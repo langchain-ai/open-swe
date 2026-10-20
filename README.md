@@ -76,3 +76,5 @@ Sandboxes have powerful tools and may have network access. Use least-privilege c
 ## License
 
 Open SWE is licensed under the [MIT License](LICENSE).
+
+That license covers Open SWE's own code only. It does not cover anything under [`vendor/`](vendor/README.md), which is not licensed by this repository at all.

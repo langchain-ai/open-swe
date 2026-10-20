@@ -38,11 +38,6 @@ function ExperimentsPage() {
           description="Give your agent a monitor tool: it runs a long-lived sandbox command and is woken with each line its filter picks out, such as errors in a log. Applies on the next run."
         />
         <ProfileSwitchRow
-          field="prefer_tools_in_sandbox"
-          label="Prefer tools through the sandbox"
-          description="The agent calls MCP integrations and large-result lookups through the sandbox tools endpoint so it can filter their output. Applies to threads you start afterwards."
-        />
-        <ProfileSwitchRow
           field="experimental_act_as_approval"
           label="Approve PRs opened as you"
           description={

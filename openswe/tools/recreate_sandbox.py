@@ -4,9 +4,17 @@ import logging
 from collections.abc import Mapping
 from typing import NotRequired, TypedDict
 
+from pydantic import JsonValue
+
 from openswe.audit_logs.tools import audit_tool
 from openswe.run_config import RunConfig
-from openswe.sandboxes.lifecycle import SandboxRecreationStopError, SandboxSource
+from openswe.sandboxes.lifecycle import (
+    SandboxRecreationStopError,
+    SandboxSource,
+    request_mda_replacement,
+)
+from openswe.sandboxes.state import get_sandbox_metadata
+from openswe.tasks.schemas import ThreadMetadata
 from openswe.tools.access import Policy, access
 
 logger = logging.getLogger(__name__)
@@ -19,6 +27,8 @@ class SandboxRecreationResult(TypedDict):
     new_sandbox_id: NotRequired[str]
     old_sandbox_stopped: NotRequired[bool]
     old_sandbox_stop_error: NotRequired[str | None]
+    # An MDA-owned box: what MDA replaces it with; MDA answers with the rest.
+    replace: NotRequired[dict[str, JsonValue]]
 
 
 def _switches_workspace(args: Mapping[str, object]) -> Policy | None:
@@ -43,6 +53,13 @@ async def recreate_sandbox(
     from openswe.server import workspace_slug
 
     thread_workspace = workspace_slug(cfg)
+    metadata = ThreadMetadata.model_validate(await get_sandbox_metadata(thread_id))
+    if metadata.sandbox_owner == "mda" and metadata.task_id is None:
+        # MDA names and replaces this box; the call's access policy has already run.
+        options = await request_mda_replacement(
+            thread_id, workspace_slug=workspace or thread_workspace, source=source
+        )
+        return {"success": True, "replace": options.model_dump(mode="json")}
     try:
         from openswe.sandboxes.lifecycle import recreate_sandbox_for_thread
 

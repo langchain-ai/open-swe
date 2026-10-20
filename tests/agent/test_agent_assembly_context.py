@@ -571,18 +571,9 @@ async def test_an_automation_run_can_post_to_a_channel_without_a_slack_thread() 
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("prefer_tools_in_sandbox", [False, True])
-async def test_general_purpose_subagent_cannot_use_slack_tools(
-    monkeypatch: pytest.MonkeyPatch, prefer_tools_in_sandbox: bool
-) -> None:
+async def test_general_purpose_subagent_cannot_use_slack_tools() -> None:
     from openswe.prompt import prompt
-    from openswe.tools.sandbox_preference import SANDBOX_ONLY_TOOLS
 
-    monkeypatch.setattr("openswe.server.tools_endpoint_configured", lambda: True)
-    monkeypatch.setattr(
-        "openswe.server.OsweThread.prefers_tools_in_sandbox",
-        AsyncMock(return_value=prefer_tools_in_sandbox),
-    )
     config = _base_config()
     configurable = config.get("configurable")
     assert isinstance(configurable, dict)
@@ -636,17 +627,13 @@ async def test_general_purpose_subagent_cannot_use_slack_tools(
 
     guard = next(item for item in gp["middleware"] if item.name == "_SubagentToolGuard")
     handler = AsyncMock(return_value=ToolMessage(content="executed", tool_call_id="allowed"))
-    for name in (
-        parent_only_names
-        | (SANDBOX_ONLY_TOOLS if prefer_tools_in_sandbox else set())
-        | {
-            "read_only_sql",
-            "read_incident",
-            "search_incidents",
-            "record_incident_report",
-            "task",
-        }
-    ):
+    for name in parent_only_names | {
+        "read_only_sql",
+        "read_incident",
+        "search_incidents",
+        "record_incident_report",
+        "task",
+    }:
         request = MagicMock(spec=ToolCallRequest)
         request.tool_call = {"name": name, "args": {}, "id": name, "type": "tool_call"}
         result = await guard.awrap_tool_call(request, handler)

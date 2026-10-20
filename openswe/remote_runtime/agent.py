@@ -4,14 +4,12 @@ from typing import Final
 
 from langchain_core.runnables import RunnableConfig
 
-from openswe.config import ENV
 from openswe.dashboard.workspace_settings_cache import cached_workspace_settings
 from openswe.remote_runtime.graph import RemoteGraph
 from openswe.remote_runtime.runs import ModelSpec, RunModels
 from openswe.run_config import RunConfig
 from openswe.runtime.constants import DEFAULT_LLM_MAX_TOKENS
-from openswe.sandboxes.tool_access import tools_base_url
-from openswe.sandboxes.tool_runtime import ToolSurface, save_tool_context
+from openswe.sandboxes.tool_runtime import ToolSurface
 from openswe.utils.model import provider_model_kwargs
 
 ASSISTANT_ID: Final = "agent"
@@ -20,11 +18,7 @@ ASSISTANT_ID: Final = "agent"
 async def _build(config: RunnableConfig, surface: ToolSurface) -> object:
     from openswe.server import build_agent
 
-    graph = await build_agent(config, tool_surface=surface)
-    thread_id = RunConfig.from_config(config).thread_id
-    if thread_id and tools_base_url() and ENV.DASHBOARD_JWT_SECRET.optional():
-        await save_tool_context(thread_id, config)
-    return graph
+    return await build_agent(config, tool_surface=surface)
 
 
 def _spec(model_id: str, effort: str | None) -> ModelSpec:

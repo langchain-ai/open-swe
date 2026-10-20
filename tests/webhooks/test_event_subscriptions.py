@@ -17,6 +17,7 @@ from openswe.webhooks import event_log
 from openswe.webhooks.event_log import EventLog, EventRefs
 from openswe.webhooks.event_matches import EventMatch, MultitaskStrategy
 from openswe.webhooks.event_subscriptions import EventSubscription
+from tests.support.slack_api import SlackAPI
 
 _THREAD = "thread-1"
 
@@ -141,6 +142,72 @@ def _check_suite(
 
 async def _owed() -> list[EventMatch]:
     return await EventMatch.owed(_THREAD, [])
+
+
+@pytest.mark.parametrize("stale", [False, True])
+async def test_bot_subscription_refreshes_missing_or_stale_channel_metadata(
+    registry_db: None,
+    slack_api: SlackAPI,
+    delivered: list[tuple[str, MultitaskStrategy]],
+    stale: bool,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(event_log, "_ROTATED_AT", None)
+    workspace_id = uuid4()
+    channel: dict[str, JsonValue] = {
+        "id": "CPUBLIC",
+        "is_channel": True,
+        "is_member": True,
+        "is_private": False,
+        "is_im": False,
+        "is_mpim": False,
+    }
+    await SlackChannel.save_all(channel if stale else {"id": "CPUBLIC"})
+    async with transaction() as conn:
+        await conn.execute(
+            text("INSERT INTO workspace (id, slug, name) VALUES (:id, 'alerts', 'Alerts')"),
+            {"id": workspace_id},
+        )
+        await conn.execute(
+            text(
+                "INSERT INTO workspace_slack_channel (channel_id, workspace_id) "
+                "VALUES ('CPUBLIC', :id)"
+            ),
+            {"id": workspace_id},
+        )
+        await conn.execute(
+            text("UPDATE slack_channel SET fetched_at = :fetched WHERE id = 'CPUBLIC'"),
+            {
+                "fetched": datetime.now(UTC) - timedelta(minutes=6)
+                if stale
+                else datetime.fromtimestamp(0, UTC)
+            },
+        )
+    await _subscribe({"workspace": workspace_id}, sources=["slack"], event_types=["message"])
+    slack_api.respond({"ok": True, "channel": channel})
+    payload = {
+        "event": {
+            "type": "message",
+            "subtype": "bot_message",
+            "bot_id": "BSTATUS",
+            "user": "UBOT",
+            "text": "build failed",
+            "channel": "CPUBLIC",
+        }
+    }
+    assert await EventLog.record(
+        _request("/webhooks/slack"),
+        json.dumps(payload).encode(),
+        "slack",
+        event_type="message",
+        delivery_id="bot-alert",
+        refs=EventRefs(slack_channel_id="CPUBLIC"),
+    )
+    (owed,) = await _owed()
+    assert owed.delivery_id == "bot-alert"
+    assert "build failed" in owed.content
+    assert delivered == [(_THREAD, "enqueue")]
+    assert [call[0] for call in slack_api.calls] == ["conversations.info"]
 
 
 async def test_payload_match_filters_ci_results_on_the_subscribed_pull_request(

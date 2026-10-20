@@ -35,7 +35,6 @@ from pydantic import BaseModel, JsonValue
 
 from rt.backend import (
     BackendCallError,
-    BackendUnavailableError,
     Hook,
     OpenSweBackend,
     PhaseReply,
@@ -75,7 +74,6 @@ class RunState(AgentState):
     open_swe_state: NotRequired[Annotated[dict[str, JsonValue], OmitFromOutput, _merge]]
     open_swe_call: NotRequired[Annotated[dict[str, JsonValue], OmitFromOutput]]
     open_swe_prepared_for: NotRequired[Annotated[str, OmitFromOutput]]
-    open_swe_backend_failure: NotRequired[dict[str, JsonValue] | None]
 
 
 class _RunConfigurable(BaseModel):
@@ -225,9 +223,16 @@ class BackendRunMiddleware(AgentMiddleware[RunState]):
 
     state_schema = RunState
 
-    def __init__(self, backend: OpenSweBackend, invocation_id: str | None) -> None:
+    def __init__(
+        self,
+        backend: OpenSweBackend,
+        invocation_id: str | None,
+        open_sandbox: Callable[[Runtime], Awaitable[str | None]] | None = None,
+    ) -> None:
         self._backend = backend
         self._invocation_id = invocation_id
+        # Opens the thread's box before preparing, so the backend binds the thread to it.
+        self._open_sandbox = open_sandbox
 
     def _invocation(self) -> str:
         if self._invocation_id is not None:
@@ -235,30 +240,22 @@ class BackendRunMiddleware(AgentMiddleware[RunState]):
         return _RunConfigurable.model_validate(get_config().get("configurable", {})).thread_id
 
     @hook_config(can_jump_to=["end"])
-    async def abefore_agent(self, state: RunState, runtime: Runtime) -> dict[str, object] | None:  # noqa: ARG002
+    async def abefore_agent(self, state: RunState, runtime: Runtime) -> dict[str, object] | None:
         invocation = self._invocation()
         if state.get("open_swe_prepared_for") == invocation:
-            return {"open_swe_backend_failure": None}
-        update = await self._phase("prepare", state)
-        if not update.get("open_swe_backend_failure"):
-            update.update(open_swe_prepared_for=invocation, open_swe_backend_failure=None)
-        return update
+            return None
+        sandbox_id = await self._open_sandbox(runtime) if self._open_sandbox is not None else None
+        update = await self._phase("prepare", state, sandbox_id=sandbox_id)
+        return {**update, "open_swe_prepared_for": invocation}
 
     @hook_config(can_jump_to=["end"])
     async def abefore_model(self, state: RunState, runtime: Runtime) -> dict[str, object] | None:  # noqa: ARG002
         return await self._phase("before_model", state)
 
-    async def _phase(self, hook: Hook, state: RunState) -> dict[str, object]:
-        try:
-            reply = await self._backend.phase(hook, run_body(run_id(), state))
-        except BackendUnavailableError:
-            logger.warning(
-                "The backend interrupted a run phase", extra={"hook": hook}, exc_info=True
-            )
-            return {
-                "open_swe_backend_failure": {"run_id": run_id(), "phase": hook},
-                "jump_to": "end",
-            }
+    async def _phase(self, hook: Hook, state: RunState, **extra: JsonValue) -> dict[str, object]:
+        # A backend it cannot reach fails the run, as any hook failure does, so every
+        # surface reports it and the person can send the message again.
+        reply = await self._backend.phase(hook, run_body(run_id(), state, **extra))
         update = _apply(reply)
         if hook == "before_model" and reply.system_prompt is not None:
             update["open_swe_call"] = ModelCall(
@@ -300,9 +297,6 @@ class BackendRunMiddleware(AgentMiddleware[RunState]):
         return await self._phase("after_model", state)
 
     async def aafter_agent(self, state: RunState, runtime: Runtime) -> dict[str, object] | None:  # noqa: ARG002
-        failure = state.get("open_swe_backend_failure")
-        if failure and failure.get("run_id") == run_id():
-            return None
         try:
             return _apply(await self._backend.phase("after_agent", run_body(run_id(), state)))
         except BackendCallError:
