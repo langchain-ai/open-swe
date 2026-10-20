@@ -61,10 +61,13 @@ def github(
             }:
                 return httpx.Response(422, json={"message": "Validation Failed"})
             ids = requested if requested is not None else [11, 22]
+            token = "repos:" + ",".join(str(repo_id) for repo_id in ids)
+            if permissions := body.get("permissions"):
+                token += ";" + ",".join(f"{k}={v}" for k, v in sorted(permissions.items()))
             return httpx.Response(
                 201,
                 json={
-                    "token": "repos:" + ",".join(str(repo_id) for repo_id in ids),
+                    "token": token,
                     "expires_at": (datetime.now(UTC) + timedelta(hours=1)).isoformat(),
                 },
             )
@@ -164,6 +167,73 @@ async def test_a_callers_scope_cannot_widen_the_threads(
     )
 
     assert injected_auth(github) == ["x-access-token:repos:11"]
+
+
+async def test_a_reviewers_sandbox_can_read_but_never_write_github(
+    monkeypatch: pytest.MonkeyPatch,
+    github: list[dict[str, object]],
+) -> None:
+    """Reviewers read code anyone can push, so their box never holds a token that can write.
+
+    That holds across expiry refreshes and when MDA replaces the box and reconnects
+    it without passing any scope.
+    """
+    read_only = (
+        "actions=read,checks=read,contents=read,issues=read,"
+        "metadata=read,pull_requests=read,statuses=read"
+    )
+    monkeypatch.setattr(lifecycle, "thread_token_repositories", AsyncMock(return_value=None))
+    monkeypatch.setattr(lifecycle.client.threads, "update", AsyncMock())
+    backend = await lifecycle.ensure_sandbox_for_thread(
+        "thread",
+        workspace_slug="workspace",
+        github_proxy_repositories=["acme/api"],
+        github_proxy_permissions=sandbox_access.READ_ONLY_REVIEW_PERMISSIONS,
+    )
+    monkeypatch.setitem(proxy.SANDBOX_BACKENDS, "thread", backend)
+    assert await proxy.maybe_refresh_proxy_token(
+        "thread", now=datetime.now(UTC) + timedelta(hours=1)
+    )
+    monkeypatch.setattr(
+        lifecycle,
+        "get_sandbox_metadata",
+        AsyncMock(
+            return_value={
+                "kind": "reviewer",
+                "sandbox_id": "sandbox",
+                "pr": {"owner": "acme", "name": "api"},
+            }
+        ),
+    )
+    await lifecycle.ensure_sandbox_for_thread("thread", workspace_slug="workspace")
+
+    assert injected_auth(github) == [
+        f"x-access-token:repos:11;{read_only}",
+        f"x-access-token:repos:11;{read_only}",
+        f"x-access-token:repos:11;{read_only}",
+    ]
+
+
+async def test_a_reconnecting_reviewer_without_a_known_pr_gets_no_repository_at_all(
+    monkeypatch: pytest.MonkeyPatch,
+    github: list[dict[str, object]],
+) -> None:
+    """MDA's box-replacement reconnect knows no RunConfig, so it asks for no repository.
+
+    Without this, that reconnect would fall back to every repository the
+    installation can reach rather than just the one under review.
+    """
+    monkeypatch.setattr(WORKSPACES, "slug_exists", AsyncMock(return_value=True))
+    monkeypatch.setattr(lifecycle, "thread_token_repositories", AsyncMock(return_value=None))
+    monkeypatch.setattr(
+        lifecycle,
+        "get_sandbox_metadata",
+        AsyncMock(return_value={"kind": "reviewer", "sandbox_id": "sandbox"}),
+    )
+
+    await lifecycle.ensure_sandbox_for_thread("thread", workspace_slug="workspace")
+
+    assert injected_auth(github) == [""]
 
 
 async def test_an_unreadable_thread_scope_fails_the_sandbox_rather_than_widening(

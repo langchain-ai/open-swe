@@ -21,6 +21,22 @@ logger = logging.getLogger(__name__)
 
 RECHECK_MISSING_AFTER = timedelta(minutes=10)
 
+# What a reviewing agent's sandbox may do on GitHub: clone, fetch, read the pull
+# request, and check CI. "checks" and "statuses" cover the two ways a CI system
+# reports back (GitHub's own Checks API and the older per-commit Status API);
+# "actions" is needed to inspect a workflow run GitHub Actions reported through
+# the former. The reviewer prompt requires verifying checks before claiming they
+# passed, so dropping any of these would silently take that away.
+READ_ONLY_REVIEW_PERMISSIONS: PermissionMap = {
+    "actions": "read",
+    "checks": "read",
+    "contents": "read",
+    "issues": "read",
+    "metadata": "read",
+    "pull_requests": "read",
+    "statuses": "read",
+}
+
 
 class _InstallationRepository(BaseModel):
     id: PositiveInt
