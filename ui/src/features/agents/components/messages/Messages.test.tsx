@@ -10,7 +10,7 @@ import {
   RouterProvider,
 } from "@tanstack/react-router"
 
-import { HumanMessage } from "@langchain/core/messages"
+import { AIMessage, HumanMessage, ToolMessage } from "@langchain/core/messages"
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
 import type { ReactNode } from "react"
 
@@ -109,6 +109,116 @@ describe("Messages", () => {
     fireEvent.click(details)
     expect(container.textContent).not.toContain("Can I change")
   })
+
+  it("keeps the worker launch in the conversation when surrounding work is folded", async () => {
+    const workerId = "7db1bbf5-0623-5a35-a5a4-db372cfc31d4"
+    const messages = streamMessagesToUi([
+      new AIMessage({
+        id: "spawn-turn",
+        content: "",
+        tool_calls: [
+          { id: "read", name: "read_file", args: { path: "AGENTS.md" } },
+          {
+            id: "spawn",
+            name: "start_async_task",
+            args: {
+              description: "Investigate <login> & validation",
+              subagent_type: "general-purpose",
+            },
+          },
+          { id: "later-read", name: "read_file", args: { path: "README.md" } },
+        ],
+      }),
+      new ToolMessage({ tool_call_id: "read", content: "Instructions" }),
+      new ToolMessage({
+        tool_call_id: "spawn",
+        content: JSON.stringify({ success: true, worker_thread_id: workerId }),
+      }),
+      new ToolMessage({ tool_call_id: "later-read", content: "Docs" }),
+      new AIMessage({
+        id: "reply",
+        content: "The worker is continuing independently.",
+      }),
+    ])
+    const router = createRouter({
+      routeTree: createRootRoute({
+        component: () => <Messages messages={messages} isStreaming={false} />,
+      }),
+      history: createMemoryHistory({ initialEntries: ["/"] }),
+    })
+    await router.load()
+    const { container } = render(<RouterProvider router={router} />)
+    const chip = screen.getByRole("button", {
+      name: "Worker 7db1bbf5 · Started",
+    })
+    const folds = screen.getAllByRole("button", { name: "Worked · 1 action" })
+    expect(folds).toHaveLength(2)
+    for (const fold of folds) {
+      expect(fold.getAttribute("aria-expanded")).toBe("false")
+    }
+    expect(
+      folds[0]!.compareDocumentPosition(chip) & Node.DOCUMENT_POSITION_FOLLOWING
+    ).toBeTruthy()
+    expect(
+      chip.compareDocumentPosition(folds[1]!) & Node.DOCUMENT_POSITION_FOLLOWING
+    ).toBeTruthy()
+    expect(
+      screen
+        .getByRole("link", { name: "Open Worker 7db1bbf5 thread" })
+        .getAttribute("href")
+    ).toBe(`/agents/${workerId}`)
+    expect(
+      chip.compareDocumentPosition(
+        screen.getByText("The worker is continuing independently.")
+      ) & Node.DOCUMENT_POSITION_FOLLOWING
+    ).toBeTruthy()
+    expect(screen.queryByText("Investigate <login> & validation")).toBeNull()
+    fireEvent.click(chip)
+    expect(screen.getByText("Investigate <login> & validation")).toBeTruthy()
+    expect(container.querySelector("login")).toBeNull()
+  })
+
+  it.each([
+    ["in_progress", undefined, "Starting…"],
+    ["error", "launch failed", "Launch failed"],
+    ["completed", '{"success":false}', "Launch failed"],
+    [
+      "completed",
+      '{"success":true,"worker_thread_id":"invalid"}',
+      "Launch status unknown",
+    ],
+  ] as const)(
+    "does not claim a worker started for %s / %s",
+    (status, output, label) => {
+      render(
+        <Messages
+          isStreaming={false}
+          messages={[
+            {
+              id: "spawn",
+              author: "agent",
+              timestamp: "2026-09-03T10:30:00Z",
+              chunks: [
+                {
+                  kind: "tool-execution",
+                  toolCallId: "spawn",
+                  toolName: "start_async_task",
+                  toolKind: "other",
+                  title: "Start async task",
+                  status,
+                  output,
+                },
+              ],
+            },
+          ]}
+        />
+      )
+      expect(
+        screen.getByRole("button", { name: `Worker · ${label}` })
+      ).toBeTruthy()
+      expect(screen.queryByRole("link")).toBeNull()
+    }
+  )
 
   it("expands system context with the shared chip", () => {
     render(
