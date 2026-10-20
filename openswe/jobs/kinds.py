@@ -160,7 +160,13 @@ async def _reconcile(_job: Job) -> object:
 
 @_sandbox_work(THREAD_STATUS_RECONCILE)
 async def _thread_status_reconcile(_job: Job) -> object:
-    return await reconcile_busy_threads()
+    # The webapp must not import the agent stack at startup.
+    from openswe.remote_runtime.async_workers import settle_launched_runs
+
+    return {
+        "threads_settled": await reconcile_busy_threads(),
+        "worker_launches_settled": await settle_launched_runs(),
+    }
 
 
 @WORKER.register(WAKE_THREAD_JOB)

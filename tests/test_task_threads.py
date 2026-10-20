@@ -234,7 +234,7 @@ def launch(monkeypatch: pytest.MonkeyPatch) -> Launch:
         worker_thread_id = str(uuid5(NAMESPACE_URL, f"{actor.thread_id}:{request_id}"))
         parents[worker_thread_id] = actor.thread_id
         return await service.register_async_worker(
-            actor, request_id, worker_thread_id, instructions
+            actor, request_id, worker_thread_id, instructions, "run-1"
         )
 
     return launch
@@ -621,16 +621,23 @@ async def test_async_subagent_becomes_one_ordinary_worker_of_its_coordinators_ta
     with pytest.raises(ValueError, match="instructions"):
         await service.authorize_async_worker(actor, "blank", "  ")
     assert await service.authorize_async_worker(actor, "launch", "Implement login fix") is None
-    first = await service.register_async_worker(actor, "launch", worker, "Implement login fix")
+    first = await service.register_async_worker(
+        actor, "launch", worker, "Implement login fix", "run-1"
+    )
     # The coordinator's registration and the worker's own adoption race; both land once.
-    again = await service.register_async_worker(actor, "launch", worker, "Implement login fix")
+    again = await service.register_async_worker(
+        actor, "launch", worker, "Implement login fix", "run-1"
+    )
     assert again == first
     # A replayed launch reuses its worker instead of launching another.
     assert await service.authorize_async_worker(actor, "launch", "Implement login fix") == first
-    with pytest.raises(PermissionError, match="already started"):
-        await service.register_async_worker(actor, "launch", replayed, "Implement login fix")
+    with pytest.raises(store.WorkerAlreadyLaunchedError) as replay:
+        await service.register_async_worker(
+            actor, "launch", replayed, "Implement login fix", "run-2"
+        )
+    assert service.worker_reply(replay.value.task, replay.value.delegation) == first
     with pytest.raises(PermissionError, match="not an async worker this coordinator launched"):
-        await service.register_async_worker(actor, "elsewhere", stranger, "Implement")
+        await service.register_async_worker(actor, "elsewhere", stranger, "Implement", "run-3")
 
     context = await store.TaskMembership.context_for_thread(worker)
     assert context is not None
@@ -679,7 +686,7 @@ async def test_async_subagent_becomes_one_ordinary_worker_of_its_coordinators_ta
         )
     assert await TaskMessage.deliver(worker, "enqueue") is False
     with pytest.raises(ValueError, match="cancelled"):
-        await service.register_async_worker(actor, "launch", worker, "Implement login fix")
+        await service.register_async_worker(actor, "launch", worker, "Implement login fix", "run-1")
 
 
 @pytest.mark.usefixtures("registry_db")
@@ -701,7 +708,7 @@ async def test_concurrent_registrations_of_one_launch_make_one_worker(
 
     results = await asyncio.gather(
         *(
-            service.register_async_worker(actor, "launch", thread, "Implement login fix")
+            service.register_async_worker(actor, "launch", thread, "Implement login fix", "run")
             for thread in threads
         ),
         return_exceptions=True,
@@ -710,7 +717,7 @@ async def test_concurrent_registrations_of_one_launch_make_one_worker(
     registered = [result for result in results if isinstance(result, dict)]
     assert len(registered) == 1
     assert [type(result) for result in results if isinstance(result, BaseException)] == [
-        PermissionError
+        store.WorkerAlreadyLaunchedError
     ]
     context = await store.TaskMembership.context_for_thread(COORDINATOR)
     assert context is not None

@@ -427,7 +427,7 @@ class Delegation:
         return cls(actor, metadata, workspace.slug, chosen_model, chosen_effort)
 
     async def reserve(
-        self, worker_thread_id: str, instructions: str, request_id: str
+        self, worker_thread_id: str, instructions: str, request_id: str, run_id: str
     ) -> tuple[store.Task, store.TaskDelegation]:
         title = self.metadata.title
         return await store.Task.reserve_worker(
@@ -439,6 +439,7 @@ class Delegation:
             model=self.model,
             effort=self.effort,
             launch_request_id=request_id,
+            launch_run_id=run_id,
         )
 
     async def launched_by(self, request_id: str) -> tuple[store.Task, store.TaskDelegation] | None:
@@ -461,13 +462,14 @@ async def authorize_async_worker(
 
 
 async def register_async_worker(
-    actor: Actor, request_id: str, worker_thread_id: str, instructions: str
+    actor: Actor, request_id: str, worker_thread_id: str, instructions: str, run_id: str
 ) -> dict[str, object]:
-    """Make the async subagent a coordinator's tool call launched an ordinary task worker.
+    """Make the async subagent a coordinator's tool call launched, with its run ``run_id``, a task worker.
 
     MDA wrote the subagent thread's parent when it launched it, so only a thread
     launched from the coordinator's own thread qualifies. One launch, one worker:
-    a replay that started a second thread finds the first already registered.
+    a replay that started a second thread raises ``WorkerAlreadyLaunchedError``
+    naming the first.
     """
     if not request_id or not instructions.strip():
         raise ValueError("Assignment instructions and a stable tool-call identity are required")
@@ -479,7 +481,9 @@ async def register_async_worker(
     ):
         raise PermissionError("The thread is not an async worker this coordinator launched")
     delegation = await Delegation.authorize(actor)
-    task, reserved = await delegation.reserve(worker_thread_id, instructions.strip(), request_id)
+    task, reserved = await delegation.reserve(
+        worker_thread_id, instructions.strip(), request_id, run_id
+    )
     await index_worker(
         task, reserved, delegation.metadata, {MDA_GRAPH_METADATA_KEY: MDA_WORKER_GRAPH_ID}
     )
