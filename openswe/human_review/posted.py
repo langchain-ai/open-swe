@@ -44,8 +44,20 @@ async def watch_post(channel_id: str, message_ts: str, slack_user_id: str, text:
     user = await User.for_identity("slack", slack_user_id)
     if user is None:
         return
+    requests: list[HumanReviewRequest] = []
     for ref in refs:
-        await _watch_pull_request(channel_id, message_ts, user, ref, refs)
+        if (
+            request := await _watch_pull_request(channel_id, message_ts, user, ref, refs)
+        ) is not None:
+            requests.append(request)
+    if not requests:
+        return
+    async with HumanReviewRequest.locked_post(channel_id, message_ts) as rows:
+        urls = [row.pull_request.url.lower() for row in rows]
+        for row in rows:
+            row.run_config = {**row.run_config, "posted_pr_urls": urls}
+    for request in requests:
+        await settle(request)
 
 
 async def _watch_pull_request(
@@ -54,7 +66,7 @@ async def _watch_pull_request(
     user: User,
     pr_ref: GitHubPrRef,
     refs: list[GitHubPrRef],
-) -> None:
+) -> HumanReviewRequest | None:
     extra = {
         "pr_repo_full_name": f"{pr_ref.owner}/{pr_ref.repo}",
         "pr_number": pr_ref.number,
@@ -94,4 +106,4 @@ async def _watch_pull_request(
     logger.info(
         "Watching a pull request posted for review", extra={**extra, "request_id": str(request.id)}
     )
-    await settle(request)
+    return request

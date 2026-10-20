@@ -7,7 +7,8 @@ from openswe.database import postgres
 from openswe.expedited_review.eligibility import ChangedFile
 from openswe.expedited_review.readiness import PullRequestSnapshot, Readiness
 from openswe.github.codeowners import CodeOwners
-from openswe.github.pull_requests import PullRequest
+from openswe.github.pull_request_status import PullRequestClient
+from openswe.github.pull_requests import PullRequest, PullRequestPayload
 from openswe.human_review import lifecycle, posted, standard
 from openswe.human_review.lifecycle import ReviewCard
 from openswe.human_review.posted import linked_pull_requests
@@ -39,8 +40,6 @@ def test_links_resolve_and_deduplicate_only_on_our_dashboard(
 async def test_external_authors_are_not_watched(
     monkeypatch: pytest.MonkeyPatch, github_app: AsyncMock
 ) -> None:
-    from openswe.github.pull_requests import PullRequestPayload
-
     monkeypatch.setattr(posted, "skip_on_preview", lambda _: False)
     monkeypatch.setattr(User, "for_identity", AsyncMock(return_value=User()))
     monkeypatch.setattr(User, "for_login", AsyncMock(return_value=None))
@@ -259,6 +258,71 @@ async def test_multiple_prs_need_all_approvals_but_any_blocker_and_explain_failu
     assert "pencil2" in reactions
     await second.update_blocked_reactions(snapshot)
     assert "pencil2" not in reactions
+
+
+@pytest.mark.parametrize("skip", ["external_author", "already_watched"])
+async def test_skipped_links_do_not_block_registered_posts_positive_reactions(
+    registry_db: None, monkeypatch: pytest.MonkeyPatch, github_app: AsyncMock, skip: str
+) -> None:
+    user = User()
+    async with postgres.session() as session:
+        session.add(user)
+    pulls = {
+        number: await PullRequest(owner="lc", repo="repo", number=number).save()
+        for number in (7, 8, 9)
+    }
+    if skip == "already_watched":
+        await HumanReviewRequest(
+            pull_request_id=pulls[8].id,
+            head_sha="abc",
+            kind="posted",
+            slack_channel_id="C2",
+            slack_message_ts="2.0",
+        ).save()
+    monkeypatch.setattr(User, "for_identity", AsyncMock(return_value=user))
+    monkeypatch.setattr(
+        User, "for_login", AsyncMock(side_effect=lambda _, login: user if login == "ada" else None)
+    )
+
+    async def record(pull: PullRequestClient) -> tuple[PullRequest, PullRequestPayload]:
+        return pulls[pull.number], PullRequestPayload.model_validate(
+            {
+                "user": {"login": "external" if pull.number == 8 else "ada"},
+                "state": "open",
+                "head": {"sha": "abc"},
+            }
+        )
+
+    monkeypatch.setattr(posted, "record_pull_request", record)
+    reactions: set[str] = set()
+
+    async def add(channel: str, timestamp: str, emoji: str) -> bool:
+        reactions.add(emoji)
+        return True
+
+    async def remove(channel: str, timestamp: str, emoji: str) -> bool:
+        reactions.discard(emoji)
+        return True
+
+    monkeypatch.setattr(lifecycle, "add_slack_reaction", add)
+    monkeypatch.setattr(lifecycle, "remove_slack_reaction", remove)
+    requests: list[HumanReviewRequest] = []
+    approved_after_settle: list[bool] = []
+
+    async def settle(request: HumanReviewRequest) -> bool:
+        requests.append(request)
+        await ReviewCard(request).mark_approved()
+        approved_after_settle.append("white_check_mark" in reactions)
+        return True
+
+    monkeypatch.setattr(posted, "settle", settle)
+    await posted.watch_post("C1", "1.0", "U1", " ".join(pr.url for pr in pulls.values()))
+    assert [request.pull_request.number for request in requests] == [7, 9]
+    assert approved_after_settle == [False, True]
+    await ReviewCard(requests[0]).mark_merged()
+    assert "merged" not in reactions
+    await ReviewCard(requests[1]).mark_merged()
+    assert "merged" in reactions
 
 
 async def test_each_owned_path_needs_an_approval_including_team_owners(
