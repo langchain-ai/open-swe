@@ -316,7 +316,17 @@ async def test_mda_catalog_leaves_integrations_and_code_mode_to_mda() -> None:
             "namespace": ["managed_tools", "private-owner", "private-gateway"],
         }
         surface.dynamic = DynamicToolMiddleware({"MCP": [search, integration("mcp.dotted")]})
-        core = [integration(name) for name in ("read_file", "manage_thread", "slack_reply")]
+        core = [
+            integration(name)
+            for name in (
+                "read_file",
+                "manage_thread",
+                "slack_reply",
+                "spawn_worker",
+                "message_task_thread",
+                "load_integration_tools",
+            )
+        ]
         middleware: list[AgentMiddleware] = [
             surface.dynamic,
             CodeInterpreterMiddleware(ptc=[integration("mcp_search")]),
@@ -340,7 +350,11 @@ async def test_mda_catalog_leaves_integrations_and_code_mode_to_mda() -> None:
     assert isinstance(tools, list)
     names = {tool["name"] for tool in tools if isinstance(tool, dict)}
     assert {"mcp_search", "mcp.dotted", "read_file", "manage_thread", "slack_reply"} <= names
+    # The sandbox's tool channel never offers task coordination; the model does.
+    assert {"spawn_worker", "message_task_thread"} <= names
     assert "eval" not in names
+    excluded = catalog["excluded"]
+    assert isinstance(excluded, list) and "load_integration_tools" in excluded
     search = next(tool for tool in tools if isinstance(tool, dict) and tool["name"] == "mcp_search")
     assert isinstance(search, dict)
     expected = {

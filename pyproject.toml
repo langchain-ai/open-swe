@@ -6,20 +6,20 @@ readme = "README.md"
 requires-python = ">=3.14"
 license = { text = "MIT" }
 dependencies = [
-    "deepagents==0.7.26",
+    "deepagents==0.7.28",
     "fastapi>=0.141.1",
     "uvicorn>=0.52.4",
     "httpx2>=2.12.0,<3.0.0",
     "PyJWT>=2.13.0",
     "cryptography>=50.0.0",
-    "langgraph-sdk>=0.4.7",
+    "langgraph-sdk>=0.4.8",
     "langchain[mcp]>=1.4.6",
-    "langgraph>=1.2.15",
+    "langgraph>=1.2.16",
     "markdownify>=1.2.3",
     "markdown-it-py==4.2.0",
     "langchain-anthropic>=1.7.6",
-    "langgraph-cli[inmem]>=0.4.35",
-    "langsmith>=0.14.9",
+    "langgraph-cli[inmem]>=0.4.37",
+    "langsmith>=0.14.11",
     "langchain-openai>=1.7.2,<2.0.0",
     "openai>=3.10.0,<4.0.0",
     "langchain-fireworks>=1.7.1",
@@ -69,15 +69,15 @@ sandbox-providers = [
 
 [tool.uv]
 # The externally maintained langchain-e2b integration still declares
-# `deepagents<0.7.0`, but 0.7.26 keeps the sandbox API backward compatible. Its e2b
+# `deepagents<0.7.0`, but 0.7.28 keeps the sandbox API backward compatible. Its e2b
 # dependency also caps wcmatch<11.0 while deepagents requires wcmatch>=11.0, so
 # override both transitive bounds until langchain-e2b publishes compatible metadata.
 # Override-dependencies only apply when langchain-e2b is installed (the sandbox-e2b
 # or sandbox-providers extra).
-override-dependencies = ["deepagents==0.7.26", "wcmatch>=11.0"]
+override-dependencies = ["deepagents==0.7.28", "wcmatch>=11.0"]
 constraint-dependencies = [
-    "langgraph-api>=0.16.0,<0.17",
-    "langgraph-runtime-inmem>=0.36.0,<0.37",
+    "langgraph-api>=0.16.1,<0.17",
+    "langgraph-runtime-inmem>=0.36.1,<0.37",
 ]
 
 [build-system]

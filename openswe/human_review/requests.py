@@ -119,6 +119,7 @@ class HumanReviewRequest(Base):
     slack_message_ts: Mapped[str] = mapped_column(server_default="", default="")
     # Slack only renders a file cited when the message is first posted, so updates reuse it.
     slack_diff_file_id: Mapped[str] = mapped_column(server_default="", default="")
+    auto_merge: Mapped[bool] = mapped_column(server_default="true", default=True)
     # A draft PR's expedited card offers only "Mark ready", to its author, until they click it.
     awaiting_ready: Mapped[bool] = mapped_column(server_default="false", default=False)
     # The posted card is a thread reply also sent to the channel.

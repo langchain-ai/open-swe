@@ -45,7 +45,6 @@ from openswe.threads.workflow_approval import (
     workflow_push_approval_responses,
 )
 from openswe.tools.mcp_exposure import expose_mcp
-from openswe.tools.sandbox_preference import sandbox_only
 from openswe.users import User
 from openswe.utils.dashboard_links import (
     dashboard_plan_url,
@@ -246,7 +245,6 @@ def _exact_locator_filters(
 
 
 @expose_mcp()
-@sandbox_only
 async def list_threads(
     participant: str | None = None,
     all_users: bool = False,
@@ -764,7 +762,6 @@ def _available_actions(
 
 
 @expose_mcp()
-@sandbox_only
 async def get_thread(
     thread_id: str,
     state: Annotated[dict[str, Any] | None, InjectedState] = None,

@@ -540,7 +540,7 @@ class RemoteGraph:
         if not fresh and cached is not None and time.monotonic() < cached.expires_at:
             return cached
         config = self._config(run, run_id)
-        surface = ToolSurface()
+        surface = ToolSurface(for_model=True)
         await self._build(config, surface)
         await surface.prepare({})
         session = RunSession(surface, config, self._restore_state, started_here=fresh)
