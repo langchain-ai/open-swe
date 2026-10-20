@@ -33,7 +33,6 @@ from openswe.slack.code_channels import is_code_channel_session, set_session_sta
 from openswe.slack.thinking import sync_slack_background_status
 from openswe.source_context import SourceContext
 from openswe.tasks.messages import TASK_MESSAGE_KIND, TaskMessage
-from openswe.threads.index import index_kept
 from openswe.threads.status import refresh_thread_status
 from openswe.transcript.turns import TurnOutcome, settle_run_turn
 from openswe.ui_invalidations import Topic
@@ -97,12 +96,14 @@ _REASON_TEXT = {
     "context_too_long": "the conversation outgrew the model's context window",
     "model_unavailable": "the selected model isn't available to this workspace",
     "sandbox_unreachable": "the run lost its sandbox",
+    "backend_interrupted": "the connection to the Open SWE backend was interrupted",
     "step_limit": "the run hit its step limit",
 }
 _DEFAULT_FOLLOW_UP = "Send another message and it will pick this back up."
 _REASON_FOLLOW_UP = {
     "context_too_long": "Start a new thread to continue.",
     "model_unavailable": "Pick a different model in Open SWE Web, then retry.",
+    "backend_interrupted": "Re-trigger the run to try again.",
 }
 
 
@@ -500,14 +501,24 @@ async def handle_run_completion(payload: dict[str, Any]) -> dict[str, str]:
     run_id = raw_run_id if isinstance(raw_run_id, str) and raw_run_id else None
     if not isinstance(thread_id, str) or not thread_id:
         return {"status": "ignored", "reason": "missing thread_id"}
-    if index_kept():
-        try:
-            await refresh_thread_status(thread_id)
-        except Exception:
-            # The reconcile job settles it later; the rest of completion must still run.
-            logger.warning(
-                "Could not refresh the thread status", extra={"thread_id": thread_id}, exc_info=True
-            )
+    values = payload.get("values")
+    failure = values.get("open_swe_backend_failure") if isinstance(values, dict) else None
+    if (
+        status == "success"
+        and run_id is not None
+        and isinstance(failure, dict)
+        and failure.get("run_id") == run_id
+        and failure.get("phase") in ("prepare", "before_model", "after_model")
+    ):
+        status = "error"
+        payload = {**payload, "status": status, "error": {"error": "BackendUnavailableError"}}
+    try:
+        await refresh_thread_status(thread_id)
+    except Exception:
+        # The reconcile job settles it later; the rest of completion must still run.
+        logger.warning(
+            "Could not refresh the thread status", extra={"thread_id": thread_id}, exc_info=True
+        )
     await _finalize_agent_usage_telemetry(thread_id, status, payload)
     await _settle_transcript_turn(thread_id, run_id, status)
     is_worker = False

@@ -33,7 +33,15 @@ from langgraph.runtime import Runtime
 from langgraph.types import Command
 from pydantic import BaseModel, JsonValue
 
-from rt.backend import BackendCallError, OpenSweBackend, PhaseReply, run_body, subagent_of
+from rt.backend import (
+    BackendCallError,
+    BackendUnavailableError,
+    Hook,
+    OpenSweBackend,
+    PhaseReply,
+    run_body,
+    subagent_of,
+)
 from rt.models import ModelSpec, build_model
 from rt.tools import STATE_KEY, run_id
 
@@ -43,6 +51,7 @@ logger = logging.getLogger(__name__)
 # event, which MDA's summarization then applies to every model call.
 _MDA_STATE_KEYS: Final = frozenset({"_summarization_event"})
 _MESSAGE_KEY: Final = "__lc_message__"
+DISPLAY_DESCRIPTION: Final = "display_description"
 
 
 def _merge(
@@ -55,6 +64,8 @@ class ModelCall(BaseModel):
     """What the backend's middleware says the next model call sends."""
 
     system_prompt: str
+    # Tools the graph's own middleware takes off this call's list.
+    hidden_tools: list[str] = []
     model: ModelSpec | None
     fallback: ModelSpec | None
     use_gateway: bool
@@ -64,6 +75,7 @@ class RunState(AgentState):
     open_swe_state: NotRequired[Annotated[dict[str, JsonValue], OmitFromOutput, _merge]]
     open_swe_call: NotRequired[Annotated[dict[str, JsonValue], OmitFromOutput]]
     open_swe_prepared_for: NotRequired[Annotated[str, OmitFromOutput]]
+    open_swe_backend_failure: NotRequired[dict[str, JsonValue] | None]
 
 
 class _RunConfigurable(BaseModel):
@@ -102,21 +114,110 @@ class ServedToolsMiddleware(AgentMiddleware):
 
     The backend's tools act on its sandbox, so they stay offered even where MDA's
     filesystem middleware drops one it cannot back itself, such as ``execute``.
+    Hidden tools stay registered, so a call by name still runs, as in-process; the
+    backend names the ones its middleware hides from each call.
     """
 
-    def __init__(self, tools: Sequence[BaseTool], excluded: frozenset[str]) -> None:
-        self._tools = [tool for tool in tools if tool.name not in excluded]
-        self._excluded = excluded
+    def __init__(self, tools: Sequence[BaseTool], hidden: frozenset[str]) -> None:
+        self._tools = [tool for tool in tools if tool.name not in hidden]
+        self._hidden = hidden
 
     async def awrap_model_call(
         self,
         request: ModelRequest,
         handler: Callable[[ModelRequest], Awaitable[ModelResponse]],
     ) -> ModelResponse:
-        offered = [t for t in request.tools if getattr(t, "name", None) not in self._excluded]
+        call = request.state.get("open_swe_call")
+        hidden = self._hidden | (
+            frozenset(ModelCall.model_validate(call).hidden_tools)
+            if isinstance(call, Mapping)
+            else frozenset()
+        )
+        offered = [t for t in request.tools if getattr(t, "name", None) not in hidden]
         names = {getattr(tool, "name", None) for tool in offered}
-        missing = [tool for tool in self._tools if tool.name not in names]
+        missing = [tool for tool in self._tools if tool.name not in names | hidden]
         return await handler(request.override(tools=[*offered, *missing]))
+
+
+class DescribedToolsMiddleware(AgentMiddleware):
+    """Have the model label its calls of the named tools, for the dashboard to show.
+
+    Each named tool the model is offered takes a required ``display_description``,
+    first so the model writes it before the rest. The tool call keeps it, so the
+    transcript records it, and the tool runs without it. Place it inside code mode,
+    which binds the request's tools to ``eval`` before this rewrites them.
+    """
+
+    def __init__(self, described: Mapping[str, str]) -> None:
+        self._described = described
+        self._offered: dict[int, tuple[BaseTool, BaseTool]] = {}
+
+    def _offered_as(self, tool: BaseTool) -> BaseTool:
+        cached = self._offered.get(id(tool))
+        if cached is not None and cached[0] is tool:
+            return cached[1]
+        schema = tool.tool_call_schema
+        parameters = (
+            schema
+            if isinstance(schema, dict)
+            else schema.model_json_schema()
+            if issubclass(schema, BaseModel)
+            else schema.schema()
+        )
+        properties = parameters.get("properties")
+        if isinstance(properties, dict) and DISPLAY_DESCRIPTION in properties:
+            self._offered[id(tool)] = (tool, tool)
+            return tool
+        required = parameters.get("required")
+        offered = tool.model_copy(
+            update={
+                "args_schema": {
+                    **parameters,
+                    "type": "object",
+                    "properties": {
+                        DISPLAY_DESCRIPTION: {
+                            "type": "string",
+                            "description": self._described[tool.name],
+                        },
+                        **(properties if isinstance(properties, dict) else {}),
+                    },
+                    "required": [
+                        DISPLAY_DESCRIPTION,
+                        *(required if isinstance(required, list) else []),
+                    ],
+                }
+            }
+        )
+        self._offered[id(tool)] = (tool, offered)
+        return offered
+
+    async def awrap_model_call(
+        self,
+        request: ModelRequest,
+        handler: Callable[[ModelRequest], Awaitable[ModelResponse]],
+    ) -> ModelResponse:
+        tools = [
+            self._offered_as(tool)
+            if isinstance(tool, BaseTool) and tool.name in self._described
+            else tool
+            for tool in request.tools
+        ]
+        return await handler(request.override(tools=tools))
+
+    async def awrap_tool_call(
+        self,
+        request: ToolCallRequest,
+        handler: Callable[[ToolCallRequest], Awaitable[ToolMessage | Command]],
+    ) -> ToolMessage | Command:
+        call = request.tool_call
+        if (
+            call["name"] not in self._described
+            or DISPLAY_DESCRIPTION not in call["args"]
+            or (request.tool is not None and self._offered_as(request.tool) is request.tool)
+        ):
+            return await handler(request)
+        args = {key: value for key, value in call["args"].items() if key != DISPLAY_DESCRIPTION}
+        return await handler(request.override(tool_call={**call, "args": args}))
 
 
 class BackendRunMiddleware(AgentMiddleware[RunState]):
@@ -124,29 +225,53 @@ class BackendRunMiddleware(AgentMiddleware[RunState]):
 
     state_schema = RunState
 
-    def __init__(self, backend: OpenSweBackend, invocation_id: str | None) -> None:
+    def __init__(
+        self,
+        backend: OpenSweBackend,
+        invocation_id: str | None,
+        open_sandbox: Callable[[Runtime], Awaitable[str | None]] | None = None,
+    ) -> None:
         self._backend = backend
         self._invocation_id = invocation_id
+        # Opens the thread's box before preparing, so the backend binds the thread to it.
+        self._open_sandbox = open_sandbox
 
     def _invocation(self) -> str:
         if self._invocation_id is not None:
             return self._invocation_id
         return _RunConfigurable.model_validate(get_config().get("configurable", {})).thread_id
 
-    async def abefore_agent(self, state: RunState, runtime: Runtime) -> dict[str, object] | None:  # noqa: ARG002
+    @hook_config(can_jump_to=["end"])
+    async def abefore_agent(self, state: RunState, runtime: Runtime) -> dict[str, object] | None:
         invocation = self._invocation()
         if state.get("open_swe_prepared_for") == invocation:
-            return None
-        reply = await self._backend.phase("prepare", run_body(run_id(), state))
-        return {**_apply(reply), "open_swe_prepared_for": invocation}
+            return {"open_swe_backend_failure": None}
+        sandbox_id = await self._open_sandbox(runtime) if self._open_sandbox is not None else None
+        update = await self._phase("prepare", state, sandbox_id=sandbox_id)
+        if not update.get("open_swe_backend_failure"):
+            update.update(open_swe_prepared_for=invocation, open_swe_backend_failure=None)
+        return update
 
     @hook_config(can_jump_to=["end"])
     async def abefore_model(self, state: RunState, runtime: Runtime) -> dict[str, object] | None:  # noqa: ARG002
-        reply = await self._backend.phase("before_model", run_body(run_id(), state))
+        return await self._phase("before_model", state)
+
+    async def _phase(self, hook: Hook, state: RunState, **extra: JsonValue) -> dict[str, object]:
+        try:
+            reply = await self._backend.phase(hook, run_body(run_id(), state, **extra))
+        except BackendUnavailableError:
+            logger.warning(
+                "The backend interrupted a run phase", extra={"hook": hook}, exc_info=True
+            )
+            return {
+                "open_swe_backend_failure": {"run_id": run_id(), "phase": hook},
+                "jump_to": "end",
+            }
         update = _apply(reply)
-        if reply.system_prompt is not None:
+        if hook == "before_model" and reply.system_prompt is not None:
             update["open_swe_call"] = ModelCall(
                 system_prompt=reply.system_prompt,
+                hidden_tools=reply.hidden_tools,
                 model=reply.model,
                 fallback=reply.fallback,
                 use_gateway=reply.use_gateway,
@@ -180,9 +305,12 @@ class BackendRunMiddleware(AgentMiddleware[RunState]):
 
     @hook_config(can_jump_to=["model", "end"])
     async def aafter_model(self, state: RunState, runtime: Runtime) -> dict[str, object] | None:  # noqa: ARG002
-        return _apply(await self._backend.phase("after_model", run_body(run_id(), state)))
+        return await self._phase("after_model", state)
 
     async def aafter_agent(self, state: RunState, runtime: Runtime) -> dict[str, object] | None:  # noqa: ARG002
+        failure = state.get("open_swe_backend_failure")
+        if failure and failure.get("run_id") == run_id():
+            return None
         try:
             return _apply(await self._backend.phase("after_agent", run_body(run_id(), state)))
         except BackendCallError:

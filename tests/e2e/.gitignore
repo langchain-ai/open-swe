@@ -5,4 +5,5 @@ playwright-report/
 blob-report/
 .e2e-tmp/
 .langgraph_api/
+.mda-build/
 __pycache__/

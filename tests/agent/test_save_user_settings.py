@@ -309,7 +309,6 @@ async def test_private_read_exposes_all_ordinary_settings_only_for_requester(
                 "concierge_mode": False,
                 "pr_review_links": False,
                 "pr_failure_reactions": False,
-                "prefer_tools_in_sandbox": False,
                 "experimental_task_coordination": False,
             },
             "preferences": {

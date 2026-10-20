@@ -16,7 +16,7 @@ from openswe.tasks import messages as task_messages
 from openswe.tasks.messages import TaskMessage
 from openswe.tasks.presentation import TaskEventMetadata
 from openswe.tasks.schemas import ThreadMetadata
-from openswe.threads import access, creation, handlers
+from openswe.threads import access, handlers
 from openswe.users import User
 from openswe.users.models import UserIdentity
 from openswe.webhooks import event_matches
@@ -203,7 +203,6 @@ def client(monkeypatch: pytest.MonkeyPatch) -> MagicMock:
     monkeypatch.setattr(service, "get_profile", AsyncMock(return_value={}))
     monkeypatch.setattr(service, "resolve_run_email", AsyncMock(return_value=None))
     monkeypatch.setattr(service, "COMPLETION_WEBHOOK_URL", "https://example.test/completion")
-    monkeypatch.setattr(creation, "_owner_prefers_tools_in_sandbox", AsyncMock(return_value=False))
     from openswe import dispatch
     from openswe.slack import thinking
 
@@ -364,7 +363,7 @@ async def test_desktop_worker_cannot_be_shared(
         current_task, delegation, ThreadMetadata.model_validate(client.metadata[COORDINATOR])
     )
 
-    with pytest.raises(HTTPException, match="owner's Mac") as error:
+    with pytest.raises(HTTPException, match="owner's machine") as error:
         await handlers.share_thread_with_workspace(delegation.worker_thread_id, OWNER)
     assert error.value.status_code == 409
     client.threads.update.assert_not_called()

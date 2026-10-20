@@ -86,10 +86,10 @@ class WorkspaceSettingsUpdate(BaseModel):
     slack_follow_up_suggestions: bool | None = Field(
         default=None, json_schema_extra={"agent_feature_flag": True}
     )
+    human_review_auto_merge_enabled: bool | None = Field(
+        default=None, json_schema_extra={"agent_feature_flag": True}
+    )
     human_review_auto_assign_minutes: int | None = Field(default=None, ge=1, strict=True)
-    # Threads no person starts (API keys, workflows, system reviews) run on Managed
-    # Deep Agents when deployed; a person's threads follow their own run_on_mda.
-    run_on_mda: bool | None = None
     # The LangSmith Managed Tools gateway private threads load with the owner's own
     # LangSmith connection; unset means none. Only the instance record's value is read.
     managed_tools_gateway_id: str | None = None
@@ -109,8 +109,6 @@ class WorkspaceSettingsUpdate(BaseModel):
     default_reviewer_reasoning_effort: str | None = None
     default_reviewer_subagent_model: str | None = None
     default_reviewer_subagent_reasoning_effort: str | None = None
-    default_chat_model: str | None = None
-    default_chat_reasoning_effort: str | None = None
     default_thread_title_model: str | None = None
     default_thread_title_reasoning_effort: str | None = None
 
@@ -175,10 +173,6 @@ class WorkspaceSettingsUpdate(BaseModel):
             self.default_reviewer_subagent_model,
             self.default_reviewer_subagent_reasoning_effort,
         )
-        self.default_chat_model, self.default_chat_reasoning_effort = _normalize_stale_model_pair(
-            self.default_chat_model,
-            self.default_chat_reasoning_effort,
-        )
         self.default_thread_title_model, self.default_thread_title_reasoning_effort = (
             _normalize_stale_model_pair(
                 self.default_thread_title_model,
@@ -206,9 +200,6 @@ class WorkspaceSettingsUpdate(BaseModel):
             self.default_reviewer_subagent_model,
             self.default_reviewer_subagent_reasoning_effort,
             "reviewer subagent",
-        )
-        _validate_model_effort_pair(
-            self.default_chat_model, self.default_chat_reasoning_effort, "review chat"
         )
         _validate_model_effort_pair(
             self.default_thread_title_model,
@@ -251,7 +242,6 @@ class WorkspaceSettingsUpdate(BaseModel):
                 ),
                 ("default_reviewer_model", "default_reviewer_reasoning_effort"),
                 ("default_reviewer_subagent_model", "default_reviewer_subagent_reasoning_effort"),
-                ("default_chat_model", "default_chat_reasoning_effort"),
                 ("default_thread_title_model", "default_thread_title_reasoning_effort"),
             ):
                 model = getattr(self, model_field)
@@ -296,7 +286,6 @@ _MODEL_PAIR_FIELDS: tuple[tuple[str, str], ...] = (
     ),
     ("default_reviewer_model", "default_reviewer_reasoning_effort"),
     ("default_reviewer_subagent_model", "default_reviewer_subagent_reasoning_effort"),
-    ("default_chat_model", "default_chat_reasoning_effort"),
     ("default_thread_title_model", "default_thread_title_reasoning_effort"),
 )
 
@@ -339,10 +328,10 @@ def _default_settings() -> dict[str, Any]:
         "gateway_enabled": None,
         "fable_enabled": False,
         "expedited_review_enabled": False,
+        "human_review_auto_merge_enabled": True,
         "human_review_auto_assign_minutes": 120,
         "sandbox_openai_enabled": False,
         "slack_follow_up_suggestions": False,
-        "run_on_mda": True,
         "managed_tools_gateway_id": None,
         "org_guidelines": None,
         "default_agent_model": fallback_model,
@@ -360,9 +349,6 @@ def _default_settings() -> dict[str, Any]:
         "default_reviewer_reasoning_effort": fallback_effort,
         "default_reviewer_subagent_model": fallback_model,
         "default_reviewer_subagent_reasoning_effort": fallback_effort,
-        # No hardcoded chat default: unset means "inherit the Agent default".
-        "default_chat_model": None,
-        "default_chat_reasoning_effort": None,
         "default_thread_title_model": DEFAULT_THREAD_TITLE_MODEL,
         "default_thread_title_reasoning_effort": DEFAULT_THREAD_TITLE_REASONING_EFFORT,
         "updated_at": None,
@@ -642,7 +628,7 @@ class WorkspaceSettings(Mapping[str, Any]):
     def default_repo(self) -> dict[str, str] | None:
         return _parse_repo(self.get("default_repo"))
 
-    def default_model(self, role: Literal["agent", "reviewer", "chat"]) -> tuple[str, str]:
+    def default_model(self, role: Literal["agent", "reviewer"]) -> tuple[str, str]:
         """The default ``(model_id, reasoning_effort)`` for ``role``.
 
         Always a valid pair, resolved in order: the configured pair if still
@@ -650,24 +636,8 @@ class WorkspaceSettings(Mapping[str, Any]):
         (so a stale Anthropic/OpenAI selection stays on its provider rather
         than jumping cross-provider); otherwise the hardcoded global default
         from :func:`openswe.dashboard.options.default_model_pair`.
-
-        ``"chat"`` (the review-page PR chat) has no hardcoded default: when its
-        setting is unset/invalid it inherits the **agent** default.
         """
-        if role == "chat":
-            model = self.get("default_chat_model")
-            effort = self.get("default_chat_reasoning_effort")
-            if (
-                isinstance(model, str)
-                and isinstance(effort, str)
-                and model in SUPPORTED_MODEL_IDS
-                and model_supports_effort(model, effort)
-            ):
-                return _resolve_default_pair(model, effort)
-            # Inherit the Agent default when no chat-specific model is configured.
-            model = self.get("default_agent_model")
-            effort = self.get("default_agent_reasoning_effort")
-        elif role == "agent":
+        if role == "agent":
             model = self.get("default_agent_model")
             effort = self.get("default_agent_reasoning_effort")
         else:
@@ -763,6 +733,12 @@ class WorkspaceSettings(Mapping[str, Any]):
         """Whether the experimental expedited Slack review is switched on."""
         value = self.get("expedited_review_enabled")
         return value if isinstance(value, bool) else False
+
+    @property
+    def human_review_auto_merge_enabled(self) -> bool:
+        """Whether standard human-review requests merge automatically by default."""
+        value = self.get("human_review_auto_merge_enabled")
+        return value if isinstance(value, bool) else True
 
     @property
     def human_review_auto_assign_minutes(self) -> int:

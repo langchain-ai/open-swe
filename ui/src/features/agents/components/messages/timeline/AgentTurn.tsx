@@ -22,6 +22,7 @@ import { WorkEntryRow } from "./WorkEntryRow"
 import { describeWorkEntry, latestDiff } from "./workEntry"
 import { TurnFoldRow, WorkGroupToggleRow } from "./foldRows"
 import { ShellEntryBody } from "./entryBodies"
+import { ToolResultBody } from "./ToolResultBody"
 import type { ReactNode } from "react"
 import type { RenderItem, TurnSegment } from "../renderItems"
 import type { ApprovalCallbacks } from "../types"
@@ -35,6 +36,7 @@ import { ManagedToolsConnectionCard } from "@/features/agents/components/chat/Ma
 import { SqlResultTable } from "@/features/agents/components/chat/SqlResultTable"
 import { SubagentGroup } from "@/features/agents/components/subagents"
 import { formatElapsed } from "@/lib/utils"
+import { formatHoverTimestamp } from "@/features/agents/lib/messageTimestamps"
 
 /**
  * How many entries of a work group stay visible while it is collapsed. One
@@ -62,6 +64,47 @@ function EditWorkEntry({
       timestamp={chunk.timestamp}
       body={diff ? <DiffView diffData={diff} snippet /> : undefined}
       defaultExpanded={chunk.status === "pending"}
+    />
+  )
+}
+
+/**
+ * A code-mode `eval` call, open on the tool calls its code made. Its own output
+ * mostly repeats what those returned, so it shows only when the code failed.
+ */
+function CodeWorkEntry({
+  chunk,
+  calls,
+  repoPath,
+}: {
+  chunk: ToolExecutionChunk
+  /** The nested calls, rendered; null when the code called no tools. */
+  calls: ReactNode
+  repoPath?: string
+}) {
+  const entry = describeWorkEntry(chunk, repoPath)
+  if (calls == null) {
+    return <WorkEntryRow entry={entry} timestamp={chunk.timestamp} />
+  }
+  const failed = chunk.status === "error"
+  // Keyed apart from the plain row: calls arrive after the row first renders,
+  // and only a fresh row opens by default.
+  return (
+    <WorkEntryRow
+      key="calls"
+      entry={failed ? entry : { ...entry, loadExpandedText: null }}
+      timestamp={chunk.timestamp}
+      body={({ loadedText, loadError }) => (
+        <div className="space-y-space-2">
+          <div>{calls}</div>
+          {failed && (
+            <ToolResultBody
+              value={loadError ?? loadedText ?? entry.expandedText ?? ""}
+            />
+          )}
+        </div>
+      )}
+      defaultExpanded
     />
   )
 }
@@ -253,6 +296,18 @@ export function AgentTurn({
           />
         )
 
+      case "code-item": {
+        const { calls } = item.chunk
+        return (
+          <CodeWorkEntry
+            key={item.key}
+            chunk={item.chunk}
+            calls={calls ? buildRenderItems(calls).map(renderItem) : null}
+            repoPath={repoPath}
+          />
+        )
+      }
+
       case "reply-item":
         return <ReplyCard key={item.key} chunk={item.chunk} />
 
@@ -335,9 +390,21 @@ export function AgentTurn({
   return (
     <div className="group/turn my-space-2 min-w-0 space-y-space-2">
       {segments.map((segment, index) =>
-        segment.type === "reply"
-          ? renderItem(segment.item)
-          : renderWorkSegment(segment, index)
+        segment.type === "reply" ? (
+          <div
+            key={segment.item.key}
+            title={formatHoverTimestamp(
+              replyTimestamp(segment) ??
+                (!isStreaming && index === segments.length - 1
+                  ? turnEnd
+                  : undefined)
+            )}
+          >
+            {renderItem(segment.item)}
+          </div>
+        ) : (
+          renderWorkSegment(segment, index)
+        )
       )}
 
       <div className="mt-space-1 flex items-center gap-space-1">

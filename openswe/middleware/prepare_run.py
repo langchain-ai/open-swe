@@ -1,5 +1,6 @@
 import hashlib
 import json
+import logging
 from collections.abc import Awaitable, Callable, Mapping
 from typing import Annotated, Any, NotRequired, cast
 
@@ -15,6 +16,8 @@ from langgraph.runtime import Runtime
 from openswe.middleware.trace import OpenSWEMiddleware
 from openswe.utils.startup_trace import aphase, flush_phases
 from openswe.utils.thread_reads import shared_thread_reads
+
+logger = logging.getLogger(__name__)
 
 
 def _take_latest[T](left: T | None, right: T | None) -> T | None:
@@ -102,6 +105,27 @@ class BasePrepareRunMiddleware(OpenSWEMiddleware):
 
     async def _prepare(self, state: PrepareRunState, runtime: Runtime) -> dict[str, Any]:
         raise NotImplementedError
+
+    async def aresume_run(self, state: AgentState, runtime: Runtime) -> None:
+        """Rebuild what `_prepare` kept only in memory, in a process that did not run it.
+
+        A run hosted on Managed Deep Agents calls back into any replica, and the
+        checkpointed latch keeps `_prepare` from running again there.
+        """
+        try:
+            await self._rejoin(cast(PrepareRunState, state), runtime)
+        except Exception:
+            logger.warning(
+                "Prepared run rejoin failed",
+                extra={"middleware": self.__class__.__name__},
+                exc_info=True,
+            )
+
+    async def aflush_run(self, runtime: Runtime) -> None:
+        del runtime
+
+    async def _rejoin(self, state: PrepareRunState, runtime: Runtime) -> None:
+        del state, runtime
 
     async def awrap_model_call(
         self,

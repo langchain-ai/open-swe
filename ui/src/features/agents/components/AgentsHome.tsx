@@ -1,3 +1,4 @@
+import { LogoMark } from "@/components/Branding"
 import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { useQuery, useQueryClient } from "@tanstack/react-query"
 import { useNavigate, useRouterState } from "@tanstack/react-router"
@@ -600,8 +601,7 @@ export function AgentsHome({
         ) : (
           <div className="flex min-h-0 flex-1 overflow-y-auto px-space-3 py-space-5 sm:px-space-5 sm:py-space-6">
             <div className="mx-auto flex min-h-full w-full max-w-3xl flex-1 flex-col items-center justify-center gap-space-5">
-              <img
-                src={`${import.meta.env.BASE_URL}logo-mark.png`}
+              <LogoMark
                 alt=""
                 className="size-14 opacity-30 grayscale dark:opacity-20"
               />

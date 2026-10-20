@@ -119,6 +119,7 @@ class HumanReviewRequest(Base):
     slack_message_ts: Mapped[str] = mapped_column(server_default="", default="")
     # Slack only renders a file cited when the message is first posted, so updates reuse it.
     slack_diff_file_id: Mapped[str] = mapped_column(server_default="", default="")
+    auto_merge: Mapped[bool] = mapped_column(server_default="true", default=True)
     # A draft PR's expedited card offers only "Mark ready", to its author, until they click it.
     awaiting_ready: Mapped[bool] = mapped_column(server_default="false", default=False)
     # The posted card is a thread reply also sent to the channel.
@@ -367,13 +368,14 @@ class HumanReviewRequest(Base):
             return Counter(dict(rows.tuples().all()))
 
     @classmethod
-    async def is_card_thread(cls, channel_id: str, thread_ts: str) -> bool:
-        """Whether this Slack thread contains an Open SWE review-request card."""
+    async def card_in_thread(cls, channel_id: str, thread_ts: str) -> Self | None:
+        """The Open SWE review-request card this Slack thread holds, with its pull request."""
         if not postgres.configured():
-            return False
+            return None
         async with postgres.session() as session:
-            request_id = await session.scalar(
-                select(cls.id)
+            return await session.scalar(
+                select(cls)
+                .options(selectinload(cls.pull_request))
                 .where(
                     cls.kind.in_(("standard", "expedited")),
                     or_(
@@ -388,9 +390,9 @@ class HumanReviewRequest(Base):
                         & (cls.slack_copy_ts == thread_ts),
                     ),
                 )
+                .order_by(cls.created_at.desc())
                 .limit(1)
             )
-            return request_id is not None
 
     @classmethod
     async def copy_channels_for_author(cls, login: str, *, since: datetime) -> list[str]:

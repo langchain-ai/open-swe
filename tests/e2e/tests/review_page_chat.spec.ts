@@ -230,7 +230,7 @@ test.describe("review page", () => {
     expect(await offset()).toBeCloseTo(collapsed, 1);
   });
 
-  test("renders human input above the description and the changes", async ({
+  test("collapses human input above the description and the changes", async ({
     page,
   }) => {
     const seeded = await page.request.post("/control/walkthrough", {
@@ -243,12 +243,17 @@ test.describe("review page", () => {
     expect(seeded.ok(), await seeded.text()).toBeTruthy();
 
     await openReview(page, pr);
-    const guidance = page.getByRole("region", {
+    const guidance = page.getByRole("group", {
       name: "Requested behavior",
     });
-    await expect(guidance).toContainText(
+    const request = guidance.getByText(
       "Asked to keep the constants in flat modules",
     );
+    await expect(guidance).toBeVisible();
+    await expect(request).toBeHidden();
+    const toggle = guidance.locator("summary");
+    await toggle.click();
+    await expect(request).toBeVisible();
 
     const description = await page.getByText(DESCRIPTION).boundingBox();
     const card = await guidance.boundingBox();
@@ -260,6 +265,8 @@ test.describe("review page", () => {
     expect(description!.y + description!.height).toBeLessThanOrEqual(
       changes!.y,
     );
+    await toggle.press("Enter");
+    await expect(request).toBeHidden();
   });
 
   test("dismissing a walkthrough reports whether there was one", async ({
@@ -321,18 +328,22 @@ test.describe("review page", () => {
     ).toBeDisabled();
     await expect(page.getByText("Building the walkthrough…")).toBeVisible();
 
+    // The scout runs on Managed Deep Agents, whose run error carries what its
+    // backend hook raised.
     const failure =
-      "RuntimeError: E2E has no sandbox provider for the review scout";
-    await expect(page.getByText(`Last attempt failed: ${failure}`)).toBeVisible(
-      {
-        timeout: 30_000,
-      },
-    );
+      /RuntimeError: E2E has no sandbox provider for the review scout/;
+    await expect(
+      page.getByText(new RegExp(`^Last attempt failed: .*${failure.source}`)),
+    ).toBeVisible({
+      timeout: 30_000,
+    });
     await expect(
       page.getByText("The walkthrough failed to build"),
     ).toBeVisible();
     await expect(
-      page.getByText(`The review scout crashed: ${failure}`),
+      page.getByText(
+        new RegExp(`^The review scout crashed: .*${failure.source}`),
+      ),
     ).toBeVisible();
     await expect(build).toBeEnabled();
 

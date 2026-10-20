@@ -59,6 +59,7 @@ class TextAnchor(BaseModel):
 class CommentBody(BaseModel):
     body: str = Field(min_length=1, max_length=10_000)
     anchor: TextAnchor | None = None
+    parent_id: str | None = Field(default=None, min_length=1, max_length=64)
 
 
 class PlanUpdate(BaseModel):
@@ -178,12 +179,20 @@ async def post_plan_comment(
     text = body.body.strip()
     if not text:
         raise HTTPException(422, "comment body cannot be empty")
+    if body.parent_id is not None:
+        comments = await list_plan_comments(thread_id, raise_on_error=True)
+        parent = next((c for c in comments if c["id"] == body.parent_id), None)
+        if parent is None:
+            raise HTTPException(404, "parent comment not found")
+        if parent.get("parent_id") is not None or body.anchor is not None:
+            raise HTTPException(422, "replies must reference a top-level comment without an anchor")
     login = session["sub"]
     return await add_plan_comment(
         thread_id,
         author=session.get("name") or login,
         author_login=login,
         body=text,
+        parent_id=body.parent_id,
         anchor=body.anchor.model_dump() if body.anchor else None,
     )
 

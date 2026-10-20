@@ -290,6 +290,7 @@ export function WorkEntryRow({
           className="ms-space-5 mt-space-1 cursor-default border-s border-subtle ps-space-3 pt-0.5"
           onClick={stopRowToggle}
           onPointerDown={stopRowToggle}
+          onKeyDown={stopRowToggle}
         >
           {typeof body === "function"
             ? body({ loadedText, loadError })
