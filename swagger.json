@@ -1608,6 +1608,47 @@
         "title": "ConversationReview",
         "type": "object"
       },
+      "CoordinatorActivity": {
+        "description": "A thread's live run and the workers it coordinates.",
+        "properties": {
+          "awaiting_delivery": {
+            "title": "Awaiting Delivery",
+            "type": "boolean"
+          },
+          "run_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Run Id"
+          },
+          "settled": {
+            "description": "Nothing more will run on the thread unless someone prompts it.",
+            "readOnly": true,
+            "title": "Settled",
+            "type": "boolean"
+          },
+          "workers": {
+            "items": {
+              "$ref": "#/components/schemas/WorkerActivity"
+            },
+            "title": "Workers",
+            "type": "array"
+          }
+        },
+        "required": [
+          "run_id",
+          "awaiting_delivery",
+          "workers",
+          "settled"
+        ],
+        "title": "CoordinatorActivity",
+        "type": "object"
+      },
       "CreateResponseRequest": {
         "properties": {
           "background": {
@@ -7634,6 +7675,68 @@
         ],
         "title": "WebhookResponse",
         "type": "object"
+      },
+      "WorkerActivity": {
+        "properties": {
+          "active": {
+            "readOnly": true,
+            "title": "Active",
+            "type": "boolean"
+          },
+          "instructions": {
+            "title": "Instructions",
+            "type": "string"
+          },
+          "run_status": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Run Status"
+          },
+          "state": {
+            "$ref": "#/components/schemas/WorkerState"
+          },
+          "thread_url": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Thread Url"
+          },
+          "worker_thread_id": {
+            "title": "Worker Thread Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "worker_thread_id",
+          "thread_url",
+          "instructions",
+          "state",
+          "active"
+        ],
+        "title": "WorkerActivity",
+        "type": "object"
+      },
+      "WorkerState": {
+        "enum": [
+          "starting",
+          "running",
+          "reporting",
+          "done",
+          "failed",
+          "cancelled"
+        ],
+        "type": "string"
       },
       "Workspace": {
         "properties": {
@@ -20103,6 +20206,91 @@
         "tags": [
           "dashboard",
           "transcript"
+        ]
+      }
+    },
+    "/dashboard/api/threads/{thread_id}/workers": {
+      "get": {
+        "operationId": "api_thread_workers_dashboard_api_threads__thread_id__workers_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "thread_id",
+            "required": true,
+            "schema": {
+              "title": "Thread Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CoordinatorActivity"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Api Thread Workers",
+        "tags": [
+          "dashboard"
+        ]
+      }
+    },
+    "/dashboard/api/threads/{thread_id}/workers/cancel": {
+      "post": {
+        "description": "Cancel every worker of the thread's task that is still running.",
+        "operationId": "api_cancel_thread_workers_dashboard_api_threads__thread_id__workers_cancel_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "thread_id",
+            "required": true,
+            "schema": {
+              "title": "Thread Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CoordinatorActivity"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Api Cancel Thread Workers",
+        "tags": [
+          "dashboard"
         ]
       }
     },
