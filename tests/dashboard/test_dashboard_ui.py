@@ -112,15 +112,19 @@ def test_serving_under_a_mount_prefix(build_dir: Path) -> None:
     assert client.get("/", headers=HTML).status_code == 404
 
 
+@pytest.mark.parametrize("dashboard_url", ["https://dashboard.example/open-swe", ""])
 def test_mcp_consent_keeps_branding_on_root_auth_routes(
-    monkeypatch: pytest.MonkeyPatch,
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, dashboard_url: str
 ) -> None:
     from fastmcp.server.auth.providers.github import GitHubProvider
     from key_value.aio.stores.memory import MemoryStore
 
     from openswe.mcp import server
 
-    monkeypatch.setenv("DASHBOARD_BASE_URL", "https://dashboard.example/open-swe")
+    monkeypatch.setenv("DASHBOARD_BASE_URL", dashboard_url)
+    monkeypatch.setenv("DASHBOARD_API_BASE_URL", "http://localhost")
+    monkeypatch.setenv("DASHBOARD_STATIC_DIR", str(tmp_path))
+    monkeypatch.delenv("DASHBOARD_DEV_SERVER_URL", raising=False)
     auth = GitHubProvider(
         client_id="test-client",
         client_secret="test-secret",
@@ -146,9 +150,13 @@ def test_mcp_consent_keeps_branding_on_root_auth_routes(
         },
     )
     assert response.status_code == 200
-    assert 'src="https://dashboard.example/open-swe/logo-mark.png"' in response.text
-    assert 'href="https://dashboard.example/open-swe"' in response.text
     assert "Open SWE" in response.text
+    if dashboard_url:
+        assert f'src="{dashboard_url}/logo-mark.png"' in response.text
+        assert f'href="{dashboard_url}"' in response.text
+    else:
+        assert "/logo-mark.png" not in response.text
+        assert 'class="server-name-link"' not in response.text
 
 
 # --- Vite dev server proxy -------------------------------------------------------------

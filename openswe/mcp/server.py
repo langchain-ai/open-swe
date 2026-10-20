@@ -118,11 +118,13 @@ def build_mount() -> Mount | None:
     auth = _auth()
     if auth is None:
         return None
-    dashboard_url = dashboard_base_url() or dashboard_api_base_url()
+    dashboard_url = dashboard_base_url()
     server = FastMCP(
         _SERVER_NAME,
-        icons=[Icon(src=f"{dashboard_url}/logo-mark.png", mime_type="image/png")],
-        website_url=dashboard_url,
+        icons=[Icon(src=f"{dashboard_url}/logo-mark.png", mime_type="image/png")]
+        if dashboard_url
+        else None,
+        website_url=dashboard_url or None,
         providers=[_CallerProvider()],
         auth=auth,
     )
