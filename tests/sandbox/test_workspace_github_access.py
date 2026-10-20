@@ -5,7 +5,7 @@ import json
 from collections.abc import Iterator
 from datetime import UTC, datetime, timedelta
 from fnmatch import fnmatchcase
-from typing import TypedDict
+from typing import Never, TypedDict
 from unittest.mock import AsyncMock, MagicMock
 
 import httpx
@@ -14,6 +14,8 @@ import pytest
 
 from openswe.github import app, proxy, sandbox_access
 from openswe.github.repositories import Repository
+from openswe.remote_runtime.graph import RemoteGraph
+from openswe.remote_runtime.tokens import RemoteRun
 from openswe.sandboxes import lifecycle
 from openswe.sandboxes.providers.langsmith import LangSmithProvider
 from openswe.workspaces.refresh import _create_builder_sandbox
@@ -169,9 +171,11 @@ async def test_a_callers_scope_cannot_widen_the_threads(
     assert injected_auth(github) == ["x-access-token:repos:11"]
 
 
+@pytest.mark.parametrize("kind", ["reviewer", "review-scout"])
 async def test_a_reviewers_sandbox_can_read_but_never_write_github(
     monkeypatch: pytest.MonkeyPatch,
     github: list[dict[str, object]],
+    kind: str,
 ) -> None:
     """A reviewer box stays read-only across refresh and a reconnect that passes no scope."""
     read_only = (
@@ -180,39 +184,40 @@ async def test_a_reviewers_sandbox_can_read_but_never_write_github(
     )
     monkeypatch.setattr(lifecycle, "thread_token_repositories", AsyncMock(return_value=None))
     monkeypatch.setattr(lifecycle.client.threads, "update", AsyncMock())
+    metadata: dict[str, object] = {
+        "kind": kind,
+        "pr": {"owner": "acme", "name": "api"},
+    }
+    monkeypatch.setattr(lifecycle, "get_sandbox_metadata", AsyncMock(return_value=metadata))
     backend = await lifecycle.ensure_sandbox_for_thread(
         "thread",
         workspace_slug="workspace",
-        github_proxy_repositories=["acme/api"],
-        github_proxy_permissions=sandbox_access.READ_ONLY_REVIEW_PERMISSIONS,
+        github_proxy_repositories=["acme/api", "acme/internal"],
+        github_proxy_permissions={"contents": "write"},
     )
     monkeypatch.setitem(proxy.SANDBOX_BACKENDS, "thread", backend)
     assert await proxy.maybe_refresh_proxy_token(
         "thread", now=datetime.now(UTC) + timedelta(hours=1)
     )
+    metadata["sandbox_id"] = "sandbox"
+    await lifecycle.ensure_sandbox_for_thread("thread", workspace_slug="workspace")
+    monkeypatch.delitem(lifecycle.SANDBOX_CONNECTIONS, "sandbox", raising=False)
+    await lifecycle.ensure_sandbox_for_thread("thread", workspace_slug="workspace")
     monkeypatch.setattr(
         lifecycle,
-        "get_sandbox_metadata",
-        AsyncMock(
-            return_value={
-                "kind": "reviewer",
-                "sandbox_id": "sandbox",
-                "pr": {"owner": "acme", "name": "api"},
-            }
-        ),
+        "_connect_existing_sandbox",
+        AsyncMock(side_effect=lifecycle.SandboxGoneError("deleted")),
     )
     await lifecycle.ensure_sandbox_for_thread("thread", workspace_slug="workspace")
 
-    assert injected_auth(github) == [
-        f"x-access-token:repos:11;{read_only}",
-        f"x-access-token:repos:11;{read_only}",
-        f"x-access-token:repos:11;{read_only}",
-    ]
+    assert injected_auth(github) == [f"x-access-token:repos:11;{read_only}"] * 5
 
 
+@pytest.mark.parametrize("kind", ["reviewer", "review-scout"])
 async def test_a_reconnecting_reviewer_without_a_known_pr_gets_no_repository_at_all(
     monkeypatch: pytest.MonkeyPatch,
     github: list[dict[str, object]],
+    kind: str,
 ) -> None:
     """A reviewer reconnect with no recorded PR gets no repository."""
     monkeypatch.setattr(WORKSPACES, "slug_exists", AsyncMock(return_value=True))
@@ -220,12 +225,111 @@ async def test_a_reconnecting_reviewer_without_a_known_pr_gets_no_repository_at_
     monkeypatch.setattr(
         lifecycle,
         "get_sandbox_metadata",
-        AsyncMock(return_value={"kind": "reviewer", "sandbox_id": "sandbox"}),
+        AsyncMock(return_value={"kind": kind, "sandbox_id": "sandbox"}),
     )
 
     await lifecycle.ensure_sandbox_for_thread("thread", workspace_slug="workspace")
 
     assert injected_auth(github) == [""]
+
+
+@pytest.mark.parametrize("kind", ["reviewer", "review-scout", "agent"])
+@pytest.mark.parametrize("known_repo", [True, False])
+async def test_legacy_review_replacement_uses_authenticated_run_scope(
+    monkeypatch: pytest.MonkeyPatch,
+    github: list[dict[str, object]],
+    kind: str,
+    known_repo: bool,
+) -> None:
+    from openswe.sandboxes.tool_runtime import ToolSurface
+
+    async def build(config: object, surface: ToolSurface) -> None:
+        pass
+
+    async def start_models(config: object) -> Never:
+        raise AssertionError("No model should run")
+
+    monkeypatch.setattr(lifecycle, "thread_token_repositories", AsyncMock(return_value=None))
+    monkeypatch.setattr(
+        lifecycle,
+        "get_sandbox_metadata",
+        AsyncMock(return_value={"sandbox_id": "sandbox", "sandbox_owner": "mda"}),
+    )
+    monkeypatch.setattr(ToolSurface, "prepare", AsyncMock())
+    graph = RemoteGraph(kind, build, start_models)
+    run = RemoteRun(
+        thread_id="thread",
+        assistant_id=kind,
+        configurable={"repo": {"owner": "acme", "name": "api"}} if known_repo else {},
+    )
+
+    await graph.hook(run, "sandbox", {})
+    assert await proxy.maybe_refresh_proxy_token(
+        "thread", now=datetime.now(UTC) + timedelta(hours=1)
+    )
+
+    expected = (
+        "x-access-token:repos:11;actions=read,checks=read,contents=read,issues=read,"
+        "metadata=read,pull_requests=read,statuses=read"
+        if known_repo
+        else ""
+    )
+    if kind == "agent":
+        expected = "x-access-token:repos:11,22"
+    assert injected_auth(github) == [expected, expected]
+
+
+@pytest.mark.parametrize("kind", ["reviewer", "review-scout"])
+async def test_explicit_review_recreation_preserves_github_scope(
+    monkeypatch: pytest.MonkeyPatch,
+    github: list[dict[str, object]],
+    kind: str,
+) -> None:
+    from openswe.sandboxes.providers import langsmith
+
+    monkeypatch.setattr(lifecycle, "thread_token_repositories", AsyncMock(return_value=None))
+    monkeypatch.setattr(
+        lifecycle,
+        "get_sandbox_metadata",
+        AsyncMock(
+            return_value={
+                "sandbox_id": "old-sandbox",
+                "kind": kind,
+                "pr": {"owner": "acme", "name": "api"},
+            }
+        ),
+    )
+    sandbox_client = MagicMock()
+    sandbox_client.return_value.__aenter__ = AsyncMock(return_value=AsyncMock())
+    monkeypatch.setattr(langsmith, "get_async_sandbox_client", sandbox_client)
+    monkeypatch.setattr(lifecycle.client.threads, "update", AsyncMock())
+    monkeypatch.setattr(lifecycle, "configure_git_identity", AsyncMock())
+
+    await lifecycle.recreate_sandbox_for_thread("thread", workspace_slug="workspace")
+    assert await proxy.maybe_refresh_proxy_token(
+        "thread", now=datetime.now(UTC) + timedelta(hours=1)
+    )
+
+    expected = (
+        "x-access-token:repos:11;actions=read,checks=read,contents=read,issues=read,"
+        "metadata=read,pull_requests=read,statuses=read"
+    )
+    assert injected_auth(github) == [expected, expected]
+
+
+async def test_restricted_app_token_never_falls_back_to_a_developer_credential(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(app, "GITHUB_APP_ID", None)
+    monkeypatch.setattr(app, "_local_dev_token", AsyncMock(return_value="developer-write-token"))
+
+    assert await app.get_github_app_installation_token_with_expiry() == (
+        "developer-write-token",
+        None,
+    )
+    assert await app.get_github_app_installation_token_with_expiry(
+        permissions=sandbox_access.READ_ONLY_REVIEW_PERMISSIONS
+    ) == (None, None)
 
 
 async def test_an_unreadable_thread_scope_fails_the_sandbox_rather_than_widening(
