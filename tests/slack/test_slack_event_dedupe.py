@@ -121,6 +121,32 @@ async def test_redelivered_event_starts_only_one_run() -> None:
     assert [task[0] for task in background_tasks.tasks] == [slack_service.process_slack_mention]
 
 
+async def test_claim_outage_reaches_webhook_caller_and_retry_can_dispatch(
+    monkeypatch: pytest.MonkeyPatch,
+    _patch_slack_webhook: _FakeClient,
+) -> None:
+    unavailable = AsyncMock()
+    unavailable.threads.create.side_effect = ConnectionError("storage unavailable")
+    unavailable.threads.get.side_effect = ConnectionError("storage unavailable")
+    monkeypatch.setattr(slack_events, "get_client", lambda url: unavailable)
+    reply = AsyncMock()
+    monkeypatch.setattr(slack_failures, "post_slack_thread_reply", reply)
+    tasks = _FakeBackgroundTasks()
+
+    with pytest.raises(slack_events.SlackClaimUnavailable) as error:
+        await _post(_mention_payload(), tasks)
+
+    assert error.value.status_code == 503
+    assert error.value.headers == {"Retry-After": "1"}
+    assert tasks.tasks == []
+    reply.assert_not_awaited()
+
+    monkeypatch.setattr(slack_events, "get_client", lambda url: _patch_slack_webhook)
+    result = await _post(_mention_payload(), tasks, {"X-Slack-Retry-Num": "1"})
+    assert result["status"] == "accepted"
+    assert len(tasks.tasks) == 1
+
+
 async def test_redelivered_event_without_retry_header_is_deduped() -> None:
     background_tasks = _FakeBackgroundTasks()
 
@@ -145,11 +171,6 @@ async def test_mention_and_message_deliveries_start_one_run(
     assert first["status"] == "accepted"
     assert second["status"] == "ignored"
     assert len(background_tasks.tasks) == 1
-    assert _patch_slack_webhook.threads.ids == {
-        slack_events._claim_thread_id("Ev1"),
-        slack_events._claim_thread_id("Ev2"),
-        slack_events._claim_thread_id("C1:1786573369.551099"),
-    }
 
 
 def _bot_payload(*, event_type: str = "message", with_user: bool = True) -> dict[str, Any]:

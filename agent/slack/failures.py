@@ -12,6 +12,7 @@ from collections.abc import Awaitable, Callable
 from pydantic import BaseModel
 
 from agent.slack.client import post_slack_thread_reply
+from agent.slack.events import SlackClaimUnavailable
 from agent.slack.responses import WebhookResponse, failed
 from agent.utils.user_messages import warning
 
@@ -78,11 +79,13 @@ async def answer_slack_request(
 ) -> WebhookResponse:
     """Run a webhook handler for an addressed request; a failure becomes a thread reply.
 
-    Slack sees 200 either way so it does not retry a request the user has
-    already been told about.
+    Processing failures return 200 after notifying the user. A claim storage
+    outage propagates its retryable status before a task has been dispatched.
     """
     try:
         return await handle()
+    except SlackClaimUnavailable:
+        raise
     except Exception as exc:  # noqa: BLE001
         return failed(await report_slack_failure(target, exc))
 
