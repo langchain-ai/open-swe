@@ -678,3 +678,41 @@ async def test_async_subagent_becomes_one_ordinary_worker_of_its_coordinators_ta
     assert await TaskMessage.deliver(worker, "enqueue") is False
     with pytest.raises(ValueError, match="cancelled"):
         await service.register_async_worker(actor, "launch", worker, "Implement login fix")
+
+
+@pytest.mark.usefixtures("registry_db")
+async def test_concurrent_registrations_of_one_launch_make_one_worker(
+    client: MagicMock, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # A replayed launch started a second thread before the first registered; their
+    # registrations race in different backend processes.
+    actor = service.Actor(COORDINATOR, OWNER)
+    monkeypatch.setattr(service, "model_choice", AsyncMock(return_value=(MODEL, "low")))
+    threads = [str(uuid4()), str(uuid4())]
+    runtimes = MagicMock()
+    runtimes.mda.get = AsyncMock(
+        return_value={
+            "metadata": {"subagent_name": "general-purpose", "parent_thread_id": COORDINATOR}
+        }
+    )
+    monkeypatch.setattr(service, "RUNTIMES", runtimes)
+
+    results = await asyncio.gather(
+        *(
+            service.register_async_worker(actor, "launch", thread, "Implement login fix")
+            for thread in threads
+        ),
+        return_exceptions=True,
+    )
+
+    registered = [result for result in results if isinstance(result, dict)]
+    assert len(registered) == 1
+    assert [type(result) for result in results if isinstance(result, BaseException)] == [
+        PermissionError
+    ]
+    context = await store.TaskMembership.context_for_thread(COORDINATOR)
+    assert context is not None
+    (delegation,) = await store.TaskDelegation.for_task(context.task.id)
+    assert delegation.worker_thread_id == registered[0]["worker_thread_id"]
+    replayed = await service.authorize_async_worker(actor, "launch", "Implement login fix")
+    assert replayed == registered[0]
