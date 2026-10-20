@@ -76,8 +76,8 @@ sandbox-providers = [
 # or sandbox-providers extra).
 override-dependencies = ["deepagents==0.7.28", "wcmatch>=11.0"]
 constraint-dependencies = [
-    "langgraph-api>=0.16.1,<0.17",
-    "langgraph-runtime-inmem>=0.36.1,<0.37",
+    "langgraph-api>=0.16.2,<0.17",
+    "langgraph-runtime-inmem>=0.36.2,<0.37",
 ]
 
 [build-system]
