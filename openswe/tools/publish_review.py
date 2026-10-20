@@ -11,12 +11,14 @@ from openswe.analytics.usage import record_reviewer_publication
 from openswe.audit_logs.tools import audit_tool
 from openswe.dashboard.workspace_settings import get_workspace_settings
 from openswe.github.checks import review_check_conclusion
+from openswe.github.pull_request_status import PullRequestClient
 from openswe.github.pull_requests import PullRequest
 from openswe.github.thread_token import (
     GitHubAuthError,
     invalidate_cached_github_token,
     resolve_thread_github_token,
 )
+from openswe.prompts import escape_for_data_block, prompt
 from openswe.review.approvals import approval_mode_for
 from openswe.review.assessment_feedback import PublishedAssessment
 from openswe.review.diff import compute_diff_line_set, fetch_pr_diff, is_range_in_diff
@@ -71,6 +73,10 @@ from openswe.utils.dashboard_links import dashboard_review_url
 from openswe.utils.langsmith import get_langsmith_trace_url
 
 logger = logging.getLogger(__name__)
+
+# Each push re-runs the review, so findings would otherwise ping-pong forever.
+MAX_AUTHOR_HANDOFF_ROUNDS = 3
+_HANDOFF_DATA_TAGS = ("untrusted-review-finding",)
 
 
 async def _record_reviewer_usage(**kwargs: Any) -> None:
@@ -638,7 +644,7 @@ async def _publish_review_async(
     )
 
     try:
-        await PullRequest(owner=owner, repo=repo, number=pr_number).link_review(
+        pull_request = await PullRequest(owner=owner, repo=repo, number=pr_number).link_review(
             reviewer_thread_id=thread_id,
             github_review_id=review_id if isinstance(review_id, int) else None,
             head_sha=head_sha,
@@ -667,6 +673,19 @@ async def _publish_review_async(
             pr_number=pr_number,
             review_id=review_id,
             surfaced_count=len(inline_comments),
+        )
+
+    if inline_comments:
+        published_ids = {finding.get("id") for finding, _ in eligible_with_payload}
+        await _hand_findings_to_author(
+            pull_request,
+            review_url=pull_request.url
+            + (f"#pullrequestreview-{review_id}" if isinstance(review_id, int) else ""),
+            findings=[
+                finding
+                for finding in await list_findings_async(thread_id)
+                if finding.get("id") in published_ids
+            ],
         )
 
     await set_reviewer_thread_metadata(thread_id, last_reviewed_sha=head_sha)
@@ -969,6 +988,83 @@ async def _filter_against_pr_diff(
             if isinstance(finding_id, str):
                 dropped.append(finding_id)
     return valid, dropped
+
+
+async def _hand_findings_to_author(
+    pull_request: PullRequest, *, review_url: str, findings: list[Finding]
+) -> None:
+    """Wake the agent thread that opened the PR to address the findings just published.
+
+    Each push re-runs the review, so the handoff stops after a few rounds, telling
+    the PR once that the rest is left to people.
+    """
+    if not pull_request.author_wakeable:
+        return
+    rounds = pull_request.review_rounds_with_findings
+    try:
+        if rounds > MAX_AUTHOR_HANDOFF_ROUNDS:
+            if rounds == MAX_AUTHOR_HANDOFF_ROUNDS + 1:
+                async with PullRequestClient.as_app(
+                    pull_request.owner, pull_request.repo, pull_request.number
+                ) as pull:
+                    await pull.comment(_handoff_cap_notice())
+            return
+        await pull_request.wake_author(
+            prompt(
+                "runs/reviewer-findings-handoff",
+                pr_url=pull_request.url,
+                review_url=review_url,
+                round=rounds,
+                max_rounds=MAX_AUTHOR_HANDOFF_ROUNDS,
+                findings=[_handoff_finding(pull_request.url, finding) for finding in findings],
+            )
+        )
+    except Exception:
+        logger.exception(
+            "Failed to hand review findings to the PR's agent thread",
+            extra={
+                "pr_repo_full_name": pull_request.repo_full_name,
+                "pr_number": pull_request.number,
+                "review_round": rounds,
+            },
+        )
+
+
+def _handoff_cap_notice() -> str:
+    return (
+        f"Jarvis has handed its findings back to the agent that opened this PR for "
+        f"{MAX_AUTHOR_HANDOFF_ROUNDS} rounds, so it stops doing that automatically now. "
+        "Please review the remaining findings, or mention the agent to have it keep going."
+    )
+
+
+# The reviewer writes findings after reading text anyone can put in the PR.
+def _finding_data(value: object) -> str:
+    return escape_for_data_block(str(value or ""), _HANDOFF_DATA_TAGS)
+
+
+def _one_line(value: object) -> str:
+    return _finding_data(" ".join(str(value or "").split()))
+
+
+def _handoff_finding(pr_url: str, finding: Finding) -> dict[str, str]:
+    start, end = finding.get("start_line"), finding.get("end_line")
+    if start is not None and end is not None and start != end:
+        lines = f"lines {start}-{end}"
+    elif end is not None or start is not None:
+        lines = f"line {end if end is not None else start}"
+    else:
+        lines = ""
+    comment_ids = comment_ids_for_finding(finding)
+    return {
+        "severity": str(finding.get("severity") or ""),
+        "title": _one_line(finding.get("title")),
+        "file": _one_line(finding.get("file")),
+        "lines": lines,
+        "description": _finding_data(finding.get("description")),
+        "suggestion": _finding_data(finding.get("suggestion")),
+        "comment_url": f"{pr_url}#discussion_r{comment_ids[0]}" if comment_ids else "",
+    }
 
 
 async def _maybe_post_slack_completion_reply(

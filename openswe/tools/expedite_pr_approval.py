@@ -37,7 +37,6 @@ from openswe.slack.channels import SlackChannel
 from openswe.slack.client import GitHubPrRef, parse_github_pr_url
 from openswe.slack.dm import send_dm
 from openswe.slack.http import SlackRequestError
-from openswe.tools.manage_baby_sit import dispatch_run_config
 from openswe.tools.mcp_exposure import expose_mcp
 from openswe.users import User
 
@@ -328,7 +327,7 @@ async def expedite_pr_approval(
         awaiting_ready=payload.draft,
         slack_channel_id=channel_id,
         slack_thread_ts=thread_ts,
-        run_config=dispatch_run_config(cfg, thread_id, None) if thread_id else {},
+        run_config=cfg.wake_config(thread_id) if thread_id else {},
         requested_by_user_id=requester.id if requester is not None else None,
     ).save()
     if approval.awaiting_ready:

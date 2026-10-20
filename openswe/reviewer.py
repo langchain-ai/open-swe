@@ -62,7 +62,7 @@ from openswe.middleware import (
 )
 from openswe.middleware.prepare_run import PrepareRunState
 from openswe.middleware.sandbox_circuit_breaker import post_sandbox_unreachable_notification
-from openswe.prompts import apply_tool_descriptions, common_prompt, prompt
+from openswe.prompts import apply_tool_descriptions, common_prompt, escape_for_data_block, prompt
 from openswe.review.approvals import approval_policy_for_review
 from openswe.review.diff import (
     changed_files,
@@ -361,10 +361,7 @@ def _safe_login(value: object) -> str:
     return "unknown"
 
 
-# Closing tags of the wrappers used in this module. XML tolerates whitespace
-# around the tag name (e.g. `</body >`, `</ body\n>`), so a literal `.replace()`
-# of the canonical spelling alone is insufficient — we match each end tag
-# whitespace-tolerantly and rewrite it to an inert, human-readable form.
+# The wrappers this module puts untrusted text in.
 _DATA_BLOCK_WRAPPER_TAGS = (
     "pr_review_threads",
     "thread",
@@ -377,20 +374,10 @@ _DATA_BLOCK_WRAPPER_TAGS = (
     "summary",
     "files",
 )
-_CLOSING_TAG_RE = re.compile(
-    r"</\s*(" + "|".join(_DATA_BLOCK_WRAPPER_TAGS) + r")\s*>",
-    re.IGNORECASE,
-)
 
 
 def _escape_for_data_block(text: str) -> str:
-    """Neutralize closing tags so an attacker-controlled body can't break out.
-
-    Matches each wrapper's end tag whitespace-tolerantly (XML allows whitespace
-    before/after the tag name) and rewrites it to an inert ``</name_>`` form
-    that stays human-readable but is no longer a valid closer.
-    """
-    return _CLOSING_TAG_RE.sub(lambda m: f"</{m.group(1).lower()}_>", text)
+    return escape_for_data_block(text, _DATA_BLOCK_WRAPPER_TAGS)
 
 
 def _format_pr_review_threads(threads: list[dict]) -> str:

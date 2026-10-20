@@ -1,3 +1,4 @@
+import re
 from collections.abc import Callable, Mapping, Sequence
 from functools import cache, lru_cache
 from importlib import resources
@@ -38,6 +39,20 @@ _JINJA = Environment(
 def _is_template(name: str) -> bool:
     path = _prompt_path(f"{name}.md.jinja")
     return _PROMPT_ROOT.joinpath(*path.parts).is_file()
+
+
+@cache
+def _closing_tag_re(tags: tuple[str, ...]) -> re.Pattern[str]:
+    # XML tolerates whitespace around the tag name (`</body >`, `</ body\n>`).
+    return re.compile(r"</\s*(" + "|".join(map(re.escape, tags)) + r")\s*>", re.IGNORECASE)
+
+
+def escape_for_data_block(text: str, tags: Sequence[str]) -> str:
+    """Neutralize closing ``tags`` so untrusted text can't break out of its data block.
+
+    Each end tag becomes an inert ``</name_>`` that stays readable but no longer closes.
+    """
+    return _closing_tag_re(tuple(tags)).sub(lambda m: f"</{m.group(1).lower()}_>", text)
 
 
 def prompt(name: str, values: Mapping[str, object] | None = None, /, **kwargs: object) -> str:

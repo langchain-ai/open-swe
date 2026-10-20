@@ -30,7 +30,6 @@ from openswe.slack.client import (
 )
 from openswe.slack.dm import send_dm
 from openswe.slack.payloads import SlackMessage
-from openswe.tools.manage_baby_sit import dispatch_run_config
 from openswe.tools.mcp_exposure import expose_mcp
 from openswe.users import User
 
@@ -88,7 +87,7 @@ async def request_human_review(
     origin = Origin(
         requester=await User.for_login("github", login) if login else None,
         thread_id=thread_id,
-        run_config=dispatch_run_config(cfg, thread_id, None),
+        run_config=cfg.wake_config(thread_id),
         slack_channel_id=own_channel,
         slack_thread_ts=own_thread,
     )

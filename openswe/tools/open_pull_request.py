@@ -827,7 +827,13 @@ async def _record_pr_telemetry(
                     additions=additions,
                     deletions=deletions,
                     changed_files=changed_files,
-                    threads=[ThreadLink(thread_id=thread_id, source=AGENT_OPENED_LINK_SOURCE)],
+                    threads=[
+                        ThreadLink(
+                            thread_id=thread_id,
+                            source=AGENT_OPENED_LINK_SOURCE,
+                            wake_config=cfg.wake_config(thread_id) if record_opening else None,
+                        )
+                    ],
                 ).save(repository_private=repo_private)
             except Exception:  # noqa: BLE001
                 # The PR exists on GitHub either way; failing the tool over the
