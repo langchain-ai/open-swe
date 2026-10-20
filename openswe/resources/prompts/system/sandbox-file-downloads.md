@@ -27,8 +27,6 @@ For PR comparison screenshots:
 - Generate inline image download URLs with the correct MIME type, without an expiry unless requested.
   Keep the files available; a non-expiring URL does not make sandbox files permanent.
 - Save the tool's JSON response and build the PR body from its exact `url` field programmatically.
-  When calling through the sandbox `/invoke` endpoint, check the response envelope's `status` is
-  `success`, then extract `json.loads(response["content"])["url"]`, not `response["url"]`.
   Never retype, shorten, decode/re-encode, or reconstruct signed URLs; one changed byte can cause 403.
 - Embed a Before/After image table. Use `gh pr edit --body-file` for updates, preserving the existing
   description and footer. Do not use `gh pr edit --attach`: sandbox proxy authentication does not
