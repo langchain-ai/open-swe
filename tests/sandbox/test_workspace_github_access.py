@@ -173,11 +173,7 @@ async def test_a_reviewers_sandbox_can_read_but_never_write_github(
     monkeypatch: pytest.MonkeyPatch,
     github: list[dict[str, object]],
 ) -> None:
-    """Reviewers read code anyone can push, so their box never holds a token that can write.
-
-    That holds across expiry refreshes and when MDA replaces the box and reconnects
-    it without passing any scope.
-    """
+    """A reviewer box stays read-only across refresh and a reconnect that passes no scope."""
     read_only = (
         "actions=read,checks=read,contents=read,issues=read,"
         "metadata=read,pull_requests=read,statuses=read"
@@ -218,11 +214,7 @@ async def test_a_reconnecting_reviewer_without_a_known_pr_gets_no_repository_at_
     monkeypatch: pytest.MonkeyPatch,
     github: list[dict[str, object]],
 ) -> None:
-    """MDA's box-replacement reconnect knows no RunConfig, so it asks for no repository.
-
-    Without this, that reconnect would fall back to every repository the
-    installation can reach rather than just the one under review.
-    """
+    """A reviewer reconnect with no recorded PR gets no repository."""
     monkeypatch.setattr(WORKSPACES, "slug_exists", AsyncMock(return_value=True))
     monkeypatch.setattr(lifecycle, "thread_token_repositories", AsyncMock(return_value=None))
     monkeypatch.setattr(

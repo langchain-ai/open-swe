@@ -520,13 +520,8 @@ async def ensure_sandbox_for_thread(
     async with aphase(thread_id, "sandbox.thread_metadata"):
         sandbox_metadata = await get_sandbox_metadata(thread_id)
     if sandbox_metadata.get("kind") == REVIEWER_THREAD_KIND:
-        # Whoever reconnects a reviewer's box, such as after MDA replaces it, cannot widen this.
+        # Reconnects stay read-only and limited to the reviewed repo, including after MDA replaces the box.
         github_proxy_permissions = READ_ONLY_REVIEW_PERMISSIONS
-        # The normal run path already narrows to the PR's own repository from its
-        # RunConfig, but a bare reconnect after MDA replaces the box (which knows
-        # no RunConfig) does not; rederive it here, from thread metadata GitHub
-        # itself never sees, so that path can't fall back to every installed repo.
-        # A reviewer thread with no identifiable PR gets no repository at all.
         reviewed_pr = sandbox_metadata.get("pr")
         owner = reviewed_pr.get("owner") if isinstance(reviewed_pr, dict) else None
         name = reviewed_pr.get("name") if isinstance(reviewed_pr, dict) else None
