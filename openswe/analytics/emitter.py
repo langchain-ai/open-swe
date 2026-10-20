@@ -47,6 +47,7 @@ _ENTRY_POINTS = {
     "scheduled": EntryPoint.SCHEDULED,
     "api": EntryPoint.API,
     "linear": EntryPoint.LINEAR,
+    "notion": EntryPoint.NOTION,
 }
 
 

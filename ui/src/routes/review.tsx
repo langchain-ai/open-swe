@@ -17,8 +17,8 @@ export const Route = createFileRoute("/review")({
 function ReviewPage() {
   return (
     <SettingsPage
-      title="Code Review"
-      description="Open SWE Review checks pull requests for bugs on demand, or automatically on the repositories you choose. Runs are billed by underlying agent usage."
+      title="Code review"
+      description="Jarvis Review checks pull requests for bugs on demand, or automatically on the repositories you choose. Runs are billed by underlying agent usage."
     >
       <RepositoriesSection />
     </SettingsPage>
@@ -68,8 +68,8 @@ function RepositoriesSection() {
         )}
         {!loading && grouped.length === 0 && (
           <p className="px-space-4 py-space-3 text-xs text-secondary">
-            No GitHub App installations found. Install the Open SWE GitHub App
-            on an account or org to manage repos here.
+            No GitHub App installations found. Install the Jarvis GitHub App on
+            an account or org to manage repos here.
           </p>
         )}
         {grouped.map(([owner, list]) => {

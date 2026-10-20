@@ -194,7 +194,7 @@ async def _mapped_github_logins(logins: set[str]) -> tuple[set[str], int]:
 def _context(configurable: dict[str, Any], metadata: dict[str, Any]) -> SourceContext:
     """Thread source, with ``configurable`` taking precedence over metadata."""
     merged = SourceContext.from_metadata(metadata).dump()
-    for key in ("slack_thread", "linear_issue", "github_issue", "pr_number"):
+    for key in ("slack_thread", "linear_issue", "notion_page", "github_issue", "pr_number"):
         value = configurable.get(key)
         if value is not None:
             merged[key] = value

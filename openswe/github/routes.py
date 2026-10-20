@@ -130,6 +130,7 @@ async def github_webhook(
                 common.logger.debug("Failed to update Agent PR usage", exc_info=True)
         if action == "closed":
             background_tasks.add_task(service.settle_human_review_on_close, payload)
+            background_tasks.add_task(service.record_merge_on_notion_tasks, payload)
         elif action in common.GH_PR_AGENT_STATE_ACTIONS:
             background_tasks.add_task(service.settle_human_reviews, payload)
         if action in common.GH_PR_WATCH_TOGGLE_ACTIONS:
@@ -143,6 +144,12 @@ async def github_webhook(
                 return {"status": "ignored", "reason": "Automatic review disabled for repository"}
             gate_rejection = await common.enforce_public_repo_org_gate(payload, "pull_request")
             if gate_rejection is not None:
+                common.logger.info(
+                    "Skipping auto-review for %s/%s PR %s webhook: public-repo org gate rejected sender",
+                    webhook_repo_config.get("owner"),
+                    webhook_repo_config.get("name"),
+                    action,
+                )
                 return gate_rejection
             common.logger.info("Accepted GitHub PR %s webhook, scheduling auto-review task", action)
             background_tasks.add_task(service.process_github_pr_ready, payload)

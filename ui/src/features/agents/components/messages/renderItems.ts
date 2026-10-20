@@ -202,7 +202,11 @@ function isSqlResult(chunk: ToolExecutionChunk): boolean {
 }
 
 function isReplyTool(chunk: ToolExecutionChunk): boolean {
-  return chunk.toolKind === "slack" || chunk.toolKind === "linear"
+  return (
+    chunk.toolKind === "slack" ||
+    chunk.toolKind === "linear" ||
+    chunk.toolKind === "notion"
+  )
 }
 
 /**
