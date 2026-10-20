@@ -21,6 +21,7 @@ from managed_deepagents._identity_auth import (
 )
 from managed_deepagents._ingress import build_ingress_run_context
 from managed_deepagents._ingress_runs import (
+    lookup_status,
     observe_ingress_run,
     resume_ingress_run,
     start_ingress_run,
@@ -74,7 +75,7 @@ async def ingress_thread_interrupts(
     try:
         thread = await client.threads.get(thread_id)
     except Exception as error:
-        if _lookup_status(error) == HTTPStatus.NOT_FOUND:
+        if lookup_status(error) == HTTPStatus.NOT_FOUND:
             return []
         raise
     # The SDK types ``Thread.interrupts``; the checks below still guard the wire.
@@ -95,20 +96,6 @@ async def ingress_thread_interrupts(
                 seen.add(interrupt_id)
                 pending.append(Interrupt(id=interrupt_id, value=entry.get("value")))
     return pending
-
-
-def _lookup_status(error: Exception) -> int | None:
-    """HTTP status behind a failed loopback read.
-
-    Duck-typed rather than matching ``httpx.HTTPStatusError``: ``httpx`` reaches
-    this package only as a transitive dependency of the lazily imported client.
-    """
-    response = getattr(error, "response", None)
-    status = getattr(response, "status_code", None)
-    if isinstance(status, int):
-        return status
-    status = getattr(error, "status_code", None)
-    return status if isinstance(status, int) else None
 
 
 async def start_ingress_agent(

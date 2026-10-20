@@ -8,9 +8,13 @@ installs and `make mda-cli` builds the CLI from.
 
     uv run scripts/vendor.py           # update to the head of upstream main
     uv run scripts/vendor.py <sha>     # update to a commit on upstream main
+    uv run scripts/vendor.py --branch <branch> <sha>
+                                       # a commit on another upstream branch, such as an
+                                       # unmerged stack Open SWE needs before it lands
     uv run scripts/vendor.py --diff    # our changes: the tree against UPSTREAM's commit
 
-UPSTREAM records the exact commit the tree comes from: its full SHA, then its date.
+UPSTREAM records the exact commit the tree comes from: its full SHA, then its date,
+then its branch when that is not main.
 Our changes are edits made in the tree itself, as in a vendor branch. Updating takes
 upstream's new version of every file we left alone, and three-way merges upstream's
 changes into every file we changed (base: the recorded commit), leaving conflict
@@ -84,22 +88,23 @@ def recorded_sha() -> str:
 
 
 class Upstream:
-    """The SDK repository's main branch, fetched into a scratch directory."""
+    """One of the SDK repository's branches, main by default, fetched into a scratch directory."""
 
-    def __init__(self, repo: str, scratch: Path) -> None:
+    def __init__(self, repo: str, scratch: Path, branch: str = "main") -> None:
         self.repo = repo
+        self.branch = branch
         self._scratch = scratch
-        # History without file contents, to check a commit is on main; then commits' files.
+        # History without file contents, to check a commit is on the branch; then commits' files.
         self._history = scratch / "history"
         self._content = scratch / "content"
         for path in (self._history, self._content):
             path.mkdir()
             _git("init", "--quiet", cwd=path)
-        _git("fetch", "--quiet", "--filter=blob:none", repo, "main", cwd=self._history)
+        _git("fetch", "--quiet", "--filter=blob:none", repo, branch, cwd=self._history)
         self.main = _git("rev-parse", "FETCH_HEAD", cwd=self._history, output=True)
 
     def resolve(self, ref: str | None) -> str:
-        """The full SHA of ``ref`` (main's head by default), which must be on main."""
+        """The full SHA of ``ref`` (the branch's head by default), which must be on the branch."""
         if ref is None:
             return self.main
         try:
@@ -113,13 +118,14 @@ class Upstream:
             )
         except subprocess.CalledProcessError as exc:
             raise VendorError(
-                f"No commit {ref} on main of {self.repo}; give a full SHA from main."
+                f"No commit {ref} on {self.branch} of {self.repo}; "
+                f"give a full SHA from {self.branch}."
             ) from exc
-        on_main = subprocess.run(
+        on_branch = subprocess.run(
             ["git", "merge-base", "--is-ancestor", sha, self.main], cwd=self._history, check=False
         )
-        if on_main.returncode != 0:
-            raise VendorError(f"{sha} is not on main of {self.repo}; only main is vendored.")
+        if on_branch.returncode != 0:
+            raise VendorError(f"{sha} is not on {self.branch} of {self.repo}.")
         return sha
 
     def tree(self, sha: str) -> Path:
@@ -135,8 +141,10 @@ class Upstream:
         with tarfile.open(fileobj=BytesIO(archive)) as tar:
             members = [m for m in tar.getmembers() if not _skipped(m.name)]
             tar.extractall(out, members=members, filter="data")
-        commit = _git("show", "-s", "--format=%H %cs", sha, cwd=self._history, output=True)
-        (out / RECORD).write_text(f"{commit}\n")
+        # The commit itself was fetched here, whichever branch it is on.
+        commit = _git("show", "-s", "--format=%H %cs", sha, cwd=self._content, output=True)
+        branch = "" if self.branch == "main" else f" {self.branch}"
+        (out / RECORD).write_text(f"{commit}{branch}\n")
         return out
 
 
@@ -222,7 +230,8 @@ def update(upstream: Upstream, ref: str | None, scratch: Path) -> str:
 
 def diff(upstream: Upstream) -> int:
     """Print our changes, the tree against UPSTREAM's commit; how many files differ."""
-    base = upstream.tree(upstream.resolve(recorded_sha()))
+    # The recorded commit, whichever branch it came from.
+    base = upstream.tree(recorded_sha())
     theirs, ours = files(base), files(DEST)
     changed = 0
     for path in sorted(theirs.keys() | ours.keys()):
@@ -251,7 +260,14 @@ def main() -> int:
     parser = argparse.ArgumentParser(
         description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter
     )
-    parser.add_argument("sha", nargs="?", help="a commit on upstream main; main's head by default")
+    parser.add_argument(
+        "sha", nargs="?", help="a commit on the upstream branch; the branch's head by default"
+    )
+    parser.add_argument(
+        "--branch",
+        default="main",
+        help="the upstream branch to vendor from (main by default), for an unmerged stack",
+    )
     parser.add_argument(
         "--diff", action="store_true", help="print our changes against UPSTREAM's commit"
     )
@@ -262,14 +278,15 @@ def main() -> int:
     with tempfile.TemporaryDirectory() as scratch_dir:
         scratch = Path(scratch_dir)
         try:
-            upstream = Upstream(repo, scratch)
+            upstream = Upstream(repo, scratch, args.branch)
             if args.diff:
                 changed = diff(upstream)
                 print(f"{changed} file(s) differ from {recorded_sha()}.", file=sys.stderr)
             else:
                 commit = update(upstream, args.sha, scratch)
                 print(
-                    f"Vendored {commit} from main of {repo} into vendor/managed-deepagents-sdk, "
+                    f"Vendored {commit} from {args.branch} of {repo} into "
+                    "vendor/managed-deepagents-sdk, "
                     "keeping our changes, and relocked mda/."
                 )
         except VendorError as exc:

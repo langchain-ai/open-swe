@@ -1211,7 +1211,7 @@ wheels = [
 
 [[package]]
 name = "managed-deepagents"
-version = "0.9.3"
+version = "0.9.2"
 source = { editable = "../vendor/managed-deepagents-sdk/packages/pypi" }
 dependencies = [
     { name = "deepagents" },
@@ -1228,7 +1228,7 @@ dependencies = [
 [package.metadata]
 requires-dist = [
     { name = "cryptography", marker = "extra == 'test'", specifier = ">=50.0.1" },
-    { name = "deepagents", specifier = ">=0.7.13,<1" },
+    { name = "deepagents", specifier = ">=0.7.27,<1" },
     { name = "fastmcp", marker = "extra == 'test'", specifier = ">=4.0.10,<5" },
     { name = "httpx", specifier = ">=0.28.1,<1" },
     { name = "langchain", specifier = ">=1.4.6,<2" },
@@ -1238,7 +1238,7 @@ requires-dist = [
     { name = "langgraph-prebuilt", specifier = ">=1.1.1,<2" },
     { name = "langgraph-sdk", specifier = ">=0.4.6,<0.5" },
     { name = "mcp", marker = "extra == 'test'", specifier = ">=2.2.0,<3" },
-    { name = "pydantic", specifier = ">=2.7.4,<2.15" },
+    { name = "pydantic", specifier = ">=2.7.4" },
     { name = "pyjwt", extras = ["crypto"], marker = "extra == 'test'", specifier = ">=2.13.0" },
     { name = "pytest", marker = "extra == 'test'", specifier = ">=9.1.1" },
     { name = "starlette", marker = "extra == 'test'", specifier = ">=1.6.0" },
@@ -1248,13 +1248,13 @@ requires-dist = [
 provides-extras = ["test"]
 
 [package.metadata.requires-dev]
-lint = [{ name = "ruff", specifier = ">=0.16.7,<0.18.0" }]
+lint = [{ name = "ruff", specifier = ">=0.16.7,<0.17.0" }]
 typing = [
     { name = "basedpyright", specifier = ">=1.40.1,<2.0.0" },
     { name = "fastmcp", specifier = ">=4.0.10,<5" },
     { name = "langchain", extras = ["mcp"], specifier = ">=1.4.6,<2" },
     { name = "mcp", specifier = ">=2.2.0,<3" },
-    { name = "ty", specifier = ">=0.0.80,<0.0.88" },
+    { name = "ty", specifier = ">=0.0.80,<1.0.0" },
 ]
 
 [[package]]

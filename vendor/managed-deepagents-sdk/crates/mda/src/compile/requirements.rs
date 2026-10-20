@@ -156,6 +156,47 @@ pub(crate) fn required_env_from_connector_requirements(
     out
 }
 
+/// Agent connection names a channel reserves for what its setup provides,
+/// such as `mda/github-token`, the GitHub App's installation token. They are
+/// not workspace connections, so deploy neither checks for them nor creates
+/// them.
+/// Each with what the token is and what the agent acts as with it.
+const CHANNEL_RESERVED_AGENT_CONNECTIONS: [(&str, &str, &str); 2] = [
+    (
+        "mda/github-token",
+        "the GitHub App's installation token",
+        "act on GitHub as the App",
+    ),
+    (
+        "mda/linear-token",
+        "the Linear app's token",
+        "act in Linear as the app",
+    ),
+];
+
+/// Whether `slug` is a channel's reserved agent connection.
+fn is_channel_reserved_agent_connection(slug: &str) -> bool {
+    CHANNEL_RESERVED_AGENT_CONNECTIONS
+        .iter()
+        .any(|(reserved, _, _)| *reserved == slug)
+}
+
+/// Why a project cannot declare `slug` as a user connection, for a channel's
+/// reserved agent connection: reading an app's token as the person running
+/// the agent is not supported yet.
+pub(crate) fn reserved_user_connection_error(slug: &str) -> Option<String> {
+    CHANNEL_RESERVED_AGENT_CONNECTIONS
+        .iter()
+        .find(|(reserved, _, _)| *reserved == slug)
+        .map(|(_, token, acts_as)| {
+            format!(
+                "'{slug}' is not supported as a user connection yet: it is {token}, an \
+                 agent connection. Use connections.get(\"{slug}\", {{ type: \"agent\" }}) \
+                 to {acts_as}."
+            )
+        })
+}
+
 /// Collect unique user-owned connection slugs from compiled connector requirements.
 pub(crate) fn user_connections_from_connector_requirements(
     requirements: &ConnectorRequirements,
@@ -184,7 +225,9 @@ pub(crate) fn agent_connections_from_connector_requirements(
         if let Some(entries) = manifest.get("agentConnections").and_then(Value::as_array) {
             for entry in entries {
                 if let Some(slug) = entry.as_str() {
-                    slugs.insert(slug.to_string());
+                    if !is_channel_reserved_agent_connection(slug) {
+                        slugs.insert(slug.to_string());
+                    }
                 }
             }
         }
@@ -1552,6 +1595,47 @@ build-backend = \"setuptools.build_meta\"
             user_connections_from_connector_requirements(&requirements),
             vec!["notion".to_string(), "tavily".to_string()]
         );
+    }
+
+    #[test]
+    fn channel_reserved_agent_connections_are_not_workspace_connections() {
+        // The GitHub channel's setup provides the App's installation token,
+        // so deploy neither checks for it nor creates it.
+        let requirements = BTreeMap::from([(
+            "mcp".to_string(),
+            serde_json::json!({
+                "userConnections": ["notion"],
+                "agentConnections": ["mda/github-token", "docs-token"],
+            }),
+        )]);
+
+        assert_eq!(
+            referenced_connection_slugs(&requirements),
+            vec!["docs-token".to_string(), "notion".to_string()]
+        );
+    }
+
+    #[test]
+    fn a_channel_reserved_connection_is_not_supported_as_a_user_connection() {
+        let requirements = BTreeMap::from([(
+            "mcp".to_string(),
+            serde_json::json!({ "userConnections": ["mda/github-token"] }),
+        )]);
+
+        // It stays listed, so deploy can refuse it.
+        assert_eq!(
+            user_connections_from_connector_requirements(&requirements),
+            vec!["mda/github-token".to_string()]
+        );
+        let error = reserved_user_connection_error("mda/github-token").unwrap();
+        assert!(
+            error.contains("not supported as a user connection yet"),
+            "{error}"
+        );
+        assert!(error.contains("{ type: \"agent\" }"), "{error}");
+        let linear = reserved_user_connection_error("mda/linear-token").unwrap();
+        assert!(linear.contains("the Linear app's token"), "{linear}");
+        assert!(reserved_user_connection_error("notion").is_none());
     }
 
     #[test]

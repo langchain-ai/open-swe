@@ -330,8 +330,7 @@ async def handle_trigger_channel_event_request(  # noqa: C901, PLR0911
     else:
         if client is None:
             logger.error(
-                "channel transport is not configured "
-                "(%s and LANGSMITH_API_KEY or LANGCHAIN_API_KEY are required)",
+                "channel transport is not configured (%s and LANGSMITH_API_KEY are required)",
                 LANGSMITH_MDA_TRIGGER_SERVER_URL_ENV,
             )
     if client is None:

@@ -9,25 +9,15 @@ from __future__ import annotations
 import functools
 from collections.abc import Awaitable, Callable, Mapping, Sequence
 from dataclasses import dataclass, field, fields
-from typing import (
-    TYPE_CHECKING,
-    Annotated,
-    Any,
-    Generic,
-    TypedDict,
-    TypeVar,
-    cast,
-    overload,
-)
+from types import GenericAlias
+from typing import TYPE_CHECKING, Any, Generic, TypedDict, TypeVar, cast, get_args, overload
 
 from deepagents.backends.protocol import BackendProtocol
 from langchain.tools import ToolRuntime
 from langchain_core.runnables import RunnableConfig
-from langchain_core.tools import InjectedToolArg
 from langgraph.runtime import Runtime
 from langgraph.typing import ContextT
 from langgraph_sdk.runtime import ServerRuntime, _ExecutionRuntime, _ReadRuntime
-from pydantic import GetPydanticSchema
 from pydantic_core import core_schema
 from typing_extensions import TypeVar as DefaultTypeVar
 
@@ -69,7 +59,7 @@ class ManagedRuntimeExtras(TypedDict, total=False):
 class ManagedRuntime(Runtime[ContextT], Generic[ContextT]):  # ty: ignore[invalid-frozen-dataclass-subclass]
     """Native middleware runtime with exact authored context and managed fields."""
 
-    server_info: ManagedServerInfo | None = None  # ty: ignore[invalid-attribute-override]
+    server_info: ManagedServerInfo | None = None
     channel: RuntimeChannel | None = None
     backend: BackendProtocol | None = None
     schedules: RuntimeSchedules = field(default_factory=RuntimeSchedules)
@@ -79,20 +69,15 @@ class ManagedRuntime(Runtime[ContextT], Generic[ContextT]):  # ty: ignore[invali
 class ManagedToolRuntime(ToolRuntime[_ContextT, _StateT], Generic[_ContextT, _StateT]):
     """Native tool runtime; type parameters follow context, then state."""
 
-    server_info: ManagedServerInfo | None = None  # ty: ignore[invalid-mutable-override]
+    server_info: ManagedServerInfo | None = None
     channel: RuntimeChannel | None = None
     backend: BackendProtocol | None = None
     schedules: RuntimeSchedules = field(default_factory=RuntimeSchedules)
 
     @classmethod
-    def __class_getitem__(cls, parameters: object) -> object:
-        return Annotated[
-            super().__class_getitem__(parameters),  # ty: ignore[invalid-type-form]
-            GetPydanticSchema(
-                lambda _source, _handler: core_schema.is_instance_schema(ToolRuntime)
-            ),
-            InjectedToolArg,
-        ]
+    def __class_getitem__(cls, parameters: object) -> GenericAlias:
+        # GenericAlias exposes the Pydantic hook on parameterized tool annotations.
+        return GenericAlias(cls, get_args(super().__class_getitem__(parameters)))
 
     @classmethod
     def __get_pydantic_core_schema__(
@@ -183,7 +168,9 @@ def managed_runtime_overrides(
         if len(sanitized) != len(configurable):
             config = getattr(runtime, "config", None)
             if isinstance(config, Mapping):
-                overrides["config"] = {**dict(config), "configurable": sanitized}
+                overrides["config"] = cast(
+                    "RunnableConfig", {**dict(config), "configurable": sanitized}
+                )
             elif hasattr(runtime, "configurable"):
                 overrides["configurable"] = sanitized
     return overrides

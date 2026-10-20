@@ -83,10 +83,10 @@ name = \"managed-deepagents\"\n\
 version = {runtime_version:?}\n\
 requires-python = \">=3.11\"\n\
 dependencies = [\n\
-  \"pydantic>=2.7.4,<2.15\",\n\
+  \"pydantic>=2.7.4\",\n\
   \"httpx>=0.28.1,<1\",\n\
   \"typing-extensions>=4.12.2,<5\",\n\
-  \"deepagents>=0.7.13,<1\",\n\
+  \"deepagents>=0.7.27,<1\",\n\
   \"langchain>=1.4.6,<2\",\n\
   \"langchain-core>=1.6.2,<2\",\n\
   \"langgraph>=1.2.15,<2\",\n\

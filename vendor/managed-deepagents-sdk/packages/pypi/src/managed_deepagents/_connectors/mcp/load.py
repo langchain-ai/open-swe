@@ -50,13 +50,11 @@ if TYPE_CHECKING:
 
 
 # langchain.mcp imports optional provider packages at module load.
-with warnings.catch_warnings():
-    warnings.filterwarnings("ignore", message=r"^`langchain\.mcp` is in beta\.")
-    (MCPAdapter,) = (
-        optional_runtime_symbols("langchain.mcp", "MCPAdapter")
-        if all(find_spec(name) is not None for name in ("fastmcp", "mcp", "httpx2", "key_value"))
-        else (None,)
-    )
+(MCPAdapter,) = (
+    optional_runtime_symbols("langchain.mcp", "MCPAdapter")
+    if all(find_spec(name) is not None for name in ("fastmcp", "mcp", "httpx2", "key_value"))
+    else (None,)
+)
 
 if TYPE_CHECKING or MCPAdapter is not None:
     import httpx2
