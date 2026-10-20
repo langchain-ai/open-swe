@@ -4583,6 +4583,13 @@
             "default": false,
             "title": "Slack Onboarding Dismissed",
             "type": "boolean"
+          },
+          "workspace_default_repos": {
+            "additionalProperties": {
+              "type": "string"
+            },
+            "title": "Workspace Default Repos",
+            "type": "object"
           }
         },
         "title": "ProfileUpdate",

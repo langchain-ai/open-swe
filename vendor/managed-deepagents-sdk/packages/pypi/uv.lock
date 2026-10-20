@@ -1,5 +1,5 @@
 version = 1
-revision = 3
+revision = 5
 requires-python = ">=3.11"
 resolution-markers = [
     "python_full_version >= '3.15'",
@@ -136,6 +136,23 @@ source = { registry = "https://pypi.org/simple" }
 sdist = { url = "https://files.pythonhosted.org/packages/ac/01/5f394b8bcd6e5b92f73130990960423bbb19711f906bd9fe9ea5557c667c/bracex-3.0.1.tar.gz", hash = "sha256:4e38e32392e4a4780fe15d644bfc7c8514057cfc3861e060b11814ce829c25e4", size = 44019, upload-time = "2026-07-20T13:43:00.335Z" }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/b8/8f/6f7273a7adb8d73fc8d21ede4376a3e475e52f98435c6007f69100dec8ca/bracex-3.0.1-py3-none-any.whl", hash = "sha256:6523ad83aeb5098a4ee597cff0f964442ff74e460bd3fafaffab6a013ff2288c", size = 11940, upload-time = "2026-07-20T13:42:59.268Z" },
+]
+
+[[package]]
+name = "browserbase"
+version = "1.21.0"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "anyio" },
+    { name = "distro" },
+    { name = "httpx" },
+    { name = "pydantic" },
+    { name = "sniffio" },
+    { name = "typing-extensions" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/64/b0/11f6bd76b91f4237cfffde1eed741a2b3b6016b6c5169153a39484093c1e/browserbase-1.21.0.tar.gz", hash = "sha256:b2b019d0acc0a5876eae58b4aeb3cf942736e4e3da46571356d612f4504d537e", size = 300177, upload-time = "2026-10-14T07:16:55.192Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/fa/d0/cdd0ca2989e37f403dfefec9c70e6b1d4477afd64aff71cf11ea19f3f5ed/browserbase-1.21.0-py3-none-any.whl", hash = "sha256:b0dfbb858556c3019328c211fa319376388dcd00f22dac5e646b4a1e970e3ef5", size = 169891, upload-time = "2026-10-14T07:16:56.237Z" },
 ]
 
 [[package]]
@@ -1282,6 +1299,7 @@ typing = [
     { name = "fastmcp" },
     { name = "langchain", extra = ["mcp"] },
     { name = "mcp" },
+    { name = "stagehand" },
     { name = "ty" },
 ]
 
@@ -1314,6 +1332,7 @@ typing = [
     { name = "fastmcp", specifier = ">=4.0.10,<5" },
     { name = "langchain", extras = ["mcp"], specifier = ">=1.4.6,<2" },
     { name = "mcp", specifier = ">=2.2.0,<3" },
+    { name = "stagehand", specifier = "==4.3.0" },
     { name = "ty", specifier = ">=0.0.80,<1.0.0" },
 ]
 
@@ -2164,6 +2183,23 @@ dependencies = [
 sdist = { url = "https://files.pythonhosted.org/packages/e4/be/0123026f719d1a7936f214a88b553bb5701e04ff2511147c1dab0c5035eb/sse_starlette-3.5.0.tar.gz", hash = "sha256:75de713aa8a9441513cc283220826da079d982770965b951e9437720e8bafdb2", size = 36794, upload-time = "2026-09-28T17:48:14.7Z" }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/be/e4/cdda14023c316d71493bc54fdffc3dd006631b88866145c9d3cc33e0f1df/sse_starlette-3.5.0-py3-none-any.whl", hash = "sha256:3e6e1070df3f0f5d9cea81496de92dbb72f6721871d99748ece67441dd8b7997", size = 17407, upload-time = "2026-09-28T17:48:13.228Z" },
+]
+
+[[package]]
+name = "stagehand"
+version = "4.3.0"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "browserbase" },
+    { name = "httpx" },
+    { name = "opentelemetry-api" },
+    { name = "pydantic" },
+    { name = "typing-extensions" },
+    { name = "websockets" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/5d/c0/868c0a57d1028021306d75f37c2993195041878b7ac453519f9d48343868/stagehand-4.3.0.tar.gz", hash = "sha256:d2febed942526a0cf2a0b7a8e2a613fcea7142100cfc165317e506d049ebfb14", size = 513063, upload-time = "2026-10-20T00:38:24.653Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/4f/71/99c873e72011f5477ad77ce25e362ceb2f6e875e538704a0d3004e7d945e/stagehand-4.3.0-py3-none-any.whl", hash = "sha256:664f64e6167cb79ccd679adf2ab6f91a47e0253c5188e9eb550158fdf9590aa4", size = 527183, upload-time = "2026-10-20T00:38:23.091Z" },
 ]
 
 [[package]]

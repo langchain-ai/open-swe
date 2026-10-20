@@ -132,6 +132,7 @@ from managed_deepagents.agent_entry import (
     AgentEntry,
     AgentFactory,
 )
+from managed_deepagents.define_browser import BrowserDefinition, define_browser
 from managed_deepagents.define_deep_agent import (
     DeepAgentDefinition,
     GeneratedSkill,
@@ -175,6 +176,7 @@ __all__ = [
     "INTERRUPT_CORRELATION_KEY",
     "AgentEntry",
     "AgentFactory",
+    "BrowserDefinition",
     "ChannelContentMessage",
     "ChannelContext",
     "ChannelEvent",
@@ -292,6 +294,7 @@ __all__ = [
     "channels",
     "connections",
     "connectors",
+    "define_browser",
     "define_deep_agent",
     "define_identity",
     "define_mcp",

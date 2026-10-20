@@ -1254,6 +1254,7 @@ typing = [
     { name = "fastmcp", specifier = ">=4.0.10,<5" },
     { name = "langchain", extras = ["mcp"], specifier = ">=1.4.6,<2" },
     { name = "mcp", specifier = ">=2.2.0,<3" },
+    { name = "stagehand", specifier = "==4.3.0" },
     { name = "ty", specifier = ">=0.0.80,<1.0.0" },
 ]
 
