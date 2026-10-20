@@ -7,7 +7,7 @@ from uuid import NAMESPACE_URL, uuid4, uuid5
 import pytest
 from fastapi import HTTPException
 from pydantic import JsonValue
-from sqlalchemy import func, select
+from sqlalchemy import func, select, update
 
 from openswe.bridge.store import BridgeStore
 from openswe.dashboard.workspace_settings import WorkspaceSettings
@@ -156,13 +156,15 @@ def client(monkeypatch: pytest.MonkeyPatch) -> MagicMock:
             raise ConnectionError("response lost after acceptance")
         return result
 
-    async def list_runs(thread_id: str, **kwargs: object) -> list[dict[str, object]]:
-        return [
+    async def list_runs(
+        thread_id: str, *, limit: int | None = None, offset: int = 0, status: str | None = None
+    ) -> list[dict[str, object]]:
+        runs = [
             run
-            for run in client.created_runs
-            if run["thread_id"] == thread_id
-            and (not kwargs.get("status") or run["status"] == kwargs["status"])
+            for run in reversed(client.created_runs)
+            if run["thread_id"] == thread_id and (status is None or run["status"] == status)
         ]
+        return runs[offset:][:limit]
 
     async def cancel_many(*, thread_id: str, run_ids: list[str], action: str) -> None:
         for run in client.created_runs:
@@ -628,7 +630,8 @@ async def test_coordinator_settles_once_every_worker_report_has_reached_it(
     (wake,) = [run for run in client.created_runs if run["thread_id"] == COORDINATOR]
     current = await activity.CoordinatorActivity.of(COORDINATOR)
     assert [worker.state for worker in current.workers] == ["done"]
-    assert current.run_id == wake["run_id"]
+    assert current.runs == [wake["run_id"]]
+    assert current.running
     assert not current.settled
 
     wake["status"] = "success"
@@ -649,6 +652,52 @@ async def test_coordinator_settles_once_every_worker_report_has_reached_it(
         stuck: ("failed", "The worker did not start within 5 minutes."),
     }
     assert current.settled
+
+
+@pytest.mark.usefixtures("registry_db")
+async def test_report_held_through_a_long_coordinator_run_is_awaited_once_it_ends(
+    client: MagicMock, monkeypatch: pytest.MonkeyPatch, launch: Launch
+) -> None:
+    from openswe.tasks import activity
+    from openswe.tasks.events import worker_finished
+
+    monkeypatch.setattr(activity, "langgraph_client", lambda: client)
+    monkeypatch.setattr(service, "model_choice", AsyncMock(return_value=(MODEL, "low")))
+    first = str(uuid4())
+    coordinating: dict[str, object] = {
+        "thread_id": COORDINATOR,
+        "run_id": first,
+        "status": "running",
+    }
+    client.created_runs.append(coordinating)
+    client.statuses[COORDINATOR] = "busy"
+    worker_id = str(
+        (await launch(service.Actor(COORDINATOR, OWNER), "call", "Implement"))["worker_thread_id"]
+    )
+    worker_run = str(uuid4())
+    long_ago = datetime.now(UTC) - 2 * activity.LOST_AFTER
+    client.created_runs.append(
+        {
+            "thread_id": worker_id,
+            "run_id": worker_run,
+            "status": "success",
+            "updated_at": long_ago.isoformat(),
+        }
+    )
+    answer = {"values": {"messages": [{"type": "ai", "content": "Implemented"}]}}
+    await worker_finished(worker_id, worker_run, "success", answer)
+    async with postgres.session() as session:
+        await session.execute(update(TaskMessage).values(matched_at=long_ago))
+
+    current = await activity.CoordinatorActivity.of(COORDINATOR, after=first)
+    assert (current.runs, current.running, current.settled) == ([], True, False)
+    coordinating.update(status="success", updated_at=datetime.now(UTC).isoformat())
+    client.statuses[COORDINATOR] = "idle"
+    current = await activity.CoordinatorActivity.of(COORDINATOR, after=first)
+    assert current.awaiting_delivery
+    assert not current.settled
+    coordinating["updated_at"] = long_ago.isoformat()
+    assert (await activity.CoordinatorActivity.of(COORDINATOR, after=first)).settled
 
 
 @pytest.mark.usefixtures("registry_db")

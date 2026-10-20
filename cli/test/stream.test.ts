@@ -276,13 +276,13 @@ describe("followRun", () => {
 })
 
 function activity(
-  runId: string | null,
+  runs: string[],
   workerState: string,
   settled = false
 ): TaskActivity {
   const active = ["starting", "running", "reporting"].includes(workerState)
   return {
-    run_id: runId,
+    runs,
     settled,
     workers: [
       {
@@ -308,28 +308,31 @@ describe("followTask", () => {
     lifecycle("run-2", "completed"),
   ]
 
-  test("defers the result until the coordinator's last run once workers report", async () => {
+  test("defers the result to the coordinator's last run, even one that ended between polls", async () => {
     const polls = [
-      activity(null, "running"),
-      activity("run-2", "done"),
-      activity(null, "done", true),
+      activity([], "running"),
+      activity(["run-2"], "done", true),
+      activity([], "done", true),
     ]
-    const seen: TaskActivity[] = []
+    const cursors: (string | null)[] = []
     const outcome = await followTask(
       {
         events: async () => sse(replay),
-        activity: async () => polls.shift() ?? null,
+        activity: async (after) => {
+          cursors.push(after)
+          return polls.shift() ?? null
+        },
         stop: async () => undefined,
       },
       "run-1",
-      { sleep: noSleep, onActivity: (current) => seen.push(current) }
+      { sleep: noSleep }
     )
     expect(outcome).toEqual({
       status: "completed",
       error: null,
       result: { stdout: "worker done; tests fail", exitCode: 1 },
     })
-    expect(seen.map((current) => current.settled)).toEqual([false, false, true])
+    expect(cursors).toEqual(["run-1", "run-1", "run-2"])
   })
 
   test("ends at the run's own result on a backend without task workers", async () => {

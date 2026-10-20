@@ -183,19 +183,20 @@ class TaskMessage(Base):
         return await cls.owed(thread_id, state.values.messages if state.values else [])
 
     @classmethod
-    async def awaiting_delivery(cls, thread_id: str, *, since: datetime) -> bool:
-        """Whether a message recorded after ``since`` has yet to reach the thread's checkpoint.
+    async def awaiting_delivery(cls, thread_id: str, *, since: datetime | None) -> bool:
+        """Whether a message has yet to reach the thread's checkpoint.
 
-        A message that ran out of delivery attempts awaits nothing.
+        Only messages recorded after ``since`` count, when given. A message that ran out of
+        delivery attempts awaits nothing.
         """
+        recent = [] if since is None else [cls.matched_at >= since]
         if not postgres.configured() or not await cls._any_undelivered(
-            thread_id, cls.matched_at >= since, cls.delivery_attempts < _MAX_ATTEMPTS
+            thread_id, cls.delivery_attempts < _MAX_ATTEMPTS, *recent
         ):
             return False
         return any(
             message.delivery_attempts < _MAX_ATTEMPTS
-            and message.matched_at is not None
-            and message.matched_at >= since
+            and (since is None or (message.matched_at is not None and message.matched_at >= since))
             for message in await cls._owed_now(dispatch_client(), thread_id)
         )
 

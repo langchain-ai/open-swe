@@ -1,4 +1,4 @@
-from datetime import datetime
+from datetime import UTC, datetime
 from typing import Literal, Self
 from uuid import UUID
 
@@ -151,6 +151,17 @@ class Run(BaseModel):
     status: str
     updated_at: datetime | None = None
     metadata: RunMetadata = Field(default_factory=RunMetadata)
+
+    @property
+    def live(self) -> bool:
+        return self.status in {"pending", "running"}
+
+    @property
+    def ended_at(self) -> datetime | None:
+        """When the run, once finished, ended: its last update, in UTC."""
+        if self.live or self.updated_at is None:
+            return None
+        return self.updated_at if self.updated_at.tzinfo else self.updated_at.replace(tzinfo=UTC)
 
 
 class StateSnapshot(BaseModel):

@@ -24,9 +24,12 @@ async def _metadata(thread_id: str) -> JsonObject:
 
 
 @router.get("/threads/{thread_id}/workers")
-async def api_thread_workers(thread_id: str, principal: PrincipalDep) -> CoordinatorActivity:
+async def api_thread_workers(
+    thread_id: str, principal: PrincipalDep, after: str | None = None
+) -> CoordinatorActivity:
+    """The thread's workers, and its runs created after the run ``after``."""
     principal.assert_can_read(await _metadata(thread_id))
-    return await CoordinatorActivity.of(thread_id)
+    return await CoordinatorActivity.of(thread_id, after=after)
 
 
 @router.post("/threads/{thread_id}/workers/cancel")
