@@ -5,6 +5,7 @@ from typing import cast
 from unittest.mock import AsyncMock, MagicMock
 from uuid import uuid4
 
+import httpx
 import jwt
 import pytest
 from fastapi import HTTPException
@@ -295,3 +296,31 @@ async def test_search_tools_ranks_by_bm25_and_names_code_calls() -> None:
     assert results[0]["parameters"]["properties"].keys() == {"query"}
     assert results[0]["code_name"] == "searchDatadogLogs"
     assert await search.ainvoke({"query": "kubernetes"}) == []
+
+
+@pytest.mark.parametrize(
+    ("method", "path"),
+    [("GET", ""), ("GET", "/list"), ("GET", "/search"), ("POST", "/invoke/slack_reply")],
+)
+@pytest.mark.parametrize("token", [None, "invalid-capability"])
+async def test_removed_tool_endpoints_are_gone_without_tool_access(
+    method: str,
+    path: str,
+    token: str | None,
+) -> None:
+    from openswe.api.app import app
+
+    async with httpx.AsyncClient(
+        transport=httpx.ASGITransport(app=app), base_url="https://test"
+    ) as client:
+        response = await client.request(
+            method,
+            tool_access.TOOLS_PATH + path,
+            headers={tool_access.TOOLS_HEADER: token} if token else {},
+        )
+
+    assert response.status_code == 410
+    assert response.json() == {
+        "detail": "The sandbox tool endpoint was removed. Call the tool directly, "
+        "or find it with search_tools and call it from eval."
+    }
