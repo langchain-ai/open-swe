@@ -13,6 +13,7 @@ on:
     branches: [main]
     paths:
       - "mda/**"
+      - "vendor/managed-deepagents-sdk/**"
       - ".github/workflows/deploy_mda.yml"
   workflow_dispatch:
     inputs:
@@ -71,7 +72,7 @@ jobs:
             echo "mda/agent.py does not exist at this commit; nothing to deploy."
             echo "deploy=false" >>"$GITHUB_OUTPUT"
           elif git rev-parse -q --verify "refs/tags/${DEPLOYED_TAG}" >/dev/null \
-            && git diff --quiet "refs/tags/${DEPLOYED_TAG}" HEAD -- mda .github/workflows/deploy_mda.yml; then
+            && git diff --quiet "refs/tags/${DEPLOYED_TAG}" HEAD -- mda vendor/managed-deepagents-sdk .github/workflows/deploy_mda.yml; then
             echo "Nothing deployed changed since ${DEPLOYED_TAG}; nothing to deploy."
             echo "deploy=false" >>"$GITHUB_OUTPUT"
           else
@@ -79,6 +80,12 @@ jobs:
           fi
       - uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7 # v10.2.0
         if: steps.changed.outputs.deploy == 'true'
+      - uses: dtolnay/rust-toolchain@29eef336d9b2848a0b548edc03f92a220660cdb8 # stable
+        if: steps.changed.outputs.deploy == 'true'
+      - name: Build the mda CLI
+        if: steps.changed.outputs.deploy == 'true'
+        # From the vendored SDK, into the runtime mda/ installs.
+        run: make mda-cli
       - name: Deploy
         if: steps.changed.outputs.deploy == 'true'
         env:
@@ -92,6 +99,10 @@ jobs:
             || matrix.environment == 'staging' && secrets.MDA_SERVICE_SECRET_STAGING
             || matrix.environment == 'preview' && secrets.MDA_SERVICE_SECRET_PREVIEW
             || '' }}
+          # The backend's gateway key. Without it, model calls fall back to the deployment's
+          # own key and count against the workspace's gateway spend cap.
+          # Each secret is named, so the runner gets only the one this deployment uses.
+          LANGSMITH_GATEWAY_API_KEY: ${{ matrix.environment == 'prod' && secrets.LANGSMITH_GATEWAY_API_KEY_PROD || matrix.environment == 'staging' && secrets.LANGSMITH_GATEWAY_API_KEY_STAGING || '' }}
         run: |
           case "$ENVIRONMENT" in
             preview) backend="https://open-swe-preview-cc53e8fbe667565d843d0843f84ee92c.us.langgraph.app" ;;
@@ -99,9 +110,13 @@ jobs:
             prod) backend="https://open-swe-v3-f2834ffc0df05a46a10262a9690e8490.us.langgraph.app" ;;
             *) echo "::error::Unknown environment $ENVIRONMENT"; exit 1 ;;
           esac
+          if [[ -z "$LANGSMITH_GATEWAY_API_KEY" ]]; then
+            echo "::error::Set the LANGSMITH_GATEWAY_API_KEY_${ENVIRONMENT^^} secret to the backend's gateway key."
+            exit 1
+          fi
           # The project .env is forwarded as the deployment's secrets: the backend it calls back,
-          # and the secret they share.
-          printf 'OPEN_SWE_BACKEND_URL=%s\nMDA_SERVICE_SECRET=%s\n' "$backend" "$MDA_SERVICE_SECRET" >mda/.env
+          # the gateway key it calls models with, and the secret it signs its calls to the backend with.
+          printf 'OPEN_SWE_BACKEND_URL=%s\nLANGSMITH_GATEWAY_API_KEY=%s\nMDA_SERVICE_SECRET=%s\n' "$backend" "$LANGSMITH_GATEWAY_API_KEY" "$MDA_SERVICE_SECRET" >mda/.env
           uv run --project mda --locked --python 3.13 mda deploy mda \
             --name "open-swe-mda-$ENVIRONMENT" \
             --deployment-type prod \

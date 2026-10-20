@@ -997,7 +997,7 @@
             "anyOf": [
               {
                 "additionalProperties": {
-                  "$ref": "#/components/schemas/JsonValue-Input"
+                  "$ref": "#/components/schemas/JsonValue"
                 },
                 "type": "object"
               },
@@ -1154,7 +1154,7 @@
           },
           "params": {
             "additionalProperties": {
-              "$ref": "#/components/schemas/pydantic__types__JsonValue"
+              "$ref": "#/components/schemas/JsonValue"
             },
             "title": "Params",
             "type": "object"
@@ -1793,100 +1793,6 @@
           "enabled"
         ],
         "title": "EnabledReviewRepoUpdate",
-        "type": "object"
-      },
-      "EndpointAnswer": {
-        "additionalProperties": false,
-        "description": "The run an endpoint answers with: its input, and the run options a handler\nmay set, all JSON. An endpoint answers ``null`` (or HTTP 204) instead to start\nnothing.",
-        "properties": {
-          "context": {
-            "additionalProperties": {
-              "$ref": "#/components/schemas/managed_deepagents___channels__types__JsonValue"
-            },
-            "title": "Context",
-            "type": "object"
-          },
-          "input": {
-            "$ref": "#/components/schemas/managed_deepagents___channels__types__JsonValue"
-          },
-          "metadata": {
-            "additionalProperties": {
-              "$ref": "#/components/schemas/managed_deepagents___channels__types__JsonValue"
-            },
-            "title": "Metadata",
-            "type": "object"
-          },
-          "webhook": {
-            "title": "Webhook",
-            "type": "string"
-          }
-        },
-        "required": [
-          "input"
-        ],
-        "title": "EndpointAnswer",
-        "type": "object"
-      },
-      "EndpointEvent_str_dict_str__JsonValue__": {
-        "description": "The event a channel sends its endpoint, as the provider sent it.\n\n``EndpointEvent[Literal[\"AgentSessionEvent.created\"], LinearSessionCreatedPayload]``\ntypes one event key's payload; ``LinearEndpointRequest`` and\n``GitHubEndpointRequest`` are the unions of a channel's keys.",
-        "properties": {
-          "deliveryId": {
-            "title": "Deliveryid",
-            "type": "string"
-          },
-          "key": {
-            "title": "Key",
-            "type": "string"
-          },
-          "payload": {
-            "additionalProperties": {
-              "$ref": "#/components/schemas/JsonValue-Input"
-            },
-            "title": "Payload",
-            "type": "object"
-          }
-        },
-        "required": [
-          "key",
-          "deliveryId",
-          "payload"
-        ],
-        "title": "EndpointEvent",
-        "type": "object"
-      },
-      "EndpointThread": {
-        "description": "The conversation's thread an endpoint request is about.",
-        "properties": {
-          "channel": {
-            "$ref": "#/components/schemas/EndpointThreadChannel"
-          },
-          "id": {
-            "title": "Id",
-            "type": "string"
-          },
-          "interrupted": {
-            "title": "Interrupted",
-            "type": "boolean"
-          }
-        },
-        "required": [
-          "id",
-          "channel"
-        ],
-        "title": "EndpointThread",
-        "type": "object"
-      },
-      "EndpointThreadChannel": {
-        "properties": {
-          "name": {
-            "title": "Name",
-            "type": "string"
-          }
-        },
-        "required": [
-          "name"
-        ],
-        "title": "EndpointThreadChannel",
         "type": "object"
       },
       "ExcludedHunk": {
@@ -2552,7 +2458,7 @@
         ],
         "type": "string"
       },
-      "JsonValue-Input": {},
+      "JsonValue": {},
       "LabelChange": {
         "properties": {
           "name": {
@@ -2625,23 +2531,6 @@
           "body"
         ],
         "title": "LineComment",
-        "type": "object"
-      },
-      "LinearChannelCall": {
-        "description": "What MDA's Linear channel POSTs: the event it validated and its thread.\n\nMDA's ``EndpointRequest``, with its fields named here: pydantic doesn't apply a\ngeneric TypedDict's type arguments to a subclass, and the API schema gets a\nname of its own.",
-        "properties": {
-          "event": {
-            "$ref": "#/components/schemas/EndpointEvent_str_dict_str__JsonValue__"
-          },
-          "thread": {
-            "$ref": "#/components/schemas/EndpointThread"
-          }
-        },
-        "required": [
-          "event",
-          "thread"
-        ],
-        "title": "LinearChannelCall",
         "type": "object"
       },
       "LinearTrigger": {
@@ -2944,15 +2833,6 @@
         "title": "MCPOAuthUpdate",
         "type": "object"
       },
-      "MCPScope": {
-        "enum": [
-          "instance",
-          "workspace",
-          "user",
-          "managed"
-        ],
-        "type": "string"
-      },
       "MCPToolDescription": {
         "properties": {
           "description": {
@@ -2969,33 +2849,6 @@
           "name"
         ],
         "title": "MCPToolDescription",
-        "type": "object"
-      },
-      "MCPToolProvenance": {
-        "additionalProperties": false,
-        "description": "Credential-free provenance from the caller's authorized connection sources.",
-        "properties": {
-          "connection_name": {
-            "title": "Connection Name",
-            "type": "string"
-          },
-          "overridden_scopes": {
-            "items": {
-              "$ref": "#/components/schemas/MCPScope"
-            },
-            "title": "Overridden Scopes",
-            "type": "array"
-          },
-          "scope": {
-            "$ref": "#/components/schemas/MCPScope"
-          }
-        },
-        "required": [
-          "connection_name",
-          "scope",
-          "overridden_scopes"
-        ],
-        "title": "MCPToolProvenance",
         "type": "object"
       },
       "ManagedConnectResponse": {
@@ -3239,7 +3092,7 @@
             "anyOf": [
               {
                 "items": {
-                  "$ref": "#/components/schemas/pydantic__types__JsonValue"
+                  "$ref": "#/components/schemas/JsonValue"
                 },
                 "type": "array"
               },
@@ -3978,7 +3831,7 @@
         "properties": {
           "annotations": {
             "items": {
-              "$ref": "#/components/schemas/pydantic__types__JsonValue"
+              "$ref": "#/components/schemas/JsonValue"
             },
             "title": "Annotations",
             "type": "array"
@@ -4598,17 +4451,6 @@
               }
             ],
             "title": "Pr Review Links"
-          },
-          "prefer_tools_in_sandbox": {
-            "anyOf": [
-              {
-                "type": "boolean"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Prefer Tools In Sandbox"
           },
           "recent_thread_context_enabled": {
             "default": false,
@@ -5382,6 +5224,11 @@
       },
       "RequestResult": {
         "properties": {
+          "auto_merge": {
+            "default": true,
+            "title": "Auto Merge",
+            "type": "boolean"
+          },
           "channel": {
             "default": "",
             "title": "Channel",
@@ -5445,7 +5292,7 @@
             "anyOf": [
               {
                 "additionalProperties": {
-                  "$ref": "#/components/schemas/JsonValue-Input"
+                  "$ref": "#/components/schemas/JsonValue"
                 },
                 "type": "object"
               },
@@ -5470,7 +5317,7 @@
             "anyOf": [
               {
                 "additionalProperties": {
-                  "$ref": "#/components/schemas/JsonValue-Input"
+                  "$ref": "#/components/schemas/JsonValue"
                 },
                 "type": "object"
               },
@@ -5627,7 +5474,7 @@
           },
           "tools": {
             "items": {
-              "$ref": "#/components/schemas/pydantic__types__JsonValue"
+              "$ref": "#/components/schemas/JsonValue"
             },
             "title": "Tools",
             "type": "array"
@@ -7281,13 +7128,6 @@
         "title": "ThreadResolveBody",
         "type": "object"
       },
-      "ToolArguments": {
-        "additionalProperties": {
-          "$ref": "#/components/schemas/JsonValue-Input"
-        },
-        "title": "ToolArguments",
-        "type": "object"
-      },
       "ToolCallView": {
         "additionalProperties": false,
         "properties": {
@@ -7381,84 +7221,6 @@
           "ended_at"
         ],
         "title": "ToolCallView",
-        "type": "object"
-      },
-      "ToolDescription": {
-        "properties": {
-          "description": {
-            "title": "Description",
-            "type": "string"
-          },
-          "mcp_provenance": {
-            "anyOf": [
-              {
-                "$ref": "#/components/schemas/MCPToolProvenance"
-              },
-              {
-                "type": "null"
-              }
-            ]
-          },
-          "name": {
-            "title": "Name",
-            "type": "string"
-          },
-          "parameters": {
-            "additionalProperties": {
-              "$ref": "#/components/schemas/pydantic__types__JsonValue"
-            },
-            "title": "Parameters",
-            "type": "object"
-          }
-        },
-        "required": [
-          "name",
-          "description",
-          "parameters"
-        ],
-        "title": "ToolDescription",
-        "type": "object"
-      },
-      "ToolList": {
-        "properties": {
-          "tools": {
-            "items": {
-              "$ref": "#/components/schemas/ToolDescription"
-            },
-            "title": "Tools",
-            "type": "array"
-          },
-          "total": {
-            "title": "Total",
-            "type": "integer"
-          }
-        },
-        "required": [
-          "tools",
-          "total"
-        ],
-        "title": "ToolList",
-        "type": "object"
-      },
-      "ToolResult": {
-        "properties": {
-          "content": {
-            "$ref": "#/components/schemas/pydantic__types__JsonValue"
-          },
-          "status": {
-            "enum": [
-              "success",
-              "error"
-            ],
-            "title": "Status",
-            "type": "string"
-          }
-        },
-        "required": [
-          "status",
-          "content"
-        ],
-        "title": "ToolResult",
         "type": "object"
       },
       "TranscriptTurnPage": {
@@ -7846,7 +7608,7 @@
           },
           "create_params": {
             "additionalProperties": {
-              "$ref": "#/components/schemas/pydantic__types__JsonValue"
+              "$ref": "#/components/schemas/JsonValue"
             },
             "title": "Create Params",
             "type": "object"
@@ -8158,7 +7920,7 @@
           },
           "create_params": {
             "additionalProperties": {
-              "$ref": "#/components/schemas/JsonValue-Input"
+              "$ref": "#/components/schemas/JsonValue"
             },
             "title": "Create Params",
             "type": "object"
@@ -8600,6 +8362,18 @@
             ],
             "title": "Human Review Auto Assign Minutes"
           },
+          "human_review_auto_merge_enabled": {
+            "agent_feature_flag": true,
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Human Review Auto Merge Enabled"
+          },
           "managed_tools_gateway_id": {
             "anyOf": [
               {
@@ -8737,7 +8511,7 @@
             "anyOf": [
               {
                 "additionalProperties": {
-                  "$ref": "#/components/schemas/JsonValue-Input"
+                  "$ref": "#/components/schemas/JsonValue"
                 },
                 "type": "object"
               },
@@ -8895,48 +8669,16 @@
         "title": "WorkspaceUpdate",
         "type": "object"
       },
-      "managed_deepagents___channels__types__JsonValue": {
-        "anyOf": [
-          {
-            "type": "boolean"
-          },
-          {
-            "type": "integer"
-          },
-          {
-            "type": "number"
-          },
-          {
-            "type": "string"
-          },
-          {
-            "items": {
-              "$ref": "#/components/schemas/managed_deepagents___channels__types__JsonValue"
-            },
-            "type": "array"
-          },
-          {
-            "additionalProperties": {
-              "$ref": "#/components/schemas/managed_deepagents___channels__types__JsonValue"
-            },
-            "type": "object"
-          },
-          {
-            "type": "null"
-          }
-        ]
-      },
       "openswe__transcript__events__JsonObject": {
         "additionalProperties": {
-          "$ref": "#/components/schemas/pydantic__types__JsonValue"
+          "$ref": "#/components/schemas/JsonValue"
         },
         "type": "object"
       },
       "openswe__utils__json_types__JsonObject": {
         "additionalProperties": true,
         "type": "object"
-      },
-      "pydantic__types__JsonValue": {}
+      }
     },
     "securitySchemes": {
       "DashboardSession": {
@@ -16774,73 +16516,6 @@
         ]
       }
     },
-    "/dashboard/api/sandbox-tools": {
-      "get": {
-        "operationId": "list_tools_dashboard_api_sandbox_tools_get",
-        "parameters": [
-          {
-            "in": "query",
-            "name": "q",
-            "required": false,
-            "schema": {
-              "default": "",
-              "maxLength": 512,
-              "title": "Q",
-              "type": "string"
-            }
-          },
-          {
-            "in": "query",
-            "name": "offset",
-            "required": false,
-            "schema": {
-              "default": 0,
-              "minimum": 0,
-              "title": "Offset",
-              "type": "integer"
-            }
-          },
-          {
-            "in": "query",
-            "name": "limit",
-            "required": false,
-            "schema": {
-              "default": 100,
-              "maximum": 100,
-              "minimum": 1,
-              "title": "Limit",
-              "type": "integer"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ToolList"
-                }
-              }
-            },
-            "description": "Successful Response"
-          },
-          "422": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            },
-            "description": "Validation Error"
-          }
-        },
-        "summary": "List Tools",
-        "tags": [
-          "sandbox-tools"
-        ]
-      }
-    },
     "/dashboard/api/sandbox-tools/background-tasks/{task_id}/complete": {
       "post": {
         "operationId": "background_task_complete_dashboard_api_sandbox_tools_background_tasks__task_id__complete_post",
@@ -16913,127 +16588,6 @@
         ]
       }
     },
-    "/dashboard/api/sandbox-tools/invoke/{tool_name}": {
-      "post": {
-        "operationId": "invoke_tool_dashboard_api_sandbox_tools_invoke__tool_name__post",
-        "parameters": [
-          {
-            "in": "path",
-            "name": "tool_name",
-            "required": true,
-            "schema": {
-              "maxLength": 256,
-              "minLength": 1,
-              "title": "Tool Name",
-              "type": "string"
-            }
-          }
-        ],
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/ToolArguments"
-              }
-            }
-          },
-          "required": true
-        },
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ToolResult"
-                }
-              }
-            },
-            "description": "Successful Response"
-          },
-          "422": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            },
-            "description": "Validation Error"
-          }
-        },
-        "summary": "Invoke Tool",
-        "tags": [
-          "sandbox-tools"
-        ]
-      }
-    },
-    "/dashboard/api/sandbox-tools/list": {
-      "get": {
-        "operationId": "list_tools_dashboard_api_sandbox_tools_list_get",
-        "parameters": [
-          {
-            "in": "query",
-            "name": "q",
-            "required": false,
-            "schema": {
-              "default": "",
-              "maxLength": 512,
-              "title": "Q",
-              "type": "string"
-            }
-          },
-          {
-            "in": "query",
-            "name": "offset",
-            "required": false,
-            "schema": {
-              "default": 0,
-              "minimum": 0,
-              "title": "Offset",
-              "type": "integer"
-            }
-          },
-          {
-            "in": "query",
-            "name": "limit",
-            "required": false,
-            "schema": {
-              "default": 100,
-              "maximum": 100,
-              "minimum": 1,
-              "title": "Limit",
-              "type": "integer"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ToolList"
-                }
-              }
-            },
-            "description": "Successful Response"
-          },
-          "422": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            },
-            "description": "Validation Error"
-          }
-        },
-        "summary": "List Tools",
-        "tags": [
-          "sandbox-tools"
-        ]
-      }
-    },
     "/dashboard/api/sandbox-tools/monitors/{monitor_id}/sync": {
       "post": {
         "description": "A monitor's runner has new events or has ended; a 5xx makes a final sync retry.",
@@ -17066,73 +16620,6 @@
           }
         },
         "summary": "Monitor Sync",
-        "tags": [
-          "sandbox-tools"
-        ]
-      }
-    },
-    "/dashboard/api/sandbox-tools/search": {
-      "get": {
-        "operationId": "list_tools_dashboard_api_sandbox_tools_search_get",
-        "parameters": [
-          {
-            "in": "query",
-            "name": "q",
-            "required": false,
-            "schema": {
-              "default": "",
-              "maxLength": 512,
-              "title": "Q",
-              "type": "string"
-            }
-          },
-          {
-            "in": "query",
-            "name": "offset",
-            "required": false,
-            "schema": {
-              "default": 0,
-              "minimum": 0,
-              "title": "Offset",
-              "type": "integer"
-            }
-          },
-          {
-            "in": "query",
-            "name": "limit",
-            "required": false,
-            "schema": {
-              "default": 100,
-              "maximum": 100,
-              "minimum": 1,
-              "title": "Limit",
-              "type": "integer"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ToolList"
-                }
-              }
-            },
-            "description": "Successful Response"
-          },
-          "422": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            },
-            "description": "Validation Error"
-          }
-        },
-        "summary": "List Tools",
         "tags": [
           "sandbox-tools"
         ]
@@ -21653,53 +21140,6 @@
         "summary": "Health Check"
       }
     },
-    "/linear/channel/events": {
-      "post": {
-        "description": "The run a Linear event starts, or ``None`` to start nothing.\n\nAn agent session turn starts the run it prepares; ``None`` there declines, and\nthe channel tells the session. Issue events run Linear automations.",
-        "operationId": "linear_channel_event_linear_channel_events_post",
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/LinearChannelCall"
-              }
-            }
-          },
-          "required": true
-        },
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "anyOf": [
-                    {
-                      "$ref": "#/components/schemas/EndpointAnswer"
-                    },
-                    {
-                      "type": "null"
-                    }
-                  ],
-                  "title": "Response Linear Channel Event Linear Channel Events Post"
-                }
-              }
-            },
-            "description": "Successful Response"
-          },
-          "422": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            },
-            "description": "Validation Error"
-          }
-        },
-        "summary": "Linear Channel Event"
-      }
-    },
     "/webhooks/github": {
       "post": {
         "description": "Handle GitHub webhooks for issue and PR events that tag @open-swe.",
@@ -21721,6 +21161,50 @@
           }
         },
         "summary": "Github Webhook"
+      }
+    },
+    "/webhooks/linear": {
+      "get": {
+        "description": "Verify endpoint for Linear webhook setup.",
+        "operationId": "linear_webhook_verify_webhooks_linear_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": {
+                    "type": "string"
+                  },
+                  "title": "Response Linear Webhook Verify Webhooks Linear Get",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Linear Webhook Verify"
+      },
+      "post": {
+        "description": "Handle Linear webhooks.\n\nTriggers a new LangGraph run when an issue gets the 'open-swe' label added.",
+        "operationId": "linear_webhook_webhooks_linear_post",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": {
+                    "type": "string"
+                  },
+                  "title": "Response Linear Webhook Webhooks Linear Post",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Linear Webhook"
       }
     },
     "/webhooks/rollout": {

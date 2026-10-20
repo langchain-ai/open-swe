@@ -1211,8 +1211,8 @@ wheels = [
 
 [[package]]
 name = "managed-deepagents"
-version = "0.10.0.dev14"
-source = { registry = "https://pypi.org/simple" }
+version = "0.9.3"
+source = { editable = "../vendor/managed-deepagents-sdk/packages/pypi" }
 dependencies = [
     { name = "deepagents" },
     { name = "httpx" },
@@ -1224,13 +1224,37 @@ dependencies = [
     { name = "pydantic" },
     { name = "typing-extensions" },
 ]
-wheels = [
-    { url = "https://files.pythonhosted.org/packages/30/a9/3bff895a16a6cda6d22777acfc5b5876919736b0234fe9d8490d2828e427/managed_deepagents-0.10.0.dev14-py3-none-macosx_10_12_x86_64.whl", hash = "sha256:e6b2738d1546ea2a709667a3a27cfb46dd03981361bada597174100ea1c88723", size = 2826472, upload-time = "2026-10-19T20:52:02.247Z" },
-    { url = "https://files.pythonhosted.org/packages/26/aa/1ee05c665f90f2a0e9bff157f779d27d896c96da20aa9acd05b3f4ad118c/managed_deepagents-0.10.0.dev14-py3-none-macosx_11_0_arm64.whl", hash = "sha256:e0e81eaae2108f7b0a8990b618a61b4d39fb6d0214860e4168012b9a66776e78", size = 2607764, upload-time = "2026-10-19T20:52:04.642Z" },
-    { url = "https://files.pythonhosted.org/packages/1f/8f/e376559ea8af04e9487c7bb4ab3a4ea7dcb0c5a29712075eedbd5928fdba/managed_deepagents-0.10.0.dev14-py3-none-manylinux2014_aarch64.whl", hash = "sha256:e181025b56e932c7772034d0014a8ee9ff5877d2af1c7a88a85c5026bd2819a8", size = 2900317, upload-time = "2026-10-19T20:52:06.351Z" },
-    { url = "https://files.pythonhosted.org/packages/7c/54/a4a44c30d193c0d0cd75a66915c585a64893e589a788bec1423f8f785683/managed_deepagents-0.10.0.dev14-py3-none-manylinux2014_x86_64.whl", hash = "sha256:7d5fe8fc41beeff9230f3717e0f790c6836ec263283f0e28e1b9b18684b3e4d1", size = 3165566, upload-time = "2026-10-19T20:52:08.014Z" },
-    { url = "https://files.pythonhosted.org/packages/53/f9/16826a465b1caf803e01b70e7e4b400a15652818d7a53b6df59f956e9baa/managed_deepagents-0.10.0.dev14-py3-none-win_amd64.whl", hash = "sha256:c1772967b5141d45bdc3c299a0702c08164b02e9f5b3fedb0668850e9b875608", size = 2598762, upload-time = "2026-10-19T20:52:09.512Z" },
-    { url = "https://files.pythonhosted.org/packages/00/c6/3abb32dbc40fab33906cb14d137bce598df5f89592e1cdb6d418a2a76bf6/managed_deepagents-0.10.0.dev14-py3-none-win_arm64.whl", hash = "sha256:5797087396af60c9912d5de1cd6ace8b2a07324c11fa4d1af819fd624c091459", size = 2471853, upload-time = "2026-10-19T20:52:11.361Z" },
+
+[package.metadata]
+requires-dist = [
+    { name = "cryptography", marker = "extra == 'test'", specifier = ">=50.0.1" },
+    { name = "deepagents", specifier = ">=0.7.13,<1" },
+    { name = "fastmcp", marker = "extra == 'test'", specifier = ">=4.0.10,<5" },
+    { name = "httpx", specifier = ">=0.28.1,<1" },
+    { name = "langchain", specifier = ">=1.4.6,<2" },
+    { name = "langchain", extras = ["mcp"], marker = "extra == 'test'", specifier = ">=1.4.6,<2" },
+    { name = "langchain-core", specifier = ">=1.6.2,<2" },
+    { name = "langgraph", specifier = ">=1.2.15,<2" },
+    { name = "langgraph-prebuilt", specifier = ">=1.1.1,<2" },
+    { name = "langgraph-sdk", specifier = ">=0.4.6,<0.5" },
+    { name = "mcp", marker = "extra == 'test'", specifier = ">=2.2.0,<3" },
+    { name = "pydantic", specifier = ">=2.7.4,<2.15" },
+    { name = "pyjwt", extras = ["crypto"], marker = "extra == 'test'", specifier = ">=2.13.0" },
+    { name = "pytest", marker = "extra == 'test'", specifier = ">=9.1.1" },
+    { name = "starlette", marker = "extra == 'test'", specifier = ">=1.6.0" },
+    { name = "typing-extensions", specifier = ">=4.12.2,<5" },
+    { name = "uvicorn", marker = "extra == 'test'", specifier = ">=0.54.0,<1" },
+]
+provides-extras = ["test"]
+
+[package.metadata.requires-dev]
+lint = [{ name = "ruff", specifier = ">=0.16.7,<0.18.0" }]
+typing = [
+    { name = "basedpyright", specifier = ">=1.40.1,<2.0.0" },
+    { name = "fastmcp", specifier = ">=4.0.10,<5" },
+    { name = "langchain", extras = ["mcp"], specifier = ">=1.4.6,<2" },
+    { name = "mcp", specifier = ">=2.2.0,<3" },
+    { name = "ty", specifier = ">=0.0.80,<0.0.88" },
 ]
 
 [[package]]
@@ -1327,7 +1351,7 @@ requires-dist = [
     { name = "langchain-openai", specifier = ">=1.7.2,<2.0.0" },
     { name = "langchain-quickjs", specifier = ">=0.3.9,<0.4.0" },
     { name = "langsmith", specifier = ">=0.14.11" },
-    { name = "managed-deepagents", specifier = "==0.10.0.dev14" },
+    { name = "managed-deepagents", editable = "../vendor/managed-deepagents-sdk/packages/pypi" },
     { name = "mcp", specifier = ">=2.2.0,<3" },
     { name = "pydantic", specifier = ">=2.11" },
 ]
