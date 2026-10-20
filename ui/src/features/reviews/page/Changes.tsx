@@ -432,10 +432,7 @@ export const Changes = memo(function Changes({ pr }: { pr: PullRequestRef }) {
         if (!container) return
         const atEnd =
           scrollTop + container.clientHeight >= container.scrollHeight - 2
-        // At the bottom the last item can't reach the top edge, so it counts once it's on screen.
-        const edge = atEnd
-          ? container.getBoundingClientRect().bottom
-          : container.getBoundingClientRect().top + FILE_HEADER_HEIGHT
+        const edge = container.getBoundingClientRect().top + FILE_HEADER_HEIGHT
         let active: DiffEntry | null = null
         let best = -Infinity
         for (const rendered of viewer.getRenderedItems()) {

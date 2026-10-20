@@ -177,10 +177,14 @@ export function isCollapsed(
   return isRead(state.viewed, entry) !== state.collapsed.has(entry.readKey)
 }
 
-/** The walkthrough step the reader is in. */
+/**
+ * The walkthrough step the reader is in. At the bottom of the page that's the last step,
+ * even though the entry under the top edge, which keyboard actions use, may be earlier.
+ */
 export function activeStep(
-  state: Pick<ReviewPageState, "entryOrder" | "activeEntry">
+  state: Pick<ReviewPageState, "entryOrder" | "activeEntry" | "atEnd">
 ): number | null {
+  if (state.atEnd) return state.entryOrder.at(-1)?.step?.index ?? null
   return (
     state.entryOrder.find((entry) => entry.id === state.activeEntry)?.step
       ?.index ?? null
@@ -195,8 +199,9 @@ export function isPassed(
   >,
   step: { index: number; count: number }
 ): boolean {
-  if (!state.visitedSteps.has(step.index)) return false
+  // Reaching the bottom of the page scrolls the last step fully past the reader.
   if (state.atEnd && step.index === step.count) return true
+  if (!state.visitedSteps.has(step.index)) return false
   return (activeStep(state) ?? 0) > step.index
 }
 
