@@ -169,8 +169,8 @@ def update(upstream: Upstream, ref: str | None, scratch: Path) -> str:
     new = upstream.tree(sha)
     tree = scratch / "updated"
     shutil.copytree(new, tree)
+    # Each path someone must look at, with what happened to it.
     conflicts: list[str] = []
-    notes: list[str] = []
     if DEST.exists():
         old_files = files(upstream.tree(recorded_sha()))
         new_files = files(new)
@@ -181,11 +181,12 @@ def update(upstream: Upstream, ref: str | None, scratch: Path) -> str:
             if mine is not None and before is not None and mine.read_bytes() == before.read_bytes():
                 continue  # untouched: upstream's new version, or its deletion, stands
             if mine is None and before is not None:
-                # We deleted it; keep it deleted unless upstream changed it since.
-                if after is not None:
+                # We deleted it. It stays deleted unless upstream changed it since: then
+                # upstream's new version comes back, to delete again or keep.
+                if after is not None and after.read_bytes() == before.read_bytes():
                     (tree / path).unlink()
-                    if after.read_bytes() != before.read_bytes():
-                        notes.append(f"{path}: we deleted it, and upstream has since changed it")
+                elif after is not None:
+                    conflicts.append(f"{path}: we deleted it, but upstream changed it since")
                 continue
             if mine is None:
                 continue
@@ -195,11 +196,11 @@ def update(upstream: Upstream, ref: str | None, scratch: Path) -> str:
                 # Our addition, or a file we changed that upstream has since deleted: ours.
                 shutil.copyfile(mine, target)
                 if before is not None:
-                    notes.append(f"{path}: upstream deleted it; our changed copy is kept")
+                    conflicts.append(f"{path}: upstream deleted it; our changed copy is kept")
                 continue
             shutil.copyfile(mine, target)
             if _merge(target, before, after, label):
-                conflicts.append(path)
+                conflicts.append(f"{path}: conflict markers where both sides changed it")
     # Keep build outputs, so `make mda-cli` need not start over.
     for output in BUILD_OUTPUTS:
         if (DEST / output).exists():
@@ -208,13 +209,11 @@ def update(upstream: Upstream, ref: str | None, scratch: Path) -> str:
     shutil.rmtree(DEST, ignore_errors=True)
     DEST.parent.mkdir(parents=True, exist_ok=True)
     shutil.move(tree, DEST)
-    for note in notes:
-        print(note)
     if conflicts:
         raise VendorError(
-            f"Updated to {sha}, but upstream changed lines we changed too; resolve the conflict "
-            "markers in:\n"
-            + "\n".join(f"  vendor/managed-deepagents-sdk/{path}" for path in conflicts)
+            f"Updated to {sha}, but upstream and our changes collide; settle each of these in "
+            "vendor/managed-deepagents-sdk:\n"
+            + "\n".join(f"  {conflict}" for conflict in conflicts)
             + "\nthen run `cd mda && uv lock`."
         )
     subprocess.run(["uv", "lock", "--quiet"], cwd=ROOT / "mda", check=True)
