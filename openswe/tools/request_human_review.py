@@ -67,7 +67,7 @@ async def _repository_refusal(pr_ref: GitHubPrRef, cfg: RunConfig) -> str | None
 @expose_mcp()
 @audit_tool()
 async def request_human_review(
-    pr_url: str, inline_summary: str, channel: str = ""
+    pr_url: str, inline_summary: str, channel: str = "", auto_merge: bool | None = None
 ) -> dict[str, Any]:
     """Implement the `request_human_review` tool."""
     pr_ref = parse_github_pr_url(pr_url)
@@ -81,7 +81,7 @@ async def request_human_review(
     if refusal := await _repository_refusal(pr_ref, cfg):
         return _failure(refusal)
     if caller := cfg.mcp_caller:
-        return await _request_for_mcp_caller(pr_ref, caller, inline_summary, channel)
+        return await _request_for_mcp_caller(pr_ref, caller, inline_summary, channel, auto_merge)
     login = cfg.github_login or ""
     thread_id = cfg.thread_id or ""
     own_channel, own_thread = await run_slack_location(cfg, thread_id)
@@ -92,7 +92,9 @@ async def request_human_review(
         slack_channel_id=own_channel,
         slack_thread_ts=own_thread,
     )
-    result = await request_review(pr_ref, origin, channel=channel, inline_summary=inline_summary)
+    result = await request_review(
+        pr_ref, origin, channel=channel, inline_summary=inline_summary, auto_merge=auto_merge
+    )
     if not result.success:
         return _failure(result.error)
     if result.summary_updated:
@@ -101,24 +103,38 @@ async def request_human_review(
         posted = "This pull request already has an open review request; no new card was posted."
     else:
         posted = "The review card is posted."
+    merge_note = (
+        "It merges on its own once the review and readiness requirements are met."
+        if result.auto_merge
+        else "Auto-merge is off; a person must merge it."
+    )
     return {
         "success": True,
+        "auto_merge": result.auto_merge,
         "request_id": result.request_id,
         "slack_channel_id": result.channel,
-        "next": f"{posted} People sign up from the card and it merges on its own once they "
-        "approve. You are woken if nobody signs up. Do not announce or link the card; do not poll.",
+        "next": f"{posted} People sign up from the card. {merge_note} "
+        "You are woken if nobody signs up. Do not announce or link the card; do not poll.",
     }
 
 
 async def _request_for_mcp_caller(
-    pr_ref: GitHubPrRef, login: str, inline_summary: str, channel: str
+    pr_ref: GitHubPrRef,
+    login: str,
+    inline_summary: str,
+    channel: str,
+    auto_merge: bool | None = None,
 ) -> dict[str, Any]:
     """Request review as a person calling over MCP, who has no thread to point at the card."""
     requester = await User.for_login("github", login)
     if requester is None:
         return _failure("Sign in to the Open SWE dashboard before requesting a review")
     result = await request_review(
-        pr_ref, Origin(requester=requester), channel=channel, inline_summary=inline_summary
+        pr_ref,
+        Origin(requester=requester),
+        channel=channel,
+        inline_summary=inline_summary,
+        auto_merge=auto_merge,
     )
     if not result.success:
         return _failure(result.error)
@@ -133,12 +149,18 @@ async def _request_for_mcp_caller(
         posted = "The review card is posted and the person was sent a Slack DM pointing to it."
     else:
         posted = "The review card is posted."
+    merge_note = (
+        "It merges on its own once the review and readiness requirements are met."
+        if result.auto_merge
+        else "Auto-merge is off; a person must merge it."
+    )
     return {
         "success": True,
+        "auto_merge": result.auto_merge,
         "request_id": result.request_id,
         "permalink": result.permalink,
-        "next": f"{posted} People sign up from the card and it merges on its own once they "
-        "approve. If nobody signs up, Open SWE picks a reviewer. Do not poll.",
+        "next": f"{posted} People sign up from the card. {merge_note} "
+        "If nobody signs up, Open SWE picks a reviewer. Do not poll.",
     }
 
 

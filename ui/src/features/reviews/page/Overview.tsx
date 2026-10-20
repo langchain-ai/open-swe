@@ -4,7 +4,7 @@ import { useCallback, useLayoutEffect, useRef, useState } from "react"
 import type { ReactNode } from "react"
 
 import { reviewImageProxyUrl, type ReviewUserRef } from "@/lib/api"
-import { cn, formatRelativeTime } from "@/lib/utils"
+import { cn } from "@/lib/utils"
 import { Markdown } from "@/features/agents/components/chat/Markdown"
 import { Skeleton } from "@langchain/macaw-components/Skeleton"
 import { HumanInputText } from "@/features/reviews/components/HumanInputCard"
@@ -14,6 +14,7 @@ import { ProfileLink } from "./notes/Byline"
 import { AgentMark } from "./AgentMark"
 import { reviewQueries, type PullRequestRef } from "./queries"
 import { StandingPanel } from "./Standing"
+import { RelativeTimestamp } from "./RelativeTimestamp"
 
 const CLAMP_PX = 320
 
@@ -137,8 +138,7 @@ function Description({
           rel="noreferrer"
           className="hover:text-primary hover:underline"
         >
-          opened this{" "}
-          {createdAt ? formatRelativeTime(new Date(createdAt).getTime()) : ""}
+          opened this {createdAt && <RelativeTimestamp value={createdAt} />}
         </a>
         <span className="ml-auto">{labels}</span>
       </header>

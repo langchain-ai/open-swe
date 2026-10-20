@@ -36,6 +36,7 @@ import { ManagedToolsConnectionCard } from "@/features/agents/components/chat/Ma
 import { SqlResultTable } from "@/features/agents/components/chat/SqlResultTable"
 import { SubagentGroup } from "@/features/agents/components/subagents"
 import { formatElapsed } from "@/lib/utils"
+import { formatHoverTimestamp } from "@/features/agents/lib/messageTimestamps"
 
 /**
  * How many entries of a work group stay visible while it is collapsed. One
@@ -389,9 +390,21 @@ export function AgentTurn({
   return (
     <div className="group/turn my-space-2 min-w-0 space-y-space-2">
       {segments.map((segment, index) =>
-        segment.type === "reply"
-          ? renderItem(segment.item)
-          : renderWorkSegment(segment, index)
+        segment.type === "reply" ? (
+          <div
+            key={segment.item.key}
+            title={formatHoverTimestamp(
+              replyTimestamp(segment) ??
+                (!isStreaming && index === segments.length - 1
+                  ? turnEnd
+                  : undefined)
+            )}
+          >
+            {renderItem(segment.item)}
+          </div>
+        ) : (
+          renderWorkSegment(segment, index)
+        )
       )}
 
       <div className="mt-space-1 flex items-center gap-space-1">

@@ -22,10 +22,11 @@ from openswe.prompts import prompt
 from openswe.sandboxes.tool_models import ToolDescription
 
 _json = TypeAdapter(JsonValue)
-# Task workers share this channel with their coordinator, so task coordination stays model-only.
-EXCLUDED_TOOLS = frozenset(
-    {"load_integration_tools", "spawn_worker", "control_worker", "message_task_thread"}
-)
+# Every surface lists the integration tools themselves, so none offers their loader.
+EXCLUDED_TOOLS = frozenset({"load_integration_tools"})
+# Task workers share the sandbox's tool channel with their coordinator, so task
+# coordination stays the model's: a surface serving the sandbox never offers it.
+MODEL_ONLY_TOOLS = frozenset({"spawn_worker", "control_worker", "message_task_thread"})
 
 
 def tool_parameters(tool: BaseTool) -> dict[str, JsonValue]:
@@ -90,6 +91,8 @@ class ToolSurface:
     subagents: Sequence[SurfaceSubagent] = ()
     # Whether the graph's core tools it seldom needs belong in a runtime's code mode.
     code_mode: bool = False
+    # Whether a model loop running elsewhere calls these tools, rather than the sandbox.
+    for_model: bool = False
 
     async def prepare(self, state: Mapping[str, object]) -> None:
         if self.graph is None:
@@ -102,7 +105,9 @@ class ToolSurface:
             integrations = await self.dynamic.catalog_tools()
             self.integration_names = [tool.name for tool in integrations]
             tools.update({tool.name: tool for tool in integrations})
-        excluded = self.excluded | EXCLUDED_TOOLS
+        excluded = (
+            self.excluded | EXCLUDED_TOOLS | (frozenset() if self.for_model else MODEL_ONLY_TOOLS)
+        )
         self.tools = {name: tool for name, tool in tools.items() if name not in excluded}
 
     def catalog(self) -> list[ToolDescription]:

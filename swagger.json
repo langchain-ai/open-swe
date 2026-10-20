@@ -4407,18 +4407,6 @@
             ],
             "title": "Experimental Background Callbacks"
           },
-          "experimental_mcp_ptc": {
-            "agent_feature_flag": true,
-            "anyOf": [
-              {
-                "type": "boolean"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Experimental Mcp Ptc"
-          },
           "experimental_monitor": {
             "agent_feature_flag": true,
             "anyOf": [
@@ -5236,6 +5224,11 @@
       },
       "RequestResult": {
         "properties": {
+          "auto_merge": {
+            "default": true,
+            "title": "Auto Merge",
+            "type": "boolean"
+          },
           "channel": {
             "default": "",
             "title": "Channel",
@@ -8368,6 +8361,18 @@
               }
             ],
             "title": "Human Review Auto Assign Minutes"
+          },
+          "human_review_auto_merge_enabled": {
+            "agent_feature_flag": true,
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Human Review Auto Merge Enabled"
           },
           "managed_tools_gateway_id": {
             "anyOf": [

@@ -38,11 +38,6 @@ function ExperimentsPage() {
           description="Give your agent a monitor tool: it runs a long-lived sandbox command and is woken with each line its filter picks out, such as errors in a log. Applies on the next run."
         />
         <ProfileSwitchRow
-          field="experimental_mcp_ptc"
-          label="Code Mode (Experimental)"
-          description="Let the agent call integrations and supported tools from JavaScript, combining calls and filtering results before they enter its context. Not available for local runs. Applies on the next run."
-        />
-        <ProfileSwitchRow
           field="experimental_act_as_approval"
           label="Approve PRs opened as you"
           description={

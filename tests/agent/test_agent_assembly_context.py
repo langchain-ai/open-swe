@@ -16,7 +16,7 @@ from unittest.mock import ANY, AsyncMock, MagicMock, patch
 
 import langgraph_sdk
 import pytest
-from langchain.agents.middleware.types import ModelRequest, ModelResponse
+from langchain.agents.middleware.types import AgentMiddleware, ModelRequest, ModelResponse
 from langchain_core.language_models import BaseChatModel
 from langchain_core.messages import AIMessage, HumanMessage, ToolMessage
 from langgraph.graph.state import RunnableConfig
@@ -74,6 +74,39 @@ async def test_public_agent_excludes_personal_skills_and_tools(saved_thread_scop
     assert any(isinstance(item, WorkspaceSkillsMiddleware) for item in middleware)
     subagents = cast(list[dict], captured["subagents"])
     assert any(isinstance(item, WorkspaceSkillsMiddleware) for item in subagents[0]["middleware"])
+
+
+async def test_remote_agent_discovers_personal_skills(monkeypatch: pytest.MonkeyPatch) -> None:
+    from deepagents.middleware.skills import SkillsMiddleware
+    from langgraph.runtime import Runtime
+
+    from openswe.remote_runtime.graph import RunSession
+    from openswe.sandboxes.tool_runtime import ToolSurface
+    from openswe.skill_store.store import _record
+
+    monkeypatch.setattr(
+        "openswe.skill_store.backend.agent_skills",
+        AsyncMock(
+            side_effect=lambda login: (
+                [_record("personal-workflow", "A workflow", "Do it.")] if login else []
+            )
+        ),
+    )
+    captured = await _capture_create_deep_agent_kwargs()
+    middleware = [
+        item
+        for item in cast(list[object], captured["middleware"])
+        if isinstance(item, SkillsMiddleware)
+    ]
+    session = RunSession(
+        ToolSurface(middleware=cast(list[AgentMiddleware], middleware)), {}, None, started_here=True
+    )
+    state: dict[str, object] = {"messages": []}
+    with patch("openswe.remote_runtime.graph.get_config", return_value=_base_config()):
+        prepared = await session.run_phase("before_agent", state, Runtime())
+    shaped = await session.model_call({**state, **prepared.update}, Runtime())
+
+    assert "personal-workflow" in shaped.system_prompt
 
 
 @pytest.mark.asyncio
