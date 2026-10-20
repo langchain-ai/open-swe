@@ -1,4 +1,9 @@
-import { ApiError, ProtocolError } from "./api.ts"
+import {
+  ApiError,
+  ProtocolError,
+  type CoordinatorThread,
+  type TaskActivity,
+} from "./api.ts"
 import { CredentialError } from "./credentials.ts"
 import {
   errorMessage,
@@ -226,6 +231,10 @@ export interface FollowOptions {
   now?: () => number
 }
 
+function wait(ms: number): Promise<void> {
+  return new Promise<void>((done) => setTimeout(done, ms))
+}
+
 function reconnectable(cause: unknown): boolean {
   if (cause instanceof ApiError) return retryableStatus(cause.status)
   return !(cause instanceof ProtocolError || cause instanceof CredentialError)
@@ -241,9 +250,7 @@ export async function followRun(
   runId: string | null,
   options: FollowOptions = {}
 ): Promise<RunOutcome> {
-  const sleep =
-    options.sleep ??
-    ((ms: number) => new Promise<void>((done) => setTimeout(done, ms)))
+  const sleep = options.sleep ?? wait
   const now = options.now ?? Date.now
   let attempts = 0
   let backoff = MIN_RECONNECT_MS
@@ -267,4 +274,55 @@ export async function followRun(
     await sleep(backoff)
     backoff = Math.min(backoff * 2, MAX_RECONNECT_MS)
   }
+}
+
+const ACTIVITY_POLL_MS = 5_000
+
+export interface TaskFollowOptions extends FollowOptions {
+  onActivity?: (activity: TaskActivity) => void
+  pollMs?: number
+}
+
+/**
+ * Follows the coordinator from the run the CLI started until its thread
+ * settles. Workers share the thread's sandbox, this machine, and each one's
+ * report wakes the coordinator in a run of its own, so a result reported while
+ * anything is left to run is not final: the last one reported is.
+ */
+export async function followTask(
+  thread: CoordinatorThread,
+  runId: string | null,
+  options: TaskFollowOptions = {}
+): Promise<RunOutcome> {
+  const sleep = options.sleep ?? wait
+  const pollMs = options.pollMs ?? ACTIVITY_POLL_MS
+  const events = () => thread.events()
+  let outcome = await followRun(events, runId, options)
+  let result = outcome.result
+  let followed = runId
+  let failures = 0
+  while (outcome.status !== "closed") {
+    let activity: TaskActivity | null
+    try {
+      activity = await thread.activity()
+      failures = 0
+    } catch (cause) {
+      failures += 1
+      if (!reconnectable(cause) || failures > MAX_RECONNECTS) throw cause
+      options.onReconnect?.(failures, errorMessage(cause))
+      await sleep(pollMs)
+      continue
+    }
+    if (activity === null) break
+    options.onActivity?.(activity)
+    if (activity.settled) break
+    if (activity.run_id === null || activity.run_id === followed) {
+      await sleep(pollMs)
+      continue
+    }
+    followed = activity.run_id
+    outcome = await followRun(events, followed, options)
+    result = outcome.result ?? result
+  }
+  return { ...outcome, result: outcome.result ?? result }
 }

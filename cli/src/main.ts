@@ -3,7 +3,12 @@ import { parseArgs } from "node:util"
 import { randomUUID } from "node:crypto"
 
 import pkg from "../package.json"
-import { ApiClient, ApiError, normalizeBackend } from "./api.ts"
+import {
+  ApiClient,
+  ApiError,
+  normalizeBackend,
+  type TaskActivity,
+} from "./api.ts"
 import { Bridge } from "open-swe-bridge-client"
 import {
   forgetSession,
@@ -18,7 +23,7 @@ import { composePrompt, readPipedStdin } from "./input.ts"
 import { errorMessage, type JsonObject } from "./json.ts"
 import { login } from "./login.ts"
 import {
-  followRun,
+  followTask,
   RESULT_TOOL,
   type CliResult,
   type RunOutcome,
@@ -67,6 +72,35 @@ function printResult(result: CliResult): void {
   process.stdout.write(
     stdout === "" || stdout.endsWith("\n") ? stdout : `${stdout}\n`
   )
+}
+
+const INSTRUCTIONS_PREVIEW_CHARS = 72
+
+/** Notes each worker as it changes state, and how many the CLI is waiting for. */
+function workerProgress(): (activity: TaskActivity) => void {
+  const states = new Map<string, string>()
+  let waitingFor = 0
+  return (activity) => {
+    for (const worker of activity.workers) {
+      const previous = states.get(worker.worker_thread_id)
+      if (previous === worker.state) continue
+      states.set(worker.worker_thread_id, worker.state)
+      const outcome =
+        !worker.active && worker.run_status ? ` (${worker.run_status})` : ""
+      const instructions = worker.instructions.split("\n")[0] ?? ""
+      const preview =
+        previous === undefined
+          ? ` — ${instructions.slice(0, INSTRUCTIONS_PREVIEW_CHARS)}`
+          : ""
+      note(
+        `Worker ${worker.state}${outcome}: ${worker.thread_url ?? worker.worker_thread_id}${preview}`
+      )
+    }
+    const active = activity.workers.filter((worker) => worker.active).length
+    if (active > 0 && active !== waitingFor)
+      note(`Waiting for ${active} worker${active === 1 ? "" : "s"} to report`)
+    waitingFor = active
+  }
 }
 
 async function resolveBackend(explicit: string | undefined): Promise<string> {
@@ -210,20 +244,26 @@ async function runCommand(options: RunOptions): Promise<number> {
     root,
   })
   note(`Thread ${api.dashboardUrl(`/agents/${encodeURIComponent(threadId)}`)}`)
+  const thread = api.coordinator(threadId, {
+    channels: EVENT_CHANNELS,
+    namespaces: [[]],
+    depth: EVENT_DEPTH,
+    since: 0,
+  })
 
   let exitCode = 0
   let closing = false
   let interrupts = 0
-  let activeRun = false
+  let following = false
 
   const shutdown = async (): Promise<void> => {
     if (closing) return
     closing = true
-    if (activeRun) {
+    if (following) {
       try {
-        await api.cancelThread(threadId)
+        await thread.stop()
       } catch (cause) {
-        fail(`could not cancel the run: ${errorMessage(cause)}`)
+        fail(`could not cancel the run and its workers: ${errorMessage(cause)}`)
       }
     }
     await bridge.close()
@@ -233,7 +273,9 @@ async function runCommand(options: RunOptions): Promise<number> {
   process.on("SIGINT", () => {
     interrupts += 1
     if (interrupts > 1) process.exit(130)
-    note("\nStopping — press Ctrl-C again to exit immediately.")
+    note(
+      "\nStopping the run and its workers — press Ctrl-C again to exit immediately."
+    )
     void shutdown()
   })
 
@@ -261,24 +303,15 @@ async function runCommand(options: RunOptions): Promise<number> {
 
   let outcome: RunOutcome | null = null
   try {
-    activeRun = true
+    following = true
     const runId = await api.startRun(threadId, configurable, prompt)
-    outcome = await followRun(
-      () =>
-        api.openEventStream(threadId, {
-          channels: EVENT_CHANNELS,
-          namespaces: [[]],
-          depth: EVENT_DEPTH,
-          since: 0,
-        }),
-      runId,
-      {
-        onReconnect: (attempt, reason) =>
-          note(
-            `Event stream dropped (${reason}); reconnecting, attempt ${attempt}`
-          ),
-      }
-    )
+    outcome = await followTask(thread, runId, {
+      onReconnect: (attempt, reason) =>
+        note(
+          `Lost the connection to the backend (${reason}); retrying, attempt ${attempt}`
+        ),
+      onActivity: workerProgress(),
+    })
   } catch (cause) {
     fail(
       cause instanceof ApiError && cause.status === 401
@@ -287,7 +320,7 @@ async function runCommand(options: RunOptions): Promise<number> {
     )
     exitCode = 1
   } finally {
-    activeRun = false
+    following = false
   }
 
   if (outcome?.status === "completed" && outcome.result) {
