@@ -19,6 +19,7 @@ from openswe.dashboard.workspace_settings import (
     upsert_instance_settings,
     upsert_workspace_overrides,
 )
+from openswe.input_messages import dynamic_context_hash, person_introduction
 from openswe.message_queue import QueuedMessage
 from openswe.tasks.store import SidebarTaskMembership
 from openswe.threads import diffs as thread_diffs
@@ -620,6 +621,35 @@ async def test_enrich_run_start_command_allowlists_client_configurable(monkeypat
     )
     assert offloaded["params"]["config"]["configurable"]["model_selection"] == "explicit"
     assert updates[-1]["model_selection"] == "explicit"
+
+
+@pytest.mark.parametrize("history_available", [True, False])
+async def test_dashboard_context_hashes_replace_stale_metadata(
+    monkeypatch: pytest.MonkeyPatch, history_available: bool
+) -> None:
+    person_id = f"user:{uuid7()}"
+    linked = person_introduction({"id": person_id, "open_swe_account": "linked"})
+    unlinked = person_introduction({"id": person_id, "open_swe_account": "unlinked"})
+    linked_hash = dynamic_context_hash(linked["content"])
+    unlinked_hash = dynamic_context_hash(unlinked["content"])
+    assert linked_hash and unlinked_hash
+    get_state = AsyncMock(return_value={"values": {"messages": [linked, unlinked]}})
+    if not history_available:
+        get_state.side_effect = RuntimeError("History unavailable")
+    client = SimpleNamespace(threads=SimpleNamespace(get_state=get_state))
+    monkeypatch.setattr(User, "canonical_person", AsyncMock(return_value={"id": person_id}))
+
+    _, injected, _ = await thread_runs._attributed_run_messages(
+        "tid",
+        "octocat",
+        metadata={"injected_dynamic_context_hashes": [linked_hash, unlinked_hash]},
+        content="Continue",
+        creating=False,
+        email=None,
+        client=client,
+    )
+
+    assert injected == ({unlinked_hash} if history_available else {linked_hash, unlinked_hash})
 
 
 async def test_enrich_run_start_command_reuses_a_deduplicated_turn(monkeypatch) -> None:

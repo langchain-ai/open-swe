@@ -745,8 +745,8 @@ async def _attributed_run_messages(
             values = prior_state.get("values") if isinstance(prior_state, dict) else None
             if isinstance(values, dict):
                 messages = values.get("messages")
-                injected.update(dynamic_context_hashes_from_messages(messages))
                 if isinstance(messages, list):
+                    injected = dynamic_context_hashes_from_messages(messages)
                     persisted_message_ids = {
                         message_id
                         for message in messages
