@@ -306,7 +306,11 @@ class ReviewCard:
             is None
         ):
             return standard_card.closed_card(
-                request, title=pr.title, author=author, outcome="approved", review_states=states
+                request,
+                title=pr.title,
+                author=author,
+                outcome="approved" if request.auto_merge else "approved — awaiting manual merge",
+                review_states=states,
             )
         requester = request.requested_by
         return standard_card.open_card(

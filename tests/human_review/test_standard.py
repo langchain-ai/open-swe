@@ -624,3 +624,111 @@ async def test_review_blockers_refuse_authors_without_an_open_swe_account(
     ):
         blockers = await review_blockers(MagicMock())
     assert blockers == (["its author is not an Open SWE user"] if blocked else [])
+
+
+@pytest.mark.usefixtures("registry_db")
+@pytest.mark.parametrize(
+    ("default", "override", "expected"),
+    [(True, None, True), (False, None, False), (True, False, False), (False, True, True)],
+)
+async def test_review_request_snapshots_merge_mode_and_preserves_it_on_reuse(
+    default: bool,
+    override: bool | None,
+    expected: bool,
+) -> None:
+    from openswe.dashboard.workspace_settings import WorkspaceSettings
+    from openswe.human_review import standard
+    from openswe.human_review.standard import Origin
+    from openswe.slack.channels import SlackChannel
+    from openswe.slack.client import GitHubPrRef
+
+    pr = await PullRequest(owner="lc", repo="repo", number=7, author="ada").save()
+    details = MagicMock(head_sha="abc", body="Fix")
+    ref = GitHubPrRef(owner="lc", repo="repo", number=7, url=pr.url)
+    with (
+        patch.object(standard, "review_blockers", AsyncMock(return_value=[])),
+        patch.object(standard, "_target_channel", AsyncMock(return_value=SlackChannel(id="C1"))),
+        patch.object(standard, "record_pull_request", AsyncMock(return_value=(pr, details))),
+        patch.object(
+            standard,
+            "_workspace_settings",
+            AsyncMock(return_value=WorkspaceSettings({"human_review_auto_merge_enabled": default})),
+        ),
+        patch.object(standard, "_assignment_minutes", AsyncMock(return_value=120)),
+        patch.object(standard, "_schedule", AsyncMock(return_value=True)) as schedule,
+        patch.object(standard, "_permalink", AsyncMock(return_value="")),
+        patch.object(ReviewCard, "post_standard", AsyncMock(return_value="1.0")),
+    ):
+        result = await standard._request_review(
+            ref, MagicMock(), Origin(), channel="", inline_summary="Fix", auto_merge=override
+        )
+        assert result.success and result.auto_merge is expected
+        request = await HumanReviewRequest.active_for("lc", "repo", 7)
+        assert request is not None and request.auto_merge is expected
+        assert [call.args[1] for call in schedule.await_args_list] == (
+            ["unclaimed", "auto_merge"] if expected else ["unclaimed"]
+        )
+        reused = await standard._request_review(
+            ref, MagicMock(), Origin(), channel="", inline_summary="Fix"
+        )
+        assert reused.success and reused.reused and reused.auto_merge is expected
+        refused = await standard._request_review(
+            ref, MagicMock(), Origin(), channel="", inline_summary="Fix", auto_merge=not expected
+        )
+        assert not refused.success
+        assert request.auto_merge is expected
+
+
+@pytest.mark.parametrize("trigger", ["event", "deadline"])
+@pytest.mark.parametrize("auto_merge", [False, True])
+async def test_only_auto_merge_requests_merge_when_approved(
+    trigger: str,
+    auto_merge: bool,
+    github_app: AsyncMock,
+) -> None:
+    from openswe.expedited_review.readiness import Readiness
+    from openswe.human_review import standard
+    from openswe.human_review.merging import MergeResult
+    from openswe.human_review.picking import Coverage
+
+    pr = PullRequest(owner="lc", repo="repo", number=7, author="ada")
+    request = HumanReviewRequest(
+        pull_request_id=pr.id, head_sha="abc", kind="standard", auto_merge=auto_merge
+    )
+    request.pull_request = pr
+
+    @asynccontextmanager
+    async def locked(*_: object) -> AsyncIterator[tuple[None, HumanReviewRequest]]:
+        yield None, request
+
+    with (
+        patch.object(HumanReviewRequest, "get", AsyncMock(return_value=request)),
+        patch.object(HumanReviewRequest, "active_for", AsyncMock(return_value=request)),
+        patch.object(HumanReviewRequest, "locked", locked),
+        patch.object(
+            Readiness,
+            "assess",
+            AsyncMock(return_value=Readiness(snapshot=_snapshot(), blockers=[])),
+        ),
+        patch.object(User, "for_login", AsyncMock(return_value=User())),
+        patch.object(
+            standard, "latest_review_states", AsyncMock(return_value={"grace": "APPROVED"})
+        ),
+        patch.object(Coverage, "load", AsyncMock(return_value=None)),
+        patch.object(ReviewPicks, "complete", AsyncMock()),
+        patch.object(ReviewPicks, "release", AsyncMock(return_value=request)),
+        patch.object(ReviewCard, "update_blocked_reactions", AsyncMock()),
+        patch.object(ReviewCard, "mark_merged", AsyncMock()),
+        patch.object(ReviewCard, "refresh", AsyncMock()),
+        patch.object(
+            standard, "merge_pull_request", AsyncMock(return_value=MergeResult("merged", "Merged"))
+        ) as merge,
+    ):
+        if trigger == "deadline":
+            await standard.run_deadline(str(request.id), "auto_merge")
+        else:
+            await standard.settle_pull_request("lc", "repo", 7)
+    assert merge.await_count == int(auto_merge)
+    if not auto_merge:
+        assert request.state == "open"
+        assert request.detail == "approved — awaiting manual merge"
