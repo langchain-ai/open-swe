@@ -214,11 +214,16 @@ export const useReviewPage = create<ReviewPageState & ReviewPageActions>()((
     const { pr, viewed, viewedSha, collapsed, entryOrder } = get()
     const next = new Set(viewed)
     const flipped = new Set(collapsed)
+    const slicesOf = new Map<string, Array<DiffEntry>>()
+    for (const other of entryOrder) {
+      if (other.readKey === other.file.path) continue
+      const slices = slicesOf.get(other.file.path) ?? []
+      slices.push(other)
+      slicesOf.set(other.file.path, slices)
+    }
     for (const entry of targets) {
       const path = entry.file.path
-      const slices = entryOrder.filter(
-        (other) => other.file.path === path && other.readKey !== path
-      )
+      const slices = slicesOf.get(path) ?? []
       flipped.delete(entry.readKey)
       if (read) {
         next.add(entry.readKey)
