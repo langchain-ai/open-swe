@@ -338,6 +338,61 @@ async def test_pending_external_channel_is_not_retried_or_dispatched(
     assert background_tasks.tasks == []
 
 
+@pytest.mark.parametrize(
+    "event",
+    [
+        {"type": "message", "subtype": "bot_message", "bot_id": "BOTHER", "text": "status"},
+        {"type": "message", "user": "BOT", "text": "my own reply"},
+        {"type": "reaction_added", "reaction": "eyes"},
+        {"type": "user_change"},
+    ],
+)
+async def test_irrelevant_events_do_not_verify_channels(
+    monkeypatch: pytest.MonkeyPatch,
+    event: dict[str, str],
+) -> None:
+    verify = AsyncMock(side_effect=AssertionError("must not contact Slack"))
+    monkeypatch.setattr(webhook_common, "resolve_slack_channel_context", verify)
+    monkeypatch.setattr(webhook_common, "SLACK_BOT_USER_ID", "BOT")
+    payload = _channel_message_payload()
+    payload["event"].update(event)
+    tasks = _FakeBackgroundTasks()
+    assert (await _post(payload, tasks))["status"] == "ignored"
+    assert tasks.tasks == []
+    verify.assert_not_awaited()
+
+
+async def test_watched_bot_messages_still_verify_and_launch_automations(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(slack_routes, "_slack_channel_watched", AsyncMock(return_value=True))
+    payload = _bot_payload()
+    payload["event"]["text"] = "deployment status"
+    tasks = _FakeBackgroundTasks()
+    assert (await _post(payload, tasks))["status"] == "ignored"
+    assert len(tasks.tasks) == 1
+    assert tasks.tasks[0][0] == slack_routes._launch_slack_automations
+
+
+async def test_already_handled_delivery_skips_live_channel_check(
+    monkeypatch: pytest.MonkeyPatch,
+    registry_db: None,
+) -> None:
+    from datetime import timedelta
+
+    from openswe import event_claims
+
+    tasks = _FakeBackgroundTasks()
+    assert (await _post(_mention_payload(), tasks))["status"] == "accepted"
+    await event_claims.defer("slack_event", "Ev1", ttl=timedelta(minutes=1))
+    slack_events.reset_slack_event_claims()
+    verify = AsyncMock(side_effect=AssertionError("duplicate must not contact Slack"))
+    monkeypatch.setattr(webhook_common, "resolve_slack_channel_context", verify)
+    assert (await _post(_mention_payload(), tasks))["status"] == "ignored"
+    assert len(tasks.tasks) == 1
+    verify.assert_not_awaited()
+
+
 async def test_preprocessing_failure_replies_and_does_not_claim_event(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
