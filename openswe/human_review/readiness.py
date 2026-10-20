@@ -2,11 +2,13 @@
 
 import json
 import logging
+from datetime import UTC, datetime, timedelta
 from typing import TYPE_CHECKING
 
 from fastapi import BackgroundTasks, HTTPException
-from pydantic import BaseModel, ValidationError
+from pydantic import BaseModel, Field, ValidationError
 
+from openswe import event_claims
 from openswe.dispatch import dispatch_agent_run, follow_up_configurable
 from openswe.expedited_review.reviews import github_token_hint
 from openswe.github.http import GitHubClient, GitHubSignInRequired
@@ -37,6 +39,8 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 BUTTON_TYPE = "human_review_ready"
+DELIVERY_SCOPE = "human_review_readiness_dm"
+CARD_TTL = timedelta(days=1)
 
 
 class ReadinessCard(BaseModel):
@@ -47,6 +51,17 @@ class ReadinessCard(BaseModel):
     thread_id: str = ""
     origin_channel: str = ""
     origin_thread: str = ""
+    expires_at: datetime = Field(default_factory=lambda: datetime.now(UTC) + CARD_TTL)
+
+    @property
+    def delivery_key(self) -> str:
+        return f"{self.pr_url.lower()}:{self.head_sha}:{self.slack_user_id}"
+
+    async def release_delivery(self) -> None:
+        try:
+            await event_claims.release(DELIVERY_SCOPE, self.delivery_key)
+        except Exception:
+            logger.warning("Could not release readiness delivery claim", exc_info=True)
 
     def value(self) -> str:
         return json.dumps(
@@ -54,6 +69,10 @@ class ReadinessCard(BaseModel):
         )
 
     async def mark_ready(self, slack_user_id: str) -> None:
+        if datetime.now(UTC) >= self.expires_at:
+            raise ValueError(
+                "This readiness card expired. Ask Open SWE for a new Mark ready button."
+            )
         actor = linked_participant(await User.for_person({"id": f"slack:{slack_user_id}"}))
         if (
             isinstance(actor, Outcome)
@@ -141,15 +160,26 @@ async def offer_readiness(pr: GitHubPrRef, pull: PullRequestClient, origin: Orig
             ),
         ]
     )
-    location = await send_dm_with_location(
-        author.slack_user_id,
-        text,
-        blocks=blocks,
-        origin=DmOrigin(channel_id=origin.slack_channel_id, thread_ts=origin.slack_thread_ts)
-        if origin.slack_channel_id and origin.slack_thread_ts
-        else None,
-    )
+    if not await event_claims.claim(DELIVERY_SCOPE, card.delivery_key, ttl=CARD_TTL):
+        return (
+            f"An author-only Mark ready button for this revision was already sent or is being "
+            f"delivered to <@{author.slack_user_id}> in Slack DM. No new card or review request "
+            "was created. Ask the author to review the changes carefully and click that button."
+        )
+    try:
+        location = await send_dm_with_location(
+            author.slack_user_id,
+            text,
+            blocks=blocks,
+            origin=DmOrigin(channel_id=origin.slack_channel_id, thread_ts=origin.slack_thread_ts)
+            if origin.slack_channel_id and origin.slack_thread_ts
+            else None,
+        )
+    except Exception:
+        await card.release_delivery()
+        raise
     if location is None:
+        await card.release_delivery()
         return (
             "Slack could not deliver the author-only Mark ready button; try again or ask "
             "the author to use Ready for review on GitHub."
@@ -209,6 +239,7 @@ async def _process(interaction: SlackInteraction, value: SlackButtonValue) -> No
         await note_for_concierge(user_id, channel, f"Clicked Mark ready for {card.pr_url}.")
         await card.mark_ready(user_id)
         marked = True
+        await card.release_delivery()
         text = f"Marked ready for review: {card.pr_url}"
         await update_slack_message(channel, ts, text, blocks=block_payload([section(text)]))
         await card.notify(user_id)
