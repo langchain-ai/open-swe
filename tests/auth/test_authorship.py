@@ -16,9 +16,14 @@ from openswe.utils.authorship import (
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("source_slack_id", ["", "U_CURRENT"])
-@pytest.mark.parametrize("run_login", ["mason", ""])
+@pytest.mark.parametrize(
+    ("run_login", "canonical_found"), [("mason", True), ("", True), ("mason", False)]
+)
 async def test_participant_context_resolves_canonical_identity(
-    monkeypatch: pytest.MonkeyPatch, source_slack_id: str, run_login: str
+    monkeypatch: pytest.MonkeyPatch,
+    source_slack_id: str,
+    run_login: str,
+    canonical_found: bool,
 ) -> None:
     from unittest.mock import AsyncMock
 
@@ -33,7 +38,8 @@ async def test_participant_context_resolves_canonical_identity(
             UserIdentity(provider="github", external_id="123", login="mason"),
         ],
     )
-    monkeypatch.setattr(User, "get", AsyncMock(return_value=user))
+    monkeypatch.setattr(User, "get", AsyncMock(return_value=user if canonical_found else None))
+    monkeypatch.setattr(User, "for_login", AsyncMock(return_value=user))
     monkeypatch.setattr("openswe.server.load_profile", AsyncMock(return_value={}))
     monkeypatch.setattr("openswe.server.participant_is_admin", AsyncMock(return_value=False))
     monkeypatch.setattr(

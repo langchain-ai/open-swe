@@ -445,7 +445,9 @@ async def _participant_user(login: str, person_id: str | None) -> User | None:
     """Resolve a participant by their canonical id before falling back to a surface login."""
     try:
         if person_id and person_id.startswith("user:"):
-            return await User.get(UUID(person_id.removeprefix("user:")))
+            user = await User.get(UUID(person_id.removeprefix("user:")))
+            if user is not None:
+                return user
         return await User.for_login("github", login) if login else None
     except Exception:
         logger.warning(
