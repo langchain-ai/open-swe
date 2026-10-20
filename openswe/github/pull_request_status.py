@@ -570,15 +570,7 @@ class PullRequestClient:
     ) -> list[int]:
         """Dismiss Open SWE's standing approvals other than the kept ones; the ids GitHub refused.
 
-        ``scope_to_review_id`` narrows dismissal to the login behind that review, so
-        publishing as one Open SWE deployment never touches another deployment's
-        approval of the same pull request (more than one may be installed on a
-        repo, each with its own approval mode and its own view of this head). When
-        that review can't be found, nothing is dismissed rather than guessing which
-        login to scope to. Leave it unset only when every Open SWE login's approval
-        of an old commit is equally stale, as after a push.
-
-        GitHub's review list is the record, so a refused dismissal is retried by the next call.
+        ``scope_to_review_id`` limits this to that review's login. An unknown review dismisses nothing.
         """
         reviews = _GITHUB_REVIEWS.validate_python(await self.reviews())
         only_login: str | None = None

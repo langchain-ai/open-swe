@@ -733,15 +733,7 @@ async def _withdraw_open_swe_approvals(
     keep_commit: str | None = None,
     scope_to_review_id: int | None = None,
 ) -> None:
-    """Leave standing only the approval this publish posted, if it posted one.
-
-    ``scope_to_review_id`` is the review just posted (approving or not); it scopes
-    dismissal to that review's own login so a sibling Open SWE deployment's valid
-    approval of this head is never touched. ``keep_commit`` is used instead when
-    nothing was posted this round (an empty re-review was skipped), which keeps
-    every deployment's approval of the current head and only drops ones left over
-    from an older one.
-    """
+    """Leave standing only this publish's own approval, if it posted one."""
     if keep_review_id is not None:
         reason = "Superseded by Open SWE's approval of the current head."
     elif keep_commit is not None:
