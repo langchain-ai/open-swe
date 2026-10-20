@@ -14,7 +14,7 @@ from openswe.tools.mcp_exposure import expose_mcp
 logger = logging.getLogger(__name__)
 
 _READ = Policy(trusted="admin_thread", actor="admin")
-_WRITE = Policy(trusted="admin_thread", actor="admin", shared=ack("automation.id"))
+_WRITE = Policy(trusted="admin_thread", actor="admin", shared=ack("automation.id"), all_admins=True)
 
 
 async def _identity() -> tuple[str, str | None] | None:

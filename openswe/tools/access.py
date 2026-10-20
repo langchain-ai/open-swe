@@ -101,13 +101,15 @@ class Policy:
 
     ``shared`` is ``None`` when the tool stays unavailable in shared threads;
     otherwise it projects the result, because everyone who can read the thread
-    reads it. A shared thread qualifies when only the actor has written there or,
-    for ``actor="admin"`` tools, when every writer is a workspace admin.
+    reads it. A shared thread qualifies when only the actor has written there, or
+    when every writer is a workspace admin and an ``actor="admin"`` tool opts in
+    with ``all_admins``.
     """
 
     trusted: Place
     actor: Actor = "anyone"
     shared: Projection | None = None
+    all_admins: bool = False
     direct: bool = False
 
 
@@ -135,7 +137,7 @@ class Access:
         }[policy.trusted]
         if trusted and self._actor(policy.actor):
             return "full"
-        if policy.shared is not None and self._shared(policy.actor):
+        if policy.shared is not None and self._shared(policy):
             return "shared"
         return None
 
@@ -146,9 +148,9 @@ class Access:
             return self.owner
         return True
 
-    def _shared(self, actor: Actor) -> bool:
-        if actor == "admin":
-            return self.admin and (self.sole or self.admins)
+    def _shared(self, policy: Policy) -> bool:
+        if policy.actor == "admin":
+            return self.admin and (self.sole or (policy.all_admins and self.admins))
         return self.sole
 
 

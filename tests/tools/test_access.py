@@ -9,7 +9,7 @@ from openswe.tools import access as tool_access
 from openswe.tools.access import Policy, ack, resolve_access
 
 _OWN = Policy(trusted="private", actor="owner", shared=ack("id"))
-_ADMIN = Policy(trusted="admin_thread", actor="admin", shared=ack("id"))
+_ADMIN = Policy(trusted="admin_thread", actor="admin", shared=ack("id"), all_admins=True)
 _SLACK = {"channel_id": "C1", "thread_ts": "1.0"}
 
 
@@ -83,6 +83,7 @@ async def test_admin_tools_work_where_every_writer_is_an_admin(
     cfg = _cfg(source="slack", slack_thread=_SLACK)
     resolved = await resolve_access(cfg)
     assert resolved.mode(_ADMIN) == "shared"
+    assert resolved.mode(Policy(trusted="admin_thread", actor="admin", shared=ack())) is None
     assert resolved.mode(_OWN) is None
     monkeypatch.setenv("CONFIGURED_ADMINS", "alice")
     assert (await resolve_access(cfg)).mode(_ADMIN) is None
