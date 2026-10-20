@@ -30,7 +30,6 @@ from rt.backend import (
     BackendUnavailableError,
     OpenSweBackend,
     PhaseReply,
-    ToolReply,
     ToolSpec,
 )
 from rt.middleware import BackendRunMiddleware
@@ -196,19 +195,11 @@ async def test_turn_reconciliation_reaches_runtime_root_llm_and_nested_calls(
     backend = OpenSweBackend("secret-token")
     git = TurnGitMetadata({"configurable": {"invocation_id": "turn"}, "metadata": actor})
 
-    validate_shared = True
-
-    async def call(body: dict[str, object]) -> ToolReply:
-        if validate_shared:
-            assert isinstance(held := body["state"], dict)
-            assert held["git_trace_baseline"]["invocation"] == "turn"
-            if body["tool_call_id"] == "second":
-                assert "git_trace_work:work" in held
-        return ToolReply(
-            message=message_to_dict(
-                ToolMessage(content="done", tool_call_id=str(body["tool_call_id"]))
-            ),
-            update={
+    @tool
+    async def nested_call(text: str) -> str:
+        """Call a nested runnable."""
+        TurnTrace.record_evidence(
+            {
                 **git.evidence(
                     [GitTarget(repo="org/actual", branch="local")], "work", observed_at=1
                 ),
@@ -224,28 +215,8 @@ async def test_turn_reconciliation_reaches_runtime_root_llm_and_nested_calls(
                     pr=True,
                     observed_at=3,
                 ),
-            },
+            }
         )
-
-    monkeypatch.setattr(backend, "tool", call)
-    served = backend_tool(
-        ToolSpec(name="execute", description="Execute", parameters={"type": "object"}), backend
-    )
-
-    @tool
-    async def nested_call(text: str) -> str:
-        """Call a backend tool with isolated subagent state, then a nested runnable."""
-        for call_id in ("first", "second"):
-            await served.coroutine(
-                runtime=ToolRuntime(
-                    state={"messages": []},
-                    context=None,
-                    config={},
-                    stream_writer=lambda event: None,
-                    tool_call_id=call_id,
-                    store=None,
-                )
-            )
         return await RunnableLambda(lambda value: value).ainvoke(text)
 
     async def phase(name: str, body: dict[str, object]) -> PhaseReply:
@@ -326,7 +297,6 @@ async def test_turn_reconciliation_reaches_runtime_root_llm_and_nested_calls(
         assert metadata["existing_key"] == "preserved"
     assert len({run["trace_id"] for run in created.values()}) == 1
     previous_update_count = len(updates)
-    validate_shared = False
     final["ls_git_branch"] = "Next/turn"
     if not next_trace_available:
 

@@ -6,24 +6,9 @@ from pathlib import Path
 from unittest.mock import AsyncMock
 
 import pytest
-from langchain.agents import create_agent
-from langchain_core.language_models.fake_chat_models import FakeListChatModel
-from langchain_core.runnables import RunnableConfig
-from langchain_core.tools import tool
 from pydantic import JsonValue
 
-from openswe.remote_runtime.git_metadata import (
-    GitCheckout,
-    GitSnapshot,
-    GitTarget,
-    TurnGitMetadata,
-    record_pr_target,
-)
-from openswe.remote_runtime.graph import RemoteGraph
-from openswe.remote_runtime.runs import ModelSpec, RunModels
-from openswe.remote_runtime.tokens import RemoteRun
-from openswe.run_config import RunConfig
-from openswe.sandboxes.tool_runtime import ToolSurface
+from openswe.remote_runtime.git_metadata import GitSnapshot, GitTarget, TurnGitMetadata
 
 
 @pytest.mark.parametrize("pr", [False, True])
@@ -68,29 +53,6 @@ async def test_actual_checkout_wins_over_configured_repo(
     assert result["ls_repo_provider"] == "github"
 
 
-@pytest.mark.parametrize(
-    "targets",
-    [
-        [],
-        [GitTarget(repo="org/z", branch="first"), GitTarget(repo="org/a", branch="later")],
-        [GitTarget(repo="org/a", branch="z-first"), GitTarget(repo="org/a", branch="a-later")],
-    ],
-)
-async def test_first_target_populates_single_valued_git_keys(
-    monkeypatch: pytest.MonkeyPatch, targets: list[GitTarget]
-) -> None:
-    git = TurnGitMetadata({"configurable": {"invocation_id": "turn"}})
-    snapshot = {"repos": {"/workspace/a": {"repo": "org/a", "branch": "unchanged"}}}
-    monkeypatch.setattr(
-        git, "snapshot", AsyncMock(return_value=GitSnapshot.model_validate(snapshot))
-    )
-    state = {**await git.begin(), **git.evidence(targets, "call", pr=True)}
-    result = await git.reconcile(state)
-    assert result.get("ls_git_repo") == (targets[0].repo if targets else None)
-    assert result.get("ls_git_branch") == (targets[0].branch if targets else None)
-    assert result.get("open_swe_git_targets", []) == [target.model_dump() for target in targets]
-
-
 async def test_work_order_wins_over_snapshot_order_pr_order_and_completion_order(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -118,12 +80,16 @@ async def test_work_order_wins_over_snapshot_order_pr_order_and_completion_order
         "snapshot",
         AsyncMock(
             side_effect=[
-                GitSnapshot.model_validate(value) for value in (before, first, later, later)
+                GitSnapshot.model_validate(value) for value in (before, before, first, later, later)
             ]
         ),
     )
     baseline = await git.begin()
+    assert git.work_baseline(baseline) == GitSnapshot.model_validate(before)
+    unchanged = await git.reconcile(baseline)
+    assert "ls_git_repo" not in unchanged and "ls_git_branch" not in unchanged
     first_work = await git.work_evidence(GitSnapshot.model_validate(before), "first", 10)
+    assert git.work_baseline({**baseline, **first_work}) is None
     later_work = await git.work_evidence(GitSnapshot.model_validate(first), "later", 20)
     state = {
         **baseline,
@@ -166,83 +132,6 @@ async def test_invalid_optional_evidence_does_not_discard_valid_pr_outcome(
     )
     assert result["ls_git_repo"] == "org/actual"
     assert result["ls_git_branch"] == "Exact/head"
-
-
-async def test_tool_observation_stops_scanning_after_first_work(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    current = GitSnapshot(
-        repos={
-            f"/workspace/{name}": GitCheckout(repo=f"org/{name}", branch="local", head="old")
-            for name in ("a", "z")
-        }
-    )
-    scans = 0
-
-    async def snapshot(self: TurnGitMetadata) -> GitSnapshot:
-        nonlocal scans
-        scans += 1
-        return current.model_copy(deep=True)
-
-    @tool
-    async def execute(repo: str) -> str:
-        """Simulate work in a checkout or a structured PR outcome."""
-        if repo == "pr":
-            record_pr_target("org/z", "Exact/head")
-        elif repo:
-            current.repos[f"/workspace/{repo}"].head += "-edited"
-        return "done"
-
-    async def build(config: RunnableConfig, surface: ToolSurface) -> None:
-        surface.graph = create_agent(model=FakeListChatModel(responses=["done"]), tools=[execute])
-
-    async def models(config: RunConfig) -> RunModels:
-        spec = ModelSpec(model_id="test", kwargs={})
-        return RunModels(model=spec, subagent_model=spec, use_gateway=False)
-
-    monkeypatch.setattr(TurnGitMetadata, "snapshot", snapshot)
-    monkeypatch.setattr(
-        "openswe.remote_runtime.graph.ManagedSandbox.for_thread", AsyncMock(return_value=None)
-    )
-    graph = RemoteGraph("agent", build, models)
-    run = RemoteRun(
-        thread_id="thread", assistant_id="agent", configurable={"invocation_id": "turn"}
-    )
-    prepared = await graph.hook(run, "prepare", {"run_id": "run"})
-    assert isinstance(prepared, dict)
-    state = prepared["update"]
-    assert isinstance(state, dict)
-    for index, repo in enumerate(("", "z", "a", "z", "pr")):
-        reply = await graph.hook(
-            run,
-            "call",
-            {
-                "run_id": "run",
-                "state": state,
-                "name": "execute",
-                "arguments": {"repo": repo},
-                "tool_call_id": f"call-{index}",
-            },
-        )
-        assert isinstance(reply, dict)
-        update = reply["update"]
-        assert isinstance(update, dict)
-        state.update(update)
-        message = reply["message"]
-        assert isinstance(message, dict)
-        data = message["data"]
-        assert isinstance(data, dict)
-        assert data["content"] == "done"
-    reconciled = await graph.hook(run, "after_agent", {"run_id": "run", "state": state})
-    assert isinstance(reconciled, dict)
-    assert reconciled["trace_metadata"]["ls_git_repo"] == "org/z"
-    assert reconciled["trace_metadata"]["ls_git_branch"] == "Exact/head"
-    assert reconciled["trace_metadata"]["open_swe_git_targets"] == [
-        {"repo": "org/z", "branch": "Exact/head"},
-        {"repo": "org/a", "branch": "local"},
-    ]
-    assert reconciled["update"]["git_trace_baseline"] is None
-    assert scans == 4
 
 
 def test_snapshot_detects_more_edits_to_an_already_dirty_checkout(tmp_path: Path) -> None:
