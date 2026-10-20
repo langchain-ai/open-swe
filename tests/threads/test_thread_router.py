@@ -7,6 +7,7 @@ import pytest
 from pydantic import JsonValue
 from starlette.types import Message, Receive, Scope, Send
 
+from openswe.remote_runtime.runs import run_config
 from openswe.remote_runtime.tokens import RemoteRun, sign_runtime_token, verify_runtime_token
 from openswe.threads import index, router, runtimes
 from openswe.threads.index import Runtime, ThreadStatus
@@ -109,10 +110,17 @@ class _Harness:
         monkeypatch.setattr(router, "RUNTIMES", self.runtimes)
 
         async def context(
-            configurable: dict[str, JsonValue], *, thread_id: str, assistant_id: str
+            configurable: dict[str, JsonValue],
+            *,
+            thread_id: str,
+            assistant_id: str,
+            metadata: dict[str, JsonValue] | None = None,
         ) -> dict[str, JsonValue]:
             run = RemoteRun(
-                thread_id=thread_id, assistant_id=assistant_id, configurable=configurable
+                thread_id=thread_id,
+                assistant_id=assistant_id,
+                configurable=configurable,
+                metadata=metadata or {},
             )
             return {"graph": assistant_id, "__run_token": sign_runtime_token(run)}
 
@@ -275,6 +283,7 @@ async def test_a_new_thread_runs_on_mda(monkeypatch: pytest.MonkeyPatch, secret:
                 "__event_streaming_v2": True,
             }
         },
+        "metadata": {"kind": "task_message", "event_match_ids": ["match-1"]},
     }
 
     await harness.request("POST", f"/threads/{THREAD}/runs", run)
@@ -291,10 +300,11 @@ async def test_a_new_thread_runs_on_mda(monkeypatch: pytest.MonkeyPatch, secret:
     context = sent["context"]
     assert isinstance(context, dict) and context["__event_streaming_v2"] is True
     assert isinstance(token := context["__run_token"], str)
-    assert verify_runtime_token(token).configurable == {
-        "github_login": "ada",
-        "repo": {"owner": "a", "name": "b"},
-    }
+    signed = verify_runtime_token(token)
+    assert signed.configurable == {"github_login": "ada", "repo": {"owner": "a", "name": "b"}}
+    # The hooks see the run metadata an in-process run would, e.g. which delivered
+    # task messages the transcript records.
+    assert run_config(signed)["metadata"] == {"event_match_ids": ["match-1"]}
 
 
 async def test_deleting_a_thread_removes_every_copy(monkeypatch: pytest.MonkeyPatch) -> None:
