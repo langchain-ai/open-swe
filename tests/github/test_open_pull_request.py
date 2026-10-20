@@ -9,6 +9,7 @@ import langgraph_sdk
 import pytest
 
 import openswe.tools.open_pull_request  # noqa: F401
+from openswe.remote_runtime.git_metadata import GitTarget, collect_pr_targets
 
 opr = sys.modules["openswe.tools.open_pull_request"]
 
@@ -596,8 +597,6 @@ async def test_record_pr_telemetry_retitles_only_new_prs_when_enabled(
         "head": {"ref": "Actual/PR-head"},
     }
     client = _FakeClient(post=_FakeResponse(201, {}), get=_FakeResponse(200, details))
-
-    from openswe.remote_runtime.git_metadata import GitTarget, collect_pr_targets
 
     with collect_pr_targets() as targets:
         await opr._record_pr_telemetry(

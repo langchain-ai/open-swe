@@ -1,15 +1,24 @@
 import sys
+from copy import deepcopy
 from pathlib import Path
 from typing import Literal
 from unittest.mock import AsyncMock, MagicMock
 
 import httpx2
 import pytest
+from deepagents import create_deep_agent
 from langchain.agents import create_agent
 from langchain.tools import ToolRuntime
 from langchain_core.language_models.fake_chat_models import FakeListChatModel
 from langchain_core.messages import ToolMessage, message_to_dict
+from langchain_core.runnables import RunnableLambda
+from langchain_core.tools import tool
+from langchain_core.tracers.langchain import LangChainTracer
 from langgraph.types import Command
+from langsmith import Client, tracing_context
+from langsmith.run_trees import RunTree
+
+from openswe.remote_runtime.git_metadata import GitTarget, TurnGitMetadata
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "mda"))
 
@@ -22,6 +31,7 @@ from rt.backend import (
 )
 from rt.middleware import BackendRunMiddleware
 from rt.tools import backend_tool
+from rt.tracing import TurnTrace
 
 
 @pytest.mark.parametrize(
@@ -175,18 +185,6 @@ async def test_a_failing_backend_hook_fails_the_run_with_what_it_raised(
 async def test_turn_reconciliation_reaches_runtime_root_llm_and_nested_calls(
     monkeypatch: pytest.MonkeyPatch, next_trace_available: bool
 ) -> None:
-    from copy import deepcopy
-
-    from deepagents import create_deep_agent
-    from langchain_core.runnables import RunnableLambda
-    from langchain_core.tools import tool
-    from langchain_core.tracers.langchain import LangChainTracer
-    from langsmith import Client, tracing_context
-    from langsmith.run_trees import RunTree
-    from rt.tracing import TurnTrace
-
-    from openswe.remote_runtime.git_metadata import GitTarget, TurnGitMetadata
-
     monkeypatch.setenv("OPEN_SWE_BACKEND_URL", "https://backend.invalid")
     monkeypatch.setattr("rt.middleware.run_id", lambda: "run-1")
     actor = {"ls_repo_provider": "github", "ls_attribution_identifier": "trigger"}
@@ -293,10 +291,6 @@ async def test_turn_reconciliation_reaches_runtime_root_llm_and_nested_calls(
 async def test_optional_trace_failures_do_not_change_successful_turn_output(
     monkeypatch: pytest.MonkeyPatch, failure: str
 ) -> None:
-    from langchain_core.tracers.langchain import LangChainTracer
-    from langsmith import Client, tracing_context
-    from rt.tracing import TurnTrace
-
     monkeypatch.setenv("OPEN_SWE_BACKEND_URL", "https://backend.invalid")
     monkeypatch.setattr("rt.middleware.run_id", lambda: "run-1")
     backend = OpenSweBackend("secret-token")
