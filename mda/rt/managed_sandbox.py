@@ -33,10 +33,10 @@ _json_object = TypeAdapter(dict[str, JsonValue])
 def definition(create: SandboxCreate, thread_id: str | None) -> SandboxDefinition:
     """The box MDA keeps for ``thread_id`` (the run's own by default), created from ``create``."""
     return define_sandbox(
-        per_thread=True,
-        thread_id=thread_id,
-        manage_proxy=False,
-        create_fields=dict(create.extra_fields),
+        _openswe_per_thread=True,
+        _openswe_thread_id=thread_id,
+        _openswe_no_manage_proxy=True,
+        _openswe_create_fields=dict(create.extra_fields),
         snapshot_id=create.snapshot_id,
         idle_ttl_seconds=create.idle_ttl_seconds,
         delete_after_stop_seconds=create.delete_after_stop_seconds,

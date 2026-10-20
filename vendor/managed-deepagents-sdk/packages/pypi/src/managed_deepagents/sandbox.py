@@ -92,10 +92,10 @@ class SandboxDefinition:
 
     #: Options that shape how MDA resolves the box rather than the create request.
     RESOLUTION_OPTION_KEYS: ClassVar[tuple[str, ...]] = (
-        "per_thread",
-        "thread_id",
-        "create_fields",
-        "manage_proxy",
+        "_openswe_per_thread",
+        "_openswe_thread_id",
+        "_openswe_create_fields",
+        "_openswe_no_manage_proxy",
     )
 
     def __repr__(self) -> str:  # pragma: no cover - debug helper
@@ -125,10 +125,12 @@ def normalize_sandbox_options(options: dict[str, object]) -> dict[str, object]:
             "run-scoped name automatically."
         )
 
-    _validate_thread_id(normalized.get("thread_id"))
-    _validate_create_fields(normalized.get("create_fields"))
-    if normalized.get("manage_proxy") is False and normalized.get("proxy_config") is not None:
-        raise TypeError("proxy_config needs MDA to manage the proxy. Remove manage_proxy=False.")
+    _validate_thread_id(normalized.get("_openswe_thread_id"))
+    _validate_create_fields(normalized.get("_openswe_create_fields"))
+    if normalized.get("_openswe_no_manage_proxy") and normalized.get("proxy_config") is not None:
+        raise TypeError(
+            "proxy_config needs MDA to manage the proxy. Remove _openswe_no_manage_proxy."
+        )
 
     bases = [
         name for name in ("snapshot_name", "snapshot_id", "docker_image") if normalized.get(name)
@@ -147,7 +149,7 @@ def normalize_sandbox_options(options: dict[str, object]) -> dict[str, object]:
     return normalized
 
 
-#: Create-request fields MDA sets itself, so ``create_fields`` cannot override them.
+#: Create-request fields MDA sets itself, so ``_openswe_create_fields`` cannot override them.
 _RESERVED_CREATE_FIELDS = frozenset(
     {"name", "snapshot", "snapshot_id", "snapshot_name", "wait_for_ready", "timeout"}
 )
@@ -189,39 +191,39 @@ async def replace_sandbox(
 
 def owning_thread(options: Mapping[str, object]) -> str | None:
     """The thread whose box a definition uses, when not the run's own."""
-    thread_id = options.get("thread_id")
+    thread_id = options.get("_openswe_thread_id")
     return thread_id if isinstance(thread_id, str) else None
 
 
 def is_per_thread(options: Mapping[str, object]) -> bool:
     """Whether the thread keeps one box whatever a dynamic selection's options."""
-    return options.get("per_thread") is True
+    return options.get("_openswe_per_thread") is True
 
 
 def declared_create_fields(options: Mapping[str, object]) -> dict[str, object]:
     """Create-request fields sent as-is, beyond the ones the SDK models."""
-    fields = options.get("create_fields")
+    fields = options.get("_openswe_create_fields")
     return dict(fields) if isinstance(fields, dict) else {}
 
 
 def manages_proxy(options: Mapping[str, object]) -> bool:
     """Whether MDA sets the box's proxy config before each command."""
-    return options.get("manage_proxy") is not False
+    return options.get("_openswe_no_manage_proxy") is not True
 
 
 def _validate_thread_id(thread_id: object) -> None:
     if thread_id is not None and (not isinstance(thread_id, str) or not thread_id.strip()):
-        raise TypeError("sandbox thread_id must be a non-empty string")
+        raise TypeError("sandbox _openswe_thread_id must be a non-empty string")
 
 
 def _validate_create_fields(fields: object) -> None:
     if fields is None:
         return
     if not isinstance(fields, dict) or not all(isinstance(key, str) for key in fields):
-        raise TypeError("create_fields must be a mapping of field names to values")
+        raise TypeError("_openswe_create_fields must map field names to values")
     reserved = sorted(_RESERVED_CREATE_FIELDS.intersection(fields))
     if reserved:
-        raise TypeError(f"create_fields cannot set {', '.join(reserved)}; MDA sets them")
+        raise TypeError(f"_openswe_create_fields cannot set {', '.join(reserved)}; MDA sets them")
 
 
 __all__ = [

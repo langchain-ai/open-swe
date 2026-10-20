@@ -2387,7 +2387,7 @@ def _send_create_fields(client: LangSmithSandboxClient, fields: Mapping[str, obj
     http = getattr(client, "_http", None)
     post = getattr(http, "post", None)
     if http is None or not callable(post):
-        raise RuntimeError("This langsmith SDK cannot send sandbox create_fields")
+        raise RuntimeError("This langsmith SDK cannot send sandbox _openswe_create_fields")
 
     def post_with_fields(url: object, *args: object, **kwargs: object) -> object:
         payload = kwargs.get("json")
