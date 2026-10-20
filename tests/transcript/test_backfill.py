@@ -4,9 +4,10 @@ from typing import Any
 from uuid import uuid7
 
 import pytest
+from fastapi import HTTPException
 from langchain_core.messages import AIMessage, HumanMessage, ToolMessage
 
-from openswe.transcript import backfill, tool_output
+from openswe.transcript import backfill, routes, tool_output
 from openswe.transcript.backfill import ThreadBusy, upgrade_transcript
 from openswe.transcript.snapshot import load_access, load_snapshot
 
@@ -70,6 +71,7 @@ def threads(monkeypatch: pytest.MonkeyPatch) -> FakeThreads:
         threads = fake
 
     monkeypatch.setattr(backfill, "langgraph_client", Client)
+    monkeypatch.setattr(routes, "langgraph_client", Client)
     return fake
 
 
@@ -138,5 +140,19 @@ async def test_a_thread_with_a_live_run_is_left_alone(
     threads.status = "busy"
     with pytest.raises(ThreadBusy):
         await upgrade_transcript(threads.thread_id)
+    assert "transcript" not in threads.metadata
+    assert await load_snapshot(threads.thread_id) is None
+
+
+async def test_only_the_owner_may_upgrade_a_thread_others_can_read(
+    registry_db: None, threads: FakeThreads, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    async def opted_in(login: str) -> dict[str, object]:
+        return {"experimental_transcript_upgrade": True}
+
+    monkeypatch.setattr(routes, "get_profile", opted_in)
+    with pytest.raises(HTTPException) as refused:
+        await routes.api_upgrade_thread_transcript(threads.thread_id, {"sub": "trusted-user"})
+    assert refused.value.status_code == 403
     assert "transcript" not in threads.metadata
     assert await load_snapshot(threads.thread_id) is None

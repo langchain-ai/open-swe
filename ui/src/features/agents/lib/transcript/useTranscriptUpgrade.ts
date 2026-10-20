@@ -32,8 +32,14 @@ function subscribeProgress(listener: () => void): () => void {
   return () => progressListeners.delete(listener)
 }
 
+/** The stamp changes every viewer's reader, so only the owner's opt-in upgrades. */
+function isOwner(thread: AgentThread, login: string | undefined): boolean {
+  const owner = thread.ownerLogin?.trim().toLowerCase()
+  return Boolean(owner) && owner === login?.trim().toLowerCase()
+}
+
 /**
- * Upgrades a legacy thread to the transcript log when it is opened, behind the
+ * Upgrades a legacy thread to the transcript log when its owner opens it, behind the
  * `experimental_transcript_upgrade` experiment. On success the cached thread
  * is stamped `transcript: "v2"`, which is what switches the page's reader; on
  * failure the page keeps the SDK stream and an error toast says so. A busy
@@ -65,6 +71,7 @@ export function useTranscriptUpgrade(
     session.data?.transcript_recording === true &&
     profile.data?.experimental_transcript_upgrade === true &&
     thread !== undefined &&
+    isOwner(thread, session.data?.login) &&
     thread.transcript !== "v2" &&
     thread.status !== "running"
   const upgrade = useQuery({

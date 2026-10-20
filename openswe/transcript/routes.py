@@ -30,7 +30,7 @@ from openswe.dashboard.profiles import get_profile
 from openswe.database import postgres
 
 # The ``thread.metadata`` mirror exists so this predicate is reused unchanged.
-from openswe.threads.summary import assert_thread_readable
+from openswe.threads.summary import assert_thread_readable, thread_is_owner
 from openswe.transcript import attachments, listener, tool_output
 from openswe.transcript.backfill import (
     UPGRADE_FLAG,
@@ -252,7 +252,11 @@ async def api_upgrade_thread_transcript(
         thread = await langgraph_client().threads.get(thread_id)
     except Exception as exc:  # noqa: BLE001
         raise HTTPException(404, "thread not found") from exc
-    assert_thread_readable(thread_metadata(thread), session["sub"], session.get("email"))
+    metadata = thread_metadata(thread)
+    assert_thread_readable(metadata, session["sub"], session.get("email"))
+    # The stamp switches every viewer's reader, so only the owner's opt-in may set it.
+    if not thread_is_owner(metadata, session["sub"]):
+        raise HTTPException(403, "transcript_upgrade_owner_only")
     progress: asyncio.Queue[UpgradeProgress] = asyncio.Queue()
     task = asyncio.create_task(upgrade_transcript(thread_id, progress.put_nowait))
     _upgrades.add(task)

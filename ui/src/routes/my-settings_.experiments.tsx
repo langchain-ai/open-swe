@@ -57,7 +57,7 @@ function ExperimentsPage() {
         <ProfileSwitchRow
           field="experimental_transcript_upgrade"
           label="Upgrade older threads on open (experimental)"
-          description="Opening a thread that predates the transcript log, or an imported Claude Code session, moves its history to the transcript log so it loads faster. Sessions you import afterwards are recorded there directly."
+          description="Opening a thread you own that predates the transcript log, or an imported Claude Code session, moves its history to the transcript log so it loads faster. Sessions you import afterwards are recorded there directly."
         />
         <ProfileSwitchRow
           field="experimental_monitor"
