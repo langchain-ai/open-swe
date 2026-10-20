@@ -37,6 +37,7 @@ from openswe.remote_runtime.client import remote_run_context
 from openswe.remote_runtime.runs import in_graph_context, run_config
 from openswe.remote_runtime.tokens import RemoteRun, WorkerGrant, sign_worker_grant
 from openswe.tasks import service
+from openswe.threads.status import refresh_thread_status
 
 logger = logging.getLogger(__name__)
 
@@ -58,6 +59,23 @@ class LaunchBody(BaseModel):
 class LaunchedBody(LaunchBody):
     worker_thread_id: str
     run_id: str
+
+
+class _Task(BaseModel):
+    interrupts: list[JsonValue] = []
+
+
+class _Checkpoint(BaseModel):
+    """A run's own last checkpoint, as the thread's history returns it."""
+
+    values: dict[str, JsonValue] | None = None
+    interrupts: list[JsonValue] = []
+    tasks: list[_Task] = []
+
+    @property
+    def waiting(self) -> bool:
+        """Paused on ``interrupt()``: its run ends as ``success``, only the checkpoint shows the pause."""
+        return bool(self.interrupts) or any(task.interrupts for task in self.tasks)
 
 
 class AdoptBody(BaseModel):
@@ -172,15 +190,24 @@ async def _settle_when_done(thread_id: str, run_id: str) -> None:
         try:
             run = _json_object.validate_python(dict(await client.runs.get(thread_id, run_id)))
             if run.get("status") in _TERMINAL:
-                state = _json_object.validate_python(
-                    dict(await client.threads.get_state(thread_id))
+                # This run's own checkpoint: a later run on the thread may have moved its state on.
+                history = await client.threads.get_history(
+                    thread_id, limit=1, metadata={"run_id": run_id}
                 )
+                checkpoint = _Checkpoint.model_validate(history[0]) if history else _Checkpoint()
+                if run.get("status") == "success" and checkpoint.waiting:
+                    # Not finished: the run that resumes it reports, through its own webhook.
+                    logger.info(
+                        "An async worker's launched run is waiting for a human", extra=extra
+                    )
+                    await refresh_thread_status(thread_id)
+                    return
                 payload = {
                     "thread_id": thread_id,
                     "run_id": run_id,
                     "status": run.get("status"),
                     "metadata": run.get("metadata"),
-                    "values": state.get("values"),
+                    "values": checkpoint.values,
                     "error": run.get("error"),
                 }
                 continue

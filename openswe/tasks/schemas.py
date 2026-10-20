@@ -28,8 +28,6 @@ class ThreadMetadata(BaseModel):
     workspace: str | None = None
     environment: str | None = None
     task_id: UUID | None = None
-    # The coordinator's tool call that launched this worker as an MDA async subagent.
-    async_launch_request_id: str | None = None
     sandbox_host_thread_id: str | None = None
     sandbox_id: str | None = None
     # "mda": Managed Deep Agents names, creates and replaces the box; the backend binds to it.

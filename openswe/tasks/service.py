@@ -44,8 +44,6 @@ from openswe.workspaces.routing import resolve_workspace
 
 logger = logging.getLogger(__name__)
 _JSON_OBJECT = TypeAdapter(dict[str, JsonValue])
-# Worker thread metadata: the coordinator's tool call that launched an async worker.
-ASYNC_LAUNCH_KEY = "async_launch_request_id"
 # The async subagent Open SWE runs its workers as.
 ASYNC_WORKER_SUBAGENT = "general-purpose"
 
@@ -429,7 +427,7 @@ class Delegation:
         return cls(actor, metadata, workspace.slug, chosen_model, chosen_effort)
 
     async def reserve(
-        self, worker_thread_id: str, instructions: str
+        self, worker_thread_id: str, instructions: str, request_id: str
     ) -> tuple[store.Task, store.TaskDelegation]:
         title = self.metadata.title
         return await store.Task.reserve_worker(
@@ -440,23 +438,16 @@ class Delegation:
             instructions=instructions,
             model=self.model,
             effort=self.effort,
+            launch_request_id=request_id,
         )
 
     async def launched_by(self, request_id: str) -> tuple[store.Task, store.TaskDelegation] | None:
         """The async worker this coordinator's tool call ``request_id`` already launched."""
+        delegation = await store.TaskDelegation.launched(self.actor.thread_id, request_id)
         context = await store.TaskMembership.context_for_thread(self.actor.thread_id)
-        if context is None:
+        if delegation is None or context is None:
             return None
-        for delegation in await store.TaskDelegation.for_task(context.task.id):
-            if delegation.coordinator_thread_id != self.actor.thread_id:
-                continue
-            try:
-                worker = await langgraph_client().threads.get(delegation.worker_thread_id)
-            except NotFoundError:
-                continue
-            if Thread.model_validate(worker).metadata.async_launch_request_id == request_id:
-                return context.task, delegation
-        return None
+        return context.task, delegation
 
 
 async def authorize_async_worker(
@@ -488,15 +479,9 @@ async def register_async_worker(
     ):
         raise PermissionError("The thread is not an async worker this coordinator launched")
     delegation = await Delegation.authorize(actor)
-    launched = await delegation.launched_by(request_id)
-    if launched is not None and launched[1].worker_thread_id != worker_thread_id:
-        raise PermissionError(f"This launch already started worker {launched[1].worker_thread_id}")
-    task, reserved = await delegation.reserve(worker_thread_id, instructions.strip())
+    task, reserved = await delegation.reserve(worker_thread_id, instructions.strip(), request_id)
     await index_worker(
-        task,
-        reserved,
-        delegation.metadata,
-        {ASYNC_LAUNCH_KEY: request_id, MDA_GRAPH_METADATA_KEY: MDA_WORKER_GRAPH_ID},
+        task, reserved, delegation.metadata, {MDA_GRAPH_METADATA_KEY: MDA_WORKER_GRAPH_ID}
     )
     # MDA started its run, not the thread router, which marks the threads it runs busy.
     await refresh_thread_status(worker_thread_id)

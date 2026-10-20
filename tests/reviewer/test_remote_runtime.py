@@ -519,7 +519,7 @@ async def test_a_launched_worker_run_without_a_webhook_is_settled_once_it_ends(
     )
     # A long run outlasts one join; the wait goes on.
     client.runs.join = AsyncMock(side_effect=[httpx.ReadTimeout("still running"), {}])
-    client.threads.get_state = AsyncMock(return_value={"values": {"messages": []}})
+    client.threads.get_history = AsyncMock(return_value=[{"values": {"messages": []}}])
     mda = MagicMock(client=client)
     monkeypatch.setattr(runtimes.Runtimes, "mda", property(lambda self: mda))
     monkeypatch.setattr(async_workers.asyncio, "sleep", AsyncMock())
@@ -539,3 +539,87 @@ async def test_a_launched_worker_run_without_a_webhook_is_settled_once_it_ends(
             "error": None,
         }
     )
+
+
+async def test_a_launched_worker_run_reports_its_own_answer_and_never_a_pause(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import operator
+    from typing import Annotated, TypedDict
+    from unittest.mock import AsyncMock, MagicMock
+
+    from langgraph.checkpoint.memory import InMemorySaver
+    from langgraph.graph import END, START, StateGraph
+    from langgraph.types import Command, interrupt
+
+    from openswe import completion
+    from openswe.remote_runtime import async_workers
+    from openswe.tasks.events import worker_result
+    from openswe.threads import runtimes
+
+    class State(TypedDict):
+        messages: Annotated[list[dict[str, str]], operator.add]
+
+    def agent(state: State) -> State:
+        asked = state["messages"][-1]["content"]
+        if asked == "push":
+            approval = interrupt("Approve the workflow push?")
+            return {"messages": [{"type": "ai", "content": f"Pushed: {approval}"}]}
+        return {"messages": [{"type": "ai", "content": f"Answered {asked}"}]}
+
+    builder = StateGraph(State)
+    builder.add_node("agent", agent)
+    builder.add_edge(START, "agent")
+    builder.add_edge("agent", END)
+    graph = builder.compile(checkpointer=InMemorySaver())
+    thread = {"configurable": {"thread_id": "worker"}}
+
+    async def run(run_id: str, given: State | Command) -> None:
+        await graph.ainvoke(given, {**thread, "metadata": {"run_id": run_id}})
+
+    async def history(
+        thread_id: str, *, limit: int, metadata: dict[str, str]
+    ) -> list[dict[str, object]]:
+        assert thread_id == "worker"
+        return [
+            {
+                "values": snapshot.values,
+                "interrupts": [{"id": i.id, "value": i.value} for i in snapshot.interrupts],
+            }
+            async for snapshot in graph.aget_state_history(thread, filter=metadata, limit=limit)
+        ]
+
+    client = MagicMock()
+    # The server reports a run paused on interrupt() as a success, like a finished one.
+    client.runs.get = AsyncMock(
+        side_effect=lambda thread_id, run_id: {
+            "run_id": run_id,
+            "status": "success",
+            "metadata": {},
+        }
+    )
+    client.threads.get_history = AsyncMock(side_effect=history)
+    client.threads.get_state = AsyncMock(
+        side_effect=lambda thread_id: {"values": graph.get_state(thread).values}
+    )
+    mda = MagicMock(client=client)
+    monkeypatch.setattr(runtimes.Runtimes, "mda", property(lambda self: mda))
+    monkeypatch.setattr(async_workers, "refresh_thread_status", AsyncMock())
+    settle = AsyncMock()
+    monkeypatch.setattr(completion, "handle_run_completion", settle)
+
+    # Run A finished, then a task message's run B moved the thread on before A was settled.
+    await run("run-a", {"messages": [{"type": "human", "content": "A"}]})
+    await run("run-b", {"messages": [{"type": "human", "content": "B"}]})
+    await async_workers._settle_when_done("worker", "run-a")
+    (settled,) = settle.await_args.args
+    assert await worker_result("worker", "run-a", "success", settled) == "Answered A"
+
+    # Run C stopped for a person's approval: not finished, so nothing reports it or
+    # wakes the worker with queued messages, and the approval resumes it.
+    settle.reset_mock()
+    await run("run-c", {"messages": [{"type": "human", "content": "push"}]})
+    await async_workers._settle_when_done("worker", "run-c")
+    settle.assert_not_awaited()
+    await run("run-d", Command(resume="approved"))
+    assert graph.get_state(thread).values["messages"][-1]["content"] == "Pushed: approved"
