@@ -87,8 +87,19 @@ async def test_push_event_skips_when_thread_not_watching() -> None:
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("storage_fails", [False, True])
+@pytest.mark.parametrize(
+    "approval_mode,policy,storage_fails",
+    [
+        ("off", None, False),
+        ("off", None, True),
+        ("dry_run", None, False),
+        ("dry_run", "Policy", False),
+        ("approve", None, False),
+    ],
+)
 async def test_push_event_skips_when_pr_diff_unchanged_since_last_review(
+    approval_mode: str,
+    policy: str | None,
     storage_fails: bool,
 ) -> None:
     payload = _push_payload(ref="refs/heads/feat-x", after="newsha")
@@ -104,6 +115,8 @@ async def test_push_event_skips_when_pr_diff_unchanged_since_last_review(
     set_metadata = AsyncMock()
 
     with (
+        patch("openswe.github.webhook.approval_mode_for", AsyncMock(return_value=approval_mode)),
+        patch("openswe.github.webhook.approval_policy_for_review", AsyncMock(return_value=policy)),
         patch(
             "openswe.github.webhook.PullRequest.link_review",
             AsyncMock(side_effect=RuntimeError("Storage unavailable") if storage_fails else None),
@@ -180,9 +193,7 @@ async def test_push_event_skips_when_pr_diff_unchanged_since_last_review(
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("fork", [False, True])
-@pytest.mark.parametrize(
-    "approval_mode,unchanged_diff", [("off", False), ("approve", True), ("dry_run", True)]
-)
+@pytest.mark.parametrize("approval_mode,unchanged_diff", [("off", False), ("approve", True)])
 async def test_head_update_triggers_re_review_run_when_watching(
     fork: bool,
     unchanged_diff: bool,
@@ -206,6 +217,9 @@ async def test_head_update_triggers_re_review_run_when_watching(
 
     with (
         patch("openswe.github.webhook.approval_mode_for", AsyncMock(return_value=approval_mode)),
+        patch(
+            "openswe.github.webhook.approval_policy_for_review", AsyncMock(return_value="Policy")
+        ),
         patch("openswe.webhooks.common.enforce_public_repo_org_gate", AsyncMock(return_value=None)),
         patch(
             "openswe.webhooks.common.is_repo_auto_review_enabled",

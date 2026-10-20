@@ -30,7 +30,7 @@ from openswe.input_messages import (
     system_introduction,
 )
 from openswe.prompts import prompt
-from openswe.review.approvals import approval_mode_for
+from openswe.review.approvals import approval_mode_for, approval_policy_for_review
 from openswe.review.findings import (
     FindingInteraction,
     ReviewerPRMeta,
@@ -797,13 +797,16 @@ async def _process_github_head_update(
     if (
         isinstance(last_reviewed_sha, str)
         and last_reviewed_sha
-        and await approval_mode_for(context.owner, context.name) == "off"
         and await common.is_pr_diff_unchanged_since_last_review(
             repo_config,
             base_ref=base_ref,
             last_reviewed_sha=last_reviewed_sha,
             head_sha=head_sha,
             token=app_token,
+        )
+        and not (
+            await approval_mode_for(context.owner, context.name) == "approve"
+            and await approval_policy_for_review(context.owner, context.name, token=app_token)
         )
     ):
         await PullRequest(
