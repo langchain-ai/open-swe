@@ -14,7 +14,10 @@ from openswe.slack.payloads import SlackButtonValue, SlackInteraction
 from openswe.users import User, UserIdentity
 
 
-async def test_draft_request_offers_author_control_without_requesting_review() -> None:
+@pytest.mark.parametrize("failure", [None, "github", "delivery"])
+async def test_draft_request_offers_author_control_without_requesting_review(
+    failure: str | None,
+) -> None:
     author = User(
         identities=[
             UserIdentity(provider="github", external_id="ada", login="ada"),
@@ -30,12 +33,21 @@ async def test_draft_request_offers_author_control_without_requesting_review() -
             "head": {"sha": "abc"},
         }
     )
+    if failure == "github":
+        pull.pull.side_effect = HTTPException(502, "GitHub unavailable")
     with (
         patch.object(HumanReviewRequest, "active_for", AsyncMock(return_value=None)),
         patch.object(standard, "review_blockers", AsyncMock(return_value=["it is a draft"])),
         patch.object(User, "for_login", AsyncMock(return_value=author)),
         patch.object(
-            readiness, "send_dm_with_location", AsyncMock(return_value=("D1", "1.2"))
+            readiness,
+            "send_dm_with_location",
+            AsyncMock(
+                return_value=("D1", "1.2"),
+                side_effect=RuntimeError("DM origin unavailable")
+                if failure == "delivery"
+                else None,
+            ),
         ) as dm,
         patch.object(HumanReviewRequest, "save", AsyncMock()) as save,
     ):
@@ -47,8 +59,13 @@ async def test_draft_request_offers_author_control_without_requesting_review() -
             inline_summary="A change",
         )
     assert not result.success
-    assert "author-only Mark ready button" in result.error
+    assert "it is a draft" in result.error
     save.assert_not_awaited()
+    if failure is not None:
+        assert "Ready for review on GitHub" in result.error
+        assert "Do not work around this refusal" in result.error
+        return
+    assert "author-only Mark ready button" in result.error
     assert dm.await_args is not None
     assert dm.await_args.args[0] == "U1"
     sent = dm.await_args.kwargs["blocks"]
