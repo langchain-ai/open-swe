@@ -115,22 +115,29 @@ class IncidentSession:
     async def _record_incident_report(self, **kwargs: Any) -> dict[str, Any]:
         await self.check()
         draft = ReportDraft.model_validate(kwargs)
-        if not draft.has_meaningful_content(self.collector):
+        report = finalize_report(draft, self.collector)
+        record = self.record
+        previous = await service.REPORTS.get(record.id)
+        error = draft.validation_error(
+            self.collector, report, previous.report if previous else None
+        )
+        if error:
             return {
                 "recorded": False,
                 "posted": False,
                 "error": (
-                    "Report rejected: provide a substantive claim with known evidence IDs, "
-                    "or meaningful investigation gaps or questions. Empty and placeholder "
-                    "drafts are not saved. Expected claim shape: "
+                    f"Report rejected: {error} No documents, stored reports, or channel posts changed. "
+                    "Expected claim shape for summary, problem, impact, cause, and next_steps: "
                     'summary=[{"text": "A substantive supported observation", '
-                    '"evidence_ids": ["<known evidence ID>"]}]'
+                    '"evidence_ids": ["<known evidence ID>"]}]. '
+                    "summary/problem text must be at least 20 characters after stripping whitespace. "
+                    'hypotheses=[{"title": "Specific suspected cause", "assessment": "plausible", '
+                    '"evidence_ids": ["<known evidence ID>"]}]. '
+                    "Assessments: plausible, supported, rejected. gaps/questions are lists of strings "
+                    "and do not replace claims. Never probe this write tool with placeholders."
                 ),
             }
-        report = finalize_report(draft, self.collector)
-        record = self.record
         digest = service.fingerprint(digest_fields(report))
-        previous = await service.REPORTS.get(record.id)
         run_id = current_run_id()
         # The postmortem update runs first: if it fails, nothing is recorded and the agent
         # sees the error instead of a report that was never fully written.

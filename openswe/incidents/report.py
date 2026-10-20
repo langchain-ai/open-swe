@@ -79,7 +79,6 @@ class ReportDraft(BaseModel):
         claims = [
             *self.summary,
             *self.problem,
-            *self.previous_occurrence,
             *self.impact,
             *self.cause,
             *self.next_steps,
@@ -94,8 +93,51 @@ class ReportDraft(BaseModel):
             for hypothesis in self.hypotheses
             if supported_refs(hypothesis.evidence_ids, known_ids)
         )
-        texts.extend(redact(text, 500) for text in [*self.gaps, *self.questions])
         return any(meaningful_text(text) for text in texts)
+
+    def validation_error(
+        self,
+        collector: EvidenceCollector,
+        report: IncidentReport,
+        previous: IncidentReport | None = None,
+    ) -> str:
+        if any(len(claim.text.strip()) < 20 for claim in [*self.summary, *self.problem]):
+            return (
+                "Every summary and problem claim must contain at least 20 non-padding characters."
+            )
+        if not self.has_meaningful_content(collector):
+            return "Provide substantive evidence-backed claims or hypotheses, not only gaps or questions."
+
+        def content(value: IncidentReport) -> set[tuple[str, str]]:
+            sections = {
+                "summary": [value.summary],
+                "problem": [value.problem],
+                "previous_occurrence": [value.previous_occurrence],
+                "impact": [value.impact],
+                "cause": [value.cause],
+                "next_steps": value.next_steps,
+                "hypotheses": [f"{item.title}: {item.assessment}" for item in value.hypotheses],
+            }
+            return {
+                (section, normalized)
+                for section, texts in sections.items()
+                for text in texts
+                for part in _CITATION.split(text)
+                if (normalized := " ".join(part.split()))
+                and normalized
+                not in {
+                    "No evidence-backed conclusion was established.",
+                    "No previous-occurrence check was recorded.",
+                    "Impact remains unverified.",
+                }
+            }
+
+        if previous and (
+            (previous.outcome == "findings" and report.outcome != "findings")
+            or content(report) < content(previous)
+        ):
+            return "This draft regresses or only repeats a subset of the stored findings; retain the full report."
+        return ""
 
 
 INCIDENT_PROMPT = prompt("incidents/report")
