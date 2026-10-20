@@ -93,11 +93,20 @@ class _LangSmithSandboxArgs(BaseModel):
     environment-variable name; MDA creates or updates the Host registry.
     Unmodeled keys pass through as LangSmith create options. MDA owns naming,
     lifecycle, ``setup.sh`` bake, and cleanup — the envelope rejects the keys
-    it owns. Reuse is always one box per thread.
+    it owns. Reuse is one box per thread and selection; ``per_thread=True``
+    keeps one box per thread whatever a dynamic selection's options, which then
+    apply only when MDA creates it. ``thread_id`` uses that thread's box instead
+    of the run's own. ``create_fields`` go into the create request as-is, for
+    fields the SDK does not model. ``manage_proxy=False`` leaves the box's proxy
+    config to whoever else sets it.
     """
 
     model_config = ConfigDict(extra="allow")
 
+    per_thread: bool | None = None
+    thread_id: str | None = None
+    create_fields: dict[str, object] | None = None
+    manage_proxy: bool | None = None
     idle_ttl_seconds: int | None = None
     api_key: str | None = None
     default_timeout: int | None = None
@@ -109,6 +118,10 @@ class _LangSmithSandboxArgs(BaseModel):
 
 def define_sandbox(
     *,
+    per_thread: bool | None = None,
+    thread_id: str | None = None,
+    create_fields: dict[str, object] | None = None,
+    manage_proxy: bool | None = None,
     idle_ttl_seconds: int | None = None,
     api_key: str | None = None,
     default_timeout: int | None = None,
@@ -123,6 +136,10 @@ def define_sandbox(
     parsed = _LangSmithSandboxArgs.model_validate(
         {
             **options,
+            "per_thread": per_thread,
+            "thread_id": thread_id,
+            "create_fields": create_fields,
+            "manage_proxy": manage_proxy,
             "idle_ttl_seconds": idle_ttl_seconds,
             "api_key": api_key,
             "default_timeout": default_timeout,
