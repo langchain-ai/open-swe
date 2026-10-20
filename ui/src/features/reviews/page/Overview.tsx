@@ -41,7 +41,7 @@ export function Overview({ pr }: { pr: PullRequestRef }) {
     return (
       <div
         aria-hidden
-        className="flex w-full max-w-[920px] flex-col gap-space-4 px-space-4 pt-space-4 pb-space-6"
+        className="flex w-full flex-col gap-space-4 px-space-4 pt-space-4 pb-space-6"
       >
         <Skeleton className="h-[236px] rounded-xl" />
         <Skeleton className="h-4 w-48" />
@@ -57,7 +57,7 @@ export function Overview({ pr }: { pr: PullRequestRef }) {
       </div>
     )
   return (
-    <div className="flex w-full max-w-[920px] flex-col gap-space-4 px-space-4 pt-space-4 pb-space-6">
+    <div className="flex w-full flex-col gap-space-4 px-space-4 pt-space-4 pb-space-6">
       <StandingPanel pr={pr} />
       {detail.walkthrough?.human_input && (
         <section
@@ -145,7 +145,7 @@ function Description({
       <div
         ref={ref}
         className={cn(
-          "relative flow-root text-xs leading-[1.65]",
+          "relative flow-root max-w-[100ch] text-xs leading-[1.65]",
           clamped && "overflow-hidden"
         )}
         style={clamped ? { maxHeight: CLAMP_PX } : undefined}

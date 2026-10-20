@@ -7,6 +7,7 @@ import type {
   CodeViewItem,
   CodeViewReactOptions,
   DiffLineAnnotation,
+  LineAnnotation,
   FileDiffLoadedFiles,
   FileDiffMetadata,
   SelectedLineRange,
@@ -27,14 +28,12 @@ import {
   readDiffSelection,
   selectedRangeFromDiff,
 } from "@/features/agents/utils/diffSelection"
-import { Markdown } from "@/features/agents/components/chat/Markdown"
 import { useChatDrafts } from "@/features/reviews/lib/chatDrafts"
 import { loadReviewFileContents } from "@/features/reviews/lib/fileContents"
 import { toPierreSide } from "@/features/reviews/lib/lineRange"
 import { usePendingReview } from "@/features/reviews/lib/usePendingReview"
 import { ProposedCommentCard } from "@/features/reviews/components/ProposedCommentCard"
 import { PendingReviewCommentCard } from "@/features/reviews/components/PendingReviewCommentCard"
-import { AgentMark } from "./AgentMark"
 import { useAskAboutLines } from "./askAboutLines"
 import { ChangesToolbar } from "./ChangesToolbar"
 import {
@@ -42,15 +41,16 @@ import {
   entryNotes,
   filterEntries,
   findEntry,
+  groupSteps,
   isRenderable,
   notesSignature,
   type DiffEntry,
   type Note,
   type NoteSources,
+  type StepGroup,
 } from "./diffEntries"
-import { EntriesContext, MarkersContext, useEntry } from "./entries"
+import { EntriesContext, MarkersContext, StepsContext } from "./entries"
 import { FILE_HEADER_HEIGHT, FileHeader } from "./FileHeader"
-import { InlineCode } from "./inlineCode"
 import { FindingNote } from "./notes/FindingNote"
 import { NoteFrame } from "./notes/NoteFrame"
 import { Composer } from "./notes/Composer"
@@ -59,6 +59,14 @@ import { Overview } from "./Overview"
 import { reviewQueries, useFileMarkers, type PullRequestRef } from "./queries"
 import { isCollapsed, useReviewPage, type DiffTarget } from "./store"
 import { SelectionBar, type TextSelection } from "./SelectionBar"
+import {
+  isStepItem,
+  ReadNudge,
+  StepHeader,
+  StepIntro,
+  stepItemId,
+  WalkthroughEnd,
+} from "./StepSection"
 import { useDiffKeys } from "./useDiffKeys"
 
 type Item = CodeViewItem<Note>
@@ -74,27 +82,44 @@ const NO_ITEMS: Array<Item> = []
 // A diff row as painted: the line-number gutter sets the grid track, not the 18px code line.
 const DIFF_ROW_HEIGHT = 20
 
+// A step's own item is a one-line file whose file-level note is the intro; CSS hides the line.
+function stepItem(group: StepGroup): Item {
+  const id = stepItemId(group.step.index)
+  return {
+    id,
+    type: "file",
+    file: { name: id, contents: " ", cacheKey: id },
+    annotations: [{ lineNumber: 0, metadata: { kind: "step" } }],
+    version: hashText(`${group.step.title}|${group.step.summary}`),
+  }
+}
+
 /** An item's version hashes everything it shows, so CodeView repaints only files that changed. */
 function useCodeViewItems(
   entries: ReadonlyArray<DiffEntry>,
+  steps: ReadonlyMap<number, StepGroup>,
   sources: NoteSources,
   viewed: ReadonlySet<string>,
   flipped: ReadonlySet<string>
 ): Array<Item> {
   return useMemo(
     () =>
-      entries.map((entry) => {
+      entries.flatMap((entry, i): Array<Item> => {
+        const opens =
+          entry.step && entries[i - 1]?.step?.index !== entry.step.index
+            ? steps.get(entry.step.index)
+            : undefined
         const annotations = entryNotes(entry, sources)
         const collapsed =
           !isRenderable(entry.file) ||
-          isCollapsed({ viewed, collapsed: flipped }, entry.file.path)
+          isCollapsed({ viewed, collapsed: flipped }, entry)
         const hunks = entry.fileDiff.hunks
           .map(
             (hunk) =>
               `${hunk.additionStart},${hunk.additionCount},${hunk.deletionStart},${hunk.deletionCount}`
           )
           .join(";")
-        return {
+        const item: Item = {
           id: entry.id,
           type: "diff",
           fileDiff: entry.fileDiff,
@@ -104,8 +129,9 @@ function useCodeViewItems(
             `${notesSignature(annotations)}|${collapsed}|${entry.file.headSha}|${entry.file.patch?.length ?? 0}|${hunks}`
           ),
         }
+        return opens ? [stepItem(opens), item] : [item]
       }),
-    [entries, sources, viewed, flipped]
+    [entries, steps, sources, viewed, flipped]
   )
 }
 
@@ -154,6 +180,16 @@ export const Changes = memo(function Changes({ pr }: { pr: PullRequestRef }) {
     () => new Map(entries.map((entry) => [entry.id, entry])),
     [entries]
   )
+  const stepGroups = useMemo(() => groupSteps(entries), [entries])
+  const stepsByIndex = useMemo(
+    () => new Map(stepGroups.map((group) => [group.step.index, group])),
+    [stepGroups]
+  )
+  const stepItems = useMemo(
+    () =>
+      new Map(stepGroups.map((group) => [stepItemId(group.step.index), group])),
+    [stepGroups]
+  )
   useEffect(() => setEntryOrder(entries), [entries, setEntryOrder])
   const draftComments = drafts?.comments
   const sources = useMemo<NoteSources>(
@@ -174,7 +210,13 @@ export const Changes = memo(function Changes({ pr }: { pr: PullRequestRef }) {
       composer,
     ]
   )
-  const items = useCodeViewItems(entries, sources, viewed, flipped)
+  const items = useCodeViewItems(
+    entries,
+    stepsByIndex,
+    sources,
+    viewed,
+    flipped
+  )
 
   const filesByPath = useMemo(
     () => new Map((diff.data?.files ?? []).map((file) => [file.path, file])),
@@ -222,7 +264,8 @@ export const Changes = memo(function Changes({ pr }: { pr: PullRequestRef }) {
     return {
       ...base,
       // FileHeader draws its own rule; rows are pinned to the gutter's height so measured = laid out.
-      unsafeCSS: `${base.unsafeCSS}[data-diffs-header]{border-bottom:0 !important}[data-line-annotation],[data-gutter-buffer="annotation"]{--diffs-annotation-bg:var(--diffs-surface)}[data-gutter-buffer="annotation"]{border-right-color:transparent}[data-code],[data-diff-type=split]:is([data-overflow=wrap],[data-dehydrated]){padding-top:${DIFF_VIRTUAL_METRICS.spacing}px}${
+      // Step items are the only plain files: no gutter, no surface, their placeholder line unseen.
+      unsafeCSS: `${base.unsafeCSS}[data-diffs-header]{border-bottom:0 !important}pre[data-file],pre[data-file] :is([data-gutter],[data-content],[data-line-annotation],[data-line]){--diffs-line-bg:transparent;background:transparent !important}pre[data-file] [data-code]{grid-template-columns:0 minmax(0,1fr)}pre[data-file] [data-gutter]{visibility:hidden;overflow:hidden}pre[data-file] [data-line]{visibility:hidden}pre[data-file] [data-annotation-content]{left:0;width:auto}[data-line-annotation],[data-gutter-buffer="annotation"]{--diffs-annotation-bg:var(--diffs-surface)}[data-gutter-buffer="annotation"]{border-right-color:transparent}[data-code],[data-diff-type=split]:is([data-overflow=wrap],[data-dehydrated]){padding-top:${DIFF_VIRTUAL_METRICS.spacing}px}${
         overflow === "scroll"
           ? `[data-line]{height:${DIFF_ROW_HEIGHT}px !important;min-height:${DIFF_ROW_HEIGHT}px !important;max-height:${DIFF_ROW_HEIGHT}px !important;line-height:${DIFF_ROW_HEIGHT}px !important}`
           : ""
@@ -237,15 +280,17 @@ export const Changes = memo(function Changes({ pr }: { pr: PullRequestRef }) {
         paddingTop: DIFF_VIRTUAL_METRICS.spacing,
         diffHeaderHeight: FILE_HEADER_HEIGHT,
       },
-      layout: { paddingTop: 0, paddingBottom: 160, gap: 10 },
+      layout: { paddingTop: 0, paddingBottom: 0, gap: 10 },
       __devOnlyValidateItemHeights: import.meta.env.DEV,
       loadDiffFiles,
       // Hunks highlighted alone lose multi-line string state; hydrate once shown.
       onPostRender: (_node, instance, phase) => {
         if (phase === "unmount") return void hydrating.delete(instance)
         if (instance.options.collapsed || hydrating.has(instance)) return
+        const loads = instance as unknown as Partial<LoadsFiles>
+        if (typeof loads.loadFilesIfNecessary !== "function") return
         hydrating.add(instance)
-        ;(instance as unknown as LoadsFiles).loadFilesIfNecessary()
+        loads.loadFilesIfNecessary()
       },
       enableLineSelection: true,
       enableGutterUtility: true,
@@ -268,14 +313,34 @@ export const Changes = memo(function Changes({ pr }: { pr: PullRequestRef }) {
     ),
     [pr]
   )
+  // Room below the last file so it can scroll to the top; the walkthrough ends right under it.
+  const renderFooter = useCallback(
+    () => (
+      <div style={{ paddingBottom: 160 }}>
+        <WalkthroughEnd groups={stepGroups} />
+      </div>
+    ),
+    [stepGroups]
+  )
   const renderCustomHeader = useCallback(
-    (item: Item) => <FileHeader pr={pr} id={item.id} />,
+    (item: Item) =>
+      isStepItem(item.id) ? (
+        <StepHeader id={item.id} />
+      ) : (
+        <FileHeader pr={pr} id={item.id} />
+      ),
     [pr]
   )
   const renderAnnotation = useCallback(
-    (annotation: DiffLineAnnotation<Note>, item: Item) => (
-      <NoteView pr={pr} note={annotation.metadata} entryId={item.id} />
-    ),
+    (
+      annotation: DiffLineAnnotation<Note> | LineAnnotation<Note>,
+      item: Item
+    ) =>
+      annotation.metadata.kind === "step" ? (
+        <StepIntro id={item.id} />
+      ) : (
+        <NoteView pr={pr} note={annotation.metadata} />
+      ),
     [pr]
   )
 
@@ -290,17 +355,20 @@ export const Changes = memo(function Changes({ pr }: { pr: PullRequestRef }) {
       }
       const entry = findEntry(entries, target)
       if (!entry) return
-      const path = entry.file.path
       if (
         isRenderable(entry.file) &&
-        isCollapsed(useReviewPage.getState(), path)
+        isCollapsed(useReviewPage.getState(), entry)
       )
-        toggleCollapsed(path)
+        toggleCollapsed(entry.readKey)
+      // Arriving at a step's first file shows the step from its header.
+      const opensStep =
+        entry.step && stepsByIndex.get(entry.step.index)?.entries[0] === entry
       requestAnimationFrame(() => {
         if (target.kind !== "line") {
           view.scrollTo({
             type: "item",
-            id: entry.id,
+            id:
+              opensStep && entry.step ? stepItemId(entry.step.index) : entry.id,
             align: "start",
             behavior: "instant",
           })
@@ -331,7 +399,7 @@ export const Changes = memo(function Changes({ pr }: { pr: PullRequestRef }) {
         }, 2400)
       })
     },
-    [entries, toggleCollapsed]
+    [entries, stepsByIndex, toggleCollapsed]
   )
 
   useEffect(
@@ -353,28 +421,37 @@ export const Changes = memo(function Changes({ pr }: { pr: PullRequestRef }) {
   }, [order, scrollTo])
 
   // The file under the top edge, read from what is actually painted, so it
-  // stays right while items above are still being measured.
+  // stays right while items above are still being measured. A step's own item
+  // stands for the step's first file.
   const spyFrame = useRef(0)
   const onScroll = useCallback(
-    (_scrollTop: number, viewer: CoreCodeView<Note>) => {
+    (scrollTop: number, viewer: CoreCodeView<Note>) => {
       cancelAnimationFrame(spyFrame.current)
       spyFrame.current = requestAnimationFrame(() => {
         const container = viewer.getContainerElement()
         if (!container) return
-        const edge = container.getBoundingClientRect().top + FILE_HEADER_HEIGHT
+        const atEnd =
+          scrollTop + container.clientHeight >= container.scrollHeight - 2
+        // At the bottom the last item can't reach the top edge, so it counts once it's on screen.
+        const edge = atEnd
+          ? container.getBoundingClientRect().bottom
+          : container.getBoundingClientRect().top + FILE_HEADER_HEIGHT
         let active: DiffEntry | null = null
         let best = -Infinity
         for (const rendered of viewer.getRenderedItems()) {
           const top = rendered.element.getBoundingClientRect().top
           if (top <= edge && top > best) {
             best = top
-            active = entryMap.get(rendered.id) ?? null
+            active =
+              entryMap.get(rendered.id) ??
+              stepItems.get(rendered.id)?.entries[0] ??
+              null
           }
         }
-        setActive(active ? { id: active.id, path: active.file.path } : null)
+        setActive(active, atEnd)
       })
     },
-    [entryMap, setActive]
+    [entryMap, stepItems, setActive]
   )
 
   const [selection, setSelection] = useState<TextSelection | null>(null)
@@ -428,51 +505,59 @@ export const Changes = memo(function Changes({ pr }: { pr: PullRequestRef }) {
 
   return (
     <EntriesContext.Provider value={entryMap}>
-      <MarkersContext.Provider value={markers}>
-        <WorkerPoolContextProvider
-          poolOptions={DIFF_WORKER_POOL_OPTIONS}
-          highlighterOptions={DIFF_WORKER_HIGHLIGHTER_OPTIONS}
-        >
-          <div
-            ref={containerRef}
-            className="relative h-full min-h-0"
-            onMouseUp={onMouseUp}
-            onPointerDown={clearSelection}
+      <StepsContext.Provider value={stepItems}>
+        <MarkersContext.Provider value={markers}>
+          <WorkerPoolContextProvider
+            poolOptions={DIFF_WORKER_POOL_OPTIONS}
+            highlighterOptions={DIFF_WORKER_HIGHLIGHTER_OPTIONS}
           >
-            <CodeView<Note>
-              ref={handle}
-              // Files wait for the overview above them, so they're never pushed down once painted.
-              items={detailQuery.isPending ? NO_ITEMS : items}
-              options={options}
-              // Each file is a card on the page's gutter, as on GitHub. The
-              // outline is a shadow, so it adds nothing CodeView must measure.
-              className="review-code-view h-full overflow-y-auto [&_diffs-container]:overflow-clip [&_diffs-container]:shadow-[0_0_0_1px_var(--border-default)] sm:[&_diffs-container]:mx-space-4 sm:[&_diffs-container]:rounded-lg"
-              renderCodeViewHeader={renderHeader}
-              renderCustomHeader={renderCustomHeader}
-              renderAnnotation={renderAnnotation}
-              onScroll={onScroll}
-            />
-            {diff.isError && (
-              <p
-                role="alert"
-                className="absolute inset-x-0 bottom-6 mx-auto w-fit rounded-lg bg-error-subtle px-space-3 py-space-2 text-xs text-error-secondary"
-              >
-                Couldn&apos;t load the changes: {diff.error.message}
-              </p>
-            )}
-            {selection && (
-              <SelectionBar
-                selection={selection}
-                onAsk={askAboutSelection}
-                onComment={() => {
-                  setComposer({ path: selection.path, range: selection.range })
-                  clearSelection()
-                }}
+            <div
+              ref={containerRef}
+              className="relative h-full min-h-0"
+              onMouseUp={onMouseUp}
+              onPointerDown={clearSelection}
+            >
+              <CodeView<Note>
+                ref={handle}
+                // Files wait for the overview above them, so they're never pushed down once painted.
+                items={detailQuery.isPending ? NO_ITEMS : items}
+                options={options}
+                // Each file is a card on the page's gutter, as on GitHub; a step
+                // opens with a bare heading over its cards. The outline is a
+                // shadow, so it adds nothing CodeView must measure.
+                className="review-code-view h-full overflow-y-auto [&_diffs-container]:overflow-clip sm:[&_diffs-container]:mx-space-4 [&_diffs-container:has([data-step-header])]:bg-transparent [&_diffs-container:not(:has([data-step-header]))]:shadow-[0_0_0_1px_var(--border-default)] sm:[&_diffs-container:not(:has([data-step-header]))]:rounded-lg"
+                renderCodeViewHeader={renderHeader}
+                renderCodeViewFooter={renderFooter}
+                renderCustomHeader={renderCustomHeader}
+                renderAnnotation={renderAnnotation}
+                onScroll={onScroll}
               />
-            )}
-          </div>
-        </WorkerPoolContextProvider>
-      </MarkersContext.Provider>
+              <ReadNudge groups={stepGroups} />
+              {diff.isError && (
+                <p
+                  role="alert"
+                  className="absolute inset-x-0 bottom-6 mx-auto w-fit rounded-lg bg-error-subtle px-space-3 py-space-2 text-xs text-error-secondary"
+                >
+                  Couldn&apos;t load the changes: {diff.error.message}
+                </p>
+              )}
+              {selection && (
+                <SelectionBar
+                  selection={selection}
+                  onAsk={askAboutSelection}
+                  onComment={() => {
+                    setComposer({
+                      path: selection.path,
+                      range: selection.range,
+                    })
+                    clearSelection()
+                  }}
+                />
+              )}
+            </div>
+          </WorkerPoolContextProvider>
+        </MarkersContext.Provider>
+      </StepsContext.Provider>
     </EntriesContext.Provider>
   )
 })
@@ -481,15 +566,11 @@ export const Changes = memo(function Changes({ pr }: { pr: PullRequestRef }) {
 function NoteView({
   pr,
   note,
-  entryId,
 }: {
   pr: PullRequestRef
-  note: Note
-  entryId: string
+  note: Exclude<Note, { kind: "step" }>
 }): ReactNode {
   switch (note.kind) {
-    case "step":
-      return <StepIntro entryId={entryId} />
     case "finding":
       return <FindingNoteView pr={pr} id={note.id} />
     case "thread":
@@ -552,27 +633,4 @@ function ComposerNote({ pr }: { pr: PullRequestRef }) {
   return composer ? (
     <Composer pr={pr} path={composer.path} range={composer.range} />
   ) : null
-}
-
-function StepIntro({ entryId }: { entryId: string }) {
-  const step = useEntry(entryId)?.step
-  if (!step) return null
-  return (
-    <NoteFrame className="pt-0 pb-space-2">
-      <div className="rounded-lg border border-brand-subtle bg-brand-subtle-gradient px-space-3 py-space-2">
-        <p className="flex items-center gap-space-2 text-xxs font-medium text-brand-primary">
-          <AgentMark className="size-3" />
-          Step {step.index} of {step.count}
-        </p>
-        <p className="mt-0.5 text-xs leading-5 font-semibold text-primary">
-          <InlineCode text={step.title} />
-        </p>
-        {step.summary && (
-          <div className="mt-space-1 max-w-[72ch] text-secondary [&_li]:text-xxs [&_li]:leading-5 [&_p]:text-xxs [&_p]:leading-5">
-            <Markdown content={step.summary} />
-          </div>
-        )}
-      </div>
-    </NoteFrame>
-  )
 }
