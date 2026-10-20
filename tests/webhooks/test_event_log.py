@@ -95,10 +95,7 @@ async def _partitions() -> set[str]:
         return set(rows.scalars().all())
 
 
-async def test_kinds_name_actions_and_narrow_by_prefix(
-    registry_db: None, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    monkeypatch.setattr(event_log, "_ROTATED_AT", None)
+async def test_kinds_name_actions_and_narrow_by_prefix(registry_db: None) -> None:
     request = Request(
         {
             "type": "http",
@@ -160,7 +157,6 @@ async def test_record_creates_its_partition_and_stores_form_bodies_as_objects(
         await release.wait()
 
     monkeypatch.setattr(segment, "record_webhook", slow_export)
-    monkeypatch.setattr(event_log, "_ROTATED_AT", None)
     monkeypatch.setattr(
         "openswe.slack.channels.SlackChannel.load",
         AsyncMock(
@@ -249,10 +245,7 @@ async def test_slack_event_log_reuses_directory_without_fetching_permissions(
     assert count == 1
 
 
-async def test_record_links_a_github_pr_comment_to_its_rows(
-    registry_db: None, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    monkeypatch.setattr(event_log, "_ROTATED_AT", None)
+async def test_record_links_a_github_pr_comment_to_its_rows(registry_db: None) -> None:
     ids = {name: uuid4() for name in ("user", "workspace", "repository", "pull_request")}
     async with transaction() as conn:
         for statement in (
@@ -302,7 +295,6 @@ async def test_slack_event_links_a_single_known_pr_without_dispatching(
     monkeypatch: pytest.MonkeyPatch,
     kind: Literal["message", "me_message", "edit", "multiple", "unknown"],
 ) -> None:
-    monkeypatch.setattr(event_log, "_ROTATED_AT", None)
     monkeypatch.setattr(
         "openswe.slack.channels.SlackChannel.load",
         AsyncMock(
