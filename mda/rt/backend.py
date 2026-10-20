@@ -59,12 +59,13 @@ Hook = Literal[
 # connection never reached the backend, so every hook is resent after one. A gateway
 # 502 or 503 usually means no backend was ready, but can also follow a backend that
 # took the call and died, so only calls that are safe to repeat are resent after
-# one: ``catalog`` only reads, and ``prepare``, which a restarted run makes again
-# anyway. ``before_model`` only builds the next model call, so it is also resent
-# after a 503, the answer a rollout gives it. A tool call is never resent: it may
-# have run. Nor is anything after a 504: the backend may still be running the call.
+# one: ``catalog`` only reads, ``prepare`` a restarted run makes again anyway, and
+# ``launch_worker`` only authorizes a launch or returns the worker it already made.
+# ``before_model`` only builds the next model call, so it is also resent after a 503,
+# the answer a rollout gives it. A tool call is never resent: it may have run. Nor is
+# anything after a 504: the backend may still be running the call.
 _RETRY_SECONDS: Final = (1.0, 2.0, 4.0, 8.0, 15.0, 30.0, 30.0, 30.0, 30.0, 30.0)
-_REPEATABLE_HOOKS: Final[frozenset[Hook]] = frozenset({"catalog", "prepare"})
+_REPEATABLE_HOOKS: Final[frozenset[Hook]] = frozenset({"catalog", "prepare", "launch_worker"})
 _RESENT_AFTER_503: Final[frozenset[Hook]] = _REPEATABLE_HOOKS | {"before_model"}
 _GATEWAY_STATUSES: Final = frozenset({502, 503, 504})
 _json_object = TypeAdapter(dict[str, JsonValue])
