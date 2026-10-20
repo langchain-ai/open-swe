@@ -1,4 +1,5 @@
 import json
+from datetime import UTC, datetime, timedelta
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
@@ -35,7 +36,20 @@ async def test_draft_request_offers_author_control_without_requesting_review(
     )
     if failure == "github":
         pull.pull.side_effect = HTTPException(502, "GitHub unavailable")
+    claimed: set[str] = set()
+
+    async def claim(scope: str, key: str, *, ttl: timedelta) -> bool:
+        if key in claimed:
+            return False
+        claimed.add(key)
+        return True
+
+    async def release(scope: str, key: str) -> None:
+        claimed.discard(key)
+
     with (
+        patch.object(readiness.event_claims, "claim", AsyncMock(side_effect=claim)),
+        patch.object(readiness.event_claims, "release", AsyncMock(side_effect=release)),
         patch.object(HumanReviewRequest, "active_for", AsyncMock(return_value=None)),
         patch.object(standard, "review_blockers", AsyncMock(return_value=["it is a draft"])),
         patch.object(User, "for_login", AsyncMock(return_value=author)),
@@ -58,6 +72,30 @@ async def test_draft_request_offers_author_control_without_requesting_review(
             channel="C2",
             inline_summary="A change",
         )
+        if failure is None:
+            repeated = await standard._request_review(
+                GitHubPrRef(
+                    owner="lc", repo="repo", number=7, url="https://github.com/lc/repo/pull/7"
+                ),
+                pull,
+                standard.Origin(thread_id="another-thread"),
+                channel="C2",
+                inline_summary="The same change",
+            )
+            assert "already sent or is being delivered" in repeated.error
+            assert dm.await_count == 1
+        elif failure == "delivery":
+            assert not claimed
+            dm.side_effect = None
+            retry = await readiness.offer_readiness(
+                GitHubPrRef(
+                    owner="lc", repo="repo", number=7, url="https://github.com/lc/repo/pull/7"
+                ),
+                pull,
+                standard.Origin(thread_id="origin"),
+            )
+            assert "Sent" in retry
+            assert dm.await_count == 2
     assert not result.success
     assert "it is a draft" in result.error
     save.assert_not_awaited()
@@ -73,6 +111,18 @@ async def test_draft_request_offers_author_control_without_requesting_review(
     card = readiness.ReadinessCard.model_validate_json(json.loads(value)["fingerprint"])
     assert card.author == "ada" and card.head_sha == "abc" and card.thread_id == "origin"
     assert len(value) <= 2000
+
+
+async def test_expired_card_cannot_mark_ready_after_a_replacement_is_sent() -> None:
+    card = readiness.ReadinessCard(
+        pr_url="https://github.com/lc/repo/pull/7",
+        author="ada",
+        slack_user_id="U1",
+        head_sha="abc",
+        expires_at=datetime.now(UTC) - timedelta(seconds=1),
+    )
+    with pytest.raises(ValueError, match="expired"):
+        await card.mark_ready("U1")
 
 
 @pytest.mark.parametrize(
@@ -171,6 +221,7 @@ async def test_readiness_click_binds_source_and_rolls_back_failed_mutations(scen
         patch.object(readiness, "post_slack_ephemeral_message", AsyncMock()) as error,
         patch.object(readiness, "note_for_concierge", AsyncMock()),
         patch.object(readiness.ReadinessCard, "mark_ready", mark),
+        patch.object(readiness.event_claims, "release", AsyncMock()),
         patch.object(readiness, "wake_thread_owner", AsyncMock()) as wake,
         patch.object(readiness, "dispatch_agent_run", AsyncMock()) as dispatch,
         patch.object(readiness, "langgraph_client") as client,
