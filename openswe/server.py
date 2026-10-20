@@ -48,7 +48,7 @@ from langchain_anthropic.middleware import AnthropicPromptCachingMiddleware
 from langchain_core.language_models import BaseChatModel
 from langchain_core.messages import HumanMessage, ToolMessage
 from langchain_core.tools import BaseTool
-from langchain_quickjs._ptc import is_valid_ptc_tool_name
+from langchain_quickjs._ptc import is_valid_ptc_tool_name, to_camel_case
 from langgraph.types import Command
 from langsmith.sandbox import SandboxRetryableConnectionError
 
@@ -271,6 +271,7 @@ from openswe.tools.manage_review_repos import manage_review_repos
 from openswe.tools.propose_pr_review import propose_pr_review
 from openswe.tools.propose_review_comment import propose_review_comment
 from openswe.tools.review_walkthrough import walkthrough_tools
+from openswe.tools.search_tools import SEARCH_TOOLS_NAME, search_tools_tool
 from openswe.tools.submit_review_assessment_feedback import submit_review_assessment_feedback
 from openswe.tools.task_threads import (
     control_worker,
@@ -828,6 +829,7 @@ _NOT_FROM_CODE = (
 )
 # Everyday tools code mode still offers the model directly.
 _DIRECT_IN_CODE_MODE = SANDBOX_TOOL_NAMES | {
+    SEARCH_TOOLS_NAME,
     "monitor",
     "open_pull_request",
     "web_search",
@@ -843,6 +845,11 @@ def callable_from_code(name: str) -> bool:
 def direct_and_from_code(name: str) -> bool:
     """Whether code mode offers a tool from code while keeping its schema on the model's list."""
     return callable_from_code(name) and name in _DIRECT_IN_CODE_MODE
+
+
+def code_name(name: str) -> str | None:
+    """The name code mode calls a tool by, as ``tools.<name>``, if it can."""
+    return to_camel_case(name) if callable_from_code(name) else None
 
 
 def code_only(name: str) -> bool:
@@ -1830,6 +1837,8 @@ async def build_agent(config: RunnableConfig, *, tool_surface: ToolSurface | Non
         ]
     if guide is not None:
         static_tools = [*static_tools, *walkthrough_tools(guide.mode)]
+    if tool_surface is not None:
+        static_tools = [*static_tools, search_tools_tool(tool_surface, code_name)]
     static_tools = apply_tool_descriptions(static_tools, _tool_description_values())
     if stop_summary_mode:
         static_tools = apply_tool_descriptions([slack_read_thread_messages, slack_reply])

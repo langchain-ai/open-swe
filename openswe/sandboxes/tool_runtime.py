@@ -1,5 +1,8 @@
 """Execute the agent's tool node without invoking its model."""
 
+import math
+import re
+from collections import Counter
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field
 from typing import cast
@@ -36,6 +39,60 @@ def tool_parameters(tool: BaseTool) -> dict[str, JsonValue]:
     if issubclass(schema, BaseModel):
         return schema.model_json_schema()
     return schema.schema()
+
+
+def describe_tool(name: str, tool: BaseTool) -> ToolDescription:
+    provenance = (tool.metadata or {}).get("mcp_provenance")
+    if not isinstance(provenance, MCPToolProvenance):
+        return ToolDescription(
+            name=name, description=tool.description, parameters=tool_parameters(tool)
+        )
+    return ToolDescription(
+        name=name,
+        description=tool.description
+        + "\n\n"
+        + prompt("tools/mcp-provenance", provenance=provenance.model_dump_json()),
+        parameters=tool_parameters(tool),
+        mcp_provenance=provenance,
+    )
+
+
+_WORD = re.compile(r"[A-Z]+(?![a-z])|[A-Z]?[a-z]+|[0-9]+")
+
+
+def _tokens(text: str) -> list[str]:
+    return [word.casefold() for word in _WORD.findall(text)]
+
+
+def _tool_tokens(name: str, tool: BaseTool) -> list[str]:
+    properties = tool_parameters(tool).get("properties")
+    parameters = " ".join(properties) if isinstance(properties, dict) else ""
+    # A match on the name says more than one buried in a long description.
+    return [*_tokens(name) * 3, *_tokens(tool.description), *_tokens(parameters)]
+
+
+def bm25(
+    query: Sequence[str], documents: Sequence[Sequence[str]], k1: float = 1.2, b: float = 0.75
+) -> list[float]:
+    """Okapi BM25 score of each document for ``query``."""
+    if not documents:
+        return []
+    average = sum(map(len, documents)) / len(documents) or 1
+    counts = [Counter(document) for document in documents]
+    scores = [0.0] * len(documents)
+    for term in set(query):
+        having = sum(1 for count in counts if term in count)
+        if not having:
+            continue
+        idf = math.log(1 + (len(documents) - having + 0.5) / (having + 0.5))
+        for index, count in enumerate(counts):
+            frequency = count[term]
+            if frequency:
+                length = len(documents[index]) / average
+                scores[index] += (
+                    idf * frequency * (k1 + 1) / (frequency + k1 * (1 - b + b * length))
+                )
+    return scores
 
 
 # The file and shell tools deepagents' FilesystemMiddleware gives every deep agent.
@@ -111,26 +168,17 @@ class ToolSurface:
         self.tools = {name: tool for name, tool in tools.items() if name not in excluded}
 
     def catalog(self) -> list[ToolDescription]:
-        results: list[ToolDescription] = []
-        for name, tool in sorted(self.tools.items()):
-            parameters = tool_parameters(tool)
-            provenance = (tool.metadata or {}).get("mcp_provenance")
-            description = tool.description
-            if isinstance(provenance, MCPToolProvenance):
-                description += "\n\n" + prompt(
-                    "tools/mcp-provenance", provenance=provenance.model_dump_json()
-                )
-            results.append(
-                ToolDescription(
-                    name=name,
-                    description=description,
-                    parameters=parameters,
-                    mcp_provenance=provenance
-                    if isinstance(provenance, MCPToolProvenance)
-                    else None,
-                )
-            )
-        return results
+        return [describe_tool(name, tool) for name, tool in sorted(self.tools.items())]
+
+    def search(self, query: str, limit: int) -> list[ToolDescription]:
+        """The tools whose name, description and parameters best match ``query``, by BM25."""
+        names = sorted(self.tools)
+        scores = bm25(_tokens(query), [_tool_tokens(name, self.tools[name]) for name in names])
+        ranked = sorted(
+            (item for item in zip(names, scores, strict=True) if item[1] > 0),
+            key=lambda item: -item[1],
+        )
+        return [describe_tool(name, self.tools[name]) for name, _ in ranked[:limit]]
 
     async def run(
         self,
