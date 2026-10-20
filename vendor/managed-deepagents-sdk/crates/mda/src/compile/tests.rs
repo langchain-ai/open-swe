@@ -4997,6 +4997,10 @@ fn compile_leaves_a_local_python_runtime_source_to_the_vendored_runtime() {
     with_py_runtime(&project.root, || compile(&project, &out_dir)).unwrap();
 
     assert!(!out_dir.join("__local__").exists());
+    let pyproject = read_toml(&out_dir.join("pyproject.toml"));
+    assert!(pyproject["tool"]["uv"]["sources"]
+        .get("managed_deepagents")
+        .is_none());
 }
 
 fn py_project_with_nested_local_package() -> (tempfile::TempDir, Project) {
