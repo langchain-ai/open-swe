@@ -231,11 +231,14 @@ class OpenSweBackend:
             except httpx2.TimeoutException as exc:
                 raise BackendTimeoutError(f"{hook} failed ({type(exc).__name__})") from exc
             except httpx2.ConnectError as exc:
-                if attempt == 2:
+                if attempt >= 2:
                     raise BackendUnavailableError(f"{hook} failed (ConnectError)") from exc
                 logger.warning("Backend connection failed; retrying", extra={"hook": hook})
                 await asyncio.sleep((1, 3)[attempt])
             except httpx2.HTTPError as exc:
+                gateway_failure = isinstance(
+                    exc, httpx2.HTTPStatusError
+                ) and exc.response.status_code in {502, 503, 504}
                 if isinstance(exc, httpx2.HTTPStatusError) and (
                     failure := _hook_failure(exc.response)
                 ):
@@ -243,9 +246,7 @@ class OpenSweBackend:
                     raise BackendCallError(f"{hook} failed: {failure.describe()}") from exc
                 error = (
                     BackendUnavailableError
-                    if isinstance(exc, httpx2.TransportError)
-                    or isinstance(exc, httpx2.HTTPStatusError)
-                    and exc.response.status_code in {502, 503, 504}
+                    if isinstance(exc, httpx2.TransportError) or gateway_failure
                     else BackendCallError
                 )
                 raise error(f"{hook} failed ({type(exc).__name__})") from exc

@@ -109,6 +109,14 @@ class Job(BaseModel):
                 },
             )
 
+    async def stop(self) -> None:
+        """Delete this job for good, unless it was queued again while this run held it."""
+        async with transaction() as conn:
+            await conn.execute(
+                text("DELETE FROM job WHERE id = :id AND claim_token = :token"),
+                {"id": self.id, "token": self.claim_token},
+            )
+
     async def retry_later(self) -> None:
         """After a failure: back off a one-shot job, or skip a cron job to its next fire time."""
         if self.cron is not None:

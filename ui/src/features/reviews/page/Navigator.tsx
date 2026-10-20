@@ -207,6 +207,14 @@ function StepList({
     <ol className="min-h-0 flex-1 overflow-y-auto px-space-2 pb-space-4">
       {groups.map(({ step, entries }) => {
         const active = entries.some((entry) => entry.id === activeEntry)
+        const additions = entries.reduce(
+          (sum, entry) => sum + entry.additions,
+          0
+        )
+        const deletions = entries.reduce(
+          (sum, entry) => sum + entry.deletions,
+          0
+        )
         return (
           <li key={step.index}>
             <button
@@ -235,8 +243,18 @@ function StepList({
                 )}
               >
                 <InlineCode text={step.title} />
-                <span className="block text-xxs text-secondary tabular-nums">
+                <span className="flex flex-wrap gap-x-space-2 text-xxs text-secondary tabular-nums">
                   {stepProgress(entries, viewed)}
+                  <span className="font-mono">
+                    {additions > 0 && (
+                      <span className="text-success-secondary">
+                        +{additions}
+                      </span>
+                    )}{" "}
+                    {deletions > 0 && (
+                      <span className="text-error-secondary">−{deletions}</span>
+                    )}
+                  </span>
                 </span>
               </span>
             </button>
@@ -459,15 +477,18 @@ function FileRow({
             {threads}
           </span>
         )}
-        {viewed ? (
+        <span
+          className="flex shrink-0 gap-space-1 font-mono text-xxs tabular-nums"
+          title={`${file.additions} lines added, ${file.deletions} lines deleted`}
+        >
+          <span className="text-success-secondary">+{file.additions}</span>
+          <span className="text-error-secondary">−{file.deletions}</span>
+        </span>
+        {viewed && (
           <CheckIcon
             weight="bold"
             className="size-3 shrink-0 text-brand-primary"
           />
-        ) : (
-          <span className="shrink-0 font-mono text-xxs text-secondary tabular-nums">
-            {changed}
-          </span>
         )}
       </button>
     </li>

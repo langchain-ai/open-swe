@@ -1,3 +1,4 @@
+import asyncio
 import logging
 import re
 from typing import Literal, TypedDict
@@ -5,12 +6,13 @@ from typing import Literal, TypedDict
 from fastapi import HTTPException
 
 from openswe.run_config import RunConfig
+from openswe.slack.availability import SlackUserInfo
 from openswe.slack.blocks import block_payload
 from openswe.slack.cards import origin_footer, run_slack_location
 from openswe.slack.client import (
     SLACK_USER_ID_RE,
     convert_mentions_to_slack_format,
-    get_slack_user_names,
+    get_slack_user_info,
     post_slack_top_level_message_with_ts,
 )
 from openswe.slack.http import SLACK_REQUEST_ERRORS, SlackClient, SlackRequestError, slack_error
@@ -45,6 +47,9 @@ class SlackChannelMember(TypedDict):
     id: str
     name: str
     github_login: str | None
+    status_text: str | None
+    status_emoji: str | None
+    status_expiration: int | None
 
 
 class SlackChannelMemberList(TypedDict):
@@ -154,11 +159,20 @@ async def slack_list_channel_members(
     next_cursor = metadata.get("next_cursor", "") if isinstance(metadata, dict) else None
     if not isinstance(next_cursor, str):
         return {"success": False, "error": "invalid_slack_response"}
-    names = await get_slack_user_names(member_ids)
-    members: list[SlackChannelMember] = [
-        {"id": member, "name": names[member], "github_login": await User.login_for_slack(member)}
-        for member in member_ids
-    ]
+    infos = await asyncio.gather(*(get_slack_user_info(member) for member in member_ids))
+    members: list[SlackChannelMember] = []
+    for member, info in zip(member_ids, infos, strict=True):
+        user = SlackUserInfo.model_validate(info) if info is not None else None
+        members.append(
+            {
+                "id": member,
+                "name": user.display_name or member if user else member,
+                "github_login": await User.login_for_slack(member),
+                "status_text": user.profile.status_text if user else None,
+                "status_emoji": user.profile.status_emoji if user else None,
+                "status_expiration": user.profile.status_expiration if user else None,
+            }
+        )
     return {
         "success": True,
         "channel_id": channel_id,

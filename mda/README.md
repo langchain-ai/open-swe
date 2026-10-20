@@ -23,8 +23,8 @@ This directory is its own project and is never imported by the backend.
 
 Every agent, reviewer and review scout thread runs here. The backend refuses to start without `MDA_RUNTIME_URL`, and its thread router (`openswe.threads.router`), which serves threads from its PostgreSQL thread index, routes these threads' runs to this deployment:
 
-- **Claiming.** Starting an `agent`, `reviewer` or `review-scout` run on a thread with no local history claims the thread for MDA (`runtime: mda` in its metadata). The run is created on `open-swe`, with its configurable moved into the signed context. A protocol v2 `run.start` becomes such a run too. Threads whose runs left checkpoints on the backend before it required MDA keep running there.
-- **Forwarding.** Every run, state, history, stream and cancel request for a claimed thread is then forwarded here. This covers the dashboard, the CLI and every backend client.
+- **Creating.** Every new thread is created here (`runtime: mda` in its metadata). Its runs are created on `open-swe`, with their configurable moved into the signed context. A protocol v2 `run.start` becomes such a run too. Threads created on the backend before it required MDA keep running there, and the router logs a warning each time one is used.
+- **Forwarding.** Every run, state, history, stream and cancel request for an MDA thread is forwarded here. This covers the dashboard, the CLI and every backend client.
 - **Indexing.** Thread reads and searches answer from the backend's thread index. A run started here marks the thread busy there, and the run-complete webhook settles it.
 
 ## Configure
@@ -67,10 +67,13 @@ Each Open SWE backend calls its own MDA deployment, created with `mda deploy`:
 Each deployment's configuration is `OPEN_SWE_BACKEND_URL` and `LANGSMITH_GATEWAY_API_KEY`, in the project `.env` that `mda deploy` forwards as secrets, replacing any set before. The gateway key is its backend's, so model calls count against that key's gateway spend cap; without it they fall back to the deployment's own LangSmith key and the workspace's cap. `deploy_mda.yml` reads it from the `LANGSMITH_GATEWAY_API_KEY_<ENVIRONMENT>` repository secret. The backends' `MDA_RUNTIME_URL` and `REMOTE_RUNTIME_TOKEN_SECRET` live in their Terraform. To deploy one by hand, with `.env` holding that deployment's backend URL and gateway key:
 
 ```bash
-uv tool install managed-deepagents==0.9.1
 cd mda
-mda deploy --name open-swe-mda-staging --deployment-type prod
+uv run --locked --python 3.13 mda deploy --name open-swe-mda-staging --deployment-type prod
 ```
+
+CI and manual deploys run the CLI from this project's locked environment, so its version follows the runtime dependency without a separate install pin. Keep `managed-deepagents` and `deepagents` exactly pinned and refresh `mda/uv.lock` when bumping them; `--locked` rejects an out-of-date lockfile.
+
+The preview can also deploy an unreleased SDK commit, for a preview-labelled PR only. The PR takes `managed-deepagents` from that commit in `[tool.uv.sources]` (`git` on `langchain-ai/managed-deepagents-sdk`, a full `rev`, `subdirectory = "packages/pypi"`), pinned to that commit's package version, and relocks. The preview workflow reads the SHA directly from the assembled tree, builds that commit's compiler, and deploys with it and its runtime (`scripts/preview_mda_source.py`); no separate approval variable is needed. Applying the `preview` label authorizes running the PR's code and its selected SDK commit, including subsequent updates while labelled, so only trusted maintainers should apply it. Sources outside that repository or package, or without a full lowercase commit SHA, fail the MDA deploy. Staging and production never build from source.
 
 Nothing here is generated from the backend: tools, subagents and models come from each run's `catalog`.
 

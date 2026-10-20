@@ -919,7 +919,7 @@ async def test_list_dashboard_threads_page_pages_beyond_first_search_batch(monke
     run_list_calls = 0
 
     class FakeThreads:
-        async def search(self, *, metadata, limit, offset, sort_by, sort_order, select):
+        async def search(self, *, metadata, limit, offset, sort_by, sort_order, select, params):
             offsets.append(offset)
             assert select == thread_listing._THREAD_LIST_SELECT
             return threads[offset : offset + limit]
@@ -1154,7 +1154,7 @@ async def test_list_dashboard_threads_page_scopes_search_to_requested_participan
     searches: list[dict[str, object]] = []
 
     class FakeThreads:
-        async def search(self, *, metadata, limit, offset, sort_by, sort_order, select):
+        async def search(self, *, metadata, limit, offset, sort_by, sort_order, select, params):
             searches.append(metadata)
             return threads[offset : offset + limit]
 
@@ -1178,11 +1178,7 @@ async def test_list_dashboard_threads_page_scopes_search_to_requested_participan
         surfaced_only=True,
     )
 
-    # The legacy owner filter rides along until pre-participant threads age out.
-    assert searches == [
-        {"participant_logins": {"other-user": True}},
-        {"github_login": "other-user"},
-    ]
+    assert searches == [{"participant_logins": {"other-user": True}}]
     assert [item["id"] for item in result["items"]] == ["surfaced"]
 
 
@@ -1199,7 +1195,7 @@ async def test_list_dashboard_threads_page_filters_ownerless_threads(monkeypatch
     }
 
     class FakeThreads:
-        async def search(self, *, metadata, limit, offset, sort_by, sort_order, select):
+        async def search(self, *, metadata, limit, offset, sort_by, sort_order, select, params):
             return threads[offset : offset + limit]
 
     class FakeRuns:
@@ -1242,7 +1238,7 @@ async def test_status_filter_refreshes_threads_missing_run_status(monkeypatch) -
     run_list_thread_ids: list[str] = []
 
     class FakeThreads:
-        async def search(self, *, metadata, limit, offset, sort_by, sort_order, select):
+        async def search(self, *, metadata, limit, offset, sort_by, sort_order, select, params):
             return threads[offset : offset + limit]
 
         async def update(self, *, thread_id, metadata):
