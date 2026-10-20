@@ -18,7 +18,9 @@
 
 @custom-variant dark (&:where(.dark, .dark *));
 
-body:has(.version-mismatch-banner) {
+/* A class, not `body:has(.version-mismatch-banner)`: Chrome restyles the whole
+   document for a `:has()` on `body` after every DOM change. */
+body.version-mismatch {
     .h-svh { height: calc(100svh - 2.5rem); }
     .min-h-svh { min-height: calc(100svh - 2.5rem); }
     .fixed.top-2 { top: 3rem; }
