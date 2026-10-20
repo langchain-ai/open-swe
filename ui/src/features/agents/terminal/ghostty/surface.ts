@@ -4,7 +4,7 @@ import {
   extractTerminalLinks,
 } from "../terminalLinks"
 import { installGhosttyStyles } from "./styles"
-import { GhosttyTerminalCore } from "./core"
+import { GhosttyTerminalCore, ghosttyColorsEqual } from "./core"
 import {
   measureGhosttyCell,
   renderGhosttySnapshot,
@@ -1660,7 +1660,14 @@ export class GhosttyTerminalSurface {
       window.cancelAnimationFrame(this.frame)
       this.frame = 0
     }
+    const previousBackground = this.snapshot?.background
     this.snapshot = this.core.snapshot()
+    if (
+      previousBackground === undefined ||
+      !ghosttyColorsEqual(previousBackground, this.snapshot.background)
+    ) {
+      this.forceFullRender = true
+    }
     // A cursor that is not blinking right now must be drawn, never caught in an
     // off phase left behind by a blink that has since been turned off.
     if (!this.blinkEnabled()) this.cursorOn = true

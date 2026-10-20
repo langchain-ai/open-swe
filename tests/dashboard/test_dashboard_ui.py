@@ -112,6 +112,53 @@ def test_serving_under_a_mount_prefix(build_dir: Path) -> None:
     assert client.get("/", headers=HTML).status_code == 404
 
 
+@pytest.mark.parametrize("dashboard_url", ["https://dashboard.example/open-swe", ""])
+def test_mcp_consent_keeps_branding_on_root_auth_routes(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, dashboard_url: str
+) -> None:
+    from fastmcp.server.auth.providers.github import GitHubProvider
+    from key_value.aio.stores.memory import MemoryStore
+
+    from openswe.mcp import server
+
+    monkeypatch.setenv("DASHBOARD_BASE_URL", dashboard_url)
+    monkeypatch.setenv("DASHBOARD_API_BASE_URL", "http://localhost")
+    monkeypatch.setenv("DASHBOARD_STATIC_DIR", str(tmp_path))
+    monkeypatch.delenv("DASHBOARD_DEV_SERVER_URL", raising=False)
+    auth = GitHubProvider(
+        client_id="test-client",
+        client_secret="test-secret",
+        base_url="http://localhost/dashboard/api/auth",
+        client_storage=MemoryStore(),
+    )
+    monkeypatch.setattr(server, "_auth", lambda: auth)
+    monkeypatch.setattr(app_module, "AGENT_MCP", server.build_mount())
+    client = TestClient(app_module.create_app(), base_url="http://localhost")
+    registration = client.post(
+        "/dashboard/api/auth/register",
+        json={"client_name": "Claude Code", "redirect_uris": ["http://localhost:65199/callback"]},
+    )
+    assert registration.status_code == 201
+    response = client.get(
+        "/dashboard/api/auth/authorize",
+        params={
+            "client_id": registration.json()["client_id"],
+            "redirect_uri": "http://localhost:65199/callback",
+            "response_type": "code",
+            "code_challenge": "a" * 43,
+            "code_challenge_method": "S256",
+        },
+    )
+    assert response.status_code == 200
+    assert "Open SWE" in response.text
+    if dashboard_url:
+        assert f'src="{dashboard_url}/logo-mark.png"' in response.text
+        assert f'href="{dashboard_url}"' in response.text
+    else:
+        assert "/logo-mark.png" not in response.text
+        assert 'class="server-name-link"' not in response.text
+
+
 # --- Vite dev server proxy -------------------------------------------------------------
 
 

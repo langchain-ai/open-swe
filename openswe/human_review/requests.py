@@ -119,6 +119,7 @@ class HumanReviewRequest(Base):
     slack_message_ts: Mapped[str] = mapped_column(server_default="", default="")
     # Slack only renders a file cited when the message is first posted, so updates reuse it.
     slack_diff_file_id: Mapped[str] = mapped_column(server_default="", default="")
+    auto_merge: Mapped[bool] = mapped_column(server_default="true", default=True)
     # A draft PR's expedited card offers only "Mark ready", to its author, until they click it.
     awaiting_ready: Mapped[bool] = mapped_column(server_default="false", default=False)
     # The posted card is a thread reply also sent to the channel.
@@ -367,13 +368,14 @@ class HumanReviewRequest(Base):
             return Counter(dict(rows.tuples().all()))
 
     @classmethod
-    async def is_card_thread(cls, channel_id: str, thread_ts: str) -> bool:
-        """Whether this Slack thread contains an Open SWE review-request card."""
+    async def card_in_thread(cls, channel_id: str, thread_ts: str) -> Self | None:
+        """The Open SWE review-request card this Slack thread holds, with its pull request."""
         if not postgres.configured():
-            return False
+            return None
         async with postgres.session() as session:
-            request_id = await session.scalar(
-                select(cls.id)
+            return await session.scalar(
+                select(cls)
+                .options(selectinload(cls.pull_request))
                 .where(
                     cls.kind.in_(("standard", "expedited")),
                     or_(
@@ -388,9 +390,9 @@ class HumanReviewRequest(Base):
                         & (cls.slack_copy_ts == thread_ts),
                     ),
                 )
+                .order_by(cls.created_at.desc())
                 .limit(1)
             )
-            return request_id is not None
 
     @classmethod
     async def copy_channels_for_author(cls, login: str, *, since: datetime) -> list[str]:
@@ -446,6 +448,23 @@ class HumanReviewRequest(Base):
                 .execution_options(populate_existing=True)
             )
             yield session, row
+
+    @classmethod
+    @asynccontextmanager
+    async def locked_post(cls, channel_id: str, message_ts: str) -> AsyncIterator[list[Self]]:
+        """Lock every PR watched on one Slack message in a stable order."""
+        async with postgres.session() as session:
+            rows = await session.scalars(
+                cls._loaded(select(cls))
+                .where(
+                    cls.kind == "posted",
+                    cls.slack_channel_id == channel_id,
+                    cls.slack_message_ts == message_ts,
+                )
+                .order_by(cls.id)
+                .with_for_update(of=cls)
+            )
+            yield list(rows)
 
     async def record_pick_message(self, user_id: UUID, message: PickMessage) -> None:
         """Remember the DM that asked ``user_id`` to take their pick, so it can be edited later."""

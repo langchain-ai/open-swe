@@ -23,19 +23,19 @@ from fastmcp.utilities.components import FastMCPComponent
 from pydantic import JsonValue
 from starlette.routing import BaseRoute, Route
 
-from mcp.types import TextContent
+from mcp.types import Icon, TextContent
 from openswe.config import ENV
 from openswe.dashboard.dev_login import dev_login_enabled
 from openswe.dashboard.oauth import AUTH_PATH, GITHUB_CALLBACK_PATH, MCP_SIGN_IN_CALLBACK_PATH
 from openswe.mcp.caller import ToolCaller
 from openswe.mcp.token_store import SealedStore
-from openswe.utils.dashboard_links import dashboard_api_base_url
+from openswe.utils.dashboard_links import dashboard_api_base_url, dashboard_base_url
 
 logger = logging.getLogger(__name__)
 
 PREFIX: Final = "/oswe"
 _MCP_PATH: Final = "/mcp"
-_SERVER_NAME: Final = "oswe"
+_SERVER_NAME: Final = "Open SWE"
 _GITHUB_CACHE_SECONDS: Final = 300
 
 
@@ -118,7 +118,16 @@ def build_mount() -> Mount | None:
     auth = _auth()
     if auth is None:
         return None
-    server = FastMCP(_SERVER_NAME, providers=[_CallerProvider()], auth=auth)
+    dashboard_url = dashboard_base_url()
+    server = FastMCP(
+        _SERVER_NAME,
+        icons=[Icon(src=f"{dashboard_url}/logo-mark.png", mime_type="image/png")]
+        if dashboard_url
+        else None,
+        website_url=dashboard_url or None,
+        providers=[_CallerProvider()],
+        auth=auth,
+    )
     # The only provider is the caller's catalog: a refusal must reach the client,
     # not list as an empty catalog.
     server.provider_error_strategy = "raise"

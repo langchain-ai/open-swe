@@ -8,7 +8,6 @@ from openswe.slack.client import (
     slack_image_file_urls,
     slack_message_bot_id,
 )
-from openswe.tools.sandbox_preference import sandbox_only
 
 
 async def fetch_and_format_thread(channel_id: str, message_ts: str) -> dict[str, Any]:
@@ -48,7 +47,6 @@ async def fetch_and_format_thread(channel_id: str, message_ts: str) -> dict[str,
     }
 
 
-@sandbox_only
 async def slack_read_thread_messages(channel_id: str, message_ts: str) -> dict[str, Any]:
     """Implement the `slack_read_thread_messages` tool."""
     if not channel_id or not channel_id.strip():

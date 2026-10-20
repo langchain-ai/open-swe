@@ -121,14 +121,13 @@
 
 .chat-markdown a {
   color: var(--text-brand-primary);
-  text-decoration: none;
+  text-decoration: underline;
+  text-underline-offset: 2px;
 }
 
 .chat-markdown a:hover,
 .chat-markdown a:focus-visible {
-  text-decoration: underline;
   text-decoration-style: dotted;
-  text-underline-offset: 2px;
 }
 
 .chat-markdown blockquote {

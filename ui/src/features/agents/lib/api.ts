@@ -2,6 +2,7 @@ import type {
   AgentPullRequestContextResponse,
   ThreadFixScope,
   AgentPullRequestStatusResponse,
+  AgentBackgroundWork,
   AgentQueuedMessage,
   AgentSchedule,
   AgentThread,
@@ -29,6 +30,11 @@ export class AgentsApiError extends DashboardRequestError {
     this.name = "AgentsApiError"
   }
 }
+
+/** Where a thread moves: onto this Mac through its bridge, or to the cloud. */
+export type ThreadMoveDestination =
+  | { sandbox_bridge_id: string }
+  | { target: "cloud" }
 
 export interface ScheduleCreateRequest {
   prompt: string
@@ -302,6 +308,11 @@ export const agentsApi = {
       `/threads/${encodeURIComponent(threadId)}/share-to-workspace`,
       { method: "POST" }
     ),
+  moveThread: (threadId: string, destination: ThreadMoveDestination) =>
+    agentsRequest<AgentThread>(
+      `/threads/${encodeURIComponent(threadId)}/move`,
+      { method: "POST", body: JSON.stringify(destination) }
+    ),
   continueThreadPrivately: (threadId: string) =>
     agentsRequest<AgentThread>(
       `/threads/${encodeURIComponent(threadId)}/continue-private`,
@@ -367,6 +378,10 @@ export const agentsApi = {
   getThreadPullRequestStatus: (threadId: string) =>
     agentsRequest<AgentPullRequestStatusResponse>(
       `/threads/${encodeURIComponent(threadId)}/pull-request-status`
+    ),
+  getThreadBackgroundWork: (threadId: string) =>
+    agentsRequest<AgentBackgroundWork>(
+      `/threads/${encodeURIComponent(threadId)}/background-work`
     ),
   getThreadQueuedMessages: (threadId: string) =>
     agentsRequest<Array<AgentQueuedMessage>>(

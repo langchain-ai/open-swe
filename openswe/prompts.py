@@ -6,6 +6,8 @@ from pathlib import PurePosixPath
 from jinja2 import Environment, FunctionLoader, StrictUndefined
 from langchain_core.tools import BaseTool, tool
 
+from openswe.config import ENV
+
 _PROMPT_ROOT = resources.files("openswe.resources").joinpath("prompts")
 
 
@@ -113,3 +115,22 @@ def warm_tool_schemas(
 
     for described in apply_tool_descriptions(tools, values):
         convert_to_openai_tool(described)
+
+
+def _deployment_context() -> tuple[str, str]:
+    """Identify the agent service deployment from explicit configuration."""
+    if configured := ENV.OPENSWE_ENV.optional():
+        environment = configured.lower()
+        return "production" if environment == "prod" else environment, "OPENSWE_ENV"
+    if ENV.LANGSMITH_LANGGRAPH_API_VARIANT.optional() == "local_dev":
+        return "local", "LANGSMITH_LANGGRAPH_API_VARIANT"
+    return "unknown", "no explicit environment or local runtime marker"
+
+
+def common_prompt(agent_prompt: str = "") -> str:
+    """Add deployment context only for preview and staging services."""
+    environment, source = _deployment_context()
+    if environment not in {"preview", "staging"}:
+        return agent_prompt
+    shared = prompt("system/common", deployment_environment=environment, deployment_source=source)
+    return f"{shared}\n\n{agent_prompt}" if agent_prompt else shared

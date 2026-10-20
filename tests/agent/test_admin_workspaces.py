@@ -277,7 +277,7 @@ async def test_roster_admin_flag_is_the_participants_own(monkeypatch: pytest.Mon
     from openswe import server
 
     monkeypatch.setenv("CONFIGURED_ADMINS", "admin@example.com")
-    monkeypatch.setattr(server, "_user_for_login", AsyncMock(return_value=None))
+    monkeypatch.setattr(server, "_participant_user", AsyncMock(return_value=None))
     monkeypatch.setattr(server, "load_profile", AsyncMock(return_value=None))
     monkeypatch.setattr(server, "_resolve_user_custom_instructions", AsyncMock(return_value=None))
     monkeypatch.setattr(User, "email_for_login", AsyncMock(return_value="bob@example.com"))

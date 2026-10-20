@@ -29,7 +29,7 @@ def _button_value(action: str, request: HumanReviewRequest) -> str:
 
 def _label(request: HumanReviewRequest) -> str:
     pr = request.pull_request
-    return f"{pr.owner}/{pr.repo}#{pr.number}"
+    return pr.label
 
 
 def _reviewer_line(reviewer: HumanReviewParticipant, states: dict[str, str]) -> str:
@@ -153,6 +153,9 @@ def open_card(
     if request.tldr:
         blocks.append(section("\n".join(f">{line}" for line in escape(request.tldr).splitlines())))
     blocks.append(context(_stats(request, author, requester)))
+    blocks.append(
+        context("Auto-merge enabled" if request.auto_merge else "Manual merge — auto-merge is off")
+    )
     blocks.extend(_reviewers(request, review_states))
     if request.detail:
         blocks.append(context(f"Waiting on: {escape(request.detail)}."))

@@ -56,10 +56,12 @@ export function RunTargetSelector({
         icon={value === "local" ? LaptopRegularIcon : CloudIcon}
       />
       <span>{value === "local" ? "This Mac" : "Cloud"}</span>
-      {pending && <span className="text-tertiary">· next message</span>}
+      {pending && <span className="text-tertiary">· moving…</span>}
     </>
   )
-  const title = pending ? "Moves with your next message" : undefined
+  const title = pending
+    ? "Moving this thread and its checkout; send once it's there"
+    : undefined
   if (!onChange)
     return (
       <span

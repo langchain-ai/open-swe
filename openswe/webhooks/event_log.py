@@ -22,7 +22,7 @@ logger = logging.getLogger(__name__)
 
 type WebhookSource = Literal["github", "slack", "linear", "deployment"]
 
-RETAINED_DAYS = 2
+RETAINED_DAYS = 14
 _TABLE = "event_log"
 _ROTATE_INTERVAL_SECONDS = 3600
 
@@ -263,7 +263,9 @@ class EventLog:
             except Exception:
                 logger.warning("Checking event log Slack channel failed", exc_info=True)
                 return True
-            if channel is None or not channel.details.publishes_events:
+            if channel is None:
+                return False
+            if not channel.details.publishes_events:
                 return True
         try:
             await cls.ensure_partitions()
