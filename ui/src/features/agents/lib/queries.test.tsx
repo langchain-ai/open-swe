@@ -535,6 +535,32 @@ describe("sidebar queries", () => {
     ).toBe("success")
   })
 
+  it("returns the loaded coordinator when the active thread is one of its workers", () => {
+    const worker = { id: "worker-thread", title: "Worker" } as AgentThread
+    const coordinator = {
+      id: "coordinator-thread",
+      title: "Coordinator",
+      taskMembership: { role: "coordinator" },
+      taskWorkers: [worker],
+    } as AgentThread
+    const client = testClient()
+    client.setQueryData(agentThreadKeys.detail(worker.id), worker)
+    const { result } = renderHook(
+      () =>
+        useSidebarActiveThread({
+          activeThreadId: worker.id,
+          loadedThreads: [coordinator],
+        }),
+      {
+        wrapper: ({ children }) => (
+          <QueryClientProvider client={client}>{children}</QueryClientProvider>
+        ),
+      }
+    )
+
+    expect(result.current).toBe(coordinator)
+  })
+
   it("keeps the deep-linked active thread available as cached pages catch up", async () => {
     const opened = {
       id: "opened-thread",
