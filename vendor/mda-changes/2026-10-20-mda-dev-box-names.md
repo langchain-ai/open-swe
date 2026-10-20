@@ -14,4 +14,4 @@ An unnamed box is found only through the process's cache, so restarting `mda dev
 
 ## Upstream
 
-Propose unchanged, in langchain-ai/managed-deepagents-sdk#935.
+As it stands, unchanged.

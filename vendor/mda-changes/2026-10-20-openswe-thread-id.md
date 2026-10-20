@@ -14,4 +14,4 @@ An Open SWE task worker works in its coordinator's sandbox. Open SWE's backend c
 
 ## Upstream
 
-MDA should let a run share another thread's box only once it has verified the caller may: the same caller owns both threads, or the threads are linked by MDA (as langchain-ai/managed-deepagents-sdk#728 does for async subagents and their lead). Then Open SWE links worker threads that way and drops the option.
+MDA should let a run share another thread's box only once it has verified the caller may: the same caller owns both threads, or MDA itself linked the threads, as it does an async subagent to its lead. Then Open SWE links worker threads that way and drops the option.

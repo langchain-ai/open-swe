@@ -18,7 +18,7 @@ Before every command it runs in the box, MDA replaces the box's whole proxy conf
 
 Each writer should own only its rules and leave the rest:
 
-- **LangSmith sandboxes:** an atomic per-namespace rule write, so writers never read-modify-write the whole config (being added in langchainplus, "Sandbox proxy-rule namespaces API").
+- **LangSmith sandboxes:** an atomic per-namespace rule write, so writers never read-modify-write the whole config.
 - **MDA:** write its rules under its own namespace and never touch the others.
 - **Open SWE:** write its rules under its own namespace, then drop this option.
 

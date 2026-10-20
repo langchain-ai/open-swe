@@ -15,4 +15,4 @@ Open SWE's backend works in the same box as MDA, so it needs the box's name befo
 
 ## Upstream
 
-Propose both unchanged, in langchain-ai/managed-deepagents-sdk#935.
+Both as they stand, unchanged.
