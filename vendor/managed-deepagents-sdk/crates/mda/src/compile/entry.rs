@@ -8,7 +8,7 @@ use serde_json::json;
 
 use crate::project::Language;
 
-use super::{IDENTITY_EXPORT, MEMORY_EXPORT, NODE_VERSION, RUNTIME_DIR};
+use super::{BROWSER_EXPORT, IDENTITY_EXPORT, MEMORY_EXPORT, NODE_VERSION, RUNTIME_DIR};
 
 /// Encode `value` as a string literal valid in both TypeScript and Python.
 ///
@@ -60,6 +60,9 @@ pub(super) struct EntryInputs<'a> {
     /// Module specifier for the root `memory` declaration, if the project opts
     /// into durable memory. Absent means the runtime mounts nothing.
     pub(super) memory_import: Option<&'a str>,
+    /// Module specifier for the root `browser` declaration (Python only), if
+    /// the project opts into browser use.
+    pub(super) browser_import: Option<&'a str>,
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -317,6 +320,11 @@ fn generate_python_entry(inputs: &EntryInputs<'_>) -> String {
             "from {memory_import} import {MEMORY_EXPORT} as _memory\n"
         ));
     }
+    if let Some(browser_import) = inputs.browser_import {
+        out.push_str(&format!(
+            "from {browser_import} import {BROWSER_EXPORT} as _browser\n"
+        ));
+    }
     out.push('\n');
 
     // Keyword arguments handed to the runtime.
@@ -386,6 +394,9 @@ fn generate_python_entry(inputs: &EntryInputs<'_>) -> String {
     }
     if inputs.memory_import.is_some() {
         kwargs.push("memory=_memory".to_string());
+    }
+    if inputs.browser_import.is_some() {
+        kwargs.push("browser=_browser".to_string());
     }
     out.push('\n');
 
@@ -855,6 +866,7 @@ mod tests {
                 channels_import: None,
                 identity_import: None,
                 memory_import: None,
+                browser_import: None,
             };
             for (language, check) in [
                 (
@@ -901,6 +913,7 @@ mod tests {
                 channels_import: None,
                 identity_import: None,
                 memory_import: None,
+                browser_import: None,
             };
             for language in [Language::TypeScript, Language::Python] {
                 let entry = generate_entry(language, &inputs);
@@ -928,6 +941,7 @@ mod tests {
                 channels_import: None,
                 identity_import: None,
                 memory_import: None,
+                browser_import: None,
             },
         );
 
@@ -962,6 +976,7 @@ mod tests {
                 channels_import: None,
                 identity_import: None,
                 memory_import: None,
+                browser_import: None,
             },
         );
 

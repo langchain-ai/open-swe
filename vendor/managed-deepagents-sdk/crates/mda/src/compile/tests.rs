@@ -3829,6 +3829,7 @@ fn eval_dependency_injection_prefers_explicit_override_for_typescript() {
         true,
         Some("openai:gpt-5-mini"),
         Some("anthropic:claude-sonnet-4-5"),
+        false,
     )
     .unwrap();
 
@@ -4178,6 +4179,77 @@ fn compile_wires_python_memory() {
         "await compile_managed_agent_async(_definition, config, context_root=_context_root, \
          has_skills=_has_skills, memory=_memory, runtime=runtime)"
     ));
+}
+
+#[test]
+fn compile_wires_python_browser_and_adds_stagehand() {
+    let root = tempfile::tempdir().unwrap();
+    write_file(
+        root.path(),
+        "agent.py",
+        "agent = define_deep_agent(name=\"agent\", model=\"openai:gpt-5\")\n",
+    );
+    write_file(
+        root.path(),
+        "browser.py",
+        concat!(
+            "from managed_deepagents import define_browser\n",
+            "browser = define_browser(scope=\"user\")\n",
+        ),
+    );
+    write_file(
+        root.path(),
+        "pyproject.toml",
+        "[project]\nname = \"example\"\nversion = \"0.0.0\"\ndependencies = [\"deepagents>=0.7.3\"]\n",
+    );
+
+    let project = Project {
+        root: root.path().to_path_buf(),
+        language: Language::Python,
+        agent_file: PathBuf::from("agent.py"),
+        files: vec![
+            PathBuf::from("agent.py"),
+            PathBuf::from("browser.py"),
+            PathBuf::from("pyproject.toml"),
+        ],
+    };
+
+    let out_dir = root.path().join(".mda").join("build");
+    with_py_runtime(root.path(), || compile(&project, &out_dir)).unwrap();
+
+    let entry_out = fs::read_to_string(out_dir.join("_mda_entry.py")).unwrap();
+    assert!(entry_out.contains("from browser import browser as _browser"));
+    assert!(entry_out.contains(
+        "await compile_managed_agent_async(_definition, config, context_root=_context_root, \
+         has_skills=_has_skills, browser=_browser, runtime=runtime)"
+    ));
+    let pyproject = fs::read_to_string(out_dir.join("pyproject.toml")).unwrap();
+    assert!(pyproject.contains("stagehand==4.3.0"));
+}
+
+#[test]
+fn compile_ignores_browser_in_typescript() {
+    let root = tempfile::tempdir().unwrap();
+    setup_mock_ts_runtime(root.path());
+    write_file(
+        root.path(),
+        "agent.ts",
+        "export const agent = defineDeepAgent({ name: \"agent\", model: \"openai:gpt-5\" });\n",
+    );
+    write_file(root.path(), "browser.py", "browser = None\n");
+
+    let project = Project {
+        root: root.path().to_path_buf(),
+        language: Language::TypeScript,
+        agent_file: PathBuf::from("agent.ts"),
+        files: vec![PathBuf::from("agent.ts"), PathBuf::from("browser.py")],
+    };
+
+    let out_dir = root.path().join(".mda").join("build");
+    compile(&project, &out_dir).unwrap();
+
+    let entry_out = fs::read_to_string(out_dir.join("_mda_entry.ts")).unwrap();
+    assert!(!entry_out.contains("browser"));
 }
 
 #[test]
