@@ -252,6 +252,8 @@ async function runCommand(options: RunOptions): Promise<number> {
   })
 
   let exitCode = 0
+  // 128 + SIGINT, as shells report an interrupted command, so `oswe run … &&` stops.
+  const INTERRUPTED = 130
   let closing = false
   let interrupts = 0
   let following = false
@@ -272,7 +274,8 @@ async function runCommand(options: RunOptions): Promise<number> {
 
   process.on("SIGINT", () => {
     interrupts += 1
-    if (interrupts > 1) process.exit(130)
+    if (interrupts > 1) process.exit(INTERRUPTED)
+    exitCode = INTERRUPTED
     note(
       "\nStopping the run and its workers — press Ctrl-C again to exit immediately."
     )
@@ -323,7 +326,10 @@ async function runCommand(options: RunOptions): Promise<number> {
     following = false
   }
 
-  if (outcome?.status === "completed" && outcome.result) {
+  if (interrupts > 0) {
+    // The run ended because Ctrl-C cancelled it, not on its own.
+    exitCode = INTERRUPTED
+  } else if (outcome?.status === "completed" && outcome.result) {
     printResult(outcome.result)
     exitCode = outcome.result.exitCode
   } else if (outcome !== null) {

@@ -151,7 +151,8 @@ reason to stderr and exits 1. The server re-prompts the agent twice before givin
 missing result.
 
 Ctrl-C once cancels the run and every worker still running, releases the
-bridge and exits. Ctrl-C twice exits immediately.
+bridge and exits with 130, as an interrupted command does. Ctrl-C twice exits
+immediately, also with 130.
 
 Options:
 
