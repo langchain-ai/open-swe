@@ -16,8 +16,9 @@ from openswe.utils.authorship import (
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("source_slack_id", ["", "U_CURRENT"])
-async def test_participant_context_includes_slack_identity(
-    monkeypatch: pytest.MonkeyPatch, source_slack_id: str
+@pytest.mark.parametrize("run_login", ["mason", ""])
+async def test_participant_context_resolves_canonical_identity(
+    monkeypatch: pytest.MonkeyPatch, source_slack_id: str, run_login: str
 ) -> None:
     from unittest.mock import AsyncMock
 
@@ -27,9 +28,12 @@ async def test_participant_context_includes_slack_identity(
 
     user = User(
         display_name="Mason",
-        identities=[UserIdentity(provider="slack", external_id="U_LINKED")],
+        identities=[
+            UserIdentity(provider="slack", external_id="U_LINKED"),
+            UserIdentity(provider="github", external_id="123", login="mason"),
+        ],
     )
-    monkeypatch.setattr("openswe.server._user_for_login", AsyncMock(return_value=user))
+    monkeypatch.setattr(User, "get", AsyncMock(return_value=user))
     monkeypatch.setattr("openswe.server.load_profile", AsyncMock(return_value={}))
     monkeypatch.setattr("openswe.server.participant_is_admin", AsyncMock(return_value=False))
     monkeypatch.setattr(
@@ -40,12 +44,16 @@ async def test_participant_context_includes_slack_identity(
             display_name="Mason",
             commit_name="Mason",
             commit_email="mason@example.com",
-            github_login="mason",
+            github_login=run_login,
         ),
         {},
+        person_id=f"user:{user.id}",
         slack_user_id=source_slack_id,
     )
     content = person_introduction(participant.as_person())["content"]
+    assert "open_swe_account: linked" in content
+    assert "github_login: mason" in content
+    assert "commit_email: mason@users.noreply.github.com" in content
     assert f"slack_user_id: {source_slack_id or 'U_LINKED'}" in content
 
 
