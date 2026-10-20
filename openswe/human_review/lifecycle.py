@@ -302,6 +302,7 @@ class ReviewCard:
                 request.created_at,
                 states,
                 datetime.now(UTC),
+                auto_merge=request.auto_merge,
             )
             is None
         ):

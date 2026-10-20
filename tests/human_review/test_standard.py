@@ -415,13 +415,16 @@ def test_every_reviewer_approving_merges_before_the_deadline() -> None:
     assert merge_wait(["grace", "linus"], _NOW, states, _NOW) is None
 
 
-def test_one_approval_waits_for_the_other_reviewers_until_the_deadline() -> None:
+@pytest.mark.parametrize("auto_merge", [False, True])
+def test_one_approval_waits_for_the_other_reviewers_until_the_deadline(auto_merge: bool) -> None:
     states = {"grace": "APPROVED"}
     early = _NOW - timedelta(hours=1)
     late = _NOW - timedelta(hours=2)
 
     assert merge_wait(["grace", "linus"], early, states, _NOW) == "approval from @linus"
-    assert merge_wait(["grace", "linus"], late, states, _NOW) is None
+    assert merge_wait(["grace", "linus"], late, states, _NOW, auto_merge=auto_merge) == (
+        None if auto_merge else "approval from @linus"
+    )
 
 
 def test_an_approval_from_someone_who_did_not_sign_up_counts() -> None:
@@ -479,20 +482,33 @@ def test_a_long_description_is_cut_at_a_word_with_an_ellipsis() -> None:
 
 
 @pytest.mark.parametrize(
-    ("states", "collapsed"),
+    ("states", "collapsed", "auto_merge", "pending"),
     [
-        ({"grace": "APPROVED"}, True),
-        ({}, False),
-        ({"grace": "APPROVED", "linus": "CHANGES_REQUESTED"}, False),
+        ({"grace": "APPROVED"}, True, True, False),
+        ({"grace": "APPROVED"}, True, False, False),
+        ({"grace": "APPROVED"}, False, False, True),
+        ({"grace": "APPROVED"}, True, True, True),
+        ({}, False, True, False),
+        ({"grace": "APPROVED", "linus": "CHANGES_REQUESTED"}, False, True, False),
     ],
 )
 async def test_approved_card_collapses_without_closing_the_request(
-    states: dict[str, str], collapsed: bool, github_app: AsyncMock
+    states: dict[str, str], collapsed: bool, auto_merge: bool, pending: bool, github_app: AsyncMock
 ) -> None:
     pr = PullRequest(owner="o", repo="r", number=1, title="Fix", author="ada")
-    request = HumanReviewRequest(pull_request_id=pr.id, head_sha="abc", kind="standard")
+    request = HumanReviewRequest(
+        pull_request_id=pr.id, head_sha="abc", kind="standard", auto_merge=auto_merge
+    )
     request.pull_request = pr
     request.requested_by = None
+    request.created_at = datetime.now(UTC) - timedelta(hours=3)
+    if pending:
+        user = User(
+            identities=[UserIdentity(provider="github", external_id="linus", login="linus")]
+        )
+        reviewer = HumanReviewParticipant(user_id=user.id, decision="review")
+        reviewer.user = user
+        request.participants.append(reviewer)
     with (
         patch(
             "openswe.human_review.lifecycle.latest_review_states", AsyncMock(return_value=states)
@@ -505,6 +521,9 @@ async def test_approved_card_collapses_without_closing_the_request(
     assert "<@U_ada>" in str(block_payload(blocks))
     if collapsed:
         assert "by <@U_ada>" in text
+    if pending and not auto_merge:
+        assert "linus" in str(block_payload(blocks))
+        assert "awaiting manual merge" not in text
     assert request.state == "open"
 
 
@@ -680,10 +699,12 @@ async def test_review_request_snapshots_merge_mode_and_preserves_it_on_reuse(
 
 
 @pytest.mark.parametrize("trigger", ["event", "deadline"])
+@pytest.mark.parametrize("pending", [False, True])
 @pytest.mark.parametrize("auto_merge", [False, True])
 async def test_only_auto_merge_requests_merge_when_approved(
     trigger: str,
     auto_merge: bool,
+    pending: bool,
     github_app: AsyncMock,
 ) -> None:
     from openswe.expedited_review.readiness import Readiness
@@ -696,6 +717,14 @@ async def test_only_auto_merge_requests_merge_when_approved(
         pull_request_id=pr.id, head_sha="abc", kind="standard", auto_merge=auto_merge
     )
     request.pull_request = pr
+    request.created_at = datetime.now(UTC) - timedelta(hours=3)
+    if pending:
+        user = User(
+            identities=[UserIdentity(provider="github", external_id="linus", login="linus")]
+        )
+        reviewer = HumanReviewParticipant(user_id=user.id, decision="review")
+        reviewer.user = user
+        request.participants.append(reviewer)
 
     @asynccontextmanager
     async def locked(*_: object) -> AsyncIterator[tuple[None, HumanReviewRequest]]:
@@ -731,4 +760,6 @@ async def test_only_auto_merge_requests_merge_when_approved(
     assert merge.await_count == int(auto_merge)
     if not auto_merge:
         assert request.state == "open"
-        assert request.detail == "approved — awaiting manual merge"
+        assert request.detail == (
+            "approval from @linus" if pending else "approved — awaiting manual merge"
+        )

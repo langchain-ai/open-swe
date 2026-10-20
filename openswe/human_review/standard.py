@@ -849,7 +849,12 @@ async def _set_detail(request: HumanReviewRequest, detail: str) -> HumanReviewRe
 
 
 def merge_wait(
-    reviewers: list[str], requested_at: datetime | None, states: dict[str, str], now: datetime
+    reviewers: list[str],
+    requested_at: datetime | None,
+    states: dict[str, str],
+    now: datetime,
+    *,
+    auto_merge: bool = True,
 ) -> str | None:
     """What approvals the merge still waits for, or ``None`` when they are enough.
 
@@ -859,8 +864,10 @@ def merge_wait(
     if not approvers:
         return "an approval on GitHub"
     pending = [login for login in reviewers if login.lower() not in approvers]
-    deadline_passed = requested_at is not None and now >= requested_at + timedelta(
-        hours=AUTO_MERGE_AFTER_HOURS
+    deadline_passed = (
+        auto_merge
+        and requested_at is not None
+        and now >= requested_at + timedelta(hours=AUTO_MERGE_AFTER_HOURS)
     )
     if pending and not deadline_passed:
         return "approval from " + ", ".join(f"@{login}" for login in pending)
@@ -1020,6 +1027,7 @@ async def _settle(request: HumanReviewRequest, pull: PullRequestClient) -> bool:
         request.created_at,
         states,
         datetime.now(UTC),
+        auto_merge=request.auto_merge,
     )
     if waiting is None and readiness.blockers:
         waiting = "; ".join(readiness.blockers)
