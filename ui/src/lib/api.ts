@@ -303,6 +303,7 @@ export interface Profile {
   login?: string
   email?: string
   default_repo?: string | null
+  workspace_default_repos?: Record<string, string>
   base_branch?: string | null
   branch_prefix?: string | null
   auto_fix_ci?: boolean
@@ -311,8 +312,6 @@ export interface Profile {
   concierge_mode?: boolean
   pr_review_links?: boolean
   pr_failure_reactions?: boolean
-  prefer_tools_in_sandbox?: boolean
-  experimental_mcp_ptc?: boolean
   experimental_monitor?: boolean | null
   experimental_act_as_approval?: boolean
   act_as_always_allowed?: boolean
@@ -328,6 +327,7 @@ export interface ProfileUpdate {
   experimental_background_callbacks?: boolean | null
   experimental_transcript_upgrade?: boolean | null
   default_repo?: string | null
+  workspace_default_repos?: Record<string, string>
   base_branch?: string | null
   branch_prefix?: string | null
   auto_fix_ci?: boolean
@@ -336,8 +336,6 @@ export interface ProfileUpdate {
   concierge_mode?: boolean
   pr_review_links?: boolean
   pr_failure_reactions?: boolean
-  prefer_tools_in_sandbox?: boolean
-  experimental_mcp_ptc?: boolean
   experimental_monitor?: boolean | null
   experimental_act_as_approval?: boolean
   draft_prs?: boolean

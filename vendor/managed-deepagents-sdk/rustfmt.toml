@@ -1,0 +1,5 @@
+# Stable rustfmt defaults used by CI (`cargo fmt --check`).
+#
+# Import regrouping (`imports_granularity` / `group_imports`) requires nightly
+# rustfmt; run `cargo +nightly fmt` locally when reshaping imports.
+edition = "2021"

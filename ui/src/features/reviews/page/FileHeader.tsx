@@ -14,7 +14,7 @@ import { isRenderable } from "./diffEntries"
 import { useEntry, useMarkers } from "./entries"
 import { findingGroupColor, findingTarget, threadTarget } from "./findings"
 import type { PullRequestRef } from "./queries"
-import { isCollapsed, useReviewPage } from "./store"
+import { isCollapsed, isRead, useReviewPage } from "./store"
 import { Tag } from "./Tag"
 import { plural, splitPath } from "./text"
 
@@ -35,8 +35,12 @@ const onHover = "hidden group-focus-within/header:flex group-hover/header:flex"
 export function FileHeader({ pr, id }: { pr: PullRequestRef; id: string }) {
   const entry = useEntry(id)
   const path = entry?.file.path ?? ""
-  const viewed = useReviewPage((state) => state.viewed.has(path))
-  const collapsed = useReviewPage((state) => isCollapsed(state, path))
+  const viewed = useReviewPage((state) =>
+    entry ? isRead(state.viewed, entry) : false
+  )
+  const collapsed = useReviewPage((state) =>
+    entry ? isCollapsed(state, entry) : false
+  )
   const markViewed = useReviewPage((state) => state.markViewed)
   const toggleCollapsed = useReviewPage((state) => state.toggleCollapsed)
   const askInChat = useReviewPage((state) => state.askInChat)
@@ -73,7 +77,7 @@ export function FileHeader({ pr, id }: { pr: PullRequestRef; id: string }) {
           event.target instanceof Element &&
           !event.target.closest("button, a")
         )
-          toggleCollapsed(path)
+          toggleCollapsed(entry.readKey)
       }}
       style={{ height: FILE_HEADER_HEIGHT }}
       className={cn(
@@ -86,7 +90,7 @@ export function FileHeader({ pr, id }: { pr: PullRequestRef; id: string }) {
         label={folded ? `Expand ${path}` : `Collapse ${path}`}
         aria-expanded={!folded}
         disabled={!renderable}
-        onClick={() => toggleCollapsed(path)}
+        onClick={() => toggleCollapsed(entry.readKey)}
         tooltipProps={{ disabled: true }}
         iconClassName={cn("transition-transform", folded && "-rotate-90")}
         {...quiet}
