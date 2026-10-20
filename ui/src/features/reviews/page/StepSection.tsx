@@ -74,7 +74,7 @@ export function MarkStepRead({
       type="button"
       role="checkbox"
       aria-checked={read}
-      aria-label={`Step ${index} read`}
+      aria-label={`Mark step ${index} read`}
       onClick={() => markStepRead(index)}
       className={cn(
         "flex shrink-0 items-center gap-space-2 rounded-md border px-space-2 py-space-1 text-xxs transition-colors",
@@ -112,7 +112,7 @@ export function StepHeader({ id }: { id: string }) {
       style={{ height: FILE_HEADER_HEIGHT }}
       // The first step sits right under the Changes rule; later ones start with their own.
       className={cn(
-        "flex items-center gap-space-2 bg-surface-level-1 pt-space-1 font-sans text-xxs",
+        "flex items-center gap-space-2 bg-surface-level-1 pt-space-1 font-sans text-xxs max-sm:px-space-4",
         step.index > 1 && "border-t border-default"
       )}
     >
@@ -143,7 +143,7 @@ export function StepIntro({ id }: { id: string }) {
   const { step } = group
   return (
     // Pulled down over the step item's hidden placeholder line, so the files follow closely.
-    <div className="-mb-5 pt-space-1 font-sans">
+    <div className="-mb-5 pt-space-1 font-sans max-sm:px-space-4">
       <h3 className="text-sm leading-6 font-semibold text-primary">
         <InlineCode text={step.title} />
       </h3>
@@ -202,10 +202,7 @@ export function ReadNudge({ groups }: { groups: ReadonlyArray<StepGroup> }) {
   const markStepRead = useReviewPage((state) => state.markStepRead)
   if (candidate === null || dismissed.has(candidate)) return null
   return (
-    <div
-      role="status"
-      className="absolute right-6 bottom-6 z-floating-bar flex items-center gap-space-1 rounded-full border border-subtle bg-surface-level-1/80 py-0.5 pr-0.5 pl-space-3 font-sans text-xxs text-tertiary opacity-80 backdrop-blur-sm transition-opacity focus-within:opacity-100 hover:opacity-100"
-    >
+    <div className="absolute right-6 bottom-6 z-floating-bar flex items-center gap-space-1 rounded-full border border-subtle bg-surface-level-1/80 py-0.5 pr-0.5 pl-space-3 font-sans text-xxs text-tertiary opacity-80 backdrop-blur-sm transition-opacity focus-within:opacity-100 hover:opacity-100">
       Done with step {candidate}?
       <button
         type="button"

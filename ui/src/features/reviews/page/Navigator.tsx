@@ -261,7 +261,7 @@ function StepList({
               type="button"
               role="checkbox"
               aria-checked={read}
-              aria-label={`Step ${step.index} read`}
+              aria-label={`Mark step ${step.index} read`}
               title={read ? "Mark step unread" : "Mark step read"}
               onClick={() => markStepRead(step.index)}
               className={cn(
