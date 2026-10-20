@@ -5,7 +5,7 @@ from __future__ import annotations
 from collections.abc import Mapping
 from typing import TYPE_CHECKING
 
-from managed_deepagents._channels.assistant_text import extract_assistant_content
+from managed_deepagents._channels.assistant_text import extract_reply_content, run_start_id
 from managed_deepagents._channels.types import ChannelError
 from managed_deepagents._ingress import (
     _create_ingress_loopback_client,
@@ -78,7 +78,9 @@ async def observe_http_ingress_agent(
     interrupts = state.get("__interrupt__")
     interrupted = isinstance(interrupts, (list, Mapping)) and bool(interrupts)
     return {
-        "reply_content": None if interrupted else extract_assistant_content(state),
+        "reply_content": (
+            None if interrupted else extract_reply_content(state, start_id=run_start_id(state))
+        ),
         "thread_id": thread_id,
         "run_id": run_id,
     }

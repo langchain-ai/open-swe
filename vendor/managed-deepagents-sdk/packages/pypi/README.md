@@ -278,8 +278,11 @@ credentials in the shared sandbox; it never reruns workspace setup there or
 deletes it. If the starting agent hasn't created its sandbox yet, the subagent
 creates it, and the starting agent then uses that same sandbox.
 
-When the subagent pauses for approval, the agent sees the task as waiting.
-Answer the approval in the subagent's own thread, and the task continues.
+When the subagent pauses for approval, the agent sees the task as waiting. If the
+agent was started from a Slack channel, the approval shows in that Slack thread,
+and the answer there resumes the subagent. Otherwise, answer it in the subagent's
+own thread. When a task finishes, the agent's reply about it is posted to the
+same Slack thread.
 
 With tracing on, a subagent's runs appear in the starting agent's trace, under
 the call that started it. Nesting follows the trace headers on the request, so
@@ -295,7 +298,8 @@ than the agent that starts it.
 Write async subagents in `agent.py` as dict literals, or names bound to one, so
 the build can find them without running your code. `mda build` warns about
 subagent entries it can't read. Async subagents are Python only, and are not
-supported in `mda eval`.
+supported in `mda eval`. Sharing the sandbox, nesting traces, and showing
+approvals in Slack need a deepagents release that sends the parent reference.
 
 ## Run context and channels
 

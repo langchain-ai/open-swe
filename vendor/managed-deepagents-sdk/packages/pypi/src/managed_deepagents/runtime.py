@@ -895,6 +895,8 @@ async def _compile_resolved_managed_agent_async(
         )
         # Memory policies keep their public channel field after routing normalization.
         policy_context = _policy_run_context(run_context, config)
+        if policy_schema is ManagedChannelContext:
+            policy_context = await _with_saved_channel(policy_context, config)
         allow_agent = await resolve_agent_memory_access(agent_layer, policy_context, policy_schema)
         user_access = await resolve_user_memory_access(
             user_memory_layer(declared_memory_layers),
@@ -1093,6 +1095,8 @@ def _compile_managed_agent(
 
     # Managed prompt behavior surrounds authored middleware in the same order as TS.
     _prepend_schedule_delivery_middleware(merged)
+    if channels:
+        _prepend_channel_notification_middleware(merged)
     _append_channel_response_format_middleware(merged)
     if mounted_memory:
         _append_memory_instructions_middleware(
@@ -1172,6 +1176,49 @@ def _policy_run_context(run_context: object, config: RunnableConfig | None) -> o
     if channel is not None:
         return {**context, "mda_channel": channel, "channel": channel}
     return run_context
+
+
+async def _with_saved_channel(policy_context: object, config: RunnableConfig | None) -> object:
+    """Give a task notification run's memory policy the channel its thread saved.
+
+    A notification waking the lead has no channel of its own; its reply goes to the
+    channel its thread saved (for a caller who may deliver there), so the policy sees
+    that channel too. The saved binding has no provider event, so MDA's default
+    policy still denies user memory; only an authored policy can allow it. Other runs
+    are unchanged.
+    """
+    from managed_deepagents._channels.schedule_delivery import (  # noqa: PLC0415
+        SAVED_CHANNEL_KEY,
+        is_task_notification_input,
+        restored_channel,
+    )
+
+    configurable = resolve_runtime_configurable(config)
+    thread_id = configurable.get("thread_id") if configurable is not None else None
+    metadata = config.get("metadata") if config is not None else None
+    run_id = (configurable or {}).get("run_id") or _field(metadata, "run_id")
+    if _field(policy_context, "mda_channel") is not None or not (
+        isinstance(thread_id, str) and isinstance(run_id, str)
+    ):
+        return policy_context
+    try:
+        client = get_client()
+        run = await client.runs.get(thread_id, run_id)
+        kwargs = run.get("kwargs")
+        if not is_task_notification_input(
+            kwargs.get("input") if isinstance(kwargs, Mapping) else None
+        ):
+            return policy_context
+        values = (await client.threads.get(thread_id)).get("values")
+    except Exception:  # noqa: BLE001 — a missing or unreadable run or thread restores nothing
+        return policy_context
+    binding = restored_channel(
+        values.get(SAVED_CHANNEL_KEY) if isinstance(values, Mapping) else None, configurable
+    )
+    if binding is None:
+        return policy_context
+    context = policy_context if isinstance(policy_context, Mapping) else {}
+    return {**context, "mda_channel": binding, "channel": binding}
 
 
 def _detect_run_channel(config: Mapping[str, object] | None) -> RunChannel:
@@ -1536,6 +1583,19 @@ def _prepend_schedule_delivery_middleware(merged: dict[str, object]) -> None:
         list(cast("Iterable[object]", middleware_value)) if middleware_value is not None else []
     )
     merged["middleware"] = [schedule_mw, *authored]
+
+
+def _prepend_channel_notification_middleware(merged: dict[str, object]) -> None:
+    """Install delivery of task notification replies to the channel thread they belong to."""
+    from managed_deepagents._channels.schedule_delivery import (  # noqa: PLC0415
+        create_channel_notification_middleware,
+    )
+
+    middleware_value = merged.get("middleware")
+    authored = (
+        list(cast("Iterable[object]", middleware_value)) if middleware_value is not None else []
+    )
+    merged["middleware"] = [create_channel_notification_middleware(), *authored]
 
 
 def _prepend_credential_gate_middleware(

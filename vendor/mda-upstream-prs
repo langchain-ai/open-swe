@@ -1,4 +1,5 @@
 728 414659a02567872b2ce35eed2db31cb8fce83e85 feat(mda): share the lead's sandbox and trace with async subagents
 860 1362fa448007178698bd01b362318e3ef76823da feat(mda): build a graph per async subagent
 897 1aa4e62bd39050f986343c68d0beb69805828363 feat(browser): browser use via define_browser
+921 18ab96f4205c72fa92bf985881cf33e375696201 feat(mda): post async subagent updates and their approvals to the lead's channel thread
 959 89bfff3ea118ec80da1044da9099e469759ff032 feat(browser): share the thread's sandbox's localhost with its browser

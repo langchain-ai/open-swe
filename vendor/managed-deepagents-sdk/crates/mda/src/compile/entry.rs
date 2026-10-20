@@ -414,12 +414,9 @@ fn generate_python_entry(inputs: &EntryInputs<'_>) -> String {
     out.push('\n');
 
     let subagents = inputs.async_subagents;
-    // Async subagents run with the lead's managed kwargs; channels stay with the lead.
-    let mut subagent_kwargs: Vec<String> = kwargs
-        .iter()
-        .filter(|kwarg| !kwarg.starts_with("channels="))
-        .cloned()
-        .collect();
+    // Async subagents run with the lead's managed kwargs. They keep `channels` so
+    // a paused subagent can find the lead's channel thread to show its approval.
+    let mut subagent_kwargs = kwargs.clone();
     subagent_kwargs.push("runtime=runtime".to_string());
     if !subagents.is_empty() {
         let entries: Vec<String> = subagents
