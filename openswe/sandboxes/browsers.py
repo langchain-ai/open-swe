@@ -91,6 +91,16 @@ class LangSmithBrowser:
         )
         return WindowLinks.model_validate(response.json())
 
+    async def delete(self) -> None:
+        """Delete the browser and its profile; MDA opens a fresh one when the agent next browses."""
+        try:
+            await _browser_request(
+                "DELETE", f"/boxes/{self.name}", timeout=_BROWSER_REQUEST_TIMEOUT_SECONDS
+            )
+        except httpx2.HTTPStatusError as exc:
+            if exc.response.status_code != 404:
+                raise
+
     async def _running_state(self) -> BrowserState:
         state = await self._state()
         if state.status == "stopped":
@@ -136,6 +146,11 @@ class ThreadBrowser(BaseModel):
     def langsmith(self) -> LangSmithBrowser:
         return LangSmithBrowser(self.browser)
 
+    async def forget(self) -> dict[str, object]:
+        """Delete the browser, signed-in sessions and all; the metadata update that forgets it."""
+        await self.langsmith.delete()
+        return {_THREAD_METADATA_KEY: None}
+
     async def save(self, thread_id: str) -> None:
         await langgraph_client().threads.update(
             thread_id=thread_id, metadata={_THREAD_METADATA_KEY: self.model_dump()}
@@ -144,7 +159,7 @@ class ThreadBrowser(BaseModel):
 
 
 async def _browser_request(
-    method: Literal["GET", "POST"],
+    method: Literal["GET", "POST", "DELETE"],
     path: str,
     *,
     json: dict[str, object] | None = None,

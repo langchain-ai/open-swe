@@ -5,7 +5,9 @@ first time a run browses, this tells the backend which browser it is, so the
 thread's Browser panel can frame the window the agent drives.
 """
 
+import asyncio
 import logging
+from collections.abc import Mapping
 
 from managed_deepagents import ManagedToolRuntime
 from managed_deepagents.browser import BrowserMiddleware
@@ -23,18 +25,25 @@ class ReportedBrowserMiddleware(BrowserMiddleware):
         super().__init__()
         self._backend = backend
         self._reported: set[str] = set()
+        self._reporting: dict[str, asyncio.Task[None]] = {}
 
     async def _share(
         self, session: object, name: str, key: str, runtime: ManagedToolRuntime
     ) -> None:
         # Runs before every browser call, with the browser's name once it is open.
         await super()._share(session, name, key, runtime)  # ty: ignore[invalid-argument-type]
-        if name in self._reported:
+        if name in self._reported or name in self._reporting:
             return
+        # In the background: a backend that is slow or down must not hold up browsing.
+        self._reporting[name] = asyncio.create_task(self._report(name, runtime.state))
+
+    async def _report(self, name: str, state: Mapping[str, object]) -> None:
         try:
-            await self._backend.call("browser", run_body(run_id(), runtime.state, browser=name))
+            await self._backend.call("browser", run_body(run_id(), state, browser=name))
         except Exception:
-            # Browsing goes on; the panel only shows the browser once the backend hears of it.
+            # Tried again on the next browser call; until then the panel cannot show it.
             logger.warning("Could not report the thread's browser", exc_info=True)
-            return
-        self._reported.add(name)
+        else:
+            self._reported.add(name)
+        finally:
+            self._reporting.pop(name, None)
