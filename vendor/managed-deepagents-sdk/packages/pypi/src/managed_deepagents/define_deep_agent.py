@@ -48,6 +48,19 @@ if TYPE_CHECKING:
         webhook: NotRequired[str]
         """URL the Agent Server calls whenever a run of this subagent finishes."""
 
+        notify_parent: NotRequired[bool]
+        """Whether this subagent may wake this agent when it finishes while this agent is idle.
+
+        Defaults to `True`.
+
+        Set it to `False` when the application delivers results itself, for example
+        through `webhook`. This agent still sees the subagent's updates while it runs.
+
+        !!! warning "Beta"
+
+            `notify_parent` may change along with how subagents wake their parent.
+        """
+
     #: Declarative, compiled, or async subagent specs from deepagents, plus
     #: declarative specs marked `"async": True`.
     DeepAgentSubAgent = SubAgent | ManagedAsyncSubAgent | CompiledSubAgent | AsyncSubAgent
@@ -206,6 +219,8 @@ def _validate_async_subagents(subagents: Sequence[DeepAgentSubAgent]) -> None:
             raise TypeError('subagent "skills" must be a list of skill source paths')
         if "webhook" in spec and not isinstance(spec["webhook"], str):
             raise TypeError('subagent "webhook" must be a URL string')
+        if "notify_parent" in spec and not isinstance(spec["notify_parent"], bool):
+            raise TypeError('subagent "notify_parent" must be True or False')
         unsupported = [key for key in _ASYNC_SUBAGENT_UNSUPPORTED_KEYS if key in spec]
         if unsupported:
             msg = (

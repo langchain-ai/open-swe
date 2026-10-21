@@ -7,3 +7,4 @@
 941 78078e30ac72997713468af653fd45521c984dd7 fix(mda): read sync subagent spreads in `subagents=[...]`
 945 130fcbaafc79aec9e1199b6e32fd556f0175797a feat(mda): pass an async subagent's `webhook` through to deepagents
 959 89bfff3ea118ec80da1044da9099e469759ff032 feat(browser): share the thread's sandbox's localhost with its browser
+977 148200c893047fe5e450a552826be4526217c853 feat(mda): pass an async subagent's `notify_parent` through to deepagents

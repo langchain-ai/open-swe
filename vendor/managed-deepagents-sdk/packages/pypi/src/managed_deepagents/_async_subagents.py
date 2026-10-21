@@ -115,8 +115,7 @@ def _route(spec: Mapping[str, object], graphs: Mapping[str, str]) -> dict[str, o
         "description": spec.get("description", ""),
         "graph_id": graph_id,
     }
-    if "webhook" in spec:
-        routed["webhook"] = spec["webhook"]
+    routed.update({key: spec[key] for key in ("webhook", "notify_parent") if key in spec})
     return routed
 
 
