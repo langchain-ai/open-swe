@@ -198,6 +198,19 @@ async def test_sharing_deletes_the_threads_browser(private_thread, monkeypatch):
     assert metadata["browser_opened"] is False
 
 
+async def test_sharing_skips_a_browser_never_opened(private_thread, monkeypatch):
+    thread, client = private_thread
+    thread["metadata"].update(browser_name="browser-1", browser_opened=False)
+    delete = AsyncMock()
+    monkeypatch.setattr(LangSmithBrowser, "delete", delete)
+    monkeypatch.setattr(handlers, "mirror_thread_metadata", AsyncMock())
+
+    await handlers.share_thread_with_workspace("private-thread", "alice")
+
+    delete.assert_not_awaited()
+    assert client.threads.update.call_args.kwargs["metadata"]["visibility"] == "public"
+
+
 async def test_a_run_starting_never_undoes_a_browse(private_thread, monkeypatch):
     _, client = private_thread
     monkeypatch.setattr(browsers, "langgraph_client", lambda: client)
