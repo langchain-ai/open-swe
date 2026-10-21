@@ -14,4 +14,4 @@ Open SWE runs its file and shell tools in the thread's MDA box. That box holds t
 
 ## Upstream
 
-MDA should not silently recreate a box whose contents it cannot restore: a box that disappears mid-run should fail the call, and replacing it should be an explicit act (see `replace_sandbox`). Then Open SWE stops passing the option.
+MDA should remove this recovery outright, for every project, not make it optional. Silently swapping an empty box in for a vanished one loses the agent's work while looking like success. A box that disappears mid-run should fail the call, and replacing it should be an explicit act (see `replace_sandbox`). Once MDA drops `_recover_managed_sandbox`, Open SWE stops passing the option.
