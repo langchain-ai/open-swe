@@ -1840,13 +1840,9 @@ class _LazyManagedSandboxBackend(SandboxBackendProtocol):
         return backend
 
     def _recover(self, backend: SandboxBackendProtocol, error: Exception) -> None:
-        from managed_deepagents.sandbox import recovers  # noqa: PLC0415
-
         if not _is_sandbox_not_found_error(error):
             return
         source = self._source
-        if not recovers(source.sandbox.options):
-            return
         config = self._config()
         previous_name = _peek_managed_host_name(
             _sandbox_scope_key(source.sandbox, config, source.selection_fingerprint)
@@ -2073,8 +2069,11 @@ def _recover_managed_sandbox(
             existing = _await_if_needed(client.get_sandbox(entry.host_name))
         except ResourceNotFoundError:
             existing = None
-        if existing is not None and _sandbox_handle_id(existing) == entry.sandbox_id:
+        if existing is None or _sandbox_handle_id(existing) == entry.sandbox_id:
+            # A box that is gone stays gone, and the call fails: a fresh one would be
+            # empty, and the run would carry on without the files it was working on.
             return current
+        # Another process replaced the box under its name; adopt the replacement.
         backend, host_name, sandbox_id = _create_langsmith_sandbox(
             sandbox,
             config=config,

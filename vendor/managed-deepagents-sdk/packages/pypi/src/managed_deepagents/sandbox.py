@@ -96,7 +96,6 @@ class SandboxDefinition:
         "_openswe_thread_id",
         "_openswe_create_fields",
         "_openswe_no_manage_proxy",
-        "_openswe_no_recover",
     )
 
     def __repr__(self) -> str:  # pragma: no cover - debug helper
@@ -210,11 +209,6 @@ def declared_create_fields(options: Mapping[str, object]) -> dict[str, object]:
 def manages_proxy(options: Mapping[str, object]) -> bool:
     """Whether MDA sets the box's proxy config before each command."""
     return options.get("_openswe_no_manage_proxy") is not True
-
-
-def recovers(options: Mapping[str, object]) -> bool:
-    """Whether MDA recreates a box that disappears mid-run, under the same name."""
-    return options.get("_openswe_no_recover") is not True
 
 
 def _validate_thread_id(thread_id: object) -> None:

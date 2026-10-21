@@ -34,16 +34,11 @@ EXECUTE_TIMEOUT_SECONDS: Final = 300
 
 
 def definition(create: SandboxCreate, thread_id: str | None) -> SandboxDefinition:
-    """The box MDA keeps for ``thread_id`` (the run's own by default), created from ``create``.
-
-    A box that disappears mid-run is not recreated: a fresh one would silently drop
-    the thread's uncommitted work, so the run's next call into it fails instead.
-    """
+    """The box MDA keeps for ``thread_id`` (the run's own by default), created from ``create``."""
     return define_sandbox(
         _openswe_per_thread=True,
         _openswe_thread_id=thread_id,
         _openswe_no_manage_proxy=True,
-        _openswe_no_recover=True,
         _openswe_create_fields=dict(create.extra_fields),
         default_timeout=EXECUTE_TIMEOUT_SECONDS,
         snapshot_id=create.snapshot_id,
