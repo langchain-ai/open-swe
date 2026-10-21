@@ -15,21 +15,20 @@ use the typed async SDK in ``openswe.github.sdk``. This helper centralises:
 """
 
 import asyncio
-import base64
 import io
 import logging
 import random
-import tempfile
+import re
 import zipfile
 from collections.abc import AsyncIterator, Awaitable, Mapping, Sequence
 from contextlib import asynccontextmanager
 from dataclasses import dataclass
-from pathlib import Path
+from pathlib import PurePosixPath
 from typing import TYPE_CHECKING, Any, Self
 from urllib.parse import quote, urlparse
 
 import httpx2
-from pydantic import BaseModel, JsonValue, SecretStr, TypeAdapter
+from pydantic import BaseModel, JsonValue, TypeAdapter
 
 from openswe.github.queue import Artifact, CommitComparison, WorkflowRun
 from openswe.utils.http_pool import pooled_transport
@@ -692,27 +691,48 @@ class RepoClient:
 
     @asynccontextmanager
     async def candidate_git(self) -> AsyncIterator[CandidateGit]:
-        """Fresh isolated object store using this client's controller credentials."""
+        """A dedicated sandbox with controller credentials kept in the GitHub proxy."""
         from openswe.github.repo_names import normalize_repo_full_name
         from openswe.merge_queue.git import CandidateGit
+        from openswe.sandboxes.providers.langsmith import (
+            configure_sandbox_proxy,
+            create_langsmith_sandbox,
+            get_async_sandbox_client,
+        )
 
         repository = normalize_repo_full_name(self.full_name)
+        if not re.fullmatch(r"[A-Za-z0-9_-]+/[A-Za-z0-9_.-]+", repository):
+            raise ValueError("Candidate Git requires a GitHub repository name")
         authorization = self.github.http.headers.get("Authorization")
-        if self.github.login is not None or not authorization:
+        if (
+            self.github.login is not None
+            or not authorization
+            or not authorization.startswith("Bearer ")
+        ):
             raise ValueError("Candidate writes require an explicitly supplied controller identity")
-        with tempfile.TemporaryDirectory(prefix="merge-queue-") as directory:
+        sandbox = await create_langsmith_sandbox(
+            prepare_work_dir=False,
+            create_params={"idle_ttl_seconds": 600, "delete_after_stop_seconds": 60},
+        )
+        try:
+            await configure_sandbox_proxy(sandbox.id, authorization.removeprefix("Bearer "))
             git = CandidateGit(
-                Path(directory) / "objects.git",
+                sandbox,
+                PurePosixPath("/tmp/merge-queue.git"),
                 f"https://github.com/{repository}.git",
-                authorization=SecretStr(
-                    "Basic "
-                    + base64.b64encode(
-                        f"x-access-token:{authorization.removeprefix('Bearer ')}".encode()
-                    ).decode()
-                ),
             )
             await git.initialize()
             yield git
+        finally:
+            try:
+                async with asyncio.timeout(30), get_async_sandbox_client() as client:
+                    await client.stop_sandbox(sandbox.id)
+            except Exception:
+                logger.warning(
+                    "Failed to stop candidate sandbox",
+                    extra={"sandbox_id": sandbox.id},
+                    exc_info=True,
+                )
 
     async def commit_statuses(self, sha: str) -> list[dict[str, Any]]:
         """The latest status per context on ``sha``."""

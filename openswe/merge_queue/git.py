@@ -1,18 +1,33 @@
-"""Bare Git object operations. Candidate trees are never checked out or executed."""
+"""Bare Git object operations in a sandbox; candidate trees are never checked out."""
 
-import asyncio
-import os
 import re
-import signal
-from contextlib import suppress
-from pathlib import Path
-from typing import Annotated, Literal, Self
+import shlex
+from pathlib import PurePath
+from typing import TYPE_CHECKING, Annotated, Literal, Self
 from uuid import UUID
 
-from pydantic import BaseModel, ConfigDict, Field, SecretStr, model_validator
+from pydantic import BaseModel, ConfigDict, Field, model_validator
+
+if TYPE_CHECKING:
+    from deepagents.backends.protocol import SandboxBackendProtocol
 
 SHA = Annotated[str, Field(pattern=r"^[0-9a-f]{40}$")]
-_BARE_CONFIG = b"[core]\n\trepositoryformatversion = 0\n\tbare = true\n"
+_BARE_CONFIG = "[core]\n\trepositoryformatversion = 0\n\tbare = true\n"
+_PROXY_ENV = (
+    "HTTP_PROXY",
+    "HTTPS_PROXY",
+    "ALL_PROXY",
+    "NO_PROXY",
+    "http_proxy",
+    "https_proxy",
+    "all_proxy",
+    "no_proxy",
+    "SSL_CERT_FILE",
+    "SSL_CERT_DIR",
+    "CURL_CA_BUNDLE",
+    "GIT_SSL_CAINFO",
+    "GIT_SSL_CAPATH",
+)
 
 
 class PullHead(BaseModel):
@@ -62,34 +77,29 @@ class CandidateConflict(ValueError):
 
 
 class CandidateGit:
-    def __init__(self, directory: Path, remote: str, *, authorization: SecretStr | None = None):
-        if authorization is not None and not re.fullmatch(
-            r"https://github\.com/[A-Za-z0-9_-]+/[A-Za-z0-9_.-]+\.git", remote
-        ):
-            raise ValueError("Authenticated Git requires a GitHub repository URL")
+    def __init__(self, sandbox: SandboxBackendProtocol, directory: PurePath, remote: str):
+        self.sandbox = sandbox
         self.directory = directory
         self.remote = remote
-        self._authorization = authorization
 
     async def initialize(self) -> None:
-        self.directory.mkdir(mode=0o700)
         await self._run(["init", "--bare", "--template="], initializing=True)
-        (self.directory / "config").write_bytes(_BARE_CONFIG)
 
     async def _run(
         self, args: list[str], *, timestamp: int | None = None, initializing: bool = False
     ) -> str:
-        config = self.directory / "config"
-        if not initializing and (
-            config.is_symlink()
-            or (self.directory / "commondir").exists()
-            or config.read_bytes() != _BARE_CONFIG
-        ):
-            raise ValueError("Unexpected candidate workspace configuration")
+        directory, config = shlex.quote(str(self.directory)), shlex.quote(_BARE_CONFIG)
+        setup = f"mkdir -m 700 -- {directory}\n" if initializing else ""
+        setup += f"cd {directory}\n"
+        if not initializing:
+            setup += (
+                "if [ -L config ] || [ -e commondir ] || [ -L commondir ] || "
+                f"! printf %s {config} | cmp -s - config; then exit 97; fi\n"
+            )
         env = {
-            "PATH": os.defpath,
+            "PATH": "/usr/bin:/bin",
             "GIT_CONFIG_NOSYSTEM": "1",
-            "GIT_CONFIG_GLOBAL": os.devnull,
+            "GIT_CONFIG_GLOBAL": "/dev/null",
             "GIT_ATTR_NOSYSTEM": "1",
             "GIT_NO_REPLACE_OBJECTS": "1",
             "GIT_TERMINAL_PROMPT": "0",
@@ -98,46 +108,40 @@ class CandidateGit:
             env.update(
                 GIT_AUTHOR_DATE=f"{timestamp} +0000", GIT_COMMITTER_DATE=f"{timestamp} +0000"
             )
-        if self._authorization is not None:
-            env.update(
-                GIT_CONFIG_COUNT="1",
-                GIT_CONFIG_KEY_0=f"http.{self.remote}.extraHeader",
-                GIT_CONFIG_VALUE_0=f"Authorization: {self._authorization.get_secret_value()}",
-            )
-        process = await asyncio.create_subprocess_exec(
-            "git",
-            "-c",
-            "credential.helper=",
-            "-c",
-            f"core.hooksPath={os.devnull}",
-            "-c",
-            "commit.gpgsign=false",
-            "-c",
-            "user.name=Merge Queue",
-            "-c",
-            "user.email=merge-queue@example.invalid",
-            "-c",
-            "http.followRedirects=false",
-            *([] if initializing else ["--git-dir=."]),
-            *args,
-            cwd=self.directory,
-            env=env,
-            start_new_session=True,
-            stdout=asyncio.subprocess.PIPE,
-            stderr=asyncio.subprocess.PIPE,
+        # Keep the sandbox's proxy/TLS configuration, never its Git configuration or secrets.
+        proxy_env = " ".join(f'${{{name}:+"{name}=${name}"}}' for name in _PROXY_ENV)
+        command = shlex.join(
+            [
+                "git",
+                "-c",
+                "credential.helper=",
+                "-c",
+                "core.hooksPath=/dev/null",
+                "-c",
+                "commit.gpgsign=false",
+                "-c",
+                "user.name=Merge Queue",
+                "-c",
+                "user.email=merge-queue@example.invalid",
+                "-c",
+                "http.followRedirects=false",
+                *([] if initializing else ["--git-dir=."]),
+                *args,
+            ]
         )
-        try:
-            async with asyncio.timeout(300):
-                stdout, stderr = await process.communicate()
-        except BaseException:
-            with suppress(ProcessLookupError):
-                os.killpg(process.pid, signal.SIGKILL)
-            await process.wait()
-            raise
-        if process.returncode:
+        clean_env = shlex.join(["env", "-i", *(f"{key}={value}" for key, value in env.items())])
+        command = f"set -e\n{setup}{clean_env} {proxy_env} {command} 2>/dev/null"
+        if initializing:
+            command += f"\nprintf %s {config} > config"
+        result = await self.sandbox.aexecute(command, timeout=300)
+        if result.exit_code == 97:
+            raise ValueError("Unexpected candidate workspace configuration")
+        if result.exit_code is None or result.truncated:
+            raise RuntimeError("Candidate command result is incomplete")
+        if result.exit_code:
             # Git output can contain remote-controlled text and credential diagnostics.
-            raise GitError(process.returncode, f"Git {args[0]} failed (exit {process.returncode})")
-        return stdout.decode().strip()
+            raise GitError(result.exit_code, f"Git {args[0]} failed (exit {result.exit_code})")
+        return result.output.strip()
 
     async def build(
         self, branch: str, base_sha: str, pulls: tuple[PullHead, ...], *, timestamp: int
@@ -265,15 +269,15 @@ class CanaryLanding(CandidateGit):
 
     def __init__(
         self,
-        directory: Path,
+        sandbox: SandboxBackendProtocol,
+        directory: PurePath,
         remote: str,
         *,
         canary_remote: str,
-        authorization: SecretStr | None = None,
     ):
         if remote != canary_remote:
             raise ValueError("Landing is restricted to the configured canary")
-        super().__init__(directory, remote, authorization=authorization)
+        super().__init__(sandbox, directory, remote)
 
     async def reconcile(self, candidate: Candidate) -> Literal["ready", "landed", "stale"]:
         await self.verify(candidate)

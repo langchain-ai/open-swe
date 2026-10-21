@@ -1,10 +1,11 @@
 """Unit tests for the shared GitHub HTTP helper."""
 
 import asyncio
-from unittest.mock import AsyncMock, patch
+from unittest.mock import AsyncMock, Mock, patch
 
 import httpx2
 import pytest
+from deepagents.backends.protocol import ExecuteResponse, SandboxBackendProtocol
 
 from openswe.dashboard import profiles
 from openswe.github import http as github_http
@@ -267,3 +268,41 @@ async def test_check_runs_retains_cancellations_without_a_known_replacement(
     monkeypatch.setattr(github_http.RepoClient, "pages", pages)
     async with httpx2.AsyncClient() as http:
         assert await GitHubClient(http).repo("acme", "app").check_runs("a" * 40) == runs
+
+
+@pytest.mark.parametrize("outcome", ["success", "proxy_failure", "cancelled"])
+async def test_candidate_sandbox_keeps_credentials_in_proxy_and_stops_on_exit(
+    monkeypatch: pytest.MonkeyPatch, outcome: str
+) -> None:
+    from openswe.sandboxes.providers import langsmith
+
+    sandbox = Mock(spec=SandboxBackendProtocol, id="candidate-sandbox")
+    sandbox.aexecute = AsyncMock(return_value=ExecuteResponse(output="", exit_code=0))
+    configure = AsyncMock(
+        side_effect=RuntimeError("Proxy unavailable") if outcome == "proxy_failure" else None
+    )
+    client = AsyncMock()
+    client.__aenter__.return_value = client
+    monkeypatch.setattr(langsmith, "create_langsmith_sandbox", AsyncMock(return_value=sandbox))
+    monkeypatch.setattr(langsmith, "configure_sandbox_proxy", configure)
+    monkeypatch.setattr(langsmith, "get_async_sandbox_client", Mock(return_value=client))
+
+    async def use_candidate() -> None:
+        async with httpx2.AsyncClient(
+            headers={"Authorization": "Bearer test-controller-token"}
+        ) as http:
+            async with GitHubClient(http).repo("acme", "widgets").candidate_git() as git:
+                assert git.sandbox is sandbox
+                if outcome == "cancelled":
+                    raise asyncio.CancelledError
+
+    if outcome == "success":
+        await use_candidate()
+    else:
+        with pytest.raises(RuntimeError if outcome == "proxy_failure" else asyncio.CancelledError):
+            await use_candidate()
+    configure.assert_awaited_once_with("candidate-sandbox", "test-controller-token")
+    client.stop_sandbox.assert_awaited_once_with("candidate-sandbox")
+    assert all(
+        "test-controller-token" not in call.args[0] for call in sandbox.aexecute.await_args_list
+    )

@@ -3,9 +3,11 @@
 import asyncio
 import os
 from pathlib import Path
+from unittest.mock import AsyncMock, Mock
 from uuid import uuid7
 
 import pytest
+from deepagents.backends.protocol import ExecuteResponse, SandboxBackendProtocol
 
 from openswe.merge_queue.git import (
     CanaryLanding,
@@ -19,6 +21,27 @@ from openswe.merge_queue.git import (
 class RepositoryFixture:
     def __init__(self, path: Path):
         self.path = path
+        self.sandbox = Mock(spec=SandboxBackendProtocol)
+        self.sandbox.aexecute = AsyncMock(side_effect=self.execute)
+
+    async def execute(self, command: str, *, timeout: int) -> ExecuteResponse:
+        """Run the sandbox command contract against temporary test repositories."""
+        process = await asyncio.create_subprocess_exec(
+            "sh",
+            "-c",
+            command,
+            cwd=self.path.parent,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE,
+        )
+        try:
+            async with asyncio.timeout(timeout):
+                stdout, stderr = await process.communicate()
+        finally:
+            if process.returncode is None:
+                process.kill()
+                await process.wait()
+        return ExecuteResponse(output=(stdout + stderr).decode(), exit_code=process.returncode)
 
     async def git(self, *args: str) -> str:
         process = await asyncio.create_subprocess_exec(
@@ -50,7 +73,7 @@ class RepositoryFixture:
 
 @pytest.fixture
 async def repository(tmp_path: Path) -> RepositoryFixture:
-    path = tmp_path / "repository"
+    path = tmp_path / "repository with 'quotes'"
     path.mkdir()
     repo = RepositoryFixture(path)
     await repo.git("init", "--initial-branch=main", "--template=")
@@ -70,12 +93,15 @@ async def test_ordered_batch_is_reproducible_and_lands_the_exact_tip(
             PullHead(number=number, sha=await repository.commit(f"file{number}", f"PR {number}\n"))
         )
     git = CanaryLanding(
-        tmp_path / "candidate", str(repository.path), canary_remote=str(repository.path)
+        repository.sandbox,
+        tmp_path / "candidate",
+        str(repository.path),
+        canary_remote=str(repository.path),
     )
     await git.initialize()
     candidate = await git.build("main", base, tuple(pulls), timestamp=1_700_000_000)
     assert await repository.git("rev-parse", "main") == base
-    rebuilt = CandidateGit(tmp_path / "rebuilt", str(repository.path))
+    rebuilt = CandidateGit(repository.sandbox, tmp_path / "rebuilt", str(repository.path))
     await rebuilt.initialize()
     assert await rebuilt.build("main", base, tuple(pulls), timestamp=1_700_000_000) == candidate
     batch_id = uuid7()
@@ -108,7 +134,10 @@ async def test_stale_base_and_replaced_candidate_refs_are_never_overwritten(
     await repository.git("checkout", "--detach", base)
     head = await repository.commit("feature", "feature\n")
     git = CanaryLanding(
-        tmp_path / "candidate", str(repository.path), canary_remote=str(repository.path)
+        repository.sandbox,
+        tmp_path / "candidate",
+        str(repository.path),
+        canary_remote=str(repository.path),
     )
     await git.initialize()
     candidate = await git.build(
@@ -141,7 +170,7 @@ async def test_conflicts_and_git_configuration_cannot_execute_candidate_code(
     monkeypatch.setenv("GIT_CONFIG_COUNT", "1")
     monkeypatch.setenv("GIT_CONFIG_KEY_0", "merge.evil.driver")
     monkeypatch.setenv("GIT_CONFIG_VALUE_0", f"touch {sentinel}")
-    git = CandidateGit(tmp_path / "candidate", str(repository.path))
+    git = CandidateGit(repository.sandbox, tmp_path / "candidate", str(repository.path))
     await git.initialize()
     with pytest.raises(CandidateConflict, match="PR #2") as conflict:
         await git.build(
@@ -152,6 +181,21 @@ async def test_conflicts_and_git_configuration_cannot_execute_candidate_code(
         )
     assert conflict.value.number == 2
     assert not sentinel.exists()
-    (git.directory / "config").write_text('[merge "evil"]\n driver = malicious\n')
+    (Path(git.directory) / "config").write_text('[merge "evil"]\n driver = malicious\n')
     with pytest.raises(ValueError, match="configuration"):
+        await git.remote_sha("refs/heads/main")
+
+
+@pytest.mark.parametrize("exit_code,truncated", [(None, False), (0, True)])
+async def test_incomplete_sandbox_results_cannot_confirm_a_candidate_ref(
+    tmp_path: Path, exit_code: int | None, truncated: bool
+) -> None:
+    sandbox = Mock(spec=SandboxBackendProtocol)
+    sandbox.aexecute = AsyncMock(
+        return_value=ExecuteResponse(
+            output=f"{'a' * 40}\trefs/heads/main\n", exit_code=exit_code, truncated=truncated
+        )
+    )
+    git = CandidateGit(sandbox, tmp_path / "candidate", "https://github.com/acme/widgets.git")
+    with pytest.raises(RuntimeError, match="incomplete"):
         await git.remote_sha("refs/heads/main")
