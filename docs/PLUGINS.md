@@ -187,9 +187,11 @@ host.on((event) => event.type === "path" && router.navigate(event.path))
 A memory-history router fits well; see `PathSync` in [`plugins/docs/src/routes/__root.tsx`](../plugins/docs/src/routes/__root.tsx). Other navigation:
 
 - `host.nav.openThread(threadId)` opens an agent thread in the web UI.
-- `host.nav.openExternal(url)` opens a web link in a new tab. github.com links open directly; anything else opens only after the person confirms in a dialog the web UI draws.
+- `host.nav.openExternal(url)` opens a web link in a new tab. github.com links open directly; anything else opens only after the person confirms it.
 - `host.ui.toast({ title, description, intent })` shows a web UI toast (`intent` is `success`, `error` or `info`).
 - `host.ui.setTitle(title)` names the browser tab "title · Open SWE", up to 120 characters; `null` goes back to the plugin's name.
+
+The web UI asks the person inline, in a panel it draws between the plugin's header and its frame, never in a modal: the picker, link confirmations and thread approvals all appear there, where the plugin can neither cover nor imitate them.
 
 A plugin behaves like a tab. Once opened, it stays mounted while the person visits threads, pull requests or other pages in the same part of the web UI, and clicking its sidebar entry brings it back exactly as they left it. While hidden it still runs and syncs, but it can't move the web UI or show toasts, and requests that would ask the person something (opening a link, starting a thread, picking repositories) are declined.
 

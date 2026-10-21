@@ -3,12 +3,6 @@ import { Badge } from "@langchain/macaw-components/Badge"
 import { Banner } from "@langchain/macaw-components/Banner"
 import { Button } from "@langchain/macaw-components/Button"
 import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogTitle,
-} from "@langchain/macaw-components/Dialog"
-import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
@@ -501,7 +495,12 @@ export function PageView({
               />
             </DropdownMenuTrigger>
             <DropdownMenuContent align="end" className="w-64">
-              <DropdownMenuItem onSelect={() => setAsking({ anchor: null })}>
+              <DropdownMenuItem
+                onSelect={() => {
+                  setAsking({ anchor: null })
+                  setTab("comments")
+                }}
+              >
                 <SparkleIcon size={14} /> Ask the agent for a change
               </DropdownMenuItem>
               <DropdownMenuItem
@@ -580,7 +579,10 @@ export function PageView({
                 setComposing({ anchor, kind: "suggestion" })
                 setTab("comments")
               },
-              askAgent: (anchor) => setAsking({ anchor }),
+              askAgent: (anchor) => {
+                setAsking({ anchor })
+                setTab("comments")
+              },
             }}
             onSelectComment={(id) => {
               setActiveId(id)
@@ -620,6 +622,17 @@ export function PageView({
             </button>
           ))}
         </nav>
+        {tab === "comments" && asking && (
+          <AskAgent
+            anchor={asking.anchor}
+            onCancel={() => setAsking(null)}
+            onSubmit={(instruction) => {
+              const anchor = asking.anchor
+              setAsking(null)
+              act("Ask the agent")(() => askAgent(instruction, anchor))
+            }}
+          />
+        )}
         {tab === "comments" ? (
           <CommentsPanel
             threads={threads}
@@ -667,17 +680,6 @@ export function PageView({
           <Activity repository={repository} path={path} gitRef={ref} />
         )}
       </aside>
-      {asking && (
-        <AskAgent
-          anchor={asking.anchor}
-          onCancel={() => setAsking(null)}
-          onSubmit={(instruction) => {
-            const anchor = asking.anchor
-            setAsking(null)
-            act("Ask the agent")(() => askAgent(instruction, anchor))
-          }}
-        />
-      )}
     </div>
   )
 }
@@ -724,6 +726,7 @@ function Viewers({
   )
 }
 
+/** Save version, opening in place into a short note on what changed. */
 function SaveButton({
   disabled,
   onSave,
@@ -733,8 +736,8 @@ function SaveButton({
 }) {
   const [open, setOpen] = useState(false)
   const [message, setMessage] = useState("")
-  return (
-    <>
+  if (!open)
+    return (
       <Button
         size="sm"
         variant="outlined"
@@ -743,48 +746,40 @@ function SaveButton({
       >
         Save version
       </Button>
-      <Dialog open={open} onOpenChange={setOpen}>
-        <DialogContent
-          childrenClassName="gap-space-4 p-space-6"
-          showClose={false}
-        >
-          <DialogTitle>Save a version</DialogTitle>
-          <DialogDescription>
-            Commits the page to its draft branch, for everyone editing it.
-          </DialogDescription>
-          <form
-            className="flex flex-col gap-space-3"
-            onSubmit={(event) => {
-              event.preventDefault()
-              onSave(message)
-              setMessage("")
-              setOpen(false)
-            }}
-          >
-            <Textarea
-              placeholder="What changed? (optional)"
-              value={message}
-              onChange={setMessage}
-              rows={3}
-              autoFocus
-            />
-            <div className="flex justify-end gap-space-2">
-              <Button
-                type="button"
-                size="sm"
-                variant="plain"
-                onClick={() => setOpen(false)}
-              >
-                Cancel
-              </Button>
-              <Button type="submit" size="sm">
-                Save version
-              </Button>
-            </div>
-          </form>
-        </DialogContent>
-      </Dialog>
-    </>
+    )
+  return (
+    <form
+      className="flex items-center gap-space-1"
+      onSubmit={(event) => {
+        event.preventDefault()
+        onSave(message)
+        setMessage("")
+        setOpen(false)
+      }}
+      onKeyDown={(event) => {
+        if (event.key === "Escape") setOpen(false)
+      }}
+    >
+      <input
+        aria-label="What changed"
+        placeholder="What changed? (optional)"
+        value={message}
+        onChange={(event) => setMessage(event.target.value)}
+        autoFocus
+        className="h-6 w-56 rounded-md border border-default bg-transparent px-space-2 text-xs text-primary outline-none placeholder:text-placeholder focus:border-[var(--border-focus)]"
+      />
+      <Button type="submit" size="sm" disabled={disabled}>
+        Save
+      </Button>
+      <Button
+        type="button"
+        size="sm"
+        variant="plain"
+        onClick={() => setOpen(false)}
+      >
+        Cancel
+      </Button>
+    </form>
   )
 }
 
@@ -859,6 +854,7 @@ function Activity({
   )
 }
 
+/** The request to the agent, inline at the top of the side panel. */
 function AskAgent({
   anchor,
   onCancel,
@@ -870,49 +866,47 @@ function AskAgent({
 }) {
   const [instruction, setInstruction] = useState("")
   return (
-    <Dialog open onOpenChange={(open) => !open && onCancel()}>
-      <DialogContent
-        childrenClassName="gap-space-4 p-space-6"
-        showClose={false}
-      >
-        <DialogTitle>Ask the agent</DialogTitle>
-        <DialogDescription>
-          It edits this page on its draft and commits there; you&apos;ll see the
-          request before it starts.
-        </DialogDescription>
-        {anchor && (
-          <blockquote className="line-clamp-4 border-l-2 border-default pl-space-2 text-sm text-secondary">
-            {anchor.quote}
-          </blockquote>
-        )}
-        <form
-          className="flex flex-col gap-space-3"
-          onSubmit={(event) => {
-            event.preventDefault()
-            if (instruction.trim()) onSubmit(instruction.trim())
-          }}
-        >
-          <Textarea
-            placeholder={
-              anchor
-                ? "What should change here?"
-                : "What should change on this page?"
-            }
-            value={instruction}
-            onChange={setInstruction}
-            rows={4}
-            autoFocus
-          />
-          <div className="flex justify-end gap-space-2">
-            <Button type="button" size="sm" variant="plain" onClick={onCancel}>
-              Cancel
-            </Button>
-            <Button type="submit" size="sm" disabled={!instruction.trim()}>
-              Continue
-            </Button>
-          </div>
-        </form>
-      </DialogContent>
-    </Dialog>
+    <form
+      className="m-space-3 mb-0 flex flex-col gap-space-2 rounded-lg border border-default bg-surface-level-1 p-space-3"
+      onSubmit={(event) => {
+        event.preventDefault()
+        if (instruction.trim()) onSubmit(instruction.trim())
+      }}
+      onKeyDown={(event) => {
+        if (event.key === "Escape") onCancel()
+      }}
+    >
+      <span className="flex items-center gap-space-1 text-xs font-medium text-secondary">
+        <SparkleIcon size={12} /> Ask the agent
+      </span>
+      {anchor && (
+        <blockquote className="line-clamp-3 border-l-2 border-default pl-space-2 text-xs text-secondary">
+          {anchor.quote}
+        </blockquote>
+      )}
+      <Textarea
+        placeholder={
+          anchor
+            ? "What should change here?"
+            : "What should change on this page?"
+        }
+        value={instruction}
+        onChange={setInstruction}
+        rows={3}
+        autoFocus
+      />
+      <p className="text-xs text-tertiary">
+        It edits this page on its draft and commits there; you&apos;ll see the
+        request before it starts.
+      </p>
+      <div className="flex justify-end gap-space-2">
+        <Button type="button" size="sm" variant="plain" onClick={onCancel}>
+          Cancel
+        </Button>
+        <Button type="submit" size="sm" disabled={!instruction.trim()}>
+          Continue
+        </Button>
+      </div>
+    </form>
   )
 }

@@ -1,12 +1,6 @@
 import { Badge } from "@langchain/macaw-components/Badge"
 import { Button } from "@langchain/macaw-components/Button"
 import { Checkbox } from "@langchain/macaw-components/Checkbox"
-import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogTitle,
-} from "@langchain/macaw-components/Dialog"
 import { IconButton } from "@langchain/macaw-components/IconButton"
 import { Input } from "@langchain/macaw-components/Input"
 import { ArrowsClockwiseIcon } from "@phosphor-icons/react/dist/ssr/ArrowsClockwise"
@@ -21,40 +15,17 @@ import { cn } from "@/lib/utils"
 const OWNER_REPO = /^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/
 
 /**
- * The dashboard's picker for a plugin's `repositories.pick`: the person
- * chooses from the repositories they can read, and the plugin gets only those.
+ * The web UI's picker for a plugin's `repositories.pick`, drawn inline above
+ * the plugin: the person chooses from the repositories they can read, and the
+ * plugin gets only those.
  */
-export function RepositoryPicker({
-  plugin,
-  pick,
-  armed,
-  onAnswer,
-}: {
+export function RepositoryPicker(props: {
   plugin: InstalledPlugin
-  pick: RepositoryPick | null
+  pick: RepositoryPick
   armed: boolean
   onAnswer: (chosen: ReadonlyArray<string> | null) => void
 }) {
-  return (
-    <Dialog
-      open={pick !== null}
-      onOpenChange={(open) => !open && onAnswer(null)}
-    >
-      <DialogContent
-        childrenClassName="gap-space-4 p-space-6"
-        showClose={false}
-      >
-        {pick && (
-          <Picker
-            plugin={plugin}
-            pick={pick}
-            armed={armed}
-            onAnswer={onAnswer}
-          />
-        )}
-      </DialogContent>
-    </Dialog>
-  )
+  return <Picker {...props} />
 }
 
 function Picker({
@@ -99,13 +70,13 @@ function Picker({
 
   return (
     <>
-      <DialogTitle>
+      <h2 className="text-sm font-medium text-primary">
         Share {pick.multiple ? "repositories" : "a repository"} with {name}?
-      </DialogTitle>
-      <DialogDescription>
+      </h2>
+      <p className="text-xs text-secondary">
         {name} reaches only the repositories you choose, as you and with your
         access. You can stop sharing them in Settings → Plugins.
-      </DialogDescription>
+      </p>
       <div className="flex flex-col overflow-hidden rounded-md border border-default">
         <div className="border-b border-default">
           <Input

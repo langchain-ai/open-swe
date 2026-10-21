@@ -1,10 +1,4 @@
 import { Button } from "@langchain/macaw-components/Button"
-import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogTitle,
-} from "@langchain/macaw-components/Dialog"
 import { EmptyState } from "@langchain/macaw-components/EmptyState"
 import { ErrorState } from "@langchain/macaw-components/ErrorState"
 import { Skeleton } from "@langchain/macaw-components/Skeleton"
@@ -14,7 +8,7 @@ import { Link, useNavigate } from "@tanstack/react-router"
 import { useEffect, useEffectEvent, useState } from "react"
 
 import { PluginFrame } from "@/features/plugins/components/PluginFrame"
-import { RepositoryPicker } from "@/features/plugins/components/RepositoryPicker"
+import { ApprovalPanel } from "@/features/plugins/components/ApprovalPanel"
 import type { InstalledPlugin } from "@/features/plugins/lib/api"
 import { useApproval } from "@/features/plugins/lib/approval"
 import { PluginIcon } from "@/features/plugins/lib/icons"
@@ -114,11 +108,6 @@ function InstalledPluginPage({
   const bundle = usePluginBundle(plugin)
   const approval = useApproval()
   const share = useSharePluginRepositories()
-  const thread =
-    approval.shown?.kind === "thread" ? approval.shown.request : null
-  const link = approval.shown?.kind === "link" ? approval.shown.url : null
-  const picking =
-    approval.shown?.kind === "repositories" ? approval.shown.pick : null
   const source = [plugin.source.repository, plugin.source.path]
     .filter(Boolean)
     .join("/")
@@ -150,6 +139,14 @@ function InstalledPluginPage({
           Manage
         </Link>
       </header>
+      {approval.shown && (
+        <ApprovalPanel
+          plugin={plugin}
+          approval={approval.shown}
+          armed={approval.armed}
+          onAnswer={approval.answer}
+        />
+      )}
       {bundle.data !== undefined ? (
         <PluginFrame
           plugin={plugin}
@@ -199,90 +196,6 @@ function InstalledPluginPage({
       ) : (
         <Skeleton className="m-space-5 flex-1" />
       )}
-      <Dialog
-        open={thread !== null}
-        onOpenChange={(open) => !open && approval.answer(null)}
-      >
-        <DialogContent
-          childrenClassName="gap-space-4 p-space-6"
-          showClose={false}
-        >
-          <DialogTitle>Start an agent thread?</DialogTitle>
-          <DialogDescription>
-            {plugin.manifest.displayName} wants to start a private agent thread
-            in{" "}
-            <span className="font-medium text-primary">
-              {thread?.repository}
-            </span>
-            . The agent works as you, with your access. Read the request before
-            you approve it.
-          </DialogDescription>
-          <div className="flex flex-col gap-space-1">
-            <span className="text-xs font-medium text-primary">
-              {thread?.title}
-            </span>
-            <pre className="max-h-72 overflow-auto rounded-md border border-default bg-surface-level-1 p-space-3 text-xs whitespace-pre-wrap text-primary">
-              {thread?.request}
-            </pre>
-          </div>
-          <div className="flex justify-end gap-space-2">
-            <Button
-              size="sm"
-              variant="outlined"
-              onClick={() => approval.answer(null)}
-            >
-              Cancel
-            </Button>
-            <Button
-              size="sm"
-              disabled={!approval.armed}
-              onClick={() => approval.answer(true)}
-            >
-              Start thread
-            </Button>
-          </div>
-        </DialogContent>
-      </Dialog>
-      <RepositoryPicker
-        plugin={plugin}
-        pick={picking}
-        armed={approval.armed}
-        onAnswer={approval.answer}
-      />
-      <Dialog
-        open={link !== null}
-        onOpenChange={(open) => !open && approval.answer(null)}
-      >
-        <DialogContent
-          childrenClassName="gap-space-4 p-space-6"
-          showClose={false}
-        >
-          <DialogTitle>Open this link?</DialogTitle>
-          <DialogDescription>
-            {plugin.manifest.displayName} wants to open a page outside Open SWE
-            in a new tab.
-          </DialogDescription>
-          <code className="rounded-md border border-default bg-surface-level-1 p-space-2 text-xs break-all text-primary">
-            {link}
-          </code>
-          <div className="flex justify-end gap-space-2">
-            <Button
-              size="sm"
-              variant="outlined"
-              onClick={() => approval.answer(null)}
-            >
-              Cancel
-            </Button>
-            <Button
-              size="sm"
-              disabled={!approval.armed}
-              onClick={() => approval.answer(true)}
-            >
-              Open link
-            </Button>
-          </div>
-        </DialogContent>
-      </Dialog>
     </main>
   )
 }
