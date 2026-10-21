@@ -376,8 +376,12 @@ test.describe("review page", () => {
   }) => {
     await openReview(page, pr);
     const diff = diffColumn(page);
-    await diff.locator('[data-column-number="5"]').first().hover();
-    await diff.locator("[data-gutter-utility-slot] button").click();
+    await expect(async () => {
+      await diff.locator('[data-column-number="5"]').first().hover();
+      await diff
+        .locator("[data-gutter-utility-slot] button")
+        .click({ timeout: 1000 });
+    }).toPass({ timeout: 10_000 });
     await expect(diff.getByLabel("Comment body")).toBeVisible();
     await expect(diff.locator("[data-selected-line]").first()).toBeVisible();
 
