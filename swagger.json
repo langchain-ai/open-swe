@@ -5032,6 +5032,21 @@
         "title": "PullRequestThreadStatus",
         "type": "object"
       },
+      "QrLoginRedemption": {
+        "properties": {
+          "code": {
+            "maxLength": 43,
+            "minLength": 43,
+            "title": "Code",
+            "type": "string"
+          }
+        },
+        "required": [
+          "code"
+        ],
+        "title": "QrLoginRedemption",
+        "type": "object"
+      },
       "QueuedPreview": {
         "properties": {
           "id": {
@@ -10072,6 +10087,84 @@
           }
         },
         "summary": "Auth Logout",
+        "tags": [
+          "dashboard",
+          "auth"
+        ]
+      }
+    },
+    "/dashboard/api/auth/qr": {
+      "post": {
+        "description": "Mint a one-time link that signs another device in as this session's person.",
+        "operationId": "auth_qr_issue_dashboard_api_auth_qr_post",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": {
+                    "type": "string"
+                  },
+                  "title": "Response Auth Qr Issue Dashboard Api Auth Qr Post",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "security": [
+          {
+            "DashboardSession": []
+          }
+        ],
+        "summary": "Auth Qr Issue",
+        "tags": [
+          "dashboard",
+          "auth"
+        ]
+      }
+    },
+    "/dashboard/api/auth/qr/redeem": {
+      "post": {
+        "operationId": "auth_qr_redeem_dashboard_api_auth_qr_redeem_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/QrLoginRedemption"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": {
+                    "type": "string"
+                  },
+                  "title": "Response Auth Qr Redeem Dashboard Api Auth Qr Redeem Post",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Auth Qr Redeem",
         "tags": [
           "dashboard",
           "auth"
