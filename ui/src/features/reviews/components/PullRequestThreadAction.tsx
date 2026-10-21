@@ -1,3 +1,11 @@
+import { Button } from "@langchain/macaw-components/Button"
+import {
+  Popover,
+  PopoverContent,
+  PopoverTrigger,
+} from "@langchain/macaw-components/Popover"
+import { Text } from "@langchain/macaw-components/Text"
+import { WarningCircleIcon } from "@phosphor-icons/react/dist/ssr/WarningCircle"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { toast } from "sonner"
 
@@ -81,6 +89,44 @@ export function PullRequestThreadAction({
   const started = actions.find((action) => !runs[action].isIdle) ?? first
   const run = runs[started]
   const { labels } = threadActions[started]
+  if (thread.isError) {
+    return (
+      <Popover>
+        <PopoverTrigger asChild>
+          <Button
+            size="xs"
+            color="secondary"
+            variant="outlined"
+            leftDecorator={WarningCircleIcon}
+          >
+            {labels.unavailable}
+          </Button>
+        </PopoverTrigger>
+        <PopoverContent
+          align="end"
+          aria-label={labels.unavailable}
+          className="w-72 max-w-[calc(100vw-2rem)]"
+        >
+          <Text variant="sm" weight="semibold">
+            Couldn’t check agent availability
+          </Text>
+          <Text variant="xs" color="secondary" className="mt-space-1">
+            {thread.error.message}
+          </Text>
+          <Button
+            size="xs"
+            color="secondary"
+            variant="outlined"
+            className="mt-space-3"
+            disabled={thread.isFetching}
+            onClick={() => void thread.refetch()}
+          >
+            {thread.isFetching ? "Retrying…" : "Retry"}
+          </Button>
+        </PopoverContent>
+      </Popover>
+    )
+  }
   const label = run.data?.already_running
     ? labels.running
     : run.isPending || run.isSuccess
@@ -89,43 +135,30 @@ export function PullRequestThreadAction({
         ? labels.running
         : thread.isPending
           ? labels.checking
-          : thread.isError
-            ? labels.unavailable
-            : run.isError
-              ? labels.retry
-              : labels.idle
+          : run.isError
+            ? labels.retry
+            : labels.idle
   return (
-    <div>
-      <SplitButton
-        disabled={
-          thread.isPending ||
-          thread.isError ||
-          thread.data?.running === true ||
-          run.isPending ||
-          run.isSuccess
-        }
-        onClick={() => run.mutate()}
-        menuLabel={`More fixes for PR #${pr.number}`}
-        menuAlign="start"
-        menu={
-          rest.length > 0 &&
-          rest.map((action) => (
-            <DropdownMenuItem
-              key={action}
-              onSelect={() => runs[action].mutate()}
-            >
-              {threadActions[action].labels.idle}
-            </DropdownMenuItem>
-          ))
-        }
-      >
-        {label}
-      </SplitButton>
-      {thread.error && (
-        <p role="alert" className="mt-space-1 text-error-secondary">
-          {thread.error.message}
-        </p>
-      )}
-    </div>
+    <SplitButton
+      disabled={
+        thread.isPending ||
+        thread.data?.running === true ||
+        run.isPending ||
+        run.isSuccess
+      }
+      onClick={() => run.mutate()}
+      menuLabel={`More fixes for PR #${pr.number}`}
+      menuAlign="start"
+      menu={
+        rest.length > 0 &&
+        rest.map((action) => (
+          <DropdownMenuItem key={action} onSelect={() => runs[action].mutate()}>
+            {threadActions[action].labels.idle}
+          </DropdownMenuItem>
+        ))
+      }
+    >
+      {label}
+    </SplitButton>
   )
 }
