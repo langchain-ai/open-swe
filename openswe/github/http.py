@@ -566,11 +566,11 @@ class RepoClient:
         await self.delete(f"pulls/comments/{comment_id}")
 
     async def check_runs(self, sha: str) -> list[dict[str, Any]]:
-        """Latest checks on ``sha``, excluding superseded Actions cancellations."""
+        """Latest checks on ``sha``, excluding Actions runs a newer run of their workflow superseded."""
         runs = await self.pages(
             f"commits/{sha}/check-runs", key="check_runs", params={"filter": "latest"}
         )
-        if not any(run.get("conclusion") in {"cancelled", "stale"} for run in runs):
+        if all(run.get("conclusion") in {None, "success", "neutral", "skipped"} for run in runs):
             return runs
         try:
             payloads = await self.pages(
@@ -611,7 +611,7 @@ class RepoClient:
         return [
             run
             for index, run in enumerate(runs)
-            if run.get("conclusion") not in {"cancelled", "stale"}
+            if run.get("conclusion") in {None, "success", "neutral", "skipped"}
             or index not in identities
             or orders[index] == latest[identities[index]]
         ]
