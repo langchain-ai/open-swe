@@ -18,7 +18,7 @@ import { RelativeTimestamp } from "./RelativeTimestamp"
 
 const CLAMP_PX = 320
 
-/** `#123` in prose links to that pull request's review page here; code is left alone. */
+/** `#123` and `owner/repo#123` in prose link to that pull request's review page here; code is left alone. */
 function linkPullRequestRefs(body: string, pr: PullRequestRef): string {
   return body
     .split(/(```[\s\S]*?```|`[^`\n]*`)/)
@@ -26,9 +26,18 @@ function linkPullRequestRefs(body: string, pr: PullRequestRef): string {
       index % 2 === 1
         ? part
         : part.replace(
-            /(^|[\s(])#(\d+)\b/g,
-            (_match, lead: string, number: string) =>
-              `${lead}[#${number}](/agents/reviews/${pr.owner}/${pr.repo}/${number})`
+            /(^|[\s(])(?:([A-Za-z0-9-]+)\/([\w.-]+))?#(\d+)\b/g,
+            (
+              _match,
+              lead: string,
+              owner: string | undefined,
+              repo: string | undefined,
+              number: string
+            ) => {
+              const target = owner && repo ? { owner, repo } : pr
+              const text = owner ? `${owner}/${repo}#${number}` : `#${number}`
+              return `${lead}[${text}](/agents/reviews/${encodeURIComponent(target.owner)}/${encodeURIComponent(target.repo)}/${number})`
+            }
           )
     )
     .join("")
