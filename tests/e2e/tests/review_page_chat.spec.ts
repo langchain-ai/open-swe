@@ -570,6 +570,14 @@ test.describe("review page", () => {
     const verdict = "Approving the constant modules.";
     await page.getByLabel("Review summary").fill(verdict);
     await page.getByRole("radio", { name: /Approve/ }).check();
+    await page
+      .getByRole("button", { name: "Cancel", exact: true })
+      .press("Meta+Enter");
+    await expect(page.getByLabel("Review summary")).toBeVisible();
+    expect((await fakePull(page, pr)).reviews).toHaveLength(0);
+    await page.getByRole("button", { name: "Cancel", exact: true }).click();
+    await page.getByRole("button", { name: /Review changes/ }).click();
+    await page.getByRole("radio", { name: /Approve/ }).check();
     await page.getByRole("radio", { name: /Approve/ }).press("Meta+Enter");
     await expect(conversation.getByText(verdict)).toBeVisible();
     await expect(

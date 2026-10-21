@@ -164,6 +164,11 @@ export function SubmitReviewPopover({
             if (canSubmit) submit.mutate()
           }}
           onKeyDown={(e) => {
+            if (
+              e.target instanceof Element &&
+              e.target.closest('a, button:not([role="radio"])')
+            )
+              return
             if ((e.metaKey || e.ctrlKey) && e.key === "Enter") {
               e.preventDefault()
               e.currentTarget.requestSubmit()
