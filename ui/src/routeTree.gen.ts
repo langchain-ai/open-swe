@@ -37,6 +37,7 @@ import { Route as AssistantIndexRouteImport } from './routes/assistant/index'
 import { Route as AssistantThreadIdRouteImport } from './routes/assistant/$threadId'
 import { Route as IncidentsIndexRouteImport } from './routes/incidents/index'
 import { Route as IncidentsIncidentIdRouteImport } from './routes/incidents/$incidentId'
+import { Route as LoginQrRouteImport } from './routes/login_.qr'
 import { Route as MySettingsAboutRouteImport } from './routes/my-settings_.about'
 import { Route as MySettingsAgentRouteImport } from './routes/my-settings_.agent'
 import { Route as MySettingsConnectionsRouteImport } from './routes/my-settings_.connections'
@@ -195,6 +196,11 @@ const IncidentsIncidentIdRoute = IncidentsIncidentIdRouteImport.update({
   path: '/$incidentId',
   getParentRoute: () => IncidentsRoute,
 } as any)
+const LoginQrRoute = LoginQrRouteImport.update({
+  id: '/login_/qr',
+  path: '/login/qr',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const MySettingsAboutRoute = MySettingsAboutRouteImport.update({
   id: '/my-settings_/about',
   path: '/my-settings/about',
@@ -309,6 +315,7 @@ export interface FileRoutesByFullPath {
   '/agents/workspaces': typeof AgentsWorkspacesRoute
   '/assistant/$threadId': typeof AssistantThreadIdRoute
   '/incidents/$incidentId': typeof IncidentsIncidentIdRoute
+  '/login/qr': typeof LoginQrRoute
   '/my-settings/about': typeof MySettingsAboutRoute
   '/my-settings/agent': typeof MySettingsAgentRoute
   '/my-settings/connections': typeof MySettingsConnectionsRoute
@@ -353,6 +360,7 @@ export interface FileRoutesByTo {
   '/agents/workspaces': typeof AgentsWorkspacesRoute
   '/assistant/$threadId': typeof AssistantThreadIdRoute
   '/incidents/$incidentId': typeof IncidentsIncidentIdRoute
+  '/login/qr': typeof LoginQrRoute
   '/my-settings/about': typeof MySettingsAboutRoute
   '/my-settings/agent': typeof MySettingsAgentRoute
   '/my-settings/connections': typeof MySettingsConnectionsRoute
@@ -401,6 +409,7 @@ export interface FileRoutesById {
   '/agents_/workspaces': typeof AgentsWorkspacesRoute
   '/assistant/$threadId': typeof AssistantThreadIdRoute
   '/incidents/$incidentId': typeof IncidentsIncidentIdRoute
+  '/login_/qr': typeof LoginQrRoute
   '/my-settings_/about': typeof MySettingsAboutRoute
   '/my-settings_/agent': typeof MySettingsAgentRoute
   '/my-settings_/connections': typeof MySettingsConnectionsRoute
@@ -450,6 +459,7 @@ export interface FileRouteTypes {
     | '/agents/workspaces'
     | '/assistant/$threadId'
     | '/incidents/$incidentId'
+    | '/login/qr'
     | '/my-settings/about'
     | '/my-settings/agent'
     | '/my-settings/connections'
@@ -494,6 +504,7 @@ export interface FileRouteTypes {
     | '/agents/workspaces'
     | '/assistant/$threadId'
     | '/incidents/$incidentId'
+    | '/login/qr'
     | '/my-settings/about'
     | '/my-settings/agent'
     | '/my-settings/connections'
@@ -541,6 +552,7 @@ export interface FileRouteTypes {
     | '/agents_/workspaces'
     | '/assistant/$threadId'
     | '/incidents/$incidentId'
+    | '/login_/qr'
     | '/my-settings_/about'
     | '/my-settings_/agent'
     | '/my-settings_/connections'
@@ -585,6 +597,7 @@ export interface RootRouteChildren {
   AdminUsersRoute: typeof AdminUsersRoute
   AgentsInstructionsRoute: typeof AgentsInstructionsRoute
   AgentsWorkspacesRoute: typeof AgentsWorkspacesRoute
+  LoginQrRoute: typeof LoginQrRoute
   MySettingsAboutRoute: typeof MySettingsAboutRoute
   MySettingsAgentRoute: typeof MySettingsAgentRoute
   MySettingsConnectionsRoute: typeof MySettingsConnectionsRoute
@@ -795,6 +808,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof IncidentsIncidentIdRouteImport
       parentRoute: typeof IncidentsRoute
     }
+    '/login_/qr': {
+      id: '/login_/qr'
+      path: '/login/qr'
+      fullPath: '/login/qr'
+      preLoaderRoute: typeof LoginQrRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/my-settings_/about': {
       id: '/my-settings_/about'
       path: '/my-settings/about'
@@ -996,6 +1016,7 @@ const rootRouteChildren: RootRouteChildren = {
   AdminUsersRoute: AdminUsersRoute,
   AgentsInstructionsRoute: AgentsInstructionsRoute,
   AgentsWorkspacesRoute: AgentsWorkspacesRoute,
+  LoginQrRoute: LoginQrRoute,
   MySettingsAboutRoute: MySettingsAboutRoute,
   MySettingsAgentRoute: MySettingsAgentRoute,
   MySettingsConnectionsRoute: MySettingsConnectionsRoute,

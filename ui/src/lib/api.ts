@@ -2069,6 +2069,15 @@ export const api = {
       body: JSON.stringify(body),
     }),
   logout: () => request<void>("/auth/logout", { method: "POST" }),
+  issueQrLogin: () =>
+    request<{ url: string; expires_at: string }>("/auth/qr", {
+      method: "POST",
+    }),
+  redeemQrLogin: (code: string) =>
+    request<{ login: string }>("/auth/qr/redeem", {
+      method: "POST",
+      body: JSON.stringify({ code }),
+    }),
 }
 
 export function loginUrl(redirectTo?: string): string {

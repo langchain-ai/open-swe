@@ -27,6 +27,7 @@ import type {
 } from "@/lib/api"
 import { useTheme } from "@/lib/theme"
 import { ConfirmDialog } from "./ConfirmDialog"
+import { QrLoginSection } from "./QrLoginSection"
 
 const THEMES: Array<{ value: Theme; label: string }> = [
   { value: "system", label: "System" },
@@ -222,6 +223,8 @@ export function GeneralSettings() {
           }
         />
       </SettingsSection>
+
+      <QrLoginSection />
 
       <SettingsSection title="Data">
         <SettingsRow

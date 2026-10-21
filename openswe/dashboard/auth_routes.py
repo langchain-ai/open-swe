@@ -1,4 +1,4 @@
-"""Dashboard login, logout, desktop handoff redemption, and the session identity."""
+"""Dashboard login, logout, desktop and QR handoffs, and the session identity."""
 
 import hmac
 import logging
@@ -7,7 +7,7 @@ from urllib.parse import urlencode
 
 from fastapi import APIRouter, HTTPException, Query, Request, Response
 from fastapi.responses import RedirectResponse
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 from openswe.config import ENV
 from openswe.dashboard.admin import configured_admins, is_admin
@@ -47,6 +47,7 @@ from openswe.dashboard.profiles import (
     upsert_access_token,
     upsert_access_token_from_github_response,
 )
+from openswe.dashboard.qr_login import QrLoginCode
 from openswe.dashboard.user_preferences import get_user_preferences
 from openswe.database import postgres
 from openswe.slack.oauth import slack_base_url, slack_oauth_configured
@@ -232,6 +233,47 @@ async def auth_desktop_exchange(body: DesktopHandoffExchange) -> dict[str, Any]:
         "session": redeem_desktop_handoff(code=body.code, verifier=body.verifier),
         "expires_in": SESSION_TTL_SECONDS,
     }
+
+
+class QrLoginRedemption(BaseModel):
+    code: str = Field(min_length=43, max_length=43)
+
+
+@router.post("/auth/qr")
+async def auth_qr_issue(
+    response: Response, session: dict[str, object] = SESSION_DEP
+) -> dict[str, str]:
+    """Mint a one-time link that signs another device in as this session's person."""
+    user_id = session_user_id(session)
+    if user_id is None or not postgres.configured():
+        raise HTTPException(409, "QR sign-in needs a database-backed account")
+    record, code = await QrLoginCode.issue(user_id)
+    response.headers["Cache-Control"] = "no-store"
+    return {
+        "url": f"{frontend_base_url()}/login/qr#code={code}",
+        "expires_at": record.expires_at.isoformat(),
+    }
+
+
+@router.post("/auth/qr/redeem")
+async def auth_qr_redeem(body: QrLoginRedemption, response: Response) -> dict[str, str]:
+    response.headers["Cache-Control"] = "no-store"
+    user_id = await QrLoginCode.redeem(body.code)
+    user = await User.get(user_id) if user_id is not None else None
+    if user is None or not user.github_login:
+        raise HTTPException(400, "This QR code has expired or was already used")
+    await enforce_github_login_gate(user.github_login)
+    set_session_cookie(
+        response,
+        issue_session(
+            login=user.github_login,
+            email=user.email or None,
+            avatar_url=user.avatar_url or None,
+            user_id=str(user.id),
+        ),
+    )
+    logger.info("Signed in with a QR code", extra={"github_login": user.github_login})
+    return {"login": user.github_login}
 
 
 @router.post("/auth/logout")
