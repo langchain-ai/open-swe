@@ -489,7 +489,7 @@ async def settle_review_check_run(
     The dispatching webhook stores ``review_check_run_id`` in reviewer thread
     metadata when it creates the check. No-op when none is tracked. The id is
     only cleared after a successful PATCH so a transient failure (timeout,
-    5xx, rate limit) leaves it in place for the after-agent hook or a later
+    5xx, rate limit) leaves it in place for the run-complete webhook or a later
     publish to retry — otherwise the check would hang in-progress forever.
     On failure the intended result is persisted as
     ``review_check_pending_result`` so the retry reports this conclusion, not

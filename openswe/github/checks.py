@@ -2,7 +2,7 @@
 
 A check run named ``Open SWE Review`` is created on the PR head SHA when an
 auto-review is dispatched, so the PR's checks section shows the review as
-in-progress. ``publish_review`` (or the after-agent fallback) completes it.
+in-progress. ``publish_review`` (or the run-complete webhook) completes it.
 
 All calls are best-effort: check runs require the GitHub App's
 ``Checks: Read & write`` permission, and a missing permission must never

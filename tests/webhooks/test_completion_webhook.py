@@ -6,6 +6,10 @@ import pytest
 
 from openswe import completion
 from openswe.message_queue import QueuedMessage
+from openswe.review_scout import graph as scout_graph
+from openswe.review_scout import launch
+from openswe.review_scout.launch import ReviewScoutTarget
+from openswe.run_config import RunConfig
 from openswe.slack import thinking as slack_thinking
 from openswe.tasks import events, store
 from openswe.threads import runs
@@ -36,8 +40,12 @@ def _slack_metadata() -> dict[str, Any]:
 
 
 @pytest.mark.asyncio
-async def test_reviewer_error_preserves_pending_check_result(
-    monkeypatch: pytest.MonkeyPatch,
+@pytest.mark.parametrize(
+    ("status", "newer_run", "settles"),
+    [("success", False, True), ("error", False, True), ("success", True, False)],
+)
+async def test_finished_reviewer_run_settles_its_check(
+    monkeypatch: pytest.MonkeyPatch, status: str, newer_run: bool, settles: bool
 ) -> None:
     metadata = {
         "kind": "reviewer",
@@ -50,7 +58,7 @@ async def test_reviewer_error_preserves_pending_check_result(
         "pr": {"owner": "acme", "name": "widgets"},
         "source": "schedule",
     }
-    client = _FakeClient(metadata)
+    client = _FakeActiveRunClient(metadata, active=newer_run)
     monkeypatch.setattr(completion, "langgraph_client", lambda: client)
     monkeypatch.setattr(
         completion, "get_github_app_installation_token", AsyncMock(return_value="token")
@@ -58,10 +66,11 @@ async def test_reviewer_error_preserves_pending_check_result(
     settle = AsyncMock()
     monkeypatch.setattr(completion, "settle_review_check_run", settle)
 
-    await completion.handle_run_completion(
-        {"thread_id": "t1", "run_id": "run-1", "status": "error"}
-    )
+    await completion.handle_run_completion({"thread_id": "t1", "run_id": "run-1", "status": status})
 
+    if not settles:
+        settle.assert_not_awaited()
+        return
     settle.assert_awaited_once_with(
         thread_id="t1",
         owner="acme",
@@ -74,6 +83,53 @@ async def test_reviewer_error_preserves_pending_check_result(
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("newer_run", "checkout_head", "settles"),
+    [(False, "head-1", True), (True, "head-1", False), (False, "head-2", False)],
+)
+async def test_successful_scout_run_finishes_its_plan(
+    monkeypatch: pytest.MonkeyPatch, newer_run: bool, checkout_head: str, settles: bool
+) -> None:
+    target = ReviewScoutTarget(
+        owner="acme",
+        repo="widgets",
+        pr_number=7,
+        pr_title="Add widgets",
+        base_sha="base-1",
+        head_sha="head-1",
+        workspace_slug="acme",
+    )
+    workspace = SimpleNamespace(
+        head_sha=checkout_head, plan=SimpleNamespace(chunks=[]), settle=AsyncMock(return_value=3)
+    )
+    planned: list[RunConfig] = []
+
+    async def locate(_backend: object, cfg: RunConfig) -> SimpleNamespace:
+        planned.append(cfg)
+        return workspace
+
+    monkeypatch.setattr(
+        launch, "dispatch_client", lambda: SimpleNamespace(runs=_FakeRuns(newer_run))
+    )
+    monkeypatch.setattr(scout_graph, "_ensure_scout_sandbox", AsyncMock())
+    monkeypatch.setattr(scout_graph, "_workspace", locate)
+    monkeypatch.setattr(completion, "langgraph_client", lambda: _FakeClient({}))
+
+    await completion.handle_run_completion(
+        {
+            "thread_id": target.thread_id,
+            "run_id": "run-1",
+            "status": "success",
+            "metadata": {"review_scout": target.model_dump(mode="json")},
+        }
+    )
+
+    assert workspace.settle.await_count == (1 if settles else 0)
+    if not newer_run:
+        assert planned[0].pr_number == 7
+
+
+@pytest.mark.asyncio
 async def test_reviewer_cleanup_failure_does_not_block_failure_reply(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -82,7 +138,7 @@ async def test_reviewer_cleanup_failure_does_not_block_failure_reply(
         "review_check_run_id": 42,
         "pr": {"owner": "acme", "name": "widgets"},
     }
-    client = _FakeClient(metadata)
+    client = _FakeActiveRunClient(metadata, active=False)
     monkeypatch.setattr(completion, "langgraph_client", lambda: client)
     monkeypatch.setattr(
         completion, "get_github_app_installation_token", AsyncMock(return_value="token")

@@ -4,7 +4,8 @@ Plans a pull request's shared walkthrough in the background: places every
 changed line in a chunk or in Other, and records a summary of the human input
 behind the change. Runs on its own thread per PR. On a new head it only places
 the lines the carried-over plan does not already cover, and when there are
-none it finishes without a model call.
+none it finishes without a model call. Once a run succeeds, the run-complete
+webhook sends whatever it left unplanned to Other.
 """
 
 import logging
@@ -31,7 +32,6 @@ from langgraph.runtime import Runtime
 from openswe.dashboard.options import gate_fable_model
 from openswe.dashboard.workspace_settings_cache import cached_workspace_settings
 from openswe.github.app import get_github_app_installation_token_with_expiry
-from openswe.github.pull_request_key import PullRequestKey
 from openswe.github.thread_token import cache_github_token_for_thread
 from openswe.middleware import (
     BasePrepareRunMiddleware,
@@ -46,7 +46,6 @@ from openswe.middleware import (
     ToolErrorMiddleware,
 )
 from openswe.middleware.prepare_run import PrepareRunState
-from openswe.middleware.trace import OpenSWEMiddleware
 from openswe.prompts import apply_tool_descriptions, common_prompt, prompt
 from openswe.review.author_guidance import SteeringHistory
 from openswe.run_config import RunConfig
@@ -68,12 +67,11 @@ from openswe.tools.plan_walkthrough import (
     walkthrough_split_hunks,
 )
 from openswe.tools.record_human_input import record_human_input
-from openswe.ui_invalidations import Topic
 from openswe.utils.deferred_model import make_deferred_error_model
 from openswe.utils.model import DEFAULT_LLM_REASONING, make_model, provider_model_kwargs
 from openswe.walkthrough.checkout import CheckoutError, PinnedCheckout
 from openswe.walkthrough.planner import PlannerUnavailableError, PlanWorkspace
-from openswe.walkthrough.record import PlanMovedError, Walkthrough
+from openswe.walkthrough.record import PlanMovedError
 
 logger = logging.getLogger(__name__)
 
@@ -84,7 +82,6 @@ _HUMAN_INPUT_TOOL = record_human_input.__name__
 
 class ReviewScoutState(PrepareRunState):
     scout_nothing_to_plan: NotRequired[bool]
-    human_input_summary: NotRequired[str]
     has_human_input: NotRequired[bool]
 
 
@@ -193,7 +190,6 @@ class PrepareReviewScoutRunMiddleware(BasePrepareRunMiddleware):
             "work_dir": work_dir,
             "rendered_system_prompt": system_prompt,
             "scout_nothing_to_plan": False,
-            "human_input_summary": "",
             "has_human_input": history is not None,
         }
 
@@ -218,48 +214,34 @@ class PrepareReviewScoutRunMiddleware(BasePrepareRunMiddleware):
         return await super().awrap_model_call(request, handler)
 
 
-class FinishPlanMiddleware(OpenSWEMiddleware[ReviewScoutState]):
-    """Send whatever the scout left unplanned to Other, so the plan is complete."""
-
-    state_schema = ReviewScoutState
-
-    def __init__(self, *, thread_id: str, config: RunnableConfig) -> None:
-        self._thread_id = thread_id
-        self._config = config
-
-    async def aafter_agent(self, state: ReviewScoutState, runtime: Runtime) -> None:  # noqa: ARG002
-        cfg = RunConfig.from_config(self._config)
-        if cfg.repo is None or cfg.pr_number is None or not cfg.head_sha:
-            return
-        extra = {
-            "pr_repo_full_name": cfg.repo.full_name,
-            "pr_number": cfg.pr_number,
-            "scout_head_sha": cfg.head_sha,
-        }
-        try:
-            workspace = await _workspace(get_cached_sandbox_backend(self._thread_id), cfg)
-            settled = await workspace.settle()
-        except PlanMovedError:
-            logger.info(
-                "Review scout head is stale; leaving the plan to the newer head", extra=extra
-            )
-            return
-        except CheckoutError, PlannerUnavailableError:
-            logger.exception("Review scout could not finish its plan", extra=extra)
-            return
-        if summary := state.get("human_input_summary", ""):
-            await Walkthrough.set_human_input(workspace.pull_request.id, summary)
-        await Topic.PULL_REQUESTS.invalidate(
-            key=PullRequestKey.of(cfg.repo.owner, cfg.repo.name, cfg.pr_number)
-        )
-        logger.info(
-            "Review scout finished its plan",
-            extra={
-                **extra,
-                "scout_chunks": len(workspace.plan.chunks),
-                "scout_settled_lines": settled,
-            },
-        )
+async def finish_plan(cfg: RunConfig) -> None:
+    """Send whatever the scout left unplanned at ``cfg.head_sha`` to Other, so the plan is complete."""
+    if not cfg.thread_id or cfg.repo is None or cfg.pr_number is None or not cfg.head_sha:
+        return
+    extra = {
+        "pr_repo_full_name": cfg.repo.full_name,
+        "pr_number": cfg.pr_number,
+        "scout_head_sha": cfg.head_sha,
+    }
+    try:
+        workspace = await _workspace(await _ensure_scout_sandbox(cfg.thread_id, cfg), cfg)
+        if workspace.head_sha != cfg.head_sha:
+            raise PlanMovedError("the checkout moved on to another head")
+        settled = await workspace.settle()
+    except PlanMovedError:
+        logger.info("Review scout head is stale; leaving the plan to the newer head", extra=extra)
+        return
+    except CheckoutError, PlannerUnavailableError:
+        logger.exception("Review scout could not finish its plan", extra=extra)
+        return
+    logger.info(
+        "Review scout finished its plan",
+        extra={
+            **extra,
+            "scout_chunks": len(workspace.plan.chunks),
+            "scout_settled_lines": settled,
+        },
+    )
 
 
 def _make_model_or_defer(model_id: str, *, use_gateway: bool, **kwargs: Any) -> BaseChatModel:
@@ -341,7 +323,6 @@ async def build_review_scout(
             ModelRetryMiddleware(retry_on=(TimeoutError,)),
             ModelErrorMiddleware(),
             ModelCallTimeoutMiddleware(),
-            FinishPlanMiddleware(thread_id=thread_id, config=config),
         ],
     )
     graph = create_deep_agent(

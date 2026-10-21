@@ -88,9 +88,13 @@ POSTGRES_URI=""                 # local dev defaults to localhost:5433; set this
 
 MDA_RUNTIME_URL="http://localhost:2025"   # `make dev-mda`; the backend refuses to start without it
 REMOTE_RUNTIME_TOKEN_SECRET=""  # openssl rand -hex 32     (signs the run tokens Managed Deep Agents calls back with)
+COMPLETION_WEBHOOK_URL="https://<name>.ngrok-free.dev/webhooks/run-complete"  # your domain from step 3; runs report their end here
+RUN_COMPLETE_WEBHOOK_SECRET=""  # openssl rand -hex 32     (authenticates those reports)
 ```
 
 Every Open SWE thread runs its model loop on Managed Deep Agents, from the project in `mda/`. Locally that is `make dev-mda` on port 2025, which reads its own `mda/.env`: set `OPEN_SWE_BACKEND_URL=http://localhost:2024` there, plus `LANGSMITH_API_KEY` and the same model key as above ([mda/README.md](../mda/README.md#run-locally)).
+
+When a run ends, the backend's run-complete webhook does the end-of-run work: it settles the thread's status, posts a reply when a run failed, closes the reviewer's GitHub check, and completes the review scout's walkthrough plan. The platform refuses loopback webhook URLs, so it reaches the backend through the tunnel; without the two values above, none of that happens locally.
 
 `LANGGRAPH_URL` defaults to `http://localhost:2024`, and `DASHBOARD_BASE_URL` / `DASHBOARD_API_BASE_URL` default to it, so none of the three is needed locally. Keep them on localhost when setting `SLACK_PUBLIC_BASE_URL` to the tunnel. You only need one model credential: either a provider key or a gateway key if you route model calls through an LLM gateway, such as the [LangSmith Gateway](INSTALLATION.md#4-model-providers-and-api-keys). How the running model is chosen is covered in the same section. Linear, if you use it, comes from the [Linear](INSTALLATION.md#linear) section of the installation guide, with your ngrok domain as the URL.
 

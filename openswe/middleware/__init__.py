@@ -24,7 +24,6 @@ _MIDDLEWARE_MODULES = {
     "SanitizeOpenAIResponsesMiddleware": ".sanitize_openai_responses",
     "SanitizeThinkingBlocksMiddleware": ".sanitize_thinking_blocks",
     "StableToolResultOrderMiddleware": ".stable_tool_order",
-    "settle_review_check_on_exit": ".settle_review_check",
     "SubdirAgentsReadMiddleware": ".subdir_agents",
     "task_on_failure": ".task_retry",
     "task_retry_on": ".task_retry",
@@ -61,7 +60,6 @@ __all__ = [
     "notify_step_limit_reached",
     "record_run_usage",
     "refresh_github_proxy_before_model",
-    "settle_review_check_on_exit",
     "task_on_failure",
     "task_retry_on",
 ]
@@ -85,7 +83,6 @@ if TYPE_CHECKING:
     from openswe.middleware.sanitize_fireworks_messages import SanitizeFireworksMessagesMiddleware
     from openswe.middleware.sanitize_openai_responses import SanitizeOpenAIResponsesMiddleware
     from openswe.middleware.sanitize_thinking_blocks import SanitizeThinkingBlocksMiddleware
-    from openswe.middleware.settle_review_check import settle_review_check_on_exit
     from openswe.middleware.stable_tool_order import StableToolResultOrderMiddleware
     from openswe.middleware.subdir_agents import SubdirAgentsReadMiddleware
     from openswe.middleware.task_retry import task_on_failure, task_retry_on

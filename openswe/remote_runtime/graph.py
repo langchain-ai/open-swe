@@ -14,8 +14,7 @@ own middleware, which the MDA run hands each phase of its loop to:
 - ``model_result`` lets the transcript and usage middleware observe each response
 - ``after_model`` runs ``after_model`` hooks, such as the reply nudges, which can
   send the loop back to the model
-- ``after_agent`` runs ``after_agent`` hooks: usage, transcript, step-limit notice,
-  review-check settle
+- ``after_agent`` runs ``after_agent`` hooks: usage, transcript, step-limit notice
 - ``call`` runs one tool through the graph's tools node
 - ``tool_started`` and ``tool_result`` let the transcript record a tool MDA runs
   itself, such as ``task``, whose subagent runs on MDA
