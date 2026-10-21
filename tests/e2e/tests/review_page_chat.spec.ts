@@ -570,7 +570,7 @@ test.describe("review page", () => {
     const verdict = "Approving the constant modules.";
     await page.getByLabel("Review summary").fill(verdict);
     await page.getByRole("radio", { name: /Approve/ }).check();
-    await page.getByRole("button", { name: "Submit review" }).click();
+    await page.getByRole("radio", { name: /Approve/ }).press("Meta+Enter");
     await expect(conversation.getByText(verdict)).toBeVisible();
     await expect(
       conversation.getByText("approved", { exact: true }),

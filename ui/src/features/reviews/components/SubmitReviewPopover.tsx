@@ -163,6 +163,12 @@ export function SubmitReviewPopover({
             e.preventDefault()
             if (canSubmit) submit.mutate()
           }}
+          onKeyDown={(e) => {
+            if ((e.metaKey || e.ctrlKey) && e.key === "Enter") {
+              e.preventDefault()
+              e.currentTarget.requestSubmit()
+            }
+          }}
         >
           <Text as="h2" variant="sm" weight="semibold">
             {isAuthor ? "Comment on your pull request" : "Finish your review"}
@@ -178,12 +184,6 @@ export function SubmitReviewPopover({
             aria-label="Review summary"
             value={body}
             onChange={setBody}
-            onKeyDown={(e) => {
-              if ((e.metaKey || e.ctrlKey) && e.key === "Enter") {
-                e.preventDefault()
-                if (canSubmit) submit.mutate()
-              }
-            }}
             placeholder="Leave a comment"
             rows={5}
             className="mt-space-2"
