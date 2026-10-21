@@ -77,6 +77,7 @@ from openswe.remote_runtime.server import UnknownHookError
 from openswe.remote_runtime.tokens import RemoteRun
 from openswe.run_config import RunConfig
 from openswe.runtime.constants import DEFAULT_LLM_MAX_TOKENS
+from openswe.sandboxes.browsers import ThreadBrowser
 from openswe.sandboxes.lifecycle import bind_mda_sandbox, reconnect_replaced_sandbox
 from openswe.sandboxes.managed import ManagedSandbox
 from openswe.sandboxes.tool_runtime import (
@@ -137,6 +138,12 @@ class CallBody(HookBody):
     name: str
     arguments: dict[str, JsonValue] = {}
     tool_call_id: str
+
+
+class BrowserBody(HookBody):
+    """``browser``: the LangSmith browser MDA gave the thread's agent."""
+
+    browser: str
 
 
 class ToolResultBody(HookBody):
@@ -594,6 +601,9 @@ class RemoteGraph:
             # MDA opened the box before preparing; preparation connects to it as to any other.
             await session.bind_sandbox(body.sandbox_id)
             return await self._phase(session, "before_agent", body)
+        if hook == "browser":
+            await ThreadBrowser(browser=BrowserBody.model_validate(raw).browser).save(run.thread_id)
+            return {}
         if hook == "sandbox":
             session = await self.session(run, body.run_id)
             await in_graph_context(session.config, lambda _runtime: session.reconnect_sandbox())
