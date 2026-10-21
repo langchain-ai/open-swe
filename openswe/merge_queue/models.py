@@ -52,6 +52,7 @@ class MergeRequest(Record):
         JSONB(none_as_null=True), default=None
     )
     blocked_reason: Mapped[str | None] = mapped_column(default=None)
+    blocked_base_sha: Mapped[str | None] = mapped_column(default=None)
     queued_at: Mapped[datetime | None] = mapped_column(default=None)
     last_checked_at: Mapped[datetime | None] = mapped_column(default=None)
     finished_at: Mapped[datetime | None] = mapped_column(default=None)

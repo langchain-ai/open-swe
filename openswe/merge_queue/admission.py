@@ -3,7 +3,7 @@
 import hashlib
 import json
 from dataclasses import asdict
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from typing import Annotated
 
 from pydantic import BaseModel, ConfigDict, Field, JsonValue
@@ -12,6 +12,8 @@ from openswe.github.ci import RequiredCheck
 from openswe.github.http import RepoClient
 from openswe.github.queue import Check, QueuePull, WorkflowRun
 from openswe.merge_queue.git import SHA
+
+ADMISSION_MAX_AGE = timedelta(seconds=120)
 
 
 class CheckSource(BaseModel):

@@ -143,13 +143,14 @@ async def test_conflicts_and_git_configuration_cannot_execute_candidate_code(
     monkeypatch.setenv("GIT_CONFIG_VALUE_0", f"touch {sentinel}")
     git = CandidateGit(tmp_path / "candidate", str(repository.path))
     await git.initialize()
-    with pytest.raises(CandidateConflict, match="PR #2"):
+    with pytest.raises(CandidateConflict, match="PR #2") as conflict:
         await git.build(
             "main",
             base,
             (PullHead(number=1, sha=first), PullHead(number=2, sha=second)),
             timestamp=1_700_000_000,
         )
+    assert conflict.value.number == 2
     assert not sentinel.exists()
     (git.directory / "config").write_text('[merge "evil"]\n driver = malicious\n')
     with pytest.raises(ValueError, match="configuration"):

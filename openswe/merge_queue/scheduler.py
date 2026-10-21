@@ -5,7 +5,12 @@ import logging
 from datetime import UTC, datetime, timedelta
 
 from openswe.github.http import RepoClient
-from openswe.merge_queue.admission import AdmissionReader, AdmissionRejected, QueuePolicy
+from openswe.merge_queue.admission import (
+    ADMISSION_MAX_AGE,
+    AdmissionReader,
+    AdmissionRejected,
+    QueuePolicy,
+)
 from openswe.merge_queue.git import Candidate, CandidateConflict, PullHead, candidate_ref
 from openswe.merge_queue.models import Batch, Lease
 from openswe.merge_queue.store import LeaseLost, MergeQueue, QueueEntry
@@ -35,7 +40,9 @@ class BatchScheduler:
 
         async def work() -> None:
             try:
-                admission_deadline = asyncio.get_running_loop().time() + seconds / 2
+                admission_deadline = asyncio.get_running_loop().time() + min(
+                    seconds / 2, ADMISSION_MAX_AGE.total_seconds() / 2
+                )
                 entries = await self.queue.entries(lease)
                 entries.sort(
                     key=lambda entry: (
@@ -169,7 +176,9 @@ class BatchScheduler:
                         timestamp=int(batch.created_at.timestamp()),
                     )
                 except CandidateConflict as exc:
-                    await self.queue.candidate_failed(batch.id, str(exc), lease)
+                    await self.queue.candidate_failed(
+                        batch.id, str(exc), lease, conflicting_pr=exc.number
+                    )
                     return
                 if not await self._current(batch, lease):
                     return

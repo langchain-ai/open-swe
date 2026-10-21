@@ -554,6 +554,69 @@ async def test_candidate_budget_manifest_fence_and_retention(queue: MergeQueue) 
     assert (
         await queue.history(next_batch.id)
     ).batch.candidate_error == "Candidate build retry budget exhausted"
+    assert (await queue.history(next_batch.id)).batch.state == "invalidated"
+    for pending in await queue.requests():
+        await queue.refresh_admission(
+            pending.id, pending.head_sha, admission(pending, policy), replacement
+        )
+    assert await queue.schedule("a" * 40, policy, replacement) is None
+    later = await request(queue, 4)
+    await queue.refresh_admission(later.id, later.head_sha, admission(later, policy), replacement)
+    async with postgres.session() as session:
+        await session.execute(
+            update(MergeRequest)
+            .where(MergeRequest.id == later.id)
+            .values(queued_at=datetime.now(UTC) - timedelta(minutes=31))
+        )
+    following = await queue.schedule("a" * 40, policy, replacement)
+    assert following is not None
+    assert [
+        entry.number for entry in (await queue.candidate_inputs(following.id, replacement))[1]
+    ] == [4]
+
+
+@pytest.mark.parametrize("recovery", ["head", "base"])
+async def test_candidate_conflict_blocks_only_the_culprit_until_inputs_change(
+    queue: MergeQueue, recovery: str
+) -> None:
+    policy = QueuePolicy(checks={}, max_batch_size=3, collection_seconds=0)
+    lease, requests = await prepare(queue, policy)
+    failed = await queue.schedule("a" * 40, policy, lease)
+    assert failed is not None
+    await queue.candidate_failed(failed.id, "Merge conflict in PR #2", lease, conflicting_pr=2)
+    history = await queue.history(failed.id)
+    assert history.batch.state == "invalidated" and history.batch.finished_at is not None
+    # Neither a failed admission read nor a fresh approval can erase a Git conflict.
+    culprit = requests[1]
+    await queue.refresh_admission(
+        culprit.id, culprit.head_sha, None, lease, reason="GitHub unavailable"
+    )
+    for pending in requests:
+        await queue.refresh_admission(
+            pending.id, pending.head_sha, admission(pending, policy), lease
+        )
+    blocked = next(pending for pending in await queue.requests() if pending.id == culprit.id)
+    assert blocked.blocked_reason == "Merge conflict in PR #2"
+    following = await queue.schedule("a" * 40, policy, lease)
+    assert following is not None
+    assert [entry.number for entry in (await queue.candidate_inputs(following.id, lease))[1]] == [
+        1,
+        3,
+    ]
+    await queue.invalidate(following.id, lease)
+    base = "b" * 40 if recovery == "base" else "a" * 40
+    if recovery == "head":
+        await queue.refresh_head(culprit.id, "d" * 40, lease)
+    for pending in await queue.requests():
+        refreshed = admission(pending, policy).model_copy(update={"base_sha": base})
+        await queue.refresh_admission(pending.id, pending.head_sha, refreshed, lease)
+    recovered = await queue.schedule(base, policy, lease)
+    assert recovered is not None
+    assert [entry.number for entry in (await queue.candidate_inputs(recovered.id, lease))[1]] == [
+        1,
+        2,
+        3,
+    ]
 
 
 @pytest.mark.parametrize("failure", ["lost_response", "lost_lease"])

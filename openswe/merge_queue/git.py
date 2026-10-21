@@ -56,7 +56,9 @@ class GitError(RuntimeError):
 
 
 class CandidateConflict(ValueError):
-    pass
+    def __init__(self, number: int, reason: str):
+        super().__init__(reason)
+        self.number = number
 
 
 class CandidateGit:
@@ -155,13 +157,15 @@ class CandidateGit:
         merges: list[str] = []
         for pull in pulls:
             if await self._run(["merge-base", previous, pull.sha]) == pull.sha:
-                raise CandidateConflict(f"PR #{pull.number} is already included")
+                raise CandidateConflict(pull.number, f"PR #{pull.number} is already included")
             try:
                 tree = await self._run(["merge-tree", "--write-tree", previous, pull.sha])
             except GitError as exc:
                 if exc.code != 1:
                     raise
-                raise CandidateConflict(f"Merge conflict in PR #{pull.number}") from exc
+                raise CandidateConflict(
+                    pull.number, f"Merge conflict in PR #{pull.number}"
+                ) from exc
             previous = await self._run(
                 [
                     "commit-tree",

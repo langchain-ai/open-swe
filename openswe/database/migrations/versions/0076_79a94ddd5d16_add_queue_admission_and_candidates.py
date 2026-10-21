@@ -16,6 +16,7 @@ def upgrade() -> None:
           ADD COLUMN dependencies jsonb NOT NULL DEFAULT '[]' CHECK (jsonb_typeof(dependencies) = 'array'),
           ADD COLUMN admission jsonb CHECK (jsonb_typeof(admission) = 'object'),
           ADD COLUMN blocked_reason text,
+          ADD COLUMN blocked_base_sha text CHECK (blocked_base_sha ~ '^[0-9a-f]{40}$'),
           ADD COLUMN queued_at timestamptz,
           ADD COLUMN last_checked_at timestamptz
     """)

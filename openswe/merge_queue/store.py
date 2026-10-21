@@ -21,7 +21,7 @@ from sqlalchemy.orm import Mapped, mapped_column
 from openswe.database import postgres
 from openswe.github.pull_requests import PullRequest
 from openswe.github.repositories import Repository
-from openswe.merge_queue.admission import Admission, QueuePolicy
+from openswe.merge_queue.admission import ADMISSION_MAX_AGE, Admission, QueuePolicy
 from openswe.merge_queue.git import Candidate
 from openswe.merge_queue.models import (
     Attempt,
@@ -276,6 +276,7 @@ class MergeQueue(Record):
                 batch = await self._active_batch(session)
                 await self._invalidate(session, batch, now, None)
             request.admission, request.queued_at = None, None
+            request.blocked_reason, request.blocked_base_sha = None, None
             request.head_sha, request.state, request.updated_by = (
                 head_sha,
                 "waiting_for_review",
@@ -714,11 +715,17 @@ class MergeQueue(Record):
             if request.state == "batched" and (admission is None or changed):
                 await self._invalidate(session, await self._active_batch(session), now, None)
             request.admission = admission.model_dump(mode="json") if admission else None
-            request.blocked_reason, request.updated_by = reason, None
+            if terminal or (
+                admission is not None and request.blocked_base_sha != admission.base_sha
+            ):
+                request.blocked_base_sha = None
+            if request.blocked_base_sha is None:
+                request.blocked_reason = reason
+            request.updated_by = None
             request.last_checked_at = now
             if terminal:
                 request.state, request.finished_at = ("merged" if merged else "withdrawn"), now
-            elif admission is None:
+            elif admission is None or request.blocked_base_sha is not None:
                 request.state, request.queued_at = "waiting_for_review", None
             elif request.state != "batched":
                 request.state = "queued"
@@ -732,14 +739,14 @@ class MergeQueue(Record):
         policy: QueuePolicy,
         preceding: set[int],
     ) -> bool:
-        if request.admission is None or request.blocked_reason:
+        if request.admission is None or request.blocked_reason or request.blocked_base_sha:
             return False
         admission = Admission.model_validate(request.admission)
         return (
             admission.head_sha == request.head_sha
             and admission.base_sha == base_sha
             and admission.policy_digest == policy.fingerprint
-            and timedelta(0) <= now - admission.checked_at <= timedelta(seconds=120)
+            and timedelta(0) <= now - admission.checked_at <= ADMISSION_MAX_AGE
             and not (set(request.dependencies) - set(admission.merged_dependencies) - preceding)
         )
 
@@ -832,16 +839,48 @@ class MergeQueue(Record):
             if batch.published_at or batch.candidate_error:
                 return False
             if batch.build_attempts >= QueuePolicy.model_validate(batch.policy).max_build_attempts:
-                batch.candidate_error = "Candidate build retry budget exhausted"
+                await self._fail_candidate(
+                    session, batch, now, "Candidate build retry budget exhausted"
+                )
                 return False
             batch.build_attempts += 1
             return True
 
-    async def candidate_failed(self, batch_id: UUID, reason: str, lease: Lease) -> None:
-        async with self._locked(lease) as (session, _, _):
+    async def candidate_failed(
+        self, batch_id: UUID, reason: str, lease: Lease, *, conflicting_pr: int | None = None
+    ) -> None:
+        async with self._locked(lease) as (session, _, now):
             batch = await self._batch(session, batch_id)
             if batch.state == "active":
-                batch.candidate_error = reason
+                await self._fail_candidate(
+                    session, batch, now, reason, conflicting_pr=conflicting_pr
+                )
+
+    async def _fail_candidate(
+        self,
+        session: AsyncSession,
+        batch: Batch,
+        now: datetime,
+        reason: str,
+        *,
+        conflicting_pr: int | None = None,
+    ) -> None:
+        query = (
+            select(MergeRequest)
+            .join(BatchMember)
+            .join(PullRequest, PullRequest.id == MergeRequest.pull_request_id)
+            .where(BatchMember.batch_id == batch.id, MergeRequest.queue_id == self.id)
+        )
+        if conflicting_pr is not None:
+            query = query.where(PullRequest.number == conflicting_pr)
+        blocked = list(await session.scalars(query))
+        if not blocked:
+            raise ValueError("Conflicting PR is not a member of this batch")
+        await self._invalidate(session, batch, now, None)
+        batch.candidate_error = reason
+        for request in blocked:
+            request.state, request.queued_at = "waiting_for_review", None
+            request.blocked_reason, request.blocked_base_sha = reason, batch.base_sha
 
     async def save_candidate(
         self, batch_id: UUID, candidate: Candidate, lease: Lease, *, published: bool = False
