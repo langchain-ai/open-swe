@@ -87,17 +87,21 @@ async def test_threads_stuck_busy_are_settled_from_their_runtime(
     }
 
 
-async def test_a_channel_thread_mda_says_nothing_about_stays_busy(
+async def test_a_channel_thread_mda_says_nothing_about_stays_busy_until_its_run_never_came(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     long_ago = datetime.now(UTC) - timedelta(hours=1)
-    await _busy_since("hidden", long_ago, metadata={"channel": "linear"})
+    await _busy_since("hidden", datetime.now(UTC) - timedelta(minutes=2), {"channel": "linear"})
+    await _busy_since("never-started", long_ago, metadata={"channel": "linear"})
     await _busy_since("shown", long_ago, metadata={"channel": "linear"})
     monkeypatch.setattr(status, "RUNTIMES", _Runtimes({"shown": "idle"}))
 
-    assert await status.reconcile_busy_threads() == 1
+    assert await status.reconcile_busy_threads() == 2
 
-    hidden = await index.get("hidden")
-    shown = await index.get("shown")
-    assert hidden is not None and hidden.status == "busy"
-    assert shown is not None and shown.status == "idle"
+    statuses = {
+        thread_id: thread.status
+        for thread_id in ("hidden", "never-started", "shown")
+        if (thread := await index.get(thread_id))
+    }
+    # MDA may not have created it yet; long after, its run never started.
+    assert statuses == {"hidden": "busy", "never-started": "idle", "shown": "idle"}

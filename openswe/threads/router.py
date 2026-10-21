@@ -110,9 +110,8 @@ async def adopt_channel_run(thread_id: str, channel: str) -> None:
     Call it before the thread's metadata is written. The channel creates the thread
     on MDA as its conversation's own when it starts the run, so the backend indexes
     it and keeps its own copy, but never creates it there, as it does a new thread
-    of its own; it marks it the channel's, so it stays read-only here. Busy now, so
-    the dashboard shows the run; its run-complete webhook settles it, or the
-    reconcile job.
+    of its own; it marks it the channel's, so it stays read-only here. Mark it busy
+    with :func:`channel_run_starting` once the run is ready.
     """
     thread = await index.get(thread_id)
     if thread is None:
@@ -126,6 +125,14 @@ async def adopt_channel_run(thread_id: str, channel: str) -> None:
     elif channel_of(thread.metadata) != channel:
         await index.update(thread_id, {CHANNEL_METADATA_KEY: channel})
         await RUNTIMES.local.update(thread_id, {CHANNEL_METADATA_KEY: channel})
+
+
+async def channel_run_starting(thread_id: str) -> None:
+    """Busy once the channel's run is ready to start, so the dashboard shows it.
+
+    Last, so a run that fails to come together never leaves the thread busy. Its
+    run-complete webhook settles it, or the reconcile job.
+    """
     await index.set_status(thread_id, "busy")
 
 
