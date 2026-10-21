@@ -11,7 +11,7 @@ import type { BaseMessage, ContentBlock } from "@langchain/core/messages"
 import type { AssembledToolCall } from "@langchain/react"
 
 import type { StructuredEntity } from "./structuredInputMessages"
-import type { Chunk, Message, ToolExecutionChunk } from "./types"
+import type { Chunk, ImageChunk, Message, ToolExecutionChunk } from "./types"
 
 function senderNote(entity: StructuredEntity | undefined): string | undefined {
   if (entity?.senderType === "bot") return undefined
@@ -160,10 +160,10 @@ function reasoningText(raw: BaseMessage): string {
   return text.trim()
 }
 
-function imageChunks(content: unknown): Array<Chunk> {
+function imageChunks(content: unknown): Array<ImageChunk> {
   if (!Array.isArray(content)) return []
 
-  const chunks: Array<Chunk> = []
+  const chunks: Array<ImageChunk> = []
   for (const item of content) {
     if (!item || typeof item !== "object" || Array.isArray(item)) continue
     const block = item as Record<string, unknown>
@@ -327,7 +327,7 @@ export function streamMessagesToUi(
       flushAgentTurn()
       turnKey = typeof raw.id === "string" ? raw.id : undefined
       const content = (raw as unknown as { content?: unknown }).content
-      const chunks = imageChunks(content)
+      const chunks: Array<Chunk> = imageChunks(content)
       const parsed = parseStructuredInput(raw.text, structuredEntities)
       if (parsed.type === "entity") return
       if (parsed.type === "message" && isSilentSender(parsed.sender)) return
@@ -396,6 +396,8 @@ export function streamMessagesToUi(
         if (output) chunk.output = output
         const display = outputIframeDisplay(toolMessage?.artifact)
         if (display) chunk.display = display
+        const images = imageChunks(toolMessage?.content)
+        if (images.length) chunk.images = images
         const diffData = maybeDiffFromArgs(args)
         if (diffData) chunk.diffData = diffData
         chunks.push(chunk)

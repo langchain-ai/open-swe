@@ -10,7 +10,7 @@ import {
   RouterProvider,
 } from "@tanstack/react-router"
 
-import { HumanMessage } from "@langchain/core/messages"
+import { AIMessage, HumanMessage, ToolMessage } from "@langchain/core/messages"
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
 import type { ReactNode } from "react"
 
@@ -296,6 +296,39 @@ describe("Messages", () => {
 
     fireEvent.click(fold)
     expect(screen.getByText("subagent")).toBeTruthy()
+  })
+
+  it("shows a tool result's image on its card outside the folded work", () => {
+    const png = "iVBORw0KGgo="
+    const messages = streamMessagesToUi([
+      new AIMessage({
+        id: "browse",
+        content: "",
+        tool_calls: [
+          { id: "ls", name: "execute", args: { command: "ls" } },
+          { id: "shot", name: "screenshot", args: {} },
+        ],
+      }),
+      new ToolMessage({ tool_call_id: "ls", content: "README.md" }),
+      new ToolMessage({
+        tool_call_id: "shot",
+        content: [
+          { type: "text", text: "Captured the page" },
+          { type: "image", base64: png, mime_type: "image/png" },
+        ],
+      }),
+      new AIMessage({ id: "reply", content: "The page is shown above." }),
+    ])
+    render(<Messages messages={messages} isStreaming={false} />, { wrapper })
+
+    expect(
+      screen.getByRole("button", { name: "Worked · 1 action" })
+    ).toBeTruthy()
+    expect(screen.queryByText("README.md")).toBeNull()
+    expect(screen.getByRole("img", { name: "image" }).getAttribute("src")).toBe(
+      `data:image/png;base64,${png}`
+    )
+    expect(screen.getByText("Captured the page")).toBeTruthy()
   })
 
   it("keeps workflow approval available alongside an empty-state error", () => {
