@@ -1,6 +1,6 @@
 # Local Development
 
-Run Open SWE on your machine: the backend and the dashboard on `http://localhost:2024`, with GitHub and Slack webhooks arriving through a tunnel. Deploying it for a team is the [installation guide](INSTALLATION.md).
+Run Open SWE on your own machine: the backend and the dashboard on `http://localhost:2024`, with GitHub and Slack webhooks arriving through a tunnel. Deploying it for a team is the  Setup takes about fifteen minutes.[installation guide](INSTALLATION.md).
 
 ## Prerequisites
 
@@ -28,7 +28,7 @@ Follow [Create a GitHub App](INSTALLATION.md#3-create-a-github-app) in the insta
 - **Callback URL**: `http://localhost:2024/dashboard/api/auth/callback`. This is where GitHub sends the browser after "Sign in with GitHub" on your local dashboard.
 - **Webhook URL**: `https://<name>.ngrok-free.dev/webhooks/github` with your ngrok domain from step 3, or leave the webhook off (untick **Active**) if you only start runs from the dashboard. GitHub cannot deliver to `localhost`.
 
-Use a name of your own (GitHub App names are unique), and give it a distinct mention handle (`OPEN_SWE_MENTION_TAGS`) if a shared deployment already answers to `@openswe` in the same repositories.
+Use a name of your own (GitHub App names are unique), and give it a distinct mention handle (`OPEN_SWE_MENTION_TAGS`) if a shared deployment already answers to `@openswe` in the same repositories. Ask in #open-swe if you ge
 
 ## 3. Tunnel for webhooks
 
