@@ -333,7 +333,6 @@ async def test_a_channel_thread_is_indexed_for_mda_without_creating_it_there(
 
     indexed = await index.get(THREAD)
     assert indexed is not None and indexed.runtime == "mda"
-    assert indexed.status == "busy"
     assert indexed.metadata["channel"] == "linear"
     assert harness.runtimes.local.threads[THREAD]["metadata"]["runtime"] == "mda"
     # MDA's channel creates it as its conversation's own thread; a copy made

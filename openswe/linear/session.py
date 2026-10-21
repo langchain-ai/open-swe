@@ -34,7 +34,7 @@ from openswe.input_messages import (
 )
 from openswe.prompts import prompt
 from openswe.source_context import SourceContext
-from openswe.threads.router import adopt_channel_run
+from openswe.threads.router import adopt_channel_run, channel_run_starting
 from openswe.threads.runtimes import RUNTIMES
 from openswe.users import User
 from openswe.utils.http_pool import pooled_transport
@@ -271,6 +271,7 @@ class LinearSessionTurn:
         }
         if COMPLETION_WEBHOOK_URL:
             prepared["webhook"] = COMPLETION_WEBHOOK_URL
+        await channel_run_starting(thread_id)
         return prepared
 
     async def _images(
