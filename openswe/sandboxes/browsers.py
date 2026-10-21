@@ -1,9 +1,11 @@
 """The LangSmith browser MDA gives a thread's agent, as the dashboard shows it.
 
-MDA's browser middleware names and opens each thread's browser and drives one
-window of it, ``mda``. The ``mda/`` project reports the browser's name through
-the backend's ``browser`` hook, and the dashboard frames that window from an
-act link LangSmith mints for the dashboard's origin.
+MDA's browser middleware names each thread's browser and drives one window of
+it, ``mda``. The ``mda/`` project reports the browser's name through the
+backend's ``browser`` hook when a run starts, and again once the agent opens
+it. A person can open it first: MDA adopts an existing browser and ``mda``
+window. The dashboard frames that window from an act link LangSmith mints for
+the dashboard's origin.
 """
 
 import logging
@@ -20,6 +22,8 @@ from openswe.utils.thread_ops import langgraph_client
 
 # Creating and starting wait for Chrome to answer.
 _BROWSER_START_TIMEOUT_SECONDS = 180.0
+# MDA's browser middleware's default, so a browser a person opens idles out like the agent's.
+_BROWSER_IDLE_TTL_SECONDS = 600
 _BROWSER_REQUEST_TIMEOUT_SECONDS = 30.0
 _GONE_STATUSES = frozenset({"failed", "deleting"})
 _THREAD_METADATA_KEY = "browser"
@@ -75,11 +79,37 @@ class LangSmithBrowser:
 
     async def window_named(self, name: str) -> BrowserWindow:
         """The window called ``name``, starting the browser when it is stopped."""
-        state = await self._running_state()
-        for window in state.attachments:
-            if window.name == name:
-                return window
-        raise BrowserGoneError(f"browser {self.name} has no window {name!r}")
+        window = self._find(await self._running_state(), name)
+        if window is None:
+            raise BrowserGoneError(f"browser {self.name} has no window {name!r}")
+        return window
+
+    async def open_window(self, name: str) -> BrowserWindow:
+        """The window called ``name``, creating the browser and, for a person, the window."""
+        try:
+            await _browser_request(
+                "POST",
+                "/browsers",
+                json={"name": self.name, "idle_ttl_seconds": _BROWSER_IDLE_TTL_SECONDS},
+                timeout=_BROWSER_START_TIMEOUT_SECONDS,
+            )
+        except httpx2.HTTPStatusError as exc:
+            if exc.response.status_code != 409:
+                raise
+        window = self._find(await self._running_state(), name)
+        if window is not None:
+            return window
+        response = await _browser_request(
+            "POST",
+            f"/browsers/{self.name}/attachments",
+            json={"name": name, "controller": "user"},
+            timeout=_BROWSER_START_TIMEOUT_SECONDS,
+        )
+        return BrowserWindow.model_validate(response.json())
+
+    @staticmethod
+    def _find(state: BrowserState, name: str) -> BrowserWindow | None:
+        return next((window for window in state.attachments if window.name == name), None)
 
     async def links(self, window_id: str, *, embed_origins: list[str]) -> WindowLinks:
         """Mint view and act links that pages on ``embed_origins`` may show in an iframe."""
@@ -127,9 +157,12 @@ class LangSmithBrowser:
 
 
 class ThreadBrowser(BaseModel):
-    """The browser MDA gave a thread's agent, kept in the thread's metadata."""
+    """The browser MDA names for a thread's agent, kept in the thread's metadata."""
 
     browser: str
+    # Whether the agent or a person has opened it. Records saved before MDA
+    # reported unopened browsers were all opened.
+    opened: bool = True
 
     @classmethod
     def of(cls, metadata: Mapping[str, object]) -> Self | None:
@@ -143,13 +176,39 @@ class ThreadBrowser(BaseModel):
             return None
 
     @property
+    def state(self) -> Literal["opened", "available"]:
+        return "opened" if self.opened else "available"
+
+    @property
     def langsmith(self) -> LangSmithBrowser:
         return LangSmithBrowser(self.browser)
 
     async def forget(self) -> dict[str, object]:
-        """Delete the browser, signed-in sessions and all; the metadata update that forgets it."""
+        """Delete the browser, signed-in sessions and all; the metadata update that records it.
+
+        MDA keeps the name, and opens a fresh browser under it when the agent next browses.
+        """
         await self.langsmith.delete()
-        return {_THREAD_METADATA_KEY: None}
+        return {_THREAD_METADATA_KEY: self.model_copy(update={"opened": False}).model_dump()}
+
+    async def report(self, thread_id: str) -> None:
+        """Record MDA's report; a browser it reported opened stays opened until forgotten."""
+        thread = await langgraph_client().threads.get(thread_id)
+        known = self.of(thread.get("metadata") or {})
+        if (
+            known is not None
+            and known.browser == self.browser
+            and (known.opened or not self.opened)
+        ):
+            return
+        await self.save(thread_id)
+
+    async def open(self, thread_id: str) -> BrowserWindow:
+        """Open the agent's window for a person, creating the browser if the agent hasn't yet."""
+        window = await self.langsmith.open_window(AGENT_WINDOW)
+        if not self.opened:
+            await self.model_copy(update={"opened": True}).save(thread_id)
+        return window
 
     async def save(self, thread_id: str) -> None:
         await langgraph_client().threads.update(
