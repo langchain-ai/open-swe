@@ -37,7 +37,7 @@ from deepagents.backends.protocol import SandboxBackendProtocol
 from deepagents.middleware.skills import SkillsMiddleware, SkillsState
 from deepagents.middleware.subagents import GENERAL_PURPOSE_SUBAGENT, SubAgent
 from langchain.agents.middleware import ModelCallLimitMiddleware, ModelRetryMiddleware
-from langchain.agents.middleware.types import AgentMiddleware, AgentState
+from langchain.agents.middleware.types import AgentMiddleware
 from langchain_anthropic.middleware import AnthropicPromptCachingMiddleware
 from langchain_core.language_models.chat_models import BaseChatModel
 from langchain_core.tools import BaseTool
@@ -65,7 +65,6 @@ from openswe.middleware import (
 from openswe.middleware.prepare_run import PrepareRunState
 from openswe.middleware.record_run_usage import RecordRunUsageMiddleware
 from openswe.middleware.sandbox_circuit_breaker import post_sandbox_unreachable_notification
-from openswe.middleware.trace import OpenSWEMiddleware
 from openswe.middleware.transcript import TranscriptMiddleware
 from openswe.prompts import apply_tool_descriptions, common_prompt, prompt
 from openswe.review.approvals import approval_policy_for_review
@@ -613,10 +612,12 @@ class PrepareReviewerRunMiddleware(BasePrepareRunMiddleware):
         thread_id: str,
         config: RunnableConfig,
         use_gateway: bool,
+        model: ReviewerModelChoice,
     ) -> None:
         self._thread_id = thread_id
         self._config = config
         self._use_gateway = use_gateway
+        self._model = model
 
     def _prepare_config_fingerprint(self) -> Any:
         cfg = RunConfig.from_config(self._config)
@@ -635,7 +636,36 @@ class PrepareReviewerRunMiddleware(BasePrepareRunMiddleware):
         }
 
     async def _prepare(self, state: PrepareRunState, runtime: Runtime) -> dict[str, Any]:  # noqa: ARG002
+        await self._record_run()
         return await prepare_reviewer_run(self._thread_id, self._config, runtime)
+
+    async def _record_run(self) -> None:
+        """Attribute the run to its model before the transcript and usage observers read it."""
+        cfg = RunConfig.from_config(self._config)
+        try:
+            async with aphase(self._thread_id, "prepare.record_run"):
+                await get_client().threads.update(
+                    thread_id=self._thread_id,
+                    metadata={
+                        "agent_kind": "reviewer",
+                        "model": self._model.model_id,
+                        "effort": self._model.effort,
+                    },
+                )
+                if cfg.invocation_id:
+                    await record_agent_invocation_usage(
+                        invocation_id=cfg.invocation_id,
+                        thread_id=self._thread_id,
+                        github_login=cfg.github_login,
+                        github_user_id=cfg.github_user_id,
+                        user_email=cfg.user_email,
+                        model_id=self._model.model_id,
+                        effort=self._model.effort,
+                        source=cfg.source,
+                        repository=cfg.repo_full_name or None,
+                    )
+        except Exception:
+            logger.warning("Failed to record the reviewer run", exc_info=True)
 
     async def _rejoin(self, state: PrepareRunState, runtime: Runtime) -> None:  # noqa: ARG002
         await ensure_reviewer_github_token(self._thread_id, RunConfig.from_config(self._config))
@@ -1070,41 +1100,6 @@ async def get_reviewer_agent(config: RunnableConfig) -> Pregel:
     return await build_reviewer_agent(config)
 
 
-class RecordReviewerUsageMiddleware(OpenSWEMiddleware):
-    def __init__(self, model: ReviewerModelChoice) -> None:
-        self._model = model
-
-    async def abefore_agent(self, state: AgentState, runtime: Runtime) -> None:
-        del state, runtime
-        cfg = RunConfig.from_runtime()
-        if not cfg.thread_id:
-            return
-        effort = self._model.effort
-        try:
-            await get_client().threads.update(
-                cfg.thread_id,
-                metadata={
-                    "model": self._model.model_id,
-                    "effort": effort,
-                    "agent_kind": "reviewer",
-                },
-            )
-            if cfg.invocation_id:
-                await record_agent_invocation_usage(
-                    invocation_id=cfg.invocation_id,
-                    thread_id=cfg.thread_id,
-                    github_login=cfg.github_login,
-                    github_user_id=cfg.github_user_id,
-                    user_email=cfg.user_email,
-                    model_id=self._model.model_id,
-                    effort=effort,
-                    source=cfg.source,
-                    repository=cfg.repo_full_name or None,
-                )
-        except Exception:
-            logger.warning("Failed to record reviewer usage", exc_info=True)
-
-
 async def build_reviewer_agent(
     config: RunnableConfig, *, tool_surface: ToolSurface | None = None
 ) -> Pregel:
@@ -1151,8 +1146,8 @@ async def build_reviewer_agent(
                 thread_id=thread_id,
                 config=config,
                 use_gateway=use_gateway,
+                model=models.main,
             ),
-            RecordReviewerUsageMiddleware(models.main),
             TranscriptMiddleware(),
             RecordRunUsageMiddleware(),
             AnthropicPromptCachingMiddleware(ttl="1h", unsupported_model_behavior="ignore"),

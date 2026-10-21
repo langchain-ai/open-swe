@@ -11,7 +11,11 @@ import pytest
 from langchain_core.runnables import RunnableConfig
 from langsmith.sandbox import SandboxClientError
 
-from openswe.reviewer import PrepareReviewerRunMiddleware, ensure_reviewer_sandbox_for_thread
+from openswe.reviewer import (
+    PrepareReviewerRunMiddleware,
+    ReviewerModelChoice,
+    ensure_reviewer_sandbox_for_thread,
+)
 from openswe.run_config import RunConfig
 from openswe.sandboxes.lifecycle import SANDBOX_BACKENDS, ensure_sandbox_for_thread
 from openswe.sandboxes.providers.registry import SandboxGoneError
@@ -194,7 +198,10 @@ async def test_reviewer_notifies_when_replacement_also_fails() -> None:
         "configurable": {"repo": {"owner": "langchain-ai", "name": "open-swe"}}
     }
     middleware = PrepareReviewerRunMiddleware(
-        thread_id="thread-reviewer", config=config, use_gateway=False
+        thread_id="thread-reviewer",
+        config=config,
+        use_gateway=False,
+        model=ReviewerModelChoice("openai:gpt-6.1-sol", {}, None),
     )
 
     with (
