@@ -128,9 +128,12 @@ export function OpenPullRequests({
   useEffect(() => {
     if (needsMorePages && !isFetching) void fetchNextPage()
   }, [needsMorePages, isFetching, fetchNextPage])
+  const kept = (pr: OpenPullRequest) =>
+    settled[pullRequestKey(pr)] !== undefined
   const matchingRows = rows
     .filter(
       (pr) =>
+        kept(pr) ||
         !leftOpenList(
           queryClient.getQueryData(pullRequestStatusQuery(login, pr).queryKey)
         )
@@ -151,7 +154,8 @@ export function OpenPullRequests({
     login,
     matchingRows,
     requestedRows,
-    query.dataUpdatedAt
+    query.dataUpdatedAt,
+    kept
   )
   const filtered = all.filter(
     (pr) =>

@@ -11,13 +11,14 @@ import { leftOpenList, pullRequestStatusQuery } from "./cache"
  * Each row in `requested` subscribes to its pull request's status, seeded from
  * the listing fetched at `listedAt`, so it costs no read until that pull request
  * changes or an action updates it; a row that comes back closed or merged
- * drops out of the list.
+ * drops out of the list, unless `kept` holds it.
  */
 export function useCurrentPullRequests(
   login: string,
   rows: OpenPullRequest[],
   requested: OpenPullRequest[],
-  listedAt: number
+  listedAt: number,
+  kept: (pr: OpenPullRequest) => boolean
 ) {
   const statuses = useQueries({
     queries: requested.map((pr) => ({
@@ -36,7 +37,7 @@ export function useCurrentPullRequests(
     )
     const status = statuses[index]
     const current = status && status.dataUpdatedAt > listedAt ? status.data : pr
-    if (leftOpenList(current)) return []
-    return [current ?? pr]
+    if (!leftOpenList(current)) return [current ?? pr]
+    return kept(pr) ? [current ?? pr] : []
   })
 }
