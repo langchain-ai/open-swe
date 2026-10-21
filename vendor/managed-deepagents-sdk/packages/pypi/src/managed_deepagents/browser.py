@@ -454,8 +454,11 @@ async def _reinstall_stagehand(cdp_url: str, headers: dict[str, str]) -> None:
 
 
 def _from_the_browser(err: Exception) -> bool:
-    """Whether a live session reported ``err``; any other error may mean it died."""
-    errors = (RPCError, StagehandFacadeExecutionError, StagehandFacadeInputError)
+    """Whether a live session reported ``err``; any other error may mean it died.
+
+    The facade raises a plain ``SyntaxError`` for run code that does not parse.
+    """
+    errors = (RPCError, StagehandFacadeExecutionError, StagehandFacadeInputError, SyntaxError)
     return isinstance(err, errors)
 
 
