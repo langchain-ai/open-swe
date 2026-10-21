@@ -24,13 +24,32 @@ Each scoped thing you open, such as a collection, a repository or a live room, i
 my-plugin/
 ├── .openswe-plugin/
 │   └── plugin.json     # the manifest
-├── bundle/
-│   └── index.html      # the built plugin, committed
+├── .github/workflows/
+│   └── plugin.yml      # builds and publishes the plugin
 ├── src/
-└── package.json
+└── package.json        # `build` writes the manifest's entry, e.g. bundle/index.html
 ```
 
-Installing reads the manifest and the bundle from GitHub at one commit; nothing is built on the server, so **commit the built bundle**.
+The built UI is never committed, and nothing is built on Open SWE's servers. A GitHub Actions workflow builds the plugin on each push and publishes the build as a release asset; installs read it from there:
+
+```yaml
+# .github/workflows/plugin.yml
+name: Plugin
+on:
+  push:
+  workflow_dispatch:
+  delete:
+permissions:
+  contents: write
+jobs:
+  plugin:
+    uses: langchain-ai/open-swe/.github/workflows/openswe-plugin.yml@main
+    with:
+      install: npm ci          # once, at the repository root
+      build: npm run build     # in each plugin's directory
+```
+
+The newest build of each branch or tag is the asset `<name>-<commit>.html` on a release tagged `openswe-plugin/<name>/<ref>`, a pre-release for branches. Each build replaces the last, and deleting a branch deletes its releases. An install takes the newest build of the ref it follows and pins the commit that build came from, reading the manifest at that commit too. Anyone who can push to the repository can publish a build, the same people who could change its code.
 
 One repository can offer several plugins with `.openswe-plugin/marketplace.json` (the same layout as Claude Code plugin marketplaces):
 
@@ -73,7 +92,7 @@ A source is a directory in the same repository, another repository (`github`, wi
 | `displayName` | At most 48 characters. |
 | `version` | Free text, at most 32 characters. It is shown to people, not compared. |
 | `description` | Optional, at most 280 characters. |
-| `entry` | The bundle, a path relative to the plugin directory. |
+| `entry` | Where the build writes the UI, relative to the plugin directory. The plugin workflow publishes that file. |
 | `sidebar.label` | At most 24 characters. |
 | `sidebar.icon` | One of `puzzle-piece`, `notebook`, `file-text`, `book-open`, `kanban`, `chart-bar`, `chat-circle`, `calendar`, `lightbulb`. |
 | `permissions` | What the plugin may ask for; see below. |
@@ -290,7 +309,7 @@ A failed request rejects with `HostError`, which carries `message` and an HTTP-l
 
 ## Building the bundle
 
-The entry must be one self-contained HTML file: every script, stylesheet and font inline. It must be at most 8 MB and contain no NUL characters (escape them as `\u0000`). Any build that emits a single file works. Docs builds a TanStack Start SPA with Vite, then [`scripts/inline-bundle.mjs`](../plugins/docs/scripts/inline-bundle.mjs) folds the output into `bundle/index.html`, keeping only the Latin font subsets:
+The build must write the manifest's `entry` as one self-contained HTML file: every script, stylesheet and font inline. It must be at most 8 MB and contain no NUL characters (escape them as `\u0000`). Any build that emits a single file works. Docs builds a TanStack Start SPA with Vite, then [`scripts/inline-bundle.mjs`](../plugins/docs/scripts/inline-bundle.mjs) folds the output into `bundle/index.html`, keeping only the Latin font subsets:
 
 ```bash
 pnpm --filter openswe-plugin-docs run build
@@ -300,13 +319,13 @@ pnpm --filter openswe-plugin-docs run build
 
 Your plugin only runs inside the web UI: outside the frame, `connect()` waits forever. To try a change:
 
-1. Build, then commit and push the bundle to a branch.
+1. Push your change to a branch and wait for the plugin workflow to publish its build, usually a minute or two. Run the workflow by hand for a branch it hasn't built yet.
 2. In **Settings → Plugins**, enter your repository, its plugin directory if it has one, and the branch, then press **Find plugins** and **Install**.
 3. Open the plugin from the sidebar.
-4. After the next push, press **Update** to move the install to the new commit.
+4. After the next build, press **Update** to move the install to it.
 
-A local web UI works the same way; [local development](DEVELOPMENT.md) covers running one. Installing reads from GitHub, so the branch has to be pushed either way.
+A local web UI works the same way; [local development](DEVELOPMENT.md) covers running one. Installing reads the build from GitHub either way.
 
 ## Shipping it
 
-People install from the repository's default branch, or from a branch or tag they name. An install stays on its commit until someone presses **Update**. Anyone can install a plugin for themselves; admins can also install one for everyone. Bump `version` with each release so people can tell what they run.
+People install from the repository's default branch, or from a branch or tag they name, so the workflow must have built that ref. A marketplace that points at another repository names a branch or tag there, not a commit. An install stays on its build until someone presses **Update**. Anyone can install a plugin for themselves; admins can also install one for everyone. Bump `version` with each release so people can tell what they run.

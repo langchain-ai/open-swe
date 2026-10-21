@@ -588,6 +588,26 @@ class RepoClient:
         """Every file and directory in commit ``sha``, recursively."""
         return RepoTree.model_validate(await self.get(f"git/trees/{sha}", {"recursive": "1"}))
 
+    async def release(self, tag: str) -> Release | None:
+        """The release tagged ``tag``; ``None`` when there is none."""
+        try:
+            payload = await self.get(f"releases/tags/{quote(tag, safe='')}")
+        except GitHubError as exc:
+            if exc.response.status_code == 404:
+                return None
+            raise
+        return Release.model_validate(payload)
+
+    async def download_asset(self, asset: ReleaseAsset) -> bytes:
+        """``asset``'s bytes. GitHub redirects to its storage, which gets no token."""
+        response = await self.github.request(
+            "GET",
+            f"repos/{self.full_name}/releases/assets/{asset.id}",
+            headers={"Accept": "application/octet-stream"},
+            follow_redirects=True,
+        )
+        return response.content
+
     async def create_branch(self, name: str, sha: str) -> None:
         """Create branch ``name`` pointing at commit ``sha``."""
         await self.post("git/refs", {"ref": f"refs/heads/{name}", "sha": sha})
@@ -729,6 +749,18 @@ class RepoTree(BaseModel):
     sha: str
     tree: list[TreeEntry]
     truncated: bool
+
+
+class ReleaseAsset(BaseModel):
+    id: int
+    name: str
+    size: int
+    updated_at: str
+
+
+class Release(BaseModel):
+    tag_name: str
+    assets: list[ReleaseAsset]
 
 
 class _WorkflowRun(BaseModel):

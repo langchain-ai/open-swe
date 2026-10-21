@@ -12,11 +12,13 @@ approved when they installed it.
 ```
 my-plugin/
   .openswe-plugin/plugin.json   # the manifest
-  bundle/index.html             # one self-contained HTML file: scripts, styles, fonts inlined
+  package.json                  # `build` writes the entry: one self-contained HTML file
 ```
 
 A repository can list several plugins in `.openswe-plugin/marketplace.json`.
-Commit the built bundle: Open SWE never runs a build.
+Never commit the build: the Open SWE plugin workflow
+(`langchain-ai/open-swe/.github/workflows/openswe-plugin.yml`) builds each push
+and publishes it as a release asset, which installs read.
 
 ```json
 {

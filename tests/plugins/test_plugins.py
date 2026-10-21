@@ -1,9 +1,11 @@
 """PostgreSQL regressions for what keeps plugins inside the access they were given."""
 
+from typing import cast
 from uuid import UUID
 
 import pytest
 
+from openswe.github.http import GitHubClient, Release, ReleaseAsset
 from openswe.github.repo_names import RepoFullName
 from openswe.plugins import installed as installed_module
 from openswe.plugins.installed import InstalledPlugin, PluginPermissionDenied, RepositoryNotGranted
@@ -16,7 +18,7 @@ from openswe.plugins.records import (
     PluginNameTaken,
 )
 from openswe.plugins.rooms import Room
-from openswe.plugins.source import PluginPackage, PluginSource
+from openswe.plugins.source import PluginPackage, PluginSource, PluginSourceError
 from openswe.ui_invalidations.topics import _readable_plugin_documents
 from openswe.users import User
 
@@ -166,3 +168,58 @@ async def test_document_changes_reach_only_people_who_can_read_their_scope(
         DocumentScope(repository="acme/app").topic_key(plugin, "comments"),
         DocumentScope(user_id=ada).topic_key(plugin, "notes"),
     }
+
+
+class _PluginRepo:
+    """A plugin repository whose head moved past its newest build."""
+
+    head = "b" * 40
+
+    def __init__(self, release: Release | None) -> None:
+        self._release = release
+        self.tags: list[str] = []
+
+    async def info(self) -> dict[str, str]:
+        return {"default_branch": "main"}
+
+    async def commit_sha(self, ref: str) -> str:
+        return self.head
+
+    async def read_file(self, path: str, ref: str, *, max_chars: int, strict: bool) -> str:
+        return _package("acme/docs").manifest.model_dump_json(by_alias=True)
+
+    async def release(self, tag: str) -> Release | None:
+        self.tags.append(tag)
+        return self._release
+
+    async def download_asset(self, asset: ReleaseAsset) -> bytes:
+        return f"<p>{asset.name}</p>".encode()
+
+
+async def test_an_install_takes_the_newest_build_and_pins_its_commit(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    older, newer = "1" * 40, "2" * 40
+    release = Release(
+        tag_name="openswe-plugin/docs/main",
+        assets=[
+            ReleaseAsset(
+                id=1, name=f"docs-{older}.html", size=9, updated_at="2026-10-20T00:00:00Z"
+            ),
+            ReleaseAsset(
+                id=2, name=f"docs-{newer}.html", size=9, updated_at="2026-10-21T00:00:00Z"
+            ),
+            ReleaseAsset(id=3, name="other-plugin.html", size=9, updated_at="2026-10-22T00:00:00Z"),
+        ],
+    )
+    repo = _PluginRepo(release)
+    monkeypatch.setattr(PluginSource, "repo", lambda _self, _github: repo)
+
+    package = await PluginSource(RepoFullName("acme/docs")).fetch(cast(GitHubClient, None))
+
+    assert repo.tags == ["openswe-plugin/docs/main"]
+    assert (package.commit_sha, package.html) == (newer, f"<p>docs-{newer}.html</p>")
+
+    monkeypatch.setattr(PluginSource, "repo", lambda _self, _github: _PluginRepo(None))
+    with pytest.raises(PluginSourceError, match="no build of docs on main"):
+        await PluginSource(RepoFullName("acme/docs")).fetch(cast(GitHubClient, None))

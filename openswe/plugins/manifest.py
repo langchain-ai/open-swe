@@ -2,9 +2,9 @@
 
 A plugin is a directory with ``.openswe-plugin/plugin.json``. A marketplace is a
 repository with ``.openswe-plugin/marketplace.json`` listing plugins and where
-each one lives. The manifest names a self-contained HTML entry, the plugin's UI,
-which the dashboard runs in a sandboxed frame; the plugin never runs on the
-backend.
+each one lives. The manifest's ``entry`` is where the plugin's build writes its
+UI, one self-contained HTML file, which the plugin workflow publishes and the
+web UI runs in a sandboxed frame; the plugin never runs on the backend.
 """
 
 from enum import StrEnum

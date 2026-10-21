@@ -1,12 +1,26 @@
-"""Where a plugin lives on GitHub, and reading it from there at a pinned commit."""
+"""Where a plugin lives on GitHub, and reading it from there at a pinned commit.
+
+A plugin's UI is built, never committed. The repository's plugin workflow
+(``.github/workflows/openswe-plugin.yml``) builds it on each push and keeps the
+newest build of each branch or tag as an asset of a release tagged
+``openswe-plugin/<name>/<ref>``, named for the commit it was built from. An
+install takes that build and pins that commit, reading the manifest there too.
+"""
 
 import logging
+import re
 from dataclasses import dataclass
 
 import httpx2
 from pydantic import ValidationError
 
-from openswe.github.http import GitHubClient, RepoClient, RepoFileUnreadableError
+from openswe.github.http import (
+    GitHubClient,
+    Release,
+    ReleaseAsset,
+    RepoClient,
+    RepoFileUnreadableError,
+)
 from openswe.github.repo_names import RepoFullName, normalize_repo_full_name
 from openswe.plugins.manifest import (
     MANIFEST_PATH,
@@ -19,7 +33,25 @@ from openswe.plugins.manifest import (
 logger = logging.getLogger(__name__)
 
 MAX_MANIFEST_CHARS = 64_000
-MAX_BUNDLE_CHARS = 8_000_000
+MAX_BUNDLE_BYTES = 8_000_000
+
+
+def release_tag(name: str, ref: str) -> str:
+    """The release holding ``name``'s newest build of ``ref``."""
+    return f"openswe-plugin/{name}/{ref}"
+
+
+def newest_build(release: Release, name: str) -> tuple[ReleaseAsset, str] | None:
+    """The release's newest ``<name>-<commit>.html`` and the commit it was built from."""
+    pattern = re.compile(rf"{re.escape(name)}-([0-9a-f]{{40}})\.html")
+    builds = [
+        (asset, match.group(1))
+        for asset in release.assets
+        if (match := pattern.fullmatch(asset.name))
+    ]
+    if not builds:
+        return None
+    return max(builds, key=lambda build: build[0].updated_at)
 
 
 class PluginSourceError(ValueError):
@@ -66,20 +98,31 @@ class PluginSource:
             raise PluginSourceError(f"Invalid {MANIFEST_PATH}: {exc.errors()[0]['msg']}") from exc
 
     async def fetch(self, github: GitHubClient) -> PluginPackage:
-        """The plugin as it is at the commit ``ref`` names now."""
+        """The plugin as its newest build of ``ref`` has it, at the commit that build is from."""
         repo = self.repo(github)
-        ref, sha = await self.resolve(repo)
+        ref, head = await self.resolve(repo)
+        name = (await self.manifest(repo, head)).name
+        tag = release_tag(name, ref)
+        release = await repo.release(tag)
+        build = newest_build(release, name) if release is not None else None
+        if build is None:
+            raise PluginSourceError(
+                f"{self.repository} has no build of {name} on {ref} yet. Its plugin workflow "
+                f"publishes each build to the {tag} release: push a change to the plugin, "
+                "or run the workflow."
+            )
+        asset, sha = build
         manifest = await self.manifest(repo, sha)
-        html = await _read(repo, self.file(manifest.entry), sha, MAX_BUNDLE_CHARS)
-        if html is None:
-            raise PluginSourceError(
-                f"{self.repository} has no {self.file(manifest.entry)}; "
-                "commit the built bundle the manifest names"
-            )
+        if manifest.name != name:
+            raise PluginSourceError(f"The build at {sha[:7]} is of {manifest.name!r}, not {name!r}")
+        if asset.size > MAX_BUNDLE_BYTES:
+            raise PluginSourceError(f"{asset.name} is larger than {MAX_BUNDLE_BYTES} bytes")
+        try:
+            html = (await repo.download_asset(asset)).decode()
+        except UnicodeDecodeError as exc:
+            raise PluginSourceError(f"{asset.name} is not UTF-8 text") from exc
         if "\0" in html:
-            raise PluginSourceError(
-                f"{self.file(manifest.entry)} contains NUL characters; escape them as \\u0000"
-            )
+            raise PluginSourceError(f"{asset.name} contains NUL characters; escape them as \\u0000")
         return PluginPackage(source=self, ref=ref, commit_sha=sha, manifest=manifest, html=html)
 
 
