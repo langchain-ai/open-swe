@@ -405,6 +405,8 @@ export const Changes = memo(function Changes({ pr }: { pr: PullRequestRef }) {
   useEffect(
     () =>
       useReviewPage.subscribe((state, previous) => {
+        if (previous.composer && !state.composer)
+          handle.current?.clearSelectedLines()
         if (state.jump && state.jump !== previous.jump)
           scrollTo(state.jump.target)
       }),

@@ -1,16 +1,22 @@
 """Storage regressions use the same migrated PostgreSQL database as the application."""
 
 import asyncio
+from collections.abc import AsyncIterator
+from contextlib import asynccontextmanager
 from datetime import UTC, datetime, timedelta
-from uuid import uuid7
+from unittest.mock import AsyncMock, Mock
+from uuid import UUID, uuid7
 
 import pytest
 from sqlalchemy import func, select, update
 from sqlalchemy.exc import IntegrityError
 
 from openswe.database import postgres
+from openswe.github.http import RepoClient
 from openswe.github.pull_requests import PullRequest
 from openswe.github.repositories import Repository
+from openswe.merge_queue.admission import Admission, QueuePolicy
+from openswe.merge_queue.git import Candidate, CandidateGit, PullHead, candidate_ref
 from openswe.merge_queue.models import (
     Attempt,
     Batch,
@@ -20,6 +26,7 @@ from openswe.merge_queue.models import (
     Lease,
     MergeRequest,
 )
+from openswe.merge_queue.scheduler import BatchScheduler
 from openswe.merge_queue.store import LeaseLost, MergeQueue
 from openswe.users.models import User
 from openswe.workspaces.rows import WorkspaceRepositoryRow, WorkspaceRow
@@ -387,3 +394,307 @@ async def test_workspace_deletion_removes_its_queue_history(queue: MergeQueue) -
             assert await session.scalar(select(func.count()).select_from(model)) == 0
         assert await session.get(Repository, queue.repository_id) is not None
         assert await session.scalar(select(func.count()).select_from(PullRequest)) == 1
+
+
+async def prepare(queue: MergeQueue, policy: QueuePolicy) -> tuple[Lease, list[MergeRequest]]:
+    async with postgres.session() as session:
+        await session.execute(
+            update(MergeQueue).where(MergeQueue.id == queue.id).values(paused=False)
+        )
+    lease = await claim(queue)
+    requests = [await request(queue, number) for number in range(1, 4)]
+    for pending in requests:
+        await queue.refresh_admission(
+            pending.id, pending.head_sha, admission(pending, policy), lease
+        )
+    return lease, requests
+
+
+def admission(
+    pending: MergeRequest, policy: QueuePolicy, *, snapshot: str = "reviewed"
+) -> Admission:
+    return Admission(
+        head_sha=pending.head_sha,
+        base_sha="a" * 40,
+        checked_at=datetime.now(UTC),
+        policy_digest=policy.fingerprint,
+        snapshot_digest=snapshot,
+    )
+
+
+def candidate_for(batch: Batch, requests: list[MergeRequest]) -> Candidate:
+    return Candidate(
+        repository="https://github.com/acme/widgets.git",
+        branch="main",
+        base_sha=batch.base_sha,
+        pulls=tuple(
+            PullHead(number=int(pending.head_sha, 16), sha=pending.head_sha) for pending in requests
+        ),
+        merges=tuple(f"{100 + position:040x}" for position in range(len(requests))),
+        tree_sha="b" * 40,
+    )
+
+
+async def test_collection_window_dependency_order_and_stale_admission(queue: MergeQueue) -> None:
+    policy = QueuePolicy(checks={}, max_batch_size=3)
+    lease, requests = await prepare(queue, policy)
+    async with postgres.session() as session:
+        await session.execute(
+            update(MergeRequest).where(MergeRequest.id == requests[0].id).values(dependencies=[2])
+        )
+    batch = await queue.schedule("a" * 40, policy, lease)
+    assert batch is not None
+    assert [entry.number for entry in (await queue.candidate_inputs(batch.id, lease))[1]] == [
+        2,
+        1,
+        3,
+    ]
+    await queue.withdraw(requests[2].id)
+    assert await queue.schedule("a" * 40, policy, lease) is None
+    async with postgres.session() as session:
+        await session.execute(
+            update(MergeRequest)
+            .where(MergeRequest.queue_id == queue.id)
+            .values(queued_at=datetime.now(UTC) - timedelta(minutes=31))
+        )
+    smaller = await queue.schedule("a" * 40, policy, lease)
+    assert smaller is not None
+    assert len((await queue.history(smaller.id)).members) == 2
+    changed = admission(requests[0], policy, snapshot="new review")
+    await queue.refresh_admission(requests[0].id, requests[0].head_sha, changed, lease)
+    assert (await queue.history(smaller.id)).batch.state == "invalidated"
+    await queue.refresh_admission(
+        requests[0].id,
+        requests[0].head_sha,
+        changed.model_copy(update={"checked_at": datetime.now(UTC) - timedelta(minutes=3)}),
+        lease,
+    )
+    single = QueuePolicy(checks={}, max_batch_size=1)
+    await queue.refresh_admission(
+        requests[1].id, requests[1].head_sha, admission(requests[1], single), lease
+    )
+    next_batch = await queue.schedule("a" * 40, single, lease)
+    assert next_batch is not None
+    assert [entry.number for entry in (await queue.candidate_inputs(next_batch.id, lease))[1]] == [
+        2
+    ]
+    assert await queue.schedule("c" * 40, single, lease) is None
+    assert (await queue.history(next_batch.id)).batch.state == "invalidated"
+
+
+async def test_dependency_cycles_and_removed_approvals_block_candidates(queue: MergeQueue) -> None:
+    first = await PullRequest(owner="acme", repo="widgets", number=1, base_ref="main").save()
+    second = await PullRequest(owner="acme", repo="widgets", number=2, base_ref="main").save()
+    await queue.request_merge(first.id, "1" * 40, "first", dependencies=(2,))
+    with pytest.raises(ValueError, match="dependency cycle"):
+        await queue.request_merge(second.id, "2" * 40, "second", dependencies=(1,))
+    lease = await claim(queue)
+    policy = QueuePolicy(checks={}, collection_seconds=0)
+    pending = (await queue.requests())[0]
+    await queue.refresh_admission(pending.id, pending.head_sha, admission(pending, policy), lease)
+    async with postgres.session() as session:
+        await session.execute(
+            update(MergeQueue).where(MergeQueue.id == queue.id).values(paused=False)
+        )
+    assert await queue.schedule("a" * 40, policy, lease) is None
+    approved = admission(pending, policy).model_copy(update={"merged_dependencies": (2,)})
+    await queue.refresh_admission(pending.id, pending.head_sha, approved, lease)
+    batch = await queue.schedule("a" * 40, policy, lease)
+    assert batch is not None
+    await queue.refresh_admission(
+        pending.id, pending.head_sha, None, lease, reason="Review dismissed"
+    )
+    assert (await queue.history(batch.id)).batch.state == "invalidated"
+    assert (await queue.requests())[0].state == "waiting_for_review"
+    with pytest.raises(ValueError, match="inactive"):
+        await queue.candidate_inputs(batch.id, lease)
+
+
+async def test_candidate_manifest_fence_and_retention(queue: MergeQueue) -> None:
+    policy = QueuePolicy(checks={}, max_batch_size=3, max_build_attempts=1)
+    lease, requests = await prepare(queue, policy)
+    batch = await queue.schedule("a" * 40, policy, lease)
+    assert batch is not None
+    assert await queue.begin_build(batch.id, lease)
+    candidate = candidate_for(batch, requests)
+    await queue.save_candidate(batch.id, candidate, lease)
+    await queue.save_candidate(batch.id, candidate, lease)
+    with pytest.raises(ValueError, match="immutable"):
+        await queue.save_candidate(
+            batch.id, candidate.model_copy(update={"tree_sha": "c" * 40}), lease
+        )
+    await queue.release(lease)
+    replacement = await claim(queue)
+    with pytest.raises(LeaseLost):
+        await queue.save_candidate(batch.id, candidate, lease, published=True)
+    await queue.save_candidate(batch.id, candidate, replacement, published=True)
+    assert not await queue.begin_build(batch.id, replacement)
+    await queue.refresh_head(requests[0].id, "d" * 40, replacement)
+    assert (await queue.history(batch.id)).batch.state == "invalidated"
+    cutoff = datetime.now(UTC) - timedelta(days=90)
+    async with postgres.session() as session:
+        await session.execute(
+            update(Batch).where(Batch.id == batch.id).values(finished_at=cutoff - timedelta(days=1))
+        )
+    assert [row.id for row in await queue.expired_candidates(cutoff, replacement)] == [batch.id]
+    assert await queue.prune_history(cutoff, replacement) == 0
+    with pytest.raises(ValueError, match="does not match"):
+        await queue.candidate_deleted(batch.id, "e" * 40, replacement)
+    await queue.candidate_deleted(batch.id, candidate.sha, replacement)
+    assert await queue.prune_history(cutoff, replacement) == 1
+
+
+@pytest.mark.parametrize("failure", ["build_budget", "published_ref"])
+async def test_candidate_infrastructure_failure_retries_unchanged_members(
+    queue: MergeQueue, failure: str
+) -> None:
+    policy = QueuePolicy(checks={}, max_batch_size=3, max_build_attempts=1)
+    lease, requests = await prepare(queue, policy)
+    failed = await queue.schedule("a" * 40, policy, lease)
+    assert failed is not None
+    assert await queue.begin_build(failed.id, lease)
+    if failure == "build_budget":
+        reason = "Candidate build retry budget exhausted"
+        assert not await queue.begin_build(failed.id, lease)
+    else:
+        reason = "Published candidate ref changed or disappeared"
+        candidate = candidate_for(failed, requests)
+        await queue.save_candidate(failed.id, candidate, lease)
+        await queue.save_candidate(failed.id, candidate, lease, published=True)
+        await queue.candidate_failed(failed.id, reason, lease)
+    history = await queue.history(failed.id)
+    assert history.batch.state == "invalidated" and history.batch.candidate_error == reason
+    assert all(pending.blocked_reason == reason for pending in await queue.requests())
+    assert await queue.schedule("a" * 40, policy, lease) is None
+    for pending in requests:
+        await queue.refresh_admission(
+            pending.id, pending.head_sha, admission(pending, policy), lease
+        )
+    following = await queue.schedule("a" * 40, policy, lease)
+    assert following is not None
+    assert [entry.number for entry in (await queue.candidate_inputs(following.id, lease))[1]] == [
+        1,
+        2,
+        3,
+    ]
+    assert await queue.begin_build(following.id, lease)
+
+
+@pytest.mark.parametrize("recovery", ["head", "base"])
+async def test_candidate_conflict_blocks_only_the_culprit_until_inputs_change(
+    queue: MergeQueue, recovery: str
+) -> None:
+    policy = QueuePolicy(checks={}, max_batch_size=3, collection_seconds=0)
+    lease, requests = await prepare(queue, policy)
+    failed = await queue.schedule("a" * 40, policy, lease)
+    assert failed is not None
+    await queue.candidate_failed(failed.id, "Merge conflict in PR #2", lease, conflicting_pr=2)
+    history = await queue.history(failed.id)
+    assert history.batch.state == "invalidated" and history.batch.finished_at is not None
+    # Neither a failed admission read nor a fresh approval can erase a Git conflict.
+    culprit = requests[1]
+    await queue.refresh_admission(
+        culprit.id, culprit.head_sha, None, lease, reason="GitHub unavailable"
+    )
+    for pending in requests:
+        await queue.refresh_admission(
+            pending.id, pending.head_sha, admission(pending, policy), lease
+        )
+    blocked = next(pending for pending in await queue.requests() if pending.id == culprit.id)
+    assert blocked.blocked_reason == "Merge conflict in PR #2"
+    following = await queue.schedule("a" * 40, policy, lease)
+    assert following is not None
+    assert [entry.number for entry in (await queue.candidate_inputs(following.id, lease))[1]] == [
+        1,
+        3,
+    ]
+    await queue.invalidate(following.id, lease)
+    base = "b" * 40 if recovery == "base" else "a" * 40
+    if recovery == "head":
+        await queue.refresh_head(culprit.id, "d" * 40, lease)
+    for pending in await queue.requests():
+        refreshed = admission(pending, policy).model_copy(update={"base_sha": base})
+        await queue.refresh_admission(pending.id, pending.head_sha, refreshed, lease)
+    recovered = await queue.schedule(base, policy, lease)
+    assert recovered is not None
+    assert [entry.number for entry in (await queue.candidate_inputs(recovered.id, lease))[1]] == [
+        1,
+        2,
+        3,
+    ]
+
+
+@pytest.mark.parametrize("failure", ["lost_response", "lost_lease"])
+async def test_scheduler_recovers_publication_but_stops_on_lease_loss(
+    queue: MergeQueue, failure: str, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    policy = QueuePolicy(checks={}, max_batch_size=3)
+    lease, requests = await prepare(queue, policy)
+    repo = Mock(spec=RepoClient)
+    repo.full_name = "acme/widgets"
+    repo.branch_sha = AsyncMock(return_value="a" * 40)
+
+    def pull(number: int) -> Mock:
+        client = Mock()
+        client.queue_state = AsyncMock(
+            return_value=Mock(head=f"{number:040x}", merged=False, state="OPEN")
+        )
+        return client
+
+    repo.pull_request.side_effect = pull
+    refs: dict[str, str] = {}
+    repo.ref_sha = AsyncMock(side_effect=lambda ref: refs.get(ref))
+    built = sandboxes = 0
+
+    async def build(
+        branch: str, base_sha: str, pulls: tuple[PullHead, ...], *, timestamp: int
+    ) -> Candidate:
+        nonlocal built
+        built += 1
+        if failure == "lost_lease":
+            await queue.release(lease)
+        return Candidate(
+            repository="https://github.com/acme/widgets.git",
+            branch=branch,
+            base_sha=base_sha,
+            pulls=pulls,
+            merges=tuple(f"{100 + p.number:040x}" for p in pulls),
+            tree_sha="b" * 40,
+        )
+
+    async def publish(candidate: Candidate, batch_id: UUID) -> None:
+        refs[candidate_ref(batch_id)] = candidate.sha
+        raise RuntimeError("Response lost after remote accepted publication")
+
+    git = Mock(spec=CandidateGit)
+    git.build = AsyncMock(side_effect=build)
+    git.publish = AsyncMock(side_effect=publish)
+
+    @asynccontextmanager
+    async def candidate_git() -> AsyncIterator[CandidateGit]:
+        nonlocal sandboxes
+        sandboxes += 1
+        yield git
+
+    repo.candidate_git = candidate_git
+    scheduler = BatchScheduler(queue, repo, policy)
+    monkeypatch.setattr(
+        scheduler.admission,
+        "check",
+        AsyncMock(
+            side_effect=lambda number, head, dependencies: admission(requests[number - 1], policy)
+        ),
+    )
+    with pytest.raises(LeaseLost if failure == "lost_lease" else RuntimeError):
+        await scheduler.reconcile(lease)
+    if failure == "lost_lease":
+        assert refs == {}
+    else:
+        await scheduler.reconcile(lease)
+        await scheduler.reconcile(lease)
+        batch = await queue.schedule("a" * 40, policy, lease)
+        assert batch is not None
+        assert batch.published_at is not None
+        assert batch.build_attempts == built == 1
+        assert refs == {candidate_ref(batch.id): Candidate.model_validate(batch.candidate).sha}
+        assert sandboxes == 1
