@@ -1185,7 +1185,24 @@ async def _process_slack_mention_impl(
     if (code_channel or concierge_mode) and reply_thread_ts:
         slack_thread_context["reply_thread_ts"] = reply_thread_ts
 
-    if repo is not None and not resolution.explicit:
+    review_card = (
+        await HumanReviewRequest.card_in_thread(channel_id, thread_ts)
+        if event_ts != thread_ts
+        and context_thread_ts == thread_ts
+        and any(
+            slack_utils.is_own_slack_message(message, bot_user_id)
+            and isinstance(message.get("text"), str)
+            and message["text"].startswith(
+                ("Review requested for ", "Expedited review requested for ")
+            )
+            for message in thread_messages
+        )
+        else None
+    )
+    if review_card is not None and not resolution.explicit:
+        reviewed = review_card.pull_request
+        repo = Repo.model_validate({"owner": reviewed.owner, "name": reviewed.repo})
+    elif repo is not None and not resolution.explicit:
         repo = await workspace_scoped_default_repo(repo, thread_workspace)
     repo_dict = repo.model_dump() if repo else None
 
@@ -1230,18 +1247,8 @@ async def _process_slack_mention_impl(
             _MESSAGE_UPDATE_PREAMBLE if message_update else "",
             dm_origin_section,
             request.turn_context,
-            prompt("runs/slack-review-request")
-            if event_ts != thread_ts
-            and context_thread_ts == thread_ts
-            and any(
-                slack_utils.is_own_slack_message(message, bot_user_id)
-                and isinstance(message.get("text"), str)
-                and message["text"].startswith(
-                    ("Review requested for ", "Expedited review requested for ")
-                )
-                for message in thread_messages
-            )
-            and await HumanReviewRequest.is_card_thread(channel_id, thread_ts)
+            prompt("runs/slack-review-request", pull_request=review_card.pull_request)
+            if review_card is not None
             else "",
             resolved_links_section,
         )

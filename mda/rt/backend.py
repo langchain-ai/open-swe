@@ -19,6 +19,7 @@ from langchain_core.messages import BaseMessage, ToolMessage, messages_to_dict
 from pydantic import BaseModel, JsonValue, TypeAdapter, ValidationError
 
 from rt.models import ModelSpec, RunModels
+from rt.sandbox import SandboxSpec
 
 logger = logging.getLogger(__name__)
 
@@ -43,6 +44,8 @@ Hook = Literal[
     "call",
     "tool_started",
     "tool_result",
+    # The thread's box was replaced: the backend connects to the fresh one.
+    "sandbox",
 ]
 _json_object = TypeAdapter(dict[str, JsonValue])
 _json_list = TypeAdapter(list[JsonValue])
@@ -111,6 +114,8 @@ class Catalog(BaseModel):
     also_from_code: list[str] = []
     # Tools the model labels each call of, with what the label argument tells it.
     described: dict[str, str] = {}
+    # The thread's box; None runs every file and shell tool on the backend alone.
+    sandbox: SandboxSpec | None = None
 
 
 class PhaseReply(BaseModel):
@@ -231,11 +236,14 @@ class OpenSweBackend:
             except httpx2.TimeoutException as exc:
                 raise BackendTimeoutError(f"{hook} failed ({type(exc).__name__})") from exc
             except httpx2.ConnectError as exc:
-                if attempt == 2:
+                if attempt >= 2:
                     raise BackendUnavailableError(f"{hook} failed (ConnectError)") from exc
                 logger.warning("Backend connection failed; retrying", extra={"hook": hook})
                 await asyncio.sleep((1, 3)[attempt])
             except httpx2.HTTPError as exc:
+                gateway_failure = isinstance(
+                    exc, httpx2.HTTPStatusError
+                ) and exc.response.status_code in {502, 503, 504}
                 if isinstance(exc, httpx2.HTTPStatusError) and (
                     failure := _hook_failure(exc.response)
                 ):
@@ -243,9 +251,7 @@ class OpenSweBackend:
                     raise BackendCallError(f"{hook} failed: {failure.describe()}") from exc
                 error = (
                     BackendUnavailableError
-                    if isinstance(exc, httpx2.TransportError)
-                    or isinstance(exc, httpx2.HTTPStatusError)
-                    and exc.response.status_code in {502, 503, 504}
+                    if isinstance(exc, httpx2.TransportError) or gateway_failure
                     else BackendCallError
                 )
                 raise error(f"{hook} failed ({type(exc).__name__})") from exc

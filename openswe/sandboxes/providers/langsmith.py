@@ -28,7 +28,7 @@ from langsmith.sandbox import (
     SandboxOperationError,
     SandboxServerReloadError,
 )
-from pydantic import BaseModel
+from pydantic import BaseModel, JsonValue, TypeAdapter
 
 from openswe.config import ENV
 from openswe.sandboxes.paths import WORKSPACE_DIR
@@ -149,6 +149,58 @@ def get_sandbox_proxy_config(
 ) -> dict[str, Any] | None:
     proxy_config = _merge_sandbox_create_extra_fields(create_params).get("proxy_config")
     return dict(proxy_config) if isinstance(proxy_config, dict) else None
+
+
+_json_object = TypeAdapter(dict[str, JsonValue])
+
+
+class LangSmithCreateOptions(BaseModel):
+    """What a new sandbox is created with, the deployment's defaults filled in."""
+
+    snapshot_id: str | None = None
+    fs_capacity_bytes: int
+    vcpus: int | None = None
+    mem_bytes: int | None = None
+    idle_ttl_seconds: int
+    delete_after_stop_seconds: int
+    # Create-request fields the SDK does not model, such as ``preserve_memory_on_stop``.
+    extra_fields: dict[str, JsonValue] = {}
+
+    @classmethod
+    def resolve(
+        cls,
+        *,
+        snapshot_id: str | None = None,
+        mem_bytes: int | None = None,
+        vcpus: int | None = None,
+        fs_capacity_bytes: int | None = None,
+        create_params: dict[str, Any] | None = None,
+    ) -> LangSmithCreateOptions:
+        (
+            default_fs_capacity_bytes,
+            default_vcpus,
+            default_mem_bytes,
+            idle_ttl_seconds,
+            delete_after_stop_seconds,
+        ) = _get_sandbox_snapshot_config()
+        if mem_bytes is None and vcpus is None:
+            mem_bytes, vcpus = default_mem_bytes, default_vcpus
+        extra_fields = _merge_sandbox_create_extra_fields(create_params)
+        # The API boots its default root snapshot only when the key is absent:
+        # `snapshot_id` is a UUID server-side, so "" is rejected with a 422.
+        if not extra_fields.get("snapshot_id"):
+            extra_fields.pop("snapshot_id", None)
+        return cls(
+            snapshot_id=snapshot_id or None,
+            fs_capacity_bytes=(
+                fs_capacity_bytes if fs_capacity_bytes is not None else default_fs_capacity_bytes
+            ),
+            vcpus=vcpus,
+            mem_bytes=mem_bytes,
+            idle_ttl_seconds=idle_ttl_seconds,
+            delete_after_stop_seconds=delete_after_stop_seconds,
+            extra_fields=_json_object.validate_python(extra_fields),
+        )
 
 
 def _install_create_extra_fields(client: AsyncSandboxClient, extra: dict[str, Any]) -> None:
@@ -513,34 +565,22 @@ async def create_langsmith_sandbox(
     Returns:
         SandboxBackendProtocol instance
     """
-    api_key = SandboxAPI.from_env().api_key
-    (
-        default_fs_capacity_bytes,
-        default_vcpus,
-        default_mem_bytes,
-        idle_ttl_seconds,
-        delete_after_stop_seconds,
-    ) = _get_sandbox_snapshot_config()
-
-    effective_snapshot_id = snapshot_id or ""
-    if mem_bytes is None and vcpus is None:
-        effective_mem_bytes = default_mem_bytes
-        effective_vcpus = default_vcpus
-    else:
-        effective_mem_bytes = mem_bytes
-        effective_vcpus = vcpus
-
-    provider = LangSmithProvider(api_key=api_key)
+    options = LangSmithCreateOptions.resolve(
+        snapshot_id=snapshot_id,
+        mem_bytes=mem_bytes,
+        vcpus=vcpus,
+        fs_capacity_bytes=fs_capacity_bytes,
+        create_params=create_params,
+    )
+    provider = LangSmithProvider(api_key=SandboxAPI.from_env().api_key)
     backend = await provider.get_or_create(
         sandbox_id=sandbox_id,
-        snapshot_id=effective_snapshot_id,
-        fs_capacity_bytes=(
-            fs_capacity_bytes if fs_capacity_bytes is not None else default_fs_capacity_bytes
-        ),
-        vcpus=effective_vcpus,
-        mem_bytes=effective_mem_bytes,
-        idle_ttl_seconds=idle_ttl_seconds,
-        delete_after_stop_seconds=delete_after_stop_seconds,
+        snapshot_id=options.snapshot_id or "",
+        fs_capacity_bytes=options.fs_capacity_bytes,
+        vcpus=options.vcpus,
+        mem_bytes=options.mem_bytes,
+        idle_ttl_seconds=options.idle_ttl_seconds,
+        delete_after_stop_seconds=options.delete_after_stop_seconds,
         create_params=create_params,
     )
 

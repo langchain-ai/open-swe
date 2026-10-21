@@ -566,10 +566,55 @@ class RepoClient:
         await self.delete(f"pulls/comments/{comment_id}")
 
     async def check_runs(self, sha: str) -> list[dict[str, Any]]:
-        """The latest run of each check on ``sha``."""
-        return await self.pages(
+        """Latest checks on ``sha``, excluding superseded Actions cancellations."""
+        runs = await self.pages(
             f"commits/{sha}/check-runs", key="check_runs", params={"filter": "latest"}
         )
+        if not any(run.get("conclusion") in {"cancelled", "stale"} for run in runs):
+            return runs
+        try:
+            payloads = await self.pages(
+                "actions/runs", key="workflow_runs", params={"head_sha": sha}
+            )
+            workflows = {
+                workflow.check_suite_id: workflow
+                for workflow in map(_WorkflowRun.model_validate, payloads)
+            }
+        except httpx2.HTTPError, ValueError:
+            logger.warning(
+                "Could not identify superseded check runs",
+                extra={"repo_full_name": self.full_name, "sha": sha},
+                exc_info=True,
+            )
+            return runs
+        identities: dict[int, tuple[int, int, str, str]] = {}
+        latest: dict[tuple[int, int, str, str], int] = {}
+        orders: dict[int, int] = {}
+        for index, run in enumerate(runs):
+            app, suite = run.get("app"), run.get("check_suite")
+            if not isinstance(app, dict) or not isinstance(suite, dict):
+                continue
+            app_id, suite_id = app.get("id"), suite.get("id")
+            name = run.get("name")
+            if (
+                app.get("slug") != "github-actions"
+                or not isinstance(app_id, int)
+                or not isinstance(suite_id, int)
+                or not isinstance(name, str)
+                or (workflow := workflows.get(suite_id)) is None
+            ):
+                continue
+            identity = (app_id, workflow.workflow_id, workflow.event, name)
+            order = workflow.id
+            identities[index], orders[index] = identity, order
+            latest[identity] = max(latest.get(identity, order), order)
+        return [
+            run
+            for index, run in enumerate(runs)
+            if run.get("conclusion") not in {"cancelled", "stale"}
+            or index not in identities
+            or orders[index] == latest[identities[index]]
+        ]
 
     async def commit_statuses(self, sha: str) -> list[dict[str, Any]]:
         """The latest status per context on ``sha``."""
@@ -591,6 +636,13 @@ async def or_none[T](read: Awaitable[T]) -> T | None:
 
 def _json_or_none(response: httpx2.Response) -> object:
     return None if response.status_code == 204 or not response.content else response.json()
+
+
+class _WorkflowRun(BaseModel):
+    id: int
+    workflow_id: int
+    check_suite_id: int
+    event: str
 
 
 class _GitHubErrorBody(BaseModel):

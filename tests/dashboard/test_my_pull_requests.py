@@ -153,6 +153,51 @@ async def test_blocked_merge_names_required_checks_the_head_never_reported(
     assert rules.await_count == int(reads_rules)
 
 
+@pytest.mark.parametrize(
+    ("conclusion", "ci", "failures", "inconclusive"),
+    [
+        ("cancelled", "unknown", [], 1),
+        ("stale", "unknown", [], 1),
+        ("failure", "failing", ["unit"], 0),
+        ("success", "passing", [], 0),
+        (None, "pending", [], 0),
+    ],
+)
+async def test_review_and_thread_status_agree_on_check_outcomes(
+    monkeypatch, conclusion, ci, failures, inconclusive
+):
+    pull = {
+        "state": "open",
+        "draft": False,
+        "mergeable": True,
+        "mergeable_state": "clean",
+        "head": {"sha": "a" * 40},
+    }
+    runs = [
+        {
+            "name": "unit",
+            "status": "completed" if conclusion else "queued",
+            "conclusion": conclusion,
+        }
+    ]
+    monkeypatch.setattr(prs.PullRequestClient, "pull", AsyncMock(return_value=pull))
+    monkeypatch.setattr(github_http.RepoClient, "check_runs", AsyncMock(return_value=runs))
+    monkeypatch.setattr(github_http.RepoClient, "commit_statuses", AsyncMock(return_value=[]))
+    monkeypatch.setattr(prs.PullRequestClient, "reviewers", AsyncMock(return_value=[]))
+    monkeypatch.setattr(
+        prs.PullRequestClient, "review_state", AsyncMock(return_value=prs.ReviewState(0))
+    )
+    monkeypatch.setattr(prs.PullRequestClient, "unresolved_threads", AsyncMock(return_value=[]))
+    review = await _client(1).load()
+    thread = await _client(1).thread_status()
+    assert review is not None
+    assert review.ci == ci
+    assert review.failing_checks == failures
+    assert [check["name"] for check in thread["failingChecks"]] == failures
+    assert thread["inconclusiveCheckCount"] == inconclusive
+    assert len(review.pending_checks) == thread["pendingCheckCount"] == int(conclusion is None)
+
+
 async def test_mergeability_is_not_awaited_forever(monkeypatch):
     monkeypatch.setattr(prs, "_MERGEABILITY_DELAY_SECONDS", 0)
     fetches = AsyncMock(

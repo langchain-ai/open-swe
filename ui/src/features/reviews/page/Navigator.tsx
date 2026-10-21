@@ -477,15 +477,18 @@ function FileRow({
             {threads}
           </span>
         )}
-        {viewed ? (
+        <span
+          className="flex shrink-0 gap-space-1 font-mono text-xxs tabular-nums"
+          title={`${file.additions} lines added, ${file.deletions} lines deleted`}
+        >
+          <span className="text-success-secondary">+{file.additions}</span>
+          <span className="text-error-secondary">−{file.deletions}</span>
+        </span>
+        {viewed && (
           <CheckIcon
             weight="bold"
             className="size-3 shrink-0 text-brand-primary"
           />
-        ) : (
-          <span className="shrink-0 font-mono text-xxs text-secondary tabular-nums">
-            {changed}
-          </span>
         )}
       </button>
     </li>

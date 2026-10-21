@@ -44,6 +44,7 @@ RETIRED_PROFILE_KEYS = frozenset(
         "default_subagent_model",
         "subagent_reasoning_effort",
         "model_routing_enabled",
+        "experimental_mcp_ptc",
     }
 )
 
@@ -86,7 +87,6 @@ class ProfileUpdate(BaseModel):
     concierge_mode: bool | None = None
     pr_review_links: bool | None = None
     pr_failure_reactions: bool | None = None
-    prefer_tools_in_sandbox: bool | None = None
     experimental_task_coordination: bool | None = None
     draft_prs: bool | None = None
     review_draft_prs: bool | None = None
@@ -94,9 +94,6 @@ class ProfileUpdate(BaseModel):
         default=None, json_schema_extra={"agent_feature_flag": True}
     )
     experimental_background_callbacks: bool | None = Field(
-        default=None, json_schema_extra={"agent_feature_flag": True}
-    )
-    experimental_mcp_ptc: bool | None = Field(
         default=None, json_schema_extra={"agent_feature_flag": True}
     )
     experimental_monitor: bool | None = Field(
@@ -156,11 +153,6 @@ async def upsert_profile(login: str, email: str, update: ProfileUpdate) -> dict[
             update.experimental_assistant_ui
             if update.experimental_assistant_ui is not None
             else existing.get("experimental_assistant_ui")
-        ),
-        "experimental_mcp_ptc": (
-            update.experimental_mcp_ptc
-            if update.experimental_mcp_ptc is not None
-            else existing.get("experimental_mcp_ptc", False)
         ),
         "experimental_background_callbacks": (
             update.experimental_background_callbacks
@@ -410,7 +402,6 @@ async def put_my_profile(
             concierge_mode=update.concierge_mode,
             pr_review_links=update.pr_review_links,
             pr_failure_reactions=update.pr_failure_reactions,
-            prefer_tools_in_sandbox=update.prefer_tools_in_sandbox,
             experimental_task_coordination=update.experimental_task_coordination,
             experimental_act_as_approval=update.experimental_act_as_approval,
             # Switching approval either way starts over from asking every time.
@@ -423,7 +414,6 @@ async def put_my_profile(
         update.concierge_mode
         or update.pr_review_links
         or update.pr_failure_reactions
-        or update.prefer_tools_in_sandbox
         or update.experimental_task_coordination
         or update.experimental_act_as_approval
     ):

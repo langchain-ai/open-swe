@@ -1,4 +1,4 @@
-"""Runs a review walkthrough inside the coding agent, on a thread forked into a code channel.
+"""Runs a review walkthrough inside the coding agent, on a thread bound to a code channel.
 
 Every run first pins the pull request's base and head as refs in the shared
 sandbox, without touching its checkout, attaches the diff to the channel when

@@ -22,6 +22,7 @@ import re
 import uuid
 from collections.abc import Awaitable, Callable, Mapping
 from typing import Final, Literal
+from urllib.parse import parse_qs
 
 from pydantic import JsonValue, TypeAdapter, ValidationError
 from starlette.datastructures import Headers
@@ -141,9 +142,9 @@ class ThreadRouter:
         body = await read_body(receive)
         replayed = replay(body, receive)
         if _SEARCH.match(path):
-            await self._search(send, body, count=False)
+            await self._search(scope, send, body, count=False)
         elif _COUNT.match(path):
-            await self._search(send, body, count=True)
+            await self._search(scope, send, body, count=True)
         elif _THREADS.match(path):
             await self._create(send, body)
         elif _CANCEL_MANY.match(path):
@@ -264,9 +265,11 @@ class ThreadRouter:
                     exc_info=True,
                 )
 
-    async def _search(self, send: Send, body: bytes, *, count: bool) -> None:
+    async def _search(self, scope: Scope, send: Send, body: bytes, *, count: bool) -> None:
+        # The SDK sends only the Agent Server's fields in the body, so ``text`` rides the URL.
+        text = parse_qs(scope["query_string"].decode()).get("text", [None])[-1]
         try:
-            query = ThreadSearch.model_validate(json_body(body) or {})
+            query = ThreadSearch.model_validate({**(json_body(body) or {}), "text": text})
         except ValidationError as exc:
             await send_json(send, 422, {"detail": str(exc)})
             return
