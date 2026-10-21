@@ -5,6 +5,7 @@ import { render, screen } from "@testing-library/react"
 
 import { ErrorToastBody } from "@/lib/errorReporting"
 import { api } from "@/lib/api"
+import { agentsApi } from "@/features/agents/lib/api"
 import { makeQueryClient } from "@/lib/query"
 
 const toastError = vi.fn()
@@ -34,16 +35,16 @@ function stubFetch(respond: (url: string) => Promise<Response>) {
   )
 }
 
-async function runFailingMutation(meta: {
-  errorTitle?: string
-  silent?: boolean
-}) {
+async function runFailingMutation(
+  meta: { errorTitle?: string; silent?: boolean },
+  mutationFn: () => Promise<unknown> = () => api.saveMyInstructions("x")
+) {
   const client = makeQueryClient()
   await client
     .getMutationCache()
     .build(client, {
       mutationKey: ["threads", "pin"],
-      mutationFn: () => api.saveMyInstructions("x"),
+      mutationFn,
       meta,
     })
     .execute(undefined)
@@ -102,6 +103,45 @@ it("shows, traces, and logs a failed mutation under the ID its request carried",
     status: 409,
     mutation: '["threads","pin"]',
   })
+})
+
+it("formats validation errors without exposing the rejected input in the toast", async () => {
+  stubFetch(async () =>
+    Response.json(
+      {
+        detail: [
+          {
+            type: "string_too_long",
+            loc: ["body", "name"],
+            msg: "String should have at most 120 characters",
+            input: "private automation instructions".repeat(10),
+            ctx: { max_length: 120 },
+          },
+          { loc: ["body", "prompt"], msg: "Field required" },
+        ],
+      },
+      { status: 422 }
+    )
+  )
+
+  await runFailingMutation({ errorTitle: "Couldn't create automation" }, () =>
+    agentsApi.createSchedule({
+      name: "private automation instructions".repeat(10),
+      prompt: "Check dependencies",
+      workspace: "default",
+    })
+  )
+
+  const options = toastError.mock.calls[0]![1] as {
+    description: React.ReactElement
+  }
+  const { container } = render(options.description)
+  expect(container.textContent).toContain(
+    "name: String should have at most 120 characters; prompt: Field required"
+  )
+  expect(container.textContent).not.toContain("private automation instructions")
+  expect(container.textContent).not.toContain("string_too_long")
+  expect(container.textContent).toContain(sent[0]!.headers["X-Request-ID"])
 })
 
 it("trims an oversized error so the server still logs it", async () => {

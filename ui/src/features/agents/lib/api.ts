@@ -157,6 +157,34 @@ export const agentsLangGraphApiUrl = `${API_BASE}/dashboard/api`
 
 const timedFetch = withRequestTiming((input, init) => fetch(input, init))
 
+function errorDetailMessage(detail: unknown): string {
+  if (typeof detail === "string") return detail
+  if (Array.isArray(detail)) {
+    const messages = detail.flatMap((issue: unknown) => {
+      if (
+        !issue ||
+        typeof issue !== "object" ||
+        !("msg" in issue) ||
+        typeof issue.msg !== "string"
+      )
+        return []
+      const field =
+        "loc" in issue && Array.isArray(issue.loc)
+          ? issue.loc
+              .slice(1)
+              .filter(
+                (part: unknown) =>
+                  typeof part === "string" || typeof part === "number"
+              )
+              .join(".")
+          : ""
+      return [field ? `${field}: ${issue.msg}` : issue.msg]
+    })
+    if (messages.length) return messages.join("; ")
+  }
+  return JSON.stringify(detail) ?? "Request failed"
+}
+
 export async function agentsRequest<T>(
   path: string,
   init: RequestInit = {}
@@ -179,10 +207,7 @@ export async function agentsRequest<T>(
     try {
       const body = await res.json()
       if (body?.detail) {
-        message =
-          typeof body.detail === "string"
-            ? body.detail
-            : JSON.stringify(body.detail)
+        message = errorDetailMessage(body.detail)
       }
     } catch {
       /* ignore */
@@ -216,10 +241,7 @@ async function agentsBlobRequest(path: string): Promise<ThreadRecoveryPatch> {
     try {
       const body = await res.json()
       if (body?.detail) {
-        message =
-          typeof body.detail === "string"
-            ? body.detail
-            : JSON.stringify(body.detail)
+        message = errorDetailMessage(body.detail)
       }
     } catch {
       /* ignore */

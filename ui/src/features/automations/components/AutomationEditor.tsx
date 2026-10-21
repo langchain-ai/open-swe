@@ -179,11 +179,8 @@ export function AutomationEditor({
 
   const isSaving = createSchedule.isPending || updateSchedule.isPending
 
-  const trimmedName = name.trim()
-  const nameTooLong = Array.from(trimmedName).length > 120
   const canSave =
-    trimmedName.length > 0 &&
-    !nameTooLong &&
+    name.trim().length > 0 &&
     prompt.trim().length > 0 &&
     workspace !== null &&
     !savedWorkspaceMissing &&
@@ -261,7 +258,7 @@ export function AutomationEditor({
     if (mode === "create") {
       createSchedule.mutate(
         {
-          name: trimmedName,
+          name: name.trim(),
           prompt: prompt.trim(),
           triggers: toTriggers(drafts),
           admin_thread: adminThread,
@@ -283,7 +280,7 @@ export function AutomationEditor({
       {
         scheduleId: schedule.id,
         body: {
-          name: trimmedName,
+          name: name.trim(),
           prompt: prompt.trim(),
           triggers: toTriggers(drafts),
           admin_thread: adminThread,
@@ -371,21 +368,8 @@ export function AutomationEditor({
           disabled={!canManage}
           placeholder="Untitled automation"
           aria-label="Automation name"
-          aria-invalid={nameTooLong}
-          aria-describedby={nameTooLong ? "automation-name-error" : undefined}
           className="w-full bg-transparent text-base font-medium text-primary outline-none placeholder:text-placeholder"
         />
-        {nameTooLong && (
-          <Text
-            id="automation-name-error"
-            role="alert"
-            variant="xs"
-            color="error"
-            className="mt-space-2"
-          >
-            Automation names must be 120 characters or fewer.
-          </Text>
-        )}
 
         <div className="mt-space-3 flex items-center gap-space-3 text-xs">
           <Switch
