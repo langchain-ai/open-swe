@@ -139,7 +139,7 @@ include = ["openswe", "tests"]
 exclude = ["tests/e2e/mda_entrypoint.py", "openswe/sandbox_scripts/*.py"]
 
 [tool.ty.environment]
-extra-paths = ["mda"]
+extra-paths = ["mda", "vendor/managed-deepagents-sdk/packages/pypi/src"]
 
 [tool.ty.analysis]
 allowed-unresolved-imports = [
