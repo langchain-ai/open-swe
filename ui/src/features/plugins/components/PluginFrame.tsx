@@ -24,9 +24,10 @@ import {
 } from "@/features/plugins/lib/bridge"
 import {
   PLUGIN_ALLOW,
+  ESCAPED_MESSAGE,
   PLUGIN_CSP,
   PLUGIN_SANDBOX,
-  pluginDocument,
+  pluginShell,
 } from "@/features/plugins/lib/shell"
 import { DashboardRequestError } from "@/lib/dashboard-fetch"
 import { invalidationTopic } from "@/lib/invalidations/topics"
@@ -90,7 +91,7 @@ export function PluginFrame({
   // A fresh nonce per mount: the dashboard answers only the document it made.
   const [nonce, setNonce] = useState(() => crypto.randomUUID())
   const srcDoc = useMemo(
-    () => pluginDocument(html, initialTheme, nonce),
+    () => pluginShell(html, initialTheme, nonce),
     [html, initialTheme, nonce]
   )
 
@@ -180,9 +181,10 @@ export function PluginFrame({
   }
 
   /**
-   * The port goes only to the document the dashboard wrote: the frame's own
-   * window, still on its opaque origin (a page it navigated to has a real
-   * one), echoing this mount's nonce, before any second load, and only once.
+   * The port goes to the shell the dashboard wrote, which can only hand it to
+   * the plugin's own document: its `frame-src 'none'` keeps that frame from
+   * loading anything else. The hello must come from the shell's window,
+   * echoing this mount's nonce, and the port goes once.
    */
   const hello = useEffectEvent((message: MessageEvent) => {
     const data: unknown = message.data
@@ -194,9 +196,17 @@ export function PluginFrame({
       !data ||
       typeof data !== "object" ||
       !("type" in data) ||
-      data.type !== HELLO_MESSAGE ||
       !("nonce" in data) ||
-      data.nonce !== nonce ||
+      data.nonce !== nonce
+    )
+      return
+    if (data.type === ESCAPED_MESSAGE) {
+      teardown()
+      setEscaped(true)
+      return
+    }
+    if (
+      data.type !== HELLO_MESSAGE ||
       portRef.current !== null ||
       loads.current > 1
     )

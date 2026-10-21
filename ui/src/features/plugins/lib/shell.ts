@@ -1,13 +1,21 @@
 /**
- * The document a plugin's frame loads: the plugin's own HTML behind a policy
- * that blocks its requests, so what it sends goes through the port the
- * dashboard hands it, as requests the backend checks.
+ * What a plugin runs in: its own HTML behind a policy that blocks its
+ * requests, inside a shell frame the dashboard writes. What a plugin sends
+ * goes through the port the dashboard hands it, as requests the backend checks.
  *
- * A frame can still navigate itself away, which no policy stops; the `csp`
- * attribute makes Chromium enforce this policy on whatever it navigates to,
- * and the dashboard hands its port only to the document it made.
+ * The shell is there because no policy on a document stops that document
+ * navigating its own frame elsewhere; its parent's `frame-src` does. The
+ * shell's `frame-src 'none'` refuses every navigation the plugin's frame
+ * attempts before a request leaves, in every browser, and the shell passes
+ * the port to the plugin only after the plugin's document says hello.
  */
-import { NONCE_META, type Theme } from "@openswe/plugin-sdk"
+import {
+  CONNECT_MESSAGE,
+  HELLO_MESSAGE,
+  NONCE_META,
+  PROTOCOL_VERSION,
+  type Theme,
+} from "@openswe/plugin-sdk"
 
 export const PLUGIN_CSP = [
   "default-src 'none'",
@@ -31,6 +39,23 @@ export const PLUGIN_CSP = [
 export const PLUGIN_SANDBOX = "allow-scripts allow-forms"
 export const PLUGIN_ALLOW = "clipboard-write"
 
+/** What the shell sends the dashboard when the plugin's frame loaded a second document. */
+export const ESCAPED_MESSAGE = "openswe-plugin-escaped"
+
+/** The shell may run only its own script and frame nothing but the plugin's srcdoc. */
+const SHELL_CSP = [
+  "default-src 'none'",
+  "script-src 'unsafe-inline'",
+  "style-src 'unsafe-inline'",
+  "frame-src 'none'",
+  "base-uri 'none'",
+  "form-action 'none'",
+].join("; ")
+
+function attribute(value: string): string {
+  return value.replaceAll("&", "&amp;").replaceAll('"', "&quot;")
+}
+
 export function pluginDocument(
   html: string,
   theme: Theme,
@@ -45,5 +70,46 @@ export function pluginDocument(
     `<meta name="${NONCE_META}" content="${nonce}">` +
     `<style>:root{color-scheme:${theme}}</style>` +
     html.replace(/^\s*<!doctype[^>]*>/i, "")
+  )
+}
+
+/**
+ * The shell around a plugin: one full-size frame holding `pluginDocument`,
+ * and a relay. It forwards the plugin's hello to the dashboard, hands the
+ * port the dashboard answers with to the plugin, once, and reports the
+ * plugin's frame if it ever loads a second document.
+ */
+export function pluginShell(html: string, theme: Theme, nonce: string): string {
+  const relay = `(() => {
+    const nonce = ${JSON.stringify(nonce)};
+    const frame = document.getElementById("plugin");
+    let loads = 0, asked = false, handed = false;
+    frame.addEventListener("load", () => {
+      if (++loads < 2) return;
+      frame.remove();
+      parent.postMessage({ type: ${JSON.stringify(ESCAPED_MESSAGE)}, nonce }, "*");
+    });
+    addEventListener("message", (event) => {
+      const data = event.data;
+      if (!data || typeof data !== "object") return;
+      if (event.source === frame.contentWindow && data.type === ${JSON.stringify(HELLO_MESSAGE)}
+          && data.nonce === nonce && !asked && loads < 2) {
+        asked = true;
+        parent.postMessage({ type: ${JSON.stringify(HELLO_MESSAGE)}, nonce, version: ${PROTOCOL_VERSION} }, "*");
+      } else if (event.source === parent && data.type === ${JSON.stringify(CONNECT_MESSAGE)}
+          && event.ports[0] && asked && !handed && loads < 2) {
+        handed = true;
+        frame.contentWindow.postMessage(data, "*", [event.ports[0]]);
+      }
+    });
+  })()`
+  return (
+    `<!doctype html><html><head>` +
+    `<meta http-equiv="Content-Security-Policy" content="${SHELL_CSP}">` +
+    `<style>:root{color-scheme:${theme}}html,body{margin:0;height:100%;overflow:hidden}` +
+    `iframe{display:block;width:100%;height:100%;border:0}</style></head><body>` +
+    `<iframe id="plugin" title="plugin" sandbox="${PLUGIN_SANDBOX}" allow="${PLUGIN_ALLOW}" ` +
+    `referrerpolicy="no-referrer" srcdoc="${attribute(pluginDocument(html, theme, nonce))}"></iframe>` +
+    `<script>${relay}</script></body></html>`
   )
 }
