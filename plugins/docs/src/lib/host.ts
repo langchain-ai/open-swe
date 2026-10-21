@@ -1,10 +1,13 @@
 import { connect, HostError, type PluginHost } from "@openswe/plugin-sdk"
 
-let pending: Promise<PluginHost> | null = null
+// Listen as the module loads: the dashboard hands over its port on the frame's
+// load event, which fires before React has mounted anything.
+const pending: Promise<PluginHost> | null =
+  typeof window === "undefined" ? null : connect()
 
-/** The dashboard's port, connected once; it only exists in the browser frame. */
+/** The dashboard's port; it only exists in the browser frame. */
 export function hostConnection(): Promise<PluginHost> {
-  pending ??= connect()
+  if (!pending) throw new Error("The dashboard is only reachable in the browser")
   return pending
 }
 
