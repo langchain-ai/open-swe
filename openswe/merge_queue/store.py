@@ -880,7 +880,8 @@ class MergeQueue(Record):
         batch.candidate_error = reason
         for request in blocked:
             request.state, request.queued_at = "waiting_for_review", None
-            request.blocked_reason, request.blocked_base_sha = reason, batch.base_sha
+            request.blocked_reason = reason
+            request.blocked_base_sha = batch.base_sha if conflicting_pr is not None else None
 
     async def save_candidate(
         self, batch_id: UUID, candidate: Candidate, lease: Lease, *, published: bool = False

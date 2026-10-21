@@ -510,7 +510,7 @@ async def test_dependency_cycles_and_removed_approvals_block_candidates(queue: M
         await queue.candidate_inputs(batch.id, lease)
 
 
-async def test_candidate_budget_manifest_fence_and_retention(queue: MergeQueue) -> None:
+async def test_candidate_manifest_fence_and_retention(queue: MergeQueue) -> None:
     policy = QueuePolicy(checks={}, max_batch_size=3, max_build_attempts=1)
     lease, requests = await prepare(queue, policy)
     batch = await queue.schedule("a" * 40, policy, lease)
@@ -542,37 +542,42 @@ async def test_candidate_budget_manifest_fence_and_retention(queue: MergeQueue) 
         await queue.candidate_deleted(batch.id, "e" * 40, replacement)
     await queue.candidate_deleted(batch.id, candidate.sha, replacement)
     assert await queue.prune_history(cutoff, replacement) == 1
-    # A new batch does not inherit the invalidated batch's build counter.
-    for pending in await queue.requests():
+
+
+@pytest.mark.parametrize("failure", ["build_budget", "published_ref"])
+async def test_candidate_infrastructure_failure_retries_unchanged_members(
+    queue: MergeQueue, failure: str
+) -> None:
+    policy = QueuePolicy(checks={}, max_batch_size=3, max_build_attempts=1)
+    lease, requests = await prepare(queue, policy)
+    failed = await queue.schedule("a" * 40, policy, lease)
+    assert failed is not None
+    assert await queue.begin_build(failed.id, lease)
+    if failure == "build_budget":
+        reason = "Candidate build retry budget exhausted"
+        assert not await queue.begin_build(failed.id, lease)
+    else:
+        reason = "Published candidate ref changed or disappeared"
+        candidate = candidate_for(failed, requests)
+        await queue.save_candidate(failed.id, candidate, lease)
+        await queue.save_candidate(failed.id, candidate, lease, published=True)
+        await queue.candidate_failed(failed.id, reason, lease)
+    history = await queue.history(failed.id)
+    assert history.batch.state == "invalidated" and history.batch.candidate_error == reason
+    assert all(pending.blocked_reason == reason for pending in await queue.requests())
+    assert await queue.schedule("a" * 40, policy, lease) is None
+    for pending in requests:
         await queue.refresh_admission(
-            pending.id, pending.head_sha, admission(pending, policy), replacement
+            pending.id, pending.head_sha, admission(pending, policy), lease
         )
-    next_batch = await queue.schedule("a" * 40, policy, replacement)
-    assert next_batch is not None
-    assert await queue.begin_build(next_batch.id, replacement)
-    assert not await queue.begin_build(next_batch.id, replacement)
-    assert (
-        await queue.history(next_batch.id)
-    ).batch.candidate_error == "Candidate build retry budget exhausted"
-    assert (await queue.history(next_batch.id)).batch.state == "invalidated"
-    for pending in await queue.requests():
-        await queue.refresh_admission(
-            pending.id, pending.head_sha, admission(pending, policy), replacement
-        )
-    assert await queue.schedule("a" * 40, policy, replacement) is None
-    later = await request(queue, 4)
-    await queue.refresh_admission(later.id, later.head_sha, admission(later, policy), replacement)
-    async with postgres.session() as session:
-        await session.execute(
-            update(MergeRequest)
-            .where(MergeRequest.id == later.id)
-            .values(queued_at=datetime.now(UTC) - timedelta(minutes=31))
-        )
-    following = await queue.schedule("a" * 40, policy, replacement)
+    following = await queue.schedule("a" * 40, policy, lease)
     assert following is not None
-    assert [
-        entry.number for entry in (await queue.candidate_inputs(following.id, replacement))[1]
-    ] == [4]
+    assert [entry.number for entry in (await queue.candidate_inputs(following.id, lease))[1]] == [
+        1,
+        2,
+        3,
+    ]
+    assert await queue.begin_build(following.id, lease)
 
 
 @pytest.mark.parametrize("recovery", ["head", "base"])
