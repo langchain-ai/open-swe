@@ -371,6 +371,22 @@ test.describe("review page", () => {
     ).toHaveCount(0);
   });
 
+  test("clears the line selection when cancelling an inline comment", async ({
+    page,
+  }) => {
+    await openReview(page, pr);
+    const diff = diffColumn(page);
+    await diff.locator('[data-column-number="5"]').first().hover();
+    await diff.locator("[data-gutter-utility-slot] button").click();
+    await expect(diff.getByLabel("Comment body")).toBeVisible();
+    await expect(diff.locator("[data-selected-line]").first()).toBeVisible();
+
+    await diff.getByRole("button", { name: "Cancel", exact: true }).click();
+    await page.getByRole("heading", { name: "Changes", exact: true }).click();
+    await expect(diff.getByLabel("Comment body")).toHaveCount(0);
+    await expect(diff.locator("[data-selected-line]")).toHaveCount(0);
+  });
+
   test("chat-drafted comments join one pending review that submits together", async ({
     page,
   }) => {
