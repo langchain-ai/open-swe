@@ -1,20 +1,20 @@
 # Building Web Plugins
 
-A plugin is a web app that people install from a GitHub repository. It gets an entry in the dashboard's sidebar and opens full screen there. It runs in a sandboxed frame with no network access and reaches Open SWE only through the dashboard's plugin API, acting as the person using it and never beyond what they allowed. A plugin ships no backend code.
+A plugin is a web app that people install from a GitHub repository. It gets an entry in the web UI's sidebar and opens full screen there. It runs in a sandboxed frame with no network access and reaches Open SWE only through the web UI's plugin API, acting as the person using it and never beyond what they allowed. A plugin ships no backend code.
 
 [`plugins/docs`](../plugins/docs) is a complete plugin: Markdown pages in a repository, edited together live and published as pull requests. Read it alongside this guide.
 
 ## How a plugin runs
 
-The dashboard loads your plugin's single HTML file into a sandboxed `srcdoc` frame, inside a small shell frame the dashboard writes itself. Your document gets:
+The web UI loads your plugin's single HTML file into a sandboxed `srcdoc` frame, inside a small shell frame the web UI writes itself. Your document gets:
 
 - **An opaque origin.** There are no cookies, and `localStorage`, `sessionStorage` and IndexedDB throw. Keep state in [storage](#storage).
 - **No network.** The page's Content-Security-Policy is `default-src 'none'`, plus inline scripts and styles, `data:` fonts, and `data:`/`blob:` images and media. `fetch`, XHR, WebSocket, EventSource, workers, nested frames and remote scripts, styles, fonts and images are all refused. Anything from the outside world comes through the host API.
-- **No navigation.** The frame cannot navigate, open popups or reach the top window. If its document is ever replaced, the dashboard tears the plugin down. Open links with [`nav.openExternal`](#navigation-and-links).
+- **No navigation.** The frame cannot navigate, open popups or reach the top window. If its document is ever replaced, the web UI tears the plugin down. Open links with [`nav.openExternal`](#navigation-and-links).
 - **Forms that never submit.** `submit` events fire for your own handlers (call `preventDefault()`), but the browser never sends a form anywhere.
 - **Clipboard writes**, through `navigator.clipboard.writeText`.
 
-The dashboard hands your document one end of a `MessageChannel`. Every request goes over that port. The dashboard checks it, and the backend checks it again against the permissions the installer approved, the repositories the person shared, and the person's own GitHub access. The SDK handles all of this.
+The web UI hands your document one end of a `MessageChannel`. Every request goes over that port. The web UI checks it, and the backend checks it again against the permissions the installer approved, the repositories the person shared, and the person's own GitHub access. The SDK handles all of this.
 
 ## Repository layout
 
@@ -93,7 +93,7 @@ The person approves these permissions when they install. **Update** re-reads the
 
 A plugin reaches no repository until the person shares one with it, and grants are per person. When an admin installs a plugin for everyone, each person still picks their own repositories.
 
-Ask for one with the picker the dashboard draws:
+Ask for one with the picker the web UI draws:
 
 ```ts
 const [repository] = await host.repositories.pick()           // "acme/app", or undefined if cancelled
@@ -115,7 +115,7 @@ A call naming a repository the person hasn't shared, or can no longer read, fail
 
 ### Connecting
 
-Call `connect()` while your module loads, not inside a React effect. The dashboard hands over the port as soon as the frame loads, and a late listener would miss it.
+Call `connect()` while your module loads, not inside a React effect. The web UI hands over the port as soon as the frame loads, and a late listener would miss it.
 
 ```ts
 import { connect } from "@openswe/plugin-sdk"
@@ -127,8 +127,8 @@ export const hostReady = connect() // resolves once the port and context arrive
 
 - the plugin (`id`, `name`, `displayName`, `version`, `permissions`);
 - the person using it (`user`: `login`, `name`, and `avatar` as a Blob);
-- the dashboard's `theme` (`"light"` or `"dark"`);
-- the plugin's own `path` after its dashboard URL.
+- the web UI's `theme` (`"light"` or `"dark"`);
+- the plugin's own `path` after its web UI URL.
 
 `host.on(listener)` receives events: `theme`, `path`, `storage.changed` and the room events.
 
@@ -146,17 +146,17 @@ function App({ host }: { host: PluginHost }) {
 }
 
 function Themed() {
-  useDashboardTheme() // follows the dashboard's light/dark mode
+  useDashboardTheme() // follows the web UI's light/dark mode
   const { user } = useHostContext()
   return <p>Hello, {user.name}</p>
 }
 ```
 
-`useDashboardTheme` toggles `html.dark` and sets `color-scheme` and `data-theme`, which is what the dashboard's Macaw design system reads. To match the dashboard, use Macaw as Docs does (`@langchain/macaw-components` and `@langchain/macaw-tokens` from `ui/vendor/macaw`).
+`useDashboardTheme` toggles `html.dark` and sets `color-scheme` and `data-theme`, which is what the web UI's Macaw design system reads. To match the web UI, use Macaw as Docs does (`@langchain/macaw-components` and `@langchain/macaw-tokens` from `ui/vendor/macaw`).
 
 ### Navigation and links
 
-The plugin's path is part of the dashboard URL (`/agents/plugins/<name>/<path>`), so links to a page inside your plugin can be shared and reloaded. Start your router at `host.context.path`, follow `path` events (back and forward in the dashboard), and report your own moves:
+The plugin's path is part of the web UI URL (`/agents/plugins/<name>/<path>`), so links to a page inside your plugin can be shared and reloaded. Start your router at `host.context.path`, follow `path` events (back and forward in the web UI), and report your own moves:
 
 ```ts
 await host.nav.setPath("/acme/app/docs/intro.md") // { replace: true } to replace the entry
@@ -165,9 +165,9 @@ host.on((event) => event.type === "path" && router.navigate(event.path))
 
 A memory-history router fits well; see `PathSync` in [`plugins/docs/src/routes/__root.tsx`](../plugins/docs/src/routes/__root.tsx). Other navigation:
 
-- `host.nav.openThread(threadId)` opens an agent thread in the dashboard.
-- `host.nav.openExternal(url)` opens a web link in a new tab. github.com links open directly; anything else opens only after the person confirms in a dialog the dashboard draws.
-- `host.ui.toast({ title, description, intent })` shows a dashboard toast (`intent` is `success`, `error` or `info`).
+- `host.nav.openThread(threadId)` opens an agent thread in the web UI.
+- `host.nav.openExternal(url)` opens a web link in a new tab. github.com links open directly; anything else opens only after the person confirms in a dialog the web UI draws.
+- `host.ui.toast({ title, description, intent })` shows a web UI toast (`intent` is `success`, `error` or `info`).
 
 ### People
 
@@ -176,7 +176,7 @@ const [ada] = await host.people.get(["ada"]) // { login, name, avatar: Blob | nu
 const src = ada.avatar ? URL.createObjectURL(ada.avatar) : undefined
 ```
 
-The frame can't load remote images, so the dashboard fetches each picture and hands it over as a Blob. Results come back in the order you asked, logins with no profile are left out, and the client caches profiles for the frame's lifetime.
+The frame can't load remote images, so the web UI fetches each picture and hands it over as a Blob. Results come back in the order you asked, logins with no profile are left out, and the client caches profiles for the frame's lifetime.
 
 ### Storage
 
@@ -228,7 +228,7 @@ A commit carries at most 100 files and 100 deletions. `openPull` also takes `bod
 
 ### Live rooms
 
-A room is an ordered log of opaque updates, plus presence that is broadcast and never stored. Rooms are scoped like documents, and their names follow the key rules. The dashboard keeps the log in PostgreSQL and fans each update out to everyone in the room.
+A room is an ordered log of opaque updates, plus presence that is broadcast and never stored. Rooms are scoped like documents, and their names follow the key rules. Open SWE keeps the log in PostgreSQL and fans each update out to everyone in the room.
 
 For collaborative editing, use the Yjs provider:
 
@@ -258,7 +258,7 @@ if (started) host.nav.openThread(started.threadId) // null: the person declined
 const mine = await host.threads.list()              // threads this install started
 ```
 
-The dashboard shows the person your request word for word before anything runs. The thread is theirs: private, working with their access, and its prompt says which plugin asked. The title is at most 120 characters and the request at most 40,000.
+The web UI shows the person your request word for word before anything runs. The thread is theirs: private, working with their access, and its prompt says which plugin asked. The title is at most 120 characters and the request at most 40,000.
 
 ### Errors
 
@@ -267,7 +267,7 @@ A failed request rejects with `HostError`, which carries `message` and an HTTP-l
 | Status | Meaning |
 | --- | --- |
 | 400 | The request's parameters are invalid; the backend was never called. |
-| 401 | The person's GitHub sign-in expired. They need to sign in to the dashboard again. |
+| 401 | The person's GitHub sign-in expired. They need to sign in to the web UI again. |
 | 403 | The permission wasn't granted, the repository isn't shared, or the person can't do this on GitHub. |
 | 404 | No such document, file or repository. |
 | 409 | Another approval is already open for this plugin. |
@@ -283,14 +283,14 @@ pnpm --filter openswe-plugin-docs run build
 
 ## Trying it
 
-Your plugin only runs inside the dashboard: outside the frame, `connect()` waits forever. To try a change:
+Your plugin only runs inside the web UI: outside the frame, `connect()` waits forever. To try a change:
 
 1. Build, then commit and push the bundle to a branch.
 2. In **Settings → Plugins**, enter your repository, its plugin directory if it has one, and the branch, then press **Find plugins** and **Install**.
 3. Open the plugin from the sidebar.
 4. After the next push, press **Update** to move the install to the new commit.
 
-A local dashboard works the same way; [local development](DEVELOPMENT.md) covers running one. Installing reads from GitHub, so the branch has to be pushed either way.
+A local web UI works the same way; [local development](DEVELOPMENT.md) covers running one. Installing reads from GitHub, so the branch has to be pushed either way.
 
 ## Shipping it
 
