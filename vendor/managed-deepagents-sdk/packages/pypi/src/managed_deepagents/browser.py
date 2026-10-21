@@ -109,7 +109,7 @@ _DEAD_SESSION = (
     "stagehand is unavailable",
 )
 
-# Ours, in a thread browser's instructions: it shares its sandbox's localhost.
+#: Ours, in a thread browser's instructions: it shares its sandbox's localhost.
 LOCALHOST_NOTE = (
     "Servers running in your sandbox are reachable at http://localhost:<port> "
     "(any port but 80 and 443)."
@@ -141,12 +141,12 @@ class _Session:
 
     browser: StagehandBrowser
     stagehand: Stagehand
-    shared: str | None = None  # the sandbox whose localhost the browser shares
     facade: StagehandFacadeTools = field(init=False)
     #: A folder of this process where run code's screenshots wait to go to the sandbox.
     artifacts: str = field(init=False)
     #: Run code called `browser.close()`: release this client once the call is done.
     close_requested: bool = False
+    shared: str | None = None  # the sandbox whose localhost the browser shares
 
     def __post_init__(self) -> None:
         from stagehand_middleware.facade import StagehandFacadeTools  # noqa: PLC0415
