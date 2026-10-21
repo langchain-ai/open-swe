@@ -169,6 +169,7 @@ pub(super) fn inject_managed_dependencies(
     let mut deps: Vec<Dependency> = dependencies::managed_dependencies(project.language).to_vec();
     if browser {
         deps.push(dependencies::PYTHON_BROWSER);
+        deps.push(dependencies::PYTHON_BROWSER_TOOLS);
     }
     if include_local_dev {
         deps.extend_from_slice(dependencies::local_dev_dependencies(project.language));

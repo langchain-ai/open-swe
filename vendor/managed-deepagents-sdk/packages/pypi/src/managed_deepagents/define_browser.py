@@ -40,7 +40,7 @@ def define_browser(
     Args:
         scope: ``"thread"`` gives each thread its own browser; ``"user"`` shares
             one per signed-in user across their threads, logins included, with
-            a tab per thread. Runs with no person behind them, such as
+            a window per thread. Runs with no person behind them, such as
             scheduled runs, get their thread's browser.
         idle_ttl_seconds: Stop a browser after this long idle (60 to 86,400).
     """
