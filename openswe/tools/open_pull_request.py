@@ -23,6 +23,7 @@ from openswe.github.app import get_github_app_installation_token
 from openswe.github.comments import derive_pr_state
 from openswe.github.pull_requests import AGENT_OPENED_LINK_SOURCE, PullRequest, ThreadLink
 from openswe.github.token import GitHubUserAuthRequired
+from openswe.pull_request_context import CONTEXT_SUMMARY, public_context_section
 from openswe.run_config import RunConfig
 from openswe.slack.client import (
     get_active_slack_thread,
@@ -939,13 +940,16 @@ async def _build_source_reference_lines(cfg: RunConfig) -> list[str]:
     return lines
 
 
-async def _is_private_repo(client: httpx2.AsyncClient, token: str, owner: str, repo: str) -> bool:
-    """Return True only when GitHub confirms the repo is private."""
+async def _repo_private(
+    client: httpx2.AsyncClient, token: str, owner: str, repo: str
+) -> bool | None:
+    """Whether GitHub says the repo is private, or ``None`` when it did not say."""
     resp = await client.get(f"{GITHUB_API}/repos/{owner}/{repo}", headers=_auth_headers(token))
     if resp.status_code != 200:  # noqa: PLR2004
-        return False
+        return None
     data = resp.json()
-    return bool(data.get("private")) if isinstance(data, dict) else False
+    private = data.get("private") if isinstance(data, dict) else None
+    return private if isinstance(private, bool) else None
 
 
 async def _stamp_attribution_footer(body: str, state: dict[str, Any] | None = None) -> str:
@@ -982,35 +986,53 @@ async def _stamp_attribution_footer(body: str, state: dict[str, Any] | None = No
     )
 
 
+async def _run_sections(
+    client: httpx2.AsyncClient, token: str, owner: str, repo: str, body: str
+) -> list[str]:
+    """Context for outside readers of a public repo, then the run's references.
+
+    Source links only go on private repos, whose readers can follow them; a public
+    repo gets a scrubbed summary of the conversation instead.
+    """
+    cfg = RunConfig.from_runtime()
+    private = await _repo_private(client, token, owner, repo)
+    sections: list[str] = []
+    if private is False and CONTEXT_SUMMARY not in body:
+        try:
+            if context := await public_context_section(cfg):
+                sections.append(context)
+        except Exception:
+            logger.warning("Failed to add public context to PR body", exc_info=True)
+    if _REFERENCES_HEADING in body:
+        return sections
+    lines: list[str] = []
+    if plan_line := await _plan_reference_line(cfg):
+        lines.append(plan_line)
+    if private is True:
+        try:
+            lines.extend(await _build_source_reference_lines(cfg))
+        except Exception:
+            logger.debug("Failed to append source references to PR body", exc_info=True)
+    if lines:
+        sections.append(f"{_REFERENCES_HEADING}\n" + "\n".join(lines))
+    return sections
+
+
 async def _maybe_append_references(
     client: httpx2.AsyncClient, token: str, owner: str, repo: str, body: str
 ) -> str:
-    """Append run references to the PR body."""
+    """Append run context and references to the PR body, above the footer."""
     try:
-        if _REFERENCES_HEADING in body:
+        sections = await _run_sections(client, token, owner, repo, body)
+        if not sections:
             return body
-        cfg = RunConfig.from_runtime()
-        lines: list[str] = []
-        plan_line = await _plan_reference_line(cfg)
-        if plan_line:
-            lines.append(plan_line)
-        try:
-            source_lines = await _build_source_reference_lines(cfg)
-            if source_lines and (
-                cfg.source == "slack" or await _is_private_repo(client, token, owner, repo)
-            ):
-                lines.extend(source_lines)
-        except Exception:
-            logger.debug("Failed to append source references to PR body", exc_info=True)
-        if not lines:
-            return body
-        references = f"{_REFERENCES_HEADING}\n" + "\n".join(lines)
+        added = "\n\n".join(sections)
         footer_start = body.find(PR_ATTRIBUTION_TEXT)
         if footer_start < 0:
-            return f"{body.rstrip()}\n\n{references}"
+            return f"{body.rstrip()}\n\n{added}"
         before_footer = body[:footer_start].rstrip()
         footer = body[footer_start:].lstrip()
-        return f"{before_footer}\n\n{references}\n\n{footer}"
+        return f"{before_footer}\n\n{added}\n\n{footer}"
     except Exception:
         logger.debug("Failed to append references to PR body", exc_info=True)
         return body

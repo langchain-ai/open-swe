@@ -441,8 +441,9 @@ def test_plan_reference_survives_source_reference_failure(
     assert client.post_calls
 
 
-def test_public_repo_appends_plan_and_slack_reference(
-    monkeypatch: pytest.MonkeyPatch,
+@pytest.mark.parametrize("private", [False, True])
+def test_slack_link_on_private_repo_and_context_on_public(
+    monkeypatch: pytest.MonkeyPatch, private: bool
 ) -> None:
     monkeypatch.setenv("DASHBOARD_BASE_URL", "https://dashboard.example")
     _set_config(
@@ -464,18 +465,23 @@ def test_public_repo_appends_plan_and_slack_reference(
     monkeypatch.setattr(
         opr, "get_slack_permalink", lambda *_a, **_k: _coro("https://slack.example/p1")
     )
+    context = "<details>\n<summary>Context</summary>\n\nWhy.\n\n</details>"
+    monkeypatch.setattr(opr, "public_context_section", lambda *_a, **_k: _coro(context))
 
     client = _RoutingClient(
         post=_FakeResponse(201, {"html_url": "u", "number": 1, "user": {}}),
-        get_routes={"/repos/langchain-ai/open-swe": _FakeResponse(200, {"private": False})},
+        get_routes={"/repos/langchain-ai/open-swe": _FakeResponse(200, {"private": private})},
     )
     _install_client(monkeypatch, client)
 
     _open_with_body("body")
 
-    sent_body = client.post_calls[0]["json"]["body"]
-    assert "- [Plan](https://dashboard.example/agents/thread-1/plan)" in sent_body
-    assert "- [Slack thread](https://slack.example/p1)" in sent_body
+    references = "## References\n- [Plan](https://dashboard.example/agents/thread-1/plan)"
+    assert client.post_calls[0]["json"]["body"] == (
+        f"body\n\n{references}\n- [Slack thread](https://slack.example/p1)"
+        if private
+        else f"body\n\n{context}\n\n{references}"
+    )
 
 
 @pytest.mark.parametrize("source", ["linear", "github_issue"])
