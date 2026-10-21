@@ -193,13 +193,18 @@ async def test_private_stop_summary_requires_reacting_owner(
     dispatched, _ = _patch_handler(monkeypatch, client)
     user = (
         User(
-            identities=[UserIdentity(provider="github", external_id="123", login=login)],
+            identities=[
+                UserIdentity(
+                    provider="github",
+                    external_id="123",
+                    login=login,
+                    email="reactor@example.com",
+                )
+            ],
         )
         if login
         else None
     )
-    if user is not None:
-        user.email = "reactor@example.com"
     monkeypatch.setattr(User, "for_identity", AsyncMock(return_value=user))
     reply = AsyncMock()
     monkeypatch.setattr(slack_stop, "post_slack_thread_reply", reply)
