@@ -902,13 +902,8 @@ def _sandbox_file_downloads_enabled(cfg: RunConfig, *, bridged: bool) -> bool:
 
 
 def _slack_tools_enabled(cfg: RunConfig) -> bool:
-    """Return whether the run has trusted Slack source context.
-
-    A web follow-up counts: its `slack_thread` is copied from the thread's own
-    metadata, never from the client, and keeping the tools registered across a
-    surface switch is what keeps the prompt prefix cacheable.
-    """
-    if cfg.source not in {"slack", "schedule", "incidents_agent", DASHBOARD_SOURCE}:
+    """Return whether the run has trusted Slack context across reply surfaces."""
+    if cfg.source not in {"slack", "schedule", "incidents_agent", "github", DASHBOARD_SOURCE}:
         return False
     if cfg.slack_thread is None:
         return False
@@ -919,7 +914,7 @@ def _slack_tools_enabled(cfg: RunConfig) -> bool:
 
 def _initial_reply_surface(cfg: RunConfig) -> ReplySurface:
     """Where this run owes its answer, before anything moves mid-run."""
-    if cfg.source == DASHBOARD_SOURCE or not _slack_tools_enabled(cfg):
+    if cfg.source in {DASHBOARD_SOURCE, "github"} or not _slack_tools_enabled(cfg):
         return WEB_REPLY_SURFACE
     return SLACK_REPLY_SURFACE
 
