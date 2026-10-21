@@ -59,4 +59,4 @@ React bindings live in `@openswe/plugin-sdk/react` (`PluginHostProvider`,
 `useHostContext`, `useDashboardTheme`), and a Yjs provider for live rooms in
 `@openswe/plugin-sdk/yjs` (`RoomProvider`).
 
-See `plugins/docs` in the Open SWE repository for a complete plugin.
+The [plugin guide](https://github.com/langchain-ai/open-swe/blob/main/docs/PLUGINS.md) covers the whole API, the sandbox and building a bundle; `plugins/docs` in the Open SWE repository is a complete plugin.
