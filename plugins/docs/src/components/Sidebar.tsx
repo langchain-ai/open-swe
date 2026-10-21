@@ -82,7 +82,7 @@ export function Sidebar({
     <nav className="flex w-64 shrink-0 flex-col gap-space-2 border-r border-default bg-surface-level-1 p-space-2 max-sm:hidden">
       <select
         aria-label="Repository"
-        className="h-8 rounded-md border border-default bg-transparent px-space-2 text-sm text-primary"
+        className="h-8 truncate rounded-md border border-default bg-transparent py-0 pr-space-6 pl-space-2 text-sm leading-8 text-primary"
         value={repository}
         onChange={(event) => {
           const [o = "", r = ""] = event.target.value.split("/")

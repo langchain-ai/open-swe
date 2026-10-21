@@ -95,6 +95,10 @@ export function PageView({
   const pull = usePull(repository, draft?.branch)
 
   const editor = useRef<Editor | null>(null)
+  // Starting a draft swaps the read-only editor for the live one; only ever
+  // touch the one still mounted.
+  const mounted = (): Editor | null =>
+    editor.current && !editor.current.isDestroyed ? editor.current : null
   const [doc, setDoc] = useState<ProseMirrorNode | null>(null)
   const [current, setCurrent] = useState<string | null>(null)
   const [busy, setBusy] = useState<string | null>(null)
@@ -111,7 +115,8 @@ export function PageView({
   const normalize = (ready: Editor, markdown: string) =>
     asLiveMarkdown(ready, markdown)
   useEffect(() => {
-    if (editor.current) setSaved(normalize(editor.current, split.body))
+    const ready = mounted()
+    if (ready) setSaved(normalize(ready, split.body))
   }, [split.body])
   // Trailing blank lines are the editor's own (an empty paragraph after a
   // table), never the page's.
@@ -204,11 +209,12 @@ export function PageView({
   }
 
   const save = async (message?: string) => {
-    if (!draft || !head.data || !editor.current) return
+    const ready = mounted()
+    if (!draft || !head.data || !ready) return
     const body = preserveFormatting(
       split.body.trimEnd(),
-      (saved ?? normalize(editor.current, split.body)).trimEnd(),
-      editor.current.getMarkdown().trimEnd()
+      (saved ?? normalize(ready, split.body)).trimEnd(),
+      ready.getMarkdown().trimEnd()
     )
     const text = split.frontMatter + withTrailingNewline(body)
     const sha = await github.commit({
@@ -224,9 +230,10 @@ export function PageView({
   }
 
   const loadOutsideCommits = async () => {
-    if (!draft || !head.data || !editor.current) return
+    const ready = mounted()
+    if (!draft || !head.data || !ready) return
     const text = await github.file(path, head.data)
-    editor.current.commands.setContent(splitFrontMatter(text ?? "").body, {
+    ready.commands.setContent(splitFrontMatter(text ?? "").body, {
       contentType: "markdown",
     })
     await putDraft({ ...draft, head: head.data })
@@ -287,7 +294,7 @@ export function PageView({
   }
 
   const applySuggestion = async (thread: CommentThread) => {
-    const view = editor.current
+    const view = mounted()
     const range = view && resolveAnchor(view.state.doc, thread.comment)
     if (!view || !range || thread.comment.suggestion === null) return
     view

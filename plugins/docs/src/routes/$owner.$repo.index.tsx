@@ -22,6 +22,25 @@ function SpaceHome() {
         drafts, and each version is published as a pull request.
       </p>
       <Text as="h2" variant="h5" weight="medium" className="mt-space-8">
+        Pages
+      </Text>
+      <ul className="mt-space-3 grid grid-cols-1 gap-space-2 sm:grid-cols-2">
+        {pages.slice(0, 24).map((path) => (
+          <li key={path}>
+            <Link
+              to="/$owner/$repo/$"
+              params={{ owner, repo, _splat: path }}
+              className="flex flex-col rounded-lg border border-default px-space-3 py-space-2 hover:bg-surface-level-2-hover"
+            >
+              <span className="text-sm font-medium text-primary capitalize">
+                {pageTitle(path)}
+              </span>
+              <span className="truncate text-xs text-tertiary">{path}</span>
+            </Link>
+          </li>
+        ))}
+      </ul>
+      <Text as="h2" variant="h5" weight="medium" className="mt-space-8">
         Drafts in progress
       </Text>
       {drafts.length === 0 ? (
