@@ -15,22 +15,29 @@ use the typed async SDK in ``openswe.github.sdk``. This helper centralises:
 """
 
 import asyncio
+import io
 import logging
 import random
+import re
+import zipfile
 from collections.abc import AsyncIterator, Awaitable, Mapping, Sequence
 from contextlib import asynccontextmanager
 from dataclasses import dataclass
 from datetime import datetime
+from pathlib import PurePosixPath
 from typing import TYPE_CHECKING, Any, Self
-from urllib.parse import quote
+from urllib.parse import quote, urlparse
 
 import httpx2
-from pydantic import BaseModel
+from pydantic import BaseModel, JsonValue, TypeAdapter
 
+from openswe.github.queue import Artifact, CommitComparison, GitReference, WorkflowRun
 from openswe.utils.http_pool import pooled_transport
+from openswe.utils.url_safety import request_with_safe_redirects
 
 if TYPE_CHECKING:
     from openswe.github.pull_request_status import PullRequestClient
+    from openswe.merge_queue.git import CandidateGit
 
 logger = logging.getLogger(__name__)
 
@@ -552,6 +559,23 @@ class RepoClient:
             raise ValueError("GitHub answered the branch without an object")
         return payload
 
+    async def branch_sha(self, name: str) -> str:
+        payload = await self.branch(name)
+        commit = payload.get("commit")
+        sha = commit.get("sha") if isinstance(commit, dict) else None
+        if not isinstance(sha, str) or not sha:
+            raise ValueError("Target branch is unavailable")
+        return sha
+
+    async def ref_sha(self, ref: str) -> str | None:
+        """Read an exact qualified ref; API failures must not look like a missing ref."""
+        if not ref.startswith("refs/"):
+            raise ValueError("Expected a fully qualified Git ref")
+        references = TypeAdapter(list[GitReference]).validate_python(
+            await self.get(f"git/matching-refs/{quote(ref.removeprefix('refs/'), safe='')}")
+        )
+        return next((item.sha for item in references if item.ref == ref), None)
+
     async def branch_rules(self, name: str) -> list[dict[str, Any]]:
         """The rulesets' rules that apply to branch ``name``."""
         return await self.pages(f"rules/branches/{quote(name, safe='')}")
@@ -654,6 +678,109 @@ class RepoClient:
             or orders[index] == latest[identities[index]]
         ]
 
+    async def workflow_for_suite(self, suite_id: int) -> WorkflowRun:
+        runs = await self.pages(
+            "actions/runs", key="workflow_runs", params={"check_suite_id": str(suite_id)}
+        )
+        parsed = [WorkflowRun.model_validate(run) for run in runs]
+        if len(parsed) != 1 or parsed[0].check_suite_id != suite_id:
+            raise ValueError("Required check workflow is ambiguous or unavailable")
+        return parsed[0]
+
+    async def merge_base(self, base: str, head: str) -> str:
+        payload = await self.get(
+            f"compare/{quote(base, safe='')}...{quote(head, safe='')}", {"per_page": "1"}
+        )
+        return CommitComparison.model_validate(payload).merge_base
+
+    async def admission_artifact(self, run_id: int, name: str) -> dict[str, JsonValue]:
+        artifacts = [
+            Artifact.model_validate(item)
+            for item in await self.pages(f"actions/runs/{run_id}/artifacts", key="artifacts")
+        ]
+        matches = [item for item in artifacts if item.name == name and not item.expired]
+        if len(matches) != 1:
+            raise ValueError("Admission evidence is missing or ambiguous")
+        # GitHub redirects to a signed blob URL. Never forward authorization to it.
+        response = await self.github.http.get(
+            f"{GITHUB_API_BASE}/repos/{self.full_name}/actions/artifacts/{matches[0].id}/zip",
+            follow_redirects=False,
+        )
+        if response.status_code != 302:
+            raise ValueError("Admission artifact download unavailable")
+        location = response.headers.get("location", "")
+        try:
+            async with github_client() as anonymous:
+                download = await request_with_safe_redirects(
+                    anonymous, "GET", location, validate_url=_artifact_destination, stream=True
+                )
+                try:
+                    download.raise_for_status()
+                    content = bytearray()
+                    async for chunk in download.aiter_bytes():
+                        content.extend(chunk)
+                        if len(content) > 1_000_000:
+                            raise ValueError("Admission artifact is too large")
+                finally:
+                    await download.aclose()
+        except httpx2.HTTPError:
+            # Signed artifact URLs must not appear in controller exception logs.
+            raise ValueError("Admission artifact download failed") from None
+        with zipfile.ZipFile(io.BytesIO(content)) as archive:
+            files = archive.infolist()
+            if (
+                len(files) != 1
+                or files[0].filename != "admission.json"
+                or files[0].file_size > 100_000
+            ):
+                raise ValueError("Unexpected admission artifact contents")
+            return TypeAdapter(dict[str, JsonValue]).validate_json(archive.read(files[0]))
+
+    @asynccontextmanager
+    async def candidate_git(self) -> AsyncIterator[CandidateGit]:
+        """A dedicated sandbox with controller credentials kept in the GitHub proxy."""
+        from openswe.github.repo_names import normalize_repo_full_name
+        from openswe.merge_queue.git import CandidateGit
+        from openswe.sandboxes.providers.langsmith import (
+            configure_sandbox_proxy,
+            create_langsmith_sandbox,
+            get_async_sandbox_client,
+        )
+
+        repository = normalize_repo_full_name(self.full_name)
+        if not re.fullmatch(r"[A-Za-z0-9_-]+/[A-Za-z0-9_.-]+", repository):
+            raise ValueError("Candidate Git requires a GitHub repository name")
+        authorization = self.github.http.headers.get("Authorization")
+        if (
+            self.github.login is not None
+            or not authorization
+            or not authorization.startswith("Bearer ")
+        ):
+            raise ValueError("Candidate writes require an explicitly supplied controller identity")
+        sandbox = await create_langsmith_sandbox(
+            prepare_work_dir=False,
+            create_params={"idle_ttl_seconds": 600, "delete_after_stop_seconds": 60},
+        )
+        try:
+            await configure_sandbox_proxy(sandbox.id, authorization.removeprefix("Bearer "))
+            git = CandidateGit(
+                sandbox,
+                PurePosixPath("/tmp/merge-queue.git"),
+                f"https://github.com/{repository}.git",
+            )
+            await git.initialize()
+            yield git
+        finally:
+            try:
+                async with asyncio.timeout(30), get_async_sandbox_client() as client:
+                    await client.stop_sandbox(sandbox.id)
+            except Exception:
+                logger.warning(
+                    "Failed to stop candidate sandbox",
+                    extra={"sandbox_id": sandbox.id},
+                    exc_info=True,
+                )
+
     async def commit_statuses(self, sha: str) -> list[dict[str, Any]]:
         """The latest status per context on ``sha``."""
         latest: dict[str, dict[str, Any]] = {}
@@ -662,6 +789,19 @@ class RepoClient:
             if isinstance(context, str):
                 latest.setdefault(context, status)
         return list(latest.values())
+
+
+def _artifact_destination(location: str) -> None:
+    url = urlparse(location)
+    if (
+        url.scheme != "https"
+        or not url.hostname
+        or not url.hostname.endswith((".blob.core.windows.net", ".actions.githubusercontent.com"))
+        or url.username
+        or url.password
+        or url.port not in (None, 443)
+    ):
+        raise ValueError("Untrusted artifact download destination")
 
 
 async def or_none[T](read: Awaitable[T]) -> T | None:

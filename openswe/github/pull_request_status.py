@@ -15,6 +15,7 @@ from urllib.parse import quote
 import httpx2
 
 from openswe.github.http import GITHUB_API_BASE, GitHubClient, GraphQLError, RepoClient
+from openswe.github.queue import QueuePull, Review, ReviewPage
 
 logger = logging.getLogger(__name__)
 
@@ -331,6 +332,46 @@ class PullRequestClient:
         await self.repo.github.request(
             "PUT", f"repos/{self.repo.full_name}/pulls/{self.number}/merge", json=payload
         )
+
+    async def queue_state(self) -> QueuePull:
+        """Fail closed on unreadable or changing PR/review snapshots."""
+        query = """
+        query($owner:String!, $repo:String!, $number:Int!, $cursor:String) {
+          repository(owner:$owner, name:$repo) {
+            pullRequest(number:$number) {
+              number state merged isDraft headRefOid baseRefOid baseRefName reviewDecision
+              baseRef { target { oid } }
+              headRepository { nameWithOwner } baseRepository { nameWithOwner }
+              reviews(first:100, after:$cursor) {
+                nodes { databaseId state updatedAt commit { oid } }
+                pageInfo { hasNextPage endCursor }
+              }
+            }
+          }
+        }
+        """
+        snapshot: QueuePull | None = None
+        reviews: list[Review] = []
+        cursor: str | None = None
+        seen: set[str] = set()
+        for _ in range(50):
+            data = await self.repo.graphql(query, {"number": self.number, "cursor": cursor})
+            pull = _graphql_pull(data)
+            if pull is None:
+                raise ValueError("PR admission state unavailable")
+            current = QueuePull.model_validate({**pull, "reviews": ()})
+            if current.number != self.number or (snapshot is not None and snapshot != current):
+                raise ValueError("PR changed during admission read")
+            snapshot = current
+            page = ReviewPage.model_validate(pull.get("reviews"))
+            reviews.extend(page.nodes)
+            if not page.has_next:
+                return snapshot.model_copy(update={"reviews": tuple(reviews)})
+            if not page.cursor or page.cursor in seen:
+                raise ValueError("Invalid review pagination")
+            seen.add(page.cursor)
+            cursor = page.cursor
+        raise ValueError("PR reviews exceed admission pagination limit")
 
     async def reviews(self) -> list[dict[str, Any]]:
         return await self.repo.pages(f"pulls/{self.number}/reviews")
