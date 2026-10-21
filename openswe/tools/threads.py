@@ -27,7 +27,8 @@ from openswe.schedules import store as schedules
 from openswe.slack.client import parse_github_pr_url, parse_slack_thread_url
 from openswe.slack.code_channels import CODE_CHANNEL_SESSION_TS
 from openswe.slack.records import lookup_slack_thread_id
-from openswe.threads import plan_api, workflow_approval_api
+from openswe.slack.workflow_approval_cards import share_workflow_approval
+from openswe.threads import plan_api
 from openswe.threads.handlers import (
     admin_cancel_dashboard_thread,
     cancel_dashboard_thread,
@@ -73,8 +74,7 @@ ThreadAction = Literal[
     "add_plan_comment",
     "delete_plan_comment",
     "update_plan",
-    "approve_workflow_push",
-    "reject_workflow_push",
+    "share_workflow_approval",
 ]
 PlanFormat = Literal["html", "markdown"]
 _MAX_MESSAGE_CHARS = 20_000
@@ -755,7 +755,7 @@ def _available_actions(
     if plan_status:
         actions.append("update_plan")
     if any(record.get("status") == WORKFLOW_APPROVAL_PENDING for record in approvals.values()):
-        actions.extend(["approve_workflow_push", "reject_workflow_push"])
+        actions.append("share_workflow_approval")
     if admin and running:
         actions.append("admin_cancel")
     return actions
@@ -963,8 +963,7 @@ def _unexpected_action_arguments(
         "add_plan_comment": {"comment"},
         "delete_plan_comment": {"comment_id"},
         "update_plan": {"content", "content_format"},
-        "approve_workflow_push": {"fingerprint"},
-        "reject_workflow_push": {"fingerprint"},
+        "share_workflow_approval": {"fingerprint"},
     }.get(action, set())
     provided = {
         key
@@ -1104,15 +1103,18 @@ async def manage_thread(
                 "content_length": len(content or ""),
                 "plan_url": dashboard_plan_url(thread_id),
             }
-        if action in {"approve_workflow_push", "reject_workflow_push"}:
+        if action == "share_workflow_approval":
             if error := _required(fingerprint, "fingerprint", action):
                 return error
-            handler = (
-                workflow_approval_api.approve_workflow_push
-                if action == "approve_workflow_push"
-                else workflow_approval_api.reject_workflow_push
+            current_thread_id = RunConfig.parse(_config().get("configurable")).thread_id
+            if not current_thread_id:
+                return _failure("A current thread is required to share a workflow approval")
+            result = await share_workflow_approval(
+                thread_id,
+                fingerprint or "",
+                current_thread_id=current_thread_id,
+                actor_login=actor.login,
             )
-            result = await handler(thread_id, fingerprint or "", session=actor.session)
             return {"success": True, **result}
         return _failure(f"unsupported action: {action}")
     except HTTPException as exc:
