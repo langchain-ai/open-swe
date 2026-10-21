@@ -75,15 +75,17 @@ export function AgentGitPanel({
     Boolean(localThread) ||
     (Boolean(thread.sandboxId) && !thread.sandboxBridgeClient)
 
-  // Show the agent's browser as soon as it opens one, once per thread view.
-  const browserAvailable = Boolean(thread.hasBrowser)
-  const browserShownRef = useRef(browserAvailable)
+  // The browser can be opened once the agent's first run names it, and its
+  // panel shows on its own when it opens, once per thread view.
+  const browserAvailable = Boolean(thread.browser)
+  const browserOpened = thread.browser === "opened"
+  const browserShownRef = useRef(browserOpened)
   useEffect(() => {
-    if (!browserAvailable || browserShownRef.current) return
+    if (!browserOpened || browserShownRef.current) return
     browserShownRef.current = true
     openSurface(threadRef, "preview")
     onCollapsedChange(false)
-  }, [browserAvailable, onCollapsedChange, openSurface, threadRef])
+  }, [browserOpened, onCollapsedChange, openSurface, threadRef])
 
   const isRunning = thread.status === "running"
   const diffVisible = !collapsed && activeSurfaceId === "diff"
@@ -208,7 +210,9 @@ export function AgentGitPanel({
       terminalAvailable={terminalAvailable}
       diffAvailable
       browserAvailable={browserAvailable}
-      renderBrowser={() => <BrowserPanel threadId={thread.id} />}
+      renderBrowser={() => (
+        <BrowserPanel threadId={thread.id} opened={browserOpened} />
+      )}
       collapsed={collapsed}
       onCollapsedChange={onCollapsedChange}
       renderDiff={({ fullScreen }) => (
