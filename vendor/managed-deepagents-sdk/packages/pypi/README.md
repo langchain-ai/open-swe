@@ -406,6 +406,23 @@ when available. Its `link.status` currently reports `not_required`; it does not
 perform an account-link lookup. Its source thread identifier retains the existing
 provider-thread/LangGraph-thread fallback behavior.
 
+### Self-hosted channel runtime configuration
+
+Agent Server's `MOUNT_PREFIX` is honored by managed event routes and default
+loopback clients. Explicit `MDA_CHANNEL_API_URL` or `LANGGRAPH_API_URL` overrides
+must already include the deployment path.
+
+Trigger-backed channels require `LANGSMITH_MDA_TRIGGER_SERVER_URL` and a
+deployment key (`LANGSMITH_API_KEY`, or `LANGCHAIN_API_KEY` on self-hosted).
+The runtime prefers `LANGSMITH_API_KEY` when both are present.
+
+If the Agent Auth token issuer differs from the runtime's LangSmith API URL,
+set `OAUTH_AS_ISSUER` in the deployment environment to the configured issuer
+(for example, `https://langsmith.example.com/api`). The runtime verifies the
+exact issuer and fetches its public `/.well-known/jwks.json`; it does not trust
+an issuer supplied by an incoming token. LangSmith must have signing keys
+configured, and the agent must be able to reach that public-key endpoint.
+
 ## Tool and middleware runtime types
 
 Python requires 3.11 or later and includes Deep Agents, LangChain, and LangGraph.

@@ -29,7 +29,7 @@ async def test_omitted_draft_preference_preserves_existing_value(
     assert profile["draft_prs"] is False
     assert profile["auto_human_review_enabled"] is False
     assert "model_routing_enabled" not in profile
-    assert profile["recent_thread_context_enabled"] is True
+    assert "recent_thread_context_enabled" not in profile
     assert profile["slack_onboarding_dismissed"] is True
     assert user_records.get("profile", "octocat") == profile
 

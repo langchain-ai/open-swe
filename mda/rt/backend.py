@@ -46,6 +46,8 @@ Hook = Literal[
     "tool_result",
     # The thread's box was replaced: the backend connects to the fresh one.
     "sandbox",
+    # The LangSmith browser MDA gave the thread's agent, for the dashboard to show.
+    "browser",
 ]
 # Waits before resending a call, for as long as a backend rollout takes. A refused
 # connection never reached the backend, so every hook is resent after one. A gateway
