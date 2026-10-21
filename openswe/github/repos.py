@@ -1,8 +1,9 @@
 """Dashboard API for the repos a user can reach through the GitHub App."""
 
 import logging
-from collections.abc import AsyncIterable
-from typing import Any, TypedDict
+from collections.abc import AsyncIterable, Iterable
+from dataclasses import dataclass
+from typing import Any, Self, TypedDict
 
 from fastapi import HTTPException
 from githubkit.auth import TokenAuthStrategy
@@ -10,12 +11,13 @@ from githubkit.exception import RequestError, RequestFailed, RequestTimeout
 
 from openswe.dashboard.profiles import get_valid_access_token
 from openswe.github import repo_cache
+from openswe.github.repo_names import normalize_repo_full_name
 from openswe.github.sdk import GITHUB_API_VERSION, github_sdk
 
 logger = logging.getLogger(__name__)
 
 _SKIPPABLE_INSTALLATION_REPO_STATUS_CODES = frozenset({403, 404})
-# How long ``accessible_repo_full_names`` trusts a cached listing. It is an
+# How long ``ReadableRepositories`` trusts a cached listing. It is an
 # authorization boundary (it decides which private PR metadata a person may
 # see): installation webhooks clear the cache, so a repo removed from the App
 # drops at once, while access lost on GitHub's side, such as leaving an org,
@@ -170,16 +172,47 @@ async def build_repo_payload(login: str) -> dict[str, Any]:
     return payload
 
 
-async def accessible_repo_full_names(login: str) -> frozenset[str]:
-    """Lowercased ``owner/name`` of repos the user can access, as of ``ACCESS_FRESH_MS`` ago at most."""
-    cached = await repo_cache.read_cached_repos(login)
-    if cached is not None and cached[1] <= ACCESS_FRESH_MS:
-        payload = cached[0]
-    else:
-        payload = await build_repo_payload(login)
-    repositories = payload.get("repositories")
-    return frozenset(
-        repo["full_name"].lower()
-        for repo in (repositories if isinstance(repositories, list) else [])
-        if isinstance(repo, dict) and isinstance(repo.get("full_name"), str)
-    )
+@dataclass(frozen=True, slots=True)
+class ReadableRepositories:
+    """The repositories a dashboard viewer can read through the App's installations.
+
+    An authorization boundary for everything the dashboard serves without asking
+    GitHub, such as the pull request mirror: it decides which private metadata a
+    person may see, and is at most ``ACCESS_FRESH_MS`` old.
+    """
+
+    # Lowercased ``owner/name``.
+    full_names: frozenset[str]
+
+    @classmethod
+    async def of(cls, login: str) -> Self:
+        cached = await repo_cache.read_cached_repos(login)
+        if cached is not None and cached[1] <= ACCESS_FRESH_MS:
+            payload = cached[0]
+        else:
+            payload = await build_repo_payload(login)
+        repositories = payload.get("repositories")
+        return cls(
+            frozenset(
+                repo["full_name"].lower()
+                for repo in (repositories if isinstance(repositories, list) else [])
+                if isinstance(repo, dict) and isinstance(repo.get("full_name"), str)
+            )
+        )
+
+    def __contains__(self, full_name: object) -> bool:
+        return isinstance(full_name, str) and full_name.lower() in self.full_names
+
+    def among(self, full_names: Iterable[str]) -> frozenset[str]:
+        """The ones of ``full_names`` the viewer can read, lowercased."""
+        return frozenset(name.lower() for name in full_names) & self.full_names
+
+    def require(self, full_name: str) -> str:
+        """``full_name`` normalized; 422 when it names no repository, 404 when unreadable."""
+        try:
+            normalized = normalize_repo_full_name(full_name)
+        except ValueError as exc:
+            raise HTTPException(422, str(exc)) from exc
+        if normalized not in self:
+            raise HTTPException(404, "repository not found")
+        return normalized

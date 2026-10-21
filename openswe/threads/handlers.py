@@ -18,7 +18,7 @@ from openswe.github.mirror.views import PullRequestView, SidebarPullRequest, una
 from openswe.github.pull_request_context import PullRequestFixScope, get_pull_request_context
 from openswe.github.pull_request_status import pull_request_identity
 from openswe.github.pull_requests import PullRequest
-from openswe.github.repos import accessible_repo_full_names
+from openswe.github.repos import ReadableRepositories
 from openswe.github.thread_token import invalidate_cached_github_token
 from openswe.message_queue import QueuedMessage, QueuedPreview
 from openswe.review.session import ReviewSession, ReviewSessionMetadata
@@ -671,11 +671,11 @@ async def get_dashboard_thread_pull_request_status(
     tracked = _tracked_pull_requests(metadata)
     if not tracked:
         return {"pullRequests": []}
-    accessible = await accessible_repo_full_names(login)
+    readable = await ReadableRepositories.of(login)
 
     async def health(record: object) -> dict[str, Any]:
         identity = pull_request_identity(record)
-        if identity is None or f"{identity[0]}/{identity[1]}".lower() not in accessible:
+        if identity is None or f"{identity[0]}/{identity[1]}" not in readable:
             return unavailable_health(record)
         stored = await PullRequestSync(*identity).mirrored()
         if stored is None:
@@ -697,8 +697,8 @@ async def get_dashboard_pull_request_checks(
     ]
     if not identities:
         return {}
-    accessible = await accessible_repo_full_names(login)
-    visible = [i for i in identities if f"{i[0]}/{i[1]}".lower() in accessible]
+    readable = await ReadableRepositories.of(login)
+    visible = [i for i in identities if f"{i[0]}/{i[1]}" in readable]
     stored = await PullRequest.many(
         [(f"{owner}/{repo}", number) for owner, repo, number in visible]
     )

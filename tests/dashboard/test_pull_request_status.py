@@ -4,6 +4,7 @@ import pytest
 from fastapi import HTTPException
 
 from openswe.github import pull_request_status
+from openswe.github.repos import ReadableRepositories
 from openswe.threads import handlers
 from tests.conftest import patch_thread_module
 
@@ -42,13 +43,13 @@ async def test_thread_status_only_reads_pull_requests_the_viewer_can_see(
         assert (thread_id, login, email) == ("thread-1", "teammate", "teammate@example.com")
         return {"pull_requests": records}
 
-    async def accessible(login: str) -> frozenset[str]:
+    async def accessible(login: str) -> ReadableRepositories:
         order.append("accessible")
-        return frozenset({"o/one"})
+        return ReadableRepositories(frozenset({"o/one"}))
 
     mirrored = AsyncMock(return_value=None)
     patch_thread_module(monkeypatch, "_readable_thread_metadata", readable)
-    patch_thread_module(monkeypatch, "accessible_repo_full_names", accessible)
+    monkeypatch.setattr(ReadableRepositories, "of", accessible)
     monkeypatch.setattr(handlers.PullRequestSync, "mirrored", mirrored)
 
     result = await handlers.get_dashboard_thread_pull_request_status(
@@ -67,9 +68,9 @@ async def test_thread_status_read_denial_reads_nothing_else(
     async def denied(*args, **kwargs):
         raise HTTPException(403, "thread is not readable")
 
-    accessible = AsyncMock(return_value=frozenset())
+    accessible = AsyncMock(return_value=ReadableRepositories(frozenset()))
     patch_thread_module(monkeypatch, "_readable_thread_metadata", denied)
-    patch_thread_module(monkeypatch, "accessible_repo_full_names", accessible)
+    monkeypatch.setattr(ReadableRepositories, "of", accessible)
 
     with pytest.raises(HTTPException) as exc_info:
         await handlers.get_dashboard_thread_pull_request_status("thread-1", "intruder")

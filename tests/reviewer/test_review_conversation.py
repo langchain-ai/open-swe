@@ -12,6 +12,7 @@ from openswe.github import app as github_app
 from openswe.github import http as github_http
 from openswe.github.checks import github_headers
 from openswe.github.http import GitHubError
+from openswe.github.repos import ReadableRepositories
 from openswe.review import conversation
 from openswe.review.conversation import (
     ConversationComment,
@@ -39,7 +40,11 @@ def github(monkeypatch: pytest.MonkeyPatch) -> Callable[[Handler], list[httpx2.R
         return "viewer-token"
 
     monkeypatch.setattr(conversation, "require_repo_access_for_user", allow)
-    monkeypatch.setattr(conversation, "require_installed_repo_access", allow)
+    monkeypatch.setattr(
+        ReadableRepositories,
+        "of",
+        AsyncMock(return_value=ReadableRepositories(frozenset({"acme/app"}))),
+    )
     monkeypatch.setattr(profiles, "get_valid_access_token", token)
     monkeypatch.setattr(
         github_app, "get_github_app_installation_id_for_repo", AsyncMock(return_value=1)

@@ -172,10 +172,10 @@ async def _readable_incidents(session: Session, incident_ids: set[str]) -> set[s
 
 async def _readable_pull_requests(session: Session, keys: set[str]) -> set[str]:
     # Imported on use: most of the app imports this module, which stays light.
-    from openswe.github.repos import accessible_repo_full_names
+    from openswe.github.repos import ReadableRepositories
 
     try:
-        accessible = await accessible_repo_full_names(session["sub"])
+        readable = await ReadableRepositories.of(session["sub"])
     except Exception:
         logger.warning("Could not list repositories for pull request invalidations", exc_info=True)
         return set()
@@ -184,7 +184,7 @@ async def _readable_pull_requests(session: Session, keys: set[str]) -> set[str]:
         for key in keys
         if (parsed := PullRequestKey.parse(key)) is not None
         and parsed == key
-        and parsed.repo_full_name in accessible
+        and parsed.repo_full_name in readable
     }
 
 

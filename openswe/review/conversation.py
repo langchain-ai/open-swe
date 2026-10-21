@@ -14,10 +14,7 @@ from sqlalchemy import select
 
 from openswe.audit_logs.middleware import audit_endpoint
 from openswe.dashboard.deps import SESSION_DEP
-from openswe.dashboard.repo_access import (
-    require_installed_repo_access,
-    require_repo_access_for_user,
-)
+from openswe.dashboard.repo_access import require_repo_access_for_user
 from openswe.database import postgres
 from openswe.github.http import GitHubClient
 from openswe.github.mirror import conversation as mirrored
@@ -29,6 +26,7 @@ from openswe.github.mirror.ingest import (
 from openswe.github.mirror.sync import PullRequestSync
 from openswe.github.mirror.views import avatar_url
 from openswe.github.pull_request_status import PullRequestClient
+from openswe.github.repos import ReadableRepositories
 
 logger = logging.getLogger(__name__)
 
@@ -387,7 +385,7 @@ async def api_get_review_conversation(
     pr_number: int,
     session: dict[str, Any] = SESSION_DEP,
 ) -> Conversation:
-    await require_installed_repo_access(session["sub"], f"{owner}/{repo}")
+    (await ReadableRepositories.of(session["sub"])).require(f"{owner}/{repo}")
     stored = await PullRequestSync(owner, repo, pr_number).mirrored()
     if stored is None:
         raise HTTPException(404, "pull request not found")

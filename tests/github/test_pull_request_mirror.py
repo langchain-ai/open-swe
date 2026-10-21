@@ -15,6 +15,7 @@ from openswe.github.mirror.ingest import ingest
 from openswe.github.mirror.sync import _Snapshot, prune_ci
 from openswe.github.mirror.views import PullRequestView
 from openswe.github.pull_requests import PullRequest
+from openswe.github.repos import ReadableRepositories
 from openswe.jobs import queue
 
 pytestmark = pytest.mark.usefixtures("registry_db")
@@ -191,9 +192,9 @@ async def test_listing_scopes_stay_inside_the_viewers_repositories(
         },
     )
     monkeypatch.setattr(
-        pull_request_dashboard_routes,
-        "accessible_repo_full_names",
-        AsyncMock(return_value=frozenset({"lc/repo"})),
+        ReadableRepositories,
+        "of",
+        AsyncMock(return_value=ReadableRepositories(frozenset({"lc/repo"}))),
     )
     monkeypatch.setattr(views, "team_members", AsyncMock(return_value=["Ada"]))
 

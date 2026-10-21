@@ -7,10 +7,7 @@ from pydantic import BaseModel
 
 from openswe.audit_logs.middleware import audit_endpoint
 from openswe.dashboard.deps import SESSION_DEP
-from openswe.dashboard.repo_access import (
-    require_installed_repo_access,
-    require_repo_access_for_user,
-)
+from openswe.dashboard.repo_access import require_repo_access_for_user
 from openswe.github.comments import PrState
 from openswe.github.http import GitHubClient
 from openswe.github.mirror.sync import PullRequestSync
@@ -30,7 +27,7 @@ from openswe.github.pull_request_actions import (
 )
 from openswe.github.pull_request_status import pull_request_identity
 from openswe.github.pull_requests import PullRequest
-from openswe.github.repos import accessible_repo_full_names
+from openswe.github.repos import ReadableRepositories
 from openswe.threads.pr_fixes import (
     PullRequestThreadIntent,
     PullRequestThreadRun,
@@ -62,9 +59,9 @@ async def api_search_pull_requests(
     offset: int = Query(default=0, ge=0),
     session: dict[str, str] = SESSION_DEP,
 ) -> PullRequestSearchResults:
-    accessible = await accessible_repo_full_names(session["sub"])
+    readable = await ReadableRepositories.of(session["sub"])
     rows = await PullRequest.search(
-        q, repositories=sorted(accessible), limit=limit + 1, offset=offset
+        q, repositories=sorted(readable.full_names), limit=limit + 1, offset=offset
     )
     return PullRequestSearchResults(
         pull_requests=[
@@ -95,10 +92,10 @@ async def api_list_pull_requests(
         pull_request_identity({"repo_full_name": name, "number": 1}) is None for name in requested
     ):
         raise HTTPException(422, "repository must be owner/repo")
-    accessible = await accessible_repo_full_names(session["sub"])
+    readable = await ReadableRepositories.of(session["sub"])
     return await list_open(
         session["sub"],
-        repositories=accessible & requested if requested else accessible,
+        repositories=readable.among(requested) if requested else readable.full_names,
         scope=scope,
         sort=sort,
         direction=direction,
@@ -112,7 +109,7 @@ async def api_pull_request_details(
 ) -> OpenPullRequest | None:
     if pull_request_identity({"repo_full_name": f"{owner}/{repo}", "number": number}) is None:
         raise HTTPException(422, "invalid pull request")
-    await require_installed_repo_access(session["sub"], f"{owner}/{repo}")
+    (await ReadableRepositories.of(session["sub"])).require(f"{owner}/{repo}")
     stored = await PullRequestSync(owner, repo, number).mirrored()
     if stored is None:
         return None

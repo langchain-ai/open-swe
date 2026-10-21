@@ -4,6 +4,7 @@ import pytest
 from fastapi import HTTPException
 
 from openswe.github import pull_request_dashboard_routes as pr_routes
+from openswe.github.repos import ReadableRepositories
 from openswe.review import routes as review_routes
 
 
@@ -25,9 +26,9 @@ async def test_review_indicators_require_repo_access_before_reading(monkeypatch)
     lookup = AsyncMock(return_value={})
     monkeypatch.setattr(review_routes, "get_review_summaries", lookup)
     monkeypatch.setattr(
-        review_routes,
-        "accessible_repo_full_names",
-        AsyncMock(return_value=frozenset({"acme/allowed"})),
+        ReadableRepositories,
+        "of",
+        AsyncMock(return_value=ReadableRepositories(frozenset({"acme/allowed"}))),
     )
     payload = review_routes.ReviewSummariesRequest(
         pull_requests=[{"repo": "acme/private", "number": 1}]

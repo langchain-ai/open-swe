@@ -574,6 +574,7 @@ async def test_assignment_inbox_is_personal_and_hides_completed_or_inaccessible_
     from openswe.database import postgres
     from openswe.github.mirror.conversation import Review
     from openswe.github.pull_requests import PullRequest
+    from openswe.github.repos import ReadableRepositories
     from openswe.human_review.requests import (
         HumanReviewParticipant,
         HumanReviewRequest,
@@ -625,9 +626,8 @@ async def test_assignment_inbox_is_personal_and_hides_completed_or_inaccessible_
                     ],
                 )
 
-    with patch(
-        "openswe.human_review.routes.accessible_repo_full_names",
-        AsyncMock(return_value=frozenset({"o/r"})),
+    with patch.object(
+        ReadableRepositories, "of", AsyncMock(return_value=ReadableRepositories(frozenset({"o/r"})))
     ):
         result = await api_review_assignments(page=1, session={"sub": "ada"})
     assert [row.number for row in result.pull_requests] == [1]

@@ -19,7 +19,7 @@ from openswe.github.mirror.views import (
 )
 from openswe.github.pull_request_status import pull_request_identity
 from openswe.github.repo_files import RepoSettings
-from openswe.github.repos import accessible_repo_full_names
+from openswe.github.repos import ReadableRepositories
 from openswe.human_review.card import mention
 from openswe.human_review.lifecycle import ReviewCard
 from openswe.human_review.requests import HumanReviewRequest
@@ -53,10 +53,8 @@ async def api_review_assignments(
         for request in requests
         if not repositories or request.pull_request.repo_full_name.lower() in repositories
     ]
-    accessible = await accessible_repo_full_names(login)
-    requests = [
-        request for request in requests if request.pull_request.repo_full_name.lower() in accessible
-    ]
+    readable = await ReadableRepositories.of(login)
+    requests = [request for request in requests if request.pull_request.repo_full_name in readable]
     views = await PullRequestView.load([request.pull_request for request in requests])
     rows: list[OpenPullRequest] = []
     for request, view in zip(requests, views, strict=True):
