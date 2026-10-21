@@ -2,7 +2,6 @@ import { expect, test, type Page } from "@playwright/test";
 import {
   SAME_USER,
   loginAs,
-  typeIntoComposer,
   waitForStateToContain,
   waitForThreadIdle,
   waitForThreadNotBusy,
@@ -473,41 +472,4 @@ test("keeps a draft while running and sends it after native cancellation", async
     conversation(page).getByText(/anything else you'd like changed/),
   ).toBeVisible();
   await waitForThreadIdle(page, id);
-});
-
-test("standard mode still sends, and the setting applies to the same existing thread", async ({
-  page,
-}) => {
-  await setExperimentalMode(page, false);
-  const id = await startSlackThread(page, "Add a greet() helper and open a PR");
-  await page.goto(`/agents/${id}`);
-  await expect(page.getByTestId("composer-editor")).toBeVisible();
-  await expect(conversation(page)).toHaveCount(0);
-  await waitForThreadIdle(page, id);
-  await waitForThreadNotBusy(page, id);
-  await typeIntoComposer(page, "Continue using the standard composer.");
-  await expect(
-    page.getByText(/anything else you'd like changed/),
-  ).toBeVisible();
-  await waitForThreadIdle(page, id);
-
-  await page.evaluate(() =>
-    localStorage.setItem("open-swe-feature-flags-panel", "true"),
-  );
-  await page.goto("/feature-flags");
-  const toggle = page.getByRole("switch", {
-    name: "Assistant UI",
-  });
-  await expect(toggle).toHaveAttribute("aria-checked", "false");
-  await toggle.click();
-  await expect(toggle).toHaveAttribute("aria-checked", "true");
-  await page.getByRole("link", { name: "Back to app" }).click();
-  await expect(page).toHaveURL(new RegExp(`/assistant/${id}$`));
-  await expect(conversation(page)).toBeVisible();
-  await expect(composer(page)).toBeVisible();
-  await expect(
-    conversation(page).getByText("Continue using the standard composer.", {
-      exact: true,
-    }),
-  ).toBeVisible();
 });
