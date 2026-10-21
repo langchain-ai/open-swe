@@ -11,6 +11,7 @@ An async subagent's first run carries a worker grant instead: it may read its
 coordinator's catalog and ``adopt`` a run token of its own, nothing else.
 """
 
+import asyncio
 import logging
 from collections.abc import Awaitable, Callable, Mapping
 from typing import Final
@@ -32,6 +33,12 @@ logger = logging.getLogger(__name__)
 
 HOOKS_PATH: Final = "/remote-runtime/hooks/{hook}"
 _RUN_STATE_KEY: Final = "remote_run"
+_HOOK_SECONDS: Final = 270.0
+# Ten minutes for the scout plus five minutes for preparation, below MDA's 1800s.
+_PREPARE_SECONDS: Final = 900.0
+_LONG_CALL_SECONDS: Final = 1800.0
+_TOOL_CALL_SLACK_SECONDS: Final = 300.0
+_RESPONSE_SECONDS: Final = 30.0
 _hook_body = TypeAdapter(dict[str, JsonValue])
 
 
@@ -71,6 +78,19 @@ def _scope_principal(scope: Scope) -> RemoteRun | WorkerGrant:
     return principal
 
 
+def _hook_seconds(hook: str, body: Mapping[str, JsonValue]) -> float:
+    if hook == "prepare":
+        return _PREPARE_SECONDS
+    if hook == "call":
+        arguments = body.get("arguments")
+        requested = arguments.get("timeout") if isinstance(arguments, dict) else None
+        seconds = _LONG_CALL_SECONDS
+        if isinstance(requested, int | float) and not isinstance(requested, bool):
+            seconds = max(seconds, requested + _TOOL_CALL_SLACK_SECONDS)
+        return seconds - _RESPONSE_SECONDS
+    return _HOOK_SECONDS
+
+
 async def hook_endpoint(scope: Scope, receive: Receive, send: Send) -> None:
     principal = _scope_principal(scope)
     hook = scope["path_params"]["hook"]
@@ -100,13 +120,15 @@ async def hook_endpoint(scope: Scope, receive: Receive, send: Send) -> None:
             scope, receive, send
         )
         return
+    deadline = asyncio.timeout(_hook_seconds(hook, body))
     try:
-        if isinstance(principal, WorkerGrant) and grant_hook is not None:
-            result = await grant_hook(principal, body)
-        elif run_hook is not None:
-            result = await run_hook(run, body)
-        else:
-            result = await graph(run, hook, body)
+        async with deadline:
+            if isinstance(principal, WorkerGrant) and grant_hook is not None:
+                result = await grant_hook(principal, body)
+            elif run_hook is not None:
+                result = await run_hook(run, body)
+            else:
+                result = await graph(run, hook, body)
     except UnknownHookError:
         await JSONResponse({"detail": f"Unknown hook {hook}"}, status_code=404)(
             scope, receive, send
@@ -117,7 +139,8 @@ async def hook_endpoint(scope: Scope, receive: Receive, send: Send) -> None:
             "Remote runtime hook failed", extra={"hook": hook, "thread_id": run.thread_id}
         )
         # The run fails with what failed here, as it would have in-process.
-        failure = {"error": type(exc).__name__, "message": str(exc)}
+        message = f"{hook} hook exceeded its execution deadline" if deadline.expired() else str(exc)
+        failure = {"error": type(exc).__name__, "message": message}
         await JSONResponse(failure, status_code=500)(scope, receive, send)
         return
     await JSONResponse(result)(scope, receive, send)

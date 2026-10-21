@@ -890,6 +890,7 @@ async def prepare_reviewer_run(
         # A failed checkout must not leave the scout wait polling for minutes.
         for task in tasks:
             task.cancel()
+        await asyncio.gather(*tasks, return_exceptions=True)
     work_dir, repo_ready = checkout.work_dir, checkout.repo_ready
     pr_title, pr_body = pr_overview
 

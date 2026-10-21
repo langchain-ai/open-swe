@@ -41,7 +41,9 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "mda"))
 
 from rt.backend import (
     BackendCallError,
+    BackendTimeoutError,
     BackendUnavailableError,
+    Hook,
     OpenSweBackend,
     PhaseReply,
     ToolReply,
@@ -816,3 +818,18 @@ async def test_mda_does_not_retry_tool_pairing_errors(
         with pytest.raises(type(error)) as caught:
             await middleware.awrap_model_call(request, handler)
         assert caught.value is error
+
+
+@pytest.mark.parametrize("hook", ["prepare", "before_model", "call", "after_model", "model_result"])
+async def test_transport_timeout_does_not_replay_a_hook(
+    monkeypatch: pytest.MonkeyPatch, hook: Hook
+) -> None:
+    monkeypatch.setenv("OPEN_SWE_BACKEND_URL", "https://backend.invalid")
+    client = MagicMock(is_closed=False)
+    client.post = AsyncMock(side_effect=httpx2.ReadTimeout("secret-token"))
+    monkeypatch.setattr("rt.backend.httpx2.AsyncClient", lambda **kwargs: client)
+
+    with pytest.raises(BackendTimeoutError, match=rf"{hook} failed \(ReadTimeout\)"):
+        await OpenSweBackend("secret-token").call(hook, {})
+
+    assert client.post.await_count == 1

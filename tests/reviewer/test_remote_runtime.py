@@ -1,3 +1,4 @@
+import asyncio
 import json
 import time
 
@@ -692,3 +693,134 @@ async def test_a_launched_run_that_ended_before_its_worker_was_registered_is_set
             "error": "boom",
         }
     )
+
+
+@pytest.mark.parametrize("hook", ["prepare", "before_model", "after_model", "model_result", "call"])
+async def test_hook_deadline_cancels_execution_and_names_the_phase(
+    monkeypatch: pytest.MonkeyPatch, hook: str
+) -> None:
+    from collections.abc import Mapping
+
+    import httpx
+    from pydantic import JsonValue
+    from starlette.applications import Starlette
+    from starlette.routing import Route
+
+    from openswe.remote_runtime import server
+
+    cancelled = asyncio.Event()
+
+    async def graph(run: RemoteRun, name: str, body: Mapping[str, JsonValue]) -> JsonValue:
+        try:
+            await asyncio.Event().wait()
+        finally:
+            cancelled.set()
+
+    monkeypatch.setattr(server, "_graphs", lambda: {"reviewer": graph})
+    monkeypatch.setattr(server, "_hook_seconds", lambda hook, body: 0.01)
+    app = Starlette(routes=[Route(server.HOOKS_PATH, server.HOOKS, methods=["POST"])])
+    async with (
+        asyncio.timeout(1),
+        httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://test") as client,
+    ):
+        response = await client.post(
+            f"/remote-runtime/hooks/{hook}",
+            headers={"Authorization": f"Bearer {sign_runtime_token(RUN)}"},
+            json={"name": "execute", "arguments": {}, "tool_call_id": "call-1"},
+        )
+    assert response.status_code == 500
+    assert response.json() == {
+        "error": "TimeoutError",
+        "message": f"{hook} hook exceeded its execution deadline",
+    }
+    assert cancelled.is_set()
+
+
+@pytest.mark.parametrize("stage", ["lookup", "startup", "poll"])
+async def test_walkthrough_deadline_includes_lookup_startup_and_polling(
+    monkeypatch: pytest.MonkeyPatch, stage: str
+) -> None:
+    from types import SimpleNamespace
+
+    from openswe.review_scout import launch
+
+    cancelled = asyncio.Event()
+
+    async def wait() -> None:
+        try:
+            await asyncio.Event().wait()
+        finally:
+            cancelled.set()
+
+    async def walkthrough(self: launch.ReviewScoutTarget) -> None:
+        if stage == "lookup":
+            await wait()
+
+    async def start(self: launch.ReviewScoutTarget) -> str:
+        if stage == "startup":
+            await wait()
+        return "run-1"
+
+    async def poll(thread_id: str, run_id: str) -> None:
+        await wait()
+
+    monkeypatch.setattr(launch.postgres, "configured", lambda: True)
+    monkeypatch.setattr(launch, "SCOUT_WAIT_SECONDS", 0.01)
+    monkeypatch.setattr(launch.ReviewScoutTarget, "walkthrough", walkthrough)
+    monkeypatch.setattr(launch.ReviewScoutTarget, "start", start)
+
+    async def current_thread_id(self: launch.ReviewScoutTarget) -> str:
+        return "scout-thread"
+
+    monkeypatch.setattr(launch.ReviewScoutTarget, "current_thread_id", current_thread_id)
+    monkeypatch.setattr(
+        launch, "dispatch_client", lambda: SimpleNamespace(runs=SimpleNamespace(get=poll))
+    )
+    target = launch.ReviewScoutTarget(
+        owner="acme",
+        repo="widgets",
+        pr_number=7,
+        pr_title="Change",
+        base_sha="base",
+        head_sha="head",
+        workspace_slug=None,
+    )
+    async with asyncio.timeout(1):
+        assert await target.await_walkthrough() is None
+    assert cancelled.is_set()
+
+
+@pytest.mark.parametrize("hook", ["prepare", "call"])
+async def test_long_hooks_keep_their_preparation_and_requested_tool_allowances(
+    monkeypatch: pytest.MonkeyPatch, hook: str
+) -> None:
+    from collections.abc import Mapping
+
+    import httpx
+    from pydantic import JsonValue
+    from starlette.applications import Starlette
+    from starlette.routing import Route
+
+    from openswe.remote_runtime import server
+
+    async def graph(run: RemoteRun, name: str, body: Mapping[str, JsonValue]) -> JsonValue:
+        await asyncio.sleep(0.02)
+        return {"finished": True}
+
+    monkeypatch.setattr(server, "_graphs", lambda: {"reviewer": graph})
+    monkeypatch.setattr(server, "_HOOK_SECONDS", 0.001)
+    monkeypatch.setattr(server, "_PREPARE_SECONDS", 0.1)
+    monkeypatch.setattr(server, "_LONG_CALL_SECONDS", 0.001)
+    monkeypatch.setattr(server, "_TOOL_CALL_SLACK_SECONDS", 0.01)
+    monkeypatch.setattr(server, "_RESPONSE_SECONDS", 0.001)
+    app = Starlette(routes=[Route(server.HOOKS_PATH, server.HOOKS, methods=["POST"])])
+    async with httpx.AsyncClient(
+        transport=httpx.ASGITransport(app=app), base_url="http://test"
+    ) as client:
+        response = await client.post(
+            f"/remote-runtime/hooks/{hook}",
+            headers={"Authorization": f"Bearer {sign_runtime_token(RUN)}"},
+            json={"arguments": {"timeout": 0.1}},
+        )
+    assert response.status_code == 200
+    assert response.json() == {"finished": True}

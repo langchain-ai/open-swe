@@ -279,6 +279,7 @@ class OpenSweBackend:
             seconds = _LONG_CALL_SECONDS if hook == "prepare" else _HOOK_SECONDS
         waits = iter(_RETRY_SECONDS)
         while True:
+            started = asyncio.get_running_loop().time()
             try:
                 response = await _CONNECTIONS.client().post(
                     f"{self._base}/remote-runtime/hooks/{hook}",
@@ -289,6 +290,13 @@ class OpenSweBackend:
                 response.raise_for_status()
                 break
             except httpx2.TimeoutException as exc:
+                logger.warning(
+                    "Backend hook transport timed out",
+                    extra={
+                        "hook": hook,
+                        "elapsed_seconds": asyncio.get_running_loop().time() - started,
+                    },
+                )
                 raise BackendTimeoutError(f"{hook} failed ({type(exc).__name__})") from exc
             except httpx2.HTTPError as exc:
                 status = (
