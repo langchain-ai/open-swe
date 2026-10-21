@@ -85,6 +85,16 @@ class SteeringHistory(BaseModel):
                     continue
                 seen.add(turn.message_id)
                 turns.append(turn)
+        return cls._of(turns)
+
+    @classmethod
+    async def for_thread(cls, thread_id: str) -> Self | None:
+        """One agent thread's human turns, before any pull request records them."""
+        turns = await cls._human_turns(thread_id)
+        return cls._of(turns) if turns else None
+
+    @classmethod
+    def _of(cls, turns: list[HumanTurn]) -> Self:
         follow_ups = turns[1:]
         return cls(
             request=turns[0],
@@ -138,11 +148,11 @@ class SteeringHistory(BaseModel):
             )
         return turns
 
-    def messages_block(self) -> str:
-        """Every human message as a ``<message author="...">`` entry, oldest first."""
+    def messages_block(self, *, with_authors: bool = True) -> str:
+        """Every human message as a ``<message>`` entry, oldest first."""
         entries = [
-            f'<message author="{html.escape(turn.author)}">\n'
-            f"{_CLOSING_MESSAGE_TAG_RE.sub(lambda m: f'</{m.group(1)}_>', turn.text)}\n"
+            (f'<message author="{html.escape(turn.author)}">\n' if with_authors else "<message>\n")
+            + f"{_CLOSING_MESSAGE_TAG_RE.sub(lambda m: f'</{m.group(1)}_>', turn.text)}\n"
             "</message>"
             for turn in self.turns
         ]
