@@ -146,6 +146,8 @@ class _Session:
     artifacts: str = field(init=False)
     #: Run code called `browser.close()`: release this client once the call is done.
     close_requested: bool = False
+    #: The thread whose own tab the tools act on, in a browser threads share.
+    thread: str | None = None
     shared: str | None = None  # the sandbox whose localhost the browser shares
 
     def __post_init__(self) -> None:
@@ -158,10 +160,23 @@ class _Session:
             on_close_requested=self._request_close,
             quiet_wait=True,
         )
+        # The facade acts on Chrome's focused tab, but a LangSmith browser has a window
+        # per attachment (the agent's, the shared localhost's), and headless Chrome keeps
+        # focus on the newest, whose tab this client cannot see. So we name the tab;
+        # the facade has no hook for it.
+        self.facade._active_page = self.tab  # ty: ignore[invalid-assignment]  # noqa: SLF001
 
     async def _request_close(self) -> None:
         # In place of the facade's own cleanup, which closes the browser itself.
         self.close_requested = True
+
+    async def tab(self) -> Page:
+        """The tab the tools act on: the thread's own, else the window's newest."""
+        if self.thread is not None:
+            return await self.page(self.thread)
+        context = self.browser.context
+        pages = await context.pages()
+        return pages[-1] if pages else await context.new_page()
 
     async def page(self, thread: str) -> Page:
         """``thread``'s own tab of a browser threads share."""
@@ -623,10 +638,7 @@ class BrowserMiddleware(AgentMiddleware):
                             self._sessions[key] = await _open(name, self.idle_ttl_seconds)
                         session = self._sessions[key]
                         await self._share(session, name, key, runtime)
-                        if thread is not None:  # the facade acts on the active tab
-                            await session.browser.context.set_active_page(
-                                await session.page(thread)
-                            )
+                        session.thread = thread
                         return await fn(session)
                     except Exception as err:  # noqa: BLE001 - recover or report
                         if _dead_session(err) and attempt == 1:
