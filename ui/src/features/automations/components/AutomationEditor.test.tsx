@@ -182,6 +182,66 @@ describe("AutomationEditor", () => {
     })
   })
 
+  it.each(["create", "edit"] as const)(
+    "blocks overlong names in %s mode until shortened",
+    (mode) => {
+      signInAsAdmin()
+      render(
+        <AutomationEditor
+          mode={mode}
+          template={TEMPLATE}
+          schedule={
+            mode === "edit"
+              ? {
+                  id: "sched_1",
+                  name: "Nightly",
+                  prompt: TEMPLATE.prompt,
+                  schedule: TEMPLATE.schedule,
+                  triggers: [
+                    {
+                      id: "trigger_1",
+                      kind: "schedule",
+                      cron: TEMPLATE.schedule,
+                    },
+                  ],
+                  model: "Default",
+                  scope: "workspace",
+                  workspace: "default",
+                  adminThread: false,
+                  enabled: true,
+                }
+              : undefined
+          }
+        />,
+        { wrapper: TooltipProvider }
+      )
+
+      const input = screen.getByRole("textbox", { name: "Automation name" })
+      const save = screen.getByRole("button", {
+        name: mode === "create" ? "Create" : "Save changes",
+      })
+      fireEvent.change(input, { target: { value: "a".repeat(121) } })
+
+      expect(screen.getByRole("alert").textContent).toContain("120 characters")
+      expect(input.getAttribute("aria-invalid")).toBe("true")
+      expect(save.hasAttribute("disabled")).toBe(true)
+      fireEvent.click(save)
+      expect(mocks.createMutate).not.toHaveBeenCalled()
+      expect(mocks.updateMutate).not.toHaveBeenCalled()
+
+      const name = "😀".repeat(120)
+      fireEvent.change(input, { target: { value: ` ${name} ` } })
+      expect(screen.queryByRole("alert")).toBeNull()
+      expect(save.hasAttribute("disabled")).toBe(false)
+      fireEvent.click(save)
+      expect(
+        mode === "create"
+          ? mocks.createMutate.mock.calls[0]?.[0]
+          : mocks.updateMutate.mock.calls[0]?.[0].body
+      ).toMatchObject({ name })
+    }
+  )
+
   it("sends a workspace the user picked", () => {
     signInAsAdmin()
     render(<AutomationEditor mode="create" template={TEMPLATE} />, {
