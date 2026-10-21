@@ -5733,8 +5733,15 @@
       "RefResponse": {
         "properties": {
           "sha": {
-            "title": "Sha",
-            "type": "string"
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Sha"
           }
         },
         "required": [
