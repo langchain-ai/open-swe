@@ -5,7 +5,6 @@ from unittest.mock import AsyncMock
 import pytest
 
 from openswe import credential_scope
-from openswe.slack import client as slack_client
 from openswe.slack import http as slack_http
 from openswe.slack import stop as slack_stop
 from openswe.slack import thinking
@@ -312,7 +311,7 @@ def _patch_native_stop(monkeypatch: pytest.MonkeyPatch, client: FakeClient) -> A
     monkeypatch.setattr(handlers, "langgraph_client", lambda: client)
     monkeypatch.setattr(handlers, "_thread_summary", AsyncMock(return_value={}))
     monkeypatch.setattr(handlers, "settle_run_turn", AsyncMock())
-    monkeypatch.setattr(slack_client, "post_slack_thread_reply", AsyncMock())
+    monkeypatch.setattr(slack_stop, "post_slack_thread_reply", AsyncMock())
     monkeypatch.setattr(slack_http.SlackClient, "bot", lambda: AsyncMock())
     monkeypatch.setattr(slack_http, "slack_identity", AsyncMock(return_value={"team_id": "T123"}))
     status = AsyncMock(return_value=True)
@@ -345,7 +344,7 @@ async def test_native_stop_targets_ordinary_thread_preserves_queued_work_and_ded
     assert client.cleared_queues == []
     assert "latest_run_status" not in client.threads.values[code_thread_id]["metadata"]
     status.assert_awaited_once_with("C123", "1.000", "")
-    slack_client.post_slack_thread_reply.assert_not_awaited()
+    slack_stop.post_slack_thread_reply.assert_not_awaited()
 
 
 async def test_native_stop_reports_cancellation_failure(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -361,7 +360,7 @@ async def test_native_stop_reports_cancellation_failure(monkeypatch: pytest.Monk
 
     assert client.threads.updates == []
     status.assert_not_awaited()
-    slack_client.post_slack_thread_reply.assert_awaited_once_with(
+    slack_stop.post_slack_thread_reply.assert_awaited_once_with(
         "C123",
         "1.000",
         "I couldn't stop this thread. Please try Stop again.",
@@ -397,7 +396,7 @@ async def test_native_stop_rejects_wrong_location_or_unauthorized_user(
     assert client.threads.updates == []
     assert client.cleared_queues == []
     status.assert_not_awaited()
-    slack_client.post_slack_thread_reply.assert_not_awaited()
+    slack_stop.post_slack_thread_reply.assert_not_awaited()
 
 
 @pytest.mark.parametrize("thread_ts", ["0", None])
