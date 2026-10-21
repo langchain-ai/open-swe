@@ -44,6 +44,8 @@ repositories they can read, and the plugin gets back only the ones they chose.
 
 ## Client
 
+The web UI talks to the plugin over [Cap'n Web](https://github.com/cloudflare/capnweb), running its own copy in the frame ahead of the plugin's code. Don't bundle `capnweb`: this package uses it only for types.
+
 ```ts
 import { connect } from "@openswe/plugin-sdk"
 

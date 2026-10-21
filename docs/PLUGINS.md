@@ -14,7 +14,9 @@ The web UI loads your plugin's single HTML file into a sandboxed `srcdoc` frame,
 - **Forms that never submit.** `submit` events fire for your own handlers (call `preventDefault()`), but the browser never sends a form anywhere.
 - **Clipboard writes**, through `navigator.clipboard.writeText`.
 
-The web UI hands your document one end of a `MessageChannel`. Every request goes over that port. The web UI checks it, and the backend checks it again against the permissions the installer approved, the repositories the person shared, and the person's own GitHub access. The SDK handles all of this.
+The web UI hands your document one end of a `MessageChannel` and talks to it over [Cap'n Web](https://github.com/cloudflare/capnweb). It runs its own copy of Cap'n Web in your document before any of your code, so both ends always speak the same version: don't bundle `capnweb` yourself (the SDK uses it for types only). The web UI checks every request, and the backend checks it again against the permissions the installer approved, the repositories the person shared, and the person's own GitHub access. The SDK handles all of this.
+
+Each scoped thing you open, such as a collection, a repository or a live room, is its own capability on the web UI's side. The SDK reuses one per collection or repository, and leaving a room releases it. Everything is released when the frame goes away. Each frame has an allowance: 16 requests running at once with up to 256 waiting, 3,000 requests a minute, 256 capabilities held at once, and 512 undelivered events per listener (a listener that far behind is dropped). Past it, requests fail with status 429.
 
 ## Repository layout
 
@@ -284,6 +286,7 @@ A failed request rejects with `HostError`, which carries `message` and an HTTP-l
 | 404 | No such document, file or repository. |
 | 409 | Another approval is already open for this plugin. |
 | 422 | GitHub refused the change, for example because the branch moved past `expectedHead`. |
+| 429 | The plugin is past its allowance: too many requests at once or in a minute, or too many open capabilities. |
 
 ## Building the bundle
 
