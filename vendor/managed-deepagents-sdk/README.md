@@ -677,7 +677,8 @@ Before running `mda deploy`, make sure you have:
 - The package installed from the dev channel: `managed-deepagents@dev` or
   `uv tool install --prerelease allow managed-deepagents`.
 - `npm` on `PATH` for TypeScript deploys, because the CLI generates a lockfile
-  for the remote build.
+  for the remote build. Other lockfiles (`pnpm-lock.yaml`, `yarn.lock`,
+  `bun.lock`) are left out of the build.
 - `LANGSMITH_API_KEY` in your environment or project `.env`. If neither is set,
   `mda deploy` prompts for a key or let you press Enter to sign
   in with the browser; browser sign-in mints a 2-hour personal access token

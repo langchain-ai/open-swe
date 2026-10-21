@@ -21,10 +21,12 @@ not yet on main: one per line, its number, the head commit carried, then its tit
 Our changes, carried pull requests included, are edits made in the tree itself, as in a
 vendor branch. Updating takes upstream's new version of every file we left alone, and
 three-way merges upstream's changes into every file we changed (base: the recorded
-commit), leaving conflict markers where both sides changed the same lines; carried pull
-requests the new commit contains drop out of that record. Carrying a pull request
-three-way merges its changes into the tree the same way (base: where it branched off
-its base branch, or the head carried before). Both relock mda/.
+commit, or where it meets the new one when that doesn't build on it, so a move from main
+to a release branch keeps main's newer changes), leaving conflict markers where both
+sides changed the same lines; carried pull requests the new commit contains drop out of
+that record. Carrying a pull request three-way merges its changes into the tree the same
+way (base: where it branched off its base branch, or the head carried before). Both
+relock mda/.
 MDA_SDK_REPO overrides the upstream, e.g. a local checkout; pull requests are looked up
 on GitHub with `gh`.
 """
@@ -219,6 +221,18 @@ class Upstream:
             raise VendorError(f"{sha} is not on {self.branch} of {self.repo}.")
         return sha
 
+    def merge_base(self, recorded: str, sha: str) -> str:
+        """What the tree's changes are against when moving it from ``recorded`` to ``sha``.
+
+        ``recorded`` itself when ``sha`` builds on it. Otherwise, as when moving from main
+        to a release branch, where the two meet: what ``recorded`` has and ``sha`` lacks
+        then stays, as a merge of the two would keep it.
+        """
+        if self._contains(recorded, sha):
+            return recorded
+        _git("fetch", "--quiet", "--filter=blob:none", self.repo, recorded, cwd=self._history)
+        return _git("merge-base", recorded, sha, cwd=self._history, output=True)
+
     def contains(self, pr: PullRequest, commit: str) -> bool:
         """Whether ``commit``, on the branch, already has ``pr``'s changes: it was merged into it."""
         return pr.merge_commit is not None and self._contains(pr.merge_commit, commit)
@@ -336,19 +350,26 @@ def update(upstream: Upstream, ref: str | None, scratch: Path) -> str:
     sha = upstream.resolve(ref)
     new = upstream.tree(sha)
     record = (new / RECORD).read_text().strip()
+    recorded = recorded_sha() if DEST.exists() else None
+    base = upstream.merge_base(recorded, sha) if recorded else None
     tree = scratch / "updated"
     tree.mkdir()
     conflicts = merge_trees(
         files(DEST),
-        files(upstream.tree(recorded_sha())) if DEST.exists() else {},
+        files(upstream.tree(base)) if base else {},
         files(new),
         tree,
-        ("ours", "upstream (before)", f"upstream {sha[:12]}"),
+        ("ours", f"upstream {base[:12]}" if base else "upstream (before)", f"upstream {sha[:12]}"),
     )
     carried = CarriedPRs.read()
     merged = [n for n in carried.prs if upstream.contains(PullRequest.lookup(n), sha)]
     still = CarriedPRs({n: pr for n, pr in carried.prs.items() if n not in merged})
     done = f"Updated to {record}"
+    if recorded and base != recorded:
+        done += (
+            f"; it doesn't build on {recorded[:12]}, so what {recorded[:12]} has and it lacks "
+            f"(since {base[:12]}) stays as our change: note it in vendor/mda-changes"
+        )
     if merged:
         done += f"; it has #{', #'.join(map(str, sorted(merged)))}, no longer carried"
     if still.prs:

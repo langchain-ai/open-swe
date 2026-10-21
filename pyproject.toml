@@ -6,7 +6,7 @@ readme = "README.md"
 requires-python = ">=3.14"
 license = { text = "MIT" }
 dependencies = [
-    "deepagents==0.7.28",
+    "deepagents==0.7.29",
     # The types of the event endpoint requests the MDA deployment's channels send (mda/).
     "managed-deepagents==0.10.0.dev15",
     # Verifies the signature MDA puts on those requests (MDA_SERVICE_SECRET).
@@ -73,12 +73,12 @@ sandbox-providers = [
 
 [tool.uv]
 # The externally maintained langchain-e2b integration still declares
-# `deepagents<0.7.0`, but 0.7.28 keeps the sandbox API backward compatible. Its e2b
+# `deepagents<0.7.0`, but 0.7.29 keeps the sandbox API backward compatible. Its e2b
 # dependency also caps wcmatch<11.0 while deepagents requires wcmatch>=11.0, so
 # override both transitive bounds until langchain-e2b publishes compatible metadata.
 # Override-dependencies only apply when langchain-e2b is installed (the sandbox-e2b
 # or sandbox-providers extra).
-override-dependencies = ["deepagents==0.7.28", "wcmatch>=11.0"]
+override-dependencies = ["deepagents==0.7.29", "wcmatch>=11.0"]
 constraint-dependencies = [
     "langgraph-api>=0.16.2,<0.17",
     "langgraph-runtime-inmem>=0.36.2,<0.37",

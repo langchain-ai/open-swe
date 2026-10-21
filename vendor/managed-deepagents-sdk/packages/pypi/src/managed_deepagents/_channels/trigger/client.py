@@ -81,7 +81,7 @@ class TriggerClient(TriggerClientLike):
     ) -> None:
         resolved_env = os.environ if env is None else env
         self._api_base = _trigger_server_api_base(_configured_trigger_server_url(resolved_env))
-        api_key = (resolved_env.get("LANGSMITH_API_KEY") or "").strip()
+        api_key = _configured_api_key(resolved_env)
         if not api_key:
             raise ValueError("Channel runtime is not configured.")
         self._api_key = api_key
@@ -182,9 +182,8 @@ def create_trigger_client(
 ) -> TriggerClient | None:
     """Build a client when both hosted Trigger settings are present."""
     resolved_env = os.environ if env is None else env
-    if (
-        _configured_trigger_server_url(resolved_env) is None
-        or not (resolved_env.get("LANGSMITH_API_KEY") or "").strip()
+    if _configured_trigger_server_url(resolved_env) is None or not _configured_api_key(
+        resolved_env
     ):
         return None
     return TriggerClient(user_id=user_id, env=resolved_env, fetch=fetch, timeout=timeout)
@@ -199,6 +198,13 @@ def _uuid_string(value: str | None) -> str | None:
 
 def _configured_trigger_server_url(env: Mapping[str, str]) -> str | None:
     return (env.get(LANGSMITH_MDA_TRIGGER_SERVER_URL_ENV) or "").strip() or None
+
+
+def _configured_api_key(env: Mapping[str, str]) -> str:
+    # Self-hosted Host injects the deployment key under its legacy name.
+    return (env.get("LANGSMITH_API_KEY") or "").strip() or (
+        env.get("LANGCHAIN_API_KEY") or ""
+    ).strip()
 
 
 def _trigger_server_api_base(raw: str | None) -> str:

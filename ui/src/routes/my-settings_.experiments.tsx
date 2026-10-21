@@ -40,23 +40,18 @@ function ExperimentsPage() {
       </SettingsSection>
       <SettingsSection title="Agent">
         <ProfileSwitchRow
-          field="recent_thread_context_enabled"
-          label="Include recent work"
-          description="Give runs a filtered digest of your recent threads."
-        />
-        <ProfileSwitchRow
           field="experimental_task_coordination"
-          label="Asynchronous task coordination (experimental)"
+          label="Asynchronous task coordination"
           description="Let your agent delegate to workers that run independently. Turning this off prevents new workers; existing workers can finish and remain available to message or cancel."
         />
         <ProfileSwitchRow
           field="experimental_background_callbacks"
-          label="Background command callbacks (experimental)"
+          label="Background command callbacks"
           description="Background commands you start report completion from the sandbox instead of being polled every minute."
         />
         <ProfileSwitchRow
           field="experimental_monitor"
-          label="Monitors (experimental)"
+          label="Monitors"
           description="Give your agent a monitor tool: it runs a long-lived sandbox command and is woken with each line its filter picks out, such as errors in a log. Applies on the next run."
         />
         <ProfileSwitchRow

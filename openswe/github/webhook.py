@@ -975,11 +975,6 @@ CHANNEL_HISTORY_MESSAGES = 50
 CONTINUES_THREAD_KEY = "continues_thread"
 
 
-async def _channel_thread(thread_id: str) -> str | None:
-    """``thread_id`` when an MDA channel owns it: its runs start in the channel only."""
-    return thread_id if channel_of(await common.get_thread_metadata_safe(thread_id)) else None
-
-
 def _state_messages(state: object) -> list[dict[str, Any]]:
     values = state.get("values") if isinstance(state, Mapping) else None
     messages = values.get("messages") if isinstance(values, Mapping) else None
@@ -1084,10 +1079,18 @@ async def process_github_pr_comment(
 
     # A channel (Linear, GitHub issues) starts the runs on its own threads, so
     # feedback on a PR its conversation opened continues on the PR's own thread.
-    continues_thread = await _channel_thread(thread_id)
-    if continues_thread is not None:
+    channel_metadata = await common.get_thread_metadata_safe(thread_id)
+    continues_thread: str | None = None
+    if channel_metadata is not None and channel_of(channel_metadata):
         if not pr_number:
             return
+        # The PR thread starts with the conversation's history, so only who may prompt
+        # the conversation continues it, as when its own thread took the feedback.
+        if common.thread_is_private(channel_metadata) and not common.thread_is_promptable(
+            channel_metadata, github_login
+        ):
+            return
+        continues_thread = thread_id
         thread_id = pr_comment_thread_id(
             repo_config.get("owner", ""), repo_config.get("name", ""), pr_number
         )

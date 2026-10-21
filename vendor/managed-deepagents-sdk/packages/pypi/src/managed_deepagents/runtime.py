@@ -1393,7 +1393,7 @@ def _declared_memory_layers(memory: MemoryDefinitionLike | None) -> MemoryLayers
     scope = config.get("scope")
     # Dynamic boundary: the declaration is imported from the author's module, so
     # its shape is checked here rather than trusted.
-    return cast("MemoryLayers", list(scope)) if isinstance(scope, list) else []
+    return list(scope) if isinstance(scope, list) else []
 
 
 def _select_system_prompt(
@@ -1829,6 +1829,20 @@ class _LazyManagedSandboxBackend(SandboxBackendProtocol):
             return f"pending:{scope}"
         except Exception:  # noqa: BLE001 — match TS pending:sandbox fallback
             return "pending:sandbox"
+
+    def opened(self) -> SandboxBackendProtocol | None:
+        """This thread's sandbox if this process opened it, by any handle; never opens one."""
+        if self._resolved_backend is not None:
+            return self._resolved_backend
+        try:
+            key = _sandbox_scope_key(
+                self._source.sandbox, self._config(), self._source.selection_fingerprint
+            )
+        except Exception:  # noqa: BLE001 — no thread, so no sandbox, as in ``id``
+            return None
+        with _managed_sandbox_lock:
+            entry = _managed_sandboxes.get(key)
+        return entry.backend if entry is not None else None
 
     def ls(self, path: str = "/") -> LsResult:
         return self._call(lambda backend: backend.ls(path))

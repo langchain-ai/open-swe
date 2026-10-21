@@ -100,6 +100,23 @@ wheels = [
 ]
 
 [[package]]
+name = "browserbase"
+version = "1.21.0"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "anyio" },
+    { name = "distro" },
+    { name = "httpx" },
+    { name = "pydantic" },
+    { name = "sniffio" },
+    { name = "typing-extensions" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/64/b0/11f6bd76b91f4237cfffde1eed741a2b3b6016b6c5169153a39484093c1e/browserbase-1.21.0.tar.gz", hash = "sha256:b2b019d0acc0a5876eae58b4aeb3cf942736e4e3da46571356d612f4504d537e", size = 300177, upload-time = "2026-10-14T07:16:55.192Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/fa/d0/cdd0ca2989e37f403dfefec9c70e6b1d4477afd64aff71cf11ea19f3f5ed/browserbase-1.21.0-py3-none-any.whl", hash = "sha256:b0dfbb858556c3019328c211fa319376388dcd00f22dac5e646b4a1e970e3ef5", size = 169891, upload-time = "2026-10-14T07:16:56.237Z" },
+]
+
+[[package]]
 name = "bsdiff4"
 version = "1.2.6"
 source = { registry = "https://pypi.org/simple" }
@@ -186,11 +203,11 @@ wheels = [
 
 [[package]]
 name = "certifi"
-version = "2026.7.22"
+version = "2026.10.19"
 source = { registry = "https://pypi.org/simple" }
-sdist = { url = "https://files.pythonhosted.org/packages/a3/c2/24167ea9858356b47a87a50d39908bfdb72ceeefe0041586e704e5376b3a/certifi-2026.7.22.tar.gz", hash = "sha256:741e2c3b351ddf169a738da9f2c048608ff7f2c5cc02f1ebc6b118bb090d5d55", size = 138112, upload-time = "2026-07-22T03:35:12.644Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/a6/bd/1436c50cc46699de0230fbaacc1d1de7bfec413176099949e9d5112e88f2/certifi-2026.10.19.tar.gz", hash = "sha256:035c1e85572b141bf1c3a3eff0e33a8eb74917522f2559075ff8d2fea780a1ae", size = 137598, upload-time = "2026-10-20T02:24:16.604Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/0b/a7/71ac2cff56fec219ed242bb11b8efb69fcc4bec75db06fb7bfe35de520e6/certifi-2026.7.22-py3-none-any.whl", hash = "sha256:62f22742b58a1a33014a2b6b706588a8d7e2a88ae7bd1a6ebe8c992928483775", size = 136983, upload-time = "2026-07-22T03:35:11.276Z" },
+    { url = "https://files.pythonhosted.org/packages/c4/51/29046e48f693c54e5b7412216d447a1d8362c9653148d98c02cdf65fa733/certifi-2026.10.19-py3-none-any.whl", hash = "sha256:42d35340cc5b9ba78e818ddbff0c5b1c2b779de448a340fd1b989f5fa8670e1b", size = 136464, upload-time = "2026-10-20T02:24:15.072Z" },
 ]
 
 [[package]]
@@ -498,7 +515,7 @@ wheels = [
 
 [[package]]
 name = "deepagents"
-version = "0.7.28"
+version = "0.7.29"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "langchain" },
@@ -509,9 +526,9 @@ dependencies = [
     { name = "packaging" },
     { name = "wcmatch" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/1c/36/4f436696ea891078843d9451faade5b24df728e99a2be9fe1167a883df6b/deepagents-0.7.28.tar.gz", hash = "sha256:7479791ebd60989dbfff4a0704dfa2e6d85a8a7a37314ab933c05b9f8215deac", size = 338147, upload-time = "2026-10-16T20:21:10.381Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/4e/e0/8c60fda210b3899d3f35298a0bcc6dc19428d663be543433672ce91fbdf2/deepagents-0.7.29.tar.gz", hash = "sha256:9e778f5d5c513c102ad47f9b6b803144313dc6cbd5d6ca1db3cdb43c6695df50", size = 338215, upload-time = "2026-10-20T16:17:44.372Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/f1/69/d7df283b3919c9515369e5a1221f352c0c535c33be9880b2d8ab2b271740/deepagents-0.7.28-py3-none-any.whl", hash = "sha256:3e2492475d9e6c728262df22a324edd9abb9a0d8d1cb3d4c2593088f63ab89a5", size = 368067, upload-time = "2026-10-16T20:21:09.178Z" },
+    { url = "https://files.pythonhosted.org/packages/c1/01/3ca3f9e018dbe2fed34ca90b4fd45eef61faa6af8da371c874bf1e9a6ae5/deepagents-0.7.29-py3-none-any.whl", hash = "sha256:f4ef2ef4b85e1b81885edb8bbde1bbfa6b362e02189b97da4f18c4826e859dcb", size = 368170, upload-time = "2026-10-20T16:17:42.442Z" },
 ]
 
 [[package]]
@@ -1211,7 +1228,7 @@ wheels = [
 
 [[package]]
 name = "managed-deepagents"
-version = "0.9.2"
+version = "0.9.3"
 source = { editable = "../vendor/managed-deepagents-sdk/packages/pypi" }
 dependencies = [
     { name = "deepagents" },
@@ -1238,7 +1255,7 @@ requires-dist = [
     { name = "langgraph-prebuilt", specifier = ">=1.1.1,<2" },
     { name = "langgraph-sdk", specifier = ">=0.4.6,<0.5" },
     { name = "mcp", marker = "extra == 'test'", specifier = ">=2.2.0,<3" },
-    { name = "pydantic", specifier = ">=2.7.4" },
+    { name = "pydantic", specifier = ">=2.7.4,<2.15" },
     { name = "pyjwt", extras = ["crypto"], marker = "extra == 'test'", specifier = ">=2.13.0" },
     { name = "pytest", marker = "extra == 'test'", specifier = ">=9.1.1" },
     { name = "starlette", marker = "extra == 'test'", specifier = ">=1.6.0" },
@@ -1248,14 +1265,14 @@ requires-dist = [
 provides-extras = ["test"]
 
 [package.metadata.requires-dev]
-lint = [{ name = "ruff", specifier = ">=0.16.7,<0.17.0" }]
+lint = [{ name = "ruff", specifier = ">=0.16.7,<0.18.0" }]
 typing = [
     { name = "basedpyright", specifier = ">=1.40.1,<2.0.0" },
     { name = "fastmcp", specifier = ">=4.0.10,<5" },
     { name = "langchain", extras = ["mcp"], specifier = ">=1.4.6,<2" },
     { name = "mcp", specifier = ">=2.2.0,<3" },
     { name = "stagehand", specifier = "==4.3.0" },
-    { name = "ty", specifier = ">=0.0.80,<1.0.0" },
+    { name = "ty", specifier = ">=0.0.80,<0.0.88" },
 ]
 
 [[package]]
@@ -1341,11 +1358,12 @@ dependencies = [
     { name = "managed-deepagents" },
     { name = "mcp" },
     { name = "pydantic" },
+    { name = "stagehand" },
 ]
 
 [package.metadata]
 requires-dist = [
-    { name = "deepagents", specifier = "==0.7.28" },
+    { name = "deepagents", specifier = "==0.7.29" },
     { name = "httpx2", specifier = ">=2.12.0,<3.0.0" },
     { name = "langchain", extras = ["mcp"], specifier = ">=1.4.6" },
     { name = "langchain-anthropic", specifier = ">=1.7.6" },
@@ -1355,6 +1373,7 @@ requires-dist = [
     { name = "managed-deepagents", editable = "../vendor/managed-deepagents-sdk/packages/pypi" },
     { name = "mcp", specifier = ">=2.2.0,<3" },
     { name = "pydantic", specifier = ">=2.11" },
+    { name = "stagehand", specifier = "==4.3.0" },
 ]
 
 [[package]]
@@ -2155,6 +2174,23 @@ dependencies = [
 sdist = { url = "https://files.pythonhosted.org/packages/e4/be/0123026f719d1a7936f214a88b553bb5701e04ff2511147c1dab0c5035eb/sse_starlette-3.5.0.tar.gz", hash = "sha256:75de713aa8a9441513cc283220826da079d982770965b951e9437720e8bafdb2", size = 36794, upload-time = "2026-09-28T17:48:14.7Z" }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/be/e4/cdda14023c316d71493bc54fdffc3dd006631b88866145c9d3cc33e0f1df/sse_starlette-3.5.0-py3-none-any.whl", hash = "sha256:3e6e1070df3f0f5d9cea81496de92dbb72f6721871d99748ece67441dd8b7997", size = 17407, upload-time = "2026-09-28T17:48:13.228Z" },
+]
+
+[[package]]
+name = "stagehand"
+version = "4.3.0"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "browserbase" },
+    { name = "httpx" },
+    { name = "opentelemetry-api" },
+    { name = "pydantic" },
+    { name = "typing-extensions" },
+    { name = "websockets" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/5d/c0/868c0a57d1028021306d75f37c2993195041878b7ac453519f9d48343868/stagehand-4.3.0.tar.gz", hash = "sha256:d2febed942526a0cf2a0b7a8e2a613fcea7142100cfc165317e506d049ebfb14", size = 513063, upload-time = "2026-10-20T00:38:24.653Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/4f/71/99c873e72011f5477ad77ce25e362ceb2f6e875e538704a0d3004e7d945e/stagehand-4.3.0-py3-none-any.whl", hash = "sha256:664f64e6167cb79ccd679adf2ab6f91a47e0253c5188e9eb550158fdf9590aa4", size = 527183, upload-time = "2026-10-20T00:38:23.091Z" },
 ]
 
 [[package]]

@@ -1,8 +1,13 @@
 """A PR thread starts with the latest turns of the channel conversation it continues."""
 
 from typing import Any
+from unittest.mock import AsyncMock
 
+import pytest
+
+from openswe.github import webhook
 from openswe.github.webhook import CHANNEL_HISTORY_MESSAGES, recent_turns
+from openswe.webhooks import common
 
 
 def _human(n: int) -> dict[str, Any]:
@@ -37,3 +42,50 @@ def test_the_cap_moves_forward_to_a_turn_boundary() -> None:
 def test_at_most_the_cap_is_kept() -> None:
     messages = [_human(n) for n in range(CHANNEL_HISTORY_MESSAGES + 10)]
     assert recent_turns(messages, CHANNEL_HISTORY_MESSAGES) == messages[10:]
+
+
+@pytest.mark.asyncio
+async def test_only_who_may_prompt_a_private_conversation_continues_it(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Feedback from anyone else starts nothing, so the conversation never reaches them."""
+    monkeypatch.setattr(
+        common,
+        "extract_pr_context",
+        AsyncMock(
+            return_value=(
+                {"owner": "o", "name": "r"},
+                7,
+                "open-swe/thread-1",
+                "mallory",
+                "https://github.com/o/r/pull/7",
+                42,
+                None,
+            )
+        ),
+    )
+    monkeypatch.setattr(
+        common,
+        "get_thread_metadata_safe",
+        AsyncMock(
+            return_value={
+                "channel": "linear",
+                "source": "linear",
+                "visibility": "private",
+                "owner_login": "ada",
+            }
+        ),
+    )
+    create = AsyncMock()
+    monkeypatch.setattr(webhook, "create_thread", create)
+    trigger = AsyncMock(return_value=True)
+    monkeypatch.setattr(common, "trigger_or_queue_run", trigger)
+
+    await webhook.process_github_pr_comment(
+        {"action": "created", "sender": {"login": "mallory", "id": 2}, "comment": {}},
+        "issue_comment",
+        agent_thread_id="thread-1",
+    )
+
+    create.assert_not_awaited()
+    trigger.assert_not_awaited()

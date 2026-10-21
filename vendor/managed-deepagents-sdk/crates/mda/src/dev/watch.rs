@@ -458,6 +458,25 @@ mod tests {
     }
 
     #[test]
+    fn ignores_other_package_manager_lockfiles() {
+        let ctx = root_ctx();
+        for path in [
+            "pnpm-lock.yaml",
+            "yarn.lock",
+            "bun.lock",
+            "bun.lockb",
+            "npm-shrinkwrap.json",
+            "packages/ui/pnpm-lock.yaml",
+        ] {
+            assert_eq!(
+                classify_watch_path(Path::new(path), &ctx),
+                WatchAction::Ignore,
+                "{path}"
+            );
+        }
+    }
+
+    #[test]
     fn classifies_hub_and_env_paths() {
         let ctx = root_ctx();
         assert_eq!(
