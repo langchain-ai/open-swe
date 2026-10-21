@@ -1,6 +1,6 @@
 import type { Person, PluginHost, StoredDocument } from "@openswe/plugin-sdk"
 import { usePluginHost } from "@openswe/plugin-sdk/react"
-import { useQuery, useQueryClient } from "@tanstack/react-query"
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { useEffect, useMemo } from "react"
 
 import {
@@ -12,6 +12,7 @@ import {
 } from "@/lib/model"
 
 export const keys = {
+  repositories: ["repositories"] as const,
   space: (repository: string) => ["space", repository] as const,
   drafts: (repository: string) => ["drafts", repository] as const,
   comments: (repository: string, path: string) =>
@@ -25,6 +26,31 @@ export const keys = {
     ["pull", repository, branch] as const,
   threads: ["threads"] as const,
   people: (logins: string[]) => ["people", ...logins] as const,
+}
+
+/** The repositories the person shared with Docs, the only ones it can open. */
+export function useRepositories() {
+  const host = usePluginHost()
+  return useQuery({
+    queryKey: keys.repositories,
+    queryFn: () => host.repositories.list(),
+    staleTime: Infinity,
+  })
+}
+
+/** Asks the person to share a repository; resolves to it, or `null` if they cancel. */
+export function usePickRepository() {
+  const host = usePluginHost()
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: async (suggested?: string) => {
+      const [picked] = await host.repositories.pick(
+        suggested ? { suggested: [suggested] } : {}
+      )
+      await queryClient.invalidateQueries({ queryKey: keys.repositories })
+      return picked ?? null
+    },
+  })
 }
 
 export function useSpace(repository: string) {

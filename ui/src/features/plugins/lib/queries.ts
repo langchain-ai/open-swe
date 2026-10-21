@@ -89,12 +89,32 @@ export function useUpgradePlugin() {
   })
 }
 
-export function useSetPluginRepositories() {
+/** Puts the install's new summary, with the viewer's repositories, in the cache. */
+function useReplacePlugin() {
   const queryClient = useQueryClient()
+  return (updated: InstalledPlugin) =>
+    queryClient.setQueryData<Array<InstalledPlugin>>(pluginKeys.all, (prev) =>
+      prev?.map((plugin) => (plugin.id === updated.id ? updated : plugin))
+    )
+}
+
+export function useSharePluginRepositories() {
+  const replace = useReplacePlugin()
   return useMutation({
     mutationFn: (vars: { id: string; repositories: Array<string> }) =>
-      pluginsApi.setRepositories(vars.id, vars.repositories),
-    meta: { errorTitle: "Couldn't update plugin repositories" },
+      pluginsApi.share(vars.id, vars.repositories),
+    meta: { errorTitle: "Couldn't share the repository" },
+    onSuccess: replace,
+  })
+}
+
+export function useUnsharePluginRepository() {
+  const queryClient = useQueryClient()
+  const replace = useReplacePlugin()
+  return useMutation({
+    mutationFn: (vars: { id: string; repository: string }) =>
+      pluginsApi.unshare(vars.id, vars.repository),
+    meta: { errorTitle: "Couldn't stop sharing the repository" },
     onMutate: async (vars) => ({
       undo: await optimisticUpdate<Array<InstalledPlugin>>(
         queryClient,
@@ -102,14 +122,18 @@ export function useSetPluginRepositories() {
         (prev) =>
           prev.map((plugin) =>
             plugin.id === vars.id
-              ? { ...plugin, repositories: vars.repositories }
+              ? {
+                  ...plugin,
+                  repositories: plugin.repositories.filter(
+                    (name) => name !== vars.repository
+                  ),
+                }
               : plugin
           )
       ),
     }),
     onError: (_error, _vars, context) => context?.undo(),
-    onSettled: () =>
-      queryClient.invalidateQueries({ queryKey: pluginKeys.all }),
+    onSuccess: replace,
   })
 }
 

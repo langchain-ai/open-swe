@@ -48,6 +48,7 @@ export interface InstalledPlugin {
   source: PluginSource
   commit_sha: string
   scope: "user" | "organization"
+  /** The repositories the viewer shared with it. */
   repositories: Array<string>
   installed_at: string | null
 }
@@ -64,7 +65,6 @@ export interface InstallRequest {
   scope: "user" | "organization"
   name: string
   permissions: Array<PluginPermission>
-  repositories: Array<string>
 }
 
 /** The permissions a newer commit asks for beyond the approved ones, from a 409. */
@@ -222,11 +222,16 @@ export const pluginsApi = {
       method: "POST",
       ...json({ permissions }),
     }),
-  setRepositories: (id: string, repositories: Array<string>) =>
+  share: (id: string, repositories: Array<string>) =>
     agentsRequest<InstalledPlugin>(`${plugin(id)}/repositories`, {
-      method: "PUT",
+      method: "POST",
       ...json({ repositories }),
     }),
+  unshare: (id: string, repository: string) =>
+    agentsRequest<InstalledPlugin>(
+      `${plugin(id)}/repositories/${segments(repository)}`,
+      { method: "DELETE" }
+    ),
   uninstall: (id: string) =>
     agentsRequest<void>(plugin(id), { method: "DELETE" }),
   bundle: async (id: string) =>

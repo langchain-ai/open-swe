@@ -37,6 +37,11 @@ Commit the built bundle: Open SWE never runs a build.
 | `github:write` | create branches, commit files and open pull requests there |
 | `threads` | ask to start agent threads; the person approves each request |
 
+A plugin reaches no repository until the person shares one. Ask with
+`host.repositories.pick()`: the dashboard shows them a picker of the
+repositories they can read, and the plugin gets back only the ones they chose.
+`host.repositories.list()` returns what they have shared so far.
+
 ## Client
 
 ```ts
@@ -44,6 +49,7 @@ import { connect } from "@openswe/plugin-sdk"
 
 const host = await connect() // call while the module loads
 host.context.user // { login, name, avatar: Blob | null }
+const [repository] = await host.repositories.pick() // "acme/app", or none
 await host.storage.put("notes", "n1", { text: "hi" }, { repository: "acme/app" })
 await host.github("acme/app").file("README.md", "main")
 const [person] = await host.people.get(["ada"])

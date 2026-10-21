@@ -151,6 +151,7 @@ class PluginSummary(BaseModel):
     commit_sha: str
     scope: Literal["user", "organization"]
     repositories: list[str]
+    """The repositories the viewer shared with it."""
     installed_at: datetime | None
 
     @classmethod
@@ -182,7 +183,6 @@ class InstallBody(BaseModel):
     """The plugin the installer reviewed; the install fails if the source now holds another."""
     permissions: list[PluginPermission]
     """The permissions the installer approved; the install fails if the plugin asks for more."""
-    repositories: list[str] = Field(default_factory=list, max_length=50)
 
 
 class UpgradeBody(BaseModel):
@@ -190,11 +190,11 @@ class UpgradeBody(BaseModel):
 
 
 class RepositoriesBody(BaseModel):
-    repositories: list[str] = Field(max_length=50)
+    repositories: list[str] = Field(min_length=1, max_length=50)
 
 
-async def _grantable(login: str, raw: list[str]) -> list[str]:
-    """``raw`` as lowercased ``owner/repo``, each one the installer can reach."""
+async def _shareable(login: str, raw: list[str]) -> list[str]:
+    """``raw`` as lowercased ``owner/repo``, each one ``login`` can read."""
     try:
         names = sorted({normalize_repo_full_name(repo).lower() for repo in raw})
     except ValueError as exc:
@@ -243,7 +243,6 @@ async def api_plugin_catalog(
 async def api_install_plugin(body: InstallBody, viewer: ViewerDep) -> PluginSummary:
     if body.scope == "organization" and not viewer.admin:
         raise HTTPException(403, "Only admins install plugins for everyone")
-    repositories = await _grantable(viewer.login, body.repositories)
     with _as_http():
         source = PluginSource.parse(body.repository, body.path, body.ref)
         async with GitHubClient.as_user(viewer.login) as github:
@@ -255,7 +254,7 @@ async def api_install_plugin(body: InstallBody, viewer: ViewerDep) -> PluginSumm
         if owner is not None and await PluginInstallations.named(body.name, None) is not None:
             raise PluginNameTaken(body.name)
         installation_id = await PluginInstallations.install(
-            package, user_id=owner, repositories=repositories, by=viewer.user_id
+            package, user_id=owner, by=viewer.user_id
         )
         return PluginSummary.of(await PluginInstallations.get(installation_id, viewer.user_id))
 
@@ -276,15 +275,32 @@ async def api_upgrade_plugin(
         return PluginSummary.of(await PluginInstallations.get(installation.id, viewer.user_id))
 
 
-@router.put("/{installation_id}/repositories")
+@router.post("/{installation_id}/repositories")
 @audit_endpoint
-async def api_set_plugin_repositories(
-    body: RepositoriesBody, installation: ManagedDep, viewer: ViewerDep
+async def api_share_plugin_repositories(
+    body: RepositoriesBody, plugin: PluginDep, viewer: ViewerDep
 ) -> PluginSummary:
-    repositories = await _grantable(viewer.login, body.repositories)
-    await PluginInstallations.set_repositories(installation.id, repositories, by=viewer.user_id)
+    """Share repositories with the plugin, for the viewer only: what they picked when it asked."""
+    repositories = await _shareable(viewer.login, body.repositories)
+    await PluginInstallations.share(plugin.installation.id, viewer.user_id, repositories)
     with _as_http():
-        return PluginSummary.of(await PluginInstallations.get(installation.id, viewer.user_id))
+        return PluginSummary.of(
+            await PluginInstallations.get(plugin.installation.id, viewer.user_id)
+        )
+
+
+@router.delete("/{installation_id}/repositories/{owner}/{repo}")
+@audit_endpoint
+async def api_unshare_plugin_repository(
+    owner: str, repo: str, plugin: PluginDep, viewer: ViewerDep
+) -> PluginSummary:
+    await PluginInstallations.unshare(
+        plugin.installation.id, viewer.user_id, f"{owner}/{repo}".lower()
+    )
+    with _as_http():
+        return PluginSummary.of(
+            await PluginInstallations.get(plugin.installation.id, viewer.user_id)
+        )
 
 
 @router.delete("/{installation_id}", status_code=204)

@@ -13,10 +13,15 @@ import { ShieldCheckIcon } from "@phosphor-icons/react/dist/ssr/ShieldCheck"
 import { Link, useNavigate } from "@tanstack/react-router"
 
 import { PluginFrame } from "@/features/plugins/components/PluginFrame"
+import { RepositoryPicker } from "@/features/plugins/components/RepositoryPicker"
 import type { InstalledPlugin } from "@/features/plugins/lib/api"
 import { useApproval } from "@/features/plugins/lib/approval"
 import { PluginIcon } from "@/features/plugins/lib/icons"
-import { usePlugin, usePluginBundle } from "@/features/plugins/lib/queries"
+import {
+  usePlugin,
+  usePluginBundle,
+  useSharePluginRepositories,
+} from "@/features/plugins/lib/queries"
 
 export function PluginPage({ name, path }: { name: string; path: string }) {
   const { plugin, isPending, error } = usePlugin(name)
@@ -68,9 +73,12 @@ function InstalledPluginPage({
   const navigate = useNavigate()
   const bundle = usePluginBundle(plugin)
   const approval = useApproval()
+  const share = useSharePluginRepositories()
   const thread =
     approval.shown?.kind === "thread" ? approval.shown.request : null
   const link = approval.shown?.kind === "link" ? approval.shown.url : null
+  const picking =
+    approval.shown?.kind === "repositories" ? approval.shown.pick : null
   const source = [plugin.source.repository, plugin.source.path]
     .filter(Boolean)
     .join("/")
@@ -117,8 +125,21 @@ function InstalledPluginPage({
           openThread={(threadId) =>
             void navigate({ to: "/agents/$threadId", params: { threadId } })
           }
-          confirmLink={(url) => approval.ask({ kind: "link", url })}
-          confirmThread={(request) => approval.ask({ kind: "thread", request })}
+          confirmLink={async (url) =>
+            (await approval.ask({ kind: "link", url })) !== null
+          }
+          confirmThread={async (request) =>
+            (await approval.ask({ kind: "thread", request })) !== null
+          }
+          pickRepositories={async (pick) => {
+            const chosen = await approval.ask({ kind: "repositories", pick })
+            if (!Array.isArray(chosen) || chosen.length === 0) return []
+            const updated = await share.mutateAsync({
+              id: plugin.id,
+              repositories: [...chosen],
+            })
+            return chosen.filter((repo) => updated.repositories.includes(repo))
+          }}
         />
       ) : bundle.error ? (
         <div className="flex flex-1 items-center justify-center p-space-5">
@@ -133,7 +154,7 @@ function InstalledPluginPage({
       )}
       <Dialog
         open={thread !== null}
-        onOpenChange={(open) => !open && approval.answer(false)}
+        onOpenChange={(open) => !open && approval.answer(null)}
       >
         <DialogContent
           childrenClassName="gap-space-4 p-space-6"
@@ -161,7 +182,7 @@ function InstalledPluginPage({
             <Button
               size="sm"
               variant="outlined"
-              onClick={() => approval.answer(false)}
+              onClick={() => approval.answer(null)}
             >
               Cancel
             </Button>
@@ -175,9 +196,15 @@ function InstalledPluginPage({
           </div>
         </DialogContent>
       </Dialog>
+      <RepositoryPicker
+        plugin={plugin}
+        pick={picking}
+        armed={approval.armed}
+        onAnswer={approval.answer}
+      />
       <Dialog
         open={link !== null}
-        onOpenChange={(open) => !open && approval.answer(false)}
+        onOpenChange={(open) => !open && approval.answer(null)}
       >
         <DialogContent
           childrenClassName="gap-space-4 p-space-6"
@@ -195,7 +222,7 @@ function InstalledPluginPage({
             <Button
               size="sm"
               variant="outlined"
-              onClick={() => approval.answer(false)}
+              onClick={() => approval.answer(null)}
             >
               Cancel
             </Button>

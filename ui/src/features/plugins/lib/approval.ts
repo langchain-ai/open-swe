@@ -1,11 +1,18 @@
 import { useRef, useState } from "react"
 
-import type { ThreadRequest } from "@/features/plugins/lib/bridge"
+import type {
+  RepositoryPick,
+  ThreadRequest,
+} from "@/features/plugins/lib/bridge"
 import { BridgeRequestError } from "@/features/plugins/lib/bridge"
 
 export type Approval =
   | { kind: "thread"; request: ThreadRequest }
   | { kind: "link"; url: string }
+  | { kind: "repositories"; pick: RepositoryPick }
+
+/** Approving a request, or the repositories picked; `null` declines. */
+export type Answer = true | ReadonlyArray<string>
 
 /** How long the approve button stays disabled once a request is shown. */
 const ARM_DELAY_MS = 600
@@ -19,12 +26,12 @@ const ARM_DELAY_MS = 600
 export function useApproval() {
   const open = useRef<{
     approval: Approval
-    resolve: (ok: boolean) => void
+    resolve: (answer: Answer | null) => void
   } | null>(null)
   const [shown, setShown] = useState<Approval | null>(null)
   const [armed, setArmed] = useState(false)
 
-  const ask = (approval: Approval): Promise<boolean> => {
+  const ask = (approval: Approval): Promise<Answer | null> => {
     if (open.current)
       return Promise.reject(
         new BridgeRequestError("Another request is waiting for an answer", 409)
@@ -37,11 +44,11 @@ export function useApproval() {
     })
   }
 
-  const answer = (ok: boolean) => {
+  const answer = (value: Answer | null) => {
     const held = open.current
     open.current = null
     setShown(null)
-    held?.resolve(ok)
+    held?.resolve(value)
   }
 
   return { shown, armed, ask, answer }

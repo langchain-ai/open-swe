@@ -1,10 +1,10 @@
 """An installed plugin acting for the person using it, within what they granted.
 
 Plugin code never reaches the backend itself: the dashboard relays each call
-from the plugin's sandboxed frame here. Every call is checked twice, against the
-permissions the plugin's manifest was installed with and its repositories, and
-against what the person may do themselves, so a plugin can never exceed the
-person using it.
+from the plugin's sandboxed frame here. Every call is checked twice: against the
+permissions the plugin's manifest was installed with and the repositories this
+person shared with it, and against what the person may do themselves, so a
+plugin can never exceed the person using it.
 """
 
 from collections.abc import AsyncIterator
@@ -31,7 +31,7 @@ class PluginPermissionDenied(PermissionError):
 
 class RepositoryNotGranted(PermissionError):
     def __init__(self, repository: str) -> None:
-        super().__init__(f"The plugin may not reach {repository}")
+        super().__init__(f"{repository} is not shared with the plugin")
 
 
 async def can_read_repository(login: str, repository: str) -> bool:
@@ -58,7 +58,7 @@ class InstalledPlugin:
             raise PluginPermissionDenied(permissions[0])
 
     async def repository(self, raw: str) -> RepoFullName:
-        """``raw`` as ``owner/repo``, when both the plugin and the person may reach it."""
+        """``raw`` as ``owner/repo``, when the person shared it with the plugin and can read it."""
         try:
             name = RepoFullName(normalize_repo_full_name(raw).lower())
         except ValueError as exc:

@@ -9,8 +9,8 @@ from typing import Literal
 from uuid import UUID, uuid7
 
 from pydantic import ValidationError
-from sqlalchemy import ColumnElement, ForeignKey, Text, delete, func, or_, select, update
-from sqlalchemy.dialects.postgresql import ARRAY, JSONB, insert
+from sqlalchemy import ColumnElement, ForeignKey, Text, cast, delete, func, or_, select, update
+from sqlalchemy.dialects.postgresql import ARRAY, JSONB, aggregate_order_by, array, insert
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import Mapped, mapped_column
@@ -67,7 +67,25 @@ class PluginInstallationRow(Base):
     commit_sha: Mapped[str]
     manifest: Mapped[JsonObject] = mapped_column(JSONB)
     bundle: Mapped[UUID] = mapped_column(ForeignKey("plugin_bundle.id"))
-    repositories: Mapped[list[str]] = mapped_column(ARRAY(Text))
+    id: Mapped[UUID] = mapped_column(primary_key=True, default_factory=uuid7)
+    created_at: Mapped[datetime | None] = mapped_column(server_default=NOW, init=False)
+    updated_at: Mapped[datetime | None] = mapped_column(server_default=NOW, init=False)
+    created_by: Mapped[UUID | None] = mapped_column(
+        ForeignKey("users.id", ondelete="SET NULL"), default=None
+    )
+    updated_by: Mapped[UUID | None] = mapped_column(
+        ForeignKey("users.id", ondelete="SET NULL"), default=None
+    )
+
+
+class PluginRepositoryGrantRow(Base):
+    __tablename__ = "plugin_repository_grant"
+
+    installation: Mapped[UUID] = mapped_column(
+        ForeignKey("plugin_installation.id", ondelete="CASCADE")
+    )
+    user_id: Mapped[UUID] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"))
+    repository: Mapped[str]
     id: Mapped[UUID] = mapped_column(primary_key=True, default_factory=uuid7)
     created_at: Mapped[datetime | None] = mapped_column(server_default=NOW, init=False)
     updated_at: Mapped[datetime | None] = mapped_column(server_default=NOW, init=False)
@@ -129,7 +147,10 @@ class InstallationNotFound(LookupError):
 
 @dataclass(frozen=True, slots=True)
 class Installation:
-    """One install of a plugin, for one person or (``user_id`` ``None``) everyone."""
+    """One install of a plugin, for one person or (``user_id`` ``None``) everyone, as one person sees it.
+
+    ``repositories`` are the ones that person shared with it.
+    """
 
     id: UUID
     plugin: UUID
@@ -145,10 +166,27 @@ class Installation:
         return "organization" if self.user_id is None else "user"
 
 
-_INSTALLATION_COLUMNS = (PluginInstallationRow, PluginRow.repository, PluginRow.path)
+def _granted_by(user_id: UUID) -> ColumnElement[list[str]]:
+    return func.coalesce(
+        select(
+            func.array_agg(
+                aggregate_order_by(
+                    PluginRepositoryGrantRow.repository, PluginRepositoryGrantRow.repository
+                )
+            )
+        )
+        .where(
+            PluginRepositoryGrantRow.installation == PluginInstallationRow.id,
+            PluginRepositoryGrantRow.user_id == user_id,
+        )
+        .scalar_subquery(),
+        cast(array([], type_=Text), ARRAY(Text)),
+    )
 
 
-def _installation(row: PluginInstallationRow, repository: str, path: str) -> Installation:
+def _installation(
+    row: PluginInstallationRow, repository: str, path: str, repositories: Sequence[str]
+) -> Installation:
     return Installation(
         id=row.id,
         plugin=row.plugin,
@@ -156,7 +194,7 @@ def _installation(row: PluginInstallationRow, repository: str, path: str) -> Ins
         source=PluginSource(RepoFullName(repository), path, row.ref),
         commit_sha=row.commit_sha,
         manifest=PluginManifest.model_validate(row.manifest),
-        repositories=tuple(row.repositories),
+        repositories=tuple(repositories),
         created_at=row.created_at,
     )
 
@@ -169,7 +207,12 @@ class PluginInstallations:
         """The person's own installs and everyone's; an install for everyone wins a name."""
         async with postgres.session() as session:
             rows = await session.execute(
-                select(*_INSTALLATION_COLUMNS)
+                select(
+                    PluginInstallationRow,
+                    PluginRow.repository,
+                    PluginRow.path,
+                    _granted_by(user_id),
+                )
                 .join(PluginRow, PluginRow.id == PluginInstallationRow.plugin)
                 .where(
                     or_(
@@ -180,9 +223,9 @@ class PluginInstallations:
                 .order_by(PluginInstallationRow.created_at)
             )
         by_name: dict[str, Installation] = {}
-        for row, repository, path in rows:
+        for row, repository, path, repositories in rows:
             try:
-                installation = _installation(row, repository, path)
+                installation = _installation(row, repository, path, repositories)
             except ValidationError:
                 logger.warning(
                     "Skipping plugin installation with an unreadable manifest",
@@ -223,7 +266,6 @@ class PluginInstallations:
         package: PluginPackage,
         *,
         user_id: UUID | None,
-        repositories: Sequence[str],
         by: UUID,
     ) -> UUID:
         """Install ``package`` for ``user_id``, or everyone when ``None``."""
@@ -237,7 +279,6 @@ class PluginInstallations:
                 commit_sha=package.commit_sha,
                 manifest=package.manifest.model_dump(mode="json", by_alias=True),
                 bundle=bundle,
-                repositories=list(repositories),
                 created_by=by,
                 updated_by=by,
             )
@@ -267,17 +308,37 @@ class PluginInstallations:
             )
 
     @staticmethod
-    async def set_repositories(
-        installation_id: UUID, repositories: Sequence[str], *, by: UUID
-    ) -> None:
+    async def share(installation_id: UUID, user_id: UUID, repositories: Sequence[str]) -> None:
+        """Let the install reach ``repositories`` for ``user_id``, who chose them."""
+        if not repositories:
+            return
         async with postgres.session() as session:
             await session.execute(
-                update(PluginInstallationRow)
-                .where(PluginInstallationRow.id == installation_id)
+                insert(PluginRepositoryGrantRow)
                 .values(
-                    repositories=list(repositories),
-                    updated_at=func.clock_timestamp(),
-                    updated_by=by,
+                    [
+                        {
+                            "id": uuid7(),
+                            "installation": installation_id,
+                            "user_id": user_id,
+                            "repository": repository,
+                            "created_by": user_id,
+                            "updated_by": user_id,
+                        }
+                        for repository in repositories
+                    ]
+                )
+                .on_conflict_do_nothing()
+            )
+
+    @staticmethod
+    async def unshare(installation_id: UUID, user_id: UUID, repository: str) -> None:
+        async with postgres.session() as session:
+            await session.execute(
+                delete(PluginRepositoryGrantRow).where(
+                    PluginRepositoryGrantRow.installation == installation_id,
+                    PluginRepositoryGrantRow.user_id == user_id,
+                    PluginRepositoryGrantRow.repository == repository,
                 )
             )
 

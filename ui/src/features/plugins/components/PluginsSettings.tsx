@@ -19,7 +19,6 @@ import { useState } from "react"
 import { toast } from "sonner"
 
 import { SettingsSection } from "@/components/AppShell"
-import { RepoSelector } from "@/features/settings/components/RepoSelector"
 import type {
   CatalogItem,
   InstalledPlugin,
@@ -32,11 +31,10 @@ import {
   useInstallPlugin,
   usePluginCatalog,
   usePlugins,
-  useSetPluginRepositories,
   useUninstallPlugin,
+  useUnsharePluginRepository,
   useUpgradePlugin,
 } from "@/features/plugins/lib/queries"
-import { useRepos } from "@/lib/profile"
 import { useSession } from "@/lib/session"
 
 const ROW = "flex flex-col gap-space-3 p-space-4"
@@ -60,7 +58,7 @@ function InstalledPlugins() {
   return (
     <SettingsSection
       title="Installed"
-      description="Each plugin opens from the sidebar and runs in a sandbox that blocks its own requests. It acts as you only through the permissions and repositories listed here."
+      description="Each plugin opens from the sidebar and runs in a sandbox that blocks its own requests. It acts as you only through the permissions listed here, in the repositories you shared with it."
     >
       {plugins.isPending ? (
         <div className={ROW}>
@@ -90,7 +88,7 @@ function InstalledPluginRow({
   plugin: InstalledPlugin
   editable: boolean
 }) {
-  const setRepositories = useSetPluginRepositories()
+  const unshare = useUnsharePluginRepository()
   const uninstall = useUninstallPlugin()
   const upgrade = useUpgradePlugin()
   const [newPermissions, setNewPermissions] =
@@ -177,11 +175,10 @@ function InstalledPluginRow({
         )}
       </div>
       <PermissionList permissions={plugin.manifest.permissions} />
-      <RepositoryGrants
+      <SharedRepositories
         repositories={plugin.repositories}
-        editable={editable}
-        onChange={(repositories) =>
-          setRepositories.mutate({ id: plugin.id, repositories })
+        onUnshare={(repository) =>
+          unshare.mutate({ id: plugin.id, repository })
         }
       />
       <Dialog
@@ -247,84 +244,39 @@ function PermissionList({
   )
 }
 
-function RepositoryGrants({
+/** What the viewer shared with the plugin when it asked; each person has their own. */
+function SharedRepositories({
   repositories,
-  editable,
-  onChange,
+  onUnshare,
 }: {
   repositories: ReadonlyArray<string>
-  editable: boolean
-  onChange: (repositories: Array<string>) => void
+  onUnshare: (repository: string) => void
 }) {
-  const repos = useRepos()
-  const [typed, setTyped] = useState("")
-  const options = repos.data?.repositories?.filter(
-    (repo) => !repositories.includes(repo.full_name.toLowerCase())
-  )
-  const add = (repo: string) => {
-    const name = repo.trim().toLowerCase()
-    if (/^[^/\s]+\/[^/\s]+$/.test(name) && !repositories.includes(name))
-      onChange([...repositories, name])
-  }
   return (
     <div className="flex flex-wrap items-center gap-space-1">
-      <span className="mr-space-1 text-xs text-secondary">Repositories:</span>
+      <span className="mr-space-1 text-xs text-secondary">
+        Repositories you shared:
+      </span>
       {repositories.length === 0 && (
-        <span className="text-xs text-secondary">none</span>
+        <span className="text-xs text-secondary">
+          none yet; it asks when it needs one
+        </span>
       )}
       {repositories.map((repository) => (
         <Badge key={repository} size="xs" color="plain">
           <span className="flex items-center gap-space-1">
             {repository}
-            {editable && (
-              <button
-                type="button"
-                aria-label={`Remove ${repository}`}
-                className="text-icon-secondary hover:text-primary"
-                onClick={() =>
-                  onChange(repositories.filter((name) => name !== repository))
-                }
-              >
-                <XIcon size={10} />
-              </button>
-            )}
+            <button
+              type="button"
+              aria-label={`Stop sharing ${repository}`}
+              className="text-icon-secondary hover:text-primary"
+              onClick={() => onUnshare(repository)}
+            >
+              <XIcon size={10} />
+            </button>
           </span>
         </Badge>
       ))}
-      {editable && options && options.length > 0 && (
-        <RepoSelector
-          repos={options}
-          onRepoChange={(repo) => repo && add(repo)}
-          placeholder="Add repository"
-          triggerClassName="h-6 text-xs"
-        />
-      )}
-      {editable && (
-        <form
-          className="flex items-center gap-space-1"
-          onSubmit={(event) => {
-            event.preventDefault()
-            add(typed)
-            setTyped("")
-          }}
-        >
-          <input
-            aria-label="Repository to add"
-            className="h-6 w-40 rounded-md border border-default bg-transparent px-space-2 text-xs text-primary"
-            placeholder="owner/repo"
-            value={typed}
-            onChange={(event) => setTyped(event.target.value)}
-          />
-          <Button
-            type="submit"
-            size="xs"
-            variant="outlined"
-            disabled={!typed.trim()}
-          >
-            Add
-          </Button>
-        </form>
-      )}
     </div>
   )
 }
@@ -464,10 +416,6 @@ function InstallDialog({
   const admin = useSession().data?.is_admin === true
   const install = useInstallPlugin()
   const [scope, setScope] = useState<"user" | "organization">("user")
-  const [repositories, setRepositories] = useState<Array<string>>([])
-  const needsRepositories = item.manifest.permissions.some(
-    (permission) => permission !== "storage"
-  )
 
   return (
     <Dialog open onOpenChange={(open) => !open && onClose()}>
@@ -480,21 +428,12 @@ function InstallDialog({
           From{" "}
           {[item.source.repository, item.source.path].filter(Boolean).join("/")}
           . It runs in a sandbox that blocks its own requests, and acts as you
-          only through what you allow here.
+          only through what you allow here. It reaches no repository until you
+          pick one when it asks.
         </DialogDescription>
         <div className="flex flex-col gap-space-2">
           <span className="text-xs font-medium text-primary">It can</span>
           <PermissionList permissions={item.manifest.permissions} />
-        </div>
-        <div className="flex flex-col gap-space-2">
-          <span className="text-xs font-medium text-primary">
-            In these repositories
-          </span>
-          <RepositoryGrants
-            repositories={repositories}
-            editable
-            onChange={setRepositories}
-          />
         </div>
         {admin && (
           <label className="flex items-center gap-space-2 text-xs text-primary">
@@ -505,7 +444,8 @@ function InstallDialog({
                 setScope(event.target.checked ? "organization" : "user")
               }
             />
-            Install for everyone in this Open SWE
+            Install for everyone in this Open SWE; each person picks their own
+            repositories
           </label>
         )}
         <div className="flex justify-end gap-space-2">
@@ -515,7 +455,6 @@ function InstallDialog({
           <Button
             size="sm"
             loading={install.isPending}
-            disabled={needsRepositories && repositories.length === 0}
             onClick={() =>
               install.mutate(
                 {
@@ -525,7 +464,6 @@ function InstallDialog({
                   scope,
                   name: item.manifest.name,
                   permissions: item.manifest.permissions,
-                  repositories,
                 },
                 {
                   onSuccess: (installed) => {

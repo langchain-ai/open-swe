@@ -1,5 +1,5 @@
 import { Button } from "@langchain/macaw-components/Button"
-import { useHostContext } from "@openswe/plugin-sdk/react"
+import { IconButton } from "@langchain/macaw-components/IconButton"
 import { CaretDownIcon } from "@phosphor-icons/react/dist/ssr/CaretDown"
 import { CaretRightIcon } from "@phosphor-icons/react/dist/ssr/CaretRight"
 import { FileTextIcon } from "@phosphor-icons/react/dist/ssr/FileText"
@@ -8,7 +8,9 @@ import { PlusIcon } from "@phosphor-icons/react/dist/ssr/Plus"
 import { useNavigate, useParams } from "@tanstack/react-router"
 import { useMemo, useState } from "react"
 
+import { useOpenPickedRepository } from "@/components/ShareRepository"
 import { isHidden, isMarkdown, pageTitle, type Draft } from "@/lib/model"
+import { useRepositories } from "@/lib/queries"
 
 interface Folder {
   name: string
@@ -50,7 +52,8 @@ export function Sidebar({
   drafts: Map<string, Draft>
   truncated: boolean
 }) {
-  const { plugin } = useHostContext()
+  const repositories = useRepositories().data ?? [repository]
+  const share = useOpenPickedRepository()
   const navigate = useNavigate()
   const params = useParams({ strict: false }) as { _splat?: string }
   const current = params._splat ?? null
@@ -80,21 +83,34 @@ export function Sidebar({
 
   return (
     <nav className="flex w-64 shrink-0 flex-col gap-space-2 border-r border-default bg-surface-level-1 p-space-2 max-sm:hidden">
-      <select
-        aria-label="Repository"
-        className="h-8 truncate rounded-md border border-default bg-transparent py-0 pr-space-6 pl-space-2 text-sm leading-8 text-primary"
-        value={repository}
-        onChange={(event) => {
-          const [o = "", r = ""] = event.target.value.split("/")
-          void navigate({ to: "/$owner/$repo", params: { owner: o, repo: r } })
-        }}
-      >
-        {plugin.repositories.map((name) => (
-          <option key={name} value={name}>
-            {name}
-          </option>
-        ))}
-      </select>
+      <div className="flex items-center gap-space-1">
+        <select
+          aria-label="Repository"
+          className="h-8 min-w-0 flex-1 truncate rounded-md border border-default bg-transparent py-0 pr-space-6 pl-space-2 text-sm leading-8 text-primary"
+          value={repository}
+          onChange={(event) => {
+            const [o = "", r = ""] = event.target.value.split("/")
+            void navigate({
+              to: "/$owner/$repo",
+              params: { owner: o, repo: r },
+            })
+          }}
+        >
+          {repositories.map((name) => (
+            <option key={name} value={name}>
+              {name}
+            </option>
+          ))}
+        </select>
+        <IconButton
+          icon={PlusIcon}
+          label="Open another repository"
+          size="sm"
+          variant="outlined"
+          loading={share.pending}
+          onClick={() => share.open()}
+        />
+      </div>
       <label className="flex h-8 items-center gap-space-2 rounded-md border border-default px-space-2">
         <MagnifyingGlassIcon size={14} className="text-icon-secondary" />
         <input

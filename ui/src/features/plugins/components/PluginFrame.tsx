@@ -17,7 +17,11 @@ import { SandboxedHtmlFrame } from "@/features/agents/components/SandboxedHtmlFr
 import type { InstalledPlugin } from "@/features/plugins/lib/api"
 import { pluginsApi } from "@/features/plugins/lib/api"
 import { PluginRooms } from "@/features/plugins/lib/rooms"
-import type { BridgeHost, ThreadRequest } from "@/features/plugins/lib/bridge"
+import type {
+  BridgeHost,
+  RepositoryPick,
+  ThreadRequest,
+} from "@/features/plugins/lib/bridge"
 import {
   BridgeRequestError,
   handleBridgeRequest,
@@ -60,6 +64,7 @@ export function PluginFrame({
   openThread,
   confirmThread,
   confirmLink,
+  pickRepositories,
 }: {
   plugin: InstalledPlugin
   html: string
@@ -68,6 +73,7 @@ export function PluginFrame({
   openThread: (threadId: string) => void
   confirmThread: (request: ThreadRequest) => Promise<boolean>
   confirmLink: (url: string) => Promise<boolean>
+  pickRepositories: (pick: RepositoryPick) => Promise<Array<string>>
 }) {
   const session = useSession()
   const theme = useResolvedTheme()
@@ -108,7 +114,6 @@ export function PluginFrame({
       displayName: plugin.manifest.displayName,
       version: plugin.manifest.version,
       permissions: plugin.manifest.permissions,
-      repositories: plugin.repositories,
     },
     user: me.data ?? { login, name: login, avatar: null },
     theme,
@@ -133,6 +138,7 @@ export function PluginFrame({
     },
     confirmThread,
     confirmLink,
+    pickRepositories,
     watch: (repository) =>
       setWatched((prev) =>
         prev.includes(repository) ? prev : [...prev, repository]

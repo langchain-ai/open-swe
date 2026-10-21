@@ -30,6 +30,12 @@ export interface ThreadRequest {
   request: string
 }
 
+export interface RepositoryPick {
+  /** Lowercase `owner/repo` names the plugin would like chosen. */
+  suggested: Array<string>
+  multiple: boolean
+}
+
 /** What a request may do in the dashboard beyond calling the backend. */
 export interface BridgeHost {
   plugin: InstalledPlugin
@@ -40,6 +46,8 @@ export interface BridgeHost {
   confirmThread: (request: ThreadRequest) => Promise<boolean>
   /** Asks before leaving for a site other than GitHub; resolves whether to go. */
   confirmLink: (url: string) => Promise<boolean>
+  /** Shows the person a picker and shares what they choose; resolves to it, `[]` if they cancel. */
+  pickRepositories: (pick: RepositoryPick) => Promise<Array<string>>
   watch: (repository: string | null) => void
   unwatch: (repository: string | null) => void
   joinRoom: (target: RoomTarget, after: number) => void
@@ -206,6 +214,32 @@ const handlers: Handlers = {
     if (logins.length === 0 || logins.length > 100)
       throw new BridgeRequestError("logins must name 1 to 100 people", 400)
     return pluginsApi.people(host.plugin.id, logins)
+  },
+  "repositories.list": async (host) => [...host.plugin.repositories],
+  "repositories.pick": async (host, params) => {
+    const suggested = [
+      ...new Set(
+        stringList(params, "suggested").map((name) => {
+          if (
+            !REPOSITORY.test(name) ||
+            name.split("/").some((part) => part === "." || part === "..")
+          )
+            throw new BridgeRequestError("suggested must be owner/repo", 400)
+          return name.toLowerCase()
+        })
+      ),
+    ]
+    if (suggested.length > 20)
+      throw new BridgeRequestError("suggest at most 20 repositories", 400)
+    if (
+      suggested.length > 0 &&
+      suggested.every((name) => host.plugin.repositories.includes(name))
+    )
+      return suggested
+    return host.pickRepositories({
+      suggested,
+      multiple: params.multiple === true,
+    })
   },
   "ui.toast": async (host, params) => {
     const intent = params.intent

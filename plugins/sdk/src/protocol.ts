@@ -45,8 +45,6 @@ export interface HostContext {
     displayName: string
     version: string
     permissions: PluginPermission[]
-    /** The GitHub repositories (`owner/repo`, lowercase) the plugin may reach. */
-    repositories: string[]
   }
   /** The person using the plugin. */
   user: Person
@@ -131,6 +129,21 @@ export interface HostMethods {
   "nav.openExternal": { params: { url: string }; result: null }
   /** Profiles for GitHub logins, in the order asked; at most 100 per call. */
   "people.get": { params: { logins: string[] }; result: Person[] }
+  /**
+   * The GitHub repositories (`owner/repo`, lowercase) the person shared with
+   * the plugin. It reaches no other: a call naming one fails with status 403.
+   */
+  "repositories.list": { params: Record<string, never>; result: string[] }
+  /**
+   * Asks the person to share repositories, in a picker the dashboard draws
+   * from those they can read. Resolves to the ones they chose, or `[]` when
+   * they cancel. `suggested` come preselected, such as one a shared link
+   * names; when they are already shared it resolves at once, without asking.
+   */
+  "repositories.pick": {
+    params: { suggested?: string[]; multiple?: boolean }
+    result: string[]
+  }
   "ui.toast": {
     params: {
       title: string

@@ -124,6 +124,14 @@ export class PluginHost {
     openExternal: (url: string) => this.call("nav.openExternal", { url }),
   }
 
+  /** The repositories the person shared with the plugin, the only ones it reaches. */
+  readonly repositories = {
+    list: () => this.call("repositories.list", {}),
+    /** Asks the person to choose repositories to share; `[]` when they cancel. */
+    pick: (options: ParamsOf<"repositories.pick"> = {}) =>
+      this.call("repositories.pick", options),
+  }
+
   /** Profiles (name, picture) for GitHub logins, cached for this frame's life. */
   readonly people = {
     get: async (logins: string[]): Promise<Person[]> => {

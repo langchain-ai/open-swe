@@ -7,7 +7,7 @@ import { useApproval } from "@/features/plugins/lib/approval"
 describe("useApproval", () => {
   it("refuses a second request while one is shown, so it cannot be swapped", async () => {
     const { result } = renderHook(() => useApproval())
-    let first: Promise<boolean> | undefined
+    let first: Promise<unknown> | undefined
     act(() => {
       first = result.current.ask({ kind: "link", url: "https://example.com/a" })
     })

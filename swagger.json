@@ -2718,14 +2718,6 @@
             ],
             "title": "Ref"
           },
-          "repositories": {
-            "items": {
-              "type": "string"
-            },
-            "maxItems": 50,
-            "title": "Repositories",
-            "type": "array"
-          },
           "repository": {
             "title": "Repository",
             "type": "string"
@@ -5797,6 +5789,7 @@
               "type": "string"
             },
             "maxItems": 50,
+            "minItems": 1,
             "title": "Repositories",
             "type": "array"
           }
@@ -14901,8 +14894,9 @@
       }
     },
     "/dashboard/api/plugins/{installation_id}/repositories": {
-      "put": {
-        "operationId": "api_set_plugin_repositories_dashboard_api_plugins__installation_id__repositories_put",
+      "post": {
+        "description": "Share repositories with the plugin, for the viewer only: what they picked when it asked.",
+        "operationId": "api_share_plugin_repositories_dashboard_api_plugins__installation_id__repositories_post",
         "parameters": [
           {
             "in": "path",
@@ -14952,7 +14946,74 @@
             "DashboardSession": []
           }
         ],
-        "summary": "Api Set Plugin Repositories",
+        "summary": "Api Share Plugin Repositories",
+        "tags": [
+          "dashboard",
+          "plugins"
+        ]
+      }
+    },
+    "/dashboard/api/plugins/{installation_id}/repositories/{owner}/{repo}": {
+      "delete": {
+        "operationId": "api_unshare_plugin_repository_dashboard_api_plugins__installation_id__repositories__owner___repo__delete",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "owner",
+            "required": true,
+            "schema": {
+              "title": "Owner",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "repo",
+            "required": true,
+            "schema": {
+              "title": "Repo",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "installation_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Installation Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PluginSummary"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "DashboardSession": []
+          }
+        ],
+        "summary": "Api Unshare Plugin Repository",
         "tags": [
           "dashboard",
           "plugins"

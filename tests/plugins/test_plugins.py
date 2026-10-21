@@ -56,13 +56,9 @@ async def _person(login: str, external_id: str) -> UUID:
 
 async def test_documents_stay_in_their_plugin_and_scope() -> None:
     ada, bob = await _person("ada", "1"), await _person("bob", "2")
-    first = await PluginInstallations.install(
-        _package("acme/docs"), user_id=ada, repositories=["acme/app"], by=ada
-    )
+    first = await PluginInstallations.install(_package("acme/docs"), user_id=ada, by=ada)
     # The same name from another repository is another plugin with its own data.
-    impostor = await PluginInstallations.install(
-        _package("evil/docs"), user_id=bob, repositories=["acme/app"], by=bob
-    )
+    impostor = await PluginInstallations.install(_package("evil/docs"), user_id=bob, by=bob)
     docs = PluginDocuments((await PluginInstallations.get(first, ada)).plugin)
     other = PluginDocuments((await PluginInstallations.get(impostor, bob)).plugin)
     shared = DocumentScope(repository="acme/app")
@@ -80,16 +76,10 @@ async def test_documents_stay_in_their_plugin_and_scope() -> None:
 
 async def test_a_name_installed_for_everyone_wins_and_cannot_be_installed_twice() -> None:
     ada = await _person("ada", "1")
-    own = await PluginInstallations.install(
-        _package("acme/docs"), user_id=ada, repositories=[], by=ada
-    )
+    own = await PluginInstallations.install(_package("acme/docs"), user_id=ada, by=ada)
     with pytest.raises(PluginNameTaken):
-        await PluginInstallations.install(
-            _package("other/docs"), user_id=ada, repositories=[], by=ada
-        )
-    everyone = await PluginInstallations.install(
-        _package("acme/docs"), user_id=None, repositories=[], by=ada
-    )
+        await PluginInstallations.install(_package("other/docs"), user_id=ada, by=ada)
+    everyone = await PluginInstallations.install(_package("acme/docs"), user_id=None, by=ada)
 
     visible = await PluginInstallations.visible_to(ada)
 
@@ -101,17 +91,17 @@ def _installed(installation: Installation, user_id: UUID) -> InstalledPlugin:
     return InstalledPlugin(installation=installation, login="ada", email=None, user_id=user_id)
 
 
-async def test_plugin_reaches_only_granted_repositories_the_person_can_read(
+async def test_plugin_reaches_only_repositories_the_person_shared_and_can_read(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    ada = await _person("ada", "1")
+    ada, bob = await _person("ada", "1"), await _person("bob", "2")
     installation_id = await PluginInstallations.install(
-        _package("acme/docs", permissions=["storage", "github:read"]),
-        user_id=ada,
-        repositories=["acme/app", "acme/secret"],
-        by=ada,
+        _package("acme/docs", permissions=["storage", "github:read"]), user_id=None, by=ada
     )
+    await PluginInstallations.share(installation_id, ada, ["acme/app", "acme/secret"])
     plugin = _installed(await PluginInstallations.get(installation_id, ada), ada)
+    # Ada's picks are hers: the same install reaches nothing for Bob until he picks.
+    for_bob = _installed(await PluginInstallations.get(installation_id, bob), bob)
 
     async def readable(_login: str, repository: str) -> bool:
         return repository != "acme/secret"
@@ -119,6 +109,8 @@ async def test_plugin_reaches_only_granted_repositories_the_person_can_read(
     monkeypatch.setattr(installed_module, "can_read_repository", readable)
 
     assert await plugin.repository("Acme/App") == "acme/app"
+    with pytest.raises(RepositoryNotGranted):
+        await for_bob.repository("acme/app")
     with pytest.raises(RepositoryNotGranted):
         await plugin.repository("acme/web")
     with pytest.raises(RepositoryNotGranted):
@@ -131,9 +123,7 @@ async def test_plugin_reaches_only_granted_repositories_the_person_can_read(
 
 async def test_compacting_a_room_keeps_what_came_after() -> None:
     ada = await _person("ada", "1")
-    installation_id = await PluginInstallations.install(
-        _package("acme/docs"), user_id=ada, repositories=[], by=ada
-    )
+    installation_id = await PluginInstallations.install(_package("acme/docs"), user_id=ada, by=ada)
     plugin = (await PluginInstallations.get(installation_id, ada)).plugin
     room = Room(plugin, DocumentScope(repository="acme/app"), "draft/page.md")
     other = Room(plugin, DocumentScope(repository="acme/web"), "draft/page.md")
