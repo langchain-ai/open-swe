@@ -4,7 +4,6 @@ from unittest.mock import AsyncMock
 import pytest
 from fastapi import HTTPException
 
-from openswe.sandboxes.browsers import LangSmithBrowser
 from openswe.threads import (
     access,
     blobs,
@@ -14,9 +13,7 @@ from openswe.threads import (
     summary,
     workflow_approval_api,
 )
-from openswe.threads import browser as thread_browser
 from openswe.tools import threads as tools
-from openswe.ui_invalidations.topics import Topic
 
 _ADMINS = {"admin", "admin@example.com"}
 
@@ -175,62 +172,6 @@ async def test_owner_can_publish_thread_without_retaining_admin_capabilities(
     mirror.assert_awaited_once_with(
         "private-thread", client.threads.update.call_args.kwargs["metadata"]
     )
-
-
-_OWNER_BROWSER = {"scope": "user", "browser": "browser-1", "window": "w1"}
-
-
-async def test_sharing_closes_the_owners_own_browser_window(private_thread, monkeypatch):
-    thread, client = private_thread
-    thread["metadata"]["browser_window"] = dict(_OWNER_BROWSER)
-    detached: list[tuple[str, str]] = []
-
-    async def detach(browser: LangSmithBrowser, window_id: str) -> None:
-        detached.append((browser.name, window_id))
-
-    monkeypatch.setattr(LangSmithBrowser, "detach", detach)
-    monkeypatch.setattr(handlers, "mirror_thread_metadata", AsyncMock())
-    monkeypatch.setattr(Topic.THREAD_BROWSERS, "invalidate", AsyncMock())
-
-    await handlers.share_thread_with_workspace("private-thread", "alice")
-
-    assert detached == [("browser-1", "w1")]
-    assert client.threads.update.call_args.kwargs["metadata"]["browser_window"] is None
-
-
-async def test_sharing_waits_for_the_owners_browser_window_to_close(private_thread, monkeypatch):
-    thread, client = private_thread
-    thread["metadata"]["browser_window"] = dict(_OWNER_BROWSER)
-    monkeypatch.setattr(
-        LangSmithBrowser, "detach", AsyncMock(side_effect=RuntimeError("LangSmith is down"))
-    )
-
-    with pytest.raises(HTTPException) as exc:
-        await handlers.share_thread_with_workspace("private-thread", "alice")
-
-    assert exc.value.status_code == 502
-    client.threads.update.assert_not_awaited()
-
-
-@pytest.mark.parametrize(
-    ("visibility", "login"), [("public", "alice"), ("public", "bob"), ("private", "bob")]
-)
-async def test_owners_browser_is_theirs_only_in_their_private_thread(
-    monkeypatch, visibility, login
-):
-    metadata = {
-        "visibility": visibility,
-        "owner_login": "alice",
-        "browser_window": dict(_OWNER_BROWSER),
-    }
-    monkeypatch.setattr(
-        thread_browser, "get_promptable_thread_metadata", AsyncMock(return_value=metadata)
-    )
-
-    with pytest.raises(HTTPException) as exc:
-        await thread_browser._thread_window("thread-1", login)
-
-    assert exc.value.status_code == 403
 
 
 @pytest.mark.parametrize(

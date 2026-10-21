@@ -4475,11 +4475,6 @@
             ],
             "title": "Pr Review Links"
           },
-          "recent_thread_context_enabled": {
-            "default": false,
-            "title": "Recent Thread Context Enabled",
-            "type": "boolean"
-          },
           "review_draft_prs": {
             "anyOf": [
               {
@@ -4495,6 +4490,13 @@
             "default": false,
             "title": "Slack Onboarding Dismissed",
             "type": "boolean"
+          },
+          "workspace_default_repos": {
+            "additionalProperties": {
+              "type": "string"
+            },
+            "title": "Workspace Default Repos",
+            "type": "object"
           }
         },
         "title": "ProfileUpdate",
@@ -7003,7 +7005,7 @@
         "title": "TextAnchor",
         "type": "object"
       },
-      "ThreadBrowser": {
+      "ThreadBrowserView": {
         "description": "A thread's browser window as the dashboard embeds it.",
         "properties": {
           "act_url": {
@@ -7015,14 +7017,6 @@
             "title": "Expires At",
             "type": "string"
           },
-          "scope": {
-            "enum": [
-              "user",
-              "workspace"
-            ],
-            "title": "Scope",
-            "type": "string"
-          },
           "tabs": {
             "items": {
               "$ref": "#/components/schemas/BrowserTab"
@@ -7032,12 +7026,11 @@
           }
         },
         "required": [
-          "scope",
           "tabs",
           "act_url",
           "expires_at"
         ],
-        "title": "ThreadBrowser",
+        "title": "ThreadBrowserView",
         "type": "object"
       },
       "ThreadComment-Input": {
@@ -8503,18 +8496,6 @@
               }
             ],
             "title": "Review Trace Links"
-          },
-          "sandbox_browser_enabled": {
-            "agent_feature_flag": true,
-            "anyOf": [
-              {
-                "type": "boolean"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Sandbox Browser Enabled"
           },
           "sandbox_openai_enabled": {
             "agent_feature_flag": true,
@@ -18614,7 +18595,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/ThreadBrowser"
+                  "$ref": "#/components/schemas/ThreadBrowserView"
                 }
               }
             },

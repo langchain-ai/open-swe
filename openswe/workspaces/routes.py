@@ -10,6 +10,7 @@ from pydantic import BaseModel
 
 from openswe.audit_logs.context import bind_workspace
 from openswe.audit_logs.middleware import audit_endpoint
+from openswe.dashboard.agent_overrides import get_profile_default_repo
 from openswe.dashboard.deps import ADMIN_DEP, SESSION_DEP, session_is_admin
 from openswe.dashboard.workspace_settings import delete_workspace_settings, get_workspace_settings
 from openswe.slack.channels import SlackChannel
@@ -104,9 +105,10 @@ async def api_create_workspace(
     return record
 
 
-async def _default_repo_for(slug: str) -> str | None:
+async def _default_repo_for(slug: str, login: str | None = None) -> str | None:
     """The repository a run composed in ``slug`` starts from when none is picked."""
-    repo = (await get_workspace_settings(slug)).default_repo
+    repo = await get_profile_default_repo(login, slug)
+    repo = repo or (await get_workspace_settings(slug)).default_repo
     if not repo:
         return None
     return f"{repo['owner']}/{repo['name']}"
@@ -122,7 +124,9 @@ async def api_workspace_options(
     the workspace is chosen first.
     """
     options = await list_workspace_options(include_logs=session_is_admin(session))
-    defaults = await asyncio.gather(*(_default_repo_for(option["slug"]) for option in options))
+    defaults = await asyncio.gather(
+        *(_default_repo_for(option["slug"], session.get("sub")) for option in options)
+    )
     for option, default_repo in zip(options, defaults, strict=True):
         option["default_repo"] = default_repo
     return {"workspaces": options, "default_slug": DEFAULT_WORKSPACE_SLUG}

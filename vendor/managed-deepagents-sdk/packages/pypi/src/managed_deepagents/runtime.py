@@ -155,6 +155,7 @@ if TYPE_CHECKING:
     from managed_deepagents._managed_tools import RuntimeBackendFactory
     from managed_deepagents._sandbox_proxy import SandboxProxyConfigSync
     from managed_deepagents.agent_entry import AgentEntry
+    from managed_deepagents.define_browser import BrowserDefinition
     from managed_deepagents.define_deep_agent import DeepAgentSubAgent, DeepAgentTool
     from managed_deepagents.define_memory import MemoryDefinition, MemoryDefinitionLike
     from managed_deepagents.identity import (
@@ -551,6 +552,7 @@ class _ManagedCompileOptions(TypedDict):
     channels: list[Channel] | None
     identity: IdentityDefinitionLike | None
     memory: MemoryDefinitionLike | None
+    browser: BrowserDefinition | None
     trial_root_dir: str | None
 
 
@@ -594,6 +596,7 @@ def compile_managed_agent(
     channels: list[Channel] | None = None,
     identity: IdentityDefinitionLike | None = None,
     memory: MemoryDefinitionLike | None = None,
+    browser: BrowserDefinition | None = None,
     trial_root_dir: str | None = None,
     runtime: ServerRuntime[ManagedRunContext] | None = None,
     run_context: object = None,
@@ -615,6 +618,7 @@ def compile_managed_agent(
             channels=channels,
             identity=identity,
             memory=memory,
+            browser=browser,
             trial_root_dir=trial_root_dir,
             runtime=runtime,
             run_context=run_context,
@@ -638,6 +642,7 @@ async def compile_managed_agent_async(
     channels: list[Channel] | None = None,
     identity: IdentityDefinitionLike | None = None,
     memory: MemoryDefinitionLike | None = None,
+    browser: BrowserDefinition | None = None,
     trial_root_dir: str | None = None,
     runtime: ServerRuntime[ManagedRunContext] | None = None,
     run_context: object = None,
@@ -682,6 +687,7 @@ async def compile_managed_agent_async(
         channels=channels,
         identity=identity,
         memory=memory,
+        browser=browser,
         trial_root_dir=trial_root_dir,
         run_context=run_context,
         is_run=is_run,
@@ -705,6 +711,7 @@ async def _compile_resolved_managed_agent_async(
     channels: list[Channel] | None = None,
     identity: IdentityDefinitionLike | None = None,
     memory: MemoryDefinitionLike | None = None,
+    browser: BrowserDefinition | None = None,
     trial_root_dir: str | None = None,
     run_context: object = None,
     is_run: bool = True,
@@ -748,6 +755,7 @@ async def _compile_resolved_managed_agent_async(
         "channels": channels,
         "identity": identity,
         "memory": run_memory,
+        "browser": browser,
         "trial_root_dir": trial_root_dir,
     }
     context_schema = definition.config.get("context_schema")
@@ -844,6 +852,7 @@ def _compile_managed_agent(
     channels: list[Channel] | None = None,
     identity: IdentityDefinitionLike | None = None,
     memory: MemoryDefinitionLike | None = None,
+    browser: BrowserDefinition | None = None,
     trial_root_dir: str | None = None,
     user_access: UserMemoryAccess,
     allow_agent: bool,
@@ -949,6 +958,8 @@ def _compile_managed_agent(
     # Save files and checkpoint their paths before credential interrupts;
     # resume deliveries do not include the original file event.
     _prepend_slack_files_middleware(merged, channels)
+    # Before the seam, so the browser's tools get the thread's sandbox backend.
+    _append_browser_middleware(merged, browser)
     _apply_runtime_seam(merged, backend_factory)
 
     # Connectors: run each connector's ``tools`` hook and append the results to
@@ -1489,6 +1500,21 @@ def _prepend_slack_files_middleware(
         ]
 
 
+def _append_browser_middleware(
+    merged: dict[str, object], browser: BrowserDefinition | None
+) -> None:
+    """Give the agent a browser when the project declares one in ``browser.py``."""
+    if browser is None:
+        return
+    from managed_deepagents.browser import BrowserMiddleware  # noqa: PLC0415
+
+    authored_middleware = merged.get("middleware")
+    merged["middleware"] = [
+        *(cast("Iterable[object]", authored_middleware) if authored_middleware else []),
+        BrowserMiddleware(scope=browser.scope, idle_ttl_seconds=browser.idle_ttl_seconds),
+    ]
+
+
 def _append_channel_response_format_middleware(merged: dict[str, object]) -> None:
     """Install managed channel response guidance after authored middleware."""
     from managed_deepagents._channels.response_format import (  # noqa: PLC0415
@@ -1606,6 +1632,20 @@ class _LazyManagedSandboxBackend(SandboxBackendProtocol):
             return f"pending:{scope}"
         except Exception:  # noqa: BLE001 — match TS pending:sandbox fallback
             return "pending:sandbox"
+
+    def opened(self) -> SandboxBackendProtocol | None:
+        """This thread's sandbox if this process opened it, by any handle; never opens one."""
+        if self._resolved_backend is not None:
+            return self._resolved_backend
+        try:
+            key = _sandbox_scope_key(
+                self._source.sandbox, self._config(), self._source.selection_fingerprint
+            )
+        except Exception:  # noqa: BLE001 — no thread, so no sandbox, as in ``id``
+            return None
+        with _managed_sandbox_lock:
+            entry = _managed_sandboxes.get(key)
+        return entry.backend if entry is not None else None
 
     def ls(self, path: str = "/") -> LsResult:
         return self._call(lambda backend: backend.ls(path))

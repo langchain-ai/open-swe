@@ -7,11 +7,6 @@ import { GlobeIcon } from "@phosphor-icons/react/dist/ssr/Globe"
 
 import { useAgentThreadBrowser } from "@/features/agents/lib/queries"
 
-const SCOPE_LABELS = {
-  user: "Your browser",
-  workspace: "Workspace browser",
-} as const
-
 /** What LangSmith's window page posts to the page that frames it. */
 type WindowMessage =
   | { type: "connection"; connected: boolean }
@@ -114,10 +109,10 @@ export function BrowserPanel({ threadId }: { threadId: string }) {
           color="secondary"
           className="min-w-0 flex-1 truncate"
         >
-          {tab?.title || tab?.url || SCOPE_LABELS[browser.data.scope]}
+          {tab?.title || tab?.url || "Browser"}
         </Text>
         <Text variant="xs" color="tertiary" className="shrink-0">
-          {SCOPE_LABELS[browser.data.scope]} · {status}
+          {status}
         </Text>
       </div>
       {control?.controller === "agent" && control.reason ? (

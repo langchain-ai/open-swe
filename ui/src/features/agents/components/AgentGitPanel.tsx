@@ -76,7 +76,7 @@ export function AgentGitPanel({
     (Boolean(thread.sandboxId) && !thread.sandboxBridgeClient)
 
   // Show the agent's browser as soon as it opens one, once per thread view.
-  const browserAvailable = Boolean(thread.browserScope)
+  const browserAvailable = Boolean(thread.hasBrowser)
   const browserShownRef = useRef(browserAvailable)
   useEffect(() => {
     if (!browserAvailable || browserShownRef.current) return

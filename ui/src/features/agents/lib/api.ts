@@ -118,9 +118,8 @@ export interface ThreadBrowserTab {
   url: string
 }
 
-/** The browser window a thread's agent opened, as the dashboard embeds it. */
+/** The window of its LangSmith browser a thread's agent drives, as the dashboard embeds it. */
 export interface ThreadBrowser {
-  scope: "user" | "workspace"
   tabs: Array<ThreadBrowserTab>
   /** LangSmith's page for the window, minted for the dashboard to frame. */
   act_url: string

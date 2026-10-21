@@ -16,7 +16,7 @@ from datetime import UTC, datetime, timedelta
 from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 
 from openswe.audit_logs.middleware import audit_endpoint
 from openswe.dashboard.oauth import (
@@ -45,6 +45,7 @@ RETIRED_PROFILE_KEYS = frozenset(
         "subagent_reasoning_effort",
         "model_routing_enabled",
         "experimental_mcp_ptc",
+        "recent_thread_context_enabled",
     }
 )
 
@@ -79,11 +80,11 @@ GITHUB_OAUTH_TOKENS = UserRecords("github_oauth_token")
 
 class ProfileUpdate(BaseModel):
     default_repo: str | None = None
+    workspace_default_repos: dict[str, str] = Field(default_factory=dict)
     base_branch: str | None = None
     branch_prefix: str | None = None
     auto_fix_ci: bool = True
     auto_human_review_enabled: bool = True
-    recent_thread_context_enabled: bool = False
     concierge_mode: bool | None = None
     pr_review_links: bool | None = None
     pr_failure_reactions: bool | None = None
@@ -102,10 +103,26 @@ class ProfileUpdate(BaseModel):
     experimental_act_as_approval: bool | None = None
     slack_onboarding_dismissed: bool = False
 
+    @field_validator("workspace_default_repos")
+    @classmethod
+    def validate_workspace_default_repos(cls, value: dict[str, str]) -> dict[str, str]:
+        for workspace, repo in value.items():
+            parts = repo.split("/")
+            if (
+                not workspace.strip()
+                or len(parts) != 2
+                or any(not part or any(char.isspace() for char in part) for part in parts)
+            ):
+                raise ValueError(
+                    "Workspace defaults must map workspace slugs to owner/name repositories"
+                )
+        return value
+
 
 def normalize_profile_for_response(profile: dict[str, Any]) -> dict[str, Any]:
     value = dict(profile)
     value.setdefault("auto_human_review_enabled", True)
+    value.setdefault("workspace_default_repos", {})
     for field in RETIRED_PROFILE_KEYS:
         value.pop(field, None)
     return value
@@ -132,6 +149,11 @@ async def upsert_profile(login: str, email: str, update: ProfileUpdate) -> dict[
         "login": login,
         "email": email or existing.get("email", ""),
         "default_repo": update.default_repo,
+        "workspace_default_repos": (
+            update.workspace_default_repos
+            if "workspace_default_repos" in update.model_fields_set
+            else existing.get("workspace_default_repos", {})
+        ),
         "base_branch": update.base_branch,
         "branch_prefix": update.branch_prefix,
         "auto_fix_ci": update.auto_fix_ci,
@@ -139,11 +161,6 @@ async def upsert_profile(login: str, email: str, update: ProfileUpdate) -> dict[
             update.auto_human_review_enabled
             if "auto_human_review_enabled" in update.model_fields_set
             else existing.get("auto_human_review_enabled", True)
-        ),
-        "recent_thread_context_enabled": (
-            update.recent_thread_context_enabled
-            if "recent_thread_context_enabled" in update.model_fields_set
-            else existing.get("recent_thread_context_enabled", False)
         ),
         "draft_prs": (
             update.draft_prs if update.draft_prs is not None else existing.get("draft_prs", True)

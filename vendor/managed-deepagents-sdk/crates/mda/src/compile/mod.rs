@@ -65,7 +65,7 @@ pub(crate) use sandbox_recipe::{
 };
 
 use discovery::{
-    agent_import_specifier, find_identity_entry, find_memory_entry,
+    agent_import_specifier, find_browser_entry, find_identity_entry, find_memory_entry,
     misspelled_channel_directory_warning, project_has_skills, read_instructions,
     sandbox_import_specifier,
 };
@@ -365,6 +365,7 @@ const IDENTITY_EXPORT: &str = "identity";
 
 /// Canonical export name for the root memory declaration, in both languages.
 const MEMORY_EXPORT: &str = "memory";
+const BROWSER_EXPORT: &str = "browser";
 
 /// Basename (without extension) of the generated managed custom-auth module.
 const AUTH_STEM: &str = "_mda_auth";
@@ -853,6 +854,15 @@ fn compile_inner(
         }
     };
 
+    // Browser use is opt-in (Python only). Eval trials never get a browser.
+    let browser_import = match context {
+        RuntimeContext::Eval { .. } => None,
+        RuntimeContext::Local { .. } | RuntimeContext::ContextHub { .. } => {
+            find_browser_entry(project)
+                .map(|entry| agent_import_specifier(&entry, project.language))
+        }
+    };
+
     // Ingress channels (Slack `on:`) and connectors (GitHub `events:`) cannot fall back to a
     // deployment service principal: require a root identity declaration.
     if identity_import.is_none()
@@ -890,6 +900,7 @@ fn compile_inner(
             channels_import: channels_import.as_deref(),
             identity_import: identity_import.as_deref(),
             memory_import: memory_import.as_deref(),
+            browser_import: browser_import.as_deref(),
         },
     );
     write_if_changed(&out_dir.join(&entry_file), entry_source.as_bytes())
@@ -1029,6 +1040,7 @@ fn compile_inner(
         is_dev,
         agent.model.as_deref(),
         eval_model_override,
+        browser_import.is_some(),
     )?;
 
     vendor_runtime(project.language, runtime_source, out_dir)?;
