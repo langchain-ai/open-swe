@@ -13,7 +13,10 @@ import pytest
 from langgraph.runtime import Runtime
 
 import openswe.server as server
+from openswe import credential_scope
+from openswe.github import token as github_token
 from openswe.middleware.prepare_run import PrepareRunState
+from openswe.slack.stop import _summary_configurable
 from openswe.utils import ttl_cache
 
 _INSTALLATION_TOKEN = "installation-token"
@@ -161,20 +164,45 @@ async def _prepare(middleware: Any) -> dict[str, Any]:
     )
 
 
+@pytest.mark.parametrize("stop_summary", [False, True])
 async def test_private_scope_uses_oauth_identity_and_skips_public_lookup(
-    prepare_harness: dict[str, Any], github_client: _FakeGitHubClient
+    prepare_harness: dict[str, Any],
+    github_client: _FakeGitHubClient,
+    monkeypatch: pytest.MonkeyPatch,
+    stop_summary: bool,
 ) -> None:
-    prepare_harness["github_token"] = "oauth-token"
-    prepare_harness["thread_metadata"] = {"visibility": "private", "owner_login": "mason-gh"}
+    metadata = {"visibility": "private", "owner_login": "mason-gh"}
+    prepare_harness["thread_metadata"] = metadata
+    monkeypatch.setattr(
+        credential_scope, "read_thread", AsyncMock(return_value={"metadata": metadata})
+    )
+    oauth = AsyncMock(return_value=("oauth-token", None))
+    monkeypatch.setattr(github_token, "_resolve_dashboard_user_token", oauth)
+    monkeypatch.setattr(github_token, "invalidate_cached_github_token", AsyncMock())
+    monkeypatch.setattr(server, "resolve_github_token", github_token.resolve_github_token)
     github_client._responses.append(
         _FakeResponse(
             200, {"id": 7, "login": "mason-gh", "name": "Mason", "email": "m@example.com"}
         )
     )
 
-    middleware = _middleware(_slack_config(), credential_login="mason-gh")
+    config = _slack_config()
+    if stop_summary:
+        config["configurable"] = {
+            **_summary_configurable(
+                metadata,
+                config["configurable"]["slack_thread"],
+                github_login="mason-gh",
+                user_email="m@example.com",
+            ),
+            "thread_id": "thread-1",
+            "invocation_id": "inv-1",
+        }
+    login = await credential_scope.private_credential_login(config)
+    middleware = _middleware(config, credential_login=login)
     await _prepare(middleware)
 
+    oauth.assert_awaited_once_with("thread-1", "mason-gh")
     assert github_client.requests == ["https://api.github.com/user"]
     recorded = prepare_harness["recorded"]
     assert recorded["github_user_id"] == 7
