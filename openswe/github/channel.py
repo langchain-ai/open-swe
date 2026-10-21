@@ -22,7 +22,7 @@ from typing_extensions import TypedDict
 from openswe.dispatch import CHANNEL_METADATA_KEY, COMPLETION_WEBHOOK_URL, prepare_durable_run
 from openswe.github import webhook as service
 from openswe.mda_channels.auth import require_mda_channel
-from openswe.threads.router import adopt_channel_run
+from openswe.threads.router import adopt_channel_run, channel_run_starting
 from openswe.threads.runtimes import RUNTIMES
 from openswe.webhooks import common
 from openswe.workspaces.routing import repo_is_routable
@@ -124,6 +124,7 @@ async def _prepare_run(
     }
     if COMPLETION_WEBHOOK_URL:
         run["webhook"] = COMPLETION_WEBHOOK_URL
+    await channel_run_starting(thread_id)
     return run
 
 

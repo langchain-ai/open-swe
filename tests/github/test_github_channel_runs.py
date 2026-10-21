@@ -108,6 +108,7 @@ def prepared(monkeypatch: pytest.MonkeyPatch) -> AsyncMock:
     prepare = AsyncMock(side_effect=adopt_then_prepare, return_value=run)
     monkeypatch.setattr(github_webhooks, "prepare_github_issue_run", prepare)
     monkeypatch.setattr(channel, "adopt_channel_run", AsyncMock())
+    monkeypatch.setattr(channel, "channel_run_starting", AsyncMock())
     monkeypatch.setattr(dispatch, "_run_user_id", AsyncMock(return_value="user-1"))
     monkeypatch.setattr(webhook_common, "AGENT_VERSION_METADATA", {"LANGSMITH_AGENT_VERSION": "v1"})
 
@@ -160,6 +161,8 @@ async def test_an_issue_mention_starts_a_run_on_the_channels_thread(
     # The run completes through the backend's run-complete webhook.
     assert run["webhook"] == webhook
     channel.adopt_channel_run.assert_awaited_once_with(THREAD, "github")  # type: ignore[attr-defined]
+    # Busy only once the run is ready, so a failure on the way never leaves it busy.
+    channel.channel_run_starting.assert_awaited_once_with(THREAD)  # type: ignore[attr-defined]
     # The run token is signed for the channel's thread.
     token = verify_runtime_token(run["context"]["__run_token"])
     assert token.thread_id == THREAD
