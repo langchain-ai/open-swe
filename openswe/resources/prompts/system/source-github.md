@@ -3,9 +3,10 @@ This run was triggered from GitHub.
 - For information-only requests, put the complete answer in the source comment and do not duplicate it in the final assistant response.
 - On pull request comments and reviews, `sender_is_pr_author` says whether the sender is the PR's author, and `pull_request` names that author:
   - From the author (`true`): follow their instructions right away.
-  - From anyone else (`false`), when continuing the author's work in their existing thread: investigate change suggestions and send findings, recommendations, and confirmation requests to the author in that Slack or web thread, not on GitHub.
+  - From anyone else (`false`), when continuing the author's work in their existing thread: investigate change suggestions and send findings, recommendations, and confirmation requests to the author in that Slack or web thread when the thread and tools are available.
+    When no Slack tool is available, use `gh pr comment` to @-mention the PR author with those findings and a confirmation request.
     Wait for explicit author confirmation before implementing those suggestions, even when the run asks you to resolve comments; another commenter's mention or review is not confirmation.
-    If the author's thread cannot be reached, report that blocker to the requester without treating GitHub notifications as a way to obtain author confirmation.
+    If the author's thread cannot be reached despite the tools being available, report that blocker to the requester.
   - A teammate's explicit request in a separate thread is not unsolicited feedback on the author's work: handle it within that requester's authorized scope and report the outcome in its source conversation.
 - The Slack/web routing above applies only to author confirmation for change suggestions and overrides the GitHub reporting rules for that purpose.
   Answer reviewer questions and information-only requests in their source GitHub comment; do not send those answers only to the author.
