@@ -148,20 +148,20 @@ class BatchScheduler:
         batch = await self.queue.schedule(base, self.policy, lease)
         if batch is None or not await self._current(batch, lease):
             return
-        async with self.repo.candidate_git() as git:
-            if batch.candidate is not None:
-                candidate = Candidate.model_validate(batch.candidate)
-                remote = await git.remote_sha(candidate_ref(batch.id))
-                if remote == candidate.sha:
-                    await self.queue.save_candidate(batch.id, candidate, lease, published=True)
-                    return
-                if remote is not None or batch.published_at is not None:
-                    await self.queue.candidate_failed(
-                        batch.id, "Published candidate ref changed or disappeared", lease
-                    )
-                    return
-            if not await self.queue.begin_build(batch.id, lease):
+        if batch.candidate is not None:
+            candidate = Candidate.model_validate(batch.candidate)
+            remote = await self.repo.ref_sha(candidate_ref(batch.id))
+            if remote == candidate.sha:
+                await self.queue.save_candidate(batch.id, candidate, lease, published=True)
                 return
+            if remote is not None or batch.published_at is not None:
+                await self.queue.candidate_failed(
+                    batch.id, "Published candidate ref changed or disappeared", lease
+                )
+                return
+        if not await self.queue.begin_build(batch.id, lease):
+            return
+        async with self.repo.candidate_git() as git:
             batch, entries = await self.queue.candidate_inputs(batch.id, lease)
             remaining = (batch.deadline - datetime.now(UTC)).total_seconds()
             async with asyncio.timeout(remaining):
@@ -189,16 +189,30 @@ class BatchScheduler:
 
     async def _cleanup(self, lease: Lease, retention_days: int) -> None:
         cutoff = datetime.now(UTC) - timedelta(days=retention_days)
-        for batch in await self.queue.expired_candidates(cutoff, lease):
-            candidate = Candidate.model_validate(batch.candidate)
-            await self.queue.renew(lease, timedelta(seconds=60))
-            try:
-                async with self.repo.candidate_git() as git:
-                    await git.delete(batch.id, candidate.sha)
-                await self.queue.candidate_deleted(batch.id, candidate.sha, lease)
-            except LeaseLost:
-                raise
-            except Exception:
-                logger.warning(
-                    "Candidate ref cleanup failed", extra={"batch_id": str(batch.id)}, exc_info=True
-                )
+        batches = await self.queue.expired_candidates(cutoff, lease)
+        if not batches:
+            return
+        try:
+            async with self.repo.candidate_git() as git:
+                for batch in batches:
+                    await self.queue.renew(lease, timedelta(seconds=60))
+                    try:
+                        candidate = Candidate.model_validate(batch.candidate)
+                        await git.delete(batch.id, candidate.sha)
+                        await self.queue.candidate_deleted(batch.id, candidate.sha, lease)
+                    except LeaseLost:
+                        raise
+                    except Exception:
+                        logger.warning(
+                            "Candidate ref cleanup failed",
+                            extra={"batch_id": str(batch.id)},
+                            exc_info=True,
+                        )
+        except LeaseLost:
+            raise
+        except Exception:
+            logger.warning(
+                "Candidate cleanup pass failed",
+                extra={"queue_id": str(self.queue.id)},
+                exc_info=True,
+            )

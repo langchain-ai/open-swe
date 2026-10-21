@@ -30,7 +30,7 @@ from urllib.parse import quote, urlparse
 import httpx2
 from pydantic import BaseModel, JsonValue, TypeAdapter
 
-from openswe.github.queue import Artifact, CommitComparison, WorkflowRun
+from openswe.github.queue import Artifact, CommitComparison, GitReference, WorkflowRun
 from openswe.utils.http_pool import pooled_transport
 from openswe.utils.url_safety import request_with_safe_redirects
 
@@ -565,6 +565,15 @@ class RepoClient:
         if not isinstance(sha, str) or not sha:
             raise ValueError("Target branch is unavailable")
         return sha
+
+    async def ref_sha(self, ref: str) -> str | None:
+        """Read an exact qualified ref; API failures must not look like a missing ref."""
+        if not ref.startswith("refs/"):
+            raise ValueError("Expected a fully qualified Git ref")
+        references = TypeAdapter(list[GitReference]).validate_python(
+            await self.get(f"git/matching-refs/{quote(ref.removeprefix('refs/'), safe='')}")
+        )
+        return next((item.sha for item in references if item.ref == ref), None)
 
     async def branch_rules(self, name: str) -> list[dict[str, Any]]:
         """The rulesets' rules that apply to branch ``name``."""

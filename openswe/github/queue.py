@@ -76,3 +76,8 @@ class CommitComparison(Snapshot):
     merge_base: str = Field(
         validation_alias=AliasPath("merge_base_commit", "sha"), pattern=r"^[0-9a-f]{40}$"
     )
+
+
+class GitReference(Snapshot):
+    ref: str
+    sha: str = Field(validation_alias=AliasPath("object", "sha"), pattern=r"^[0-9a-f]{40}$")

@@ -643,7 +643,8 @@ async def test_scheduler_recovers_publication_but_stops_on_lease_loss(
 
     repo.pull_request.side_effect = pull
     refs: dict[str, str] = {}
-    built = 0
+    repo.ref_sha = AsyncMock(side_effect=lambda ref: refs.get(ref))
+    built = sandboxes = 0
 
     async def build(
         branch: str, base_sha: str, pulls: tuple[PullHead, ...], *, timestamp: int
@@ -668,10 +669,11 @@ async def test_scheduler_recovers_publication_but_stops_on_lease_loss(
     git = Mock(spec=CandidateGit)
     git.build = AsyncMock(side_effect=build)
     git.publish = AsyncMock(side_effect=publish)
-    git.remote_sha = AsyncMock(side_effect=lambda ref: refs.get(ref))
 
     @asynccontextmanager
     async def candidate_git() -> AsyncIterator[CandidateGit]:
+        nonlocal sandboxes
+        sandboxes += 1
         yield git
 
     repo.candidate_git = candidate_git
@@ -689,8 +691,10 @@ async def test_scheduler_recovers_publication_but_stops_on_lease_loss(
         assert refs == {}
     else:
         await scheduler.reconcile(lease)
+        await scheduler.reconcile(lease)
         batch = await queue.schedule("a" * 40, policy, lease)
         assert batch is not None
         assert batch.published_at is not None
         assert batch.build_attempts == built == 1
         assert refs == {candidate_ref(batch.id): Candidate.model_validate(batch.candidate).sha}
+        assert sandboxes == 1

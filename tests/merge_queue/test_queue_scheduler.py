@@ -1,16 +1,19 @@
-"""A slow GitHub read must leave time for scheduling and cleanup."""
+"""Bound reconciliation time and sandbox use while preserving cleanup progress."""
 
 import asyncio
+from collections.abc import AsyncIterator
+from contextlib import asynccontextmanager
 from datetime import UTC, datetime, timedelta
 from unittest.mock import AsyncMock, Mock
-from uuid import uuid7
+from uuid import UUID, uuid7
 
 import pytest
 
 from openswe.github.http import RepoClient
 from openswe.merge_queue import scheduler
 from openswe.merge_queue.admission import QueuePolicy
-from openswe.merge_queue.models import Lease, MergeRequest
+from openswe.merge_queue.git import Candidate, CandidateGit, PullHead
+from openswe.merge_queue.models import Batch, Lease, MergeRequest
 from openswe.merge_queue.store import MergeQueue, QueueEntry
 
 
@@ -46,3 +49,48 @@ async def test_stalled_admission_does_not_consume_reconciliation_window(
             await started.wait()
             await reconcile
     assert cancelled.is_set()
+
+
+async def test_cleanup_reuses_one_sandbox_and_continues_past_a_replaced_ref() -> None:
+    candidate = Candidate(
+        repository="https://github.com/acme/widgets.git",
+        branch="main",
+        base_sha="a" * 40,
+        pulls=(PullHead(number=1, sha="b" * 40),),
+        merges=("c" * 40,),
+        tree_sha="d" * 40,
+    )
+    batches = [
+        Mock(spec=Batch, id=uuid7(), candidate=candidate.model_dump(mode="json")) for _ in range(3)
+    ]
+    queue = Mock(spec=MergeQueue, id=uuid7(), target_branch="main")
+    queue.repository_name = AsyncMock(return_value="acme/widgets")
+    queue.renew = AsyncMock()
+    queue.entries = AsyncMock(return_value=[])
+    queue.schedule = AsyncMock(return_value=None)
+    queue.expired_candidates = AsyncMock(return_value=batches)
+    queue.candidate_deleted = AsyncMock()
+    repo = Mock(spec=RepoClient, full_name="acme/widgets")
+    repo.branch_sha = AsyncMock(return_value="a" * 40)
+    git = Mock(spec=CandidateGit)
+
+    async def delete(batch_id: UUID, sha: str) -> None:
+        if batch_id == batches[1].id:
+            raise ValueError("Candidate ref changed; refusing deletion")
+
+    git.delete = AsyncMock(side_effect=delete)
+    sandboxes = 0
+
+    @asynccontextmanager
+    async def candidate_git() -> AsyncIterator[CandidateGit]:
+        nonlocal sandboxes
+        sandboxes += 1
+        yield git
+
+    repo.candidate_git = candidate_git
+    await scheduler.BatchScheduler(queue, repo, QueuePolicy(checks={})).reconcile(Lease(uuid7(), 1))
+    assert sandboxes == 1
+    assert {call.args[0] for call in queue.candidate_deleted.await_args_list} == {
+        batches[0].id,
+        batches[2].id,
+    }

@@ -306,3 +306,39 @@ async def test_candidate_sandbox_keeps_credentials_in_proxy_and_stops_on_exit(
     assert all(
         "test-controller-token" not in call.args[0] for call in sandbox.aexecute.await_args_list
     )
+
+
+@pytest.mark.parametrize(
+    "result", ["present", "missing", "prefix_only", "unavailable", "malformed"]
+)
+async def test_ref_lookup_distinguishes_absence_from_api_failure(
+    monkeypatch: pytest.MonkeyPatch, result: str
+) -> None:
+    ref = "refs/merge-queue/candidates/example"
+    payload: object = []
+    if result in {"present", "prefix_only"}:
+        name = ref if result == "present" else f"{ref}-other"
+        payload = [{"ref": name, "object": {"sha": "a" * 40}}]
+    elif result == "malformed":
+        payload = [{"ref": ref}]
+    request = AsyncMock(
+        return_value=httpx2.Response(
+            404 if result == "unavailable" else 200,
+            json=payload,
+            request=httpx2.Request(
+                "GET", "https://api.github.com/repos/acme/widgets/git/matching-refs"
+            ),
+        )
+    )
+    monkeypatch.setattr(github_http, "github_request", request)
+    async with httpx2.AsyncClient() as http:
+        repo = GitHubClient(http).repo("acme", "widgets")
+        if result in {"unavailable", "malformed"}:
+            with pytest.raises(github_http.GitHubError if result == "unavailable" else ValueError):
+                await repo.ref_sha(ref)
+        else:
+            assert await repo.ref_sha(ref) == ("a" * 40 if result == "present" else None)
+    assert request.call_args.args[2] == (
+        "https://api.github.com/repos/acme/widgets/git/matching-refs/"
+        "merge-queue%2Fcandidates%2Fexample"
+    )
