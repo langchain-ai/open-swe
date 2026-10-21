@@ -27,6 +27,7 @@ logger = logging.getLogger(__name__)
 from langgraph.graph.state import RunnableConfig
 from langgraph.pregel import Pregel
 from langgraph.runtime import Runtime
+from langgraph_sdk import get_client
 
 warnings.filterwarnings("ignore", module="langchain_core._api.deprecation")
 warnings.filterwarnings("ignore", message=".*Pydantic V1.*", category=UserWarning)
@@ -36,11 +37,12 @@ from deepagents.backends.protocol import SandboxBackendProtocol
 from deepagents.middleware.skills import SkillsMiddleware, SkillsState
 from deepagents.middleware.subagents import GENERAL_PURPOSE_SUBAGENT, SubAgent
 from langchain.agents.middleware import ModelCallLimitMiddleware, ModelRetryMiddleware
-from langchain.agents.middleware.types import AgentMiddleware
+from langchain.agents.middleware.types import AgentMiddleware, AgentState
 from langchain_anthropic.middleware import AnthropicPromptCachingMiddleware
 from langchain_core.language_models.chat_models import BaseChatModel
 from langchain_core.tools import BaseTool
 
+from openswe.analytics.usage import record_agent_invocation_usage
 from openswe.dashboard.options import gate_fable_model
 from openswe.dashboard.workspace_settings_cache import cached_workspace_settings
 from openswe.github.app import get_github_app_installation_token_with_expiry
@@ -61,7 +63,10 @@ from openswe.middleware import (
     settle_review_check_on_exit,
 )
 from openswe.middleware.prepare_run import PrepareRunState
+from openswe.middleware.record_run_usage import RecordRunUsageMiddleware
 from openswe.middleware.sandbox_circuit_breaker import post_sandbox_unreachable_notification
+from openswe.middleware.trace import OpenSWEMiddleware
+from openswe.middleware.transcript import TranscriptMiddleware
 from openswe.prompts import apply_tool_descriptions, common_prompt, prompt
 from openswe.review.approvals import approval_policy_for_review
 from openswe.review.diff import (
@@ -975,6 +980,7 @@ async def prepare_reviewer_run(
 class ReviewerModelChoice(NamedTuple):
     model_id: str
     kwargs: ModelKwargs
+    effort: str | None
 
 
 class ReviewerModels(NamedTuple):
@@ -1025,6 +1031,7 @@ async def resolve_reviewer_models(cfg: RunConfig) -> ReviewerModels:
                 max_tokens=DEFAULT_LLM_MAX_TOKENS,
                 openai_reasoning_default=DEFAULT_LLM_REASONING,
             ),
+            reasoning_effort,
         ),
         subagent=ReviewerModelChoice(
             subagent_model_id,
@@ -1034,6 +1041,7 @@ async def resolve_reviewer_models(cfg: RunConfig) -> ReviewerModels:
                 max_tokens=DEFAULT_LLM_MAX_TOKENS,
                 openai_reasoning_default=DEFAULT_LLM_REASONING,
             ),
+            subagent_effort,
         ),
         use_gateway=settings.effective_gateway_enabled,
     )
@@ -1060,6 +1068,41 @@ def reviewer_tools() -> list[BaseTool]:
 async def get_reviewer_agent(config: RunnableConfig) -> Pregel:
     """Get or create a reviewer agent with checkpointed run prep."""
     return await build_reviewer_agent(config)
+
+
+class RecordReviewerUsageMiddleware(OpenSWEMiddleware):
+    def __init__(self, model: ReviewerModelChoice) -> None:
+        self._model = model
+
+    async def abefore_agent(self, state: AgentState, runtime: Runtime) -> None:
+        del state, runtime
+        cfg = RunConfig.from_runtime()
+        if not cfg.thread_id:
+            return
+        effort = self._model.effort
+        try:
+            await get_client().threads.update(
+                cfg.thread_id,
+                metadata={
+                    "model": self._model.model_id,
+                    "effort": effort,
+                    "agent_kind": "reviewer",
+                },
+            )
+            if cfg.invocation_id:
+                await record_agent_invocation_usage(
+                    invocation_id=cfg.invocation_id,
+                    thread_id=cfg.thread_id,
+                    github_login=cfg.github_login,
+                    github_user_id=cfg.github_user_id,
+                    user_email=cfg.user_email,
+                    model_id=self._model.model_id,
+                    effort=effort,
+                    source=cfg.source,
+                    repository=cfg.repo_full_name or None,
+                )
+        except Exception:
+            logger.warning("Failed to record reviewer usage", exc_info=True)
 
 
 async def build_reviewer_agent(
@@ -1109,6 +1152,9 @@ async def build_reviewer_agent(
                 config=config,
                 use_gateway=use_gateway,
             ),
+            RecordReviewerUsageMiddleware(models.main),
+            TranscriptMiddleware(),
+            RecordRunUsageMiddleware(),
             AnthropicPromptCachingMiddleware(ttl="1h", unsupported_model_behavior="ignore"),
             ModelCallLimitMiddleware(run_limit=MODEL_CALL_RECURSION_LIMIT, exit_behavior="end"),
             ToolErrorMiddleware(),

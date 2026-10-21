@@ -1,5 +1,8 @@
 import json
 import time
+from datetime import UTC, datetime
+from unittest.mock import AsyncMock, MagicMock
+from uuid import uuid7
 
 import jwt
 import pytest
@@ -187,6 +190,111 @@ async def test_reviewer_tools_get_a_github_token_on_a_replica_that_did_not_prepa
     await session.join({"messages": [], "run_prepared": True}, None)
 
     assert await resolve_thread_github_token(config) == "ghs_reviewer"
+
+
+@pytest.mark.parametrize("legacy", [False, True])
+async def test_reviewer_records_response_metadata_and_usage(
+    monkeypatch: pytest.MonkeyPatch, registry_db: None, legacy: bool
+) -> None:
+    from langchain_core.messages import AIMessage, HumanMessage
+    from langgraph.runtime import Runtime
+    from sqlalchemy import text
+
+    import openswe.reviewer as reviewer
+    from openswe.database import analytics, postgres
+    from openswe.middleware.record_run_usage import RecordRunUsageMiddleware
+    from openswe.middleware.transcript import TranscriptMiddleware
+    from openswe.remote_runtime.graph import RunSession
+    from openswe.remote_runtime.runs import in_graph_context
+    from openswe.sandboxes.tool_runtime import ToolSurface
+    from openswe.transcript.snapshot import load_snapshot
+
+    thread_id, invocation_id = str(uuid7()), str(uuid7())
+    config = {
+        "configurable": {
+            "__is_for_execution__": True,
+            "thread_id": thread_id,
+            "invocation_id": invocation_id,
+            "run_id": invocation_id,
+            "source": "github",
+        }
+    }
+    monkeypatch.setattr(analytics, "_WORKSPACE_ID", None)
+    await analytics.load_workspace()
+    metadata: dict[str, object] = {"title": "Review"}
+    client = MagicMock()
+    client.threads.get = AsyncMock(return_value={"metadata": metadata})
+
+    async def update(thread_id: str, *, metadata: dict[str, object]) -> None:
+        del thread_id
+        stored_metadata.update(metadata)
+
+    stored_metadata = metadata
+    client.threads.update = AsyncMock(side_effect=update)
+    monkeypatch.setattr(reviewer, "get_client", lambda: client)
+    monkeypatch.setattr("openswe.middleware.transcript.get_client", lambda: client)
+    monkeypatch.setattr(reviewer, "_make_model_or_defer", MagicMock())
+    monkeypatch.setattr(reviewer, "create_deep_agent", MagicMock())
+    schedule = AsyncMock(return_value=True)
+    monkeypatch.setattr("openswe.agent_cost.schedule_agent_cost_refresh", schedule)
+    surface = ToolSurface()
+    await reviewer.build_reviewer_agent(config, tool_surface=surface)
+    surface.middleware = [
+        m
+        for m in surface.middleware
+        if isinstance(
+            m,
+            (
+                reviewer.RecordReviewerUsageMiddleware,
+                TranscriptMiddleware,
+                RecordRunUsageMiddleware,
+            ),
+        )
+    ]
+    session = RunSession(surface, config, None, started_here=True)
+    human = HumanMessage(content="Review this PR", id="human")
+    state: dict[str, object] = {"messages": [human]}
+    if legacy:
+        state["messages"] = [AIMessage(content="Earlier review", id="old"), human]
+    response = AIMessage(
+        content="Reviewed",
+        id="review",
+        response_metadata={"model_name": "review-model"},
+        usage_metadata={"input_tokens": 10, "output_tokens": 5, "total_tokens": 15},
+    )
+    started = datetime.now(UTC)
+
+    async def run(runtime: Runtime) -> None:
+        await session.run_phase("before_agent", state, runtime)
+        messages = await session.observe(state, [response], runtime)
+        state["messages"] = [human, *messages]
+        await session.run_phase("after_agent", state, runtime)
+
+    await in_graph_context(config, run)
+    assert datetime.fromisoformat(response.response_metadata["created_at"]) >= started
+    assert response.response_metadata["open_swe_invocation_id"] == invocation_id
+    assert schedule.await_count == 1
+    assert schedule.await_args.args[0]["invocation_id"] == invocation_id
+    snapshot = await load_snapshot(thread_id)
+    if legacy:
+        assert snapshot is None
+    else:
+        assert snapshot is not None
+        assert snapshot.turns[0].state == "completed"
+        message = next(message for message in snapshot.messages if message.text == "Reviewed")
+        assert message.created_at >= started
+        assert message.usage["invocation_id"] == invocation_id
+        async with postgres.read_only_transaction() as conn:
+            created = await conn.scalar(
+                text(
+                    "SELECT payload FROM thread_event "
+                    "WHERE thread_id = :thread_id AND event_type = 'thread.created'"
+                ),
+                {"thread_id": thread_id},
+            )
+        assert created["model_id"] == metadata["model"]
+        assert created["effort"] == metadata["effort"] == "medium"
+    assert metadata["model"] == surface.models.main.model_id
 
 
 def test_run_token_round_trips_the_signed_run() -> None:
