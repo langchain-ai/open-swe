@@ -34,6 +34,8 @@ sources:
     resource: repo://openswe/middleware/task_retry.py
   - id: openwiki-source-54936c5fc8d4f07851a05349
     resource: repo://openswe/middleware/tool_error_handler.py
+  - id: openwiki-source-39f8a68480d768367a7dd112
+    resource: repo://openswe/middleware/transcript.py
   - id: openwiki-source-d618115330c9c5a6ad6a6eec
     resource: repo://openswe/middleware/workflow_push_guard.py
   - id: openwiki-source-96bcad07b4fe7078402bc2b8
@@ -42,10 +44,10 @@ sources:
     resource: repo://openswe/server.py
   - id: openwiki-source-10026b2dd7b7368bb04e27f0
     resource: repo://tests/sandbox/test_reviewer_sandbox_recovery.py
-generated: { by: "openwiki/0.4.2", at: "2026-10-18T12:31:08.965Z" }
+generated: { by: "openwiki/0.4.2", at: "2026-10-21T13:36:13.083Z" }
 verified:
   - by: openwiki/0.4.2
-    at: 2026-10-18T12:31:08.965Z
+    at: 2026-10-21T13:36:13.083Z
 ---
 
 # Middleware Stack and Request Processing
@@ -208,13 +210,12 @@ The coding-agent middleware chain is outer to inner. Each wraps the next, formin
 | 27 | ModelFallbackMiddleware | model-selection | fallback model differs |
 | 28 | ImageModelFallbackMiddleware | model-selection | vision support mismatch |
 | 29 | DynamicToolMiddleware | tool-related | integration groups present |
-| 30 | CodeModeMiddleware | tool-related | experimental MCP PTC enabled |
-| 31 | SanitizeFireworksMessagesMiddleware | message-prep | always |
-| 32 | SanitizeOpenAIResponsesMiddleware | message-prep | always |
-| 33 | SanitizeThinkingBlocksMiddleware | message-prep | always |
-| 34 | StableToolResultOrderMiddleware | message-prep | always |
-| 35 | ModelErrorMiddleware | error-handling | always |
-| 36 | ModelCallTimeoutMiddleware | error-handling | always (innermost) |
+| 30 | SanitizeFireworksMessagesMiddleware | message-prep | always |
+| 31 | SanitizeOpenAIResponsesMiddleware | message-prep | always |
+| 32 | SanitizeThinkingBlocksMiddleware | message-prep | always |
+| 33 | StableToolResultOrderMiddleware | message-prep | always |
+| 34 | ModelErrorMiddleware | error-handling | always |
+| 35 | ModelCallTimeoutMiddleware | error-handling | always (innermost) |
 
 ## PrepareRunState and mutation flow
 
@@ -232,7 +233,7 @@ The preparation flow is:
 5. LangGraph checkpoints this state after the before-agent node.
 6. `awrap_model_call` merges `rendered_system_prompt` into the system message before each model call.
 
-Preparation must be idempotent: a failure before the checkpoint can cause re-execution. Setup typically refreshes authorization tokens, loads diffs for reviewers, or resolves model-specific parameters.
+Preparation must be idempotent: a failure before the checkpoint can cause re-execution. Setup typically refreshes authorization tokens, loads diffs for reviewers, or resolves model-specific parameters. After an in-checkpoint failure and resume, the latch prevents preparation from running again as long as the fingerprint matches.
 
 ## Message processing pipeline
 
@@ -311,36 +312,63 @@ An immediate `model_not_available` or `model_not_found` error short-circuits to 
 
 Max two retries with exponential backoff (initial 1 second, max 10 seconds) and jitter.
 
+## Transcript offloading and background writing
+
+`TranscriptMiddleware` manages per-run transcript event collection and persistence without blocking the model stream:
+
+- One middleware instance serves all runs; per-run state lives in a module-level registry keyed by `thread_id:run_id`.
+- Events are queued (enqueue) and processed by a background writer asyncio task per run, so `append` calls never wait on database I/O.
+- A `ContextVar` holds the subagent namespace, which travels downward into nested graph invocations from within tool coroutines.
+- Transcript writes are observability: every failure is logged and swallowed so a transcript problem can never fail a run.
+- Events include model messages, tool calls/results, reasoning blocks, usage metrics, errors, and turn state.
+
+## WorkflowPushGuardMiddleware approval flow
+
+When `execute` or `background_execute` tool calls contain a `git push` command targeting `.github/workflows` files:
+
+1. **Detection**: Middleware parses shell commands and detects `git push` operations using regex and shell tokenization.
+2. **Diff inspection**: If the push is found, the middleware queries the sandbox for the diff between base and head commits to extract affected workflow files and a statistical summary (additions/deletions).
+3. **Fingerprinting**: A SHA256 fingerprint is computed from the diff content, ensuring only exact push changes are approved. Inherited workflow changes (from merging a base branch) are noted separately.
+4. **Approval check**: The middleware checks the database for a prior approval record matching the fingerprint.
+   - If approved, the original `git push` command is executed.
+   - If pending or never seen, a Slack approval request is posted **once per unique fingerprint** (marked `notified` after posting).
+   - If rejected, a user-facing error message is returned.
+5. **User approval**: The approval URL directs the user to a dashboard link that records consent, tied to the fingerprint and thread.
+6. **Resume behavior**: On the next model call, the approval check re-runs and sees the stored approval, then executes the push.
+
+The blocking result includes a diff preview (truncated to 400 lines, 20,000 chars) and the approval fingerprint.
+
 ## Reviewer middleware chain
 
 The reviewer graph installs a markedly leaner middleware stack than the coding agent because reviewers are read-only and deterministic:
 
 | # | Middleware | 
 |---|---|
-| 1 | FilesystemMiddleware |
+| 1 | PrepareReviewerRunMiddleware |
 | 2 | AnthropicPromptCachingMiddleware |
 | 3 | ModelCallLimitMiddleware |
 | 4 | ToolErrorMiddleware |
-| 5 | refresh_github_proxy_before_model |
-| 6 | check_message_queue_before_model |
-| 7 | SanitizeFireworksMessagesMiddleware |
-| 8 | SanitizeOpenAIResponsesMiddleware |
-| 9 | SanitizeThinkingBlocksMiddleware |
-| 10 | RepairOrphanedToolCallsMiddleware |
-| 11 | StableToolResultOrderMiddleware |
-| 12 | ModelRetryMiddleware (TimeoutError only) |
-| 13 | ModelErrorMiddleware |
-| 14 | ModelCallTimeoutMiddleware |
-| 15 | settle_review_check_on_exit (after-agent hook) |
+| 5 | ExcludeToolsMiddleware |
+| 6 | refresh_github_proxy_before_model |
+| 7 | check_message_queue_before_model |
+| 8 | SanitizeFireworksMessagesMiddleware |
+| 9 | SanitizeOpenAIResponsesMiddleware |
+| 10 | SanitizeThinkingBlocksMiddleware |
+| 11 | RepairOrphanedToolCallsMiddleware |
+| 12 | StableToolResultOrderMiddleware |
+| 13 | ModelRetryMiddleware (TimeoutError only) |
+| 14 | ModelErrorMiddleware |
+| 15 | ModelCallTimeoutMiddleware |
+| 16 | settle_review_check_on_exit (after-agent hook) |
 
 **Key differences from coding agent:**
 
-- No conversation offloading, transcript, incident, workspace skills, task retry, model selection, model fallback, or PR guard.
-- Uses langchain's `ModelRetryMiddleware` for `TimeoutError` instead of a full fallback model wrapper.
+- No conversation offloading, transcript, incident, workspace skills, task retry, model selection, model fallback, PR guard, or workflow push guard.
+- Uses langchain's `ModelRetryMiddleware` for `TimeoutError` only (not cross-provider fallback).
 - Adds `RepairOrphanedToolCallsMiddleware` to fix interrupted review threads.
 - Adds `settle_review_check_on_exit` to mark incomplete reviews as neutral.
 - Deterministic repo prep (single clone-or-fetch + checkout) before the first model call, avoiding token burn on git commands.
-- No push, commit, or PR-opening tools.
+- No push, commit, or PR-opening tools; review is read-only and deterministic.
 
 ## Tool and message safety invariants
 

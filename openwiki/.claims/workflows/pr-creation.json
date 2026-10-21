@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "pageVersion": "sha256:17a03aecccd95357a199b8a201f0e1de5e3373cb6a6ae36fff4d14b8de658b0f",
+  "pageVersion": "sha256:cbbbc548fea2a2c5ad2de5f5dbbd968c18f8c7b30f5111b7f828be9a9c402146",
   "claims": [
     {
       "id": "claim_1e087483ed7d4f6789eaef708ca65bca",
@@ -65,18 +65,18 @@
       "statement": "open_pull_request appends a ## References section to the PR body with the dashboard plan link and source references (Slack thread permalink, Linear ticket, or GitHub issue), but only adds originating-source references when GitHub confirms the target repository is private, preventing private conversation links from leaking into public PRs.",
       "evidence": [
         {
-          "resource": "repo://openswe/tools/open_pull_request.py#L992-L1023",
+          "resource": "repo://openswe/tools/open_pull_request.py#L999-L1030",
           "version": "repo-lines-v1:sha256:c3c3e668c17d49c972443961181ed65b3335a8dc628c00d0b0c19c8c93bd1eeb:eyJzZWxlY3RlZExpbmVDb3VudCI6MzIsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6ImMxZjViYTRkNWM3Yjg0MzVhOWNhM2NiY2QwZjhhZDUxNzc1NmM1MDc5N2U3NmIwNDliYWUxOGNkMWE5YzkwNjkiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6IjUzNDU1NGUyNmY2NDcxNDA1NTczNGE0MWUwMjFlNmQ2ODY5ZDMyZDAxY2Y2YzM1YjNhMjUxYjYzM2Y0YjM0YTAiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6IjhjYzRhN2QxY2M3OTZhYmEzZTQ2NzIzMzI3ZjUxN2U5ZjgxMTk4MmQyNTBmMDcwMjk4NmU0YjU3NjRhZDk1ODkiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6IjQ1OGE5ZjQ2MGY0MDIyNGJjM2M1MDY1NjU3ZDE1N2YxNDU3OTUyNmVkMjEzMWNhMDNkM2U4YWJjNzUxYTBiYzAifQ"
         }
       ]
     },
     {
       "id": "claim_07dd7cd9be1542d8b60432b674f22e85",
-      "statement": "After a created or already-existing PR is returned, open_pull_request best-effort fetches full details, records agent PR usage, upserts normalized PR and legacy metadata on the thread, and, for a Slack code-channel session, refreshes context, agent resource, and the diff view when a nonempty diff is available; any exception in this telemetry sequence is non-fatal to PR creation.",
+      "statement": "After a created or already-existing PR is returned, open_pull_request best-effort captures PR revision data via analytics/revisions.py, fetches full details, records agent PR usage, upserts normalized PR and legacy metadata on the thread, records a PullRequest database entry, and for a Slack code-channel session refreshes context, agent resource, and the diff view when a nonempty diff is available; any exception in this telemetry sequence is non-fatal to PR creation.",
       "evidence": [
         {
-          "resource": "repo://openswe/tools/open_pull_request.py#L615-L884",
-          "version": "repo-lines-v1:sha256:95fa3c67730c1a17173eb847bccebfae288d87c127f65029fcc26ac6b1199772:eyJzZWxlY3RlZExpbmVDb3VudCI6MjcwLCJmaXJzdFNlbGVjdGVkTGluZUhhc2giOiI0MDUyZWYyM2ZiYzIzN2EwOGYwOThmODU4MThiNTQyNWMwMTc3NDQzMjMxZjg1ZWM4MWI2YzZjYzNmZWFiNWQ1IiwibGFzdFNlbGVjdGVkTGluZUhhc2giOiI1OTA5YTUzYTYxOGQwMjhlMWQzMDAwYzBhN2FiY2VlY2JlNWZiMzdmNGU1MTFlZmU0NjY0M2ZhZDZlNjY4NzJmIiwicHJlY2VkaW5nQ29udGV4dExpbmVDb3VudCI6MywicHJlY2VkaW5nQ29udGV4dEhhc2giOiI4MjQxYmM5MmY4ZWExYzU0N2NiZDcxZWQ2ZDgxMjVhYzE3ZjkyYmQwNmE4NTc5N2ZiMzQxZDg1MTJiOTc1NGU5IiwiZm9sbG93aW5nQ29udGV4dExpbmVDb3VudCI6MywiZm9sbG93aW5nQ29udGV4dEhhc2giOiJjOWIzZTRmNGZmNzZmZDkxM2E1YjU3ZGRjNDYxNzJkODMzYWU3OWJjYTUxOTY0YWZhNzk2MTQ5YWJiNTkyZmNmIn0"
+          "resource": "repo://openswe/tools/open_pull_request.py#L614-L892",
+          "version": "repo-lines-v1:sha256:53bc95ff1d9ccff25998692867350788c8d2682d6c19607cffc092e7411b1300:eyJzZWxlY3RlZExpbmVDb3VudCI6Mjc5LCJmaXJzdFNlbGVjdGVkTGluZUhhc2giOiI4NzRjZmUwNTQ1NzA2MjFlYTYzN2IyMGZmMmU1MGJhZDNmZDA5ODI1MjYyNDJjOTFiMDk3ZTRmNjQzY2JjNjU0IiwibGFzdFNlbGVjdGVkTGluZUhhc2giOiIwMWJhNDcxOWM4MGI2ZmU5MTFiMDkxYTdjMDUxMjRiNjRlZWVjZTk2NGUwOWMwNThlZjhmOTgwNWRhY2E1NDZiIiwicHJlY2VkaW5nQ29udGV4dExpbmVDb3VudCI6MywicHJlY2VkaW5nQ29udGV4dEhhc2giOiI4Y2M0YTdkMWNjNzk2YWJhM2U0NjcyMzMyN2Y1MTdlOWY4MTE5ODJkMjUwZjA3MDI5ODZlNGI1NzY0YWQ5NTg5IiwiZm9sbG93aW5nQ29udGV4dExpbmVDb3VudCI6MywiZm9sbG93aW5nQ29udGV4dEhhc2giOiI0MWIzOGNhZjVmYWM2MTczMWJhYzRhMTYxYzkxMzRhYjAyNjA4ZWMwZDQwYjUwZmE2MmZkNGJmOWUzYTM2ZTliIn0"
         }
       ]
     },
@@ -85,12 +85,12 @@
       "statement": "PullRequestCreationGuardMiddleware wraps execute/background_execute tool calls and blocks any shell command that would create a PR outside open_pull_request (gh pr create, gh api pulls POST/field, or curl POST to the pulls endpoint), including nested shell commands up to a bounded expansion depth, returning a non-recoverable pr_creation_fallback_blocked error so the real open_pull_request failure is surfaced.",
       "evidence": [
         {
-          "resource": "repo://openswe/middleware/pr_creation_guard.py#L232-L239",
+          "resource": "repo://openswe/middleware/pr_creation_guard.py#L248-L255",
           "version": "repo-lines-v1:sha256:5c288cbccea54f50dce2a792a6d10254d930d3f1320e7092f1a7e0ed5ed82b9d:eyJzZWxlY3RlZExpbmVDb3VudCI6OCwiZmlyc3RTZWxlY3RlZExpbmVIYXNoIjoiMTQzNTgyYWRjMDgwNTdkNTNmOTFjMTZhZTZkODI0MDA2ZmZiOTEyMDQ0YWZlZjI0ODAxZjU4MDZhNzRhNTVhZiIsImxhc3RTZWxlY3RlZExpbmVIYXNoIjoiMzBjMWYxODhmMTQyZWQ3YTgyNDY4MGIyMDcxNzJjNTUxOWJjNjE0YTQ4ZmRhN2NmMTY3ZWRiOGRkZjc5OTU2YyIsInByZWNlZGluZ0NvbnRleHRMaW5lQ291bnQiOjMsInByZWNlZGluZ0NvbnRleHRIYXNoIjoiZTBiMjFiZjg5NWZhZTJkNzM5MjBkOTMxNzhjZmQ1ODQxY2RmOGY5NTI0NTE2YzhhNTY1ODQzNmE0YWM0OGYzYiIsImZvbGxvd2luZ0NvbnRleHRMaW5lQ291bnQiOjMsImZvbGxvd2luZ0NvbnRleHRIYXNoIjoiOTRmOWMzNDYwMGE4NTFjMTljZGEyODc4YzNhNTNkZjBiMTNjOTVkMDdkNzljOTFjODE4ZWU5YmNjOTIyN2Q4YyJ9"
         },
         {
-          "resource": "repo://openswe/middleware/pr_creation_guard.py#L258-L289",
-          "version": "repo-lines-v1:sha256:51bb8b706ce2cfefe28c83dd25e9a5be368043e3330d99db53a07d3d236be313:eyJzZWxlY3RlZExpbmVDb3VudCI6MzIsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6IjNhMjgwZGE0MGNkMmQzMTE3ZjdjNjA4MWE3MTQ2OGUxZWNkZmExNWM0OTA2MDMxZjVlNjQ5NTI4ZDY4MmU3N2EiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6IjcxZWE2M2E2MmY5MjFhY2ZlOTFhMTcyMzExMDkyMjljNTkzZGU3ODMxZjAxYWZkYWZkNjA1MWM1MjYxNTRjZTkiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6IjhjYzRhN2QxY2M3OTZhYmEzZTQ2NzIzMzI3ZjUxN2U5ZjgxMTk4MmQyNTBmMDcwMjk4NmU0YjU3NjRhZDk1ODkiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjowLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6ImUzYjBjNDQyOThmYzFjMTQ5YWZiZjRjODk5NmZiOTI0MjdhZTQxZTQ2NDliOTM0Y2E0OTU5OTFiNzg1MmI4NTUifQ"
+          "resource": "repo://openswe/middleware/pr_creation_guard.py#L274-L303",
+          "version": "repo-lines-v1:sha256:e843aebeeb3365c193b66da0b0aa482e342c92b801565e30ba5df240e101dc20:eyJzZWxlY3RlZExpbmVDb3VudCI6MzAsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6IjNhMjgwZGE0MGNkMmQzMTE3ZjdjNjA4MWE3MTQ2OGUxZWNkZmExNWM0OTA2MDMxZjVlNjQ5NTI4ZDY4MmU3N2EiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6IjcxZWE2M2E2MmY5MjFhY2ZlOTFhMTcyMzExMDkyMjljNTkzZGU3ODMxZjAxYWZkYWZkNjA1MWM1MjYxNTRjZTkiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6IjhjYzRhN2QxY2M3OTZhYmEzZTQ2NzIzMzI3ZjUxN2U5ZjgxMTk4MmQyNTBmMDcwMjk4NmU0YjU3NjRhZDk1ODkiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjowLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6ImUzYjBjNDQyOThmYzFjMTQ5YWZiZjRjODk5NmZiOTI0MjdhZTQxZTQ2NDliOTM0Y2E0OTU5OTFiNzg1MmI4NTUifQ"
         }
       ]
     },
@@ -99,11 +99,7 @@
       "statement": "The PR-creation guard is installed in the main agent graph unconditionally and also in the general-purpose subagent's own middleware, while the workflow push guard is installed only in the main agent.",
       "evidence": [
         {
-          "resource": "repo://openswe/server.py#L2153-L2154",
-          "version": "repo-lines-v1:sha256:d80956655e6faa8108c664f0f0596b0ad1cb7a9d08573f4915cb755c6e92e59b:eyJzZWxlY3RlZExpbmVDb3VudCI6MiwiZmlyc3RTZWxlY3RlZExpbmVIYXNoIjoiYTA2ZWNhNDFlNmNmYTJkZTBmYWQxMzdjNDY3ZDUyZGY1OTA2NDE5NDQ3YjkyYjkwZDgzMTRiY2FlZmVkNzZlYiIsImxhc3RTZWxlY3RlZExpbmVIYXNoIjoiMTA4M2VkOTUxYTM3Mzg3NzY4NGZmZWQyM2E2MzUyYWE0MDA0MTY1ZDQ1NzM2MmJhZmM3NDM2YjRiZjYzM2I3ZiIsInByZWNlZGluZ0NvbnRleHRMaW5lQ291bnQiOjMsInByZWNlZGluZ0NvbnRleHRIYXNoIjoiZWRiN2ZmMmRmMzI1OTljZWI3OGM5OTgyNDU1NGY2NTFkNWY3Mzg1ODk4Mzk3ZDViOWZiNmUzZGYyMjc3MGVmMCIsImZvbGxvd2luZ0NvbnRleHRMaW5lQ291bnQiOjMsImZvbGxvd2luZ0NvbnRleHRIYXNoIjoiM2M3OWU0OWUzMmNhMmQyM2VlZWJjYWU3MjA5YzJkZGM1YzhkNjdkYWU5MzM0Njc1NGUyMmE1ODhhZDI5Mjk4MSJ9"
-        },
-        {
-          "resource": "repo://openswe/server.py#L2212-L2212",
+          "resource": "repo://openswe/server.py#L2157-L2157",
           "version": "repo-lines-v1:sha256:fd02e5db72c145fc2036bf79458e495a82a97876811b83389ece79e9454dad49:eyJzZWxlY3RlZExpbmVDb3VudCI6MSwiZmlyc3RTZWxlY3RlZExpbmVIYXNoIjoiZmQwMmU1ZGI3MmMxNDVmYzIwMzZiZjc5NDU4ZTQ5NWE4MmE5Nzg3NjgxMWI4MzM4OWVjZTc5ZTk0NTRkYWQ0OSIsImxhc3RTZWxlY3RlZExpbmVIYXNoIjoiZmQwMmU1ZGI3MmMxNDVmYzIwMzZiZjc5NDU4ZTQ5NWE4MmE5Nzg3NjgxMWI4MzM4OWVjZTc5ZTk0NTRkYWQ0OSIsInByZWNlZGluZ0NvbnRleHRMaW5lQ291bnQiOjMsInByZWNlZGluZ0NvbnRleHRIYXNoIjoiNGRkNDIyMGIyNTU1ZTc1ZDYyZDkzODlhYTdjMGQ5ZWEzOWQ5YmE2YWQzNmE4ZjYyOTdjYWViOWJkMTJiZTMyNSIsImZvbGxvd2luZ0NvbnRleHRMaW5lQ291bnQiOjMsImZvbGxvd2luZ0NvbnRleHRIYXNoIjoiNzVjN2JlMTA2ZjQyODQ3MTlkYWJkODQ1Y2ZkZjBkNDY3OGJmOTgxNTQwMDU4MzcxOGVkMjIyYjUyMzA1Y2U0YyJ9"
         }
       ]
@@ -113,12 +109,8 @@
       "statement": "WorkflowPushGuardMiddleware gates eligible standalone git push origin refspecs, rejects unsafe shell shapes from interpretation, inspects the sandbox repository to compute the workflow diff, preview, stats, and content fingerprint, and lets an eligible push proceed untouched when no .github/workflows files changed.",
       "evidence": [
         {
-          "resource": "repo://openswe/middleware/workflow_push_guard.py#L334-L434",
-          "version": "repo-lines-v1:sha256:d6413e7833e8c7b2ffd4759b019e1e9bd0afa198f111944c7bd198e28bb98fde:eyJzZWxlY3RlZExpbmVDb3VudCI6MTAxLCJmaXJzdFNlbGVjdGVkTGluZUhhc2giOiI3MDYzNjE3ZDc1NDBiNDljN2Q5OWZkZGFhYzE3NWI2ZDQ3NTkxNjc0M2IxN2M5N2JhNzQ3MWQwN2RlMjFiMmQ4IiwibGFzdFNlbGVjdGVkTGluZUhhc2giOiIzMGMxZjE4OGYxNDJlZDdhODI0NjgwYjIwNzE3MmM1NTE5YmM2MTRhNDhmZGE3Y2YxNjdlZGI4ZGRmNzk5NTZjIiwicHJlY2VkaW5nQ29udGV4dExpbmVDb3VudCI6MywicHJlY2VkaW5nQ29udGV4dEhhc2giOiJlNDEyYTQ0NDI5OTUyNzM4YjhjZDM5ZjBjNzJlZjQwYmVhMjNhNWIxYmVmNzQ4OTRhN2FmNzVjYWIwMWNkZDcxIiwiZm9sbG93aW5nQ29udGV4dExpbmVDb3VudCI6MywiZm9sbG93aW5nQ29udGV4dEhhc2giOiI2MmVjNzRmNDJhOGNmMDZiYmNiZTZmMGZhZTA5NjdjNDA4ZmE0YmJjZmYxNGVhMWQzYTc3N2M1NmRmMzg0NDk0In0"
-        },
-        {
-          "resource": "repo://openswe/middleware/workflow_push_guard.py#L575-L587",
-          "version": "repo-lines-v1:sha256:70354bbd7197ab95b89dd529855e58bfd7ac464612b4c7733e9845930ed6c5e1:eyJzZWxlY3RlZExpbmVDb3VudCI6MTMsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6IjQwMGRlMDJjY2Y0NjY1YWRmMjU5ZTMwODIzNWI0OTM3MTFiZjNmM2M5MzcyOTJmZmMzOWM1ZGVjZDUzMDhlYzMiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6IjVjMDIzMzYxMmQ3OGYyYTI4NjRjNTNhMTZhZDQ0ZTU0ZDIzODY1YTE3OWM0NTg5ODJhNjkyMDNiZjExMGMxMzgiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6ImNiNzIxYjQ0ZTk0NDJkM2I5MjYwODMwZTgyZTdiNTMwZmY4MjljOWMzYzc2ZjliYjBjYjI0M2ZlMzQ5YzE3OTciLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6IjI2M2Y0NDM0OThmMjgyOWYzYmM4YTU2NmU3NDliMjNjY2QwY2Y1MzQ0YzM4OTA2MWIzYmQyMThmMzM0YjI2YzAifQ"
+          "resource": "repo://openswe/middleware/workflow_push_guard.py#L455-L552",
+          "version": "repo-lines-v1:sha256:eb6fbe411dff00929e1afb1d88afd2a2eb5ab19cba1b4b920e8ecf8f7ca0bc50:eyJzZWxlY3RlZExpbmVDb3VudCI6OTgsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6IjcwNjM2MTdkNzU0MGI0OWM3ZDk5ZmRkYWFjMTc1YjZkNDc1OTE2NzQzYjE3Yzk3YmE3NDcxZDA3ZGUyMWIyZDgiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6IjMwYzFmMTg4ZjE0MmVkN2E4MjQ2ODBiMjA3MTcyYzU1MTliYzYxNGE0OGZkYTdjZjE2N2VkYjhkZGY3OTk1NmMiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6ImU0MTJhNDQ0Mjk5NTI3MzhiOGNkMzlmMGM3MmVmNDBiZWEyM2E1YjFiZWY3NDg5NGE3YWY3NWNhYjAxY2RkNzEiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6IjYyZWM3NGY0MmE4Y2YwNmJiY2JlNmYwZmFlMDk2N2M0MDhmYTRiYmNmZjE0ZWExZDNhNzc3YzU2ZGYzODQ0OTQifQ"
         }
       ]
     },
@@ -127,12 +119,12 @@
       "statement": "The workflow push guard keys human approval by fingerprint in per-thread workflow_push_approvals metadata: an approved fingerprint causes the push to be rewritten to a safe explicit head_sha:refs/heads/branch refspec and allowed, while a non-approved fingerprint blocks the push with WorkflowPushApprovalRequired, records a pending approval, and posts a one-time Slack approval message; any further workflow-file change yields a new fingerprint requiring fresh approval.",
       "evidence": [
         {
-          "resource": "repo://openswe/middleware/workflow_push_guard.py#L509-L568",
-          "version": "repo-lines-v1:sha256:468ecc8e265c874bef1733db18cbb181bb2795b468b5921a531a30a68ff795ed:eyJzZWxlY3RlZExpbmVDb3VudCI6NjAsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6IjEzMDFmMDliZTNlZDA2YjRjMGVhZWVmOGU4YTg0NTkzMDNlMjkyMTRiMjA4OTc2Y2Y2Y2M5NGZmNmUwMTI3MWQiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6IjAxYmE0NzE5YzgwYjZmZTkxMWIwOTFhN2MwNTEyNGI2NGVlZWNlOTY0ZTA5YzA1OGVmOGY5ODA1ZGFjYTU0NmIiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6IjhjYzRhN2QxY2M3OTZhYmEzZTQ2NzIzMzI3ZjUxN2U5ZjgxMTk4MmQyNTBmMDcwMjk4NmU0YjU3NjRhZDk1ODkiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6IjQwMTFhYzI0YWMwNmUyMDIxMjQwMGQxNjdiN2UyYzI0ZmQwYjRmZTdjMjNlNjhlZGYzODhkOTY0YWUyMTMxMTkifQ"
+          "resource": "repo://openswe/middleware/workflow_push_guard.py#L627-L651",
+          "version": "repo-lines-v1:sha256:8f3b58897dfa862fe07cbae5407f2a68b303ef5563989d280e5c4e6cdb6a067b:eyJzZWxlY3RlZExpbmVDb3VudCI6MjUsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6IjEzMDFmMDliZTNlZDA2YjRjMGVhZWVmOGU4YTg0NTkzMDNlMjkyMTRiMjA4OTc2Y2Y2Y2M5NGZmNmUwMTI3MWQiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6IjhhN2Y4OGIyZGI1OTJiYjBhOGZkYzJlZjc2YjFlN2FjM2Q1N2FmYTRlNDE2YTI4YTZlZTJjMGI5N2FkOGIxMTgiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6IjhjYzRhN2QxY2M3OTZhYmEzZTQ2NzIzMzI3ZjUxN2U5ZjgxMTk4MmQyNTBmMDcwMjk4NmU0YjU3NjRhZDk1ODkiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6ImU4YTZmMzQzNmIxYWM3Nzk4MDA2NDIxZjk3M2I3NmRiNjk3MWY4Y2M4NDIyZDFmMGIxZTQxYzVlYzAwZmVmNTIifQ"
         },
         {
-          "resource": "repo://openswe/middleware/workflow_push_guard.py#L541-L564",
-          "version": "repo-lines-v1:sha256:9c4b9b3c87b5270aa92ec81ee62bf8269ce41b302c45b6e1cfdce11816c4a58d:eyJzZWxlY3RlZExpbmVDb3VudCI6MjQsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6ImJiMWViNzI2M2MyYjEzNzY2OWM3MGMwNDQ0YTEwNDVmZTI0YmY3NTNhYjllMzZkYTg0ZmUyMmQyM2EzYWYwNDYiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6ImY4ZjQyODllOTIyMDc3NmNmYjJjNDQ4NDg5MGFiNTNmOTRiZmVmMTQ5MDkzZThkY2Q4YjdlYzY0NjIxNmQwMzQiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6ImZkNjk3NjQwNmEyOGY5MjE5YzJmODU1NWQyMzdmNzY5YjlhOWFjZGY5MTZlMjM0OTk5ZDM2OTBlODllZjVkZGQiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6ImQ5OTM2NzY1ZTRiYjMxMjhhMDdkYmQ1NWIxMTRiMDQ4ZGRlMGQwZjdmMjJiOWU4OGRiMGY5ZTYzZmRjMTgxNTIifQ"
+          "resource": "repo://openswe/threads/workflow_approval.py#L43-L91",
+          "version": "repo-lines-v1:sha256:593df447d0862d5820fd721343bae3c770b0a5342102ed4a36c5c3bb9d0e4282:eyJzZWxlY3RlZExpbmVDb3VudCI6NDksImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6IjVmZWYzN2I3NzM4NTY3MWZkM2JlYjU0YjAzMzdmYWQ4ZTJkZjM1ZmE5YjA5MWQ0MzljNGFiNmQzNGE5YTcyZjQiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6IjcwMWY4OTczNWExZGNkYmNiMThjZDQ3YmYzNGRiYTM4M2I1NzBkOWRiMjgyZDJhYzYxNzljYTk2MTE4YTQyNzYiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6ImNmODc1YWE2OGI3MzkyNjBlOWY5OWRkMjNiMDM2ZWIwYjM1OTlkM2Y0ZDEwOTMwZjUxMjFmZmQyMDYzMWQ5MGMiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6ImEwYjBkZjk2YWYwMDdkZmRjYjdkZTAyM2RhMWNkZWZiOGVlMDM4ODBhYjk2OWU5ZGZjNjlkN2Y0ZGYxNjQ2N2IifQ"
         }
       ]
     },
@@ -141,8 +133,8 @@
       "statement": "request_pr_review starts the reviewer agent for a PR URL by parsing it into a GitHubPrRef, resolving the active Slack thread and triggering identity from run config, and delegating to the GitHub webhook's trigger_pr_review_from_ref; it is a handoff distinct from PR creation.",
       "evidence": [
         {
-          "resource": "repo://openswe/slack/tools/request_pr_review.py#L35-L64",
-          "version": "repo-lines-v1:sha256:e80933f443724b9a6e620c2023797a3f7e295969e0229ef6f8da2833a13eb1ec:eyJzZWxlY3RlZExpbmVDb3VudCI6MzAsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6ImEwYjBlYjI4YjQ1MzU3N2M2MTBlOThlYTJjYzZiNmNhZmFkNTkzMDdjNTVlYWE4NzZlMjY2YmNiYTM3NzNlZWEiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6ImZhMTFjMDU2N2QwYTVmOWU5YjEzNWY2NWNkMjUzNzJkZmQ2Mjg3NzVmN2MxZWQyNTNmOGJhZDQyZGQyZDY2NjkiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6IjgxMzY5YWI0ODIwNGQ5MzExNGZjYzViMTQ3ODEwZmFkM2IwNjhlOGQ1MGUyNTNhYjdiN2ExZTdmZTE2NzhmODkiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjowLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6ImUzYjBjNDQyOThmYzFjMTQ5YWZiZjRjODk5NmZiOTI0MjdhZTQxZTQ2NDliOTM0Y2E0OTU5OTFiNzg1MmI4NTUifQ"
+          "resource": "repo://openswe/slack/tools/request_pr_review.py#L32-L64",
+          "version": "repo-lines-v1:sha256:098f477e2ec9b905ff1003033191f82bd14989682523272be3835a485886c99e:eyJzZWxlY3RlZExpbmVDb3VudCI6MzMsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6ImE4N2Y3MmU2MTE2NWNmNzgyZWJhMDUyOTc0OWNjM2I5NGNjMjM2N2Y1OTA2NTMwNDllZGJmOTVmYThkYmQ2MTIiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6ImZhMTFjMDU2N2QwYTVmOWU5YjEzNWY2NWNkMjUzNzJkZmQ2Mjg3NzVmN2MxZWQyNTNmOGJhZDQyZGQyZDY2NjkiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6IjQwOGRjNzBlNTdlOTI2MTk4YzU0NWQyYjUwODEwOTE4ZWRkNjU3MTk2YzBjMTVmZmIzMjQ2YzU3Mzk2YTJlOTMiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjowLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6ImUzYjBjNDQyOThmYzFjMTQ5YWZiZjRjODk5NmZiOTI0MjdhZTQxZTQ2NDliOTM0Y2E0OTU5OTFiNzg1MmI4NTUifQ"
         }
       ]
     },
@@ -165,8 +157,8 @@
       "statement": "The workflow push guard only posts a Slack approval notification after a pending record is not already marked notified, and marks it notified only after the Slack post returns a message timestamp without an error.",
       "evidence": [
         {
-          "resource": "repo://openswe/middleware/workflow_push_guard.py#L509-L538",
-          "version": "repo-lines-v1:sha256:d012de94f50bf8eb17589c537ad75d3b7b59c5626dd3435a6ca775e23e1b4b53:eyJzZWxlY3RlZExpbmVDb3VudCI6MzAsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6IjEzMDFmMDliZTNlZDA2YjRjMGVhZWVmOGU4YTg0NTkzMDNlMjkyMTRiMjA4OTc2Y2Y2Y2M5NGZmNmUwMTI3MWQiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6ImNkZDQxYjA4MGFlMmI2OTg4MzkyMTE1NjZkMDBiZjMzOTRmM2Y1NDFjNDM4YTE0NjAyMTY4NzgyMDUzY2RhOTAiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6IjhjYzRhN2QxY2M3OTZhYmEzZTQ2NzIzMzI3ZjUxN2U5ZjgxMTk4MmQyNTBmMDcwMjk4NmU0YjU3NjRhZDk1ODkiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6IjU5OTcyNzkyODc2MmE3YmUxMzNhYjBjMDM5MmZmMGEyM2MwNjljMGYzYTk4ZGE1M2I0MTExNjJmNTE3MjY2NDIifQ"
+          "resource": "repo://openswe/middleware/workflow_push_guard.py#L627-L651",
+          "version": "repo-lines-v1:sha256:8f3b58897dfa862fe07cbae5407f2a68b303ef5563989d280e5c4e6cdb6a067b:eyJzZWxlY3RlZExpbmVDb3VudCI6MjUsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6IjEzMDFmMDliZTNlZDA2YjRjMGVhZWVmOGU4YTg0NTkzMDNlMjkyMTRiMjA4OTc2Y2Y2Y2M5NGZmNmUwMTI3MWQiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6IjhhN2Y4OGIyZGI1OTJiYjBhOGZkYzJlZjc2YjFlN2FjM2Q1N2FmYTRlNDE2YTI4YTZlZTJjMGI5N2FkOGIxMTgiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6IjhjYzRhN2QxY2M3OTZhYmEzZTQ2NzIzMzI3ZjUxN2U5ZjgxMTk4MmQyNTBmMDcwMjk4NmU0YjU3NjRhZDk1ODkiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6ImU4YTZmMzQzNmIxYWM3Nzk4MDA2NDIxZjk3M2I3NmRiNjk3MWY4Y2M4NDIyZDFmMGIxZTQxYzVlYzAwZmVmNTIifQ"
         }
       ]
     },
@@ -205,8 +197,8 @@
       "statement": "The PR body includes an attribution footer (added before References) with the dashboard thread URL, the resolved agent model ID (or comma-separated list if multiple models were used), and the reasoning effort level when applicable.",
       "evidence": [
         {
-          "resource": "repo://openswe/tools/open_pull_request.py#L960-L989",
-          "version": "repo-lines-v1:sha256:ee5df4a79f11be39866a980eba7cfba223b38ed344d2c38d05934636c33f9bbf:eyJzZWxlY3RlZExpbmVDb3VudCI6MzAsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6ImI4YzlmZmQ2Nzc5ODE5OWY2YzFiNmI5N2MxZWE5YzU0ZDEyNTZkZmQyN2U2MjhiODVmODkwMjViNGY1OWQzMGEiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6IjMwYzFmMTg4ZjE0MmVkN2E4MjQ2ODBiMjA3MTcyYzU1MTliYzYxNGE0OGZkYTdjZjE2N2VkYjhkZGY3OTk1NmMiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6IjBhZmI3ZGZkNDc4MGExN2JiYjk4OGQ3ZDY4MzJmMGQ4NmE5ZTU5YWYzYTllZmRiY2JkZGE5MjQwNDFlZjA0YWMiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6IjYxYjJiMTc5YjBlZWRlN2JkYjIzYzZhYTA1MjUwZGYzYWU4MDdmZWQzY2JlOGU5ZjU4NTkzNjIxZDBmYWQ4ZTcifQ"
+          "resource": "repo://openswe/tools/open_pull_request.py#L965-L996",
+          "version": "repo-lines-v1:sha256:57778b4dc43d7fec110e5c8272274001d1f6fb78881476ef475ea235665d6c9e:eyJzZWxlY3RlZExpbmVDb3VudCI6MzIsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6IjVkOGY5NjNlYzViZTU0MjA3ZDkyNTU3MDQ2Mzk1YWYyZWQwNDhjMGFmYzBjNTcxYjNlNTVhMDgyMGJjYjQwMzgiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6IjMwYzFmMTg4ZjE0MmVkN2E4MjQ2ODBiMjA3MTcyYzU1MTliYzYxNGE0OGZkYTdjZjE2N2VkYjhkZGY3OTk1NmMiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6Ijg0NWFiYTdjMmRkYWViNTUxMzUzMDljMjU5NWMyMGYwNjMxMjVhM2VlN2Q2MjU1OWVlMDUzMDJlMmVhZDgyYTciLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6IjYxYjJiMTc5YjBlZWRlN2JkYjIzYzZhYTA1MjUwZGYzYWU4MDdmZWQzY2JlOGU5ZjU4NTkzNjIxZDBmYWQ4ZTcifQ"
         }
       ]
     },
@@ -215,7 +207,7 @@
       "statement": "When a preflight check detects a revoked user token (401 response), open_pull_request returns github_user_auth_revoked with a link to the settings page so the user can re-authenticate.",
       "evidence": [
         {
-          "resource": "repo://openswe/tools/open_pull_request.py#L315-L339",
+          "resource": "repo://openswe/tools/open_pull_request.py#L316-L340",
           "version": "repo-lines-v1:sha256:e21068eeb0c9857ff8c1e000b9aa1617237f4597233cb4053263995f7f7bc9ce:eyJzZWxlY3RlZExpbmVDb3VudCI6MjUsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6Ijk0MzNhNDIwNzQwYTNjODAyYjk5Mzc1MTRlNTAyYWE5ZDUzODhmZGY1NDg4NWE0MzY0ZWM4ODFhMmJiN2RmNzUiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6IjMwYzFmMTg4ZjE0MmVkN2E4MjQ2ODBiMjA3MTcyYzU1MTliYzYxNGE0OGZkYTdjZjE2N2VkYjhkZGY3OTk1NmMiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6IjhjYzRhN2QxY2M3OTZhYmEzZTQ2NzIzMzI3ZjUxN2U5ZjgxMTk4MmQyNTBmMDcwMjk4NmU0YjU3NjRhZDk1ODkiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6ImNhZDYzYmQ4ZDk3NjVjMTc3OTJlNDhiOTk0ZThmY2E0Yjk0NTMyNjZlZmE4ZGQ2ZTBmNDhhMGM5YmQxN2FkOTgifQ"
         }
       ]
@@ -223,6 +215,6 @@
   ],
   "verification": {
     "by": "openwiki/0.4.2",
-    "at": "2026-10-18T12:31:08.965Z"
+    "at": "2026-10-21T13:36:13.083Z"
   }
 }

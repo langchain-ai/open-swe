@@ -22,8 +22,6 @@ sources:
     resource: repo://openswe/linear/routes.py
   - id: openwiki-source-e1b58373b113650a4ad4b477
     resource: repo://openswe/linear/webhook.py
-  - id: openwiki-source-685dc33e7199aa1f6e402f7a
-    resource: repo://openswe/scheduler.py
   - id: openwiki-source-8a63971e6f57fbbd7583054b
     resource: repo://openswe/schedules/store.py
   - id: openwiki-source-c1d629bf5196269b73880148
@@ -36,10 +34,10 @@ sources:
     resource: repo://openswe/threads/proxy.py
   - id: openwiki-source-5c84530a3d0edb1fb15187f1
     resource: repo://openswe/threads/runs.py
-generated: { by: "openwiki/0.4.2", at: "2026-10-18T12:31:08.965Z" }
+generated: { by: "openwiki/0.4.2", at: "2026-10-21T13:36:13.083Z" }
 verified:
   - by: openwiki/0.4.2
-    at: 2026-10-18T12:31:08.965Z
+    at: 2026-10-21T13:36:13.083Z
 ---
 
 # Inbound Invocation to Durable Run
@@ -122,7 +120,7 @@ Inputs are not arbitrary prompt strings at the graph boundary. `human_input` and
 
 ## Durable dispatch and completion
 
-`dispatch_agent_run` is the single agent/reviewer dispatch contract. It refuses ambiguous calls that combine prebuilt input with raw content/identity arguments, selects the graph with `assistant_id`, and delegates to `create_durable_run`. The latter defaults to `multitask_strategy="interrupt"`, `durability="async"`, and `stream_resumable=True`; callers such as untagged Slack follow-ups can explicitly select `enqueue`. Async durability checkpoints each step while the next one runs, so a crash or process recycle can resume from at most a step back instead of losing the run.
+`dispatch_agent_run` is the single agent/reviewer dispatch contract. It rejects ambiguous calls that combine prebuilt input with raw content/identity arguments, selects the graph with `assistant_id`, and delegates to `create_durable_run`. The latter defaults to `multitask_strategy="interrupt"`, `durability="async"`, and `stream_resumable=True`; callers such as untagged Slack follow-ups can explicitly select `enqueue`. Async durability checkpoints each step while the next one runs, so a crash or process recycle can resume from at most a step back instead of losing the run.
 
 Every created run is marked for Protocol v2 streaming via the `__event_streaming_v2` configuration key, includes the v2 stream modes (`values`, `updates`, `messages`, `custom`, `tasks`, `checkpoints`) and subgraphs, and receives an `invocation_id` (with legacy `prepare_run_id` alias) in both configurable state and metadata. This preserves tools/lifecycle and nested-agent visibility for runs that the dashboard did not start, and lets a later client replay the stream.
 

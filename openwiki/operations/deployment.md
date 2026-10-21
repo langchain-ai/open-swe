@@ -3,6 +3,9 @@ type: operations-guide
 title: Development, Deployment, and Serving
 description: Deploy Open SWE as a single LangGraph service across multiple topologies — local development with Docker PostgreSQL, standalone Docker, LangGraph Platform, Electron desktop, and multiple replicas. Covers environment setup, dashboard mounting, webhook exposure, authentication modes, checkpointer durability, and health checks.
 tags: [deployment, development, docker, langgraph, dashboard, webhooks, desktop, postgresql, operations, migrations, checkpointer]
+verified:
+  - by: openwiki/0.4.2
+    at: 2026-10-21T13:36:13.083Z
 sources:
   - id: openwiki-source-2f66613e587b7c57d9be522e
     resource: repo://desktop/README.md
@@ -42,28 +45,23 @@ sources:
     resource: repo://ui/server/backend-proxy.ts
   - id: openwiki-source-a741d432f952c0dbfb4fb35d
     resource: repo://ui/vite.config.ts
-generated: { by: "openwiki/0.4.2", at: "2026-10-15T13:12:32.024Z" }
-verified:
-  - by: openwiki/0.4.2
-    at: 2026-10-18T12:31:08.965Z
+generated: { by: "openwiki/0.4.2", at: "2026-10-21T13:36:13.083Z" }
 ---
 
 # Development, Deployment, and Serving
 
-Open SWE is deployed as a single LangGraph application: five registered graphs (`agent`, `reviewer`, `review-scout`, `chat`, `scheduler`) plus a FastAPI application (`openswe.webapp:app`), wired through `langgraph.json`. The deployment topology determines serving: all components share one origin, so the LangGraph API (`/threads`, `/runs`, `/assistants`, `/store`), the FastAPI dashboard API (`/dashboard/api/*`), webhook endpoints (`/webhooks/*`), and the bundled dashboard UI are served from the same URL. Multiple replicas share Postgres for state and Redis for workers. The local development and production backend support Electron desktop clients as well as web clients.
+Open SWE is deployed as a single LangGraph application: three registered graphs (`agent`, `reviewer`, `review-scout`) plus a FastAPI application (`openswe.webapp:app`), wired through `langgraph.json`. PR chat and scheduled work run through FastAPI proxies and job-queue handlers rather than as separate registered graphs. The deployment topology determines serving: all components share one origin, so the LangGraph API (`/threads`, `/runs`, `/assistants`, `/store`), the FastAPI dashboard API (`/dashboard/api/*`), webhook endpoints (`/webhooks/*`), and the bundled dashboard UI are served from the same URL. Multiple replicas share Postgres for state and Redis for workers. The local development and production backend support Electron desktop clients as well as web clients.
 
-<!-- openwiki: broken internal link [../configuration.md] file "../configuration.md" does not exist. Fix the href or restore the target, then delete this comment. -->
-See [Configuration](../configuration.md) for the complete environment variable reference, [Dashboard UI](../integrations/dashboard-ui.md) for UI behavior and mounting, and [Invocation](../workflows/invocation.md) for how requests become runs.
+<!-- openwiki: broken internal link [../workflows/integrations.md] file "../workflows/integrations.md" does not exist. Fix the href or restore the target, then delete this comment. -->
+See [Configuration](../operations/configuration.md) for the complete environment variable reference and [Webhooks and integrations](../workflows/integrations.md) for how external events become runs.
 
 ## Architecture
 
 ### Manifest and runtime versions
 
-Open SWE's local development runtime uses Python 3.14 and LangGraph constraints `langgraph-api>=0.15.0rc1,<0.16` and `langgraph-runtime-inmem>=0.35.0rc1,<0.36` (set in `pyproject.toml`). The manifest `langgraph.json` declares the Python version (`3.14`), LangGraph API version (`>~=0.15.0rc1`), the five registered graphs and FastAPI app (`http.app`), a checkpointer TTL policy (60-minute sweep interval, 43,200-minute—30 day—default TTL with delete strategy), and loads `.env` from the repository root.
+Open SWE's local development runtime uses Python 3.14 and LangGraph constraints `langgraph-api>=0.16.1,<0.17` and `langgraph-runtime-inmem>=0.36.1,<0.37` (set in `pyproject.toml` as constraint-dependencies). The manifest `langgraph.json` declares the Python version (`3.14`), LangGraph API version (`>~=0.15.0rc1`), the three registered graphs and FastAPI app (`http.app`), a checkpointer TTL policy (60-minute sweep interval, 43,200-minute—30 day—default TTL with delete strategy), and loads `.env` from the repository root.
 
 For LangGraph Platform deployments, `langgraph.json` includes `dockerfile_lines` that perform a best-effort dashboard build: the platform extracts the `http.mount_prefix` from the manifest and supplies it to the build, then continues backend deployment even if the UI build fails. The standalone `Dockerfile` builds a production image using `langchain/langgraph-api:0.15.1-py3.14`, installs Open SWE with `uv`, and bakes graph registrations (via `LANGSERVE_GRAPHS`), the FastAPI app (via `LANGGRAPH_HTTP`), and checkpointer settings (via `LANGGRAPH_CHECKPOINTER`) into environment variables rather than manifest declarations.
-
-The desktop build uses a separate trimmed manifest `langgraph.desktop.json` (Python 3.14, API version 0.13.3) that exposes only the `agent` graph, disables the built-in UI, and configures a local auth handler (`openswe.local_auth:auth`) with Studio auth disabled plus a local checkpointer, so the app owns a private loopback LangGraph server for local-only agent work.
 
 ### Startup sequence
 
@@ -184,7 +182,7 @@ This runs `uv sync --extra dev` and installs Open SWE in development mode.
 make dev
 ```
 
-Executes `uv run langgraph dev --no-browser --port 2024 --n-jobs-per-worker 10`. The server runs all five graphs and the FastAPI app on `http://localhost:2024`, making both `/webhooks/*` and `/dashboard/api/*` endpoints available from a single process.
+Executes `uv run langgraph dev --no-browser --port 2024 --n-jobs-per-worker 10`. The server runs all three graphs and the FastAPI app on `http://localhost:2024`, making both `/webhooks/*` and `/dashboard/api/*` endpoints available from a single process.
 
 A local PostgreSQL 16 container (`open-swe-postgres`) is started automatically unless `POSTGRES_URI` is already set. The container binds to loopback only (`127.0.0.1:5433`) and persists data in a named volume (`open-swe-postgres`), so stopping the container preserves workspace and user data across restarts.
 
@@ -210,7 +208,7 @@ flowchart TD
   Vite["Vite dev server on port 3000"]
   LG["LangGraph dev on port 2024"]
   FastAPI["FastAPI app"]
-  Graphs["Five LangGraph graphs"]
+  Graphs["Three LangGraph graphs"]
   Routes["Dashboard API / Webhooks / Health"]
   Proxy["Reverse-proxy Vite for UI requests"]
 
@@ -281,7 +279,7 @@ Build with:
 docker build -t open-swe .
 ```
 
-The root `Dockerfile` uses the `langchain/langgraph-api:0.15.1-py3.14` base image, installs the repository with `uv`, bakes the five graph registrations into `LANGSERVE_GRAPHS`, the FastAPI app into `LANGGRAPH_HTTP`, and checkpointer settings into `LANGGRAPH_CHECKPOINTER`, and exposes port 8000.
+The root `Dockerfile` uses the `langchain/langgraph-api:0.15.1-py3.14` base image, installs the repository with `uv`, bakes the three graph registrations into `LANGSERVE_GRAPHS`, the FastAPI app into `LANGGRAPH_HTTP`, and checkpointer settings into `LANGGRAPH_CHECKPOINTER`, and exposes port 8000.
 
 For a standalone server, provide:
 
@@ -408,7 +406,7 @@ make install-checkout          # install/update current checkout without git cha
 
 The installation script is macOS-only and:
 
-1. Checks for Node 24, `ditto`, `uv`, and a pnpm/corepack launcher
+1. Checks for Node 24, `ditto`, `bun`, and a pnpm/corepack launcher
 2. Packs the application with `pnpm --dir desktop run pack`
 3. Stages the `.app` to `<target>.installing.$$` (atomic move)
 4. Terminates the existing app (if running)

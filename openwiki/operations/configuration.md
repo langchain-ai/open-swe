@@ -5,7 +5,7 @@ description: Explains Open SWE's lazy environment registry, persisted team and w
 tags: [configuration, operations, environment-variables, startup-validation, sandbox, models, security, workspace-settings]
 verified:
   - by: openwiki/0.4.2
-    at: 2026-10-18T12:31:08.965Z
+    at: 2026-10-21T13:36:13.083Z
 sources:
   - id: openwiki-source-5bbba7b2a8ea8360ff233d63
     resource: repo://langgraph.json
@@ -35,7 +35,7 @@ sources:
     resource: repo://openswe/utils/gateway.py
   - id: openwiki-source-4cc74089c0207ec1e5a6ca3b
     resource: repo://openswe/utils/model.py
-generated: { by: "openwiki/0.4.2", at: "2026-10-18T12:31:08.965Z" }
+generated: { by: "openwiki/0.4.2", at: "2026-10-21T13:36:13.083Z" }
 ---
 
 # Configuration and Environment
@@ -59,21 +59,23 @@ The canonical name wins over aliases. Deprecated names and aliases are registere
 
 ## Startup lifecycle and validation
 
-The FastAPI entrypoint is `openswe.api.app:create_app`. It pins the process to a single event loop before background workers are constructed, and pins again in the lifespan startup phase. The lifespan then runs four mandatory checks in order, aborting startup if any fail. After validation, it initializes background workers and services before yielding to serve routes. On shutdown it closes the database and stops workers.
+The FastAPI entrypoint is `openswe.api.app:create_app`. It pins the process to a single event loop before background workers are constructed, and pins again in the lifespan startup phase. The lifespan then runs mandatory validation checks in order, aborting startup if any fail. After validation, it initializes background workers and services before yielding to serve routes. On shutdown it closes the database and stops workers.
 
 <!-- openwiki: mermaid parse failed and this diagram was converted to a text fence so it does not break rendering. Fix the diagram source and restore the mermaid fence. Parser error: Heuristic: an unescaped angle bracket inside a label breaks rendering; rephrase the label. -->
 ```text
 flowchart TD
     Init["Import application"] --> Pin["Pin one event loop"]
     Pin --> Build["Create FastAPI application"]
-    Build --> ValidateOrigins{"DASHBOARD_ALLOWED_ORIGINS<br/>contains '*'?"}
+    Build --> ValidateOrigins{"DASHBOARD_ALLOWED_ORIGINS<br/>contains asterisk?"}
     ValidateOrigins -->|yes| Abort["Abort: credentialed CORS<br/>cannot use wildcard"]
     ValidateOrigins -->|no| Start["Lifespan startup"]
     Start --> CheckAuth["Validate GitHub login allowlist"]
     CheckAuth -->|fail| Stop["Raise and abort startup"]
     CheckAuth -->|pass| CheckSandbox["Validate sandbox configuration"]
     CheckSandbox -->|fail| Stop
-    CheckSandbox -->|pass| CheckModel["Validate localhost model credentials"]
+    CheckSandbox -->|pass| CheckMDA["Validate MDA/remote runtime URL"]
+    CheckMDA -->|fail| Stop
+    CheckMDA -->|pass| CheckModel["Validate localhost model credentials"]
     CheckModel -->|fail| Stop
     CheckModel -->|pass| Workers["Initialize background workers"]
     Workers --> Serve["Serve routes and runs"]
@@ -83,6 +85,8 @@ flowchart TD
 ### Validation details
 
 **GitHub login gate**: Startup fails when neither `OPEN_SWE_LOCAL_AUTH_TOKEN` is set nor either `ALLOWED_GITHUB_ORGS` or `ALLOWED_GITHUB_USERS` is non-empty. The deployment must gate dashboard access.
+
+**MDA/Remote runtime**: Startup fails when `MDA_RUNTIME_URL` is not configured, since the agent and reviewer graphs require it. If set, the validation checks that the URL is available.
 
 **Sandbox configuration**: Validation is provider-specific. For `SANDBOX_TYPE=langsmith`, it checks numeric resource fields (`DEFAULT_SANDBOX_*_BYTES`, `DEFAULT_SANDBOX_*_SECONDS`), numeric TTL fields (rejecting negative values for idle or delete-after-stop), and `SANDBOX_CREATE_EXTRA_JSON` (rejecting non-JSON or non-object). An unsupported provider name is rejected only when `create_sandbox` is called, not at startup.
 
@@ -168,6 +172,14 @@ Run completion/failure replies require `RUN_COMPLETE_WEBHOOK_SECRET` and a usabl
 
 Dispatch attaches a completion webhook only when the secret is set and `COMPLETION_WEBHOOK_URL` is absolute (not relative) and non-loopback (not localhost or 127.0.0.1). A relative or loopback URL is logged as a warning and omitted (not a run failure) so invalid URLs cannot poison run creation. The dispatch URL carries the token as a query parameter for constant-time verification.
 
+## MCP server configuration
+
+Open SWE's agent graph includes an MCP (Model Context Protocol) server that can integrate with external tools and data sources. Each workspace can configure MCP servers and their parameters. Configuration is workspace-level, set through workspace settings or workspace-specific environment overrides.
+
+- **Per-workspace MCP config**: Workspaces can specify MCP server URLs, authentication tokens, and other parameters. These override deployment defaults.
+- **Fallback to deployment defaults**: When a workspace does not override an MCP setting, the deployment configuration applies.
+- **Local development**: The MCP server validates that the workspace can reach configured URLs at startup to fail fast in development.
+
 ## Operation and extension
 
 **Adding an environment variable**: Declare it in `openswe/config.py` with a description, defaults, secret status, and any aliases or deprecated names. Consume through `ENV.NAME` or `ENV["NAME"]`, never through direct `os.environ` reads, so late hydration and key rotation are observed.
@@ -190,3 +202,4 @@ Cover the registry's behavior (blank/alias/typed-value access), invalid LangSmit
 - [Models, profiles, and instructions](../concepts/models-profiles-instructions.md) — model selection and resolution
 - [Authentication and security](../concepts/auth-and-security.md) — GitHub App, OAuth, and authorization
 - [Sandbox providers](../integrations/sandbox-providers.md) — provider-specific details
+- [Observability and MCP](../integrations/observability-and-mcp.md) — MCP server setup and troubleshooting

@@ -24,10 +24,10 @@ sources:
     resource: repo://openswe/tools/publish_review.py
   - id: openwiki-source-065c69ba95cc740a2282dd3c
     resource: repo://tests/reviewer/test_factory_config_isolation.py
+generated: { by: "openwiki/0.4.2", at: "2026-10-21T13:36:13.083Z" }
 verified:
   - by: openwiki/0.4.2
-    at: 2026-10-18T12:31:08.965Z
-generated: { by: "openwiki/0.4.2", at: "2026-10-13T15:44:17.388Z" }
+    at: 2026-10-21T13:36:13.083Z
 ---
 
 # Reviewer Graph and Code Review
@@ -42,14 +42,14 @@ For trigger routing and webhook behavior, see [PR Review Workflow](../workflows/
 
 The reviewer is read-only with respect to the repository. Its system prompt prohibits commits, pushes, and direct `gh pr review` or review-API calls. It has no coding, commit, push, or PR-opening tools: repository changes cannot be an agent action. GitHub review mutation is centralized in `publish_review` and the finding-thread tools.
 
-`get_reviewer_agent(config)` creates the graph per run. It shallow-copies the outer config and its `configurable` mapping before supplying a default recursion limit, preserving the caller's configuration. If the run has no `thread_id`, or the graph is not loaded for execution, it deliberately returns an empty deep agent rather than provisioning a sandbox.
+`get_reviewer_agent(config)` and `build_reviewer_agent(config)` create the graph per run. The factory shallow-copies the outer config and its `configurable` mapping before supplying a default recursion limit, preserving the caller's configuration. If the run has no `thread_id`, or the graph is not loaded for execution, it deliberately returns an empty deep agent rather than provisioning a sandbox.
 
 For an executable run, the factory selects reviewer and subagent models from explicit configuration or team defaults, applies the Fable model gate, and attaches a cached sandbox backend with a reconnect closure. Its explicit tools are:
 
 - review lifecycle: `fetch_review_diff`, `add_finding`, `update_finding`, `list_findings`, `publish_review`, `resolve_finding_thread`, and `reply_to_finding_thread`;
 - read-only external helpers: `web_search`, `fetch_url`, and `http_request`.
 
-It permits one `reviewer` subagent. The parent assigns a disjoint file partition; the subagent returns only candidate defects and has neither finding nor publication tools. The parent remains responsible for validation, persistence, and publication.
+It permits one `reviewer` subagent configured with an explicit system prompt. The parent assigns a disjoint file partition; the subagent returns only candidate defects and has neither finding nor publication tools. The parent remains responsible for validation, persistence, and publication. MCP workspace tools are loaded only for private-repository reviews (public reviews never receive them to prevent steering via attacker-controlled PR text).
 
 ### Run preparation, GitHub access, and context
 

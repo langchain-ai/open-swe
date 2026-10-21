@@ -8,8 +8,6 @@ sources:
     resource: repo://langgraph.json
   - id: openwiki-source-4b1279a0a1e5ec2d55a4558a
     resource: repo://openswe/api/app.py
-  - id: openwiki-source-70b814b26d317c2b15c4a4fb
-    resource: repo://openswe/chat.py
   - id: openwiki-source-e4bce0ee35cec33ca72293f7
     resource: repo://openswe/dashboard/__init__.py
   - id: openwiki-source-7fc33e4789861923a6f12e78
@@ -20,18 +18,18 @@ sources:
     resource: repo://openswe/github/routes.py
   - id: openwiki-source-813c25f6bac2408de322a1f5
     resource: repo://openswe/graphs/agent.py
-  - id: openwiki-source-3bfcac4339fc43029fdaee09
-    resource: repo://openswe/graphs/chat.py
   - id: openwiki-source-a9562865a4bff791686b49dd
     resource: repo://openswe/graphs/review_scout.py
   - id: openwiki-source-90b15fd6117126ebfe5b6b22
     resource: repo://openswe/graphs/reviewer.py
+  - id: openwiki-source-1501ebbb20af772307a3e518
+    resource: repo://openswe/jobs/kinds.py
   - id: openwiki-source-ff94e6d6f8e823f174c61b08
     resource: repo://openswe/linear/routes.py
+  - id: openwiki-source-7a02c62499495310b04f21ef
+    resource: repo://openswe/review/chat.py
   - id: openwiki-source-96bcad07b4fe7078402bc2b8
     resource: repo://openswe/reviewer.py
-  - id: openwiki-source-685dc33e7199aa1f6e402f7a
-    resource: repo://openswe/scheduler.py
   - id: openwiki-source-919e16feae379651f2cbc1c9
     resource: repo://openswe/server.py
   - id: openwiki-source-c1d629bf5196269b73880148
@@ -44,15 +42,15 @@ sources:
     resource: repo://ui/src/router.tsx
   - id: openwiki-source-c7a3ad58e4b4017484c1e326
     resource: repo://ui/src/routes/agents.tsx
-generated: { by: "openwiki/0.4.2", at: "2026-10-18T12:31:08.965Z" }
+generated: { by: "openwiki/0.4.2", at: "2026-10-21T13:36:13.083Z" }
 verified:
   - by: openwiki/0.4.2
-    at: 2026-10-18T12:31:08.965Z
+    at: 2026-10-21T13:36:13.083Z
 ---
 
 # Runtime and Product Architecture
 
-Open SWE is a LangGraph deployment with a custom FastAPI application. The HTTP layer accepts browser and integration traffic, while durable LangGraph runs execute coding or review work against thread-scoped state and—except for PR chat—a backend. Five registered graph entrypoints separate the primary agent, reviewer, review-scout tool inspector, read-only PR chat, and time-triggered work.
+Open SWE is a LangGraph deployment with a custom FastAPI application. The HTTP layer accepts browser and integration traffic, while durable LangGraph runs execute coding or review work against thread-scoped state and—except for PR chat—a backend. Three registered graph entrypoints power the main agent, reviewer, and review-scout tool inspector. PR chat flows through a FastAPI proxy to the main agent thread, and background work runs via the job queue, not as registered graphs.
 
 ## Mission and workflow
 
@@ -75,8 +73,6 @@ It also operates as a reviewer (runs on-demand or automatic reviews, publishes f
 | `agent` | `openswe.graphs.agent:traced_agent` | Per-run coding-agent factory: backend, models, tools, skills, and middleware. |
 | `reviewer` | `openswe.graphs.reviewer:traced_reviewer_agent` | PR review and findings publication workflow. |
 | `review-scout` | `openswe.graphs.review_scout:traced_review_scout` | Review-tool inspection and capability discovery. |
-| `chat` | `openswe.graphs.chat:traced_chat_agent` | Read-only discussion of one PR, without a sandbox. |
-| `scheduler` | `openswe.graphs.scheduler:get_scheduler` | A cron-tick dispatcher for maintenance and scheduled work. |
 
 ```
 flowchart TD
@@ -84,7 +80,8 @@ flowchart TD
   Linear["Linear"] --> Webhooks
   GitHub["GitHub"] --> Webhooks
   Browser["Web dashboard"] --> Dashboard["Dashboard router"]
-  Cron["Cron tick"] --> Scheduler["scheduler graph"]
+  JobQueue["Job queue"] --> BackgroundJobs["Background jobs<br/>(reconcile, watch, costs)"]
+  Dashboard --> Chat["PR chat proxy"]
 
   subgraph App["FastAPI app"]
     Webhooks
@@ -93,16 +90,16 @@ flowchart TD
 
   Webhooks --> Dispatch["dispatch_agent_run"]
   Dashboard --> Dispatch
-  Scheduler --> Dispatch
   Dispatch --> Agent["agent graph"]
   Dispatch --> Reviewer["reviewer graph"]
   Agent --> Backend["Thread sandbox or desktop backend"]
   Reviewer --> Backend
   Scout["review-scout graph"] --> Backend
-  Browser --> Chat["chat graph"]
+  Chat --> Agent
+  BackgroundJobs --> Dispatch
 ```
 
-This shows the principal paths. `dispatch_agent_run` is the shared creation boundary for `agent` and `reviewer` runs; chat, review-scout, and scheduler invocations use their own graph entrypoints.
+This shows the principal paths. `dispatch_agent_run` is the shared creation boundary for `agent` and `reviewer` runs; review-scout uses its own graph entrypoint. Chat, background work, and scheduled runs do not go through dispatch or registered graphs.
 
 ## Graph and execution boundaries
 
@@ -110,13 +107,13 @@ This shows the principal paths. `dispatch_agent_run` is the shared creation boun
 
 The reviewer follows the sandbox lifecycle but deliberately has a review-only toolset: `add_finding`, `update_finding`, `list_findings`, and `publish_review`; it does not receive commit, push, or PR-opening tools. Its preparation computes an in-diff line set so finding validation occurs when a finding is created, rather than failing only during GitHub publication. The review-scout graph uses the same sandbox and authenticated `gh` access but is designed for capability inspection and review-tool discovery. See [Reviewer Graph](./reviewer-and-analyzer.md).
 
-The chat graph is intentionally sandbox-less and read-only. The dashboard review-chat proxy seeds the PR diff, findings, and overview as virtual `/pr/` files in the graph's `files` state channel. Filesystem tools can read that context, while `execute`, writes, edits, and deletion are excluded; GitHub-backed tools use a repository-scoped GitHub App token rather than a user credential.
+The chat flow is intentionally sandbox-less and read-only. Rather than being a separate graph, it is a FastAPI proxy in `openswe/review/chat.py` that proxies requests through to the main agent thread. The dashboard review-chat handlers seed the PR diff, findings, and overview via the existing agent thread's state. Filesystem tools can read that context, while `execute`, writes, edits, and deletion are excluded; GitHub-backed tools use a repository-scoped GitHub App token rather than a user credential.
 
-The scheduler is a compiled, single-node `StateGraph`. Its `_launch` node dispatches a cron tick to reconciliation, watch evaluation, background-task monitoring, session-cost or agent-cost refresh, thread-feedback evaluation, human-review deadline management, or `launch_scheduled_agent_run`. Missing a watch key, thread ID, or schedule ID yields a structured status instead of launching ambiguous work.
+Background and scheduled work runs via the job queue (openswe/jobs), not as registered graphs. Job handlers dispatch to reconciliation (`reconcile_stale_runs`), watch evaluation (`evaluate_watch`), background-task monitoring, session-cost or agent-cost refresh, thread-feedback evaluation, human-review deadline management, or scheduled agent runs. Missing a watch key, thread ID, or schedule ID yields a structured status instead of launching ambiguous work.
 
 ## HTTP composition and ingress
 
-`openswe/webapp.py` is a compatibility re-export of the application assembled by `openswe/api/app.py:create_app`. At import time the API pins one event loop before queue workers are built, and repeated pinning in the lifespan hook ensures all workers share the same loop. The app factory configures credentialed CORS from `DASHBOARD_ALLOWED_ORIGINS` and rejects `*`, then mounts dashboard, plan, workflow-approval, Linear, Notion, Slack, GitHub, health, and sandbox-tool routers plus the bundled dashboard UI. Its lifespan hook validates sandbox and local-development LLM configuration at startup, runs database migrations and user imports, activates analytics, starts listeners for transcripts and sandbox bridges, closes cached models on shutdown, and handles imports of legacy Store records (user mappings, concierge mode, automations).
+`openswe/webapp.py` is a compatibility re-export of the application assembled by `openswe/api/app.py:create_app`. At import time the API pins one event loop before background workers are built, and repeated pinning in the lifespan hook ensures all workers share the same event loop. The app factory configures credentialed CORS from `DASHBOARD_ALLOWED_ORIGINS` and rejects `*`, then mounts dashboard, plan, workflow-approval, Linear, Notion, Slack, GitHub, health, and sandbox-tool routers plus the bundled dashboard UI. Its lifespan hook validates sandbox and local-development LLM configuration at startup, runs database migrations and user imports, activates analytics, starts listeners for transcripts and sandbox bridges, closes cached models on shutdown, and handles imports of legacy Store records (user mappings, concierge mode, automations).
 
 The dashboard router is rooted at `/dashboard/api` and applies a same-origin dependency to mutations. It is the browser-facing boundary for OAuth, profiles, team defaults, administration, repository and review-style configuration, and thread APIs. Importing `openswe.dashboard` does not eagerly load this large surface: a PEP 562 `__getattr__` imports and caches `routes.router` only when the web application mounts it. This prevents middleware and non-webapp modules from pulling in FastAPI and all downstream API/job dependencies.
 

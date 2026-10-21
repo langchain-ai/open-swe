@@ -35,7 +35,7 @@ sources:
 generated: { by: "openwiki/0.4.2", at: "2026-10-18T12:31:08.965Z" }
 verified:
   - by: openwiki/0.4.2
-    at: 2026-10-18T12:31:08.965Z
+    at: 2026-10-21T13:36:13.083Z
 ---
 
 # Context and Prompt Engineering

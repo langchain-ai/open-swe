@@ -1,24 +1,24 @@
 {
   "schemaVersion": 1,
-  "pageVersion": "sha256:bc883967913fb2bbc7539197b667d7b7e55836d12e21137225730f419e91519b",
+  "pageVersion": "sha256:18e1d56d675db81cd28f6c8c1b89ae34b2a0c6e084892659ab9e7a83d2a3b938",
   "claims": [
     {
       "id": "claim_0e227b88b5d94fd5924bb5c89a53831e",
-      "statement": "Open SWE's backend is a LangGraph application that registers five graphs (agent, reviewer, review-scout, chat, scheduler) together with a FastAPI app (openswe.webapp:app), all wired through langgraph.json which declares the Python version (3.14), LangGraph API version (>~=0.15.0rc1), registered graphs, checkpointer TTL policy (60-minute sweep, 43,200-minute default TTL with delete strategy), and loads .env.",
+      "statement": "Open SWE's backend is a LangGraph application that registers three graphs (agent, reviewer, review-scout) together with a FastAPI app (openswe.webapp:app), all wired through langgraph.json which declares the Python version (3.14), LangGraph API version (>~=0.15.0rc1), registered graphs, checkpointer TTL policy (60-minute sweep, 43,200-minute default TTL with delete strategy), and loads .env.",
       "evidence": [
         {
           "resource": "repo://langgraph.json",
-          "version": "repo-file-v1:sha256:cae91925892a68a8665236aaf46d28b8acfe481d5a11ef32f69f070ede01a3b9"
+          "version": "repo-file-v1:sha256:0031c0d6b752b036027ee94b93313ece1b105ae8caf78c7eddd4c444586e1d8a"
         }
       ]
     },
     {
       "id": "claim_865f6195385d4d4ebbe6e5a23dd20014",
-      "statement": "make dev runs `uv run langgraph dev --no-browser --port 2024 --n-jobs-per-worker 10`, serving all five graphs plus the FastAPI app on http://localhost:2024 so that both the /webhooks/* and /dashboard/api/* endpoints are available from one process; a local PostgreSQL 16 container is started automatically unless POSTGRES_URI is set.",
+      "statement": "make dev runs `uv run langgraph dev --no-browser --port 2024 --n-jobs-per-worker 10`, serving all three graphs plus the FastAPI app on http://localhost:2024 so that both the /webhooks/* and /dashboard/api/* endpoints are available from one process; a local PostgreSQL 16 container is started automatically unless POSTGRES_URI is set.",
       "evidence": [
         {
           "resource": "repo://Makefile",
-          "version": "repo-file-v1:sha256:808b2749c818f219f1d662a3a3671f64759f59dd0ed72e2d664138646bc6acb4"
+          "version": "repo-file-v1:sha256:454b48b387adbf1c18c86358975b3e22aceb24e3aa6496a21f8dbb739e61c6e1"
         }
       ]
     },
@@ -28,7 +28,7 @@
       "evidence": [
         {
           "resource": "repo://Makefile",
-          "version": "repo-file-v1:sha256:808b2749c818f219f1d662a3a3671f64759f59dd0ed72e2d664138646bc6acb4"
+          "version": "repo-file-v1:sha256:454b48b387adbf1c18c86358975b3e22aceb24e3aa6496a21f8dbb739e61c6e1"
         }
       ]
     },
@@ -38,25 +38,25 @@
       "evidence": [
         {
           "resource": "repo://Makefile",
-          "version": "repo-file-v1:sha256:808b2749c818f219f1d662a3a3671f64759f59dd0ed72e2d664138646bc6acb4"
+          "version": "repo-file-v1:sha256:454b48b387adbf1c18c86358975b3e22aceb24e3aa6496a21f8dbb739e61c6e1"
         }
       ]
     },
     {
       "id": "claim_7c0acef30b314001ba9760696f5b0434",
-      "statement": "The local dev server's LangGraph constraints are set to langgraph-api>=0.16.0,<0.17 and langgraph-runtime-inmem>=0.36.0,<0.37 in pyproject.toml, while langgraph.json declares api_version >~=0.15.0rc1; the standalone Docker image uses langchain/langgraph-api:0.15.1-py3.14 base with environment variable registrations for graphs and checkpointer instead of manifest declarations.",
+      "statement": "The local dev server's LangGraph constraints are set to langgraph-api>=0.16.1,<0.17 and langgraph-runtime-inmem>=0.36.1,<0.37 in pyproject.toml (as constraint-dependencies), while langgraph.json declares api_version >~=0.15.0rc1; the standalone Docker image uses langchain/langgraph-api:0.15.1-py3.14 base with environment variable registrations for graphs and checkpointer instead of manifest declarations.",
       "evidence": [
         {
           "resource": "repo://Dockerfile",
-          "version": "repo-file-v1:sha256:6a549a4623048ef6495c26220f2b5ba2243c09bff44e4692865af68de110aee5"
+          "version": "repo-file-v1:sha256:d0ddb3959c1eda19cd3de9567f64a8e10afd1135e59dcee4b01f947251d43181"
         },
         {
           "resource": "repo://langgraph.json",
-          "version": "repo-file-v1:sha256:cae91925892a68a8665236aaf46d28b8acfe481d5a11ef32f69f070ede01a3b9"
+          "version": "repo-file-v1:sha256:0031c0d6b752b036027ee94b93313ece1b105ae8caf78c7eddd4c444586e1d8a"
         },
         {
-          "resource": "repo://pyproject.toml",
-          "version": "repo-file-v1:sha256:19b637013503a8c003f126cbf4b5c4a47a10fef49a2d4e8de2850d723e5939af"
+          "resource": "repo://pyproject.toml#L78-L81",
+          "version": "repo-lines-v1:sha256:85bb40eb96568641013be0101d8c7fc293c9e59f35b0461a592da1e9c27c496b:eyJzZWxlY3RlZExpbmVDb3VudCI6NCwiZmlyc3RTZWxlY3RlZExpbmVIYXNoIjoiMjg2MmU0MmI1ZDAyY2I5OTUwM2I2MGVmNWY4MzNiNTc0MTA1YzkxYWUzMTFmNmM3NTZlODcyYzk5ZDIzNTYwYiIsImxhc3RTZWxlY3RlZExpbmVIYXNoIjoiZjk0MTZlMDlmNzhiYTMxNmMwMzI1NjgyMTNiODU1ZWU3NTZlNDE1NjVkOTE4ZjA5NTE5YzgxZmQ2MjBmNDA2MCIsInByZWNlZGluZ0NvbnRleHRMaW5lQ291bnQiOjMsInByZWNlZGluZ0NvbnRleHRIYXNoIjoiODBkYmIyNjM5ZjU0YjUxOTE0ZmRmZTU0MWUyOWQxODhjZTA2YTA0NmJjYTQxZWRiNGYxMjI5ZWNkYjNkZWZlNCIsImZvbGxvd2luZ0NvbnRleHRMaW5lQ291bnQiOjMsImZvbGxvd2luZ0NvbnRleHRIYXNoIjoiMjkwNWJkZWQwNjQ0MDE5ODI4NDkwYjFkNTZjOTA2YTQ4YTk4YzIwM2JlMTY5MDNiNGZmNTIwMmI5NTRmYjZhZSJ9"
         }
       ]
     },
@@ -76,15 +76,15 @@
       "evidence": [
         {
           "resource": "repo://Makefile",
-          "version": "repo-file-v1:sha256:808b2749c818f219f1d662a3a3671f64759f59dd0ed72e2d664138646bc6acb4"
+          "version": "repo-file-v1:sha256:454b48b387adbf1c18c86358975b3e22aceb24e3aa6496a21f8dbb739e61c6e1"
         },
         {
           "resource": "repo://package.json",
           "version": "repo-file-v1:sha256:448c10173e8cd0d561069c0a53fe7eadce7d9b8d42c9b1402a131764bba7dc26"
         },
         {
-          "resource": "repo://ui/vite.config.ts",
-          "version": "repo-file-v1:sha256:f787f4d491689d150e6262ef3672fc6225f2804dd10b10696f4d72106953607a"
+          "resource": "repo://ui/vite.config.ts#L161-L161",
+          "version": "repo-lines-v1:sha256:6654907119fea310a113f639a9b35ce7b083772758a1e9f642ebbb6477e0b021:eyJzZWxlY3RlZExpbmVDb3VudCI6MSwiZmlyc3RTZWxlY3RlZExpbmVIYXNoIjoiNjY1NDkwNzExOWZlYTMxMGExMTNmNjM5YTliMzVjZTdiMDgzNzcyNzU4YTFlOWY2NDJlYmJiNjQ3N2UwYjAyMSIsImxhc3RTZWxlY3RlZExpbmVIYXNoIjoiNjY1NDkwNzExOWZlYTMxMGExMTNmNjM5YTliMzVjZTdiMDgzNzcyNzU4YTFlOWY2NDJlYmJiNjQ3N2UwYjAyMSIsInByZWNlZGluZ0NvbnRleHRMaW5lQ291bnQiOjMsInByZWNlZGluZ0NvbnRleHRIYXNoIjoiOGVmZWU1OWZjOTI5YzlmNGZjN2QyZjU1NmY1NGI1NzkwMGVhZmQ4ZTQxZWUzYzgwNGQwZWIwOGIyYmMxMzI4NCIsImZvbGxvd2luZ0NvbnRleHRMaW5lQ291bnQiOjMsImZvbGxvd2luZ0NvbnRleHRIYXNoIjoiMjE2MzcxYTY3OWViMjZiOTdjYjUzOTQ3MDYyNWMxNDk4MjYzZDlhNGNhNTE1MTVjMGQ2MmQ2M2EyMDBkMzk3MyJ9"
         }
       ]
     },
@@ -124,7 +124,7 @@
       "evidence": [
         {
           "resource": "repo://Makefile",
-          "version": "repo-file-v1:sha256:808b2749c818f219f1d662a3a3671f64759f59dd0ed72e2d664138646bc6acb4"
+          "version": "repo-file-v1:sha256:454b48b387adbf1c18c86358975b3e22aceb24e3aa6496a21f8dbb739e61c6e1"
         }
       ]
     },
@@ -160,11 +160,11 @@
     },
     {
       "id": "claim_eadc4b3dcf5e4752bf245ed137ea5a67",
-      "statement": "The root Dockerfile builds the standalone production LangGraph API server image from langchain/langgraph-api:0.15.1-py3.14, installing the repository with uv and baking the five graph registrations (via LANGSERVE_GRAPHS), HTTP app (via LANGGRAPH_HTTP), and checkpointer TTL (via LANGGRAPH_CHECKPOINTER) into environment variables; it exposes port 8000.",
+      "statement": "The root Dockerfile builds the standalone production LangGraph API server image from langchain/langgraph-api:0.15.1-py3.14, installing the repository with uv and baking the three graph registrations (via LANGSERVE_GRAPHS), HTTP app (via LANGGRAPH_HTTP), and checkpointer TTL (via LANGGRAPH_CHECKPOINTER) into environment variables; it exposes port 8000.",
       "evidence": [
         {
           "resource": "repo://Dockerfile",
-          "version": "repo-file-v1:sha256:6a549a4623048ef6495c26220f2b5ba2243c09bff44e4692865af68de110aee5"
+          "version": "repo-file-v1:sha256:d0ddb3959c1eda19cd3de9567f64a8e10afd1135e59dcee4b01f947251d43181"
         }
       ]
     },
@@ -174,7 +174,7 @@
       "evidence": [
         {
           "resource": "repo://docs/INSTALLATION.md",
-          "version": "repo-file-v1:sha256:6cd680724ead93b6cd57db31da0bae0a5f88862572bacaf9f16d21d62a6c9745"
+          "version": "repo-file-v1:sha256:b97bacc9d5998f93882695419eb1aae8ceebc68bd8076314a561c276ddf45348"
         }
       ]
     },
@@ -204,7 +204,7 @@
       "evidence": [
         {
           "resource": "repo://docs/INSTALLATION.md",
-          "version": "repo-file-v1:sha256:6cd680724ead93b6cd57db31da0bae0a5f88862572bacaf9f16d21d62a6c9745"
+          "version": "repo-file-v1:sha256:b97bacc9d5998f93882695419eb1aae8ceebc68bd8076314a561c276ddf45348"
         }
       ]
     },
@@ -213,8 +213,8 @@
       "statement": "The production Nitro proxy requires DASHBOARD_API_URL at request time and throws if it is unset, rather than falling back to a backend; it proxies the original path and query while preserving OAuth redirects manually.",
       "evidence": [
         {
-          "resource": "repo://ui/server/backend-proxy.ts",
-          "version": "repo-file-v1:sha256:621b86cafa2d1d4f2d0b305a00a90eaa4868efff6431a56b9381e3de27c8d0ac"
+          "resource": "repo://ui/server/backend-proxy.ts#L1-L12",
+          "version": "repo-lines-v1:sha256:0a38af90f197ceb9c4ec57d1f6be0499c52ec728f060b77f07c02a6cfab1bba3:eyJzZWxlY3RlZExpbmVDb3VudCI6MTIsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6IjRmOWQ0NTkyYWY0NDgyNGJhNGI1NmNjNDNmNjZmMTg1NWExNGMyODgzM2ZjYmI0NTIzYjdlNDE3ZjExMDk0MTMiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6IjQxMmNhMzQ1Y2NmNzViZjljMDgwNmJjZTY5NWJlOGRlODA4Yjc5OTg0MjUxYTdhNTRkMjAyY2Y2MTAxZGQ0NTEiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjowLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6ImUzYjBjNDQyOThmYzFjMTQ5YWZiZjRjODk5NmZiOTI0MjdhZTQxZTQ2NDliOTM0Y2E0OTU5OTFiNzg1MmI4NTUiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6IjgzMTlmYWE5OGJjNDljNzM3ZTJkYjM3ZDcyZDExMjEwZjRkZGYwZTY0YzJiZWIwZGRhZGYyMjk1M2U0MzYwMmYifQ"
         }
       ]
     },
@@ -234,11 +234,11 @@
       "evidence": [
         {
           "resource": "repo://Makefile",
-          "version": "repo-file-v1:sha256:808b2749c818f219f1d662a3a3671f64759f59dd0ed72e2d664138646bc6acb4"
+          "version": "repo-file-v1:sha256:454b48b387adbf1c18c86358975b3e22aceb24e3aa6496a21f8dbb739e61c6e1"
         },
         {
-          "resource": "repo://langgraph.json",
-          "version": "repo-file-v1:sha256:cae91925892a68a8665236aaf46d28b8acfe481d5a11ef32f69f070ede01a3b9"
+          "resource": "repo://langgraph.json#L30-L30",
+          "version": "repo-lines-v1:sha256:2fa373d97dc786a1af046ccb442bb2d86e5f4aa1f7a5c78e3e3e6acb63b255b9:eyJzZWxlY3RlZExpbmVDb3VudCI6MSwiZmlyc3RTZWxlY3RlZExpbmVIYXNoIjoiMmZhMzczZDk3ZGM3ODZhMWFmMDQ2Y2NiNDQyYmIyZDg2ZTVmNGFhMWY3YTVjNzhlM2UzZTZhY2I2M2IyNTViOSIsImxhc3RTZWxlY3RlZExpbmVIYXNoIjoiMmZhMzczZDk3ZGM3ODZhMWFmMDQ2Y2NiNDQyYmIyZDg2ZTVmNGFhMWY3YTVjNzhlM2UzZTZhY2I2M2IyNTViOSIsInByZWNlZGluZ0NvbnRleHRMaW5lQ291bnQiOjMsInByZWNlZGluZ0NvbnRleHRIYXNoIjoiNDQ2NTlkM2NhYjU2Y2NiZTIwZDM2MzY3ZmEwNmViNDQzZjBiNTllNmJjNjc4ZjY2MWMzOTk5Y2U0NWY4OTgxYyIsImZvbGxvd2luZ0NvbnRleHRMaW5lQ291bnQiOjMsImZvbGxvd2luZ0NvbnRleHRIYXNoIjoiNjc4ZTM3OGMzM2YxOGU0OTkwMjRlNzQzODljZTk3MjJmNGY2MTBhNWY3M2EyMDhhNjYxM2I0NTg0NmRiYjA2YiJ9"
         },
         {
           "resource": "repo://ui/vite.config.ts",
@@ -252,7 +252,7 @@
       "evidence": [
         {
           "resource": "repo://Makefile",
-          "version": "repo-file-v1:sha256:808b2749c818f219f1d662a3a3671f64759f59dd0ed72e2d664138646bc6acb4"
+          "version": "repo-file-v1:sha256:454b48b387adbf1c18c86358975b3e22aceb24e3aa6496a21f8dbb739e61c6e1"
         },
         {
           "resource": "repo://examples/ngrok/webhooks-only.yml",
@@ -266,11 +266,11 @@
       "evidence": [
         {
           "resource": "repo://Dockerfile",
-          "version": "repo-file-v1:sha256:6a549a4623048ef6495c26220f2b5ba2243c09bff44e4692865af68de110aee5"
+          "version": "repo-file-v1:sha256:d0ddb3959c1eda19cd3de9567f64a8e10afd1135e59dcee4b01f947251d43181"
         },
         {
-          "resource": "repo://langgraph.json",
-          "version": "repo-file-v1:sha256:cae91925892a68a8665236aaf46d28b8acfe481d5a11ef32f69f070ede01a3b9"
+          "resource": "repo://langgraph.json#L28-L45",
+          "version": "repo-lines-v1:sha256:4dcd922e797f79ddd3d3764642d11fbd7bd013d0f92b71c0e45ccd6e3d93139c:eyJzZWxlY3RlZExpbmVDb3VudCI6MTgsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6IjFiMzY0NTNkNjNhZWRkNjZkYzg0YTI2ZjRiZDhiMTI3NzQyOTRkN2JmZGE5YzU3MjBlZmFiM2U0OWY0OTdjZjUiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6IjMwNjQ4Zjc3ZmQ1YTljNjNiM2NkZDBhZjQ5ZGFhMTI5OTIyMGI3NTQxZTg4Y2ExN2VmZTFhNmExMTRiOWZmMmEiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6IjE4MDlkYTkwNTc4NzMyYzVhYWFmYTVlNDFkZTgzMzE5ZDU2ODhlYmFlMDk0ZWIxMzRjMDBiNjkyNTc1MTA2ZTEiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjoxLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6IjQxMmNhMzQ1Y2NmNzViZjljMDgwNmJjZTY5NWJlOGRlODA4Yjc5OTg0MjUxYTdhNTRkMjAyY2Y2MTAxZGQ0NTEifQ"
         }
       ]
     },
@@ -280,7 +280,7 @@
       "evidence": [
         {
           "resource": "repo://docs/INSTALLATION.md",
-          "version": "repo-file-v1:sha256:6cd680724ead93b6cd57db31da0bae0a5f88862572bacaf9f16d21d62a6c9745"
+          "version": "repo-file-v1:sha256:b97bacc9d5998f93882695419eb1aae8ceebc68bd8076314a561c276ddf45348"
         }
       ]
     },
@@ -290,11 +290,7 @@
       "evidence": [
         {
           "resource": "repo://openswe/api/app.py#L46-L126",
-          "version": "repo-lines-v1:sha256:6eda72eb1ca6f3c834dda89659488bc1a25d9e9044a6e8c38aa3732b4452e77a:eyJzZWxlY3RlZExpbmVDb3VudCI6ODEsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6IjAxYmE0NzE5YzgwYjZmZTkxMWIwOTFhN2MwNTEyNGI2NGVlZWNlOTY0ZTA5YzA1OGVmOGY5ODA1ZGFjYTU0NmIiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6IjAxYmE0NzE5YzgwYjZmZTkxMWIwOTFhN2MwNTEyNGI2NGVlZWNlOTY0ZTA5YzA1OGVmOGY5ODA1ZGFjYTU0NmIiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6ImY4NmQ2Mzg2NTgwOTVjNWNhNzhjMTFjNDE4NDFiZTZiMzYyOTc2NmRkYjNmYTY3ZDA0MWRjZjcxZWQ0YTI2YTQiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6IjdlNmUzOGZiNDM1NjdmMWM0NzNhNTg0MTgxZTY3YmNiNGMyODJkNzQwNTM3NGFhMTJkOWY4MmM0NjU5NWM0OGIifQ"
-        },
-        {
-          "resource": "repo://openswe/database/postgres.py#L212-L225",
-          "version": "repo-lines-v1:sha256:96ea83b1ef56c68d5fbcaab5acadca94ca94928eaa8718375d946ec746585725:eyJzZWxlY3RlZExpbmVDb3VudCI6MTQsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6ImI5ODAzMWM1MmJmOWZmZDMwN2E2ODkwZTFkM2ZiYjAxMzQ3YzQyMDk2NDNmZDYzMjhhY2VjYjk0ZTUxYmU3MzkiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6IjMwYzFmMTg4ZjE0MmVkN2E4MjQ2ODBiMjA3MTcyYzU1MTliYzYxNGE0OGZkYTdjZjE2N2VkYjhkZGY3OTk1NmMiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6ImViYTA5MjMxMzFmYWNkZjA5OWMzYTU3ODJhZGYxMzE0MjM1NjI2OWMxMTdiMDNlM2RmMmY3MGFiNjkzMzUxNWQiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6IjFkZGVmZTYxZmQzNjZjNWViZTRiZDQ2YzFmNDdhYjk4ZjNmMzdjOGY1OWVkOWZiY2RhMTJhNmM2ZjU1ZDEzNWIifQ"
+          "version": "repo-lines-v1:sha256:f7e93fa0d4adfbdea6a97e1d41041375775d0a8bc351528eaa7fa56a5c1c41c9:eyJzZWxlY3RlZExpbmVDb3VudCI6ODEsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6Ijg3Y2ZmM2YxNzg0MmRlYzZlN2U5MWMzZTNiOGZjZTBhODIyZmMzMTEyNzM4MWIwMGY0NGE5ZjEzMzMzMDNhMmUiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6IjAxYmE0NzE5YzgwYjZmZTkxMWIwOTFhN2MwNTEyNGI2NGVlZWNlOTY0ZTA5YzA1OGVmOGY5ODA1ZGFjYTU0NmIiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6IjhjNTgzMDM2ZTQ5MGMxYjdkNjI3MjYwNGJkN2I3N2QyYTc5MGViOGFmMGZhM2EwZTQ3MTgyZDc5MDdiZThlOTQiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6IjdlNmUzOGZiNDM1NjdmMWM0NzNhNTg0MTgxZTY3YmNiNGMyODJkNzQwNTM3NGFhMTJkOWY4MmM0NjU5NWM0OGIifQ"
         }
       ]
     },
@@ -304,7 +300,7 @@
       "evidence": [
         {
           "resource": "repo://Makefile",
-          "version": "repo-file-v1:sha256:808b2749c818f219f1d662a3a3671f64759f59dd0ed72e2d664138646bc6acb4"
+          "version": "repo-file-v1:sha256:454b48b387adbf1c18c86358975b3e22aceb24e3aa6496a21f8dbb739e61c6e1"
         }
       ]
     },
@@ -314,7 +310,7 @@
       "evidence": [
         {
           "resource": "repo://Makefile",
-          "version": "repo-file-v1:sha256:808b2749c818f219f1d662a3a3671f64759f59dd0ed72e2d664138646bc6acb4"
+          "version": "repo-file-v1:sha256:454b48b387adbf1c18c86358975b3e22aceb24e3aa6496a21f8dbb739e61c6e1"
         }
       ]
     },
@@ -343,8 +339,8 @@
       "statement": "Alembic-based database migrations in openswe/database/migrations/versions/ run at startup within an advisory lock (XID 557314367248862439), create the open_swe schema if missing, and execute only new revisions tracked in alembic_version; on the preview environment, rebased branch heads that become superseded are deleted from the version table to apply the new chain cleanly.",
       "evidence": [
         {
-          "resource": "repo://openswe/database/postgres.py#L212-L256",
-          "version": "repo-lines-v1:sha256:23cccebca5efcfa1476e22b13cf4bb325081db0c9c454af8f8aa0b80e1dceef3:eyJzZWxlY3RlZExpbmVDb3VudCI6NDUsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6ImI5ODAzMWM1MmJmOWZmZDMwN2E2ODkwZTFkM2ZiYjAxMzQ3YzQyMDk2NDNmZDYzMjhhY2VjYjk0ZTUxYmU3MzkiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6IjAxYmE0NzE5YzgwYjZmZTkxMWIwOTFhN2MwNTEyNGI2NGVlZWNlOTY0ZTA5YzA1OGVmOGY5ODA1ZGFjYTU0NmIiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6ImViYTA5MjMxMzFmYWNkZjA5OWMzYTU3ODJhZGYxMzE0MjM1NjI2OWMxMTdiMDNlM2RmMmY3MGFiNjkzMzUxNWQiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6ImI3OGRiYzdkOWM0NmE5MTQ2YTM1NWEyZGY2N2ZhNWVhMzM4M2U3YWExMWQ5MDgzNWQ1NzI5YTJiNmUyMWQyZGEifQ"
+          "resource": "repo://openswe/database/postgres.py#L213-L256",
+          "version": "repo-lines-v1:sha256:164f73a5a338314eaf7ce2f46795b5b1d3aa15c1d6d79c57e1f7dbd3cb42e31c:eyJzZWxlY3RlZExpbmVDb3VudCI6NDQsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6ImI5ODAzMWM1MmJmOWZmZDMwN2E2ODkwZTFkM2ZiYjAxMzQ3YzQyMDk2NDNmZDYzMjhhY2VjYjk0ZTUxYmU3MzkiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6IjBiMmQxOTc0NGQ2NDNhN2EzYjYxN2JjMzdkNWYzN2U4NjgyNDA2MDIwNjFkZTk0ZDMzZjJkMGEwZWYzZDc2ZmMiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6ImViYTA5MjMxMzFmYWNkZjA5OWMzYTU3ODJhZGYxMzE0MjM1NjI2OWMxMTdiMDNlM2RmMmY3MGFiNjkzMzUxNWQiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6ImZhY2I2MjQxYjRjNDFjZTdkYjMxYzA5ZDI5NWQ1MzkwNWQ3YmVmYjA0NGQ4M2YxZGQxYjQ0Yjg5YzdiZGFjZGIifQ"
         }
       ]
     },
@@ -354,11 +350,11 @@
       "evidence": [
         {
           "resource": "repo://Dockerfile",
-          "version": "repo-file-v1:sha256:6a549a4623048ef6495c26220f2b5ba2243c09bff44e4692865af68de110aee5"
+          "version": "repo-file-v1:sha256:d0ddb3959c1eda19cd3de9567f64a8e10afd1135e59dcee4b01f947251d43181"
         },
         {
-          "resource": "repo://langgraph.json",
-          "version": "repo-file-v1:sha256:cae91925892a68a8665236aaf46d28b8acfe481d5a11ef32f69f070ede01a3b9"
+          "resource": "repo://langgraph.json#L20-L26",
+          "version": "repo-lines-v1:sha256:12aec50317b1e566f70f5ed9e22f9da69ba986880e7a318462ef1cc974b2a094:eyJzZWxlY3RlZExpbmVDb3VudCI6NywiZmlyc3RTZWxlY3RlZExpbmVIYXNoIjoiOGM1Zjc0MTQ0ZDM0ZjA2NTkzNDIzN2JhODFiZWM4YzVhZjMzOTVhYTdjMmQxNDM1ZTY0OTk0NGFhMzVkMTIzZiIsImxhc3RTZWxlY3RlZExpbmVIYXNoIjoiNGQ1Y2QyZmI0ZjNkZjg4NDUxNTI1NWIzOTUyM2YyZjhiNTQ3MmJlZWE5ZjU2NmZmY2EyMDRkYjgwMjU2MTA0MSIsInByZWNlZGluZ0NvbnRleHRMaW5lQ291bnQiOjMsInByZWNlZGluZ0NvbnRleHRIYXNoIjoiMmZjMzQzMGI1YTQ1YzllZWM5YzRiMTZiNzVkMzExNDA3Y2Y0OTJkNjU1MjgzMjNiNzkyMjY3MTgzYmM1NjlmZCIsImZvbGxvd2luZ0NvbnRleHRMaW5lQ291bnQiOjMsImZvbGxvd2luZ0NvbnRleHRIYXNoIjoiNDQ2NTlkM2NhYjU2Y2NiZTIwZDM2MzY3ZmEwNmViNDQzZjBiNTllNmJjNjc4ZjY2MWMzOTk5Y2U0NWY4OTgxYyJ9"
         }
       ]
     },
@@ -378,13 +374,13 @@
       "evidence": [
         {
           "resource": "repo://openswe/api/app.py#L46-L126",
-          "version": "repo-lines-v1:sha256:6eda72eb1ca6f3c834dda89659488bc1a25d9e9044a6e8c38aa3732b4452e77a:eyJzZWxlY3RlZExpbmVDb3VudCI6ODEsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6IjAxYmE0NzE5YzgwYjZmZTkxMWIwOTFhN2MwNTEyNGI2NGVlZWNlOTY0ZTA5YzA1OGVmOGY5ODA1ZGFjYTU0NmIiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6IjAxYmE0NzE5YzgwYjZmZTkxMWIwOTFhN2MwNTEyNGI2NGVlZWNlOTY0ZTA5YzA1OGVmOGY5ODA1ZGFjYTU0NmIiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6ImY4NmQ2Mzg2NTgwOTVjNWNhNzhjMTFjNDE4NDFiZTZiMzYyOTc2NmRkYjNmYTY3ZDA0MWRjZjcxZWQ0YTI2YTQiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6IjdlNmUzOGZiNDM1NjdmMWM0NzNhNTg0MTgxZTY3YmNiNGMyODJkNzQwNTM3NGFhMTJkOWY4MmM0NjU5NWM0OGIifQ"
+          "version": "repo-lines-v1:sha256:75863236c3a0c8eb0e9980cdc795de8cab5c8086b820f585a9337aaba600c88d:eyJzZWxlY3RlZExpbmVDb3VudCI6ODMsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6IjAxYmE0NzE5YzgwYjZmZTkxMWIwOTFhN2MwNTEyNGI2NGVlZWNlOTY0ZTA5YzA1OGVmOGY5ODA1ZGFjYTU0NmIiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6IjAxYmE0NzE5YzgwYjZmZTkxMWIwOTFhN2MwNTEyNGI2NGVlZWNlOTY0ZTA5YzA1OGVmOGY5ODA1ZGFjYTU0NmIiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6ImY4NmQ2Mzg2NTgwOTVjNWNhNzhjMTFjNDE4NDFiZTZiMzYyOTc2NmRkYjNmYTY3ZDA0MWRjZjcxZWQ0YTI2YTQiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6IjdlNmUzOGZiNDM1NjdmMWM0NzNhNTg0MTgxZTY3YmNiNGMyODJkNzQwNTM3NGFhMTJkOWY4MmM0NjU5NWM0OGIifQ"
         }
       ]
     }
   ],
   "verification": {
     "by": "openwiki/0.4.2",
-    "at": "2026-10-18T12:31:08.965Z"
+    "at": "2026-10-21T13:36:13.083Z"
   }
 }

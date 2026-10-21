@@ -12,6 +12,8 @@ sources:
     resource: repo://openswe/api/tracing.py
   - id: openwiki-source-8e86bc5c07d70c0696441776
     resource: repo://openswe/mcp/instance.py
+  - id: openwiki-source-bcad329e419936bbe20b5ee9
+    resource: repo://openswe/mcp/oauth.py
   - id: openwiki-source-67faae85e3ecd320e29f3e28
     resource: repo://openswe/mcp/records.py
   - id: openwiki-source-573a0cf072c076b2dd72dbbd
@@ -36,10 +38,10 @@ sources:
     resource: repo://openswe/utils/errors.py
   - id: openwiki-source-78aaabb479325754c1118320
     resource: repo://openswe/utils/langsmith.py
-generated: { by: "openwiki/0.4.2", at: "2026-10-18T12:31:08.965Z" }
+generated: { by: "openwiki/0.4.2", at: "2026-10-21T13:36:13.083Z" }
 verified:
   - by: openwiki/0.4.2
-    at: 2026-10-18T12:31:08.965Z
+    at: 2026-10-21T13:36:13.083Z
 ---
 
 # Observability, Tracing, and MCP
@@ -106,14 +108,14 @@ The transcript captures:
 - **Tool lifecycle**: tool calls with invocation details and results (truncated to 256 KiB and stripped of sensitive data).
 - **Reasoning blocks**: expanded reasoning and internal thinking from advanced models like Claude Sonnet 4.
 
-Events are queued and flushed asynchronously by a writer per run, with soft-buffer boundaries at paragraph breaks and hard boundaries at 24 KB. Failures to write transcripts are logged but never fail the run, so transcript problems are observability-only.
+Events are queued and flushed asynchronously by a writer per run, with soft-buffer boundaries at paragraph breaks (0.4 seconds between flushes) and hard boundaries at 24 KB. Failures to write transcripts are logged but never fail the run, so transcript problems are observability-only.
 
 ## Error tracking and recovery
 
 The system tracks model-call errors in thread metadata for observability and upstream error recovery:
 
 - **`ModelErrorMiddleware`** (`openswe/middleware/model_errors.py`): Logs full exception details on model-call failures and records an error classification in thread metadata under `LAST_MODEL_ERROR_KEY`.
-- **Error classification**: `openswe/utils/errors.py` provides `classify_exception` to categorize errors by code (e.g., "provider_overloaded", "rate_limited", "invalid_request"), distinguishing provider-specific failures from generic API errors.
+- **Error classification**: `openswe/utils/errors.py` provides `classify_exception` to categorize errors by code (e.g., "provider_overloaded", "rate_limited", "invalid_request"), distinguishing provider-specific failures from generic API errors by inspecting status codes and error bodies.
 - **Thread metadata**: The `last_model_error` metadata key carries the error type, run ID, and classification code. The run-completion reply can use this classification to decide recovery strategies, even when the exception message has been scrubbed by the platform.
 
 ## MCP connection scoping and discovery
@@ -121,16 +123,25 @@ The system tracks model-call errors in thread metadata for observability and ups
 MCP connections are organized in a three-tier hierarchy: **instance** (globally managed by deployment admins), **workspace** (managed by workspace admins per slug), and **user** (personal connections owned by an individual GitHub login). When loading tools for a run, all three tiers are consulted in order; a later tier's connection with the same name replaces the earlier one.
 
 - **Instance tier** (`openswe/mcp/instance.py`): Connections stored at the instance level that every run can access. The tier functions as the global deployment layer for connections all workspaces inherit.
-- **Workspace tier** (`openswe/mcp/workspace.py`): Connections stored under `["workspace_mcps", <slug>]`, where `<slug>` is the lowercase workspace identifier. Each workspace has its own set of connections.
-- **User tier** (`openswe/mcp/user.py`): Personal connections stored under `["user_mcps", <login>]`, scoped to a GitHub login and visible only in runs where that login is the triggering user. Authorization checks that the connection lookup is made only for private threads whose owner is the current login.
+- **Workspace tier** (`openswe/mcp/workspace.py`): Connections stored under `["workspace_mcps", <slug>]`, where `<slug>` is the lowercase workspace identifier. Each workspace has its own set of connections managed by workspace administrators.
+- **User tier** (`openswe/mcp/user.py`): Personal connections stored under `["user_mcps", <login>]`, scoped to a GitHub login and visible only in runs where that login is the triggering user. Authorization checks verify the connection lookup is made only for private threads whose owner is the current login.
 
 Each tier exposes its own admin UI route for creation, validation, token refresh, and discovery. A connection is a reusable MCP server reference with a name, URL, transport (streamable_http or SSE), optional headers (including OAuth token URLs and client secrets), and an optional allowlist of tool names to expose. Stored tokens are encrypted at rest with `openswe.encryption`.
+
+### OAuth client credentials
+
+`openswe/mcp/oauth.py` implements OAuth 2.0 client credentials flow for MCP connections:
+
+- Encrypted client secrets are decrypted just-in-time during token requests.
+- Access tokens are cached with a TTL deducted from the provider's `expires_in` response, with a safety margin to avoid expiration race conditions.
+- Failed token requests raise `MCPOAuthError` with a safe user-facing message that never echoes credentials or request details.
+- The `_ClientCredentialsAuth` handler automatically refreshes expired tokens on 401 responses within a request.
 
 ## Tool loading and availability
 
 The server loads MCP tools during agent assembly for non-summary, non-local runs with a known credential scope. It loads the three tiers via `load_mcp_tools(*sources)` in `openswe/mcp/runtime.py`, which walks each source's connection list, discovers tool definitions, and builds runnable tools. The `DynamicToolMiddleware` exposes only tool *names* initially and defers the MCP handshake (which may fail, timeout, or be expensive) until the agent explicitly calls `load_integration_tools` and requests to use them. This lazy strategy avoids blocking the first model call when MCP availability is uncertain.
 
-Tool loaders use a stale-while-revalidate TTL cache (300 seconds for most tiers, 600 for expensive operations) and enforce a per-load timeout. An exception, timeout, or missing credentials returns an empty tool list rather than failing the run. Reads on the tool-loading path are fail-soft: if the Store backend is unreachable, the run continues without those tools, whereas dashboard status reads surface Store failures.
+Tool loaders use a stale-while-revalidate TTL cache (10 minutes for most tiers, 24 hours max age) and enforce a per-load timeout (30 seconds). An exception, timeout, or missing credentials returns an empty tool list rather than failing the run. Reads on the tool-loading path are fail-soft: if the Store backend is unreachable, the run continues without those tools, whereas dashboard status reads surface Store failures.
 
 ```mermaid
 graph TD

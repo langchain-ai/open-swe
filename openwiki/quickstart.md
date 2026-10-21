@@ -12,22 +12,18 @@ sources:
     resource: repo://Makefile
   - id: openwiki-source-4b1279a0a1e5ec2d55a4558a
     resource: repo://openswe/api/app.py
-  - id: openwiki-source-70b814b26d317c2b15c4a4fb
-    resource: repo://openswe/chat.py
   - id: openwiki-source-1685d34aae8025be9332f45a
     resource: repo://openswe/dispatch.py
   - id: openwiki-source-813c25f6bac2408de322a1f5
     resource: repo://openswe/graphs/agent.py
-  - id: openwiki-source-6b99105488d7c23beda1e5ad
-    resource: repo://openswe/graphs/scheduler.py
+  - id: openwiki-source-90b15fd6117126ebfe5b6b22
+    resource: repo://openswe/graphs/reviewer.py
   - id: openwiki-source-169564263f818f7bae30cd90
     resource: repo://openswe/review_scout/graph.py
   - id: openwiki-source-96bcad07b4fe7078402bc2b8
     resource: repo://openswe/reviewer.py
   - id: openwiki-source-1b32e9f41fa7e64702b380f6
     resource: repo://openswe/sandboxes/lifecycle.py
-  - id: openwiki-source-685dc33e7199aa1f6e402f7a
-    resource: repo://openswe/scheduler.py
   - id: openwiki-source-919e16feae379651f2cbc1c9
     resource: repo://openswe/server.py
   - id: openwiki-source-3bd49e1c2bb74350a7519268
@@ -40,10 +36,10 @@ sources:
     resource: repo://tests/e2e/playwright.desktop.config.ts
   - id: openwiki-source-7ef60dc4372e1a33c7728fe6
     resource: repo://tests/e2e/README.md
-generated: { by: "openwiki/0.4.2", at: "2026-10-15T13:12:32.024Z" }
+generated: { by: "openwiki/0.4.2", at: "2026-10-21T13:36:13.083Z" }
 verified:
   - by: openwiki/0.4.2
-    at: 2026-10-18T12:31:08.965Z
+    at: 2026-10-21T13:36:13.083Z
 ---
 
 # Quick Start: Navigate the Open SWE Codebase
@@ -63,7 +59,7 @@ make web                # pnpm run dev
 make desktop            # pnpm run dev:desktop
 ```
 
-Use `make dev` when a change needs LangGraph graph execution; it serves all five registered graphs and the HTTP app. `make run` is FastAPI-only for dashboard and webhook testing without graph changes. `make dev-ui` fronts Vite through the backend at `:2024`; `make desktop` starts Electron and requires the backend separately. For local webhook exposure, use `make tunnel NGROK_DOMAIN=<name>.ngrok-free.dev` to restrict the ngrok policy to `/webhooks/*` only, since the development server has no authentication.
+Use `make dev` when a change needs LangGraph graph execution; it serves all three registered graphs and the HTTP app. `make run` is FastAPI-only for dashboard and webhook testing without graph changes. `make dev-ui` fronts Vite through the backend at `:2024`; `make desktop` starts Electron and requires the backend separately. For local webhook exposure, use `make tunnel NGROK_DOMAIN=<name>.ngrok-free.dev` to restrict the ngrok policy to `/webhooks/*` only, since the development server has no authentication.
 
 Python is async-first: implement the async path. Add a synchronous method only when an interface requires it, and make that method raise `NotImplementedError`; do not maintain parallel implementations.
 
@@ -76,13 +72,11 @@ Python is async-first: implement the async path. Add a synchronous method only w
 | `openswe.graphs.agent:traced_agent` | Main coding graph (`openswe/server.py`) | Agent assembly, tools, skills, models, prompts, middleware, and coding sandbox preparation. |
 | `openswe.graphs.reviewer:traced_reviewer_agent` | Reviewer graph (`openswe/reviewer.py`) | Diff-grounded findings, review publication, reviewer sandbox behavior, and reviewer middleware. |
 | `openswe.graphs.review_scout:traced_review_scout` | Review scout (`openswe/review_scout/graph.py`) | Diff walkthrough generation, commit ordering, and scout-specific sandbox behavior. |
-| `openswe.graphs.chat:traced_chat_agent` | PR chat (`openswe/chat.py`) | Dashboard "chat with this PR," virtual PR files, and read-only repository access. |
-| `openswe.graphs.scheduler:get_scheduler` | Scheduler (`openswe/scheduler.py`) | Cron routing, scheduled work, stale-run repair, CI watches, background tasks, and cost refreshes. |
 | `openswe.webapp:app` | FastAPI composition (`openswe/api/app.py`) | Dashboard APIs/UI mount, health, plan/approval APIs, CORS, and webhook ingress. |
 
 ### Request flow: from trigger to durable run
 
-All interactive triggers (dashboard, GitHub, Slack, Linear webhooks) and scheduled work converge through a single dispatch contract. The key entrypoint is `openswe.dispatch:dispatch_agent_run`, which creates a durable LangGraph run with the appropriate graph (agent or reviewer) and configurable multitask strategy (default: `interrupt`).
+All interactive triggers (dashboard, GitHub, Slack, Linear webhooks) and background work converge through a single dispatch contract. The key entrypoint is `openswe.dispatch:dispatch_agent_run`, which creates a durable LangGraph run with the appropriate graph (agent or reviewer) and configurable multitask strategy (default: `interrupt`).
 
 ```mermaid
 flowchart TD
@@ -90,26 +84,24 @@ flowchart TD
     GitHub["GitHub webhook"] --> Api
     Slack["Slack webhook"] --> Api
     Linear["Linear webhook"] --> Api
-    Cron["Cron tick"] --> Scheduler["Scheduler dispatch"]
     
     Api --> Dispatch["dispatch_agent_run"]
     Dispatch --> RunInput["Create run input with identity and context"]
     RunInput --> DurableRun["Create durable LangGraph run"]
     DurableRun --> AgentGraph["Agent or Reviewer graph"]
-    Scheduler --> RunInput
     
     AgentGraph --> Sandbox["Thread-scoped sandbox"]
     Sandbox --> Result["Result: work or findings"]
     Result --> Webhook["Completion webhook"]
 ```
 
-The main agent graph is stateless and rebuilt per thread; all per-thread state lives in the sandbox plus LangGraph thread metadata. The reviewer is a non-mutating PR-analysis graph with finding tools. The scheduler routes cron ticks to maintenance work (reconciliation, watch evaluation, cost refresh) or scheduled agent runs.
+The main agent graph is stateless and rebuilt per thread; all per-thread state lives in the sandbox plus LangGraph thread metadata. The reviewer is a non-mutating PR-analysis graph with finding tools. The scout generates a diff walkthrough for pull requests.
 
 ### Key invariants to preserve
 
 - **Stateless graphs and thread binding:** The main agent factory is stateless and rebuilt per thread. Thread continuity belongs to LangGraph state/metadata and the sandbox, not to a long-lived graph object.
 - **Sandbox preservation:** A missing sandbox may be recreated, but do **not** silently replace an unreachable main-agent sandbox—it could contain uncommitted work. Only the reviewer and scout opt into replacement because their checkouts are recreated each run.
-- **Reviewer constraints:** The reviewer has no commit, push, or PR-opening tools. It only adds findings. The chat graph is also sandbox-less and excludes shell and file mutation; it answers from `/pr/` virtual files and read-only GitHub API access.
+- **Reviewer constraints:** The reviewer has no commit, push, or PR-opening tools. It only adds findings.
 - **Dispatch contract:** `dispatch_agent_run` is the shared creation contract for all Slack, Linear, GitHub, and dashboard triggers of `agent` or `reviewer` graphs. Its default multitask strategy is `interrupt`, and callers must choose exactly one input-construction path: either a prebuilt run input or separate content/context/identity parameters—not both.
 - **FastAPI startup:** The lifespan pins a single event loop before queue construction, validates sandbox and local-development LLM configuration at startup, and configures credentialed CORS for configured dashboard origins only—rejecting a wildcard origin.
 

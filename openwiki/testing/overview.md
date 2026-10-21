@@ -30,6 +30,8 @@ sources:
     resource: repo://tests/e2e/tests/full_flow.spec.ts
   - id: openwiki-source-ec3fbe14e1e05123704c4f28
     resource: repo://tests/reviewer/test_reviewer_outcomes.py
+  - id: openwiki-source-7df46053b42dbcb9f728130d
+    resource: repo://tests/reviewer/test_reviewer_publish.py
   - id: openwiki-source-f05d7497d4c60c3b322628eb
     resource: repo://tests/sandbox/test_sandbox_state.py
   - id: openwiki-source-a9842c19fa28878dfa7fcd61
@@ -38,10 +40,10 @@ sources:
     resource: repo://turbo.json
   - id: openwiki-source-436f4179fe22abf615d2f7d0
     resource: repo://ui/package.json
-generated: { by: "openwiki/0.4.2", at: "2026-10-18T12:31:08.965Z" }
+generated: { by: "openwiki/0.4.2", at: "2026-10-21T13:36:13.083Z" }
 verified:
   - by: openwiki/0.4.2
-    at: 2026-10-18T12:31:08.965Z
+    at: 2026-10-21T13:36:13.083Z
 ---
 
 # Testing Infrastructure and Validation Patterns
@@ -81,9 +83,12 @@ make typecheck
 - **`_reset_ttl_cache`** (autouse): Clears the process-global TTL cache before and after each test, preventing cached team settings from leaking between tests. Also clears the langgraph_api in-process cache when not running against a PostgreSQL backend.
 - **`_reset_sandbox_registries`** (autouse): Clears `SANDBOX_BACKENDS` and `SANDBOX_CONNECTIONS` (process globals) to prevent one test's sandbox from answering for another's thread.
 - **`_default_enable_auto_review`** (autouse): Stubs `is_review_repo_enabled` to return `True` for every repository because the dashboard opt-in list is empty without a live Store. Tests targeting the auto-review gate must override it with a stricter policy.
+- **`_offline`** (autouse): Refuses real network requests, allowing only loopback and ASGITransport; unit tests must fake all external boundaries via MockTransport or local test servers.
 - **`registry_db`** and **`registry_db_if_available`**: Isolated PostgreSQL schemas for pull-request and repository rows; required for tests using the real database code path. Set `TEST_ANALYTICS_POSTGRES_URI` to enable.
 - **`slack_api`**: A mock Slack API server for tests driving real Slack endpoints without credentials.
 - **`allowed_bot`**: Seeds a test Slack bot configuration; requires the `registry_db` fixture.
+- **`user_records`**: In-memory store for UserRecords keyed like PostgreSQL resolves logins, for tests that need to seed user data.
+- **`grant_tool_access`**: Callable fixture that resolves every gated tool call to `Access(**fields)` for the test, enabling or disabling individual tool permissions.
 
 ### System-boundary test locations and patterns
 
@@ -91,7 +96,7 @@ Use the narrow test family that carries the failure semantics being changed:
 
 | Change | Focused location and protected behavior |
 | --- | --- |
-| Main agent construction, source-specific tools, backend, skills, or middleware | `tests/agent/test_agent_assembly_context.py`; it verifies the initialized `CompositeBackend`/`SandboxBackendProxy` arrangement, read-only skills, dynamic browser-tool exposure, and parent-only tool boundaries. |
+| Main agent construction, source-specific tools, backend, skills, or middleware | `tests/agent/test_agent_assembly_context.py`; it verifies the initialized `CompositeBackend`/`SandboxBackendProxy` arrangement, source-sensitive skills (personal vs. public), read-only tool exposure, and middleware/parent-tool boundaries. |
 | Reviewer findings, published reviews, reconciliation, check runs, or learning outcomes | `tests/reviewer/test_reviewer_outcomes.py`; maps resolution and feedback into true/false-positive outcomes and treats absent credentials or repository data as a no-op. |
 | Lazy sandbox reconnection, capture offload, or sandbox identity recovery | `tests/sandbox/test_sandbox_state.py`; requires `BaseSandbox` compatibility, safe offload fallback, one shared reconnect, cancellation-safe waiting, retry after failed startup, and live-thread metadata fallback. |
 | Completion notification and reviewer error cleanup | `tests/webhooks/test_completion_webhook.py`; errors on Slack-originated work send a thread reply and record the run, while reviewer failures settle a tracked check when its metadata and token exist. |

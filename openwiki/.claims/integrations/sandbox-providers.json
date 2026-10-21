@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "pageVersion": "sha256:11f9e832bf77c84621cf760a0ebf69d39f3576153eb0e6b93e0c7fc51097140c",
+  "pageVersion": "sha256:89491c4b9457a08dceec47ddde855b55c0d1f59349593262cb07ffcbafecc1ed",
   "claims": [
     {
       "id": "claim_85a89a5c69bd4e8e8d4a89c2513ad2d5",
@@ -203,10 +203,34 @@
           "version": "repo-lines-v1:sha256:01e8fa46005a7df5775bcdd8f3e7886ed4bdf8add06304360378f884ac2f319a:eyJzZWxlY3RlZExpbmVDb3VudCI6NTMsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6IjQwOGU1MjZhZTFiMjAxZDUyNTFkODY3MjVjMWRjZjY2ZWRiNjc4ZTI3Yjk5YTczODA0YmQ0ZGI2MzI5MTNiOGYiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6ImU2MTcwODc1ZThjYTQxYmJhMzVmMGNmNmQyOGViMjk2N2YwMDE0N2M1ZWIxNzVmNmM4ZDcyOWVkZWQ3NjdjNjQiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6IjUyMDFhMmRmNDg3MzZiMmUzM2RjOGI1NGNiMmNjOTk2MjFhZjdhZDIzZmEyZjRlNGFhMDViMzgwZTNjY2RjYzUiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6ImY1ODljNzUzOGZiMDliOWFjNjE0ZjNkYTY4ZWUwNGY2MjFkZjJkZjRjZGRmZjAzNzY0OGNlMzQyMjAyNGI0MmIifQ"
         }
       ]
+    },
+    {
+      "id": "claim_75a8123461b342278f5ca272e2952e1d",
+      "statement": "`BridgeSandboxBackend` is async-only, queues operations over a persistent bridge connection, enforces operation-specific timeouts (120 seconds for file transfers, 360 seconds for worktree handoff), and supports only execute, upload, and download operations.",
+      "evidence": [
+        {
+          "resource": "repo://openswe/bridge/backend.py#L1-L100",
+          "version": "repo-lines-v1:sha256:0001dfd9e497e456cdfc3fee276a13e9ed5ceff3e2a7bb698f3771efa698711c:eyJzZWxlY3RlZExpbmVDb3VudCI6MTAwLCJmaXJzdFNlbGVjdGVkTGluZUhhc2giOiI2YzI2Nzg2YTBkYTM2YmRhZmZmNDgyMGU5OTRmZWVmYzkxOWY0MjY3YWMzNjljMDllNmYzMTUxNGYyZWE3YTc0IiwibGFzdFNlbGVjdGVkTGluZUhhc2giOiIwMWJhNDcxOWM4MGI2ZmU5MTFiMDkxYTdjMDUxMjRiNjRlZWVjZTk2NGUwOWMwNThlZjhmOTgwNWRhY2E1NDZiIiwicHJlY2VkaW5nQ29udGV4dExpbmVDb3VudCI6MCwicHJlY2VkaW5nQ29udGV4dEhhc2giOiJlM2IwYzQ0Mjk4ZmMxYzE0OWFmYmY0Yzg5OTZmYjkyNDI3YWU0MWU0NjQ5YjkzNGNhNDk1OTkxYjc4NTJiODU1IiwiZm9sbG93aW5nQ29udGV4dExpbmVDb3VudCI6MywiZm9sbG93aW5nQ29udGV4dEhhc2giOiJiNmY2ZmUyZGUyYzQ4NWE2MDA1Y2Y4MTRkYTkxMzM3NGFhNjM0YzQ2NDU5NjQwNjNjYjAyOWYyYjI5N2VkOGMwIn0"
+        }
+      ]
+    },
+    {
+      "id": "claim_b278209a3af646f1881bd0fee2efb2a3",
+      "statement": "Desktop integration with the bridge client enables repository synchronization; when a thread connects to a desktop machine, the backend proxy receives sandbox operations via the bridge connection instead of direct provider calls.",
+      "evidence": [
+        {
+          "resource": "repo://openswe/bridge/backend.py#L1-L100",
+          "version": "repo-lines-v1:sha256:0001dfd9e497e456cdfc3fee276a13e9ed5ceff3e2a7bb698f3771efa698711c:eyJzZWxlY3RlZExpbmVDb3VudCI6MTAwLCJmaXJzdFNlbGVjdGVkTGluZUhhc2giOiI2YzI2Nzg2YTBkYTM2YmRhZmZmNDgyMGU5OTRmZWVmYzkxOWY0MjY3YWMzNjljMDllNmYzMTUxNGYyZWE3YTc0IiwibGFzdFNlbGVjdGVkTGluZUhhc2giOiIwMWJhNDcxOWM4MGI2ZmU5MTFiMDkxYTdjMDUxMjRiNjRlZWVjZTk2NGUwOWMwNThlZjhmOTgwNWRhY2E1NDZiIiwicHJlY2VkaW5nQ29udGV4dExpbmVDb3VudCI6MCwicHJlY2VkaW5nQ29udGV4dEhhc2giOiJlM2IwYzQ0Mjk4ZmMxYzE0OWFmYmY0Yzg5OTZmYjkyNDI3YWU0MWU0NjQ5YjkzNGNhNDk1OTkxYjc4NTJiODU1IiwiZm9sbG93aW5nQ29udGV4dExpbmVDb3VudCI6MywiZm9sbG93aW5nQ29udGV4dEhhc2giOiJiNmY2ZmUyZGUyYzQ4NWE2MDA1Y2Y4MTRkYTkxMzM3NGFhNjM0YzQ2NDU5NjQwNjNjYjAyOWYyYjI5N2VkOGMwIn0"
+        },
+        {
+          "resource": "repo://openswe/sandboxes/lifecycle.py#L512-L603",
+          "version": "repo-lines-v1:sha256:0fb8477371a8e6e3b6fb5dfd32b8b66eb45aa947daf0f62800b37ed4638c77bc:eyJzZWxlY3RlZExpbmVDb3VudCI6OTIsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6IjIwN2UzMWE4YzFiMjAyNWI5OWQ3YzllMjVjMjJiMjQyZWNhMzRiNmM5ZTdmMzAzNjFkOTAxZjMyY2Y3MDgwODEiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6Ijk3MmE4NjE1OThkOWFkZjVjOWYyYWU4NGUzOGRiNmZhNmMyYTM0MTFlMDRiNDA3YjljYmI1ZDc3MjAwZmY0MGIiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6IjY5YzFhYTBlYjAxZDMxNjc4Zjk5ZDg5ZWZlNGE2ODUzODA1ZjFlZWRkMGIzYjJhYTE3MTk0NzZlYjU0ZDRmNzYiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6IjBkMjIwNzU4ZGUxYzBlZWFlMzY3NzkzZTc4OTk1ZmM0MTIwYzE4Nzk4ZmYyNjc1OGQ2ZjIwYjZhNzAxNWUwOWIifQ"
+        }
+      ]
     }
   ],
   "verification": {
     "by": "openwiki/0.4.2",
-    "at": "2026-10-18T12:31:08.965Z"
+    "at": "2026-10-21T13:36:13.083Z"
   }
 }

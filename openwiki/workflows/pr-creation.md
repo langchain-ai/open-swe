@@ -3,6 +3,9 @@ type: workflow
 title: Pull Request Creation and Workflow Approval
 description: How the agent creates and manages pull requests with attributed authorship, commits squashing, workflow-file change approval, and metadata recording.
 tags: [pull-request, github, commit, delivery, pr-creation, attribution, workflow-approval]
+verified:
+  - by: openwiki/0.4.2
+    at: 2026-10-21T13:36:13.083Z
 sources:
   - id: openwiki-source-6ba47e09f2a30f358f5d7a36
     resource: repo://openswe/github/squash_message.py
@@ -22,10 +25,7 @@ sources:
     resource: repo://openswe/tools/open_pull_request.py
   - id: openwiki-source-3087256f0cd599176fba3c38
     resource: repo://openswe/webhooks/common.py
-generated: { by: "openwiki/0.4.2", at: "2026-10-18T12:31:08.965Z" }
-verified:
-  - by: openwiki/0.4.2
-    at: 2026-10-18T12:31:08.965Z
+generated: { by: "openwiki/0.4.2", at: "2026-10-21T13:36:13.083Z" }
 ---
 
 # Pull Request Creation and Workflow Approval
@@ -145,19 +145,21 @@ Failure payloads include GitHub's message, likely cause, HTTP status, and indica
 
 After either creation or finding an existing PR, `_record_pr_telemetry` performs several best-effort bookkeeping steps. These are independent; an exception in one does not prevent the others:
 
-1. **Fetch full PR details** from GitHub to capture state, draft flag, diff statistics, author, and creation timestamp.
+1. **Capture PR revision:** Invoke `capture_pr_revision` in `analytics/revisions.py` to record opening endpoint data (owner, repo, number, base_sha, head_sha, endpoint_at, source_kind) for audit and merge-tracking purposes when a new PR is created.
 
-2. **Record usage:** Invoke `record_agent_pr_usage` to track PR creation in analytics (thread ID, user email, repository, PR number, diff stats, state, creation/merge time, model, effort level).
+2. **Fetch full PR details** from GitHub to capture state, draft flag, diff statistics, author, and creation timestamp.
 
-3. **Upsert thread metadata:** Normalize the PR record and merge it into the thread's `pull_requests` list, preserving any earlier Slack feedback. Also update legacy fields (`pr_url`, `pr_number`, `pr_state`, `pr_title`, `branch_name`, `base_branch`, `diff_stats`) for backward compatibility.
+3. **Record usage:** Invoke `record_agent_pr_usage` to track PR creation in analytics (thread ID, user email, repository, PR number, diff stats, state, creation/merge time, model, effort level).
 
-4. **Record in PullRequest store:** Create a database record (owned by the PR registry) with author identity, opening-time SHA values, model ID, diff statistics, and Slack origin if applicable. This enables dashboard status queries and finding all threads for a given PR.
+4. **Upsert thread metadata:** Normalize the PR record and merge it into the thread's `pull_requests` list, preserving any earlier Slack feedback. Also update legacy fields (`pr_url`, `pr_number`, `pr_state`, `pr_title`, `branch_name`, `base_branch`, `diff_stats`) for backward compatibility.
 
-5. **Retitle thread metadata** (if `retitle_thread=True` and a new PR was created): Update the thread's title and clear `title_seed` so the Slack subject line reflects the PR title.
+5. **Record in PullRequest store:** Create a database record (owned by the PR registry) with author identity, opening-time SHA values, model ID, diff statistics, and Slack origin if applicable. This enables dashboard status queries and finding all threads for a given PR.
 
-6. **Update Slack code channel context** (if active and a code-channel session): Post the repository context bar items (repo name, branch, PR link, dashboard link) and set the agent resource (PR URL and title).
+6. **Retitle thread metadata** (if `retitle_thread=True` and a new PR was created): Update the thread's title and clear `title_seed` so the Slack subject line reflects the PR title.
 
-7. **Set diff view** (if nonempty diff available): Render and display the diff in the Slack code-channel view.
+7. **Update Slack code channel context** (if active and a code-channel session): Post the repository context bar items (repo name, branch, PR link, dashboard link) and set the agent resource (PR URL and title).
+
+8. **Set diff view** (if nonempty diff available): Render and display the diff in the Slack code-channel view.
 
 Failures in telemetry are logged but do not cause the PR creation to fail; the PR exists on GitHub either way.
 
@@ -241,10 +243,8 @@ Approval records are stored under the `workflow_push_approvals` key in thread me
 }
 ```
 
+Per-thread approval history trims to the 20 most recent records after each operation. Slack approval notification is posted only once per pending record, and only after the message timestamp is confirmed from the Slack API response.
+
 ## PR review requests
 
 `request_pr_review` is a Slack-exposed tool that initiates a separate reviewer agent run for an existing PR. It parses the PR URL into a `GitHubPrRef`, resolves the active Slack thread and triggering user from run config, and delegates to the GitHub webhook's `trigger_pr_review_from_ref`. This is a distinct handoff from PR creation and is not part of the creation workflow.
-
-## Focused verification
-
-`tests/github/test_open_pull_request.py` covers author token resolution, preflight diagnostics, duplicate PR handling, references appending, and metadata recording. `tests/github/test_pr_creation_guard.py` exercises direct and deeply nested shell fallback detection. Workflow push guard tests cover safe command parsing, workflow diff and fingerprint construction, pending notification semantics, and safe refspec rewriting. The baby-sit and webhook tests cover CI webhook handling and PR lifecycle state updates.

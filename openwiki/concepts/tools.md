@@ -4,12 +4,12 @@ title: Tools and Tool Access
 description: How tools are defined, registered, dynamically loaded, and exposed to agents; tool categories (sandbox, integration, review, etc.), authorization policies, and mode-specific controls.
 tags: [tools, agent, authorization, integrations, dynamic-tools, automation, reviewer, access-control, mcp]
 sources:
-  - id: openwiki-source-70b814b26d317c2b15c4a4fb
-    resource: repo://openswe/chat.py
   - id: openwiki-source-75a672d9a8b6d6c500b1cf8d
     resource: repo://openswe/middleware/dynamic_tools.py
   - id: openwiki-source-1c036e99d40740776a65df4f
     resource: repo://openswe/middleware/exclude_tools.py
+  - id: openwiki-source-7a02c62499495310b04f21ef
+    resource: repo://openswe/review/chat.py
   - id: openwiki-source-96bcad07b4fe7078402bc2b8
     resource: repo://openswe/reviewer.py
   - id: openwiki-source-cc9c77c1e30f40e9c07d39bc
@@ -26,10 +26,10 @@ sources:
     resource: repo://openswe/tools/automations.py
   - id: openwiki-source-1a477779016142ec6f3dc601
     resource: repo://openswe/tools/read_user_settings.py
-generated: { by: "openwiki/0.4.2", at: "2026-10-18T12:31:08.965Z" }
+generated: { by: "openwiki/0.4.2", at: "2026-10-21T13:36:13.083Z" }
 verified:
   - by: openwiki/0.4.2
-    at: 2026-10-18T12:31:08.965Z
+    at: 2026-10-21T13:36:13.083Z
 ---
 
 # Tools and Tool Access
@@ -139,7 +139,7 @@ Tool exclusion is applied per-mode using `ExcludeToolsMiddleware` to remove cont
 - **Stop-summary mode** removes filesystem mutation (`write_file`, `edit_file`, `delete`), shell execution (`execute`), delegation (`task`), and `grep`, leaving only Slack read/reply tools.
 - **Slack channel-ask mode** removes thread-bound Slack operations (`slack_add_reaction`, `slack_attach_html`, `slack_move_thread`, `slack_start_review_channel`), incident management (`manage_code_channel`, `manage_incident`), and `grep`, but retains write capabilities. By-the-way mode additionally excludes `slack_breakout_thread`.
 - **Slack DM mode** removes `slack_add_reaction` to avoid clutter on user messages.
-- **Incident automatic mode** removes mutable operations (`code_channel_set_view`, `manage_code_channel`, `manage_incident`, `slack_reply`, and others) when an incident sweep runs without explicit user request, preventing unintended side effects.
+- **Incident automatic mode** removes mutable operations (including `code_channel_set_view`, `manage_code_channel`, `manage_incident`, `slack_reply`, and many others) when an incident sweep runs without explicit user request, preventing unintended side effects.
 - **PR chat** removes `execute`, `write_file`, `edit_file`, and `delete` to ensure read-only operation over GitHub-backed read tools.
 
 ## Safely extending a tool

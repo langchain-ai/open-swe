@@ -5,7 +5,7 @@ description: How the primary Deep Agents coding graph is assembled per executabl
 tags: [agent-graph, deep-agents, langgraph, middleware, subagents, sandbox, tools, factory]
 verified:
   - by: openwiki/0.4.2
-    at: 2026-10-18T12:31:08.965Z
+    at: 2026-10-21T13:36:13.083Z
 sources:
   - id: openwiki-source-5bbba7b2a8ea8360ff233d63
     resource: repo://langgraph.json
@@ -25,12 +25,12 @@ sources:
     resource: repo://openswe/sandboxes/lifecycle.py
   - id: openwiki-source-919e16feae379651f2cbc1c9
     resource: repo://openswe/server.py
-generated: { by: "openwiki/0.4.2", at: "2026-10-18T12:31:08.965Z" }
+generated: { by: "openwiki/0.4.2", at: "2026-10-21T13:36:13.083Z" }
 ---
 
 # Coding Agent Assembly and Execution
 
-`get_agent(config)` and its internal `_get_agent` async factory in `openswe/server.py` compose the primary coding agent graph for an executable thread run. The factory is the customization seam for sandbox providers, model policy, tool surfaces, skills routes, subagents, and middleware. All per-thread state lives in the sandbox and thread metadata; the agent graph itself is stateless and rebuilt per thread.
+`get_agent(config)` in `openswe/server.py` and its async internal alias `_get_agent`, which delegates to `build_agent`, compose the primary coding agent graph for an executable thread run. The factory is the customization seam for sandbox providers, model policy, tool surfaces, skills routes, subagents, and middleware. All per-thread state lives in the sandbox and thread metadata; the agent graph itself is stateless and rebuilt per thread.
 
 ## Entry and execution gate
 
@@ -54,8 +54,9 @@ Main-agent and subagent model/effort pairs resolve by precedence:
 2. **Profile overrides** from the dashboard, with separate subagent override when provided.
 3. **Stored thread settings** (persisted after each run and refreshed across participants).
 4. **Per-run agent_model_id and agent_effort**, only if both are canonical `SUPPORTED_MODEL_IDS` and pass `model_supports_effort` validation.
+5. **Image model override** when the primary model lacks image support and image input is detected.
 
-Resolved pairs are persisted to thread settings for hosted runs before Fable gating, so a deployment-wide enablement decision applies on every run rather than freezing into thread settings. Provider-specific keyword arguments are computed separately for main, subagent, and title models. Construction failures defer to an error model, allowing the graph to compile and reporting provider setup failure at model-call time. A fallback middleware is installed only if its model id differs from the primary model.
+Resolved pairs are persisted to thread settings before Fable gating, so a deployment-wide enablement decision applies on every run rather than freezing into thread settings. Provider-specific keyword arguments are computed separately for main, subagent, and title models. Construction failures defer to an error model, allowing the graph to compile and reporting provider setup failure at model-call time. A fallback middleware is installed only if its model id differs from the primary model.
 
 Desktop runs skip thread-settings lookup and use workspace defaults directly; Slack `/oswe` questions use the triggering user's default model and disable adaptive routing.
 
@@ -69,7 +70,7 @@ The factory supplies `create_deep_agent` an empty static system prompt and relie
 
 For hosted runs, preparation resolves the GitHub token, sandbox work directory, sender identity, instruction context, and thread participants. It adds the resulting sender context as a separate generated message after a human input, allowing the model to distinguish between user input and infrastructure context. A sandbox-unreachable failure posts a user-facing notification before being re-raised.
 
-Preparation is checkpointed: `run_prepared_for` fingerprints the middleware class, latest message, and configuration. A resumed attempt with the same fingerprint skips setup, while a later invocation re-prepares fresh tokens, prompt, and context. Preparation implementations must be idempotent because failure before checkpoint persistence permits a retry.
+Preparation is checkpointed: `run_prepared_for` fingerprints the middleware class, latest message, and configuration. A resumed attempt with the same fingerprint skips setup, while a later invocation re-prepares fresh tokens, prompts, and context. Preparation implementations must be idempotent because failure before checkpoint persistence permits a retry.
 
 ## Backend and skills
 
@@ -77,10 +78,10 @@ The primary backend is a `CompositeBackend` whose default route is the sandbox p
 
 - **Bundled skills** (`/bundled-skills/`) come from `FilesystemBackend(BUNDLED_SKILLS_DIR)`.
 - **Hosted organization skills** (`/organization-skills/`) come from a `StoreBackend` namespaced in the LangGraph store scoped to the workspace.
-- **Hosted user skills** (`/skills/`) come from a `StoreBackend` namespaced to `profile_login` when one exists.
+- **Hosted user skills** (`/skills/`) come from a `StoreBackend` namespaced to `credential_login` when one exists, providing access to private personal integrations.
 - **Blobs** (`/blobs/`) on hosted runs use a `StoreBackend` routed to PostgreSQL (`ThreadBlobs`) so offloaded images can be read without sandbox access.
 
-The ordered `skill_sources` list is supplied to both the parent agent and the general-purpose subagent, ensuring consistent skill availability across delegation.
+The ordered `skill_sources` list is supplied to both the parent agent and the general-purpose subagent, ensuring consistent skill availability across delegation. For hosted runs, organization skills are checked first, then bundled skills; for hosted runs with personal integrations, user skills are checked before organization skills. Desktop runs or runs without credential access use only organization and bundled skills.
 
 ## Curated and dynamic tools
 
@@ -106,16 +107,18 @@ Integration tools (MCP/Corridor tools, Notion tools) are exposed through `Dynami
 The only configured subagent is the general-purpose Deep Agents subagent. It receives:
 
 - **Model**: The subagent model and effort pair, constructed independently of the parent.
-- **Tools**: Static tools filtered to exclude parent-only tools (save_user_settings, background_execute, Slack-specific tools, etc.) and subagent guards.
+- **Tools**: Static tools filtered to exclude `save_user_settings` and parent-only tools (background_execute, Slack-specific tools except those usable from subagents, infrastructure tools, etc.).
 - **Skills**: The same ordered skill_sources as the parent.
 - **Middleware**: Independently compiled so parent middleware never wraps it:
-  - `_DisableInheritedMiddleware` disables RequireUserReplyMiddleware (subagents do not reply to users) and parent-specific routing middleware.
-  - `_SubagentToolGuard` rejects parent-only tool calls with a user-friendly message.
+  - `_DisableInheritedMiddleware` disables RequireUserReplyMiddleware (subagents do not reply to users) and excludes parent-specific routing middleware.
+  - `_SubagentToolGuard` rejects parent-only tool calls with a user-friendly message and filters sandbox-only tools.
   - AnthropicPromptCachingMiddleware for prompt caching.
   - TranscriptMiddleware for call logging.
-  - Incident and workspace-skills middleware when applicable.
+  - ExcludeToolsMiddleware filtering shell/search tools.
+  - Incident middleware when applicable.
+  - Workspace skills middleware if applicable.
   - Full dynamic-tool middleware if parent has integration tools.
-  - GuardMiddleware (PullRequestCreationGuardMiddleware for hosted runs, none for desktop).
+  - Guard middleware (PullRequestCreationGuardMiddleware for hosted runs, none for desktop).
   - ConversationOffloadingMiddleware for history summarization.
   - Model guards: SanitizeOpenAIResponsesMiddleware, ModelErrorMiddleware, ModelCallTimeoutMiddleware.
 
@@ -258,7 +261,7 @@ sequenceDiagram
 
 ## Change guidance and extension points
 
-Treat `_get_agent` and `build_agent` (internal aliases used historically) as the customization seam for:
+Treat `build_agent` and its alias `_get_agent` as the customization seam for:
 
 - Sandbox providers and reconnect strategies
 - Model policy, routing, and fallback configuration
@@ -271,8 +274,10 @@ Preserve these contracts:
 
 - **Execution gate**: Do not bypass the `__is_for_execution__` check; graph discovery must remain cheap.
 - **Authority model**: `profile_login` drives authorization; thread settings freeze durable decisions. Do not silence model/settings changes between participants.
-- **Subagent boundary**: Parent middleware does not wrap subagents. A parent-only guard (e.g., PullRequestCreationGuardMiddleware) does not secure a separately compiled subagent. Add subagent guards in `_subagent_guard_middleware`.
+- **Subagent boundary**: Parent middleware does not wrap subagents. A parent-only guard (e.g., PullRequestCreationGuardMiddleware) does not secure a separately compiled subagent. Add subagent guards through the `guard_middleware` parameter to `_general_purpose_subagent`.
 - **Middleware order**: Order is part of the contract, not an implementation detail. Timeouts must be innermost so fallback escalation works correctly.
+- **Skill consistency**: Parent and subagent receive the same `skill_sources` list so skill availability does not differ between delegations.
+- **Tool filtering**: `_is_subagent_excluded_tool` is the authoritative exclusion list for subagent-only tool filtering; extend it there, not in per-run overrides.
 
 ## Focused tests
 

@@ -1,22 +1,18 @@
 {
   "schemaVersion": 1,
-  "pageVersion": "sha256:b6de7c8018380ebce675f2e0f5cf31760c36f61d35c48dc40e600ca77df03d51",
+  "pageVersion": "sha256:8f5d4bb79569142382dc15ec9c51f14e1c5c57797ba3509fb211f16fef3debcb",
   "claims": [
     {
       "id": "claim_5705cfc7c26a4fecbe1f78d84822fd3c",
-      "statement": "langgraph.json registers five named LangGraph graphs (agent, reviewer, review-scout, chat, scheduler), each mapped to a dotted entrypoint under openswe.graphs.* or openswe.*.",
+      "statement": "langgraph.json registers three named LangGraph graphs (agent, reviewer, review-scout), each mapped to a dotted entrypoint under openswe.graphs.* or openswe.*.",
       "evidence": [
         {
-          "resource": "repo://langgraph.json#L5-L11",
-          "version": "repo-lines-v1:sha256:48422e267e902d0d85521aefdccbe20e5f758459d69755ddd43ef19a3c7df4b0:eyJzZWxlY3RlZExpbmVDb3VudCI6NywiZmlyc3RTZWxlY3RlZExpbmVIYXNoIjoiZjQzMDI2NDY0ODUyNzc2Y2FkMmQyNzljMTYwMzBhM2IyYzU3YjgzYzExMjA1OTJlNmFmODFiNjliNjg0YmFhOCIsImxhc3RTZWxlY3RlZExpbmVIYXNoIjoiNGQ1Y2QyZmI0ZjNkZjg4NDUxNTI1NWIzOTUyM2YyZjhiNTQ3MmJlZWE5ZjU2NmZmY2EyMDRkYjgwMjU2MTA0MSIsInByZWNlZGluZ0NvbnRleHRMaW5lQ291bnQiOjMsInByZWNlZGluZ0NvbnRleHRIYXNoIjoiZTFlNWFmNmI2NzUzMGU0NmYxMzQzN2JiNmFjYzRmZTFiMTI5ODFlZjk4ZmMwZTlhYTljN2ViNWQ5OGQwYjE3MyIsImZvbGxvd2luZ0NvbnRleHRMaW5lQ291bnQiOjMsImZvbGxvd2luZ0NvbnRleHRIYXNoIjoiM2RlODIwMmY0OTJkY2FlNDhkN2JjZTY4ODU4OTBkNTZlYTdmY2ViYzU3ZjY0Zjc2ZmI1MzM2NTNjNTYyOTY1OCJ9"
+          "resource": "repo://langgraph.json#L5-L9",
+          "version": "repo-lines-v1:sha256:32402d76861a75af955c0e25150a7d209359dc79c27d82ec7dfccee290836fdf:eyJzZWxlY3RlZExpbmVDb3VudCI6NSwiZmlyc3RTZWxlY3RlZExpbmVIYXNoIjoiZjQzMDI2NDY0ODUyNzc2Y2FkMmQyNzljMTYwMzBhM2IyYzU3YjgzYzExMjA1OTJlNmFmODFiNjliNjg0YmFhOCIsImxhc3RTZWxlY3RlZExpbmVIYXNoIjoiNGQ1Y2QyZmI0ZjNkZjg4NDUxNTI1NWIzOTUyM2YyZjhiNTQ3MmJlZWE5ZjU2NmZmY2EyMDRkYjgwMjU2MTA0MSIsInByZWNlZGluZ0NvbnRleHRMaW5lQ291bnQiOjMsInByZWNlZGluZ0NvbnRleHRIYXNoIjoiZTFlNWFmNmI2NzUzMGU0NmYxMzQzN2JiNmFjYzRmZTFiMTI5ODFlZjk4ZmMwZTlhYTljN2ViNWQ5OGQwYjE3MyIsImZvbGxvd2luZ0NvbnRleHRMaW5lQ291bnQiOjMsImZvbGxvd2luZ0NvbnRleHRIYXNoIjoiM2RlODIwMmY0OTJkY2FlNDhkN2JjZTY4ODU4OTBkNTZlYTdmY2ViYzU3ZjY0Zjc2ZmI1MzM2NTNjNTYyOTY1OCJ9"
         },
         {
           "resource": "repo://openswe/graphs/agent.py#L1-L2",
           "version": "repo-lines-v1:sha256:0fa0e9dccf23378d9161ad329bfff9c6f023f287bc46c395a9582bb122272982:eyJzZWxlY3RlZExpbmVDb3VudCI6MiwiZmlyc3RTZWxlY3RlZExpbmVIYXNoIjoiZTU4YjViMmU5ZDhjYWI4MzBhZjk2NDI2ZjM2ZWVhZDEzNjNkYmU2YTFhM2U2MTJmYTBjY2ZmOGZhNDI1ZjY0OCIsImxhc3RTZWxlY3RlZExpbmVIYXNoIjoiMDFiYTQ3MTljODBiNmZlOTExYjA5MWE3YzA1MTI0YjY0ZWVlY2U5NjRlMDljMDU4ZWY4Zjk4MDVkYWNhNTQ2YiIsInByZWNlZGluZ0NvbnRleHRMaW5lQ291bnQiOjAsInByZWNlZGluZ0NvbnRleHRIYXNoIjoiZTNiMGM0NDI5OGZjMWMxNDlhZmJmNGM4OTk2ZmI5MjQyN2FlNDFlNDY0OWI5MzRjYTQ5NTk5MWI3ODUyYjg1NSIsImZvbGxvd2luZ0NvbnRleHRMaW5lQ291bnQiOjEsImZvbGxvd2luZ0NvbnRleHRIYXNoIjoiYWMwZWNiZWUyM2RmMTRmMTI5YWVmNGZiOTViY2JjOWJkZWQ2ZDVlOGQyYzYwMTYyNzQ4ZGQyYThhNWUyYmRjNiJ9"
-        },
-        {
-          "resource": "repo://openswe/graphs/chat.py#L1-L2",
-          "version": "repo-lines-v1:sha256:e767f0be9f9d2a3bcb8680161dfe90a88637ca7bb20f24d557105818c9d371fc:eyJzZWxlY3RlZExpbmVDb3VudCI6MiwiZmlyc3RTZWxlY3RlZExpbmVIYXNoIjoiNTdmYmJkYzUyZmRlMWExZmFlZjczNWU1ZjdkZmRiYzM1YzY1YzExZjMxODM4ODQ1NWQzMmJkMjZiYjUxNjFlZiIsImxhc3RTZWxlY3RlZExpbmVIYXNoIjoiMDFiYTQ3MTljODBiNmZlOTExYjA5MWE3YzA1MTI0YjY0ZWVlY2U5NjRlMDljMDU4ZWY4Zjk4MDVkYWNhNTQ2YiIsInByZWNlZGluZ0NvbnRleHRMaW5lQ291bnQiOjAsInByZWNlZGluZ0NvbnRleHRIYXNoIjoiZTNiMGM0NDI5OGZjMWMxNDlhZmJmNGM4OTk2ZmI5MjQyN2FlNDFlNDY0OWI5MzRjYTQ5NTk5MWI3ODUyYjg1NSIsImZvbGxvd2luZ0NvbnRleHRMaW5lQ291bnQiOjEsImZvbGxvd2luZ0NvbnRleHRIYXNoIjoiMDg2ZWUzOGY0MTljNTg3YWU3YzYxMTRiNmVjOTU0MzM3MDJiNWViYTU1Nzg2YWI0MDNlNGU5MDJhYTkyOGI0NSJ9"
         },
         {
           "resource": "repo://openswe/graphs/review_scout.py#L1-L2",
@@ -25,10 +21,6 @@
         {
           "resource": "repo://openswe/graphs/reviewer.py#L1-L2",
           "version": "repo-lines-v1:sha256:bbc9a960cade139678bebc985101064c127b9bc614a01dff7fc733f9e5306a31:eyJzZWxlY3RlZExpbmVDb3VudCI6MiwiZmlyc3RTZWxlY3RlZExpbmVIYXNoIjoiMTM3MDlhMzM0MGU3OTY1YzEyMTNhMmMyNzVhNjkyMDMyYjEyZWNiOTMwOWZmZDA3Zjg0ODkzYWM4ZjljYjc0NyIsImxhc3RTZWxlY3RlZExpbmVIYXNoIjoiMDFiYTQ3MTljODBiNmZlOTExYjA5MWE3YzA1MTI0YjY0ZWVlY2U5NjRlMDljMDU4ZWY4Zjk4MDVkYWNhNTQ2YiIsInByZWNlZGluZ0NvbnRleHRMaW5lQ291bnQiOjAsInByZWNlZGluZ0NvbnRleHRIYXNoIjoiZTNiMGM0NDI5OGZjMWMxNDlhZmJmNGM4OTk2ZmI5MjQyN2FlNDFlNDY0OWI5MzRjYTQ5NTk5MWI3ODUyYjg1NSIsImZvbGxvd2luZ0NvbnRleHRMaW5lQ291bnQiOjEsImZvbGxvd2luZ0NvbnRleHRIYXNoIjoiYjI5YTA5MWJkY2JhMjg5ZTYyZGUwMmEwMGQ0NjcxYWI1OWIzZDRkZmU2MzYzZjYzMzE1MGE1NDBmZWZmM2IyOCJ9"
-        },
-        {
-          "resource": "repo://openswe/scheduler.py#L113-L117",
-          "version": "repo-lines-v1:sha256:e5669e8b816b3d3ca19f8d8c2afca74af2e50d736e53e8fa68d1a2fd5e4e5351:eyJzZWxlY3RlZExpbmVDb3VudCI6NSwiZmlyc3RTZWxlY3RlZExpbmVIYXNoIjoiYTFiY2JhZTI0ZDczZmVlYWJiNzg5YTZiZDQxNDk5N2VhYjBmMjdhYzJiMzcxYWZiMWU5YmNmY2Y4YTVhZTRhMiIsImxhc3RTZWxlY3RlZExpbmVIYXNoIjoiNjY5OTUwZTE1Y2MwODUzZTE0MjMyYmQ1N2Q1MDBjYmUwZDU1NmU1NjQ5YWE1NjQ3M2M4M2ZlZTA3ZmZjOGQzMyIsInByZWNlZGluZ0NvbnRleHRMaW5lQ291bnQiOjMsInByZWNlZGluZ0NvbnRleHRIYXNoIjoiOGEyMTY4YjdjOTMxNWVmYTY5MmFmOGI2ZDFlNmIyNjIyNjliODZhNzJjYmMwODEzM2M5ZDIyMjg1NWFiNjg5OCIsImZvbGxvd2luZ0NvbnRleHRMaW5lQ291bnQiOjEsImZvbGxvd2luZ0NvbnRleHRIYXNoIjoiNzAwYzZiNjMzOTU0MGM4YWE3YzZlNmYyOTI0MjA3NWZiNGRiNjhlYjM3ZWZhMGJkMTUxZWRkZGUwN2E5MjJiNCJ9"
         }
       ]
     },
@@ -37,12 +29,12 @@
       "statement": "langgraph.json mounts a custom FastAPI app at openswe.webapp:app, and openswe/webapp.py is a compatibility shim that re-exports the application assembled in openswe/api/app.py.",
       "evidence": [
         {
-          "resource": "repo://langgraph.json#L15-L17",
-          "version": "repo-lines-v1:sha256:c1e27f2d6f817335b2e0699b90cd4ff6ae61b4b288a0320e77cfab13108fff81:eyJzZWxlY3RlZExpbmVDb3VudCI6MywiZmlyc3RTZWxlY3RlZExpbmVIYXNoIjoiNWYxZDc0NWJiZmIzMzliZDkxZTZmZTgwZWU5NDk4ZWU3M2M4ZjcwNTgyMjk0ZmExYWNjYWI0OGVlNzk2ZTYzMSIsImxhc3RTZWxlY3RlZExpbmVIYXNoIjoiNGQ1Y2QyZmI0ZjNkZjg4NDUxNTI1NWIzOTUyM2YyZjhiNTQ3MmJlZWE5ZjU2NmZmY2EyMDRkYjgwMjU2MTA0MSIsInByZWNlZGluZ0NvbnRleHRMaW5lQ291bnQiOjMsInByZWNlZGluZ0NvbnRleHRIYXNoIjoiM2RlODIwMmY0OTJkY2FlNDhkN2JjZTY4ODU4OTBkNTZlYTdmY2ViYzU3ZjY0Zjc2ZmI1MzM2NTNjNTYyOTY1OCIsImZvbGxvd2luZ0NvbnRleHRMaW5lQ291bnQiOjMsImZvbGxvd2luZ0NvbnRleHRIYXNoIjoiMGEwYjJjODA5NDZjN2I1ZjgyODg5OTg2ZGMxMGM5NmEyYzAwMDUzOTMxYzJiNjdhODRhYmMzMGE0OTk2YjMyYyJ9"
+          "resource": "repo://langgraph.json#L13-L15",
+          "version": "repo-lines-v1:sha256:c1e27f2d6f817335b2e0699b90cd4ff6ae61b4b288a0320e77cfab13108fff81:eyJzZWxlY3RlZExpbmVDb3VudCI6MywiZmlyc3RTZWxlY3RlZExpbmVIYXNoIjoiNWYxZDc0NWJiZmIzMzliZDkxZTZmZTgwZWU5NDk4ZWU3M2M4ZjcwNTgyMjk0ZmExYWNjYWI0OGVlNzk2ZTYzMSIsImxhc3RTZWxlY3RlZExpbmVIYXNoIjoiNGQ1Y2QyZmI0ZjNkZjg4NDUxNTI1NWIzOTUyM2YyZjhiNTQ3MmJlZWE5ZjU2NmZmY2EyMDRkYjgwMjU2MTA0MSIsInByZWNlZGluZ0NvbnRleHRMaW5lQ291bnQiOjMsInByZWNlZGluZ0NvbnRleHRIYXNoIjoiM2RlODIwMmY0OTJkY2FlNDhkN2JjZTY4ODU4OTBkNTZlYTdmY2ViYzU3ZjY0Zjc2ZmI1MzM2NTNjNTYyOTY1OCIsImZvbGxvd2luZ0NvbnRleHRMaW5lQ291bnQiOjMsImZvbGxvd2luZ0NvbnRleHRIYXNoIjoiMzQ4NTFiODc0Y2VhMzdjOWRhNmE4ZjMyNTI4ZjljZDgyZDJhN2Y4NmYyNTczNjYwZDI0OGM0OTBkZDQxZTk0OSJ9"
         },
         {
-          "resource": "repo://openswe/api/app.py#L183-L185",
-          "version": "repo-lines-v1:sha256:14eb6d014cdf19b837fa5aaa88813dfa63727146c3461ddbe7a19b0fbb5fa14c:eyJzZWxlY3RlZExpbmVDb3VudCI6MywiZmlyc3RTZWxlY3RlZExpbmVIYXNoIjoiMDcxODI5NzQ3OTI2NGM0YjMxMDgxYmEwMTgwNTNiZDlkMTRiNzIzYmNhNjdlMDc3MjYwN2VlNGIyMTVkNThmNCIsImxhc3RTZWxlY3RlZExpbmVIYXNoIjoiNWM3MzIzMzViMjdmZjQwMjM1ZTkxMDkyM2M4ZjA2YjE5NGJlNjY1YmJjYjM4OTI2YzgzYTRhMTFiM2ViMTQyZCIsInByZWNlZGluZ0NvbnRleHRMaW5lQ291bnQiOjMsInByZWNlZGluZ0NvbnRleHRIYXNoIjoiN2I3MDU1N2E1NzFiODk1MDcxNGY3MWUxNDA0N2QzMjFlOWZjMTY2NzY4NmU5OTg0ZTBiNDJiYWFiYzUxMDMyZSIsImZvbGxvd2luZ0NvbnRleHRMaW5lQ291bnQiOjMsImZvbGxvd2luZ0NvbnRleHRIYXNoIjoiOWYyMjdkM2UwMmVkYzNhMTNlNjJjOTBhNWE0ODQyZWUyMzc1OWQzZWQ4ZmQ1YzI2NjU0ZDc3NzM0NDdmZThmYSJ9"
+          "resource": "repo://openswe/api/app.py#L183-L183",
+          "version": "repo-lines-v1:sha256:827528b024c346bb0dbc2edf46b32db53b4710040088fd294a5c761369075463:eyJzZWxlY3RlZExpbmVDb3VudCI6MSwiZmlyc3RTZWxlY3RlZExpbmVIYXNoIjoiODI3NTI4YjAyNGMzNDZiYjBkYmMyZWRmNDZiMzJkYjUzYjQ3MTAwNDAwODhmZDI5NGE1Yzc2MTM2OTA3NTQ2MyIsImxhc3RTZWxlY3RlZExpbmVIYXNoIjoiODI3NTI4YjAyNGMzNDZiYjBkYmMyZWRmNDZiMzJkYjUzYjQ3MTAwNDAwODhmZDI5NGE1Yzc2MTM2OTA3NTQ2MyIsInByZWNlZGluZ0NvbnRleHRMaW5lQ291bnQiOjMsInByZWNlZGluZ0NvbnRleHRIYXNoIjoiMWVmYWM5YTZiNjhkMDk0NGZkMzM2ZGM4ZjM5MzhiOGExNWNkZjZjNDZlYmI4NWI0OTgzNWI4MjE0Y2EwMTk1NSIsImZvbGxvd2luZ0NvbnRleHRMaW5lQ291bnQiOjAsImZvbGxvd2luZ0NvbnRleHRIYXNoIjoiZTNiMGM0NDI5OGZjMWMxNDlhZmJmNGM4OTk2ZmI5MjQyN2FlNDFlNDY0OWI5MzRjYTQ5NTk5MWI3ODUyYjg1NSJ9"
         },
         {
           "resource": "repo://openswe/webapp.py#L1-L5",
@@ -55,8 +47,8 @@
       "statement": "openswe/api/app.py:create_app composes the FastAPI application, including the dashboard, plan, workflow-approval, Linear, Notion, Slack, GitHub, health, and sandbox-tool routers, and configures CORS from DASHBOARD_ALLOWED_ORIGINS while rejecting '*' when credentials are allowed.",
       "evidence": [
         {
-          "resource": "repo://openswe/api/app.py#L183-L185",
-          "version": "repo-lines-v1:sha256:1efac9a6b68d0944fd336dc8f3938b8a15cdf6c46ebb85b49835b8214ca01955:eyJzZWxlY3RlZExpbmVDb3VudCI6MywiZmlyc3RTZWxlY3RlZExpbmVIYXNoIjoiYmQ2N2I0NjYzNzg3NWMzYmI3ZjkwM2IxZGI4NzM0YjRhMjk2Njg1ZGY0ZGJlNjZhNGY2Y2VmN2ZkYzQxMTYzZSIsImxhc3RTZWxlY3RlZExpbmVIYXNoIjoiMDFiYTQ3MTljODBiNmZlOTExYjA5MWE3YzA1MTI0YjY0ZWVlY2U5NjRlMDljMDU4ZWY4Zjk4MDVkYWNhNTQ2YiIsInByZWNlZGluZ0NvbnRleHRMaW5lQ291bnQiOjMsInByZWNlZGluZ0NvbnRleHRIYXNoIjoiY2E1NTRlMjRlZDc3MWU5MDI1MjY0YzQ0OGQ3ZTE3M2Y1MmM1Y2NiMzRmZThhMTI3YmEwN2VkZTM2NWVhZDU0YiIsImZvbGxvd2luZ0NvbnRleHRMaW5lQ291bnQiOjEsImZvbGxvd2luZ0NvbnRleHRIYXNoIjoiODI3NTI4YjAyNGMzNDZiYjBkYmMyZWRmNDZiMzJkYjUzYjQ3MTAwNDAwODhmZDI5NGE1Yzc2MTM2OTA3NTQ2MyJ9"
+          "resource": "repo://openswe/api/app.py#L159-L179",
+          "version": "repo-lines-v1:sha256:6b47e7a6040fb9793ee78d579d444b4e87e8255ffbea53ab882d87aa60eaef22:eyJzZWxlY3RlZExpbmVDb3VudCI6MjEsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6IjQ4NjFiODdlZDc0OTdmYWMzZTAwYzIzNzQzZWFkMjIwYTBhYWYxMjU2YWRjMzlhYTdkMDlmYWU2YWVjZGViMjQiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6IjM5NDY5NWIxZTRhMmEyYmU5OTQ1MWNmZTYyYjhmMWYwOWFlY2U5MjllZTg3NWQ3NWYyNWVkZWViNGJmMWYyYTYiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6ImJjMjU0YmUwNDlmNzcwNTM5YjUwZDJiNWViNTRhMTUyODk0YmE2OWE1YTkwNWEyZjE3N2Q2NjAzY2NlZWZiODciLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6IjFlZmFjOWE2YjY4ZDA5NDRmZDMzNmRjOGYzOTM4YjhhMTVjZGY2YzQ2ZWJiODViNDk4MzViODIxNGNhMDE5NTUifQ"
         }
       ]
     },
@@ -65,16 +57,16 @@
       "statement": "openswe.server:build_agent (wrapped by _get_agent) is the main graph factory, called per-thread, that resolves the GitHub identity, gets-or-creates the thread's sandbox backend, resolves model settings, and constructs a fresh create_deep_agent with its tools and middleware stack.",
       "evidence": [
         {
-          "resource": "repo://langgraph.json#L5-L6",
-          "version": "repo-lines-v1:sha256:c05585d6596324ff9a165757bc3ed4b4ca3d173241d49329297f2d6234c4af4d:eyJzZWxlY3RlZExpbmVDb3VudCI6MiwiZmlyc3RTZWxlY3RlZExpbmVIYXNoIjoiZjQzMDI2NDY0ODUyNzc2Y2FkMmQyNzljMTYwMzBhM2IyYzU3YjgzYzExMjA1OTJlNmFmODFiNjliNjg0YmFhOCIsImxhc3RTZWxlY3RlZExpbmVIYXNoIjoiY2ZmYjBlZGVlYWY1ZjZiNTEwMGY1MWYwNGU4MTViYmJjNWM3Y2YxMmIyZjYwMGE5NGI5YmI3YzdjZDRhYzNhYiIsInByZWNlZGluZ0NvbnRleHRMaW5lQ291bnQiOjMsInByZWNlZGluZ0NvbnRleHRIYXNoIjoiZTFlNWFmNmI2NzUzMGU0NmYxMzQzN2JiNmFjYzRmZTFiMTI5ODFlZjk4ZmMwZTlhYTljN2ViNWQ5OGQwYjE3MyIsImZvbGxvd2luZ0NvbnRleHRMaW5lQ291bnQiOjMsImZvbGxvd2luZ0NvbnRleHRIYXNoIjoiNGZhNGNlNzNjMjE2ZDkyNWI4YWQ0YWNiOTQzMTI2Mjg2ZWQ3MGIwZmY0ODQyMThkODY4NjkxYjYyMTk3NzI3ZiJ9"
+          "resource": "repo://langgraph.json#L5-L9",
+          "version": "repo-lines-v1:sha256:32402d76861a75af955c0e25150a7d209359dc79c27d82ec7dfccee290836fdf:eyJzZWxlY3RlZExpbmVDb3VudCI6NSwiZmlyc3RTZWxlY3RlZExpbmVIYXNoIjoiZjQzMDI2NDY0ODUyNzc2Y2FkMmQyNzljMTYwMzBhM2IyYzU3YjgzYzExMjA1OTJlNmFmODFiNjliNjg0YmFhOCIsImxhc3RTZWxlY3RlZExpbmVIYXNoIjoiNGQ1Y2QyZmI0ZjNkZjg4NDUxNTI1NWIzOTUyM2YyZjhiNTQ3MmJlZWE5ZjU2NmZmY2EyMDRkYjgwMjU2MTA0MSIsInByZWNlZGluZ0NvbnRleHRMaW5lQ291bnQiOjMsInByZWNlZGluZ0NvbnRleHRIYXNoIjoiZTFlNWFmNmI2NzUzMGU0NmYxMzQzN2JiNmFjYzRmZTFiMTI5ODFlZjk4ZmMwZTlhYTljN2ViNWQ5OGQwYjE3MyIsImZvbGxvd2luZ0NvbnRleHRMaW5lQ291bnQiOjMsImZvbGxvd2luZ0NvbnRleHRIYXNoIjoiM2RlODIwMmY0OTJkY2FlNDhkN2JjZTY4ODU4OTBkNTZlYTdmY2ViYzU3ZjY0Zjc2ZmI1MzM2NTNjNTYyOTY1OCJ9"
         },
         {
-          "resource": "repo://openswe/server.py#L1475-L1496",
-          "version": "repo-lines-v1:sha256:d0892a98ec62f992f8453d7c3c8109b68746c59ab6d8ded1c91cc090b97c0b0b:eyJzZWxlY3RlZExpbmVDb3VudCI6MjIsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6ImNhZDliYzc0MTFjMGNkN2U1ZjlkMWIyNjJjYzk4YWIyN2JhYzYyYzJkYTkyN2I2Zjg0NGVlN2VjOWRmYzZmYzQiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6IjAxYmE0NzE5YzgwYjZmZTkxMWIwOTFhN2MwNTEyNGI2NGVlZWNlOTY0ZTA5YzA1OGVmOGY5ODA1ZGFjYTU0NmIiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6IjBmOGNmNmU2MjBjMDg2ZDAzMTIyYzIxNThkMTY2ODZkMmIzYzBkZGE3YjY1ZDdkMjc4YjVkNWFlOGE2MDMxMmIiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6IjEyNTcyMDM3MWNlY2M2YTY5MDUxYWFjNzRhOWVmOTUwNmEwZWU4MGI5OWE1ODlmZmVkMTQxZjE3NTg2ZjA5ZTgifQ"
+          "resource": "repo://openswe/server.py#L1442-L1443",
+          "version": "repo-lines-v1:sha256:baec74d242c61277a789bf720948922f1abd9156cbe8044846aa9fe3a34cfa62:eyJzZWxlY3RlZExpbmVDb3VudCI6MiwiZmlyc3RTZWxlY3RlZExpbmVIYXNoIjoiY2FkOWJjNzQxMWMwY2Q3ZTVmOWQxYjI2MmNjOThhYjI3YmFjNjJjMmRhOTI3YjZmODQ0ZWU3ZWM5ZGZjNmZjNCIsImxhc3RTZWxlY3RlZExpbmVIYXNoIjoiMDc5YmIxNzA1ZjVlZmQ0ZDE1MjkzMjU3ZWRhYzhhZGY5NzA1M2IxOWUzZTQ3ZDllYjQ4NDczMmNjOWIxZmQzZiIsInByZWNlZGluZ0NvbnRleHRMaW5lQ291bnQiOjMsInByZWNlZGluZ0NvbnRleHRIYXNoIjoiMGY4Y2Y2ZTYyMGMwODZkMDMxMjJjMjE1OGQxNjY4NmQyYjNjMGRkYTdiNjVkN2QyNzhiNWQ1YWU4YTYwMzEyYiIsImZvbGxvd2luZ0NvbnRleHRMaW5lQ291bnQiOjMsImZvbGxvd2luZ0NvbnRleHRIYXNoIjoiNTBhYjBmNmZkNzg4Y2FlNjA1MzY0MDE3MTRkY2JkMTVjZTQzYTlhOGUwNTI5YTRiMTViZTFhMmIwODIyNzM1MSJ9"
         },
         {
-          "resource": "repo://openswe/server.py#L1527-L1545",
-          "version": "repo-lines-v1:sha256:b7a7ff47e0b0816a1c999b895f1bfc86b50247f9c3d835baac7d2d8ea08c723f:eyJzZWxlY3RlZExpbmVDb3VudCI6MTksImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6Ijg1YzU4YjYyMGRlYjFiNmNiMGQxMTUyNGI2NjU4NjFjMjcyYTc5MjRiNGY1NzhjNjJmMjgxNzFhMjE2ODNlZTciLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6ImZlZjVkYmE0YWJkOWIwZWUwMmM0Mzg4MTQ3MGMxNWZkYjBlMzU2ZjUyYzY0NjAxOTFlYTUzYWExNjk3OTI2NmYiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6IjI5NTI1YmI1ZDQyYThiMTJiMjMwOWM0OTQ5ZDJhNGE0YzE3ZTJlMzg3YTgzMjQ4Y2NhMzJkZjdmNTZmMTcyOTgiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6IjBhNGExMmNmZGY1ZjY2MDZhYzJhMjdjZDU0MDU0MDA3YzkzOTcwYmE4YzI5ZDU1NzgyZGMyNTJmNTYzZDcyNzQifQ"
+          "resource": "repo://openswe/server.py#L1446-L1506",
+          "version": "repo-lines-v1:sha256:bc0aebc8fe6eef00ef4e48718b0e6a8092d06a1117fd88ef069b926eb6383ec1:eyJzZWxlY3RlZExpbmVDb3VudCI6NjEsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6IjIxMGIzOWFhMmU2ZDcyMTlhNmM0N2E5ZTk3ODM4ZjQzZDI1ZmYwYWI5MmZmZTljOTY3ODU3MWQ3MDMxYzI2MzMiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6ImY2MjU1YjdkZTliODNlMmZhNTE1OWEzMjM1MWEyZWU2ODE3OTAyNGIyZDlkOTgxN2ZkZjdiNmMwNzAzMTliYTAiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6IjQxYWI3NzM0Y2E5NzJkMmI3ZjI1YmNhNDY0Y2U0MDAyNTE3MjBlYWYxOWU2NmQyZTEyMGMyMTUxZTNjNTIyYWYiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6ImQ2YTdjNDJjMDNkYmFiMzFhMzMyNmIxNzEyYTI4MjIxMWM1YWM3YTVhODZlMWM1Yjc0NjAyNmQ4ZDgyNGYwOWYifQ"
         }
       ]
     },
@@ -83,7 +75,7 @@
       "statement": "When there is no thread_id or the graph is not loaded for execution, build_agent returns a trivial no-sandbox deep agent instead of provisioning a sandbox.",
       "evidence": [
         {
-          "resource": "repo://openswe/server.py#L1487-L1495",
+          "resource": "repo://openswe/server.py#L1454-L1462",
           "version": "repo-lines-v1:sha256:7e53f20763ebad7a7333d05126fa6aec1c61765df48bbe143d990306825e2136:eyJzZWxlY3RlZExpbmVDb3VudCI6OSwiZmlyc3RTZWxlY3RlZExpbmVIYXNoIjoiOWJjODU3MWEyYzVmNDY1ZmJlNGYyNGEyYzA5M2RhZTBiMWNjM2M2YjNmMzBmNmEzY2JiZWIzN2RjNDY5YzU1ZiIsImxhc3RTZWxlY3RlZExpbmVIYXNoIjoiOTU4NmUwYjFjODc0NTA5ZTQ2NjRhZTllNTAwOGY5YzkwMjgzNDZlZDA5YzBlZDYyYWI1YWJhYzU2YjhmMzNjOCIsInByZWNlZGluZ0NvbnRleHRMaW5lQ291bnQiOjMsInByZWNlZGluZ0NvbnRleHRIYXNoIjoiOGJiZjdjZmI3NTNiOGEyZGE2MzUzZjMwY2I1Y2MxZTgwOTQ2ZjM3MGIyNGY1NTIwZjE4MDBmOGIzN2M5ZGZiYyIsImZvbGxvd2luZ0NvbnRleHRMaW5lQ291bnQiOjMsImZvbGxvd2luZ0NvbnRleHRIYXNoIjoiMDFiMTAxMjRhNTA0MDk0ODIzMzc4NTY5Yzk0YmU2ZjQyZTZmOTM2MzU4MjcwZTQzMjQ2MWVjZDFkMzE5YThkNiJ9"
         }
       ]
@@ -100,21 +92,25 @@
     },
     {
       "id": "claim_f73f16e843044747a6a0a4342a0098fa",
-      "statement": "The chat graph is a read-only chat-with-this-PR agent for the review UI that has no sandbox; PR context is seeded as virtual files under /pr/ into the files state channel by the dashboard chat proxy.",
+      "statement": "The chat flow is a read-only FastAPI proxy in openswe/review/chat.py that routes requests through to the main agent thread; PR context is accessed via the existing agent thread's state, and filesystem tools can read context while execute, writes, edits, and deletion are excluded.",
       "evidence": [
         {
-          "resource": "repo://openswe/chat.py#L1-L14",
-          "version": "repo-lines-v1:sha256:5904d415801ca3fb1c876e4397c8cd53d855297001a934ee4b03f9325cb7c795:eyJzZWxlY3RlZExpbmVDb3VudCI6MTQsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6ImE2NzlkNzc4ZTMzYTdkYTEzYjlmZjBiOTViY2U5OTcyYTJiMDYxNzgyMTEzNmYzYWZiZjJhM2JlNDZlNWQxMjAiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6ImEzMDNlY2RkNGE0ZDEwZjE5YzczZmQ0MmZkMTI0MzdmZDMzNTRhODI2ODE2MDVkYTUyNTVhOTdhMzkwNjhkYmIiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjowLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6ImUzYjBjNDQyOThmYzFjMTQ5YWZiZjRjODk5NmZiOTI0MjdhZTQxZTQ2NDliOTM0Y2E0OTU5OTFiNzg1MmI4NTUiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6IjgxMDkwNzY0ZWJhZGM4NTlkNGVkZjk1MWFmODkzMWM3ZDRhN2JmMDJjZjBiZWI3YmM5NzU5MmUwZmRmODQ1YTMifQ"
+          "resource": "repo://openswe/dispatch.py#L1-L27",
+          "version": "repo-lines-v1:sha256:b089ea59a45f0c547ce3888dd68945ebf8ab2807ad74643a752299105aa6a940:eyJzZWxlY3RlZExpbmVDb3VudCI6MjcsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6IjBlMzgxZGU4NjA0OWNiMjBhYmU5NmI2YWQyODlhMDI4OWJhZThmOTVhZWFlY2ZjNzUxNTI2ZDIwYTNiMmRkZDEiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6ImEzMDNlY2RkNGE0ZDEwZjE5YzczZmQ0MmZkMTI0MzdmZDMzNTRhODI2ODE2MDVkYTUyNTVhOTdhMzkwNjhkYmIiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjowLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6ImUzYjBjNDQyOThmYzFjMTQ5YWZiZjRjODk5NmZiOTI0MjdhZTQxZTQ2NDliOTM0Y2E0OTU5OTFiNzg1MmI4NTUiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6ImE1YWUwYzIwY2Y2N2I3ZWI2NWNkYWQ1MTIyZmI1YmU2OTA5Njk3MmJkYzYzMjYxZWI0MmY4OGViYzc5NWU2ODEifQ"
+        },
+        {
+          "resource": "repo://openswe/review/chat.py#L1-L70",
+          "version": "repo-lines-v1:sha256:3d0768fe2c07924e23d62c88618e162a816c358b78275986a5424c2cb9d36ce6:eyJzZWxlY3RlZExpbmVDb3VudCI6NzAsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6ImUyZjI4ZGExZTBjMzk2OGUzNDgxNDAzZTBmMTg2NDY1N2M2MTA5NTlmNDNjNTIzZDMxMjlkNTgyNGJkOWZmZDAiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6IjAxYmE0NzE5YzgwYjZmZTkxMWIwOTFhN2MwNTEyNGI2NGVlZWNlOTY0ZTA5YzA1OGVmOGY5ODA1ZGFjYTU0NmIiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjowLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6ImUzYjBjNDQyOThmYzFjMTQ5YWZiZjRjODk5NmZiOTI0MjdhZTQxZTQ2NDliOTM0Y2E0OTU5OTFiNzg1MmI4NTUiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6IjY1ODIzOTQ3NzIyYWIzYjFlZDUyYmViOTllZWM5MzNjZjc2NTljM2ExMDI1NDFkNzQ2Zjk3YWFlYzRjOTNmYzIifQ"
         }
       ]
     },
     {
       "id": "claim_0ed5beb42ec048d48bb1b5745c722438",
-      "statement": "The scheduler graph is a single-node StateGraph whose _launch node dispatches a cron tick to reconciliation, watch evaluation, background-task monitoring, session-cost or agent-cost refresh, thread-feedback evaluation, human-review deadline management, or a scheduled agent run.",
+      "statement": "Background and scheduled work runs via the job queue (openswe/jobs/kinds.py), not as a registered graph; job handlers dispatch to reconciliation, watch evaluation, background-task monitoring, session-cost or agent-cost refresh, thread-feedback evaluation, human-review deadline management, or scheduled agent runs via launch_scheduled_agent_run.",
       "evidence": [
         {
-          "resource": "repo://openswe/scheduler.py#L61-L104",
-          "version": "repo-lines-v1:sha256:78397c197be6ef897100d78d902b7c9aeced41ddc60655426a93cb3a1ac8725d:eyJzZWxlY3RlZExpbmVDb3VudCI6NDQsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6IjAyMTc1NWE0NzlkNzgxYTY2NDkzYTBkMTI3Y2IyYmU5MzE4YTk5ZjZlZWQ3ZmY3MGMyYmE0NTU2MTk4OTk2YTYiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6IjJiYWIxNjJkMGM5NmZmMWM0NmM0MDk5NWE2ZDFkNWQxZDg4M2YxMjgxMjAzOGYwMjU0YThkNDBiZTg1ZjY4NDkiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6IjQzNjEzNWZiNWRmMDMzNjRkN2FlNjMzNGMxZGMzMWVjMjVkMTY5MjQ1MTU3Y2UxMjk3NGY2NDRjMDQ0ZjViNmYiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6ImVhM2I3ZDNlZDZmMTMyMDIwNTgwNzQzMzk4NDY2YWMxMWVhYzNkMzAyOGZjMTcyZmI3ZGQ4ZGE3YWUxOTZjMDAifQ"
+          "resource": "repo://openswe/jobs/kinds.py#L1-L175",
+          "version": "repo-lines-v1:sha256:a8a3ab6fa5d576193b68bf5511d6367b0618e5d445bbd3c2fdb8cae1c6ca3060:eyJzZWxlY3RlZExpbmVDb3VudCI6MTc1LCJmaXJzdFNlbGVjdGVkTGluZUhhc2giOiI3OWNkZDRkODcxY2U0Y2VjNjI5YWZjMmMyMGUyNDNkMzVjNGZhNjRlOWU4NzI4NmIzMjI5YTY5OTY2ODAxYzgzIiwibGFzdFNlbGVjdGVkTGluZUhhc2giOiIwMWJhNDcxOWM4MGI2ZmU5MTFiMDkxYTdjMDUxMjRiNjRlZWVjZTk2NGUwOWMwNThlZjhmOTgwNWRhY2E1NDZiIiwicHJlY2VkaW5nQ29udGV4dExpbmVDb3VudCI6MCwicHJlY2VkaW5nQ29udGV4dEhhc2giOiJlM2IwYzQ0Mjk4ZmMxYzE0OWFmYmY0Yzg5OTZmYjkyNDI3YWU0MWU0NjQ5YjkzNGNhNDk1OTkxYjc4NTJiODU1IiwiZm9sbG93aW5nQ29udGV4dExpbmVDb3VudCI6MywiZm9sbG93aW5nQ29udGV4dEhhc2giOiI5MDYzZGNmNDEzMTA4YzljY2FiN2M3YTNmMjk5NjJjMjQyZjk4ZmRlOWIxZTBmZWEzODY4MjQwZjM3ZDAxMGE5In0"
         }
       ]
     },
@@ -143,8 +139,8 @@
       "statement": "Slack, Linear, and GitHub webhooks are received by APIRouters and resolve deterministic thread identities so follow-up messages on the same external issue, conversation, or PR route to the same agent run.",
       "evidence": [
         {
-          "resource": "repo://openswe/github/routes.py#L29-L80",
-          "version": "repo-lines-v1:sha256:7171da16b5e0ee4921736004d94ef023fbe3a69da2bbd3956c126c323f99d2db:eyJzZWxlY3RlZExpbmVDb3VudCI6NTIsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6IjlkOGQxYjkwZTExOWQ1ZDVhMDEzMWFjMzhiOWQ4M2Y5ZWUzNmY2OTFkMmJmMGY0NzM5MjAwN2ZiOWVhOTI3ODEiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6ImQwMDE1NWNlZjAzY2M1Y2MxZWE5YjlhM2FhN2VhMmFjNzBmMWVjMjdhMGY4ZmNlNjE1ODUyN2E3YzQwZTY3YjIiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6ImIzZGYyYWNmMDZlOGMzZjAzYzcxMzVjNmU4YWM1YTljYTU0MzJhYmUwNmE3NGFjYTBmZGQ5YTUzYTAwOGY5ODciLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6ImVhYzUwNGJmZmVkMWY0YjI2MDA2M2E4MWM4ZTA5NDVjMTY1ODQ3M2YxODkzMDhhMmNiZjA2NmMzZTY1YmM0OTUifQ"
+          "resource": "repo://openswe/github/routes.py#L30-L80",
+          "version": "repo-lines-v1:sha256:21235b1c83ab3bd00366808c6d91f23b3135228e722e8f4da74c8834733beff1:eyJzZWxlY3RlZExpbmVDb3VudCI6NTEsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6IjlkOGQxYjkwZTExOWQ1ZDVhMDEzMWFjMzhiOWQ4M2Y5ZWUzNmY2OTFkMmJmMGY0NzM5MjAwN2ZiOWVhOTI3ODEiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6IjQ4OTNmNDBlMzc4MWViODk2YzgyZDA0NmEwODA2N2ExMWUzNWNkZjJmMWRmYWYyNmZlYTkwYjhkYjY2NzY0MTMiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6ImIzZGYyYWNmMDZlOGMzZjAzYzcxMzVjNmU4YWM1YTljYTU0MzJhYmUwNmE3NGFjYTBmZGQ5YTUzYTAwOGY5ODciLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6ImRiOTM2ZjVkMjM3ZWY0NGFmNmU0MTQyMzA3MTZiNDkzMWIxZGZjYmRkOTZiOGZjMTdkMzYwNmE4MWU4YzA0MmQifQ"
         },
         {
           "resource": "repo://openswe/linear/routes.py#L46-L100",
@@ -185,16 +181,16 @@
       "statement": "build_agent builds a fresh deep-agent factory result per run; LangGraph checkpoints retain graph state, while sandbox and thread metadata retain thread-specific execution context.",
       "evidence": [
         {
-          "resource": "repo://langgraph.json#L5-L11",
-          "version": "repo-lines-v1:sha256:48422e267e902d0d85521aefdccbe20e5f758459d69755ddd43ef19a3c7df4b0:eyJzZWxlY3RlZExpbmVDb3VudCI6NywiZmlyc3RTZWxlY3RlZExpbmVIYXNoIjoiZjQzMDI2NDY0ODUyNzc2Y2FkMmQyNzljMTYwMzBhM2IyYzU3YjgzYzExMjA1OTJlNmFmODFiNjliNjg0YmFhOCIsImxhc3RTZWxlY3RlZExpbmVIYXNoIjoiNGQ1Y2QyZmI0ZjNkZjg4NDUxNTI1NWIzOTUyM2YyZjhiNTQ3MmJlZWE5ZjU2NmZmY2EyMDRkYjgwMjU2MTA0MSIsInByZWNlZGluZ0NvbnRleHRMaW5lQ291bnQiOjMsInByZWNlZGluZ0NvbnRleHRIYXNoIjoiZTFlNWFmNmI2NzUzMGU0NmYxMzQzN2JiNmFjYzRmZTFiMTI5ODFlZjk4ZmMwZTlhYTljN2ViNWQ5OGQwYjE3MyIsImZvbGxvd2luZ0NvbnRleHRMaW5lQ291bnQiOjMsImZvbGxvd2luZ0NvbnRleHRIYXNoIjoiM2RlODIwMmY0OTJkY2FlNDhkN2JjZTY4ODU4OTBkNTZlYTdmY2ViYzU3ZjY0Zjc2ZmI1MzM2NTNjNTYyOTY1OCJ9"
+          "resource": "repo://langgraph.json#L5-L9",
+          "version": "repo-lines-v1:sha256:32402d76861a75af955c0e25150a7d209359dc79c27d82ec7dfccee290836fdf:eyJzZWxlY3RlZExpbmVDb3VudCI6NSwiZmlyc3RTZWxlY3RlZExpbmVIYXNoIjoiZjQzMDI2NDY0ODUyNzc2Y2FkMmQyNzljMTYwMzBhM2IyYzU3YjgzYzExMjA1OTJlNmFmODFiNjliNjg0YmFhOCIsImxhc3RTZWxlY3RlZExpbmVIYXNoIjoiNGQ1Y2QyZmI0ZjNkZjg4NDUxNTI1NWIzOTUyM2YyZjhiNTQ3MmJlZWE5ZjU2NmZmY2EyMDRkYjgwMjU2MTA0MSIsInByZWNlZGluZ0NvbnRleHRMaW5lQ291bnQiOjMsInByZWNlZGluZ0NvbnRleHRIYXNoIjoiZTFlNWFmNmI2NzUzMGU0NmYxMzQzN2JiNmFjYzRmZTFiMTI5ODFlZjk4ZmMwZTlhYTljN2ViNWQ5OGQwYjE3MyIsImZvbGxvd2luZ0NvbnRleHRMaW5lQ291bnQiOjMsImZvbGxvd2luZ0NvbnRleHRIYXNoIjoiM2RlODIwMmY0OTJkY2FlNDhkN2JjZTY4ODU4OTBkNTZlYTdmY2ViYzU3ZjY0Zjc2ZmI1MzM2NTNjNTYyOTY1OCJ9"
         },
         {
           "resource": "repo://openswe/dispatch.py#L425-L467",
           "version": "repo-lines-v1:sha256:afa1fb93b491cc829cf13d9dcadc7f0e92e7c3636137ceaf1fd14e3091a9d8da:eyJzZWxlY3RlZExpbmVDb3VudCI6NDMsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6IjYwZDIyMGI5YzM4ODdhMGNjNzc2NzkwNzdjYTE4NWQ2ZGEyNzk3NTg0MjIxMDBkODZiZDJjMjYxNzIzNjAyYjkiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6IjMwYzFmMTg4ZjE0MmVkN2E4MjQ2ODBiMjA3MTcyYzU1MTliYzYxNGE0OGZkYTdjZjE2N2VkYjhkZGY3OTk1NmMiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6IjU3MGE2MjgzNWZjZTI3OWU4NTEzNzg0NzU0ZWQ4ZmFhZTNmNWNjMTVmYTZmNzg0ZDhkMzc0ODM5YmY2NmNmYTQiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjowLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6ImUzYjBjNDQyOThmYzFjMTQ5YWZiZjRjODk5NmZiOTI0MjdhZTQxZTQ2NDliOTM0Y2E0OTU5OTFiNzg1MmI4NTUifQ"
         },
         {
-          "resource": "repo://openswe/server.py#L1479-L1496",
-          "version": "repo-lines-v1:sha256:7b9961c59ae76835d342efd4809336e8880528c026a889418c50025b06c91838:eyJzZWxlY3RlZExpbmVDb3VudCI6MTgsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6IjIxMGIzOWFhMmU2ZDcyMTlhNmM0N2E5ZTk3ODM4ZjQzZDI1ZmYwYWI5MmZmZTljOTY3ODU3MWQ3MDMxYzI2MzMiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6IjAxYmE0NzE5YzgwYjZmZTkxMWIwOTFhN2MwNTEyNGI2NGVlZWNlOTY0ZTA5YzA1OGVmOGY5ODA1ZGFjYTU0NmIiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6IjQxYWI3NzM0Y2E5NzJkMmI3ZjI1YmNhNDY0Y2U0MDAyNTE3MjBlYWYxOWU2NmQyZTEyMGMyMTUxZTNjNTIyYWYiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6IjEyNTcyMDM3MWNlY2M2YTY5MDUxYWFjNzRhOWVmOTUwNmEwZWU4MGI5OWE1ODlmZmVkMTQxZjE3NTg2ZjA5ZTgifQ"
+          "resource": "repo://openswe/server.py#L1446-L1506",
+          "version": "repo-lines-v1:sha256:bc0aebc8fe6eef00ef4e48718b0e6a8092d06a1117fd88ef069b926eb6383ec1:eyJzZWxlY3RlZExpbmVDb3VudCI6NjEsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6IjIxMGIzOWFhMmU2ZDcyMTlhNmM0N2E5ZTk3ODM4ZjQzZDI1ZmYwYWI5MmZmZTljOTY3ODU3MWQ3MDMxYzI2MzMiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6ImY2MjU1YjdkZTliODNlMmZhNTE1OWEzMjM1MWEyZWU2ODE3OTAyNGIyZDlkOTgxN2ZkZjdiNmMwNzAzMTliYTAiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6IjQxYWI3NzM0Y2E5NzJkMmI3ZjI1YmNhNDY0Y2U0MDAyNTE3MjBlYWYxOWU2NmQyZTEyMGMyMTUxZTNjNTIyYWYiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6ImQ2YTdjNDJjMDNkYmFiMzFhMzMyNmIxNzEyYTI4MjIxMWM1YWM3YTVhODZlMWM1Yjc0NjAyNmQ4ZDgyNGYwOWYifQ"
         }
       ]
     },
@@ -203,8 +199,8 @@
       "statement": "The sandbox backend cache is in process and keyed by thread_id while thread metadata persists sandbox_id across processes, so a recycled worker reconnects the same sandbox; an existing sandbox that cannot be reached raises rather than being replaced, because an empty replacement would destroy uncommitted work.",
       "evidence": [
         {
-          "resource": "repo://openswe/server.py#L1527-L1545",
-          "version": "repo-lines-v1:sha256:b7a7ff47e0b0816a1c999b895f1bfc86b50247f9c3d835baac7d2d8ea08c723f:eyJzZWxlY3RlZExpbmVDb3VudCI6MTksImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6Ijg1YzU4YjYyMGRlYjFiNmNiMGQxMTUyNGI2NjU4NjFjMjcyYTc5MjRiNGY1NzhjNjJmMjgxNzFhMjE2ODNlZTciLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6ImZlZjVkYmE0YWJkOWIwZWUwMmM0Mzg4MTQ3MGMxNWZkYjBlMzU2ZjUyYzY0NjAxOTFlYTUzYWExNjk3OTI2NmYiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6IjI5NTI1YmI1ZDQyYThiMTJiMjMwOWM0OTQ5ZDJhNGE0YzE3ZTJlMzg3YTgzMjQ4Y2NhMzJkZjdmNTZmMTcyOTgiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6IjBhNGExMmNmZGY1ZjY2MDZhYzJhMjdjZDU0MDU0MDA3YzkzOTcwYmE4YzI5ZDU1NzgyZGMyNTJmNTYzZDcyNzQifQ"
+          "resource": "repo://openswe/server.py#L1494-L1506",
+          "version": "repo-lines-v1:sha256:ddd9822e371fa1e470217333162a18b6cd63751617e2af7c5850c77e8171c01b:eyJzZWxlY3RlZExpbmVDb3VudCI6MTMsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6Ijg1YzU4YjYyMGRlYjFiNmNiMGQxMTUyNGI2NjU4NjFjMjcyYTc5MjRiNGY1NzhjNjJmMjgxNzFhMjE2ODNlZTciLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6ImY2MjU1YjdkZTliODNlMmZhNTE1OWEzMjM1MWEyZWU2ODE3OTAyNGIyZDlkOTgxN2ZkZjdiNmMwNzAzMTliYTAiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6IjI5NTI1YmI1ZDQyYThiMTJiMjMwOWM0OTQ5ZDJhNGE0YzE3ZTJlMzg3YTgzMjQ4Y2NhMzJkZjdmNTZmMTcyOTgiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6ImQ2YTdjNDJjMDNkYmFiMzFhMzMyNmIxNzEyYTI4MjIxMWM1YWM3YTVhODZlMWM1Yjc0NjAyNmQ4ZDgyNGYwOWYifQ"
         }
       ]
     },
@@ -213,8 +209,8 @@
       "statement": "langgraph.json pins python_version 3.14 and api_version >~=0.15.0rc1, configures checkpointer TTL with a delete strategy, a 60-minute sweep interval, a default TTL of 43200 minutes, loads env from .env, and best-effort builds the dashboard static UI into the deployment image.",
       "evidence": [
         {
-          "resource": "repo://langgraph.json#L1-L49",
-          "version": "repo-lines-v1:sha256:89343442e8cc37f9d03c341439e785db0ec01469d4018c6da2f3d3a1d22d5cd9:eyJzZWxlY3RlZExpbmVDb3VudCI6NDcsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6ImE2ZmIwOGZkYTFhY2I5NTdiNjExNmJkMzc4MTFhMWZlNDFhMDE2MTFjMDYzMWVkYmY3ODZkNjg4OWEyN2E1NWMiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6IjMwNjQ4Zjc3ZmQ1YTljNjNiM2NkZDBhZjQ5ZGFhMTI5OTIyMGI3NTQxZTg4Y2ExN2VmZTFhNmExMTRiOWZmMmEiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjowLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6ImUzYjBjNDQyOThmYzFjMTQ5YWZiZjRjODk5NmZiOTI0MjdhZTQxZTQ2NDliOTM0Y2E0OTU5OTFiNzg1MmI4NTUiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjoxLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6IjQxMmNhMzQ1Y2NmNzViZjljMDgwNmJjZTY5NWJlOGRlODA4Yjc5OTg0MjUxYTdhNTRkMjAyY2Y2MTAxZGQ0NTEifQ"
+          "resource": "repo://langgraph.json#L1-L45",
+          "version": "repo-lines-v1:sha256:8e778fd0cc4796cdc1a5f1fb5fd93ed4fd80b0da7d9b8e43cf2c1628c131fb83:eyJzZWxlY3RlZExpbmVDb3VudCI6NDUsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6ImE2ZmIwOGZkYTFhY2I5NTdiNjExNmJkMzc4MTFhMWZlNDFhMDE2MTFjMDYzMWVkYmY3ODZkNjg4OWEyN2E1NWMiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6IjMwNjQ4Zjc3ZmQ1YTljNjNiM2NkZDBhZjQ5ZGFhMTI5OTIyMGI3NTQxZTg4Y2ExN2VmZTFhNmExMTRiOWZmMmEiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjowLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6ImUzYjBjNDQyOThmYzFjMTQ5YWZiZjRjODk5NmZiOTI0MjdhZTQxZTQ2NDliOTM0Y2E0OTU5OTFiNzg1MmI4NTUiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjoxLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6IjQxMmNhMzQ1Y2NmNzViZjljMDgwNmJjZTY5NWJlOGRlODA4Yjc5OTg0MjUxYTdhNTRkMjAyY2Y2MTAxZGQ0NTEifQ"
         }
       ]
     },
@@ -237,8 +233,8 @@
       "statement": "Dispatch attaches a completion webhook only when RUN_COMPLETE_WEBHOOK_SECRET is set and COMPLETION_WEBHOOK_URL is absolute and non-loopback; otherwise it omits the webhook so invalid completion configuration does not prevent run creation.",
       "evidence": [
         {
-          "resource": "repo://openswe/dispatch.py#L190-L226",
-          "version": "repo-lines-v1:sha256:29af6fc30c6eacf4268786ce2c8dc5d9e9a24faf54062c4c7999dbf0986e84f9:eyJzZWxlY3RlZExpbmVDb3VudCI6MzcsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6ImZjNGY3NDQyMmEzN2Y2OGRjZDQ2ZjRjMTg5MWQxMjk0MTQ4ZmZiZDQxODgyNzI0OTI2MjAwZjY2MDBjODExYmQiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6ImZhZmJhMDUyN2MzOTUzYzRiNmUwZTViNTczOWJhODM2MTJmODA1M2JjZGM5NDY2NzMwMTkzY2QxZDU5MGI0MDgiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6IjVjMmY5YzgzMmU2NTc4OGFhZjRhYWQxNjFiMzRhODljNzY2ZDdlNGYyYmU1MGFlN2EyZmVjZWFmNjJmYzA5ODciLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6IjQ0ZmFkMDk4NTI0ZTNlOWE2MjNlMzE3ZjA1ZWE2OWE1NDc4MWZhODAzNTU3MjAyMTkyZjQ0OTYzYzYxNGJjNjkifQ"
+          "resource": "repo://openswe/dispatch.py#L190-L222",
+          "version": "repo-lines-v1:sha256:c91c3114aee1f3b676def52e9eb0279bd70c7ec7a71684831ba18ddfd84e8596:eyJzZWxlY3RlZExpbmVDb3VudCI6MzMsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6IjQwYmYwZTE0OTM1NTIwZjZjYTY4MDk1ZGQxN2RjZDlmZTRjYTBlYzg2YTY0YTY1Yjc3ZDE1OWFiNTlmYzdmYTEiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6ImZhZmJhMDUyN2MzOTUzYzRiNmUwZTViNTczOWJhODM2MTJmODA1M2JjZGM5NDY2NzMwMTkzY2QxZDU5MGI0MDgiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6ImRiYmI2MzljMDRmZWU3NzcwYjEyZGRhYmEzYTI0OGM4Yjc2MDk4ZmIyYjgzY2MxMTc3NzJmNzMwZmYxODRkNmIiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6IjQ0ZmFkMDk4NTI0ZTNlOWE2MjNlMzE3ZjA1ZWE2OWE1NDc4MWZhODAzNTU3MjAyMTkyZjQ0OTYzYzYxNGJjNjkifQ"
         }
       ]
     },
@@ -247,8 +243,8 @@
       "statement": "The review-scout graph uses the same sandbox and authenticated gh access as the reviewer but is designed for review-tool capability inspection and discovery.",
       "evidence": [
         {
-          "resource": "repo://langgraph.json#L8-L8",
-          "version": "repo-lines-v1:sha256:1936260cd03dfac223fd135695e5ede98216228fe7a46e9000c19781f97a03ae:eyJzZWxlY3RlZExpbmVDb3VudCI6MSwiZmlyc3RTZWxlY3RlZExpbmVIYXNoIjoiMTkzNjI2MGNkMDNkZmFjMjIzZmQxMzU2OTVlNWVkZTk4MjE2MjI4ZmU3YTQ2ZTkwMDBjMTk3ODFmOTdhMDNhZSIsImxhc3RTZWxlY3RlZExpbmVIYXNoIjoiMTkzNjI2MGNkMDNkZmFjMjIzZmQxMzU2OTVlNWVkZTk4MjE2MjI4ZmU3YTQ2ZTkwMDBjMTk3ODFmOTdhMDNhZSIsInByZWNlZGluZ0NvbnRleHRMaW5lQ291bnQiOjMsInByZWNlZGluZ0NvbnRleHRIYXNoIjoiMzEyNjNlNDhmNTEzYzczNDAwOWY4NWIwYmQ3YTNkZGE2NWU5YjZkNTNkM2QwOTljMzIwNjE0ZGE0MDYwZTgwZSIsImZvbGxvd2luZ0NvbnRleHRMaW5lQ291bnQiOjMsImZvbGxvd2luZ0NvbnRleHRIYXNoIjoiZWUyZTdiMDQ3ODNiYmM3MjI2ZDBmNjhiYjE5MGU0ODBlMDNkZjZmZGFlNTk1OGUyNGIwZWFhZGZiNDg5NGE4ZCJ9"
+          "resource": "repo://langgraph.json#L5-L9",
+          "version": "repo-lines-v1:sha256:32402d76861a75af955c0e25150a7d209359dc79c27d82ec7dfccee290836fdf:eyJzZWxlY3RlZExpbmVDb3VudCI6NSwiZmlyc3RTZWxlY3RlZExpbmVIYXNoIjoiZjQzMDI2NDY0ODUyNzc2Y2FkMmQyNzljMTYwMzBhM2IyYzU3YjgzYzExMjA1OTJlNmFmODFiNjliNjg0YmFhOCIsImxhc3RTZWxlY3RlZExpbmVIYXNoIjoiNGQ1Y2QyZmI0ZjNkZjg4NDUxNTI1NWIzOTUyM2YyZjhiNTQ3MmJlZWE5ZjU2NmZmY2EyMDRkYjgwMjU2MTA0MSIsInByZWNlZGluZ0NvbnRleHRMaW5lQ291bnQiOjMsInByZWNlZGluZ0NvbnRleHRIYXNoIjoiZTFlNWFmNmI2NzUzMGU0NmYxMzQzN2JiNmFjYzRmZTFiMTI5ODFlZjk4ZmMwZTlhYTljN2ViNWQ5OGQwYjE3MyIsImZvbGxvd2luZ0NvbnRleHRMaW5lQ291bnQiOjMsImZvbGxvd2luZ0NvbnRleHRIYXNoIjoiM2RlODIwMmY0OTJkY2FlNDhkN2JjZTY4ODU4OTBkNTZlYTdmY2ViYzU3ZjY0Zjc2ZmI1MzM2NTNjNTYyOTY1OCJ9"
         },
         {
           "resource": "repo://openswe/graphs/review_scout.py#L1-L2",
@@ -261,8 +257,8 @@
       "statement": "Open SWE's system mission is to turn engineering work into a repeatable workflow: investigate repositories, implement changes in isolated sandboxes, validate results, deliver pull requests, and respond to feedback including code review and CI.",
       "evidence": [
         {
-          "resource": "repo://README.md#L37-L69",
-          "version": "repo-lines-v1:sha256:49d705685cfb2f8dc4a09c744a949629a594b9d99ec9b16307a2559c9b71de06:eyJzZWxlY3RlZExpbmVDb3VudCI6MzMsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6IjlhYjFiNDYyZTg2NTQ2NjM3OGU1ZTAzZjBhZmYxOTMyM2EwYjJmZTBhOTVmMjU1YjAwY2RkZTQ5OTczY2E5ZWYiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6IjZlMDE1NjJmY2JkM2E1YzlhYTk2N2RhNzIwYmZiNmZjOWU4YTk3YTdkMTdlZTYwNjBhMGY5ZmYxYjRkOWJjYWMiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6ImM3ZWY1YmNjOTJiNWYzOWYwMGQwMzFmOWJjYzQ0NDA2NjQxMjk3ZTIzNTQxNjY3ZGQ4ZmY5MzJkNzNkMWFkMTQiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6IjQ5NDZiNTFiODZhN2U4OGQwNmQ5ZGNmMDgwODlhY2I2YWE4NDQ2MDUwOGUyODg5YjM1N2JmMDQ2NTg3YjExYzIifQ"
+          "resource": "repo://README.md#L25-L50",
+          "version": "repo-lines-v1:sha256:e607280a2bb0ed36370dcbbad973e3d821acb5239c27f421e4a84c14428cfbae:eyJzZWxlY3RlZExpbmVDb3VudCI6MjYsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6IjgyMzUyZDYzY2NlMWY1NWI3ZmYxYWJhYzVmZWRhODNmZjFhZmRjNTUzYjllNTkwZDRiYWJhMzI5ZjA5NmM5NmIiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6IjY0OTAyZTYxYzIxMjM2OGI3YjQ2YjcyMGY3OGQ0MWI1MGNmZmRiOTQ3ZmVhMTFkMDc0ZDVlNDE3OWZmZDQ3MWMiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6ImI3YzkzOGNmZDIwZDhjY2Q1M2I5NWQwZGQ2ZTQxYzIxYTQ5ZDY2OTUzMmM2NDA1MTcxMTI1OTYyZTcxOTQwZjYiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6IjkyNTQzZTAyYTI4ZjMyOGJhMGI4MDMwZWIwZmMxMjYyODEyMmM1ZjgzODY5NzUzYmZhNDM0ODYzNGZmZDIyZDUifQ"
         }
       ]
     },
@@ -271,12 +267,12 @@
       "statement": "External integrations are organized into three domains: GitHub (webhooks, API, OAuth for repo access and PR creation), Slack (messages, buttons, threads for async conversations), and Linear (webhooks, API, MCP connections for issue-comment triggers).",
       "evidence": [
         {
-          "resource": "repo://README.md#L55-L55",
+          "resource": "repo://README.md#L50-L50",
           "version": "repo-lines-v1:sha256:64902e61c212368b7b46b720f78d41b50cffdb947fea11d074d5e4179ffd471c:eyJzZWxlY3RlZExpbmVDb3VudCI6MSwiZmlyc3RTZWxlY3RlZExpbmVIYXNoIjoiNjQ5MDJlNjFjMjEyMzY4YjdiNDZiNzIwZjc4ZDQxYjUwY2ZmZGI5NDdmZWExMWQwNzRkNWU0MTc5ZmZkNDcxYyIsImxhc3RTZWxlY3RlZExpbmVIYXNoIjoiNjQ5MDJlNjFjMjEyMzY4YjdiNDZiNzIwZjc4ZDQxYjUwY2ZmZGI5NDdmZWExMWQwNzRkNWU0MTc5ZmZkNDcxYyIsInByZWNlZGluZ0NvbnRleHRMaW5lQ291bnQiOjMsInByZWNlZGluZ0NvbnRleHRIYXNoIjoiMGM4ZWQ3ZTNkOThlZTkwMjVlMGE0YmU0NGZmMDk3OWZiYTBhYjAyYTc4NWRhZThhNTFmNTdkMTExZjc0YmE5OCIsImZvbGxvd2luZ0NvbnRleHRMaW5lQ291bnQiOjMsImZvbGxvd2luZ0NvbnRleHRIYXNoIjoiOTI1NDNlMDJhMjhmMzI4YmEwYjgwMzBlYjBmYzEyNjI4MTIyYzVmODM4Njk3NTNiZmE0MzQ4NjM0ZmZkMjJkNSJ9"
         },
         {
-          "resource": "repo://openswe/github/routes.py#L29-L80",
-          "version": "repo-lines-v1:sha256:7171da16b5e0ee4921736004d94ef023fbe3a69da2bbd3956c126c323f99d2db:eyJzZWxlY3RlZExpbmVDb3VudCI6NTIsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6IjlkOGQxYjkwZTExOWQ1ZDVhMDEzMWFjMzhiOWQ4M2Y5ZWUzNmY2OTFkMmJmMGY0NzM5MjAwN2ZiOWVhOTI3ODEiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6ImQwMDE1NWNlZjAzY2M1Y2MxZWE5YjlhM2FhN2VhMmFjNzBmMWVjMjdhMGY4ZmNlNjE1ODUyN2E3YzQwZTY3YjIiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6ImIzZGYyYWNmMDZlOGMzZjAzYzcxMzVjNmU4YWM1YTljYTU0MzJhYmUwNmE3NGFjYTBmZGQ5YTUzYTAwOGY5ODciLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6ImVhYzUwNGJmZmVkMWY0YjI2MDA2M2E4MWM4ZTA5NDVjMTY1ODQ3M2YxODkzMDhhMmNiZjA2NmMzZTY1YmM0OTUifQ"
+          "resource": "repo://openswe/github/routes.py#L30-L80",
+          "version": "repo-lines-v1:sha256:21235b1c83ab3bd00366808c6d91f23b3135228e722e8f4da74c8834733beff1:eyJzZWxlY3RlZExpbmVDb3VudCI6NTEsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6IjlkOGQxYjkwZTExOWQ1ZDVhMDEzMWFjMzhiOWQ4M2Y5ZWUzNmY2OTFkMmJmMGY0NzM5MjAwN2ZiOWVhOTI3ODEiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6IjQ4OTNmNDBlMzc4MWViODk2YzgyZDA0NmEwODA2N2ExMWUzNWNkZjJmMWRmYWYyNmZlYTkwYjhkYjY2NzY0MTMiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6ImIzZGYyYWNmMDZlOGMzZjAzYzcxMzVjNmU4YWM1YTljYTU0MzJhYmUwNmE3NGFjYTBmZGQ5YTUzYTAwOGY5ODciLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6ImRiOTM2ZjVkMjM3ZWY0NGFmNmU0MTQyMzA3MTZiNDkzMWIxZGZjYmRkOTZiOGZjMTdkMzYwNmE4MWU4YzA0MmQifQ"
         },
         {
           "resource": "repo://openswe/linear/routes.py#L46-L100",
@@ -284,23 +280,23 @@
         },
         {
           "resource": "repo://openswe/slack/routes.py#L1-L75",
-          "version": "repo-lines-v1:sha256:56e320040baf41ad9a688b2609990f9b5f8c18c6e1fb1f582c41cbcdb7fa9db9:eyJzZWxlY3RlZExpbmVDb3VudCI6NzQsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6ImM2ODAwZTg2Mzg2ZmZlNjQ5NjQ3ZjEwNzYyNmYzZjJkODUyNGNiODEyODIyZmEwNDY5ZDQ2MjYxZTU3N2I2ZTUiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6IjAxYmE0NzE5YzgwYjZmZTkxMWIwOTFhN2MwNTEyNGI2NGVlZWNlOTY0ZTA5YzA1OGVmOGY5ODA1ZGFjYTU0NmIiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjowLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6ImUzYjBjNDQyOThmYzFjMTQ5YWZiZjRjODk5NmZiOTI0MjdhZTQxZTQ2NDliOTM0Y2E0OTU5OTFiNzg1MmI4NTUiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6ImQxMmE2NTQzMDZmNzBlZTljMjY4MjI1OWE2M2Y1N2JjNjM5OTFiZDk5NTA4ZWIzMjgxNTg1NTM3ZTNhOTljYTIifQ"
+          "version": "repo-lines-v1:sha256:67bdb8a448305c62ae0f5bb1e857b21d4dc2772ec9aae9cfd733473f33eadcf8:eyJzZWxlY3RlZExpbmVDb3VudCI6NzUsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6ImM2ODAwZTg2Mzg2ZmZlNjQ5NjQ3ZjEwNzYyNmYzZjJkODUyNGNiODEyODIyZmEwNDY5ZDQ2MjYxZTU3N2I2ZTUiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6IjA3YjJjZjZhODM0MjIzYjJjYmQxYWRkMzFmNWRjZjRkMTViN2NmNzA4NDEyMWI3YjEwMjdmYWZiMmFkN2NlZTIiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjowLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6ImUzYjBjNDQyOThmYzFjMTQ5YWZiZjRjODk5NmZiOTI0MjdhZTQxZTQ2NDliOTM0Y2E0OTU5OTFiNzg1MmI4NTUiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6IjY5OTlkM2NjNTJkZWIzZDc4MzVlODg3NTY5NDYzYTIxZjdhZjU4ODFhOTE3YjgyOTZkZGRiNTg5YzVjNzZkZjMifQ"
         }
       ]
     },
     {
       "id": "claim_0674e1fb3d784be0a01781eb52280a2e",
-      "statement": "openswe/api/app.py pins a single event loop at import time before queue workers are built, and repeated pinning in the lifespan hook ensures all workers share the same loop.",
+      "statement": "openswe/api/app.py pins a single event loop at import time before background workers are built, and repeated pinning in the lifespan hook ensures all workers share the same loop.",
       "evidence": [
         {
-          "resource": "repo://openswe/api/app.py#L33-L69",
-          "version": "repo-lines-v1:sha256:fe6a8f4c890509bb234ed6d29fc579ca46730e6e00412c89adb51926a4536ca4:eyJzZWxlY3RlZExpbmVDb3VudCI6MzEsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6ImNjODNmZWVjNzkzMWI3OTFjNTlkODJlOTk1ZGFmMjhhYTc5ODU1ODFiZTk0MWVkZmVmNTg5YzQ4YzQ0NGUyZmIiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6ImQxYTRiYTFlMGExNzI0NWEyM2MzYjQ5MTY1YWFlN2RkYmNjZTI4ZmFhMGM4YWYyZjc2OGU0MzAzZmJiZTRiYzEiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6Ijk3MzljYjg2ZjFjZjU1ZmU4ODE4NTdmOTA2Y2RlZTIwMGJkMTFkZDVmNzQxZGVlOWQ2MTRmMGJmMWQzMDE1MWQiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6ImMxM2E2YTBjZGJjMzA4Y2RhYWQ1OWQwNmJmODhjNGFjYzM0NjEwYTM4NTMzNjZlZDUyYzg4YTNlY2QxMDExZDgifQ"
+          "resource": "repo://openswe/api/app.py#L34-L65",
+          "version": "repo-lines-v1:sha256:665e9d6117115ca3bb09b0f68bb68f8c1e9495375a45768685e5f3588277c402:eyJzZWxlY3RlZExpbmVDb3VudCI6MzIsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6ImNjODNmZWVjNzkzMWI3OTFjNTlkODJlOTk1ZGFmMjhhYTc5ODU1ODFiZTk0MWVkZmVmNTg5YzQ4YzQ0NGUyZmIiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6ImQxYTRiYTFlMGExNzI0NWEyM2MzYjQ5MTY1YWFlN2RkYmNjZTI4ZmFhMGM4YWYyZjc2OGU0MzAzZmJiZTRiYzEiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6Ijk3MzljYjg2ZjFjZjU1ZmU4ODE4NTdmOTA2Y2RlZTIwMGJkMTFkZDVmNzQxZGVlOWQ2MTRmMGJmMWQzMDE1MWQiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6ImMxM2E2YTBjZGJjMzA4Y2RhYWQ1OWQwNmJmODhjNGFjYzM0NjEwYTM4NTMzNjZlZDUyYzg4YTNlY2QxMDExZDgifQ"
         }
       ]
     }
   ],
   "verification": {
     "by": "openwiki/0.4.2",
-    "at": "2026-10-18T12:31:08.965Z"
+    "at": "2026-10-21T13:36:13.083Z"
   }
 }

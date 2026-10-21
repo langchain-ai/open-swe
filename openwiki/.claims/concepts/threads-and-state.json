@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "pageVersion": "sha256:6b1a5aeda0222ebd39dcfb54008943541511bf0e369a7d98f2a7ed659814196f",
+  "pageVersion": "sha256:77c93a517293a725e4339fffb9e1a79823d471b7d0e5609715b78c643a718fd7",
   "claims": [
     {
       "id": "claim_59daaaa8396044a0ab47378f78878e79",
@@ -307,16 +307,6 @@
       ]
     },
     {
-      "id": "claim_08ff94348e2a443fb6152b1d35adbb31",
-      "statement": "The chat graph is a read-only PR-scoped agent for the review UI with no sandbox: it answers questions about a single pull request using the diff, published review findings, and read-only repository API access; PR context is injected as virtual files under /pr/ by the dashboard chat proxy.",
-      "evidence": [
-        {
-          "resource": "repo://openswe/chat.py#L1-L14",
-          "version": "repo-lines-v1:sha256:5904d415801ca3fb1c876e4397c8cd53d855297001a934ee4b03f9325cb7c795:eyJzZWxlY3RlZExpbmVDb3VudCI6MTQsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6ImE2NzlkNzc4ZTMzYTdkYTEzYjlmZjBiOTViY2U5OTcyYTJiMDYxNzgyMTEzNmYzYWZiZjJhM2JlNDZlNWQxMjAiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6ImEzMDNlY2RkNGE0ZDEwZjE5YzczZmQ0MmZkMTI0MzdmZDMzNTRhODI2ODE2MDVkYTUyNTVhOTdhMzkwNjhkYmIiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjowLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6ImUzYjBjNDQyOThmYzFjMTQ5YWZiZjRjODk5NmZiOTI0MjdhZTQxZTQ2NDliOTM0Y2E0OTU5OTFiNzg1MmI4NTUiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6IjgxMDkwNzY0ZWJhZGM4NTlkNGVkZjk1MWFmODkzMWM3ZDRhN2JmMDJjZjBiZWI3YmM5NzU5MmUwZmRmODQ1YTMifQ"
-        }
-      ]
-    },
-    {
       "id": "claim_2b747d6add0b4fc69da47e63f59fff2f",
       "statement": "openswe/threads/creation.py is the only place LangGraph threads are created, and every thread people can open must have a non-empty, stripped title; this enforces an invariant that prevents untitled conversations.",
       "evidence": [
@@ -350,13 +340,13 @@
         },
         {
           "resource": "repo://openswe/run_config.py#L87-L165",
-          "version": "repo-lines-v1:sha256:1b6e568a6b75f4870ae76860ba4ca82e76942eac7a01b18475c3a2ed87213e56:eyJzZWxlY3RlZExpbmVDb3VudCI6NzksImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6IjAxNzA4NTY4YmU1MWZlMjE4ZjUyZjlkNGMzNzUzYmQzMmVkMmQwZmZmMWRkNzIzMTVmNjdkN2U0OTQ5NmQ2ZWQiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6ImI0OWUwZjE5NWE1YjdlYWY4Mjc3ZjNiMjU3N2UyZTljYmE5MmEzMjgwZjM2ODI2MWJjYjU0YzY1OGY0ZGNkYjYiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6IjRiY2NkY2EyY2Q4ZDQ3M2VhMGJiYTY5OWM5NjQ3OTUzNzU3ZWEzMjA5MjQ5M2Q2YmUwNTM1MTY0ZGRhYzc1YmUiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6IjdlYjNhNjBmZmViZWIzZjliZTFlNGRkMTc4ZjljMmMzY2UyMmI3MDIzMmQ2NDMyODg2ZTg5ZjU1NDIwYjVlMTAifQ"
+          "version": "repo-lines-v1:sha256:4537bda11d53b3b8ac38b286abab1d3081b4911b36e22889ea690e616b657f82:eyJzZWxlY3RlZExpbmVDb3VudCI6OTksImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6ImRmM2QxMzU2NjU0NjRiMWY1MDNiMDMzN2ExMGIxNDYwYTRlZWFjMWNmMjA4N2RjODY5YmFiZGZiOTU3MjNiNGQiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6ImI0OWUwZjE5NWE1YjdlYWY4Mjc3ZjNiMjU3N2UyZTljYmE5MmEzMjgwZjM2ODI2MWJjYjU0YzY1OGY0ZGNkYjYiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6IjRiY2NkY2EyY2Q4ZDQ3M2VhMGJiYTY5OWM5NjQ3OTUzNzU3ZWEzMjA5MjQ5M2Q2YmUwNTM1MTY0ZGRhYzc1YmUiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6IjdlYjNhNjBmZmViZWIzZjliZTFlNGRkMTc4ZjljMmMzY2UyMmI3MDIzMmQ2NDMyODg2ZTg5ZjU1NDIwYjVlMTAifQ"
         }
       ]
     }
   ],
   "verification": {
     "by": "openwiki/0.4.2",
-    "at": "2026-10-18T12:31:08.965Z"
+    "at": "2026-10-21T13:36:13.083Z"
   }
 }

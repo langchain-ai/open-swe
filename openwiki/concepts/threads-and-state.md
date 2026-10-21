@@ -6,8 +6,6 @@ tags: [threads, state, langgraph, durability, checkpoints, sandbox, slack, integ
 sources:
   - id: openwiki-source-5bbba7b2a8ea8360ff233d63
     resource: repo://langgraph.json
-  - id: openwiki-source-70b814b26d317c2b15c4a4fb
-    resource: repo://openswe/chat.py
   - id: openwiki-source-913527bc7b548b4bf81f6a35
     resource: repo://openswe/completion.py
   - id: openwiki-source-1685d34aae8025be9332f45a
@@ -41,7 +39,7 @@ sources:
 generated: { by: "openwiki/0.4.2", at: "2026-10-18T12:31:08.965Z" }
 verified:
   - by: openwiki/0.4.2
-    at: 2026-10-18T12:31:08.965Z
+    at: 2026-10-21T13:36:13.083Z
 ---
 
 # Threads, Durable Runs, and State

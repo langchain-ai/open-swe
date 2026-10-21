@@ -1,12 +1,14 @@
 ---
 type: integration reference
-title: Sandbox Providers and Backends
-description: Selects and operates sandbox providers, handles thread binding and reconnection, documents LangSmith configuration, credentials, and execution behavior, plus local and desktop exceptions. Covers provider extension points and operations.
+title: Sandbox Providers and Configuration
+description: Operational provider selection, provisioning, and configuration. Covers LangSmith managed sandboxes, local development, bridge client for desktop, and extension mechanisms.
 tags: [sandbox, providers, langsmith, configuration, extension, lifecycle]
 verified:
   - by: openwiki/0.4.2
-    at: 2026-10-18T12:31:08.965Z
+    at: 2026-10-21T13:36:13.083Z
 sources:
+  - id: openwiki-source-3436762fd1bce7c774640399
+    resource: repo://openswe/bridge/backend.py
   - id: openwiki-source-b3a1e5fc7fe45f62e902bef9
     resource: repo://openswe/config.py
   - id: openwiki-source-1b32e9f41fa7e64702b380f6
@@ -31,10 +33,10 @@ sources:
     resource: repo://openswe/sandboxes/repo_prep.py
   - id: openwiki-source-63c74145043dac21719006df
     resource: repo://openswe/sandboxes/retry.py
-generated: { by: "openwiki/0.4.2", at: "2026-10-18T12:31:08.965Z" }
+generated: { by: "openwiki/0.4.2", at: "2026-10-21T13:36:13.083Z" }
 ---
 
-# Sandbox Providers and Backends
+# Sandbox Providers and Configuration
 
 Open SWE runs repository work through a `SandboxBackendProtocol`. Provider selection is operational configuration rather than an agent-graph change: `create_sandbox()` resolves the active provider, while the sandbox lifecycle owns thread binding, safe reconnection, and replacement policy. See [sandbox lifecycle](../architecture/sandbox-lifecycle.md) for the broader thread lifecycle and [configuration](../operations/configuration.md) for environment variables.
 
@@ -60,6 +62,16 @@ flowchart TD
 
 Provider factory dispatch and async/sync execution paths.
 
+### Factory pattern and registration
+
+Factory functions are registered as `(module: str, function_name: str)` tuples in the registry. Each factory must:
+
+- Accept `sandbox_id: str | None` as its first parameter
+- Return a `SandboxBackendProtocol` instance
+- Be either an `async def` (native async) or sync function (executed in `asyncio.to_thread`)
+
+LangSmith and Modal are registered as native async factories. Daytona, E2B, Runloop, and Local are synchronous and execute off the event loop.
+
 ### create_sandbox forwarding
 
 `create_sandbox()` forwards resource options—snapshot, CPU, memory, filesystem—and arbitrary create-body fields only to LangSmith; other providers receive only the id. LangSmith and Modal factories run natively async. Synchronous provider wrappers (Daytona, E2B, Runloop, Local) run through `asyncio.to_thread`, keeping blocking SDK or filesystem setup off the event loop.
@@ -78,13 +90,11 @@ await create_sandbox(
 
 ### Startup validation
 
-The FastAPI lifespan hook calls `validate_sandbox_startup_config()` before serving. Validation is provider-specific only for LangSmith:
+The FastAPI lifespan hook calls `validate_sandbox_startup_config()` before serving. Validation is provider-specific:
 
-- Configured resource and TTL values must parse as integers
-- TTLs must be non-negative
-- `SANDBOX_CREATE_EXTRA_JSON` must parse as a valid JSON object
-
-For optional provider extras (daytona, modal, runloop, e2b), startup eagerly loads the factory so a missing dependency fails at boot rather than on first sandbox creation. Other provider credentials are checked when their factory is invoked.
+- For LangSmith: configured resource and TTL values must parse as integers, TTLs must be non-negative, and `SANDBOX_CREATE_EXTRA_JSON` must parse as a valid JSON object
+- For optional provider extras (daytona, modal, runloop, e2b): startup eagerly loads the factory so a missing dependency fails at boot rather than on first sandbox creation
+- Other provider credentials are checked when their factory is invoked
 
 ## Thread binding and failure semantics
 
@@ -184,7 +194,7 @@ Runloop requires `RUNLOOP_API_KEY`. The factory reconnects by id or creates a ne
 
 ### E2B
 
-E2B requires `E2B_API_KEY` with an optional `E2B_TEMPLATE` and enforces a one-hour default timeout (`DEFAULT_E2B_SANDBOX_TIMEOUT`). The factory reconnects by id or creates with the template if supplied. No resource overrides.
+E2B requires `E2B_API_KEY` with an optional `E2B_TEMPLATE` and enforces a one-hour default timeout. The factory reconnects by id or creates with the template if supplied. No resource overrides.
 
 ## Local and desktop exceptions
 
@@ -199,14 +209,66 @@ E2B requires `E2B_API_KEY` with an optional `E2B_TEMPLATE` and enforces a one-ho
 
 Unless the operator explicitly provides `GIT_CONFIG_GLOBAL`, it writes a root-local `.gitconfig-sandbox` that includes the host configuration. This preserves aliases and helpers while preventing bot identity writes from overwriting `~/.gitconfig`.
 
-### Desktop backend
+### Desktop bridge client
 
-Desktop runs compose read-only bundled and user skill routes plus separate artifact routes. `ReadOnlyBackend` delegates only async read operations and rejects synchronous calls, ensuring the desktop cannot mutate a sandbox's working tree.
+Desktop CLI synchronizes repository state with the backend via a bridge connection. `BridgeSandboxBackend` is async-only and:
 
-## Extension points
+- Queues requests to the desktop over a persistent WebSocket
+- Waits for results on the CLI side with optional liveness ticks (every 15 seconds)
+- Enforces file transfer timeouts (120 seconds) and worktree handoff timeout (360 seconds)
+- Supports execute, upload, and download operations only; all other operations raise `NotImplementedError`
 
-Adding a provider requires a `create_<name>_sandbox(sandbox_id: str | None = None)` factory that returns `SandboxBackendProtocol` and a corresponding `(module, function)` registry entry; a factory may be synchronous or asynchronous. The factory receives the optional existing sandbox id for reconnection. If the id is supplied, the factory connects to that existing sandbox; when absent, it creates a new one. Registry validation runs at server startup to fail fast on missing dependencies.
+The bridge backend pair implements `SandboxBackendProtocol` symmetrically: the backend submits requests, the listener on the desktop answers them, and results flow back through the bridge store. A `BridgeUnavailableError` surface when the desktop closes its connection or stops responding.
 
-## Repository preparation
+### Read-only backend for virtual skill routes
 
-Reviewer preparation clone-or-fetches and verifies the PR head before agent work, while trusted skills are extracted from the base SHA rather than the author-controlled PR head; preparation failure returns `False` so review can continue from diff context. This prevents a PR author from injecting instructions into the reviewer prompt by adding or editing a `SKILL.md` file.
+`ReadOnlyBackend` wraps another backend and delegates only async read operations (`als`, `aread`, `agrep`, `aglob`, `adownload_files`), rejecting all synchronous calls and mutation operations. Used by the desktop to serve bundled and user skill routes read-only.
+
+## Repository preparation and review
+
+### Reviewer sandbox preparation
+
+Reviewer preparation clone-or-fetches and verifies the PR head before agent work. `prepare_review_repo()`:
+
+- Clone-or-fetches the repo using `gh repo clone` with blobless filtering
+- Fetches target commit and PR head specifically to minimize download
+- Checks out the PR head and verifies SHA matches
+- Returns `False` if prep fails so review can continue from diff context
+
+### Trusted skills extraction
+
+Trusted skills are extracted from the PR's base SHA rather than the author-controlled PR head. `materialize_trusted_skills()`:
+
+- Extracts skill directories from a trusted ref (base SHA)
+- Saves them to a separate directory outside the main checkout
+- Prevents PR authors from injecting instructions into the reviewer prompt
+- Returns extracted source directories with trailing slash for SkillsMiddleware
+
+## Extension: adding a provider
+
+Adding a provider requires:
+
+1. Create a factory function in a new module at `openswe/sandboxes/providers/<name>.py` with signature:
+   ```python
+   async def create_<name>_sandbox(sandbox_id: str | None = None) -> SandboxBackendProtocol:
+       # async factory
+   
+   # or
+   
+   def create_<name>_sandbox(sandbox_id: str | None = None) -> SandboxBackendProtocol:
+       # sync factory
+   ```
+
+2. Register in `SANDBOX_FACTORIES` dict in `openswe/sandboxes/providers/registry.py`:
+   ```python
+   SANDBOX_FACTORIES: dict[str, tuple[str, str]] = {
+       "<name>": ("openswe.sandboxes.providers.<name>", "create_<name>_sandbox"),
+       # ...
+   }
+   ```
+
+3. If the provider's SDK is optional (not in base install), add to `OPTIONAL_PROVIDER_EXTRAS` and provide a mapping in `_PROVIDER_SDK_MODULES` so missing dependencies fail at boot.
+
+4. Optionally add environment variable documentation to `openswe/config.py` for credentials and configuration.
+
+The factory receives only `sandbox_id` from `create_sandbox()` unless the provider is `langsmith`, which additionally receives `snapshot_id`, `mem_bytes`, `vcpus`, `fs_capacity_bytes`, and `create_params`.

@@ -1,8 +1,8 @@
 ---
 type: workflow
-title: Follow-up Messages and Interruption
-description: Message queues for live handoffs, multitask strategies for follow-up dispatch, run completion webhooks, and emergency stop mechanics that coordinate concurrent work without losing user input.
-tags: [follow-up, message-queue, middleware, completion-webhook, baby-sit, background-tasks, stop, multitask-strategy, interrupt, enqueue]
+title: Follow-up Messages and Threaded Continuity
+description: Thread message routing, follow-up invocation from GitHub PR comments and Slack replies, run continuation and interruption coordination, and completion webhooks that coordinate concurrent work without losing user input.
+tags: [follow-up, message-queue, middleware, completion-webhook, baby-sit, background-tasks, stop, multitask-strategy, interrupt, enqueue, threaded-continuity]
 sources:
   - id: openwiki-source-987be1dce6e9ba720855c2ed
     resource: repo://openswe/baby_sit.py
@@ -16,8 +16,6 @@ sources:
     resource: repo://openswe/message_queue.py
   - id: openwiki-source-1772d9a59ed3ff28f22ae21a
     resource: repo://openswe/middleware/check_message_queue.py
-  - id: openwiki-source-96bcad07b4fe7078402bc2b8
-    resource: repo://openswe/reviewer.py
   - id: openwiki-source-1b32e9f41fa7e64702b380f6
     resource: repo://openswe/sandboxes/lifecycle.py
   - id: openwiki-source-919e16feae379651f2cbc1c9
@@ -34,13 +32,13 @@ sources:
     resource: repo://openswe/threads/runs.py
   - id: openwiki-source-996097a4d0a674613168d766
     resource: repo://openswe/utils/thread_ops.py
-generated: { by: "openwiki/0.4.2", at: "2026-10-18T12:31:08.965Z" }
+generated: { by: "openwiki/0.4.2", at: "2026-10-21T13:36:13.083Z" }
 verified:
   - by: openwiki/0.4.2
-    at: 2026-10-18T12:31:08.965Z
+    at: 2026-10-21T13:36:13.083Z
 ---
 
-# Follow-up Messages and Interruption
+# Follow-up Messages and Threaded Continuity
 
 Open SWE coordinates concurrent work without losing user input through two key mechanisms:
 
