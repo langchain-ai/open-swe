@@ -1373,7 +1373,7 @@ requires-dist = [
     { name = "langsmith", specifier = ">=0.14.11" },
     { name = "managed-deepagents", editable = "../vendor/managed-deepagents-sdk/packages/pypi" },
     { name = "mcp", specifier = ">=2.2.0,<3" },
-    { name = "osweshared", editable = "../osweshared" },
+    { name = "osweshared", editable = "../shared" },
     { name = "pydantic", specifier = ">=2.11" },
     { name = "stagehand", specifier = "==4.3.0" },
 ]
@@ -1509,7 +1509,7 @@ wheels = [
 [[package]]
 name = "osweshared"
 version = "0.0.0"
-source = { editable = "../osweshared" }
+source = { editable = "../shared" }
 dependencies = [
     { name = "deepagents" },
     { name = "langchain" },

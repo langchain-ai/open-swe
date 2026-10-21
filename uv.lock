@@ -2602,7 +2602,7 @@ requires-dist = [
     { name = "markdown-it-py", specifier = "==4.2.0" },
     { name = "markdownify", specifier = ">=1.2.3" },
     { name = "openai", specifier = ">=3.10.0,<4.0.0" },
-    { name = "osweshared", editable = "osweshared" },
+    { name = "osweshared", editable = "shared" },
     { name = "pillow", specifier = ">=12.1.0" },
     { name = "pygments", specifier = ">=2.21.0" },
     { name = "pyjwt", specifier = ">=2.13.0" },
@@ -2836,7 +2836,7 @@ wheels = [
 [[package]]
 name = "osweshared"
 version = "0.0.0"
-source = { editable = "osweshared" }
+source = { editable = "shared" }
 dependencies = [
     { name = "deepagents" },
     { name = "langchain" },
