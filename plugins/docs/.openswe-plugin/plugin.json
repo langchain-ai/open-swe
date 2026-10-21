@@ -2,7 +2,7 @@
   "name": "docs",
   "displayName": "Docs",
   "version": "0.2.0",
-  "description": "Notion-style pages over the Markdown in your repositories: edit together live, comment and suggest, and publish each version as a pull request.",
+  "description": "Pages over the Markdown in your repositories: edit together live, comment and suggest, and publish each version as a pull request.",
   "entry": "bundle/index.html",
   "sidebar": {
     "label": "Docs",

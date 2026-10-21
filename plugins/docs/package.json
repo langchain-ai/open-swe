@@ -2,7 +2,7 @@
   "name": "openswe-plugin-docs",
   "version": "0.1.0",
   "private": true,
-  "description": "Docs: Notion-style pages over the Markdown in a repository, edited live together and published as pull requests",
+  "description": "Docs: pages over the Markdown in a repository, edited live together and published as pull requests",
   "type": "module",
   "scripts": {
     "dev": "vite dev --port 3100",

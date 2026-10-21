@@ -6,7 +6,7 @@
 
 @custom-variant dark (&:where(.dark, .dark *));
 
-/* The page: Macaw tokens over a Notion-like reading measure. */
+/* The page: Macaw tokens over a comfortable reading measure. */
 .docs-page .tiptap {
   outline: none;
   font-size: 16px;

@@ -6,7 +6,7 @@
     {
       "name": "docs",
       "source": "./plugins/docs",
-      "description": "Notion-style pages over the Markdown in your repositories, edited together live"
+      "description": "Pages over the Markdown in your repositories, edited together live"
     }
   ]
 }

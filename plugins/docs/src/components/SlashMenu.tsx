@@ -1,5 +1,5 @@
 /**
- * Notion's `/` menu: type a slash at the start of a block to turn it into a
+ * The `/` menu: type a slash at the start of a block to turn it into a
  * heading, list, quote, code block, table or divider.
  */
 import { Extension, type Editor, type Range } from "@tiptap/core"

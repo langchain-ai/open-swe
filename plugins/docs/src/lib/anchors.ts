@@ -120,7 +120,7 @@ interface HighlightState {
   decorations: DecorationSet
 }
 
-const key = new PluginKey<HighlightState>("spaces-highlights")
+const key = new PluginKey<HighlightState>("docs-highlights")
 
 function decorate(
   doc: ProseMirrorNode,
@@ -158,7 +158,7 @@ export function setHighlights(
 export const Highlights = Extension.create<{
   onSelect: (id: string) => void
 }>({
-  name: "spacesHighlights",
+  name: "docsHighlights",
   addOptions: () => ({ onSelect: () => {} }),
   addProseMirrorPlugins() {
     const onSelect = this.options.onSelect

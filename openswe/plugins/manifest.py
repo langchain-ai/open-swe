@@ -1,4 +1,4 @@
-"""The files a plugin repository carries, in the layout Claude Code plugins use.
+"""The files a plugin repository carries.
 
 A plugin is a directory with ``.openswe-plugin/plugin.json``. A marketplace is a
 repository with ``.openswe-plugin/marketplace.json`` listing plugins and where

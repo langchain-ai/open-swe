@@ -15,9 +15,8 @@ my-plugin/
   bundle/index.html             # one self-contained HTML file: scripts, styles, fonts inlined
 ```
 
-A repository can list several plugins in `.openswe-plugin/marketplace.json`, in
-the same shape as a Claude Code marketplace. Commit the built bundle: Open SWE
-never runs a build.
+A repository can list several plugins in `.openswe-plugin/marketplace.json`.
+Commit the built bundle: Open SWE never runs a build.
 
 ```json
 {
@@ -47,7 +46,7 @@ const host = await connect() // call while the module loads
 host.context.user // { login, name, avatar: Blob | null }
 await host.storage.put("notes", "n1", { text: "hi" }, { repository: "acme/app" })
 await host.github("acme/app").file("README.md", "main")
-const [person] = await host.people.get(["octocat"])
+const [person] = await host.people.get(["ada"])
 ```
 
 React bindings live in `@openswe/plugin-sdk/react` (`PluginHostProvider`,
