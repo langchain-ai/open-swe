@@ -6,6 +6,8 @@
  *
  * Joining or leaving a room reopens the stream after the last update each
  * room delivered, so the frame never misses one and never sees one twice.
+ * A room joined more than once keeps every listener, each from its own place
+ * in the log.
  */
 import type { RoomEvent } from "@openswe/plugin-sdk"
 
@@ -15,10 +17,19 @@ import { dashboardApiUrl } from "@/lib/dashboard-fetch"
 
 const MAX_BACKOFF_MS = 15_000
 
-interface Joined {
-  target: RoomTarget
+interface Listener {
   seq: number
   onEvent: (event: RoomEvent) => void
+}
+
+interface Joined {
+  target: RoomTarget
+  listeners: Set<Listener>
+}
+
+/** Where the stream resumes: after the update the furthest-behind listener saw. */
+function resumeAfter(joined: Joined): number {
+  return Math.min(...[...joined.listeners].map((listener) => listener.seq))
 }
 
 function keyOf(room: string, repository: string | null | undefined): string {
@@ -46,12 +57,19 @@ export class PluginRooms {
     onEvent: (event: RoomEvent) => void
   ): () => void {
     const key = keyOf(target.room, target.repository)
-    const joined: Joined = { target, seq: after, onEvent }
-    this.joined.set(key, joined)
+    let joined = this.joined.get(key)
+    if (!joined) {
+      joined = { target, listeners: new Set() }
+      this.joined.set(key, joined)
+    }
+    const room = joined
+    const listener: Listener = { seq: after, onEvent }
+    room.listeners.add(listener)
     this.schedule(0)
     return () => {
-      if (this.joined.get(key) !== joined) return
-      this.joined.delete(key)
+      if (!room.listeners.delete(listener)) return
+      if (room.listeners.size === 0 && this.joined.get(key) === room)
+        this.joined.delete(key)
       this.schedule(0)
     }
   }
@@ -78,9 +96,9 @@ export class PluginRooms {
       dashboardApiUrl(
         roomsStreamUrl(
           this.installationId,
-          [...this.joined.values()].map(({ target, seq }) => ({
-            ...target,
-            after: seq,
+          [...this.joined.values()].map((joined) => ({
+            ...joined.target,
+            after: resumeAfter(joined),
           }))
         )
       ),
@@ -95,29 +113,34 @@ export class PluginRooms {
     source.addEventListener("update", (message) => {
       const frame = parse<RoomFrame & { seq: number; update: string }>(message)
       if (!frame) return
-      frame.joined.seq = Math.max(frame.joined.seq, frame.data.seq)
-      frame.joined.onEvent({
-        type: "update",
-        seq: frame.data.seq,
-        update: fromBase64(frame.data.update),
-      })
+      const update = fromBase64(frame.data.update)
+      for (const listener of frame.joined.listeners) {
+        if (frame.data.seq <= listener.seq) continue
+        listener.seq = frame.data.seq
+        listener.onEvent({ type: "update", seq: frame.data.seq, update })
+      }
     })
     source.addEventListener("synced", (message) => {
       const frame = parse<RoomFrame & { seq: number }>(message)
       if (!frame) return
       this.backoff = 500
-      frame.joined.onEvent({ type: "synced", seq: frame.data.seq })
+      for (const listener of frame.joined.listeners) {
+        listener.seq = Math.max(listener.seq, frame.data.seq)
+        listener.onEvent({ type: "synced", seq: frame.data.seq })
+      }
     })
     source.addEventListener("presence", (message) => {
       const frame = parse<RoomFrame & { client: string; presence: string }>(
         message
       )
       if (!frame) return
-      frame.joined.onEvent({
-        type: "presence",
-        client: frame.data.client,
-        presence: fromBase64(frame.data.presence),
-      })
+      const presence = fromBase64(frame.data.presence)
+      for (const listener of frame.joined.listeners)
+        listener.onEvent({
+          type: "presence",
+          client: frame.data.client,
+          presence,
+        })
     })
     source.onerror = () => {
       source.close()

@@ -7,6 +7,10 @@
  * Every scoped thing (a collection, a repository, a live room) is its own
  * capability, checked when it is minted and again by the backend on every
  * call, and released when the plugin disposes it or the frame goes away.
+ *
+ * Cap'n Web drops object keys named like `Object.prototype` members
+ * (`constructor`, `toString`, `__proto__`, ...) from what it carries, so
+ * anything keyed by the plugin's own data crosses as JSON text or as a list.
  */
 import type { RpcTarget } from "capnweb"
 
@@ -179,6 +183,18 @@ export interface CommitRequest {
   deletions?: string[]
 }
 
+/** `CommitRequest` as it crosses the wire: its files as a list, so every path survives. */
+export interface CommitWire extends Omit<CommitRequest, "files"> {
+  files: { path: string; content: string }[]
+}
+
+/** A stored document as it crosses the wire: its JSON text, so every key survives. */
+export interface StoredJson {
+  key: string
+  json: string
+  updatedAt: string | null
+}
+
 export interface PullRequestDraft {
   head: string
   base: string
@@ -243,13 +259,11 @@ export interface HostApi extends RpcTarget {
 
 /** One collection of JSON documents in one scope. */
 export interface CollectionApi extends RpcTarget {
-  get(key: string): Promise<StoredDocument | null>
-  /** Documents that contain every field of `where`, oldest first. */
-  query(options: {
-    where?: JsonObject
-    limit?: number
-  }): Promise<StoredDocument[]>
-  put(key: string, document: JsonObject): Promise<StoredDocument>
+  get(key: string): Promise<StoredJson | null>
+  /** Documents that contain every field of `where` (JSON text), oldest first. */
+  query(options: { where?: string; limit?: number }): Promise<StoredJson[]>
+  /** Stores `json`, the text of a JSON object. */
+  put(key: string, json: string): Promise<StoredJson>
   delete(key: string): Promise<void>
   /** Calls `onChange` whenever anyone writes a document here. */
   watch(onChange: () => void): Promise<Subscription>
@@ -264,7 +278,7 @@ export interface GitHubRepositoryApi extends RpcTarget {
   history(path: string, ref: string, limit?: number): Promise<Commit[]>
   createBranch(name: string, sha: string): Promise<void>
   /** Fails when `branch` moved past `expectedHead`, so no push is overwritten. */
-  commit(request: CommitRequest): Promise<string>
+  commit(request: CommitWire): Promise<string>
   findPull(head: string): Promise<PullRequest | null>
   openPull(draft: PullRequestDraft): Promise<PullRequest>
 }

@@ -14,7 +14,6 @@ import {
   type HostContext,
   type HostEvent,
   type JsonDocument,
-  type JsonObject,
   type Person,
   type PullRequestDraft,
   type RepositoryPickOptions,
@@ -22,6 +21,7 @@ import {
   type RoomEvent,
   type RoomScope,
   type StoredDocument,
+  type StoredJson,
   type ThreadRequest,
   type Toast,
 } from "./protocol"
@@ -224,7 +224,7 @@ export class Collection<K extends string, V extends JsonDocument<V>> {
 
   async get(key: K): Promise<StoredDocument<V, K> | null> {
     const found = await settle(this.stub.get(key))
-    return found as unknown as StoredDocument<V, K> | null
+    return found && this.#fromWire(found)
   }
 
   /** Documents whose fields include every field of `where`, oldest first; at most `limit` (500). */
@@ -233,16 +233,27 @@ export class Collection<K extends string, V extends JsonDocument<V>> {
   ): Promise<StoredDocument<V, K>[]> {
     const found = await settle(
       this.stub.query({
-        where: options.where as JsonObject | undefined,
+        where:
+          options.where === undefined
+            ? undefined
+            : JSON.stringify(options.where),
         limit: options.limit,
       })
     )
-    return found as unknown as StoredDocument<V, K>[]
+    return found.map((stored) => this.#fromWire(stored))
   }
 
   async put(key: K, document: V): Promise<StoredDocument<V, K>> {
-    const stored = await settle(this.stub.put(key, document as JsonObject))
-    return stored as unknown as StoredDocument<V, K>
+    const stored = await settle(this.stub.put(key, JSON.stringify(document)))
+    return this.#fromWire(stored)
+  }
+
+  #fromWire(stored: StoredJson): StoredDocument<V, K> {
+    return {
+      key: stored.key as K,
+      document: JSON.parse(stored.json) as V,
+      updatedAt: stored.updatedAt,
+    }
   }
 
   delete(key: K): Promise<void> {
@@ -279,7 +290,15 @@ export class GitHubRepository {
     return settle(this.stub.createBranch(name, sha))
   }
   commit(request: CommitRequest): Promise<string> {
-    return settle(this.stub.commit(request))
+    return settle(
+      this.stub.commit({
+        ...request,
+        files: Object.entries(request.files).map(([path, content]) => ({
+          path,
+          content,
+        })),
+      })
+    )
   }
   findPull(head: string) {
     return settle(this.stub.findPull(head))

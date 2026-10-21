@@ -1,3 +1,8 @@
+/** @vitest-environment jsdom */
+import { Collection } from "@openswe/plugin-sdk"
+import type { CollectionApi, HostApi } from "@openswe/plugin-sdk"
+import { newMessagePortRpcSession } from "capnweb"
+import type { RpcStub } from "capnweb"
 import { afterEach, describe, expect, it, vi } from "vitest"
 
 import type { InstalledPlugin } from "@/features/plugins/lib/api"
@@ -53,5 +58,46 @@ describe("PluginHostApi", () => {
     await api.collection("a", {})
     await api.collection("b", {})
     await expect(api.collection("c", {})).rejects.toMatchObject({ status: 429 })
+  })
+})
+
+describe("documents over Cap'n Web", () => {
+  afterEach(() => vi.unstubAllGlobals())
+
+  it("keep keys named like Object.prototype members", async () => {
+    // The backend echoes what it stores.
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (_url: string, init: RequestInit) => {
+        const body = JSON.parse(String(init.body)) as { document: object }
+        return new Response(
+          JSON.stringify({
+            key: "k",
+            document: body.document,
+            updated_at: null,
+          }),
+          { status: 200, headers: { "Content-Type": "application/json" } }
+        )
+      })
+    )
+    const { port1, port2 } = new MessageChannel()
+    using session = newMessagePortRpcSession(port1, hostApi())
+    void session
+    const remote = newMessagePortRpcSession<HostApi>(port2)
+    const notes = new Collection<string, { tags: Record<string, number> }>(
+      remote.collection("notes", {}) as unknown as RpcStub<CollectionApi>,
+      "notes",
+      {}
+    )
+
+    const stored = await notes.put("k", {
+      tags: { constructor: 1, toString: 2, plain: 3 },
+    })
+
+    expect(stored.document.tags).toEqual({
+      constructor: 1,
+      toString: 2,
+      plain: 3,
+    })
   })
 })

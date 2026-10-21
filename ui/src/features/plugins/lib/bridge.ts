@@ -7,7 +7,7 @@
  */
 import type {
   CollectionApi,
-  CommitRequest,
+  CommitWire,
   DocumentScope,
   GitHubRepositoryApi,
   HostApi,
@@ -21,6 +21,7 @@ import type {
   RoomEvent,
   RoomScope,
   StoredDocument,
+  StoredJson,
   Subscription,
   Toast,
 } from "@openswe/plugin-sdk"
@@ -161,11 +162,38 @@ function jsonObject(value: unknown, name: string): JsonObject {
   return value as JsonObject
 }
 
-function stringMap(value: unknown, name: string): Record<string, string> {
-  const map = record(value, name)
-  for (const item of Object.values(map))
-    if (typeof item !== "string") invalid(`${name} values must be strings`)
-  return map as Record<string, string>
+/** `value`, the text of a JSON object; parsed, so keys Cap'n Web would drop survive. */
+function jsonText(value: unknown, name: string, max: number): JsonObject {
+  let parsed: unknown
+  try {
+    parsed = JSON.parse(text(value, name, max))
+  } catch {
+    invalid(`${name} must be JSON text`)
+  }
+  return jsonObject(parsed, name)
+}
+
+function toWire(stored: StoredDocument): StoredJson {
+  return {
+    key: stored.key,
+    json: JSON.stringify(stored.document),
+    updatedAt: stored.updatedAt,
+  }
+}
+
+/** Commit files, sent as a list so no path is lost; at most 100. */
+function fileList(value: unknown): Record<string, string> {
+  if (!Array.isArray(value) || value.length > 100)
+    invalid("files must be a list of at most 100")
+  // fromEntries defines own properties, so a path like "__proto__" stays a path.
+  return Object.fromEntries(
+    value.map((entry) => {
+      const file = record(entry, "file")
+      if (typeof file.content !== "string")
+        invalid("file content must be a string")
+      return [text(file.path, "path", 1_000), file.content]
+    })
+  )
 }
 
 function stringList(value: unknown, name: string): Array<string> {
@@ -618,43 +646,52 @@ class CollectionTarget extends RpcTarget implements CollectionApi {
     this.#release = release
   }
 
-  get(key: string): Promise<StoredDocument | null> {
-    return this.#budget.run(() =>
-      pluginsApi.getDocument(
+  get(key: string): Promise<StoredJson | null> {
+    return this.#budget.run(async () => {
+      const found = await pluginsApi.getDocument(
         this.#host().plugin.id,
         this.#target.collection,
         pathName(key, "key", DOCUMENT_KEY),
         this.#target.repository ?? undefined
       )
-    )
+      return found && toWire(found)
+    })
   }
 
-  query(options: { where?: JsonObject; limit?: number }) {
-    return this.#budget.run(() => {
+  query(options: {
+    where?: string
+    limit?: number
+  }): Promise<Array<StoredJson>> {
+    return this.#budget.run(async () => {
       const fields = options === undefined ? {} : record(options, "options")
-      return pluginsApi.queryDocuments(
+      const found = await pluginsApi.queryDocuments(
         this.#host().plugin.id,
         this.#target.collection,
         {
           repository: this.#target.repository ?? undefined,
           where:
-            fields.where === undefined ? {} : jsonObject(fields.where, "where"),
+            fields.where === undefined
+              ? {}
+              : jsonText(fields.where, "where", 64_000),
           limit: optionalInteger(fields.limit, "limit"),
         }
       )
+      return found.map(toWire)
     })
   }
 
-  put(key: string, document: JsonObject): Promise<StoredDocument> {
-    return this.#budget.run(() =>
-      pluginsApi.putDocument(
-        this.#host().plugin.id,
-        this.#target.collection,
-        pathName(key, "key", DOCUMENT_KEY),
-        {
-          repository: this.#target.repository ?? undefined,
-          document: jsonObject(document, "document"),
-        }
+  put(key: string, json: string): Promise<StoredJson> {
+    return this.#budget.run(async () =>
+      toWire(
+        await pluginsApi.putDocument(
+          this.#host().plugin.id,
+          this.#target.collection,
+          pathName(key, "key", DOCUMENT_KEY),
+          {
+            repository: this.#target.repository ?? undefined,
+            document: jsonText(json, "document", 512_000),
+          }
+        )
       )
     )
   }
@@ -766,14 +803,14 @@ class RepositoryTarget extends RpcTarget implements GitHubRepositoryApi {
     })
   }
 
-  commit(request: CommitRequest): Promise<string> {
+  commit(request: CommitWire): Promise<string> {
     return this.#budget.run(() => {
       const fields = record(request, "request")
       return pluginsApi.commit(this.#plugin, this.#repository, {
         branch: text(fields.branch, "branch", 200),
         expectedHead: text(fields.expectedHead, "expectedHead", 40),
         message: text(fields.message, "message", 10_000),
-        files: stringMap(fields.files, "files"),
+        files: fileList(fields.files),
         deletions: stringList(fields.deletions, "deletions"),
       })
     })
