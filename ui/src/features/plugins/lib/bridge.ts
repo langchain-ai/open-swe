@@ -115,6 +115,37 @@ function stringList(params: Params, key: string): Array<string> {
   return value as Array<string>
 }
 
+/** A name the backend accepts as one path: no empty, `.` or `..` part. */
+function pathName(
+  params: Params,
+  key: string,
+  pattern: RegExp,
+  max = 200
+): string {
+  const value = text(params, key, max)
+  if (
+    !pattern.test(value) ||
+    value.split("/").some((part) => !part || part === "." || part === "..")
+  )
+    throw new BridgeRequestError(`${key} is not a valid name`, 400)
+  return value
+}
+
+const COLLECTION = /^[a-z][a-z0-9_-]{0,63}$/
+const DOCUMENT_KEY = /^[A-Za-z0-9._:@/-]{1,200}$/
+const ROOM = /^[A-Za-z0-9._:@/-]{1,200}$/
+const REPOSITORY = /^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/
+
+const collection = (params: Params) =>
+  pathName(params, "collection", COLLECTION)
+const documentKey = (params: Params) => pathName(params, "key", DOCUMENT_KEY)
+const repository = (params: Params) =>
+  pathName(params, "repository", REPOSITORY)
+const optionalRepository = (params: Params) =>
+  params.repository === undefined || params.repository === null
+    ? undefined
+    : repository(params)
+
 function binary(params: Params, key: string, max: number): Uint8Array {
   const value = params[key]
   if (!(value instanceof Uint8Array) || value.byteLength > max)
@@ -123,13 +154,10 @@ function binary(params: Params, key: string, max: number): Uint8Array {
 }
 
 function roomTarget(params: Params): RoomTarget {
-  const room = text(params, "room", 200)
-  if (!/^[A-Za-z0-9._:@/-]+$/.test(room))
-    throw new BridgeRequestError(
-      "room may hold letters, digits and ._:@/-",
-      400
-    )
-  return { room, repository: optionalText(params, "repository")?.toLowerCase() }
+  return {
+    room: pathName(params, "room", ROOM),
+    repository: optionalRepository(params)?.toLowerCase(),
+  }
 }
 
 function path(params: Params): string {
@@ -193,27 +221,27 @@ const handlers: Handlers = {
   },
 
   "storage.query": (host, params) =>
-    pluginsApi.queryDocuments(host.plugin.id, text(params, "collection"), {
-      repository: optionalText(params, "repository"),
+    pluginsApi.queryDocuments(host.plugin.id, collection(params), {
+      repository: optionalRepository(params),
       where: jsonObject(params, "where"),
       limit: optionalNumber(params, "limit"),
     }),
   "storage.get": (host, params) =>
     pluginsApi.getDocument(
       host.plugin.id,
-      text(params, "collection"),
-      text(params, "key", 200),
-      optionalText(params, "repository")
+      collection(params),
+      documentKey(params),
+      optionalRepository(params)
     ),
   "storage.put": (host, params) => {
     if (!isJson(params.document))
       throw new BridgeRequestError("document must be JSON", 400)
     return pluginsApi.putDocument(
       host.plugin.id,
-      text(params, "collection"),
-      text(params, "key", 200),
+      collection(params),
+      documentKey(params),
       {
-        repository: optionalText(params, "repository"),
+        repository: optionalRepository(params),
         document: params.document,
       }
     )
@@ -221,46 +249,46 @@ const handlers: Handlers = {
   "storage.delete": async (host, params) => {
     await pluginsApi.deleteDocument(
       host.plugin.id,
-      text(params, "collection"),
-      text(params, "key", 200),
-      optionalText(params, "repository")
+      collection(params),
+      documentKey(params),
+      optionalRepository(params)
     )
     return null
   },
   "storage.watch": async (host, params) => {
-    host.watch(optionalText(params, "repository")?.toLowerCase() ?? null)
+    host.watch(optionalRepository(params)?.toLowerCase() ?? null)
     return null
   },
   "storage.unwatch": async (host, params) => {
-    host.unwatch(optionalText(params, "repository")?.toLowerCase() ?? null)
+    host.unwatch(optionalRepository(params)?.toLowerCase() ?? null)
     return null
   },
 
   "github.repository": (host, params) =>
-    pluginsApi.repository(host.plugin.id, text(params, "repository")),
+    pluginsApi.repository(host.plugin.id, repository(params)),
   "github.ref": (host, params) =>
     pluginsApi.ref(
       host.plugin.id,
-      text(params, "repository"),
+      repository(params),
       text(params, "name", 200)
     ),
   "github.tree": (host, params) =>
     pluginsApi.tree(
       host.plugin.id,
-      text(params, "repository"),
+      repository(params),
       text(params, "sha", 40)
     ),
   "github.file": (host, params) =>
     pluginsApi.file(
       host.plugin.id,
-      text(params, "repository"),
+      repository(params),
       text(params, "path"),
       text(params, "ref", 200)
     ),
   "github.history": (host, params) =>
     pluginsApi.history(
       host.plugin.id,
-      text(params, "repository"),
+      repository(params),
       text(params, "path"),
       text(params, "ref", 200),
       optionalNumber(params, "limit")
@@ -268,14 +296,14 @@ const handlers: Handlers = {
   "github.createBranch": async (host, params) => {
     await pluginsApi.createBranch(
       host.plugin.id,
-      text(params, "repository"),
+      repository(params),
       text(params, "name", 200),
       text(params, "sha", 40)
     )
     return null
   },
   "github.commit": (host, params) =>
-    pluginsApi.commit(host.plugin.id, text(params, "repository"), {
+    pluginsApi.commit(host.plugin.id, repository(params), {
       branch: text(params, "branch", 200),
       expectedHead: text(params, "expectedHead", 40),
       message: text(params, "message", 10_000),
@@ -285,11 +313,11 @@ const handlers: Handlers = {
   "github.findPull": (host, params) =>
     pluginsApi.findPull(
       host.plugin.id,
-      text(params, "repository"),
+      repository(params),
       text(params, "head", 200)
     ),
   "github.openPull": (host, params) =>
-    pluginsApi.openPull(host.plugin.id, text(params, "repository"), {
+    pluginsApi.openPull(host.plugin.id, repository(params), {
       head: text(params, "head", 200),
       base: text(params, "base", 200),
       title: text(params, "title", 256),
@@ -299,7 +327,7 @@ const handlers: Handlers = {
 
   "threads.start": async (host, params) => {
     const request: ThreadRequest = {
-      repository: text(params, "repository"),
+      repository: repository(params),
       title: text(params, "title", 120),
       request: text(params, "request", 40_000),
     }
@@ -341,12 +369,13 @@ const handlers: Handlers = {
   },
 }
 
-export function handleBridgeRequest(
+/** Always settles: a request that fails validation still gets an answer. */
+export async function handleBridgeRequest(
   host: BridgeHost,
   method: unknown,
   params: unknown
 ): Promise<unknown> {
   if (typeof method !== "string" || !Object.hasOwn(handlers, method))
-    return Promise.reject(new BridgeRequestError("unknown method", 404))
+    throw new BridgeRequestError("unknown method", 404)
   return handlers[method as HostMethod](host, record(params))
 }

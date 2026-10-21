@@ -1,7 +1,7 @@
 /**
  * The messages an Open SWE plugin and the dashboard exchange.
  *
- * The plugin runs in a sandboxed frame with no network access. The dashboard
+ * The plugin runs in a sandboxed frame whose policy blocks its requests. The dashboard
  * hands it one end of a `MessageChannel`; every request goes over that port,
  * and the dashboard answers it by calling the backend for the person using the
  * plugin, within the permissions they granted.
@@ -10,6 +10,14 @@
 export const PROTOCOL_VERSION = 1
 /** The `window.postMessage` type that carries the port into the frame. */
 export const CONNECT_MESSAGE = "openswe-plugin-connect"
+/**
+ * What the frame sends its parent to ask for the port, echoing the nonce the
+ * dashboard put in its document; the dashboard answers only the document it
+ * made, and only once.
+ */
+export const HELLO_MESSAGE = "openswe-plugin-hello"
+/** The `<meta name>` holding that nonce. */
+export const NONCE_META = "openswe-plugin-nonce"
 
 export type JsonValue =
   | string

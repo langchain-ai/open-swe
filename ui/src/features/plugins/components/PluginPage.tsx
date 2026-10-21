@@ -11,11 +11,10 @@ import { Skeleton } from "@langchain/macaw-components/Skeleton"
 import { PuzzlePieceIcon } from "@phosphor-icons/react/dist/ssr/PuzzlePiece"
 import { ShieldCheckIcon } from "@phosphor-icons/react/dist/ssr/ShieldCheck"
 import { Link, useNavigate } from "@tanstack/react-router"
-import { useState } from "react"
 
 import { PluginFrame } from "@/features/plugins/components/PluginFrame"
 import type { InstalledPlugin } from "@/features/plugins/lib/api"
-import type { ThreadRequest } from "@/features/plugins/lib/bridge"
+import { useApproval } from "@/features/plugins/lib/approval"
 import { PluginIcon } from "@/features/plugins/lib/icons"
 import { usePlugin, usePluginBundle } from "@/features/plugins/lib/queries"
 
@@ -68,22 +67,13 @@ function InstalledPluginPage({
 }) {
   const navigate = useNavigate()
   const bundle = usePluginBundle(plugin)
-  const [leaving, setLeaving] = useState<{
-    url: string
-    resolve: (go: boolean) => void
-  } | null>(null)
-  const [pending, setPending] = useState<{
-    request: ThreadRequest
-    resolve: (approved: boolean) => void
-  } | null>(null)
+  const approval = useApproval()
+  const thread =
+    approval.shown?.kind === "thread" ? approval.shown.request : null
+  const link = approval.shown?.kind === "link" ? approval.shown.url : null
   const source = [plugin.source.repository, plugin.source.path]
     .filter(Boolean)
     .join("/")
-
-  const settle = (approved: boolean) => {
-    pending?.resolve(approved)
-    setPending(null)
-  }
 
   return (
     <main className="flex min-h-0 min-w-0 flex-1 flex-col">
@@ -127,18 +117,8 @@ function InstalledPluginPage({
           openThread={(threadId) =>
             void navigate({ to: "/agents/$threadId", params: { threadId } })
           }
-          confirmLink={(url) =>
-            new Promise<boolean>((resolve) => {
-              leaving?.resolve(false)
-              setLeaving({ url, resolve })
-            })
-          }
-          confirmThread={(request) =>
-            new Promise<boolean>((resolve) => {
-              pending?.resolve(false)
-              setPending({ request, resolve })
-            })
-          }
+          confirmLink={(url) => approval.ask({ kind: "link", url })}
+          confirmThread={(request) => approval.ask({ kind: "thread", request })}
         />
       ) : bundle.error ? (
         <div className="flex flex-1 items-center justify-center p-space-5">
@@ -152,8 +132,8 @@ function InstalledPluginPage({
         <Skeleton className="m-space-5 flex-1" />
       )}
       <Dialog
-        open={pending !== null}
-        onOpenChange={(open) => !open && settle(false)}
+        open={thread !== null}
+        onOpenChange={(open) => !open && approval.answer(false)}
       >
         <DialogContent
           childrenClassName="gap-space-4 p-space-6"
@@ -164,36 +144,40 @@ function InstalledPluginPage({
             {plugin.manifest.displayName} wants to start a private agent thread
             in{" "}
             <span className="font-medium text-primary">
-              {pending?.request.repository}
+              {thread?.repository}
             </span>
             . The agent works as you, with your access. Read the request before
             you approve it.
           </DialogDescription>
           <div className="flex flex-col gap-space-1">
             <span className="text-xs font-medium text-primary">
-              {pending?.request.title}
+              {thread?.title}
             </span>
             <pre className="max-h-72 overflow-auto rounded-md border border-default bg-surface-level-1 p-space-3 text-xs whitespace-pre-wrap text-primary">
-              {pending?.request.request}
+              {thread?.request}
             </pre>
           </div>
           <div className="flex justify-end gap-space-2">
-            <Button size="sm" variant="outlined" onClick={() => settle(false)}>
+            <Button
+              size="sm"
+              variant="outlined"
+              onClick={() => approval.answer(false)}
+            >
               Cancel
             </Button>
-            <Button size="sm" onClick={() => settle(true)}>
+            <Button
+              size="sm"
+              disabled={!approval.armed}
+              onClick={() => approval.answer(true)}
+            >
               Start thread
             </Button>
           </div>
         </DialogContent>
       </Dialog>
       <Dialog
-        open={leaving !== null}
-        onOpenChange={(open) => {
-          if (open) return
-          leaving?.resolve(false)
-          setLeaving(null)
-        }}
+        open={link !== null}
+        onOpenChange={(open) => !open && approval.answer(false)}
       >
         <DialogContent
           childrenClassName="gap-space-4 p-space-6"
@@ -205,25 +189,20 @@ function InstalledPluginPage({
             in a new tab.
           </DialogDescription>
           <code className="rounded-md border border-default bg-surface-level-1 p-space-2 text-xs break-all text-primary">
-            {leaving?.url}
+            {link}
           </code>
           <div className="flex justify-end gap-space-2">
             <Button
               size="sm"
               variant="outlined"
-              onClick={() => {
-                leaving?.resolve(false)
-                setLeaving(null)
-              }}
+              onClick={() => approval.answer(false)}
             >
               Cancel
             </Button>
             <Button
               size="sm"
-              onClick={() => {
-                leaving?.resolve(true)
-                setLeaving(null)
-              }}
+              disabled={!approval.armed}
+              onClick={() => approval.answer(true)}
             >
               Open link
             </Button>

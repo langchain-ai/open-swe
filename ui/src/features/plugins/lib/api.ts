@@ -98,20 +98,40 @@ function query(params: Record<string, string | number | null | undefined>) {
   return text ? `?${text}` : ""
 }
 
+export class UnsafePathError extends Error {}
+
+/**
+ * One path segment from a plugin's input. The browser resolves `.` and `..`
+ * before sending a request, so a segment like that would carry the call to
+ * some other dashboard route with the person's cookies; refuse it outright.
+ */
+function segment(value: string): string {
+  if (!value || value === "." || value === ".." || /[%\\]/.test(value))
+    throw new UnsafePathError(`unsafe path segment ${JSON.stringify(value)}`)
+  return encodeURIComponent(value)
+}
+
+/** A plugin's slash-separated name (a key, a room), each part one safe segment. */
+function segments(value: string): string {
+  return value.split("/").map(segment).join("/")
+}
+
 function plugin(id: string): string {
-  return `/plugins/${encodeURIComponent(id)}`
+  return `/plugins/${segment(id)}`
 }
 
 function repo(id: string, repository: string): string {
-  const [owner = "", name = ""] = repository.split("/")
-  return `${plugin(id)}/github/${encodeURIComponent(owner)}/${encodeURIComponent(name)}`
+  const [owner = "", name = "", ...rest] = repository.split("/")
+  if (rest.length) throw new UnsafePathError("repository must be owner/repo")
+  return `${plugin(id)}/github/${segment(owner)}/${segment(name)}`
 }
 
 function document(id: string, collection: string, key: string): string {
-  return `${plugin(id)}/documents/${encodeURIComponent(collection)}/${key
-    .split("/")
-    .map(encodeURIComponent)
-    .join("/")}`
+  return `${plugin(id)}/documents/${segment(collection)}/${segments(key)}`
+}
+
+function roomPath(id: string, target: RoomTarget, action: string): string {
+  return `${plugin(id)}/rooms/${segments(target.room)}/${action}`
 }
 
 interface DocumentWire {
@@ -219,7 +239,7 @@ export const pluginsApi = {
   ) =>
     (
       await agentsRequest<Array<DocumentWire>>(
-        `${plugin(id)}/documents/${encodeURIComponent(collection)}/query`,
+        `${plugin(id)}/documents/${segment(collection)}/query`,
         { method: "POST", ...json(body) }
       )
     ).map(stored),
@@ -380,13 +400,10 @@ export const pluginsApi = {
 
   publishRoom: async (id: string, target: RoomTarget, update: Uint8Array) =>
     (
-      await agentsRequest<{ seq: number }>(
-        `${plugin(id)}/rooms/${encodeURIComponent(target.room)}/updates`,
-        {
-          method: "POST",
-          ...json({ repository: target.repository, update: base64(update) }),
-        }
-      )
+      await agentsRequest<{ seq: number }>(roomPath(id, target, "updates"), {
+        method: "POST",
+        ...json({ repository: target.repository, update: base64(update) }),
+      })
     ).seq,
   compactRoom: async (
     id: string,
@@ -395,17 +412,14 @@ export const pluginsApi = {
     through: number
   ) =>
     (
-      await agentsRequest<{ seq: number }>(
-        `${plugin(id)}/rooms/${encodeURIComponent(target.room)}/compact`,
-        {
-          method: "POST",
-          ...json({
-            repository: target.repository,
-            snapshot: base64(snapshot),
-            through,
-          }),
-        }
-      )
+      await agentsRequest<{ seq: number }>(roomPath(id, target, "compact"), {
+        method: "POST",
+        ...json({
+          repository: target.repository,
+          snapshot: base64(snapshot),
+          through,
+        }),
+      })
     ).seq,
   announceInRoom: (
     id: string,
@@ -413,17 +427,14 @@ export const pluginsApi = {
     client: string,
     presence: Uint8Array
   ) =>
-    agentsRequest<void>(
-      `${plugin(id)}/rooms/${encodeURIComponent(target.room)}/presence`,
-      {
-        method: "POST",
-        ...json({
-          repository: target.repository,
-          client,
-          presence: base64(presence),
-        }),
-      }
-    ),
+    agentsRequest<void>(roomPath(id, target, "presence"), {
+      method: "POST",
+      ...json({
+        repository: target.repository,
+        client,
+        presence: base64(presence),
+      }),
+    }),
 
   startThread: (
     id: string,

@@ -1,5 +1,6 @@
 import {
   CONNECT_MESSAGE,
+  HELLO_MESSAGE,
   PROTOCOL_VERSION,
   type HostContext,
   type HostEvent,
@@ -23,6 +24,7 @@ import {
 } from "@/features/plugins/lib/bridge"
 import {
   PLUGIN_ALLOW,
+  PLUGIN_CSP,
   PLUGIN_SANDBOX,
   pluginDocument,
 } from "@/features/plugins/lib/shell"
@@ -85,9 +87,11 @@ export function PluginFrame({
     enabled: Boolean(login),
     staleTime: Infinity,
   })
+  // A fresh nonce per mount: the dashboard answers only the document it made.
+  const [nonce, setNonce] = useState(() => crypto.randomUUID())
   const srcDoc = useMemo(
-    () => pluginDocument(html, initialTheme),
-    [html, initialTheme]
+    () => pluginDocument(html, initialTheme, nonce),
+    [html, initialTheme, nonce]
   )
 
   const post = (message: HostMessage) => portRef.current?.postMessage(message)
@@ -160,36 +164,63 @@ export function PluginFrame({
     )
   })
 
-  const connect = () => {
+  const teardown = () => {
+    rooms.current?.closeAll()
+    portRef.current?.close()
+    portRef.current = null
+  }
+
+  // A second document in the frame means it navigated away from the bundle.
+  const loaded = () => {
     loads.current += 1
     if (loads.current > 1) {
-      rooms.current?.closeAll()
-      portRef.current?.close()
-      portRef.current = null
+      teardown()
       setEscaped(true)
-      return
     }
+  }
+
+  /**
+   * The port goes only to the document the dashboard wrote: the frame's own
+   * window, still on its opaque origin (a page it navigated to has a real
+   * one), echoing this mount's nonce, before any second load, and only once.
+   */
+  const hello = useEffectEvent((message: MessageEvent) => {
+    const data: unknown = message.data
+    const frame = frameRef.current?.contentWindow
+    if (
+      !frame ||
+      message.source !== frame ||
+      message.origin !== "null" ||
+      !data ||
+      typeof data !== "object" ||
+      !("type" in data) ||
+      data.type !== HELLO_MESSAGE ||
+      !("nonce" in data) ||
+      data.nonce !== nonce ||
+      portRef.current !== null ||
+      loads.current > 1
+    )
+      return
     rooms.current = new PluginRooms(plugin.id, (event) => emit(event))
     const channel = new MessageChannel()
     portRef.current = channel.port1
     channel.port1.onmessage = receive
     channel.port1.start()
-    frameRef.current?.contentWindow?.postMessage(
+    frame.postMessage(
       { type: CONNECT_MESSAGE, version: PROTOCOL_VERSION },
       "*",
       [channel.port2]
     )
     emit({ type: "context", context: context() })
-  }
+  })
 
-  useEffect(
-    () => () => {
-      rooms.current?.closeAll()
-      portRef.current?.close()
-      portRef.current = null
-    },
-    []
-  )
+  useEffect(() => {
+    const listen = (message: MessageEvent) => hello(message)
+    window.addEventListener("message", listen)
+    return () => window.removeEventListener("message", listen)
+  }, [])
+
+  useEffect(() => teardown, [])
 
   const announceSelf = useEffectEvent(() =>
     emit({ type: "context", context: context() })
@@ -253,6 +284,7 @@ export function PluginFrame({
             onClick={() => {
               loads.current = 0
               setEscaped(false)
+              setNonce(crypto.randomUUID())
               setGeneration((value) => value + 1)
             }}
           >
@@ -271,7 +303,8 @@ export function PluginFrame({
       html={srcDoc}
       sandbox={PLUGIN_SANDBOX}
       allow={PLUGIN_ALLOW}
-      onLoad={connect}
+      onLoad={loaded}
+      csp={PLUGIN_CSP}
       className="h-full min-h-0 flex-1"
     />
   )

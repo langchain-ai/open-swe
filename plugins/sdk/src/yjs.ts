@@ -1,7 +1,7 @@
 /**
  * A Yjs provider over an Open SWE live room, for plugins that edit together.
  *
- * Plugins have no network, so instead of a WebSocket the provider talks to the
+ * Plugin frames cannot open sockets, so instead of a WebSocket the provider talks to the
  * dashboard, which keeps the room's log in PostgreSQL and fans updates out to
  * everyone in it. Local edits are batched into one update per `flushMs`;
  * awareness (cursors, names) travels as presence and is never stored.

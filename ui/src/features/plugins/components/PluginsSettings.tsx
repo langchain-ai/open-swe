@@ -60,7 +60,7 @@ function InstalledPlugins() {
   return (
     <SettingsSection
       title="Installed"
-      description="Each plugin opens from the sidebar and runs in a sandbox with no network. It acts as you, only through the permissions and repositories listed here."
+      description="Each plugin opens from the sidebar and runs in a sandbox that blocks its own requests. It acts as you only through the permissions and repositories listed here."
     >
       {plugins.isPending ? (
         <div className={ROW}>
@@ -479,8 +479,8 @@ function InstallDialog({
         <DialogDescription>
           From{" "}
           {[item.source.repository, item.source.path].filter(Boolean).join("/")}
-          . It runs in a sandbox with no network, and acts as you only through
-          what you allow here.
+          . It runs in a sandbox that blocks its own requests, and acts as you
+          only through what you allow here.
         </DialogDescription>
         <div className="flex flex-col gap-space-2">
           <span className="text-xs font-medium text-primary">It can</span>

@@ -1,5 +1,8 @@
 import {
   CONNECT_MESSAGE,
+  HELLO_MESSAGE,
+  NONCE_META,
+  PROTOCOL_VERSION,
   type DocumentScope,
   type HostContext,
   type HostEvent,
@@ -46,7 +49,7 @@ export class PluginHost {
       this.receive(message.data)
   }
 
-  /** Waits for the dashboard to hand this frame its port and context. */
+  /** Asks the dashboard for this frame's port, then waits for it and the context. */
   static connect(): Promise<PluginHost> {
     return new Promise((resolve) => {
       const onMessage = (message: MessageEvent) => {
@@ -66,6 +69,13 @@ export class PluginHost {
         port.start()
       }
       window.addEventListener("message", onMessage)
+      const nonce = document
+        .querySelector(`meta[name="${NONCE_META}"]`)
+        ?.getAttribute("content")
+      window.parent.postMessage(
+        { type: HELLO_MESSAGE, nonce, version: PROTOCOL_VERSION },
+        "*"
+      )
     })
   }
 

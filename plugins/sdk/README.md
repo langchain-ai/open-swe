@@ -3,8 +3,8 @@
 Build plugins for the [Open SWE](https://github.com/langchain-ai/open-swe) dashboard.
 
 A plugin is a web app in a GitHub repository. Open SWE runs it full screen from
-its sidebar, in a sandboxed frame with **no network access**: everything it does
-goes through the dashboard, as the person using it, within the permissions they
+its sidebar, in a sandboxed frame whose policy blocks its own requests:
+everything it does goes through the dashboard, as the person using it, within the permissions they
 approved when they installed it.
 
 ## Layout
