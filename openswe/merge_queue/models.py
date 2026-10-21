@@ -24,7 +24,7 @@ class Lease:
     fence: int
 
 
-class Record(Base):
+class Record(Base, kw_only=True):
     __abstract__ = True
 
     id: Mapped[UUID] = mapped_column(primary_key=True, default_factory=uuid7)
@@ -41,7 +41,7 @@ class Record(Base):
 class MergeRequest(Record):
     __tablename__ = "merge_queue_request"
 
-    queue_id: Mapped[UUID] = mapped_column(ForeignKey("merge_queue.id"))
+    queue_id: Mapped[UUID] = mapped_column(ForeignKey("merge_queue.id", ondelete="CASCADE"))
     pull_request_id: Mapped[UUID] = mapped_column(ForeignKey(PullRequest.id))
     request_key: Mapped[str]
     head_sha: Mapped[str]
@@ -53,7 +53,7 @@ class MergeRequest(Record):
 class Batch(Record):
     __tablename__ = "merge_queue_batch"
 
-    queue_id: Mapped[UUID] = mapped_column(ForeignKey("merge_queue.id"))
+    queue_id: Mapped[UUID] = mapped_column(ForeignKey("merge_queue.id", ondelete="CASCADE"))
     request_key: Mapped[str]
     base_sha: Mapped[str]
     policy: Mapped[dict[str, JsonValue]] = mapped_column(JSONB)
@@ -70,7 +70,7 @@ class BatchMember(Record):
     __tablename__ = "merge_queue_member"
 
     batch_id: Mapped[UUID] = mapped_column(ForeignKey(Batch.id, ondelete="CASCADE"))
-    request_id: Mapped[UUID] = mapped_column(ForeignKey(MergeRequest.id))
+    request_id: Mapped[UUID] = mapped_column(ForeignKey(MergeRequest.id, ondelete="CASCADE"))
     position: Mapped[int]
     head_sha: Mapped[str]
 

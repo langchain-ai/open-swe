@@ -51,7 +51,7 @@ class BatchHistory:
 class MergeQueue(Record):
     __tablename__ = "merge_queue"
 
-    workspace_id: Mapped[UUID] = mapped_column(ForeignKey(WorkspaceRow.id))
+    workspace_id: Mapped[UUID] = mapped_column(ForeignKey(WorkspaceRow.id, ondelete="CASCADE"))
     repository_id: Mapped[UUID] = mapped_column(ForeignKey(Repository.id))
     target_branch: Mapped[str]
     paused: Mapped[bool] = mapped_column(default=True)

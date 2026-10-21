@@ -11,7 +11,7 @@ depends_on = None
 # All tables are new. Foreign keys take only brief locks on existing identity tables.
 _TABLES = {
     "merge_queue": """
-        workspace_id uuid NOT NULL REFERENCES workspace(id),
+        workspace_id uuid NOT NULL REFERENCES workspace(id) ON DELETE CASCADE,
         repository_id uuid NOT NULL REFERENCES repository(id),
         target_branch text NOT NULL CHECK (target_branch <> '' AND target_branch NOT LIKE 'refs/%'),
         paused boolean NOT NULL DEFAULT true,
@@ -21,7 +21,7 @@ _TABLES = {
         CHECK ((lease_owner IS NULL) = (lease_until IS NULL))
     """,
     "merge_queue_request": """
-        queue_id uuid NOT NULL REFERENCES merge_queue(id),
+        queue_id uuid NOT NULL REFERENCES merge_queue(id) ON DELETE CASCADE,
         pull_request_id uuid NOT NULL REFERENCES pull_request(id),
         request_key text NOT NULL CHECK (request_key <> ''),
         head_sha text NOT NULL CHECK (head_sha ~ '^[0-9a-f]{40}$'),
@@ -32,7 +32,7 @@ _TABLES = {
         CHECK ((state IN ('merged', 'withdrawn')) = (finished_at IS NOT NULL))
     """,
     "merge_queue_batch": """
-        queue_id uuid NOT NULL REFERENCES merge_queue(id),
+        queue_id uuid NOT NULL REFERENCES merge_queue(id) ON DELETE CASCADE,
         request_key text NOT NULL CHECK (request_key <> ''),
         base_sha text NOT NULL CHECK (base_sha ~ '^[0-9a-f]{40}$'),
         policy jsonb NOT NULL CHECK (jsonb_typeof(policy) = 'object'),
@@ -45,7 +45,7 @@ _TABLES = {
     """,
     "merge_queue_member": """
         batch_id uuid NOT NULL REFERENCES merge_queue_batch(id) ON DELETE CASCADE,
-        request_id uuid NOT NULL REFERENCES merge_queue_request(id),
+        request_id uuid NOT NULL REFERENCES merge_queue_request(id) ON DELETE CASCADE,
         position integer NOT NULL CHECK (position >= 0),
         head_sha text NOT NULL CHECK (head_sha ~ '^[0-9a-f]{40}$')
     """,
