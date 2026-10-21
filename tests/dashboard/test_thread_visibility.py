@@ -193,26 +193,23 @@ async def test_sharing_deletes_the_threads_browser(private_thread, monkeypatch):
 
     assert deleted == ["browser-1"]
     # MDA keeps the name, so the panel can still open a fresh browser.
-    assert client.threads.update.call_args.kwargs["metadata"]["browser"] == {
-        "browser": "browser-1",
-        "opened": False,
-    }
+    metadata = client.threads.update.call_args.kwargs["metadata"]
+    assert metadata["browser_name"] == "browser-1"
+    assert metadata["browser_opened"] is False
 
 
-async def test_a_browser_reported_opened_stays_opened(private_thread, monkeypatch):
-    thread, client = private_thread
+async def test_a_run_starting_never_undoes_a_browse(private_thread, monkeypatch):
+    _, client = private_thread
     monkeypatch.setattr(browsers, "langgraph_client", lambda: client)
     monkeypatch.setattr(Topic.THREAD_BROWSERS, "invalidate", AsyncMock())
-    thread["metadata"]["browser"] = {"browser": "browser-1", "opened": True}
 
-    # A later run starting reports the name as not yet opened by it.
     await ThreadBrowser(browser="browser-1", opened=False).report("private-thread")
-    client.threads.update.assert_not_awaited()
+    assert client.threads.update.call_args.kwargs["metadata"] == {"browser_name": "browser-1"}
 
-    thread["metadata"]["browser"] = {"browser": "browser-1", "opened": False}
     await ThreadBrowser(browser="browser-1", opened=True).report("private-thread")
     assert client.threads.update.call_args.kwargs["metadata"] == {
-        "browser": {"browser": "browser-1", "opened": True}
+        "browser_name": "browser-1",
+        "browser_opened": True,
     }
 
 

@@ -23,7 +23,7 @@ logger = logging.getLogger(__name__)
 
 
 class ReportedBrowserMiddleware(BrowserMiddleware):
-    """MDA's browser per thread, whose name and first use the backend hears once per process."""
+    """MDA's browser per thread: the backend hears its name once per process, its use once per run."""
 
     def __init__(self, backend: OpenSweBackend) -> None:
         super().__init__()
@@ -34,7 +34,11 @@ class ReportedBrowserMiddleware(BrowserMiddleware):
 
     async def abefore_agent(self, state: AgentState, runtime: Runtime) -> None:
         with contextlib.suppress(RuntimeError):  # no thread, so no browser
-            self._report_later(self.browser_name(runtime), state, opened=False)
+            name = self.browser_name(runtime)
+            # Sharing the thread deletes its browser, so each run reports the
+            # agent's first browse again; a repeat changes nothing.
+            self._reported.discard((name, True))
+            self._report_later(name, state, opened=False)
 
     async def _share(
         self, session: object, name: str, key: str, runtime: ManagedToolRuntime

@@ -8,13 +8,12 @@ window. The dashboard frames that window from an act link LangSmith mints for
 the dashboard's origin.
 """
 
-import logging
 from collections.abc import Mapping
 from datetime import datetime
 from typing import Literal, Self
 
 import httpx2
-from pydantic import BaseModel, ValidationError
+from pydantic import BaseModel
 
 from openswe.sandboxes.providers.langsmith_api import SandboxAPI
 from openswe.ui_invalidations.topics import Topic
@@ -26,11 +25,12 @@ _BROWSER_START_TIMEOUT_SECONDS = 180.0
 _BROWSER_IDLE_TTL_SECONDS = 600
 _BROWSER_REQUEST_TIMEOUT_SECONDS = 30.0
 _GONE_STATUSES = frozenset({"failed", "deleting"})
-_THREAD_METADATA_KEY = "browser"
+_NAME_KEY = "browser_name"
+_OPENED_KEY = "browser_opened"
+# The record before names were reported early: {"browser": name}, always opened.
+_LEGACY_KEY = "browser"
 # The window MDA's browser middleware drives.
 AGENT_WINDOW = "mda"
-
-logger = logging.getLogger(__name__)
 
 
 class BrowserUnavailableError(RuntimeError):
@@ -85,7 +85,11 @@ class LangSmithBrowser:
         return window
 
     async def open_window(self, name: str) -> BrowserWindow:
-        """The window called ``name``, creating the browser and, for a person, the window."""
+        """The window called ``name``, creating the browser and the window when missing.
+
+        The window starts with the agent in control, as MDA opens it, so the agent
+        can drive it at once; a person takes control from its page.
+        """
         try:
             await _browser_request(
                 "POST",
@@ -102,7 +106,7 @@ class LangSmithBrowser:
         response = await _browser_request(
             "POST",
             f"/browsers/{self.name}/attachments",
-            json={"name": name, "controller": "user"},
+            json={"name": name, "controller": "agent"},
             timeout=_BROWSER_START_TIMEOUT_SECONDS,
         )
         return BrowserWindow.model_validate(response.json())
@@ -157,23 +161,26 @@ class LangSmithBrowser:
 
 
 class ThreadBrowser(BaseModel):
-    """The browser MDA names for a thread's agent, kept in the thread's metadata."""
+    """The browser MDA names for a thread's agent, kept in the thread's metadata.
+
+    The name and whether it is opened are separate keys, and each report writes
+    only what it knows, so a run starting never undoes the agent having browsed.
+    """
 
     browser: str
-    # Whether the agent or a person has opened it. Records saved before MDA
-    # reported unopened browsers were all opened.
-    opened: bool = True
+    # Whether the agent or a person has opened it.
+    opened: bool
 
     @classmethod
     def of(cls, metadata: Mapping[str, object]) -> Self | None:
-        raw = metadata.get(_THREAD_METADATA_KEY)
-        if raw is None:
-            return None
-        try:
-            return cls.model_validate(raw)
-        except ValidationError:
-            logger.warning("Ignoring a malformed thread browser", exc_info=True)
-            return None
+        name = metadata.get(_NAME_KEY)
+        if isinstance(name, str) and name:
+            return cls(browser=name, opened=metadata.get(_OPENED_KEY) is True)
+        legacy = metadata.get(_LEGACY_KEY)
+        if isinstance(legacy, Mapping) and isinstance(legacy.get("browser"), str):
+            # Before MDA reported unopened browsers, only opened ones were recorded.
+            return cls(browser=legacy["browser"], opened=metadata.get(_OPENED_KEY) is not False)
+        return None
 
     @property
     def state(self) -> Literal["opened", "available"]:
@@ -189,32 +196,26 @@ class ThreadBrowser(BaseModel):
         MDA keeps the name, and opens a fresh browser under it when the agent next browses.
         """
         await self.langsmith.delete()
-        return {_THREAD_METADATA_KEY: self.model_copy(update={"opened": False}).model_dump()}
+        return {_NAME_KEY: self.browser, _OPENED_KEY: False}
 
     async def report(self, thread_id: str) -> None:
-        """Record MDA's report; a browser it reported opened stays opened until forgotten."""
-        thread = await langgraph_client().threads.get(thread_id)
-        known = self.of(thread.get("metadata") or {})
-        if (
-            known is not None
-            and known.browser == self.browser
-            and (known.opened or not self.opened)
-        ):
-            return
-        await self.save(thread_id)
+        """Record what MDA reported: the name, and that it is opened once the agent browses."""
+        update: dict[str, object] = {_NAME_KEY: self.browser}
+        if self.opened:
+            update[_OPENED_KEY] = True
+        await _update(thread_id, update)
 
     async def open(self, thread_id: str) -> BrowserWindow:
         """Open the agent's window for a person, creating the browser if the agent hasn't yet."""
         window = await self.langsmith.open_window(AGENT_WINDOW)
         if not self.opened:
-            await self.model_copy(update={"opened": True}).save(thread_id)
+            await _update(thread_id, {_NAME_KEY: self.browser, _OPENED_KEY: True})
         return window
 
-    async def save(self, thread_id: str) -> None:
-        await langgraph_client().threads.update(
-            thread_id=thread_id, metadata={_THREAD_METADATA_KEY: self.model_dump()}
-        )
-        await Topic.THREAD_BROWSERS.invalidate(key=thread_id)
+
+async def _update(thread_id: str, metadata: dict[str, object]) -> None:
+    await langgraph_client().threads.update(thread_id=thread_id, metadata=metadata)
+    await Topic.THREAD_BROWSERS.invalidate(key=thread_id)
 
 
 async def _browser_request(
