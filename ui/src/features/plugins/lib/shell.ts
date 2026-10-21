@@ -19,8 +19,12 @@ export const PLUGIN_CSP = [
   "connect-src 'none'",
 ].join("; ")
 
-/** No `allow-same-origin`: the frame gets an opaque origin, no cookies, and no way into the page. */
-export const PLUGIN_SANDBOX = "allow-scripts"
+/**
+ * No `allow-same-origin`: the frame gets an opaque origin, no cookies, and no
+ * way into the page. `allow-forms` only lets forms fire `submit` for the
+ * plugin's own handlers; `form-action 'none'` still blocks every submission.
+ */
+export const PLUGIN_SANDBOX = "allow-scripts allow-forms"
 export const PLUGIN_ALLOW = "clipboard-write"
 
 export function pluginDocument(html: string, theme: Theme): string {

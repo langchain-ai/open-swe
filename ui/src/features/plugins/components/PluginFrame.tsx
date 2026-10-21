@@ -7,13 +7,15 @@ import {
 } from "@openswe/plugin-sdk"
 import { Button } from "@langchain/macaw-components/Button"
 import { EmptyState } from "@langchain/macaw-components/EmptyState"
-import { useQueries } from "@tanstack/react-query"
+import { useQueries, useQuery } from "@tanstack/react-query"
 import { WarningCircleIcon } from "@phosphor-icons/react/dist/ssr/WarningCircle"
 import { useEffect, useEffectEvent, useMemo, useRef, useState } from "react"
 import { toast } from "sonner"
 
 import { SandboxedHtmlFrame } from "@/features/agents/components/SandboxedHtmlFrame"
 import type { InstalledPlugin } from "@/features/plugins/lib/api"
+import { pluginsApi } from "@/features/plugins/lib/api"
+import { PluginRooms } from "@/features/plugins/lib/rooms"
 import type { BridgeHost, ThreadRequest } from "@/features/plugins/lib/bridge"
 import {
   BridgeRequestError,
@@ -54,6 +56,7 @@ export function PluginFrame({
   navigate,
   openThread,
   confirmThread,
+  confirmLink,
 }: {
   plugin: InstalledPlugin
   html: string
@@ -61,6 +64,7 @@ export function PluginFrame({
   navigate: (path: string, replace: boolean) => void
   openThread: (threadId: string) => void
   confirmThread: (request: ThreadRequest) => Promise<boolean>
+  confirmLink: (url: string) => Promise<boolean>
 }) {
   const session = useSession()
   const theme = useResolvedTheme()
@@ -72,6 +76,15 @@ export function PluginFrame({
   const [escaped, setEscaped] = useState(false)
   const [watched, setWatched] = useState<ReadonlyArray<string | null>>([])
   const [initialTheme] = useState(theme)
+  const rooms = useRef<PluginRooms | null>(null)
+  const login = session.data?.login ?? ""
+  const me = useQuery({
+    queryKey: ["plugin-person", plugin.id, login],
+    queryFn: async () =>
+      (await pluginsApi.people(plugin.id, [login]))[0] ?? null,
+    enabled: Boolean(login),
+    staleTime: Infinity,
+  })
   const srcDoc = useMemo(
     () => pluginDocument(html, initialTheme),
     [html, initialTheme]
@@ -92,10 +105,7 @@ export function PluginFrame({
       permissions: plugin.manifest.permissions,
       repositories: plugin.repositories,
     },
-    user: {
-      login: session.data?.login ?? "",
-      avatarUrl: session.data?.avatar_url ?? null,
-    },
+    user: me.data ?? { login, name: login, avatar: null },
     theme,
     path: sentPath.current,
   })
@@ -117,12 +127,15 @@ export function PluginFrame({
       show(title, { description })
     },
     confirmThread,
+    confirmLink,
     watch: (repository) =>
       setWatched((prev) =>
         prev.includes(repository) ? prev : [...prev, repository]
       ),
     unwatch: (repository) =>
       setWatched((prev) => prev.filter((scope) => scope !== repository)),
+    joinRoom: (target, after) => rooms.current?.join(target, after),
+    leaveRoom: (target) => rooms.current?.leave(target),
   }
 
   const receive = useEffectEvent((message: MessageEvent) => {
@@ -150,11 +163,13 @@ export function PluginFrame({
   const connect = () => {
     loads.current += 1
     if (loads.current > 1) {
+      rooms.current?.closeAll()
       portRef.current?.close()
       portRef.current = null
       setEscaped(true)
       return
     }
+    rooms.current = new PluginRooms(plugin.id, (event) => emit(event))
     const channel = new MessageChannel()
     portRef.current = channel.port1
     channel.port1.onmessage = receive
@@ -169,11 +184,19 @@ export function PluginFrame({
 
   useEffect(
     () => () => {
+      rooms.current?.closeAll()
       portRef.current?.close()
       portRef.current = null
     },
     []
   )
+
+  const announceSelf = useEffectEvent(() =>
+    emit({ type: "context", context: context() })
+  )
+  useEffect(() => {
+    if (me.data) announceSelf()
+  }, [me.data])
 
   useEffect(() => {
     emit({ type: "theme", theme })

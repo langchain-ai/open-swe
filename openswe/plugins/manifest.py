@@ -30,6 +30,8 @@ class PluginPermission(StrEnum):
     """Create branches, commit files and open pull requests in its repositories."""
     THREADS = "threads"
     """Start agent threads, each one only after the person approves its request."""
+    REALTIME = "realtime"
+    """Join live rooms: broadcast updates and presence to others with the same access."""
 
 
 def _relative_path(value: str) -> str:

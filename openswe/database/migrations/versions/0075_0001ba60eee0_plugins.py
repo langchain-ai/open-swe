@@ -11,6 +11,9 @@ installer granted; ``repositories`` are the GitHub repositories the plugin may
 reach. ``plugin_document`` is the plugin's storage: each document is either
 shared with everyone who can read ``repository`` or private to ``user_id``.
 ``plugin_thread`` records the agent threads a plugin started.
+``plugin_room_update`` is a live room's log: the opaque updates its members
+broadcast (a CRDT's, for collaborative editing), in ``seq`` order, scoped like
+documents. A member may replace the log up to some ``seq`` with one snapshot.
 """
 
 from alembic import op
@@ -99,6 +102,27 @@ def upgrade() -> None:
     """)
     op.execute("CREATE UNIQUE INDEX plugin_thread_thread_id ON plugin_thread (thread_id)")
     op.execute("CREATE INDEX plugin_thread_installation ON plugin_thread (installation)")
+    op.execute("""
+        CREATE TABLE plugin_room_update (
+            id uuid PRIMARY KEY,
+            seq bigint GENERATED ALWAYS AS IDENTITY,
+            plugin uuid NOT NULL REFERENCES plugin (id) ON DELETE CASCADE,
+            room text NOT NULL,
+            repository text,
+            user_id uuid REFERENCES users (id) ON DELETE CASCADE,
+            payload bytea NOT NULL,
+            created_at timestamptz NOT NULL DEFAULT clock_timestamp(),
+            updated_at timestamptz NOT NULL DEFAULT clock_timestamp(),
+            created_by uuid REFERENCES users (id) ON DELETE SET NULL,
+            updated_by uuid REFERENCES users (id) ON DELETE SET NULL,
+            CONSTRAINT plugin_room_update_one_scope CHECK ((repository IS NULL) <> (user_id IS NULL))
+        )
+    """)
+    op.execute("CREATE UNIQUE INDEX plugin_room_update_seq ON plugin_room_update (seq)")
+    op.execute("""
+        CREATE INDEX plugin_room_update_room
+            ON plugin_room_update (plugin, room, repository, user_id, seq)
+    """)
 
 
 def downgrade() -> None:

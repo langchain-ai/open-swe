@@ -11,7 +11,7 @@ import type {
   ResultOf,
 } from "@openswe/plugin-sdk"
 
-import type { InstalledPlugin } from "@/features/plugins/lib/api"
+import type { InstalledPlugin, RoomTarget } from "@/features/plugins/lib/api"
 import { pluginsApi } from "@/features/plugins/lib/api"
 
 export class BridgeRequestError extends Error {
@@ -38,8 +38,12 @@ export interface BridgeHost {
   toast: (toast: HostMethods["ui.toast"]["params"]) => void
   /** Shows the person the request word for word; resolves whether they approved it. */
   confirmThread: (request: ThreadRequest) => Promise<boolean>
+  /** Asks before leaving for a site other than GitHub; resolves whether to go. */
+  confirmLink: (url: string) => Promise<boolean>
   watch: (repository: string | null) => void
   unwatch: (repository: string | null) => void
+  joinRoom: (target: RoomTarget, after: number) => void
+  leaveRoom: (target: RoomTarget) => void
 }
 
 type Params = Record<string, unknown>
@@ -111,6 +115,23 @@ function stringList(params: Params, key: string): Array<string> {
   return value as Array<string>
 }
 
+function binary(params: Params, key: string, max: number): Uint8Array {
+  const value = params[key]
+  if (!(value instanceof Uint8Array) || value.byteLength > max)
+    throw new BridgeRequestError(`${key} must be bytes, at most ${max}`, 400)
+  return value
+}
+
+function roomTarget(params: Params): RoomTarget {
+  const room = text(params, "room", 200)
+  if (!/^[A-Za-z0-9._:@/-]+$/.test(room))
+    throw new BridgeRequestError(
+      "room may hold letters, digits and ._:@/-",
+      400
+    )
+  return { room, repository: optionalText(params, "repository")?.toLowerCase() }
+}
+
 function path(params: Params): string {
   const value = text(params, "path", 2_000)
   if (!value.startsWith("/") || value.startsWith("//"))
@@ -118,11 +139,16 @@ function path(params: Params): string {
   return value
 }
 
-function githubUrl(params: Params): string {
-  const url = new URL(text(params, "url", 4_000))
-  if (url.protocol !== "https:" || url.hostname !== "github.com")
-    throw new BridgeRequestError("only github.com links can be opened", 400)
-  return url.toString()
+function webUrl(params: Params): URL {
+  let url: URL
+  try {
+    url = new URL(text(params, "url", 4_000))
+  } catch {
+    throw new BridgeRequestError("url must be absolute", 400)
+  }
+  if (url.protocol !== "https:" && url.protocol !== "http:")
+    throw new BridgeRequestError("only web links can be opened", 400)
+  return url
 }
 
 type Handlers = {
@@ -138,9 +164,20 @@ const handlers: Handlers = {
     host.openThread(text(params, "threadId", 200))
     return null
   },
-  "nav.openExternal": async (_host, params) => {
-    window.open(githubUrl(params), "_blank", "noopener,noreferrer")
+  "nav.openExternal": async (host, params) => {
+    const url = webUrl(params)
+    if (
+      url.hostname === "github.com" ||
+      (await host.confirmLink(url.toString()))
+    )
+      window.open(url.toString(), "_blank", "noopener,noreferrer")
     return null
+  },
+  "people.get": (host, params) => {
+    const logins = stringList(params, "logins")
+    if (logins.length === 0 || logins.length > 100)
+      throw new BridgeRequestError("logins must name 1 to 100 people", 400)
+    return pluginsApi.people(host.plugin.id, logins)
   },
   "ui.toast": async (host, params) => {
     const intent = params.intent
@@ -271,6 +308,37 @@ const handlers: Handlers = {
     return { threadId: started.thread_id }
   },
   "threads.list": (host) => pluginsApi.threads(host.plugin.id),
+
+  "rooms.join": async (host, params) => {
+    host.joinRoom(roomTarget(params), optionalNumber(params, "after") ?? 0)
+    return null
+  },
+  "rooms.leave": async (host, params) => {
+    host.leaveRoom(roomTarget(params))
+    return null
+  },
+  "rooms.publish": (host, params) =>
+    pluginsApi.publishRoom(
+      host.plugin.id,
+      roomTarget(params),
+      binary(params, "update", 1_000_000)
+    ),
+  "rooms.compact": (host, params) =>
+    pluginsApi.compactRoom(
+      host.plugin.id,
+      roomTarget(params),
+      binary(params, "snapshot", 8_000_000),
+      optionalNumber(params, "through") ?? 0
+    ),
+  "rooms.presence": async (host, params) => {
+    await pluginsApi.announceInRoom(
+      host.plugin.id,
+      roomTarget(params),
+      text(params, "client", 64),
+      binary(params, "presence", 2_900)
+    )
+    return null
+  },
 }
 
 export function handleBridgeRequest(

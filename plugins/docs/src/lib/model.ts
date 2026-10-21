@@ -1,6 +1,8 @@
 /**
- * What Spaces keeps. Pages are Markdown files in the repository; everything
- * else is a plugin document shared with whoever can read that repository.
+ * What Docs keeps. Pages are the repository's Markdown files; a draft is a
+ * branch whose live state is a shared Yjs document until someone saves a
+ * version. Drafts and comments are plugin documents shared with everyone who
+ * can read the repository.
  */
 
 /** A page's open edit: a branch off the default one, published as a pull request. */
@@ -8,6 +10,8 @@ export interface Draft {
   [key: string]: string
   branch: string
   base: string
+  /** The last commit Docs saved on the branch; another head means someone pushed. */
+  head: string
   startedBy: string
   startedAt: string
 }
@@ -44,6 +48,11 @@ export function isMarkdown(path: string): boolean {
   return /\.(md|markdown)$/i.test(path)
 }
 
+/** Dotfiles and anything under a dot-directory: tooling, not pages. */
+export function isHidden(path: string): boolean {
+  return path.split("/").some((segment) => segment.startsWith("."))
+}
+
 export function pageTitle(path: string): string {
   const name = path.split("/").pop() ?? path
   return name.replace(/\.(md|markdown)$/i, "").replace(/[-_]+/g, " ")
@@ -56,11 +65,15 @@ export function draftBranch(path: string): string {
     .replace(/[^a-z0-9]+/g, "-")
     .replace(/^-|-$/g, "")
     .slice(0, 40)
-  return `spaces/${slug || "page"}-${Date.now().toString(36)}`
+  return `docs/${slug || "page"}-${Date.now().toString(36)}`
 }
 
-export function newId(): string {
-  return crypto.randomUUID()
+export function draftRoom(draft: Draft, path: string): string {
+  return `draft/${draft.branch}/${path}`
+}
+
+export function presenceRoom(path: string): string {
+  return `presence/${path}`
 }
 
 /** A page's YAML front matter, kept out of the editor and put back on save. */
@@ -87,4 +100,40 @@ export function timeAgo(iso: string): string {
     month: "short",
     day: "numeric",
   })
+}
+
+const COLORS = [
+  "#2563eb",
+  "#db2777",
+  "#16a34a",
+  "#ea580c",
+  "#7c3aed",
+  "#0891b2",
+  "#ca8a04",
+  "#dc2626",
+]
+
+/** A stable colour per person, for their cursor and avatar. */
+export function colorFor(login: string): string {
+  let hash = 0
+  for (const char of login) hash = (hash * 31 + char.charCodeAt(0)) | 0
+  return COLORS[Math.abs(hash) % COLORS.length] ?? "#2563eb"
+}
+
+/** Where a link in a page goes: another page here, GitHub, or elsewhere. */
+export function resolveLink(
+  href: string,
+  fromPath: string
+): { page: string } | { url: string } | null {
+  if (/^https?:\/\//i.test(href)) return { url: href }
+  if (href.startsWith("#") || href.startsWith("mailto:")) return null
+  const [target = ""] = href.split("#")
+  const base = fromPath.split("/").slice(0, -1)
+  const parts = target.startsWith("/") ? [] : base
+  for (const segment of target.split("/")) {
+    if (!segment || segment === ".") continue
+    if (segment === "..") parts.pop()
+    else parts.push(decodeURIComponent(segment))
+  }
+  return parts.length ? { page: parts.join("/") } : null
 }

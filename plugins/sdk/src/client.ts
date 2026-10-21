@@ -8,8 +8,10 @@ import {
   type JsonObject,
   type JsonValue,
   type ParamsOf,
+  type Person,
   type PluginMessage,
   type ResultOf,
+  type RoomScope,
   type StoredDocument,
 } from "./protocol"
 
@@ -34,6 +36,7 @@ export class PluginHost {
   >()
   private readonly listeners = new Set<Listener>()
   private readonly watchers = new Map<string | null, number>()
+  private readonly profiles = new Map<string, Person>()
 
   private constructor(
     private readonly port: MessagePort,
@@ -109,6 +112,26 @@ export class PluginHost {
       this.call("nav.setPath", { path, ...options }),
     openThread: (threadId: string) => this.call("nav.openThread", { threadId }),
     openExternal: (url: string) => this.call("nav.openExternal", { url }),
+  }
+
+  /** Profiles (name, picture) for GitHub logins, cached for this frame's life. */
+  readonly people = {
+    get: async (logins: string[]): Promise<Person[]> => {
+      const missing = [...new Set(logins)].filter(
+        (login) => !this.profiles.has(login.toLowerCase())
+      )
+      for (let i = 0; i < missing.length; i += 100) {
+        const found = await this.call("people.get", {
+          logins: missing.slice(i, i + 100),
+        })
+        for (const person of found)
+          this.profiles.set(person.login.toLowerCase(), person)
+      }
+      return logins.flatMap((login) => {
+        const person = this.profiles.get(login.toLowerCase())
+        return person ? [person] : []
+      })
+    },
   }
 
   readonly ui = {
@@ -196,6 +219,66 @@ export class PluginHost {
     start: (params: ParamsOf<"threads.start">) =>
       this.call("threads.start", params),
     list: () => this.call("threads.list", {}),
+  }
+
+  /** Joins a live room; leave it with the returned room's `leave()`. */
+  joinRoom(scope: RoomScope, handlers: RoomHandlers, after = 0): LiveRoom {
+    return new LiveRoom(this, scope, handlers, after)
+  }
+}
+
+export interface RoomHandlers {
+  onUpdate: (update: Uint8Array, seq: number) => void
+  onSynced?: (seq: number) => void
+  onPresence?: (client: string, presence: Uint8Array) => void
+}
+
+/** One joined room: its incoming updates and presence, and what this member sends. */
+export class LiveRoom {
+  private readonly off: () => void
+  private readonly repository: string | null
+  /** The highest sequence number seen, for compaction and rejoining. */
+  seq: number
+
+  constructor(
+    private readonly host: PluginHost,
+    readonly scope: RoomScope,
+    handlers: RoomHandlers,
+    after: number
+  ) {
+    this.seq = after
+    this.repository = scope.repository?.toLowerCase() ?? null
+    this.off = host.on((event) => {
+      if (!("room" in event) || event.room !== scope.room) return
+      if (event.repository !== this.repository) return
+      if (event.type === "room.update") {
+        this.seq = Math.max(this.seq, event.seq)
+        handlers.onUpdate(event.update, event.seq)
+      } else if (event.type === "room.synced") {
+        this.seq = Math.max(this.seq, event.seq)
+        handlers.onSynced?.(event.seq)
+      } else if (event.type === "room.presence") {
+        handlers.onPresence?.(event.client, event.presence)
+      }
+    })
+    void host.call("rooms.join", { ...scope, after })
+  }
+
+  publish(update: Uint8Array): Promise<number> {
+    return this.host.call("rooms.publish", { ...this.scope, update })
+  }
+
+  compact(snapshot: Uint8Array, through: number): Promise<number> {
+    return this.host.call("rooms.compact", { ...this.scope, snapshot, through })
+  }
+
+  presence(client: string, presence: Uint8Array): Promise<null> {
+    return this.host.call("rooms.presence", { ...this.scope, client, presence })
+  }
+
+  leave(): void {
+    this.off()
+    void this.host.call("rooms.leave", this.scope)
   }
 }
 

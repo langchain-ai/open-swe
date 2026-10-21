@@ -4,9 +4,9 @@
   "owner": { "name": "LangChain" },
   "plugins": [
     {
-      "name": "spaces",
-      "source": "./plugins/spaces",
-      "description": "Notion-style pages, comments and suggestions over the Markdown in your repositories"
+      "name": "docs",
+      "source": "./plugins/docs",
+      "description": "Notion-style pages over the Markdown in your repositories, edited together live"
     }
   ]
 }

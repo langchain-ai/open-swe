@@ -19,6 +19,7 @@ from openswe.github.http import GitHubClient, RepoClient
 from openswe.github.repo_names import RepoFullName, normalize_repo_full_name
 from openswe.plugins.manifest import PluginPermission
 from openswe.plugins.records import DocumentScope, Installation, PluginDocuments, PluginThreads
+from openswe.plugins.rooms import Room
 from openswe.prompts import prompt
 from openswe.threads.runs import start_dashboard_thread
 
@@ -74,6 +75,16 @@ class InstalledPlugin:
         if repository is None:
             return DocumentScope(user_id=self.user_id)
         return DocumentScope(repository=await self.repository(repository))
+
+    async def room(self, name: str, repository: str | None) -> Room:
+        """A live room, shared like documents: per repository, or this person's own."""
+        self.require(PluginPermission.REALTIME)
+        scope = (
+            DocumentScope(user_id=self.user_id)
+            if repository is None
+            else DocumentScope(repository=await self.repository(repository))
+        )
+        return Room(self.installation.plugin, scope, name)
 
     @property
     def documents(self) -> PluginDocuments:

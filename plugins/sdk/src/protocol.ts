@@ -25,6 +25,7 @@ export type PluginPermission =
   | "github:read"
   | "github:write"
   | "threads"
+  | "realtime"
 
 export type Theme = "light" | "dark"
 
@@ -39,10 +40,22 @@ export interface HostContext {
     /** The GitHub repositories (`owner/repo`, lowercase) the plugin may reach. */
     repositories: string[]
   }
-  user: { login: string; avatarUrl: string | null }
+  /** The person using the plugin. */
+  user: Person
   theme: Theme
   /** The plugin's own path after its dashboard URL, starting with `/`. */
   path: string
+}
+
+/**
+ * Someone the plugin can show: their GitHub login, display name and picture.
+ * The frame cannot load remote images, so the dashboard fetches the picture
+ * and hands it over as a Blob; show it with `URL.createObjectURL`.
+ */
+export interface Person {
+  login: string
+  name: string
+  avatar: Blob | null
 }
 
 export interface StoredDocument<T extends JsonValue = JsonValue> {
@@ -108,6 +121,8 @@ export interface HostMethods {
   "nav.openThread": { params: { threadId: string }; result: null }
   /** Opens a github.com link in a new tab. */
   "nav.openExternal": { params: { url: string }; result: null }
+  /** Profiles for GitHub logins, in the order asked; at most 100 per call. */
+  "people.get": { params: { logins: string[] }; result: Person[] }
   "ui.toast": {
     params: {
       title: string
@@ -208,6 +223,35 @@ export interface HostMethods {
     result: { threadId: string } | null
   }
   "threads.list": { params: Record<string, never>; result: AgentThread[] }
+
+  /**
+   * Starts streaming a live room: every update after `after`, then `room.synced`,
+   * then each update and presence as others send them. Scoped like documents.
+   */
+  "rooms.join": {
+    params: RoomScope & { after?: number }
+    result: null
+  }
+  "rooms.leave": { params: RoomScope; result: null }
+  /** Appends an update to the room's log; resolves to its sequence number. */
+  "rooms.publish": {
+    params: RoomScope & { update: Uint8Array }
+    result: number
+  }
+  /** Replaces the log through `through` with `snapshot`, which must cover it. */
+  "rooms.compact": {
+    params: RoomScope & { snapshot: Uint8Array; through: number }
+    result: number
+  }
+  /** Broadcasts this member's presence (cursor, selection); nothing is stored. */
+  "rooms.presence": {
+    params: RoomScope & { client: string; presence: Uint8Array }
+    result: null
+  }
+}
+
+export interface RoomScope extends DocumentScope {
+  room: string
 }
 
 export type HostMethod = keyof HostMethods
@@ -219,6 +263,26 @@ export type HostEvent =
   | { type: "theme"; theme: Theme }
   | { type: "path"; path: string }
   | { type: "storage.changed"; repository: string | null }
+  | {
+      type: "room.update"
+      room: string
+      repository: string | null
+      seq: number
+      update: Uint8Array
+    }
+  | {
+      type: "room.synced"
+      room: string
+      repository: string | null
+      seq: number
+    }
+  | {
+      type: "room.presence"
+      room: string
+      repository: string | null
+      client: string
+      presence: Uint8Array
+    }
 
 export type PluginMessage = {
   kind: "request"

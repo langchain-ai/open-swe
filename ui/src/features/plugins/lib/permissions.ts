@@ -19,6 +19,11 @@ export const PERMISSION_COPY: Record<
     description:
       "Create branches, commit files and open pull requests in its repositories, as you.",
   },
+  realtime: {
+    label: "Work together live",
+    description:
+      "Share live edits, cursors and who is viewing with everyone using it on the same repository.",
+  },
   threads: {
     label: "Start agent threads",
     description:

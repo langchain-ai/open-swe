@@ -68,6 +68,10 @@ function InstalledPluginPage({
 }) {
   const navigate = useNavigate()
   const bundle = usePluginBundle(plugin)
+  const [leaving, setLeaving] = useState<{
+    url: string
+    resolve: (go: boolean) => void
+  } | null>(null)
   const [pending, setPending] = useState<{
     request: ThreadRequest
     resolve: (approved: boolean) => void
@@ -123,6 +127,12 @@ function InstalledPluginPage({
           openThread={(threadId) =>
             void navigate({ to: "/agents/$threadId", params: { threadId } })
           }
+          confirmLink={(url) =>
+            new Promise<boolean>((resolve) => {
+              leaving?.resolve(false)
+              setLeaving({ url, resolve })
+            })
+          }
           confirmThread={(request) =>
             new Promise<boolean>((resolve) => {
               pending?.resolve(false)
@@ -173,6 +183,49 @@ function InstalledPluginPage({
             </Button>
             <Button size="sm" onClick={() => settle(true)}>
               Start thread
+            </Button>
+          </div>
+        </DialogContent>
+      </Dialog>
+      <Dialog
+        open={leaving !== null}
+        onOpenChange={(open) => {
+          if (open) return
+          leaving?.resolve(false)
+          setLeaving(null)
+        }}
+      >
+        <DialogContent
+          childrenClassName="gap-space-4 p-space-6"
+          showClose={false}
+        >
+          <DialogTitle>Open this link?</DialogTitle>
+          <DialogDescription>
+            {plugin.manifest.displayName} wants to open a page outside Open SWE
+            in a new tab.
+          </DialogDescription>
+          <code className="rounded-md border border-default bg-surface-level-1 p-space-2 text-xs break-all text-primary">
+            {leaving?.url}
+          </code>
+          <div className="flex justify-end gap-space-2">
+            <Button
+              size="sm"
+              variant="outlined"
+              onClick={() => {
+                leaving?.resolve(false)
+                setLeaving(null)
+              }}
+            >
+              Cancel
+            </Button>
+            <Button
+              size="sm"
+              onClick={() => {
+                leaving?.resolve(true)
+                setLeaving(null)
+              }}
+            >
+              Open link
             </Button>
           </div>
         </DialogContent>

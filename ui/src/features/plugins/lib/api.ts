@@ -135,6 +135,48 @@ async function orNull<T>(request: Promise<T>): Promise<T | null> {
   }
 }
 
+function base64(bytes: Uint8Array): string {
+  let binary = ""
+  for (let i = 0; i < bytes.length; i += 0x8000)
+    binary += String.fromCharCode(...bytes.subarray(i, i + 0x8000))
+  return btoa(binary)
+}
+
+export function fromBase64(base64Text: string): Uint8Array {
+  const binary = atob(base64Text)
+  const out = new Uint8Array(binary.length)
+  for (let i = 0; i < binary.length; i++) out[i] = binary.charCodeAt(i)
+  return out
+}
+
+const avatars = new Map<string, Promise<Blob | null>>()
+
+/** A picture as bytes the sandboxed frame can show, fetched once per URL. */
+export function avatarBlob(url: string | null): Promise<Blob | null> {
+  if (!url) return Promise.resolve(null)
+  const sized = `${url}${url.includes("?") ? "&" : "?"}s=96`
+  let pending = avatars.get(sized)
+  if (!pending) {
+    pending = fetch(sized, { credentials: "omit" })
+      .then((res) => (res.ok ? res.blob() : null))
+      .catch(() => null)
+    avatars.set(sized, pending)
+  }
+  return pending
+}
+
+export interface RoomTarget {
+  room: string
+  repository?: string
+}
+
+export function roomStreamUrl(id: string, target: RoomTarget, after: number) {
+  return `${plugin(id)}/rooms/${encodeURIComponent(target.room)}/stream${query({
+    repository: target.repository,
+    after,
+  })}`
+}
+
 export const pluginsApi = {
   list: () => agentsRequest<Array<InstalledPlugin>>("/plugins"),
   catalog: (source: PluginSource) =>
@@ -311,6 +353,68 @@ export const pluginsApi = {
       method: "POST",
       ...json(body),
     }),
+
+  people: async (id: string, logins: Array<string>) => {
+    const people = await agentsRequest<
+      Array<{ login: string; name: string; avatar_url: string | null }>
+    >(
+      `${plugin(id)}/people?${logins.map((l) => `login=${encodeURIComponent(l)}`).join("&")}`
+    )
+    return Promise.all(
+      people.map(async (person) => ({
+        login: person.login,
+        name: person.name,
+        avatar: await avatarBlob(person.avatar_url),
+      }))
+    )
+  },
+
+  publishRoom: async (id: string, target: RoomTarget, update: Uint8Array) =>
+    (
+      await agentsRequest<{ seq: number }>(
+        `${plugin(id)}/rooms/${encodeURIComponent(target.room)}/updates`,
+        {
+          method: "POST",
+          ...json({ repository: target.repository, update: base64(update) }),
+        }
+      )
+    ).seq,
+  compactRoom: async (
+    id: string,
+    target: RoomTarget,
+    snapshot: Uint8Array,
+    through: number
+  ) =>
+    (
+      await agentsRequest<{ seq: number }>(
+        `${plugin(id)}/rooms/${encodeURIComponent(target.room)}/compact`,
+        {
+          method: "POST",
+          ...json({
+            repository: target.repository,
+            snapshot: base64(snapshot),
+            through,
+          }),
+        }
+      )
+    ).seq,
+  announceInRoom: (
+    id: string,
+    target: RoomTarget,
+    client: string,
+    presence: Uint8Array
+  ) =>
+    agentsRequest<void>(
+      `${plugin(id)}/rooms/${encodeURIComponent(target.room)}/presence`,
+      {
+        method: "POST",
+        ...json({
+          repository: target.repository,
+          client,
+          presence: base64(presence),
+        }),
+      }
+    ),
 
   startThread: (
     id: string,

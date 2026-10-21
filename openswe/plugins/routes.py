@@ -7,16 +7,19 @@ sandboxed frame, which cannot reach the network itself.
 """
 
 import asyncio
+import base64
+import json
 import logging
-from collections.abc import Iterator
+from collections.abc import AsyncGenerator, Iterator
 from contextlib import contextmanager
 from datetime import datetime
 from typing import Annotated, Any, Literal
+from urllib.parse import quote
 from uuid import UUID
 
 import httpx2
 from fastapi import APIRouter, Depends, HTTPException, Query
-from fastapi.responses import Response
+from fastapi.responses import Response, StreamingResponse
 from pydantic import BaseModel, Field, StringConstraints
 
 from openswe.audit_logs.middleware import audit_endpoint
@@ -38,6 +41,7 @@ from openswe.plugins.records import (
     PluginInstallations,
     PluginNameTaken,
 )
+from openswe.plugins.rooms import MAX_PRESENCE_BYTES, Room
 from openswe.plugins.source import PluginSource, PluginSourceError, catalog
 from openswe.threads.handlers import get_dashboard_thread
 from openswe.users.models import User
@@ -647,3 +651,147 @@ async def api_plugin_threads(plugin: PluginDep) -> list[PluginThread]:
             )
         )
     return threads
+
+
+# ---- People ------------------------------------------------------------------------
+
+
+class Person(BaseModel):
+    login: str
+    name: str
+    avatar_url: str | None
+
+
+@router.get("/{installation_id}/people")
+async def api_plugin_people(
+    _plugin: PluginDep,
+    login: Annotated[list[str], Query(min_length=1, max_length=100)],
+) -> list[Person]:
+    """Names and pictures for GitHub logins: Open SWE's record of each, else the login alone."""
+    found = await User.for_github_logins(login)
+    people: list[Person] = []
+    for name in dict.fromkeys(login):
+        user = found.get(name.lower())
+        people.append(
+            Person(
+                login=name,
+                name=(user.display_name if user else "") or name,
+                avatar_url=(user.avatar_url if user else "")
+                or f"https://avatars.githubusercontent.com/{quote(name, safe='')}",
+            )
+        )
+    return people
+
+
+# ---- Live rooms --------------------------------------------------------------------
+
+RoomName = Annotated[str, StringConstraints(pattern=r"^[A-Za-z0-9._:@/-]{1,200}$")]
+MAX_UPDATE_BYTES = 1_000_000
+MAX_SNAPSHOT_BYTES = 8_000_000
+ROOM_HEARTBEAT_SECONDS = 15.0
+_SSE_HEADERS = {"Cache-Control": "no-cache", "Connection": "keep-alive", "X-Accel-Buffering": "no"}
+
+
+class RoomUpdateBody(BaseModel):
+    repository: str | None = None
+    update: str = Field(description="Base64 of the update's bytes")
+
+
+class RoomCompactBody(BaseModel):
+    repository: str | None = None
+    snapshot: str = Field(description="Base64 of a state covering every update through `through`")
+    through: int = Field(ge=0)
+
+
+class RoomPresenceBody(BaseModel):
+    repository: str | None = None
+    client: str = Field(min_length=1, max_length=64)
+    presence: str = Field(max_length=MAX_PRESENCE_BYTES, description="Base64 presence state")
+
+
+class RoomSeq(BaseModel):
+    seq: int
+
+
+def _decoded(value: str, limit: int) -> bytes:
+    try:
+        data = base64.b64decode(value, validate=True)
+    except ValueError as exc:
+        raise HTTPException(422, "payload must be base64") from exc
+    if len(data) > limit:
+        raise HTTPException(413, "payload too large")
+    return data
+
+
+def _room_frame(event: str, data: dict[str, object]) -> str:
+    return f"event: {event}\ndata: {json.dumps(data)}\n\n"
+
+
+async def _room_stream(room: Room, after: int) -> AsyncGenerator[str]:
+    """Every update after ``after``, then each one as it commits, and everyone's presence."""
+    async with room.events() as events:
+        seq = after
+        while True:
+            for update in await room.since(seq):
+                seq = update.seq
+                yield _room_frame(
+                    "update",
+                    {"seq": update.seq, "update": base64.b64encode(update.payload).decode()},
+                )
+            yield _room_frame("synced", {"seq": seq})
+            while True:
+                try:
+                    event = await asyncio.wait_for(events.get(), timeout=ROOM_HEARTBEAT_SECONDS)
+                except TimeoutError:
+                    yield ": keep-alive\n\n"
+                    continue
+                if event.kind == "presence":
+                    yield _room_frame(
+                        "presence", {"client": event.client, "presence": event.presence}
+                    )
+                    continue
+                break
+
+
+@router.get("/{installation_id}/rooms/{room}/stream")
+async def api_plugin_room_stream(
+    room: RoomName,
+    plugin: PluginDep,
+    repository: str | None = None,
+    after: int = Query(0, ge=0),
+) -> StreamingResponse:
+    with _as_http():
+        joined = await plugin.room(room, repository)
+    return StreamingResponse(
+        _room_stream(joined, after), media_type="text/event-stream", headers=_SSE_HEADERS
+    )
+
+
+@router.post("/{installation_id}/rooms/{room}/updates")
+async def api_plugin_room_update(
+    room: RoomName, body: RoomUpdateBody, plugin: PluginDep
+) -> RoomSeq:
+    payload = _decoded(body.update, MAX_UPDATE_BYTES)
+    with _as_http():
+        joined = await plugin.room(room, body.repository)
+    return RoomSeq(seq=await joined.append(payload, by=plugin.user_id))
+
+
+@router.post("/{installation_id}/rooms/{room}/compact")
+async def api_plugin_room_compact(
+    room: RoomName, body: RoomCompactBody, plugin: PluginDep
+) -> RoomSeq:
+    snapshot = _decoded(body.snapshot, MAX_SNAPSHOT_BYTES)
+    with _as_http():
+        joined = await plugin.room(room, body.repository)
+    return RoomSeq(seq=await joined.compact(snapshot, through=body.through, by=plugin.user_id))
+
+
+@router.post("/{installation_id}/rooms/{room}/presence", status_code=204)
+async def api_plugin_room_presence(
+    room: RoomName, body: RoomPresenceBody, plugin: PluginDep
+) -> Response:
+    with _as_http():
+        joined = await plugin.room(room, body.repository)
+    await joined.announce(body.client, body.presence)
+    return Response(status_code=204)
