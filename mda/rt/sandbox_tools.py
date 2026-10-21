@@ -58,6 +58,9 @@ _GUARDED_SHELLS: Final = 3
 # The guards read a command as the shell splits it, with its quotes and escapes gone,
 # and the shell joins a line it continues.
 _QUOTING: Final = re.compile(r"\\\n|[\"'\\]")
+# Shell features that spell a word only when the command runs, such as ANSI-C quoting
+# (`$'pu\x73h'`), backticks and eval: whatever they spell, the backend's guards decide.
+_RUNTIME_SPELLING: Final = re.compile(r"\$['\"]|`|\beval\b")
 # As the backend's sandbox: the client gives up on a command the sandbox never
 # answers 30 seconds past its own timeout.
 _EXECUTE_GRACE_SECONDS: Final = 30
@@ -151,6 +154,8 @@ class SandboxToolsMiddleware(AgentMiddleware):
 
 
 def _guarded(command: str) -> bool:
+    if _RUNTIME_SPELLING.search(command):
+        return True
     unquoted = _QUOTING.sub("", command)
     return bool(_GUARDED_WORDS.search(unquoted)) or len(_SHELL.findall(unquoted)) >= _GUARDED_SHELLS
 
