@@ -205,11 +205,9 @@ class RequireUserReplyMiddleware(OpenSWEMiddleware):
         ]
 
     async def aafter_agent(self, state: AgentState, runtime: Runtime) -> dict[str, Any] | None:  # noqa: ARG002
-        # A Slack answer goes through the reply tool, which records it itself.
-        if current_reply_surface(state) == WEB_REPLY_SURFACE and (
-            text := _last_answer(state.get("messages") or [])
-        ):
-            await LastReply.record(text)
+        # The reply tools record a Slack answer, which closing narration must not replace.
+        if text := _last_answer(state.get("messages") or []):
+            await LastReply.record(text, fallback=True)
         return None
 
     @hook_config(can_jump_to=["model"])

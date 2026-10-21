@@ -7,6 +7,7 @@ from langgraph.config import get_config
 from pydantic import BaseModel, ValidationError
 
 from openswe.run_config import RunConfig
+from openswe.utils.json_types import thread_metadata
 from openswe.utils.thread_ops import langgraph_client
 
 logger = logging.getLogger(__name__)
@@ -34,8 +35,13 @@ class LastReply(BaseModel):
         return reply if reply.run_id == run_id else None
 
     @classmethod
-    async def record(cls, text: str | None, *, awaiting_choice: bool = False) -> None:
-        """Remember the current run's answer on its thread, best-effort."""
+    async def record(
+        cls, text: str | None, *, awaiting_choice: bool = False, fallback: bool = False
+    ) -> None:
+        """Remember the current run's answer on its thread, best-effort.
+
+        A ``fallback`` answer never replaces one the run's reply tools already recorded.
+        """
         try:
             config = get_config()
         except RuntimeError:
@@ -49,8 +55,13 @@ class LastReply(BaseModel):
             text=text.strip()[:_MAX_TEXT_CHARS] if text and text.strip() else None,
             awaiting_choice=awaiting_choice,
         )
+        client = langgraph_client()
         try:
-            await langgraph_client().threads.update(
+            if fallback and cls.for_run(
+                thread_metadata(await client.threads.get(cfg.thread_id)), reply.run_id
+            ):
+                return
+            await client.threads.update(
                 thread_id=cfg.thread_id, metadata={LAST_REPLY_KEY: reply.model_dump()}
             )
         except Exception:  # noqa: BLE001
