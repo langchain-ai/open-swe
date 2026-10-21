@@ -1,11 +1,4 @@
-import {
-  Fragment,
-  useCallback,
-  useEffect,
-  useMemo,
-  useRef,
-  useState,
-} from "react"
+import { Fragment, useCallback, useEffect, useMemo, useState } from "react"
 import { CopyIconButton } from "@langchain/macaw-components/CopyButton"
 
 import { DiffView } from "../../chat/DiffView"
@@ -176,25 +169,6 @@ export function AgentTurn({
     setExpandedGroups((prev) => ({ ...prev, [id]: !(prev[id] ?? false) }))
   }, [])
 
-  // Measure wall-clock work time for live runs (most accurate); fall back to
-  // the turn's first→last message timestamps for transcripts loaded from state.
-  const [measuredDurationMs, setMeasuredDurationMs] = useState<number | null>(
-    null
-  )
-  const workStartRef = useRef<number | null>(null)
-  const wasStreamingRef = useRef(false)
-  useEffect(() => {
-    if (isStreaming) {
-      if (workStartRef.current === null) workStartRef.current = Date.now()
-      wasStreamingRef.current = true
-      return
-    }
-    if (wasStreamingRef.current && workStartRef.current !== null) {
-      setMeasuredDurationMs(Date.now() - workStartRef.current)
-      wasStreamingRef.current = false
-    }
-  }, [isStreaming])
-
   const segments = useMemo(() => {
     const split = segmentTurn(renderItems)
     if (isStreaming && split.at(-1)?.type !== "work") {
@@ -202,7 +176,6 @@ export function AgentTurn({
     }
     return split
   }, [isStreaming, renderItems])
-  const workSegmentCount = segments.filter((s) => s.type === "work").length
   const liveItemKey = isStreaming ? renderItems.at(-1)?.key : undefined
 
   const [expandedFolds, setExpandedFolds] = useState<Record<string, boolean>>(
@@ -230,15 +203,11 @@ export function AgentTurn({
 
   const turnStart = message.timestampIsFallback ? undefined : message.startedAt
   const turnEnd = message.timestampIsFallback ? undefined : message.timestamp
-  const segmentDurationMs = (index: number): number | null => {
-    if (workSegmentCount === 1 && measuredDurationMs !== null) {
-      return measuredDurationMs
-    }
-    return elapsedMs(
+  const segmentDurationMs = (index: number): number | null =>
+    elapsedMs(
       replyTimestamp(segments[index - 1]) ?? turnStart,
       replyTimestamp(segments[index + 1]) ?? turnEnd
     )
-  }
 
   const renderItem = (item: RenderItem): ReactNode => {
     switch (item.type) {
@@ -378,6 +347,11 @@ export function AgentTurn({
               : label
           }
           active={live}
+          since={
+            live
+              ? (replyTimestamp(segments[index - 1]) ?? turnStart)
+              : undefined
+          }
           expanded={expanded}
           onToggle={() => toggleFold(segment.key)}
         />
