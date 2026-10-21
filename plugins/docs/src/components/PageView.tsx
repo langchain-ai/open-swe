@@ -25,7 +25,7 @@ import { useQueryClient } from "@tanstack/react-query"
 import { useNavigate } from "@tanstack/react-router"
 import type { Editor } from "@tiptap/react"
 import type { Node as ProseMirrorNode } from "@tiptap/pm/model"
-import { useEffect, useMemo, useRef, useState } from "react"
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react"
 
 import {
   CommentsPanel,
@@ -107,6 +107,24 @@ export function PageView({
   const [activeId, setActiveId] = useState<string | null>(null)
   const [asking, setAsking] = useState<{ anchor: Anchor | null } | null>(null)
   const [pendingAccept, setPendingAccept] = useState<string | null>(null)
+
+  // Opening the draft swaps the read-only editor for the live one, and the page
+  // briefly loses its height; put the reader back where they were.
+  const scroller = useRef<HTMLDivElement>(null)
+  const scrolled = useRef(0)
+  const liveShown = editing && synced ? live : null
+  useLayoutEffect(() => {
+    const element = scroller.current
+    if (!element) return
+    // Kept before the swap: the collapse's own scroll event would overwrite it.
+    const top = scrolled.current
+    element.scrollTop = top
+    const frame = requestAnimationFrame(() => {
+      element.scrollTop = top
+      scrolled.current = top
+    })
+    return () => cancelAnimationFrame(frame)
+  }, [liveShown])
 
   const split = useMemo(() => splitFrontMatter(file.data ?? ""), [file.data])
   // What the saved Markdown reads as once the editor has normalised it, so a
@@ -202,7 +220,16 @@ export function PageView({
       startedAt: new Date().toISOString(),
     }
     await github.createBranch(started.branch, base)
+    // The branch starts at the commit on screen, so the page needs nothing new
+    // to stay up while the draft takes over.
+    queryClient.setQueryData(keys.head(repository, started.branch), base)
+    if (head.data === base && file.data !== undefined)
+      queryClient.setQueryData(keys.file(repository, path, base), file.data)
     await putDraft(started)
+    queryClient.setQueryData<Map<string, Draft>>(
+      keys.drafts(repository),
+      (drafts) => new Map(drafts).set(path, started)
+    )
     await refreshDraft()
     return started
   }
@@ -398,7 +425,7 @@ export function PageView({
         {(head.error ?? file.error)?.message}
       </p>
     )
-  if (file.data === undefined || (editing && !synced))
+  if (file.data === undefined)
     return (
       <div className="flex flex-1 items-center justify-center">
         <Spinner />
@@ -410,7 +437,13 @@ export function PageView({
 
   return (
     <div className="flex min-h-0 flex-1">
-      <div className="min-w-0 flex-1 overflow-y-auto">
+      <div
+        ref={scroller}
+        onScroll={(event) => {
+          scrolled.current = event.currentTarget.scrollTop
+        }}
+        className="min-w-0 flex-1 overflow-y-auto"
+      >
         <header className="bg-surface-level-0/95 sticky top-0 z-10 flex h-12 items-center gap-space-2 border-b border-default px-space-5 backdrop-blur">
           <span className="truncate text-sm text-secondary">
             {path.split("/").slice(0, -1).join(" / ") || repository}
@@ -533,7 +566,8 @@ export function PageView({
           )}
           <PageEditor
             markdown={split.body}
-            live={editing ? live : null}
+            // Until the draft's live document syncs, the page stays as it was.
+            live={liveShown}
             me={me}
             highlights={highlights}
             activeId={activeId}
