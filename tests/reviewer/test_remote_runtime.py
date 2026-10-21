@@ -189,6 +189,59 @@ async def test_reviewer_tools_get_a_github_token_on_a_replica_that_did_not_prepa
     assert await resolve_thread_github_token(config) == "ghs_reviewer"
 
 
+async def test_mda_slack_runs_nudge_a_turn_that_ends_without_a_reply() -> None:
+    from langchain_core.messages import AIMessage, HumanMessage
+    from langgraph.runtime import Runtime
+
+    from openswe.middleware.require_user_reply import (
+        SLACK_REPLY_SURFACE,
+        RequireUserReplyMiddleware,
+    )
+    from openswe.remote_runtime.graph import RunSession
+    from openswe.sandboxes.tool_runtime import ToolSurface
+
+    session = RunSession(
+        ToolSurface(
+            middleware=[
+                RequireUserReplyMiddleware(
+                    "slack_reply", "slack_no_reply_needed", initial_surface=SLACK_REPLY_SURFACE
+                )
+            ]
+        ),
+        {},
+        None,
+        started_here=True,
+    )
+
+    prepared = await session.run_phase("before_agent", {"messages": []}, Runtime())
+    assert prepared.update["reply_surface"] == SLACK_REPLY_SURFACE
+
+    ended = await session.run_phase(
+        "after_model",
+        {**prepared.update, "messages": [HumanMessage("status?"), AIMessage("all good")]},
+        Runtime(),
+    )
+    assert ended.jump_to == "model"
+    assert ended.update["reply_nudges"] == 1
+
+
+async def test_mda_runs_refuse_middleware_with_only_a_sync_phase_hook() -> None:
+    from langchain.agents.middleware.types import AgentMiddleware
+    from langgraph.runtime import Runtime
+
+    from openswe.remote_runtime.graph import RunSession
+    from openswe.sandboxes.tool_runtime import ToolSurface
+
+    class SyncOnly(AgentMiddleware):
+        def before_agent(self, state: object, runtime: object) -> dict[str, object]:  # noqa: ARG002
+            return {"seen": True}
+
+    session = RunSession(ToolSurface(middleware=[SyncOnly()]), {}, None, started_here=True)
+
+    with pytest.raises(TypeError, match="SyncOnly"):
+        await session.run_phase("before_agent", {"messages": []}, Runtime())
+
+
 def test_run_token_round_trips_the_signed_run() -> None:
     assert verify_runtime_token(sign_runtime_token(RUN)) == RUN
 

@@ -551,7 +551,7 @@ async def test_a_web_turn_on_a_slack_thread_keeps_the_slack_tools() -> None:
     require_reply = next(
         item for item in middleware if type(item).__name__ == "RequireUserReplyMiddleware"
     )
-    assert require_reply.before_agent({}, MagicMock())["reply_surface"] == "web"
+    assert (await require_reply.abefore_agent({}, MagicMock()))["reply_surface"] == "web"
 
 
 @pytest.mark.asyncio
