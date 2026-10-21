@@ -2069,11 +2069,8 @@ def _recover_managed_sandbox(
             existing = _await_if_needed(client.get_sandbox(entry.host_name))
         except ResourceNotFoundError:
             existing = None
-        if existing is None or _sandbox_handle_id(existing) == entry.sandbox_id:
-            # A box that is gone stays gone, and the call fails: a fresh one would be
-            # empty, and the run would carry on without the files it was working on.
+        if existing is not None and _sandbox_handle_id(existing) == entry.sandbox_id:
             return current
-        # Another process replaced the box under its name; adopt the replacement.
         backend, host_name, sandbox_id = _create_langsmith_sandbox(
             sandbox,
             config=config,
