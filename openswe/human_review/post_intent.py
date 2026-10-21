@@ -26,8 +26,8 @@ logger = logging.getLogger(__name__)
 _URL = re.compile(r"https?://[^\s|<>]+", re.I)
 _CACHED_POSTS = 256
 _CHANNEL_CONTEXT_SECONDS = 24 * 60 * 60
-# Jev 1.13 reads 32k tokens per question; four characters to the token, leaving room for the question.
-_STATE_MAX_CHARS = 24_000 * 4
+# Enough recent conversation to read intent while keeping Jev fast; four characters to the token.
+_STATE_MAX_CHARS = 4_000 * 4
 _MIN_MESSAGE_CHARS = 200
 _CUT = " […] "
 _POST_MARKER = ">>> "
