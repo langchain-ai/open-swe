@@ -23,9 +23,9 @@ from managed_deepagents import (
     ManagedServerRuntime,
     define_deep_agent,
 )
-from managed_deepagents.browser import BrowserMiddleware
 from pydantic import BaseModel, ConfigDict, Field, JsonValue
 from rt.backend import Catalog, OpenSweBackend
+from rt.browser import ReportedBrowserMiddleware
 from rt.managed_sandbox import ReplaceSandboxMiddleware, definition, opened_sandbox
 from rt.middleware import (
     BackendRunMiddleware,
@@ -93,12 +93,12 @@ def _code_mode(
     return [interpreter, *([DescribedToolsMiddleware(described)] if described else [])]
 
 
-def _browser(graph: Graph) -> list[AgentMiddleware]:
-    """The coding agent's browser, a LangSmith browser per thread.
+def _browser(graph: Graph, backend: OpenSweBackend) -> list[AgentMiddleware]:
+    """The coding agent's browser, a LangSmith browser per thread the dashboard shows.
 
     The deployment's workspace needs the LangSmith browser beta.
     """
-    return [BrowserMiddleware()] if graph == "agent" else []
+    return [ReportedBrowserMiddleware(backend)] if graph == "agent" else []
 
 
 # `mda build` reads the agent's name without running this factory, so its body
@@ -183,7 +183,7 @@ async def agent(runtime: ManagedServerRuntime) -> DeepAgentDefinition:
             *_backend_reports(backend, by_name.keys()),
             ServedToolsMiddleware(offered, excluded | code_only),
             *_code_mode(context.graph, from_code, catalog.described),
-            *_browser(context.graph),
+            *_browser(context.graph, backend),
             ModelCallLimitMiddleware(run_limit=_MODEL_CALL_LIMIT, exit_behavior="end"),
             ModelRetryMiddleware(retry_on=(TimeoutError,)),
         ],
