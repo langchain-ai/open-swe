@@ -4,6 +4,7 @@ from unittest.mock import AsyncMock
 
 import pytest
 
+from openswe import credential_scope
 from openswe.slack import client as slack_client
 from openswe.slack import http as slack_http
 from openswe.slack import stop as slack_stop
@@ -177,6 +178,56 @@ async def test_stop_reaction_on_mapped_reply_interrupts_all_runs_and_dispatches_
     assert dispatched[0]["configurable"]["slack_thread"]["triggering_user_id"] == "UOWNER"
     current = await lookup_slack_thread_run_mapping("C123", "1.000")
     assert current is not None and current.run_id == "run-summary"
+
+
+@pytest.mark.parametrize("login", ["OWNER", "other", None])
+async def test_private_stop_summary_requires_reacting_owner(
+    monkeypatch: pytest.MonkeyPatch, login: str | None
+) -> None:
+    client = FakeClient()
+    thread_id = await _add_thread(client)
+    metadata = client.threads.values[thread_id]["metadata"]
+    metadata.pop("github_login")
+    metadata.update(visibility="private", owner_login="owner", slack_conversation_type="dm")
+    client.runs.by_status["running"] = [{"run_id": "running"}]
+    dispatched, _ = _patch_handler(monkeypatch, client)
+    user = (
+        User(
+            identities=[UserIdentity(provider="github", external_id="123", login=login)],
+        )
+        if login
+        else None
+    )
+    if user is not None:
+        user.email = "reactor@example.com"
+    monkeypatch.setattr(User, "for_identity", AsyncMock(return_value=user))
+    reply = AsyncMock()
+    monkeypatch.setattr(slack_stop, "post_slack_thread_reply", reply)
+
+    await process_slack_stop_reaction(_event("1.000", user_id="UREACTOR"), event_id="EvPrivate")
+
+    assert client.runs.cancelled == [
+        {"thread_id": thread_id, "run_ids": ["running"], "action": "interrupt"}
+    ]
+    assert client.cleared_queues == [thread_id]
+    if login == "OWNER":
+        assert len(dispatched) == 1
+        configurable = dispatched[0]["configurable"]
+        assert configurable["github_login"] == "OWNER"
+        assert configurable["user_email"] == "reactor@example.com"
+        monkeypatch.setattr(
+            credential_scope, "read_thread", AsyncMock(return_value={"metadata": metadata})
+        )
+        assert (
+            await credential_scope.private_credential_login(
+                {"configurable": {**configurable, "thread_id": thread_id}}
+            )
+            == "OWNER"
+        )
+        reply.assert_not_awaited()
+    else:
+        assert dispatched == []
+        reply.assert_awaited_once_with("C123", "1.000", "Stopped.", agent_thread_id=thread_id)
 
 
 async def test_stop_reaction_ignores_mismatched_thread_metadata(

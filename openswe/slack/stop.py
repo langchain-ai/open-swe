@@ -11,9 +11,12 @@ from langgraph_sdk import get_client
 from langgraph_sdk.client import LangGraphClient
 
 from openswe.config import ENV
+from openswe.credential_scope import private_owner_login
 from openswe.dispatch import dispatch_agent_run, thread_workspace
 from openswe.message_queue import QueuedMessage
 from openswe.prompts import prompt
+from openswe.run_config import RunConfig
+from openswe.slack.client import post_slack_thread_reply
 from openswe.slack.code_channels import CODE_CHANNEL_SESSION_TS, set_session_status
 from openswe.slack.events import claim_slack_event
 from openswe.slack.records import (
@@ -22,6 +25,7 @@ from openswe.slack.records import (
     store_slack_run_mapping,
 )
 from openswe.source_context import SourceContext
+from openswe.users.models import User
 
 logger = logging.getLogger(__name__)
 
@@ -95,7 +99,11 @@ async def _active_run_ids(client: LangGraphClient, thread_id: str) -> list[str]:
 
 
 def _summary_configurable(
-    metadata: Mapping[str, Any], slack_thread: Mapping[str, Any]
+    metadata: Mapping[str, Any],
+    slack_thread: Mapping[str, Any],
+    *,
+    github_login: str | None = None,
+    user_email: str | None = None,
 ) -> dict[str, Any]:
     source = metadata.get("source")
     configurable: dict[str, Any] = {
@@ -120,6 +128,11 @@ def _summary_configurable(
         value = metadata.get(metadata_key)
         if isinstance(value, str) and value:
             configurable[config_key] = value
+
+    if github_login:
+        configurable["github_login"] = github_login
+    if user_email:
+        configurable["user_email"] = user_email
 
     workspace = thread_workspace(metadata)
     if workspace is not None:
@@ -182,7 +195,21 @@ async def _process_slack_stop_reaction(event: dict[str, Any], event_id: str) -> 
         },
     )
 
-    configurable = _summary_configurable(metadata, slack_thread)
+    user_id = event.get("user")
+    user = (
+        await User.for_identity("slack", user_id) if isinstance(user_id, str) and user_id else None
+    )
+    github_login = user.github_login if user else None
+    if (
+        metadata.get("visibility") == "private"
+        and private_owner_login(RunConfig(github_login=github_login), metadata) is None
+    ):
+        await post_slack_thread_reply(channel_id, thread_ts, "Stopped.", agent_thread_id=thread_id)
+        return
+
+    configurable = _summary_configurable(
+        metadata, slack_thread, github_login=github_login, user_email=user.email if user else None
+    )
     summary_run = await dispatch_agent_run(
         thread_id,
         _stop_summary_prompt(bool(run_ids)),
@@ -240,11 +267,9 @@ async def _process_agent_session_stopped(
         )
         return
     if thread_ts != CODE_CHANNEL_SESSION_TS:
-        from openswe.slack.client import post_slack_thread_reply
         from openswe.slack.http import SlackClient, slack_identity
         from openswe.slack.thinking import release_slack_location_status
         from openswe.threads.handlers import cancel_dashboard_thread
-        from openswe.users.models import User
 
         user_id = event.get("user")
         if not event_id or not team_id:
