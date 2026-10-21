@@ -478,11 +478,9 @@ async def share_thread_with_workspace(
         "updated_at_ms": _now_ms(),
     }
     # The thread's browser keeps whatever the owner signed into: like the
-    # owner's GitHub token below, it must not pass to the workspace. One that
-    # was never opened doesn't exist yet.
+    # owner's GitHub token below, it must not pass to the workspace. Whether
+    # it was opened is best effort, so it is deleted whenever it has a name.
     browser = ThreadBrowser.of(metadata)
-    if browser is not None and not browser.opened:
-        browser = None
     if browser is not None:
         try:
             metadata_update.update(await browser.forget())
