@@ -26,7 +26,9 @@ from openswe.agent_api.client import (
 )
 from openswe.source_context import SourceContext
 from openswe.threads import index
+from openswe.threads.access import agent_version_metadata
 from openswe.threads.index import INDEXED_FIELDS, IndexedThread, Runtime, ThreadStatus
+from openswe.utils.build_info import backend_build_info
 
 logger = logging.getLogger(__name__)
 
@@ -169,7 +171,12 @@ class MdaRuntime:
     ) -> dict[str, JsonValue]:
         """Rewrite a run-create body for the thread's MDA graph: configurable becomes context."""
         raw_metadata = payload.get("metadata")
-        run_metadata = dict(raw_metadata) if isinstance(raw_metadata, dict) else {}
+        run_metadata = {
+            **(raw_metadata if isinstance(raw_metadata, dict) else {}),
+            **agent_version_metadata(),
+        }
+        if commit := backend_build_info()["commit"]:
+            run_metadata["revision_id"] = commit
         config = payload.get("config")
         config = dict(config) if isinstance(config, dict) else {}
         slack_thread = SourceContext.from_metadata(thread_metadata).slack_thread
