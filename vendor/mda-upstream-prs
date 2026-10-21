@@ -1,2 +1,2 @@
 897 1aa4e62bd39050f986343c68d0beb69805828363 feat(browser): browser use via define_browser
-959 75ee034dcec382d6bc8c2119469f21d29584c3b6 feat(browser): share the thread's sandbox's localhost with its browser
+959 89bfff3ea118ec80da1044da9099e469759ff032 feat(browser): share the thread's sandbox's localhost with its browser

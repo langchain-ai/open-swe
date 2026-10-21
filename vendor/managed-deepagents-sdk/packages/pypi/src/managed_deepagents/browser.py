@@ -34,6 +34,7 @@ from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Annotated, Literal, Required, TypedDict, TypeVar, cast
 
 import httpx
+from deepagents.backends import CompositeBackend
 from deepagents.backends.protocol import SandboxBackendProtocol
 from langchain.agents.middleware import AgentMiddleware
 from langchain.tools import BaseTool, tool
@@ -377,8 +378,18 @@ async def _open(name: str, idle_ttl_seconds: int) -> _Session:
 
 
 def _thread_sandbox(runtime: ManagedToolRuntime) -> str | None:
-    """The run's sandbox, once it exists: MDA names one it has not made yet ``pending:…``."""
-    backend = runtime.backend
+    """The run's sandbox once MDA has opened it; the browser never opens one.
+
+    Tools see the sandbox behind a CompositeBackend, through a lazy handle made fresh
+    for each run, so the handle asks the process whether the box is open.
+    """
+    from managed_deepagents.runtime import _LazyManagedSandboxBackend  # noqa: PLC0415
+
+    backend: object = runtime.backend
+    while isinstance(backend, CompositeBackend):
+        backend = backend.default
+    if isinstance(backend, _LazyManagedSandboxBackend):
+        backend = backend.opened()
     if not isinstance(backend, SandboxBackendProtocol) or backend.id.startswith("pending:"):
         return None
     return backend.id
