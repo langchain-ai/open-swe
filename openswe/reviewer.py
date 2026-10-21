@@ -38,6 +38,7 @@ from langchain.agents.middleware import ModelCallLimitMiddleware, ModelRetryMidd
 from langchain.agents.middleware.types import AgentMiddleware
 from langchain_anthropic.middleware import AnthropicPromptCachingMiddleware
 from langchain_core.language_models.chat_models import BaseChatModel
+from langchain_core.messages import HumanMessage
 from langchain_core.tools import BaseTool
 
 from openswe.dashboard.options import gate_fable_model
@@ -923,14 +924,15 @@ async def prepare_reviewer_run(
         scoped_agents_md=scoped_agents_md,
         api_standards_skill=api_standards_skill,
     )
-    if review_context:
-        system_prompt = f"{system_prompt}\n\n{review_context}"
-    walkthrough_block = _format_walkthrough(walkthrough)
-    if walkthrough_block:
-        system_prompt = f"{system_prompt}\n\n{walkthrough_block}"
-    human_input_block = _format_human_input(walkthrough)
-    if human_input_block:
-        system_prompt = f"{system_prompt}\n\n{human_input_block}"
+    input_content = "\n\n".join(
+        block
+        for block in (
+            review_context,
+            _format_walkthrough(walkthrough),
+            _format_human_input(walkthrough),
+        )
+        if block
+    )
     if checkout.skills_prompt:
         system_prompt = f"{system_prompt}\n\n{checkout.skills_prompt}"
 
@@ -941,6 +943,8 @@ async def prepare_reviewer_run(
         "diff_text": pr_diff_text,
         "diff_line_set": pr_diff_line_set,
     }
+    if input_content:
+        prepared["messages"] = [HumanMessage(content=input_content)]
     return prepared
 
 

@@ -3,6 +3,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 from langchain.agents.middleware import AgentMiddleware, AgentState
+from langchain_core.messages import HumanMessage
 from langgraph.graph.state import RunnableConfig
 from langgraph.runtime import Runtime
 
@@ -217,7 +218,8 @@ def test_format_pr_overview_neutralizes_whitespace_padded_closers() -> None:
 
 
 @pytest.mark.asyncio
-async def test_reviewer_continues_when_thread_fetch_raises() -> None:
+@pytest.mark.parametrize("event", ["first_review", "re_review", "finding_reply"])
+async def test_reviewer_continues_when_thread_fetch_raises(event: str) -> None:
     config: RunnableConfig = {
         "configurable": {
             "__is_for_execution__": True,
@@ -231,7 +233,14 @@ async def test_reviewer_continues_when_thread_fetch_raises() -> None:
         },
         "metadata": {},
     }
-    captured: dict[str, object] = {}
+    config["configurable"].update(
+        reviewer_event=event,
+        re_review=event == "re_review",
+        last_reviewed_sha="previous" if event == "re_review" else "",
+        finding_reply_id="finding-1",
+        finding_reply_author="octocat",
+        finding_reply_body="Please check this reply",
+    )
 
     with (
         patch(
@@ -259,15 +268,52 @@ async def test_reviewer_continues_when_thread_fetch_raises() -> None:
             new_callable=AsyncMock,
             side_effect=RuntimeError("network down"),
         ),
+        patch(
+            "openswe.reviewer.ReviewScoutTarget.await_walkthrough",
+            new_callable=AsyncMock,
+            return_value=reviewer.WalkthroughView(
+                head_sha="head",
+                human_input="Requested behavior",
+                steps=[
+                    {
+                        "index": 1,
+                        "title": "Walkthrough step",
+                        "summary": "Changed behavior",
+                        "other": False,
+                        "files": [],
+                    }
+                ],
+            ),
+        ),
+        patch("openswe.reviewer.list_findings_async", new_callable=AsyncMock, return_value=[]),
         patch("openswe.reviewer.make_model", return_value=MagicMock()),
     ):
         prepare = await _planned_prepare(config)
         updates = await _run_prepare(prepare)
-        captured["system_prompt"] = cast(str, updates["rendered_system_prompt"])
-
-    # The reviewer must still produce a usable prompt even if the thread
-    # fetch fails; the first-review user-message context should still appear.
-    assert "https://github.com/acme/repo/pull/42" in captured["system_prompt"]
+        system_prompt = updates["rendered_system_prompt"]
+        assert isinstance(system_prompt, str)
+        messages = updates["messages"]
+        assert isinstance(messages, list)
+        [message] = messages
+        assert isinstance(message, HumanMessage)
+        assert message.type == "human"
+        assert "https://github.com/acme/repo/pull/42" in message.content
+        assert "https://github.com/acme/repo/pull/42" not in system_prompt
+        if event != "finding_reply":
+            assert "Walkthrough step" in message.content
+            assert "Requested behavior" in message.content
+            assert "Walkthrough step" not in system_prompt
+            assert "Requested behavior" not in system_prompt
+        if event == "re_review":
+            assert "previous" in message.content
+        if event == "finding_reply":
+            assert "Please check this reply" in message.content
+        config["configurable"]["finding_reply_body"] = "A different reply"
+        config["configurable"]["invocation_id"] = "next-review"
+        next_updates = await _run_prepare(await _planned_prepare(config))
+        assert next_updates["rendered_system_prompt"] == system_prompt
+        if event == "finding_reply":
+            assert "A different reply" in next_updates["messages"][0].content
 
 
 @pytest.mark.asyncio
