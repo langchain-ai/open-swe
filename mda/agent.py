@@ -46,6 +46,7 @@ from rt.middleware import (
     BackendRunMiddleware,
     DescribedToolsMiddleware,
     ReportRepliesMiddleware,
+    ResolveBlobsMiddleware,
     RuntimeToolsMiddleware,
     ServedToolsMiddleware,
 )
@@ -197,6 +198,7 @@ async def agent(runtime: ManagedServerRuntime) -> DeepAgentDefinition:
             "model": subagent_model,
             "tools": subagent_tools[subagent.name],
             "middleware": [
+                ResolveBlobsMiddleware(backend),
                 *_backend_reports(backend, reported_elsewhere),
                 *box_tools,
                 *replace_sandbox,
@@ -215,6 +217,7 @@ async def agent(runtime: ManagedServerRuntime) -> DeepAgentDefinition:
             trace_metadata=catalog.trace_metadata,
         ),
         *replace_sandbox,
+        ResolveBlobsMiddleware(backend),
         *_backend_reports(backend, reported_elsewhere),
         *box_tools,
         ServedToolsMiddleware(offered, excluded | code_only, backend),

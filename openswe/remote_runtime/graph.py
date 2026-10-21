@@ -36,14 +36,18 @@ limits, provider sanitizers) is MDA's own. Graph state the hooks write that MDA
 does not know rides in the MDA run's state and comes back with every call.
 """
 
+import base64
+import hashlib
 import inspect
 import logging
+import re
 import time
 from collections.abc import Awaitable, Callable, Mapping, Sequence
 from functools import partial
 from typing import Final, Literal, Protocol, cast, get_args, runtime_checkable
 from uuid import uuid4
 
+from deepagents.backends import StoreBackend
 from deepagents.middleware.filesystem import FilesystemMiddleware
 from langchain.agents.middleware import ModelCallLimitMiddleware, ToolRetryMiddleware
 from langchain.agents.middleware.types import (
@@ -116,6 +120,7 @@ from openswe.server import (
     direct_and_from_code,
     fallback_model_choice,
 )
+from openswe.threads.blobs import ThreadBlobs, blob_namespace
 from openswe.utils.model import provider_model_kwargs
 
 logger = logging.getLogger(__name__)
@@ -698,6 +703,19 @@ class RemoteGraph:
 
     async def hook(self, run: RemoteRun, hook: str, raw: Mapping[str, JsonValue]) -> JsonValue:
         """Answer one call the MDA run makes around its model loop."""
+        if hook == "blob":
+            digest = raw.get("digest")
+            if not isinstance(digest, str) or re.fullmatch(r"[0-9a-f]{64}", digest) is None:
+                raise ValueError("Invalid blob digest")
+            store = ThreadBlobs(run.thread_id)
+            backend = StoreBackend(
+                store=store, namespace=lambda _runtime: blob_namespace(run.thread_id)
+            )
+            [result] = await backend.adownload_files([f"/{digest}"])
+            content = result.content
+            if content is None or hashlib.sha256(content).hexdigest() != digest:
+                return {"base64": None}
+            return {"base64": base64.b64encode(content).decode("ascii")}
         if hook == "call":
             return await self._call(run, CallBody.model_validate(raw))
         body = HookBody.model_validate(raw)

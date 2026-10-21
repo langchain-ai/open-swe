@@ -20,6 +20,7 @@ import asyncio
 import dataclasses
 import json
 import logging
+import re
 from collections.abc import (
     Awaitable,
     Callable,
@@ -33,6 +34,7 @@ from contextvars import ContextVar
 from typing import Annotated, Final, NotRequired
 
 import httpx
+from anthropic import BadRequestError as AnthropicBadRequestError
 from deepagents.middleware import async_subagents
 from langchain.agents.middleware.types import (
     AgentMiddleware,
@@ -42,6 +44,7 @@ from langchain.agents.middleware.types import (
     OmitFromOutput,
     hook_config,
 )
+from langchain_core.exceptions import ContextOverflowError
 from langchain_core.messages import (
     HumanMessage,
     SystemMessage,
@@ -55,6 +58,7 @@ from langgraph.prebuilt.tool_node import ToolCallRequest, ToolRuntime
 from langgraph.runtime import Runtime
 from langgraph.types import Command
 from langgraph_sdk.errors import APIConnectionError, APIStatusError
+from openai import BadRequestError as OpenAIBadRequestError
 from pydantic import BaseModel, JsonValue
 
 from rt.backend import (
@@ -290,6 +294,55 @@ class DescribedToolsMiddleware(AgentMiddleware):
         return await handler(request.override(tool_call={**call, "args": args}))
 
 
+class ResolveBlobsMiddleware(AgentMiddleware):
+    """Restore backend image payloads only in the outgoing model request."""
+
+    def __init__(self, backend: OpenSweBackend) -> None:
+        self._backend = backend
+
+    async def awrap_model_call(
+        self,
+        request: ModelRequest,
+        handler: Callable[[ModelRequest], Awaitable[ModelResponse]],
+    ) -> ModelResponse:
+        payloads: dict[str, str | None] = {}
+        messages = []
+        for message in request.messages:
+            if not isinstance(message.content, list):
+                messages.append(message)
+                continue
+            content: list[str | dict[str, object]] = []
+            for block in message.content:
+                image = block
+                if isinstance(block, dict) and block.get("type") == "non_standard":
+                    image = block.get("value")
+                if not isinstance(image, dict) or "deepagents_blob" not in image:
+                    content.append(block)
+                    continue
+                digest = image["deepagents_blob"]
+                if (
+                    isinstance(digest, str)
+                    and re.fullmatch(r"[0-9a-f]{64}", digest) is not None
+                    and digest not in payloads
+                ):
+                    payloads[digest] = await self._backend.blob(digest)
+                payload = payloads.get(digest) if isinstance(digest, str) else None
+                if payload is None:
+                    content.append(
+                        {
+                            "type": "text",
+                            "text": f"[Image {digest} is unavailable. Re-read the file if needed.]",
+                        }
+                    )
+                else:
+                    content.append(
+                        {k: v for k, v in image.items() if k != "deepagents_blob"}
+                        | {"base64": payload}
+                    )
+            messages.append(message.model_copy(update={"content": content}))
+        return await handler(request.override(messages=messages))
+
+
 class BackendRunMiddleware(AgentMiddleware[RunState]):
     """Run the Open SWE graph's own middleware on the backend, phase by phase."""
 
@@ -370,6 +423,11 @@ class BackendRunMiddleware(AgentMiddleware[RunState]):
         try:
             return await handler(request)
         except Exception as exc:
+            if isinstance(
+                exc, (AnthropicBadRequestError, OpenAIBadRequestError)
+            ) and not isinstance(exc, ContextOverflowError):
+                logger.error("Model request rejected; fallback skipped", exc_info=True)
+                raise
             if call.fallback is None or _tool_pairing_error(exc):
                 raise
             # As the in-process graph does: another provider before failing the run.

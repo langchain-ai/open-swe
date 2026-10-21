@@ -40,6 +40,7 @@ _HOOK_SECONDS: Final = 300.0
 _TOOL_CALL_SLACK_SECONDS: Final = 300.0
 
 Hook = Literal[
+    "blob",
     "catalog",
     "prepare",
     "before_model",
@@ -63,13 +64,15 @@ Hook = Literal[
 # connection never reached the backend, so every hook is resent after one. A gateway
 # 502 or 503 usually means no backend was ready, but can also follow a backend that
 # took the call and died, so only calls that are safe to repeat are resent after
-# one: ``catalog`` only reads, ``prepare`` a restarted run makes again anyway, and
-# ``launch_worker`` only authorizes a launch or returns the worker it already made.
-# ``before_model`` only builds the next model call, so it is also resent after a 503,
-# the answer a rollout gives it. A tool call is never resent: it may have run. Nor is
-# anything after a 504: the backend may still be running the call.
+# one: ``catalog`` and ``blob`` only read, ``prepare`` a restarted run makes again
+# anyway, and ``launch_worker`` only authorizes a launch or returns the worker it
+# already made. ``before_model`` only builds the next model call, so it is also resent
+# after a 503, the answer a rollout gives it. A tool call is never resent: it may have
+# run. Nor is anything after a 504: the backend may still be running the call.
 _RETRY_SECONDS: Final = (1.0, 2.0, 4.0, 8.0, 15.0, 30.0, 30.0, 30.0, 30.0, 30.0)
-_REPEATABLE_HOOKS: Final[frozenset[Hook]] = frozenset({"catalog", "prepare", "launch_worker"})
+_REPEATABLE_HOOKS: Final[frozenset[Hook]] = frozenset(
+    {"catalog", "prepare", "launch_worker", "blob"}
+)
 _RESENT_AFTER_503: Final[frozenset[Hook]] = _REPEATABLE_HOOKS | {"before_model"}
 _GATEWAY_STATUSES: Final = frozenset({502, 503, 504})
 _json_object = TypeAdapter(dict[str, JsonValue])
@@ -318,6 +321,11 @@ class OpenSweBackend:
                 )
                 raise error(f"{hook} failed ({type(exc).__name__})") from exc
         return _json_object.validate_python(response.json())
+
+    async def blob(self, digest: str) -> str | None:
+        reply = await self.call("blob", {"digest": digest})
+        payload = reply.get("base64")
+        return payload if isinstance(payload, str) else None
 
     async def catalog(self, run_id: str | None) -> Catalog:
         return Catalog.model_validate(await self.call("catalog", {"run_id": run_id}))
