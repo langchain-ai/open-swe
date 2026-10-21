@@ -59,13 +59,15 @@ async def offer_review(
     slack_user_id: str,
     pr_ref: GitHubPrRef,
     text: str,
+    message_ts: str,
 ) -> None:
     """Suggest getting the linked pull request reviewed, when it could be and was posted for it."""
     if skip_on_preview("offer_review"):
         return
     if await User.for_identity("slack", slack_user_id) is None or not await _reviewable(pr_ref):
         return
-    if not await PullRequestPost(channel_id, slack_user_id, text).shares_for_review(pr_ref):
+    post = PullRequestPost(channel_id, slack_user_id, text, message_ts, reply_thread_ts)
+    if not await post.shares_for_review(pr_ref):
         return
     await GET_REVIEWED.suggest(
         channel_id,

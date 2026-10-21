@@ -28,7 +28,7 @@ async def watch_post(channel_id: str, message_ts: str, slack_user_id: str, text:
     user = await User.for_identity("slack", slack_user_id)
     if user is None:
         return
-    post = PullRequestPost(channel_id, slack_user_id, text)
+    post = PullRequestPost(channel_id, slack_user_id, text, message_ts)
     intents = {ref.url.lower(): await post.intent(ref) for ref in refs}
     watched: tuple[PostIntent | None, ...] = (None, "review", "investigate")
     if "investigate" in intents.values() and await investigate_post(

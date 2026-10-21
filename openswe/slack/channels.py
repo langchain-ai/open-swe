@@ -285,8 +285,10 @@ class SlackChannel(Base):
             self.id, text, unfurl_links=False, unfurl_media=False, blocks=blocks, login=login
         )
 
-    async def messages(self, limit: int = 30) -> list[SlackMessage]:
-        """The most recent top-level messages, oldest first.
+    async def messages(
+        self, limit: int = 30, *, oldest: str | None = None, latest: str | None = None
+    ) -> list[SlackMessage]:
+        """The most recent top-level messages, oldest first, optionally between two inclusive ts.
 
         Empty when the channel may not be read this way, when the fetch failed,
         and when the channel is simply quiet; a caller that has to tell those
@@ -305,7 +307,12 @@ class SlackChannel(Base):
         capped = max(1, min(limit, HISTORY_MAX_MESSAGES))
         try:
             async with SlackClient.bot() as client:
-                payload = await client.conversations_history(channel=self.id, limit=capped)
+                payload = await client.conversations_history(
+                    channel=self.id,
+                    limit=capped,
+                    **({"oldest": oldest} if oldest else {}),
+                    **({"latest": latest, "inclusive": True} if latest else {}),
+                )
         except SLACK_REQUEST_ERRORS as exc:
             logger.warning(
                 "Slack channel history fetch failed", extra={"slack_error": slack_error(exc)}

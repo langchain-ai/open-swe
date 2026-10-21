@@ -355,7 +355,7 @@ async def test_a_newly_linked_pull_request_is_offered_for_review_once(
         assert offers == []
         return
     assert len(offers) == 1
-    channel_id, thread_ts, reply_thread_ts, user_id, ref, _ = offers[0]
+    channel_id, thread_ts, reply_thread_ts, user_id, ref, _, _ = offers[0]
     assert (channel_id, thread_ts, reply_thread_ts, user_id) == (
         "C1",
         "1786573300.000000",
