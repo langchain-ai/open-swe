@@ -84,7 +84,7 @@ export function PageView({
   const draft = useDrafts(repository).data?.get(path) ?? null
   const ref = draft?.branch ?? space.defaultBranch
   const head = useHead(repository, ref)
-  const file = useFile(repository, path, head.data)
+  const file = useFile(repository, path, head.data ?? undefined)
   const editing = draft !== null
   const { live, synced } = useLiveDoc(
     repository,
@@ -126,7 +126,7 @@ export function PageView({
     saved !== null &&
     current.trimEnd() !== saved.trimEnd()
   const outsideCommits =
-    editing && head.data !== undefined && draft.head !== head.data && !dirty
+    editing && Boolean(head.data) && draft.head !== head.data && !dirty
 
   const people = usePeople(
     useMemo(
@@ -373,6 +373,25 @@ export function PageView({
     })
   }
 
+  if (editing && head.data === null)
+    return (
+      <div className="flex flex-col items-start gap-space-3 p-space-6">
+        <p className="text-sm text-secondary">
+          This draft's branch, <code>{draft.branch}</code>, no longer exists,
+          perhaps because its pull request was merged. Its unsaved edits went
+          with it.
+        </p>
+        <Button size="sm" variant="outlined" onClick={() => void closeDraft()}>
+          Discard draft
+        </Button>
+      </div>
+    )
+  if (head.data === null)
+    return (
+      <p className="text-error p-space-6 text-sm">
+        Branch {ref} no longer exists
+      </p>
+    )
   if (head.error || file.error)
     return (
       <p className="text-error p-space-6 text-sm">

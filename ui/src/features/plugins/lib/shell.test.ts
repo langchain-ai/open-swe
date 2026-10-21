@@ -37,6 +37,18 @@ describe("pluginShell", () => {
     expect(shell).toContain("<p title=&quot;x&quot;>&amp;</p>")
     expect(shell).not.toContain('<p title="x">')
   })
+
+  it("allows the pictures, fonts and media the plugin's policy allows, which its srcdoc inherits", () => {
+    const shell = pluginShell("<p></p>", "light", "nonce-1")
+    for (const directive of [
+      "img-src data: blob:",
+      "font-src data:",
+      "media-src data: blob:",
+    ]) {
+      expect(PLUGIN_CSP).toContain(directive)
+      expect(shell.slice(0, shell.indexOf("<iframe"))).toContain(directive)
+    }
+  })
 })
 
 describe("CAPNWEB_RUNTIME", () => {

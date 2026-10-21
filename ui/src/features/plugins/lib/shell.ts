@@ -76,11 +76,18 @@ export const PLUGIN_ALLOW = "clipboard-write"
 /** What the shell sends the dashboard when the plugin's frame loaded a second document. */
 export const ESCAPED_MESSAGE = "openswe-plugin-escaped"
 
-/** The shell may run only its own script and frame nothing but the plugin's srcdoc. */
+/**
+ * The shell may run only its own script and frame nothing but the plugin's
+ * srcdoc. That srcdoc inherits this policy on top of its own, so the shell
+ * also allows the inline pictures, fonts and media the plugin's policy does.
+ */
 const SHELL_CSP = [
   "default-src 'none'",
   "script-src 'unsafe-inline'",
   "style-src 'unsafe-inline'",
+  "font-src data:",
+  "img-src data: blob:",
+  "media-src data: blob:",
   "frame-src 'none'",
   "base-uri 'none'",
   "form-action 'none'",

@@ -313,12 +313,10 @@ export const pluginsApi = {
   },
   ref: async (id: string, repository: string, name: string) =>
     (
-      await orNull(
-        agentsRequest<{ sha: string }>(
-          `${repo(id, repository)}/ref${query({ name })}`
-        )
+      await agentsRequest<{ sha: string | null }>(
+        `${repo(id, repository)}/ref${query({ name })}`
       )
-    )?.sha ?? null,
+    ).sha,
   tree: (id: string, repository: string, sha: string) =>
     agentsRequest<RepositoryTree>(
       `${repo(id, repository)}/tree${query({ sha })}`

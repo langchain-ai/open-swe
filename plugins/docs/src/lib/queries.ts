@@ -109,11 +109,8 @@ export function useHead(repository: string, ref: string) {
   const host = usePluginHost()
   return useQuery({
     queryKey: keys.head(repository, ref),
-    queryFn: async () => {
-      const sha = await host.github(repository).ref(ref)
-      if (!sha) throw new Error(`Branch ${ref} no longer exists`)
-      return sha
-    },
+    // `null` once the branch is gone, for example deleted when its pull request merged.
+    queryFn: () => host.github(repository).ref(ref),
     refetchOnWindowFocus: true,
     staleTime: 0,
   })

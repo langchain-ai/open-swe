@@ -410,7 +410,8 @@ class RepositoryInfo(BaseModel):
 
 
 class RefResponse(BaseModel):
-    sha: str
+    sha: str | None
+    """``None`` when no branch, tag or commit has that name."""
 
 
 class TreeEntryModel(BaseModel):
@@ -503,7 +504,13 @@ async def api_plugin_ref(
 ) -> RefResponse:
     with _as_http():
         async with plugin.github(_repository(owner, repo)) as client:
-            return RefResponse(sha=await client.commit_sha(name))
+            try:
+                return RefResponse(sha=await client.commit_sha(name))
+            except GitHubError as exc:
+                # GitHub answers a name that names nothing with 404 or 422.
+                if exc.response.status_code not in {404, 422}:
+                    raise
+                return RefResponse(sha=None)
 
 
 @router.get("/{installation_id}/github/{owner}/{repo}/tree")
