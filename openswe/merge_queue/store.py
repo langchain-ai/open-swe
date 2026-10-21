@@ -11,7 +11,7 @@ from copy import deepcopy
 from dataclasses import dataclass
 from datetime import datetime, timedelta
 from typing import Self
-from uuid import UUID
+from uuid import UUID, uuid7
 
 from pydantic import JsonValue
 from sqlalchemy import BigInteger, ForeignKey, delete, func, select
@@ -21,6 +21,8 @@ from sqlalchemy.orm import Mapped, mapped_column
 from openswe.database import postgres
 from openswe.github.pull_requests import PullRequest
 from openswe.github.repositories import Repository
+from openswe.merge_queue.admission import Admission, QueuePolicy
+from openswe.merge_queue.git import Candidate
 from openswe.merge_queue.models import (
     Attempt,
     AttemptResult,
@@ -37,6 +39,12 @@ from openswe.workspaces.rows import WorkspaceRepositoryRow, WorkspaceRow
 
 class LeaseLost(ValueError):
     """This controller no longer owns the queue."""
+
+
+@dataclass(frozen=True)
+class QueueEntry:
+    request: MergeRequest
+    number: int
 
 
 @dataclass(frozen=True)
@@ -163,9 +171,19 @@ class MergeQueue(Record):
             queue.updated_by = None
 
     async def request_merge(
-        self, pull_request_id: UUID, head_sha: str, request_key: str, *, actor: UUID | None = None
+        self,
+        pull_request_id: UUID,
+        head_sha: str,
+        request_key: str,
+        *,
+        actor: UUID | None = None,
+        dependencies: tuple[int, ...] = (),
     ) -> MergeRequest:
         """Record intent. Replaying its key never replaces the subsequently observed head."""
+        if len(set(dependencies)) != len(dependencies) or any(
+            type(number) is not int or number <= 0 for number in dependencies
+        ):
+            raise ValueError("Dependencies must be distinct positive PR numbers")
         async with self._locked() as (session, queue, _):
             existing = await session.scalar(
                 select(MergeRequest).where(
@@ -174,7 +192,9 @@ class MergeQueue(Record):
                 )
             )
             if existing is not None:
-                if existing.pull_request_id != pull_request_id:
+                if existing.pull_request_id != pull_request_id or existing.dependencies != list(
+                    dependencies
+                ):
                     raise ValueError("Request key was already used with different input")
                 return existing
             pull = await session.scalar(
@@ -194,11 +214,23 @@ class MergeQueue(Record):
             )
             if active is not None:
                 raise ValueError("Pull request already has an active merge request")
+            entries = await self._entries(session)
+            graph = {entry.number: entry.request.dependencies for entry in entries}
+            graph[pull.number] = list(dependencies)
+            pending, visited = list(dependencies), set()
+            while pending:
+                dependency = pending.pop()
+                if dependency == pull.number:
+                    raise ValueError("PR dependency cycle")
+                if dependency not in visited:
+                    visited.add(dependency)
+                    pending.extend(graph.get(dependency, []))
             request = MergeRequest(
                 queue_id=queue.id,
                 pull_request_id=pull_request_id,
                 head_sha=head_sha,
                 request_key=request_key,
+                dependencies=list(dependencies),
                 created_by=actor,
                 updated_by=actor,
             )
@@ -243,6 +275,7 @@ class MergeQueue(Record):
             if request.state == "batched":
                 batch = await self._active_batch(session)
                 await self._invalidate(session, batch, now, None)
+            request.admission, request.queued_at = None, None
             request.head_sha, request.state, request.updated_by = (
                 head_sha,
                 "waiting_for_review",
@@ -330,28 +363,51 @@ class MergeQueue(Record):
             requests = [await self._request(session, request_id) for request_id in request_ids]
             if any(request.state != "queued" for request in requests):
                 raise ValueError("All batch members must be queued")
-            batch = Batch(
-                queue_id=self.id,
+            return await self._save_batch(
+                session,
+                requests,
                 request_key=request_key,
                 base_sha=base_sha,
-                policy=deepcopy(policy),
+                policy=policy,
                 deadline=deadline,
                 max_attempts=max_attempts,
                 max_plans=max_plans,
             )
-            session.add(batch)
-            await session.flush()
-            for position, request in enumerate(requests):
-                session.add(
-                    BatchMember(
-                        batch_id=batch.id,
-                        request_id=request.id,
-                        position=position,
-                        head_sha=request.head_sha,
-                    )
+
+    async def _save_batch(
+        self,
+        session: AsyncSession,
+        requests: Sequence[MergeRequest],
+        *,
+        request_key: str,
+        base_sha: str,
+        policy: dict[str, JsonValue],
+        deadline: datetime,
+        max_attempts: int,
+        max_plans: int,
+    ) -> Batch:
+        batch = Batch(
+            queue_id=self.id,
+            request_key=request_key,
+            base_sha=base_sha,
+            policy=deepcopy(policy),
+            deadline=deadline,
+            max_attempts=max_attempts,
+            max_plans=max_plans,
+        )
+        session.add(batch)
+        await session.flush()
+        for position, request in enumerate(requests):
+            session.add(
+                BatchMember(
+                    batch_id=batch.id,
+                    request_id=request.id,
+                    position=position,
+                    head_sha=request.head_sha,
                 )
-                request.state, request.updated_by = "batched", None
-            return batch
+            )
+            request.state, request.updated_by = "batched", None
+        return batch
 
     async def _batch(self, session: AsyncSession, batch_id: UUID) -> Batch:
         batch = await session.scalar(
@@ -575,6 +631,7 @@ class MergeQueue(Record):
                     .where(
                         Batch.queue_id == self.id,
                         Batch.finished_at < before,
+                        (Batch.candidate.is_(None) | Batch.ref_deleted_at.is_not(None)),
                         ~select(Attempt.id)
                         .where(Attempt.batch_id == Batch.id, Attempt.state == "running")
                         .exists(),
@@ -606,3 +663,252 @@ class MergeQueue(Record):
                 )
             )
             return len(batches) + len(requests)
+
+    async def _entries(self, session: AsyncSession) -> list[QueueEntry]:
+        rows = await session.execute(
+            select(MergeRequest, PullRequest.number)
+            .join(PullRequest)
+            .where(MergeRequest.queue_id == self.id, MergeRequest.finished_at.is_(None))
+            .order_by(MergeRequest.priority.desc(), MergeRequest.created_at, MergeRequest.id)
+        )
+        return [QueueEntry(request, number) for request, number in rows.tuples()]
+
+    async def entries(self, lease: Lease) -> list[QueueEntry]:
+        async with self._locked(lease) as (session, _, _):
+            return await self._entries(session)
+
+    async def repository_name(self, lease: Lease) -> str:
+        async with self._locked(lease) as (session, _, _):
+            return (
+                await session.scalars(
+                    select(Repository.full_name).where(Repository.id == self.repository_id)
+                )
+            ).one()
+
+    async def refresh_admission(
+        self,
+        request_id: UUID,
+        head_sha: str,
+        admission: Admission | None,
+        lease: Lease,
+        *,
+        reason: str | None = None,
+        terminal: bool = False,
+        merged: bool = False,
+    ) -> None:
+        async with self._locked(lease) as (session, _, now):
+            request = await self._request(session, request_id)
+            if request.finished_at is not None:
+                return
+            if request.head_sha != head_sha or (
+                admission is not None and admission.head_sha != head_sha
+            ):
+                raise ValueError("Admission was checked against an obsolete head")
+            previous = Admission.model_validate(request.admission) if request.admission else None
+            changed = (
+                previous is not None
+                and admission is not None
+                and previous.model_dump(exclude={"checked_at"})
+                != admission.model_dump(exclude={"checked_at"})
+            )
+            if request.state == "batched" and (admission is None or changed):
+                await self._invalidate(session, await self._active_batch(session), now, None)
+            request.admission = admission.model_dump(mode="json") if admission else None
+            request.blocked_reason, request.updated_by = reason, None
+            request.last_checked_at = now
+            if terminal:
+                request.state, request.finished_at = ("merged" if merged else "withdrawn"), now
+            elif admission is None:
+                request.state, request.queued_at = "waiting_for_review", None
+            elif request.state != "batched":
+                request.state = "queued"
+                request.queued_at = request.queued_at or now
+
+    @staticmethod
+    def _ready(
+        request: MergeRequest,
+        now: datetime,
+        base_sha: str,
+        policy: QueuePolicy,
+        preceding: set[int],
+    ) -> bool:
+        if request.admission is None or request.blocked_reason:
+            return False
+        admission = Admission.model_validate(request.admission)
+        return (
+            admission.head_sha == request.head_sha
+            and admission.base_sha == base_sha
+            and admission.policy_digest == policy.fingerprint
+            and timedelta(0) <= now - admission.checked_at <= timedelta(seconds=120)
+            and not (set(request.dependencies) - set(admission.merged_dependencies) - preceding)
+        )
+
+    async def schedule(self, base_sha: str, policy: QueuePolicy, lease: Lease) -> Batch | None:
+        async with self._locked(lease) as (session, queue, now):
+            active = await session.scalar(
+                select(Batch).where(Batch.queue_id == queue.id, Batch.state == "active")
+            )
+            if active is not None and (
+                active.base_sha != base_sha
+                or active.policy != policy.model_dump(mode="json")
+                or active.deadline <= now
+            ):
+                await self._invalidate(session, active, now, None)
+                return None
+            if queue.paused:
+                return None
+            if active is not None:
+                return active
+            entries = await self._entries(session)
+            selected: list[MergeRequest] = []
+            preceding: set[int] = set()
+            while len(selected) < policy.max_batch_size:
+                for entry in entries:
+                    request = entry.request
+                    if (
+                        entry.number not in preceding
+                        and request.state == "queued"
+                        and self._ready(request, now, base_sha, policy, preceding)
+                    ):
+                        selected.append(request)
+                        preceding.add(entry.number)
+                        break
+                else:
+                    break
+            if not selected:
+                return None
+            oldest = min(request.queued_at or now for request in selected)
+            if len(selected) < policy.max_batch_size and now < oldest + timedelta(
+                seconds=policy.collection_seconds
+            ):
+                return None
+            return await self._save_batch(
+                session,
+                selected,
+                request_key=str(uuid7()),
+                base_sha=base_sha,
+                policy=policy.model_dump(mode="json"),
+                deadline=now + timedelta(seconds=policy.deadline_seconds),
+                max_attempts=policy.max_attempts,
+                max_plans=policy.max_plans,
+            )
+
+    async def candidate_inputs(
+        self, batch_id: UUID, lease: Lease
+    ) -> tuple[Batch, list[QueueEntry]]:
+        async with self._locked(lease) as (session, queue, now):
+            batch = await self._batch(session, batch_id)
+            if queue.paused or batch.state != "active" or batch.deadline <= now:
+                raise ValueError("Candidate is paused, inactive or expired")
+            rows = await session.execute(
+                select(MergeRequest, PullRequest.number, BatchMember.head_sha)
+                .select_from(MergeRequest)
+                .join(BatchMember)
+                .join(PullRequest, PullRequest.id == MergeRequest.pull_request_id)
+                .where(BatchMember.batch_id == batch.id, MergeRequest.queue_id == self.id)
+                .order_by(BatchMember.position)
+            )
+            preceding: set[int] = set()
+            entries: list[QueueEntry] = []
+            policy = QueuePolicy.model_validate(batch.policy)
+            for request, number, head in rows.tuples():
+                if (
+                    request.state != "batched"
+                    or head != request.head_sha
+                    or not self._ready(request, now, batch.base_sha, policy, preceding)
+                ):
+                    raise ValueError("Candidate admission is stale")
+                entries.append(QueueEntry(request, number))
+                preceding.add(number)
+            if not entries:
+                raise ValueError("Candidate has no members")
+            return batch, entries
+
+    async def begin_build(self, batch_id: UUID, lease: Lease) -> bool:
+        async with self._locked(lease) as (session, queue, now):
+            batch = await self._batch(session, batch_id)
+            if queue.paused or batch.state != "active" or batch.deadline <= now:
+                return False
+            if batch.published_at or batch.candidate_error:
+                return False
+            if batch.build_attempts >= QueuePolicy.model_validate(batch.policy).max_build_attempts:
+                batch.candidate_error = "Candidate build retry budget exhausted"
+                return False
+            batch.build_attempts += 1
+            return True
+
+    async def candidate_failed(self, batch_id: UUID, reason: str, lease: Lease) -> None:
+        async with self._locked(lease) as (session, _, _):
+            batch = await self._batch(session, batch_id)
+            if batch.state == "active":
+                batch.candidate_error = reason
+
+    async def save_candidate(
+        self, batch_id: UUID, candidate: Candidate, lease: Lease, *, published: bool = False
+    ) -> None:
+        async with self._locked(lease) as (session, queue, now):
+            batch = await self._batch(session, batch_id)
+            if (
+                queue.paused
+                or batch.state != "active"
+                or batch.deadline <= now
+                or batch.candidate_error
+            ):
+                raise ValueError("Candidate is not active")
+            repository = (
+                await session.scalars(
+                    select(Repository.full_name).where(Repository.id == queue.repository_id)
+                )
+            ).one()
+            rows = await session.execute(
+                select(BatchMember.head_sha, PullRequest.number)
+                .select_from(BatchMember)
+                .join(MergeRequest, MergeRequest.id == BatchMember.request_id)
+                .join(PullRequest, PullRequest.id == MergeRequest.pull_request_id)
+                .where(BatchMember.batch_id == batch.id)
+                .order_by(BatchMember.position)
+            )
+            if (
+                candidate.repository.lower() != f"https://github.com/{repository}.git".lower()
+                or candidate.branch != queue.target_branch
+                or candidate.base_sha != batch.base_sha
+                or list(rows.tuples()) != [(pull.sha, pull.number) for pull in candidate.pulls]
+            ):
+                raise ValueError("Candidate does not match the saved batch")
+            manifest = candidate.model_dump(mode="json")
+            if batch.candidate is not None and batch.candidate != manifest:
+                raise ValueError("Candidate manifest is immutable")
+            if published and batch.candidate is None:
+                raise ValueError("Save the manifest before publishing")
+            batch.candidate = manifest
+            if published:
+                batch.published_at = batch.published_at or now
+
+    async def expired_candidates(self, before: datetime, lease: Lease) -> list[Batch]:
+        async with self._locked(lease) as (session, _, now):
+            if before.tzinfo is None or before > now:
+                raise ValueError("Invalid retention cutoff")
+            return list(
+                await session.scalars(
+                    select(Batch)
+                    .where(
+                        Batch.queue_id == self.id,
+                        Batch.finished_at < before,
+                        Batch.candidate.is_not(None),
+                        Batch.ref_deleted_at.is_(None),
+                    )
+                    .order_by(Batch.finished_at, Batch.id)
+                    .limit(20)
+                )
+            )
+
+    async def candidate_deleted(self, batch_id: UUID, sha: str, lease: Lease) -> None:
+        async with self._locked(lease) as (session, _, now):
+            batch = await self._batch(session, batch_id)
+            if (
+                batch.state == "active"
+                or batch.candidate is None
+                or Candidate.model_validate(batch.candidate).sha != sha
+            ):
+                raise ValueError("Candidate is active or does not match deletion")
+            batch.ref_deleted_at = now

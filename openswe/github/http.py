@@ -15,21 +15,29 @@ use the typed async SDK in ``openswe.github.sdk``. This helper centralises:
 """
 
 import asyncio
+import base64
+import io
 import logging
 import random
+import tempfile
+import zipfile
 from collections.abc import AsyncIterator, Awaitable, Mapping, Sequence
 from contextlib import asynccontextmanager
 from dataclasses import dataclass
+from pathlib import Path
 from typing import TYPE_CHECKING, Any, Self
-from urllib.parse import quote
+from urllib.parse import quote, urlparse
 
 import httpx2
-from pydantic import BaseModel
+from pydantic import BaseModel, JsonValue, SecretStr, TypeAdapter
 
+from openswe.github.queue import Artifact, CommitComparison, WorkflowRun
 from openswe.utils.http_pool import pooled_transport
+from openswe.utils.url_safety import request_with_safe_redirects
 
 if TYPE_CHECKING:
     from openswe.github.pull_request_status import PullRequestClient
+    from openswe.merge_queue.git import CandidateGit
 
 logger = logging.getLogger(__name__)
 
@@ -551,6 +559,14 @@ class RepoClient:
             raise ValueError("GitHub answered the branch without an object")
         return payload
 
+    async def branch_sha(self, name: str) -> str:
+        payload = await self.branch(name)
+        commit = payload.get("commit")
+        sha = commit.get("sha") if isinstance(commit, dict) else None
+        if not isinstance(sha, str) or not sha:
+            raise ValueError("Target branch is unavailable")
+        return sha
+
     async def branch_rules(self, name: str) -> list[dict[str, Any]]:
         """The rulesets' rules that apply to branch ``name``."""
         return await self.pages(f"rules/branches/{quote(name, safe='')}")
@@ -616,6 +632,88 @@ class RepoClient:
             or orders[index] == latest[identities[index]]
         ]
 
+    async def workflow_for_suite(self, suite_id: int) -> WorkflowRun:
+        runs = await self.pages(
+            "actions/runs", key="workflow_runs", params={"check_suite_id": str(suite_id)}
+        )
+        parsed = [WorkflowRun.model_validate(run) for run in runs]
+        if len(parsed) != 1 or parsed[0].check_suite_id != suite_id:
+            raise ValueError("Required check workflow is ambiguous or unavailable")
+        return parsed[0]
+
+    async def merge_base(self, base: str, head: str) -> str:
+        payload = await self.get(
+            f"compare/{quote(base, safe='')}...{quote(head, safe='')}", {"per_page": "1"}
+        )
+        return CommitComparison.model_validate(payload).merge_base
+
+    async def admission_artifact(self, run_id: int, name: str) -> dict[str, JsonValue]:
+        artifacts = [
+            Artifact.model_validate(item)
+            for item in await self.pages(f"actions/runs/{run_id}/artifacts", key="artifacts")
+        ]
+        matches = [item for item in artifacts if item.name == name and not item.expired]
+        if len(matches) != 1:
+            raise ValueError("Admission evidence is missing or ambiguous")
+        # GitHub redirects to a signed blob URL. Never forward authorization to it.
+        response = await self.github.http.get(
+            f"{GITHUB_API_BASE}/repos/{self.full_name}/actions/artifacts/{matches[0].id}/zip",
+            follow_redirects=False,
+        )
+        if response.status_code != 302:
+            raise ValueError("Admission artifact download unavailable")
+        location = response.headers.get("location", "")
+        try:
+            async with github_client() as anonymous:
+                download = await request_with_safe_redirects(
+                    anonymous, "GET", location, validate_url=_artifact_destination, stream=True
+                )
+                try:
+                    download.raise_for_status()
+                    content = bytearray()
+                    async for chunk in download.aiter_bytes():
+                        content.extend(chunk)
+                        if len(content) > 1_000_000:
+                            raise ValueError("Admission artifact is too large")
+                finally:
+                    await download.aclose()
+        except httpx2.HTTPError:
+            # Signed artifact URLs must not appear in controller exception logs.
+            raise ValueError("Admission artifact download failed") from None
+        with zipfile.ZipFile(io.BytesIO(content)) as archive:
+            files = archive.infolist()
+            if (
+                len(files) != 1
+                or files[0].filename != "admission.json"
+                or files[0].file_size > 100_000
+            ):
+                raise ValueError("Unexpected admission artifact contents")
+            return TypeAdapter(dict[str, JsonValue]).validate_json(archive.read(files[0]))
+
+    @asynccontextmanager
+    async def candidate_git(self) -> AsyncIterator[CandidateGit]:
+        """Fresh isolated object store using this client's controller credentials."""
+        from openswe.github.repo_names import normalize_repo_full_name
+        from openswe.merge_queue.git import CandidateGit
+
+        repository = normalize_repo_full_name(self.full_name)
+        authorization = self.github.http.headers.get("Authorization")
+        if self.github.login is not None or not authorization:
+            raise ValueError("Candidate writes require an explicitly supplied controller identity")
+        with tempfile.TemporaryDirectory(prefix="merge-queue-") as directory:
+            git = CandidateGit(
+                Path(directory) / "objects.git",
+                f"https://github.com/{repository}.git",
+                authorization=SecretStr(
+                    "Basic "
+                    + base64.b64encode(
+                        f"x-access-token:{authorization.removeprefix('Bearer ')}".encode()
+                    ).decode()
+                ),
+            )
+            await git.initialize()
+            yield git
+
     async def commit_statuses(self, sha: str) -> list[dict[str, Any]]:
         """The latest status per context on ``sha``."""
         latest: dict[str, dict[str, Any]] = {}
@@ -624,6 +722,19 @@ class RepoClient:
             if isinstance(context, str):
                 latest.setdefault(context, status)
         return list(latest.values())
+
+
+def _artifact_destination(location: str) -> None:
+    url = urlparse(location)
+    if (
+        url.scheme != "https"
+        or not url.hostname
+        or not url.hostname.endswith((".blob.core.windows.net", ".actions.githubusercontent.com"))
+        or url.username
+        or url.password
+        or url.port not in (None, 443)
+    ):
+        raise ValueError("Untrusted artifact download destination")
 
 
 async def or_none[T](read: Awaitable[T]) -> T | None:

@@ -47,6 +47,13 @@ class MergeRequest(Record):
     head_sha: Mapped[str]
     state: Mapped[RequestState] = mapped_column(Text, default="waiting_for_review")
     priority: Mapped[int] = mapped_column(default=0)
+    dependencies: Mapped[list[int]] = mapped_column(JSONB, default_factory=list)
+    admission: Mapped[dict[str, JsonValue] | None] = mapped_column(
+        JSONB(none_as_null=True), default=None
+    )
+    blocked_reason: Mapped[str | None] = mapped_column(default=None)
+    queued_at: Mapped[datetime | None] = mapped_column(default=None)
+    last_checked_at: Mapped[datetime | None] = mapped_column(default=None)
     finished_at: Mapped[datetime | None] = mapped_column(default=None)
 
 
@@ -60,6 +67,13 @@ class Batch(Record):
     deadline: Mapped[datetime]
     max_attempts: Mapped[int]
     max_plans: Mapped[int]
+    candidate: Mapped[dict[str, JsonValue] | None] = mapped_column(
+        JSONB(none_as_null=True), default=None
+    )
+    build_attempts: Mapped[int] = mapped_column(default=0)
+    candidate_error: Mapped[str | None] = mapped_column(default=None)
+    published_at: Mapped[datetime | None] = mapped_column(default=None)
+    ref_deleted_at: Mapped[datetime | None] = mapped_column(default=None)
     state: Mapped[Literal["active", "landed", "invalidated"]] = mapped_column(
         Text, default="active"
     )
