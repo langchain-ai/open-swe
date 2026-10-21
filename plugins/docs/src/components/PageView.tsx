@@ -668,10 +668,11 @@ function Viewers({
         return (
           <span
             key={viewer.login}
-            className="rounded-full ring-2 ring-[var(--bg-primary)]"
+            className="flex rounded-full ring-2 ring-[var(--bg-primary)]"
           >
             <Avatar
-              size="xs"
+              size="md"
+              shape="circle"
               label={name}
               imageUrl={person?.picture ?? undefined}
               color={viewer.color}

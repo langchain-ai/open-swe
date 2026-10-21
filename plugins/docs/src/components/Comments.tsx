@@ -184,7 +184,8 @@ function Author({
   return (
     <div className="flex items-center gap-space-2">
       <Avatar
-        size="xs"
+        size="sm"
+        shape="circle"
         label={person?.name ?? login}
         imageUrl={person?.picture ?? undefined}
         color={colorFor(login)}
