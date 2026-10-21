@@ -61,6 +61,9 @@ _PATH_ARGUMENTS: Final = {
 _GUARDED_WORDS: Final = re.compile(r"\b(?:push|gh|pulls)\b")
 _SHELL: Final = re.compile(r"\b(?:ba|da|z)?sh\b")
 _GUARDED_SHELLS: Final = 3
+# The guards read a command as the shell splits it, with its quotes and escapes gone,
+# and the shell joins a line it continues.
+_QUOTING: Final = re.compile(r"\\\n|[\"'\\]")
 # As the backend's sandbox: the client gives up on a command the sandbox never
 # answers 30 seconds past its own timeout.
 _EXECUTE_GRACE_SECONDS: Final = 30
@@ -234,7 +237,8 @@ class SandboxToolsMiddleware(AgentMiddleware):
 
 
 def _guarded(command: str) -> bool:
-    return bool(_GUARDED_WORDS.search(command)) or len(_SHELL.findall(command)) >= _GUARDED_SHELLS
+    unquoted = _QUOTING.sub("", command)
+    return bool(_GUARDED_WORDS.search(unquoted)) or len(_SHELL.findall(unquoted)) >= _GUARDED_SHELLS
 
 
 def _absolute(path: object) -> str | None:
