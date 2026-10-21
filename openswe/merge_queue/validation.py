@@ -1,5 +1,7 @@
 """Reconcile saved CI intent using GitHub's authenticated run, job and artifact APIs."""
 
+from datetime import timedelta
+
 from pydantic import JsonValue
 
 from openswe.github.http import GitHubError, RepoClient
@@ -58,7 +60,10 @@ class CandidateValidation:
             return
         try:
             # Search even after binding: a second matching run makes the attempt ambiguous.
-            runs = await self.repo.validation_runs(WORKFLOW, attempt.created_at)
+            # Allow for skew between the database and GitHub clocks.
+            runs = await self.repo.validation_runs(
+                WORKFLOW, attempt.created_at - timedelta(minutes=5)
+            )
             matches = {
                 run.id: run
                 for run in runs

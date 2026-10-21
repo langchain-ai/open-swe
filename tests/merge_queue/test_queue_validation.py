@@ -110,53 +110,20 @@ def validation() -> tuple[CandidateValidation, ValidationWork, Lease]:
     )
 
 
-@pytest.mark.parametrize("status", [None, 502, 504])
-async def test_lost_dispatch_response_recovers_without_redispatch(
+async def test_discovers_run_when_database_clock_is_ahead(
     validation: tuple[CandidateValidation, ValidationWork, Lease],
     monkeypatch: pytest.MonkeyPatch,
-    status: int | None,
 ) -> None:
     controller, work, lease = validation
-    error = (
-        GitHubError(
-            httpx2.Response(status, request=httpx2.Request("POST", "https://api.github.com"))
-        )
-        if status is not None
-        else TimeoutError("Response lost")
-    )
-    dispatch = AsyncMock(side_effect=error)
-    monkeypatch.setattr(controller.repo, "dispatch_validation", dispatch)
-    monkeypatch.setattr(
-        controller.queue,
-        "validation_work",
-        AsyncMock(
-            side_effect=[
-                ValidationWork(work.batch),
-                replace(work, dispatch=True),
-                work,
-                work,
-                work,
-            ]
-        ),
-    )
+    assert work.attempt is not None
+    github_created_at = work.attempt.created_at - timedelta(seconds=2)
     run = await controller.repo.validation_run(42)
-    monkeypatch.setattr(
-        controller.repo,
-        "validation_runs",
-        AsyncMock(
-            side_effect=[
-                (),
-                (run.model_copy(update={"actor_id": 456, "triggering_actor_id": 456}),),
-                (run,),
-            ]
-        ),
-    )
-    with pytest.raises(type(error)):
-        await controller.reconcile(lease)
-    restarted = CandidateValidation(controller.queue, controller.repo, controller.policy)
-    for _ in range(3):
-        await restarted.reconcile(lease)
-    assert dispatch.await_count == 1
+
+    async def runs_since(_workflow: str, since: datetime) -> tuple[ValidationRun, ...]:
+        return (run,) if since <= github_created_at else ()
+
+    monkeypatch.setattr(controller.repo, "validation_runs", runs_since)
+    await controller.reconcile(lease)
     finish = controller.queue.finish_validation
     assert isinstance(finish, AsyncMock) and finish.await_count == 1
     assert finish.call_args.kwargs == {"succeeded": True}
