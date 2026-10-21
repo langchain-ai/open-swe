@@ -373,3 +373,62 @@ async def test_mda_catalog_leaves_integrations_and_code_mode_to_mda(
     assert "private-gateway" not in str(catalog)
     assert catalog["code_only"] == ["manage_thread", "mcp_search"]
     assert catalog["also_from_code"] == ["read_file"]
+
+
+async def test_an_unreachable_sandbox_ends_the_mda_run_after_telling_the_user_once(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The call hook fails rather than handing the model an error to carry on from.
+
+    Its failure fails the MDA run's tool call, so the run ends as it does in-process,
+    and parallel calls that hit the same dead sandbox do not notify the user again.
+    """
+    import asyncio
+    from unittest.mock import AsyncMock
+
+    from langchain.agents import create_agent
+    from langchain_core.language_models.fake_chat_models import FakeListChatModel
+    from langchain_core.tools import StructuredTool
+    from langsmith.sandbox import SandboxConnectionError
+
+    from openswe.middleware.tool_error_handler import ToolErrorMiddleware
+    from openswe.remote_runtime.graph import RemoteGraph
+    from openswe.sandboxes.tool_runtime import ToolSurface
+
+    async def execute(command: str) -> str:
+        raise SandboxConnectionError("WebSocket upgrade to sb-dead failed")
+
+    async def build(config: object, surface: ToolSurface) -> None:
+        tool = StructuredTool.from_function(coroutine=execute, name="execute", description="Run")
+        surface.graph = create_agent(
+            FakeListChatModel(responses=[]), tools=[tool], middleware=[ToolErrorMiddleware()]
+        )
+
+    async def start_models(cfg: object) -> object:
+        raise AssertionError("not asked for")
+
+    notify = AsyncMock()
+    monkeypatch.setattr(
+        "openswe.middleware.tool_error_handler.post_sandbox_unreachable_notification", notify
+    )
+    graph = RemoteGraph("agent", build, start_models)
+    await graph.session(RUN, "run-1")
+
+    def call(tool_call_id: str) -> dict[str, object]:
+        return {
+            "run_id": "run-1",
+            "name": "execute",
+            "arguments": {"command": "ls"},
+            "tool_call_id": tool_call_id,
+        }
+
+    results = await asyncio.gather(
+        graph.hook(RUN, "call", call("call-1")),
+        graph.hook(RUN, "call", call("call-2")),
+        return_exceptions=True,
+    )
+
+    assert all(isinstance(result, SandboxConnectionError) for result in results)
+    notify.assert_awaited_once()
+    assert notify.await_args is not None
+    assert notify.await_args.kwargs == {"sandbox_id": "sb-dead"}
