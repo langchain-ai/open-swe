@@ -1,6 +1,6 @@
 # @openswe/plugin-sdk
 
-Build plugins for the [Open SWE](https://github.com/langchain-ai/open-swe) dashboard.
+Build web plugins for [Open SWE](https://github.com/langchain-ai/open-swe).
 
 A plugin is a web app in a GitHub repository. Open SWE runs it full screen from
 its sidebar, in a sandboxed frame whose policy blocks its own requests:

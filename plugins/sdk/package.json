@@ -1,7 +1,7 @@
 {
   "name": "@openswe/plugin-sdk",
   "version": "0.1.0",
-  "description": "Build Open SWE dashboard plugins: the frame protocol, a client, React bindings and a Yjs provider for live rooms",
+  "description": "Build Open SWE web plugins: the frame protocol, a client, React bindings and a Yjs provider for live rooms",
   "license": "MIT",
   "type": "module",
   "sideEffects": false,

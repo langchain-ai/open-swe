@@ -1,4 +1,4 @@
-# Building Dashboard Plugins
+# Building Web Plugins
 
 A plugin is a web app that people install from a GitHub repository. It gets an entry in the dashboard's sidebar and opens full screen there. It runs in a sandboxed frame with no network access and reaches Open SWE only through the dashboard's plugin API, acting as the person using it and never beyond what they allowed. A plugin ships no backend code.
 
