@@ -8,7 +8,7 @@ point a call elsewhere. Every call is ``POST /remote-runtime/hooks/{hook}``.
 import asyncio
 import logging
 import os
-from collections.abc import Iterator, Mapping, Sequence
+from collections.abc import Coroutine, Iterator, Mapping, Sequence
 from contextlib import contextmanager
 from contextvars import ContextVar
 from typing import Final, Literal
@@ -46,6 +46,8 @@ Hook = Literal[
     "tool_result",
     # The thread's box was replaced: the backend connects to the fresh one.
     "sandbox",
+    # A tool this runtime ran in the box found it gone: the backend tells the person.
+    "sandbox_unreachable",
     # The LangSmith browser MDA gave the thread's agent, for the dashboard to show.
     "browser",
 ]
@@ -219,6 +221,7 @@ class OpenSweBackend:
             raise BackendCallError(f"{BACKEND_URL_ENV} is not configured")
         self._base = base
         self._run_token = run_token
+        self.reports = ToolReports(self)
 
     @property
     def has_run(self) -> bool:
@@ -311,3 +314,41 @@ class OpenSweBackend:
     async def tool_result(self, body: Mapping[str, JsonValue], result: ToolMessage) -> None:
         [message] = _json_list.validate_python(messages_to_dict([result]))
         await self.call("tool_result", {**body, "result": message})
+
+
+class ToolReports:
+    """Tell the backend's transcript about the tool calls this runtime runs, off their path.
+
+    Reports go out in the order they were made, one after another, while the calls
+    carry on. A report the backend could not take is logged and dropped: the call
+    it describes has run either way.
+    """
+
+    def __init__(self, backend: OpenSweBackend) -> None:
+        self._backend = backend
+        self._last: asyncio.Task[None] | None = None
+
+    def started(self, body: Mapping[str, JsonValue]) -> None:
+        self._send(self._backend.tool_started(body))
+
+    def finished(self, body: Mapping[str, JsonValue], result: ToolMessage) -> None:
+        self._send(self._backend.tool_result(body, result))
+
+    async def drain(self) -> None:
+        """Wait for every report made so far, so the transcript has them before what follows."""
+        if self._last is not None:
+            await asyncio.shield(self._last)
+
+    def _send(self, report: Coroutine[object, object, None]) -> None:
+        self._last = asyncio.ensure_future(self._after(self._last, report))
+
+    @staticmethod
+    async def _after(
+        previous: asyncio.Task[None] | None, report: Coroutine[object, object, None]
+    ) -> None:
+        if previous is not None:
+            await previous
+        try:
+            await report
+        except Exception:
+            logger.warning("The backend did not record a tool call", exc_info=True)

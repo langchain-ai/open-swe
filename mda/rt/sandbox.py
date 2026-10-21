@@ -5,7 +5,12 @@ the box MDA reports and keeps its proxy config. Kept free of ``managed_deepagent
 so the backend's tests can import this package.
 """
 
+from typing import Literal
+
 from pydantic import BaseModel, JsonValue
+
+# The graph's tool-call middleware this runtime applies to the calls it runs in the box.
+SandboxCheck = Literal["tool_errors", "image_reads", "agents_md", "push_guards"]
 
 
 class SandboxCreate(BaseModel):
@@ -23,3 +28,8 @@ class SandboxSpec(BaseModel):
     create: SandboxCreate
     # The thread whose box this one works in, a task worker's coordinator; None for its own.
     thread_id: str | None = None
+    # The file and shell tools this runtime runs in the box itself, rather than the backend.
+    tools: list[str] = []
+    checks: list[SandboxCheck] = []
+    # Paths the graph's file tools read from the backend, such as skills.
+    backend_paths: list[str] = []

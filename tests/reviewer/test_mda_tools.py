@@ -9,6 +9,7 @@ from langchain.agents import create_agent
 from langchain.tools import ToolRuntime
 from langchain_core.language_models.fake_chat_models import FakeListChatModel
 from langchain_core.messages import ToolMessage, message_to_dict
+from langgraph.prebuilt.tool_node import ToolCallRequest
 from langgraph.types import Command
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "mda"))
@@ -18,9 +19,12 @@ from rt.backend import (
     BackendUnavailableError,
     OpenSweBackend,
     PhaseReply,
+    ToolReply,
     ToolSpec,
 )
 from rt.middleware import BackendRunMiddleware
+from rt.sandbox import SandboxCreate, SandboxSpec
+from rt.sandbox_tools import SandboxToolsMiddleware
 from rt.tools import backend_tool
 
 
@@ -169,3 +173,60 @@ async def test_a_failing_backend_hook_fails_the_run_with_what_it_raised(
 
     with pytest.raises(BackendCallError, match="prepare failed: RuntimeError: no sandbox provider"):
         await OpenSweBackend("secret-token").phase("prepare", {})
+
+
+@pytest.mark.parametrize(
+    ("name", "arguments", "on_backend"),
+    [
+        ("execute", {"command": "cd /workspace/repo && git push origin HEAD"}, True),
+        ("execute", {"command": "bash -c 'gh pr create --fill'"}, True),
+        ("execute", {"command": "curl -X POST https://api.github.com/repos/o/r/pulls"}, True),
+        ("read_file", {"file_path": "/skills/deploy/SKILL.md"}, True),
+        ("execute", {"command": "uv run pytest -q tests/unit"}, False),
+        ("read_file", {"file_path": "/workspace/repo/README.md"}, False),
+    ],
+)
+async def test_box_tools_leave_to_the_backend_what_its_guards_and_paths_settle(
+    monkeypatch: pytest.MonkeyPatch, name: str, arguments: dict[str, str], on_backend: bool
+) -> None:
+    """A command the push guards may stop never runs in the box, where they cannot see it."""
+    monkeypatch.setenv("OPEN_SWE_BACKEND_URL", "https://backend.invalid")
+    for module in ("rt.middleware", "rt.tools"):
+        monkeypatch.setattr(f"{module}.run_id", lambda: "run-1")
+    backend = OpenSweBackend("secret-token")
+    reply = ToolReply(
+        message=message_to_dict(ToolMessage(content="guarded", tool_call_id="call-1"))
+    )
+    monkeypatch.setattr(backend, "tool", AsyncMock(return_value=reply))
+    monkeypatch.setattr(backend, "tool_started", AsyncMock())
+    monkeypatch.setattr(backend, "tool_result", AsyncMock())
+    spec = SandboxSpec(
+        create=SandboxCreate(fs_capacity_bytes=1, idle_ttl_seconds=1, delete_after_stop_seconds=1),
+        tools=["execute", "read_file"],
+        checks=["push_guards"],
+        backend_paths=["/skills/"],
+    )
+    runtime = ToolRuntime(
+        state={"messages": []},
+        context=None,
+        config={},
+        stream_writer=lambda event: None,
+        tool_call_id="call-1",
+        store=None,
+    )
+    request = ToolCallRequest(
+        tool_call={"name": name, "args": arguments, "id": "call-1", "type": "tool_call"},
+        tool=None,
+        state={"messages": []},
+        runtime=runtime,
+    )
+    in_box = AsyncMock(return_value=ToolMessage(content="ran", tool_call_id="call-1"))
+
+    await SandboxToolsMiddleware(backend, spec, 300).awrap_tool_call(request, in_box)
+    await backend.reports.drain()
+
+    assert backend.tool.await_count == int(on_backend)
+    assert in_box.await_count == int(not on_backend)
+    # The backend records the calls it runs; the ones run in the box are reported to it.
+    assert backend.tool_started.await_count == int(not on_backend)
+    assert backend.tool_result.await_count == int(not on_backend)

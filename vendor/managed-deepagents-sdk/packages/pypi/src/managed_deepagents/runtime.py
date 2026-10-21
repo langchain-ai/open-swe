@@ -1840,9 +1840,13 @@ class _LazyManagedSandboxBackend(SandboxBackendProtocol):
         return backend
 
     def _recover(self, backend: SandboxBackendProtocol, error: Exception) -> None:
+        from managed_deepagents.sandbox import recovers  # noqa: PLC0415
+
         if not _is_sandbox_not_found_error(error):
             return
         source = self._source
+        if not recovers(source.sandbox.options):
+            return
         config = self._config()
         previous_name = _peek_managed_host_name(
             _sandbox_scope_key(source.sandbox, config, source.selection_fingerprint)
