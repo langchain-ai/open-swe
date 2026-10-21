@@ -16,6 +16,7 @@ from typing import Final
 import httpx2
 
 from openswe.remote_runtime.client import mda_runtime_url
+from openswe.utils.http_pool import pooled_transport
 
 logger = logging.getLogger(__name__)
 
@@ -46,7 +47,9 @@ async def forward_to_mda_channel(body: bytes, headers: Mapping[str, str]) -> Non
     url = f"{mda_runtime_url()}{CHANNEL_EVENTS_PATH}"
     delivery = headers.get("X-GitHub-Delivery", "")
     backoff = _FIRST_BACKOFF_SECONDS
-    async with httpx2.AsyncClient(timeout=_TIMEOUT_SECONDS, follow_redirects=False) as client:
+    async with httpx2.AsyncClient(
+        transport=pooled_transport(), timeout=_TIMEOUT_SECONDS, follow_redirects=False
+    ) as client:
         for attempt in range(1, _ATTEMPTS + 1):
             try:
                 response = await client.post(url, content=body, headers=dict(headers))

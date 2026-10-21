@@ -142,9 +142,10 @@ def _mda(
 
     def client(**kwargs: Any) -> httpx2.AsyncClient:
         assert kwargs["follow_redirects"] is False
-        return real_client(transport=httpx2.MockTransport(recording), **kwargs)
+        return real_client(**kwargs)
 
     monkeypatch.setattr(forwarding.httpx2, "AsyncClient", client)
+    monkeypatch.setattr(forwarding, "pooled_transport", lambda: httpx2.MockTransport(recording))
     return seen
 
 
