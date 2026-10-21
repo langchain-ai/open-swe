@@ -6,7 +6,7 @@ requires-python = ">=3.12"
 dependencies = [
     "managed-deepagents",
     # Tool-call middleware shared with the backend (../shared/README.md).
-    "open-swe-shared",
+    "osweshared",
     "deepagents==0.7.29",
     "langchain[mcp]>=1.4.6",
     "langchain-anthropic>=1.7.6",
@@ -25,7 +25,7 @@ dependencies = [
 # Editable, so that CLI is read from the source tree.
 [tool.uv.sources]
 managed-deepagents = { path = "../vendor/managed-deepagents-sdk/packages/pypi", editable = true }
-open-swe-shared = { path = "../shared", editable = true }
+osweshared = { path = "../shared", editable = true }
 
 [tool.mda]
 # bsdiff4 (via langchain-quickjs) has no 3.14 wheels and MDA build images have no compiler: langchain-ai/deepagents#6878.

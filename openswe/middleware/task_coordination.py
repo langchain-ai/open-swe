@@ -7,7 +7,7 @@ from langchain.agents.middleware import AgentState
 from langchain.agents.middleware.types import ModelRequest, ModelResponse
 from langchain_core.messages import SystemMessage
 from langgraph.runtime import Runtime
-from openswe_shared.trace import OpenSWEMiddleware
+from osweshared.trace import OpenSWEMiddleware
 
 from openswe.database import postgres
 from openswe.github.proxy import maybe_refresh_proxy_token

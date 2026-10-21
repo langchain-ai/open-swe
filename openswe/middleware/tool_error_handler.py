@@ -6,7 +6,7 @@ from typing import Any
 
 from langgraph.config import get_config
 from langgraph.prebuilt.tool_node import ToolCallRequest
-from openswe_shared.tool_error_handler import BaseToolErrorMiddleware
+from osweshared.tool_error_handler import BaseToolErrorMiddleware
 
 from openswe.middleware.sandbox_circuit_breaker import post_sandbox_unreachable_notification
 

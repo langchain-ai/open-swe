@@ -2527,8 +2527,8 @@ dependencies = [
     { name = "langsmith" },
     { name = "markdown-it-py" },
     { name = "markdownify" },
-    { name = "open-swe-shared" },
     { name = "openai" },
+    { name = "osweshared" },
     { name = "pillow" },
     { name = "pygments" },
     { name = "pyjwt" },
@@ -2601,8 +2601,8 @@ requires-dist = [
     { name = "langsmith", specifier = ">=0.14.11" },
     { name = "markdown-it-py", specifier = "==4.2.0" },
     { name = "markdownify", specifier = ">=1.2.3" },
-    { name = "open-swe-shared", editable = "shared" },
     { name = "openai", specifier = ">=3.10.0,<4.0.0" },
+    { name = "osweshared", editable = "shared" },
     { name = "pillow", specifier = ">=12.1.0" },
     { name = "pygments", specifier = ">=2.21.0" },
     { name = "pyjwt", specifier = ">=2.13.0" },
@@ -2617,27 +2617,6 @@ requires-dist = [
     { name = "websockets", specifier = ">=16.1.1" },
 ]
 provides-extras = ["dev", "sandbox-daytona", "sandbox-modal", "sandbox-runloop", "sandbox-e2b", "sandbox-providers"]
-
-[[package]]
-name = "open-swe-shared"
-version = "0.0.0"
-source = { editable = "shared" }
-dependencies = [
-    { name = "deepagents" },
-    { name = "langchain" },
-    { name = "langchain-core" },
-    { name = "langgraph" },
-    { name = "langsmith" },
-]
-
-[package.metadata]
-requires-dist = [
-    { name = "deepagents" },
-    { name = "langchain" },
-    { name = "langchain-core" },
-    { name = "langgraph" },
-    { name = "langsmith" },
-]
 
 [[package]]
 name = "openai"
@@ -2852,6 +2831,27 @@ wheels = [
     { url = "https://files.pythonhosted.org/packages/a3/9a/900a6b9b413e0f8a471cf07830f9cf65939af039a362204b36bd5b581d8b/ormsgpack-1.12.2-cp314-cp314t-manylinux_2_17_aarch64.manylinux2014_aarch64.whl", hash = "sha256:4ee766d2e78251b7a63daf1cddfac36a73562d3ddef68cacfb41b2af64698033", size = 203170, upload-time = "2026-01-18T20:55:44.469Z" },
     { url = "https://files.pythonhosted.org/packages/87/4c/27a95466354606b256f24fad464d7c97ab62bce6cc529dd4673e1179b8fb/ormsgpack-1.12.2-cp314-cp314t-manylinux_2_17_x86_64.manylinux2014_x86_64.whl", hash = "sha256:292410a7d23de9b40444636b9b8f1e4e4b814af7f1ef476e44887e52a123f09d", size = 212816, upload-time = "2026-01-18T20:55:23.501Z" },
     { url = "https://files.pythonhosted.org/packages/73/cd/29cee6007bddf7a834e6cd6f536754c0535fcb939d384f0f37a38b1cddb8/ormsgpack-1.12.2-cp314-cp314t-win_amd64.whl", hash = "sha256:837dd316584485b72ef451d08dd3e96c4a11d12e4963aedb40e08f89685d8ec2", size = 117232, upload-time = "2026-01-18T20:55:45.448Z" },
+]
+
+[[package]]
+name = "osweshared"
+version = "0.0.0"
+source = { editable = "shared" }
+dependencies = [
+    { name = "deepagents" },
+    { name = "langchain" },
+    { name = "langchain-core" },
+    { name = "langgraph" },
+    { name = "langsmith" },
+]
+
+[package.metadata]
+requires-dist = [
+    { name = "deepagents" },
+    { name = "langchain" },
+    { name = "langchain-core" },
+    { name = "langgraph" },
+    { name = "langsmith" },
 ]
 
 [[package]]

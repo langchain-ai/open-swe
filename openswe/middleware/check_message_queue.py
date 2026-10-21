@@ -13,7 +13,7 @@ from langchain.agents.middleware import before_model
 from langgraph.config import get_config
 from langgraph.runtime import Runtime
 from langgraph_sdk import get_client
-from openswe_shared.trace import scrub_middleware_inputs
+from osweshared.trace import scrub_middleware_inputs
 
 from openswe.dashboard.options import model_supports_images
 from openswe.input_messages import (

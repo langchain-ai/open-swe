@@ -36,7 +36,7 @@ from langgraph.prebuilt.tool_node import ToolCallRequest, ToolRuntime
 from langgraph.runtime import Runtime
 from langgraph.types import Command as GraphCommand
 from langgraph_sdk import get_client
-from openswe_shared.trace import OpenSWEMiddleware
+from osweshared.trace import OpenSWEMiddleware
 from pydantic import JsonValue
 from pydantic_core import PydanticSerializationError, to_jsonable_python
 from sqlalchemy import text as sql

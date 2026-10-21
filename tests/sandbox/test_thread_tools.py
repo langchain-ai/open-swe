@@ -16,7 +16,7 @@ from langchain_core.runnables import RunnableConfig
 from langchain_core.tools import StructuredTool
 from langgraph.prebuilt.tool_node import ToolCallRequest
 from langgraph.types import Command
-from openswe_shared.trace import OpenSWEMiddleware
+from osweshared.trace import OpenSWEMiddleware
 
 from openswe.middleware.dynamic_tools import DynamicToolMiddleware
 from openswe.sandboxes import tool_access

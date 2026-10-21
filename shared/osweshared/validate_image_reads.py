@@ -18,7 +18,7 @@ from langchain_core.messages import ToolMessage
 from langgraph.prebuilt.tool_node import ToolCallRequest
 from langgraph.types import Command
 
-from openswe_shared.trace import OpenSWEMiddleware
+from osweshared.trace import OpenSWEMiddleware
 
 _IMAGE_SIGNATURES: tuple[tuple[bytes, ...], ...] = (
     (b"\x89PNG\r\n\x1a\n",),

@@ -12,7 +12,7 @@ from langchain_core.messages import HumanMessage, SystemMessage, ToolMessage
 from langchain_core.tools import BaseTool, StructuredTool
 from langgraph.config import get_config
 from langgraph.types import Command
-from openswe_shared.trace import OpenSWEMiddleware
+from osweshared.trace import OpenSWEMiddleware
 
 from openswe.incidents import documents, service
 from openswe.incidents.evidence_tools import EvidenceCollector, source_url

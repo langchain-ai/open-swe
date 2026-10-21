@@ -27,7 +27,7 @@ from openswe.monitors.delivery import POLL_JOB_KIND as MONITOR_POLL
 from openswe.monitors.delivery import poll_monitors
 
 __all__ = ["WORKER"]
-from openswe_shared.tool_error_handler import is_transient_sandbox_error
+from osweshared.tool_error_handler import is_transient_sandbox_error
 
 from openswe.reconcile import reconcile_stale_runs
 from openswe.sandboxes.retry import SANDBOX_ATTACH_MAX_ELAPSED, retry_transient_sandbox_errors

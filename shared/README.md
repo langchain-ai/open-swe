@@ -1,4 +1,4 @@
-# open-swe-shared
+# osweshared
 
 Tool-call middleware that both the Open SWE backend (`openswe/`) and its Managed Deep Agents runtime (`mda/`) run.
 

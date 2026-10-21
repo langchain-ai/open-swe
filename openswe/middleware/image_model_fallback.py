@@ -4,7 +4,7 @@ from collections.abc import Awaitable, Callable
 
 from langchain.agents.middleware.types import ModelRequest, ModelResponse
 from langchain_core.language_models import BaseChatModel
-from openswe_shared.trace import OpenSWEMiddleware
+from osweshared.trace import OpenSWEMiddleware
 
 
 class ImageModelFallbackMiddleware(OpenSWEMiddleware):

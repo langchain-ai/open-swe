@@ -1,5 +1,5 @@
 [project]
-name = "open-swe-shared"
+name = "osweshared"
 version = "0.0.0"
 description = "Tool-call middleware the Open SWE backend and its Managed Deep Agents runtime both run, until it all lives in MDA."
 requires-python = ">=3.12"
@@ -16,7 +16,7 @@ requires = ["hatchling"]
 build-backend = "hatchling.build"
 
 [tool.hatch.build.targets.wheel]
-packages = ["openswe_shared"]
+packages = ["osweshared"]
 
 [tool.ruff]
 extend = "../pyproject.toml"

@@ -2,7 +2,7 @@
 
 Where MDA owns the thread's box, MDA's own file and shell tools serve the graph's
 against it, with no call to the backend in between. This middleware wraps those
-calls in the graph's own tool-call middleware from ``openswe_shared``, as the
+calls in the graph's own tool-call middleware from ``osweshared``, as the
 backend's catalog lists it: tool errors become results the model can act on, a
 file posing as an image is not attached, and reading a file loads the
 ``AGENTS.md`` files above it. The transcript hears of each call alongside it.
@@ -29,9 +29,9 @@ from langchain_core.messages import ToolMessage
 from langgraph.prebuilt.tool_node import ToolCallRequest
 from langgraph.types import Command
 from langsmith.sandbox import SandboxRetryableConnectionError
-from openswe_shared.subdir_agents import BaseSubdirAgentsReadMiddleware
-from openswe_shared.tool_error_handler import BaseToolErrorMiddleware
-from openswe_shared.validate_image_reads import ValidateImageReadsMiddleware
+from osweshared.subdir_agents import BaseSubdirAgentsReadMiddleware
+from osweshared.tool_error_handler import BaseToolErrorMiddleware
+from osweshared.validate_image_reads import ValidateImageReadsMiddleware
 
 from rt.backend import OpenSweBackend, run_body
 from rt.middleware import reported

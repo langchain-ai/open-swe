@@ -26,7 +26,7 @@ from langsmith.sandbox import (
     SandboxServerReloadError,
 )
 
-from openswe_shared.trace import OpenSWEMiddleware
+from osweshared.trace import OpenSWEMiddleware
 
 logger = logging.getLogger(__name__)
 

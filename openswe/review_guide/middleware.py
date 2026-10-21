@@ -20,7 +20,7 @@ from langchain.agents.middleware.types import (
 )
 from langchain_core.messages import HumanMessage, SystemMessage
 from langgraph.runtime import Runtime
-from openswe_shared.trace import OpenSWEMiddleware
+from osweshared.trace import OpenSWEMiddleware
 
 from openswe.prompts import prompt
 from openswe.review_guide.advance import approve_click

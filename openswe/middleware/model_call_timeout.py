@@ -13,7 +13,7 @@ import logging
 from collections.abc import Awaitable, Callable
 
 from langchain.agents.middleware.types import ModelRequest, ModelResponse
-from openswe_shared.trace import OpenSWEMiddleware
+from osweshared.trace import OpenSWEMiddleware
 
 from openswe.config import ENV
 

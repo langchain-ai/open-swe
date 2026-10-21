@@ -8,7 +8,7 @@ license = { text = "MIT" }
 dependencies = [
     "deepagents==0.7.29",
     # Tool-call middleware this backend shares with mda/ until it all moves there (shared/README.md).
-    "open-swe-shared",
+    "osweshared",
     "fastapi>=0.141.1",
     "uvicorn>=0.52.4",
     "httpx2>=2.12.0,<3.0.0",
@@ -83,7 +83,7 @@ constraint-dependencies = [
 ]
 
 [tool.uv.sources]
-open-swe-shared = { path = "shared", editable = true }
+osweshared = { path = "shared", editable = true }
 
 [build-system]
 requires = ["hatchling"]

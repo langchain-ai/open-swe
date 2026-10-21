@@ -39,7 +39,7 @@ from langchain_core.exceptions import ModelError
 from langchain_core.language_models import BaseChatModel
 from langchain_core.messages import AIMessage
 from langsmith import trace
-from openswe_shared.trace import OpenSWEMiddleware
+from osweshared.trace import OpenSWEMiddleware
 
 from openswe.utils.errors import classify_exception, error_tracking_fields, exception_fields
 

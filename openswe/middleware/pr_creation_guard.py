@@ -11,7 +11,7 @@ from langchain.agents.middleware.types import AgentState
 from langchain_core.messages import ToolMessage
 from langgraph.prebuilt.tool_node import ToolCallRequest
 from langgraph.types import Command
-from openswe_shared.trace import OpenSWEMiddleware
+from osweshared.trace import OpenSWEMiddleware
 
 _SHELL_SEPARATORS = {";", "&&", "||", "|", "&"}
 _SHELL_EXECUTABLES = {"bash", "dash", "sh", "zsh"}

@@ -29,7 +29,7 @@ _MIDDLEWARE_MODULES = {
     "task_on_failure": ".task_retry",
     "task_retry_on": ".task_retry",
     "ToolErrorMiddleware": ".tool_error_handler",
-    "ValidateImageReadsMiddleware": "openswe_shared.validate_image_reads",
+    "ValidateImageReadsMiddleware": "osweshared.validate_image_reads",
     "WorkflowPushGuardMiddleware": ".workflow_push_guard",
     "WorkspaceSkillsMiddleware": ".workspace_skills",
 }
@@ -67,7 +67,7 @@ __all__ = [
 ]
 
 if TYPE_CHECKING:
-    from openswe_shared.validate_image_reads import ValidateImageReadsMiddleware
+    from osweshared.validate_image_reads import ValidateImageReadsMiddleware
 
     from openswe.middleware.check_message_queue import check_message_queue_before_model
     from openswe.middleware.deliver_event_matches import deliver_event_matches_before_model

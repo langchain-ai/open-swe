@@ -8,7 +8,7 @@ from langchain.agents.middleware import AgentState, ModelRequest, ModelResponse
 from langchain_core.exceptions import ModelAuthenticationError
 from langchain_core.messages import AIMessage
 from langgraph.runtime import Runtime
-from openswe_shared.trace import OpenSWEMiddleware
+from osweshared.trace import OpenSWEMiddleware
 
 from openswe.agent_cost import finalize_agent_invocation_usage
 from openswe.run_config import RunConfig

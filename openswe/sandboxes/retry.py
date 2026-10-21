@@ -7,7 +7,7 @@ import time
 from collections.abc import Awaitable, Callable
 from typing import TypeVar
 
-from openswe_shared.tool_error_handler import is_transient_sandbox_error
+from osweshared.tool_error_handler import is_transient_sandbox_error
 
 logger = logging.getLogger(__name__)
 

@@ -12,7 +12,7 @@ from langchain.agents.middleware.types import (
 )
 from langchain_core.messages import SystemMessage
 from langgraph.runtime import Runtime
-from openswe_shared.trace import OpenSWEMiddleware
+from osweshared.trace import OpenSWEMiddleware
 
 from openswe.utils.startup_trace import aphase, flush_phases
 from openswe.utils.thread_reads import shared_thread_reads

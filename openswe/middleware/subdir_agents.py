@@ -2,7 +2,7 @@
 
 from deepagents.backends.protocol import BackendProtocol
 from langgraph.prebuilt.tool_node import ToolCallRequest
-from openswe_shared.subdir_agents import BaseSubdirAgentsReadMiddleware, thread_id
+from osweshared.subdir_agents import BaseSubdirAgentsReadMiddleware, thread_id
 
 from openswe.sandboxes.state import SANDBOX_BACKENDS
 

@@ -68,9 +68,9 @@ from langchain_core.tools import BaseTool
 from langchain_quickjs import CodeInterpreterMiddleware
 from langgraph.config import get_config
 from langgraph.runtime import Runtime
-from openswe_shared.subdir_agents import BaseSubdirAgentsReadMiddleware
-from openswe_shared.tool_error_handler import BaseToolErrorMiddleware
-from openswe_shared.validate_image_reads import ValidateImageReadsMiddleware
+from osweshared.subdir_agents import BaseSubdirAgentsReadMiddleware
+from osweshared.tool_error_handler import BaseToolErrorMiddleware
+from osweshared.validate_image_reads import ValidateImageReadsMiddleware
 from pydantic import BaseModel, JsonValue, TypeAdapter, ValidationError
 
 from openswe.middleware.conversation_offloading import ConversationOffloadingMiddleware
