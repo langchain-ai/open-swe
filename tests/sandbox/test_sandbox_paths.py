@@ -125,3 +125,15 @@ async def test_a_work_dir_the_identity_write_could_not_ready_is_still_probed() -
     await configure_git_identity(cast(SandboxBackendProtocol, backend))
 
     assert await resolve_sandbox_work_dir(cast(SandboxBackendProtocol, backend)) == "/home/daytona"
+
+
+async def test_home_fallback_is_reprobed_when_workspace_becomes_available() -> None:
+    backend = _FakeSandboxBackend(
+        shell_paths={"pwd": "/root", "printf '%s' \"$HOME\"": "/root"},
+        writable_dirs={"/root"},
+    )
+    sandbox = cast(SandboxBackendProtocol, backend)
+
+    assert await resolve_sandbox_work_dir(sandbox) == "/root"
+    backend.writable_dirs.add("/workspace")
+    assert await resolve_sandbox_work_dir(sandbox) == "/workspace"

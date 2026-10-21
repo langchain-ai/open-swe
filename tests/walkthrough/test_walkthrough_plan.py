@@ -4,16 +4,24 @@ import time
 from collections.abc import Callable
 from pathlib import Path
 from typing import cast
-from unittest.mock import AsyncMock
+from unittest.mock import AsyncMock, patch
 
 import pytest
-from deepagents.backends.protocol import ExecuteResponse, SandboxBackendProtocol
+from deepagents.backends.protocol import (
+    ExecuteResponse,
+    FileDownloadResponse,
+    FileUploadResponse,
+    SandboxBackendProtocol,
+)
 
 from openswe.database import postgres
 from openswe.github.pull_requests import PullRequest
 from openswe.review_guide.walk import Reader, Walk
 from openswe.sandbox_scripts.walkthrough import parse_index
-from openswe.walkthrough.checkout import HEAD_REF, MERGE_BASE_REF, PinnedCheckout
+from openswe.sandboxes.paths import resolve_checkout_dir, resolve_sandbox_work_dir
+from openswe.sandboxes.state import SandboxBackendProxy
+from openswe.tools.fetch_review_diff import fetch_review_diff
+from openswe.walkthrough.checkout import HEAD_REF, MERGE_BASE_REF, CheckoutError, PinnedCheckout
 from openswe.walkthrough.diff import Carry, DiffIndex
 from openswe.walkthrough.lines import LinePoint, LineSet
 from openswe.walkthrough.plan import (
@@ -25,7 +33,7 @@ from openswe.walkthrough.plan import (
     RangeError,
     claim,
 )
-from openswe.walkthrough.planner import PlanWorkspace
+from openswe.walkthrough.planner import PlannerUnavailableError, PlanWorkspace
 from openswe.walkthrough.record import Walkthrough
 
 pytestmark = pytest.mark.skipif(shutil.which("git") is None, reason="git is required")
@@ -487,3 +495,84 @@ async def test_a_plan_left_at_an_older_merge_base_is_replanned_without_base_bran
     assert [file.path for file in workspace.index.files] == ["feature.py"]
     stored = await Walkthrough.get(pull_request.id, with_index=True)
     assert stored is not None and stored.merge_base_sha == base
+
+
+class _WorkspaceBackend(_ShellBackend):
+    id = "workspace-sandbox"
+
+    def __init__(self, workspace: Path, *, declared: bool) -> None:
+        self.workspace = workspace
+        self.declared = declared
+
+    def get_work_dir(self) -> str | None:
+        return "/workspace" if self.declared else None
+
+    async def aexecute(self, command: str, timeout: int | None = None) -> ExecuteResponse:
+        if command == "pwd":
+            return ExecuteResponse(output="/root", exit_code=0)
+        result = await super().aexecute(command.replace("/workspace", str(self.workspace)), timeout)
+        return ExecuteResponse(
+            output=result.output.replace(str(self.workspace), "/workspace"),
+            exit_code=result.exit_code,
+        )
+
+    async def adownload_files(self, paths: list[str]) -> list[FileDownloadResponse]:
+        return [FileDownloadResponse(path=path, error="file_not_found") for path in paths]
+
+    async def aupload_files(self, files: list[tuple[str, bytes]]) -> list[FileUploadResponse]:
+        for path, content in files:
+            Path(path.replace("/workspace", str(self.workspace))).write_bytes(content)
+        return [FileUploadResponse(path=path) for path, _ in files]
+
+
+@pytest.mark.parametrize("declared", [False, True])
+async def test_review_and_walkthrough_find_workspace_checkout(
+    repo: Path, monkeypatch: pytest.MonkeyPatch, declared: bool
+) -> None:
+    base = _git(repo, "rev-parse", "HEAD").strip()
+    head = _commit(repo, {"core.py": BASE + "changed = True\n"}, "change")
+    for ref, sha in ((HEAD_REF, head), (MERGE_BASE_REF, base)):
+        _git(repo, "update-ref", ref, sha)
+    backend = _WorkspaceBackend(repo.parent, declared=declared)
+
+    async def reconnect() -> SandboxBackendProtocol:
+        return cast(SandboxBackendProtocol, backend)
+
+    proxy = SandboxBackendProxy(thread_id="workspace-test", reconnect=reconnect)
+    assert not proxy.has_backend
+    assert await resolve_sandbox_work_dir(proxy) == "/workspace"
+    assert await resolve_checkout_dir(proxy, "/root", "repo") == "/workspace/repo"
+    checkout = await PinnedCheckout.locate(proxy, "repo")
+    assert checkout.repo_dir == "/workspace/repo"
+    assert await checkout.pinned() == (base, head)
+    assert "changed = True" in await checkout.diff()
+    config = {
+        "configurable": {
+            "thread_id": "workspace-test",
+            "repo": {"owner": "acme", "name": "repo"},
+            "base_sha": base,
+            "head_sha": head,
+        }
+    }
+    monkeypatch.setattr("openswe.run_config.get_config", lambda: config)
+    with patch("openswe.tools.fetch_review_diff.get_cached_sandbox_backend", return_value=proxy):
+        result = await fetch_review_diff({"work_dir": "/root"})
+    assert result["success"] is True
+    assert result["files"] == ["core.py"]
+    assert str(result["path"]).startswith(checkout.repo_dir + "/")
+    assert (
+        "changed = True"
+        in Path(str(result["path"]).replace("/workspace", str(repo.parent))).read_text()
+    )
+
+
+async def test_walkthrough_open_distinguishes_missing_checkout_from_unpinned_refs(
+    repo: Path,
+) -> None:
+    backend = cast(SandboxBackendProtocol, _ShellBackend())
+    pull_request = AsyncMock()
+    with pytest.raises(CheckoutError, match="Repository not found.*restore or prepare"):
+        await PlanWorkspace.open(pull_request, PinnedCheckout(backend, str(repo / "missing")))
+    with pytest.raises(PlannerUnavailableError, match="try again next turn"):
+        await PlanWorkspace.open(pull_request, PinnedCheckout(backend, str(repo)))
+    assert await PinnedCheckout(backend, str(repo / "missing")).pinned(allow_missing=True) is None
