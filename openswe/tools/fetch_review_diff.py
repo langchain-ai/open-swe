@@ -1,18 +1,22 @@
 """Tool: materialize the current reviewer diff in the sandbox."""
 
 import re
-from typing import Any
+from typing import Annotated
+
+from langgraph.prebuilt import InjectedState
 
 from openswe.review.diff import changed_files, materialize_review_diff, review_diff_range
 from openswe.run_config import RunConfig
 from openswe.runtime import get_cached_sandbox_backend
-from openswe.sandboxes.paths import resolve_sandbox_work_dir
+from openswe.sandboxes.paths import resolve_checkout_dir, resolve_sandbox_work_dir
 
 _MAX_CHANGED_FILES = 200
 _REPO_NAME_RE = re.compile(r"^[A-Za-z0-9_.-]+$")
 
 
-async def fetch_review_diff() -> dict[str, Any]:
+async def fetch_review_diff(
+    state: Annotated[dict[str, object] | None, InjectedState] = None,
+) -> dict[str, object]:
     """Implement the `fetch_review_diff` tool."""
     cfg = RunConfig.from_runtime()
 
@@ -31,10 +35,17 @@ async def fetch_review_diff() -> dict[str, Any]:
             re_review=bool(cfg.re_review),
         )
         sandbox_backend = get_cached_sandbox_backend(thread_id)
-        work_dir = await resolve_sandbox_work_dir(sandbox_backend)
+        await sandbox_backend.ready()
+        prepared_dir = state.get("work_dir") if state else None
+        work_dir = (
+            prepared_dir
+            if isinstance(prepared_dir, str) and prepared_dir
+            else await resolve_sandbox_work_dir(sandbox_backend)
+        )
+        repo_dir = await resolve_checkout_dir(sandbox_backend, work_dir, repo_name)
         materialized = await materialize_review_diff(
             sandbox_backend,
-            work_dir=f"{work_dir}/{repo_name}",
+            work_dir=repo_dir,
             base_ref=base_ref,
             head_ref=head_ref,
             merge_base=merge_base,
