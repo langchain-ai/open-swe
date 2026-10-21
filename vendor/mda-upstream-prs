@@ -1,4 +1,4 @@
 897 1aa4e62bd39050f986343c68d0beb69805828363 feat(browser): browser use via define_browser
-959 2a66512c303ce961752195d0e4039b08a0fb038c feat(browser): share the thread's sandbox's localhost with its browser
-964 86ff8150deeff0a44a1277f4d2c80e3d4a251317 feat(browser): run the browser tools on Stagehand's facade
-965 309684fa27db771f9b9af0f968b040332ccfa969 feat(browser): save run code's screenshots in the sandbox, and tell the model how
+959 459823482b2b93fe4e20dda1ae6e25825fba84a7 feat(browser): share the thread's sandbox's localhost with its browser
+964 4cce3ae1f395013699d1601487b7078a8e8a11f5 feat(browser): run the browser tools on Stagehand's facade
+965 78687f8ff52c9f147affd1550142732517e32fa4 feat(browser): save run code's screenshots in the sandbox, and tell the model how

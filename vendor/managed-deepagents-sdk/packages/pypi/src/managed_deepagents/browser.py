@@ -72,8 +72,8 @@ STAGEHAND_VERSION = "4.3.0"
 #: them by paths relative to it.
 _WORKSPACE = "/workspace"
 _SCREENSHOT_PATH = (
-    "Also save the image to this absolute path in your sandbox, creating its folder, "
-    "e.g. to publish it."
+    "Only if you have a sandbox: also save the image to this absolute path in it, "
+    "creating its folder, e.g. to publish it."
 )
 #: What the model needs on top of the facade's own instructions.
 _INSTRUCTIONS = (
@@ -90,7 +90,7 @@ _WINDOWS_FILE = "/var/lib/browserd/attachments.json"
 _WINDOW_NAME = "mda"
 #: The window that shares the thread's sandbox's localhost with every window.
 _LOCALHOST_WINDOW = "mda-localhost"
-#: The extension's manifest name, which tells its service worker from other extensions'.
+#: The extension's manifest name, which tells it from other loaded extensions.
 _STAGEHAND_EXTENSION = "Stagehand Runtime"
 _CDP_TIMEOUT_S = 30
 _HTTP_TIMEOUT = httpx.Timeout(90.0)  # creating a browser waits for Chrome
@@ -98,16 +98,6 @@ _SETUP_TIMEOUT_S = 300
 _LOG = logging.getLogger("mda.browser")
 
 _EXTENSION_ZIP = "/tmp/mda-stagehand-extension.zip"  # noqa: S108 - in the browser sandbox, not here
-
-# A transport that died: reopen and try once more. Anything else (a page that
-# threw, a bad selector) goes back to the model with the session left alone.
-_DEAD_SESSION = (
-    "closed",
-    "connection",
-    "websocket",
-    "window is gone",
-    "stagehand is unavailable",
-)
 
 #: Ours, in a thread browser's instructions: it shares its sandbox's localhost.
 LOCALHOST_NOTE = (
@@ -475,13 +465,9 @@ class _CDP:
     connection: ClientConnection
     ids: itertools.count[int] = field(default_factory=itertools.count)
 
-    async def call(
-        self, method: str, params: dict[str, object] | None = None, *, session: str | None = None
-    ) -> dict[str, object]:
+    async def call(self, method: str, **params: object) -> dict[str, object]:
         command_id = next(self.ids)
-        message: dict[str, object] = {"id": command_id, "method": method, "params": params or {}}
-        if session is not None:
-            message["sessionId"] = session
+        message = {"id": command_id, "method": method, "params": params}
         await self.connection.send(json.dumps(message))
         while True:  # events and other replies share the socket
             reply = cast("dict[str, object]", json.loads(await self.connection.recv()))
@@ -506,40 +492,28 @@ async def _reinstall_stagehand(cdp_url: str, headers: dict[str, str]) -> None:
         websockets.connect(cdp_url, additional_headers=headers) as connection,
     ):
         cdp = _CDP(connection)
-        targets = cast("list[dict[str, str]]", (await cdp.call("Target.getTargets"))["targetInfos"])
-        for target in targets:
-            extension = target["url"].removeprefix("chrome-extension://")
-            if target["type"] != "service_worker" or extension == target["url"]:
-                continue
-            attached = await cdp.call(
-                "Target.attachToTarget", {"targetId": target["targetId"], "flatten": True}
-            )
-            named = await cdp.call(
-                "Runtime.evaluate",
-                {"expression": "chrome.runtime.getManifest().name", "returnByValue": True},
-                session=str(attached["sessionId"]),
-            )
-            if cast("dict[str, object]", named["result"]).get("value") == _STAGEHAND_EXTENSION:
-                await cdp.call("Extensions.uninstall", {"id": extension.split("/", 1)[0]})
-                await cdp.call("Extensions.loadUnpacked", {"path": _EXTENSION_DIR})
+        loaded = (await cdp.call("Extensions.getExtensions"))["extensions"]
+        for extension in cast("list[dict[str, str]]", loaded):
+            if extension["name"] == _STAGEHAND_EXTENSION:
+                await cdp.call("Extensions.uninstall", id=extension["id"])
+                await cdp.call("Extensions.loadUnpacked", path=_EXTENSION_DIR)
                 return
     msg = "could not find Stagehand's extension in the browser"
     raise RuntimeError(msg)
 
 
-def _dead_session(err: Exception) -> bool:
-    """Whether ``err`` means the session died, so the call is worth reopening and retrying.
+def _from_the_browser(err: Exception) -> bool:
+    """Whether a live session reported ``err``: code that threw, a page that failed, bad input.
 
-    An error the browser reported back (code that threw, a page that failed to
-    load, even one that mentions a closed connection) comes from a live session;
-    retrying would run the model's code a second time.
+    Any other error may mean the session died.
     """
     from stagehand.rpc_client import RPCError  # noqa: PLC0415
-    from stagehand_middleware.facade import StagehandFacadeExecutionError  # noqa: PLC0415
+    from stagehand_middleware.facade import (  # noqa: PLC0415
+        StagehandFacadeExecutionError,
+        StagehandFacadeInputError,
+    )
 
-    if isinstance(err, (RPCError, StagehandFacadeExecutionError)):
-        return False
-    return any(marker in str(err).lower() for marker in _DEAD_SESSION)
+    return isinstance(err, (RPCError, StagehandFacadeExecutionError, StagehandFacadeInputError))
 
 
 def _describe(err: Exception) -> str:
@@ -616,10 +590,12 @@ class BrowserMiddleware(AgentMiddleware):
     async def _call(
         self, runtime: ManagedToolRuntime, fn: Callable[[_Session], Awaitable[T]]
     ) -> T | str:
-        """Run ``fn(session)`` on the run's active tab, reopening once if the session died.
+        """Run ``fn(session)`` on the run's tab, opening the session first if needed.
 
         Errors come back as text: a browsing failure is something the model can
-        route around. Results are not clipped here: deepagents' filesystem
+        route around. One the browser did not report itself may mean the session
+        died, so it is released and the next call reconnects. Nothing is retried,
+        so no code runs twice. Results are not clipped here: deepagents' filesystem
         middleware moves a large one to a file the agent can read back.
         """
         try:
@@ -631,26 +607,22 @@ class BrowserMiddleware(AgentMiddleware):
         # Stagehand serves one client per browser: calls on a browser take turns.
         async with self._locks.setdefault(key, asyncio.Lock()):
             try:
-                for attempt in (1, 2):
-                    try:
-                        name = _browser_name(key)
-                        if key not in self._sessions:
-                            self._sessions[key] = await _open(name, self.idle_ttl_seconds)
-                        session = self._sessions[key]
-                        await self._share(session, name, key, runtime)
-                        session.thread = thread
-                        return await fn(session)
-                    except Exception as err:  # noqa: BLE001 - recover or report
-                        if _dead_session(err) and attempt == 1:
-                            await self._release(key)
-                            continue
-                        return f"error: {_describe(err)}"
+                name = _browser_name(key)
+                if key not in self._sessions:
+                    self._sessions[key] = await _open(name, self.idle_ttl_seconds)
+                session = self._sessions[key]
+                await self._share(session, name, key, runtime)
+                session.thread = thread
+                return await fn(session)
+            except Exception as err:  # noqa: BLE001 - reported to the model
+                if not _from_the_browser(err):
+                    await self._release(key)
+                return f"error: {_describe(err)}"
             finally:
                 session = self._sessions.get(key)
                 if session is not None and session.close_requested:
                     await self._release(key)
                 self._release_later(key)
-        return "error: browser unavailable"
 
     async def _share(
         self, session: _Session, name: str, key: str, runtime: ManagedToolRuntime
