@@ -1,4 +1,4 @@
-"""Browser use for a managed agent: Stagehand v4's tools on a LangSmith browser.
+"""Browser use for a managed agent: Stagehand's facade tools on a LangSmith browser.
 
 Each thread gets its own LangSmith browser, named after the deployment and
 thread so ``mda delete`` finds it. The Stagehand client lives in this process
@@ -10,6 +10,11 @@ Stagehand's engine is a Chrome extension. The first open puts Stagehand's in
 browserd's extensions directory and asks browserd to load it into the running
 Chrome. The extension then dials Chrome from inside the browser sandbox, on the
 window's own port.
+
+The tools are Stagehand's facade (``stagehand-middleware``): ``run`` code gets a
+Playwright-shaped ``page``, ``context`` and ``browser``, and the tools'
+descriptions and schemas are the facade's own. Screenshots run code saves go to
+the agent's sandbox, under ``/workspace``.
 
     # browser.py
     browser = define_browser(scope="user")
@@ -26,12 +31,14 @@ import json
 import logging
 import os
 import posixpath
-import re
 import shlex
+import shutil
+import tempfile
 import uuid
 import weakref
 from dataclasses import dataclass, field
-from typing import TYPE_CHECKING, Annotated, Literal, Required, TypedDict, TypeVar, cast
+from pathlib import Path
+from typing import TYPE_CHECKING, Literal, TypedDict, TypeVar, cast
 
 import httpx
 from deepagents.backends import CompositeBackend
@@ -45,11 +52,13 @@ from managed_deepagents.identity import ManagedServerInfo
 if TYPE_CHECKING:
     from collections.abc import Awaitable, Callable
 
-    from langchain.agents.middleware.types import AgentState
+    from langchain.agents.middleware.types import AgentState, ModelRequest, ModelResponse
+    from langchain_core.messages import ContentBlock
     from langchain_core.runnables import RunnableConfig
     from langgraph.runtime import Runtime
     from langsmith.sandbox import AsyncSandbox
     from stagehand import Page, Stagehand, StagehandBrowser
+    from stagehand_middleware.facade import StagehandFacadeTools
     from websockets.asyncio.client import ClientConnection
 
 T = TypeVar("T")
@@ -59,8 +68,20 @@ Scope = Literal["thread", "user"]
 #: ``mda`` adds this pin to the deployment's dependencies.
 STAGEHAND_VERSION = "4.3.0"
 
-RUN_TIMEOUT_MS = 60_000
-MAX_QUALITY = 100
+#: Where screenshots run code saves land in the agent's sandbox; run code names
+#: them by paths relative to it.
+_WORKSPACE = "/workspace"
+_SCREENSHOT_PATH = (
+    "Also save the image to this absolute path in your sandbox, creating its folder, "
+    "e.g. to publish it."
+)
+#: What the model needs on top of the facade's own instructions.
+_INSTRUCTIONS = (
+    f"Screenshots that run code saves go to {_WORKSPACE} in your sandbox. Give them a "
+    "relative path: `await page.screenshot({ path: 'shots/home.png' })` saves "
+    f"{_WORKSPACE}/shots/home.png. An absolute path is refused. To save the screenshot "
+    "tool's image instead, give that tool an absolute `path`."
+)
 
 _EXTENSIONS_DIR = "/var/lib/browserd/extensions"
 _EXTENSION_DIR = f"{_EXTENSIONS_DIR}/stagehand-{STAGEHAND_VERSION}"
@@ -88,78 +109,11 @@ _DEAD_SESSION = (
     "stagehand is unavailable",
 )
 
-# Descriptions are Stagehand's facade contract verbatim
-# (`packages/integrations/core/src/facade/contract.ts`); do not reword them.
-RUN_DESCRIPTION = (
-    "Browse and automate websites in the persistent browser by executing JavaScript "
-    "against a Playwright-shaped API. The code runs inside an async function with "
-    "page, context, and browser in scope (Playwright Page, BrowserContext, and "
-    "Browser); use await directly and return a JSON-serializable value when useful. "
-    'Navigate with await page.goto("https://example.com"); there is no separate '
-    "navigate or start tool. Alternatively, provide a batch of actions using IDs from "
-    "the latest snapshot. Provide exactly one of code or actions. Each action must use "
-    '"op" (never "kind") and "id" (never "ref"). Copy the bracketed snapshot ID as a '
-    'string. Examples: {"actions":[{"op":"click","id":"1-42"}]}, '
-    '{"actions":[{"op":"fill","id":"2-14","value":"Miami"}]}, '
-    '{"actions":[{"op":"select","id":"3-9","values":"Lowest price"}]}.'
-)
-SNAPSHOT_DESCRIPTION = (
-    "Capture the active page's Stagehand accessibility tree and hydrate its displayed "
-    "IDs for subsequent run actions. Every call replaces the active page's ID map."
-)
-SCREENSHOT_DESCRIPTION = (
-    "Capture a screenshot of the active page. For size-constrained MCP clients, prefer "
-    'a viewport JPEG: {"type":"jpeg","quality":40,"fullPage":false}.'
-)
-# Ours, after `run`'s contract text: a thread's browser shares its sandbox's localhost.
+# Ours, in a thread browser's instructions: it shares its sandbox's localhost.
 LOCALHOST_NOTE = (
-    " Servers running in your sandbox are reachable at http://localhost:<port> "
+    "Servers running in your sandbox are reachable at http://localhost:<port> "
     "(any port but 80 and 443)."
 )
-
-# `experimental_batch` hands the callback a worker-local batch context; the
-# async IIFE makes a top-level `return` legal in model code. The code gets lines
-# of its own, so a trailing `//` comment can't swallow the closing `})();`.
-_RUN_SOURCE = """async (batch, input) => {
-  const page = batch.page;
-  const context = batch.context;
-  return await (async () => {
-%s
-  })();
-}"""
-
-# Snapshot actions in one round trip, as Stagehand's Deep Agents integration runs them.
-_ACTIONS_SOURCE = """async (batch, input) => {
-  for (const step of input.steps) {
-    const target = batch.page.locator(step.selector);
-    if (step.op === "click") await target.click();
-    else if (step.op === "hover") await target.hover();
-    else if (step.op === "fill") await target.fill(step.value);
-    else if (step.op === "type") await target.type(step.value);
-    else if (step.op === "press") { await target.click(); await batch.page.keyPress(step.value); }
-    else if (step.op === "select") await target.selectOption(step.value);
-  }
-  return { completed: input.steps.length, url: await batch.page.url() };
-}"""
-
-
-class Action(TypedDict, total=False):
-    """A snapshot action, as Stagehand's facade contract spells it."""
-
-    op: Required[Literal["click", "hover", "fill", "type", "press", "select"]]
-    id: Required[str]
-    value: str
-    text: str
-    key: str
-    values: str | list[str]
-
-
-class _Step(TypedDict):
-    """An action resolved to the selector its snapshot ID names."""
-
-    op: str
-    selector: str
-    value: str | list[str] | None
 
 
 class _Attachment(TypedDict):
@@ -181,27 +135,38 @@ class _SavedWindows(TypedDict, total=False):
     attachments: list[_SavedWindow]
 
 
-# Each op's value field, from the contract: `type` carries `text`, `press` carries `key`.
-_ACTION_FIELDS = {"fill": "value", "type": "text", "press": "key", "select": "values"}
-# Snapshot xpaths can end at a text node, which a locator cannot target.
-_TEXT_NODE = re.compile(r"/text\(\)(?:\[\d+\])?$")
-
-
 @dataclass
 class _Session:
-    """Stagehand attached to a thread's window."""
+    """Stagehand attached to a thread's window, and the facade's tools over it."""
 
     browser: StagehandBrowser
     stagehand: Stagehand
-    ids: dict[str, dict[str, str]] = field(default_factory=dict)  # each tab's latest snapshot
     shared: str | None = None  # the sandbox whose localhost the browser shares
+    facade: StagehandFacadeTools = field(init=False)
+    #: A folder of this process where run code's screenshots wait to go to the sandbox.
+    artifacts: str = field(init=False)
+    #: Run code called `browser.close()`: release this client once the call is done.
+    close_requested: bool = False
 
-    async def page(self, thread: str | None = None) -> Page:
-        """The newest tab, or ``thread``'s own tab of a browser threads share."""
+    def __post_init__(self) -> None:
+        from stagehand_middleware.facade import StagehandFacadeTools  # noqa: PLC0415
+
+        self.artifacts = tempfile.mkdtemp(prefix="mda-browser-")
+        self.facade = StagehandFacadeTools(
+            self.stagehand,
+            artifact_root=self.artifacts,
+            on_close_requested=self._request_close,
+            quiet_wait=True,
+        )
+
+    async def _request_close(self) -> None:
+        # In place of the facade's own cleanup, which closes the browser itself.
+        self.close_requested = True
+
+    async def page(self, thread: str) -> Page:
+        """``thread``'s own tab of a browser threads share."""
         context = self.browser.context
         pages = await context.pages()
-        if thread is None:
-            return pages[-1] if pages else await context.new_page()
         tab = next((p for p in pages if p.page_id == _TABS.get(thread)), None)
         if tab is None:  # its first call, or its tab is gone
             tab = await context.new_page()
@@ -215,6 +180,7 @@ class _Session:
         with contextlib.suppress(Exception):  # best effort
             await asyncio.wait_for(self.stagehand.close(), 3)
         await _drop(self.browser)
+        shutil.rmtree(self.artifacts, ignore_errors=True)
 
 
 #: Each thread's tab in a browser threads share, by Stagehand page ID: the tab's
@@ -554,10 +520,25 @@ def _dead_session(err: Exception) -> bool:
     retrying would run the model's code a second time.
     """
     from stagehand.rpc_client import RPCError  # noqa: PLC0415
+    from stagehand_middleware.facade import StagehandFacadeExecutionError  # noqa: PLC0415
 
-    if isinstance(err, RPCError):
+    if isinstance(err, (RPCError, StagehandFacadeExecutionError)):
         return False
     return any(marker in str(err).lower() for marker in _DEAD_SESSION)
+
+
+def _describe(err: Exception) -> str:
+    """``err`` for the model: the facade's own messages as they are, others with their type."""
+    from stagehand_middleware.facade import (  # noqa: PLC0415
+        StagehandFacadeExecutionError,
+        StagehandFacadeInputError,
+    )
+
+    if isinstance(err, StagehandFacadeInputError):
+        return str(err)
+    if isinstance(err, StagehandFacadeExecutionError):  # thrown by run code: its JS name
+        return f"{err.name}: {err}"
+    return f"{type(err).__name__}: {err}"
 
 
 async def _window_port(box: AsyncSandbox, window_id: str) -> int:
@@ -602,6 +583,8 @@ class BrowserMiddleware(AgentMiddleware):
                 calls take turns.
             idle_ttl_seconds: Stop a browser after this long idle.
         """
+        from stagehand_middleware.facade import facade_instructions  # noqa: PLC0415
+
         super().__init__()
         self.scope: Scope = scope
         self.idle_ttl_seconds = idle_ttl_seconds
@@ -611,11 +594,14 @@ class BrowserMiddleware(AgentMiddleware):
         self._locks = _LOCKS
         self._releases = _RELEASES
         self.tools = self._build_tools()
+        self._instructions = f"{facade_instructions()}\n\n{_INSTRUCTIONS}"
+        if scope == "thread":
+            self._instructions += f" {LOCALHOST_NOTE}"
 
     async def _call(
-        self, runtime: ManagedToolRuntime, fn: Callable[[_Session, Page], Awaitable[T]]
+        self, runtime: ManagedToolRuntime, fn: Callable[[_Session], Awaitable[T]]
     ) -> T | str:
-        """Run ``fn(session, page)``, reopening once if the session died.
+        """Run ``fn(session)`` on the run's active tab, reopening once if the session died.
 
         Errors come back as text: a browsing failure is something the model can
         route around. Results are not clipped here: deepagents' filesystem
@@ -637,13 +623,20 @@ class BrowserMiddleware(AgentMiddleware):
                             self._sessions[key] = await _open(name, self.idle_ttl_seconds)
                         session = self._sessions[key]
                         await self._share(session, name, key, runtime)
-                        return await fn(session, await session.page(thread))
+                        if thread is not None:  # the facade acts on the active tab
+                            await session.browser.context.set_active_page(
+                                await session.page(thread)
+                            )
+                        return await fn(session)
                     except Exception as err:  # noqa: BLE001 - recover or report
                         if _dead_session(err) and attempt == 1:
                             await self._release(key)
                             continue
-                        return f"error: {type(err).__name__}: {err}"
+                        return f"error: {_describe(err)}"
             finally:
+                session = self._sessions.get(key)
+                if session is not None and session.close_requested:
+                    await self._release(key)
                 self._release_later(key)
         return "error: browser unavailable"
 
@@ -690,77 +683,141 @@ class BrowserMiddleware(AgentMiddleware):
             async with self._locks.setdefault(key, asyncio.Lock()):
                 await self._release(key)
 
-    def _build_tools(self) -> list[BaseTool]:  # noqa: C901 - three flat tool closures
-        middleware = self
+    def wrap_model_call(
+        self,
+        request: ModelRequest[None],
+        handler: Callable[[ModelRequest[None]], ModelResponse[object]],
+    ) -> ModelResponse[object]:
+        """Tell the model how the browser works, after the agent's own instructions."""
+        return handler(_with_instructions(request, self._instructions))
 
-        @tool(description=SNAPSHOT_DESCRIPTION)
-        async def snapshot(runtime: ManagedToolRuntime, *, includeIframes: bool = True) -> str:  # noqa: N803 - contract name
-            async def go(session: _Session, page: Page) -> str:
-                result = await page.snapshot(include_iframes=includeIframes)
-                session.ids[page.page_id] = dict(result.xpath_map)
-                return str(result.formatted_tree)
+    async def awrap_model_call(
+        self,
+        request: ModelRequest[None],
+        handler: Callable[[ModelRequest[None]], Awaitable[ModelResponse[object]]],
+    ) -> ModelResponse[object]:
+        """Tell the model how the browser works, after the agent's own instructions."""
+        return await handler(_with_instructions(request, self._instructions))
+
+    def _build_tools(self) -> list[BaseTool]:  # noqa: C901 - three flat tool closures
+        from stagehand_middleware.facade import facade_tools  # noqa: PLC0415
+
+        middleware = self
+        # The facade's names, descriptions and schemas verbatim, as its TypeScript
+        # hosts advertise them. The model's arguments are not checked against a JSON
+        # schema, so each tool turns away what its schema does not name.
+        contract = {entry["name"]: entry for entry in facade_tools()}
+        shot_schema = contract["screenshot"]["inputSchema"]
+        shot_schema["properties"]["path"] = {"type": "string", "description": _SCREENSHOT_PATH}
+
+        def facade_tool(name: str) -> Callable[[Callable[..., Awaitable[object]]], BaseTool]:
+            entry = contract[name]
+            return tool(name, description=entry["description"], args_schema=entry["inputSchema"])
+
+        @facade_tool("snapshot")
+        async def snapshot(
+            runtime: ManagedToolRuntime,
+            *,
+            includeIframes: bool = True,  # noqa: N803 - contract name
+            **unexpected: object,
+        ) -> str:
+            if unexpected:
+                return _unexpected(unexpected)
+
+            async def go(session: _Session) -> str:
+                return await session.facade.snapshot(include_iframes=includeIframes)
 
             return await middleware._call(runtime, go)
 
-        @tool(description=RUN_DESCRIPTION + (LOCALHOST_NOTE if self.scope == "thread" else ""))
+        @facade_tool("run")
         async def run(
             runtime: ManagedToolRuntime,
             code: str | None = None,
-            actions: list[Action] | None = None,
+            actions: list[dict[str, object]] | None = None,
+            **unexpected: object,
         ) -> str:
+            if unexpected:
+                return _unexpected(unexpected)
             if (code is None) == (actions is None):
                 return "error: provide exactly one of `code` or `actions`."
 
-            async def go(session: _Session, page: Page) -> str:
-                payload: dict[str, list[_Step]] = {}
-                if code is not None:
-                    source = _RUN_SOURCE % code
-                else:
-                    steps = _hydrate(session.ids.get(page.page_id, {}), actions or [])
-                    if isinstance(steps, str):
-                        return steps
-                    source, payload = _ACTIONS_SOURCE, {"steps": steps}
-                result = await session.stagehand.experimental_batch(
-                    source, payload, page=page, timeout=RUN_TIMEOUT_MS
-                )
-                return json.dumps(result, default=str, separators=(",", ":"))
+            async def go(session: _Session) -> str:
+                try:
+                    value = await session.facade.run(code=code, actions=actions)
+                finally:  # code that threw may have saved some first
+                    saved = await _save_artifacts(runtime, session.artifacts)
+                return "\n".join([json.dumps(value, default=str, separators=(",", ":")), *saved])
 
             return await middleware._call(runtime, go)
 
-        @tool(description=SCREENSHOT_DESCRIPTION)
+        @facade_tool("screenshot")
         async def screenshot(
             runtime: ManagedToolRuntime,
             *,
             fullPage: bool | None = None,  # noqa: N803 - contract name
             type: Literal["png", "jpeg"] = "png",
-            quality: int | None = None,
-            path: Annotated[
-                str | None,
-                "Also save the image to this absolute path in your sandbox, creating its "
-                "folder, e.g. to publish it.",
-            ] = None,
+            quality: float | None = None,
+            path: str | None = None,
+            **unexpected: object,
         ) -> list[dict[str, str]] | str:
-            if quality is not None and not 0 <= quality <= MAX_QUALITY:
-                return f"error: quality must be between 0 and {MAX_QUALITY}."
-            if type == "png" and quality is not None:
-                return "error: quality is only valid for jpeg screenshots."
+            if unexpected:
+                return _unexpected(unexpected)
 
-            async def go(_session: _Session, page: Page) -> bytes:
-                return await page.screenshot(full_page=fullPage, type=type, quality=quality)
+            async def go(session: _Session) -> dict[str, str]:
+                return await session.facade.screenshot(
+                    full_page=fullPage, type=type, quality=quality
+                )
 
-            image = await middleware._call(runtime, go)
-            if isinstance(image, str):
-                return image
+            shot = await middleware._call(runtime, go)
+            if isinstance(shot, str):
+                return shot
             text = "Screenshot of the current page."
             if path is not None:
-                text = f"{text} {await _save(runtime, path, image)}"
-            data = base64.b64encode(image).decode("ascii")
+                text = f"{text} {await _save(runtime, path, base64.b64decode(shot['data']))}"
             return [
                 {"type": "text", "text": text},
-                {"type": "image", "url": f"data:image/{type};base64,{data}"},
+                {"type": "image", "url": f"data:{shot['mimeType']};base64,{shot['data']}"},
             ]
 
         return [snapshot, run, screenshot]
+
+
+def _with_instructions(request: ModelRequest[None], text: str) -> ModelRequest[None]:
+    """``request`` with ``text`` as a block of its own at the end of the system message.
+
+    Unlike memory's block it sets no cache breakpoint: Anthropic allows four, and the
+    message-level one already covers this static text.
+    """
+    from langchain_core.messages import SystemMessage  # noqa: PLC0415
+
+    existing = request.system_message
+    blocks: list[ContentBlock] = list(existing.content_blocks if existing is not None else [])
+    blocks.append({"type": "text", "text": text})
+    return request.override(system_message=SystemMessage(content_blocks=blocks))
+
+
+def _unexpected(arguments: dict[str, object]) -> str:
+    names = ", ".join(repr(name) for name in arguments)
+    return f"error: unexpected argument{'s' if len(arguments) > 1 else ''} {names}."
+
+
+async def _save_artifacts(runtime: ManagedToolRuntime, root: str) -> list[str]:
+    """Move the screenshots run code saved under ``root`` into the agent's sandbox.
+
+    Run code names them relative to the facade's artifact root, which here stands
+    for the sandbox's ``/workspace``. Each note says where one went, or why not.
+    """
+    files = await asyncio.to_thread(_take_files, Path(root))
+    return [await _save(runtime, posixpath.join(_WORKSPACE, path), data) for path, data in files]
+
+
+def _take_files(root: Path) -> list[tuple[str, bytes]]:
+    """The files under ``root`` by relative path, deleting each once read."""
+    files: list[tuple[str, bytes]] = []
+    for file in sorted(path for path in root.rglob("*") if path.is_file()):
+        files.append((file.relative_to(root).as_posix(), file.read_bytes()))
+        file.unlink()
+    return files
 
 
 async def _save(runtime: ManagedToolRuntime, path: str, data: bytes) -> str:
@@ -780,23 +837,3 @@ async def _save(runtime: ManagedToolRuntime, path: str, data: bytes) -> str:
     if result.error:
         return f"error: not saved to {path}: {result.error}"
     return f"Saved to {result.path}."
-
-
-def _hydrate(ids: dict[str, str], actions: list[Action]) -> list[_Step] | str:
-    """Snapshot actions as selector steps, or why they cannot run."""
-    if not actions:
-        return "error: actions must not be empty."
-    steps: list[_Step] = []
-    for action in actions:
-        op = action.get("op")
-        if op not in {"click", "hover", *_ACTION_FIELDS}:
-            return f"error: unsupported op {op!r}. Use click, hover, fill, type, press or select."
-        xpath = ids.get(str(action.get("id")))
-        if xpath is None:
-            ref = action.get("id")
-            return f"error: snapshot ID {ref!r} is stale or not actionable; snapshot again."
-        value = action.get(_ACTION_FIELDS[op]) if op in _ACTION_FIELDS else None
-        if op in _ACTION_FIELDS and not isinstance(value, (str, list)):
-            return f'error: {op} requires "{_ACTION_FIELDS[op]}".'
-        steps.append({"op": op, "selector": f"xpath={_TEXT_NODE.sub('', xpath)}", "value": value})
-    return steps
