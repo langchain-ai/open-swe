@@ -105,19 +105,24 @@ export function PullRequestThreadAction({
         <PopoverContent
           align="end"
           aria-label={labels.unavailable}
-          className="w-72 max-w-[calc(100vw-2rem)]"
+          className="flex w-72 max-w-[calc(100vw-2rem)] flex-col gap-space-3 p-space-3"
         >
-          <Text variant="sm" weight="semibold">
-            Couldn’t check agent availability
+          <Text as="h2" variant="sm" weight="semibold">
+            Agent unavailable
           </Text>
-          <Text variant="xs" color="secondary" className="mt-space-1">
+          <Text
+            as="p"
+            variant="sm"
+            color="secondary"
+            className="leading-normal break-words"
+          >
             {thread.error.message}
           </Text>
           <Button
-            size="xs"
+            size="sm"
             color="secondary"
             variant="outlined"
-            className="mt-space-3"
+            className="self-end"
             disabled={thread.isFetching}
             onClick={() => void thread.refetch()}
           >
