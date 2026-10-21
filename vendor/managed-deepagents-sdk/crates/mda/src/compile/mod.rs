@@ -1086,7 +1086,7 @@ fn compile_inner(
         is_dev,
         agent.model.as_deref(),
         eval_model_override,
-        find_browser_entry(project).is_some(),
+        browser_import.is_some(),
     )?;
 
     vendor_runtime(project.language, runtime_source, out_dir)?;
