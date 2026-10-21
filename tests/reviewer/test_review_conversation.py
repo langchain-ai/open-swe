@@ -1,12 +1,14 @@
 import json
 from collections.abc import AsyncIterator, Callable
 from contextlib import asynccontextmanager
+from unittest.mock import AsyncMock
 
 import httpx2
 import pytest
 from fastapi import HTTPException
 
 from openswe.dashboard import profiles
+from openswe.github import app as github_app
 from openswe.github import http as github_http
 from openswe.github.checks import github_headers
 from openswe.github.http import GitHubError
@@ -37,7 +39,14 @@ def github(monkeypatch: pytest.MonkeyPatch) -> Callable[[Handler], list[httpx2.R
         return "viewer-token"
 
     monkeypatch.setattr(conversation, "require_repo_access_for_user", allow)
+    monkeypatch.setattr(conversation, "require_installed_repo_access", allow)
     monkeypatch.setattr(profiles, "get_valid_access_token", token)
+    monkeypatch.setattr(
+        github_app, "get_github_app_installation_id_for_repo", AsyncMock(return_value=1)
+    )
+    monkeypatch.setattr(
+        github_app, "get_github_app_installation_token", AsyncMock(return_value="app-token")
+    )
 
     def install(handler: Handler) -> list[httpx2.Request]:
         seen: list[httpx2.Request] = []
@@ -59,6 +68,7 @@ def github(monkeypatch: pytest.MonkeyPatch) -> Callable[[Handler], list[httpx2.R
     return install
 
 
+@pytest.mark.usefixtures("registry_db")
 async def test_timeline_merges_sorts_and_drops_pending_reviews(
     github: Callable[[Handler], list[httpx2.Request]],
 ) -> None:
@@ -154,11 +164,33 @@ async def test_timeline_merges_sorts_and_drops_pending_reviews(
         }
     }
 
+    pull = {
+        "number": 7,
+        "title": "Add app",
+        "state": "open",
+        "user": _user("erin"),
+        "head": {"ref": "app", "sha": "a" * 40},
+        "base": {"ref": "main", "sha": "b" * 40},
+        "updated_at": "2026-01-03T00:00:00Z",
+    }
+
     def handler(request: httpx2.Request) -> httpx2.Response:
         if request.url.path == "/graphql":
+            if b"reviewDecision" in request.content:
+                return httpx2.Response(
+                    200, json={"data": {"repository": {"pullRequest": {"reviewDecision": None}}}}
+                )
             return httpx2.Response(200, json=thread_states)
-        page = request.url.params["page"]
+        page = request.url.params.get("page", "1")
         match request.url.path:
+            case "/repos/acme/app/pulls/7":
+                return httpx2.Response(200, json=pull)
+            case "/repos/acme/app/pulls/7/files":
+                return httpx2.Response(200, json=[])
+            case path if path.endswith("/check-runs"):
+                return httpx2.Response(200, json={"check_runs": []})
+            case path if path.endswith("/status"):
+                return httpx2.Response(200, json={"statuses": []})
             case "/repos/acme/app/issues/7/comments":
                 return httpx2.Response(200, json=full_page if page == "1" else [late_comment])
             case "/repos/acme/app/pulls/7/reviews":

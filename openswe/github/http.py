@@ -20,6 +20,7 @@ import random
 from collections.abc import AsyncIterator, Awaitable, Mapping, Sequence
 from contextlib import asynccontextmanager
 from dataclasses import dataclass
+from datetime import datetime
 from typing import TYPE_CHECKING, Any, Self
 from urllib.parse import quote
 
@@ -565,17 +566,54 @@ class RepoClient:
     async def delete_review_comment(self, comment_id: int) -> None:
         await self.delete(f"pulls/comments/{comment_id}")
 
-    async def check_runs(self, sha: str) -> list[dict[str, Any]]:
-        """Latest checks on ``sha``, excluding superseded Actions cancellations."""
-        runs = await self.pages(
+    async def latest_check_runs(self, sha: str) -> list[dict[str, Any]]:
+        """The latest run of each check on ``sha``, superseded cancellations included."""
+        return await self.pages(
             f"commits/{sha}/check-runs", key="check_runs", params={"filter": "latest"}
         )
+
+    async def workflow_runs(self, sha: str) -> list[dict[str, Any]]:
+        """Actions runs for commit ``sha``."""
+        return await self.pages("actions/runs", key="workflow_runs", params={"head_sha": sha})
+
+    async def pulls_updated_since(
+        self, since: datetime | None, *, max_pages: int = 10
+    ) -> list[dict[str, Any]]:
+        """Pull requests updated after ``since``, newest first; every open one when ``None``."""
+        params = (
+            {"state": "open", "sort": "updated", "direction": "desc"}
+            if since is None
+            else {"state": "all", "sort": "updated", "direction": "desc"}
+        )
+        found: list[dict[str, Any]] = []
+        for page in range(1, max_pages + 1):
+            payload = await self.get("pulls", {**params, "per_page": "100", "page": str(page)})
+            items = (
+                [item for item in payload if isinstance(item, dict)]
+                if isinstance(payload, list)
+                else []
+            )
+            fresh = [
+                item
+                for item in items
+                if since is None
+                or (
+                    isinstance(item.get("updated_at"), str)
+                    and datetime.fromisoformat(item["updated_at"]) > since
+                )
+            ]
+            found.extend(fresh)
+            if len(items) < 100 or len(fresh) < len(items):
+                return found
+        return found
+
+    async def check_runs(self, sha: str) -> list[dict[str, Any]]:
+        """Latest checks on ``sha``, excluding superseded Actions cancellations."""
+        runs = await self.latest_check_runs(sha)
         if not any(run.get("conclusion") in {"cancelled", "stale"} for run in runs):
             return runs
         try:
-            payloads = await self.pages(
-                "actions/runs", key="workflow_runs", params={"head_sha": sha}
-            )
+            payloads = await self.workflow_runs(sha)
             workflows = {
                 workflow.check_suite_id: workflow
                 for workflow in map(_WorkflowRun.model_validate, payloads)

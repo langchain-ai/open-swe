@@ -103,7 +103,7 @@ Go to **GitHub Settings → Developer settings → [GitHub Apps](https://github.
   - Workflows: Read & write — lets Open SWE push branches containing explicitly requested GitHub Actions workflow changes.
   - Metadata: Read-only
 - **Organization permissions**: Members: Read-only — verifies org membership for dashboard login and LangSmith trace-tool access when `ALLOWED_GITHUB_ORGS` is set. Without it that check fails closed.
-- **Subscribe to events**: Issue comment, Pull request review, Pull request review comment, Check run, Check suite, Workflow run (the last three give `/baby-sit` immediate failure detection), and Status (optional; legacy commit-status integrations).
+- **Subscribe to events**: Issues, Issue comment, Pull request, Pull request review, Pull request review comment, Pull request review thread, Push, Check run, Check suite, Workflow run (the last three give `/baby-sit` immediate failure detection), and Status (optional; legacy commit-status integrations). The dashboard reads pull requests from a PostgreSQL mirror these deliveries keep current; a missing event leaves that part of the mirror stale until the next sweep, every 15 minutes.
 
 Click **Create GitHub App**, then collect from its settings page:
 
@@ -453,7 +453,7 @@ Open SWE keeps all of its state in PostgreSQL and no longer reads the LangGraph 
 ### Webhook not receiving events
 
 - The URL configured in GitHub, Slack, or Linear must be the deployment's URL; GitHub shows each delivery and its response under the App's **Advanced** tab. A new webhook or signing secret takes effect only after the deployment restarts with it; deliveries in between are rejected as `Invalid signature`, and Slack then needs **Retry** on its Request URL under **Event Subscriptions**.
-- Enable the right events: Issue comment and the pull request review events for GitHub, `app_mention` for Slack, Comments → Create (and Issues, for automations) for Linear.
+- Enable the right events: the GitHub ones listed under [Create a GitHub App](#3-create-a-github-app), `app_mention` for Slack, Comments → Create (and Issues, for automations) for Linear.
 - Webhook secrets are required: without `GITHUB_WEBHOOK_SECRET`, `SLACK_SIGNING_SECRET`, or `LINEAR_WEBHOOK_SECRET`, every request to that endpoint is rejected with 401.
 
 ### Thread credential scope

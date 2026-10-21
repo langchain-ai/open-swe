@@ -10,14 +10,19 @@ Nothing here touches agent logic — it only stands in for the SaaS boundaries
 and renders their state back as a user-facing UI.
 """
 
+import asyncio
 import hashlib
 import hmac
 import json
+import logging
 import os
 import sys
 import threading
 import time
 import uuid
+import zlib
+from collections.abc import AsyncIterator
+from contextlib import asynccontextmanager
 from datetime import UTC, datetime, timedelta
 from html import escape
 from pathlib import Path
@@ -57,6 +62,7 @@ from fastapi.responses import (  # noqa: E402
     RedirectResponse,
     Response,
 )
+from starlette.types import ASGIApp, Receive, Scope, Send  # noqa: E402
 
 # Slack-user directory the fake ``users.info`` resolves: the default sender used
 # by the automated tests plus the named manual-test users. ``U_CAROL`` is in
@@ -79,6 +85,8 @@ from openswe.dashboard.oauth import COOKIE_NAME, issue_session  # noqa: E402
 from openswe.slack.records import lookup_slack_thread_id  # noqa: E402
 from openswe.users import User  # noqa: E402
 from openswe.utils.dashboard_ui import keep_dashboard_ui_last  # noqa: E402
+
+logger = logging.getLogger(__name__)
 
 GITHUB_WEBHOOK_SECRET = os.environ["GITHUB_WEBHOOK_SECRET"]
 SLACK_SIGNING_SECRET = os.environ["SLACK_SIGNING_SECRET"]
@@ -109,6 +117,9 @@ if os.environ.get("E2E_EXIT_WHEN_ORPHANED"):
 # --- control + Slack compose (the test driver) -----------------------------
 @app.post("/control/reset")
 async def control_reset() -> JSONResponse:
+    # A delivery still in flight would land on the state reset is about to clear.
+    if _SENDING:
+        await asyncio.wait(set(_SENDING), timeout=30)
     fakes.reset()
     CURRENT_THREAD["channel"] = DEMO_CHANNEL
     CURRENT_THREAD["thread_ts"] = None
@@ -181,6 +192,9 @@ async def _reset_durable_pr_state() -> None:
 
     ``repository`` stays: ``workspace_repository`` references it, so truncating
     it cascades away the workspace assignments every routable-repo check needs.
+    The mirrored CI goes with the pull requests: it is keyed by head SHA, and
+    every run's fake pull requests start from the same synthetic ones. So do
+    queued mirror syncs, which name a pull request by its reused number.
     """
     from openswe.baby_sit import WATCHES, stop_watch
 
@@ -190,10 +204,20 @@ async def _reset_durable_pr_state() -> None:
     from sqlalchemy import text
 
     from openswe.database import postgres
+    from openswe.github.mirror.sync import SYNC_JOB
 
     if postgres.configured():
         async with postgres.transaction() as connection:
-            await connection.execute(text("TRUNCATE human_review_request, pull_request CASCADE"))
+            await connection.execute(
+                text(
+                    "TRUNCATE human_review_request, pull_request, github_check_run, "
+                    "github_commit_status, github_workflow_run CASCADE"
+                )
+            )
+            await connection.execute(
+                text("DELETE FROM job WHERE kind = :kind AND claim_token IS NULL"),
+                {"kind": SYNC_JOB},
+            )
 
 
 @app.post("/control/prepare-sandbox-repo")
@@ -246,7 +270,8 @@ async def control_pull_request_health(request: Request) -> JSONResponse:
     number = body.get("number")
     if not isinstance(number, int) or isinstance(number, bool):
         raise HTTPException(400, "A pull request number is required")
-    pull = fakes.update_pull_health(number, body)
+    async with _publishing(wait=True):
+        pull = fakes.update_pull_health(number, body)
     if pull is None:
         raise HTTPException(404, "Pull request not found")
     return JSONResponse({"ok": True, "pull_request": fakes.pull_health_json(pull)})
@@ -303,29 +328,32 @@ async def control_reserve_session_upload(request: Request) -> JSONResponse:
 
 @app.post("/control/pull-request")
 async def control_seed_pull_request(request: Request) -> JSONResponse:
-    """Seed an open pull request the PR search returns, without running the agent.
+    """Open a pull request on fake GitHub, as its author would, without running the agent.
 
     Anything ``/control/pull-request-health`` accepts may be set inline, so a spec
     can pick the draft flag, conflict state, checks and reviews up front."""
     body = await request.json()
     owner, name = _split_repo(body.get("repo"))
     head = str(body.get("head") or "seeded-branch")
+    author = str(body.get("author") or TEST_USERS[0]["login"])
     files = body.get("files")
     if isinstance(files, dict) and files:
         fakes.push_branch(owner, name, head, {str(path): str(text) for path, text in files.items()})
-    pull = fakes.create_pull(
-        owner,
-        name,
-        head=head,
-        base=str(body.get("base") or BASE_BRANCH),
-        title=str(body.get("title") or "Seeded pull request"),
-        body=str(body.get("body") or ""),
-        draft=bool(body.get("draft", False)),
-        author=str(body.get("author") or TEST_USERS[0]["login"]),
-        created_at=body.get("created_at") if isinstance(body.get("created_at"), str) else None,
-        updated_at=body.get("updated_at") if isinstance(body.get("updated_at"), str) else None,
-    )
-    fakes.update_pull_health(pull["number"], body)
+        await _publish_pushes(wait=True)
+    async with _publishing(author, wait=True):
+        pull = fakes.create_pull(
+            owner,
+            name,
+            head=head,
+            base=str(body.get("base") or BASE_BRANCH),
+            title=str(body.get("title") or "Seeded pull request"),
+            body=str(body.get("body") or ""),
+            draft=bool(body.get("draft", False)),
+            author=author,
+            created_at=body.get("created_at") if isinstance(body.get("created_at"), str) else None,
+            updated_at=body.get("updated_at") if isinstance(body.get("updated_at"), str) else None,
+        )
+        fakes.update_pull_health(pull["number"], body)
     return JSONResponse(
         {
             "ok": True,
@@ -677,6 +705,305 @@ async def _deliver_github_event(
         return await client.post("/webhooks/github", content=raw, headers=headers)
 
 
+# --- the webhooks fake GitHub sends for what changed -----------------------
+# Every change to fake GitHub state goes through ``_publishing``, which delivers
+# what GitHub would for it, so the backend's mirror of pull requests stays current.
+_CI_SENDER = "fake-ci[bot]"
+
+type _Delivery = tuple[str, str, dict[str, Any]]
+
+
+@asynccontextmanager
+async def _publishing(sender: str = "", *, wait: bool = False) -> AsyncIterator[None]:
+    """Deliver the webhooks GitHub sends for whatever the block changes, as ``sender``.
+
+    GitHub delivers after answering, so by default this does too: the backend's
+    own call must not wait on handlers that may wait on it. A spec's control call
+    passes ``wait`` to see them handled, as ``/control/github-event`` does.
+    Keep the block free of awaits, so no other request's change lands in it.
+    """
+    before = fakes.snapshot()
+    yield
+    # All worked out now: deliveries go out later, and their handlers may change state.
+    deliveries = [
+        (event, actor, _with_context(pull, body))
+        for pull in fakes.pulls()
+        for event, actor, body in _deliveries(pull, before.get(fakes.pull_key(pull)), sender)
+    ]
+    if not deliveries:
+        return
+    if wait:
+        await _send(deliveries)
+        return
+    task = asyncio.create_task(_send(deliveries))
+    _SENDING.add(task)
+    task.add_done_callback(_sent)
+
+
+_SENDING: set[asyncio.Task[None]] = set()
+_DELIVERY_ORDER = asyncio.Lock()
+
+
+async def _send(deliveries: list[_Delivery]) -> None:
+    async with _DELIVERY_ORDER:
+        for event, actor, payload in deliveries:
+            response = await _deliver_github_event(
+                event, {**payload, "sender": fakes.github_user(actor)}
+            )
+            if response.status_code >= 400:
+                raise RuntimeError(
+                    f"{event} webhook delivery failed: {response.status_code} {response.text}"
+                )
+
+
+def _sent(task: asyncio.Task[None]) -> None:
+    _SENDING.discard(task)
+    if not task.cancelled() and (error := task.exception()) is not None:
+        logger.error("Fake GitHub could not deliver a webhook", exc_info=error)
+
+
+def _with_context(pull: dict[str, Any], body: dict[str, Any]) -> dict[str, Any]:
+    return {
+        **body,
+        "repository": _repository_json(pull["owner"], pull["repo"]),
+        "installation": {"id": 42},
+    }
+
+
+async def _publish_pushes(*, wait: bool = False) -> None:
+    async with _publishing(wait=wait):
+        fakes.advance_heads()
+
+
+def _deliveries(
+    pull: dict[str, Any], before: dict[str, Any] | None, sender: str
+) -> list[_Delivery]:
+    """What GitHub delivers for how ``pull`` changed since ``before``, ``None`` when just opened."""
+    actor = sender or pull["author"]
+    old: dict[str, Any] = before or {}
+    actions = _pull_actions(pull, before)
+    reviews = _review_changes(pull, old)
+    comments = _review_comment_changes(pull, old)
+    resolutions = _resolution_changes(pull, old)
+    known = {comment["id"] for comment in old.get("issue_comments", [])}
+    issue_comments = [c for c in pull["issue_comments"] if c["id"] not in known]
+    known = {run["id"] for run in old.get("check_runs", [])}
+    runs = [run for run in pull["check_runs"] if run["id"] not in known]
+    statuses = [status for status in pull["statuses"] if status not in old.get("statuses", [])]
+    if before is not None and (actions or reviews or comments or resolutions or issue_comments):
+        fakes.touch(pull)
+    about_pull: list[_Delivery] = [
+        *(
+            ("pull_request", actor, {"action": action, "number": pull["number"], **extra})
+            for action, extra in actions
+        ),
+        *(
+            (
+                "pull_request_review",
+                review["author"],
+                {"action": action, "review": fakes.review_rest_json(review)},
+            )
+            for action, review in reviews
+        ),
+        *(
+            (
+                "pull_request_review_comment",
+                comment["user"]["login"],
+                {"action": action, "comment": comment},
+            )
+            for action, comment in comments
+        ),
+        *(
+            (
+                "pull_request_review_thread",
+                actor,
+                {
+                    "action": action,
+                    "thread": {
+                        "node_id": fakes.thread_node_id(root),
+                        "comments": fakes.thread_comments(pull, root),
+                    },
+                },
+            )
+            for action, root in resolutions
+        ),
+    ]
+    pr = _gh_pr_json(pull)
+    return [
+        *((event, who, {**body, "pull_request": pr}) for event, who, body in about_pull),
+        *(
+            (
+                "issue_comment",
+                comment["user"]["login"],
+                {"action": "created", "issue": _issue_json(pull), "comment": comment},
+            )
+            for comment in issue_comments
+        ),
+        *(
+            (
+                "check_run",
+                _CI_SENDER,
+                {
+                    "action": "completed" if run["status"] == "completed" else "created",
+                    "check_run": fakes.check_run_json(pull, run),
+                },
+            )
+            for run in runs
+        ),
+        *(
+            (
+                "status",
+                _CI_SENDER,
+                {
+                    "id": fakes.next_github_id(),
+                    "sha": pull["head_sha"],
+                    "name": f"{pull['owner']}/{pull['repo']}",
+                    "context": status["context"],
+                    "state": status["state"],
+                    "description": status["description"],
+                    "target_url": status["target_url"],
+                    "created_at": status["updated_at"],
+                    "updated_at": status["updated_at"],
+                },
+            )
+            for status in statuses
+        ),
+    ]
+
+
+def _pull_actions(
+    pull: dict[str, Any], before: dict[str, Any] | None
+) -> list[tuple[str, dict[str, Any]]]:
+    if before is None:
+        return [("opened", {})]
+    actions: list[tuple[str, dict[str, Any]]] = []
+    if pull["state"] != before["state"]:
+        actions.append(("closed" if pull["state"] == "closed" else "reopened", {}))
+    if pull["draft"] != before["draft"]:
+        actions.append(("converted_to_draft" if pull["draft"] else "ready_for_review", {}))
+    if pull["head_sha"] != before["head_sha"]:
+        actions.append(("synchronize", {"before": before["head_sha"], "after": pull["head_sha"]}))
+    actions += [
+        ("review_requested", {"requested_reviewer": fakes.github_user(login)})
+        for login in pull["requested_reviewers"]
+        if login not in before["requested_reviewers"]
+    ]
+    actions += [
+        ("review_request_removed", {"requested_reviewer": fakes.github_user(login)})
+        for login in before["requested_reviewers"]
+        if login not in pull["requested_reviewers"]
+    ]
+    changes = {
+        field: {"from": before[field]}
+        for field in ("title", "body")
+        if pull[field] != before[field]
+    }
+    # GitHub sends nothing when it recomputes mergeability; a spec setting it still must reach the mirror.
+    recomputed = any(pull[f] != before[f] for f in ("mergeable", "mergeable_state", "merged"))
+    if changes or (recomputed and not actions):
+        actions.append(("edited", {"changes": changes}))
+    return actions
+
+
+def _review_changes(pull: dict[str, Any], old: dict[str, Any]) -> list[tuple[str, dict[str, Any]]]:
+    """Submitted, edited and dismissed reviews; a pending one is its author's alone."""
+    was = {r["id"]: r for r in old.get("reviews", []) if r["state"] != "PENDING"}
+    now = {r["id"]: r for r in pull["reviews"] if r["state"] != "PENDING"}
+    changes: list[tuple[str, dict[str, Any]]] = []
+    for review_id, review in now.items():
+        previous = was.get(review_id)
+        if previous is None:
+            changes.append(("submitted", review))
+        elif review["state"] == "DISMISSED" != previous["state"]:
+            changes.append(("dismissed", review))
+        elif review["body"] != previous["body"]:
+            changes.append(("edited", review))
+    changes += [
+        ("dismissed", {**review, "state": "DISMISSED"})
+        for review_id, review in was.items()
+        if review_id not in now
+    ]
+    return changes
+
+
+def _review_comment_changes(
+    pull: dict[str, Any], old: dict[str, Any]
+) -> list[tuple[str, dict[str, Any]]]:
+    was = {c["id"]: c for c in fakes.submitted_review_comments(old)} if old else {}
+    now = {c["id"]: c for c in fakes.submitted_review_comments(pull)}
+    return [
+        *(("deleted", comment) for comment_id, comment in was.items() if comment_id not in now),
+        *(("created", comment) for comment_id, comment in now.items() if comment_id not in was),
+        *(
+            ("edited", comment)
+            for comment_id, comment in now.items()
+            if comment_id in was and comment["body"] != was[comment_id]["body"]
+        ),
+    ]
+
+
+def _resolution_changes(
+    pull: dict[str, Any], old: dict[str, Any]
+) -> list[tuple[str, dict[str, Any]]]:
+    roots = {
+        comment["id"]: comment
+        for comment in fakes.submitted_review_comments(pull)
+        if comment.get("in_reply_to_id") is None
+    }
+    was = set(old.get("resolved_threads", []))
+    now = set(pull["resolved_threads"])
+    return [
+        *(("resolved", roots[root]) for root in now - was if root in roots),
+        *(("unresolved", roots[root]) for root in was - now if root in roots),
+    ]
+
+
+def _repository_json(owner: str, repo: str) -> dict[str, Any]:
+    return {
+        "id": zlib.crc32(f"{owner}/{repo}".encode()),
+        "name": repo,
+        "full_name": f"{owner}/{repo}",
+        "owner": {"login": owner},
+        "private": fakes.repo_private(),
+    }
+
+
+def _issue_json(pull: dict[str, Any]) -> dict[str, Any]:
+    return {
+        "number": pull["number"],
+        "title": pull["title"],
+        "state": pull["state"],
+        "user": fakes.github_user(pull["author"]),
+        "html_url": _pr_html_url(pull),
+        "pull_request": {
+            "url": f"{FAKE_GITHUB_API}/repos/{pull['owner']}/{pull['repo']}/pulls/{pull['number']}",
+            "html_url": _pr_html_url(pull),
+        },
+    }
+
+
+class _NoticePushes:
+    """Fake GitHub notices pushes the post-receive hook missed before answering about them."""
+
+    def __init__(self, app: ASGIApp) -> None:
+        self.app = app
+
+    async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
+        if scope["type"] == "http" and str(scope["path"]).startswith(("/fake-gh/", "/mock/github")):
+            await _publish_pushes()
+        await self.app(scope, receive, send)
+
+
+app.add_middleware(_NoticePushes)
+
+
+@app.post("/control/pushed")
+async def control_pushed() -> JSONResponse:
+    """Where the bare remotes' post-receive hook reports a push, as GitHub sees one."""
+    await _publish_pushes()
+    return JSONResponse({"ok": True})
+
+
 async def _deliver_slack_interaction(payload: dict[str, Any]) -> httpx2.Response:
     raw = urlencode({"payload": json.dumps(payload)}).encode()
     req_ts = str(int(time.time()))
@@ -828,8 +1155,7 @@ async def _signed_in(login: str, email: str) -> User:
     user = await User.for_login("github", login)
     if user is not None:
         return user
-    github_id = str(int(hashlib.sha256(login.encode()).hexdigest()[:8], 16))
-    return await User.sign_in("github", github_id, login=login, email=email)
+    return await User.sign_in("github", str(fakes.github_user_id(login)), login=login, email=email)
 
 
 @app.post("/control/login")
@@ -1136,6 +1462,7 @@ async def gh_installation_repositories() -> JSONResponse:
 
 def _gh_pr_json(pr: dict[str, Any]) -> dict[str, Any]:
     return {
+        "id": pr["id"],
         "number": pr["number"],
         "node_id": fakes.pull_node_id(pr),
         "html_url": _pr_html_url(pr),
@@ -1146,11 +1473,9 @@ def _gh_pr_json(pr: dict[str, Any]) -> dict[str, Any]:
         "mergeable_state": pr["mergeable_state"],
         "title": pr["title"],
         "body": pr["body"],
-        "user": {
-            "login": pr["author"],
-            "avatar_url": f"{BASE_URL}/logo-mark.png",
-        },
-        "merged_at": pr.get("merged_at"),
+        "user": {**fakes.github_user(pr["author"]), "avatar_url": f"{BASE_URL}/logo-mark.png"},
+        "merged_at": pr["merged_at"],
+        "closed_at": pr["closed_at"],
         "head": {
             "ref": pr["head"],
             "sha": pr["head_sha"],
@@ -1169,6 +1494,11 @@ def _gh_pr_json(pr: dict[str, Any]) -> dict[str, Any]:
         "additions": pr["additions"],
         "deletions": pr["deletions"],
         "changed_files": len(pr["files"]),
+        "commits": len(fakes.pull_commits(pr)),
+        "requested_reviewers": [fakes.github_user(login) for login in pr["requested_reviewers"]],
+        "requested_teams": [],
+        "labels": [],
+        "assignees": [],
         "created_at": pr["created_at"],
         "updated_at": pr["updated_at"],
     }
@@ -1287,16 +1617,18 @@ async def gh_list_pulls(owner: str, repo: str) -> JSONResponse:  # noqa: ARG001
 async def gh_create_pull(owner: str, repo: str, request: Request) -> JSONResponse:
     """Open a pull request authored by the person whose token opened it, as GitHub does."""
     body = await request.json()
-    pr = fakes.create_pull(
-        owner,
-        repo,
-        head=body.get("head", ""),
-        base=body.get("base", "main"),
-        title=body.get("title", ""),
-        body=body.get("body", ""),
-        draft=bool(body.get("draft", True)),
-        author=_token_login(request) or "open-swe[bot]",
-    )
+    author = _token_login(request) or "open-swe[bot]"
+    async with _publishing(author):
+        pr = fakes.create_pull(
+            owner,
+            repo,
+            head=body.get("head", ""),
+            base=body.get("base", "main"),
+            title=body.get("title", ""),
+            body=body.get("body", ""),
+            draft=bool(body.get("draft", True)),
+            author=author,
+        )
     return JSONResponse(_gh_pr_json(pr), status_code=201)
 
 
@@ -1311,10 +1643,11 @@ async def gh_get_pull(owner: str, repo: str, number: int, request: Request) -> R
 
 
 @app.get("/fake-gh/repos/{owner}/{repo}/pulls/{number}/commits")
-async def gh_list_pull_commits(owner: str, repo: str, number: int) -> JSONResponse:
-    if fakes.find_pull(number, owner, repo) is None:
+async def gh_list_pull_commits(owner: str, repo: str, number: int, page: int = 1) -> JSONResponse:
+    pr = fakes.find_pull(number, owner, repo)
+    if pr is None:
         return JSONResponse({"message": "Not Found"}, status_code=404)
-    return JSONResponse([])
+    return JSONResponse(fakes.pull_commits(pr) if page == 1 else [])
 
 
 @app.get("/fake-gh/repos/{owner}/{repo}/pulls/{number}/comments")
@@ -1344,7 +1677,10 @@ async def gh_create_pull_comment(
 async def gh_delete_pull_comment(
     owner: str, repo: str, comment_id: int, request: Request
 ) -> Response:
-    if not fakes.delete_review_comment(owner, repo, comment_id, author=_token_login(request)):
+    author = _token_login(request)
+    async with _publishing(author):
+        deleted = fakes.delete_review_comment(owner, repo, comment_id, author=author)
+    if not deleted:
         return JSONResponse({"message": "Not Found"}, status_code=404)
     return Response(status_code=204)
 
@@ -1354,15 +1690,17 @@ async def gh_submit_pending_review(
     owner: str, repo: str, number: int, review_id: int, request: Request
 ) -> JSONResponse:
     body = await request.json()
-    status, payload = fakes.submit_pending_review(
-        number,
-        owner,
-        repo,
-        review_id,
-        author=_token_login(request),
-        event=str(body.get("event") or ""),
-        body=str(body.get("body") or ""),
-    )
+    author = _token_login(request)
+    async with _publishing(author):
+        status, payload = fakes.submit_pending_review(
+            number,
+            owner,
+            repo,
+            review_id,
+            author=author,
+            event=str(body.get("event") or ""),
+            body=str(body.get("body") or ""),
+        )
     return JSONResponse(payload, status_code=status)
 
 
@@ -1370,9 +1708,9 @@ async def gh_submit_pending_review(
 async def gh_delete_pending_review(
     owner: str, repo: str, number: int, review_id: int, request: Request
 ) -> JSONResponse:
-    status, payload = fakes.delete_pending_review(
-        number, owner, repo, review_id, author=_token_login(request)
-    )
+    author = _token_login(request)
+    async with _publishing(author):
+        status, payload = fakes.delete_pending_review(number, owner, repo, review_id, author=author)
     return JSONResponse(payload, status_code=status)
 
 
@@ -1427,14 +1765,14 @@ async def gh_update_pull(owner: str, repo: str, number: int, request: Request) -
         return JSONResponse({"message": "Not Found"}, status_code=404)
     body = await request.json()
     state = body.get("state")
-    if state is not None:
-        if state not in {"open", "closed"}:
-            return JSONResponse({"message": "Invalid value for state"}, status_code=422)
-        fakes.update_pull_health(number, {"state": state})
-    for field in ("title", "body"):
-        if isinstance(body.get(field), str):
-            pr[field] = body[field]
-    pr["updated_at"] = fakes.github_timestamp()
+    if state is not None and state not in {"open", "closed"}:
+        return JSONResponse({"message": "Invalid value for state"}, status_code=422)
+    async with _publishing(_token_login(request)):
+        if state is not None:
+            fakes.set_pull_state(pr, state)
+        for field in ("title", "body"):
+            if isinstance(body.get(field), str):
+                pr[field] = body[field]
     return JSONResponse(_gh_pr_json(pr))
 
 
@@ -1455,16 +1793,17 @@ async def gh_submit_pull_review(
     author = _token_login(request)
     if not author:
         return JSONResponse({"message": "Resource not accessible by integration"}, status_code=403)
-    review = fakes.submit_review(
-        number,
-        owner,
-        repo,
-        author=author,
-        state=str(body.get("event") or "PENDING"),
-        commit_id=str(body.get("commit_id") or ""),
-        body=str(body.get("body") or ""),
-        comments=[c for c in body.get("comments") or [] if isinstance(c, dict)],
-    )
+    async with _publishing(author):
+        review = fakes.submit_review(
+            number,
+            owner,
+            repo,
+            author=author,
+            state=str(body.get("event") or "PENDING"),
+            commit_id=str(body.get("commit_id") or ""),
+            body=str(body.get("body") or ""),
+            comments=[c for c in body.get("comments") or [] if isinstance(c, dict)],
+        )
     if review is None:
         return JSONResponse({"message": "Not Found"}, status_code=404)
     if "_error" in review:
@@ -1480,9 +1819,9 @@ async def gh_create_issue_comment(
     if pr is None:
         return JSONResponse({"message": "Not Found"}, status_code=404)
     body = await request.json()
-    comment = fakes.add_issue_comment(
-        pr, author=_token_login(request), body=str(body.get("body") or "")
-    )
+    author = _token_login(request)
+    async with _publishing(author):
+        comment = fakes.add_issue_comment(pr, author=author, body=str(body.get("body") or ""))
     return JSONResponse(comment, status_code=201)
 
 
@@ -1494,14 +1833,16 @@ async def gh_request_reviewers(
     if pr is None:
         return JSONResponse({"message": "Not Found"}, status_code=404)
     body = await request.json()
-    for login in body.get("reviewers") or []:
-        if login == pr["author"]:
-            return JSONResponse(
-                {"message": "Review cannot be requested from pull request author."},
-                status_code=422,
-            )
-        if login not in pr["requested_reviewers"]:
-            pr["requested_reviewers"].append(login)
+    logins = [str(login) for login in body.get("reviewers") or []]
+    if pr["author"] in logins:
+        return JSONResponse(
+            {"message": "Review cannot be requested from pull request author."},
+            status_code=422,
+        )
+    async with _publishing(_token_login(request)):
+        pr["requested_reviewers"] += [
+            login for login in dict.fromkeys(logins) if login not in pr["requested_reviewers"]
+        ]
     return JSONResponse(_gh_pr_json(pr), status_code=201)
 
 
@@ -1514,27 +1855,27 @@ async def gh_remove_requested_reviewers(
         return JSONResponse({"message": "Not Found"}, status_code=404)
     body = await request.json()
     removed = set(body.get("reviewers") or [])
-    pr["requested_reviewers"] = [
-        login for login in pr["requested_reviewers"] if login not in removed
-    ]
+    async with _publishing(_token_login(request)):
+        pr["requested_reviewers"] = [
+            login for login in pr["requested_reviewers"] if login not in removed
+        ]
     return JSONResponse(_gh_pr_json(pr))
 
 
 @app.put("/fake-gh/repos/{owner}/{repo}/pulls/{number}/merge")
 async def gh_merge_pull(owner: str, repo: str, number: int, request: Request) -> JSONResponse:
     body = await request.json()
-    status, payload = fakes.merge_pull(
-        number,
-        owner,
-        repo,
-        sha=str(body.get("sha") or ""),
-        merge_method=str(body.get("merge_method") or "merge"),
-    )
+    async with _publishing(_token_login(request)):
+        status, payload = fakes.merge_pull(
+            number,
+            owner,
+            repo,
+            sha=str(body.get("sha") or ""),
+            merge_method=str(body.get("merge_method") or "merge"),
+        )
     return JSONResponse(payload, status_code=status)
 
 
-# Seeded reviews carry only ``{author, state}``, so the list has to be
-# normalised: the dashboard's review-decision read needs a login and an id.
 @app.get("/fake-gh/repos/{owner}/{repo}/pulls/{number}/reviews")
 async def gh_list_pull_reviews(
     owner: str, repo: str, number: int, request: Request, page: int = 1
@@ -1548,9 +1889,9 @@ async def gh_list_pull_reviews(
     viewer = _token_login(request)
     return JSONResponse(
         [
-            fakes.review_rest_json(review, index)
-            for index, review in enumerate(pr["reviews"])
-            if review.get("state") != "PENDING" or review.get("author") == viewer
+            fakes.review_rest_json(review)
+            for review in pr["reviews"]
+            if review["state"] != "PENDING" or review["author"] == viewer
         ]
     )
 
@@ -1563,19 +1904,43 @@ async def gh_collaborator_permission(owner: str, repo: str, username: str) -> JS
 
 
 @app.get("/fake-gh/repos/{owner}/{repo}/commits/{sha}/check-runs")
-async def gh_get_check_runs(owner: str, repo: str, sha: str) -> JSONResponse:
-    pr = fakes.find_pull_by_sha(owner, repo, sha)
-    if pr is None:
-        return JSONResponse({"message": "Not Found"}, status_code=404)
-    return JSONResponse({"total_count": len(pr["check_runs"]), "check_runs": pr["check_runs"]})
+async def gh_get_check_runs(owner: str, repo: str, sha: str, page: int = 1) -> JSONResponse:
+    runs = [
+        fakes.check_run_json(pull, run)
+        for pull in fakes.pulls()
+        if (pull["owner"], pull["repo"]) == (owner, repo)
+        for run in pull["check_runs"]
+        if run["head_sha"] == sha
+    ]
+    window = runs if page == 1 else []
+    return JSONResponse({"total_count": len(runs), "check_runs": window})
 
 
 @app.get("/fake-gh/repos/{owner}/{repo}/commits/{sha}/status")
-async def gh_get_commit_status(owner: str, repo: str, sha: str) -> JSONResponse:
+async def gh_get_commit_status(owner: str, repo: str, sha: str, page: int = 1) -> JSONResponse:
     pr = fakes.find_pull_by_sha(owner, repo, sha)
-    if pr is None:
-        return JSONResponse({"message": "Not Found"}, status_code=404)
-    return JSONResponse({"state": "pending", "sha": sha, "statuses": pr["statuses"]})
+    statuses = pr["statuses"] if pr is not None and page == 1 else []
+    states = {status["state"] for status in statuses}
+    combined = next(
+        (state for state in ("failure", "error", "pending") if state in states), "success"
+    )
+    return JSONResponse(
+        {
+            "state": combined if statuses else "pending",
+            "sha": sha,
+            "total_count": len(statuses),
+            "statuses": [
+                {key: status[key] for key in ("context", "state", "target_url", "description")}
+                | {"updated_at": status["updated_at"]}
+                for status in statuses
+            ],
+        }
+    )
+
+
+@app.get("/fake-gh/repos/{owner}/{repo}/actions/runs")
+async def gh_list_workflow_runs(owner: str, repo: str, head_sha: str = "") -> JSONResponse:  # noqa: ARG001
+    return JSONResponse({"total_count": 0, "workflow_runs": []})
 
 
 @app.post("/fake-gh/graphql")
@@ -1583,28 +1948,39 @@ async def gh_graphql(request: Request) -> JSONResponse:
     body = await request.json()
     variables = body.get("variables", {})
     query = body.get("query", "")
+    viewer = _token_login(request)
     if "MarkPullRequestReady" in query:
         node_id = variables.get("pullRequestId")
-        ready = fakes.mark_pull_ready(node_id) if isinstance(node_id, str) else None
+        async with _publishing(viewer):
+            ready = fakes.mark_pull_ready(node_id) if isinstance(node_id, str) else None
         if ready is None:
             return JSONResponse({"errors": [{"message": "Could not resolve to a node"}]})
         return JSONResponse(
             {"data": {"markPullRequestReadyForReview": {"pullRequest": {"isDraft": False}}}}
         )
-    viewer = _token_login(request)
+    if "resolveReviewThread" in query or "unresolveReviewThread" in query:
+        resolved = "unresolveReviewThread" not in query
+        async with _publishing(viewer):
+            pull = fakes.set_thread_resolved(str(variables.get("id") or ""), resolved)
+        if pull is None:
+            return JSONResponse({"errors": [{"message": "Could not resolve to a thread"}]})
+        mutation = "resolveReviewThread" if resolved else "unresolveReviewThread"
+        return JSONResponse({"data": {mutation: {"thread": {"isResolved": resolved}}}})
     mutation_input = variables.get("input")
     if "addPullRequestReviewThread" in query and isinstance(mutation_input, dict):
-        comment = fakes.add_review_thread(viewer, mutation_input)
+        async with _publishing(viewer):
+            comment = fakes.add_review_thread(viewer, mutation_input)
         if comment is None:
             return JSONResponse({"errors": [{"message": "Could not resolve to a pending review"}]})
-        thread = {"id": f"PRRT_node_{comment['id']}"}
+        thread = {"id": fakes.thread_node_id(comment)}
         return JSONResponse({"data": {"addPullRequestReviewThread": {"thread": thread}}})
     if "updatePullRequestReviewComment" in query and isinstance(mutation_input, dict):
-        updated = fakes.update_review_comment_body(
-            viewer,
-            str(mutation_input.get("pullRequestReviewCommentId") or ""),
-            str(mutation_input.get("body") or ""),
-        )
+        async with _publishing(viewer):
+            updated = fakes.update_review_comment_body(
+                viewer,
+                str(mutation_input.get("pullRequestReviewCommentId") or ""),
+                str(mutation_input.get("body") or ""),
+            )
         if updated is None:
             return JSONResponse({"errors": [{"message": "Could not resolve to a comment"}]})
         payload = {"pullRequestReviewComment": {"id": updated["node_id"]}}
@@ -1617,29 +1993,14 @@ async def gh_graphql(request: Request) -> JSONResponse:
     pr = fakes.find_pull(number, owner, repo)
     if pr is None:
         return JSONResponse({"errors": [{"message": "Pull request not found"}]})
-    if "fullDatabaseId" in query and "reviewThreads" in query:
-        threads = {
-            "nodes": fakes.review_threads_graphql(pr, viewer),
-            "pageInfo": {"hasNextPage": False, "endCursor": None},
-        }
-        return JSONResponse({"data": {"repository": {"pullRequest": {"reviewThreads": threads}}}})
-    if "PullRequestThreadCount" in query:
-        return JSONResponse(
-            {
-                "data": {
-                    "repository": {
-                        "pullRequest": {
-                            "reviewThreads": fakes.review_thread_count_graphql(pr["review_threads"])
-                        }
-                    }
-                }
-            }
-        )
     review_threads = {
-        "nodes": [fakes.review_thread_graphql(thread) for thread in pr["review_threads"]],
+        "nodes": fakes.review_threads_graphql(pr, viewer),
         "pageInfo": {"hasNextPage": False, "endCursor": None},
     }
-    pull_request: dict[str, Any] = {"reviewThreads": review_threads}
+    pull_request: dict[str, Any] = {
+        "reviewThreads": review_threads,
+        "reviewDecision": pr["review_decision"],
+    }
     if "PullRequestFixReviews" in query:
         pull_request.update(
             {
@@ -1648,12 +2009,13 @@ async def gh_graphql(request: Request) -> JSONResponse:
                 "latestOpinionatedReviews": {
                     "nodes": [
                         {
-                            "author": {"login": review.get("author")},
-                            "state": review.get("state"),
-                            "body": review.get("body", ""),
-                            "url": review.get("url"),
+                            "author": {"login": review["author"]},
+                            "state": review["state"],
+                            "body": review["body"],
+                            "url": review["url"],
                         }
                         for review in pr["reviews"]
+                        if review["state"] != "PENDING"
                     ]
                 },
             }

@@ -5,16 +5,20 @@ These stores are the single source of truth that both the real agent code
 sees in the UI is exactly what the agent produced.
 """
 
+import copy
+import os
 import shutil
 import subprocess
 import time
 import zlib
+from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 
 from e2e_env import (
     BARE_REMOTE,
     BASE_BRANCH,
+    BASE_URL,
     OWNER,
     REPO,
     SECOND_BARE_REMOTE,
@@ -165,10 +169,24 @@ REPO_PRIVATE = [False]
 MERGE_METHOD_FLAGS = ("allow_squash_merge", "allow_merge_commit", "allow_rebase_merge")
 REPO_MERGE_METHODS: dict[tuple[str, str], dict[str, bool]] = {}
 _pr_seq = [0]
+# GitHub's record ids are global and only grow; the mirror keys rows on them.
+_github_id_seq = [0]
 _REMOTES = {
     (OWNER, REPO): BARE_REMOTE,
     (SECOND_OWNER, SECOND_REPO): SECOND_BARE_REMOTE,
 }
+# The harness's own pushes run inside its event loop, so the hook calling back
+# into it would wait on itself; it publishes those pushes directly instead.
+_HARNESS_PUSH_ENV = "E2E_HARNESS_PUSH"
+_POST_RECEIVE_HOOK = f"""#!/bin/sh
+[ -n "${_HARNESS_PUSH_ENV}" ] && exit 0
+curl -s -m 10 -X POST "{BASE_URL}/control/pushed" >/dev/null 2>&1 || true
+"""
+
+
+def next_github_id() -> int:
+    _github_id_seq[0] += 1
+    return _github_id_seq[0]
 
 
 def _git(*args: str, cwd: Path | None = None) -> str:
@@ -178,6 +196,7 @@ def _git(*args: str, cwd: Path | None = None) -> str:
         capture_output=True,
         text=True,
         check=True,
+        env={**os.environ, _HARNESS_PUSH_ENV: "1"},
     )
     return result.stdout
 
@@ -198,6 +217,9 @@ def seed_bare_remotes() -> None:
         _git("add", "-A", cwd=seed_work)
         _git(*ident, "commit", "-m", "Initial commit", cwd=seed_work)
         _git("init", "--bare", "-b", BASE_BRANCH, str(remote))
+        hook = remote / "hooks" / "post-receive"
+        hook.write_text(_POST_RECEIVE_HOOK)
+        hook.chmod(0o755)
         _git("remote", "add", "origin", str(remote), cwd=seed_work)
         _git("push", "origin", BASE_BRANCH, cwd=seed_work)
         shutil.rmtree(seed_work)
@@ -385,10 +407,46 @@ def pull_diff(pull: dict[str, Any]) -> str:
         return ""
 
 
-def pulls() -> list[dict[str, Any]]:
-    """Every pull request, with any open one whose branch was pushed moved to the new head.
+def pull_commits(pull: dict[str, Any]) -> list[dict[str, Any]]:
+    """The commits on the pull request's branch, oldest first, as ``/pulls/{n}/commits`` lists them."""
+    remote = _REMOTES.get((pull["owner"], pull["repo"]))
+    if remote is None or not pull["branch_tip"]:
+        return []
+    try:
+        out = _git(
+            "--git-dir",
+            str(remote),
+            "log",
+            "--reverse",
+            "--format=%H%x00%s%x00%aI%x00%ae",
+            f"{pull['base']}..{pull['branch_tip']}",
+        )
+    except subprocess.CalledProcessError:
+        return []
+    logins = {user["email"]: user["login"] for user in TEST_USERS}
+    commits = []
+    for line in out.splitlines():
+        sha, message, date, email = line.split("\x00")
+        login = logins.get(email)
+        commits.append(
+            {
+                "sha": sha,
+                "html_url": f"https://github.com/{pull['owner']}/{pull['repo']}/commit/{sha}",
+                "commit": {"message": message, "author": {"date": date, "email": email}},
+                "author": github_user(login) if login else None,
+            }
+        )
+    return commits
 
-    GitHub re-points a PR at each push and the new head starts with no checks.
+
+def pulls() -> list[dict[str, Any]]:
+    return PULLS
+
+
+def advance_heads() -> None:
+    """Re-point each open pull request whose branch was pushed at the new head.
+
+    GitHub does this on every push, and the new head starts with no checks.
     """
     for pull in PULLS:
         if pull["state"] != "open" or pull["merged"]:
@@ -405,9 +463,22 @@ def pulls() -> list[dict[str, Any]]:
             deletions=sum(f["deletions"] for f in files),
             check_runs=[],
             statuses=[],
-            updated_at=github_timestamp(),
+            check_suite_id=next_github_id(),
         )
-    return PULLS
+
+
+def snapshot() -> dict[tuple[str, str, int], dict[str, Any]]:
+    """Every pull request as it stands now, to tell later what changed."""
+    return {pull_key(pull): copy.deepcopy(pull) for pull in PULLS}
+
+
+def pull_key(pull: dict[str, Any]) -> tuple[str, str, int]:
+    return (pull["owner"], pull["repo"], pull["number"])
+
+
+def touch(pull: dict[str, Any]) -> None:
+    """Advance ``updated_at`` as GitHub does on every change, never backwards."""
+    pull["updated_at"] = max(github_timestamp(), pull["updated_at"])
 
 
 def github_timestamp(offset_seconds: float = 0.0) -> str:
@@ -431,6 +502,7 @@ def create_pull(
     number = _pr_seq[0]
     files = _diff_files(owner, repo, base, head)
     pr = {
+        "id": next_github_id(),
         "number": number,
         "owner": owner,
         "repo": repo,
@@ -443,16 +515,21 @@ def create_pull(
         "draft": draft,
         "state": "open",
         "merged": False,
+        "merged_at": None,
+        "closed_at": None,
         "mergeable": True,
         "mergeable_state": "clean",
+        "check_suite_id": next_github_id(),
         "check_runs": [],
         "statuses": [],
-        "review_threads": [],
+        "resolved_threads": [],
+        "seeded_comment_ids": [],
         "reviews": [],
         "review_comments": [],
         "standalone_comment_posts": [],
         "issue_comments": [],
-        "review_decision": "REVIEW_REQUIRED",
+        # GitHub's verdict under branch protection; the fake repos have none.
+        "review_decision": None,
         "requested_reviewers": [],
         "author": author,
         "merge_method": None,
@@ -497,73 +574,174 @@ def pull_node_id(pull: dict[str, Any]) -> str:
 
 
 def mark_pull_ready(node_id: str) -> dict[str, Any] | None:
-    pull = next((pull for pull in pulls() if pull_node_id(pull) == node_id), None)
+    pull = next((pull for pull in PULLS if pull_node_id(pull) == node_id), None)
     if pull is None:
         return None
     pull["draft"] = False
-    pull["updated_at"] = github_timestamp()
     return pull
+
+
+def set_pull_state(pull: dict[str, Any], state: str) -> None:
+    pull["state"] = state
+    pull["closed_at"] = github_timestamp() if state == "closed" else None
 
 
 def update_pull_health(number: int, values: dict[str, Any]) -> dict[str, Any] | None:
+    """Set what a spec says GitHub holds for the pull request.
+
+    Reviews, threads, checks and statuses become records with ids, as GitHub
+    lists them; one left as it was keeps its id, so setting it again is no change.
+    """
     pull = find_pull(number)
     if pull is None:
         return None
-    allowed = {
-        "draft",
-        "state",
-        "merged",
-        "mergeable",
-        "mergeable_state",
-        "head_sha",
-        "check_runs",
-        "statuses",
-        "review_threads",
-        "reviews",
-        "review_decision",
-    }
-    pull.update({key: value for key, value in values.items() if key in allowed})
+    pull.update(
+        {
+            key: value
+            for key, value in values.items()
+            if key
+            in {"draft", "merged", "mergeable", "mergeable_state", "head_sha", "review_decision"}
+        }
+    )
+    if "state" in values:
+        set_pull_state(pull, str(values["state"]))
+    if values.get("merged") and not pull["merged_at"]:
+        pull["merged_at"] = github_timestamp()
+    if isinstance(values.get("check_runs"), list):
+        pull["check_runs"] = [_seeded_check_run(pull, check) for check in values["check_runs"]]
+    if isinstance(values.get("statuses"), list):
+        pull["statuses"] = [_seeded_status(pull, status) for status in values["statuses"]]
+    if isinstance(values.get("reviews"), list):
+        pull["reviews"] = [_seeded_review(pull, review) for review in values["reviews"]]
+    if isinstance(values.get("review_threads"), list):
+        _seed_review_threads(pull, values["review_threads"])
     return pull
 
 
-def review_thread_graphql(thread: dict[str, Any]) -> dict[str, Any]:
-    comments = thread.get("comments")
-    if not isinstance(comments, list):
-        comments = [
-            {
-                "author": thread.get("author"),
-                "body": thread.get("body", ""),
-                "url": thread.get("url"),
-            }
-        ]
+def _seeded_check_run(pull: dict[str, Any], check: dict[str, Any]) -> dict[str, Any]:
+    fields = {
+        "name": str(check.get("name") or ""),
+        "head_sha": str(check.get("head_sha") or pull["head_sha"]),
+        "status": str(check.get("status") or "completed"),
+        "conclusion": check.get("conclusion"),
+        "details_url": check.get("details_url"),
+    }
+    same = next(
+        (run for run in pull["check_runs"] if all(run.get(k) == v for k, v in fields.items())),
+        None,
+    )
+    # A changed check is a rerun: a new id in the same suite, which GitHub shows instead.
     return {
-        "isResolved": bool(thread.get("is_resolved", False)),
-        "isOutdated": bool(thread.get("is_outdated", False)),
-        "path": thread.get("path", ""),
-        "line": thread.get("line"),
-        "originalLine": thread.get("original_line"),
-        "comments": {
-            "nodes": [
-                {
-                    "author": {"login": comment.get("author")},
-                    "body": comment.get("body", ""),
-                    "url": comment.get("url"),
-                }
-                for comment in comments
-            ],
-            "pageInfo": {"hasNextPage": False, "endCursor": None},
-        },
+        **fields,
+        "id": same["id"] if same else next_github_id(),
+        "required": bool(check.get("required", False)),
     }
 
 
-def review_thread_count_graphql(threads: list[dict[str, Any]]) -> dict[str, Any]:
-    """``reviewThreads`` as the unresolved-count query selects it."""
+def check_run_json(pull: dict[str, Any], run: dict[str, Any]) -> dict[str, Any]:
+    url = f"https://github.com/{pull['owner']}/{pull['repo']}/runs/{run['id']}"
     return {
-        "nodes": [
-            {"isResolved": review_thread_graphql(thread)["isResolved"]} for thread in threads
-        ],
-        "pageInfo": {"hasNextPage": False, "endCursor": None},
+        "id": run["id"],
+        "name": run["name"],
+        "head_sha": run["head_sha"],
+        "status": run["status"],
+        "conclusion": run["conclusion"],
+        "details_url": run["details_url"] or url,
+        "html_url": url,
+        "app": {"id": 1, "slug": "fake-ci"},
+        "check_suite": {"id": pull["check_suite_id"], "head_branch": pull["head"]},
+        "started_at": pull["created_at"],
+        "completed_at": github_timestamp() if run["status"] == "completed" else None,
     }
+
+
+def _seeded_status(pull: dict[str, Any], status: dict[str, Any]) -> dict[str, Any]:
+    fields = {
+        "context": str(status.get("context") or ""),
+        "state": str(status.get("state") or "pending"),
+        "target_url": status.get("target_url"),
+        "description": status.get("description"),
+    }
+    same = next(
+        (old for old in pull["statuses"] if all(old.get(k) == v for k, v in fields.items())),
+        None,
+    )
+    return {
+        **fields,
+        "updated_at": same["updated_at"] if same else github_timestamp(),
+        "required": bool(status.get("required", False)),
+    }
+
+
+def _seeded_review(pull: dict[str, Any], review: dict[str, Any]) -> dict[str, Any]:
+    user = review.get("user")
+    author = str(user.get("login") if isinstance(user, dict) else review.get("author") or "")
+    state = str(review.get("state") or "").upper()
+    body = str(review.get("body") or "")
+    same = next(
+        (
+            old
+            for old in pull["reviews"]
+            if (old["author"], old["state"], old["body"]) == (author, state, body)
+        ),
+        None,
+    )
+    return same or _review_record(
+        pull,
+        author=author,
+        state=state,
+        commit_id=pull["head_sha"],
+        body=body,
+        url=review.get("url") if isinstance(review.get("url"), str) else None,
+    )
+
+
+def _seed_review_threads(pull: dict[str, Any], threads: list[dict[str, Any]]) -> None:
+    """Replace the spec's earlier inline threads with ``threads``, as review comments."""
+    seeded = set(pull["seeded_comment_ids"])
+    pull["review_comments"] = [c for c in pull["review_comments"] if c["id"] not in seeded]
+    pull["resolved_threads"] = [r for r in pull["resolved_threads"] if r not in seeded]
+    pull["seeded_comment_ids"] = []
+    for thread in threads:
+        comments = thread.get("comments")
+        if not isinstance(comments, list):
+            comments = [thread]
+        line = None if thread.get("is_outdated") else thread.get("line")
+        root: dict[str, Any] | None = None
+        for comment in comments:
+            added = _add_review_comment(
+                pull,
+                review_id=None,
+                commit_id=pull["head_sha"],
+                author=str(comment.get("author") or ""),
+                payload={
+                    "body": comment.get("body"),
+                    "path": thread.get("path"),
+                    "line": line,
+                    "original_line": thread.get("original_line") or thread.get("line"),
+                },
+                url=comment.get("url") if isinstance(comment.get("url"), str) else None,
+                in_reply_to=root["id"] if root else None,
+            )
+            pull["seeded_comment_ids"].append(added["id"])
+            root = root or added
+        if root is not None and thread.get("is_resolved"):
+            pull["resolved_threads"].append(root["id"])
+
+
+def thread_node_id(root: dict[str, Any]) -> str:
+    return f"PRRT_node_{root['id']}"
+
+
+def set_thread_resolved(node_id: str, resolved: bool) -> dict[str, Any] | None:
+    """GraphQL ``resolveReviewThread``/``unresolveReviewThread``."""
+    found = _comment_by(lambda comment: thread_node_id(comment) == node_id)
+    if found is None or found[1].get("in_reply_to_id") is not None:
+        return None
+    pull, root = found
+    others = [r for r in pull["resolved_threads"] if r != root["id"]]
+    pull["resolved_threads"] = [*others, root["id"]] if resolved else others
+    return pull
 
 
 def check_graphql(check: dict[str, Any]) -> dict[str, Any]:
@@ -589,54 +767,55 @@ def status_graphql(status: dict[str, Any]) -> dict[str, Any]:
 
 def pull_health_json(pull: dict[str, Any]) -> dict[str, Any]:
     return {
-        key: pull[key]
-        for key in (
-            "number",
-            "draft",
-            "state",
-            "merged",
-            "mergeable",
-            "mergeable_state",
-            "head_sha",
-            "check_runs",
-            "statuses",
-            "review_threads",
-            "reviews",
-            "review_decision",
-        )
+        **{
+            key: pull[key]
+            for key in (
+                "number",
+                "draft",
+                "state",
+                "merged",
+                "mergeable",
+                "mergeable_state",
+                "head_sha",
+                "check_runs",
+                "statuses",
+                "reviews",
+                "review_decision",
+            )
+        },
+        "review_threads": review_threads_graphql(pull, ""),
     }
+
+
+# Accounts the backend already knows under another id than the hash below.
+_GITHUB_IDS = {"octocat": 1003, **{user["login"]: int(user["github_id"]) for user in TEST_USERS}}
 
 
 def github_user_id(login: str) -> int:
     """The account id GitHub sends with every user; stable per login across runs."""
-    known = next((user["github_id"] for user in TEST_USERS if user["login"] == login), None)
-    return int(known) if known else zlib.crc32(login.encode())
+    return _GITHUB_IDS.get(login) or zlib.crc32(login.encode())
 
 
-def review_rest_json(review: dict[str, Any], index: int) -> dict[str, Any]:
-    """A review as the REST ``/pulls/{n}/reviews`` list returns it.
-
-    The GraphQL fix path stores reviews as ``{author, state, body, url}``; accept
-    that shape as well as GitHub's own ``{id, user: {login}, state}``."""
-    user = review.get("user")
-    login = user.get("login") if isinstance(user, dict) else review.get("author")
-    review_id = review.get("id")
-    resolved_id = (
-        review_id if isinstance(review_id, int) and not isinstance(review_id, bool) else index + 1
-    )
-    resolved_login = login if isinstance(login, str) else ""
+def github_user(login: str) -> dict[str, Any]:
     return {
-        "id": resolved_id,
-        "node_id": review.get("node_id") or f"PRR_node_{resolved_id}",
-        "user": {
-            "id": github_user_id(resolved_login),
-            "login": resolved_login,
-            "avatar_url": "",
-        },
-        "state": review.get("state", ""),
-        "body": review.get("body", ""),
-        "html_url": review.get("url") or f"https://github.com/pullrequestreview-{resolved_id}",
-        "submitted_at": review.get("submitted_at"),
+        "login": login,
+        "id": github_user_id(login),
+        "avatar_url": "",
+        "type": "Bot" if login.endswith("[bot]") else "User",
+    }
+
+
+def review_rest_json(review: dict[str, Any]) -> dict[str, Any]:
+    """A review as the REST ``/pulls/{n}/reviews`` list and webhooks describe it."""
+    return {
+        "id": review["id"],
+        "node_id": review["node_id"],
+        "user": github_user(review["author"]),
+        "state": review["state"],
+        "body": review["body"],
+        "html_url": review["html_url"],
+        "commit_id": review["commit_id"],
+        "submitted_at": review["submitted_at"],
     }
 
 
@@ -680,8 +859,6 @@ def record_snapshot_delete(snapshot_id: str) -> None:
     DELETED_SNAPSHOTS.append(snapshot_id)
 
 
-_review_seq = [0]
-
 # Repository permission per GitHub login, as ``/collaborators/{u}/permission``
 # reports it. Anyone absent reads as "read", which is what fails the vote gate.
 COLLABORATOR_PERMISSIONS: dict[str, str] = {}
@@ -703,11 +880,16 @@ _REVIEW_STATES = {
 
 
 def _review_record(
-    pull: dict[str, Any], *, author: str, state: str, commit_id: str, body: str
+    pull: dict[str, Any],
+    *,
+    author: str,
+    state: str,
+    commit_id: str,
+    body: str,
+    url: str | None = None,
 ) -> dict[str, Any]:
-    _review_seq[0] += 1
-    review_id = _review_seq[0]
-    url = (
+    review_id = next_github_id()
+    url = url or (
         f"https://github.com/{pull['owner']}/{pull['repo']}/pull/{pull['number']}"
         f"#pullrequestreview-{review_id}"
     )
@@ -715,7 +897,7 @@ def _review_record(
         "id": review_id,
         "node_id": f"PRR_node_{review_id}",
         "author": author,
-        "user": {"login": author},
+        "user": github_user(author),
         "state": state,
         "body": body,
         "commit_id": commit_id,
@@ -758,14 +940,10 @@ def submit_review(
     )
     pull["reviews"].append(review)
     for comment in comments or []:
-        _add_review_comment(pull, review, author=author, payload=comment)
-    _refresh_review_decision(pull)
+        _add_review_comment(
+            pull, review_id=review["id"], commit_id=commit_id, author=author, payload=comment
+        )
     return review
-
-
-def _refresh_review_decision(pull: dict[str, Any]) -> None:
-    if any(item["state"] == "APPROVED" for item in pull["reviews"]):
-        pull["review_decision"] = "APPROVED"
 
 
 def pending_review(pull: dict[str, Any], author: str) -> dict[str, Any] | None:
@@ -796,7 +974,6 @@ def submit_pending_review(
         body=body or review["body"],
         submitted_at=github_timestamp(),
     )
-    _refresh_review_decision(pull)
     return 200, review
 
 
@@ -817,39 +994,47 @@ def delete_pending_review(
     return 200, review
 
 
-_review_comment_seq = [0]
-
-
 def _add_review_comment(
-    pull: dict[str, Any], review: dict[str, Any], *, author: str, payload: dict[str, Any]
+    pull: dict[str, Any],
+    *,
+    review_id: int | None,
+    commit_id: str,
+    author: str,
+    payload: dict[str, Any],
+    url: str | None = None,
+    in_reply_to: int | None = None,
 ) -> dict[str, Any]:
-    _review_comment_seq[0] += 1
-    comment_id = _review_comment_seq[0]
+    comment_id = next_github_id()
+    now = github_timestamp()
     comment = {
         "id": comment_id,
         "node_id": f"PRRC_node_{comment_id}",
-        "pull_request_review_id": review["id"],
-        "user": {"login": author, "avatar_url": ""},
+        "pull_request_review_id": review_id,
+        "in_reply_to_id": in_reply_to,
+        "user": github_user(author),
         "body": str(payload.get("body") or ""),
         "path": str(payload.get("path") or ""),
         "line": payload.get("line"),
+        "original_line": payload.get("original_line") or payload.get("line"),
         "start_line": payload.get("start_line") or payload.get("startLine"),
         "side": payload.get("side") or "RIGHT",
         "start_side": payload.get("start_side") or payload.get("startSide"),
-        "commit_id": review["commit_id"],
+        "commit_id": commit_id,
         "position": 1,
-        "html_url": (
+        "html_url": url
+        or (
             f"https://github.com/{pull['owner']}/{pull['repo']}/pull/{pull['number']}"
             f"#discussion_r{comment_id}"
         ),
-        "created_at": github_timestamp(),
+        "created_at": now,
+        "updated_at": now,
     }
     pull["review_comments"].append(comment)
     return comment
 
 
 def _review_by_node(node_id: str) -> tuple[dict[str, Any], dict[str, Any]] | None:
-    for pull in pulls():
+    for pull in PULLS:
         for review in pull["reviews"]:
             if review.get("node_id") == node_id:
                 return pull, review
@@ -864,11 +1049,19 @@ def add_review_thread(author: str, thread: dict[str, Any]) -> dict[str, Any] | N
     pull, review = found
     if review.get("author") != author or review["state"] != "PENDING":
         return None
-    return _add_review_comment(pull, review, author=author, payload=thread)
+    return _add_review_comment(
+        pull,
+        review_id=review["id"],
+        commit_id=review["commit_id"],
+        author=author,
+        payload=thread,
+    )
 
 
-def _comment_by(predicate: Any) -> tuple[dict[str, Any], dict[str, Any]] | None:
-    for pull in pulls():
+def _comment_by(
+    predicate: Callable[[dict[str, Any]], bool],
+) -> tuple[dict[str, Any], dict[str, Any]] | None:
+    for pull in PULLS:
         for comment in pull["review_comments"]:
             if predicate(comment):
                 return pull, comment
@@ -880,7 +1073,7 @@ def update_review_comment_body(author: str, node_id: str, body: str) -> dict[str
     found = _comment_by(lambda comment: comment["node_id"] == node_id)
     if found is None or found[1]["user"]["login"] != author:
         return None
-    found[1]["body"] = body
+    found[1].update(body=body, updated_at=github_timestamp())
     return found[1]
 
 
@@ -919,18 +1112,26 @@ def submitted_review_comments(pull: dict[str, Any]) -> list[dict[str, Any]]:
     ]
 
 
+def thread_comments(pull: dict[str, Any], root: dict[str, Any]) -> list[dict[str, Any]]:
+    """The thread ``root`` opened: it, then its replies."""
+    return [root] + [c for c in pull["review_comments"] if c.get("in_reply_to_id") == root["id"]]
+
+
 def review_threads_graphql(pull: dict[str, Any], viewer: str) -> list[dict[str, Any]]:
-    """``reviewThreads`` with the comment ids and review links the pending-review read selects."""
+    """``reviewThreads`` with every field the backend's thread queries select."""
+    visible = visible_review_comments(pull, viewer)
+    visible_ids = {comment["id"] for comment in visible}
     return [
         {
-            "id": f"PRRT_node_{comment['id']}",
-            "path": comment["path"],
-            "line": comment["line"],
-            "startLine": comment["start_line"],
-            "diffSide": comment["side"],
-            "startDiffSide": comment["start_side"],
-            "isResolved": False,
-            "isOutdated": False,
+            "id": thread_node_id(root),
+            "path": root["path"],
+            "line": root["line"],
+            "originalLine": root["original_line"],
+            "startLine": root["start_line"],
+            "diffSide": root["side"],
+            "startDiffSide": root["start_side"],
+            "isResolved": root["id"] in pull["resolved_threads"],
+            "isOutdated": root["line"] is None,
             "comments": {
                 "nodes": [
                     {
@@ -939,30 +1140,33 @@ def review_threads_graphql(pull: dict[str, Any], viewer: str) -> list[dict[str, 
                         "body": comment["body"],
                         "author": {"login": comment["user"]["login"]},
                         "url": comment["html_url"],
-                        "pullRequestReview": {
-                            "fullDatabaseId": str(comment["pull_request_review_id"])
-                        },
+                        "pullRequestReview": (
+                            {"fullDatabaseId": str(comment["pull_request_review_id"])}
+                            if comment["pull_request_review_id"] is not None
+                            else None
+                        ),
                     }
+                    for comment in thread_comments(pull, root)
+                    if comment["id"] in visible_ids
                 ],
                 "pageInfo": {"hasNextPage": False, "endCursor": None},
             },
         }
-        for comment in visible_review_comments(pull, viewer)
+        for root in visible
+        if root.get("in_reply_to_id") is None
     ]
-
-
-_issue_comment_seq = [0]
 
 
 def add_issue_comment(pull: dict[str, Any], *, author: str, body: str) -> dict[str, Any]:
     """``POST /issues/{n}/comments``: a top-level pull request comment."""
-    _issue_comment_seq[0] += 1
-    comment_id = _issue_comment_seq[0]
+    comment_id = next_github_id()
+    now = github_timestamp()
     comment = {
         "id": comment_id,
-        "user": {"login": author or "open-swe[bot]", "avatar_url": ""},
+        "user": github_user(author or "open-swe[bot]"),
         "body": body,
-        "created_at": github_timestamp(),
+        "created_at": now,
+        "updated_at": now,
         "html_url": (
             f"https://github.com/{pull['owner']}/{pull['repo']}/pull/{pull['number']}"
             f"#issuecomment-{comment_id}"
@@ -993,8 +1197,8 @@ def merge_pull(
     if not pull["mergeable"]:
         return 405, {"message": "Pull request is not mergeable"}
     pull["merged"] = True
-    pull["state"] = "closed"
-    pull["merged_at"] = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
+    set_pull_state(pull, "closed")
+    pull["merged_at"] = pull["closed_at"]
     pull["merge_method"] = merge_method
     return 200, {
         "sha": pull["head_sha"],
@@ -1015,7 +1219,5 @@ def reset() -> None:
     COLLABORATOR_PERMISSIONS.clear()
     REPO_PRIVATE[0] = False
     _pr_seq[0] = 0
-    _review_seq[0] = 0
-    _review_comment_seq[0] = 0
-    _issue_comment_seq[0] = 0
+    _github_id_seq[0] = 0
     seed_bare_remotes()

@@ -139,7 +139,7 @@ async function botMessages(
     .join("\n");
 }
 
-/** Report the head check as `conclusion`, then let GitHub say so out of band. */
+/** Report the head check as `conclusion`; fake GitHub delivers its webhook. */
 async function reportCheck(
   request: APIRequestContext,
   headSha: string,
@@ -149,7 +149,6 @@ async function reportCheck(
     number: PR_NUMBER,
     check_runs: [
       {
-        id: 9001,
         name: "unit tests",
         status: "completed",
         conclusion,
@@ -157,29 +156,6 @@ async function reportCheck(
         details_url: "https://ci.example.com/runs/9001",
       },
     ],
-  });
-
-  await control(request, "/control/github-event", {
-    event: "check_run",
-    payload: {
-      action: "completed",
-      repository: {
-        name: REPO.repo,
-        full_name: `${REPO.owner}/${REPO.repo}`,
-        owner: { login: REPO.owner },
-        private: false,
-      },
-      installation: { id: 42 },
-      check_run: {
-        id: 9001,
-        name: "unit tests",
-        status: "completed",
-        conclusion,
-        head_sha: headSha,
-        details_url: "https://ci.example.com/runs/9001",
-        check_suite: { head_branch: "add-greet" },
-      },
-    },
   });
 }
 

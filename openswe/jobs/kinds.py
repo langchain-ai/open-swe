@@ -17,6 +17,9 @@ from openswe.announcements.delivery import ANNOUNCEMENT_TASK, deliver_announceme
 from openswe.baby_sit import WATCH_JOB_KIND, evaluate_watch
 from openswe.background_tasks import CRON_KIND as BACKGROUND_TASKS
 from openswe.background_tasks import monitor_background_tasks
+from openswe.github.mirror.sync import SWEEP_JOB as PULL_REQUEST_SWEEP
+from openswe.github.mirror.sync import SYNC_JOB as PULL_REQUEST_SYNC
+from openswe.github.mirror.sync import PullRequestSync, start_sweeps, sweep
 from openswe.human_review.standard import SCHEDULER_TASK as HUMAN_REVIEW_DEADLINE
 from openswe.human_review.standard import run_deadline
 from openswe.jobs import queue
@@ -163,6 +166,28 @@ async def _thread_status_reconcile(_job: Job) -> object:
     return await reconcile_busy_threads()
 
 
+@WORKER.register(PULL_REQUEST_SYNC)
+async def _pull_request_sync(job: Job) -> None:
+    repository, number = _text(job, "repository"), job.payload.get("number")
+    if repository is None or "/" not in repository or not isinstance(number, int):
+        return
+    attempt = job.payload.get("attempt")
+    owner, name = repository.split("/", 1)
+    await PullRequestSync(owner, name, number).run(
+        full=job.payload.get("full") is True,
+        attempt=attempt if isinstance(attempt, int) else 0,
+    )
+
+
+@WORKER.register(PULL_REQUEST_SWEEP)
+async def _pull_request_sweep(job: Job) -> None:
+    queued = await sweep(_text(job, "repository"))
+    logger.info(
+        "Job ran",
+        extra={"job_kind": job.kind, "job_id": str(job.id), "job_result": sum(queued.values())},
+    )
+
+
 @WORKER.register(WAKE_THREAD_JOB)
 async def _wake_thread(job: Job) -> None:
     # Never retried: a run the server started before the client saw an error would start twice.
@@ -182,6 +207,7 @@ async def start_jobs() -> None:
         lambda: queue.schedule(
             THREAD_STATUS_RECONCILE, cron=RECONCILE_SCHEDULE, key=THREAD_STATUS_RECONCILE
         ),
+        start_sweeps,
     ]
     for step in steps:
         try:

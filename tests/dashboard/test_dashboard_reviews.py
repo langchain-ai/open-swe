@@ -4,10 +4,10 @@ from unittest.mock import AsyncMock
 
 import httpx2
 import pytest
+from fastapi import HTTPException
 
 from openswe.github import app as github_app
 from openswe.github import http as github_http
-from openswe.github.http import GitHubError
 from openswe.review import reviews as review_api
 from openswe.review.findings import REVIEWER_THREAD_KIND
 
@@ -58,7 +58,11 @@ async def test_list_reviews_applies_accessibility_and_has_more(monkeypatch) -> N
 
 
 @pytest.mark.asyncio
-async def test_get_review_propagates_a_pull_request_missing_on_github(monkeypatch) -> None:
+@pytest.mark.usefixtures("registry_db")
+async def test_get_review_reports_a_pull_request_missing_on_github(monkeypatch) -> None:
+    monkeypatch.setattr(
+        github_app, "get_github_app_installation_id_for_repo", AsyncMock(return_value=1)
+    )
     monkeypatch.setattr(
         github_app, "get_github_app_installation_token", AsyncMock(return_value="t")
     )
@@ -67,7 +71,7 @@ async def test_get_review_propagates_a_pull_request_missing_on_github(monkeypatc
     )
     monkeypatch.setattr(github_http, "github_request", AsyncMock(return_value=missing))
 
-    with pytest.raises(GitHubError) as excinfo:
+    with pytest.raises(HTTPException) as excinfo:
         await review_api.get_review("acme", "app", 7)
 
-    assert excinfo.value.response.status_code == 404
+    assert excinfo.value.status_code == 404

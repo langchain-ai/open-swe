@@ -168,7 +168,7 @@ export function PullRequestCard({
             </time>
           </span>
           <UnresolvedConversations pr={pr} />
-          {!pr.statusAvailable && !pr.detailsLoading && (
+          {!pr.statusAvailable && (
             <span className="text-warning-secondary">
               Live PR status unavailable
             </span>

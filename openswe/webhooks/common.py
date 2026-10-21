@@ -61,7 +61,7 @@ from openswe.github.comments import (
 )
 from openswe.github.http import GitHubClient
 from openswe.github.org_membership import INTERNAL_BOT_LOGINS, is_user_active_org_member
-from openswe.github.pull_requests import PullRequestEvent
+from openswe.github.pull_requests import PullRequest, PullRequestEvent
 from openswe.github.thread_token import (
     cache_github_token_for_thread,
     invalidate_cached_github_token,
@@ -1467,8 +1467,9 @@ async def update_agent_thread_pr_state(payload: dict[str, Any]) -> None:
 
     langgraph_client = get_client(url=LANGGRAPH_URL)
     try:
-        saved = await pull_request.save(repository_private=event.repo_private)
-        thread_ids = await saved.linked_threads()
+        # The mirror stored the event before this ran.
+        stored = await PullRequest.load(pull_request.owner, pull_request.repo, pull_request.number)
+        thread_ids = await stored.linked_threads()
     except Exception:  # noqa: BLE001
         logger.warning(
             "Pull request registry unavailable; scanning thread metadata instead",

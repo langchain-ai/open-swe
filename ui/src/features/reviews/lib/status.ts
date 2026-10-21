@@ -9,8 +9,6 @@ export function pullRequestKey(pr: { repo: string; number: number }) {
 
 /** One pill per condition the PR is in; Reviewable only when none applies. */
 export function statusLabels(pr: OpenPullRequest): string[] {
-  if (pr.detailsLoading) return ["Loading…"]
-  if (pr.detailsError) return ["Could not load status"]
   const labels = [
     ...(pr.draft ? ["Draft"] : []),
     ...(pr.mergeable === false || pr.mergeState === "dirty"
@@ -38,7 +36,6 @@ export function statusLabels(pr: OpenPullRequest): string[] {
 
 /** What a compact row adds under its pills: the specifics no pill names. */
 export function statusDetail(pr: OpenPullRequest): string | null {
-  if (pr.detailsLoading || pr.detailsError) return null
   if (pr.failingChecks.length)
     return pr.failingChecks.length === 1
       ? `${pr.failingChecks[0]} failing`

@@ -13,8 +13,12 @@ from openswe.audit_logs.middleware import audit_endpoint
 from openswe.dashboard.deps import ADMIN_DEP, SESSION_DEP, filter_repo_models_for_user
 from openswe.dashboard.oauth import session_user_id
 from openswe.dashboard.options import model_supports_effort
-from openswe.dashboard.repo_access import require_repo_access_for_user
+from openswe.dashboard.repo_access import (
+    require_installed_repo_access,
+    require_repo_access_for_user,
+)
 from openswe.github.http import GitHubClient, RepoClient
+from openswe.github.mirror.sync import PullRequestSync
 from openswe.github.pull_request_status import pull_request_identity
 from openswe.github.repo_names import normalize_repo_full_name
 from openswe.github.repos import accessible_repo_full_names
@@ -210,7 +214,7 @@ async def api_get_review(
     pr_number: int,
     session: dict[str, Any] = SESSION_DEP,
 ) -> dict[str, Any]:
-    await require_repo_access_for_user(session["sub"], f"{owner}/{repo}")
+    await require_installed_repo_access(session["sub"], f"{owner}/{repo}")
     return await get_review(owner, repo, pr_number)
 
 
@@ -249,8 +253,11 @@ async def api_get_pull_request_preview(
     pr_number: int,
     session: dict[str, Any] = SESSION_DEP,
 ) -> PullRequestPreview:
-    async with _as_viewer(session, owner, repo) as repository:
-        return await get_pull_request_preview(repository.pull_request(pr_number))
+    await require_installed_repo_access(session["sub"], f"{owner}/{repo}")
+    pull = await PullRequestSync(owner, repo, pr_number).mirrored()
+    if pull is None:
+        raise HTTPException(404, "pull request not found")
+    return await get_pull_request_preview(pull)
 
 
 @router.get("/reviews/{owner}/{repo}/{pr_number}/labels")

@@ -12,6 +12,7 @@ import logging
 import re
 import socket
 from collections.abc import Awaitable, Callable, Sequence
+from datetime import datetime
 from typing import Any, Literal, Self
 from urllib.parse import urljoin, urlparse
 
@@ -19,15 +20,21 @@ import httpx2
 from fastapi import HTTPException, Response
 from langgraph_sdk.errors import NotFoundError
 from pydantic import BaseModel, TypeAdapter, ValidationError
+from sqlalchemy import select
 
 from openswe.database import postgres
 from openswe.github.app import get_github_app_installation_token
 from openswe.github.http import GitHubAppUnavailable, GitHubClient, or_none
+from openswe.github.mirror.ci import HeadChecks
+from openswe.github.mirror.conversation import PullRequestFile
+from openswe.github.mirror.sync import PullRequestSync
+from openswe.github.mirror.views import PullRequestView, avatar_url
 from openswe.github.pull_request_diff import (
     build_pr_diff_files,
     fetch_file_versions,
 )
 from openswe.github.pull_request_status import PullRequestClient
+from openswe.github.pull_requests import PullRequest
 from openswe.github.webhook import trigger_pr_review_from_ref
 from openswe.review.assessment_feedback import PublishedAssessment
 from openswe.review.findings import (
@@ -305,63 +312,52 @@ def _as_review_summary(raw: dict[str, Any] | None) -> ReviewSummary | None:
         return None
 
 
-def _user_ref(value: Any) -> dict[str, Any] | None:
-    if not isinstance(value, dict):
-        return None
-    login = value.get("login")
-    if not isinstance(login, str):
-        return None
-    return {"login": login, "avatar_url": value.get("avatar_url")}
+def _account(login: str, github_id: int | None) -> dict[str, Any] | None:
+    return {"login": login, "avatar_url": avatar_url(github_id)} if login else None
 
 
-def _serialize_pr_details(payload: dict[str, Any]) -> dict[str, Any]:
-    labels = payload.get("labels")
-    state = payload.get("state")
-    if payload.get("merged"):
-        state = "merged"
-    elif payload.get("draft"):
-        state = "draft"
+def _pr_details(pull: PullRequest) -> dict[str, Any]:
     return {
-        "state": state if isinstance(state, str) else "open",
-        "title": payload.get("title") or "",
-        "body": payload.get("body") or "",
-        "additions": payload.get("additions") or 0,
-        "deletions": payload.get("deletions") or 0,
-        "changed_files": payload.get("changed_files") or 0,
-        "commits": payload.get("commits") or 0,
-        "head_sha": (payload.get("head") or {}).get("sha") or "",
-        "head_ref": (payload.get("head") or {}).get("ref") or "",
-        "base_ref": (payload.get("base") or {}).get("ref") or "",
-        "author": _user_ref(payload.get("user")),
-        "created_at": payload.get("created_at"),
-        "merged_at": payload.get("merged_at"),
+        "state": pull.state,
+        "title": pull.title,
+        "body": pull.body,
+        "additions": pull.additions or 0,
+        "deletions": pull.deletions or 0,
+        "changed_files": pull.changed_files or 0,
+        "commits": pull.commit_count or 0,
+        "head_sha": pull.head_sha,
+        "head_ref": pull.head_ref,
+        "base_ref": pull.base_ref,
+        "author": _account(pull.author, pull.author_github_id),
+        "created_at": _iso(pull.github_created_at),
+        "merged_at": _iso(pull.merged_at),
         "assignees": [
-            user
-            for user in (_user_ref(value) for value in payload.get("assignees") or [])
-            if user is not None
+            account
+            for user in pull.assignees or []
+            if (account := _account(user["login"], user["id"])) is not None
         ],
         "requested_reviewers": [
-            user
-            for user in (_user_ref(value) for value in payload.get("requested_reviewers") or [])
-            if user is not None
+            account
+            for user in pull.requested_reviewers or []
+            if (account := _account(user["login"], user["id"])) is not None
         ],
-        "labels": [
-            {"name": label.get("name"), "color": label.get("color")}
-            for label in (labels if isinstance(labels, list) else [])
-            if isinstance(label, dict) and isinstance(label.get("name"), str)
-        ],
+        "labels": [{"name": label["name"], "color": label["color"]} for label in pull.labels or []],
     }
 
 
-def _check_run_views(runs: list[dict[str, Any]]) -> list[dict[str, Any]]:
+def _iso(moment: datetime | None) -> str | None:
+    return moment.isoformat() if moment is not None else None
+
+
+def _check_run_views(checks: HeadChecks) -> list[dict[str, Any]]:
     return [
         {
-            "name": run.get("name") or "",
-            "status": run.get("status") or "",
-            "conclusion": run.get("conclusion"),
-            "url": run.get("html_url"),
+            "name": run.name,
+            "status": run.status,
+            "conclusion": run.conclusion or None,
+            "url": run.html_url or None,
         }
-        for run in runs
+        for run in checks.runs
     ]
 
 
@@ -625,27 +621,24 @@ async def _reviewer_thread_for(owner: str, repo: str, pr_number: int) -> ThreadL
     return thread if isinstance(thread, dict) else None
 
 
-def _unreviewed_summary(
-    owner: str, repo: str, pr_number: int, pr_payload: dict[str, Any]
-) -> dict[str, Any]:
+def _unreviewed_summary(pull: PullRequest) -> dict[str, Any]:
     """A review summary for a PR the reviewer has never run on."""
-    author = pr_payload.get("user")
     return {
         "thread_id": None,
-        "owner": owner,
-        "repo": repo,
-        "full_name": f"{owner}/{repo}",
-        "number": pr_number,
-        "title": pr_payload.get("title") or f"PR #{pr_number}",
-        "url": pr_payload.get("html_url") or f"https://github.com/{owner}/{repo}/pull/{pr_number}",
-        "head_ref": (pr_payload.get("head") or {}).get("ref") or "",
-        "base_ref": (pr_payload.get("base") or {}).get("ref") or "",
-        "author": (author.get("login") or "") if isinstance(author, dict) else "",
-        "head_sha": (pr_payload.get("head") or {}).get("sha") or "",
+        "owner": pull.owner,
+        "repo": pull.repo,
+        "full_name": pull.repo_full_name,
+        "number": pull.number,
+        "title": pull.title or f"PR #{pull.number}",
+        "url": pull.url,
+        "head_ref": pull.head_ref,
+        "base_ref": pull.base_ref,
+        "author": pull.author,
+        "head_sha": pull.head_sha,
         "watch": False,
         "status": "none",
         "counts": _finding_counts([]),
-        "updated_at": pr_payload.get("updated_at"),
+        "updated_at": _iso(pull.github_updated_at),
     }
 
 
@@ -655,23 +648,19 @@ async def get_review(owner: str, repo: str, pr_number: int) -> dict[str, Any]:
     The reviewer graph is optional — a PR it has never run on still renders with
     its GitHub-sourced details, checks and diff, and no findings.
     """
-    async with GitHubClient.as_app() as github:
-        repository = github.repo(owner, repo)
-        pr_payload = await repository.pull_request(pr_number).pull()
-        details = _serialize_pr_details(pr_payload)
-
-        thread = await _reviewer_thread_for(owner, repo, pr_number)
-        stored = (
-            (await _thread_findings([thread])).get(thread.get("thread_id"), []) if thread else []
-        )
-        summary = _thread_review_summary(thread, stored) if thread else None
-        metadata = thread_metadata(thread) if thread else {}
-        if not summary:
-            summary = _unreviewed_summary(owner, repo, pr_number, pr_payload)
-
-        head_sha = details["head_sha"] or summary["head_sha"]
-        runs = await or_none(repository.check_runs(head_sha)) if head_sha else None
-    checks = _check_run_views(runs or [])
+    pull = await PullRequestSync(owner, repo, pr_number).mirrored()
+    if pull is None:
+        raise HTTPException(404, "pull request not found")
+    details = _pr_details(pull)
+    thread = await _reviewer_thread_for(owner, repo, pr_number)
+    stored = (await _thread_findings([thread])).get(thread.get("thread_id"), []) if thread else []
+    summary = _thread_review_summary(thread, stored) if thread else None
+    metadata = thread_metadata(thread) if thread else {}
+    if not summary:
+        summary = _unreviewed_summary(pull)
+    head_sha = details["head_sha"] or summary["head_sha"]
+    (view,) = await PullRequestView.load([pull])
+    checks = _check_run_views(view.checks)
 
     findings = [_serialize_finding(finding, head_sha) for finding in stored]
     findings.sort(
@@ -685,7 +674,9 @@ async def get_review(owner: str, repo: str, pr_number: int) -> dict[str, Any]:
     for finding in findings:
         finding["group"] = classify_finding(finding)
 
-    target = await _scout_target(owner, repo, pr_number, pr_payload)
+    target = await _scout_target(
+        owner, repo, pr_number, title=pull.title, base_sha=pull.base_sha, head_sha=pull.head_sha
+    )
     walkthrough = await target.walkthrough() if target else None
     walkthrough_running = walkthrough is None and target is not None and await _scouting(target)
     walkthrough_error = (
@@ -778,61 +769,6 @@ class PullRequestPreview(BaseModel):
     human_input: str
 
 
-class _GithubPreviewFile(BaseModel):
-    filename: str
-    status: str = "modified"
-    additions: int = 0
-    deletions: int = 0
-
-
-class _GithubCheckRun(BaseModel):
-    name: str = ""
-    status: str = "completed"
-    conclusion: str | None = None
-    html_url: str | None = None
-
-
-class _GithubCommitStatus(BaseModel):
-    context: str = ""
-    state: str = "pending"
-    target_url: str | None = None
-
-    def as_check(self) -> PreviewCheck:
-        """A legacy commit status in check-run terms, which is how the UI reads both."""
-        pending = self.state == "pending"
-        return PreviewCheck(
-            name=self.context,
-            status="in_progress" if pending else "completed",
-            conclusion=None if pending else self.state,
-            url=self.target_url,
-        )
-
-
-class _GithubUser(BaseModel):
-    login: str
-    avatar_url: str | None = None
-
-
-class _GithubRef(BaseModel):
-    ref: str = ""
-    sha: str = ""
-
-
-class _GithubPreviewPull(BaseModel):
-    title: str = ""
-    body: str | None = None
-    state: str = "open"
-    draft: bool = False
-    merged: bool = False
-    commits: int = 0
-    additions: int = 0
-    deletions: int = 0
-    changed_files: int = 0
-    user: _GithubUser | None = None
-    head: _GithubRef | None = None
-    base: _GithubRef | None = None
-
-
 def _preview_thread(thread: dict[str, Any]) -> PreviewThread:
     parsed = PreviewThread.model_validate(thread)
     # Review bots hide their bookkeeping in HTML comments, which would otherwise
@@ -848,80 +784,71 @@ def _preview_thread(thread: dict[str, Any]) -> PreviewThread:
     )
 
 
-async def get_pull_request_preview(pull_request: PullRequestClient) -> PullRequestPreview:
+async def get_pull_request_preview(pull: PullRequest) -> PullRequestPreview:
     """Description, the largest changed files, and unresolved threads for any PR.
 
     Unlike ``get_review`` this does not need a reviewer thread, so it answers for
-    every PR the viewer can reach. Only file metadata is read — the contents live
+    every PR the viewer can reach. Only file metadata is kept — the contents live
     behind ``get_review_diff``, which is far too heavy to open a preview with.
-
-    Read as the viewer rather than the App: the preview only ever shows a PR the
-    viewer can already open, unlike the published review a reviewer thread backs.
     """
-    repository = pull_request.repo
-    owner, repo, pr_number = repository.owner, repository.name, pull_request.number
-    pull_payload, raw_files, threads = await asyncio.gather(
-        pull_request.pull(), pull_request.files(), pull_request.unresolved_threads()
-    )
-    pull = _GithubPreviewPull.model_validate(pull_payload)
-    files = [
-        PreviewFile(
-            path=entry.filename,
-            status=entry.status,
-            additions=entry.additions,
-            deletions=entry.deletions,
-        )
-        for entry in (
-            _GithubPreviewFile.model_validate(item) for item in raw_files if isinstance(item, dict)
-        )
-    ]
-    files.sort(key=lambda entry: entry.additions + entry.deletions, reverse=True)
-    head_sha = pull.head.sha if pull.head else ""
-    walkthrough = await WalkthroughView.for_head(owner, repo, pr_number, head_sha)
+    (view,) = await PullRequestView.load([pull])
+    async with postgres.session() as session:
+        files = [
+            PreviewFile(
+                path=row.path, status=row.status, additions=row.additions, deletions=row.deletions
+            )
+            for row in await session.scalars(
+                select(PullRequestFile)
+                .where(PullRequestFile.pull_request_id == pull.id)
+                .order_by((PullRequestFile.additions + PullRequestFile.deletions).desc())
+                .limit(_PREVIEW_FILE_LIMIT)
+            )
+        ]
+    walkthrough = await WalkthroughView.for_head(pull.owner, pull.repo, pull.number, pull.head_sha)
+    synced = pull.synced_at is not None
     # CI reaches GitHub as check runs or as legacy commit statuses, and the PR
     # list counts both — a preview reading only one would contradict the rail.
-    raw_checks, raw_statuses = (
-        await asyncio.gather(
-            or_none(repository.check_runs(head_sha)), or_none(repository.commit_statuses(head_sha))
+    checks = [
+        PreviewCheck(
+            name=run.name,
+            status=run.status,
+            conclusion=run.conclusion or None,
+            url=run.html_url or None,
         )
-        if head_sha
-        else (None, None)
-    )
-    checks = (
-        None
-        if raw_checks is None and raw_statuses is None
-        else [
-            PreviewCheck(
-                name=run.name, status=run.status, conclusion=run.conclusion, url=run.html_url
-            )
-            for run in (
-                _GithubCheckRun.model_validate(item)
-                for item in (raw_checks or [])
-                if isinstance(item, dict)
-            )
-        ]
-        + [
-            _GithubCommitStatus.model_validate(item).as_check()
-            for item in (raw_statuses or [])
-            if isinstance(item, dict)
-        ]
-    )
+        for run in view.checks.runs
+    ] + [
+        PreviewCheck(
+            name=status.context,
+            status="in_progress" if status.state == "pending" else "completed",
+            conclusion=None if status.state == "pending" else status.state,
+            url=status.target_url or None,
+        )
+        for status in view.checks.statuses
+    ]
     return PullRequestPreview(
         title=pull.title,
-        body=pull.body or "",
-        author=pull.user.login if pull.user else None,
-        author_avatar_url=pull.user.avatar_url if pull.user else None,
-        state="merged" if pull.merged else pull.state,
-        draft=pull.draft,
-        head_ref=pull.head.ref if pull.head else "",
-        base_ref=pull.base.ref if pull.base else "",
-        commits=pull.commits,
-        checks=checks,
-        additions=pull.additions,
-        deletions=pull.deletions,
+        body=pull.body,
+        author=pull.author or None,
+        author_avatar_url=avatar_url(pull.author_github_id),
+        state="merged"
+        if pull.state == "merged"
+        else "closed"
+        if pull.state == "closed"
+        else "open",
+        draft=pull.state == "draft",
+        head_ref=pull.head_ref,
+        base_ref=pull.base_ref,
+        commits=pull.commit_count or 0,
+        checks=checks if pull.head_sha else None,
+        additions=pull.additions or 0,
+        deletions=pull.deletions or 0,
         changed_files=pull.changed_files or len(files),
-        files=files[:_PREVIEW_FILE_LIMIT],
-        unresolved=(None if threads is None else [_preview_thread(thread) for thread in threads]),
+        files=files,
+        unresolved=(
+            [_preview_thread(thread) for thread in await view.unresolved_with_comments()]
+            if synced
+            else None
+        ),
         human_input=walkthrough.human_input if walkthrough else "",
     )
 
@@ -1143,21 +1070,18 @@ class _ScoutPull(BaseModel):
 
 
 async def _scout_target(
-    owner: str, repo: str, pr_number: int, pr_payload: object
+    owner: str, repo: str, pr_number: int, *, title: str, base_sha: str, head_sha: str
 ) -> ReviewScoutTarget | None:
-    """The scout target for the PR's current head, or ``None`` without a database or head."""
-    if not postgres.configured():
-        return None
-    pull = _ScoutPull.model_validate(pr_payload if isinstance(pr_payload, dict) else {})
-    if not pull.base.sha or not pull.head.sha:
+    """The scout target for the PR's head, or ``None`` without a database or head."""
+    if not postgres.configured() or not base_sha or not head_sha:
         return None
     return ReviewScoutTarget(
         owner=owner,
         repo=repo,
         pr_number=pr_number,
-        pr_title=pull.title,
-        base_sha=pull.base.sha,
-        head_sha=pull.head.sha,
+        pr_title=title,
+        base_sha=base_sha,
+        head_sha=head_sha,
         workspace_slug=await WORKSPACES.owner_of_repo(f"{owner}/{repo}"),
     )
 
@@ -1214,7 +1138,10 @@ async def trigger_review_scout(
     """
     async with GitHubClient.as_app() as github:
         pr_payload = await github.repo(owner, repo).pull_request(pr_number).pull()
-    target = await _scout_target(owner, repo, pr_number, pr_payload)
+    pull = _ScoutPull.model_validate(pr_payload if isinstance(pr_payload, dict) else {})
+    target = await _scout_target(
+        owner, repo, pr_number, title=pull.title, base_sha=pull.base.sha, head_sha=pull.head.sha
+    )
     if target is None:
         raise HTTPException(503, "the review scout needs a database and a pull request head")
     # Taken before the scout starts, so a walkthrough it stores quickly still counts as newer.
@@ -1223,7 +1150,6 @@ async def trigger_review_scout(
         trigger = ReviewScoutTrigger(started=False)
     else:
         trigger = ReviewScoutTrigger(started=True, run_id=await target.start())
-    pull = _ScoutPull.model_validate(pr_payload if isinstance(pr_payload, dict) else {})
     try:
         await ReviewSession(owner=owner, repo=repo, pr_number=pr_number, login=login).open(
             title=pull.title,

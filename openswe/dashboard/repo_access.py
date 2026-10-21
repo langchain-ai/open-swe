@@ -8,6 +8,7 @@ from fastapi import HTTPException
 from openswe.dashboard.profiles import get_valid_access_token
 from openswe.github.app import get_github_app_installation_token
 from openswe.github.repo_names import normalize_repo_full_name
+from openswe.github.repos import accessible_repo_full_names
 from openswe.utils.http import DEFAULT_HTTP_TIMEOUT
 from openswe.utils.http_pool import pooled_transport
 
@@ -58,6 +59,21 @@ async def require_repo_access_for_user(login: str, full_name: str) -> str:
             raise HTTPException(401, "github token expired, re-login required") from exc
         await assert_repo_access(full_name, token)
     return token
+
+
+async def require_installed_repo_access(login: str, full_name: str) -> str:
+    """``full_name``, if the App is installed on it and ``login`` can see it; 404 otherwise.
+
+    For reads the mirror answers: it holds only repositories the App is installed
+    on, and the list it checks is cached, so this costs GitHub nothing most times.
+    """
+    try:
+        normalized = normalize_repo_full_name(full_name)
+    except ValueError as exc:
+        raise HTTPException(422, str(exc)) from exc
+    if normalized.lower() not in await accessible_repo_full_names(login):
+        raise HTTPException(404, "repository not found")
+    return normalized
 
 
 async def require_repo_access_for_workspace(full_name: str) -> str:

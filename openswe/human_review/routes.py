@@ -1,6 +1,5 @@
 """Dashboard API for asking a repository's Slack review channel to review a pull request."""
 
-import asyncio
 import logging
 from datetime import UTC, datetime
 from typing import Any, Literal
@@ -11,14 +10,16 @@ from pydantic import BaseModel
 from openswe.audit_logs.middleware import audit_endpoint
 from openswe.dashboard.deps import SESSION_DEP
 from openswe.dashboard.repo_access import require_repo_access_for_user
-from openswe.expedited_review.readiness import latest_review_states
-from openswe.github.http import GitHubClient, GitHubError, or_none
-from openswe.github.pull_request_status import (
+from openswe.github.http import GitHubClient, or_none
+from openswe.github.mirror.views import (
     OpenPullRequest,
     OpenPullRequests,
-    pull_request_identity,
+    PullRequestReviewer,
+    PullRequestView,
 )
+from openswe.github.pull_request_status import pull_request_identity
 from openswe.github.repo_files import RepoSettings
+from openswe.github.repos import accessible_repo_full_names
 from openswe.human_review.card import mention
 from openswe.human_review.lifecycle import ReviewCard
 from openswe.human_review.requests import HumanReviewRequest
@@ -52,54 +53,23 @@ async def api_review_assignments(
         for request in requests
         if not repositories or request.pull_request.repo_full_name.lower() in repositories
     ]
+    accessible = await accessible_repo_full_names(login)
+    requests = [
+        request for request in requests if request.pull_request.repo_full_name.lower() in accessible
+    ]
+    views = await PullRequestView.load([request.pull_request for request in requests])
     rows: list[OpenPullRequest] = []
-    if requests:
-        async with GitHubClient.as_user(login) as github:
-            allowed: set[str] = set()
-            for full_name in {request.pull_request.repo_full_name for request in requests}:
-                owner, name = full_name.split("/", 1)
-                try:
-                    await github.repo(owner, name).info()
-                except GitHubError as exc:
-                    if exc.response.status_code not in {403, 404}:
-                        raise
-                    logger.info(
-                        "Review assignment repository no longer accessible",
-                        extra={"repository": full_name},
-                    )
-                else:
-                    allowed.add(full_name)
-            semaphore = asyncio.Semaphore(4)
-
-            async def pending(request: HumanReviewRequest) -> OpenPullRequest | None:
-                pr = request.pull_request
-                if pr.repo_full_name not in allowed:
-                    return None
-                async with semaphore:
-                    states = await latest_review_states(
-                        github.repo(pr.owner, pr.repo).pull_request(pr.number), pr.author
-                    )
-                if states is None:
-                    raise HTTPException(502, "Could not load assigned reviews from GitHub")
-                if any(
-                    who.lower() == login.lower() and state in {"APPROVED", "CHANGES_REQUESTED"}
-                    for who, state in states.items()
-                ):
-                    return None
-                return OpenPullRequest(
-                    repo=pr.repo_full_name,
-                    number=pr.number,
-                    title=pr.title,
-                    created_at=request.created_at.isoformat() if request.created_at else None,
-                    updated_at=request.updated_at.isoformat() if request.updated_at else None,
-                    details_loading=True,
-                )
-
-            rows = [
-                row
-                for row in await asyncio.gather(*(pending(request) for request in requests))
-                if row is not None
-            ]
+    for request, view in zip(requests, views, strict=True):
+        if view.state != "open" or any(
+            reviewer.login.lower() == login.lower()
+            and reviewer.state in {"approved", "changes_requested"}
+            for reviewer in PullRequestReviewer.latest(view.reviews)
+        ):
+            continue
+        row = await view.summary()
+        row.created_at = request.created_at.isoformat() if request.created_at else None
+        row.updated_at = request.updated_at.isoformat() if request.updated_at else None
+        rows.append(row)
     rows.sort(
         key=lambda row: (
             (row.created_at if sort == "created" else row.updated_at) or "",

@@ -43,7 +43,6 @@ const CORRECTED_TLDR =
   "Ends every greeting with one exclamation mark, with a test.";
 const GREEN = [
   {
-    id: 7001,
     name: "unit tests",
     status: "completed",
     conclusion: "success",
@@ -260,7 +259,7 @@ async function click(
   });
 }
 
-/** Submit a GitHub review as ``login``, then deliver the webhook GitHub would send. */
+/** Submit a GitHub review as ``login``; its webhook arrives after, as GitHub sends it. */
 async function approveOnGitHub(
   request: APIRequestContext,
   number: number,
@@ -275,22 +274,6 @@ async function approveOnGitHub(
     },
   );
   expect(res.ok(), await res.text()).toBeTruthy();
-  await control(request, "/control/github-event", {
-    event: "pull_request_review",
-    payload: {
-      action: "submitted",
-      repository: {
-        name: REPO.repo,
-        full_name: `${REPO.owner}/${REPO.repo}`,
-        owner: { login: REPO.owner },
-        private: false,
-      },
-      installation: { id: 42 },
-      sender: { login },
-      pull_request: { number, user: { login: "octocat" } },
-      review: { state: "approved", body: "LGTM", user: { login } },
-    },
-  });
 }
 
 async function setReviewChannel(request: APIRequestContext) {
@@ -508,7 +491,6 @@ test.describe("Human review in Slack", () => {
       mergeable_state: "blocked",
       check_runs: [
         {
-          id: 7002,
           name: "unit tests",
           status: "completed",
           conclusion: "failure",
@@ -845,7 +827,9 @@ test.describe("Human review in Slack", () => {
         timeout: 30_000,
       })
       .toBe(true);
-    expect((await latestRequest(request)).state).toBe("merged");
+    await expect
+      .poll(async () => (await latestRequest(request)).state)
+      .toBe("merged");
   });
 
   test("nobody signs up, so the thread's agent picks the code owner Open SWE suggests; they accept from their DM and their approval merges it", async ({
@@ -939,7 +923,9 @@ test.describe("Human review in Slack", () => {
         timeout: 30_000,
       })
       .toBe(true);
-    expect((await latestRequest(request)).state).toBe("merged");
+    await expect
+      .poll(async () => (await latestRequest(request)).state)
+      .toBe("merged");
   });
 
   test("a picked reviewer declines with a reason; the thread's agent picks the other code owner", async ({

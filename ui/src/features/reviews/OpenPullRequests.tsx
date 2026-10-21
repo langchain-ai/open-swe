@@ -33,7 +33,7 @@ import {
 import { dateLabel } from "./lib/dateLabel"
 import { pullRequestKey, statusLabels } from "./lib/status"
 import { useOpenPullRequests } from "./lib/useOpenPullRequests"
-import { usePullRequestDetails } from "./lib/usePullRequestDetails"
+import { useCurrentPullRequests } from "./lib/useCurrentPullRequests"
 import { usePullRequestSearch } from "./lib/usePullRequestSearch"
 import { reviewStatuses, type ReviewsSearch, type ReviewSort } from "./search"
 
@@ -142,15 +142,16 @@ export function OpenPullRequests({
           .includes(search.trim().toLowerCase()) ||
         descriptionMatches.has(pullRequestKey(pr).toLowerCase())
     )
-  // A status filter can only be applied to rows whose details have arrived, so
-  // it costs a detail read for every row rather than only the ones on screen.
+  // A status filter can bring any row on screen, so then every row follows its
+  // pull request rather than only the ones shown.
   const requestedRows = filter?.length
     ? matchingRows
     : matchingRows.slice(0, requested)
-  const { all, detailsLoading } = usePullRequestDetails(
+  const all = useCurrentPullRequests(
     login,
     matchingRows,
-    requestedRows
+    requestedRows,
+    query.dataUpdatedAt
   )
   const filtered = all.filter(
     (pr) =>
@@ -212,7 +213,6 @@ export function OpenPullRequests({
     latest &&
     !query.hasNextPage &&
     !query.isFetching &&
-    !detailsLoading &&
     visible.length === filtered.length ? (
       <div className="py-space-4 text-center">
         <Button
@@ -454,9 +454,7 @@ export function OpenPullRequests({
             latest && (
               <>
                 {visible.length === 0 ? (
-                  detailsLoading ||
-                  query.isFetchingNextPage ||
-                  descriptionSearch.isSearching ? (
+                  query.isFetchingNextPage || descriptionSearch.isSearching ? (
                     <div
                       role="status"
                       aria-label="Loading matching PRs"
@@ -503,12 +501,8 @@ export function OpenPullRequests({
                     {!railed &&
                       " · Added/deleted lines include tests and docs. PRs with checks still running are Pending."}
                   </span>
-                  {query.isFetchingNextPage ? (
-                    <span role="status">Loading more PRs from GitHub…</span>
-                  ) : (
-                    detailsLoading && (
-                      <span role="status">Loading PR details…</span>
-                    )
+                  {query.isFetchingNextPage && (
+                    <span role="status">Loading more PRs…</span>
                   )}
                 </div>
               </>
