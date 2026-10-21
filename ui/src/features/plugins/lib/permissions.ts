@@ -7,17 +7,17 @@ export const PERMISSION_COPY: Record<
   storage: {
     label: "Keep data",
     description:
-      "Save notes and comments, private to you or shared with everyone who can read one of its repositories.",
+      "Save notes and comments, private to you or shared with everyone who can read a repository you share.",
   },
   "github:read": {
     label: "Read repositories",
     description:
-      "Read files, branches, history and pull requests in its repositories, as you.",
+      "Read files, branches, history and pull requests in the repositories you share, as you.",
   },
   "github:write": {
     label: "Change repositories",
     description:
-      "Create branches, commit files and open pull requests in its repositories, as you.",
+      "Create branches, commit files and open pull requests in the repositories you share, as you.",
   },
   realtime: {
     label: "Work together live",
@@ -27,7 +27,7 @@ export const PERMISSION_COPY: Record<
   threads: {
     label: "Start agent threads",
     description:
-      "Ask you to start an agent thread in one of its repositories. You read and approve every request first.",
+      "Ask you to start an agent thread in a repository you share. You read and approve every request first.",
   },
 }
 

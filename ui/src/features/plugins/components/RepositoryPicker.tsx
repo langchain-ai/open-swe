@@ -135,7 +135,11 @@ function Picker({
         <div className="flex max-h-72 flex-col overflow-y-auto py-space-1">
           {options.length === 0 ? (
             <p className="px-space-3 py-space-2 text-xs text-secondary">
-              {repos.isPending ? "Loading repositories…" : "No matches"}
+              {repos.isPending
+                ? "Loading repositories…"
+                : query.trim()
+                  ? "No matches; type the full owner/repo"
+                  : "Type a repository as owner/repo"}
             </p>
           ) : (
             options.map((repo) => {
