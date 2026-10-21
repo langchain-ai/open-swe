@@ -1,5 +1,5 @@
 version = 1
-revision = 3
+revision = 5
 requires-python = ">=3.12"
 resolution-markers = [
     "python_full_version >= '3.15'",
@@ -515,7 +515,7 @@ wheels = [
 
 [[package]]
 name = "deepagents"
-version = "0.7.28"
+version = "0.7.29"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "langchain" },
@@ -526,9 +526,9 @@ dependencies = [
     { name = "packaging" },
     { name = "wcmatch" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/1c/36/4f436696ea891078843d9451faade5b24df728e99a2be9fe1167a883df6b/deepagents-0.7.28.tar.gz", hash = "sha256:7479791ebd60989dbfff4a0704dfa2e6d85a8a7a37314ab933c05b9f8215deac", size = 338147, upload-time = "2026-10-16T20:21:10.381Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/4e/e0/8c60fda210b3899d3f35298a0bcc6dc19428d663be543433672ce91fbdf2/deepagents-0.7.29.tar.gz", hash = "sha256:9e778f5d5c513c102ad47f9b6b803144313dc6cbd5d6ca1db3cdb43c6695df50", size = 338215, upload-time = "2026-10-20T16:17:44.372Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/f1/69/d7df283b3919c9515369e5a1221f352c0c535c33be9880b2d8ab2b271740/deepagents-0.7.28-py3-none-any.whl", hash = "sha256:3e2492475d9e6c728262df22a324edd9abb9a0d8d1cb3d4c2593088f63ab89a5", size = 368067, upload-time = "2026-10-16T20:21:09.178Z" },
+    { url = "https://files.pythonhosted.org/packages/c1/01/3ca3f9e018dbe2fed34ca90b4fd45eef61faa6af8da371c874bf1e9a6ae5/deepagents-0.7.29-py3-none-any.whl", hash = "sha256:f4ef2ef4b85e1b81885edb8bbde1bbfa6b362e02189b97da4f18c4826e859dcb", size = 368170, upload-time = "2026-10-20T16:17:42.442Z" },
 ]
 
 [[package]]
@@ -1363,7 +1363,7 @@ dependencies = [
 
 [package.metadata]
 requires-dist = [
-    { name = "deepagents", specifier = "==0.7.28" },
+    { name = "deepagents", specifier = "==0.7.29" },
     { name = "httpx2", specifier = ">=2.12.0,<3.0.0" },
     { name = "langchain", extras = ["mcp"], specifier = ">=1.4.6" },
     { name = "langchain-anthropic", specifier = ">=1.7.6" },
