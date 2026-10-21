@@ -93,6 +93,7 @@ class _Session:
     tools: StagehandFacadeTools
     artifacts: str  # where the facade writes run code's screenshots
     browser: str  # the browser's name, which a later generation may have replaced
+    closing: bool = False  # run code called `browser.close()`: released after the call
     shared: str | None = None  # the sandbox whose localhost the browser shares
 
     async def close(self) -> None:
@@ -114,6 +115,15 @@ _RELEASES: dict[str, asyncio.Task[None]] = {}
 async def _release(key: str) -> None:
     if session := _SESSIONS.pop(key, None):
         await session.close()
+
+
+async def _close_after_call(key: str) -> None:
+    """Run code's `browser.close()`: release the client once the tool call is done.
+
+    The facade asks before the run tool has moved the screenshots that code saved.
+    """
+    if session := _SESSIONS.get(key):
+        session.closing = True
 
 
 async def _release_when_idle(key: str) -> None:
@@ -166,6 +176,8 @@ class BrowserMiddleware(AgentMiddleware):
                     await _release(key)
                 return f"error: {sanitize_error_message(f'{type(err).__name__}: {err}')}"
             finally:
+                if (session := _SESSIONS.get(key)) and session.closing:
+                    await _release(key)
                 if pending := _RELEASES.pop(key, None):
                     pending.cancel()
                 _RELEASES[key] = asyncio.create_task(_release_when_idle(key))
@@ -509,7 +521,7 @@ async def _connect(
     tools = StagehandFacadeTools(
         stagehand,
         artifact_root=artifacts,
-        on_close_requested=lambda: _release(key),
+        on_close_requested=lambda: _close_after_call(key),
         quiet_wait=True,
     )
     # The facade acts on Chrome's focused tab, which is often in a window this client
