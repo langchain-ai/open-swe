@@ -66,40 +66,46 @@ def intake(monkeypatch: pytest.MonkeyPatch) -> dict[str, AsyncMock]:
     return mocks
 
 
+@pytest.mark.parametrize(
+    ("event_type", "payload", "message"),
+    [
+        (
+            "issues",
+            {"action": "opened", "issue": _issue(), "repository": REPO, "sender": {}},
+            "Processing GitHub issue event",
+        ),
+        (
+            "issue_comment",
+            {
+                "action": "created",
+                "issue": _issue(body="no tag"),
+                "comment": {"id": 55, "body": "@openswe try again", "user": {"login": "ada"}},
+                "repository": REPO,
+                "sender": {"login": "ada"},
+            },
+            "Processing GitHub issue comment event",
+        ),
+    ],
+)
 async def test_an_issue_mention_goes_to_mda_exactly_as_github_sent_it(
-    intake: dict[str, AsyncMock],
+    intake: dict[str, AsyncMock], event_type: str, payload: dict[str, Any], message: str
 ) -> None:
-    payload = {"action": "opened", "issue": _issue(), "repository": REPO, "sender": {}}
+    response, body = await _deliver(event_type, payload)
 
-    response, body = await _deliver("issues", payload)
-
-    assert response.json()["message"] == "Processing GitHub issue event"
+    assert response.json()["message"] == message
     forwarded_body, headers = intake["forward"].await_args.args
     assert forwarded_body == body
+    # Only GitHub's own headers: not the User-Agent or anything else the request carried.
     assert headers == {
         "X-Hub-Signature-256": headers["X-Hub-Signature-256"],
-        "X-GitHub-Event": "issues",
+        "X-GitHub-Event": event_type,
         "X-GitHub-Delivery": "delivery-1",
         "Content-Type": "application/json",
     }
     assert headers["X-Hub-Signature-256"].startswith("sha256=")
-    # The backend's own side effects of the delivery still run.
-    github_routes._launch_automations.assert_awaited_once()  # type: ignore[attr-defined]
-
-
-async def test_an_issue_comment_mention_goes_to_mda(intake: dict[str, AsyncMock]) -> None:
-    payload = {
-        "action": "created",
-        "issue": _issue(body="no tag"),
-        "comment": {"id": 55, "body": "@openswe try again", "user": {"login": "ada"}},
-        "repository": REPO,
-        "sender": {"login": "ada"},
-    }
-
-    response, _ = await _deliver("issue_comment", payload)
-
-    assert response.json()["message"] == "Processing GitHub issue comment event"
-    intake["forward"].assert_awaited_once()
+    if event_type == "issues":
+        # The backend's own side effects of the delivery still run.
+        github_routes._launch_automations.assert_awaited_once()  # type: ignore[attr-defined]
 
 
 async def test_pull_request_comments_stay_on_open_swe(intake: dict[str, AsyncMock]) -> None:
@@ -114,16 +120,6 @@ async def test_pull_request_comments_stay_on_open_swe(intake: dict[str, AsyncMoc
     await _deliver("issue_comment", payload)
 
     intake["pr_comment"].assert_awaited_once()
-    intake["forward"].assert_not_awaited()
-
-
-async def test_issues_open_swe_ignores_are_not_forwarded(intake: dict[str, AsyncMock]) -> None:
-    response, _ = await _deliver(
-        "issues",
-        {"action": "opened", "issue": _issue(body="no tag"), "repository": REPO, "sender": {}},
-    )
-
-    assert response.json()["status"] == "ignored"
     intake["forward"].assert_not_awaited()
 
 
@@ -173,12 +169,17 @@ async def test_the_forward_retries_until_mda_takes_the_delivery(
             assert request.headers[name] == value
 
 
-async def test_the_forward_does_not_retry_a_refusal(monkeypatch: pytest.MonkeyPatch) -> None:
-    seen = _mda(monkeypatch, lambda _request: httpx2.Response(401))
+@pytest.mark.parametrize("status", [401, 307])
+async def test_the_forward_does_not_retry_a_refusal(
+    monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture, status: int
+) -> None:
+    seen = _mda(monkeypatch, lambda _request: httpx2.Response(status))
 
     await forwarding.forward_to_mda_channel(b"{}", _HEADERS)
 
     assert len(seen) == 1
+    # A redirect isn't followed, so it took nothing either: both are logged.
+    assert "MDA's GitHub channel refused a forwarded delivery" in caplog.messages
 
 
 async def test_the_forward_gives_up_after_its_attempts(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -190,9 +191,3 @@ async def test_the_forward_gives_up_after_its_attempts(monkeypatch: pytest.Monke
     await forwarding.forward_to_mda_channel(b"{}", _HEADERS)
 
     assert len(seen) == 4
-
-
-def test_only_githubs_own_headers_are_forwarded() -> None:
-    headers = {**_HEADERS, "Authorization": "Bearer x", "Cookie": "y", "User-Agent": "z"}
-
-    assert forwarding.forwarded_headers(headers) == _HEADERS

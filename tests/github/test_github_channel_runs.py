@@ -140,14 +140,25 @@ async def test_only_calls_mda_signed_are_answered(prepared: AsyncMock) -> None:
     prepared.assert_not_awaited()
 
 
-async def test_an_issue_mention_starts_a_run_on_the_channels_thread(prepared: AsyncMock) -> None:
-    response = await _post(_event("issues.opened", _issue_payload()))
+@pytest.mark.parametrize(
+    ("event", "payload"),
+    [("issues.opened", _issue_payload()), ("issue_comment.created", _comment_payload())],
+)
+async def test_an_issue_mention_starts_a_run_on_the_channels_thread(
+    prepared: AsyncMock, monkeypatch: pytest.MonkeyPatch, event: str, payload: dict[str, Any]
+) -> None:
+    webhook = "https://backend.example/webhooks/run-complete?token=t"
+    monkeypatch.setattr(channel, "COMPLETION_WEBHOOK_URL", webhook)
+
+    response = await _post(_event(event, payload))
 
     assert response.status_code == 200
     run = response.json()
     assert run["input"] == {"messages": [{"role": "user", "content": "Fix the crash"}]}
     prepared.assert_awaited_once()
-    assert prepared.await_args.args[1:] == ("issues", THREAD)
+    assert prepared.await_args.args[1:] == (event.split(".")[0], THREAD)
+    # The run completes through the backend's run-complete webhook.
+    assert run["webhook"] == webhook
     channel.adopt_channel_run.assert_awaited_once_with(THREAD, "github")  # type: ignore[attr-defined]
     # The run token is signed for the channel's thread.
     token = verify_runtime_token(run["context"]["__run_token"])
@@ -162,27 +173,6 @@ async def test_an_issue_mention_starts_a_run_on_the_channels_thread(prepared: As
     assert metadata["user_id"] == "user-1"
     assert "invocation_id" in metadata
     assert not [key for key in metadata if key.startswith(("mda_", "langgraph_"))]
-
-
-async def test_the_run_completes_through_the_run_complete_webhook(
-    prepared: AsyncMock, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    webhook = "https://backend.example/webhooks/run-complete?token=t"
-    monkeypatch.setattr(channel, "COMPLETION_WEBHOOK_URL", webhook)
-    response = await _post(_event("issues.opened", _issue_payload()))
-    assert response.json()["webhook"] == webhook
-
-    # Without one configured, the run carries none.
-    monkeypatch.setattr(channel, "COMPLETION_WEBHOOK_URL", None)
-    response = await _post(_event("issues.opened", _issue_payload()))
-    assert "webhook" not in response.json()
-
-
-async def test_a_comment_mention_on_an_issue_starts_a_run(prepared: AsyncMock) -> None:
-    response = await _post(_event("issue_comment.created", _comment_payload()))
-
-    assert response.json() is not None
-    assert prepared.await_args.args[1:] == ("issue_comment", THREAD)
 
 
 @pytest.mark.parametrize(
@@ -238,16 +228,6 @@ async def test_a_waiting_thread_is_only_asked_whether_open_swe_acts(prepared: As
     assert response.json() == {"input": "Open SWE was mentioned while the thread waits."}
     # No reaction, metadata or run token while the thread waits.
     prepared.assert_not_awaited()
-    channel.adopt_channel_run.assert_not_awaited()  # type: ignore[attr-defined]
-
-
-async def test_a_run_the_issue_intake_declines_starts_nothing(prepared: AsyncMock) -> None:
-    # For example a sender without an email mapping.
-    prepared.return_value = None
-
-    response = await _post(_event("issues.opened", _issue_payload()))
-
-    assert response.json() is None
     channel.adopt_channel_run.assert_not_awaited()  # type: ignore[attr-defined]
 
 

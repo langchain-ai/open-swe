@@ -61,7 +61,8 @@ async def forward_to_mda_channel(body: bytes, headers: Mapping[str, str]) -> Non
                 )
             else:
                 if response.status_code < 500:
-                    if response.is_error:
+                    # An unfollowed redirect took nothing either.
+                    if not response.is_success:
                         logger.error(
                             "MDA's GitHub channel refused a forwarded delivery",
                             extra={"github_delivery": delivery, "status": response.status_code},
