@@ -109,6 +109,10 @@ class Topic(BaseTopic):
     ANNOUNCEMENTS: ClassVar[Topic]
     """Admin announcements and their delivery progress; admins only."""
 
+    PLUGIN_DOCUMENTS: ClassVar[KeyedTopic[str]]
+    """Keyed: one plugin's documents in one scope, ``<plugin id>/<owner>/<repo>`` for
+    those shared through a repository and ``<plugin id>/user/<user id>`` for one person's."""
+
     async def invalidate(self, conn: Connection | None = None) -> None:
         """Mark this topic stale.
 
@@ -188,6 +192,28 @@ async def _readable_pull_requests(session: Session, keys: set[str]) -> set[str]:
     }
 
 
+async def _readable_plugin_documents(session: Session, keys: set[str]) -> set[str]:
+    # Imported on use: most of the app imports this module, which stays light.
+    from openswe.dashboard.oauth import session_user_id
+    from openswe.github.repos import accessible_repo_full_names
+    from openswe.users.models import User
+
+    scopes = {key: key.split("/", 1)[1] for key in keys if "/" in key}
+    readable: set[str] = set()
+    if any(scope.startswith("user/") for scope in scopes.values()):
+        user = await User.for_session(session_user_id(session), session["sub"])
+        own = f"user/{user.id}" if user is not None else None
+        readable |= {key for key, scope in scopes.items() if scope == own}
+    if any(not scope.startswith("user/") for scope in scopes.values()):
+        try:
+            accessible = await accessible_repo_full_names(session["sub"])
+        except Exception:
+            logger.warning("Could not list repositories for plugin invalidations", exc_info=True)
+            return readable
+        readable |= {key for key, scope in scopes.items() if scope in accessible}
+    return readable
+
+
 async def _readable_threads(session: Session, thread_ids: set[str]) -> set[str]:
     # Thread summaries import this module.
     from openswe.threads.summary import thread_is_readable
@@ -223,3 +249,4 @@ Topic.THREAD_BACKGROUND_WORK = KeyedTopic(
     "thread-background-work", authorize_keys=_readable_threads
 )
 Topic.ANNOUNCEMENTS = AdminTopic("announcements")
+Topic.PLUGIN_DOCUMENTS = KeyedTopic("plugin-documents", authorize_keys=_readable_plugin_documents)

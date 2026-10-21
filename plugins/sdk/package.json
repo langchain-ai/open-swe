@@ -1,0 +1,16 @@
+{
+  "name": "@openswe/plugin-sdk",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Build Open SWE dashboard plugins: the protocol and the client a plugin's frame uses",
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "scripts": {
+    "typecheck": "tsc --noEmit"
+  },
+  "devDependencies": {
+    "typescript": "^5.9.3"
+  }
+}

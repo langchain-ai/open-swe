@@ -66,6 +66,11 @@ const NAV: Array<NavGroup> = [
         icon: LinkIcon,
       },
       {
+        to: "/my-settings/plugins",
+        label: "Plugins",
+        icon: PuzzlePieceIcon,
+      },
+      {
         to: "/my-settings/experiments",
         label: "Experiments",
         icon: FlaskIcon,

@@ -1,0 +1,12 @@
+{
+  "name": "open-swe",
+  "description": "Plugins maintained with Open SWE",
+  "owner": { "name": "LangChain" },
+  "plugins": [
+    {
+      "name": "spaces",
+      "source": "./plugins/spaces",
+      "description": "Notion-style pages, comments and suggestions over the Markdown in your repositories"
+    }
+  ]
+}

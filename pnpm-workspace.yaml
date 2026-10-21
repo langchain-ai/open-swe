@@ -3,6 +3,7 @@ packages:
   - ui
   - desktop
   - cli
+  - plugins/*
   - tests/e2e
 
 allowBuilds:

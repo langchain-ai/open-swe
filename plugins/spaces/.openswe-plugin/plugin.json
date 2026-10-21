@@ -1,0 +1,9 @@
+{
+  "name": "spaces",
+  "displayName": "Spaces",
+  "version": "0.1.0",
+  "description": "Notion-style pages over the Markdown in your repositories: edit in drafts, comment, suggest, accept, and publish each version as a pull request.",
+  "entry": "bundle/index.html",
+  "sidebar": { "label": "Spaces", "icon": "notebook" },
+  "permissions": ["storage", "github:read", "github:write", "threads"]
+}
