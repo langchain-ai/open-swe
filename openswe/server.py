@@ -1566,7 +1566,11 @@ async def build_agent(config: RunnableConfig, *, tool_surface: ToolSurface | Non
         thread_settings["requested_model"] = None
         thread_settings["model_handoff_complete"] = True
         settings_changed = True
-    elif cfg.source == "dashboard" and cfg.model_selection == "auto":
+    elif (
+        cfg.source == "dashboard"
+        and cfg.model_selection == "auto"
+        and (reset_model_selection or not isinstance(stored_model, str))
+    ):
         if reset_model_selection:
             thread_settings["requested_model"] = None
             thread_settings["model_handoff_complete"] = True

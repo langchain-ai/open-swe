@@ -689,7 +689,10 @@ def pinned_settings() -> dict[str, object]:
     }
 
 
-async def test_explicit_breakout_model_survives_startup_and_followup() -> None:
+@pytest.mark.parametrize("followup_source", ["slack", "dashboard"])
+async def test_explicit_breakout_model_survives_startup_and_followup(
+    followup_source: str,
+) -> None:
     from openswe.server import PrepareAgentRunMiddleware
 
     config = _base_config()
@@ -705,7 +708,9 @@ async def test_explicit_breakout_model_survives_startup_and_followup() -> None:
     snapshot = cast(dict[str, object], store.call_args.args[2])
     assert snapshot["model_handoff_complete"] is True
     assert snapshot["model_routing_enabled"] is False
-    followup = await _capture_create_deep_agent_kwargs(_base_config(), thread_settings=snapshot)
+    followup_config = _base_config()
+    followup_config["configurable"].update(source=followup_source, model_selection="auto")
+    followup = await _capture_create_deep_agent_kwargs(followup_config, thread_settings=snapshot)
     for agent in (initial, followup):
         calls = cast(list[tuple[str, dict[str, object]]], agent["make_model_calls"])
         assert calls[0][0] == "anthropic:claude-opus-5-5"
