@@ -530,6 +530,11 @@ def is_channel_events_request(method: str | None, path: str | None) -> bool:
     if str(method).upper() != "POST":
         return False
     path_value = str(path).rstrip("/")
+    # Host keeps the deployment mount prefix in auth requests. Strip only the
+    # server-configured prefix at a complete path-segment boundary.
+    mount_prefix = os.environ.get("MOUNT_PREFIX", "").rstrip("/")
+    if mount_prefix.startswith("/") and path_value.startswith(f"{mount_prefix}/"):
+        path_value = path_value[len(mount_prefix) :]
     return (
         _is_events_path(path_value, CHANNEL_EVENTS_PATH_PREFIX, CHANNEL_EVENTS_PATH_SUFFIX)
         or _is_events_path(

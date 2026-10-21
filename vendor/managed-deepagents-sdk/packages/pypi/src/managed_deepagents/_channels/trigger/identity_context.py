@@ -53,10 +53,11 @@ class IdentityContextUnavailableError(RuntimeError):
 def resolve_identity_context_issuer(
     env: Mapping[str, str] | None = None,
 ) -> str:
-    """LangSmith API origin used as identity-context ``iss`` and JWKS host."""
+    """Canonical issuer; self-hosted API URLs may use an internal host or prefix."""
     source = env if env is not None else os.environ
     raw = (
-        (source.get("LANGSMITH_ENDPOINT") or "").strip()
+        (source.get("OAUTH_AS_ISSUER") or "").strip()
+        or (source.get("LANGSMITH_ENDPOINT") or "").strip()
         or (source.get("LANGCHAIN_ENDPOINT") or "").strip()
         or _DEFAULT_LANGSMITH_ENDPOINT
     )

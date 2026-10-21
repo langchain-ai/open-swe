@@ -1393,7 +1393,7 @@ def _declared_memory_layers(memory: MemoryDefinitionLike | None) -> MemoryLayers
     scope = config.get("scope")
     # Dynamic boundary: the declaration is imported from the author's module, so
     # its shape is checked here rather than trusted.
-    return cast("MemoryLayers", list(scope)) if isinstance(scope, list) else []
+    return list(scope) if isinstance(scope, list) else []
 
 
 def _select_system_prompt(

@@ -51,7 +51,7 @@ class TriggerSlackChannel(Channel):
     """Slack events and deploy requirements routed through Trigger Server."""
 
     kind = "slack"
-    transport: Literal["trigger_server"] = "trigger_server"
+    transport: Literal["trigger_server"] = "trigger_server"  # ty: ignore[invalid-mutable-override]
 
     def __init__(
         self,

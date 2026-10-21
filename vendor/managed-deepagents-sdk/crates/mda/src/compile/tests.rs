@@ -15,7 +15,7 @@ use super::test_support::{
     with_live_npm_lockfile, with_py_runtime,
 };
 use super::{load_sandbox_recipe_manifest, DeployContext, BUILD_MARKER, LANGGRAPH_API_VERSION};
-use crate::project::{Language, Project};
+use crate::project::{load, Language, Project};
 use crate::test_support::write_file;
 use crate::toolchain;
 
@@ -873,6 +873,35 @@ fn compile_refresh_does_not_replace_managed_lockfile_with_author_lock() {
         fs::read(out_dir.join("package-lock.json")).unwrap(),
         managed_lock
     );
+}
+
+// A build dir written by an older CLI still holds the author's pnpm lockfile;
+// refresh must prune it rather than let it survive next to the managed lock.
+#[test]
+fn compile_refresh_prunes_lockfiles_an_older_cli_copied() {
+    let root = tempfile::tempdir().unwrap();
+    setup_mock_ts_runtime(root.path());
+    write_file(
+        root.path(),
+        "agent.ts",
+        "export const agent = defineDeepAgent({ name: \"agent\", model: \"openai:gpt-5\" });\n",
+    );
+    write_file(
+        root.path(),
+        "package.json",
+        "{\n  \"name\": \"example\",\n  \"dependencies\": { \"managed-deepagents\": \"^0.0.2\" }\n}\n",
+    );
+    write_file(root.path(), "pnpm-lock.yaml", "author\n");
+    let project = load(root.path()).unwrap();
+    let out_dir = root.path().join("build");
+    compile(&project, &out_dir).unwrap();
+    assert!(!out_dir.join("pnpm-lock.yaml").exists());
+    write_file(&out_dir, "pnpm-lock.yaml", "stale\n");
+
+    compile_refresh(&project, &out_dir).unwrap();
+
+    assert!(!out_dir.join("pnpm-lock.yaml").exists());
+    assert!(out_dir.join("package-lock.json").is_file());
 }
 
 #[test]

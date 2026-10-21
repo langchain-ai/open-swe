@@ -11,7 +11,7 @@ def resolve_loopback_api_url(*, explicit: str | None = None) -> str:
     """Return the Agent Server base URL for in-process/loopback SDK clients.
 
     Prefers ``explicit``, then ``MDA_CHANNEL_API_URL`` / ``LANGGRAPH_API_URL``,
-    else ``http://127.0.0.1:{PORT|8000}``. ``LANGSMITH_ENDPOINT`` is deliberately
+    else ``http://127.0.0.1:{PORT|8000}{MOUNT_PREFIX}``. ``LANGSMITH_ENDPOINT`` is deliberately
     not consulted: it is the tracing/API endpoint (LangSmith SaaS by default),
     not this server's origin.
     """
@@ -21,7 +21,8 @@ def resolve_loopback_api_url(*, explicit: str | None = None) -> str:
     if from_env and from_env.strip():
         return from_env.strip().rstrip("/")
     port = os.environ.get("PORT") or "8000"
-    return f"http://127.0.0.1:{port}"
+    prefix = os.environ.get("MOUNT_PREFIX", "").rstrip("/")
+    return f"http://127.0.0.1:{port}{prefix if prefix.startswith('/') else ''}"
 
 
 def resolve_loopback_api_key(*, explicit: str | None = None) -> str:
