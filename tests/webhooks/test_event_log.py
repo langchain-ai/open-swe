@@ -1,6 +1,6 @@
 import asyncio
 import json
-from datetime import UTC, date, datetime
+from datetime import UTC, date, datetime, timedelta
 from typing import Literal
 from unittest.mock import AsyncMock
 from uuid import uuid4
@@ -17,7 +17,7 @@ from openswe.slack import routes
 from openswe.slack.channels import SlackChannel
 from openswe.slack.payloads import SlackChannelContext
 from openswe.webhooks import common, event_log
-from openswe.webhooks.event_log import EventLog, EventRefs
+from openswe.webhooks.event_log import RETAINED_DAYS, EventLog, EventRefs
 
 
 async def test_segment_webhook_excludes_raw_payload_and_keeps_unlinked_events(monkeypatch):
@@ -95,10 +95,7 @@ async def _partitions() -> set[str]:
         return set(rows.scalars().all())
 
 
-async def test_kinds_name_actions_and_narrow_by_prefix(
-    registry_db: None, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    monkeypatch.setattr(event_log, "_ROTATED_AT", None)
+async def test_kinds_name_actions_and_narrow_by_prefix(registry_db: None) -> None:
     request = Request(
         {
             "type": "http",
@@ -134,15 +131,16 @@ async def test_kinds_name_actions_and_narrow_by_prefix(
     assert opened.payload_shape == {"action": "string", "number": "number"}
 
 
-async def test_rotation_keeps_yesterday_today_and_tomorrow(registry_db: None) -> None:
-    await EventLog.rotate_partitions(date(2026, 9, 1))
+async def test_rotation_keeps_the_retained_days_and_tomorrow(registry_db: None) -> None:
+    first = date(2026, 9, 1)
+    await EventLog.rotate_partitions(first)
     assert await _partitions() == {"event_log_20260901", "event_log_20260902"}
 
-    await EventLog.rotate_partitions(date(2026, 9, 3))
+    today = first + timedelta(days=RETAINED_DAYS)
+    await EventLog.rotate_partitions(today)
     assert await _partitions() == {
-        "event_log_20260902",
-        "event_log_20260903",
-        "event_log_20260904",
+        f"event_log_{day.strftime('%Y%m%d')}"
+        for day in (first + timedelta(days=1), today, today + timedelta(days=1))
     }
 
 
@@ -159,7 +157,6 @@ async def test_record_creates_its_partition_and_stores_form_bodies_as_objects(
         await release.wait()
 
     monkeypatch.setattr(segment, "record_webhook", slow_export)
-    monkeypatch.setattr(event_log, "_ROTATED_AT", None)
     monkeypatch.setattr(
         "openswe.slack.channels.SlackChannel.load",
         AsyncMock(
@@ -217,10 +214,38 @@ async def test_record_creates_its_partition_and_stores_form_bodies_as_objects(
     )
 
 
-async def test_record_links_a_github_pr_comment_to_its_rows(
-    registry_db: None, monkeypatch: pytest.MonkeyPatch
+async def test_slack_event_log_reuses_directory_without_fetching_permissions(
+    registry_db: None,
+    slack_api,
 ) -> None:
-    monkeypatch.setattr(event_log, "_ROTATED_AT", None)
+    request = Request(
+        {
+            "type": "http",
+            "method": "POST",
+            "path": "/webhooks/slack",
+            "query_string": b"",
+            "headers": [(b"content-type", b"application/json")],
+        }
+    )
+    refs = EventRefs(slack_channel_id="CLOG")
+    await SlackChannel.save_all(
+        {
+            "id": "CLOG",
+            "is_channel": True,
+            "is_private": False,
+            "is_member": True,
+            "is_im": False,
+            "is_mpim": False,
+        }
+    )
+    assert await EventLog.record(request, b"{}", "slack", refs=refs)
+    assert slack_api.calls == []
+    async with transaction() as conn:
+        count = await conn.scalar(text("SELECT count(*) FROM event_log"))
+    assert count == 1
+
+
+async def test_record_links_a_github_pr_comment_to_its_rows(registry_db: None) -> None:
     ids = {name: uuid4() for name in ("user", "workspace", "repository", "pull_request")}
     async with transaction() as conn:
         for statement in (
@@ -270,7 +295,6 @@ async def test_slack_event_links_a_single_known_pr_without_dispatching(
     monkeypatch: pytest.MonkeyPatch,
     kind: Literal["message", "me_message", "edit", "multiple", "unknown"],
 ) -> None:
-    monkeypatch.setattr(event_log, "_ROTATED_AT", None)
     monkeypatch.setattr(
         "openswe.slack.channels.SlackChannel.load",
         AsyncMock(

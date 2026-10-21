@@ -22,7 +22,11 @@ from openswe.github.proxy import get_recorded_proxy_base_config, record_proxy_to
 from openswe.github.sandbox_access import SandboxGitHubAccess, workspace_token
 from openswe.sandboxes.handoff import complete_handoff
 from openswe.sandboxes.paths import declared_work_dir, remember_work_dir
-from openswe.sandboxes.providers.langsmith import configure_sandbox_proxy, get_sandbox_proxy_config
+from openswe.sandboxes.providers.langsmith import (
+    LangSmithCreateOptions,
+    configure_sandbox_proxy,
+    get_sandbox_proxy_config,
+)
 from openswe.sandboxes.providers.registry import SandboxGoneError, create_sandbox
 from openswe.sandboxes.state import (
     SANDBOX_BACKENDS,
@@ -89,6 +93,13 @@ class SandboxCreateConfig:
     @property
     def proxy_config(self) -> dict[str, Any] | None:
         return get_sandbox_proxy_config(self.create_params)
+
+    def langsmith_options(self) -> LangSmithCreateOptions:
+        """What the box is created with when MDA creates it, its proxy config left to us."""
+        create_params = {k: v for k, v in self.create_params.items() if k != "proxy_config"}
+        return LangSmithCreateOptions.resolve(
+            snapshot_id=self.snapshot_id, create_params=create_params, **self.resources
+        )
 
     async def boot(self) -> SandboxBackendProtocol:
         if self.create_params:
@@ -487,6 +498,12 @@ async def ensure_sandbox_for_thread(
         )
     raw_sandbox_id = sandbox_metadata.get("sandbox_id")
     sandbox_id = raw_sandbox_id if isinstance(raw_sandbox_id, str) else None
+    # MDA names, creates and replaces this thread's box; only it may give the thread another.
+    owned_by_mda = sandbox_metadata.get("sandbox_owner") == "mda"
+    if owned_by_mda and sandbox_id is None:
+        raise SandboxUnreachableError(
+            thread_id, None, "Managed Deep Agents could not open this thread's sandbox"
+        )
     if require_existing and sandbox_id is None:
         raise SandboxUnreachableError(
             thread_id, None, "The coordinator must attach its sandbox first"
@@ -543,6 +560,9 @@ async def ensure_sandbox_for_thread(
                     "The coordinator must recover its sandbox before workers attach",
                 ) from exc
             gone = isinstance(exc, SandboxGoneError)
+            if owned_by_mda:
+                # MDA recreates a deleted box under its name when the next run opens it.
+                raise SandboxUnreachableError(thread_id, sandbox_id, str(exc)) from exc
             if not (gone or allow_replacement):
                 raise
             logger.warning(
@@ -603,6 +623,84 @@ async def ensure_sandbox_for_thread(
     return published
 
 
+async def bind_mda_sandbox(
+    thread_id: str, sandbox_id: str | None, *, workspace_slug: str | None = None
+) -> None:
+    """Bind a thread to the box Managed Deep Agents opened for it, and mark the thread MDA's.
+
+    MDA names, creates and replaces the box; the next connection configures it as it
+    does any reused box: proxy credentials, git identity, the tool channel. With no
+    ``sandbox_id`` MDA could not open the box, and the thread stays MDA's, so preparing
+    reports it unreachable rather than creating one here. A task worker attaches to its
+    coordinator's box through the backend, as before.
+    """
+    metadata = ThreadMetadata.model_validate(await get_sandbox_metadata(thread_id))
+    if metadata.task_id is not None:
+        return
+    if metadata.sandbox_owner == "mda" and sandbox_id in (None, metadata.sandbox_id):
+        return
+    bind_metadata: dict[str, Any] = {"sandbox_owner": "mda"}
+    config = await SandboxCreateConfig.resolve(workspace_slug)
+    if sandbox_id is not None and sandbox_id != metadata.sandbox_id:
+        bind_metadata["sandbox_id"] = sandbox_id
+        if config.proxy_config is not None:
+            bind_metadata[SANDBOX_PROXY_CONFIG_METADATA_KEY] = config.proxy_config
+        if metadata.sandbox_id is not None:
+            SANDBOX_CONNECTIONS.pop(metadata.sandbox_id, None)
+        if config.workspace is not None and is_snapshot_stale(config.workspace):
+            _STALE_BOOTS[thread_id] = config.workspace
+        _fire_and_forget(maybe_start_update(config.workspace), "workspace update trigger")
+    async with aphase(thread_id, "sandbox.bind_thread"):
+        await client.threads.update(thread_id=thread_id, metadata=bind_metadata)
+
+
+# The replacement ``recreate_sandbox`` authorized for an MDA box: its workspace and source.
+_REPLACEMENT_METADATA_KEY = "sandbox_replacement"
+
+
+async def request_mda_replacement(
+    thread_id: str, *, workspace_slug: str | None, source: SandboxSource
+) -> LangSmithCreateOptions:
+    """What MDA replaces the thread's box with, recorded so the reconnect applies its proxy.
+
+    The reconnect takes the proxy config from this record, never from anything MDA sends.
+    """
+    config = await SandboxCreateConfig.resolve(workspace_slug, source=source)
+    await client.threads.update(
+        thread_id=thread_id,
+        metadata={_REPLACEMENT_METADATA_KEY: {"workspace": workspace_slug, "source": source}},
+    )
+    return config.langsmith_options()
+
+
+async def reconnect_replaced_sandbox(
+    thread_id: str, *, workspace_slug: str | None = None
+) -> SandboxBackendProtocol:
+    """Connect again to the thread's box, which MDA just replaced with a fresh one of the same name.
+
+    A replacement from another workspace or the base snapshot brings that one's proxy rules.
+    """
+    metadata = await get_sandbox_metadata(thread_id)
+    requested = metadata.get(_REPLACEMENT_METADATA_KEY)
+    if isinstance(requested, dict):
+        workspace = requested.get("workspace")
+        config = await SandboxCreateConfig.resolve(
+            workspace if isinstance(workspace, str) else None,
+            source="base" if requested.get("source") == "base" else "workspace",
+        )
+        await client.threads.update(
+            thread_id=thread_id,
+            metadata={
+                SANDBOX_PROXY_CONFIG_METADATA_KEY: config.proxy_config or {},
+                _REPLACEMENT_METADATA_KEY: None,
+            },
+        )
+    sandbox_id = metadata.get("sandbox_id")
+    if isinstance(sandbox_id, str):
+        SANDBOX_CONNECTIONS.pop(sandbox_id, None)
+    return await ensure_sandbox_for_thread(thread_id, workspace_slug=workspace_slug)
+
+
 class SandboxRecreationStopError(RuntimeError):
     def __init__(self, old_sandbox_id: str, new_sandbox_id: str, reason: str) -> None:
         super().__init__(reason)
@@ -630,6 +728,8 @@ async def recreate_sandbox_for_thread(
         raise ValueError(f"Thread {thread_id} has no sandbox to recreate")
     if Bridge.bridge_id_of(old_sandbox_id) is not None:
         raise ValueError("A thread bridged to a local machine cannot be given a cloud sandbox")
+    if metadata.get("sandbox_owner") == "mda":
+        raise ValueError("Managed Deep Agents owns this thread's sandbox; only it may replace it")
 
     from openswe.sandboxes.providers.langsmith import get_async_sandbox_client
 

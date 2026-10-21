@@ -112,6 +112,20 @@ export interface CloudTerminalConnection {
   ticket: string
 }
 
+export interface ThreadBrowserTab {
+  id: string
+  title: string
+  url: string
+}
+
+/** The window of its LangSmith browser a thread's agent drives, as the dashboard embeds it. */
+export interface ThreadBrowser {
+  tabs: Array<ThreadBrowserTab>
+  /** LangSmith's page for the window, minted for the dashboard to frame. */
+  act_url: string
+  expires_at: string
+}
+
 export type ThreadScope = "all" | "interactive" | "automation" | "bot"
 export type ThreadSortBy = "created_at" | "updated_at"
 
@@ -463,6 +477,10 @@ export const agentsApi = {
     agentsRequest<CloudTerminalConnection>(
       `/threads/${encodeURIComponent(threadId)}/terminal/connect`,
       { method: "POST" }
+    ),
+  getThreadBrowser: (threadId: string) =>
+    agentsRequest<ThreadBrowser>(
+      `/threads/${encodeURIComponent(threadId)}/browser`
     ),
   sharePort: (threadId: string, port: number) =>
     agentsRequest<{ url: string }>(

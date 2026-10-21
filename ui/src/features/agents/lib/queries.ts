@@ -68,6 +68,8 @@ export const agentThreadKeys = {
     ["agent-threads", threadId, "working-tree-diff"] as const,
   workflowApprovals: (threadId: string) =>
     ["agent-threads", threadId, "workflow-approvals"] as const,
+  browser: (threadId: string) =>
+    ["agent-threads", threadId, "browser"] as const,
   page: (params: ThreadsPageParams) =>
     ["agent-threads", "lists", "page", params] as const,
   infinitePages: (params: Omit<ThreadsPageParams, "offset">) =>
@@ -897,6 +899,29 @@ export function useAgentThreadQueuedMessages(threadId: string) {
     queryFn: () => agentsApi.getThreadQueuedMessages(threadId),
     enabled: Boolean(threadId),
     meta: { invalidatedBy: [invalidationTopic("thread-queues", threadId)] },
+  })
+}
+
+// Each read mints a new act link and reloads the framed page, so a link is kept
+// until shortly before it expires rather than refetched on every focus.
+const BROWSER_LINK_REFRESH_MARGIN_MS = 5 * 60_000
+
+export function useAgentThreadBrowser(threadId: string, enabled: boolean) {
+  return useQuery({
+    queryKey: agentThreadKeys.browser(threadId),
+    queryFn: () => agentsApi.getThreadBrowser(threadId),
+    enabled: enabled && Boolean(threadId),
+    retry: false,
+    staleTime: (query) => {
+      const expiresAt = query.state.data?.expires_at
+      return expiresAt
+        ? Math.max(
+            Date.parse(expiresAt) - Date.now() - BROWSER_LINK_REFRESH_MARGIN_MS,
+            0
+          )
+        : 0
+    },
+    meta: { invalidatedBy: [invalidationTopic("thread-browsers", threadId)] },
   })
 }
 

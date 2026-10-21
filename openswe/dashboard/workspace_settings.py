@@ -86,6 +86,9 @@ class WorkspaceSettingsUpdate(BaseModel):
     slack_follow_up_suggestions: bool | None = Field(
         default=None, json_schema_extra={"agent_feature_flag": True}
     )
+    human_review_auto_merge_enabled: bool | None = Field(
+        default=None, json_schema_extra={"agent_feature_flag": True}
+    )
     human_review_auto_assign_minutes: int | None = Field(default=None, ge=1, strict=True)
     # The LangSmith Managed Tools gateway private threads load with the owner's own
     # LangSmith connection; unset means none. Only the instance record's value is read.
@@ -325,6 +328,7 @@ def _default_settings() -> dict[str, Any]:
         "gateway_enabled": None,
         "fable_enabled": False,
         "expedited_review_enabled": False,
+        "human_review_auto_merge_enabled": True,
         "human_review_auto_assign_minutes": 120,
         "sandbox_openai_enabled": False,
         "slack_follow_up_suggestions": False,
@@ -729,6 +733,12 @@ class WorkspaceSettings(Mapping[str, Any]):
         """Whether the experimental expedited Slack review is switched on."""
         value = self.get("expedited_review_enabled")
         return value if isinstance(value, bool) else False
+
+    @property
+    def human_review_auto_merge_enabled(self) -> bool:
+        """Whether standard human-review requests merge automatically by default."""
+        value = self.get("human_review_auto_merge_enabled")
+        return value if isinstance(value, bool) else True
 
     @property
     def human_review_auto_assign_minutes(self) -> int:

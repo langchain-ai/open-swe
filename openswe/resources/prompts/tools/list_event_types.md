@@ -1,4 +1,4 @@
-List every distinct inbound event type Open SWE received in the last two days, across GitHub, Slack, and Linear.
+List every distinct inbound event type Open SWE received in the last 14 days, across GitHub, Slack, and Linear.
 
 Each entry has `source`, `event_type`, `count`, and `last_received_at`. An event whose payload has an `action` is named `<event>.<action>`, e.g. `pull_request.opened` or `check_suite.completed`; one without keeps the bare name, e.g. `push`. Use it to pick `event_types` and `payload_match` for `listen_events`.
 

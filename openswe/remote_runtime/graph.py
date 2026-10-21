@@ -77,6 +77,9 @@ from openswe.remote_runtime.server import UnknownHookError
 from openswe.remote_runtime.tokens import RemoteRun
 from openswe.run_config import RunConfig
 from openswe.runtime.constants import DEFAULT_LLM_MAX_TOKENS
+from openswe.sandboxes.browsers import ThreadBrowser
+from openswe.sandboxes.lifecycle import bind_mda_sandbox, reconnect_replaced_sandbox
+from openswe.sandboxes.managed import ManagedSandbox
 from openswe.sandboxes.tool_runtime import (
     EXCLUDED_TOOLS,
     ModelChoice,
@@ -127,12 +130,20 @@ class HookBody(BaseModel):
     state: dict[str, JsonValue] = {}
     # The ``task`` calls the run's subagent is nested in; empty for the agent itself.
     namespace: list[str] = []
+    # ``prepare``: the box MDA opened for the thread, None when it could not.
+    sandbox_id: str | None = None
 
 
 class CallBody(HookBody):
     name: str
     arguments: dict[str, JsonValue] = {}
     tool_call_id: str
+
+
+class BrowserBody(HookBody):
+    """``browser``: the LangSmith browser MDA gave the thread's agent."""
+
+    browser: str
 
 
 class ToolResultBody(HookBody):
@@ -333,6 +344,26 @@ class RunSession:
                 },
             }
         )
+
+    async def sandbox(self) -> ManagedSandbox | None:
+        """The thread's box as MDA creates it, when MDA owns it."""
+        cfg = RunConfig.from_config(self.config)
+        if cfg.thread_id is None:
+            return None
+        return await ManagedSandbox.for_thread(cfg.thread_id, cfg.workspace_slug)
+
+    async def bind_sandbox(self, sandbox_id: str | None) -> None:
+        """Bind the thread to the box MDA opened before preparing, if MDA owns it."""
+        cfg = RunConfig.from_config(self.config)
+        if cfg.thread_id is not None and await self.sandbox() is not None:
+            await bind_mda_sandbox(cfg.thread_id, sandbox_id, workspace_slug=cfg.workspace_slug)
+
+    async def reconnect_sandbox(self) -> None:
+        """Connect again to the thread's box, which MDA replaced with a fresh one."""
+        cfg = RunConfig.from_config(self.config)
+        if cfg.thread_id is None:
+            raise ValueError("This run has no thread")
+        await reconnect_replaced_sandbox(cfg.thread_id, workspace_slug=cfg.workspace_slug)
 
     def start_models(self) -> RunModels:
         return RunModels(
@@ -540,7 +571,7 @@ class RemoteGraph:
         if not fresh and cached is not None and time.monotonic() < cached.expires_at:
             return cached
         config = self._config(run, run_id)
-        surface = ToolSurface()
+        surface = ToolSurface(for_model=True)
         await self._build(config, surface)
         await surface.prepare({})
         session = RunSession(surface, config, self._restore_state, started_here=fresh)
@@ -559,10 +590,24 @@ class RemoteGraph:
             return await self._call(run, CallBody.model_validate(raw))
         body = HookBody.model_validate(raw)
         if hook == "catalog":
-            return (await self.session(run, body.run_id)).catalog()
+            session = await self.session(run, body.run_id)
+            sandbox = await session.sandbox()
+            return {
+                **session.catalog(),
+                "sandbox": None if sandbox is None else _json.validate_python(sandbox.model_dump()),
+            }
         if hook == "prepare":
             session = await self.session(run, body.run_id, fresh=True)
+            # MDA opened the box before preparing; preparation connects to it as to any other.
+            await session.bind_sandbox(body.sandbox_id)
             return await self._phase(session, "before_agent", body)
+        if hook == "browser":
+            await ThreadBrowser(browser=BrowserBody.model_validate(raw).browser).save(run.thread_id)
+            return {}
+        if hook == "sandbox":
+            session = await self.session(run, body.run_id)
+            await in_graph_context(session.config, lambda _runtime: session.reconnect_sandbox())
+            return {}
         session = await self.session(run, body.run_id)
         if hook == "before_model":
             return await self._phase(session, "before_model", body)

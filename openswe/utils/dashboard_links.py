@@ -138,6 +138,27 @@ def dashboard_review_url(owner: str, repo: str, pr_number: int) -> str | None:
     )
 
 
+def dashboard_review_pr_url(locator: str) -> str | None:
+    """Resolve a review URL on a configured dashboard origin to its canonical GitHub PR."""
+    try:
+        parsed = urlsplit(locator)
+    except ValueError:
+        return None
+    if (
+        parsed.username is not None
+        or parsed.password is not None
+        or _origin(locator) not in _dashboard_origins()
+    ):
+        return None
+    segments = parsed.path.rstrip("/").split("/")
+    if len(segments) != 6 or segments[:3] != ["", "agents", "reviews"]:
+        return None
+    owner, repo, number = segments[3:]
+    if not owner or not repo or not number.isascii() or not number.isdecimal() or int(number) < 1:
+        return None
+    return f"https://github.com/{owner}/{repo}/pull/{int(number)}"
+
+
 def dashboard_incident_url(incident_id: str) -> str | None:
     """Build the dashboard Incidents detail URL for an incident id."""
     base_url = dashboard_base_url()
