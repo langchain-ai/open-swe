@@ -299,7 +299,7 @@ describe("Messages", () => {
   })
 
   it("shows a tool result's image on its card outside the folded work", () => {
-    const png = "iVBORw0KGgo="
+    const dataUrl = "data:image/png;base64,iVBORw0KGgo="
     const messages = streamMessagesToUi([
       new AIMessage({
         id: "browse",
@@ -312,9 +312,10 @@ describe("Messages", () => {
       new ToolMessage({ tool_call_id: "ls", content: "README.md" }),
       new ToolMessage({
         tool_call_id: "shot",
+        // The block MDA's browser `screenshot` tool returns.
         content: [
           { type: "text", text: "Captured the page" },
-          { type: "image", base64: png, mime_type: "image/png" },
+          { type: "image", url: dataUrl },
         ],
       }),
       new AIMessage({ id: "reply", content: "The page is shown above." }),
@@ -326,7 +327,7 @@ describe("Messages", () => {
     ).toBeTruthy()
     expect(screen.queryByText("README.md")).toBeNull()
     expect(screen.getByRole("img", { name: "image" }).getAttribute("src")).toBe(
-      `data:image/png;base64,${png}`
+      dataUrl
     )
     expect(screen.getByText("Captured the page")).toBeTruthy()
   })

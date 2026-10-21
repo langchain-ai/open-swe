@@ -55,7 +55,7 @@ class MessageSender(BaseModel):
 
 
 class MessageAttachment(BaseModel):
-    """A file attached to a message — metadata only, never base64.
+    """A file attached to a message or tool result — metadata only, never base64.
 
     ``attachment_id`` addresses the bytes, which are stored in
     ``thread_attachment`` by the same transaction that appended the event and
@@ -282,7 +282,8 @@ class ToolCompleted(_Body):
     on the command, not in this payload, the way attachment bytes do — and is
     served on demand by the tool-output endpoint. ``output_truncated`` says the
     stored output was itself cut at the size cap, so even that endpoint has no
-    more.
+    more. ``attachments`` are the images the tool returned, such as a browser
+    screenshot; their bytes are stored like a message's.
     """
 
     type: Literal["tool.completed"] = "tool.completed"
@@ -293,6 +294,7 @@ class ToolCompleted(_Body):
     output_truncated: bool = False
     has_output: bool = False
     namespace: list[str] = Field(default_factory=list)
+    attachments: list[MessageAttachment] | None = None
 
 
 class RunNotice(_Body):
