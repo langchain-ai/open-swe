@@ -36,6 +36,7 @@ from langgraph.prebuilt.tool_node import ToolCallRequest, ToolRuntime
 from langgraph.runtime import Runtime
 from langgraph.types import Command as GraphCommand
 from langgraph_sdk import get_client
+from openswe_shared.trace import OpenSWEMiddleware
 from pydantic import JsonValue
 from pydantic_core import PydanticSerializationError, to_jsonable_python
 from sqlalchemy import text as sql
@@ -46,7 +47,6 @@ from openswe.input_messages import (
     input_message_text,
     message_sender_id,
 )
-from openswe.middleware.trace import OpenSWEMiddleware
 from openswe.transcript.attachments import PendingAttachment, UnsupportedAttachment
 from openswe.transcript.engine import Command, append
 from openswe.transcript.events import (

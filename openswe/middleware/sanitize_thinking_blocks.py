@@ -6,8 +6,7 @@ from typing import Any
 from langchain.agents.middleware.types import ModelRequest, ModelResponse
 from langchain_anthropic import ChatAnthropic
 from langchain_core.messages import AIMessage
-
-from openswe.middleware.trace import OpenSWEMiddleware
+from openswe_shared.trace import OpenSWEMiddleware
 
 
 def _is_chat_anthropic(model: object) -> bool:

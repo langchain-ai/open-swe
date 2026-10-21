@@ -6,9 +6,9 @@ from typing import Any
 from langchain.agents.middleware import AgentState, after_agent
 from langgraph.runtime import Runtime
 from langgraph_sdk import get_client
+from openswe_shared.trace import scrub_middleware_inputs
 
 from openswe.middleware.message_content import content_to_text
-from openswe.middleware.trace import scrub_middleware_inputs
 from openswe.run_config import RunConfig
 from openswe.slack.client import (
     LANGGRAPH_URL,

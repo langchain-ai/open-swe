@@ -7,6 +7,8 @@ requires-python = ">=3.14"
 license = { text = "MIT" }
 dependencies = [
     "deepagents==0.7.29",
+    # Tool-call middleware this backend shares with mda/ until it all moves there (shared/README.md).
+    "open-swe-shared",
     "fastapi>=0.141.1",
     "uvicorn>=0.52.4",
     "httpx2>=2.12.0,<3.0.0",
@@ -80,6 +82,9 @@ constraint-dependencies = [
     "langgraph-runtime-inmem>=0.36.2,<0.37",
 ]
 
+[tool.uv.sources]
+open-swe-shared = { path = "shared", editable = true }
+
 [build-system]
 requires = ["hatchling"]
 build-backend = "hatchling.build"
@@ -133,7 +138,7 @@ asyncio_mode = "auto"
 testpaths = ["tests"]
 
 [tool.ty.src]
-include = ["openswe", "tests"]
+include = ["openswe", "shared", "tests"]
 # Runs in the mda/ project's environment, against the graph `mda build` compiles.
 # Sandbox scripts run on an older python3; `make typecheck` checks them at 3.8.
 exclude = ["tests/e2e/mda_entrypoint.py", "openswe/sandbox_scripts/*.py"]

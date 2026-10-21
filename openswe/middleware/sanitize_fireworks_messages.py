@@ -25,7 +25,7 @@ except ImportError:  # pragma: no cover
     ChatFireworks = None  # type: ignore[assignment, misc]
 
 
-from openswe.middleware.trace import OpenSWEMiddleware
+from openswe_shared.trace import OpenSWEMiddleware
 
 
 def _is_chat_fireworks(model: object) -> bool:

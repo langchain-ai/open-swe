@@ -1,7 +1,6 @@
 """Telling the user, on the channel they triggered from, that their sandbox went quiet."""
 
 import logging
-import re
 from collections.abc import Mapping
 from typing import Any
 
@@ -58,14 +57,6 @@ def sandbox_unreachable_message(
         "Retrigger this thread to try the same sandbox again, or start a new thread "
         "to get a fresh one."
     )
-
-
-_SANDBOX_ID_RE = re.compile(r"\bsb-[A-Za-z0-9-]+\b")
-
-
-def extract_sandbox_id(text: str) -> str | None:
-    match = _SANDBOX_ID_RE.search(text)
-    return match.group(0) if match else None
 
 
 async def get_slack_target(cfg: RunConfig) -> tuple[str, str] | None:

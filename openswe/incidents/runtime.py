@@ -12,6 +12,7 @@ from langchain_core.messages import HumanMessage, SystemMessage, ToolMessage
 from langchain_core.tools import BaseTool, StructuredTool
 from langgraph.config import get_config
 from langgraph.types import Command
+from openswe_shared.trace import OpenSWEMiddleware
 
 from openswe.incidents import documents, service
 from openswe.incidents.evidence_tools import EvidenceCollector, source_url
@@ -25,7 +26,6 @@ from openswe.incidents.report import (
     finalize_report,
 )
 from openswe.incidents.turns import SESSION_TS
-from openswe.middleware.trace import OpenSWEMiddleware
 from openswe.prompts import prompt
 from openswe.run_config import RunConfig
 from openswe.slack.client import post_slack_thread_reply_with_ts

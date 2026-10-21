@@ -18,7 +18,7 @@ from langchain_core.messages import ToolMessage
 from langgraph.prebuilt.tool_node import ToolCallRequest
 from langgraph.types import Command
 
-from openswe.middleware.trace import OpenSWEMiddleware
+from openswe_shared.trace import OpenSWEMiddleware
 
 _IMAGE_SIGNATURES: tuple[tuple[bytes, ...], ...] = (
     (b"\x89PNG\r\n\x1a\n",),
@@ -50,7 +50,7 @@ def _image_block_head(block: Any) -> bytes | None:
         return None
     try:
         return base64.b64decode(encoded[:24] + "==")[:12]
-    except binascii.Error, ValueError:
+    except (binascii.Error, ValueError):
         return b""
 
 

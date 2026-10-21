@@ -14,8 +14,8 @@ from langchain_core.tools import BaseTool, StructuredTool
 from langgraph.prebuilt.tool_node import ToolCallRequest
 from langgraph.runtime import Runtime
 from langgraph.types import Command
+from openswe_shared.trace import OpenSWEMiddleware
 
-from openswe.middleware.trace import OpenSWEMiddleware
 from openswe.openai_responses.client_tools import PENDING_ARTIFACT_KEY, ClientToolSpec
 from openswe.prompts import prompt
 

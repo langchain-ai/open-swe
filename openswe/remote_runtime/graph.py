@@ -68,6 +68,9 @@ from langchain_core.tools import BaseTool
 from langchain_quickjs import CodeInterpreterMiddleware
 from langgraph.config import get_config
 from langgraph.runtime import Runtime
+from openswe_shared.subdir_agents import BaseSubdirAgentsReadMiddleware
+from openswe_shared.tool_error_handler import BaseToolErrorMiddleware
+from openswe_shared.validate_image_reads import ValidateImageReadsMiddleware
 from pydantic import BaseModel, JsonValue, TypeAdapter, ValidationError
 
 from openswe.middleware.conversation_offloading import ConversationOffloadingMiddleware
@@ -76,10 +79,7 @@ from openswe.middleware.model_selection import PersistedRoute, normalize_route
 from openswe.middleware.pr_creation_guard import PullRequestCreationGuardMiddleware
 from openswe.middleware.record_run_usage import RecordRunUsageMiddleware
 from openswe.middleware.sandbox_circuit_breaker import post_sandbox_unreachable_notification
-from openswe.middleware.subdir_agents import SubdirAgentsReadMiddleware
-from openswe.middleware.tool_error_handler import ToolErrorMiddleware
 from openswe.middleware.transcript import TranscriptMiddleware, within_namespace
-from openswe.middleware.validate_image_reads import ValidateImageReadsMiddleware
 from openswe.middleware.workflow_push_guard import WorkflowPushGuardMiddleware
 from openswe.prompts import common_prompt, prompt
 from openswe.remote_runtime.runs import (
@@ -135,9 +135,9 @@ SandboxCheck = Literal["tool_errors", "image_reads", "agents_md", "push_guards"]
 # own filesystem middleware offloads large results, and the rest act on other tools.
 # A graph with tool-call middleware not listed here runs every call on the backend.
 _BOX_CHECKS: Final[Sequence[tuple[type, SandboxCheck | None]]] = (
-    (ToolErrorMiddleware, "tool_errors"),
+    (BaseToolErrorMiddleware, "tool_errors"),
     (ValidateImageReadsMiddleware, "image_reads"),
-    (SubdirAgentsReadMiddleware, "agents_md"),
+    (BaseSubdirAgentsReadMiddleware, "agents_md"),
     (PullRequestCreationGuardMiddleware, "push_guards"),
     (WorkflowPushGuardMiddleware, "push_guards"),
     (TranscriptMiddleware, None),

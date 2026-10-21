@@ -1,11 +1,11 @@
 """The file and shell tools of the thread's box, run here with the graph's own checks.
 
 Where MDA owns the thread's box, MDA's own file and shell tools serve the graph's
-against it, with no call to the backend in between. This middleware applies to
-those calls what the graph's tool-call middleware does in-process, as the backend's
-catalog lists it: tool errors become results the model can act on, a file posing
-as an image is not attached, and reading a file loads the ``AGENTS.md`` files above
-it. The transcript hears of each call alongside it.
+against it, with no call to the backend in between. This middleware wraps those
+calls in the graph's own tool-call middleware from ``openswe_shared``, as the
+backend's catalog lists it: tool errors become results the model can act on, a
+file posing as an image is not attached, and reading a file loads the
+``AGENTS.md`` files above it. The transcript hears of each call alongside it.
 
 The backend still runs the calls only it can settle: calls on the paths it serves,
 such as skills, and, where the graph guards pushes and pull requests, commands that
@@ -15,33 +15,27 @@ runs in the box.
 """
 
 import asyncio
-import base64
-import json
 import logging
 import posixpath
 import random
 import re
-from collections.abc import Awaitable, Callable, Iterable, Sequence
+from collections.abc import Awaitable, Callable, Mapping
 from functools import partial
-from time import monotonic
 from typing import Final
 
 from deepagents.backends.protocol import BackendProtocol
 from langchain.agents.middleware import AgentMiddleware
 from langchain_core.messages import ToolMessage
-from langgraph.errors import NodeCancelledError
 from langgraph.prebuilt.tool_node import ToolCallRequest
 from langgraph.types import Command
-from langsmith.sandbox import (
-    ResourceNotFoundError,
-    SandboxConnectionError,
-    SandboxRetryableConnectionError,
-    SandboxServerReloadError,
-)
+from langsmith.sandbox import SandboxRetryableConnectionError
+from openswe_shared.subdir_agents import BaseSubdirAgentsReadMiddleware
+from openswe_shared.tool_error_handler import BaseToolErrorMiddleware
+from openswe_shared.validate_image_reads import ValidateImageReadsMiddleware
 
-from rt.backend import BackendCallError, OpenSweBackend, run_body
+from rt.backend import OpenSweBackend, run_body
 from rt.middleware import reported
-from rt.sandbox import SandboxSpec
+from rt.sandbox import SandboxCheck, SandboxSpec
 from rt.tools import run_id, run_on_backend
 
 logger = logging.getLogger(__name__)
@@ -69,22 +63,29 @@ _QUOTING: Final = re.compile(r"\\\n|[\"'\\]")
 _EXECUTE_GRACE_SECONDS: Final = 30
 # A sandbox call rejected before it started cannot have run, so it is sent again.
 _TRANSIENT_BACKOFF_SECONDS: Final = (0.5, 1.0, 2.0)
-_SLOW_CALL_SECONDS: Final = 5
-_SANDBOX_ID: Final = re.compile(r"\bsb-[A-Za-z0-9-]+\b")
-_READ_FILE: Final = "read_file"
-_AGENTS_MD: Final = "AGENTS.md"
-_MAX_AGENTS_LINES: Final = 1_000
-_MAX_AGENTS_BYTES: Final = 64 * 1024
-_IMAGE_SIGNATURES: Final[tuple[tuple[bytes, ...], ...]] = (
-    (b"\x89PNG\r\n\x1a\n",),
-    (b"\xff\xd8\xff",),
-    (b"GIF87a",),
-    (b"GIF89a",),
-    (b"RIFF", b"WEBP"),
-)
 
 Handler = Callable[[ToolCallRequest], Awaitable[ToolMessage | Command]]
-Check = Callable[[ToolCallRequest, Handler], Awaitable[ToolMessage | Command]]
+
+
+class _ToolErrors(BaseToolErrorMiddleware):
+    """The backend tells the person, on the channel the run came from."""
+
+    def __init__(self, backend: OpenSweBackend) -> None:
+        self._backend = backend
+
+    async def anotify_sandbox_unreachable(
+        self, request: ToolCallRequest, sandbox_id: str | None
+    ) -> None:
+        body = run_body(run_id(), request.state, sandbox_id=sandbox_id)
+        await self._backend.call("sandbox_unreachable", body)
+
+
+class _AgentsMdReads(BaseSubdirAgentsReadMiddleware):
+    """Reads the ``AGENTS.md`` files from the box the call ran in."""
+
+    def backend(self, request: ToolCallRequest) -> BackendProtocol | None:
+        backend = getattr(request.runtime, "backend", None)
+        return backend if isinstance(backend, BackendProtocol) else None
 
 
 class SandboxToolsMiddleware(AgentMiddleware):
@@ -96,13 +97,11 @@ class SandboxToolsMiddleware(AgentMiddleware):
         self._guards_pushes = "push_guards" in spec.checks
         self._backend_paths = tuple(spec.backend_paths)
         self._execute_timeout = execute_timeout
-        # The AGENTS.md files the model has seen; a read loads each one once.
-        self._agents_seen: set[str] = set()
         # Outermost first, in the graph's own order.
-        checks: Sequence[tuple[str, Check]] = (
-            ("image_reads", _without_false_images),
-            ("tool_errors", self._errors_as_results),
-            ("agents_md", self._with_agents_md),
+        checks: tuple[tuple[SandboxCheck, AgentMiddleware], ...] = (
+            ("image_reads", ValidateImageReadsMiddleware()),
+            ("tool_errors", _ToolErrors(backend)),
+            ("agents_md", _AgentsMdReads()),
         )
         self._checks = [check for name, check in checks if name in spec.checks]
 
@@ -114,12 +113,14 @@ class SandboxToolsMiddleware(AgentMiddleware):
             return await handler(request)
         if self._on_backend(call["name"], call["args"]):
             return await run_on_backend(self._backend, call["name"], call["args"], request.runtime)
-        checked = handler
-        for check in reversed([*self._checks, _retried, self._within_deadline]):
-            checked = partial(check, handler=checked)
+        checked: Handler = partial(
+            _retried, handler=partial(self._within_deadline, handler=handler)
+        )
+        for check in reversed(self._checks):
+            checked = partial(check.awrap_tool_call, handler=checked)
         return await reported(self._backend, request, checked)
 
-    def _on_backend(self, name: str, arguments: dict[str, object]) -> bool:
+    def _on_backend(self, name: str, arguments: Mapping[str, object]) -> bool:
         if name == "execute":
             command = arguments.get("command")
             return self._guards_pushes and isinstance(command, str) and _guarded(command)
@@ -148,93 +149,6 @@ class SandboxToolsMiddleware(AgentMiddleware):
                 status="error",
             )
 
-    async def _errors_as_results(
-        self, request: ToolCallRequest, handler: Handler
-    ) -> ToolMessage | Command:
-        """Hand the model what failed, except a box that stopped answering, which ends the run."""
-        started = monotonic()
-        try:
-            return await handler(request)
-        except NodeCancelledError:
-            raise
-        except SandboxRetryableConnectionError as exc:
-            logger.warning("The sandbox kept refusing a tool call before it started", exc_info=True)
-            return _error_message(
-                request,
-                {
-                    "status": "error",
-                    "error_type": type(exc).__name__,
-                    "previous_error": str(exc),
-                    "recovery": "sandbox_transient",
-                    "error": (
-                        "The sandbox connection was rejected before this command started, so "
-                        "nothing ran and nothing changed."
-                    ),
-                },
-            )
-        except Exception as exc:
-            if not _sandbox_unreachable(exc):
-                logger.exception("Tool call failed", extra={"tool_name": request.tool_call["name"]})
-                return _error_message(
-                    request,
-                    {"error": str(exc), "error_type": type(exc).__name__, "status": "error"},
-                )
-            # Every later call would meet the same dead box, so the run ends here
-            # once the person knows.
-            logger.exception("The thread's sandbox stopped answering")
-            await self._report_unreachable(request, exc)
-            raise
-        finally:
-            seconds = monotonic() - started
-            if seconds > _SLOW_CALL_SECONDS:
-                logger.warning(
-                    "Slow tool call",
-                    extra={
-                        "tool_name": request.tool_call["name"],
-                        "tool_call_id": request.tool_call.get("id"),
-                        "duration_seconds": seconds,
-                    },
-                )
-
-    async def _report_unreachable(self, request: ToolCallRequest, exc: Exception) -> None:
-        sandbox_id = _SANDBOX_ID.search(str(exc))
-        body = run_body(
-            run_id(), request.state, sandbox_id=sandbox_id.group(0) if sandbox_id else None
-        )
-        try:
-            await self._backend.call("sandbox_unreachable", body)
-        except BackendCallError:
-            logger.warning("Could not tell the person the sandbox stopped answering", exc_info=True)
-
-    async def _with_agents_md(
-        self, request: ToolCallRequest, handler: Handler
-    ) -> ToolMessage | Command:
-        """Append the ``AGENTS.md`` files above a file the model reads, each the first time."""
-        result = await handler(request)
-        file_path = _absolute(request.tool_call["args"].get("file_path"))
-        if (
-            request.tool_call["name"] != _READ_FILE
-            or file_path is None
-            or not isinstance(result, ToolMessage)
-            or result.status == "error"
-            or not isinstance(result.content, str)
-        ):
-            return result
-        if posixpath.basename(file_path) == _AGENTS_MD:
-            self._agents_seen.add(file_path)
-            return result
-        backend = getattr(request.runtime, "backend", None)
-        if not isinstance(backend, BackendProtocol):
-            return result
-        paths = [path for path in _agents_paths(file_path) if path not in self._agents_seen]
-        self._agents_seen.update(paths)
-        texts = await asyncio.gather(*(_read_agents_md(backend, path) for path in paths))
-        loaded = [(path, text) for path, text in zip(paths, texts, strict=True) if text is not None]
-        if not loaded:
-            return result
-        reminder = _agents_reminder(file_path, loaded)
-        return result.model_copy(update={"content": f"{result.content}\n\n{reminder}"})
-
 
 def _guarded(command: str) -> bool:
     unquoted = _QUOTING.sub("", command)
@@ -257,116 +171,3 @@ async def _retried(request: ToolCallRequest, handler: Handler) -> ToolMessage | 
             logger.warning("The sandbox refused a tool call before it started; retrying")
             await asyncio.sleep(backoff * random.uniform(0.8, 1.2))
     return await handler(request)
-
-
-def _sandbox_unreachable(exc: Exception) -> bool:
-    """Whether the box itself did not answer, as opposed to a call that failed in it.
-
-    A reload left the command running, and a missing resource that is not the box
-    is a missing file.
-    """
-    if isinstance(exc, SandboxConnectionError):
-        return not isinstance(exc, SandboxServerReloadError)
-    return isinstance(exc, ResourceNotFoundError) and exc.resource_type == "sandbox"
-
-
-def _error_message(request: ToolCallRequest, payload: dict[str, str]) -> ToolMessage:
-    return ToolMessage(
-        content=json.dumps({**payload, "name": request.tool_call["name"]}),
-        tool_call_id=request.tool_call.get("id") or "",
-        status="error",
-    )
-
-
-async def _without_false_images(
-    request: ToolCallRequest, handler: Handler
-) -> ToolMessage | Command:
-    """Keep a file with an image's extension but not its bytes from reaching the model as one.
-
-    The provider would reject it, and every later call on the thread with it.
-    """
-    result = await handler(request)
-    if request.tool_call["name"] != _READ_FILE or not isinstance(result, ToolMessage):
-        return result
-    if not isinstance(result.content, list):
-        return result
-    for block in result.content:
-        head = _image_head(block)
-        if head is None or _is_image(head):
-            continue
-        path = result.additional_kwargs.get("read_file_path", "the file")
-        return ToolMessage(
-            content=(
-                f"read_file: {path} has an image extension but its contents are not a "
-                f"valid image (starts with {head[:8]!r}). It was not attached; inspect "
-                "it as text or re-download it."
-            ),
-            name=result.name,
-            tool_call_id=result.tool_call_id,
-            status="error",
-        )
-    return result
-
-
-def _image_head(block: object) -> bytes | None:
-    if not isinstance(block, dict) or block.get("type") != "image":
-        return None
-    encoded = block.get("base64")
-    if not isinstance(encoded, str):
-        return None
-    try:
-        return base64.b64decode(encoded[:24] + "==")[:12]
-    except ValueError:  # binascii.Error included
-        return b""
-
-
-def _is_image(head: bytes) -> bool:
-    # HEIC/HEIF and AVIF are ISO-BMFF containers: the `ftyp` box sits at offset 4.
-    if head[4:8] == b"ftyp":
-        return True
-    return any(
-        head.startswith(parts[0]) and (len(parts) == 1 or head[8:12] == parts[1])
-        for parts in _IMAGE_SIGNATURES
-    )
-
-
-def _agents_paths(file_path: str) -> list[str]:
-    """The ``AGENTS.md`` files that apply to ``file_path``, outermost first."""
-    paths: list[str] = []
-    current = posixpath.dirname(file_path)
-    while current not in {"", "/"}:
-        paths.append(posixpath.join(current, _AGENTS_MD))
-        current = posixpath.dirname(current)
-    return list(reversed(paths))
-
-
-async def _read_agents_md(backend: BackendProtocol, path: str) -> str | None:
-    try:
-        read = await backend.aread(path, offset=0, limit=_MAX_AGENTS_LINES)
-    except Exception:
-        logger.debug("Could not read an AGENTS.md", extra={"agents_md_path": path}, exc_info=True)
-        return None
-    data = read.file_data
-    if read.error or data is None:
-        return None
-    content = data.get("content")
-    if data.get("encoding", "utf-8") != "utf-8" or not isinstance(content, str):
-        return None
-    if not content.strip():
-        return None
-    encoded = content.encode("utf-8")
-    if len(encoded) <= _MAX_AGENTS_BYTES:
-        return content
-    return encoded[:_MAX_AGENTS_BYTES].decode("utf-8", errors="ignore") + "\n\n[truncated]"
-
-
-def _agents_reminder(file_path: str, loaded: Iterable[tuple[str, str]]) -> str:
-    body = "\n\n".join(f"Instructions from: {path}\n{content.rstrip()}" for path, content in loaded)
-    return (
-        "<system-reminder>\n"
-        f"Loaded applicable AGENTS.md instructions for `{file_path}`. "
-        "Follow these before editing files under their scopes; more deeply nested "
-        "instructions take precedence.\n\n"
-        f"{body}\n"
-        "</system-reminder>"
-    )

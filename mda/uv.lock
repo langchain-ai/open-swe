@@ -1357,6 +1357,7 @@ dependencies = [
     { name = "langsmith" },
     { name = "managed-deepagents" },
     { name = "mcp" },
+    { name = "open-swe-shared" },
     { name = "pydantic" },
     { name = "stagehand" },
 ]
@@ -1372,8 +1373,30 @@ requires-dist = [
     { name = "langsmith", specifier = ">=0.14.11" },
     { name = "managed-deepagents", editable = "../vendor/managed-deepagents-sdk/packages/pypi" },
     { name = "mcp", specifier = ">=2.2.0,<3" },
+    { name = "open-swe-shared", editable = "../shared" },
     { name = "pydantic", specifier = ">=2.11" },
     { name = "stagehand", specifier = "==4.3.0" },
+]
+
+[[package]]
+name = "open-swe-shared"
+version = "0.0.0"
+source = { editable = "../shared" }
+dependencies = [
+    { name = "deepagents" },
+    { name = "langchain" },
+    { name = "langchain-core" },
+    { name = "langgraph" },
+    { name = "langsmith" },
+]
+
+[package.metadata]
+requires-dist = [
+    { name = "deepagents" },
+    { name = "langchain" },
+    { name = "langchain-core" },
+    { name = "langgraph" },
+    { name = "langsmith" },
 ]
 
 [[package]]

@@ -20,8 +20,7 @@ from typing import Any
 
 from langchain.agents.middleware.types import ModelRequest, ModelResponse
 from langchain_core.messages import AIMessage, ToolMessage
-
-from openswe.middleware.trace import OpenSWEMiddleware
+from openswe_shared.trace import OpenSWEMiddleware
 
 logger = logging.getLogger(__name__)
 

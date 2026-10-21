@@ -8,6 +8,7 @@ from typing import Annotated, Any, NotRequired
 from langchain.agents.middleware.types import AgentState, OmitFromOutput, hook_config
 from langchain_core.messages import AIMessage, BaseMessage, HumanMessage, ToolMessage
 from langgraph.runtime import Runtime
+from openswe_shared.trace import OpenSWEMiddleware
 
 from openswe.input_messages import (
     SystemIdentity,
@@ -16,7 +17,6 @@ from openswe.input_messages import (
 )
 from openswe.middleware.message_content import content_to_text
 from openswe.middleware.require_user_reply import reported_failure, turn_tail
-from openswe.middleware.trace import OpenSWEMiddleware
 from openswe.prompts import prompt
 
 logger = logging.getLogger(__name__)
