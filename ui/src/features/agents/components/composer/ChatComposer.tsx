@@ -51,7 +51,8 @@ import type {
   Skill,
   WorkspaceOption,
 } from "@/lib/api"
-import type { ImageChunk } from "@/features/agents/lib/types"
+import type { MediaChunk } from "@/features/agents/lib/types"
+import { MessageMedia } from "@/features/agents/components/messages/MessageMedia"
 import type { ModelSelection } from "@/features/agents/lib/provider/useModelOptions"
 import { ModelPicker } from "@/features/agents/components/ModelPicker"
 import { RepoSelector } from "@/features/settings/components/RepoSelector"
@@ -66,14 +67,18 @@ import { cn } from "@/lib/utils"
 
 export type { ActiveRun }
 
-const MAX_IMAGE_COUNT = 5
-const MAX_IMAGE_BYTES = 10 * 1024 * 1024
+const MAX_ATTACHMENT_COUNT = 5
+const MAX_ATTACHMENT_BYTES = 10 * 1024 * 1024
 const MAX_MENTION_SUGGESTIONS = 8
-const SUPPORTED_IMAGE_TYPES = new Set([
+const SUPPORTED_MEDIA_TYPES = new Set([
   "image/png",
   "image/jpeg",
   "image/gif",
   "image/webp",
+  "video/mp4",
+  "video/webm",
+  "video/quicktime",
+  "video/mpeg",
 ])
 
 interface SlashCommandSpec {
@@ -106,7 +111,7 @@ export interface RestoredDraft {
   /** Changes on every restore so the same content can come back twice. */
   key: number
   text: string
-  images: Array<ImageChunk>
+  attachments: Array<MediaChunk>
   /** Replace the previous suggested prompt if it is still exactly as suggested, instead of stacking on it. */
   replacesSuggestion?: boolean
 }
@@ -123,7 +128,7 @@ export interface ChatComposerProps {
   onStop?: () => void | Promise<void>
   onSubmit?: (
     value: string,
-    images: Array<ImageChunk>,
+    attachments: Array<MediaChunk>,
     options?: SubmitOptions
   ) => void | Promise<void>
   /** What a message sent while a run is live does; drives copy only. */
@@ -167,8 +172,11 @@ export interface ChatComposerProps {
   routed?: { route?: string; modelId?: string | null } | null
 }
 
-function fileToImageChunk(file: File): Promise<ImageChunk | null> {
-  if (!SUPPORTED_IMAGE_TYPES.has(file.type) || file.size > MAX_IMAGE_BYTES) {
+function fileToMediaChunk(file: File): Promise<MediaChunk | null> {
+  if (
+    !SUPPORTED_MEDIA_TYPES.has(file.type) ||
+    file.size > MAX_ATTACHMENT_BYTES
+  ) {
     return Promise.resolve(null)
   }
 
@@ -179,7 +187,12 @@ function fileToImageChunk(file: File): Promise<ImageChunk | null> {
       const base64 = dataUrl.split(",")[1]
       resolve(
         base64
-          ? { kind: "image", base64, mimeType: file.type, fileName: file.name }
+          ? {
+              kind: file.type.startsWith("video/") ? "video" : "image",
+              base64,
+              mimeType: file.type,
+              fileName: file.name,
+            }
           : null
       )
     }
@@ -301,7 +314,9 @@ export const ChatComposer = memo(function ChatComposer({
 }: ChatComposerProps) {
   const [value, setValue] = useState("")
   const [cursor, setCursor] = useState(0)
-  const [pendingImages, setPendingImages] = useState<Array<ImageChunk>>([])
+  const [pendingAttachments, setPendingAttachments] = useState<
+    Array<MediaChunk>
+  >([])
   const [dragKind, setDragKind] = useState<"files" | "path" | null>(null)
   const [isSubmitting, setIsSubmitting] = useState(false)
   const [activeItemId, setActiveItemId] = useState<string | null>(null)
@@ -400,13 +415,22 @@ export const ChatComposer = memo(function ChatComposer({
     null
 
   const selectedModelSupportsImages = useMemo(() => {
-    if (!selection || pendingImages.length === 0) return true
+    if (
+      !selection ||
+      !pendingAttachments.some((attachment) => attachment.kind === "image")
+    )
+      return true
     return models.some((m) => m.id === selection.modelId && m.supports_images)
-  }, [models, pendingImages.length, selection])
+  }, [models, pendingAttachments, selection])
 
-  const composerEmpty = value.trim().length === 0 && pendingImages.length === 0
+  const composerEmpty =
+    value.trim().length === 0 && pendingAttachments.length === 0
   const canSubmit =
-    !disabled && !isSubmitting && selectedModelSupportsImages && !composerEmpty
+    !disabled &&
+    !isSubmitting &&
+    selectedModelSupportsImages &&
+    !composerEmpty &&
+    pendingAttachments.length <= MAX_ATTACHMENT_COUNT
 
   const applyPrompt = useCallback((nextValue: string, nextCursor: number) => {
     setValue(nextValue)
@@ -430,9 +454,9 @@ export const ChatComposer = memo(function ChatComposer({
       .filter((part) => part.trim().length > 0)
       .join("\n\n")
     applyPrompt(next, next.length)
-    if (restoreDraft.images.length > 0) {
+    if (restoreDraft.attachments.length > 0) {
       // oxlint-disable-next-line react/set-state-in-effect
-      setPendingImages((prev) => [...restoreDraft.images, ...prev])
+      setPendingAttachments((prev) => [...restoreDraft.attachments, ...prev])
     }
     editorRef.current?.focusAtEnd()
   }, [applyPrompt, restoreDraft, value])
@@ -444,25 +468,28 @@ export const ChatComposer = memo(function ChatComposer({
       // has not yet round-tripped through state would otherwise be dropped.
       const snapshot = editorRef.current?.readSnapshot()
       const trimmed = (snapshot?.value ?? value).trim()
-      if (trimmed.length === 0 && pendingImages.length === 0) return
+      if (trimmed.length === 0 && pendingAttachments.length === 0) return
 
-      if (trimmed === "/offload" && (!canOffload || pendingImages.length)) {
+      if (
+        trimmed === "/offload" &&
+        (!canOffload || pendingAttachments.length)
+      ) {
         setComposerError(
-          pendingImages.length
+          pendingAttachments.length
             ? "Offloading does not accept attachments."
             : "Offloading requires an idle, existing conversation."
         )
         return
       }
 
-      const images = pendingImages
+      const attachments = pendingAttachments
       submittingRef.current = true
       setIsSubmitting(true)
       applyPrompt("", 0)
-      setPendingImages([])
+      setPendingAttachments([])
       setComposerError(null)
       try {
-        await onSubmit?.(trimmed, images, options)
+        await onSubmit?.(trimmed, attachments, options)
       } catch {
         // Caller surfaces send errors (e.g. via react-query mutation state).
       } finally {
@@ -470,7 +497,7 @@ export const ChatComposer = memo(function ChatComposer({
         setIsSubmitting(false)
       }
     },
-    [applyPrompt, disabled, onSubmit, pendingImages, value, canOffload]
+    [applyPrompt, disabled, onSubmit, pendingAttachments, value, canOffload]
   )
 
   const selectCommandItem = useCallback(
@@ -569,22 +596,46 @@ export const ChatComposer = memo(function ChatComposer({
     ]
   )
 
-  const addFiles = useCallback(async (files: FileList | Array<File>) => {
-    const nextImages = await Promise.all(
-      Array.from(files).map(fileToImageChunk)
-    )
-    const validImages = nextImages.filter(
-      (image): image is ImageChunk => image !== null
-    )
-    if (validImages.length === 0) return
-    setPendingImages((prev) =>
-      [...prev, ...validImages].slice(0, MAX_IMAGE_COUNT)
-    )
-  }, [])
+  const addFiles = useCallback(
+    async (files: FileList | Array<File>) => {
+      if (disabled) return
+      const incoming = Array.from(files)
+      const nextAttachments = await Promise.all(incoming.map(fileToMediaChunk))
+      const validAttachments = nextAttachments.filter(
+        (attachment): attachment is MediaChunk => attachment !== null
+      )
+      const errors = []
+      if (incoming.some((file) => !SUPPORTED_MEDIA_TYPES.has(file.type)))
+        errors.push("Use PNG, JPEG, GIF, WebP, MP4, WebM, MOV, or MPEG files.")
+      if (incoming.some((file) => file.size > MAX_ATTACHMENT_BYTES))
+        errors.push("Each attachment must be 10 MiB or smaller.")
+      if (
+        pendingAttachments.length + validAttachments.length >
+        MAX_ATTACHMENT_COUNT
+      )
+        errors.push("Attach up to 5 images or videos per message.")
+      if (
+        validAttachments.length <
+        incoming.filter(
+          (file) =>
+            SUPPORTED_MEDIA_TYPES.has(file.type) &&
+            file.size <= MAX_ATTACHMENT_BYTES
+        ).length
+      )
+        errors.push("An attachment could not be read. Try adding it again.")
+      setComposerError(errors.length ? errors.join(" ") : null)
+      setPendingAttachments((prev) =>
+        [...prev, ...validAttachments].slice(0, MAX_ATTACHMENT_COUNT)
+      )
+    },
+    [disabled, pendingAttachments.length]
+  )
 
+  const droppedKeyRef = useRef<number | null>(null)
   useEffect(() => {
-    if (droppedFiles)
-      void Promise.resolve().then(() => addFiles(droppedFiles.files))
+    if (!droppedFiles || droppedKeyRef.current === droppedFiles.key) return
+    droppedKeyRef.current = droppedFiles.key
+    void Promise.resolve().then(() => addFiles(droppedFiles.files))
   }, [addFiles, droppedFiles])
 
   const handleFileChange = useCallback(
@@ -673,7 +724,7 @@ export const ChatComposer = memo(function ChatComposer({
       for (const item of Array.from(event.clipboardData.items)) {
         if (item.kind !== "file") continue
         const file = item.getAsFile()
-        if (file && SUPPORTED_IMAGE_TYPES.has(file.type)) files.push(file)
+        if (file && SUPPORTED_MEDIA_TYPES.has(file.type)) files.push(file)
       }
       if (files.length === 0) return
       event.preventDefault()
@@ -752,19 +803,24 @@ export const ChatComposer = memo(function ChatComposer({
         compact ? "max-w-none" : "max-w-2xl"
       )}
     >
-      {composerError && (
+      {(composerError || pendingAttachments.length > MAX_ATTACHMENT_COUNT) && (
         <div
           className="mb-space-2 px-space-1 text-xs text-error-secondary"
           role="alert"
         >
-          {composerError}
+          {composerError ||
+            "Remove attachments until at most 5 remain before sending."}
         </div>
       )}
 
       {!selectedModelSupportsImages && (
         <Banner className="mb-space-2" intent="warning">
           {`The selected model does not accept image input. Remove the image${
-            pendingImages.length > 1 ? "s" : ""
+            pendingAttachments.filter(
+              (attachment) => attachment.kind === "image"
+            ).length > 1
+              ? "s"
+              : ""
           } or switch to a vision-enabled model to send.`}
         </Banner>
       )}
@@ -796,13 +852,14 @@ export const ChatComposer = memo(function ChatComposer({
             <span className="rounded-md bg-brand-subtle px-space-3 py-space-1 text-xs font-medium text-brand-primary">
               {dragKind === "path"
                 ? "Drop to mention this file"
-                : "Drop images here"}
+                : "Drop images or videos here"}
             </span>
           </div>
         )}
 
         <input
-          accept="image/png,image/jpeg,image/gif,image/webp"
+          accept={Array.from(SUPPORTED_MEDIA_TYPES).join(",")}
+          aria-label="Attach images or videos"
           className="hidden"
           multiple
           onChange={handleFileChange}
@@ -810,25 +867,35 @@ export const ChatComposer = memo(function ChatComposer({
           type="file"
         />
 
-        {pendingImages.length > 0 && (
+        {pendingAttachments.length > 0 && (
           <div className="mb-space-2 flex flex-wrap gap-space-2">
-            {pendingImages.map((image, index) => (
+            {pendingAttachments.map((attachment, index) => (
               <div
                 className="group relative"
-                key={`${image.fileName ?? "image"}-${index}`}
+                key={`${attachment.fileName ?? "image"}-${index}`}
               >
-                <img
-                  alt={image.fileName || "Pending image"}
-                  className="size-16 rounded-lg border border-default object-cover"
-                  src={`data:${image.mimeType};base64,${image.base64}`}
+                <MessageMedia
+                  chunk={attachment}
+                  className={cn(
+                    "rounded-lg border border-default object-cover",
+                    attachment.kind === "video" ? "h-24 w-40" : "size-16"
+                  )}
                 />
+                {attachment.kind === "video" && attachment.fileName && (
+                  <div
+                    className="max-w-40 truncate pt-space-1 text-xxs text-secondary"
+                    title={attachment.fileName}
+                  >
+                    {attachment.fileName}
+                  </div>
+                )}
                 <IconButton
                   className="absolute -top-1.5 -right-1.5 opacity-0 group-focus-within:opacity-100 group-hover:opacity-100"
                   color="secondary"
                   icon={XIcon}
-                  label="Remove image"
+                  label={`Remove ${attachment.kind}`}
                   onClick={() =>
-                    setPendingImages((prev) =>
+                    setPendingAttachments((prev) =>
                       prev.filter((_, i) => i !== index)
                     )
                   }
@@ -882,7 +949,9 @@ export const ChatComposer = memo(function ChatComposer({
             >
               <DropdownMenuItem
                 className="text-xs"
-                disabled={disabled || pendingImages.length >= MAX_IMAGE_COUNT}
+                disabled={
+                  disabled || pendingAttachments.length >= MAX_ATTACHMENT_COUNT
+                }
                 onSelect={() => fileInputRef.current?.click()}
                 size="sm"
               >
@@ -890,7 +959,7 @@ export const ChatComposer = memo(function ChatComposer({
                   className="size-3.5 shrink-0 text-icon-secondary"
                   weight="regular"
                 />
-                Attach images
+                Attach images or videos
               </DropdownMenuItem>
             </DropdownMenuContent>
           </DropdownMenu>
@@ -902,7 +971,9 @@ export const ChatComposer = memo(function ChatComposer({
                 onOpenChange={setModelPickerOpen}
                 onSelectionChange={onSelectionChange}
                 open={modelPickerOpen}
-                requireImageSupport={pendingImages.length > 0}
+                requireImageSupport={pendingAttachments.some(
+                  (attachment) => attachment.kind === "image"
+                )}
                 routed={routed}
                 selection={selection}
                 triggerClassName="h-7 max-w-full rounded-md px-space-2 text-xs/relaxed text-tertiary hover:bg-surface-level-2 hover:text-primary"

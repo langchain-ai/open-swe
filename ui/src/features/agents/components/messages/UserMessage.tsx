@@ -5,12 +5,12 @@ import { useEffect, useRef, useState } from "react"
 import { SkillPromptText } from "../SkillBadge"
 import { CodeBlock } from "@/features/agents/components/chat/CodeBlock"
 import { parseExcerpts } from "@/features/agents/utils/codeExcerpt"
-import { MessageImage } from "./MessageImage"
+import { MessageMedia } from "./MessageMedia"
 import { MessageTimestamp } from "./MessageTimestamp"
 import { ExpandableMessageChip } from "./ExpandableMessageChip"
 import { TaskEventMessage } from "./TaskEventMessage"
 import { SlackMrkdwn } from "./SlackMrkdwn"
-import type { Message } from "@/features/agents/lib/types"
+import type { AnyMediaChunk, Message } from "@/features/agents/lib/types"
 import { cn } from "@/lib/utils"
 
 const COLLAPSED_MAX_HEIGHT_PX = 250
@@ -38,8 +38,10 @@ function StandardUserMessage({ message }: { message: Message }) {
       .join("")
   )
 
-  const images = message.chunks.filter((c) => c.kind === "image")
-  const hasBody = Boolean(text) || images.length > 0 || excerpts.length > 0
+  const attachments = message.chunks.filter(
+    (c): c is AnyMediaChunk => c.kind === "image" || c.kind === "video"
+  )
+  const hasBody = Boolean(text) || attachments.length > 0 || excerpts.length > 0
   const [expanded, setExpanded] = useState(false)
   const [isTruncated, setIsTruncated] = useState(false)
   const textRef = useRef<HTMLDivElement>(null)
@@ -74,14 +76,14 @@ function StandardUserMessage({ message }: { message: Message }) {
               text={excerpt.code}
             />
           ))}
-          {images.length > 0 && (
+          {attachments.length > 0 && (
             <div className="mb-space-2 grid max-w-[420px] grid-cols-2 gap-space-2">
-              {images.map((img, i) => (
+              {attachments.map((img, i) => (
                 <div
                   key={i}
                   className="overflow-hidden rounded-lg border border-default bg-surface-level-1"
                 >
-                  <MessageImage
+                  <MessageMedia
                     chunk={img}
                     className="block h-auto max-h-[220px] w-full object-cover"
                   />

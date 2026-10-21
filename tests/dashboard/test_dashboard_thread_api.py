@@ -122,8 +122,8 @@ async def test_create_session_uses_selected_workspace_personal_default(
     assert metadata["workspace"] == "selected"
 
 
-def _image() -> thread_runs.DashboardImageBody:
-    return thread_runs.DashboardImageBody(
+def _image() -> thread_runs.DashboardAttachmentBody:
+    return thread_runs.DashboardAttachmentBody(
         base64=base64.b64encode(b"image").decode("ascii"),
         mimeType="image/png",
     )
@@ -502,6 +502,48 @@ async def test_enrich_run_start_command_uses_vision_fallback_for_text_only_model
     assert configurable["agent_model_id"] == _VISION_MODEL
     assert configurable["agent_effort"] == "medium"
     assert configurable["model_override_reason"] == "image_input"
+
+
+@pytest.mark.parametrize("creating", [False, True])
+async def test_video_submission_does_not_boot_a_sandbox(
+    monkeypatch: pytest.MonkeyPatch, creating: bool
+) -> None:
+    metadata = {"model": _TEXT_ONLY_MODEL, "effort": "high"}
+    created: dict[str, object] = {} if creating else {"metadata": metadata}
+    _patch_new_thread_deps(monkeypatch, profile={})
+    patch_thread_module(monkeypatch, "langgraph_client", lambda: _new_thread_client(created))
+    provision = AsyncMock(side_effect=RuntimeError("sandbox is unavailable"))
+    monkeypatch.setattr(thread_runs, "ensure_sandbox_for_thread", provision, raising=False)
+    command = {
+        "method": "run.start",
+        "params": {
+            "input": {
+                "messages": [
+                    {
+                        "type": "human",
+                        "content": [
+                            {
+                                "type": "video",
+                                "base64": base64.b64encode(b"video").decode("ascii"),
+                                "mime_type": "video/mp4",
+                                "file_name": "../../clip.mp4",
+                            }
+                        ],
+                    }
+                ]
+            },
+            "config": {"configurable": {}},
+        },
+    }
+    enriched = await thread_runs._enrich_run_start_command(
+        "video-tid", "octocat", command, metadata={} if creating else metadata, creating=creating
+    )
+    content = enriched["params"]["input"]["messages"][-1]["content"]
+    assert content[-1]["type"] == "video"
+    assert base64.b64decode(content[-1]["base64"]) == b"video"
+    provision.assert_not_awaited()
+    if not creating:
+        assert created["metadata"]["model"] == _TEXT_ONLY_MODEL
 
 
 async def test_recovery_patch_enforces_size_limit(monkeypatch) -> None:
@@ -1516,8 +1558,9 @@ def test_admin_cancel_thread_dependency_rejects_non_admin(monkeypatch) -> None:
     assert exc_info.value.status_code == 403
 
 
+@pytest.mark.parametrize("video", [False, True])
 async def test_steer_running_thread_records_and_delivers_the_follow_up(
-    monkeypatch, registry_db: None
+    monkeypatch, registry_db: None, video: bool
 ) -> None:
     updates: list[dict[str, object]] = []
     turn = uuid7()
@@ -1549,6 +1592,16 @@ async def test_steer_running_thread_records_and_delivers_the_follow_up(
     patch_thread_module(monkeypatch, "append", fake_append)
     monkeypatch.setattr("openswe.utils.thread_ops.langgraph_client", lambda: FakeClient())
 
+    content = [{"type": "text", "text": "also check the tests"}]
+    if video:
+        content.append(
+            {
+                "type": "video",
+                "mime_type": "video/mp4",
+                "base64": base64.b64encode(b"video bytes").decode("ascii"),
+                "file_name": "../../clip.mp4",
+            }
+        )
     result = await thread_runs.steer_running_thread(
         "tid",
         "teammate",
@@ -1556,9 +1609,7 @@ async def test_steer_running_thread_records_and_delivers_the_follow_up(
             "id": 7,
             "method": "run.start",
             "params": {
-                "input": {
-                    "messages": [{"role": "user", "content": "also check the tests", "id": "msg-1"}]
-                }
+                "input": {"messages": [{"role": "user", "content": content, "id": "msg-1"}]}
             },
         },
         metadata={
@@ -1586,7 +1637,7 @@ async def test_steer_running_thread_records_and_delivers_the_follow_up(
     [queued] = await QueuedMessage.for_thread("tid")
     assert isinstance(queued.content, dict)
     assert queued.content["queue_id"] == "msg-1"
-    assert queued.content["text"] == "also check the tests"
+    assert "also check the tests" in queued.content["text"]
     assert queued.content["sender"]["github_login"] == "teammate"
     assert "source" not in queued.content
     # The transcript shows it on the live turn right away, under the id the
@@ -1598,3 +1649,12 @@ async def test_steer_running_thread_records_and_delivers_the_follow_up(
     assert command.event.sender.login == "teammate"
     assert "also check the tests" in command.event.text
     assert updates[-1]["participant_logins"] == {"teammate": True}
+
+    if video:
+        [block] = queued.content["images"]
+        assert block["type"] == "video"
+        assert base64.b64decode(block["base64"]) == b"video bytes"
+        [attachment] = command.attachments
+        assert attachment.mime_type == "video/mp4"
+        assert attachment.data == b"video bytes"
+        assert command.event.attachments[0].attachment_id == attachment.attachment_id

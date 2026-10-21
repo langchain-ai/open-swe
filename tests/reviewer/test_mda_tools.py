@@ -20,8 +20,35 @@ from rt.backend import (
     PhaseReply,
     ToolSpec,
 )
-from rt.middleware import BackendRunMiddleware
+from rt.middleware import BackendRunMiddleware, ImageModelFallbackMiddleware
 from rt.tools import backend_tool
+
+
+@pytest.mark.parametrize("has_frames", [False, True])
+async def test_text_only_subagent_uses_vision_model_for_video_frames(has_frames: bool) -> None:
+    from langchain.agents.middleware.types import ModelRequest, ModelResponse
+    from langchain_core.messages import AIMessage, HumanMessage
+    from langgraph.runtime import Runtime
+
+    primary = FakeListChatModel(responses=[])
+    vision = FakeListChatModel(responses=[])
+    frames = HumanMessage(
+        content=[{"type": "image", "base64": "ZmFrZQ==", "mime_type": "image/jpeg"}]
+    )
+    messages = [frames] if has_frames else [HumanMessage(content="Read a file")]
+    request = ModelRequest(
+        model=primary,
+        messages=messages,
+        state={"messages": messages},
+        runtime=Runtime(),
+    )
+
+    async def respond(request: ModelRequest) -> ModelResponse:
+        assert request.model is (vision if has_frames else primary)
+        assert request.messages == messages
+        return ModelResponse(result=[AIMessage(content="done")])
+
+    await ImageModelFallbackMiddleware(vision).awrap_model_call(request, respond)
 
 
 @pytest.mark.parametrize(

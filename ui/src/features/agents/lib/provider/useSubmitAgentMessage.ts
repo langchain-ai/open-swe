@@ -70,7 +70,7 @@ export function useSubmitAgentMessage(threadId: string) {
             "Wait for the current run to finish before offloading."
           )
         }
-        if (vars.images?.length) {
+        if (vars.attachments?.length) {
           throw new Error("Offloading does not accept attachments.")
         }
         setAgentThreadStatus(queryClient, threadId, "running")
@@ -83,7 +83,7 @@ export function useSubmitAgentMessage(threadId: string) {
       const pendingMessage: PendingThreadMessage = {
         id,
         content: vars.content.trim(),
-        images: vars.images,
+        attachments: vars.attachments,
         createdAt: Date.now(),
         status: "sending",
         ...(vars.enqueue ? { queued: true } : {}),
@@ -105,7 +105,7 @@ export function useSubmitAgentMessage(threadId: string) {
 
       void source
         .startRun({
-          message: { id, text: vars.content, images: vars.images },
+          message: { id, text: vars.content, attachments: vars.attachments },
           configurable: {
             ...configurable,
             ...(review

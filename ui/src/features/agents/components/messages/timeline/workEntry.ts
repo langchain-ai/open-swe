@@ -265,11 +265,14 @@ export function liveActivityLabel(
     if (
       chunk.kind === "code" ||
       chunk.kind === "list" ||
-      chunk.kind === "image"
+      chunk.kind === "image" ||
+      chunk.kind === "video"
     ) {
       return "Preparing response…"
     }
     if (chunk.kind === "todo") return "Planning next steps…"
+
+    if (chunk.kind !== "tool-execution") continue
 
     if (chunk.status === "completed") {
       const activeTool = chunks.findLast(

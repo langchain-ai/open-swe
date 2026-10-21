@@ -2,9 +2,9 @@ import type { SubmissionQueueEntry } from "@langchain/react"
 
 import type { QueuedTurn } from "@/features/agents/lib/transcript/reducer"
 import type {
-  AnyImageChunk,
+  AnyMediaChunk,
   Chunk,
-  ImageChunk,
+  MediaChunk,
   Message,
   PendingThreadMessage,
   QueuedThreadMessage,
@@ -37,7 +37,7 @@ export function visiblePendingMessages(
       deliveryError: message.error,
       optimistic: true,
       chunks: [
-        ...(message.images ?? []),
+        ...(message.attachments ?? []),
         ...(message.content
           ? [{ kind: "text" as const, text: message.content }]
           : []),
@@ -112,9 +112,13 @@ function queuedEntryChunks(
     if (raw.content) chunks.push({ kind: "text", text: raw.content })
   } else if (Array.isArray(raw.content)) {
     for (const block of raw.content) {
-      if (block.type === "image" && block.base64 && block.mime_type) {
+      if (
+        (block.type === "image" || block.type === "video") &&
+        block.base64 &&
+        block.mime_type
+      ) {
         chunks.push({
-          kind: "image",
+          kind: block.type,
           base64: block.base64,
           mimeType: block.mime_type,
           ...(block.file_name ? { fileName: block.file_name } : {}),
@@ -167,35 +171,31 @@ function blobToBase64(blob: Blob): Promise<string> {
   })
 }
 
-export interface MaterializedImages {
-  images: Array<ImageChunk>
-  /** Images whose bytes could not be fetched; they are not in `images`. */
+export interface MaterializedAttachments {
+  attachments: Array<MediaChunk>
+  /** Attachments whose bytes could not be fetched. */
   failed: number
 }
 
-/**
- * Images as the composer holds them. A queued message's images are served by
- * the transcript, so putting them back in the composer means fetching the bytes
- * again. Callers decide what a failed fetch means: it is reported, not dropped
- * silently, because the queued run these images belong to may be about to go.
- */
-export async function materializeImages(
-  images: ReadonlyArray<AnyImageChunk>
-): Promise<MaterializedImages> {
+/** Fetch queued attachments before withdrawing their run, reporting bytes that could not be restored. */
+export async function materializeAttachments(
+  attachments: ReadonlyArray<AnyMediaChunk>
+): Promise<MaterializedAttachments> {
   const settled = await Promise.all(
-    images.map(async (image): Promise<ImageChunk | null> => {
-      if ("base64" in image) return image
+    attachments.map(async (attachment): Promise<MediaChunk | null> => {
+      if ("base64" in attachment) return attachment
       try {
-        const response = await fetch(image.url, {
-          credentials: image.credentials === "session" ? "include" : "omit",
+        const response = await fetch(attachment.url, {
+          credentials:
+            attachment.credentials === "session" ? "include" : "omit",
         })
         if (!response.ok) return null
         const blob = await response.blob()
         return {
-          kind: "image",
+          kind: attachment.kind,
           base64: await blobToBase64(blob),
-          mimeType: image.mimeType ?? blob.type,
-          ...(image.fileName ? { fileName: image.fileName } : {}),
+          mimeType: attachment.mimeType ?? blob.type,
+          ...(attachment.fileName ? { fileName: attachment.fileName } : {}),
         }
       } catch {
         return null
@@ -203,7 +203,10 @@ export async function materializeImages(
     })
   )
   const materialized = settled.filter(
-    (image): image is ImageChunk => image !== null
+    (attachment): attachment is MediaChunk => attachment !== null
   )
-  return { images: materialized, failed: settled.length - materialized.length }
+  return {
+    attachments: materialized,
+    failed: settled.length - materialized.length,
+  }
 }

@@ -3,7 +3,7 @@ import type { ApprovalCallbacks } from "./types"
 import { CodeBlock } from "@/features/agents/components/chat/CodeBlock"
 import { Markdown } from "@/features/agents/components/chat/Markdown"
 import { ToolExecution } from "@/features/agents/components/chat/ToolExecution"
-import { MessageImage } from "./MessageImage"
+import { MessageMedia } from "./MessageMedia"
 
 export function ChunkRenderer({
   chunk,
@@ -45,8 +45,9 @@ export function ChunkRenderer({
         />
       )
     case "image":
+    case "video":
       return (
-        <MessageImage
+        <MessageMedia
           chunk={chunk}
           className="max-h-48 max-w-48 rounded-sm border border-default"
         />

@@ -278,3 +278,28 @@ async def test_aread_pages_a_large_file_inside_the_sandbox() -> None:
 
     assert downloads == []
     assert sandbox.run_calls
+
+
+@pytest.mark.parametrize("size_bytes", [600 * 1024, 51 * 1024 * 1024])
+async def test_video_read_uses_a_bounded_input_budget(size_bytes: int) -> None:
+    import base64
+
+    handle = _FakeHandle(result=SimpleNamespace(stdout="", stderr="", exit_code=0))
+    sb = _backend(handle)
+    sandbox = _StatSandbox(handle, size_bytes=size_bytes)
+    content = b"video bytes" * (60 * 1024)
+    read = AsyncMock(return_value=content)
+    object.__setattr__(sandbox, "read", read)
+    object.__setattr__(sb, "_async_sandbox", sandbox)
+
+    result = await sb.aread("/workspace/clip.mp4", offset=2, limit=5)
+
+    if size_bytes > 50 * 1024 * 1024:
+        assert result.error and "maximum input size" in result.error
+        read.assert_not_awaited()
+    else:
+        assert result.error is None
+        assert result.file_data is not None
+        assert result.file_data["encoding"] == "base64"
+        assert base64.b64decode(result.file_data["content"]) == content
+    assert not sandbox.run_calls

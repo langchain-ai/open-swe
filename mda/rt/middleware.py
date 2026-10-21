@@ -25,6 +25,7 @@ from langchain.agents.middleware.types import (
     OmitFromOutput,
     hook_config,
 )
+from langchain_core.language_models import BaseChatModel
 from langchain_core.messages import SystemMessage, ToolMessage, messages_from_dict
 from langchain_core.tools import BaseTool
 from langgraph.config import get_config, get_stream_writer
@@ -216,6 +217,26 @@ class DescribedToolsMiddleware(AgentMiddleware):
             return await handler(request)
         args = {key: value for key, value in call["args"].items() if key != DISPLAY_DESCRIPTION}
         return await handler(request.override(tool_call={**call, "args": args}))
+
+
+class ImageModelFallbackMiddleware(AgentMiddleware):
+    """Use the backend's vision model when a text-only subagent reads images."""
+
+    def __init__(self, fallback: BaseChatModel) -> None:
+        self._fallback = fallback
+
+    async def awrap_model_call(
+        self,
+        request: ModelRequest,
+        handler: Callable[[ModelRequest], Awaitable[ModelResponse]],
+    ) -> ModelResponse:
+        if any(
+            block.get("type") == "image"
+            for message in request.messages
+            for block in message.content_blocks
+        ):
+            request = request.override(model=self._fallback)
+        return await handler(request)
 
 
 class BackendRunMiddleware(AgentMiddleware[RunState]):

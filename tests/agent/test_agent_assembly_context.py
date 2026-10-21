@@ -10,6 +10,7 @@ is what makes deepagents auto-wire `FilesystemMiddleware` tool-result eviction a
 import asyncio
 import json
 from collections.abc import Callable
+from pathlib import Path
 from types import SimpleNamespace
 from typing import Literal, cast
 from unittest.mock import ANY, AsyncMock, MagicMock, patch
@@ -23,7 +24,8 @@ from langgraph.graph.state import RunnableConfig
 
 from openswe.dashboard.workspace_settings import WorkspaceSettings
 from openswe.sandboxes.state import SANDBOX_BACKENDS
-from openswe.server import _registered_tool_name, get_agent
+from openswe.sandboxes.tool_runtime import ToolSurface
+from openswe.server import _registered_tool_name, build_agent, get_agent
 
 _MODEL_DEFAULTS = {
     "default_agent_model": "openai:gpt-6.1-sol",
@@ -127,6 +129,146 @@ async def test_binary_content_is_offloaded_to_a_thread_scoped_store():
     assert filesystem._offload_binary_content
 
 
+async def test_remote_video_frames_reach_mda_without_backend_only_blob_references(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    import base64
+    import io
+
+    import av
+    from deepagents.backends.filesystem import FilesystemBackend
+    from deepagents.middleware.filesystem import FilesystemMiddleware
+    from langchain.agents import create_agent
+    from langchain.tools import ToolRuntime
+    from langchain_core.language_models.fake_chat_models import FakeListChatModel
+    from langgraph.runtime import Runtime
+    from langgraph.types import Command
+    from PIL import Image
+    from pydantic import JsonValue
+
+    from openswe.middleware.video_attachments import VideoAttachmentsMiddleware
+    from openswe.remote_runtime.graph import RemoteGraph
+    from openswe.remote_runtime.tokens import RemoteRun
+
+    monkeypatch.syspath_prepend(str(Path(__file__).resolve().parents[2] / "mda"))
+    from rt.backend import OpenSweBackend, ToolReply, ToolSpec
+    from rt.tools import backend_tool
+
+    video = tmp_path / "recording.mp4"
+    with av.open(str(video), mode="w") as container:
+        stream = container.add_stream("mpeg4", rate=2)
+        stream.width = stream.height = 32
+        stream.pix_fmt = "yuv420p"
+        for color in ("red", "green", "blue", "white"):
+            for packet in stream.encode(
+                av.VideoFrame.from_image(Image.new("RGB", (32, 32), color))
+            ):
+                container.mux(packet)
+        for packet in stream.encode():
+            container.mux(packet)
+
+    captured = await _capture_create_deep_agent_kwargs(tool_surface=ToolSurface(for_model=True))
+    filesystem = next(
+        item
+        for item in cast(list[object], captured["middleware"])
+        if isinstance(item, FilesystemMiddleware)
+    )
+    filesystem.backend = FilesystemBackend(root_dir=str(tmp_path), virtual_mode=True)
+    staging = next(
+        item
+        for item in cast(list[object], captured["middleware"])
+        if isinstance(item, VideoAttachmentsMiddleware)
+    )
+    staging.backend = filesystem.backend
+    original = HumanMessage(
+        id="video-input",
+        content=[
+            {"type": "text", "text": "Inspect the recording"},
+            {
+                "type": "video",
+                "base64": base64.b64encode(video.read_bytes()).decode("ascii"),
+                "mime_type": "video/mp4",
+                "file_name": "../../recording.mp4",
+            },
+        ],
+    )
+    staged = await staging.abefore_agent({"messages": [original]}, Runtime())
+    assert staged is not None
+    [message] = staged["messages"]
+    assert message.id == original.id
+    assert not any(block["type"] == "video" for block in message.content)
+    assert original.content[1]["type"] == "video"
+    [uploaded] = list(tmp_path.glob("workspace/.open-swe/uploads/*.mp4"))
+    assert uploaded.read_bytes() == video.read_bytes()
+    video_path = "/" + str(uploaded.relative_to(tmp_path))
+    assert video_path in str(message.content)
+    assert await staging.abefore_model({"messages": [message]}, Runtime()) is None
+
+    async def build(config: RunnableConfig, surface: ToolSurface) -> None:
+        surface.graph = create_agent(FakeListChatModel(responses=[]), middleware=[filesystem])
+
+    graph = RemoteGraph("agent", build, AsyncMock())
+    run = RemoteRun(thread_id="thread-ctx", assistant_id="agent", configurable={})
+    monkeypatch.setenv("OPEN_SWE_BACKEND_URL", "https://backend.invalid")
+    monkeypatch.setattr("rt.tools.run_id", lambda: "run-video")
+    backend = OpenSweBackend("run-token")
+
+    async def remote_call(body: dict[str, JsonValue]) -> ToolReply:
+        return ToolReply.model_validate_json(json.dumps(await graph.hook(run, "call", body)))
+
+    monkeypatch.setattr(backend, "tool", remote_call)
+    served = backend_tool(
+        ToolSpec(name="read_file", description="Read a file", parameters={"type": "object"}),
+        backend,
+    )
+    runtime = ToolRuntime(
+        state={"messages": []},
+        context=None,
+        config={},
+        stream_writer=lambda event: None,
+        tool_call_id="read-video",
+        store=None,
+    )
+    result = await served.coroutine(runtime=runtime, file_path=video_path)
+    assert isinstance(result, Command)
+    tool, media = result.update["messages"]
+    assert isinstance(tool, ToolMessage) and tool.status == "success"
+    assert tool.tool_call_id == "read-video"
+    assert isinstance(media, HumanMessage)
+    assert media.additional_kwargs["read_file_media_result"] is True
+    frames = [block for block in media.content_blocks if block["type"] == "image"]
+    assert frames
+    for frame in frames:
+        assert "deepagents_blob" not in frame
+        with Image.open(io.BytesIO(base64.b64decode(frame["base64"]))) as image:
+            assert image.format == "JPEG"
+            assert image.size == (32, 32)
+
+
+@pytest.mark.parametrize("unreachable", [False, True])
+async def test_queued_video_upload_failure_preserves_input_for_retry(unreachable: bool) -> None:
+    from langgraph.runtime import Runtime
+
+    from openswe.middleware.video_attachments import VideoAttachmentsMiddleware
+    from openswe.sandboxes.state import SandboxUnreachableError
+
+    backend = MagicMock()
+    backend.aupload_files = AsyncMock(
+        side_effect=SandboxUnreachableError("thread-ctx", "mda-box", "unavailable")
+        if unreachable
+        else None,
+        return_value=[SimpleNamespace(error="upload_failed")],
+    )
+    middleware = VideoAttachmentsMiddleware(backend)
+    message = HumanMessage(
+        id="queued-video",
+        content=[{"type": "video", "base64": "dmlkZW8=", "mime_type": "video/mp4"}],
+    )
+    with pytest.raises(RuntimeError):
+        await middleware.abefore_model({"messages": [message]}, Runtime())
+    assert message.content[0]["type"] == "video"
+
+
 @pytest.mark.parametrize(
     ("enabled", "binding", "available"),
     [
@@ -224,6 +366,7 @@ async def _capture_create_deep_agent_kwargs(
     thread_settings: dict[str, object] | None = None,
     workspace_settings: WorkspaceSettings | None = None,
     make_model: Callable[..., BaseChatModel] | None = None,
+    tool_surface: ToolSurface | None = None,
 ) -> dict[str, object]:
     captured: dict[str, object] = {}
     make_model_calls: list[tuple[str, dict[str, object]]] = []
@@ -283,7 +426,10 @@ async def _capture_create_deep_agent_kwargs(
         patch("openswe.server.construct_system_prompt", return_value="prompt"),
         patch("openswe.server.create_deep_agent", side_effect=fake_create_deep_agent),
     ):
-        await get_agent(config)
+        if tool_surface is None:
+            await get_agent(config)
+        else:
+            await build_agent(config, tool_surface=tool_surface)
 
     SANDBOX_BACKENDS.pop(thread_id, None)
     captured["make_model_calls"] = make_model_calls

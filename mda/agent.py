@@ -30,6 +30,7 @@ from rt.managed_sandbox import ReplaceSandboxMiddleware, definition, opened_sand
 from rt.middleware import (
     BackendRunMiddleware,
     DescribedToolsMiddleware,
+    ImageModelFallbackMiddleware,
     ReportRepliesMiddleware,
     RuntimeToolsMiddleware,
     ServedToolsMiddleware,
@@ -142,6 +143,14 @@ async def agent(runtime: ManagedServerRuntime) -> DeepAgentDefinition:
     replace_sandbox = (
         [ReplaceSandboxMiddleware(backend, catalog.sandbox)] if catalog.sandbox is not None else []
     )
+    subagent_vision = (
+        build_model(
+            catalog.subagent_vision_model,
+            use_gateway=models.use_gateway if models is not None else False,
+        )
+        if catalog.subagent_vision_model is not None
+        else None
+    )
     return define_deep_agent(
         name="open-swe",
         model=model,
@@ -168,6 +177,11 @@ async def agent(runtime: ManagedServerRuntime) -> DeepAgentDefinition:
                     *_backend_reports(backend, by_name.keys()),
                     *replace_sandbox,
                     ServedToolsMiddleware(subagent_tools[subagent.name], excluded),
+                    *(
+                        [ImageModelFallbackMiddleware(subagent_vision)]
+                        if subagent_vision is not None
+                        else []
+                    ),
                     ModelRetryMiddleware(retry_on=(TimeoutError,)),
                 ],
             }

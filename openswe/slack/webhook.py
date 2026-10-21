@@ -291,7 +291,8 @@ async def _download_slack_files_to_sandbox(
         base = filename
         suffix = 1
         while filename in used_names:
-            filename = f"{base.rsplit('.', 1)[0] if '.' in base else base}-{suffix}"
+            stem, extension = posixpath.splitext(base)
+            filename = f"{stem}-{suffix}{extension}"
             suffix += 1
         used_names.add(filename)
         sandbox_path = posixpath.join(_SLACK_FILE_DIR, filename)
