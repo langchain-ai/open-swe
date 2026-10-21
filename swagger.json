@@ -4464,17 +4464,6 @@
             ],
             "title": "Pr Failure Reactions"
           },
-          "pr_review_links": {
-            "anyOf": [
-              {
-                "type": "boolean"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Pr Review Links"
-          },
           "review_draft_prs": {
             "anyOf": [
               {

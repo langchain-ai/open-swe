@@ -1,14 +1,9 @@
-"""Feature-gated review links at the Slack delivery boundary."""
+"""Review links at the Slack delivery boundary."""
 
-import logging
 import re
 from typing import cast
 
-from openswe.run_config import RunConfig
-from openswe.users import User
 from openswe.utils.dashboard_links import dashboard_base_url, dashboard_review_url
-
-logger = logging.getLogger(__name__)
 
 _PR_LINK = re.compile(
     r"https?://(?:www\.)?github\.com/([\w.-]+)/([\w.-]+)/pull/([1-9]\d*)/?"
@@ -49,17 +44,8 @@ def _block(value: object) -> object:
 async def pr_review_links(
     text: str,
     blocks: list[dict[str, object]] | None,
-    *,
-    login: str | None = None,
 ) -> tuple[str, list[dict[str, object]] | None]:
     """Rewrite displayed PR links without changing stored URLs or button values."""
     if not dashboard_base_url() or "github.com/" not in (text + str(blocks)).lower():
-        return text, blocks
-    if login is None:
-        try:
-            login = RunConfig.from_runtime().github_login
-        except RuntimeError:
-            logger.debug("No active run for Slack PR links", exc_info=True)
-    if not login or not (await User.preferences_for_login(login)).pr_review_links:
         return text, blocks
     return _text(text), cast(list[dict[str, object]] | None, _block(blocks))

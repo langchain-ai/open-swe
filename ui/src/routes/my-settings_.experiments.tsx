@@ -28,11 +28,6 @@ function ExperimentsPage() {
           description="Your whole DM with Open SWE becomes one private thread it always answers in, instead of a new thread per message."
         />
         <ProfileSwitchRow
-          field="pr_review_links"
-          label="Open pull requests in Open SWE"
-          description="Pull request links Open SWE posts for you open its review page instead of GitHub."
-        />
-        <ProfileSwitchRow
           field="pr_failure_reactions"
           label="React to failing checks"
           description="Add ⚠️ to watched pull request posts when checks fail on a pull request you own."
