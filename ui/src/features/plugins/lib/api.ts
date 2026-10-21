@@ -170,10 +170,19 @@ export interface RoomTarget {
   repository?: string
 }
 
-export function roomStreamUrl(id: string, target: RoomTarget, after: number) {
-  return `${plugin(id)}/rooms/${encodeURIComponent(target.room)}/stream${query({
-    repository: target.repository,
-    after,
+/** One stream for every room a frame has joined, each from just after `after`. */
+export function roomsStreamUrl(
+  id: string,
+  rooms: Array<RoomTarget & { after: number }>
+) {
+  return `${plugin(id)}/rooms/stream${query({
+    rooms: JSON.stringify(
+      rooms.map(({ room, repository, after }) => ({
+        room,
+        repository: repository ?? null,
+        after,
+      }))
+    ),
   })}`
 }
 

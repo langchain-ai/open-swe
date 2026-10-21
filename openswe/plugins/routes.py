@@ -41,7 +41,7 @@ from openswe.plugins.records import (
     PluginInstallations,
     PluginNameTaken,
 )
-from openswe.plugins.rooms import MAX_PRESENCE_BYTES, Room
+from openswe.plugins.rooms import MAX_PRESENCE_BYTES, Room, listen
 from openswe.plugins.source import PluginSource, PluginSourceError, catalog
 from openswe.threads.handlers import get_dashboard_thread
 from openswe.users.models import User
@@ -727,47 +727,88 @@ def _room_frame(event: str, data: dict[str, object]) -> str:
     return f"event: {event}\ndata: {json.dumps(data)}\n\n"
 
 
-async def _room_stream(room: Room, after: int) -> AsyncGenerator[str]:
-    """Every update after ``after``, then each one as it commits, and everyone's presence."""
-    async with room.events() as events:
-        seq = after
-        while True:
-            for update in await room.since(seq):
-                seq = update.seq
+MAX_ROOMS_PER_STREAM = 20
+
+
+class RoomJoin(BaseModel):
+    room: RoomName
+    repository: str | None = None
+    after: int = Field(0, ge=0)
+
+
+def _room_names(room: Room) -> dict[str, object]:
+    return {"room": room.name, "repository": room.scope.repository}
+
+
+async def _rooms_stream(joined: list[tuple[Room, int]]) -> AsyncGenerator[str]:
+    """Each room's updates after its ``after``, then ``synced``, then everything as it commits.
+
+    One stream carries every room a frame has joined: browsers allow a host only
+    a handful of HTTP/1.1 connections, and a page joins several rooms.
+    """
+    rooms = {room.key: room for room, _ in joined}
+    seqs = {room.key: after for room, after in joined}
+
+    async def catch_up(key: str) -> AsyncGenerator[str]:
+        room = rooms[key]
+        while updates := await room.since(seqs[key]):
+            for update in updates:
+                seqs[key] = update.seq
                 yield _room_frame(
                     "update",
-                    {"seq": update.seq, "update": base64.b64encode(update.payload).decode()},
+                    {
+                        **_room_names(room),
+                        "seq": update.seq,
+                        "update": base64.b64encode(update.payload).decode(),
+                    },
                 )
-            yield _room_frame("synced", {"seq": seq})
-            while True:
-                try:
-                    event = await asyncio.wait_for(events.get(), timeout=ROOM_HEARTBEAT_SECONDS)
-                except TimeoutError:
-                    yield ": keep-alive\n\n"
-                    continue
-                if event.kind == "presence":
-                    yield _room_frame(
-                        "presence", {"client": event.client, "presence": event.presence}
-                    )
-                    continue
-                break
+
+    async with listen(list(rooms.values())) as events:
+        for key in rooms:
+            async for frame in catch_up(key):
+                yield frame
+            yield _room_frame("synced", {**_room_names(rooms[key]), "seq": seqs[key]})
+        while True:
+            try:
+                event = await asyncio.wait_for(events.get(), timeout=ROOM_HEARTBEAT_SECONDS)
+            except TimeoutError:
+                yield ": keep-alive\n\n"
+                continue
+            if event.room not in rooms:
+                continue
+            if event.kind == "presence":
+                yield _room_frame(
+                    "presence",
+                    {
+                        **_room_names(rooms[event.room]),
+                        "client": event.client,
+                        "presence": event.presence,
+                    },
+                )
+            else:
+                async for frame in catch_up(event.room):
+                    yield frame
 
 
-@router.get("/{installation_id}/rooms/{room}/stream")
-async def api_plugin_room_stream(
-    room: RoomName,
+@router.get("/{installation_id}/rooms/stream")
+async def api_plugin_rooms_stream(
     plugin: PluginDep,
-    repository: str | None = None,
-    after: int = Query(0, ge=0),
+    rooms: str = Query(description="JSON list of {room, repository, after}"),
 ) -> StreamingResponse:
+    try:
+        joins = [RoomJoin.model_validate(item) for item in json.loads(rooms)]
+    except (ValueError, TypeError) as exc:
+        raise HTTPException(422, "rooms must be a JSON list of {room, repository, after}") from exc
+    if not 0 < len(joins) <= MAX_ROOMS_PER_STREAM:
+        raise HTTPException(422, f"join 1 to {MAX_ROOMS_PER_STREAM} rooms per stream")
     with _as_http():
-        joined = await plugin.room(room, repository)
+        joined = [(await plugin.room(join.room, join.repository), join.after) for join in joins]
     return StreamingResponse(
-        _room_stream(joined, after), media_type="text/event-stream", headers=_SSE_HEADERS
+        _rooms_stream(joined), media_type="text/event-stream", headers=_SSE_HEADERS
     )
 
 
-@router.post("/{installation_id}/rooms/{room}/updates")
+@router.post("/{installation_id}/rooms/{room:path}/updates")
 async def api_plugin_room_update(
     room: RoomName, body: RoomUpdateBody, plugin: PluginDep
 ) -> RoomSeq:
@@ -777,7 +818,7 @@ async def api_plugin_room_update(
     return RoomSeq(seq=await joined.append(payload, by=plugin.user_id))
 
 
-@router.post("/{installation_id}/rooms/{room}/compact")
+@router.post("/{installation_id}/rooms/{room:path}/compact")
 async def api_plugin_room_compact(
     room: RoomName, body: RoomCompactBody, plugin: PluginDep
 ) -> RoomSeq:
@@ -787,7 +828,7 @@ async def api_plugin_room_compact(
     return RoomSeq(seq=await joined.compact(snapshot, through=body.through, by=plugin.user_id))
 
 
-@router.post("/{installation_id}/rooms/{room}/presence", status_code=204)
+@router.post("/{installation_id}/rooms/{room:path}/presence", status_code=204)
 async def api_plugin_room_presence(
     room: RoomName, body: RoomPresenceBody, plugin: PluginDep
 ) -> Response:

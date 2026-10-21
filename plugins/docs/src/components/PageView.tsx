@@ -35,7 +35,8 @@ import {
 import { PageEditor } from "@/components/Editor"
 import { resolveAnchor, type Highlight } from "@/lib/anchors"
 import { errorMessage } from "@/lib/host"
-import { useLiveDoc, usePresence } from "@/lib/live"
+import { asLiveMarkdown, useLiveDoc, usePresence } from "@/lib/live"
+import { preserveFormatting } from "@/lib/preserve"
 import {
   COMMENTS,
   DRAFTS,
@@ -108,14 +109,17 @@ export function PageView({
   // page the serialiser would merely reformat does not count as changed.
   const [saved, setSaved] = useState<string | null>(null)
   const normalize = (ready: Editor, markdown: string) =>
-    ready.markdown
-      ? ready.markdown.serialize(ready.markdown.parse(markdown))
-      : markdown
+    asLiveMarkdown(ready, markdown)
   useEffect(() => {
     if (editor.current) setSaved(normalize(editor.current, split.body))
   }, [split.body])
+  // Trailing blank lines are the editor's own (an empty paragraph after a
+  // table), never the page's.
   const dirty =
-    editing && current !== null && saved !== null && current !== saved
+    editing &&
+    current !== null &&
+    saved !== null &&
+    current.trimEnd() !== saved.trimEnd()
   const outsideCommits =
     editing && head.data !== undefined && draft.head !== head.data && !dirty
 
@@ -201,8 +205,12 @@ export function PageView({
 
   const save = async (message?: string) => {
     if (!draft || !head.data || !editor.current) return
-    const text =
-      split.frontMatter + withTrailingNewline(editor.current.getMarkdown())
+    const body = preserveFormatting(
+      split.body.trimEnd(),
+      (saved ?? normalize(editor.current, split.body)).trimEnd(),
+      editor.current.getMarkdown().trimEnd()
+    )
+    const text = split.frontMatter + withTrailingNewline(body)
     const sha = await github.commit({
       branch: draft.branch,
       expectedHead: head.data,

@@ -13,7 +13,7 @@ import asyncio
 import contextlib
 import json
 import logging
-from collections.abc import AsyncIterator
+from collections.abc import AsyncIterator, Sequence
 from dataclasses import dataclass
 from datetime import datetime
 from uuid import UUID, uuid7
@@ -64,8 +64,10 @@ class RoomUpdate:
 
 @dataclass(frozen=True, slots=True)
 class RoomEvent:
-    """``update`` means the log grew; ``presence`` carries one member's state."""
+    """In ``room`` (a ``Room.key``): ``update`` means the log grew; ``presence``
+    carries one member's state."""
 
+    room: str
     kind: str
     client: str = ""
     presence: str = ""
@@ -103,7 +105,7 @@ class Room:
                 .order_by(PluginRoomUpdateRow.seq)
                 .limit(limit)
             )
-            return [RoomUpdate(seq, payload) for seq, payload in rows.tuples()]
+            return [RoomUpdate(seq, payload) for seq, payload in rows]
 
     async def append(self, payload: bytes, *, by: UUID) -> int:
         async with postgres.session() as session:
@@ -166,22 +168,26 @@ class Room:
             {"channel": CHANNEL, "payload": json.dumps({"room": self.key, **event})},
         )
 
-    @contextlib.asynccontextmanager
-    async def events(self) -> AsyncIterator[asyncio.Queue[RoomEvent]]:
-        """This room's events for the body of the ``with``, registered on entry."""
-        queue: asyncio.Queue[RoomEvent] = asyncio.Queue(maxsize=_QUEUE_LIMIT)
-        _SUBSCRIBERS.setdefault(self.key, set()).add(queue)
-        try:
-            yield queue
-        finally:
-            queues = _SUBSCRIBERS.get(self.key)
+
+_SUBSCRIBERS: dict[str, set[asyncio.Queue[RoomEvent]]] = {}
+
+
+@contextlib.asynccontextmanager
+async def listen(rooms: Sequence[Room]) -> AsyncIterator[asyncio.Queue[RoomEvent]]:
+    """One queue of every event in ``rooms`` for the body of the ``with``, registered on entry."""
+    queue: asyncio.Queue[RoomEvent] = asyncio.Queue(maxsize=_QUEUE_LIMIT)
+    keys = {room.key for room in rooms}
+    for key in keys:
+        _SUBSCRIBERS.setdefault(key, set()).add(queue)
+    try:
+        yield queue
+    finally:
+        for key in keys:
+            queues = _SUBSCRIBERS.get(key)
             if queues is not None:
                 queues.discard(queue)
                 if not queues:
-                    _SUBSCRIBERS.pop(self.key, None)
-
-
-_SUBSCRIBERS: dict[str, set[asyncio.Queue[RoomEvent]]] = {}
+                    _SUBSCRIBERS.pop(key, None)
 
 
 def _publish(room: str, event: RoomEvent) -> None:
@@ -206,14 +212,14 @@ def _on_notify(payload: str) -> None:  # pragma: no cover - driven by Postgres
         return
     _publish(
         room,
-        RoomEvent(kind, str(event.get("client", "")), str(event.get("presence", ""))),
+        RoomEvent(room, kind, str(event.get("client", "")), str(event.get("presence", ""))),
     )
 
 
 async def _on_connected(_down_seconds: float | None) -> None:  # pragma: no cover
     # Streams re-read the log on any update event, so one wakes them all after a gap.
     for room in tuple(_SUBSCRIBERS):
-        _publish(room, RoomEvent("update"))
+        _publish(room, RoomEvent(room, "update"))
 
 
 async def start() -> None:

@@ -25,6 +25,7 @@ export interface RoomProviderOptions {
 }
 
 const AWARENESS_HEARTBEAT_MS = 15_000
+const RETRY_MS = 2_000
 
 export class RoomProvider {
   readonly awareness: Awareness
@@ -32,6 +33,7 @@ export class RoomProvider {
   private readonly flushMs: number
   private readonly compactAfter: number
   private pending: Uint8Array[] = []
+  private sending = false
   private flushTimer: ReturnType<typeof setTimeout> | null = null
   private heartbeat: ReturnType<typeof setInterval>
   private sinceCompaction = 0
@@ -88,12 +90,25 @@ export class RoomProvider {
     this.flushTimer ??= setTimeout(this.flush, this.flushMs)
   }
 
+  /** Sends what was typed as one update; a failed send keeps it for the next try. */
   private readonly flush = () => {
     this.flushTimer = null
-    if (!this.pending.length) return
-    const update = Y.mergeUpdates(this.pending)
+    if (!this.pending.length || this.sending) return
+    const batch = this.pending
     this.pending = []
-    void this.room.publish(update)
+    this.sending = true
+    this.room.publish(Y.mergeUpdates(batch)).then(
+      () => {
+        this.sending = false
+        if (this.pending.length) this.flush()
+      },
+      () => {
+        this.sending = false
+        // Keep the edits and try again, with whatever was typed meanwhile.
+        this.pending = [...batch, ...this.pending]
+        this.flushTimer ??= setTimeout(this.flush, RETRY_MS)
+      }
+    )
   }
 
   private readonly onAwarenessUpdate = (

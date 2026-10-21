@@ -5,6 +5,7 @@ import {
   useDashboardTheme,
 } from "@openswe/plugin-sdk/react"
 import { Spinner } from "@langchain/macaw-components/Spinner"
+import { TooltipProvider } from "@langchain/macaw-components/Tooltip"
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
 import {
   HeadContent,
@@ -66,8 +67,10 @@ function Root() {
   return (
     <PluginHostProvider host={host}>
       <QueryClientProvider client={queryClient}>
-        <PathSync host={host} />
-        <Themed />
+        <TooltipProvider>
+          <PathSync host={host} />
+          <Themed />
+        </TooltipProvider>
       </QueryClientProvider>
     </PluginHostProvider>
   )

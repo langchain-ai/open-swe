@@ -180,7 +180,7 @@ class PluginInstallations:
                 .order_by(PluginInstallationRow.created_at)
             )
         by_name: dict[str, Installation] = {}
-        for row, repository, path in rows.tuples():
+        for row, repository, path in rows:
             try:
                 installation = _installation(row, repository, path)
             except ValidationError:

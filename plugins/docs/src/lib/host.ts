@@ -7,7 +7,8 @@ const pending: Promise<PluginHost> | null =
 
 /** The dashboard's port; it only exists in the browser frame. */
 export function hostConnection(): Promise<PluginHost> {
-  if (!pending) throw new Error("The dashboard is only reachable in the browser")
+  if (!pending)
+    throw new Error("The dashboard is only reachable in the browser")
   return pending
 }
 

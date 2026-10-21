@@ -9,7 +9,10 @@ import type { PluginHost } from "@openswe/plugin-sdk"
 import { usePluginHost } from "@openswe/plugin-sdk/react"
 import { RoomProvider } from "@openswe/plugin-sdk/yjs"
 import type { Editor } from "@tiptap/core"
-import { prosemirrorJSONToYXmlFragment } from "@tiptap/y-tiptap"
+import {
+  prosemirrorJSONToYXmlFragment,
+  yXmlFragmentToProsemirrorJSON,
+} from "@tiptap/y-tiptap"
 import { useCallback, useEffect, useSyncExternalStore } from "react"
 import * as Y from "yjs"
 
@@ -162,6 +165,26 @@ export function seedFromMarkdown(
   )
   Y.applyUpdate(doc, Y.encodeStateAsUpdate(seed))
   seed.destroy()
+}
+
+/**
+ * `markdown` as a live draft would serialise it: through Yjs and back, the path
+ * the shared document takes, so an untouched draft compares equal to its save.
+ */
+export function asLiveMarkdown(editor: Editor, markdown: string): string {
+  if (!editor.markdown) return markdown
+  const scratch = new Y.Doc()
+  const fragment = scratch.getXmlFragment(FIELD)
+  prosemirrorJSONToYXmlFragment(
+    editor.schema,
+    editor.markdown.parse(markdown),
+    fragment
+  )
+  const normalized = editor.markdown.serialize(
+    yXmlFragmentToProsemirrorJSON(fragment)
+  )
+  scratch.destroy()
+  return normalized
 }
 
 export interface Viewer {
