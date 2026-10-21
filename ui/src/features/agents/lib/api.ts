@@ -178,6 +178,19 @@ function errorDetailMessage(detail: unknown): string {
               )
               .join(".")
           : ""
+      if (
+        field === "name" &&
+        "type" in issue &&
+        issue.type === "string_too_long" &&
+        "ctx" in issue &&
+        issue.ctx &&
+        typeof issue.ctx === "object" &&
+        "max_length" in issue.ctx &&
+        typeof issue.ctx.max_length === "number"
+      )
+        return [
+          `Please use a shorter name (${issue.ctx.max_length} characters or fewer)`,
+        ]
       return [field ? `${field}: ${issue.msg}` : issue.msg]
     })
     if (messages.length) return messages.join("; ")

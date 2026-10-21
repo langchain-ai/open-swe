@@ -137,7 +137,7 @@ it("formats validation errors without exposing the rejected input in the toast",
   }
   const { container } = render(options.description)
   expect(container.textContent).toContain(
-    "name: String should have at most 120 characters; prompt: Field required"
+    "Please use a shorter name (120 characters or fewer); prompt: Field required"
   )
   expect(container.textContent).not.toContain("private automation instructions")
   expect(container.textContent).not.toContain("string_too_long")
