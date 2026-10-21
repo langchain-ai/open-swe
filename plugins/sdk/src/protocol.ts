@@ -28,6 +28,22 @@ export type JsonValue =
   | { [key: string]: JsonValue }
 export type JsonObject = { [key: string]: JsonValue }
 
+type JsonShape<T> = T extends string | number | boolean | null | undefined
+  ? T
+  : T extends (...args: never[]) => unknown
+    ? never
+    : T extends readonly (infer Item)[]
+      ? readonly JsonShape<Item>[]
+      : T extends object
+        ? { [K in keyof T]: JsonShape<T[K]> }
+        : never
+
+/**
+ * `T` when it is a JSON object all the way down. Unlike `JsonObject` it takes
+ * plain interfaces, with no index signature: `V extends JsonDocument<V>`.
+ */
+export type JsonDocument<T> = { [K in keyof T]: JsonShape<T[K]> }
+
 export type PluginPermission =
   | "storage"
   | "github:read"
@@ -64,9 +80,12 @@ export interface Person {
   avatar: Blob | null
 }
 
-export interface StoredDocument<T extends JsonValue = JsonValue> {
-  key: string
-  document: T
+export interface StoredDocument<
+  V extends JsonDocument<V> = JsonObject,
+  K extends string = string,
+> {
+  key: K
+  document: V
   updatedAt: string | null
 }
 
@@ -170,7 +189,7 @@ export interface HostMethods {
     params: DocumentScope & {
       collection: string
       key: string
-      document: JsonValue
+      document: JsonObject
     }
     result: StoredDocument
   }
@@ -178,9 +197,15 @@ export interface HostMethods {
     params: DocumentScope & { collection: string; key: string }
     result: null
   }
-  /** Sends `storage.changed` whenever someone writes a document in this scope. */
-  "storage.watch": { params: DocumentScope; result: null }
-  "storage.unwatch": { params: DocumentScope; result: null }
+  /** Sends `storage.changed` whenever someone writes a document in this collection and scope. */
+  "storage.watch": {
+    params: DocumentScope & { collection: string }
+    result: null
+  }
+  "storage.unwatch": {
+    params: DocumentScope & { collection: string }
+    result: null
+  }
 
   "github.repository": {
     params: { repository: string }
@@ -283,7 +308,7 @@ export type HostEvent =
   | { type: "context"; context: HostContext }
   | { type: "theme"; theme: Theme }
   | { type: "path"; path: string }
-  | { type: "storage.changed"; repository: string | null }
+  | { type: "storage.changed"; collection: string; repository: string | null }
   | {
       type: "room.update"
       room: string

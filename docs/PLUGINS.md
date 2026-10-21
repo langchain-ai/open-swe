@@ -180,24 +180,36 @@ The frame can't load remote images, so the web UI fetches each picture and hands
 
 ### Storage
 
-Documents are JSON objects in named collections. Each document lives in one of two scopes:
+Documents are JSON objects in named collections. Open a collection in one of two scopes:
 
 - **Private to the person**, when no `repository` is given.
 - **Shared per repository**: everyone using the plugin who has shared that repository and can read it.
 
-```ts
-await host.storage.put("comments", "c1", { body: "Looks good" }, { repository: "acme/app" })
-const one = await host.storage.get("comments", "c1", { repository: "acme/app" })
-const open = await host.storage.query("comments", { repository: "acme/app", where: { status: "open" }, limit: 50 })
-await host.storage.delete("comments", "c1", { repository: "acme/app" })
+Type the collection with its key (`string`, or any subtype such as a template literal) and its documents. Plain interfaces work; they need no index signature, and anything that isn't JSON, such as a function or a `Date`, fails to compile:
 
-const stop = host.storage.watch({ repository: "acme/app" }, () => refetch()) // anyone's write in this scope
+```ts
+interface Comment {
+  body: string
+  status: "open" | "resolved"
+  parent: string | null
+}
+
+const comments = host.storage.collection<`c-${string}`, Comment>("comments", { repository: "acme/app" })
+
+await comments.put("c-1", { body: "Looks good", status: "open", parent: null })
+const one = await comments.get("c-1")                                    // { key, document, updatedAt } | null
+const open = await comments.query({ where: { status: "open" }, limit: 50 }) // oldest first
+await comments.delete("c-1")
+
+const stop = comments.watch(() => refetch()) // anyone's write to this collection, in this scope
 ```
+
+The SDK trusts these types; nothing checks documents at runtime. Validate what you read if older versions of your plugin may have written it.
 
 - **Collection names:** a lowercase letter, then up to 63 more lowercase letters, digits, `_` or `-`.
 - **Keys:** up to 200 of `A–Z a–z 0–9 . _ : @ / -`, with no empty, `.` or `..` path segment.
 - **Size:** a document is at most 256 KB as JSON.
-- **Queries:** `where` matches fields exactly, and `limit` is 1–500 (200 by default).
+- **Queries:** a document matches when it contains every field of `where` (nested objects included), and `limit` is 1–500 (200 by default).
 
 Data belongs to the plugin's source, its repository and directory. Updating keeps it. A plugin with the same name installed from another source never sees it.
 

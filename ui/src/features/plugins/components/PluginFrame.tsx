@@ -14,8 +14,11 @@ import { useEffect, useEffectEvent, useMemo, useRef, useState } from "react"
 import { toast } from "sonner"
 
 import { SandboxedHtmlFrame } from "@/features/agents/components/SandboxedHtmlFrame"
-import type { InstalledPlugin } from "@/features/plugins/lib/api"
-import { pluginsApi } from "@/features/plugins/lib/api"
+import type {
+  DocumentTarget,
+  InstalledPlugin,
+} from "@/features/plugins/lib/api"
+import { documentsTopicKey, pluginsApi } from "@/features/plugins/lib/api"
 import { PluginRooms } from "@/features/plugins/lib/rooms"
 import type {
   BridgeHost,
@@ -83,7 +86,7 @@ export function PluginFrame({
   const sentPath = useRef(path)
   const [generation, setGeneration] = useState(0)
   const [escaped, setEscaped] = useState(false)
-  const [watched, setWatched] = useState<ReadonlyArray<string | null>>([])
+  const [watched, setWatched] = useState<ReadonlyArray<DocumentTarget>>([])
   const [initialTheme] = useState(theme)
   const rooms = useRef<PluginRooms | null>(null)
   const login = session.data?.login ?? ""
@@ -139,12 +142,12 @@ export function PluginFrame({
     confirmThread,
     confirmLink,
     pickRepositories,
-    watch: (repository) =>
+    watch: (target) =>
       setWatched((prev) =>
-        prev.includes(repository) ? prev : [...prev, repository]
+        prev.some((held) => sameTarget(held, target)) ? prev : [...prev, target]
       ),
-    unwatch: (repository) =>
-      setWatched((prev) => prev.filter((scope) => scope !== repository)),
+    unwatch: (target) =>
+      setWatched((prev) => prev.filter((held) => !sameTarget(held, target))),
     joinRoom: (target, after) => rooms.current?.join(target, after),
     leaveRoom: (target) => rooms.current?.leave(target),
   }
@@ -257,31 +260,26 @@ export function PluginFrame({
 
   const userId = session.data?.user_id
   const watches = useQueries({
-    queries: watched.map((repository) => ({
-      queryKey: ["plugin-watch", plugin.id, repository] as const,
-      queryFn: () => Date.now(),
-      staleTime: Infinity,
-      meta: {
-        invalidatedBy: [
-          invalidationTopic(
-            "plugin-documents",
-            repository === null
-              ? `${plugin.plugin_id}/user/${userId}`
-              : `${plugin.plugin_id}/${repository}`
-          ),
-        ],
-      },
-    })),
+    queries: watched.map((target) => {
+      const key = documentsTopicKey(plugin.plugin_id, target, userId ?? "")
+      return {
+        queryKey: ["plugin-watch", plugin.id, key] as const,
+        queryFn: () => Date.now(),
+        staleTime: Infinity,
+        meta: { invalidatedBy: [invalidationTopic("plugin-documents", key)] },
+      }
+    }),
   })
-  const seen = useRef(new Map<string | null, number>())
+  const seen = useRef(new Map<string, number>())
   const versions = watches.map((watch) => watch.dataUpdatedAt).join(",")
   const announceChanges = useEffectEvent(() => {
-    watched.forEach((repository, index) => {
+    watched.forEach((target, index) => {
+      const id = documentsTopicKey(plugin.plugin_id, target, userId ?? "")
       const version = watches[index]?.dataUpdatedAt ?? 0
-      const before = seen.current.get(repository)
-      seen.current.set(repository, version)
+      const before = seen.current.get(id)
+      seen.current.set(id, version)
       if (before !== undefined && before !== version)
-        emit({ type: "storage.changed", repository })
+        emit({ type: "storage.changed", ...target })
     })
   })
   useEffect(() => announceChanges(), [versions])
@@ -324,4 +322,8 @@ export function PluginFrame({
       className="h-full min-h-0 flex-1"
     />
   )
+}
+
+function sameTarget(a: DocumentTarget, b: DocumentTarget): boolean {
+  return a.collection === b.collection && a.repository === b.repository
 }

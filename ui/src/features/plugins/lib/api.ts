@@ -2,7 +2,6 @@ import type {
   AgentThread,
   Commit,
   JsonObject,
-  JsonValue,
   PluginPermission,
   PullRequest,
   RepositoryInfo,
@@ -136,7 +135,7 @@ function roomPath(id: string, target: RoomTarget, action: string): string {
 
 interface DocumentWire {
   key: string
-  document: JsonValue
+  document: JsonObject
   updated_at: string | null
 }
 
@@ -188,6 +187,22 @@ export function avatarBlob(url: string | null): Promise<Blob | null> {
 export interface RoomTarget {
   room: string
   repository?: string
+}
+
+/** One collection's documents in one scope: a repository's, or the person's own (`null`). */
+export interface DocumentTarget {
+  collection: string
+  repository: string | null
+}
+
+/** The `plugin-documents` invalidation key the backend sends when `target` changes. */
+export function documentsTopicKey(
+  pluginId: string,
+  target: DocumentTarget,
+  userId: string
+): string {
+  const scope = target.repository ?? `user/${userId}`
+  return `${pluginId}/${target.collection}/${scope}`
 }
 
 /** One stream for every room a frame has joined, each from just after `after`. */
@@ -265,7 +280,7 @@ export const pluginsApi = {
     id: string,
     collection: string,
     key: string,
-    body: { repository?: string; document: JsonValue }
+    body: { repository?: string; document: JsonObject }
   ) =>
     stored(
       await agentsRequest<DocumentWire>(document(id, collection, key), {

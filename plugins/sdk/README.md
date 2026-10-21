@@ -50,7 +50,8 @@ import { connect } from "@openswe/plugin-sdk"
 const host = await connect() // call while the module loads
 host.context.user // { login, name, avatar: Blob | null }
 const [repository] = await host.repositories.pick() // "acme/app", or none
-await host.storage.put("notes", "n1", { text: "hi" }, { repository: "acme/app" })
+const notes = host.storage.collection<string, { text: string }>("notes", { repository: "acme/app" })
+await notes.put("n1", { text: "hi" })
 await host.github("acme/app").file("README.md", "main")
 const [person] = await host.people.get(["ada"])
 ```

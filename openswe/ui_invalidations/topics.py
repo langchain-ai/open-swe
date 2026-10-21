@@ -200,7 +200,8 @@ async def _readable_plugin_documents(session: Session, keys: set[str]) -> set[st
     from openswe.plugins.installed import can_read_repository
     from openswe.users.models import User
 
-    scopes = {key: key.split("/", 1)[1] for key in keys if "/" in key}
+    # A key is "<plugin>/<collection>/<scope>"; the scope is "user/<id>" or "owner/repo".
+    scopes = {key: parts[2] for key in keys if len(parts := key.split("/", 2)) == 3}
     readable: set[str] = set()
     if any(scope.startswith("user/") for scope in scopes.values()):
         user = await User.for_session(session_user_id(session), session["sub"])

@@ -396,12 +396,14 @@ class DocumentScope:
     repository: str | None = None
     user_id: UUID | None = None
 
-    def topic_key(self, plugin: UUID) -> str:
-        return (
-            f"{plugin}/{self.repository}"
-            if self.repository is not None
-            else f"{plugin}/user/{self.user_id}"
-        )
+    @property
+    def key(self) -> str:
+        """``owner/repo``, or ``user/<id>`` for one person's own documents."""
+        return self.repository if self.repository is not None else f"user/{self.user_id}"
+
+    def topic_key(self, plugin: UUID, collection: str) -> str:
+        """The ``plugin-documents`` key a write to ``collection`` in this scope invalidates."""
+        return f"{plugin}/{collection}/{self.key}"
 
 
 @dataclass(frozen=True, slots=True)
@@ -486,7 +488,9 @@ class PluginDocuments:
                     .returning(PluginDocumentRow)
                 )
             ).scalar_one()
-            await Topic.PLUGIN_DOCUMENTS.invalidate(session, key=scope.topic_key(self.plugin))
+            await Topic.PLUGIN_DOCUMENTS.invalidate(
+                session, key=scope.topic_key(self.plugin, collection)
+            )
             return PluginDocument(row.key, row.document, row.updated_at)
 
     async def delete(self, collection: str, scope: DocumentScope, key: str) -> bool:
@@ -497,7 +501,9 @@ class PluginDocuments:
                 .returning(PluginDocumentRow.id)
             )
             if deleted is not None:
-                await Topic.PLUGIN_DOCUMENTS.invalidate(session, key=scope.topic_key(self.plugin))
+                await Topic.PLUGIN_DOCUMENTS.invalidate(
+                    session, key=scope.topic_key(self.plugin, collection)
+                )
             return deleted is not None
 
 

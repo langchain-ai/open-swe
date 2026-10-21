@@ -1,5 +1,6 @@
 export * from "./protocol"
 export {
+  Collection,
   connect,
   HostError,
   LiveRoom,

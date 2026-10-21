@@ -1,3 +1,5 @@
+import type { PluginHost } from "@openswe/plugin-sdk"
+
 /**
  * What Docs keeps. Pages are the repository's Markdown files; a draft is a
  * branch whose live state is a shared Yjs document until someone saves a
@@ -7,7 +9,6 @@
 
 /** A page's open edit: a branch off the default one, published as a pull request. */
 export interface Draft {
-  [key: string]: string
   branch: string
   base: string
   /** The last commit Docs saved on the branch; another head means someone pushed. */
@@ -26,7 +27,6 @@ export interface Anchor {
 export type CommentStatus = "open" | "resolved" | "accepted" | "rejected"
 
 export interface PageComment {
-  [key: string]: string | null
   path: string
   /** The comment this one replies to; replies carry no anchor of their own. */
   parent: string | null
@@ -41,8 +41,17 @@ export interface PageComment {
   status: CommentStatus
 }
 
-export const DRAFTS = "drafts"
-export const COMMENTS = "comments"
+/** Drafts by the path of the page they edit. */
+export function draftsIn(host: PluginHost, repository: string) {
+  return host.storage.collection<string, Draft>("drafts", { repository })
+}
+
+/** Comments and suggestions on the repository's pages, by comment id. */
+export function commentsIn(host: PluginHost, repository: string) {
+  return host.storage.collection<string, PageComment>("comments", {
+    repository,
+  })
+}
 
 export function isMarkdown(path: string): boolean {
   return /\.(md|markdown)$/i.test(path)

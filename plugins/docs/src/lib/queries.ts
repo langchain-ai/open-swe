@@ -1,15 +1,9 @@
-import type { Person, PluginHost, StoredDocument } from "@openswe/plugin-sdk"
+import type { Person, PluginHost } from "@openswe/plugin-sdk"
 import { usePluginHost } from "@openswe/plugin-sdk/react"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { useEffect, useMemo } from "react"
 
-import {
-  COMMENTS,
-  DRAFTS,
-  isMarkdown,
-  type Draft,
-  type PageComment,
-} from "@/lib/model"
+import { commentsIn, draftsIn, isMarkdown } from "@/lib/model"
 
 export const keys = {
   repositories: ["repositories"] as const,
@@ -80,31 +74,33 @@ export function useSpace(repository: string) {
 export function useRepositoryWatch(repository: string) {
   const host = usePluginHost()
   const queryClient = useQueryClient()
-  useEffect(
-    () =>
-      host.storage.watch({ repository }, () => {
+  useEffect(() => {
+    const offDrafts = draftsIn(host, repository).watch(
+      () =>
         void queryClient.invalidateQueries({
           queryKey: keys.drafts(repository),
         })
+    )
+    const offComments = commentsIn(host, repository).watch(
+      () =>
         void queryClient.invalidateQueries({
           queryKey: ["comments", repository],
         })
-      }),
-    [host, queryClient, repository]
-  )
+    )
+    return () => {
+      offDrafts()
+      offComments()
+    }
+  }, [host, queryClient, repository])
 }
 
 export function useDrafts(repository: string) {
-  const host = usePluginHost()
+  const drafts = draftsIn(usePluginHost(), repository)
   return useQuery({
     queryKey: keys.drafts(repository),
     queryFn: async () =>
       new Map(
-        (
-          (await host.storage.query<Draft>(DRAFTS, {
-            repository,
-          })) as StoredDocument<Draft>[]
-        ).map((draft) => [draft.key, draft.document])
+        (await drafts.query()).map((draft) => [draft.key, draft.document])
       ),
   })
 }
@@ -138,15 +134,10 @@ export function useFile(
 }
 
 export function useComments(repository: string, path: string) {
-  const host = usePluginHost()
+  const comments = commentsIn(usePluginHost(), repository)
   return useQuery({
     queryKey: keys.comments(repository, path),
-    queryFn: async () =>
-      (await host.storage.query<PageComment>(COMMENTS, {
-        repository,
-        where: { path },
-        limit: 500,
-      })) as StoredDocument<PageComment>[],
+    queryFn: () => comments.query({ where: { path }, limit: 500 }),
   })
 }
 

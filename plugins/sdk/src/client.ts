@@ -8,8 +8,8 @@ import {
   type HostEvent,
   type HostMessage,
   type HostMethod,
+  type JsonDocument,
   type JsonObject,
-  type JsonValue,
   type ParamsOf,
   type Person,
   type PluginMessage,
@@ -38,7 +38,7 @@ export class PluginHost {
     { resolve: (value: unknown) => void; reject: (error: Error) => void }
   >()
   private readonly listeners = new Set<Listener>()
-  private readonly watchers = new Map<string | null, number>()
+  private readonly watches = new DocumentWatches(this)
   private readonly profiles = new Map<string, Person>()
 
   private constructor(
@@ -157,57 +157,16 @@ export class PluginHost {
   }
 
   readonly storage = {
-    query: <T extends JsonValue>(
-      collection: string,
-      options: DocumentScope & { where?: JsonObject; limit?: number } = {}
-    ) =>
-      this.call("storage.query", { collection, ...options }) as Promise<
-        StoredDocument<T>[]
-      >,
-    get: <T extends JsonValue>(
-      collection: string,
-      key: string,
+    /**
+     * One collection of JSON documents, in one scope: private to the person,
+     * or shared per repository. `K` types its keys (any `string` subtype) and
+     * `V` its documents.
+     */
+    collection: <K extends string, V extends JsonDocument<V>>(
+      name: string,
       scope: DocumentScope = {}
-    ) =>
-      this.call("storage.get", {
-        collection,
-        key,
-        ...scope,
-      }) as Promise<StoredDocument<T> | null>,
-    put: <T extends JsonValue>(
-      collection: string,
-      key: string,
-      document: T,
-      scope: DocumentScope = {}
-    ) =>
-      this.call("storage.put", {
-        collection,
-        key,
-        document,
-        ...scope,
-      }) as Promise<StoredDocument<T>>,
-    delete: (collection: string, key: string, scope: DocumentScope = {}) =>
-      this.call("storage.delete", { collection, key, ...scope }),
-    /** Calls `onChange` whenever a document in `scope` is written; returns the unsubscribe. */
-    watch: (scope: DocumentScope, onChange: () => void): (() => void) => {
-      const repository = scope.repository?.toLowerCase() ?? null
-      const count = this.watchers.get(repository) ?? 0
-      this.watchers.set(repository, count + 1)
-      if (count === 0) void this.call("storage.watch", scope)
-      const off = this.on((event) => {
-        if (event.type === "storage.changed" && event.repository === repository)
-          onChange()
-      })
-      return () => {
-        off()
-        const left = (this.watchers.get(repository) ?? 1) - 1
-        if (left > 0) this.watchers.set(repository, left)
-        else {
-          this.watchers.delete(repository)
-          void this.call("storage.unwatch", scope)
-        }
-      }
-    },
+    ): Collection<K, V> =>
+      new Collection<K, V>(this, this.watches, name, scope),
   }
 
   /** One repository's GitHub calls, made with the person's own access. */
@@ -242,6 +201,94 @@ export class PluginHost {
   /** Joins a live room; leave it with the returned room's `leave()`. */
   joinRoom(scope: RoomScope, handlers: RoomHandlers, after = 0): LiveRoom {
     return new LiveRoom(this, scope, handlers, after)
+  }
+}
+
+/** Shares one `storage.watch` per collection and scope among everyone listening. */
+class DocumentWatches {
+  private readonly counts = new Map<string, number>()
+
+  constructor(private readonly host: PluginHost) {}
+
+  add(collection: string, scope: DocumentScope, onChange: () => void) {
+    const repository = scope.repository?.toLowerCase() ?? null
+    const id = JSON.stringify([collection, repository])
+    const count = this.counts.get(id) ?? 0
+    this.counts.set(id, count + 1)
+    if (count === 0)
+      void this.host.call("storage.watch", { ...scope, collection })
+    const off = this.host.on((event) => {
+      if (
+        event.type === "storage.changed" &&
+        event.collection === collection &&
+        event.repository === repository
+      )
+        onChange()
+    })
+    return () => {
+      off()
+      const left = (this.counts.get(id) ?? 1) - 1
+      if (left > 0) this.counts.set(id, left)
+      else {
+        this.counts.delete(id)
+        void this.host.call("storage.unwatch", { ...scope, collection })
+      }
+    }
+  }
+}
+
+/** A named collection of documents in one scope; see `host.storage.collection`. */
+export class Collection<K extends string, V extends JsonDocument<V>> {
+  constructor(
+    private readonly host: PluginHost,
+    private readonly watches: DocumentWatches,
+    readonly name: string,
+    readonly scope: DocumentScope
+  ) {}
+
+  async get(key: K): Promise<StoredDocument<V, K> | null> {
+    const found = await this.host.call("storage.get", {
+      ...this.scope,
+      collection: this.name,
+      key,
+    })
+    return found as StoredDocument<V, K> | null
+  }
+
+  /** Documents whose fields include every field of `where`, oldest first; at most `limit` (500). */
+  async query(
+    options: { where?: Partial<V>; limit?: number } = {}
+  ): Promise<StoredDocument<V, K>[]> {
+    const found = await this.host.call("storage.query", {
+      ...this.scope,
+      collection: this.name,
+      where: options.where as JsonObject | undefined,
+      limit: options.limit,
+    })
+    return found as StoredDocument<V, K>[]
+  }
+
+  async put(key: K, document: V): Promise<StoredDocument<V, K>> {
+    const stored = await this.host.call("storage.put", {
+      ...this.scope,
+      collection: this.name,
+      key,
+      document: document as JsonObject,
+    })
+    return stored as StoredDocument<V, K>
+  }
+
+  async delete(key: K): Promise<void> {
+    await this.host.call("storage.delete", {
+      ...this.scope,
+      collection: this.name,
+      key,
+    })
+  }
+
+  /** Calls `onChange` whenever anyone writes a document here; returns the unsubscribe. */
+  watch(onChange: () => void): () => void {
+    return this.watches.add(this.name, this.scope, onChange)
   }
 }
 

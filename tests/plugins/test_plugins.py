@@ -17,6 +17,7 @@ from openswe.plugins.records import (
 )
 from openswe.plugins.rooms import Room
 from openswe.plugins.source import PluginPackage, PluginSource
+from openswe.ui_invalidations.topics import _readable_plugin_documents
 from openswe.users import User
 
 pytestmark = pytest.mark.usefixtures("registry_db")
@@ -136,3 +137,32 @@ async def test_compacting_a_room_keeps_what_came_after() -> None:
     assert [u.payload for u in await room.since(0)] == [b"one+two", b"three"]
     assert [u.payload for u in await room.since(second)] == [b"three"]
     assert [u.payload for u in await other.since(0)] == [b"elsewhere"]
+
+
+async def test_document_changes_reach_only_people_who_can_read_their_scope(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    ada, bob = await _person("ada", "1"), await _person("bob", "2")
+    plugin = (
+        await PluginInstallations.get(
+            await PluginInstallations.install(_package("acme/docs"), user_id=ada, by=ada), ada
+        )
+    ).plugin
+
+    async def readable(_login: str, repository: str) -> bool:
+        return repository == "acme/app"
+
+    monkeypatch.setattr(installed_module, "can_read_repository", readable)
+    keys = {
+        DocumentScope(repository="acme/app").topic_key(plugin, "comments"),
+        DocumentScope(repository="acme/secret").topic_key(plugin, "comments"),
+        DocumentScope(user_id=ada).topic_key(plugin, "notes"),
+        DocumentScope(user_id=bob).topic_key(plugin, "notes"),
+    }
+
+    allowed = await _readable_plugin_documents({"sub": "ada", "user_id": str(ada)}, keys)
+
+    assert allowed == {
+        DocumentScope(repository="acme/app").topic_key(plugin, "comments"),
+        DocumentScope(user_id=ada).topic_key(plugin, "notes"),
+    }

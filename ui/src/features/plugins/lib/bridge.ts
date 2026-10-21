@@ -11,7 +11,11 @@ import type {
   ResultOf,
 } from "@openswe/plugin-sdk"
 
-import type { InstalledPlugin, RoomTarget } from "@/features/plugins/lib/api"
+import type {
+  DocumentTarget,
+  InstalledPlugin,
+  RoomTarget,
+} from "@/features/plugins/lib/api"
 import { pluginsApi } from "@/features/plugins/lib/api"
 
 export class BridgeRequestError extends Error {
@@ -48,8 +52,8 @@ export interface BridgeHost {
   confirmLink: (url: string) => Promise<boolean>
   /** Shows the person a picker and shares what they choose; resolves to it, `[]` if they cancel. */
   pickRepositories: (pick: RepositoryPick) => Promise<Array<string>>
-  watch: (repository: string | null) => void
-  unwatch: (repository: string | null) => void
+  watch: (target: DocumentTarget) => void
+  unwatch: (target: DocumentTarget) => void
   joinRoom: (target: RoomTarget, after: number) => void
   leaveRoom: (target: RoomTarget) => void
 }
@@ -161,6 +165,13 @@ function binary(params: Params, key: string, max: number): Uint8Array {
   return value
 }
 
+function documentTarget(params: Params): DocumentTarget {
+  return {
+    collection: collection(params),
+    repository: optionalRepository(params)?.toLowerCase() ?? null,
+  }
+}
+
 function roomTarget(params: Params): RoomTarget {
   return {
     room: pathName(params, "room", ROOM),
@@ -268,15 +279,21 @@ const handlers: Handlers = {
       optionalRepository(params)
     ),
   "storage.put": (host, params) => {
-    if (!isJson(params.document))
-      throw new BridgeRequestError("document must be JSON", 400)
+    const document = params.document
+    if (
+      !isJson(document) ||
+      document === null ||
+      typeof document !== "object" ||
+      Array.isArray(document)
+    )
+      throw new BridgeRequestError("document must be a JSON object", 400)
     return pluginsApi.putDocument(
       host.plugin.id,
       collection(params),
       documentKey(params),
       {
         repository: optionalRepository(params),
-        document: params.document,
+        document,
       }
     )
   },
@@ -290,11 +307,11 @@ const handlers: Handlers = {
     return null
   },
   "storage.watch": async (host, params) => {
-    host.watch(optionalRepository(params)?.toLowerCase() ?? null)
+    host.watch(documentTarget(params))
     return null
   },
   "storage.unwatch": async (host, params) => {
-    host.unwatch(optionalRepository(params)?.toLowerCase() ?? null)
+    host.unwatch(documentTarget(params))
     return null
   },
 

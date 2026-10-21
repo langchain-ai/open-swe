@@ -83,7 +83,7 @@ class Room:
 
     @property
     def key(self) -> str:
-        return f"{self.scope.topic_key(self.plugin)}#{self.name}"
+        return f"{self.plugin}/{self.scope.key}#{self.name}"
 
     def _where(self) -> list[ColumnElement[bool]]:
         return [

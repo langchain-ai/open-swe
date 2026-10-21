@@ -38,8 +38,8 @@ import { errorMessage } from "@/lib/host"
 import { asLiveMarkdown, useLiveDoc, usePresence } from "@/lib/live"
 import { preserveFormatting } from "@/lib/preserve"
 import {
-  COMMENTS,
-  DRAFTS,
+  commentsIn,
+  draftsIn,
   colorFor,
   draftBranch,
   draftRoom,
@@ -188,8 +188,7 @@ export function PageView({
     })
   }
 
-  const putDraft = (next: Draft) =>
-    host.storage.put(DRAFTS, path, next, { repository })
+  const putDraft = (next: Draft) => draftsIn(host, repository).put(path, next)
 
   const ensureDraft = async (): Promise<Draft> => {
     if (draft) return draft
@@ -264,12 +263,12 @@ export function PageView({
   }
 
   const closeDraft = async () => {
-    await host.storage.delete(DRAFTS, path, { repository })
+    await draftsIn(host, repository).delete(path)
     await refreshDraft()
   }
 
   const putComment = async (id: string, comment: PageComment) => {
-    await host.storage.put(COMMENTS, id, comment, { repository })
+    await commentsIn(host, repository).put(id, comment)
     await queryClient.invalidateQueries({
       queryKey: keys.comments(repository, path),
     })
