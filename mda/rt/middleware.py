@@ -42,6 +42,7 @@ from langchain.agents.middleware.types import (
     OmitFromOutput,
     hook_config,
 )
+from langchain_anthropic import ChatAnthropic
 from langchain_core.messages import (
     HumanMessage,
     SystemMessage,
@@ -362,11 +363,30 @@ class BackendRunMiddleware(AgentMiddleware[RunState]):
         if not isinstance(raw, Mapping):
             return await handler(request)
         call = ModelCall.model_validate(raw)
-        existing = request.system_message.text if request.system_message is not None else ""
-        prompt = f"{call.system_prompt}\n\n{existing}" if existing else call.system_prompt
-        request = request.override(system_message=SystemMessage(content=prompt))
         if call.model is not None:
             request = request.override(model=build_model(call.model, use_gateway=call.use_gateway))
+        system = request.system_message
+        blocks: list[str | dict[str, object]] = []
+        if system is not None and system.content:
+            blocks = (
+                [{"type": "text", "text": system.content}]
+                if isinstance(system.content, str)
+                else [dict(block) if isinstance(block, dict) else block for block in system.content]
+            )
+        uncached_blocks = [*blocks, {"type": "text", "text": call.system_prompt}]
+        if blocks and isinstance(request.model, ChatAnthropic):
+            last = blocks[-1]
+            blocks[-1] = {
+                **({"type": "text", "text": last} if isinstance(last, str) else last),
+                "cache_control": {"type": "ephemeral", "ttl": "1h"},
+            }
+        blocks.append({"type": "text", "text": call.system_prompt})
+        composed = (
+            system.model_copy(update={"content": blocks})
+            if system
+            else SystemMessage(content=blocks)
+        )
+        request = request.override(system_message=composed)
         try:
             return await handler(request)
         except Exception as exc:
@@ -374,9 +394,13 @@ class BackendRunMiddleware(AgentMiddleware[RunState]):
                 raise
             # As the in-process graph does: another provider before failing the run.
             logger.warning("Model call failed; retrying on the fallback model", exc_info=True)
-            return await handler(
-                request.override(model=build_model(call.fallback, use_gateway=call.use_gateway))
+            fallback = build_model(call.fallback, use_gateway=call.use_gateway)
+            fallback_system = (
+                composed
+                if isinstance(fallback, ChatAnthropic)
+                else composed.model_copy(update={"content": uncached_blocks})
             )
+            return await handler(request.override(model=fallback, system_message=fallback_system))
 
     @hook_config(can_jump_to=["model", "end"])
     async def aafter_model(self, state: RunState, runtime: Runtime) -> dict[str, object] | None:  # noqa: ARG002

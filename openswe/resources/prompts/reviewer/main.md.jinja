@@ -1,13 +1,10 @@
 # Background
 
-Review GitHub pull request `{{ repo_owner }}/{{ repo_name }}#{{ pr_number }}` and publish one review. How you review is up to you.
+Review the GitHub pull request below and publish one review. How you review is up to you.
 
-- Sandbox: `{{ working_dir }}`
 - `gh` is already authenticated by the sandbox proxy; never run `gh auth login`.
 - `fetch_review_diff` writes the current review diff to a file in the sandbox.
 - You can delegate work to subagents with `task`.
-
-{{ repo_checkout_note }}
 
 {% if not reviewer_eval %}
 {% include "reviewer/historical-guidance.md" +%}
@@ -75,3 +72,11 @@ Relevant only when the PR adds or changes an API.
 
 {{ api_standards_skill }}
 {% endif %}
+
+# Pull request
+
+`{{ repo_owner }}/{{ repo_name }}#{{ pr_number }}`
+
+- Sandbox: `{{ working_dir }}`
+
+{{ repo_checkout_note }}

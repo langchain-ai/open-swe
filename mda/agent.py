@@ -25,6 +25,7 @@ from langchain.agents.middleware import (
     ModelCallLimitMiddleware,
     ModelRetryMiddleware,
 )
+from langchain_anthropic.middleware import AnthropicPromptCachingMiddleware
 from langchain_core.tools import BaseTool
 from langchain_quickjs import CodeInterpreterMiddleware
 from managed_deepagents import (
@@ -201,6 +202,7 @@ async def agent(runtime: ManagedServerRuntime) -> DeepAgentDefinition:
                 *box_tools,
                 *replace_sandbox,
                 ServedToolsMiddleware(subagent_tools[subagent.name], excluded, backend),
+                AnthropicPromptCachingMiddleware(ttl="1h", unsupported_model_behavior="ignore"),
                 ModelRetryMiddleware(retry_on=(TimeoutError,)),
             ],
         }
@@ -208,18 +210,21 @@ async def agent(runtime: ManagedServerRuntime) -> DeepAgentDefinition:
     ]
     # This agent's own, as the agent a worker is; deepagents passes no middleware down.
     agent_middleware = [
-        BackendRunMiddleware(
-            backend,
-            context.invocation_id,
-            opened_sandbox if catalog.sandbox is not None else None,
-            trace_metadata=catalog.trace_metadata,
-        ),
         *replace_sandbox,
         *_backend_reports(backend, reported_elsewhere),
         *box_tools,
         ServedToolsMiddleware(offered, excluded | code_only, backend),
         *_code_mode(context.graph, from_code, catalog.described),
         *_browser(context.graph, backend),
+        # Inside the middleware that add to the system prompt, so their static blocks
+        # come before the backend's prompt and stay cacheable.
+        BackendRunMiddleware(
+            backend,
+            context.invocation_id,
+            opened_sandbox if catalog.sandbox is not None else None,
+            trace_metadata=catalog.trace_metadata,
+        ),
+        AnthropicPromptCachingMiddleware(ttl="1h", unsupported_model_behavior="ignore"),
         ModelCallLimitMiddleware(run_limit=_MODEL_CALL_LIMIT, exit_behavior="end"),
         ModelRetryMiddleware(retry_on=(TimeoutError,)),
     ]
