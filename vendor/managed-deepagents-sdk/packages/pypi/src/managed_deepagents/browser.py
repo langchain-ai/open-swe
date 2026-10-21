@@ -52,6 +52,8 @@ from stagehand_middleware.facade import (
     facade_tools,
 )
 
+# At runtime: ToolNode resolves the tools' `runtime` annotation to know what to inject.
+from managed_deepagents._managed_tools import ManagedToolRuntime  # noqa: TC001
 from managed_deepagents.identity import ManagedServerInfo
 from managed_deepagents.runtime import (
     _LazyManagedSandboxBackend,
@@ -68,8 +70,6 @@ if TYPE_CHECKING:
     from langsmith.sandbox import AsyncSandbox
     from stagehand import Page, StagehandBrowser
     from websockets.asyncio.client import ClientConnection
-
-    from managed_deepagents._managed_tools import ManagedToolRuntime
 
 T = TypeVar("T")
 Scope = Literal["thread", "user"]
