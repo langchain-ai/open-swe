@@ -1,15 +1,31 @@
 /**
- * The dashboard's side of the plugin protocol: what each request from a
- * plugin's frame does. Plugins are untrusted, so every request is checked for
- * shape here and for permission again by the backend, which is the authority.
+ * The web UI's side of the plugin protocol: the capabilities a plugin's frame
+ * reaches over Cap'n Web. Plugins are untrusted, so every argument is checked
+ * for shape here, before anything else runs, and for permission again by the
+ * backend, which is the authority. All state lives in `#private` fields:
+ * Cap'n Web exposes a target's prototype methods and nothing else.
  */
 import type {
-  HostMethod,
-  HostMethods,
+  CollectionApi,
+  CommitRequest,
+  DocumentScope,
+  GitHubRepositoryApi,
+  HostApi,
+  HostContext,
+  HostEvent,
   JsonObject,
   JsonValue,
-  ResultOf,
+  PullRequestDraft,
+  RepositoryPickOptions,
+  RoomApi,
+  RoomEvent,
+  RoomScope,
+  StoredDocument,
+  Subscription,
+  Toast,
 } from "@openswe/plugin-sdk"
+import { RpcTarget } from "capnweb"
+import type { RpcStub } from "capnweb"
 
 import type {
   DocumentTarget,
@@ -17,15 +33,32 @@ import type {
   RoomTarget,
 } from "@/features/plugins/lib/api"
 import { pluginsApi } from "@/features/plugins/lib/api"
+import { DashboardRequestError } from "@/lib/dashboard-fetch"
 
 export class BridgeRequestError extends Error {
   constructor(
     message: string,
+    /** An own enumerable property, so it reaches the plugin with the error. */
     readonly status: number
   ) {
     super(message)
     this.name = "BridgeRequestError"
   }
+}
+
+/**
+ * What the plugin sees of a failure: its message and an HTTP-like status,
+ * never a stack or anything else the error carried.
+ */
+export function sendableError(error: Error): Error {
+  const status =
+    error instanceof BridgeRequestError ||
+    error instanceof DashboardRequestError
+      ? error.status
+      : null
+  const sent = Object.assign(new Error(error.message), { status })
+  delete sent.stack
+  return sent
 }
 
 export interface ThreadRequest {
@@ -40,51 +73,60 @@ export interface RepositoryPick {
   multiple: boolean
 }
 
-/** What a request may do in the dashboard beyond calling the backend. */
+/** What a plugin's requests may do in the web UI beyond calling the backend. */
 export interface BridgeHost {
   plugin: InstalledPlugin
+  context: () => Promise<HostContext>
+  /** Calls `listener` as the theme or the plugin's path changes; returns the unsubscribe. */
+  subscribe: (listener: (event: HostEvent) => void) => () => void
   navigate: (path: string, replace: boolean) => void
   openThread: (threadId: string) => void
-  toast: (toast: HostMethods["ui.toast"]["params"]) => void
+  toast: (toast: Toast) => void
   /** Shows the person the request word for word; resolves whether they approved it. */
   confirmThread: (request: ThreadRequest) => Promise<boolean>
   /** Asks before leaving for a site other than GitHub; resolves whether to go. */
   confirmLink: (url: string) => Promise<boolean>
   /** Shows the person a picker and shares what they choose; resolves to it, `[]` if they cancel. */
   pickRepositories: (pick: RepositoryPick) => Promise<Array<string>>
-  watch: (target: DocumentTarget) => void
-  unwatch: (target: DocumentTarget) => void
-  joinRoom: (target: RoomTarget, after: number) => void
-  leaveRoom: (target: RoomTarget) => void
+  /** Calls `onChange` whenever anyone writes to `target`; returns the unsubscribe. */
+  watchDocuments: (target: DocumentTarget, onChange: () => void) => () => void
+  /** Streams one live room to `onEvent` from after `after`; returns the leave. */
+  joinRoom: (
+    target: RoomTarget,
+    after: number,
+    onEvent: (event: RoomEvent) => void
+  ) => () => void
 }
 
-type Params = Record<string, unknown>
+// ---- Shapes ---------------------------------------------------------------------
 
-function record(value: unknown): Params {
-  if (value && typeof value === "object" && !Array.isArray(value))
-    return value as Params
-  throw new BridgeRequestError("params must be an object", 400)
+function invalid(message: string): never {
+  throw new BridgeRequestError(message, 400)
 }
 
-function text(params: Params, key: string, max = 1_000): string {
-  const value = params[key]
+function text(value: unknown, name: string, max = 1_000): string {
   if (typeof value !== "string" || !value || value.length > max)
-    throw new BridgeRequestError(`${key} must be a non-empty string`, 400)
+    invalid(`${name} must be a non-empty string`)
   return value
 }
 
-function optionalText(params: Params, key: string, max = 1_000) {
-  return params[key] === undefined || params[key] === null
+function optionalText(value: unknown, name: string, max = 1_000) {
+  return value === undefined || value === null
     ? undefined
-    : text(params, key, max)
+    : text(value, name, max)
 }
 
-function optionalNumber(params: Params, key: string): number | undefined {
-  const value = params[key]
+function optionalInteger(value: unknown, name: string): number | undefined {
   if (value === undefined) return undefined
   if (typeof value !== "number" || !Number.isInteger(value))
-    throw new BridgeRequestError(`${key} must be an integer`, 400)
+    invalid(`${name} must be an integer`)
   return value
+}
+
+function record(value: unknown, name: string): Record<string, unknown> {
+  if (value && typeof value === "object" && !Array.isArray(value))
+    return value as Record<string, unknown>
+  invalid(`${name} must be an object`)
 }
 
 function isJson(value: unknown, depth = 0): value is JsonValue {
@@ -97,50 +139,56 @@ function isJson(value: unknown, depth = 0): value is JsonValue {
     case "number":
       return Number.isFinite(value)
     case "object":
-      return Array.isArray(value)
-        ? value.every((item) => isJson(item, depth + 1))
-        : Object.values(value).every((item) => isJson(item, depth + 1))
+      if (Array.isArray(value))
+        return value.every((item) => isJson(item, depth + 1))
+      return (
+        Object.getPrototypeOf(value) === Object.prototype &&
+        Object.values(value).every((item) => isJson(item, depth + 1))
+      )
     default:
       return false
   }
 }
 
-function jsonObject(params: Params, key: string): JsonObject {
-  const value = params[key] ?? {}
-  if (!isJson(value) || typeof value !== "object" || Array.isArray(value))
-    throw new BridgeRequestError(`${key} must be a JSON object`, 400)
+function jsonObject(value: unknown, name: string): JsonObject {
+  if (
+    !isJson(value) ||
+    !value ||
+    typeof value !== "object" ||
+    Array.isArray(value)
+  )
+    invalid(`${name} must be a JSON object`)
   return value as JsonObject
 }
 
-function stringMap(params: Params, key: string): Record<string, string> {
-  const value = record(params[key])
-  for (const item of Object.values(value))
-    if (typeof item !== "string")
-      throw new BridgeRequestError(`${key} values must be strings`, 400)
-  return value as Record<string, string>
+function stringMap(value: unknown, name: string): Record<string, string> {
+  const map = record(value, name)
+  for (const item of Object.values(map))
+    if (typeof item !== "string") invalid(`${name} values must be strings`)
+  return map as Record<string, string>
 }
 
-function stringList(params: Params, key: string): Array<string> {
-  const value = params[key] ?? []
-  if (!Array.isArray(value) || value.some((item) => typeof item !== "string"))
-    throw new BridgeRequestError(`${key} must be a list of strings`, 400)
-  return value as Array<string>
+function stringList(value: unknown, name: string): Array<string> {
+  const list = value ?? []
+  if (!Array.isArray(list) || list.some((item) => typeof item !== "string"))
+    invalid(`${name} must be a list of strings`)
+  return list as Array<string>
 }
 
 /** A name the backend accepts as one path: no empty, `.` or `..` part. */
 function pathName(
-  params: Params,
-  key: string,
+  value: unknown,
+  name: string,
   pattern: RegExp,
   max = 200
 ): string {
-  const value = text(params, key, max)
+  const checked = text(value, name, max)
   if (
-    !pattern.test(value) ||
-    value.split("/").some((part) => !part || part === "." || part === "..")
+    !pattern.test(checked) ||
+    checked.split("/").some((part) => !part || part === "." || part === "..")
   )
-    throw new BridgeRequestError(`${key} is not a valid name`, 400)
-  return value
+    invalid(`${name} is not a valid name`)
+  return checked
 }
 
 const COLLECTION = /^[a-z][a-z0-9_-]{0,63}$/
@@ -148,285 +196,670 @@ const DOCUMENT_KEY = /^[A-Za-z0-9._:@/-]{1,200}$/
 const ROOM = /^[A-Za-z0-9._:@/-]{1,200}$/
 const REPOSITORY = /^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/
 
-const collection = (params: Params) =>
-  pathName(params, "collection", COLLECTION)
-const documentKey = (params: Params) => pathName(params, "key", DOCUMENT_KEY)
-const repository = (params: Params) =>
-  pathName(params, "repository", REPOSITORY)
-const optionalRepository = (params: Params) =>
-  params.repository === undefined || params.repository === null
-    ? undefined
-    : repository(params)
+const repositoryName = (value: unknown, name = "repository") =>
+  pathName(value, name, REPOSITORY).toLowerCase()
 
-function binary(params: Params, key: string, max: number): Uint8Array {
-  const value = params[key]
+function scopeOf(value: unknown): string | null {
+  const scope = value === undefined ? {} : record(value, "scope")
+  return scope.repository === undefined || scope.repository === null
+    ? null
+    : repositoryName(scope.repository)
+}
+
+function binary(value: unknown, name: string, max: number): Uint8Array {
   if (!(value instanceof Uint8Array) || value.byteLength > max)
-    throw new BridgeRequestError(`${key} must be bytes, at most ${max}`, 400)
+    invalid(`${name} must be bytes, at most ${max}`)
   return value
 }
 
-function documentTarget(params: Params): DocumentTarget {
-  return {
-    collection: collection(params),
-    repository: optionalRepository(params)?.toLowerCase() ?? null,
-  }
+function pluginPath(value: unknown): string {
+  const checked = text(value, "path", 2_000)
+  if (!checked.startsWith("/") || checked.startsWith("//"))
+    invalid("path must start with a single /")
+  return checked
 }
 
-function roomTarget(params: Params): RoomTarget {
-  return {
-    room: pathName(params, "room", ROOM),
-    repository: optionalRepository(params)?.toLowerCase(),
-  }
-}
-
-function path(params: Params): string {
-  const value = text(params, "path", 2_000)
-  if (!value.startsWith("/") || value.startsWith("//"))
-    throw new BridgeRequestError("path must start with a single /", 400)
-  return value
-}
-
-function webUrl(params: Params): URL {
+function webUrl(value: unknown): URL {
   let url: URL
   try {
-    url = new URL(text(params, "url", 4_000))
+    url = new URL(text(value, "url", 4_000))
   } catch {
-    throw new BridgeRequestError("url must be absolute", 400)
+    invalid("url must be absolute")
   }
   if (url.protocol !== "https:" && url.protocol !== "http:")
-    throw new BridgeRequestError("only web links can be opened", 400)
+    invalid("only web links can be opened")
   return url
 }
 
-type Handlers = {
-  [M in HostMethod]: (host: BridgeHost, params: Params) => Promise<ResultOf<M>>
+/** A callback the plugin passed, kept past the call that brought it. */
+function keep<A>(value: unknown, name: string): RpcStub<(arg: A) => void> {
+  const stub = value as RpcStub<(arg: A) => void> | undefined
+  if (typeof stub !== "function" || typeof stub.dup !== "function")
+    invalid(`${name} must be a function`)
+  return stub.dup()
 }
 
-const handlers: Handlers = {
-  "nav.setPath": async (host, params) => {
-    host.navigate(path(params), params.replace === true)
-    return null
-  },
-  "nav.openThread": async (host, params) => {
-    host.openThread(text(params, "threadId", 200))
-    return null
-  },
-  "nav.openExternal": async (host, params) => {
-    const url = webUrl(params)
-    if (
-      url.hostname === "github.com" ||
-      (await host.confirmLink(url.toString()))
-    )
-      window.open(url.toString(), "_blank", "noopener,noreferrer")
-    return null
-  },
-  "people.get": (host, params) => {
-    const logins = stringList(params, "logins")
-    if (logins.length === 0 || logins.length > 100)
-      throw new BridgeRequestError("logins must name 1 to 100 people", 400)
-    return pluginsApi.people(host.plugin.id, logins)
-  },
-  "repositories.list": async (host) => [...host.plugin.repositories],
-  "repositories.pick": async (host, params) => {
-    const suggested = [
-      ...new Set(
-        stringList(params, "suggested").map((name) => {
-          if (
-            !REPOSITORY.test(name) ||
-            name.split("/").some((part) => part === "." || part === "..")
-          )
-            throw new BridgeRequestError("suggested must be owner/repo", 400)
-          return name.toLowerCase()
-        })
-      ),
-    ]
-    if (suggested.length > 20)
-      throw new BridgeRequestError("suggest at most 20 repositories", 400)
-    if (
-      suggested.length > 0 &&
-      suggested.every((name) => host.plugin.repositories.includes(name))
-    )
-      return suggested
-    return host.pickRepositories({
-      suggested,
-      multiple: params.multiple === true,
-    })
-  },
-  "ui.toast": async (host, params) => {
-    const intent = params.intent
-    host.toast({
-      title: text(params, "title", 200),
-      description: optionalText(params, "description", 1_000),
-      intent:
-        intent === "success" || intent === "error" || intent === "info"
-          ? intent
-          : undefined,
-    })
-    return null
-  },
+// ---- Limits -----------------------------------------------------------------------
 
-  "storage.query": (host, params) =>
-    pluginsApi.queryDocuments(host.plugin.id, collection(params), {
-      repository: optionalRepository(params),
-      where: jsonObject(params, "where"),
-      limit: optionalNumber(params, "limit"),
-    }),
-  "storage.get": (host, params) =>
-    pluginsApi.getDocument(
-      host.plugin.id,
-      collection(params),
-      documentKey(params),
-      optionalRepository(params)
-    ),
-  "storage.put": (host, params) => {
-    const document = params.document
-    if (
-      !isJson(document) ||
-      document === null ||
-      typeof document !== "object" ||
-      Array.isArray(document)
-    )
-      throw new BridgeRequestError("document must be a JSON object", 400)
-    return pluginsApi.putDocument(
-      host.plugin.id,
-      collection(params),
-      documentKey(params),
-      {
-        repository: optionalRepository(params),
-        document,
+export interface SessionLimits {
+  /** Requests running at once; more wait their turn. */
+  concurrency: number
+  /** Requests running or waiting; more are refused. */
+  pending: number
+  /** Requests started in any minute; more are refused. */
+  perMinute: number
+  /** Capabilities (collections, repositories, rooms, subscriptions) held at once. */
+  capabilities: number
+  /** Events waiting on the plugin per listener; a listener this far behind is dropped. */
+  backlog: number
+}
+
+export const SESSION_LIMITS: SessionLimits = {
+  concurrency: 16,
+  pending: 256,
+  // A live room flushes edits every 50 ms; this leaves room for that and more.
+  perMinute: 3_000,
+  capabilities: 256,
+  backlog: 512,
+}
+
+/** One frame's allowance, so a misbehaving plugin cannot flood the web UI or the backend. */
+export class SessionBudget {
+  #limits: SessionLimits
+  #running = 0
+  #waiting: Array<() => void> = []
+  #started: Array<number> = []
+  #capabilities = 0
+  #closed = false
+
+  constructor(limits: SessionLimits = SESSION_LIMITS) {
+    this.#limits = limits
+  }
+
+  get limits(): SessionLimits {
+    return this.#limits
+  }
+
+  run<T>(work: () => T | Promise<T>): Promise<T> {
+    if (this.#closed)
+      return Promise.reject(
+        new BridgeRequestError("The plugin was closed", 410)
+      )
+    if (this.#running + this.#waiting.length >= this.#limits.pending)
+      return Promise.reject(
+        new BridgeRequestError("The plugin has too many pending requests", 429)
+      )
+    const now = Date.now()
+    while (this.#started.length && this.#started[0]! < now - 60_000)
+      this.#started.shift()
+    if (this.#started.length >= this.#limits.perMinute)
+      return Promise.reject(
+        new BridgeRequestError("The plugin made too many requests", 429)
+      )
+    this.#started.push(now)
+    return new Promise<T>((resolve, reject) => {
+      const start = () => {
+        this.#running += 1
+        Promise.resolve()
+          .then(work)
+          .then(resolve, reject)
+          .finally(() => {
+            this.#running -= 1
+            this.#waiting.shift()?.()
+          })
       }
-    )
-  },
-  "storage.delete": async (host, params) => {
-    await pluginsApi.deleteDocument(
-      host.plugin.id,
-      collection(params),
-      documentKey(params),
-      optionalRepository(params)
-    )
-    return null
-  },
-  "storage.watch": async (host, params) => {
-    host.watch(documentTarget(params))
-    return null
-  },
-  "storage.unwatch": async (host, params) => {
-    host.unwatch(documentTarget(params))
-    return null
-  },
+      if (this.#running < this.#limits.concurrency) start()
+      else this.#waiting.push(start)
+    })
+  }
 
-  "github.repository": (host, params) =>
-    pluginsApi.repository(host.plugin.id, repository(params)),
-  "github.ref": (host, params) =>
-    pluginsApi.ref(
-      host.plugin.id,
-      repository(params),
-      text(params, "name", 200)
-    ),
-  "github.tree": (host, params) =>
-    pluginsApi.tree(
-      host.plugin.id,
-      repository(params),
-      text(params, "sha", 40)
-    ),
-  "github.file": (host, params) =>
-    pluginsApi.file(
-      host.plugin.id,
-      repository(params),
-      text(params, "path"),
-      text(params, "ref", 200)
-    ),
-  "github.history": (host, params) =>
-    pluginsApi.history(
-      host.plugin.id,
-      repository(params),
-      text(params, "path"),
-      text(params, "ref", 200),
-      optionalNumber(params, "limit")
-    ),
-  "github.createBranch": async (host, params) => {
-    await pluginsApi.createBranch(
-      host.plugin.id,
-      repository(params),
-      text(params, "name", 200),
-      text(params, "sha", 40)
-    )
-    return null
-  },
-  "github.commit": (host, params) =>
-    pluginsApi.commit(host.plugin.id, repository(params), {
-      branch: text(params, "branch", 200),
-      expectedHead: text(params, "expectedHead", 40),
-      message: text(params, "message", 10_000),
-      files: stringMap(params, "files"),
-      deletions: stringList(params, "deletions"),
-    }),
-  "github.findPull": (host, params) =>
-    pluginsApi.findPull(
-      host.plugin.id,
-      repository(params),
-      text(params, "head", 200)
-    ),
-  "github.openPull": (host, params) =>
-    pluginsApi.openPull(host.plugin.id, repository(params), {
-      head: text(params, "head", 200),
-      base: text(params, "base", 200),
-      title: text(params, "title", 256),
-      body: optionalText(params, "body", 60_000),
-      draft: params.draft === true,
-    }),
-
-  "threads.start": async (host, params) => {
-    const request: ThreadRequest = {
-      repository: repository(params),
-      title: text(params, "title", 120),
-      request: text(params, "request", 40_000),
+  /** Reserves one capability; the returned release frees it, once. */
+  claim(): () => void {
+    if (this.#capabilities >= this.#limits.capabilities)
+      throw new BridgeRequestError(
+        "The plugin holds too many capabilities",
+        429
+      )
+    this.#capabilities += 1
+    let held = true
+    return () => {
+      if (!held) return
+      held = false
+      this.#capabilities -= 1
     }
-    if (!(await host.confirmThread(request))) return null
-    const started = await pluginsApi.startThread(host.plugin.id, request)
-    return { threadId: started.thread_id }
-  },
-  "threads.list": (host) => pluginsApi.threads(host.plugin.id),
+  }
 
-  "rooms.join": async (host, params) => {
-    host.joinRoom(roomTarget(params), optionalNumber(params, "after") ?? 0)
-    return null
-  },
-  "rooms.leave": async (host, params) => {
-    host.leaveRoom(roomTarget(params))
-    return null
-  },
-  "rooms.publish": (host, params) =>
-    pluginsApi.publishRoom(
-      host.plugin.id,
-      roomTarget(params),
-      binary(params, "update", 1_000_000)
-    ),
-  "rooms.compact": (host, params) =>
-    pluginsApi.compactRoom(
-      host.plugin.id,
-      roomTarget(params),
-      binary(params, "snapshot", 8_000_000),
-      optionalNumber(params, "through") ?? 0
-    ),
-  "rooms.presence": async (host, params) => {
-    await pluginsApi.announceInRoom(
-      host.plugin.id,
-      roomTarget(params),
-      text(params, "client", 64),
-      binary(params, "presence", 2_900)
-    )
-    return null
-  },
+  close(): void {
+    this.#closed = true
+  }
 }
 
-/** Always settles: a request that fails validation still gets an answer. */
-export async function handleBridgeRequest(
-  host: BridgeHost,
-  method: unknown,
-  params: unknown
-): Promise<unknown> {
-  if (typeof method !== "string" || !Object.hasOwn(handlers, method))
-    throw new BridgeRequestError("unknown method", 404)
-  return handlers[method as HostMethod](host, record(params))
+/**
+ * Hands events to a plugin's callback in order. A callback that fails, or
+ * falls `backlog` events behind, is dropped and `onDrop` runs.
+ */
+class Delivery<E> {
+  #listener: RpcStub<(event: E) => void> | null
+  #inFlight = 0
+  #backlog: number
+  #onDrop: () => void
+
+  constructor(
+    listener: RpcStub<(event: E) => void>,
+    backlog: number,
+    onDrop: () => void
+  ) {
+    this.#listener = listener
+    this.#backlog = backlog
+    this.#onDrop = onDrop
+  }
+
+  send(event: E): void {
+    const listener = this.#listener
+    if (!listener) return
+    if (this.#inFlight >= this.#backlog) {
+      this.#onDrop()
+      return
+    }
+    this.#inFlight += 1
+    Promise.resolve(listener(event as never)).then(
+      () => {
+        this.#inFlight -= 1
+      },
+      () => this.#onDrop()
+    )
+  }
+
+  close(): void {
+    this.#listener?.[Symbol.dispose]()
+    this.#listener = null
+  }
+}
+
+// ---- Capabilities -------------------------------------------------------------------
+
+/** What a plugin disposes to stop a subscription or leave a room. */
+class SubscriptionTarget extends RpcTarget implements Subscription {
+  #stop: () => void
+
+  constructor(stop: () => void) {
+    super()
+    this.#stop = stop
+  }
+
+  [Symbol.dispose](): void {
+    this.#stop()
+  }
+}
+
+/** Starts `listener`'s deliveries; the returned stop ends them and frees the capability. */
+function subscription<E>(
+  budget: SessionBudget,
+  listener: unknown,
+  name: string,
+  start: (send: (event: E) => void) => () => void
+): () => void {
+  const kept = keep<E>(listener, name)
+  let release: () => void
+  try {
+    release = budget.claim()
+  } catch (error) {
+    kept[Symbol.dispose]()
+    throw error
+  }
+  let off = () => {}
+  let stopped = false
+  const stop = () => {
+    if (stopped) return
+    stopped = true
+    off()
+    delivery.close()
+    release()
+  }
+  const delivery = new Delivery<E>(kept, budget.limits.backlog, stop)
+  off = start((event) => delivery.send(event))
+  return stop
+}
+
+/** The web UI, as a plugin's frame reaches it: the session's main capability. */
+export class PluginHostApi extends RpcTarget implements HostApi {
+  #host: () => BridgeHost
+  #budget: SessionBudget
+
+  constructor(host: () => BridgeHost, budget: SessionBudget) {
+    super()
+    this.#host = host
+    this.#budget = budget
+  }
+
+  context(): Promise<HostContext> {
+    return this.#budget.run(() => this.#host().context())
+  }
+
+  subscribe(listener: (event: HostEvent) => void): Promise<Subscription> {
+    return this.#budget.run(
+      () =>
+        new SubscriptionTarget(
+          subscription<HostEvent>(this.#budget, listener, "listener", (send) =>
+            this.#host().subscribe(send)
+          )
+        )
+    )
+  }
+
+  setPath(next: string, replace: boolean): Promise<void> {
+    return this.#budget.run(() =>
+      this.#host().navigate(pluginPath(next), replace === true)
+    )
+  }
+
+  openThread(threadId: string): Promise<void> {
+    return this.#budget.run(() =>
+      this.#host().openThread(text(threadId, "threadId", 200))
+    )
+  }
+
+  openExternal(link: string): Promise<void> {
+    return this.#budget.run(async () => {
+      const url = webUrl(link)
+      if (
+        url.hostname === "github.com" ||
+        (await this.#host().confirmLink(url.toString()))
+      )
+        window.open(url.toString(), "_blank", "noopener,noreferrer")
+    })
+  }
+
+  toast(toast: Toast): Promise<void> {
+    return this.#budget.run(() => {
+      const fields = record(toast, "toast")
+      const intent = fields.intent
+      this.#host().toast({
+        title: text(fields.title, "title", 200),
+        description: optionalText(fields.description, "description", 1_000),
+        intent:
+          intent === "success" || intent === "error" || intent === "info"
+            ? intent
+            : undefined,
+      })
+    })
+  }
+
+  people(logins: Array<string>) {
+    return this.#budget.run(() => {
+      const checked = stringList(logins, "logins")
+      if (checked.length === 0 || checked.length > 100)
+        invalid("logins must name 1 to 100 people")
+      return pluginsApi.people(this.#host().plugin.id, checked)
+    })
+  }
+
+  repositories(): Promise<Array<string>> {
+    return this.#budget.run(() => [...this.#host().plugin.repositories])
+  }
+
+  pickRepositories(options: RepositoryPickOptions): Promise<Array<string>> {
+    return this.#budget.run(() => {
+      const fields = options === undefined ? {} : record(options, "options")
+      const suggested = [
+        ...new Set(
+          stringList(fields.suggested, "suggested").map((name) =>
+            repositoryName(name, "suggested")
+          )
+        ),
+      ]
+      if (suggested.length > 20) invalid("suggest at most 20 repositories")
+      const host = this.#host()
+      if (
+        suggested.length > 0 &&
+        suggested.every((name) => host.plugin.repositories.includes(name))
+      )
+        return suggested
+      return host.pickRepositories({
+        suggested,
+        multiple: fields.multiple === true,
+      })
+    })
+  }
+
+  collection(name: string, scope: DocumentScope): Promise<CollectionApi> {
+    return this.#budget.run(
+      () =>
+        new CollectionTarget(
+          this.#host,
+          this.#budget,
+          {
+            collection: pathName(name, "collection", COLLECTION),
+            repository: scopeOf(scope),
+          },
+          this.#budget.claim()
+        )
+    )
+  }
+
+  github(repository: string): Promise<GitHubRepositoryApi> {
+    return this.#budget.run(
+      () =>
+        new RepositoryTarget(
+          this.#host().plugin.id,
+          this.#budget,
+          repositoryName(repository),
+          this.#budget.claim()
+        )
+    )
+  }
+
+  startThread(request: ThreadRequest) {
+    return this.#budget.run(async () => {
+      const fields = record(request, "request")
+      const checked: ThreadRequest = {
+        repository: repositoryName(fields.repository),
+        title: text(fields.title, "title", 120),
+        request: text(fields.request, "request", 40_000),
+      }
+      const host = this.#host()
+      if (!(await host.confirmThread(checked))) return null
+      const started = await pluginsApi.startThread(host.plugin.id, checked)
+      return { threadId: started.thread_id }
+    })
+  }
+
+  threads() {
+    return this.#budget.run(() => pluginsApi.threads(this.#host().plugin.id))
+  }
+
+  joinRoom(
+    scope: RoomScope,
+    listener: (event: RoomEvent) => void,
+    after: number
+  ): Promise<RoomApi> {
+    return this.#budget.run(() => {
+      const fields = record(scope, "scope")
+      const target: RoomTarget = {
+        room: pathName(fields.room, "room", ROOM),
+        repository: scopeOf(scope) ?? undefined,
+      }
+      const from = optionalInteger(after, "after") ?? 0
+      if (from < 0) invalid("after must not be negative")
+      const leave = subscription<RoomEvent>(
+        this.#budget,
+        listener,
+        "listener",
+        (send) => this.#host().joinRoom(target, from, send)
+      )
+      return new LiveRoomTarget(
+        this.#host().plugin.id,
+        this.#budget,
+        target,
+        leave
+      )
+    })
+  }
+}
+
+/** One collection in one scope. */
+class CollectionTarget extends RpcTarget implements CollectionApi {
+  #host: () => BridgeHost
+  #budget: SessionBudget
+  #target: DocumentTarget
+  #release: () => void
+  #watches = new Set<() => void>()
+
+  constructor(
+    host: () => BridgeHost,
+    budget: SessionBudget,
+    target: DocumentTarget,
+    release: () => void
+  ) {
+    super()
+    this.#host = host
+    this.#budget = budget
+    this.#target = target
+    this.#release = release
+  }
+
+  get(key: string): Promise<StoredDocument | null> {
+    return this.#budget.run(() =>
+      pluginsApi.getDocument(
+        this.#host().plugin.id,
+        this.#target.collection,
+        pathName(key, "key", DOCUMENT_KEY),
+        this.#target.repository ?? undefined
+      )
+    )
+  }
+
+  query(options: { where?: JsonObject; limit?: number }) {
+    return this.#budget.run(() => {
+      const fields = options === undefined ? {} : record(options, "options")
+      return pluginsApi.queryDocuments(
+        this.#host().plugin.id,
+        this.#target.collection,
+        {
+          repository: this.#target.repository ?? undefined,
+          where:
+            fields.where === undefined ? {} : jsonObject(fields.where, "where"),
+          limit: optionalInteger(fields.limit, "limit"),
+        }
+      )
+    })
+  }
+
+  put(key: string, document: JsonObject): Promise<StoredDocument> {
+    return this.#budget.run(() =>
+      pluginsApi.putDocument(
+        this.#host().plugin.id,
+        this.#target.collection,
+        pathName(key, "key", DOCUMENT_KEY),
+        {
+          repository: this.#target.repository ?? undefined,
+          document: jsonObject(document, "document"),
+        }
+      )
+    )
+  }
+
+  delete(key: string): Promise<void> {
+    return this.#budget.run(async () => {
+      await pluginsApi.deleteDocument(
+        this.#host().plugin.id,
+        this.#target.collection,
+        pathName(key, "key", DOCUMENT_KEY),
+        this.#target.repository ?? undefined
+      )
+    })
+  }
+
+  watch(onChange: () => void): Promise<Subscription> {
+    return this.#budget.run(() => {
+      const stop = subscription<undefined>(
+        this.#budget,
+        onChange,
+        "onChange",
+        (send) =>
+          this.#host().watchDocuments(this.#target, () => send(undefined))
+      )
+      this.#watches.add(stop)
+      return new SubscriptionTarget(() => {
+        this.#watches.delete(stop)
+        stop()
+      })
+    })
+  }
+
+  [Symbol.dispose](): void {
+    for (const stop of this.#watches) stop()
+    this.#watches.clear()
+    this.#release()
+  }
+}
+
+/** One repository the person shared, through their own GitHub access. */
+class RepositoryTarget extends RpcTarget implements GitHubRepositoryApi {
+  #plugin: string
+  #budget: SessionBudget
+  #repository: string
+  #release: () => void
+
+  constructor(
+    plugin: string,
+    budget: SessionBudget,
+    repository: string,
+    release: () => void
+  ) {
+    super()
+    this.#plugin = plugin
+    this.#budget = budget
+    this.#repository = repository
+    this.#release = release
+  }
+
+  info() {
+    return this.#budget.run(() =>
+      pluginsApi.repository(this.#plugin, this.#repository)
+    )
+  }
+
+  ref(name: string) {
+    return this.#budget.run(() =>
+      pluginsApi.ref(this.#plugin, this.#repository, text(name, "name", 200))
+    )
+  }
+
+  tree(sha: string) {
+    return this.#budget.run(() =>
+      pluginsApi.tree(this.#plugin, this.#repository, text(sha, "sha", 40))
+    )
+  }
+
+  file(path: string, ref: string) {
+    return this.#budget.run(() =>
+      pluginsApi.file(
+        this.#plugin,
+        this.#repository,
+        text(path, "path"),
+        text(ref, "ref", 200)
+      )
+    )
+  }
+
+  history(path: string, ref: string, limit?: number) {
+    return this.#budget.run(() =>
+      pluginsApi.history(
+        this.#plugin,
+        this.#repository,
+        text(path, "path"),
+        text(ref, "ref", 200),
+        optionalInteger(limit, "limit")
+      )
+    )
+  }
+
+  createBranch(name: string, sha: string): Promise<void> {
+    return this.#budget.run(async () => {
+      await pluginsApi.createBranch(
+        this.#plugin,
+        this.#repository,
+        text(name, "name", 200),
+        text(sha, "sha", 40)
+      )
+    })
+  }
+
+  commit(request: CommitRequest): Promise<string> {
+    return this.#budget.run(() => {
+      const fields = record(request, "request")
+      return pluginsApi.commit(this.#plugin, this.#repository, {
+        branch: text(fields.branch, "branch", 200),
+        expectedHead: text(fields.expectedHead, "expectedHead", 40),
+        message: text(fields.message, "message", 10_000),
+        files: stringMap(fields.files, "files"),
+        deletions: stringList(fields.deletions, "deletions"),
+      })
+    })
+  }
+
+  findPull(head: string) {
+    return this.#budget.run(() =>
+      pluginsApi.findPull(
+        this.#plugin,
+        this.#repository,
+        text(head, "head", 200)
+      )
+    )
+  }
+
+  openPull(draft: PullRequestDraft) {
+    return this.#budget.run(() => {
+      const fields = record(draft, "draft")
+      return pluginsApi.openPull(this.#plugin, this.#repository, {
+        head: text(fields.head, "head", 200),
+        base: text(fields.base, "base", 200),
+        title: text(fields.title, "title", 256),
+        body: optionalText(fields.body, "body", 60_000),
+        draft: fields.draft === true,
+      })
+    })
+  }
+
+  [Symbol.dispose](): void {
+    this.#release()
+  }
+}
+
+/** One live room the plugin joined; disposing it leaves. */
+class LiveRoomTarget extends RpcTarget implements RoomApi {
+  #plugin: string
+  #budget: SessionBudget
+  #target: RoomTarget
+  #leave: () => void
+
+  constructor(
+    plugin: string,
+    budget: SessionBudget,
+    target: RoomTarget,
+    leave: () => void
+  ) {
+    super()
+    this.#plugin = plugin
+    this.#budget = budget
+    this.#target = target
+    this.#leave = leave
+  }
+
+  publish(update: Uint8Array): Promise<number> {
+    return this.#budget.run(() =>
+      pluginsApi.publishRoom(
+        this.#plugin,
+        this.#target,
+        binary(update, "update", 1_000_000)
+      )
+    )
+  }
+
+  compact(snapshot: Uint8Array, through: number): Promise<number> {
+    return this.#budget.run(() =>
+      pluginsApi.compactRoom(
+        this.#plugin,
+        this.#target,
+        binary(snapshot, "snapshot", 8_000_000),
+        optionalInteger(through, "through") ?? 0
+      )
+    )
+  }
+
+  presence(client: string, presence: Uint8Array): Promise<void> {
+    return this.#budget.run(async () => {
+      await pluginsApi.announceInRoom(
+        this.#plugin,
+        this.#target,
+        text(client, "client", 64),
+        binary(presence, "presence", 2_900)
+      )
+    })
+  }
+
+  [Symbol.dispose](): void {
+    this.#leave()
+  }
 }

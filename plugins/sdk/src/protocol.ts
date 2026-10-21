@@ -1,23 +1,32 @@
 /**
- * The messages an Open SWE plugin and the dashboard exchange.
+ * What an Open SWE plugin and the web UI share: the handshake, and the typed
+ * capabilities the web UI hands the plugin over Cap'n Web.
  *
- * The plugin runs in a sandboxed frame whose policy blocks its requests. The dashboard
- * hands it one end of a `MessageChannel`; every request goes over that port,
- * and the dashboard answers it by calling the backend for the person using the
- * plugin, within the permissions they granted.
+ * The plugin runs in a sandboxed frame whose policy blocks its requests. The
+ * web UI hands it one end of a `MessageChannel` and serves `HostApi` on it.
+ * Every scoped thing (a collection, a repository, a live room) is its own
+ * capability, checked when it is minted and again by the backend on every
+ * call, and released when the plugin disposes it or the frame goes away.
  */
+import type { RpcTarget } from "capnweb"
 
-export const PROTOCOL_VERSION = 1
+export const PROTOCOL_VERSION = 2
 /** The `window.postMessage` type that carries the port into the frame. */
 export const CONNECT_MESSAGE = "openswe-plugin-connect"
 /**
  * What the frame sends its parent to ask for the port, echoing the nonce the
- * dashboard put in its document; the dashboard answers only the document it
- * made, and only once.
+ * web UI put in its document; the web UI answers only the document it made,
+ * and only once.
  */
 export const HELLO_MESSAGE = "openswe-plugin-hello"
 /** The `<meta name>` holding that nonce. */
 export const NONCE_META = "openswe-plugin-nonce"
+/**
+ * Where the web UI's copy of Cap'n Web waits in the frame. The web UI runs it
+ * ahead of the plugin's own code, so both ends always speak the same version;
+ * plugins never bundle their own.
+ */
+export const RUNTIME_GLOBAL = "__opensweCapnweb"
 
 export type JsonValue =
   | string
@@ -140,208 +149,132 @@ export interface AgentThread {
   updatedAtMs: number | null
 }
 
-/** Every request a plugin may make: its params and what it resolves to. */
-export interface HostMethods {
-  "nav.setPath": { params: { path: string; replace?: boolean }; result: null }
-  "nav.openThread": { params: { threadId: string }; result: null }
-  /** Opens a github.com link in a new tab. */
-  "nav.openExternal": { params: { url: string }; result: null }
-  /** Profiles for GitHub logins, in the order asked; at most 100 per call. */
-  "people.get": { params: { logins: string[] }; result: Person[] }
-  /**
-   * The GitHub repositories (`owner/repo`, lowercase) the person shared with
-   * the plugin. It reaches no other: a call naming one fails with status 403.
-   */
-  "repositories.list": { params: Record<string, never>; result: string[] }
-  /**
-   * Asks the person to share repositories, in a picker the dashboard draws
-   * from those they can read. Resolves to the ones they chose, or `[]` when
-   * they cancel. `suggested` come preselected, such as one a shared link
-   * names; when they are already shared it resolves at once, without asking.
-   */
-  "repositories.pick": {
-    params: { suggested?: string[]; multiple?: boolean }
-    result: string[]
-  }
-  "ui.toast": {
-    params: {
-      title: string
-      description?: string
-      intent?: "success" | "error" | "info"
-    }
-    result: null
-  }
-
-  "storage.query": {
-    params: DocumentScope & {
-      collection: string
-      /** Every field listed must match the document's. */
-      where?: JsonObject
-      limit?: number
-    }
-    result: StoredDocument[]
-  }
-  "storage.get": {
-    params: DocumentScope & { collection: string; key: string }
-    result: StoredDocument | null
-  }
-  "storage.put": {
-    params: DocumentScope & {
-      collection: string
-      key: string
-      document: JsonObject
-    }
-    result: StoredDocument
-  }
-  "storage.delete": {
-    params: DocumentScope & { collection: string; key: string }
-    result: null
-  }
-  /** Sends `storage.changed` whenever someone writes a document in this collection and scope. */
-  "storage.watch": {
-    params: DocumentScope & { collection: string }
-    result: null
-  }
-  "storage.unwatch": {
-    params: DocumentScope & { collection: string }
-    result: null
-  }
-
-  "github.repository": {
-    params: { repository: string }
-    result: RepositoryInfo
-  }
-  /** The commit a branch, tag or SHA names; `null` when there is none. */
-  "github.ref": {
-    params: { repository: string; name: string }
-    result: string | null
-  }
-  "github.tree": {
-    params: { repository: string; sha: string }
-    result: RepositoryTree
-  }
-  "github.file": {
-    params: { repository: string; path: string; ref: string }
-    result: string | null
-  }
-  "github.history": {
-    params: { repository: string; path: string; ref: string; limit?: number }
-    result: Commit[]
-  }
-  "github.createBranch": {
-    params: { repository: string; name: string; sha: string }
-    result: null
-  }
-  /** Fails when `branch` moved past `expectedHead`, so no push is overwritten. */
-  "github.commit": {
-    params: {
-      repository: string
-      branch: string
-      expectedHead: string
-      message: string
-      files: Record<string, string>
-      deletions?: string[]
-    }
-    result: string
-  }
-  "github.findPull": {
-    params: { repository: string; head: string }
-    result: PullRequest | null
-  }
-  "github.openPull": {
-    params: {
-      repository: string
-      head: string
-      base: string
-      title: string
-      body?: string
-      draft?: boolean
-    }
-    result: PullRequest
-  }
-
-  /**
-   * Asks the person to approve starting an agent thread with `request`; `null`
-   * when they decline. The dashboard shows them the request word for word.
-   */
-  "threads.start": {
-    params: { repository: string; title: string; request: string }
-    result: { threadId: string } | null
-  }
-  "threads.list": { params: Record<string, never>; result: AgentThread[] }
-
-  /**
-   * Starts streaming a live room: every update after `after`, then `room.synced`,
-   * then each update and presence as others send them. Scoped like documents.
-   */
-  "rooms.join": {
-    params: RoomScope & { after?: number }
-    result: null
-  }
-  "rooms.leave": { params: RoomScope; result: null }
-  /** Appends an update to the room's log; resolves to its sequence number. */
-  "rooms.publish": {
-    params: RoomScope & { update: Uint8Array }
-    result: number
-  }
-  /** Replaces the log through `through` with `snapshot`, which must cover it. */
-  "rooms.compact": {
-    params: RoomScope & { snapshot: Uint8Array; through: number }
-    result: number
-  }
-  /** Broadcasts this member's presence (cursor, selection); nothing is stored. */
-  "rooms.presence": {
-    params: RoomScope & { client: string; presence: Uint8Array }
-    result: null
-  }
-}
-
 export interface RoomScope extends DocumentScope {
   room: string
 }
 
-export type HostMethod = keyof HostMethods
-export type ParamsOf<M extends HostMethod> = HostMethods[M]["params"]
-export type ResultOf<M extends HostMethod> = HostMethods[M]["result"]
-
-export type HostEvent =
-  | { type: "context"; context: HostContext }
-  | { type: "theme"; theme: Theme }
-  | { type: "path"; path: string }
-  | { type: "storage.changed"; collection: string; repository: string | null }
-  | {
-      type: "room.update"
-      room: string
-      repository: string | null
-      seq: number
-      update: Uint8Array
-    }
-  | {
-      type: "room.synced"
-      room: string
-      repository: string | null
-      seq: number
-    }
-  | {
-      type: "room.presence"
-      room: string
-      repository: string | null
-      client: string
-      presence: Uint8Array
-    }
-
-export type PluginMessage = {
-  kind: "request"
-  id: number
-  method: HostMethod
-  params: unknown
+export interface Toast {
+  title: string
+  description?: string
+  intent?: "success" | "error" | "info"
 }
 
-export type HostMessage =
-  | { kind: "response"; id: number; result: unknown }
-  | {
-      kind: "response"
-      id: number
-      error: { message: string; status: number | null }
-    }
-  | { kind: "event"; event: HostEvent }
+export interface RepositoryPickOptions {
+  /** Preselected, such as one a shared link names. */
+  suggested?: string[]
+  multiple?: boolean
+}
+
+export interface ThreadRequest {
+  repository: string
+  title: string
+  request: string
+}
+
+export interface CommitRequest {
+  branch: string
+  expectedHead: string
+  message: string
+  files: Record<string, string>
+  deletions?: string[]
+}
+
+export interface PullRequestDraft {
+  head: string
+  base: string
+  title: string
+  body?: string
+  draft?: boolean
+}
+
+/** What the web UI tells the plugin as it happens. */
+export type HostEvent =
+  | { type: "theme"; theme: Theme }
+  | { type: "path"; path: string }
+
+/** What a live room delivers: its log after `after`, `synced`, then each update and presence. */
+export type RoomEvent =
+  | { type: "update"; seq: number; update: Uint8Array }
+  | { type: "synced"; seq: number }
+  | { type: "presence"; client: string; presence: Uint8Array }
+
+/** Something the plugin ends by disposing it. */
+export interface Subscription extends RpcTarget {}
+
+/** The web UI, as the plugin's frame reaches it. */
+export interface HostApi extends RpcTarget {
+  context(): Promise<HostContext>
+  /** Calls `listener` as the theme or the plugin's path changes. */
+  subscribe(listener: (event: HostEvent) => void): Promise<Subscription>
+  setPath(path: string, replace: boolean): Promise<void>
+  openThread(threadId: string): Promise<void>
+  /** Opens a web link in a new tab; outside github.com, only once the person agrees. */
+  openExternal(url: string): Promise<void>
+  toast(toast: Toast): Promise<void>
+  /** Profiles for GitHub logins, in the order asked; at most 100 per call. */
+  people(logins: string[]): Promise<Person[]>
+  /**
+   * The GitHub repositories (`owner/repo`, lowercase) the person shared with
+   * the plugin. It reaches no other: a call naming one fails with status 403.
+   */
+  repositories(): Promise<string[]>
+  /**
+   * Asks the person to share repositories, in a picker the web UI draws from
+   * those they can read. Resolves to the ones they chose, or `[]` when they
+   * cancel; already-shared suggestions resolve at once, without asking.
+   */
+  pickRepositories(options: RepositoryPickOptions): Promise<string[]>
+  collection(name: string, scope: DocumentScope): Promise<CollectionApi>
+  /** One repository the person shared, acting with their own GitHub access. */
+  github(repository: string): Promise<GitHubRepositoryApi>
+  /**
+   * Asks the person to approve starting an agent thread with `request`;
+   * `null` when they decline. The web UI shows them the request word for word.
+   */
+  startThread(request: ThreadRequest): Promise<{ threadId: string } | null>
+  threads(): Promise<AgentThread[]>
+  /** Joins a live room, scoped like documents; dispose the room to leave it. */
+  joinRoom(
+    scope: RoomScope,
+    listener: (event: RoomEvent) => void,
+    after: number
+  ): Promise<RoomApi>
+}
+
+/** One collection of JSON documents in one scope. */
+export interface CollectionApi extends RpcTarget {
+  get(key: string): Promise<StoredDocument | null>
+  /** Documents that contain every field of `where`, oldest first. */
+  query(options: {
+    where?: JsonObject
+    limit?: number
+  }): Promise<StoredDocument[]>
+  put(key: string, document: JsonObject): Promise<StoredDocument>
+  delete(key: string): Promise<void>
+  /** Calls `onChange` whenever anyone writes a document here. */
+  watch(onChange: () => void): Promise<Subscription>
+}
+
+export interface GitHubRepositoryApi extends RpcTarget {
+  info(): Promise<RepositoryInfo>
+  /** The commit a branch, tag or SHA names; `null` when there is none. */
+  ref(name: string): Promise<string | null>
+  tree(sha: string): Promise<RepositoryTree>
+  file(path: string, ref: string): Promise<string | null>
+  history(path: string, ref: string, limit?: number): Promise<Commit[]>
+  createBranch(name: string, sha: string): Promise<void>
+  /** Fails when `branch` moved past `expectedHead`, so no push is overwritten. */
+  commit(request: CommitRequest): Promise<string>
+  findPull(head: string): Promise<PullRequest | null>
+  openPull(draft: PullRequestDraft): Promise<PullRequest>
+}
+
+/** One live room this plugin joined. */
+export interface RoomApi extends RpcTarget {
+  /** Appends an update to the room's log; resolves to its sequence number. */
+  publish(update: Uint8Array): Promise<number>
+  /** Replaces the log through `through` with `snapshot`, which must cover it. */
+  compact(snapshot: Uint8Array, through: number): Promise<number>
+  /** Broadcasts this member's presence (cursor, selection); nothing is stored. */
+  presence(client: string, presence: Uint8Array): Promise<void>
+}

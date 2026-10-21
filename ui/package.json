@@ -34,6 +34,7 @@
     "@tanstack/react-start": "^1.168.60",
     "@tanstack/react-virtual": "^3.14.13",
     "@tanstack/router-plugin": "^1.168.42",
+    "capnweb": "0.12.0",
     "lexical": "^0.49.0",
     "mermaid": "12.0.0",
     "monaco-editor": "^0.56.0",

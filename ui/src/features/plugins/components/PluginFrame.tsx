@@ -4,12 +4,13 @@ import {
   PROTOCOL_VERSION,
   type HostContext,
   type HostEvent,
-  type HostMessage,
+  type Person,
 } from "@openswe/plugin-sdk"
 import { Button } from "@langchain/macaw-components/Button"
 import { EmptyState } from "@langchain/macaw-components/EmptyState"
-import { useQueries, useQuery } from "@tanstack/react-query"
+import { useQueries, useQueryClient } from "@tanstack/react-query"
 import { WarningCircleIcon } from "@phosphor-icons/react/dist/ssr/WarningCircle"
+import { newMessagePortRpcSession } from "capnweb"
 import { useEffect, useEffectEvent, useMemo, useRef, useState } from "react"
 import { toast } from "sonner"
 
@@ -26,8 +27,9 @@ import type {
   ThreadRequest,
 } from "@/features/plugins/lib/bridge"
 import {
-  BridgeRequestError,
-  handleBridgeRequest,
+  PluginHostApi,
+  SessionBudget,
+  sendableError,
 } from "@/features/plugins/lib/bridge"
 import {
   PLUGIN_ALLOW,
@@ -36,28 +38,30 @@ import {
   PLUGIN_SANDBOX,
   pluginShell,
 } from "@/features/plugins/lib/shell"
-import { DashboardRequestError } from "@/lib/dashboard-fetch"
 import { invalidationTopic } from "@/lib/invalidations/topics"
 import { useSession } from "@/lib/session"
 import { useResolvedTheme } from "@/lib/theme"
 
-function errorOf(error: unknown): { message: string; status: number | null } {
-  if (error instanceof BridgeRequestError)
-    return { message: error.message, status: error.status }
-  if (error instanceof DashboardRequestError)
-    return { message: error.message, status: error.status }
-  return {
-    message: error instanceof Error ? error.message : "Request failed",
-    status: null,
-  }
+/** One connected frame: its Cap'n Web session, its allowance and its live rooms. */
+interface Connection {
+  peer: Disposable
+  budget: SessionBudget
+  rooms: PluginRooms
+}
+
+interface DocumentWatch {
+  target: DocumentTarget
+  listeners: Set<() => void>
 }
 
 /**
- * One plugin's sandboxed frame and the port it talks to the dashboard over.
+ * One plugin's sandboxed frame and the Cap'n Web session it reaches the web UI
+ * over.
  *
  * The frame is connected once. Should it load a second document, it navigated
  * itself away from the bundle, out from under its policy, so it is torn down
- * rather than handed a new port.
+ * rather than handed a new port. Tearing down ends the session, which releases
+ * every capability the plugin held and leaves every room it joined.
  */
 export function PluginFrame({
   plugin,
@@ -80,51 +84,57 @@ export function PluginFrame({
 }) {
   const session = useSession()
   const theme = useResolvedTheme()
+  const queryClient = useQueryClient()
   const frameRef = useRef<HTMLIFrameElement>(null)
-  const portRef = useRef<MessagePort | null>(null)
+  const connection = useRef<Connection | null>(null)
   const loads = useRef(0)
   const sentPath = useRef(path)
+  const listeners = useRef(new Set<(event: HostEvent) => void>())
+  const documentWatches = useRef(new Map<string, DocumentWatch>())
   const [generation, setGeneration] = useState(0)
   const [escaped, setEscaped] = useState(false)
   const [watched, setWatched] = useState<ReadonlyArray<DocumentTarget>>([])
   const [initialTheme] = useState(theme)
-  const rooms = useRef<PluginRooms | null>(null)
   const login = session.data?.login ?? ""
-  const me = useQuery({
-    queryKey: ["plugin-person", plugin.id, login],
-    queryFn: async () =>
-      (await pluginsApi.people(plugin.id, [login]))[0] ?? null,
-    enabled: Boolean(login),
-    staleTime: Infinity,
-  })
-  // A fresh nonce per mount: the dashboard answers only the document it made.
+  const userId = session.data?.user_id ?? ""
+  // A fresh nonce per mount: the web UI answers only the document it made.
   const [nonce, setNonce] = useState(() => crypto.randomUUID())
   const srcDoc = useMemo(
     () => pluginShell(html, initialTheme, nonce),
     [html, initialTheme, nonce]
   )
 
-  const post = (message: HostMessage) => portRef.current?.postMessage(message)
-  const emit = useEffectEvent((event: HostEvent) =>
-    post({ kind: "event", event })
-  )
-
-  const context = (): HostContext => ({
-    protocol: PROTOCOL_VERSION,
-    plugin: {
-      id: plugin.id,
-      name: plugin.name,
-      displayName: plugin.manifest.displayName,
-      version: plugin.manifest.version,
-      permissions: plugin.manifest.permissions,
-    },
-    user: me.data ?? { login, name: login, avatar: null },
-    theme,
-    path: sentPath.current,
-  })
+  const me = async (): Promise<Person> => {
+    const found = login
+      ? await queryClient.ensureQueryData({
+          queryKey: ["plugin-person", plugin.id, login],
+          queryFn: async () =>
+            (await pluginsApi.people(plugin.id, [login]))[0] ?? null,
+          staleTime: Infinity,
+        })
+      : null
+    return found ?? { login, name: login, avatar: null }
+  }
 
   const host: BridgeHost = {
     plugin,
+    context: async (): Promise<HostContext> => ({
+      protocol: PROTOCOL_VERSION,
+      plugin: {
+        id: plugin.id,
+        name: plugin.name,
+        displayName: plugin.manifest.displayName,
+        version: plugin.manifest.version,
+        permissions: plugin.manifest.permissions,
+      },
+      user: await me(),
+      theme,
+      path: sentPath.current,
+    }),
+    subscribe: (listener) => {
+      listeners.current.add(listener)
+      return () => listeners.current.delete(listener)
+    },
     navigate: (next, replace) => {
       sentPath.current = next
       navigate(next, replace)
@@ -142,42 +152,37 @@ export function PluginFrame({
     confirmThread,
     confirmLink,
     pickRepositories,
-    watch: (target) =>
-      setWatched((prev) =>
-        prev.some((held) => sameTarget(held, target)) ? prev : [...prev, target]
-      ),
-    unwatch: (target) =>
-      setWatched((prev) => prev.filter((held) => !sameTarget(held, target))),
-    joinRoom: (target, after) => rooms.current?.join(target, after),
-    leaveRoom: (target) => rooms.current?.leave(target),
+    watchDocuments: (target, onChange) => {
+      const key = documentsTopicKey(plugin.plugin_id, target, userId)
+      let watch = documentWatches.current.get(key)
+      if (!watch) {
+        watch = { target, listeners: new Set() }
+        documentWatches.current.set(key, watch)
+        setWatched((prev) => [...prev, target])
+      }
+      const held = watch
+      held.listeners.add(onChange)
+      return () => {
+        held.listeners.delete(onChange)
+        if (held.listeners.size > 0) return
+        documentWatches.current.delete(key)
+        setWatched((prev) => prev.filter((other) => other !== held.target))
+      }
+    },
+    joinRoom: (target, after, onEvent) =>
+      connection.current?.rooms.join(target, after, onEvent) ?? (() => {}),
   }
-
-  const receive = useEffectEvent((message: MessageEvent) => {
-    const data: unknown = message.data
-    if (
-      !data ||
-      typeof data !== "object" ||
-      !("kind" in data) ||
-      data.kind !== "request" ||
-      !("id" in data) ||
-      typeof data.id !== "number"
-    )
-      return
-    const { id } = data
-    handleBridgeRequest(
-      host,
-      "method" in data ? data.method : undefined,
-      "params" in data ? data.params : undefined
-    ).then(
-      (result) => post({ kind: "response", id, result: result ?? null }),
-      (error: unknown) => post({ kind: "response", id, error: errorOf(error) })
-    )
-  })
+  // The session outlives renders; it always reaches the latest props through this.
+  const current = useEffectEvent(() => host)
 
   const teardown = () => {
-    rooms.current?.closeAll()
-    portRef.current?.close()
-    portRef.current = null
+    const held = connection.current
+    connection.current = null
+    if (!held) return
+    held.budget.close()
+    held.rooms.closeAll()
+    held.peer[Symbol.dispose]()
+    listeners.current.clear()
   }
 
   // A second document in the frame means it navigated away from the bundle.
@@ -190,8 +195,8 @@ export function PluginFrame({
   }
 
   /**
-   * The port goes to the shell the dashboard wrote, which can only hand it to
-   * the plugin's own document: its `frame-src 'none'` keeps that frame from
+   * The port goes to the shell the web UI wrote, which can only hand it to the
+   * plugin's own document: its `frame-src 'none'` keeps that frame from
    * loading anything else. The hello must come from the shell's window,
    * echoing this mount's nonce, and the port goes once.
    */
@@ -216,21 +221,26 @@ export function PluginFrame({
     }
     if (
       data.type !== HELLO_MESSAGE ||
-      portRef.current !== null ||
+      connection.current !== null ||
       loads.current > 1
     )
       return
-    rooms.current = new PluginRooms(plugin.id, (event) => emit(event))
+    const budget = new SessionBudget()
     const channel = new MessageChannel()
-    portRef.current = channel.port1
-    channel.port1.onmessage = receive
-    channel.port1.start()
+    connection.current = {
+      peer: newMessagePortRpcSession(
+        channel.port1,
+        new PluginHostApi(current, budget),
+        { onSendError: sendableError, limits: { maxDepth: 64 } }
+      ),
+      budget,
+      rooms: new PluginRooms(plugin.id),
+    }
     frame.postMessage(
       { type: CONNECT_MESSAGE, version: PROTOCOL_VERSION },
       "*",
       [channel.port2]
     )
-    emit({ type: "context", context: context() })
   })
 
   useEffect(() => {
@@ -241,27 +251,23 @@ export function PluginFrame({
 
   useEffect(() => teardown, [])
 
-  const announceSelf = useEffectEvent(() =>
-    emit({ type: "context", context: context() })
-  )
-  useEffect(() => {
-    if (me.data) announceSelf()
-  }, [me.data])
+  const tell = useEffectEvent((event: HostEvent) => {
+    for (const listener of listeners.current) listener(event)
+  })
 
   useEffect(() => {
-    emit({ type: "theme", theme })
+    tell({ type: "theme", theme })
   }, [theme])
 
   useEffect(() => {
     if (path === sentPath.current) return
     sentPath.current = path
-    emit({ type: "path", path })
+    tell({ type: "path", path })
   }, [path])
 
-  const userId = session.data?.user_id
   const watches = useQueries({
     queries: watched.map((target) => {
-      const key = documentsTopicKey(plugin.plugin_id, target, userId ?? "")
+      const key = documentsTopicKey(plugin.plugin_id, target, userId)
       return {
         queryKey: ["plugin-watch", plugin.id, key] as const,
         queryFn: () => Date.now(),
@@ -274,12 +280,14 @@ export function PluginFrame({
   const versions = watches.map((watch) => watch.dataUpdatedAt).join(",")
   const announceChanges = useEffectEvent(() => {
     watched.forEach((target, index) => {
-      const id = documentsTopicKey(plugin.plugin_id, target, userId ?? "")
+      const key = documentsTopicKey(plugin.plugin_id, target, userId)
       const version = watches[index]?.dataUpdatedAt ?? 0
-      const before = seen.current.get(id)
-      seen.current.set(id, version)
+      const before = seen.current.get(key)
+      seen.current.set(key, version)
       if (before !== undefined && before !== version)
-        emit({ type: "storage.changed", ...target })
+        for (const onChange of documentWatches.current.get(key)?.listeners ??
+          [])
+          onChange()
     })
   })
   useEffect(() => announceChanges(), [versions])
@@ -322,8 +330,4 @@ export function PluginFrame({
       className="h-full min-h-0 flex-1"
     />
   )
-}
-
-function sameTarget(a: DocumentTarget, b: DocumentTarget): boolean {
-  return a.collection === b.collection && a.repository === b.repository
 }

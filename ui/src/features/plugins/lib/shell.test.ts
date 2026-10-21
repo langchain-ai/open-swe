@@ -1,6 +1,9 @@
 import { describe, expect, it } from "vitest"
 
+import { RUNTIME_GLOBAL } from "@openswe/plugin-sdk"
+
 import {
+  CAPNWEB_RUNTIME,
   PLUGIN_CSP,
   pluginDocument,
   pluginShell,
@@ -33,5 +36,20 @@ describe("pluginShell", () => {
     // The plugin's markup sits escaped inside srcdoc, never as shell markup.
     expect(shell).toContain("<p title=&quot;x&quot;>&amp;</p>")
     expect(shell).not.toContain('<p title="x">')
+  })
+})
+
+describe("CAPNWEB_RUNTIME", () => {
+  it("leaves the web UI's Cap'n Web for the plugin, ahead of the plugin's code", () => {
+    const frame: Record<string, unknown> = {}
+    new Function("globalThis", CAPNWEB_RUNTIME)(frame)
+    const runtime = frame[RUNTIME_GLOBAL] as Record<string, unknown>
+    expect(typeof runtime.newMessagePortRpcSession).toBe("function")
+    expect(typeof runtime.RpcTarget).toBe("function")
+
+    const html = pluginDocument("<script>start()</script>", "light", "n")
+    expect(html.indexOf(RUNTIME_GLOBAL)).toBeLessThan(
+      html.indexOf("<script>start()</script>")
+    )
   })
 })

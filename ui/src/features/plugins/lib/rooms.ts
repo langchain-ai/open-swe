@@ -1,13 +1,13 @@
 /**
  * The live rooms one plugin frame has joined. The frame cannot open a socket,
- * so the dashboard holds one SSE stream for all of them and hands what it
- * carries to the frame as events. One stream, not one per room: browsers give
+ * so the web UI holds one SSE stream for all of them and hands what it
+ * carries to each room's listener. One stream, not one per room: browsers give
  * a host only a few HTTP/1.1 connections, and every open tab needs its own.
  *
  * Joining or leaving a room reopens the stream after the last update each
  * room delivered, so the frame never misses one and never sees one twice.
  */
-import type { HostEvent } from "@openswe/plugin-sdk"
+import type { RoomEvent } from "@openswe/plugin-sdk"
 
 import type { RoomTarget } from "@/features/plugins/lib/api"
 import { fromBase64, roomsStreamUrl } from "@/features/plugins/lib/api"
@@ -18,6 +18,7 @@ const MAX_BACKOFF_MS = 15_000
 interface Joined {
   target: RoomTarget
   seq: number
+  onEvent: (event: RoomEvent) => void
 }
 
 function keyOf(room: string, repository: string | null | undefined): string {
@@ -36,22 +37,23 @@ export class PluginRooms {
   private backoff = 500
   private closed = false
 
-  constructor(
-    private readonly installationId: string,
-    private readonly emit: (event: HostEvent) => void
-  ) {}
+  constructor(private readonly installationId: string) {}
 
-  join(target: RoomTarget, after: number): void {
-    this.joined.set(keyOf(target.room, target.repository), {
-      target,
-      seq: after,
-    })
+  /** Streams `target` to `onEvent` from after `after`; returns the leave. */
+  join(
+    target: RoomTarget,
+    after: number,
+    onEvent: (event: RoomEvent) => void
+  ): () => void {
+    const key = keyOf(target.room, target.repository)
+    const joined: Joined = { target, seq: after, onEvent }
+    this.joined.set(key, joined)
     this.schedule(0)
-  }
-
-  leave(target: RoomTarget): void {
-    if (this.joined.delete(keyOf(target.room, target.repository)))
+    return () => {
+      if (this.joined.get(key) !== joined) return
+      this.joined.delete(key)
       this.schedule(0)
+    }
   }
 
   closeAll(): void {
@@ -94,10 +96,8 @@ export class PluginRooms {
       const frame = parse<RoomFrame & { seq: number; update: string }>(message)
       if (!frame) return
       frame.joined.seq = Math.max(frame.joined.seq, frame.data.seq)
-      this.emit({
-        type: "room.update",
-        room: frame.data.room,
-        repository: frame.data.repository,
+      frame.joined.onEvent({
+        type: "update",
         seq: frame.data.seq,
         update: fromBase64(frame.data.update),
       })
@@ -106,22 +106,15 @@ export class PluginRooms {
       const frame = parse<RoomFrame & { seq: number }>(message)
       if (!frame) return
       this.backoff = 500
-      this.emit({
-        type: "room.synced",
-        room: frame.data.room,
-        repository: frame.data.repository,
-        seq: frame.data.seq,
-      })
+      frame.joined.onEvent({ type: "synced", seq: frame.data.seq })
     })
     source.addEventListener("presence", (message) => {
       const frame = parse<RoomFrame & { client: string; presence: string }>(
         message
       )
       if (!frame) return
-      this.emit({
-        type: "room.presence",
-        room: frame.data.room,
-        repository: frame.data.repository,
+      frame.joined.onEvent({
+        type: "presence",
         client: frame.data.client,
         presence: fromBase64(frame.data.presence),
       })

@@ -1,7 +1,8 @@
 /**
  * What a plugin runs in: its own HTML behind a policy that blocks its
- * requests, inside a shell frame the dashboard writes. What a plugin sends
- * goes through the port the dashboard hands it, as requests the backend checks.
+ * requests, inside a shell frame the web UI writes. What a plugin sends goes
+ * through the port the web UI hands it, over the web UI's own copy of
+ * Cap'n Web, as requests the backend checks.
  *
  * The shell is there because no policy on a document stops that document
  * navigating its own frame elsewhere; its parent's `frame-src` does. The
@@ -14,8 +15,41 @@ import {
   HELLO_MESSAGE,
   NONCE_META,
   PROTOCOL_VERSION,
+  RUNTIME_GLOBAL,
   type Theme,
 } from "@openswe/plugin-sdk"
+// oxlint-disable-next-line import/default -- Vite's ?raw import is the file's text
+import CAPNWEB_MODULE from "capnweb?raw"
+
+/**
+ * An ES module with no imports, its exports gathered in one trailing
+ * `export { … }`, as a classic script that leaves those exports at
+ * `globalThis[global]`. Classic, so it runs before the plugin's own scripts,
+ * of either kind, without needing a `data:` import the policy refuses.
+ */
+export function classicScript(module: string, global: string): string {
+  const tail =
+    /export\s*\{([^}]*)\};?\s*(?:\/\/# sourceMappingURL=\S*\s*)?$/.exec(module)
+  const body = tail ? module.slice(0, tail.index) : ""
+  if (!tail || /^\s*(?:import|export)\b/m.test(body))
+    throw new Error("Cap'n Web is no longer one self-contained module")
+  const exports = (tail[1] ?? "")
+    .split(",")
+    .map((entry) => entry.trim())
+    .filter(Boolean)
+    .map((entry) => {
+      const [local, name = local] = entry.split(/\s+as\s+/)
+      return `${JSON.stringify(name)}: ${local}`
+    })
+  return (
+    `(() => {"use strict";\n${body}\n` +
+    `Object.defineProperty(globalThis, ${JSON.stringify(global)}, ` +
+    `{ value: Object.freeze({ ${exports.join(", ")} }) })\n})()`
+  ).replaceAll("</script", "<\\/script")
+}
+
+/** The web UI's Cap'n Web, run in every plugin's document ahead of its own code. */
+export const CAPNWEB_RUNTIME = classicScript(CAPNWEB_MODULE, RUNTIME_GLOBAL)
 
 export const PLUGIN_CSP = [
   "default-src 'none'",
@@ -69,6 +103,7 @@ export function pluginDocument(
     `<meta http-equiv="Content-Security-Policy" content="${PLUGIN_CSP}">` +
     `<meta name="${NONCE_META}" content="${nonce}">` +
     `<style>:root{color-scheme:${theme}}</style>` +
+    `<script>${CAPNWEB_RUNTIME}</script>` +
     html.replace(/^\s*<!doctype[^>]*>/i, "")
   )
 }
