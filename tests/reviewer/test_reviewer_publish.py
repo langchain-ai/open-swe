@@ -96,7 +96,8 @@ def _f(**overrides: Any) -> Finding:
 
 
 @pytest.fixture(autouse=True)
-def _isolate_publish_review_pr_state() -> Iterator[None]:
+def _isolate_publish_review_pr_state() -> Iterator[AsyncMock]:
+    request_human_review = AsyncMock(return_value=None)
     with (
         patch(
             "openswe.tools.publish_review.get_workspace_settings",
@@ -113,8 +114,9 @@ def _isolate_publish_review_pr_state() -> Iterator[None]:
                 side_effect=lambda thread_id, configurable: configurable.get("head_sha") or ""
             ),
         ),
+        patch("openswe.tools.publish_review.request_after_ai_review", request_human_review),
     ):
-        yield
+        yield request_human_review
 
 
 def _eval_config(**configurable: object) -> dict[str, object]:

@@ -7,6 +7,7 @@ from openswe.expedited_review.readiness import (
     Readiness,
     _latest_reviews_by_user,
     _resolve_mergeability,
+    latest_review_states,
     readiness_blockers,
 )
 from openswe.github.ci import RequiredCheck
@@ -160,6 +161,19 @@ def test_later_approval_clears_a_request_for_changes_but_a_comment_does_not() ->
     assert cleared == {"grace": "APPROVED"}
     assert standing == {"grace": "CHANGES_REQUESTED"}
     assert own == {}
+
+
+@pytest.mark.asyncio
+async def test_open_swe_approval_does_not_count_as_a_human_review() -> None:
+    pull = MagicMock(spec=PullRequestClient)
+    pull.reviews = AsyncMock(
+        return_value=[
+            {"user": {"login": "jarvis-aeteq[bot]"}, "state": "APPROVED"},
+            {"user": {"login": "grace"}, "state": "CHANGES_REQUESTED"},
+        ]
+    )
+
+    assert await latest_review_states(pull, "ada") == {"grace": "CHANGES_REQUESTED"}
 
 
 def test_graphql_answers_mergeability_that_rest_left_null() -> None:

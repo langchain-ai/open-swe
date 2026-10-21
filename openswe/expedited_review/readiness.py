@@ -17,6 +17,7 @@ from pydantic import BaseModel
 from openswe.baby_sit import aggregate_check_state
 from openswe.github.ci import CommitChecks, RequiredCheck
 from openswe.github.http import or_none
+from openswe.github.org_membership import OPEN_SWE_GITHUB_LOGINS
 from openswe.github.pull_request_status import Mergeability, PullRequestClient
 from openswe.github.pull_requests import PullRequestPayload
 
@@ -212,11 +213,18 @@ async def review_authors(pull: PullRequestClient) -> set[str] | None:
 
 
 async def latest_review_states(pull: PullRequestClient, author: str) -> dict[str, str] | None:
-    """Each non-author reviewer's latest ``APPROVED``/``CHANGES_REQUESTED``/``DISMISSED`` state."""
+    """Each non-author person's latest ``APPROVED``/``CHANGES_REQUESTED``/``DISMISSED`` state.
+
+    Open SWE's own reviews are left out: its approval never stands in for a human's.
+    """
     reviews = await or_none(pull.reviews())
     if reviews is None:
         return None
-    return _latest_reviews_by_user(reviews, author)
+    return {
+        login: state
+        for login, state in _latest_reviews_by_user(reviews, author).items()
+        if login.lower() not in OPEN_SWE_GITHUB_LOGINS
+    }
 
 
 def _resolve_mergeability(

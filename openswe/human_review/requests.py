@@ -263,6 +263,22 @@ class HumanReviewRequest(Base):
             )
 
     @classmethod
+    async def ever_for(cls, owner: str, repo: str, number: int) -> bool:
+        """Whether the pull request has had a review request of any kind, open or closed."""
+        async with postgres.session() as session:
+            found = await session.scalar(
+                select(cls.id)
+                .join(cls.pull_request)
+                .join(PullRequest.repository)
+                .where(
+                    Repository.key == f"{owner}/{repo}".lower(),
+                    PullRequest.number == number,
+                )
+                .limit(1)
+            )
+            return found is not None
+
+    @classmethod
     async def assigned_to(cls, user_id: UUID) -> list[Self]:
         """Open review requests for which Open SWE explicitly picked this person."""
         async with postgres.session() as session:
