@@ -34,6 +34,7 @@ if TYPE_CHECKING:
     from langchain_core.tools import BaseTool
     from langgraph.cache.base import BaseCache
 
+    from managed_deepagents.define_browser import BrowserDefinition
     from managed_deepagents.define_memory import MemoryDefinition
     from managed_deepagents.sandbox import SandboxDefinition
 
@@ -93,6 +94,7 @@ def define_deep_agent(
     sandbox: SandboxDefinition | Omitted | None = OMITTED,
     skills: SkillSelection | Omitted | None = OMITTED,
     memory: MemoryDefinition | Omitted | None = OMITTED,
+    browser: BrowserDefinition | Omitted | None = OMITTED,
     disable_memory: bool | None = None,
     metadata: Mapping[str, object] | None = None,
     **kwargs: Never,
@@ -100,11 +102,13 @@ def define_deep_agent(
     """Define a Managed Deep Agent.
 
     Accepts the ``create_deep_agent`` surface except platform-owned runtime
-    keys, plus selections of managed instructions, MCP servers, sandboxes, and
-    skills when returned from a factory entrypoint.
+    keys, plus selections of managed instructions, MCP servers, sandboxes,
+    skills, and the browser when returned from a factory entrypoint.
     Static exported definitions use discovered resources and cannot set those selection fields.
     An omitted selection keeps its discovered default; an empty list selects
-    none, and ``sandbox=None`` disables the discovered sandbox. ``name`` is
+    none, and ``sandbox=None`` disables the discovered sandbox (``browser=None``
+    the browser). A selected browser needs ``browser.py``, which installs
+    Stagehand in the deployment. ``name`` is
     required and becomes the graph id and default deployment name. Factory
     entries must set it with an inline string literal so ``mda build`` can read
     it without running the function.
@@ -164,7 +168,7 @@ def define_deep_agent(
     if metadata is not None:
         config["metadata"] = dict(metadata)
 
-    config.update(copy_managed_selections(instructions, mcp, sandbox, skills, memory))
+    config.update(copy_managed_selections(instructions, mcp, sandbox, skills, memory, browser))
 
     return DeepAgentDefinition(config)
 

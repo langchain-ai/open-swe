@@ -1,8 +1,8 @@
 """:func:`define_browser` — browser use for an agent's threads (Python only).
 
 The CLI discovers a root ``browser`` export in ``browser.py``; MDA then gives
-the agent a LangSmith browser and Stagehand's ``run``, ``snapshot`` and
-``screenshot`` tools.
+the agent a LangSmith browser and Stagehand's tools, as ``browser_run``,
+``browser_snapshot`` and ``browser_screenshot``.
 
     # browser.py
     from managed_deepagents import define_browser

@@ -71,6 +71,9 @@ Scope = Literal["thread", "user"]
 STAGEHAND_VERSION = "4.3.0"
 _WORKSPACE = "/workspace"  # where run code's screenshots land in the sandbox
 _INSTRUCTIONS = (
+    # The facade's text and errors name its tools `run` and so on; ours gain `browser_`.
+    "These tools are named browser_run, browser_snapshot and browser_screenshot: "
+    "call those wherever this text or an error names run, snapshot or screenshot.\n"
     f"Screenshots that run code saves go to {_WORKSPACE} in your sandbox: "
     f"`await page.screenshot({{ path: 'shots/a.png' }})` saves {_WORKSPACE}/shots/a.png."
 )
@@ -94,7 +97,9 @@ class _Session:
     artifacts: str  # where the facade writes run code's screenshots
     browser: str  # the browser's name, which a later generation may have replaced
     closing: bool = False  # run code called `browser.close()`: released after the call
-    shared: str | None = None  # the sandbox whose localhost the browser shares
+    # The sandbox whose localhost the browser shares. By handle, not name: one MDA
+    # replaces mid-run keeps its name but gets a new handle.
+    shared: SandboxBackendProtocol | None = None
 
     async def close(self) -> None:
         # Not `browser.close()`, which closes the browser. Closing Stagehand frees the
@@ -134,7 +139,7 @@ async def _release_when_idle(key: str) -> None:
 
 
 class BrowserMiddleware(AgentMiddleware):
-    """Give the agent Stagehand's ``run``, ``snapshot`` and ``screenshot`` tools."""
+    """Give the agent Stagehand's tools, named ``browser_run``, ``browser_snapshot`` and so on."""
 
     name = "mda-browser"
 
@@ -192,12 +197,14 @@ class BrowserMiddleware(AgentMiddleware):
         user's serves several threads, whose sandboxes cannot all be ``localhost``.
         """
         sandbox = _thread_sandbox(runtime) if key.startswith("thread:") else None
-        if sandbox is None or session.shared == sandbox:
+        if sandbox is None or session.shared is sandbox:
             return
         try:
-            await _share_localhost(name, sandbox)
+            await _share_localhost(name, sandbox.id)
         except Exception as err:  # noqa: BLE001 - browsing goes on; tried again next call
-            _LOG.warning("could not share sandbox %s's localhost with %s: %s", sandbox, name, err)
+            _LOG.warning(
+                "could not share sandbox %s's localhost with %s: %s", sandbox.id, name, err
+            )
             return
         session.shared = sandbox
 
@@ -222,7 +229,7 @@ class BrowserMiddleware(AgentMiddleware):
         return await handler(request.override(system_message=SystemMessage(content_blocks=blocks)))
 
     def _tools(self) -> list[BaseTool]:  # noqa: C901 - three flat tool closures
-        """The facade's tools as its hosts advertise them: names, descriptions, schemas.
+        """The facade's tools as its hosts advertise them, names prefixed ``browser_``.
 
         JSON-schema tools take their arguments unchecked, so each turns away names it
         lacks, such as the Python methods' snake_case ones.
@@ -233,7 +240,11 @@ class BrowserMiddleware(AgentMiddleware):
 
         def advertised(name: str) -> Callable[[Callable[..., Awaitable[object]]], BaseTool]:
             entry = facade[name]
-            return tool(name, description=entry["description"], args_schema=entry["inputSchema"])
+            return tool(
+                f"browser_{name}",
+                description=entry["description"],
+                args_schema=entry["inputSchema"],
+            )
 
         @advertised("run")
         async def run(
@@ -348,7 +359,7 @@ def _thread_id(runtime: ManagedToolRuntime | Runtime) -> str:
     raise RuntimeError(msg)
 
 
-def _thread_sandbox(runtime: ManagedToolRuntime) -> str | None:
+def _thread_sandbox(runtime: ManagedToolRuntime) -> SandboxBackendProtocol | None:
     """The run's sandbox once MDA has opened it; the browser never opens one.
 
     Tools see it behind a CompositeBackend, through a lazy handle made fresh for each
@@ -361,7 +372,7 @@ def _thread_sandbox(runtime: ManagedToolRuntime) -> str | None:
         backend = backend.opened()
     if not isinstance(backend, SandboxBackendProtocol) or backend.id.startswith("pending:"):
         return None
-    return backend.id
+    return backend
 
 
 def _window_name(key: str, thread: str) -> str:

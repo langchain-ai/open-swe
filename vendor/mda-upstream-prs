@@ -1,2 +1,2 @@
-967 aaa3fc4628dcdb535a31a11393c03257e034aeb9 feat(browser): browser use on Stagehand's facade tools, with simple sessions
-985 c032996ea11d373d49a7dea93f5be030c846c0fa feat(browser): share a thread's sandbox localhost with its browser
+967 e00321806d928731bb59c7d83c13afdb4d1648cd feat(browser): browser use on Stagehand's facade tools, with simple sessions
+985 3c11c28b34293782e98a6e3fb220dae155e8d05c feat(browser): share a thread's sandbox localhost with its browser
