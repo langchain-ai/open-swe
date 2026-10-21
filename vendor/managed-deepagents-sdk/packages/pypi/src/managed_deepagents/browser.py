@@ -74,6 +74,10 @@ _INSTRUCTIONS = (
     f"Screenshots that run code saves go to {_WORKSPACE} in your sandbox: "
     f"`await page.screenshot({{ path: 'shots/a.png' }})` saves {_WORKSPACE}/shots/a.png."
 )
+_SCREENSHOT_PATH = (
+    "Only if you have a sandbox: also save the image to this absolute path in it, "
+    "creating its folder, e.g. to publish it."
+)
 _LOCALHOST_NOTE = (  # a thread's browser shares its sandbox's localhost
     "Servers running in your sandbox are reachable at http://localhost:<port> "
     "(any port but 80 and 443)."
@@ -88,6 +92,7 @@ class _Session:
     stagehand: Stagehand
     tools: StagehandFacadeTools
     artifacts: str  # where the facade writes run code's screenshots
+    browser: str  # the browser's name, which a later generation may have replaced
     shared: str | None = None  # the sandbox whose localhost the browser shares
 
     async def close(self) -> None:
@@ -148,14 +153,16 @@ class BrowserMiddleware(AgentMiddleware):
                     await _release(key)  # another of the user's threads: move windows
                 if key not in _SESSIONS:
                     _SESSIONS[key] = await _open(key, window, self.idle_ttl_seconds)
-                await self._share(_SESSIONS[key], _browser_name(key), key, runtime)
+                await self._share(_SESSIONS[key], _SESSIONS[key].browser, key, runtime)
                 return await fn(_SESSIONS[key])
             except StagehandFacadeInputError as err:
                 return f"error: {err}"
             except StagehandFacadeExecutionError as err:  # thrown by run code
                 return f"error: {err.name}: {err}"
             except Exception as err:  # noqa: BLE001 - reported to the model
-                if not isinstance(err, RPCError):  # the connection may be dead
+                # The connection may be dead, unless the browser answered or the facade
+                # turned away run code that does not parse, with a plain SyntaxError.
+                if not isinstance(err, RPCError | SyntaxError):
                     await _release(key)
                 return f"error: {sanitize_error_message(f'{type(err).__name__}: {err}')}"
             finally:
@@ -202,17 +209,30 @@ class BrowserMiddleware(AgentMiddleware):
         ]
         return await handler(request.override(system_message=SystemMessage(content_blocks=blocks)))
 
-    def _tools(self) -> list[BaseTool]:
-        """The Python facade's methods as tools, with the facade's descriptions."""
-        about = {entry["name"]: entry["description"] for entry in facade_tools()}
-        about["screenshot"] += " Give an absolute `path` to also save it in your sandbox."
+    def _tools(self) -> list[BaseTool]:  # noqa: C901 - three flat tool closures
+        """The facade's tools as its hosts advertise them: names, descriptions, schemas.
 
-        @tool(description=about["run"])
+        JSON-schema tools take their arguments unchecked, so each turns away names it
+        lacks, such as the Python methods' snake_case ones.
+        """
+        facade = {entry["name"]: entry for entry in facade_tools()}
+        path = {"type": "string", "description": _SCREENSHOT_PATH}
+        facade["screenshot"]["inputSchema"]["properties"]["path"] = path
+
+        def advertised(name: str) -> Callable[[Callable[..., Awaitable[object]]], BaseTool]:
+            entry = facade[name]
+            return tool(name, description=entry["description"], args_schema=entry["inputSchema"])
+
+        @advertised("run")
         async def run(
             runtime: ManagedToolRuntime,
             code: str | None = None,
             actions: list[dict[str, Any]] | None = None,
+            **unexpected: object,
         ) -> str:
+            if unexpected:
+                return _unexpected(unexpected)
+
             async def go(session: _Session) -> str:
                 try:
                     value = await session.tools.run(code=code, actions=actions)
@@ -222,23 +242,32 @@ class BrowserMiddleware(AgentMiddleware):
 
             return await self._call(runtime, go)
 
-        @tool(description=about["snapshot"])
-        async def snapshot(runtime: ManagedToolRuntime, include_iframes: bool = True) -> str:
+        @advertised("snapshot")
+        async def snapshot(
+            runtime: ManagedToolRuntime,
+            includeIframes: bool = True,  # noqa: N803 - the facade's name
+            **unexpected: object,
+        ) -> str:
+            if unexpected:
+                return _unexpected(unexpected)
             return await self._call(
-                runtime, lambda s: s.tools.snapshot(include_iframes=include_iframes)
+                runtime, lambda s: s.tools.snapshot(include_iframes=includeIframes)
             )
 
-        @tool(description=about["screenshot"])
+        @advertised("screenshot")
         async def screenshot(
             runtime: ManagedToolRuntime,
-            full_page: bool | None = None,
+            fullPage: bool | None = None,  # noqa: N803 - the facade's name
             type: Literal["png", "jpeg"] = "png",
             quality: float | None = None,
             path: str | None = None,
+            **unexpected: object,
         ) -> list[dict[str, str]] | str:
+            if unexpected:
+                return _unexpected(unexpected)
             shot = await self._call(
                 runtime,
-                lambda s: s.tools.screenshot(full_page=full_page, type=type, quality=quality),
+                lambda s: s.tools.screenshot(full_page=fullPage, type=type, quality=quality),
             )
             if isinstance(shot, str):
                 return shot
@@ -249,6 +278,11 @@ class BrowserMiddleware(AgentMiddleware):
             return [{"type": "text", "text": text}, image]
 
         return [run, snapshot, screenshot]
+
+
+def _unexpected(arguments: dict[str, object]) -> str:
+    names = ", ".join(repr(name) for name in arguments)
+    return f"error: unexpected argument{'s' if len(arguments) > 1 else ''} {names}."
 
 
 async def _save_artifacts(runtime: ManagedToolRuntime, root: Path) -> list[str]:
@@ -325,15 +359,53 @@ def _window_name(key: str, thread: str) -> str:
     return f"mda-{hashlib.sha256(thread.encode()).hexdigest()[:16]}"
 
 
-def _browser_name(key: str) -> str:
-    """``key``'s browser, under the deployment's prefix like its sandboxes."""
+def _browser_name(key: str, generation: int = 0) -> str:
+    """``key``'s browser, under the deployment's prefix like its sandboxes.
+
+    A later ``generation`` replaces a browser that is being deleted or broke.
+    """
+    scope = f"browser:{key}" if generation == 0 else f"browser:{key}:{generation}"
     if deployment := _managed_deployment_name():
-        return _managed_sandbox_name(deployment, f"browser:{key}")
-    return f"mda-{hashlib.sha256(key.encode()).hexdigest()[:16]}"
+        return _managed_sandbox_name(deployment, scope)
+    return f"mda-{hashlib.sha256(scope.encode()).hexdigest()[:16]}"
+
+
+async def _usable_browser(
+    api: httpx.AsyncClient,
+    sandboxes: AsyncSandboxClient,
+    browsers: str,
+    key: str,
+    idle_ttl_seconds: int,
+) -> tuple[str, AsyncSandbox]:
+    """``key``'s browser, created or started as needed, and its sandbox.
+
+    A browser that is being deleted, or broke, can't be used or recreated under
+    its name, so ``key`` moves on to its next generation.
+    """
+    for generation in range(_BROWSER_GENERATIONS):
+        name = _browser_name(key, generation)
+        try:
+            # HiDPI renders at twice the resolution, so a person watching or driving
+            # the window sees it sharp; it can only be chosen at creation.
+            create = {"name": name, "idle_ttl_seconds": idle_ttl_seconds, "hidpi": True}
+            await api.post(browsers, json=create)
+        except httpx.HTTPStatusError as err:
+            if err.response.status_code != httpx.codes.CONFLICT:  # conflict: it exists
+                raise
+        box = await sandboxes.get_sandbox(name)
+        if box.status in _UNUSABLE:
+            continue
+        if box.status == "stopped":
+            box = await sandboxes.start_sandbox(name, timeout=300) or box
+        return name, box
+    msg = "could not find or create a usable browser"
+    raise RuntimeError(msg)
 
 
 # --- LangSmith: create the browser, put Stagehand's extension on it, connect -------
 
+_BROWSER_GENERATIONS = 5
+_UNUSABLE = {"deleting", "deleted", "failed", "error"}  # browser states to move past
 _EXTENSION_DIR = f"/var/lib/browserd/extensions/stagehand-{STAGEHAND_VERSION}"
 _EXTENSION_ZIP = "/tmp/mda-stagehand.zip"  # noqa: S108 - in the browser sandbox
 _WINDOWS_FILE = "/var/lib/browserd/attachments.json"  # browserd's windows and their ports
@@ -353,7 +425,6 @@ async def _open(key: str, window_name: str, idle_ttl_seconds: int) -> _Session:
     The client reaches Chrome through the API's CDP proxy; the extension, inside the
     browser sandbox, dials the window's local port.
     """
-    name = _browser_name(key)
     url, headers = _api()
     browsers = f"{url}/browsers"
 
@@ -361,14 +432,7 @@ async def _open(key: str, window_name: str, idle_ttl_seconds: int) -> _Session:
         httpx.AsyncClient(headers=headers, timeout=90, event_hooks={"response": [_raise]}) as api,
         AsyncSandboxClient(api_key=headers["X-Api-Key"], headers=headers) as sandboxes,
     ):
-        try:
-            await api.post(browsers, json={"name": name, "idle_ttl_seconds": idle_ttl_seconds})
-        except httpx.HTTPStatusError as err:
-            if err.response.status_code != httpx.codes.CONFLICT:  # conflict: it exists
-                raise
-        box = await sandboxes.get_sandbox(name)
-        if box.status == "stopped":
-            box = await sandboxes.start_sandbox(name, timeout=300) or box
+        name, box = await _usable_browser(api, sandboxes, browsers, key, idle_ttl_seconds)
         await _install_extension(box)
         await api.post(f"{browsers}/{name}/extensions/load")  # a no-op once loaded
         windows = (await api.get(f"{browsers}/{name}")).json().get("attachments") or []
@@ -383,14 +447,14 @@ async def _open(key: str, window_name: str, idle_ttl_seconds: int) -> _Session:
 
     local_url = f"ws://127.0.0.1:{port}/devtools/browser/{window['id']}"
     try:
-        return await _connect(key, window_name, cdp_url, local_url, headers)
+        return await _connect(key, window_name, name, cdp_url, local_url, headers)
     except Exception as err:
         if "already initialized" not in str(err):
             raise
     # A client that never closed (a crash, another replica) left its claim in the
     # extension; reinstalling it clears the claim without restarting Chrome.
     await _reinstall_extension(cdp_url, headers)
-    return await _connect(key, window_name, cdp_url, local_url, headers)
+    return await _connect(key, window_name, name, cdp_url, local_url, headers)
 
 
 async def _share_localhost(name: str, sandbox: str) -> None:
@@ -429,7 +493,7 @@ async def _raise(response: httpx.Response) -> None:
 
 
 async def _connect(
-    key: str, window: str, cdp_url: str, local_url: str, headers: dict[str, str]
+    key: str, window: str, browser_name: str, cdp_url: str, local_url: str, headers: dict[str, str]
 ) -> _Session:
     browser = await local_browser.connect(
         cdp_url=cdp_url, extension_cdp_url=local_url, headers=headers
@@ -452,7 +516,7 @@ async def _connect(
     # cannot see (another thread's, or the shared localhost one), and `set_active_page`
     # does not move headless Chrome's focus. It has no hook for the page, so name ours.
     tools._active_page = lambda: _newest_tab(browser.context)  # ty: ignore[invalid-assignment]  # noqa: SLF001
-    return _Session(window, stagehand, tools, artifacts)
+    return _Session(window, stagehand, tools, artifacts, browser_name)
 
 
 async def _newest_tab(context: BrowserContext) -> Page:
