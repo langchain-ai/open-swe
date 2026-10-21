@@ -1,20 +1,12 @@
 """Browser use for a managed agent: Stagehand's facade tools on a LangSmith browser.
 
-Each thread gets its own LangSmith browser, named after the deployment and
-thread so ``mda delete`` finds it. The Stagehand client lives in this process
-and drives a window of that browser through the LangSmith API's CDP proxy (the
-window's ``api_cdp_url``). The client is released after every run; the browser,
-its tabs and its logins stay until it idles out.
-
-Stagehand's engine is a Chrome extension. The first open puts Stagehand's in
-browserd's extensions directory and asks browserd to load it into the running
-Chrome. The extension then dials Chrome from inside the browser sandbox, on the
-window's own port.
-
-The tools are Stagehand's facade (``stagehand-middleware``): ``run`` code gets a
-Playwright-shaped ``page``, ``context`` and ``browser``, and the tools'
-descriptions and schemas are the facade's own. Screenshots run code saves go to
-the agent's sandbox, under ``/workspace``.
+Each thread gets a LangSmith browser named after the deployment and thread, so
+``mda delete`` finds it. The Stagehand client lives in this process and drives
+one window of it through the API's CDP proxy. Stagehand's engine is a Chrome
+extension, which MDA installs into the browser and which dials Chrome on the
+window's own port. The tools are the facade's (``stagehand-middleware``), with
+its descriptions and schemas. Screenshots run code saves go to the agent's
+sandbox, under ``/workspace``.
 
     # browser.py
     browser = define_browser(scope="user")
@@ -41,41 +33,62 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Literal, TypedDict, TypeVar, cast
 
 import httpx
+import websockets
 from deepagents.backends import CompositeBackend
 from deepagents.backends.protocol import SandboxBackendProtocol
 from langchain.agents.middleware import AgentMiddleware
 from langchain.tools import BaseTool, tool
+from langchain_core.messages import SystemMessage
+from langsmith.sandbox import AsyncSandboxClient
+from langsmith.utils import get_env_var
+from stagehand import Stagehand, get_extension_archive, local_browser
+from stagehand.browser import _invalidate_browser
+from stagehand.rpc_client import RPCError
+from stagehand_middleware.facade import (
+    StagehandFacadeExecutionError,
+    StagehandFacadeInputError,
+    StagehandFacadeTools,
+    facade_instructions,
+    facade_tools,
+)
 
-from managed_deepagents._managed_tools import ManagedToolRuntime
 from managed_deepagents.identity import ManagedServerInfo
+from managed_deepagents.runtime import (
+    _LazyManagedSandboxBackend,
+    _managed_deployment_name,
+    _managed_sandbox_name,
+)
 
 if TYPE_CHECKING:
     from collections.abc import Awaitable, Callable
 
     from langchain.agents.middleware.types import AgentState, ModelRequest, ModelResponse
     from langchain_core.messages import ContentBlock
-    from langchain_core.runnables import RunnableConfig
     from langgraph.runtime import Runtime
     from langsmith.sandbox import AsyncSandbox
-    from stagehand import Page, Stagehand, StagehandBrowser
-    from stagehand_middleware.facade import StagehandFacadeTools
+    from stagehand import Page, StagehandBrowser
     from websockets.asyncio.client import ClientConnection
+
+    from managed_deepagents._managed_tools import ManagedToolRuntime
 
 T = TypeVar("T")
 Scope = Literal["thread", "user"]
 
-#: The deployment's client and the browser's extension must be the same release;
-#: ``mda`` adds this pin to the deployment's dependencies.
+#: The client and the browser's extension must be the same release; ``mda`` pins it.
 STAGEHAND_VERSION = "4.3.0"
 
-#: Where screenshots run code saves land in the agent's sandbox; run code names
-#: them by paths relative to it.
+#: Where run code's screenshots land in the sandbox; run code names them relative to it.
 _WORKSPACE = "/workspace"
 _SCREENSHOT_PATH = (
     "Only if you have a sandbox: also save the image to this absolute path in it, "
     "creating its folder, e.g. to publish it."
 )
-#: What the model needs on top of the facade's own instructions.
+#: A thread browser's, on top: it shares its sandbox's localhost.
+LOCALHOST_NOTE = (
+    "Servers running in your sandbox are reachable at http://localhost:<port> "
+    "(any port but 80 and 443)."
+)
+#: What the model needs on top of the facade's instructions.
 _INSTRUCTIONS = (
     f"Screenshots that run code saves go to {_WORKSPACE} in your sandbox. Give them a "
     "relative path: `await page.screenshot({ path: 'shots/home.png' })` saves "
@@ -85,30 +98,20 @@ _INSTRUCTIONS = (
 
 _EXTENSIONS_DIR = "/var/lib/browserd/extensions"
 _EXTENSION_DIR = f"{_EXTENSIONS_DIR}/stagehand-{STAGEHAND_VERSION}"
+_EXTENSION_ZIP = "/tmp/mda-stagehand-extension.zip"  # noqa: S108 - in the browser sandbox, not here
+_STAGEHAND_EXTENSION = "Stagehand Runtime"  # its manifest name
 #: browserd's windows, each with the port it serves inside the browser sandbox.
 _WINDOWS_FILE = "/var/lib/browserd/attachments.json"
 _WINDOW_NAME = "mda"
 #: The window that shares the thread's sandbox's localhost with every window.
 _LOCALHOST_WINDOW = "mda-localhost"
-#: The extension's manifest name, which tells it from other loaded extensions.
-_STAGEHAND_EXTENSION = "Stagehand Runtime"
 _CDP_TIMEOUT_S = 30
 _HTTP_TIMEOUT = httpx.Timeout(90.0)  # creating a browser waits for Chrome
 _SETUP_TIMEOUT_S = 300
 _LOG = logging.getLogger("mda.browser")
 
-_EXTENSION_ZIP = "/tmp/mda-stagehand-extension.zip"  # noqa: S108 - in the browser sandbox, not here
-
-#: Ours, in a thread browser's instructions: it shares its sandbox's localhost.
-LOCALHOST_NOTE = (
-    "Servers running in your sandbox are reachable at http://localhost:<port> "
-    "(any port but 80 and 443)."
-)
-
 
 class _Attachment(TypedDict):
-    """A browser window, as the browsers API describes it."""
-
     id: str
     name: str
     api_cdp_url: str
@@ -120,44 +123,37 @@ class _SavedWindow(TypedDict):
 
 
 class _SavedWindows(TypedDict, total=False):
-    """browserd's saved windows file."""
-
     attachments: list[_SavedWindow]
 
 
 @dataclass
 class _Session:
-    """Stagehand attached to a thread's window, and the facade's tools over it."""
+    """Stagehand on a browser's window, and the facade's tools over it."""
 
     browser: StagehandBrowser
     stagehand: Stagehand
     facade: StagehandFacadeTools = field(init=False)
-    #: A folder of this process where run code's screenshots wait to go to the sandbox.
+    #: Where run code's screenshots wait to go to the sandbox, never this process's cwd.
     artifacts: str = field(init=False)
-    #: Run code called `browser.close()`: release this client once the call is done.
+    #: Run code called `browser.close()`: release this client after the call.
     close_requested: bool = False
     #: The thread whose own tab the tools act on, in a browser threads share.
     thread: str | None = None
     shared: str | None = None  # the sandbox whose localhost the browser shares
 
     def __post_init__(self) -> None:
-        from stagehand_middleware.facade import StagehandFacadeTools  # noqa: PLC0415
-
         self.artifacts = tempfile.mkdtemp(prefix="mda-browser-")
         self.facade = StagehandFacadeTools(
             self.stagehand,
             artifact_root=self.artifacts,
-            on_close_requested=self._request_close,
+            on_close_requested=self._request_close,  # the default closes the browser
             quiet_wait=True,
         )
-        # The facade acts on Chrome's focused tab, but a LangSmith browser has a window
-        # per attachment (the agent's, the shared localhost's), and headless Chrome keeps
-        # focus on the newest, whose tab this client cannot see. So we name the tab;
-        # the facade has no hook for it.
+        # The facade acts on Chrome's focused tab, which is often another window's (the
+        # shared localhost one) that this client cannot see. It has no hook for this.
         self.facade._active_page = self.tab  # ty: ignore[invalid-assignment]  # noqa: SLF001
 
     async def _request_close(self) -> None:
-        # In place of the facade's own cleanup, which closes the browser itself.
         self.close_requested = True
 
     async def tab(self) -> Page:
@@ -169,56 +165,49 @@ class _Session:
         return pages[-1] if pages else await context.new_page()
 
     async def page(self, thread: str) -> Page:
-        """``thread``'s own tab of a browser threads share."""
+        """``thread``'s own tab of a browser threads share, opened on its first call."""
         context = self.browser.context
         pages = await context.pages()
         tab = next((p for p in pages if p.page_id == _TABS.get(thread)), None)
-        if tab is None:  # its first call, or its tab is gone
+        if tab is None:
             tab = await context.new_page()
             await _close_stalest(pages, _TABS_PER_BROWSER - 1)
         _remember_tab(thread, tab.page_id)
         return tab
 
     async def close(self) -> None:
-        # Never `browser.close()`: on a browser we attached to it sends
-        # `Browser.close`. Closing Stagehand frees the extension for the next client.
+        # Never `browser.close()`, which closes the browser itself.
         with contextlib.suppress(Exception):  # best effort
             await asyncio.wait_for(self.stagehand.close(), 3)
         await _drop(self.browser)
         shutil.rmtree(self.artifacts, ignore_errors=True)
 
 
-#: Each thread's tab in a browser threads share, by Stagehand page ID: the tab's
-#: CDP target ID, which outlives our connection. Kept to the most recent threads.
+#: Each thread's tab by Stagehand page ID (its CDP target ID, which outlives our
+#: connection), most recent last.
 _TABS: dict[str, str] = {}
 _MAX_TABS = 1024
-#: Tabs a shared browser keeps open; a thread whose tab was closed gets a new one.
 _TABS_PER_BROWSER = 10
 
 
 def _remember_tab(thread: str, page_id: str) -> None:
-    _TABS.pop(thread, None)  # most recent last, so the cap drops the stalest
+    _TABS.pop(thread, None)
     _TABS[thread] = page_id
     if len(_TABS) > _MAX_TABS:
         del _TABS[next(iter(_TABS))]
 
 
 async def _close_stalest(pages: list[Page], keep: int) -> None:
-    """Close all but ``keep`` of ``pages``: tabs no thread here uses, then the least recent."""
+    """Close all but ``keep`` of ``pages``: untracked tabs first, then the least recent."""
     recency = {page_id: i for i, page_id in enumerate(_TABS.values())}
     stalest = sorted(pages, key=lambda page: recency.get(page.page_id, -1))
     for page in stalest[: max(len(pages) - keep, 0)]:
-        with contextlib.suppress(Exception):  # best effort: it may be gone already
+        with contextlib.suppress(Exception):  # it may be gone already
             await page.close()
 
 
 async def _drop(browser: StagehandBrowser) -> None:
-    """Close our CDP connection to ``browser``, without `Browser.close`.
-
-    Stagehand (4.3.0 too) leaves it open, and an open connection holds the browser in use.
-    """
-    from stagehand.browser import _invalidate_browser  # noqa: PLC0415 - no public equivalent
-
+    """Close our CDP connection, which Stagehand leaves open and which holds the browser."""
     with contextlib.suppress(Exception):  # best effort
         await asyncio.wait_for(_invalidate_browser(browser), 3)
 
@@ -226,8 +215,8 @@ async def _drop(browser: StagehandBrowser) -> None:
 def _browser_key(runtime: ManagedToolRuntime | Runtime, scope: Scope) -> str:
     """Whose browser this run uses: its thread's, or its signed-in person's.
 
-    A service principal, such as a schedule's, is shared by all of its runs, so
-    under user scope each of those runs gets its thread's browser instead.
+    A service principal, such as a schedule's, is shared by all its runs, so each
+    of them gets its thread's browser.
     """
     if scope == "thread":
         return f"thread:{_thread_id(runtime)}"
@@ -242,28 +231,14 @@ def _browser_key(runtime: ManagedToolRuntime | Runtime, scope: Scope) -> str:
 
 
 def _thread_id(runtime: ManagedToolRuntime | Runtime) -> str:
-    """The run's thread: tools carry it on ``runtime.config``, agent hooks ambiently."""
-    from langgraph.config import get_config  # noqa: PLC0415
-
-    sources: list[RunnableConfig] = []
-    if isinstance(runtime, ManagedToolRuntime):
-        sources.append(runtime.config)
-    with contextlib.suppress(RuntimeError):  # outside a graph run
-        sources.append(get_config())
-    for config in sources:
-        if thread_id := config.get("configurable", {}).get("thread_id"):
-            return str(thread_id)
+    if (info := runtime.execution_info) and info.thread_id:
+        return str(info.thread_id)
     msg = "browser use needs a thread_id"
     raise RuntimeError(msg)
 
 
 def _browser_name(key: str) -> str:
     """The browser for ``key``, under the deployment's prefix like its sandboxes."""
-    from managed_deepagents.runtime import (  # noqa: PLC0415
-        _managed_deployment_name,
-        _managed_sandbox_name,
-    )
-
     if deployment := _managed_deployment_name():
         return _managed_sandbox_name(deployment, f"browser:{key}")
     return f"mda-browser-{hashlib.sha256(key.encode()).hexdigest()[:16]}"
@@ -271,8 +246,6 @@ def _browser_name(key: str) -> str:
 
 def _credentials() -> dict[str, str]:
     """The deployment's LangSmith API key, and the workspace MDA scopes to."""
-    from langsmith.utils import get_env_var  # noqa: PLC0415
-
     api_key = get_env_var("API_KEY")
     if not api_key:
         msg = "browser use needs the deployment's LangSmith API key"
@@ -284,15 +257,11 @@ def _credentials() -> dict[str, str]:
 
 
 def _sandboxes_url() -> str:
-    """The LangSmith sandboxes API, at the endpoint the SDK's sandbox client uses."""
-    from langsmith.utils import get_env_var  # noqa: PLC0415
-
     endpoint = get_env_var("ENDPOINT") or "https://api.smith.langchain.com"
     return f"{endpoint.rstrip('/')}/v2/sandboxes"
 
 
 def _browsers_url() -> str:
-    """The LangSmith browsers API (beta)."""
     return f"{_sandboxes_url()}/browsers"
 
 
@@ -307,9 +276,7 @@ def _check(resp: httpx.Response, action: str) -> httpx.Response:
 
 
 async def _open(name: str, idle_ttl_seconds: int) -> _Session:
-    """Attach Stagehand to the window of browser ``name``, creating either as needed."""
-    from langsmith.sandbox import AsyncSandboxClient  # noqa: PLC0415
-
+    """Attach Stagehand to browser ``name``'s window, creating either as needed."""
     credentials = _credentials()
     tenant = {"X-Tenant-Id": credentials["tenant_id"]} if "tenant_id" in credentials else {}
     headers = {"X-Api-Key": credentials["api_key"], **tenant}
@@ -329,8 +296,7 @@ async def _open(name: str, idle_ttl_seconds: int) -> _Session:
             box = await sandboxes.start_sandbox(name, timeout=_SETUP_TIMEOUT_S) or box
 
         await _install_extension(box)
-        # Load it into the running Chrome. A no-op once it is loaded, so calling it on
-        # every open also heals a browser whose earlier load never happened.
+        # A no-op once loaded, so loading on every open heals a browser whose load failed.
         _check(await api.post(f"{base}/extensions/load"), "load the Stagehand extension")
 
         found = _check(await api.get(base), "look up the browser").json().get("attachments")
@@ -351,11 +317,9 @@ async def _open(name: str, idle_ttl_seconds: int) -> _Session:
 def _thread_sandbox(runtime: ManagedToolRuntime) -> str | None:
     """The run's sandbox once MDA has opened it; the browser never opens one.
 
-    Tools see the sandbox behind a CompositeBackend, through a lazy handle made fresh
-    for each run, so the handle asks the process whether the box is open.
+    Tools see it behind a CompositeBackend, through a lazy handle made fresh for each
+    run, so the handle asks the process whether the box is open.
     """
-    from managed_deepagents.runtime import _LazyManagedSandboxBackend  # noqa: PLC0415
-
     backend: object = runtime.backend
     while isinstance(backend, CompositeBackend):
         backend = backend.default
@@ -367,7 +331,7 @@ def _thread_sandbox(runtime: ManagedToolRuntime) -> str | None:
 
 
 def _localhost_alias(sandbox_id: str) -> str:
-    """The browser's host for a sandbox's localhost: ``sb-`` and its id in lowercase base32."""
+    """The browser's host for a sandbox's localhost: ``sb-`` and its id in base32."""
     label = base64.b32encode(uuid.UUID(sandbox_id).bytes).decode().rstrip("=").lower()
     return f"sb-{label}.localhost"
 
@@ -375,10 +339,9 @@ def _localhost_alias(sandbox_id: str) -> str:
 async def _share_localhost(name: str, sandbox: str) -> None:
     """Let browser ``name`` open ``sandbox``'s servers at ``http://localhost:<port>``.
 
-    One window attached with ``share_localhost`` serves every window of the
-    browser, so this adds one beside the agent's instead of reopening it. A
-    sandbox replaced under the same name keeps the window's ``sandbox`` but not
-    its id, so the window is checked by the id its ``localhost_alias`` names.
+    One window attached with ``share_localhost`` serves the whole browser. A sandbox
+    MDA replaced under the same name keeps the window's ``sandbox`` but not its id,
+    so the window is checked by the id its ``localhost_alias`` names.
     """
     credentials = _credentials()
     tenant = {"X-Tenant-Id": credentials["tenant_id"]} if "tenant_id" in credentials else {}
@@ -400,19 +363,15 @@ async def _share_localhost(name: str, sandbox: str) -> None:
 
 
 async def _install_extension(box: AsyncSandbox) -> None:
-    """Put the client's own Stagehand extension on the browser's disk, unless it is there.
+    """Unpack the client's Stagehand extension on the browser's disk, unless it is there.
 
-    Chrome loads extensions only from its own filesystem, so the archive is
-    written into the browser sandbox and unpacked there.
+    Chrome loads extensions only from its own filesystem.
     """
-    from stagehand import get_extension_archive  # noqa: PLC0415
-
     present = await box.run(f"test -f {_EXTENSION_DIR}/manifest.json", timeout=_SETUP_TIMEOUT_S)
     if present.exit_code == 0:
         return
     await box.write(_EXTENSION_ZIP, get_extension_archive(), timeout=_SETUP_TIMEOUT_S)
-    # Unpacked beside its folder, then moved in, so a half-unpacked copy never
-    # passes the manifest check above.
+    # Unpacked beside its folder, then moved in, so a half-unpacked copy never passes.
     unpacked = await box.run(
         f"rm -rf {_EXTENSION_DIR} {_EXTENSION_DIR}.tmp && mkdir -p {_EXTENSIONS_DIR} && "
         f"python3 -m zipfile -e {_EXTENSION_ZIP} {_EXTENSION_DIR}.tmp && "
@@ -429,10 +388,8 @@ async def _attach(cdp_url: str, local_url: str, headers: dict[str, str]) -> _Ses
     try:
         return await _connect(cdp_url, local_url, headers)
     except Exception as err:
-        # A client that never released (a crash, a reload, a browser resumed
-        # mid-session) leaves its claim in the extension's service worker. It
-        # outlives the client, and reloading the extension in place disables it;
-        # uninstalling and loading it again clears the claim.
+        # A client that never released (a crash, a reload) leaves its claim in the
+        # extension's service worker; reinstalling the extension clears it.
         if "already initialized" not in str(err):
             raise
     await _reinstall_stagehand(cdp_url, headers)
@@ -442,11 +399,8 @@ async def _attach(cdp_url: str, local_url: str, headers: dict[str, str]) -> _Ses
 async def _connect(cdp_url: str, local_url: str, headers: dict[str, str]) -> _Session:
     """Connect through the API's CDP proxy and start Stagehand, or drop the connection.
 
-    The extension runs inside the browser sandbox, so it dials Chrome on the
-    window's local port rather than the API's URL.
+    The extension runs in the browser sandbox, so it dials the window's local port.
     """
-    from stagehand import Stagehand, local_browser  # noqa: PLC0415
-
     browser = await local_browser.connect(
         cdp_url=cdp_url, extension_cdp_url=local_url, headers=headers
     )
@@ -480,13 +434,10 @@ class _CDP:
 
 
 async def _reinstall_stagehand(cdp_url: str, headers: dict[str, str]) -> None:
-    """Uninstall Stagehand's extension and load it again from its folder, over CDP.
+    """Uninstall Stagehand's extension and load it again, which ends its claim.
 
-    That ends its service worker and the claim it holds. browserd's
-    /extensions/load does not reload an extension it already loaded once.
+    browserd's /extensions/load does not reload an extension it loaded once.
     """
-    import websockets  # noqa: PLC0415 - installed with stagehand, which is imported lazily
-
     async with (
         asyncio.timeout(_CDP_TIMEOUT_S),
         websockets.connect(cdp_url, additional_headers=headers) as connection,
@@ -503,26 +454,13 @@ async def _reinstall_stagehand(cdp_url: str, headers: dict[str, str]) -> None:
 
 
 def _from_the_browser(err: Exception) -> bool:
-    """Whether a live session reported ``err``: code that threw, a page that failed, bad input.
-
-    Any other error may mean the session died.
-    """
-    from stagehand.rpc_client import RPCError  # noqa: PLC0415
-    from stagehand_middleware.facade import (  # noqa: PLC0415
-        StagehandFacadeExecutionError,
-        StagehandFacadeInputError,
-    )
-
-    return isinstance(err, (RPCError, StagehandFacadeExecutionError, StagehandFacadeInputError))
+    """Whether a live session reported ``err``; any other error may mean it died."""
+    errors = (RPCError, StagehandFacadeExecutionError, StagehandFacadeInputError)
+    return isinstance(err, errors)
 
 
 def _describe(err: Exception) -> str:
-    """``err`` for the model: the facade's own messages as they are, others with their type."""
-    from stagehand_middleware.facade import (  # noqa: PLC0415
-        StagehandFacadeExecutionError,
-        StagehandFacadeInputError,
-    )
-
+    """``err`` for the model: the facade's messages as they are, others with their type."""
     if isinstance(err, StagehandFacadeInputError):
         return str(err)
     if isinstance(err, StagehandFacadeExecutionError):  # thrown by run code: its JS name
@@ -544,16 +482,15 @@ async def _window_port(box: AsyncSandbox, window_id: str) -> int:
     raise RuntimeError(msg)
 
 
-#: Release a browser's client after this long without a call. A run that raises
-#: or pauses on an interrupt never reaches `aafter_agent`, and an open client
-#: holds its browser in use, so the browser would never idle out.
+#: Release a client after this long without a call. A run that raises or pauses on
+#: an interrupt never reaches `aafter_agent`, and an open client keeps its browser busy.
 _RELEASE_AFTER_S = 60.0
 
-#: Each browser's Stagehand client, and the lock its calls take turns on. A lock
-#: lasts only while a call holds or awaits it.
+#: Each browser's client, the lock its calls take turns on (kept only while held or
+#: awaited), and its pending idle release. Process-wide: MDA builds the middleware for
+#: every run, and a user's concurrent threads share one client.
 _SESSIONS: dict[str, _Session] = {}
 _LOCKS: weakref.WeakValueDictionary[str, asyncio.Lock] = weakref.WeakValueDictionary()
-#: Each browser's pending idle release.
 _RELEASES: dict[str, asyncio.Task[None]] = {}
 
 
@@ -566,19 +503,13 @@ class BrowserMiddleware(AgentMiddleware):
         """Build the browser tools.
 
         Args:
-            scope: ``"thread"`` gives each thread its own browser; ``"user"``
-                shares one per signed-in user across their threads, logins
-                included. Each of their threads drives its own tab, and their
-                calls take turns.
+            scope: ``"thread"`` gives each thread its own browser; ``"user"`` shares
+                one per signed-in person, logins included, with a tab per thread.
             idle_ttl_seconds: Stop a browser after this long idle.
         """
-        from stagehand_middleware.facade import facade_instructions  # noqa: PLC0415
-
         super().__init__()
         self.scope: Scope = scope
         self.idle_ttl_seconds = idle_ttl_seconds
-        # Process-wide: MDA builds this middleware for every run, and a user's
-        # concurrent threads must share their browser's one client.
         self._sessions = _SESSIONS
         self._locks = _LOCKS
         self._releases = _RELEASES
@@ -592,19 +523,16 @@ class BrowserMiddleware(AgentMiddleware):
     ) -> T | str:
         """Run ``fn(session)`` on the run's tab, opening the session first if needed.
 
-        Errors come back as text: a browsing failure is something the model can
-        route around. One the browser did not report itself may mean the session
-        died, so it is released and the next call reconnects. Nothing is retried,
-        so no code runs twice. Results are not clipped here: deepagents' filesystem
-        middleware moves a large one to a file the agent can read back.
+        Errors go back to the model as text. One the browser did not report releases
+        the session, and the next call reconnects; nothing is retried, so no code runs
+        twice. deepagents moves a large result to a file, so none is clipped here.
         """
         try:
             key = _browser_key(runtime, self.scope)
-            # A user's threads share the browser, so each drives its own tab.
             thread = _thread_id(runtime) if key.startswith("user:") else None
         except RuntimeError as err:
             return f"error: {err}"
-        # Stagehand serves one client per browser: calls on a browser take turns.
+        # Stagehand serves one client per browser, so calls on a browser take turns.
         async with self._locks.setdefault(key, asyncio.Lock()):
             try:
                 name = _browser_name(key)
@@ -629,8 +557,8 @@ class BrowserMiddleware(AgentMiddleware):
     ) -> None:
         """Share the thread's sandbox's localhost with its browser, once that sandbox exists.
 
-        Only a thread's browser: a user's serves several threads, and their
-        sandboxes cannot all be ``localhost``. Browsing goes on without it.
+        Only a thread's browser: a user's serves several threads, whose sandboxes cannot
+        all be ``localhost``. Browsing goes on without it.
         """
         sandbox = _thread_sandbox(runtime) if key.startswith("thread:") else None
         if sandbox is None or session.shared == sandbox:
@@ -647,15 +575,14 @@ class BrowserMiddleware(AgentMiddleware):
             await session.close()
 
     def _release_later(self, key: str) -> None:
-        """Restart ``key``'s idle countdown, which releases its client when it runs out."""
+        """Restart ``key``'s idle countdown."""
         if (pending := self._releases.pop(key, None)) is not None:
             pending.cancel()
         self._releases[key] = asyncio.create_task(self._release_when_idle(key))
 
     async def _release_when_idle(self, key: str) -> None:
         await asyncio.sleep(_RELEASE_AFTER_S)
-        # A call holding the lock restarts the countdown before it lets go,
-        # cancelling this one.
+        # A call holding the lock restarts the countdown before it lets go.
         async with self._locks.setdefault(key, asyncio.Lock()):
             self._releases.pop(key, None)
             await self._release(key)
@@ -684,12 +611,9 @@ class BrowserMiddleware(AgentMiddleware):
         return await handler(_with_instructions(request, self._instructions))
 
     def _build_tools(self) -> list[BaseTool]:  # noqa: C901 - three flat tool closures
-        from stagehand_middleware.facade import facade_tools  # noqa: PLC0415
-
         middleware = self
-        # The facade's names, descriptions and schemas verbatim, as its TypeScript
-        # hosts advertise them. The model's arguments are not checked against a JSON
-        # schema, so each tool turns away what its schema does not name.
+        # The facade's names, descriptions and schemas, as its TypeScript hosts advertise
+        # them. JSON-schema tools are not checked, so each turns away arguments it lacks.
         contract = {entry["name"]: entry for entry in facade_tools()}
         shot_schema = contract["screenshot"]["inputSchema"]
         shot_schema["properties"]["path"] = {"type": "string", "description": _SCREENSHOT_PATH}
@@ -767,13 +691,10 @@ class BrowserMiddleware(AgentMiddleware):
 
 
 def _with_instructions(request: ModelRequest[None], text: str) -> ModelRequest[None]:
-    """``request`` with ``text`` as a block of its own at the end of the system message.
+    """``request`` with ``text`` as its system message's last block.
 
-    Unlike memory's block it sets no cache breakpoint: Anthropic allows four, and the
-    message-level one already covers this static text.
+    No cache breakpoint of its own: Anthropic allows four, and the message's covers it.
     """
-    from langchain_core.messages import SystemMessage  # noqa: PLC0415
-
     existing = request.system_message
     blocks: list[ContentBlock] = list(existing.content_blocks if existing is not None else [])
     blocks.append({"type": "text", "text": text})
@@ -786,11 +707,7 @@ def _unexpected(arguments: dict[str, object]) -> str:
 
 
 async def _save_artifacts(runtime: ManagedToolRuntime, root: str) -> list[str]:
-    """Move the screenshots run code saved under ``root`` into the agent's sandbox.
-
-    Run code names them relative to the facade's artifact root, which here stands
-    for the sandbox's ``/workspace``. Each note says where one went, or why not.
-    """
+    """Move run code's screenshots from ``root`` to the same paths under ``/workspace``."""
     files = await asyncio.to_thread(_take_files, Path(root))
     return [await _save(runtime, posixpath.join(_WORKSPACE, path), data) for path, data in files]
 
