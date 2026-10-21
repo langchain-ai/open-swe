@@ -4,8 +4,7 @@ from unittest.mock import MagicMock
 import pytest
 from langchain.agents.middleware.types import ModelRequest, ModelResponse
 from langchain_core.messages import AIMessage, HumanMessage, ToolMessage
-
-from openswe.middleware.sanitize_fireworks_messages import SanitizeFireworksMessagesMiddleware
+from model_guards import SanitizeFireworksMessagesMiddleware
 
 
 def _make_request(messages: list[object], model: object | None = None) -> ModelRequest[None]:

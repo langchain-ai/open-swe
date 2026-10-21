@@ -63,6 +63,14 @@ class _DisableInheritedMiddleware(AgentMiddleware):
         return self._name
 
 
+from model_guards import (
+    ModelCallTimeoutMiddleware,
+    SanitizeFireworksMessagesMiddleware,
+    SanitizeOpenAIResponsesMiddleware,
+    SanitizeThinkingBlocksMiddleware,
+    StableToolResultOrderMiddleware,
+)
+
 from openswe.analytics.usage import record_agent_invocation_usage
 from openswe.bridge.cli_result import cli_result
 from openswe.bridge.constants import LOCAL_ARTIFACTS_DIR, BridgeClient
@@ -103,16 +111,11 @@ from openswe.middleware import (
     BasePrepareRunMiddleware,
     DynamicToolMiddleware,
     ExcludeToolsMiddleware,
-    ModelCallTimeoutMiddleware,
     ModelErrorMiddleware,
     ModelFallbackMiddleware,
     ModelSelectionMiddleware,
     PullRequestCreationGuardMiddleware,
     RequireUserReplyMiddleware,
-    SanitizeFireworksMessagesMiddleware,
-    SanitizeOpenAIResponsesMiddleware,
-    SanitizeThinkingBlocksMiddleware,
-    StableToolResultOrderMiddleware,
     SubdirAgentsReadMiddleware,
     ToolErrorMiddleware,
     ValidateImageReadsMiddleware,

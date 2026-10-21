@@ -41,6 +41,7 @@ dependencies = [
     "jinja2>=3.1.6",
     "langchain-typesafe==0.0.1a3",
     "langchain-quickjs==0.3.9",
+    "open-swe-model-guards",
 ]
 
 [project.optional-dependencies]
@@ -66,6 +67,10 @@ sandbox-providers = [
     "langchain-runloop>=0.0.7",
     "langchain-e2b==0.0.6",
 ]
+
+# Shared with mda/ (packages/model-guards).
+[tool.uv.sources]
+open-swe-model-guards = { path = "packages/model-guards", editable = true }
 
 [tool.uv]
 # The externally maintained langchain-e2b integration still declares
@@ -133,7 +138,7 @@ asyncio_mode = "auto"
 testpaths = ["tests"]
 
 [tool.ty.src]
-include = ["openswe", "tests"]
+include = ["openswe", "packages", "tests"]
 # Runs in the mda/ project's environment, against the graph `mda build` compiles.
 # Sandbox scripts run on an older python3; `make typecheck` checks them at 3.8.
 exclude = ["tests/e2e/mda_entrypoint.py", "openswe/sandbox_scripts/*.py"]

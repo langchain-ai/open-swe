@@ -23,8 +23,11 @@ own middleware, which the MDA run hands each phase of its loop to:
 A call made from inside a subagent names the namespace of its ``task`` calls, so
 its tool calls and replies land under the subagent, as they do in-process.
 
-The graph's model-call shaping (caching, retries, fallback, summarization, call
-limits, provider sanitizers) is MDA's own. Graph state the hooks write that MDA
+MDA makes the model call. Caching, retries, the fallback model, summarization
+and call limits are MDA's own, and the provider guards (``model_guards``:
+sanitizers, tool-result order, the call deadline) are shared code MDA wraps its
+call in. The graph's image-model fallback and model-error classification need
+the backend and do not reach that call. Graph state the hooks write that MDA
 does not know rides in the MDA run's state and comes back with every call.
 """
 
@@ -60,6 +63,7 @@ from langchain_core.tools import BaseTool
 from langchain_quickjs import CodeInterpreterMiddleware
 from langgraph.config import get_config
 from langgraph.runtime import Runtime
+from model_guards import ModelGuard
 from pydantic import BaseModel, JsonValue, TypeAdapter, ValidationError
 
 from openswe.middleware.conversation_offloading import ConversationOffloadingMiddleware
@@ -101,6 +105,8 @@ _NOT_PROMPT_SHAPING: Final = (
     ConversationOffloadingMiddleware,
     TranscriptMiddleware,
     RecordRunUsageMiddleware,
+    # Shared with MDA, which wraps its own model call in them.
+    ModelGuard,
 )
 _MODEL_OBSERVERS: Final = (TranscriptMiddleware, RecordRunUsageMiddleware)
 # Loop bookkeeping and code mode MDA's own middleware already does.

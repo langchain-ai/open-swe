@@ -2,9 +2,8 @@ from copy import deepcopy
 
 from langchain_core.messages import AIMessage, HumanMessage, ToolMessage
 from langchain_openai import ChatOpenAI
+from model_guards.sanitize import _drop_unreplayable_reasoning
 from pydantic import SecretStr
-
-from openswe.middleware.sanitize_openai_responses import _sanitize_messages
 
 
 def test_stateless_responses_replay_preserves_tool_history_without_mutation() -> None:
@@ -58,8 +57,8 @@ def test_stateless_responses_replay_preserves_tool_history_without_mutation() ->
         output_version="responses/v1",
     )
 
-    first_payload = model._get_request_payload(_sanitize_messages(messages))
-    second_payload = model._get_request_payload(_sanitize_messages(messages))
+    first_payload = model._get_request_payload(_drop_unreplayable_reasoning(messages))
+    second_payload = model._get_request_payload(_drop_unreplayable_reasoning(messages))
 
     expected_call = {
         "type": "function_call",

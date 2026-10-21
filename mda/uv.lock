@@ -1,5 +1,5 @@
 version = 1
-revision = 3
+revision = 5
 requires-python = ">=3.12"
 resolution-markers = [
     "python_full_version >= '3.15'",
@@ -1344,6 +1344,23 @@ wheels = [
 ]
 
 [[package]]
+name = "open-swe-model-guards"
+version = "0.0.0"
+source = { editable = "../packages/model-guards" }
+dependencies = [
+    { name = "langchain" },
+    { name = "langchain-anthropic" },
+    { name = "langchain-openai" },
+]
+
+[package.metadata]
+requires-dist = [
+    { name = "langchain", specifier = ">=1.4.6" },
+    { name = "langchain-anthropic", specifier = ">=1.7.6" },
+    { name = "langchain-openai", specifier = ">=1.7.2,<2.0.0" },
+]
+
+[[package]]
 name = "open-swe-runtime"
 version = "0.0.0"
 source = { virtual = "." }
@@ -1357,6 +1374,7 @@ dependencies = [
     { name = "langsmith" },
     { name = "managed-deepagents" },
     { name = "mcp" },
+    { name = "open-swe-model-guards" },
     { name = "pydantic" },
     { name = "stagehand" },
 ]
@@ -1372,6 +1390,7 @@ requires-dist = [
     { name = "langsmith", specifier = ">=0.14.11" },
     { name = "managed-deepagents", editable = "../vendor/managed-deepagents-sdk/packages/pypi" },
     { name = "mcp", specifier = ">=2.2.0,<3" },
+    { name = "open-swe-model-guards", editable = "../packages/model-guards" },
     { name = "pydantic", specifier = ">=2.11" },
     { name = "stagehand", specifier = "==4.3.0" },
 ]

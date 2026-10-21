@@ -4,8 +4,7 @@ from unittest.mock import MagicMock
 
 import pytest
 from langchain.agents.middleware.types import ModelRequest, ModelResponse
-
-from openswe.middleware.model_call_timeout import (
+from model_guards import (
     DEFAULT_MODEL_CALL_TIMEOUT_SECONDS,
     ModelCallTimeoutError,
     ModelCallTimeoutMiddleware,

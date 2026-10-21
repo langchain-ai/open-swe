@@ -8,12 +8,11 @@ first model call of every new run.
 """
 
 from collections.abc import Awaitable, Callable
-from typing import Any
 
 from langchain.agents.middleware.types import ModelRequest, ModelResponse
 from langchain_core.messages import AIMessage, AnyMessage, ToolMessage
 
-from openswe.middleware.trace import OpenSWEMiddleware
+from model_guards.guard import ModelGuard
 
 
 def _call_positions(message: AIMessage) -> dict[str, int]:
@@ -57,14 +56,14 @@ def _order_messages(messages: list[AnyMessage]) -> list[AnyMessage] | None:
     return ordered if changed else None
 
 
-class StableToolResultOrderMiddleware(OpenSWEMiddleware):
+class StableToolResultOrderMiddleware(ModelGuard):
     """Sort each parallel tool batch's results into their tool call order."""
 
     async def awrap_model_call(
         self,
         request: ModelRequest,
         handler: Callable[[ModelRequest], Awaitable[ModelResponse]],
-    ) -> Any:
+    ) -> ModelResponse:
         ordered = _order_messages(request.messages)
         if ordered is not None:
             request = request.override(messages=ordered)

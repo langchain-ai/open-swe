@@ -1,5 +1,5 @@
 version = 1
-revision = 3
+revision = 5
 requires-python = ">=3.14"
 resolution-markers = [
     "python_full_version >= '3.15'",
@@ -2527,6 +2527,7 @@ dependencies = [
     { name = "langsmith" },
     { name = "markdown-it-py" },
     { name = "markdownify" },
+    { name = "open-swe-model-guards" },
     { name = "openai" },
     { name = "pillow" },
     { name = "pygments" },
@@ -2600,6 +2601,7 @@ requires-dist = [
     { name = "langsmith", specifier = ">=0.14.11" },
     { name = "markdown-it-py", specifier = "==4.2.0" },
     { name = "markdownify", specifier = ">=1.2.3" },
+    { name = "open-swe-model-guards", editable = "packages/model-guards" },
     { name = "openai", specifier = ">=3.10.0,<4.0.0" },
     { name = "pillow", specifier = ">=12.1.0" },
     { name = "pygments", specifier = ">=2.21.0" },
@@ -2615,6 +2617,23 @@ requires-dist = [
     { name = "websockets", specifier = ">=16.1.1" },
 ]
 provides-extras = ["dev", "sandbox-daytona", "sandbox-modal", "sandbox-runloop", "sandbox-e2b", "sandbox-providers"]
+
+[[package]]
+name = "open-swe-model-guards"
+version = "0.0.0"
+source = { editable = "packages/model-guards" }
+dependencies = [
+    { name = "langchain" },
+    { name = "langchain-anthropic" },
+    { name = "langchain-openai" },
+]
+
+[package.metadata]
+requires-dist = [
+    { name = "langchain", specifier = ">=1.4.6" },
+    { name = "langchain-anthropic", specifier = ">=1.7.6" },
+    { name = "langchain-openai", specifier = ">=1.7.2,<2.0.0" },
+]
 
 [[package]]
 name = "openai"

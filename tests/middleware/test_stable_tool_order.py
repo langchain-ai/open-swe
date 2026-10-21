@@ -3,8 +3,7 @@ from unittest.mock import AsyncMock
 
 from langchain.agents.middleware.types import AgentState, ModelRequest, ModelResponse
 from langchain_core.messages import AIMessage, AnyMessage, HumanMessage, ToolMessage
-
-from openswe.middleware.stable_tool_order import StableToolResultOrderMiddleware
+from model_guards import StableToolResultOrderMiddleware
 
 
 def _ai(*call_ids: str) -> AIMessage:

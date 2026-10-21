@@ -3,26 +3,27 @@
 Provider ``timeout`` kwargs bound HTTP requests, but the OpenAI Responses
 websocket transport can stall without the client ever raising a read timeout,
 which parks the whole run: no stream events, no queued-message pickup, and
-nothing for ``ModelFallbackMiddleware`` to react to (a hang is not an error).
-This middleware turns that hang into a timeout error, so the fallback model — or
-the run-completion webhook — reports it instead of the run going silent.
+nothing for a fallback model to react to (a hang is not an error). This
+middleware turns that hang into a timeout error, so the fallback model, or the
+run-completion webhook, reports it instead of the run going silent.
 """
 
 import asyncio
 import logging
+import os
 from collections.abc import Awaitable, Callable
+from typing import Final
 
 from langchain.agents.middleware.types import ModelRequest, ModelResponse
 
-from openswe.config import ENV
-from openswe.middleware.trace import OpenSWEMiddleware
+from model_guards.guard import ModelGuard
 
 logger = logging.getLogger(__name__)
 
-# Above the provider-level ``timeout`` (openswe.utils.model), so a stalled HTTP
-# request fails and retries inside the provider client first and this only fires
-# for stalls the provider never notices.
-DEFAULT_MODEL_CALL_TIMEOUT_SECONDS = 900.0
+# Above the provider-level ``timeout``, so a stalled HTTP request fails and retries
+# inside the provider client first and this only fires for stalls it never notices.
+DEFAULT_MODEL_CALL_TIMEOUT_SECONDS: Final = 900.0
+TIMEOUT_ENV_VAR: Final = "OPEN_SWE_MODEL_CALL_TIMEOUT_SECONDS"
 
 
 class ModelCallTimeoutError(TimeoutError):
@@ -30,17 +31,18 @@ class ModelCallTimeoutError(TimeoutError):
 
 
 def _configured_timeout_seconds() -> float:
-    raw = ENV.OPEN_SWE_MODEL_CALL_TIMEOUT_SECONDS.optional()
+    raw = os.environ.get(TIMEOUT_ENV_VAR)
     if not raw:
         return DEFAULT_MODEL_CALL_TIMEOUT_SECONDS
     try:
         value = float(raw)
     except ValueError:
+        logger.warning("Ignoring a model call timeout that is not a number", extra={"raw": raw})
         return DEFAULT_MODEL_CALL_TIMEOUT_SECONDS
     return value if value > 0 else DEFAULT_MODEL_CALL_TIMEOUT_SECONDS
 
 
-class ModelCallTimeoutMiddleware(OpenSWEMiddleware):
+class ModelCallTimeoutMiddleware(ModelGuard):
     """Fail a model call that exceeds the deadline instead of hanging forever."""
 
     def __init__(self, timeout_seconds: float | None = None) -> None:
@@ -55,7 +57,10 @@ class ModelCallTimeoutMiddleware(OpenSWEMiddleware):
         try:
             return await asyncio.wait_for(handler(request), timeout=self._timeout_seconds)
         except TimeoutError as exc:
-            logger.warning("Model call exceeded %ss deadline; aborting", self._timeout_seconds)
+            logger.warning(
+                "Model call exceeded its deadline; aborting",
+                extra={"timeout_seconds": self._timeout_seconds},
+            )
             raise ModelCallTimeoutError(
                 f"Model call exceeded the {self._timeout_seconds}s deadline"
             ) from exc

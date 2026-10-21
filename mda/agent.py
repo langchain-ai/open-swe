@@ -14,7 +14,6 @@ from typing import Final, Literal
 from langchain.agents.middleware import (
     AgentMiddleware,
     ModelCallLimitMiddleware,
-    ModelRetryMiddleware,
 )
 from langchain_core.tools import BaseTool
 from langchain_quickjs import CodeInterpreterMiddleware
@@ -34,7 +33,7 @@ from rt.middleware import (
     RuntimeToolsMiddleware,
     ServedToolsMiddleware,
 )
-from rt.models import RunModels, build_model
+from rt.models import RunModels, build_model, model_call_guards
 from rt.tools import backend_tool
 
 Graph = Literal["agent", "reviewer", "review-scout"]
@@ -168,7 +167,7 @@ async def agent(runtime: ManagedServerRuntime) -> DeepAgentDefinition:
                     *_backend_reports(backend, by_name.keys()),
                     *replace_sandbox,
                     ServedToolsMiddleware(subagent_tools[subagent.name], excluded),
-                    ModelRetryMiddleware(retry_on=(TimeoutError,)),
+                    *model_call_guards(),
                 ],
             }
             for subagent in catalog.subagents
@@ -185,6 +184,6 @@ async def agent(runtime: ManagedServerRuntime) -> DeepAgentDefinition:
             *_code_mode(context.graph, from_code, catalog.described),
             *_browser(context.graph),
             ModelCallLimitMiddleware(run_limit=_MODEL_CALL_LIMIT, exit_behavior="end"),
-            ModelRetryMiddleware(retry_on=(TimeoutError,)),
+            *model_call_guards(),
         ],
     )

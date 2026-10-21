@@ -1,0 +1,17 @@
+[project]
+name = "open-swe-model-guards"
+version = "0.0.0"
+description = "Open SWE's provider guards around a model call, shared by the backend's graphs and its Managed Deep Agents runtime (mda/)."
+requires-python = ">=3.12"
+dependencies = [
+    "langchain>=1.4.6",
+    "langchain-anthropic>=1.7.6",
+    "langchain-openai>=1.7.2,<2.0.0",
+]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/model_guards"]

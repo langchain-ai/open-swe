@@ -1,7 +1,8 @@
-"""Chat models for the models Open SWE picked when it dispatched a run.
+"""Chat models for the models Open SWE picked when it dispatched a run, and the guards around each call.
 
 The backend sends model ids and provider settings, never credentials; keys come
 from this deployment's environment, and gateway routing mirrors the backend's.
+The guards are the in-process graphs' own (``model_guards``), shared with the backend.
 """
 
 import json
@@ -9,8 +10,16 @@ import os
 from functools import lru_cache
 from typing import Final
 
+from langchain.agents.middleware import AgentMiddleware, ModelRetryMiddleware
 from langchain.chat_models import init_chat_model
 from langchain_core.language_models import BaseChatModel
+from model_guards import (
+    ModelCallTimeoutMiddleware,
+    SanitizeFireworksMessagesMiddleware,
+    SanitizeOpenAIResponsesMiddleware,
+    SanitizeThinkingBlocksMiddleware,
+    StableToolResultOrderMiddleware,
+)
 from pydantic import BaseModel, JsonValue, TypeAdapter
 
 _DEFAULT_GATEWAY_BASE_URL: Final = "https://gateway.smith.langchain.com"
@@ -65,3 +74,19 @@ def _build(model_id: str, kwargs_json: str, use_gateway: bool) -> BaseChatModel:
 def build_model(spec: ModelSpec, *, use_gateway: bool) -> BaseChatModel:
     """The chat model for ``spec``, built once per distinct model and settings."""
     return _build(spec.model_id, json.dumps(spec.kwargs, sort_keys=True), use_gateway)
+
+
+def model_call_guards() -> list[AgentMiddleware]:
+    """The graphs' provider guards, innermost so they see the model the backend named.
+
+    As in-process: the history is made safe for the provider and ordered for its
+    cache, then a timed-out call is retried, the deadline covering each attempt.
+    """
+    return [
+        SanitizeFireworksMessagesMiddleware(),
+        SanitizeOpenAIResponsesMiddleware(),
+        SanitizeThinkingBlocksMiddleware(),
+        StableToolResultOrderMiddleware(),
+        ModelRetryMiddleware(retry_on=(TimeoutError,)),
+        ModelCallTimeoutMiddleware(),
+    ]

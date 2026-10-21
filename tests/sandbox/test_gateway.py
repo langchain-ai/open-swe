@@ -150,8 +150,7 @@ async def test_fireworks_gateway_strips_legacy_function_call() -> None:
     survives.
     """
     from langchain_fireworks.chat_models import ChatFireworks
-
-    from openswe.middleware.sanitize_fireworks_messages import _sanitize_messages
+    from model_guards.sanitize import _strip_function_calls
 
     captured_bodies: list[dict] = []
 
@@ -187,7 +186,7 @@ async def test_fireworks_gateway_strips_legacy_function_call() -> None:
             additional_kwargs={"function_call": {"name": "read_file", "arguments": "{}"}},
         )
         messages = [HumanMessage(content="hi"), ai_message]
-        _sanitize_messages(messages)
+        _strip_function_calls(messages)
         await chat_model.ainvoke(messages)
         await chat_model._async_sdk_client.close()
 
