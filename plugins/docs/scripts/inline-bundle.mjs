@@ -36,8 +36,15 @@ html = html.replace(/<link rel="modulepreload" href="[^"]+"\/?>/g, "")
 html = html.replace(
   /<script type="module" async="" src="([^"]+)"><\/script>/g,
   (_, src) =>
-    `<script type="module">${readFileSync(asset(src), "utf8").replaceAll("</script", "<\\/script")}</script>`
+    `<script type="module">${readFileSync(asset(src), "utf8").replaceAll(
+      "</script",
+      "<\\/script"
+    )}</script>`
 )
+// Raw NULs sit only inside script string literals (Start's own hydration data
+// has one), where the escape means the same; the HTML parser would turn a raw
+// one into U+FFFD, and PostgreSQL text refuses them.
+html = html.replaceAll("\0", "\\u0000")
 if (/\s(?:src|href)="\/assets\//.test(html))
   throw new Error("bundle/index.html still references /assets/")
 

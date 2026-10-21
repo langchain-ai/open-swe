@@ -76,6 +76,10 @@ class PluginSource:
                 f"{self.repository} has no {self.file(manifest.entry)}; "
                 "commit the built bundle the manifest names"
             )
+        if "\0" in html:
+            raise PluginSourceError(
+                f"{self.file(manifest.entry)} contains NUL characters; escape them as \\u0000"
+            )
         return PluginPackage(source=self, ref=ref, commit_sha=sha, manifest=manifest, html=html)
 
 
