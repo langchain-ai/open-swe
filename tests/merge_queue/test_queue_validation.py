@@ -3,9 +3,10 @@ from datetime import UTC, datetime, timedelta
 from unittest.mock import AsyncMock, Mock
 from uuid import uuid7
 
+import httpx2
 import pytest
 
-from openswe.github.http import RepoClient
+from openswe.github.http import GitHubError, RepoClient
 from openswe.github.queue import Artifact, ValidationJob, ValidationRun
 from openswe.merge_queue.admission import QueuePolicy
 from openswe.merge_queue.git import Candidate, PullHead
@@ -109,11 +110,21 @@ def validation() -> tuple[CandidateValidation, ValidationWork, Lease]:
     )
 
 
+@pytest.mark.parametrize("status", [None, 502, 504])
 async def test_lost_dispatch_response_recovers_without_redispatch(
-    validation: tuple[CandidateValidation, ValidationWork, Lease], monkeypatch: pytest.MonkeyPatch
+    validation: tuple[CandidateValidation, ValidationWork, Lease],
+    monkeypatch: pytest.MonkeyPatch,
+    status: int | None,
 ) -> None:
     controller, work, lease = validation
-    dispatch = AsyncMock(side_effect=TimeoutError("Response lost"))
+    error = (
+        GitHubError(
+            httpx2.Response(status, request=httpx2.Request("POST", "https://api.github.com"))
+        )
+        if status is not None
+        else TimeoutError("Response lost")
+    )
+    dispatch = AsyncMock(side_effect=error)
     monkeypatch.setattr(controller.repo, "dispatch_validation", dispatch)
     monkeypatch.setattr(
         controller.queue,
@@ -140,7 +151,7 @@ async def test_lost_dispatch_response_recovers_without_redispatch(
             ]
         ),
     )
-    with pytest.raises(TimeoutError):
+    with pytest.raises(type(error)):
         await controller.reconcile(lease)
     restarted = CandidateValidation(controller.queue, controller.repo, controller.policy)
     for _ in range(3):
@@ -150,6 +161,49 @@ async def test_lost_dispatch_response_recovers_without_redispatch(
     assert isinstance(finish, AsyncMock) and finish.await_count == 1
     assert finish.call_args.kwargs == {"succeeded": True}
     assert finish.call_args.args[1]["artifact_id"] == 7
+
+
+@pytest.mark.parametrize("status", [403, 404, 422, 429, 503])
+async def test_definite_dispatch_rejection_records_failure_immediately(
+    validation: tuple[CandidateValidation, ValidationWork, Lease],
+    monkeypatch: pytest.MonkeyPatch,
+    status: int,
+) -> None:
+    controller, work, lease = validation
+    monkeypatch.setattr(
+        controller.queue,
+        "validation_work",
+        AsyncMock(
+            side_effect=[
+                ValidationWork(work.batch),
+                replace(work, dispatch=True),
+            ]
+        ),
+    )
+    dispatch = AsyncMock(
+        side_effect=GitHubError(
+            httpx2.Response(
+                status,
+                request=httpx2.Request("POST", "https://api.github.com"),
+            )
+        )
+    )
+    monkeypatch.setattr(controller.repo, "dispatch_validation", dispatch)
+    await controller.reconcile(lease)
+    assert dispatch.await_count == 1
+    assert work.attempt is not None and work.request is not None
+    finish = controller.queue.finish_validation
+    assert isinstance(finish, AsyncMock)
+    finish.assert_awaited_once_with(
+        work.attempt.id,
+        {
+            **work.request.model_dump(mode="json"),
+            "error": "GitHub rejected the workflow dispatch",
+            "http_status": status,
+        },
+        lease,
+        succeeded=False,
+    )
 
 
 @pytest.mark.parametrize(

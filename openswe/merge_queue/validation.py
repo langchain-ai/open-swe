@@ -2,7 +2,7 @@
 
 from pydantic import JsonValue
 
-from openswe.github.http import RepoClient
+from openswe.github.http import GitHubError, RepoClient
 from openswe.github.queue import ValidationRun
 from openswe.merge_queue.admission import QueuePolicy
 from openswe.merge_queue.git import Candidate, candidate_ref
@@ -39,7 +39,22 @@ class CandidateValidation:
         attempt, request = work.attempt, work.request
         assert attempt is not None and request is not None
         if work.dispatch:
-            await self.repo.dispatch_validation(WORKFLOW, request.model_dump_json())
+            try:
+                await self.repo.dispatch_validation(WORKFLOW, request.model_dump_json())
+            except GitHubError as exc:
+                status = exc.response.status_code
+                if status not in {400, 401, 403, 404, 405, 410, 422, 429, 503}:
+                    raise
+                await self.queue.finish_validation(
+                    attempt.id,
+                    {
+                        **request.model_dump(mode="json"),
+                        "error": "GitHub rejected the workflow dispatch",
+                        "http_status": status,
+                    },
+                    lease,
+                    succeeded=False,
+                )
             return
         try:
             # Search even after binding: a second matching run makes the attempt ambiguous.
