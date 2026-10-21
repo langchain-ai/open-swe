@@ -87,7 +87,7 @@ async def test_incident_uses_system_sandbox_tools_integrations_and_delegation(
     remote = StructuredTool.from_function(
         coroutine=update_incident, name="incident_update", description="Update incident status"
     )
-    with patch("openswe.server.load_mcp_tools", AsyncMock(return_value=[remote])) as mcps:
+    with patch("openswe.mcp.tiers.load_mcp_tools", AsyncMock(return_value=[remote])) as mcps:
         result = cast(dict[str, Any], await _capture_create_deep_agent_kwargs(_incident_config()))
     mcps.assert_awaited_once()
     # System runs load the instance tier and the default workspace's, never a person's.

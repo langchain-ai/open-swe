@@ -93,11 +93,8 @@ from openswe.input_messages import (
     person_introduction,
     visible_dynamic_context_hashes,
 )
-from openswe.mcp import load_mcp_tools
-from openswe.mcp.instance import instance_mcp_source
-from openswe.mcp.managed import instance_gateway, managed_mcp_source
-from openswe.mcp.user import user_mcp_source
-from openswe.mcp.workspace import workspace_mcp_source
+from openswe.mcp.managed import instance_gateway
+from openswe.mcp.tiers import mcp_tools_for
 from openswe.middleware import (
     BasePrepareRunMiddleware,
     DynamicToolMiddleware,
@@ -794,29 +791,13 @@ async def _bridge_client(thread_id: str | None) -> BridgeClient | None:
     return "desktop" if metadata.get("sandbox_bridge_client") == "desktop" else "cli"
 
 
-async def _mcp_tools_for(
-    credential_login: str | None, workspace: str, managed_gateway: str | None
-) -> list[Any]:
-    """Load the run's MCPs by tier: instance, then workspace, then the user's own.
-
-    A later tier's connection replaces a same-named one from the tier before. The
-    instance's LangSmith Managed Tools gateway comes last, used as the private owner.
-    """
-    sources = [instance_mcp_source(), workspace_mcp_source(workspace)]
-    if credential_login:
-        sources.append(user_mcp_source(credential_login))
-        if managed_gateway:
-            sources.append(managed_mcp_source(credential_login, managed_gateway))
-    return await load_mcp_tools(*sources)
-
-
 async def _run_mcp_tools(
     thread_id: str, credential_login: str | None, workspace: str
 ) -> tuple[str | None, list[Any]]:
     """The instance's Managed Tools gateway and the MCP tools the run may use."""
     managed_gateway = await instance_gateway() if credential_login else None
     async with aphase(thread_id, "factory.mcp_tools"):
-        return managed_gateway, await _mcp_tools_for(credential_login, workspace, managed_gateway)
+        return managed_gateway, await mcp_tools_for(credential_login, workspace, managed_gateway)
 
 
 # The sandbox's file and shell tools, which code mode offers directly as well.

@@ -13,6 +13,10 @@ Review GitHub pull request `{{ repo_owner }}/{{ repo_name }}#{{ pr_number }}` an
 {% include "reviewer/historical-guidance.md" +%}
 
 {% endif %}
+{% if notion_tools %}
+{% include "reviewer/notion-context.md.jinja" +%}
+
+{% endif %}
 # Submitting the review
 
 - Record each finding with `add_finding`. Findings must anchor to lines inside the PR diff.
