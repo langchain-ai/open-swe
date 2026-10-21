@@ -1,0 +1,5 @@
+Policies are scoped to the current workspace and require a repository bound there; there is no instance-wide fallback. Dispatch a GitHub workflow explicitly allowlisted by an admin for this repository. Requires an authenticated requester with repository write access. Supply the exact workflow filename (such as deploy.yml); arbitrary refs are not accepted. The admin fixes the ref and may fix inputs or permit bot-supplied string inputs. Fixed input keys cannot be overridden. Unconfigured workflows are denied.
+
+Use this guarded tool rather than sandbox gh/curl for workflow dispatch. A dedicated repository-scoped Actions: write installation token stays on the server and is never handed to the sandbox. A successful response means dispatch was accepted, not that a run finished or passed. Do not retry an uncertain dispatch automatically; inspect Actions first.
+
+The admin_only policy restricts dispatch to an authorized admin in an admin thread, checked at dispatch time; ordinary threads cannot trigger it even when their requester is an admin.

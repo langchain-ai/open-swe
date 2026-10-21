@@ -60,6 +60,14 @@ async def test_token_cache_respects_expiry(
     requests: list[httpx.Request] = []
 
     def handle(request: httpx.Request) -> httpx.Response:
+        if request.method == "GET":
+            return httpx.Response(
+                200, json={"permissions": {"contents": "write", "actions": "write"}}
+            )
+        assert json.loads(request.content)["permissions"] == {
+            "contents": "write",
+            "actions": "read",
+        }
         requests.append(request)
         return httpx.Response(
             201, json={"token": f"token-{len(requests)}", "expires_at": expires_at}
@@ -107,6 +115,10 @@ async def test_repository_names_and_full_installation_have_distinct_scopes(
     scopes: list[dict[str, object]] = []
 
     def handle(request: httpx.Request) -> httpx.Response:
+        if request.method == "GET":
+            return httpx.Response(
+                200, json={"permissions": {"contents": "write", "actions": "write"}}
+            )
         scopes.append(json.loads(request.content))
         return httpx.Response(
             201, json={"token": f"token-{len(scopes)}", "expires_at": "2099-01-01T00:00:00Z"}
@@ -115,7 +127,11 @@ async def test_repository_names_and_full_installation_have_distinct_scopes(
     mock_github_sdk(monkeypatch, handle)
     for names in (["a"], ["b"], ["a"], None):
         assert await github_app.get_github_app_installation_token(repositories=names)
-    assert scopes == [{"repositories": ["a"]}, {"repositories": ["b"]}, {}]
+    assert scopes == [
+        {"repositories": ["a"], "permissions": {"contents": "write", "actions": "read"}},
+        {"repositories": ["b"], "permissions": {"contents": "write", "actions": "read"}},
+        {"permissions": {"contents": "write", "actions": "read"}},
+    ]
 
 
 async def test_token_request_preserves_repository_ids_and_permissions(
@@ -144,6 +160,10 @@ async def test_token_failure_never_returns_cached_broader_access(
     monkeypatch: pytest.MonkeyPatch, status: int
 ) -> None:
     def handle(request: httpx.Request) -> httpx.Response:
+        if request.method == "GET":
+            return httpx.Response(
+                200, json={"permissions": {"contents": "write", "actions": "write"}}
+            )
         if json.loads(request.content).get("repository_ids"):
             return httpx.Response(status, json={"message": "unavailable"})
         return httpx.Response(

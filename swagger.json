@@ -7595,6 +7595,105 @@
         "title": "WebhookResponse",
         "type": "object"
       },
+      "WorkflowOptions": {
+        "description": "What a workflow policy may name: workflow filenames and branch or tag refs.",
+        "properties": {
+          "refs": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Refs",
+            "type": "array"
+          },
+          "workflows": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Workflows",
+            "type": "array"
+          }
+        },
+        "required": [
+          "workflows",
+          "refs"
+        ],
+        "title": "WorkflowOptions",
+        "type": "object"
+      },
+      "WorkflowPolicy": {
+        "additionalProperties": false,
+        "properties": {
+          "admin_only": {
+            "default": false,
+            "title": "Admin Only",
+            "type": "boolean"
+          },
+          "allow_bot_inputs": {
+            "default": false,
+            "title": "Allow Bot Inputs",
+            "type": "boolean"
+          },
+          "fixed_inputs": {
+            "additionalProperties": {
+              "type": "string"
+            },
+            "title": "Fixed Inputs",
+            "type": "object"
+          },
+          "ref": {
+            "minLength": 1,
+            "title": "Ref",
+            "type": "string"
+          },
+          "repository": {
+            "title": "Repository",
+            "type": "string"
+          },
+          "workflow": {
+            "title": "Workflow",
+            "type": "string"
+          }
+        },
+        "required": [
+          "ref",
+          "repository",
+          "workflow"
+        ],
+        "title": "WorkflowPolicy",
+        "type": "object"
+      },
+      "WorkflowRule": {
+        "additionalProperties": false,
+        "properties": {
+          "admin_only": {
+            "default": false,
+            "title": "Admin Only",
+            "type": "boolean"
+          },
+          "allow_bot_inputs": {
+            "default": false,
+            "title": "Allow Bot Inputs",
+            "type": "boolean"
+          },
+          "fixed_inputs": {
+            "additionalProperties": {
+              "type": "string"
+            },
+            "title": "Fixed Inputs",
+            "type": "object"
+          },
+          "ref": {
+            "minLength": 1,
+            "title": "Ref",
+            "type": "string"
+          }
+        },
+        "required": [
+          "ref"
+        ],
+        "title": "WorkflowRule",
+        "type": "object"
+      },
       "Workspace": {
         "properties": {
           "base_snapshot_id": {
@@ -20717,6 +20816,279 @@
         "summary": "Api Configure Workspace Repository",
         "tags": [
           "dashboard",
+          "workspaces"
+        ]
+      }
+    },
+    "/dashboard/api/workspaces/{slug}/workflow-options/{owner}/{name}": {
+      "get": {
+        "operationId": "workflow_options_dashboard_api_workspaces__slug__workflow_options__owner___name__get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "slug",
+            "required": true,
+            "schema": {
+              "title": "Slug",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "owner",
+            "required": true,
+            "schema": {
+              "title": "Owner",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "name",
+            "required": true,
+            "schema": {
+              "title": "Name",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WorkflowOptions"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "DashboardSession": []
+          }
+        ],
+        "summary": "Workflow Options",
+        "tags": [
+          "dashboard",
+          "workspaces",
+          "workspaces"
+        ]
+      }
+    },
+    "/dashboard/api/workspaces/{slug}/workflow-policies": {
+      "get": {
+        "operationId": "list_workflow_policies_dashboard_api_workspaces__slug__workflow_policies_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "slug",
+            "required": true,
+            "schema": {
+              "title": "Slug",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/WorkflowPolicy"
+                  },
+                  "title": "Response List Workflow Policies Dashboard Api Workspaces  Slug  Workflow Policies Get",
+                  "type": "array"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "DashboardSession": []
+          }
+        ],
+        "summary": "List Workflow Policies",
+        "tags": [
+          "dashboard",
+          "workspaces",
+          "workspaces"
+        ]
+      }
+    },
+    "/dashboard/api/workspaces/{slug}/workflow-policies/{owner}/{name}/{workflow}": {
+      "delete": {
+        "operationId": "remove_workflow_policy_dashboard_api_workspaces__slug__workflow_policies__owner___name___workflow__delete",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "slug",
+            "required": true,
+            "schema": {
+              "title": "Slug",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "owner",
+            "required": true,
+            "schema": {
+              "title": "Owner",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "name",
+            "required": true,
+            "schema": {
+              "title": "Name",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "workflow",
+            "required": true,
+            "schema": {
+              "title": "Workflow",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "DashboardSession": []
+          }
+        ],
+        "summary": "Remove Workflow Policy",
+        "tags": [
+          "dashboard",
+          "workspaces",
+          "workspaces"
+        ]
+      },
+      "put": {
+        "operationId": "set_workflow_policy_dashboard_api_workspaces__slug__workflow_policies__owner___name___workflow__put",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "slug",
+            "required": true,
+            "schema": {
+              "title": "Slug",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "owner",
+            "required": true,
+            "schema": {
+              "title": "Owner",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "name",
+            "required": true,
+            "schema": {
+              "title": "Name",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "workflow",
+            "required": true,
+            "schema": {
+              "title": "Workflow",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/WorkflowRule"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WorkflowPolicy"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "DashboardSession": []
+          }
+        ],
+        "summary": "Set Workflow Policy",
+        "tags": [
+          "dashboard",
+          "workspaces",
           "workspaces"
         ]
       }
