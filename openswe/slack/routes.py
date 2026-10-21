@@ -662,6 +662,7 @@ async def slack_webhook(
                 reply_thread_ts,
                 user_id,
                 reviewable_link,
+                text,
             )
 
     is_direct_message = not is_message_update and in_dm_channel and bool(user_id)

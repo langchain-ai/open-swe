@@ -863,7 +863,7 @@ async def test_slack_question_allows_auto_routing_after_dashboard_handoff(
     monkeypatch: pytest.MonkeyPatch, reply_thread_ts: str
 ) -> None:
     from openswe.middleware.model_selection import ModelSelectionMiddleware
-    from openswe.threads.runs import _build_dashboard_configurable
+    from openswe.threads.runs import build_dashboard_configurable
 
     monkeypatch.setattr("openswe.threads.runs.resolve_run_email", AsyncMock(return_value=None))
     monkeypatch.setattr("openswe.server._model_routing_mode", lambda _: "fast")
@@ -875,7 +875,7 @@ async def test_slack_question_allows_auto_routing_after_dashboard_handoff(
     for source in ("slack", "dashboard"):
         config = _base_config()
         config["configurable"].update(
-            await _build_dashboard_configurable(
+            await build_dashboard_configurable(
                 "thread-ctx",
                 "octocat",
                 {"source": source, "source_context": source_context, "model_selection": "auto"},

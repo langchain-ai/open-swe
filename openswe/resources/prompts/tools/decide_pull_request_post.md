@@ -1,0 +1,1 @@
+Record which pull requests a Slack post shares for review, after investigating a post the classifier was unsure about. Open SWE watches each pull request in `review_urls` and reacts to the post as its checks and reviews change; the rest get no reaction. Pass an empty list when none were posted for review. Call it exactly once.

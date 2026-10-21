@@ -69,7 +69,7 @@ def test_build_configurable_marks_repo_less_config_when_explicit(
     dashboard_run_client: _FakeLangGraphClient,
 ) -> None:
     configurable = asyncio.run(
-        thread_runs._build_dashboard_configurable(
+        thread_runs.build_dashboard_configurable(
             "thread-id",
             "octo",
             {"source": "dashboard", "repo_explicitly_none": True},
@@ -83,7 +83,7 @@ def test_build_configurable_includes_repo_when_configured(
     dashboard_run_client: _FakeLangGraphClient,
 ) -> None:
     configurable = asyncio.run(
-        thread_runs._build_dashboard_configurable(
+        thread_runs.build_dashboard_configurable(
             "thread-id",
             "octo",
             {"source": "dashboard", "repo_owner": "octo", "repo_name": "repo"},

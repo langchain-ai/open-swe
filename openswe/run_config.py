@@ -84,6 +84,15 @@ class GitHubPROrIssueRef(BaseModel):
     repo: Repo | None = None
 
 
+class PullRequestPostRef(BaseModel):
+    """The Slack post an escalated pull request triage run decides on."""
+
+    channel_id: str
+    message_ts: str
+    slack_user_id: str
+    text: str
+
+
 class RunConfig(BaseModel):
     model_config = ConfigDict(extra="allow")
 
@@ -167,6 +176,8 @@ class RunConfig(BaseModel):
     # `@Open SWE /btw`: the Slack thread the one public answer is posted in.
     slack_by_the_way_thread_ts: str | None = None
     slack_by_the_way_message_ts: str | None = None
+    # A pull request post Jev was unsure about, handed to this run to decide.
+    pull_request_post: PullRequestPostRef | None = None
     # Set on a private thread whose transcript was copied from a collaborative one.
     continued_from_thread_id: str | None = None
 

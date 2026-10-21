@@ -9,7 +9,7 @@ from openswe.expedited_review.readiness import PullRequestSnapshot, Readiness
 from openswe.github.codeowners import CodeOwners
 from openswe.github.pull_request_status import PullRequestClient
 from openswe.github.pull_requests import PullRequest, PullRequestPayload
-from openswe.human_review import lifecycle, posted, standard
+from openswe.human_review import lifecycle, post_intent, posted, standard
 from openswe.human_review.lifecycle import ReviewCard
 from openswe.human_review.posted import linked_pull_requests
 from openswe.human_review.requests import HumanReviewRequest
@@ -54,6 +54,42 @@ async def test_external_authors_are_not_watched(
     monkeypatch.setattr(HumanReviewRequest, "save", save)
     await posted.watch_post("C1", "1.0", "U1", "https://github.com/lc/repo/pull/7")
     save.assert_not_called()
+
+
+@pytest.mark.parametrize(
+    ("opted_in", "intent", "escalated", "watched"),
+    [
+        (True, "not_ready", False, False),
+        (True, "other", False, False),
+        (True, "review", False, True),
+        (True, None, False, True),
+        (True, "investigate", True, False),
+        (True, "investigate", False, True),
+        (False, "other", False, True),
+    ],
+)
+async def test_posts_jev_reads_as_not_for_review_are_not_watched(
+    monkeypatch: pytest.MonkeyPatch,
+    opted_in: bool,
+    intent: str | None,
+    escalated: bool,
+    watched: bool,
+) -> None:
+    monkeypatch.setattr(posted, "skip_on_preview", lambda _: False)
+    poster = User(preferences=UserPreferences(pr_failure_reactions=opted_in).model_dump())
+    monkeypatch.setattr(User, "for_identity", AsyncMock(return_value=poster))
+    classify = AsyncMock(return_value={"pr_0": intent})
+    monkeypatch.setattr(post_intent, "select_jev_choices", classify)
+    watch = AsyncMock(return_value=None)
+    monkeypatch.setattr(posted, "_watch_pull_request", watch)
+    investigate = AsyncMock(return_value=escalated)
+    monkeypatch.setattr(posted, "investigate_post", investigate)
+    await posted.watch_post(
+        "C1", "1.0", "U1", f"https://github.com/lc/repo/pull/7 {opted_in} {intent} {escalated}"
+    )
+    assert watch.called is watched
+    assert investigate.called is (intent == "investigate")
+    assert classify.called is opted_in
 
 
 async def test_blocked_reactions_track_an_approved_posts_current_head(
@@ -101,7 +137,8 @@ async def test_blocked_reactions_track_an_approved_posts_current_head(
         assert removed == ({"warning", "construction", "pencil2"} - expected) | {"x"}
         assert all(
             params["channel"] == "C1" and params["timestamp"] == "1.0"
-            for _, params in slack_api.calls[start:]
+            for method, params in slack_api.calls[start:]
+            if method.startswith("reactions.")
         )
 
     monkeypatch.setattr(User, "for_login", AsyncMock(return_value=User()))
@@ -197,10 +234,10 @@ async def test_multiple_prs_need_all_approvals_but_any_blocker_and_explain_failu
         reactions.discard(emoji)
         return True
 
-    wake = AsyncMock()
+    notify = AsyncMock(return_value="2.0")
     monkeypatch.setattr(lifecycle, "add_slack_reaction", add)
     monkeypatch.setattr(lifecycle, "remove_slack_reaction", remove)
-    monkeypatch.setattr(lifecycle, "wake_thread_owner", wake)
+    monkeypatch.setattr(lifecycle, "post_slack_thread_reply_with_ts", notify)
     monkeypatch.setattr(
         User,
         "preferences_for_login",
@@ -228,12 +265,12 @@ async def test_multiple_prs_need_all_approvals_but_any_blocker_and_explain_failu
     )
     await first.update_blocked_reactions(snapshot)
     assert {"warning", "construction"} <= reactions
-    assert wake.await_count == 1
-    args = wake.await_args.args
-    assert args[:3] == ("C1", "1.0", "U1")
-    assert urls[0] in args[3] and "unit tests" in args[3]
+    assert notify.await_count == 1
+    args = notify.await_args.args
+    assert args[:2] == ("C1", "1.0")
+    assert args[2] == f":warning: `unit tests` is failing on <{urls[0]}|repo#7>"
     await first.update_blocked_reactions(snapshot)
-    assert wake.await_count == 1
+    assert notify.await_count == 1
     snapshot.mergeable = True
     snapshot.mergeable_state = "clean"
     snapshot.check_state = "success"
@@ -247,9 +284,10 @@ async def test_multiple_prs_need_all_approvals_but_any_blocker_and_explain_failu
     await second.update_post_reactions()
     assert "white_check_mark" not in reactions
     snapshot.check_state = "failure"
+    snapshot.failing_checks = ["lint", "unit tests"]
     await second.update_blocked_reactions(snapshot)
-    assert wake.await_count == 2
-    assert urls[1] in wake.await_args.args[3]
+    assert notify.await_count == 2
+    assert notify.await_args.args[2] == f":warning: 2 checks are failing on <{urls[1]}|repo#8>"
     snapshot.draft = True
     await second.update_blocked_reactions(snapshot)
     assert "pencil2" in reactions
