@@ -227,6 +227,8 @@ export interface HostApi extends RpcTarget {
   /** Opens a web link in a new tab; outside github.com, only once the person agrees. */
   openExternal(url: string): Promise<void>
   toast(toast: Toast): Promise<void>
+  /** Names the browser tab "<title> · Open SWE"; `null` goes back to the plugin's name. */
+  setTitle(title: string | null): Promise<void>
   /** Profiles for GitHub logins, in the order asked; at most 100 per call. */
   people(logins: string[]): Promise<Person[]>
   /**

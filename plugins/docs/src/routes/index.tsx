@@ -2,12 +2,13 @@ import { Spinner } from "@langchain/macaw-components/Spinner"
 import { Navigate, createFileRoute } from "@tanstack/react-router"
 
 import { ShareRepository } from "@/components/ShareRepository"
-import { useRepositories } from "@/lib/queries"
+import { useRepositories, useTabTitle } from "@/lib/queries"
 
 export const Route = createFileRoute("/")({ component: Home })
 
 function Home() {
   const repositories = useRepositories()
+  useTabTitle(null)
   if (repositories.isPending)
     return (
       <div className="flex h-svh items-center justify-center">

@@ -211,3 +211,11 @@ export function usePeople(logins: string[]): Map<string, Profile> {
 export function selfProfile(host: PluginHost): Profile {
   return profile(host.context.user)
 }
+
+/** Names the web UI's tab after what is open; `null` leaves it named Docs. */
+export function useTabTitle(title: string | null) {
+  const host = usePluginHost()
+  useEffect(() => {
+    void host.ui.setTitle(title)
+  }, [host, title])
+}

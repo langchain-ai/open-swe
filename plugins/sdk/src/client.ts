@@ -162,6 +162,8 @@ export class PluginHost {
 
   readonly ui = {
     toast: (toast: Toast) => settle(this.api.toast(toast)),
+    /** Names the browser tab "<title> · Open SWE"; `null` goes back to the plugin's name. */
+    setTitle: (title: string | null) => settle(this.api.setTitle(title)),
   }
 
   readonly storage = {

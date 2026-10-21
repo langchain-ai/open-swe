@@ -69,6 +69,8 @@ export function PluginFrame({
   path,
   navigate,
   openThread,
+  setTitle,
+  visible,
   confirmThread,
   confirmLink,
   pickRepositories,
@@ -78,6 +80,9 @@ export function PluginFrame({
   path: string
   navigate: (path: string, replace: boolean) => void
   openThread: (threadId: string) => void
+  setTitle: (title: string | null) => void
+  /** Whether the frame is on screen; a hidden one shows no toasts. */
+  visible: () => boolean
   confirmThread: (request: ThreadRequest) => Promise<boolean>
   confirmLink: (url: string) => Promise<boolean>
   pickRepositories: (pick: RepositoryPick) => Promise<Array<string>>
@@ -140,7 +145,9 @@ export function PluginFrame({
       navigate(next, replace)
     },
     openThread,
+    setTitle,
     toast: ({ title, description, intent }) => {
+      if (!visible()) return
       const show =
         intent === "success"
           ? toast.success

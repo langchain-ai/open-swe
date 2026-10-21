@@ -11,19 +11,37 @@ import { Skeleton } from "@langchain/macaw-components/Skeleton"
 import { PuzzlePieceIcon } from "@phosphor-icons/react/dist/ssr/PuzzlePiece"
 import { ShieldCheckIcon } from "@phosphor-icons/react/dist/ssr/ShieldCheck"
 import { Link, useNavigate } from "@tanstack/react-router"
+import { useEffect, useEffectEvent, useState } from "react"
 
 import { PluginFrame } from "@/features/plugins/components/PluginFrame"
 import { RepositoryPicker } from "@/features/plugins/components/RepositoryPicker"
 import type { InstalledPlugin } from "@/features/plugins/lib/api"
 import { useApproval } from "@/features/plugins/lib/approval"
 import { PluginIcon } from "@/features/plugins/lib/icons"
+import { pageTitle } from "@/lib/pageTitle"
 import {
   usePlugin,
   usePluginBundle,
   useSharePluginRepositories,
 } from "@/features/plugins/lib/queries"
 
-export function PluginPage({ name, path }: { name: string; path: string }) {
+/**
+ * One installed plugin's page. `active` is whether it is the page on screen: a
+ * plugin stays mounted while the person is elsewhere, like a tab, and while it
+ * is hidden it can neither move the web UI nor ask the person anything.
+ * `onPath` hears every path the plugin moves to, on screen or not.
+ */
+export function PluginPage({
+  name,
+  path,
+  active,
+  onPath,
+}: {
+  name: string
+  path: string
+  active: boolean
+  onPath: (path: string) => void
+}) {
   const { plugin, isPending, error } = usePlugin(name)
   if (isPending)
     return (
@@ -60,17 +78,39 @@ export function PluginPage({ name, path }: { name: string; path: string }) {
         />
       </main>
     )
-  return <InstalledPluginPage key={plugin.id} plugin={plugin} path={path} />
+  return (
+    <InstalledPluginPage
+      key={plugin.id}
+      plugin={plugin}
+      path={path}
+      active={active}
+      onPath={onPath}
+    />
+  )
 }
 
 function InstalledPluginPage({
   plugin,
   path,
+  active,
+  onPath,
 }: {
   plugin: InstalledPlugin
   path: string
+  active: boolean
+  onPath: (path: string) => void
 }) {
   const navigate = useNavigate()
+  const onScreen = useEffectEvent(() => active)
+  const [title, setTitle] = useState<string | null>(null)
+  useEffect(() => {
+    if (!active) return
+    const documentTitle = pageTitle(title ?? plugin.manifest.displayName)
+    document.title = documentTitle
+    return () => {
+      if (document.title === documentTitle) document.title = pageTitle("Plugin")
+    }
+  }, [active, title, plugin.manifest.displayName])
   const bundle = usePluginBundle(plugin)
   const approval = useApproval()
   const share = useSharePluginRepositories()
@@ -115,23 +155,30 @@ function InstalledPluginPage({
           plugin={plugin}
           html={bundle.data}
           path={path}
-          navigate={(next, replace) =>
-            void navigate({
-              to: "/agents/plugins/$name/$",
-              params: { name: plugin.name, _splat: next.slice(1) },
-              replace,
-            })
-          }
-          openThread={(threadId) =>
-            void navigate({ to: "/agents/$threadId", params: { threadId } })
-          }
+          navigate={(next, replace) => {
+            onPath(next)
+            if (onScreen())
+              void navigate({
+                to: "/agents/plugins/$name/$",
+                params: { name: plugin.name, _splat: next.slice(1) },
+                replace,
+              })
+          }}
+          openThread={(threadId) => {
+            if (onScreen())
+              void navigate({ to: "/agents/$threadId", params: { threadId } })
+          }}
+          setTitle={setTitle}
+          visible={onScreen}
           confirmLink={async (url) =>
-            (await approval.ask({ kind: "link", url })) !== null
+            onScreen() && (await approval.ask({ kind: "link", url })) !== null
           }
           confirmThread={async (request) =>
+            onScreen() &&
             (await approval.ask({ kind: "thread", request })) !== null
           }
           pickRepositories={async (pick) => {
+            if (!onScreen()) return []
             const chosen = await approval.ask({ kind: "repositories", pick })
             if (!Array.isArray(chosen) || chosen.length === 0) return []
             const updated = await share.mutateAsync({

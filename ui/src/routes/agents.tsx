@@ -9,6 +9,7 @@ import {
 } from "@tanstack/react-router"
 
 import { AgentsShell } from "@/features/agents/components/AgentsSidebar"
+import { PluginTabs } from "@/features/plugins/components/PluginTabs"
 import { reviewChatQuery } from "@/features/agents/lib/queries"
 import { Skeleton } from "@langchain/macaw-components/Skeleton"
 import { useExperimentalAssistantUi, useProfile } from "@/lib/profile"
@@ -126,6 +127,7 @@ function AgentsLayout() {
       ) : (
         <Outlet />
       )}
+      <PluginTabs />
     </AgentsShell>
   )
 }

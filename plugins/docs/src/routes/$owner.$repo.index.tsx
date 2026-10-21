@@ -2,13 +2,14 @@ import { Text } from "@langchain/macaw-components/Text"
 import { Link, createFileRoute } from "@tanstack/react-router"
 
 import { isHidden, pageTitle } from "@/lib/model"
-import { useDrafts, useSpace } from "@/lib/queries"
+import { useDrafts, useSpace, useTabTitle } from "@/lib/queries"
 
 export const Route = createFileRoute("/$owner/$repo/")({ component: SpaceHome })
 
 function SpaceHome() {
   const { owner, repo } = Route.useParams()
   const repository = `${owner}/${repo}`.toLowerCase()
+  useTabTitle(repository)
   const space = useSpace(repository).data
   const drafts = [...(useDrafts(repository).data ?? new Map()).entries()]
   const pages = (space?.pages ?? []).filter((path) => !isHidden(path))

@@ -83,6 +83,8 @@ export interface BridgeHost {
   navigate: (path: string, replace: boolean) => void
   openThread: (threadId: string) => void
   toast: (toast: Toast) => void
+  /** The page's title, before " · Open SWE"; `null` is the plugin's name. */
+  setTitle: (title: string | null) => void
   /** Shows the person the request word for word; resolves whether they approved it. */
   confirmThread: (request: ThreadRequest) => Promise<boolean>
   /** Asks before leaving for a site other than GitHub; resolves whether to go. */
@@ -511,6 +513,12 @@ export class PluginHostApi extends RpcTarget implements HostApi {
             : undefined,
       })
     })
+  }
+
+  setTitle(title: string | null): Promise<void> {
+    return this.#budget.run(() =>
+      this.#host().setTitle(optionalText(title, "title", 120) ?? null)
+    )
   }
 
   people(logins: Array<string>) {
