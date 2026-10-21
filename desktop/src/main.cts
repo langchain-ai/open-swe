@@ -1233,12 +1233,32 @@ async function serveBundledUi(request) {
   return net.fetch(pathToFileURL(filePath).toString());
 }
 
-async function loadApp(window) {
+const appNavigations = new WeakMap<Electron.BrowserWindow, { url: string }>();
+
+async function loadApp(
+  window: Electron.BrowserWindow,
+  url = appNavigations.get(window)?.url ?? APP_URL,
+) {
   if (!backendUrl) return;
+  const navigation = { url };
+  appNavigations.set(window, navigation);
   try {
-    await window.loadURL(APP_URL);
+    await window.loadURL(url);
   } catch (error) {
-    if (!window.isDestroyed()) await window.loadURL(errorPage(error));
+    console.warn("Desktop navigation failed", error);
+    if (
+      window.isDestroyed() ||
+      appNavigations.get(window) !== navigation ||
+      (error instanceof Error &&
+        "code" in error &&
+        error.code === "ERR_ABORTED")
+    )
+      return;
+    await window
+      .loadURL(errorPage(error))
+      .catch((pageError) =>
+        console.warn("Could not show desktop navigation error", pageError),
+      );
   }
 }
 
@@ -1537,7 +1557,7 @@ function handleNavigation(window, event, url) {
   }
 }
 
-function createWindow() {
+function createWindow(initialUrl = APP_URL) {
   if (!backendUrl) return createSetupWindow();
   const window = new BrowserWindow({
     title: appRuntime.name,
@@ -1598,7 +1618,7 @@ function createWindow() {
     rendererConsole.push(normalizeConsoleMessage(details)),
   );
   mainWindow = window;
-  void loadApp(window);
+  void loadApp(window, initialUrl);
   return window;
 }
 
@@ -1692,10 +1712,11 @@ function createSetupWindow() {
         await clearBackendCookies(previousUrl);
         await session.defaultSession.clearStorageData({ origin: APP_URL });
       }
-      if (mainWindow && !mainWindow.isDestroyed()) await loadApp(mainWindow);
-      else createWindow();
       if (pendingDeepLink && openDesktopLink(pendingDeepLink))
         pendingDeepLink = null;
+      else if (mainWindow && !mainWindow.isDestroyed())
+        await loadApp(mainWindow);
+      else createWindow();
       window.close();
     } catch (error) {
       dialog.showErrorBox(
@@ -1734,16 +1755,11 @@ function openDesktopLink(url) {
   if (!target) return false;
   const existingWindow =
     mainWindow && !mainWindow.isDestroyed() ? mainWindow : null;
-  const window = existingWindow || createWindow();
+  const window = existingWindow || createWindow(target);
   if (window.isMinimized()) window.restore();
   window.show();
   window.focus();
-  if (existingWindow) void window.loadURL(target);
-  else
-    window.webContents.once(
-      "did-finish-load",
-      () => void window.loadURL(target),
-    );
+  if (existingWindow) void loadApp(window, target);
   return true;
 }
 
@@ -1818,9 +1834,9 @@ if (!hasSingleInstanceLock) {
     configurePermissions();
     configureDesktopIpc();
     createMenu();
-    createWindow();
     if (pendingDeepLink && openDesktopLink(pendingDeepLink))
       pendingDeepLink = null;
+    else createWindow();
     configureAutoUpdater();
     configureTerminalIpc({
       ipcMain,

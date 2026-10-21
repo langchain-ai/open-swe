@@ -11,6 +11,7 @@ import {
   writeFileSync,
 } from "node:fs";
 import { join, resolve } from "node:path";
+import { tmpdir } from "node:os";
 import { _electron as electron } from "playwright";
 
 const repoRoot = resolve(__dirname, "..", "..", "..");
@@ -215,5 +216,92 @@ test("Desktop runs a This Mac thread on the cloud agent through its bridge", asy
     await electronApp.close().catch(() => {});
     if (!process.env.E2E_KEEP_TMP)
       rmSync(stateRoot, { recursive: true, force: true });
+  }
+});
+
+test("Desktop links supersede startup loading and survive error-page reload", async () => {
+  const stateRoot = mkdtempSync(join(tmpdir(), "desktop-links-"));
+  const electronApp = await electron.launch({
+    executablePath: electronPath,
+    args: [
+      ...(process.platform === "linux" ? ["--no-sandbox"] : []),
+      desktopRoot,
+      "--dev",
+      "--backend-url=https://desktop.test",
+    ],
+    env: {
+      ...process.env,
+      HOME: stateRoot,
+      XDG_CONFIG_HOME: stateRoot,
+      APPDATA: stateRoot,
+    },
+  });
+  const target = "open-swe://app/agents/reviews/langchain-ai/open-swe/4215";
+  try {
+    const page = await electronApp.firstWindow();
+    await electronApp.evaluate(({ protocol }) => {
+      protocol.unhandle("open-swe");
+      let reviewLoads = 0;
+      protocol.handle("open-swe", async (request) => {
+        const pathname = new URL(request.url).pathname;
+        if (pathname.endsWith("/4215") && ++reviewLoads === 2)
+          throw new Error("Review fixture unavailable");
+        if (pathname === "/")
+          await new Promise((done) => setTimeout(done, 200));
+        return new Response("<h1>Desktop navigation fixture</h1>", {
+          headers: { "content-type": "text/html" },
+        });
+      });
+    });
+    await page.goto("data:text/html,Reload fixture");
+    await electronApp.evaluate(({ app, Menu }) => {
+      Menu.getApplicationMenu()
+        ?.items.find((item) => item.label === "View")
+        ?.submenu?.items.find((item) => item.label === "Reload")
+        ?.click();
+      app.emit(
+        "continue-activity",
+        { preventDefault() {} },
+        "NSUserActivityTypeBrowsingWeb",
+        {},
+        {
+          webpageURL:
+            "https://desktop.test/agents/reviews/langchain-ai/open-swe/4215",
+        },
+      );
+    });
+    await expect(
+      page.getByRole("heading", { name: "Desktop navigation fixture" }),
+    ).toBeVisible();
+    await expect(page).toHaveURL(target);
+    await page.goto("open-swe://app/agents");
+    await electronApp.evaluate(({ app }) => {
+      app.emit(
+        "continue-activity",
+        { preventDefault() {} },
+        "NSUserActivityTypeBrowsingWeb",
+        {},
+        {
+          webpageURL:
+            "https://desktop.test/agents/reviews/langchain-ai/open-swe/4215",
+        },
+      );
+    });
+    await expect(
+      page.getByRole("heading", { name: "Open SWE could not start" }),
+    ).toBeVisible();
+    await electronApp.evaluate(({ Menu }) => {
+      Menu.getApplicationMenu()
+        ?.items.find((item) => item.label === "View")
+        ?.submenu?.items.find((item) => item.label === "Reload")
+        ?.click();
+    });
+    await expect(
+      page.getByRole("heading", { name: "Desktop navigation fixture" }),
+    ).toBeVisible();
+    await expect(page).toHaveURL(target);
+  } finally {
+    await electronApp.close();
+    rmSync(stateRoot, { recursive: true, force: true });
   }
 });
