@@ -12,9 +12,11 @@ from contextlib import asynccontextmanager
 from dataclasses import dataclass
 from uuid import UUID
 
+from fastapi import HTTPException
+
+from openswe.dashboard.repo_access import require_repo_access_for_user
 from openswe.github.http import GitHubClient, RepoClient
 from openswe.github.repo_names import RepoFullName, normalize_repo_full_name
-from openswe.github.repos import accessible_repo_full_names
 from openswe.plugins.manifest import PluginPermission
 from openswe.plugins.records import DocumentScope, Installation, PluginDocuments, PluginThreads
 from openswe.prompts import prompt
@@ -29,6 +31,17 @@ class PluginPermissionDenied(PermissionError):
 class RepositoryNotGranted(PermissionError):
     def __init__(self, repository: str) -> None:
         super().__init__(f"The plugin may not reach {repository}")
+
+
+async def can_read_repository(login: str, repository: str) -> bool:
+    """Whether ``login`` can read ``repository`` on GitHub now; an expired sign-in raises."""
+    try:
+        await require_repo_access_for_user(login, repository)
+    except HTTPException as exc:
+        if exc.status_code in {403, 404}:
+            return False
+        raise
+    return True
 
 
 @dataclass(frozen=True, slots=True)
@@ -51,7 +64,7 @@ class InstalledPlugin:
             raise RepositoryNotGranted(raw) from exc
         if name not in self.installation.repositories:
             raise RepositoryNotGranted(name)
-        if name not in await accessible_repo_full_names(self.login):
+        if not await can_read_repository(self.login, name):
             raise RepositoryNotGranted(name)
         return name
 

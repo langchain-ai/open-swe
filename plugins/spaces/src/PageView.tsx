@@ -438,7 +438,9 @@ export function PageView({ path }: { path: string }) {
               </button>
             )}
           </div>
-          <h1 className="page-title">{pageTitle(path)}</h1>
+          {!/^\s*#\s/.test(split.body) && (
+            <h1 className="page-title">{pageTitle(path)}</h1>
+          )}
           {editing && draft.startedBy !== user.login && (
             <p className="muted">
               {draft.startedBy} started this draft {timeAgo(draft.startedAt)}.

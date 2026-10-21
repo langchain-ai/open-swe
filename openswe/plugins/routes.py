@@ -6,6 +6,7 @@ GitHub, and agent threads. The dashboard relays those from the plugin's
 sandboxed frame, which cannot reach the network itself.
 """
 
+import asyncio
 import logging
 from collections.abc import Iterator
 from contextlib import contextmanager
@@ -23,8 +24,12 @@ from openswe.dashboard.deps import SESSION_DEP, session_is_admin
 from openswe.dashboard.oauth import session_user_id
 from openswe.github.http import GitHubClient, GitHubError, GitHubSignInRequired, GraphQLError
 from openswe.github.repo_names import normalize_repo_full_name
-from openswe.github.repos import accessible_repo_full_names
-from openswe.plugins.installed import InstalledPlugin, PluginPermissionDenied, RepositoryNotGranted
+from openswe.plugins.installed import (
+    InstalledPlugin,
+    PluginPermissionDenied,
+    RepositoryNotGranted,
+    can_read_repository,
+)
 from openswe.plugins.manifest import PluginManifest, PluginPermission
 from openswe.plugins.records import (
     Installation,
@@ -190,8 +195,8 @@ async def _grantable(login: str, raw: list[str]) -> list[str]:
         names = sorted({normalize_repo_full_name(repo).lower() for repo in raw})
     except ValueError as exc:
         raise HTTPException(422, "repositories must be owner/repo") from exc
-    accessible = await accessible_repo_full_names(login)
-    if missing := [name for name in names if name not in accessible]:
+    readable = await asyncio.gather(*(can_read_repository(login, name) for name in names))
+    if missing := [name for name, ok in zip(names, readable, strict=True) if not ok]:
         raise HTTPException(403, f"You cannot reach {', '.join(missing)}")
     return names
 

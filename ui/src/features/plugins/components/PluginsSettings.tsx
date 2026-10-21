@@ -257,6 +257,15 @@ function RepositoryGrants({
   onChange: (repositories: Array<string>) => void
 }) {
   const repos = useRepos()
+  const [typed, setTyped] = useState("")
+  const options = repos.data?.repositories?.filter(
+    (repo) => !repositories.includes(repo.full_name.toLowerCase())
+  )
+  const add = (repo: string) => {
+    const name = repo.trim().toLowerCase()
+    if (/^[^/\s]+\/[^/\s]+$/.test(name) && !repositories.includes(name))
+      onChange([...repositories, name])
+  }
   return (
     <div className="flex flex-wrap items-center gap-space-1">
       <span className="mr-space-1 text-xs text-secondary">Repositories:</span>
@@ -282,17 +291,39 @@ function RepositoryGrants({
           </span>
         </Badge>
       ))}
-      {editable && (
+      {editable && options && options.length > 0 && (
         <RepoSelector
-          repos={repos.data?.repositories?.filter(
-            (repo) => !repositories.includes(repo.full_name.toLowerCase())
-          )}
-          onRepoChange={(repo) =>
-            repo && onChange([...repositories, repo.toLowerCase()])
-          }
+          repos={options}
+          onRepoChange={(repo) => repo && add(repo)}
           placeholder="Add repository"
           triggerClassName="h-6 text-xs"
         />
+      )}
+      {editable && (
+        <form
+          className="flex items-center gap-space-1"
+          onSubmit={(event) => {
+            event.preventDefault()
+            add(typed)
+            setTyped("")
+          }}
+        >
+          <input
+            aria-label="Repository to add"
+            className="h-6 w-40 rounded-md border border-default bg-transparent px-space-2 text-xs text-primary"
+            placeholder="owner/repo"
+            value={typed}
+            onChange={(event) => setTyped(event.target.value)}
+          />
+          <Button
+            type="submit"
+            size="xs"
+            variant="outlined"
+            disabled={!typed.trim()}
+          >
+            Add
+          </Button>
+        </form>
       )}
     </div>
   )

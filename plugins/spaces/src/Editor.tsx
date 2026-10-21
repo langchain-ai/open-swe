@@ -68,19 +68,6 @@ export function PageEditor({
       immediatelyRender: true,
       onUpdate: ({ editor: updated }) =>
         callbacks.current.onChange(updated.getMarkdown(), updated.state.doc),
-      onSelectionUpdate: ({ editor: selected }) => {
-        const { from, to, empty } = selected.state.selection
-        const box = shell.current?.getBoundingClientRect()
-        const anchor = empty ? null : anchorFor(selected.state.doc, from, to)
-        if (!anchor || !box || !anchor.quote.trim()) return setSelection(null)
-        const start = selected.view.coordsAtPos(from)
-        setSelection({
-          anchor,
-          top: start.top - box.top - 40,
-          left: Math.max(0, start.left - box.left),
-        })
-      },
-      onBlur: () => setTimeout(() => setSelection(null), 150),
     },
     [markdown]
   )
@@ -93,6 +80,49 @@ export function PageEditor({
   useEffect(() => {
     if (editor && editor.isEditable !== editable) editor.setEditable(editable)
   }, [editor, editable])
+
+  // The DOM selection, not ProseMirror's: a read-only page has no editor
+  // selection, and comments belong on published pages too.
+  useEffect(() => {
+    if (!editor) return
+    const update = () => {
+      const selected = document.getSelection()
+      const box = shell.current?.getBoundingClientRect()
+      if (!selected || selected.isCollapsed || !selected.rangeCount || !box)
+        return setSelection(null)
+      const range = selected.getRangeAt(0)
+      const root = editor.view.dom
+      if (
+        !root.contains(range.startContainer) ||
+        !root.contains(range.endContainer)
+      )
+        return setSelection(null)
+      let anchor: Anchor | null = null
+      try {
+        const from = editor.view.posAtDOM(
+          range.startContainer,
+          range.startOffset
+        )
+        const to = editor.view.posAtDOM(range.endContainer, range.endOffset)
+        anchor = anchorFor(
+          editor.state.doc,
+          Math.min(from, to),
+          Math.max(from, to)
+        )
+      } catch {
+        anchor = null
+      }
+      if (!anchor?.quote.trim()) return setSelection(null)
+      const rect = range.getBoundingClientRect()
+      setSelection({
+        anchor,
+        top: rect.top - box.top - 40,
+        left: Math.max(0, rect.left - box.left),
+      })
+    }
+    document.addEventListener("selectionchange", update)
+    return () => document.removeEventListener("selectionchange", update)
+  }, [editor])
 
   useEffect(() => {
     if (editor) setHighlights(editor.view, highlights, activeId)

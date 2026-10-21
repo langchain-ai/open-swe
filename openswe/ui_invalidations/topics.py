@@ -195,7 +195,7 @@ async def _readable_pull_requests(session: Session, keys: set[str]) -> set[str]:
 async def _readable_plugin_documents(session: Session, keys: set[str]) -> set[str]:
     # Imported on use: most of the app imports this module, which stays light.
     from openswe.dashboard.oauth import session_user_id
-    from openswe.github.repos import accessible_repo_full_names
+    from openswe.plugins.installed import can_read_repository
     from openswe.users.models import User
 
     scopes = {key: key.split("/", 1)[1] for key in keys if "/" in key}
@@ -204,14 +204,16 @@ async def _readable_plugin_documents(session: Session, keys: set[str]) -> set[st
         user = await User.for_session(session_user_id(session), session["sub"])
         own = f"user/{user.id}" if user is not None else None
         readable |= {key for key, scope in scopes.items() if scope == own}
-    if any(not scope.startswith("user/") for scope in scopes.values()):
-        try:
-            accessible = await accessible_repo_full_names(session["sub"])
-        except Exception:
-            logger.warning("Could not list repositories for plugin invalidations", exc_info=True)
-            return readable
-        readable |= {key for key, scope in scopes.items() if scope in accessible}
-    return readable
+    repositories = sorted({s for s in scopes.values() if not s.startswith("user/")})
+    try:
+        allowed = await asyncio.gather(
+            *(can_read_repository(session["sub"], repo) for repo in repositories)
+        )
+    except Exception:
+        logger.warning("Could not check repositories for plugin invalidations", exc_info=True)
+        return readable
+    visible = {repo for repo, ok in zip(repositories, allowed, strict=True) if ok}
+    return readable | {key for key, scope in scopes.items() if scope in visible}
 
 
 async def _readable_threads(session: Session, thread_ids: set[str]) -> set[str]:
