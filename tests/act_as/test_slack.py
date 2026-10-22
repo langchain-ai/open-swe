@@ -97,7 +97,8 @@ async def stack(thread_metadata: JsonObject, monkeypatch: pytest.MonkeyPatch) ->
 
 
 async def _status() -> str:
-    return (await ThreadActAs.load("thread-1")).decision_for("alice") or "pending"
+    thread = await ThreadActAs.load("thread-1")
+    return thread.decision_for(next(iter(thread.requests.values()))) or "pending"
 
 
 @pytest.mark.asyncio
@@ -112,7 +113,7 @@ async def test_the_persons_answer_is_recorded_and_announced(stack, action, statu
     stack.ephemeral.assert_awaited_once_with(
         "C1",
         "U-ALICE",
-        f"`alice` {status} Open SWE opening PRs as them in this thread.",
+        f"`alice` {status} Open SWE opening this PR as them.",
         thread_ts="1.0",
     )
     user_id, channel_id, note = stack.concierge.await_args.args
@@ -142,6 +143,7 @@ async def test_an_answer_after_the_tool_gave_up_wakes_the_thread(stack, monkeypa
 
     if gave_up:
         dispatch.assert_awaited_once()
+        assert dispatch.await_args is not None
         assert dispatch.await_args.kwargs["multitask_strategy"] == "enqueue"
         assert "alice approved" in dispatch.await_args.args[2]
     else:

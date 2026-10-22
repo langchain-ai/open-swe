@@ -1,7 +1,7 @@
 """Ask a participant before Open SWE opens a PR as them in a shared thread.
 
 In a thread with more than one participant anyone can steer the run, so the
-person the PR opens as gets the final say, once per thread. They get a DM card
+person the PR opens as gets the final say, separately for each PR. They get a DM card
 and the tool waits briefly for their answer; an answer that comes later wakes
 the thread with a follow-up run. "Always allow" skips the card, and a thread with a single
 participant never asks. Only people who turned on the
@@ -52,7 +52,7 @@ def _refusal(login: str, refusal: Refusal, token_kind: str) -> ActAsRefusal:
             f"{login} did not answer within {int(_WAIT_SECONDS)} seconds. Their answer will "
             "arrive as a new message in this thread."
         ),
-        "denied": f"{login} denied Open SWE acting as them in this thread.",
+        "denied": f"{login} denied Open SWE opening this PR as them.",
         "unreachable": f"{login} could not be sent the approval DM in Slack.",
     }[refusal]
     return {
@@ -92,14 +92,14 @@ async def require_consent(
         return None
     if person.typed_preferences.act_as_always_allowed:
         return None
-    decision = thread.decision_for(login)
+    request = await thread.request(login, owner=owner, repo=repo, head=head, base=base, title=title)
+    decision = thread.decision_for(request)
     if decision is not None:
         return _outcome(decision, login, token_kind)
 
     slack_user_id = person.slack_user_id
     if not slack_user_id:
         return _refusal(login, "unreachable", token_kind)
-    request = await thread.request(login, owner=owner, repo=repo, head=head, base=base, title=title)
     if not request.notified:
         if not await _send_card(slack_user_id, request, thread_id):
             return _refusal(login, "unreachable", token_kind)
@@ -124,7 +124,7 @@ async def _send_card(slack_user_id: str, request: ActAsRequest, thread_id: str) 
         f":raised_hand: Open SWE wants to open a PR as you in {thread_link}.\n\n"
         f"*{escape(request.title)}*\n"
         f"`{repo}` — `{escape(request.head)}` → `{escape(request.base)}`\n\n"
-        "Approve, always allow, or deny."
+        "Approve or deny this PR only. Always allow skips approval for all future PRs as you."
     )
     dm_channel_id = await open_dm(slack_user_id)
     if not dm_channel_id:
@@ -166,12 +166,12 @@ async def _wait_for_answer(
         await thread.set_wake_on_answer(request, False)
     for _ in range(int(_WAIT_SECONDS / _POLL_SECONDS)):
         await asyncio.sleep(_POLL_SECONDS)
-        decision = (await ThreadActAs.load(thread.thread_id)).decision_for(login)
+        decision = (await ThreadActAs.load(thread.thread_id)).decision_for(request)
         if decision is not None:
             return _outcome(decision, login, token_kind)
     await thread.set_wake_on_answer(request, True)
     # An answer recorded before the flag landed will not wake the thread, so act on it here.
-    decision = (await ThreadActAs.load(thread.thread_id)).decision_for(login)
+    decision = (await ThreadActAs.load(thread.thread_id)).decision_for(request)
     if decision is not None:
         return _outcome(decision, login, token_kind)
     return _refusal(login, "pending", token_kind)

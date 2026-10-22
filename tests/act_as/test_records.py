@@ -4,7 +4,7 @@ from unittest.mock import AsyncMock
 
 import pytest
 
-from openswe.act_as.records import ActAsRequest, ThreadActAs
+from openswe.act_as.records import ThreadActAs
 from openswe.users import User, UserPreferences, UserPreferencesPatch
 from openswe.utils.json_types import JsonObject
 from openswe.utils.thread_participants import (
@@ -16,23 +16,21 @@ from openswe.utils.thread_participants import (
 _PR = {"owner": "o", "repo": "r", "head": "h", "base": "b", "title": "t"}
 
 
-def test_fingerprint_is_per_thread_and_login() -> None:
-    fingerprint = ActAsRequest.fingerprint_for("t1", "alice")
-    assert ActAsRequest.fingerprint_for("t1", "Alice") == fingerprint
-    assert ActAsRequest.fingerprint_for("t2", "alice") != fingerprint
-    assert ActAsRequest.fingerprint_for("t1", "carol") != fingerprint
-
-
 @pytest.mark.asyncio
-async def test_one_request_per_person_survives_a_reload(thread_metadata: JsonObject) -> None:
+async def test_each_pr_keeps_its_own_request_after_reload(thread_metadata: JsonObject) -> None:
     thread = await ThreadActAs.load("thread-1")
     first = await thread.request("alice", **_PR)
-    await thread.request("Alice", **{**_PR, "head": "other"})
+    retry = await thread.request("Alice", **{**_PR, "title": "renamed"})
+    other = await thread.request("alice", **{**_PR, "head": "other"})
+    await thread.decide(first, approved=True, always_allow=False)
+    await thread.decide(other, approved=False, always_allow=False)
 
     reloaded = await ThreadActAs.load("thread-1")
 
-    assert list(reloaded.requests) == [first.fingerprint]
-    assert reloaded.for_login("alice") == first
+    assert retry == first
+    assert len(reloaded.requests) == 2
+    assert reloaded.decision_for(first) == "approved"
+    assert reloaded.decision_for(other) == "denied"
 
 
 @pytest.mark.asyncio
@@ -102,7 +100,7 @@ async def test_the_first_answer_stands(
 
     later = await ThreadActAs.load("thread-1")
     assert not await later.decide(request, approved=True, always_allow=False)
-    assert (await ThreadActAs.load("thread-1")).decision_for("alice") == "denied"
+    assert (await ThreadActAs.load("thread-1")).decision_for(request) == "denied"
 
 
 @pytest.mark.asyncio
@@ -114,7 +112,7 @@ async def test_a_late_notification_write_keeps_the_decision(thread_metadata: Jso
 
     await sender.mark_notified(request)
 
-    assert (await ThreadActAs.load("thread-1")).decision_for("alice") == "approved"
+    assert (await ThreadActAs.load("thread-1")).decision_for(request) == "approved"
 
 
 @pytest.mark.asyncio
@@ -128,5 +126,5 @@ async def test_always_allow_is_saved_on_the_person(
 
     await thread.decide(request, approved=True, always_allow=True)
 
-    assert (await ThreadActAs.load("thread-1")).decision_for("alice") == "approved"
+    assert (await ThreadActAs.load("thread-1")).decision_for(request) == "approved"
     update.assert_awaited_once_with("alice", UserPreferencesPatch(act_as_always_allowed=True))

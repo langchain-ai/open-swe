@@ -1,6 +1,7 @@
 """Asking a participant before a PR opens as them in a shared thread."""
 
 import asyncio
+import hashlib
 import json
 from types import SimpleNamespace
 from unittest.mock import AsyncMock
@@ -48,22 +49,18 @@ def _alice(
     monkeypatch.setattr(User, "for_login", AsyncMock(return_value=person))
 
 
-async def _open() -> gate.ActAsRefusal | None:
+async def _open(**scope: str) -> gate.ActAsRefusal | None:
     return await gate.require_consent(
         thread_id="thread-1",
         token_kind="user",
         author=None,
-        owner="o",
-        repo="r",
-        head="h",
-        base="b",
-        title="t",
+        **{"owner": "o", "repo": "r", "head": "h", "base": "b", "title": "t", **scope},
     )
 
 
 async def _answer(approved: bool) -> None:
     thread = await ThreadActAs.load("thread-1")
-    request = thread.for_login("alice")
+    request = next(iter(thread.requests.values()), None)
     assert request is not None
     await thread.decide(request, approved=approved, always_allow=False)
 
@@ -144,6 +141,38 @@ async def test_retry_after_a_late_approval_opens_without_asking_again(dm, monkey
 
     assert await _open() is None
     dm.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "scope", [{"owner": "other"}, {"repo": "other"}, {"head": "other"}, {"base": "other"}]
+)
+async def test_approval_does_not_authorize_another_pr(dm, monkeypatch, scope):
+    _alice(monkeypatch, "U-ALICE")
+    await _open()
+    await _answer(True)
+    dm.reset_mock()
+
+    refusal = await _open(**scope)
+
+    assert refusal is not None and refusal["act_as"] == "pending"
+    dm.assert_awaited_once()
+    assert await _open() is None
+
+
+@pytest.mark.asyncio
+async def test_legacy_thread_approval_does_not_authorize_a_pr(dm, thread_metadata, monkeypatch):
+    _alice(monkeypatch, "U-ALICE")
+    legacy = hashlib.sha256(b"thread-1|alice").hexdigest()[:16]
+    thread_metadata[f"act_as_decision:{legacy}"] = {
+        "decision": "approved",
+        "decided_at": "2026-10-22T00:00:00Z",
+    }
+
+    refusal = await _open()
+
+    assert refusal is not None and refusal["act_as"] == "pending"
+    dm.assert_awaited_once()
 
 
 @pytest.mark.asyncio

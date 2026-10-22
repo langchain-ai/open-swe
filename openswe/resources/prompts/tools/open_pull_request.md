@@ -58,7 +58,8 @@ Returns:
 
 Shared threads and acting as someone:
     In a thread with more than one participant, a PR first needs the approval of
-    the person it opens as, unless they chose "Always allow". The tool
+    the person it opens as for that repository, head branch and base branch, unless they
+    chose "Always allow". Approval for one PR does not authorize other PRs. The tool
     DMs them an approval card in Slack and waits up to 30 seconds: on
     approval it proceeds, otherwise it returns
     ``act_as: pending|denied|unreachable`` — PR created: no. On ``pending``, tell the
