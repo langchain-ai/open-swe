@@ -46,9 +46,9 @@ so what Playwright asserts on is exactly what the real agent produced.
   fake API URLs, isolated `GIT_CONFIG_GLOBAL`, bot-token-only mode).
 - `fake_llm.py` — the scripted `BaseChatModel` (the only faked agent piece).
 - `patches.py` — monkeypatches the boundaries (LLM, GitHub/Slack URLs, token mint).
-- `agent_entrypoint.py` — langgraph `agent` graph: applies patches, re-exports the
-  real `traced_agent`. Every Open SWE thread runs on Managed Deep Agents, so
-  the backend builds this graph for each MDA run's hooks.
+- `agent_entrypoint.py` — langgraph `agent` graph: applies patches in the backend
+  worker, re-exports the read-only `traced_agent`. Every Open SWE thread runs on
+  Managed Deep Agents, whose hooks the backend answers from `plan_agent`.
 - `mda-dev.sh` + `mda_entrypoint.py` — the Managed Deep Agents server: `mda build`
   output served by `langgraph dev` as `mda dev` serves it, with the fake model
   and loopback completion webhooks.

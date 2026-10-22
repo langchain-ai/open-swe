@@ -4,7 +4,7 @@ from typing import Any, cast
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
-from langchain.agents.middleware.types import ModelRequest, ToolCallRequest
+from langchain.agents.middleware.types import ModelRequest
 from langchain_core.language_models import BaseChatModel
 from langchain_core.messages import AIMessage, HumanMessage, ToolMessage
 from langchain_core.outputs import ChatGeneration, ChatResult
@@ -17,7 +17,7 @@ from openswe.mcp.workspace import workspace_mcp_source
 from openswe.slack.channels import SlackChannel
 from openswe.workspaces.store import DEFAULT_WORKSPACE_SLUG
 from tests.agent.test_agent_assembly_context import (
-    _capture_create_deep_agent_kwargs,
+    _plan_agent,
 )
 from tests.agent.test_agent_assembly_context import saved_thread_scope as saved_thread_scope
 
@@ -88,7 +88,7 @@ async def test_incident_uses_system_sandbox_tools_integrations_and_delegation(
         coroutine=update_incident, name="incident_update", description="Update incident status"
     )
     with patch("openswe.server.load_mcp_tools", AsyncMock(return_value=[remote])) as mcps:
-        result = cast(dict[str, Any], await _capture_create_deep_agent_kwargs(_incident_config()))
+        result = cast(dict[str, Any], await _plan_agent(_incident_config()))
     mcps.assert_awaited_once()
     # System runs load the instance tier and the default workspace's, never a person's.
     assert [source.namespace for source in mcps.await_args.args] == [
@@ -128,21 +128,11 @@ async def test_incident_uses_system_sandbox_tools_integrations_and_delegation(
     dynamic = next(item for item in middleware if isinstance(item, DynamicToolMiddleware))
     assert remote.name in dynamic.tools[0].description
     subagent = result["subagents"][0]
-    subagent_names = {_registered_tool_name(tool) for tool in subagent["tools"]}
-    assert ("open_pull_request" in subagent_names) is explicit
-    tool_guard = next(item for item in subagent["middleware"] if item.name == "_SubagentToolGuard")
-    tool_handler = AsyncMock()
-    for name in runtime.INCIDENT_TOOL_NAMES | {"manage_incident"}:
-        request = MagicMock(spec=ToolCallRequest)
-        request.tool_call = {"name": name, "args": {}, "id": name, "type": "tool_call"}
-        response = await tool_guard.awrap_tool_call(request, tool_handler)
-        assert isinstance(response, ToolMessage)
-        assert response.tool_call_id == name
-        assert "inside a subagent" in response.content
-    tool_handler.assert_not_awaited()
-    guard = next(
-        item for item in subagent["middleware"] if isinstance(item, runtime.IncidentMiddleware)
-    )
+    assert subagent.tools is not None
+    assert ("open_pull_request" in subagent.tools) is explicit
+    # Incident tools are the parent's alone.
+    assert not (runtime.INCIDENT_TOOL_NAMES | {"manage_incident"}) & set(subagent.tools)
+    guard = next(item for item in middleware if isinstance(item, runtime.IncidentMiddleware))
     session.check.side_effect = PermissionError("revoked")
     handler = AsyncMock()
     with pytest.raises(PermissionError, match="revoked"):
@@ -155,7 +145,7 @@ async def test_incident_uses_system_sandbox_tools_integrations_and_delegation(
 async def test_forged_incident_source_on_a_normal_thread_is_refused(saved_thread_scope):
     saved_thread_scope.update(source="slack", visibility="public")
     with pytest.raises(PermissionError, match="not an incident"):
-        await _capture_create_deep_agent_kwargs(_incident_config())
+        await _plan_agent(_incident_config())
 
 
 @pytest.mark.parametrize("requested_action", [False, True])
@@ -221,28 +211,30 @@ async def test_main_agent_records_the_incident_report_through_the_tool(
             return ChatResult(generations=[ChatGeneration(message=reply)])
 
     model = TurnModel(responses=[])
-    kwargs = cast(
-        dict[str, Any],
-        await _capture_create_deep_agent_kwargs(config, make_model=lambda *_args, **_kwargs: model),
-    )
-    kwargs.pop("make_model_calls")
+    planned = await _plan_agent(config, make_model=lambda *_args, **_kwargs: model)
+    tools = cast(list[Any], planned["tools"])
     if requested_action:
 
         async def open_pull_request() -> dict:
             """Open the requested test PR through a simulated external API."""
             return await performed()
 
-        kwargs["tools"] = [
+        tools = [
             tool
-            for tool in kwargs["tools"]
+            for tool in tools
             if getattr(tool, "__name__", getattr(tool, "name", "")) != "open_pull_request"
         ]
-        kwargs["tools"].append(StructuredTool.from_function(coroutine=open_pull_request))
-    for subagent in kwargs["subagents"]:
-        subagent["model"] = ScriptedModel(responses=[])
-    kwargs["checkpointer"] = InMemorySaver()
-    kwargs["store"] = InMemoryStore()
-    agent = create_deep_agent(**kwargs)
+        tools.append(StructuredTool.from_function(coroutine=open_pull_request))
+    # The planned run, played in-process: its tools through its middleware.
+    agent = create_deep_agent(
+        model=model,
+        tools=tools,
+        middleware=cast(list[Any], planned["middleware"]),
+        backend=planned["backend"],
+        subagents=[],
+        checkpointer=InMemorySaver(),
+        store=InMemoryStore(),
+    )
     with patch(
         "openswe.server.PrepareAgentRunMiddleware._prepare",
         AsyncMock(

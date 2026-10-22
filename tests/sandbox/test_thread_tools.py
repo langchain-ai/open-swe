@@ -8,9 +8,7 @@ from uuid import uuid4
 import jwt
 import pytest
 from fastapi import HTTPException
-from langchain.agents import create_agent
 from langchain.agents.middleware import AgentMiddleware
-from langchain_core.language_models.fake_chat_models import FakeListChatModel
 from langchain_core.messages import ToolMessage
 from langchain_core.runnables import RunnableConfig
 from langchain_core.tools import StructuredTool
@@ -98,11 +96,9 @@ def surface() -> ToolSurface:
             "MCP": [StructuredTool.from_function(coroutine=integration_echo)],
         }
     )
-    graph = create_agent(
-        FakeListChatModel(responses=[]),
-        middleware=cast(list[AgentMiddleware], [dynamic, DenyValue()]),
+    return ToolSurface(
+        dynamic=dynamic, middleware=cast(list[AgentMiddleware], [dynamic, DenyValue()])
     )
-    return ToolSurface(graph=graph, dynamic=dynamic)
 
 
 async def test_capability_carries_binding_and_is_revoked_on_rebinding(
@@ -258,7 +254,7 @@ async def test_invalid_claims_never_reach_thread_lookup(
 def test_agent_factory_is_accepted_by_langgraph() -> None:
     from langgraph_api._factory_utils import FACTORY_KWARGS, classify_factory
 
-    from openswe.server import traced_agent
+    from openswe.graphs.agent import traced_agent
 
     graph_id = "sandbox-tools-factory-test"
     try:

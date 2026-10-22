@@ -343,9 +343,7 @@ async def test_mda_catalog_leaves_integrations_and_code_mode_to_mda(
     """Seldom-needed tools go to MDA's code mode, not the model's schemas; the graph's own stays here."""
     # A provider MDA declares no box for, so the catalog reads no thread metadata.
     monkeypatch.setenv("SANDBOX_TYPE", "local")
-    from langchain.agents import create_agent
     from langchain.agents.middleware.types import AgentMiddleware
-    from langchain_core.language_models.fake_chat_models import FakeListChatModel
     from langchain_core.tools import StructuredTool
     from langchain_quickjs import CodeInterpreterMiddleware
 
@@ -391,9 +389,7 @@ async def test_mda_catalog_leaves_integrations_and_code_mode_to_mda(
             CodeInterpreterMiddleware(ptc=[integration("mcp_search")]),
             TaskCoordinationMiddleware(RUN.thread_id, True, None),
         ]
-        surface.graph = create_agent(
-            FakeListChatModel(responses=[]), tools=core, middleware=middleware
-        )
+        surface.base_tools = core
         surface.code_mode = True
         surface.middleware = middleware
         surface.subagents = [SurfaceSubagent("general-purpose", "helper", "instructions")]

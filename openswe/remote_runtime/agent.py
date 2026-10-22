@@ -15,10 +15,10 @@ from openswe.utils.model import provider_model_kwargs
 ASSISTANT_ID: Final = "agent"
 
 
-async def _build(config: RunnableConfig, surface: ToolSurface) -> object:
-    from openswe.server import build_agent
+async def _plan(config: RunnableConfig, surface: ToolSurface) -> None:
+    from openswe.server import plan_agent
 
-    return await build_agent(config, tool_surface=surface)
+    await plan_agent(config, surface)
 
 
 def _spec(model_id: str, effort: str | None) -> ModelSpec:
@@ -37,4 +37,4 @@ async def run_models(cfg: RunConfig) -> RunModels:
     )
 
 
-AGENT: Final = RemoteGraph(ASSISTANT_ID, _build, run_models)
+AGENT: Final = RemoteGraph(ASSISTANT_ID, _plan, run_models)

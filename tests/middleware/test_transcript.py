@@ -646,7 +646,6 @@ async def test_an_mda_subagent_is_recorded_under_its_task_call(
     """MDA runs ``task`` and its subagent; the backend's hooks file their events under the call."""
     # A provider MDA declares no box for, so preparing reads no thread metadata.
     monkeypatch.setenv("SANDBOX_TYPE", "local")
-    from langchain.agents import create_agent
     from langchain_core.messages import messages_to_dict
     from langchain_core.tools import tool
 
@@ -662,11 +661,8 @@ async def test_an_mda_subagent_is_recorded_under_its_task_call(
         return f"contents of {path}"
 
     async def build(config: Any, surface: ToolSurface) -> None:
-        middleware = [mw.TranscriptMiddleware()]
-        surface.graph = create_agent(
-            GenericFakeChatModel(messages=iter([])), tools=[read_file], middleware=middleware
-        )
-        surface.middleware = middleware
+        surface.base_tools = [read_file]
+        surface.middleware = [mw.TranscriptMiddleware()]
 
     async def start_models(cfg: Any) -> Any:
         raise AssertionError("not asked for")

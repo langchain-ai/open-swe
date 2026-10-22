@@ -1,22 +1,28 @@
-"""Execute the agent's tool node without invoking its model."""
+"""What a graph factory plans for a run, and its tools node, run without a model.
+
+The factory names the run's tools, middleware, models and subagents; the model
+loop runs on Managed Deep Agents, and the backend runs the tools it is called for
+through the node an agent with those tools and middleware would run them in.
+"""
 
 import math
 import re
 from collections import Counter
-from collections.abc import Mapping, Sequence
+from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass, field
 from typing import cast
 from uuid import uuid4
 
 from fastapi import HTTPException
+from langchain.agents import create_agent
 from langchain.agents.middleware.types import AgentMiddleware
+from langchain_core.language_models.fake_chat_models import FakeListChatModel
 from langchain_core.messages import AIMessage, AnyMessage, ToolMessage
 from langchain_core.runnables import RunnableConfig
 from langchain_core.tools import BaseTool
 from langgraph.graph import END, START, StateGraph
-from langgraph.graph.state import CompiledStateGraph
 from langgraph.prebuilt import ToolNode
-from langgraph.typing import StateT
+from langgraph.typing import StateLike, StateT
 from pydantic import BaseModel, JsonValue, TypeAdapter
 
 from openswe.mcp.models import MCPToolProvenance
@@ -136,9 +142,35 @@ class SurfaceSubagent:
     tools: tuple[str, ...] | None = None
 
 
+type PlannedTool = BaseTool | Callable[..., object] | dict[str, object]
+
+
+@dataclass
+class _ToolsNode:
+    node: ToolNode
+    state_schema: type[StateLike]
+
+
+def _tools_node(tools: Sequence[PlannedTool], middleware: Sequence[AgentMiddleware]) -> _ToolsNode:
+    """The tools node an agent with ``tools`` and ``middleware`` runs, wrapped in its tool-call middleware.
+
+    Its model never runs: a run's model loop is Managed Deep Agents'.
+    """
+    agent = create_agent(
+        FakeListChatModel(responses=[""]), tools=list(tools), middleware=list(middleware)
+    )
+    node = agent.builder.nodes["tools"].runnable
+    if not isinstance(node, ToolNode):
+        raise RuntimeError("Agent tools node is unavailable")
+    return _ToolsNode(node, agent.builder.state_schema)
+
+
 @dataclass
 class ToolSurface:
-    graph: CompiledStateGraph | None = None
+    """A run as its graph factory plans it."""
+
+    # The factory's own tools; its middleware adds theirs.
+    base_tools: Sequence[PlannedTool] = ()
     dynamic: DynamicToolMiddleware | None = None
     excluded: frozenset[str] = frozenset()
     tools: dict[str, BaseTool] = field(default_factory=dict)
@@ -156,13 +188,11 @@ class ToolSurface:
     # Whether a model loop running elsewhere calls these tools, rather than the sandbox.
     for_model: bool = False
 
+    _node: _ToolsNode | None = field(default=None, init=False, repr=False)
+
     async def prepare(self, state: Mapping[str, object]) -> None:
-        if self.graph is None:
-            raise RuntimeError("Tool graph was not initialized")
-        node = self.graph.builder.nodes["tools"].runnable
-        if not isinstance(node, ToolNode):
-            raise RuntimeError("Agent tools node is unavailable")
-        tools = dict(node.tools_by_name)
+        self._node = _tools_node(self.base_tools, self.middleware)
+        tools = dict(self._node.node.tools_by_name)
         if self.dynamic:
             integrations = await self.dynamic.catalog_tools()
             self.integration_names = [tool.name for tool in integrations]
@@ -194,7 +224,7 @@ class ToolSurface:
         *,
         call_id: str | None = None,
     ) -> ToolNodeResult:
-        """Run one call through the graph's own tools node, keeping its state updates."""
+        """Run one call through the run's tools node, keeping its state updates."""
         tool = self.tools.get(name)
         if tool is None:
             raise HTTPException(404, "Tool is unavailable")
@@ -202,18 +232,15 @@ class ToolSurface:
         properties = parameters.get("properties", {})
         if not isinstance(properties, dict) or set(arguments) - properties.keys():
             raise HTTPException(422, "Unexpected tool arguments")
-        if self.graph is None:
-            raise RuntimeError("Tool graph was not initialized")
-        node = self.graph.builder.nodes["tools"].runnable
-        if not isinstance(node, ToolNode):
-            raise RuntimeError("Agent tools node is unavailable")
+        if self._node is None:
+            raise RuntimeError("The surface was not prepared")
         loaded = state.get("loaded_integration_tools", [])
         integration_names = list(loaded) if isinstance(loaded, list) else []
         if name in self.integration_names and name not in integration_names:
             integration_names.append(name)
         return await run_tool_node(
-            node,
-            self.graph.builder.state_schema,
+            self._node.node,
+            self._node.state_schema,
             {**state, "loaded_integration_tools": integration_names},
             config,
             name,

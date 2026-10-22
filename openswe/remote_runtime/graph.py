@@ -1,9 +1,9 @@
 """One Open SWE graph, played by a run on Managed Deep Agents.
 
-MDA keeps the model loop and its checkpoints. Everything else is the in-process
-graph itself, built here for the run exactly as this deployment would
-run it: its tools node, with its tool-call middleware around every call, and its
-own middleware, which the MDA run hands each phase of its loop to:
+MDA keeps the model loop and its checkpoints. Everything else is the run as its
+graph factory plans it (``ToolSurface``), with no graph compiled: its tools, run
+through the tools node an agent with its tool-call middleware would run them in,
+and its own middleware, which the MDA run hands each phase of its loop to:
 
 - ``prepare`` runs every ``before_agent`` hook: run preparation (the thread's
   sandbox, checkout and prompt), the transcript turn, skills, reply bookkeeping
@@ -183,7 +183,7 @@ _json_object = TypeAdapter(dict[str, JsonValue])
 _json_list = TypeAdapter(list[JsonValue])
 
 Phase = Literal["before_agent", "before_model", "after_model", "after_agent"]
-GraphBuilder = Callable[[RunnableConfig, ToolSurface], Awaitable[object]]
+RunPlanner = Callable[[RunnableConfig, ToolSurface], Awaitable[None]]
 StartModels = Callable[[RunConfig], Awaitable[RunModels]]
 StateRestorer = Callable[[dict[str, object]], None]
 
@@ -316,7 +316,7 @@ class RecordsRemoteTools(Protocol):
 
 
 class RunSession:
-    """One run's in-process graph: its tools node, middleware and models."""
+    """One run as its graph factory planned it: its tools, middleware and models."""
 
     def __init__(
         self,
@@ -665,13 +665,13 @@ class RemoteGraph:
     def __init__(
         self,
         assistant_id: str,
-        build: GraphBuilder,
+        plan: RunPlanner,
         start_models: StartModels,
         *,
         restore_state: StateRestorer | None = None,
     ) -> None:
         self.assistant_id = assistant_id
-        self._build = build
+        self._plan = plan
         self.start_models = start_models
         self._restore_state = restore_state
         self._sessions: dict[tuple[str, str | None], RunSession] = {}
@@ -693,7 +693,7 @@ class RemoteGraph:
             return cached
         config = self._config(run, run_id)
         surface = ToolSurface(for_model=True)
-        await self._build(config, surface)
+        await self._plan(config, surface)
         await surface.prepare({})
         session = RunSession(surface, config, self._restore_state, started_here=fresh)
         if len(self._sessions) >= _SESSION_LIMIT:
