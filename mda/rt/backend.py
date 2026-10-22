@@ -46,6 +46,8 @@ Hook = Literal[
     "tool_result",
     # The thread's box was replaced: the backend connects to the fresh one.
     "sandbox",
+    # The LangSmith browser MDA gave the thread's agent, for the dashboard to show.
+    "browser",
 ]
 # Waits before resending a call, for as long as a backend rollout takes. A refused
 # connection never reached the backend, so every hook is resent after one. A gateway
@@ -118,6 +120,7 @@ class Catalog(BaseModel):
     tools: list[ToolSpec] = []
     subagents: list[SubagentSpec] = []
     models: RunModels | None = None
+    trace_metadata: dict[str, JsonValue] = {}
     # Tools the graph keeps from the model, including MDA's own of the same name.
     excluded: list[str] = []
     # Tools the model calls from code mode rather than directly.
@@ -141,6 +144,7 @@ class PhaseReply(BaseModel):
     model: ModelSpec | None = None
     fallback: ModelSpec | None = None
     use_gateway: bool = False
+    trace_metadata: dict[str, JsonValue] = {}
 
 
 class ToolReply(BaseModel):

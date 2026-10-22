@@ -315,6 +315,7 @@ class TestRequireUserReplyMiddleware:
         assert posted.await_args is not None
         assert posted.await_args.args[:2] == ("all good", "final")
 
+    @pytest.mark.asyncio
     async def test_each_run_resolves_its_own_surface(self) -> None:
         middleware = RequireUserReplyMiddleware(
             TOOL, NO_REPLY_TOOL, initial_surface=WEB_REPLY_SURFACE

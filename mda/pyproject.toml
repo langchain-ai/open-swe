@@ -5,7 +5,7 @@ description = "Open SWE's coding agent and pull request reviewer as one Managed 
 requires-python = ">=3.12"
 dependencies = [
     "managed-deepagents",
-    "deepagents==0.7.28",
+    "deepagents==0.7.30",
     "langchain[mcp]>=1.4.6",
     "langchain-anthropic>=1.7.6",
     "langchain-openai>=1.7.2,<2.0.0",
