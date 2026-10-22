@@ -38,10 +38,10 @@ python-version = "3.13"
 # Its own type-check root: checked against this project's environment alone, an
 # import of the backend (`openswe`) or a database driver fails to resolve.
 [tool.ty.src]
-include = ["agent.py", "identity.py", "channels", "rt", "tests"]
+include = ["agent.py", "identity.py", "rt", "tests"]
 
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
 testpaths = ["tests"]
-# `agent`, `channels` and `rt` import from the project root, as `mda build` lays them out.
+# `agent` and `rt` import from the project root, as `mda build` lays them out.
 pythonpath = ["."]
