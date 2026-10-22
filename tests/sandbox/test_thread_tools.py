@@ -295,3 +295,14 @@ async def test_search_tools_ranks_by_bm25_and_names_code_calls() -> None:
     assert results[0]["parameters"]["properties"].keys() == {"query"}
     assert results[0]["code_name"] == "searchDatadogLogs"
     assert await search.ainvoke({"query": "kubernetes"}) == []
+    restricted = search_tools_tool(
+        surface, lambda name: name, allowed=frozenset({"get_datadog_metric"})
+    )
+    results = await restricted.ainvoke(
+        {
+            "query": "datadog logs",
+            "limit": 1,
+            "names": ["searchDatadogLogs", "get_datadog_metric"],
+        }
+    )
+    assert [result["name"] for result in results] == ["get_datadog_metric"]

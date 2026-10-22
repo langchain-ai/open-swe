@@ -167,11 +167,36 @@ async def agent(runtime: ManagedServerRuntime) -> DeepAgentDefinition:
         *in_code,
         *(tool for tool in tools if tool.name in catalog.also_from_code and tool not in in_code),
     ]
-    subagent_tools = {
-        subagent.name: offered
-        if subagent.tools is None
-        else [by_name[name] for name in subagent.tools if name in by_name]
+    # What each subagent may call, directly or from code: its own tool list, or the
+    # graph's, never a tool the graph hides. Its search_tools ranks only these.
+    subagent_allowed = {
+        subagent.name: frozenset(
+            (spec.name for spec in catalog.tools) if subagent.tools is None else subagent.tools
+        )
+        - excluded
         for subagent in catalog.subagents
+    }
+    subagent_search = {
+        name: backend_tool(spec, backend, search_names=allowed)
+        for name, allowed in subagent_allowed.items()
+        for spec in catalog.tools
+        if spec.name == "search_tools" and spec.name in allowed
+    }
+    subagent_tools = {
+        name: [
+            subagent_search[name] if spec.name == "search_tools" else by_name[spec.name]
+            for spec in catalog.tools
+            if spec.name in allowed and spec.name in by_name
+        ]
+        for name, allowed in subagent_allowed.items()
+    }
+    subagent_code = {
+        name: [
+            subagent_search[name] if tool.name == "search_tools" else tool
+            for tool in from_code
+            if tool.name in allowed
+        ]
+        for name, allowed in subagent_allowed.items()
     }
     replace_sandbox = (
         [ReplaceSandboxMiddleware(backend, catalog.sandbox)] if catalog.sandbox is not None else []
@@ -200,7 +225,12 @@ async def agent(runtime: ManagedServerRuntime) -> DeepAgentDefinition:
                 *_backend_reports(backend, reported_elsewhere),
                 *box_tools,
                 *replace_sandbox,
-                ServedToolsMiddleware(subagent_tools[subagent.name], excluded, backend),
+                ServedToolsMiddleware(
+                    subagent_tools[subagent.name],
+                    excluded | (code_only if subagent.tools is None else frozenset()),
+                    backend,
+                ),
+                *_code_mode("agent", subagent_code[subagent.name], catalog.described),
                 ModelRetryMiddleware(retry_on=(TimeoutError,)),
             ],
         }
