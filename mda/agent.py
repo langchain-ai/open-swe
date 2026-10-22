@@ -193,6 +193,8 @@ async def agent(runtime: ManagedServerRuntime) -> DeepAgentDefinition:
         ModelRetryMiddleware(retry_on=(TimeoutError,)),
     ]
     worker: ManagedAsyncSubAgent = {
+        # MDA's build reads `name` and `async` as literals after any spread.
+        **({"webhook": catalog.worker_webhook} if catalog.worker_webhook else {}),
         "name": "general-purpose",
         "description": _WORKER_DESCRIPTION,
         "system_prompt": _INSTRUCTIONS,
@@ -201,7 +203,6 @@ async def agent(runtime: ManagedServerRuntime) -> DeepAgentDefinition:
         # The backend settles a worker's runs from their webhooks and wakes the coordinator
         # itself, so deepagents must not wake it as well.
         "notify_parent": False,
-        **({"webhook": catalog.worker_webhook} if catalog.worker_webhook else {}),
     }
     return define_deep_agent(
         name="open-swe",
