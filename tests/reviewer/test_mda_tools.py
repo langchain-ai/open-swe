@@ -816,3 +816,95 @@ async def test_mda_does_not_retry_tool_pairing_errors(
         with pytest.raises(type(error)) as caught:
             await middleware.awrap_model_call(request, handler)
         assert caught.value is error
+
+
+@pytest.mark.parametrize("wrapped", [False, True])
+@pytest.mark.parametrize("available", [False, True])
+async def test_offloaded_tool_image_reaches_anthropic(
+    monkeypatch: pytest.MonkeyPatch, wrapped: bool, available: bool
+) -> None:
+    from langchain.agents.middleware.types import ModelRequest, ModelResponse
+    from langchain_anthropic.chat_models import _format_messages
+    from langchain_core.messages import AIMessage
+    from rt.middleware import ResolveBlobsMiddleware
+
+    monkeypatch.setenv("OPEN_SWE_BACKEND_URL", "https://backend.invalid")
+    backend = OpenSweBackend("token")
+    monkeypatch.setattr(backend, "blob", AsyncMock(return_value="aW1hZ2U=" if available else None))
+    image = {"type": "image", "mime_type": "image/png", "deepagents_blob": "a" * 64}
+    block = {"type": "non_standard", "value": image} if wrapped else image
+    message = ToolMessage(content=[block], tool_call_id="read-1")
+    request = ModelRequest(
+        model=FakeListChatModel(responses=["done"]),
+        messages=[message],
+        state={"messages": [message]},
+        tools=[],
+    )
+
+    async def provider(outgoing: ModelRequest) -> ModelResponse:
+        _, messages = _format_messages(outgoing.messages, model="claude-opus-5-5")
+        content = messages[0]["content"][0]["content"][0]
+        if available:
+            assert content["source"] == {
+                "type": "base64",
+                "media_type": "image/png",
+                "data": "aW1hZ2U=",
+            }
+        else:
+            assert content["type"] == "text"
+            assert "a" * 64 in content["text"]
+        return ModelResponse(result=[AIMessage(content="done")])
+
+    await ResolveBlobsMiddleware(backend).awrap_model_call(request, provider)
+    assert message.content == [block]
+
+
+@pytest.mark.parametrize("provider", ["anthropic", "openai", "transient"])
+async def test_mda_fallback_preserves_invalid_request_errors(
+    monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture, provider: str
+) -> None:
+    import httpx
+    from langchain.agents.middleware.types import ModelRequest, ModelResponse
+    from langchain_anthropic.chat_models import AnthropicInvalidRequestError
+    from langchain_core.messages import AIMessage
+    from langchain_openai.chat_models.base import OpenAIInvalidRequestError
+    from rt.middleware import ModelCall
+    from rt.models import ModelSpec
+
+    monkeypatch.setenv("OPEN_SWE_BACKEND_URL", "https://backend.invalid")
+    model = FakeListChatModel(responses=["done"])
+    monkeypatch.setattr("rt.middleware.build_model", lambda *args, **kwargs: model)
+    response = httpx.Response(400, request=httpx.Request("POST", "https://provider.invalid"))
+    failure = (
+        AnthropicInvalidRequestError("missing image source", response=response, body={})
+        if provider == "anthropic"
+        else OpenAIInvalidRequestError("invalid image", response=response, body={})
+        if provider == "openai"
+        else RuntimeError("unavailable")
+    )
+    call = ModelCall(
+        system_prompt="test",
+        model=None,
+        fallback=ModelSpec(model_id="openai:fallback", kwargs={}),
+        use_gateway=False,
+    )
+    request = ModelRequest(
+        model=model,
+        messages=[],
+        tools=[],
+        state={"messages": [], "open_swe_call": call.model_dump()},
+    )
+    handler = AsyncMock(
+        side_effect=[failure, ModelResponse(result=[AIMessage(content="fallback")])]
+    )
+    middleware = BackendRunMiddleware(OpenSweBackend("token"), "run")
+    if provider == "transient":
+        result = await middleware.awrap_model_call(request, handler)
+        assert result.result[0].content == "fallback"
+    else:
+        with pytest.raises(type(failure)) as raised:
+            await middleware.awrap_model_call(request, handler)
+        assert raised.value is failure
+        assert handler.await_count == 1
+        assert "Model request rejected; fallback skipped" in caplog.text
+        assert str(failure) in caplog.text

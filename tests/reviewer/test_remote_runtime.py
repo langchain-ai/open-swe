@@ -692,3 +692,44 @@ async def test_a_launched_run_that_ended_before_its_worker_was_registered_is_set
             "error": "boom",
         }
     )
+
+
+@pytest.mark.parametrize("stored", [None, b"wrong image", b"image"])
+async def test_blob_hook_reads_only_the_signed_threads_verified_image(
+    monkeypatch: pytest.MonkeyPatch, stored: bytes | None
+) -> None:
+    import base64
+    import hashlib
+    from collections.abc import Iterable
+    from datetime import UTC, datetime
+    from unittest.mock import AsyncMock
+
+    from langgraph.store.base import GetOp, Item, Op, Result
+
+    from openswe.remote_runtime.graph import RemoteGraph
+    from openswe.threads.blobs import ThreadBlobs, blob_namespace
+
+    digest = hashlib.sha256(b"image").hexdigest()
+
+    async def read_blob(self: ThreadBlobs, ops: Iterable[Op]) -> list[Result]:
+        [op] = list(ops)
+        assert isinstance(op, GetOp)
+        assert self.thread_id == RUN.thread_id
+        assert op.namespace == blob_namespace(RUN.thread_id)
+        assert op.key == f"/{digest}"
+        if stored is None:
+            return [None]
+        return [
+            Item(
+                value={"content": base64.b64encode(stored).decode("ascii"), "encoding": "base64"},
+                key=op.key,
+                namespace=op.namespace,
+                created_at=datetime.now(UTC),
+                updated_at=datetime.now(UTC),
+            )
+        ]
+
+    monkeypatch.setattr(ThreadBlobs, "abatch", read_blob)
+    graph = RemoteGraph("reviewer", AsyncMock(), AsyncMock())
+    reply = await graph.hook(RUN, "blob", {"digest": digest, "thread_id": "other-thread"})
+    assert reply == {"base64": "aW1hZ2U=" if stored == b"image" else None}
