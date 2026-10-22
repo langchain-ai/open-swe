@@ -205,6 +205,38 @@ async def test_review_and_thread_status_agree_on_check_outcomes(
     assert len(review.pending_checks) == thread["pendingCheckCount"] == int(conclusion is None)
 
 
+@pytest.mark.parametrize("merge_state", ["clean", "blocked"])
+@pytest.mark.parametrize("unavailable", ["rules", "runs", "statuses", "base"])
+async def test_clean_merge_confirms_required_checks_when_details_are_unavailable(
+    monkeypatch, merge_state, unavailable
+):
+    pull = {
+        "state": "open",
+        "mergeable": True,
+        "mergeable_state": merge_state,
+        "head": {"sha": "a" * 40},
+    }
+    if unavailable != "base":
+        pull["base"] = {"ref": "main"}
+    monkeypatch.setattr(prs.PullRequestClient, "pull", AsyncMock(return_value=pull))
+    for method, source in [("check_runs", "runs"), ("commit_statuses", "statuses")]:
+        monkeypatch.setattr(
+            github_http.RepoClient,
+            method,
+            AsyncMock(side_effect=httpx2.HTTPError("Unavailable"))
+            if unavailable == source
+            else AsyncMock(return_value=[]),
+        )
+    monkeypatch.setattr(RequiredCheck, "for_branch", AsyncMock(return_value=None))
+    monkeypatch.setattr(prs.PullRequestClient, "reviewers", AsyncMock(return_value=[]))
+    monkeypatch.setattr(
+        prs.PullRequestClient, "review_state", AsyncMock(return_value=prs.ReviewState(0))
+    )
+    result = await _client(1).load()
+    assert result is not None
+    assert result.required_checks_passing is (True if merge_state == "clean" else None)
+
+
 async def test_mergeability_is_not_awaited_forever(monkeypatch):
     monkeypatch.setattr(prs, "_MERGEABILITY_DELAY_SECONDS", 0)
     fetches = AsyncMock(

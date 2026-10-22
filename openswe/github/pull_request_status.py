@@ -848,6 +848,8 @@ class PullRequestClient:
         )
         if pull is None:
             return result
+        if result.merge_state == "clean":
+            result.required_checks_passing = True
         head = pull.get("head")
         if not isinstance(head, Mapping):
             return result
