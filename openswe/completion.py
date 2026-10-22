@@ -9,6 +9,11 @@ This decouples "the user gets an answer" from "the agent remembered to reply."
 The reply is idempotent per run when the webhook includes a run id. Older or
 manual payloads without a run id fall back to legacy thread-level idempotence so
 missing ids degrade dedupe instead of silencing failure replies.
+
+Runs an MDA channel starts (run metadata ``channel``) carry the same webhook, which
+the backend hands the channel with the run. The channel answers in its own
+conversation, failures included, and starts every run on its threads, so a
+channel run gets no failure reply and starts no follow-up runs.
 """
 
 import hmac
@@ -20,7 +25,7 @@ from langgraph_sdk.client import LangGraphClient
 
 from openswe.agent_cost import finalize_agent_invocation_usage
 from openswe.config import ENV
-from openswe.dispatch import FOLLOW_UP_PICKUP_KIND, RunMetadata
+from openswe.dispatch import FOLLOW_UP_PICKUP_KIND, RunMetadata, channel_of
 from openswe.github.app import get_github_app_installation_token
 from openswe.github.comments import post_github_comment
 from openswe.invocation import resolve_invocation_id, with_invocation_id
@@ -523,13 +528,20 @@ async def handle_run_completion(payload: dict[str, Any]) -> dict[str, str]:
             )
             raise
     payload_metadata = payload.get("metadata")
+    # The channel starts every run on its threads and answers failures there itself.
+    channel = channel_of(payload_metadata if isinstance(payload_metadata, dict) else None)
     if isinstance(payload_metadata, dict) and status in _TERMINAL_RUN_STATUSES:
         if pull_request := RunMetadata.model_validate(payload_metadata).pull_request:
             await Topic.PULL_REQUESTS.invalidate(key=pull_request)
     # A run that failed, or a pickup run that left the store as it found it,
     # would only fail the same way again: one attempt per leftover.
-    if status == "success" and not (
-        isinstance(payload_metadata, dict) and payload_metadata.get("kind") == FOLLOW_UP_PICKUP_KIND
+    if (
+        status == "success"
+        and channel is None
+        and not (
+            isinstance(payload_metadata, dict)
+            and payload_metadata.get("kind") == FOLLOW_UP_PICKUP_KIND
+        )
     ):
         pickup_allowed = True
         if is_worker:
@@ -544,7 +556,7 @@ async def handle_run_completion(payload: dict[str, Any]) -> dict[str, str]:
         if status in _TERMINAL_FAILURE_STATUSES:
             _log_run_failure(thread_id, run_id, status, payload.get("error"))
         return {"status": "ok", "reason": "worker completion handled"}
-    if status == "success" or status in _TERMINAL_FAILURE_STATUSES:
+    if channel is None and (status == "success" or status in _TERMINAL_FAILURE_STATUSES):
         await TaskMessage.deliver_to(thread_id)
         await EventSubscription.deliver_to(thread_id, "enqueue")
     if status == "success":
@@ -584,6 +596,9 @@ async def handle_run_completion(payload: dict[str, Any]) -> dict[str, str]:
             return {"status": "ignored", "reason": "failure reply already posted"}
     elif run_id in _posted_failure_run_ids(metadata):
         return {"status": "ignored", "reason": "failure reply already posted for run"}
+
+    if channel is not None:
+        return {"status": "ignored", "reason": "the channel reports the failure"}
 
     # Only event-woken runs count: a failure on a run a person started always replies
     # and lets later event-woken failures report again.

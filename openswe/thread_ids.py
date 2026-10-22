@@ -12,7 +12,6 @@ import uuid
 
 __all__ = [
     "github_issue_thread_id",
-    "linear_issue_thread_id",
     "mda_successor_thread_id",
     "pr_comment_thread_id",
     "review_chat_thread_id",
@@ -56,10 +55,6 @@ def review_chat_thread_id(owner: str, repo: str, pr_number: int, login: str) -> 
 
 def slack_thread_id(channel: str, timestamp: str, nonce: str | None = None) -> str:
     return _url_uuid(f"slack:{channel}:{timestamp}:{nonce or ''}")
-
-
-def linear_issue_thread_id(issue_id: str) -> str:
-    return _sha256_uuid(f"linear-issue:{issue_id}")
 
 
 def github_issue_thread_id(issue_id: str) -> str:

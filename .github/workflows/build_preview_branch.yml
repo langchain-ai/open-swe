@@ -129,10 +129,13 @@ jobs:
         env:
           # Reserved by `mda deploy`: it authenticates the deploy and is never forwarded as a deployment secret.
           LANGSMITH_API_KEY: ${{ secrets.PREVIEW_DEPLOY_API_KEY || secrets.LANGSMITH_API_KEY }}
+          # Shared with the preview backend: MDA signs each call its channels make to it.
+          MDA_SERVICE_SECRET: ${{ secrets.MDA_SERVICE_SECRET_PREVIEW }}
           TREE_SHA: ${{ needs.build.outputs.sha }}
         run: |
-          # The project .env is forwarded as the deployment's secrets: only the backend it calls back.
-          printf 'OPEN_SWE_BACKEND_URL=%s\n' "https://open-swe-preview-cc53e8fbe667565d843d0843f84ee92c.us.langgraph.app" >mda/.env
+          # The project .env is forwarded as the deployment's secrets: the backend it calls back,
+          # and the secret they share.
+          printf 'OPEN_SWE_BACKEND_URL=%s\nMDA_SERVICE_SECRET=%s\n' "https://open-swe-preview-cc53e8fbe667565d843d0843f84ee92c.us.langgraph.app" "$MDA_SERVICE_SECRET" >mda/.env
           uv run --project mda --locked --python 3.13 mda deploy mda \
             --name open-swe-mda-preview \
             --deployment-type prod \
