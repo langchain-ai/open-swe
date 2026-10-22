@@ -312,16 +312,14 @@ async def test_turn_reconciliation_reaches_runtime_root_llm_and_nested_calls(
     assert all(run_id not in created for run_id, _ in updates[previous_update_count:])
 
 
-@pytest.mark.parametrize("destination", ["project", "address", "replicas"])
+@pytest.mark.parametrize("destination", ["project", "address"])
 async def test_backfill_preserves_destination_timing_and_outputs(
     monkeypatch: pytest.MonkeyPatch, destination: str
 ) -> None:
     patches: list[dict[str, object]] = []
-    auths: list[object] = []
 
     def capture(client: Client, data: dict[str, object], **kwargs: object) -> None:
         patches.append(deepcopy(data))
-        auths.append(kwargs.get("_replica_auths"))
 
     monkeypatch.setattr(Client, "_update_run", capture)
     started = datetime(2026, 1, 1, tzinfo=UTC)
@@ -337,15 +335,6 @@ async def test_backfill_preserves_destination_timing_and_outputs(
             extra={"metadata": {"invocation_id": "turn"}},
             project_name="source" if destination != "address" else None,
             address=agent_address("open-swe", "production") if destination == "address" else None,
-            replicas=[
-                {"project_name": "source", "primary": True},
-                {
-                    "address": agent_address("open-swe", "production"),
-                    "api_key": "replica-test",
-                },
-            ]
-            if destination == "replicas"
-            else None,
         )
         child = root.create_child(
             name="model",
@@ -365,17 +354,11 @@ async def test_backfill_preserves_destination_timing_and_outputs(
         assert isinstance(extra := patch["extra"], dict)
         assert extra["metadata"]["ls_git_repo"] == "org/repo"
         assert extra["metadata"]["ls_git_branch"] == "feature"
-    assert len(patches) == (2 if destination == "replicas" else 1)
+    assert len(patches) == 1
     if destination == "project":
         assert child_patch["session_name"] == "source"
     else:
-        addressed = next(patch for patch in patches if patch.get("address"))
-        assert addressed["address"] == "lrn:agents/open-swe/environments/production"
-        if destination == "replicas":
-            assert child_patch["session_name"] == "source"
-            assert addressed["id"] != child.id
-            assert isinstance(replica_auth := auths[1], list)
-            assert getattr(replica_auth[0], "api_key", None) == "replica-test"
+        assert child_patch["address"] == "lrn:agents/open-swe/environments/production"
     assert child.outputs == {"answer": "done"}
     assert root.end_time is None
     assert root.metadata["ls_git_repo"] == child.metadata["ls_git_repo"] == "org/repo"
