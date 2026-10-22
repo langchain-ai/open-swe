@@ -2,10 +2,12 @@
 
 Open SWE dispatch names the graph a run plays (``agent``, ``reviewer`` or
 ``review-scout``) in its context. The model loop and its checkpoints run here. The Open SWE backend
-holds every credential, the sandbox and the graph itself: this factory takes the
-graph's tools, subagents and models from the backend's catalog for the run, and
+holds every credential and the graph itself: this factory takes the graph's tools,
+subagents and models from the backend's catalog for the run, and
 ``BackendRunMiddleware`` hands each phase of the loop to the graph's own
-middleware there. The run token in the context authenticates every call.
+middleware there. Where MDA owns the thread's box, the file and shell tools run in
+it from here (``SandboxToolsMiddleware``). The run token in the context
+authenticates every call.
 
 The same agent runs as the async ``general-purpose`` subagent, the graph
 ``open-swe--general-purpose``, for the task workers a coordinator launches with
@@ -33,7 +35,12 @@ from managed_deepagents import (
 from pydantic import BaseModel, ConfigDict, Field, JsonValue
 from rt.backend import Catalog, OpenSweBackend
 from rt.browser import ReportedBrowserMiddleware
-from rt.managed_sandbox import ReplaceSandboxMiddleware, definition, opened_sandbox
+from rt.managed_sandbox import (
+    EXECUTE_TIMEOUT_SECONDS,
+    ReplaceSandboxMiddleware,
+    definition,
+    opened_sandbox,
+)
 from rt.middleware import (
     AsyncWorkerLaunchMiddleware,
     BackendRunMiddleware,
@@ -43,6 +50,7 @@ from rt.middleware import (
     ServedToolsMiddleware,
 )
 from rt.models import RunModels, build_model
+from rt.sandbox_tools import SandboxToolsMiddleware
 from rt.tools import backend_tool
 
 if TYPE_CHECKING:
@@ -144,14 +152,21 @@ async def agent(runtime: ManagedServerRuntime) -> DeepAgentDefinition:
         else _DEFAULT_MODEL
     )
     tools = [backend_tool(spec, backend) for spec in catalog.tools]
-    by_name = {tool.name: tool for tool in tools}
+    # MDA's own file and shell tools serve the ones the thread's box runs here. Code
+    # mode keeps the backend's: its calls skip tool-call middleware, the checks included.
+    in_box = frozenset(catalog.sandbox.tools if catalog.sandbox is not None else ())
+    registered = [tool for tool in tools if tool.name not in in_box]
+    by_name = {tool.name: tool for tool in registered}
     excluded = frozenset(catalog.excluded)
     # Every schema offered costs each call its context, and OpenAI answers some requests
     # carrying hundreds with nothing; the tools the model seldom needs are called from code.
     code_only = frozenset(catalog.code_only)
     in_code = [tool for tool in tools if tool.name in code_only]
-    offered = [tool for tool in tools if tool not in in_code]
-    from_code = [*in_code, *(tool for tool in offered if tool.name in catalog.also_from_code)]
+    offered = [tool for tool in registered if tool.name not in code_only]
+    from_code = [
+        *in_code,
+        *(tool for tool in tools if tool.name in catalog.also_from_code and tool not in in_code),
+    ]
     subagent_tools = {
         subagent.name: offered
         if subagent.tools is None
@@ -161,6 +176,19 @@ async def agent(runtime: ManagedServerRuntime) -> DeepAgentDefinition:
     replace_sandbox = (
         [ReplaceSandboxMiddleware(backend, catalog.sandbox)] if catalog.sandbox is not None else []
     )
+    box_tools = (
+        [
+            SandboxToolsMiddleware(
+                backend,
+                catalog.sandbox,
+                EXECUTE_TIMEOUT_SECONDS,
+                check_reads=context.graph == "agent",
+            )
+        ]
+        if catalog.sandbox is not None and in_box
+        else []
+    )
+    reported_elsewhere = {*by_name, *in_box}
     sync_subagents: list[SubAgent] = [
         {
             "name": subagent.name,
@@ -169,7 +197,8 @@ async def agent(runtime: ManagedServerRuntime) -> DeepAgentDefinition:
             "model": subagent_model,
             "tools": subagent_tools[subagent.name],
             "middleware": [
-                *_backend_reports(backend, by_name.keys()),
+                *_backend_reports(backend, reported_elsewhere),
+                *box_tools,
                 *replace_sandbox,
                 ServedToolsMiddleware(subagent_tools[subagent.name], excluded, backend),
                 ModelRetryMiddleware(retry_on=(TimeoutError,)),
@@ -186,7 +215,8 @@ async def agent(runtime: ManagedServerRuntime) -> DeepAgentDefinition:
             trace_metadata=catalog.trace_metadata,
         ),
         *replace_sandbox,
-        *_backend_reports(backend, by_name.keys()),
+        *_backend_reports(backend, reported_elsewhere),
+        *box_tools,
         ServedToolsMiddleware(offered, excluded | code_only, backend),
         *_code_mode(context.graph, from_code, catalog.described),
         *_browser(context.graph, backend),
@@ -204,13 +234,14 @@ async def agent(runtime: ManagedServerRuntime) -> DeepAgentDefinition:
         name="open-swe",
         model=model,
         context_schema=OpenSweRunContext,
-        # Named as the in-process graph names them, these replace MDA's own file
-        # and shell tools: the backend runs them in the thread's sandbox. Code-only
-        # tools stay callable by name, as in-process, though no request offers them.
-        tools=tools,
-        # The thread's box, for MDA's own use of it such as the browser's screenshots;
-        # the backend's tools run in the same box. A worker's catalog is its coordinator's,
-        # so the worker shares the coordinator's box.
+        # Named as the in-process graph names them, these replace MDA's own file and
+        # shell tools where the backend runs them. Code-only tools stay callable by
+        # name, as in-process, though no request offers them.
+        tools=registered,
+        # The thread's box, for the file and shell tools run in it from here and for
+        # MDA's own use of it, such as the browser's screenshots; the backend's tools
+        # run in the same box. A worker's catalog is its coordinator's, so the worker
+        # shares the coordinator's box.
         sandbox=(
             definition(catalog.sandbox.create, catalog.sandbox.thread_id)
             if catalog.sandbox is not None
