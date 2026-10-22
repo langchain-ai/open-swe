@@ -1027,6 +1027,29 @@
         "title": "BridgeRequestsResponse",
         "type": "object"
       },
+      "BrowserTab": {
+        "properties": {
+          "id": {
+            "title": "Id",
+            "type": "string"
+          },
+          "title": {
+            "default": "",
+            "title": "Title",
+            "type": "string"
+          },
+          "url": {
+            "default": "",
+            "title": "Url",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id"
+        ],
+        "title": "BrowserTab",
+        "type": "object"
+      },
       "ChallengeResponse": {
         "properties": {
           "challenge": {
@@ -6980,6 +7003,34 @@
           "end"
         ],
         "title": "TextAnchor",
+        "type": "object"
+      },
+      "ThreadBrowserView": {
+        "description": "A thread's browser window as the dashboard embeds it.",
+        "properties": {
+          "act_url": {
+            "title": "Act Url",
+            "type": "string"
+          },
+          "expires_at": {
+            "format": "date-time",
+            "title": "Expires At",
+            "type": "string"
+          },
+          "tabs": {
+            "items": {
+              "$ref": "#/components/schemas/BrowserTab"
+            },
+            "title": "Tabs",
+            "type": "array"
+          }
+        },
+        "required": [
+          "tabs",
+          "act_url",
+          "expires_at"
+        ],
+        "title": "ThreadBrowserView",
         "type": "object"
       },
       "ThreadComment-Input": {
@@ -18521,6 +18572,103 @@
         "summary": "Api Get Thread Branch Diff",
         "tags": [
           "dashboard",
+          "threads"
+        ]
+      }
+    },
+    "/dashboard/api/threads/{thread_id}/browser": {
+      "get": {
+        "operationId": "api_thread_browser_dashboard_api_threads__thread_id__browser_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "thread_id",
+            "required": true,
+            "schema": {
+              "title": "Thread Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ThreadBrowserView"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "DashboardSession": []
+          }
+        ],
+        "summary": "Api Thread Browser",
+        "tags": [
+          "dashboard",
+          "threads",
+          "threads"
+        ]
+      },
+      "post": {
+        "description": "Open the thread's browser for a person, before or after the agent has.",
+        "operationId": "api_open_thread_browser_dashboard_api_threads__thread_id__browser_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "thread_id",
+            "required": true,
+            "schema": {
+              "title": "Thread Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ThreadBrowserView"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "DashboardSession": []
+          }
+        ],
+        "summary": "Api Open Thread Browser",
+        "tags": [
+          "dashboard",
+          "threads",
           "threads"
         ]
       }
