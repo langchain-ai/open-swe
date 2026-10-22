@@ -140,6 +140,7 @@ from openswe.middleware.require_user_reply import (
 from openswe.middleware.sandbox_circuit_breaker import post_sandbox_unreachable_notification
 from openswe.middleware.stale_workspace import warn_stale_workspace
 from openswe.middleware.task_coordination import TaskCoordinationMiddleware
+from openswe.middleware.task_retry import TaskConcurrencyMiddleware
 from openswe.middleware.transcript import TranscriptMiddleware
 from openswe.model_request import (
     ModelSelectionDecision,
@@ -732,6 +733,7 @@ def _general_purpose_subagent(
             list[AgentMiddleware[Any, Any, Any]],
             [
                 _DisableInheritedMiddleware(RequireUserReplyMiddleware.__name__),
+                _DisableInheritedMiddleware(TaskConcurrencyMiddleware.__name__),
                 *(_DisableInheritedMiddleware(name) for name in inherited_middleware_exclusions),
                 _SubagentToolGuard(),
                 AnthropicPromptCachingMiddleware(ttl="1h", unsupported_model_behavior="ignore"),
@@ -2056,6 +2058,7 @@ async def build_agent(config: RunnableConfig, *, tool_surface: ToolSurface | Non
             ToolErrorMiddleware(),
             ExcludeToolsMiddleware(excluded=excluded_tools),
             SubdirAgentsReadMiddleware(),
+            TaskConcurrencyMiddleware(),
             ToolRetryMiddleware(
                 max_retries=2,
                 tools=["task"],

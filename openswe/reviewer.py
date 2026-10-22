@@ -63,6 +63,7 @@ from openswe.middleware import (
 )
 from openswe.middleware.prepare_run import PrepareRunState
 from openswe.middleware.sandbox_circuit_breaker import post_sandbox_unreachable_notification
+from openswe.middleware.task_retry import TaskConcurrencyMiddleware
 from openswe.prompts import apply_tool_descriptions, common_prompt, prompt
 from openswe.review.approvals import approval_policy_for_review
 from openswe.review.diff import (
@@ -1114,6 +1115,7 @@ async def build_reviewer_agent(
             AnthropicPromptCachingMiddleware(ttl="1h", unsupported_model_behavior="ignore"),
             ModelCallLimitMiddleware(run_limit=MODEL_CALL_RECURSION_LIMIT, exit_behavior="end"),
             ToolErrorMiddleware(),
+            TaskConcurrencyMiddleware(),
             ExcludeToolsMiddleware(excluded=SHELL_SEARCH_EXCLUDED_TOOLS),
             refresh_github_proxy_before_model,
             check_message_queue_before_model,
