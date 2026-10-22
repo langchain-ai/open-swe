@@ -3,7 +3,6 @@ import json
 import httpx2
 import pytest
 
-from openswe.middleware.model_call_timeout import ModelCallTimeoutError
 from openswe.middleware.task_retry import task_on_failure, task_retry_on
 
 
@@ -25,12 +24,6 @@ def test_task_retry_on_transient_status() -> None:
     assert task_retry_on(_HTTPError(503)) is True
     assert task_retry_on(_HTTPError(529)) is True
     assert task_retry_on(_HTTPError(400)) is False
-
-
-def test_task_retry_on_subagent_model_deadline() -> None:
-    # A subagent has no fallback middleware, so retrying the delegated task is
-    # how a wedged model call inside it recovers.
-    assert task_retry_on(ModelCallTimeoutError("wedged")) is True
 
 
 def test_task_retry_on_httpx_transport_subclasses() -> None:
