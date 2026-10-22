@@ -140,15 +140,8 @@ pub const RESERVED_ENV_VARS: &[&str] = &[
     // CLI-only: Agent Auth's OAuth callback, which a new Linear app lists, when
     // the CLI cannot derive it (the local stack sets it).
     "MDA_AGENT_AUTH_OAUTH_CALLBACK_URL",
-    // CLI-only: where a new GitHub App is created, or an existing App with its
-    // webhook secret and installation, without a prompt. Agent Auth keeps the
-    // App; the deployment never gets them as env vars (`GH_WEBHOOK_SECRET` is
-    // the runtime's own override and is uploaded).
+    // CLI-only: where a new GitHub App is created when deploy cannot ask.
     "MDA_GITHUB_APP_OWNER",
-    "MDA_GITHUB_APP_ID",
-    "MDA_GITHUB_APP_PRIVATE_KEY_FILE",
-    "MDA_GITHUB_APP_INSTALLATION_ID",
-    "MDA_GITHUB_WEBHOOK_SECRET",
     // CLI-only: a Linear app's credentials when deploy cannot ask. Agent Auth
     // keeps them; the deployment never gets them as env vars.
     "MDA_LINEAR_CLIENT_ID",
