@@ -49,6 +49,7 @@ from openswe.dashboard.profiles import (
 )
 from openswe.dashboard.user_preferences import get_user_preferences
 from openswe.database import postgres
+from openswe.github.repo_names import controlling_org
 from openswe.slack.oauth import slack_base_url, slack_oauth_configured
 from openswe.users import User
 from openswe.utils.build_info import build_info
@@ -268,6 +269,7 @@ async def me(response: Response, session: dict[str, Any] = SESSION_DEP) -> dict[
     preferences = await get_user_preferences(session["sub"])
     return {
         "login": session["sub"],
+        "controlling_org": controlling_org(),
         "email": session.get("email") or (user.email or None if user else None),
         "avatar_url": session.get("avatar_url"),
         "user_id": str(user.id) if user else session.get("user_id"),

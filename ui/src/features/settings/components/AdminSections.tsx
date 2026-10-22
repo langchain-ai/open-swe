@@ -1,3 +1,4 @@
+import { useRepoName } from "@/lib/repoNames"
 import { Link } from "@tanstack/react-router"
 import { useMutation, useQuery } from "@tanstack/react-query"
 import { useEffect, useMemo, useState } from "react"
@@ -124,6 +125,7 @@ export function SlackIntegrationSection({
 }
 
 export function RunningAgentsSection() {
+  const repoName = useRepoName()
   const threads = useThreadsPage({
     all: true,
     status: "running",
@@ -191,7 +193,10 @@ export function RunningAgentsSection() {
                     {thread.title}
                   </p>
                   <p className="truncate font-mono text-xxs text-secondary">
-                    {thread.repoFullName || "no repo"} · {thread.id}
+                    {thread.repoFullName
+                      ? repoName(thread.repoFullName)
+                      : "no repo"}{" "}
+                    · {thread.id}
                   </p>
                   <p className="text-xxs text-secondary">
                     Thread started{" "}

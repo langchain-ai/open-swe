@@ -1,3 +1,4 @@
+import { useRepoName } from "@/lib/repoNames"
 import { Button } from "@langchain/macaw-components/Button"
 import { Dialog, DialogContent } from "@langchain/macaw-components/Dialog"
 import { IconButton } from "@langchain/macaw-components/IconButton"
@@ -23,6 +24,7 @@ export function PullRequestLinks({
   title: string
   onReviewPage?: boolean
 }) {
+  const repoName = useRepoName()
   const [owner, name] = repo.split("/")
   const navigate = useNavigate()
   const [messageOpen, setMessageOpen] = useState(false)
@@ -81,7 +83,7 @@ export function PullRequestLinks({
         <Dialog open={messageOpen} onOpenChange={setMessageOpen}>
           <DialogContent
             title="Send a message to the agent"
-            description={`${repo}#${number} · ${title}`}
+            description={`${repoName(repo)}#${number} · ${title}`}
           >
             <form
               className="flex flex-col gap-space-4"

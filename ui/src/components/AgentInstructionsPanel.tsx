@@ -1,3 +1,4 @@
+import { useRepoName } from "@/lib/repoNames"
 import { Banner } from "@langchain/macaw-components/Banner"
 import { Link as MacawLink } from "@langchain/macaw-components/Link"
 import { Button } from "@langchain/macaw-components/Button"
@@ -25,6 +26,7 @@ function formatMutationError(e: Error): string {
 }
 
 export function AgentInstructionsPanel() {
+  const repoName = useRepoName()
   const qc = useQueryClient()
   const [error, setError] = useState<string | null>(null)
   const [addRepo, setAddRepo] = useState("")
@@ -150,7 +152,7 @@ export function AgentInstructionsPanel() {
                 onClick={() => {
                   if (
                     !window.confirm(
-                      `Remove custom instructions for ${active.full_name}? This cannot be undone.`
+                      `Remove custom instructions for ${repoName(active.full_name)}? This cannot be undone.`
                     )
                   ) {
                     return
@@ -203,7 +205,7 @@ export function AgentInstructionsPanel() {
                     )}
                     onClick={() => setSelected(s.full_name)}
                   >
-                    {s.full_name}
+                    {repoName(s.full_name)}
                   </button>
                 </li>
               ))}
@@ -227,7 +229,7 @@ export function AgentInstructionsPanel() {
         <TextEditor
           value={draft}
           onChange={setDraft}
-          ariaLabel={`Instructions for ${active.full_name}`}
+          ariaLabel={`Instructions for ${repoName(active.full_name)}`}
           placeholder="Write custom instructions for the coding agent on this repository (markdown)."
         />
       ) : (

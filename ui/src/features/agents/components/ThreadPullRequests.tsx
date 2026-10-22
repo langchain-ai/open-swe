@@ -1,3 +1,4 @@
+import { useRepoName } from "@/lib/repoNames"
 import {
   CaretDownIcon,
   CaretUpIcon,
@@ -303,6 +304,7 @@ export function PullRequestHoverCard({
   health: AgentPullRequestHealth | undefined
   healthUnavailable: boolean
 }) {
+  const repoName = useRepoName()
   const age = relativeAge(pullRequest.createdAt)
   const state = pullRequestState(pullRequest, health)
 
@@ -321,7 +323,7 @@ export function PullRequestHoverCard({
           {state}
         </span>
         <span className="min-w-0 truncate text-secondary">
-          {pullRequest.repoFullName} #{pullRequest.number}
+          {repoName(pullRequest.repoFullName)} #{pullRequest.number}
         </span>
         {age && (
           <time
@@ -381,6 +383,7 @@ function PullRequestLink({
   onFix?: ThreadFix
   fixDisabled: boolean
 }) {
+  const repoName = useRepoName()
   const state = pullRequestState(pullRequest, health)
   const tone = pullRequestTone(pullRequest, health)
   const scopes = onFix ? fixScopes(pullRequest, health) : []
@@ -393,7 +396,7 @@ function PullRequestLink({
             href={pullRequest.url}
             target="_blank"
             rel="noreferrer"
-            aria-label={`Open ${pullRequest.repoFullName} pull request #${pullRequest.number}`}
+            aria-label={`Open ${repoName(pullRequest.repoFullName)} pull request #${pullRequest.number}`}
             data-testid={`pr-summary-${pullRequest.repoFullName}-${pullRequest.number}`}
             data-pr-tone={tone}
             className="flex min-w-0 flex-1 items-center gap-space-2 overflow-hidden rounded-lg px-space-2 py-space-1 transition-colors hover:bg-surface-level-1-hover"

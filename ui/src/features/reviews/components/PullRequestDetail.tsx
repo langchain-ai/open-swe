@@ -1,3 +1,4 @@
+import { useRepoName } from "@/lib/repoNames"
 import { XIcon } from "@langchain/macaw-components/icons"
 import { Text } from "@langchain/macaw-components/Text"
 import { Button } from "@langchain/macaw-components/Button"
@@ -460,6 +461,7 @@ export function PullRequestDetail({
   scrollAnchor?: string
   onPositionChange: (changes: { files?: Array<string>; at?: string }) => void
 }) {
+  const repoName = useRepoName()
   const preview = useQuery(pullRequestPreviewQuery(pr))
   const data = preview.data
   const scrollRef = useRef<HTMLDivElement | null>(null)
@@ -479,13 +481,13 @@ export function PullRequestDetail({
 
   return (
     <aside
-      aria-label={`Pull request ${pr.repo} #${pr.number}`}
+      aria-label={`Pull request ${repoName(pr.repo)} #${pr.number}`}
       className="flex min-h-0 w-full flex-col overflow-hidden rounded-lg border border-default bg-surface-level-1"
     >
       <header className="flex items-start gap-space-3 border-b border-default px-space-4 py-space-4">
         <div className="min-w-0 flex-1">
           <div className="flex items-baseline gap-space-2 text-xs text-secondary">
-            <span className="truncate">{pr.repo}</span>
+            <span className="truncate">{repoName(pr.repo)}</span>
             <span className="font-mono tabular-nums">#{pr.number}</span>
             {data && (
               <span className="tabular-nums">

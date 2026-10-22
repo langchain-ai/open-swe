@@ -1,3 +1,4 @@
+import { useRepoName } from "@/lib/repoNames"
 import {
   ArrowDownIcon,
   ArrowUpIcon,
@@ -70,6 +71,7 @@ export function OpenPullRequests({
   filters: ReviewsSearch
   onFiltersChange: (changes: Partial<ReviewsSearch>, replace?: boolean) => void
 }) {
+  const repoName = useRepoName()
   const {
     repo = [],
     q: search = "",
@@ -308,6 +310,7 @@ export function OpenPullRequests({
                       : "No matches"
                 }
                 options={repoNames}
+                getOptionLabel={repoName}
                 value={repo}
                 onChange={(chosen) =>
                   onFiltersChange({ repo: chosen.length ? chosen : undefined })
