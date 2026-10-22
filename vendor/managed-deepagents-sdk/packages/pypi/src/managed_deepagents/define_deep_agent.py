@@ -143,8 +143,9 @@ def define_deep_agent(
     inherit from this agent; middleware and memory do not. Like a sync subagent,
     it loads only the skill sources its ``skills`` names (``["/skills/"]`` for
     this agent's skills). Its ``webhook``, if set, is a URL the Agent Server
-    calls when each of its runs finishes. Served agents also get a background
-    copy of the general-purpose subagent.
+    calls when each of its runs finishes. With ``"mode": "fork"`` (experimental)
+    it starts with a copy of this agent's conversation, not only the task.
+    Served agents also get a background copy of the general-purpose subagent.
 
     ``metadata`` is MDA-owned authoring config (not a ``create_deep_agent``
     kwarg): the runtime applies it via ``.with_config({"metadata": ...})`` so
@@ -201,7 +202,7 @@ def define_deep_agent(
     return DeepAgentDefinition(config)
 
 
-_ASYNC_SUBAGENT_UNSUPPORTED_KEYS = ("runnable", "graph_id", "url", "headers", "mode")
+_ASYNC_SUBAGENT_UNSUPPORTED_KEYS = ("runnable", "graph_id", "url", "headers")
 
 
 def _validate_async_subagents(subagents: Sequence[DeepAgentSubAgent]) -> None:
@@ -221,6 +222,8 @@ def _validate_async_subagents(subagents: Sequence[DeepAgentSubAgent]) -> None:
             raise TypeError('subagent "webhook" must be a URL string')
         if "notify_parent" in spec and not isinstance(spec["notify_parent"], bool):
             raise TypeError('subagent "notify_parent" must be True or False')
+        if spec.get("mode", "isolated") not in ("isolated", "fork"):
+            raise TypeError('subagent "mode" must be "isolated" or "fork"')
         unsupported = [key for key in _ASYNC_SUBAGENT_UNSUPPORTED_KEYS if key in spec]
         if unsupported:
             msg = (

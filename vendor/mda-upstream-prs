@@ -8,3 +8,4 @@
 945 130fcbaafc79aec9e1199b6e32fd556f0175797a feat(mda): pass an async subagent's `webhook` through to deepagents
 959 89bfff3ea118ec80da1044da9099e469759ff032 feat(browser): share the thread's sandbox's localhost with its browser
 977 148200c893047fe5e450a552826be4526217c853 feat(mda): pass an async subagent's `notify_parent` through to deepagents
+980 fdcc1c4d926bcddfe873db7e82c1d8228521cd37 feat(mda): let async subagents run in fork mode
