@@ -19,7 +19,7 @@ documents. A member may replace the log up to some ``seq`` with one snapshot.
 from alembic import op
 
 revision = "0001ba60eee0"
-down_revision = "79a94ddd5d16"
+down_revision = "a7c12a7f1462"
 branch_labels = None
 depends_on = None
 
