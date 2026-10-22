@@ -183,6 +183,9 @@ class TaskDelegation(Base):
     # and when the backend settled it (or found nothing to settle) in the webhook's place.
     launch_run_id: Mapped[str | None] = mapped_column(default=None)
     launch_settled_at: Mapped[datetime | None] = mapped_column(default=None)
+    # Cancelled because a person stopped the task, so nothing it reports reaches the coordinator.
+    silenced: Mapped[bool] = mapped_column(default=False)
+    created_at: Mapped[datetime] = mapped_column(server_default=NOW, init=False)
 
     @classmethod
     async def get(cls, worker_thread_id: str) -> TaskDelegation | None:

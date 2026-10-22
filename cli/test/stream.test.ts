@@ -1,9 +1,10 @@
 import { describe, expect, test } from "bun:test"
 
-import { ApiError } from "../src/api.ts"
-import { CredentialError } from "../src/credentials.ts"
+import { ApiClient, ApiError, type TaskActivity } from "../src/api.ts"
+import { CredentialError, SessionCredential } from "../src/credentials.ts"
 import {
   followRun,
+  followTask,
   lifecycleRunId,
   parseCliResult,
   RunCollector,
@@ -72,6 +73,7 @@ describe("parseCliResult", () => {
     expect(parseCliResult({ stdout: "ok\n", exit_code: 3 })).toEqual({
       stdout: "ok\n",
       exitCode: 3,
+      unchanged: false,
     })
   })
 
@@ -129,7 +131,7 @@ describe("RunCollector", () => {
     expect(collector.handle(lifecycle("run-1", "completed"))).toEqual({
       status: "completed",
       error: null,
-      result: { stdout: "second", exitCode: 0 },
+      result: { stdout: "second", exitCode: 0, unchanged: false },
     })
   })
 
@@ -186,7 +188,7 @@ describe("followRun", () => {
     expect(outcome).toEqual({
       status: "completed",
       error: null,
-      result: { stdout: "done", exitCode: 0 },
+      result: { stdout: "done", exitCode: 0, unchanged: false },
     })
     expect(reconnects).toEqual([1])
   })
@@ -271,5 +273,172 @@ describe("followRun", () => {
     )
     await expect(failing).rejects.toBeInstanceOf(ApiError)
     expect(opened).toBe(1)
+  })
+})
+
+function activity(
+  runs: string[],
+  workerState: string,
+  settled = false
+): TaskActivity {
+  const active = ["starting", "running", "reporting"].includes(workerState)
+  return {
+    runs,
+    settled,
+    workers: [
+      {
+        worker_thread_id: "worker-1",
+        thread_url: null,
+        instructions: "Implement",
+        state: workerState,
+        run_status: null,
+        active,
+      },
+    ],
+  }
+}
+
+describe("followTask", () => {
+  const noSleep = async (): Promise<void> => undefined
+  const replay = [
+    lifecycle("run-1", "running"),
+    resultCall({ stdout: "waiting on a worker", exit_code: 0 }),
+    lifecycle("run-1", "completed"),
+    lifecycle("run-2", "running"),
+    resultCall({ stdout: "worker done; tests fail", exit_code: 1 }),
+    lifecycle("run-2", "completed"),
+  ]
+
+  test("defers the result to the coordinator's last run, even one that ended between polls", async () => {
+    const polls = [
+      activity([], "running"),
+      activity(["run-2"], "done", true),
+      activity([], "done", true),
+    ]
+    const cursors: (string | null)[] = []
+    const outcome = await followTask(
+      {
+        events: async () => sse(replay),
+        activity: async (after) => {
+          cursors.push(after)
+          return polls.shift() ?? null
+        },
+        stop: async () => undefined,
+      },
+      "run-1",
+      { sleep: noSleep }
+    )
+    expect(outcome).toEqual({
+      status: "completed",
+      error: null,
+      result: {
+        stdout: "worker done; tests fail",
+        exitCode: 1,
+        unchanged: false,
+      },
+    })
+    expect(cursors).toEqual(["run-1", "run-1", "run-2"])
+  })
+
+  const followRuns = (runs: string[][], frames: unknown[]) =>
+    followTask(
+      {
+        events: async () => sse(frames as never),
+        activity: async () => {
+          const next = runs.shift()
+          return next === undefined ? null : activity(next, "done", true)
+        },
+        stop: async () => undefined,
+      },
+      "run-1",
+      { sleep: async () => undefined }
+    )
+  const wake = (result: Record<string, unknown>) => [
+    ...replay,
+    lifecycle("run-3", "running"),
+    resultCall(result),
+    lifecycle("run-3", "completed"),
+  ]
+
+  test("keeps the answer when a later run reports nothing new", async () => {
+    const outcome = await followRuns(
+      [["run-2"], ["run-3"], []],
+      wake({ stdout: "", exit_code: 0, unchanged: true })
+    )
+    expect(outcome.result).toEqual({
+      stdout: "worker done; tests fail",
+      exitCode: 1,
+      unchanged: false,
+    })
+  })
+
+  test("an empty answer replaces an interim status", async () => {
+    const outcome = await followRuns(
+      [["run-2"], ["run-3"], []],
+      wake({ stdout: "", exit_code: 0 })
+    )
+    expect(outcome.result).toEqual({
+      stdout: "",
+      exitCode: 0,
+      unchanged: false,
+    })
+  })
+
+  test("ends at the run's own result on a backend without task workers", async () => {
+    let polled = 0
+    const outcome = await followTask(
+      {
+        events: async () => sse(replay),
+        activity: async () => {
+          polled += 1
+          return null
+        },
+        stop: async () => undefined,
+      },
+      "run-1",
+      { sleep: noSleep }
+    )
+    expect(outcome.result).toEqual({
+      stdout: "waiting on a worker",
+      exitCode: 0,
+      unchanged: false,
+    })
+    expect(polled).toBe(1)
+  })
+})
+
+describe("stopping a coordinator", () => {
+  test("cancels its workers, and its runs even when that fails", async () => {
+    const posted: string[] = []
+    const server = Bun.serve({
+      hostname: "127.0.0.1",
+      port: 0,
+      fetch(request) {
+        const path = new URL(request.url).pathname
+        posted.push(path.replace("/dashboard/api", ""))
+        return path.endsWith("/workers/cancel")
+          ? new Response("down", { status: 503 })
+          : Response.json({})
+      },
+    })
+    try {
+      const api = new ApiClient(
+        `http://127.0.0.1:${server.port}`,
+        new SessionCredential("jwt-token", "session (test)")
+      )
+      const thread = api.coordinator("thread-1", {
+        channels: [],
+        namespaces: [],
+        depth: 0,
+        since: 0,
+      })
+      await expect(thread.stop()).rejects.toBeInstanceOf(ApiError)
+      expect(posted).toEqual([
+        "/threads/thread-1/workers/cancel",
+        "/threads/thread-1/cancel",
+      ])
+    } finally {
+      await server.stop(true)
+    }
   })
 })

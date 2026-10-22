@@ -223,7 +223,8 @@ async def record_event(
     content: str,
     *,
     task_event: TaskEventMetadata | None = None,
-) -> None:
+) -> bool:
+    """Record a message for the recipient; false when its sender was silenced and owes nothing."""
     config = await recipient_config(recipient_thread_id)
     workspace = config.get("workspace")
     if workspace and workspace != task.workspace.slug:
@@ -240,6 +241,19 @@ async def record_event(
         delegation = await session.get(store.TaskDelegation, recipient_thread_id)
         if delegation is not None and delegation.cancelled:
             raise ValueError("This worker was cancelled; create a new worker for further work")
+        # Checked under the recipient's lock, which a silencing stop takes to withdraw the
+        # sender's messages, so a report racing that stop is either withdrawn or never recorded.
+        sender = (
+            await session.get(store.TaskDelegation, str(task_event.sender_thread_id))
+            if task_event is not None
+            else None
+        )
+        if sender is not None and sender.silenced:
+            logger.info(
+                "Dropped a message from a silenced worker",
+                extra={"worker_thread_id": sender.worker_thread_id, "delivery_id": delivery_id},
+            )
+            return False
         await TaskMessage(
             thread_id=recipient_thread_id,
             task_id=task.id,
@@ -248,6 +262,7 @@ async def record_event(
             run_config=config,
             task_event=task_event.model_dump(mode="json") if task_event is not None else None,
         ).record(session)
+        return True
 
 
 async def notify(
@@ -258,8 +273,8 @@ async def notify(
     *,
     task_event: TaskEventMetadata | None = None,
 ) -> None:
-    await record_event(task, recipient_thread_id, delivery_id, content, task_event=task_event)
-    await TaskMessage.deliver(recipient_thread_id, "enqueue")
+    if await record_event(task, recipient_thread_id, delivery_id, content, task_event=task_event):
+        await TaskMessage.deliver(recipient_thread_id, "enqueue")
 
 
 async def owned_worker(
@@ -404,10 +419,8 @@ class Delegation:
         context = await store.TaskMembership.context_for_thread(actor.thread_id)
         if context is not None:
             context = await authorized_context(actor, coordinator=True)
-        if not metadata.delegation_supported:
-            raise ValueError(
-                "Asynchronous task coordination is unavailable on a one-shot CLI bridge"
-            )
+        if not await metadata.delegation_supported():
+            raise ValueError("Delegation needs the machine serving this thread to be connected")
         if metadata.sandbox_host_thread_id:
             raise PermissionError(
                 "Sandbox guests must ask their coordinator for additional workers"
@@ -598,19 +611,57 @@ async def message_task_thread(
     return {"success": True, "recipient_thread_id": recipient}
 
 
-async def live_worker_runs(worker_thread_id: str) -> list[str]:
+async def live_runs(thread_id: str) -> list[str]:
+    """The thread's running runs, then its pending ones."""
     client = langgraph_client()
     run_ids: list[str] = []
-    statuses: tuple[RunStatus, ...] = ("pending", "running")
+    statuses: tuple[RunStatus, ...] = ("running", "pending")
     for status in statuses:
         offset = 0
         while True:
-            runs = await client.runs.list(worker_thread_id, status=status, limit=100, offset=offset)
+            runs = await client.runs.list(thread_id, status=status, limit=100, offset=offset)
             run_ids.extend(run["run_id"] for run in runs)
             if len(runs) < 100:
                 break
             offset += 100
     return run_ids
+
+
+async def cancel_worker(worker_thread_id: str, *, silently: bool = False) -> None:
+    """Stop a worker for good: its live runs, the messages owed to it, and its wake-ups.
+
+    A worker cancelled ``silently`` also owes its coordinator nothing: what it has yet to
+    deliver is withdrawn, and its later reports, the interruption included, are dropped.
+    """
+    async with postgres.session() as session:
+        await session.execute(
+            text("SELECT pg_advisory_xact_lock(hashtext(:key))"),
+            {"key": f"event_match:{worker_thread_id}"},
+        )
+        coordinator_thread_id = await session.scalar(
+            update(store.TaskDelegation)
+            .where(store.TaskDelegation.worker_thread_id == worker_thread_id)
+            .values(cancelled=True, **({"silenced": True} if silently else {}))
+            .returning(store.TaskDelegation.coordinator_thread_id)
+        )
+        await EventSubscription.forget(worker_thread_id, session=session)
+        try:
+            run_ids = await live_runs(worker_thread_id)
+        except NotFoundError:
+            logger.info(
+                "Cancelled worker before thread creation",
+                extra={"worker_thread_id": worker_thread_id},
+            )
+            run_ids = []
+        if run_ids:
+            await langgraph_client().runs.cancel_many(
+                thread_id=worker_thread_id, run_ids=run_ids, action="interrupt"
+            )
+    await TaskMessage.forget(worker_thread_id)
+    if silently and coordinator_thread_id is not None:
+        await TaskMessage.withdraw(coordinator_thread_id, sender_thread_id=worker_thread_id)
+    await interrupt_transcript_turns(worker_thread_id, run_ids)
+    await cancel_thread_wakeups(worker_thread_id)
 
 
 async def control_worker(
@@ -621,32 +672,7 @@ async def control_worker(
     actor = await Actor.resolve(actor)
     task, delegation = await owned_worker(actor, worker_thread_id)
     if action == "cancel":
-        async with postgres.session() as session:
-            await session.execute(
-                text("SELECT pg_advisory_xact_lock(hashtext(:key))"),
-                {"key": f"event_match:{worker_thread_id}"},
-            )
-            await session.execute(
-                update(store.TaskDelegation)
-                .where(store.TaskDelegation.worker_thread_id == worker_thread_id)
-                .values(cancelled=True)
-            )
-            await EventSubscription.forget(worker_thread_id, session=session)
-            try:
-                run_ids = await live_worker_runs(worker_thread_id)
-            except NotFoundError:
-                logger.info(
-                    "Cancelled worker before thread creation",
-                    extra={"worker_thread_id": worker_thread_id},
-                )
-                run_ids = []
-            if run_ids:
-                await langgraph_client().runs.cancel_many(
-                    thread_id=worker_thread_id, run_ids=run_ids, action="interrupt"
-                )
-        await TaskMessage.forget(worker_thread_id)
-        await interrupt_transcript_turns(worker_thread_id, run_ids)
-        await cancel_thread_wakeups(worker_thread_id)
+        await cancel_worker(worker_thread_id)
         delegation.cancelled = True
         return {**await worker_status(delegation), "cancellation_requested": True}
     return await worker_status(delegation)

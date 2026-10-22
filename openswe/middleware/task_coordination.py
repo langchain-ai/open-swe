@@ -34,7 +34,9 @@ class TaskCoordinationMiddleware(OpenSWEMiddleware):
 
     @classmethod
     async def for_thread(cls, thread_id: str) -> Self | None:
-        enabled = Thread.model_validate(await read_thread(thread_id)).metadata.delegation_supported
+        enabled = await Thread.model_validate(
+            await read_thread(thread_id)
+        ).metadata.delegation_supported()
         context = await TaskMembership.context_for_thread(thread_id)
         if context is not None and context.membership.role == "worker":
             delegation = await TaskDelegation.get(thread_id)
