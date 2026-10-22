@@ -129,7 +129,7 @@ async def _actor(run: RemoteRun) -> service.Actor:
     async def resolve(runtime: Runtime) -> service.Actor:  # noqa: ARG001
         return await service.Actor.resolve({})
 
-    return await in_graph_context(run_config(run), resolve)
+    return await in_graph_context({**run_config(run), "run_name": "worker.actor"}, resolve)
 
 
 async def launch(run: RemoteRun, raw: Mapping[str, JsonValue]) -> JsonValue:
