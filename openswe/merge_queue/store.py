@@ -34,6 +34,7 @@ from openswe.merge_queue.models import (
     MergeRequest,
     Record,
 )
+from openswe.merge_queue.validation_contract import ValidationDispatch, ValidationRequest
 from openswe.workspaces.rows import WorkspaceRepositoryRow, WorkspaceRow
 
 
@@ -56,6 +57,15 @@ class BatchHistory:
     decisions: list[Decision]
 
 
+@dataclass(frozen=True)
+class ValidationWork:
+    batch: Batch
+    attempt: Attempt | None = None
+    request: ValidationRequest | None = None
+    run_id: int | None = None
+    dispatch: bool = False
+
+
 class MergeQueue(Record):
     __tablename__ = "merge_queue"
 
@@ -66,6 +76,13 @@ class MergeQueue(Record):
     fence: Mapped[int] = mapped_column(BigInteger, default=0)
     lease_owner: Mapped[UUID | None] = mapped_column(default=None)
     lease_until: Mapped[datetime | None] = mapped_column(default=None)
+
+    @classmethod
+    async def load(cls, queue_id: UUID, workspace_id: UUID) -> Self | None:
+        async with postgres.session() as session:
+            return await session.scalar(
+                select(cls).where(cls.id == queue_id, cls.workspace_id == workspace_id)
+            )
 
     @classmethod
     async def register(
@@ -458,7 +475,8 @@ class MergeQueue(Record):
             )
         )
         for attempt in attempts:
-            attempt.state, attempt.finished_at, attempt.updated_by = "cancelled", now, actor
+            attempt.state = "timed_out" if attempt.deadline <= now else "cancelled"
+            attempt.finished_at, attempt.updated_by = now, actor
         batch.state, batch.finished_at, batch.updated_by = "invalidated", now, actor
 
     async def start_attempt(
@@ -532,17 +550,159 @@ class MergeQueue(Record):
     ) -> Evidence:
         async with self._locked(lease) as (session, _, _):
             attempt = await self._attempt(session, attempt_id)
-            existing = await session.scalar(
-                select(Evidence).where(Evidence.attempt_id == attempt.id, Evidence.key == key)
+            return await self._save_evidence(session, attempt, key, reference)
+
+    async def _save_evidence(
+        self, session: AsyncSession, attempt: Attempt, key: str, reference: dict[str, JsonValue]
+    ) -> Evidence:
+        existing = await session.scalar(
+            select(Evidence).where(Evidence.attempt_id == attempt.id, Evidence.key == key)
+        )
+        if existing is not None:
+            if existing.reference != reference:
+                raise ValueError("Evidence key was already used with different input")
+            return existing
+        evidence = Evidence(attempt_id=attempt.id, key=key, reference=deepcopy(reference))
+        session.add(evidence)
+        await session.flush()
+        return evidence
+
+    async def advance_validation(
+        self, policy: QueuePolicy, lease: Lease, *, start: UUID | None = None
+    ) -> ValidationWork | None:
+        """Expire stale state and return pending work, atomically starting an attempt if requested.
+
+        Only the call that creates an attempt returns dispatch=True; subsequent calls
+        resume discovery. Inactive, expired, or completed work returns None.
+        """
+        async with self._locked(lease) as (session, queue, now):
+            batch = await session.scalar(
+                select(Batch).where(Batch.queue_id == self.id, Batch.state == "active")
             )
-            if existing is not None:
-                if existing.reference != reference:
-                    raise ValueError("Evidence key was already used with different input")
-                return existing
-            evidence = Evidence(attempt_id=attempt.id, key=key, reference=deepcopy(reference))
-            session.add(evidence)
+            if batch is None or (start is not None and batch.id != start):
+                return None
+            if batch.policy != policy.model_dump(mode="json") or batch.deadline <= now:
+                await self._invalidate(session, batch, now, None)
+                return None
+            validation = policy.validation
+            if validation is None or batch.candidate is None or batch.published_at is None:
+                return None
+            if queue.target_branch != "main":
+                raise ValueError("Validation workflow requires the main target branch")
+            attempt = await session.scalar(
+                select(Attempt)
+                .where(Attempt.batch_id == batch.id)
+                .order_by(Attempt.number.desc())
+                .limit(1)
+            )
+            if attempt is not None:
+                if attempt.state != "running":
+                    return None
+                if attempt.deadline <= now:
+                    attempt.state, attempt.finished_at, attempt.updated_by = "timed_out", now, None
+                    return None
+                evidence = {
+                    row.key: row.reference
+                    for row in await session.scalars(
+                        select(Evidence).where(Evidence.attempt_id == attempt.id)
+                    )
+                }
+                saved = ValidationDispatch.model_validate(evidence.get("validation-request"))
+                run_id = evidence.get("validation-run", {}).get("run_id")
+                if run_id is not None and (type(run_id) is not int or run_id <= 0):
+                    raise ValueError("Invalid saved validation run")
+                if saved.policy_digest != policy.fingerprint:
+                    raise ValueError("Saved validation policy changed")
+                return ValidationWork(batch, attempt, saved.contract, run_id)
+            if queue.paused or batch.candidate_error:
+                return None
+            if start is None:
+                return ValidationWork(batch)
+            await self._candidate_entries(session, batch, now)
+            candidate = Candidate.model_validate(batch.candidate)
+            attempt = Attempt(
+                batch_id=batch.id,
+                request_key="smoke-validation",
+                number=1,
+                deadline=min(batch.deadline, now + timedelta(seconds=validation.deadline_seconds)),
+            )
+            session.add(attempt)
             await session.flush()
-            return evidence
+            repository = (
+                await session.scalars(
+                    select(Repository.full_name).where(Repository.id == queue.repository_id)
+                )
+            ).one()
+            request = ValidationRequest(
+                repository=repository,
+                batch_id=batch.id,
+                attempt_id=attempt.id,
+                candidate_sha=candidate.sha,
+                workflow_sha=batch.base_sha,
+                dispatch_actor_id=validation.dispatch_actor_id,
+            )
+            await self._save_evidence(
+                session,
+                attempt,
+                "validation-request",
+                ValidationDispatch(
+                    contract=request,
+                    policy_digest=policy.fingerprint,
+                    lease_owner=lease.owner,
+                    fence=lease.fence,
+                ).model_dump(mode="json"),
+            )
+            return ValidationWork(batch, attempt, request, dispatch=True)
+
+    async def bind_validation_run(self, attempt_id: UUID, run_id: int, lease: Lease) -> None:
+        if type(run_id) is not int or run_id <= 0:
+            raise ValueError("Invalid validation run")
+        async with self._locked(lease) as (session, _, now):
+            attempt = await self._attempt(session, attempt_id)
+            batch = await self._batch(session, attempt.batch_id)
+            if batch.state != "active" or attempt.state != "running" or attempt.deadline <= now:
+                raise ValueError("Validation attempt is inactive or expired")
+            await self._save_evidence(session, attempt, "validation-run", {"run_id": run_id})
+
+    async def finish_validation(
+        self, attempt_id: UUID, reference: dict[str, JsonValue], lease: Lease, *, succeeded: bool
+    ) -> bool:
+        async with self._locked(lease) as (session, _, now):
+            attempt = await self._attempt(session, attempt_id)
+            batch = await self._batch(session, attempt.batch_id)
+            if batch.state != "active" or attempt.state != "running":
+                return False
+            if min(attempt.deadline, batch.deadline) <= now:
+                attempt.state, attempt.finished_at, attempt.updated_by = "timed_out", now, None
+                return False
+            evidence = {
+                row.key: row.reference
+                for row in await session.scalars(
+                    select(Evidence).where(Evidence.attempt_id == attempt.id)
+                )
+            }
+            request = ValidationDispatch.model_validate(evidence.get("validation-request")).contract
+            if any(
+                reference.get(key) != value
+                for key, value in request.model_dump(mode="json").items()
+            ):
+                raise ValueError("Validation evidence does not match its request")
+            if succeeded:
+                await self._candidate_entries(session, batch, now)
+                run_id = evidence.get("validation-run", {}).get("run_id")
+                if (
+                    run_id is None
+                    or reference.get("run_id") != run_id
+                    or reference.get("run_attempt") != 1
+                    or reference.get("tested_sha") != request.candidate_sha
+                ):
+                    raise ValueError("Validation evidence does not match its run")
+            await self._save_evidence(
+                session, attempt, "validation-result", {**reference, "coverage": "smoke"}
+            )
+            attempt.state = "succeeded" if succeeded else "failed"
+            attempt.finished_at, attempt.updated_by = now, None
+            return True
 
     async def record_plan(
         self,
@@ -807,29 +967,34 @@ class MergeQueue(Record):
             batch = await self._batch(session, batch_id)
             if queue.paused or batch.state != "active" or batch.deadline <= now:
                 raise ValueError("Candidate is paused, inactive or expired")
-            rows = await session.execute(
-                select(MergeRequest, PullRequest.number, BatchMember.head_sha)
-                .select_from(MergeRequest)
-                .join(BatchMember)
-                .join(PullRequest, PullRequest.id == MergeRequest.pull_request_id)
-                .where(BatchMember.batch_id == batch.id, MergeRequest.queue_id == self.id)
-                .order_by(BatchMember.position)
-            )
-            preceding: set[int] = set()
-            entries: list[QueueEntry] = []
-            policy = QueuePolicy.model_validate(batch.policy)
-            for request, number, head in rows.tuples():
-                if (
-                    request.state != "batched"
-                    or head != request.head_sha
-                    or not self._ready(request, now, batch.base_sha, policy, preceding)
-                ):
-                    raise ValueError("Candidate admission is stale")
-                entries.append(QueueEntry(request, number))
-                preceding.add(number)
-            if not entries:
-                raise ValueError("Candidate has no members")
-            return batch, entries
+            return batch, await self._candidate_entries(session, batch, now)
+
+    async def _candidate_entries(
+        self, session: AsyncSession, batch: Batch, now: datetime
+    ) -> list[QueueEntry]:
+        rows = await session.execute(
+            select(MergeRequest, PullRequest.number, BatchMember.head_sha)
+            .select_from(MergeRequest)
+            .join(BatchMember)
+            .join(PullRequest, PullRequest.id == MergeRequest.pull_request_id)
+            .where(BatchMember.batch_id == batch.id, MergeRequest.queue_id == self.id)
+            .order_by(BatchMember.position)
+        )
+        preceding: set[int] = set()
+        entries: list[QueueEntry] = []
+        policy = QueuePolicy.model_validate(batch.policy)
+        for request, number, head in rows.tuples():
+            if (
+                request.state != "batched"
+                or head != request.head_sha
+                or not self._ready(request, now, batch.base_sha, policy, preceding)
+            ):
+                raise ValueError("Candidate admission is stale")
+            entries.append(QueueEntry(request, number))
+            preceding.add(number)
+        if not entries:
+            raise ValueError("Candidate has no members")
+        return entries
 
     async def begin_build(self, batch_id: UUID, lease: Lease) -> bool:
         async with self._locked(lease) as (session, queue, now):
