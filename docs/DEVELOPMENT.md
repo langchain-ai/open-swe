@@ -179,7 +179,7 @@ The `local-gh-dev` skill in `.claude/skills/` walks through the whole loop, incl
 
 ## Mirror your Claude Code sessions
 
-Connect Claude Code from **Settings → Connections → Claude Code** on your local dashboard, then run a session with the settings it gives you (`claude --settings ./open-swe-hooks.json`). Each hook event lands on the local backend, and the session shows up as a read-only thread. See [Mirroring Claude Code sessions](reference/claude-code-sync.md).
+Connect Claude Code from **Settings → Claude Code** on your local dashboard, then run a session with the settings it gives you (`claude --settings ./open-swe-hooks.json`). Each hook event lands on the local backend, and the session shows up as a read-only thread. See [Mirroring Claude Code sessions](reference/claude-code-sync.md).
 
 ## Dashboard on the Vite dev server directly
 

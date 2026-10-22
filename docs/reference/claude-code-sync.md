@@ -4,11 +4,11 @@ Claude Code can post its [hook events](https://code.claude.com/docs/en/hooks) to
 
 ## Connect a machine
 
-1. In the dashboard, open **Settings → Connections → Claude Code**, name the machine, and choose **Connect Claude Code**.
+1. In the dashboard, open **Settings → Claude Code**, name the machine, and choose **Connect Claude Code**.
 2. Merge the settings it shows into `~/.claude/settings.json`. They hold the machine's token, which is not shown again.
 3. Start a new Claude Code session. It appears in the sidebar with a terminal icon on its first prompt.
 
-Revoking a token in the same section stops that machine from mirroring. Threads it already mirrored stay.
+Revoking a machine under **Machines** on the same page stops that machine from mirroring. Threads it already mirrored stay.
 
 The settings register one [HTTP hook](https://code.claude.com/docs/en/hooks#http-hook-fields) per event below, all posting to `POST /dashboard/api/claude-code/hooks` with the token as a bearer token. If your organization limits hook targets with `allowedHttpHookUrls`, allow that URL.
 
@@ -42,7 +42,7 @@ The PR is read as you, so a repository you cannot see is never linked.
 
 ## Try it locally
 
-Run the backend, Managed Deep Agents and the dashboard as in [Local Development](../DEVELOPMENT.md#6-run), sign in, and connect a machine from **Settings → Connections**. The generated settings point at your `DASHBOARD_API_BASE_URL`, which is `http://localhost:2024` by default. To try them without changing your own Claude Code settings, save them to a file and pass it for one session:
+Run the backend, Managed Deep Agents and the dashboard as in [Local Development](../DEVELOPMENT.md#6-run), sign in, and connect a machine from **Settings → Claude Code**. The generated settings point at your `DASHBOARD_API_BASE_URL`, which is `http://localhost:2024` by default. To try them without changing your own Claude Code settings, save them to a file and pass it for one session:
 
 ```bash
 claude --settings ./open-swe-hooks.json
