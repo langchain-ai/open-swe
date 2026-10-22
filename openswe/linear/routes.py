@@ -7,6 +7,7 @@ from fastapi import APIRouter
 
 from openswe.linear import webhook as service
 from openswe.thread_ids import linear_issue_thread_id
+from openswe.threads import index
 from openswe.users import User
 from openswe.webhooks import common
 from openswe.webhooks.event_log import EventLog, EventRefs
@@ -148,7 +149,9 @@ async def linear_webhook(  # noqa: PLR0911, PLR0912, PLR0915
         comment_user_email = (data.get("user") or payload.get("actor") or {}).get("email")
         try:
             user = await User.for_email(comment_user_email) if comment_user_email else None
-            workspace = await common.get_thread_workspace(linear_issue_thread_id(issue_id))
+            workspace = await common.get_thread_workspace(
+                await index.live_thread_id(linear_issue_thread_id(issue_id))
+            )
             if workspace is None:
                 workspace = (
                     await resolve_workspace(login=user.github_login if user else None)

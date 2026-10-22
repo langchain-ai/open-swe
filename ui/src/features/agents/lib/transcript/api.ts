@@ -29,25 +29,6 @@ function transcriptPath(threadId: string, suffix = ""): string {
   return `/threads/${encodeURIComponent(threadId)}/transcript${suffix}`
 }
 
-async function apiError(
-  response: Response,
-  requestId?: string
-): Promise<AgentsApiError> {
-  let message = response.statusText
-  try {
-    const body: unknown = await response.json()
-    const detail =
-      body !== null && typeof body === "object" && "detail" in body
-        ? (body as { detail: unknown }).detail
-        : undefined
-    if (typeof detail === "string" && detail) message = detail
-    else if (detail !== undefined) message = JSON.stringify(detail)
-  } catch {
-    // Not a JSON error body; the status text is all we have.
-  }
-  return new AgentsApiError(response.status, message, requestId)
-}
-
 /** The whole thread as of `version`; 404 for threads that predate the log. */
 export function fetchTranscript(threadId: string): Promise<TranscriptSnapshot> {
   return agentsRequest<TranscriptSnapshot>(transcriptPath(threadId))
@@ -96,7 +77,7 @@ export function attachmentUrl(threadId: string, attachmentId: string): string {
  */
 export async function fetchImageBlob(url: string): Promise<Blob> {
   const response = await timedFetch(url, { credentials: "include" })
-  if (!response.ok) throw await apiError(response)
+  if (!response.ok) throw await AgentsApiError.fromResponse(response)
   return await response.blob()
 }
 
@@ -292,7 +273,7 @@ export async function startRun(
   ).catch((cause: unknown) => {
     throw networkError(cause, requestId)
   })
-  if (!response.ok) throw await apiError(response, requestId)
+  if (!response.ok) throw await AgentsApiError.fromResponse(response, requestId)
   const payload: unknown = await response.json().catch(() => null)
   if (isProtocolFailure(payload)) {
     throw new AgentsApiError(

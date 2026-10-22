@@ -47,6 +47,7 @@ from openswe.thread_ids import (
     reviewer_thread_id,
     thread_id_from_branch,
 )
+from openswe.threads import index
 from openswe.threads.creation import create_thread
 from openswe.users import User
 from openswe.walkthrough.record import Walkthrough
@@ -1103,20 +1104,23 @@ async def process_github_pr_comment(
         branch_name,
     )
 
-    thread_id = agent_thread_id or (thread_id_from_branch(branch_name) if branch_name else None)
-    if not thread_id:
-        if not pr_number:
-            common.logger.warning(
-                "Could not determine thread_id for branch '%s' (no pr_number), skipping",
-                branch_name,
-            )
-            return
-        thread_id = pr_comment_thread_id(
+    own_thread_id = agent_thread_id or (thread_id_from_branch(branch_name) if branch_name else None)
+    if own_thread_id:
+        derived_thread_id = own_thread_id
+    elif pr_number:
+        derived_thread_id = pr_comment_thread_id(
             repo_config.get("owner", ""), repo_config.get("name", ""), pr_number
         )
-        common.logger.info(
-            "Generated thread_id %s for non-open-swe branch '%s'", thread_id, branch_name
+    else:
+        common.logger.warning(
+            "Could not determine thread_id for branch '%s' (no pr_number), skipping",
+            branch_name,
         )
+        return
+    thread_id = await index.live_thread_id(derived_thread_id)
+    # The agent's own thread exists; a PR thread or a successor may not yet.
+    if thread_id != own_thread_id:
+        common.logger.info("Using thread_id %s for branch '%s'", thread_id, branch_name)
         langgraph_client = common.get_client(url=common.LANGGRAPH_URL)
         try:
             await langgraph_client.threads.update(thread_id, metadata={"branch_name": branch_name})
@@ -1512,7 +1516,7 @@ async def process_github_issue(payload: dict[str, Any], event_type: str) -> None
         common.logger.warning("No email mapping for GitHub user '%s', skipping", github_login)
         return
 
-    thread_id = github_issue_thread_id(issue_id)
+    thread_id = await index.live_thread_id(github_issue_thread_id(issue_id))
     existing_thread = await common.thread_exists(thread_id)
     github_token = await common.get_or_resolve_thread_github_token(thread_id, email)
     app_token = await common.get_github_app_installation_token()
