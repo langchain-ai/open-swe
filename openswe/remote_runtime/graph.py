@@ -77,8 +77,10 @@ from openswe.middleware.model_selection import PersistedRoute, normalize_route
 from openswe.middleware.pr_creation_guard import PullRequestCreationGuardMiddleware
 from openswe.middleware.record_run_usage import RecordRunUsageMiddleware
 from openswe.middleware.sandbox_circuit_breaker import post_sandbox_unreachable_notification
+from openswe.middleware.subdir_agents import SubdirAgentsReadMiddleware
 from openswe.middleware.tool_error_handler import ToolErrorMiddleware
 from openswe.middleware.transcript import TranscriptMiddleware, within_namespace
+from openswe.middleware.validate_image_reads import ValidateImageReadsMiddleware
 from openswe.middleware.workflow_push_guard import WorkflowPushGuardMiddleware
 from openswe.prompts import common_prompt, prompt
 from openswe.remote_runtime.git_metadata import (
@@ -138,10 +140,13 @@ SandboxCheck = Literal["tool_errors", "push_guards"]
 # by the check MDA runs in its place, or None where there is nothing to do there. The
 # transcript records those calls through ``tool_started`` and ``tool_result``, MDA's
 # own filesystem middleware offloads large results, and the rest act on other tools.
-# The checks on what ``read_file`` returns live in MDA alone (``mda/rt/sandbox_tools.py``).
+# MDA runs its own copies of the checks on what ``read_file`` returns; the backend's
+# are for the file calls it runs itself, such as a desktop thread's.
 # A graph with tool-call middleware not listed here runs every call on the backend.
 _BOX_CHECKS: Final[Sequence[tuple[type, SandboxCheck | None]]] = (
     (ToolErrorMiddleware, "tool_errors"),
+    (ValidateImageReadsMiddleware, None),
+    (SubdirAgentsReadMiddleware, None),
     (PullRequestCreationGuardMiddleware, "push_guards"),
     (WorkflowPushGuardMiddleware, "push_guards"),
     (TranscriptMiddleware, None),

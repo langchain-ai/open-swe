@@ -25,9 +25,11 @@ _MIDDLEWARE_MODULES = {
     "SanitizeThinkingBlocksMiddleware": ".sanitize_thinking_blocks",
     "StableToolResultOrderMiddleware": ".stable_tool_order",
     "settle_review_check_on_exit": ".settle_review_check",
+    "SubdirAgentsReadMiddleware": ".subdir_agents",
     "task_on_failure": ".task_retry",
     "task_retry_on": ".task_retry",
     "ToolErrorMiddleware": ".tool_error_handler",
+    "ValidateImageReadsMiddleware": ".validate_image_reads",
     "WorkflowPushGuardMiddleware": ".workflow_push_guard",
     "WorkspaceSkillsMiddleware": ".workspace_skills",
 }
@@ -49,7 +51,9 @@ __all__ = [
     "SanitizeOpenAIResponsesMiddleware",
     "SanitizeThinkingBlocksMiddleware",
     "StableToolResultOrderMiddleware",
+    "SubdirAgentsReadMiddleware",
     "ToolErrorMiddleware",
+    "ValidateImageReadsMiddleware",
     "WorkflowPushGuardMiddleware",
     "WorkspaceSkillsMiddleware",
     "check_message_queue_before_model",
@@ -83,8 +87,10 @@ if TYPE_CHECKING:
     from openswe.middleware.sanitize_thinking_blocks import SanitizeThinkingBlocksMiddleware
     from openswe.middleware.settle_review_check import settle_review_check_on_exit
     from openswe.middleware.stable_tool_order import StableToolResultOrderMiddleware
+    from openswe.middleware.subdir_agents import SubdirAgentsReadMiddleware
     from openswe.middleware.task_retry import task_on_failure, task_retry_on
     from openswe.middleware.tool_error_handler import ToolErrorMiddleware
+    from openswe.middleware.validate_image_reads import ValidateImageReadsMiddleware
     from openswe.middleware.workflow_push_guard import WorkflowPushGuardMiddleware
     from openswe.middleware.workspace_skills import WorkspaceSkillsMiddleware
 
