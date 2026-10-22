@@ -27,11 +27,7 @@ class ReportedBrowserMiddleware(BrowserMiddleware):
         self._reported: set[str] = set()
         self._reporting: dict[str, asyncio.Task[None]] = {}
 
-    async def _share(
-        self, session: object, name: str, key: str, runtime: ManagedToolRuntime
-    ) -> None:
-        # Runs before every browser call, with the browser's name once it is open.
-        await super()._share(session, name, key, runtime)  # ty: ignore[invalid-argument-type]
+    async def _browsing(self, name: str, runtime: ManagedToolRuntime) -> None:
         if name in self._reported or name in self._reporting:
             return
         # In the background: a backend that is slow or down must not hold up browsing.

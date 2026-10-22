@@ -11,6 +11,11 @@ browserd's extensions directory and asks browserd to load it into the running
 Chrome. The extension then dials Chrome from inside the browser sandbox, on the
 window's own port.
 
+A thread's window is attached to the thread's sandbox once it exists: the
+browser opens the sandbox's servers at ``http://localhost:<port>``, and the
+sandbox can drive the same window over CDP at the URL written to
+``CDP_URL_FILE`` there.
+
     # browser.py
     browser = define_browser(scope="user")
 """
@@ -67,8 +72,10 @@ _EXTENSION_DIR = f"{_EXTENSIONS_DIR}/stagehand-{STAGEHAND_VERSION}"
 #: browserd's windows, each with the port it serves inside the browser sandbox.
 _WINDOWS_FILE = "/var/lib/browserd/attachments.json"
 _WINDOW_NAME = "mda"
-#: The window that shares the thread's sandbox's localhost with every window.
-_LOCALHOST_WINDOW = "mda-localhost"
+#: A separate window older browsers shared the thread's sandbox's localhost through.
+_LEGACY_LOCALHOST_WINDOW = "mda-localhost"
+#: Where the thread's sandbox finds the CDP URL of the window the agent drives.
+CDP_URL_FILE = "/tmp/mda-browser-cdp-url"  # noqa: S108 - in the thread's sandbox
 #: The extension's manifest name, which tells its service worker from other extensions'.
 _STAGEHAND_EXTENSION = "Stagehand Runtime"
 _CDP_TIMEOUT_S = 30
@@ -114,7 +121,9 @@ SCREENSHOT_DESCRIPTION = (
 # Ours, after `run`'s contract text: a thread's browser shares its sandbox's localhost.
 LOCALHOST_NOTE = (
     " Servers running in your sandbox are reachable at http://localhost:<port> "
-    "(any port but 80 and 443)."
+    "(any port but 80 and 443). Once you have browsed, your sandbox can also drive "
+    "this same window with any CDP client (e.g. Playwright's connect_over_cdp) at "
+    f"the URL in {CDP_URL_FILE}."
 )
 
 # `experimental_batch` hands the callback a worker-local batch context; the
@@ -162,12 +171,14 @@ class _Step(TypedDict):
     value: str | list[str] | None
 
 
-class _Attachment(TypedDict):
+class _Attachment(TypedDict, total=False):
     """A browser window, as the browsers API describes it."""
 
-    id: str
-    name: str
-    api_cdp_url: str
+    id: Required[str]
+    name: Required[str]
+    api_cdp_url: Required[str]
+    cdp_url: str  # only for a window attached to a sandbox, reachable from that sandbox
+    localhost_alias: str
 
 
 class _SavedWindow(TypedDict):
@@ -194,7 +205,9 @@ class _Session:
     browser: StagehandBrowser
     stagehand: Stagehand
     ids: dict[str, dict[str, str]] = field(default_factory=dict)  # each tab's latest snapshot
-    shared: str | None = None  # the sandbox whose localhost the browser shares
+    sandbox: str | None = None  # the sandbox the window was opened for
+    cdp_url: str | None = None  # the window's CDP URL from inside that sandbox
+    published: bool = False  # whether `cdp_url` is written to the sandbox
 
     async def page(self, thread: str | None = None) -> Page:
         """The newest tab, or ``thread``'s own tab of a browser threads share."""
@@ -335,8 +348,12 @@ def _check(resp: httpx.Response, action: str) -> httpx.Response:
     return resp
 
 
-async def _open(name: str, idle_ttl_seconds: int) -> _Session:
-    """Attach Stagehand to the window of browser ``name``, creating either as needed."""
+async def _open(name: str, idle_ttl_seconds: int, sandbox: str | None) -> _Session:
+    """Attach Stagehand to the window of browser ``name``, creating either as needed.
+
+    With ``sandbox``, the window is attached to it, sharing its localhost; a
+    window attached to no sandbox or to an earlier one is replaced.
+    """
     from langsmith.sandbox import AsyncSandboxClient  # noqa: PLC0415
 
     credentials = _credentials()
@@ -362,19 +379,44 @@ async def _open(name: str, idle_ttl_seconds: int) -> _Session:
         # every open also heals a browser whose earlier load never happened.
         _check(await api.post(f"{base}/extensions/load"), "load the Stagehand extension")
 
-        found = _check(await api.get(base), "look up the browser").json().get("attachments")
-        windows = cast("list[_Attachment]", found or [])
-        window = next((w for w in windows if w["name"] == _WINDOW_NAME), None)
-        if window is None:
-            body = {"name": _WINDOW_NAME, "controller": "agent"}
-            made = _check(await api.post(f"{base}/attachments", json=body), "open a window")
-            window = cast("_Attachment", made.json())
+        window = await _agent_window(api, base, sandbox)
         port = await _window_port(box, window["id"])
         version = await api.get(f"{window['api_cdp_url']}/json/version")
         ws_url: str = _check(version, "reach the browser window").json()["webSocketDebuggerUrl"]
 
         local_url = f"ws://127.0.0.1:{port}/devtools/browser/{window['id']}"
-        return await _attach(ws_url, local_url, headers)
+        session = await _attach(ws_url, local_url, headers)
+    session.sandbox = sandbox
+    if sandbox is not None:
+        session.cdp_url = window.get("cdp_url")
+    return session
+
+
+async def _agent_window(api: httpx.AsyncClient, base: str, sandbox: str | None) -> _Attachment:
+    """The window the agent drives, attached to ``sandbox`` when there is one."""
+    found = _check(await api.get(base), "look up the browser").json().get("attachments")
+    windows = cast("list[_Attachment]", found or [])
+    for legacy in (w for w in windows if w["name"] == _LEGACY_LOCALHOST_WINDOW):
+        _check(await api.delete(f"{base}/attachments/{legacy['id']}"), "close a stale window")
+    window = next((w for w in windows if w["name"] == _WINDOW_NAME), None)
+    alias = await _sandbox_alias(api, sandbox) if sandbox is not None else None
+    if window is not None and alias is not None and window.get("localhost_alias") != alias:
+        # A sandbox replaced under the same name keeps the window's `sandbox`, not its id.
+        _check(await api.delete(f"{base}/attachments/{window['id']}"), "close a stale window")
+        window = None
+    if window is not None:
+        return window
+    body: dict[str, object] = {"name": _WINDOW_NAME, "controller": "agent"}
+    if sandbox is not None:
+        linked = await api.post(
+            f"{base}/attachments", json={**body, "sandbox": sandbox, "share_localhost": True}
+        )
+        if linked.is_success:
+            return cast("_Attachment", linked.json())
+        # Browsing goes on without the sandbox's localhost or CDP access.
+        _LOG.warning("could not attach sandbox %s to its browser: %s", sandbox, linked.text[:300])
+    made = _check(await api.post(f"{base}/attachments", json=body), "open a window")
+    return cast("_Attachment", made.json())
 
 
 def _thread_sandbox(runtime: ManagedToolRuntime) -> str | None:
@@ -395,37 +437,11 @@ def _thread_sandbox(runtime: ManagedToolRuntime) -> str | None:
     return backend.id
 
 
-def _localhost_alias(sandbox_id: str) -> str:
-    """The browser's host for a sandbox's localhost: ``sb-`` and its id in lowercase base32."""
-    label = base64.b32encode(uuid.UUID(sandbox_id).bytes).decode().rstrip("=").lower()
+async def _sandbox_alias(api: httpx.AsyncClient, sandbox: str) -> str:
+    """The browser's host for ``sandbox``'s localhost: ``sb-`` and its id in lowercase base32."""
+    box = _check(await api.get(f"{_sandboxes_url()}/boxes/{sandbox}"), "look up the sandbox")
+    label = base64.b32encode(uuid.UUID(box.json()["id"]).bytes).decode().rstrip("=").lower()
     return f"sb-{label}.localhost"
-
-
-async def _share_localhost(name: str, sandbox: str) -> None:
-    """Let browser ``name`` open ``sandbox``'s servers at ``http://localhost:<port>``.
-
-    One window attached with ``share_localhost`` serves every window of the
-    browser, so this adds one beside the agent's instead of reopening it. A
-    sandbox replaced under the same name keeps the window's ``sandbox`` but not
-    its id, so the window is checked by the id its ``localhost_alias`` names.
-    """
-    credentials = _credentials()
-    tenant = {"X-Tenant-Id": credentials["tenant_id"]} if "tenant_id" in credentials else {}
-    headers = {"X-Api-Key": credentials["api_key"], **tenant}
-    base = f"{_browsers_url()}/{name}"
-    async with httpx.AsyncClient(headers=headers, timeout=_HTTP_TIMEOUT) as api:
-        found = _check(await api.get(base), "look up the browser").json().get("attachments")
-        window = next((w for w in found or [] if w.get("name") == _LOCALHOST_WINDOW), None)
-        if window is not None:
-            box = _check(
-                await api.get(f"{_sandboxes_url()}/boxes/{sandbox}"), "look up the sandbox"
-            )
-            if window.get("localhost_alias") == _localhost_alias(box.json()["id"]):
-                return
-            stale = f"{base}/attachments/{window['id']}"
-            _check(await api.delete(stale), "drop the stale localhost window")
-        body = {"name": _LOCALHOST_WINDOW, "sandbox": sandbox, "share_localhost": True}
-        _check(await api.post(f"{base}/attachments", json=body), "share the sandbox's localhost")
 
 
 async def _install_extension(box: AsyncSandbox) -> None:
@@ -627,16 +643,23 @@ class BrowserMiddleware(AgentMiddleware):
             thread = _thread_id(runtime) if key.startswith("user:") else None
         except RuntimeError as err:
             return f"error: {err}"
+        # Only a thread's browser is attached to its sandbox: a user's serves
+        # several threads, and their sandboxes cannot all be `localhost`.
+        sandbox = _thread_sandbox(runtime) if key.startswith("thread:") else None
         # Stagehand serves one client per browser: calls on a browser take turns.
         async with self._locks.setdefault(key, asyncio.Lock()):
             try:
                 for attempt in (1, 2):
                     try:
                         name = _browser_name(key)
+                        held = self._sessions.get(key)
+                        if held is not None and sandbox not in {None, held.sandbox}:
+                            await self._release(key)  # reattach the window to the sandbox
                         if key not in self._sessions:
-                            self._sessions[key] = await _open(name, self.idle_ttl_seconds)
+                            self._sessions[key] = await _open(name, self.idle_ttl_seconds, sandbox)
                         session = self._sessions[key]
-                        await self._share(session, name, key, runtime)
+                        await _publish_cdp_url(session, runtime)
+                        await self._browsing(name, runtime)
                         return await fn(session, await session.page(thread))
                     except Exception as err:  # noqa: BLE001 - recover or report
                         if _dead_session(err) and attempt == 1:
@@ -647,23 +670,8 @@ class BrowserMiddleware(AgentMiddleware):
                 self._release_later(key)
         return "error: browser unavailable"
 
-    async def _share(
-        self, session: _Session, name: str, key: str, runtime: ManagedToolRuntime
-    ) -> None:
-        """Share the thread's sandbox's localhost with its browser, once that sandbox exists.
-
-        Only a thread's browser: a user's serves several threads, and their
-        sandboxes cannot all be ``localhost``. Browsing goes on without it.
-        """
-        sandbox = _thread_sandbox(runtime) if key.startswith("thread:") else None
-        if sandbox is None or session.shared == sandbox:
-            return
-        try:
-            await _share_localhost(name, sandbox)
-        except Exception as err:  # noqa: BLE001 - tried again on the next call
-            _LOG.warning("could not share sandbox %s's localhost with %s: %s", sandbox, name, err)
-            return
-        session.shared = sandbox
+    async def _browsing(self, name: str, runtime: ManagedToolRuntime) -> None:
+        """Called before every browser call with the open browser's name."""
 
     async def _release(self, key: str) -> None:
         if (session := self._sessions.pop(key, None)) is not None:
@@ -761,6 +769,23 @@ class BrowserMiddleware(AgentMiddleware):
             ]
 
         return [snapshot, run, screenshot]
+
+
+async def _publish_cdp_url(session: _Session, runtime: ManagedToolRuntime) -> None:
+    """Write the window's CDP URL to ``CDP_URL_FILE`` in the sandbox it is attached to."""
+    if session.published or session.cdp_url is None or runtime.backend is None:
+        return
+    try:
+        [result] = await runtime.backend.aupload_files(
+            [(CDP_URL_FILE, f"{session.cdp_url}\n".encode())]
+        )
+    except Exception as err:  # noqa: BLE001 - tried again on the next call
+        _LOG.warning("could not write the browser's CDP URL to the sandbox: %s", err)
+        return
+    if result.error:
+        _LOG.warning("could not write the browser's CDP URL to the sandbox: %s", result.error)
+        return
+    session.published = True
 
 
 async def _save(runtime: ManagedToolRuntime, path: str, data: bytes) -> str:
