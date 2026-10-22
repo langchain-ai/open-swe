@@ -595,6 +595,11 @@ struct ChannelInitArgs {
 enum ChannelInitCommand {
     /// Create a Slack channel definition.
     Slack,
+    /// Create a GitHub channel definition.
+    #[command(name = "github")]
+    GitHub,
+    /// Create a Linear channel definition.
+    Linear,
 }
 
 #[derive(Args)]
@@ -1054,11 +1059,14 @@ fn run_connection(args: ConnectionArgs, _facts: &mut ReportableFacts) -> Result<
 
 fn run_channel(args: ChannelArgs, _facts: &mut ReportableFacts) -> Result<CommandCompletion> {
     match args.command {
-        ChannelCommand::Init(ChannelInitArgs {
-            channel: ChannelInitCommand::Slack,
-        }) => {
-            let path = channel::init_slack(Path::new("."))?;
-            channel::show_added(&path)?;
+        ChannelCommand::Init(ChannelInitArgs { channel }) => {
+            let kind = match channel {
+                ChannelInitCommand::Slack => channel::ChannelKind::Slack,
+                ChannelInitCommand::GitHub => channel::ChannelKind::GitHub,
+                ChannelInitCommand::Linear => channel::ChannelKind::Linear,
+            };
+            let path = channel::init_channel(Path::new("."), kind)?;
+            channel::show_added(kind, &path)?;
         }
     }
     Ok(CommandCompletion::Succeeded)
@@ -1920,6 +1928,19 @@ mod tests {
     }
 
     #[test]
+    fn init_parses_github_channel() {
+        let cli = Cli::try_parse_from(["mda", "init", "my-agent", "-c", "github", "-c", "slack"])
+            .unwrap();
+        let Command::Init(init) = cli.command else {
+            unreachable!();
+        };
+        assert_eq!(
+            init.channels,
+            vec![init::InitChannel::GitHub, init::InitChannel::Slack]
+        );
+    }
+
+    #[test]
     fn init_rejects_an_unknown_channel() {
         let err = match Cli::try_parse_from(["mda", "init", "my-agent", "--channel", "discord"]) {
             Err(err) => err,
@@ -1927,7 +1948,9 @@ mod tests {
         };
         let message = err.to_string();
         assert!(
-            message.contains("invalid value 'discord'") && message.contains("slack"),
+            message.contains("invalid value 'discord'")
+                && message.contains("slack")
+                && message.contains("github"),
             "{message}"
         );
     }
@@ -2078,6 +2101,21 @@ mod tests {
                 Command::Channel(ChannelArgs {
                     command: ChannelCommand::Init(ChannelInitArgs {
                         channel: ChannelInitCommand::Slack,
+                    }),
+                })
+            ));
+        }
+    }
+
+    #[test]
+    fn channel_init_github_parses() {
+        for command in ["channel", "channels"] {
+            let cli = Cli::try_parse_from(["mda", command, "init", "github"]).unwrap();
+            assert!(matches!(
+                cli.command,
+                Command::Channel(ChannelArgs {
+                    command: ChannelCommand::Init(ChannelInitArgs {
+                        channel: ChannelInitCommand::GitHub,
                     }),
                 })
             ));

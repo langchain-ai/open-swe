@@ -612,6 +612,14 @@ class BrowserMiddleware(AgentMiddleware):
         self._releases = _RELEASES
         self.tools = self._build_tools()
 
+    def browser_name(self, runtime: ManagedToolRuntime | Runtime) -> str:
+        """The LangSmith browser this run's browser tools use, whether or not it exists yet.
+
+        Raises:
+            RuntimeError: the run has no thread, or user scope has no signed-in user.
+        """
+        return _browser_name(_browser_key(runtime, self.scope))
+
     async def _call(
         self, runtime: ManagedToolRuntime, fn: Callable[[_Session, Page], Awaitable[T]]
     ) -> T | str:

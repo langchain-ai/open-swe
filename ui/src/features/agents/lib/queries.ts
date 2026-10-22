@@ -923,6 +923,18 @@ export function useAgentThreadBrowser(threadId: string, enabled: boolean) {
   })
 }
 
+// Opening creates a browser and a window, so the panel waits for them rather
+// than showing one that isn't there yet.
+export function useOpenAgentThreadBrowser(threadId: string) {
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: () => agentsApi.openThreadBrowser(threadId),
+    meta: { errorTitle: "Couldn't open the browser" },
+    onSuccess: (browser) =>
+      queryClient.setQueryData(agentThreadKeys.browser(threadId), browser),
+  })
+}
+
 export function useAgentThreadBackgroundWork(threadId: string) {
   return useQuery({
     queryKey: agentThreadKeys.backgroundWork(threadId),

@@ -6,6 +6,7 @@ use std::path::Path;
 use anyhow::{bail, Context, Result};
 use serde_json::json;
 
+use crate::agent_config::AsyncSubagentGraph;
 use crate::project::Language;
 
 use super::{BROWSER_EXPORT, IDENTITY_EXPORT, MEMORY_EXPORT, NODE_VERSION, RUNTIME_DIR};
@@ -63,6 +64,8 @@ pub(super) struct EntryInputs<'a> {
     /// Module specifier for the root `browser` declaration (Python only), if
     /// the project opts into browser use.
     pub(super) browser_import: Option<&'a str>,
+    /// Async subagents that get their own graph factory (served Python only).
+    pub(super) async_subagents: &'a [AsyncSubagentGraph],
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -279,8 +282,18 @@ fn generate_python_entry(inputs: &EntryInputs<'_>) -> String {
             "compile_managed_agent_async"
         }
     };
+    let is_eval = matches!(inputs.context, RuntimeContext::Eval { .. });
+    // Served entries hold `parent_run` open for the whole run: an async
+    // subagent's run is checked against the agent that launched it, and nests
+    // under that agent's trace.
+    let runtime_imports = if is_eval {
+        compile_fn.to_string()
+    } else {
+        out.push_str("from contextlib import asynccontextmanager\n\n");
+        format!("{compile_fn}, parent_run")
+    };
     out.push_str(&format!(
-        "from managed_deepagents.runtime import {compile_fn}\n"
+        "from managed_deepagents.runtime import {runtime_imports}\n"
     ));
     if !inputs.factory {
         out.push_str(
@@ -400,7 +413,30 @@ fn generate_python_entry(inputs: &EntryInputs<'_>) -> String {
     }
     out.push('\n');
 
-    let await_prefix = if matches!(inputs.context, RuntimeContext::Eval { .. }) {
+    let subagents = inputs.async_subagents;
+    // Async subagents run with the lead's managed kwargs. They keep `channels` so
+    // a paused subagent can find the lead's channel thread to show its approval.
+    let mut subagent_kwargs = kwargs.clone();
+    subagent_kwargs.push("runtime=runtime".to_string());
+    if !subagents.is_empty() {
+        let entries: Vec<String> = subagents
+            .iter()
+            .map(|subagent| {
+                format!(
+                    "{}: {}",
+                    encode_string_literal(&subagent.name),
+                    encode_string_literal(&subagent.graph_id)
+                )
+            })
+            .collect();
+        out.push_str(&format!(
+            "_async_subagent_graphs = {{{}}}\n",
+            entries.join(", ")
+        ));
+        kwargs.push("async_subagent_graphs=_async_subagent_graphs".to_string());
+    }
+
+    let await_prefix = if is_eval {
         if inputs.factory {
             out.push_str("\nasync def agent(config):\n");
             "await "
@@ -410,20 +446,33 @@ fn generate_python_entry(inputs: &EntryInputs<'_>) -> String {
         }
     } else {
         kwargs.push("runtime=runtime".to_string());
-        out.push_str("\nasync def agent(config, runtime: ServerRuntime):\n");
+        out.push_str("\n@asynccontextmanager\n");
+        out.push_str("async def agent(config, runtime: ServerRuntime):\n");
         "await "
     };
     if !inputs.factory {
         out.push_str("    assert_static_agent_definition(_definition)\n");
     }
-    if kwargs.is_empty() {
-        out.push_str(&format!(
-            "    return {await_prefix}{compile_fn}(_definition, config)\n"
-        ));
+    let call = if kwargs.is_empty() {
+        format!("{await_prefix}{compile_fn}(_definition, config)")
     } else {
-        out.push_str(&format!(
-            "    return {await_prefix}{compile_fn}(_definition, config, {})\n",
+        format!(
+            "{await_prefix}{compile_fn}(_definition, config, {})",
             kwargs.join(", ")
+        )
+    };
+    if is_eval {
+        out.push_str(&format!("    return {call}\n"));
+    } else {
+        out.push_str("    async with parent_run(config):\n");
+        out.push_str(&format!("        yield {call}\n"));
+    }
+    for subagent in subagents {
+        out.push_str(&format!(
+            "\n\n@asynccontextmanager\nasync def {}(config, runtime: ServerRuntime):\n    async with parent_run(config):\n        yield await {compile_fn}(_definition, config, {}, async_subagent={})\n",
+            subagent.export,
+            subagent_kwargs.join(", "),
+            encode_string_literal(&subagent.name)
         ));
     }
     out
@@ -585,6 +634,8 @@ pub(super) fn generate_managed_http_module(
                 out.push_str(&format!(
                     "import {{ channels }} from \"{channels_import}\";\n"
                 ));
+                // Channels read project files (an app icon) relative to the build.
+                out.push_str("import { fileURLToPath } from \"node:url\";\n");
             }
             let mut fields: Vec<&str> = Vec::new();
             if identity_import.is_some() {
@@ -595,6 +646,7 @@ pub(super) fn generate_managed_http_module(
             }
             if channels_import.is_some() {
                 fields.push("channels");
+                fields.push("root: fileURLToPath(new URL(\".\", import.meta.url))");
             }
             out.push_str(&format!(
                 "\nexport const app = buildManagedHttpApp({{ {} }});\n",
@@ -624,6 +676,8 @@ pub(super) fn generate_managed_http_module(
                 out.push_str(&format!(
                     "from {channels_import} import channels as _channels\n"
                 ));
+                // Channels read project files (an app icon) relative to the build.
+                out.push_str("from pathlib import Path as _Path\n");
             }
             let mut args: Vec<&str> = Vec::new();
             if identity_import.is_some() {
@@ -634,6 +688,7 @@ pub(super) fn generate_managed_http_module(
             }
             if channels_import.is_some() {
                 args.push("channels=_channels");
+                args.push("root=str(_Path(__file__).resolve().parent)");
             }
             out.push_str(&format!(
                 "\napp = build_managed_http_app({})\n",
@@ -738,6 +793,8 @@ pub(super) struct LanggraphManifestInputs<'a> {
     /// Local package directories that Python deploys install separately.
     pub(super) local_packages: &'a [String],
     pub(super) disable_studio_auth: bool,
+    /// Extra `(graph key, export specifier)` pairs, one per async subagent.
+    pub(super) extra_graphs: &'a [(String, String)],
 }
 
 pub(super) fn generate_langgraph_json(inputs: &LanggraphManifestInputs<'_>) -> Result<String> {
@@ -752,6 +809,7 @@ pub(super) fn generate_langgraph_json(inputs: &LanggraphManifestInputs<'_>) -> R
         include_vendored_runtime,
         local_packages,
         disable_studio_auth,
+        extra_graphs,
     } = *inputs;
     // The LangGraph manifest keys the runtime on `node_version` (LangGraph.js)
     // or `python_version` (LangGraph Python); the rest of the shape is shared.
@@ -760,6 +818,9 @@ pub(super) fn generate_langgraph_json(inputs: &LanggraphManifestInputs<'_>) -> R
     // binding.
     let mut graphs = serde_json::Map::new();
     graphs.insert(assistant_id.to_string(), json!(graph));
+    for (key, export) in extra_graphs {
+        graphs.insert(key.clone(), json!(export));
+    }
 
     // Prefer `_INTERNAL_docker_tag` over `api_version`: Cloud SaaS has been
     // observed to ignore rc `api_version` pins and keep the newest stable
@@ -867,6 +928,7 @@ mod tests {
                 identity_import: None,
                 memory_import: None,
                 browser_import: None,
+                async_subagents: &[],
             };
             for (language, check) in [
                 (
@@ -880,7 +942,11 @@ mod tests {
             ] {
                 let entry = generate_entry(language, &inputs);
                 let check_position = entry.find(check).unwrap();
-                let compile_position = entry.rfind("return ").unwrap();
+                // Served Python entries yield the graph instead of returning it.
+                let compile_position = entry
+                    .rfind("return ")
+                    .or_else(|| entry.rfind("yield "))
+                    .unwrap();
                 assert!(check_position < compile_position, "{entry}");
             }
         }
@@ -914,6 +980,7 @@ mod tests {
                 identity_import: None,
                 memory_import: None,
                 browser_import: None,
+                async_subagents: &[],
             };
             for language in [Language::TypeScript, Language::Python] {
                 let entry = generate_entry(language, &inputs);
@@ -942,6 +1009,7 @@ mod tests {
                 identity_import: None,
                 memory_import: None,
                 browser_import: None,
+                async_subagents: &[],
             },
         );
 
@@ -954,6 +1022,41 @@ mod tests {
         assert!(entry.contains("async def agent(config):"), "{entry}");
         assert!(
             entry.contains("return await compile_agent_factory_for_eval_async(_definition, config"),
+            "{entry}"
+        );
+    }
+
+    #[test]
+    fn python_served_entry_holds_parent_run_for_the_run() {
+        let entry = generate_entry(
+            Language::Python,
+            &EntryInputs {
+                agent_import: "agent",
+                factory: false,
+                context: RuntimeContext::Local {
+                    context_root: "/tmp/context",
+                    has_skills: false,
+                },
+                sandbox_import: None,
+                connectors_import: None,
+                channels_import: None,
+                identity_import: None,
+                memory_import: None,
+                browser_import: None,
+                sandbox_setup: false,
+                async_subagents: &[],
+            },
+        );
+
+        assert!(
+            entry
+                .contains("@asynccontextmanager\nasync def agent(config, runtime: ServerRuntime):"),
+            "{entry}"
+        );
+        assert!(
+            entry.contains(
+                "    async with parent_run(config):\n        yield await compile_managed_agent_async("
+            ),
             "{entry}"
         );
     }
@@ -977,6 +1080,7 @@ mod tests {
                 identity_import: None,
                 memory_import: None,
                 browser_import: None,
+                async_subagents: &[],
             },
         );
 
@@ -1030,6 +1134,7 @@ mod tests {
             include_vendored_runtime: false,
             local_packages: &[],
             disable_studio_auth: false,
+            extra_graphs: &[],
         })
         .unwrap();
 
@@ -1068,6 +1173,7 @@ mod tests {
             include_vendored_runtime: false,
             local_packages: &[],
             disable_studio_auth: false,
+            extra_graphs: &[],
         })
         .unwrap();
 
@@ -1096,6 +1202,7 @@ mod tests {
             include_vendored_runtime: true,
             local_packages: &[],
             disable_studio_auth: false,
+            extra_graphs: &[],
         })
         .unwrap();
 
@@ -1120,6 +1227,7 @@ mod tests {
             include_vendored_runtime: false,
             local_packages: &[],
             disable_studio_auth: false,
+            extra_graphs: &[],
         })
         .unwrap();
 
@@ -1145,6 +1253,7 @@ mod tests {
             include_vendored_runtime: false,
             local_packages: &[],
             disable_studio_auth: false,
+            extra_graphs: &[],
         })
         .unwrap();
 
@@ -1173,6 +1282,7 @@ mod tests {
             include_vendored_runtime: false,
             local_packages: &[],
             disable_studio_auth: true,
+            extra_graphs: &[],
         })
         .unwrap();
 
@@ -1194,6 +1304,7 @@ mod tests {
             include_vendored_runtime: false,
             local_packages: &[],
             disable_studio_auth: false,
+            extra_graphs: &[],
         })
         .unwrap();
 

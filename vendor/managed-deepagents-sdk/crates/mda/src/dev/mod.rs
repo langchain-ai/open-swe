@@ -346,6 +346,7 @@ pub fn run(opts: DevOptions) -> Result<CommandCompletion> {
         has_skills: summary.has_skills,
         needs_developer_principal,
         schedule_crons: summary.schedule_crons,
+        graphs_changed: false,
     };
     let mut classify_ctx = WatchClassifyContext::from_agent_file(&project.agent_file);
     let mut hub_fingerprint = hub_inputs_fingerprint(&project.root, &classify_ctx);
@@ -426,11 +427,18 @@ pub fn run(opts: DevOptions) -> Result<CommandCompletion> {
                 // The running server needs the newly staged developer principal.
                 let gained_developer_principal =
                     !needed_developer_principal && features.needs_developer_principal;
+                let graphs_changed = std::mem::take(&mut features.graphs_changed);
                 if gained_developer_principal || restaged_env {
                     // Both CLIs inherit the loopback URL from the parent process.
                     // Node's dotenv loader preserves that value across worker
                     // reloads, so an env restage must replace the parent too.
                     let _ = log::info("Restarting LangGraph server for updated .env");
+                    restart_langgraph_dev(&mut child, &command, &project, &out_dir)?;
+                    if let Some(sync) = schedules.as_mut() {
+                        sync.restarted();
+                    }
+                } else if graphs_changed {
+                    let _ = log::info("Restarting LangGraph server for updated graphs");
                     restart_langgraph_dev(&mut child, &command, &project, &out_dir)?;
                     if let Some(sync) = schedules.as_mut() {
                         sync.restarted();
@@ -829,6 +837,22 @@ struct DevWatchFeatures {
     needs_developer_principal: bool,
     /// What the last successful compile produced from `schedules/`.
     schedule_crons: compile::schedules::ScheduleCrons,
+    /// A rebuild added or removed a graph, which `langgraph dev` only reads at
+    /// startup.
+    graphs_changed: bool,
+}
+
+/// Graph keys in a `langgraph.json` manifest.
+fn langgraph_graph_keys(manifest: Option<&[u8]>) -> Vec<String> {
+    manifest
+        .and_then(|bytes| serde_json::from_slice::<serde_json::Value>(bytes).ok())
+        .and_then(|value| {
+            value
+                .get("graphs")?
+                .as_object()
+                .map(|graphs| graphs.keys().cloned().collect())
+        })
+        .unwrap_or_default()
 }
 
 fn apply_watch_action(
@@ -923,6 +947,10 @@ fn apply_watch_action(
             features.has_skills = summary.has_skills;
             features.schedule_crons = summary.schedule_crons.clone();
             *hub_fingerprint = hub_inputs_fingerprint(&project.root, classify_ctx);
+            // Only Python builds async subagent graphs, so only Python graph sets change.
+            features.graphs_changed = project.language == Language::Python
+                && langgraph_graph_keys(prior_langgraph.as_deref())
+                    != langgraph_graph_keys(fs::read(&langgraph_path).ok().as_deref());
 
             // TypeScript: if deps are stale, stash the freshly written
             // langgraph.json and restore the previous one immediately so
@@ -1068,6 +1096,9 @@ fn feature_summary_lines(
     if summary.has_skills {
         lines.push("Skills         synced from skills/".to_string());
     }
+    lines.extend(crate::deploy::channel_setup::dev_notes(
+        &summary.channel_providers,
+    ));
     if let Some(line) = format_public_url_line(public_url.as_ref(), needs_public_url) {
         lines.push(line);
     }
@@ -1544,7 +1575,8 @@ fn dev_langsmith_login_is_interactive(needs_api_key: bool, prompt: DevLoginPromp
 
 /// Fill omitted LangSmith settings in the staged env from available local sources.
 ///
-/// Order: keep an existing staged value; else mirror process env. When the
+/// Order: mirror a set process env value (the shell wins over the project
+/// `.env`, as everywhere else in the CLI); else keep the staged value. When the
 /// project declares a sandbox and the CLI is interactive, resolve or prompt for
 /// `LANGSMITH_API_KEY` the same way as deploy (env → cache → sign-in). Non-TTY
 /// runs and watch rebuilds stay soft: mirror env/cache when present, and only
@@ -1556,21 +1588,22 @@ fn ensure_dev_langsmith_env(
     prompt: DevLoginPrompt,
 ) -> Result<()> {
     let staged = out_dir.join(".env");
-    let env = crate::deploy::env_file::parse_env_file(&staged);
+    // Compare against the project file, not the staged copy: the staged one
+    // also holds values the CLI wrote itself (e.g. `LANGSMITH_PROJECT`).
+    let project_env = crate::deploy::env_file::parse_env_file(
+        &crate::deploy::env_file::project_env_persist_path(project_root),
+    );
     for key in DEV_LANGSMITH_STAGED_ENV_KEYS {
+        // The API key has its own resolver below (session PATs need care).
         if key == &API_KEY_ENV {
             continue;
         }
-        if env
-            .get(*key)
-            .map(|v| v.trim())
-            .is_some_and(|v| !v.is_empty())
-        {
-            continue;
-        }
+        // `set_env_key` no-ops on an unchanged value, so restages do not wake
+        // LangGraph's `.env` watcher.
         if let Ok(value) = std::env::var(key) {
             let trimmed = value.trim();
             if !trimmed.is_empty() {
+                crate::langsmith::warn_if_shell_shadows_env_file(key, trimmed, &project_env);
                 crate::deploy::env_file::set_env_key(&staged, key, trimmed)?;
             }
         }
@@ -2248,6 +2281,17 @@ mod tests {
 
     use super::*;
     use crate::error::category_of;
+
+    #[test]
+    fn langgraph_graph_keys_reads_the_graphs_map() {
+        let manifest = br#"{"graphs": {"lead": "a", "lead--researcher": "b"}}"#;
+        assert_eq!(
+            langgraph_graph_keys(Some(manifest)),
+            ["lead", "lead--researcher"]
+        );
+        assert!(langgraph_graph_keys(None).is_empty());
+        assert!(langgraph_graph_keys(Some(b"not json")).is_empty());
+    }
 
     const TEST_ASSISTANT_ID: &str = "test-agent";
 
@@ -3213,7 +3257,7 @@ mod tests {
     }
 
     #[test]
-    fn ensure_dev_langsmith_env_keeps_staged_key() {
+    fn ensure_dev_langsmith_env_prefers_shell_key_over_staged() {
         let _lock = crate::test_support::LANGSMITH_API_KEY_ENV_LOCK
             .lock()
             .unwrap();
@@ -3240,7 +3284,7 @@ mod tests {
         let env = crate::deploy::env_file::parse_env_file(&out_dir.join(".env"));
         assert_eq!(
             env.get("LANGSMITH_API_KEY").map(String::as_str),
-            Some("lsv2_pt_from_file")
+            Some("lsv2_pt_from_shell")
         );
     }
 
@@ -3829,6 +3873,7 @@ mod tests {
                 PathBuf::from("connectors/notion.ts"),
             ],
             channels: vec![],
+            channel_providers: Default::default(),
             identity: Some(IdentitySummary {
                 path: PathBuf::from("identity.ts"),
                 auth: Some(IdentityAuthMode::Backend),
@@ -3921,6 +3966,21 @@ mod tests {
     }
 
     #[test]
+    fn feature_summary_notes_github_channel_is_not_available_in_dev() {
+        let (project, mut summary) = summary_fixture();
+        summary.channels = vec![PathBuf::from("channels/github.ts")];
+        summary.channel_providers.insert("github".to_string());
+        let lines = feature_summary_lines(&project, &summary, &[], None, false, true);
+        let joined = lines.join("\n");
+        assert!(
+            joined
+                .contains("GitHub         not available in dev · deploy to receive GitHub events"),
+            "{joined}"
+        );
+        assert!(!joined.contains("Public URL"), "{joined}");
+    }
+
+    #[test]
     fn feature_summary_omits_connectors_schedules_sandbox_when_absent() {
         let (project, mut summary) = summary_fixture();
         summary.connectors.clear();
@@ -3937,6 +3997,7 @@ mod tests {
         assert!(!joined.contains("Schedules"), "{joined}");
         assert!(!joined.contains("Sandbox"), "{joined}");
         assert!(!joined.contains("Public URL"), "{joined}");
+        assert!(!joined.contains("GitHub"), "{joined}");
     }
 
     #[test]
