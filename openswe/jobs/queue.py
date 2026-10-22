@@ -152,9 +152,11 @@ async def schedule(
     key: str | None = None,
     metadata: Mapping[str, JsonValue] | None = None,
     by: uuid.UUID | None = None,
+    replace: bool = True,
 ) -> Job:
     """Queue a job; one with ``key`` replaces the job queued under that key before.
 
+    With ``replace=False``, an existing keyed job keeps its payload, schedule and claim.
     ``by`` is the person whose action queued it, ``None`` for the system's own work.
     """
     if cron is not None and not croniter.is_valid(cron):
@@ -173,6 +175,15 @@ async def schedule(
     )
     if cron is not None and due_at is None:
         job.due_at = job.next_fire_after(datetime.now(UTC))
+    updates = (
+        "kind = EXCLUDED.kind, payload = EXCLUDED.payload, "
+        "due_at = EXCLUDED.due_at, cron = EXCLUDED.cron, "
+        "timezone = EXCLUDED.timezone, metadata = EXCLUDED.metadata, "
+        "attempts = 0, locked_until = NULL, claim_token = NULL, "
+        "updated_at = clock_timestamp(), updated_by = EXCLUDED.updated_by"
+        if replace
+        else "key = EXCLUDED.key"
+    )
     async with transaction() as conn:
         row = (
             (
@@ -183,12 +194,7 @@ async def schedule(
                                      created_by, updated_by)
                     VALUES (:id, :kind, CAST(:payload AS jsonb), :due_at, :cron, :timezone,
                             :key, CAST(:metadata AS jsonb), :by, :by)
-                    ON CONFLICT (key) DO UPDATE SET
-                        kind = EXCLUDED.kind, payload = EXCLUDED.payload,
-                        due_at = EXCLUDED.due_at, cron = EXCLUDED.cron,
-                        timezone = EXCLUDED.timezone, metadata = EXCLUDED.metadata,
-                        attempts = 0, locked_until = NULL, claim_token = NULL,
-                        updated_at = clock_timestamp(), updated_by = EXCLUDED.updated_by
+                    ON CONFLICT (key) DO UPDATE SET {updates}
                     RETURNING {_COLUMNS}
                     """
                     ),
