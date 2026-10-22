@@ -100,7 +100,9 @@ HUMAN_REVIEW_PICK = "bob"
 _UNCLAIMED_MARKER = "Nobody has signed up to review"
 _DECLINED_MARKER = "declined the review of"
 _PICK_REQUEST = "reviewer for it"
-_SUGGESTED_REVIEWER = re.compile(r"Open SWE suggests @(\S+): (.+?) Unless this Slack thread")
+_SUGGESTED_REVIEWER = re.compile(
+    r"Open SWE suggests @(\S+) \(`[^`]*`\): (.+?) Unless this Slack thread"
+)
 
 # The spec seeds config.py (VALUE_1..VALUE_30) and CHANGELOG.md on main. Drawn:
 # greet.py and config.py's VALUE_2 hunk, four lines. Excluded: 40 more.
@@ -628,14 +630,38 @@ def _human_review_dismiss_step(messages: list[BaseMessage]) -> AIMessage:
     )
 
 
-def _human_review_assign_step(messages: list[BaseMessage]) -> AIMessage:
-    """Nobody signed up: take Open SWE's suggestion, else the reviewer CODEOWNERS names.
-
-    Notes queued for the thread can land after the pick request, so find the request itself.
-    """
+def _pick_request(messages: list[BaseMessage]) -> str:
+    """Notes queued for the thread can land after the pick request, so find the request itself."""
     texts = [_text(m.content) for m in messages if isinstance(m, HumanMessage)]
-    text = next((t for t in reversed(texts) if _PICK_REQUEST in t), texts[-1] if texts else "")
+    return next((t for t in reversed(texts) if _PICK_REQUEST in t), texts[-1] if texts else "")
+
+
+def _human_review_lookup_step(messages: list[BaseMessage]) -> AIMessage:
+    """Nobody signed up: look up Open SWE's suggestion, else the reviewer CODEOWNERS names."""
+    suggested = _SUGGESTED_REVIEWER.search(_pick_request(messages))
+    return AIMessage(
+        content="Looking up the reviewer.",
+        tool_calls=[
+            {
+                "name": "lookup_user",
+                "args": {"query": suggested.group(1) if suggested else HUMAN_REVIEW_PICK},
+                "id": f"call-human-review-lookup-{len(messages)}",
+            }
+        ],
+        response_metadata={"model_name": "fake-scripted-model"},
+    )
+
+
+def _human_review_assign_step(messages: list[BaseMessage]) -> AIMessage:
+    """Assign the reviewer the lookup found, by their user id."""
+    text = _pick_request(messages)
     suggested = _SUGGESTED_REVIEWER.search(text)
+    lookup = next(
+        m
+        for m in reversed(messages)
+        if isinstance(m, ToolMessage) and m.tool_call_id.startswith("call-human-review-lookup")
+    )
+    user_id = json.loads(_text(lookup.content))["users"][0]["user_id"]
     return AIMessage(
         content="Picking a reviewer from CODEOWNERS.",
         tool_calls=[
@@ -643,7 +669,7 @@ def _human_review_assign_step(messages: list[BaseMessage]) -> AIMessage:
                 "name": "assign_human_reviewer",
                 "args": {
                     "pr_url": _pr_url_in(text),
-                    "github_login": suggested.group(1) if suggested else HUMAN_REVIEW_PICK,
+                    "user_id": user_id,
                     "reason": (
                         suggested.group(2) if suggested else "They own greet.py in CODEOWNERS."
                     ),
@@ -1357,6 +1383,7 @@ SCRIPT_LIBRARY: dict[str, tuple[StepSpec, ...]] = {
     "hello": (_tool_step("Saying hi.", "slack_reply", {"message": "Hi!"}, "call-hello"),),
     # Woken because nobody signed up within 30 minutes.
     "human_review_assign": (
+        _dynamic_step(_human_review_lookup_step),
         _dynamic_step(_human_review_assign_step),
         _tool_step(
             "The pick already tagged them in the thread.",
