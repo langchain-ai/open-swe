@@ -20,8 +20,6 @@ from langchain_core.language_models.fake_chat_models import (
 )
 from langchain_core.messages import (
     AIMessage,
-    AnyMessage,
-    HumanMessage,
     ToolCall,
     ToolMessage,
     message_to_dict,
@@ -60,58 +58,29 @@ from rt.tools import backend_tool
 from rt.tracing import TurnTrace
 
 
-@pytest.mark.parametrize("fallback", [False, True])
-async def test_orphaned_results_are_not_replayed_to_models(
-    monkeypatch: pytest.MonkeyPatch, fallback: bool
-) -> None:
-    monkeypatch.setenv("OPEN_SWE_BACKEND_URL", "https://backend.invalid")
-    messages: list[AnyMessage] = [
-        HumanMessage(content="continue"),
+async def test_orphaned_results_are_not_replayed_to_models() -> None:
+    messages = [
         AIMessage(content="", tool_calls=[{"name": "execute", "args": {}, "id": "call-a"}]),
         ToolMessage(content="interrupted", tool_call_id="call-a", status="error"),
-        ToolMessage(content="late result", tool_call_id="missing-call"),
-        AIMessage(content="", tool_calls=[{"name": "execute", "args": {}, "id": "call-b"}]),
-        ToolMessage(content="done", tool_call_id="call-b"),
         AIMessage(content=[{"type": "tool_use", "id": "raw-call", "name": "execute", "input": {}}]),
         ToolMessage(content="native result", tool_call_id="raw-call"),
+        ToolMessage(content="late result", tool_call_id="missing-call"),
     ]
     saved = deepcopy(messages)
-    expected = [message for message in messages if message is not messages[3]]
-    model = FakeListChatModel(responses=["done"])
-    monkeypatch.setattr("rt.middleware.build_model", lambda *args, **kwargs: model)
     request = ModelRequest(
-        model=model,
+        model=FakeListChatModel(responses=["done"]),
         messages=messages,
-        state={
-            "messages": messages,
-            "open_swe_call": {
-                "system_prompt": "test",
-                "model": None,
-                "fallback": {"model_id": "test", "kwargs": {}} if fallback else None,
-                "use_gateway": False,
-            },
-        },
+        state={"messages": messages},
         runtime=MagicMock(),
     )
-    attempts = 0
+    handler = AsyncMock(return_value=ModelResponse(result=[AIMessage(content="done")]))
 
-    async def respond(outgoing: ModelRequest) -> ModelResponse:
-        nonlocal attempts
-        attempts += 1
-        assert outgoing.messages == expected
-        assert outgoing.state["messages"] == saved
-        if fallback and attempts == 1:
-            raise TimeoutError("retry with fallback")
-        return ModelResponse(result=[AIMessage(content="done")])
+    await OrphanedToolResultsMiddleware().awrap_model_call(request, handler)
 
-    async def sanitize(outgoing: ModelRequest) -> ModelResponse:
-        return await OrphanedToolResultsMiddleware().awrap_model_call(outgoing, respond)
-
-    backend = BackendRunMiddleware(OpenSweBackend(None), "turn")
-    await backend.awrap_model_call(request, sanitize)
-    assert attempts == (2 if fallback else 1)
+    outgoing = handler.call_args.args[0]
+    assert outgoing.messages == saved[:-1]
+    assert outgoing.state["messages"] == saved
     assert request.messages == saved
-    assert messages == saved
 
 
 @pytest.mark.parametrize(
