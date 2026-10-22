@@ -54,12 +54,15 @@ vi.mock("@tanstack/react-router", () => ({
     params,
     children,
     className,
+    "aria-label": ariaLabel,
   }: {
     params: { owner: string; repo: string; number: string }
     children: React.ReactNode
     className?: string
+    "aria-label"?: string
   }) => (
     <a
+      aria-label={ariaLabel}
       className={className}
       href={`/agents/reviews/${params.owner}/${params.repo}/${params.number}`}
     >
@@ -380,7 +383,9 @@ describe("My PRs", () => {
       within(card).getByRole("link", { name: "GitHub" }).getAttribute("href")
     ).toBe("https://github.com/acme/app/pull/1")
     expect(
-      within(card).getByRole("link", { name: "Reviewer" }).getAttribute("href")
+      within(card)
+        .getByRole("link", { name: "Open full page" })
+        .getAttribute("href")
     ).toBe("/agents/reviews/acme/app/1")
   })
   it("shows pending checks as Pending alongside the PR's other conditions", async () => {
