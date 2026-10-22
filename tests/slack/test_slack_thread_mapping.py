@@ -21,6 +21,8 @@ from openswe.slack.records import (
     store_slack_message_run_mapping,
     store_slack_run_mapping,
 )
+from openswe.thread_ids import mda_successor_thread_id
+from openswe.threads import index
 
 
 class _Threads:
@@ -125,6 +127,21 @@ async def test_resolver_backfills_existing_thread_from_metadata() -> None:
 
     assert resolved == "legacy-thread"
     assert await lookup_slack_thread_id("C1", "1.0") == "legacy-thread"
+
+
+@pytest.mark.asyncio
+@pytest.mark.usefixtures("registry_db")
+async def test_a_location_on_a_local_thread_moves_to_its_mda_successor() -> None:
+    old = "00000000-0000-4000-8000-000000000001"
+    await index.create(old, runtime="local")
+    await bind_slack_thread_id("C1", "1.0", old)
+    client: Any = _Client()
+
+    first = await resolve_slack_thread_id(client, "C1", "1.0")
+    second = await resolve_slack_thread_id(client, "C1", "1.0")
+
+    assert first == second == mda_successor_thread_id(old)
+    assert await lookup_slack_thread_id("C1", "1.0") == first
 
 
 @pytest.mark.asyncio

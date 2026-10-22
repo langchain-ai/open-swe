@@ -160,20 +160,34 @@ test.describe("HTML artifacts", () => {
     const verificationHeading = ownerArtifact
       .contentFrame()
       .getByText("Verification");
-    await verificationHeading.evaluate((element) => {
-      const range = document.createRange();
-      range.selectNodeContents(element);
-      const selection = window.getSelection();
-      selection?.removeAllRanges();
-      selection?.addRange(range);
-      element.dispatchEvent(new MouseEvent("mouseup", { bubbles: true }));
-    });
+    const selectHeading = () =>
+      verificationHeading.evaluate((element) => {
+        const range = document.createRange();
+        range.selectNodeContents(element);
+        const selection = window.getSelection();
+        selection?.removeAllRanges();
+        selection?.addRange(range);
+        element.dispatchEvent(new MouseEvent("mouseup", { bubbles: true }));
+      });
+    const clearSelection = () => verificationHeading.click();
+    await selectHeading();
+    await expect(owner.getByTestId("comment-composer")).toBeVisible();
+    await clearSelection();
+    await expect(owner.getByTestId("comment-composer")).toHaveCount(0);
+    await selectHeading();
     await expect(owner.getByTestId("comment-composer")).toContainText(
       "Verification",
     );
     await owner
       .getByTestId("comment-input")
       .fill("Clarify the expected output.");
+    await clearSelection();
+    await expect(owner.getByTestId("comment-input")).toHaveValue(
+      "Clarify the expected output.",
+    );
+    await expect(owner.getByTestId("comment-composer")).toContainText(
+      "Verification",
+    );
     await owner.getByTestId("comment-submit").click();
     await expect(owner.getByTestId("plan-comment")).toContainText(
       "Clarify the expected output.",

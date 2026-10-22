@@ -62,6 +62,34 @@ async def held(scope: str, key: str) -> bool:
         return result.first() is not None
 
 
+async def remaining(scope: str, key: str) -> float:
+    """Seconds until a claim expires, or zero when it is absent or expired."""
+    async with transaction() as conn:
+        result = await conn.execute(
+            text(
+                "SELECT greatest(0, extract(epoch FROM expires_at - clock_timestamp())) "
+                "FROM event_claim WHERE scope = :scope AND key = :key"
+            ),
+            {"scope": scope, "key": key},
+        )
+        return float(result.scalar_one_or_none() or 0)
+
+
+async def defer(scope: str, key: str, *, ttl: timedelta) -> None:
+    """Keep a cooldown claim until at least ``ttl`` from now, never shortening it."""
+    async with transaction() as conn:
+        await conn.execute(_SWEEP, {"limit": _SWEEP_LIMIT})
+        await conn.execute(
+            text(
+                "INSERT INTO event_claim (scope, key, expires_at) "
+                "VALUES (:scope, :key, clock_timestamp() + CAST(:ttl AS interval)) "
+                "ON CONFLICT (scope, key) DO UPDATE "
+                "SET expires_at = greatest(event_claim.expires_at, EXCLUDED.expires_at)"
+            ),
+            {"scope": scope, "key": key, "ttl": ttl},
+        )
+
+
 async def release(scope: str, key: str) -> None:
     """Give a claim back, so the event's next delivery is handled."""
     async with transaction() as conn:

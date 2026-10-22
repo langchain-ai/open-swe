@@ -50,7 +50,14 @@ from openswe.human_review.lifecycle import ReviewCard, ReviewPicks
 from openswe.human_review.merging import merge_pull_request
 from openswe.human_review.people import Outcome, Participant, resolve_writer
 from openswe.human_review.pick_message import PickMessage
-from openswe.human_review.picking import Area, Coverage, Pick, Wait, choose_reviewer
+from openswe.human_review.picking import (
+    Area,
+    Coverage,
+    Pick,
+    ReviewerAvailability,
+    Wait,
+    choose_reviewer,
+)
 from openswe.human_review.requests import HumanReviewParticipant, HumanReviewRequest, RequestKind
 from openswe.jobs import queue
 from openswe.prompts import prompt
@@ -63,7 +70,6 @@ from openswe.slack.client import (
     get_slack_permalink,
     get_slack_user_info,
     post_slack_thread_reply_with_ts,
-    remove_slack_reaction,
 )
 from openswe.slack.dm import send_dm, send_dm_with_location
 from openswe.slack.http import SlackRequestError
@@ -677,10 +683,21 @@ async def assign(
     user = await User.for_login("github", github_login)
     if user is None:
         return _failure(f"@{github_login} is not an Open SWE user; pick someone who is.")
-    if not replace and not await PROFILES.allows_auto_human_review(
-        user.github_login or github_login
-    ):
-        return _failure(f"@{github_login} opted out of automatic review picks; pick someone else.")
+    if not replace:
+        if not await PROFILES.allows_auto_human_review(user.github_login or github_login):
+            return _failure(
+                f"@{github_login} opted out of automatic review picks; pick someone else."
+            )
+        availability = await ReviewerAvailability.for_user(user)
+        if availability.out_of_office is True:
+            return _failure(f"@{github_login} is out of office; pick someone else.")
+        now = datetime.now(UTC)
+        if not availability.on_shift(now):
+            return _failure(
+                f"@{github_login} is outside working hours in {availability.zone_name}; "
+                f"their next work day starts at {availability.next_start(now).isoformat()}. "
+                "Pick someone who is on shift instead."
+            )
     if (previous := request.participant(user.id)) is not None and previous.decision == "expired":
         return _failure(f"@{github_login} already let this pick expire; pick someone else.")
     reviewer = await resolve_writer(request, user)
@@ -914,9 +931,7 @@ async def _settle_posted(
             return
         if row.approved_at is not None:
             row.approved_at = None
-            await remove_slack_reaction(
-                row.slack_channel_id, row.slack_message_ts, "white_check_mark"
-            )
+    await ReviewCard(request).update_post_reactions()
     now = datetime.now(UTC)
     async with HumanReviewRequest.locked(request.id) as (_, row):
         if row is None or row.state != "open":

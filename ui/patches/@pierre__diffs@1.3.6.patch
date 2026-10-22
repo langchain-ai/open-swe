@@ -167,3 +167,27 @@ index e13a442d292fbd370ba474731f6fae8272c1b2b4..ebf22865ed0b6ee1b0865ca50c3f6010
  			properties: { "data-separator-content": "" }
  		}));
  		if (chunked && expandIndex != null) contentChildren.push(createHastElement({
+diff --git a/dist/utils/parsePatchFiles.js b/dist/utils/parsePatchFiles.js
+index 4d31b9507fca2206982d51fd5e0c84d2c77ce126..862bfdfea80cf5cbbf78cb9a49ce6865540bfebb 100644
+--- a/dist/utils/parsePatchFiles.js
++++ b/dist/utils/parsePatchFiles.js
+@@ -293,9 +293,7 @@ function hasCommitMetadataBoundary(data) {
+ 	return data.startsWith("From ") || data.includes("\nFrom ");
+ }
+ function splitFileContents(contents) {
+-	const lines = splitWithNewlines(contents);
+-	for (let index = 0; index < lines.length; index++) lines[index] = detachString(lines[index]);
+-	return lines;
++	return splitWithNewlines(contents);
+ }
+ function splitWithNewlines(contents) {
+ 	if (contents.length === 0) return [""];
+@@ -480,7 +478,7 @@ function parseRawLineType(firstChar) {
+ }
+ function getParsedLineContent(rawLine) {
+ 	const processedLine = rawLine.slice(1);
+-	return detachString(processedLine === "" ? "\n" : processedLine);
++	return processedLine === "" ? "\n" : processedLine;
+ }
+ function createContentGroup(type, deletionLineIndex, additionLineIndex) {
+ 	if (type === "change") return {

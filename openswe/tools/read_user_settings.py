@@ -26,7 +26,6 @@ _PROFILE_SETTING_KEYS = (
     "auto_human_review_enabled",
     "draft_prs",
     "review_draft_prs",
-    "recent_thread_context_enabled",
 )
 
 

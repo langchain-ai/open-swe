@@ -3,6 +3,7 @@ from xml.etree import ElementTree
 from langchain_core.messages import AIMessage, HumanMessage
 
 from openswe.input_messages import (
+    dynamic_context_hash,
     human_input,
     person_introduction,
     visible_dynamic_context_hashes,
@@ -64,3 +65,21 @@ def test_visible_dynamic_context_hashes_ignores_summarized_prefix() -> None:
 
     summarized = {"messages": messages, "_summarization_event": {"cutoff_index": 1}}
     assert visible_dynamic_context_hashes(summarized) == set()
+
+
+def test_changed_person_context_can_return_to_an_earlier_profile() -> None:
+    person_id = "user:123"
+    linked = person_introduction({"id": person_id, "open_swe_account": "linked"})
+    unlinked = person_introduction({"id": person_id, "open_swe_account": "unlinked"})
+    other = _person_intro_message("slack:U2")
+    messages = [linked, other, unlinked]
+
+    assert visible_dynamic_context_hashes({"messages": messages}) == {
+        dynamic_context_hash(other.content),
+        dynamic_context_hash(unlinked["content"]),
+    }
+    messages.append(linked)
+    assert visible_dynamic_context_hashes({"messages": messages}) == {
+        dynamic_context_hash(other.content),
+        dynamic_context_hash(linked["content"]),
+    }

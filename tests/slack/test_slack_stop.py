@@ -264,16 +264,18 @@ def _patch_native_stop(monkeypatch: pytest.MonkeyPatch, client: FakeClient) -> A
     return status
 
 
+@pytest.mark.parametrize("has_follow_up", [False, True])
 async def test_native_stop_targets_ordinary_thread_preserves_queued_work_and_deduplicates(
-    monkeypatch: pytest.MonkeyPatch,
+    monkeypatch: pytest.MonkeyPatch, has_follow_up: bool
 ) -> None:
     client = FakeClient()
     thread_id = await _add_thread(client)
     code_thread_id = await _add_thread(client, "0")
     client.runs.by_status["running"] = [{"run_id": "running"}]
-    client.runs.by_status["pending"] = [
-        {"run_id": "other-follow-up", "metadata": {"queued_by": "other"}}
-    ]
+    if has_follow_up:
+        client.runs.by_status["pending"] = [
+            {"run_id": "other-follow-up", "metadata": {"queued_by": "other"}}
+        ]
     status = _patch_native_stop(monkeypatch, client)
     monkeypatch.setattr(slack_stop, "claim_slack_event", AsyncMock(side_effect=[True, False]))
     event: dict[str, object] = {"channel": "C123", "thread_ts": "1.000", "user": "UOWNER"}
@@ -287,8 +289,27 @@ async def test_native_stop_targets_ordinary_thread_preserves_queued_work_and_ded
     assert client.cleared_queues == []
     assert "latest_run_status" not in client.threads.values[code_thread_id]["metadata"]
     status.assert_awaited_once_with("C123", "1.000", "")
+    slack_client.post_slack_thread_reply.assert_not_awaited()
+
+
+async def test_native_stop_reports_cancellation_failure(monkeypatch: pytest.MonkeyPatch) -> None:
+    client = FakeClient()
+    thread_id = await _add_thread(client)
+    client.runs.by_status["running"] = [{"run_id": "running"}]
+    client.runs.fail_cancel = True
+    status = _patch_native_stop(monkeypatch, client)
+
+    await slack_stop.process_agent_session_stopped(
+        {"channel": "C123", "thread_ts": "1.000", "user": "UOWNER"}, "EvStop", "T123"
+    )
+
+    assert client.threads.updates == []
+    status.assert_not_awaited()
     slack_client.post_slack_thread_reply.assert_awaited_once_with(
-        "C123", "1.000", "Stopped. Starting the queued follow-up next.", agent_thread_id=thread_id
+        "C123",
+        "1.000",
+        "I couldn't stop this thread. Please try Stop again.",
+        agent_thread_id=thread_id,
     )
 
 
@@ -320,6 +341,7 @@ async def test_native_stop_rejects_wrong_location_or_unauthorized_user(
     assert client.threads.updates == []
     assert client.cleared_queues == []
     status.assert_not_awaited()
+    slack_client.post_slack_thread_reply.assert_not_awaited()
 
 
 @pytest.mark.parametrize("thread_ts", ["0", None])
