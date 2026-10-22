@@ -43,6 +43,8 @@ from langchain.agents.middleware.types import (
     hook_config,
 )
 from langchain_core.messages import (
+    AIMessage,
+    AnyMessage,
     HumanMessage,
     SystemMessage,
     ToolCall,
@@ -288,6 +290,52 @@ class DescribedToolsMiddleware(AgentMiddleware):
             return await handler(request)
         args = {key: value for key, value in call["args"].items() if key != DISPLAY_DESCRIPTION}
         return await handler(request.override(tool_call={**call, "args": args}))
+
+
+class RepairOrphanedToolCallsMiddleware(AgentMiddleware):
+    """Repair interrupted and mismatched tool-result groups before each model request."""
+
+    async def awrap_model_call(
+        self,
+        request: ModelRequest,
+        handler: Callable[[ModelRequest], Awaitable[ModelResponse]],
+    ) -> ModelResponse:
+        repaired: list[AnyMessage] = []
+        pending: dict[str, ToolCall] = {}
+        inserted = 0
+        dropped = 0
+        for message in [*request.messages, None]:
+            if isinstance(message, ToolMessage):
+                if message.tool_call_id in pending:
+                    pending.pop(message.tool_call_id)
+                    repaired.append(message)
+                else:
+                    dropped += 1
+                continue
+            for call_id, call in pending.items():
+                repaired.append(
+                    ToolMessage(
+                        content="No matching result was captured for this tool call. Its effects are unknown; check before retrying.",
+                        tool_call_id=call_id,
+                        name=call["name"],
+                        status="error",
+                    )
+                )
+                inserted += 1
+            pending = {}
+            if message is not None:
+                repaired.append(message)
+            if isinstance(message, AIMessage):
+                pending = {
+                    call_id: call for call in message.tool_calls if (call_id := call.get("id"))
+                }
+        if inserted or dropped:
+            logger.warning(
+                "Repaired tool history before model call",
+                extra={"inserted_results": inserted, "dropped_results": dropped},
+            )
+            request = request.override(messages=repaired)
+        return await handler(request)
 
 
 class BackendRunMiddleware(AgentMiddleware[RunState]):

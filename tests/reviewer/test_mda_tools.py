@@ -1,3 +1,4 @@
+import json
 import sys
 from collections.abc import Sequence
 from contextlib import closing
@@ -816,3 +817,129 @@ async def test_mda_does_not_retry_tool_pairing_errors(
         with pytest.raises(type(error)) as caught:
             await middleware.awrap_model_call(request, handler)
         assert caught.value is error
+
+
+@pytest.mark.parametrize(
+    "history", ["missing", "mismatched", "partial", "valid", "late", "duplicate"]
+)
+async def test_mda_repairs_history_for_primary_and_fallback(
+    monkeypatch: pytest.MonkeyPatch, history: str
+) -> None:
+    from langchain.agents.middleware import AgentMiddleware
+    from langchain_anthropic import ChatAnthropic
+    from langchain_core.messages import HumanMessage
+    from langchain_openai import ChatOpenAI
+    from rt.middleware import RepairOrphanedToolCallsMiddleware
+    from rt.models import ModelSpec
+
+    ai = AIMessage(
+        content="",
+        tool_calls=[
+            {"name": "execute", "args": {}, "id": "call-1"},
+            {"name": "execute", "args": {}, "id": "call-2"},
+        ],
+    )
+    valid = ToolMessage(content="done", tool_call_id="call-1")
+    messages = [HumanMessage(content="start"), ai]
+    if history in {"partial", "valid"}:
+        messages.append(valid)
+    if history == "valid":
+        messages.append(ToolMessage(content="done too", tool_call_id="call-2"))
+    if history == "duplicate":
+        messages.extend([valid, ToolMessage(content="duplicate", tool_call_id="call-1")])
+    if history == "mismatched":
+        messages.append(ToolMessage(content="wrong", tool_call_id="other-loop"))
+    messages.append(HumanMessage(content="continue"))
+    if history == "late":
+        messages.append(valid)
+    original = list(messages)
+    payloads: dict[str, dict[str, object]] = {}
+
+    def respond(request: httpx2.Request) -> httpx2.Response:
+        provider = request.url.host
+        payloads[provider] = json.loads(request.content)
+        if provider == "primary.invalid":
+            return httpx2.Response(503, json={"error": {"message": "unavailable"}})
+        return httpx2.Response(
+            200,
+            json={
+                "id": "msg-test",
+                "type": "message",
+                "role": "assistant",
+                "model": "claude-test",
+                "content": [{"type": "text", "text": "recovered"}],
+                "stop_reason": "end_turn",
+                "usage": {"input_tokens": 1, "output_tokens": 1},
+            },
+        )
+
+    async with httpx2.AsyncClient(transport=httpx2.MockTransport(respond)) as client:
+        primary = ChatOpenAI(
+            model="gpt-test",
+            api_key="test",
+            base_url="https://primary.invalid/v1",
+            use_responses_api=True,
+            max_retries=0,
+            http_async_client=client,
+        )
+        monkeypatch.setattr(
+            "langchain_anthropic.chat_models._get_default_async_httpx_client",
+            lambda **kwargs: client,
+        )
+        fallback = ChatAnthropic(
+            model_name="claude-test",
+            api_key="test",
+            base_url="https://fallback.invalid",
+            max_retries=0,
+        )
+        monkeypatch.setenv("OPEN_SWE_BACKEND_URL", "https://backend.invalid")
+        backend = OpenSweBackend("test")
+
+        async def phase(name: str, body: object) -> PhaseReply:
+            if name == "before_model":
+                return PhaseReply(
+                    system_prompt="test",
+                    model=ModelSpec(model_id="primary", kwargs={}),
+                    fallback=ModelSpec(model_id="fallback", kwargs={}),
+                )
+            return PhaseReply()
+
+        monkeypatch.setattr(backend, "phase", phase)
+        monkeypatch.setattr(backend, "model_result", AsyncMock(return_value=[]))
+        monkeypatch.setattr(
+            "rt.middleware.build_model",
+            lambda spec, **kwargs: primary if spec.model_id == "primary" else fallback,
+        )
+        middleware: list[AgentMiddleware] = [
+            BackendRunMiddleware(backend, "turn"),
+            RepairOrphanedToolCallsMiddleware(),
+        ]
+        graph = create_agent(primary, middleware=middleware, checkpointer=InMemorySaver())
+        config = {"configurable": {"thread_id": "repair-history"}}
+        await graph.aupdate_state(config, {"messages": messages}, as_node="__start__")
+        result = await graph.ainvoke(None, config)
+
+    assert result["messages"][-1].content == "recovered"
+    assert messages == original
+    primary_input = payloads["primary.invalid"]["input"]
+    assert isinstance(primary_input, list)
+    outputs = [item for item in primary_input if item.get("type") == "function_call_output"]
+    assert [item["call_id"] for item in outputs] == ["call-1", "call-2"]
+    fallback_messages = payloads["fallback.invalid"]["messages"]
+    assert isinstance(fallback_messages, list)
+    blocks = [
+        block
+        for message in fallback_messages
+        if isinstance(message["content"], list)
+        for block in message["content"]
+        if block["type"] == "tool_result"
+    ]
+    assert [block["tool_use_id"] for block in blocks] == ["call-1", "call-2"]
+    if history in {"partial", "valid", "duplicate"}:
+        assert outputs[0]["output"] == "done"
+    else:
+        assert blocks[0]["is_error"] is True
+    if history == "valid":
+        assert outputs[1]["output"] == "done too"
+    else:
+        assert blocks[1]["is_error"] is True
