@@ -2592,7 +2592,7 @@ sandbox-runloop = [
 
 [package.metadata]
 requires-dist = [
-    { name = "aiohttp", specifier = ">=3.14.3,<4.0.0" },
+    { name = "aiohttp", specifier = ">=3.14.3" },
     { name = "alembic", specifier = "==1.20.0" },
     { name = "asyncpg", specifier = "==0.31.0" },
     { name = "croniter", specifier = ">=6.0.0" },
@@ -2603,7 +2603,7 @@ requires-dist = [
     { name = "fireworks-ai", specifier = ">=1.2.9" },
     { name = "githubkit", extras = ["auth-app"], specifier = "==0.16.1" },
     { name = "githubkit-schemas", extras = ["2022-11-28"], specifier = "==26.9.29" },
-    { name = "httpx2", specifier = ">=2.12.0,<3.0.0" },
+    { name = "httpx2", specifier = ">=2.12.0" },
     { name = "jinja2", specifier = ">=3.1.6" },
     { name = "langchain", extras = ["mcp"], specifier = ">=1.4.7" },
     { name = "langchain-anthropic", specifier = ">=1.7.6" },
@@ -2627,7 +2627,7 @@ requires-dist = [
     { name = "managed-deepagents", specifier = "==0.10.0.dev15" },
     { name = "markdown-it-py", specifier = "==4.2.0" },
     { name = "markdownify", specifier = ">=1.2.3" },
-    { name = "openai", specifier = ">=3.10.0,<4.0.0" },
+    { name = "openai", specifier = ">=3.10.0" },
     { name = "pillow", specifier = ">=12.1.0" },
     { name = "pygments", specifier = ">=2.21.0" },
     { name = "pyjwt", specifier = ">=2.13.0" },
@@ -2635,7 +2635,7 @@ requires-dist = [
     { name = "pytest-asyncio", marker = "extra == 'dev'", specifier = ">=1.4.0" },
     { name = "pytest-xdist", marker = "extra == 'dev'", specifier = ">=3.8.0" },
     { name = "ruff", marker = "extra == 'dev'", specifier = ">=0.16.4" },
-    { name = "slack-sdk", specifier = ">=3.44.1,<4.0.0" },
+    { name = "slack-sdk", specifier = ">=3.44.1" },
     { name = "sqlalchemy", extras = ["asyncio"], specifier = "==2.1.1" },
     { name = "standardwebhooks", specifier = ">=1.1.0" },
     { name = "ty", marker = "extra == 'dev'", specifier = "==0.0.84" },

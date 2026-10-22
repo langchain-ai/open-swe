@@ -289,7 +289,7 @@ or pull request is told to continue it in LangSmith Studio.
 
 Example::
 
-    {"issues.opened": lambda e, _: f"Help with #{e.payload.issue.number}"}
+    {"issues.opened": lambda e, _: f"Help with #{e.payload['issue']['number']}"}
 """
 
 

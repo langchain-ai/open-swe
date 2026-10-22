@@ -282,10 +282,26 @@ async def test_a_local_thread_takes_no_new_activity(
     assert status == 200 and harness.reached_here == [f"/threads/{THREAD}/history"]
 
 
-async def test_a_new_thread_runs_on_mda(monkeypatch: pytest.MonkeyPatch, secret: None) -> None:
+# An async task worker's follow-ups run on the graph MDA launched it on.
+_GRAPHS = pytest.mark.parametrize(
+    ("metadata", "graph"),
+    [
+        pytest.param({}, "open-swe", id="agent"),
+        pytest.param(
+            {"mda_graph_id": "open-swe--general-purpose"}, "open-swe--general-purpose", id="worker"
+        ),
+        pytest.param({"mda_graph_id": "elsewhere"}, "open-swe", id="unknown-graph"),
+    ],
+)
+
+
+@_GRAPHS
+async def test_a_new_thread_runs_on_mda(
+    monkeypatch: pytest.MonkeyPatch, secret: None, metadata: dict[str, JsonValue], graph: str
+) -> None:
     harness = _Harness(monkeypatch)
     await harness.request(
-        "POST", "/threads", {"thread_id": THREAD, "metadata": {"owner_login": "ada"}}
+        "POST", "/threads", {"thread_id": THREAD, "metadata": {"owner_login": "ada", **metadata}}
     )
     run = {
         "assistant_id": "agent",
@@ -312,6 +328,7 @@ async def test_a_new_thread_runs_on_mda(monkeypatch: pytest.MonkeyPatch, secret:
     assert harness.runtimes.mda.threads[THREAD]["metadata"] == indexed.metadata
     assert harness.runtimes.local.threads[THREAD]["metadata"] == indexed.metadata
     [(_, sent)] = harness.forwarded
+    assert sent["assistant_id"] == graph
     # Nothing the remote graph is handed carries the configurable but the signed token.
     assert "config" not in sent
     assert sent["langsmith_tracer"] == {"project_name": "open-swe-test"}
@@ -480,8 +497,9 @@ async def test_deleting_a_thread_removes_every_copy(monkeypatch: pytest.MonkeyPa
     assert harness.runtimes.local.threads == {} and harness.runtimes.mda.threads == {}
 
 
+@_GRAPHS
 async def test_a_run_started_by_command_on_mda_settles_through_the_completion_webhook(
-    monkeypatch: pytest.MonkeyPatch, secret: None
+    monkeypatch: pytest.MonkeyPatch, secret: None, metadata: dict[str, JsonValue], graph: str
 ) -> None:
     from openswe import dispatch
 
@@ -489,7 +507,7 @@ async def test_a_run_started_by_command_on_mda_settles_through_the_completion_we
         dispatch, "COMPLETION_WEBHOOK_URL", "https://swe.test/webhooks/run-complete"
     )
     harness = _Harness(monkeypatch)
-    await harness.request("POST", "/threads", {"thread_id": THREAD, "metadata": {}})
+    await harness.request("POST", "/threads", {"thread_id": THREAD, "metadata": metadata})
     command = {"id": 1, "method": "run.start", "params": {"assistant_id": "agent", "input": {}}}
 
     await harness.request("POST", f"/threads/{THREAD}/commands", command)
@@ -498,6 +516,7 @@ async def test_a_run_started_by_command_on_mda_settles_through_the_completion_we
     assert indexed is not None and (indexed.runtime, indexed.status) == ("mda", "busy")
     [(path, sent)] = harness.forwarded
     assert path == f"/threads/{THREAD}/runs"
+    assert sent["assistant_id"] == graph
     assert sent["webhook"] == "https://swe.test/webhooks/run-complete"
 
 

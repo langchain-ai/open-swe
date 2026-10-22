@@ -9,7 +9,7 @@ from __future__ import annotations
 
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Any, ClassVar, Never, TypedDict
+from typing import TYPE_CHECKING, Any, ClassVar, Never, NotRequired, TypedDict
 
 from managed_deepagents._managed_composition import (
     OMITTED,
@@ -44,6 +44,22 @@ if TYPE_CHECKING:
 
     class ManagedAsyncSubAgent(SubAgent, _AsyncFlag):
         """A declarative subagent that MDA builds as its own graph."""
+
+        webhook: NotRequired[str]
+        """URL the Agent Server calls whenever a run of this subagent finishes."""
+
+        notify_parent: NotRequired[bool]
+        """Whether this subagent may wake this agent when it finishes while this agent is idle.
+
+        Defaults to `True`.
+
+        Set it to `False` when the application delivers results itself, for example
+        through `webhook`. This agent still sees the subagent's updates while it runs.
+
+        !!! warning "Beta"
+
+            `notify_parent` may change along with how subagents wake their parent.
+        """
 
     #: Declarative, compiled, or async subagent specs from deepagents, plus
     #: declarative specs marked `"async": True`.
@@ -126,8 +142,9 @@ def define_deep_agent(
     graph. Unset ``model``, ``tools``, ``permissions``, and ``interrupt_on``
     inherit from this agent; middleware and memory do not. Like a sync subagent,
     it loads only the skill sources its ``skills`` names (``["/skills/"]`` for
-    this agent's skills). Served agents also get a background copy of the
-    general-purpose subagent.
+    this agent's skills). Its ``webhook``, if set, is a URL the Agent Server
+    calls when each of its runs finishes. Served agents also get a background
+    copy of the general-purpose subagent.
 
     ``metadata`` is MDA-owned authoring config (not a ``create_deep_agent``
     kwarg): the runtime applies it via ``.with_config({"metadata": ...})`` so
@@ -200,6 +217,10 @@ def _validate_async_subagents(subagents: Sequence[DeepAgentSubAgent]) -> None:
         skills = spec.get("skills")
         if skills is not None and not _is_path_list(skills):
             raise TypeError('subagent "skills" must be a list of skill source paths')
+        if "webhook" in spec and not isinstance(spec["webhook"], str):
+            raise TypeError('subagent "webhook" must be a URL string')
+        if "notify_parent" in spec and not isinstance(spec["notify_parent"], bool):
+            raise TypeError('subagent "notify_parent" must be True or False')
         unsupported = [key for key in _ASYNC_SUBAGENT_UNSUPPORTED_KEYS if key in spec]
         if unsupported:
             msg = (
