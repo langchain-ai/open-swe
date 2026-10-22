@@ -159,14 +159,18 @@ class ModelCallTimeoutMiddleware(_ModelCallGuard):
             ) from exc
 
 
-def model_call_guards() -> list[AgentMiddleware]:
+def model_call_guards(
+    timeout_seconds: float = MODEL_CALL_TIMEOUT_SECONDS,
+) -> list[AgentMiddleware]:
     """Innermost around every model call, inside the middleware that picks its model.
 
-    They see the model the call really goes to, the fallback included. The history
-    is fixed once; a call that times out is retried, the deadline covering each try.
+    They see the model the call really goes to, the fallback included. One deadline
+    covers the call and its retries; a call that still fails raises, so the
+    fallback takes over and the run-complete webhook sees why.
     """
     return [
         ReplayableHistoryMiddleware(),
-        ModelRetryMiddleware(retry_on=(TimeoutError,)),
-        ModelCallTimeoutMiddleware(),
+        ModelCallTimeoutMiddleware(timeout_seconds),
+        # Its default answers with the error as the model's reply instead of raising.
+        ModelRetryMiddleware(retry_on=(TimeoutError,), on_failure="error"),
     ]
