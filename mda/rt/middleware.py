@@ -95,6 +95,26 @@ def _merge(
     return {**held, **(right or {})}
 
 
+_TOOL_PAIRING_ERRORS: Final = (
+    "no tool output found for function call",
+    "no tool call found for function call output",
+    "unexpected `tool_use_id`",
+    "unexpected tool_use_id",
+    "without `tool_result`",
+    "must be followed by tool messages",
+    "must be a response to a preceeding message with 'tool_calls'",
+    "must be a response to a preceding message with 'tool_calls'",
+)
+
+
+def _tool_pairing_error(exc: Exception) -> bool:
+    """A 400 over unpaired tool history, which the fallback would get as well."""
+    if getattr(exc, "status_code", None) != 400:
+        return False
+    message = str(exc).lower()
+    return any(marker in message for marker in _TOOL_PAIRING_ERRORS)
+
+
 class ModelCall(BaseModel):
     """What the backend's middleware says the next model call sends."""
 
@@ -349,8 +369,8 @@ class BackendRunMiddleware(AgentMiddleware[RunState]):
             request = request.override(model=build_model(call.model, use_gateway=call.use_gateway))
         try:
             return await handler(request)
-        except Exception:
-            if call.fallback is None:
+        except Exception as exc:
+            if call.fallback is None or _tool_pairing_error(exc):
                 raise
             # As the in-process graph does: another provider before failing the run.
             logger.warning("Model call failed; retrying on the fallback model", exc_info=True)

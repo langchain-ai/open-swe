@@ -7,8 +7,10 @@ from pathlib import Path
 from typing import Literal
 from unittest.mock import AsyncMock, MagicMock
 
+import anthropic
 import httpx
 import httpx2
+import openai
 import pytest
 from deepagents import create_deep_agent
 from langchain.agents import create_agent
@@ -763,3 +765,54 @@ async def test_a_launched_worker_adopts_its_own_run_token_before_anything_runs(
     assert seen[0] == ("adopt", "Bearer worker-grant")
     assert [hook for hook, _ in seen[1:3]] == ["catalog", "prepare"]
     assert all(bearer == "Bearer worker-token" for _, bearer in seen[1:])
+
+
+@pytest.mark.parametrize(
+    ("status", "message", "retries"),
+    [
+        (400, "No tool output found for function call call_1", False),
+        (400, "No tool call found for function call output call_1", False),
+        (400, "unexpected `tool_use_id` found in `tool_result` blocks", False),
+        (400, "tool_use ids were found without `tool_result` blocks", False),
+        (400, "context window exceeded", True),
+        (500, "No tool output found for function call", True),
+    ],
+)
+async def test_mda_does_not_retry_tool_pairing_errors(
+    monkeypatch: pytest.MonkeyPatch, status: int, message: str, retries: bool
+) -> None:
+    from langchain.agents.middleware.types import ModelRequest, ModelResponse
+    from rt.middleware import ModelCall
+    from rt.models import ModelSpec
+
+    monkeypatch.setenv("OPEN_SWE_BACKEND_URL", "https://backend.invalid")
+    model = FakeListChatModel(responses=["done"])
+    monkeypatch.setattr("rt.middleware.build_model", lambda *args, **kwargs: model)
+    response = httpx2.Response(status, request=httpx2.Request("POST", "https://provider.invalid"))
+    error = (
+        anthropic.BadRequestError(message, response=response, body={})
+        if "tool_use" in message
+        else openai.APIStatusError(message, response=response, body={})
+    )
+    handler = AsyncMock(side_effect=[error, ModelResponse(result=[AIMessage(content="fallback")])])
+    request = ModelRequest(
+        model=model,
+        messages=[],
+        state={
+            "messages": [],
+            "open_swe_call": ModelCall(
+                system_prompt="test",
+                model=None,
+                fallback=ModelSpec(model_id="fallback", kwargs={}),
+                use_gateway=False,
+            ).model_dump(),
+        },
+    )
+    middleware = BackendRunMiddleware(OpenSweBackend("token"), "run")
+    if retries:
+        response = await middleware.awrap_model_call(request, handler)
+        assert response.result[0].content == "fallback"
+    else:
+        with pytest.raises(type(error)) as caught:
+            await middleware.awrap_model_call(request, handler)
+        assert caught.value is error
