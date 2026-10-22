@@ -392,7 +392,9 @@ test.describe("Human review in Slack", () => {
       )
       .toContainEqual(
         expect.stringMatching(
-          new RegExp(`^<[^|>]+\\|Review requested> in <#${REVIEW_CHANNEL}>\\.$`),
+          new RegExp(
+            `^<[^|>]+\\|Review requested> in <#${REVIEW_CHANNEL}>\\.$`,
+          ),
         ),
       );
     const posted = await latestRequest(request);
