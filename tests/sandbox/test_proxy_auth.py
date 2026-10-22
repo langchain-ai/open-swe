@@ -1,5 +1,6 @@
 """Tests for GitHub proxy auth configuration."""
 
+from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import httpx2
@@ -7,6 +8,7 @@ import pytest
 
 from openswe.github.sandbox_access import SandboxGitHubAccess
 from openswe.sandboxes.providers.langsmith import (
+    PROXY_CONFIG_RETRY_WINDOW_SECONDS,
     configure_sandbox_proxy,
 )
 
@@ -67,7 +69,7 @@ class TestConfigureSandboxProxy:
         request = httpx2.Request(
             "PATCH", "https://api.smith.langchain.com/v2/sandboxes/boxes/sandbox-abc"
         )
-        response = httpx2.Response(503, request=request)
+        response = httpx2.Response(503, request=request, headers={"Retry-After": "7"})
         transient_error = httpx2.HTTPStatusError(
             "Server error",
             request=request,
@@ -75,9 +77,7 @@ class TestConfigureSandboxProxy:
         )
         with (
             patch("openswe.sandboxes.providers.langsmith.httpx2.AsyncClient") as mock_client_cls,
-            patch(
-                "openswe.sandboxes.providers.langsmith.asyncio.sleep", new_callable=AsyncMock
-            ) as mock_sleep,
+            patch("openswe.sandboxes.retry.asyncio.sleep", new_callable=AsyncMock) as mock_sleep,
             patch.dict("os.environ", {"LANGSMITH_API_KEY": "api-key"}),
         ):
             mock_client = MagicMock()
@@ -91,7 +91,50 @@ class TestConfigureSandboxProxy:
             await configure_sandbox_proxy("sandbox-abc", "token")
 
             assert mock_client.patch.call_count == 2
-            mock_sleep.assert_called_once()
+            mock_sleep.assert_awaited_once_with(7.0)
+
+    @pytest.mark.parametrize("suspend_seconds", [170.0, PROXY_CONFIG_RETRY_WINDOW_SECONDS + 30])
+    async def test_outlasts_a_host_suspend_within_the_retry_window(
+        self, suspend_seconds: float
+    ) -> None:
+        """While the host suspends an idle box the API fails the push with a 500."""
+        request = httpx2.Request(
+            "PATCH", "https://api.smith.langchain.com/v2/sandboxes/boxes/sandbox-abc"
+        )
+        error = httpx2.HTTPStatusError(
+            "Server error",
+            request=request,
+            response=httpx2.Response(
+                500, request=request, text="failed to push proxy config to sandbox"
+            ),
+        )
+        clock = SimpleNamespace(now=0.0)
+
+        async def sleep(delay: float) -> None:
+            clock.now += delay
+
+        def respond(*_args: object, **_kwargs: object) -> MagicMock:
+            response = MagicMock()
+            if clock.now < suspend_seconds:
+                response.raise_for_status.side_effect = error
+            return response
+
+        with (
+            patch("openswe.sandboxes.providers.langsmith.httpx2.AsyncClient") as mock_client_cls,
+            patch("openswe.sandboxes.retry.asyncio.sleep", sleep),
+            patch("openswe.sandboxes.retry.time", SimpleNamespace(monotonic=lambda: clock.now)),
+            patch.dict("os.environ", {"LANGSMITH_API_KEY": "api-key"}),
+        ):
+            mock_client = MagicMock()
+            mock_client.patch = AsyncMock(side_effect=respond)
+            _mock_async_client(mock_client_cls, mock_client)
+
+            if suspend_seconds < PROXY_CONFIG_RETRY_WINDOW_SECONDS:
+                await configure_sandbox_proxy("sandbox-abc", "token")
+            else:
+                with pytest.raises(httpx2.HTTPStatusError, match="failed to push proxy config"):
+                    await configure_sandbox_proxy("sandbox-abc", "token")
+                assert clock.now == PROXY_CONFIG_RETRY_WINDOW_SECONDS
 
     async def test_raises_on_non_retryable_http_error(self) -> None:
         """Non-retryable HTTP errors should propagate without retrying."""
@@ -102,9 +145,7 @@ class TestConfigureSandboxProxy:
         error = httpx2.HTTPStatusError("Forbidden", request=request, response=response)
         with (
             patch("openswe.sandboxes.providers.langsmith.httpx2.AsyncClient") as mock_client_cls,
-            patch(
-                "openswe.sandboxes.providers.langsmith.asyncio.sleep", new_callable=AsyncMock
-            ) as mock_sleep,
+            patch("openswe.sandboxes.retry.asyncio.sleep", new_callable=AsyncMock) as mock_sleep,
             patch.dict("os.environ", {"LANGSMITH_API_KEY": "api-key"}),
         ):
             mock_client = MagicMock()
@@ -118,50 +159,6 @@ class TestConfigureSandboxProxy:
 
             mock_client.patch.assert_called_once()
             mock_sleep.assert_not_called()
-
-
-class TestConfigureSandboxProxyStartsStoppedSandbox:
-    """A 400 means the sandbox is not ready; start it and retry the update."""
-
-    @staticmethod
-    def _not_ready_error() -> httpx2.HTTPStatusError:
-        request = httpx2.Request(
-            "PATCH", "https://api.smith.langchain.com/v2/sandboxes/boxes/sandbox-abc"
-        )
-        response = httpx2.Response(
-            400,
-            request=request,
-            text='sandbox "sandbox-abc" is in "stopped" state, must be "ready"',
-        )
-        return httpx2.HTTPStatusError("Bad request", request=request, response=response)
-
-    async def test_starts_sandbox_then_retries(self) -> None:
-        with (
-            patch("openswe.sandboxes.providers.langsmith.httpx2.AsyncClient") as mock_client_cls,
-            patch(
-                "openswe.sandboxes.providers.langsmith.get_async_sandbox_client"
-            ) as mock_sandbox_client_factory,
-            patch.dict("os.environ", {"LANGSMITH_API_KEY": "api-key"}),
-        ):
-            mock_client = MagicMock()
-            failed_response = MagicMock()
-            failed_response.raise_for_status.side_effect = self._not_ready_error()
-            successful_response = MagicMock()
-            successful_response.raise_for_status = MagicMock()
-            mock_client.patch = AsyncMock(side_effect=[failed_response, successful_response])
-            _mock_async_client(mock_client_cls, mock_client)
-
-            sandbox_client = MagicMock()
-            sandbox_client.start_sandbox = AsyncMock()
-            sandbox_client.aclose = AsyncMock()
-            mock_sandbox_client_factory.return_value = sandbox_client
-
-            await configure_sandbox_proxy("sandbox-abc", "token")
-
-            sandbox_client.start_sandbox.assert_awaited_once()
-            assert sandbox_client.start_sandbox.await_args.args[0] == "sandbox-abc"
-            sandbox_client.aclose.assert_awaited_once()
-            assert mock_client.patch.call_count == 2
 
 
 class TestRefreshProxyOnSandboxReuse:

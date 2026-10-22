@@ -3,11 +3,11 @@ import { useEffect, useMemo } from "react"
 
 import { Button } from "@langchain/macaw-components/Button"
 import { Card } from "@langchain/macaw-components/Card"
-import { Logo } from "@langchain/macaw-components/Logo"
 import { Skeleton } from "@langchain/macaw-components/Skeleton"
 import { Text } from "@langchain/macaw-components/Text"
 import { GithubLogoIcon } from "@phosphor-icons/react/dist/ssr/GithubLogo"
 
+import { LogoMark } from "@/components/Branding"
 import { loginUrl } from "@/lib/api"
 import { pageTitle } from "@/lib/pageTitle"
 import {
@@ -61,7 +61,7 @@ function Login() {
         className="flex w-full max-w-md flex-col gap-space-5 p-space-6 shadow-md"
       >
         <div className="flex flex-col items-center gap-space-3 text-center">
-          <Logo brand="langchain" variant="logomark" size="lg" />
+          <LogoMark alt="Open SWE" className="size-8" />
           <div className="flex flex-col gap-space-1">
             <Text as="h1" variant="h3">
               Sign in to Open SWE

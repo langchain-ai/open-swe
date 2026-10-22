@@ -449,6 +449,23 @@ class HumanReviewRequest(Base):
             )
             yield session, row
 
+    @classmethod
+    @asynccontextmanager
+    async def locked_post(cls, channel_id: str, message_ts: str) -> AsyncIterator[list[Self]]:
+        """Lock every PR watched on one Slack message in a stable order."""
+        async with postgres.session() as session:
+            rows = await session.scalars(
+                cls._loaded(select(cls))
+                .where(
+                    cls.kind == "posted",
+                    cls.slack_channel_id == channel_id,
+                    cls.slack_message_ts == message_ts,
+                )
+                .order_by(cls.id)
+                .with_for_update(of=cls)
+            )
+            yield list(rows)
+
     async def record_pick_message(self, user_id: UUID, message: PickMessage) -> None:
         """Remember the DM that asked ``user_id`` to take their pick, so it can be edited later."""
         async with self.locked(self.id) as (_, row):
