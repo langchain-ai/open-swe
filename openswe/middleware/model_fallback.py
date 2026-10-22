@@ -45,7 +45,12 @@ from langsmith import trace
 
 from openswe.middleware.trace import OpenSWEMiddleware
 from openswe.run_config import RunConfig
-from openswe.utils.errors import classify_exception, error_tracking_fields, exception_fields
+from openswe.utils.errors import (
+    ModelOutageError,
+    classify_exception,
+    error_tracking_fields,
+    exception_fields,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -81,10 +86,6 @@ MODEL_OUTAGE_MESSAGE = (
     "problem with your task. My progress so far has been saved — please retrigger "
     "the run in a few minutes to continue."
 )
-
-
-class ModelOutageError(RuntimeError):
-    pass
 
 
 def is_model_outage(message: BaseMessage) -> bool:

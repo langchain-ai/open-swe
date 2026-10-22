@@ -25,7 +25,6 @@ from openswe.github.app import get_github_app_installation_token
 from openswe.github.comments import post_github_comment
 from openswe.invocation import resolve_invocation_id, with_invocation_id
 from openswe.linear.notifications import post_linear_notification
-from openswe.middleware.model_fallback import ModelOutageError
 from openswe.review.findings import REVIEWER_THREAD_KIND
 from openswe.review.publish import settle_review_check_run
 from openswe.session_cost import schedule_session_cost_refresh
@@ -37,7 +36,7 @@ from openswe.tasks.messages import TASK_MESSAGE_KIND, TaskMessage
 from openswe.threads.status import refresh_thread_status
 from openswe.transcript.turns import TurnOutcome, settle_run_turn
 from openswe.ui_invalidations import Topic
-from openswe.utils.errors import LAST_MODEL_ERROR_KEY, code_for_error_type
+from openswe.utils.errors import LAST_MODEL_ERROR_KEY, ModelOutageError, code_for_error_type
 from openswe.utils.json_types import thread_metadata
 from openswe.utils.langsmith import get_langsmith_trace_url
 from openswe.utils.thread_ops import langgraph_client

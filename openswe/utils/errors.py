@@ -31,6 +31,10 @@ _ERROR_TYPE_CODES = {
 }
 
 
+class ModelOutageError(RuntimeError):
+    """A scheduled run exhausted every model attempt; completion retries the fire."""
+
+
 def code_for_error_type(error_type: str | None) -> str | None:
     """Failure code for a bare exception class name."""
     return _ERROR_TYPE_CODES.get(error_type) if error_type else None
