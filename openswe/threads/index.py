@@ -17,6 +17,7 @@ from sqlalchemy import RowMapping, text
 
 from openswe.database.postgres import transaction
 from openswe.remote_runtime.client import MDA_RUNTIME, RUNTIME_METADATA_KEY
+from openswe.thread_ids import mda_successor_thread_id
 
 Runtime = Literal["local", "mda"]
 ThreadStatus = Literal["idle", "busy", "interrupted", "error"]
@@ -346,6 +347,24 @@ async def get(thread_id: str) -> IndexedThread | None:
             .first()
         )
     return None if row is None else IndexedThread.from_row(row)
+
+
+async def live_thread_id(thread_id: str) -> str:
+    """Where new activity for ``thread_id`` goes: the thread itself, or for a ``local``
+    thread, which takes none, the thread on Managed Deep Agents that succeeds it."""
+    thread = await get(thread_id)
+    if thread is not None and thread.runtime == "local":
+        return mda_successor_thread_id(thread_id)
+    return thread_id
+
+
+async def current_thread_id(thread_id: str) -> str:
+    """The thread to read for ``thread_id``: its successor once activity has moved
+    there, else the thread itself."""
+    live = await live_thread_id(thread_id)
+    if live != thread_id and await get(live) is not None:
+        return live
+    return thread_id
 
 
 async def update(thread_id: str, metadata: Mapping[str, JsonValue]) -> IndexedThread | None:

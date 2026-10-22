@@ -5,6 +5,8 @@ import pytest
 
 from openswe.review_scout import launch
 
+pytestmark = pytest.mark.usefixtures("no_local_threads")
+
 
 @pytest.mark.parametrize("active", [None, "active-run"])
 async def test_scout_records_security_identity_before_starting_or_reusing_a_run(

@@ -8,6 +8,8 @@ from fastapi import HTTPException
 
 from openswe.threads import pr_fixes
 
+pytestmark = pytest.mark.usefixtures("no_local_threads")
+
 CAMEL_CASE_CONTEXT: dict[str, Any] = {
     "title": "Broken build",
     "headRef": "feature/fix",

@@ -15,6 +15,7 @@ from openswe.dispatch import dispatch_agent_run
 from openswe.github.pull_request_status import pull_request_identity
 from openswe.github.pull_requests import PullRequest
 from openswe.prompts import prompt
+from openswe.threads import index
 from openswe.threads.access import _ensure_dashboard_github_token
 from openswe.threads.runs import (
     _build_dashboard_configurable,
@@ -297,7 +298,12 @@ async def _find_or_create_pr_thread(
 ) -> str:
     client = langgraph_client()
     url = f"https://github.com/{owner}/{repo}/pull/{number}"
-    candidates = await find_pr_threads(owner, repo, number, login, email, unlisted=unlisted)
+    # A thread made before Managed Deep Agents takes no new work; a new one starts instead.
+    candidates = [
+        thread
+        for thread in await find_pr_threads(owner, repo, number, login, email, unlisted=unlisted)
+        if await index.live_thread_id(thread["thread_id"]) == thread["thread_id"]
+    ]
     if candidates:
         return candidates[0]["thread_id"]
     thread = await create_dashboard_thread_record(
