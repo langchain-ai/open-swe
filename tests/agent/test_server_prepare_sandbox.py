@@ -32,9 +32,6 @@ async def test_cancelled_worker_wakeup_cannot_reconnect_or_start_work(
     )
     monkeypatch.setattr(thread_reads.langgraph_sdk, "get_client", lambda: client)
     monkeypatch.setattr(
-        task_coordination, "task_coordination_enabled", AsyncMock(return_value=True)
-    )
-    monkeypatch.setattr(
         task_coordination.TaskMembership, "context_for_thread", AsyncMock(return_value=context)
     )
     monkeypatch.setattr(task_coordination.TaskDelegation, "get", AsyncMock(return_value=delegation))
