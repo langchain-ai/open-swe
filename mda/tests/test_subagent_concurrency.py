@@ -72,18 +72,21 @@ async def test_managed_factory_bounds_ten_tasks(
         ],
         **({"subagent_concurrency": limit} if limit is not None else {}),
     )
-    backend = MagicMock(has_run=True)
+    backend = MagicMock(has_run=True, adopted=None, awaiting_adoption=False)
     backend.catalog = AsyncMock(return_value=catalog)
     backend.phase = AsyncMock(return_value=PhaseReply())
     backend.model_result = AsyncMock(return_value=[])
     backend.tool_started = AsyncMock()
     backend.tool_result = AsyncMock()
+    backend.reports.drain = AsyncMock()
     runtime = SimpleNamespace(execution_runtime=SimpleNamespace(context={"invocation_id": "smoke"}))
-    monkeypatch.setattr(agent, "OpenSweBackend", lambda token: backend)
+    monkeypatch.setattr(agent, "OpenSweBackend", lambda token, **kwargs: backend)
     monkeypatch.setattr(agent, "_DEFAULT_MODEL", model)
     definition = await agent.agent(runtime)
     config = dict(definition.config)
     config.pop("sandbox")
+    # The async task worker shares the sync subagent's name; only `task` is exercised here.
+    config["subagents"] = [s for s in config["subagents"] if not s.get("async")]
     graph = create_deep_agent(**config, backend=StateBackend(), checkpointer=InMemorySaver())
     expected = limit or 3
     async with asyncio.timeout(10):

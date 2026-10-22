@@ -80,8 +80,8 @@ from openswe.middleware.record_run_usage import RecordRunUsageMiddleware
 from openswe.middleware.sandbox_circuit_breaker import post_sandbox_unreachable_notification
 from openswe.middleware.subdir_agents import SubdirAgentsReadMiddleware
 from openswe.middleware.task_coordination import TaskCoordinationMiddleware
-from openswe.middleware.tool_error_handler import ToolErrorMiddleware
 from openswe.middleware.task_retry import subagent_concurrency_limit
+from openswe.middleware.tool_error_handler import ToolErrorMiddleware
 from openswe.middleware.transcript import TranscriptMiddleware, within_namespace
 from openswe.middleware.validate_image_reads import ValidateImageReadsMiddleware
 from openswe.middleware.workflow_push_guard import WorkflowPushGuardMiddleware
