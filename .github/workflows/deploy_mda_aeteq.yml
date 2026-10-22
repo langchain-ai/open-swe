@@ -12,6 +12,7 @@ on:
     branches: [main]
     paths:
       - "mda/**"
+      - "vendor/managed-deepagents-sdk/**"
       - ".github/workflows/deploy_mda_aeteq.yml"
   workflow_dispatch:
 
@@ -51,7 +52,7 @@ jobs:
             echo "mda/agent.py does not exist at this commit; nothing to deploy."
             echo "deploy=false" >>"$GITHUB_OUTPUT"
           elif git rev-parse -q --verify "refs/tags/${DEPLOYED_TAG}" >/dev/null \
-            && git diff --quiet "refs/tags/${DEPLOYED_TAG}" HEAD -- mda .github/workflows/deploy_mda_aeteq.yml; then
+            && git diff --quiet "refs/tags/${DEPLOYED_TAG}" HEAD -- mda vendor/managed-deepagents-sdk .github/workflows/deploy_mda_aeteq.yml; then
             echo "Nothing deployed changed since ${DEPLOYED_TAG}; nothing to deploy."
             echo "deploy=false" >>"$GITHUB_OUTPUT"
           else
@@ -59,10 +60,12 @@ jobs:
           fi
       - uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7 # v10.2.0
         if: steps.changed.outputs.deploy == 'true'
-      - name: Install the mda CLI
+      - uses: dtolnay/rust-toolchain@29eef336d9b2848a0b548edc03f92a220660cdb8 # stable
         if: steps.changed.outputs.deploy == 'true'
-        # Same version mda/ pins.
-        run: uv tool install managed-deepagents==0.9.1
+      - name: Build the mda CLI
+        if: steps.changed.outputs.deploy == 'true'
+        # From the vendored SDK, into the runtime mda/ installs.
+        run: make mda-cli
       - name: Deploy
         if: steps.changed.outputs.deploy == 'true'
         env:
@@ -76,7 +79,7 @@ jobs:
           # The project .env is forwarded as the deployment's secrets: only the backend it calls back.
           printf 'OPEN_SWE_BACKEND_URL=%s\n' "$backend" >mda/.env
           printf 'ANTHROPIC_API_KEY=%s\n' "$ANTHROPIC_API_KEY" >>mda/.env
-          mda deploy mda \
+          uv run --project mda --locked --python 3.13 mda deploy mda \
             --name "open-swe-mda" \
             --deployment-type prod \
             --workspace-id 7657d5d9-dea8-46fd-a8ab-d26db7f80e5f \
