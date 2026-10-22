@@ -6,7 +6,7 @@ human messages before the next model call.
 """
 
 import logging
-from typing import Any, cast
+from typing import Any, NotRequired, cast
 
 import httpx2
 from langchain.agents.middleware import before_model
@@ -47,6 +47,8 @@ class LinearNotifyState(ReplySurfaceState):
     """Extended agent state for tracking Linear notifications."""
 
     linear_messages_sent_count: int
+    relayed_from_thread_id: NotRequired[str | None]
+    relay_run_id: NotRequired[str | None]
 
 
 async def _resolve_thread_model_id(thread_id: str) -> str | None:
@@ -297,7 +299,12 @@ async def check_message_queue_before_model(  # noqa: PLR0911
         # Cleared only once every message is built: a failure above leaves
         # them for the next model call instead of losing them.
         await QueuedMessage.remove(queued_messages)
-        return _message_update(queued_updates, thread_id, moved_surface)  # noqa: TRY300
+        update = _message_update(queued_updates, thread_id, moved_surface) or {}
+        latest = contents[-1]
+        relayed_from = latest.get(RELAYED_FROM_KEY) if isinstance(latest, dict) else None
+        update[RELAYED_FROM_KEY] = relayed_from if isinstance(relayed_from, str) else None
+        update["relay_run_id"] = configurable.get("run_id")
+        return update  # noqa: TRY300
     except Exception:
         logger.exception("Error in check_message_queue_before_model")
     return None
