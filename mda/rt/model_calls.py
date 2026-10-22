@@ -30,6 +30,7 @@ logger = logging.getLogger(__name__)
 MODEL_CALL_TIMEOUT_SECONDS: Final = 900.0
 # Bindings nest a few deep at most; the bound stops a self-referencing chain.
 _MAX_BINDINGS: Final = 10
+_SUBAGENT_TIMED_OUT: Final = "This subagent could not finish: its model call timed out."
 
 
 class ModelCallTimeoutError(TimeoutError):
@@ -159,16 +160,40 @@ class ModelCallTimeoutMiddleware(_ModelCallGuard):
             ) from exc
 
 
+class SubagentTimeoutReplyMiddleware(_ModelCallGuard):
+    """Answer with a subagent's timed-out model call instead of raising it.
+
+    A subagent has no fallback model, and its ``task`` call does not catch what it
+    raises, so a stall would end the run that delegated to it. As its answer, the
+    timeout goes back to that agent, which can try again or carry on.
+    """
+
+    async def awrap_model_call(
+        self,
+        request: ModelRequest,
+        handler: Callable[[ModelRequest], Awaitable[ModelResponse]],
+    ) -> ModelResponse:
+        try:
+            return await handler(request)
+        except TimeoutError as exc:
+            logger.warning("A subagent's model call timed out", exc_info=True)
+            return ModelResponse(
+                result=[AIMessage(content=f"{_SUBAGENT_TIMED_OUT} ({type(exc).__name__}: {exc})")]
+            )
+
+
 def model_call_guards(
-    timeout_seconds: float = MODEL_CALL_TIMEOUT_SECONDS,
+    timeout_seconds: float = MODEL_CALL_TIMEOUT_SECONDS, *, subagent: bool = False
 ) -> list[AgentMiddleware]:
     """Innermost around every model call, inside the middleware that picks its model.
 
     They see the model the call really goes to, the fallback included. One deadline
-    covers the call and its retries; a call that still fails raises, so the
-    fallback takes over and the run-complete webhook sees why.
+    covers the call and its retries. An agent's call that still fails raises, so the
+    fallback takes over and the run-complete webhook sees why; a subagent's that
+    times out becomes its answer.
     """
     return [
+        *([SubagentTimeoutReplyMiddleware()] if subagent else []),
         ReplayableHistoryMiddleware(),
         ModelCallTimeoutMiddleware(timeout_seconds),
         # Its default answers with the error as the model's reply instead of raising.

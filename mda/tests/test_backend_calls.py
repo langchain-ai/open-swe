@@ -394,6 +394,21 @@ async def test_a_stalled_model_call_goes_to_the_fallback_model(
     assert fallback.sent
 
 
+async def test_a_stalled_subagent_call_answers_with_the_timeout() -> None:
+    # Its `task` call hands this answer back; a raise would end the delegating run.
+    subagent = create_agent(
+        model=_StalledAnthropic(model_name="claude-opus-5-5", api_key="test-key"),
+        middleware=model_call_guards(timeout_seconds=0.05, subagent=True),
+    )
+
+    result = await subagent.ainvoke({"messages": [HumanMessage("look into it")]})
+
+    answer = result["messages"][-1]
+    assert isinstance(answer, AIMessage)
+    assert "timed out" in answer.text
+    assert "ModelCallTimeoutError" in answer.text
+
+
 async def test_a_failing_backend_hook_fails_the_run_with_what_it_raised(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
