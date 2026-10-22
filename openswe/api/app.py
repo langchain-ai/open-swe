@@ -6,6 +6,7 @@ from contextlib import AsyncExitStack, asynccontextmanager
 
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.middleware.gzip import GZipMiddleware
 from fastapi.responses import JSONResponse
 from starlette.routing import Route
 
@@ -151,6 +152,8 @@ def create_app() -> FastAPI:
     app.add_middleware(AuditLogMiddleware)
     # Ahead of the core /threads and /runs routes, which the custom app shadows.
     app.add_middleware(ThreadRouter)
+    # Starlette leaves `text/event-stream` and already-encoded responses alone.
+    app.add_middleware(GZipMiddleware, minimum_size=1024, compresslevel=4)
     add_trace_resource_names(app)
     add_request_ids(app)
     add_github_error_handlers(app)
@@ -171,6 +174,7 @@ def create_app() -> FastAPI:
         Route(remote_runtime_server.HOOKS_PATH, remote_runtime_server.HOOKS, methods=["POST"])
     )
     if AGENT_MCP is not None:
+        app.state.fastmcp_server = AGENT_MCP.app.state.fastmcp_server
         app.router.routes.extend(AGENT_MCP.root_routes)
         app.mount(agent_mcp_server.PREFIX, AGENT_MCP.app)
     mount_dashboard_ui(app)

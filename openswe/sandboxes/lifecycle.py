@@ -18,11 +18,21 @@ from langgraph_sdk import get_client
 from openswe.bridge.backend import BridgeSandboxBackend
 from openswe.bridge.store import Bridge
 from openswe.config import ENV
+from openswe.github.app import PermissionMap
 from openswe.github.proxy import get_recorded_proxy_base_config, record_proxy_token_expiry
-from openswe.github.sandbox_access import SandboxGitHubAccess, workspace_token
+from openswe.github.sandbox_access import (
+    READ_ONLY_REVIEW_PERMISSIONS,
+    SandboxGitHubAccess,
+    workspace_token,
+)
+from openswe.review.findings import REVIEWER_THREAD_KIND
 from openswe.sandboxes.handoff import complete_handoff
 from openswe.sandboxes.paths import declared_work_dir, remember_work_dir
-from openswe.sandboxes.providers.langsmith import configure_sandbox_proxy, get_sandbox_proxy_config
+from openswe.sandboxes.providers.langsmith import (
+    LangSmithCreateOptions,
+    configure_sandbox_proxy,
+    get_sandbox_proxy_config,
+)
 from openswe.sandboxes.providers.registry import SandboxGoneError, create_sandbox
 from openswe.sandboxes.state import (
     SANDBOX_BACKENDS,
@@ -90,6 +100,13 @@ class SandboxCreateConfig:
     def proxy_config(self) -> dict[str, Any] | None:
         return get_sandbox_proxy_config(self.create_params)
 
+    def langsmith_options(self) -> LangSmithCreateOptions:
+        """What the box is created with when MDA creates it, its proxy config left to us."""
+        create_params = {k: v for k, v in self.create_params.items() if k != "proxy_config"}
+        return LangSmithCreateOptions.resolve(
+            snapshot_id=self.snapshot_id, create_params=create_params, **self.resources
+        )
+
     async def boot(self) -> SandboxBackendProtocol:
         if self.create_params:
             return await create_sandbox(
@@ -105,16 +122,22 @@ class SandboxCreateConfig:
 
 
 async def _proxy_token(
-    thread_id: str | None, workspace_slug: str | None, repositories: Sequence[str] | None
+    thread_id: str | None,
+    workspace_slug: str | None,
+    repositories: Sequence[str] | None,
+    permissions: PermissionMap | None,
 ) -> SandboxGitHubAccess:
     async with aphase(thread_id, "sandbox.proxy_token"):
-        return await workspace_token(workspace_slug, repositories=repositories)
+        return await workspace_token(
+            workspace_slug, repositories=repositories, permissions=permissions
+        )
 
 
 async def _create_sandbox_with_proxy(
     *,
     thread_id: str | None = None,
     github_proxy_repositories: Sequence[str] | None = None,
+    github_proxy_permissions: PermissionMap | None = None,
     workspace_slug: str | None = None,
     source: SandboxSource = "workspace",
     record_stale_boot: bool = False,
@@ -124,7 +147,11 @@ async def _create_sandbox_with_proxy(
         config = await SandboxCreateConfig.resolve(workspace_slug, source=source)
     # The proxy token does not depend on the sandbox, so it is minted while the box boots.
     token = (
-        asyncio.ensure_future(_proxy_token(thread_id, workspace_slug, github_proxy_repositories))
+        asyncio.ensure_future(
+            _proxy_token(
+                thread_id, workspace_slug, github_proxy_repositories, github_proxy_permissions
+            )
+        )
         if ENV.SANDBOX_TYPE.get() == "langsmith"
         else None
     )
@@ -153,6 +180,7 @@ async def _create_sandbox_with_proxy(
                 thread_id,
                 access.expires_at,
                 repositories=github_proxy_repositories,
+                permissions=github_proxy_permissions,
                 workspace_slug=workspace_slug,
                 base_proxy_config=proxy_config,
             )
@@ -211,6 +239,7 @@ async def _refresh_github_proxy(
     *,
     thread_id: str | None = None,
     github_proxy_repositories: Sequence[str] | None = None,
+    github_proxy_permissions: PermissionMap | None = None,
     base_proxy_config: dict[str, Any] | None = None,
     workspace_slug: str | None = None,
 ) -> None:
@@ -218,8 +247,9 @@ async def _refresh_github_proxy(
     if ENV.SANDBOX_TYPE.get() != "langsmith":
         return
 
-    async with aphase(thread_id, "sandbox.proxy_token"):
-        access = await workspace_token(workspace_slug, repositories=github_proxy_repositories)
+    access = await _proxy_token(
+        thread_id, workspace_slug, github_proxy_repositories, github_proxy_permissions
+    )
 
     current_backend = unwrap_sandbox_backend(sandbox_backend)
     async with aphase(thread_id, "sandbox.proxy_refresh"):
@@ -233,6 +263,7 @@ async def _refresh_github_proxy(
         thread_id,
         access.expires_at,
         repositories=github_proxy_repositories,
+        permissions=github_proxy_permissions,
         workspace_slug=workspace_slug,
         base_proxy_config=base_proxy_config,
     )
@@ -244,6 +275,8 @@ async def _refresh_github_proxy_or_fail(
     github_proxy_repositories: Sequence[str] | None = None,
     base_proxy_config: dict[str, Any] | None = None,
     workspace_slug: str | None = None,
+    *,
+    github_proxy_permissions: PermissionMap | None = None,
 ) -> SandboxBackendProtocol:
     """Refresh proxy credentials; a sandbox we can't reconfigure is unreachable."""
     try:
@@ -251,6 +284,7 @@ async def _refresh_github_proxy_or_fail(
             sandbox_backend,
             thread_id=thread_id,
             github_proxy_repositories=github_proxy_repositories,
+            github_proxy_permissions=github_proxy_permissions,
             base_proxy_config=base_proxy_config,
             workspace_slug=workspace_slug,
         )
@@ -323,6 +357,7 @@ async def _connect_existing_sandbox(
     cached: SandboxBackendProtocol | None,
     sandbox_id: str | None,
     github_proxy_repositories: Sequence[str] | None = None,
+    github_proxy_permissions: PermissionMap | None = None,
     base_proxy_config: dict[str, Any] | None = None,
     workspace_slug: str | None = None,
 ) -> SandboxBackendProtocol:
@@ -352,6 +387,7 @@ async def _connect_existing_sandbox(
             github_proxy_repositories,
             base_proxy_config,
             workspace_slug,
+            github_proxy_permissions=github_proxy_permissions,
         )
     return refreshed
 
@@ -432,10 +468,35 @@ async def _attach_task_worker_sandbox(
     return published
 
 
+async def _thread_proxy_scope(
+    thread_id: str,
+    metadata: Mapping[str, object],
+    repositories: Sequence[str] | None = None,
+    permissions: PermissionMap | None = None,
+) -> tuple[Sequence[str] | None, PermissionMap | None]:
+    if metadata.get("kind") in {REVIEWER_THREAD_KIND, "review-scout"}:
+        permissions = READ_ONLY_REVIEW_PERMISSIONS
+        reviewed_pr = metadata.get("pr")
+        owner = reviewed_pr.get("owner") if isinstance(reviewed_pr, dict) else None
+        name = reviewed_pr.get("name") if isinstance(reviewed_pr, dict) else None
+        reviewed_repo = (
+            [f"{owner}/{name}"]
+            if isinstance(owner, str) and owner and isinstance(name, str) and name
+            else []
+        )
+        repositories = narrowed_repositories(repositories, reviewed_repo)
+    async with aphase(thread_id, "sandbox.token_scope"):
+        repositories = narrowed_repositories(
+            repositories, await thread_token_repositories(thread_id)
+        )
+    return repositories, permissions
+
+
 async def ensure_sandbox_for_thread(
     thread_id: str,
     *,
     github_proxy_repositories: Sequence[str] | None = None,
+    github_proxy_permissions: PermissionMap | None = None,
     workspace_slug: str | None = None,
     allow_replacement: bool = False,
     record_stale_boot: bool = False,
@@ -464,6 +525,10 @@ async def ensure_sandbox_for_thread(
     for callers whose sandbox holds nothing but a re-derivable checkout — the
     read-only reviewer, which re-preps the repo every run.
 
+    ``github_proxy_permissions`` narrows what the proxy's GitHub token may do, at
+    creation, reconnection and every expiry refresh. Reviewer and review-scout
+    threads always receive read-only GitHub credentials.
+
     ``record_stale_boot`` is for callers that collect ``take_stale_boot``.
 
     ``require_existing`` raises ``SandboxUnreachableError`` instead of creating or
@@ -487,6 +552,12 @@ async def ensure_sandbox_for_thread(
         )
     raw_sandbox_id = sandbox_metadata.get("sandbox_id")
     sandbox_id = raw_sandbox_id if isinstance(raw_sandbox_id, str) else None
+    # MDA names, creates and replaces this thread's box; only it may give the thread another.
+    owned_by_mda = sandbox_metadata.get("sandbox_owner") == "mda"
+    if owned_by_mda and sandbox_id is None:
+        raise SandboxUnreachableError(
+            thread_id, None, "Managed Deep Agents could not open this thread's sandbox"
+        )
     if require_existing and sandbox_id is None:
         raise SandboxUnreachableError(
             thread_id, None, "The coordinator must attach its sandbox first"
@@ -509,16 +580,16 @@ async def ensure_sandbox_for_thread(
     )
     created = False
     created_proxy_config: dict[str, Any] | None = None
-    async with aphase(thread_id, "sandbox.token_scope"):
-        github_proxy_repositories = narrowed_repositories(
-            github_proxy_repositories, await thread_token_repositories(thread_id)
-        )
+    github_proxy_repositories, github_proxy_permissions = await _thread_proxy_scope(
+        thread_id, sandbox_metadata, github_proxy_repositories, github_proxy_permissions
+    )
 
     if sandbox_id is None:
         logger.info("Creating new sandbox for thread %s", thread_id)
         sandbox_backend = await _create_sandbox_with_proxy(
             thread_id=thread_id,
             github_proxy_repositories=github_proxy_repositories,
+            github_proxy_permissions=github_proxy_permissions,
             workspace_slug=workspace_slug,
             record_stale_boot=record_stale_boot,
         )
@@ -532,6 +603,7 @@ async def ensure_sandbox_for_thread(
                 cached=SANDBOX_CONNECTIONS.get(sandbox_id),
                 sandbox_id=sandbox_id,
                 github_proxy_repositories=github_proxy_repositories,
+                github_proxy_permissions=github_proxy_permissions,
                 base_proxy_config=base_proxy_config,
                 workspace_slug=workspace_slug,
             )
@@ -543,6 +615,9 @@ async def ensure_sandbox_for_thread(
                     "The coordinator must recover its sandbox before workers attach",
                 ) from exc
             gone = isinstance(exc, SandboxGoneError)
+            if owned_by_mda:
+                # MDA recreates a deleted box under its name when the next run opens it.
+                raise SandboxUnreachableError(thread_id, sandbox_id, str(exc)) from exc
             if not (gone or allow_replacement):
                 raise
             logger.warning(
@@ -555,6 +630,7 @@ async def ensure_sandbox_for_thread(
                 sandbox_backend = await _create_sandbox_with_proxy(
                     thread_id=thread_id,
                     github_proxy_repositories=github_proxy_repositories,
+                    github_proxy_permissions=github_proxy_permissions,
                     workspace_slug=workspace_slug,
                     record_stale_boot=record_stale_boot,
                 )
@@ -603,6 +679,93 @@ async def ensure_sandbox_for_thread(
     return published
 
 
+async def bind_mda_sandbox(
+    thread_id: str, sandbox_id: str | None, *, workspace_slug: str | None = None
+) -> None:
+    """Bind a thread to the box Managed Deep Agents opened for it, and mark the thread MDA's.
+
+    MDA names, creates and replaces the box; the next connection configures it as it
+    does any reused box: proxy credentials, git identity, the tool channel. With no
+    ``sandbox_id`` MDA could not open the box, and the thread stays MDA's, so preparing
+    reports it unreachable rather than creating one here. A task worker attaches to its
+    coordinator's box through the backend, as before.
+    """
+    metadata = ThreadMetadata.model_validate(await get_sandbox_metadata(thread_id))
+    if metadata.task_id is not None:
+        return
+    if metadata.sandbox_owner == "mda" and sandbox_id in (None, metadata.sandbox_id):
+        return
+    bind_metadata: dict[str, Any] = {"sandbox_owner": "mda"}
+    config = await SandboxCreateConfig.resolve(workspace_slug)
+    if sandbox_id is not None and sandbox_id != metadata.sandbox_id:
+        bind_metadata["sandbox_id"] = sandbox_id
+        if config.proxy_config is not None:
+            bind_metadata[SANDBOX_PROXY_CONFIG_METADATA_KEY] = config.proxy_config
+        if metadata.sandbox_id is not None:
+            SANDBOX_CONNECTIONS.pop(metadata.sandbox_id, None)
+        if config.workspace is not None and is_snapshot_stale(config.workspace):
+            _STALE_BOOTS[thread_id] = config.workspace
+        _fire_and_forget(maybe_start_update(config.workspace), "workspace update trigger")
+    async with aphase(thread_id, "sandbox.bind_thread"):
+        await client.threads.update(thread_id=thread_id, metadata=bind_metadata)
+
+
+# The replacement ``recreate_sandbox`` authorized for an MDA box: its workspace and source.
+_REPLACEMENT_METADATA_KEY = "sandbox_replacement"
+
+
+async def request_mda_replacement(
+    thread_id: str, *, workspace_slug: str | None, source: SandboxSource
+) -> LangSmithCreateOptions:
+    """What MDA replaces the thread's box with, recorded so the reconnect applies its proxy.
+
+    The reconnect takes the proxy config from this record, never from anything MDA sends.
+    """
+    config = await SandboxCreateConfig.resolve(workspace_slug, source=source)
+    await client.threads.update(
+        thread_id=thread_id,
+        metadata={_REPLACEMENT_METADATA_KEY: {"workspace": workspace_slug, "source": source}},
+    )
+    return config.langsmith_options()
+
+
+async def reconnect_replaced_sandbox(
+    thread_id: str,
+    *,
+    workspace_slug: str | None = None,
+    github_proxy_repositories: Sequence[str] | None = None,
+    github_proxy_permissions: PermissionMap | None = None,
+) -> SandboxBackendProtocol:
+    """Connect again to the thread's box, which MDA just replaced with a fresh one of the same name.
+
+    A replacement from another workspace or the base snapshot brings that one's proxy rules.
+    """
+    metadata = await get_sandbox_metadata(thread_id)
+    requested = metadata.get(_REPLACEMENT_METADATA_KEY)
+    if isinstance(requested, dict):
+        workspace = requested.get("workspace")
+        config = await SandboxCreateConfig.resolve(
+            workspace if isinstance(workspace, str) else None,
+            source="base" if requested.get("source") == "base" else "workspace",
+        )
+        await client.threads.update(
+            thread_id=thread_id,
+            metadata={
+                SANDBOX_PROXY_CONFIG_METADATA_KEY: config.proxy_config or {},
+                _REPLACEMENT_METADATA_KEY: None,
+            },
+        )
+    sandbox_id = metadata.get("sandbox_id")
+    if isinstance(sandbox_id, str):
+        SANDBOX_CONNECTIONS.pop(sandbox_id, None)
+    return await ensure_sandbox_for_thread(
+        thread_id,
+        workspace_slug=workspace_slug,
+        github_proxy_repositories=github_proxy_repositories,
+        github_proxy_permissions=github_proxy_permissions,
+    )
+
+
 class SandboxRecreationStopError(RuntimeError):
     def __init__(self, old_sandbox_id: str, new_sandbox_id: str, reason: str) -> None:
         super().__init__(reason)
@@ -630,6 +793,8 @@ async def recreate_sandbox_for_thread(
         raise ValueError(f"Thread {thread_id} has no sandbox to recreate")
     if Bridge.bridge_id_of(old_sandbox_id) is not None:
         raise ValueError("A thread bridged to a local machine cannot be given a cloud sandbox")
+    if metadata.get("sandbox_owner") == "mda":
+        raise ValueError("Managed Deep Agents owns this thread's sandbox; only it may replace it")
 
     from openswe.sandboxes.providers.langsmith import get_async_sandbox_client
 
@@ -662,9 +827,11 @@ async def recreate_sandbox_for_thread(
                 "Stopped old sandbox before recreation", extra={"sandbox_id": old_sandbox_id}
             )
 
+    repositories, permissions = await _thread_proxy_scope(thread_id, metadata)
     new_sandbox = await _create_sandbox_with_proxy(
         thread_id=thread_id,
-        github_proxy_repositories=await thread_token_repositories(thread_id),
+        github_proxy_repositories=repositories,
+        github_proxy_permissions=permissions,
         workspace_slug=workspace_slug,
         source=source,
     )

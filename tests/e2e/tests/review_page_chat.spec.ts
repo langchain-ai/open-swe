@@ -230,7 +230,7 @@ test.describe("review page", () => {
     expect(await offset()).toBeCloseTo(collapsed, 1);
   });
 
-  test("renders human input above the description and the changes", async ({
+  test("collapses human input above the description and the changes", async ({
     page,
   }) => {
     const seeded = await page.request.post("/control/walkthrough", {
@@ -243,12 +243,17 @@ test.describe("review page", () => {
     expect(seeded.ok(), await seeded.text()).toBeTruthy();
 
     await openReview(page, pr);
-    const guidance = page.getByRole("region", {
+    const guidance = page.getByRole("group", {
       name: "Requested behavior",
     });
-    await expect(guidance).toContainText(
+    const request = guidance.getByText(
       "Asked to keep the constants in flat modules",
     );
+    await expect(guidance).toBeVisible();
+    await expect(request).toBeHidden();
+    const toggle = guidance.locator("summary");
+    await toggle.click();
+    await expect(request).toBeVisible();
 
     const description = await page.getByText(DESCRIPTION).boundingBox();
     const card = await guidance.boundingBox();
@@ -260,6 +265,8 @@ test.describe("review page", () => {
     expect(description!.y + description!.height).toBeLessThanOrEqual(
       changes!.y,
     );
+    await toggle.press("Enter");
+    await expect(request).toBeHidden();
   });
 
   test("dismissing a walkthrough reports whether there was one", async ({
@@ -362,6 +369,26 @@ test.describe("review page", () => {
         name: "Walk me through the review findings",
       }),
     ).toHaveCount(0);
+  });
+
+  test("clears the line selection when cancelling an inline comment", async ({
+    page,
+  }) => {
+    await openReview(page, pr);
+    const diff = diffColumn(page);
+    await expect(async () => {
+      await diff.locator('[data-column-number="5"]').first().hover();
+      await diff
+        .locator("[data-gutter-utility-slot] button")
+        .click({ timeout: 1000 });
+    }).toPass({ timeout: 10_000 });
+    await expect(diff.getByLabel("Comment body")).toBeVisible();
+    await expect(diff.locator("[data-selected-line]").first()).toBeVisible();
+
+    await diff.getByRole("button", { name: "Cancel", exact: true }).click();
+    await page.getByRole("heading", { name: "Changes", exact: true }).click();
+    await expect(diff.getByLabel("Comment body")).toHaveCount(0);
+    await expect(diff.locator("[data-selected-line]")).toHaveCount(0);
   });
 
   test("chat-drafted comments join one pending review that submits together", async ({
@@ -543,7 +570,15 @@ test.describe("review page", () => {
     const verdict = "Approving the constant modules.";
     await page.getByLabel("Review summary").fill(verdict);
     await page.getByRole("radio", { name: /Approve/ }).check();
-    await page.getByRole("button", { name: "Submit review" }).click();
+    await page
+      .getByRole("button", { name: "Cancel", exact: true })
+      .press("Meta+Enter");
+    await expect(page.getByLabel("Review summary")).toBeVisible();
+    expect((await fakePull(page, pr)).reviews).toHaveLength(0);
+    await page.getByRole("button", { name: "Cancel", exact: true }).click();
+    await page.getByRole("button", { name: /Review changes/ }).click();
+    await page.getByRole("radio", { name: /Approve/ }).check();
+    await page.getByRole("radio", { name: /Approve/ }).press("Meta+Enter");
     await expect(conversation.getByText(verdict)).toBeVisible();
     await expect(
       conversation.getByText("approved", { exact: true }),

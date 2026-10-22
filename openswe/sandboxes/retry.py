@@ -42,8 +42,14 @@ async def retry_transient_sandbox_errors[T](
     description: str,
     max_attempts: int = MAX_TRANSIENT_ATTEMPTS,
     max_elapsed: float | None = None,
+    retryable: Callable[[BaseException], bool] = is_transient_sandbox_error,
+    retry_after: Callable[[BaseException], float | None] | None = None,
 ) -> T:
-    """Run ``operation``, retrying it with backoff while it fails transiently."""
+    """Run ``operation``, retrying it with backoff while it fails transiently.
+
+    ``retry_after`` returns the delay a failure asks for (e.g. a Retry-After
+    header), used in place of the backoff when it is positive.
+    """
     attempt = 0
     deadline = time.monotonic() + max_elapsed if max_elapsed is not None else None
     while True:
@@ -51,7 +57,7 @@ async def retry_transient_sandbox_errors[T](
         try:
             return await operation()
         except Exception as exc:
-            if not is_transient_sandbox_error(exc):
+            if not retryable(exc):
                 raise
             if deadline is None and attempt >= max_attempts:
                 raise
@@ -61,7 +67,8 @@ async def retry_transient_sandbox_errors[T](
                     raise
             else:
                 remaining = None
-            delay = _compute_backoff(attempt)
+            requested = retry_after(exc) if retry_after is not None else None
+            delay = requested or _compute_backoff(attempt)
             if remaining is not None:
                 delay = min(delay, remaining)
             logger.warning(

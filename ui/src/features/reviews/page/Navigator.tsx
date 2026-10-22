@@ -17,6 +17,7 @@ import {
   buildEntries,
   compareTreePaths,
   filterEntries,
+  groupSteps,
   matchesFileFilter,
   type DiffEntry,
 } from "./diffEntries"
@@ -29,7 +30,8 @@ import {
   type PullRequestRef,
 } from "./queries"
 import { ReadingOrderTabs } from "./ReadingOrderTabs"
-import { useReviewPage } from "./store"
+import { activeStep, isPassed, isRead, useReviewPage } from "./store"
+import { StepBadge } from "./StepSection"
 import { plural, splitPath } from "./text"
 
 interface FolderNode {
@@ -154,19 +156,15 @@ export function Navigator({ pr }: { pr: PullRequestRef }) {
   )
 }
 
-interface StepGroup {
-  step: NonNullable<DiffEntry["step"]>
-  entries: Array<DiffEntry>
-}
-
 function stepProgress(
   entries: ReadonlyArray<DiffEntry>,
   viewed: ReadonlySet<string>
 ): string {
-  const read = entries.filter((entry) => viewed.has(entry.file.path)).length
-  if (read === entries.length) return `All ${entries.length} viewed`
-  if (read > 0) return `${read} of ${entries.length} viewed`
-  return plural(entries.length, "file")
+  const files = new Set(entries.map((entry) => entry.file.path)).size
+  const read = entries.filter((entry) => isRead(viewed, entry)).length
+  if (read === entries.length) return "Read"
+  if (read > 0) return `${read} of ${entries.length} parts read`
+  return plural(files, "file")
 }
 
 function StepList({
@@ -177,26 +175,24 @@ function StepList({
   walkthrough: ReviewWalkthrough
 }) {
   const jumpTo = useReviewPage((state) => state.jumpTo)
-  const activeEntry = useReviewPage((state) => state.activeEntry)
+  const markStepRead = useReviewPage((state) => state.markStepRead)
+  const current = useReviewPage(activeStep)
   const viewed = useReviewPage((state) => state.viewed)
   const fileFilter = useReviewPage((state) => state.fileFilter)
   // A filter keeps only the steps that touch a matching file, each with just those files.
-  const groups = useMemo(() => {
-    const byStep = new Map<number, StepGroup>()
-    for (const entry of filterEntries(
-      buildEntries(files, walkthrough, "guide"),
-      fileFilter
-    )) {
-      if (!entry.step) continue
-      const group = byStep.get(entry.step.index) ?? {
-        step: entry.step,
-        entries: [],
-      }
-      group.entries.push(entry)
-      byStep.set(entry.step.index, group)
-    }
-    return [...byStep.values()]
-  }, [files, walkthrough, fileFilter])
+  const groups = useMemo(
+    () =>
+      groupSteps(
+        filterEntries(buildEntries(files, walkthrough, "guide"), fileFilter)
+      ),
+    [files, walkthrough, fileFilter]
+  )
+  const passed = useReviewPage((state) =>
+    groups
+      .filter((group) => isPassed(state, group.step))
+      .map((group) => group.step.index)
+      .join(",")
+  )
   if (groups.length === 0)
     return (
       <p className="px-space-4 py-space-2 text-xs text-secondary">
@@ -206,7 +202,10 @@ function StepList({
   return (
     <ol className="min-h-0 flex-1 overflow-y-auto px-space-2 pb-space-4">
       {groups.map(({ step, entries }) => {
-        const active = entries.some((entry) => entry.id === activeEntry)
+        const active = step.index === current
+        const read = entries.every((entry) => isRead(viewed, entry))
+        // Scrolled past without being marked: the toggle stays faintly in view as an offer.
+        const offered = !read && passed.split(",").includes(`${step.index}`)
         const additions = entries.reduce(
           (sum, entry) => sum + entry.additions,
           0
@@ -216,30 +215,30 @@ function StepList({
           0
         )
         return (
-          <li key={step.index}>
+          <li
+            key={step.index}
+            className={cn(
+              "group/step flex items-start rounded-md hover:bg-surface-level-1-hover",
+              active && "bg-selected"
+            )}
+          >
             <button
               type="button"
               aria-current={active ? "step" : undefined}
               onClick={() => jumpTo({ kind: "entry", id: entries[0]!.id })}
-              className={cn(
-                "flex w-full items-start gap-space-2 rounded-md px-space-2 py-space-1 text-left text-xs leading-5 hover:bg-surface-level-1-hover",
-                active && "bg-selected"
-              )}
+              className="flex min-w-0 flex-1 items-start gap-space-2 px-space-2 py-space-1 text-left text-xs leading-5"
             >
-              <span
-                className={cn(
-                  "mt-0.5 flex size-4 shrink-0 items-center justify-center rounded-full text-xxs font-semibold tabular-nums",
-                  active
-                    ? "bg-brand text-brand-on-fill"
-                    : "bg-surface-level-3 text-secondary"
-                )}
-              >
-                {step.index}
-              </span>
+              <StepBadge
+                index={step.index}
+                read={read}
+                active={active}
+                className="mt-0.5 size-4"
+              />
               <span
                 className={cn(
                   "min-w-0",
-                  active ? "text-primary" : "text-secondary"
+                  active ? "text-primary" : "text-secondary",
+                  read && !active && "text-tertiary"
                 )}
               >
                 <InlineCode text={step.title} />
@@ -257,6 +256,26 @@ function StepList({
                   </span>
                 </span>
               </span>
+            </button>
+            <button
+              type="button"
+              role="checkbox"
+              aria-checked={read}
+              aria-label={`Mark step ${step.index} read`}
+              title={read ? "Mark step unread" : "Mark step read"}
+              onClick={() => markStepRead(step.index)}
+              className={cn(
+                "mt-1.5 mr-space-2 flex size-4 shrink-0 items-center justify-center rounded-full border transition-opacity focus-visible:opacity-100",
+                read
+                  ? "border-brand bg-brand text-brand-on-fill opacity-0 group-hover/step:opacity-100"
+                  : offered
+                    ? "border-brand text-brand-primary opacity-70 hover:bg-brand-subtle hover:opacity-100"
+                    : "border-strong text-secondary opacity-0 group-hover/step:opacity-100"
+              )}
+            >
+              {(read || offered) && (
+                <CheckIcon weight="bold" className="size-2.5" />
+              )}
             </button>
           </li>
         )
@@ -435,7 +454,9 @@ function FileRow({
         type="button"
         aria-current={active ? "location" : undefined}
         aria-label={description}
-        onClick={() => jumpTo({ kind: "file", path: file.path })}
+        onClick={() =>
+          jumpTo({ kind: "file", path: file.path }, { reveal: true })
+        }
         title={file.path}
         style={{ paddingLeft: 22 + depth * 12 }}
         className={cn(
@@ -477,15 +498,18 @@ function FileRow({
             {threads}
           </span>
         )}
-        {viewed ? (
+        <span
+          className="flex shrink-0 gap-space-1 font-mono text-xxs tabular-nums"
+          title={`${file.additions} lines added, ${file.deletions} lines deleted`}
+        >
+          <span className="text-success-secondary">+{file.additions}</span>
+          <span className="text-error-secondary">−{file.deletions}</span>
+        </span>
+        {viewed && (
           <CheckIcon
             weight="bold"
             className="size-3 shrink-0 text-brand-primary"
           />
-        ) : (
-          <span className="shrink-0 font-mono text-xxs text-secondary tabular-nums">
-            {changed}
-          </span>
         )}
       </button>
     </li>

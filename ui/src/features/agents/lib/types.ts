@@ -324,6 +324,8 @@ export interface AgentSchedule {
   lastTriggeredAt?: string | null
   lastError?: string | null
   lastErrorAt?: string | null
+  createdBy?: string | null
+  updatedBy?: string | null
   createdAt?: string | null
   updatedAt?: string | null
 }
@@ -604,6 +606,12 @@ export interface AgentThread {
   sandboxBridgeClient?: "cli" | "desktop" | null
   /** Whether that machine is serving the thread's checkout right now; null in lists. */
   sandboxBridgeOnline?: boolean | null
+  /**
+   * The thread's LangSmith browser: "opened" once the agent or a person has
+   * opened it, "available" while it can be opened, null before the agent's
+   * first run names it.
+   */
+  browser?: "opened" | "available" | null
   messages: Array<Message>
   pendingMessages?: Array<PendingThreadMessage>
   pr?: AgentPullRequestSummary

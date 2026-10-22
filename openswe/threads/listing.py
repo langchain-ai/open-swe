@@ -15,6 +15,7 @@ from pydantic import BaseModel
 from openswe.review.session import ReviewSessionMetadata
 from openswe.tasks.flags import task_coordination_enabled
 from openswe.tasks.store import SidebarTaskMembership, sidebar_memberships
+from openswe.threads import index
 from openswe.threads.pins import list_thread_pin_ids, pin_thread, unpin_thread
 from openswe.threads.summary import (
     _SURFACED_SOURCES,
@@ -262,7 +263,9 @@ async def settle_review_walkthrough(client: Any, thread: ThreadLike) -> ThreadLi
     if review is None or review.walkthrough_state != "building" or not thread_id:
         return thread
     try:
-        runs = await client.runs.list(review.scout_thread_id, limit=1)
+        runs = await client.runs.list(
+            await index.current_thread_id(review.scout_thread_id), limit=1
+        )
     except NotFoundError:
         runs = []
     except Exception:

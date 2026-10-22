@@ -11,7 +11,7 @@ import ipaddress
 import logging
 import re
 import socket
-from collections.abc import Awaitable, Callable, Sequence
+from collections.abc import Awaitable, Callable, Mapping, Sequence
 from typing import Any, Literal, Self
 from urllib.parse import urljoin, urlparse
 
@@ -41,7 +41,9 @@ from openswe.review.findings import (
 from openswe.review.session import PullRequestState, ReviewSession, now_ms
 from openswe.review_scout.launch import ReviewScoutTarget, ScoutProgress
 from openswe.thread_ids import reviewer_thread_id
+from openswe.threads import index
 from openswe.threads.status import thread_run_error
+from openswe.threads.succession import SUCCEEDED_BY_KEY
 from openswe.utils.http_pool import pooled_transport
 from openswe.utils.json_types import ThreadLike, thread_metadata
 from openswe.utils.thread_ops import langgraph_client
@@ -170,6 +172,12 @@ def _run_status(thread: ThreadLike, metadata: dict[str, Any]) -> str:
     return "idle"
 
 
+def _succeeded(thread: Mapping[str, Any]) -> bool:
+    """A reviewer thread whose review carries on in its successor, which is listed instead."""
+    metadata = thread.get("metadata")
+    return isinstance(metadata, Mapping) and bool(metadata.get(SUCCEEDED_BY_KEY))
+
+
 def _thread_review_summary(
     thread: ThreadLike, findings: Sequence[FindingLike]
 ) -> dict[str, Any] | None:
@@ -250,7 +258,7 @@ async def list_reviews(
             break
         findings = await _thread_findings(threads)
         for thread in threads:
-            if not isinstance(thread, dict):
+            if not isinstance(thread, dict) or _succeeded(thread):
                 continue
             summary = _thread_review_summary(thread, findings.get(thread.get("thread_id"), []))
             if not summary:
@@ -281,11 +289,12 @@ async def get_review_summaries(
                     "kind": REVIEWER_THREAD_KIND,
                     "pr": {"owner": owner, "name": repo, "number": number},
                 },
-                limit=1,
+                limit=2,
                 sort_by="updated_at",
                 sort_order="desc",
             )
-            raw = await _review_summary_of(threads[0]) if threads else None
+            current = next((t for t in threads if not _succeeded(t)), None)
+            raw = await _review_summary_of(current) if current else None
             return f"{owner}/{repo}#{number}".lower(), _as_review_summary(raw)
 
     return dict(await asyncio.gather(*(read(*identity) for identity in identities)))
@@ -612,7 +621,9 @@ def _clean_comment_body(body: str) -> str:
 async def _reviewer_thread_for(owner: str, repo: str, pr_number: int) -> ThreadLike | None:
     """The reviewer thread for this PR, or ``None`` when no review has run."""
     try:
-        thread = await langgraph_client().threads.get(reviewer_thread_id(owner, repo, pr_number))
+        thread = await langgraph_client().threads.get(
+            await index.current_thread_id(reviewer_thread_id(owner, repo, pr_number))
+        )
     except NotFoundError:
         return None
     except Exception:  # noqa: BLE001
@@ -719,7 +730,7 @@ async def get_review(owner: str, repo: str, pr_number: int) -> dict[str, Any]:
             walkthrough_progress.model_dump(mode="json") if walkthrough_progress else None
         ),
         "review_error": review_error,
-        "walkthrough_scout_thread_id": target.thread_id if target else None,
+        "walkthrough_scout_thread_id": await target.current_thread_id() if target else None,
         "assessment": assessment.model_dump() if assessment else None,
     }
 
