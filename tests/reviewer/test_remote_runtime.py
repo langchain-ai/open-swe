@@ -391,6 +391,58 @@ async def test_mda_catalog_leaves_integrations_and_code_mode_to_mda(
     assert catalog["also_from_code"] == ["read_file"]
 
 
+@pytest.mark.parametrize("unknown", [False, True])
+def test_mda_runs_box_tools_itself_only_with_tool_middleware_it_applies(unknown: bool) -> None:
+    """Tool-call middleware MDA does not know keeps every call here, where it sees it."""
+    from collections.abc import Awaitable, Callable
+
+    from langchain.agents.middleware.types import AgentMiddleware
+    from langchain_core.messages import ToolMessage
+    from langchain_core.tools import StructuredTool
+    from langgraph.prebuilt.tool_node import ToolCallRequest
+    from langgraph.types import Command
+
+    from openswe.middleware.tool_error_handler import ToolErrorMiddleware
+    from openswe.middleware.workflow_push_guard import WorkflowPushGuardMiddleware
+    from openswe.remote_runtime.graph import RunSession
+    from openswe.sandboxes.tool_runtime import ToolSurface
+
+    class Unknown(AgentMiddleware):
+        async def awrap_tool_call(
+            self,
+            request: ToolCallRequest,
+            handler: Callable[[ToolCallRequest], Awaitable[ToolMessage | Command]],
+        ) -> ToolMessage | Command:
+            return await handler(request)
+
+    def tool(name: str) -> StructuredTool:
+        async def run() -> str:
+            return name
+
+        return StructuredTool.from_function(coroutine=run, name=name, description=name)
+
+    surface = ToolSurface(
+        tools={name: tool(name) for name in ("execute", "read_file", "slack_reply")},
+        middleware=[
+            ToolErrorMiddleware(),
+            WorkflowPushGuardMiddleware(),
+            *([Unknown()] if unknown else []),
+        ],
+        backend_paths=("/skills/",),
+    )
+
+    in_box = RunSession(surface, {}, None, started_here=True).box_tools()
+
+    if unknown:
+        assert in_box == {"tools": [], "checks": [], "backend_paths": []}
+    else:
+        assert in_box == {
+            "tools": ["execute", "read_file"],
+            "checks": ["push_guards", "tool_errors"],
+            "backend_paths": ["/skills/"],
+        }
+
+
 async def _hook_status(
     monkeypatch: pytest.MonkeyPatch, token: str, hook: str
 ) -> tuple[int, list[tuple[str, str]]]:
@@ -473,8 +525,6 @@ async def test_an_adopted_worker_acts_as_its_own_thread_never_its_coordinator(
         AsyncMock(return_value={"thread_id": "worker", "github_login": "owner"}),
     )
     monkeypatch.setattr(async_workers.service.Actor, "resolve", AsyncMock(return_value="actor"))
-    joined: list[async_workers.LaunchedRun] = []
-    monkeypatch.setattr(async_workers.LaunchedRun, "join", lambda run: joined.append(run))
     spec = ModelSpec(model_id="openai:gpt-6.1-sol", kwargs={})
     graph = MagicMock(
         start_models=AsyncMock(
@@ -497,8 +547,7 @@ async def test_an_adopted_worker_acts_as_its_own_thread_never_its_coordinator(
     adopted = verify_runtime_token(token)
     assert adopted.thread_id == "worker"
     assert adopted.configurable["thread_id"] == "worker"
-    register.assert_awaited_once_with("actor", "call-1", "worker", "Fix it", "run-1")
-    assert joined == [async_workers.LaunchedRun("worker", "run-1")]
+    register.assert_awaited_once_with("actor", "call-1", "worker", "Fix it")
 
 
 async def test_a_replayed_launch_reports_the_worker_it_registered_and_stops_the_other(
@@ -527,8 +576,6 @@ async def test_a_replayed_launch_reports_the_worker_it_registered_and_stops_the_
         AsyncMock(side_effect=store.WorkerAlreadyLaunchedError(task, first)),
     )
     monkeypatch.setattr(async_workers.service.Actor, "resolve", AsyncMock(return_value="actor"))
-    joined: list[async_workers.LaunchedRun] = []
-    monkeypatch.setattr(async_workers.LaunchedRun, "join", lambda run: joined.append(run))
     client = MagicMock()
     client.runs.cancel = AsyncMock()
     mda = MagicMock(client=client)
@@ -549,141 +596,52 @@ async def test_a_replayed_launch_reports_the_worker_it_registered_and_stops_the_
     assert isinstance(worker, dict)
     assert worker["worker_thread_id"] == "first-worker"
     client.runs.cancel.assert_awaited_once_with("second-worker", "run-2")
-    assert joined == []
 
 
-async def test_a_launched_worker_run_without_a_webhook_is_settled_once_it_ends(
+async def test_a_launched_run_that_ended_before_its_worker_was_registered_is_settled(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     from unittest.mock import AsyncMock, MagicMock
-
-    import httpx
 
     from openswe import completion
     from openswe.remote_runtime import async_workers
     from openswe.threads import runtimes
 
-    client = MagicMock()
-    client.runs.get = AsyncMock(
-        side_effect=[
-            {"run_id": "run-1", "status": "running"},
-            # A transient failure is retried, never the end of the wait.
-            httpx.ConnectError("dropped"),
-            {"run_id": "run-1", "status": "running"},
-            {
-                "run_id": "run-1",
-                "status": "error",
-                "metadata": {"subagent_name": "general-purpose"},
-            },
-        ]
+    coordinator = RemoteRun(thread_id="coordinator", assistant_id="agent", configurable={})
+    monkeypatch.setattr(
+        async_workers.service,
+        "register_async_worker",
+        AsyncMock(return_value={"worker_thread_id": "worker"}),
     )
-    # A long run outlasts one join; the wait goes on.
-    client.runs.join = AsyncMock(side_effect=[httpx.ReadTimeout("still running"), {}])
-    client.threads.get_history = AsyncMock(return_value=[{"values": {"messages": []}}])
+    monkeypatch.setattr(async_workers.service.Actor, "resolve", AsyncMock(return_value="actor"))
+    client = MagicMock()
     mda = MagicMock(client=client)
     monkeypatch.setattr(runtimes.Runtimes, "mda", property(lambda self: mda))
-    monkeypatch.setattr(async_workers.asyncio, "sleep", AsyncMock())
-    # A failure is logged and left unsettled for the reconcile job to retry.
-    settle = AsyncMock(side_effect=RuntimeError("delegation gone"))
+    settle = AsyncMock()
     monkeypatch.setattr(completion, "handle_run_completion", settle)
-    settled = AsyncMock()
-    monkeypatch.setattr(async_workers.store.TaskDelegation, "settle_launch", settled)
+    body = {
+        "tool_call_id": "call-1",
+        "instructions": "Fix login",
+        "worker_thread_id": "worker",
+        "run_id": "run-1",
+    }
 
-    await async_workers.LaunchedRun("worker", "run-1").settle_when_done()
+    # Still running: its webhook reports it, to a registered worker.
+    client.runs.get = AsyncMock(return_value={"run_id": "run-1", "status": "running"})
+    await async_workers.launched(coordinator, body)
+    settle.assert_not_awaited()
 
+    # Its webhook came before the worker existed, so registering settles it.
+    client.runs.get = AsyncMock(
+        return_value={"run_id": "run-1", "status": "error", "error": "boom"}
+    )
+    await async_workers.launched(coordinator, body)
     settle.assert_awaited_once_with(
         {
             "thread_id": "worker",
             "run_id": "run-1",
             "status": "error",
-            "metadata": {"subagent_name": "general-purpose"},
-            "values": {"messages": []},
-            "error": None,
+            "metadata": None,
+            "error": "boom",
         }
     )
-    settled.assert_not_awaited()
-
-
-async def test_a_launched_worker_run_reports_its_own_answer_and_never_a_pause(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    import operator
-    from typing import Annotated, TypedDict
-    from unittest.mock import AsyncMock, MagicMock
-
-    from langgraph.checkpoint.memory import InMemorySaver
-    from langgraph.graph import END, START, StateGraph
-    from langgraph.types import Command, interrupt
-
-    from openswe import completion
-    from openswe.remote_runtime import async_workers
-    from openswe.tasks.events import worker_result
-    from openswe.threads import runtimes
-
-    class State(TypedDict):
-        messages: Annotated[list[dict[str, str]], operator.add]
-
-    def agent(state: State) -> State:
-        asked = state["messages"][-1]["content"]
-        if asked == "push":
-            approval = interrupt("Approve the workflow push?")
-            return {"messages": [{"type": "ai", "content": f"Pushed: {approval}"}]}
-        return {"messages": [{"type": "ai", "content": f"Answered {asked}"}]}
-
-    builder = StateGraph(State)
-    builder.add_node("agent", agent)
-    builder.add_edge(START, "agent")
-    builder.add_edge("agent", END)
-    graph = builder.compile(checkpointer=InMemorySaver())
-    thread = {"configurable": {"thread_id": "worker"}}
-
-    async def run(run_id: str, given: State | Command) -> None:
-        await graph.ainvoke(given, {**thread, "metadata": {"run_id": run_id}})
-
-    async def history(
-        thread_id: str, *, limit: int, metadata: dict[str, str]
-    ) -> list[dict[str, object]]:
-        assert thread_id == "worker"
-        return [
-            {
-                "values": snapshot.values,
-                "interrupts": [{"id": i.id, "value": i.value} for i in snapshot.interrupts],
-            }
-            async for snapshot in graph.aget_state_history(thread, filter=metadata, limit=limit)
-        ]
-
-    client = MagicMock()
-    # The server reports a run paused on interrupt() as a success, like a finished one.
-    client.runs.get = AsyncMock(
-        side_effect=lambda thread_id, run_id: {
-            "run_id": run_id,
-            "status": "success",
-            "metadata": {},
-        }
-    )
-    client.threads.get_history = AsyncMock(side_effect=history)
-    client.threads.get_state = AsyncMock(
-        side_effect=lambda thread_id: {"values": graph.get_state(thread).values}
-    )
-    mda = MagicMock(client=client)
-    monkeypatch.setattr(runtimes.Runtimes, "mda", property(lambda self: mda))
-    monkeypatch.setattr(async_workers, "refresh_thread_status", AsyncMock())
-    settle = AsyncMock()
-    monkeypatch.setattr(completion, "handle_run_completion", settle)
-    monkeypatch.setattr(async_workers.store.TaskDelegation, "settle_launch", AsyncMock())
-
-    # Run A finished, then a task message's run B moved the thread on before A was settled.
-    await run("run-a", {"messages": [{"type": "human", "content": "A"}]})
-    await run("run-b", {"messages": [{"type": "human", "content": "B"}]})
-    await async_workers.LaunchedRun("worker", "run-a").settle_when_done()
-    (settled,) = settle.await_args.args
-    assert await worker_result("worker", "run-a", "success", settled) == "Answered A"
-
-    # Run C stopped for a person's approval: not finished, so nothing reports it or
-    # wakes the worker with queued messages, and the approval resumes it.
-    settle.reset_mock()
-    await run("run-c", {"messages": [{"type": "human", "content": "push"}]})
-    await async_workers.LaunchedRun("worker", "run-c").settle_when_done()
-    settle.assert_not_awaited()
-    await run("run-d", Command(resume="approved"))
-    assert graph.get_state(thread).values["messages"][-1]["content"] == "Pushed: approved"
