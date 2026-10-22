@@ -2,6 +2,8 @@ import { Button } from "@langchain/macaw-components/Button"
 import { Textarea } from "@langchain/macaw-components/Textarea"
 import { useState } from "react"
 
+import { SubmitShortcut } from "@/components/SubmitShortcut"
+
 /** A one-line "Reply…" that grows into a composer, as on GitHub. ⌘↩ sends. */
 export function ReplyBox({
   reply,
@@ -69,8 +71,15 @@ export function ReplyBox({
         >
           Cancel
         </Button>
-        <Button size="sm" disabled={!body.trim() || pending} onClick={send}>
+        <Button
+          size="sm"
+          aria-label="Reply"
+          aria-keyshortcuts="Meta+Enter Control+Enter"
+          disabled={!body.trim() || pending}
+          onClick={send}
+        >
           Reply
+          {!pending && <SubmitShortcut />}
         </Button>
       </div>
     </div>
