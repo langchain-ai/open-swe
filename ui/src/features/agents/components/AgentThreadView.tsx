@@ -948,7 +948,8 @@ export function AgentThreadView({
                 disabled={!canPost}
                 busy={isStreaming}
                 activeRun={activeRun}
-                onStop={mirroredSession ? undefined : stopRun}
+                onStop={stopRun}
+                stoppable={!mirroredSession}
                 onSubmit={submitWithExcerpts}
                 followUpBehavior={followUpBehavior}
                 restoreDraft={restoreDraft}
