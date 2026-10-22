@@ -43,6 +43,7 @@ from langchain.agents.middleware.types import (
     hook_config,
 )
 from langchain_core.messages import (
+    BaseMessage,
     HumanMessage,
     SystemMessage,
     ToolCall,
@@ -76,6 +77,8 @@ _MDA_STATE_KEYS: Final = frozenset({"_summarization_event"})
 _MESSAGE_KEY: Final = "__lc_message__"
 DISPLAY_DESCRIPTION: Final = "display_description"
 LAUNCH_WORKER_TOOL: Final = "start_async_task"
+# Marks a message a forked worker inherited from its coordinator; the backend reads it too.
+INHERITED_KEY: Final = "open_swe_inherited"
 # deepagents' tools for the tasks it tracks; Open SWE's task tools track its workers.
 _TRACKED_BY_OPEN_SWE: Final = frozenset(
     {"check_async_task", "update_async_task", "cancel_async_task", "list_async_tasks"}
@@ -288,25 +291,32 @@ class BackendRunMiddleware(AgentMiddleware[RunState]):
 
     @hook_config(can_jump_to=["end"])
     async def abefore_agent(self, state: RunState, runtime: Runtime) -> dict[str, object] | None:
+        inherited: list[BaseMessage] = []
         if self._backend.awaiting_adoption:
             # A worker never acts on its grant: it has no identity until it adopts one.
             thread_id = _RunConfigurable.model_validate(get_config().get("configurable", {}))
-            assignment = next(
-                (m.text for m in state["messages"] if isinstance(m, HumanMessage)), ""
-            )
+            inherited, assignment = _launch_input(state["messages"])
             await self._backend.adopt(thread_id.thread_id, run_id(), assignment)
         invocation = self._invocation()
         if state.get("open_swe_prepared_for") == invocation:
-            return None
+            return {"messages": inherited} if inherited else None
         sandbox_id = await self._open_sandbox(runtime) if self._open_sandbox is not None else None
-        update = await self._phase("prepare", state, sandbox_id=sandbox_id)
+        messages = [*inherited, *state["messages"][len(inherited) :]]
+        update = await self._phase(
+            "prepare", {**state, "messages": messages}, sandbox_id=sandbox_id
+        )
+        if inherited:
+            own = update.get("messages")
+            update["messages"] = [*inherited, *(own if isinstance(own, list) else [])]
         return {**update, "open_swe_prepared_for": invocation}
 
     @hook_config(can_jump_to=["end"])
     async def abefore_model(self, state: RunState, runtime: Runtime) -> dict[str, object] | None:  # noqa: ARG002
         return await self._phase("before_model", state)
 
-    async def _phase(self, hook: Hook, state: RunState, **extra: JsonValue) -> dict[str, object]:
+    async def _phase(
+        self, hook: Hook, state: Mapping[str, object], **extra: JsonValue
+    ) -> dict[str, object]:
         # A backend it cannot reach fails the run, as any hook failure does, so every
         # surface reports it and the person can send the message again.
         reply = await self._backend.phase(hook, run_body(run_id(), state, **extra))
@@ -575,6 +585,27 @@ class AsyncWorkerLaunchMiddleware(AgentMiddleware):
             logger.warning("The backend did not register a launched worker", exc_info=True)
             return _worker_message({"worker_thread_id": launched.thread_id}, tool_call_id)
         return _worker_message(registered.get("worker"), tool_call_id)
+
+
+def _launch_input(messages: Sequence[BaseMessage]) -> tuple[list[BaseMessage], str]:
+    """A launched worker's input: the coordinator's conversation it forked, marked, and its task.
+
+    The task is the last human message. Everything before it came from the coordinator,
+    so the worker's transcript records none of it as the worker's own.
+    """
+    index = next(
+        (i for i in range(len(messages) - 1, -1, -1) if isinstance(messages[i], HumanMessage)),
+        None,
+    )
+    if index is None:
+        return [], ""
+    inherited = [
+        message.model_copy(
+            update={"additional_kwargs": {**message.additional_kwargs, INHERITED_KEY: True}}
+        )
+        for message in messages[:index]
+    ]
+    return inherited, messages[index].text
 
 
 def _launch_runtime(runtime: ToolRuntime, grant: str) -> ToolRuntime:

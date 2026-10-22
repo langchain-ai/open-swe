@@ -10,7 +10,8 @@ middleware there. The run token in the context authenticates every call.
 The same agent runs as the async ``general-purpose`` subagent, the graph
 ``open-swe--general-purpose``, for the task workers a coordinator launches with
 ``start_async_task``. A worker is an Open SWE thread of its own: it starts with a
-worker grant, adopts its own run token, and runs this agent's middleware as it.
+worker grant and a copy of its coordinator's conversation, adopts its own run
+token, and runs this agent's middleware as it.
 """
 
 from collections.abc import Collection, Mapping, Sequence
@@ -203,6 +204,8 @@ async def agent(runtime: ManagedServerRuntime) -> DeepAgentDefinition:
         # The backend settles a worker's runs from their webhooks and wakes the coordinator
         # itself, so deepagents must not wake it as well.
         "notify_parent": False,
+        # Starts from the coordinator's conversation, so an assignment needn't restate it.
+        "mode": "fork",
     }
     return define_deep_agent(
         name="open-swe",

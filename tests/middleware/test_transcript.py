@@ -293,6 +293,48 @@ async def test_a_run_continued_in_another_process_keeps_its_turn(
     assert engine.command_ids[-1] == f"turn:{turn_id}:completed"
 
 
+async def test_a_forked_worker_records_its_assignment_never_what_it_inherited(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A forked worker's thread starts with its coordinator's conversation, which isn't its own."""
+    engine = _install(monkeypatch, transcribed=False)
+    monkeypatch.setattr(mw, "_thread_metadata", AsyncMock(return_value={}))
+    monkeypatch.setattr(mw, "_stamp_transcript", AsyncMock())
+    inherited = {"open_swe_inherited": True}
+    history = [
+        HumanMessage(content="fix login", id="asked", additional_kwargs=inherited),
+        HumanMessage(
+            content='<dynamic-context kind="person" id="u">x</dynamic-context>',
+            id="context",
+            additional_kwargs=inherited,
+        ),
+        AIMessage(content="Launching a worker.", id="launching", additional_kwargs=inherited),
+        HumanMessage(content="[Inherited.]\n\nFix login", id="assignment"),
+    ]
+    await mw.TranscriptMiddleware().abefore_agent({"messages": history}, None)
+    await mw.TranscriptMiddleware().aflush_run(None)
+    [requested] = [c for c in engine.commands if c.event.type == "turn.requested"]
+    assert requested.event.message_id == "assignment"
+
+    # Its next model call reaches another process, which knows only what PostgreSQL recorded.
+    mw._runs.clear()
+    monkeypatch.setattr(
+        mw, "run_turn", AsyncMock(return_value=RunTurn(requested.turn_id, open=True))
+    )
+    monkeypatch.setattr(mw, "recorded_message_ids", AsyncMock(return_value={"assignment"}))
+    middleware = mw.TranscriptMiddleware()
+    await middleware.aresume_run({"messages": history}, None)
+
+    async def model_handler(request: ModelRequest) -> ModelResponse:
+        return ModelResponse(result=[AIMessage(content="done", id="ai-1")])
+
+    await middleware.awrap_model_call(_model_request(history), model_handler)
+    await middleware.aafter_agent({"messages": history}, None)
+
+    assert engine.types[0] == "thread.created"
+    assert not [c for c in engine.commands if c.command_id.startswith("human:")]
+
+
 @pytest.mark.parametrize("supplied_turn", [False, True])
 async def test_event_inputs_survive_initial_delivery_injection_and_replay(
     registry_db: None, monkeypatch: pytest.MonkeyPatch, supplied_turn: bool

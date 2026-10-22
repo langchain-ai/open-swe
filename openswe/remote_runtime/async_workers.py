@@ -66,7 +66,7 @@ class _Run(BaseModel):
 class AdoptBody(BaseModel):
     thread_id: str
     run_id: str
-    # The assignment the worker was launched with, its first message.
+    # The assignment the worker was launched with, its last message before it ran.
     instructions: str
 
 
@@ -78,13 +78,20 @@ def _assignment(coordinator_thread_id: str, instructions: str) -> str:
 
 
 def _assigned_instructions(coordinator_thread_id: str, assignment: str) -> str:
-    """The coordinator's instructions inside the assignment ``launch`` rendered for them."""
-    before, _, after = _assignment(coordinator_thread_id, _INSTRUCTIONS_MARK).partition(
-        _INSTRUCTIONS_MARK
+    """The coordinator's instructions inside the assignment ``launch`` rendered for them.
+
+    A forked worker's assignment follows deepagents' note on the conversation it inherited.
+    """
+    before, _, after = (
+        part.strip()
+        for part in _assignment(coordinator_thread_id, _INSTRUCTIONS_MARK).partition(
+            _INSTRUCTIONS_MARK
+        )
     )
     text = assignment.strip()
-    if text.startswith(before.lstrip()) and text.endswith(after.rstrip()):
-        return text[len(before.lstrip()) : len(text) - len(after.rstrip())].strip() or text
+    start = text.find(before)
+    if start >= 0 and text.endswith(after):
+        return text[start + len(before) : len(text) - len(after)].strip() or text
     logger.warning(
         "An async worker's assignment does not match its template",
         extra={"coordinator_thread_id": coordinator_thread_id},

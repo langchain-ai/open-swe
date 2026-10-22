@@ -81,6 +81,8 @@ _WRITER_BATCH = 32
 # conversation offloading) are tagged out of the user-facing stream. Their
 # tokens must not become transcript fragments.
 _HIDDEN_TAGS = frozenset({"nostream", "langsmith:hidden"})
+# Set by MDA's `rt.middleware` on the coordinator messages a forked task worker starts with.
+_INHERITED_KEY = "open_swe_inherited"
 
 _FENCE = re.compile(r"^ {0,3}(`{3,}|~{3,})")
 _LIST_ITEM = re.compile(r"^ {0,3}(?:[-*+]|\d{1,9}[.)])\s")
@@ -383,6 +385,11 @@ def _transcribed_human_text(message: HumanMessage) -> str:
 def _is_dynamic_context(message: HumanMessage) -> bool:
     """A ``<dynamic-context>`` introduction: who a sender is, not what they said."""
     return "<dynamic-context" in _message_text(message)
+
+
+def _is_inherited(message: BaseMessage) -> bool:
+    """Part of the coordinator's conversation a forked task worker started with, not its own."""
+    return message.additional_kwargs.get(_INHERITED_KEY) is True
 
 
 def _is_turn_annotation(message: HumanMessage) -> bool:
@@ -832,7 +839,11 @@ class TranscriptMiddleware(OpenSWEMiddleware):
         # must not be stamped as one: the UI would switch to a read path that
         # has no rows behind it.
         untranscribable = not postgres.configured() or (
-            not transcribed and any(isinstance(message, AIMessage) for message in messages)
+            not transcribed
+            and any(
+                isinstance(message, AIMessage) and not _is_inherited(message)
+                for message in messages
+            )
         )
         if untranscribable:
             # A thread that already has agent turns but no transcript row predates
@@ -916,9 +927,10 @@ class TranscriptMiddleware(OpenSWEMiddleware):
         )
         # Every human message already in state belongs to a turn that is over, so
         # recording one again would move it into this turn. Two exceptions: a
-        # ``<dynamic-context>`` introduction (injected once per thread, renders as
-        # nothing, and recording it is what makes attribution work), and event
-        # matches this run was started to deliver, which belong to this turn.
+        # ``<dynamic-context>`` introduction of this thread's own (injected once per
+        # thread, renders as nothing, and recording it is what makes attribution
+        # work), and event matches this run was started to deliver, which belong
+        # to this turn.
         run_state.seen_human_ids.update(
             message.id
             for message in messages
@@ -926,7 +938,7 @@ class TranscriptMiddleware(OpenSWEMiddleware):
             and isinstance(message.id, str)
             and message.id
             and message.id not in input_event_ids
-            and not _is_dynamic_context(message)
+            and (_is_inherited(message) or not _is_dynamic_context(message))
         )
         commands.extend(
             Command(
@@ -966,12 +978,16 @@ class TranscriptMiddleware(OpenSWEMiddleware):
             thread_id=ids.thread_id, run_id=ids.run_id, turn_id=owned.turn_id, enabled=owned.open
         )
         if owned.open:
-            humans = [
-                message.id
-                for message in cast(Sequence[BaseMessage], state.get("messages") or [])
-                if isinstance(message, HumanMessage) and isinstance(message.id, str) and message.id
-            ]
-            run_state.seen_human_ids.update(await recorded_message_ids(ids.thread_id, humans))
+            # What a forked worker inherited is never its own to record.
+            own: list[str] = []
+            for message in cast(Sequence[BaseMessage], state.get("messages") or []):
+                if not isinstance(message, HumanMessage) or not isinstance(message.id, str):
+                    continue
+                if _is_inherited(message):
+                    run_state.seen_human_ids.add(message.id)
+                elif message.id:
+                    own.append(message.id)
+            run_state.seen_human_ids.update(await recorded_message_ids(ids.thread_id, own))
             run_state.queue = asyncio.Queue()
             run_state.writer = asyncio.create_task(_writer_loop(run_state))
         _runs[_run_key(ids.thread_id, ids.run_id)] = run_state

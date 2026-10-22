@@ -452,8 +452,9 @@ async def test_a_worker_grant_reads_its_coordinators_catalog_and_adopts_nothing_
     assert status == 404
 
 
+@pytest.mark.parametrize("preamble", ["", "[The messages above are inherited.]\n\n"])
 async def test_an_adopted_worker_acts_as_its_own_thread_never_its_coordinator(
-    monkeypatch: pytest.MonkeyPatch,
+    monkeypatch: pytest.MonkeyPatch, preamble: str
 ) -> None:
     from unittest.mock import AsyncMock, MagicMock
 
@@ -481,12 +482,13 @@ async def test_an_adopted_worker_acts_as_its_own_thread_never_its_coordinator(
     )
     monkeypatch.setattr(hosted, "hosted_graphs", lambda: {"agent": graph})
 
-    # The worker's first message: the assignment its launch rendered.
+    # The assignment its launch rendered, after deepagents' note when the worker forked.
     assignment = prompt(
         "tasks/assignment", coordinator_thread_id="coordinator", instructions="Fix it"
     )
     reply = await async_workers.adopt(
-        grant, {"thread_id": "worker", "run_id": "run-1", "instructions": assignment}
+        grant,
+        {"thread_id": "worker", "run_id": "run-1", "instructions": preamble + assignment},
     )
 
     assert isinstance(reply, dict)

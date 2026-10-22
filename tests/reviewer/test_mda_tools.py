@@ -214,6 +214,7 @@ async def _launch_worker(
                 # As `mda/agent.py` declares the worker.
                 "notify_parent": False,
                 "webhook": "https://backend.invalid/webhooks/run-complete?token=t",
+                "mode": "fork",
             }
         ]
     )
@@ -264,9 +265,11 @@ async def test_a_launched_worker_carries_a_grant_never_its_coordinators_run_toke
 
     launch = client.runs.create.await_args.kwargs
     assert launch["context"] == {"graph": "agent", "__worker_grant": "worker-grant"}
-    assert launch["input"] == {
-        "messages": [{"role": "user", "content": "Your assignment: Fix login"}]
-    }
+    # The worker forks the coordinator's conversation, up to its launch, then its assignment.
+    asked, assigned = launch["input"]["messages"]
+    assert asked["content"] == "fix login in the background"
+    assert assigned["type"] == "human"
+    assert assigned["content"].endswith("\n\nYour assignment: Fix login")
     assert "coordinator-token" not in repr(client.runs.create.await_args)
     # The backend settles the launched run from its webhook, as it does every worker run.
     assert launch["webhook"] == "https://backend.invalid/webhooks/run-complete?token=t"
@@ -345,6 +348,7 @@ async def test_a_launched_worker_adopts_its_own_run_token_before_anything_runs(
     monkeypatch.setattr("rt.middleware.run_id", lambda: "worker-run")
     request = httpx2.Request("POST", "https://backend.invalid")
     seen: list[tuple[str, str]] = []
+    prepared: list[dict[str, object]] = []
 
     async def post(
         url: str, *, headers: dict[str, str], json: dict[str, object], **kwargs: object
@@ -355,9 +359,11 @@ async def test_a_launched_worker_adopts_its_own_run_token_before_anything_runs(
             assert json == {
                 "thread_id": "worker-thread",
                 "run_id": "worker-run",
-                "instructions": "Fix login",
+                "instructions": "[Inherited.]\n\nFix login",
             }
             return httpx2.Response(200, request=request, json={"run_token": "worker-token"})
+        if hook == "prepare":
+            prepared.extend(json["messages"])
         return httpx2.Response(200, request=request, json={})
 
     client = MagicMock(is_closed=False)
@@ -369,10 +375,26 @@ async def test_a_launched_worker_adopts_its_own_run_token_before_anything_runs(
         middleware=[BackendRunMiddleware(backend, None)],
     )
 
-    await graph.ainvoke(
-        {"messages": [("user", "Fix login")]}, {"configurable": {"thread_id": "worker-thread"}}
+    # Forked: the coordinator's conversation, then deepagents' note and the assignment.
+    values = await graph.ainvoke(
+        {
+            "messages": [
+                ("user", "fix login in the background"),
+                ("ai", "Launching a worker."),
+                ("user", "[Inherited.]\n\nFix login"),
+            ]
+        },
+        {"configurable": {"thread_id": "worker-thread"}},
     )
 
     assert seen[0] == ("adopt", "Bearer worker-grant")
     assert [hook for hook, _ in seen[1:3]] == ["catalog", "prepare"]
     assert all(bearer == "Bearer worker-token" for _, bearer in seen[1:])
+    # Only the assignment is the worker's own, so its transcript records nothing before it.
+    inherited = [
+        bool(m.additional_kwargs.get("open_swe_inherited")) for m in values["messages"][:3]
+    ]
+    assert inherited == [True, True, False]
+    assert [
+        bool(m["data"]["additional_kwargs"].get("open_swe_inherited")) for m in prepared
+    ] == inherited
