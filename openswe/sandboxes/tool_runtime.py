@@ -1,5 +1,8 @@
 """Execute the agent's tool node without invoking its model."""
 
+import math
+import re
+from collections import Counter
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field
 from typing import cast
@@ -14,31 +17,19 @@ from langgraph.graph import END, START, StateGraph
 from langgraph.graph.state import CompiledStateGraph
 from langgraph.prebuilt import ToolNode
 from langgraph.typing import StateT
-from langgraph_sdk import get_client
 from pydantic import BaseModel, JsonValue, TypeAdapter
 
 from openswe.mcp.models import MCPToolProvenance
 from openswe.middleware.dynamic_tools import DynamicToolMiddleware
 from openswe.prompts import prompt
-from openswe.run_config import RunConfig
-from openswe.sandboxes.tool_data import ToolContext, load_context, save_context
 from openswe.sandboxes.tool_models import ToolDescription
 
 _json = TypeAdapter(JsonValue)
-# Task workers share this channel with their coordinator, so task coordination stays model-only.
-EXCLUDED_TOOLS = frozenset(
-    {"load_integration_tools", "spawn_worker", "control_worker", "message_task_thread"}
-)
-
-
-async def save_tool_context(thread_id: str, config: RunnableConfig) -> None:
-    cfg = RunConfig.from_config(config)
-    values = {
-        name: _json.validate_python(value)
-        for name, value in cfg.dump().items()
-        if name in RunConfig.model_fields and name not in {"run_id", "invocation_id"}
-    }
-    await save_context(thread_id, ToolContext(configurable=values))
+# Every surface lists the integration tools themselves, so none offers their loader.
+EXCLUDED_TOOLS = frozenset({"load_integration_tools"})
+# Task workers share the sandbox's tool channel with their coordinator, so task
+# coordination stays the model's: a surface serving the sandbox never offers it.
+MODEL_ONLY_TOOLS = frozenset({"spawn_worker", "control_worker", "message_task_thread"})
 
 
 def tool_parameters(tool: BaseTool) -> dict[str, JsonValue]:
@@ -48,6 +39,60 @@ def tool_parameters(tool: BaseTool) -> dict[str, JsonValue]:
     if issubclass(schema, BaseModel):
         return schema.model_json_schema()
     return schema.schema()
+
+
+def describe_tool(name: str, tool: BaseTool) -> ToolDescription:
+    provenance = (tool.metadata or {}).get("mcp_provenance")
+    if not isinstance(provenance, MCPToolProvenance):
+        return ToolDescription(
+            name=name, description=tool.description, parameters=tool_parameters(tool)
+        )
+    return ToolDescription(
+        name=name,
+        description=tool.description
+        + "\n\n"
+        + prompt("tools/mcp-provenance", provenance=provenance.model_dump_json()),
+        parameters=tool_parameters(tool),
+        mcp_provenance=provenance,
+    )
+
+
+_WORD = re.compile(r"[A-Z]+(?![a-z])|[A-Z]?[a-z]+|[0-9]+")
+
+
+def _tokens(text: str) -> list[str]:
+    return [word.casefold() for word in _WORD.findall(text)]
+
+
+def _tool_tokens(name: str, tool: BaseTool) -> list[str]:
+    properties = tool_parameters(tool).get("properties")
+    parameters = " ".join(properties) if isinstance(properties, dict) else ""
+    # A match on the name says more than one buried in a long description.
+    return [*_tokens(name) * 3, *_tokens(tool.description), *_tokens(parameters)]
+
+
+def bm25(
+    query: Sequence[str], documents: Sequence[Sequence[str]], k1: float = 1.2, b: float = 0.75
+) -> list[float]:
+    """Okapi BM25 score of each document for ``query``."""
+    if not documents:
+        return []
+    average = sum(map(len, documents)) / len(documents) or 1
+    counts = [Counter(document) for document in documents]
+    scores = [0.0] * len(documents)
+    for term in set(query):
+        having = sum(1 for count in counts if term in count)
+        if not having:
+            continue
+        idf = math.log(1 + (len(documents) - having + 0.5) / (having + 0.5))
+        for index, count in enumerate(counts):
+            frequency = count[term]
+            if frequency:
+                length = len(documents[index]) / average
+                scores[index] += (
+                    idf * frequency * (k1 + 1) / (frequency + k1 * (1 - b + b * length))
+                )
+    return scores
 
 
 # The file and shell tools deepagents' FilesystemMiddleware gives every deep agent.
@@ -103,6 +148,8 @@ class ToolSurface:
     subagents: Sequence[SurfaceSubagent] = ()
     # Whether the graph's core tools it seldom needs belong in a runtime's code mode.
     code_mode: bool = False
+    # Whether a model loop running elsewhere calls these tools, rather than the sandbox.
+    for_model: bool = False
 
     async def prepare(self, state: Mapping[str, object]) -> None:
         if self.graph is None:
@@ -115,44 +162,23 @@ class ToolSurface:
             integrations = await self.dynamic.catalog_tools()
             self.integration_names = [tool.name for tool in integrations]
             tools.update({tool.name: tool for tool in integrations})
-        excluded = self.excluded | EXCLUDED_TOOLS
+        excluded = (
+            self.excluded | EXCLUDED_TOOLS | (frozenset() if self.for_model else MODEL_ONLY_TOOLS)
+        )
         self.tools = {name: tool for name, tool in tools.items() if name not in excluded}
 
-    def catalog(self, query: str = "") -> list[ToolDescription]:
-        terms = query.casefold().split()
-        results: list[ToolDescription] = []
-        for name, tool in sorted(self.tools.items()):
-            if not all(term in f"{name} {tool.description}".casefold() for term in terms):
-                continue
-            parameters = tool_parameters(tool)
-            provenance = (tool.metadata or {}).get("mcp_provenance")
-            description = tool.description
-            if isinstance(provenance, MCPToolProvenance):
-                description += "\n\n" + prompt(
-                    "tools/mcp-provenance", provenance=provenance.model_dump_json()
-                )
-            results.append(
-                ToolDescription(
-                    name=name,
-                    description=description,
-                    parameters=parameters,
-                    mcp_provenance=provenance
-                    if isinstance(provenance, MCPToolProvenance)
-                    else None,
-                )
-            )
-        return results
+    def catalog(self) -> list[ToolDescription]:
+        return [describe_tool(name, tool) for name, tool in sorted(self.tools.items())]
 
-    async def invoke(
-        self,
-        thread_id: str,
-        config: RunnableConfig,
-        state: dict[str, object],
-        name: str,
-        arguments: dict[str, JsonValue],
-    ) -> dict[str, JsonValue]:
-        result = await self.run(config, state, name, arguments)
-        return {"status": result.message.status, "content": result.content}
+    def search(self, query: str, limit: int) -> list[ToolDescription]:
+        """The tools whose name, description and parameters best match ``query``, by BM25."""
+        names = sorted(self.tools)
+        scores = bm25(_tokens(query), [_tool_tokens(name, self.tools[name]) for name in names])
+        ranked = sorted(
+            (item for item in zip(names, scores, strict=True) if item[1] > 0),
+            key=lambda item: -item[1],
+        )
+        return [describe_tool(name, self.tools[name]) for name, _ in ranked[:limit]]
 
     async def run(
         self,
@@ -289,27 +315,3 @@ async def invoke_tool_node(
     """Run one tool call through ``node`` and return its status and content."""
     result = await run_tool_node(node, state_schema, state, config, name, arguments)
     return {"status": result.message.status, "content": result.content}
-
-
-async def load_tool_surface(
-    thread_id: str,
-) -> tuple[ToolSurface, RunnableConfig, dict[str, object]]:
-    from openswe.server import build_agent
-
-    context = await load_context(thread_id)
-    if context is None:
-        raise HTTPException(409, "Thread tools have not been initialized")
-    snapshot = await get_client().threads.get_state(thread_id)
-    values = snapshot.get("values")
-    state: dict[str, object] = dict(values) if isinstance(values, dict) else {}
-    config: RunnableConfig = {
-        "configurable": {
-            **context.configurable,
-            "thread_id": thread_id,
-            "__is_for_execution__": True,
-        },
-    }
-    surface = ToolSurface()
-    await build_agent(config, tool_surface=surface)
-    await surface.prepare(state)
-    return surface, config, state

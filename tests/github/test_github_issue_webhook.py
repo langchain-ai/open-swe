@@ -17,6 +17,8 @@ from openswe.users import User
 from openswe.webhooks import common as webhook_common
 from tests.conftest import post_signed_github_webhook, register_github_logins
 
+pytestmark = pytest.mark.usefixtures("no_local_threads")
+
 request_pr_review_module = importlib.import_module("openswe.slack.tools.request_pr_review")
 
 _TEST_WEBHOOK_SECRET = "test-secret-for-webhook"

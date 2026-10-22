@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef } from "react"
+import { useEffect, useEffectEvent, useMemo, useRef } from "react"
 
 import type { PlanComment, PlanTextAnchor } from "@/lib/plan"
 import { SandboxedHtmlFrame } from "@/features/agents/components/SandboxedHtmlFrame"
@@ -186,8 +186,7 @@ function frameScript(channel: string): string {
 
     document.addEventListener("mouseup", () => {
       setTimeout(() => {
-        const anchor = selectedAnchor();
-        if (anchor) post({ type: "text-selected", anchor });
+        post({ type: "text-selected", anchor: selectedAnchor() });
       });
     });
 
@@ -277,7 +276,7 @@ export function PlanArtifactFrame({
 }: {
   html: string
   comments?: Array<PlanComment>
-  onTextSelected?: (anchor: PlanTextAnchor) => void
+  onTextSelected?: (anchor: PlanTextAnchor | null) => void
   onCommentSelected?: (id: string) => void
   focusCommentId?: string | null
   focusCommentKey?: number
@@ -312,24 +311,29 @@ export function PlanArtifactFrame({
     commentsRef.current = anchoredComments
   }, [anchoredComments])
 
+  const receive = useEffectEvent((event: MessageEvent) => {
+    if (event.data?.type === "ready")
+      portRef.current?.postMessage({
+        type: "set-comments",
+        comments: commentsRef.current,
+      })
+    if (
+      event.data?.type === "text-selected" &&
+      (event.data.anchor === null || isAnchor(event.data.anchor))
+    )
+      onTextSelected?.(event.data.anchor)
+    if (
+      event.data?.type === "comment-selected" &&
+      typeof event.data.id === "string"
+    )
+      onCommentSelected?.(event.data.id)
+  })
+
   const connect = () => {
     portRef.current?.close()
     const messageChannel = new MessageChannel()
     portRef.current = messageChannel.port1
-    messageChannel.port1.onmessage = (event: MessageEvent) => {
-      if (event.data?.type === "ready")
-        portRef.current?.postMessage({
-          type: "set-comments",
-          comments: commentsRef.current,
-        })
-      if (event.data?.type === "text-selected" && isAnchor(event.data.anchor))
-        onTextSelected?.(event.data.anchor)
-      if (
-        event.data?.type === "comment-selected" &&
-        typeof event.data.id === "string"
-      )
-        onCommentSelected?.(event.data.id)
-    }
+    messageChannel.port1.onmessage = receive
     messageChannel.port1.start()
     frameRef.current?.contentWindow?.postMessage(
       { type: "connect-annotations", channel },

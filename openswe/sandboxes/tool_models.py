@@ -2,7 +2,7 @@
 
 from typing import Literal
 
-from pydantic import BaseModel, Field, JsonValue, RootModel
+from pydantic import BaseModel, Field, JsonValue
 
 from openswe.mcp.models import MCPToolProvenance
 
@@ -14,10 +14,6 @@ class ToolDescription(BaseModel):
     mcp_provenance: MCPToolProvenance | None = Field(
         default=None, exclude_if=lambda value: value is None
     )
-
-
-class ToolArguments(RootModel[dict[str, JsonValue]]):
-    pass
 
 
 class ToolResult(BaseModel):

@@ -81,7 +81,7 @@ vi.mock("@/features/agents/components/PlanArtifactFrame", () => ({
   }: {
     html: string
     className?: string
-    onTextSelected?: (anchor: PlanTextAnchor) => void
+    onTextSelected?: (anchor: PlanTextAnchor | null) => void
   }) => (
     <div data-testid="plan-artifact-frame" className={className}>
       {html}
@@ -101,6 +101,9 @@ vi.mock("@/features/agents/components/PlanArtifactFrame", () => ({
         }
       >
         Select text
+      </button>
+      <button type="button" onClick={() => onTextSelected?.(null)}>
+        Clear selection
       </button>
     </div>
   ),
@@ -176,6 +179,8 @@ describe("PlanReview", () => {
     const selections = screen.getByRole("list", {
       name: "Selections attached to your next message",
     })
+    expect(selections.textContent).toContain("Artifact")
+    fireEvent.click(screen.getByRole("button", { name: "Clear selection" }))
     expect(selections.textContent).toContain("Artifact")
     const modelInput = screen.getByTestId("model-input").textContent ?? ""
     expect(modelInput).toContain(

@@ -64,7 +64,8 @@ export function PlanReview({ plan }: { plan: PlanData }) {
     () => ({ excerpts, removeExcerpt, clearExcerpts }),
     [excerpts, removeExcerpt, clearExcerpts]
   )
-  const attachSelection = useCallback((anchor: PlanTextAnchor) => {
+  const attachSelection = useCallback((anchor: PlanTextAnchor | null) => {
+    if (!anchor) return
     const before = (anchor.context_before ?? anchor.prefix)
       .split("\n")
       .filter((line) => line.trim())

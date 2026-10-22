@@ -39,8 +39,9 @@ async def test_instance_flags_keep_unrelated_settings_and_reset() -> None:
 
 
 @pytest.mark.usefixtures("registry_db")
-async def test_workspace_flags_inherit_and_keep_other_overrides() -> None:
-    await WORKSPACE_SETTINGS.put("team", {"org_guidelines": "Keep me", "pr_summaries": False})
+@pytest.mark.parametrize("flag", ["pr_summaries", "human_review_auto_merge_enabled"])
+async def test_workspace_flags_inherit_and_keep_other_overrides(flag: str) -> None:
+    await WORKSPACE_SETTINGS.put("team", {"org_guidelines": "Keep me", flag: False})
     with (
         patch.object(
             WORKSPACES,
@@ -48,14 +49,15 @@ async def test_workspace_flags_inherit_and_keep_other_overrides() -> None:
             AsyncMock(return_value=Workspace(name="team", slug="team", prompt="")),
         ),
     ):
-        assert (await manage_feature_flags("read", workspace="team"))["overrides"] == {
-            "pr_summaries": False
-        }
-        await manage_feature_flags("set", {"pr_summaries": True}, workspace="team")
-        assert (await get_workspace_settings("team"))["pr_summaries"] is True
-        result = await manage_feature_flags("set", {"pr_summaries": None}, workspace="team")
+        assert (await manage_feature_flags("read", workspace="team"))["overrides"] == {flag: False}
+        await manage_feature_flags("set", {flag: True}, workspace="team")
+        assert (await get_workspace_settings("team"))[flag] is True
+        await manage_feature_flags("set", {flag: False})
+        result = await manage_feature_flags("set", {flag: None}, workspace="team")
         assert result["overrides"] == {}
-        assert (await get_workspace_settings("team"))["pr_summaries"] is True
+        assert (await get_workspace_settings("team"))[flag] is False
+        await manage_feature_flags("set", {flag: None})
+        assert (await get_workspace_settings("team"))[flag] is True
         assert (await WORKSPACE_SETTINGS.get("team") or {})["org_guidelines"] == "Keep me"
 
 

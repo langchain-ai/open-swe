@@ -14,6 +14,7 @@ import warnings
 from collections.abc import Awaitable, Callable, Mapping, Sequence
 from pathlib import Path
 from typing import Any, cast
+from uuid import UUID
 
 from openswe.config import ENV
 
@@ -40,6 +41,7 @@ from deepagents.backends.filesystem import FilesystemBackend
 from deepagents.backends.protocol import BackendProtocol, SandboxBackendProtocol
 from deepagents.backends.store import StoreBackend
 from deepagents.middleware.filesystem import FilesystemMiddleware
+from deepagents.middleware.skills import SkillsMiddleware
 from deepagents.middleware.subagents import GENERAL_PURPOSE_SUBAGENT, SubAgent
 from langchain.agents.middleware import ModelCallLimitMiddleware, ToolRetryMiddleware
 from langchain.agents.middleware.types import AgentMiddleware, ToolCallRequest
@@ -47,7 +49,7 @@ from langchain_anthropic.middleware import AnthropicPromptCachingMiddleware
 from langchain_core.language_models import BaseChatModel
 from langchain_core.messages import HumanMessage, ToolMessage
 from langchain_core.tools import BaseTool
-from langchain_quickjs._ptc import is_valid_ptc_tool_name
+from langchain_quickjs._ptc import is_valid_ptc_tool_name, to_camel_case
 from langgraph.types import Command
 from langsmith.sandbox import SandboxRetryableConnectionError
 
@@ -172,21 +174,18 @@ from openswe.sandboxes.state import (
     SandboxUnreachableError,
     get_or_create_sandbox_backend_proxy,
 )
-from openswe.sandboxes.tool_access import tools_base_url, tools_endpoint_configured
 from openswe.sandboxes.tool_runtime import (
     FILESYSTEM_TOOL_NAMES,
     ModelChoice,
     SurfaceModels,
     SurfaceSubagent,
     ToolSurface,
-    save_tool_context,
 )
 from openswe.search_policy import SHELL_SEARCH_EXCLUDED_TOOLS
 from openswe.skill_store.backend import skills_backend
 from openswe.slack.dm import is_concierge_thread, is_dm_channel
 from openswe.thread_title import TITLE_GENERATION_MAX_TOKENS, schedule_thread_title_generation
 from openswe.threads.blobs import ThreadBlobs, blob_namespace
-from openswe.threads.oswe_thread import PREFER_TOOLS_IN_SANDBOX_KEY, OsweThread
 from openswe.threads.recent_context import RecentContextAudience, recent_thread_context_section
 from openswe.threads.summary import DASHBOARD_SOURCE
 from openswe.tools import (
@@ -273,7 +272,7 @@ from openswe.tools.manage_review_repos import manage_review_repos
 from openswe.tools.propose_pr_review import propose_pr_review
 from openswe.tools.propose_review_comment import propose_review_comment
 from openswe.tools.review_walkthrough import walkthrough_tools
-from openswe.tools.sandbox_preference import CURL_REPLACED_TOOLS, SANDBOX_ONLY_TOOLS
+from openswe.tools.search_tools import SEARCH_TOOLS_NAME, search_tools_tool
 from openswe.tools.submit_review_assessment_feedback import submit_review_assessment_feedback
 from openswe.tools.task_threads import (
     control_worker,
@@ -410,7 +409,18 @@ async def _resolve_prompt_default_repo(cfg: RunConfig) -> dict[str, str] | None:
         return None
 
     try:
-        return (await get_workspace_settings(workspace_slug(cfg))).default_repo
+        email = cfg.user_email or (
+            cfg.slack_thread.triggering_user_email if cfg.slack_thread else None
+        )
+        user = (
+            await User.for_login("github", cfg.github_login)
+            if cfg.github_login
+            else await User.for_email(email)
+            if email
+            else None
+        )
+        personal = await user.default_repo(workspace_slug(cfg)) if user else None
+        return personal or (await get_workspace_settings(workspace_slug(cfg))).default_repo
     except Exception:
         logger.debug("Failed to load the workspace default repo for prompt", exc_info=True)
         return None
@@ -442,14 +452,18 @@ async def _thread_participant_identities(thread_id: str) -> list[CollaboratorIde
         return []
 
 
-async def _user_for_login(login: str) -> User | None:
-    """The ``users`` row behind a GitHub login, or ``None`` when nothing answers."""
+async def _participant_user(login: str, person_id: str | None) -> User | None:
+    """Resolve a participant by their canonical id before falling back to a surface login."""
     try:
-        return await User.for_login("github", login)
+        if person_id and person_id.startswith("user:"):
+            user = await User.get(UUID(person_id.removeprefix("user:")))
+            if user is not None:
+                return user
+        return await User.for_login("github", login) if login else None
     except Exception:
         logger.warning(
             "Could not resolve a participant; describing them from surface data",
-            extra={"participant_login": login},
+            extra={"participant_login": login, "person_id": person_id},
             exc_info=True,
         )
         return None
@@ -463,16 +477,18 @@ async def _thread_participant(
     timezone: str = "",
     slack_user_id: str = "",
 ) -> ThreadParticipant:
-    login = identity.github_login or None
-    if login is None:
+    user = await _participant_user(identity.github_login, person_id)
+    login = (user.github_login if user else "") or identity.github_login
+    if not login:
         return ThreadParticipant(
             identity=identity,
             person_id=person_id or "",
             timezone=timezone,
-            slack_user_id=slack_user_id,
+            linked=user is not None,
+            slack_user_id=slack_user_id or (user.slack_user_id if user else ""),
         )
-    user, profile, workspace_admin, instructions = await asyncio.gather(
-        _user_for_login(login),
+    identity = replace(identity, github_login=login)
+    profile, workspace_admin, instructions = await asyncio.gather(
         load_profile(login),
         participant_is_admin(login),
         _resolve_user_custom_instructions(login),
@@ -662,16 +678,13 @@ def _is_subagent_excluded_tool(name: str) -> bool:
 
 
 class _SubagentToolGuard(AgentMiddleware):
-    def __init__(self, sandbox_only_tools: frozenset[str] = frozenset()) -> None:
-        self._sandbox_only_tools = sandbox_only_tools
-
     async def awrap_tool_call(
         self,
         request: ToolCallRequest,
         handler: Callable[[ToolCallRequest], Awaitable[ToolMessage | Command]],
     ) -> ToolMessage | Command:
         name = request.tool_call["name"]
-        if name in self._sandbox_only_tools or _is_subagent_excluded_tool(name):
+        if _is_subagent_excluded_tool(name):
             return ToolMessage(
                 content=prompt("tools/subagent-unavailable"),
                 tool_call_id=request.tool_call["id"],
@@ -705,11 +718,10 @@ def _general_purpose_subagent(
     dynamic_tools: DynamicToolMiddleware | None = None,
     *,
     offloading: ConversationOffloadingMiddleware | None = None,
-    workspace_skills: WorkspaceSkillsMiddleware | None = None,
+    skills_middleware: SkillsMiddleware | None = None,
     incident_middleware: AgentMiddleware | None = None,
     guard_middleware: Sequence[AgentMiddleware[Any, Any, Any]] = (),
     inherited_middleware_exclusions: Sequence[str] = (),
-    sandbox_only_tools: frozenset[str] = frozenset(),
 ) -> SubAgent:
     subagent: SubAgent = {
         "name": GENERAL_PURPOSE_SUBAGENT["name"],
@@ -722,12 +734,12 @@ def _general_purpose_subagent(
             [
                 _DisableInheritedMiddleware(RequireUserReplyMiddleware.__name__),
                 *(_DisableInheritedMiddleware(name) for name in inherited_middleware_exclusions),
-                _SubagentToolGuard(sandbox_only_tools),
+                _SubagentToolGuard(),
                 AnthropicPromptCachingMiddleware(ttl="1h", unsupported_model_behavior="ignore"),
                 TranscriptMiddleware(),
                 ExcludeToolsMiddleware(excluded=SHELL_SEARCH_EXCLUDED_TOOLS),
                 *([incident_middleware] if incident_middleware else []),
-                *([workspace_skills] if workspace_skills else []),
+                *([skills_middleware] if skills_middleware else []),
                 *_subagent_middleware(dynamic_tools),
                 *guard_middleware,
                 *([offloading] if offloading else []),
@@ -835,6 +847,7 @@ _NOT_FROM_CODE = (
 )
 # Everyday tools code mode still offers the model directly.
 _DIRECT_IN_CODE_MODE = SANDBOX_TOOL_NAMES | {
+    SEARCH_TOOLS_NAME,
     "monitor",
     "open_pull_request",
     "web_search",
@@ -852,22 +865,20 @@ def direct_and_from_code(name: str) -> bool:
     return callable_from_code(name) and name in _DIRECT_IN_CODE_MODE
 
 
+def code_name(name: str) -> str | None:
+    """The name code mode calls a tool by, as ``tools.<name>``, if it can."""
+    return to_camel_case(name) if callable_from_code(name) else None
+
+
 def code_only(name: str) -> bool:
     """Whether code mode offers a tool only from code, keeping its schema off the model's list."""
     return callable_from_code(name) and name not in _DIRECT_IN_CODE_MODE
 
 
 def _integration_middleware(
-    mcp_tools: Sequence[BaseTool],
-    reserved_names: set[str],
-    *,
-    model_visible: bool = True,
+    mcp_tools: Sequence[BaseTool], reserved_names: set[str]
 ) -> DynamicToolMiddleware | None:
-    candidate = DynamicToolMiddleware(
-        {"MCPs": mcp_tools},
-        reserved_names=reserved_names,
-        model_visible=model_visible,
-    )
+    candidate = DynamicToolMiddleware({"MCPs": mcp_tools}, reserved_names=reserved_names)
     return candidate if candidate.has_groups else None
 
 
@@ -969,7 +980,6 @@ class PrepareAgentRunMiddleware(BasePrepareRunMiddleware):
         linear_project_id: str,
         linear_issue_number: str,
         draft_prs: bool,
-        recent_thread_context_enabled: bool,
         admin_workspaces: bool,
         sole_writer: bool = False,
         model_selection: ModelSelectionMiddleware | None = None,
@@ -978,11 +988,9 @@ class PrepareAgentRunMiddleware(BasePrepareRunMiddleware):
         requested_models: Mapping[str, ModelOption] | None = None,
         saved_requested_model: str | None = None,
         bridge_client: BridgeClient | None = None,
-        prefer_tools_in_sandbox: bool = False,
     ) -> None:
         self._bridge_client = bridge_client
         self._saved_requested_model = saved_requested_model
-        self._prefer_tools_in_sandbox = prefer_tools_in_sandbox
         self._requested_models = requested_models
         self._thread_id = thread_id
         self._config = config
@@ -997,7 +1005,6 @@ class PrepareAgentRunMiddleware(BasePrepareRunMiddleware):
         self._linear_project_id = linear_project_id
         self._linear_issue_number = linear_issue_number
         self._draft_prs = draft_prs
-        self._recent_thread_context_enabled = recent_thread_context_enabled
         self._admin_workspaces = admin_workspaces
         self._sole_writer = sole_writer
         self._model_selection = model_selection
@@ -1005,8 +1012,7 @@ class PrepareAgentRunMiddleware(BasePrepareRunMiddleware):
 
     def _recent_context_audience(self, cfg: RunConfig) -> RecentContextAudience | None:
         if (
-            not self._recent_thread_context_enabled
-            or cfg.background_task_completion
+            cfg.background_task_completion
             or not self._profile_login
             or (cfg.slack_thread is not None and cfg.slack_thread.triggering_bot_id)
         ):
@@ -1038,7 +1044,6 @@ class PrepareAgentRunMiddleware(BasePrepareRunMiddleware):
             "source": self._source,
             "repo": cfg.repo.model_dump() if cfg.repo else None,
             "draft_prs": self._draft_prs,
-            "recent_thread_context_enabled": self._recent_thread_context_enabled,
             "model": self._model_id,
             "effort": self._effort,
         }
@@ -1425,7 +1430,6 @@ class PrepareAgentRunMiddleware(BasePrepareRunMiddleware):
                 )
                 is True,
                 sandbox_file_downloads=_sandbox_file_downloads_enabled(cfg, bridged=bridged),
-                prefer_tools_in_sandbox=self._prefer_tools_in_sandbox,
                 continued_from_collaborative=bool(cfg.continued_from_thread_id),
                 local_checkout=bridged,
                 local_checkout_client=self._bridge_client or "cli",
@@ -1515,13 +1519,6 @@ async def build_agent(config: RunnableConfig, *, tool_surface: ToolSurface | Non
     async with aphase(thread_id, "factory.thread_settings"):
         thread_settings, settings_changed = normalize_thread_settings(
             await load_thread_settings(client, thread_id)
-        )
-        # Bridged threads and deployments without a tools endpoint have no way to
-        # reach sandbox-only tools, so they keep every tool direct.
-        prefer_tools_in_sandbox = (
-            bridge_client is None
-            and tools_endpoint_configured()
-            and await OsweThread.prefers_tools_in_sandbox(client, thread_id)
         )
     # Workspace/profile settings are accepted stale for a short TTL so graph factories
     # stay off the critical path during worker load and retry storms.
@@ -1664,7 +1661,6 @@ async def build_agent(config: RunnableConfig, *, tool_surface: ToolSurface | Non
         **(config.get("metadata") or {}),
         "model_routing_applied": adaptive_model_routing,
         **({"model_routing_mode": model_routing_mode} if model_routing_mode else {}),
-        PREFER_TOOLS_IN_SANDBOX_KEY: prefer_tools_in_sandbox,
     }
     model_id, profile_effort = gate_fable_model(
         model_id, profile_effort, fable_enabled=fable_enabled
@@ -1855,13 +1851,11 @@ async def build_agent(config: RunnableConfig, *, tool_surface: ToolSurface | Non
         ]
     if guide is not None:
         static_tools = [*static_tools, *walkthrough_tools(guide.mode)]
+    if tool_surface is not None:
+        static_tools = [*static_tools, search_tools_tool(tool_surface, code_name)]
     static_tools = apply_tool_descriptions(static_tools, _tool_description_values())
     if stop_summary_mode:
         static_tools = apply_tool_descriptions([slack_read_thread_messages, slack_reply])
-    if prefer_tools_in_sandbox:
-        static_tools = [
-            tool for tool in static_tools if _registered_tool_name(tool) not in CURL_REPLACED_TOOLS
-        ]
     reserved_tool_names = {_registered_tool_name(tool) for tool in static_tools}
     excluded_tools = (
         STOP_SUMMARY_EXCLUDED_TOOLS
@@ -1872,12 +1866,6 @@ async def build_agent(config: RunnableConfig, *, tool_surface: ToolSurface | Non
         if incident_automatic
         else DEEP_AGENT_EXCLUDED_TOOLS
     )
-    sandbox_only_tools = (
-        frozenset(SANDBOX_ONLY_TOOLS)
-        if prefer_tools_in_sandbox and not stop_summary_mode
-        else frozenset()
-    )
-    excluded_tools |= sandbox_only_tools
     # A client's tool replaces any server tool of the same name, so the endpoint's
     # view of which calls the client runs matches the graph's.
     client_tool_names = frozenset(spec.name for spec in cfg.client_tools)
@@ -1893,7 +1881,6 @@ async def build_agent(config: RunnableConfig, *, tool_surface: ToolSurface | Non
     dynamic_tool_middleware = _integration_middleware(
         mcp_tools,
         {*DEEP_AGENT_TOOL_NAMES, *reserved_tool_names},
-        model_visible=not prefer_tools_in_sandbox,
     )
 
     logger.info("Returning agent with sandbox for thread %s", thread_id)
@@ -2016,10 +2003,10 @@ async def build_agent(config: RunnableConfig, *, tool_surface: ToolSurface | Non
         use_gateway=use_gateway,
         **title_model_kwargs,
     )
-    workspace_skills = (
+    skills_middleware = (
         WorkspaceSkillsMiddleware(backend=agent_backend, sources=skill_sources)
         if credential_login is None
-        else None
+        else SkillsMiddleware(backend=agent_backend, sources=skill_sources)
     )
     run_preparation = PrepareAgentRunMiddleware(
         credential_login=credential_login,
@@ -2035,9 +2022,6 @@ async def build_agent(config: RunnableConfig, *, tool_surface: ToolSurface | Non
         linear_project_id=linear_project_id,
         linear_issue_number=linear_issue_number,
         draft_prs=sender_draft_prs,
-        recent_thread_context_enabled=(
-            sender_profile.get("recent_thread_context_enabled") is True if sender_profile else False
-        ),
         admin_workspaces=admin_thread,
         sole_writer=tool_access.sole,
         model_selection=model_selection,
@@ -2045,13 +2029,11 @@ async def build_agent(config: RunnableConfig, *, tool_surface: ToolSurface | Non
         requested_models=requested_models,
         saved_requested_model=thread_settings.get("requested_model"),
         bridge_client=bridge_client,
-        prefer_tools_in_sandbox=prefer_tools_in_sandbox,
     )
     subagent_tools = [
         tool
         for tool in static_tools
         if _registered_tool_name(tool) != _registered_tool_name(save_user_settings)
-        and _registered_tool_name(tool) not in sandbox_only_tools
     ]
     middleware = cast(
         list[AgentMiddleware[Any, Any, Any]],
@@ -2070,7 +2052,7 @@ async def build_agent(config: RunnableConfig, *, tool_surface: ToolSurface | Non
             TranscriptMiddleware(),
             *([client_tools] if client_tools else []),
             *([IncidentMiddleware(incident_session)] if incident_session is not None else []),
-            *([workspace_skills] if workspace_skills else []),
+            skills_middleware,
             ValidateImageReadsMiddleware(),
             ModelCallLimitMiddleware(
                 run_limit=incident_session.policy.max_model_calls
@@ -2140,8 +2122,7 @@ async def build_agent(config: RunnableConfig, *, tool_surface: ToolSurface | Non
                 _general_purpose_subagent(
                     subagent_model,
                     tools=main_tools,
-                    sandbox_only_tools=sandbox_only_tools,
-                    workspace_skills=workspace_skills,
+                    skills_middleware=skills_middleware,
                     dynamic_tools=dynamic_tool_middleware,
                     offloading=ConversationOffloadingMiddleware(subagent_model, agent_backend),
                     incident_middleware=IncidentMiddleware(incident_session)
@@ -2208,8 +2189,6 @@ async def build_agent(config: RunnableConfig, *, tool_surface: ToolSurface | Non
             if incident_automatic
             else DEEP_AGENT_EXCLUDED_TOOLS
         )
-    elif tools_base_url() and ENV.DASHBOARD_JWT_SECRET.optional():
-        await save_tool_context(thread_id, config)
     return graph
 
 

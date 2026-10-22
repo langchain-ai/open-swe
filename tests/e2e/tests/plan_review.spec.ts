@@ -145,6 +145,7 @@ test.describe("HTML artifacts", () => {
       selection?.addRange(range);
       element.dispatchEvent(new MouseEvent("mouseup", { bubbles: true }));
     });
+    await verificationHeading.click();
     await expect(
       owner.getByRole("list", {
         name: "Selections attached to your next message",
