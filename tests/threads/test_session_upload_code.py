@@ -12,9 +12,18 @@ from openswe.threads import session_upload
 from openswe.threads.summary import assert_thread_postable
 
 _TRANSCRIPT = (
-    json.dumps({"type": "user", "uuid": "u1", "parentUuid": None, "message": {"content": "hi"}})
+    json.dumps(
+        {
+            "type": "user",
+            "uuid": "u1",
+            "parentUuid": None,
+            "sessionId": "session-1",
+            "message": {"content": "hi"},
+        }
+    )
     + "\n"
 ).encode()
+_USER_ID = "0190f2a4-6f4e-7c3b-9d2a-1b2c3d4e5f60"
 
 
 def _request() -> Request:
@@ -51,6 +60,11 @@ def reserved(monkeypatch: pytest.MonkeyPatch) -> dict[str, object]:
         session_upload, "langgraph_client", lambda: SimpleNamespace(threads=threads)
     )
     monkeypatch.setattr(session_upload, "mirror_thread_metadata", AsyncMock())
+
+    async def mirror_of(owner_id: object, session_id: str) -> str | None:
+        return "mirror-thread" if (str(owner_id), session_id) == (_USER_ID, "session-1") else None
+
+    monkeypatch.setattr(session_upload, "mirror_of", mirror_of)
     return metadata
 
 
@@ -60,7 +74,7 @@ async def _upload(code: str) -> dict[str, object] | None:
 
 
 def _code(login: str) -> str:
-    return issue_upload_ticket(login=login, email=None, user_id=None, thread_id="t1")
+    return issue_upload_ticket(login=login, email=None, user_id=_USER_ID, thread_id="t1")
 
 
 async def test_an_upload_code_fills_its_own_thread_once(reserved: dict[str, object]) -> None:
@@ -72,6 +86,9 @@ async def test_an_upload_code_fills_its_own_thread_once(reserved: dict[str, obje
     assert uploaded is not None
     assert uploaded["id"] == "t1"
     assert reserved["session_upload_pending"] is False
+    # Tied to the mirror of the same Claude Code session.
+    assert reserved["claude_code_session_id"] == "session-1"
+    assert reserved["claude_code_mirror_thread_id"] == "mirror-thread"
     assert_thread_postable(reserved, "alice")
     seeded = session_upload.langgraph_client().threads.update_state
     seeds = seeded.await_count

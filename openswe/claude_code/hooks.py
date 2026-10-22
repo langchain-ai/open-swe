@@ -74,6 +74,8 @@ from openswe.utils.time import now_ms
 logger = logging.getLogger(__name__)
 
 SESSION_ID_KEY = "claude_code_session_id"
+# On an uploaded session's thread: the thread that already mirrors the same session.
+MIRROR_THREAD_KEY = "claude_code_mirror_thread_id"
 CWD_KEY = "claude_code_cwd"
 _THREAD_NAMESPACE = uuid.UUID("5b0f3a52-7c1e-4d55-9a0e-c1a7de5c0de5")
 _PASTED_CONTENT = re.compile(r"<pasted_content\b[^>]*>.*?</pasted_content>", re.DOTALL)
@@ -260,13 +262,31 @@ def _tool_output(response: JsonValue) -> str | None:
     return json.dumps(response, indent=2)
 
 
+def mirror_thread_id(owner_id: UUID, session_id: str) -> str:
+    """The id of the thread mirroring this person's session, whether or not its hooks ever ran."""
+    return str(uuid.uuid5(_THREAD_NAMESPACE, f"{owner_id}:{session_id}"))
+
+
+async def mirror_of(owner_id: UUID, session_id: str) -> str | None:
+    """The thread mirroring this person's session, or ``None`` when it was never mirrored."""
+    if not postgres.configured():
+        return None
+    thread_id = mirror_thread_id(owner_id, session_id)
+    async with postgres.read_only_transaction() as conn:
+        result = await conn.execute(
+            text("SELECT thread_id FROM thread WHERE thread_id = :thread_id"),
+            {"thread_id": thread_id},
+        )
+        return result.scalar_one_or_none()
+
+
 class SessionMirror:
     """One person's Claude Code session, as the read-only thread that mirrors it."""
 
     def __init__(self, owner: User, session_id: str) -> None:
         self.owner = owner
         self.session_id = session_id
-        self.thread_id = str(uuid.uuid5(_THREAD_NAMESPACE, f"{owner.id}:{session_id}"))
+        self.thread_id = mirror_thread_id(owner.id, session_id)
         # Turns carry a run id; this one only ever names the session.
         self._run_id = f"claude-code:{session_id}"
 
