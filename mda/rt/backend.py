@@ -20,6 +20,7 @@ from pydantic import BaseModel, JsonValue, TypeAdapter, ValidationError
 
 from rt.models import ModelSpec, RunModels
 from rt.sandbox import SandboxSpec
+from rt.tracing import TurnTrace
 
 logger = logging.getLogger(__name__)
 
@@ -122,6 +123,7 @@ class Catalog(BaseModel):
     tools: list[ToolSpec] = []
     subagents: list[SubagentSpec] = []
     models: RunModels | None = None
+    trace_metadata: dict[str, JsonValue] = {}
     # Tools the graph keeps from the model, including MDA's own of the same name.
     excluded: list[str] = []
     # Tools the model calls from code mode rather than directly.
@@ -145,6 +147,7 @@ class PhaseReply(BaseModel):
     model: ModelSpec | None = None
     fallback: ModelSpec | None = None
     use_gateway: bool = False
+    trace_metadata: dict[str, JsonValue] = {}
 
 
 class ToolReply(BaseModel):
@@ -311,9 +314,13 @@ class OpenSweBackend:
     async def tool_started(self, body: Mapping[str, JsonValue]) -> None:
         await self.call("tool_started", body)
 
-    async def tool_result(self, body: Mapping[str, JsonValue], result: ToolMessage) -> None:
+    async def tool_result(
+        self, body: Mapping[str, JsonValue], result: ToolMessage
+    ) -> dict[str, JsonValue]:
         [message] = _json_list.validate_python(messages_to_dict([result]))
-        await self.call("tool_result", {**body, "result": message})
+        reply = await self.call("tool_result", {**body, "result": message})
+        update = reply.get("update")
+        return _json_object.validate_python(update) if isinstance(update, dict) else {}
 
 
 class ToolReports:
@@ -332,12 +339,16 @@ class ToolReports:
         self._send(self._backend.tool_started(body))
 
     def finished(self, body: Mapping[str, JsonValue], result: ToolMessage) -> None:
-        self._send(self._backend.tool_result(body, result))
+        self._send(self._finished(body, result))
 
     async def drain(self) -> None:
         """Wait for every report made so far, so the transcript has them before what follows."""
         if self._last is not None:
             await asyncio.shield(self._last)
+
+    async def _finished(self, body: Mapping[str, JsonValue], result: ToolMessage) -> None:
+        # What the call changed in the thread's checkouts, for the turn's git metadata.
+        TurnTrace.record_evidence(await self._backend.tool_result(body, result))
 
     def _send(self, report: Coroutine[object, object, None]) -> None:
         self._last = asyncio.ensure_future(self._after(self._last, report))

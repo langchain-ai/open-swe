@@ -27,6 +27,7 @@ from rt.backend import (
     ToolSpec,
     run_body,
 )
+from rt.tracing import TurnTrace
 
 logger = logging.getLogger(__name__)
 
@@ -45,18 +46,28 @@ def run_id() -> str | None:
     return str(raw) if raw else None
 
 
+def tool_body(
+    state: Mapping[str, object],
+    *,
+    name: str,
+    arguments: Mapping[str, JsonValue],
+    tool_call_id: str,
+) -> dict[str, JsonValue]:
+    """A tool call as the backend takes it, with the turn's git evidence, which its trace holds."""
+    body = run_body(
+        run_id(), state, name=name, arguments=dict(arguments), tool_call_id=tool_call_id
+    )
+    held = body.get("state")
+    body["state"] = {**(held if isinstance(held, dict) else {}), **TurnTrace.current_evidence()}
+    return body
+
+
 async def run_on_backend(
     backend: OpenSweBackend, name: str, arguments: Mapping[str, JsonValue], runtime: ToolRuntime
 ) -> Command:
     """Run one call of the graph's tool ``name`` on the backend, through its tools node."""
     tool_call_id = runtime.tool_call_id or ""
-    body = run_body(
-        run_id(),
-        runtime.state,
-        name=name,
-        arguments=dict(arguments),
-        tool_call_id=tool_call_id,
-    )
+    body = tool_body(runtime.state, name=name, arguments=arguments, tool_call_id=tool_call_id)
     try:
         reply = await backend.tool(body)
     except BackendTimeoutError:
@@ -78,6 +89,7 @@ async def run_on_backend(
         runtime.stream_writer(event)
     update: dict[str, object] = {"messages": messages_from_dict([reply.message, *reply.messages])}
     if reply.update:
+        TurnTrace.record_evidence(reply.update)
         update[STATE_KEY] = reply.update
     return Command(update=update)
 
