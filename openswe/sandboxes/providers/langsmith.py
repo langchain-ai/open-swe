@@ -28,7 +28,7 @@ from langsmith.sandbox import (
     SandboxOperationError,
     SandboxServerReloadError,
 )
-from pydantic import BaseModel
+from pydantic import BaseModel, JsonValue, TypeAdapter
 
 from openswe.config import ENV
 from openswe.sandboxes.paths import WORKSPACE_DIR
@@ -54,13 +54,12 @@ DEFAULT_SANDBOX_DELETE_AFTER_STOP_SECONDS = 30 * 24 * 60 * 60  # 30 days
 SANDBOX_CREATE_MAX_ATTEMPTS = 3
 SANDBOX_CREATE_RETRY_DELAYS_SECONDS = (1.0, 3.0)
 SANDBOX_CREATE_RETRYABLE_STATUS_CODES = frozenset({408, 409, 425, 429, 500, 502, 503, 504, 529})
-PROXY_CONFIG_MAX_ATTEMPTS = 3
 PROXY_CONFIG_TIMEOUT_SECONDS = 10.0
-PROXY_CONFIG_RETRY_DELAYS_SECONDS = (0.5, 1.0)
+# The API cannot push a proxy config while the host suspends an idle box, which
+# takes up to about three minutes; outlast that rather than fail the run.
+PROXY_CONFIG_RETRY_WINDOW_SECONDS = 180.0
 PROXY_CONFIG_RETRYABLE_STATUS_CODES = frozenset({408, 409, 425, 429, 500, 502, 503, 504, 529})
-PROXY_CONFIG_NOT_READY_STATUS = 400
 PROXY_CONFIG_ERROR_BODY_CHARS = 500
-SANDBOX_START_TIMEOUT_SECONDS = 120
 PROXY_GH_TOKEN_PLACEHOLDER = "proxy-injected"
 SERVICE_URL_TIMEOUT_SECONDS = 15.0
 _KILL_TIMEOUT_SECONDS = 5.0
@@ -178,6 +177,58 @@ def get_sandbox_proxy_config(
     return dict(proxy_config) if isinstance(proxy_config, dict) else None
 
 
+_json_object = TypeAdapter(dict[str, JsonValue])
+
+
+class LangSmithCreateOptions(BaseModel):
+    """What a new sandbox is created with, the deployment's defaults filled in."""
+
+    snapshot_id: str | None = None
+    fs_capacity_bytes: int
+    vcpus: int | None = None
+    mem_bytes: int | None = None
+    idle_ttl_seconds: int
+    delete_after_stop_seconds: int
+    # Create-request fields the SDK does not model, such as ``preserve_memory_on_stop``.
+    extra_fields: dict[str, JsonValue] = {}
+
+    @classmethod
+    def resolve(
+        cls,
+        *,
+        snapshot_id: str | None = None,
+        mem_bytes: int | None = None,
+        vcpus: int | None = None,
+        fs_capacity_bytes: int | None = None,
+        create_params: dict[str, Any] | None = None,
+    ) -> LangSmithCreateOptions:
+        (
+            default_fs_capacity_bytes,
+            default_vcpus,
+            default_mem_bytes,
+            idle_ttl_seconds,
+            delete_after_stop_seconds,
+        ) = _get_sandbox_snapshot_config()
+        if mem_bytes is None and vcpus is None:
+            mem_bytes, vcpus = default_mem_bytes, default_vcpus
+        extra_fields = _merge_sandbox_create_extra_fields(create_params)
+        # The API boots its default root snapshot only when the key is absent:
+        # `snapshot_id` is a UUID server-side, so "" is rejected with a 422.
+        if not extra_fields.get("snapshot_id"):
+            extra_fields.pop("snapshot_id", None)
+        return cls(
+            snapshot_id=snapshot_id or None,
+            fs_capacity_bytes=(
+                fs_capacity_bytes if fs_capacity_bytes is not None else default_fs_capacity_bytes
+            ),
+            vcpus=vcpus,
+            mem_bytes=mem_bytes,
+            idle_ttl_seconds=idle_ttl_seconds,
+            delete_after_stop_seconds=delete_after_stop_seconds,
+            extra_fields=_json_object.validate_python(extra_fields),
+        )
+
+
 def _install_create_extra_fields(client: AsyncSandboxClient, extra: dict[str, Any]) -> None:
     """Merge extra fields until the SDK exposes create-payload passthrough."""
     if not extra:
@@ -241,10 +292,10 @@ def _github_proxy_rules(github_token: str | None) -> list[GitHubProxyRule]:
     ]
 
 
-def _retry_after_seconds(response: httpx2.Response | None) -> float | None:
-    if response is None:
+def _proxy_config_retry_after(exc: BaseException) -> float | None:
+    if not isinstance(exc, httpx2.HTTPStatusError):
         return None
-    raw = response.headers.get("Retry-After")
+    raw = exc.response.headers.get("Retry-After")
     if not raw:
         return None
     try:
@@ -348,59 +399,23 @@ async def _patch_proxy_config(
     api_key: str,
     sandbox_name: str,
 ) -> None:
-    for attempt in range(PROXY_CONFIG_MAX_ATTEMPTS):
-        try:
-            response = await client.patch(
-                url,
-                json=payload,
-                headers={"X-API-Key": api_key},
-            )
-            response.raise_for_status()
-            return
-        except Exception as exc:
-            if attempt == PROXY_CONFIG_MAX_ATTEMPTS - 1 or not _is_retryable_proxy_config_error(
-                exc
-            ):
-                enriched = _with_response_body(exc)
-                if enriched is not None:
-                    raise enriched from exc
-                raise
-            retry_after = (
-                _retry_after_seconds(exc.response)
-                if isinstance(exc, httpx2.HTTPStatusError)
-                else None
-            )
-            delay = (
-                retry_after
-                or PROXY_CONFIG_RETRY_DELAYS_SECONDS[
-                    min(attempt, len(PROXY_CONFIG_RETRY_DELAYS_SECONDS) - 1)
-                ]
-            )
-            logger.warning(
-                "Failed to configure GitHub proxy for sandbox %s (%s); retrying in %.1fs",
-                sandbox_name,
-                type(exc).__name__,
-                delay,
-            )
-            await asyncio.sleep(delay)
+    async def patch() -> None:
+        response = await client.patch(url, json=payload, headers={"X-API-Key": api_key})
+        response.raise_for_status()
 
-
-async def _start_sandbox_best_effort(sandbox_name: str) -> None:
-    """Start ``sandbox_name`` so a proxy-config update can land on it.
-
-    The API rejects a proxy-config update on any sandbox that is not ``ready``,
-    and an idle sandbox is stopped rather than deleted — its filesystem, and the
-    agent's uncommitted work with it, comes back when the box starts again.
-    Failures are logged and swallowed: the retried update reports the real state.
-    """
-    client = get_async_sandbox_client()
     try:
-        await client.start_sandbox(sandbox_name, timeout=SANDBOX_START_TIMEOUT_SECONDS)
-        logger.info("Started sandbox %s before retrying GitHub proxy config", sandbox_name)
-    except Exception:
-        logger.warning("Failed to start sandbox %s", sandbox_name, exc_info=True)
-    finally:
-        await client.aclose()
+        await retry_transient_sandbox_errors(
+            patch,
+            description=f"GitHub proxy config for sandbox {sandbox_name}",
+            max_elapsed=PROXY_CONFIG_RETRY_WINDOW_SECONDS,
+            retryable=_is_retryable_proxy_config_error,
+            retry_after=_proxy_config_retry_after,
+        )
+    except httpx2.HTTPStatusError as exc:
+        enriched = _with_response_body(exc)
+        if enriched is not None:
+            raise enriched from exc
+        raise
 
 
 async def configure_sandbox_proxy(
@@ -444,18 +459,7 @@ async def configure_sandbox_proxy(
     async with httpx2.AsyncClient(
         transport=pooled_transport(), timeout=PROXY_CONFIG_TIMEOUT_SECONDS
     ) as client:
-        try:
-            await _patch_proxy_config(client, url, payload, api_key, sandbox_name)
-        except httpx2.HTTPStatusError as exc:
-            if exc.response.status_code != PROXY_CONFIG_NOT_READY_STATUS:
-                raise
-            logger.warning(
-                "Proxy config rejected for sandbox %s; starting it and retrying: %s",
-                sandbox_name,
-                exc,
-            )
-            await _start_sandbox_best_effort(sandbox_name)
-            await _patch_proxy_config(client, url, payload, api_key, sandbox_name)
+        await _patch_proxy_config(client, url, payload, api_key, sandbox_name)
     logger.info("Configured sandbox proxy", extra={"sandbox_id": sandbox_name})
 
 
@@ -581,34 +585,22 @@ async def create_langsmith_sandbox(
     Returns:
         SandboxBackendProtocol instance
     """
-    api_key = _get_langsmith_api_key()
-    (
-        default_fs_capacity_bytes,
-        default_vcpus,
-        default_mem_bytes,
-        idle_ttl_seconds,
-        delete_after_stop_seconds,
-    ) = _get_sandbox_snapshot_config()
-
-    effective_snapshot_id = snapshot_id or ""
-    if mem_bytes is None and vcpus is None:
-        effective_mem_bytes = default_mem_bytes
-        effective_vcpus = default_vcpus
-    else:
-        effective_mem_bytes = mem_bytes
-        effective_vcpus = vcpus
-
-    provider = LangSmithProvider(api_key=api_key)
+    options = LangSmithCreateOptions.resolve(
+        snapshot_id=snapshot_id,
+        mem_bytes=mem_bytes,
+        vcpus=vcpus,
+        fs_capacity_bytes=fs_capacity_bytes,
+        create_params=create_params,
+    )
+    provider = LangSmithProvider(api_key=_get_langsmith_api_key())
     backend = await provider.get_or_create(
         sandbox_id=sandbox_id,
-        snapshot_id=effective_snapshot_id,
-        fs_capacity_bytes=(
-            fs_capacity_bytes if fs_capacity_bytes is not None else default_fs_capacity_bytes
-        ),
-        vcpus=effective_vcpus,
-        mem_bytes=effective_mem_bytes,
-        idle_ttl_seconds=idle_ttl_seconds,
-        delete_after_stop_seconds=delete_after_stop_seconds,
+        snapshot_id=options.snapshot_id or "",
+        fs_capacity_bytes=options.fs_capacity_bytes,
+        vcpus=options.vcpus,
+        mem_bytes=options.mem_bytes,
+        idle_ttl_seconds=options.idle_ttl_seconds,
+        delete_after_stop_seconds=options.delete_after_stop_seconds,
         create_params=create_params,
     )
 

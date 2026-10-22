@@ -6,9 +6,11 @@ import time
 from fastapi import APIRouter
 
 from openswe.linear import webhook as service
+from openswe.thread_ids import linear_issue_thread_id
 from openswe.users import User
 from openswe.webhooks import common
 from openswe.webhooks.event_log import EventLog, EventRefs
+from openswe.workspaces.routing import resolve_workspace
 
 router = APIRouter()
 
@@ -135,6 +137,7 @@ async def linear_webhook(  # noqa: PLR0911, PLR0912, PLR0915
         comment_body, default_owner=common.DEFAULT_REPO_OWNER
     )
 
+    default_workspace: str | None = None
     if repo_config:
         common.logger.debug(
             "Using repo from comment body: %s/%s",
@@ -144,9 +147,19 @@ async def linear_webhook(  # noqa: PLR0911, PLR0912, PLR0915
     else:
         comment_user_email = (data.get("user") or payload.get("actor") or {}).get("email")
         try:
-            profile_repo = await common.get_profile_default_repo(
-                await User.login_for_email(comment_user_email)
+            user = await User.for_email(comment_user_email) if comment_user_email else None
+            workspace = await common.get_thread_workspace(linear_issue_thread_id(issue_id))
+            if workspace is None:
+                workspace = (
+                    await resolve_workspace(login=user.github_login if user else None)
+                ).slug
+            profile_repo = (
+                await user.default_repo(workspace, fallback_global=False) if user else None
             )
+            if profile_repo:
+                default_workspace = workspace
+            elif user:
+                profile_repo = await user.default_repo()
         except Exception:  # noqa: BLE001
             common.logger.exception("Failed to apply dashboard default_repo for Linear user")
             profile_repo = None
@@ -187,7 +200,9 @@ async def linear_webhook(  # noqa: PLR0911, PLR0912, PLR0915
         issue.get("title"),
         issue.get("id"),
     )
-    background_tasks.add_task(service.process_linear_issue, issue, repo_config)
+    background_tasks.add_task(
+        service.process_linear_issue, issue, repo_config, workspace=default_workspace
+    )
 
     return {
         "status": "accepted",

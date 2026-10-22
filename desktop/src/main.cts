@@ -1747,6 +1747,10 @@ function openDesktopLink(url) {
   return true;
 }
 
+app.on("will-continue-activity", (event, type) => {
+  if (type === "NSUserActivityTypeBrowsingWeb") event.preventDefault();
+});
+
 app.on("continue-activity", (event, type, _userInfo, details) => {
   if (type !== "NSUserActivityTypeBrowsingWeb" || !details.webpageURL) return;
   if (!backendUrl) pendingDeepLink = details.webpageURL;

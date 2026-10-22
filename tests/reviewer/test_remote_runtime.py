@@ -287,8 +287,12 @@ async def test_tool_server_hands_the_verified_run_to_its_handlers() -> None:
     assert await _status(f"Bearer {sign_runtime_token(RUN)}") == (200, RUN)
 
 
-async def test_mda_catalog_leaves_integrations_and_code_mode_to_mda() -> None:
+async def test_mda_catalog_leaves_integrations_and_code_mode_to_mda(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     """Seldom-needed tools go to MDA's code mode, not the model's schemas; the graph's own stays here."""
+    # A provider MDA declares no box for, so the catalog reads no thread metadata.
+    monkeypatch.setenv("SANDBOX_TYPE", "local")
     from langchain.agents import create_agent
     from langchain.agents.middleware.types import AgentMiddleware
     from langchain_core.language_models.fake_chat_models import FakeListChatModel

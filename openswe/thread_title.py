@@ -10,11 +10,12 @@ from pydantic import BaseModel, Field
 
 from openswe.input_messages import dynamic_context_hash, human_input, input_message_text
 from openswe.prompts import prompt
-from openswe.slack.client import update_slack_message
+from openswe.slack.client import append_slack_web_link_footer, update_slack_message
 from openswe.slack.code_channels import CODE_CHANNEL_SESSION_TS, is_code_channel, rename_session
 from openswe.slack.http import SlackRequestError
 from openswe.source_context import SourceContext
 from openswe.transcript.mirror import mirror_thread_metadata
+from openswe.utils.dashboard_links import dashboard_thread_url
 
 logger = logging.getLogger(__name__)
 
@@ -139,7 +140,10 @@ async def generate_and_store_thread_title(
                 try:
                     await update_slack_message(
                         *ref.location,
-                        f"`/breakout`: {title}{ref.breakout_root_suffix}",
+                        append_slack_web_link_footer(
+                            f"`/breakout`: {title}{ref.breakout_root_suffix}",
+                            dashboard_thread_url(thread_id),
+                        ),
                         unfurl_links=False,
                         unfurl_media=False,
                     )

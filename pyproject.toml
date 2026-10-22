@@ -6,7 +6,7 @@ readme = "README.md"
 requires-python = ">=3.14"
 license = { text = "MIT" }
 dependencies = [
-    "deepagents==0.7.28",
+    "deepagents==0.7.29",
     "fastapi>=0.141.1",
     "uvicorn>=0.52.4",
     "httpx2>=2.12.0,<3.0.0",
@@ -69,15 +69,15 @@ sandbox-providers = [
 
 [tool.uv]
 # The externally maintained langchain-e2b integration still declares
-# `deepagents<0.7.0`, but 0.7.28 keeps the sandbox API backward compatible. Its e2b
+# `deepagents<0.7.0`, but 0.7.29 keeps the sandbox API backward compatible. Its e2b
 # dependency also caps wcmatch<11.0 while deepagents requires wcmatch>=11.0, so
 # override both transitive bounds until langchain-e2b publishes compatible metadata.
 # Override-dependencies only apply when langchain-e2b is installed (the sandbox-e2b
 # or sandbox-providers extra).
-override-dependencies = ["deepagents==0.7.28", "wcmatch>=11.0"]
+override-dependencies = ["deepagents==0.7.29", "wcmatch>=11.0"]
 constraint-dependencies = [
-    "langgraph-api>=0.16.1,<0.17",
-    "langgraph-runtime-inmem>=0.36.1,<0.37",
+    "langgraph-api>=0.16.2,<0.17",
+    "langgraph-runtime-inmem>=0.36.2,<0.37",
 ]
 
 [build-system]
@@ -94,6 +94,8 @@ packages = ["openswe"]
 line-length = 100
 # Scripts copied into sandboxes run on whatever python3 the image ships.
 per-file-target-version = { "openswe/sandbox_scripts/*.py" = "py38" }
+# Vendored upstream code keeps its own style.
+extend-exclude = ["vendor"]
 
 [tool.ruff.lint]
 # PLC2701 (private-name imports) is preview-only; explicit-preview-rules keeps every

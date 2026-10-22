@@ -2833,15 +2833,6 @@
         "title": "MCPOAuthUpdate",
         "type": "object"
       },
-      "MCPScope": {
-        "enum": [
-          "instance",
-          "workspace",
-          "user",
-          "managed"
-        ],
-        "type": "string"
-      },
       "MCPToolDescription": {
         "properties": {
           "description": {
@@ -2858,33 +2849,6 @@
           "name"
         ],
         "title": "MCPToolDescription",
-        "type": "object"
-      },
-      "MCPToolProvenance": {
-        "additionalProperties": false,
-        "description": "Credential-free provenance from the caller's authorized connection sources.",
-        "properties": {
-          "connection_name": {
-            "title": "Connection Name",
-            "type": "string"
-          },
-          "overridden_scopes": {
-            "items": {
-              "$ref": "#/components/schemas/MCPScope"
-            },
-            "title": "Overridden Scopes",
-            "type": "array"
-          },
-          "scope": {
-            "$ref": "#/components/schemas/MCPScope"
-          }
-        },
-        "required": [
-          "connection_name",
-          "scope",
-          "overridden_scopes"
-        ],
-        "title": "MCPToolProvenance",
         "type": "object"
       },
       "ManagedConnectResponse": {
@@ -4488,22 +4452,6 @@
             ],
             "title": "Pr Review Links"
           },
-          "prefer_tools_in_sandbox": {
-            "anyOf": [
-              {
-                "type": "boolean"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Prefer Tools In Sandbox"
-          },
-          "recent_thread_context_enabled": {
-            "default": false,
-            "title": "Recent Thread Context Enabled",
-            "type": "boolean"
-          },
           "review_draft_prs": {
             "anyOf": [
               {
@@ -4519,6 +4467,13 @@
             "default": false,
             "title": "Slack Onboarding Dismissed",
             "type": "boolean"
+          },
+          "workspace_default_repos": {
+            "additionalProperties": {
+              "type": "string"
+            },
+            "title": "Workspace Default Repos",
+            "type": "object"
           }
         },
         "title": "ProfileUpdate",
@@ -5271,6 +5226,11 @@
       },
       "RequestResult": {
         "properties": {
+          "auto_merge": {
+            "default": true,
+            "title": "Auto Merge",
+            "type": "boolean"
+          },
           "channel": {
             "default": "",
             "title": "Channel",
@@ -7170,13 +7130,6 @@
         "title": "ThreadResolveBody",
         "type": "object"
       },
-      "ToolArguments": {
-        "additionalProperties": {
-          "$ref": "#/components/schemas/JsonValue"
-        },
-        "title": "ToolArguments",
-        "type": "object"
-      },
       "ToolCallView": {
         "additionalProperties": false,
         "properties": {
@@ -7270,84 +7223,6 @@
           "ended_at"
         ],
         "title": "ToolCallView",
-        "type": "object"
-      },
-      "ToolDescription": {
-        "properties": {
-          "description": {
-            "title": "Description",
-            "type": "string"
-          },
-          "mcp_provenance": {
-            "anyOf": [
-              {
-                "$ref": "#/components/schemas/MCPToolProvenance"
-              },
-              {
-                "type": "null"
-              }
-            ]
-          },
-          "name": {
-            "title": "Name",
-            "type": "string"
-          },
-          "parameters": {
-            "additionalProperties": {
-              "$ref": "#/components/schemas/JsonValue"
-            },
-            "title": "Parameters",
-            "type": "object"
-          }
-        },
-        "required": [
-          "name",
-          "description",
-          "parameters"
-        ],
-        "title": "ToolDescription",
-        "type": "object"
-      },
-      "ToolList": {
-        "properties": {
-          "tools": {
-            "items": {
-              "$ref": "#/components/schemas/ToolDescription"
-            },
-            "title": "Tools",
-            "type": "array"
-          },
-          "total": {
-            "title": "Total",
-            "type": "integer"
-          }
-        },
-        "required": [
-          "tools",
-          "total"
-        ],
-        "title": "ToolList",
-        "type": "object"
-      },
-      "ToolResult": {
-        "properties": {
-          "content": {
-            "$ref": "#/components/schemas/JsonValue"
-          },
-          "status": {
-            "enum": [
-              "success",
-              "error"
-            ],
-            "title": "Status",
-            "type": "string"
-          }
-        },
-        "required": [
-          "status",
-          "content"
-        ],
-        "title": "ToolResult",
         "type": "object"
       },
       "TranscriptTurnPage": {
@@ -8488,6 +8363,18 @@
               }
             ],
             "title": "Human Review Auto Assign Minutes"
+          },
+          "human_review_auto_merge_enabled": {
+            "agent_feature_flag": true,
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Human Review Auto Merge Enabled"
           },
           "managed_tools_gateway_id": {
             "anyOf": [
@@ -16619,73 +16506,6 @@
         ]
       }
     },
-    "/dashboard/api/sandbox-tools": {
-      "get": {
-        "operationId": "list_tools_dashboard_api_sandbox_tools_get",
-        "parameters": [
-          {
-            "in": "query",
-            "name": "q",
-            "required": false,
-            "schema": {
-              "default": "",
-              "maxLength": 512,
-              "title": "Q",
-              "type": "string"
-            }
-          },
-          {
-            "in": "query",
-            "name": "offset",
-            "required": false,
-            "schema": {
-              "default": 0,
-              "minimum": 0,
-              "title": "Offset",
-              "type": "integer"
-            }
-          },
-          {
-            "in": "query",
-            "name": "limit",
-            "required": false,
-            "schema": {
-              "default": 100,
-              "maximum": 100,
-              "minimum": 1,
-              "title": "Limit",
-              "type": "integer"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ToolList"
-                }
-              }
-            },
-            "description": "Successful Response"
-          },
-          "422": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            },
-            "description": "Validation Error"
-          }
-        },
-        "summary": "List Tools",
-        "tags": [
-          "sandbox-tools"
-        ]
-      }
-    },
     "/dashboard/api/sandbox-tools/background-tasks/{task_id}/complete": {
       "post": {
         "operationId": "background_task_complete_dashboard_api_sandbox_tools_background_tasks__task_id__complete_post",
@@ -16758,127 +16578,6 @@
         ]
       }
     },
-    "/dashboard/api/sandbox-tools/invoke/{tool_name}": {
-      "post": {
-        "operationId": "invoke_tool_dashboard_api_sandbox_tools_invoke__tool_name__post",
-        "parameters": [
-          {
-            "in": "path",
-            "name": "tool_name",
-            "required": true,
-            "schema": {
-              "maxLength": 256,
-              "minLength": 1,
-              "title": "Tool Name",
-              "type": "string"
-            }
-          }
-        ],
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/ToolArguments"
-              }
-            }
-          },
-          "required": true
-        },
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ToolResult"
-                }
-              }
-            },
-            "description": "Successful Response"
-          },
-          "422": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            },
-            "description": "Validation Error"
-          }
-        },
-        "summary": "Invoke Tool",
-        "tags": [
-          "sandbox-tools"
-        ]
-      }
-    },
-    "/dashboard/api/sandbox-tools/list": {
-      "get": {
-        "operationId": "list_tools_dashboard_api_sandbox_tools_list_get",
-        "parameters": [
-          {
-            "in": "query",
-            "name": "q",
-            "required": false,
-            "schema": {
-              "default": "",
-              "maxLength": 512,
-              "title": "Q",
-              "type": "string"
-            }
-          },
-          {
-            "in": "query",
-            "name": "offset",
-            "required": false,
-            "schema": {
-              "default": 0,
-              "minimum": 0,
-              "title": "Offset",
-              "type": "integer"
-            }
-          },
-          {
-            "in": "query",
-            "name": "limit",
-            "required": false,
-            "schema": {
-              "default": 100,
-              "maximum": 100,
-              "minimum": 1,
-              "title": "Limit",
-              "type": "integer"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ToolList"
-                }
-              }
-            },
-            "description": "Successful Response"
-          },
-          "422": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            },
-            "description": "Validation Error"
-          }
-        },
-        "summary": "List Tools",
-        "tags": [
-          "sandbox-tools"
-        ]
-      }
-    },
     "/dashboard/api/sandbox-tools/monitors/{monitor_id}/sync": {
       "post": {
         "description": "A monitor's runner has new events or has ended; a 5xx makes a final sync retry.",
@@ -16911,73 +16610,6 @@
           }
         },
         "summary": "Monitor Sync",
-        "tags": [
-          "sandbox-tools"
-        ]
-      }
-    },
-    "/dashboard/api/sandbox-tools/search": {
-      "get": {
-        "operationId": "list_tools_dashboard_api_sandbox_tools_search_get",
-        "parameters": [
-          {
-            "in": "query",
-            "name": "q",
-            "required": false,
-            "schema": {
-              "default": "",
-              "maxLength": 512,
-              "title": "Q",
-              "type": "string"
-            }
-          },
-          {
-            "in": "query",
-            "name": "offset",
-            "required": false,
-            "schema": {
-              "default": 0,
-              "minimum": 0,
-              "title": "Offset",
-              "type": "integer"
-            }
-          },
-          {
-            "in": "query",
-            "name": "limit",
-            "required": false,
-            "schema": {
-              "default": 100,
-              "maximum": 100,
-              "minimum": 1,
-              "title": "Limit",
-              "type": "integer"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ToolList"
-                }
-              }
-            },
-            "description": "Successful Response"
-          },
-          "422": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            },
-            "description": "Validation Error"
-          }
-        },
-        "summary": "List Tools",
         "tags": [
           "sandbox-tools"
         ]
