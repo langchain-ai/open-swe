@@ -1,14 +1,13 @@
-import base64
-import json
 import subprocess
-import sys
 from pathlib import Path
 from unittest.mock import AsyncMock
 
 import pytest
 from pydantic import JsonValue
 
-from openswe.remote_runtime.git_metadata import GitSnapshot, GitTarget, TurnGitMetadata
+from openswe.remote_runtime.git_metadata import GitCheckout, GitSnapshot, GitTarget, TurnGitMetadata
+from openswe.sandboxes.scripts import SandboxScript, SandboxScriptError
+from tests.tools.test_monitor import LocalShell
 
 
 @pytest.mark.parametrize("pr", [False, True])
@@ -134,7 +133,7 @@ async def test_invalid_optional_evidence_does_not_discard_valid_pr_outcome(
     assert result["ls_git_branch"] == "Exact/head"
 
 
-def test_snapshot_detects_more_edits_to_an_already_dirty_checkout(tmp_path: Path) -> None:
+async def test_snapshot_detects_more_edits_to_an_already_dirty_checkout(tmp_path: Path) -> None:
     for name in ("a-no-origin", "b-unborn"):
         path = tmp_path / name
         subprocess.run(["git", "init", str(path)], check=True, capture_output=True)
@@ -166,19 +165,19 @@ def test_snapshot_detects_more_edits_to_an_already_dirty_checkout(tmp_path: Path
     subprocess.run(
         ["git", "-C", str(repo), "commit", "-m", "initial"], check=True, capture_output=True
     )
-    script = Path(__file__).resolve().parents[2] / "openswe/sandbox_scripts/git_trace.py"
-    payload = base64.b64encode(json.dumps({"root": str(tmp_path)}).encode()).decode()
+    script = SandboxScript("git_trace.py", str(tmp_path / "scripts"))
+    backend = LocalShell()
 
-    def snapshot() -> dict[str, object]:
-        response = subprocess.run(
-            [sys.executable, str(script), payload], check=True, capture_output=True
-        )
-        return json.loads(response.stdout)["repos"][str(repo)]
+    async def snapshot() -> GitCheckout:
+        response = await script.run(backend, {"root": str(tmp_path)})
+        return GitSnapshot.model_validate(response).repos[str(repo)]
 
     file.write_text("dirty")
-    first = snapshot()
+    first = await snapshot()
     file.write_text("different dirty content")
-    second = snapshot()
-    assert first["repo"] == second["repo"] == "org/actual"
-    assert first["branch"] == second["branch"] == "work"
-    assert first["dirty"] != second["dirty"]
+    second = await snapshot()
+    assert first.repo == second.repo == "org/actual"
+    assert first.branch == second.branch == "work"
+    assert first.dirty != second.dirty
+    with pytest.raises(SandboxScriptError, match="Could not inspect workspace git state"):
+        await script.run(backend, {"root": str(tmp_path / "missing")})
