@@ -51,7 +51,6 @@ class Task(Base):
         model: str,
         effort: str,
         launch_request_id: str | None = None,
-        launch_run_id: str | None = None,
     ) -> tuple[Task, TaskDelegation]:
         """The worker's delegation, reserved once; one launch request reserves one worker."""
         postgres.require_configured()
@@ -98,7 +97,6 @@ class Task(Base):
                 model=model,
                 effort=effort,
                 launch_request_id=launch_request_id,
-                launch_run_id=launch_run_id,
             )
             session.add(delegation)
             return task, delegation
@@ -179,10 +177,9 @@ class TaskDelegation(Base):
     cancelled: Mapped[bool] = mapped_column(default=False)
     # The coordinator's tool call that launched this worker as an MDA async subagent.
     launch_request_id: Mapped[str | None] = mapped_column(default=None)
-    # The worker's first run, which MDA started without Open SWE's completion webhook,
-    # and when the backend settled it (or found nothing to settle) in the webhook's place.
-    launch_run_id: Mapped[str | None] = mapped_column(default=None)
-    launch_settled_at: Mapped[datetime | None] = mapped_column(default=None)
+    # Cancelled because a person stopped the task, so nothing it reports reaches the coordinator.
+    silenced: Mapped[bool] = mapped_column(default=False)
+    created_at: Mapped[datetime] = mapped_column(server_default=NOW, init=False)
 
     @classmethod
     async def get(cls, worker_thread_id: str) -> TaskDelegation | None:
@@ -207,31 +204,6 @@ class TaskDelegation(Base):
             return await session.scalar(query)
         async with postgres.session() as own:
             return await own.scalar(query)
-
-    @classmethod
-    async def unsettled_launches(cls, limit: int) -> list[tuple[str, str]]:
-        """``(worker_thread_id, launch_run_id)`` of workers' first runs not yet settled."""
-        async with postgres.session() as session:
-            rows = await session.execute(
-                select(cls.worker_thread_id, cls.launch_run_id)
-                .where(cls.launch_run_id.is_not(None), cls.launch_settled_at.is_(None))
-                .order_by(cls.launch_run_id)
-                .limit(limit)
-            )
-            return [(thread_id, run_id) for thread_id, run_id in rows if run_id is not None]
-
-    @classmethod
-    async def settle_launch(cls, worker_thread_id: str, launch_run_id: str) -> None:
-        async with postgres.session() as session:
-            await session.execute(
-                update(cls)
-                .where(
-                    cls.worker_thread_id == worker_thread_id,
-                    cls.launch_run_id == launch_run_id,
-                    cls.launch_settled_at.is_(None),
-                )
-                .values(launch_settled_at=NOW)
-            )
 
     @classmethod
     async def for_task(cls, task_id: UUID) -> list[TaskDelegation]:

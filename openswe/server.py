@@ -2163,6 +2163,7 @@ async def build_agent(config: RunnableConfig, *, tool_surface: ToolSurface | Non
             )
         ]
         tool_surface.dynamic = dynamic_tool_middleware
+        tool_surface.backend_paths = tuple(skill_routes)
         tool_surface.code_mode = True
         tool_surface.excluded = (
             STOP_SUMMARY_EXCLUDED_TOOLS

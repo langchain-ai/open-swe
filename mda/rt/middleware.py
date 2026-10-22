@@ -1,6 +1,6 @@
 """The run hooks that hand each phase of this model loop to the Open SWE backend.
 
-The backend holds the in-process graph, its sandbox and its own middleware, and
+The backend holds the in-process graph and its own middleware, and
 runs that middleware for every phase here: preparation before the run, the
 follow-up queue, routing and the system prompt before each model call, the
 transcript and usage after it, reply nudges after the model, and the end-of-run
@@ -9,7 +9,8 @@ with every call.
 
 Subagents run here too. Their replies and the tools this runtime runs itself,
 such as ``task``, go to the backend as well, so its transcript records them
-under the subagent, as an in-process run does.
+under the subagent, as an in-process run does. Those reports go alongside the
+calls; each phase and reply waits for the ones made before it.
 
 A task worker can run here as an async subagent of its coordinator: launched with
 ``start_async_task``, it is an Open SWE worker thread with its own run token.
@@ -23,7 +24,6 @@ from collections.abc import (
     Awaitable,
     Callable,
     Collection,
-    Coroutine,
     Iterator,
     Mapping,
     Sequence,
@@ -66,7 +66,7 @@ from rt.backend import (
     subagent_of,
 )
 from rt.models import ModelSpec, build_model
-from rt.tools import STATE_KEY, run_id
+from rt.tools import STATE_KEY, run_id, tool_body
 from rt.tracing import TurnTrace
 
 logger = logging.getLogger(__name__)
@@ -93,6 +93,26 @@ def _merge(
     if right is not None and "git_trace_baseline" in right:
         held = {key: value for key, value in held.items() if not key.startswith("git_trace_")}
     return {**held, **(right or {})}
+
+
+_TOOL_PAIRING_ERRORS: Final = (
+    "no tool output found for function call",
+    "no tool call found for function call output",
+    "unexpected `tool_use_id`",
+    "unexpected tool_use_id",
+    "without `tool_result`",
+    "must be followed by tool messages",
+    "must be a response to a preceeding message with 'tool_calls'",
+    "must be a response to a preceding message with 'tool_calls'",
+)
+
+
+def _tool_pairing_error(exc: Exception) -> bool:
+    """A 400 over unpaired tool history, which the fallback would get as well."""
+    if getattr(exc, "status_code", None) != 400:
+        return False
+    message = str(exc).lower()
+    return any(marker in message for marker in _TOOL_PAIRING_ERRORS)
 
 
 class ModelCall(BaseModel):
@@ -318,6 +338,7 @@ class BackendRunMiddleware(AgentMiddleware[RunState]):
         return await self._phase("before_model", state)
 
     async def _phase(self, hook: Hook, state: RunState, **extra: JsonValue) -> dict[str, object]:
+        await self._backend.reports.drain()
         # A backend it cannot reach fails the run, as any hook failure does, so every
         # surface reports it and the person can send the message again.
         reply = await self._backend.phase(hook, run_body(run_id(), state, **extra))
@@ -348,8 +369,8 @@ class BackendRunMiddleware(AgentMiddleware[RunState]):
             request = request.override(model=build_model(call.model, use_gateway=call.use_gateway))
         try:
             return await handler(request)
-        except Exception:
-            if call.fallback is None:
+        except Exception as exc:
+            if call.fallback is None or _tool_pairing_error(exc):
                 raise
             # As the in-process graph does: another provider before failing the run.
             logger.warning("Model call failed; retrying on the fallback model", exc_info=True)
@@ -362,6 +383,7 @@ class BackendRunMiddleware(AgentMiddleware[RunState]):
         return await self._phase("after_model", state)
 
     async def aafter_agent(self, state: RunState, runtime: Runtime) -> dict[str, object] | None:  # noqa: ARG002
+        await self._backend.reports.drain()
         metadata = dict(self._trace_metadata)
         try:
             body = run_body(run_id(), state)
@@ -389,6 +411,8 @@ class ReportRepliesMiddleware(AgentMiddleware):
         handler: Callable[[ModelRequest], Awaitable[ModelResponse]],
     ) -> ModelResponse:
         response = await handler(request)
+        # The transcript records the calls this reply follows before the reply itself.
+        await self._backend.reports.drain()
         observed = await self._backend.model_result(
             run_body(run_id(), request.state), response.result
         )
@@ -400,12 +424,47 @@ class ReportRepliesMiddleware(AgentMiddleware):
         )
 
 
+async def reported(
+    backend: OpenSweBackend,
+    request: ToolCallRequest,
+    handler: Callable[[ToolCallRequest], Awaitable[ToolMessage | Command]],
+) -> ToolMessage | Command:
+    """Run ``request``, telling the backend's transcript it started and how it ended.
+
+    The reports go out alongside the call rather than before it. A ``task`` call's
+    subagent runs here, so every call made within it names the ``task`` call.
+    """
+    tool_call_id = request.tool_call.get("id")
+    if not tool_call_id:
+        return await handler(request)
+    body = tool_body(
+        request.state,
+        name=request.tool_call["name"],
+        arguments=request.tool_call["args"],
+        tool_call_id=tool_call_id,
+    )
+    backend.reports.started(body)
+    try:
+        with subagent_of(tool_call_id):
+            result = await handler(request)
+    except asyncio.CancelledError:
+        # A stopped call stays open, as it does in-process.
+        raise
+    except Exception as exc:
+        failure = ToolMessage(
+            content=f"{type(exc).__name__}: {exc}", tool_call_id=tool_call_id, status="error"
+        )
+        backend.reports.finished(body, failure)
+        raise
+    backend.reports.finished(body, _tool_message(result, tool_call_id))
+    return result
+
+
 class RuntimeToolsMiddleware(AgentMiddleware):
     """Report the tool calls this runtime runs itself, such as ``task``, to the backend's transcript.
 
-    The backend records the calls of its own tools as it runs them. A ``task``
-    call's subagent runs here, so every call it makes names the ``task`` call.
-    Reporting is best effort: a call the backend could not record still runs.
+    The backend records the calls of its own tools as it runs them, and
+    ``SandboxToolsMiddleware`` reports the calls this runtime runs in the box.
     """
 
     def __init__(self, backend: OpenSweBackend, served: Collection[str]) -> None:
@@ -417,39 +476,9 @@ class RuntimeToolsMiddleware(AgentMiddleware):
         request: ToolCallRequest,
         handler: Callable[[ToolCallRequest], Awaitable[ToolMessage | Command]],
     ) -> ToolMessage | Command:
-        name = request.tool_call["name"]
-        tool_call_id = request.tool_call.get("id")
-        if name in self._served or not tool_call_id:
+        if request.tool_call["name"] in self._served:
             return await handler(request)
-        body = run_body(
-            run_id(),
-            request.state,
-            name=name,
-            arguments=request.tool_call["args"],
-            tool_call_id=tool_call_id,
-        )
-        await self._report(self._backend.tool_started(body))
-        try:
-            with subagent_of(tool_call_id):
-                result = await handler(request)
-        except asyncio.CancelledError:
-            # A stopped call stays open, as it does in-process.
-            raise
-        except Exception as exc:
-            failure = ToolMessage(
-                content=f"{type(exc).__name__}: {exc}", tool_call_id=tool_call_id, status="error"
-            )
-            await self._report(self._backend.tool_result(body, failure))
-            raise
-        await self._report(self._backend.tool_result(body, _tool_message(result, tool_call_id)))
-        return result
-
-    @staticmethod
-    async def _report(call: Coroutine[object, object, None]) -> None:
-        try:
-            await call
-        except BackendCallError:
-            logger.warning("The backend did not record a runtime tool call", exc_info=True)
+        return await reported(self._backend, request, handler)
 
 
 class _Launched(BaseModel):
@@ -596,20 +625,8 @@ class AsyncWorkerLaunchMiddleware(AgentMiddleware):
 
 
 def _launch_runtime(runtime: ToolRuntime, grant: str) -> ToolRuntime:
-    """The tool runtime the launch sees: a worker grant for context, no assistant to wake."""
-    config = runtime.config
-    unwakeable = {
-        **config,
-        "metadata": {
-            k: v for k, v in (config.get("metadata") or {}).items() if k != "assistant_id"
-        },
-        "configurable": {
-            k: v for k, v in (config.get("configurable") or {}).items() if k != "assistant_id"
-        },
-    }
-    return dataclasses.replace(
-        runtime, context={"graph": "agent", WORKER_GRANT_KEY: grant}, config=unwakeable
-    )
+    """The tool runtime the launch sees: a worker grant for context, in place of the run's."""
+    return dataclasses.replace(runtime, context={"graph": "agent", WORKER_GRANT_KEY: grant})
 
 
 def _launched_task(result: ToolMessage | Command) -> _Launched | None:

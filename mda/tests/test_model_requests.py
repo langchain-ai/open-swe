@@ -1,7 +1,5 @@
-import sys
 from collections.abc import Callable
 from copy import deepcopy
-from pathlib import Path
 from typing import cast
 from unittest.mock import AsyncMock
 
@@ -10,14 +8,11 @@ from langchain.agents.middleware import AgentMiddleware
 from langchain.agents.middleware.types import AgentState, ModelRequest, ModelResponse
 from langchain_anthropic import ChatAnthropic
 from langchain_core.language_models import BaseChatModel
-from langchain_core.messages import AIMessage, AnyMessage, HumanMessage, ToolMessage
+from langchain_core.messages import AIMessage, AnyMessage, BaseMessage, HumanMessage, ToolMessage
 from langchain_core.runnables import Runnable
 from langchain_fireworks import ChatFireworks
 from langchain_openai import ChatOpenAI
 from pydantic import SecretStr
-
-sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "mda"))
-
 from rt.model_requests import SanitizeProviderMessagesMiddleware, StableToolResultOrderMiddleware
 
 
@@ -154,7 +149,8 @@ async def test_fireworks_sends_tool_calls_without_the_legacy_function_call() -> 
     forwarded = await _forward(
         SanitizeProviderMessagesMiddleware(), [HumanMessage("hi"), _legacy_function_call()], model
     )
-    sent, _ = model._create_message_dicts(forwarded, None)
+    messages: list[BaseMessage] = [*forwarded]
+    sent, _ = model._create_message_dicts(messages, None)
 
     assert all("function_call" not in message for message in sent)
     assert "tool_calls" in sent[1]

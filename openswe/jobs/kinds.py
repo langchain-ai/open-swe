@@ -23,6 +23,8 @@ from openswe.jobs import queue
 from openswe.jobs.cron_import import import_agent_server_crons
 from openswe.jobs.queue import Job
 from openswe.jobs.worker import WORKER
+from openswe.merge_queue.runtime import JOB_KIND as MERGE_QUEUE_RECONCILE
+from openswe.merge_queue.runtime import reconcile_queue
 from openswe.monitors.delivery import POLL_JOB_KIND as MONITOR_POLL
 from openswe.monitors.delivery import poll_monitors
 
@@ -48,6 +50,8 @@ AGENT_COST: Final = "agent_cost"
 SESSION_COST: Final = "session_cost"
 RECONCILE: Final = "reconcile"
 _FIRE_CLAIM_TTL: Final = timedelta(days=2)
+
+WORKER.register(MERGE_QUEUE_RECONCILE)(reconcile_queue)
 
 
 def _text(job: Job, key: str) -> str | None:
@@ -160,13 +164,7 @@ async def _reconcile(_job: Job) -> object:
 
 @_sandbox_work(THREAD_STATUS_RECONCILE)
 async def _thread_status_reconcile(_job: Job) -> object:
-    # The webapp must not import the agent stack at startup.
-    from openswe.remote_runtime.async_workers import settle_launched_runs
-
-    return {
-        "threads_settled": await reconcile_busy_threads(),
-        "worker_launches_settled": await settle_launched_runs(),
-    }
+    return {"threads_settled": await reconcile_busy_threads()}
 
 
 @WORKER.register(WAKE_THREAD_JOB)
