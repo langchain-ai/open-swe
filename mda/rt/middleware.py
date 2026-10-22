@@ -605,20 +605,8 @@ class AsyncWorkerLaunchMiddleware(AgentMiddleware):
 
 
 def _launch_runtime(runtime: ToolRuntime, grant: str) -> ToolRuntime:
-    """The tool runtime the launch sees: a worker grant for context, no assistant to wake."""
-    config = runtime.config
-    unwakeable = {
-        **config,
-        "metadata": {
-            k: v for k, v in (config.get("metadata") or {}).items() if k != "assistant_id"
-        },
-        "configurable": {
-            k: v for k, v in (config.get("configurable") or {}).items() if k != "assistant_id"
-        },
-    }
-    return dataclasses.replace(
-        runtime, context={"graph": "agent", WORKER_GRANT_KEY: grant}, config=unwakeable
-    )
+    """The tool runtime the launch sees: a worker grant for context, in place of the run's."""
+    return dataclasses.replace(runtime, context={"graph": "agent", WORKER_GRANT_KEY: grant})
 
 
 def _launched_task(result: ToolMessage | Command) -> _Launched | None:

@@ -574,6 +574,9 @@ async def _launch_worker(
                 "name": "general-purpose",
                 "description": "A task worker.",
                 "graph_id": "open-swe--general-purpose",
+                # As `mda/agent.py` declares the worker.
+                "notify_parent": False,
+                "webhook": "https://backend.invalid/webhooks/run-complete?token=t",
             }
         ]
     )
@@ -628,6 +631,8 @@ async def test_a_launched_worker_carries_a_grant_never_its_coordinators_run_toke
         "messages": [{"role": "user", "content": "Your assignment: Fix login"}]
     }
     assert "coordinator-token" not in repr(client.runs.create.await_args)
+    # The backend settles the launched run from its webhook, as it does every worker run.
+    assert launch["webhook"] == "https://backend.invalid/webhooks/run-complete?token=t"
     # No parent assistant, so the worker never wakes the coordinator on MDA's own.
     assert client.threads.create.await_args.kwargs["metadata"] == {
         "subagent_name": "general-purpose",
