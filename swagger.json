@@ -18297,6 +18297,25 @@
           },
           {
             "in": "query",
+            "name": "exclude_source",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "items": {
+                    "type": "string"
+                  },
+                  "type": "array"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Exclude Source"
+            }
+          },
+          {
+            "in": "query",
             "name": "sort_by",
             "required": false,
             "schema": {
@@ -18481,6 +18500,25 @@
               "default": false,
               "title": "All",
               "type": "boolean"
+            }
+          },
+          {
+            "in": "query",
+            "name": "exclude_source",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "items": {
+                    "type": "string"
+                  },
+                  "type": "array"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Exclude Source"
             }
           }
         ],
