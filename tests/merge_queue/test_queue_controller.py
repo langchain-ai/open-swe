@@ -37,6 +37,7 @@ async def test_controller_rejects_changed_trusted_inputs(
             app_id=123,
             installation_id=456,
             workflow_digest=hashlib.sha256(workflow).hexdigest(),
+            operator_emails=frozenset({"operator@example.com"}),
             policy=QueuePolicy(
                 checks={"checks": CheckSource(app_id=1, workflow_path=".github/workflows/ci.yml")},
                 validation=ValidationPolicy(dispatch_actor_id=789),

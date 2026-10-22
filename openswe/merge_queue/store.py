@@ -319,9 +319,17 @@ class MergeQueue(Record):
                 raise ValueError("Only unbatched requests can be reordered")
             request.priority, request.updated_by = priority, actor
 
-    async def withdraw(self, request_id: UUID, *, actor: UUID | None = None) -> None:
+    async def set_paused(self, paused: bool, *, actor: UUID) -> None:
+        async with self._locked() as (_, queue, _):
+            queue.paused, queue.updated_by = paused, actor
+
+    async def withdraw(
+        self, request_id: UUID, *, actor: UUID | None = None, operator: bool = False
+    ) -> None:
         async with self._locked() as (session, _, now):
             request = await self._request(session, request_id)
+            if actor is not None and request.created_by != actor and not operator:
+                raise PermissionError("Only the requester or a queue operator may withdraw")
             if request.state == "withdrawn":
                 return
             if request.state == "merged":
@@ -825,12 +833,26 @@ class MergeQueue(Record):
             )
             return len(batches) + len(requests)
 
-    async def _entries(self, session: AsyncSession) -> list[QueueEntry]:
+    async def snapshot(
+        self, *, limit: int, offset: int
+    ) -> tuple[bool, list[QueueEntry], UUID | None]:
+        async with self._locked() as (session, queue, _):
+            entries = await self._entries(session, limit=limit, offset=offset)
+            batch_id = await session.scalar(
+                select(Batch.id).where(Batch.queue_id == queue.id, Batch.state == "active")
+            )
+            return queue.paused, entries, batch_id
+
+    async def _entries(
+        self, session: AsyncSession, *, limit: int | None = None, offset: int = 0
+    ) -> list[QueueEntry]:
         rows = await session.execute(
             select(MergeRequest, PullRequest.number)
             .join(PullRequest)
             .where(MergeRequest.queue_id == self.id, MergeRequest.finished_at.is_(None))
             .order_by(MergeRequest.priority.desc(), MergeRequest.created_at, MergeRequest.id)
+            .limit(limit)
+            .offset(offset)
         )
         return [QueueEntry(request, number) for request, number in rows.tuples()]
 
