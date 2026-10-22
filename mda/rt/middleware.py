@@ -43,6 +43,7 @@ from langchain.agents.middleware.types import (
     hook_config,
 )
 from langchain_core.messages import (
+    AIMessage,
     HumanMessage,
     SystemMessage,
     ToolCall,
@@ -142,6 +143,44 @@ def _apply(reply: PhaseReply) -> dict[str, object]:
     if reply.jump_to:
         update["jump_to"] = reply.jump_to
     return update
+
+
+class OrphanedToolResultsMiddleware(AgentMiddleware):
+    """Exclude unpaired tool results from model requests without changing saved history."""
+
+    async def awrap_model_call(
+        self,
+        request: ModelRequest,
+        handler: Callable[[ModelRequest], Awaitable[ModelResponse]],
+    ) -> ModelResponse:
+        call_ids = {
+            call["id"]
+            for message in request.messages
+            if isinstance(message, AIMessage)
+            for call in (*message.tool_calls, *message.invalid_tool_calls)
+            if call["id"] is not None
+        }
+        call_ids.update(
+            block["id"]
+            for message in request.messages
+            if isinstance(message, AIMessage) and isinstance(message.content, list)
+            for block in message.content
+            if isinstance(block, dict)
+            and block.get("type") == "tool_use"
+            and isinstance(block.get("id"), str)
+        )
+        messages = [
+            message
+            for message in request.messages
+            if not isinstance(message, ToolMessage) or message.tool_call_id in call_ids
+        ]
+        omitted = len(request.messages) - len(messages)
+        if omitted:
+            logger.warning(
+                "Excluded orphaned tool results from model request", extra={"omitted": omitted}
+            )
+            request = request.override(messages=messages)
+        return await handler(request)
 
 
 class ServedToolsMiddleware(AgentMiddleware):

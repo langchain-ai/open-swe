@@ -45,6 +45,7 @@ from rt.middleware import (
     AsyncWorkerLaunchMiddleware,
     BackendRunMiddleware,
     DescribedToolsMiddleware,
+    OrphanedToolResultsMiddleware,
     ReportRepliesMiddleware,
     RuntimeToolsMiddleware,
     ServedToolsMiddleware,
@@ -102,8 +103,12 @@ class OpenSweRunContext(BaseModel):
 
 
 def _backend_reports(backend: OpenSweBackend, served: Collection[str]) -> list[AgentMiddleware]:
-    """The backend's transcript and usage see every reply, and every tool call."""
-    return [ReportRepliesMiddleware(backend), RuntimeToolsMiddleware(backend, served)]
+    """Report every reply and tool call, keeping orphaned results out of model requests."""
+    return [
+        ReportRepliesMiddleware(backend),
+        RuntimeToolsMiddleware(backend, served),
+        OrphanedToolResultsMiddleware(),
+    ]
 
 
 def _code_mode(
