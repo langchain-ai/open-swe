@@ -816,3 +816,106 @@ async def test_mda_does_not_retry_tool_pairing_errors(
         with pytest.raises(type(error)) as caught:
             await middleware.awrap_model_call(request, handler)
         assert caught.value is error
+
+
+@pytest.mark.parametrize("anthropic", [True, False])
+async def test_backend_prompt_changes_preserve_static_blocks_and_cache_breakpoint(
+    monkeypatch: pytest.MonkeyPatch,
+    anthropic: bool,
+) -> None:
+    from langchain.agents.middleware.types import ModelRequest, ModelResponse
+    from langchain_anthropic import ChatAnthropic
+    from langchain_core.messages import AIMessage, SystemMessage
+
+    monkeypatch.setenv("OPEN_SWE_BACKEND_URL", "https://backend.invalid")
+    middleware = BackendRunMiddleware(OpenSweBackend("secret-token"), "invocation-1")
+    static = SystemMessage(
+        content=[
+            {"type": "text", "text": "Stable instructions", "extra": "preserved"},
+            {"type": "text", "text": "Static code-mode reference"},
+        ]
+    )
+    sent: list[SystemMessage] = []
+
+    async def handler(request: ModelRequest) -> ModelResponse:
+        assert request.system_message is not None
+        sent.append(request.system_message)
+        return ModelResponse(result=[AIMessage(content="done")])
+
+    for prompt in ("First backend prompt", "Next backend prompt"):
+        await middleware.awrap_model_call(
+            ModelRequest(
+                model=(
+                    ChatAnthropic(model_name="claude-opus-5-5", api_key="test-key")
+                    if anthropic
+                    else FakeListChatModel(responses=["done"])
+                ),
+                messages=[],
+                system_message=static,
+                state={
+                    "messages": [],
+                    "open_swe_call": {
+                        "system_prompt": prompt,
+                        "model": None,
+                        "fallback": None,
+                        "use_gateway": False,
+                    },
+                },
+                runtime=None,
+            ),
+            handler,
+        )
+    first, second = (message.content for message in sent)
+    assert first[:-1] == second[:-1]
+    assert first[0] == static.content[0]
+    if anthropic:
+        assert first[-2]["cache_control"] == {"type": "ephemeral", "ttl": "1h"}
+    else:
+        assert "cache_control" not in first[-2]
+    assert first[-1]["text"] == "First backend prompt"
+    assert second[-1]["text"] == "Next backend prompt"
+    assert "cache_control" not in static.content[-1]
+
+
+def test_variable_prompt_values_follow_reusable_instructions() -> None:
+    from openswe.prompts import prompt
+    from openswe.reviewer import _reviewer_system_prompt
+
+    reviewer_prompts = [
+        _reviewer_system_prompt(
+            f"/workspace/repo-{number}",
+            repo_owner="acme",
+            repo_name=f"repo-{number}",
+            pr_number=number,
+            head_sha=f"sha-{number}",
+            repo_style_prompt="Repository guidance",
+        )
+        for number in (1, 2)
+    ]
+    scout_prompts = [
+        prompt(
+            "review-scout/main",
+            pr_number=number,
+            repo_full_name=f"acme/repo-{number}",
+            pr_title=f"Title {number}",
+            repo_dir=f"/workspace/repo-{number}",
+            carried=False,
+            plan={
+                "chunks": [],
+                "other_lines": 0,
+                "unplanned": 0,
+                "unplanned_hunks": [],
+                "more_files_unplanned": 0,
+            },
+        )
+        for number in (1, 2)
+    ]
+    for prompts, boundary in (
+        (reviewer_prompts, "# Pull request"),
+        (scout_prompts, "# Pull request"),
+    ):
+        first, second = prompts
+        prefix = first.split(boundary)[0]
+        assert prefix
+        assert prefix == second.split(boundary)[0]
+        assert first != second
