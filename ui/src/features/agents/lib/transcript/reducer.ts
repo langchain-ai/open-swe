@@ -986,6 +986,7 @@ function buildHumanMessage(
             entity?.displayName ??
             (entity?.handle ? `@${entity.handle}` : undefined) ??
             row.senderName,
+          structuredSenderLogin: row.senderLogin ?? undefined,
           structuredSenderNote:
             entity?.senderType !== "bot" &&
             entity?.openSweAccount === "unlinked"
