@@ -4,8 +4,7 @@ These run here because the model call does: the backend's model-call phase retur
 only the system prompt and tools, so a message edit made there never reaches the model.
 """
 
-from collections.abc import Awaitable, Callable, Iterator
-from typing import Any
+from collections.abc import Awaitable, Callable, Iterator, Mapping
 
 from langchain.agents.middleware import AgentMiddleware
 from langchain.agents.middleware.types import ModelRequest, ModelResponse
@@ -41,7 +40,9 @@ def _without_legacy_function_call(message: AnyMessage) -> AnyMessage:
     return message.model_copy(update={"additional_kwargs": kwargs})
 
 
-def _without_blocks(message: AnyMessage, drop: Callable[[dict[str, Any]], bool]) -> AnyMessage:
+def _without_blocks(
+    message: AnyMessage, drop: Callable[[Mapping[str, object]], bool]
+) -> AnyMessage:
     if not isinstance(message, AIMessage) or not isinstance(message.content, list):
         return message
     content = [b for b in message.content if not (isinstance(b, dict) and drop(b))]
@@ -50,7 +51,7 @@ def _without_blocks(message: AnyMessage, drop: Callable[[dict[str, Any]], bool])
     return message.model_copy(update={"content": content})
 
 
-def _unreplayable_reasoning(block: dict[str, Any]) -> bool:
+def _unreplayable_reasoning(block: Mapping[str, object]) -> bool:
     item_id = block.get("id")
     return (
         block.get("type") == "reasoning"
@@ -60,7 +61,7 @@ def _unreplayable_reasoning(block: dict[str, Any]) -> bool:
     )
 
 
-def _empty_thinking(block: dict[str, Any]) -> bool:
+def _empty_thinking(block: Mapping[str, object]) -> bool:
     return block.get("type") == "thinking" and not block.get("thinking")
 
 
