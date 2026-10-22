@@ -23,6 +23,7 @@ record for the dashboard. A failed refresh of either kind leaves the previous
 snapshot in place: runs keep booting from the last image that worked.
 """
 
+import asyncio
 import hashlib
 import logging
 import shlex
@@ -36,6 +37,7 @@ from openswe.utils.time import parse_iso
 from openswe.workspaces.store import (
     WORKSPACES,
     RefreshKind,
+    RefreshStep,
     Workspace,
     capture_workspace_snapshot,
     require_capture_support,
@@ -234,12 +236,21 @@ async def maybe_start_update(record: Workspace | None) -> str | None:
     if record is None or not is_update_due(record):
         return None
     try:
-        return await start_refresh_run(record.slug, kind="update")
+        run_id = await start_refresh_run(record.slug, kind="update")
     except Exception:
         logger.warning(
             "Could not start workspace update", extra={"workspace": record.slug}, exc_info=True
         )
         return None
+    logger.info(
+        "Queued workspace update",
+        extra={
+            "workspace": record.slug,
+            "refresh_run_id": run_id,
+            "last_captured_at": record.last_captured_at,
+        },
+    )
+    return run_id
 
 
 async def refresh_workspace(
@@ -283,18 +294,35 @@ async def refresh_workspace(
         and record.refresh_status == "refreshing"
         and record.refresh_run_id == run_id
     )
+    context = {"workspace": slug, "refresh_kind": kind, "refresh_run_id": run_id}
     if not await WORKSPACES.mark_refreshing(slug, kind, run_id=run_id):
+        logger.info(
+            "Refresh already running elsewhere",
+            extra={
+                **context,
+                "holder_run_id": record.refresh_run_id,
+                "holder_started_at": record.refresh_started_at,
+            },
+        )
         return {"status": "already_refreshing", "slug": slug}
     if interrupted:
-        logger.info(
+        lost_step = _running_step(record)
+        logger.warning(
             "Restarting an interrupted refresh",
-            extra={"workspace": slug, "refresh_run_id": run_id},
+            extra={
+                **context,
+                "interrupted_started_at": record.refresh_started_at,
+                "interrupted_step": lost_step.label if lost_step else None,
+                "sandbox_id": record.refresh_sandbox_id,
+            },
         )
         if record.refresh_sandbox_id:
             await _release_builder_sandbox(record.refresh_sandbox_id)
+    logger.info("Refresh started", extra={**context, "base_snapshot_id": base})
     started = datetime.now(UTC)
     sandbox_id: str | None = None
     log = ""
+    step = "boot"
     try:
         await WORKSPACES.start_refresh_step(slug, "boot")
         backend = await _create_builder_sandbox(record, base)
@@ -306,6 +334,7 @@ async def refresh_workspace(
         # Every script runs before the capture, so a snapshot only ships once the
         # whole of what produced it worked.
         for label, command, timeout in _scripts_to_run(record, kind):
+            step = label
             await WORKSPACES.start_refresh_step(slug, label, log_path=script_log_path(label))
             result = await backend.aexecute(command, timeout=timeout)
             log = f"{log}\n--- {label} script ---\n{result.output or ''}".strip()
@@ -324,11 +353,19 @@ async def refresh_workspace(
                     "log": log,
                 }
             await WORKSPACES.finish_refresh_step(slug, label, "success", exit_code=0)
+        step = "capture"
         await WORKSPACES.start_refresh_step(slug, "capture")
         await capture_workspace_snapshot(slug, sandbox_id, timeout=capture_timeout())
         await WORKSPACES.finish_refresh_step(slug, "capture", "success")
+    except asyncio.CancelledError:
+        # Left marked refreshing on purpose: the job's retry takes the refresh over.
+        logger.warning(
+            "Refresh interrupted",
+            extra={**context, "step": step, "sandbox_id": sandbox_id},
+        )
+        raise
     except Exception as exc:
-        logger.warning("Refresh failed", extra={"workspace": slug}, exc_info=True)
+        logger.warning("Refresh failed", extra={**context, "step": step}, exc_info=True)
         await WORKSPACES.mark_refresh_settled(slug, "failed", log=log, error=str(exc))
         return {"status": "failed", "slug": slug, "error": str(exc), "log": log}
     finally:
@@ -339,7 +376,7 @@ async def refresh_workspace(
     await WORKSPACES.mark_refresh_settled(slug, "success", log=log)
     logger.info(
         "Refreshed workspace",
-        extra={"workspace": slug, "refresh_kind": kind, "elapsed_seconds": elapsed},
+        extra={**context, "elapsed_seconds": elapsed},
     )
     return {"status": "success", "slug": slug, "kind": kind, "seconds": elapsed, "log": log}
 
@@ -430,7 +467,7 @@ async def _read_builder_log(sandbox_id: str, path: str) -> str | None:
     return (result.output or "").strip() or None
 
 
-def _running_step(record: Workspace) -> Any:
+def _running_step(record: Workspace) -> RefreshStep | None:
     return next((step for step in record.refresh_steps if step.status == "running"), None)
 
 
