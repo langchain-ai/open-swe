@@ -121,10 +121,9 @@ interface ScrollState {
  * user sends is pinned to the top and the reply fills in below it.
  *
  * Every adjustment runs before paint (layout effects and ResizeObserver
- * callbacks), so no frame ever shows the transcript out of place. Only real
- * scroll input (wheel, touch, keys, the scrollbar) counts as the user moving:
- * the browser also scrolls when it clamps to a shrinking scroll height, and
- * that must not stop the tail being followed.
+ * callbacks), so no frame ever shows the transcript out of place. Any scroll
+ * the hook didn't make counts as the user moving, except the browser clamping
+ * to a shrinking scroll height, which must not stop the tail being followed.
  */
 export function useTranscriptScroll({
   scrollKey,
@@ -374,7 +373,14 @@ export function useTranscriptScroll({
     const handleScroll = () => {
       const top = el.scrollTop
       const nearBottom = isNearBottom(el)
-      if (userIsScrolling()) {
+      // Our own writes settle `previousTop` to where they land, and the browser
+      // clamping to a shorter transcript lands exactly on the new bottom. Any
+      // other move is the user's even without input we can see: find in page,
+      // drag-select autoscroll, focus moving to an off-screen control.
+      const ours = Math.abs(top - state.current.previousTop) <= 1
+      const clamped =
+        top < state.current.previousTop && top >= maxScrollTop(el) - 1
+      if (userIsScrolling() || (!ours && !clamped)) {
         releasePin()
         if (top < state.current.previousTop - 1) {
           state.current.followTail = false
