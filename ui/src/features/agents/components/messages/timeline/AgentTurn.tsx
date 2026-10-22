@@ -11,6 +11,7 @@ import { CopyIconButton } from "@langchain/macaw-components/CopyButton"
 import { DiffView } from "../../chat/DiffView"
 import { ChunkRenderer } from "../ChunkRenderer"
 import { MessageTimestamp } from "../MessageTimestamp"
+import { WorkerLaunchMessage } from "../TaskEventMessage"
 import { ReasoningBlock } from "../ReasoningBlock"
 import {
   buildRenderItems,
@@ -306,6 +307,9 @@ export function AgentTurn({
           />
         )
       }
+
+      case "worker-launch-item":
+        return <WorkerLaunchMessage key={item.key} chunk={item.chunk} />
 
       case "reply-item":
         return <ReplyCard key={item.key} chunk={item.chunk} />
