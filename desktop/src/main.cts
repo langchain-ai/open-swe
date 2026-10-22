@@ -1716,10 +1716,7 @@ function createSetupWindow() {
         await clearBackendCookies(previousUrl);
         await session.defaultSession.clearStorageData({ origin: APP_URL });
       }
-      if (pendingDeepLink && openDesktopLink(pendingDeepLink))
-        pendingDeepLink = null;
-      else if (mainWindow && !mainWindow.isDestroyed())
-        await loadApp(mainWindow);
+      if (mainWindow && !mainWindow.isDestroyed()) await loadApp(mainWindow);
       else createWindow();
       window.close();
     } catch (error) {
@@ -1753,10 +1750,27 @@ function configurePermissions() {
 }
 
 let pendingDeepLink = null;
+let desktopLinksReady = false;
+
+function openPendingDesktopLink() {
+  desktopLinksReady = true;
+  const url = pendingDeepLink;
+  pendingDeepLink = null;
+  return url ? openDesktopLink(url) : false;
+}
 
 function openDesktopLink(url) {
   const target = backendUrl && desktopDeepLinkUrl(url, backendUrl);
-  if (!target) return false;
+  if (!target) {
+    if (URL.canParse(url) && new URL(url).protocol === "https:") {
+      void shell
+        .openExternal(url)
+        .catch((error) =>
+          console.warn("Could not open desktop link in the browser", error),
+        );
+    }
+    return false;
+  }
   const existingWindow =
     mainWindow && !mainWindow.isDestroyed() ? mainWindow : null;
   const window = existingWindow || createWindow(target);
@@ -1773,10 +1787,9 @@ app.on("will-continue-activity", (event, type) => {
 
 app.on("continue-activity", (event, type, _userInfo, details) => {
   if (type !== "NSUserActivityTypeBrowsingWeb" || !details.webpageURL) return;
-  if (!backendUrl) pendingDeepLink = details.webpageURL;
-  else if (!desktopDeepLinkUrl(details.webpageURL, backendUrl)) return;
   event.preventDefault();
-  if (backendUrl) openDesktopLink(details.webpageURL);
+  if (!desktopLinksReady) pendingDeepLink = details.webpageURL;
+  else openDesktopLink(details.webpageURL);
 });
 
 const hasSingleInstanceLock = app.requestSingleInstanceLock();
@@ -1838,9 +1851,7 @@ if (!hasSingleInstanceLock) {
     configurePermissions();
     configureDesktopIpc();
     createMenu();
-    if (pendingDeepLink && openDesktopLink(pendingDeepLink))
-      pendingDeepLink = null;
-    else createWindow();
+    if (!openPendingDesktopLink()) createWindow();
     configureAutoUpdater();
     configureTerminalIpc({
       ipcMain,

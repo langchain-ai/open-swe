@@ -28,6 +28,11 @@ Packaged builds ask for the organization's backend URL on first launch and store
 local user data. They have no maintainer-hosted default. Use **Open SWE → Backend URL…** to switch
 deployments; switching clears the previous deployment's local session data.
 
+On macOS, Universal Links open agent and review pages in the app only when the URL's origin
+matches the configured backend. Links for other deployments open in the default browser instead.
+Associated domains are fixed in the signed app, so macOS may still launch Open SWE before it
+hands a mismatched link back to the browser.
+
 The shared backend's GitHub App must allow `<backend-url>/dashboard/api/auth/callback` as a
 callback URL. Set `ALLOWED_GITHUB_ORGS` or `ALLOWED_GITHUB_USERS` on that backend to control which
 GitHub users can create dashboard sessions, including the ones "This Mac" threads run under.
