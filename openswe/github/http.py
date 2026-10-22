@@ -46,9 +46,6 @@ from openswe.utils.http_pool import pooled_transport
 from openswe.utils.url_safety import request_with_safe_redirects
 
 if TYPE_CHECKING:
-    from githubkit import GitHub
-    from githubkit.auth import AppAuthStrategy
-
     from openswe.github.pull_request_status import PullRequestClient
     from openswe.merge_queue.git import CandidateGit
 
@@ -73,22 +70,6 @@ _BASE_BACKOFF = 1.0
 _BACKOFF_MULTIPLIER = 2.0
 _MAX_BACKOFF = 60.0
 _JITTER_FACTOR = 0.25
-
-
-async def scoped_installation_token(
-    app: GitHub[AppAuthStrategy],
-    installation_id: int,
-    repository_id: int,
-    permissions: Mapping[str, str],
-) -> object:
-    # The generated SDK silently drops permissions absent from its schema (Variables).
-    response = await app.arequest(
-        "POST",
-        f"/app/installations/{installation_id}/access_tokens",
-        json={"repository_ids": [repository_id], "permissions": dict(permissions)},
-        headers={"X-GitHub-Api-Version": GITHUB_HEADERS_VERSION},
-    )
-    return response.json()
 
 
 def github_headers(token: str) -> dict[str, str]:
@@ -787,31 +768,6 @@ class RepoClient:
             if len(files) != 1 or files[0].filename != filename or files[0].file_size > 100_000:
                 raise ValueError("Unexpected artifact contents")
             return TypeAdapter(dict[str, JsonValue]).validate_json(archive.read(files[0]))
-
-    async def queue_dispatch_actor(self) -> int:
-        value = await self.get("actions/variables/MERGE_QUEUE_DISPATCH_ACTOR_ID")
-        actor = value.get("value") if isinstance(value, dict) else None
-        if (
-            not isinstance(actor, str)
-            or not actor.isascii()
-            or not actor.isdigit()
-            or int(actor) <= 0
-        ):
-            raise ValueError("Queue dispatch actor is missing or invalid")
-        return int(actor)
-
-    async def dispatch_validation(self, workflow: str, contract: str) -> None:
-        """Exactly one HTTP attempt; recover ambiguous responses by discovering the run."""
-        if self.github.login is not None:
-            raise ValueError("Validation dispatch requires a controller identity")
-        response = await self.github.http.post(
-            f"{GITHUB_API_BASE}/repos/{self.full_name}/actions/workflows/"
-            f"{quote(workflow, safe='')}/dispatches",
-            json={"ref": "main", "inputs": {"contract": contract}},
-            follow_redirects=False,
-        )
-        if response.status_code != 204:
-            raise GitHubError(response)
 
     async def validation_runs(self, workflow: str, since: datetime) -> tuple[ValidationRun, ...]:
         runs: list[ValidationRun] = []

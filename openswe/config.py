@@ -269,8 +269,8 @@ ENV.var("GITHUB_APP_INSTALLATION_ID", "GitHub App installation used when a run n
 ENV.var("GITHUB_WEBHOOK_SECRET", "HMAC secret for GitHub webhook deliveries.", secret=True)
 ENV.var("MERGE_QUEUE_CONFIG", "Trusted canary queue configuration as JSON; unset disables it.")
 ENV.var(
-    "MERGE_QUEUE_APP_PRIVATE_KEY",
-    "Private key of the isolated merge queue controller App; never used by agents.",
+    "MERGE_QUEUE_DISPATCH_SECRET",
+    "Backend-only signing secret for the queue dispatch gateway; never used by agents.",
     secret=True,
 )
 ENV.var(

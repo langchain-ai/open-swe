@@ -7,19 +7,19 @@ from datetime import UTC, datetime, timedelta
 from unittest.mock import AsyncMock, Mock
 from uuid import UUID, uuid7
 
-import httpx2
 import pytest
 from sqlalchemy import func, select, update
 from sqlalchemy.exc import IntegrityError
 
 from openswe.database import postgres
-from openswe.github.http import GitHubError, RepoClient
+from openswe.github.http import RepoClient
 from openswe.github.pull_requests import PullRequest
 from openswe.github.repositories import Repository
 from openswe.merge_queue import controller, runtime
 from openswe.merge_queue.admission import Admission, AdmissionReader, CheckSource, QueuePolicy
 from openswe.merge_queue.configuration import QueueConfiguration
 from openswe.merge_queue.controller import QueueController
+from openswe.merge_queue.dispatch import DispatchGateway, DispatchRejected
 from openswe.merge_queue.git import Candidate, CandidateGit, PullHead, candidate_ref
 from openswe.merge_queue.models import (
     Attempt,
@@ -839,7 +839,7 @@ async def test_validation_job_expires_saved_budget_during_github_outage(
         raise RuntimeError("GitHub unavailable")
         yield  # pragma: no cover
 
-    runtime = QueueRuntime({queue.id: policy}, unavailable)
+    runtime = QueueRuntime({queue.id: policy}, unavailable, Mock(spec=DispatchGateway))
     with pytest.raises(RuntimeError, match="GitHub unavailable"):
         await runtime.reconcile(QueueJob(queue_id=queue.id, workspace_id=queue.workspace_id))
     history = await queue.history(batch.id)
@@ -873,13 +873,9 @@ async def test_validation_precedes_cleanup_and_cancellation_skips_it(
     repo = Mock(spec=RepoClient, full_name="acme/widgets")
     repo.branch_sha = AsyncMock(return_value=candidate.base_sha)
     repo.ref_sha = AsyncMock(return_value=candidate.sha)
-    repo.dispatch_validation = AsyncMock(
-        side_effect=GitHubError(
-            httpx2.Response(403, request=httpx2.Request("POST", "https://api.github.com"))
-        )
-    )
+    dispatcher = Mock(spec=DispatchGateway, dispatch=AsyncMock(side_effect=DispatchRejected(403)))
     if cancelled:
-        repo.dispatch_validation.side_effect = asyncio.CancelledError()
+        dispatcher.dispatch.side_effect = asyncio.CancelledError()
 
     def pull(number: int) -> Mock:
         return Mock(
@@ -912,7 +908,7 @@ async def test_validation_precedes_cleanup_and_cancellation_skips_it(
     async def open_repo(_queue: MergeQueue) -> AsyncIterator[RepoClient]:
         yield repo
 
-    runtime = QueueRuntime({queue.id: policy}, open_repo)
+    runtime = QueueRuntime({queue.id: policy}, open_repo, dispatcher)
     payload = QueueJob(queue_id=queue.id, workspace_id=queue.workspace_id)
     if cancelled:
         with pytest.raises(asyncio.CancelledError):
@@ -925,7 +921,7 @@ async def test_validation_precedes_cleanup_and_cancellation_skips_it(
 
 @pytest.fixture
 async def queue_controller(queue: MergeQueue, monkeypatch: pytest.MonkeyPatch) -> QueueController:
-    monkeypatch.setenv("MERGE_QUEUE_APP_PRIVATE_KEY", "queue-test-private-key")
+    monkeypatch.setenv("MERGE_QUEUE_DISPATCH_SECRET", "s" * 32)
     monkeypatch.setenv("GITHUB_APP_ID", "99")
     monkeypatch.setenv("SANDBOX_TYPE", "langsmith")
     monkeypatch.setattr(runtime, "RUNTIME", None)
@@ -934,8 +930,7 @@ async def queue_controller(queue: MergeQueue, monkeypatch: pytest.MonkeyPatch) -
         workspace_id=queue.workspace_id,
         repository="acme/widgets",
         repository_id=42,
-        app_id=123,
-        installation_id=456,
+        dispatch_url="https://dispatcher.example/queue",
         workflow_digest="a" * 64,
         policy=QueuePolicy(
             checks={"checks": CheckSource(app_id=1, workflow_path=".github/workflows/ci.yml")},
