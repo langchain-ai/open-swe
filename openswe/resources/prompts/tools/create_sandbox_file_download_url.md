@@ -6,9 +6,8 @@ it for secrets or credentials. Links do not expire by default; pass `expires_in_
 when a link should stop working after a set time. Set `content_disposition` to `inline` and
 provide an appropriate `content_type` when the browser should preview an image, video, or PDF.
 Preserve the returned `url` byte-for-byte: save the JSON result and insert its `url` programmatically,
-never reconstruct a signed URL. In a web chat reply, show an image inline with Markdown image syntax
-and the returned `url` verbatim (for example, `![Screenshot](url)`) instead of a bare link. In GitHub
-PR descriptions, embed screenshots with explicit HTML `<img>` tags with an explicit `width` (for
-example, `width="640"`), including in Before/After tables; never use Markdown image syntax there.
-For PR images, read back the published body and rendered image URLs and verify anonymous GETs
-return HTTP 200 with the expected image MIME type after publication.
+never reconstruct a signed URL. Don't create a link for an image `browser_screenshot` returned: the
+web transcript already shows it. In GitHub PR descriptions, embed screenshots with explicit HTML
+`<img>` tags with an explicit `width` (for example, `width="640"`), including in Before/After tables;
+never use Markdown image syntax. For PR images, read back the published body and rendered image URLs
+and verify anonymous GETs return HTTP 200 with the expected image MIME type after publication.
