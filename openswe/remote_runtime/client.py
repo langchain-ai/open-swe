@@ -5,6 +5,7 @@ plays. Dispatch stamps a signed run token into that context, and the deployment
 calls back with it for the graph's tools and run hooks.
 """
 
+from collections.abc import Mapping
 from typing import Final, Literal, NotRequired, TypedDict, get_args
 from urllib.parse import urlsplit
 
