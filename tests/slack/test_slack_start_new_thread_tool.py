@@ -63,6 +63,23 @@ async def test_slack_breakout_thread_refuses_private_channel(
     post.assert_not_awaited()
 
 
+@pytest.mark.parametrize("channel_id", ["null", "", "#general"])
+async def test_breakout_rejects_invalid_channel_before_slack_lookup(
+    monkeypatch: pytest.MonkeyPatch, channel_id: str
+) -> None:
+    monkeypatch.setattr("openswe.run_config.get_config", _config)
+    load = AsyncMock()
+    monkeypatch.setattr(SlackChannel, "load", load)
+
+    result = await slack_breakout_tool.slack_breakout_thread(
+        "Title", "Do the thing.", channel_id=channel_id
+    )
+
+    assert result["success"] is False
+    assert "channel_id must be a Slack channel ID" in str(result["error"])
+    load.assert_not_awaited()
+
+
 async def _fake_trace_url(thread_id: str, **kwargs: object) -> str:
     return "https://smith/x"
 
