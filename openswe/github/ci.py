@@ -66,7 +66,9 @@ class RequiredCheck:
     app_id: int | None = None
 
     @classmethod
-    async def for_branch(cls, repo: RepoClient, branch: str) -> set[Self] | None:
+    async def for_branch(
+        cls, repo: RepoClient, branch: str, *, include_review_checks: bool = False
+    ) -> set[Self] | None:
         """Checks ``branch`` requires, from branch protection and rulesets; read access suffices."""
         try:
             protection = _Branch.model_validate(await repo.branch(branch)).protection
@@ -89,7 +91,11 @@ class RequiredCheck:
                     cls(check.context, _any_app(check.integration_id))
                     for check in rule.parameters.required_status_checks
                 )
-        return {check for check in required if check.name not in _OPEN_SWE_CHECK_NAMES}
+        return {
+            check
+            for check in required
+            if include_review_checks or check.name not in _OPEN_SWE_CHECK_NAMES
+        }
 
     def reported_by(self, check_runs: list[dict[str, Any]], statuses: list[dict[str, Any]]) -> bool:
         for run in check_runs:
