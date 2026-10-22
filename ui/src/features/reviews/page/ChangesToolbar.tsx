@@ -33,10 +33,14 @@ export function ChangesToolbar({ pr }: { pr: PullRequestRef }) {
     .reduce((total, file) => total + file.additions + file.deletions, 0)
   const viewedCount = files.filter((file) => viewed.has(file.path)).length
   const steps = detail?.walkthrough?.steps.length ?? 0
-  // The file list beside the diff carries the same switch; only one is shown.
+  // The tabbed file list beside the diff carries the same switch; only one is shown.
   const navigatorOpen = useReviewPage((state) => state.navigatorOpen)
   const roomForNavigator = useMediaQuery(NAVIGATOR_INLINE_QUERY)
-  const navigatorInline = navigatorOpen && roomForNavigator
+  const navigatorStacked = useReviewPage(
+    (state) => state.navigatorLayout === "stacked"
+  )
+  const navigatorHasTabs =
+    navigatorOpen && roomForNavigator && !navigatorStacked
   const open = detail !== undefined && isLive(detail)
   const fileFilter = useReviewPage((state) => state.fileFilter)
   const setFileFilter = useReviewPage((state) => state.setFileFilter)
@@ -92,7 +96,7 @@ export function ChangesToolbar({ pr }: { pr: PullRequestRef }) {
           </span>
         )}
         <span className="flex-1" />
-        {steps > 0 && !navigatorInline && (
+        {steps > 0 && !navigatorHasTabs && (
           <ReadingOrderTabs steps={steps} files={files.length} />
         )}
         <GroupedTabs
