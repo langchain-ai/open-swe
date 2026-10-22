@@ -96,23 +96,6 @@ jobs:
           # own key and count against the workspace's gateway spend cap.
           # Each secret is named, so the runner gets only the one this deployment uses.
           LANGSMITH_GATEWAY_API_KEY: ${{ matrix.environment == 'prod' && secrets.LANGSMITH_GATEWAY_API_KEY_PROD || matrix.environment == 'staging' && secrets.LANGSMITH_GATEWAY_API_KEY_STAGING || '' }}
-          # This deployment's Linear app, which deploy cannot ask for without a terminal. Deploy
-          # hands it to Agent Auth and never to the deployment.
-          MDA_LINEAR_CLIENT_ID: >-
-            ${{ matrix.environment == 'prod' && secrets.MDA_LINEAR_CLIENT_ID_PROD
-            || matrix.environment == 'staging' && secrets.MDA_LINEAR_CLIENT_ID_STAGING
-            || matrix.environment == 'preview' && secrets.MDA_LINEAR_CLIENT_ID_PREVIEW
-            || '' }}
-          MDA_LINEAR_CLIENT_SECRET: >-
-            ${{ matrix.environment == 'prod' && secrets.MDA_LINEAR_CLIENT_SECRET_PROD
-            || matrix.environment == 'staging' && secrets.MDA_LINEAR_CLIENT_SECRET_STAGING
-            || matrix.environment == 'preview' && secrets.MDA_LINEAR_CLIENT_SECRET_PREVIEW
-            || '' }}
-          MDA_LINEAR_WEBHOOK_SECRET: >-
-            ${{ matrix.environment == 'prod' && secrets.MDA_LINEAR_WEBHOOK_SECRET_PROD
-            || matrix.environment == 'staging' && secrets.MDA_LINEAR_WEBHOOK_SECRET_STAGING
-            || matrix.environment == 'preview' && secrets.MDA_LINEAR_WEBHOOK_SECRET_PREVIEW
-            || '' }}
         run: |
           case "$ENVIRONMENT" in
             preview) backend="https://open-swe-preview-cc53e8fbe667565d843d0843f84ee92c.us.langgraph.app" ;;
