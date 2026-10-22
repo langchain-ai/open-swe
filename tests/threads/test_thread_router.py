@@ -222,16 +222,11 @@ async def test_a_thread_only_the_agent_server_knows_is_indexed_on_first_read(
     assert (await harness.request("GET", "/threads/00000000-0000-4000-8000-00000000ffff"))[0] == 404
 
 
-@pytest.mark.parametrize("runtime", ["local", "mda"])
-async def test_a_run_goes_to_its_threads_runtime_and_marks_the_thread_busy(
-    monkeypatch: pytest.MonkeyPatch,
-    caplog: pytest.LogCaptureFixture,
-    secret: None,
-    runtime: Runtime,
+async def test_a_run_goes_to_mda_and_marks_the_thread_busy(
+    monkeypatch: pytest.MonkeyPatch, secret: None
 ) -> None:
     harness = _Harness(monkeypatch)
-    # A local thread is one made before every new thread ran on MDA.
-    await index.create(THREAD, runtime=runtime, metadata={"owner_login": "ada"})
+    await index.create(THREAD, runtime="mda", metadata={"owner_login": "ada"})
     run = {
         "assistant_id": "agent",
         "input": {},
@@ -243,29 +238,37 @@ async def test_a_run_goes_to_its_threads_runtime_and_marks_the_thread_busy(
     assert status == 200
     indexed = await index.get(THREAD)
     assert indexed is not None and indexed.status == "busy"
-    warnings = [r for r in caplog.records if r.name == router.__name__ and r.levelname == "WARNING"]
-    if runtime == "local":
-        assert harness.reached_here == [f"/threads/{THREAD}/runs"]
-        assert harness.forwarded == []
-        [warning] = warnings
-        assert warning.__dict__["thread_id"] == THREAD
-        assert warning.__dict__["assistant_id"] == "agent"
-    else:
-        assert warnings == []
-        assert harness.reached_here == []
-        [(path, sent)] = harness.forwarded
-        assert path == f"/threads/{THREAD}/runs" and sent["assistant_id"] == "open-swe"
+    assert harness.reached_here == []
+    [(path, sent)] = harness.forwarded
+    assert path == f"/threads/{THREAD}/runs" and sent["assistant_id"] == "open-swe"
 
 
-async def test_a_refused_run_leaves_the_thread_idle(monkeypatch: pytest.MonkeyPatch) -> None:
+@pytest.mark.parametrize(
+    ("path", "body"),
+    [
+        ("/runs", {"assistant_id": "agent"}),
+        ("/runs/crons", {"assistant_id": "agent", "schedule": "* * * * *"}),
+        ("/commands", {"id": 1, "method": "run.start", "params": {"assistant_id": "agent"}}),
+        ("/commands", {"id": 1, "method": "input.respond", "params": {}}),
+        ("/copy", {}),
+    ],
+)
+async def test_a_local_thread_takes_no_new_activity(
+    monkeypatch: pytest.MonkeyPatch, path: str, body: dict[str, JsonValue]
+) -> None:
     harness = _Harness(monkeypatch)
-    harness.local_status = 409
+    # A local thread is one made before every new thread ran on MDA.
     await index.create(THREAD, runtime="local")
 
-    await harness.request("POST", f"/threads/{THREAD}/runs", {"assistant_id": "agent"})
+    status, _ = await harness.request("POST", f"/threads/{THREAD}{path}", body)
 
+    assert status == 410
+    assert harness.reached_here == [] and harness.forwarded == []
     indexed = await index.get(THREAD)
     assert indexed is not None and indexed.status == "idle"
+    assert await index.ThreadSearch().run() == [indexed]
+    status, _ = await harness.request("POST", f"/threads/{THREAD}/history", {})
+    assert status == 200 and harness.reached_here == [f"/threads/{THREAD}/history"]
 
 
 async def test_a_new_thread_runs_on_mda(monkeypatch: pytest.MonkeyPatch, secret: None) -> None:

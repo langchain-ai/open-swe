@@ -7,6 +7,8 @@ import pytest
 
 from openswe.github import webhook as github_webhooks
 
+pytestmark = pytest.mark.usefixtures("no_local_threads")
+
 
 @pytest.fixture(autouse=True)
 def _approval_mode_off(monkeypatch: pytest.MonkeyPatch) -> None:
