@@ -1,7 +1,33 @@
 import { memo } from "react"
 
+import { MessageImage } from "../MessageImage"
 import { ToolResultBody } from "./ToolResultBody"
-import type { ToolExecutionChunk } from "@/features/agents/lib/types"
+import type {
+  AnyImageChunk,
+  ToolExecutionChunk,
+} from "@/features/agents/lib/types"
+
+/** A tool's images above its text, bounded like a message's attachments. */
+export const ImageEntryBody = memo(function ImageEntryBody({
+  images,
+  text,
+}: {
+  images: Array<AnyImageChunk>
+  text: string | null
+}) {
+  return (
+    <div className="space-y-space-2">
+      {images.map((image, index) => (
+        <MessageImage
+          key={index}
+          chunk={image}
+          className="block h-auto max-h-[220px] w-auto max-w-[min(100%,420px)] rounded-lg border border-default bg-surface-level-1 object-contain"
+        />
+      ))}
+      {text && <ToolResultBody value={text} />}
+    </div>
+  )
+})
 
 export const ShellEntryBody = memo(function ShellEntryBody({
   chunk,
