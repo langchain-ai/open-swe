@@ -2,15 +2,24 @@
 
 Open SWE dispatch names the graph a run plays (``agent``, ``reviewer`` or
 ``review-scout``) in its context. The model loop and its checkpoints run here. The Open SWE backend
-holds every credential, the sandbox and the graph itself: this factory takes the
-graph's tools, subagents and models from the backend's catalog for the run, and
+holds every credential and the graph itself: this factory takes the graph's tools,
+subagents and models from the backend's catalog for the run, and
 ``BackendRunMiddleware`` hands each phase of the loop to the graph's own
-middleware there. The run token in the context authenticates every call.
+middleware there. Where MDA owns the thread's box, the file and shell tools run in
+it from here (``SandboxToolsMiddleware``). The run token in the context
+authenticates every call.
+
+The same agent runs as the async ``general-purpose`` subagent, the graph
+``open-swe--general-purpose``, for the task workers a coordinator launches with
+``start_async_task``. A worker is an Open SWE thread of its own: it starts with a
+worker grant, adopts its own run token, and runs this agent's middleware as it.
 """
 
 from collections.abc import Collection, Mapping, Sequence
-from typing import Final, Literal
+from pathlib import Path
+from typing import TYPE_CHECKING, Final, Literal
 
+from deepagents.middleware.subagents import SubAgent
 from langchain.agents.middleware import (
     AgentMiddleware,
     ModelCallLimitMiddleware,
@@ -26,8 +35,14 @@ from managed_deepagents import (
 from pydantic import BaseModel, ConfigDict, Field, JsonValue
 from rt.backend import Catalog, OpenSweBackend
 from rt.browser import ReportedBrowserMiddleware
-from rt.managed_sandbox import ReplaceSandboxMiddleware, definition, opened_sandbox
+from rt.managed_sandbox import (
+    EXECUTE_TIMEOUT_SECONDS,
+    ReplaceSandboxMiddleware,
+    definition,
+    opened_sandbox,
+)
 from rt.middleware import (
+    AsyncWorkerLaunchMiddleware,
     BackendRunMiddleware,
     DescribedToolsMiddleware,
     ReportRepliesMiddleware,
@@ -35,12 +50,22 @@ from rt.middleware import (
     ServedToolsMiddleware,
 )
 from rt.models import RunModels, build_model
+from rt.sandbox_tools import SandboxToolsMiddleware
 from rt.tools import backend_tool
+
+if TYPE_CHECKING:
+    from managed_deepagents.define_deep_agent import ManagedAsyncSubAgent
 
 Graph = Literal["agent", "reviewer", "review-scout"]
 _DEFAULT_MODEL: Final = "anthropic:claude-opus-5-5"
 # Matches the in-process graphs' cap on model calls per run.
 _MODEL_CALL_LIMIT: Final = 5_000
+# A worker's system prompt starts as this agent's; the backend's prepends the rest.
+_INSTRUCTIONS: Final = Path(__file__).with_name("instructions.md").read_text()
+_WORKER_DESCRIPTION: Final = (
+    "An Open SWE task worker: a full agent of its own, sharing this thread's sandbox, "
+    "that works on one assignment in the background and reports back as a task message."
+)
 # Callable from the reviewer's code mode, so large results can be filtered or written
 # to files without passing through the model.
 _REVIEWER_PTC_TOOLS: Final[list[str | BaseTool]] = [
@@ -69,6 +94,8 @@ class OpenSweRunContext(BaseModel):
     event_streaming_v2: bool = Field(default=False, alias="__event_streaming_v2")
     # Dunder keys stay out of the trace metadata the context is mirrored into.
     run_token: str | None = Field(default=None, alias="__run_token")
+    # A launched task worker's first run: traded for its own run token before anything else.
+    worker_grant: str | None = Field(default=None, alias="__worker_grant")
     invocation_id: str | None = None
     # JSON, not RunModels: the gRPC runtime serializes only the context's top level.
     models: dict[str, JsonValue] | None = None
@@ -108,7 +135,7 @@ async def agent(runtime: ManagedServerRuntime) -> DeepAgentDefinition:
     context = OpenSweRunContext.model_validate(
         execution.context if execution is not None and execution.context is not None else {}
     )
-    backend = OpenSweBackend(context.run_token)
+    backend = OpenSweBackend(context.run_token, worker_grant=context.worker_grant)
     # Runs without a context (state reads, assistant reads) never call a model or a tool.
     catalog = await backend.catalog(None) if backend.has_run else Catalog()
     models = catalog.models or (
@@ -125,14 +152,21 @@ async def agent(runtime: ManagedServerRuntime) -> DeepAgentDefinition:
         else _DEFAULT_MODEL
     )
     tools = [backend_tool(spec, backend) for spec in catalog.tools]
-    by_name = {tool.name: tool for tool in tools}
+    # MDA's own file and shell tools serve the ones the thread's box runs here. Code
+    # mode keeps the backend's: its calls skip tool-call middleware, the checks included.
+    in_box = frozenset(catalog.sandbox.tools if catalog.sandbox is not None else ())
+    registered = [tool for tool in tools if tool.name not in in_box]
+    by_name = {tool.name: tool for tool in registered}
     excluded = frozenset(catalog.excluded)
     # Every schema offered costs each call its context, and OpenAI answers some requests
     # carrying hundreds with nothing; the tools the model seldom needs are called from code.
     code_only = frozenset(catalog.code_only)
     in_code = [tool for tool in tools if tool.name in code_only]
-    offered = [tool for tool in tools if tool not in in_code]
-    from_code = [*in_code, *(tool for tool in offered if tool.name in catalog.also_from_code)]
+    offered = [tool for tool in registered if tool.name not in code_only]
+    from_code = [
+        *in_code,
+        *(tool for tool in tools if tool.name in catalog.also_from_code and tool not in in_code),
+    ]
     subagent_tools = {
         subagent.name: offered
         if subagent.tools is None
@@ -142,50 +176,78 @@ async def agent(runtime: ManagedServerRuntime) -> DeepAgentDefinition:
     replace_sandbox = (
         [ReplaceSandboxMiddleware(backend, catalog.sandbox)] if catalog.sandbox is not None else []
     )
+    box_tools = (
+        [
+            SandboxToolsMiddleware(
+                backend,
+                catalog.sandbox,
+                EXECUTE_TIMEOUT_SECONDS,
+                check_reads=context.graph == "agent",
+            )
+        ]
+        if catalog.sandbox is not None and in_box
+        else []
+    )
+    reported_elsewhere = {*by_name, *in_box}
+    sync_subagents: list[SubAgent] = [
+        {
+            "name": subagent.name,
+            "description": subagent.description,
+            "system_prompt": subagent.system_prompt,
+            "model": subagent_model,
+            "tools": subagent_tools[subagent.name],
+            "middleware": [
+                *_backend_reports(backend, reported_elsewhere),
+                *box_tools,
+                *replace_sandbox,
+                ServedToolsMiddleware(subagent_tools[subagent.name], excluded, backend),
+                ModelRetryMiddleware(retry_on=(TimeoutError,)),
+            ],
+        }
+        for subagent in catalog.subagents
+    ]
+    # This agent's own, as the agent a worker is; deepagents passes no middleware down.
+    agent_middleware = [
+        BackendRunMiddleware(
+            backend,
+            context.invocation_id,
+            opened_sandbox if catalog.sandbox is not None else None,
+            trace_metadata=catalog.trace_metadata,
+        ),
+        *replace_sandbox,
+        *_backend_reports(backend, reported_elsewhere),
+        *box_tools,
+        ServedToolsMiddleware(offered, excluded | code_only, backend),
+        *_code_mode(context.graph, from_code, catalog.described),
+        *_browser(context.graph, backend),
+        ModelCallLimitMiddleware(run_limit=_MODEL_CALL_LIMIT, exit_behavior="end"),
+        ModelRetryMiddleware(retry_on=(TimeoutError,)),
+    ]
+    worker: ManagedAsyncSubAgent = {
+        "name": "general-purpose",
+        "description": _WORKER_DESCRIPTION,
+        "system_prompt": _INSTRUCTIONS,
+        "middleware": agent_middleware,
+        "async": True,
+    }
     return define_deep_agent(
         name="open-swe",
         model=model,
         context_schema=OpenSweRunContext,
-        # Named as the in-process graph names them, these replace MDA's own file
-        # and shell tools: the backend runs them in the thread's sandbox. Code-only
-        # tools stay callable by name, as in-process, though no request offers them.
-        tools=tools,
-        # The thread's box, for MDA's own use of it such as the browser's screenshots;
-        # the backend's tools run in the same box.
+        # Named as the in-process graph names them, these replace MDA's own file and
+        # shell tools where the backend runs them. Code-only tools stay callable by
+        # name, as in-process, though no request offers them.
+        tools=registered,
+        # The thread's box, for the file and shell tools run in it from here and for
+        # MDA's own use of it, such as the browser's screenshots; the backend's tools
+        # run in the same box. A worker's catalog is its coordinator's, so the worker
+        # shares the coordinator's box.
         sandbox=(
             definition(catalog.sandbox.create, catalog.sandbox.thread_id)
             if catalog.sandbox is not None
             else None
         ),
-        subagents=[
-            {
-                "name": subagent.name,
-                "description": subagent.description,
-                "system_prompt": subagent.system_prompt,
-                "model": subagent_model,
-                "tools": subagent_tools[subagent.name],
-                "middleware": [
-                    *_backend_reports(backend, by_name.keys()),
-                    *replace_sandbox,
-                    ServedToolsMiddleware(subagent_tools[subagent.name], excluded),
-                    ModelRetryMiddleware(retry_on=(TimeoutError,)),
-                ],
-            }
-            for subagent in catalog.subagents
-        ],
-        middleware=[
-            BackendRunMiddleware(
-                backend,
-                context.invocation_id,
-                opened_sandbox if catalog.sandbox is not None else None,
-                trace_metadata=catalog.trace_metadata,
-            ),
-            *replace_sandbox,
-            *_backend_reports(backend, by_name.keys()),
-            ServedToolsMiddleware(offered, excluded | code_only),
-            *_code_mode(context.graph, from_code, catalog.described),
-            *_browser(context.graph, backend),
-            ModelCallLimitMiddleware(run_limit=_MODEL_CALL_LIMIT, exit_behavior="end"),
-            ModelRetryMiddleware(retry_on=(TimeoutError,)),
-        ],
+        # `mda build` reads `worker`'s literal name to build its graph.
+        subagents=[*sync_subagents, worker],
+        middleware=[*agent_middleware, AsyncWorkerLaunchMiddleware(backend)],
     )

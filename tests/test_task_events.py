@@ -248,7 +248,9 @@ async def test_cancelled_worker_only_reports_interruption_without_restarting_owe
     from openswe.tasks import service
 
     monkeypatch.setattr(
-        store.TaskDelegation, "get", AsyncMock(return_value=SimpleNamespace(cancelled=True))
+        store.TaskDelegation,
+        "get",
+        AsyncMock(return_value=SimpleNamespace(cancelled=True, silenced=False)),
     )
     notify = AsyncMock()
     monkeypatch.setattr(service, "notify", notify)
@@ -460,7 +462,7 @@ async def test_repaired_task_thread_checkpoints_owed_messages_once(
         async with postgres.session() as session:
             await message.record(session)
     context = await store.TaskMembership.context_for_thread(thread_id)
-    middleware = task_coordination.TaskCoordinationMiddleware(thread_id, "owner", True, context)
+    middleware = task_coordination.TaskCoordinationMiddleware(thread_id, True, context)
     monkeypatch.setattr(task_coordination, "maybe_refresh_proxy_token", AsyncMock())
 
     delivered = await middleware.abefore_model({"messages": []}, Runtime())
@@ -494,7 +496,7 @@ async def test_task_context_is_checkpointed_once_without_changing_request_prefix
     lookup = AsyncMock(return_value=None)
     monkeypatch.setattr(store.TaskMembership, "context_for_thread", lookup)
     monkeypatch.setattr(postgres, "configured", lambda: False)
-    middleware = task_coordination.TaskCoordinationMiddleware(_COORDINATOR, "owner", enabled, None)
+    middleware = task_coordination.TaskCoordinationMiddleware(_COORDINATOR, enabled, None)
     state: AgentState = {"messages": [HumanMessage(content="Repair login", id="request")]}
     received: list[ModelRequest] = []
 
@@ -518,7 +520,9 @@ async def test_task_context_is_checkpointed_once_without_changing_request_prefix
     state["messages"] = add_messages(
         state["messages"],
         [
-            AIMessage(content="", tool_calls=[{"name": "spawn_worker", "args": {}, "id": "spawn"}]),
+            AIMessage(
+                content="", tool_calls=[{"name": "start_async_task", "args": {}, "id": "spawn"}]
+            ),
             ToolMessage(content="Worker started", tool_call_id="spawn"),
         ],
     )
@@ -541,7 +545,7 @@ async def test_task_context_is_checkpointed_once_without_changing_request_prefix
         ],
     )
     assert await middleware.abefore_model(state, Runtime()) is None
-    middleware = task_coordination.TaskCoordinationMiddleware(_COORDINATOR, "owner", enabled, None)
+    middleware = task_coordination.TaskCoordinationMiddleware(_COORDINATOR, enabled, None)
     assert await middleware.abefore_model(state, Runtime()) is None
     await model_call()
     for previous, current in zip(received, received[1:], strict=False):
@@ -564,7 +568,7 @@ async def test_task_context_returns_after_summarization_without_replacing_histor
     )
     monkeypatch.setattr(postgres, "configured", lambda: False)
     state: SummarizationState = {"messages": [HumanMessage(content="Repair login")]}
-    middleware = task_coordination.TaskCoordinationMiddleware(_COORDINATOR, "owner", False, context)
+    middleware = task_coordination.TaskCoordinationMiddleware(_COORDINATOR, False, context)
     initial = await middleware.abefore_model(state, Runtime())
     assert initial is not None
     state["messages"] = add_messages(state["messages"], initial["messages"])
@@ -597,9 +601,7 @@ async def test_task_context_returns_after_summarization_without_replacing_histor
         assert visible[:-1] == visible_before
         assert visible[-1].content == original_context.content
         assert visible[-1].id != original_context.id
-        middleware = task_coordination.TaskCoordinationMiddleware(
-            _COORDINATOR, "owner", False, context
-        )
+        middleware = task_coordination.TaskCoordinationMiddleware(_COORDINATOR, False, context)
         assert await middleware.abefore_model(state, Runtime()) is None
 
 
@@ -689,7 +691,7 @@ async def test_subscription_delivery_waiting_on_worker_cancel_cannot_launch(
     monkeypatch.setattr(event_matches, "dispatch_client", dispatch_client)
     monkeypatch.setattr(event_matches, "create_durable_run", dispatch)
     monkeypatch.setattr(service, "owned_worker", AsyncMock(return_value=(task, delegation)))
-    monkeypatch.setattr(service, "live_worker_runs", live_runs)
+    monkeypatch.setattr(service, "live_runs", live_runs)
     monkeypatch.setattr(service, "worker_status", AsyncMock(return_value={}))
     monkeypatch.setattr(service, "interrupt_transcript_turns", AsyncMock())
     monkeypatch.setattr(service, "cancel_thread_wakeups", AsyncMock())
@@ -701,3 +703,61 @@ async def test_subscription_delivery_waiting_on_worker_cancel_cannot_launch(
     assert not await subscription.match(event, EventSummary.of(event))
     assert await EventMatch.owed(_WORKER, []) == []
     assert await EventSubscription.for_thread(_WORKER) == []
+
+
+async def test_launched_runs_a_restart_left_unjoined_are_settled_once_they_end(
+    registry_db: None, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from unittest.mock import MagicMock
+
+    from openswe.remote_runtime import async_workers
+    from openswe.threads import runtimes
+
+    runs = {"ended": "error", "running": "running", "paused": "success"}
+    workers = {name: str(uuid4()) for name in runs}
+    for name, worker in workers.items():
+        await store.Task.reserve_worker(
+            _COORDINATOR,
+            worker,
+            title="Repair login",
+            workspace="default",
+            instructions="Fix login",
+            model="openai:gpt-5.5",
+            effort="high",
+            launch_request_id=name,
+            launch_run_id=f"run-{name}",
+        )
+    names = {worker: name for name, worker in workers.items()}
+
+    async def history(
+        thread_id: str, *, limit: int, metadata: dict[str, str]
+    ) -> list[dict[str, object]]:
+        paused = names[thread_id] == "paused"
+        return [{"values": {"messages": []}, "interrupts": [{"id": "approve"}] if paused else []}]
+
+    client = MagicMock()
+    client.runs.get = AsyncMock(
+        side_effect=lambda thread_id, run_id: {"run_id": run_id, "status": runs[names[thread_id]]}
+    )
+    client.threads.get_history = AsyncMock(side_effect=history)
+    mda = MagicMock(client=client)
+    monkeypatch.setattr(runtimes.Runtimes, "mda", property(lambda self: mda))
+    monkeypatch.setattr(async_workers, "refresh_thread_status", AsyncMock())
+    settle = AsyncMock()
+    monkeypatch.setattr(completion, "handle_run_completion", settle)
+
+    # The ended run is reported; the paused one needs no report, its resuming run has a webhook.
+    assert await async_workers.settle_launched_runs() == 2
+    settle.assert_awaited_once()
+    assert settle.await_args.args[0]["thread_id"] == workers["ended"]
+    assert settle.await_args.args[0]["status"] == "error"
+
+    # Settled runs are not asked about again; the running one is, until it ends.
+    client.runs.get.reset_mock()
+    assert await async_workers.settle_launched_runs() == 0
+    assert [call.args[0] for call in client.runs.get.await_args_list] == [workers["running"]]
+    runs["running"] = "success"
+    assert await async_workers.settle_launched_runs() == 1
+    assert settle.await_count == 2
+    assert await async_workers.settle_launched_runs() == 0
+    assert settle.await_count == 2
