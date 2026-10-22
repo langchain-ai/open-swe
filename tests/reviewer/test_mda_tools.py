@@ -458,3 +458,23 @@ async def test_optional_trace_failures_do_not_change_successful_turn_output(
             },
         )
     assert result["messages"][-1].content == "done"
+
+
+async def test_box_call_git_evidence_reaches_the_turn_after_its_run_closed(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The backend answers a box call's report after the call's run closed; its evidence still counts."""
+    monkeypatch.setenv("OPEN_SWE_BACKEND_URL", "https://backend.invalid")
+    git = TurnGitMetadata({"configurable": {"invocation_id": "turn"}})
+    evidence = git.evidence([GitTarget(repo="org/actual", branch="work")], "call-1", observed_at=1)
+    turn = RunTree(name="turn", run_type="chain", metadata={"open_swe_git_evidence": {}})
+    roots: list[RunTree | None] = [turn]
+    monkeypatch.setattr(TurnTrace, "current_root", staticmethod(lambda: roots[0]))
+    backend = OpenSweBackend("secret-token")
+    monkeypatch.setattr(backend, "tool_result", AsyncMock(return_value=evidence))
+
+    backend.reports.finished({}, ToolMessage(content="ran", tool_call_id="call-1"))
+    roots[0] = None  # The call's run has closed: the turn is no longer found from here.
+    await backend.reports.drain()
+
+    assert turn.metadata["open_swe_git_evidence"] == evidence

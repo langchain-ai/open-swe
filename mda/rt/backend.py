@@ -16,6 +16,7 @@ from weakref import WeakKeyDictionary
 
 import httpx2
 from langchain_core.messages import BaseMessage, ToolMessage, messages_to_dict
+from langsmith.run_trees import RunTree
 from pydantic import BaseModel, JsonValue, TypeAdapter, ValidationError
 
 from rt.models import ModelSpec, RunModels
@@ -339,16 +340,20 @@ class ToolReports:
         self._send(self._backend.tool_started(body))
 
     def finished(self, body: Mapping[str, JsonValue], result: ToolMessage) -> None:
-        self._send(self._finished(body, result))
+        # The call's run closes before the report is answered, and with it the way to
+        # the turn's trace, so the trace is found now.
+        self._send(self._finished(body, result, TurnTrace.live_root()))
 
     async def drain(self) -> None:
         """Wait for every report made so far, so the transcript has them before what follows."""
         if self._last is not None:
             await asyncio.shield(self._last)
 
-    async def _finished(self, body: Mapping[str, JsonValue], result: ToolMessage) -> None:
+    async def _finished(
+        self, body: Mapping[str, JsonValue], result: ToolMessage, turn: RunTree | None
+    ) -> None:
         # What the call changed in the thread's checkouts, for the turn's git metadata.
-        TurnTrace.record_evidence(await self._backend.tool_result(body, result))
+        TurnTrace.record_evidence(await self._backend.tool_result(body, result), turn)
 
     def _send(self, report: Coroutine[object, object, None]) -> None:
         self._last = asyncio.ensure_future(self._after(self._last, report))
