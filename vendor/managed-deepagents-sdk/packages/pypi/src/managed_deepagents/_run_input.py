@@ -1,6 +1,7 @@
 """Config defaults for native LangGraph execution."""
 
 from collections.abc import AsyncIterator, Iterator, Mapping, Sequence
+from contextlib import AbstractContextManager, nullcontext
 from typing import Any, cast
 
 from langchain_core.runnables.config import RunnableConfig
@@ -9,6 +10,7 @@ from langgraph._internal._constants import CONFIG_KEY_RUNTIME
 from langgraph.graph.state import CompiledStateGraph
 from langgraph.runtime import Runtime
 from langgraph.types import Interrupt
+from langsmith import get_tracing_context, tracing_context
 
 from managed_deepagents._channels.binding import (
     ChannelBinding,
@@ -54,6 +56,26 @@ def graph_default_config(config: Mapping[str, object] | None) -> RunnableConfig:
 class ManagedCompiledAgent(CompiledStateGraph[Any, Any, Any, Any]):
     """Remove ingress transport before native context conversion, on every execution."""
 
+    replicate_traces: bool = True
+
+    def _tracing(self, config: RunnableConfig | None) -> AbstractContextManager[None]:
+        project = ensure_config(self.config, config)["configurable"].get("__langsmith_project__")
+        if self.replicate_traces or not project:
+            return nullcontext()
+        context = get_tracing_context()
+        replicas = [
+            replica
+            for replica in context["replicas"] or ()
+            if replica.get("project_name") == project
+        ]
+        if not replicas:
+            return nullcontext()
+        context["replicas"] = replicas
+        parent = context["parent"]
+        if parent is not None:
+            context["parent"] = parent.model_copy(update={"replicas": replicas})
+        return tracing_context(**context)
+
     def stream(
         self,
         input: Any,
@@ -79,7 +101,8 @@ class ManagedCompiledAgent(CompiledStateGraph[Any, Any, Any, Any]):
                 notify_token = _delivering_notification.set(notifying)
                 routing_token = _current_routing.set(routing)
                 try:
-                    item = next(iterator)
+                    with self._tracing(config):
+                        item = next(iterator)
                 except StopIteration:
                     if reports_to is not None:
                         merged = _merged(self.config, config)
@@ -92,7 +115,8 @@ class ManagedCompiledAgent(CompiledStateGraph[Any, Any, Any, Any]):
                     _current_channel.reset(token)
                 yield item
         finally:
-            iterator.close()
+            with self._tracing(config):
+                iterator.close()
 
     async def astream(
         self,
@@ -119,7 +143,8 @@ class ManagedCompiledAgent(CompiledStateGraph[Any, Any, Any, Any]):
                 notify_token = _delivering_notification.set(notifying)
                 routing_token = _current_routing.set(routing)
                 try:
-                    item = await anext(iterator)
+                    with self._tracing(config):
+                        item = await anext(iterator)
                 except StopAsyncIteration:
                     if reports_to is not None:
                         merged = _merged(self.config, config)
@@ -133,7 +158,8 @@ class ManagedCompiledAgent(CompiledStateGraph[Any, Any, Any, Any]):
                     _current_channel.reset(token)
                 yield item
         finally:
-            await iterator.aclose()
+            with self._tracing(config):
+                await iterator.aclose()
 
     def _saved_channel(
         self, thread_config: RunnableConfig, config: RunnableConfig | None
@@ -147,6 +173,12 @@ class ManagedCompiledAgent(CompiledStateGraph[Any, Any, Any, Any]):
     ) -> ChannelBinding | None:
         saved = (await self.aget_state(thread_config)).values.get(SAVED_CHANNEL_KEY)
         return restored_channel(saved, _configurable(self.config, config))
+
+
+class SingleProjectManagedAgent(ManagedCompiledAgent):
+    """Keep requested-project runs from also being copied to the deployment project."""
+
+    replicate_traces = False
 
 
 def _lead_thread_id(

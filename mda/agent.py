@@ -241,6 +241,7 @@ async def agent(runtime: ManagedServerRuntime) -> DeepAgentDefinition:
     }
     return define_deep_agent(
         name="open-swe",
+        replicate_traces=False,
         model=model,
         context_schema=OpenSweRunContext,
         # Named as the in-process graph names them, these replace MDA's own file and

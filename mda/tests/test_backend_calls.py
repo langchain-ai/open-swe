@@ -20,7 +20,8 @@ from langchain_core.language_models.fake_chat_models import (
 from langchain_core.messages import AIMessage, ToolCall, ToolMessage, message_to_dict
 from langchain_core.runnables import RunnableConfig, RunnableLambda
 from langchain_core.tools import tool
-from langchain_core.tracers.langchain import LangChainTracer
+from langchain_core.tracers.langchain import LangChainTracer, wait_for_all_tracers
+from langchain_core.tracers.run_collector import RunCollectorCallbackHandler
 from langgraph.checkpoint.memory import InMemorySaver
 from langgraph.prebuilt.tool_node import ToolCallRequest
 from langgraph.types import Command
@@ -30,8 +31,10 @@ from langgraph_sdk.errors import (
     PermissionDeniedError,
     RateLimitError,
 )
-from langsmith import Client, agent_address, tracing_context
-from langsmith.run_trees import RunTree
+from langsmith import Client, agent_address, get_tracing_context, tracing_context
+from langsmith.run_trees import RunTree, WriteReplica
+from managed_deepagents import define_deep_agent
+from managed_deepagents.runtime import compile_managed_agent_async
 from pydantic import JsonValue
 from rt.backend import (
     BackendCallError,
@@ -66,6 +69,79 @@ def _evidence(
             "targets": [{"repo": repo, "branch": branch}],
         }
     }
+
+
+@pytest.mark.parametrize(
+    ("replicate", "override", "projects"),
+    [
+        (False, "canonical", {"canonical"}),
+        (True, "canonical", {"canonical", "deployment"}),
+        (False, None, {"canonical", "deployment"}),
+    ],
+)
+@pytest.mark.parametrize("has_parent", [False, True])
+async def test_managed_traces_keep_the_requested_project_without_mirroring(
+    monkeypatch: pytest.MonkeyPatch,
+    replicate: bool,
+    override: str | None,
+    projects: set[str],
+    has_parent: bool,
+) -> None:
+    monkeypatch.setattr(FakeListChatModel, "bind_tools", lambda self, *args, **kwargs: self)
+    client = MagicMock()
+    example_id = "00000000-0000-4000-8000-000000000001"
+    replicas: list[WriteReplica] = [
+        {
+            "project_name": "canonical",
+            "updates": {"reference_example_id": example_id},
+            "auth": {"api_key": "synthetic-replica-key"},
+        },
+        {"project_name": "deployment"},
+    ]
+    parent = RunTree(name="upstream", ls_client=client, replicas=replicas)
+    parent.post()
+    parent_spans = {
+        call.kwargs["session_name"]: call.kwargs["id"] for call in client.create_run.call_args_list
+    }
+    client.reset_mock()
+    agent = await compile_managed_agent_async(
+        define_deep_agent(
+            name="test-agent",
+            model=FakeListChatModel(responses=["first", "second"]),
+            **({"replicate_traces": False} if not replicate else {}),
+        ),
+        {"configurable": {"__langsmith_project__": override}},
+        report_telemetry=False,
+    )
+    callbacks = RunCollectorCallbackHandler()
+    with tracing_context(
+        enabled=True, client=client, parent=parent if has_parent else False, replicas=replicas
+    ):
+        for answer in ("first", "second"):
+            result = await agent.ainvoke(
+                {"messages": [("user", "hello")]},
+                config={"run_name": "test-agent", "callbacks": [callbacks]},
+            )
+            assert result["messages"][-1].content == answer
+            assert get_tracing_context()["replicas"] == replicas
+    wait_for_all_tracers()
+    assert len([run for run in callbacks.traced_runs if run.name == "test-agent"]) == 2
+    spans = [call.kwargs for call in client.create_run.call_args_list]
+    assert {span["session_name"] for span in spans} == projects
+    for project in projects:
+        project_spans = [span for span in spans if span["session_name"] == project]
+        roots = [span for span in project_spans if span["name"] == "test-agent"]
+        models = [span for span in project_spans if span["run_type"] == "llm"]
+        assert len(roots) == len(models) == 2
+        assert len({model["id"] for model in models}) == 2
+        for root in roots:
+            assert root["parent_run_id"] == (parent_spans[project] if has_parent else None)
+            [model] = [m for m in models if str(root["id"]) in m["dotted_order"]]
+            assert model["trace_id"] == root["trace_id"]
+            if project == "canonical":
+                assert root["reference_example_id"] == example_id
+                assert root["_replica_auths"][0].api_key == "synthetic-replica-key"
+    assert parent.replicas == replicas
 
 
 @pytest.mark.parametrize(
