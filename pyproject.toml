@@ -8,7 +8,7 @@ license = { text = "MIT" }
 dependencies = [
     "deepagents==0.7.30",
     # The types of the event endpoint requests the MDA deployment's channels send (mda/).
-    "managed-deepagents==0.10.0.dev15",
+    "managed-deepagents==0.10.0.dev14",
     # Verifies the signature MDA puts on those requests (MDA_SERVICE_SECRET).
     "standardwebhooks>=1.1.0",
     "fastapi>=0.141.1",

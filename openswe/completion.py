@@ -498,11 +498,6 @@ def _log_run_failure(thread_id: str, run_id: str | None, status: object, error: 
     )
 
 
-# MDA channels that report a run's failure in their conversation themselves. The
-# GitHub channel doesn't, so its issues still get Open SWE's failure reply.
-_CHANNELS_REPORTING_FAILURES = frozenset({"linear"})
-
-
 async def handle_run_completion(payload: dict[str, Any]) -> dict[str, str]:
     """Settle a completed run, enqueue cost refreshes, and post failure replies."""
     status = payload.get("status")
@@ -602,7 +597,7 @@ async def handle_run_completion(payload: dict[str, Any]) -> dict[str, str]:
     elif run_id in _posted_failure_run_ids(metadata):
         return {"status": "ignored", "reason": "failure reply already posted for run"}
 
-    if channel in _CHANNELS_REPORTING_FAILURES:
+    if channel is not None:
         return {"status": "ignored", "reason": "the channel reports the failure"}
 
     # Only event-woken runs count: a failure on a run a person started always replies

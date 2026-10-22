@@ -216,9 +216,8 @@ ENV.var(
 ENV.var(
     "MDA_SERVICE_SECRET",
     "Secret shared with the MDA deployment at MDA_RUNTIME_URL (its MDA_SERVICE_SECRET): MDA "
-    "signs each call its channels make to /linear/channel/* and /github/channel/* with it "
-    "(Standard Webhooks), and the backend verifies the signature; required for the Linear "
-    "and GitHub channels.",
+    "signs each call its channels make to /linear/channel/* with it (Standard Webhooks), and "
+    "the backend verifies the signature; required for the Linear channel.",
     secret=True,
 )
 ENV.var(

@@ -17,7 +17,6 @@ from openswe.api.tracing import add_trace_resource_names, configure_datadog_envi
 from openswe.audit_logs.middleware import AuditLogMiddleware
 from openswe.config import ENV
 from openswe.dashboard import router as dashboard_router
-from openswe.github.channel import router as github_channel_router
 from openswe.github.routes import router as github_webhook_router
 from openswe.linear.channel import router as linear_channel_router
 from openswe.mcp import server as agent_mcp_server
@@ -166,7 +165,6 @@ def create_app() -> FastAPI:
     app.include_router(slack_webhook_router)
     app.include_router(health_router)
     app.include_router(github_webhook_router)
-    app.include_router(github_channel_router)
     app.include_router(rollout_webhook_router)
     app.include_router(sandbox_tool_router)
     app.include_router(sandbox_openai_router)

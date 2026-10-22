@@ -5,7 +5,6 @@ from typing import Any, cast
 import pytest
 from httpx2 import Response
 
-from openswe.github import forwarding
 from openswe.github import webhook as github_webhooks
 from openswe.webhooks import common as webhook_common
 from tests.conftest import post_signed_github_webhook, register_github_logins
@@ -205,10 +204,10 @@ async def test_gate_blocks_non_member_on_public_issue(monkeypatch, registry_db) 
     _common_setup(monkeypatch)
     _install_membership_stub(monkeypatch, members={"insider"})
 
-    async def fake_forward(*_args, **_kwargs) -> None:
+    async def fake_process_github_issue(*_args, **_kwargs) -> None:
         raise AssertionError("should not be called")
 
-    monkeypatch.setattr(forwarding, "forward_to_mda_channel", fake_forward)
+    monkeypatch.setattr(github_webhooks, "process_github_issue", fake_process_github_issue)
 
     response = await _post_github_webhook(
         "issues",
