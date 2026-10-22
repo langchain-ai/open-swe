@@ -138,9 +138,6 @@ include = ["openswe", "tests"]
 # Sandbox scripts run on an older python3; `make typecheck` checks them at 3.8.
 exclude = ["tests/e2e/mda_entrypoint.py", "openswe/sandbox_scripts/*.py"]
 
-[tool.ty.environment]
-extra-paths = ["mda"]
-
 [tool.ty.analysis]
 allowed-unresolved-imports = [
     "daytona",

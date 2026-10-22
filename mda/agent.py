@@ -9,7 +9,7 @@ middleware there. The run token in the context authenticates every call.
 """
 
 from collections.abc import Collection, Mapping, Sequence
-from typing import Final, Literal
+from typing import Final, Literal, cast
 
 from langchain.agents.middleware import (
     AgentMiddleware,
@@ -81,7 +81,7 @@ def _backend_reports(backend: OpenSweBackend, served: Collection[str]) -> list[A
 
 def _code_mode(
     graph: Graph, from_code: Sequence[BaseTool], described: Mapping[str, str]
-) -> list[AgentMiddleware]:
+) -> list[AgentMiddleware | CodeInterpreterMiddleware]:
     """The graph's code mode, with every tool the catalog offers from code callable from it."""
     if graph == "reviewer":
         interpreter = CodeInterpreterMiddleware(ptc=[*_REVIEWER_PTC_TOOLS, *from_code])
@@ -173,19 +173,23 @@ async def agent(runtime: ManagedServerRuntime) -> DeepAgentDefinition:
             }
             for subagent in catalog.subagents
         ],
-        middleware=[
-            BackendRunMiddleware(
-                backend,
-                context.invocation_id,
-                opened_sandbox if catalog.sandbox is not None else None,
-                trace_metadata=catalog.trace_metadata,
-            ),
-            *replace_sandbox,
-            *_backend_reports(backend, by_name.keys()),
-            ServedToolsMiddleware(offered, excluded | code_only),
-            *_code_mode(context.graph, from_code, catalog.described),
-            *_browser(context.graph, backend),
-            ModelCallLimitMiddleware(run_limit=_MODEL_CALL_LIMIT, exit_behavior="end"),
-            ModelRetryMiddleware(retry_on=(TimeoutError,)),
-        ],
+        # Middleware types are invariant in the state they extend; the agent merges them all.
+        middleware=cast(
+            list[AgentMiddleware],
+            [
+                BackendRunMiddleware(
+                    backend,
+                    context.invocation_id,
+                    opened_sandbox if catalog.sandbox is not None else None,
+                    trace_metadata=catalog.trace_metadata,
+                ),
+                *replace_sandbox,
+                *_backend_reports(backend, by_name.keys()),
+                ServedToolsMiddleware(offered, excluded | code_only),
+                *_code_mode(context.graph, from_code, catalog.described),
+                *_browser(context.graph, backend),
+                ModelCallLimitMiddleware(run_limit=_MODEL_CALL_LIMIT, exit_behavior="end"),
+                ModelRetryMiddleware(retry_on=(TimeoutError,)),
+            ],
+        ),
     )

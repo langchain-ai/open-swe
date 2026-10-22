@@ -59,7 +59,7 @@ Hook = Literal[
 # have run. Nor is anything after a 504: the backend may still be running the call.
 _RETRY_SECONDS: Final = (1.0, 2.0, 4.0, 8.0, 15.0, 30.0, 30.0, 30.0, 30.0, 30.0)
 _REPEATABLE_HOOKS: Final[frozenset[Hook]] = frozenset({"catalog", "prepare"})
-_RESENT_AFTER_503: Final[frozenset[Hook]] = _REPEATABLE_HOOKS | {"before_model"}
+_RESENT_AFTER_503: Final[frozenset[Hook]] = frozenset({*_REPEATABLE_HOOKS, "before_model"})
 _GATEWAY_STATUSES: Final = frozenset({502, 503, 504})
 _json_object = TypeAdapter(dict[str, JsonValue])
 _json_list = TypeAdapter(list[JsonValue])

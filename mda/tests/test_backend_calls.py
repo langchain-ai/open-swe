@@ -1,8 +1,7 @@
-import sys
+from collections.abc import Mapping
 from contextlib import closing
 from copy import deepcopy
 from datetime import UTC, datetime, timedelta
-from pathlib import Path
 from typing import Literal
 from unittest.mock import AsyncMock, MagicMock
 
@@ -13,18 +12,14 @@ from langchain.agents import create_agent
 from langchain.tools import ToolRuntime
 from langchain_core.language_models.fake_chat_models import FakeListChatModel
 from langchain_core.messages import ToolMessage, message_to_dict
-from langchain_core.runnables import RunnableLambda
+from langchain_core.runnables import RunnableConfig, RunnableLambda
 from langchain_core.tools import tool
 from langchain_core.tracers.langchain import LangChainTracer
 from langgraph.checkpoint.memory import InMemorySaver
 from langgraph.types import Command
 from langsmith import Client, tracing_context
 from langsmith.run_trees import RunTree
-
-from openswe.remote_runtime.git_metadata import GitTarget, TurnGitMetadata
-
-sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "mda"))
-
+from pydantic import JsonValue
 from rt.backend import (
     BackendCallError,
     BackendUnavailableError,
@@ -37,12 +32,32 @@ from rt.tools import backend_tool
 from rt.tracing import TurnTrace
 
 
+def _run_metadata(patch: Mapping[str, object]) -> Mapping[str, object]:
+    """The metadata a LangSmith run update sets."""
+    extra = patch.get("extra")
+    metadata = extra.get("metadata") if isinstance(extra, Mapping) else None
+    return metadata if isinstance(metadata, Mapping) else {}
+
+
+def _evidence(
+    kind: Literal["work", "pr"], key: str, repo: str, branch: str, observed_at: int
+) -> dict[str, JsonValue]:
+    """Git evidence as the backend's hooks record it for the turn ``turn``."""
+    return {
+        f"git_trace_{kind}:{key}": {
+            "invocation": "turn",
+            "observed_at": observed_at,
+            "targets": [{"repo": repo, "branch": branch}],
+        }
+    }
+
+
 @pytest.mark.parametrize(
     ("failure", "failures", "attempts"),
     [("connect", 10, 11), ("connect", 11, 11), (503, 1, 1), (504, 1, 1)],
 )
 async def test_a_tool_call_the_backend_never_answered(
-    monkeypatch: pytest.MonkeyPatch, failure: str | int, failures: int, attempts: int
+    monkeypatch: pytest.MonkeyPatch, failure: Literal["connect"] | int, failures: int, attempts: int
 ) -> None:
     monkeypatch.setenv("OPEN_SWE_BACKEND_URL", "https://backend.invalid")
     monkeypatch.setattr("rt.tools.run_id", lambda: "run-1")
@@ -70,6 +85,7 @@ async def test_a_tool_call_the_backend_never_answered(
         tool_call_id="call-1",
         store=None,
     )
+    assert served.coroutine is not None
     result = await served.coroutine(runtime=runtime)
     assert isinstance(result, Command)
     [result_message] = result.update["messages"]
@@ -193,48 +209,40 @@ async def test_turn_reconciliation_reaches_runtime_root_llm_and_nested_calls(
     actor = {"ls_repo_provider": "github", "ls_attribution_identifier": "trigger"}
     final = {**actor, "ls_git_repo": "org/actual", "ls_git_branch": "Exact/PR-head"}
     backend = OpenSweBackend("secret-token")
-    git = TurnGitMetadata({"configurable": {"invocation_id": "turn"}, "metadata": actor})
 
     @tool
     async def nested_call(text: str) -> str:
         """Call a nested runnable."""
         TurnTrace.record_evidence(
             {
-                **git.evidence(
-                    [GitTarget(repo="org/actual", branch="local")], "work", observed_at=1
-                ),
-                **git.evidence(
-                    [GitTarget(repo="org/later", branch="later/head")],
-                    "pr-later",
-                    pr=True,
-                    observed_at=2,
-                ),
-                **git.evidence(
-                    [GitTarget(repo="org/actual", branch=final["ls_git_branch"])],
-                    "pr-first",
-                    pr=True,
-                    observed_at=3,
-                ),
+                **_evidence("work", "work", "org/actual", "local", 1),
+                **_evidence("pr", "pr-later", "org/later", "later/head", 2),
+                **_evidence("pr", "pr-first", "org/actual", final["ls_git_branch"], 3),
             }
         )
         return await RunnableLambda(lambda value: value).ainvoke(text)
 
     async def phase(name: str, body: dict[str, object]) -> PhaseReply:
         if name == "prepare":
-            return PhaseReply(update=await git.begin())
+            return PhaseReply(
+                update={"git_trace_baseline": {"invocation": "turn", "snapshot": None}}
+            )
         if name == "before_model":
             assert isinstance(state := body["state"], dict)
             assert "git_trace_work:previous" not in state
             await nested_call.ainvoke({"text": "nested"})
-            return PhaseReply(
-                update=git.evidence(
-                    [GitTarget(repo="org/actual", branch="local")], "work", observed_at=1
-                )
-            )
+            return PhaseReply(update=_evidence("work", "work", "org/actual", "local", 1))
         if name == "after_agent":
-            assert isinstance(state := body["state"], dict)
+            # What the backend reconciles from that evidence: the earliest PR target first.
             return PhaseReply(
-                trace_metadata=await git.reconcile(state), update={"git_trace_baseline": None}
+                trace_metadata={
+                    **final,
+                    "open_swe_git_targets": [
+                        {"repo": "org/actual", "branch": final["ls_git_branch"]},
+                        {"repo": "org/later", "branch": "later/head"},
+                    ],
+                },
+                update={"git_trace_baseline": None},
             )
         return PhaseReply()
 
@@ -254,7 +262,7 @@ async def test_turn_reconciliation_reaches_runtime_root_llm_and_nested_calls(
         middleware=[BackendRunMiddleware(backend, "turn", trace_metadata=actor)],
         checkpointer=InMemorySaver(),
     )
-    config = {
+    config: RunnableConfig = {
         "configurable": {"thread_id": "trace-test"},
         "callbacks": [tracer],
         "metadata": {"invocation_id": "turn", "existing_key": "preserved"},
@@ -277,9 +285,9 @@ async def test_turn_reconciliation_reaches_runtime_root_llm_and_nested_calls(
     assert any(run["run_type"] == "llm" for run in created.values())
     assert any(run["run_type"] == "tool" for run in created.values())
     reconciled = {
-        run_id: patch
+        run_id: metadata
         for run_id, patch in updates
-        if patch.get("extra", {}).get("metadata", {}).get("ls_git_repo") == "org/actual"
+        if (metadata := _run_metadata(patch)).get("ls_git_repo") == "org/actual"
     }
     attributed = {
         run_id
@@ -288,7 +296,7 @@ async def test_turn_reconciliation_reaches_runtime_root_llm_and_nested_calls(
     }
     assert attributed <= reconciled.keys()
     for run_id in attributed:
-        metadata = reconciled[run_id]["extra"]["metadata"]
+        metadata = reconciled[run_id]
         assert metadata.items() >= final.items()
         assert metadata["open_swe_git_targets"] == [
             {"repo": "org/actual", "branch": "Exact/PR-head"},

@@ -72,15 +72,15 @@ jobs:
       - name: Run typecheck
         run: make typecheck
 
-  mda-boundary:
-    name: MDA import boundary
+  mda-typecheck:
+    name: MDA typecheck
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@v7.0.1
       - uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7 # v10.2.0
-      - name: Check the MDA project imports nothing from the backend
-        run: make mda-boundary
+      - name: Type-check the MDA project against its own environment
+        run: make mda-typecheck
 
   unit-tests:
     name: Agent unit tests
@@ -117,6 +117,8 @@ jobs:
           -c "SELECT pg_reload_conf()"
       - name: Run unit tests
         run: make test PYTEST_ARGS="-n auto"
+      - name: Run MDA unit tests
+        run: make mda-test
 
   js-format:
     name: JS format check
@@ -264,7 +266,7 @@ jobs:
             exit 0
           fi
 
-          agent_unit_test_paths=(openswe tests pyproject.toml uv.lock langgraph.json Makefile .github/workflows/ci.yml ":(exclude)tests/e2e")
+          agent_unit_test_paths=(openswe tests mda vendor/managed-deepagents-sdk pyproject.toml uv.lock langgraph.json Makefile .github/workflows/ci.yml ":(exclude)tests/e2e")
           if git diff --quiet "$BASE_SHA" HEAD -- "${agent_unit_test_paths[@]}"; then
             echo "agent_unit_tests=false" >> "$GITHUB_OUTPUT"
           else
