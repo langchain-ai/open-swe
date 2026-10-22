@@ -6,12 +6,13 @@ pass or permission to merge.
 
 ## Configuration
 
-Unset `MERGE_QUEUE_CONFIG` disables the controller. To enable one
-canary repository, supply a trusted JSON object matching `QueueConfiguration`:
+Configuration lives in PostgreSQL, in the nullable `workspace.merge_queue_config`
+JSONB column. All workspaces default to NULL, which disables the controller.
+An operator can configure one canary workspace with this object; its workspace
+ID comes from the row:
 
 ```json
 {
-  "workspace_id": "019a0000-0000-7000-8000-000000000001",
   "repository": "example/queue-canary",
   "repository_id": 123,
   "dispatch_url": "https://dispatcher.example/api/v1/merge-queue/dispatch",
@@ -31,10 +32,15 @@ canary repository, supply a trusted JSON object matching `QueueConfiguration`:
 }
 ```
 
-These are illustrative identifiers. Use the repository's numeric GitHub ID, an
-existing Open SWE workspace UUID, the actual required-check sources, and the gateway's GitHub App bot **user ID** for `dispatch_actor_id`. The repository must already be bound
-to that workspace. Policy changes require a deployment; callers cannot supply
-policy, GitHub credentials, or target repositories through jobs or HTTP requests.
+These are illustrative identifiers. Use the repository's numeric GitHub ID,
+the actual required-check sources, and the gateway's GitHub App bot **user ID**
+for `dispatch_actor_id`. The repository must already be bound to that workspace.
+Startup refuses multiple configured workspaces. Apply the additive migration
+before deploying this runtime; set the column back to SQL NULL to disable it.
+Configuration is read at startup, so restart all backend replicas after changes.
+Only operators with database access can edit it; the workspace API and agent tools
+do not expose this field. Jobs and HTTP callers cannot supply policy, GitHub
+credentials, or target repositories.
 
 The existing Open SWE App supplies repository-scoped tokens with Contents write
 and Actions, Checks, Metadata, Pull requests and Statuses read. It needs no Actions
@@ -42,7 +48,7 @@ write or queue-specific branch-rule bypass. Install the reviewed workflow on the
 canary's `main`; the controller verifies its digest before GitHub reconciliation.
 Expired database deadlines still reconcile during a GitHub outage.
 
-Workflow dispatch uses a separately deployed gateway. Set the deployment-owned
+Workflow dispatch uses a separately deployed gateway. Set the operator-managed
 HTTPS `dispatch_url` and store `MERGE_QUEUE_DISPATCH_SECRET` (at least 32 random
 characters) only in the backend and gateway secret stores. Never pass this secret
 to agent sandboxes or general-purpose agent tools. Local agent shells are disabled

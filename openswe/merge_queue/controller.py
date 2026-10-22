@@ -11,7 +11,7 @@ from openswe.github.http import GitHubClient, RepoClient
 from openswe.github.repositories import Repository
 from openswe.jobs import queue as jobs
 from openswe.merge_queue import runtime
-from openswe.merge_queue.configuration import QueueConfiguration, load_configuration
+from openswe.merge_queue.configuration import QueueConfiguration
 from openswe.merge_queue.dispatch import DispatchGateway
 from openswe.merge_queue.store import MergeQueue
 from openswe.merge_queue.validation_contract import WORKFLOW
@@ -87,10 +87,10 @@ CONTROLLER: QueueController | None = None
 
 async def start_queue() -> None:
     global CONTROLLER
-    config = load_configuration()
+    CONTROLLER = None
+    runtime.RUNTIME = None
+    config = await QueueConfiguration.load()
     if config is None:
-        CONTROLLER = None
-        runtime.RUNTIME = None
         return
     controller = QueueController(config)
     await controller.start()
