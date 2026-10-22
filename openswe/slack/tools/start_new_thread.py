@@ -1,9 +1,10 @@
 import asyncio
 import re
 import uuid
-from typing import Any
+from typing import Annotated, Any
 
 from fastapi import HTTPException
+from pydantic import Field
 
 from openswe.dashboard.options import available_requested_models
 from openswe.dashboard.repo_access import require_repo_access_for_user
@@ -40,6 +41,7 @@ _TITLE_MAX_CHARS = 160
 _INSTRUCTIONS_MAX_CHARS = 12000
 _VISIBLE_INSTRUCTIONS_MAX_CHARS = 2800
 _REPO_RE = re.compile(r"^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$")
+_CHANNEL_ID_PATTERN = r"^[CG][A-Z0-9]+$"
 
 
 def _failure_hint(slack_error: str | None) -> str:
@@ -170,12 +172,17 @@ async def slack_breakout_thread(
     title: str,
     instructions: str,
     default_repo: str | None = None,
-    channel_id: str | None = None,
+    channel_id: Annotated[str, Field(pattern=_CHANNEL_ID_PATTERN)] | None = None,
     web_only: bool = False,
     model: str | None = None,
     effort: str | None = None,
 ) -> dict[str, object]:
     """Implement the `slack_breakout_thread` tool."""
+    if channel_id is not None and not re.fullmatch(_CHANNEL_ID_PATTERN, channel_id):
+        return {
+            "success": False,
+            "error": "channel_id must be a Slack channel ID (for example, C0123456789); omit it or pass JSON null to use the current channel.",
+        }
     cfg = RunConfig.from_runtime()
     if cfg.slack_thread is None:
         return {"success": False, "error": "Missing slack_thread config"}

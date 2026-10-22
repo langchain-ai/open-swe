@@ -2,6 +2,7 @@ import { Button } from "@langchain/macaw-components/Button"
 import { Textarea } from "@langchain/macaw-components/Textarea"
 import { useRef } from "react"
 
+import { SubmitShortcut } from "@/components/SubmitShortcut"
 import { useReviewPage } from "@/features/reviews/page/store"
 
 /**
@@ -77,8 +78,15 @@ export function ReplyBox({
         <Button size="sm" color="secondary" variant="plain" onClick={close}>
           Cancel
         </Button>
-        <Button size="sm" disabled={!body.trim() || pending} onClick={send}>
+        <Button
+          size="sm"
+          aria-label="Reply"
+          aria-keyshortcuts="Meta+Enter Control+Enter"
+          disabled={!body.trim() || pending}
+          onClick={send}
+        >
           Reply
+          {!pending && <SubmitShortcut />}
         </Button>
       </div>
     </div>

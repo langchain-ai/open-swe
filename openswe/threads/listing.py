@@ -13,7 +13,6 @@ from langgraph_sdk.schema import ThreadSelectField
 from pydantic import BaseModel
 
 from openswe.review.session import ReviewSessionMetadata
-from openswe.tasks.flags import task_coordination_enabled
 from openswe.tasks.store import SidebarTaskMembership, sidebar_memberships
 from openswe.threads import index
 from openswe.threads.pins import list_thread_pin_ids, pin_thread, unpin_thread
@@ -396,7 +395,8 @@ def _attach_task_membership(
             }
         ):
             label = " ".join(membership.instructions.split())[:64].strip() or "Worker"
-            summary["title"] = f"{label} · {membership.thread_id[:8]}"
+            # The tail, as worker launch chips show it: a UUIDv7 starts with a shared timestamp.
+            summary["title"] = f"{label} · {membership.thread_id[-8:]}"
         if membership.cancelled:
             summary["status"] = "interrupted"
         elif membership.launch_error:
@@ -418,9 +418,6 @@ async def attach_task_workers(
     ids = [thread_id for summary in summaries if isinstance(thread_id := summary.get("id"), str)]
     memberships = await sidebar_memberships(ids)
     if not memberships:
-        return
-    if not await task_coordination_enabled(login):
-        _attach_flat_task_memberships(summaries, memberships)
         return
     coordinator_ids = [
         key for key, membership in memberships.items() if membership.role == "coordinator"
@@ -882,7 +879,6 @@ async def list_dashboard_threads_page(
 ) -> dict[str, Any]:
     client = langgraph_client()
     search_login = filter_participant_login or login
-    hierarchy = hierarchy and await task_coordination_enabled(login)
     search_email = email if search_login == login else None
     if scope == "automation" and filter_participant_login is None:
         searches = [{"thread_category": "automation"}, {"source": "schedule"}]
