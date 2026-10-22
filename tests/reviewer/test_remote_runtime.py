@@ -494,6 +494,8 @@ async def _hook_status(
     monkeypatch: pytest.MonkeyPatch, token: str, hook: str
 ) -> tuple[int, list[tuple[str, str]]]:
     """Call ``hook`` with ``token`` and report the status and what served it, as whom."""
+    import asyncio
+
     from openswe.remote_runtime import server
 
     served: list[tuple[str, str]] = []
@@ -518,14 +520,14 @@ async def _hook_status(
         "headers": [(b"authorization", f"Bearer {token}".encode())],
     }
     sent: list[Message] = []
-
-    async def receive() -> Message:
-        return {"type": "http.request", "body": b"{}"}
+    # Like an ASGI server: the body once, then nothing until the client disconnects.
+    messages: asyncio.Queue[Message] = asyncio.Queue()
+    messages.put_nowait({"type": "http.request", "body": b"{}", "more_body": False})
 
     async def send(message: Message) -> None:
         sent.append(message)
 
-    await server.HOOKS(scope, receive, send)
+    await server.HOOKS(scope, messages.get, send)
     return sent[0]["status"], served
 
 
