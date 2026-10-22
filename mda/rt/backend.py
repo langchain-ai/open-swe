@@ -44,6 +44,7 @@ Hook = Literal[
     "prepare",
     "before_model",
     "model_result",
+    "model_error",
     "after_model",
     "after_agent",
     "call",

@@ -816,3 +816,110 @@ async def test_mda_does_not_retry_tool_pairing_errors(
         with pytest.raises(type(error)) as caught:
             await middleware.awrap_model_call(request, handler)
         assert caught.value is error
+
+
+@pytest.mark.parametrize("failure_on_fallback", [False, True])
+@pytest.mark.parametrize("status", [402, 429])
+async def test_gateway_policy_failure_reaches_completion(
+    monkeypatch: pytest.MonkeyPatch, failure_on_fallback: bool, status: int
+) -> None:
+    import openai
+    from langchain.agents.middleware import ModelRetryMiddleware
+    from langchain.agents.middleware.types import ModelRequest, ModelResponse
+    from langchain_core.language_models.fake_chat_models import FakeListChatModel
+    from langchain_core.messages import AIMessage
+    from rt.middleware import BackendRunMiddleware, ModelCall
+    from rt.models import ModelSpec
+
+    from openswe import completion
+    from openswe.middleware import model_errors
+    from openswe.remote_runtime.hosted import hosted_graphs
+    from openswe.remote_runtime.tokens import RemoteRun
+    from openswe.utils.errors import LAST_MODEL_ERROR_KEY
+
+    monkeypatch.setenv("OPEN_SWE_BACKEND_URL", "https://backend.invalid")
+    monkeypatch.setattr("rt.middleware.run_id", lambda: "root-run")
+    primary = FakeListChatModel(responses=["primary"])
+    fallback = FakeListChatModel(responses=["fallback"])
+    monkeypatch.setattr("rt.middleware.build_model", lambda *args, **kwargs: fallback)
+    recorded: dict[str, object] = {}
+
+    async def update(*, thread_id: str, metadata: dict[str, object]) -> None:
+        assert thread_id == "thread-1"
+        recorded.update(metadata)
+
+    client = MagicMock()
+    client.threads.update = update
+    monkeypatch.setattr(model_errors, "get_client", lambda: client)
+    backend = OpenSweBackend("token")
+    graph = hosted_graphs()["agent"]
+    remote = RemoteRun(thread_id="thread-1", assistant_id="agent", configurable={})
+
+    async def report(hook: str, body: dict[str, object]) -> object:
+        return await graph.hook(remote, hook, body)
+
+    monkeypatch.setattr(backend, "call", report)
+    middleware = BackendRunMiddleware(backend, "invocation")
+    retry = ModelRetryMiddleware(retry_on=(TimeoutError,))
+    response = httpx2.Response(status, request=httpx2.Request("POST", "https://gateway.invalid"))
+    error = openai.APIStatusError(
+        "Payment required" if status == 402 else "Blocked by gateway policies",
+        response=response,
+        body={},
+    )
+    attempts = 0
+
+    async def model(request: ModelRequest) -> ModelResponse:
+        nonlocal attempts
+        attempts += 1
+        if failure_on_fallback and request.model is primary:
+            raise openai.APIStatusError(
+                "unavailable", response=httpx2.Response(503, request=response.request), body={}
+            )
+        raise error
+
+    async def with_retry(request: ModelRequest) -> ModelResponse:
+        return await retry.awrap_model_call(request, model)
+
+    request = ModelRequest(
+        model=primary,
+        messages=[],
+        state={
+            "messages": [],
+            "open_swe_call": ModelCall(
+                system_prompt="system",
+                model=None,
+                fallback=ModelSpec(model_id="openai:fallback", kwargs={}),
+                use_gateway=True,
+            ).model_dump(),
+        },
+    )
+    with pytest.raises(openai.APIStatusError) as caught:
+        await middleware.awrap_model_call(request, with_retry)
+    assert caught.value is error
+    assert attempts == (2 if failure_on_fallback else 1)
+    assert recorded[LAST_MODEL_ERROR_KEY] == {
+        "run_id": "root-run",
+        "error_type": "APIStatusError",
+        "code": "gateway_policy_blocked",
+    }
+    code = completion._failure_reason_code({"error": "APIStatusError"}, recorded, "root-run")
+    assert code == "gateway_policy_blocked"
+    assert (
+        completion._failure_reason_code({"error": "APIStatusError"}, recorded, "other-run")
+        == "provider_unavailable"
+    )
+    text = completion._failure_text("error", reason_code=code)
+    assert "workspace admin" in text
+    assert "Resending will not help" in text
+    assert "Send another message" not in text
+
+    async def transient(request: ModelRequest) -> ModelResponse:
+        if request.model is primary:
+            raise openai.APIStatusError(
+                "unavailable", response=httpx2.Response(503, request=response.request), body={}
+            )
+        return ModelResponse(result=[AIMessage(content="recovered")])
+
+    result = await middleware.awrap_model_call(request, transient)
+    assert result.result[0].content == "recovered"

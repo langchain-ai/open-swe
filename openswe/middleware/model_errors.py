@@ -71,13 +71,15 @@ class ModelErrorMiddleware(OpenSWEMiddleware):
                     "model_call_failure": {"model": model, "code": code, **fields},
                 },
             )
-            await _record_model_error(exc, code)
+            thread_id, run_id = _run_context()
+            await record_model_error(type(exc).__name__, code, thread_id=thread_id, run_id=run_id)
             raise
 
 
-async def _record_model_error(exc: BaseException, code: str | None) -> None:
+async def record_model_error(
+    error_type: str, code: str | None, *, thread_id: str | None, run_id: str | None
+) -> None:
     """Leave the classification on the thread for the run-completion reply."""
-    thread_id, run_id = _run_context()
     if thread_id is None or code is None:
         return
     try:
@@ -86,7 +88,7 @@ async def _record_model_error(exc: BaseException, code: str | None) -> None:
             metadata={
                 LAST_MODEL_ERROR_KEY: {
                     "run_id": run_id,
-                    "error_type": type(exc).__name__,
+                    "error_type": error_type,
                     "code": code,
                 }
             },

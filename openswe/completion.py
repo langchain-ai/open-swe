@@ -94,6 +94,7 @@ def verify_run_complete_token(token: str | None) -> bool:
 
 
 _REASON_TEXT = {
+    "gateway_policy_blocked": "a LangSmith LLM gateway policy is blocking model calls",
     "provider_overloaded": "the model provider was overloaded and never recovered",
     "provider_rate_limited": "the model provider rate-limited it",
     "provider_unavailable": "the model provider kept returning errors",
@@ -106,6 +107,10 @@ _REASON_TEXT = {
 }
 _DEFAULT_FOLLOW_UP = "Send another message and it will pick this back up."
 _REASON_FOLLOW_UP = {
+    "gateway_policy_blocked": (
+        "Ask a workspace admin to review the gateway policies. "
+        "Resending will not help until the block is resolved."
+    ),
     "context_too_long": "Start a new thread to continue.",
     "model_unavailable": "Pick a different model in Open SWE Web, then retry.",
     "backend_interrupted": "Re-trigger the run to try again.",
