@@ -2,10 +2,13 @@
 
 from unittest.mock import AsyncMock, call
 
+import httpx2
 import pytest
 from fastapi import HTTPException
 
 from openswe.dashboard import oauth
+from openswe.github import http as github_http
+from openswe.github import org_membership
 from openswe.users import authorization
 
 
@@ -90,6 +93,44 @@ async def test_gate_uses_union_when_both_allowlists_are_set(
         membership.assert_not_awaited()
     else:
         membership.assert_awaited_once_with("insider", "primary")
+
+
+@pytest.mark.parametrize("failure", [503, "timeout", "rate-limit"])
+@pytest.mark.parametrize("outcome", ["active", "pending", "exhausted"])
+async def test_gate_retries_membership_lookup_without_bypassing_authorization(
+    monkeypatch: pytest.MonkeyPatch, failure: int | str, outcome: str
+) -> None:
+    monkeypatch.setenv("ALLOWED_GITHUB_USERS", "")
+    monkeypatch.setenv("ALLOWED_GITHUB_ORGS", "primary")
+    monkeypatch.setattr(
+        org_membership, "get_github_app_installation_id_for_org", AsyncMock(return_value=1)
+    )
+    monkeypatch.setattr(
+        org_membership, "get_github_app_installation_token", AsyncMock(return_value="token")
+    )
+    transient = (
+        httpx2.ConnectTimeout("timeout")
+        if failure == "timeout"
+        else httpx2.Response(403, text="secondary rate limit")
+        if failure == "rate-limit"
+        else httpx2.Response(503)
+    )
+    responses = (
+        [transient] * (github_http.DEFAULT_MAX_RETRIES + 1)
+        if outcome == "exhausted"
+        else [transient, httpx2.Response(200, json={"state": outcome})]
+    )
+    request = AsyncMock(side_effect=responses)
+    monkeypatch.setattr(httpx2.AsyncClient, "request", request)
+    monkeypatch.setattr(github_http.asyncio, "sleep", AsyncMock())
+
+    if outcome == "active":
+        await oauth.enforce_github_login_gate("insider")
+    else:
+        with pytest.raises(HTTPException) as exc:
+            await oauth.enforce_github_login_gate("insider")
+        assert exc.value.status_code == 403
+    assert request.await_count == len(responses)
 
 
 @pytest.mark.asyncio

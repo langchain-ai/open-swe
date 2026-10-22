@@ -55,19 +55,10 @@ async def is_user_active_org_member(username: str, org: str) -> bool:
         )
         return False
 
-    url = (
-        f"https://api.github.com/orgs/{quote(org, safe='')}/memberships/{quote(username, safe='')}"
-    )
+    url = f"{GITHUB_API_BASE}/orgs/{quote(org, safe='')}/memberships/{quote(username, safe='')}"
     try:
-        async with httpx2.AsyncClient(timeout=10.0) as client:
-            response = await client.get(
-                url,
-                headers={
-                    "Authorization": f"Bearer {token}",
-                    "Accept": "application/vnd.github+json",
-                    "X-GitHub-Api-Version": "2022-11-28",
-                },
-            )
+        async with github_client(token=token, timeout=10.0) as client:
+            response = await github_request(client, "GET", url)
     except Exception:
         logger.exception("Error calling GitHub org membership API for %s/%s", org, username)
         return False
