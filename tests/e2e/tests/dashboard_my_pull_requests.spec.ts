@@ -55,6 +55,53 @@ test.describe("my pull requests", () => {
     await loginAs(page, SAME_USER);
   });
 
+  test("expands the same review into a page and returns to the filtered preview", async ({
+    page,
+  }) => {
+    const pr = await seedOpenPullRequest(page, {
+      repo: DEMO,
+      title: "Unified review layout",
+      body: "The description stays with the review in both layouts.",
+      files: { "src/shared.ts": "export const shared = true;\n" },
+      ...approved,
+    });
+    await openMine(page);
+    await page
+      .getByRole("textbox", { name: "Search pull requests" })
+      .fill("Unified");
+    await card(page, pr)
+      .getByRole("button", { name: "Unified review layout", exact: true })
+      .click();
+    const preview = page.getByRole("complementary", {
+      name: `Pull request ${pr.repo} #${pr.number}`,
+    });
+    await expect(
+      preview.getByRole("article", { name: "Description" }),
+    ).toContainText("The description stays with the review in both layouts.");
+    await preview
+      .getByRole("checkbox", { name: "Viewed src/shared.ts" })
+      .click();
+    await preview.getByRole("link", { name: "Open full page" }).click();
+    await expect(page).toHaveURL(
+      new RegExp(`/agents/reviews/fakeorg/demo/${pr.number}$`),
+    );
+    await expect(
+      page.getByRole("checkbox", { name: "Viewed src/shared.ts" }),
+    ).toBeChecked();
+    await expect(
+      page.getByRole("article", { name: "Description" }),
+    ).toContainText("The description stays with the review in both layouts.");
+    await page.getByRole("tab", { name: "Discussion", exact: true }).click();
+    await page.getByRole("link", { name: "Back to PR preview" }).click();
+    await expect(preview).toBeVisible();
+    await expect(
+      page.getByRole("textbox", { name: "Search pull requests" }),
+    ).toHaveValue("Unified");
+    await expect(
+      preview.getByRole("checkbox", { name: "Viewed src/shared.ts" }),
+    ).toBeChecked();
+  });
+
   test("finds description-only matches in My PRs and the command palette", async ({
     page,
   }) => {

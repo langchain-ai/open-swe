@@ -50,6 +50,7 @@ vi.mock("@/lib/session", () => ({
 const navigate = vi.hoisted(() => vi.fn())
 vi.mock("@tanstack/react-router", () => ({
   useNavigate: () => navigate,
+  useLocation: () => ({ pathname: "/agents/reviews", search: {} }),
   Link: ({
     params,
     children,

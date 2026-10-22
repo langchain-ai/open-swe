@@ -67,7 +67,9 @@ export function Overview({ pr }: { pr: PullRequestRef }) {
     )
   return (
     <div className="flex w-full flex-col gap-space-4 px-space-4 pt-space-4 pb-space-6">
-      <StandingPanel pr={pr} />
+      <div style={{ viewTransitionName: "pr-standing" }}>
+        <StandingPanel pr={pr} />
+      </div>
       {detail.walkthrough?.human_input && (
         <details
           aria-label="Requested behavior"
@@ -136,7 +138,11 @@ function Description({
   }, [body])
   const clamped = overflows && !expanded
   return (
-    <article aria-label="Description" className="group/description">
+    <article
+      aria-label="Description"
+      className="group/description"
+      style={{ viewTransitionName: "pr-description" }}
+    >
       <header className="mb-space-2 flex items-center gap-space-2 text-xs text-secondary">
         {author?.avatar_url && (
           <img

@@ -19,7 +19,7 @@ const outcomeLabels: Record<PullRequestOutcome, string> = {
   closed: "Closed",
 }
 
-/** Everything that can be done to a PR, shared by the card and the preview. */
+/** The PR list card's actions and destination links. */
 export function PullRequestActions({
   pr,
   login,
@@ -27,7 +27,6 @@ export function PullRequestActions({
   onSettled,
   onSettledConfirmed,
   onReady,
-  pageLink = true,
 }: {
   pr: OpenPullRequest
   login: string
@@ -36,8 +35,6 @@ export function PullRequestActions({
   /** Runs once GitHub confirms a merge or close; the list leaves it unset to keep the row. */
   onSettledConfirmed?: () => void
   onReady: () => void
-  /** The preview shows its page link in its own header instead. */
-  pageLink?: boolean
 }) {
   const settle = (next: PullRequestOutcome) => {
     onSettled(next)
@@ -84,12 +81,7 @@ export function PullRequestActions({
           onClosed={onSettledConfirmed}
         />
       </div>
-      <PullRequestLinks
-        repo={pr.repo}
-        number={pr.number}
-        title={pr.title}
-        pageLink={pageLink}
-      />
+      <PullRequestLinks repo={pr.repo} number={pr.number} title={pr.title} />
     </div>
   )
 }
