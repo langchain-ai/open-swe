@@ -19,11 +19,12 @@ The settings register one [HTTP hook](https://code.claude.com/docs/en/hooks#http
 | `UserPromptSubmit` | A new turn with the prompt. A prompt that arrives while the previous turn is still open ends that turn as interrupted, since Claude Code fires no event when you press Esc. |
 | `PreToolUse` | A tool call, shown as running. |
 | `PostToolUse`, `PostToolUseFailure` | The tool call's result or error. |
-| `Stop` | Claude's final reply, and the turn completes. |
+| `MessageDisplay` | Each message Claude writes, streamed batch by batch as Claude Code displays it, then completed on its final batch. |
+| `Stop` | The turn completes. Its reply is added only when no `MessageDisplay` already showed it. |
 | `StopFailure` | The turn fails with the API error. |
 | `SessionEnd` | An open turn ends as interrupted. |
 
-Hooks only see what Claude Code hands them, so the text Claude writes between tool calls does not appear; the reply that ends a turn does. Steps inside a subagent appear only as its tool call.
+Hooks only see what Claude Code hands them: no hook carries Claude's thinking, and steps inside a subagent appear only as its tool call.
 
 A thread also picks up its pull request, records it like one the agent opened, and links the two, when the session:
 
@@ -37,7 +38,7 @@ The PR is read as you, so a repository you cannot see is never linked.
 
 - **Read-only.** Nobody can prompt, steer or stop a mirrored thread from Open SWE, including you. Continue it in Claude Code.
 - **Private.** Only you and workspace admins can open it: a local session can contain anything on your machine.
-- **Never in the way.** The endpoint answers with an empty body, so Claude Code never reads it as a decision, and the hooks time out after 5 seconds. A failed hook is logged by Claude Code and the session continues.
+- **Never in the way.** The endpoint answers with an empty body, so Claude Code never reads it as a decision, and the hooks time out quickly: Claude Code holds each batch of a message until `MessageDisplay` answers, so that hook gives up after 2 seconds and the rest after 5. A failed hook is logged by Claude Code and the session continues.
 - **Yours only.** A thread's id is derived from your user and Claude Code's session id, so another person's token cannot write into it whatever session id it sends.
 
 ## Try it locally

@@ -66,6 +66,7 @@ async def test_a_session_mirrors_as_turns_and_an_interrupted_one_is_closed(
         _event("PreToolUse", tool_name="Bash", tool_use_id="t1", tool_input={"command": "ls"}),
         # A follow-up with no Stop before it: the person interrupted the first turn.
         _event("UserPromptSubmit", prompt="Actually, run the tests"),
+        _event("MessageDisplay", message_id="m1", index=0, final=True, delta="Running them.\n"),
         # PostToolUse alone still records the call.
         _event(
             "PostToolUse",
@@ -74,7 +75,10 @@ async def test_a_session_mirrors_as_turns_and_an_interrupted_one_is_closed(
             tool_input={"command": "pytest"},
             tool_response={"stdout": "1 passed", "stderr": ""},
         ),
-        _event("Stop", last_assistant_message="The tests pass."),
+        _event("MessageDisplay", message_id="m2", index=0, delta="The tests\n"),
+        _event("MessageDisplay", message_id="m2", index=1, final=True, delta="pass."),
+        # The reply was mirrored as it was shown, so Stop does not add it again.
+        _event("Stop", last_assistant_message="The tests\npass."),
     )
 
     snapshot = await load_snapshot(mirror.thread_id)
@@ -85,7 +89,8 @@ async def test_a_session_mirrors_as_turns_and_an_interrupted_one_is_closed(
     assert [(m.role, m.text) for m in snapshot.messages] == [
         ("human", "Fix the flaky test\nmore detail"),
         ("human", "Actually, run the tests"),
-        ("ai", "The tests pass."),
+        ("ai", "Running them."),
+        ("ai", "The tests\npass."),
     ]
     calls = {call.tool_call_id: call for call in snapshot.tool_calls}
     assert calls["t1"].status == "in_progress"

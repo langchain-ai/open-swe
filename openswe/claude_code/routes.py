@@ -31,6 +31,8 @@ router = APIRouter(prefix="/claude-code", tags=["claude-code"])
 HOOKS_PATH = "/dashboard/api/claude-code/hooks"
 # Hooks run inline in Claude Code, so a slow mirror must never hold up the session.
 _HOOK_TIMEOUT_SECONDS = 5
+# Claude Code holds each batch of a message off the screen until this hook answers.
+_DISPLAY_HOOK_TIMEOUT_SECONDS = 2
 _INVALID_TOKEN = "invalid Claude Code sync token"
 
 HOOK_REQUEST_BODY: dict[str, object] = {
@@ -112,13 +114,18 @@ class MintedSyncToken(SyncTokenView):
 
 def hook_settings(secret: str) -> dict[str, JsonValue]:
     """The ``hooks`` block of a Claude Code ``settings.json`` that mirrors every session."""
-    handler: dict[str, JsonValue] = {
-        "type": "http",
-        "url": dashboard_api_base_url() + HOOKS_PATH,
-        "timeout": _HOOK_TIMEOUT_SECONDS,
-        "headers": {"Authorization": f"Bearer {secret}"},
-    }
-    return {"hooks": {event: [{"hooks": [handler]}] for event in sorted(MIRRORED_EVENTS)}}
+
+    def handler(event: str) -> dict[str, JsonValue]:
+        return {
+            "type": "http",
+            "url": dashboard_api_base_url() + HOOKS_PATH,
+            "timeout": _DISPLAY_HOOK_TIMEOUT_SECONDS
+            if event == "MessageDisplay"
+            else _HOOK_TIMEOUT_SECONDS,
+            "headers": {"Authorization": f"Bearer {secret}"},
+        }
+
+    return {"hooks": {event: [{"hooks": [handler(event)]}] for event in sorted(MIRRORED_EVENTS)}}
 
 
 async def _session_user(session: dict[str, Any]) -> User:

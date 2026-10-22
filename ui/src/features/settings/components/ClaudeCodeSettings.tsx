@@ -163,7 +163,7 @@ export function ClaudeCodeSetupSection() {
           </p>
           <p>
             Nothing appears? Run <Code>/hooks</Code> in Claude Code: you should
-            see Open SWE’s hooks under seven events. If you don’t, check the
+            see Open SWE’s hooks under eight events. If you don’t, check the
             file is valid JSON.
           </p>
         </Step>
@@ -307,12 +307,12 @@ export function ClaudeCodeAboutSection() {
       <SettingsSection title="What gets mirrored">
         <dl className="divide-y divide-default">
           <Fact term="Shown">
-            Each prompt, each tool call with its result, and Claude’s reply at
-            the end of a turn.
+            Each prompt, each tool call with its result, and Claude’s messages,
+            streamed live as Claude writes them.
           </Fact>
           <Fact term="Not shown">
-            What Claude writes between tool calls and the steps inside
-            subagents. Claude Code doesn’t send those to hooks.
+            Claude’s thinking and the steps inside subagents. Claude Code
+            doesn’t send those to hooks.
           </Fact>
           <Fact term="Pull requests">
             A pull request the session binds in the Claude app or opens with{" "}
@@ -323,8 +323,9 @@ export function ClaudeCodeAboutSection() {
             them in Claude Code.
           </Fact>
           <Fact term="Your sessions">
-            Never slowed down: a hook gives up after 5 seconds, and a failed one
-            doesn’t stop the session.
+            Claude Code waits for each hook, so they give up fast: 2 seconds for
+            messages, 5 for everything else. A failed one never stops the
+            session.
           </Fact>
         </dl>
       </SettingsSection>

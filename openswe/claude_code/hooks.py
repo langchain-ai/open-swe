@@ -4,7 +4,8 @@ Claude Code posts each hook event to ``POST /dashboard/api/claude-code/hooks``.
 Every event is appended to the thread's transcript log, which the dashboard
 streams, so the thread follows the session as it runs. Hooks only see what
 Claude Code hands them: each prompt, each tool call with its input and result,
-and the reply that ends a turn, not the text Claude writes between tool calls.
+and every message Claude writes, streamed as Claude Code displays it. Thinking
+never reaches a hook.
 A pull request the session binds in the Claude app, reads back as its own, or
 opens with ``gh pr create`` is recorded on the thread and linked to it.
 
@@ -49,6 +50,7 @@ from openswe.threads.summary import (
 from openswe.transcript.engine import Command, append
 from openswe.transcript.events import (
     JsonObject,
+    MessageAppended,
     MessageCompleted,
     MessageSender,
     ThreadCreated,
@@ -143,6 +145,16 @@ class ToolFailed(_ToolHook):
     error: str = ""
 
 
+class MessageShown(_Hook):
+    """Lines of a message as Claude Code displays them; every batch of one message shares its id."""
+
+    hook_event_name: Literal["MessageDisplay"]
+    message_id: str = Field(min_length=1)
+    index: int = Field(default=0, ge=0)
+    final: bool = False
+    delta: str = ""
+
+
 class Stopped(_Hook):
     hook_event_name: Literal["Stop"]
     last_assistant_message: str | None = None
@@ -192,6 +204,7 @@ MIRRORED_EVENTS = frozenset(
         "PreToolUse",
         "PostToolUse",
         "PostToolUseFailure",
+        "MessageDisplay",
         "Stop",
         "StopFailure",
         "SessionEnd",
@@ -209,6 +222,7 @@ type HookEvent = Annotated[
     | Annotated[ToolCalled, Tag("PreToolUse")]
     | Annotated[ToolReturned, Tag("PostToolUse")]
     | Annotated[ToolFailed, Tag("PostToolUseFailure")]
+    | Annotated[MessageShown, Tag("MessageDisplay")]
     | Annotated[Stopped, Tag("Stop")]
     | Annotated[StopFailed, Tag("StopFailure")]
     | Annotated[SessionEnded, Tag("SessionEnd")]
@@ -261,7 +275,9 @@ class SessionMirror:
             return
         title = await self._title()
         if title is None:
-            if not isinstance(event, PromptSubmitted | ToolCalled | ToolReturned | ToolFailed):
+            if not isinstance(
+                event, PromptSubmitted | ToolCalled | ToolReturned | ToolFailed | MessageShown
+            ):
                 return
             await self._create(event)
         match event:
@@ -272,6 +288,8 @@ class SessionMirror:
                 await self._append([*commands, self._tool_started(turn_id, event)])
             case ToolReturned() | ToolFailed():
                 await self._tool_ended(event)
+            case MessageShown():
+                await self._message_shown(event)
             case Stopped():
                 await self._stopped(event)
             case StopFailed():
@@ -399,31 +417,71 @@ class SessionMirror:
         if isinstance(event, ToolReturned) and (url := event.pull_request_url()) is not None:
             await self._link_pull_request(url)
 
+    async def _message_shown(self, event: MessageShown) -> None:
+        turn_id, commands = await self._turn()
+        message_id = f"ai-{event.message_id}"
+        if event.delta:
+            commands.append(
+                Command(
+                    command_id=f"message:{message_id}:{event.index}",
+                    event=MessageAppended(turn_id=turn_id, message_id=message_id, text=event.delta),
+                    actor_kind="agent",
+                    turn_id=turn_id,
+                )
+            )
+        await self._append(commands)
+        # The fragments already show the message; completing it settles the canonical text.
+        if event.final and (shown := await self._message_text(message_id)):
+            await self._append([self._reply(turn_id, message_id, shown)])
+
     async def _stopped(self, event: Stopped) -> None:
         reply = (event.last_assistant_message or "").strip()
         if (open_turn := await steer_target(self.thread_id)) is None and not reply:
             return
         turn_id, commands = await self._turn()
-        if reply:
-            message_id = f"ai-{turn_id}"
-            commands.append(
-                Command(
-                    command_id=f"message:{message_id}:completed",
-                    event=MessageCompleted(
-                        turn_id=turn_id,
-                        message_id=message_id,
-                        role="ai",
-                        text=reply,
-                        created_at=datetime.now(UTC),
-                    ),
-                    actor_kind="agent",
-                    turn_id=turn_id,
-                )
-            )
+        # With MessageDisplay hooked, the reply was already mirrored as it was shown.
+        if reply and not await self._replied(turn_id, reply):
+            commands.append(self._reply(turn_id, f"ai-{turn_id}", reply))
         commands.append(self._ended(TurnCompleted(turn_id=turn_id), "completed"))
         await self._append(commands)
         if open_turn is not None:
             await self._touch()
+
+    async def _message_text(self, message_id: str) -> str:
+        async with postgres.read_only_transaction() as conn:
+            result = await conn.execute(
+                text(
+                    "SELECT text FROM thread_message "
+                    "WHERE thread_id = :thread_id AND message_id = :message_id"
+                ),
+                {"thread_id": self.thread_id, "message_id": message_id},
+            )
+            return (result.scalar_one_or_none() or "").strip()
+
+    async def _replied(self, turn_id: UUID, reply: str) -> bool:
+        async with postgres.read_only_transaction() as conn:
+            result = await conn.execute(
+                text(
+                    "SELECT EXISTS (SELECT 1 FROM thread_message WHERE thread_id = :thread_id "
+                    "AND turn_id = :turn_id AND role = 'ai' AND btrim(text) = :reply)"
+                ),
+                {"thread_id": self.thread_id, "turn_id": turn_id, "reply": reply},
+            )
+            return bool(result.scalar_one())
+
+    def _reply(self, turn_id: UUID, message_id: str, reply: str) -> Command:
+        return Command(
+            command_id=f"message:{message_id}:completed",
+            event=MessageCompleted(
+                turn_id=turn_id,
+                message_id=message_id,
+                role="ai",
+                text=reply,
+                created_at=datetime.now(UTC),
+            ),
+            actor_kind="agent",
+            turn_id=turn_id,
+        )
 
     async def _end_turn(
         self,
