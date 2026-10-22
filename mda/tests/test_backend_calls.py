@@ -41,7 +41,7 @@ from rt.backend import (
     ToolReply,
     ToolSpec,
 )
-from rt.middleware import BackendRunMiddleware
+from rt.middleware import BackendRunMiddleware, RunState
 from rt.sandbox import SandboxCreate, SandboxSpec
 from rt.sandbox_tools import SandboxToolsMiddleware
 from rt.tools import backend_tool
@@ -807,19 +807,16 @@ async def test_mda_does_not_retry_tool_pairing_errors(
         else openai.APIStatusError(message, response=response, body={})
     )
     handler = AsyncMock(side_effect=[error, ModelResponse(result=[AIMessage(content="fallback")])])
-    request = ModelRequest(
-        model=model,
-        messages=[],
-        state={
-            "messages": [],
-            "open_swe_call": ModelCall(
-                system_prompt="test",
-                model=None,
-                fallback=ModelSpec(model_id="fallback", kwargs={}),
-                use_gateway=False,
-            ).model_dump(),
-        },
-    )
+    state: RunState = {
+        "messages": [],
+        "open_swe_call": ModelCall(
+            system_prompt="test",
+            model=None,
+            fallback=ModelSpec(model_id="fallback", kwargs={}),
+            use_gateway=False,
+        ).model_dump(mode="json"),
+    }
+    request = ModelRequest(model=model, messages=[], state=state)
     middleware = BackendRunMiddleware(OpenSweBackend("token"), "run")
     if retries:
         response = await middleware.awrap_model_call(request, handler)
