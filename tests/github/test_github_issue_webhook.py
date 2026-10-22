@@ -408,9 +408,9 @@ def test_process_github_review_finding_reply_dispatches_sanitized_reply_body(mon
 
     kwargs = captured["kwargs"]
     assert isinstance(kwargs, dict)
-    messages = kwargs["input"]["messages"]
-    assert len(messages) == 1
-    message_content = messages[-1]["content"]
+    introduction, message = kwargs["input"]["messages"]
+    assert 'kind="person" id="github:123"' in introduction["content"]
+    message_content = message["content"]
     assert isinstance(message_content, str)
     assert "Open SWE finding f_1" in message_content
     assert "This is handled elsewhere." in message_content

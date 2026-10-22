@@ -246,6 +246,18 @@ def dynamic_context_hash(content: object) -> str | None:
     return context[1] if context else None
 
 
+def introduced_person_ids(messages: object) -> set[str]:
+    """Ids of every person a context block in ``messages`` has described."""
+    if not isinstance(messages, (list, tuple)):
+        return set()
+    ids: set[str] = set()
+    for message in messages:
+        context = _dynamic_context(_message_content(message))
+        if context is not None and context[0][0] == "person":
+            ids.add(context[0][1])
+    return ids
+
+
 def _message_content(message: object) -> object:
     """The content of a message, whether it is a model object or its JSON form."""
     if isinstance(message, BaseMessage):

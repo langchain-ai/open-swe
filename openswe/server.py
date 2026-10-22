@@ -14,7 +14,6 @@ import warnings
 from collections.abc import Awaitable, Callable, Mapping, Sequence
 from pathlib import Path
 from typing import Any, cast
-from uuid import UUID
 
 from openswe.config import ENV
 
@@ -30,7 +29,6 @@ from langgraph_sdk import get_client
 warnings.filterwarnings("ignore", module="langchain_core._api.deprecation")
 
 import asyncio
-from dataclasses import replace
 
 # Suppress Pydantic v1 compatibility warnings from langchain on Python 3.14+
 warnings.filterwarnings("ignore", message=".*Pydantic V1.*", category=UserWarning)
@@ -90,6 +88,7 @@ from openswe.dashboard.workspace_settings_cache import cached_workspace_settings
 from openswe.github.token import resolve_github_token
 from openswe.input_messages import (
     dynamic_context_hash,
+    introduced_person_ids,
     message_sender_id,
     person_introduction,
     visible_dynamic_context_hashes,
@@ -187,6 +186,7 @@ from openswe.slack.dm import is_concierge_thread, is_dm_channel
 from openswe.thread_title import TITLE_GENERATION_MAX_TOKENS, schedule_thread_title_generation
 from openswe.threads.blobs import ThreadBlobs, blob_namespace
 from openswe.threads.recent_context import RecentContextAudience, recent_thread_context_section
+from openswe.threads.roster import ThreadRoster
 from openswe.threads.summary import DASHBOARD_SOURCE
 from openswe.tools import (
     assign_human_reviewer,
@@ -264,7 +264,6 @@ from openswe.tools import (
 from openswe.tools.access import permitted, resolve_access
 from openswe.tools.admin_gate import (
     actor_has_admin_context,
-    participant_is_admin,
 )
 from openswe.tools.manage_feature_flags import manage_feature_flags
 from openswe.tools.manage_review_approval_mode import manage_review_approval_mode
@@ -282,11 +281,7 @@ from openswe.tools.task_threads import (
 from openswe.users import User
 from openswe.utils import ttl_cache
 from openswe.utils.authorship import (
-    OPEN_SWE_BOT_EMAIL,
-    OPEN_SWE_BOT_NAME,
-    CollaboratorIdentity,
     ThreadParticipant,
-    resolve_participant_identities,
     resolve_triggering_user_identity,
 )
 from openswe.utils.dashboard_links import dashboard_base_url, dashboard_plan_url
@@ -300,7 +295,6 @@ from openswe.utils.model import (
     provider_model_kwargs,
 )
 from openswe.utils.startup_trace import aphase
-from openswe.utils.thread_participants import PARTICIPANT_LOGINS_KEY, participant_logins
 from openswe.utils.thread_reads import read_thread, shared_thread_reads
 from openswe.utils.thread_settings import (
     ThreadSettings,
@@ -437,134 +431,6 @@ async def _resolve_repo_custom_instructions(
         return await get_repo_agent_instructions(default_repo["owner"], default_repo["name"])
     except Exception:
         logger.debug("Failed to load repo custom agent instructions", exc_info=True)
-        return None
-
-
-async def _thread_participant_identities(thread_id: str) -> list[CollaboratorIdentity]:
-    """Git identities of everyone who has posted in this thread."""
-    try:
-        thread = await read_thread(thread_id, client)
-        logins = participant_logins(thread_metadata(thread).get(PARTICIPANT_LOGINS_KEY))
-        return await resolve_participant_identities(logins)
-    except Exception:
-        logger.debug("Failed to resolve participant identities for %s", thread_id, exc_info=True)
-        return []
-
-
-async def _participant_user(login: str, person_id: str | None) -> User | None:
-    """Resolve a participant by their canonical id before falling back to a surface login."""
-    try:
-        if person_id and person_id.startswith("user:"):
-            user = await User.get(UUID(person_id.removeprefix("user:")))
-            if user is not None:
-                return user
-        return await User.for_login("github", login) if login else None
-    except Exception:
-        logger.warning(
-            "Could not resolve a participant; describing them from surface data",
-            extra={"participant_login": login, "person_id": person_id},
-            exc_info=True,
-        )
-        return None
-
-
-async def _thread_participant(
-    identity: CollaboratorIdentity,
-    config: RunnableConfig,
-    *,
-    person_id: str | None = None,
-    timezone: str = "",
-    slack_user_id: str = "",
-) -> ThreadParticipant:
-    user = await _participant_user(identity.github_login, person_id)
-    login = (user.github_login if user else "") or identity.github_login
-    if not login:
-        return ThreadParticipant(
-            identity=identity,
-            person_id=person_id or "",
-            timezone=timezone,
-            linked=user is not None,
-            slack_user_id=slack_user_id or (user.slack_user_id if user else ""),
-        )
-    identity = replace(identity, github_login=login)
-    profile, workspace_admin, instructions = await asyncio.gather(
-        load_profile(login),
-        participant_is_admin(login),
-        _resolve_user_custom_instructions(login),
-    )
-    display_name = (user.display_name if user else "") or identity.display_name or login
-    return ThreadParticipant(
-        identity=replace(
-            identity,
-            display_name=display_name,
-            commit_name=display_name,
-            commit_email=identity.login_noreply_email,
-        ),
-        person_id=person_id or (f"user:{user.id}" if user else f"github:{login}"),
-        workspace_admin=workspace_admin,
-        draft_prs=profile_draft_prs(profile),
-        instructions=instructions or "",
-        email=(user.email if user else "") or "",
-        timezone=timezone,
-        linked=user is not None,
-        slack_user_id=slack_user_id or (user.slack_user_id if user else ""),
-    )
-
-
-async def _thread_participants(
-    thread_id: str,
-    config: RunnableConfig,
-    sender: CollaboratorIdentity | None,
-    *,
-    sender_person_id: str,
-    sender_display_name: str = "",
-    sender_timezone: str = "",
-    sender_slack_user_id: str = "",
-) -> list[ThreadParticipant]:
-    """Everyone in the thread, each with the settings the agent acts under for them.
-
-    The sender is keyed by the id their message envelope carries, so the turn's
-    envelope resolves to their block even when no person row exists. Without a
-    GitHub account they have no commit identity, and the surface's name for them
-    is all anyone knows.
-    """
-    identities = await _thread_participant_identities(thread_id)
-    resolved_sender = sender or (
-        CollaboratorIdentity(display_name=sender_display_name, commit_name="", commit_email="")
-        if sender_display_name
-        else CollaboratorIdentity(
-            display_name=OPEN_SWE_BOT_NAME,
-            commit_name=OPEN_SWE_BOT_NAME,
-            commit_email=OPEN_SWE_BOT_EMAIL,
-        )
-    )
-    others = [
-        identity for identity in identities if identity.commit_email != resolved_sender.commit_email
-    ]
-    return list(
-        await asyncio.gather(
-            _thread_participant(
-                resolved_sender,
-                config,
-                person_id=sender_person_id,
-                timezone=sender_timezone,
-                slack_user_id=sender_slack_user_id,
-            ),
-            *(_thread_participant(identity, config) for identity in others),
-        )
-    )
-
-
-async def _resolve_user_custom_instructions(login: str | None) -> str | None:
-    """Load user-level custom agent instructions for the triggering user."""
-    if not login:
-        return None
-    try:
-        from openswe.dashboard.user_instructions import get_user_custom_instructions
-
-        return await get_user_custom_instructions(login)
-    except Exception:
-        logger.debug("Failed to load user custom agent instructions", exc_info=True)
         return None
 
 
@@ -1330,21 +1196,12 @@ class PrepareAgentRunMiddleware(BasePrepareRunMiddleware):
             )
             sender_messages: list[Any] = []
             if subject_id is not None:
-                participants = await _thread_participants(
+                participants = await ThreadRoster(
                     self._thread_id,
-                    self._config or {},
-                    triggering_user_identity,
-                    sender_person_id=subject_id,
-                    sender_display_name=(
-                        cfg.slack_thread.triggering_user_name if cfg.slack_thread else ""
-                    ),
-                    sender_timezone=(
-                        cfg.slack_thread.triggering_user_timezone if cfg.slack_thread else ""
-                    ),
-                    sender_slack_user_id=(
-                        cfg.slack_thread.triggering_user_id if cfg.slack_thread else ""
-                    ),
-                )
+                    cfg,
+                    frozenset(introduced_person_ids(state.get("messages"))),
+                    client,
+                ).participants(subject_id)
                 sender_messages = self._participants_messages(state, participants)
         recent_thread_context = await recent_context_task if recent_context_task is not None else ""
         try:
