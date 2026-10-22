@@ -6,7 +6,7 @@ pass or permission to merge.
 
 ## Configuration
 
-Unset `MERGE_QUEUE_CONFIG` disables both the API and controller. To enable one
+Unset `MERGE_QUEUE_CONFIG` disables the controller. To enable one
 canary repository, supply a trusted JSON object matching `QueueConfiguration`:
 
 ```json
@@ -17,7 +17,6 @@ canary repository, supply a trusted JSON object matching `QueueConfiguration`:
   "app_id": 456,
   "installation_id": 789,
   "workflow_digest": "<sha256 of the reviewed merge_queue_validate.yml bytes>",
-  "operator_emails": ["operator@example.com"],
   "policy": {
     "checks": {
       "required-check-name": {
@@ -54,27 +53,12 @@ The controller checks the workflow digest and actor variable before each GitHub
 reconciliation. Changing either blocks GitHub work until configuration is updated.
 Expired database deadlines can still be reconciled during a GitHub outage.
 
-## Human controls
+## Startup
 
-All endpoints use dashboard session cookies and the dashboard mutation-origin
-check. Bearer/API-key credentials do not authenticate these endpoints. Access is
-limited to the configured workspace and current GitHub repository access.
-
-Under `/dashboard/api/merge-queue/{workspace_id}`:
-
-- `GET` lists active requests, pause state and the active batch ID; `limit` and
-  `offset` paginate requests. `GET /batches/{batch_id}` shows candidate and attempt status.
-- `POST /requests` accepts `number`, `head_sha`, an idempotency UUID `request_key`,
-  and optional PR-number `dependencies`. It requires repository write access and
-  records intent before reviews finish. The worker separately checks admission.
-- `DELETE /requests/{request_id}` withdraws the caller's intent. Operators may
-  withdraw another person's intent. Withdrawal invalidates an affected batch.
-- `PATCH /pause` accepts `paused`; `PATCH /requests/{request_id}/priority` accepts
-  `priority`. Both require an operator email from the current stored user identity
-  and repository write access. Priority changes only affect unbatched requests.
-
-Registration starts paused. An operator resumes explicitly. Pause stops new
-batch/dispatch work; already dispatched validation and cleanup can still reconcile.
+Registration starts paused. This runtime does not expose queue controls. Enable
+only after authenticated controls are installed and ownership handoff is complete.
+Pause stops new batch/dispatch work; already dispatched validation and cleanup
+can still reconcile.
 Startup registers a keyed minute job, retaining existing requests, pause state,
 and running job claims. GitHub failures are retried by subsequent reconciliation;
 there is no one-time GitHub availability requirement during startup.

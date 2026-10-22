@@ -16,7 +16,10 @@ from openswe.database import postgres
 from openswe.github.http import GitHubError, RepoClient
 from openswe.github.pull_requests import PullRequest
 from openswe.github.repositories import Repository
-from openswe.merge_queue.admission import Admission, AdmissionReader, QueuePolicy
+from openswe.merge_queue import controller, runtime
+from openswe.merge_queue.admission import Admission, AdmissionReader, CheckSource, QueuePolicy
+from openswe.merge_queue.configuration import QueueConfiguration
+from openswe.merge_queue.controller import QueueController
 from openswe.merge_queue.git import Candidate, CandidateGit, PullHead, candidate_ref
 from openswe.merge_queue.models import (
     Attempt,
@@ -920,27 +923,8 @@ async def test_validation_precedes_cleanup_and_cancellation_skips_it(
     assert (await queue.history(expired.id)).batch.ref_deleted_at is None
 
 
-async def test_queue_dashboard_authorization_and_restart(
-    queue: MergeQueue, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    """Human controls retain workspace, repository and owner boundaries after restart."""
-    import httpx
-    from fastapi import Depends, FastAPI
-
-    from openswe.dashboard import profiles, repo_access
-    from openswe.dashboard.oauth import (
-        issue_session,
-        require_same_origin_for_mutations,
-    )
-    from openswe.github.http import GitHubClient
-    from openswe.jobs import queue as jobs
-    from openswe.merge_queue import controller, routes, runtime
-    from openswe.merge_queue.admission import CheckSource
-    from openswe.merge_queue.configuration import QueueConfiguration
-    from openswe.users.models import UserIdentity
-
-    monkeypatch.setenv("DASHBOARD_JWT_SECRET", "queue-test-session-secret")
-    monkeypatch.setenv("DASHBOARD_BASE_URL", "http://testserver")
+@pytest.fixture
+async def queue_controller(queue: MergeQueue, monkeypatch: pytest.MonkeyPatch) -> QueueController:
     monkeypatch.setenv("MERGE_QUEUE_APP_PRIVATE_KEY", "queue-test-private-key")
     monkeypatch.setenv("GITHUB_APP_ID", "99")
     monkeypatch.setenv("SANDBOX_TYPE", "langsmith")
@@ -953,7 +937,6 @@ async def test_queue_dashboard_authorization_and_restart(
         app_id=123,
         installation_id=456,
         workflow_digest="a" * 64,
-        operator_emails=frozenset({"operator@example.com"}),
         policy=QueuePolicy(
             checks={"checks": CheckSource(app_id=1, workflow_path=".github/workflows/ci.yml")},
             validation=ValidationPolicy(dispatch_actor_id=789),
@@ -961,156 +944,37 @@ async def test_queue_dashboard_authorization_and_restart(
     )
     monkeypatch.setenv("MERGE_QUEUE_CONFIG", config.model_dump_json())
     await controller.start_queue()
+    assert controller.CONTROLLER is not None
+    return controller.CONTROLLER
+
+
+async def test_queue_startup_preserves_state_and_running_job(
+    queue_controller: QueueController, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from sqlalchemy import text
+
+    from openswe.jobs import queue as jobs
+
+    queue = queue_controller.queue
+    assert queue.paused
+    pending = await request(queue, 1)
     first_job = await jobs.get(f"merge-queue:{queue.id}")
     assert first_job is not None
     # Hold the recurring job while a second replica starts.
-    from sqlalchemy import text
-
     async with postgres.transaction() as conn:
         await conn.execute(
             text("UPDATE job SET due_at = clock_timestamp() WHERE id = :id"), {"id": first_job.id}
         )
+        await conn.execute(update(MergeQueue).where(MergeQueue.id == queue.id).values(paused=False))
     claimed = next(job for job in await jobs.claim_due(100) if job.id == first_job.id)
-    async with postgres.session() as session:
-        people = [
-            User(
-                identities=[
-                    UserIdentity(
-                        provider="github", external_id=str(index), login=login, email=email
-                    )
-                ]
-            )
-            for index, (login, email) in enumerate(
-                (
-                    ("author", "author@example.com"),
-                    ("coworker", "coworker@example.com"),
-                    ("operator", "operator@example.com"),
-                ),
-                1,
-            )
-        ]
-        session.add_all(people)
-    author, coworker, operator = people
-    permission, available = "write", True
 
-    async def user_token(login: str, **kwargs: object) -> str:
-        return login
+    await controller.start_queue()
+    next_job = await jobs.get(f"merge-queue:{queue.id}")
+    assert next_job is not None and next_job.claim_token == claimed.claim_token
+    restored = await MergeQueue.load(queue.id, queue.workspace_id)
+    assert restored is not None and not restored.paused
+    assert [row.id for row in await restored.requests()] == [pending.id]
 
-    def github_response(request: httpx2.Request) -> httpx2.Response:
-        if not available:
-            return httpx2.Response(404, json={"message": "Not Found"})
-        if request.url.path.endswith("/permission"):
-            return httpx2.Response(200, json={"permission": permission})
-        if request.url.path == "/graphql":
-            return httpx2.Response(
-                200,
-                json={
-                    "data": {
-                        "repository": {
-                            "pullRequest": {
-                                "number": 1,
-                                "state": "OPEN",
-                                "merged": False,
-                                "isDraft": False,
-                                "headRefOid": "a" * 40,
-                                "baseRefOid": "b" * 40,
-                                "baseRefName": "main",
-                                "baseRef": {"target": {"oid": "b" * 40}},
-                                "headRepository": {"nameWithOwner": "acme/widgets"},
-                                "baseRepository": {"nameWithOwner": "acme/widgets"},
-                                "reviewDecision": "REVIEW_REQUIRED",
-                                "reviews": {
-                                    "nodes": [],
-                                    "pageInfo": {"hasNextPage": False, "endCursor": None},
-                                },
-                            }
-                        }
-                    }
-                },
-            )
-        assert request.url.path == "/repos/acme/widgets"
-        return httpx2.Response(200, json={"id": 42})
-
-    @asynccontextmanager
-    async def as_user(login: str) -> AsyncIterator[GitHubClient]:
-        async with httpx2.AsyncClient(transport=httpx2.MockTransport(github_response)) as client:
-            yield GitHubClient(client, login=login)
-
-    monkeypatch.setattr(repo_access, "get_valid_access_token", user_token)
-    monkeypatch.setattr(profiles, "get_valid_access_token", user_token)
-    monkeypatch.setattr(
-        repo_access, "pooled_transport", lambda: httpx2.MockTransport(github_response)
-    )
-    monkeypatch.setattr(GitHubClient, "as_user", as_user)
-    app = FastAPI()
-    app.include_router(routes.router, dependencies=[Depends(require_same_origin_for_mutations)])
-    path = f"/merge-queue/{queue.workspace_id}"
-    async with httpx.AsyncClient(
-        transport=httpx.ASGITransport(app=app),
-        base_url="http://testserver",
-        headers={"Origin": "http://testserver"},
-    ) as client:
-        assert (
-            await client.get(path, headers={"Authorization": "Bearer agent-key"})
-        ).status_code == 401
-        client.cookies.set(
-            "osw_session",
-            issue_session(
-                login=author.github_login,
-                email=author.email,
-                avatar_url=None,
-                user_id=str(author.id),
-            ),
-        )
-        assert (await client.get(f"/merge-queue/{uuid7()}")).status_code == 404
-        available = False
-        assert (await client.get(path)).status_code == 404
-        available = True
-        body = {"number": 1, "head_sha": "a" * 40, "request_key": str(uuid7())}
-        permission = "read"
-        assert (await client.post(f"{path}/requests", json=body)).status_code == 403
-        permission = "write"
-        assert (
-            await client.post(
-                f"{path}/requests", json=body, headers={"Origin": "http://evil.example"}
-            )
-        ).status_code == 403
-        response = await client.post(f"{path}/requests", json=body)
-        assert response.status_code == 200, response.text
-        requested = response.json()
-        assert requested["state"] == "waiting_for_review"
-        assert (await client.post(f"{path}/requests", json=body)).json()["id"] == requested["id"]
-        assert (await client.patch(f"{path}/pause", json={"paused": False})).status_code == 403
-        client.cookies.set(
-            "osw_session",
-            issue_session(
-                login=coworker.github_login,
-                email=operator.email,
-                avatar_url=None,
-                user_id=str(coworker.id),
-            ),
-        )
-        # An email claim cannot override the current stored person's identity.
-        assert (await client.patch(f"{path}/pause", json={"paused": False})).status_code == 403
-        assert (await client.delete(f"{path}/requests/{requested['id']}")).status_code == 403
-        client.cookies.set(
-            "osw_session",
-            issue_session(
-                login=operator.github_login,
-                email=operator.email,
-                avatar_url=None,
-                user_id=str(operator.id),
-            ),
-        )
-        assert (await client.patch(f"{path}/pause", json={"paused": False})).status_code == 204
-        await controller.start_queue()
-        next_job = await jobs.get(f"merge-queue:{queue.id}")
-        assert next_job is not None and next_job.claim_token == claimed.claim_token
-        snapshot = (await client.get(path)).json()
-        assert snapshot["paused"] is False and len(snapshot["entries"]) == 1
-        assert (await client.delete(f"{path}/requests/{requested['id']}")).status_code == 204
-        assert (await client.get(path)).json()["entries"] == []
-        monkeypatch.delenv("MERGE_QUEUE_CONFIG")
-        await controller.start_queue()
-        assert runtime.RUNTIME is None
-        assert (await client.get(path)).status_code == 404
+    monkeypatch.delenv("MERGE_QUEUE_CONFIG")
+    await controller.start_queue()
+    assert controller.CONTROLLER is None and runtime.RUNTIME is None
