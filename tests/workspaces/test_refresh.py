@@ -141,9 +141,15 @@ async def test_a_sandbox_that_never_boots_still_records_the_failure() -> None:
 
 @pytest.mark.usefixtures("registry_db")
 @pytest.mark.asyncio
-async def test_a_refresh_in_flight_blocks_a_second_one() -> None:
-    create = AsyncMock()
-    with patch.object(refresh, "_create_builder_sandbox", create):
+async def test_a_refresh_in_flight_blocks_a_second_one_but_not_its_own_retry() -> None:
+    """A job retried after a redeploy cut it short must not wait hours behind itself."""
+    create = AsyncMock(return_value=_backend(_Result("provisioned", 0)))
+    release = AsyncMock()
+    with (
+        patch.object(refresh, "_create_builder_sandbox", create),
+        patch.object(refresh, "_release_builder_sandbox", release),
+        patch.object(refresh, "capture_workspace_snapshot", AsyncMock()),
+    ):
         await WORKSPACES.create(
             WorkspaceCreate(
                 inherit_default_sandbox=False,
@@ -153,11 +159,19 @@ async def test_a_refresh_in_flight_blocks_a_second_one() -> None:
             ),
             "ramon",
         )
-        await WORKSPACES.mark_refreshing("base")
-        result = await refresh.refresh_workspace("base")
+        assert await WORKSPACES.mark_refreshing("base", run_id="run-a")
+        await WORKSPACES.mark_refresh_builder("base", "sb-lost")
+        other = await refresh.refresh_workspace("base", run_id="run-b")
+        create.assert_not_awaited()
+        retried = await refresh.refresh_workspace("base", run_id="run-a")
+        record = await WORKSPACES.get("base")
 
-    assert result["status"] == "already_refreshing"
-    create.assert_not_awaited()
+    assert other["status"] == "already_refreshing"
+    assert retried["status"] == "success"
+    assert record is not None
+    assert record.refresh_status == "success"
+    # The cut-short attempt's builder is stopped, not leaked.
+    assert [call.args[0] for call in release.await_args_list] == ["sb-lost", "sb-builder"]
 
 
 # --- update kind + lazy trigger ---

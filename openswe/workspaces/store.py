@@ -38,6 +38,7 @@ import re
 import shlex
 from collections import defaultdict
 from collections.abc import Callable, Sequence
+from datetime import UTC, datetime
 from typing import Any, Literal, NamedTuple, Self, TypedDict
 from uuid import UUID
 
@@ -59,7 +60,7 @@ from openswe.database import postgres
 from openswe.github.repo_names import normalize_repo_full_name
 from openswe.github.repositories import Repository
 from openswe.ui_invalidations import Topic
-from openswe.utils.time import now_iso
+from openswe.utils.time import now_iso, parse_iso
 from openswe.workspaces.rows import (
     WorkspaceRepositoryRow,
     WorkspaceRow,
@@ -150,6 +151,9 @@ MAX_REPOS = 50
 CREATE_PARAMS_MAX_CHARS = 20_000
 SCRIPT_MAX_CHARS = 20_000
 REFRESH_LOG_MAX_CHARS = 40_000
+# A refresh that has been "refreshing" for longer than this lost its worker
+# (redeploy, crash) and must not block the next attempt forever.
+STALE_REFRESH_SECONDS = 3 * 60 * 60
 SNAPSHOT_NAME_MAX_CHARS = 128
 LOG_EXCERPT_LINES = 10
 SNAPSHOT_TAG = "latest"
@@ -649,6 +653,21 @@ class Workspace(BaseModel):
         if self.snapshot_status not in ("ready", "capturing"):
             return None
         return self.snapshot_id or None
+
+    def refresh_in_flight(self, run_id: str | None = None) -> bool:
+        """Whether a refresh other than ``run_id``'s is still plausibly running.
+
+        The marker a run left behind is not someone else's: its job was cut
+        short (a redeploy lapsed its lease) and is being retried.
+        """
+        if self.refresh_status != "refreshing":
+            return False
+        if run_id is not None and self.refresh_run_id == run_id:
+            return False
+        started_at = parse_iso(self.refresh_started_at)
+        if started_at is None:
+            return False
+        return (datetime.now(UTC) - started_at).total_seconds() < STALE_REFRESH_SECONDS
 
     @property
     def instructions(self) -> str | None:
@@ -1189,8 +1208,23 @@ class WorkspaceStore:
 
         return await self.update_state(slug, change)
 
-    async def mark_refreshing(self, slug: str, kind: RefreshKind = "full") -> Workspace | None:
+    async def mark_refreshing(
+        self, slug: str, kind: RefreshKind = "full", *, run_id: str | None = None
+    ) -> bool:
+        """Claim the workspace's refresh for ``run_id``; ``False`` if another holds it.
+
+        Checked under the row lock, so two jobs queued for one workspace start
+        one builder between them.
+        """
+        claimed = False
+
         def change(record: Workspace) -> None:
+            nonlocal claimed
+            if record.refresh_in_flight(run_id):
+                return
+            claimed = True
+            if run_id is not None:
+                record.refresh_run_id = run_id
             record.refresh_status = "refreshing"
             record.refresh_kind = kind
             record.refresh_started_at = now_iso()
@@ -1200,7 +1234,8 @@ class WorkspaceStore:
             record.refresh_steps = []
             record.refresh_sandbox_id = None
 
-        return await self.update_state(slug, change)
+        await self.update_state(slug, change)
+        return claimed
 
     async def start_refresh_step(
         self, slug: str, label: str, *, log_path: str | None = None
@@ -1271,10 +1306,15 @@ class WorkspaceStore:
         return await self.update_state(slug, change)
 
     async def set_refresh_run_id(self, slug: str, run_id: str) -> Workspace | None:
-        """Record the run a refresh is running in, so a poll can tell it from a later one."""
+        """Record the run a refresh is running in, so a poll can tell it from a later one.
+
+        Never while another run's refresh is in flight: that run would no longer
+        recognise its own marker if its job is retried.
+        """
 
         def change(record: Workspace) -> None:
-            record.refresh_run_id = run_id
+            if not record.refresh_in_flight(run_id):
+                record.refresh_run_id = run_id
 
         return await self.update_state(slug, change)
 
