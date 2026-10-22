@@ -945,3 +945,46 @@ async def test_historical_personal_models_and_routing_do_not_override_workspace(
     )
     assert captured["make_model_calls"][0][0] == "openai:gpt-6.1-sol"
     assert captured["make_model_calls"][0][1]["reasoning"]["effort"] == "medium"
+
+
+async def test_subagent_discovery_respects_permissions() -> None:
+    from langchain_core.language_models.fake_chat_models import FakeListChatModel
+    from langchain_core.tools import StructuredTool
+
+    from openswe.sandboxes.tool_runtime import ToolSurface
+    from openswe.server import _general_purpose_subagent, code_name
+    from openswe.tools.search_tools import search_tools_tool
+
+    def lookup(name: str) -> StructuredTool:
+        async def run(query: str) -> str:
+            return f"{name}: {query}"
+
+        return StructuredTool.from_function(coroutine=run, name=name, description="Lookup records")
+
+    tools = [lookup(name) for name in ("lookup_records", "get_thread", "list_threads", "hidden")]
+    surface = ToolSurface(tools={tool.name: tool for tool in tools})
+    search = search_tools_tool(surface, code_name)
+    tools.append(search)
+    subagent = _general_purpose_subagent(
+        FakeListChatModel(responses=[]),
+        tools,
+        tool_surface=surface,
+        excluded_tools=frozenset({"hidden"}),
+    )
+    [scoped] = [tool for tool in subagent["tools"] if getattr(tool, "name", None) == "search_tools"]
+    # The fork keeps the parent's schemas, so its cached prompt prefix still matches.
+    assert scoped.args == search.args
+    for names in (None, ["lookup_records", "get_thread", "list_threads", "hidden"]):
+        arguments = {"query": "lookup records", "limit": 10}
+        if names is not None:
+            arguments["names"] = names
+        results = await scoped.ainvoke(arguments)
+        assert [result["name"] for result in results] == ["lookup_records"]
+        assert results[0]["code_name"] == "lookupRecords"
+    parent_results = await search.ainvoke({"query": "lookup records", "limit": 10})
+    assert {result["name"] for result in parent_results} == {
+        "lookup_records",
+        "get_thread",
+        "list_threads",
+        "hidden",
+    }

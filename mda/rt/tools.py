@@ -10,7 +10,7 @@ backend can settle.
 """
 
 import logging
-from collections.abc import Mapping
+from collections.abc import Collection, Mapping
 from typing import Final
 
 from langchain.tools import ToolRuntime
@@ -94,8 +94,14 @@ async def run_on_backend(
     return Command(update=update)
 
 
-def backend_tool(spec: ToolSpec, backend: OpenSweBackend) -> BaseTool:
+def backend_tool(
+    spec: ToolSpec, backend: OpenSweBackend, *, search_names: Collection[str] | None = None
+) -> BaseTool:
+    """The backend's tool ``spec``; ``search_names`` limits a ``search_tools`` to those tools."""
+
     async def call(runtime: ToolRuntime, **arguments: JsonValue) -> Command:
+        if spec.name == "search_tools" and search_names is not None:
+            arguments["names"] = sorted(search_names)
         return await run_on_backend(backend, spec.name, arguments, runtime)
 
     return StructuredTool.from_function(

@@ -59,6 +59,10 @@ The backend:
 
 The browser E2E suite runs this project the same way, with a scripted model: `tests/e2e/mda-dev.sh`.
 
+## Unit tests
+
+Run `uv run --no-editable python -m unittest discover -s tests` from this directory. These tests use this project's dependencies; backend unit tests run separately from the repository root.
+
 ## Build and deploy
 
 Each Open SWE backend calls its own MDA deployment, created with `mda deploy`:

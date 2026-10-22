@@ -716,12 +716,32 @@ def _general_purpose_subagent(
     tools: Sequence[BaseTool | Callable[..., object] | dict[str, object]],
     dynamic_tools: DynamicToolMiddleware | None = None,
     *,
+    tool_surface: ToolSurface | None = None,
+    excluded_tools: frozenset[str] = frozenset(),
     offloading: ConversationOffloadingMiddleware | None = None,
     skills_middleware: SkillsMiddleware | None = None,
     incident_middleware: AgentMiddleware | None = None,
     guard_middleware: Sequence[AgentMiddleware[Any, Any, Any]] = (),
     inherited_middleware_exclusions: Sequence[str] = (),
 ) -> SubAgent:
+    permitted = [
+        tool
+        for tool in tools
+        if not _is_subagent_excluded_tool(_registered_tool_name(tool))
+        and _registered_tool_name(tool) not in excluded_tools | SHELL_SEARCH_EXCLUDED_TOOLS
+    ]
+    allowed = (
+        frozenset((*FILESYSTEM_TOOL_NAMES, *map(_registered_tool_name, permitted)))
+        - excluded_tools
+        - SHELL_SEARCH_EXCLUDED_TOOLS
+    )
+    if tool_surface is not None:
+        tools = [
+            search_tools_tool(tool_surface, code_name, allowed=allowed)
+            if _registered_tool_name(tool) == SEARCH_TOOLS_NAME
+            else tool
+            for tool in tools
+        ]
     subagent: SubAgent = {
         "name": GENERAL_PURPOSE_SUBAGENT["name"],
         "description": _general_purpose_description(),
@@ -2115,6 +2135,8 @@ async def build_agent(config: RunnableConfig, *, tool_surface: ToolSurface | Non
                 _general_purpose_subagent(
                     subagent_model,
                     tools=main_tools,
+                    tool_surface=tool_surface,
+                    excluded_tools=excluded_tools,
                     skills_middleware=skills_middleware,
                     dynamic_tools=dynamic_tool_middleware,
                     offloading=ConversationOffloadingMiddleware(subagent_model, agent_backend),

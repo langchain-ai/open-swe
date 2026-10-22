@@ -173,9 +173,11 @@ class ToolSurface:
     def catalog(self) -> list[ToolDescription]:
         return [describe_tool(name, tool) for name, tool in sorted(self.tools.items())]
 
-    def search(self, query: str, limit: int) -> list[ToolDescription]:
+    def search(
+        self, query: str, limit: int, allowed: frozenset[str] | None = None
+    ) -> list[ToolDescription]:
         """The tools whose name, description and parameters best match ``query``, by BM25."""
-        names = sorted(self.tools)
+        names = sorted(self.tools if allowed is None else self.tools.keys() & allowed)
         scores = bm25(_tokens(query), [_tool_tokens(name, self.tools[name]) for name in names])
         ranked = sorted(
             (item for item in zip(names, scores, strict=True) if item[1] > 0),
