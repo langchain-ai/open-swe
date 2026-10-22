@@ -262,7 +262,7 @@ async def test_prepare_auth_fallback_attributes_default_without_pinning_route(
     monkeypatch.setattr(
         httpx2,
         "AsyncClient",
-        lambda **kwargs: client(**kwargs, transport=httpx2.MockTransport(handle)),
+        lambda **kwargs: client(**{**kwargs, "transport": httpx2.MockTransport(handle)}),
     )
     state: PrepareRunState = {"messages": [HumanMessage(content="Fix the typo")]}
     prepared = await handoff.prepare(state)
