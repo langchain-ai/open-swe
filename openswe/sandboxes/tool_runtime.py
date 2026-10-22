@@ -146,6 +146,9 @@ class ToolSurface:
     middleware: Sequence[AgentMiddleware] = ()
     models: SurfaceModels | None = None
     subagents: Sequence[SurfaceSubagent] = ()
+    # Paths the graph's file tools read from this deployment rather than the sandbox,
+    # such as skills.
+    backend_paths: tuple[str, ...] = ()
     # Whether the graph's core tools it seldom needs belong in a runtime's code mode.
     code_mode: bool = False
     # Whether a model loop running elsewhere calls these tools, rather than the sandbox.
