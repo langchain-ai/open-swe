@@ -102,6 +102,7 @@ class _MockHttpxClient:
 # (c) successful re-auth following stale-cache invalidation -------------------
 
 
+@pytest.mark.usefixtures("no_local_threads")
 async def test_private_pr_followup_rejected_before_credentials_or_dispatch(monkeypatch):
     thread_id = "00000000-0000-0000-0000-000000000001"
     client = MagicMock()
@@ -152,6 +153,7 @@ async def test_private_pr_followup_rejected_before_credentials_or_dispatch(monke
     dispatch.assert_not_awaited()
 
 
+@pytest.mark.usefixtures("no_local_threads")
 def test_process_github_pr_comment_invalidates_and_reauths_on_401(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

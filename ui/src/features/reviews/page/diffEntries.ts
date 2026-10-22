@@ -299,13 +299,14 @@ export function entryNotes(
   return notes
 }
 
+/** Which note this is, across renders, wherever it sits in the file's list. */
+export function noteKey(note: Note): string {
+  return "id" in note ? `${note.kind}:${note.id}` : note.kind
+}
+
 export function notesSignature(notes: ReadonlyArray<NoteAnnotation>): string {
   return notes
-    .map((note) => {
-      const meta = note.metadata
-      const id = "id" in meta ? meta.id : ""
-      return `${meta.kind}:${id}:${note.side}:${note.lineNumber}`
-    })
+    .map((note) => `${noteKey(note.metadata)}:${note.side}:${note.lineNumber}`)
     .join("|")
 }
 

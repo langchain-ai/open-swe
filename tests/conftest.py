@@ -18,7 +18,7 @@ import pytest
 
 from openswe.sandboxes.state import SANDBOX_BACKENDS, SANDBOX_CONNECTIONS
 from openswe.slack.allowed_bots import AllowedSlackBot
-from openswe.threads import access, diffs, handlers, listing, proxy, runs, summary
+from openswe.threads import access, diffs, handlers, index, listing, proxy, runs, summary
 from openswe.tools import access as tool_access
 from openswe.users.records import UserRecords
 from openswe.utils import ttl_cache
@@ -176,6 +176,16 @@ async def registry_db_if_available(monkeypatch: pytest.MonkeyPatch) -> AsyncIter
         return
     async with isolated_database(uri, monkeypatch):
         yield True
+
+
+@pytest.fixture
+def no_local_threads(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Every thread takes new activity itself, for tests without the thread index."""
+
+    async def itself(thread_id: str) -> str:
+        return thread_id
+
+    monkeypatch.setattr(index, "live_thread_id", itself)
 
 
 @pytest.fixture

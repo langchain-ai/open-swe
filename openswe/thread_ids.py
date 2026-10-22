@@ -12,6 +12,7 @@ import uuid
 
 __all__ = [
     "github_issue_thread_id",
+    "mda_successor_thread_id",
     "pr_comment_thread_id",
     "review_chat_thread_id",
     "reviewer_thread_id",
@@ -58,6 +59,11 @@ def slack_thread_id(channel: str, timestamp: str, nonce: str | None = None) -> s
 
 def github_issue_thread_id(issue_id: str) -> str:
     return _sha256_uuid(f"github-issue:{issue_id}")
+
+
+def mda_successor_thread_id(thread_id: str) -> str:
+    """The thread that takes new activity for one made before Managed Deep Agents."""
+    return _url_uuid(f"thread:{thread_id}:mda")
 
 
 def thread_id_from_branch(branch_name: str) -> str | None:

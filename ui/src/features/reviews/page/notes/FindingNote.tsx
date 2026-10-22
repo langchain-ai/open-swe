@@ -175,7 +175,11 @@ function FindingReplies({
       {thread.comments.slice(1).map((comment) => (
         <CommentRow key={comment.id} comment={comment} />
       ))}
-      <ReplyBox reply={reply} placeholder="Reply on GitHub…" />
+      <ReplyBox
+        threadId={thread.id}
+        reply={reply}
+        placeholder="Reply on GitHub…"
+      />
       <div className="flex items-center gap-space-1">
         <ResolveButton thread={thread} resolve={resolve} />
       </div>
