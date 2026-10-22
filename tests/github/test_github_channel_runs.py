@@ -109,7 +109,11 @@ def prepared(monkeypatch: pytest.MonkeyPatch) -> AsyncMock:
     monkeypatch.setattr(github_webhooks, "prepare_github_issue_run", prepare)
     monkeypatch.setattr(channel, "adopt_channel_run", AsyncMock())
     monkeypatch.setattr(channel, "channel_run_starting", AsyncMock())
-    monkeypatch.setattr(dispatch, "_run_user_id", AsyncMock(return_value="user-1"))
+    monkeypatch.setattr(
+        dispatch,
+        "_run_user_metadata",
+        AsyncMock(return_value={"ls_repo_provider": "github", "user_id": "user-1"}),
+    )
     monkeypatch.setattr(webhook_common, "AGENT_VERSION_METADATA", {"LANGSMITH_AGENT_VERSION": "v1"})
 
     async def context(

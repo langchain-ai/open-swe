@@ -9,6 +9,8 @@ from openswe.github import webhook
 from openswe.github.webhook import CHANNEL_HISTORY_MESSAGES, recent_turns
 from openswe.webhooks import common
 
+pytestmark = pytest.mark.usefixtures("no_local_threads")
+
 
 def _human(n: int) -> dict[str, Any]:
     return {"type": "human", "content": f"h{n}"}

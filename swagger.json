@@ -18808,6 +18808,54 @@
           "threads",
           "threads"
         ]
+      },
+      "post": {
+        "description": "Open the thread's browser for a person, before or after the agent has.",
+        "operationId": "api_open_thread_browser_dashboard_api_threads__thread_id__browser_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "thread_id",
+            "required": true,
+            "schema": {
+              "title": "Thread Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ThreadBrowserView"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "DashboardSession": []
+          }
+        ],
+        "summary": "Api Open Thread Browser",
+        "tags": [
+          "dashboard",
+          "threads",
+          "threads"
+        ]
       }
     },
     "/dashboard/api/threads/{thread_id}/cancel": {

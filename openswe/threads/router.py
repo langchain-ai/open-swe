@@ -10,8 +10,9 @@ keeps working unchanged:
 - A new thread is created on Managed Deep Agents (``mda``). A thread's runs,
   state, history, commands and streams go to its runtime: MDA, or for ``local``
   threads made before that, this deployment's Agent Server, which logs a
-  warning for each. A run started there marks the thread busy; the run-complete
-  webhook and a reconcile job settle it.
+  warning for each. Local threads are read-only: starting a run, cron or
+  posting command there, or copying one, is refused. A run started on MDA
+  marks the thread busy; the run-complete webhook and a reconcile job settle it.
 - Reads reach MDA as LangSmith Studio's, which may read every thread; writes stay
   scoped to the threads the backend owns. A thread an MDA channel owns (its index
   metadata names the ``channel``) is read-only here: the channel starts its runs,
@@ -73,6 +74,8 @@ _READ_COMMANDS: Final = frozenset(
         "subscription.reconnect",
     }
 )
+# Commands that add to a thread rather than read or stop it.
+POSTING_COMMANDS: Final = frozenset({"run.start", "input.respond", "input.inject", "state.fork"})
 
 
 def _routed(scope: Scope) -> bool:
@@ -168,7 +171,7 @@ async def _refuse_channel_write(send: Send, thread: IndexedThread) -> bool:
     return True
 
 
-def _warn_local(scope: Scope, thread: IndexedThread, assistant_id: JsonValue = None) -> None:
+def _warn_local(scope: Scope, thread: IndexedThread) -> None:
     """Only threads made before every new one started on MDA are still ``local``."""
     logger.warning(
         "Served a thread that is not on Managed Deep Agents",
@@ -180,11 +183,23 @@ def _warn_local(scope: Scope, thread: IndexedThread, assistant_id: JsonValue = N
             "thread_updated_at": thread.updated_at.isoformat(),
             "thread_metadata": thread.metadata,
             "graph_id": thread.metadata.get("graph_id"),
-            "assistant_id": assistant_id,
             "http_method": scope["method"],
             "http_path": scope["path"],
             "query_string": bytes(scope.get("query_string", b"")).decode("latin-1"),
             "user_agent": Headers(scope=scope).get("user-agent"),
+        },
+    )
+
+
+async def _refuse_local(scope: Scope, send: Send, thread: IndexedThread) -> None:
+    _warn_local(scope, thread)
+    # Not 409, which callers read as "a run is already going" and retry or skip.
+    await send_json(
+        send,
+        410,
+        {
+            "detail": "This thread predates Managed Deep Agents and is read-only. "
+            "Start a new thread to continue."
         },
     )
 
@@ -386,17 +401,16 @@ class ThreadRouter:
             thread = await self._index_new(thread_id, {}, if_exists="do_nothing")
         if await _refuse_channel_write(send, thread):
             return
+        if thread.runtime == "local":
+            await _refuse_local(scope, send, thread)
+            return
         # Busy before the answer reaches the caller, so a run that ends at once
         # is not marked busy after its run-complete webhook settled it.
         recorder = StatusRecorder(send, on_success=None if cron else _marks_busy(thread_id))
-        if thread.runtime == "mda":
-            mda = RUNTIMES.mda_runtime
-            await mda.ensure_remote_thread(thread_id)
-            rewritten = await mda.run_payload(thread_id, payload)
-            await forward(mda.http, scope, recorder, json.dumps(rewritten).encode())
-        else:
-            _warn_local(scope, thread, payload.get("assistant_id"))
-            await self.app(scope, receive, recorder)
+        mda = RUNTIMES.mda_runtime
+        await mda.ensure_remote_thread(thread_id)
+        rewritten = await mda.run_payload(thread_id, payload)
+        await forward(mda.http, scope, recorder, json.dumps(rewritten).encode())
 
     async def _command(
         self, scope: Scope, receive: Receive, send: Send, body: bytes, thread_id: str
@@ -406,8 +420,12 @@ class ThreadRouter:
         if command is None or thread is None:
             await self._to_runtime(scope, receive, send, body, thread_id)
             return
+        method = command.get("method")
+        if thread.runtime == "local" and method in POSTING_COMMANDS:
+            await _refuse_local(scope, send, thread)
+            return
         params = command.get("params")
-        if command.get("method") == "run.start" and isinstance(params, dict):
+        if method == "run.start" and isinstance(params, dict):
             if (channel := channel_of(thread.metadata)) is not None:
                 await send_json(
                     send,
@@ -421,14 +439,10 @@ class ThreadRouter:
                     },
                 )
                 return
-            if thread.runtime == "mda":
-                reply = await RUNTIMES.mda_runtime.start_command_run(thread_id, command, params)
-                if reply.get("type") == "success":
-                    await index.set_status(thread_id, "busy")
-                await send_json(send, 200, reply)
-                return
-            _warn_local(scope, thread, params.get("assistant_id"))
-            await self.app(scope, receive, StatusRecorder(send, on_success=_marks_busy(thread_id)))
+            reply = await RUNTIMES.mda_runtime.start_command_run(thread_id, command, params)
+            if reply.get("type") == "success":
+                await index.set_status(thread_id, "busy")
+            await send_json(send, 200, reply)
             return
         await self._to_runtime(scope, receive, send, body, thread_id)
 
@@ -441,7 +455,8 @@ class ThreadRouter:
         if await _refuse_channel_write(send, thread):
             return
         if thread.runtime == "local":
-            _warn_local(scope, thread)
+            await _refuse_local(scope, send, thread)
+            return
         made = _object.validate_python(
             await RUNTIMES.runs_on(thread.runtime).client.http.post(
                 f"/threads/{thread_id}/copy", json={}
@@ -455,8 +470,7 @@ class ThreadRouter:
         copied = await index.create(
             copy_id, runtime=thread.runtime, metadata=metadata, if_exists="do_nothing"
         )
-        if thread.runtime == "mda":
-            await RUNTIMES.local.create(copy_id, copied.metadata)
+        await RUNTIMES.local.create(copy_id, copied.metadata)
         await send_json(send, 200, copied.as_langgraph())
 
     async def _to_runtime(

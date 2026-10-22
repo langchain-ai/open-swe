@@ -206,7 +206,9 @@ def client(monkeypatch: pytest.MonkeyPatch) -> MagicMock:
     from openswe import dispatch
     from openswe.slack import thinking
 
-    monkeypatch.setattr(dispatch, "_run_user_id", AsyncMock(return_value=None))
+    monkeypatch.setattr(
+        dispatch, "_run_user_metadata", AsyncMock(return_value={"ls_repo_provider": "github"})
+    )
     monkeypatch.setattr(thinking, "sync_slack_background_status", AsyncMock())
     monkeypatch.setattr(service, "interrupt_transcript_turns", AsyncMock())
     monkeypatch.setattr(service, "cancel_thread_wakeups", AsyncMock())
