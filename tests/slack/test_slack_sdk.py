@@ -35,9 +35,18 @@ async def test_removing_an_absent_reaction_is_already_settled(slack_api: SlackAP
     assert not await remove_slack_reaction("C1", "1.0", "x")
 
 
-async def test_read_thread_tool_paginates_and_resolves_authors(slack_api):
-    from openswe.slack.tools.read_thread_messages import slack_read_thread_messages
+@pytest.mark.parametrize("public", [False, True])
+async def test_read_thread_tool_paginates_and_resolves_authors(
+    slack_api, grant_tool_access, public
+):
+    from openswe.slack.tools.read_thread_messages import (
+        slack_read_public_thread_messages,
+        slack_read_thread_messages,
+    )
 
+    grant_tool_access(private=True)
+    if public:
+        slack_api.respond(_PUBLIC_CHANNEL)
     slack_api.respond(
         {
             "ok": True,
@@ -49,12 +58,13 @@ async def test_read_thread_tool_paginates_and_resolves_authors(slack_api):
         {"ok": True, "messages": [{"ts": "2.0", "user": "U1", "text": "Second message"}]}
     )
     slack_api.respond({"ok": True, "user": {"profile": {"display_name": "Alice"}}})
-    result = await slack_read_thread_messages("C1", "1.0")
+    reader = slack_read_public_thread_messages if public else slack_read_thread_messages
+    result = await reader("C1", "1.0")
     assert result["success"] is True
     assert result["count"] == 2
     assert "Alice" in result["formatted"]
     assert result["formatted"].index("First message") < result["formatted"].index("Second message")
-    assert slack_api.calls == [
+    assert slack_api.calls == ([("conversations.info", {"channel": "C1"})] if public else []) + [
         ("conversations.replies", {"channel": "C1", "ts": "1.0", "limit": "200"}),
         (
             "conversations.replies",
@@ -84,6 +94,28 @@ async def test_read_channel_tool_refuses_a_private_channel(slack_api, grant_tool
     slack_api.respond({"ok": True, "channel": {"id": "C1", "is_channel": True, "is_private": True}})
     result = await slack_read_channel_messages("C1")
 
+    assert result["success"] is False
+    assert "public" in result["error"]
+    assert [call[0] for call in slack_api.calls] == ["conversations.info"]
+
+
+@pytest.mark.parametrize(
+    "channel",
+    [
+        {"id": "C1", "is_channel": True, "is_private": True},
+        {"id": "C1", "is_im": True},
+        {"id": "C1", "is_channel": True, "is_private": False, "is_ext_shared": True},
+        {"id": "C1"},
+    ],
+)
+async def test_public_thread_tool_refuses_restricted_channels(
+    slack_api, grant_tool_access, channel
+):
+    from openswe.slack.tools.read_thread_messages import slack_read_public_thread_messages
+
+    grant_tool_access(private=True)
+    slack_api.respond({"ok": True, "channel": channel})
+    result = await slack_read_public_thread_messages("C1", "1.0")
     assert result["success"] is False
     assert "public" in result["error"]
     assert [call[0] for call in slack_api.calls] == ["conversations.info"]

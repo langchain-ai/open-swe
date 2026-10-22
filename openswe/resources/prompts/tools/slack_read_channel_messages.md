@@ -11,4 +11,4 @@ organization is refused. Ask the person for what you need instead.
 
 Channel history does not contain thread replies. A message with replies is
 marked `[thread: N replies, thread_ts=...]`; pass that thread_ts to
-`slack_read_thread_messages` to read the thread itself.
+`slack_read_public_thread_messages` to read the thread itself.
