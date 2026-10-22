@@ -613,10 +613,6 @@ class RepoClient:
             raise ValueError("GitHub answered the comparison without a merge base and files")
         return Comparison(sha, [file for file in files if isinstance(file, dict)])
 
-    async def merge_base(self, base: str, head: str) -> str:
-        """The commit ``base`` and ``head`` last shared, where their three-dot diff starts."""
-        return (await self.compare(base, head)).merge_base
-
     async def branch(self, name: str) -> dict[str, Any]:
         payload = await self.get(f"branches/{quote(name, safe='')}")
         if not isinstance(payload, dict):

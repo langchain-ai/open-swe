@@ -161,7 +161,8 @@ async def test_every_page_of_a_large_pr_is_loaded_even_past_a_stale_count() -> N
         path = request.url.path
         if path.endswith("/pulls/7"):
             return httpx2.Response(
-                200, json={"base": {"sha": "b"}, "head": {"sha": "h"}, "changed_files": 150}
+                200,
+                json={"base": {"sha": "b" * 40}, "head": {"sha": "a" * 40}, "changed_files": 150},
             )
         if path.endswith("/pulls/7/files"):
             page = int(request.url.params.get("page", "1"))
@@ -175,7 +176,7 @@ async def test_every_page_of_a_large_pr_is_loaded_even_past_a_stale_count() -> N
                 ],
             )
         if "/compare/" in path:
-            return httpx2.Response(200, json={"merge_base_commit": {"sha": "b"}})
+            return httpx2.Response(200, json={"merge_base_commit": {"sha": "b" * 40}})
         return httpx2.Response(200, content=b"x = 1\n")
 
     async with httpx2.AsyncClient(transport=httpx2.MockTransport(github)) as client:
