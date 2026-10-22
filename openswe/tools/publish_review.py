@@ -1098,10 +1098,12 @@ async def _hand_findings_to_author(
     try:
         if rounds > MAX_AUTHOR_HANDOFF_ROUNDS:
             if rounds == MAX_AUTHOR_HANDOFF_ROUNDS + 1:
-                async with PullRequestClient.as_app(
-                    pull_request.owner, pull_request.repo, pull_request.number
-                ) as pull:
-                    await pull.comment(_handoff_cap_notice())
+                async with GitHubClient.as_app(pull_request.owner, pull_request.repo) as github:
+                    await (
+                        github.repo(pull_request.owner, pull_request.repo)
+                        .pull_request(pull_request.number)
+                        .comment(_handoff_cap_notice())
+                    )
             return
         await pull_request.wake_author(
             prompt(

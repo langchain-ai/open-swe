@@ -5,7 +5,7 @@ import pytest
 from fastapi import HTTPException
 
 from openswe.github import pull_request_actions as actions
-from openswe.github import squash_message
+from openswe.github import pull_request_status, squash_message
 from openswe.github.http import GitHubClient
 from openswe.github.pull_request_status import PullRequestClient
 
@@ -48,11 +48,18 @@ def github(monkeypatch):
     ],
 )
 async def test_only_open_swe_approvals_other_than_the_kept_one_are_withdrawn(
+    monkeypatch: pytest.MonkeyPatch,
     keep_review_id: int | None,
     keep_commit: str | None,
     scope_to_review_id: int | None,
     dismissed: set[int],
 ) -> None:
+    monkeypatch.setattr(
+        pull_request_status,
+        "OPEN_SWE_GITHUB_LOGINS",
+        frozenset({"jarvis-aeteq[bot]", "jarvis-aeteq-preview[bot]", "jarvis-aeteq-dev[bot]"}),
+    )
+
     def review(review_id: int, login: str, state: str, commit: str) -> dict[str, object]:
         return {
             "id": review_id,
@@ -66,8 +73,8 @@ async def test_only_open_swe_approvals_other_than_the_kept_one_are_withdrawn(
         review(2, "alice", "APPROVED", "old"),
         review(3, "jarvis-aeteq[bot]", "APPROVED", "new"),
         review(4, "jarvis-aeteq[bot]", "COMMENTED", "old"),
-        review(5, "Jarvis-Aeteq[bot]", "APPROVED", "old"),
-        review(6, "jarvis-aeteq[bot]", "APPROVED", "old"),
+        review(5, "Jarvis-Aeteq-Preview[bot]", "APPROVED", "old"),
+        review(6, "jarvis-aeteq-dev[bot]", "APPROVED", "old"),
         review(7, "jarvis-aeteq[bot]", "APPROVED", "new"),
     ]
     dismissals: list[int] = []
