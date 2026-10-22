@@ -366,7 +366,13 @@ export function streamMessagesToUi(
       const reasoning = reasoningText(raw)
       if (reasoning) chunks.push({ kind: "reasoning", text: reasoning })
       const text = raw.text.trim()
-      if (text) chunks.push({ kind: "text", text })
+      if (text) {
+        chunks.push({
+          kind: "text",
+          text,
+          ...(timestampIsFallback ? {} : { timestamp }),
+        })
+      }
 
       for (const toolCall of raw.tool_calls ?? []) {
         const name = toolCall.name || "tool"

@@ -250,6 +250,76 @@ describe("Messages", () => {
     })
   })
 
+  it("keeps the agent's commentary between folds and copies only its answer", async () => {
+    const writeText = vi.fn().mockResolvedValue(undefined)
+    Object.defineProperty(navigator, "clipboard", {
+      configurable: true,
+      value: { writeText },
+    })
+    Object.defineProperty(window, "isSecureContext", {
+      configurable: true,
+      value: true,
+    })
+    const shell = (toolCallId: string, timestamp: string) => ({
+      kind: "tool-execution" as const,
+      toolCallId,
+      timestamp,
+      title: "ls",
+      toolKind: "execute" as const,
+      status: "completed" as const,
+    })
+    render(
+      <Messages
+        isStreaming={false}
+        messages={[
+          {
+            id: "agent-turn",
+            author: "agent",
+            startedAt: "2026-09-03T10:00:00.000Z",
+            timestamp: "2026-09-03T10:10:00.000Z",
+            chunks: [
+              {
+                kind: "text",
+                text: "Checking the tests first.",
+                timestamp: "2026-09-03T10:00:00.000Z",
+              },
+              shell("first", "2026-09-03T10:00:05.000Z"),
+              {
+                kind: "text",
+                text: "Found the cause.",
+                timestamp: "2026-09-03T10:02:00.000Z",
+              },
+              shell("second", "2026-09-03T10:02:05.000Z"),
+              {
+                kind: "text",
+                text: "Fixed it.",
+                timestamp: "2026-09-03T10:10:00.000Z",
+              },
+            ],
+          },
+        ]}
+      />,
+      { wrapper }
+    )
+
+    const inOrder = [
+      screen.getByText("Checking the tests first."),
+      screen.getByRole("button", { name: "Worked for 2m 0s · 1 action" }),
+      screen.getByText("Found the cause."),
+      screen.getByRole("button", { name: "Worked for 8m 0s · 1 action" }),
+      screen.getByText("Fixed it."),
+    ]
+    inOrder.slice(1).forEach((later, index) => {
+      expect(
+        inOrder[index]!.compareDocumentPosition(later) &
+          Node.DOCUMENT_POSITION_FOLLOWING
+      ).toBeTruthy()
+    })
+
+    fireEvent.click(screen.getByRole("button", { name: "Copy message" }))
+    await vi.waitFor(() => expect(writeText).toHaveBeenCalledWith("Fixed it."))
+  })
+
   it("renders unfinished grouped work after its fold row", () => {
     render(
       <Messages

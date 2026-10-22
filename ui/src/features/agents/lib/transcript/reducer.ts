@@ -1110,7 +1110,7 @@ function turnMessages(
       if (reasoning) chunks.push({ kind: "reasoning", text: reasoning })
       chunks.push(...imageChunks(state.threadId, row.attachments))
       const text = row.text.trim()
-      if (text) chunks.push({ kind: "text", text })
+      if (text) chunks.push({ kind: "text", text, timestamp: row.createdAt })
       append(row.messageId, row.createdAt, chunks, row.invocationId)
       continue
     }
