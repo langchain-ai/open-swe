@@ -4595,17 +4595,6 @@
             ],
             "title": "Experimental Monitor"
           },
-          "experimental_task_coordination": {
-            "anyOf": [
-              {
-                "type": "boolean"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Experimental Task Coordination"
-          },
           "pr_failure_reactions": {
             "anyOf": [
               {

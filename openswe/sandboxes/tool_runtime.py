@@ -29,7 +29,7 @@ _json = TypeAdapter(JsonValue)
 EXCLUDED_TOOLS = frozenset({"load_integration_tools"})
 # Task workers share the sandbox's tool channel with their coordinator, so task
 # coordination stays the model's: a surface serving the sandbox never offers it.
-MODEL_ONLY_TOOLS = frozenset({"spawn_worker", "control_worker", "message_task_thread"})
+MODEL_ONLY_TOOLS = frozenset({"control_worker", "message_task_thread"})
 
 
 def tool_parameters(tool: BaseTool) -> dict[str, JsonValue]:
