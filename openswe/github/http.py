@@ -570,7 +570,12 @@ class RepoClient:
         runs = await self.pages(
             f"commits/{sha}/check-runs", key="check_runs", params={"filter": "latest"}
         )
-        if all(run.get("conclusion") in {None, "success", "neutral", "skipped"} for run in runs):
+        if not any(
+            run.get("conclusion") not in {None, "success", "neutral", "skipped"}
+            and isinstance(app := run.get("app"), dict)
+            and app.get("slug") == "github-actions"
+            for run in runs
+        ):
             return runs
         try:
             payloads = await self.pages(
