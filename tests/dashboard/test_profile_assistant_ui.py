@@ -7,7 +7,6 @@ from openswe.dashboard.profiles import ProfileUpdate, get_profile, upsert_profil
     "flag",
     [
         "experimental_assistant_ui",
-        "experimental_mcp_ptc",
         "experimental_ui_motion",
         "auto_human_review_enabled",
     ],

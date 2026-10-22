@@ -96,7 +96,11 @@ _DEFAULTS = {
     "DASHBOARD_BASE_URL": APP_URL,
     "DASHBOARD_API_BASE_URL": BASE_URL,
     "DASHBOARD_ALLOWED_ORIGINS": f"{APP_URL},{BASE_URL},open-swe://app",
-    "DASHBOARD_JWT_SECRET": "test-dashboard-jwt-secret",
+    # At least 32 bytes: a shorter key makes PyJWT warn on every session decode
+    # from a worker thread, which holds the warnings lock while logging. The dev
+    # log renderer warns from inside its handler, so the two lock orders cross
+    # and deadlock the backend's event loop for the rest of the shard.
+    "DASHBOARD_JWT_SECRET": "test-dashboard-jwt-secret-for-e2e-sessions",
 }
 
 # Named test users (the Slack sender dropdown + the dashboard login picker, and

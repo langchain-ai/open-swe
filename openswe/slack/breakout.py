@@ -8,8 +8,7 @@ from uuid import uuid4
 from openswe.slack import webhook as service
 from openswe.slack.blocks import block_payload, section
 from openswe.slack.breakout_destination import resolve_breakout_destination
-from openswe.slack.breakout_links import mark_broken_out, source_thread_line
-from openswe.slack.cards import origin_footer
+from openswe.slack.breakout_links import mark_broken_out, notify_breakout, source_thread_line
 from openswe.slack.channels import SlackChannel
 from openswe.slack.client import (
     append_slack_web_link_footer,
@@ -177,14 +176,7 @@ async def _start(
         new_ts = await post_slack_top_level_message_with_ts(
             target,
             root_text,
-            blocks=block_payload(
-                [
-                    section(root_text),
-                    *await origin_footer(
-                        request.thread_id or "", (request.channel_id, request.thread_ts)
-                    ),
-                ]
-            ),
+            blocks=block_payload([section(root_text)]),
             unfurl_links=False,
             unfurl_media=False,
         )
@@ -204,14 +196,7 @@ async def _start(
                 target,
                 new_ts,
                 append_slack_web_link_footer(root_text, web_url),
-                blocks=block_payload(
-                    [
-                        section(append_slack_web_link_footer(root_text, web_url)),
-                        *await origin_footer(
-                            request.thread_id or "", (request.channel_id, request.thread_ts)
-                        ),
-                    ]
-                ),
+                blocks=block_payload([section(append_slack_web_link_footer(root_text, web_url))]),
                 unfurl_links=False,
                 unfurl_media=False,
             )
@@ -279,7 +264,13 @@ async def process_slack_web(
             ),
         )
         if started:
-            await _tell_sender(request, f"Continue on the web: {dashboard_thread_url(thread_id)}")
+            await notify_breakout(
+                request.channel_id,
+                request.thread_ts,
+                _command_ts(request),
+                f"<@{request.user_id}> continued in a "
+                f"<{dashboard_thread_url(thread_id)}|private web breakout>.",
+            )
     except Exception:
         logger.exception("Slack web question failed", extra={"agent_thread_id": thread_id})
         await _tell_sender(request, "Could not start a web conversation; try again.")

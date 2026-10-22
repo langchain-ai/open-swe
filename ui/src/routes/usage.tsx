@@ -15,6 +15,7 @@ import { IconButton } from "@langchain/macaw-components/IconButton"
 import { Select } from "@langchain/macaw-components/Select"
 import { Skeleton } from "@langchain/macaw-components/Skeleton"
 import { Tooltip } from "@langchain/macaw-components/Tooltip"
+import zIndices from "@langchain/macaw-components/utils/zIndices"
 import { ArrowClockwiseIcon } from "@phosphor-icons/react/dist/ssr/ArrowClockwise"
 import { ArrowsDownUpIcon } from "@phosphor-icons/react/dist/ssr/ArrowsDownUp"
 import { CheckCircleIcon } from "@phosphor-icons/react/dist/ssr/CheckCircle"
@@ -115,19 +116,18 @@ function UsagePage() {
   if (!session.data) return <RequireLogin />
 
   return (
-    <AppShell
-      user={session.data}
-      title="Usage"
-      className="max-w-5xl"
-      action={
+    <AppShell user={session.data} title="Usage" className="max-w-5xl">
+      <div
+        className="sticky top-0 -mx-space-4 border-b border-default bg-surface-level-1 px-space-4 py-space-3 sm:-mx-space-6 sm:px-space-6"
+        style={{ zIndex: zIndices.dashboardHeader }}
+      >
         <UsageDateRange
           period={activePeriod}
           onPeriodChange={(value) =>
             navigate({ to: "/usage", search: { period: value } })
           }
         />
-      }
-    >
+      </div>
       <UsageAnalytics
         period={activePeriod}
         login={session.data.login}

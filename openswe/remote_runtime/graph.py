@@ -62,11 +62,18 @@ from langgraph.config import get_config
 from langgraph.runtime import Runtime
 from pydantic import BaseModel, JsonValue, TypeAdapter, ValidationError
 
+from openswe.github.sandbox_access import READ_ONLY_REVIEW_PERMISSIONS
 from openswe.middleware.conversation_offloading import ConversationOffloadingMiddleware
 from openswe.middleware.model_selection import PersistedRoute, normalize_route
 from openswe.middleware.record_run_usage import RecordRunUsageMiddleware
 from openswe.middleware.transcript import TranscriptMiddleware, within_namespace
 from openswe.prompts import common_prompt, prompt
+from openswe.remote_runtime.git_metadata import (
+    BASELINE,
+    OBSERVED_TOOLS,
+    TurnGitMetadata,
+    collect_pr_targets,
+)
 from openswe.remote_runtime.runs import (
     ModelSpec,
     RunModels,
@@ -77,6 +84,9 @@ from openswe.remote_runtime.server import UnknownHookError
 from openswe.remote_runtime.tokens import RemoteRun
 from openswe.run_config import RunConfig
 from openswe.runtime.constants import DEFAULT_LLM_MAX_TOKENS
+from openswe.sandboxes.browsers import ThreadBrowser
+from openswe.sandboxes.lifecycle import bind_mda_sandbox, reconnect_replaced_sandbox
+from openswe.sandboxes.managed import ManagedSandbox
 from openswe.sandboxes.tool_runtime import (
     EXCLUDED_TOOLS,
     ModelChoice,
@@ -127,12 +137,21 @@ class HookBody(BaseModel):
     state: dict[str, JsonValue] = {}
     # The ``task`` calls the run's subagent is nested in; empty for the agent itself.
     namespace: list[str] = []
+    # ``prepare``: the box MDA opened for the thread, None when it could not.
+    sandbox_id: str | None = None
 
 
 class CallBody(HookBody):
     name: str
     arguments: dict[str, JsonValue] = {}
     tool_call_id: str
+
+
+class BrowserBody(HookBody):
+    """``browser``: the LangSmith browser MDA names for the thread's agent."""
+
+    browser: str
+    opened: bool = True
 
 
 class ToolResultBody(HookBody):
@@ -332,6 +351,33 @@ class RunSession:
                     name: prompt("tools/display-description") for name in _DESCRIBED_TOOLS
                 },
             }
+        )
+
+    async def sandbox(self) -> ManagedSandbox | None:
+        """The thread's box as MDA creates it, when MDA owns it."""
+        cfg = RunConfig.from_config(self.config)
+        if cfg.thread_id is None:
+            return None
+        return await ManagedSandbox.for_thread(cfg.thread_id, cfg.workspace_slug)
+
+    async def bind_sandbox(self, sandbox_id: str | None) -> None:
+        """Bind the thread to the box MDA opened before preparing, if MDA owns it."""
+        cfg = RunConfig.from_config(self.config)
+        if cfg.thread_id is not None and await self.sandbox() is not None:
+            await bind_mda_sandbox(cfg.thread_id, sandbox_id, workspace_slug=cfg.workspace_slug)
+
+    async def reconnect_sandbox(self, assistant_id: str) -> None:
+        """Connect again to the thread's box, which MDA replaced with a fresh one."""
+        cfg = RunConfig.from_config(self.config)
+        if cfg.thread_id is None:
+            raise ValueError("This run has no thread")
+        reviewing = assistant_id in {"reviewer", "review-scout"}
+        repositories = [cfg.repo.full_name] if cfg.repo else []
+        await reconnect_replaced_sandbox(
+            cfg.thread_id,
+            workspace_slug=cfg.workspace_slug,
+            github_proxy_repositories=repositories if reviewing else None,
+            github_proxy_permissions=READ_ONLY_REVIEW_PERMISSIONS if reviewing else None,
         )
 
     def start_models(self) -> RunModels:
@@ -540,7 +586,7 @@ class RemoteGraph:
         if not fresh and cached is not None and time.monotonic() < cached.expires_at:
             return cached
         config = self._config(run, run_id)
-        surface = ToolSurface()
+        surface = ToolSurface(for_model=True)
         await self._build(config, surface)
         await surface.prepare({})
         session = RunSession(surface, config, self._restore_state, started_here=fresh)
@@ -559,10 +605,28 @@ class RemoteGraph:
             return await self._call(run, CallBody.model_validate(raw))
         body = HookBody.model_validate(raw)
         if hook == "catalog":
-            return (await self.session(run, body.run_id)).catalog()
+            session = await self.session(run, body.run_id)
+            sandbox = await session.sandbox()
+            return {
+                **session.catalog(),
+                "trace_metadata": TurnGitMetadata(session.config).actor,
+                "sandbox": None if sandbox is None else _json.validate_python(sandbox.model_dump()),
+            }
         if hook == "prepare":
             session = await self.session(run, body.run_id, fresh=True)
+            # MDA opened the box before preparing; preparation connects to it as to any other.
+            await session.bind_sandbox(body.sandbox_id)
             return await self._phase(session, "before_agent", body)
+        if hook == "browser":
+            body = BrowserBody.model_validate(raw)
+            await ThreadBrowser(browser=body.browser, opened=body.opened).report(run.thread_id)
+            return {}
+        if hook == "sandbox":
+            session = await self.session(run, body.run_id)
+            await in_graph_context(
+                session.config, lambda _runtime: session.reconnect_sandbox(run.assistant_id)
+            )
+            return {}
         session = await self.session(run, body.run_id)
         if hook == "before_model":
             return await self._phase(session, "before_model", body)
@@ -588,6 +652,12 @@ class RemoteGraph:
             await session.join(state, runtime)
             result = await session.run_phase(phase, state, runtime)
             reply = result.model_dump()
+            git = TurnGitMetadata(session.config)
+            if phase == "before_agent":
+                reply["update"].update(await git.begin())
+            elif phase == "after_agent":
+                reply["trace_metadata"] = await git.reconcile(state)
+                reply["update"][BASELINE] = None
             if phase == "before_model" and result.jump_to is None:
                 model = session.model_for(state)
                 fallback = fallback_model_choice(model.model_id)
@@ -663,8 +733,11 @@ class RemoteGraph:
             }
         state = session.state(body)
         await in_graph_context(session.config, partial(session.join, state))
+        git = TurnGitMetadata(session.config)
+        before = git.work_baseline(state) if body.name in OBSERVED_TOOLS else None
+        observed_at = time.time_ns()
         try:
-            with within_namespace(body.namespace):
+            with within_namespace(body.namespace), collect_pr_targets() as pr_targets:
                 result = await session.surface.run(
                     session.config,
                     state,
@@ -692,7 +765,11 @@ class RemoteGraph:
             {
                 "message": dump_messages([result.message])[0],
                 "messages": dump_messages(_with_ids(result.messages)),
-                "update": _json_state(result.update),
+                "update": {
+                    **_json_state(result.update),
+                    **git.evidence(pr_targets, body.tool_call_id, pr=True, observed_at=observed_at),
+                    **await git.work_evidence(before, body.tool_call_id, observed_at),
+                },
                 "events": [_json_or_text(e) for e in result.events],
             }
         )

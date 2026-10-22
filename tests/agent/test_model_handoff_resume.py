@@ -55,7 +55,6 @@ def factory_settings(monkeypatch: pytest.MonkeyPatch) -> ThreadSettings:
         server, "cached_workspace_settings", AsyncMock(return_value=WorkspaceSettings({}))
     )
     monkeypatch.setattr(server, "get_cached_sandbox_backend", MagicMock())
-    monkeypatch.setattr(server, "tools_base_url", lambda: None)
     monkeypatch.setattr(
         server,
         "_make_model_or_defer",

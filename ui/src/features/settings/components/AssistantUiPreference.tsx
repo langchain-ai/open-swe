@@ -22,26 +22,26 @@ export function AssistantUiPreference() {
   return (
     <>
       <SettingsRow
-        label="SDK useStream (experimental)"
+        label="SDK useStream"
         htmlFor="sdk-use-stream"
         description="Use SDK streaming instead of the transcript with the same conversation UI. Applies only to this browser; legacy threads always use SDK streaming."
         control={
           <Switch
             id="sdk-use-stream"
-            aria-label="SDK useStream (experimental)"
+            aria-label="SDK useStream"
             checked={preferStream}
             onChange={setUseStreamPreference}
           />
         }
       />
       <SettingsRow
-        label="Assistant UI (experimental)"
+        label="Assistant UI"
         htmlFor="experimental-assistant-ui"
         description="Use the new conversation interface for your account."
         control={
           <Switch
             id="experimental-assistant-ui"
-            aria-label="Assistant UI (experimental)"
+            aria-label="Assistant UI"
             checked={enabled}
             disabled={disabled}
             onChange={(value) => {
