@@ -2,6 +2,7 @@
 
 import asyncio
 import logging
+from collections.abc import Callable, Coroutine
 from datetime import UTC, datetime, timedelta
 
 from openswe.github.http import RepoClient
@@ -26,13 +27,6 @@ class BatchScheduler:
     async def reconcile(self, lease: Lease, *, seconds: float = 240) -> None:
         if not 0 < seconds <= 600:
             raise ValueError("Invalid reconciliation limit")
-        if (await self.queue.repository_name(lease)).lower() != self.repo.full_name.lower():
-            raise ValueError("GitHub client does not belong to this queue")
-
-        async def heartbeat() -> None:
-            while True:
-                await self.queue.renew(lease, timedelta(seconds=60))
-                await asyncio.sleep(20)
 
         async def work() -> None:
             admission_deadline = asyncio.get_running_loop().time() + min(
@@ -61,18 +55,35 @@ class BatchScheduler:
                     break
             await self._schedule(lease)
 
+        await self._run_with_lease(lease, work, seconds=seconds)
+
+    async def _run_with_lease(
+        self,
+        lease: Lease,
+        work: Callable[[], Coroutine[object, object, None]],
+        *,
+        seconds: float,
+    ) -> None:
+        async def heartbeat() -> None:
+            while True:
+                await asyncio.sleep(20)
+                await self.queue.renew(lease, timedelta(seconds=60))
+
         async with asyncio.timeout(seconds):
+            if (await self.queue.repository_name(lease)).lower() != self.repo.full_name.lower():
+                raise ValueError("GitHub client does not belong to this queue")
+            await self.queue.renew(lease, timedelta(seconds=60))
             renewal = asyncio.create_task(heartbeat())
-            reconcile = asyncio.create_task(work())
+            operation = asyncio.create_task(work())
             try:
-                await asyncio.wait({renewal, reconcile}, return_when=asyncio.FIRST_COMPLETED)
+                await asyncio.wait({renewal, operation}, return_when=asyncio.FIRST_COMPLETED)
                 if renewal.done():
                     await renewal
-                await reconcile
+                await operation
             finally:
                 renewal.cancel()
-                reconcile.cancel()
-                await asyncio.gather(renewal, reconcile, return_exceptions=True)
+                operation.cancel()
+                await asyncio.gather(renewal, operation, return_exceptions=True)
 
     async def _refresh(self, entry: QueueEntry, lease: Lease) -> None:
         request, head = entry.request, entry.request.head_sha
@@ -178,20 +189,18 @@ class BatchScheduler:
                 if await self._current(batch, lease):
                     await self.queue.save_candidate(batch.id, candidate, lease, published=True)
 
-    async def cleanup(self, lease: Lease, *, retention_days: int = 90, seconds: float = 10) -> None:
-        """Bound ref maintenance separately so it can run after validation advances."""
-        if not 7 <= retention_days <= 365 or not 0 < seconds <= 30:
+    async def cleanup(self, lease: Lease, *, retention_days: int = 90, seconds: float = 60) -> None:
+        """Bound ref deletion separately from sandbox setup, renewing the lease throughout."""
+        if not 7 <= retention_days <= 365 or not 0 < seconds <= 180:
             raise ValueError("Invalid cleanup or retention limit")
-        if (await self.queue.repository_name(lease)).lower() != self.repo.full_name.lower():
-            raise ValueError("GitHub client does not belong to this queue")
-        try:
-            async with asyncio.timeout(seconds):
-                await self.queue.renew(lease, timedelta(seconds=60))
-                cutoff = datetime.now(UTC) - timedelta(days=retention_days)
-                batches = await self.queue.expired_candidates(cutoff, lease)
-                if not batches:
-                    return
-                async with self.repo.candidate_git() as git:
+
+        async def work() -> None:
+            cutoff = datetime.now(UTC) - timedelta(days=retention_days)
+            batches = await self.queue.expired_candidates(cutoff, lease)
+            if not batches:
+                return
+            async with self.repo.candidate_git() as git:
+                async with asyncio.timeout(seconds):
                     for batch in batches:
                         try:
                             candidate = Candidate.model_validate(batch.candidate)
@@ -205,6 +214,10 @@ class BatchScheduler:
                                 extra={"batch_id": str(batch.id)},
                                 exc_info=True,
                             )
+
+        try:
+            # Sandbox startup and teardown get three minutes beyond the deletion budget.
+            await self._run_with_lease(lease, work, seconds=180 + seconds)
         except LeaseLost:
             raise
         except Exception:

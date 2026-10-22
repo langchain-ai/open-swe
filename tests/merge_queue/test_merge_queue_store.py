@@ -844,10 +844,12 @@ async def test_validation_job_expires_saved_budget_during_github_outage(
     assert history.batch.state == "active"
 
 
-async def test_validation_records_result_before_failed_ref_cleanup(
+@pytest.mark.parametrize("cancelled", [False, True])
+async def test_validation_precedes_cleanup_and_cancellation_skips_it(
     queue: MergeQueue,
     validation_batch: tuple[Lease, Batch, QueuePolicy],
     monkeypatch: pytest.MonkeyPatch,
+    cancelled: bool,
 ) -> None:
     lease, expired, policy = validation_batch
     candidate = Candidate.model_validate(expired.candidate)
@@ -873,6 +875,8 @@ async def test_validation_records_result_before_failed_ref_cleanup(
             httpx2.Response(403, request=httpx2.Request("POST", "https://api.github.com"))
         )
     )
+    if cancelled:
+        repo.dispatch_validation.side_effect = asyncio.CancelledError()
 
     def pull(number: int) -> Mock:
         return Mock(
@@ -905,8 +909,12 @@ async def test_validation_records_result_before_failed_ref_cleanup(
     async def open_repo(_queue: MergeQueue) -> AsyncIterator[RepoClient]:
         yield repo
 
-    await QueueRuntime({queue.id: policy}, open_repo).reconcile(
-        QueueJob(queue_id=queue.id, workspace_id=queue.workspace_id)
-    )
-    assert states_at_cleanup == ["failed"]
+    runtime = QueueRuntime({queue.id: policy}, open_repo)
+    payload = QueueJob(queue_id=queue.id, workspace_id=queue.workspace_id)
+    if cancelled:
+        with pytest.raises(asyncio.CancelledError):
+            await runtime.reconcile(payload)
+    else:
+        await runtime.reconcile(payload)
+    assert states_at_cleanup == ([] if cancelled else ["failed"])
     assert (await queue.history(expired.id)).batch.ref_deleted_at is None

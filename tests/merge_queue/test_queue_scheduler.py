@@ -51,8 +51,8 @@ async def test_stalled_admission_does_not_consume_reconciliation_window(
     assert cancelled.is_set()
 
 
-@pytest.mark.parametrize("failure", ["replaced_ref", "stalled"])
-async def test_cleanup_reuses_one_sandbox_and_preserves_unfinished_refs(failure: str) -> None:
+@pytest.mark.parametrize("scenario", ["replaced_ref", "stalled", "slow_provisioning"])
+async def test_cleanup_reuses_one_sandbox_and_preserves_unfinished_refs(scenario: str) -> None:
     candidate = Candidate(
         repository="https://github.com/acme/widgets.git",
         branch="main",
@@ -76,8 +76,8 @@ async def test_cleanup_reuses_one_sandbox_and_preserves_unfinished_refs(failure:
     git = Mock(spec=CandidateGit)
 
     async def delete(batch_id: UUID, sha: str) -> None:
-        if batch_id == batches[1].id:
-            if failure == "stalled":
+        if batch_id == batches[1].id and scenario != "slow_provisioning":
+            if scenario == "stalled":
                 await asyncio.Event().wait()
             raise ValueError("Candidate ref changed; refusing deletion")
 
@@ -88,6 +88,8 @@ async def test_cleanup_reuses_one_sandbox_and_preserves_unfinished_refs(failure:
     async def candidate_git() -> AsyncIterator[CandidateGit]:
         nonlocal sandboxes
         sandboxes += 1
+        if scenario == "slow_provisioning":
+            await asyncio.sleep(0.2)
         yield git
 
     repo.candidate_git = candidate_git
@@ -96,4 +98,9 @@ async def test_cleanup_reuses_one_sandbox_and_preserves_unfinished_refs(failure:
     )
     assert sandboxes == 1
     deleted = {call.args[0] for call in queue.candidate_deleted.await_args_list}
-    assert deleted == ({batches[0].id} if failure == "stalled" else {batches[0].id, batches[2].id})
+    expected = {batch.id for batch in batches}
+    if scenario == "stalled":
+        expected = {batches[0].id}
+    elif scenario == "replaced_ref":
+        expected.remove(batches[1].id)
+    assert deleted == expected

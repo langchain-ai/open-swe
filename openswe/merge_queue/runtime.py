@@ -3,7 +3,7 @@
 import asyncio
 import logging
 from collections.abc import Callable, Mapping
-from contextlib import AbstractAsyncContextManager
+from contextlib import AbstractAsyncContextManager, AsyncExitStack
 from datetime import UTC, datetime, timedelta
 from uuid import UUID, uuid7
 
@@ -50,17 +50,24 @@ class QueueRuntime:
         if lease is None:
             return
         try:
-            async with asyncio.timeout(240):
-                # Expire saved budgets even when GitHub or admission is unavailable.
-                await queue.advance_validation(policy, lease)
-                async with self.open_repo(queue) as repo:
-                    scheduler = BatchScheduler(queue, repo, policy)
-                    try:
+            async with AsyncExitStack() as resources:
+                scheduler = None
+                cancelled = False
+                try:
+                    async with asyncio.timeout(240):
+                        # Expire saved budgets even when GitHub or admission is unavailable.
+                        await queue.advance_validation(policy, lease)
+                        repo = await resources.enter_async_context(self.open_repo(queue))
+                        scheduler = BatchScheduler(queue, repo, policy)
                         await scheduler.reconcile(lease, seconds=180)
                         await queue.renew(lease, timedelta(seconds=60))
                         async with asyncio.timeout(45):
                             await CandidateValidation(queue, repo, policy).reconcile(lease)
-                    finally:
+                except asyncio.CancelledError:
+                    cancelled = True
+                    raise
+                finally:
+                    if scheduler is not None and not cancelled:
                         await scheduler.cleanup(lease, retention_days=self.retention_days)
         finally:
             try:
