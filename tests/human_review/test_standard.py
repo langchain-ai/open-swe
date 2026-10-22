@@ -270,6 +270,76 @@ async def test_opted_out_reviewer_requires_a_verified_person_naming_them(
             assert "opted out" in result["error"]
 
 
+@pytest.mark.parametrize(
+    ("local_time", "out_of_office", "named", "allowed"),
+    [
+        ("2026-10-22T03:00:00", False, False, False),
+        ("2026-10-22T09:00:00", False, False, True),
+        ("2026-10-22T12:00:00", True, False, False),
+        ("2026-10-22T03:00:00", False, True, True),
+    ],
+)
+async def test_assignment_enforces_availability_before_contacting_reviewer(
+    local_time: str, out_of_office: bool, named: bool, allowed: bool
+) -> None:
+    from openswe.human_review import standard
+    from openswe.human_review.people import Participant
+    from openswe.human_review.picking import Coverage, ReviewerAvailability
+
+    zone = ZoneInfo("America/New_York")
+    now = datetime.fromisoformat(local_time).replace(tzinfo=zone).astimezone(UTC)
+    user = User(
+        identities=[
+            UserIdentity(provider="github", external_id="grace", login="grace"),
+            UserIdentity(provider="slack", external_id="U_GRACE", login="grace"),
+        ]
+    )
+    pr = PullRequest(owner="lc", repo="repo", number=7, author="ada")
+    request = HumanReviewRequest(pull_request_id=pr.id, head_sha="abc", kind="standard")
+    request.pull_request = pr
+
+    @asynccontextmanager
+    async def locked(*_: object) -> AsyncIterator[tuple[None, HumanReviewRequest]]:
+        yield None, request
+
+    with (
+        patch.object(standard, "datetime", wraps=datetime) as clock,
+        patch.object(standard, "_github_approvers", AsyncMock(return_value=[])),
+        patch.object(Coverage, "load", AsyncMock(return_value=None)),
+        patch.object(User, "for_login", AsyncMock(return_value=user)),
+        patch.object(standard.PROFILES, "allows_auto_human_review", AsyncMock(return_value=True)),
+        patch.object(
+            ReviewerAvailability,
+            "for_user",
+            AsyncMock(return_value=ReviewerAvailability(zone, out_of_office)),
+        ),
+        patch.object(
+            standard, "resolve_writer", AsyncMock(return_value=Participant(user, "grace"))
+        ),
+        patch.object(HumanReviewRequest, "locked", locked),
+        patch.object(HumanReviewRequest, "get", AsyncMock(return_value=request)),
+        patch.object(ReviewCard, "refresh", AsyncMock()),
+        patch.object(standard, "_request_github_review", AsyncMock()) as github_review,
+        patch.object(standard, "send_dm_with_location", AsyncMock(return_value=None)) as dm,
+        patch.object(standard, "_schedule", AsyncMock(return_value=True)) as schedule,
+        patch.object(standard, "_assignment_minutes", AsyncMock(return_value=120)),
+        patch.object(standard, "_permalink", AsyncMock(return_value="")),
+    ):
+        clock.now.return_value = now
+        result = await standard.assign(request, "grace", "nearby reviewer", replace=named)
+
+    assert result.success is allowed
+    assert bool(request.participants) is allowed
+    if allowed:
+        github_review.assert_awaited_once()
+        dm.assert_awaited_once()
+    else:
+        assert ("out of office" if out_of_office else "outside working hours") in result.error
+        github_review.assert_not_awaited()
+        dm.assert_not_awaited()
+        schedule.assert_not_awaited()
+
+
 @pytest.mark.parametrize("status", [200, 503])
 async def test_reviewer_removal_sends_delete_body_without_aborting(
     status: int, github_app: AsyncMock

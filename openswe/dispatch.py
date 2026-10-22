@@ -63,6 +63,16 @@ LangGraphRunConfig = dict[str, Any]
 
 
 _PULL_REQUEST_GRAPHS = frozenset({"reviewer", "review-scout"})
+TURN_ATTRIBUTION_FIELDS = frozenset(
+    {
+        "user_id",
+        "ls_repo_provider",
+        "ls_attribution_identifier",
+        "ls_git_repo",
+        "ls_git_branch",
+        "open_swe_git_targets",
+    }
+)
 
 
 class RunMetadata(BaseModel):
@@ -85,6 +95,19 @@ class RunMetadata(BaseModel):
 V3_STREAMING_CONFIG_KEY = "__event_streaming_v2"
 # Run metadata ``kind`` of a run started only to deliver store leftovers.
 FOLLOW_UP_PICKUP_KIND = "follow_up_pickup"
+#: Names the MDA channel (``linear``, ``github``, ...) that owns a thread or started a
+#: run, in run metadata and in the thread index's metadata alike. The channel answers
+#: in its conversation, failures included, and starts every run on its threads, so the
+#: backend neither replies there nor starts runs on them.
+CHANNEL_METADATA_KEY = "channel"
+
+
+def channel_of(metadata: Mapping[str, Any] | None) -> str | None:
+    """The MDA channel ``metadata`` (a run's or a thread's) names, whatever the provider."""
+    channel = (metadata or {}).get(CHANNEL_METADATA_KEY)
+    return channel if isinstance(channel, str) and channel else None
+
+
 # The dashboard's ``run.start`` defaults, minus protocol-only channels rejected by
 # the REST ``POST /runs`` schema.
 V3_RUN_STREAM_MODES: tuple[str, ...] = (
@@ -293,9 +316,12 @@ def prepare_run_config(
     configurable = dict(configurable) if isinstance(configurable, dict) else {}
     existing_metadata = run_config.get("metadata")
     merged_metadata = dict(existing_metadata) if isinstance(existing_metadata, dict) else {}
+    for key in TURN_ATTRIBUTION_FIELDS:
+        merged_metadata.pop(key, None)
     if metadata is not None:
         merged_metadata.update(metadata)
     merged_metadata.update(_slack_channel_metadata(configurable))
+    merged_metadata["ls_repo_provider"] = "github"
     invocation_id = resolve_invocation_id(configurable, merged_metadata) or new_invocation_id()
     started_at = merged_metadata.setdefault("invocation_started_at", datetime.now(UTC).isoformat())
     configurable = with_invocation_id(configurable, invocation_id)
@@ -307,15 +333,17 @@ def prepare_run_config(
     return run_config
 
 
-async def _run_user_id(
+async def _run_user_metadata(
     config: LangGraphRunConfig | None, *, source: str | None = None
-) -> str | None:
+) -> dict[str, str]:
+    """Resolve canonical attribution identically for durable and dashboard-started turns."""
+    metadata = {"ls_repo_provider": "github"}
     configurable = (config or {}).get("configurable")
     if not isinstance(configurable, Mapping):
-        return None
+        return metadata
     cfg = RunConfig.parse(dict(configurable))
     if cfg.background_task_completion:
-        return None
+        return metadata
     try:
         if (source or cfg.source) in {"dashboard", "web"} and cfg.github_login:
             user = await User.for_login("github", cfg.github_login)
@@ -328,11 +356,38 @@ async def _run_user_id(
         elif cfg.user_email:
             user = await User.for_email(cfg.user_email)
         else:
-            return None
-        return str(user.id) if user else None
+            return metadata
+        if user is not None:
+            metadata["user_id"] = str(user.id)
+            if user.github_login:
+                metadata["ls_attribution_identifier"] = user.github_login
     except Exception:
         logger.warning("Could not resolve run user for trace metadata", exc_info=True)
-        return None
+    return metadata
+
+
+async def prepare_durable_run(
+    assistant_id: str,
+    config: LangGraphRunConfig | None,
+    metadata: dict[str, Any] | None,
+    *,
+    source: str,
+) -> LangGraphRunConfig:
+    """The config and metadata a durable run starts with, wherever it is created."""
+    recorded = RunMetadata.of_run(assistant_id, config)
+    run_metadata = {
+        key: value for key, value in (metadata or {}).items() if key not in TURN_ATTRIBUTION_FIELDS
+    } | recorded.model_dump(exclude_none=True)
+    run_metadata.update(await _run_user_metadata(config, source=source))
+    conversation_type = _slack_conversation_type(source, config)
+    if conversation_type is not None:
+        run_metadata["slack_conversation_type"] = conversation_type
+    run_config = prepare_run_config(config, run_metadata)
+    if "user_id" not in run_metadata:
+        configurable = run_config["configurable"]
+        if isinstance(configurable, dict):
+            configurable.pop("user_id", None)
+    return run_config
 
 
 async def create_durable_run(
@@ -362,20 +417,8 @@ async def create_durable_run(
     client = client or dispatch_client()
     if thread_title is not None:
         await ensure_titled_thread(client, thread_id, title=thread_title)
+    run_config = await prepare_durable_run(assistant_id, config, metadata, source=source)
     recorded = RunMetadata.of_run(assistant_id, config)
-    run_metadata = dict(metadata or {}) | recorded.model_dump(exclude_none=True)
-    conversation_type = _slack_conversation_type(source, config)
-    if conversation_type is not None:
-        run_metadata["slack_conversation_type"] = conversation_type
-    user_id = await _run_user_id(config, source=source)
-    if user_id:
-        run_metadata["user_id"] = user_id
-    run_config = prepare_run_config(config, run_metadata)
-    if user_id is None:
-        run_config["metadata"].pop("user_id", None)
-        configurable = run_config["configurable"]
-        if isinstance(configurable, dict):
-            configurable.pop("user_id", None)
     create_kwargs: dict[str, Any] = {
         "input": input,
         "config": run_config,

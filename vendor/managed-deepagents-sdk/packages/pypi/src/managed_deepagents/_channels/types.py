@@ -8,14 +8,17 @@ from __future__ import annotations
 
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
-from typing import Literal, NotRequired, TypeAlias
+from typing import Literal, NotRequired, TypeAlias, Union
 
 from langchain_core.messages import ContentBlock
-from typing_extensions import ReadOnly, TypedDict
+from typing_extensions import ReadOnly, TypeAliasType, TypedDict
 
-JsonValue: TypeAlias = (
-    bool | int | float | str | Sequence["JsonValue"] | Mapping[str, "JsonValue"] | None
+JsonValue = TypeAliasType(
+    "JsonValue",
+    Union[bool, int, float, str, Sequence["JsonValue"], Mapping[str, "JsonValue"], None],  # noqa: UP007
 )
+"""A JSON value. A recursive alias pydantic builds, so a TypedDict that uses it,
+such as ``EndpointAnswer``, validates as it is typed."""
 
 ChannelErrorCode = Literal[
     "channel_invalid_signature",

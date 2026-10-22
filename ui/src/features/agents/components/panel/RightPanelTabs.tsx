@@ -144,13 +144,14 @@ function surfaceLaunchers(props: SurfaceLauncherProps): Array<SurfaceLauncher> {
       ? [
           {
             label: "Browser",
-            description: "Watch the agent's browser, or take it over.",
+            description:
+              "Browse alongside the agent, or take its browser over.",
             icon: GlobeIcon,
             shortcut: "B",
             available: props.browserAvailable ?? false,
             disabledReason:
-              "The browser is available once the agent opens one in this thread.",
-            unavailableHint: "Available once the agent opens one.",
+              "The browser is available once this thread's agent has started.",
+            unavailableHint: "Available once the thread starts.",
             onClick: props.onAddBrowser,
           },
         ]

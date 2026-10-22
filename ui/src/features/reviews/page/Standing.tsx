@@ -70,7 +70,7 @@ import {
   type Standing,
   type StandingTone,
 } from "./pullRequestStanding"
-import { useReviewPage } from "./store"
+import { usePageEvent, useReviewPage } from "./store"
 import { plural } from "./text"
 
 const toneColor: Record<StandingTone, string> = {
@@ -674,17 +674,14 @@ function OpenSweRow({
   const queryClient = useQueryClient()
   const { bugs, flags } = openFindingCounts(detail.findings)
   // Open while there is something to look at, until the person folds it; a
-  // link elsewhere that names the findings opens it again.
-  const findingsKey = useReviewPage((state) => state.findingsKey)
-  const [folded, setFolded] = useState<{ value: boolean; key: number } | null>(
-    null
-  )
-  const expanded =
-    folded === null || folded.key !== findingsKey
-      ? bugs + flags > 0 || findingsKey > 0
-      : !folded.value
-  const setExpanded = (change: (value: boolean) => boolean) =>
-    setFolded({ value: !change(expanded), key: findingsKey })
+  // link elsewhere that names the findings opens it again, with a flash.
+  const [chosen, setChosen] = useState<boolean | null>(null)
+  const [flashes, setFlashes] = useState(0)
+  usePageEvent("showFindings", () => {
+    setChosen(true)
+    setFlashes((count) => count + 1)
+  })
+  const expanded = chosen ?? bugs + flags > 0
   const reReview = useMutation({
     mutationFn: () => api.reReview(pr.owner, pr.repo, pr.number),
     meta: { errorTitle: "Couldn't start the Open SWE review" },
@@ -735,7 +732,7 @@ function OpenSweRow({
         label="Open SWE"
         expandable={canExpand}
         expanded={expanded}
-        onToggle={() => setExpanded((value) => !value)}
+        onToggle={() => setChosen(!expanded)}
         action={
           <>
             {detail.thread_id && (
@@ -767,10 +764,10 @@ function OpenSweRow({
       {expanded && canExpand && (
         <div
           // Remounting replays the flash each time something asks for the findings.
-          key={findingsKey}
+          key={flashes}
           className={cn(
             "pr-space-4 pb-space-3 pl-space-7",
-            findingsKey > 0 && "motion-safe:animate-attention-flash"
+            flashes > 0 && "motion-safe:animate-attention-flash"
           )}
         >
           {detail.findings.length > 0 && (
