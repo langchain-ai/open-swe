@@ -1,11 +1,15 @@
 import { useEffect, useMemo, useRef, useState } from "react"
 import { Banner } from "@langchain/macaw-components/Banner"
+import { Button } from "@langchain/macaw-components/Button"
 import { EmptyState } from "@langchain/macaw-components/EmptyState"
 import { Spinner } from "@langchain/macaw-components/Spinner"
 import { Text } from "@langchain/macaw-components/Text"
 import { GlobeIcon } from "@phosphor-icons/react/dist/ssr/Globe"
 
-import { useAgentThreadBrowser } from "@/features/agents/lib/queries"
+import {
+  useAgentThreadBrowser,
+  useOpenAgentThreadBrowser,
+} from "@/features/agents/lib/queries"
 
 /** What LangSmith's window page posts to the page that frames it. */
 type WindowMessage =
@@ -31,13 +35,21 @@ function windowMessage(data: unknown): WindowMessage | null {
 }
 
 /**
- * The browser window a thread's agent opened, framed from LangSmith's own page
- * for it, zoomed in to follow the pointer in the narrow panel. The page has
- * the Take control and Hand back buttons; it tells this panel who is in
- * control, and why the agent asked for a person.
+ * The thread's browser window, framed from LangSmith's own page for it, zoomed
+ * in for the narrow panel. A person can open it before the agent has, and the
+ * agent then uses the same one. The page has the Take control and Hand back
+ * buttons; it tells this panel who is in control, and why the agent asked for
+ * a person.
  */
-export function BrowserPanel({ threadId }: { threadId: string }) {
-  const browser = useAgentThreadBrowser(threadId, true)
+export function BrowserPanel({
+  threadId,
+  opened,
+}: {
+  threadId: string
+  opened: boolean
+}) {
+  const browser = useAgentThreadBrowser(threadId, opened)
+  const open = useOpenAgentThreadBrowser(threadId)
   const frameRef = useRef<HTMLIFrameElement>(null)
   const [connected, setConnected] = useState(false)
   const [control, setControl] = useState<{
@@ -71,7 +83,7 @@ export function BrowserPanel({ threadId }: { threadId: string }) {
     return () => window.removeEventListener("message", onMessage)
   }, [frame])
 
-  if (browser.isPending) {
+  if (opened && browser.isPending) {
     return (
       <div className="flex flex-1 items-center justify-center">
         <Spinner />
@@ -84,10 +96,20 @@ export function BrowserPanel({ threadId }: { threadId: string }) {
         <EmptyState
           size="sm"
           icon={GlobeIcon}
-          title="No browser to show"
+          title="No browser open"
           description={
             browser.error?.message ??
-            "The agent hasn't opened a browser in this thread."
+            "Open the thread's browser to look around or sign in to sites. The agent browses in the same one."
+          }
+          action={
+            <Button
+              color="secondary"
+              variant="outlined"
+              loading={open.isPending}
+              onClick={() => open.mutate()}
+            >
+              Open browser
+            </Button>
           }
         />
       </div>

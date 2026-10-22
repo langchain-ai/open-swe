@@ -66,6 +66,7 @@ from openswe.github.sandbox_access import READ_ONLY_REVIEW_PERMISSIONS
 from openswe.middleware.conversation_offloading import ConversationOffloadingMiddleware
 from openswe.middleware.model_selection import PersistedRoute, normalize_route
 from openswe.middleware.record_run_usage import RecordRunUsageMiddleware
+from openswe.middleware.task_coordination import TaskCoordinationMiddleware
 from openswe.middleware.transcript import TranscriptMiddleware, within_namespace
 from openswe.prompts import common_prompt, prompt
 from openswe.remote_runtime.git_metadata import (
@@ -99,7 +100,20 @@ from openswe.utils.model import provider_model_kwargs
 logger = logging.getLogger(__name__)
 
 # MDA's own deep agent runs subagents and code.
-_MDA_TOOLS: Final = frozenset({"task", "eval"})
+_SYNC_SUBAGENT_TOOL: Final = "task"
+_MDA_TOOLS: Final = frozenset({_SYNC_SUBAGENT_TOOL, "eval"})
+# deepagents' async subagent tools. Open SWE launches a task worker with the first,
+# wherever the thread may delegate; its task tools track the worker from then on.
+_LAUNCH_WORKER_TOOL: Final = "start_async_task"
+_ASYNC_TASK_TOOLS: Final = frozenset(
+    {
+        _LAUNCH_WORKER_TOOL,
+        "check_async_task",
+        "update_async_task",
+        "cancel_async_task",
+        "list_async_tasks",
+    }
+)
 # Tools the model labels each call of, for the dashboard to show in place of a bare name.
 _DESCRIBED_TOOLS: Final = ("eval",)
 # Model-call middleware that is MDA's own, or that observes rather than shapes a call.
@@ -148,9 +162,10 @@ class CallBody(HookBody):
 
 
 class BrowserBody(HookBody):
-    """``browser``: the LangSmith browser MDA gave the thread's agent."""
+    """``browser``: the LangSmith browser MDA names for the thread's agent."""
 
     browser: str
+    opened: bool = True
 
 
 class ToolResultBody(HookBody):
@@ -330,11 +345,14 @@ class RunSession:
                         if subagent.tools is None
                         else [name for name in subagent.tools if name in tools],
                     }
-                    for subagent in self.surface.subagents
+                    for subagent in (() if self._delegates else self.surface.subagents)
                 ],
                 "models": self.start_models().model_dump(),
                 # Hidden from the model, as the in-process graph hides them.
-                "excluded": sorted((self.surface.excluded | EXCLUDED_TOOLS) - _MDA_TOOLS),
+                "excluded": sorted(
+                    ((self.surface.excluded | EXCLUDED_TOOLS) - _MDA_TOOLS)
+                    | self._unoffered_delegation_tools()
+                ),
                 # Called from MDA's code mode, never offered to the model as schemas.
                 "code_only": sorted(
                     name
@@ -378,6 +396,20 @@ class RunSession:
             github_proxy_repositories=repositories if reviewing else None,
             github_proxy_permissions=READ_ONLY_REVIEW_PERMISSIONS if reviewing else None,
         )
+
+    @property
+    def _delegates(self) -> bool:
+        return any(
+            isinstance(middleware, TaskCoordinationMiddleware) and middleware.can_delegate
+            for middleware in self.surface.middleware
+        )
+
+    def _unoffered_delegation_tools(self) -> frozenset[str]:
+        if self._delegates:
+            # A coordinator delegates only through its workers: no synchronous subagents,
+            # not even the general-purpose one deepagents adds to any agent without them.
+            return (_ASYNC_TASK_TOOLS - {_LAUNCH_WORKER_TOOL}) | {_SYNC_SUBAGENT_TOOL}
+        return _ASYNC_TASK_TOOLS
 
     def start_models(self) -> RunModels:
         return RunModels(
@@ -617,7 +649,8 @@ class RemoteGraph:
             await session.bind_sandbox(body.sandbox_id)
             return await self._phase(session, "before_agent", body)
         if hook == "browser":
-            await ThreadBrowser(browser=BrowserBody.model_validate(raw).browser).save(run.thread_id)
+            body = BrowserBody.model_validate(raw)
+            await ThreadBrowser(browser=body.browser, opened=body.opened).report(run.thread_id)
             return {}
         if hook == "sandbox":
             session = await self.session(run, body.run_id)

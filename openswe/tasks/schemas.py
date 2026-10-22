@@ -3,6 +3,7 @@ from uuid import UUID
 
 from pydantic import AliasChoices, BaseModel, ConfigDict, Field, JsonValue, TypeAdapter
 
+from openswe.bridge.constants import SANDBOX_ID_PREFIX
 from openswe.invocation import resolve_invocation_id
 from openswe.users import User
 
@@ -50,6 +51,14 @@ class ThreadMetadata(BaseModel):
     def json_metadata(self) -> dict[str, JsonValue]:
         return _JSON_OBJECT.validate_python(self.model_dump(mode="json", exclude_unset=True))
 
+    @property
+    def delegation_supported(self) -> bool:
+        """Whether workers can outlive this thread's runs in its sandbox."""
+        if self.sandbox_id and self.sandbox_id.startswith(SANDBOX_ID_PREFIX):
+            # CLI bridges close when the coordinator's run ends, before workers finish.
+            return self.sandbox_bridge_client == "desktop"
+        return True
+
     async def owner(self) -> User:
         if self.owner_type != "user":
             raise PermissionError("Task operations require a user-owned thread")
@@ -60,6 +69,13 @@ class ThreadMetadata(BaseModel):
         if user is None:
             raise PermissionError("The thread owner needs an Open SWE account")
         return user
+
+
+class LaunchedThread(BaseModel):
+    """What MDA records on an async subagent's thread when a run launches it."""
+
+    subagent_name: str | None = None
+    parent_thread_id: str | None = None
 
 
 class Thread(BaseModel):
