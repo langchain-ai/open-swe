@@ -76,7 +76,12 @@ export function MergePullRequest({
   const state = actionLabel(labels, merge)
   return (
     <SplitButton
-      disabled={!pr.headSha || busy || allowed.isPending}
+      disabled={
+        !pr.headSha ||
+        pr.requiredChecksPassing !== true ||
+        busy ||
+        allowed.isPending
+      }
       onClick={() => (method ? merge.mutate() : setMenuOpen(true))}
       menuLabel={`Merge method for PR #${pr.number}`}
       menuDisabled={busy}
