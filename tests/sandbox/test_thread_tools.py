@@ -19,7 +19,7 @@ from langgraph.types import Command
 
 from openswe.middleware.dynamic_tools import DynamicToolMiddleware
 from openswe.middleware.trace import OpenSWEMiddleware
-from openswe.sandboxes import tool_access
+from openswe.sandboxes import tool_access, tool_runtime
 from openswe.sandboxes.tool_runtime import ToolSurface
 
 TEST_SIGNING_KEY = "test-tools-signing-key-" * 3
