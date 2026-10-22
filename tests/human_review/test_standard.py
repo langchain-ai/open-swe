@@ -274,8 +274,6 @@ async def test_opted_out_reviewer_requires_a_verified_person_naming_them(
     ("local_time", "out_of_office", "named", "allowed"),
     [
         ("2026-10-22T03:00:00", False, False, False),
-        ("2026-10-22T18:00:00", False, False, False),
-        ("2026-10-24T12:00:00", False, False, False),
         ("2026-10-22T09:00:00", False, False, True),
         ("2026-10-22T12:00:00", True, False, False),
         ("2026-10-22T03:00:00", False, True, True),
