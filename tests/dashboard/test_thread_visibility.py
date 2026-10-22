@@ -410,7 +410,11 @@ async def test_manage_thread_denies_private_thread_outside_private_context(
 
     thread["metadata"]["visibility"] = "public"
     result = await tools.manage_thread("private-thread", "cancel")
-    assert result == {"success": False, "error": "thread not found", "status_code": 404}
+    assert result == {
+        "success": False,
+        "error": "this private thread can only be reached from its owner's private conversation",
+        "status_code": 403,
+    }
     cancel.assert_not_awaited()
 
     thread["metadata"]["visibility"] = "private"
