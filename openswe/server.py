@@ -63,6 +63,20 @@ class _DisableInheritedMiddleware(AgentMiddleware):
         return self._name
 
 
+class _CodeModeFilesystemMiddleware(FilesystemMiddleware):
+    @property
+    def name(self) -> str:
+        return "FilesystemMiddleware"
+
+    async def _aprocess_large_message(
+        self, message: ToolMessage, resolved_backend: BackendProtocol
+    ) -> tuple[ToolMessage, bool]:
+        # PTC results feed the interpreter; only eval's output enters model context.
+        if message.tool_call_id.startswith("ptc_"):
+            return message, False
+        return await super()._aprocess_large_message(message, resolved_backend)
+
+
 from openswe.analytics.usage import record_agent_invocation_usage
 from openswe.bridge.cli_result import cli_result
 from openswe.bridge.constants import LOCAL_ARTIFACTS_DIR, BridgeClient
@@ -2031,7 +2045,7 @@ async def build_agent(config: RunnableConfig, *, tool_surface: ToolSurface | Non
     middleware = cast(
         list[AgentMiddleware[Any, Any, Any]],
         [
-            FilesystemMiddleware(backend=agent_backend, offload_binary_content=True),
+            _CodeModeFilesystemMiddleware(backend=agent_backend, offload_binary_content=True),
             AnthropicPromptCachingMiddleware(ttl="1h", unsupported_model_behavior="ignore"),
             ConversationOffloadingMiddleware(
                 main_model, agent_backend, manual=cfg.offload_conversation is True

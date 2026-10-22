@@ -1,5 +1,6 @@
+import json
 import sys
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 from contextlib import closing
 from copy import deepcopy
 from datetime import UTC, datetime, timedelta
@@ -11,16 +12,19 @@ import httpx
 import httpx2
 import pytest
 from deepagents import create_deep_agent
+from deepagents.backends.filesystem import FilesystemBackend
 from langchain.agents import create_agent
 from langchain.tools import ToolRuntime
 from langchain_core.language_models.fake_chat_models import (
     FakeListChatModel,
+    FakeMessagesListChatModel,
     GenericFakeChatModel,
 )
 from langchain_core.messages import AIMessage, ToolCall, ToolMessage, message_to_dict
 from langchain_core.runnables import RunnableLambda
 from langchain_core.tools import tool
 from langchain_core.tracers.langchain import LangChainTracer
+from langchain_quickjs import CodeInterpreterMiddleware
 from langgraph.checkpoint.memory import InMemorySaver
 from langgraph.prebuilt.tool_node import ToolCallRequest
 from langgraph.types import Command
@@ -32,8 +36,12 @@ from langgraph_sdk.errors import (
 )
 from langsmith import Client, agent_address, tracing_context
 from langsmith.run_trees import RunTree
+from pydantic import JsonValue
 
 from openswe.remote_runtime.git_metadata import GitTarget, TurnGitMetadata
+from openswe.remote_runtime.graph import CallBody
+from openswe.sandboxes.tool_runtime import ToolSurface
+from openswe.server import _CodeModeFilesystemMiddleware
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "mda"))
 
@@ -50,6 +58,83 @@ from rt.sandbox import SandboxCreate, SandboxSpec
 from rt.sandbox_tools import SandboxToolsMiddleware
 from rt.tools import backend_tool
 from rt.tracing import TurnTrace
+
+
+@pytest.mark.parametrize("print_full_result", [False, True])
+async def test_code_mode_receives_large_json_and_evicts_only_model_visible_output(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, print_full_result: bool
+) -> None:
+    monkeypatch.setenv("OPEN_SWE_BACKEND_URL", "https://backend.invalid")
+    payload = "x" * 110_000
+    content = json.dumps({"payload": payload, "tail": "complete"})
+
+    @tool
+    async def large_result(runtime: ToolRuntime) -> Command:
+        """Return a large JSON result."""
+        return Command(
+            update={
+                "messages": [ToolMessage(content=content, tool_call_id=runtime.tool_call_id)],
+            }
+        )
+
+    filesystem = FilesystemBackend(root_dir=tmp_path, virtual_mode=True)
+    surface = ToolSurface(
+        graph=create_agent(
+            FakeListChatModel(responses=[]),
+            tools=[large_result],
+            middleware=[
+                _CodeModeFilesystemMiddleware(backend=filesystem, offload_binary_content=True)
+            ],
+        )
+    )
+    await surface.prepare({})
+    backend = OpenSweBackend("secret-token")
+
+    async def call(body: Mapping[str, JsonValue]) -> ToolReply:
+        request = CallBody.model_validate(body)
+        result = await surface.run(
+            {}, {}, request.name, request.arguments, call_id=request.tool_call_id
+        )
+        return ToolReply.model_validate({"message": message_to_dict(result.message)})
+
+    monkeypatch.setattr(backend, "tool", call)
+    served = backend_tool(
+        ToolSpec(name="large_result", description="Large JSON", parameters={"type": "object"}),
+        backend,
+    )
+    code = "const raw = await tools.largeResult({}); const parsed = JSON.parse(raw); " + (
+        "console.log(raw);"
+        if print_full_result
+        else "console.log(parsed.payload.length, parsed.tail);"
+    )
+    monkeypatch.setattr(FakeMessagesListChatModel, "bind_tools", lambda self, *args, **kwargs: self)
+    graph = create_deep_agent(
+        model=FakeMessagesListChatModel(
+            responses=[
+                AIMessage(
+                    content="",
+                    tool_calls=[{"name": "eval", "args": {"code": code}, "id": "eval-1"}],
+                ),
+                AIMessage(content="done"),
+            ]
+        ),
+        backend=filesystem,
+        middleware=[
+            CodeInterpreterMiddleware(
+                ptc=[served], subagents=False, mode="turn", max_result_chars=150_000
+            )
+        ],
+    )
+    result = await graph.ainvoke({"messages": [("user", "Read the large result")]})
+    [output] = [message for message in result["messages"] if isinstance(message, ToolMessage)]
+    if print_full_result:
+        assert "Tool result too large" in output.content
+        assert any(content in path.read_text() for path in tmp_path.rglob("*") if path.is_file())
+    else:
+        assert "110000 complete" in output.content
+        assert not list(tmp_path.rglob("*"))
+        visible = await surface.run({}, {}, "large_result", {}, call_id="visible-1")
+        assert "Tool result too large" in visible.message.content
 
 
 @pytest.mark.parametrize(
