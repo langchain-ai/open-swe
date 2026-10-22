@@ -33,7 +33,7 @@ import logging
 import time
 from collections.abc import Awaitable, Callable, Mapping, Sequence
 from functools import partial
-from typing import Final, Literal, Protocol, cast, get_args, runtime_checkable
+from typing import ClassVar, Final, Literal, Protocol, cast, get_args, runtime_checkable
 from uuid import uuid4
 
 from deepagents.middleware.filesystem import FilesystemMiddleware
@@ -124,6 +124,9 @@ _json_object = TypeAdapter(dict[str, JsonValue])
 _json_list = TypeAdapter(list[JsonValue])
 
 Phase = Literal["before_agent", "before_model", "after_model", "after_agent"]
+# When an MDA run must call ``after_model``: on every reply, only on one with no tool
+# calls (the reply that would end the run), or never.
+AfterModel = Literal["every", "final_reply", "never"]
 GraphBuilder = Callable[[RunnableConfig, ToolSurface], Awaitable[object]]
 StartModels = Callable[[RunConfig], Awaitable[RunModels]]
 StateRestorer = Callable[[dict[str, object]], None]
@@ -254,6 +257,13 @@ class RecordsRemoteTools(Protocol):
     async def atool_finished(self, result: ToolMessage) -> None: ...
 
 
+@runtime_checkable
+class ChecksOnlyFinalReplies(Protocol):
+    """Middleware whose ``after_model`` acts only on a reply with no tool calls."""
+
+    checks_only_final_replies: ClassVar[bool]
+
+
 class RunSession:
     """One run's in-process graph: its tools node, middleware and models."""
 
@@ -349,8 +359,22 @@ class RunSession:
                 "described": {
                     name: prompt("tools/display-description") for name in _DESCRIBED_TOOLS
                 },
+                # The per-turn hooks this graph answers, so a run skips the rest.
+                "model_replies_observed": any(
+                    isinstance(m, _MODEL_OBSERVERS) for m in self.surface.middleware
+                ),
+                "tool_calls_recorded": bool(self._tool_recorders()),
+                "after_model": self._after_model(),
             }
         )
+
+    def _after_model(self) -> AfterModel:
+        middleware = self._phase_middleware("after_model")
+        if not middleware:
+            return "never"
+        if all(isinstance(m, ChecksOnlyFinalReplies) for m in middleware):
+            return "final_reply"
+        return "every"
 
     async def sandbox(self) -> ManagedSandbox | None:
         """The thread's box as MDA creates it, when MDA owns it."""

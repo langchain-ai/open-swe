@@ -58,6 +58,9 @@ Hook = Literal[
 # after a 503, the answer a rollout gives it. A tool call is never resent: it may
 # have run. Nor is anything after a 504: the backend may still be running the call.
 _RETRY_SECONDS: Final = (1.0, 2.0, 4.0, 8.0, 15.0, 30.0, 30.0, 30.0, 30.0, 30.0)
+# When ``after_model`` is called: on every reply, only on one with no tool calls (the
+# reply that would end the run), or never.
+AfterModel = Literal["every", "final_reply", "never"]
 _REPEATABLE_HOOKS: Final[frozenset[Hook]] = frozenset({"catalog", "prepare"})
 _RESENT_AFTER_503: Final[frozenset[Hook]] = _REPEATABLE_HOOKS | {"before_model"}
 _GATEWAY_STATUSES: Final = frozenset({502, 503, 504})
@@ -131,6 +134,10 @@ class Catalog(BaseModel):
     described: dict[str, str] = {}
     # The thread's box; None runs every file and shell tool on the backend alone.
     sandbox: SandboxSpec | None = None
+    # The per-turn hooks the graph answers; a backend that names none answers them all.
+    model_replies_observed: bool = True
+    tool_calls_recorded: bool = True
+    after_model: AfterModel = "every"
 
 
 class PhaseReply(BaseModel):

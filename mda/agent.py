@@ -74,9 +74,14 @@ class OpenSweRunContext(BaseModel):
     models: dict[str, JsonValue] | None = None
 
 
-def _backend_reports(backend: OpenSweBackend, served: Collection[str]) -> list[AgentMiddleware]:
-    """The backend's transcript and usage see every reply, and every tool call."""
-    return [ReportRepliesMiddleware(backend), RuntimeToolsMiddleware(backend, served)]
+def _backend_reports(
+    backend: OpenSweBackend, catalog: Catalog, served: Collection[str]
+) -> list[AgentMiddleware]:
+    """The backend's transcript and usage see every reply, and every tool call, if the graph keeps them."""
+    return [
+        *([ReportRepliesMiddleware(backend)] if catalog.model_replies_observed else []),
+        RuntimeToolsMiddleware(backend, served, recorded=catalog.tool_calls_recorded),
+    ]
 
 
 def _code_mode(
@@ -165,7 +170,7 @@ async def agent(runtime: ManagedServerRuntime) -> DeepAgentDefinition:
                 "model": subagent_model,
                 "tools": subagent_tools[subagent.name],
                 "middleware": [
-                    *_backend_reports(backend, by_name.keys()),
+                    *_backend_reports(backend, catalog, by_name.keys()),
                     *replace_sandbox,
                     ServedToolsMiddleware(subagent_tools[subagent.name], excluded),
                     ModelRetryMiddleware(retry_on=(TimeoutError,)),
@@ -179,9 +184,10 @@ async def agent(runtime: ManagedServerRuntime) -> DeepAgentDefinition:
                 context.invocation_id,
                 opened_sandbox if catalog.sandbox is not None else None,
                 trace_metadata=catalog.trace_metadata,
+                after_model=catalog.after_model,
             ),
             *replace_sandbox,
-            *_backend_reports(backend, by_name.keys()),
+            *_backend_reports(backend, catalog, by_name.keys()),
             ServedToolsMiddleware(offered, excluded | code_only),
             *_code_mode(context.graph, from_code, catalog.described),
             *_browser(context.graph, backend),

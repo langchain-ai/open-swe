@@ -25,7 +25,7 @@ from langchain.agents.middleware.types import (
     OmitFromOutput,
     hook_config,
 )
-from langchain_core.messages import SystemMessage, ToolMessage, messages_from_dict
+from langchain_core.messages import AIMessage, SystemMessage, ToolMessage, messages_from_dict
 from langchain_core.tools import BaseTool
 from langgraph.config import get_config, get_stream_writer
 from langgraph.prebuilt.tool_node import ToolCallRequest
@@ -34,6 +34,7 @@ from langgraph.types import Command
 from pydantic import BaseModel, JsonValue
 
 from rt.backend import (
+    AfterModel,
     BackendCallError,
     Hook,
     OpenSweBackend,
@@ -235,10 +236,12 @@ class BackendRunMiddleware(AgentMiddleware[RunState]):
         open_sandbox: Callable[[Runtime], Awaitable[str | None]] | None = None,
         *,
         trace_metadata: Mapping[str, JsonValue] | None = None,
+        after_model: AfterModel = "every",
     ) -> None:
         self._backend = backend
         self._invocation_id = invocation_id
         self._trace_metadata = trace_metadata or {}
+        self._after_model = after_model
         self._trace = TurnTrace()
         # Opens the thread's box before preparing, so the backend binds the thread to it.
         self._open_sandbox = open_sandbox
@@ -305,6 +308,13 @@ class BackendRunMiddleware(AgentMiddleware[RunState]):
 
     @hook_config(can_jump_to=["model", "end"])
     async def aafter_model(self, state: RunState, runtime: Runtime) -> dict[str, object] | None:  # noqa: ARG002
+        if self._after_model == "never":
+            return None
+        if self._after_model == "final_reply":
+            messages = state["messages"]
+            last = messages[-1] if messages else None
+            if not isinstance(last, AIMessage) or last.tool_calls:
+                return None
         return await self._phase("after_model", state)
 
     async def aafter_agent(self, state: RunState, runtime: Runtime) -> dict[str, object] | None:  # noqa: ARG002
@@ -354,9 +364,13 @@ class RuntimeToolsMiddleware(AgentMiddleware):
     Reporting is best effort: a call the backend could not record still runs.
     """
 
-    def __init__(self, backend: OpenSweBackend, served: Collection[str]) -> None:
+    def __init__(
+        self, backend: OpenSweBackend, served: Collection[str], *, recorded: bool = True
+    ) -> None:
         self._backend = backend
         self._served = frozenset(served)
+        # Whether the graph records these calls; its subagents' calls name theirs either way.
+        self._recorded = recorded
 
     async def awrap_tool_call(
         self,
@@ -367,6 +381,9 @@ class RuntimeToolsMiddleware(AgentMiddleware):
         tool_call_id = request.tool_call.get("id")
         if name in self._served or not tool_call_id:
             return await handler(request)
+        if not self._recorded:
+            with subagent_of(tool_call_id):
+                return await handler(request)
         body = run_body(
             run_id(),
             request.state,

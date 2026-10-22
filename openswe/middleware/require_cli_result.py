@@ -3,7 +3,7 @@
 import logging
 import uuid
 from collections.abc import Mapping, Sequence
-from typing import Annotated, Any, NotRequired
+from typing import Annotated, Any, ClassVar, NotRequired
 
 from langchain.agents.middleware.types import AgentState, OmitFromOutput, hook_config
 from langchain_core.messages import AIMessage, BaseMessage, HumanMessage, ToolMessage
@@ -40,6 +40,8 @@ class RequireCliResultMiddleware(OpenSWEMiddleware):
     """
 
     state_schema = CliResultState
+    # Its after-model check passes over any reply that calls a tool.
+    checks_only_final_replies: ClassVar[bool] = True
 
     def __init__(self, tool_name: str, *, max_retries: int = 2) -> None:
         super().__init__()

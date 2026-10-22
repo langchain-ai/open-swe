@@ -93,6 +93,55 @@ async def test_mda_calls_hide_the_tools_the_graph_middleware_hides_from_each_cal
     assert (await session.model_call({"messages": [], "asked": True}, None)).hidden_tools == []
 
 
+@pytest.mark.parametrize("graph", ["reviewer", "agent", "unmarked"])
+async def test_mda_catalog_names_the_per_turn_hooks_the_graph_answers(graph: str) -> None:
+    from langchain.agents.middleware import AgentMiddleware, AgentState, ModelCallLimitMiddleware
+    from langgraph.runtime import Runtime
+
+    from openswe.middleware.require_user_reply import (
+        WEB_REPLY_SURFACE,
+        RequireUserReplyMiddleware,
+    )
+    from openswe.middleware.transcript import TranscriptMiddleware
+    from openswe.remote_runtime.graph import RunSession
+    from openswe.sandboxes.tool_runtime import ModelChoice, SurfaceModels, ToolSurface
+
+    class Nudge(AgentMiddleware):
+        async def aafter_model(self, state: AgentState, runtime: Runtime) -> None:
+            return None
+
+    middleware: dict[str, list[AgentMiddleware]] = {
+        "reviewer": [ModelCallLimitMiddleware(run_limit=5)],
+        "agent": [
+            TranscriptMiddleware(),
+            RequireUserReplyMiddleware("reply", "no_reply", initial_surface=WEB_REPLY_SURFACE),
+        ],
+        "unmarked": [Nudge()],
+    }
+    model = ModelChoice("openai:gpt-6.1-sol", {})
+    session = RunSession(
+        ToolSurface(
+            middleware=middleware[graph],
+            models=SurfaceModels(main=model, subagent=model, use_gateway=False),
+        ),
+        {},
+        None,
+        started_here=True,
+    )
+
+    catalog = session.catalog()
+
+    assert (
+        catalog["after_model"],
+        catalog["model_replies_observed"],
+        catalog["tool_calls_recorded"],
+    ) == {
+        "reviewer": ("never", False, False),
+        "agent": ("final_reply", True, True),
+        "unmarked": ("every", False, False),
+    }[graph]
+
+
 @pytest.mark.parametrize("environment", ["preview", "staging", "production"])
 async def test_remote_prompts_include_deployment_context(
     monkeypatch: pytest.MonkeyPatch, environment: str

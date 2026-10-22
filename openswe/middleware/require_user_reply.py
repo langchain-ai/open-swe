@@ -10,7 +10,7 @@ import json
 import logging
 import uuid
 from collections.abc import Mapping, Sequence
-from typing import Annotated, Any, Literal, NotRequired
+from typing import Annotated, Any, ClassVar, Literal, NotRequired
 
 from langchain.agents.middleware.types import AgentState, OmitFromOutput, hook_config
 from langchain_core.messages import AIMessage, BaseMessage, HumanMessage, ToolMessage
@@ -102,6 +102,8 @@ class RequireUserReplyMiddleware(OpenSWEMiddleware):
     """
 
     state_schema = ReplySurfaceState
+    # Its after-model check passes over any reply that calls a tool.
+    checks_only_final_replies: ClassVar[bool] = True
 
     def __init__(
         self,

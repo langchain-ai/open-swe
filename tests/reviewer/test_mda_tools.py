@@ -11,8 +11,11 @@ import pytest
 from deepagents import create_deep_agent
 from langchain.agents import create_agent
 from langchain.tools import ToolRuntime
-from langchain_core.language_models.fake_chat_models import FakeListChatModel
-from langchain_core.messages import ToolMessage, message_to_dict
+from langchain_core.language_models.fake_chat_models import (
+    FakeListChatModel,
+    FakeMessagesListChatModel,
+)
+from langchain_core.messages import AIMessage, ToolMessage, message_to_dict
 from langchain_core.runnables import RunnableLambda
 from langchain_core.tools import tool
 from langchain_core.tracers.langchain import LangChainTracer
@@ -168,6 +171,44 @@ async def test_an_unreachable_backend_fails_the_run(
 
     with pytest.raises(BackendUnavailableError):
         await graph.ainvoke({"messages": [("user", "hello")]})
+
+
+@pytest.mark.parametrize(
+    ("after_model", "reply", "called"),
+    [
+        (
+            "final_reply",
+            AIMessage(content="", tool_calls=[{"name": "ls", "args": {}, "id": "call-1"}]),
+            False,
+        ),
+        ("final_reply", AIMessage(content="done"), True),
+        ("never", AIMessage(content="done"), False),
+    ],
+)
+async def test_a_run_calls_after_model_only_when_the_graph_answers_it(
+    monkeypatch: pytest.MonkeyPatch,
+    after_model: Literal["final_reply", "never"],
+    reply: AIMessage,
+    called: bool,
+) -> None:
+    monkeypatch.setenv("OPEN_SWE_BACKEND_URL", "https://backend.invalid")
+    monkeypatch.setattr("rt.middleware.run_id", lambda: "run-1")
+    backend = OpenSweBackend("secret-token")
+    hooks: list[str] = []
+
+    async def phase(name: str, body: object) -> PhaseReply:
+        hooks.append(name)
+        return PhaseReply()
+
+    monkeypatch.setattr(backend, "phase", phase)
+    graph = create_agent(
+        model=FakeMessagesListChatModel(responses=[reply]),
+        middleware=[BackendRunMiddleware(backend, "invocation-1", after_model=after_model)],
+    )
+
+    await graph.ainvoke({"messages": [("user", "hello")]})
+
+    assert ("after_model" in hooks) is called
 
 
 async def test_a_failing_backend_hook_fails_the_run_with_what_it_raised(
