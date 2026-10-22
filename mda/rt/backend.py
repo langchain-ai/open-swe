@@ -137,6 +137,8 @@ class Catalog(BaseModel):
     described: dict[str, str] = {}
     # The thread's box; None runs every file and shell tool on the backend alone.
     sandbox: SandboxSpec | None = None
+    # Where the Agent Server reports a launched worker's run ending; None launches none.
+    worker_webhook: str | None = None
 
 
 class AdoptReply(BaseModel):

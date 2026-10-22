@@ -198,6 +198,10 @@ async def agent(runtime: ManagedServerRuntime) -> DeepAgentDefinition:
         "system_prompt": _INSTRUCTIONS,
         "middleware": agent_middleware,
         "async": True,
+        # The backend settles a worker's runs from their webhooks and wakes the coordinator
+        # itself, so deepagents must not wake it as well.
+        "notify_parent": False,
+        **({"webhook": catalog.worker_webhook} if catalog.worker_webhook else {}),
     }
     return define_deep_agent(
         name="open-swe",
