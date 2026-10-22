@@ -10,6 +10,13 @@ const BOTTOM_LOCK_THRESHOLD_PX = 24
 /** A sent message that hasn't rendered by now never will; stop waiting for it. */
 const PENDING_PIN_TIMEOUT_MS = 5000
 const REMEMBERED_TRANSCRIPTS = 200
+/** How long a sent message takes to glide up to the top. */
+const PIN_GLIDE_MS = 450
+/**
+ * The most one frame may advance a glide. A slow frame (rendering right after
+ * a send often is one) then slows the glide for a beat instead of jumping it.
+ */
+const PIN_GLIDE_MAX_FRAME_MS = 17
 /** How long a wheel, touch, or key keeps scroll events attributed to the user (momentum included). */
 const USER_SCROLL_WINDOW_MS = 1000
 const SCROLL_KEYS = new Set([
@@ -82,10 +89,29 @@ function pinTarget(scroller: HTMLElement, message: HTMLElement): number {
   )
 }
 
+/** Leaves at once, then settles gently: the glide reads as a response, not a wait. */
+function easeOutQuint(progress: number): number {
+  return 1 - (1 - progress) ** 5
+}
+
+function prefersReducedMotion(): boolean {
+  return (
+    window.matchMedia?.("(prefers-reduced-motion: reduce)").matches ?? false
+  )
+}
+
+interface Glide {
+  frame: number
+}
+
 interface Pin {
   messageId: string
   /** Keep the message at the top; dropped once the user scrolls. */
   hold: boolean
+  /** It has been brought to the top once; later holds keep it there in place. */
+  placed: boolean
+  /** The animation bringing it there, while it runs. */
+  glide: Glide | null
 }
 
 interface ScrollState {
@@ -118,7 +144,7 @@ interface ScrollState {
  * Scroll behaviour for a streaming transcript: follow the tail until the user
  * scrolls up, hold their place while content reflows, and remember where they
  * were in each transcript (by `scrollKey`) across navigation. A message the
- * user sends is pinned to the top and the reply fills in below it.
+ * user sends glides up to the top and the reply fills in below it.
  *
  * Every adjustment runs before paint (layout effects and ResizeObserver
  * callbacks), so no frame ever shows the transcript out of place. Any scroll
@@ -151,7 +177,7 @@ export function useTranscriptScroll({
   const settle = useCallback((el: HTMLElement, top: number) => {
     state.current.manualTop = top
     state.current.previousTop = top
-    setShowScrollToBottom(!isNearBottom(el))
+    setShowScrollToBottom(!isNearBottom(el) && !state.current.pin?.glide)
   }, [])
 
   const jumpToBottom = useCallback(
@@ -173,7 +199,12 @@ export function useTranscriptScroll({
     const pending = state.current.pendingPin
     if (!pending) return false
     if (messageElement(el, pending.messageId)) {
-      state.current.pin = { messageId: pending.messageId, hold: true }
+      state.current.pin = {
+        messageId: pending.messageId,
+        hold: true,
+        placed: false,
+        glide: null,
+      }
       state.current.pendingPin = null
       return false
     }
@@ -210,17 +241,78 @@ export function useTranscriptScroll({
     [pinnedElement]
   )
 
+  const cancelGlide = useCallback(() => {
+    const pin = state.current.pin
+    if (!pin?.glide) return
+    window.cancelAnimationFrame(pin.glide.frame)
+    pin.glide = null
+  }, [])
+
+  /**
+   * Ease the pinned message up to the top. It starts at most a screen away, so
+   * a long way still reads as a short glide, and each frame aims at where the
+   * message belongs now, so content moving mid-glide can't throw it off. The
+   * clock starts a frame late and advances at most a frame at a time: the
+   * frame after a send's render is often long, and the curve is steepest at
+   * the start, so a long frame there would jump the message instead of
+   * gliding it.
+   */
+  const glideToPin = useCallback(
+    (el: HTMLElement, pin: Pin, target: number) => {
+      const reach = el.clientHeight
+      el.scrollTop = Math.min(
+        Math.max(el.scrollTop, target - reach),
+        target + reach
+      )
+      if (prefersReducedMotion() || Math.abs(target - el.scrollTop) < 1) {
+        el.scrollTop = target
+        settle(el, el.scrollTop)
+        return
+      }
+      const from = el.scrollTop
+      let elapsed = 0
+      let last: number | null = null
+      const step = (now: number) => {
+        const message = pinnedElement(el)
+        if (!pin.glide || state.current.pin !== pin || !message) return
+        elapsed += Math.min(now - (last ?? now), PIN_GLIDE_MAX_FRAME_MS)
+        last = now
+        const progress = Math.min(1, elapsed / PIN_GLIDE_MS)
+        const aim = Math.min(pinTarget(el, message), maxScrollTop(el))
+        el.scrollTop = from + (aim - from) * easeOutQuint(progress)
+        if (progress < 1) pin.glide.frame = window.requestAnimationFrame(step)
+        else pin.glide = null
+        settle(el, el.scrollTop)
+      }
+      const glide: Glide = {
+        frame: window.requestAnimationFrame(() => {
+          glide.frame = window.requestAnimationFrame(step)
+        }),
+      }
+      pin.glide = glide
+      settle(el, el.scrollTop)
+    },
+    [pinnedElement, settle]
+  )
+
   const holdPin = useCallback(
     (el: HTMLElement): boolean => {
-      if (!state.current.pin?.hold) return false
+      const pin = state.current.pin
+      if (!pin?.hold) return false
       const message = pinnedElement(el)
       if (!message) return false
       state.current.followTail = false
-      el.scrollTop = Math.min(pinTarget(el, message), maxScrollTop(el))
-      settle(el, el.scrollTop)
+      const target = Math.min(pinTarget(el, message), maxScrollTop(el))
+      if (!pin.placed) {
+        pin.placed = true
+        glideToPin(el, pin, target)
+      } else if (!pin.glide) {
+        el.scrollTop = target
+        settle(el, el.scrollTop)
+      }
       return true
     },
-    [pinnedElement, settle]
+    [glideToPin, pinnedElement, settle]
   )
 
   /**
@@ -283,16 +375,18 @@ export function useTranscriptScroll({
   )
 
   const clearPin = useCallback(() => {
+    cancelGlide()
     state.current.pin = null
     state.current.pendingPin = null
     reserveRef.current?.style.removeProperty("height")
-  }, [])
+  }, [cancelGlide])
 
   /** The user scrolled: stop holding any sent message in place. */
   const releasePin = useCallback(() => {
+    cancelGlide()
     if (state.current.pin) state.current.pin.hold = false
     state.current.pendingPin = null
-  }, [])
+  }, [cancelGlide])
 
   /** Pin a message the user is sending to the top once it renders. */
   const pinMessage = useCallback((messageId: string) => {
@@ -377,7 +471,10 @@ export function useTranscriptScroll({
       // clamping to a shorter transcript lands exactly on the new bottom. Any
       // other move is the user's even without input we can see: find in page,
       // drag-select autoscroll, focus moving to an off-screen control.
-      const ours = Math.abs(top - state.current.previousTop) <= 1
+      // A glide's frames are ours too, until it lands.
+      const ours =
+        Math.abs(top - state.current.previousTop) <= 1 ||
+        !!state.current.pin?.glide
       const clamped =
         top < state.current.previousTop && top >= maxScrollTop(el) - 1
       if (userIsScrolling() || (!ours && !clamped)) {
@@ -418,6 +515,8 @@ export function useTranscriptScroll({
     observer.observe(content)
     return () => observer.disconnect()
   }, [reconcile])
+
+  useEffect(() => cancelGlide, [cancelGlide])
 
   return {
     scrollRef,
