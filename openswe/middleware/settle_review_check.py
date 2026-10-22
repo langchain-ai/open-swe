@@ -12,9 +12,9 @@ from typing import Any
 
 from langchain.agents.middleware import AgentState, after_agent
 from langgraph.runtime import Runtime
-from osweshared.trace import scrub_middleware_inputs
 
 from openswe.github.thread_token import resolve_thread_github_token
+from openswe.middleware.trace import scrub_middleware_inputs
 from openswe.review.findings import get_thread_metadata
 from openswe.review.publish import settle_review_check_run
 from openswe.run_config import RunConfig

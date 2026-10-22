@@ -27,10 +27,12 @@ from openswe.monitors.delivery import POLL_JOB_KIND as MONITOR_POLL
 from openswe.monitors.delivery import poll_monitors
 
 __all__ = ["WORKER"]
-from osweshared.tool_error_handler import is_transient_sandbox_error
-
 from openswe.reconcile import reconcile_stale_runs
-from openswe.sandboxes.retry import SANDBOX_ATTACH_MAX_ELAPSED, retry_transient_sandbox_errors
+from openswe.sandboxes.retry import (
+    SANDBOX_ATTACH_MAX_ELAPSED,
+    is_transient_sandbox_error,
+    retry_transient_sandbox_errors,
+)
 from openswe.schedules.store import AGENT_SCHEDULE_JOB_KIND, launch_scheduled_agent_run
 from openswe.session_cost import run_session_cost_refresh
 from openswe.threads.index_import import import_agent_server_threads

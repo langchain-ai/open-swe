@@ -17,8 +17,8 @@ from typing import Any
 from langchain.agents.middleware.types import ModelRequest, ModelResponse
 from langgraph.config import get_config
 from langgraph_sdk import get_client
-from osweshared.trace import OpenSWEMiddleware
 
+from openswe.middleware.trace import OpenSWEMiddleware
 from openswe.utils.errors import (
     LAST_MODEL_ERROR_KEY,
     classify_exception,

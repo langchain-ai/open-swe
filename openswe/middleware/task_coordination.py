@@ -7,11 +7,11 @@ from langchain.agents.middleware import AgentState
 from langchain.agents.middleware.types import ModelRequest, ModelResponse
 from langchain_core.messages import SystemMessage
 from langgraph.runtime import Runtime
-from osweshared.trace import OpenSWEMiddleware
 
 from openswe.database import postgres
 from openswe.github.proxy import maybe_refresh_proxy_token
 from openswe.input_messages import RunMessage, dynamic_context_hash, visible_dynamic_context_hashes
+from openswe.middleware.trace import OpenSWEMiddleware
 from openswe.prompts import prompt
 from openswe.tasks.flags import task_coordination_enabled, task_coordination_supported
 from openswe.tasks.messages import TaskMessage

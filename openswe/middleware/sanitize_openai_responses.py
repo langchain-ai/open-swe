@@ -6,7 +6,8 @@ from typing import Any
 from langchain.agents.middleware.types import ModelRequest, ModelResponse
 from langchain_core.messages import AIMessage, AnyMessage
 from langchain_openai import ChatOpenAI
-from osweshared.trace import OpenSWEMiddleware
+
+from openswe.middleware.trace import OpenSWEMiddleware
 
 
 def _is_stateless_chat_openai(model: object) -> bool:

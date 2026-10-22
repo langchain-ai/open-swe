@@ -9,8 +9,9 @@ from typing import Literal
 
 from pydantic import BaseModel, JsonValue
 
-# The graph's tool-call middleware this runtime applies to the calls it runs in the box.
-SandboxCheck = Literal["tool_errors", "image_reads", "agents_md", "push_guards"]
+# The graph's tool-call middleware the box's calls need: its tool errors as results,
+# and its push and pull request guards, which keep the commands they check on the backend.
+SandboxCheck = Literal["tool_errors", "push_guards"]
 
 
 class SandboxCreate(BaseModel):

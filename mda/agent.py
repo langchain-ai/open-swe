@@ -158,7 +158,14 @@ async def agent(runtime: ManagedServerRuntime) -> DeepAgentDefinition:
         [ReplaceSandboxMiddleware(backend, catalog.sandbox)] if catalog.sandbox is not None else []
     )
     box_tools = (
-        [SandboxToolsMiddleware(backend, catalog.sandbox, EXECUTE_TIMEOUT_SECONDS)]
+        [
+            SandboxToolsMiddleware(
+                backend,
+                catalog.sandbox,
+                EXECUTE_TIMEOUT_SECONDS,
+                check_reads=context.graph == "agent",
+            )
+        ]
         if catalog.sandbox is not None and in_box
         else []
     )

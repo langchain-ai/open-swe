@@ -238,7 +238,9 @@ async def test_box_tools_leave_to_the_backend_what_its_guards_and_paths_settle(
     )
     in_box = AsyncMock(return_value=ToolMessage(content="ran", tool_call_id="call-1"))
 
-    await SandboxToolsMiddleware(backend, spec, 300).awrap_tool_call(request, in_box)
+    await SandboxToolsMiddleware(backend, spec, 300, check_reads=True).awrap_tool_call(
+        request, in_box
+    )
     await backend.reports.drain()
 
     assert backend.tool.await_count == int(on_backend)

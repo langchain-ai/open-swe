@@ -13,9 +13,9 @@ import logging
 from collections.abc import Awaitable, Callable
 
 from langchain.agents.middleware.types import ModelRequest, ModelResponse
-from osweshared.trace import OpenSWEMiddleware
 
 from openswe.config import ENV
+from openswe.middleware.trace import OpenSWEMiddleware
 
 logger = logging.getLogger(__name__)
 

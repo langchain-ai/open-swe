@@ -13,7 +13,6 @@ from langchain.agents.middleware import before_model
 from langgraph.config import get_config
 from langgraph.runtime import Runtime
 from langgraph_sdk import get_client
-from osweshared.trace import scrub_middleware_inputs
 
 from openswe.dashboard.options import model_supports_images
 from openswe.input_messages import (
@@ -30,6 +29,7 @@ from openswe.middleware.require_user_reply import (
     ReplySurfaceState,
     current_reply_surface,
 )
+from openswe.middleware.trace import scrub_middleware_inputs
 from openswe.users import User
 from openswe.utils.dashboard_handoff import (
     DASHBOARD_HANDOFF_BODY,

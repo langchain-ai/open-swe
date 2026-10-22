@@ -15,9 +15,9 @@ from langgraph.config import get_config
 from langgraph.prebuilt.tool_node import ToolCallRequest
 from langgraph.types import Command
 from langgraph_sdk import get_client
-from osweshared.trace import OpenSWEMiddleware
 
 from openswe.middleware.pr_creation_guard import executable_name, shell_commands, shell_tokens
+from openswe.middleware.trace import OpenSWEMiddleware
 from openswe.run_config import RunConfig
 from openswe.sandboxes.state import SANDBOX_BACKENDS
 from openswe.slack.client import (

@@ -1,7 +1,12 @@
 import base64
+import sys
+from pathlib import Path
 
 from langchain_core.messages import ToolMessage
-from osweshared.validate_image_reads import validate_read_file_message
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "mda"))
+
+from rt.validate_image_reads import validate_read_file_message
 
 PNG_HEAD = b"\x89PNG\r\n\x1a\n" + b"\x00" * 16
 

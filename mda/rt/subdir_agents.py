@@ -1,7 +1,4 @@
-"""Auto-load applicable ``AGENTS.md`` files after file reads.
-
-Where the thread's sandbox is reached from is the runtime's.
-"""
+"""Auto-load applicable ``AGENTS.md`` files after file reads, from the box the read ran in."""
 
 import asyncio
 import logging
@@ -11,13 +8,12 @@ from collections.abc import Awaitable, Callable, Iterable, Mapping
 from typing import Any
 
 from deepagents.backends.protocol import BackendProtocol
+from langchain.agents.middleware import AgentMiddleware
 from langchain.agents.middleware.types import AgentState
 from langchain_core.messages import ToolMessage
 from langgraph.config import get_config
 from langgraph.prebuilt.tool_node import ToolCallRequest
 from langgraph.types import Command
-
-from osweshared.trace import OpenSWEMiddleware
 
 logger = logging.getLogger(__name__)
 
@@ -44,7 +40,7 @@ def _tool_args(request: ToolCallRequest) -> dict[str, Any]:
     return {}
 
 
-def thread_id(request: ToolCallRequest) -> str | None:
+def _thread_id(request: ToolCallRequest) -> str | None:
     runtime_config = getattr(getattr(request, "runtime", None), "config", None)
     config: Mapping[str, Any] | None = (
         runtime_config if isinstance(runtime_config, Mapping) else None
@@ -145,7 +141,7 @@ def _append_reminder(result: ToolMessage | Command, reminder: str | None) -> Too
     return result
 
 
-class BaseSubdirAgentsReadMiddleware(OpenSWEMiddleware):
+class SubdirAgentsReadMiddleware(AgentMiddleware):
     """Append applicable ancestor ``AGENTS.md`` files to ``read_file`` results."""
 
     state_schema = AgentState
@@ -154,11 +150,12 @@ class BaseSubdirAgentsReadMiddleware(OpenSWEMiddleware):
         self._loaded: defaultdict[str, set[str]] = defaultdict(set)
 
     def _thread_key(self, request: ToolCallRequest) -> str:
-        return thread_id(request) or "__unknown_thread__"
+        return _thread_id(request) or "__unknown_thread__"
 
     def backend(self, request: ToolCallRequest) -> BackendProtocol | None:
-        """The thread's sandbox, where the ``AGENTS.md`` files are read from."""
-        raise NotImplementedError
+        """The thread's box, behind the run's backend."""
+        backend = getattr(request.runtime, "backend", None)
+        return backend if isinstance(backend, BackendProtocol) else None
 
     def _mark_direct_agents_read(self, request: ToolCallRequest, file_path: str) -> bool:
         if posixpath.basename(file_path) != _AGENTS_MD:

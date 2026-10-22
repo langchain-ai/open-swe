@@ -7,7 +7,7 @@ import time
 from collections.abc import Awaitable, Callable
 from typing import TypeVar
 
-from osweshared.tool_error_handler import is_transient_sandbox_error
+from langsmith.sandbox import SandboxRetryableConnectionError
 
 logger = logging.getLogger(__name__)
 
@@ -18,6 +18,16 @@ _MAX_BACKOFF = 8.0
 _JITTER_FACTOR = 0.2
 
 T = TypeVar("T")
+
+
+def is_transient_sandbox_error(exc: BaseException) -> bool:
+    """Whether the SDK guarantees this failure happened before the command started.
+
+    ``SandboxRetryableConnectionError`` covers a WebSocket upgrade rejected with a
+    gateway status (500/502/503/504): the execute frame never went out, so no
+    attempt can have run the command, and re-issuing it cannot double-run it.
+    """
+    return isinstance(exc, SandboxRetryableConnectionError)
 
 
 def _compute_backoff(attempt: int) -> float:

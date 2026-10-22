@@ -113,9 +113,7 @@ from openswe.middleware import (
     SanitizeOpenAIResponsesMiddleware,
     SanitizeThinkingBlocksMiddleware,
     StableToolResultOrderMiddleware,
-    SubdirAgentsReadMiddleware,
     ToolErrorMiddleware,
-    ValidateImageReadsMiddleware,
     WorkflowPushGuardMiddleware,
     WorkspaceSkillsMiddleware,
     check_message_queue_before_model,
@@ -2053,7 +2051,6 @@ async def build_agent(config: RunnableConfig, *, tool_surface: ToolSurface | Non
             *([client_tools] if client_tools else []),
             *([IncidentMiddleware(incident_session)] if incident_session is not None else []),
             skills_middleware,
-            ValidateImageReadsMiddleware(),
             ModelCallLimitMiddleware(
                 run_limit=incident_session.policy.max_model_calls
                 if incident_session is not None
@@ -2062,7 +2059,6 @@ async def build_agent(config: RunnableConfig, *, tool_surface: ToolSurface | Non
             ),
             ToolErrorMiddleware(),
             ExcludeToolsMiddleware(excluded=excluded_tools),
-            SubdirAgentsReadMiddleware(),
             ToolRetryMiddleware(
                 max_retries=2,
                 tools=["task"],

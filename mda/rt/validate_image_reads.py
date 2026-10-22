@@ -9,16 +9,14 @@ bytes and downgrades a mismatch to a plain-text tool result.
 """
 
 import base64
-import binascii
 from collections.abc import Awaitable, Callable
 from typing import Any
 
+from langchain.agents.middleware import AgentMiddleware
 from langchain.agents.middleware.types import AgentState
 from langchain_core.messages import ToolMessage
 from langgraph.prebuilt.tool_node import ToolCallRequest
 from langgraph.types import Command
-
-from osweshared.trace import OpenSWEMiddleware
 
 _IMAGE_SIGNATURES: tuple[tuple[bytes, ...], ...] = (
     (b"\x89PNG\r\n\x1a\n",),
@@ -50,7 +48,7 @@ def _image_block_head(block: Any) -> bytes | None:
         return None
     try:
         return base64.b64decode(encoded[:24] + "==")[:12]
-    except (binascii.Error, ValueError):
+    except ValueError:  # binascii.Error included
         return b""
 
 
@@ -75,7 +73,7 @@ def validate_read_file_message(message: ToolMessage) -> ToolMessage:
     return message
 
 
-class ValidateImageReadsMiddleware(OpenSWEMiddleware):
+class ValidateImageReadsMiddleware(AgentMiddleware):
     state_schema = AgentState
 
     async def awrap_tool_call(

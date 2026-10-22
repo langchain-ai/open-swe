@@ -5,9 +5,9 @@ from typing import Any
 
 from langchain.agents.middleware import AgentState, before_model
 from langgraph.runtime import Runtime
-from osweshared.trace import scrub_middleware_inputs
 
 from openswe.database import postgres
+from openswe.middleware.trace import scrub_middleware_inputs
 from openswe.run_config import RunConfig
 from openswe.webhooks.event_matches import EventMatch
 

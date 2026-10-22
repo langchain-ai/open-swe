@@ -68,9 +68,6 @@ from langchain_core.tools import BaseTool
 from langchain_quickjs import CodeInterpreterMiddleware
 from langgraph.config import get_config
 from langgraph.runtime import Runtime
-from osweshared.subdir_agents import BaseSubdirAgentsReadMiddleware
-from osweshared.tool_error_handler import BaseToolErrorMiddleware
-from osweshared.validate_image_reads import ValidateImageReadsMiddleware
 from pydantic import BaseModel, JsonValue, TypeAdapter, ValidationError
 
 from openswe.github.sandbox_access import READ_ONLY_REVIEW_PERMISSIONS
@@ -80,6 +77,7 @@ from openswe.middleware.model_selection import PersistedRoute, normalize_route
 from openswe.middleware.pr_creation_guard import PullRequestCreationGuardMiddleware
 from openswe.middleware.record_run_usage import RecordRunUsageMiddleware
 from openswe.middleware.sandbox_circuit_breaker import post_sandbox_unreachable_notification
+from openswe.middleware.tool_error_handler import ToolErrorMiddleware
 from openswe.middleware.transcript import TranscriptMiddleware, within_namespace
 from openswe.middleware.workflow_push_guard import WorkflowPushGuardMiddleware
 from openswe.prompts import common_prompt, prompt
@@ -135,16 +133,15 @@ _MODEL_OBSERVERS: Final = (TranscriptMiddleware, RecordRunUsageMiddleware)
 _MDA_PHASES: Final = (ModelCallLimitMiddleware, CodeInterpreterMiddleware)
 # The file and shell tools an MDA run calls in the thread's box itself, where MDA owns it.
 _BOX_TOOLS: Final = frozenset(DEEP_AGENT_TOOL_NAMES) - _MDA_TOOLS
-SandboxCheck = Literal["tool_errors", "image_reads", "agents_md", "push_guards"]
+SandboxCheck = Literal["tool_errors", "push_guards"]
 # The graph's tool-call middleware, as MDA applies it to the calls it runs in the box:
 # by the check MDA runs in its place, or None where there is nothing to do there. The
 # transcript records those calls through ``tool_started`` and ``tool_result``, MDA's
 # own filesystem middleware offloads large results, and the rest act on other tools.
+# The checks on what ``read_file`` returns live in MDA alone (``mda/rt/sandbox_tools.py``).
 # A graph with tool-call middleware not listed here runs every call on the backend.
 _BOX_CHECKS: Final[Sequence[tuple[type, SandboxCheck | None]]] = (
-    (BaseToolErrorMiddleware, "tool_errors"),
-    (ValidateImageReadsMiddleware, "image_reads"),
-    (BaseSubdirAgentsReadMiddleware, "agents_md"),
+    (ToolErrorMiddleware, "tool_errors"),
     (PullRequestCreationGuardMiddleware, "push_guards"),
     (WorkflowPushGuardMiddleware, "push_guards"),
     (TranscriptMiddleware, None),

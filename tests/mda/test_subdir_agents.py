@@ -1,13 +1,16 @@
 """Tests for subdirectory AGENTS.md auto-loading on read_file."""
 
+import sys
+from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
 
-import pytest
+from deepagents.backends.protocol import BackendProtocol
 from langchain_core.messages import ToolMessage
 
-from openswe.middleware.subdir_agents import SubdirAgentsReadMiddleware
-from openswe.sandboxes import state as sandbox_state
+sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "mda"))
+
+from rt.subdir_agents import SubdirAgentsReadMiddleware
 
 
 class FakeReadResult:
@@ -18,7 +21,7 @@ class FakeReadResult:
         self.file_data = None if content is None else {"content": content, "encoding": encoding}
 
 
-class FakeBackend:
+class FakeBackend(BackendProtocol):
     def __init__(self, results: dict[str, Any]) -> None:
         self.results = results
         self.reads: list[str] = []
@@ -33,10 +36,10 @@ class FakeBackend:
         return result
 
 
-def _request(name: str, args: dict[str, Any], thread_id: str = "t1") -> Any:
+def _request(name: str, args: dict[str, Any], backend: FakeBackend) -> Any:
     return SimpleNamespace(
         tool_call={"name": name, "args": args, "id": "call-1"},
-        runtime=SimpleNamespace(config={"configurable": {"thread_id": thread_id}}),
+        runtime=SimpleNamespace(config={"configurable": {"thread_id": "t1"}}, backend=backend),
     )
 
 
@@ -49,29 +52,14 @@ def _tool_result(result: object) -> ToolMessage:
     return result
 
 
-@pytest.fixture
-def register_backend():
-    registered: list[str] = []
-
-    def _register(thread_id: str, backend: Any) -> Any:
-        sandbox_state.SANDBOX_BACKENDS[thread_id] = backend
-        registered.append(thread_id)
-        return backend
-
-    yield _register
-    for thread_id in registered:
-        sandbox_state.SANDBOX_BACKENDS.pop(thread_id, None)
-
-
-async def test_read_file_appends_applicable_agents_in_root_to_leaf_order(register_backend) -> None:
+async def test_read_file_appends_applicable_agents_in_root_to_leaf_order() -> None:
     backend = FakeBackend(
         {
             "/repo/AGENTS.md": FakeReadResult(content="root rules"),
             "/repo/pkg/AGENTS.md": FakeReadResult(content="pkg rules"),
         }
     )
-    register_backend("t1", backend)
-    request = _request("read_file", {"file_path": "/repo/pkg/src/app.py"})
+    request = _request("read_file", {"file_path": "/repo/pkg/src/app.py"}, backend)
 
     async def handler(_req: Any) -> ToolMessage:
         return _ok("read_file")
@@ -93,9 +81,8 @@ async def test_read_file_appends_applicable_agents_in_root_to_leaf_order(registe
     ]
 
 
-async def test_read_file_does_not_reload_same_agents_file(register_backend) -> None:
+async def test_read_file_does_not_reload_same_agents_file() -> None:
     backend = FakeBackend({"/repo/pkg/AGENTS.md": FakeReadResult(content="pkg rules")})
-    register_backend("t1", backend)
     middleware = SubdirAgentsReadMiddleware()
 
     async def handler(_req: Any) -> ToolMessage:
@@ -103,12 +90,12 @@ async def test_read_file_does_not_reload_same_agents_file(register_backend) -> N
 
     first = _tool_result(
         await middleware.awrap_tool_call(
-            _request("read_file", {"file_path": "/repo/pkg/a.py"}), handler
+            _request("read_file", {"file_path": "/repo/pkg/a.py"}, backend), handler
         )
     )
     second = _tool_result(
         await middleware.awrap_tool_call(
-            _request("read_file", {"file_path": "/repo/pkg/b.py"}), handler
+            _request("read_file", {"file_path": "/repo/pkg/b.py"}, backend), handler
         )
     )
 

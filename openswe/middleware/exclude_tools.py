@@ -14,7 +14,8 @@ from langchain.agents.middleware.types import (
     ModelResponse,
 )
 from langchain_core.tools import BaseTool
-from osweshared.trace import OpenSWEMiddleware
+
+from openswe.middleware.trace import OpenSWEMiddleware
 
 
 def _tool_name(tool: BaseTool | dict[str, Any] | Any) -> str | None:

@@ -2,9 +2,12 @@ from unittest.mock import AsyncMock, patch
 
 import pytest
 from langsmith.sandbox import SandboxClientError, SandboxRetryableConnectionError
-from osweshared.tool_error_handler import is_transient_sandbox_error
 
-from openswe.sandboxes.retry import MAX_TRANSIENT_ATTEMPTS, retry_transient_sandbox_errors
+from openswe.sandboxes.retry import (
+    MAX_TRANSIENT_ATTEMPTS,
+    is_transient_sandbox_error,
+    retry_transient_sandbox_errors,
+)
 
 
 def _transient() -> SandboxRetryableConnectionError:

@@ -12,9 +12,9 @@ from langchain_core.language_models import BaseChatModel
 from langchain_core.messages import HumanMessage
 from langgraph.config import get_stream_writer
 from langgraph.runtime import Runtime
-from osweshared.trace import OpenSWEMiddleware
 
 from openswe.input_messages import input_message_text, message_sender_id
+from openswe.middleware.trace import OpenSWEMiddleware
 from openswe.prompts import prompt
 from openswe.utils.jev import select_jev_choice
 

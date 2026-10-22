@@ -12,7 +12,8 @@ from typing import Any
 
 from langchain.agents.middleware.types import ModelRequest, ModelResponse
 from langchain_core.messages import AIMessage, AnyMessage, ToolMessage
-from osweshared.trace import OpenSWEMiddleware
+
+from openswe.middleware.trace import OpenSWEMiddleware
 
 
 def _call_positions(message: AIMessage) -> dict[str, int]:
