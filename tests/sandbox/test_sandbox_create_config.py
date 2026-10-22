@@ -190,7 +190,12 @@ async def test_a_box_mda_replaced_from_another_workspace_gets_that_workspaces_pr
     assert updates == [
         {"sandbox_base_proxy_config": {"rules": ["other"]}, "sandbox_replacement": None}
     ]
-    ensure.assert_awaited_once_with("thread-1", workspace_slug="original")
+    ensure.assert_awaited_once_with(
+        "thread-1",
+        workspace_slug="original",
+        github_proxy_repositories=None,
+        github_proxy_permissions=None,
+    )
 
 
 async def _no_update(workspace: object) -> None:

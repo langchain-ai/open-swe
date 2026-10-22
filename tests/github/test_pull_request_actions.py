@@ -30,6 +30,70 @@ def github(monkeypatch):
     return _install
 
 
+@pytest.mark.parametrize(
+    ("keep_review_id", "keep_commit", "scope_to_review_id", "dismissed"),
+    [
+        (None, "new", None, {1, 5, 6}),
+        (3, None, None, {1, 5, 6, 7}),
+        (None, None, None, {1, 3, 5, 6, 7}),
+        (None, None, 4, {1, 3, 5, 6, 7}),
+        (None, None, 999, set()),
+    ],
+    ids=[
+        "head-moved",
+        "approved-again",
+        "not-approved",
+        "scoped-to-own-login",
+        "own-review-missing",
+    ],
+)
+async def test_only_open_swe_approvals_other_than_the_kept_one_are_withdrawn(
+    keep_review_id: int | None,
+    keep_commit: str | None,
+    scope_to_review_id: int | None,
+    dismissed: set[int],
+) -> None:
+    def review(review_id: int, login: str, state: str, commit: str) -> dict[str, object]:
+        return {
+            "id": review_id,
+            "user": {"id": review_id, "login": login},
+            "state": state,
+            "commit_id": commit,
+        }
+
+    reviews = [
+        review(1, "jarvis-aeteq[bot]", "APPROVED", "old"),
+        review(2, "alice", "APPROVED", "old"),
+        review(3, "jarvis-aeteq[bot]", "APPROVED", "new"),
+        review(4, "jarvis-aeteq[bot]", "COMMENTED", "old"),
+        review(5, "Jarvis-Aeteq[bot]", "APPROVED", "old"),
+        review(6, "jarvis-aeteq[bot]", "APPROVED", "old"),
+        review(7, "jarvis-aeteq[bot]", "APPROVED", "new"),
+    ]
+    dismissals: list[int] = []
+
+    def github(request: httpx2.Request) -> httpx2.Response:
+        if request.method == "GET":
+            return httpx2.Response(200, json=reviews)
+        review_id = int(request.url.path.split("/")[-2])
+        dismissals.append(review_id)
+        # A review GitHub no longer has is as good as dismissed; a refusal must be reported.
+        return httpx2.Response({5: 404, 6: 403}.get(review_id, 200), json={})
+
+    async with httpx2.AsyncClient(transport=httpx2.MockTransport(github)) as http:
+        pull = GitHubClient(http).repo("acme", "app").pull_request(9)
+        refused = await pull.withdraw_open_swe_approvals(
+            reason="stale",
+            keep_review_id=keep_review_id,
+            keep_commit=keep_commit,
+            scope_to_review_id=scope_to_review_id,
+        )
+
+    assert set(dismissals) == dismissed
+    # An unknown scope review attempts nothing at all.
+    assert refused == ([] if scope_to_review_id == 999 else [6])
+
+
 @pytest.mark.parametrize("status,merged", [(200, True), (200, False), (409, False), (403, False)])
 async def test_merge_requires_github_confirmation(github, status, merged):
     request = github(

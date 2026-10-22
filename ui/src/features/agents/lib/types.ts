@@ -608,6 +608,8 @@ export interface AgentThread {
   sandboxBridgeClient?: "cli" | "desktop" | null
   /** Whether that machine is serving the thread's checkout right now; null in lists. */
   sandboxBridgeOnline?: boolean | null
+  /** Whether the thread's agent has used its LangSmith browser. */
+  hasBrowser?: boolean
   messages: Array<Message>
   pendingMessages?: Array<PendingThreadMessage>
   pr?: AgentPullRequestSummary

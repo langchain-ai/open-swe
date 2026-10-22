@@ -283,7 +283,11 @@ async def test_a_new_thread_runs_on_mda(monkeypatch: pytest.MonkeyPatch, secret:
                 "__event_streaming_v2": True,
             }
         },
-        "metadata": {"kind": "task_message", "event_match_ids": ["match-1"]},
+        "metadata": {
+            "kind": "task_message",
+            "event_match_ids": ["match-1"],
+            "ls_attribution_identifier": "trigger",
+        },
     }
 
     await harness.request("POST", f"/threads/{THREAD}/runs", run)
@@ -304,7 +308,10 @@ async def test_a_new_thread_runs_on_mda(monkeypatch: pytest.MonkeyPatch, secret:
     assert signed.configurable == {"github_login": "ada", "repo": {"owner": "a", "name": "b"}}
     # The hooks see the run metadata an in-process run would, e.g. which delivered
     # task messages the transcript records.
-    assert run_config(signed)["metadata"] == {"event_match_ids": ["match-1"]}
+    assert run_config(signed)["metadata"] == {
+        "event_match_ids": ["match-1"],
+        "ls_attribution_identifier": "trigger",
+    }
 
 
 async def test_deleting_a_thread_removes_every_copy(monkeypatch: pytest.MonkeyPatch) -> None:

@@ -46,6 +46,7 @@ from openswe.dashboard.options import gate_fable_model
 from openswe.dashboard.repo_access import repo_is_private
 from openswe.dashboard.workspace_settings_cache import cached_workspace_settings
 from openswe.github.app import get_github_app_installation_token_with_expiry
+from openswe.github.sandbox_access import READ_ONLY_REVIEW_PERMISSIONS
 from openswe.github.thread_token import cache_github_token_for_thread
 from openswe.mcp.models import MCPToolProvenance
 from openswe.mcp.tiers import mcp_tools_for
@@ -553,6 +554,7 @@ async def ensure_reviewer_sandbox_for_thread(
         thread_id,
         workspace_slug=cfg.workspace_slug,
         github_proxy_repositories=[cfg.repo.full_name] if cfg.repo else [],
+        github_proxy_permissions=READ_ONLY_REVIEW_PERMISSIONS,
         # A reviewer sandbox holds nothing but a checkout `prepare_review_repo`
         # re-derives every run, and reviewer threads outlive their sandbox: one
         # thread per PR, re-triggered on every push. Refusing to replace an

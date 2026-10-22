@@ -7,6 +7,7 @@ from langgraph.graph.state import RunnableConfig
 from langgraph.runtime import Runtime
 
 from openswe import reviewer
+from openswe.github.sandbox_access import READ_ONLY_REVIEW_PERMISSIONS
 
 
 def test_reviewer_system_prompt_org_guidelines_precede_repo_style() -> None:
@@ -139,6 +140,7 @@ async def test_reviewer_limits_sandbox_to_reviewed_repository_in_workspace() -> 
         "reviewer-thread-id",
         workspace_slug="oss",
         github_proxy_repositories=["acme/repo"],
+        github_proxy_permissions=READ_ONLY_REVIEW_PERMISSIONS,
         allow_replacement=True,
     )
 

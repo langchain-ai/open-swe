@@ -4,6 +4,7 @@ import logging
 from collections.abc import Mapping
 from typing import Annotated, Any
 
+import httpx2
 from langgraph.config import get_config
 from langgraph.prebuilt import InjectedState
 
@@ -11,6 +12,7 @@ from openswe.analytics.usage import record_reviewer_publication
 from openswe.audit_logs.tools import audit_tool
 from openswe.dashboard.workspace_settings import get_workspace_settings
 from openswe.github.checks import review_check_conclusion
+from openswe.github.http import GitHubClient
 from openswe.github.pull_request_status import PullRequestClient
 from openswe.github.pull_requests import PullRequest
 from openswe.github.thread_token import (
@@ -433,6 +435,9 @@ async def _publish_review_async(
             head_sha=head_sha,
             findings=await list_findings_async(thread_id),
         )
+        await _withdraw_open_swe_approvals(
+            owner=owner, repo=repo, pr_number=pr_number, token=token, keep_commit=head_sha
+        )
         await clear_review_started_comment(thread_id=thread_id, owner=owner, repo=repo, token=token)
         conclusion, check_title, check_summary = review_check_conclusion(0)
         await settle_review_check_run(
@@ -577,6 +582,18 @@ async def _publish_review_async(
             "error": "Failed to POST PR review: no response from GitHub",
         }
     review_id = review_response.get("id") if isinstance(review_response, dict) else None
+    # The anchor retry above posts a plain comment, so only the first post can be an approval.
+    approval_id = (
+        review_id if approved and not unresolvable_findings and isinstance(review_id, int) else None
+    )
+    await _withdraw_open_swe_approvals(
+        owner=owner,
+        repo=repo,
+        pr_number=pr_number,
+        token=token,
+        keep_review_id=approval_id,
+        scope_to_review_id=review_id,
+    )
 
     if assessment is not None and isinstance(review_id, int) and not unresolvable_findings:
         # GitHub already accepted the review; a storage failure must not prompt a duplicate post.
@@ -753,6 +770,53 @@ async def _request_human_review(pull_request: PullRequest, *, summary: str) -> N
     except Exception:
         logger.exception(
             "Could not request a human review after the AI review", extra={"pr_url": pr_ref.url}
+        )
+
+
+async def _withdraw_open_swe_approvals(
+    *,
+    owner: str,
+    repo: str,
+    pr_number: int,
+    token: str,
+    keep_review_id: int | None = None,
+    keep_commit: str | None = None,
+    scope_to_review_id: int | None = None,
+) -> None:
+    """Leave standing only this publish's own approval, if it posted one."""
+    if keep_review_id is not None:
+        reason = "Superseded by Jarvis' approval of the current head."
+    elif keep_commit is not None:
+        reason = "New commits were pushed after Jarvis approved this pull request."
+    else:
+        reason = "Jarvis' latest review of this pull request does not approve it."
+    try:
+        async with GitHubClient.connect(token=token) as github:
+            refused = await (
+                github.repo(owner, repo)
+                .pull_request(pr_number)
+                .withdraw_open_swe_approvals(
+                    reason=reason,
+                    keep_review_id=keep_review_id,
+                    keep_commit=keep_commit,
+                    scope_to_review_id=scope_to_review_id,
+                )
+            )
+    except httpx2.HTTPError, ValueError:
+        logger.warning(
+            "Could not list Open SWE approvals to withdraw",
+            extra={"repository": f"{owner}/{repo}", "pr_number": pr_number},
+            exc_info=True,
+        )
+        return
+    if refused:
+        logger.error(
+            "Open SWE approvals the latest review does not support are still standing",
+            extra={
+                "repository": f"{owner}/{repo}",
+                "pr_number": pr_number,
+                "github_review_ids": refused,
+            },
         )
 
 
