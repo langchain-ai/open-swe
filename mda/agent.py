@@ -49,6 +49,7 @@ from rt.middleware import (
     RuntimeToolsMiddleware,
     ServedToolsMiddleware,
 )
+from rt.model_calls import ModelCallTimeoutMiddleware, ReplayableHistoryMiddleware
 from rt.models import RunModels, build_model
 from rt.sandbox_tools import SandboxToolsMiddleware
 from rt.tools import backend_tool
@@ -104,6 +105,11 @@ class OpenSweRunContext(BaseModel):
 def _backend_reports(backend: OpenSweBackend, served: Collection[str]) -> list[AgentMiddleware]:
     """The backend's transcript and usage see every reply, and every tool call."""
     return [ReportRepliesMiddleware(backend), RuntimeToolsMiddleware(backend, served)]
+
+
+def _model_calls() -> list[AgentMiddleware]:
+    """Innermost around each model call, so they act on the model it really goes to."""
+    return [ReplayableHistoryMiddleware(), ModelCallTimeoutMiddleware()]
 
 
 def _code_mode(
@@ -202,6 +208,7 @@ async def agent(runtime: ManagedServerRuntime) -> DeepAgentDefinition:
                 *replace_sandbox,
                 ServedToolsMiddleware(subagent_tools[subagent.name], excluded, backend),
                 ModelRetryMiddleware(retry_on=(TimeoutError,)),
+                *_model_calls(),
             ],
         }
         for subagent in catalog.subagents
@@ -222,6 +229,7 @@ async def agent(runtime: ManagedServerRuntime) -> DeepAgentDefinition:
         *_browser(context.graph, backend),
         ModelCallLimitMiddleware(run_limit=_MODEL_CALL_LIMIT, exit_behavior="end"),
         ModelRetryMiddleware(retry_on=(TimeoutError,)),
+        *_model_calls(),
     ]
     worker: ManagedAsyncSubAgent = {
         # MDA's build reads `name` and `async` as literals after any spread.

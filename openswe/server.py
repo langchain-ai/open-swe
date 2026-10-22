@@ -103,16 +103,11 @@ from openswe.middleware import (
     BasePrepareRunMiddleware,
     DynamicToolMiddleware,
     ExcludeToolsMiddleware,
-    ModelCallTimeoutMiddleware,
     ModelErrorMiddleware,
     ModelFallbackMiddleware,
     ModelSelectionMiddleware,
     PullRequestCreationGuardMiddleware,
     RequireUserReplyMiddleware,
-    SanitizeFireworksMessagesMiddleware,
-    SanitizeOpenAIResponsesMiddleware,
-    SanitizeThinkingBlocksMiddleware,
-    StableToolResultOrderMiddleware,
     SubdirAgentsReadMiddleware,
     ToolErrorMiddleware,
     ValidateImageReadsMiddleware,
@@ -128,7 +123,6 @@ from openswe.middleware import (
 )
 from openswe.middleware.client_tools import ClientToolsMiddleware
 from openswe.middleware.conversation_offloading import ConversationOffloadingMiddleware
-from openswe.middleware.image_model_fallback import ImageModelFallbackMiddleware
 from openswe.middleware.model_selection import ModelSelectionState, RoutingMode
 from openswe.middleware.prepare_run import PrepareRunState
 from openswe.middleware.require_cli_result import RequireCliResultMiddleware
@@ -620,21 +614,6 @@ INCIDENT_AUTOMATIC_EXCLUDED_TOOLS: frozenset[str] = frozenset(
 DM_EXCLUDED_TOOLS: frozenset[str] = frozenset({"slack_add_reaction"})
 
 
-def _subagent_model_middleware() -> list[AgentMiddleware[Any, Any, Any]]:
-    """Provider guards for subagent model calls.
-
-    Subagents compile into their own graphs, so parent middleware never wraps them.
-    """
-    return cast(
-        list[AgentMiddleware[Any, Any, Any]],
-        [
-            SanitizeOpenAIResponsesMiddleware(),
-            ModelErrorMiddleware(),
-            ModelCallTimeoutMiddleware(),
-        ],
-    )
-
-
 def _subagent_middleware(
     dynamic_tools: DynamicToolMiddleware | None,
 ) -> list[AgentMiddleware[Any, Any, Any]]:
@@ -642,7 +621,8 @@ def _subagent_middleware(
     if dynamic_tools is not None:
         middleware.append(dynamic_tools)
     middleware.append(WorkflowPushGuardMiddleware())
-    middleware.extend(_subagent_model_middleware())
+    # Subagents compile into their own graphs, so parent middleware never wraps them.
+    middleware.append(ModelErrorMiddleware())
     return middleware
 
 
@@ -1909,7 +1889,9 @@ async def build_agent(config: RunnableConfig, *, tool_surface: ToolSurface | Non
         and not cfg.continued_from_thread_id
         else None
     )
-    image_fallback: ImageModelFallbackMiddleware | None = None
+    # The model a call to a text-only model goes to instead once the conversation
+    # holds an image; the MDA run makes the swap.
+    vision_model: ModelChoice | None = None
     if (
         not model_supports_images(model_id)
         or any(not option["supports_images"] for option in (requested_models or {}).values())
@@ -1920,21 +1902,19 @@ async def build_agent(config: RunnableConfig, *, tool_surface: ToolSurface | Non
             )
         )
     ):
-        vision_model = main_model
+        vision_model = ModelChoice(model_id, dict(model_kwargs))
         if not model_supports_images(model_id):
             vision_model_id, vision_effort = default_vision_model_pair()
-            vision_model = _make_model_or_defer(
+            vision_model = ModelChoice(
                 vision_model_id,
-                use_gateway=use_gateway,
-                **provider_model_kwargs(
-                    vision_model_id, vision_effort, max_tokens=DEFAULT_LLM_MAX_TOKENS
+                dict(
+                    provider_model_kwargs(
+                        vision_model_id, vision_effort, max_tokens=DEFAULT_LLM_MAX_TOKENS
+                    )
                 ),
             )
-        image_fallback = ImageModelFallbackMiddleware(vision_model)
-        if not model_supports_images(model_id):
-            image_fallback.add_text_only_model(main_model)
 
-    configurable["image_model_fallback_enabled"] = image_fallback is not None
+    configurable["image_model_fallback_enabled"] = vision_model is not None
 
     def requested_model_factory(
         requested_model: str, requested_effort: str | None
@@ -1949,8 +1929,6 @@ async def build_agent(config: RunnableConfig, *, tool_surface: ToolSurface | Non
                 max_tokens=DEFAULT_LLM_MAX_TOKENS,
             ),
         )
-        if image_fallback is not None and not option["supports_images"]:
-            image_fallback.add_text_only_model(model)
         fallback_middleware.register_fallback(model, make_fallback_model(requested_model))
         return model
 
@@ -1968,10 +1946,6 @@ async def build_agent(config: RunnableConfig, *, tool_surface: ToolSurface | Non
         for route, (routed_model_id, effort) in routing_defaults.items()
         if adaptive_model_routing
     }
-    if image_fallback is not None:
-        for route, model in routing_models.items():
-            if not model_supports_images(routing_defaults[route][0]):
-                image_fallback.add_text_only_model(model)
     model_selection = ModelSelectionMiddleware(
         routing_models,
         main_model,
@@ -2094,16 +2068,8 @@ async def build_agent(config: RunnableConfig, *, tool_surface: ToolSurface | Non
             record_run_usage,
             model_selection,
             fallback_middleware,
-            *([image_fallback] if image_fallback else []),
             *([dynamic_tool_middleware] if dynamic_tool_middleware else []),
-            SanitizeFireworksMessagesMiddleware(),
-            SanitizeOpenAIResponsesMiddleware(),
-            SanitizeThinkingBlocksMiddleware(),
-            StableToolResultOrderMiddleware(),
             ModelErrorMiddleware(),
-            # Innermost, so the deadline covers the provider call itself and a
-            # timeout escalates outward to the fallback model.
-            ModelCallTimeoutMiddleware(),
         ],
     )
     async with aphase(thread_id, "factory.graph_assembly"):
@@ -2155,6 +2121,7 @@ async def build_agent(config: RunnableConfig, *, tool_surface: ToolSurface | Non
                 for route, (routed_model_id, effort) in routing_defaults.items()
                 if adaptive_model_routing
             },
+            vision=vision_model,
         )
         tool_surface.subagents = [
             SurfaceSubagent(

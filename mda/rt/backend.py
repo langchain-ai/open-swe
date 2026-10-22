@@ -159,6 +159,7 @@ class PhaseReply(BaseModel):
     system_prompt: str | None = None
     hidden_tools: list[str] = []
     model: ModelSpec | None = None
+    vision: ModelSpec | None = None
     fallback: ModelSpec | None = None
     use_gateway: bool = False
     trace_metadata: dict[str, JsonValue] = {}

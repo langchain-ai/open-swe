@@ -107,6 +107,14 @@ _TOOL_PAIRING_ERRORS: Final = (
 )
 
 
+def _has_image(request: ModelRequest) -> bool:
+    return any(
+        block.get("type") == "image"
+        for message in request.messages
+        for block in message.content_blocks
+    )
+
+
 def _tool_pairing_error(exc: Exception) -> bool:
     """A 400 over unpaired tool history, which the fallback would get as well."""
     if getattr(exc, "status_code", None) != 400:
@@ -122,6 +130,9 @@ class ModelCall(BaseModel):
     # Tools the graph's own middleware takes off this call's list.
     hidden_tools: list[str] = []
     model: ModelSpec | None
+    # What a call to that model goes to instead when the conversation holds an
+    # image: None where the model reads images itself.
+    vision: ModelSpec | None = None
     fallback: ModelSpec | None
     use_gateway: bool
 
@@ -348,6 +359,7 @@ class BackendRunMiddleware(AgentMiddleware[RunState]):
                 system_prompt=reply.system_prompt,
                 hidden_tools=reply.hidden_tools,
                 model=reply.model,
+                vision=reply.vision,
                 fallback=reply.fallback,
                 use_gateway=reply.use_gateway,
             ).model_dump()
@@ -365,8 +377,9 @@ class BackendRunMiddleware(AgentMiddleware[RunState]):
         existing = request.system_message.text if request.system_message is not None else ""
         prompt = f"{call.system_prompt}\n\n{existing}" if existing else call.system_prompt
         request = request.override(system_message=SystemMessage(content=prompt))
-        if call.model is not None:
-            request = request.override(model=build_model(call.model, use_gateway=call.use_gateway))
+        model = call.vision if call.vision is not None and _has_image(request) else call.model
+        if model is not None:
+            request = request.override(model=build_model(model, use_gateway=call.use_gateway))
         try:
             return await handler(request)
         except Exception as exc:
