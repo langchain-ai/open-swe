@@ -31,6 +31,53 @@ def token_secret(monkeypatch: pytest.MonkeyPatch) -> None:
     )
 
 
+@pytest.mark.parametrize("fails", [False, True])
+async def test_backend_operation_traces_keep_runtime_events_and_errors(fails: bool) -> None:
+    from langchain_core.tracers.run_collector import RunCollectorCallbackHandler
+    from langgraph.config import get_config, get_stream_writer
+    from langgraph.runtime import Runtime
+
+    from openswe.remote_runtime.runs import in_graph_context
+
+    collector = RunCollectorCallbackHandler()
+    events: list[object] = []
+
+    async def operation(runtime: Runtime) -> str:
+        assert runtime is not None
+        assert get_config()["configurable"]["thread_id"] == "thread-1"
+        assert get_config()["metadata"]["run_id"] == "run-1"
+        get_stream_writer()({"status": "observed"})
+        if fails:
+            raise ValueError("hook failed")
+        return "result"
+
+    pending = in_graph_context(
+        {
+            "callbacks": [collector],
+            "configurable": {"thread_id": "thread-1"},
+            "metadata": {"run_id": "run-1"},
+            "run_name": "after_model",
+        },
+        operation,
+        events=events,
+    )
+    if fails:
+        with pytest.raises(ValueError, match="hook failed"):
+            await pending
+    else:
+        assert await pending == "result"
+        assert events == [{"status": "observed"}]
+
+    [root] = collector.traced_runs
+    assert root.name == "after_model"
+    assert root.extra["metadata"]["backend_operation"] == "after_model"
+    assert root.extra["metadata"]["run_id"] == "run-1"
+    [node] = root.child_runs
+    assert node.name == "after_model"
+    assert bool(root.error) is fails
+    assert bool(node.error) is fails
+
+
 @pytest.mark.parametrize("requested", ["anthropic:claude-opus-5-5", "openai:gpt-6.1-sol"])
 def test_remote_model_switch_overrides_cached_route_and_effort(requested: str) -> None:
     from openswe.remote_runtime.graph import RunSession
