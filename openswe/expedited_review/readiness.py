@@ -35,6 +35,7 @@ class PullRequestSnapshot:
     mergeable_state: str
     check_state: str
     unresolved_threads: int
+    failing_checks: list[str] = field(default_factory=list)
     failing_required_checks: list[str] = field(default_factory=list)
     unreported_required_checks: list[str] = field(default_factory=list)
     changes_requested_by: list[str] = field(default_factory=list)
@@ -112,7 +113,7 @@ class Readiness:
             return None
         mergeable, mergeable_state = _resolve_mergeability(pr, mergeability)
 
-        check_state, _ = aggregate_check_state(checks.runs, checks.statuses)
+        check_state, failures = aggregate_check_state(checks.runs, checks.statuses)
         failing_required_checks = sorted(
             {
                 check.name
@@ -136,6 +137,7 @@ class Readiness:
             mergeable_state=mergeable_state,
             check_state=check_state,
             unresolved_threads=len(threads),
+            failing_checks=sorted({str(failure["name"]) for failure in failures}),
             failing_required_checks=failing_required_checks,
             unreported_required_checks=checks.unreported(required),
             changes_requested_by=sorted(
