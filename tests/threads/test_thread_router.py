@@ -262,7 +262,7 @@ async def test_a_local_thread_takes_no_new_activity(
 
     status, _ = await harness.request("POST", f"/threads/{THREAD}{path}", body)
 
-    assert status == 409
+    assert status == 410
     assert harness.reached_here == [] and harness.forwarded == []
     indexed = await index.get(THREAD)
     assert indexed is not None and indexed.status == "idle"

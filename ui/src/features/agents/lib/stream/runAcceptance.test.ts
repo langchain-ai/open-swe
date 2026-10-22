@@ -48,7 +48,7 @@ it("keeps the reason the server gave for refusing a start", async () => {
   const detail = "This thread is read-only."
   const fetcher = vi
     .fn<typeof fetch>()
-    .mockResolvedValue(Response.json({ detail }, { status: 409 }))
+    .mockResolvedValue(Response.json({ detail }, { status: 410 }))
   const tracker = createRunAcceptanceTracker(fetcher)
   const accepted = tracker.track("message")
   await tracker.fetch("http://localhost/threads/one/commands", {
@@ -61,7 +61,7 @@ it("keeps the reason the server gave for refusing a start", async () => {
   const acceptance = await accepted()
   expect(acceptance.accepted).toBe(false)
   expect(!acceptance.accepted && acceptance.refusal).toMatchObject({
-    status: 409,
+    status: 410,
     message: detail,
   })
 })

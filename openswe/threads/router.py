@@ -113,9 +113,10 @@ def _warn_local(scope: Scope, thread: IndexedThread) -> None:
 
 async def _refuse_local(scope: Scope, send: Send, thread: IndexedThread) -> None:
     _warn_local(scope, thread)
+    # Not 409, which callers read as "a run is already going" and retry or skip.
     await send_json(
         send,
-        409,
+        410,
         {
             "detail": "This thread predates Managed Deep Agents and is read-only. "
             "Start a new thread to continue."
