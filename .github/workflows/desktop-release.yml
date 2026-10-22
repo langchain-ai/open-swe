@@ -35,7 +35,9 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
           NIGHTLY: ${{ inputs.nightly }}
+          RELEASE_REF: ${{ inputs.release_ref }}
         run: |
+          complete=false
           stable_version=$(node -p "require('./desktop/package.json').version")
           [[ "$stable_version" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]] || exit 1
           if [ "$NIGHTLY" = "true" ]; then
@@ -50,6 +52,10 @@ jobs:
             prerelease=false
             label="Open SWE Desktop v${version}"
             if git rev-parse "refs/tags/${tag}" >/dev/null 2>&1; then
+              if [[ "$RELEASE_REF" =~ ^[0-9a-f]{40}$ ]] && [ "$(git rev-parse "$tag^{commit}")" != "$(git rev-parse HEAD)" ]; then
+                echo "::error::$tag points at a different release commit"
+                exit 1
+              fi
               cli_assets='[]'
               if git cat-file -e "${tag}:cli/package.json" 2>/dev/null; then
                 cli_assets='["oswe-darwin-arm64.tar.gz", "oswe-darwin-x64.tar.gz", "oswe-linux-arm64.tar.gz", "oswe-linux-x64.tar.gz", "oswe-SHA256SUMS"]'
@@ -64,43 +70,51 @@ jobs:
                 ($cli - $names | length) == 0
               ' >/dev/null; then
                 echo "$tag already has a complete release"
-                exit 1
+                complete=true
               fi
               git checkout --detach "$tag"
             fi
           fi
+          echo "complete=$complete" >> "$GITHUB_OUTPUT"
           echo "version=$version" >> "$GITHUB_OUTPUT"
           echo "tag=$tag" >> "$GITHUB_OUTPUT"
           echo "prerelease=$prerelease" >> "$GITHUB_OUTPUT"
           echo "label=$label" >> "$GITHUB_OUTPUT"
 
       - name: Set build version
+        if: steps.release.outputs.complete != 'true'
         env:
           VERSION: ${{ steps.release.outputs.version }}
         run: |
           node -e "const fs=require('fs'); for (const path of ['desktop/package.json', 'cli/package.json']) { const pkg=require('./'+path); pkg.version=process.env.VERSION; fs.writeFileSync(path, JSON.stringify(pkg, null, 2)+'\n') }"
 
       - name: Set up Node.js
+        if: steps.release.outputs.complete != 'true'
         uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
           node-version: "24"
 
       - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
+        if: steps.release.outputs.complete != 'true'
         with:
           bun-version: "1.4.2"
 
       - run: corepack enable
+        if: steps.release.outputs.complete != 'true'
 
       - uses: socketdev/action@ba6de6cc0565af1f42295590380973573297e31f
+        if: steps.release.outputs.complete != 'true'
         with:
           mode: firewall-free
 
       - name: Install workspace dependencies
+        if: steps.release.outputs.complete != 'true'
         env:
           ELECTRON_GET_USE_PROXY: "true"
         run: pnpm install --frozen-lockfile
 
       - name: Import signing certificate
+        if: steps.release.outputs.complete != 'true'
         env:
           SIGNING_CERT_B64: ${{ secrets.APPLE_SIGNING_CERT }}
           SIGNING_CERT_PASSWORD: ${{ secrets.APPLE_SIGNING_CERT_PASSWORD }}
@@ -119,6 +133,7 @@ jobs:
           echo "CSC_KEYCHAIN=$KEYCHAIN_PATH" >> "$GITHUB_ENV"
 
       - name: Write App Store Connect API key
+        if: steps.release.outputs.complete != 'true'
         env:
           APPLE_API_KEY_CONTENT: ${{ secrets.APPLE_API_KEY }}
         run: |
@@ -126,6 +141,7 @@ jobs:
           echo "APPLE_API_KEY_PATH=$RUNNER_TEMP/AuthKey.p8" >> "$GITHUB_ENV"
 
       - name: Build macOS distribution
+        if: steps.release.outputs.complete != 'true'
         env:
           APPLE_PROVISIONING_PROFILE_B64: ${{ secrets.APPLE_PROVISIONING_PROFILE }}
           APPLE_API_KEY: ${{ env.APPLE_API_KEY_PATH }}
@@ -149,6 +165,7 @@ jobs:
           pnpm --filter open-swe-desktop exec electron-builder --mac zip dmg --publish never "${signing_args[@]}"
 
       - name: Verify and package release assets
+        if: steps.release.outputs.complete != 'true'
         id: assets
         env:
           VERSION: ${{ steps.release.outputs.version }}
@@ -202,6 +219,7 @@ jobs:
           fi
 
       - name: Build standalone CLI binaries
+        if: steps.release.outputs.complete != 'true'
         id: cli
         env:
           VERSION: ${{ steps.release.outputs.version }}
@@ -243,6 +261,7 @@ jobs:
           echo "dir=$assets" >> "$GITHUB_OUTPUT"
 
       - name: Tag desktop version
+        if: steps.release.outputs.complete != 'true'
         env:
           TAG: ${{ steps.release.outputs.tag }}
         run: |
@@ -252,6 +271,7 @@ jobs:
           fi
 
       - name: Create GitHub release
+        if: steps.release.outputs.complete != 'true'
         uses: softprops/action-gh-release@efb35369e0ad2afab669f228072c1b0d510eae64 # v3.0.3
         with:
           tag_name: ${{ steps.release.outputs.tag }}
