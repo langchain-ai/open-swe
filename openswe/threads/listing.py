@@ -13,8 +13,8 @@ from langgraph_sdk.schema import ThreadSelectField
 from pydantic import BaseModel
 
 from openswe.review.session import ReviewSessionMetadata
-from openswe.tasks.flags import task_coordination_enabled
 from openswe.tasks.store import SidebarTaskMembership, sidebar_memberships
+from openswe.threads import index
 from openswe.threads.pins import list_thread_pin_ids, pin_thread, unpin_thread
 from openswe.threads.summary import (
     _SURFACED_SOURCES,
@@ -262,7 +262,9 @@ async def settle_review_walkthrough(client: Any, thread: ThreadLike) -> ThreadLi
     if review is None or review.walkthrough_state != "building" or not thread_id:
         return thread
     try:
-        runs = await client.runs.list(review.scout_thread_id, limit=1)
+        runs = await client.runs.list(
+            await index.current_thread_id(review.scout_thread_id), limit=1
+        )
     except NotFoundError:
         runs = []
     except Exception:
@@ -415,9 +417,6 @@ async def attach_task_workers(
     ids = [thread_id for summary in summaries if isinstance(thread_id := summary.get("id"), str)]
     memberships = await sidebar_memberships(ids)
     if not memberships:
-        return
-    if not await task_coordination_enabled(login):
-        _attach_flat_task_memberships(summaries, memberships)
         return
     coordinator_ids = [
         key for key, membership in memberships.items() if membership.role == "coordinator"
@@ -879,7 +878,6 @@ async def list_dashboard_threads_page(
 ) -> dict[str, Any]:
     client = langgraph_client()
     search_login = filter_participant_login or login
-    hierarchy = hierarchy and await task_coordination_enabled(login)
     search_email = email if search_login == login else None
     if scope == "automation" and filter_participant_login is None:
         searches = [{"thread_category": "automation"}, {"source": "schedule"}]

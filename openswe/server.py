@@ -277,7 +277,6 @@ from openswe.tools.submit_review_assessment_feedback import submit_review_assess
 from openswe.tools.task_threads import (
     control_worker,
     message_task_thread,
-    spawn_worker,
     task_status,
 )
 from openswe.users import User
@@ -839,7 +838,6 @@ _NOT_FROM_CODE = (
             "switch_to_performance_model",
             "record_human_input",
             "load_integration_tools",
-            "spawn_worker",
             "control_worker",
             "message_task_thread",
         }
@@ -1749,11 +1747,6 @@ async def build_agent(config: RunnableConfig, *, tool_surface: ToolSurface | Non
         search_pull_requests,
         get_thread,
         manage_thread,
-        *(
-            [spawn_worker]
-            if task_coordination and task_coordination.enabled and not task_coordination.is_worker
-            else []
-        ),
         *([task_status, message_task_thread, control_worker] if task_coordination else []),
         *((start_thread,) if _slack_concierge_run(cfg) else ()),
         manage_baby_sit,

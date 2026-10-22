@@ -44,8 +44,28 @@ pub(crate) struct SlackChannelApp {
 #[derive(Debug, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub(crate) struct SlackChannelOptions {
+    /// Deprecated in favor of `trigger_mode`; still sent for Trigger Servers
+    /// that only read this flag.
     pub(crate) trigger_on_all_messages: bool,
+    /// Only sent when the channel sets it, so default payloads stay identical
+    /// for consumers that predate the option. Unset lets Trigger Server keep an
+    /// existing app's mode or default a new one to `thread`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(crate) trigger_mode: Option<SlackTriggerMode>,
     pub(crate) allow_bot_triggers: bool,
+}
+
+/// Which channel messages start a run; DMs always do.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub(crate) enum SlackTriggerMode {
+    /// Only messages that mention the agent.
+    Mention,
+    /// Mentions, and later replies in threads the agent was mentioned in.
+    Thread,
+    /// Every message in the agent's channels. Sent to Trigger Server as the
+    /// legacy `triggerOnAllMessages` flag, which every version understands.
+    All,
 }
 
 #[derive(Debug, Deserialize)]

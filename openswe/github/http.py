@@ -47,6 +47,7 @@ GITHUB_HEADERS_VERSION = "2022-11-28"
 DEFAULT_TIMEOUT = httpx2.Timeout(30.0, connect=10.0, pool=5.0)
 DEFAULT_MAX_RETRIES = 3
 _PAGE_SIZE = 100
+_PAGE_CONCURRENCY = 10
 _FILES_PER_QUERY = 100
 
 _ALWAYS_RETRYABLE_STATUS = frozenset({429, 503})
@@ -353,11 +354,15 @@ class GitHubClient:
         key: str | None = None,
         params: Mapping[str, str] | None = None,
         max_pages: int | None = None,
+        total: int | None = None,
     ) -> list[dict[str, Any]]:
-        """Every item of a paginated list; ``key`` names the list inside each page's object."""
-        items: list[dict[str, Any]] = []
-        page = 1
-        while True:
+        """Every item of a paginated list; ``key`` names the list inside each page's object.
+
+        ``total`` is how many items the list should hold: the pages that many fill
+        are read concurrently, and reading goes on while the last one comes back full.
+        """
+
+        async def read(page: int) -> list[object]:
             payload = await self.get(
                 path, {**(params or {}), "per_page": str(_PAGE_SIZE), "page": str(page)}
             )
@@ -366,10 +371,23 @@ class GitHubClient:
             )
             if not isinstance(batch, list):
                 raise ValueError(f"GitHub answered {path} without a list")
-            items.extend(item for item in batch if isinstance(item, dict))
-            if len(batch) < _PAGE_SIZE or page == max_pages:
-                return items
+            return batch
+
+        semaphore = asyncio.Semaphore(_PAGE_CONCURRENCY)
+
+        async def bounded(page: int) -> list[object]:
+            async with semaphore:
+                return await read(page)
+
+        known = max(1, -(-(total or 0) // _PAGE_SIZE))
+        if max_pages is not None:
+            known = min(known, max_pages)
+        batches = await asyncio.gather(*(bounded(page) for page in range(1, known + 1)))
+        page = known
+        while len(batches[-1]) == _PAGE_SIZE and page != max_pages:
             page += 1
+            batches.append(await read(page))
+        return [item for batch in batches for item in batch if isinstance(item, dict)]
 
     async def graphql(
         self, query: str, variables: Mapping[str, object], *, partial: bool = False
@@ -391,6 +409,14 @@ class GitHubClient:
         if not isinstance(data, Mapping):
             raise ValueError("GitHub answered GraphQL without data")
         return data
+
+
+@dataclass(frozen=True, slots=True)
+class Comparison:
+    """A three-dot ``base...head`` comparison."""
+
+    merge_base: str
+    files: list[dict[str, Any]]
 
 
 @dataclass(frozen=True, slots=True)
@@ -433,9 +459,14 @@ class RepoClient:
         key: str | None = None,
         params: Mapping[str, str] | None = None,
         max_pages: int | None = None,
+        total: int | None = None,
     ) -> list[dict[str, Any]]:
         return await self.github.pages(
-            f"repos/{self.full_name}/{path}", key=key, params=params, max_pages=max_pages
+            f"repos/{self.full_name}/{path}",
+            key=key,
+            params=params,
+            max_pages=max_pages,
+            total=total,
         )
 
     async def graphql(
@@ -489,6 +520,21 @@ class RepoClient:
                 raise RepoFileUnreadableError(f"Repository file {path} exceeds the size cap")
             return None
         return content if strict else content or None
+
+    async def raw_file(self, path: str, ref: str) -> bytes | None:
+        """``path``'s bytes at ``ref``, unaltered; ``None`` when it is absent there."""
+        try:
+            response = await self.github.request(
+                "GET",
+                f"repos/{self.full_name}/contents/{quote(path, safe='/')}",
+                params={"ref": ref},
+                headers={"Accept": "application/vnd.github.raw+json"},
+            )
+        except GitHubError as refused:
+            if refused.response.status_code == 404:
+                return None
+            raise
+        return response.content
 
     async def read_files(self, paths: Sequence[str], ref: str) -> dict[str, str]:
         """Text of each of ``paths`` present at ``ref``, read in batched GraphQL queries."""
@@ -551,6 +597,21 @@ class RepoClient:
 
     async def labels(self) -> list[dict[str, Any]]:
         return await self.pages("labels")
+
+    async def compare(self, base: str, head: str) -> Comparison:
+        """``base...head``, with at most GitHub's 300 changed files; refs are fully escaped."""
+        # The paginated commit list is never read, so only one commit comes back.
+        payload = await self.get(
+            f"compare/{quote(base, safe='')}...{quote(head, safe='')}", {"per_page": "1"}
+        )
+        if not isinstance(payload, dict):
+            raise ValueError("GitHub answered the comparison without an object")
+        merge_base = payload.get("merge_base_commit")
+        sha = merge_base.get("sha") if isinstance(merge_base, dict) else None
+        files = payload.get("files") or []
+        if not isinstance(sha, str) or not isinstance(files, list):
+            raise ValueError("GitHub answered the comparison without a merge base and files")
+        return Comparison(sha, [file for file in files if isinstance(file, dict)])
 
     async def branch(self, name: str) -> dict[str, Any]:
         payload = await self.get(f"branches/{quote(name, safe='')}")

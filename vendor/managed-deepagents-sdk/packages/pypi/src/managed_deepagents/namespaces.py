@@ -19,7 +19,9 @@ import warnings
 from pydantic import BaseModel, ConfigDict, field_validator
 from typing_extensions import Unpack
 
+from managed_deepagents._channels.github import github_channel
 from managed_deepagents._channels.http import http_channel
+from managed_deepagents._channels.linear import linear_channel
 from managed_deepagents._channels.trigger.channel import slack_channel
 from managed_deepagents._connectors.mcp import McpServersConfig, McpServersDefinition, define_mcp
 from managed_deepagents.identity import auth
@@ -51,6 +53,8 @@ class _Channels(_Namespace):
     Slack ingress through Trigger Server.
     """
 
+    github = staticmethod(github_channel)
+    linear = staticmethod(linear_channel)
     slack = staticmethod(slack_channel)
     http = staticmethod(http_channel)
 

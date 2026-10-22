@@ -47,8 +47,11 @@ from managed_deepagents._connection_authorization import (
 )
 from managed_deepagents._connections import (
     ConnectionReference,
+    channel_provider,
+    outside_caller_on_channel_thread,
     resolve_agent_auth_context,
     resolve_owner_id,
+    unmapped_channel_provider,
 )
 from managed_deepagents._identity_runtime import (
     build_runtime_identity,
@@ -162,6 +165,33 @@ def create_credential_gate_middleware(
 def _before_agent(
     consumers: Sequence[CredentialConsumer], runtime: Runtime[Any]
 ) -> _BlockedRun | None:
+    channel = channel_provider(_runtime_identity(runtime))
+    if channel is not None:
+        warnings.warn(
+            "Integrations that need a user connection are unavailable in this run: "
+            f"a {channel} event runs as the channel, not as a person.",
+            RuntimeWarning,
+            stacklevel=2,
+        )
+        return None
+    sender = unmapped_channel_provider(_runtime_identity(runtime))
+    if sender is not None:
+        warnings.warn(
+            "Integrations that need a user connection are unavailable in this run: "
+            f"its {sender} sender cannot be mapped to a user of this agent's identity.",
+            RuntimeWarning,
+            stacklevel=2,
+        )
+        return None
+    if outside_caller_on_channel_thread(_runtime_identity(runtime)):
+        warnings.warn(
+            "Integrations that need a user connection are unavailable in this run: "
+            "it continues a channel's conversation, which holds content from outside "
+            "the workspace.",
+            RuntimeWarning,
+            stacklevel=2,
+        )
+        return None
     caller = _auth_context(runtime)
     if caller is None:
         if all(not consumer.requires_identity for consumer in consumers):
@@ -323,9 +353,25 @@ class _Caller:
     identity: RuntimeIdentity
 
 
+def _runtime_identity(runtime: object | None) -> RuntimeIdentity | None:
+    return build_runtime_identity(resolve_runtime_configurable(runtime))
+
+
 def _auth_context(runtime: object | None) -> _Caller | None:
-    identity = build_runtime_identity(resolve_runtime_configurable(runtime))
-    if identity is None or not identity["user"].get("id"):
+    """The person a run acts for.
+
+    None without a caller, for a channel event, for a channel sender who cannot
+    be mapped to a user of the agent's identity, or for a caller resuming a
+    channel's conversation from outside that channel.
+    """
+    identity = _runtime_identity(runtime)
+    if (
+        identity is None
+        or not identity["user"].get("id")
+        or channel_provider(identity)
+        or unmapped_channel_provider(identity)
+        or outside_caller_on_channel_thread(identity)
+    ):
         return None
     return _Caller(context=resolve_agent_auth_context(identity), identity=identity)
 

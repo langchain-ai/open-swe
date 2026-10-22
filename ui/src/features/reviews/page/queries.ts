@@ -8,6 +8,7 @@ import { useSession } from "@/lib/session"
 import { pullRequestStatusQuery } from "@/features/reviews/lib/cache"
 import {
   reviewDetailQuery,
+  reviewDiffOptions,
   reviewKeys,
   sharedReviewOptions,
   statusRef,
@@ -37,7 +38,7 @@ export const reviewQueries = {
     queryOptions({
       queryKey: reviewKeys.diff(pr),
       queryFn: () => api.getReviewDiff(pr.owner, pr.repo, pr.number),
-      ...sharedReviewOptions(pr),
+      ...reviewDiffOptions,
     }),
   conversation: (pr: PullRequestRef) =>
     queryOptions({

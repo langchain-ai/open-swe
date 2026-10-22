@@ -454,7 +454,9 @@ function FileRow({
         type="button"
         aria-current={active ? "location" : undefined}
         aria-label={description}
-        onClick={() => jumpTo({ kind: "file", path: file.path })}
+        onClick={() =>
+          jumpTo({ kind: "file", path: file.path }, { reveal: true })
+        }
         title={file.path}
         style={{ paddingLeft: 22 + depth * 12 }}
         className={cn(

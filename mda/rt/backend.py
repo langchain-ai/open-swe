@@ -3,6 +3,9 @@
 Dispatch signs a run token into each run's context. The backend reads the thread,
 repository and run configuration from that token, so nothing the model writes can
 point a call elsewhere. Every call is ``POST /remote-runtime/hooks/{hook}``.
+
+A task worker launched as an async subagent starts with a worker grant instead:
+enough to read its coordinator's catalog, then ``adopt`` a run token of its own.
 """
 
 import asyncio
@@ -52,17 +55,21 @@ Hook = Literal[
     "sandbox_unreachable",
     # The LangSmith browser MDA gave the thread's agent, for the dashboard to show.
     "browser",
+    "launch_worker",
+    "worker_launched",
+    "adopt",
 ]
 # Waits before resending a call, for as long as a backend rollout takes. A refused
 # connection never reached the backend, so every hook is resent after one. A gateway
 # 502 or 503 usually means no backend was ready, but can also follow a backend that
 # took the call and died, so only calls that are safe to repeat are resent after
-# one: ``catalog`` only reads, and ``prepare``, which a restarted run makes again
-# anyway. ``before_model`` only builds the next model call, so it is also resent
-# after a 503, the answer a rollout gives it. A tool call is never resent: it may
-# have run. Nor is anything after a 504: the backend may still be running the call.
+# one: ``catalog`` only reads, ``prepare`` a restarted run makes again anyway, and
+# ``launch_worker`` only authorizes a launch or returns the worker it already made.
+# ``before_model`` only builds the next model call, so it is also resent after a 503,
+# the answer a rollout gives it. A tool call is never resent: it may have run. Nor is
+# anything after a 504: the backend may still be running the call.
 _RETRY_SECONDS: Final = (1.0, 2.0, 4.0, 8.0, 15.0, 30.0, 30.0, 30.0, 30.0, 30.0)
-_REPEATABLE_HOOKS: Final[frozenset[Hook]] = frozenset({"catalog", "prepare"})
+_REPEATABLE_HOOKS: Final[frozenset[Hook]] = frozenset({"catalog", "prepare", "launch_worker"})
 _RESENT_AFTER_503: Final[frozenset[Hook]] = _REPEATABLE_HOOKS | {"before_model"}
 _GATEWAY_STATUSES: Final = frozenset({502, 503, 504})
 _json_object = TypeAdapter(dict[str, JsonValue])
@@ -135,6 +142,10 @@ class Catalog(BaseModel):
     described: dict[str, str] = {}
     # The thread's box; None runs every file and shell tool on the backend alone.
     sandbox: SandboxSpec | None = None
+
+
+class AdoptReply(BaseModel):
+    run_token: str
 
 
 class PhaseReply(BaseModel):
@@ -217,19 +228,38 @@ def _hook_failure(response: httpx2.Response) -> HookFailure | None:
 
 
 class OpenSweBackend:
-    """The Open SWE backend, called with one run's token."""
+    """The Open SWE backend, called with one run's token, or the grant a launched worker adopts it with."""
 
-    def __init__(self, run_token: str | None) -> None:
+    def __init__(self, run_token: str | None, *, worker_grant: str | None = None) -> None:
         base = os.environ.get(BACKEND_URL_ENV, "").strip().rstrip("/")
         if not base:
             raise BackendCallError(f"{BACKEND_URL_ENV} is not configured")
         self._base = base
         self._run_token = run_token
+        self._worker_grant = worker_grant if run_token is None else None
+        # The worker's own catalog, once it adopted a run token: what it may offer the model.
+        self.adopted: Catalog | None = None
         self.reports = ToolReports(self)
 
     @property
     def has_run(self) -> bool:
-        return self._run_token is not None
+        return self._run_token is not None or self._worker_grant is not None
+
+    @property
+    def awaiting_adoption(self) -> bool:
+        """A launched worker that has not yet traded its grant for a run token of its own."""
+        return self._run_token is None and self._worker_grant is not None
+
+    async def adopt(self, thread_id: str, run_id: str | None, instructions: str) -> None:
+        """Become this worker thread's run: every later call, tools included, acts as it."""
+        body: dict[str, JsonValue] = {
+            "thread_id": thread_id,
+            "run_id": run_id,
+            "instructions": instructions,
+        }
+        reply = AdoptReply.model_validate(await self.call("adopt", body))
+        self._run_token, self._worker_grant = reply.run_token, None
+        self.adopted = await self.catalog(run_id)
 
     async def call(
         self,
@@ -238,7 +268,8 @@ class OpenSweBackend:
         *,
         seconds: float | None = None,
     ) -> dict[str, JsonValue]:
-        if self._run_token is None:
+        bearer = self._run_token or self._worker_grant
+        if bearer is None:
             raise BackendCallError(
                 "This run carries no Open SWE run token; start it through Open SWE"
             )
@@ -249,7 +280,7 @@ class OpenSweBackend:
             try:
                 response = await _CONNECTIONS.client().post(
                     f"{self._base}/remote-runtime/hooks/{hook}",
-                    headers={"Authorization": f"Bearer {self._run_token}"},
+                    headers={"Authorization": f"Bearer {bearer}"},
                     json=dict(body or {}),
                     timeout=seconds,
                 )
