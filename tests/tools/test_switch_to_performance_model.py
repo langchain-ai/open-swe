@@ -38,5 +38,6 @@ async def test_switch_persists_and_updates_the_running_model(
     assert result.update["requested_effort"] == stored["effort"]
     assert result.update["messages"][0].tool_call_id == "switch-call"
     client.threads.update.assert_awaited_once_with(
-        thread_id="current", metadata={"model": "openai:gpt-6-astra", "effort": "low"}
+        thread_id="current",
+        metadata={"model": "openai:gpt-6-astra", "effort": "low", "model_selection": "explicit"},
     )
