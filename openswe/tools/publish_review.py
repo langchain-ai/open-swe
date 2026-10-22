@@ -13,6 +13,7 @@ from openswe.audit_logs.tools import audit_tool
 from openswe.dashboard.workspace_settings import get_workspace_settings
 from openswe.github.checks import review_check_conclusion
 from openswe.github.http import GitHubClient
+from openswe.github.pull_request_status import PullRequestClient
 from openswe.github.pull_requests import PullRequest
 from openswe.github.thread_token import (
     GitHubAuthError,
@@ -1098,12 +1099,10 @@ async def _hand_findings_to_author(
     try:
         if rounds > MAX_AUTHOR_HANDOFF_ROUNDS:
             if rounds == MAX_AUTHOR_HANDOFF_ROUNDS + 1:
-                async with GitHubClient.as_app(pull_request.owner, pull_request.repo) as github:
-                    await (
-                        github.repo(pull_request.owner, pull_request.repo)
-                        .pull_request(pull_request.number)
-                        .comment(_handoff_cap_notice())
-                    )
+                async with PullRequestClient.as_app(
+                    pull_request.owner, pull_request.repo, pull_request.number
+                ) as pull:
+                    await pull.comment(_handoff_cap_notice())
             return
         await pull_request.wake_author(
             prompt(
