@@ -15,7 +15,7 @@ from typing import Final
 
 from langchain.tools import ToolRuntime
 from langchain_core.messages import ToolMessage, messages_from_dict
-from langchain_core.tools import BaseTool, StructuredTool
+from langchain_core.tools import StructuredTool
 from langgraph.config import get_config
 from langgraph.types import Command
 from pydantic import JsonValue
@@ -94,7 +94,7 @@ async def run_on_backend(
     return Command(update=update)
 
 
-def backend_tool(spec: ToolSpec, backend: OpenSweBackend) -> BaseTool:
+def backend_tool(spec: ToolSpec, backend: OpenSweBackend) -> StructuredTool:
     async def call(runtime: ToolRuntime, **arguments: JsonValue) -> Command:
         return await run_on_backend(backend, spec.name, arguments, runtime)
 

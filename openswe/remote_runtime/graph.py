@@ -32,7 +32,8 @@ A call made from inside a subagent names the namespace of its ``task`` calls, so
 its tool calls and replies land under the subagent, as they do in-process.
 
 The graph's model-call shaping (caching, retries, fallback, summarization, call
-limits, provider sanitizers) is MDA's own. Graph state the hooks write that MDA
+limits, provider history fixes, the call deadline, and the swap to a vision model
+this graph names) is MDA's own. Graph state the hooks write that MDA
 does not know rides in the MDA run's state and comes back with every call.
 """
 
@@ -70,6 +71,7 @@ from langgraph.config import get_config
 from langgraph.runtime import Runtime
 from pydantic import BaseModel, JsonValue, TypeAdapter, ValidationError
 
+from openswe.dashboard.options import model_supports_images
 from openswe.dispatch import COMPLETION_WEBHOOK_URL
 from openswe.github.sandbox_access import READ_ONLY_REVIEW_PERMISSIONS
 from openswe.middleware.conversation_offloading import ConversationOffloadingMiddleware
@@ -171,7 +173,8 @@ _BOX_CHECKS: Final[Sequence[tuple[type, SandboxCheck | None]]] = (
 )
 # A message inside a state value, as it crosses to MDA and back.
 MESSAGE_KEY: Final = "__lc_message__"
-_ROUTES: Final = frozenset(get_args(PersistedRoute))
+# PersistedRoute is a union of literals: its arguments are the literals, not the names.
+_ROUTES: Final = frozenset(name for route in get_args(PersistedRoute) for name in get_args(route))
 _SESSION_TTL_SECONDS: Final = 6 * 60 * 60
 _SESSION_LIMIT: Final = 512
 
@@ -582,6 +585,12 @@ class RunSession:
             return self._explicit_model(selected, state.get("selected_effort"))
         return self.models.main
 
+    def vision_for(self, model: ModelChoice) -> ModelChoice | None:
+        """What a call to ``model`` goes to instead once the conversation holds an image."""
+        if self.models.vision is None or model_supports_images(model.model_id):
+            return None
+        return self.models.vision
+
     def _explicit_model(self, model_id: str, effort: object) -> ModelChoice:
         return ModelChoice(
             model_id,
@@ -725,7 +734,8 @@ class RemoteGraph:
         if hook == "sandbox":
             session = await self.session(run, body.run_id)
             await in_graph_context(
-                session.config, lambda _runtime: session.reconnect_sandbox(run.assistant_id)
+                {**session.config, "run_name": "sandbox"},
+                lambda _runtime: session.reconnect_sandbox(run.assistant_id),
             )
             return {}
         if hook == "sandbox_unreachable":
@@ -767,15 +777,17 @@ class RemoteGraph:
             if phase == "before_model" and result.jump_to is None:
                 model = session.model_for(state)
                 fallback = fallback_model_choice(model.model_id)
+                vision = session.vision_for(model)
                 reply.update((await session.model_call(state, runtime)).model_dump())
                 reply["model"] = _model_spec(model).model_dump()
+                reply["vision"] = None if vision is None else _model_spec(vision).model_dump()
                 reply["fallback"] = None if fallback is None else _model_spec(fallback).model_dump()
                 reply["use_gateway"] = session.models.use_gateway
             await session.flush(runtime)
             return _json_object.validate_python(reply)
 
         events: list[object] = []
-        reply = await in_graph_context(session.config, run, events=events)
+        reply = await in_graph_context({**session.config, "run_name": phase}, run, events=events)
         reply["events"] = _json_list.validate_python([_json_or_text(e) for e in events])
         return reply
 
@@ -795,7 +807,7 @@ class RemoteGraph:
             await session.flush(runtime)
             return observed
 
-        observed = await in_graph_context(session.config, observe)
+        observed = await in_graph_context({**session.config, "run_name": "model_result"}, observe)
         return {"response": dump_messages(observed)}
 
     async def _tool_started(self, session: RunSession, body: CallBody) -> JsonValue:
@@ -808,7 +820,7 @@ class RemoteGraph:
                 await session.tool_started(tool_call, messages_from_dict(body.messages))
             await session.flush(runtime)
 
-        await in_graph_context(session.config, record)
+        await in_graph_context({**session.config, "run_name": "tool_started"}, record)
         return {}
 
     async def _tool_result(self, session: RunSession, body: ToolResultBody) -> JsonValue:
@@ -823,7 +835,7 @@ class RemoteGraph:
                 await session.tool_finished(result)
             await session.flush(runtime)
 
-        await in_graph_context(session.config, record)
+        await in_graph_context({**session.config, "run_name": "tool_result"}, record)
         # A file or shell tool MDA ran in the box may have started the turn's work, as
         # one run here would; the snapshot is taken now, off the call's path.
         git = TurnGitMetadata(session.config)
@@ -842,7 +854,9 @@ class RemoteGraph:
                 "events": [],
             }
         state = session.state(body)
-        await in_graph_context(session.config, partial(session.join, state))
+        await in_graph_context(
+            {**session.config, "run_name": "call.join"}, partial(session.join, state)
+        )
         git = TurnGitMetadata(session.config)
         before = git.work_baseline(state) if body.name in OBSERVED_TOOLS else None
         observed_at = time.time_ns()
@@ -870,7 +884,7 @@ class RemoteGraph:
                 "update": {},
                 "events": [],
             }
-        await in_graph_context(session.config, session.flush)
+        await in_graph_context({**session.config, "run_name": "call.flush"}, session.flush)
         return _json_object.validate_python(
             {
                 "message": dump_messages([result.message])[0],

@@ -123,6 +123,8 @@ class SurfaceModels:
     # Model routes the agent's model selection picks between, by route name.
     routes: Mapping[str, ModelChoice] = field(default_factory=dict)
     fallback: ModelChoice | None = None
+    # What a text-only model's call goes to once the conversation holds an image.
+    vision: ModelChoice | None = None
 
 
 @dataclass(frozen=True)
