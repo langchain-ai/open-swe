@@ -102,6 +102,32 @@ async def test_reviewer_cleanup_failure_does_not_block_failure_reply(
 
 
 @pytest.mark.asyncio
+async def test_a_github_channel_run_still_reports_its_failure_on_the_issue(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    metadata = {
+        "source": "github",
+        "repo": {"owner": "acme", "name": "api"},
+        "source_context": {"github_issue": {"id": "101", "number": 7, "title": "Bug"}},
+    }
+    monkeypatch.setattr(completion, "langgraph_client", lambda: _FakeClient(metadata))
+    monkeypatch.setattr(
+        completion, "get_github_app_installation_token", AsyncMock(return_value="token")
+    )
+    comment = AsyncMock(return_value=True)
+    monkeypatch.setattr(completion, "post_github_comment", comment)
+
+    # MDA's GitHub channel posts no failure notice, so Open SWE's reply stays.
+    result = await completion.handle_run_completion(
+        {"thread_id": "t1", "run_id": "run-1", "status": "error", "metadata": {"channel": "github"}}
+    )
+
+    assert result["status"] == "ok"
+    repo, number, _text = comment.await_args.args
+    assert (repo, number) == ({"owner": "acme", "name": "api"}, 7)
+
+
+@pytest.mark.asyncio
 async def test_a_channel_run_leaves_its_failure_to_the_channel(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

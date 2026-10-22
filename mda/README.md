@@ -48,7 +48,7 @@ The backend:
 | `MDA_RUNTIME_URL` | This deployment's URL; every new agent, reviewer and review scout thread runs here |
 | `MDA_RUNTIME_API_KEY` | LangSmith service key the backend calls this deployment with |
 | `REMOTE_RUNTIME_TOKEN_SECRET` | Signs run tokens; comma-separated for rotation |
-| `MDA_SERVICE_SECRET` | The same value as this deployment's; `/linear/channel/*` answers only calls signed with it |
+| `MDA_SERVICE_SECRET` | The same value as this deployment's; `/linear/channel/*` and `/github/channel/*` answer only calls signed with it |
 
 ## Run locally
 
@@ -91,3 +91,11 @@ The channel verifies each delivery (Linear's signature and timestamp). The backe
 Threads of Linear sessions belong to the channel, and MDA scopes threads by owner. The backend reads them as LangSmith Studio does (its LangSmith key with `x-auth-scheme: langsmith`), which MDA allows for reads only, so the dashboard shows them read-only: the backend starts no runs on them and writes nothing there. Each run carries the backend's run-complete webhook, so `/webhooks/run-complete` completes it as it does the backend's own runs. The channel reports failures in the session itself.
 
 `mda deploy` sets up the Linear app, which takes a Linear workspace admin; see [Linear](../docs/INSTALLATION.md#linear).
+
+## GitHub
+
+The deployment's GitHub channel (`channels/github.py`) handles `@openswe` mentions on issues: `issues.opened`, `edited` and `reopened` with the handle in the title or body, and `issue_comment.created` and `edited` with it in the comment, on issues only. One issue is one conversation, on the channel's own thread, and a new mention interrupts the run in progress, as before. Pull requests, reviews, CI, the reviewer and automations stay on the backend.
+
+The channel uses Open SWE's own GitHub App: `mda deploy` brings it (App ID, private key, installation ID and webhook secret), and its webhook stays at the backend's `/webhooks/github`. The backend forwards the issue events that would start a run to `<deployment>/channels/github/events` exactly as GitHub sent them, instead of starting the run itself. Deploy remembers that the webhook stays at the backend once you answer "No" to moving it; without a terminal, `MDA_GITHUB_WEBHOOK_ELSEWHERE` names the backend's URL.
+
+The channel's `on_event` names the backend's endpoint, `POST /github/channel/events`, which it asks what each event starts: MDA posts `{event: {key, deliveryId, payload}, thread}`. The backend applies the same gates as its own intake, reacts to the comment, builds the prompt, writes and indexes the thread, and answers with the input, the run context with a run token signed for the channel's thread, the run metadata and the run-complete webhook, or `null` to start nothing. While the thread waits on an interrupt it only answers whether Open SWE would act, so the channel points the issue to the decision. Its threads are the channel's, as Linear sessions' are: read-only on the backend, and completed through `/webhooks/run-complete`, which also posts Open SWE's failure reply on the issue, as before.
