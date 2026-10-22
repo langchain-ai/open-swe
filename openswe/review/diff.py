@@ -15,6 +15,7 @@ The reviewer needs three things from a PR diff:
 import hashlib
 import logging
 import re
+import shlex
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Literal
 
@@ -28,7 +29,7 @@ DiffSide = Literal["LEFT", "RIGHT"]
 logger = logging.getLogger(__name__)
 
 
-_DIFF_FILE_HEADER_RE = re.compile(r"^diff --git a/(?P<a>.+?) b/(?P<b>.+?)$")
+DIFF_FILE_HEADER_RE = re.compile(r"^diff --git a/(?P<a>.+?) b/(?P<b>.+?)$")
 _HUNK_HEADER_RE = re.compile(
     r"^@@ -(?P<old_start>\d+)(?:,(?P<old_count>\d+))? "
     r"\+(?P<new_start>\d+)(?:,(?P<new_count>\d+))? @@"
@@ -82,7 +83,7 @@ def parse_unified_diff(diff_text: str) -> list[FileDiff]:
     lines = diff_text.splitlines()
     i = 0
     while i < len(lines):
-        header_match = _DIFF_FILE_HEADER_RE.match(lines[i])
+        header_match = DIFF_FILE_HEADER_RE.match(lines[i])
         if not header_match:
             i += 1
             continue
@@ -92,7 +93,7 @@ def parse_unified_diff(diff_text: str) -> list[FileDiff]:
         hunks: list[DiffHunk] = []
         current_hunk_lines: list[str] = []
         current_meta: tuple[int, int, int, int] | None = None
-        while i < len(lines) and not _DIFF_FILE_HEADER_RE.match(lines[i]):
+        while i < len(lines) and not DIFF_FILE_HEADER_RE.match(lines[i]):
             line = lines[i]
             hunk_match = _HUNK_HEADER_RE.match(line)
             if hunk_match:
@@ -329,18 +330,66 @@ async def fetch_pr_metadata(
     return (title if isinstance(title, str) else "", body if isinstance(body, str) else "")
 
 
-def review_diff_range(
+async def review_diff_range(
+    sandbox_backend: SandboxBackendProtocol,
     *,
+    work_dir: str,
     base_sha: str,
     head_sha: str,
     last_reviewed_sha: str = "",
     re_review: bool = False,
 ) -> tuple[str, str, bool]:
-    """Resolve the trusted commit range for the current review invocation."""
+    """Ignore clean base-merge-only pushes while preserving real re-review deltas."""
     base_ref = last_reviewed_sha if re_review and last_reviewed_sha else base_sha
-    if not _GIT_SHA_RE.fullmatch(base_ref) or not _GIT_SHA_RE.fullmatch(head_sha):
+    if not all(_GIT_SHA_RE.fullmatch(ref) for ref in (base_sha, base_ref, head_sha)):
         raise ValueError("review diff requires valid Git commit SHAs")
-    return base_ref.lower(), head_sha.lower(), not re_review
+    base_sha, base_ref, head_sha = base_sha.lower(), base_ref.lower(), head_sha.lower()
+    if re_review and last_reviewed_sha and base_ref != head_sha:
+        commits = await _review_git_output(
+            sandbox_backend,
+            work_dir,
+            f"rev-list --parents {base_ref}..{head_sha} --not {base_sha}",
+        )
+        parents = [line.split() for line in commits.splitlines()]
+        merge_shas = {row[0] for row in parents if row}
+        if (
+            parents
+            and head_sha in merge_shas
+            and all(len(row) == 3 and row[1] in merge_shas | {base_ref} for row in parents)
+        ):
+            for sha, _, merged_parent in parents:
+                ancestry = await _review_git_output(
+                    sandbox_backend,
+                    work_dir,
+                    f"merge-base --is-ancestor {merged_parent} {base_sha}; "
+                    'status=$?; if [ "$status" -eq 1 ]; then echo not-base; '
+                    'elif [ "$status" -ne 0 ]; then exit "$status"; fi',
+                )
+                if ancestry.strip():
+                    break
+                resolution = await _review_git_output(
+                    sandbox_backend,
+                    work_dir,
+                    f"show --remerge-diff --format= --no-ext-diff --no-color {sha}",
+                )
+                if resolution.strip():
+                    break
+            else:
+                return head_sha, head_sha, False
+    return base_ref, head_sha, not re_review
+
+
+async def _review_git_output(
+    sandbox_backend: SandboxBackendProtocol, work_dir: str, arguments: str
+) -> str:
+    result = await sandbox_backend.aexecute(f"cd {shlex.quote(work_dir)} && git {arguments}")
+    exit_code = (
+        result.get("exit_code") if isinstance(result, dict) else getattr(result, "exit_code", None)
+    )
+    output = _stdout_from_result(result)
+    if exit_code not in (0, None):
+        raise RuntimeError(f"review range Git inspection failed (exit {exit_code}): {output}")
+    return output
 
 
 def review_diff_path(work_dir: str, base_ref: str, head_ref: str, merge_base: bool) -> str:
@@ -404,7 +453,7 @@ def changed_files(diff_text: str) -> list[str]:
     paths = (
         match.group("b")
         for line in diff_text.splitlines()
-        if (match := _DIFF_FILE_HEADER_RE.match(line))
+        if (match := DIFF_FILE_HEADER_RE.match(line))
     )
     return list(dict.fromkeys(paths))
 

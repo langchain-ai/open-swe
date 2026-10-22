@@ -281,10 +281,9 @@ async def test_reviewer_continues_when_thread_fetch_raises() -> None:
 
 @pytest.mark.asyncio
 async def test_reviewer_populates_diff_line_set_from_github_api() -> None:
-    """The reviewer must fetch the PR's unified diff via the GitHub API and
-    populate ``configurable['diff_line_set']`` + ``diff_text`` so
-    ``add_finding`` can reject anchors not in the PR diff at creation time.
-    Without this, bad anchors only fail at publish_review with a 422."""
+    """Preparation retains anchor validation and a sandbox path, not the diff body."""
+    from openswe.review.diff import MaterializedReviewDiff
+
     config: RunnableConfig = {
         "configurable": {
             "__is_for_execution__": True,
@@ -293,8 +292,8 @@ async def test_reviewer_populates_diff_line_set_from_github_api() -> None:
             "repo": {"owner": "acme", "name": "repo"},
             "pr_number": 42,
             "pr_url": "https://github.com/acme/repo/pull/42",
-            "base_sha": "base",
-            "head_sha": "head",
+            "base_sha": "a" * 40,
+            "head_sha": "b" * 40,
         },
         "metadata": {},
     }
@@ -344,6 +343,18 @@ async def test_reviewer_populates_diff_line_set_from_github_api() -> None:
             new_callable=AsyncMock,
             return_value=pr_diff,
         ) as mock_fetch_diff,
+        patch(
+            "openswe.reviewer.materialize_review_diff",
+            new_callable=AsyncMock,
+            return_value=MaterializedReviewDiff(
+                path="/workspace/repo/review-diff.patch",
+                diff_text=pr_diff,
+                base_ref="a" * 40,
+                head_ref="b" * 40,
+                merge_base=True,
+                cached=False,
+            ),
+        ),
         patch("openswe.reviewer.make_model", return_value=MagicMock()),
         patch("openswe.reviewer.create_deep_agent", side_effect=fake_create_deep_agent),
     ):
@@ -356,5 +367,7 @@ async def test_reviewer_populates_diff_line_set_from_github_api() -> None:
     mock_fetch_diff.assert_awaited_once_with(
         owner="acme", repo="repo", pr_number=42, token="gh-token"
     )
-    assert updates["diff_text"] == pr_diff
+    restored_state = {"diff_text": "oversized diff from the previous review", **updates}
+    assert restored_state["diff_text"] is None
+    assert updates["diff_path"] == "/workspace/repo/review-diff.patch"
     assert updates["diff_line_set"] == {"in_diff.py": {"RIGHT": {10}, "LEFT": {1}}}

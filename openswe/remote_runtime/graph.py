@@ -181,7 +181,7 @@ def _encode(value: object) -> object:
         return {MESSAGE_KEY: messages_to_dict([value])[0]}
     if isinstance(value, Mapping):
         return {str(k): _encode(v) for k, v in value.items()}
-    if isinstance(value, (list, tuple)):
+    if isinstance(value, (list, tuple, set, frozenset)):
         return [_encode(v) for v in value]
     return value
 

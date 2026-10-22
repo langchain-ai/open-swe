@@ -29,7 +29,10 @@ async def test_fetch_review_diff_returns_metadata_without_diff_body() -> None:
     with (
         patch("openswe.run_config.get_config", return_value=config),
         patch(
-            "openswe.tools.fetch_review_diff.get_cached_sandbox_backend", return_value=MagicMock()
+            "openswe.tools.fetch_review_diff.get_cached_sandbox_backend",
+            return_value=MagicMock(
+                aexecute=AsyncMock(return_value="c" * 40 + " " + "b" * 40 + "\n")
+            ),
         ),
         patch(
             "openswe.tools.fetch_review_diff.resolve_sandbox_work_dir",
@@ -85,7 +88,10 @@ async def test_fetch_review_diff_uses_incremental_range_for_re_review() -> None:
     with (
         patch("openswe.run_config.get_config", return_value=config),
         patch(
-            "openswe.tools.fetch_review_diff.get_cached_sandbox_backend", return_value=MagicMock()
+            "openswe.tools.fetch_review_diff.get_cached_sandbox_backend",
+            return_value=MagicMock(
+                aexecute=AsyncMock(return_value="c" * 40 + " " + "b" * 40 + "\n")
+            ),
         ),
         patch(
             "openswe.tools.fetch_review_diff.resolve_sandbox_work_dir",

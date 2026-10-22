@@ -9,6 +9,7 @@ import logging
 import posixpath
 import shlex
 from collections.abc import Iterable
+from uuid import uuid4
 
 import httpx2
 from deepagents.backends.protocol import SandboxBackendProtocol
@@ -120,7 +121,8 @@ async def fetch_agents_md(
 
 _READ_SCOPED_DOCS = """
 import json, subprocess, sys
-ref, paths, limit = json.loads(sys.argv[1])
+with open(sys.argv[1], encoding="utf-8") as request:
+    ref, paths, limit = json.load(request)
 tree = subprocess.check_output(["git", "ls-tree", "-rz", ref], stderr=subprocess.PIPE)
 blobs = {}
 for entry in tree.split(b"\\0"):
@@ -153,12 +155,20 @@ async def fetch_scoped_agents_md(
     if not directories:
         return {}
     paths = [posixpath.join(d, name) for d in directories for name in _AGENT_DOC_FILENAMES]
-    args = json.dumps([ref, paths, _MAX_AGENTS_MD_BYTES])
+    request_path = f"/tmp/openswe-scoped-agents-{uuid4().hex}.json"
     command = (
         f"cd {shlex.quote(repo_dir)} && "
-        f"python3 -c {shlex.quote(_READ_SCOPED_DOCS)} {shlex.quote(args)}"
+        f"python3 -c {shlex.quote(_READ_SCOPED_DOCS)} {shlex.quote(request_path)}"
     )
     try:
+        uploads = await sandbox_backend.aupload_files(
+            [(request_path, json.dumps([ref, paths, _MAX_AGENTS_MD_BYTES]).encode("utf-8"))]
+        )
+        if len(uploads) != 1 or uploads[0].error:
+            raise RuntimeError(
+                f"Failed to upload scoped agent docs request: "
+                f"{uploads[0].error if uploads else 'missing upload response'}"
+            )
         response = await sandbox_backend.aexecute(command)
         if response.exit_code != 0:
             logger.warning(
@@ -174,6 +184,16 @@ async def fetch_scoped_agents_md(
     except Exception:
         logger.exception("Failed to load scoped agent docs", extra={"ref": ref})
         return {}
+    finally:
+        try:
+            cleanup = await sandbox_backend.aexecute(f"rm -f -- {shlex.quote(request_path)}")
+            if cleanup.exit_code != 0:
+                logger.warning(
+                    "Failed to clean up scoped agent docs request",
+                    extra={"ref": ref, "output": cleanup.output},
+                )
+        except Exception:
+            logger.exception("Failed to clean up scoped agent docs request", extra={"ref": ref})
     result: dict[str, str] = {}
     for directory in directories:
         for name in _AGENT_DOC_FILENAMES:

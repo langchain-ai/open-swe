@@ -1,11 +1,18 @@
 """Tool: ``add_finding``. Records one review finding on the reviewer thread."""
 
+import logging
+import shlex
 from typing import Annotated, Any
 
 from langgraph.prebuilt import InjectedState
 
 from openswe.github.thread_token import resolve_thread_github_token
-from openswe.review.diff import compute_diff_line_set, fetch_pr_diff, is_range_in_diff
+from openswe.review.diff import (
+    DIFF_FILE_HEADER_RE,
+    compute_diff_line_set,
+    fetch_pr_diff,
+    is_range_in_diff,
+)
 from openswe.review.findings import (
     DEFAULT_FINDING_TITLE,
     MAX_SUGGESTION_LINES,
@@ -23,6 +30,34 @@ from openswe.review.findings import (
     thread_missing_tool_result,
 )
 from openswe.run_config import RunConfig
+from openswe.runtime import get_cached_sandbox_backend
+
+logger = logging.getLogger(__name__)
+
+_MAX_FILE_DIFF_BYTES = 256 * 1024
+_FILE_DIFF_SCRIPT = """
+import re
+import sys
+
+path, file, pattern, limit = sys.argv[1:]
+header = re.compile(pattern)
+selected = False
+lines = []
+size = 0
+with open(path, encoding="utf-8", errors="replace") as diff:
+    for line in diff:
+        if line.startswith("diff --git "):
+            if selected:
+                break
+            match = header.match(line.rstrip("\\r\\n"))
+            selected = match is not None and match.group("b") == file
+        if selected:
+            size += len(line.encode("utf-8"))
+            if size > int(limit):
+                sys.exit("Matching file diff exceeds size limit")
+            lines.append(line)
+sys.stdout.write("".join(lines))
+"""
 
 
 async def add_finding(
@@ -74,6 +109,10 @@ async def add_finding(
             ),
         }
 
+    diff_path = state.get("diff_path") if isinstance(state, dict) else None
+    if isinstance(diff_path, str) and diff_path:
+        diff_text = await _read_file_diff(diff_path, file, cfg.thread_id) or diff_text
+
     diff_hunk: str | None = None
     if isinstance(diff_text, str) and diff_text:
         from openswe.review.diff import extract_diff_hunk
@@ -121,6 +160,44 @@ async def add_finding(
             "include `suggestion` for small, obvious fixes."
         )
     return result
+
+
+async def _read_file_diff(path: str, file: str, thread_id: str | None) -> str:
+    """Read only one bounded file section, without downloading the full diff."""
+    if not thread_id:
+        return ""
+    command = " ".join(
+        shlex.quote(arg)
+        for arg in (
+            "python3",
+            "-c",
+            _FILE_DIFF_SCRIPT,
+            path,
+            file,
+            DIFF_FILE_HEADER_RE.pattern,
+            str(_MAX_FILE_DIFF_BYTES),
+        )
+    )
+    try:
+        backend = get_cached_sandbox_backend(thread_id)
+        result = await backend.aexecute(command)
+        exit_code = (
+            result.get("exit_code")
+            if isinstance(result, dict)
+            else getattr(result, "exit_code", None)
+        )
+        if exit_code not in (0, None):
+            raise RuntimeError(f"File diff read failed (exit {exit_code})")
+    except Exception:
+        logger.exception("Could not read materialized finding diff", extra={"file": file})
+        return ""
+    if isinstance(result, str):
+        return result
+    for key in ("stdout", "output", "text"):
+        output = result.get(key) if isinstance(result, dict) else getattr(result, key, None)
+        if isinstance(output, str):
+            return output
+    return ""
 
 
 async def _resolve_diff_context(

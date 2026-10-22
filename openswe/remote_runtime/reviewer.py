@@ -22,9 +22,12 @@ async def _build(config: RunnableConfig, surface: ToolSurface) -> object:
 
 
 def _restore(state: dict[str, object]) -> None:
-    # Sets do not cross to MDA and back; the diff they index does.
     diff_text = state.get("diff_text")
-    if isinstance(diff_text, str) and diff_text and "diff_line_set" not in state:
+    if isinstance(state.get("diff_line_set"), dict):
+        state["diff_line_set"] = TypeAdapter(dict[str, dict[str, set[int]]]).validate_python(
+            state["diff_line_set"]
+        )
+    elif isinstance(diff_text, str) and diff_text:
         state["diff_line_set"] = compute_diff_line_set(diff_text)
 
 
