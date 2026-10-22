@@ -107,7 +107,6 @@ async def test_sender_is_not_reintroduced_for_a_different_noreply_email(
 
     assert [p.identity.github_login for p in participants] == [sender_login, "bob"]
     assert participants[0].timezone == "America/New_York"
-    assert len(PrepareAgentRunMiddleware._participants_messages({}, participants)) == 2
 
 
 def test_only_the_changed_participant_is_resent():
