@@ -115,15 +115,15 @@ async def test_repository_filter_cannot_change_query_or_path(repo):
 
 
 @pytest.mark.parametrize(
-    ("merge_state", "runs", "missing"),
+    ("merge_state", "runs", "missing", "required_passing"),
     [
-        ("blocked", [{"name": "unit", "status": "completed"}], ["lint"]),
-        ("blocked", [{"name": "unit", "status": "in_progress"}], ["lint"]),
-        ("clean", [{"name": "unit", "status": "completed"}], ["lint"]),
+        ("blocked", [{"name": "unit", "status": "completed"}], ["lint"], False),
+        ("blocked", [{"name": "unit", "status": "in_progress"}], ["lint"], False),
+        ("clean", [{"name": "unit", "status": "completed"}], [], True),
     ],
 )
 async def test_blocked_merge_names_required_checks_the_head_never_reported(
-    monkeypatch, merge_state, runs, missing
+    monkeypatch, merge_state, runs, missing, required_passing
 ):
     pull = {
         "state": "open",
@@ -150,7 +150,7 @@ async def test_blocked_merge_names_required_checks_the_head_never_reported(
     result = await _client(1).load(wanted={"open"})
     assert result is not None
     assert result.missing_checks == missing
-    assert result.required_checks_passing is False
+    assert result.required_checks_passing is required_passing
 
 
 @pytest.mark.parametrize(
@@ -172,7 +172,7 @@ async def test_review_and_thread_status_agree_on_check_outcomes(
         "state": "open",
         "draft": False,
         "mergeable": True,
-        "mergeable_state": "clean",
+        "mergeable_state": "blocked",
         "head": {"sha": "a" * 40},
         "base": {"ref": "main"},
     }

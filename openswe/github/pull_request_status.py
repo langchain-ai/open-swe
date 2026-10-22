@@ -902,7 +902,7 @@ class PullRequestClient:
         )
         base = pull.get("base")
         base_ref = _as_optional_str(base.get("ref")) if isinstance(base, Mapping) else None
-        if base_ref is not None:
+        if base_ref is not None and result.merge_state != "clean":
             required = await RequiredCheck.for_branch(
                 self.repo, base_ref, include_review_checks=True
             )
