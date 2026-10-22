@@ -4,7 +4,7 @@ import { useCallback, useLayoutEffect, useRef, useState } from "react"
 import type { ReactNode } from "react"
 
 import { reviewImageProxyUrl, type ReviewUserRef } from "@/lib/api"
-import { cn, formatRelativeTime } from "@/lib/utils"
+import { cn } from "@/lib/utils"
 import { Markdown } from "@/features/agents/components/chat/Markdown"
 import { Skeleton } from "@langchain/macaw-components/Skeleton"
 import { HumanInputText } from "@/features/reviews/components/HumanInputCard"
@@ -14,10 +14,11 @@ import { ProfileLink } from "./notes/Byline"
 import { AgentMark } from "./AgentMark"
 import { reviewQueries, type PullRequestRef } from "./queries"
 import { StandingPanel } from "./Standing"
+import { RelativeTimestamp } from "./RelativeTimestamp"
 
 const CLAMP_PX = 320
 
-/** `#123` in prose links to that pull request's review page here; code is left alone. */
+/** `#123` and `owner/repo#123` in prose link to that pull request's review page here; code is left alone. */
 function linkPullRequestRefs(body: string, pr: PullRequestRef): string {
   return body
     .split(/(```[\s\S]*?```|`[^`\n]*`)/)
@@ -25,9 +26,18 @@ function linkPullRequestRefs(body: string, pr: PullRequestRef): string {
       index % 2 === 1
         ? part
         : part.replace(
-            /(^|[\s(])#(\d+)\b/g,
-            (_match, lead: string, number: string) =>
-              `${lead}[#${number}](/agents/reviews/${pr.owner}/${pr.repo}/${number})`
+            /(^|[\s(])(?:([A-Za-z0-9-]+)\/([\w.-]+))?#(\d+)\b/g,
+            (
+              _match,
+              lead: string,
+              owner: string | undefined,
+              repo: string | undefined,
+              number: string
+            ) => {
+              const target = owner && repo ? { owner, repo } : pr
+              const text = owner ? `${owner}/${repo}#${number}` : `#${number}`
+              return `${lead}[${text}](/agents/reviews/${encodeURIComponent(target.owner)}/${encodeURIComponent(target.repo)}/${number})`
+            }
           )
     )
     .join("")
@@ -40,7 +50,7 @@ export function Overview({ pr }: { pr: PullRequestRef }) {
     return (
       <div
         aria-hidden
-        className="flex w-full max-w-[920px] flex-col gap-space-4 px-space-4 pt-space-4 pb-space-6"
+        className="flex w-full flex-col gap-space-4 px-space-4 pt-space-4 pb-space-6"
       >
         <Skeleton className="h-[236px] rounded-xl" />
         <Skeleton className="h-4 w-48" />
@@ -56,19 +66,25 @@ export function Overview({ pr }: { pr: PullRequestRef }) {
       </div>
     )
   return (
-    <div className="flex w-full max-w-[920px] flex-col gap-space-4 px-space-4 pt-space-4 pb-space-6">
+    <div className="flex w-full flex-col gap-space-4 px-space-4 pt-space-4 pb-space-6">
       <StandingPanel pr={pr} />
       {detail.walkthrough?.human_input && (
-        <section
+        <details
           aria-label="Requested behavior"
-          className="rounded-xl border border-dashed border-default px-space-4 py-space-3"
+          className="group/requested rounded-xl border border-dashed border-default px-space-4 py-space-3"
         >
-          <p className="mb-space-1 flex items-center gap-space-2 text-xs font-medium text-secondary">
+          <summary className="flex cursor-pointer list-none items-center gap-space-2 text-xs font-medium text-secondary hover:text-primary [&::-webkit-details-marker]:hidden">
             <AgentMark />
             Requested behavior
-          </p>
-          <HumanInputText summary={detail.walkthrough.human_input} />
-        </section>
+            <CaretDownIcon
+              aria-hidden
+              className="ml-auto size-3 -rotate-90 group-open/requested:rotate-0"
+            />
+          </summary>
+          <div className="mt-space-1">
+            <HumanInputText summary={detail.walkthrough.human_input} />
+          </div>
+        </details>
       )}
       <Description
         pr={pr}
@@ -137,15 +153,14 @@ function Description({
           rel="noreferrer"
           className="hover:text-primary hover:underline"
         >
-          opened this{" "}
-          {createdAt ? formatRelativeTime(new Date(createdAt).getTime()) : ""}
+          opened this {createdAt && <RelativeTimestamp value={createdAt} />}
         </a>
         <span className="ml-auto">{labels}</span>
       </header>
       <div
         ref={ref}
         className={cn(
-          "relative flow-root text-xs leading-[1.65]",
+          "relative flow-root max-w-[100ch] text-xs leading-[1.65]",
           clamped && "overflow-hidden"
         )}
         style={clamped ? { maxHeight: CLAMP_PX } : undefined}

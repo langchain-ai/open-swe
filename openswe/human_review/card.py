@@ -148,6 +148,9 @@ def open_card(
     if request.tldr:
         blocks.append(section("\n".join(f">{line}" for line in escape(request.tldr).splitlines())))
     blocks.append(context(_stats(request, author, requester)))
+    blocks.append(
+        context("Auto-merge enabled" if request.auto_merge else "Manual merge — auto-merge is off")
+    )
     blocks.extend(_reviewers(request, review_states))
     if waiting := waiting or escape(request.detail):
         blocks.append(context(f"Waiting on: {waiting}."))

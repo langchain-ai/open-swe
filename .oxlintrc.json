@@ -41,6 +41,7 @@
   "ignorePatterns": [
     "**/node_modules/**",
     ".venv/**",
+    "vendor/**",
     "ui/.output/**",
     "ui/.nitro/**",
     "ui/.tanstack/**",

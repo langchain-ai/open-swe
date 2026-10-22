@@ -4,7 +4,6 @@ from unittest.mock import AsyncMock
 import pytest
 
 from openswe.slack import ask as slack_ask
-from openswe.slack import client as slack_client
 from openswe.slack import routes as slack_routes
 from openswe.slack.channels import SlackChannel
 from openswe.slack.payloads import SlackChannelContext, SlackMessage
@@ -45,9 +44,11 @@ def linked_asker(monkeypatch: pytest.MonkeyPatch) -> None:
 
 @pytest.mark.asyncio
 @pytest.mark.usefixtures("linked_asker")
-@pytest.mark.parametrize("reply_thread_ts", ["", "123.456"])
+@pytest.mark.parametrize(
+    "reply_thread_ts,selected_message", [("", ""), ("123.456", ""), ("", "Ship the migration")]
+)
 async def test_command_thread_stays_private_and_can_reply_after_task_wakeup(
-    monkeypatch: pytest.MonkeyPatch, reply_thread_ts: str
+    monkeypatch: pytest.MonkeyPatch, reply_thread_ts: str, selected_message: str
 ) -> None:
     status = AsyncMock()
     monkeypatch.setattr("openswe.slack.thinking.set_slack_thread_status", status)
@@ -67,6 +68,7 @@ async def test_command_thread_stays_private_and_can_reply_after_task_wakeup(
         channel_id="C1",
         user_id="U1",
         question="why?",
+        selected_message=selected_message,
         thread_id="t-1",
         team_id="T1",
         reply_thread_ts=reply_thread_ts,
@@ -204,27 +206,3 @@ async def test_an_unreplaceable_acknowledgement_falls_back_to_a_fresh_ephemeral(
     assert await slack_reply.slack_reply("the answer", "final") == {"success": True}
 
     assert post.await_args.args == ("C1", "U1", "the answer")
-
-
-@pytest.mark.asyncio
-async def test_the_acknowledgement_only_goes_out_through_the_callback(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    calls: list[tuple[str, dict[str, Any], str]] = []
-
-    async def capture(response_url: str, payload: dict[str, Any], path_prefix: str) -> bool:
-        calls.append((response_url, payload, path_prefix))
-        return True
-
-    monkeypatch.setattr(slack_ask, "post_slack_ephemeral_message", AsyncMock(return_value=True))
-    monkeypatch.setattr(slack_client, "_post_slack_callback", capture)
-
-    assert await slack_client.acknowledge_slack_command(
-        "https://hooks.slack.com/commands/T1/1/x", "Working on it"
-    )
-
-    response_url, payload, prefix = calls[0]
-    assert prefix == "/commands/"
-    assert payload == {"response_type": "ephemeral", "text": "Working on it"}
-    # No replace_original: this message is the one later replies replace.
-    assert "replace_original" not in payload

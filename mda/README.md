@@ -2,8 +2,10 @@
 
 Open SWE's coding agent, pull request reviewer and review scout, packaged as one [Managed Deep Agents](https://docs.langchain.com/langsmith/python/managed-deep-agents-overview) project with a single graph, `open-swe`. Each run's context names the Open SWE graph it plays (`agent`, `reviewer` or `review-scout`); the factory in `agent.py` builds that graph's deep agent from it.
 
-The model loop and its checkpoints run here. Everything else is the in-process Open SWE graph, which the backend builds for each run (`openswe/remote_runtime/graph.py`), including the thread's sandbox: the backend creates, reuses and credentials it exactly as for an in-process run, so local, bridged and task-worker sandboxes work too, and this deployment declares none. All calls go to `POST /remote-runtime/hooks/{hook}`, authenticated with the run token.
+The model loop and its checkpoints run here. Everything else is the in-process Open SWE graph, which the backend builds for each run (`openswe/remote_runtime/graph.py`), except the thread's sandbox, which MDA owns (below). All calls go to `POST /remote-runtime/hooks/{hook}`, authenticated with the run token.
 
+- **Sandbox:** MDA names, creates, adopts, restarts and replaces each thread's LangSmith box, one per thread. The catalog gives the options it is created with (the workspace snapshot, VM size, TTLs, `preserve_memory_on_stop`), which apply only when MDA creates it, so a refreshed snapshot never strands a thread's work. Before `prepare`, the run opens the box (`open_sandbox`) and reports its name; the backend binds the thread to it (`sandbox_owner: mda`) and connects as to any reused box: proxy credentials, git identity, tool channel. MDA leaves the proxy config to the backend (`_openswe_no_manage_proxy=True`). `recreate_sandbox` on such a box comes back from the backend as what to replace it with; MDA replaces it under the same name (`replace_sandbox`, the old box stopped and kept renamed), and the backend reconnects through the `sandbox` hook. The backend never creates or replaces an MDA-owned box. Threads the backend gave a box keep it; bridged threads run on the user's machine; a task worker works in its coordinator's MDA box once the backend has attached it there.
+- **Browser:** the coding agent (`agent`) also gets Stagehand's `run`, `snapshot` and `screenshot` tools on one LangSmith browser per thread (`managed_deepagents.browser`, carried in the vendored SDK as managed-deepagents-sdk#897). The deployment's workspace needs the LangSmith browser beta.
 - **`catalog`:** the graph's tools, subagents and models. The factory declares each tool under its in-process name, as a call to the backend's `call` hook. The prompts, the transcript and the dashboard therefore see exactly what an in-process run shows. These tools replace MDA's own file and shell tools of the same name. Every call runs through the graph's tools node, with its tool-call middleware (transcript, PR and workflow push guards, `AGENTS.md` reads, tool errors), against the thread's sandbox. Tools the graph hides from the model are dropped from each request.
 - **Phases:** `BackendRunMiddleware` hands each phase of the loop to the graph's own middleware on the backend:
   - `prepare`: before the run (preparation, transcript turn, skills, reply bookkeeping);
@@ -36,7 +38,7 @@ The deployment's `.env`, forwarded as deployment secrets by `mda deploy`:
 | `OPEN_SWE_BACKEND_URL` | Public HTTPS origin of the Open SWE backend |
 | `LANGSMITH_API_KEY` | Authenticates the LLM Gateway and tracing |
 | `ANTHROPIC_API_KEY`, `OPENAI_API_KEY`, … | Model keys for direct (non-gateway) model calls and deepagents' summarization |
-| `LANGSMITH_GATEWAY_API_KEY` | Optional gateway key, as on the backend |
+| `LANGSMITH_GATEWAY_API_KEY` | Gateway key, the backend's; falls back to `LANGSMITH_API_KEY` |
 
 The backend:
 
@@ -64,16 +66,15 @@ Each Open SWE backend calls its own MDA deployment, created with `mda deploy`:
 | `open-swe-mda-preview` | `open-swe-preview` |
 | `open-swe-mda-prod` | `open-swe-v3` |
 
-Each deployment's only configuration is `OPEN_SWE_BACKEND_URL`, in the project `.env` that `mda deploy` forwards as secrets; model calls go through the LLM Gateway with the deployment's own LangSmith key. The backends' `MDA_RUNTIME_URL` and `REMOTE_RUNTIME_TOKEN_SECRET` live in their Terraform. To deploy one by hand, with `.env` holding only that deployment's backend URL:
+Each deployment's configuration is `OPEN_SWE_BACKEND_URL` and `LANGSMITH_GATEWAY_API_KEY`, in the project `.env` that `mda deploy` forwards as secrets, replacing any set before. The gateway key is its backend's, so model calls count against that key's gateway spend cap; without it they fall back to the deployment's own LangSmith key and the workspace's cap. `deploy_mda.yml` reads it from the `LANGSMITH_GATEWAY_API_KEY_<ENVIRONMENT>` repository secret. The backends' `MDA_RUNTIME_URL` and `REMOTE_RUNTIME_TOKEN_SECRET` live in their Terraform. To deploy one by hand from the repository root, with `mda/.env` holding that deployment's backend URL and gateway key:
 
 ```bash
+make mda-cli
 cd mda
 uv run --locked --python 3.13 mda deploy --name open-swe-mda-staging --deployment-type prod
 ```
 
-CI and manual deploys run the CLI from this project's locked environment, so its version follows the runtime dependency without a separate install pin. Keep `managed-deepagents` and `deepagents` exactly pinned and refresh `mda/uv.lock` when bumping them; `--locked` rejects an out-of-date lockfile.
-
-The preview can also deploy an unreleased SDK commit, for a preview-labelled PR only. The PR takes `managed-deepagents` from that commit in `[tool.uv.sources]` (`git` on `langchain-ai/managed-deepagents-sdk`, a full `rev`, `subdirectory = "packages/pypi"`), pinned to that commit's package version, and relocks. A repository administrator approves the commit by setting the `PREVIEW_MDA_SOURCE_SHA` variable to it. The preview workflow then builds that commit's compiler and deploys with it and its runtime (`scripts/preview_mda_source.py`). A tree naming any other source fails its MDA deploy. Approving after a refused deploy takes effect on the next preview build that changes the tree, or a `workflow_dispatch` with `force`. Staging and production never build from source.
+CI and manual deploys run the CLI from this project's locked environment. `managed-deepagents` is the SDK vendored in [`vendor/managed-deepagents-sdk`](../vendor/README.md): `mda/` installs its runtime as an editable path source, and `make mda-cli` builds its CLI with cargo into that runtime, where the `mda` command runs it. Run it before `mda build`, `mda dev` or `mda deploy`: until it has, the runtime has no CLI, and it rebuilds whenever the vendored CLI changed; `mda build` and `mda deploy` bundle that runtime, so what deploys is exactly the vendored tree. Only the SDK's `main` is vendored: `uv run scripts/vendor.py [sha]` vendors main's head or a commit on it, records the exact commit in `UPSTREAM`, three-way merges upstream's changes into the files we edited there, and relocks `mda/`; `--pr <n>` carries an upstream pull request not yet on main, recorded in `vendor/mda-upstream-prs`; `--diff` prints our changes ([`vendor/README.md`](../vendor/README.md)). Keep `deepagents` exactly pinned and refresh `mda/uv.lock` when bumping it; `--locked` rejects an out-of-date lockfile.
 
 Nothing here is generated from the backend: tools, subagents and models come from each run's `catalog`.
 

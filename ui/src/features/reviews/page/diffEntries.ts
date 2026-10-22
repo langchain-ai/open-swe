@@ -21,12 +21,11 @@ import {
 import { isAnchored, mirroredThreadIds, type AnchoredFinding } from "./findings"
 import type { CommentDraftTarget, DiffOrder, DiffTarget } from "./store"
 
-interface EntryStep {
+export interface EntryStep {
   index: number
   count: number
   title: string
   summary: string
-  first: boolean
 }
 
 /** One rendered slice of the diff: a whole file, or a guide step's part of one. */
@@ -37,9 +36,18 @@ export interface DiffEntry {
   additions: number
   deletions: number
   step: EntryStep | null
+  /** What marking it viewed records: the path for a whole file, the path and its hunks for a slice. */
+  readKey: string
+}
+
+/** A walkthrough step with the entries it shows, in reading order. */
+export interface StepGroup {
+  step: EntryStep
+  entries: ReadonlyArray<DiffEntry>
 }
 
 export type Note =
+  /** A walkthrough step's intro, on the item that opens the step. */
   | { kind: "step" }
   | { kind: "finding"; id: string }
   | { kind: "thread"; id: number }
@@ -95,7 +103,18 @@ function whole(file: ReviewDiffFile): EntryBody {
     fileDiff: wholeFileDiff(file),
     additions: file.additions,
     deletions: file.deletions,
+    readKey: file.path,
   }
+}
+
+function sliceKey(path: string, diff: FileDiffMetadata): string {
+  const hunks = diff.hunks
+    .map(
+      (hunk) =>
+        `${hunk.additionStart},${hunk.additionCount},${hunk.deletionStart},${hunk.deletionCount}`
+    )
+    .join(";")
+  return `${path}@${hunks}`
 }
 
 export function buildEntries(
@@ -135,14 +154,11 @@ export function buildEntries(
         fileDiff: sliced,
         additions: rangeLineCount(lines.added),
         deletions: rangeLineCount(lines.deleted),
+        readKey: sliceKey(file.path, sliced),
       })
     }
     if (entries.length === 0) continue
-    const group = {
-      title: step.title,
-      summary: step.other ? "" : step.summary,
-      entries,
-    }
+    const group = { title: step.title, summary: step.summary, entries }
     if (step.other) other = group
     groups.push(group)
   }
@@ -152,19 +168,33 @@ export function buildEntries(
     else
       groups.push({ title: "Everything else", summary: "", entries: leftover })
   }
-  return groups.flatMap((group, groupIndex) =>
-    group.entries.map((entry, i) => ({
+  return groups.flatMap((group, groupIndex) => {
+    const step = {
+      index: groupIndex + 1,
+      count: groups.length,
+      title: group.title,
+      summary: group.summary,
+    }
+    return group.entries.map((entry) => ({
       ...entry,
-      id: `${groupIndex + 1}:${entry.file.path}`,
-      step: {
-        index: groupIndex + 1,
-        count: groups.length,
-        title: group.title,
-        summary: group.summary,
-        first: i === 0,
-      },
+      id: `${step.index}:${entry.file.path}`,
+      step,
     }))
-  )
+  })
+}
+
+/** Guide entries gathered under their steps, in order; empty in file order. */
+export function groupSteps(
+  entries: ReadonlyArray<DiffEntry>
+): Array<StepGroup> {
+  const groups: Array<{ step: EntryStep; entries: Array<DiffEntry> }> = []
+  for (const entry of entries) {
+    if (!entry.step) continue
+    const last = groups.at(-1)
+    if (last?.step.index === entry.step.index) last.entries.push(entry)
+    else groups.push({ step: entry.step, entries: [entry] })
+  }
+  return groups
 }
 
 function containsLine(
@@ -230,8 +260,6 @@ export function entryNotes(
     entryShows(entry, path, line, side)
       ? { side: toPierreSide(side), lineNumber: line }
       : null
-  if (entry.step?.first)
-    notes.push({ side: "additions", lineNumber: 0, metadata: { kind: "step" } })
   const anchored = sources.findings.filter(
     (finding): finding is AnchoredFinding =>
       finding.file === path && isAnchored(finding)
@@ -271,13 +299,14 @@ export function entryNotes(
   return notes
 }
 
+/** Which note this is, across renders, wherever it sits in the file's list. */
+export function noteKey(note: Note): string {
+  return "id" in note ? `${note.kind}:${note.id}` : note.kind
+}
+
 export function notesSignature(notes: ReadonlyArray<NoteAnnotation>): string {
   return notes
-    .map((note) => {
-      const meta = note.metadata
-      const id = "id" in meta ? meta.id : ""
-      return `${meta.kind}:${id}:${note.side}:${note.lineNumber}`
-    })
+    .map((note) => `${noteKey(note.metadata)}:${note.side}:${note.lineNumber}`)
     .join("|")
 }
 
@@ -286,21 +315,11 @@ export function matchesFileFilter(path: string, filter: string): boolean {
   return !query || path.toLowerCase().includes(query)
 }
 
-/** Only entries whose file matches; each step keeps its intro on its first remaining entry. */
+/** Only entries whose file matches. */
 export function filterEntries(
   entries: ReadonlyArray<DiffEntry>,
   filter: string
 ): ReadonlyArray<DiffEntry> {
   if (!filter.trim()) return entries
-  const introduced = new Set<number>()
-  return entries
-    .filter((entry) => matchesFileFilter(entry.file.path, filter))
-    .map((entry) => {
-      if (!entry.step) return entry
-      const first = !introduced.has(entry.step.index)
-      introduced.add(entry.step.index)
-      return first === entry.step.first
-        ? entry
-        : { ...entry, step: { ...entry.step, first } }
-    })
+  return entries.filter((entry) => matchesFileFilter(entry.file.path, filter))
 }

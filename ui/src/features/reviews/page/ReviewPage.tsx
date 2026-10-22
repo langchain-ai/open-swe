@@ -28,6 +28,7 @@ export function ReviewPage({ pr }: { pr: PullRequestRef }) {
   const detail = useQuery(reviewQueries.detail(pr))
   const chatThreadId = useReviewChat(pr).data?.thread_id
   const open = useReviewPage((state) => state.open)
+  const leave = useReviewPage((state) => state.leave)
   const navigatorOpen = useReviewPage((state) => state.navigatorOpen)
   const navigatorOverlay = useReviewPage((state) => state.navigatorOverlay)
   const setNavigatorOverlay = useReviewPage(
@@ -44,6 +45,7 @@ export function ReviewPage({ pr }: { pr: PullRequestRef }) {
   const headSha = detail.data?.head_sha ?? null
 
   useLayoutEffect(() => open(pr, headSha), [open, pr, headSha])
+  useLayoutEffect(() => leave, [leave])
 
   // A new head means a new diff; the page stays mounted so nothing else resets.
   const seenSha = useRef(headSha)
