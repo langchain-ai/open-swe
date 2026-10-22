@@ -70,6 +70,7 @@ from langgraph.config import get_config
 from langgraph.runtime import Runtime
 from pydantic import BaseModel, JsonValue, TypeAdapter, ValidationError
 
+from openswe.dispatch import COMPLETION_WEBHOOK_URL
 from openswe.github.sandbox_access import READ_ONLY_REVIEW_PERMISSIONS
 from openswe.middleware.conversation_offloading import ConversationOffloadingMiddleware
 from openswe.middleware.dynamic_tools import DynamicToolMiddleware
@@ -409,6 +410,7 @@ class RunSession:
                 "described": {
                     name: prompt("tools/display-description") for name in _DESCRIBED_TOOLS
                 },
+                "worker_webhook": COMPLETION_WEBHOOK_URL if self._delegates else None,
             }
         )
 
