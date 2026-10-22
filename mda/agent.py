@@ -34,6 +34,7 @@ from rt.middleware import (
     RuntimeToolsMiddleware,
     ServedToolsMiddleware,
 )
+from rt.model_requests import SanitizeProviderMessagesMiddleware, StableToolResultOrderMiddleware
 from rt.models import RunModels, build_model
 from rt.tools import backend_tool
 
@@ -77,6 +78,11 @@ class OpenSweRunContext(BaseModel):
 def _backend_reports(backend: OpenSweBackend, served: Collection[str]) -> list[AgentMiddleware]:
     """The backend's transcript and usage see every reply, and every tool call."""
     return [ReportRepliesMiddleware(backend), RuntimeToolsMiddleware(backend, served)]
+
+
+def _model_requests() -> list[AgentMiddleware]:
+    """Fixes to each call's messages, inside the backend's choice of model so they fit it."""
+    return [StableToolResultOrderMiddleware(), SanitizeProviderMessagesMiddleware()]
 
 
 def _code_mode(
@@ -169,6 +175,7 @@ async def agent(runtime: ManagedServerRuntime) -> DeepAgentDefinition:
                     *replace_sandbox,
                     ServedToolsMiddleware(subagent_tools[subagent.name], excluded),
                     ModelRetryMiddleware(retry_on=(TimeoutError,)),
+                    *_model_requests(),
                 ],
             }
             for subagent in catalog.subagents
@@ -187,5 +194,6 @@ async def agent(runtime: ManagedServerRuntime) -> DeepAgentDefinition:
             *_browser(context.graph, backend),
             ModelCallLimitMiddleware(run_limit=_MODEL_CALL_LIMIT, exit_behavior="end"),
             ModelRetryMiddleware(retry_on=(TimeoutError,)),
+            *_model_requests(),
         ],
     )

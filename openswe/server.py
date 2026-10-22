@@ -109,10 +109,6 @@ from openswe.middleware import (
     ModelSelectionMiddleware,
     PullRequestCreationGuardMiddleware,
     RequireUserReplyMiddleware,
-    SanitizeFireworksMessagesMiddleware,
-    SanitizeOpenAIResponsesMiddleware,
-    SanitizeThinkingBlocksMiddleware,
-    StableToolResultOrderMiddleware,
     SubdirAgentsReadMiddleware,
     ToolErrorMiddleware,
     ValidateImageReadsMiddleware,
@@ -629,7 +625,6 @@ def _subagent_model_middleware() -> list[AgentMiddleware[Any, Any, Any]]:
     return cast(
         list[AgentMiddleware[Any, Any, Any]],
         [
-            SanitizeOpenAIResponsesMiddleware(),
             ModelErrorMiddleware(),
             ModelCallTimeoutMiddleware(),
         ],
@@ -2103,10 +2098,6 @@ async def build_agent(config: RunnableConfig, *, tool_surface: ToolSurface | Non
             fallback_middleware,
             *([image_fallback] if image_fallback else []),
             *([dynamic_tool_middleware] if dynamic_tool_middleware else []),
-            SanitizeFireworksMessagesMiddleware(),
-            SanitizeOpenAIResponsesMiddleware(),
-            SanitizeThinkingBlocksMiddleware(),
-            StableToolResultOrderMiddleware(),
             ModelErrorMiddleware(),
             # Innermost, so the deadline covers the provider call itself and a
             # timeout escalates outward to the fallback model.

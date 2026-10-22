@@ -20,10 +20,6 @@ _MIDDLEWARE_MODULES = {
     "refresh_github_proxy_before_model": ".refresh_github_proxy",
     "RepairOrphanedToolCallsMiddleware": ".repair_orphaned_tool_calls",
     "RequireUserReplyMiddleware": ".require_user_reply",
-    "SanitizeFireworksMessagesMiddleware": ".sanitize_fireworks_messages",
-    "SanitizeOpenAIResponsesMiddleware": ".sanitize_openai_responses",
-    "SanitizeThinkingBlocksMiddleware": ".sanitize_thinking_blocks",
-    "StableToolResultOrderMiddleware": ".stable_tool_order",
     "settle_review_check_on_exit": ".settle_review_check",
     "SubdirAgentsReadMiddleware": ".subdir_agents",
     "task_on_failure": ".task_retry",
@@ -47,10 +43,6 @@ __all__ = [
     "PullRequestCreationGuardMiddleware",
     "RepairOrphanedToolCallsMiddleware",
     "RequireUserReplyMiddleware",
-    "SanitizeFireworksMessagesMiddleware",
-    "SanitizeOpenAIResponsesMiddleware",
-    "SanitizeThinkingBlocksMiddleware",
-    "StableToolResultOrderMiddleware",
     "SubdirAgentsReadMiddleware",
     "ToolErrorMiddleware",
     "ValidateImageReadsMiddleware",
@@ -82,11 +74,7 @@ if TYPE_CHECKING:
     from openswe.middleware.refresh_github_proxy import refresh_github_proxy_before_model
     from openswe.middleware.repair_orphaned_tool_calls import RepairOrphanedToolCallsMiddleware
     from openswe.middleware.require_user_reply import RequireUserReplyMiddleware
-    from openswe.middleware.sanitize_fireworks_messages import SanitizeFireworksMessagesMiddleware
-    from openswe.middleware.sanitize_openai_responses import SanitizeOpenAIResponsesMiddleware
-    from openswe.middleware.sanitize_thinking_blocks import SanitizeThinkingBlocksMiddleware
     from openswe.middleware.settle_review_check import settle_review_check_on_exit
-    from openswe.middleware.stable_tool_order import StableToolResultOrderMiddleware
     from openswe.middleware.subdir_agents import SubdirAgentsReadMiddleware
     from openswe.middleware.task_retry import task_on_failure, task_retry_on
     from openswe.middleware.tool_error_handler import ToolErrorMiddleware
