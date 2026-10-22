@@ -1,7 +1,7 @@
-"""One-off questions: the `/oswe` slash command and `@Open SWE /btw`.
+"""One-off questions: Explain This and `@Open SWE /btw`.
 
 Each invocation gets an agent thread of its own, private to the asker and stamped
-``unlisted`` so one-off questions never fill anyone's thread list. `/oswe` answers
+``unlisted`` so one-off questions never fill anyone's thread list. Explain This answers
 ephemerally with the usual `Open in Web` link, and continuing it on the web clears
 that stamp. `/btw` answers in the Slack thread for everyone, without a link, and
 never touches the agent thread that Slack thread already maps to.
@@ -40,7 +40,6 @@ from openswe.workspaces.routing import resolve_workspace
 
 logger = logging.getLogger(__name__)
 
-ASK_COMMAND = "/oswe"
 BY_THE_WAY_COMMAND = SlackAction.BY_THE_WAY.value
 _CONTEXT_FENCE_RE = re.compile(r"<(\s*/?\s*untrusted_slack_context)", re.IGNORECASE)
 MAX_QUESTION_CHARS = 2000
@@ -53,8 +52,7 @@ _CHANNEL_CONTEXT_TRIMMED = "[earlier messages omitted to stay inside the context
 _NO_CHANNEL_CONTEXT = "(unavailable — this is not a public channel, or it has no messages)"
 _CHANNEL_REFUSAL = "Open SWE cannot answer questions in this channel."
 _START_FAILURE = "Open SWE could not start that request. Try again in a moment."
-_SHORTCUT_ACKNOWLEDGEMENT = "Working on it — I’ll send a separate reply, visible only to you."
-_ACKNOWLEDGEMENT = "Working on it — the answer will replace this message, visible only to you."
+_ACKNOWLEDGEMENT = "Working on it — I’ll send a separate reply, visible only to you."
 _BY_THE_WAY_USAGE = "Ask a question after it: `@Open SWE /btw how does thread routing work?`"
 _BY_THE_WAY_TOO_LONG = (
     "That question is too long for `/btw`. Tag Open SWE without `/btw` to start a thread instead."
@@ -66,7 +64,7 @@ class SlackAskRequest(BaseModel):
     user_id: str
     question: str
     thread_id: str
-    command: str = ASK_COMMAND
+    command: str = "Explain This"
     team_id: str = ""
     response_url: str = ""
     selected_message: str = ""
@@ -85,7 +83,7 @@ class SlackAskRequest(BaseModel):
 
 
 def ask_thread_id(channel_id: str, user_id: str, invocation: str) -> str:
-    """The thread for one `/oswe` or `/btw` invocation.
+    """The thread for one Explain This or `/btw` invocation.
 
     Derived rather than stored so the route can link to it inside Slack's three
     seconds. `invocation` is unique per command, so two questions never share a
@@ -205,10 +203,7 @@ async def _runnable_login(request: SlackAskRequest, login: str | None, email: st
 
 async def _process_slack_ask(request: SlackAskRequest) -> None:
     if request.response_url:
-        await acknowledge_slack_command(
-            request.response_url,
-            _SHORTCUT_ACKNOWLEDGEMENT if request.selected_message else _ACKNOWLEDGEMENT,
-        )
+        await acknowledge_slack_command(request.response_url, _ACKNOWLEDGEMENT)
     if request.by_the_way:
         await add_slack_reaction(request.channel_id, request.message_ts, "hourglass_flowing_sand")
         if not request.question:
@@ -298,11 +293,7 @@ async def _process_slack_ask(request: SlackAskRequest) -> None:
         "environment": workspace,
     }
     run_prompt = prompt(
-        "runs/slack-explain"
-        if request.selected_message
-        else "runs/slack-by-the-way"
-        if request.by_the_way
-        else "runs/slack-ask",
+        "runs/slack-by-the-way" if request.by_the_way else "runs/slack-explain",
         command=request.command,
         asked_by=user_name or f"<@{request.user_id}>",
         request=request.question,
@@ -325,7 +316,7 @@ async def _process_slack_ask(request: SlackAskRequest) -> None:
 
 
 async def process_slack_ask(request: SlackAskRequest) -> None:
-    """Answer one `/oswe` or `/btw` question, reporting any failure back to the asker."""
+    """Answer one Explain This or `/btw` question, reporting failures to the asker."""
     try:
         await _process_slack_ask(request)
     except Exception:
