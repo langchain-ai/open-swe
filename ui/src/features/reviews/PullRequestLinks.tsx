@@ -2,6 +2,7 @@ import { Button } from "@langchain/macaw-components/Button"
 import { Dialog, DialogContent } from "@langchain/macaw-components/Dialog"
 import { IconButton } from "@langchain/macaw-components/IconButton"
 import { Textarea } from "@langchain/macaw-components/Textarea"
+import { CornersOutIcon } from "@phosphor-icons/react/dist/ssr/CornersOut"
 import { GithubLogoIcon } from "@phosphor-icons/react/dist/ssr/GithubLogo"
 import { useMutation } from "@tanstack/react-query"
 import { Link, useNavigate } from "@tanstack/react-router"
@@ -12,18 +13,43 @@ import { DropdownMenuItem } from "@/components/MenuItem"
 import { SplitButton } from "@/components/SplitButton"
 import { api } from "@/lib/api"
 
+/** Opens the PR's full review page, the expanded form of its preview. */
+export function PullRequestPageLink({
+  repo,
+  number,
+}: {
+  repo: string
+  number: number
+}) {
+  const [owner, name] = repo.split("/")
+  return (
+    <IconButton
+      asChild
+      icon={CornersOutIcon}
+      label="Open full page"
+      size="xs"
+      color="secondary"
+      variant="plain"
+    >
+      <Link
+        to="/agents/reviews/$owner/$repo/$number"
+        params={{ owner: owner!, repo: name!, number: String(number) }}
+      />
+    </IconButton>
+  )
+}
+
 export function PullRequestLinks({
   repo,
   number,
   title,
-  onReviewPage = false,
+  pageLink = true,
 }: {
   repo: string
   number: number
   title: string
-  onReviewPage?: boolean
+  pageLink?: boolean
 }) {
-  const [owner, name] = repo.split("/")
   const navigate = useNavigate()
   const [messageOpen, setMessageOpen] = useState(false)
   const [message, setMessage] = useState("")
@@ -118,42 +144,22 @@ export function PullRequestLinks({
             </form>
           </DialogContent>
         </Dialog>
-        {!onReviewPage && (
-          <>
-            <Button
-              size="xs"
-              color="secondary"
-              variant="plain"
-              as={
-                <Link
-                  to="/agents/reviews/$owner/$repo/$number"
-                  params={{
-                    owner: owner!,
-                    repo: name!,
-                    number: String(number),
-                  }}
-                />
-              }
-            >
-              Reviewer
-            </Button>
-            <IconButton
-              asChild
-              icon={GithubLogoIcon}
-              label="GitHub"
-              size="xs"
-              color="secondary"
-              variant="plain"
-              tooltipProps={{ title: "Open on GitHub" }}
-            >
-              <a
-                href={`https://github.com/${repo}/pull/${number}`}
-                target="_blank"
-                rel="noreferrer"
-              />
-            </IconButton>
-          </>
-        )}
+        {pageLink && <PullRequestPageLink repo={repo} number={number} />}
+        <IconButton
+          asChild
+          icon={GithubLogoIcon}
+          label="GitHub"
+          size="xs"
+          color="secondary"
+          variant="plain"
+          tooltipProps={{ title: "Open on GitHub" }}
+        >
+          <a
+            href={`https://github.com/${repo}/pull/${number}`}
+            target="_blank"
+            rel="noreferrer"
+          />
+        </IconButton>
       </span>
     </div>
   )

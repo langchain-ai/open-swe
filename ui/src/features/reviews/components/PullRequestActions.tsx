@@ -27,7 +27,7 @@ export function PullRequestActions({
   onSettled,
   onSettledConfirmed,
   onReady,
-  onReviewPage = false,
+  pageLink = true,
 }: {
   pr: OpenPullRequest
   login: string
@@ -36,7 +36,8 @@ export function PullRequestActions({
   /** Runs once GitHub confirms a merge or close; the list leaves it unset to keep the row. */
   onSettledConfirmed?: () => void
   onReady: () => void
-  onReviewPage?: boolean
+  /** The preview shows its page link in its own header instead. */
+  pageLink?: boolean
 }) {
   const settle = (next: PullRequestOutcome) => {
     onSettled(next)
@@ -87,7 +88,7 @@ export function PullRequestActions({
         repo={pr.repo}
         number={pr.number}
         title={pr.title}
-        onReviewPage={onReviewPage}
+        pageLink={pageLink}
       />
     </div>
   )
