@@ -214,7 +214,40 @@ test("restores sidebar navigation, pins, view controls, and search", async ({
 
   await sidebar.getByRole("button", { name: "Collapse sidebar" }).click();
   await expect(sidebar).toHaveCount(0);
-  await page.getByRole("button", { name: "Expand sidebar" }).click();
+  const title = conversation(page).getByRole("heading", { level: 1 });
+  const expandSidebar = page.getByRole("button", { name: "Expand sidebar" });
+  const filesButton = page.getByRole("button", { name: "Files and terminal" });
+  const showPanel = page.getByRole("button", {
+    name: "Show panel",
+    exact: true,
+  });
+  await expect(async () => {
+    const titleBox = await title.boundingBox();
+    const sidebarBox = await expandSidebar.boundingBox();
+    const filesBox = await filesButton.boundingBox();
+    const panelBox = await showPanel.boundingBox();
+    expect(titleBox).not.toBeNull();
+    expect(sidebarBox).not.toBeNull();
+    expect(filesBox).not.toBeNull();
+    expect(panelBox).not.toBeNull();
+    expect(titleBox!.x).toBeGreaterThan(sidebarBox!.x + sidebarBox!.width);
+    expect(filesBox!.x + filesBox!.width).toBeLessThan(panelBox!.x);
+    expect(
+      Math.abs(
+        titleBox!.y +
+          titleBox!.height / 2 -
+          (sidebarBox!.y + sidebarBox!.height / 2),
+      ),
+    ).toBeLessThan(1);
+    expect(
+      Math.abs(
+        filesBox!.y +
+          filesBox!.height / 2 -
+          (panelBox!.y + panelBox!.height / 2),
+      ),
+    ).toBeLessThan(1);
+  }).toPass();
+  await expandSidebar.click();
   await expect(sidebar).toBeVisible();
   await sidebar.getByRole("link", { name: "Skills", exact: true }).click();
   await expect(page).toHaveURL(/\/agents\/skills$/);
@@ -463,7 +496,7 @@ test("standard mode still sends, and the setting applies to the same existing th
   );
   await page.goto("/feature-flags");
   const toggle = page.getByRole("switch", {
-    name: "Assistant UI (experimental)",
+    name: "Assistant UI",
   });
   await expect(toggle).toHaveAttribute("aria-checked", "false");
   await toggle.click();

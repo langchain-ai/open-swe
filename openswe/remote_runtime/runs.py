@@ -34,7 +34,8 @@ def run_config(run: RemoteRun) -> RunnableConfig:
             **run.configurable,
             "thread_id": run.thread_id,
             "__is_for_execution__": True,
-        }
+        },
+        "metadata": dict(run.metadata),
     }
 
 

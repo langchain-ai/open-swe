@@ -171,12 +171,11 @@ export function buildProfileUpdate(
 ): ProfileUpdate {
   return {
     default_repo: current?.default_repo ?? null,
+    workspace_default_repos: current?.workspace_default_repos ?? {},
     base_branch: current?.base_branch ?? null,
     branch_prefix: current?.branch_prefix ?? null,
     auto_fix_ci: current?.auto_fix_ci ?? true,
     auto_human_review_enabled: current?.auto_human_review_enabled ?? true,
-    recent_thread_context_enabled:
-      current?.recent_thread_context_enabled ?? false,
     draft_prs: current?.draft_prs ?? true,
     review_draft_prs: current?.review_draft_prs ?? null,
     experimental_assistant_ui: current?.experimental_assistant_ui ?? null,

@@ -1,7 +1,7 @@
 """Typed construction and serialization for application-owned model inputs."""
 
 import hashlib
-from collections.abc import Iterator, Mapping, Sequence
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from html import escape
 from typing import Any, Literal, NotRequired, TypedDict
@@ -220,7 +220,7 @@ def delivered_event_match_ids(messages: Sequence[object]) -> set[str]:
     }
 
 
-def _dynamic_context_roots(content: object) -> Iterator[ElementTree.Element]:
+def _dynamic_context(content: object) -> tuple[tuple[str, str], str] | None:
     values = content if isinstance(content, list) else [content]
     for value in values:
         text = value.get("text") if isinstance(value, dict) else value
@@ -230,30 +230,32 @@ def _dynamic_context_roots(content: object) -> Iterator[ElementTree.Element]:
             root = ElementTree.fromstring(text)
         except ElementTree.ParseError:
             continue
-        if root.tag == "dynamic-context":
-            yield root
-
-
-def dynamic_context_hash(content: object) -> str | None:
-    for root in _dynamic_context_roots(content):
+        if root.tag != "dynamic-context":
+            continue
         claimed_hash = root.attrib.pop("hash", None)
         canonical = ElementTree.tostring(root, encoding="unicode")
         context_hash = hashlib.sha256(canonical.encode()).hexdigest()
         if claimed_hash is None or claimed_hash == context_hash:
-            return context_hash
+            key = (root.get("kind", ""), root.get("id") or context_hash)
+            return key, context_hash
     return None
+
+
+def dynamic_context_hash(content: object) -> str | None:
+    context = _dynamic_context(content)
+    return context[1] if context else None
 
 
 def introduced_person_ids(messages: object) -> set[str]:
     """Ids of every person a context block in ``messages`` has described."""
     if not isinstance(messages, (list, tuple)):
         return set()
-    return {
-        root.attrib["id"]
-        for message in messages
-        for root in _dynamic_context_roots(_message_content(message))
-        if root.attrib.get("kind") == "person" and "id" in root.attrib
-    }
+    ids: set[str] = set()
+    for message in messages:
+        context = _dynamic_context(_message_content(message))
+        if context is not None and context[0][0] == "person":
+            ids.add(context[0][1])
+    return ids
 
 
 def _message_content(message: object) -> object:
@@ -268,12 +270,13 @@ def _message_content(message: object) -> object:
 def dynamic_context_hashes_from_messages(messages: object) -> set[str]:
     if not isinstance(messages, (list, tuple)):
         return set()
-    hashes: set[str] = set()
+    latest: dict[tuple[str, str], str] = {}
     for message in messages:
-        context_hash = dynamic_context_hash(_message_content(message))
-        if context_hash is not None:
-            hashes.add(context_hash)
-    return hashes
+        context = _dynamic_context(_message_content(message))
+        if context is not None:
+            key, context_hash = context
+            latest[key] = context_hash
+    return set(latest.values())
 
 
 def visible_dynamic_context_hashes(state: Mapping[str, Any]) -> set[str]:

@@ -42,6 +42,22 @@ def _tool_args(request: ToolCallRequest) -> dict[str, Any]:
     return dict(args) if isinstance(args, Mapping) else {}
 
 
+# Tools whose arguments run as shell in the sandbox, and which arguments do:
+# a monitor runs its filter as a second command beside its command.
+SHELL_TOOL_ARGS: Mapping[str, tuple[str, ...]] = {
+    "execute": ("command",),
+    "background_execute": ("command",),
+    "monitor": ("command", "filter"),
+}
+
+
+def shell_commands(request: ToolCallRequest) -> list[str]:
+    """Every shell string ``request`` would run in the sandbox."""
+    names = SHELL_TOOL_ARGS.get(_tool_name(request) or "", ())
+    args = _tool_args(request)
+    return [value for name in names if isinstance(value := args.get(name), str) and value]
+
+
 def _tool_call_id(request: ToolCallRequest) -> str | None:
     tool_call = getattr(request, "tool_call", None)
     if isinstance(tool_call, Mapping):
@@ -261,12 +277,10 @@ class PullRequestCreationGuardMiddleware(OpenSWEMiddleware):
     state_schema = AgentState
 
     def _blocked_message_for_request(self, request: ToolCallRequest) -> ToolMessage | None:
-        if _tool_name(request) not in {"execute", "background_execute"}:
-            return None
-        command = _tool_args(request).get("command")
-        if not isinstance(command, str) or not is_pr_creation_fallback_command(command):
-            return None
-        return _blocked_tool_message(request, command)
+        for command in shell_commands(request):
+            if is_pr_creation_fallback_command(command):
+                return _blocked_tool_message(request, command)
+        return None
 
     def wrap_tool_call(
         self,

@@ -11,6 +11,8 @@ type KeyedTopic =
   | "incidents"
   | "pull-requests"
   | "thread-queues"
+  | "thread-browsers"
+  | "thread-background-work"
 
 export type InvalidationTopic = string
 

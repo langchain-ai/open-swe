@@ -14,7 +14,7 @@ from datetime import UTC, datetime
 from typing import Any
 
 from langgraph_sdk import get_client
-from sqlalchemy import delete, select, update
+from sqlalchemy import ForeignKeyConstraint, delete, select, update
 from sqlalchemy.dialects.postgresql import JSONB, insert
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -36,6 +36,14 @@ class ThreadPlan(Base):
 
 class PlanComment(Base):
     __tablename__ = "thread_plan_comment"
+    __table_args__ = (
+        ForeignKeyConstraint(
+            ["thread_id", "parent_id"],
+            ["thread_plan_comment.thread_id", "thread_plan_comment.id"],
+            ondelete="SET NULL (parent_id)",
+            name="thread_plan_comment_parent_fk",
+        ),
+    )
 
     thread_id: Mapped[str] = mapped_column(primary_key=True)
     id: Mapped[str] = mapped_column(primary_key=True)
@@ -44,6 +52,7 @@ class PlanComment(Base):
     body: Mapped[str]
     anchor: Mapped[JsonObject | None] = mapped_column(JSONB)
     created_at: Mapped[datetime]
+    parent_id: Mapped[str | None] = mapped_column(default=None)
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -51,6 +60,7 @@ class PlanComment(Base):
             "author": self.author,
             "author_login": self.author_login,
             "body": self.body,
+            "parent_id": self.parent_id,
             "anchor": self.anchor,
             "created_at": self.created_at.astimezone(UTC).isoformat(),
         }
@@ -208,6 +218,7 @@ async def add_plan_comment(
     author_login: str,
     body: str,
     anchor: dict[str, Any] | None,
+    parent_id: str | None = None,
 ) -> dict[str, Any]:
     """Append an anchored comment; returns the stored comment."""
     comment = PlanComment(
@@ -217,6 +228,7 @@ async def add_plan_comment(
         author_login=author_login,
         body=body,
         anchor=anchor,
+        parent_id=parent_id,
         created_at=datetime.now(UTC),
     )
     async with postgres.session() as session:

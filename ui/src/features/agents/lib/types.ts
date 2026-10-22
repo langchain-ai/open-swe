@@ -324,6 +324,8 @@ export interface AgentSchedule {
   lastTriggeredAt?: string | null
   lastError?: string | null
   lastErrorAt?: string | null
+  createdBy?: string | null
+  updatedBy?: string | null
   createdAt?: string | null
   updatedAt?: string | null
 }
@@ -343,6 +345,41 @@ export interface QueuedThreadMessage {
 }
 
 /** A message in the thread's queue, as `/threads/{id}/queued-messages` returns it. */
+export interface AgentBackgroundCommand {
+  task_id: string
+  command: string | null
+  status: string
+  started_at: number | null
+}
+
+export interface AgentThreadMonitor {
+  monitor_id: string
+  description: string
+  command: string
+  filter: string
+  status: string
+  started_at: number | null
+  timeout: number | null
+  events: number
+  raw_lines: number
+}
+
+/** What a thread's monitors used of the allowance its last human message opened. */
+export interface AgentMonitorBudget {
+  events: number
+  max_events: number
+  starts: number
+  max_starts: number
+  window_ends_at: number
+}
+
+/** The sandbox commands and monitors running for a thread. */
+export interface AgentBackgroundWork {
+  commands: Array<AgentBackgroundCommand>
+  monitors: Array<AgentThreadMonitor>
+  monitor_budget: AgentMonitorBudget | null
+}
+
 export interface AgentQueuedMessage {
   id: string
   text: string
@@ -569,6 +606,12 @@ export interface AgentThread {
   sandboxBridgeClient?: "cli" | "desktop" | null
   /** Whether that machine is serving the thread's checkout right now; null in lists. */
   sandboxBridgeOnline?: boolean | null
+  /**
+   * The thread's LangSmith browser: "opened" once the agent or a person has
+   * opened it, "available" while it can be opened, null before the agent's
+   * first run names it.
+   */
+  browser?: "opened" | "available" | null
   messages: Array<Message>
   pendingMessages?: Array<PendingThreadMessage>
   pr?: AgentPullRequestSummary

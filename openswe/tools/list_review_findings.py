@@ -16,6 +16,7 @@ from openswe.review.findings import ReviewerThreadMissingError
 from openswe.review.findings import list_findings as list_findings_async
 from openswe.run_config import RunConfig
 from openswe.slack.client import parse_github_pr_url
+from openswe.threads import index
 from openswe.tools.mcp_exposure import expose_mcp
 
 _COMPACT_FIELDS = (
@@ -57,7 +58,9 @@ async def list_review_findings(
             await require_repo_access_for_user(caller, f"{pr_ref.owner}/{pr_ref.repo}")
         except HTTPException as exc:
             return {"findings": [], "count": 0, "error": f"Repository access denied: {exc.detail}"}
-        reviewer_thread_id = thread_ids.reviewer_thread_id(pr_ref.owner, pr_ref.repo, pr_ref.number)
+        reviewer_thread_id = await index.current_thread_id(
+            thread_ids.reviewer_thread_id(pr_ref.owner, pr_ref.repo, pr_ref.number)
+        )
     if not reviewer_thread_id:
         return {"findings": [], "count": 0, "error": "reviewer thread unavailable"}
 

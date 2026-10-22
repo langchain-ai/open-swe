@@ -143,9 +143,12 @@ def test_recent_context_audience_fails_closed_for_shared_destinations() -> None:
     middleware = object.__new__(PrepareAgentRunMiddleware)
     middleware._profile_login = "alice"
     middleware._credential_login = "alice"
-    middleware._recent_thread_context_enabled = True
-    middleware._source = "github"
+    middleware._source = "dashboard"
 
+    assert middleware._recent_context_audience(RunConfig()) == "private"
+    assert middleware._recent_context_audience(RunConfig(background_task_completion=True)) is None
+
+    middleware._source = "github"
     assert middleware._recent_context_audience(RunConfig()) is None
 
     middleware._source = "dashboard"

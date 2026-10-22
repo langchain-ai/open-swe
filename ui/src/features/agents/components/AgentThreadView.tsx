@@ -32,6 +32,7 @@ import type {
   ThreadFixScope,
 } from "@/features/agents/lib/types"
 import type { ModelSelection } from "@/features/agents/lib/provider/useModelOptions"
+import { BackgroundWorkSidebar } from "@/features/agents/components/BackgroundWorkSidebar"
 import { AgentGitPanel } from "@/features/agents/components/AgentGitPanel"
 import { AgentThreadHeader } from "@/features/agents/components/AgentThreadHeader"
 import { SIBLING_COLUMN_MIN_WIDTH } from "@/features/agents/components/panel/RightPanelShell"
@@ -990,6 +991,7 @@ export function AgentThreadView({
           )}
         </div>
       </div>
+      {!reviewChat && <BackgroundWorkSidebar threadId={thread.id} />}
       {/* The review page is already the diff; a second panel only squeezes the chat. */}
       {!reviewChat && (
         <AgentGitPanel

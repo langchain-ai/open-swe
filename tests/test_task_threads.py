@@ -16,7 +16,7 @@ from openswe.tasks import messages as task_messages
 from openswe.tasks.messages import TaskMessage
 from openswe.tasks.presentation import TaskEventMetadata
 from openswe.tasks.schemas import ThreadMetadata
-from openswe.threads import access, creation, handlers
+from openswe.threads import access, handlers
 from openswe.users import User
 from openswe.users.models import UserIdentity
 from openswe.webhooks import event_matches
@@ -203,11 +203,12 @@ def client(monkeypatch: pytest.MonkeyPatch) -> MagicMock:
     monkeypatch.setattr(service, "get_profile", AsyncMock(return_value={}))
     monkeypatch.setattr(service, "resolve_run_email", AsyncMock(return_value=None))
     monkeypatch.setattr(service, "COMPLETION_WEBHOOK_URL", "https://example.test/completion")
-    monkeypatch.setattr(creation, "_owner_prefers_tools_in_sandbox", AsyncMock(return_value=False))
     from openswe import dispatch
     from openswe.slack import thinking
 
-    monkeypatch.setattr(dispatch, "_run_user_id", AsyncMock(return_value=None))
+    monkeypatch.setattr(
+        dispatch, "_run_user_metadata", AsyncMock(return_value={"ls_repo_provider": "github"})
+    )
     monkeypatch.setattr(thinking, "sync_slack_background_status", AsyncMock())
     monkeypatch.setattr(service, "interrupt_transcript_turns", AsyncMock())
     monkeypatch.setattr(service, "cancel_thread_wakeups", AsyncMock())
