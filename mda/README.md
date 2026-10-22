@@ -17,7 +17,7 @@ The model loop and its checkpoints run here. Everything else is the in-process O
 - **State:** graph state those hooks write that MDA does not know rides in `open_swe_state` and goes back with every call. Custom stream events they emit are re-emitted here, so the UI gets them too.
 - **MDA-native behaviour:** model-call shaping stays MDA's own: retries, the fallback model the backend names, call limits, caching, and automatic summarization.
 
-The run's context carries the signed run token and the models dispatch picked. The backend's thread router also sets the run's LangSmith tracing project to the backend's, so every graph's traces stay in one project whichever runtime runs them. The backend reads the thread and run configuration from the token, never from the request body. This deployment holds no GitHub, Slack or database credentials.
+The run's context carries the signed run token, the run's configuration and the models dispatch picked. The backend's thread router also sets the run's LangSmith tracing project to the backend's, so every graph's traces stay in one project whichever runtime runs them. Every call echoes the configuration in its body as dispatch wrote it, and the backend accepts it only when it matches the hash the token signs; the thread comes from the token alone. The token therefore stays a fixed, small size however large the configuration grows. This deployment holds no GitHub, Slack or database credentials.
 
 This directory is its own project and is never imported by the backend.
 

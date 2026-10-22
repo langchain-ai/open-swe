@@ -1,8 +1,10 @@
 """The Open SWE backend this deployment calls back into, as the current run.
 
-Dispatch signs a run token into each run's context. The backend reads the thread,
-repository and run configuration from that token, so nothing the model writes can
-point a call elsewhere. Every call is ``POST /remote-runtime/hooks/{hook}``.
+Dispatch signs a run token into each run's context, beside the run's configuration.
+Every call is ``POST /remote-runtime/hooks/{hook}`` with the token as its bearer
+token and the configuration in its body. The backend reads the thread from the
+token and accepts the configuration only when it matches the hash the token signs,
+so nothing the model writes can point a call elsewhere.
 """
 
 import asyncio
@@ -26,6 +28,8 @@ logger = logging.getLogger(__name__)
 BACKEND_URL_ENV: Final = "OPEN_SWE_BACKEND_URL"
 # Graph state the backend's hooks read that MDA's own middleware keeps.
 _FORWARDED_STATE_KEYS: Final = ("run_model_call_count", "thread_model_call_count")
+# The body key the backend reads the run's configuration from.
+_RUN_CONFIG_KEY: Final = "run_config"
 # Preparation waits on the review scout's walkthrough for up to ten minutes; a tool
 # call can run a long command.
 _LONG_CALL_SECONDS: Final = 1800.0
@@ -213,14 +217,16 @@ def _hook_failure(response: httpx2.Response) -> HookFailure | None:
 
 
 class OpenSweBackend:
-    """The Open SWE backend, called with one run's token."""
+    """The Open SWE backend, called with one run's token and configuration."""
 
-    def __init__(self, run_token: str | None) -> None:
+    def __init__(self, run_token: str | None, run_config: str | None = None) -> None:
         base = os.environ.get(BACKEND_URL_ENV, "").strip().rstrip("/")
         if not base:
             raise BackendCallError(f"{BACKEND_URL_ENV} is not configured")
         self._base = base
         self._run_token = run_token
+        # Echoed unchanged: the token signs a hash of this exact text.
+        self._run_config = run_config
 
     @property
     def has_run(self) -> bool:
@@ -245,7 +251,10 @@ class OpenSweBackend:
                 response = await _CONNECTIONS.client().post(
                     f"{self._base}/remote-runtime/hooks/{hook}",
                     headers={"Authorization": f"Bearer {self._run_token}"},
-                    json=dict(body or {}),
+                    json={
+                        **(body or {}),
+                        **({_RUN_CONFIG_KEY: self._run_config} if self._run_config else {}),
+                    },
                     timeout=seconds,
                 )
                 response.raise_for_status()

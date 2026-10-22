@@ -8,6 +8,7 @@ from starlette.types import Message, Receive, Scope, Send
 from openswe.remote_runtime.server import RunTokenMiddleware
 from openswe.remote_runtime.tokens import (
     RemoteRun,
+    RunTicket,
     RuntimeTokenError,
     sign_runtime_token,
     verify_runtime_token,
@@ -190,7 +191,50 @@ async def test_reviewer_tools_get_a_github_token_on_a_replica_that_did_not_prepa
 
 
 def test_run_token_round_trips_the_signed_run() -> None:
-    assert verify_runtime_token(sign_runtime_token(RUN)) == RUN
+    token = sign_runtime_token(RUN)
+
+    assert verify_runtime_token(token).run(RUN.config_text()) == RUN
+    assert "cfg" not in jwt.decode(token, options={"verify_signature": False})
+
+
+@pytest.mark.parametrize(
+    "config_text",
+    [
+        pytest.param(None, id="missing"),
+        pytest.param(
+            RUN.model_copy(
+                update={"configurable": {**RUN.configurable, "pr_number": 8}}
+            ).config_text(),
+            id="tampered",
+        ),
+        # Equal as JSON, but not the text the token signed.
+        pytest.param(json.dumps(json.loads(RUN.config_text()), indent=2), id="reformatted"),
+    ],
+)
+def test_run_token_refuses_a_configuration_it_did_not_sign(config_text: str | None) -> None:
+    ticket = verify_runtime_token(sign_runtime_token(RUN))
+
+    with pytest.raises(RuntimeTokenError):
+        ticket.run(config_text)
+
+
+def test_run_token_signed_with_the_configuration_still_verifies() -> None:
+    now = int(time.time())
+    token = jwt.encode(
+        {
+            "iss": "open-swe",
+            "aud": "open-swe-remote-runtime",
+            "iat": now,
+            "exp": now + 60,
+            "sub": RUN.thread_id,
+            "assistant_id": RUN.assistant_id,
+            "cfg": RUN.configurable,
+        },
+        "current-signing-key-0123456789abcdef",
+        algorithm="HS256",
+    )
+
+    assert verify_runtime_token(token).run(None) == RUN
 
 
 def test_run_token_signed_with_a_rotated_out_key_still_verifies(
@@ -256,11 +300,11 @@ def test_run_token_refuses_tokens_this_backend_did_not_issue(token: str) -> None
         verify_runtime_token(token)
 
 
-async def _status(authorization: str | None) -> tuple[int, RemoteRun | None]:
-    seen: list[RemoteRun] = []
+async def _status(authorization: str | None) -> tuple[int, RunTicket | None]:
+    seen: list[RunTicket] = []
 
     async def inner(scope: Scope, receive: Receive, send: Send) -> None:
-        seen.append(scope["state"]["remote_run"])
+        seen.append(scope["state"]["run_ticket"])
         await send({"type": "http.response.start", "status": 200, "headers": []})
         await send({"type": "http.response.body", "body": b""})
 
@@ -284,7 +328,10 @@ async def test_tool_server_refuses_calls_without_a_valid_run_token() -> None:
 
 
 async def test_tool_server_hands_the_verified_run_to_its_handlers() -> None:
-    assert await _status(f"Bearer {sign_runtime_token(RUN)}") == (200, RUN)
+    status, ticket = await _status(f"Bearer {sign_runtime_token(RUN)}")
+
+    assert status == 200
+    assert ticket is not None and ticket.run(RUN.config_text()) == RUN
 
 
 async def test_mda_catalog_leaves_integrations_and_code_mode_to_mda(

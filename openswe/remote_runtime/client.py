@@ -26,13 +26,16 @@ _json_object = TypeAdapter(dict[str, JsonValue])
 _hosted_graph = TypeAdapter(HostedGraph)
 
 
-# The run context the MDA deployment builds its graph from. The token's key is a
-# dunder so it stays out of the trace metadata the Agent Server mirrors context into.
+# The run context the MDA deployment builds its graph from. The token's and the
+# configuration's keys are dunders so they stay out of the trace metadata the Agent
+# Server mirrors context into.
 RemoteRunContext = TypedDict(
     "RemoteRunContext",
     {
         "graph": HostedGraph,
         "__run_token": str,
+        # The configuration the token signs a hash of, which every hook call echoes.
+        "__run_config": str,
         "invocation_id": NotRequired[str],
         "models": NotRequired[dict[str, JsonValue]],
     },
@@ -79,19 +82,17 @@ async def remote_run_context(
 ) -> RemoteRunContext:
     """Everything an MDA run needs, since a run takes either context or configurable.
 
-    The configurable and metadata ride inside the signed token; the deployment calls
-    back with the token rather than reading it.
+    The configurable and the hooks' metadata ride beside the token that signs their
+    hash; the deployment calls back with both rather than reading either.
     """
     if assistant_id not in HOSTED_GRAPHS:
         raise RemoteRuntimeConfigurationError(f"Managed Deep Agents does not host {assistant_id}")
     graph = _hosted_graph.validate_python(assistant_id)
-    token = sign_runtime_token(
-        RemoteRun(
-            thread_id=thread_id,
-            assistant_id=assistant_id,
-            configurable=_json_object.validate_python(configurable),
-            metadata=_json_object.validate_python(metadata),
-        )
+    run = RemoteRun(
+        thread_id=thread_id,
+        assistant_id=assistant_id,
+        configurable=_json_object.validate_python(configurable),
+        metadata=_json_object.validate_python(metadata),
     )
     # The webapp must not import the agent stack at startup.
     from openswe.remote_runtime.hosted import hosted_graphs
@@ -100,7 +101,8 @@ async def remote_run_context(
     models = await hosted_graphs()[graph].start_models(cfg)
     context: RemoteRunContext = {
         "graph": graph,
-        "__run_token": token,
+        "__run_token": sign_runtime_token(run),
+        "__run_config": run.config_text(),
         "models": models.model_dump(mode="json"),
     }
     if cfg.invocation_id:

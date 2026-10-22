@@ -1,16 +1,21 @@
 """Run tokens: the identity a remotely hosted run carries back to this backend.
 
-Dispatch signs one per run and stamps it on the run's configurable. The remote
-runtime sends it as a bearer token on every tool server call, and the tool server
-reads the thread and run configuration and metadata from the verified claims, never
-from tool arguments the model controls.
+Dispatch signs one per run and stamps it, with the run's configuration and the
+run metadata its hooks read, on the run's context. The remote runtime sends the
+token as a bearer token on every tool server call and echoes the configuration in
+the body. The token signs only a hash of that configuration, so it stays small
+enough for a header whatever the run carries, and the tool server accepts the
+configuration only when it matches. Nothing the model controls can change either.
 """
 
+import hashlib
+import hmac
+import json
 import time
 from typing import Final
 
 import jwt
-from pydantic import BaseModel, ConfigDict, JsonValue, ValidationError
+from pydantic import BaseModel, ConfigDict, JsonValue, TypeAdapter, ValidationError
 
 from openswe.config import ENV
 
@@ -22,6 +27,7 @@ _ALGORITHM: Final = "HS256"
 _TTL_SECONDS: Final = 48 * 60 * 60
 _LEEWAY_SECONDS: Final = 60
 _REQUIRED_CLAIMS: Final = ("exp", "iat", "iss", "aud", "sub")
+_json_object = TypeAdapter(dict[str, JsonValue])
 
 
 class RuntimeTokenError(Exception):
@@ -37,6 +43,59 @@ class RemoteRun(BaseModel):
     assistant_id: str
     configurable: dict[str, JsonValue]
     metadata: dict[str, JsonValue] = {}
+
+    def config_text(self) -> str:
+        """The configurable and metadata as the exact text the token's hash covers.
+
+        The runtime echoes this text unchanged, so no JSON round trip on the way
+        (a number turning into a float, say) can break the match.
+        """
+        return json.dumps(
+            {"configurable": self.configurable, "metadata": self.metadata},
+            sort_keys=True,
+            separators=(",", ":"),
+        )
+
+
+class RunTicket(BaseModel):
+    """What a verified token proves: the run, short of the configuration it was signed with."""
+
+    model_config = ConfigDict(frozen=True)
+
+    thread_id: str
+    assistant_id: str
+    config_sha256: str | None = None
+    # Tokens signed before the hash carried the configuration itself. Accepted until
+    # they expire, so runs dispatched before the change keep working.
+    configurable: dict[str, JsonValue] | None = None
+    metadata: dict[str, JsonValue] = {}
+
+    def run(self, config_text: str | None) -> RemoteRun:
+        """The run, with ``config_text`` as its configuration if the token signed it."""
+        if self.configurable is not None:
+            return RemoteRun(
+                thread_id=self.thread_id,
+                assistant_id=self.assistant_id,
+                configurable=self.configurable,
+                metadata=self.metadata,
+            )
+        if (
+            config_text is None
+            or self.config_sha256 is None
+            or not hmac.compare_digest(_sha256(config_text), self.config_sha256)
+        ):
+            raise RuntimeTokenError("run configuration does not match the token")
+        try:
+            signed = _json_object.validate_json(config_text)
+            return RemoteRun.model_validate(
+                {**signed, "thread_id": self.thread_id, "assistant_id": self.assistant_id}
+            )
+        except ValidationError as exc:
+            raise RuntimeTokenError("malformed run configuration") from exc
+
+
+def _sha256(text: str) -> str:
+    return hashlib.sha256(text.encode()).hexdigest()
 
 
 def _signing_keys() -> list[str]:
@@ -60,8 +119,7 @@ def sign_runtime_token(run: RemoteRun, *, now: int | None = None) -> str:
         "exp": issued_at + _TTL_SECONDS,
         "sub": run.thread_id,
         "assistant_id": run.assistant_id,
-        "cfg": run.configurable,
-        "md": run.metadata,
+        "cfg_sha256": _sha256(run.config_text()),
     }
     return jwt.encode(claims, keys[0], algorithm=_ALGORITHM)
 
@@ -85,16 +143,19 @@ def _decode(token: str, keys: list[str]) -> dict[str, object]:
     raise RuntimeTokenError("InvalidSignatureError")
 
 
-def verify_runtime_token(token: str) -> RemoteRun:
+def verify_runtime_token(token: str) -> RunTicket:
     keys = _signing_keys()
     if not keys:
         raise RuntimeTokenError("REMOTE_RUNTIME_TOKEN_SECRET is not configured")
     claims = _decode(token, keys)
+    if claims.get("cfg_sha256") is None and claims.get("cfg") is None:
+        raise RuntimeTokenError("malformed claims")
     try:
-        return RemoteRun.model_validate(
+        return RunTicket.model_validate(
             {
                 "thread_id": claims.get("sub"),
                 "assistant_id": claims.get("assistant_id"),
+                "config_sha256": claims.get("cfg_sha256"),
                 "configurable": claims.get("cfg"),
                 "metadata": claims.get("md", {}),
             }

@@ -3,9 +3,9 @@
 Every call is ``POST /remote-runtime/hooks/{hook}`` with a JSON body: the graph's
 catalog, each phase of the run's model loop, and its tool calls (see
 ``openswe.remote_runtime.graph``). The middleware verifies the bearer token once
-per request and leaves the verified run for the handler, which picks the graph
-the token was signed for and reads the thread and run configuration from it,
-never from the body.
+per request and leaves what it proves for the handler. The handler takes the run's
+configuration from the body's ``run_config`` only when it matches the hash the
+token signed, then picks the graph the token was signed for.
 """
 
 import logging
@@ -17,12 +17,19 @@ from starlette.requests import Request
 from starlette.responses import JSONResponse
 from starlette.types import ASGIApp, Receive, Scope, Send
 
-from openswe.remote_runtime.tokens import RemoteRun, RuntimeTokenError, verify_runtime_token
+from openswe.remote_runtime.tokens import (
+    RemoteRun,
+    RunTicket,
+    RuntimeTokenError,
+    verify_runtime_token,
+)
 
 logger = logging.getLogger(__name__)
 
 HOOKS_PATH: Final = "/remote-runtime/hooks/{hook}"
-_RUN_STATE_KEY: Final = "remote_run"
+_TICKET_STATE_KEY: Final = "run_ticket"
+# The body key carrying the run's configuration, as the text the token's hash covers.
+RUN_CONFIG_KEY: Final = "run_config"
 _hook_body = TypeAdapter(dict[str, JsonValue])
 
 
@@ -40,19 +47,19 @@ def _graphs() -> Mapping[str, Hook]:
     return {assistant_id: graph.hook for assistant_id, graph in hosted_graphs().items()}
 
 
-def _scope_run(scope: Scope) -> RemoteRun:
-    run = scope.get("state", {}).get(_RUN_STATE_KEY)
-    if not isinstance(run, RemoteRun):
+def _scope_ticket(scope: Scope) -> RunTicket:
+    ticket = scope.get("state", {}).get(_TICKET_STATE_KEY)
+    if not isinstance(ticket, RunTicket):
         raise PermissionError("The call carried no verified run")
-    return run
+    return ticket
 
 
 async def hook_endpoint(scope: Scope, receive: Receive, send: Send) -> None:
-    run = _scope_run(scope)
+    ticket = _scope_ticket(scope)
     hook = scope["path_params"]["hook"]
-    graph = _graphs().get(run.assistant_id)
+    graph = _graphs().get(ticket.assistant_id)
     if graph is None:
-        await JSONResponse({"detail": f"No remote runtime serves {run.assistant_id}"}, 403)(
+        await JSONResponse({"detail": f"No remote runtime serves {ticket.assistant_id}"}, 403)(
             scope, receive, send
         )
         return
@@ -61,6 +68,15 @@ async def hook_endpoint(scope: Scope, receive: Receive, send: Send) -> None:
         body = _hook_body.validate_json(raw) if raw.strip() else {}
     except ValidationError:
         await JSONResponse({"detail": "The hook body must be a JSON object"}, status_code=422)(
+            scope, receive, send
+        )
+        return
+    config_text = body.pop(RUN_CONFIG_KEY, None)
+    try:
+        run = ticket.run(config_text if isinstance(config_text, str) else None)
+    except RuntimeTokenError as exc:
+        logger.info("Remote runtime call refused", extra={"refusal": str(exc)})
+        await JSONResponse({"detail": "The run configuration was not accepted"}, 403)(
             scope, receive, send
         )
         return
@@ -90,7 +106,7 @@ async def _refuse(scope: Scope, receive: Receive, send: Send, detail: str, chall
 
 
 class RunTokenMiddleware:
-    """Verify the run token on every request and leave the verified run for the handler."""
+    """Verify the run token on every request and leave what it proves for the handler."""
 
     def __init__(self, app: ASGIApp) -> None:
         self.app = app
@@ -104,7 +120,7 @@ class RunTokenMiddleware:
             await _refuse(scope, receive, send, "A run token is required", "Bearer")
             return
         try:
-            run = verify_runtime_token(token.strip())
+            ticket = verify_runtime_token(token.strip())
         except RuntimeTokenError as exc:
             logger.info("Remote runtime call refused", extra={"refusal": str(exc)})
             await _refuse(
@@ -115,7 +131,7 @@ class RunTokenMiddleware:
                 'Bearer error="invalid_token"',
             )
             return
-        scope.setdefault("state", {})[_RUN_STATE_KEY] = run
+        scope.setdefault("state", {})[_TICKET_STATE_KEY] = ticket
         await self.app(scope, receive, send)
 
 

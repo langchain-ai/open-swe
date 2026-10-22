@@ -122,7 +122,11 @@ class _Harness:
                 configurable=configurable,
                 metadata=metadata or {},
             )
-            return {"graph": assistant_id, "__run_token": sign_runtime_token(run)}
+            return {
+                "graph": assistant_id,
+                "__run_token": sign_runtime_token(run),
+                "__run_config": run.config_text(),
+            }
 
         monkeypatch.setattr(runtimes, "remote_run_context", context)
         monkeypatch.setattr(runtimes, "get_tracer_project", lambda: "open-swe-test")
@@ -301,13 +305,14 @@ async def test_a_new_thread_runs_on_mda(monkeypatch: pytest.MonkeyPatch, secret:
     assert harness.runtimes.mda.threads[THREAD]["metadata"] == indexed.metadata
     assert harness.runtimes.local.threads[THREAD]["metadata"] == indexed.metadata
     [(_, sent)] = harness.forwarded
-    # Nothing the remote graph is handed carries the configurable but the signed token.
+    # The remote graph gets the configurable only beside the token that signs its hash.
     assert "config" not in sent
     assert sent["langsmith_tracer"] == {"project_name": "open-swe-test"}
     context = sent["context"]
     assert isinstance(context, dict) and context["__event_streaming_v2"] is True
     assert isinstance(token := context["__run_token"], str)
-    signed = verify_runtime_token(token)
+    assert isinstance(config_text := context["__run_config"], str)
+    signed = verify_runtime_token(token).run(config_text)
     assert signed.configurable == {"github_login": "ada", "repo": {"owner": "a", "name": "b"}}
     # The hooks see the run metadata an in-process run would, e.g. which delivered
     # task messages the transcript records.
