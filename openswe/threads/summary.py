@@ -472,6 +472,7 @@ async def _thread_summary(
     thread_id = thread.get("thread_id") or thread.get("id")
     trace_url = await get_langsmith_trace_url(thread_id) if isinstance(thread_id, str) else None
 
+    browser = ThreadBrowser.of(metadata)
     raw_sandbox_id = metadata.get("sandbox_id")
     sandbox_id = (
         raw_sandbox_id
@@ -548,7 +549,8 @@ async def _thread_summary(
         ),
         # Lists skip it: one bridge lookup per thread would cost a query each.
         "sandboxBridgeOnline": await _mac_online(metadata, sandbox_id) if bridge_status else None,
-        "hasBrowser": ThreadBrowser.of(metadata) is not None,
+        # What the thread's Browser panel offers: its browser to watch, or to open.
+        "browser": None if browser is None else browser.state,
     }
     raw_pull_requests = metadata.get("pull_requests")
     pull_request_records = raw_pull_requests if isinstance(raw_pull_requests, list) else []

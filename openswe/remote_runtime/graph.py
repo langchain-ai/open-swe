@@ -148,9 +148,10 @@ class CallBody(HookBody):
 
 
 class BrowserBody(HookBody):
-    """``browser``: the LangSmith browser MDA gave the thread's agent."""
+    """``browser``: the LangSmith browser MDA names for the thread's agent."""
 
     browser: str
+    opened: bool = True
 
 
 class ToolResultBody(HookBody):
@@ -617,7 +618,8 @@ class RemoteGraph:
             await session.bind_sandbox(body.sandbox_id)
             return await self._phase(session, "before_agent", body)
         if hook == "browser":
-            await ThreadBrowser(browser=BrowserBody.model_validate(raw).browser).save(run.thread_id)
+            body = BrowserBody.model_validate(raw)
+            await ThreadBrowser(browser=body.browser, opened=body.opened).report(run.thread_id)
             return {}
         if hook == "sandbox":
             session = await self.session(run, body.run_id)
