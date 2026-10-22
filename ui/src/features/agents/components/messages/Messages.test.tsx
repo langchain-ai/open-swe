@@ -41,6 +41,53 @@ const wrapper = ({ children }: { children: ReactNode }) => (
 )
 
 describe("Messages", () => {
+  it("renders batched artifact selections as diff-style cards paired with their comments", () => {
+    const { container } = render(
+      <Messages
+        isStreaming={false}
+        messages={[
+          {
+            id: "artifact-feedback",
+            author: "user",
+            timestamp: "2026-10-18T10:30:00.000Z",
+            chunks: [
+              {
+                kind: "text",
+                text: [
+                  "`Artifact selection`",
+                  "````text",
+                  "First selection with ``` in it",
+                  "````",
+                  "",
+                  "Clarify the first step.",
+                  "",
+                  "`Artifact selection`",
+                  "```text",
+                  "Second selection",
+                  "```",
+                  "",
+                  "Explain the second step.",
+                ].join("\n"),
+              },
+            ],
+          },
+        ]}
+      />,
+      { wrapper }
+    )
+    expect(
+      Array.from(container.querySelectorAll("pre"), (el) => el.textContent)
+    ).toEqual(["First selection with ``` in it", "Second selection"])
+    expect(container.textContent).not.toContain("````text")
+    expect(
+      screen
+        .getByText("Clarify the first step.")
+        .compareDocumentPosition(container.querySelectorAll("pre")[1]!) &
+        Node.DOCUMENT_POSITION_FOLLOWING
+    ).toBeTruthy()
+    expect(screen.getByText("Explain the second step.")).toBeTruthy()
+  })
+
   it("renders attributed task activity with safe expandable details", async () => {
     const source = {
       version: 1,

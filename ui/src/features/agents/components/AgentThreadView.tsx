@@ -1,9 +1,10 @@
 import { LogoMark } from "@/components/Branding"
 import { LaptopRegularIcon } from "@langchain/macaw-components/icons"
+import { ReviewChatActionsContext } from "@/features/reviews/components/ReviewChatActions"
 import {
-  ReviewChatActionsContext,
-  ReviewExcerptChips,
-} from "@/features/reviews/components/ReviewChatActions"
+  ChatExcerptChips,
+  ChatExcerptsContext,
+} from "@/features/agents/components/composer/ChatExcerptChips"
 import { serializeExcerpts } from "@/features/agents/utils/codeExcerpt"
 import {
   Profiler,
@@ -95,6 +96,7 @@ import {
 
 interface AgentThreadViewProps {
   thread: AgentThread
+  embedded?: boolean
   composerDraft?: { key: number; text: string }
 }
 
@@ -130,8 +132,11 @@ function CodeChannelLink({ url }: { url?: string | null }) {
 export function AgentThreadView({
   thread,
   composerDraft,
+  embedded = false,
 }: AgentThreadViewProps) {
   const reviewChat = useContext(ReviewChatActionsContext)
+  const chatExcerpts = useContext(ChatExcerptsContext) ?? reviewChat
+  const embeddedChat = embedded || Boolean(reviewChat)
   const renameThread = useRenameAgentThread()
   const sendMessage = useSubmitAgentMessage(thread.id)
   const source = useThreadSource()
@@ -232,7 +237,7 @@ export function AgentThreadView({
   // The review page shows its PR's status itself; don't poll it a second time here.
   const pullRequestStatus = useAgentThreadPullRequestStatus(
     thread.id,
-    !reviewChat && (thread.pullRequests?.length ?? 0) > 0
+    !embeddedChat && (thread.pullRequests?.length ?? 0) > 0
   )
   const pullRequestHealth = pullRequestStatus.isError
     ? undefined
@@ -335,15 +340,15 @@ export function AgentThreadView({
       images: Array<ImageChunk>,
       options?: SubmitOptions
     ) => {
-      const excerpts = reviewChat?.excerpts ?? []
+      const excerpts = chatExcerpts?.excerpts ?? []
       await submitMessage(
         excerpts.length ? serializeExcerpts(content, excerpts) : content,
         images,
         options
       )
-      if (excerpts.length) reviewChat?.clearExcerpts?.()
+      if (excerpts.length) chatExcerpts?.clearExcerpts?.()
     },
-    [reviewChat, submitMessage]
+    [chatExcerpts, submitMessage]
   )
 
   const submitText = useCallback(
@@ -699,7 +704,7 @@ export function AgentThreadView({
         style={isMobile ? undefined : { minWidth: SIBLING_COLUMN_MIN_WIDTH }}
       >
         {/* The review page's rail is the header for its chat. */}
-        {!reviewChat && (
+        {!embeddedChat && (
           <AgentThreadHeader
             key={thread.id}
             title={thread.title}
@@ -865,7 +870,7 @@ export function AgentThreadView({
                     messages={visibleMessages}
                     threadId={thread.id}
                     scrollKey={thread.id}
-                    showPlanArtifact={Boolean(thread.planStatus)}
+                    showPlanArtifact={!embedded && Boolean(thread.planStatus)}
                     runCosts={thread.runCosts}
                     emptyState={
                       <div className="flex min-h-60 items-center justify-center">
@@ -906,7 +911,7 @@ export function AgentThreadView({
           {!isHydrating && (
             <AgentComposerDock>
               <CodeChannelLink url={thread.codeChannelUrl} />
-              {!reviewChat && (
+              {!embeddedChat && (
                 <ThreadPullRequests
                   pullRequests={
                     // A local branch's PR may come from `gh`, which the thread
@@ -923,7 +928,7 @@ export function AgentThreadView({
                   fixDisabled={!canPost || sendMessage.isPending}
                 />
               )}
-              {reviewChat && <ReviewExcerptChips />}
+              {chatExcerpts && <ChatExcerptChips {...chatExcerpts} />}
               <AgentPromptBar
                 placeholder={
                   moving
@@ -991,9 +996,9 @@ export function AgentThreadView({
           )}
         </div>
       </div>
-      {!reviewChat && <BackgroundWorkSidebar threadId={thread.id} />}
+      {!embeddedChat && <BackgroundWorkSidebar threadId={thread.id} />}
       {/* The review page is already the diff; a second panel only squeezes the chat. */}
-      {!reviewChat && (
+      {!embeddedChat && (
         <AgentGitPanel
           thread={thread}
           onComment={canPost ? submitText : undefined}

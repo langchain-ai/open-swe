@@ -131,6 +131,24 @@ async def test_dismissal_clears_when_artifact_is_republished(
     assert (await plan_api.get_plan("t1", session=session))["dismissed"] is False
 
 
+async def test_republishing_keeps_unsubmitted_comments(
+    monkeypatch: pytest.MonkeyPatch, registry_db: None
+) -> None:
+    from openswe.threads import plan_api, plan_store
+
+    await _seed_plan("t", {"html": "<p>v1</p>"})
+    monkeypatch.setattr(
+        plan_api, "fetch_thread_metadata", AsyncMock(return_value={"source": "slack"})
+    )
+    monkeypatch.setattr(plan_store, "_merge_thread_metadata", AsyncMock())
+    author = {"sub": "alice", "name": "Alice"}
+    comment = await plan_api.post_plan_comment("t", plan_api.CommentBody(body="Draft"), author)
+
+    await plan_store.save_plan_content("t", html="<p>v2</p>")
+
+    assert (await plan_api.get_plan_comments("t", author))["comments"] == [comment]
+
+
 @pytest.mark.parametrize("status", ["ready", "approved", "cancelled", "shared"])
 async def test_artifact_comments_remain_authorized_without_approval_gates(
     monkeypatch: pytest.MonkeyPatch, registry_db: None, status: str
@@ -151,7 +169,7 @@ async def test_artifact_comments_remain_authorized_without_approval_gates(
     assert (await plan_api.get_plan_comments("t", author))["comments"] == []
 
 
-async def test_submit_artifact_comments_dispatches_only_for_comment_author(
+async def test_submit_sends_own_comments_as_a_message_and_removes_them(
     monkeypatch: pytest.MonkeyPatch, registry_db: None
 ) -> None:
     from openswe.threads import plan_api
@@ -160,8 +178,16 @@ async def test_submit_artifact_comments_dispatches_only_for_comment_author(
     monkeypatch.setattr(
         plan_api, "fetch_thread_metadata", AsyncMock(return_value={"source": "slack"})
     )
-    author = {"sub": "alice", "name": "Alice"}
-    await plan_api.post_plan_comment("t", plan_api.CommentBody(body="Feedback"), author)
+    alice = {"sub": "alice", "name": "Alice"}
+    bob = {"sub": "bob", "name": "Bob"}
+    anchor = plan_api.TextAnchor(exact="Report", prefix="", suffix="", start=0, end=6)
+    first = await plan_api.post_plan_comment(
+        "t", plan_api.CommentBody(body="Shorten this", anchor=anchor), alice
+    )
+    general = await plan_api.post_plan_comment(
+        "t", plan_api.CommentBody(body="Add examples"), alice
+    )
+    bobs = await plan_api.post_plan_comment("t", plan_api.CommentBody(body="Bob's note"), bob)
     dispatch = AsyncMock()
     monkeypatch.setattr(plan_api, "dispatch_agent_run", dispatch)
     monkeypatch.setattr(plan_api, "_ensure_dashboard_github_token", AsyncMock())
@@ -169,13 +195,23 @@ async def test_submit_artifact_comments_dispatches_only_for_comment_author(
     monkeypatch.setattr(plan_api, "langgraph_client", lambda: None)
 
     with pytest.raises(HTTPException) as exc:
-        await plan_api.submit_plan_comments("t", {"sub": "bob"})
+        await plan_api.submit_plan_comments("t", {"sub": "carol"})
     assert exc.value.status_code == 422
     dispatch.assert_not_awaited()
 
-    assert await plan_api.submit_plan_comments("t", author) == {"status": "submitted"}
-    dispatch.assert_awaited_once()
+    result = await plan_api.submit_plan_comments("t", alice)
+    assert result == {"status": "submitted", "comment_ids": [first["id"], general["id"]]}
+    message = dispatch.await_args.args[1]
+    assert "`Artifact selection`\n```text\nReport\n```\n\nShorten this" in message
+    assert "On the artifact:\n\nAdd examples" in message
+    assert "Bob's note" not in message
     assert dispatch.await_args.kwargs["multitask_strategy"] == "enqueue"
+
+    await plan_api.post_plan_comment("t", plan_api.CommentBody(body="One more"), alice)
+    await plan_api.submit_plan_comments("t", alice)
+    assert "One more" in dispatch.await_args.args[1]
+    assert "Shorten this" not in dispatch.await_args.args[1]
+    assert (await plan_api.get_plan_comments("t", alice))["comments"] == [bobs]
 
 
 async def test_legacy_markdown_artifact_edits_preserve_comments_and_path(

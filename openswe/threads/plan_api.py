@@ -1,5 +1,6 @@
 """REST API for published HTML artifacts and comments."""
 
+import re
 from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException
@@ -14,7 +15,7 @@ from openswe.threads.access import _ensure_dashboard_github_token
 from openswe.threads.plan_store import (
     PLAN_STATUS_SHARED,
     add_plan_comment,
-    delete_plan_comment,
+    delete_plan_comments,
     dismiss_plan,
     get_plan_content,
     list_plan_comments,
@@ -60,6 +61,11 @@ class CommentBody(BaseModel):
     body: str = Field(min_length=1, max_length=10_000)
     anchor: TextAnchor | None = None
     parent_id: str | None = Field(default=None, min_length=1, max_length=64)
+
+    def transcript_message(self) -> str:
+        quote = self.anchor.exact if self.anchor else ""
+        fence = "`" * max([3, *(len(run) + 1 for run in re.findall(r"`+", quote))])
+        return prompt("threads/submit-artifact-comments", comment=self, fence=fence)
 
 
 class PlanUpdate(BaseModel):
@@ -144,7 +150,6 @@ async def update_plan(
             thread_id,
             markdown=value,
             status=PLAN_STATUS_SHARED,
-            clear_comments=False,
             plan_file_path=plan_file_path,
         )
     else:
@@ -152,7 +157,6 @@ async def update_plan(
             thread_id,
             html=value,
             status=PLAN_STATUS_SHARED,
-            clear_comments=False,
             plan_file_path=plan_file_path,
         )
     await write_plan_to_sandbox(thread_id, value, plan_file_path=plan_file_path)
@@ -201,25 +205,34 @@ async def post_plan_comment(
 @audit_endpoint
 async def submit_plan_comments(
     thread_id: str, session: dict[str, Any] = _SESSION_DEP
-) -> dict[str, str]:
+) -> dict[str, object]:
+    """Send the caller's comments as excerpt messages, then drop them from the artifact."""
     metadata = await fetch_thread_metadata(thread_id)
     login = session["sub"]
     _assert_thread_postable(metadata, login, session.get("email"))
-    comments = await list_plan_comments(thread_id, raise_on_error=True)
-    if not any(comment.get("author_login") == login for comment in comments):
+    comments = [
+        comment
+        for comment in await list_plan_comments(thread_id, raise_on_error=True)
+        if comment.get("author_login") == login
+    ]
+    if not comments:
         raise HTTPException(422, "no comments to submit")
     await _ensure_dashboard_github_token(login)
     configurable = await _build_dashboard_configurable(thread_id, login, metadata)
     await dispatch_agent_run(
         thread_id,
-        prompt("threads/submit-artifact-comments"),
+        "\n\n".join(
+            CommentBody.model_validate(comment).transcript_message() for comment in comments
+        ),
         configurable,
         source="dashboard",
         thread_title=None,
         client=langgraph_client(),
         multitask_strategy="enqueue",
     )
-    return {"status": "submitted"}
+    comment_ids = [comment["id"] for comment in comments]
+    await delete_plan_comments(thread_id, comment_ids)
+    return {"status": "submitted", "comment_ids": comment_ids}
 
 
 @plan_router.delete("/{thread_id}/comments/{comment_id}")
@@ -236,5 +249,5 @@ async def remove_plan_comment(
     login = session["sub"]
     if target.get("author_login") != login:
         raise HTTPException(403, "only the comment author can delete a comment")
-    await delete_plan_comment(thread_id, comment_id)
+    await delete_plan_comments(thread_id, [comment_id])
     return {"ok": True}

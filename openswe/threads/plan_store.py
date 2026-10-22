@@ -10,6 +10,7 @@ Reviewers leave whole-document comments, one ``thread_plan_comment`` row each.
 import logging
 import re
 import uuid
+from collections.abc import Collection
 from datetime import UTC, datetime
 from typing import Any
 
@@ -101,10 +102,9 @@ async def save_plan_content(
     html: str | None = None,
     markdown: str | None = None,
     status: str = PLAN_STATUS_SHARED,
-    clear_comments: bool = True,
     plan_file_path: str | None = None,
 ) -> None:
-    """Publish an artifact, clearing old comments unless this is a manual edit."""
+    """Publish an artifact; unsubmitted comments stay until their author submits them."""
     if plan_file_path is None:
         plan_file_path = await _stored_plan_file_path(thread_id)
     record: dict[str, Any] = {"status": status, "revision": str(uuid.uuid4())}
@@ -123,8 +123,6 @@ async def save_plan_content(
                 set_={"value": record, "dismissed": False, "updated_at": NOW},
             )
         )
-        if clear_comments:
-            await session.execute(delete(PlanComment).where(PlanComment.thread_id == thread_id))
     metadata = {"plan_status": status, "plan_approved_by": None, "plan_approved_at": None}
     await _merge_thread_metadata(thread_id, metadata)
 
@@ -236,11 +234,11 @@ async def add_plan_comment(
     return comment.to_dict()
 
 
-async def delete_plan_comment(thread_id: str, comment_id: str) -> None:
+async def delete_plan_comments(thread_id: str, comment_ids: Collection[str]) -> None:
     async with postgres.session() as session:
         await session.execute(
             delete(PlanComment).where(
-                PlanComment.thread_id == thread_id, PlanComment.id == comment_id
+                PlanComment.thread_id == thread_id, PlanComment.id.in_(comment_ids)
             )
         )
 

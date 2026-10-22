@@ -36,8 +36,7 @@ function usePlanDocumentTitle(threadId: string) {
   const query = useQuery({
     queryKey: ["plan", threadId],
     queryFn: () => getPlan(threadId),
-    refetchInterval: (q) =>
-      q.state.data?.html || q.state.data?.markdown ? false : 2000,
+    refetchInterval: 2000,
     retry: (count, error) =>
       !(
         error instanceof PlanApiError &&

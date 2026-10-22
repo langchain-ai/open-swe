@@ -1,0 +1,12 @@
+{% if comment.anchor %}
+`Artifact selection`
+{{ fence }}text
+{{ comment.anchor.exact }}
+{{ fence }}
+
+{{ comment.body }}
+{% else %}
+On the artifact:
+
+{{ comment.body }}
+{% endif %}

@@ -154,12 +154,25 @@ function frameScript(channel: string): string {
       }
       if (start < 0) return null;
       const end = start + exact.length;
-      const nearbyLines = value => value
-        .split("\\n")
-        .map(line => line.trim())
-        .filter(Boolean);
-      const context_before = nearbyLines(text.slice(0, start)).slice(-3).join("\\n").slice(-1000);
-      const context_after = nearbyLines(text.slice(end)).slice(0, 3).join("\\n").slice(0, 1000);
+      const contextLines = (from, to) => {
+        let offset = 0;
+        let previousBlock = null;
+        let content = "";
+        for (const node of nodes) {
+          const endOffset = offset + node.data.length;
+          if (endOffset > from && offset < to) {
+            const block = node.parentElement?.closest("p,li,pre,blockquote,h1,h2,h3,h4,h5,h6,div,section,article,header,footer,tr");
+            if (block !== previousBlock) content += "\\n";
+            content += node.data.slice(Math.max(0, from - offset), Math.min(node.data.length, to - offset));
+            previousBlock = block;
+          }
+          offset = endOffset;
+          if (offset >= to) break;
+        }
+        return content.split("\\n").map(line => line.trim()).filter(Boolean);
+      };
+      const context_before = contextLines(0, start).slice(-2).join("\\n").slice(-1000);
+      const context_after = contextLines(end, text.length).slice(0, 2).join("\\n").slice(0, 1000);
       return {
         exact,
         prefix: text.slice(Math.max(0, start - 64), start),

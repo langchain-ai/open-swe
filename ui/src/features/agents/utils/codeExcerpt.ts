@@ -125,3 +125,18 @@ export function parseExcerpts(content: string): {
   }
   return { excerpts, text: rest.trim() }
 }
+
+export function parseExcerptSections(content: string) {
+  const boundaries = [
+    ...new Set([
+      0,
+      ...Array.from(
+        content.matchAll(new RegExp(EXCERPT_PATTERN.source, "gm")),
+        (match) => match.index
+      ),
+    ]),
+  ]
+  return boundaries.map((start, i) =>
+    parseExcerpts(content.slice(start, boundaries[i + 1]))
+  )
+}
