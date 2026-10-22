@@ -389,6 +389,8 @@ A workflow that names no `repo` works in its own repository. A machine caller re
 <details id="linear">
 <summary><strong>Linear</strong></summary>
 
+> **Not deployed for now.** The Linear channel is out of `mda/` until each deployment has a Linear app, so Linear mentions and sessions don't reach Open SWE. The steps below apply once `mda/channels/linear.py` is restored.
+
 Open SWE works in Linear as an app, through the Linear channel of its Managed Deep Agents deployment (`mda/channels/linear.py`). Mentioning the app on an issue, or delegating the issue to it, opens an agent session. The agent answers there, a reply in the session continues the conversation, and **Stop** cancels the run. Each session is its own conversation and thread; mentioning the app again on the same issue opens a new one. The dashboard shows these threads read-only: continue them in Linear.
 
 1. Pick a secret (`openssl rand -hex 32`) and set it as `MDA_SERVICE_SECRET` in both `mda/.env` and the backend's environment. The deployment signs each Linear event it hands the backend with it, as Standard Webhooks does, and the backend answers only calls whose signature it verifies.

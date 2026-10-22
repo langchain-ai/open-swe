@@ -85,6 +85,8 @@ Locally, each fresh `mda dev` start rebuilds `.mda/build` and starts with empty 
 
 ## Linear
 
+The Linear channel is not deployed for now: `mda deploy` needs a Linear app for each deployment, and staging and prod have none yet. Restore `channels/linear.py` to bring it back; the backend's endpoint below stays in place.
+
 The deployment's Linear channel (`channels/linear.py`) is how Open SWE works in Linear. Mentioning the app on an issue, or delegating the issue to it, opens an agent session. Each session is its own conversation: the channel starts its runs on the session's own thread, so the answer, Stop, interrupt notices and errors reach the session. A reply in the session is the next run there; a new mention on the same issue opens a new session and thread.
 
 The channel verifies each delivery (Linear's signature and timestamp). The backend decides everything else, as for any other run: the repository, the workspace, the input, and the signed run token. Every handled event goes to the backend's endpoint, `POST /linear/channel/events` (the channel's `on_event` names it): MDA posts `{event: {key, deliveryId, payload}, thread}`, with the payload it validated. For a session event the backend indexes the thread and answers with the run's input, context, metadata and webhook; issue and comment events start no conversation, so it answers `null`, after logging them for `listen_events` and running Linear automations. The endpoint answers only calls MDA signed with `MDA_SERVICE_SECRET`.
