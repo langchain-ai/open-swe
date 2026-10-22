@@ -49,11 +49,11 @@ def _alice(
     monkeypatch.setattr(User, "for_login", AsyncMock(return_value=person))
 
 
-async def _open(**scope: str) -> gate.ActAsRefusal | None:
+async def _open(author: str | None = None, **scope: str) -> gate.ActAsRefusal | None:
     return await gate.require_consent(
         thread_id="thread-1",
         token_kind="user",
-        author=None,
+        author=author,
         **{"owner": "o", "repo": "r", "head": "h", "base": "b", "title": "t", **scope},
     )
 
@@ -94,8 +94,9 @@ async def test_shared_thread_asks_even_when_the_author_started_the_run(dm, monke
 
 
 @pytest.mark.asyncio
-async def test_single_participant_thread_never_asks(dm, thread_metadata, monkeypatch):
+async def test_private_thread_never_asks(dm, thread_metadata, monkeypatch):
     _alice(monkeypatch, "U-ALICE")
+    thread_metadata["visibility"] = "private"
     thread_metadata[PARTICIPANT_LOGINS_KEY] = {"alice": True}
     thread_metadata[PARTICIPANT_EMAILS_KEY] = {"alice@example.com": True}
     monkeypatch.setattr(User, "for_person", AsyncMock(return_value=User()))
@@ -103,6 +104,27 @@ async def test_single_participant_thread_never_asks(dm, thread_metadata, monkeyp
 
     assert await _open() is None
     dm.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("author", [None, "", "alice"])
+async def test_single_participant_public_thread_still_needs_per_pr_consent(
+    dm, thread_metadata, monkeypatch, author
+):
+    _alice(monkeypatch, "U-ALICE")
+    thread_metadata[PARTICIPANT_LOGINS_KEY] = {"alice": True}
+    thread_metadata[PARTICIPANT_EMAILS_KEY] = {"alice@example.com": True}
+    monkeypatch.setattr(User, "for_person", AsyncMock(return_value=User()))
+    thread_metadata.update(await participant_metadata(thread_metadata))
+
+    refusal = await _open(author=author)
+    assert refusal is not None and refusal["act_as"] == "pending"
+    await _answer(True)
+    assert await _open(author=author) is None
+
+    refusal = await _open(author=author, repo="other")
+    assert refusal is not None and refusal["act_as"] == "pending"
+    assert dm.await_count == 2
 
 
 @pytest.mark.asyncio

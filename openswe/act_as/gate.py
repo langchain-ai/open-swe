@@ -1,11 +1,7 @@
-"""Ask a participant before Open SWE opens a PR as them in a shared thread.
+"""Ask before opening each PR as an opted-in author in a public thread.
 
-In a thread with more than one participant anyone can steer the run, so the
-person the PR opens as gets the final say, separately for each PR. They get a DM card
-and the tool waits briefly for their answer; an answer that comes later wakes
-the thread with a follow-up run. "Always allow" skips the card, and a thread with a single
-participant never asks. Only people who turned on the
-``experimental_act_as_approval`` feature flag are asked.
+Consent follows the saved thread visibility, not its participant count or whether
+an author was passed explicitly. Private threads and "Always allow" skip the card.
 """
 
 import asyncio
@@ -58,7 +54,7 @@ def _refusal(login: str, refusal: Refusal, token_kind: str) -> ActAsRefusal:
     return {
         "success": False,
         "error": (
-            "This thread has more than one participant, so the person the PR opens as must "
+            "This is a public thread, so the person the PR opens as must "
             f"approve it. {reason} PR created: no."
         ),
         "act_as": refusal,
@@ -82,7 +78,7 @@ async def require_consent(
     if token_kind != "user" or not thread_id:
         return None
     thread = await ThreadActAs.load(thread_id)
-    if not thread.is_shared():
+    if not thread.is_public:
         return None
     login = await pr_author_login(author)
     if not login:

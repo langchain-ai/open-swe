@@ -9,8 +9,6 @@ from openswe.users import User, UserPreferences, UserPreferencesPatch
 from openswe.utils.json_types import JsonObject
 from openswe.utils.thread_participants import (
     PARTICIPANT_EMAILS_KEY,
-    PARTICIPANT_LOGINS_KEY,
-    participant_metadata,
 )
 
 _PR = {"owner": "o", "repo": "r", "head": "h", "base": "b", "title": "t"}
@@ -31,52 +29,6 @@ async def test_each_pr_keeps_its_own_request_after_reload(thread_metadata: JsonO
     assert len(reloaded.requests) == 2
     assert reloaded.decision_for(first) == "approved"
     assert reloaded.decision_for(other) == "denied"
-
-
-@pytest.mark.asyncio
-@pytest.mark.parametrize(
-    ("logins", "emails", "shared"),
-    [
-        ({"alice": True}, {}, False),
-        ({"alice": True, "bob": True}, {}, True),
-        ({"alice": True}, {"alice@example.com": True}, False),
-        ({"alice": True}, {"bob@example.com": True}, True),
-        ({"alice": True}, {"carol@example.com": True}, True),
-    ],
-)
-async def test_distinct_participants_make_a_thread_shared(
-    thread_metadata: JsonObject,
-    monkeypatch: pytest.MonkeyPatch,
-    logins: JsonObject,
-    emails: JsonObject,
-    shared: bool,
-) -> None:
-    alice, bob = User(), User()
-    monkeypatch.setattr(
-        User,
-        "for_login",
-        AsyncMock(side_effect=lambda _, login: {"alice": alice, "bob": bob}.get(login)),
-    )
-    monkeypatch.setattr(
-        User,
-        "for_email",
-        AsyncMock(
-            side_effect=lambda email: {"alice@example.com": alice, "bob@example.com": bob}.get(
-                email
-            )
-        ),
-    )
-    thread_metadata[PARTICIPANT_LOGINS_KEY] = logins
-    thread_metadata[PARTICIPANT_EMAILS_KEY] = emails
-    thread_metadata.update(await participant_metadata(thread_metadata))
-    monkeypatch.setattr(
-        User,
-        "for_person",
-        AsyncMock(side_effect=AssertionError("Consent must use stored identities")),
-    )
-
-    thread = await ThreadActAs.load("thread-1")
-    assert thread.is_shared() is shared
 
 
 @pytest.mark.asyncio

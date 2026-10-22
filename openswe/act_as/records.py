@@ -16,7 +16,6 @@ from pydantic import BaseModel, ConfigDict, ValidationError
 
 from openswe.slack.events import claim_slack_event
 from openswe.users import User, UserPreferencesPatch
-from openswe.utils.thread_participants import participant_ids
 from openswe.utils.time import now_iso
 
 logger = logging.getLogger(__name__)
@@ -59,19 +58,19 @@ class ActAsDecision(BaseModel):
 
 
 class ThreadActAs:
-    """The act-as requests, decisions and participants of one thread."""
+    """The act-as requests, decisions and visibility of one thread."""
 
     def __init__(
         self,
         thread_id: str,
         requests: dict[str, ActAsRequest],
         decisions: dict[str, ActAsDecision],
-        participants: set[str],
+        is_public: bool,
     ) -> None:
         self.thread_id = thread_id
         self.requests = requests
         self.decisions = decisions
-        self._participants = participants
+        self.is_public = is_public
 
     @classmethod
     async def load(cls, thread_id: str) -> Self:
@@ -79,10 +78,9 @@ class ThreadActAs:
         metadata = thread["metadata"] or {}
         requests = _parse(thread_id, metadata, _REQUEST_PREFIX, ActAsRequest)
         decisions = _parse(thread_id, metadata, _DECISION_PREFIX, ActAsDecision)
-        return cls(thread_id, requests, decisions, participant_ids(metadata))
-
-    def is_shared(self) -> bool:
-        return len(self._participants) > 1
+        return cls(
+            thread_id, requests, decisions, metadata.get("visibility", "public") != "private"
+        )
 
     def decision_for(self, request: ActAsRequest) -> Decision | None:
         decision = self.decisions.get(request.fingerprint)
