@@ -1,7 +1,7 @@
 """One Open SWE graph, played by a run on Managed Deep Agents.
 
 MDA keeps the model loop and its checkpoints. Everything else is the in-process
-graph itself, sandbox included, built here for the run exactly as this deployment would
+graph itself, built here for the run exactly as this deployment would
 run it: its tools node, with its tool-call middleware around every call, and its
 own middleware, which the MDA run hands each phase of its loop to:
 
@@ -19,6 +19,14 @@ own middleware, which the MDA run hands each phase of its loop to:
 - ``call`` runs one tool through the graph's tools node
 - ``tool_started`` and ``tool_result`` let the transcript record a tool MDA runs
   itself, such as ``task``, whose subagent runs on MDA
+- ``sandbox_unreachable`` tells the person a tool MDA ran found the box gone
+
+Where MDA owns the thread's box, the catalog names the file and shell tools it
+runs there itself, and which of the graph's tool-call checks it applies to them.
+It sends back here the calls those checks cannot settle in the box: calls on the
+paths this deployment serves, such as skills, and commands that may push or open a
+pull request, which the graph's guards approve. A graph with tool-call middleware
+MDA does not know runs every call here, so new middleware reaches MDA runs as is.
 
 A call made from inside a subagent names the namespace of its ``task`` calls, so
 its tool calls and replies land under the subagent, as they do in-process.
@@ -37,7 +45,7 @@ from typing import Final, Literal, Protocol, cast, get_args, runtime_checkable
 from uuid import uuid4
 
 from deepagents.middleware.filesystem import FilesystemMiddleware
-from langchain.agents.middleware import ModelCallLimitMiddleware
+from langchain.agents.middleware import ModelCallLimitMiddleware, ToolRetryMiddleware
 from langchain.agents.middleware.types import (
     AgentMiddleware,
     AgentState,
@@ -64,10 +72,17 @@ from pydantic import BaseModel, JsonValue, TypeAdapter, ValidationError
 
 from openswe.github.sandbox_access import READ_ONLY_REVIEW_PERMISSIONS
 from openswe.middleware.conversation_offloading import ConversationOffloadingMiddleware
+from openswe.middleware.dynamic_tools import DynamicToolMiddleware
 from openswe.middleware.model_selection import PersistedRoute, normalize_route
+from openswe.middleware.pr_creation_guard import PullRequestCreationGuardMiddleware
 from openswe.middleware.record_run_usage import RecordRunUsageMiddleware
+from openswe.middleware.sandbox_circuit_breaker import post_sandbox_unreachable_notification
+from openswe.middleware.subdir_agents import SubdirAgentsReadMiddleware
 from openswe.middleware.task_coordination import TaskCoordinationMiddleware
+from openswe.middleware.tool_error_handler import ToolErrorMiddleware
 from openswe.middleware.transcript import TranscriptMiddleware, within_namespace
+from openswe.middleware.validate_image_reads import ValidateImageReadsMiddleware
+from openswe.middleware.workflow_push_guard import WorkflowPushGuardMiddleware
 from openswe.prompts import common_prompt, prompt
 from openswe.remote_runtime.git_metadata import (
     BASELINE,
@@ -94,7 +109,12 @@ from openswe.sandboxes.tool_runtime import (
     SurfaceModels,
     ToolSurface,
 )
-from openswe.server import code_only, direct_and_from_code, fallback_model_choice
+from openswe.server import (
+    DEEP_AGENT_TOOL_NAMES,
+    code_only,
+    direct_and_from_code,
+    fallback_model_choice,
+)
 from openswe.utils.model import provider_model_kwargs
 
 logger = logging.getLogger(__name__)
@@ -127,6 +147,27 @@ _NOT_PROMPT_SHAPING: Final = (
 _MODEL_OBSERVERS: Final = (TranscriptMiddleware, RecordRunUsageMiddleware)
 # Loop bookkeeping and code mode MDA's own middleware already does.
 _MDA_PHASES: Final = (ModelCallLimitMiddleware, CodeInterpreterMiddleware)
+# The file and shell tools an MDA run calls in the thread's box itself, where MDA owns it.
+_BOX_TOOLS: Final = frozenset(DEEP_AGENT_TOOL_NAMES) - _MDA_TOOLS
+SandboxCheck = Literal["tool_errors", "push_guards"]
+# The graph's tool-call middleware, as MDA applies it to the calls it runs in the box:
+# by the check MDA runs in its place, or None where there is nothing to do there. The
+# transcript records those calls through ``tool_started`` and ``tool_result``, MDA's
+# own filesystem middleware offloads large results, and the rest act on other tools.
+# MDA runs its own copies of the checks on what ``read_file`` returns; the backend's
+# are for the file calls it runs itself, such as a desktop thread's.
+# A graph with tool-call middleware not listed here runs every call on the backend.
+_BOX_CHECKS: Final[Sequence[tuple[type, SandboxCheck | None]]] = (
+    (ToolErrorMiddleware, "tool_errors"),
+    (ValidateImageReadsMiddleware, None),
+    (SubdirAgentsReadMiddleware, None),
+    (PullRequestCreationGuardMiddleware, "push_guards"),
+    (WorkflowPushGuardMiddleware, "push_guards"),
+    (TranscriptMiddleware, None),
+    (FilesystemMiddleware, None),
+    (DynamicToolMiddleware, None),
+    (ToolRetryMiddleware, None),
+)
 # A message inside a state value, as it crosses to MDA and back.
 MESSAGE_KEY: Final = "__lc_message__"
 _ROUTES: Final = frozenset(get_args(PersistedRoute))
@@ -151,7 +192,8 @@ class HookBody(BaseModel):
     state: dict[str, JsonValue] = {}
     # The ``task`` calls the run's subagent is nested in; empty for the agent itself.
     namespace: list[str] = []
-    # ``prepare``: the box MDA opened for the thread, None when it could not.
+    # The thread's box: the one MDA opened for ``prepare``, None when it could not, or
+    # the one a tool found gone for ``sandbox_unreachable``.
     sandbox_id: str | None = None
 
 
@@ -168,7 +210,7 @@ class BrowserBody(HookBody):
     opened: bool = True
 
 
-class ToolResultBody(HookBody):
+class ToolResultBody(CallBody):
     """The result of a tool call MDA ran itself, as a tool message."""
 
     result: dict[str, JsonValue]
@@ -376,6 +418,28 @@ class RunSession:
         if cfg.thread_id is None:
             return None
         return await ManagedSandbox.for_thread(cfg.thread_id, cfg.workspace_slug)
+
+    def box_tools(self) -> dict[str, JsonValue]:
+        """The file and shell tools an MDA run calls in the thread's MDA box itself, and how.
+
+        None of them when the graph has tool-call middleware MDA cannot apply there,
+        so that every call still reaches it here.
+        """
+        checks: set[SandboxCheck] = set()
+        for middleware in self.surface.middleware:
+            if not _overrides(middleware, "awrap_tool_call"):
+                continue
+            known = [check for kind, check in _BOX_CHECKS if isinstance(middleware, kind)]
+            if not known:
+                return {"tools": [], "checks": [], "backend_paths": []}
+            checks.update(check for check in known if check is not None)
+        return _json_object.validate_python(
+            {
+                "tools": sorted(_BOX_TOOLS & self.surface.tools.keys()),
+                "checks": sorted(checks),
+                "backend_paths": list(self.surface.backend_paths),
+            }
+        )
 
     async def bind_sandbox(self, sandbox_id: str | None) -> None:
         """Bind the thread to the box MDA opened before preparing, if MDA owns it."""
@@ -641,7 +705,11 @@ class RemoteGraph:
             return {
                 **session.catalog(),
                 "trace_metadata": TurnGitMetadata(session.config).actor,
-                "sandbox": None if sandbox is None else _json.validate_python(sandbox.model_dump()),
+                "sandbox": None
+                if sandbox is None
+                else _json_object.validate_python(
+                    {**sandbox.model_dump(mode="json"), **session.box_tools()}
+                ),
             }
         if hook == "prepare":
             session = await self.session(run, body.run_id, fresh=True)
@@ -657,6 +725,11 @@ class RemoteGraph:
             await in_graph_context(
                 session.config, lambda _runtime: session.reconnect_sandbox(run.assistant_id)
             )
+            return {}
+        if hook == "sandbox_unreachable":
+            # A tool MDA ran in the box found it gone; the run ends once the person knows.
+            session = await self.session(run, body.run_id)
+            await post_sandbox_unreachable_notification(session.config, sandbox_id=body.sandbox_id)
             return {}
         session = await self.session(run, body.run_id)
         if hook == "before_model":
@@ -749,7 +822,11 @@ class RemoteGraph:
             await session.flush(runtime)
 
         await in_graph_context(session.config, record)
-        return {}
+        # A file or shell tool MDA ran in the box may have started the turn's work, as
+        # one run here would; the snapshot is taken now, off the call's path.
+        git = TurnGitMetadata(session.config)
+        before = git.work_baseline(state) if body.name in OBSERVED_TOOLS else None
+        return {"update": await git.work_evidence(before, body.tool_call_id, time.time_ns())}
 
     async def _call(self, run: RemoteRun, body: CallBody) -> JsonValue:
         session = await self.session(run, body.run_id)
