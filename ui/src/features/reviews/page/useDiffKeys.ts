@@ -136,13 +136,7 @@ export function useDiffKeys(askAboutSelection: () => void) {
         id: "review-collapse-file",
         label: "Collapse or expand the file",
         shortcuts: ["x"],
-        run: () => {
-          const { activeEntry, entryOrder, toggleCollapsed, jumpTo } = page()
-          const entry = entryOrder.find(({ id }) => id === activeEntry)
-          if (!entry) return
-          toggleCollapsed(entry.readKey)
-          jumpTo({ kind: "entry", id: entry.id })
-        },
+        run: () => page().toggleActiveCollapsed(),
       },
       {
         id: "review-wrap",

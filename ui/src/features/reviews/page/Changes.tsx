@@ -1,6 +1,5 @@
 import { useQuery } from "@tanstack/react-query"
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react"
-import type { ReactNode } from "react"
 import { CodeView, WorkerPoolContextProvider } from "@pierre/diffs/react"
 import type {
   CodeViewHandle,
@@ -32,8 +31,6 @@ import { useChatDrafts } from "@/features/reviews/lib/chatDrafts"
 import { loadReviewFileContents } from "@/features/reviews/lib/fileContents"
 import { toPierreSide } from "@/features/reviews/lib/lineRange"
 import { usePendingReview } from "@/features/reviews/lib/usePendingReview"
-import { ProposedCommentCard } from "@/features/reviews/components/ProposedCommentCard"
-import { PendingReviewCommentCard } from "@/features/reviews/components/PendingReviewCommentCard"
 import { useAskAboutLines } from "./askAboutLines"
 import { ChangesToolbar } from "./ChangesToolbar"
 import {
@@ -51,10 +48,7 @@ import {
 } from "./diffEntries"
 import { EntriesContext, MarkersContext, StepsContext } from "./entries"
 import { FILE_HEADER_HEIGHT, FileHeader } from "./FileHeader"
-import { FindingNote } from "./notes/FindingNote"
-import { NoteFrame } from "./notes/NoteFrame"
-import { Composer } from "./notes/Composer"
-import { ThreadNote } from "./notes/ThreadNote"
+import { renderNote } from "./notes/NoteView"
 import { Overview } from "./Overview"
 import { reviewQueries, useFileMarkers, type PullRequestRef } from "./queries"
 import { isCollapsed, useReviewPage, type DiffTarget } from "./store"
@@ -152,7 +146,6 @@ export const Changes = memo(function Changes({ pr }: { pr: PullRequestRef }) {
   const setComposer = useReviewPage((state) => state.setComposer)
   const setActive = useReviewPage((state) => state.setActive)
   const setEntryOrder = useReviewPage((state) => state.setEntryOrder)
-  const toggleCollapsed = useReviewPage((state) => state.toggleCollapsed)
   const theme = useResolvedTheme()
   const [storedOverflow] = useDiffOverflow()
   const files = diff.data?.files ?? []
@@ -339,7 +332,7 @@ export const Changes = memo(function Changes({ pr }: { pr: PullRequestRef }) {
       annotation.metadata.kind === "step" ? (
         <StepIntro id={item.id} />
       ) : (
-        <NoteView pr={pr} note={annotation.metadata} />
+        renderNote(pr, annotation.metadata)
       ),
     [pr]
   )
@@ -355,11 +348,6 @@ export const Changes = memo(function Changes({ pr }: { pr: PullRequestRef }) {
       }
       const entry = findEntry(entries, target)
       if (!entry) return
-      if (
-        isRenderable(entry.file) &&
-        isCollapsed(useReviewPage.getState(), entry)
-      )
-        toggleCollapsed(entry.readKey)
       // Arriving at a step's first file shows the step from its header.
       const opensStep =
         entry.step && stepsByIndex.get(entry.step.index)?.entries[0] === entry
@@ -399,7 +387,7 @@ export const Changes = memo(function Changes({ pr }: { pr: PullRequestRef }) {
         }, 2400)
       })
     },
-    [entries, stepsByIndex, toggleCollapsed]
+    [entries, stepsByIndex]
   )
 
   useEffect(
@@ -560,76 +548,3 @@ export const Changes = memo(function Changes({ pr }: { pr: PullRequestRef }) {
     </EntriesContext.Provider>
   )
 })
-
-/** One note on a line; each kind reads only the data it shows. */
-function NoteView({
-  pr,
-  note,
-}: {
-  pr: PullRequestRef
-  note: Exclude<Note, { kind: "step" }>
-}): ReactNode {
-  switch (note.kind) {
-    case "finding":
-      return <FindingNoteView pr={pr} id={note.id} />
-    case "thread":
-      return <ThreadNoteView pr={pr} id={note.id} />
-    case "pending":
-      return <PendingNote pr={pr} id={note.id} />
-    case "draft":
-      return (
-        <NoteFrame>
-          <ProposedCommentCard
-            owner={pr.owner}
-            repo={pr.repo}
-            number={pr.number}
-            id={note.id}
-          />
-        </NoteFrame>
-      )
-    case "composer":
-      return <ComposerNote pr={pr} />
-  }
-}
-
-function FindingNoteView({ pr, id }: { pr: PullRequestRef; id: string }) {
-  const finding = useQuery(reviewQueries.detail(pr)).data?.findings.find(
-    (candidate) => candidate.id === id
-  )
-  const thread = useQuery(reviewQueries.conversation(pr)).data?.threads.find(
-    (candidate) => candidate.id === finding?.github_review_comment_id
-  )
-  return finding ? (
-    <FindingNote pr={pr} finding={finding} thread={thread ?? null} />
-  ) : null
-}
-
-function ThreadNoteView({ pr, id }: { pr: PullRequestRef; id: number }) {
-  const thread = useQuery(reviewQueries.conversation(pr)).data?.threads.find(
-    (candidate) => candidate.id === id
-  )
-  return thread ? <ThreadNote pr={pr} thread={thread} /> : null
-}
-
-function PendingNote({ pr, id }: { pr: PullRequestRef; id: number }) {
-  const comment = usePendingReview(pr.owner, pr.repo, pr.number).comments.find(
-    (candidate) => candidate.id === id
-  )
-  return comment ? (
-    <NoteFrame className="px-space-1 py-0">
-      <PendingReviewCommentCard
-        owner={pr.owner}
-        repo={pr.repo}
-        number={pr.number}
-        comment={comment}
-      />
-    </NoteFrame>
-  ) : null
-}
-
-function ComposerNote({ pr }: { pr: PullRequestRef }) {
-  const composer = useReviewPage((state) => state.composer)
-  return composer ? (
-    <Composer pr={pr} path={composer.path} range={composer.range} />
-  ) : null
-}
