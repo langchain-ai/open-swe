@@ -73,6 +73,7 @@ async def test_check_message_queue_keeps_slack_for_a_message_relayed_by_another_
     assert "system:dashboard-handoff" not in envelopes
     assert 'surface="automation"' in envelopes
     assert 'relayed_from_thread="worker-thread"' in envelopes
+    assert 'untrusted_report="True"' in envelopes
 
 
 @pytest.mark.asyncio

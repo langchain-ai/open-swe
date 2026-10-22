@@ -1,9 +1,14 @@
 import { createFileRoute } from "@tanstack/react-router"
+import { Button } from "@langchain/macaw-components/Button"
 
-import { SettingsPage, SettingsSection } from "@/components/AppShell"
+import {
+  SettingsPage,
+  SettingsRow,
+  SettingsSection,
+} from "@/components/AppShell"
 import { AssistantUiPreference } from "@/features/settings/components/AssistantUiPreference"
 import { ProfileSwitchRow } from "@/features/settings/components/ProfileSwitchRow"
-import { useProfile } from "@/lib/profile"
+import { usePatchProfile, useProfile } from "@/lib/profile"
 import { pageTitle } from "@/lib/pageTitle"
 
 export const Route = createFileRoute("/my-settings_/experiments")({
@@ -13,6 +18,8 @@ export const Route = createFileRoute("/my-settings_/experiments")({
 
 function ExperimentsPage() {
   const profile = useProfile()
+  const patch = usePatchProfile()
+  const alwaysAllowed = profile.data?.act_as_always_allowed && !patch.isPending
   return (
     <SettingsPage
       title="Experiments"
@@ -49,13 +56,27 @@ function ExperimentsPage() {
           label="Monitors"
           description="Give your agent a monitor tool: it runs a long-lived sandbox command and is woken with each line its filter picks out, such as errors in a log. Applies on the next run."
         />
-        <ProfileSwitchRow
-          field="experimental_act_as_approval"
-          label="Approve PRs opened as you"
+        <SettingsRow
+          label="PR consent"
           description={
-            profile.data?.act_as_always_allowed
-              ? "You chose Always allow, so Open SWE is not asking. Switch this off and on to be asked again."
-              : "In Slack threads with more than one person, Open SWE DMs you for approval before opening a PR under your name."
+            alwaysAllowed
+              ? "You chose Always allow, so Open SWE is not asking for approval."
+              : "Approval is required by default for shared-thread and relayed PR actions on your behalf."
+          }
+          control={
+            <Button
+              variant="outlined"
+              size="sm"
+              disabled={!profile.isSuccess || !alwaysAllowed}
+              onClick={() =>
+                patch.patch({
+                  experimental_act_as_approval:
+                    !profile.data?.experimental_act_as_approval,
+                })
+              }
+            >
+              Require approval
+            </Button>
           }
         />
       </SettingsSection>

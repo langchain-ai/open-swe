@@ -16,6 +16,7 @@ _MIDDLEWARE_MODULES = {
     "PrepareRunState": ".prepare_run",
     "BasePrepareRunMiddleware": ".prepare_run",
     "PullRequestCreationGuardMiddleware": ".pr_creation_guard",
+    "PullRequestActionGuardMiddleware": ".pr_action_guard",
     "record_run_usage": ".record_run_usage",
     "refresh_github_proxy_before_model": ".refresh_github_proxy",
     "RepairOrphanedToolCallsMiddleware": ".repair_orphaned_tool_calls",
@@ -45,6 +46,7 @@ __all__ = [
     "BasePrepareRunMiddleware",
     "PrepareRunState",
     "PullRequestCreationGuardMiddleware",
+    "PullRequestActionGuardMiddleware",
     "RepairOrphanedToolCallsMiddleware",
     "RequireUserReplyMiddleware",
     "SanitizeFireworksMessagesMiddleware",
@@ -76,6 +78,7 @@ if TYPE_CHECKING:
     from openswe.middleware.model_fallback import ModelFallbackMiddleware
     from openswe.middleware.model_selection import ModelSelectionMiddleware
     from openswe.middleware.notify_step_limit import notify_step_limit_reached
+    from openswe.middleware.pr_action_guard import PullRequestActionGuardMiddleware
     from openswe.middleware.pr_creation_guard import PullRequestCreationGuardMiddleware
     from openswe.middleware.prepare_run import BasePrepareRunMiddleware, PrepareRunState
     from openswe.middleware.record_run_usage import record_run_usage

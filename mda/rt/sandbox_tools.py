@@ -51,8 +51,9 @@ _PATH_ARGUMENTS: Final = {
     "grep": "path",
 }
 # A command the push and pull request guards may stop: one naming a push, the GitHub
-# CLI or the pulls API, or nesting shells as deep as the pull request guard reads.
-_GUARDED_WORDS: Final = re.compile(r"\b(?:push|gh|pulls)\b")
+# CLI, the pulls, issues or GraphQL API, or nesting shells as deep as the pull request
+# guard reads.
+_GUARDED_WORDS: Final = re.compile(r"\b(?:push|gh|pulls|issues|graphql)\b")
 _SHELL: Final = re.compile(r"\b(?:ba|da|z)?sh\b")
 _GUARDED_SHELLS: Final = 3
 # The guards read a command as the shell splits it, with its quotes and escapes gone,

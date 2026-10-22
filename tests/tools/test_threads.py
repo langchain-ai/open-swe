@@ -429,6 +429,9 @@ async def test_manage_thread_sends_to_busy_thread_like_the_dashboard(
     )
     monkeypatch.setattr(threads_tool, "proxy_dashboard_thread_commands", proxy)
 
+    monkeypatch.setattr(
+        threads_tool, "_config", lambda: {"configurable": {"thread_id": "coordinator"}}
+    )
     sent = await threads_tool.manage_thread("thread-1", "send_message", message="Continue")
 
     assert sent == {"success": True, "mode": mode, "run_id": result["run_id"]}
@@ -467,6 +470,9 @@ async def test_manage_thread_starts_idle_message_with_fixed_command(
     assert command["method"] == "run.start"
     assert "plan_mode" not in command["params"]["config"]["configurable"]
     assert awaited.kwargs["relayed_from"] == "coordinator"
+    assert command["params"]["input"]["messages"][0]["additional_kwargs"] == {
+        "relayed_from_thread_id": "coordinator"
+    }
 
 
 async def test_manage_thread_rejects_plan_format_conversion(

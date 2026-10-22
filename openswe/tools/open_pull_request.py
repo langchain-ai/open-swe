@@ -23,6 +23,7 @@ from openswe.github.app import get_github_app_installation_token
 from openswe.github.comments import derive_pr_state
 from openswe.github.pull_requests import AGENT_OPENED_LINK_SOURCE, PullRequest, ThreadLink
 from openswe.github.token import GitHubUserAuthRequired
+from openswe.input_messages import latest_input_is_relay
 from openswe.remote_runtime.git_metadata import record_pr_target
 from openswe.run_config import RunConfig
 from openswe.slack.client import (
@@ -1091,6 +1092,7 @@ async def _open_pull_request(
             head=head,
             base=base,
             title=title,
+            relayed=latest_input_is_relay((state or {}).get("messages", [])),
         ):
             return dict(refusal)
         preflight_failure = await _preflight_pr_access(

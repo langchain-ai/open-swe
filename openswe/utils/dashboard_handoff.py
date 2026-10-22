@@ -19,5 +19,5 @@ def dashboard_input_context(sender_id: str, relayed_from: str | None) -> InputMe
         "sender_id": sender_id,
         "surface": "automation",
         "kind": "human",
-        "data": {"relayed_from_thread": relayed_from},
+        "data": {"relayed_from_thread": relayed_from, "untrusted_report": True},
     }
