@@ -1234,12 +1234,11 @@ async function serveBundledUi(request) {
 }
 
 const appNavigations = new WeakMap<Electron.BrowserWindow, { url: string }>();
+const failedAppUrls = new WeakMap<Electron.BrowserWindow, string>();
 
-async function loadApp(
-  window: Electron.BrowserWindow,
-  url = appNavigations.get(window)?.url ?? APP_URL,
-) {
+async function loadApp(window: Electron.BrowserWindow, url = APP_URL) {
   if (!backendUrl) return;
+  failedAppUrls.delete(window);
   const navigation = { url };
   appNavigations.set(window, navigation);
   try {
@@ -1254,6 +1253,7 @@ async function loadApp(
         error.code === "ERR_ABORTED")
     )
       return;
+    failedAppUrls.set(window, url);
     await window
       .loadURL(errorPage(error))
       .catch((pageError) =>
@@ -1350,7 +1350,11 @@ function createMenu() {
             if (!mainWindow || mainWindow.isDestroyed()) return;
             if (isAppUrl(mainWindow.webContents.getURL()))
               mainWindow.webContents.reload();
-            else void loadApp(mainWindow);
+            else
+              void loadApp(
+                mainWindow,
+                failedAppUrls.get(mainWindow) ?? APP_URL,
+              );
           },
         },
         // Installed builds too: the renderer is sandboxed with no Node access.

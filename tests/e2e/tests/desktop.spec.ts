@@ -260,6 +260,15 @@ test("Desktop links supersede startup loading", async () => {
     });
     await expect(page.getByText("Ready", { exact: true })).toBeVisible();
     await expect(page).toHaveURL("open-swe://app/agents/reviews/a/b/1");
+    await page.goto("data:text/html,Non-app page");
+    await electronApp.evaluate(({ Menu }) => {
+      Menu.getApplicationMenu()
+        ?.items.find((item) => item.label === "View")
+        ?.submenu?.items.find((item) => item.label === "Reload")
+        ?.click();
+    });
+    await expect(page.getByText("Ready", { exact: true })).toBeVisible();
+    await expect(page).toHaveURL("open-swe://app/");
   } finally {
     await electronApp.close();
     rmSync(stateRoot, { recursive: true, force: true });
