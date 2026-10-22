@@ -47,7 +47,7 @@ from openswe.thread_ids import (
     reviewer_thread_id,
     thread_id_from_branch,
 )
-from openswe.threads import index
+from openswe.threads import index, succession
 from openswe.threads.creation import create_thread
 from openswe.users import User
 from openswe.walkthrough.record import Walkthrough
@@ -311,7 +311,9 @@ async def trigger_pr_review_from_ref(
         common.logger.warning("Missing base/head SHA for Slack PR review request")
         return {"success": False, "error": "Pull request metadata is missing base/head SHA"}
 
-    thread_id = reviewer_thread_id(pr_ref.owner, pr_ref.repo, pr_ref.number)
+    thread_id = await succession.succeed(
+        reviewer_thread_id(pr_ref.owner, pr_ref.repo, pr_ref.number)
+    )
     langgraph_client = common.get_client(url=common.LANGGRAPH_URL)
     if not await common.ensure_thread_exists_for_metadata(
         thread_id,
@@ -419,8 +421,8 @@ async def _dispatch_first_review_from_pr_payload(payload: dict[str, Any], *, sou
         common.logger.warning("Missing PR context for reviewer dispatch, skipping run")
         return
 
-    thread_id = reviewer_thread_id(
-        repo_config.get("owner", ""), repo_config.get("name", ""), pr_number
+    thread_id = await index.current_thread_id(
+        reviewer_thread_id(repo_config.get("owner", ""), repo_config.get("name", ""), pr_number)
     )
 
     pr_meta: ReviewerPRMeta = {
@@ -460,6 +462,7 @@ async def _dispatch_first_review_from_pr_payload(payload: dict[str, Any], *, sou
         common.logger.warning("No GitHub App token available for reviewer dispatch")
         return
 
+    thread_id = await succession.succeed(thread_id)
     langgraph_client = common.get_client(url=common.LANGGRAPH_URL)
     if not await common.ensure_thread_exists_for_metadata(
         thread_id,
@@ -614,8 +617,8 @@ async def process_github_pr_close(payload: dict[str, Any]) -> None:
     if not pr_number or not isinstance(pr_number, int):
         return
 
-    thread_id = reviewer_thread_id(
-        repo_config.get("owner", ""), repo_config.get("name", ""), pr_number
+    thread_id = await index.current_thread_id(
+        reviewer_thread_id(repo_config.get("owner", ""), repo_config.get("name", ""), pr_number)
     )
     metadata = await common.get_thread_metadata_safe(thread_id)
     if metadata is None or metadata.get("kind") != common.REVIEWER_THREAD_KIND:
@@ -795,7 +798,9 @@ async def _process_github_head_update(
         )
         return
 
-    thread_id = reviewer_thread_id(repo_config["owner"], repo_config["name"], pr_number)
+    thread_id = await index.current_thread_id(
+        reviewer_thread_id(repo_config["owner"], repo_config["name"], pr_number)
+    )
     metadata = await common.get_thread_metadata_safe(thread_id)
     if metadata is None or metadata.get("kind") != common.REVIEWER_THREAD_KIND:
         common.logger.info(
@@ -890,6 +895,7 @@ async def _process_github_head_update(
         )
         return
 
+    thread_id = await succession.succeed(thread_id)
     langgraph_client = common.get_client(url=common.LANGGRAPH_URL)
     if not await common.ensure_thread_exists_for_metadata(
         thread_id,
@@ -1375,8 +1381,8 @@ async def process_github_review_finding_reply(payload: dict[str, Any]) -> None:
     if not isinstance(pr_number, int):
         return
 
-    thread_id = reviewer_thread_id(
-        repo_config.get("owner", ""), repo_config.get("name", ""), pr_number
+    thread_id = await index.current_thread_id(
+        reviewer_thread_id(repo_config.get("owner", ""), repo_config.get("name", ""), pr_number)
     )
     metadata = await common.get_thread_metadata_safe(thread_id)
     if metadata is None or metadata.get("kind") != common.REVIEWER_THREAD_KIND:
@@ -1426,6 +1432,7 @@ async def process_github_review_finding_reply(payload: dict[str, Any]) -> None:
     }
     await common.append_finding_interaction(thread_id, finding_id, interaction)
 
+    thread_id = await succession.succeed(thread_id)
     base_sha = pull_request.get("base", {}).get("sha", "")
     head_sha = pull_request.get("head", {}).get("sha", "")
     pr_url = pull_request.get("html_url", "") or pull_request.get("url", "")

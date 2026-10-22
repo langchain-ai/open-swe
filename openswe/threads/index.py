@@ -358,6 +358,15 @@ async def live_thread_id(thread_id: str) -> str:
     return thread_id
 
 
+async def current_thread_id(thread_id: str) -> str:
+    """The thread to read for ``thread_id``: its successor once activity has moved
+    there, else the thread itself."""
+    live = await live_thread_id(thread_id)
+    if live != thread_id and await get(live) is not None:
+        return live
+    return thread_id
+
+
 async def update(thread_id: str, metadata: Mapping[str, JsonValue]) -> IndexedThread | None:
     """Merge ``metadata`` into the thread's, key by key, as the Agent Server's PATCH does."""
     async with transaction() as conn:

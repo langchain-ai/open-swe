@@ -10,6 +10,7 @@ from openswe.input_messages import build_run_input
 from openswe.invocation import new_invocation_id, with_invocation_id
 from openswe.prompts import prompt
 from openswe.thread_ids import review_scout_thread_id
+from openswe.threads import index, succession
 from openswe.threads.creation import ensure_titled_thread
 from openswe.threads.status import thread_run_error
 from openswe.walkthrough.record import WalkthroughView
@@ -115,9 +116,11 @@ class ReviewScoutTarget(BaseModel):
     head_sha: str
     workspace_slug: str | None
 
-    @property
-    def thread_id(self) -> str:
-        return review_scout_thread_id(self.owner, self.repo, self.pr_number)
+    async def current_thread_id(self) -> str:
+        """The scout thread to read, which follows its successor once one exists."""
+        return await index.current_thread_id(
+            review_scout_thread_id(self.owner, self.repo, self.pr_number)
+        )
 
     @property
     def log_extra(self) -> dict[str, object]:
@@ -133,9 +136,10 @@ class ReviewScoutTarget(BaseModel):
     async def active_run(self) -> str | None:
         """A scout run already working on this head, so a retry joins it instead of restarting it."""
         client = dispatch_client()
+        thread_id = await self.current_thread_id()
         for status in ("running", "pending"):
             try:
-                runs = await client.runs.list(self.thread_id, status=status, limit=5)
+                runs = await client.runs.list(thread_id, status=status, limit=5)
             except NotFoundError:
                 return None
             for raw in runs:
@@ -147,7 +151,7 @@ class ReviewScoutTarget(BaseModel):
     async def progress(self) -> ScoutProgress:
         """How far the running scout has got, from its latest checkpoint."""
         state = _ScoutState.model_validate(
-            await dispatch_client().threads.get_state(self.thread_id)
+            await dispatch_client().threads.get_state(await self.current_thread_id())
         )
         messages = state.values.messages
         run_start = max((i for i, m in enumerate(messages) if m.type == "human"), default=0)
@@ -166,8 +170,9 @@ class ReviewScoutTarget(BaseModel):
     async def last_failure(self) -> str | None:
         """The error that ended the latest scout run on this head, when it failed."""
         client = dispatch_client()
+        thread_id = await self.current_thread_id()
         try:
-            runs = await client.runs.list(self.thread_id, limit=1)
+            runs = await client.runs.list(thread_id, limit=1)
         except NotFoundError:
             return None
         if not runs:
@@ -175,7 +180,7 @@ class ReviewScoutTarget(BaseModel):
         run = _ScoutRun.model_validate(runs[0])
         if run.status != "error" or run.metadata.get(_HEAD_METADATA_KEY) != self.head_sha:
             return None
-        return await thread_run_error(self.thread_id) or "The review scout run ended with an error."
+        return await thread_run_error(thread_id) or "The review scout run ended with an error."
 
     async def start(self) -> str:
         """The scout run for this head, started when none is already running.
@@ -184,11 +189,14 @@ class ReviewScoutTarget(BaseModel):
         the latest head's walkthrough is ever written.
         """
         client = dispatch_client()
+        thread_id = await succession.succeed(
+            review_scout_thread_id(self.owner, self.repo, self.pr_number)
+        )
         await ensure_titled_thread(
-            client, self.thread_id, title=f"Walkthrough: {self.pr_title} #{self.pr_number}"
+            client, thread_id, title=f"Walkthrough: {self.pr_title} #{self.pr_number}"
         )
         await client.threads.update(
-            thread_id=self.thread_id,
+            thread_id=thread_id,
             metadata={
                 "kind": ASSISTANT_ID,
                 "pr": {"owner": self.owner, "name": self.repo, "number": self.pr_number},
@@ -198,7 +206,7 @@ class ReviewScoutTarget(BaseModel):
         if active is not None:
             return active
         configurable = {
-            "thread_id": self.thread_id,
+            "thread_id": thread_id,
             "repo": {"owner": self.owner, "name": self.repo},
             "pr_number": self.pr_number,
             "pr_title": self.pr_title,
@@ -207,7 +215,7 @@ class ReviewScoutTarget(BaseModel):
             "workspace": self.workspace_slug,
         }
         run = await create_durable_run(
-            self.thread_id,
+            thread_id,
             ASSISTANT_ID,
             input=build_run_input(
                 prompt("review-scout/kickoff", pr_number=self.pr_number),
@@ -239,9 +247,10 @@ class ReviewScoutTarget(BaseModel):
         # Polled rather than joined: one join request idles for the whole run
         # and would hit the client's 300s read timeout first.
         client = dispatch_client()
+        thread_id = await self.current_thread_id()
         deadline = asyncio.get_running_loop().time() + SCOUT_WAIT_SECONDS
         while asyncio.get_running_loop().time() < deadline:
-            run = _ScoutRun.model_validate(await client.runs.get(self.thread_id, run_id))
+            run = _ScoutRun.model_validate(await client.runs.get(thread_id, run_id))
             if run.status not in _ACTIVE_STATUSES:
                 return await self.walkthrough()
             await asyncio.sleep(_POLL_SECONDS)
