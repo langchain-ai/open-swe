@@ -108,7 +108,7 @@ class _Session:
             await asyncio.wait_for(self.stagehand.close(), 3)
         with contextlib.suppress(Exception):
             await asyncio.wait_for(_invalidate_browser(self.stagehand.browser), 3)
-        shutil.rmtree(self.artifacts, ignore_errors=True)
+        await asyncio.to_thread(shutil.rmtree, self.artifacts, ignore_errors=True)
 
 
 # Process-wide: a user's concurrent threads share their browser's one client.
@@ -527,7 +527,8 @@ async def _connect(
         with contextlib.suppress(Exception):
             await _invalidate_browser(browser)
         raise
-    artifacts = tempfile.mkdtemp(prefix="mda-browser-")
+    # File work runs off the event loop: `langgraph dev` turns blocking calls on it away.
+    artifacts = await asyncio.to_thread(lambda: tempfile.mkdtemp(prefix="mda-browser-"))
     # Run code's `browser.close()` releases only our client, not the browser.
     tools = StagehandFacadeTools(
         stagehand,
@@ -552,7 +553,8 @@ async def _install_extension(box: AsyncSandbox) -> None:
     """Unpack the client's own extension into the browser, unless it is there already."""
     if (await box.run(f"test -f {_EXTENSION_DIR}/manifest.json", timeout=60)).exit_code == 0:
         return
-    await box.write(_EXTENSION_ZIP, get_extension_archive(), timeout=300)
+    archive = await asyncio.to_thread(get_extension_archive)  # zips its folder: blocking
+    await box.write(_EXTENSION_ZIP, archive, timeout=300)
     tmp = f"{_EXTENSION_DIR}.tmp"  # unpacked aside, so a partial copy never passes the check
     unpacked = await box.run(
         f"rm -rf {tmp} && python3 -m zipfile -e {_EXTENSION_ZIP} {tmp} && "
