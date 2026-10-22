@@ -1,7 +1,6 @@
 import { Button } from "@langchain/macaw-components/Button"
 import { Kbd } from "@langchain/macaw-components/Kbd"
 import { Textarea } from "@langchain/macaw-components/Textarea"
-import type { SelectedLineRange } from "@pierre/diffs"
 
 import { useShortcutLabel } from "@/lib/hotkeys"
 import {
@@ -11,9 +10,15 @@ import {
 import { usePendingReview } from "@/features/reviews/lib/usePendingReview"
 import { AgentMark } from "@/features/reviews/page/AgentMark"
 import type { PullRequestRef } from "@/features/reviews/page/queries"
-import { useReviewPage } from "@/features/reviews/page/store"
+import {
+  useReviewPage,
+  type CommentDraftTarget,
+} from "@/features/reviews/page/store"
 import { useAskAboutLines } from "@/features/reviews/page/askAboutLines"
 import { NoteFrame } from "./NoteFrame"
+
+/** Composers that already took focus; the diff remounts them as it scrolls. */
+const focused = new WeakSet<CommentDraftTarget>()
 
 /**
  * The comment box on a line range. The same words can go to the author, as
@@ -21,13 +26,12 @@ import { NoteFrame } from "./NoteFrame"
  */
 export function Composer({
   pr,
-  path,
-  range,
+  target,
 }: {
   pr: PullRequestRef
-  path: string
-  range: SelectedLineRange
+  target: CommentDraftTarget
 }) {
+  const { path, range } = target
   const pending = usePendingReview(pr.owner, pr.repo, pr.number)
   const setComposer = useReviewPage((state) => state.setComposer)
   const body = useReviewPage((state) => state.composerText)
@@ -61,8 +65,13 @@ export function Composer({
         </p>
         <Textarea
           size="md"
+          ref={(node) => {
+            // Focus once, as it opens; without moving the diff, which already scrolled to it.
+            if (!node || focused.has(target)) return
+            focused.add(target)
+            node.focus({ preventScroll: true })
+          }}
           aria-label="Comment body"
-          autoFocus
           rows={4}
           resize="vertical"
           value={body}

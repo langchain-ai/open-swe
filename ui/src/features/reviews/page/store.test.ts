@@ -98,3 +98,73 @@ describe("reading a walkthrough", () => {
     expect(isRead(viewed, second)).toBe(true)
   })
 })
+
+describe("the page's lifetimes", () => {
+  const pr = { owner: "acme", repo: "app", number: 7 }
+  const page = () => useReviewPage.getState()
+
+  beforeEach(() => {
+    page().open({ owner: "acme", repo: "other", number: 1 }, null)
+    page().open(pr, split.headSha)
+    page().setEntryOrder(entries)
+  })
+
+  it("starts the visit over on coming back, keeping what was written", () => {
+    page().setActive(second, true)
+    page().jumpTo({ kind: "entry", id: second.id })
+    page().setComposerText("half a thought")
+    page().setReplyDraft(42, "a reply")
+    page().showFindings()
+    useReviewPage.setState({ lastStop: "src/a.ts:RIGHT:7" })
+
+    page().leave()
+    page().open(pr, split.headSha)
+
+    const state = page()
+    expect(state.activeEntry).toBeNull()
+    expect(state.atEnd).toBe(false)
+    expect(state.visitedSteps.size).toBe(0)
+    expect(state.jump).toBeNull()
+    expect(state.lastStop).toBeNull()
+    expect(state.entryOrder).toEqual([])
+    // Asked for on the last visit; nothing on this one should act on it.
+    expect(state.takeEvent("showFindings")).toBe(false)
+    expect(state.composerText).toBe("half a thought")
+    expect(state.replyDrafts.get(42)).toBe("a reply")
+  })
+
+  it("drops drafts on another pull request, and folds on a new head", () => {
+    page().toggleCollapsed(first.readKey)
+    page().open(pr, "c".repeat(40))
+    expect(page().collapsed.size).toBe(0)
+
+    page().setReplyDraft(42, "a reply")
+    page().open({ ...pr, number: 8 }, null)
+    expect(page().replyDrafts.size).toBe(0)
+  })
+
+  it("x folds the file being read and leaves it folded", () => {
+    page().setActive(first, false)
+
+    page().toggleActiveCollapsed()
+
+    expect(page().jump?.target).toEqual({ kind: "entry", id: first.id })
+    expect(isCollapsed(page(), first)).toBe(true)
+    // Only a jump that asks to, like a click in the file list, opens it.
+    page().jumpTo({ kind: "file", path: split.path }, { reveal: true })
+    expect(isCollapsed(page(), first)).toBe(false)
+  })
+
+  it("marking the last unread file viewed stays put and leaves it folded", () => {
+    page().setActive(first, false)
+    page().markViewed(first.id)
+    expect(page().jump?.target).toEqual({ kind: "entry", id: second.id })
+
+    const jump = page().jump
+
+    page().markViewed(second.id)
+
+    expect(page().jump).toBe(jump)
+    expect(isCollapsed(page(), second)).toBe(true)
+  })
+})

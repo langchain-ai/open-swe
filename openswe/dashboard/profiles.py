@@ -45,6 +45,7 @@ RETIRED_PROFILE_KEYS = frozenset(
         "subagent_reasoning_effort",
         "model_routing_enabled",
         "experimental_mcp_ptc",
+        "recent_thread_context_enabled",
     }
 )
 
@@ -84,7 +85,6 @@ class ProfileUpdate(BaseModel):
     branch_prefix: str | None = None
     auto_fix_ci: bool = True
     auto_human_review_enabled: bool = True
-    recent_thread_context_enabled: bool = False
     concierge_mode: bool | None = None
     pr_review_links: bool | None = None
     pr_failure_reactions: bool | None = None
@@ -161,11 +161,6 @@ async def upsert_profile(login: str, email: str, update: ProfileUpdate) -> dict[
             update.auto_human_review_enabled
             if "auto_human_review_enabled" in update.model_fields_set
             else existing.get("auto_human_review_enabled", True)
-        ),
-        "recent_thread_context_enabled": (
-            update.recent_thread_context_enabled
-            if "recent_thread_context_enabled" in update.model_fields_set
-            else existing.get("recent_thread_context_enabled", False)
         ),
         "draft_prs": (
             update.draft_prs if update.draft_prs is not None else existing.get("draft_prs", True)

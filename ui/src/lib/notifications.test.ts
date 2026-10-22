@@ -74,6 +74,39 @@ describe("showRunNotification", () => {
 })
 
 describe("useRunCompletionNotifier", () => {
+  it.each(["finished", "error", "interrupted"] as const)(
+    "keeps Slack threads quiet on %s while dashboard threads still notify",
+    (status) => {
+      const slack: AgentThread = {
+        ...thread,
+        id: "slack-thread",
+        source: "slack",
+        status: "running",
+      }
+      const dashboard: AgentThread = {
+        ...thread,
+        source: "dashboard",
+        status: "running",
+      }
+      const openThread = vi.fn()
+      const { rerender } = renderHook(
+        (threads: Array<AgentThread>) =>
+          useRunCompletionNotifier(threads, undefined, openThread),
+        { initialProps: [slack, dashboard] }
+      )
+
+      rerender([
+        { ...slack, status },
+        { ...dashboard, status },
+      ])
+
+      expect(FakeNotification.instances).toHaveLength(1)
+      expect(FakeNotification.instances[0]?.options?.tag).toBe(
+        `run-${dashboard.id}`
+      )
+    }
+  )
+
   it("notifies for the coordinator but keeps independently listed workers quiet", () => {
     const coordinator: AgentThread = {
       ...thread,
