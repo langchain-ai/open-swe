@@ -933,7 +933,7 @@ async def _process_github_head_update(
     # GitHub only shows check runs on a PR's current head commit, so the check
     # created on the previous head disappears after a follow-up push. Create a
     # fresh in-progress check on the new head SHA so the review stays visible;
-    # publish (or the after-agent hook) settles this id.
+    # publish (or the run-complete webhook) settles this id.
     check_run_id = await common.create_review_check_run(
         owner=repo_config["owner"],
         repo=repo_config["name"],

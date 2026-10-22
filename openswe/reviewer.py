@@ -59,7 +59,6 @@ from openswe.middleware import (
     ToolErrorMiddleware,
     check_message_queue_before_model,
     refresh_github_proxy_before_model,
-    settle_review_check_on_exit,
 )
 from openswe.middleware.prepare_run import PrepareRunState
 from openswe.middleware.sandbox_circuit_breaker import post_sandbox_unreachable_notification
@@ -1125,7 +1124,6 @@ async def build_reviewer_agent(
             ModelRetryMiddleware(retry_on=(TimeoutError,)),
             ModelErrorMiddleware(),
             ModelCallTimeoutMiddleware(),
-            settle_review_check_on_exit,
         ],
     )
     graph = create_deep_agent(

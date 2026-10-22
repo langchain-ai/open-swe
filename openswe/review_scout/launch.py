@@ -1,5 +1,7 @@
 import asyncio
 import logging
+from collections.abc import Mapping
+from typing import Self
 
 from langgraph_sdk.errors import NotFoundError
 from pydantic import BaseModel, ValidationError
@@ -9,6 +11,7 @@ from openswe.dispatch import create_durable_run, dispatch_client
 from openswe.input_messages import build_run_input
 from openswe.invocation import new_invocation_id, with_invocation_id
 from openswe.prompts import prompt
+from openswe.run_config import RunConfig
 from openswe.thread_ids import review_scout_thread_id
 from openswe.threads import index, succession
 from openswe.threads.creation import ensure_titled_thread
@@ -26,6 +29,8 @@ _POLL_SECONDS = 1
 _ACTIVE_STATUSES = frozenset({"pending", "running"})
 _SENDER_ID = "system:review-scout"
 _HEAD_METADATA_KEY = "scout_head_sha"
+# The whole target, so the run-complete webhook can finish what the run left.
+_TARGET_METADATA_KEY = "review_scout"
 
 
 class _ScoutRun(BaseModel):
@@ -116,6 +121,18 @@ class ReviewScoutTarget(BaseModel):
     head_sha: str
     workspace_slug: str | None
 
+    @classmethod
+    def of_run(cls, metadata: Mapping[str, object]) -> Self | None:
+        """The target a scout run was started for, from the metadata ``start`` recorded on it."""
+        raw = metadata.get(_TARGET_METADATA_KEY)
+        if raw is None:
+            return None
+        try:
+            return cls.model_validate(raw)
+        except ValidationError:
+            logger.warning("Unparseable review scout run target", exc_info=True)
+            return None
+
     async def current_thread_id(self) -> str:
         """The scout thread to read, which follows its successor once one exists."""
         return await index.current_thread_id(
@@ -205,15 +222,6 @@ class ReviewScoutTarget(BaseModel):
         active = await self.active_run()
         if active is not None:
             return active
-        configurable = {
-            "thread_id": thread_id,
-            "repo": {"owner": self.owner, "name": self.repo},
-            "pr_number": self.pr_number,
-            "pr_title": self.pr_title,
-            "base_sha": self.base_sha,
-            "head_sha": self.head_sha,
-            "workspace": self.workspace_slug,
-        }
         run = await create_durable_run(
             thread_id,
             ASSISTANT_ID,
@@ -226,11 +234,42 @@ class ReviewScoutTarget(BaseModel):
             ),
             source="review-scout",
             thread_title=None,
-            config={"configurable": with_invocation_id(configurable, new_invocation_id())},
-            metadata={_HEAD_METADATA_KEY: self.head_sha},
+            config={
+                "configurable": with_invocation_id(
+                    self._configurable(thread_id), new_invocation_id()
+                )
+            },
+            metadata={
+                _HEAD_METADATA_KEY: self.head_sha,
+                _TARGET_METADATA_KEY: self.model_dump(mode="json"),
+            },
         )
         logger.info("Started review scout", extra=self.log_extra)
         return _ScoutRun.model_validate(run).run_id
+
+    async def finish(self) -> None:
+        """Complete the plan a finished run on this head left, unless a newer run owns it now."""
+        client = dispatch_client()
+        thread_id = await self.current_thread_id()
+        for status in ("running", "pending"):
+            if await client.runs.list(thread_id, status=status, limit=1):
+                logger.info("Another review scout run owns the plan now", extra=self.log_extra)
+                return
+        # The graph module loads the agent stack, which the web app must not import.
+        from openswe.review_scout.graph import finish_plan
+
+        await finish_plan(RunConfig.parse(self._configurable(thread_id)))
+
+    def _configurable(self, thread_id: str) -> dict[str, object]:
+        return {
+            "thread_id": thread_id,
+            "repo": {"owner": self.owner, "name": self.repo},
+            "pr_number": self.pr_number,
+            "pr_title": self.pr_title,
+            "base_sha": self.base_sha,
+            "head_sha": self.head_sha,
+            "workspace": self.workspace_slug,
+        }
 
     async def await_walkthrough(self) -> WalkthroughView | None:
         """This head's walkthrough, running the scout first when it has none yet.

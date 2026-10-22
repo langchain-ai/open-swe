@@ -837,7 +837,6 @@ _NOT_FROM_CODE = (
             "cli_result",
             "connect_managed_tools",
             "switch_to_performance_model",
-            "record_human_input",
             "load_integration_tools",
             "spawn_worker",
             "control_worker",

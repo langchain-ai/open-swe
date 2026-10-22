@@ -4,6 +4,8 @@ The platform POSTs a run-completion payload to ``/webhooks/run-complete`` (wired
 as the ``webhook`` on every dispatched run, see ``openswe.dispatch``). Successful
 Slack runs enqueue deferred session-cost enrichment. Failures (``error`` /
 ``timeout``) post a short reply so a run that died never leaves the user silent.
+It also owns the end of review runs: it closes the review check a reviewer run
+left open and completes the walkthrough plan a successful review scout left.
 
 This decouples "the user gets an answer" from "the agent remembered to reply."
 The reply is idempotent per run when the webhook includes a run id. Older or
@@ -27,6 +29,7 @@ from openswe.invocation import resolve_invocation_id, with_invocation_id
 from openswe.linear.notifications import post_linear_notification
 from openswe.review.findings import REVIEWER_THREAD_KIND
 from openswe.review.publish import settle_review_check_run
+from openswe.review_scout.launch import ReviewScoutTarget
 from openswe.session_cost import schedule_session_cost_refresh
 from openswe.slack.client import post_slack_thread_reply
 from openswe.slack.code_channels import is_code_channel_session, set_session_status
@@ -141,8 +144,14 @@ def _failure_reason_code(error: Any, metadata: dict[str, Any], run_id: str | Non
     return code_for_error_type(error_type)
 
 
-async def _settle_failed_reviewer_check(thread_id: str, metadata: dict[str, Any]) -> None:
-    """Best-effort cleanup for reviewer checks left open by graph failures."""
+async def _settle_reviewer_check(
+    client: LangGraphClient, thread_id: str, metadata: dict[str, Any]
+) -> None:
+    """Close the review check a finished reviewer run left open.
+
+    ``publish_review`` closes it and stops tracking it; one still tracked means
+    the run ended without publishing, or publishing could not close it.
+    """
     if metadata.get("kind") != REVIEWER_THREAD_KIND:
         return
     if not isinstance(metadata.get("review_check_run_id"), int):
@@ -155,10 +164,15 @@ async def _settle_failed_reviewer_check(thread_id: str, metadata: dict[str, Any]
     if not isinstance(owner, str) or not owner or not isinstance(repo, str) or not repo:
         return
     try:
+        # A newer run tracks its own check here, and settles it when it ends.
+        for status in ("pending", "running"):
+            if await client.runs.list(thread_id, status=status, limit=1):
+                return
         token = await get_github_app_installation_token()
         if not token:
             logger.warning("run-complete: no GitHub token to settle review check for %s", thread_id)
             return
+        # publish_review finished but could not close the check: report its real result.
         pending = metadata.get("review_check_pending_result")
         if isinstance(pending, dict) and pending.get("conclusion") in {
             "success",
@@ -169,6 +183,8 @@ async def _settle_failed_reviewer_check(thread_id: str, metadata: dict[str, Any]
             title = str(pending.get("title") or "Review completed")
             summary = str(pending.get("summary") or "")
         else:
+            # Neutral, not failure: an incomplete review is a reviewer-infra
+            # problem, and a red X on the PR misreads as a code problem.
             conclusion = "neutral"
             title = "Review did not complete"
             summary = (
@@ -188,6 +204,17 @@ async def _settle_failed_reviewer_check(thread_id: str, metadata: dict[str, Any]
         logger.warning(
             "run-complete: could not settle review check for %s", thread_id, exc_info=True
         )
+
+
+async def _finish_review_scout(metadata: dict[str, Any]) -> None:
+    """Complete the walkthrough plan a successful review scout run left."""
+    target = ReviewScoutTarget.of_run(metadata)
+    if target is None:
+        return
+    try:
+        await target.finish()
+    except Exception:
+        logger.exception("Could not finish the review scout's plan", extra=target.log_extra)
 
 
 async def _post_failure_reply(
@@ -368,6 +395,7 @@ async def _handle_successful_run(
 
         return await turns.handle_run_completion(thread_id, run_id, "success")
     if metadata.get("kind") == REVIEWER_THREAD_KIND:
+        await _settle_reviewer_check(client, thread_id, metadata)
         return {"status": "ignored", "reason": "not an agent Slack run"}
     await _settle_code_channel_session(client, thread_id, metadata)
     await sync_slack_background_status(client, thread_id)
@@ -524,6 +552,9 @@ async def handle_run_completion(payload: dict[str, Any]) -> dict[str, str]:
             raise
     payload_metadata = payload.get("metadata")
     if isinstance(payload_metadata, dict) and status in _TERMINAL_RUN_STATUSES:
+        # A failed scout keeps its plan incomplete, so the review page reports the failure.
+        if status == "success":
+            await _finish_review_scout(payload_metadata)
         if pull_request := RunMetadata.model_validate(payload_metadata).pull_request:
             await Topic.PULL_REQUESTS.invalidate(key=pull_request)
     # A run that failed, or a pickup run that left the store as it found it,
@@ -574,7 +605,7 @@ async def handle_run_completion(payload: dict[str, Any]) -> dict[str, str]:
         from openswe.incidents import turns
 
         return await turns.handle_run_completion(thread_id, run_id, str(status))
-    await _settle_failed_reviewer_check(thread_id, metadata)
+    await _settle_reviewer_check(client, thread_id, metadata)
     await _settle_code_channel_session(client, thread_id, metadata)
     await sync_slack_background_status(client, thread_id)
     if run_id is None:
