@@ -638,11 +638,11 @@ async def test_general_purpose_subagent_cannot_use_slack_tools() -> None:
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("private_thread", [True, False])
-async def test_channel_reads_need_a_private_thread(
-    private_thread: bool, saved_thread_scope: dict[str, str]
+@pytest.mark.parametrize("thread_scope", ["private", "public", "bot"])
+async def test_channel_reads_need_a_private_thread_or_its_triggering_bot(
+    thread_scope: str, saved_thread_scope: dict[str, object]
 ) -> None:
-    saved_thread_scope["visibility"] = "private" if private_thread else "public"
+    saved_thread_scope["visibility"] = "private" if thread_scope == "private" else "public"
     config = _base_config()
     configurable = config.get("configurable")
     assert isinstance(configurable, dict)
@@ -652,6 +652,16 @@ async def test_channel_reads_need_a_private_thread(
             "slack_thread": {"channel_id": "C123", "thread_ts": "1700000000.000100"},
         }
     )
+    if thread_scope == "bot":
+        slack_thread = {
+            "channel_id": "C123",
+            "thread_ts": "1700000000.000100",
+            "triggering_bot_id": "B1",
+        }
+        configurable.update(slack_thread=slack_thread, github_login=None)
+        saved_thread_scope.update(
+            owner_type="system", source_context={"slack_thread": slack_thread}
+        )
 
     captured = await _capture_create_deep_agent_kwargs(config)
     tools = captured["tools"]
@@ -660,13 +670,13 @@ async def test_channel_reads_need_a_private_thread(
     assert isinstance(subagents, list)
 
     tool_names = {_registered_tool_name(tool) for tool in tools}
-    assert ("slack_read_channel_messages" in tool_names) is private_thread
+    assert ("slack_read_channel_messages" in tool_names) is (thread_scope != "public")
     # A thread-bound Slack read is unaffected either way.
     assert "slack_read_thread_messages" in tool_names
 
     gp = next(item for item in subagents if item["name"] == "general-purpose")
     subagent_names = {_registered_tool_name(tool) for tool in gp["tools"]}
-    assert ("slack_read_channel_messages" in subagent_names) is private_thread
+    assert ("slack_read_channel_messages" in subagent_names) is (thread_scope != "public")
 
 
 @pytest.fixture
