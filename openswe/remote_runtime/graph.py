@@ -66,6 +66,7 @@ from openswe.github.sandbox_access import READ_ONLY_REVIEW_PERMISSIONS
 from openswe.middleware.conversation_offloading import ConversationOffloadingMiddleware
 from openswe.middleware.model_selection import PersistedRoute, normalize_route
 from openswe.middleware.record_run_usage import RecordRunUsageMiddleware
+from openswe.middleware.tool_error_handler import is_sandbox_unreachable
 from openswe.middleware.transcript import TranscriptMiddleware, within_namespace
 from openswe.prompts import common_prompt, prompt
 from openswe.remote_runtime.git_metadata import (
@@ -746,8 +747,12 @@ class RemoteGraph:
                     call_id=body.tool_call_id,
                 )
         except Exception as exc:
-            # The graph's tool-error middleware turns tool failures into results;
-            # what is left is a call that never reached a tool, such as bad arguments.
+            # The graph's tool-error middleware turns tool failures into results, except
+            # an unreachable sandbox: it has told the user, and the run must end, as it
+            # does in-process. Raised here, the hook fails and so does the MDA tool call.
+            if is_sandbox_unreachable(exc):
+                raise
+            # What is left is a call that never reached a tool, such as bad arguments.
             detail = getattr(exc, "detail", None)
             logger.warning(
                 "Remote tool call failed",

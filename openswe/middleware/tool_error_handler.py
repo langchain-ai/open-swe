@@ -96,7 +96,7 @@ def _to_transient_sandbox_payload(
     return data
 
 
-def _is_sandbox_unreachable(e: Exception) -> bool:
+def is_sandbox_unreachable(e: Exception) -> bool:
     """Whether the failure means the sandbox itself did not answer.
 
     A connection error does, once the two that carry their own meaning are
@@ -164,10 +164,15 @@ class ToolErrorMiddleware(OpenSWEMiddleware):
 
     An unreachable sandbox is the one error that is not survivable, so it is
     re-raised instead: every later sandbox call would fail the same way and
-    notify the user again.
+    notify the user again. The graph is built for each run, so the user hears
+    about it once per run, however many parallel calls hit the dead sandbox.
     """
 
     state_schema = AgentState
+
+    def __init__(self) -> None:
+        super().__init__()
+        self._told_user = False
 
     async def awrap_tool_call(
         self,
@@ -188,13 +193,14 @@ class ToolErrorMiddleware(OpenSWEMiddleware):
                     "Transient sandbox error during tool call; request=%r", request, exc_info=True
                 )
                 return _transient_sandbox_tool_message(e, request)
-            if not _is_sandbox_unreachable(e):
+            if not is_sandbox_unreachable(e):
                 logger.exception("Error during tool call handling; request=%r", request)
                 return _generic_error_tool_message(e, request)
             logger.exception("Sandbox error during tool call handling; request=%r", request)
             thread_id = _get_thread_id(request)
             config = _get_run_config(request)
-            if config is not None:
+            if config is not None and not self._told_user:
+                self._told_user = True
                 try:
                     await post_sandbox_unreachable_notification(
                         config, sandbox_id=extract_sandbox_id(str(e))

@@ -184,6 +184,34 @@ async def test_a_failing_backend_hook_fails_the_run_with_what_it_raised(
         await OpenSweBackend("secret-token").phase("prepare", {})
 
 
+async def test_a_tool_call_whose_hook_failed_fails_the_run(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """An unreachable sandbox fails the call hook; the run must end, not carry on from it."""
+    monkeypatch.setenv("OPEN_SWE_BACKEND_URL", "https://backend.invalid")
+    monkeypatch.setattr("rt.tools.run_id", lambda: "run-1")
+    request = httpx2.Request("POST", "https://backend.invalid")
+    failure = {"error": "SandboxConnectionError", "message": "WebSocket upgrade to sb-dead failed"}
+    client = MagicMock(is_closed=False)
+    client.post = AsyncMock(return_value=httpx2.Response(500, request=request, json=failure))
+    monkeypatch.setattr("rt.backend.httpx2.AsyncClient", lambda **kwargs: client)
+    served = backend_tool(
+        ToolSpec(name="execute", description="Execute", parameters={"type": "object"}),
+        OpenSweBackend("secret-token"),
+    )
+    runtime = ToolRuntime(
+        state={"messages": []},
+        context=None,
+        config={},
+        stream_writer=lambda event: None,
+        tool_call_id="call-1",
+        store=None,
+    )
+
+    with pytest.raises(BackendCallError, match="call failed: SandboxConnectionError"):
+        await served.coroutine(runtime=runtime)
+
+
 @pytest.mark.parametrize("next_trace_available", [True, False])
 async def test_turn_reconciliation_reaches_runtime_root_llm_and_nested_calls(
     monkeypatch: pytest.MonkeyPatch, next_trace_available: bool
