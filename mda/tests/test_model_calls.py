@@ -1,22 +1,23 @@
 import asyncio
-import sys
+from collections.abc import Awaitable, Callable
 from copy import deepcopy
-from pathlib import Path
-from typing import cast
+from typing import Protocol, cast
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
-from langchain.agents.middleware import AgentMiddleware
 from langchain.agents.middleware.types import AgentState, ModelRequest, ModelResponse
 from langchain_anthropic import ChatAnthropic
 from langchain_core.language_models import BaseChatModel
-from langchain_core.messages import AIMessage, AnyMessage, HumanMessage, ToolMessage
+from langchain_core.messages import (
+    AIMessage,
+    AnyMessage,
+    BaseMessage,
+    HumanMessage,
+    ToolMessage,
+)
 from langchain_fireworks import ChatFireworks
 from langchain_openai import ChatOpenAI
 from pydantic import SecretStr
-
-sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "mda"))
-
 from rt.middleware import BackendRunMiddleware, ModelCall
 from rt.model_calls import (
     ModelCallTimeoutError,
@@ -37,8 +38,16 @@ _OPENAI = ChatOpenAI(
 _FIREWORKS = ChatFireworks(model="accounts/fireworks/models/kimi-k3", api_key=SecretStr("test"))
 
 
+class _WrapsModelCalls(Protocol):
+    async def awrap_model_call(
+        self,
+        request: ModelRequest,
+        handler: Callable[[ModelRequest], Awaitable[ModelResponse]],
+    ) -> ModelResponse: ...
+
+
 async def _forwarded(
-    middleware: AgentMiddleware,
+    middleware: _WrapsModelCalls,
     messages: list[AnyMessage],
     model: BaseChatModel,
     state: dict[str, object] | None = None,
@@ -69,7 +78,7 @@ def _result(call_id: str) -> ToolMessage:
 
 
 async def test_parallel_results_are_replayed_in_tool_call_order() -> None:
-    messages = [
+    messages: list[AnyMessage] = [
         HumanMessage(content="go"),
         _calls("a", "b", "c"),
         _result("c"),
@@ -154,7 +163,8 @@ async def test_fireworks_replay_drops_the_legacy_function_call() -> None:
     forwarded = await _forwarded(
         ReplayableHistoryMiddleware(), [HumanMessage("hi"), reply], _FIREWORKS
     )
-    sent, _ = _FIREWORKS._create_message_dicts(forwarded.messages, None)
+    replayed: list[BaseMessage] = list(forwarded.messages)
+    sent, _ = _FIREWORKS._create_message_dicts(replayed, None)
 
     assert "function_call" not in sent[1]
     assert sent[1]["tool_calls"]

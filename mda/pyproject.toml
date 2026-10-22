@@ -20,6 +20,13 @@ dependencies = [
     "pydantic>=2.11",
 ]
 
+# Not `dev`, which uv installs by default: deploys stay without test tooling.
+[dependency-groups]
+test = [
+    "pytest>=9.1.1",
+    "pytest-asyncio>=1.4.0",
+]
+
 # Vendored, with the `mda` CLI `make mda-cli` builds into it (vendor/README.md).
 # Editable, so that CLI is read from the source tree.
 [tool.uv.sources]
@@ -32,4 +39,10 @@ python-version = "3.13"
 # Its own type-check root: checked against this project's environment alone, an
 # import of the backend (`openswe`) or a database driver fails to resolve.
 [tool.ty.src]
-include = ["agent.py", "identity.py", "rt"]
+include = ["agent.py", "identity.py", "rt", "tests"]
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+testpaths = ["tests"]
+# `agent` and `rt` import from the project root, as `mda build` lays them out.
+pythonpath = ["."]

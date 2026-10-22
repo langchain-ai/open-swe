@@ -36,6 +36,8 @@ Every `agent`, `reviewer` and `review-scout` thread runs on Managed Deep Agents,
 
 Never run the full test suite locally; run only tests related to the change.
 
+`mda/` is its own project: its tests live in `mda/tests/` and run in its own environment (`make mda-test`, `make mda-typecheck`). Never import `openswe` there; test each side of a hook against the JSON it exchanges.
+
 Tests are maintenance cost. Add one only when you can name a concrete regression existing coverage would miss.
 
 - Prefer extending an existing behavioral test over new files, fixtures, or mock-heavy harnesses.
