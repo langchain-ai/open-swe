@@ -5,13 +5,20 @@ import { Textarea } from "@langchain/macaw-components/Textarea"
 import { CornersOutIcon } from "@phosphor-icons/react/dist/ssr/CornersOut"
 import { GithubLogoIcon } from "@phosphor-icons/react/dist/ssr/GithubLogo"
 import { useMutation } from "@tanstack/react-query"
-import { Link, useNavigate } from "@tanstack/react-router"
+import { Link, useLocation, useNavigate } from "@tanstack/react-router"
 import { useState } from "react"
 import { toast } from "sonner"
 
 import { DropdownMenuItem } from "@/components/MenuItem"
 import { SplitButton } from "@/components/SplitButton"
 import { api } from "@/lib/api"
+import { validateReviewsSearch, type ReviewsSearch } from "./search"
+
+declare module "@tanstack/react-router" {
+  interface HistoryState {
+    reviewListSearch?: ReviewsSearch
+  }
+}
 
 /** Opens the PR's full review page, the expanded form of its preview. */
 export function PullRequestPageLink({
@@ -22,6 +29,7 @@ export function PullRequestPageLink({
   number: number
 }) {
   const [owner, name] = repo.split("/")
+  const location = useLocation()
   return (
     <IconButton
       asChild
@@ -34,6 +42,16 @@ export function PullRequestPageLink({
       <Link
         to="/agents/reviews/$owner/$repo/$number"
         params={{ owner: owner!, repo: name!, number: String(number) }}
+        viewTransition
+        state={{
+          reviewListSearch:
+            location.pathname === "/agents/reviews"
+              ? validateReviewsSearch({
+                  ...location.search,
+                  pr: `${repo}#${number}`,
+                })
+              : undefined,
+        }}
       />
     </IconButton>
   )
@@ -43,12 +61,10 @@ export function PullRequestLinks({
   repo,
   number,
   title,
-  pageLink = true,
 }: {
   repo: string
   number: number
   title: string
-  pageLink?: boolean
 }) {
   const navigate = useNavigate()
   const [messageOpen, setMessageOpen] = useState(false)
@@ -144,7 +160,7 @@ export function PullRequestLinks({
             </form>
           </DialogContent>
         </Dialog>
-        {pageLink && <PullRequestPageLink repo={repo} number={number} />}
+        <PullRequestPageLink repo={repo} number={number} />
         <IconButton
           asChild
           icon={GithubLogoIcon}

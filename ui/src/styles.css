@@ -185,3 +185,20 @@ html[data-agent-workspace] body {
     color: var(--text-primary);
   }
 }
+
+::view-transition-group(pr-surface),
+::view-transition-group(pr-title),
+::view-transition-group(pr-meta),
+::view-transition-group(pr-standing),
+::view-transition-group(pr-description) {
+  animation-duration: var(--duration-slower);
+  animation-timing-function: ease-out;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  ::view-transition-group(*),
+  ::view-transition-old(*),
+  ::view-transition-new(*) {
+    animation-duration: 0s !important;
+  }
+}
