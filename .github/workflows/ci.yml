@@ -348,11 +348,12 @@ jobs:
         env:
           ELECTRON_SKIP_BINARY_DOWNLOAD: "1"
         run: pnpm install --frozen-lockfile --filter open-swe-dashboard... --filter open-swe --filter open-swe-e2e
+      # The runner image already has Chromium's system libraries, so this skips
+      # `--with-deps`: its apt step only adds fonts, and a slow Ubuntu mirror made
+      # it outlast the timeout before Chromium itself was ever fetched.
       - name: Install Chromium
         timeout-minutes: 5
-        run: |
-          sudo rm -f /etc/apt/sources.list.d/{azure-cli,google-chrome,microsoft-prod}.*
-          pnpm run test:e2e:install
+        run: pnpm --filter open-swe-e2e exec playwright install chromium
       - name: Run browser E2E
         run: pnpm run test:e2e --shard=${{ matrix.shard }}/3
       - name: Upload Playwright report
