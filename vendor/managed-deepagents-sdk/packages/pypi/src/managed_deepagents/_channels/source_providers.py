@@ -5,7 +5,7 @@ from __future__ import annotations
 from collections.abc import Mapping, Sequence
 from typing import Protocol, cast
 
-_BUILTIN_SOURCE_PROVIDERS = frozenset({"slack", "github"})
+_BUILTIN_SOURCE_PROVIDERS = frozenset({"slack", "github", "linear"})
 _declared_providers: set[str] = set()
 
 

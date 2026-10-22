@@ -160,7 +160,7 @@ async def _reconcile(_job: Job) -> object:
 
 @_sandbox_work(THREAD_STATUS_RECONCILE)
 async def _thread_status_reconcile(_job: Job) -> object:
-    return await reconcile_busy_threads()
+    return {"threads_settled": await reconcile_busy_threads()}
 
 
 @WORKER.register(WAKE_THREAD_JOB)

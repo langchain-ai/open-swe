@@ -462,9 +462,12 @@ class PullRequestClient:
             raise ValueError("GitHub answered the pull request without a head commit")
         return sha
 
-    async def files(self, *, max_pages: int = 1) -> list[dict[str, Any]]:
-        """Changed files, up to ``max_pages`` pages of 100."""
-        return await self.repo.pages(f"pulls/{self.number}/files", max_pages=max_pages)
+    async def files(self, *, max_pages: int = 1, count: int | None = None) -> list[dict[str, Any]]:
+        """Changed files, up to ``max_pages`` pages of 100.
+
+        ``count``, the pull's ``changed_files``, lets those pages load at once.
+        """
+        return await self.repo.pages(f"pulls/{self.number}/files", max_pages=max_pages, total=count)
 
     async def issue_comments(self) -> list[dict[str, Any]]:
         """Top-level conversation comments."""

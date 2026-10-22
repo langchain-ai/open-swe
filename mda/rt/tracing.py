@@ -58,14 +58,24 @@ class TurnTrace:
             logger.warning("Could not tag the turn trace", exc_info=True)
 
     @staticmethod
-    def record_evidence(update: Mapping[str, JsonValue]) -> None:
+    def live_root() -> RunTree | None:
+        """The turn's tree as seen from the running call, while that call's run is open."""
+        try:
+            return TurnTrace.current_root()
+        except Exception:
+            logger.warning("Could not find the turn trace", exc_info=True)
+            return None
+
+    @staticmethod
+    def record_evidence(update: Mapping[str, JsonValue], root: RunTree | None = None) -> None:
+        """Hold ``update``'s git evidence on ``root``, by default the running call's turn."""
         evidence = {
             key: value
             for key, value in update.items()
             if key == "git_trace_baseline" or key.startswith(("git_trace_pr:", "git_trace_work:"))
         }
         try:
-            if evidence and (root := TurnTrace.current_root()) is not None:
+            if evidence and (root := root or TurnTrace.current_root()) is not None:
                 held = root.metadata.setdefault("open_swe_git_evidence", {})
                 if isinstance(held, dict):
                     if "git_trace_baseline" in evidence:
@@ -118,13 +128,7 @@ class TurnTrace:
             def patch() -> None:
                 for run in runs:
                     if run.end_time is not None and not run.extra.get("__disabled"):
-                        run.client.update_run(
-                            run.id,
-                            end_time=run.end_time,
-                            trace_id=run.trace_id,
-                            dotted_order=run.dotted_order,
-                            extra=run.extra.copy(),
-                        )
+                        run.patch(exclude_inputs=True)
 
             await asyncio.to_thread(patch)
         except Exception:

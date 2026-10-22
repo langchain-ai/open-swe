@@ -1,5 +1,6 @@
 from collections.abc import Sequence
 from dataclasses import dataclass
+from datetime import datetime
 from typing import Literal
 from uuid import UUID, uuid7
 
@@ -8,10 +9,19 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from openswe.database import postgres
-from openswe.database.orm import Base
+from openswe.database.orm import NOW, Base
 from openswe.workspaces.rows import WorkspaceRow
 
 type TaskRole = Literal["coordinator", "worker"]
+
+
+class WorkerAlreadyLaunchedError(PermissionError):
+    """A launch request that already registered another worker, which it names."""
+
+    def __init__(self, task: Task, delegation: TaskDelegation) -> None:
+        super().__init__(f"This launch already started worker {delegation.worker_thread_id}")
+        self.task = task
+        self.delegation = delegation
 
 
 class Task(Base):
@@ -40,7 +50,9 @@ class Task(Base):
         instructions: str,
         model: str,
         effort: str,
+        launch_request_id: str | None = None,
     ) -> tuple[Task, TaskDelegation]:
+        """The worker's delegation, reserved once; one launch request reserves one worker."""
         postgres.require_configured()
         async with postgres.session() as session:
             await cls._lock_coordinator(session, coordinator_thread_id)
@@ -68,6 +80,12 @@ class Task(Base):
                 ):
                     raise PermissionError("Worker identity belongs to another task")
                 return task, existing
+            if launch_request_id is not None and (
+                launched := await TaskDelegation.launched(
+                    coordinator_thread_id, launch_request_id, session
+                )
+            ):
+                raise WorkerAlreadyLaunchedError(task, launched)
             task.delegated = True
             session.add(TaskMembership(thread_id=worker_thread_id, task_id=task.id, role="worker"))
             await session.flush()
@@ -78,6 +96,7 @@ class Task(Base):
                 instructions=instructions,
                 model=model,
                 effort=effort,
+                launch_request_id=launch_request_id,
             )
             session.add(delegation)
             return task, delegation
@@ -156,6 +175,11 @@ class TaskDelegation(Base):
     effort: Mapped[str | None]
     launch_error: Mapped[str | None] = mapped_column(default=None)
     cancelled: Mapped[bool] = mapped_column(default=False)
+    # The coordinator's tool call that launched this worker as an MDA async subagent.
+    launch_request_id: Mapped[str | None] = mapped_column(default=None)
+    # Cancelled because a person stopped the task, so nothing it reports reaches the coordinator.
+    silenced: Mapped[bool] = mapped_column(default=False)
+    created_at: Mapped[datetime] = mapped_column(server_default=NOW, init=False)
 
     @classmethod
     async def get(cls, worker_thread_id: str) -> TaskDelegation | None:
@@ -163,6 +187,23 @@ class TaskDelegation(Base):
             return None
         async with postgres.session() as session:
             return await session.get(cls, worker_thread_id)
+
+    @classmethod
+    async def launched(
+        cls,
+        coordinator_thread_id: str,
+        launch_request_id: str,
+        session: AsyncSession | None = None,
+    ) -> TaskDelegation | None:
+        """The worker the coordinator's launch request ``launch_request_id`` reserved, if any."""
+        query = select(cls).where(
+            cls.coordinator_thread_id == coordinator_thread_id,
+            cls.launch_request_id == launch_request_id,
+        )
+        if session is not None:
+            return await session.scalar(query)
+        async with postgres.session() as own:
+            return await own.scalar(query)
 
     @classmethod
     async def for_task(cls, task_id: UUID) -> list[TaskDelegation]:
