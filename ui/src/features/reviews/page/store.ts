@@ -16,6 +16,7 @@ import { findEntry, type DiffEntry } from "./diffEntries"
 
 export type RailTab = "chat" | "discussion"
 export type DiffOrder = "files" | "guide"
+export type NavigatorLayout = "tabs" | "stacked"
 
 export type DiffTarget =
   | { kind: "top" }
@@ -48,6 +49,8 @@ interface ReviewPageState {
   navigatorOpen: boolean
   /** The file list over the page, where there is no room beside the diff. */
   navigatorOverlay: boolean
+  /** Whether the file list shows the walkthrough or the tree behind tabs, or both stacked. */
+  navigatorLayout: NavigatorLayout
   reviewOpen: boolean
   reviewVerdict: PullRequestReviewEvent
   order: DiffOrder
@@ -92,6 +95,7 @@ interface ReviewPageActions {
   setRailOpen: (open: boolean) => void
   toggleNavigator: () => void
   setNavigatorOverlay: (open: boolean) => void
+  toggleNavigatorLayout: () => void
   openReview: (verdict?: PullRequestReviewEvent) => void
   setReviewOpen: (open: boolean) => void
   setOrder: (order: DiffOrder) => void
@@ -128,6 +132,7 @@ interface ReviewPageActions {
 const ORDER_KEY = "open-swe.review.view"
 const DIFF_STYLE_KEY = "open-swe.review.diffStyle"
 const NAVIGATOR_KEY = "open-swe.review.navigator"
+const NAVIGATOR_LAYOUT_KEY = "open-swe.review.navigatorLayout"
 /** Wide enough for the file list, the diff and the chat side by side. */
 export const NAVIGATOR_INLINE_QUERY = "(min-width: 1360px)"
 
@@ -250,6 +255,7 @@ export const useReviewPage = create<ReviewPageState & ReviewPageActions>()((
     railOpen: false,
     navigatorOpen: true,
     navigatorOverlay: false,
+    navigatorLayout: "tabs",
     reviewOpen: false,
     reviewVerdict: "COMMENT",
     order: "files",
@@ -306,6 +312,10 @@ export const useReviewPage = create<ReviewPageState & ReviewPageActions>()((
                   ? "split"
                   : "unified",
               navigatorOpen: readPreference(NAVIGATOR_KEY) !== "closed",
+              navigatorLayout:
+                readPreference(NAVIGATOR_LAYOUT_KEY) === "stacked"
+                  ? "stacked"
+                  : "tabs",
             }),
       })
     },
@@ -321,6 +331,12 @@ export const useReviewPage = create<ReviewPageState & ReviewPageActions>()((
       set({ navigatorOpen })
     },
     setNavigatorOverlay: (navigatorOverlay) => set({ navigatorOverlay }),
+    toggleNavigatorLayout: () => {
+      const navigatorLayout =
+        get().navigatorLayout === "stacked" ? "tabs" : "stacked"
+      writePreference(NAVIGATOR_LAYOUT_KEY, navigatorLayout)
+      set({ navigatorLayout })
+    },
     openReview: (verdict = "COMMENT") =>
       set({ reviewOpen: true, reviewVerdict: verdict }),
     setReviewOpen: (reviewOpen) => set({ reviewOpen }),
