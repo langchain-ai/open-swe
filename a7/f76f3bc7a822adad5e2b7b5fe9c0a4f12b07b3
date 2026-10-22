@@ -1,0 +1,1527 @@
+openswe/threads/runtimes.py
+  s_27878fb276b595::t_0ffa4539927c8f 6-9,26,43-45,65,67,69,73,79,117,120-127,130,132,135-141,143,178-183,194-195,205-210,299-300
+.github/workflows/build_preview_branch.yml
+  s_27878fb276b595::t_4786b0602b275d 115,118,120-124,132-136,138-141,147-152
+.github/workflows/ci.yml
+  s_27878fb276b595::t_49c945979fb974 274,323-329,401-407
+.github/workflows/deploy_mda.yml
+  s_27878fb276b595::t_cb70c045592b58 16,75,83,85-88,95-105,113-123
+.gitignore
+  s_27878fb276b595::t_e7fc1d6b38d298 85-94
+.oxfmtrc.json
+  s_27878fb276b595::t_1b1fde5a33564b 18
+.oxlintrc.json
+  s_27878fb276b595::t_510e4869ae2448 44
+AGENTS.md
+  s_27878fb276b595::t_0116442da24af3 11,19
+Dockerfile
+  s_27878fb276b595::t_778b3b2b9d4989 9
+Makefile
+  s_27878fb276b595::t_45d0dc1be7204d 1,22-23,26-37,139,153-154,160
+README.md
+  s_27878fb276b595::t_353a3663900ee3 30,50,79-80
+desktop/src/main.cts
+  s_27878fb276b595::t_17e81e6a2d98e0 1236-1239,1241-1243,1245,1247-1261,1353-1357,1564,1625,1721-1723,1762,1766,1770-1773,1843
+docs/AUDIT_LOGS.md
+  s_27878fb276b595::t_4bb18185bbf7d8 17,20
+docs/CUSTOMIZATION.md
+  s_27878fb276b595::t_9e4a1742f482d5 315-319
+docs/DEVELOPMENT.md
+  s_27878fb276b595::t_0f71b6d6ccbe6f 10,95,112,129,132,271-272,282,290
+docs/INSTALLATION.md
+  s_27878fb276b595::t_300567466baa65 17-18,36,38,40,42,284,311-312,396-401,403,405,465-466,539
+docs/reference/audit-logs.md
+  s_27878fb276b595::t_dda72eff0a14dc 10
+docs/reference/review-approval-threat-model.md
+  s_27878fb276b595::t_acfd2c75ab223d 1-34
+langgraph.json
+  s_27878fb276b595::t_ea6b3c827d0986 8
+mda/README.md
+  s_27878fb276b595::t_c83e05f8cf7f53 3,5,7-8,20,26,28-29,41-42,48,51,71,74,76,79-80,84-101
+mda/agent.py
+  s_27878fb276b595::t_18df24102cbb93 1,3-4,11,28-29,32,40,82-84,87-91,93-101,142-144,153-159,169,177-183,186-187
+mda/channels/github.py
+  s_27878fb276b595::t_b69bb86e2ccdf9 1-25
+mda/channels/linear.py
+  s_27878fb276b595::t_6ba3f162d1b79c 1-27
+mda/identity.py
+  s_27878fb276b595::t_eac9cb1fca1799 1-6
+mda/pyproject.toml
+  s_27878fb276b595::t_1e10c909ea5fb6 7-18,22-26,34
+mda/rt/backend.py
+  s_27878fb276b595::t_045e5ab6d363c1 19,22,47-50,52-63,89-98,123,130-133,143,147,205-214,242-243,256-275,278
+mda/rt/browser.py
+  s_27878fb276b595::t_97817f71b40b1f 1-69
+mda/rt/intake.py
+  s_27878fb276b595::t_343259ede2938c 1,3-7,11,13,15-16,19-20,22-27
+mda/rt/managed_sandbox.py
+  s_27878fb276b595::t_4dae691f2a1fb6 1-8,11,13,15-17,19-22,24-26,30-46,49-50,52-53,55-83,85-97
+mda/rt/middleware.py
+  s_27878fb276b595::t_48db91e5e78619 36-43,46,54,60-63,70-71,99,120-121,133-139,141,145-225,231-238,241-244,251-253,256,258-260,264-269,271,274,308,311,313-318,322-323
+mda/rt/sandbox.py
+  s_27878fb276b595::t_c8e4e1e80befc6 1,3-6,11-19,22-25
+mda/rt/tools.py
+  s_27878fb276b595::t_3d9775805a54b7 27,56-57,81
+mda/rt/tracing.py
+  s_27878fb276b595::t_401565cffbd337 1-131
+mda/uv.lock
+  s_27878fb276b595::t_9f277b8e4e05b1 2,102-118,206,208,210,518,529,531,1034,1041,1043,1067,1081,1083,1103,1111,1113,1130,1140,1142,1177,1183,1185,1206,1224,1226,1231-1232,1239,1244-1275,1361,1366-1374,1376,2179-2195
+openswe/analytics/posthog.py
+  s_27878fb276b595::t_16961e41f8eb9b 1,16-72,81,86,88-95,97,102-123,125-126,130,139-144,147
+openswe/analytics/retention.py
+  s_27878fb276b595::t_47964dc1a50a51 10-14,16-19,21,24,28,37
+openswe/analytics/routes.py
+  s_27878fb276b595::t_d3bd0a18dd333c 54
+openswe/analytics/worker.py
+  s_27878fb276b595::t_ca5c57bddb6e87 13-14,20-21,26-28
+openswe/api/app.py
+  s_27878fb276b595::t_5899194270fbf1 9,20,22,156-157,165,169,179
+openswe/background_tasks.py
+  s_27878fb276b595::t_fea27bef673cae 17,27,94-109,134,152-163,211,252
+openswe/completion.py
+  s_27878fb276b595::t_bf35161a22b28d 12-16,28,104,111,501-505,536-537,543-549,564,605-607
+openswe/config.py
+  s_27878fb276b595::t_2e4ddf4de67afa 226-233,390-391,393-397,406-410
+openswe/dashboard/agent_overrides.py
+  s_27878fb276b595::t_b161fd6bedf0a1 10,28-31,37-39
+openswe/dashboard/oauth.py
+  s_27878fb276b595::t_e38bd51989bf70 679-681,684
+openswe/dashboard/personal_settings.py
+  s_27878fb276b595::t_acbaffb9035a43 25,41
+openswe/dashboard/profiles.py
+  s_27878fb276b595::t_8eb5a28c29e277 19,32,47-48,58-62,73-74,83,100,106-120,125,152-156,179-183
+openswe/dashboard/workspace_settings.py
+  s_27878fb276b595::t_c42c9881a1bd9d 89-91,331,631,640,737-742
+openswe/database/migrations/versions/0070_9f867d4517fa_index_analytics_retention_and_watermark_.py
+  s_27878fb276b595::t_31f449e9b69c4b 1-30
+openswe/database/migrations/versions/0071_11b8f4073839_artifact_comment_replies.py
+  s_27878fb276b595::t_e96dcf2514165c 1-34
+openswe/database/migrations/versions/0071_8272dd05ca91_event_matches_from_sandbox_monitors.py
+  s_27878fb276b595::t_fba6d91d04c85e 1-21
+openswe/database/migrations/versions/0072_8cb312f3b529_event_match_comment_follows_event_log_.py
+  s_27878fb276b595::t_69af624de02e95 1-20
+openswe/database/migrations/versions/0073_3bed5f27edb1_persist_standard_review_auto_merge_.py
+  s_27878fb276b595::t_bb8392274de6a7 1-20
+openswe/database/migrations/versions/0074_87e4182be853_drop_sandbox_tool_context.py
+  s_27878fb276b595::t_809f15bef6d5ee 1,3-4,7,9-12,15-16,19-20
+openswe/database/migrations/versions/0075_4d846b42b226_add_merge_queue_state.py
+  s_27878fb276b595::t_c54ff418ad6ff4 1-112
+openswe/database/migrations/versions/0076_79a94ddd5d16_add_queue_admission_and_candidates.py
+  s_27878fb276b595::t_e0ab32f9b3e65d 1-36
+openswe/database/postgres.py
+  s_27878fb276b595::t_8397be3060febe 12,84-85,254,259,265-269,271-279,281,285-301
+openswe/dispatch.py
+  s_27878fb276b595::t_77f4c2d55927a2 66-75,98-110,319-320,324,336,338-340,343,346,359-363,366-390,420
+openswe/event_claims.py
+  s_27878fb276b595::t_bc70c1a588fbcb 65-92
+openswe/expedited_review/card.py
+  s_27878fb276b595::t_a36e672db52e63 38-39,257,298
+openswe/github/app.py
+  s_27878fb276b595::t_1c46b011a9d11d 175-178
+openswe/github/channel.py
+  s_27878fb276b595::t_ebc629e5507293 1-161
+openswe/github/ci.py
+  s_27878fb276b595::t_c95b997e8072ad 69-71,94-98
+openswe/github/dashboard_routes.py
+  s_27878fb276b595::t_9bb7141711aeab 15,37,39
+openswe/github/forwarding.py
+  s_27878fb276b595::t_01dd00bc3126cb 1-86
+openswe/github/http.py
+  s_27878fb276b595::t_323a1b0c5c2c87 18,21-22,26,28,31,33,35,39,50,357,359-365,374-387,389-390,414-421,462,465-469,524-538,601-615,622-638,654-655,658-805,817-829,842-848
+openswe/github/proxy.py
+  s_27878fb276b595::t_ed2d982df8efa7 160
+openswe/github/pull_request_diff.py
+  s_27878fb276b595::t_bc38ab8d2ae032 1,4-7,12-14,20-23,32-47,49,51-60,63,68-73,75,88-89,109-119,121-131,134-141,144-145,147-149,152,155-159,161,164,167-185,187-225
+openswe/github/pull_request_status.py
+  s_27878fb276b595::t_43a831c7049a98 20-21,138,465-470,567-620,651-690,933-934,953-954
+openswe/github/queue.py
+  s_27878fb276b595::t_66a1cb029f996b 1-83
+openswe/github/repo_cache.py
+  s_27878fb276b595::t_23b7ab8a640275 1,3-9,12,97-104
+openswe/github/repos.py
+  s_27878fb276b595::t_13828b7db75370 5,12,18-23,147-172,174-180,182-184
+openswe/github/routes.py
+  s_27878fb276b595::t_a198bb929c34f1 5,7,19-30,68-69,138-139,141,228,300
+openswe/github/sandbox_access.py
+  s_27878fb276b595::t_118dfc0c795dbc 24-34
+openswe/github/webhook.py
+  s_27878fb276b595::t_f38342b9a7c202 7-8,11,15,19-20,36,51,315-317,425-426,466,573-602,621-622,658-703,716-736,756-757,767-772,777-778,788-792,802-804,822-828,845-848,899,930,961-962,985,1083-1128,1160-1164,1167-1170,1172-1176,1194-1218,1387-1388,1399-1426,1461-1462,1512,1568-1588,1615,1620,1729-1730,1746,1781
+openswe/human_review/card.py
+  s_27878fb276b595::t_0d1003e8fdbb1d 156-158
+openswe/human_review/lifecycle.py
+  s_27878fb276b595::t_6ef6da2dce6762 61,306,311-315,747-749,767-777,780-783,788-847
+openswe/human_review/picking.py
+  s_27878fb276b595::t_91a39351f6fa61 30,65-66,69,98-102,104,106,112,357-374
+openswe/human_review/posted.py
+  s_27878fb276b595::t_9b4331cb56a9e4 14,19,22-34,38,41-42,47-69,101,109
+openswe/human_review/requests.py
+  s_27878fb276b595::t_ef5fa223be3daa 122,371-372,374,376-378,393,452-468
+openswe/human_review/standard.py
+  s_27878fb276b595::t_0bad10e412cbbb 7-9,29,53-60,128,136-140,152,299,314-319,322,370-375,384-389,402,407-409,412,437,448-455,461,465-467,488,596-600,602,605,686-700,816,844,869-874,884-887,934,1045,1055-1058
+openswe/incidents/turns.py
+  s_27878fb276b595::t_dd38b6b3bf22bb 30,102-109,111,254
+openswe/input_messages.py
+  s_27878fb276b595::t_0e27931418aa25 223,239-240,244-248,261,263-267
+openswe/jobs/kinds.py
+  s_27878fb276b595::t_6b6cab7e7381ab 26-27,95-103
+openswe/jobs/queue.py
+  s_27878fb276b595::t_b859a4f4e36d99 112-119
+openswe/linear/channel.py
+  s_27878fb276b595::t_49afc26a3d73a2 1-22,26-27,29-37,39,42-43,45-48,50-51,54-56,61-62,67-73,75-98,100-105
+openswe/linear/session.py
+  s_27878fb276b595::t_1be0529a8f7649 1,3-10,13-14,19-25,27,37-38,42,44-48,51-54,57-59,61-63,65-73,75-82,85-91,93-101,104-105,107-123,125-129,131-133,135-146,148-149,151-170,172-173,175-204,207-221,223-224,226-241,243-254,256-275,277-307,309-317,319-355
+openswe/mcp/caller.py
+  s_27878fb276b595::t_2ea501d3cb62a3 43
+openswe/mcp/managed.py
+  s_27878fb276b595::t_e6e2a67fb4fcd4 603
+openswe/mcp/models.py
+  s_27878fb276b595::t_ad815db8268bf0 121-133
+openswe/mcp/records.py
+  s_27878fb276b595::t_371ffc5f5c0cb3 21,48,85,99,160
+openswe/mcp/runtime.py
+  s_27878fb276b595::t_6f8d84e39b834a 10,23-24,49,162,206,254,260-270,285-290,303-311
+openswe/mcp/server.py
+  s_27878fb276b595::t_c67de556f17f37 26,32,38,121-130
+openswe/mda_channels/__init__.py
+  s_27878fb276b595::t_27b46bc44f710c 1-13
+openswe/mda_channels/auth.py
+  s_27878fb276b595::t_b2d70fa6f6b7b3 1-22
+openswe/merge_queue/__init__.py
+  s_27878fb276b595::t_1fa3a4a538c2c1 1
+openswe/merge_queue/admission.py
+  s_27878fb276b595::t_e9be6570e80b08 1-187
+openswe/merge_queue/git.py
+  s_27878fb276b595::t_989cc54e736d36 1-323
+openswe/merge_queue/models.py
+  s_27878fb276b595::t_4f910331155592 1-121
+openswe/merge_queue/scheduler.py
+  s_27878fb276b595::t_c4530ceddabb95 1-218
+openswe/merge_queue/store.py
+  s_27878fb276b595::t_7590f0243b1107 1-954
+openswe/middleware/dynamic_tools.py
+  s_27878fb276b595::t_261e13abb8676e 179-185,192,271
+openswe/middleware/pr_creation_guard.py
+  s_27878fb276b595::t_1c0bf548a13a58 45-60,280-283
+openswe/middleware/require_user_reply.py
+  s_27878fb276b595::t_19df4c2e4d7fd3 123
+openswe/middleware/workflow_push_guard.py
+  s_27878fb276b595::t_33c2d043495334 19,694-702,751-755
+openswe/monitors/__init__.py
+  s_27878fb276b595::t_c5860db1f9f80c 1-5
+openswe/monitors/budget.py
+  s_27878fb276b595::t_8c046f7f25867e 1-109
+openswe/monitors/delivery.py
+  s_27878fb276b595::t_d0424f34c73d45 1-264
+openswe/monitors/sandbox.py
+  s_27878fb276b595::t_8acaf1cf1fd8f2 1-151
+openswe/prompts.py
+  s_27878fb276b595::t_2bca217dbafb9b 9-10,118-136
+openswe/remote_runtime/agent.py
+  s_27878fb276b595::t_ca830392906465 12,21
+openswe/remote_runtime/client.py
+  s_27878fb276b595::t_b99063f99d3060 1,3,8-9,20-21,26-27,51,74-79,81-85,89-90,94,99-100,104,107
+openswe/remote_runtime/git_metadata.py
+  s_27878fb276b595::t_38ca938251d066 1-195
+openswe/remote_runtime/graph.py
+  s_27878fb276b595::t_53aee0cfbf46f8 11-13,59,65,70-76,87-89,103-104,140-141,150-156,221-228,321-323,329,350-352,356-382,428-436,442,446-447,459-470,589,608-614,617-618,620-629,655-660,664,736-738,740,768-772
+openswe/remote_runtime/hosted.py
+  s_27878fb276b595::t_0fdb0aea52f782 1-15
+openswe/remote_runtime/review_scout.py
+  s_27878fb276b595::t_7f7fbd45ec070b 1-36
+openswe/remote_runtime/runs.py
+  s_27878fb276b595::t_fe2b2267d07f6a 37-38
+openswe/remote_runtime/server.py
+  s_27878fb276b595::t_ea85249a38cd77 38,40,74,78-81
+openswe/remote_runtime/tokens.py
+  s_27878fb276b595::t_e1c7c7e0b7f408 5-6,39,64,99
+openswe/resources/default_prompt.md
+  s_27878fb276b595::t_f7f70981a89096 11,14-15
+openswe/resources/prompts/runs/monitor-ended.md.jinja
+  s_27878fb276b595::t_e344c90f021b9c 1-30
+openswe/resources/prompts/runs/monitor-event.md.jinja
+  s_27878fb276b595::t_d946dbd7b153cf 1-7
+openswe/resources/prompts/runs/slack-explain.md.jinja
+  s_27878fb276b595::t_2779a4b01c5c80 1-20
+openswe/resources/prompts/runs/slack-non-kitchen.md
+  s_27878fb276b595::t_386f961683ea75 1
+openswe/resources/prompts/runs/slack-review-request.md.jinja
+  s_27878fb276b595::t_6dd9d04152193d 1
+openswe/resources/prompts/slack/availability-away.md
+  s_27878fb276b595::t_fa0ac4e78e72c8 1
+openswe/resources/prompts/slack/availability-instructions.md.jinja
+  s_27878fb276b595::t_23a28fc5325ca6 1
+openswe/resources/prompts/slack/availability-present.md
+  s_27878fb276b595::t_72bb137d58219e 1
+openswe/resources/prompts/slack/pr-failure-reaction.md.jinja
+  s_27878fb276b595::t_daa53853f6adb5 1-6
+openswe/resources/prompts/system/common.md.jinja
+  s_27878fb276b595::t_c60175bda251b7 1-3
+openswe/resources/prompts/system/shared-base.md
+  s_27878fb276b595::t_5837231bce7ad5 65
+openswe/resources/prompts/system/source-background-task.md
+  s_27878fb276b595::t_99a8ae3e0f8ba9 1-2
+openswe/resources/prompts/system/source-github.md
+  s_27878fb276b595::t_b0611fd820d2f0 6-8
+openswe/resources/prompts/system/source-linear.md
+  s_27878fb276b595::t_cb6fa7d6a4cf60 1-3
+openswe/resources/prompts/system/task-execution.md
+  s_27878fb276b595::t_f6657f976b337c 13-14
+openswe/resources/prompts/tools/display-description.md
+  s_27878fb276b595::t_b8f20d10c35e71 1
+openswe/resources/prompts/tools/list_event_types.md
+  s_27878fb276b595::t_f16cc3d79c9a3f 1
+openswe/resources/prompts/tools/mcp-provenance.md.jinja
+  s_27878fb276b595::t_5e16002fa53202 1-2
+openswe/resources/prompts/tools/monitor.md
+  s_27878fb276b595::t_b723415ef0256e 1-37
+openswe/resources/prompts/tools/request_human_review.md.jinja
+  s_27878fb276b595::t_bd7633feecd287 1,14-15
+openswe/resources/prompts/tools/save_user_settings.md
+  s_27878fb276b595::t_520e4b55ad9d51 7-8
+openswe/resources/prompts/tools/search_tools.md
+  s_27878fb276b595::t_838dfe8f383ced 1-5
+openswe/resources/prompts/tools/slack_list_channel_members.md
+  s_27878fb276b595::t_102c8622001f4a 4-8
+openswe/resources/prompts/tools/slack_start_review_channel.md.jinja
+  s_27878fb276b595::t_ff9df023b70f5c 1,3,8,10
+openswe/review/findings.py
+  s_27878fb276b595::t_011ac7e6883be0 32,41,704-712,716-721
+openswe/review/reviews.py
+  s_27878fb276b595::t_4f07d4b4ef11e2 14,28-29,45,47-48,177-182,263,294,298-299,626-628,735,950,953,960-961,973-977,981-986,988
+openswe/review_guide/launch.py
+  s_27878fb276b595::t_24af6611144d2d 10,40,55-85,90,100-101,122-129,134-137,144-145,156-157,167,181
+openswe/review_guide/middleware.py
+  s_27878fb276b595::t_7f107e99ed21b7 1
+openswe/review_scout/graph.py
+  s_27878fb276b595::t_eb57d4e3145a59 17,35,51,63,118,275-295,297-303,320,322,330-349,351-357,368,370-381
+openswe/review_scout/launch.py
+  s_27878fb276b595::t_9563ac6d45285c 13-14,119-123,139,142,154,173,175,183,191-204,209,218,228,250,253
+openswe/reviewer.py
+  s_27878fb276b595::t_3ca6f562710585 37,47,66,130,563,1133,1135-1141
+openswe/run_config.py
+  s_27878fb276b595::t_21875f286783b5 21
+openswe/sandbox_scripts/AGENTS.md
+  s_27878fb276b595::t_9ac2e53614b147 1-9
+openswe/sandbox_scripts/__init__.py
+  s_27878fb276b595::t_70f77c0c953670 1-7
+openswe/sandbox_scripts/background_task.py
+  s_27878fb276b595::t_a9d9138a48acb6 1-452
+openswe/sandbox_scripts/git_trace.py
+  s_27878fb276b595::t_0be2ad4abcd0c9 1-68
+openswe/sandbox_scripts/monitor.py
+  s_27878fb276b595::t_095d0a7a16e10e 1-841
+openswe/sandboxes/browsers.py
+  s_27878fb276b595::t_c407d9746aec86 1-235
+openswe/sandboxes/lifecycle.py
+  s_27878fb276b595::t_dcf75a1052b111 21,23-28,31-35,103-109,125-128,131-133,140,150-154,183,242,250-252,266,278-279,287,360,390,471-494,499,528-531,555-560,583-585,592,606,618-620,633,682-768,796-797,830,833-834
+openswe/sandboxes/managed.py
+  s_27878fb276b595::t_48d400375fde17 1-53
+openswe/sandboxes/providers/langsmith.py
+  s_27878fb276b595::t_b0ba9be09eb27b 31,35,59-61,79,153-204,268-269,271,354,357-367,378-379,382,410,430-435,441-442,521-528,531-536,788-790
+openswe/sandboxes/providers/langsmith_api.py
+  s_27878fb276b595::t_e5799dc789146c 1,3-7,11,14-23,25-28,30-32,34-37,39-44,46-57,59-60,62-64,66-77
+openswe/sandboxes/retry.py
+  s_27878fb276b595::t_8a1b7a1a6a3e21 45-46,48-52,60,70-71
+openswe/sandboxes/scripts.py
+  s_27878fb276b595::t_fc9df113564f8d 1-92
+openswe/sandboxes/tool_access.py
+  s_27878fb276b595::t_4074adade9b467 1
+openswe/sandboxes/tool_models.py
+  s_27878fb276b595::t_4a39a101a17df9 5-7,14-16
+openswe/sandboxes/tool_routes.py
+  s_27878fb276b595::t_97266e2170fade 1,6,18,76-82,85-105
+openswe/sandboxes/tool_runtime.py
+  s_27878fb276b595::t_7b45ae644983fc 3-5,22,24,28-32,44-97,151-152,165-167,170-181
+openswe/server.py
+  s_27878fb276b595::t_86e5e1efb7c79e 17,44,52,87,151,223,275,412-423,455-456,458-462,466,480-482,487-488,490-491,583,657,687,721,737,742,849-855,868-872,879,881,894,1015,1621,1742,1854-1855,1881,1883,2006,2009,2055,2119,2125-2126,2181
+openswe/slack/ask.py
+  s_27878fb276b595::t_edebc5c813865e 56,72,208-211,253-254,301-305,309-310
+openswe/slack/availability.py
+  s_27878fb276b595::t_a180660ae0c576 1-55
+openswe/slack/breakout.py
+  s_27878fb276b595::t_54d6f281a7d660 11,179,199,267-273
+openswe/slack/breakout_links.py
+  s_27878fb276b595::t_edabb0ef2ec101 29-33
+openswe/slack/channels.py
+  s_27878fb276b595::t_2a01ed98515169 13-14,24-30,45-69,163-173,177,188-189,201-204
+openswe/slack/client.py
+  s_27878fb276b595::t_bee27dbe96f51a 1002-1033,1041-1044,1374,1426,1438,1443,1449,1454-1455
+openswe/slack/events.py
+  s_27878fb276b595::t_d3e9b33773a039 10,52-62
+openswe/slack/http.py
+  s_27878fb276b595::t_19537e1cd51be7 3,6-9,12-14,21,23,25,56-189,191-211
+openswe/slack/payloads.py
+  s_27878fb276b595::t_84f470f9c2360d 257,259,359
+openswe/slack/records.py
+  s_27878fb276b595::t_795427da21a9eb 46,456-462,470-472,483,507-510,521-524,549
+openswe/slack/routes.py
+  s_27878fb276b595::t_909d1659f0370b 9,299-348,359,401-452,456-464,467-481,506,559-560,562,573-574,644,997-1023
+openswe/slack/stop.py
+  s_27878fb276b595::t_4cbcbea68eccf3 6,9,217-219,221,224-225,227,235-284,303-305,308
+openswe/slack/tools/channels.py
+  s_27878fb276b595::t_eda488225f1237 1,9,15,49-51,159-172
+openswe/slack/tools/start_new_thread.py
+  s_27878fb276b595::t_b26b37a614eec9 369-371,375-376
+openswe/slack/tools/start_review_channel.py
+  s_27878fb276b595::t_b74019e0fea849 4-5,7,12-13,20-21,29,31-51,54,58,63,68-87,89-91
+openswe/slack/webhook.py
+  s_27878fb276b595::t_0a41174bc903c6 686-688,696-699,1193-1211,1255-1256
+openswe/tasks/schemas.py
+  s_27878fb276b595::t_e5e98fdefd6fd8 32-33
+openswe/thread_ids.py
+  s_27878fb276b595::t_c9ac78c590c75b 13,53-55
+openswe/thread_title.py
+  s_27878fb276b595::t_179560cdd91a14 13,18,143-146
+openswe/threads/background_work.py
+  s_27878fb276b595::t_e47b62e20bc1c4 1-93
+openswe/threads/browser.py
+  s_27878fb276b595::t_2e0382b551dd17 1-96
+openswe/threads/creation.py
+  s_27878fb276b595::t_2bd4d82671b69a 29-33
+openswe/threads/diffs.py
+  s_27878fb276b595::t_bc74ad85a286ea 12,37,213,215-216,226,228,230
+openswe/threads/files.py
+  s_27878fb276b595::t_d90bbc442c6a55 11,55,96
+openswe/threads/handlers.py
+  s_27878fb276b595::t_46c5875b1301c7 7,22,52,60,112-117,125-131,268-272,289-293,302-303,315,474,480-493,501-502
+openswe/threads/index.py
+  s_27878fb276b595::t_36c011f5247b54 10,20,39-78,112-113,150-154,158-162,174,179-181,193-195,200-201,352-369
+openswe/threads/listing.py
+  s_27878fb276b595::t_5e9d49eef1151f 18,79,112,114-118,126,131-135,266-268,614,716-718
+openswe/threads/oswe_thread.py
+  s_27878fb276b595::t_bdf18dcd2be6bc 3,7,9,12-16,18-20,22-23,26,29-30,32,34,37-55
+openswe/threads/plan_api.py
+  s_27878fb276b595::t_7f94e3a985bd93 62,182-188,195
+openswe/threads/plan_store.py
+  s_27878fb276b595::t_112b2a1ea10360 17,39-46,55,63,221,231
+openswe/threads/pr_fixes.py
+  s_27878fb276b595::t_c463b4760b0b39 18,301-306
+openswe/threads/proxy.py
+  s_27878fb276b595::t_448d6868748e67 23,207
+openswe/threads/router.py
+  s_27878fb276b595::t_01a3c40a12ebfa 10-19,30,37,66-78,110-206,240,242,258,309-312,315,325-326,350-354,367-369,371,402-406,410-413,423-426,428-440,442-445,449,455-459,473,481-485,487-490,492-493
+openswe/threads/routes.py
+  s_27878fb276b595::t_7ebba000c70bbc 19-23,341,394-402
+openswe/threads/runs.py
+  s_27878fb276b595::t_fe65db2efcf343 36-37,86,420-427,441,750,893-897,910,1064-1065,1085-1087,1095
+openswe/threads/status.py
+  s_27878fb276b595::t_5f2f2020b93588 13,21-23,28-35,39-46,61-63,65-67
+openswe/threads/succession.py
+  s_27878fb276b595::t_2675b348751871 1-37
+openswe/threads/summary.py
+  s_27878fb276b595::t_6f3da5483d7668 21,475,552-553
+openswe/threads/wake_budget.py
+  s_27878fb276b595::t_bf833270103292 1-61
+openswe/tools/__init__.py
+  s_27878fb276b595::t_4b1a254c316605 28,111,212
+openswe/tools/background_execute.py
+  s_27878fb276b595::t_78d8f6782a1f56 8,12,27,29-65,69,88-89,103,134-135,146,156-157,191-193,207-208
+openswe/tools/list_review_findings.py
+  s_27878fb276b595::t_8a4c1fe405c97f 19,61-63
+openswe/tools/monitor.py
+  s_27878fb276b595::t_bd27b79f30328f 1,4-6,8,10-15,19,21-23,26-27,30-33,35-44,48-114
+openswe/tools/open_pull_request.py
+  s_27878fb276b595::t_b72bf4dae4e57d 26,663-665
+openswe/tools/publish_review.py
+  s_27878fb276b595::t_7af3cce43a71a3 7,15,422-424,566-577,726-772
+openswe/tools/recreate_sandbox.py
+  s_27878fb276b595::t_332bfec50c5b00 7-8,11-17,30-31,56-62
+openswe/tools/request_human_review.py
+  s_27878fb276b595::t_be7d34f0471934 70,84,95-97,106-110,113,116-117,122-126,133-137,146-147,152-156,159,162-163
+openswe/tools/schedule_thread_wakeup.py
+  s_27878fb276b595::t_573ed4b2fdeb5b 21,282,286,291,296
+openswe/tools/search_tools.py
+  s_27878fb276b595::t_0451f5d2e913ae 1-29
+openswe/tools/switch_to_performance_model.py
+  s_27878fb276b595::t_ca5dfc345f978e 48-51
+openswe/tools/threads.py
+  s_27878fb276b595::t_a04b74414592d9 583,598
+openswe/ui_invalidations/topics.py
+  s_27878fb276b595::t_5481219af86ed0 106-110,224-227
+openswe/users/models.py
+  s_27878fb276b595::t_8468a86dead22b 89-92,108,237-250
+openswe/users/records.py
+  s_27878fb276b595::t_d1e94450e14a0e 132-136
+openswe/users/repository_defaults.py
+  s_27878fb276b595::t_5fabd21d1778fc 1-26
+openswe/utils/background_task_state.py
+  s_27878fb276b595::t_46076df962d3d7 1,4,12-14,24,26-28,31,40-42
+openswe/utils/dashboard_links.py
+  s_27878fb276b595::t_12bd18f524233c 124-144
+openswe/utils/errors.py
+  s_27878fb276b595::t_179296b0785ea1 29-30
+openswe/webhooks/event_log.py
+  s_27878fb276b595::t_ada1d5ad88c600 25,31,266-268,299,303-304
+openswe/webhooks/event_matches.py
+  s_27878fb276b595::t_fdf214fa1164af 27,32,38-39,46-50,72,76,98-100,136,140-141,145,152-157,182-187
+openswe/workspaces/routes.py
+  s_27878fb276b595::t_26715919726823 13,108,110-111,127-129
+pnpm-lock.yaml
+  s_27878fb276b595::t_d8a35c31ee41a6 27,35,153,159,180,186,223,244,258-259,262,1364-1366,2538-2539,2550-2551,2562-2563,2574-2575,2586-2587,2598-2599,2611-2612,2625-2626,2639-2640,2653-2654,2667-2668,2681-2682,2694-2695,2706-2707,2718-2719,5098-5099,6013-6014,6537-6538,8021-8022,8221,9065,9071,9077,9083,9089,9095,9101,9107,9113,9119,9125,9131,9137,9143,9149,9386,9391,9398,9430,9436,9547,9554,9583,9587,9591,9597,9653,9662,9666,9704,9712,9724,9728,10306,10309,10322,10328,11289,11291,11761,12991,12993,12996-13010,13292-13293,13431,13438,13440,13525,13528,13530,13540,13542,13544,13547,13564
+pnpm-workspace.yaml
+  s_27878fb276b595::t_2a663a6f9a6e04 50
+pyproject.toml
+  s_27878fb276b595::t_ce38d7227667cb 9-13,16,19-21,25-26,28,35-36,76,81,83-84,99-102,131-133,145-146
+scripts/build_preview_branch.py
+  s_27878fb276b595::t_21718f756dcc0b 559-577
+scripts/vendor.py
+  s_27878fb276b595::t_d4cf21b6a3f76f 1-476
+swagger.json
+  s_27878fb276b595::t_9d02855d8d4845 793-864,1000,1030-1052,1180,1330-1342,1821-1939,2263-2279,2620,2695-2711,3271,3539-3702,4010,4586,4596,4646-4652,5405-5409,5473,5498,5655,7161-7188,7817,8129,8571-8582,8720,8878-8908,8911,8918-8919,16800,16802-16804,16809-16812,16816,16820-16846,16860,18666-18713,18764-18860,21456-21469,21475-21483,21488-21497,21500,21503-21505,21514,21522,21525-21538,21544-21552,21557-21566,21569-21572,21574-21575,21584,21592
+tests/agent/test_admin_workspaces.py
+  s_27878fb276b595::t_a03c53d0723b5d 280
+tests/agent/test_agent_assembly_context.py
+  s_27878fb276b595::t_2d50cb99436dd5 19,79-111,554-555,575,631-637
+tests/agent/test_dispatch.py
+  s_27878fb276b595::t_c86177fed1c7d5 93-103,117,121-125,148-149,158-163,166-170
+tests/agent/test_event_claims.py
+  s_27878fb276b595::t_475f78b93a55cd 43-55
+tests/agent/test_factory_tool_loading.py
+  s_27878fb276b595::t_eb6d68c121c8da 9
+tests/agent/test_input_messages.py
+  s_27878fb276b595::t_d7f267eb0663b8 6,68-85
+tests/agent/test_manage_feature_flags.py
+  s_27878fb276b595::t_e5c18b9b9dc818 42-44,52-56,58-60
+tests/agent/test_plan_review.py
+  s_27878fb276b595::t_bec2838aa987db 208-238
+tests/agent/test_prompt_default_repo.py
+  s_27878fb276b595::t_90b6b725becf9e 8-9,33-48
+tests/agent/test_save_user_settings.py
+  s_27878fb276b595::t_969735c347f9f1 67,109-124,186,285
+tests/agent/test_thread_ids.py
+  s_27878fb276b595::t_41daa266d3cde0 7
+tests/analytics/test_database.py
+  s_27878fb276b595::t_52c058e72a9d05 7,69-85
+tests/auth/test_authorship.py
+  s_27878fb276b595::t_cf338efca5b998 19-26,36-39,41-42,53,56,60-62
+tests/auth/test_github_token_ttl.py
+  s_27878fb276b595::t_c672c267a4eb63 105,156,217-219
+tests/conftest.py
+  s_27878fb276b595::t_22acd458ce724e 21,181-190
+tests/dashboard/test_analytics_routes.py
+  s_27878fb276b595::t_d0a7afe66c9369 7,18,46
+tests/dashboard/test_audit_logs.py
+  s_27878fb276b595::t_0a645a7da4ff79 10,139
+tests/dashboard/test_bot_threads.py
+  s_27878fb276b595::t_4885a8f5c3fd82 59,81-84
+tests/dashboard/test_dashboard_repos.py
+  s_27878fb276b595::t_ab86184eca10ae 11-13,19-28,160-161,171-190
+tests/dashboard/test_dashboard_thread_api.py
+  s_27878fb276b595::t_34b80a112f4df6 22,97-124,352-356,370-373,387-388,634-662,988,1223,1247,1264,1307
+tests/dashboard/test_dashboard_ui.py
+  s_27878fb276b595::t_ec9f4ec6e95d06 115-161
+tests/dashboard/test_dashboard_urls.py
+  s_27878fb276b595::t_cc38f665751647 37-50
+tests/dashboard/test_my_pull_requests.py
+  s_27878fb276b595::t_fd78703d5e0f0b 156-200
+tests/dashboard/test_pr_fixes.py
+  s_27878fb276b595::t_24bdd1e21c29c9 11-12
+tests/dashboard/test_profile_assistant_ui.py
+  s_27878fb276b595::t_cac6c292c0e1f8 6
+tests/dashboard/test_profile_draft_preference.py
+  s_27878fb276b595::t_29e1550817f74c 32
+tests/dashboard/test_public_repo_org_gate.py
+  s_27878fb276b595::t_17fac14d39a6ca 8,208,211
+tests/dashboard/test_thread_visibility.py
+  s_27878fb276b595::t_8c99dad1f73fe4 7-8,19,180-229
+tests/e2e/README.md
+  s_27878fb276b595::t_9d544535584fe3 36,50
+tests/e2e/dev-mock.sh
+  s_27878fb276b595::t_d5eb2a97cf4bdf 64
+tests/e2e/e2e_env.py
+  s_27878fb276b595::t_69b5eabc473340 41,99-103
+tests/e2e/fake_llm.py
+  s_27878fb276b595::t_6401230b39efd7 44,278-285,1070-1096,1130-1162,1584-1587,1600-1603,1680,1687-1692,1714-1715
+tests/e2e/fakes.py
+  s_27878fb276b595::t_9b5847f7c55a75 220-222,224-227,231,233-237,241-251,255,261
+tests/e2e/harness.py
+  s_27878fb276b595::t_ae28cb0859e31c 24,52,1100-1104,1215,1226,1275,1282,1287,1292,1308,1318,1325,1336,1341,1346,1353-1354,1369,1379,1387,1401,1413,1421,1438-1441,1445-1447,1451-1452,1476-1477,1489,1505-1506,1519,1533,1553,1560,1568,1576
+tests/e2e/langgraph.e2e.json
+  s_27878fb276b595::t_8afd2815f27e75 7
+tests/e2e/mda-dev.sh
+  s_27878fb276b595::t_f7ad9c0e588936 2,13
+tests/e2e/patches.py
+  s_27878fb276b595::t_d523b40f9c3b82 71,74,315-320,325,399-402
+tests/e2e/playwright.config.ts
+  s_27878fb276b595::t_3c2cc54a7c8f1e 64
+tests/e2e/tests/assistant_ui.spec.ts
+  s_27878fb276b595::t_8ee76794ba40d7 217-250,499
+tests/e2e/tests/background_work.spec.ts
+  s_27878fb276b595::t_67854f6dc80ad8 1-76
+tests/e2e/tests/desktop.spec.ts
+  s_27878fb276b595::t_61340694eb6d66 14,221-276
+tests/e2e/tests/eval_descriptions.spec.ts
+  s_27878fb276b595::t_5b623678a5830a 1-46
+tests/e2e/tests/plan_review.spec.ts
+  s_27878fb276b595::t_3b799e9622d6b1 163-177,184-190
+tests/e2e/tests/review_page_chat.spec.ts
+  s_27878fb276b595::t_7ad7753511fc5a 233,246,249,252-256,268-269,331-332,334-339,344-346,374-393,573-581
+tests/e2e/tests/thread_context.md
+  s_27878fb276b595::t_2c4ac26ee2dd12 26
+tests/expedited_review/test_card.py
+  s_27878fb276b595::t_bb1ed1178efa09 98
+tests/github/test_channel_history.py
+  s_27878fb276b595::t_2d3f8c9519f1a1 1-3,8-10,12,15-16,19-20,23-24,27-29,32-41,44-46,49-90,92-93
+tests/github/test_github_channel_forwarding.py
+  s_27878fb276b595::t_dcfc8aa079279d 1-7,10-11,14-18,20-21,24-32,35-36,38-50,53-66,69-118,120,122-123,126-133,135-137,139-141,143-145,148-153,155-157,159-193
+tests/github/test_github_channel_runs.py
+  s_27878fb276b595::t_9f4b38c94697c3 1-245
+tests/github/test_github_http.py
+  s_27878fb276b595::t_85f721820aa67d 4,8,204-344
+tests/github/test_github_issue_webhook.py
+  s_27878fb276b595::t_3f38f9ed4c1514 20-21,666,702-703,721,725-726,730,739,778-779,792,797
+tests/github/test_github_workspace_routing.py
+  s_27878fb276b595::t_c942ad20ab5a55 8,38,40,58-59,61,85
+tests/github/test_open_pull_request.py
+  s_27878fb276b595::t_a7725397ecd048 12,597,601-613
+tests/github/test_pr_creation_guard.py
+  s_27878fb276b595::t_97d4079cd5e39d 14,17,95-105
+tests/github/test_pull_request_actions.py
+  s_27878fb276b595::t_de62e20f665243 33-97
+tests/github/test_pull_request_diff.py
+  s_27878fb276b595::t_ef285656f46dc1 17-23,123,136-158,163-166,179,183,198-200,209,213
+tests/github/test_repo_extraction.py
+  s_27878fb276b595::t_860e6ba4d403b6 1,3,9,21-40,43-45,48-53,56,66-67,69-83,85,87-122
+tests/human_review/test_picking.py
+  s_27878fb276b595::t_9e3e963c62a803 11,91,98-119,124-126,130-138,140-146,167,171
+tests/human_review/test_posted.py
+  s_27878fb276b595::t_f7d1b3e078bb7d 6,10-11,14,16,20-32,34-37,101,149,155,169-327,392,394
+tests/human_review/test_standard.py
+  s_27878fb276b595::t_2bea086e57fff5 273-342,488-489,495-497,555,557-562,566,569-571,574-581,594-596,716-835
+tests/mcp/test_managed_mcps.py
+  s_27878fb276b595::t_d4fc30df85d2c5 253-264,297-299
+tests/mcp/test_tool_caller.py
+  s_27878fb276b595::t_bfe47dc51f3c6a 84-86,93,97,101,105
+tests/merge_queue/test_candidate_git.py
+  s_27878fb276b595::t_3893fd72fa14fb 1-201
+tests/merge_queue/test_merge_queue_store.py
+  s_27878fb276b595::t_46f988dfd522a9 1-700
+tests/merge_queue/test_queue_admission.py
+  s_27878fb276b595::t_aed2d618379cfa 1-144
+tests/merge_queue/test_queue_scheduler.py
+  s_27878fb276b595::t_535ecdfc91a123 1-96
+tests/middleware/test_prepare_run_middleware.py
+  s_27878fb276b595::t_daf8ab0db4cfcc 146,148-151
+tests/middleware/test_require_user_reply.py
+  s_27878fb276b595::t_4663e5c18b70c9 318-319,324
+tests/middleware/test_transcript.py
+  s_27878fb276b595::t_bbc7a6c2ffd162 647-648
+tests/review_guide/test_launch.py
+  s_27878fb276b595::t_c3d70bfabc4855 29-57
+tests/review_guide/test_start_review_channel.py
+  s_27878fb276b595::t_4ddc48cb56cf6b 1,7,10-11,21-26,42,45-74,76-81
+tests/reviewer/test_factory_config_isolation.py
+  s_27878fb276b595::t_fd33cf578a993e 1,12-15
+tests/reviewer/test_git_trace_metadata.py
+  s_27878fb276b595::t_3d0d7e9fe57af1 1-3,5-6,8-10,13-28,30-62,64-83,85-96,98-99,101-110,113-120,122-125,127-130,132-183
+tests/reviewer/test_mda_tools.py
+  s_27878fb276b595::t_c20ec24b366e68 2-4,6,11-12,14,16-19,21-24,28-35,37,42,44-45,56,61-136,138-142,144-218,220-271,273-396
+tests/reviewer/test_pr_ready_auto_review.py
+  s_27878fb276b595::t_f11267d2f6000e 13-14
+tests/reviewer/test_remote_runtime.py
+  s_27878fb276b595::t_f711e4579fb1b6 1,56-142,290-292,294-295,302,314-333,357-358,360-373
+tests/reviewer/test_review_api.py
+  s_27878fb276b595::t_ebd8ed6eab67dd 88-101
+tests/reviewer/test_review_scout_launch.py
+  s_27878fb276b595::t_1686368528a14e 1-48
+tests/reviewer/test_reviewer.py
+  s_27878fb276b595::t_d7ba0981aed0c9 10,108
+tests/reviewer/test_reviewer_findings.py
+  s_27878fb276b595::t_673918a963c533 26,188-202
+tests/reviewer/test_reviewer_publish.py
+  s_27878fb276b595::t_830a0d5fc4a7e8 109,1105,1121-1127
+tests/reviewer/test_reviewer_watch.py
+  s_27878fb276b595::t_9e5aaf56f136da 10-16,92-101,103-104,120-121,197-203,209,212-216,221-225,245,258,277-279,289-291,311-348,442-443,449,452-453,458,485-488
+tests/runtime/test_bindable_config.py
+  s_27878fb276b595::t_86fff9d35711e2 3,37
+tests/sandbox/test_proxy_auth.py
+  s_27878fb276b595::t_ccc4316a49526d 3,11,72,80,94,96-100,104-121,124-125,129,132,134-137,139-140,144-145,148,153-154,157-158,160-161
+tests/sandbox/test_reviewer_sandbox_recovery.py
+  s_27878fb276b595::t_d775459aa6c321 59
+tests/sandbox/test_sandbox_create_config.py
+  s_27878fb276b595::t_2500be7eb0cee8 38-202
+tests/sandbox/test_sandbox_recreation.py
+  s_27878fb276b595::t_dbe810d53f701b 117,159
+tests/sandbox/test_stale_sandbox_creating.py
+  s_27878fb276b595::t_15612c54462794 67-68,117-118,170-171
+tests/sandbox/test_thread_tools.py
+  s_27878fb276b595::t_4584bc3fefb0be 1,3,10,22,203,207-208,210-211,213,216,268-297
+tests/sandbox/test_workspace_github_access.py
+  s_27878fb276b595::t_63143e5d325887 8,17-18,66-68,72,174-334
+tests/slack/test_incidents_ingress.py
+  s_27878fb276b595::t_dfc35d812ad26d 34-36
+tests/slack/test_slack_ask.py
+  s_27878fb276b595::t_02c0653348cf58 47-49,51,71
+tests/slack/test_slack_breakout.py
+  s_27878fb276b595::t_7cb957ba93c34f 6,171-176,217-248
+tests/slack/test_slack_channel_tools.py
+  s_27878fb276b595::t_3e4214ccf6db41 41-52,57-66,122-131
+tests/slack/test_slack_event_dedupe.py
+  s_27878fb276b595::t_0f759fa5100b8f 7,231-238,240-241,246-284,288,290-294,296-335,339-393
+tests/slack/test_slack_interactivity.py
+  s_27878fb276b595::t_1a1e9d92d84e85 31-60
+tests/slack/test_slack_message_api.py
+  s_27878fb276b595::t_6a5289917ad19b 19-43,85-103
+tests/slack/test_slack_sdk.py
+  s_27878fb276b595::t_72e9e8ecd459fc 1-3,111-257
+tests/slack/test_slack_start_new_thread_tool.py
+  s_27878fb276b595::t_cc739190acd8e6 362-367
+tests/slack/test_slack_stop.py
+  s_27878fb276b595::t_b2a3155c2d3a73 3,7-8,10,17-18,41,47,250-367
+tests/slack/test_slack_thread_mapping.py
+  s_27878fb276b595::t_75d2446643358d 24-25,132-146
+tests/slack/test_slack_workspace_routing.py
+  s_27878fb276b595::t_fdf359ab235324 25,32-45,124,126
+tests/support/postgres.py
+  s_27878fb276b595::t_7445e31f4f19f4 13,84-85
+tests/test_build_preview_branch.py
+  s_27878fb276b595::t_37c47121c3a848 1-64
+tests/test_prompts.py
+  s_27878fb276b595::t_2c2386ac5f3d42 5-51
+tests/test_task_threads.py
+  s_27878fb276b595::t_0374fe0805fb9f 19,209-211
+tests/test_thread_title.py
+  s_27878fb276b595::t_982ce832c70d9c 194-197,212-213
+tests/threads/test_mda_runtime_auth.py
+  s_27878fb276b595::t_e7351418ba38b9 1-57
+tests/threads/test_succession.py
+  s_27878fb276b595::t_a0f586d58c114b 1-54
+tests/threads/test_thread_index.py
+  s_27878fb276b595::t_5f57dbaaf7cd88 82-128
+tests/threads/test_thread_router.py
+  s_27878fb276b595::t_8b085dc7d092e6 4,11,98-99,111-118,124-128,131-134,160,165,188,199-202,204-205,207-208,211,236-237,240,252-269,271,274,276-277,280-282,285,300-304,321-327,331-469,547-650
+tests/threads/test_thread_status.py
+  s_27878fb276b595::t_80f6fdb76ab445 4,21-34,44-47,88-107
+tests/tools/test_background_execute.py
+  s_27878fb276b595::t_25cbbf022efef8 1,5,23,27,55-68,70,72-94,102,105,108-109,115-122,126-127,134,137-138,142,146,151,153-154,156,164-165,169-181,411,423,427,450,455,753,761,765
+tests/tools/test_mcp_sources.py
+  s_27878fb276b595::t_c95d223ae97f76 9-10,34-41,80-83,94-101,104-121,161,199
+tests/tools/test_monitor.py
+  s_27878fb276b595::t_115b50d8bd5fb8 1-317
+tests/tools/test_recreate_sandbox_tool.py
+  s_27878fb276b595::t_40b6699d9a4c49 10-52
+tests/tools/test_schedule_thread_wakeup.py
+  s_27878fb276b595::t_bc19e9ad3a8478 8-10,171-176,255,258-259,274-275,289-290,328,333-334,347
+tests/tools/test_switch_to_performance_model.py
+  s_27878fb276b595::t_744007a9d5fedb 1,25-26,40-43
+tests/webhooks/test_completion_webhook.py
+  s_27878fb276b595::t_6263b55d748175 104-155,165-166
+tests/webhooks/test_event_log.py
+  s_27878fb276b595::t_328a445ee9deeb 3,20,23-24,27,37,50-54,56-57,59,67,69,74-79,81-90,92,99-104,119,155-157,160-161,163-164,171,180,221,238-240,242-269
+tests/webhooks/test_event_subscriptions.py
+  s_27878fb276b595::t_ce1ee89b677efa 20,147-212
+tests/webhooks/test_linear_channel_routes.py
+  s_27878fb276b595::t_3829ab21a3368a 1-183
+ui/package.json
+  s_27878fb276b595::t_71bc1ad84d223a 61
+ui/patches/@pierre__diffs@1.3.6.patch
+  s_27878fb276b595::t_ea1d070b0b94d9 1-13,15,26-34,36,72-80,92-108,170-193
+ui/src/components/CopyDiagnosticsButton.tsx
+  s_27878fb276b595::t_412ee1c1895228 3,15,17-19
+ui/src/components/Toaster.tsx
+  s_27878fb276b595::t_f87809a99d802c 48,56,61,63
+ui/src/components/VersionMismatchBanner.test.tsx
+  s_27878fb276b595::t_57fa6b47b539a7 48,51
+ui/src/components/VersionMismatchBanner.tsx
+  s_27878fb276b595::t_db1d96b28c4672 1,16-26,29
+ui/src/features/agents/components/AgentGitPanel.tsx
+  s_27878fb276b595::t_b6be0e3705dfd0 1,14,78-89,212-215
+ui/src/features/agents/components/AgentThreadView.tsx
+  s_27878fb276b595::t_900fd46958af7a 35,994
+ui/src/features/agents/components/AgentsHome.tsx
+  s_27878fb276b595::t_8e0b77027c236b 174-183,185-189,210-212,690-691
+ui/src/features/agents/components/BackgroundWorkSidebar.tsx
+  s_27878fb276b595::t_ea646ccd52a729 1-153
+ui/src/features/agents/components/BrowserPanel.tsx
+  s_27878fb276b595::t_ae708cd287cba2 1-156
+ui/src/features/agents/components/InlinePlanArtifact.tsx
+  s_27878fb276b595::t_af10c8fe6fc4b3 22-24,27-32,39
+ui/src/features/agents/components/PlanArtifactFrame.tsx
+  s_27878fb276b595::t_6ed5089e7560dd 1,176,266,301-318,323
+ui/src/features/agents/components/PlanReview.test.tsx
+  s_27878fb276b595::t_49c70a6bd4ab5c 4,10,14-17,19,28-29,32-33,40-41,51,117-146,302-397
+ui/src/features/agents/components/PlanReview.tsx
+  s_27878fb276b595::t_b99a5d6bcf91ba 52,94-96,99,110-111,118-120,127,129,138-146,175-183,209-276,319,321-326,349,360,366,394-429,431-453
+ui/src/features/agents/components/SidebarThreadRow.tsx
+  s_27878fb276b595::t_7c05d6910d62d4 367,865-867
+ui/src/features/agents/components/chat/Markdown.test.tsx
+  s_27878fb276b595::t_6e7dd1d81f5f3b 1-43
+ui/src/features/agents/components/chat/Markdown.tsx
+  s_27878fb276b595::t_3d946060124c63 113-133,141-164
+ui/src/features/agents/components/chat/toolExecutionDisplay.ts
+  s_27878fb276b595::t_90f227ec7e06b9 100-102,104-119
+ui/src/features/agents/components/panel/AgentRightPanel.tsx
+  s_27878fb276b595::t_4a3edfafa284eb 40-42,144-147,299-301,368-373
+ui/src/features/agents/components/panel/RightPanelTabs.tsx
+  s_27878fb276b595::t_6b64ca5a63112e 24,60-61,64,85-160,218-221,309,312,389,440,650
+ui/src/features/agents/lib/api.ts
+  s_27878fb276b595::t_ea143503120e97 5,32-51,135-148,194-234,257,291,451-454,536-544
+ui/src/features/agents/lib/composerWorkspace.test.ts
+  s_27878fb276b595::t_bc81249e2184d2 57-61,70-84
+ui/src/features/agents/lib/composerWorkspace.ts
+  s_27878fb276b595::t_6c39114ac5e401 45,54,60,65-67
+ui/src/features/agents/lib/queries.ts
+  s_27878fb276b595::t_6d96ce6d0f28ef 61-62,69-70,903-948
+ui/src/features/agents/lib/sidebarPrefs.test.tsx
+  s_27878fb276b595::t_336877800a5bd2 63-111
+ui/src/features/agents/lib/sidebarPrefs.ts
+  s_27878fb276b595::t_65fe759b6122eb 26-27,42,123-128,258
+ui/src/features/agents/lib/stream/runAcceptance.test.ts
+  s_27878fb276b595::t_7e73c3ca439a4a 19,26-28,43,46-67
+ui/src/features/agents/lib/stream/runAcceptance.ts
+  s_27878fb276b595::t_4c812c9027537f 1-9,12,33-39,41,50-51,53,60,62,64
+ui/src/features/agents/lib/stream/useAgentThreadStream.ts
+  s_27878fb276b595::t_098130b829f14d 16,24
+ui/src/features/agents/lib/threadSource/useAgentStreamSource.test.tsx
+  s_27878fb276b595::t_1d8cb652f8e3d4 5,7,10,36-50,52,64-65
+ui/src/features/agents/lib/threadSource/useAgentStreamSource.ts
+  s_27878fb276b595::t_b4b8938cd8de45 79-81
+ui/src/features/agents/lib/transcript/api.ts
+  s_27878fb276b595::t_79084abd3b3be7 80,276
+ui/src/features/agents/lib/types.ts
+  s_27878fb276b595::t_5ef656fd6879c2 327-328,348-382,609-614
+ui/src/features/agents/lib/useRunCompletionNotifier.ts
+  s_27878fb276b595::t_af1b559552a625 8,28
+ui/src/features/assistant/Composer.tsx
+  s_27878fb276b595::t_488d964242fab9 3-4,18-21,74-78,81-103,108-129,132-134,144-145,156,158-161,224,226-230,246,251-252
+ui/src/features/assistant/Conversation.tsx
+  s_27878fb276b595::t_bc06778d5d21f7 11,17,19,41-43,67-73,186
+ui/src/features/automations/components/AutomationsList.tsx
+  s_27878fb276b595::t_eab142c6baa60c 274-280
+ui/src/features/reviews/OpenPullRequests.tsx
+  s_27878fb276b595::t_99f7481e90cc9f 319,322
+ui/src/features/reviews/components/PendingReviewCommentCard.tsx
+  s_27878fb276b595::t_9e550672e0e3fd 4,10-13,19-20,26-28,31-32,35,39,53,60-61,78,81-85,88-89,95,106,110
+ui/src/features/reviews/components/RequestHumanReview.test.tsx
+  s_27878fb276b595::t_886873b5bac8ce 15,84-86,155-157,196-221
+ui/src/features/reviews/components/RequestHumanReview.tsx
+  s_27878fb276b595::t_c708189458db87 83-93,105,107,119-120,130,139,143
+ui/src/features/reviews/components/SubmitReviewPopover.tsx
+  s_27878fb276b595::t_28ae467983e4dd 166-176
+ui/src/features/reviews/lib/reviewKeys.ts
+  s_27878fb276b595::t_ceaf3370904860 29-37,41,46-52
+ui/src/features/reviews/lib/walkthroughDiff.ts
+  s_27878fb276b595::t_88f49036a0f9e1 132,166-167
+ui/src/features/reviews/page/Changes.tsx
+  s_27878fb276b595::t_9743ddfb7367c9 9,41,47,49,51,56-63,79-90,94,101-105,109,116,126,128,176-185,206-212,260-261,276,283-284,286,309-317,319-324,328-336,351-353,358-359,390,396-397,414-415,418,423-424,432-435,438,441,495-499,501-520,522-547
+ui/src/features/reviews/page/ChangesToolbar.tsx
+  s_27878fb276b595::t_56362bc07b1099 10,18,36-39,95-97
+ui/src/features/reviews/page/Discussion.tsx
+  s_27878fb276b595::t_96e43e4945025f 41,312-316,323
+ui/src/features/reviews/page/FileHeader.tsx
+  s_27878fb276b595::t_08b98c99260d59 17,38-43,80,93
+ui/src/features/reviews/page/Header.tsx
+  s_27878fb276b595::t_b5913a2a2b8aed 26,36,248
+ui/src/features/reviews/page/Navigator.tsx
+  s_27878fb276b595::t_e9cb547ae49afe 20,33-34,163-167,178-179,183-195,205-216,218-224,229,231-236,240-241,245,247-256,260-279,457-459,501-508
+ui/src/features/reviews/page/Overview.tsx
+  s_27878fb276b595::t_d6660bf74d0277 7,17,21,29-40,53,69,72,74,76,79-87,156,163
+ui/src/features/reviews/page/RelativeTimestamp.test.tsx
+  s_27878fb276b595::t_887ebf4927059e 1-39
+ui/src/features/reviews/page/RelativeTimestamp.tsx
+  s_27878fb276b595::t_92b632b3295f4c 1-30
+ui/src/features/reviews/page/ReviewPage.tsx
+  s_27878fb276b595::t_ec9a595b0265e8 31,48,50-55,57-61,65-66
+ui/src/features/reviews/page/Standing.tsx
+  s_27878fb276b595::t_0ab9fed78214e8 73,677-684,735,767,770
+ui/src/features/reviews/page/StepSection.tsx
+  s_27878fb276b595::t_f5a6b832ed445b 1-225
+ui/src/features/reviews/page/diffEntries.ts
+  s_27878fb276b595::t_4733374a9ccfe3 24,39-46,50,89,106,110-119,157,161,171-178,180-181,183-197,302-306,309,318,324
+ui/src/features/reviews/page/entries.ts
+  s_27878fb276b595::t_4e50342e6ebcb1 3,25-33
+ui/src/features/reviews/page/notes/Composer.tsx
+  s_27878fb276b595::t_558fefcf89faac 13-16,20-22,29,32,34,68-73
+ui/src/features/reviews/page/notes/FindingNote.tsx
+  s_27878fb276b595::t_6e262ed8015efb 178-182
+ui/src/features/reviews/page/notes/NoteView.test.tsx
+  s_27878fb276b595::t_bcefc5b93a89cc 1-103
+ui/src/features/reviews/page/notes/NoteView.tsx
+  s_27878fb276b595::t_b357244209d0c8 1-103
+ui/src/features/reviews/page/notes/ReplyBox.tsx
+  s_27878fb276b595::t_ce93fb2250dc04 3,5-11,13,17,24-27,29,31,34-35,37,41-44,53-57,63,71-72,77
+ui/src/features/reviews/page/notes/ThreadNote.tsx
+  s_27878fb276b595::t_794f4771ee4e42 87-91,100-104,317
+ui/src/features/reviews/page/queries.ts
+  s_27878fb276b595::t_49514ba11d7b17 11,41
+ui/src/features/reviews/page/store.test.ts
+  s_27878fb276b595::t_af8c87b52229f4 1-170
+ui/src/features/reviews/page/store.ts
+  s_27878fb276b595::t_89792f6a92e6ea 1,16,41-54,56-76,78,87-90,94-95,99-100,110-111,113,115-116,125-131,137-141,151-155,159,161-162,203-211,214,216,219-252,254,256-278,287-288,291,294,299-367,376-378,380,383,407-422,424,428-432,439-441,446,466-475,477,480-486,524-525,527-531,533-541,549,552-559,564-578
+ui/src/features/reviews/page/useDiffKeys.ts
+  s_27878fb276b595::t_d2709629d52012 139
+ui/src/features/settings/components/AboutSection.test.tsx
+  s_27878fb276b595::t_c5e13c313bca32 3-10,17-20,42,136-140
+ui/src/features/settings/components/AssistantUiPreference.test.tsx
+  s_27878fb276b595::t_6ab75e8a011254 61
+ui/src/features/settings/components/AssistantUiPreference.tsx
+  s_27878fb276b595::t_5d9b7e70e63b71 25,31,38,44
+ui/src/features/settings/components/GitSettings.tsx
+  s_27878fb276b595::t_3d38fc26e3e4e4 11,91-94,104-112,139,154-198
+ui/src/features/settings/components/ManagedToolsSection.test.tsx
+  s_27878fb276b595::t_87b23f1212e920 1-88
+ui/src/features/settings/components/ManagedToolsSection.tsx
+  s_27878fb276b595::t_65b5c4a34ca33f 52,57-61,63,69-70,83-87
+ui/src/lib/api.ts
+  s_27878fb276b595::t_b403b5ade1e1c5 305,313,327,335
+ui/src/lib/errorReporting.test.tsx
+  s_27878fb276b595::t_47b545780e8285 8,38-41,47,108-146
+ui/src/lib/invalidations/topics.ts
+  s_27878fb276b595::t_05bc0d13cd29bf 14-15
+ui/src/lib/notifications.test.ts
+  s_27878fb276b595::t_b4106ed03eec57 77-109
+ui/src/lib/plan.ts
+  s_27878fb276b595::t_828c5b7fb86378 54,119-120,124
+ui/src/lib/profile.ts
+  s_27878fb276b595::t_d96c21c1b5adbb 174
+ui/src/lib/slack-manifest.test.ts
+  s_27878fb276b595::t_1cf07e5ca987ff 45
+ui/src/lib/slack-manifest.ts
+  s_27878fb276b595::t_6331cd2d6674f9 31,62-69,113
+ui/src/routes/-usage.test.tsx
+  s_27878fb276b595::t_452f6d8e207210 14,30-33,116,1609-1613,1682-1686,1708-1709,1712
+ui/src/routes/login.tsx
+  s_27878fb276b595::t_9a8099841f47d8 10,64
+ui/src/routes/my-settings_.connections.tsx
+  s_27878fb276b595::t_1cb7aaa24b6c66 3
+ui/src/routes/my-settings_.experiments.tsx
+  s_27878fb276b595::t_85f6fc1b47ed69 24-40,44,49,53-55
+ui/src/routes/usage.tsx
+  s_27878fb276b595::t_0fd85b509ba082 18,119-123,130
+ui/src/styles.css
+  s_27878fb276b595::t_38dfa7710cc57f 21-23
+ui/vite.config.ts
+  s_27878fb276b595::t_78e6b7a2416263 320-321
+uv.lock
+  s_27878fb276b595::t_99f84db437c1b0 2,11-12,15,51,62-146,431,433,435,837,848,850,991,996,998,1003,1014,1016,1816,1823,1825,1849,1863,1865,2010,2020,2022,2027,2066,2068,2086,2095,2097,2108,2114,2116,2121,2132,2134,2139,2148,2150,2155,2173,2175,2197-2220,2552,2561,2595,2600,2606,2608,2623-2627,2630,2638,2640,2891-2936,3806-3814,4360,4367-4437
+vendor/README.md
+  s_27878fb276b595::t_a13cc21e95338e 1-16
+vendor/managed-deepagents-sdk/Cargo.lock
+  s_27878fb276b595::t_667e44d0a3361b 1-2808
+vendor/managed-deepagents-sdk/Cargo.toml
+  s_27878fb276b595::t_f54d58e9b3691b 1-30
+vendor/managed-deepagents-sdk/LICENSE
+  s_27878fb276b595::t_f56b05d692c7ee 1-21
+vendor/managed-deepagents-sdk/README.md
+  s_27878fb276b595::t_f724a6ce911f9d 1-713
+vendor/managed-deepagents-sdk/UPSTREAM
+  s_27878fb276b595::t_4006d8f5eb3006 1
+vendor/managed-deepagents-sdk/crates/mda/Cargo.toml
+  s_27878fb276b595::t_46c769b9348971 1-55
+vendor/managed-deepagents-sdk/crates/mda/README.md
+  s_27878fb276b595::t_aea2e9d9d2aed7 1-242
+vendor/managed-deepagents-sdk/crates/mda/build.rs
+  s_27878fb276b595::t_8fc16dfe8da3d0 1-80
+vendor/managed-deepagents-sdk/crates/mda/harbor/mda_harbor/__init__.py
+  s_27878fb276b595::t_154d88c5d81a96 1-149
+vendor/managed-deepagents-sdk/crates/mda/harbor/mda_harbor/agent.py
+  s_27878fb276b595::t_51505d4d48a68f 1-380
+vendor/managed-deepagents-sdk/crates/mda/harbor/mda_harbor/job_plugin.py
+  s_27878fb276b595::t_744feabb2878f7 1-523
+vendor/managed-deepagents-sdk/crates/mda/harbor/mda_harbor/langsmith_plugin.py
+  s_27878fb276b595::t_489c435d2696ea 1-51
+vendor/managed-deepagents-sdk/crates/mda/harbor/mda_harbor/runners/node_runner.mjs
+  s_27878fb276b595::t_02d2451c0beb45 1-241
+vendor/managed-deepagents-sdk/crates/mda/harbor/mda_harbor/runners/python_runner.py
+  s_27878fb276b595::t_18bb62bfd45474 1-257
+vendor/managed-deepagents-sdk/crates/mda/src/agent_config.rs
+  s_27878fb276b595::t_3660a6058cfacc 1-1490
+vendor/managed-deepagents-sdk/crates/mda/src/channel/mod.rs
+  s_27878fb276b595::t_cd661b08398389 1-421
+vendor/managed-deepagents-sdk/crates/mda/src/chat/mod.rs
+  s_27878fb276b595::t_933fc8d8e4a70f 1-639
+vendor/managed-deepagents-sdk/crates/mda/src/chat/tests.rs
+  s_27878fb276b595::t_84274ba774b26e 1-578
+vendor/managed-deepagents-sdk/crates/mda/src/child.rs
+  s_27878fb276b595::t_90a5b312906221 1-499
+vendor/managed-deepagents-sdk/crates/mda/src/cli_output.rs
+  s_27878fb276b595::t_b45f6ce0bbba11 1-536
+vendor/managed-deepagents-sdk/crates/mda/src/cli_output/chat.rs
+  s_27878fb276b595::t_242f5b3fb6e9de 1-498
+vendor/managed-deepagents-sdk/crates/mda/src/coding_agent.rs
+  s_27878fb276b595::t_5da8d750087130 1-1433
+vendor/managed-deepagents-sdk/crates/mda/src/command.rs
+  s_27878fb276b595::t_776e41cd0b9529 1-13
+vendor/managed-deepagents-sdk/crates/mda/src/compile/diagnostics.rs
+  s_27878fb276b595::t_93c12b98d17820 1-309
+vendor/managed-deepagents-sdk/crates/mda/src/compile/discovery.rs
+  s_27878fb276b595::t_4805eae06d9aa4 1-603
+vendor/managed-deepagents-sdk/crates/mda/src/compile/entry.rs
+  s_27878fb276b595::t_07b97ff5deb946 1-1328
+vendor/managed-deepagents-sdk/crates/mda/src/compile/exports.rs
+  s_27878fb276b595::t_3e9b540053b367 1-1124
+vendor/managed-deepagents-sdk/crates/mda/src/compile/identity.rs
+  s_27878fb276b595::t_bd4e7dce89caaa 1-768
+vendor/managed-deepagents-sdk/crates/mda/src/compile/local_packages.rs
+  s_27878fb276b595::t_ef1b191bae2fa0 1-496
+vendor/managed-deepagents-sdk/crates/mda/src/compile/manifest.rs
+  s_27878fb276b595::t_3adfe32d0aba1c 1-1211
+vendor/managed-deepagents-sdk/crates/mda/src/compile/memory.rs
+  s_27878fb276b595::t_08fcee6ced8521 1-1331
+vendor/managed-deepagents-sdk/crates/mda/src/compile/mod.rs
+  s_27878fb276b595::t_fb94120dbd8861 1-1761
+vendor/managed-deepagents-sdk/crates/mda/src/compile/model.rs
+  s_27878fb276b595::t_c02a5069b592a4 1-490
+vendor/managed-deepagents-sdk/crates/mda/src/compile/requirements.rs
+  s_27878fb276b595::t_18c4a3b2e522ab 1-1767
+vendor/managed-deepagents-sdk/crates/mda/src/compile/runtime.rs
+  s_27878fb276b595::t_4448290cc7bd7d 1-333
+vendor/managed-deepagents-sdk/crates/mda/src/compile/sandbox_recipe.rs
+  s_27878fb276b595::t_7052e045f1c593 1-595
+vendor/managed-deepagents-sdk/crates/mda/src/compile/schedules.rs
+  s_27878fb276b595::t_0c007a4c2ba0d3 1-283
+vendor/managed-deepagents-sdk/crates/mda/src/compile/static_extract.rs
+  s_27878fb276b595::t_4a6e3c32d5af4c 1-441
+vendor/managed-deepagents-sdk/crates/mda/src/compile/test_support.rs
+  s_27878fb276b595::t_bf7683abddcb1b 1-108
+vendor/managed-deepagents-sdk/crates/mda/src/compile/tests.rs
+  s_27878fb276b595::t_8370646e4dc159 1-5457
+vendor/managed-deepagents-sdk/crates/mda/src/connection/catalog.rs
+  s_27878fb276b595::t_2590ea4337bd92 1-512
+vendor/managed-deepagents-sdk/crates/mda/src/connection/mod.rs
+  s_27878fb276b595::t_020969187ce808 1-3373
+vendor/managed-deepagents-sdk/crates/mda/src/context_layout.rs
+  s_27878fb276b595::t_71450215a3bd60 1-124
+vendor/managed-deepagents-sdk/crates/mda/src/delete/mod.rs
+  s_27878fb276b595::t_7c9a84e7652467 1-933
+vendor/managed-deepagents-sdk/crates/mda/src/dependencies.rs
+  s_27878fb276b595::t_da153ccf511fcd 1-1169
+vendor/managed-deepagents-sdk/crates/mda/src/deploy/archive.rs
+  s_27878fb276b595::t_ca29ee4ca93d93 1-199
+vendor/managed-deepagents-sdk/crates/mda/src/deploy/bake.rs
+  s_27878fb276b595::t_7e250535b2100d 1-892
+vendor/managed-deepagents-sdk/crates/mda/src/deploy/channel_app.rs
+  s_27878fb276b595::t_cd481894cea36a 1-541
+vendor/managed-deepagents-sdk/crates/mda/src/deploy/channel_icon.rs
+  s_27878fb276b595::t_e15bbc0dae7b5f 1-90
+vendor/managed-deepagents-sdk/crates/mda/src/deploy/channel_setup.rs
+  s_27878fb276b595::t_05e8b7f12c065d 1-211
+vendor/managed-deepagents-sdk/crates/mda/src/deploy/context_hub.rs
+  s_27878fb276b595::t_2ae48df1be0538 1-1220
+vendor/managed-deepagents-sdk/crates/mda/src/deploy/env_file.rs
+  s_27878fb276b595::t_e59ccf1db53e97 1-202
+vendor/managed-deepagents-sdk/crates/mda/src/deploy/github_channel/app_manifest.rs
+  s_27878fb276b595::t_c7015ee7a59f4e 1-44
+vendor/managed-deepagents-sdk/crates/mda/src/deploy/github_channel/manifest.rs
+  s_27878fb276b595::t_7f938f1ce49043 1-657
+vendor/managed-deepagents-sdk/crates/mda/src/deploy/github_channel/mod.rs
+  s_27878fb276b595::t_6858e921a9cf3b 1-1592
+vendor/managed-deepagents-sdk/crates/mda/src/deploy/github_channel/report.rs
+  s_27878fb276b595::t_0f5bf33290881c 1-1000
+vendor/managed-deepagents-sdk/crates/mda/src/deploy/github_channel/teardown.rs
+  s_27878fb276b595::t_19481f3fd9d093 1-182
+vendor/managed-deepagents-sdk/crates/mda/src/deploy/github_channel/tests.rs
+  s_27878fb276b595::t_c8f04cf8ba4e18 1-1670
+vendor/managed-deepagents-sdk/crates/mda/src/deploy/helpers.rs
+  s_27878fb276b595::t_1b851727916b17 1-1927
+vendor/managed-deepagents-sdk/crates/mda/src/deploy/image.rs
+  s_27878fb276b595::t_7357cdb2a04978 1-373
+vendor/managed-deepagents-sdk/crates/mda/src/deploy/linear_channel/manifest.rs
+  s_27878fb276b595::t_36f65028053694 1-526
+vendor/managed-deepagents-sdk/crates/mda/src/deploy/linear_channel/mod.rs
+  s_27878fb276b595::t_c2509a256311f9 1-775
+vendor/managed-deepagents-sdk/crates/mda/src/deploy/linear_channel/teardown.rs
+  s_27878fb276b595::t_ab1bedbfdbb96f 1-73
+vendor/managed-deepagents-sdk/crates/mda/src/deploy/linear_channel/tests.rs
+  s_27878fb276b595::t_c2e83695b42246 1-634
+vendor/managed-deepagents-sdk/crates/mda/src/deploy/mod.rs
+  s_27878fb276b595::t_dc7dcdd448221f 1-4073
+vendor/managed-deepagents-sdk/crates/mda/src/deploy/prepare.rs
+  s_27878fb276b595::t_12effc78525e40 1-612
+vendor/managed-deepagents-sdk/crates/mda/src/deploy/trigger_channels.rs
+  s_27878fb276b595::t_ceff3d5ba17ce6 1-1539
+vendor/managed-deepagents-sdk/crates/mda/src/deploy/trigger_icon.rs
+  s_27878fb276b595::t_a2dc6748d378a5 1-374
+vendor/managed-deepagents-sdk/crates/mda/src/deploy/upsell.rs
+  s_27878fb276b595::t_f78bc2fa89366f 1-191
+vendor/managed-deepagents-sdk/crates/mda/src/dev/mod.rs
+  s_27878fb276b595::t_4cc7ecf823600b 1-4431
+vendor/managed-deepagents-sdk/crates/mda/src/dev/schedules.rs
+  s_27878fb276b595::t_b0c18f73ef7a4a 1-488
+vendor/managed-deepagents-sdk/crates/mda/src/dev/watch.rs
+  s_27878fb276b595::t_f16317ab54be3d 1-608
+vendor/managed-deepagents-sdk/crates/mda/src/error.rs
+  s_27878fb276b595::t_23992eb467ee2b 1-193
+vendor/managed-deepagents-sdk/crates/mda/src/eval/artifact.rs
+  s_27878fb276b595::t_17268215082bbb 1-338
+vendor/managed-deepagents-sdk/crates/mda/src/eval/harbor.rs
+  s_27878fb276b595::t_d74fea2ecffb81 1-511
+vendor/managed-deepagents-sdk/crates/mda/src/eval/helpers.rs
+  s_27878fb276b595::t_bddf3e7c6eb7b8 1-153
+vendor/managed-deepagents-sdk/crates/mda/src/eval/init.rs
+  s_27878fb276b595::t_848efa4b59b668 1-354
+vendor/managed-deepagents-sdk/crates/mda/src/eval/mod.rs
+  s_27878fb276b595::t_c7484b8139df78 1-120
+vendor/managed-deepagents-sdk/crates/mda/src/eval/templates/python/test.sh
+  s_27878fb276b595::t_a032e706c21b36 1-18
+vendor/managed-deepagents-sdk/crates/mda/src/eval/templates/typescript/test.sh
+  s_27878fb276b595::t_056873864f163f 1-17
+vendor/managed-deepagents-sdk/crates/mda/src/eval/tests.rs
+  s_27878fb276b595::t_91cb599e235b92 1-1270
+vendor/managed-deepagents-sdk/crates/mda/src/eval/types.rs
+  s_27878fb276b595::t_157e9e4cb9c4d2 1-58
+vendor/managed-deepagents-sdk/crates/mda/src/github.rs
+  s_27878fb276b595::t_fd15116683fb9f 1-80
+vendor/managed-deepagents-sdk/crates/mda/src/http.rs
+  s_27878fb276b595::t_22538d337c0578 1-160
+vendor/managed-deepagents-sdk/crates/mda/src/init/env.rs
+  s_27878fb276b595::t_f207ee4a7e3b0e 1-45
+vendor/managed-deepagents-sdk/crates/mda/src/init/manifests.rs
+  s_27878fb276b595::t_1f7733af1b1561 1-60
+vendor/managed-deepagents-sdk/crates/mda/src/init/mod.rs
+  s_27878fb276b595::t_a812b838cf3429 1-939
+vendor/managed-deepagents-sdk/crates/mda/src/init/readme.rs
+  s_27878fb276b595::t_7bc370bfa1dfd6 1-320
+vendor/managed-deepagents-sdk/crates/mda/src/init/scaffold.rs
+  s_27878fb276b595::t_566c8df608385d 1-210
+vendor/managed-deepagents-sdk/crates/mda/src/init/templates/agent.py
+  s_27878fb276b595::t_f500ab5e751f21 1-6
+vendor/managed-deepagents-sdk/crates/mda/src/init/templates/agent.ts
+  s_27878fb276b595::t_c496f42ee843af 1-6
+vendor/managed-deepagents-sdk/crates/mda/src/init/templates/gitignore
+  s_27878fb276b595::t_b26ec4d8f1f1ca 1-19
+vendor/managed-deepagents-sdk/crates/mda/src/init/templates/identity.py
+  s_27878fb276b595::t_ad3709e1570bd9 1-10
+vendor/managed-deepagents-sdk/crates/mda/src/init/templates/identity.ts
+  s_27878fb276b595::t_182464a6e20bb6 1-13
+vendor/managed-deepagents-sdk/crates/mda/src/init/templates/instructions.md
+  s_27878fb276b595::t_1a92ae664148e0 1,3
+vendor/managed-deepagents-sdk/crates/mda/src/init/templates/memory.py
+  s_27878fb276b595::t_3768fdea9dc1ba 1-24
+vendor/managed-deepagents-sdk/crates/mda/src/init/templates/memory.ts
+  s_27878fb276b595::t_1ece6e1d8b7031 1-24
+vendor/managed-deepagents-sdk/crates/mda/src/init/templates/sandbox.py
+  s_27878fb276b595::t_32c688e512641b 1-17
+vendor/managed-deepagents-sdk/crates/mda/src/init/templates/sandbox.ts
+  s_27878fb276b595::t_43cdba9fd10296 1-14
+vendor/managed-deepagents-sdk/crates/mda/src/init/templates/tsconfig.json
+  s_27878fb276b595::t_b314e3af308b3d 1-15
+vendor/managed-deepagents-sdk/crates/mda/src/install.rs
+  s_27878fb276b595::t_cac58a7f525cd7 1-187
+vendor/managed-deepagents-sdk/crates/mda/src/interrupt.rs
+  s_27878fb276b595::t_38664afa25c12f 1-95
+vendor/managed-deepagents-sdk/crates/mda/src/langsmith/agent_auth.rs
+  s_27878fb276b595::t_90e622375d35c6 1-2164
+vendor/managed-deepagents-sdk/crates/mda/src/langsmith/agent_server/events.rs
+  s_27878fb276b595::t_74c26cf406593e 1-356
+vendor/managed-deepagents-sdk/crates/mda/src/langsmith/agent_server/mod.rs
+  s_27878fb276b595::t_52b5f98585acab 1-473
+vendor/managed-deepagents-sdk/crates/mda/src/langsmith/agent_server/sse.rs
+  s_27878fb276b595::t_47900b978761ca 1-238
+vendor/managed-deepagents-sdk/crates/mda/src/langsmith/agents.rs
+  s_27878fb276b595::t_517bbc4ae4bfed 1-138
+vendor/managed-deepagents-sdk/crates/mda/src/langsmith/context_hub.rs
+  s_27878fb276b595::t_0caa6735f15258 1-820
+vendor/managed-deepagents-sdk/crates/mda/src/langsmith/crons.rs
+  s_27878fb276b595::t_c63315d54732cc 1-152
+vendor/managed-deepagents-sdk/crates/mda/src/langsmith/deployments.rs
+  s_27878fb276b595::t_88504d0ee7515a 1-703
+vendor/managed-deepagents-sdk/crates/mda/src/langsmith/github_app_setup.rs
+  s_27878fb276b595::t_5ac76ec2f18064 1-583
+vendor/managed-deepagents-sdk/crates/mda/src/langsmith/github_channel.rs
+  s_27878fb276b595::t_0e8f4f9aff98ab 1-314
+vendor/managed-deepagents-sdk/crates/mda/src/langsmith/login.rs
+  s_27878fb276b595::t_0dcb6c75fffa55 1-1023
+vendor/managed-deepagents-sdk/crates/mda/src/langsmith/logs.rs
+  s_27878fb276b595::t_814a36ba264f94 1-259
+vendor/managed-deepagents-sdk/crates/mda/src/langsmith/mod.rs
+  s_27878fb276b595::t_1b80cfbb8b12e9 1-1310
+vendor/managed-deepagents-sdk/crates/mda/src/langsmith/registries.rs
+  s_27878fb276b595::t_a6e585d23cd26f 1-180
+vendor/managed-deepagents-sdk/crates/mda/src/langsmith/sandboxes.rs
+  s_27878fb276b595::t_373c7d03ecf71e 1-558
+vendor/managed-deepagents-sdk/crates/mda/src/langsmith/secrets.rs
+  s_27878fb276b595::t_236f5e61b8b372 1-54
+vendor/managed-deepagents-sdk/crates/mda/src/langsmith/snapshots.rs
+  s_27878fb276b595::t_c9916585bfabd2 1-349
+vendor/managed-deepagents-sdk/crates/mda/src/langsmith/test_support.rs
+  s_27878fb276b595::t_1e4543641d4b04 1-78
+vendor/managed-deepagents-sdk/crates/mda/src/langsmith/trigger_server.rs
+  s_27878fb276b595::t_0322084c0e2b10 1-545
+vendor/managed-deepagents-sdk/crates/mda/src/langsmith/workspaces.rs
+  s_27878fb276b595::t_79d1fe8daeb252 1-390
+vendor/managed-deepagents-sdk/crates/mda/src/lib.rs
+  s_27878fb276b595::t_0180fd9f6f692d 1-44
+vendor/managed-deepagents-sdk/crates/mda/src/local_context_hub.rs
+  s_27878fb276b595::t_d825473c616206 1-294
+vendor/managed-deepagents-sdk/crates/mda/src/logs/mod.rs
+  s_27878fb276b595::t_32afa2106f7db2 1-534
+vendor/managed-deepagents-sdk/crates/mda/src/main.rs
+  s_27878fb276b595::t_70c4d6b3d71b83 1-2413
+vendor/managed-deepagents-sdk/crates/mda/src/naming.rs
+  s_27878fb276b595::t_7f733b2f15e347 1,3-4,6-16,18-35,37-53,55-68,70-72,74-119
+vendor/managed-deepagents-sdk/crates/mda/src/path_util.rs
+  s_27878fb276b595::t_99cd833b882c9e 1-44
+vendor/managed-deepagents-sdk/crates/mda/src/project.rs
+  s_27878fb276b595::t_64a8b3d048a294 1-613
+vendor/managed-deepagents-sdk/crates/mda/src/python_extract.rs
+  s_27878fb276b595::t_b2bde1ae8f8a2c 1-176
+vendor/managed-deepagents-sdk/crates/mda/src/python_extract/agent.py
+  s_27878fb276b595::t_d4570543797ed8 1-309
+vendor/managed-deepagents-sdk/crates/mda/src/python_extract/channel_ingress.py
+  s_27878fb276b595::t_1c6fc57a780108 1-92
+vendor/managed-deepagents-sdk/crates/mda/src/python_extract/connector_factory.py
+  s_27878fb276b595::t_01596c8fcc870a 1-77
+vendor/managed-deepagents-sdk/crates/mda/src/python_extract/connector_ingress.py
+  s_27878fb276b595::t_c570e970b60329 1-32
+vendor/managed-deepagents-sdk/crates/mda/src/python_extract/identity_summary.py
+  s_27878fb276b595::t_a24a91447d4049 1-104
+vendor/managed-deepagents-sdk/crates/mda/src/python_extract/memory_layers.py
+  s_27878fb276b595::t_3a385fc9ec14f1 1-193
+vendor/managed-deepagents-sdk/crates/mda/src/python_extract/model.py
+  s_27878fb276b595::t_3ce2026cba4549 1-28
+vendor/managed-deepagents-sdk/crates/mda/src/python_extract/prelude.py
+  s_27878fb276b595::t_ecede7ae2ea375 1-11
+vendor/managed-deepagents-sdk/crates/mda/src/secret_input.rs
+  s_27878fb276b595::t_8083bd9f2cf9fc 1-252
+vendor/managed-deepagents-sdk/crates/mda/src/state.rs
+  s_27878fb276b595::t_0306afb898f194 1-145
+vendor/managed-deepagents-sdk/crates/mda/src/telemetry/command.rs
+  s_27878fb276b595::t_31ca1334017cf6 1-258
+vendor/managed-deepagents-sdk/crates/mda/src/telemetry/event.rs
+  s_27878fb276b595::t_1f094ee654e61d 1-292
+vendor/managed-deepagents-sdk/crates/mda/src/telemetry/facts.rs
+  s_27878fb276b595::t_b9de8439c74c98 1-162
+vendor/managed-deepagents-sdk/crates/mda/src/telemetry/gates.rs
+  s_27878fb276b595::t_25be50be778df7 1-96
+vendor/managed-deepagents-sdk/crates/mda/src/telemetry/identity.rs
+  s_27878fb276b595::t_7ca134707bd8ef 1-364
+vendor/managed-deepagents-sdk/crates/mda/src/telemetry/metadata.rs
+  s_27878fb276b595::t_d78b43f0db6fc3 1-101
+vendor/managed-deepagents-sdk/crates/mda/src/telemetry/mod.rs
+  s_27878fb276b595::t_638c978797af1f 1-18
+vendor/managed-deepagents-sdk/crates/mda/src/telemetry/posthog.rs
+  s_27878fb276b595::t_b4543e93064df3 1-253
+vendor/managed-deepagents-sdk/crates/mda/src/telemetry/transport.rs
+  s_27878fb276b595::t_a6f1916cec166e 1-66
+vendor/managed-deepagents-sdk/crates/mda/src/termination.rs
+  s_27878fb276b595::t_ade1aeeb06c766 1-57
+vendor/managed-deepagents-sdk/crates/mda/src/test_support.rs
+  s_27878fb276b595::t_54942fd74ffe85 1-23
+vendor/managed-deepagents-sdk/crates/mda/src/text_module.rs
+  s_27878fb276b595::t_819b24346802ea 1-350
+vendor/managed-deepagents-sdk/crates/mda/src/toolchain.rs
+  s_27878fb276b595::t_081bd82537f93a 1-584
+vendor/managed-deepagents-sdk/crates/mda/src/typescript.rs
+  s_27878fb276b595::t_5a037bd1e57dbe 1-344
+vendor/managed-deepagents-sdk/crates/mda/src/version.rs
+  s_27878fb276b595::t_b1db1665b96f23 1-104
+vendor/managed-deepagents-sdk/crates/mda/tests/channel_init.rs
+  s_27878fb276b595::t_9415ff6ac1198a 1-69
+vendor/managed-deepagents-sdk/crates/mda/tests/coding_agent_shared.rs
+  s_27878fb276b595::t_5bf034e0fa377c 1-11
+vendor/managed-deepagents-sdk/crates/mda/tests/eval_coding_agent.rs
+  s_27878fb276b595::t_e3ccd3b4c5195a 1-656
+vendor/managed-deepagents-sdk/crates/mda/tests/init_coding_agent.rs
+  s_27878fb276b595::t_fcb53aebf0e083 1-268
+vendor/managed-deepagents-sdk/crates/mda/tests/prepare_credentials.rs
+  s_27878fb276b595::t_eddf125427bcdd 1-97
+vendor/managed-deepagents-sdk/crates/mda/tests/prompt_escapes.rs
+  s_27878fb276b595::t_6cf01030af0a60 1-127
+vendor/managed-deepagents-sdk/crates/mda/tests/terminate_children.rs
+  s_27878fb276b595::t_125f48f582b520 1-169
+vendor/managed-deepagents-sdk/packages/pypi/LICENSE
+  s_27878fb276b595::t_7353bb269f1556 1-21
+vendor/managed-deepagents-sdk/packages/pypi/README.md
+  s_27878fb276b595::t_b9a6593baa98b9 1-1360
+vendor/managed-deepagents-sdk/packages/pypi/pyproject.toml
+  s_27878fb276b595::t_ba38118471b2a6 1-161
+vendor/managed-deepagents-sdk/packages/pypi/scripts/build_wheels.py
+  s_27878fb276b595::t_6c97620cd24b05 1-157
+vendor/managed-deepagents-sdk/packages/pypi/src/managed_deepagents/__init__.py
+  s_27878fb276b595::t_73ee160d53f04c 1-315
+vendor/managed-deepagents-sdk/packages/pypi/src/managed_deepagents/__main__.py
+  s_27878fb276b595::t_36f75c39377967 1-3
+vendor/managed-deepagents-sdk/packages/pypi/src/managed_deepagents/_agent_auth.py
+  s_27878fb276b595::t_8d5a9eadfd4377 1-548
+vendor/managed-deepagents-sdk/packages/pypi/src/managed_deepagents/_agent_auth_http.py
+  s_27878fb276b595::t_0f533ed9b49cfa 1-187
+vendor/managed-deepagents-sdk/packages/pypi/src/managed_deepagents/_async_subagents.py
+  s_27878fb276b595::t_a82ecd2b03e5f4 1-136
+vendor/managed-deepagents-sdk/packages/pypi/src/managed_deepagents/_channel.py
+  s_27878fb276b595::t_080236ca5f980f 1-158
+vendor/managed-deepagents-sdk/packages/pypi/src/managed_deepagents/_channel_icon.py
+  s_27878fb276b595::t_9ec3e006c142af 1-90
+vendor/managed-deepagents-sdk/packages/pypi/src/managed_deepagents/_channels/__init__.py
+  s_27878fb276b595::t_94886cedb9a612 1-27
+vendor/managed-deepagents-sdk/packages/pypi/src/managed_deepagents/_channels/assistant_text.py
+  s_27878fb276b595::t_ff9eb368d33c53 1-211
+vendor/managed-deepagents-sdk/packages/pypi/src/managed_deepagents/_channels/binding.py
+  s_27878fb276b595::t_9d8b403e546b27 1-155
+vendor/managed-deepagents-sdk/packages/pypi/src/managed_deepagents/_channels/context.py
+  s_27878fb276b595::t_69989772be5ff8 1-61
+vendor/managed-deepagents-sdk/packages/pypi/src/managed_deepagents/_channels/github.py
+  s_27878fb276b595::t_93f7ae04737d79 1-508
+vendor/managed-deepagents-sdk/packages/pypi/src/managed_deepagents/_channels/github_connections.py
+  s_27878fb276b595::t_fba73cd0ee10aa 1-16
+vendor/managed-deepagents-sdk/packages/pypi/src/managed_deepagents/_channels/github_events.py
+  s_27878fb276b595::t_007b6ea2299489 1-31
+vendor/managed-deepagents-sdk/packages/pypi/src/managed_deepagents/_channels/github_mentions.py
+  s_27878fb276b595::t_c7bf0e2183b2e6 1-190
+vendor/managed-deepagents-sdk/packages/pypi/src/managed_deepagents/_channels/github_schema.py
+  s_27878fb276b595::t_e5c698d339e076 1-273
+vendor/managed-deepagents-sdk/packages/pypi/src/managed_deepagents/_channels/github_types.py
+  s_27878fb276b595::t_bd093a61e6fa8b 1-307
+vendor/managed-deepagents-sdk/packages/pypi/src/managed_deepagents/_channels/http/__init__.py
+  s_27878fb276b595::t_454f1b5b8565a0 1-196
+vendor/managed-deepagents-sdk/packages/pypi/src/managed_deepagents/_channels/http/endpoint.py
+  s_27878fb276b595::t_72325c37b93750 1-396
+vendor/managed-deepagents-sdk/packages/pypi/src/managed_deepagents/_channels/http/http.py
+  s_27878fb276b595::t_5e0d801b40e43c 1-765
+vendor/managed-deepagents-sdk/packages/pypi/src/managed_deepagents/_channels/http/ingress.py
+  s_27878fb276b595::t_eb06b4b5d84c28 1-306
+vendor/managed-deepagents-sdk/packages/pypi/src/managed_deepagents/_channels/http/provider.py
+  s_27878fb276b595::t_c5e167c5eb628a 1-331
+vendor/managed-deepagents-sdk/packages/pypi/src/managed_deepagents/_channels/http/reply.py
+  s_27878fb276b595::t_86d7a15bfe3912 1-177
+vendor/managed-deepagents-sdk/packages/pypi/src/managed_deepagents/_channels/http/studio.py
+  s_27878fb276b595::t_b3f7602a3b24bf 1-122
+vendor/managed-deepagents-sdk/packages/pypi/src/managed_deepagents/_channels/http/threads.py
+  s_27878fb276b595::t_e47ca55455e93d 1-16
+vendor/managed-deepagents-sdk/packages/pypi/src/managed_deepagents/_channels/http/types.py
+  s_27878fb276b595::t_3ed821cfb74388 1-240
+vendor/managed-deepagents-sdk/packages/pypi/src/managed_deepagents/_channels/linear.py
+  s_27878fb276b595::t_8575e931f89f25 1-828
+vendor/managed-deepagents-sdk/packages/pypi/src/managed_deepagents/_channels/linear_connections.py
+  s_27878fb276b595::t_b9c01a569f9713 1-16
+vendor/managed-deepagents-sdk/packages/pypi/src/managed_deepagents/_channels/linear_graphql.py
+  s_27878fb276b595::t_95531201a8873a 1-325
+vendor/managed-deepagents-sdk/packages/pypi/src/managed_deepagents/_channels/linear_schema.py
+  s_27878fb276b595::t_ff6d2ff1a1b052 1-281
+vendor/managed-deepagents-sdk/packages/pypi/src/managed_deepagents/_channels/linear_types.py
+  s_27878fb276b595::t_365b8ddc34252e 1-215
+vendor/managed-deepagents-sdk/packages/pypi/src/managed_deepagents/_channels/manifest.py
+  s_27878fb276b595::t_862b04a815acfe 1-34
+vendor/managed-deepagents-sdk/packages/pypi/src/managed_deepagents/_channels/messaging_registry.py
+  s_27878fb276b595::t_dbd1d0c613833c 1-97
+vendor/managed-deepagents-sdk/packages/pypi/src/managed_deepagents/_channels/reactions.py
+  s_27878fb276b595::t_e3820aa1d3c00b 1-99
+vendor/managed-deepagents-sdk/packages/pypi/src/managed_deepagents/_channels/reserved_connections.py
+  s_27878fb276b595::t_b5858c049d9b99 1-53
+vendor/managed-deepagents-sdk/packages/pypi/src/managed_deepagents/_channels/response_format.py
+  s_27878fb276b595::t_d7312bc607f327 1-117
+vendor/managed-deepagents-sdk/packages/pypi/src/managed_deepagents/_channels/run_input.py
+  s_27878fb276b595::t_0be5727d92d54a 1-211
+vendor/managed-deepagents-sdk/packages/pypi/src/managed_deepagents/_channels/runtime.py
+  s_27878fb276b595::t_e90b06eb32deea 1-178
+vendor/managed-deepagents-sdk/packages/pypi/src/managed_deepagents/_channels/scalars.py
+  s_27878fb276b595::t_f5d2047df16f99 1-15
+vendor/managed-deepagents-sdk/packages/pypi/src/managed_deepagents/_channels/schedule_delivery.py
+  s_27878fb276b595::t_e0f78229459973 1-538
+vendor/managed-deepagents-sdk/packages/pypi/src/managed_deepagents/_channels/slack/__init__.py
+  s_27878fb276b595::t_905d68f7036b3f 1
+vendor/managed-deepagents-sdk/packages/pypi/src/managed_deepagents/_channels/slack/api.py
+  s_27878fb276b595::t_9b7fb64aab273f 1-79
+vendor/managed-deepagents-sdk/packages/pypi/src/managed_deepagents/_channels/slack/files.py
+  s_27878fb276b595::t_d457b5a0a45c37 1-345
+vendor/managed-deepagents-sdk/packages/pypi/src/managed_deepagents/_channels/slack/message_content.py
+  s_27878fb276b595::t_f92969b6c4cd15 1-275
+vendor/managed-deepagents-sdk/packages/pypi/src/managed_deepagents/_channels/slack/middleware.py
+  s_27878fb276b595::t_945a9d17b70810 1,3,5-7,9-19,21-23,25-38,40-94,98-101
+vendor/managed-deepagents-sdk/packages/pypi/src/managed_deepagents/_channels/slack/transport.py
+  s_27878fb276b595::t_7d0481702d89bd 1-97
+vendor/managed-deepagents-sdk/packages/pypi/src/managed_deepagents/_channels/source_providers.py
+  s_27878fb276b595::t_b7e55ca6bdd7b2 1-38
+vendor/managed-deepagents-sdk/packages/pypi/src/managed_deepagents/_channels/trigger/__init__.py
+  s_27878fb276b595::t_6010ec7fa8df8d 1
+vendor/managed-deepagents-sdk/packages/pypi/src/managed_deepagents/_channels/trigger/channel.py
+  s_27878fb276b595::t_f558c8acb0c492 1-248
+vendor/managed-deepagents-sdk/packages/pypi/src/managed_deepagents/_channels/trigger/client.py
+  s_27878fb276b595::t_76684b2cb7e0f9 1-283
+vendor/managed-deepagents-sdk/packages/pypi/src/managed_deepagents/_channels/trigger/http.py
+  s_27878fb276b595::t_8b870cff60512e 1-784
+vendor/managed-deepagents-sdk/packages/pypi/src/managed_deepagents/_channels/trigger/identity_context.py
+  s_27878fb276b595::t_a821fdab84bf41 1-230
+vendor/managed-deepagents-sdk/packages/pypi/src/managed_deepagents/_channels/trigger/ingress.py
+  s_27878fb276b595::t_735e772dc07141 1-271
+vendor/managed-deepagents-sdk/packages/pypi/src/managed_deepagents/_channels/trigger/tracing_project.py
+  s_27878fb276b595::t_62532185a41ea4 1-58
+vendor/managed-deepagents-sdk/packages/pypi/src/managed_deepagents/_channels/trigger/transport.py
+  s_27878fb276b595::t_23c6a5e27e886f 1-49
+vendor/managed-deepagents-sdk/packages/pypi/src/managed_deepagents/_channels/trigger/types.py
+  s_27878fb276b595::t_8d69f0cc46053b 1-357
+vendor/managed-deepagents-sdk/packages/pypi/src/managed_deepagents/_channels/types.py
+  s_27878fb276b595::t_38a76f23c17356 1-177
+vendor/managed-deepagents-sdk/packages/pypi/src/managed_deepagents/_cli.py
+  s_27878fb276b595::t_41bc6623a9e2a9 1-51
+vendor/managed-deepagents-sdk/packages/pypi/src/managed_deepagents/_connection_authorization.py
+  s_27878fb276b595::t_545d6f7c1742e9 1-135
+vendor/managed-deepagents-sdk/packages/pypi/src/managed_deepagents/_connections.py
+  s_27878fb276b595::t_a433cf17e9c259 1-711
+vendor/managed-deepagents-sdk/packages/pypi/src/managed_deepagents/_connector.py
+  s_27878fb276b595::t_3d5ce334364196 1-234
+vendor/managed-deepagents-sdk/packages/pypi/src/managed_deepagents/_connectors/__init__.py
+  s_27878fb276b595::t_8b0fd0f557810a 1-18
+vendor/managed-deepagents-sdk/packages/pypi/src/managed_deepagents/_connectors/mcp/__init__.py
+  s_27878fb276b595::t_377eb50ac16450 1-470
+vendor/managed-deepagents-sdk/packages/pypi/src/managed_deepagents/_connectors/mcp/langsmith_url.py
+  s_27878fb276b595::t_15769384a0288f 1-49
+vendor/managed-deepagents-sdk/packages/pypi/src/managed_deepagents/_connectors/mcp/load.py
+  s_27878fb276b595::t_2ba58f951abce5 1-689
+vendor/managed-deepagents-sdk/packages/pypi/src/managed_deepagents/_connectors/tool_selection.py
+  s_27878fb276b595::t_c02e1f9184235f 1-85
+vendor/managed-deepagents-sdk/packages/pypi/src/managed_deepagents/_cors.py
+  s_27878fb276b595::t_a4482b4205c704 1-204
+vendor/managed-deepagents-sdk/packages/pypi/src/managed_deepagents/_credential_gate.py
+  s_27878fb276b595::t_290d2b65a2cc51 1-412
+vendor/managed-deepagents-sdk/packages/pypi/src/managed_deepagents/_eval_filesystem.py
+  s_27878fb276b595::t_c3f44f4518146d 1-231
+vendor/managed-deepagents-sdk/packages/pypi/src/managed_deepagents/_extension.py
+  s_27878fb276b595::t_cb0a4e864b0468 1-146
+vendor/managed-deepagents-sdk/packages/pypi/src/managed_deepagents/_identity_auth.py
+  s_27878fb276b595::t_3b5bae8ff707b3 1-996
+vendor/managed-deepagents-sdk/packages/pypi/src/managed_deepagents/_identity_http.py
+  s_27878fb276b595::t_bd3227e6a1e6c8 1-491
+vendor/managed-deepagents-sdk/packages/pypi/src/managed_deepagents/_identity_links.py
+  s_27878fb276b595::t_9cb369fe39878c 1-224
+vendor/managed-deepagents-sdk/packages/pypi/src/managed_deepagents/_identity_runtime.py
+  s_27878fb276b595::t_22ea5148d4221c 1-722
+vendor/managed-deepagents-sdk/packages/pypi/src/managed_deepagents/_ingress.py
+  s_27878fb276b595::t_4b1420a460e922 1-142
+vendor/managed-deepagents-sdk/packages/pypi/src/managed_deepagents/_ingress_runs.py
+  s_27878fb276b595::t_04618efeead357 1-298
+vendor/managed-deepagents-sdk/packages/pypi/src/managed_deepagents/_log.py
+  s_27878fb276b595::t_1ad8a63e174895 1-85
+vendor/managed-deepagents-sdk/packages/pypi/src/managed_deepagents/_loopback.py
+  s_27878fb276b595::t_99ded2a49078fc 1-70
+vendor/managed-deepagents-sdk/packages/pypi/src/managed_deepagents/_managed_composition.py
+  s_27878fb276b595::t_3cdd11fbc7107e 1-253
+vendor/managed-deepagents-sdk/packages/pypi/src/managed_deepagents/_managed_middleware.py
+  s_27878fb276b595::t_e689d2cc901e04 1-304
+vendor/managed-deepagents-sdk/packages/pypi/src/managed_deepagents/_managed_tools.py
+  s_27878fb276b595::t_544d3e7e058a48 1-307
+vendor/managed-deepagents-sdk/packages/pypi/src/managed_deepagents/_memory/__init__.py
+  s_27878fb276b595::t_a029f1dbb6375e 1-13
+vendor/managed-deepagents-sdk/packages/pypi/src/managed_deepagents/_memory/async_util.py
+  s_27878fb276b595::t_ec1cf403701df1 1-56
+vendor/managed-deepagents-sdk/packages/pypi/src/managed_deepagents/_memory/context_io.py
+  s_27878fb276b595::t_bbf459c3de8cdd 1-52
+vendor/managed-deepagents-sdk/packages/pypi/src/managed_deepagents/_memory/deps.py
+  s_27878fb276b595::t_a366b75f6d98b3 1-27
+vendor/managed-deepagents-sdk/packages/pypi/src/managed_deepagents/_memory/layers.py
+  s_27878fb276b595::t_8015a8be5ad76b 1-157
+vendor/managed-deepagents-sdk/packages/pypi/src/managed_deepagents/_memory/mounts.py
+  s_27878fb276b595::t_034c9a5a29dd2a 1-471
+vendor/managed-deepagents-sdk/packages/pypi/src/managed_deepagents/_memory/paths.py
+  s_27878fb276b595::t_ebde4d9da009ac 1-23
+vendor/managed-deepagents-sdk/packages/pypi/src/managed_deepagents/_memory/policy.py
+  s_27878fb276b595::t_18b89efb86846e 1-155
+vendor/managed-deepagents-sdk/packages/pypi/src/managed_deepagents/_memory/selected_skills.py
+  s_27878fb276b595::t_3b067ddd90eeda 1-507
+vendor/managed-deepagents-sdk/packages/pypi/src/managed_deepagents/_memory/types.py
+  s_27878fb276b595::t_22a40b5e69ddcd 1-13
+vendor/managed-deepagents-sdk/packages/pypi/src/managed_deepagents/_memory/user_memory.py
+  s_27878fb276b595::t_0650514c5fbe25 1-194
+vendor/managed-deepagents-sdk/packages/pypi/src/managed_deepagents/_memory_instructions.py
+  s_27878fb276b595::t_8048df2c5997c0 1-170
+vendor/managed-deepagents-sdk/packages/pypi/src/managed_deepagents/_run_input.py
+  s_27878fb276b595::t_36659e21d92400 1-301
+vendor/managed-deepagents-sdk/packages/pypi/src/managed_deepagents/_runtime_schedules.py
+  s_27878fb276b595::t_8741c5ac2fcf68 1-681
+vendor/managed-deepagents-sdk/packages/pypi/src/managed_deepagents/_sandbox_proxy.py
+  s_27878fb276b595::t_39e2edd1d91a55 1-253
+vendor/managed-deepagents-sdk/packages/pypi/src/managed_deepagents/_schedule_auth.py
+  s_27878fb276b595::t_4aa4d0e155582a 1-390
+vendor/managed-deepagents-sdk/packages/pypi/src/managed_deepagents/_schedule_channel.py
+  s_27878fb276b595::t_1f6232e1ae89d7 1,3,5,7,9-10,13-17,20-27,29-30
+vendor/managed-deepagents-sdk/packages/pypi/src/managed_deepagents/_schedule_time.py
+  s_27878fb276b595::t_adaa065fee1fc7 1-102
+vendor/managed-deepagents-sdk/packages/pypi/src/managed_deepagents/_static_entry.py
+  s_27878fb276b595::t_21bd6d59b5f4d5 1-17
+vendor/managed-deepagents-sdk/packages/pypi/src/managed_deepagents/_telemetry/__init__.py
+  s_27878fb276b595::t_6f7ab548ce0a68 1-49
+vendor/managed-deepagents-sdk/packages/pypi/src/managed_deepagents/_telemetry/background.py
+  s_27878fb276b595::t_c5c89f2860f6e5 1-67
+vendor/managed-deepagents-sdk/packages/pypi/src/managed_deepagents/_telemetry/client.py
+  s_27878fb276b595::t_47767749c0ebb6 1-25
+vendor/managed-deepagents-sdk/packages/pypi/src/managed_deepagents/_telemetry/event.py
+  s_27878fb276b595::t_2993347218e661 1-16
+vendor/managed-deepagents-sdk/packages/pypi/src/managed_deepagents/_telemetry/gates.py
+  s_27878fb276b595::t_de9742aebcb1e1 1-21
+vendor/managed-deepagents-sdk/packages/pypi/src/managed_deepagents/_telemetry/metadata.py
+  s_27878fb276b595::t_f4c3d236c0ee2b 1-142
+vendor/managed-deepagents-sdk/packages/pypi/src/managed_deepagents/_telemetry/run.py
+  s_27878fb276b595::t_f44b29ba7bff1b 1-203
+vendor/managed-deepagents-sdk/packages/pypi/src/managed_deepagents/_telemetry/run_wrapper.py
+  s_27878fb276b595::t_c4125af2258f4c 1-128
+vendor/managed-deepagents-sdk/packages/pypi/src/managed_deepagents/_telemetry/transport/__init__.py
+  s_27878fb276b595::t_d9b93964995444 1-13
+vendor/managed-deepagents-sdk/packages/pypi/src/managed_deepagents/_telemetry/transport/posthog.py
+  s_27878fb276b595::t_444aba7981c84a 1-115
+vendor/managed-deepagents-sdk/packages/pypi/src/managed_deepagents/_telemetry/transport/types.py
+  s_27878fb276b595::t_22f8c8fdc98263 1-12
+vendor/managed-deepagents-sdk/packages/pypi/src/managed_deepagents/_validated_token.py
+  s_27878fb276b595::t_323f8ba727779f 1-481
+vendor/managed-deepagents-sdk/packages/pypi/src/managed_deepagents/agent_entry.py
+  s_27878fb276b595::t_6282c5a21a54f8 1,3,5-6,8,10-11,13-17,19
+vendor/managed-deepagents-sdk/packages/pypi/src/managed_deepagents/browser.py
+  s_27878fb276b595::t_8c5443a79cdbcd 1-810
+vendor/managed-deepagents-sdk/packages/pypi/src/managed_deepagents/define_browser.py
+  s_27878fb276b595::t_6823a4fb171045 1-53
+vendor/managed-deepagents-sdk/packages/pypi/src/managed_deepagents/define_deep_agent.py
+  s_27878fb276b595::t_329f4b5f7583ab 1-226
+vendor/managed-deepagents-sdk/packages/pypi/src/managed_deepagents/define_memory.py
+  s_27878fb276b595::t_562f684f91ebd6 1-173
+vendor/managed-deepagents-sdk/packages/pypi/src/managed_deepagents/identity/__init__.py
+  s_27878fb276b595::t_61eacc0c312811 1-510
+vendor/managed-deepagents-sdk/packages/pypi/src/managed_deepagents/identity/claims.py
+  s_27878fb276b595::t_6cbcadc57d9385 1-34
+vendor/managed-deepagents-sdk/packages/pypi/src/managed_deepagents/identity/options.py
+  s_27878fb276b595::t_473cd54863a1cc 1-72
+vendor/managed-deepagents-sdk/packages/pypi/src/managed_deepagents/identity/supabase.py
+  s_27878fb276b595::t_7b5cfd5328f3f4 1-175
+vendor/managed-deepagents-sdk/packages/pypi/src/managed_deepagents/namespaces.py
+  s_27878fb276b595::t_2a816d20d07788 1-169
+vendor/managed-deepagents-sdk/packages/pypi/src/managed_deepagents/py.typed
+  s_27878fb276b595::t_38ff751fec111d 1
+vendor/managed-deepagents-sdk/packages/pypi/src/managed_deepagents/run_context.py
+  s_27878fb276b595::t_265b77b18cfcfe 1-126
+vendor/managed-deepagents-sdk/packages/pypi/src/managed_deepagents/runtime.py
+  s_27878fb276b595::t_6c5f432b842060 1-2925
+vendor/managed-deepagents-sdk/packages/pypi/src/managed_deepagents/sandbox.py
+  s_27878fb276b595::t_5882d229bbcb13 1-242
+vendor/managed-deepagents-sdk/packages/pypi/src/managed_deepagents/schedules.py
+  s_27878fb276b595::t_cbce167420859e 1-178
+vendor/managed-deepagents-sdk/packages/pypi/uv.lock
+  s_27878fb276b595::t_55db4d5d641719 1-2838
+vendor/managed-deepagents-sdk/rustfmt.toml
+  s_27878fb276b595::t_d5c02725a60587 1-5
+vendor/mda-changes/2026-10-20-drop-runtime-uv-source.md
+  s_27878fb276b595::t_78b7b7ca83df44 1-17
+vendor/mda-changes/2026-10-20-mda-dev-box-names.md
+  s_27878fb276b595::t_dd9c008bdb783e 1-17
+vendor/mda-changes/2026-10-20-open-and-replace-sandbox.md
+  s_27878fb276b595::t_00e1e99a08819b 1-18
+vendor/mda-changes/2026-10-20-openswe-create-fields.md
+  s_27878fb276b595::t_cf83cc5c74dbeb 1-17
+vendor/mda-changes/2026-10-20-openswe-no-manage-proxy.md
+  s_27878fb276b595::t_b857465af2500a 1-25
+vendor/mda-changes/2026-10-20-openswe-per-thread.md
+  s_27878fb276b595::t_5759e848a40f73 1-17
+vendor/mda-changes/2026-10-20-openswe-thread-id.md
+  s_27878fb276b595::t_08cc06e566c0ff 1-17
+vendor/mda-changes/2026-10-21-browser-name.md
+  s_27878fb276b595::t_32da6687d2f674 1-17
+vendor/mda-changes/2026-10-21-sdk-main-on-mda-0-10.md
+  s_27878fb276b595::t_c8ce6725054d7c 1-24
+vendor/mda-changes/README.md
+  s_27878fb276b595::t_c26f110baaf9c4 1,3,5-7,9,11-12,14
+vendor/mda-upstream-prs
+  s_27878fb276b595::t_97dccf66d92c3a 1-2
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "a7f76f3bc7a822adad5e2b7b5fe9c0a4f12b07b3",
+  "prompts": {},
+  "sessions": {
+    "s_27878fb276b595": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "45ee8f61-55f2-484d-a39a-c3b1cad86d8d",
+        "model": "claude-sonnet-5-5"
+      },
+      "human_author": "Kiewan Villatel <kiewan@langchain.dev>"
+    }
+  }
+}
