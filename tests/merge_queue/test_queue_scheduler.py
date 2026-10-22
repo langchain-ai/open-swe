@@ -51,7 +51,8 @@ async def test_stalled_admission_does_not_consume_reconciliation_window(
     assert cancelled.is_set()
 
 
-async def test_cleanup_reuses_one_sandbox_and_continues_past_a_replaced_ref() -> None:
+@pytest.mark.parametrize("failure", ["replaced_ref", "stalled"])
+async def test_cleanup_reuses_one_sandbox_and_preserves_unfinished_refs(failure: str) -> None:
     candidate = Candidate(
         repository="https://github.com/acme/widgets.git",
         branch="main",
@@ -76,6 +77,8 @@ async def test_cleanup_reuses_one_sandbox_and_continues_past_a_replaced_ref() ->
 
     async def delete(batch_id: UUID, sha: str) -> None:
         if batch_id == batches[1].id:
+            if failure == "stalled":
+                await asyncio.Event().wait()
             raise ValueError("Candidate ref changed; refusing deletion")
 
     git.delete = AsyncMock(side_effect=delete)
@@ -88,9 +91,9 @@ async def test_cleanup_reuses_one_sandbox_and_continues_past_a_replaced_ref() ->
         yield git
 
     repo.candidate_git = candidate_git
-    await scheduler.BatchScheduler(queue, repo, QueuePolicy(checks={})).reconcile(Lease(uuid7(), 1))
+    await scheduler.BatchScheduler(queue, repo, QueuePolicy(checks={})).cleanup(
+        Lease(uuid7(), 1), seconds=0.1
+    )
     assert sandboxes == 1
-    assert {call.args[0] for call in queue.candidate_deleted.await_args_list} == {
-        batches[0].id,
-        batches[2].id,
-    }
+    deleted = {call.args[0] for call in queue.candidate_deleted.await_args_list}
+    assert deleted == ({batches[0].id} if failure == "stalled" else {batches[0].id, batches[2].id})

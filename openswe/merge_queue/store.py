@@ -567,9 +567,14 @@ class MergeQueue(Record):
         await session.flush()
         return evidence
 
-    async def validation_work(
+    async def advance_validation(
         self, policy: QueuePolicy, lease: Lease, *, start: UUID | None = None
     ) -> ValidationWork | None:
+        """Expire stale state and return pending work, atomically starting an attempt if requested.
+
+        Only the call that creates an attempt returns dispatch=True; subsequent calls
+        resume discovery. Inactive, expired, or completed work returns None.
+        """
         async with self._locked(lease) as (session, queue, now):
             batch = await session.scalar(
                 select(Batch).where(Batch.queue_id == self.id, Batch.state == "active")

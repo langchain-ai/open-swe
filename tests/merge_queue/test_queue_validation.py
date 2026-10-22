@@ -52,7 +52,7 @@ def validation() -> tuple[CandidateValidation, ValidationWork, Lease]:
     )
     queue = Mock(spec=MergeQueue)
     queue.repository_name = AsyncMock(return_value=request.repository)
-    queue.validation_work = AsyncMock(return_value=work)
+    queue.advance_validation = AsyncMock(return_value=work)
     queue.bind_validation_run = AsyncMock()
     queue.finish_validation = AsyncMock(return_value=True)
     queue.invalidate = AsyncMock()
@@ -139,7 +139,7 @@ async def test_definite_dispatch_rejection_records_failure_immediately(
     controller, work, lease = validation
     monkeypatch.setattr(
         controller.queue,
-        "validation_work",
+        "advance_validation",
         AsyncMock(
             side_effect=[
                 ValidationWork(work.batch),

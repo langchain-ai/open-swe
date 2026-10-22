@@ -52,14 +52,16 @@ class QueueRuntime:
         try:
             async with asyncio.timeout(240):
                 # Expire saved budgets even when GitHub or admission is unavailable.
-                await queue.validation_work(policy, lease)
+                await queue.advance_validation(policy, lease)
                 async with self.open_repo(queue) as repo:
-                    await BatchScheduler(queue, repo, policy).reconcile(
-                        lease, seconds=180, retention_days=self.retention_days
-                    )
-                    await queue.renew(lease, timedelta(seconds=60))
-                    async with asyncio.timeout(45):
-                        await CandidateValidation(queue, repo, policy).reconcile(lease)
+                    scheduler = BatchScheduler(queue, repo, policy)
+                    try:
+                        await scheduler.reconcile(lease, seconds=180)
+                        await queue.renew(lease, timedelta(seconds=60))
+                        async with asyncio.timeout(45):
+                            await CandidateValidation(queue, repo, policy).reconcile(lease)
+                    finally:
+                        await scheduler.cleanup(lease, retention_days=self.retention_days)
         finally:
             try:
                 async with asyncio.timeout(10):

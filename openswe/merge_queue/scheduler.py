@@ -23,11 +23,9 @@ class BatchScheduler:
         self.queue, self.repo, self.policy = queue, repo, policy
         self.admission = AdmissionReader(repo, queue.target_branch, policy)
 
-    async def reconcile(
-        self, lease: Lease, *, seconds: float = 240, retention_days: int = 90
-    ) -> None:
-        if not 0 < seconds <= 600 or not 7 <= retention_days <= 365:
-            raise ValueError("Invalid reconciliation or retention limit")
+    async def reconcile(self, lease: Lease, *, seconds: float = 240) -> None:
+        if not 0 < seconds <= 600:
+            raise ValueError("Invalid reconciliation limit")
         if (await self.queue.repository_name(lease)).lower() != self.repo.full_name.lower():
             raise ValueError("GitHub client does not belong to this queue")
 
@@ -36,39 +34,32 @@ class BatchScheduler:
                 await self.queue.renew(lease, timedelta(seconds=60))
                 await asyncio.sleep(20)
 
-        deadline = asyncio.get_running_loop().time() + seconds
-
         async def work() -> None:
-            try:
-                admission_deadline = asyncio.get_running_loop().time() + min(
-                    seconds / 2, ADMISSION_MAX_AGE.total_seconds() / 2
+            admission_deadline = asyncio.get_running_loop().time() + min(
+                seconds / 2, ADMISSION_MAX_AGE.total_seconds() / 2
+            )
+            entries = await self.queue.entries(lease)
+            entries.sort(
+                key=lambda entry: (
+                    entry.request.state != "batched",
+                    entry.request.last_checked_at or datetime.min.replace(tzinfo=UTC),
+                    entry.request.created_at,
                 )
-                entries = await self.queue.entries(lease)
-                entries.sort(
-                    key=lambda entry: (
-                        entry.request.state != "batched",
-                        entry.request.last_checked_at or datetime.min.replace(tzinfo=UTC),
-                        entry.request.created_at,
+            )
+            for entry in entries[:100]:
+                remaining = admission_deadline - asyncio.get_running_loop().time()
+                if remaining <= 0:
+                    break
+                try:
+                    async with asyncio.timeout(remaining):
+                        await self._refresh(entry, lease)
+                except TimeoutError:
+                    logger.info(
+                        "Admission reconciliation reached its time limit",
+                        extra={"queue_id": str(self.queue.id)},
                     )
-                )
-                for entry in entries[:100]:
-                    remaining = admission_deadline - asyncio.get_running_loop().time()
-                    if remaining <= 0:
-                        break
-                    try:
-                        async with asyncio.timeout(remaining):
-                            await self._refresh(entry, lease)
-                    except TimeoutError:
-                        logger.info(
-                            "Admission reconciliation reached its time limit",
-                            extra={"queue_id": str(self.queue.id)},
-                        )
-                        break
-                await self._schedule(lease)
-            finally:
-                if asyncio.get_running_loop().time() < deadline:
-                    async with asyncio.timeout_at(deadline):
-                        await self._cleanup(lease, retention_days)
+                    break
+            await self._schedule(lease)
 
         async with asyncio.timeout(seconds):
             renewal = asyncio.create_task(heartbeat())
@@ -187,27 +178,33 @@ class BatchScheduler:
                 if await self._current(batch, lease):
                     await self.queue.save_candidate(batch.id, candidate, lease, published=True)
 
-    async def _cleanup(self, lease: Lease, retention_days: int) -> None:
-        cutoff = datetime.now(UTC) - timedelta(days=retention_days)
-        batches = await self.queue.expired_candidates(cutoff, lease)
-        if not batches:
-            return
+    async def cleanup(self, lease: Lease, *, retention_days: int = 90, seconds: float = 10) -> None:
+        """Bound ref maintenance separately so it can run after validation advances."""
+        if not 7 <= retention_days <= 365 or not 0 < seconds <= 30:
+            raise ValueError("Invalid cleanup or retention limit")
+        if (await self.queue.repository_name(lease)).lower() != self.repo.full_name.lower():
+            raise ValueError("GitHub client does not belong to this queue")
         try:
-            async with self.repo.candidate_git() as git:
-                for batch in batches:
-                    await self.queue.renew(lease, timedelta(seconds=60))
-                    try:
-                        candidate = Candidate.model_validate(batch.candidate)
-                        await git.delete(batch.id, candidate.sha)
-                        await self.queue.candidate_deleted(batch.id, candidate.sha, lease)
-                    except LeaseLost:
-                        raise
-                    except Exception:
-                        logger.warning(
-                            "Candidate ref cleanup failed",
-                            extra={"batch_id": str(batch.id)},
-                            exc_info=True,
-                        )
+            async with asyncio.timeout(seconds):
+                await self.queue.renew(lease, timedelta(seconds=60))
+                cutoff = datetime.now(UTC) - timedelta(days=retention_days)
+                batches = await self.queue.expired_candidates(cutoff, lease)
+                if not batches:
+                    return
+                async with self.repo.candidate_git() as git:
+                    for batch in batches:
+                        try:
+                            candidate = Candidate.model_validate(batch.candidate)
+                            await git.delete(batch.id, candidate.sha)
+                            await self.queue.candidate_deleted(batch.id, candidate.sha, lease)
+                        except LeaseLost:
+                            raise
+                        except Exception:
+                            logger.warning(
+                                "Candidate ref cleanup failed",
+                                extra={"batch_id": str(batch.id)},
+                                exc_info=True,
+                            )
         except LeaseLost:
             raise
         except Exception:

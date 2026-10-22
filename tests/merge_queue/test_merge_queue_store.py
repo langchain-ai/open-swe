@@ -7,15 +7,16 @@ from datetime import UTC, datetime, timedelta
 from unittest.mock import AsyncMock, Mock
 from uuid import UUID, uuid7
 
+import httpx2
 import pytest
 from sqlalchemy import func, select, update
 from sqlalchemy.exc import IntegrityError
 
 from openswe.database import postgres
-from openswe.github.http import RepoClient
+from openswe.github.http import GitHubError, RepoClient
 from openswe.github.pull_requests import PullRequest
 from openswe.github.repositories import Repository
-from openswe.merge_queue.admission import Admission, QueuePolicy
+from openswe.merge_queue.admission import Admission, AdmissionReader, QueuePolicy
 from openswe.merge_queue.git import Candidate, CandidateGit, PullHead, candidate_ref
 from openswe.merge_queue.models import (
     Attempt,
@@ -724,13 +725,13 @@ async def test_validation_intent_is_atomic_and_survives_restart_and_pause(
         await session.execute(
             update(MergeQueue).where(MergeQueue.id == queue.id).values(paused=True)
         )
-    assert await queue.validation_work(policy, lease, start=batch.id) is None
+    assert await queue.advance_validation(policy, lease, start=batch.id) is None
     async with postgres.session() as session:
         await session.execute(
             update(MergeQueue).where(MergeQueue.id == queue.id).values(paused=False)
         )
     results = await asyncio.gather(
-        *(queue.validation_work(policy, lease, start=batch.id) for _ in range(2))
+        *(queue.advance_validation(policy, lease, start=batch.id) for _ in range(2))
     )
     first, replay = results
     assert first is not None and replay is not None
@@ -748,7 +749,7 @@ async def test_validation_intent_is_atomic_and_survives_restart_and_pause(
         await session.execute(
             update(MergeQueue).where(MergeQueue.id == queue.id).values(paused=True)
         )
-    recovered = await restored.validation_work(policy, replacement, start=batch.id)
+    recovered = await restored.advance_validation(policy, replacement, start=batch.id)
     assert recovered is not None and not recovered.dispatch
     assert recovered.attempt is not None and recovered.attempt.deadline == deadline
     await restored.bind_validation_run(first.attempt.id, 42, replacement)
@@ -766,7 +767,7 @@ async def test_validation_cannot_revive_stale_work(
     queue: MergeQueue, validation_batch: tuple[Lease, Batch, QueuePolicy], interruption: str
 ) -> None:
     lease, batch, policy = validation_batch
-    work = await queue.validation_work(policy, lease, start=batch.id)
+    work = await queue.advance_validation(policy, lease, start=batch.id)
     assert work is not None and work.attempt is not None and work.request is not None
     if interruption == "timeout":
         async with postgres.session() as session:
@@ -779,7 +780,7 @@ async def test_validation_cannot_revive_stale_work(
         await queue.withdraw((await queue.history(batch.id)).members[0].request_id)
     else:
         policy = policy.model_copy(update={"validation": ValidationPolicy(dispatch_actor_id=456)})
-    assert await queue.validation_work(policy, lease, start=batch.id) is None
+    assert await queue.advance_validation(policy, lease, start=batch.id) is None
     assert not await queue.finish_validation(
         work.attempt.id, work.request.model_dump(mode="json"), lease, succeeded=True
     )
@@ -792,7 +793,7 @@ async def test_validation_result_is_bound_to_saved_request_and_run(
     queue: MergeQueue, validation_batch: tuple[Lease, Batch, QueuePolicy]
 ) -> None:
     lease, batch, policy = validation_batch
-    work = await queue.validation_work(policy, lease, start=batch.id)
+    work = await queue.advance_validation(policy, lease, start=batch.id)
     assert work is not None and work.attempt is not None and work.request is not None
     report = {
         **work.request.model_dump(mode="json"),
@@ -813,14 +814,14 @@ async def test_validation_result_is_bound_to_saved_request_and_run(
     history = await queue.history(batch.id)
     assert history.attempts[0].state == "succeeded" and history.batch.state == "active"
     assert history.evidence[-1].reference["coverage"] == "smoke"
-    assert await queue.validation_work(policy, lease, start=batch.id) is None
+    assert await queue.advance_validation(policy, lease, start=batch.id) is None
 
 
 async def test_validation_job_expires_saved_budget_during_github_outage(
     queue: MergeQueue, validation_batch: tuple[Lease, Batch, QueuePolicy]
 ) -> None:
     lease, batch, policy = validation_batch
-    work = await queue.validation_work(policy, lease, start=batch.id)
+    work = await queue.advance_validation(policy, lease, start=batch.id)
     assert work is not None and work.attempt is not None
     await queue.release(lease)
     async with postgres.session() as session:
@@ -841,3 +842,71 @@ async def test_validation_job_expires_saved_budget_during_github_outage(
     history = await queue.history(batch.id)
     assert len(history.attempts) == 1 and history.attempts[0].state == "timed_out"
     assert history.batch.state == "active"
+
+
+async def test_validation_records_result_before_failed_ref_cleanup(
+    queue: MergeQueue,
+    validation_batch: tuple[Lease, Batch, QueuePolicy],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    lease, expired, policy = validation_batch
+    candidate = Candidate.model_validate(expired.candidate)
+    await queue.invalidate(expired.id, lease)
+    async with postgres.session() as session:
+        await session.execute(
+            update(Batch)
+            .where(Batch.id == expired.id)
+            .values(finished_at=datetime.now(UTC) - timedelta(days=91))
+        )
+    current = await queue.schedule(candidate.base_sha, policy, lease)
+    assert current is not None
+    await queue.save_candidate(current.id, candidate, lease)
+    await queue.save_candidate(current.id, candidate, lease, published=True)
+    requests = {entry.number: entry.request for entry in await queue.entries(lease)}
+    await queue.release(lease)
+
+    repo = Mock(spec=RepoClient, full_name="acme/widgets")
+    repo.branch_sha = AsyncMock(return_value=candidate.base_sha)
+    repo.ref_sha = AsyncMock(return_value=candidate.sha)
+    repo.dispatch_validation = AsyncMock(
+        side_effect=GitHubError(
+            httpx2.Response(403, request=httpx2.Request("POST", "https://api.github.com"))
+        )
+    )
+
+    def pull(number: int) -> Mock:
+        return Mock(
+            queue_state=AsyncMock(
+                return_value=Mock(head=requests[number].head_sha, merged=False, state="OPEN")
+            )
+        )
+
+    repo.pull_request.side_effect = pull
+    monkeypatch.setattr(
+        AdmissionReader,
+        "check",
+        AsyncMock(
+            side_effect=lambda number, head, dependencies: admission(requests[number], policy)
+        ),
+    )
+    states_at_cleanup: list[str] = []
+
+    @asynccontextmanager
+    async def unavailable_sandbox() -> AsyncIterator[CandidateGit]:
+        states_at_cleanup.extend(
+            attempt.state for attempt in (await queue.history(current.id)).attempts
+        )
+        raise TimeoutError("Cleanup sandbox unavailable")
+        yield  # pragma: no cover
+
+    repo.candidate_git = unavailable_sandbox
+
+    @asynccontextmanager
+    async def open_repo(_queue: MergeQueue) -> AsyncIterator[RepoClient]:
+        yield repo
+
+    await QueueRuntime({queue.id: policy}, open_repo).reconcile(
+        QueueJob(queue_id=queue.id, workspace_id=queue.workspace_id)
+    )
+    assert states_at_cleanup == ["failed"]
+    assert (await queue.history(expired.id)).batch.ref_deleted_at is None
