@@ -391,6 +391,58 @@ async def test_mda_catalog_leaves_integrations_and_code_mode_to_mda(
     assert catalog["also_from_code"] == ["read_file"]
 
 
+@pytest.mark.parametrize("unknown", [False, True])
+def test_mda_runs_box_tools_itself_only_with_tool_middleware_it_applies(unknown: bool) -> None:
+    """Tool-call middleware MDA does not know keeps every call here, where it sees it."""
+    from collections.abc import Awaitable, Callable
+
+    from langchain.agents.middleware.types import AgentMiddleware
+    from langchain_core.messages import ToolMessage
+    from langchain_core.tools import StructuredTool
+    from langgraph.prebuilt.tool_node import ToolCallRequest
+    from langgraph.types import Command
+
+    from openswe.middleware.tool_error_handler import ToolErrorMiddleware
+    from openswe.middleware.workflow_push_guard import WorkflowPushGuardMiddleware
+    from openswe.remote_runtime.graph import RunSession
+    from openswe.sandboxes.tool_runtime import ToolSurface
+
+    class Unknown(AgentMiddleware):
+        async def awrap_tool_call(
+            self,
+            request: ToolCallRequest,
+            handler: Callable[[ToolCallRequest], Awaitable[ToolMessage | Command]],
+        ) -> ToolMessage | Command:
+            return await handler(request)
+
+    def tool(name: str) -> StructuredTool:
+        async def run() -> str:
+            return name
+
+        return StructuredTool.from_function(coroutine=run, name=name, description=name)
+
+    surface = ToolSurface(
+        tools={name: tool(name) for name in ("execute", "read_file", "slack_reply")},
+        middleware=[
+            ToolErrorMiddleware(),
+            WorkflowPushGuardMiddleware(),
+            *([Unknown()] if unknown else []),
+        ],
+        backend_paths=("/skills/",),
+    )
+
+    in_box = RunSession(surface, {}, None, started_here=True).box_tools()
+
+    if unknown:
+        assert in_box == {"tools": [], "checks": [], "backend_paths": []}
+    else:
+        assert in_box == {
+            "tools": ["execute", "read_file"],
+            "checks": ["push_guards", "tool_errors"],
+            "backend_paths": ["/skills/"],
+        }
+
+
 async def _hook_status(
     monkeypatch: pytest.MonkeyPatch, token: str, hook: str
 ) -> tuple[int, list[tuple[str, str]]]:
