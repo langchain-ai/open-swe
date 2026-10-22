@@ -11,6 +11,7 @@ from langchain_core.language_models.fake_chat_models import FakeListChatModel
 from langchain_core.messages import AIMessage, BaseMessage, HumanMessage, SystemMessage, ToolMessage
 from langchain_core.runnables import RunnableConfig
 from langgraph.checkpoint.memory import InMemorySaver
+from langgraph.runtime import Runtime
 from langgraph.types import StateSnapshot
 
 from openswe.input_messages import message_sender_id
@@ -64,6 +65,37 @@ def _assert_nudged(result: dict[str, Any] | None, attempt: int) -> list[HumanMes
 
 
 class TestRequireUserReplyMiddleware:
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize("previous_surface", [None, WEB_REPLY_SURFACE])
+    async def test_remote_turn_initializes_guard_before_a_blank_final_answer(
+        self, previous_surface: str | None
+    ) -> None:
+        from openswe.remote_runtime.graph import RunSession
+        from openswe.sandboxes.tool_runtime import ToolSurface
+
+        session = RunSession(ToolSurface(middleware=[_middleware()]), {}, None, started_here=True)
+        state: dict[str, object] = {
+            "messages": [HumanMessage(content="dig it up")],
+            "reply_surface": previous_surface,
+            "reply_nudges": 2,
+        }
+        prepared = await session.run_phase("before_agent", state, Runtime())
+        state.update(prepared.update)
+        assert state["reply_surface"] == SLACK_REPLY_SURFACE
+        assert state["reply_nudges"] == 0
+        state["messages"] = [
+            HumanMessage(content="dig it up"),
+            _reply("progress", "progress"),
+            _result("progress"),
+            AIMessage(content=""),
+        ]
+
+        result = await session.run_phase("after_model", state, Runtime())
+
+        assert result.jump_to == "model"
+        assert result.update["reply_nudges"] == 1
+        assert result.messages
+
     @pytest.mark.asyncio
     async def test_reinvokes_when_the_turn_ends_with_undelivered_text(self) -> None:
         result = await _middleware().aafter_model(
@@ -315,12 +347,13 @@ class TestRequireUserReplyMiddleware:
         assert posted.await_args is not None
         assert posted.await_args.args[:2] == ("all good", "final")
 
-    def test_each_run_resolves_its_own_surface(self) -> None:
+    @pytest.mark.asyncio
+    async def test_each_run_resolves_its_own_surface(self) -> None:
         middleware = RequireUserReplyMiddleware(
             TOOL, NO_REPLY_TOOL, initial_surface=WEB_REPLY_SURFACE
         )
 
-        assert middleware.before_agent(_state(), _runtime()) == {
+        assert await middleware.abefore_agent(_state(), _runtime()) == {
             "reply_surface": WEB_REPLY_SURFACE,
             "reply_nudges": 0,
         }
