@@ -110,7 +110,13 @@ def _route(spec: Mapping[str, object], graphs: Mapping[str, str]) -> dict[str, o
             '`"async": True` so `mda` can build it.'
         )
         raise ValueError(msg)
-    return {"name": name, "description": spec.get("description", ""), "graph_id": graph_id}
+    routed: dict[str, object] = {
+        "name": name,
+        "description": spec.get("description", ""),
+        "graph_id": graph_id,
+    }
+    routed.update({key: spec[key] for key in ("webhook", "notify_parent") if key in spec})
+    return routed
 
 
 def _subagents(definition: DeepAgentDefinition) -> Sequence[object]:
