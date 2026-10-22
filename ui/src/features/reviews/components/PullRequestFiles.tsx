@@ -19,6 +19,7 @@ import type {
   SelectedLineRange,
 } from "@pierre/diffs"
 
+import { SubmitShortcut } from "@/components/SubmitShortcut"
 import type {
   PreviewFile,
   PullRequestPreview,
@@ -534,9 +535,12 @@ function Composer({
             <Button
               size="xs"
               disabled={empty}
+              aria-label="Add to agent batch"
+              aria-keyshortcuts="Meta+Enter Control+Enter"
               onClick={() => onSend("agent", body)}
             >
               Add to agent batch
+              <SubmitShortcut />
             </Button>
           </div>
         </div>

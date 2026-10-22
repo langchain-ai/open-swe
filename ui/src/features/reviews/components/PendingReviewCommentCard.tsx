@@ -3,6 +3,7 @@ import { Button } from "@langchain/macaw-components/Button"
 import { Textarea } from "@langchain/macaw-components/Textarea"
 import { useRef } from "react"
 
+import { SubmitShortcut } from "@/components/SubmitShortcut"
 import type { PendingReviewComment } from "@/lib/api"
 import { Markdown } from "@/features/agents/components/chat/Markdown"
 import { usePendingReview } from "@/features/reviews/lib/usePendingReview"
@@ -107,8 +108,15 @@ export function PendingReviewCommentCard({
               >
                 Cancel
               </Button>
-              <Button size="xs" disabled={busy || !edit.trim()} onClick={save}>
+              <Button
+                size="xs"
+                aria-label={pending.update.isPending ? "Saving…" : "Save"}
+                aria-keyshortcuts="Meta+Enter Control+Enter"
+                disabled={busy || !edit.trim()}
+                onClick={save}
+              >
                 {pending.update.isPending ? "Saving…" : "Save"}
+                {!busy && <SubmitShortcut />}
               </Button>
             </div>
           </>
