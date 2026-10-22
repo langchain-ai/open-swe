@@ -201,6 +201,7 @@ class OpenPullRequest(BaseModel):
     head_ref: str | None = None
     status_available: bool = False
     ci: CheckState = "unknown"
+    required_checks_passing: bool | None = None
     review_decision: ReviewDecision | None = None
     reviewers: list[PullRequestReviewer] | None = None
     review_required: bool = False
@@ -899,10 +900,23 @@ class PullRequestClient:
         )
         base = pull.get("base")
         base_ref = _as_optional_str(base.get("ref")) if isinstance(base, Mapping) else None
-        # A check gated on `needs:` has no run until its upstream jobs finish.
-        if base_ref is not None and result.merge_state == "blocked" and not pending:
-            required = await RequiredCheck.for_branch(self.repo, base_ref)
+        if base_ref is not None:
+            required = await RequiredCheck.for_branch(
+                self.repo, base_ref, include_review_checks=True
+            )
             if required is not None:
+                passing_runs = [
+                    run
+                    for run in runs
+                    if run.get("status") == "completed"
+                    and run.get("conclusion") in {"success", "neutral", "skipped"}
+                ]
+                passing_statuses = [
+                    status for status in statuses if status.get("state") == "success"
+                ]
+                result.required_checks_passing = all(
+                    check.reported_by(passing_runs, passing_statuses) for check in required
+                )
                 result.missing_checks = unreported_required_checks(required, runs, statuses)
         return result
 
