@@ -62,6 +62,7 @@ from langgraph.config import get_config
 from langgraph.runtime import Runtime
 from pydantic import BaseModel, JsonValue, TypeAdapter, ValidationError
 
+from openswe.github.sandbox_access import READ_ONLY_REVIEW_PERMISSIONS
 from openswe.middleware.conversation_offloading import ConversationOffloadingMiddleware
 from openswe.middleware.model_selection import PersistedRoute, normalize_route
 from openswe.middleware.record_run_usage import RecordRunUsageMiddleware
@@ -358,12 +359,19 @@ class RunSession:
         if cfg.thread_id is not None and await self.sandbox() is not None:
             await bind_mda_sandbox(cfg.thread_id, sandbox_id, workspace_slug=cfg.workspace_slug)
 
-    async def reconnect_sandbox(self) -> None:
+    async def reconnect_sandbox(self, assistant_id: str) -> None:
         """Connect again to the thread's box, which MDA replaced with a fresh one."""
         cfg = RunConfig.from_config(self.config)
         if cfg.thread_id is None:
             raise ValueError("This run has no thread")
-        await reconnect_replaced_sandbox(cfg.thread_id, workspace_slug=cfg.workspace_slug)
+        reviewing = assistant_id in {"reviewer", "review-scout"}
+        repositories = [cfg.repo.full_name] if cfg.repo else []
+        await reconnect_replaced_sandbox(
+            cfg.thread_id,
+            workspace_slug=cfg.workspace_slug,
+            github_proxy_repositories=repositories if reviewing else None,
+            github_proxy_permissions=READ_ONLY_REVIEW_PERMISSIONS if reviewing else None,
+        )
 
     def start_models(self) -> RunModels:
         return RunModels(
@@ -606,7 +614,9 @@ class RemoteGraph:
             return {}
         if hook == "sandbox":
             session = await self.session(run, body.run_id)
-            await in_graph_context(session.config, lambda _runtime: session.reconnect_sandbox())
+            await in_graph_context(
+                session.config, lambda _runtime: session.reconnect_sandbox(run.assistant_id)
+            )
             return {}
         session = await self.session(run, body.run_id)
         if hook == "before_model":
