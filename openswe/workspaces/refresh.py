@@ -288,14 +288,16 @@ async def refresh_workspace(
         return {"status": "unsupported", "slug": slug, "error": str(exc)}
 
     base = record.ready_snapshot_id if kind == "update" else record.base_snapshot_id
-    # Only this run could have written its own marker, so reading it unlocked is safe.
+    # This job's own marker: its earlier claim wrote it, or queueing it did over a
+    # refresh that had already gone stale. Either way the builder it names is lost.
     interrupted = (
         run_id is not None
         and record.refresh_status == "refreshing"
         and record.refresh_run_id == run_id
     )
     context = {"workspace": slug, "refresh_kind": kind, "refresh_run_id": run_id}
-    if not await WORKSPACES.mark_refreshing(slug, kind, run_id=run_id):
+    attempt = await WORKSPACES.mark_refreshing(slug, kind, run_id=run_id)
+    if attempt is None:
         logger.info(
             "Refresh already running elsewhere",
             extra={
@@ -324,26 +326,24 @@ async def refresh_workspace(
     log = ""
     step = "boot"
     try:
-        await WORKSPACES.start_refresh_step(slug, "boot")
+        await attempt.start_step("boot")
         backend = await _create_builder_sandbox(record, base)
         sandbox_id = str(backend.id)
-        await WORKSPACES.finish_refresh_step(slug, "boot", "success")
+        await attempt.finish_step("boot", "success")
         # Published before the first script so a poll can tail the trace while it
         # runs; cleared when the refresh settles and the builder is released.
-        await WORKSPACES.mark_refresh_builder(slug, sandbox_id)
+        await attempt.publish_builder(sandbox_id)
         # Every script runs before the capture, so a snapshot only ships once the
         # whole of what produced it worked.
         for label, command, timeout in _scripts_to_run(record, kind):
             step = label
-            await WORKSPACES.start_refresh_step(slug, label, log_path=script_log_path(label))
+            await attempt.start_step(label, log_path=script_log_path(label))
             result = await backend.aexecute(command, timeout=timeout)
             log = f"{log}\n--- {label} script ---\n{result.output or ''}".strip()
             if result.exit_code != 0:
-                await WORKSPACES.finish_refresh_step(
-                    slug, label, "failed", exit_code=result.exit_code
-                )
+                await attempt.finish_step(label, "failed", exit_code=result.exit_code)
                 error = f"{label} script exited {result.exit_code}"
-                await WORKSPACES.mark_refresh_settled(slug, "failed", log=log, error=error)
+                await attempt.settle("failed", log=log, error=error)
                 return {
                     "status": "failed",
                     "slug": slug,
@@ -352,11 +352,11 @@ async def refresh_workspace(
                     "error": error,
                     "log": log,
                 }
-            await WORKSPACES.finish_refresh_step(slug, label, "success", exit_code=0)
+            await attempt.finish_step(label, "success", exit_code=0)
         step = "capture"
-        await WORKSPACES.start_refresh_step(slug, "capture")
+        await attempt.start_step("capture")
         await capture_workspace_snapshot(slug, sandbox_id, timeout=capture_timeout())
-        await WORKSPACES.finish_refresh_step(slug, "capture", "success")
+        await attempt.finish_step("capture", "success")
     except asyncio.CancelledError:
         # A shutdown cancels the job mid-refresh, past ``except Exception``. Settled here
         # so the record stops claiming a refresh nobody runs; a hard kill skips this,
@@ -365,18 +365,18 @@ async def refresh_workspace(
             "Refresh interrupted",
             extra={**context, "step": step, "sandbox_id": sandbox_id},
         )
-        await WORKSPACES.mark_refresh_settled(slug, "failed", log=log, error="interrupted")
+        await attempt.settle("failed", log=log, error="interrupted")
         raise
     except Exception as exc:
         logger.warning("Refresh failed", extra={**context, "step": step}, exc_info=True)
-        await WORKSPACES.mark_refresh_settled(slug, "failed", log=log, error=str(exc))
+        await attempt.settle("failed", log=log, error=str(exc))
         return {"status": "failed", "slug": slug, "error": str(exc), "log": log}
     finally:
         if sandbox_id:
             await _release_builder_sandbox(sandbox_id)
 
     elapsed = int((datetime.now(UTC) - started).total_seconds())
-    await WORKSPACES.mark_refresh_settled(slug, "success", log=log)
+    await attempt.settle("success", log=log)
     logger.info(
         "Refreshed workspace",
         extra={**context, "elapsed_seconds": elapsed},
