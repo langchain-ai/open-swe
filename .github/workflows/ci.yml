@@ -271,7 +271,7 @@ jobs:
             echo "agent_unit_tests=true" >> "$GITHUB_OUTPUT"
           fi
 
-          paths=(openswe mda ui tests/e2e package.json pnpm-lock.yaml pnpm-workspace.yaml pyproject.toml uv.lock langgraph.json Makefile .github/workflows/ci.yml)
+          paths=(openswe mda vendor/managed-deepagents-sdk ui tests/e2e package.json pnpm-lock.yaml pnpm-workspace.yaml pyproject.toml uv.lock langgraph.json Makefile .github/workflows/ci.yml)
           if git diff --quiet "$BASE_SHA" HEAD -- "${paths[@]}"; then
             echo "browser=false" >> "$GITHUB_OUTPUT"
           else
@@ -320,6 +320,13 @@ jobs:
         timeout-minutes: 5
         working-directory: mda
         run: uv sync --locked
+      - uses: dtolnay/rust-toolchain@29eef336d9b2848a0b548edc03f92a220660cdb8 # stable
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+        with:
+          workspaces: vendor/managed-deepagents-sdk
+      - name: Build the mda CLI
+        timeout-minutes: 15
+        run: make mda-cli
       - run: corepack enable
       # Chromium and the dashboard build are identical across the three shards
       # and change only with their own inputs, so all three restore them rather
@@ -391,6 +398,13 @@ jobs:
         timeout-minutes: 5
         working-directory: mda
         run: uv sync --locked
+      - uses: dtolnay/rust-toolchain@29eef336d9b2848a0b548edc03f92a220660cdb8 # stable
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+        with:
+          workspaces: vendor/managed-deepagents-sdk
+      - name: Build the mda CLI
+        timeout-minutes: 15
+        run: make mda-cli
       - run: corepack enable
       - name: Install workspace dependencies
         timeout-minutes: 5

@@ -58,7 +58,7 @@ it("saves the account preference and isolates it when the account changes", asyn
   )
   const rendered = render(view())
   const toggle = await screen.findByRole("switch", {
-    name: /Assistant UI \(experimental\)/,
+    name: "Assistant UI",
   })
   await waitFor(() => expect(toggle.getAttribute("aria-checked")).toBe("true"))
   fireEvent.click(toggle)

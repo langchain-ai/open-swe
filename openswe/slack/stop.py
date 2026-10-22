@@ -6,6 +6,7 @@ from datetime import UTC, datetime
 from functools import partial
 from typing import Any
 
+from fastapi import HTTPException
 from langgraph_sdk import get_client
 from langgraph_sdk.client import LangGraphClient
 
@@ -264,19 +265,23 @@ async def _process_agent_session_stopped(
             return
         if not await claim_slack_event(event_id):
             return
-        await cancel_dashboard_thread(
-            thread_id,
-            user.github_login,
-            email=user.email,
-            on_interrupted=partial(release_slack_location_status, channel_id, thread_ts),
-        )
-        follow_ups = await client.runs.list(thread_id, status="pending", limit=1, offset=0)
-        await post_slack_thread_reply(
-            channel_id,
-            thread_ts,
-            "Stopped. Starting the queued follow-up next." if follow_ups else "Stopped.",
-            agent_thread_id=thread_id,
-        )
+        try:
+            await cancel_dashboard_thread(
+                thread_id,
+                user.github_login,
+                email=user.email,
+                on_interrupted=partial(release_slack_location_status, channel_id, thread_ts),
+            )
+        except Exception as exc:
+            if isinstance(exc, HTTPException) and exc.status_code < 500:
+                raise
+            await post_slack_thread_reply(
+                channel_id,
+                thread_ts,
+                "I couldn't stop this thread. Please try Stop again.",
+                agent_thread_id=thread_id,
+            )
+            raise
         return
     if event_id and not await claim_slack_event(event_id):
         return

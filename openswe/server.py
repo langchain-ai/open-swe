@@ -14,6 +14,7 @@ import warnings
 from collections.abc import Awaitable, Callable, Mapping, Sequence
 from pathlib import Path
 from typing import Any, cast
+from uuid import UUID
 
 from openswe.config import ENV
 
@@ -408,7 +409,18 @@ async def _resolve_prompt_default_repo(cfg: RunConfig) -> dict[str, str] | None:
         return None
 
     try:
-        return (await get_workspace_settings(workspace_slug(cfg))).default_repo
+        email = cfg.user_email or (
+            cfg.slack_thread.triggering_user_email if cfg.slack_thread else None
+        )
+        user = (
+            await User.for_login("github", cfg.github_login)
+            if cfg.github_login
+            else await User.for_email(email)
+            if email
+            else None
+        )
+        personal = await user.default_repo(workspace_slug(cfg)) if user else None
+        return personal or (await get_workspace_settings(workspace_slug(cfg))).default_repo
     except Exception:
         logger.debug("Failed to load the workspace default repo for prompt", exc_info=True)
         return None
@@ -440,14 +452,18 @@ async def _thread_participant_identities(thread_id: str) -> list[CollaboratorIde
         return []
 
 
-async def _user_for_login(login: str) -> User | None:
-    """The ``users`` row behind a GitHub login, or ``None`` when nothing answers."""
+async def _participant_user(login: str, person_id: str | None) -> User | None:
+    """Resolve a participant by their canonical id before falling back to a surface login."""
     try:
-        return await User.for_login("github", login)
+        if person_id and person_id.startswith("user:"):
+            user = await User.get(UUID(person_id.removeprefix("user:")))
+            if user is not None:
+                return user
+        return await User.for_login("github", login) if login else None
     except Exception:
         logger.warning(
             "Could not resolve a participant; describing them from surface data",
-            extra={"participant_login": login},
+            extra={"participant_login": login, "person_id": person_id},
             exc_info=True,
         )
         return None
@@ -461,16 +477,18 @@ async def _thread_participant(
     timezone: str = "",
     slack_user_id: str = "",
 ) -> ThreadParticipant:
-    login = identity.github_login or None
-    if login is None:
+    user = await _participant_user(identity.github_login, person_id)
+    login = (user.github_login if user else "") or identity.github_login
+    if not login:
         return ThreadParticipant(
             identity=identity,
             person_id=person_id or "",
             timezone=timezone,
-            slack_user_id=slack_user_id,
+            linked=user is not None,
+            slack_user_id=slack_user_id or (user.slack_user_id if user else ""),
         )
-    user, profile, workspace_admin, instructions = await asyncio.gather(
-        _user_for_login(login),
+    identity = replace(identity, github_login=login)
+    profile, workspace_admin, instructions = await asyncio.gather(
         load_profile(login),
         participant_is_admin(login),
         _resolve_user_custom_instructions(login),
@@ -962,7 +980,6 @@ class PrepareAgentRunMiddleware(BasePrepareRunMiddleware):
         linear_project_id: str,
         linear_issue_number: str,
         draft_prs: bool,
-        recent_thread_context_enabled: bool,
         admin_workspaces: bool,
         sole_writer: bool = False,
         model_selection: ModelSelectionMiddleware | None = None,
@@ -988,7 +1005,6 @@ class PrepareAgentRunMiddleware(BasePrepareRunMiddleware):
         self._linear_project_id = linear_project_id
         self._linear_issue_number = linear_issue_number
         self._draft_prs = draft_prs
-        self._recent_thread_context_enabled = recent_thread_context_enabled
         self._admin_workspaces = admin_workspaces
         self._sole_writer = sole_writer
         self._model_selection = model_selection
@@ -996,8 +1012,7 @@ class PrepareAgentRunMiddleware(BasePrepareRunMiddleware):
 
     def _recent_context_audience(self, cfg: RunConfig) -> RecentContextAudience | None:
         if (
-            not self._recent_thread_context_enabled
-            or cfg.background_task_completion
+            cfg.background_task_completion
             or not self._profile_login
             or (cfg.slack_thread is not None and cfg.slack_thread.triggering_bot_id)
         ):
@@ -1029,7 +1044,6 @@ class PrepareAgentRunMiddleware(BasePrepareRunMiddleware):
             "source": self._source,
             "repo": cfg.repo.model_dump() if cfg.repo else None,
             "draft_prs": self._draft_prs,
-            "recent_thread_context_enabled": self._recent_thread_context_enabled,
             "model": self._model_id,
             "effort": self._effort,
         }
@@ -2008,9 +2022,6 @@ async def build_agent(config: RunnableConfig, *, tool_surface: ToolSurface | Non
         linear_project_id=linear_project_id,
         linear_issue_number=linear_issue_number,
         draft_prs=sender_draft_prs,
-        recent_thread_context_enabled=(
-            sender_profile.get("recent_thread_context_enabled") is True if sender_profile else False
-        ),
         admin_workspaces=admin_thread,
         sole_writer=tool_access.sole,
         model_selection=model_selection,

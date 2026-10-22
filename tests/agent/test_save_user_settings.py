@@ -64,6 +64,7 @@ async def test_private_requester_partial_update_preserves_other_settings_and_use
         "default_subagent_model": "anthropic:claude-haiku-4-5",
         "subagent_reasoning_effort": "none",
         "model_routing_enabled": True,
+        "recent_thread_context_enabled": False,
     }
     profile = {
         "default_repo": "org/private",
@@ -71,7 +72,6 @@ async def test_private_requester_partial_update_preserves_other_settings_and_use
         "base_branch": "develop",
         "draft_prs": False,
         "review_draft_prs": True,
-        "recent_thread_context_enabled": True,
         "email": "alice@example.com",
     }
     prefs = {
@@ -104,6 +104,22 @@ async def test_private_requester_partial_update_preserves_other_settings_and_use
     assert user_records.get("github_oauth_token", "Alice") == {"encrypted_gh_token": "secret"}
     saved_prefs = user_records.get("dashboard_preferences", "Alice")
     assert {key: saved_prefs[key] for key in prefs} == {**prefs, "default_workspace": "new"}
+
+
+async def test_workspace_repo_patch_preserves_global_and_rejects_invalid_maps(
+    user_records: FakeUserRecords,
+    requester: dict[str, object],
+    saved_scope: dict[str, object],
+) -> None:
+    user_records.seed("profile", "Alice", {"default_repo": "org/global"})
+    result = await save_user_settings({"workspace_default_repos": {"selected": "org/scoped"}})
+    assert result["ok"] is True
+    assert user_records.get("profile", "Alice")["default_repo"] == "org/global"
+    before = deepcopy(user_records.items)
+    result = await save_user_settings({"workspace_default_repos": {"selected": "invalid"}})
+    assert result["ok"] is False
+    assert user_records.items == before
+    assert (await save_user_settings({"workspace_default_repos": {}}))["ok"] is True
 
 
 @pytest.mark.parametrize(
@@ -167,6 +183,7 @@ async def test_unavailable_thread_scope_fails_closed(
         {"default_subagent_model": "openai:gpt-6.1-sol"},
         {"subagent_reasoning_effort": "low"},
         {"model_routing_enabled": True},
+        {"recent_thread_context_enabled": False, "auto_fix_ci": False},
         {"default_model": "unknown-model"},
         {"default_model": "openai:gpt-5.5"},
         {"default_model": "anthropic:claude-fable-5-1"},
@@ -265,6 +282,7 @@ async def test_private_read_exposes_all_ordinary_settings_only_for_requester(
 ) -> None:
     ordinary = {
         "default_repo": "org/private",
+        "workspace_default_repos": {"mine": "org/scoped"},
         "base_branch": "develop",
         "branch_prefix": "alice/",
     }

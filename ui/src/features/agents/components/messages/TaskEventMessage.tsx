@@ -6,7 +6,6 @@ import { ExpandableMessageChip } from "./ExpandableMessageChip"
 
 import { MessageTimestamp } from "./MessageTimestamp"
 import type { TaskEventMetadata } from "@/features/agents/lib/structuredInputMessages"
-import { formatHoverTimestamp } from "@/features/agents/lib/messageTimestamps"
 
 const COMPLETION_LABELS = {
   success: "Completed",
@@ -36,7 +35,6 @@ export function TaskEventMessage({
   return (
     <div
       className="my-space-3 flex flex-col items-start gap-space-1"
-      title={formatHoverTimestamp(timestamp)}
       data-testid="task-event"
       data-message-id={messageId}
     >

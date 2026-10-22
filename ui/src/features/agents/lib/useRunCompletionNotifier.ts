@@ -5,13 +5,7 @@ import { showRunNotification } from "@/lib/notifications"
 
 const TERMINAL_STATUSES = new Set(["finished", "error", "interrupted"])
 
-/**
- * Watches the thread list for transitions from `running` to a terminal status
- * and fires a browser notification saying what each completed run did. Task workers
- * stay quiet because their coordinator handles user communication. Suppresses
- * notifications for the thread the user is currently viewing only when the
- * page is visible — background tabs still notify even for the active thread.
- */
+/** Says what each run did once it ends outside the visible thread, except Slack threads and workers. */
 export function useRunCompletionNotifier(
   threads: Array<AgentThread> | undefined,
   activeThreadId: string | undefined,
@@ -32,6 +26,7 @@ export function useRunCompletionNotifier(
       }
       if (previous === undefined) continue
       if (
+        thread.source !== "slack" &&
         thread.taskMembership?.role !== "worker" &&
         previous.status === "running" &&
         TERMINAL_STATUSES.has(thread.status) &&
