@@ -45,6 +45,9 @@ async def switch_to_performance_model(
         model_routing_enabled=False,
     )
     await store_thread_settings(client, cfg.thread_id, settings, strict=True)
+    await client.threads.update(
+        thread_id=cfg.thread_id, metadata={"model": model_id, "effort": effort}
+    )
     if cfg.run_id:
         await create_langsmith_feedback(
             cfg.run_id,

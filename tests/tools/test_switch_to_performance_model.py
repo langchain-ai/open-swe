@@ -1,3 +1,4 @@
+from types import SimpleNamespace
 from unittest.mock import AsyncMock
 
 import pytest
@@ -21,7 +22,8 @@ async def test_switch_persists_and_updates_the_running_model(
         "get_config",
         lambda: {"configurable": {"thread_id": "current", "run_id": "current-run"}},
     )
-    monkeypatch.setattr(module, "langgraph_client", lambda: object())
+    client = SimpleNamespace(threads=SimpleNamespace(update=AsyncMock()))
+    monkeypatch.setattr(module, "langgraph_client", lambda: client)
     monkeypatch.setattr(module, "load_thread_settings", AsyncMock(return_value=settings))
     feedback = AsyncMock(return_value=True)
     monkeypatch.setattr(module, "create_langsmith_feedback", feedback)
@@ -35,3 +37,6 @@ async def test_switch_persists_and_updates_the_running_model(
     assert result.update["requested_model"] == stored["model_id"]
     assert result.update["requested_effort"] == stored["effort"]
     assert result.update["messages"][0].tool_call_id == "switch-call"
+    client.threads.update.assert_awaited_once_with(
+        thread_id="current", metadata={"model": "openai:gpt-6-astra", "effort": "low"}
+    )
