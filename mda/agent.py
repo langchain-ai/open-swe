@@ -45,6 +45,7 @@ from rt.middleware import (
     AsyncWorkerLaunchMiddleware,
     BackendRunMiddleware,
     DescribedToolsMiddleware,
+    RepairOrphanedToolCallsMiddleware,
     ReportRepliesMiddleware,
     RuntimeToolsMiddleware,
     ServedToolsMiddleware,
@@ -201,6 +202,7 @@ async def agent(runtime: ManagedServerRuntime) -> DeepAgentDefinition:
                 *box_tools,
                 *replace_sandbox,
                 ServedToolsMiddleware(subagent_tools[subagent.name], excluded, backend),
+                RepairOrphanedToolCallsMiddleware(),
                 ModelRetryMiddleware(retry_on=(TimeoutError,)),
             ],
         }
@@ -220,6 +222,7 @@ async def agent(runtime: ManagedServerRuntime) -> DeepAgentDefinition:
         ServedToolsMiddleware(offered, excluded | code_only, backend),
         *_code_mode(context.graph, from_code, catalog.described),
         *_browser(context.graph, backend),
+        RepairOrphanedToolCallsMiddleware(),
         ModelCallLimitMiddleware(run_limit=_MODEL_CALL_LIMIT, exit_behavior="end"),
         ModelRetryMiddleware(retry_on=(TimeoutError,)),
     ]
