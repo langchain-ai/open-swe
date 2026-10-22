@@ -164,5 +164,16 @@ class Run(BaseModel):
         return self.updated_at if self.updated_at.tzinfo else self.updated_at.replace(tzinfo=UTC)
 
 
+class _PendingTask(BaseModel):
+    interrupts: list[JsonValue] = []
+
+
 class StateSnapshot(BaseModel):
     values: ThreadState = Field(default_factory=ThreadState)
+    interrupts: list[JsonValue] = []
+    tasks: list[_PendingTask] = []
+
+    @property
+    def waiting(self) -> bool:
+        """Paused on ``interrupt()``: its run ends as ``success``, only the checkpoint shows the pause."""
+        return bool(self.interrupts) or any(task.interrupts for task in self.tasks)

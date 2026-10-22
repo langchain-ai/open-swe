@@ -49,6 +49,23 @@ async def worker_result(
     return "The invocation completed without a final answer. Inspect the worker thread for details."
 
 
+async def _paused(thread_id: str, run_id: str) -> bool:
+    """Whether the run stopped for a person, which the server reports as a ``success``."""
+    try:
+        history = await langgraph_client().threads.get_history(
+            thread_id, limit=1, metadata={"run_id": run_id}
+        )
+    except Exception:
+        # Reporting a paused run as finished beats losing a finished one's hand-off.
+        logger.warning(
+            "Could not check whether a worker's run is waiting for a human",
+            extra={"worker_thread_id": thread_id, "run_id": run_id},
+            exc_info=True,
+        )
+        return False
+    return bool(history) and StateSnapshot.model_validate(history[0]).waiting
+
+
 async def worker_finished(
     thread_id: str, run_id: str, status: str, payload: Mapping[str, object]
 ) -> bool:
@@ -69,6 +86,13 @@ async def worker_finished(
         logger.info(
             "Suppressed a cancelled worker's run outcome",
             extra={"worker_thread_id": thread_id, "run_id": run_id, "run_status": status},
+        )
+        return True
+    if status == "success" and await _paused(thread_id, run_id):
+        # Not finished: the run that resumes it reports, through its own webhook.
+        logger.info(
+            "A worker's run is waiting for a human",
+            extra={"worker_thread_id": thread_id, "run_id": run_id},
         )
         return True
     try:
