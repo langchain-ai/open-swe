@@ -137,9 +137,7 @@ async def test_failed_slack_delivery_is_retried_on_the_next_report(incident):
 
 async def test_postmortem_failure_records_nothing(incident, monkeypatch):
     session = await runtime.load_incident_session(config())
-    await runtime.IncidentMiddleware(session).awrap_model_call(
-        request(context_message("1.0")), AsyncMock()
-    )
+    await shape(runtime.IncidentMiddleware(session), context_message("1.0"))
     monkeypatch.setattr(
         documents, "update_from_report", AsyncMock(side_effect=RuntimeError("store"))
     )
@@ -266,9 +264,7 @@ async def test_rejected_reports_preserve_state_and_the_automatic_post(
     incident, monkeypatch, existing, draft
 ):
     session = await runtime.load_incident_session(config())
-    await runtime.IncidentMiddleware(session).awrap_model_call(
-        request(context_message("1.0")), AsyncMock()
-    )
+    await shape(runtime.IncidentMiddleware(session), context_message("1.0"))
     if existing:
         await session._record_incident_report(
             next_steps=[
@@ -317,9 +313,7 @@ async def test_rejected_reports_preserve_state_and_the_automatic_post(
 @pytest.mark.parametrize("regression", ["subset", "inconclusive"])
 async def test_regressive_report_cannot_overwrite_findings(incident, monkeypatch, regression):
     session = await runtime.load_incident_session(config(incident_request="investigate"))
-    await runtime.IncidentMiddleware(session).awrap_model_call(
-        request(context_message("1.0")), AsyncMock()
-    )
+    await shape(runtime.IncidentMiddleware(session), context_message("1.0"))
     summary = [
         {"text": "API errors rose across the gateway", "evidence_ids": ["slack:1.0"]},
         {"text": "Failures began after the latest deploy", "evidence_ids": ["slack:1.0"]},

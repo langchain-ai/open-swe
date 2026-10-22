@@ -193,9 +193,9 @@ async def test_main_agent_records_the_incident_report_through_the_tool(
         )
         assert isinstance(cited.content, str)
         evidence_id = cited.content.rsplit("Incident evidence: ", 1)[1].split("\n", 1)[0]
-        text = "Opened the fix PR"
+        text = "Opened the fix PR for the gateway"
     else:
-        evidence_id, text = "slack:1.0", "Errors reported"
+        evidence_id, text = "slack:1.0", "Responders reported gateway errors"
 
     recorded = await session.operation(
         RunOperation(
@@ -209,12 +209,12 @@ async def test_main_agent_records_the_incident_report_through_the_tool(
     latest = await service.REPORTS.get("incident")
     assert latest is not None
     if requested_action:
-        assert "Opened the fix PR" in latest.report.summary
+        assert "Opened the fix PR for the gateway" in latest.report.summary
         assert any(
             item.url == "https://github.com/acme/api/pull/42" for item in latest.report.evidence
         )
     else:
-        assert latest.report.summary == "Errors reported [slack:1.0]"
+        assert latest.report.summary == "Responders reported gateway errors [slack:1.0]"
     posted.assert_awaited_once()
     assert posted.await_args.args[:2] == ("C1", "0")
     catalog = session.catalog()
