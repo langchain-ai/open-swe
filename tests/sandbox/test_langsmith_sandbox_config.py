@@ -178,8 +178,22 @@ def _serve(
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("sandbox_env", "api", "key"),
+    [
+        ({}, "https://api.smith.langchain.com", "lsv2-key"),
+        (
+            {
+                "SANDBOX_LANGSMITH_ENDPOINT": "https://aws.api.example",
+                "SANDBOX_LANGSMITH_API_KEY": "lsv2-aws-key",
+            },
+            "https://aws.api.example",
+            "lsv2-aws-key",
+        ),
+    ],
+)
 async def test_service_url_asks_for_a_workspace_grant(
-    monkeypatch: pytest.MonkeyPatch,
+    monkeypatch: pytest.MonkeyPatch, sandbox_env: dict[str, str], api: str, key: str
 ) -> None:
     requests: list[httpx2.Request] = []
 
@@ -197,14 +211,14 @@ async def test_service_url_asks_for_a_workspace_grant(
 
     monkeypatch.setenv("LANGSMITH_ENDPOINT", "https://api.smith.langchain.com")
     monkeypatch.setenv("LANGSMITH_API_KEY", "lsv2-key")
+    for name, value in sandbox_env.items():
+        monkeypatch.setenv(name, value)
     _serve(monkeypatch, handler)
 
     service_url = await create_workspace_service_url("sandbox-1", 3000)
 
     assert service_url == "https://l-abc.sandbox.example/"
     request = requests[0]
-    assert str(request.url) == (
-        "https://api.smith.langchain.com/v2/sandboxes/boxes/sandbox-1/service-url"
-    )
-    assert request.headers["X-API-Key"] == "lsv2-key"
+    assert str(request.url) == f"{api}/v2/sandboxes/boxes/sandbox-1/service-url"
+    assert request.headers["X-API-Key"] == key
     assert json.loads(request.content) == {"port": 3000, "access": "workspace"}

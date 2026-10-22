@@ -789,7 +789,7 @@ class LangSmithProvider(SandboxProvider):
         self._api_key = api_key or api.api_key
         self._api_endpoint = api.endpoint
         if not self._api_key:
-            msg = "LANGSMITH_API_KEY not set"
+            msg = "SANDBOX_LANGSMITH_API_KEY or LANGSMITH_API_KEY not set"
             raise ValueError(msg)
 
     @classmethod

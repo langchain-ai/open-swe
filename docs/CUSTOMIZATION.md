@@ -68,7 +68,7 @@ Set the `SANDBOX_TYPE` environment variable to switch providers. Each provider h
 
 The third-party provider SDKs (`daytona`, `modal`, `runloop`, `e2b`) are optional dependency groups, so a base install only carries the default langsmith and local providers. Selecting one of these providers requires installing its extra — e.g. `uv sync --extra sandbox-e2b` — or all of them with `--extra sandbox-providers`; startup validation fails fast with the install command if it's missing.
 
-For `langsmith`, sandbox provisioning, connection, proxy configuration, and workspace snapshot captures use the deployment’s `LANGSMITH_API_KEY` and `LANGSMITH_ENDPOINT`. A workspace's base snapshot must exist in that LangSmith workspace. The former `SANDBOX_LANGSMITH_API_KEY` and `SANDBOX_LANGSMITH_ENDPOINT` overrides are no longer used.
+For `langsmith`, sandbox provisioning, connection, proxy configuration, and workspace snapshot captures use the deployment’s `LANGSMITH_API_KEY` and `LANGSMITH_ENDPOINT`. To keep thread sandboxes in another LangSmith, such as another region, set `SANDBOX_LANGSMITH_ENDPOINT` and `SANDBOX_LANGSMITH_API_KEY` on the backend and the same two on the MDA deployment (`deploy_mda.yml` reads them from the `SANDBOX_LANGSMITH_ENDPOINT_<ENV>` and `SANDBOX_LANGSMITH_API_KEY_<ENV>` secrets). Tracing and the agent's browser stay in the deployment's own LangSmith. A workspace's base snapshot must exist in the sandbox LangSmith workspace, so recapture workspace snapshots after switching.
 
 ### Adding a new sandbox provider
 

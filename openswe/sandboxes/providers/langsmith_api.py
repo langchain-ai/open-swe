@@ -24,7 +24,15 @@ class SandboxAPI:
 
     @classmethod
     def from_env(cls) -> Self:
-        """The API ``LANGSMITH_ENDPOINT`` names, with ``LANGSMITH_API_KEY``."""
+        """The API thread sandboxes live at, which may be another LangSmith than tracing's."""
+        return cls(
+            ENV.SANDBOX_LANGSMITH_ENDPOINT.optional() or ENV.LANGSMITH_ENDPOINT.get(),
+            ENV.SANDBOX_LANGSMITH_API_KEY.optional() or ENV.LANGSMITH_API_KEY.optional(),
+        )
+
+    @classmethod
+    def deployment(cls) -> Self:
+        """The deployment's own LangSmith, where MDA opens each thread's browser."""
         return cls(ENV.LANGSMITH_ENDPOINT.get(), ENV.LANGSMITH_API_KEY.optional())
 
     @property
@@ -39,7 +47,7 @@ class SandboxAPI:
     def headers(self) -> dict[str, str]:
         """Headers that authenticate this deployment to the sandbox API, sockets included."""
         if not self.api_key:
-            msg = "LANGSMITH_API_KEY not set"
+            msg = "LangSmith API key not set"
             raise ValueError(msg)
         return {"X-API-Key": self.api_key}
 

@@ -147,7 +147,7 @@ ENV = Registry()
 # --- LangSmith and LangGraph -------------------------------------------------------
 ENV.var(
     "LANGSMITH_API_KEY",
-    "LangSmith API key for sandboxes, trace links and feedback; the LangSmith SDK "
+    "LangSmith API key for sandboxes, browsers, trace links and feedback; the LangSmith SDK "
     "reads the same variable for tracing and LangGraph Platform injects it.",
     secret=True,
 )
@@ -155,6 +155,18 @@ ENV.var(
     "LANGSMITH_ENDPOINT",
     "LangSmith API endpoint; set for self-hosted or regional LangSmith.",
     default="https://api.smith.langchain.com",
+)
+ENV.var(
+    "SANDBOX_LANGSMITH_API_KEY",
+    "LangSmith API key for thread sandboxes and their snapshots, when they live in another "
+    "LangSmith than LANGSMITH_API_KEY's workspace; defaults to LANGSMITH_API_KEY. The MDA "
+    "deployment needs the same value.",
+    secret=True,
+)
+ENV.var(
+    "SANDBOX_LANGSMITH_ENDPOINT",
+    "LangSmith API endpoint for thread sandboxes, such as another region; defaults to "
+    "LANGSMITH_ENDPOINT. The MDA deployment needs the same value.",
 )
 ENV.var(
     "LANGSMITH_TENANT_ID",

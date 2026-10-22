@@ -41,6 +41,7 @@ The deployment's `.env`, forwarded as deployment secrets by `mda deploy`:
 | `ANTHROPIC_API_KEY`, `OPENAI_API_KEY`, … | Model keys for direct (non-gateway) model calls and deepagents' summarization |
 | `LANGSMITH_GATEWAY_API_KEY` | Gateway key, the backend's; falls back to `LANGSMITH_API_KEY` |
 | `MDA_SERVICE_SECRET` | Shared with the backend: MDA signs each call its channels make to the backend's endpoints with it, as Standard Webhooks does |
+| `SANDBOX_LANGSMITH_ENDPOINT`, `SANDBOX_LANGSMITH_API_KEY` | Optional, both or neither, and the backend's values: the LangSmith thread boxes live in when it is not this deployment's, such as another region. Browsers stay in this deployment's LangSmith |
 
 The backend:
 

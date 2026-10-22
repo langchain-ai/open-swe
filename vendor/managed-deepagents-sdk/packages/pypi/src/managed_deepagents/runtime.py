@@ -480,9 +480,16 @@ class _SandboxClientKwargs(TypedDict, total=False):
 
 
 def _sandbox_client_kwargs(sandbox: SandboxDefinition) -> _SandboxClientKwargs:
-    """Client kwargs pinning the API key and the workspace holding the recipe."""
+    """Client kwargs pinning the endpoint, the API key and the workspace holding the recipe."""
+    from managed_deepagents.sandbox import api_endpoint as declared_endpoint  # noqa: PLC0415
+
     kwargs: _SandboxClientKwargs = {}
-    api_endpoint = _configured_sandbox_api_endpoint()
+    other_langsmith = declared_endpoint(sandbox.options)
+    api_endpoint = (
+        _validated_sandbox_api_endpoint(other_langsmith, "_openswe_api_endpoint")
+        if other_langsmith
+        else _configured_sandbox_api_endpoint()
+    )
     if api_endpoint:
         kwargs["api_endpoint"] = api_endpoint
     api_key = _string_option(sandbox.options.get("api_key")) or _string_option(
@@ -490,7 +497,8 @@ def _sandbox_client_kwargs(sandbox: SandboxDefinition) -> _SandboxClientKwargs:
     )
     if api_key:
         kwargs["api_key"] = api_key
-    workspace_id = _string_option(os.environ.get(WORKSPACE_ID_ENV))
+    # The deployment's workspace is in its own LangSmith; another one's key picks its own.
+    workspace_id = None if other_langsmith else _string_option(os.environ.get(WORKSPACE_ID_ENV))
     if workspace_id:
         kwargs["headers"] = {_TENANT_HEADER: workspace_id}
     return kwargs
@@ -501,6 +509,11 @@ def _configured_sandbox_api_endpoint() -> str | None:
     raw = _string_option(os.environ.get(SANDBOX_API_ENDPOINT_ENV))
     if raw is None:
         return None
+    return _validated_sandbox_api_endpoint(raw, SANDBOX_API_ENDPOINT_ENV)
+
+
+def _validated_sandbox_api_endpoint(raw: str, source: str) -> str:
+    """``raw``, the full sandbox endpoint ``source`` names, once it is a plain HTTP(S) URL."""
     try:
         parsed = urlsplit(raw)
         hostname = parsed.hostname
@@ -517,8 +530,7 @@ def _configured_sandbox_api_endpoint() -> str | None:
         or parsed.fragment
     ):
         raise RuntimeError(
-            f"{SANDBOX_API_ENDPOINT_ENV} must be an HTTP(S) URL without credentials, "
-            "query, or fragment"
+            f"{source} must be an HTTP(S) URL without credentials, query, or fragment"
         )
     return raw.rstrip("/")
 

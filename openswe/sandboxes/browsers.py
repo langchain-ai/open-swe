@@ -226,7 +226,7 @@ async def _browser_request(
     timeout: float,
 ) -> httpx2.Response:
     try:
-        return await SandboxAPI.from_env().request(method, path, json=json, timeout=timeout)
+        return await SandboxAPI.deployment().request(method, path, json=json, timeout=timeout)
     except httpx2.HTTPStatusError as exc:
         if exc.response.status_code == 501:
             raise BrowserUnavailableError(

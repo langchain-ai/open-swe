@@ -121,6 +121,7 @@ def define_sandbox(
     _openswe_thread_id: str | None = None,
     _openswe_create_fields: dict[str, object] | None = None,
     _openswe_no_manage_proxy: bool = False,
+    _openswe_api_endpoint: str | None = None,
     idle_ttl_seconds: int | None = None,
     api_key: str | None = None,
     default_timeout: int | None = None,
@@ -154,6 +155,7 @@ def define_sandbox(
                 "_openswe_thread_id": _openswe_thread_id,
                 "_openswe_create_fields": _openswe_create_fields,
                 "_openswe_no_manage_proxy": _openswe_no_manage_proxy or None,
+                "_openswe_api_endpoint": _openswe_api_endpoint,
             }.items()
             if value is not None
         }

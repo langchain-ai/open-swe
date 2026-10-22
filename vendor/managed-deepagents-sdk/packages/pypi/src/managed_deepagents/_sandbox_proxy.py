@@ -153,17 +153,14 @@ def patch_sandbox_proxy_config(
 ) -> None:
     from langsmith.sandbox import ResourceNotFoundError  # noqa: PLC0415
 
-    from managed_deepagents.runtime import (  # noqa: PLC0415
-        _configured_sandbox_api_endpoint,
-        _sandbox_client_kwargs,
-    )
+    from managed_deepagents.runtime import _sandbox_client_kwargs  # noqa: PLC0415
 
     kwargs = _sandbox_client_kwargs(sandbox)
     headers = dict(cast("Mapping[str, str]", kwargs.get("headers") or {}))
     api_key = kwargs.get("api_key") or os.environ.get("LANGCHAIN_API_KEY")
     if isinstance(api_key, str):
         headers["X-Api-Key"] = api_key
-    endpoint = _configured_sandbox_api_endpoint()
+    endpoint = kwargs.get("api_endpoint")
     if endpoint is None:
         base = (
             os.environ.get("LANGSMITH_ENDPOINT")
