@@ -496,7 +496,7 @@ test("standard mode still sends, and the setting applies to the same existing th
   );
   await page.goto("/feature-flags");
   const toggle = page.getByRole("switch", {
-    name: "Assistant UI (experimental)",
+    name: "Assistant UI",
   });
   await expect(toggle).toHaveAttribute("aria-checked", "false");
   await toggle.click();

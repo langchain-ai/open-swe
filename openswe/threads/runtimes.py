@@ -35,7 +35,7 @@ _V3_STREAMING_KEY: Final = "__event_streaming_v2"
 _V3_RUN_STREAM_MODES: Final = ["values", "updates", "messages", "custom", "tasks", "checkpoints"]
 # The run metadata the graph's hooks read. Only these ride with the run, which
 # echoes them back on every hook call.
-_HOOK_METADATA_KEYS: Final = ("event_match_ids",)
+_HOOK_METADATA_KEYS: Final = ("event_match_ids", "ls_attribution_identifier")
 
 _object = TypeAdapter(dict[str, JsonValue])
 

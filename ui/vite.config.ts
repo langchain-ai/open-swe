@@ -317,6 +317,8 @@ const config = defineConfig({
     devtools(),
     nitro({
       routeRules: devRouteRules,
+      // Ships gzip and brotli copies of the build, served to a browser that accepts them.
+      compressPublicAssets: true,
       // Registered explicitly: nitro's convention scan does not reach this
       // directory under the vite plugin. The backend prefixes are proxied by a
       // deployed build only — dev proxies them through devRouteRules, which has

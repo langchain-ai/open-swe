@@ -101,7 +101,6 @@ def handoff(monkeypatch: pytest.MonkeyPatch) -> Handoff:
         linear_project_id="",
         linear_issue_number="",
         draft_prs=False,
-        recent_thread_context_enabled=False,
         admin_workspaces=False,
     )
     middleware._requested_models = available_requested_models(fable_enabled=False)

@@ -33,7 +33,8 @@ from openswe.dashboard.workspace_settings import (
 from openswe.database import postgres
 from openswe.dispatch import (
     FOLLOW_UP_PICKUP_KIND,
-    _run_user_id,
+    TURN_ATTRIBUTION_FIELDS,
+    _run_user_metadata,
     create_durable_run,
     dispatch_agent_run,
 )
@@ -745,8 +746,8 @@ async def _attributed_run_messages(
             values = prior_state.get("values") if isinstance(prior_state, dict) else None
             if isinstance(values, dict):
                 messages = values.get("messages")
-                injected.update(dynamic_context_hashes_from_messages(messages))
                 if isinstance(messages, list):
+                    injected = dynamic_context_hashes_from_messages(messages)
                     persisted_message_ids = {
                         message_id
                         for message in messages
@@ -1060,14 +1061,8 @@ async def _enrich_run_start_command(
             **{
                 key: value
                 for key, value in run_metadata.items()
-                if key
-                not in {
-                    "visibility",
-                    "owner_type",
-                    "owner_login",
-                    "system_authorization",
-                    "user_id",
-                }
+                if key not in TURN_ATTRIBUTION_FIELDS
+                and key not in {"visibility", "owner_type", "owner_login", "system_authorization"}
             },
             **agent_version_metadata(),
             "invocation_started_at": invocation_started_at,
@@ -1087,9 +1082,9 @@ async def _enrich_run_start_command(
     params["assistant_id"] = _ASSISTANT_ID
     params.setdefault("stream_mode", list(DASHBOARD_STREAM_MODES))
     params.setdefault("stream_resumable", True)
-    user_id = await _run_user_id({"configurable": merged_configurable}, source=DASHBOARD_SOURCE)
-    if user_id:
-        run_metadata["user_id"] = user_id
+    run_metadata.update(
+        await _run_user_metadata({"configurable": merged_configurable}, source=DASHBOARD_SOURCE)
+    )
     config_metadata = client_config.get("metadata")
     if not isinstance(config_metadata, dict):
         config_metadata = {}
@@ -1097,7 +1092,7 @@ async def _enrich_run_start_command(
         **client_config,
         "configurable": merged_configurable,
         "metadata": {
-            **{k: v for k, v in config_metadata.items() if k != "user_id"},
+            **{k: v for k, v in config_metadata.items() if k not in TURN_ATTRIBUTION_FIELDS},
             **run_metadata,
         },
     }

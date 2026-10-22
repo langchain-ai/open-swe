@@ -120,7 +120,7 @@ class RequireUserReplyMiddleware(OpenSWEMiddleware):
         # Other tools whose successful call answers the person, such as a walkthrough's chunk.
         self._replies = replies
 
-    def before_agent(self, state: Any, runtime: Any) -> dict[str, Any] | None:  # noqa: ARG002
+    async def abefore_agent(self, state: AgentState, runtime: Runtime) -> dict[str, object]:  # noqa: ARG002
         # Resolved fresh every run: the surface a previous run ended on says
         # nothing about where this one was triggered from.
         return {"reply_surface": self._initial_surface, "reply_nudges": 0}
