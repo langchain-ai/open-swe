@@ -1,4 +1,4 @@
-"""Compose the canary controller from trusted configuration and an isolated App."""
+"""Compose the canary controller from trusted configuration and a backend dispatch gateway."""
 
 import hashlib
 from collections.abc import AsyncIterator
@@ -8,11 +8,11 @@ from pydantic import SecretStr
 
 from openswe.config import ENV
 from openswe.github.http import GitHubClient, RepoClient
-from openswe.github.queue_app import QueueApp
 from openswe.github.repositories import Repository
 from openswe.jobs import queue as jobs
 from openswe.merge_queue import runtime
 from openswe.merge_queue.configuration import QueueConfiguration, load_configuration
+from openswe.merge_queue.dispatch import DispatchGateway
 from openswe.merge_queue.store import MergeQueue
 from openswe.merge_queue.validation_contract import WORKFLOW
 
@@ -21,13 +21,9 @@ class QueueController:
     def __init__(self, config: QueueConfiguration):
         self.config = config
         assert config.policy.validation is not None
-        self.app = QueueApp(
-            config.app_id,
-            config.installation_id,
-            config.repository_id,
-            config.repository,
-            config.policy.validation.dispatch_actor_id,
-            SecretStr(ENV.MERGE_QUEUE_APP_PRIVATE_KEY.require()),
+        self.dispatcher = DispatchGateway(
+            str(config.dispatch_url),
+            SecretStr(ENV.MERGE_QUEUE_DISPATCH_SECRET.require()),
         )
 
     @asynccontextmanager
@@ -37,8 +33,19 @@ class QueueController:
         repository = await Repository.get(self.config.repository)
         if repository is None or repository.id != queue.repository_id:
             raise ValueError("Queue repository binding changed")
-        token = await self.app.token()
-        async with GitHubClient.connect(token=token) as github:
+        owner, name = self.config.repository.split("/", 1)
+        async with GitHubClient.as_app(
+            owner,
+            name,
+            permissions={
+                "actions": "read",
+                "checks": "read",
+                "contents": "write",
+                "metadata": "read",
+                "pull_requests": "read",
+                "statuses": "read",
+            },
+        ) as github:
             repo = github.repo(*self.config.repository.split("/", 1))
             if (await repo.info()).get("id") != self.config.repository_id:
                 raise ValueError("Queue GitHub repository identity changed")
@@ -47,9 +54,8 @@ class QueueController:
             if (
                 workflow is None
                 or hashlib.sha256(workflow).hexdigest() != self.config.workflow_digest
-                or await repo.queue_dispatch_actor() != self.app.actor_id
             ):
-                raise ValueError("Queue workflow or reserved dispatch actor changed")
+                raise ValueError("Queue workflow changed")
             yield repo
 
     async def start(self) -> None:
@@ -61,6 +67,7 @@ class QueueController:
         controller = runtime.QueueRuntime(
             {queue.id: self.config.policy},
             self.open_repo,
+            self.dispatcher,
             retention_days=self.config.retention_days,
         )
         await jobs.schedule(

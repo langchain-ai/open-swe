@@ -3,7 +3,7 @@
 from typing import Self
 from uuid import UUID
 
-from pydantic import BaseModel, ConfigDict, Field, model_validator
+from pydantic import BaseModel, ConfigDict, Field, HttpUrl, model_validator
 
 from openswe.config import ENV
 from openswe.merge_queue.admission import QueuePolicy
@@ -15,8 +15,7 @@ class QueueConfiguration(BaseModel):
     workspace_id: UUID
     repository: str = Field(pattern=r"^[A-Za-z0-9_-]+/[A-Za-z0-9_.-]+$")
     repository_id: int = Field(gt=0, strict=True)
-    app_id: int = Field(gt=0, strict=True)
-    installation_id: int = Field(gt=0, strict=True)
+    dispatch_url: HttpUrl
     workflow_digest: str = Field(pattern=r"^[0-9a-f]{64}$")
     operator_emails: frozenset[str] = Field(min_length=1)
     policy: QueuePolicy
@@ -32,8 +31,14 @@ class QueueConfiguration(BaseModel):
             not email.strip() or email != email.strip().lower() for email in self.operator_emails
         ):
             raise ValueError("Operator emails must be nonempty, lowercase, and trimmed")
-        if self.app_id == ENV.GITHUB_APP_ID.get_int(0):
-            raise ValueError("The queue must use a separate GitHub App from agent sandboxes")
+        if (
+            self.dispatch_url.scheme != "https"
+            or self.dispatch_url.username
+            or self.dispatch_url.password
+            or self.dispatch_url.query
+            or self.dispatch_url.fragment
+        ):
+            raise ValueError("Dispatch URL must use HTTPS without credentials, query or fragment")
         return self
 
 

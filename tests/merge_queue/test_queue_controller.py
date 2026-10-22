@@ -10,7 +10,6 @@ import httpx2
 import pytest
 
 from openswe.github.http import GitHubClient, RepoClient
-from openswe.github.queue_app import QueueApp
 from openswe.github.repositories import Repository
 from openswe.merge_queue.admission import CheckSource, QueuePolicy
 from openswe.merge_queue.configuration import QueueConfiguration
@@ -19,12 +18,12 @@ from openswe.merge_queue.store import MergeQueue
 from openswe.merge_queue.validation_contract import ValidationPolicy
 
 
-@pytest.mark.parametrize("fault", [None, "repository", "workflow", "actor"])
+@pytest.mark.parametrize("fault", [None, "repository", "workflow"])
 async def test_controller_rejects_changed_trusted_inputs(
     monkeypatch: pytest.MonkeyPatch, fault: str | None
 ) -> None:
     monkeypatch.setenv("GITHUB_APP_ID", "99")
-    monkeypatch.setenv("MERGE_QUEUE_APP_PRIVATE_KEY", "queue-key")
+    monkeypatch.setenv("MERGE_QUEUE_DISPATCH_SECRET", "s" * 32)
     monkeypatch.setenv("SANDBOX_TYPE", "langsmith")
     repository = Repository(full_name="acme/widgets")
     queue = MergeQueue(workspace_id=uuid7(), repository_id=repository.id, target_branch="main")
@@ -34,10 +33,9 @@ async def test_controller_rejects_changed_trusted_inputs(
             workspace_id=queue.workspace_id,
             repository="acme/widgets",
             repository_id=42,
-            app_id=123,
-            installation_id=456,
-            workflow_digest=hashlib.sha256(workflow).hexdigest(),
+            dispatch_url="https://dispatcher.example/queue",
             operator_emails=frozenset({"operator@example.com"}),
+            workflow_digest=hashlib.sha256(workflow).hexdigest(),
             policy=QueuePolicy(
                 checks={"checks": CheckSource(app_id=1, workflow_path=".github/workflows/ci.yml")},
                 validation=ValidationPolicy(dispatch_actor_id=789),
@@ -45,7 +43,6 @@ async def test_controller_rejects_changed_trusted_inputs(
         )
     )
     monkeypatch.setattr(Repository, "get", AsyncMock(return_value=repository))
-    monkeypatch.setattr(QueueApp, "token", AsyncMock(return_value="isolated-token"))
 
     def respond(request: httpx2.Request) -> httpx2.Response:
         path = request.url.path
@@ -56,16 +53,20 @@ async def test_controller_rejects_changed_trusted_inputs(
         if path.endswith("/contents/.github/workflows/merge_queue_validate.yml"):
             assert request.url.params["ref"] == "a" * 40
             return httpx2.Response(200, content=b"changed" if fault == "workflow" else workflow)
-        assert path.endswith("/actions/variables/MERGE_QUEUE_DISPATCH_ACTOR_ID")
-        return httpx2.Response(200, json={"value": "999" if fault == "actor" else "789"})
+        pytest.fail(f"Unexpected GitHub request: {path}")
 
     @asynccontextmanager
-    async def connect(*, token: str) -> AsyncIterator[GitHubClient]:
-        assert token == "isolated-token"
+    async def as_app(
+        owner: str, repo: str, *, permissions: dict[str, str]
+    ) -> AsyncIterator[GitHubClient]:
+        assert (owner, repo) == ("acme", "widgets")
+        assert permissions["actions"] == "read"
+        assert permissions["contents"] == "write"
+        assert "variables" not in permissions
         async with httpx2.AsyncClient(transport=httpx2.MockTransport(respond)) as http:
             yield GitHubClient(http)
 
-    monkeypatch.setattr(GitHubClient, "connect", connect)
+    monkeypatch.setattr(GitHubClient, "as_app", as_app)
     if fault:
         with pytest.raises(ValueError):
             async with controller.open_repo(queue):
