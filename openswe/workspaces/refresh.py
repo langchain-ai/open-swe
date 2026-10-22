@@ -358,11 +358,14 @@ async def refresh_workspace(
         await capture_workspace_snapshot(slug, sandbox_id, timeout=capture_timeout())
         await WORKSPACES.finish_refresh_step(slug, "capture", "success")
     except asyncio.CancelledError:
-        # Left marked refreshing on purpose: the job's retry takes the refresh over.
+        # A shutdown cancels the job mid-refresh, past ``except Exception``. Settled here
+        # so the record stops claiming a refresh nobody runs; a hard kill skips this,
+        # and the job's retry takes its own marker over instead.
         logger.warning(
             "Refresh interrupted",
             extra={**context, "step": step, "sandbox_id": sandbox_id},
         )
+        await WORKSPACES.mark_refresh_settled(slug, "failed", log=log, error="interrupted")
         raise
     except Exception as exc:
         logger.warning("Refresh failed", extra={**context, "step": step}, exc_info=True)
