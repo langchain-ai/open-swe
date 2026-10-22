@@ -1,4 +1,8 @@
-import { ArrowLeftIcon, ArrowUpIcon } from "@langchain/macaw-components/icons"
+import {
+  ArrowLeftIcon,
+  ArrowUpIcon,
+  XIcon,
+} from "@langchain/macaw-components/icons"
 import { Badge, type BadgeProps } from "@langchain/macaw-components/Badge"
 import { Button } from "@langchain/macaw-components/Button"
 import {
@@ -10,6 +14,7 @@ import {
 import { IconButton } from "@langchain/macaw-components/IconButton"
 import { Skeleton } from "@langchain/macaw-components/Skeleton"
 import { ChatsCircleIcon } from "@phosphor-icons/react/dist/ssr/ChatsCircle"
+import { CornersInIcon } from "@phosphor-icons/react/dist/ssr/CornersIn"
 import { CopyIcon } from "@phosphor-icons/react/dist/ssr/Copy"
 import { DotsThreeIcon } from "@phosphor-icons/react/dist/ssr/DotsThree"
 import { GitMergeIcon } from "@phosphor-icons/react/dist/ssr/GitMerge"
@@ -19,13 +24,14 @@ import { KeyboardIcon } from "@phosphor-icons/react/dist/ssr/Keyboard"
 import { LinkIcon } from "@phosphor-icons/react/dist/ssr/Link"
 import { TreeViewIcon } from "@phosphor-icons/react/dist/ssr/TreeView"
 import { useQuery } from "@tanstack/react-query"
-import { Link } from "@tanstack/react-router"
+import { Link, useLocation } from "@tanstack/react-router"
 
 import { DropdownMenuItem } from "@/components/MenuItem"
 import type { ReviewDetail } from "@/lib/api"
 import { cn } from "@/lib/utils"
 import { useAppCommandControls } from "@/lib/appCommands"
 import { StatusPill } from "@/features/reviews/components/StatusPill"
+import { PullRequestPageLink } from "@/features/reviews/PullRequestLinks"
 import { SubmitReviewPopover } from "@/features/reviews/components/SubmitReviewPopover"
 import { copyText } from "@/features/reviews/lib/copyText"
 import { githubUrls } from "@/features/reviews/lib/githubUrls"
@@ -61,12 +67,18 @@ export function Header({
   leftInset,
   compactRail,
   navigatorShown,
+  onClose,
 }: {
   pr: PullRequestRef
   leftInset: string
   compactRail: boolean
   navigatorShown: boolean
+  onClose?: () => void
 }) {
+  const inline = Boolean(onClose)
+  const listSearch = useLocation({
+    select: (location) => location.state.reviewListSearch,
+  })
   const detailQuery = useQuery(reviewQueries.detail(pr))
   const detail = detailQuery.data
   const diff = useQuery(reviewQueries.diff(pr)).data
@@ -100,30 +112,39 @@ export function Header({
       className={cn(
         // Top-aligned at 8px so the first row lines up with the app's floating sidebar button.
         "flex shrink-0 items-start gap-space-3 border-b border-default bg-surface-level-1 pt-space-2 pr-space-3 pb-space-2",
-        leftInset
+        leftInset,
+        inline && "flex-wrap pb-space-3"
       )}
     >
-      <IconButton
-        asChild
-        icon={ArrowLeftIcon}
-        label="Back to reviews"
-        size="md"
-        color="secondary"
-        variant="plain"
-        className="max-sm:hidden"
-      >
-        <Link to="/agents/reviews" />
-      </IconButton>
-      <IconButton
-        icon={TreeViewIcon}
-        label={navigatorShown ? "Hide files" : "Show files"}
-        aria-pressed={navigatorShown}
-        size="md"
-        color="secondary"
-        variant="plain"
-        onClick={toggleNavigator}
-      />
-      <div className="min-w-0 flex-1">
+      {!inline && (
+        <>
+          <IconButton
+            asChild
+            icon={listSearch ? CornersInIcon : ArrowLeftIcon}
+            label={listSearch ? "Back to PR preview" : "Back to reviews"}
+            size="md"
+            color="secondary"
+            variant="plain"
+            className="max-sm:hidden"
+          >
+            <Link
+              to="/agents/reviews"
+              search={listSearch ?? {}}
+              viewTransition
+            />
+          </IconButton>
+          <IconButton
+            icon={TreeViewIcon}
+            label={navigatorShown ? "Hide files" : "Show files"}
+            aria-pressed={navigatorShown}
+            size="md"
+            color="secondary"
+            variant="plain"
+            onClick={toggleNavigator}
+          />
+        </>
+      )}
+      <div className={cn("min-w-0 flex-1", inline && "basis-[70%]")}>
         <div className="flex min-h-7 min-w-0 items-center gap-space-2">
           {/* An open PR shows where it stands, in the PR list's own pills; GitHub's lifecycle only once it's settled. */}
           {live && status ? (
@@ -150,7 +171,10 @@ export function Header({
               <Skeleton className="h-5 w-14 shrink-0 rounded-full" />
             )
           )}
-          <h1 className="min-w-0 truncate text-sm leading-6 font-semibold tracking-[-0.01em] max-sm:line-clamp-2 max-sm:text-sm max-sm:leading-5 max-sm:whitespace-normal">
+          <h1
+            style={{ viewTransitionName: "pr-title" }}
+            className="min-w-0 truncate text-sm leading-6 font-semibold tracking-[-0.01em] max-sm:line-clamp-2 max-sm:text-sm max-sm:leading-5 max-sm:whitespace-normal"
+          >
             <a
               href={githubUrl}
               target="_blank"
@@ -170,7 +194,10 @@ export function Header({
         </div>
         {detail ? (
           // The meta line and the status sentence share one slot and cross-fade.
-          <div className="mt-0.5 grid min-w-0 max-sm:hidden">
+          <div
+            style={{ viewTransitionName: "pr-meta" }}
+            className="mt-0.5 grid min-w-0 max-sm:hidden"
+          >
             <p
               inert={carrying}
               className={cn(
@@ -277,7 +304,28 @@ export function Header({
           <Skeleton className="mt-space-1 h-3.5 w-80 max-w-full max-sm:hidden" />
         )}
       </div>
-      <div className="flex h-7 shrink-0 items-center gap-space-3">
+      {inline && (
+        <div className="flex items-center gap-space-1">
+          <PullRequestPageLink
+            repo={`${pr.owner}/${pr.repo}`}
+            number={pr.number}
+          />
+          <IconButton
+            icon={XIcon}
+            label="Close pull request preview"
+            color="secondary"
+            variant="plain"
+            size="xs"
+            onClick={onClose}
+          />
+        </div>
+      )}
+      <div
+        className={cn(
+          "flex h-7 shrink-0 items-center gap-space-3",
+          inline && "w-full"
+        )}
+      >
         {carrying && current?.status && (
           <div className="max-lg:hidden">
             <NextStepAction

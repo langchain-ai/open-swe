@@ -26,7 +26,6 @@ import { PullRequestReview } from "./components/PullRequestReview"
 import {
   leftOpenList,
   PULL_REQUEST_STATUS,
-  pullRequestPreviewQuery,
   pullRequestStatusQuery,
   refreshPullRequest,
 } from "./lib/cache"
@@ -35,7 +34,13 @@ import { pullRequestKey, statusLabels } from "./lib/status"
 import { useOpenPullRequests } from "./lib/useOpenPullRequests"
 import { usePullRequestDetails } from "./lib/usePullRequestDetails"
 import { usePullRequestSearch } from "./lib/usePullRequestSearch"
-import { reviewStatuses, type ReviewsSearch, type ReviewSort } from "./search"
+import {
+  parsePullRequestSelection,
+  reviewStatuses,
+  type ReviewsSearch,
+  type ReviewSort,
+} from "./search"
+import { warmReviewPage } from "./page/queries"
 
 const chunkSize = 10
 
@@ -203,8 +208,8 @@ export function OpenPullRequests({
   )
   const nextRow = selectedIndex >= 0 ? visible[selectedIndex + 1] : undefined
   useEffect(() => {
-    if (nextRow)
-      void queryClient.prefetchQuery(pullRequestPreviewQuery(nextRow))
+    const next = nextRow && parsePullRequestSelection(pullRequestKey(nextRow))
+    if (next) warmReviewPage(queryClient, next)
   }, [queryClient, nextRow])
 
   const githubLink =
@@ -414,11 +419,12 @@ export function OpenPullRequests({
                 void queryClient.invalidateQueries({
                   queryKey: ["my-pr-review-summaries", login],
                 })
-                // An open preview outlives a refresh, so its checks and
-                // comments would otherwise stay as they were when it opened.
-                void queryClient.invalidateQueries({
-                  queryKey: ["pr-preview"],
-                })
+                for (const key of [
+                  "review",
+                  "reviewDiff",
+                  "review-conversation",
+                ])
+                  void queryClient.invalidateQueries({ queryKey: [key] })
               }}
             >
               Refresh
@@ -526,21 +532,7 @@ export function OpenPullRequests({
             <PullRequestDetail
               key={selected}
               pr={selectedRow}
-              login={login}
-              outcome={settled[pullRequestKey(selectedRow)]}
               onClose={() => onFiltersChange({ pr: undefined })}
-              expandedFiles={filters.files}
-              scrollAnchor={filters.at}
-              onPositionChange={(changes) => onFiltersChange(changes, true)}
-              onSettled={(outcome) =>
-                setSettled((previous) => ({
-                  ...previous,
-                  [pullRequestKey(selectedRow)]: outcome,
-                }))
-              }
-              onReady={() =>
-                refreshPullRequest(queryClient, login, selectedRow)
-              }
             />
           </div>
         )}

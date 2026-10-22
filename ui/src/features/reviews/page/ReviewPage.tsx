@@ -23,10 +23,16 @@ import { Rail } from "./Rail"
 import { NAVIGATOR_INLINE_QUERY, useReviewPage } from "./store"
 
 /** The pull request page: files on the left, the PR and its code in the middle, the agent on the right. */
-export function ReviewPage({ pr }: { pr: PullRequestRef }) {
+export function ReviewPage({
+  pr,
+  onClose,
+}: {
+  pr: PullRequestRef
+  onClose?: () => void
+}) {
+  const inline = Boolean(onClose)
   const queryClient = useQueryClient()
   const detail = useQuery(reviewQueries.detail(pr))
-  const chatThreadId = useReviewChat(pr).data?.thread_id
   const open = useReviewPage((state) => state.open)
   const navigatorOpen = useReviewPage((state) => state.navigatorOpen)
   const navigatorOverlay = useReviewPage((state) => state.navigatorOverlay)
@@ -35,6 +41,7 @@ export function ReviewPage({ pr }: { pr: PullRequestRef }) {
   )
   const railOpen = useReviewPage((state) => state.railOpen)
   const setRailOpen = useReviewPage((state) => state.setRailOpen)
+  const chatThreadId = useReviewChat(pr, !inline || railOpen).data?.thread_id
   // The server and the first client render assume a desktop window, so hydration matches.
   const hydrated = useIsHydrated()
   const wideQuery = useMediaQuery("(min-width: 1100px)")
@@ -44,6 +51,12 @@ export function ReviewPage({ pr }: { pr: PullRequestRef }) {
   const headSha = detail.data?.head_sha ?? null
 
   useLayoutEffect(() => open(pr, headSha), [open, pr, headSha])
+  useLayoutEffect(() => {
+    if (inline) {
+      setRailOpen(false)
+      setNavigatorOverlay(false)
+    }
+  }, [inline, setRailOpen, setNavigatorOverlay])
 
   // A new head means a new diff; the page stays mounted so nothing else resets.
   const seenSha = useRef(headSha)
@@ -70,26 +83,33 @@ export function ReviewPage({ pr }: { pr: PullRequestRef }) {
       markReviewViewed(queryClient, pr, chatThreadId)
   }, [queryClient, pr, chatThreadId, detailLoaded, walkthroughSha])
 
-  useCollapseAppSidebar(pr)
+  useCollapseAppSidebar(pr, inline)
   const sidebar = useSidebarControls()
   const isDesktop =
     typeof window !== "undefined" && Boolean(window.openSweDesktop)
-  const leftInset = sidebar?.collapsed
-    ? isDesktop
-      ? "pl-32"
-      : "pl-space-8"
-    : "pl-space-3"
+  const leftInset =
+    !inline && sidebar?.collapsed
+      ? isDesktop
+        ? "pl-32"
+        : "pl-space-8"
+      : "pl-space-3"
 
-  const navigatorInline = navigatorOpen && roomForNavigator
+  const navigatorInline = !inline && navigatorOpen && roomForNavigator
 
   return (
     <ChatDraftsProvider>
-      <div className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden bg-surface-level-1 text-primary">
+      <div
+        style={{ viewTransitionName: "pr-surface" }}
+        className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden bg-surface-level-1 text-primary"
+      >
         <Header
           pr={pr}
+          onClose={onClose}
           leftInset={leftInset}
-          compactRail={!wide}
-          navigatorShown={roomForNavigator ? navigatorOpen : navigatorOverlay}
+          compactRail={inline || !wide}
+          navigatorShown={
+            !inline && (roomForNavigator ? navigatorOpen : navigatorOverlay)
+          }
         />
         {detail.isError ? (
           <PullRequestUnavailable pr={pr} message={detail.error.message} />
@@ -103,7 +123,7 @@ export function ReviewPage({ pr }: { pr: PullRequestRef }) {
             <section aria-label="Changes" className="min-w-0 flex-1">
               <Changes pr={pr} />
             </section>
-            {wide && (
+            {!inline && wide && (
               <RightPanelShell
                 mode="inline"
                 widthStorageKey="open-swe.review-panel.width"
@@ -114,7 +134,7 @@ export function ReviewPage({ pr }: { pr: PullRequestRef }) {
             )}
           </div>
         )}
-        {!wide && (
+        {(!wide || inline) && (
           <SideSheet
             side="right"
             title="Chat and discussion"
@@ -125,7 +145,7 @@ export function ReviewPage({ pr }: { pr: PullRequestRef }) {
             <Rail pr={pr} onClose={() => setRailOpen(false)} />
           </SideSheet>
         )}
-        {!roomForNavigator && (
+        {(!roomForNavigator || inline) && (
           <SideSheet
             side="left"
             title="Files"
@@ -189,7 +209,7 @@ function PullRequestUnavailable({
 }
 
 /** Collapse the app's nav for room, unless the person came from it; restore it on the way out. */
-function useCollapseAppSidebar(pr: PullRequestRef) {
+function useCollapseAppSidebar(pr: PullRequestRef, inline: boolean) {
   const sidebar = useSidebarControls()
   const sidebarRef = useRef(sidebar)
   const fromSidebar = useRef(reviewOpenedFromSidebar(pr))
@@ -198,8 +218,8 @@ function useCollapseAppSidebar(pr: PullRequestRef) {
   }, [sidebar])
   useLayoutEffect(() => {
     const controls = sidebarRef.current
-    if (!controls || controls.collapsed || fromSidebar.current) return
+    if (inline || !controls || controls.collapsed || fromSidebar.current) return
     controls.setCollapsedForPage(true)
     return () => controls.setCollapsedForPage(false)
-  }, [])
+  }, [inline])
 }
