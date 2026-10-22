@@ -34,6 +34,20 @@ def test_cross_origin_https_session_cookie_is_none(monkeypatch: pytest.MonkeyPat
     assert dashboard_oauth.cookie_security() == (True, "none")
 
 
+def test_https_without_a_dashboard_keeps_the_session_cookie_lax(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """With no dashboard origin the CSRF origin check is off, so the cookie must not go cross-site."""
+    monkeypatch.delenv("DASHBOARD_BASE_URL", raising=False)
+    monkeypatch.delenv("DASHBOARD_ALLOWED_ORIGINS", raising=False)
+    monkeypatch.delenv("DASHBOARD_DEV_SERVER_URL", raising=False)
+    monkeypatch.setenv("DASHBOARD_STATIC_DIR", str(tmp_path))
+    monkeypatch.setenv("DASHBOARD_API_BASE_URL", "https://api.example")
+
+    assert dashboard_links.dashboard_base_url() == ""
+    assert dashboard_oauth.cookie_security() == (True, "lax")
+
+
 def test_local_dev_model_check_needs_an_explicit_localhost_dashboard(
     monkeypatch: pytest.MonkeyPatch, bundled: Path
 ) -> None:
