@@ -392,7 +392,8 @@ def _attach_task_membership(
             }
         ):
             label = " ".join(membership.instructions.split())[:64].strip() or "Worker"
-            summary["title"] = f"{label} · {membership.thread_id[:8]}"
+            # The tail, as worker launch chips show it: a UUIDv7 starts with a shared timestamp.
+            summary["title"] = f"{label} · {membership.thread_id[-8:]}"
         if membership.cancelled:
             summary["status"] = "interrupted"
         elif membership.launch_error:
