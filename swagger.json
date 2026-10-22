@@ -3309,6 +3309,63 @@
         "title": "MintedApiKey",
         "type": "object"
       },
+      "MintedSyncToken": {
+        "description": "The creation response: the only place the secret appears, ready to paste into Claude Code.",
+        "properties": {
+          "created_at": {
+            "format": "date-time",
+            "title": "Created At",
+            "type": "string"
+          },
+          "id": {
+            "format": "uuid",
+            "title": "Id",
+            "type": "string"
+          },
+          "last_used_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Last Used At"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "secret": {
+            "title": "Secret",
+            "type": "string"
+          },
+          "settings": {
+            "additionalProperties": {
+              "$ref": "#/components/schemas/JsonValue"
+            },
+            "title": "Settings",
+            "type": "object"
+          },
+          "token_suffix": {
+            "title": "Token Suffix",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "name",
+          "token_suffix",
+          "created_at",
+          "last_used_at",
+          "secret",
+          "settings"
+        ],
+        "title": "MintedSyncToken",
+        "type": "object"
+      },
       "MissingCredential": {
         "description": "A service in the gateway this person has not connected yet.",
         "properties": {
@@ -6939,6 +6996,65 @@
         "title": "SubmittedReview",
         "type": "object"
       },
+      "SyncTokenCreate": {
+        "properties": {
+          "name": {
+            "maxLength": 120,
+            "minLength": 1,
+            "title": "Name",
+            "type": "string"
+          }
+        },
+        "required": [
+          "name"
+        ],
+        "title": "SyncTokenCreate",
+        "type": "object"
+      },
+      "SyncTokenView": {
+        "description": "A stored token as its owner sees it. Has no field for the secret.",
+        "properties": {
+          "created_at": {
+            "format": "date-time",
+            "title": "Created At",
+            "type": "string"
+          },
+          "id": {
+            "format": "uuid",
+            "title": "Id",
+            "type": "string"
+          },
+          "last_used_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Last Used At"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "token_suffix": {
+            "title": "Token Suffix",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "name",
+          "token_suffix",
+          "created_at",
+          "last_used_at"
+        ],
+        "title": "SyncTokenView",
+        "type": "object"
+      },
       "TelemetryConfig": {
         "properties": {
           "environment": {
@@ -10363,6 +10479,150 @@
         "tags": [
           "dashboard",
           "sandbox-bridge"
+        ]
+      }
+    },
+    "/dashboard/api/claude-code/hooks": {
+      "post": {
+        "operationId": "api_claude_code_hook_dashboard_api_claude_code_hooks_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object"
+              }
+            }
+          },
+          "description": "A Claude Code hook event, as Claude Code posts it. Authorized by a Claude Code sync token as a bearer token.",
+          "required": true
+        },
+        "responses": {
+          "204": {
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Api Claude Code Hook",
+        "tags": [
+          "dashboard",
+          "claude-code"
+        ]
+      }
+    },
+    "/dashboard/api/claude-code/tokens": {
+      "get": {
+        "operationId": "api_list_claude_code_tokens_dashboard_api_claude_code_tokens_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/SyncTokenView"
+                  },
+                  "title": "Response Api List Claude Code Tokens Dashboard Api Claude Code Tokens Get",
+                  "type": "array"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "security": [
+          {
+            "DashboardSession": []
+          }
+        ],
+        "summary": "Api List Claude Code Tokens",
+        "tags": [
+          "dashboard",
+          "claude-code"
+        ]
+      },
+      "post": {
+        "operationId": "api_create_claude_code_token_dashboard_api_claude_code_tokens_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SyncTokenCreate"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MintedSyncToken"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "DashboardSession": []
+          }
+        ],
+        "summary": "Api Create Claude Code Token",
+        "tags": [
+          "dashboard",
+          "claude-code"
+        ]
+      }
+    },
+    "/dashboard/api/claude-code/tokens/{token_id}": {
+      "delete": {
+        "operationId": "api_revoke_claude_code_token_dashboard_api_claude_code_tokens__token_id__delete",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "token_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Token Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "DashboardSession": []
+          }
+        ],
+        "summary": "Api Revoke Claude Code Token",
+        "tags": [
+          "dashboard",
+          "claude-code"
         ]
       }
     },

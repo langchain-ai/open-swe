@@ -1,6 +1,7 @@
 import { createFileRoute } from "@tanstack/react-router"
 
 import { SettingsPage } from "@/components/AppShell"
+import { ClaudeCodeSyncSection } from "@/features/settings/components/ClaudeCodeSyncSection"
 import { ConnectionsSection } from "@/features/settings/components/ConnectionsSection"
 import { MCPConnectionsSection } from "@/features/settings/components/MCPConnectionsSection"
 import { ManagedToolsSection } from "@/features/settings/components/ManagedToolsSection"
@@ -20,6 +21,7 @@ function ConnectionsPage() {
       {(user) => (
         <>
           <ConnectionsSection user={user} />
+          <ClaudeCodeSyncSection />
           <ManagedToolsSection />
           <MCPConnectionsSection scope="user" />
         </>
