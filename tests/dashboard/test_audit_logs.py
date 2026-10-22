@@ -18,10 +18,10 @@ from openswe.audit_logs.routes import router
 from openswe.bridge import routes as bridge_routes
 from openswe.bridge.store import BridgeStore
 from openswe.dashboard import deps, oauth, workspace_settings
+from openswe.dashboard.settings_records import INSTANCE_SETTINGS, WORKSPACE_SETTINGS
 from openswe.database import postgres
 from openswe.threads.principals import PrincipalDep
 from openswe.workspaces.store import WORKSPACES, WorkspaceCreate
-from tests.conftest import FakeStore
 
 
 class Settings(BaseModel):
@@ -177,8 +177,9 @@ async def test_telemetry_keeps_its_effects_without_audit_entries(
 
 
 @pytest.mark.parametrize("workspace", [None, "preview"])
+@pytest.mark.usefixtures("registry_db")
 async def test_settings_audit_changes_are_redacted_and_track_resets(
-    monkeypatch: pytest.MonkeyPatch, fake_store: FakeStore, workspace: str | None
+    monkeypatch: pytest.MonkeyPatch, workspace: str | None
 ) -> None:
     monkeypatch.setenv("DASHBOARD_JWT_SECRET", "audit-test-secret-that-is-at-least-32-bytes")
     monkeypatch.setattr(deps, "is_admin", lambda email, *, login: login == "admin")
@@ -194,10 +195,9 @@ async def test_settings_audit_changes_are_redacted_and_track_resets(
     monkeypatch.setattr(WORKSPACES, "get", workspace_exists)
     application = app()
     application.include_router(workspace_settings.router, prefix="/dashboard/api")
-    namespace = ["team_settings"] if workspace is None else ["workspace_settings"]
-    fake_store.seed(
-        namespace,
-        workspace or "default",
+    records = INSTANCE_SETTINGS if workspace is None else WORKSPACE_SETTINGS
+    await records.put(
+        workspace or "",
         {"model_routing_enabled": False, "org_guidelines": "old-secret", "unknown": "secret"},
     )
     path = (
@@ -239,8 +239,9 @@ async def test_settings_audit_changes_are_redacted_and_track_resets(
 
 
 @pytest.mark.parametrize("failure", ["read", "write"])
+@pytest.mark.usefixtures("registry_db")
 async def test_settings_audit_does_not_invent_changes_on_store_failure(
-    monkeypatch: pytest.MonkeyPatch, fake_store: FakeStore, failure: str
+    monkeypatch: pytest.MonkeyPatch, failure: str
 ) -> None:
     monkeypatch.setenv("DASHBOARD_JWT_SECRET", "audit-test-secret-that-is-at-least-32-bytes")
     monkeypatch.setattr(deps, "is_admin", lambda email, *, login: True)
@@ -253,9 +254,10 @@ async def test_settings_audit_does_not_invent_changes_on_store_failure(
         raise RuntimeError("store unavailable")
 
     monkeypatch.setattr(middleware, "append_safely", append)
-    monkeypatch.setattr(
-        workspace_settings, "_instance_record" if failure == "read" else "put_value", fail
-    )
+    if failure == "read":
+        monkeypatch.setattr(workspace_settings, "instance_record", fail)
+    else:
+        monkeypatch.setattr(INSTANCE_SETTINGS, "put", fail)
     application = app()
     application.include_router(workspace_settings.router, prefix="/dashboard/api")
     async with httpx.AsyncClient(
@@ -269,10 +271,11 @@ async def test_settings_audit_does_not_invent_changes_on_store_failure(
     assert entry.operation_succeeded is (failure == "read")
     assert entry.enrichments.settings_changes is None
     assert current_audit_log.get() is None
+    stored = await INSTANCE_SETTINGS.get()
     if failure == "read":
-        assert fake_store.values(["team_settings"])["default"]["model_routing_enabled"] is True
+        assert stored is not None and stored["model_routing_enabled"] is True
     else:
-        assert not fake_store.items
+        assert stored is None
 
 
 async def test_audit_failure_preserves_response(

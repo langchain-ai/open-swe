@@ -10,15 +10,24 @@ import re
 from datetime import UTC, datetime, timedelta
 from typing import Any, Self
 
+import aiohttp
+from slack_sdk.errors import SlackApiError
 from sqlalchemy import func, select
 from sqlalchemy.dialects.postgresql import JSONB, insert
+from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import Mapped, mapped_column
 
 from openswe.config import ENV
 from openswe.database import postgres
 from openswe.database.orm import NOW, Base
 from openswe.slack.client import post_slack_top_level_message_with_ts
-from openswe.slack.http import SLACK_REQUEST_ERRORS, SlackClient, SlackRequestError, slack_error
+from openswe.slack.http import (
+    SLACK_REQUEST_ERRORS,
+    SlackClient,
+    SlackRequestError,
+    slack_error,
+    slack_retry_after,
+)
 from openswe.slack.payloads import SlackChannelContext, SlackChannelPayload, SlackMessage
 from openswe.utils.json_types import JsonObject
 
@@ -26,10 +35,36 @@ logger = logging.getLogger(__name__)
 
 SLACK_BOT_TOKEN = ENV.SLACK_BOT_TOKEN.get()
 PAYLOAD_TTL = timedelta(seconds=300)
+_NEVER_FETCHED = datetime.fromtimestamp(0, UTC)
 HISTORY_MAX_MESSAGES = 100
 
 _MENTION = re.compile(r"^<#([A-Z0-9]+)(?:\|[^>]*)?>$")
 _ID_SHAPE = re.compile(r"^[CGD][A-Z0-9]{8,}$")
+
+
+class ChannelLookupUnavailable(RuntimeError):
+    def __init__(self, retry_after: int) -> None:
+        super().__init__("Slack channel verification is temporarily unavailable")
+        self.retry_after = retry_after
+
+    @classmethod
+    def from_error(cls, exc: Exception) -> Self | None:
+        response = getattr(exc, "response", None)
+        status = getattr(response, "status_code", getattr(response, "status", None))
+        transient = isinstance(exc, (aiohttp.ClientError, TimeoutError)) or (
+            isinstance(exc, SlackApiError)
+            and (
+                status == 429
+                or (isinstance(status, int) and 500 <= status < 600)
+                or slack_error(exc).startswith("rate_limited")
+                or slack_error(exc) in {"internal_error", "fatal_error", "request_timeout"}
+            )
+        )
+        if not transient:
+            return None
+        raw_delay = slack_retry_after(exc) or "60"
+        delay = int(raw_delay) if re.fullmatch(r"[0-9]{1,8}", raw_delay) else 60
+        return cls(max(1, delay))
 
 
 class SlackChannel(Base):
@@ -97,6 +132,20 @@ class SlackChannel(Base):
             )
 
     @classmethod
+    async def ensure(cls, session: AsyncSession, *channel_ids: str) -> None:
+        """Give each channel a row for other rows to reference, inside ``session``.
+
+        A new row is a stub that never counts as ``fresh`` and matches no name,
+        so its details load from Slack on first use.
+        """
+        if ids := sorted(set(channel_ids)):
+            await session.execute(
+                insert(cls)
+                .values([{"id": channel_id, "fetched_at": _NEVER_FETCHED} for channel_id in ids])
+                .on_conflict_do_nothing(index_elements=[cls.id])
+            )
+
+    @classmethod
     async def _row(cls, channel_id: str) -> Self | None:
         if not postgres.configured():
             return None
@@ -111,11 +160,21 @@ class SlackChannel(Base):
             return await session.scalar(select(cls).where(cls.name == name))
 
     @classmethod
-    async def load(cls, channel_id: str, *, use_cache: bool = True) -> Self | None:
+    async def cached(cls, channel_id: str) -> Self | None:
+        """Fresh directory metadata only; never contact Slack for an audit lookup."""
+        if not SLACK_BOT_TOKEN or not channel_id:
+            return None
+        known = await cls._row(channel_id)
+        return known if known is not None and known.fresh else None
+
+    @classmethod
+    async def load(
+        cls, channel_id: str, *, use_cache: bool = True, raise_unavailable: bool = False
+    ) -> Self | None:
         """The channel, from the directory while fresh and from Slack otherwise."""
         if not SLACK_BOT_TOKEN or not channel_id:
             return None
-        if use_cache and (known := await cls._row(channel_id)) is not None and known.fresh:
+        if use_cache and (known := await cls.cached(channel_id)) is not None:
             return known
         try:
             async with SlackClient.bot() as client:
@@ -126,6 +185,8 @@ class SlackChannel(Base):
                 return cls.from_payload(payload)
         except SLACK_REQUEST_ERRORS as exc:
             logger.warning("Slack channel lookup failed", extra={"slack_error": slack_error(exc)})
+            if raise_unavailable and (unavailable := ChannelLookupUnavailable.from_error(exc)):
+                raise unavailable from None
         return None
 
     @classmethod
@@ -137,7 +198,10 @@ class SlackChannel(Base):
     @classmethod
     async def context_for(cls, channel_id: str, *, use_cache: bool = True) -> SlackChannelContext:
         """One channel's context, empty but for its id when the channel is unreadable."""
-        channel = await cls.load(channel_id, use_cache=use_cache)
+        try:
+            channel = await cls.load(channel_id, use_cache=use_cache, raise_unavailable=True)
+        except ChannelLookupUnavailable as exc:
+            return SlackChannelContext(id=channel_id, lookup_retry_after=exc.retry_after)
         return channel.context if channel is not None else SlackChannelContext(id=channel_id)
 
     @classmethod

@@ -24,8 +24,9 @@ from openswe.message_queue import QueuedMessage
 from openswe.prompts import prompt
 from openswe.run_config import RunConfig
 from openswe.schedules import store as schedules
-from openswe.slack.client import lookup_slack_thread_id, parse_github_pr_url, parse_slack_thread_url
+from openswe.slack.client import parse_github_pr_url, parse_slack_thread_url
 from openswe.slack.code_channels import CODE_CHANNEL_SESSION_TS
+from openswe.slack.records import lookup_slack_thread_id
 from openswe.threads import plan_api, workflow_approval_api
 from openswe.threads.handlers import (
     admin_cancel_dashboard_thread,
@@ -44,7 +45,6 @@ from openswe.threads.workflow_approval import (
     workflow_push_approval_responses,
 )
 from openswe.tools.mcp_exposure import expose_mcp
-from openswe.tools.sandbox_preference import sandbox_only
 from openswe.users import User
 from openswe.utils.dashboard_links import (
     dashboard_plan_url,
@@ -245,7 +245,6 @@ def _exact_locator_filters(
 
 
 @expose_mcp()
-@sandbox_only
 async def list_threads(
     participant: str | None = None,
     all_users: bool = False,
@@ -581,7 +580,7 @@ async def _queued_message_count(thread_id: str) -> int:
         logger.warning(
             "Could not count queued messages",
             exc_info=True,
-            extra={"thread": {"thread_id": thread_id}},
+            extra={"thread_id": thread_id},
         )
         return 0
 
@@ -596,6 +595,7 @@ def _compact_plan(content: Mapping[str, Any], comments: list[dict[str, Any]]) ->
             "author": comment.get("author"),
             "author_login": comment.get("author_login"),
             "body": str(comment.get("body") or "")[:_MAX_DETAIL_MESSAGE_CHARS],
+            "parent_id": comment.get("parent_id"),
             "anchor": comment.get("anchor") if isinstance(comment.get("anchor"), Mapping) else None,
             "created_at": comment.get("created_at"),
         }
@@ -670,12 +670,10 @@ async def _authorized_locator(
         if not thread_id:
             return _failure("Could not resolve LangSmith trace to an Open SWE thread")
     elif slack_locator:
-        client = langgraph_client()
-        thread_id = await lookup_slack_thread_id(client, *slack_locator) or ""
+        thread_id = await lookup_slack_thread_id(*slack_locator) or ""
         if not thread_id:
             thread_id = (
-                await lookup_slack_thread_id(client, slack_locator[0], CODE_CHANNEL_SESSION_TS)
-                or ""
+                await lookup_slack_thread_id(slack_locator[0], CODE_CHANNEL_SESSION_TS) or ""
             )
         if not thread_id:
             return _failure("Could not resolve Slack link to an Open SWE thread")
@@ -764,7 +762,6 @@ def _available_actions(
 
 
 @expose_mcp()
-@sandbox_only
 async def get_thread(
     thread_id: str,
     state: Annotated[dict[str, Any] | None, InjectedState] = None,
@@ -891,6 +888,7 @@ async def _send_message(
 ) -> dict[str, Any]:
     # The dashboard's own send: a busy thread gets the message steered into its
     # open turn or queued as a follow-up run, both shown on the transcript at once.
+    # Marked as relayed so it never moves the recipient's conversation to Web.
     configurable: dict[str, Any] = {}
     if model_id and effort:
         configurable.update(agent_model_id=model_id, agent_effort=effort)
@@ -902,11 +900,13 @@ async def _send_message(
             "config": {"configurable": configurable},
         },
     }
+    caller_thread_id = as_json_object(_config().get("configurable")).get("thread_id")
     status_code, content, _ = await proxy_dashboard_thread_commands(
         thread_id,
         actor.login,
         json.dumps(command).encode(),
         email=actor.email,
+        relayed_from=caller_thread_id if isinstance(caller_thread_id, str) else None,
     )
     try:
         reply = _CommandReply.model_validate_json(content or b"{}")

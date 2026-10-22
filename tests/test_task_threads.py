@@ -16,7 +16,7 @@ from openswe.tasks import messages as task_messages
 from openswe.tasks.messages import TaskMessage
 from openswe.tasks.presentation import TaskEventMetadata
 from openswe.tasks.schemas import ThreadMetadata
-from openswe.threads import access, creation, handlers
+from openswe.threads import access, handlers
 from openswe.users import User
 from openswe.users.models import UserIdentity
 from openswe.webhooks import event_matches
@@ -203,11 +203,12 @@ def client(monkeypatch: pytest.MonkeyPatch) -> MagicMock:
     monkeypatch.setattr(service, "get_profile", AsyncMock(return_value={}))
     monkeypatch.setattr(service, "resolve_run_email", AsyncMock(return_value=None))
     monkeypatch.setattr(service, "COMPLETION_WEBHOOK_URL", "https://example.test/completion")
-    monkeypatch.setattr(creation, "_owner_prefers_tools_in_sandbox", AsyncMock(return_value=False))
     from openswe import dispatch
     from openswe.slack import thinking
 
-    monkeypatch.setattr(dispatch, "_run_user_id", AsyncMock(return_value=None))
+    monkeypatch.setattr(
+        dispatch, "_run_user_metadata", AsyncMock(return_value={"ls_repo_provider": "github"})
+    )
     monkeypatch.setattr(thinking, "sync_slack_background_status", AsyncMock())
     monkeypatch.setattr(service, "interrupt_transcript_turns", AsyncMock())
     monkeypatch.setattr(service, "cancel_thread_wakeups", AsyncMock())
@@ -296,11 +297,12 @@ async def test_task_owner_id_survives_rename_and_rejects_reassigned_login(
     assert (
         await service.authorized_metadata(service.Actor(COORDINATOR, "renamed-owner"))
     ).owner_user_id == owner_id
-    assert not await flags.task_coordination_enabled(OWNER, owner_user_id=owner_id)
-    assert not await flags.task_coordination_enabled("renamed-owner")
-    with pytest.raises(PermissionError, match="disabled"):
+    assert await flags.task_coordination_enabled(OWNER, owner_user_id=owner_id) is enabled
+    if enabled:
         await flags.require_task_coordination(client.metadata[COORDINATOR])
-    assert owner.typed_preferences.experimental_task_coordination is enabled
+    else:
+        with pytest.raises(PermissionError, match="disabled"):
+            await flags.require_task_coordination(client.metadata[COORDINATOR])
     with pytest.raises(PermissionError, match="thread owner"):
         await service.authorized_metadata(service.Actor(COORDINATOR, OWNER))
     monkeypatch.setattr(User, "get", AsyncMock(return_value=None))
@@ -363,7 +365,7 @@ async def test_desktop_worker_cannot_be_shared(
         current_task, delegation, ThreadMetadata.model_validate(client.metadata[COORDINATOR])
     )
 
-    with pytest.raises(HTTPException, match="owner's Mac") as error:
+    with pytest.raises(HTTPException, match="owner's machine") as error:
         await handlers.share_thread_with_workspace(delegation.worker_thread_id, OWNER)
     assert error.value.status_code == 409
     client.threads.update.assert_not_called()
@@ -423,15 +425,6 @@ async def test_control_rejects_worker_from_another_task(
 async def test_lost_launch_response_retries_same_worker_without_waiting_for_work(
     client: MagicMock, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    monkeypatch.setattr(
-        flags,
-        "task_coordination_enabled",
-        AsyncMock(
-            side_effect=lambda *args, **kwargs: (
-                client.owner.typed_preferences.experimental_task_coordination
-            )
-        ),
-    )
     actor = service.Actor(COORDINATOR, OWNER)
     workspace = WorkspaceRow(slug="engineering", name="Engineering")
     async with postgres.session() as session:
@@ -519,15 +512,6 @@ async def test_lost_launch_response_retries_same_worker_without_waiting_for_work
 async def test_concurrent_first_spawns_and_replay_share_one_task(
     client: MagicMock, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    monkeypatch.setattr(
-        flags,
-        "task_coordination_enabled",
-        AsyncMock(
-            side_effect=lambda *args, **kwargs: (
-                client.owner.typed_preferences.experimental_task_coordination
-            )
-        ),
-    )
     actor = service.Actor(COORDINATOR, OWNER)
     monkeypatch.setattr(service, "model_choice", AsyncMock(return_value=(MODEL, "low")))
     results = await asyncio.gather(
@@ -563,15 +547,6 @@ async def test_concurrent_first_spawns_and_replay_share_one_task(
 async def test_cancel_discards_owed_assignment_without_reviving_worker(
     client: MagicMock, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    monkeypatch.setattr(
-        flags,
-        "task_coordination_enabled",
-        AsyncMock(
-            side_effect=lambda *args, **kwargs: (
-                client.owner.typed_preferences.experimental_task_coordination
-            )
-        ),
-    )
     actor = service.Actor(COORDINATOR, OWNER)
     monkeypatch.setattr(service, "model_choice", AsyncMock(return_value=(MODEL, "low")))
     result = await service.spawn_worker(
@@ -616,15 +591,6 @@ async def test_cancel_discards_owed_assignment_without_reviving_worker(
 async def test_finished_worker_can_receive_follow_up_and_gain_a_sibling(
     client: MagicMock, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    monkeypatch.setattr(
-        flags,
-        "task_coordination_enabled",
-        AsyncMock(
-            side_effect=lambda *args, **kwargs: (
-                client.owner.typed_preferences.experimental_task_coordination
-            )
-        ),
-    )
     actor = service.Actor(COORDINATOR, OWNER)
     monkeypatch.setattr(service, "model_choice", AsyncMock(return_value=(MODEL, "low")))
     first = await service.spawn_worker(

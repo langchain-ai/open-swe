@@ -6,9 +6,12 @@ from typing import Literal, cast
 from unittest.mock import AsyncMock
 from uuid import UUID, uuid7
 
+import httpx
 import pytest
 from fastapi import HTTPException
+from langgraph_sdk.errors import APIStatusError
 
+from openswe.bridge.store import BridgeStore
 from openswe.dashboard import deps, profiles
 from openswe.dashboard.workspace_settings import (
     WorkspaceSettings,
@@ -16,6 +19,7 @@ from openswe.dashboard.workspace_settings import (
     upsert_instance_settings,
     upsert_workspace_overrides,
 )
+from openswe.input_messages import dynamic_context_hash, person_introduction
 from openswe.message_queue import QueuedMessage
 from openswe.tasks.store import SidebarTaskMembership
 from openswe.threads import diffs as thread_diffs
@@ -29,7 +33,7 @@ from openswe.transcript.engine import AppendResult
 from openswe.transcript.turns import OpenTurn
 from openswe.users import User, UserPreferences
 from openswe.workspaces.store import WORKSPACES, WorkspaceCreate
-from tests.conftest import FakeStore, patch_thread_module
+from tests.conftest import patch_thread_module
 
 _TEXT_ONLY_MODEL = "fireworks:accounts/fireworks/models/kimi-k3"
 _VISION_MODEL = "openai:gpt-6.1-sol"
@@ -70,9 +74,7 @@ async def test_create_session_starts_only_when_requested(monkeypatch, start: boo
         dispatch.assert_not_awaited()
 
 
-async def test_create_session_uses_saved_defaults(
-    monkeypatch, fake_store: FakeStore, registry_db
-) -> None:
+async def test_create_session_uses_saved_defaults(monkeypatch, registry_db) -> None:
     created: dict[str, object] = {}
     _patch_new_thread_deps(monkeypatch, profile={"default_repo": "acme/oss"})
     patch_thread_module(monkeypatch, "langgraph_client", lambda: _new_thread_client(created))
@@ -90,6 +92,34 @@ async def test_create_session_uses_saved_defaults(
     assert metadata["repo_name"] == "oss"
     assert metadata["workspace"] == "oss"
     access.assert_awaited_once_with("octocat", "acme/oss")
+
+
+@pytest.mark.parametrize("explicit_repo", [None, "acme/explicit"])
+async def test_create_session_uses_selected_workspace_personal_default(
+    monkeypatch, registry_db, explicit_repo: str | None
+) -> None:
+    created: dict[str, object] = {}
+    _patch_new_thread_deps(
+        monkeypatch,
+        profile={
+            "default_repo": "acme/oss",
+            "workspace_default_repos": {"selected": "acme/scoped"},
+        },
+    )
+    patch_thread_module(monkeypatch, "langgraph_client", lambda: _new_thread_client(created))
+    monkeypatch.setattr(thread_runs, "require_repo_access_for_user", AsyncMock())
+    await WORKSPACES.create(
+        WorkspaceCreate(name="OSS", repos=["acme/oss", "acme/scoped"]), "octocat"
+    )
+    await WORKSPACES.create(WorkspaceCreate(name="Selected"), "octocat")
+    await thread_runs.create_dashboard_session(
+        thread_runs.SessionCreateBody(prompt="Fix login", repo=explicit_repo, workspace="selected"),
+        "octocat",
+    )
+    metadata = created["metadata"]
+    assert isinstance(metadata, dict)
+    assert metadata["repo_name"] == ("explicit" if explicit_repo else "scoped")
+    assert metadata["workspace"] == "selected"
 
 
 def _image() -> thread_runs.DashboardImageBody:
@@ -143,7 +173,7 @@ def _patch_new_thread_deps(monkeypatch, *, profile: dict[str, object]) -> None:
 
 
 async def test_enrich_run_start_command_stamps_workspace_from_repo_owner(
-    monkeypatch, fake_store: FakeStore, registry_db
+    monkeypatch, registry_db
 ) -> None:
     created: dict[str, object] = {}
     _patch_new_thread_deps(monkeypatch, profile={})
@@ -171,8 +201,42 @@ async def test_enrich_run_start_command_stamps_workspace_from_repo_owner(
     assert created_metadata["workspace"] == "oss"
 
 
+async def test_a_thread_on_the_creators_machine_is_created_private(
+    monkeypatch, registry_db
+) -> None:
+    created: dict[str, object] = {}
+    _patch_new_thread_deps(monkeypatch, profile={})
+    patch_thread_module(monkeypatch, "langgraph_client", lambda: _new_thread_client(created))
+    bridge = await BridgeStore.register(
+        owner_id="github:octocat",
+        hostname="laptop.local",
+        root_path="/Users/octocat/app",
+        label=None,
+        bridge_id=None,
+    )
+    assert bridge is not None
+    command = {
+        "method": "run.start",
+        "params": {
+            "input": {"messages": [{"type": "human", "content": "Fix the flaky test"}]},
+            "config": {
+                "configurable": {"thread_type": "workspace", "sandbox_bridge_id": bridge.bridge_id}
+            },
+        },
+    }
+
+    await thread_runs._enrich_run_start_command(
+        "new-tid", "octocat", command, metadata={}, creating=True
+    )
+
+    created_metadata = created["metadata"]
+    assert isinstance(created_metadata, dict)
+    assert created_metadata["sandbox_id"] == bridge.sandbox_id
+    assert created_metadata["visibility"] == "private"
+
+
 async def test_enrich_run_start_command_resolves_model_from_repos_workspace(
-    monkeypatch, fake_store: FakeStore, registry_db
+    monkeypatch, registry_db
 ) -> None:
     """A new thread's model default is the repo's workspace override, not the instance record."""
     created: dict[str, object] = {}
@@ -285,7 +349,11 @@ async def test_dashboard_run_stamps_sender_not_original_slack_user(
     second = uuid7()
 
     async def by_login(provider: str, login: str) -> SimpleNamespace | None:
-        return SimpleNamespace(id=second) if (provider, login) == ("github", "second-gh") else None
+        return (
+            SimpleNamespace(id=second, github_login=login)
+            if (provider, login) == ("github", "second-gh")
+            else None
+        )
 
     async def canonical(person: dict[str, str]) -> dict[str, str]:
         return person
@@ -299,8 +367,10 @@ async def test_dashboard_run_stamps_sender_not_original_slack_user(
         "method": "run.start",
         "params": {
             "input": {"messages": [{"type": "human", "content": "follow up"}]},
-            "metadata": {"user_id": str(first)},
-            "config": {"metadata": {"user_id": str(first)}},
+            "metadata": {"user_id": str(first), "ls_attribution_identifier": "first-gh"},
+            "config": {
+                "metadata": {"user_id": str(first), "ls_attribution_identifier": "first-gh"}
+            },
         },
     }
     enriched = await thread_runs._enrich_run_start_command(
@@ -314,6 +384,39 @@ async def test_dashboard_run_stamps_sender_not_original_slack_user(
     )
     assert enriched["params"]["metadata"]["user_id"] == str(second)
     assert enriched["params"]["config"]["metadata"]["user_id"] == str(second)
+    assert enriched["params"]["metadata"]["ls_attribution_identifier"] == "second-gh"
+    assert enriched["params"]["config"]["metadata"]["ls_attribution_identifier"] == "second-gh"
+
+
+@pytest.mark.parametrize("relayed", [False, True])
+async def test_only_a_person_on_web_moves_a_slack_thread_to_web(
+    monkeypatch: pytest.MonkeyPatch, relayed: bool
+) -> None:
+    async def canonical(person: dict[str, str]) -> dict[str, str]:
+        return person
+
+    monkeypatch.setattr(User, "canonical_person", canonical)
+    metadata = {"source": "slack", "source_context": {"slack_thread": {"thread_ts": "1.2"}}}
+    created: dict[str, object] = {"metadata": dict(metadata)}
+    _patch_new_thread_deps(monkeypatch, profile={})
+    patch_thread_module(monkeypatch, "langgraph_client", lambda: _new_thread_client(created))
+    params: dict[str, object] = {
+        "input": {"messages": [{"type": "human", "content": "Pushed the fix"}]}
+    }
+    if relayed:
+        params[thread_runs.RELAYED_FROM_KEY] = "coordinator-tid"
+
+    enriched = await thread_runs._enrich_run_start_command(
+        "existing-tid", "octocat", {"method": "run.start", "params": params}, metadata=metadata
+    )
+
+    texts = "".join(str(message["content"]) for message in enriched["params"]["input"]["messages"])
+    assert ("system:dashboard-handoff" in texts) is not relayed
+    assert ('surface="web"' in texts) is not relayed
+    assert thread_runs.RELAYED_FROM_KEY not in enriched["params"]
+    source = "slack" if relayed else "dashboard"
+    assert enriched["params"]["config"]["configurable"]["source"] == source
+    assert cast(dict[str, object], created["metadata"])["source"] == source
 
 
 @pytest.mark.parametrize("selection_changed", [False, True])
@@ -528,6 +631,35 @@ async def test_enrich_run_start_command_allowlists_client_configurable(monkeypat
     assert updates[-1]["model_selection"] == "explicit"
 
 
+@pytest.mark.parametrize("history_available", [True, False])
+async def test_dashboard_context_hashes_replace_stale_metadata(
+    monkeypatch: pytest.MonkeyPatch, history_available: bool
+) -> None:
+    person_id = f"user:{uuid7()}"
+    linked = person_introduction({"id": person_id, "open_swe_account": "linked"})
+    unlinked = person_introduction({"id": person_id, "open_swe_account": "unlinked"})
+    linked_hash = dynamic_context_hash(linked["content"])
+    unlinked_hash = dynamic_context_hash(unlinked["content"])
+    assert linked_hash and unlinked_hash
+    get_state = AsyncMock(return_value={"values": {"messages": [linked, unlinked]}})
+    if not history_available:
+        get_state.side_effect = RuntimeError("History unavailable")
+    client = SimpleNamespace(threads=SimpleNamespace(get_state=get_state))
+    monkeypatch.setattr(User, "canonical_person", AsyncMock(return_value={"id": person_id}))
+
+    _, injected, _ = await thread_runs._attributed_run_messages(
+        "tid",
+        "octocat",
+        metadata={"injected_dynamic_context_hashes": [linked_hash, unlinked_hash]},
+        content="Continue",
+        creating=False,
+        email=None,
+        client=client,
+    )
+
+    assert injected == ({unlinked_hash} if history_available else {linked_hash, unlinked_hash})
+
+
 async def test_enrich_run_start_command_reuses_a_deduplicated_turn(monkeypatch) -> None:
     """A retried dispatch must join the turn its first request recorded."""
 
@@ -583,6 +715,28 @@ async def test_enrich_run_start_command_reuses_a_deduplicated_turn(monkeypatch) 
     )
 
     assert enriched["params"]["config"]["configurable"]["transcript_turn_id"] == str(recorded)
+
+
+@pytest.mark.parametrize("status_code", [403, 503])
+async def test_proxy_commands_preserves_thread_lookup_failure(
+    monkeypatch, status_code: int
+) -> None:
+    error = APIStatusError(
+        "thread lookup failed",
+        response=httpx.Response(
+            status_code, request=httpx.Request("GET", "http://api/threads/tid")
+        ),
+        body=None,
+    )
+    client = SimpleNamespace(threads=SimpleNamespace(get=AsyncMock(side_effect=error)))
+    patch_thread_module(monkeypatch, "langgraph_client", lambda: client)
+
+    with pytest.raises(APIStatusError) as exc_info:
+        await thread_proxy.proxy_dashboard_thread_commands(
+            "tid", "octocat", b'{"method": "run.start"}'
+        )
+
+    assert exc_info.value is error
 
 
 async def test_proxy_commands_rejects_non_admin_on_admin_thread(monkeypatch) -> None:
@@ -831,7 +985,7 @@ async def test_list_dashboard_threads_page_pages_beyond_first_search_batch(monke
     run_list_calls = 0
 
     class FakeThreads:
-        async def search(self, *, metadata, limit, offset, sort_by, sort_order, select):
+        async def search(self, *, metadata, limit, offset, sort_by, sort_order, select, params):
             offsets.append(offset)
             assert select == thread_listing._THREAD_LIST_SELECT
             return threads[offset : offset + limit]
@@ -912,7 +1066,7 @@ async def test_task_hierarchy_opt_in_visibility_and_idle_refresh(
     flat_parent = {"id": "t3"}
     await thread_listing.attach_task_workers(client, [flat_parent], "octocat", None)
     assert "taskWorkers" not in flat_parent
-    monkeypatch.setattr(thread_listing, "task_coordination_enabled", AsyncMock(return_value=True))
+    preferences.return_value = UserPreferences(experimental_task_coordination=True)
     first = await thread_listing.list_dashboard_threads_page("octocat", hierarchy=True, limit=1)
     assert [item["id"] for item in first["items"]] == ["t3"]
     parent = first["items"][0]
@@ -963,7 +1117,11 @@ async def test_task_hierarchy_opt_in_visibility_and_idle_refresh(
 async def test_task_hierarchy_stops_at_distinct_root_target_or_scan_cap(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    monkeypatch.setattr(thread_listing, "task_coordination_enabled", AsyncMock(return_value=True))
+    monkeypatch.setattr(
+        User,
+        "preferences_for_login",
+        AsyncMock(return_value=UserPreferences(experimental_task_coordination=True)),
+    )
     monkeypatch.setattr(thread_listing, "_THREADS_SEARCH_PAGE", 2)
     threads = _make_threads(12, resolved_before=0)
     for index, thread in enumerate(threads):
@@ -1062,7 +1220,7 @@ async def test_list_dashboard_threads_page_scopes_search_to_requested_participan
     searches: list[dict[str, object]] = []
 
     class FakeThreads:
-        async def search(self, *, metadata, limit, offset, sort_by, sort_order, select):
+        async def search(self, *, metadata, limit, offset, sort_by, sort_order, select, params):
             searches.append(metadata)
             return threads[offset : offset + limit]
 
@@ -1086,11 +1244,7 @@ async def test_list_dashboard_threads_page_scopes_search_to_requested_participan
         surfaced_only=True,
     )
 
-    # The legacy owner filter rides along until pre-participant threads age out.
-    assert searches == [
-        {"participant_logins": {"other-user": True}},
-        {"github_login": "other-user"},
-    ]
+    assert searches == [{"participant_logins": {"other-user": True}}]
     assert [item["id"] for item in result["items"]] == ["surfaced"]
 
 
@@ -1107,7 +1261,7 @@ async def test_list_dashboard_threads_page_filters_ownerless_threads(monkeypatch
     }
 
     class FakeThreads:
-        async def search(self, *, metadata, limit, offset, sort_by, sort_order, select):
+        async def search(self, *, metadata, limit, offset, sort_by, sort_order, select, params):
             return threads[offset : offset + limit]
 
     class FakeRuns:
@@ -1150,7 +1304,7 @@ async def test_status_filter_refreshes_threads_missing_run_status(monkeypatch) -
     run_list_thread_ids: list[str] = []
 
     class FakeThreads:
-        async def search(self, *, metadata, limit, offset, sort_by, sort_order, select):
+        async def search(self, *, metadata, limit, offset, sort_by, sort_order, select, params):
             return threads[offset : offset + limit]
 
         async def update(self, *, thread_id, metadata):

@@ -3,6 +3,7 @@
 import logging
 from collections.abc import Mapping
 from datetime import UTC, datetime
+from functools import partial
 from typing import Any
 
 from langgraph_sdk import get_client
@@ -12,13 +13,13 @@ from openswe.config import ENV
 from openswe.dispatch import dispatch_agent_run, thread_workspace
 from openswe.message_queue import QueuedMessage
 from openswe.prompts import prompt
-from openswe.slack.client import (
+from openswe.slack.code_channels import CODE_CHANNEL_SESSION_TS, set_session_status
+from openswe.slack.events import claim_slack_event
+from openswe.slack.records import (
     lookup_slack_run_mapping,
     lookup_slack_thread_id,
     store_slack_run_mapping,
 )
-from openswe.slack.code_channels import CODE_CHANNEL_SESSION_TS, set_session_status
-from openswe.slack.events import claim_slack_event
 from openswe.source_context import SourceContext
 
 logger = logging.getLogger(__name__)
@@ -49,16 +50,10 @@ def _matching_slack_context(
 async def _resolve_stop_target(
     client: LangGraphClient, channel_id: str, message_ts: str
 ) -> tuple[str, str, dict[str, Any], dict[str, Any]] | None:
-    mapping = await lookup_slack_run_mapping(client, channel_id, message_ts)
-    if mapping is None:
-        thread_ts = message_ts
-    else:
-        mapped_thread_ts = mapping.get("thread_ts")
-        if not isinstance(mapped_thread_ts, str) or not mapped_thread_ts:
-            return None
-        thread_ts = mapped_thread_ts
+    mapping = await lookup_slack_run_mapping(channel_id, message_ts)
+    thread_ts = (mapping.thread_ts if mapping else None) or message_ts
 
-    thread_id = await lookup_slack_thread_id(client, channel_id, thread_ts)
+    thread_id = await lookup_slack_thread_id(channel_id, thread_ts)
     if not thread_id:
         return None
     try:
@@ -200,7 +195,6 @@ async def _process_slack_stop_reaction(event: dict[str, Any], event_id: str) -> 
     if isinstance(summary_run_id, str) and summary_run_id:
         triggering_user_id = slack_thread.get("triggering_user_id")
         await store_slack_run_mapping(
-            client,
             channel_id,
             thread_ts,
             summary_run_id,
@@ -219,12 +213,17 @@ async def process_slack_stop_reaction(event: dict[str, Any], event_id: str = "")
         logger.exception("Failed to stop Open SWE from Slack reaction")
 
 
-async def _process_agent_session_stopped(event: dict[str, Any], event_id: str) -> None:
+async def _process_agent_session_stopped(
+    event: dict[str, object], event_id: str, team_id: str
+) -> None:
     channel_id = event.get("channel") or event.get("channel_id")
+    thread_ts = event.get("thread_ts", CODE_CHANNEL_SESSION_TS)
     if not isinstance(channel_id, str) or not channel_id:
         return
+    if not isinstance(thread_ts, str) or not thread_ts:
+        return
     client = get_client(url=LANGGRAPH_URL)
-    thread_id = await lookup_slack_thread_id(client, channel_id, CODE_CHANNEL_SESSION_TS)
+    thread_id = await lookup_slack_thread_id(channel_id, thread_ts)
     if not thread_id:
         return
     try:
@@ -232,11 +231,52 @@ async def _process_agent_session_stopped(event: dict[str, Any], event_id: str) -
     except Exception:  # noqa: BLE001
         logger.debug("Ignoring session stop for unknown thread %s", thread_id)
         return
-    if (
-        _matching_slack_context(_thread_metadata(thread), channel_id, CODE_CHANNEL_SESSION_TS)
-        is None
-    ):
-        logger.warning("Ignoring session stop with mismatched thread metadata: %s", thread_id)
+    slack_thread = SourceContext.from_metadata(_thread_metadata(thread)).slack_thread
+    if slack_thread is None or not slack_thread.is_at(channel_id, thread_ts):
+        logger.warning(
+            "Ignoring session stop with mismatched thread metadata",
+            extra={"agent_thread_id": thread_id},
+        )
+        return
+    if thread_ts != CODE_CHANNEL_SESSION_TS:
+        from openswe.slack.client import post_slack_thread_reply
+        from openswe.slack.http import SlackClient, slack_identity
+        from openswe.slack.thinking import release_slack_location_status
+        from openswe.threads.handlers import cancel_dashboard_thread
+        from openswe.users.models import User
+
+        user_id = event.get("user")
+        if not event_id or not team_id:
+            logger.warning("Ignoring session stop without an event or Slack workspace")
+            return
+        expected_team_id = slack_thread.team_id
+        if not expected_team_id:
+            async with SlackClient.bot() as slack:
+                expected_team_id = (await slack_identity(slack))["team_id"]
+        if expected_team_id != team_id:
+            logger.warning("Ignoring session stop from a different Slack workspace")
+            return
+        if not isinstance(user_id, str) or not user_id:
+            return
+        user = await User.for_identity("slack", user_id)
+        if user is None or not user.github_login:
+            logger.warning("Ignoring session stop from an unlinked Slack user")
+            return
+        if not await claim_slack_event(event_id):
+            return
+        await cancel_dashboard_thread(
+            thread_id,
+            user.github_login,
+            email=user.email,
+            on_interrupted=partial(release_slack_location_status, channel_id, thread_ts),
+        )
+        follow_ups = await client.runs.list(thread_id, status="pending", limit=1, offset=0)
+        await post_slack_thread_reply(
+            channel_id,
+            thread_ts,
+            "Stopped. Starting the queued follow-up next." if follow_ups else "Stopped.",
+            agent_thread_id=thread_id,
+        )
         return
     if event_id and not await claim_slack_event(event_id):
         return
@@ -255,9 +295,11 @@ async def _process_agent_session_stopped(event: dict[str, Any], event_id: str) -
     await set_session_status(channel_id, "active")
 
 
-async def process_agent_session_stopped(event: dict[str, Any], event_id: str = "") -> None:
+async def process_agent_session_stopped(
+    event: dict[str, object], event_id: str = "", team_id: str = ""
+) -> None:
     """Stop work immediately when Slack signals the session was stopped."""
     try:
-        await _process_agent_session_stopped(event, event_id)
+        await _process_agent_session_stopped(event, event_id, team_id)
     except Exception:  # noqa: BLE001
         logger.exception("Failed to stop Open SWE from a Slack session stop event")

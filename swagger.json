@@ -136,6 +136,7 @@
             "type": "string"
           },
           "created_at": {
+            "format": "date-time",
             "title": "Created At",
             "type": "string"
           },
@@ -194,6 +195,123 @@
           "name"
         ],
         "title": "AllowedSlackBotEntry",
+        "type": "object"
+      },
+      "AnnouncementCreate": {
+        "properties": {
+          "test": {
+            "default": false,
+            "title": "Test",
+            "type": "boolean"
+          },
+          "text": {
+            "maxLength": 3000,
+            "minLength": 1,
+            "title": "Text",
+            "type": "string"
+          }
+        },
+        "required": [
+          "text"
+        ],
+        "title": "AnnouncementCreate",
+        "type": "object"
+      },
+      "AnnouncementSent": {
+        "properties": {
+          "recipients": {
+            "title": "Recipients",
+            "type": "integer"
+          },
+          "test": {
+            "title": "Test",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "test",
+          "recipients"
+        ],
+        "title": "AnnouncementSent",
+        "type": "object"
+      },
+      "AnnouncementSummary": {
+        "properties": {
+          "author": {
+            "title": "Author",
+            "type": "string"
+          },
+          "created_at": {
+            "format": "date-time",
+            "title": "Created At",
+            "type": "string"
+          },
+          "failed": {
+            "title": "Failed",
+            "type": "integer"
+          },
+          "finished_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Finished At"
+          },
+          "id": {
+            "format": "uuid",
+            "title": "Id",
+            "type": "string"
+          },
+          "recipients": {
+            "title": "Recipients",
+            "type": "integer"
+          },
+          "sent": {
+            "title": "Sent",
+            "type": "integer"
+          },
+          "text": {
+            "title": "Text",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "text",
+          "author",
+          "created_at",
+          "finished_at",
+          "recipients",
+          "sent",
+          "failed"
+        ],
+        "title": "AnnouncementSummary",
+        "type": "object"
+      },
+      "AnnouncementsView": {
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/AnnouncementSummary"
+            },
+            "title": "Items",
+            "type": "array"
+          },
+          "recipients": {
+            "title": "Recipients",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "recipients",
+          "items"
+        ],
+        "title": "AnnouncementsView",
         "type": "object"
       },
       "ApiKeyCreate": {
@@ -672,6 +790,78 @@
         "title": "AuditLogsPage",
         "type": "object"
       },
+      "BackgroundCommand": {
+        "properties": {
+          "command": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Command"
+          },
+          "started_at": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Started At"
+          },
+          "status": {
+            "title": "Status",
+            "type": "string"
+          },
+          "task_id": {
+            "title": "Task Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "task_id",
+          "status"
+        ],
+        "title": "BackgroundCommand",
+        "type": "object"
+      },
+      "BackgroundWork": {
+        "properties": {
+          "commands": {
+            "default": [],
+            "items": {
+              "$ref": "#/components/schemas/BackgroundCommand"
+            },
+            "title": "Commands",
+            "type": "array"
+          },
+          "monitor_budget": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/MonitorBudgetUse"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "monitors": {
+            "default": [],
+            "items": {
+              "$ref": "#/components/schemas/MonitorState"
+            },
+            "title": "Monitors",
+            "type": "array"
+          }
+        },
+        "title": "BackgroundWork",
+        "type": "object"
+      },
       "BlockSuggestionResponse": {
         "properties": {
           "options": {
@@ -835,6 +1025,29 @@
           "requests"
         ],
         "title": "BridgeRequestsResponse",
+        "type": "object"
+      },
+      "BrowserTab": {
+        "properties": {
+          "id": {
+            "title": "Id",
+            "type": "string"
+          },
+          "title": {
+            "default": "",
+            "title": "Title",
+            "type": "string"
+          },
+          "url": {
+            "default": "",
+            "title": "Url",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id"
+        ],
+        "title": "BrowserTab",
         "type": "object"
       },
       "ChallengeResponse": {
@@ -1114,12 +1327,44 @@
             "minLength": 1,
             "title": "Body",
             "type": "string"
+          },
+          "parent_id": {
+            "anyOf": [
+              {
+                "maxLength": 64,
+                "minLength": 1,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Parent Id"
           }
         },
         "required": [
           "body"
         ],
         "title": "CommentBody",
+        "type": "object"
+      },
+      "ConnectedService": {
+        "description": "A service in the gateway this person has connected.",
+        "properties": {
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "tool_count": {
+            "title": "Tool Count",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "name",
+          "tool_count"
+        ],
+        "title": "ConnectedService",
         "type": "object"
       },
       "Conversation": {
@@ -1849,8 +2094,20 @@
         "type": "object"
       },
       "GatewayStatus": {
-        "description": "What one person sees for a gateway: ready, or what to connect first.",
+        "description": "What one person sees for a gateway: every service connected, or what is left.",
         "properties": {
+          "all_required": {
+            "default": false,
+            "title": "All Required",
+            "type": "boolean"
+          },
+          "connected": {
+            "items": {
+              "$ref": "#/components/schemas/ConnectedService"
+            },
+            "title": "Connected",
+            "type": "array"
+          },
           "gateway": {
             "$ref": "#/components/schemas/Gateway"
           },
@@ -1875,18 +2132,10 @@
               }
             ],
             "title": "Tool Count"
-          },
-          "workspaces": {
-            "items": {
-              "type": "string"
-            },
-            "title": "Workspaces",
-            "type": "array"
           }
         },
         "required": [
           "gateway",
-          "workspaces",
           "ready"
         ],
         "title": "GatewayStatus",
@@ -1962,6 +2211,10 @@
       },
       "HumanReviewAvailability": {
         "properties": {
+          "active": {
+            "title": "Active",
+            "type": "boolean"
+          },
           "available": {
             "title": "Available",
             "type": "boolean"
@@ -1973,10 +2226,16 @@
             },
             "title": "Blockers",
             "type": "array"
+          },
+          "permalink": {
+            "default": "",
+            "title": "Permalink",
+            "type": "string"
           }
         },
         "required": [
-          "available"
+          "available",
+          "active"
         ],
         "title": "HumanReviewAvailability",
         "type": "object"
@@ -2640,7 +2899,7 @@
         "type": "object"
       },
       "ManagedToolsView": {
-        "description": "The managed tools gateways the caller's workspaces use, and what each still needs.",
+        "description": "The instance's managed tools gateway (none or one), and what the caller still needs.",
         "properties": {
           "configured": {
             "title": "Configured",
@@ -3123,6 +3382,170 @@
         ],
         "title": "ModelObject",
         "type": "object"
+      },
+      "MonitorBudgetUse": {
+        "description": "What the thread's monitors used of the allowance the last human message opened.",
+        "properties": {
+          "events": {
+            "title": "Events",
+            "type": "integer"
+          },
+          "max_events": {
+            "title": "Max Events",
+            "type": "integer"
+          },
+          "max_starts": {
+            "title": "Max Starts",
+            "type": "integer"
+          },
+          "starts": {
+            "title": "Starts",
+            "type": "integer"
+          },
+          "window_ends_at": {
+            "title": "Window Ends At",
+            "type": "number"
+          }
+        },
+        "required": [
+          "events",
+          "max_events",
+          "starts",
+          "max_starts",
+          "window_ends_at"
+        ],
+        "title": "MonitorBudgetUse",
+        "type": "object"
+      },
+      "MonitorState": {
+        "properties": {
+          "callback": {
+            "default": false,
+            "title": "Callback",
+            "type": "boolean"
+          },
+          "command": {
+            "default": "",
+            "title": "Command",
+            "type": "string"
+          },
+          "description": {
+            "default": "",
+            "title": "Description",
+            "type": "string"
+          },
+          "dropped_filter_bytes": {
+            "default": 0,
+            "title": "Dropped Filter Bytes",
+            "type": "integer"
+          },
+          "events": {
+            "default": 0,
+            "title": "Events",
+            "type": "integer"
+          },
+          "exit_code": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Exit Code"
+          },
+          "filter": {
+            "default": "",
+            "title": "Filter",
+            "type": "string"
+          },
+          "filter_exit_code": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Filter Exit Code"
+          },
+          "first_raw_line": {
+            "default": 1,
+            "title": "First Raw Line",
+            "type": "integer"
+          },
+          "monitor_id": {
+            "title": "Monitor Id",
+            "type": "string"
+          },
+          "raw_lines": {
+            "default": 0,
+            "title": "Raw Lines",
+            "type": "integer"
+          },
+          "raw_logs": {
+            "default": "",
+            "title": "Raw Logs",
+            "type": "string"
+          },
+          "started_at": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Started At"
+          },
+          "status": {
+            "$ref": "#/components/schemas/MonitorStatus"
+          },
+          "stop_reason": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Stop Reason"
+          },
+          "timeout": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Timeout"
+          }
+        },
+        "required": [
+          "monitor_id",
+          "status"
+        ],
+        "title": "MonitorState",
+        "type": "object"
+      },
+      "MonitorStatus": {
+        "enum": [
+          "running",
+          "completed",
+          "failed",
+          "timed_out",
+          "stopped",
+          "filter_exited",
+          "too_noisy",
+          "lost"
+        ],
+        "type": "string"
       },
       "OpenPullRequest": {
         "properties": {
@@ -3912,6 +4335,11 @@
             "title": "Auto Fix Ci",
             "type": "boolean"
           },
+          "auto_human_review_enabled": {
+            "default": true,
+            "title": "Auto Human Review Enabled",
+            "type": "boolean"
+          },
           "base_branch": {
             "anyOf": [
               {
@@ -4002,7 +4430,7 @@
             ],
             "title": "Experimental Background Callbacks"
           },
-          "experimental_mcp_ptc": {
+          "experimental_monitor": {
             "agent_feature_flag": true,
             "anyOf": [
               {
@@ -4012,7 +4440,7 @@
                 "type": "null"
               }
             ],
-            "title": "Experimental Mcp Ptc"
+            "title": "Experimental Monitor"
           },
           "experimental_task_coordination": {
             "anyOf": [
@@ -4047,33 +4475,6 @@
             ],
             "title": "Pr Review Links"
           },
-          "prefer_tools_in_sandbox": {
-            "anyOf": [
-              {
-                "type": "boolean"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Prefer Tools In Sandbox"
-          },
-          "preserve_sandbox_memory": {
-            "anyOf": [
-              {
-                "type": "boolean"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Preserve Sandbox Memory"
-          },
-          "recent_thread_context_enabled": {
-            "default": false,
-            "title": "Recent Thread Context Enabled",
-            "type": "boolean"
-          },
           "review_draft_prs": {
             "anyOf": [
               {
@@ -4089,6 +4490,13 @@
             "default": false,
             "title": "Slack Onboarding Dismissed",
             "type": "boolean"
+          },
+          "workspace_default_repos": {
+            "additionalProperties": {
+              "type": "string"
+            },
+            "title": "Workspace Default Repos",
+            "type": "object"
           }
         },
         "title": "ProfileUpdate",
@@ -4520,10 +4928,6 @@
       },
       "PullRequestSearchResult": {
         "properties": {
-          "body": {
-            "title": "Body",
-            "type": "string"
-          },
           "number": {
             "title": "Number",
             "type": "integer"
@@ -4556,7 +4960,6 @@
           "number",
           "url",
           "title",
-          "body",
           "state"
         ],
         "title": "PullRequestSearchResult",
@@ -4846,6 +5249,11 @@
       },
       "RequestResult": {
         "properties": {
+          "auto_merge": {
+            "default": true,
+            "title": "Auto Merge",
+            "type": "boolean"
+          },
           "channel": {
             "default": "",
             "title": "Channel",
@@ -5568,6 +5976,173 @@
         "title": "ReviewThread",
         "type": "object"
       },
+      "ReviewerEvalConfig": {
+        "properties": {
+          "assistant_id": {
+            "title": "Assistant Id",
+            "type": "string"
+          },
+          "dataset_name": {
+            "title": "Dataset Name",
+            "type": "string"
+          },
+          "experiment_prefix": {
+            "title": "Experiment Prefix",
+            "type": "string"
+          },
+          "langgraph_url": {
+            "title": "Langgraph Url",
+            "type": "string"
+          },
+          "langsmith_project": {
+            "title": "Langsmith Project",
+            "type": "string"
+          },
+          "max_concurrency": {
+            "title": "Max Concurrency",
+            "type": "integer"
+          },
+          "model_id": {
+            "title": "Model Id",
+            "type": "string"
+          },
+          "reasoning_effort": {
+            "title": "Reasoning Effort",
+            "type": "string"
+          },
+          "score_mode": {
+            "enum": [
+              "all_findings",
+              "surfaced_findings"
+            ],
+            "title": "Score Mode",
+            "type": "string"
+          },
+          "severity_threshold": {
+            "enum": [
+              "low",
+              "medium",
+              "high",
+              "critical"
+            ],
+            "title": "Severity Threshold",
+            "type": "string"
+          }
+        },
+        "required": [
+          "dataset_name",
+          "experiment_prefix",
+          "max_concurrency",
+          "langsmith_project",
+          "langgraph_url",
+          "assistant_id",
+          "model_id",
+          "reasoning_effort",
+          "score_mode",
+          "severity_threshold"
+        ],
+        "title": "ReviewerEvalConfig",
+        "type": "object"
+      },
+      "ReviewerEvalProgress": {
+        "properties": {
+          "completed": {
+            "title": "Completed",
+            "type": "integer"
+          },
+          "total": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Total"
+          }
+        },
+        "required": [
+          "completed",
+          "total"
+        ],
+        "title": "ReviewerEvalProgress",
+        "type": "object"
+      },
+      "ReviewerEvalReport": {
+        "additionalProperties": false,
+        "description": "One progress report from a running eval; each one doubles as its heartbeat.",
+        "properties": {
+          "completed_examples": {
+            "minimum": 0.0,
+            "title": "Completed Examples",
+            "type": "integer"
+          },
+          "error": {
+            "anyOf": [
+              {
+                "maxLength": 4000,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Error"
+          },
+          "experiment_url": {
+            "anyOf": [
+              {
+                "maxLength": 2048,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Experiment Url"
+          },
+          "log_tail": {
+            "anyOf": [
+              {
+                "maxLength": 12000,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Log Tail"
+          },
+          "status": {
+            "enum": [
+              "running",
+              "completed",
+              "failed"
+            ],
+            "title": "Status",
+            "type": "string"
+          },
+          "total_examples": {
+            "anyOf": [
+              {
+                "minimum": 0.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Total Examples"
+          }
+        },
+        "required": [
+          "status",
+          "completed_examples"
+        ],
+        "title": "ReviewerEvalReport",
+        "type": "object"
+      },
       "ReviewerEvalStart": {
         "properties": {
           "dataset_name": {
@@ -5637,6 +6212,141 @@
           "severity_threshold"
         ],
         "title": "ReviewerEvalStart",
+        "type": "object"
+      },
+      "ReviewerEvalStatus": {
+        "description": "The latest reviewer eval, as the admin dashboard shows it.",
+        "properties": {
+          "config_snapshot": {
+            "$ref": "#/components/schemas/ReviewerEvalConfig"
+          },
+          "created_by": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Created By"
+          },
+          "error": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Error"
+          },
+          "experiment_url": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Experiment Url"
+          },
+          "finished_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Finished At"
+          },
+          "langsmith_project": {
+            "title": "Langsmith Project",
+            "type": "string"
+          },
+          "limit": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Limit"
+          },
+          "log_tail": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Log Tail"
+          },
+          "progress": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ReviewerEvalProgress"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "run_name": {
+            "title": "Run Name",
+            "type": "string"
+          },
+          "started_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Started At"
+          },
+          "status": {
+            "enum": [
+              "idle",
+              "starting",
+              "running",
+              "completed",
+              "failed"
+            ],
+            "title": "Status",
+            "type": "string"
+          },
+          "worker_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Worker Id"
+          }
+        },
+        "required": [
+          "status",
+          "run_name",
+          "langsmith_project",
+          "config_snapshot"
+        ],
+        "title": "ReviewerEvalStatus",
         "type": "object"
       },
       "Role": {
@@ -6295,6 +7005,34 @@
         "title": "TextAnchor",
         "type": "object"
       },
+      "ThreadBrowserView": {
+        "description": "A thread's browser window as the dashboard embeds it.",
+        "properties": {
+          "act_url": {
+            "title": "Act Url",
+            "type": "string"
+          },
+          "expires_at": {
+            "format": "date-time",
+            "title": "Expires At",
+            "type": "string"
+          },
+          "tabs": {
+            "items": {
+              "$ref": "#/components/schemas/BrowserTab"
+            },
+            "title": "Tabs",
+            "type": "array"
+          }
+        },
+        "required": [
+          "tabs",
+          "act_url",
+          "expires_at"
+        ],
+        "title": "ThreadBrowserView",
+        "type": "object"
+      },
       "ThreadComment-Input": {
         "properties": {
           "comment_url": {
@@ -6374,6 +7112,36 @@
         "title": "ThreadComment",
         "type": "object"
       },
+      "ThreadMoveRequest": {
+        "description": "Where to move a thread: onto the caller's machine through a bridge, or to the cloud.",
+        "properties": {
+          "sandbox_bridge_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Sandbox Bridge Id"
+          },
+          "target": {
+            "anyOf": [
+              {
+                "const": "cloud",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Target"
+          }
+        },
+        "title": "ThreadMoveRequest",
+        "type": "object"
+      },
       "ThreadRenameBody": {
         "properties": {
           "title": {
@@ -6411,13 +7179,6 @@
           }
         },
         "title": "ThreadResolveBody",
-        "type": "object"
-      },
-      "ToolArguments": {
-        "additionalProperties": {
-          "$ref": "#/components/schemas/JsonValue"
-        },
-        "title": "ToolArguments",
         "type": "object"
       },
       "ToolCallView": {
@@ -6513,74 +7274,6 @@
           "ended_at"
         ],
         "title": "ToolCallView",
-        "type": "object"
-      },
-      "ToolDescription": {
-        "properties": {
-          "description": {
-            "title": "Description",
-            "type": "string"
-          },
-          "name": {
-            "title": "Name",
-            "type": "string"
-          },
-          "parameters": {
-            "additionalProperties": {
-              "$ref": "#/components/schemas/JsonValue"
-            },
-            "title": "Parameters",
-            "type": "object"
-          }
-        },
-        "required": [
-          "name",
-          "description",
-          "parameters"
-        ],
-        "title": "ToolDescription",
-        "type": "object"
-      },
-      "ToolList": {
-        "properties": {
-          "tools": {
-            "items": {
-              "$ref": "#/components/schemas/ToolDescription"
-            },
-            "title": "Tools",
-            "type": "array"
-          },
-          "total": {
-            "title": "Total",
-            "type": "integer"
-          }
-        },
-        "required": [
-          "tools",
-          "total"
-        ],
-        "title": "ToolList",
-        "type": "object"
-      },
-      "ToolResult": {
-        "properties": {
-          "content": {
-            "$ref": "#/components/schemas/JsonValue"
-          },
-          "status": {
-            "enum": [
-              "success",
-              "error"
-            ],
-            "title": "Status",
-            "type": "string"
-          }
-        },
-        "required": [
-          "status",
-          "content"
-        ],
-        "title": "ToolResult",
         "type": "object"
       },
       "TranscriptTurnPage": {
@@ -6815,17 +7508,6 @@
               }
             ],
             "title": "Follow Up Behavior"
-          },
-          "local_tracing_project": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Local Tracing Project"
           }
         },
         "required": [
@@ -7608,28 +8290,6 @@
             ],
             "title": "Default Agent Subagent Reasoning Effort"
           },
-          "default_chat_model": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Default Chat Model"
-          },
-          "default_chat_reasoning_effort": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Default Chat Reasoning Effort"
-          },
           "default_repo": {
             "anyOf": [
               {
@@ -7754,6 +8414,18 @@
               }
             ],
             "title": "Human Review Auto Assign Minutes"
+          },
+          "human_review_auto_merge_enabled": {
+            "agent_feature_flag": true,
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Human Review Auto Merge Enabled"
           },
           "managed_tools_gateway_id": {
             "anyOf": [
@@ -8075,6 +8747,79 @@
   },
   "openapi": "3.1.0",
   "paths": {
+    "/dashboard/api/admin/announcements": {
+      "get": {
+        "operationId": "api_list_announcements_dashboard_api_admin_announcements_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AnnouncementsView"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "security": [
+          {
+            "DashboardSession": []
+          }
+        ],
+        "summary": "Api List Announcements",
+        "tags": [
+          "dashboard",
+          "announcements"
+        ]
+      },
+      "post": {
+        "description": "DM the announcement to everyone, or with ``test`` to the admin alone.",
+        "operationId": "api_send_announcement_dashboard_api_admin_announcements_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AnnouncementCreate"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "202": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AnnouncementSent"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "DashboardSession": []
+          }
+        ],
+        "summary": "Api Send Announcement",
+        "tags": [
+          "dashboard",
+          "announcements"
+        ]
+      }
+    },
     "/dashboard/api/admin/api-keys": {
       "get": {
         "operationId": "api_list_api_keys_dashboard_api_admin_api_keys_get",
@@ -8229,9 +8974,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "additionalProperties": true,
-                  "title": "Response Admin Get Reviewer Eval Dashboard Api Admin Evals Reviewer Get",
-                  "type": "object"
+                  "$ref": "#/components/schemas/ReviewerEvalStatus"
                 }
               }
             },
@@ -8267,9 +9010,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "additionalProperties": true,
-                  "title": "Response Admin Start Reviewer Eval Dashboard Api Admin Evals Reviewer Post",
-                  "type": "object"
+                  "$ref": "#/components/schemas/ReviewerEvalStatus"
                 }
               }
             },
@@ -10407,7 +11148,7 @@
     },
     "/dashboard/api/managed-tools/gateways": {
       "get": {
-        "description": "Gateways an admin can pick for a workspace, read with the admin's own LangSmith login.",
+        "description": "Gateways an admin can pick for the instance, read with the admin's own LangSmith login.",
         "operationId": "api_list_managed_tools_gateways_dashboard_api_managed_tools_gateways_get",
         "responses": {
           "200": {
@@ -10799,66 +11540,6 @@
         "tags": [
           "dashboard",
           "user-instructions"
-        ]
-      }
-    },
-    "/dashboard/api/me/local-trace-url/{thread_id}": {
-      "get": {
-        "operationId": "api_get_local_trace_url_dashboard_api_me_local_trace_url__thread_id__get",
-        "parameters": [
-          {
-            "in": "path",
-            "name": "thread_id",
-            "required": true,
-            "schema": {
-              "format": "uuid",
-              "title": "Thread Id",
-              "type": "string"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "additionalProperties": {
-                    "anyOf": [
-                      {
-                        "type": "string"
-                      },
-                      {
-                        "type": "null"
-                      }
-                    ]
-                  },
-                  "title": "Response Api Get Local Trace Url Dashboard Api Me Local Trace Url  Thread Id  Get",
-                  "type": "object"
-                }
-              }
-            },
-            "description": "Successful Response"
-          },
-          "422": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            },
-            "description": "Validation Error"
-          }
-        },
-        "security": [
-          {
-            "DashboardSession": []
-          }
-        ],
-        "summary": "Api Get Local Trace Url",
-        "tags": [
-          "dashboard",
-          "threads"
         ]
       }
     },
@@ -13413,6 +14094,53 @@
         ]
       }
     },
+    "/dashboard/api/reviewer-eval/report": {
+      "post": {
+        "operationId": "report_reviewer_eval_dashboard_api_reviewer_eval_report_post",
+        "parameters": [
+          {
+            "in": "header",
+            "name": "X-Open-SWE-Eval-Token",
+            "required": false,
+            "schema": {
+              "default": "",
+              "maxLength": 512,
+              "title": "X-Open-Swe-Eval-Token",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ReviewerEvalReport"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "204": {
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Report Reviewer Eval",
+        "tags": [
+          "reviewer-eval"
+        ]
+      }
+    },
     "/dashboard/api/reviews": {
       "get": {
         "operationId": "api_list_reviews_dashboard_api_reviews_get",
@@ -15841,73 +16569,6 @@
         ]
       }
     },
-    "/dashboard/api/sandbox-tools": {
-      "get": {
-        "operationId": "list_tools_dashboard_api_sandbox_tools_get",
-        "parameters": [
-          {
-            "in": "query",
-            "name": "q",
-            "required": false,
-            "schema": {
-              "default": "",
-              "maxLength": 512,
-              "title": "Q",
-              "type": "string"
-            }
-          },
-          {
-            "in": "query",
-            "name": "offset",
-            "required": false,
-            "schema": {
-              "default": 0,
-              "minimum": 0,
-              "title": "Offset",
-              "type": "integer"
-            }
-          },
-          {
-            "in": "query",
-            "name": "limit",
-            "required": false,
-            "schema": {
-              "default": 100,
-              "maximum": 100,
-              "minimum": 1,
-              "title": "Limit",
-              "type": "integer"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ToolList"
-                }
-              }
-            },
-            "description": "Successful Response"
-          },
-          "422": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            },
-            "description": "Validation Error"
-          }
-        },
-        "summary": "List Tools",
-        "tags": [
-          "sandbox-tools"
-        ]
-      }
-    },
     "/dashboard/api/sandbox-tools/background-tasks/{task_id}/complete": {
       "post": {
         "operationId": "background_task_complete_dashboard_api_sandbox_tools_background_tasks__task_id__complete_post",
@@ -15980,41 +16641,24 @@
         ]
       }
     },
-    "/dashboard/api/sandbox-tools/invoke/{tool_name}": {
+    "/dashboard/api/sandbox-tools/monitors/{monitor_id}/sync": {
       "post": {
-        "operationId": "invoke_tool_dashboard_api_sandbox_tools_invoke__tool_name__post",
+        "description": "A monitor's runner has new events or has ended; a 5xx makes a final sync retry.",
+        "operationId": "monitor_sync_dashboard_api_sandbox_tools_monitors__monitor_id__sync_post",
         "parameters": [
           {
             "in": "path",
-            "name": "tool_name",
+            "name": "monitor_id",
             "required": true,
             "schema": {
-              "maxLength": 256,
-              "minLength": 1,
-              "title": "Tool Name",
+              "pattern": "^mon-[0-9a-f-]{1,64}$",
+              "title": "Monitor Id",
               "type": "string"
             }
           }
         ],
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/ToolArguments"
-              }
-            }
-          },
-          "required": true
-        },
         "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ToolResult"
-                }
-              }
-            },
+          "204": {
             "description": "Successful Response"
           },
           "422": {
@@ -16028,141 +16672,7 @@
             "description": "Validation Error"
           }
         },
-        "summary": "Invoke Tool",
-        "tags": [
-          "sandbox-tools"
-        ]
-      }
-    },
-    "/dashboard/api/sandbox-tools/list": {
-      "get": {
-        "operationId": "list_tools_dashboard_api_sandbox_tools_list_get",
-        "parameters": [
-          {
-            "in": "query",
-            "name": "q",
-            "required": false,
-            "schema": {
-              "default": "",
-              "maxLength": 512,
-              "title": "Q",
-              "type": "string"
-            }
-          },
-          {
-            "in": "query",
-            "name": "offset",
-            "required": false,
-            "schema": {
-              "default": 0,
-              "minimum": 0,
-              "title": "Offset",
-              "type": "integer"
-            }
-          },
-          {
-            "in": "query",
-            "name": "limit",
-            "required": false,
-            "schema": {
-              "default": 100,
-              "maximum": 100,
-              "minimum": 1,
-              "title": "Limit",
-              "type": "integer"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ToolList"
-                }
-              }
-            },
-            "description": "Successful Response"
-          },
-          "422": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            },
-            "description": "Validation Error"
-          }
-        },
-        "summary": "List Tools",
-        "tags": [
-          "sandbox-tools"
-        ]
-      }
-    },
-    "/dashboard/api/sandbox-tools/search": {
-      "get": {
-        "operationId": "list_tools_dashboard_api_sandbox_tools_search_get",
-        "parameters": [
-          {
-            "in": "query",
-            "name": "q",
-            "required": false,
-            "schema": {
-              "default": "",
-              "maxLength": 512,
-              "title": "Q",
-              "type": "string"
-            }
-          },
-          {
-            "in": "query",
-            "name": "offset",
-            "required": false,
-            "schema": {
-              "default": 0,
-              "minimum": 0,
-              "title": "Offset",
-              "type": "integer"
-            }
-          },
-          {
-            "in": "query",
-            "name": "limit",
-            "required": false,
-            "schema": {
-              "default": 100,
-              "maximum": 100,
-              "minimum": 1,
-              "title": "Limit",
-              "type": "integer"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ToolList"
-                }
-              }
-            },
-            "description": "Successful Response"
-          },
-          "422": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            },
-            "description": "Validation Error"
-          }
-        },
-        "summary": "List Tools",
+        "summary": "Monitor Sync",
         "tags": [
           "sandbox-tools"
         ]
@@ -17082,6 +17592,22 @@
         "parameters": [
           {
             "in": "query",
+            "name": "redirect_to",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Redirect To"
+            }
+          },
+          {
+            "in": "query",
             "name": "desktop_handoff",
             "required": false,
             "schema": {
@@ -17952,6 +18478,54 @@
         ]
       }
     },
+    "/dashboard/api/threads/{thread_id}/background-work": {
+      "get": {
+        "operationId": "api_get_thread_background_work_dashboard_api_threads__thread_id__background_work_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "thread_id",
+            "required": true,
+            "schema": {
+              "title": "Thread Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BackgroundWork"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "DashboardSession": []
+          }
+        ],
+        "summary": "Api Get Thread Background Work",
+        "tags": [
+          "dashboard",
+          "threads"
+        ]
+      }
+    },
     "/dashboard/api/threads/{thread_id}/branch-diff": {
       "get": {
         "operationId": "api_get_thread_branch_diff_dashboard_api_threads__thread_id__branch_diff_get",
@@ -17998,6 +18572,55 @@
         "summary": "Api Get Thread Branch Diff",
         "tags": [
           "dashboard",
+          "threads"
+        ]
+      }
+    },
+    "/dashboard/api/threads/{thread_id}/browser": {
+      "get": {
+        "operationId": "api_thread_browser_dashboard_api_threads__thread_id__browser_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "thread_id",
+            "required": true,
+            "schema": {
+              "title": "Thread Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ThreadBrowserView"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "DashboardSession": []
+          }
+        ],
+        "summary": "Api Thread Browser",
+        "tags": [
+          "dashboard",
+          "threads",
           "threads"
         ]
       }
@@ -18300,6 +18923,66 @@
           }
         ],
         "summary": "Api Thread History",
+        "tags": [
+          "dashboard",
+          "threads"
+        ]
+      }
+    },
+    "/dashboard/api/threads/{thread_id}/move": {
+      "post": {
+        "operationId": "api_move_thread_dashboard_api_threads__thread_id__move_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "thread_id",
+            "required": true,
+            "schema": {
+              "title": "Thread Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ThreadMoveRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Api Move Thread Dashboard Api Threads  Thread Id  Move Post",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "DashboardSession": []
+          }
+        ],
+        "summary": "Api Move Thread",
         "tags": [
           "dashboard",
           "threads"

@@ -58,6 +58,7 @@ from openswe.slack.client import (
 )
 from openswe.slack.dm import note_for_concierge, send_dm, send_dm_with_location
 from openswe.slack.http import SlackRequestError
+from openswe.slack.thread_owner import wake_thread_owner
 from openswe.threads.pr_fixes import dispatch_pull_request_prompt
 from openswe.users import User
 from openswe.utils.preview import skip_on_preview
@@ -180,15 +181,10 @@ class ReviewCard:
             channel = await SlackChannel.load(approval.slack_channel_id)
             if channel is None:
                 raise SlackRequestError("channel_not_found")
-            pr = approval.pull_request
             approval.slack_thread_ts = await channel.post(
-                prompt(
-                    "slack/expedited-review-requested",
-                    pr_url=pr.url,
-                    label=f"{pr.owner}/{pr.repo}#{pr.number}",
-                    title=escape(title),
-                )
+                text, blocks=block_payload(blocks), login=self.request.requester_login
             )
+            return approval.slack_thread_ts
         return await post_slack_thread_reply_with_ts(
             approval.slack_channel_id,
             approval.slack_thread_ts,
@@ -272,7 +268,10 @@ class ReviewCard:
         pr = self.request.pull_request
         if (await RepoSettings.cached(pr.owner, pr.repo)).review_channel.strip():
             return []
-        return self.request.slack_channel_choices or await own_choices(self.request)
+        choices = self.request.slack_channel_choices or await own_choices(self.request)
+        if self.request.slack_message_ts == self.request.slack_thread_ts:
+            return [choice for choice in choices if choice["id"] != self.request.slack_channel_id]
+        return choices
 
     async def _review_states(self) -> dict[str, str]:
         pr = self.request.pull_request
@@ -304,11 +303,16 @@ class ReviewCard:
                 request.created_at,
                 states,
                 datetime.now(UTC),
+                auto_merge=request.auto_merge,
             )
             is None
         ):
             return standard_card.closed_card(
-                request, title=pr.title, author=author, outcome="approved", review_states=states
+                request,
+                title=pr.title,
+                author=author,
+                outcome="approved" if request.auto_merge else "approved — awaiting manual merge",
+                review_states=states,
             )
         requester = request.requested_by
         return standard_card.open_card(
@@ -523,6 +527,11 @@ class ReviewCard:
         if not request.has_card or location is None or not request.slack_message_ts:
             return False
         old_ts = request.slack_message_ts
+        if old_ts == request.slack_thread_ts:
+            request.slack_broadcast = broadcast
+            await request.save()
+            await self.refresh(outcome=outcome)
+            return True
         request.slack_broadcast = broadcast
         text, blocks = await self.render(outcome)
 
@@ -613,7 +622,7 @@ class ReviewCard:
                 row.slack_copy_ts = ""
         request.slack_copy_ts = ""
 
-    async def notify_agent(self, prompt: str, *, title: str) -> bool:
+    async def notify_agent(self, prompt: str, *, title: str, unlisted: bool = False) -> bool:
         """Wake the agent thread that asked for the review, or start one for whoever asked; whether it was queued."""
         request = self.request
         pr = request.pull_request
@@ -640,6 +649,7 @@ class ReviewCard:
                 prompt,
                 title=title,
                 before_dispatch=record_thread,
+                unlisted=unlisted,
             )
             return True
         configurable = dict(request.run_config)
@@ -717,7 +727,11 @@ class ReviewCard:
     async def remove_superseded(self) -> None:
         """Delete older cards for this request's PR, so its thread only ever shows one."""
         for stale in await HumanReviewRequest.superseded_on_slack(self.request.pull_request_id):
-            if stale.id == self.request.id or not stale.has_card:
+            if (
+                stale.id == self.request.id
+                or not stale.has_card
+                or stale.slack_message_ts == stale.slack_thread_ts
+            ):
                 continue
             if not await delete_slack_message(stale.slack_channel_id, stale.slack_message_ts):
                 continue
@@ -730,6 +744,9 @@ class ReviewCard:
         if skip_on_preview("pr_reaction"):
             return
         request = self.request
+        if request.kind == "posted":
+            await self.update_post_reactions()
+            return
         location = request.slack_location or (
             (request.slack_channel_id, request.slack_message_ts)
             if request.slack_channel_id and request.slack_message_ts
@@ -747,26 +764,87 @@ class ReviewCard:
         request = self.request
         if request.kind != "posted" or not request.slack_channel_id or not request.slack_message_ts:
             return
-        async with HumanReviewRequest.locked(request.id) as (_, row):
+        await self.update_post_reactions(snapshot)
+
+    async def update_post_reactions(self, snapshot: PullRequestSnapshot | None = None) -> None:
+        """Positive reactions need every linked PR; any active PR can supply a blocker."""
+        if skip_on_preview("update_post_reactions"):
+            return
+        request = self.request
+        async with HumanReviewRequest.locked_post(
+            request.slack_channel_id, request.slack_message_ts
+        ) as rows:
+            row = next((row for row in rows if row.id == request.id), None)
             if row is None:
                 return
-            failing = conflicted = False
-            if (
-                row.state == "open"
-                and snapshot is not None
-                and snapshot.state == "open"
-                and not snapshot.merged
-            ):
-                author = snapshot.author or row.pull_request.author
-                preferences = await User.preferences_for_login(author)
+            if snapshot is not None:
+                preferences = await User.preferences_for_login(
+                    snapshot.author or row.pull_request.author
+                )
                 failing = preferences.pr_failure_reactions and snapshot.check_state in {
                     "failure",
                     "blocked",
                 }
-                conflicted = snapshot.mergeable is False or snapshot.mergeable_state == "dirty"
-            for emoji, blocked in (("x", failing), ("construction", conflicted)):
-                react = add_slack_reaction if blocked else remove_slack_reaction
-                await react(row.slack_channel_id, row.slack_message_ts, emoji)
+                reason = ", ".join(snapshot.failing_checks) or "a check finished without success"
+                row.run_config = {
+                    **row.run_config,
+                    "posted_failure": reason if failing else "",
+                    "posted_draft": snapshot.draft,
+                    "posted_conflicted": snapshot.mergeable is False
+                    or snapshot.mergeable_state == "dirty",
+                }
+            active = [row for row in rows if row.state == "open"]
+            failures = sorted(
+                f"{row.pull_request.url}: {row.run_config['posted_failure']}"
+                for row in active
+                if row.run_config.get("posted_failure")
+            )
+            expected = row.run_config.get("posted_pr_urls")
+            complete = not isinstance(expected, list) or set(expected) == {
+                row.pull_request.url.lower() for row in rows
+            }
+            reactions = {
+                "warning": bool(failures),
+                "construction": any(row.run_config.get("posted_conflicted") for row in active),
+                "pencil2": any(row.run_config.get("posted_draft") for row in active),
+                "white_check_mark": complete
+                and all(
+                    row.approved_at is not None and row.state in {"open", "merged"} for row in rows
+                ),
+            }
+            if complete and all(row.state == "merged" for row in rows):
+                reactions["merged"] = True
+            await remove_slack_reaction(request.slack_channel_id, request.slack_message_ts, "x")
+            failure_reacted = False
+            for emoji, enabled in reactions.items():
+                react = add_slack_reaction if enabled else remove_slack_reaction
+                success = await react(request.slack_channel_id, request.slack_message_ts, emoji)
+                if emoji == "warning":
+                    failure_reacted = enabled and success
+                if emoji == "merged" and enabled and not success:
+                    await add_slack_reaction(
+                        request.slack_channel_id,
+                        request.slack_message_ts,
+                        "twisted_rightwards_arrows",
+                    )
+            notice = "\n".join(failures)
+            first = rows[0]
+            if notice and not failure_reacted:
+                return
+            if notice and first.run_config.get("posted_failure_notice") != notice:
+                requester = first.requested_by
+                if requester is not None and requester.slack_user_id:
+                    try:
+                        await wake_thread_owner(
+                            request.slack_channel_id,
+                            request.slack_message_ts,
+                            requester.slack_user_id,
+                            prompt("slack/pr-failure-reaction", failures=notice),
+                        )
+                    except Exception:
+                        logger.warning("Could not explain PR failure reaction", exc_info=True)
+                        return
+            first.run_config = {**first.run_config, "posted_failure_notice": notice}
 
     async def mark_merged(self) -> None:
         updated = await self.retire("merged", "merged")
@@ -827,6 +905,36 @@ class ReviewPicks:
     """The reviewers Open SWE picked for a request, as GitHub and their pick DMs show them."""
 
     request: HumanReviewRequest
+
+    async def complete(self, reviewed: set[str]) -> None:
+        """Mark completed reviewers' assignment DMs stale without removing their participation."""
+        for participant in self.request.participants:
+            if participant.github_login.lower() not in reviewed:
+                continue
+            message = participant.pick_message
+            if message is None:
+                continue
+            status = "Review submitted on GitHub. This assignment is no longer active."
+            if not await message.show(status):
+                continue
+            if participant.user.slack_user_id:
+                await note_for_concierge(
+                    participant.user.slack_user_id,
+                    message.channel_id,
+                    prompt(
+                        "slack/concierge-dm-edited",
+                        text=message.text,
+                        status=status,
+                    ),
+                )
+            async with HumanReviewRequest.locked(self.request.id) as (_, row):
+                if row is None:
+                    continue
+                for current in row.participants:
+                    if current.user_id == participant.user_id and current.dm_ts == message.ts:
+                        current.dm_channel_id = current.dm_ts = current.dm_text = ""
+                        if current.decision == "picked":
+                            current.decision = "review"
 
     async def _unrequest(self, pull: PullRequestClient, login: str) -> None:
         try:
@@ -893,6 +1001,7 @@ class ReviewPicks:
                 extra={"request_id": str(request.id)},
             )
             return request
+        await self.complete(reviewed)
         async with HumanReviewRequest.locked(request.id) as (_, row):
             if row is None:
                 return request
@@ -904,7 +1013,7 @@ class ReviewPicks:
         current = await HumanReviewRequest.get(request.id) or request
         if current.state == "open":
             await ReviewCard(current).refresh()
-        label = f"<{pr.url}|{pr.owner}/{pr.repo}#{pr.number}>"
+        label = f"<{pr.url}|{pr.label}>"
         for reviewer in released:
             logger.info(
                 "Released a reviewer Open SWE picked",

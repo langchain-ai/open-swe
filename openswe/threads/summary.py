@@ -9,7 +9,7 @@ from urllib.parse import urlencode
 from fastapi import HTTPException
 
 from openswe.agent_cost import RUN_COST_KEY_PREFIX
-from openswe.bridge.store import BridgeStore
+from openswe.bridge.store import BridgeStore, SandboxBridgeBinding
 from openswe.dashboard.admin import is_admin
 from openswe.github.pull_requests import PullRequest
 from openswe.review.findings import (
@@ -18,6 +18,7 @@ from openswe.review.findings import (
     reviewer_thread_title,
 )
 from openswe.review.session import ReviewSessionMetadata
+from openswe.sandboxes.browsers import ThreadBrowser
 from openswe.slack.client import parse_github_pr_url
 from openswe.slack.code_channels import CODE_CHANNEL_SESSION_TS
 from openswe.slack.oauth import SLACK_TEAM_ID
@@ -42,6 +43,7 @@ TRANSCRIPT_VERSION = "v2"
 # Sources whose threads should surface in the Agents UI (besides "dashboard").
 _SURFACED_SOURCES: tuple[str, ...] = (
     "dashboard",
+    "web",
     "github",
     "slack",
     "linear",
@@ -132,9 +134,14 @@ def thread_is_readable(
 
 
 def thread_is_promptable(metadata: Mapping[str, Any], login: str | None) -> bool:
-    """Only the owner may prompt, approve, or open a shell into a private thread."""
+    """Only the owner may prompt, approve, or open a shell into a private thread.
+
+    Nor may anyone else drive a thread that runs on its owner's machine, even one
+    shared before such threads were kept private.
+    """
     return thread_source(metadata) in _SURFACED_SOURCES and (
-        not thread_is_private(metadata) or thread_is_owner(metadata, login)
+        not (thread_is_private(metadata) or SandboxBridgeBinding.reaches_a_machine(metadata))
+        or thread_is_owner(metadata, login)
     )
 
 
@@ -541,6 +548,7 @@ async def _thread_summary(
         ),
         # Lists skip it: one bridge lookup per thread would cost a query each.
         "sandboxBridgeOnline": await _mac_online(metadata, sandbox_id) if bridge_status else None,
+        "hasBrowser": ThreadBrowser.of(metadata) is not None,
     }
     raw_pull_requests = metadata.get("pull_requests")
     pull_request_records = raw_pull_requests if isinstance(raw_pull_requests, list) else []

@@ -9,7 +9,7 @@ from uuid import uuid4
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from openswe.encryption import decrypt_token, encrypt_token
-from openswe.store import now_iso
+from openswe.utils.time import now_iso
 
 _BLOCKED_HEADERS = {
     "host",
@@ -116,6 +116,19 @@ class MCPConnectionUpdate(BaseModel):
         if any(not name.strip() or len(name) > 128 for name in value):
             raise ValueError("Tool names must be non-empty and at most 128 characters")
         return list(dict.fromkeys(name.strip() for name in value))
+
+
+type MCPScope = Literal["instance", "workspace", "user", "managed"]
+
+
+class MCPToolProvenance(BaseModel):
+    """Credential-free provenance from the caller's authorized connection sources."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    connection_name: str
+    scope: MCPScope
+    overridden_scopes: list[MCPScope]
 
 
 class MCPToolDescription(BaseModel):

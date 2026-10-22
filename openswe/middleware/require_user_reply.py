@@ -180,9 +180,9 @@ class RequireUserReplyMiddleware(OpenSWEMiddleware):
         if not text:
             logger.warning("Nothing to post on the model's behalf: it wrote no text this turn")
             return
-        from openswe.slack.tools.reply import slack_reply
+        from openswe.slack.tools.reply import send_slack_reply
 
-        result = await slack_reply(text, "final", state=dict(state))
+        result = await send_slack_reply(text, "final", state=dict(state))
         logger.warning(
             "Posted the model's final message on its behalf after it ignored the reply tool",
             extra={"reply_tool": self._tool_name, "reply_fallback_result": result},

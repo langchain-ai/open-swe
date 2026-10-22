@@ -5,42 +5,16 @@ from typing import Any
 from fastapi import APIRouter
 
 from openswe.dashboard.deps import SESSION_DEP
-from openswe.github import repos
 from openswe.github.http import GitHubClient
 from openswe.github.repo_cache import (
     REPO_LIST_FRESH_MS,
     read_cached_repos,
     schedule_repo_cache_refresh,
-    write_cached_repos,
 )
 from openswe.github.repo_merge_methods import RepositoryMergeMethods, repository_merge_methods
+from openswe.github.repos import build_repo_payload
 
 router = APIRouter(tags=["github"])
-
-
-async def _build_repo_payload(login: str) -> dict[str, Any]:
-    installations, repositories = await repos.fetch_user_installations_and_repos(login)
-    payload = {
-        "installations": [
-            {
-                "id": i.get("id"),
-                "account": (i.get("account") or {}).get("login"),
-                "account_type": (i.get("account") or {}).get("type"),
-            }
-            for i in installations
-        ],
-        "repositories": [
-            {
-                "full_name": r.get("full_name"),
-                "private": r.get("private", False),
-                "archived": r.get("archived", False),
-            }
-            for r in repositories
-            if r.get("full_name")
-        ],
-    }
-    await write_cached_repos(login, payload)
-    return payload
 
 
 @router.get("/repos")
@@ -60,9 +34,9 @@ async def list_repos(
         if cached is not None:
             payload, age_ms = cached
             if age_ms > REPO_LIST_FRESH_MS:
-                schedule_repo_cache_refresh(login, lambda: _build_repo_payload(login))
+                schedule_repo_cache_refresh(login, lambda: build_repo_payload(login))
             return payload
-    return await _build_repo_payload(login)
+    return await build_repo_payload(login)
 
 
 @router.get("/repos/{owner}/{repo}/merge-methods")

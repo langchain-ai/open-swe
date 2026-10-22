@@ -4,11 +4,13 @@ Replaces the per-site ``runs.create`` calls (plus the ``is_thread_active``
 busy-check and the custom store-queue) with one function that uses:
 
 - ``multitask_strategy="interrupt"`` by default — a follow-up halts the active run
-  (progress preserved by the sync checkpoint) and resumes the agent with full
+  (progress preserved by its checkpoints) and resumes the agent with full
   history + the new message; on an idle thread it just starts. Background
   follow-ups such as `/baby-sit` can opt into ``enqueue`` instead.
-- ``durability="sync"`` — checkpoint before each step so a crash/recycle
-  resumes from the last checkpoint instead of losing all work.
+- ``durability="async"`` — checkpoint every step, written while the next one
+  runs, so a crash/recycle resumes from at most a step back instead of losing
+  all work. ``"sync"`` made every step wait on its write (~0.3s per model/tool
+  step in prod); dashboard-started runs already use the platform's async default.
 - ``webhook=COMPLETION_WEBHOOK_URL`` — the platform calls us on completion or
   failure so every run ends with a signal even if the agent died.
 - ``stream_resumable=True`` — the run's event stream is retained so a client that
@@ -30,6 +32,7 @@ from datetime import UTC, datetime
 from typing import Any, Self
 from urllib.parse import urlparse
 
+from langgraph.types import Durability
 from langgraph_sdk import get_client
 from langgraph_sdk.client import LangGraphClient
 from langgraph_sdk.schema import Run
@@ -47,11 +50,6 @@ from openswe.input_messages import (
     build_run_input,
 )
 from openswe.invocation import new_invocation_id, resolve_invocation_id, with_invocation_id
-from openswe.remote_runtime.client import (
-    RemoteRuntimeConfigurationError,
-    remote_run_context,
-    remote_runtime_client,
-)
 from openswe.run_config import RunConfig
 from openswe.source_context import SourceContext
 from openswe.threads.creation import ensure_titled_thread
@@ -65,6 +63,16 @@ LangGraphRunConfig = dict[str, Any]
 
 
 _PULL_REQUEST_GRAPHS = frozenset({"reviewer", "review-scout"})
+TURN_ATTRIBUTION_FIELDS = frozenset(
+    {
+        "user_id",
+        "ls_repo_provider",
+        "ls_attribution_identifier",
+        "ls_git_repo",
+        "ls_git_branch",
+        "open_swe_git_targets",
+    }
+)
 
 
 class RunMetadata(BaseModel):
@@ -103,9 +111,7 @@ async def _dispatch_input(
     content: ContentBlocks, source: str, configurable: dict[str, Any]
 ) -> RunInput:
     surface: Surface = (
-        source
-        if source in {"slack", "linear", "github", "web", "desktop", "eval"}
-        else "automation"
+        source if source in {"slack", "linear", "github", "web", "eval"} else "automation"
     )  # type: ignore[assignment]
     channels: list[ChannelIdentity] = []
     systems: list[SystemIdentity] = []
@@ -276,7 +282,7 @@ def thread_workspace(metadata: Mapping[str, Any]) -> str | None:
 def follow_up_configurable(metadata: Mapping[str, Any], thread_id: str) -> dict[str, Any]:
     """Config for a system-started run that continues a thread where its last run left off."""
     configurable: dict[str, Any] = {"thread_id": thread_id}
-    for key in ("source", "repo", "github_login", "triggering_user_email"):
+    for key in ("source", "repo", "github_login", "started_by_id", "triggering_user_email"):
         value = metadata.get(key)
         if value is not None:
             configurable["user_email" if key == "triggering_user_email" else key] = value
@@ -297,9 +303,12 @@ def prepare_run_config(
     configurable = dict(configurable) if isinstance(configurable, dict) else {}
     existing_metadata = run_config.get("metadata")
     merged_metadata = dict(existing_metadata) if isinstance(existing_metadata, dict) else {}
+    for key in TURN_ATTRIBUTION_FIELDS:
+        merged_metadata.pop(key, None)
     if metadata is not None:
         merged_metadata.update(metadata)
     merged_metadata.update(_slack_channel_metadata(configurable))
+    merged_metadata["ls_repo_provider"] = "github"
     invocation_id = resolve_invocation_id(configurable, merged_metadata) or new_invocation_id()
     started_at = merged_metadata.setdefault("invocation_started_at", datetime.now(UTC).isoformat())
     configurable = with_invocation_id(configurable, invocation_id)
@@ -311,17 +320,19 @@ def prepare_run_config(
     return run_config
 
 
-async def _run_user_id(
+async def _run_user_metadata(
     config: LangGraphRunConfig | None, *, source: str | None = None
-) -> str | None:
+) -> dict[str, str]:
+    """Resolve canonical attribution identically for durable and dashboard-started turns."""
+    metadata = {"ls_repo_provider": "github"}
     configurable = (config or {}).get("configurable")
     if not isinstance(configurable, Mapping):
-        return None
+        return metadata
     cfg = RunConfig.parse(dict(configurable))
     if cfg.background_task_completion:
-        return None
+        return metadata
     try:
-        if (source or cfg.source) in {"dashboard", "web", "desktop"} and cfg.github_login:
+        if (source or cfg.source) in {"dashboard", "web"} and cfg.github_login:
             user = await User.for_login("github", cfg.github_login)
         elif cfg.slack_thread and cfg.slack_thread.triggering_user_id:
             user = await User.for_identity("slack", cfg.slack_thread.triggering_user_id)
@@ -332,11 +343,14 @@ async def _run_user_id(
         elif cfg.user_email:
             user = await User.for_email(cfg.user_email)
         else:
-            return None
-        return str(user.id) if user else None
+            return metadata
+        if user is not None:
+            metadata["user_id"] = str(user.id)
+            if user.github_login:
+                metadata["ls_attribution_identifier"] = user.github_login
     except Exception:
         logger.warning("Could not resolve run user for trace metadata", exc_info=True)
-        return None
+    return metadata
 
 
 async def create_durable_run(
@@ -350,38 +364,32 @@ async def create_durable_run(
     metadata: dict[str, Any] | None = None,
     client: LangGraphClient | None = None,
     multitask_strategy: str = "interrupt",
-    durability: str = "sync",
+    durability: Durability = "async",
     if_not_exists: str = "create",
     stream_resumable: bool = True,
     after_seconds: int | float | None = None,
     source_context: SourceContext | None = None,
-    use_mda: bool = False,
 ) -> Run:
     """Create a run with Open SWE's durable LangGraph defaults.
 
     ``thread_title`` names a thread the system owns, creating it if needed; ``None``
-    means the caller already created and titled the thread. ``use_mda`` runs the
-    graph on its Managed Deep Agents deployment instead of this one.
+    means the caller already created and titled the thread. Agent and reviewer
+    threads run on Managed Deep Agents; the request goes here regardless and
+    ``openswe.threads.router`` routes it.
     """
     client = client or dispatch_client()
-    remote_client = remote_runtime_client(assistant_id) if use_mda else None
-    if use_mda and remote_client is None:
-        raise RemoteRuntimeConfigurationError(
-            f"No Managed Deep Agents runtime serves {assistant_id}"
-        )
     if thread_title is not None:
         await ensure_titled_thread(client, thread_id, title=thread_title)
     recorded = RunMetadata.of_run(assistant_id, config)
-    run_metadata = dict(metadata or {}) | recorded.model_dump(exclude_none=True)
+    run_metadata = {
+        key: value for key, value in (metadata or {}).items() if key not in TURN_ATTRIBUTION_FIELDS
+    } | recorded.model_dump(exclude_none=True)
+    run_metadata.update(await _run_user_metadata(config, source=source))
     conversation_type = _slack_conversation_type(source, config)
     if conversation_type is not None:
         run_metadata["slack_conversation_type"] = conversation_type
-    user_id = await _run_user_id(config, source=source)
-    if user_id:
-        run_metadata["user_id"] = user_id
     run_config = prepare_run_config(config, run_metadata)
-    if user_id is None:
-        run_config["metadata"].pop("user_id", None)
+    if "user_id" not in run_metadata:
         configurable = run_config["configurable"]
         if isinstance(configurable, dict):
             configurable.pop("user_id", None)
@@ -401,19 +409,7 @@ async def create_durable_run(
     if after_seconds is not None:
         create_kwargs["after_seconds"] = after_seconds
 
-    if remote_client is not None:
-        # The thread here stays the index the webhooks and dashboard read; the run and
-        # its checkpoints live on the remote deployment, which reaches back through
-        # the tool server with the token in its context.
-        create_kwargs["context"] = await remote_run_context(
-            run_config["configurable"], thread_id=thread_id, assistant_id=assistant_id
-        )
-        create_kwargs["config"] = {
-            key: value for key, value in run_config.items() if key != "configurable"
-        }
-        run = await remote_client.runs.create(thread_id, assistant_id, **create_kwargs)
-    else:
-        run = await client.runs.create(thread_id, assistant_id, **create_kwargs)
+    run = await client.runs.create(thread_id, assistant_id, **create_kwargs)
     if recorded.pull_request is not None:
         await Topic.PULL_REQUESTS.invalidate(key=recorded.pull_request)
     cfg = RunConfig.from_config(run_config)
@@ -449,7 +445,6 @@ async def dispatch_agent_run(
     client: LangGraphClient | None = None,
     multitask_strategy: str = "interrupt",
     source_context: SourceContext | None = None,
-    use_mda: bool = False,
 ) -> Run:
     """Create a durable run for ``thread_id`` using the requested multitask strategy.
 
@@ -486,5 +481,4 @@ async def dispatch_agent_run(
         client=client,
         multitask_strategy=multitask_strategy,
         source_context=source_context,
-        use_mda=use_mda,
     )

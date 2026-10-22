@@ -189,7 +189,48 @@ test.describe("review page", () => {
     expect(pillBox!.x + pillBox!.width).toBeLessThanOrEqual(titleBox!.x);
   });
 
-  test("renders human input above the description and the changes", async ({
+  test("keeps description spacing stable when expanding and collapsing", async ({
+    page,
+  }) => {
+    const longPr = await seedOpenPullRequest(page, {
+      repo: `${OWNER}/${REPO}`,
+      title: "Keep description spacing stable",
+      body: Array.from(
+        { length: 24 },
+        (_, index) => `Paragraph ${index + 1}: Description content.`,
+      ).join("\n\n"),
+      author: "bob",
+      head: "description-spacing",
+      files: { "spacing.py": "SPACING = 1\n" },
+    });
+    await openReview(page, longPr);
+    const description = page.getByRole("article", {
+      name: "Description",
+      exact: true,
+    });
+    const offset = () =>
+      description.evaluate((element) => {
+        const header = element.querySelector("header")!;
+        const paragraph = element.querySelector(".chat-markdown p")!;
+        return (
+          paragraph.getBoundingClientRect().top -
+          header.getBoundingClientRect().bottom
+        );
+      });
+    const expand = description.getByRole("button", {
+      name: "Show the whole description",
+    });
+    await expect(expand).toBeVisible();
+    const collapsed = await offset();
+    await expand.click();
+    expect(await offset()).toBeCloseTo(collapsed, 1);
+    await description
+      .getByRole("button", { name: "Show less", exact: true })
+      .click();
+    expect(await offset()).toBeCloseTo(collapsed, 1);
+  });
+
+  test("collapses human input above the description and the changes", async ({
     page,
   }) => {
     const seeded = await page.request.post("/control/walkthrough", {
@@ -202,12 +243,17 @@ test.describe("review page", () => {
     expect(seeded.ok(), await seeded.text()).toBeTruthy();
 
     await openReview(page, pr);
-    const guidance = page.getByRole("region", {
-      name: "Human input",
+    const guidance = page.getByRole("group", {
+      name: "Requested behavior",
     });
-    await expect(guidance).toContainText(
+    const request = guidance.getByText(
       "Asked to keep the constants in flat modules",
     );
+    await expect(guidance).toBeVisible();
+    await expect(request).toBeHidden();
+    const toggle = guidance.locator("summary");
+    await toggle.click();
+    await expect(request).toBeVisible();
 
     const description = await page.getByText(DESCRIPTION).boundingBox();
     const card = await guidance.boundingBox();
@@ -219,6 +265,8 @@ test.describe("review page", () => {
     expect(description!.y + description!.height).toBeLessThanOrEqual(
       changes!.y,
     );
+    await toggle.press("Enter");
+    await expect(request).toBeHidden();
   });
 
   test("dismissing a walkthrough reports whether there was one", async ({
@@ -280,18 +328,22 @@ test.describe("review page", () => {
     ).toBeDisabled();
     await expect(page.getByText("Building the walkthrough…")).toBeVisible();
 
+    // The scout runs on Managed Deep Agents, whose run error carries what its
+    // backend hook raised.
     const failure =
-      "RuntimeError: E2E has no sandbox provider for the review scout";
-    await expect(page.getByText(`Last attempt failed: ${failure}`)).toBeVisible(
-      {
-        timeout: 30_000,
-      },
-    );
+      /RuntimeError: E2E has no sandbox provider for the review scout/;
+    await expect(
+      page.getByText(new RegExp(`^Last attempt failed: .*${failure.source}`)),
+    ).toBeVisible({
+      timeout: 30_000,
+    });
     await expect(
       page.getByText("The walkthrough failed to build"),
     ).toBeVisible();
     await expect(
-      page.getByText(`The review scout crashed: ${failure}`),
+      page.getByText(
+        new RegExp(`^The review scout crashed: .*${failure.source}`),
+      ),
     ).toBeVisible();
     await expect(build).toBeEnabled();
 
@@ -317,6 +369,26 @@ test.describe("review page", () => {
         name: "Walk me through the review findings",
       }),
     ).toHaveCount(0);
+  });
+
+  test("clears the line selection when cancelling an inline comment", async ({
+    page,
+  }) => {
+    await openReview(page, pr);
+    const diff = diffColumn(page);
+    await expect(async () => {
+      await diff.locator('[data-column-number="5"]').first().hover();
+      await diff
+        .locator("[data-gutter-utility-slot] button")
+        .click({ timeout: 1000 });
+    }).toPass({ timeout: 10_000 });
+    await expect(diff.getByLabel("Comment body")).toBeVisible();
+    await expect(diff.locator("[data-selected-line]").first()).toBeVisible();
+
+    await diff.getByRole("button", { name: "Cancel", exact: true }).click();
+    await page.getByRole("heading", { name: "Changes", exact: true }).click();
+    await expect(diff.getByLabel("Comment body")).toHaveCount(0);
+    await expect(diff.locator("[data-selected-line]")).toHaveCount(0);
   });
 
   test("chat-drafted comments join one pending review that submits together", async ({
@@ -498,7 +570,15 @@ test.describe("review page", () => {
     const verdict = "Approving the constant modules.";
     await page.getByLabel("Review summary").fill(verdict);
     await page.getByRole("radio", { name: /Approve/ }).check();
-    await page.getByRole("button", { name: "Submit review" }).click();
+    await page
+      .getByRole("button", { name: "Cancel", exact: true })
+      .press("Meta+Enter");
+    await expect(page.getByLabel("Review summary")).toBeVisible();
+    expect((await fakePull(page, pr)).reviews).toHaveLength(0);
+    await page.getByRole("button", { name: "Cancel", exact: true }).click();
+    await page.getByRole("button", { name: /Review changes/ }).click();
+    await page.getByRole("radio", { name: /Approve/ }).check();
+    await page.getByRole("radio", { name: /Approve/ }).press("Meta+Enter");
     await expect(conversation.getByText(verdict)).toBeVisible();
     await expect(
       conversation.getByText("approved", { exact: true }),

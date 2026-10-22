@@ -1,6 +1,6 @@
 import { createContext, useContext } from "react"
 
-import type { DiffEntry } from "./diffEntries"
+import type { DiffEntry, StepGroup } from "./diffEntries"
 import type { FileMarkers } from "./queries"
 
 /** Per-file findings and threads, computed once for every file header CodeView portals in. */
@@ -21,4 +21,13 @@ export const EntriesContext = createContext<ReadonlyMap<string, DiffEntry>>(
 
 export function useEntry(id: string): DiffEntry | undefined {
   return useContext(EntriesContext).get(id)
+}
+
+/** The walkthrough steps shown, by the id of the item that introduces each one. */
+export const StepsContext = createContext<ReadonlyMap<string, StepGroup>>(
+  new Map()
+)
+
+export function useStepGroup(id: string): StepGroup | undefined {
+  return useContext(StepsContext).get(id)
 }

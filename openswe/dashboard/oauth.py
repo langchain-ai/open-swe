@@ -212,7 +212,7 @@ def sanitize_redirect_to(redirect_to: str | None) -> str:
 
 
 def validate_github_login_allowlist() -> None:
-    if ENV.OPEN_SWE_LOCAL_AUTH_TOKEN.is_set() or allowed_orgs() or allowed_logins():
+    if allowed_orgs() or allowed_logins():
         return
     message = "ALLOWED_GITHUB_ORGS or ALLOWED_GITHUB_USERS must be configured"
     logger.error(message)
@@ -676,10 +676,12 @@ def cookie_security() -> tuple[bool, Literal["lax", "none"]]:
     cookie is ``SameSite=Lax``, ``Secure`` only over HTTPS since ``Secure``
     cookies are rejected on ``http://localhost``. A dashboard on another origin
     (the split deployment) needs ``Secure; SameSite=None`` for the browser to
-    send the cookie cross-site.
+    send the cookie cross-site. With no dashboard at all there is no other origin
+    to allow, and the origin check that guards cross-site cookies has nothing to
+    check against, so the cookie stays ``Lax``.
     """
     secure = dashboard_api_base_url().startswith("https://")
-    if not secure or dashboard_is_same_origin():
+    if not secure or not dashboard_base_url() or dashboard_is_same_origin():
         return secure, "lax"
     return True, "none"
 

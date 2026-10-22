@@ -1,6 +1,4 @@
 import { PushPinRegularIcon } from "@langchain/macaw-components/icons"
-import { ContextMenuItem } from "@langchain/macaw-components/ContextMenu"
-import { DropdownMenuItem } from "@langchain/macaw-components/DropdownMenu"
 import { ArchiveIcon } from "@phosphor-icons/react/dist/ssr/Archive"
 import { ArrowCounterClockwiseIcon } from "@phosphor-icons/react/dist/ssr/ArrowCounterClockwise"
 import { CopyIcon } from "@phosphor-icons/react/dist/ssr/Copy"
@@ -11,7 +9,7 @@ import { SlackLogoIcon } from "@phosphor-icons/react/dist/ssr/SlackLogo"
 import { TrashIcon } from "@phosphor-icons/react/dist/ssr/Trash"
 import { TreeStructureIcon } from "@phosphor-icons/react/dist/ssr/TreeStructure"
 
-import type { DesktopLegacyLocalThread } from "@/desktop"
+import { ContextMenuItem, DropdownMenuItem } from "@/components/MenuItem"
 import type { AgentThread } from "@/features/agents/lib/types"
 
 /** Radix scopes items to their menu, so callers name the menu they render in. */
@@ -27,7 +25,6 @@ const ICON_SIZE = 14
 export function ThreadMenuItems({
   menu = "dropdown",
   thread,
-  localThread,
   pinned,
   archived,
   isDeleting,
@@ -36,8 +33,7 @@ export function ThreadMenuItems({
   onDelete,
 }: {
   menu?: ThreadMenuKind
-  thread: AgentThread | null
-  localThread?: DesktopLegacyLocalThread
+  thread: AgentThread
   pinned: boolean
   archived: boolean
   isDeleting: boolean
@@ -46,30 +42,18 @@ export function ThreadMenuItems({
   onDelete: () => void
 }) {
   const Item = MENU_ITEM[menu]
-  const threadId = thread?.id ?? localThread?.id
   return (
     <>
-      {thread?.traceUrl && (
-        <Item asChild className="gap-space-2">
+      {thread.traceUrl && (
+        <Item asChild>
           <a href={thread.traceUrl} target="_blank" rel="noreferrer">
             <TreeStructureIcon size={ICON_SIZE} weight="regular" />
             Open trace
           </a>
         </Item>
       )}
-      {localThread && (
-        <Item
-          className="gap-space-2"
-          onSelect={() => {
-            void window.openSweDesktop?.openLocalTrace(localThread.id)
-          }}
-        >
-          <TreeStructureIcon size={ICON_SIZE} weight="regular" />
-          Open trace
-        </Item>
-      )}
-      {thread?.sourceUrl && (
-        <Item asChild className="gap-space-2">
+      {thread.sourceUrl && (
+        <Item asChild>
           <a
             href={thread.sourceAppUrl ?? thread.sourceUrl}
             target="_blank"
@@ -80,8 +64,8 @@ export function ThreadMenuItems({
           </a>
         </Item>
       )}
-      {thread?.automationId && (
-        <Item asChild className="gap-space-2">
+      {thread.automationId && (
+        <Item asChild>
           <Link
             to="/agents/automations/$scheduleId"
             params={{ scheduleId: thread.automationId }}
@@ -91,7 +75,7 @@ export function ThreadMenuItems({
           </Link>
         </Item>
       )}
-      <Item className="gap-space-2" onSelect={onTogglePin}>
+      <Item onSelect={onTogglePin}>
         {pinned ? (
           <PushPinSlashIcon size={ICON_SIZE} weight="regular" />
         ) : (
@@ -99,34 +83,28 @@ export function ThreadMenuItems({
         )}
         {pinned ? "Unpin thread" : "Pin thread"}
       </Item>
-      {thread && (
-        <Item
-          className="gap-space-2"
-          disabled={!thread.sandboxId}
-          onSelect={() => {
-            if (thread.sandboxId) {
-              void navigator.clipboard.writeText(thread.sandboxId)
-            }
-          }}
-          title={thread.sandboxId ?? undefined}
-        >
-          <CopyIcon size={ICON_SIZE} weight="regular" />
-          Copy sandbox ID
-        </Item>
-      )}
-      {threadId && (
-        <Item
-          className="gap-space-2"
-          onSelect={() => {
-            void navigator.clipboard.writeText(threadId)
-          }}
-          title={threadId}
-        >
-          <CopyIcon size={ICON_SIZE} weight="regular" />
-          Copy thread ID
-        </Item>
-      )}
-      <Item className="gap-space-2" onSelect={onToggleArchived}>
+      <Item
+        disabled={!thread.sandboxId}
+        onSelect={() => {
+          if (thread.sandboxId) {
+            void navigator.clipboard.writeText(thread.sandboxId)
+          }
+        }}
+        title={thread.sandboxId ?? undefined}
+      >
+        <CopyIcon size={ICON_SIZE} weight="regular" />
+        Copy sandbox ID
+      </Item>
+      <Item
+        onSelect={() => {
+          void navigator.clipboard.writeText(thread.id)
+        }}
+        title={thread.id}
+      >
+        <CopyIcon size={ICON_SIZE} weight="regular" />
+        Copy thread ID
+      </Item>
+      <Item onSelect={onToggleArchived}>
         {archived ? (
           <ArrowCounterClockwiseIcon size={ICON_SIZE} weight="regular" />
         ) : (
@@ -135,7 +113,7 @@ export function ThreadMenuItems({
         {archived ? "Unarchive thread" : "Archive thread"}
       </Item>
       <Item
-        className="gap-space-2 text-error-secondary"
+        className="text-error-secondary"
         onSelect={onDelete}
         disabled={isDeleting}
       >

@@ -10,10 +10,10 @@ the policy existed, and a pull request cannot rewrite the policy it is judged by
 import logging
 
 from openswe.github.repo_files import fetch_repo_file
+from openswe.github.repo_names import RepoFullName
 from openswe.review.styles import (
     REVIEW_STYLES,
     ApprovalMode,
-    RepoFullName,
     effective_approval_mode,
 )
 

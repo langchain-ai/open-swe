@@ -4,13 +4,13 @@ from typing import Literal
 
 from openswe.audit_logs.tools import audit_tool
 from openswe.dashboard.repo_access import require_repo_access_for_user
+from openswe.github.repo_names import normalize_repo_full_name
 from openswe.review.approvals import fetch_approvals_md
 from openswe.review.styles import (
     REVIEW_STYLES,
     ApprovalMode,
     ReviewStylePromptUpdate,
     effective_approval_mode,
-    normalize_repo_full_name,
 )
 from openswe.tools.access import Policy, access, ack
 from openswe.tools.admin_gate import configurable

@@ -41,12 +41,13 @@ it("warns about a lagging frontend even when it matches the backend-served bundl
   expect(screen.queryByRole("status")).toBeNull()
   client.setQueryData(["session"], session("new"))
   expect((await screen.findByRole("status")).textContent).toContain(
-    "Frontend version differs from the deployed backend."
+    "New changes are available. Reload to get the latest updates."
   )
-  expect(
-    screen.getByRole("link", { name: "Details" }).getAttribute("href")
-  ).toBe("/my-settings/about")
+  expect(screen.queryByRole("link", { name: "Details" })).toBeNull()
+  expect(screen.getByRole("button", { name: "Reload" })).toBeTruthy()
+  expect(document.body.classList.contains("version-mismatch")).toBe(true)
   client.setQueryData(["session"], session("old"))
   await waitFor(() => expect(screen.queryByRole("status")).toBeNull())
+  expect(document.body.classList.contains("version-mismatch")).toBe(false)
   client.clear()
 })

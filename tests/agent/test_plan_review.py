@@ -4,7 +4,15 @@ from unittest.mock import AsyncMock
 import pytest
 from fastapi import HTTPException
 
-from tests.conftest import FakeStore
+from openswe.database import postgres
+from openswe.threads.plan_store import (
+    ThreadPlan,
+)
+
+
+async def _seed_plan(thread_id: str, value: dict[str, Any]) -> None:
+    async with postgres.session() as session:
+        session.add(ThreadPlan(thread_id=thread_id, value=value))
 
 
 async def test_save_plan_rejects_html_outside_plans_dir() -> None:
@@ -78,7 +86,7 @@ async def test_list_workflow_approvals_requires_readable_thread(
 
 
 async def test_republished_artifact_drops_legacy_approval(
-    monkeypatch: pytest.MonkeyPatch, fake_store: FakeStore
+    monkeypatch: pytest.MonkeyPatch, registry_db: None
 ) -> None:
     from openswe.threads import plan_api, plan_store
 
@@ -104,7 +112,7 @@ async def test_republished_artifact_drops_legacy_approval(
 
 
 async def test_dismissal_clears_when_artifact_is_republished(
-    monkeypatch: pytest.MonkeyPatch, fake_store: FakeStore
+    monkeypatch: pytest.MonkeyPatch, registry_db: None
 ) -> None:
     from openswe.threads import plan_api, plan_store
 
@@ -125,13 +133,11 @@ async def test_dismissal_clears_when_artifact_is_republished(
 
 @pytest.mark.parametrize("status", ["ready", "approved", "cancelled", "shared"])
 async def test_artifact_comments_remain_authorized_without_approval_gates(
-    monkeypatch: pytest.MonkeyPatch, fake_store: FakeStore, status: str
+    monkeypatch: pytest.MonkeyPatch, registry_db: None, status: str
 ) -> None:
-    from openswe.threads import plan_api, plan_store
+    from openswe.threads import plan_api
 
-    fake_store.seed(
-        plan_store.PLAN_CONTENT_NAMESPACE, "t", {"html": "<p>Report</p>", "status": status}
-    )
+    await _seed_plan("t", {"html": "<p>Report</p>", "status": status})
     monkeypatch.setattr(
         plan_api, "fetch_thread_metadata", AsyncMock(return_value={"source": "slack"})
     )
@@ -146,11 +152,11 @@ async def test_artifact_comments_remain_authorized_without_approval_gates(
 
 
 async def test_submit_artifact_comments_dispatches_only_for_comment_author(
-    monkeypatch: pytest.MonkeyPatch, fake_store: FakeStore
+    monkeypatch: pytest.MonkeyPatch, registry_db: None
 ) -> None:
-    from openswe.threads import plan_api, plan_store
+    from openswe.threads import plan_api
 
-    fake_store.seed(plan_store.PLAN_CONTENT_NAMESPACE, "t", {"html": "<p>Report</p>"})
+    await _seed_plan("t", {"html": "<p>Report</p>"})
     monkeypatch.setattr(
         plan_api, "fetch_thread_metadata", AsyncMock(return_value={"source": "slack"})
     )
@@ -173,13 +179,12 @@ async def test_submit_artifact_comments_dispatches_only_for_comment_author(
 
 
 async def test_legacy_markdown_artifact_edits_preserve_comments_and_path(
-    monkeypatch: pytest.MonkeyPatch, fake_store: FakeStore
+    monkeypatch: pytest.MonkeyPatch, registry_db: None
 ) -> None:
     from openswe.threads import plan_api, plan_store
 
     path = "/workspace/plans/legacy.md"
-    fake_store.seed(
-        plan_store.PLAN_CONTENT_NAMESPACE,
+    await _seed_plan(
         "t",
         {
             "markdown": "# Old plan",
@@ -200,3 +205,34 @@ async def test_legacy_markdown_artifact_edits_preserve_comments_and_path(
     assert (await plan_api.get_plan("t", author))["markdown"] == "# Updated"
     assert (await plan_api.get_plan_comments("t", author))["comments"] == [comment]
     write.assert_awaited_once_with("t", "# Updated", plan_file_path=path)
+
+
+async def test_artifact_replies_survive_parent_deletion(
+    monkeypatch: pytest.MonkeyPatch, registry_db: None
+) -> None:
+    from openswe.threads import plan_api
+
+    monkeypatch.setattr(
+        plan_api, "fetch_thread_metadata", AsyncMock(return_value={"source": "slack"})
+    )
+    alice = {"sub": "alice"}
+    bob = {"sub": "bob"}
+    parent = await plan_api.post_plan_comment("t", plan_api.CommentBody(body="Feedback"), alice)
+    reply = await plan_api.post_plan_comment(
+        "t", plan_api.CommentBody(body="Follow-on", parent_id=parent["id"]), bob
+    )
+    assert reply["parent_id"] == parent["id"]
+    assert (await plan_api.get_plan_comments("t", alice))["comments"] == [parent, reply]
+    for thread_id, parent_id, status in [("other", parent["id"], 404), ("t", reply["id"], 422)]:
+        with pytest.raises(HTTPException) as exc:
+            await plan_api.post_plan_comment(
+                thread_id, plan_api.CommentBody(body="Invalid reply", parent_id=parent_id), alice
+            )
+        assert exc.value.status_code == status
+    await plan_api.remove_plan_comment("t", parent["id"], alice)
+    assert (await plan_api.get_plan_comments("t", bob))["comments"] == [
+        {**reply, "parent_id": None}
+    ]
+    with pytest.raises(HTTPException) as exc:
+        await plan_api.remove_plan_comment("t", reply["id"], alice)
+    assert exc.value.status_code == 403

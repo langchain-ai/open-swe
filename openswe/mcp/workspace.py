@@ -2,7 +2,6 @@
 
 import logging
 from collections.abc import Callable, Coroutine
-from functools import partial
 from typing import Any
 
 from fastapi import Request, Response
@@ -11,11 +10,10 @@ from fastapi.responses import JSONResponse
 from fastapi.routing import APIRoute
 
 from openswe.mcp import MCPConnection, MCPConnectionUpdate, MCPSource, prepare_connection
-from openswe.store import TypedStore
+from openswe.mcp.records import SharedMCPConnections
 
 logger = logging.getLogger(__name__)
 
-WORKSPACE_MCPS_NAMESPACE = ["workspace_mcps"]
 _VALIDATION_MESSAGES = {
     "name": (
         "Connection name must start with a lowercase letter and contain only lowercase "
@@ -57,16 +55,16 @@ class MCPRoute(APIRoute):
         return redacted_handler
 
 
-def _store(workspace: str) -> TypedStore[MCPConnection]:
-    return TypedStore([*WORKSPACE_MCPS_NAMESPACE, workspace.strip().lower()], MCPConnection)
+def _connections(workspace: str) -> SharedMCPConnections:
+    return SharedMCPConnections(workspace)
 
 
 async def get_workspace_mcp(workspace: str, name: str) -> MCPConnection | None:
-    return await _store(workspace).get(name)
+    return await _connections(workspace).get(name)
 
 
 async def list_workspace_mcp_records(workspace: str) -> list[MCPConnection]:
-    return sorted(await _store(workspace).search_all(), key=lambda record: record.name)
+    return await _connections(workspace).records()
 
 
 async def list_workspace_mcps(workspace: str) -> list[dict[str, Any]]:
@@ -86,18 +84,13 @@ async def save_workspace_mcp(
     workspace: str, name: str, update: MCPConnectionUpdate
 ) -> dict[str, Any]:
     record = await prepare_workspace_mcp(workspace, name, update)
-    await _store(workspace).put(name, record)
+    await _connections(workspace).put(record)
     return record.public()
 
 
 async def delete_workspace_mcp(workspace: str, name: str) -> None:
-    await _store(workspace).delete(name)
+    await _connections(workspace).delete(name)
 
 
 def workspace_mcp_source(workspace: str) -> MCPSource:
-    workspace = workspace.strip().lower()
-    return MCPSource(
-        namespace=(*WORKSPACE_MCPS_NAMESPACE, workspace),
-        list_connections=partial(list_workspace_mcp_records, workspace),
-        get_connection=partial(get_workspace_mcp, workspace),
-    )
+    return _connections(workspace).source()

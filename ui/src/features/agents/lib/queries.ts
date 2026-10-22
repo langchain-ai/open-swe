@@ -4,6 +4,7 @@ import {
   sidebarThreadForMode,
 } from "./sidebarThreads"
 import {
+  queryOptions,
   useInfiniteQuery,
   useMutation,
   useQuery,
@@ -17,6 +18,7 @@ import { localThreadKeys } from "./desktopLocal"
 import type { InfiniteData, QueryClient, QueryKey } from "@tanstack/react-query"
 import type {
   ScheduleUpdateRequest,
+  ThreadMoveDestination,
   ThreadsPage,
   ThreadsPageParams,
 } from "./api"
@@ -56,12 +58,16 @@ export const agentThreadKeys = {
     ["agent-threads", threadId, "pull-request-status"] as const,
   queuedMessages: (threadId: string) =>
     ["agent-threads", threadId, "queued-messages"] as const,
+  backgroundWork: (threadId: string) =>
+    ["agent-threads", threadId, "background-work"] as const,
   branchDiff: (threadId: string) =>
     ["agent-threads", threadId, "branch-diff"] as const,
   workingTreeDiff: (threadId: string) =>
     ["agent-threads", threadId, "working-tree-diff"] as const,
   workflowApprovals: (threadId: string) =>
     ["agent-threads", threadId, "workflow-approvals"] as const,
+  browser: (threadId: string) =>
+    ["agent-threads", threadId, "browser"] as const,
   page: (params: ThreadsPageParams) =>
     ["agent-threads", "lists", "page", params] as const,
   infinitePages: (params: Omit<ThreadsPageParams, "offset">) =>
@@ -591,8 +597,7 @@ export function useDeleteAgentSkill(organization = false) {
 // Sidebar lists and detail reads return the same per-thread summary, so warming
 // the detail cache from the already-fetched sidebar avoids a fan-out of one
 // request per thread. Navigation stays instant; the real (mark-viewed) fetch
-// fires only when a thread is actually opened. The active thread is skipped so
-// its live detail query stays the source of truth.
+// fires only when a thread is actually opened.
 export function useSeedAgentThreadDetails(
   threads: Array<AgentThread>,
   activeThreadId?: string
@@ -601,7 +606,22 @@ export function useSeedAgentThreadDetails(
 
   useEffect(() => {
     for (const thread of threads.flatMap(threadFamily)) {
-      if (thread.id === activeThreadId) continue
+      if (thread.id === activeThreadId) {
+        const key = agentThreadKeys.detail(thread.id)
+        const detail = queryClient.getQueryData<AgentThread>(key)
+        if (detail && thread.updatedAt > detail.updatedAt) {
+          queryClient.setQueryData<AgentThread>(key, {
+            ...detail,
+            updatedAt: thread.updatedAt,
+            traceUrl: thread.traceUrl,
+            sandboxId: thread.sandboxId,
+            sourceUrl: thread.sourceUrl,
+            sourceAppUrl: thread.sourceAppUrl,
+            automationId: thread.automationId,
+          })
+        }
+        continue
+      }
       // Seed as already-stale: the detail GET is what marks a thread viewed
       // server-side, so opening a seeded entry must still refetch despite the
       // detail query's `staleTime` (which exists for the optimistic seed).
@@ -673,22 +693,28 @@ export function useSidebarRepos({
 export function useSidebarActiveThread({
   activeThreadId,
   loadedThreads,
-  includeResolved = false,
   enabled = true,
 }: {
   activeThreadId?: string
   loadedThreads: Array<AgentThread>
-  includeResolved?: boolean
   enabled?: boolean
 }): AgentThread | undefined {
   const hierarchy = useProfile().data?.experimental_task_coordination === true
-  const loaded = loadedThreads
-    .flatMap((thread) => (hierarchy ? threadFamily(thread) : [thread]))
-    .some((thread) => thread.id === activeThreadId)
+  const queryClient = useQueryClient()
+  const detail = useQuery({
+    ...agentThreadDetailOptions(activeThreadId ?? "", queryClient),
+    enabled: false,
+    select: (thread) => sidebarThreadForMode(thread, hierarchy),
+  }).data
+  const loaded = loadedThreads.find((thread) =>
+    (hierarchy ? threadFamily(thread) : [thread]).some(
+      (member) => member.id === activeThreadId
+    )
+  )
   const query = useQuery({
     queryKey: agentThreadKeys.sidebarActive(activeThreadId ?? ""),
     queryFn: () => agentsApi.getThread(activeThreadId!, { markViewed: false }),
-    enabled: enabled && Boolean(activeThreadId) && !loaded,
+    enabled: enabled && Boolean(activeThreadId) && !detail && !loaded,
     refetchOnMount: "always",
     refetchOnWindowFocus: "always",
     refetchInterval: (current) =>
@@ -699,9 +725,7 @@ export function useSidebarActiveThread({
     select: (thread) => sidebarThreadForMode(thread, hierarchy),
     retry: false,
   })
-  return !loaded && (!query.data?.resolved || includeResolved)
-    ? query.data
-    : undefined
+  return detail ?? loaded ?? query.data
 }
 
 function useSidebarThreadPages(
@@ -807,25 +831,29 @@ export function useSidebarRepoThreads({
 // `agent_cost._RETRY_DELAYS_SECONDS`), after the running-state poll has stopped.
 const RUN_COST_REFETCH_DELAYS_MS = [20_000, 60_000, 120_000]
 
-export function useAgentThread(threadId: string) {
-  const queryClient = useQueryClient()
-  const queryKey = agentThreadKeys.detail(threadId)
-
-  const query = useQuery({
-    queryKey,
-    queryFn: async ({ queryKey: key }) => {
+function agentThreadDetailOptions(threadId: string, queryClient: QueryClient) {
+  return queryOptions({
+    queryKey: agentThreadKeys.detail(threadId),
+    queryFn: async ({ queryKey }) => {
       const thread = await agentsApi.getThread(threadId)
-      const cached = queryClient.getQueryData<AgentThread>(key)
+      const cached = queryClient.getQueryData<AgentThread>(queryKey)
       const pendingMessages = cached?.pendingMessages
       if (!pendingMessages?.length) return thread
       return { ...thread, pendingMessages }
     },
+  })
+}
+
+export function useAgentThread(threadId: string) {
+  const queryClient = useQueryClient()
+  const query = useQuery({
+    ...agentThreadDetailOptions(threadId, queryClient),
     // Server truth heartbeat while a run is live. The SDK's SSE transport does
     // not reconnect once a custom `fetch` is supplied (it needs the dashboard
     // session cookie), so a dropped event stream must not leave the view — and
     // its stop button — believing the run already ended.
-    refetchInterval: (query) =>
-      query.state.data?.status === "running" ? 3000 : false,
+    refetchInterval: (current) =>
+      current.state.data?.status === "running" ? 3000 : false,
     // Lets the optimistic detail seeded by `AgentsHome` survive until the
     // proxied run.start stamps the server-side thread; an immediate refetch
     // would 404 and replace the seeded view with a load error.
@@ -869,6 +897,40 @@ export function useAgentThreadQueuedMessages(threadId: string) {
     queryFn: () => agentsApi.getThreadQueuedMessages(threadId),
     enabled: Boolean(threadId),
     meta: { invalidatedBy: [invalidationTopic("thread-queues", threadId)] },
+  })
+}
+
+// Each read mints a new act link and reloads the framed page, so a link is kept
+// until shortly before it expires rather than refetched on every focus.
+const BROWSER_LINK_REFRESH_MARGIN_MS = 5 * 60_000
+
+export function useAgentThreadBrowser(threadId: string, enabled: boolean) {
+  return useQuery({
+    queryKey: agentThreadKeys.browser(threadId),
+    queryFn: () => agentsApi.getThreadBrowser(threadId),
+    enabled: enabled && Boolean(threadId),
+    retry: false,
+    staleTime: (query) => {
+      const expiresAt = query.state.data?.expires_at
+      return expiresAt
+        ? Math.max(
+            Date.parse(expiresAt) - Date.now() - BROWSER_LINK_REFRESH_MARGIN_MS,
+            0
+          )
+        : 0
+    },
+    meta: { invalidatedBy: [invalidationTopic("thread-browsers", threadId)] },
+  })
+}
+
+export function useAgentThreadBackgroundWork(threadId: string) {
+  return useQuery({
+    queryKey: agentThreadKeys.backgroundWork(threadId),
+    queryFn: () => agentsApi.getThreadBackgroundWork(threadId),
+    enabled: Boolean(threadId),
+    meta: {
+      invalidatedBy: [invalidationTopic("thread-background-work", threadId)],
+    },
   })
 }
 
@@ -1219,6 +1281,39 @@ export function useShareThreadWithWorkspace() {
       storeAgentThread(queryClient, thread)
       invalidateAgentThreadLists(queryClient)
     },
+  })
+}
+
+/** Move a thread to the cloud, or onto a fresh checkout on this Mac, before its next message. */
+export function useMoveThread(
+  thread: Pick<AgentThread, "id" | "repoFullName">
+) {
+  const queryClient = useQueryClient()
+
+  return useMutation({
+    mutationFn: async (to: "cloud" | "local") => {
+      let destination: ThreadMoveDestination = { target: "cloud" }
+      if (to === "local") {
+        if (!window.openSweDesktop)
+          throw new Error(
+            "Open this thread in the Open SWE app to move it here"
+          )
+        destination = {
+          sandbox_bridge_id: await window.openSweDesktop.takeOverThread({
+            threadId: thread.id,
+            repo: thread.repoFullName,
+          }),
+        }
+      }
+      return agentsApi.moveThread(thread.id, destination)
+    },
+    meta: { errorTitle: "Couldn't move thread" },
+    onSuccess: (moved) => {
+      storeAgentThread(queryClient, moved)
+      invalidateAgentThreadLists(queryClient)
+    },
+    onSettled: () =>
+      queryClient.invalidateQueries({ queryKey: localThreadKeys.all }),
   })
 }
 

@@ -20,13 +20,17 @@ async def mark_broken_out(
     breakout_ts: str,
 ) -> None:
     """React to the request and link the breakout thread from the source thread."""
-    await add_slack_reaction(channel_id, request_ts, BREAKOUT_REACTION)
     permalink = (
         await get_slack_permalink(breakout_channel_id, breakout_ts)
         or f"https://slack.com/archives/{breakout_channel_id}/p{breakout_ts.replace('.', '')}"
     )
     where = "" if breakout_channel_id == channel_id else f" in <#{breakout_channel_id}>"
     text = f"Continued in <{permalink}|the breakout thread>{where}."
+    await notify_breakout(channel_id, thread_ts, request_ts, text)
+
+
+async def notify_breakout(channel_id: str, thread_ts: str, request_ts: str, text: str) -> None:
+    await add_slack_reaction(channel_id, request_ts, BREAKOUT_REACTION)
     await post_slack_thread_reply(
         channel_id,
         thread_ts,

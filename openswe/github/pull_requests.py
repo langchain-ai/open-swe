@@ -46,10 +46,11 @@ from sqlalchemy import (
     select,
     tuple_,
 )
-from sqlalchemy.dialects.postgresql import TSVECTOR, insert
+from sqlalchemy.dialects.postgresql import JSONB, TSVECTOR, insert
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import Mapped, mapped_column, relationship, selectinload
 
+from openswe.config import ENV
 from openswe.database import postgres
 from openswe.database.orm import NOW, Base
 from openswe.github.comments import PrState, derive_pr_state
@@ -57,7 +58,7 @@ from openswe.github.pull_request_status import pull_request_identity
 from openswe.github.repositories import Repository
 from openswe.review.findings import REVIEWER_THREAD_KIND
 from openswe.users.models import User, UserIdentity
-from openswe.utils.json_types import thread_metadata
+from openswe.utils.json_types import JsonObject, thread_metadata
 from openswe.utils.thread_ops import langgraph_client
 
 logger = logging.getLogger(__name__)
@@ -185,6 +186,12 @@ class PullRequest(Base):
     created_at: Mapped[datetime | None] = mapped_column(server_default=NOW, init=False)
     updated_at: Mapped[datetime | None] = mapped_column(server_default=NOW, init=False)
     legacy_threads_discovered_at: Mapped[datetime | None] = mapped_column(init=False)
+    # The task working on this pull request, and what it keeps here, one key per
+    # kind of work (a baby-sit watch is ``baby_sit``).
+    task_id: Mapped[UUID | None] = mapped_column(
+        ForeignKey("task.id", ondelete="SET NULL"), default=None, init=False
+    )
+    task_state: Mapped[JsonObject | None] = mapped_column(JSONB, default=None, init=False)
     repository: Mapped[Repository] = relationship(init=False)
 
     @classmethod
@@ -264,6 +271,12 @@ class PullRequest(Base):
     @property
     def repo_full_name(self) -> str:
         return f"{self.owner}/{self.repo}"
+
+    @property
+    def label(self) -> str:
+        orgs = {org.strip().lower() for org in ENV.ALLOWED_GITHUB_ORGS.get_list()}
+        repository = self.repo if self.owner.lower() in orgs else self.repo_full_name
+        return f"{repository}#{self.number}"
 
     @property
     def url(self) -> str:

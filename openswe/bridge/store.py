@@ -38,6 +38,7 @@ from openswe.bridge.constants import (
     ALIVE_THRESHOLD_SECONDS,
     CHANNEL,
     CLOSED_EVENT,
+    HANDOFF_FROM_KEY,
     REQUEST_EVENT,
     RESULT_EVENT,
     SANDBOX_ID_PREFIX,
@@ -119,6 +120,10 @@ class Bridge(BaseModel):
     def sandbox_id(self) -> str:
         return self.sandbox_id_for(self.bridge_id)
 
+    def serves(self, sender_id: str | None) -> bool:
+        """Whether a run sent by ``sender_id`` may act on this machine: only its owner's may."""
+        return sender_id is not None and sender_id.lower() == self.owner_id.lower()
+
     @property
     def is_alive(self) -> bool:
         if self.closed_at is not None:
@@ -144,6 +149,17 @@ class SandboxBridgeBinding(BaseModel):
 
     def dump(self) -> dict[str, str]:
         return self.model_dump(mode="json")
+
+    @staticmethod
+    def reaches_a_machine(metadata: Mapping[str, object]) -> bool:
+        """Whether a run of the thread would act on a person's machine.
+
+        A thread moving to the cloud still copies its checkout from the bridge it left.
+        """
+        return any(
+            isinstance(sandbox_id, str) and Bridge.bridge_id_of(sandbox_id) is not None
+            for sandbox_id in (metadata.get("sandbox_id"), metadata.get(HANDOFF_FROM_KEY))
+        )
 
 
 class ClaimedRequest(BaseModel):

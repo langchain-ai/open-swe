@@ -2,18 +2,25 @@
 
 import logging
 from collections.abc import AsyncIterable
-from typing import TypedDict
+from typing import Any, TypedDict
 
 from fastapi import HTTPException
 from githubkit.auth import TokenAuthStrategy
 from githubkit.exception import RequestError, RequestFailed, RequestTimeout
 
 from openswe.dashboard.profiles import get_valid_access_token
+from openswe.github import repo_cache
 from openswe.github.sdk import GITHUB_API_VERSION, github_sdk
 
 logger = logging.getLogger(__name__)
 
 _SKIPPABLE_INSTALLATION_REPO_STATUS_CODES = frozenset({403, 404})
+# How long ``accessible_repo_full_names`` trusts a cached listing. It is an
+# authorization boundary (it decides which private PR metadata a person may
+# see): installation webhooks clear the cache, so a repo removed from the App
+# drops at once, while access lost on GitHub's side, such as leaving an org,
+# shows within this window.
+ACCESS_FRESH_MS = 60 * 1000
 
 
 class InstallationAccount(TypedDict):
@@ -137,16 +144,42 @@ async def _fetch_with_token(
     return installations, repositories
 
 
-async def accessible_repo_full_names(login: str) -> frozenset[str]:
-    """Lowercased ``owner/name`` of repos the user can currently access.
+async def build_repo_payload(login: str) -> dict[str, Any]:
+    """List the person's installations and repos from GitHub now, and cache the listing."""
+    installations, repositories = await fetch_user_installations_and_repos(login)
+    payload = {
+        "installations": [
+            {
+                "id": i.get("id"),
+                "account": (i.get("account") or {}).get("login"),
+                "account_type": (i.get("account") or {}).get("type"),
+            }
+            for i in installations
+        ],
+        "repositories": [
+            {
+                "full_name": r.get("full_name"),
+                "private": r.get("private", False),
+                "archived": r.get("archived", False),
+            }
+            for r in repositories
+            if r.get("full_name")
+        ],
+    }
+    await repo_cache.write_cached_repos(login, payload)
+    return payload
 
-    Resolved fresh on every call (a fixed, repo-count-independent burst of
-    GitHub calls) rather than cached. ``/reviews`` uses this set to decide
-    which private PR metadata a user may see, so it's an authorization
-    boundary: a stale set would leak repo/PR titles, branches, authors and
-    finding counts for repos the user just lost access to.
-    """
-    _, repositories = await fetch_user_installations_and_repos(login)
+
+async def accessible_repo_full_names(login: str) -> frozenset[str]:
+    """Lowercased ``owner/name`` of repos the user can access, as of ``ACCESS_FRESH_MS`` ago at most."""
+    cached = await repo_cache.read_cached_repos(login)
+    if cached is not None and cached[1] <= ACCESS_FRESH_MS:
+        payload = cached[0]
+    else:
+        payload = await build_repo_payload(login)
+    repositories = payload.get("repositories")
     return frozenset(
-        repo["full_name"].lower() for repo in repositories if isinstance(repo.get("full_name"), str)
+        repo["full_name"].lower()
+        for repo in (repositories if isinstance(repositories, list) else [])
+        if isinstance(repo, dict) and isinstance(repo.get("full_name"), str)
     )

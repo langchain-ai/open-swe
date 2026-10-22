@@ -8,15 +8,18 @@ from openswe.dashboard import deps
 from openswe.dashboard.agent_instructions import (
     AGENT_INSTRUCTIONS,
     AgentInstructions,
+    get_repo_agent_instructions,
 )
-from tests.conftest import FakeStore
 
 
-@pytest.mark.asyncio
-async def test_create_agent_instructions_is_idempotent(fake_store: FakeStore) -> None:
+@pytest.mark.usefixtures("registry_db")
+async def test_create_agent_instructions_is_idempotent() -> None:
     first = await AGENT_INSTRUCTIONS.create("acme/repo", "octo")
-    second = await AGENT_INSTRUCTIONS.create("acme/repo", "someone-else")
-    assert second == first
+    await AGENT_INSTRUCTIONS.set_instructions("Acme/Repo", "rules")
+    second = await AGENT_INSTRUCTIONS.create("ACME/repo", "someone-else")
+    assert second.instructions == "rules"
+    assert second.created_at == first.created_at
+    assert await get_repo_agent_instructions("acme", "REPO") == "rules"
 
 
 @pytest.mark.asyncio

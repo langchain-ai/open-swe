@@ -4,7 +4,6 @@ import { Button } from "@langchain/macaw-components/Button"
 import {
   DropdownMenu,
   DropdownMenuContent,
-  DropdownMenuItem,
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@langchain/macaw-components/DropdownMenu"
@@ -22,8 +21,9 @@ import { TreeViewIcon } from "@phosphor-icons/react/dist/ssr/TreeView"
 import { useQuery } from "@tanstack/react-query"
 import { Link } from "@tanstack/react-router"
 
+import { DropdownMenuItem } from "@/components/MenuItem"
 import type { ReviewDetail } from "@/lib/api"
-import { cn, formatRelativeTime } from "@/lib/utils"
+import { cn } from "@/lib/utils"
 import { useAppCommandControls } from "@/lib/appCommands"
 import { StatusPill } from "@/features/reviews/components/StatusPill"
 import { SubmitReviewPopover } from "@/features/reviews/components/SubmitReviewPopover"
@@ -33,6 +33,7 @@ import { statusLabels } from "@/features/reviews/lib/status"
 import { ProfileLink } from "./notes/Byline"
 import { reviewQueries, type PullRequestRef } from "./queries"
 import { isLive } from "./pullRequestStanding"
+import { RelativeTimestamp } from "./RelativeTimestamp"
 import { NextStepAction, StandingDot, usePullRequestStanding } from "./Standing"
 import { useReviewPage } from "./store"
 
@@ -244,8 +245,7 @@ export function Header({
                   rel="noreferrer"
                   className="hidden shrink-0 hover:text-primary hover:underline xl:inline"
                 >
-                  · opened{" "}
-                  {formatRelativeTime(new Date(detail.pr.created_at).getTime())}
+                  · opened <RelativeTimestamp value={detail.pr.created_at} />
                 </a>
               )}
             </p>

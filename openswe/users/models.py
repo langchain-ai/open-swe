@@ -87,6 +87,10 @@ class User(Base):
         return self._identity_field("slack", "external_id")
 
     @property
+    def slack_team_id(self) -> str:
+        return self._identity_field("slack", "team_id")
+
+    @property
     def email(self) -> str:
         """The address to reach this person, work address first.
 
@@ -101,7 +105,7 @@ class User(Base):
         )
 
     def _identity_field(
-        self, provider: Provider, field: Literal["login", "email", "external_id"]
+        self, provider: Provider, field: Literal["login", "email", "external_id", "team_id"]
     ) -> str:
         return next(
             (
@@ -230,6 +234,20 @@ class User(Base):
         user = await cls.for_login("github", login.strip())
         return (user.email or None) if user is not None else None
 
+    async def default_repo(
+        self, workspace: str | None = None, *, fallback_global: bool = True
+    ) -> dict[str, str] | None:
+        """This person's repository default in the selected workspace."""
+        from openswe.users.records import UserRecords
+        from openswe.users.repository_defaults import RepositoryDefaults
+
+        if not self.github_login:
+            return None
+        profile = await UserRecords("profile").get(self.github_login) or {}
+        return RepositoryDefaults.model_validate(profile).repo_config(
+            workspace, fallback_global=fallback_global
+        )
+
     @property
     def typed_preferences(self) -> UserPreferences:
         return UserPreferences.model_validate(self.preferences)
@@ -343,6 +361,23 @@ class User(Base):
                     UserIdentity.external_id == external_id,
                 )
             )
+
+    @classmethod
+    async def for_identities(
+        cls, provider: Provider, external_ids: Iterable[str]
+    ) -> dict[str, Self]:
+        """The people owning those provider accounts, keyed by account id; unknown ids are absent."""
+        wanted = {external_id for external_id in external_ids if external_id}
+        if not wanted or not postgres.configured():
+            return {}
+        async with postgres.session() as session:
+            rows = await session.execute(
+                select(cls, UserIdentity.external_id)
+                .join(cls.identities)
+                .where(UserIdentity.provider == provider, UserIdentity.external_id.in_(wanted))
+                .options(selectinload(cls.identities))
+            )
+            return {external_id: user for user, external_id in rows.tuples()}
 
     @classmethod
     async def for_login(cls, provider: Provider, login: str) -> Self | None:

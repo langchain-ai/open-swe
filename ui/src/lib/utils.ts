@@ -9,7 +9,9 @@ export { cn } from "@langchain/macaw-components/utils/cn"
  */
 export function formatElapsed(ms: number): string {
   const secs = Math.max(1, Math.ceil(ms / 1000))
-  return secs < 60 ? `${secs}s` : `${Math.floor(secs / 60)}m ${secs % 60}s`
+  if (secs < 60) return `${secs}s`
+  if (secs < 3600) return `${Math.floor(secs / 60)}m ${secs % 60}s`
+  return `${Math.floor(secs / 3600)}h ${Math.floor((secs % 3600) / 60)}m ${secs % 60}s`
 }
 
 /**

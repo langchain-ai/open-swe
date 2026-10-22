@@ -4,6 +4,7 @@ from unittest.mock import AsyncMock
 import pytest
 from fastapi import HTTPException
 
+from openswe.sandboxes.browsers import LangSmithBrowser
 from openswe.threads import (
     access,
     blobs,
@@ -14,17 +15,18 @@ from openswe.threads import (
     workflow_approval_api,
 )
 from openswe.tools import threads as tools
+from openswe.ui_invalidations.topics import Topic
 
 _ADMINS = {"admin", "admin@example.com"}
 
 
-@pytest.fixture
-def private_thread(monkeypatch):
+@pytest.fixture(params=["dashboard", "web"])
+def private_thread(monkeypatch, request):
     thread = {
         "thread_id": "private-thread",
         "status": "idle",
         "metadata": {
-            "source": "dashboard",
+            "source": request.param,
             "visibility": "private",
             "owner_login": "alice",
             "participant_logins": {"alice": True, "bob": True},
@@ -174,6 +176,59 @@ async def test_owner_can_publish_thread_without_retaining_admin_capabilities(
     )
 
 
+async def test_sharing_deletes_the_threads_browser(private_thread, monkeypatch):
+    thread, client = private_thread
+    thread["metadata"]["browser"] = {"browser": "browser-1"}
+    deleted: list[str] = []
+
+    async def delete(browser: LangSmithBrowser) -> None:
+        deleted.append(browser.name)
+
+    monkeypatch.setattr(LangSmithBrowser, "delete", delete)
+    monkeypatch.setattr(handlers, "mirror_thread_metadata", AsyncMock())
+    monkeypatch.setattr(Topic.THREAD_BROWSERS, "invalidate", AsyncMock())
+
+    await handlers.share_thread_with_workspace("private-thread", "alice")
+
+    assert deleted == ["browser-1"]
+    assert client.threads.update.call_args.kwargs["metadata"]["browser"] is None
+
+
+async def test_sharing_waits_for_the_threads_browser_to_go(private_thread, monkeypatch):
+    thread, client = private_thread
+    thread["metadata"]["browser"] = {"browser": "browser-1"}
+    monkeypatch.setattr(
+        LangSmithBrowser, "delete", AsyncMock(side_effect=RuntimeError("LangSmith is down"))
+    )
+
+    with pytest.raises(HTTPException) as exc:
+        await handlers.share_thread_with_workspace("private-thread", "alice")
+
+    assert exc.value.status_code == 502
+    client.threads.update.assert_not_awaited()
+
+
+@pytest.mark.parametrize(
+    "binding",
+    [
+        {"sandbox_id": "bridge:b1", "sandbox_kind": "bridge", "sandbox_bridge_client": "cli"},
+        {"sandbox_id": "sbx", "sandbox_handoff_from": "bridge:b1"},
+    ],
+)
+async def test_a_thread_on_its_owners_machine_stays_theirs(private_thread, binding):
+    thread, client = private_thread
+    thread["metadata"].update(binding)
+    with pytest.raises(HTTPException) as exc:
+        await handlers.share_thread_with_workspace("private-thread", "alice")
+    assert exc.value.status_code == 409
+    client.threads.update.assert_not_awaited()
+    # Shared before such threads were kept private.
+    shared = {**thread["metadata"], "visibility": "public"}
+    assert summary.thread_is_promptable(shared, "alice")
+    assert not summary.thread_is_promptable(shared, "bob")
+    assert not summary.thread_is_promptable(shared, "admin")
+
+
 @pytest.mark.parametrize("login", ["bob", "admin"])
 async def test_only_owner_can_publish_even_when_admin_can_read(private_thread, login):
     _, client = private_thread
@@ -234,7 +289,7 @@ async def test_continue_privately_copies_transcript_and_drops_linkage(private_th
     assert metadata["graph_id"] == "agent"
     for key in ("source_context", "sandbox_id", "latest_run_id", "latest_run_status"):
         assert key not in metadata
-    (state_call,) = client.threads.update_state.await_args_list
+    state_call, _ = client.threads.update_state.await_args_list
     assert state_call.args[0] == client.threads.create.call_args.kwargs["thread_id"]
     copied = state_call.kwargs["values"]["messages"]
     assert [m["content"] for m in copied] == ["hi", "hello"]

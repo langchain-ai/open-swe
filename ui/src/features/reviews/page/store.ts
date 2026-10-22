@@ -56,6 +56,10 @@ interface ReviewPageState {
   /** The file, and its diff entry, under the top of the diff viewport. */
   activePath: string | null
   activeEntry: string | null
+  /** Walkthrough steps the reader scrolled into, so passing one can suggest marking it read. */
+  visitedSteps: ReadonlySet<number>
+  /** Whether the end of the diff is on screen, which passes the last step. */
+  atEnd: boolean
   /** Bumped per request so asking for the same target twice still scrolls. */
   jump: { key: number; target: DiffTarget } | null
   composer: CommentDraftTarget | null
@@ -71,7 +75,7 @@ interface ReviewPageState {
   openConversationsKey: number
   /** Bumped to open Open SWE's findings in the status panel and bring them into view. */
   findingsKey: number
-  /** Files whose collapsed state the viewer flipped away from the default (viewed = collapsed). */
+  /** Read keys whose collapsed state the viewer flipped away from the default (read = collapsed). */
   collapsed: ReadonlySet<string>
   entryOrder: ReadonlyArray<DiffEntry>
   /** Narrows the diff, the file tree and the walkthrough to matching paths. */
@@ -92,7 +96,8 @@ interface ReviewPageActions {
   setReviewOpen: (open: boolean) => void
   setOrder: (order: DiffOrder) => void
   setDiffStyle: (style: DiffStyle) => void
-  setActive: (entry: { id: string; path: string } | null) => void
+  /** What the scroll position shows: the entry under the top edge, and whether the end is in view. */
+  setActive: (entry: DiffEntry | null, atEnd: boolean) => void
   jumpTo: (target: DiffTarget) => void
   /** Opens a finding's note and brings its lines into view. */
   showFinding: (id: string, target: DiffTarget) => void
@@ -108,12 +113,14 @@ interface ReviewPageActions {
   clearChatExcerpts: () => void
   showOpenConversations: () => void
   showFindings: () => void
-  toggleCollapsed: (path: string) => void
+  toggleCollapsed: (readKey: string) => void
   setEntryOrder: (entries: ReadonlyArray<DiffEntry>) => void
   setFileFilter: (filter: string) => void
   setStandingInView: (inView: boolean) => void
-  /** Marks an entry's file viewed (or not); from the file being read, moves on to the next unread one. */
+  /** Marks an entry viewed (or not); from the file being read, moves on to the next unread one. */
   markViewed: (id: string) => void
+  /** Marks every entry of a walkthrough step read, or all unread when they already are. */
+  markStepRead: (index: number) => void
   /** The next file not yet viewed, in reading order, after the one being read. */
   jumpToUnviewed: () => void
 }
@@ -154,29 +161,86 @@ function excerptKey(excerpt: CodeExcerpt): string {
   return `${excerpt.path}:${excerpt.lineLabel}`
 }
 
-/** Viewed files start collapsed; the viewer can flip either way. */
+/** Whether the entry was marked viewed: its whole file, or its own slice of it. */
+export function isRead(
+  viewed: ReadonlySet<string>,
+  entry: Pick<DiffEntry, "file" | "readKey">
+): boolean {
+  return viewed.has(entry.file.path) || viewed.has(entry.readKey)
+}
+
+/** Read entries start collapsed; the viewer can flip either way. */
 export function isCollapsed(
   state: Pick<ReviewPageState, "viewed" | "collapsed">,
-  path: string
+  entry: Pick<DiffEntry, "file" | "readKey">
 ): boolean {
-  return state.viewed.has(path) !== state.collapsed.has(path)
+  return isRead(state.viewed, entry) !== state.collapsed.has(entry.readKey)
+}
+
+/**
+ * The walkthrough step the reader is in. At the bottom of the page that's the last step,
+ * even though the entry under the top edge, which keyboard actions use, may be earlier.
+ */
+export function activeStep(
+  state: Pick<ReviewPageState, "entryOrder" | "activeEntry" | "atEnd">
+): number | null {
+  if (state.atEnd) return state.entryOrder.at(-1)?.step?.index ?? null
+  return (
+    state.entryOrder.find((entry) => entry.id === state.activeEntry)?.step
+      ?.index ?? null
+  )
+}
+
+/** A step the reader scrolled through to its end without marking it read: worth a nudge. */
+export function isPassed(
+  state: Pick<
+    ReviewPageState,
+    "entryOrder" | "activeEntry" | "visitedSteps" | "atEnd"
+  >,
+  step: { index: number; count: number }
+): boolean {
+  // Reaching the bottom of the page scrolls the last step fully past the reader.
+  if (state.atEnd && step.index === step.count) return true
+  if (!state.visitedSteps.has(step.index)) return false
+  return (activeStep(state) ?? 0) > step.index
 }
 
 export const useReviewPage = create<ReviewPageState & ReviewPageActions>()((
   set,
   get
 ) => {
-  const toggleViewed = (path: string): boolean => {
-    const { pr, viewed, viewedSha, collapsed } = get()
+  // A file split across steps is viewed once every slice is; until then each slice is read alone.
+  const setRead = (targets: ReadonlyArray<DiffEntry>, read: boolean) => {
+    const { pr, viewed, viewedSha, collapsed, entryOrder } = get()
     const next = new Set(viewed)
-    const nowViewed = !next.has(path)
-    if (nowViewed) next.add(path)
-    else next.delete(path)
-    if (pr) writePreference(viewedKey(pr, viewedSha), JSON.stringify([...next]))
     const flipped = new Set(collapsed)
-    flipped.delete(path)
+    const slicesOf = new Map<string, Array<DiffEntry>>()
+    for (const other of entryOrder) {
+      if (other.readKey === other.file.path) continue
+      const slices = slicesOf.get(other.file.path) ?? []
+      slices.push(other)
+      slicesOf.set(other.file.path, slices)
+    }
+    for (const entry of targets) {
+      const path = entry.file.path
+      const slices = slicesOf.get(path) ?? []
+      flipped.delete(entry.readKey)
+      if (read) {
+        next.add(entry.readKey)
+        if (slices.every((slice) => next.has(slice.readKey))) {
+          next.add(path)
+          for (const slice of slices) next.delete(slice.readKey)
+        }
+      } else if (next.has(path)) {
+        next.delete(path)
+        for (const slice of slices)
+          if (slice.readKey !== entry.readKey) next.add(slice.readKey)
+      } else {
+        next.delete(entry.readKey)
+      }
+    }
+    if (pr) writePreference(viewedKey(pr, viewedSha), JSON.stringify([...next]))
     set({ viewed: next, collapsed: flipped })
-    return nowViewed
   }
 
   return {
@@ -193,6 +257,8 @@ export const useReviewPage = create<ReviewPageState & ReviewPageActions>()((
     viewed: new Set(),
     activePath: null,
     activeEntry: null,
+    visitedSteps: new Set(),
+    atEnd: false,
     jump: null,
     composer: null,
     composerText: "",
@@ -215,6 +281,7 @@ export const useReviewPage = create<ReviewPageState & ReviewPageActions>()((
         pr,
         viewedSha: headSha,
         viewed: readViewed(pr, headSha),
+        visitedSteps: new Set(),
         ...(samePr
           ? {}
           : {
@@ -265,10 +332,22 @@ export const useReviewPage = create<ReviewPageState & ReviewPageActions>()((
       writePreference(DIFF_STYLE_KEY, diffStyle)
       set({ diffStyle })
     },
-    setActive: (entry) => {
-      const activeEntry = entry?.id ?? null
-      if (get().activeEntry !== activeEntry)
-        set({ activeEntry, activePath: entry?.path ?? null })
+    setActive: (entry, atEnd) => {
+      const { activeEntry, visitedSteps } = get()
+      const step = entry?.step?.index
+      const visit = step !== undefined && !visitedSteps.has(step)
+      if (
+        activeEntry === (entry?.id ?? null) &&
+        get().atEnd === atEnd &&
+        !visit
+      )
+        return
+      set({
+        activeEntry: entry?.id ?? null,
+        activePath: entry?.file.path ?? null,
+        atEnd,
+        ...(visit ? { visitedSteps: new Set(visitedSteps).add(step) } : {}),
+      })
     },
     jumpTo: (target) => {
       // Claim the target now so a key pressed before the scroll settles moves on from it.
@@ -351,15 +430,21 @@ export const useReviewPage = create<ReviewPageState & ReviewPageActions>()((
       const index = entryOrder.findIndex((entry) => entry.id === id)
       const entry = entryOrder[index]
       if (!entry) return
-      const nowViewed = toggleViewed(entry.file.path)
+      const nowViewed = !isRead(get().viewed, entry)
+      setRead([entry], nowViewed)
       if (activeEntry !== id) return
       const { viewed } = get()
       const next = nowViewed
         ? entryOrder
             .slice(index + 1)
-            .find((candidate) => !viewed.has(candidate.file.path))
+            .find((candidate) => !isRead(viewed, candidate))
         : undefined
       jumpTo({ kind: "entry", id: (next ?? entry).id })
+    },
+    markStepRead: (index) => {
+      const { entryOrder, viewed } = get()
+      const entries = entryOrder.filter((entry) => entry.step?.index === index)
+      setRead(entries, !entries.every((entry) => isRead(viewed, entry)))
     },
     jumpToUnviewed: () => {
       const { entryOrder, activeEntry, viewed, jumpTo } = get()
@@ -367,13 +452,13 @@ export const useReviewPage = create<ReviewPageState & ReviewPageActions>()((
       const next = [
         ...entryOrder.slice(from + 1),
         ...entryOrder.slice(0, from + 1),
-      ].find((entry) => !viewed.has(entry.file.path))
+      ].find((entry) => !isRead(viewed, entry))
       if (next) jumpTo({ kind: "entry", id: next.id })
     },
-    toggleCollapsed: (path) => {
+    toggleCollapsed: (readKey) => {
       const next = new Set(get().collapsed)
-      if (next.has(path)) next.delete(path)
-      else next.add(path)
+      if (next.has(readKey)) next.delete(readKey)
+      else next.add(readKey)
       set({ collapsed: next })
     },
   }

@@ -13,8 +13,32 @@ from openswe.slack import client as slack_utils
 from openswe.slack.blocks import actions, block_payload, button, code_blocks, markdown, section
 from openswe.users import User, UserPreferences
 from openswe.utils import url_safety
-from tests.conftest import FakeStore
 from tests.support.slack_api import SlackAPI
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("prefix", ["commands", "actions"])
+async def test_question_callback_delivery_preserves_shortcut_source(prefix: str) -> None:
+    sent: list[dict[str, object]] = []
+
+    async def handle(request: httpx2.Request) -> httpx2.Response:
+        sent.append(json.loads(request.content))
+        return httpx2.Response(200, text="ok")
+
+    url = f"https://hooks.slack.com/{prefix}/T1/B1/test-response"
+    with patch.object(
+        slack_utils.httpx2, "AsyncHTTPTransport", return_value=httpx2.MockTransport(handle)
+    ):
+        assert await slack_utils.acknowledge_slack_command(url, "Working")
+        assert await slack_utils.replace_slack_command_message(url, "Answer")
+        assert await slack_utils.clear_slack_command_message(url)
+    assert sent[0] == {"response_type": "ephemeral", "text": "Working"}
+    assert sent[1]["response_type"] == "ephemeral"
+    assert sent[1]["replace_original"] is (prefix == "commands")
+    if prefix == "actions":
+        assert len(sent) == 2
+    else:
+        assert sent[2] == {"delete_original": True}
 
 
 @pytest.mark.asyncio
@@ -58,6 +82,25 @@ async def test_concierge_status_does_not_create_slack_threads(slack_api: SlackAP
     assert slack_api.calls == []
 
 
+async def test_thread_status_uses_agent_session_and_falls_back_without_agent_view(slack_api):
+    slack_api.respond({"ok": True})
+    slack_api.respond({"ok": False, "error": "not_allowed"})
+    assert await slack_utils.set_slack_thread_status("C1", "1.0", "Thinking…")
+    assert await slack_utils.set_slack_thread_status("C1", "1.0", "")
+    assert slack_api.calls == [
+        (method, {"channel_id": "C1", "thread_ts": "1.0", "status": status})
+        for method, status in [
+            ("agents.sessions.setStatus", "processing"),
+            ("agents.sessions.setStatus", "active"),
+            ("assistant.threads.setStatus", ""),
+        ]
+    ]
+    slack_api.calls.clear()
+    slack_api.respond({"ok": False, "error": "internal_error"})
+    assert not await slack_utils.set_slack_thread_status("C1", "1.0", "")
+    assert [method for method, _ in slack_api.calls] == ["agents.sessions.setStatus"]
+
+
 async def test_slack_stream_rate_limit_preserves_retry_after(slack_api):
     slack_api.respond({"ok": False}, status=429, headers={"Retry-After": "30"})
     with pytest.raises(slack_utils.SlackStreamError) as raised:
@@ -85,7 +128,9 @@ async def test_upload_completes_external_upload_without_sending_token(slack_api,
     with patch.object(
         httpx2,
         "AsyncClient",
-        side_effect=lambda **kwargs: async_client(**kwargs, transport=httpx2.MockTransport(upload)),
+        side_effect=lambda **kwargs: async_client(
+            **{**kwargs, "transport": httpx2.MockTransport(upload)}
+        ),
     ):
         assert (
             await slack_utils.upload_slack_thread_file(
@@ -130,7 +175,9 @@ async def test_upload_blocks_unsafe_urls_and_redirects(slack_api, redirect, monk
     with patch.object(
         httpx2,
         "AsyncClient",
-        side_effect=lambda **kwargs: async_client(**kwargs, transport=httpx2.MockTransport(upload)),
+        side_effect=lambda **kwargs: async_client(
+            **{**kwargs, "transport": httpx2.MockTransport(upload)}
+        ),
     ):
         with pytest.raises(slack_utils.SlackRequestError, match="unsafe_upload_url"):
             await slack_utils.upload_slack_thread_file("C1", "1.0", "plan.html", b"x")
@@ -224,7 +271,6 @@ async def test_review_link_flag_changes_displayed_links_not_code_or_button_value
 
 @pytest.mark.usefixtures("registry_db")
 async def test_review_links_are_opt_in_per_user_even_in_the_same_channel(
-    fake_store: FakeStore,
     slack_api: SlackAPI,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

@@ -10,7 +10,8 @@ from openswe.input_messages import build_run_input
 from openswe.invocation import new_invocation_id, with_invocation_id
 from openswe.prompts import prompt
 from openswe.thread_ids import review_scout_thread_id
-from openswe.utils.thread_ops import thread_run_error
+from openswe.threads.creation import ensure_titled_thread
+from openswe.threads.status import thread_run_error
 from openswe.walkthrough.record import WalkthroughView
 
 logger = logging.getLogger(__name__)
@@ -19,7 +20,8 @@ ASSISTANT_ID = "review-scout"
 # The reviewer waits this long for the walkthrough before reviewing without it;
 # the scout keeps running and still stores its result for the review page.
 SCOUT_WAIT_SECONDS = 600
-_POLL_SECONDS = 5
+# The reviewer resumes up to one interval after the scout finishes; a poll is one run read.
+_POLL_SECONDS = 1
 _ACTIVE_STATUSES = frozenset({"pending", "running"})
 _SENDER_ID = "system:review-scout"
 _HEAD_METADATA_KEY = "scout_head_sha"
@@ -181,6 +183,17 @@ class ReviewScoutTarget(BaseModel):
         A newer head interrupts a scout still working on an older one, so only
         the latest head's walkthrough is ever written.
         """
+        client = dispatch_client()
+        await ensure_titled_thread(
+            client, self.thread_id, title=f"Walkthrough: {self.pr_title} #{self.pr_number}"
+        )
+        await client.threads.update(
+            thread_id=self.thread_id,
+            metadata={
+                "kind": ASSISTANT_ID,
+                "pr": {"owner": self.owner, "name": self.repo, "number": self.pr_number},
+            },
+        )
         active = await self.active_run()
         if active is not None:
             return active
@@ -204,7 +217,7 @@ class ReviewScoutTarget(BaseModel):
                 ],
             ),
             source="review-scout",
-            thread_title=f"Walkthrough: {self.pr_title} #{self.pr_number}",
+            thread_title=None,
             config={"configurable": with_invocation_id(configurable, new_invocation_id())},
             metadata={_HEAD_METADATA_KEY: self.head_sha},
         )

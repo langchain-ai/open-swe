@@ -4,12 +4,14 @@ import asyncio
 import logging
 import posixpath
 import uuid
-from collections.abc import Mapping, Sequence
-from typing import Any
+from collections.abc import Awaitable, Callable, Mapping, Sequence
+from typing import Any, Literal
 
 from fastapi import HTTPException
+from langgraph.constants import END
 from langgraph_sdk.errors import NotFoundError
 
+from openswe.bridge.store import BridgeStore, SandboxBridgeBinding
 from openswe.github.http import GitHubClient
 from openswe.github.pull_request_checks import PullRequestState, get_pull_request_check_states
 from openswe.github.pull_request_context import PullRequestFixScope, get_pull_request_context
@@ -17,6 +19,7 @@ from openswe.github.pull_request_status import get_pull_request_statuses
 from openswe.github.thread_token import invalidate_cached_github_token
 from openswe.message_queue import QueuedMessage, QueuedPreview
 from openswe.review.session import ReviewSession, ReviewSessionMetadata
+from openswe.sandboxes.browsers import ThreadBrowser
 from openswe.slack.client import parse_github_pr_url
 from openswe.threads.access import _authorized_thread, _readable_thread_metadata
 from openswe.threads.blobs import copy_thread_blobs, referenced_blob_digests
@@ -27,6 +30,7 @@ from openswe.threads.listing import (
     settle_review_walkthrough,
 )
 from openswe.threads.machine_reads import machine_thread
+from openswe.threads.moves import SandboxMove
 from openswe.threads.principals import Principal
 from openswe.threads.runs import (
     _ASSISTANT_ID,
@@ -45,6 +49,7 @@ from openswe.threads.summary import (
     _thread_summary,
     assert_thread_readable,
     run_status_to_agent_status,
+    thread_is_bot_triggered,
     thread_is_owner,
     thread_source,
 )
@@ -52,6 +57,7 @@ from openswe.transcript.engine import delete_transcript
 from openswe.transcript.mirror import mirror_thread_metadata
 from openswe.transcript.subagents import attach_subagents
 from openswe.transcript.turns import settle_run_turn
+from openswe.ui_invalidations.topics import Topic
 from openswe.utils.json_types import JsonObject, as_json_object, as_thread_dict, thread_metadata
 from openswe.utils.thread_ops import (
     langgraph_client,
@@ -103,18 +109,26 @@ async def mark_review_session_viewed(review: ReviewSession) -> None:
     )
 
 
-async def get_dashboard_terminal_sandbox(
-    thread_id: str, login: str, *, email: str | None = None
-) -> tuple[str, str | None]:
+async def get_promptable_thread_metadata(thread_id: str, login: str) -> Mapping[str, object]:
+    """The metadata of a thread ``login`` may prompt, for opening its live capabilities.
+
+    A shell or a browser is a live capability into the owner's sandbox, so admins
+    who may view a private thread still cannot open one.
+    """
     client = langgraph_client()
     try:
         thread = await client.threads.get(thread_id)
     except Exception as exc:  # noqa: BLE001
         raise HTTPException(404, "thread not found") from exc
     metadata = thread_metadata(thread)
-    # A shell is a live capability into the owner's sandbox, so admins who may
-    # view a private thread still cannot open one.
     _assert_thread_promptable(metadata, login)
+    return metadata
+
+
+async def get_dashboard_terminal_sandbox(
+    thread_id: str, login: str, *, email: str | None = None
+) -> tuple[str, str | None]:
+    metadata = await get_promptable_thread_metadata(thread_id, login)
     sandbox_id = metadata.get("sandbox_id")
     if (
         not isinstance(sandbox_id, str)
@@ -251,7 +265,11 @@ async def interrupt_transcript_turns(thread_id: str, run_ids: Sequence[str]) -> 
 
 
 async def cancel_dashboard_thread(
-    thread_id: str, login: str, *, email: str | None = None
+    thread_id: str,
+    login: str,
+    *,
+    email: str | None = None,
+    on_interrupted: Callable[[], Awaitable[None]] | None = None,
 ) -> dict[str, Any]:
     """Interrupt every live run on a thread on behalf of its owner.
 
@@ -268,7 +286,11 @@ async def cancel_dashboard_thread(
         raise HTTPException(404, "thread not found") from exc
 
     metadata = thread_metadata(thread)
-    _assert_thread_postable(metadata, login, email)
+    bot_triggered = thread_is_bot_triggered(metadata)
+    if bot_triggered:
+        assert_thread_readable(metadata, login, email)
+    else:
+        _assert_thread_postable(metadata, login, email)
 
     try:
         cancelled_run_ids, kept_queued = await _cancel_active_thread_runs(
@@ -277,6 +299,8 @@ async def cancel_dashboard_thread(
     except Exception as exc:  # noqa: BLE001
         logger.exception("Failed to cancel active runs for thread %s", thread_id)
         raise HTTPException(502, "failed to request thread cancellation") from exc
+    if on_interrupted is not None:
+        await on_interrupted()
     await interrupt_transcript_turns(thread_id, cancelled_run_ids)
 
     metadata_update: dict[str, Any] = {
@@ -288,7 +312,7 @@ async def cancel_dashboard_thread(
     try:
         run_id = (
             None
-            if kept_queued
+            if kept_queued or bot_triggered
             else await dispatch_pending_follow_ups(thread_id, login, metadata, client=client)
         )
     except Exception as exc:  # noqa: BLE001
@@ -440,19 +464,32 @@ async def share_thread_with_workspace(
         raise HTTPException(403, "only the thread owner can share it")
     if metadata.get("visibility") != "private":
         raise HTTPException(409, "thread is not private")
-    if metadata.get("sandbox_bridge_client") == "desktop":
-        raise HTTPException(409, "a thread running on the owner's Mac cannot be shared")
+    if SandboxBridgeBinding.reaches_a_machine(metadata):
+        raise HTTPException(409, "a thread running on its owner's machine cannot be shared")
     if _thread_is_busy(thread):
         raise HTTPException(409, "stop the run before sharing this thread")
     for status in ("pending", "running"):
         if await client.runs.list(thread_id, status=status, limit=1):
             raise HTTPException(409, "stop the run before sharing this thread")
-    metadata_update = {
+    metadata_update: dict[str, object] = {
         "visibility": "public",
         "admin_thread": False,
         "unlisted": False,
         "updated_at_ms": _now_ms(),
     }
+    # The thread's browser keeps whatever the owner signed into: like the
+    # owner's GitHub token below, it must not pass to the workspace.
+    browser = ThreadBrowser.of(metadata)
+    if browser is not None:
+        try:
+            metadata_update.update(await browser.forget())
+        except Exception as exc:
+            logger.warning(
+                "Could not delete the thread's browser before sharing",
+                extra={"thread_id": thread_id},
+                exc_info=True,
+            )
+            raise HTTPException(502, "failed to clear the thread's browser") from exc
     try:
         await client.threads.update(thread_id=thread_id, metadata=metadata_update)
     except Exception as exc:
@@ -460,9 +497,40 @@ async def share_thread_with_workspace(
         raise HTTPException(502, "failed to share thread") from exc
     await invalidate_cached_github_token(thread_id)
     await mirror_thread_metadata(thread_id, metadata_update)
+    if browser is not None:
+        await Topic.THREAD_BROWSERS.invalidate(key=thread_id)
     return await _thread_summary(
         {**as_thread_dict(thread), "metadata": {**metadata, **metadata_update}}
     )
+
+
+async def move_thread(
+    thread_id: str,
+    login: str,
+    *,
+    email: str | None = None,
+    bridge_id: str | None,
+    target: Literal["cloud"] | None,
+) -> dict[str, object]:
+    """Move a thread onto its owner's machine or off it to the cloud, before its next message."""
+    thread = await _authorized_thread(thread_id, login, email=email)
+    bridge = (
+        None
+        if bridge_id is None
+        else await BridgeStore.require_open(
+            bridge_id, owner_id=Principal.of_login(login, email).sender_id
+        )
+    )
+    move = await SandboxMove.requested(
+        thread_id, thread_metadata(thread), login=login, bridge=bridge, target=target
+    )
+    if move is None:
+        raise HTTPException(409, "this thread already runs there")
+    try:
+        await move.carry_out()
+    except Exception as exc:
+        raise HTTPException(502, f"could not move this thread: {exc}") from exc
+    return await _thread_summary(await langgraph_client().threads.get(thread_id))
 
 
 async def continue_thread_privately(
@@ -529,6 +597,9 @@ async def continue_thread_privately(
         try:
             await copy_thread_blobs(thread_id, new_thread_id, referenced_blob_digests(copied))
             await client.threads.update_state(new_thread_id, values={"messages": copied})
+            # The copy is written as the graph's input, which leaves its first node
+            # pending, and clients take a pending node for a run in flight.
+            await client.threads.update_state(new_thread_id, values=None, as_node=END)
         except Exception as exc:  # noqa: BLE001
             logger.warning(
                 "Could not copy transcript into private continuation",
@@ -549,7 +620,7 @@ async def resolve_all_dashboard_threads(login: str, *, email: str | None = None)
     now_ms = _now_ms()
 
     async def resolve(thread_id: str) -> None:
-        async with agent_thread_pr_state_lock(client, thread_id):
+        async with agent_thread_pr_state_lock(thread_id):
             await client.threads.update(
                 thread_id=thread_id,
                 metadata={
@@ -571,7 +642,7 @@ async def resolve_dashboard_thread(
     client = langgraph_client()
     await _authorized_thread(thread_id, login, email=email)
     try:
-        async with agent_thread_pr_state_lock(client, thread_id):
+        async with agent_thread_pr_state_lock(thread_id):
             thread = await _authorized_thread(thread_id, login, email=email)
             metadata = thread_metadata(thread)
             metadata_update: dict[str, Any] = {

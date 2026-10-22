@@ -15,19 +15,28 @@ use the typed async SDK in ``openswe.github.sdk``. This helper centralises:
 """
 
 import asyncio
+import io
 import logging
 import random
-from collections.abc import AsyncIterator, Awaitable, Mapping
+import re
+import zipfile
+from collections.abc import AsyncIterator, Awaitable, Mapping, Sequence
 from contextlib import asynccontextmanager
 from dataclasses import dataclass
+from pathlib import PurePosixPath
 from typing import TYPE_CHECKING, Any, Self
-from urllib.parse import quote
+from urllib.parse import quote, urlparse
 
 import httpx2
-from pydantic import BaseModel
+from pydantic import BaseModel, JsonValue, TypeAdapter
+
+from openswe.github.queue import Artifact, CommitComparison, GitReference, WorkflowRun
+from openswe.utils.http_pool import pooled_transport
+from openswe.utils.url_safety import request_with_safe_redirects
 
 if TYPE_CHECKING:
     from openswe.github.pull_request_status import PullRequestClient
+    from openswe.merge_queue.git import CandidateGit
 
 logger = logging.getLogger(__name__)
 
@@ -38,6 +47,7 @@ GITHUB_HEADERS_VERSION = "2022-11-28"
 DEFAULT_TIMEOUT = httpx2.Timeout(30.0, connect=10.0, pool=5.0)
 DEFAULT_MAX_RETRIES = 3
 _PAGE_SIZE = 100
+_FILES_PER_QUERY = 100
 
 _ALWAYS_RETRYABLE_STATUS = frozenset({429, 503})
 _IDEMPOTENT_RETRYABLE_STATUS = frozenset({502, 504})
@@ -117,6 +127,7 @@ async def github_client(
     async with httpx2.AsyncClient(
         headers=merged_headers or None,
         timeout=timeout or DEFAULT_TIMEOUT,
+        transport=pooled_transport(),
     ) as client:
         yield client
 
@@ -479,6 +490,27 @@ class RepoClient:
             return None
         return content if strict else content or None
 
+    async def read_files(self, paths: Sequence[str], ref: str) -> dict[str, str]:
+        """Text of each of ``paths`` present at ``ref``, read in batched GraphQL queries."""
+        found: dict[str, str] = {}
+        for start in range(0, len(paths), _FILES_PER_QUERY):
+            batch = paths[start : start + _FILES_PER_QUERY]
+            params = "".join(f",$e{i}:String!" for i in range(len(batch)))
+            fields = "".join(
+                f"f{i}:object(expression:$e{i}){{...on Blob{{text}}}}" for i in range(len(batch))
+            )
+            data = await self.graphql(
+                f"query($owner:String!,$repo:String!{params})"
+                f"{{repository(owner:$owner,name:$repo){{{fields}}}}}",
+                {f"e{i}": f"{ref}:{path}" for i, path in enumerate(batch)},
+            )
+            repository = data.get("repository") or {}
+            for i, path in enumerate(batch):
+                blob = repository.get(f"f{i}")
+                if isinstance(blob, Mapping) and isinstance(blob.get("text"), str):
+                    found[path] = blob["text"]
+        return found
+
     async def can_write(self, login: str) -> bool:
         """Whether ``login`` has write, maintain or admin here; any failure denies."""
         if not login:
@@ -526,6 +558,23 @@ class RepoClient:
             raise ValueError("GitHub answered the branch without an object")
         return payload
 
+    async def branch_sha(self, name: str) -> str:
+        payload = await self.branch(name)
+        commit = payload.get("commit")
+        sha = commit.get("sha") if isinstance(commit, dict) else None
+        if not isinstance(sha, str) or not sha:
+            raise ValueError("Target branch is unavailable")
+        return sha
+
+    async def ref_sha(self, ref: str) -> str | None:
+        """Read an exact qualified ref; API failures must not look like a missing ref."""
+        if not ref.startswith("refs/"):
+            raise ValueError("Expected a fully qualified Git ref")
+        references = TypeAdapter(list[GitReference]).validate_python(
+            await self.get(f"git/matching-refs/{quote(ref.removeprefix('refs/'), safe='')}")
+        )
+        return next((item.sha for item in references if item.ref == ref), None)
+
     async def branch_rules(self, name: str) -> list[dict[str, Any]]:
         """The rulesets' rules that apply to branch ``name``."""
         return await self.pages(f"rules/branches/{quote(name, safe='')}")
@@ -541,10 +590,158 @@ class RepoClient:
         await self.delete(f"pulls/comments/{comment_id}")
 
     async def check_runs(self, sha: str) -> list[dict[str, Any]]:
-        """The latest run of each check on ``sha``."""
-        return await self.pages(
+        """Latest checks on ``sha``, excluding superseded Actions cancellations."""
+        runs = await self.pages(
             f"commits/{sha}/check-runs", key="check_runs", params={"filter": "latest"}
         )
+        if not any(run.get("conclusion") in {"cancelled", "stale"} for run in runs):
+            return runs
+        try:
+            payloads = await self.pages(
+                "actions/runs", key="workflow_runs", params={"head_sha": sha}
+            )
+            workflows = {
+                workflow.check_suite_id: workflow
+                for workflow in map(_WorkflowRun.model_validate, payloads)
+            }
+        except httpx2.HTTPError, ValueError:
+            logger.warning(
+                "Could not identify superseded check runs",
+                extra={"repo_full_name": self.full_name, "sha": sha},
+                exc_info=True,
+            )
+            return runs
+        identities: dict[int, tuple[int, int, str, str]] = {}
+        latest: dict[tuple[int, int, str, str], int] = {}
+        orders: dict[int, int] = {}
+        for index, run in enumerate(runs):
+            app, suite = run.get("app"), run.get("check_suite")
+            if not isinstance(app, dict) or not isinstance(suite, dict):
+                continue
+            app_id, suite_id = app.get("id"), suite.get("id")
+            name = run.get("name")
+            if (
+                app.get("slug") != "github-actions"
+                or not isinstance(app_id, int)
+                or not isinstance(suite_id, int)
+                or not isinstance(name, str)
+                or (workflow := workflows.get(suite_id)) is None
+            ):
+                continue
+            identity = (app_id, workflow.workflow_id, workflow.event, name)
+            order = workflow.id
+            identities[index], orders[index] = identity, order
+            latest[identity] = max(latest.get(identity, order), order)
+        return [
+            run
+            for index, run in enumerate(runs)
+            if run.get("conclusion") not in {"cancelled", "stale"}
+            or index not in identities
+            or orders[index] == latest[identities[index]]
+        ]
+
+    async def workflow_for_suite(self, suite_id: int) -> WorkflowRun:
+        runs = await self.pages(
+            "actions/runs", key="workflow_runs", params={"check_suite_id": str(suite_id)}
+        )
+        parsed = [WorkflowRun.model_validate(run) for run in runs]
+        if len(parsed) != 1 or parsed[0].check_suite_id != suite_id:
+            raise ValueError("Required check workflow is ambiguous or unavailable")
+        return parsed[0]
+
+    async def merge_base(self, base: str, head: str) -> str:
+        payload = await self.get(
+            f"compare/{quote(base, safe='')}...{quote(head, safe='')}", {"per_page": "1"}
+        )
+        return CommitComparison.model_validate(payload).merge_base
+
+    async def admission_artifact(self, run_id: int, name: str) -> dict[str, JsonValue]:
+        artifacts = [
+            Artifact.model_validate(item)
+            for item in await self.pages(f"actions/runs/{run_id}/artifacts", key="artifacts")
+        ]
+        matches = [item for item in artifacts if item.name == name and not item.expired]
+        if len(matches) != 1:
+            raise ValueError("Admission evidence is missing or ambiguous")
+        # GitHub redirects to a signed blob URL. Never forward authorization to it.
+        response = await self.github.http.get(
+            f"{GITHUB_API_BASE}/repos/{self.full_name}/actions/artifacts/{matches[0].id}/zip",
+            follow_redirects=False,
+        )
+        if response.status_code != 302:
+            raise ValueError("Admission artifact download unavailable")
+        location = response.headers.get("location", "")
+        try:
+            async with github_client() as anonymous:
+                download = await request_with_safe_redirects(
+                    anonymous, "GET", location, validate_url=_artifact_destination, stream=True
+                )
+                try:
+                    download.raise_for_status()
+                    content = bytearray()
+                    async for chunk in download.aiter_bytes():
+                        content.extend(chunk)
+                        if len(content) > 1_000_000:
+                            raise ValueError("Admission artifact is too large")
+                finally:
+                    await download.aclose()
+        except httpx2.HTTPError:
+            # Signed artifact URLs must not appear in controller exception logs.
+            raise ValueError("Admission artifact download failed") from None
+        with zipfile.ZipFile(io.BytesIO(content)) as archive:
+            files = archive.infolist()
+            if (
+                len(files) != 1
+                or files[0].filename != "admission.json"
+                or files[0].file_size > 100_000
+            ):
+                raise ValueError("Unexpected admission artifact contents")
+            return TypeAdapter(dict[str, JsonValue]).validate_json(archive.read(files[0]))
+
+    @asynccontextmanager
+    async def candidate_git(self) -> AsyncIterator[CandidateGit]:
+        """A dedicated sandbox with controller credentials kept in the GitHub proxy."""
+        from openswe.github.repo_names import normalize_repo_full_name
+        from openswe.merge_queue.git import CandidateGit
+        from openswe.sandboxes.providers.langsmith import (
+            configure_sandbox_proxy,
+            create_langsmith_sandbox,
+            get_async_sandbox_client,
+        )
+
+        repository = normalize_repo_full_name(self.full_name)
+        if not re.fullmatch(r"[A-Za-z0-9_-]+/[A-Za-z0-9_.-]+", repository):
+            raise ValueError("Candidate Git requires a GitHub repository name")
+        authorization = self.github.http.headers.get("Authorization")
+        if (
+            self.github.login is not None
+            or not authorization
+            or not authorization.startswith("Bearer ")
+        ):
+            raise ValueError("Candidate writes require an explicitly supplied controller identity")
+        sandbox = await create_langsmith_sandbox(
+            prepare_work_dir=False,
+            create_params={"idle_ttl_seconds": 600, "delete_after_stop_seconds": 60},
+        )
+        try:
+            await configure_sandbox_proxy(sandbox.id, authorization.removeprefix("Bearer "))
+            git = CandidateGit(
+                sandbox,
+                PurePosixPath("/tmp/merge-queue.git"),
+                f"https://github.com/{repository}.git",
+            )
+            await git.initialize()
+            yield git
+        finally:
+            try:
+                async with asyncio.timeout(30), get_async_sandbox_client() as client:
+                    await client.stop_sandbox(sandbox.id)
+            except Exception:
+                logger.warning(
+                    "Failed to stop candidate sandbox",
+                    extra={"sandbox_id": sandbox.id},
+                    exc_info=True,
+                )
 
     async def commit_statuses(self, sha: str) -> list[dict[str, Any]]:
         """The latest status per context on ``sha``."""
@@ -554,6 +751,19 @@ class RepoClient:
             if isinstance(context, str):
                 latest.setdefault(context, status)
         return list(latest.values())
+
+
+def _artifact_destination(location: str) -> None:
+    url = urlparse(location)
+    if (
+        url.scheme != "https"
+        or not url.hostname
+        or not url.hostname.endswith((".blob.core.windows.net", ".actions.githubusercontent.com"))
+        or url.username
+        or url.password
+        or url.port not in (None, 443)
+    ):
+        raise ValueError("Untrusted artifact download destination")
 
 
 async def or_none[T](read: Awaitable[T]) -> T | None:
@@ -566,6 +776,13 @@ async def or_none[T](read: Awaitable[T]) -> T | None:
 
 def _json_or_none(response: httpx2.Response) -> object:
     return None if response.status_code == 204 or not response.content else response.json()
+
+
+class _WorkflowRun(BaseModel):
+    id: int
+    workflow_id: int
+    check_suite_id: int
+    event: str
 
 
 class _GitHubErrorBody(BaseModel):

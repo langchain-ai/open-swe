@@ -16,7 +16,6 @@ from openswe.review.approvals import (
 from openswe.review.routes import api_delete_review_style, api_update_review_style_prompt
 from openswe.review.styles import REVIEW_STYLES, ReviewStylePromptUpdate
 from openswe.tools.manage_review_approval_mode import manage_review_approval_mode
-from tests.conftest import FakeStore
 
 
 def _github(status: int, text: str = "") -> AsyncMock:
@@ -56,7 +55,7 @@ async def test_fetch_yields_no_policy_when_github_is_unreachable() -> None:
         assert await fetch_approvals_md("o", "r", "main", token="t") is None
 
 
-async def test_unset_mode_is_dry_run_and_off_skips_the_file(fake_store: FakeStore) -> None:
+async def test_unset_mode_is_dry_run_and_off_skips_the_file(registry_db: None) -> None:
     assert await approval_mode_for("o", "r") == "dry_run"
     fetch = AsyncMock(return_value="Docs only")
     with patch("openswe.review.approvals.fetch_approvals_md", fetch):
@@ -69,7 +68,7 @@ async def test_unset_mode_is_dry_run_and_off_skips_the_file(fake_store: FakeStor
         fetch.assert_not_awaited()
 
 
-async def test_review_reads_the_policy_from_the_default_branch(fake_store: FakeStore) -> None:
+async def test_review_reads_the_policy_from_the_default_branch(registry_db: None) -> None:
     # Pull requests into release branches cut before the policy existed are judged by it too.
     request = _github(200, "Cherry-picks may be approved.")
     with patch("openswe.github.http.github_request", request):
@@ -84,7 +83,7 @@ async def test_failed_mode_lookup_never_approves() -> None:
         assert await approval_mode_for("o", "r") == "dry_run"
 
 
-async def test_only_admins_change_or_discard_a_mode(fake_store: FakeStore) -> None:
+async def test_only_admins_change_or_discard_a_mode(registry_db: None) -> None:
     await REVIEW_STYLES.create("o/r", "reader")
     reader = (
         patch("openswe.review.routes.require_repo_access_for_user", AsyncMock(return_value="t")),
@@ -105,7 +104,7 @@ async def test_only_admins_change_or_discard_a_mode(fake_store: FakeStore) -> No
 
 
 async def test_tool_rechecks_private_admin_and_repo_access(
-    fake_store: FakeStore, grant_tool_access: Callable[..., None]
+    registry_db: None, grant_tool_access: Callable[..., None]
 ) -> None:
     grant_tool_access(admin=True, admin_thread=True)
     refused = await manage_review_approval_mode("set", "o/r", "approve")

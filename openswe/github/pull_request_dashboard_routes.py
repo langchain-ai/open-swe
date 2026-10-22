@@ -42,7 +42,6 @@ class PullRequestSearchResult(BaseModel):
     number: int
     url: str
     title: str
-    body: str
     state: PrState
 
 
@@ -69,7 +68,6 @@ async def api_search_pull_requests(
                 number=row.number,
                 url=row.url,
                 title=row.title,
-                body=row.body,
                 state=row.state,
             )
             for row in rows[:limit]

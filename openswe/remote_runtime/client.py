@@ -1,80 +1,108 @@
-"""Clients for graphs hosted in another deployment, and the run token dispatch stamps for them."""
+"""The Managed Deep Agents deployment that hosts every Open SWE graph.
 
-from typing import NotRequired, TypedDict
+``mda`` serves them as one graph; a run's context names the graph it
+plays. Dispatch stamps a signed run token into that context, and the deployment
+calls back with it for the graph's tools and run hooks.
+"""
+
+from typing import Final, Literal, NotRequired, TypedDict, get_args
 from urllib.parse import urlsplit
 
-from langgraph_sdk import get_client
-from langgraph_sdk.client import LangGraphClient
 from pydantic import JsonValue, TypeAdapter
 
 from openswe.config import ENV
 from openswe.remote_runtime.tokens import RemoteRun, runtime_tokens_configured, sign_runtime_token
 from openswe.run_config import RunConfig
 
-_configurable = TypeAdapter(dict[str, JsonValue])
+# The graph id `mda build` derives from the project's agent name.
+MDA_GRAPH_ID: Final = "open-swe"
+HostedGraph = Literal["agent", "reviewer", "review-scout"]
+HOSTED_GRAPHS: Final[frozenset[str]] = frozenset(get_args(HostedGraph))
+# Thread metadata naming where a thread's runs and checkpoints live.
+RUNTIME_METADATA_KEY: Final = "runtime"
+MDA_RUNTIME: Final = "mda"
+
+_json_object = TypeAdapter(dict[str, JsonValue])
+_hosted_graph = TypeAdapter(HostedGraph)
 
 
-class RemoteRunContext(TypedDict):
-    """The run context a remote deployment builds its graph from."""
-
-    run_token: str
-    invocation_id: NotRequired[str]
-    snapshot_id: NotRequired[str]
-    models: NotRequired[dict[str, JsonValue]]
+# The run context the MDA deployment builds its graph from. The token's key is a
+# dunder so it stays out of the trace metadata the Agent Server mirrors context into.
+RemoteRunContext = TypedDict(
+    "RemoteRunContext",
+    {
+        "graph": HostedGraph,
+        "__run_token": str,
+        "invocation_id": NotRequired[str],
+        "models": NotRequired[dict[str, JsonValue]],
+    },
+)
 
 
 class RemoteRuntimeConfigurationError(RuntimeError):
-    """A remote runtime is configured in a way this backend cannot safely call."""
+    """Managed Deep Agents is missing or configured in a way this backend cannot safely call."""
 
 
-def _remote_url(assistant_id: str) -> str | None:
-    if assistant_id == "reviewer":
-        return ENV.REVIEWER_RUNTIME_URL.optional()
-    return None
-
-
-def remote_runtime_client(assistant_id: str) -> LangGraphClient | None:
-    """The client for the deployment hosting ``assistant_id``, or None to run it locally."""
-    url = _remote_url(assistant_id)
+def mda_runtime_url() -> str:
+    url = ENV.MDA_RUNTIME_URL.optional()
     if url is None:
-        return None
+        raise RemoteRuntimeConfigurationError(
+            "MDA_RUNTIME_URL is required: Open SWE's graphs run on Managed Deep Agents"
+        )
     parsed = urlsplit(url)
     if parsed.scheme not in {"http", "https"} or not parsed.hostname:
-        raise RemoteRuntimeConfigurationError(f"The {assistant_id} runtime URL is not absolute")
+        raise RemoteRuntimeConfigurationError("MDA_RUNTIME_URL is not absolute")
     if parsed.scheme == "http" and parsed.hostname not in {"localhost", "127.0.0.1", "::1"}:
-        raise RemoteRuntimeConfigurationError(f"The {assistant_id} runtime URL must use HTTPS")
+        raise RemoteRuntimeConfigurationError("MDA_RUNTIME_URL must use HTTPS")
     if not runtime_tokens_configured():
         raise RemoteRuntimeConfigurationError(
-            "REMOTE_RUNTIME_TOKEN_SECRET is required to run graphs in another deployment"
+            "REMOTE_RUNTIME_TOKEN_SECRET is required to run graphs on Managed Deep Agents"
         )
-    return get_client(url=url.rstrip("/"), api_key=ENV.REVIEWER_RUNTIME_API_KEY.optional())
+    return url.rstrip("/")
+
+
+def validate_mda_startup_config() -> None:
+    """Refuse to start without the Managed Deep Agents deployment every agent run needs."""
+    mda_runtime_url()
+
+
+def mda_runtime_api_key() -> str | None:
+    return ENV.MDA_RUNTIME_API_KEY.optional() or ENV.LANGSMITH_API_KEY.optional()
 
 
 async def remote_run_context(
-    configurable: dict[str, JsonValue], *, thread_id: str, assistant_id: str
+    configurable: dict[str, JsonValue],
+    *,
+    metadata: dict[str, JsonValue],
+    thread_id: str,
+    assistant_id: str,
 ) -> RemoteRunContext:
-    """Everything a remote run needs, since a run takes either context or configurable.
+    """Everything an MDA run needs, since a run takes either context or configurable.
 
-    The configurable rides inside the signed token; the remote deployment calls back
-    with the token rather than reading it.
+    The configurable and metadata ride inside the signed token; the deployment calls
+    back with the token rather than reading it.
     """
+    if assistant_id not in HOSTED_GRAPHS:
+        raise RemoteRuntimeConfigurationError(f"Managed Deep Agents does not host {assistant_id}")
+    graph = _hosted_graph.validate_python(assistant_id)
     token = sign_runtime_token(
         RemoteRun(
             thread_id=thread_id,
             assistant_id=assistant_id,
-            configurable=_configurable.validate_python(configurable),
+            configurable=_json_object.validate_python(configurable),
+            metadata=_json_object.validate_python(metadata),
         )
     )
     # The webapp must not import the agent stack at startup.
-    from openswe.remote_runtime.reviewer import run_models
-    from openswe.sandboxes.lifecycle import SandboxCreateConfig
+    from openswe.remote_runtime.hosted import hosted_graphs
 
     cfg = RunConfig.parse(configurable)
-    sandbox = await SandboxCreateConfig.resolve(cfg.workspace_slug)
-    models = await run_models(cfg)
-    context: RemoteRunContext = {"run_token": token, "models": models.model_dump(mode="json")}
+    models = await hosted_graphs()[graph].start_models(cfg)
+    context: RemoteRunContext = {
+        "graph": graph,
+        "__run_token": token,
+        "models": models.model_dump(mode="json"),
+    }
     if cfg.invocation_id:
         context["invocation_id"] = cfg.invocation_id
-    if sandbox.snapshot_id:
-        context["snapshot_id"] = sandbox.snapshot_id
     return context
