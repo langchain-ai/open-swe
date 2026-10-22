@@ -66,6 +66,46 @@ class Artifact(Snapshot):
     expired: bool
 
 
+class ValidationRun(Snapshot):
+    id: int = Field(gt=0)
+    actor_id: int = Field(validation_alias=AliasPath("actor", "id"))
+    triggering_actor_id: int = Field(validation_alias=AliasPath("triggering_actor", "id"))
+    repository: str = Field(validation_alias=AliasPath("repository", "full_name"))
+    head_repository: str = Field(validation_alias=AliasPath("head_repository", "full_name"))
+    head_branch: str
+    head_sha: str
+    path: str
+    event: str
+    display_title: str
+    run_attempt: int
+    status: str
+    conclusion: str | None
+
+
+class ValidationJob(Snapshot):
+    id: int = Field(gt=0)
+    run_id: int = Field(gt=0)
+    run_attempt: int
+    name: str
+    status: str
+    conclusion: str | None
+
+
+class ValidationRuns(Snapshot):
+    total_count: int = Field(ge=0)
+    workflow_runs: tuple[ValidationRun, ...]
+
+
+class ValidationJobs(Snapshot):
+    total_count: int = Field(ge=0)
+    jobs: tuple[ValidationJob, ...]
+
+
+class ValidationArtifacts(Snapshot):
+    total_count: int = Field(ge=0)
+    artifacts: tuple[Artifact, ...]
+
+
 class ReviewPage(Snapshot):
     nodes: tuple[Review, ...]
     has_next: bool = Field(validation_alias=AliasPath("pageInfo", "hasNextPage"))

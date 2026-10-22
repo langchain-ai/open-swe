@@ -14,6 +14,7 @@ import { useMutation, useQueryClient } from "@tanstack/react-query"
 import { useState } from "react"
 import { toast } from "sonner"
 
+import { SubmitShortcut } from "@/components/SubmitShortcut"
 import type { OpenPullRequest, PullRequestReviewEvent } from "@/lib/api"
 import { api, ApiError } from "@/lib/api"
 import { optimisticUpdate } from "@/lib/optimistic"
@@ -129,6 +130,11 @@ export function SubmitReviewPopover({
     },
   })
   const canSubmit = !submit.isPending && (!needsBody || body.trim().length > 0)
+  const submitLabel = submit.isPending
+    ? "Submitting…"
+    : isAuthor
+      ? "Comment"
+      : "Submit review"
 
   return (
     <Popover
@@ -284,12 +290,15 @@ export function SubmitReviewPopover({
             >
               Cancel
             </Button>
-            <Button type="submit" size="xs" disabled={!canSubmit}>
-              {submit.isPending
-                ? "Submitting…"
-                : isAuthor
-                  ? "Comment"
-                  : "Submit review"}
+            <Button
+              type="submit"
+              size="xs"
+              aria-label={submitLabel}
+              aria-keyshortcuts="Meta+Enter Control+Enter"
+              disabled={!canSubmit}
+            >
+              {submitLabel}
+              {!submit.isPending && <SubmitShortcut />}
             </Button>
           </div>
         </form>

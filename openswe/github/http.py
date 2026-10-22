@@ -23,6 +23,7 @@ import zipfile
 from collections.abc import AsyncIterator, Awaitable, Mapping, Sequence
 from contextlib import asynccontextmanager
 from dataclasses import dataclass
+from datetime import datetime
 from pathlib import PurePosixPath
 from typing import TYPE_CHECKING, Any, Self
 from urllib.parse import quote, urlparse
@@ -30,7 +31,17 @@ from urllib.parse import quote, urlparse
 import httpx2
 from pydantic import BaseModel, JsonValue, TypeAdapter
 
-from openswe.github.queue import Artifact, CommitComparison, GitReference, WorkflowRun
+from openswe.github.queue import (
+    Artifact,
+    CommitComparison,
+    GitReference,
+    ValidationArtifacts,
+    ValidationJob,
+    ValidationJobs,
+    ValidationRun,
+    ValidationRuns,
+    WorkflowRun,
+)
 from openswe.utils.http_pool import pooled_transport
 from openswe.utils.url_safety import request_with_safe_redirects
 
@@ -724,13 +735,16 @@ class RepoClient:
         matches = [item for item in artifacts if item.name == name and not item.expired]
         if len(matches) != 1:
             raise ValueError("Admission evidence is missing or ambiguous")
+        return await self.artifact_json(matches[0].id, "admission.json")
+
+    async def artifact_json(self, artifact_id: int, filename: str) -> dict[str, JsonValue]:
         # GitHub redirects to a signed blob URL. Never forward authorization to it.
         response = await self.github.http.get(
-            f"{GITHUB_API_BASE}/repos/{self.full_name}/actions/artifacts/{matches[0].id}/zip",
+            f"{GITHUB_API_BASE}/repos/{self.full_name}/actions/artifacts/{artifact_id}/zip",
             follow_redirects=False,
         )
         if response.status_code != 302:
-            raise ValueError("Admission artifact download unavailable")
+            raise ValueError("Artifact download unavailable")
         location = response.headers.get("location", "")
         try:
             async with github_client() as anonymous:
@@ -743,21 +757,72 @@ class RepoClient:
                     async for chunk in download.aiter_bytes():
                         content.extend(chunk)
                         if len(content) > 1_000_000:
-                            raise ValueError("Admission artifact is too large")
+                            raise ValueError("Artifact is too large")
                 finally:
                     await download.aclose()
         except httpx2.HTTPError:
             # Signed artifact URLs must not appear in controller exception logs.
-            raise ValueError("Admission artifact download failed") from None
+            raise ValueError("Artifact download failed") from None
         with zipfile.ZipFile(io.BytesIO(content)) as archive:
             files = archive.infolist()
-            if (
-                len(files) != 1
-                or files[0].filename != "admission.json"
-                or files[0].file_size > 100_000
-            ):
-                raise ValueError("Unexpected admission artifact contents")
+            if len(files) != 1 or files[0].filename != filename or files[0].file_size > 100_000:
+                raise ValueError("Unexpected artifact contents")
             return TypeAdapter(dict[str, JsonValue]).validate_json(archive.read(files[0]))
+
+    async def dispatch_validation(self, workflow: str, contract: str) -> None:
+        """Exactly one HTTP attempt; recover ambiguous responses by discovering the run."""
+        if self.github.login is not None:
+            raise ValueError("Validation dispatch requires a controller identity")
+        response = await self.github.http.post(
+            f"{GITHUB_API_BASE}/repos/{self.full_name}/actions/workflows/"
+            f"{quote(workflow, safe='')}/dispatches",
+            json={"ref": "main", "inputs": {"contract": contract}},
+            follow_redirects=False,
+        )
+        if response.status_code != 204:
+            raise GitHubError(response)
+
+    async def validation_runs(self, workflow: str, since: datetime) -> tuple[ValidationRun, ...]:
+        runs: list[ValidationRun] = []
+        for page in range(1, 11):
+            result = ValidationRuns.model_validate(
+                await self.get(
+                    f"actions/workflows/{quote(workflow, safe='')}/runs",
+                    {
+                        "event": "workflow_dispatch",
+                        "created": since.strftime(">=%Y-%m-%dT%H:%M:%SZ"),
+                        "per_page": "100",
+                        "page": str(page),
+                    },
+                )
+            )
+            runs.extend(result.workflow_runs)
+            if len(runs) >= result.total_count:
+                if len({run.id for run in runs}) != len(runs) or len(runs) != result.total_count:
+                    raise ValueError("Workflow discovery changed during pagination")
+                return tuple(runs)
+            if not result.workflow_runs:
+                break
+        raise ValueError("Workflow discovery exceeds the bounded search window")
+
+    async def validation_run(self, run_id: int) -> ValidationRun:
+        return ValidationRun.model_validate(await self.get(f"actions/runs/{run_id}"))
+
+    async def validation_jobs(self, run_id: int) -> tuple[ValidationJob, ...]:
+        result = ValidationJobs.model_validate(
+            await self.get(f"actions/runs/{run_id}/jobs", {"per_page": "100", "filter": "latest"})
+        )
+        if result.total_count != len(result.jobs):
+            raise ValueError("Validation job listing is incomplete")
+        return result.jobs
+
+    async def validation_artifacts(self, run_id: int) -> tuple[Artifact, ...]:
+        result = ValidationArtifacts.model_validate(
+            await self.get(f"actions/runs/{run_id}/artifacts", {"per_page": "100"})
+        )
+        if result.total_count != len(result.artifacts):
+            raise ValueError("Validation artifact listing is incomplete")
+        return result.artifacts
 
     @asynccontextmanager
     async def candidate_git(self) -> AsyncIterator[CandidateGit]:
