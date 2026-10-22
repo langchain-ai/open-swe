@@ -1,0 +1,49 @@
+openswe/github/pull_request_status.py
+  s_45ce6cb3804470::t_2e425cf2be62de 20
+  s_45ce6cb3804470::t_ad24e7fa930552 564-569,573-580,584-589,596
+  s_45ce6cb3804470::t_84b0e25c329ce3 563,570-572,581-583,590-595,597-624
+  s_45ce6cb3804470::t_808bccae8d5a53 137
+openswe/github/routes.py
+  s_45ce6cb3804470::t_1d3f271a9d6334 125-126
+tests/github/test_pull_request_actions.py
+  s_45ce6cb3804470::t_79d61f01239ed6 92-97
+  s_45ce6cb3804470::t_c1f3e90014d853 87-89
+  s_45ce6cb3804470::t_6d452eb5dbd71e 80-83
+  s_45ce6cb3804470::t_b15eb86081246f 40,42
+  s_45ce6cb3804470::t_93b0701cf54351 33,43-44,49-50,57-79,84-86,90-91
+  s_45ce6cb3804470::t_0a5a100b321ca1 39
+  s_45ce6cb3804470::t_044f0dd9c7f6f4 51-56
+  s_45ce6cb3804470::t_9425b00ddb0cf1 34-38,41,45-48
+tests/reviewer/test_reviewer_publish.py
+  s_45ce6cb3804470::t_6465dbf3ee3c47 109
+  s_45ce6cb3804470::t_6635dc42ebcd33 1105,1121-1125
+  s_45ce6cb3804470::t_9e9f15660694c3 1126-1127
+openswe/github/webhook.py
+  s_45ce6cb3804470::t_22140b19353f4d 567-596
+  s_45ce6cb3804470::t_d20bd5428e83ab 17
+openswe/tools/publish_review.py
+  s_45ce6cb3804470::t_5d5cf6e6f366cf 423
+  s_45ce6cb3804470::t_e285e3f71b499f 727-734,736-750,756-761
+  s_45ce6cb3804470::t_282a3e6edcd311 726,735,751-755,762,764-780
+  s_45ce6cb3804470::t_df273c3109ea7d 763
+  s_45ce6cb3804470::t_e03f44166e4705 422,424
+  s_45ce6cb3804470::t_3b2ca9a0bc886e 7,15
+  s_45ce6cb3804470::t_1309afc358b4ca 566-570,577
+  s_45ce6cb3804470::t_4c885e45d0cbbd 571-576
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "2f200c0c8f6fe81ad7aea1911ba3ae67595d5556",
+  "prompts": {},
+  "sessions": {
+    "s_45ce6cb3804470": {
+      "agent_id": {
+        "tool": "cursor",
+        "id": "c6f5b80a-c2c7-4691-a461-8b0450f235e1",
+        "model": "auto-smart"
+      },
+      "human_author": null
+    }
+  }
+}

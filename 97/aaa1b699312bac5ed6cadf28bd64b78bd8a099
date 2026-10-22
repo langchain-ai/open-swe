@@ -1,0 +1,38 @@
+openswe/github/webhook.py
+  s_45ce6cb3804470::t_22140b19353f4d 567-596
+  s_45ce6cb3804470::t_d20bd5428e83ab 17
+openswe/tools/publish_review.py
+  s_45ce6cb3804470::t_e03f44166e4705 422-424
+  s_45ce6cb3804470::t_3b2ca9a0bc886e 7,15
+  s_45ce6cb3804470::t_282a3e6edcd311 721-736,738-754
+  s_45ce6cb3804470::t_df273c3109ea7d 737
+  s_45ce6cb3804470::t_1309afc358b4ca 566-572
+openswe/github/routes.py
+  s_45ce6cb3804470::t_1d3f271a9d6334 125-126
+tests/github/test_pull_request_actions.py
+  s_45ce6cb3804470::t_93b0701cf54351 33-41,48-77
+  s_45ce6cb3804470::t_044f0dd9c7f6f4 42-47
+openswe/github/pull_request_status.py
+  s_45ce6cb3804470::t_84b0e25c329ce3 563-604
+  s_45ce6cb3804470::t_808bccae8d5a53 137
+  s_45ce6cb3804470::t_2e425cf2be62de 20
+tests/reviewer/test_reviewer_publish.py
+  s_45ce6cb3804470::t_6635dc42ebcd33 1105,1121-1125
+  s_45ce6cb3804470::t_6465dbf3ee3c47 109
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "97aaa1b699312bac5ed6cadf28bd64b78bd8a099",
+  "prompts": {},
+  "sessions": {
+    "s_45ce6cb3804470": {
+      "agent_id": {
+        "tool": "cursor",
+        "id": "c6f5b80a-c2c7-4691-a461-8b0450f235e1",
+        "model": "auto-smart"
+      },
+      "human_author": "Joaquin Borggio <joaquin@langchain.dev>"
+    }
+  }
+}
