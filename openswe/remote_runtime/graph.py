@@ -68,6 +68,12 @@ from openswe.middleware.model_selection import PersistedRoute, normalize_route
 from openswe.middleware.record_run_usage import RecordRunUsageMiddleware
 from openswe.middleware.transcript import TranscriptMiddleware, within_namespace
 from openswe.prompts import common_prompt, prompt
+from openswe.remote_runtime.git_metadata import (
+    BASELINE,
+    OBSERVED_TOOLS,
+    TurnGitMetadata,
+    collect_pr_targets,
+)
 from openswe.remote_runtime.runs import (
     ModelSpec,
     RunModels,
@@ -142,9 +148,10 @@ class CallBody(HookBody):
 
 
 class BrowserBody(HookBody):
-    """``browser``: the LangSmith browser MDA gave the thread's agent."""
+    """``browser``: the LangSmith browser MDA names for the thread's agent."""
 
     browser: str
+    opened: bool = True
 
 
 class ToolResultBody(HookBody):
@@ -602,6 +609,7 @@ class RemoteGraph:
             sandbox = await session.sandbox()
             return {
                 **session.catalog(),
+                "trace_metadata": TurnGitMetadata(session.config).actor,
                 "sandbox": None if sandbox is None else _json.validate_python(sandbox.model_dump()),
             }
         if hook == "prepare":
@@ -610,7 +618,8 @@ class RemoteGraph:
             await session.bind_sandbox(body.sandbox_id)
             return await self._phase(session, "before_agent", body)
         if hook == "browser":
-            await ThreadBrowser(browser=BrowserBody.model_validate(raw).browser).save(run.thread_id)
+            body = BrowserBody.model_validate(raw)
+            await ThreadBrowser(browser=body.browser, opened=body.opened).report(run.thread_id)
             return {}
         if hook == "sandbox":
             session = await self.session(run, body.run_id)
@@ -643,6 +652,12 @@ class RemoteGraph:
             await session.join(state, runtime)
             result = await session.run_phase(phase, state, runtime)
             reply = result.model_dump()
+            git = TurnGitMetadata(session.config)
+            if phase == "before_agent":
+                reply["update"].update(await git.begin())
+            elif phase == "after_agent":
+                reply["trace_metadata"] = await git.reconcile(state)
+                reply["update"][BASELINE] = None
             if phase == "before_model" and result.jump_to is None:
                 model = session.model_for(state)
                 fallback = fallback_model_choice(model.model_id)
@@ -718,8 +733,11 @@ class RemoteGraph:
             }
         state = session.state(body)
         await in_graph_context(session.config, partial(session.join, state))
+        git = TurnGitMetadata(session.config)
+        before = git.work_baseline(state) if body.name in OBSERVED_TOOLS else None
+        observed_at = time.time_ns()
         try:
-            with within_namespace(body.namespace):
+            with within_namespace(body.namespace), collect_pr_targets() as pr_targets:
                 result = await session.surface.run(
                     session.config,
                     state,
@@ -747,7 +765,11 @@ class RemoteGraph:
             {
                 "message": dump_messages([result.message])[0],
                 "messages": dump_messages(_with_ids(result.messages)),
-                "update": _json_state(result.update),
+                "update": {
+                    **_json_state(result.update),
+                    **git.evidence(pr_targets, body.tool_call_id, pr=True, observed_at=observed_at),
+                    **await git.work_evidence(before, body.tool_call_id, observed_at),
+                },
                 "events": [_json_or_text(e) for e in result.events],
             }
         )
