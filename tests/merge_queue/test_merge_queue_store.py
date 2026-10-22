@@ -714,7 +714,7 @@ async def validation_batch(queue: MergeQueue) -> tuple[Lease, Batch, QueuePolicy
     candidate = candidate_for(batch, requests)
     await queue.save_candidate(batch.id, candidate, lease)
     await queue.save_candidate(batch.id, candidate, lease, published=True)
-    return lease, batch, policy
+    return lease, (await queue.history(batch.id)).batch, policy
 
 
 async def test_validation_intent_is_atomic_and_survives_restart_and_pause(
