@@ -368,6 +368,8 @@ jobs:
             'Acquire::http::Timeout "20";' \
             | sudo tee /etc/apt/apt.conf.d/99-ci-chromium >/dev/null
           pnpm run test:e2e:install
+          # apt leaves its lock and partial/ readable only by root; the cache saves as the runner.
+          sudo chown -R "$(id -u):$(id -g)" ~/.cache/apt-archives
       - name: Run browser E2E
         run: pnpm run test:e2e --shard=${{ matrix.shard }}/3
       - name: Upload Playwright report
