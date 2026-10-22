@@ -1,7 +1,8 @@
 import asyncio
 from collections.abc import Awaitable, Callable
+from dataclasses import replace
 from typing import cast
-from unittest.mock import MagicMock
+from unittest.mock import AsyncMock, MagicMock, patch
 from xml.etree import ElementTree
 
 import pytest
@@ -21,7 +22,11 @@ from openswe.middleware.model_selection import ModelSelectionMiddleware
 from openswe.middleware.prepare_run import BasePrepareRunMiddleware, PrepareRunState
 from openswe.middleware.require_user_reply import RequireUserReplyMiddleware
 from openswe.run_config import RunConfig
-from openswe.server import PrepareAgentRunMiddleware, _DisableInheritedMiddleware
+from openswe.server import (
+    PrepareAgentRunMiddleware,
+    _DisableInheritedMiddleware,
+    _thread_participants,
+)
 from openswe.utils import ttl_cache
 from openswe.utils.authorship import CollaboratorIdentity, ThreadParticipant
 
@@ -69,6 +74,40 @@ def _participant(login: str, *, instructions: str = "") -> ThreadParticipant:
 def _participant_block(participant: ThreadParticipant) -> HumanMessage:
     content = person_introduction(participant.as_person())["content"]
     return HumanMessage(content=cast(str, content))
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("sender_login", ["alice", "Alice"])
+async def test_sender_is_not_reintroduced_for_a_different_noreply_email(
+    sender_login: str,
+) -> None:
+    alice, bob = _participant("alice"), _participant("bob")
+    sender = replace(
+        alice.identity,
+        github_login=sender_login,
+        commit_email=f"123+{sender_login}@users.noreply.github.com",
+    )
+    with (
+        patch(
+            "openswe.server._thread_participant_identities",
+            AsyncMock(return_value=[alice.identity, bob.identity]),
+        ),
+        patch("openswe.server._participant_user", AsyncMock(return_value=None)),
+        patch("openswe.server.load_profile", AsyncMock(return_value={})),
+        patch("openswe.server.participant_is_admin", AsyncMock(return_value=False)),
+        patch("openswe.server._resolve_user_custom_instructions", AsyncMock(return_value=None)),
+    ):
+        participants = await _thread_participants(
+            "thread-id",
+            {},
+            sender,
+            sender_person_id=alice.person_id,
+            sender_timezone="America/New_York",
+        )
+
+    assert [p.identity.github_login for p in participants] == [sender_login, "bob"]
+    assert participants[0].timezone == "America/New_York"
+    assert len(PrepareAgentRunMiddleware._participants_messages({}, participants)) == 2
 
 
 def test_only_the_changed_participant_is_resent():

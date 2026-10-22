@@ -540,7 +540,9 @@ async def _thread_participants(
         )
     )
     others = [
-        identity for identity in identities if identity.commit_email != resolved_sender.commit_email
+        identity
+        for identity in identities
+        if identity.github_login.casefold() != resolved_sender.github_login.casefold()
     ]
     return list(
         await asyncio.gather(
