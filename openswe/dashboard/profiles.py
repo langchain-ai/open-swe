@@ -100,7 +100,6 @@ class ProfileUpdate(BaseModel):
     experimental_monitor: bool | None = Field(
         default=None, json_schema_extra={"agent_feature_flag": True}
     )
-    experimental_act_as_approval: bool | None = None
     slack_onboarding_dismissed: bool = False
 
     @field_validator("workspace_default_repos")
@@ -420,11 +419,6 @@ async def put_my_profile(
             pr_review_links=update.pr_review_links,
             pr_failure_reactions=update.pr_failure_reactions,
             experimental_task_coordination=update.experimental_task_coordination,
-            experimental_act_as_approval=update.experimental_act_as_approval,
-            # Switching approval either way starts over from asking every time.
-            act_as_always_allowed=(
-                False if update.experimental_act_as_approval is not None else None
-            ),
         ),
     )
     if preferences is None and (
@@ -432,7 +426,6 @@ async def put_my_profile(
         or update.pr_review_links
         or update.pr_failure_reactions
         or update.experimental_task_coordination
-        or update.experimental_act_as_approval
     ):
         raise HTTPException(status_code=409, detail="No Open SWE user record for this login yet")
     profile = await upsert_profile(login, session.get("email") or "", update)

@@ -14,11 +14,6 @@ from openswe.remote_runtime.git_metadata import GitTarget, collect_pr_targets
 opr = sys.modules["openswe.tools.open_pull_request"]
 
 
-@pytest.fixture(autouse=True)
-def _consent_not_needed(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr(opr, "require_consent", AsyncMock(return_value=None))
-
-
 class _FakeRequest:
     def __init__(self, method: str, url: str) -> None:
         self.method = method
