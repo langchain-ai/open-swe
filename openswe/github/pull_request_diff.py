@@ -1,21 +1,26 @@
-"""Shared builders for full-content GitHub diffs.
+"""Shared builders for GitHub diffs.
 
 Fetches the changed files of a pull request — or of an arbitrary
-``base...head`` comparison, for a branch that has no pull request — together
-with their full original/modified contents, so the UI can render
-syntax-highlighted diffs with pierre's ``MultiFileDiff``. Used by the thread
-branch diff endpoint (user token) and the review diff endpoint (App
+``base...head`` comparison, for a branch that has no pull request — as per-file
+git patches, optionally with their full original/modified contents so the UI
+can render syntax-highlighted diffs with pierre's ``MultiFileDiff``. Used by
+the thread branch diff endpoint (user token) and the review diff endpoint (App
 installation token).
 """
 
 import asyncio
+import logging
+from collections.abc import Iterator
+from contextlib import contextmanager
 from typing import Any
-from urllib.parse import quote
 
 import httpx2
 from fastapi import HTTPException
 
-_GITHUB_API = "https://api.github.com"
+from openswe.github.http import GitHubError, RepoClient
+from openswe.github.pull_request_status import PullRequestClient
+
+logger = logging.getLogger(__name__)
 
 # GitHub lists at most this many files for a pull request or comparison.
 GITHUB_MAX_LISTED_FILES = 3000
@@ -24,38 +29,50 @@ PR_DIFF_FETCH_CONCURRENCY = 10
 _FILES_PAGE_SIZE = 100
 
 
-async def _fetch_file_at_ref(
-    client: httpx2.AsyncClient,
-    semaphore: asyncio.Semaphore,
-    full_name: str,
-    path: str,
-    ref: str,
+@contextmanager
+def _github_answers(not_found: str) -> Iterator[None]:
+    """GitHub's refusals as the errors the diff endpoints answer with."""
+    try:
+        yield
+    except GitHubError as refused:
+        status = refused.response.status_code
+        if status == 404:
+            raise HTTPException(404, not_found) from refused
+        raise HTTPException(502, f"github API error ({status})") from refused
+    except ValueError as exc:
+        raise HTTPException(502, "github API returned an unexpected payload") from exc
+
+
+async def _read_text(
+    repo: RepoClient, semaphore: asyncio.Semaphore, path: str, ref: str
 ) -> str | None:
+    """``path`` at ``ref``; ``None`` when it is absent, binary, oversized or unreadable."""
     async with semaphore:
-        response = await client.get(
-            f"{_GITHUB_API}/repos/{full_name}/contents/{quote(path, safe='/')}",
-            params={"ref": ref},
-            headers={"Accept": "application/vnd.github.raw+json"},
-        )
-    if response.status_code == 404:
-        return None
-    if response.status_code != 200:
-        return None
-    if len(response.content) > PR_DIFF_MAX_FILE_BYTES:
+        try:
+            content = await repo.raw_file(path, ref)
+        except httpx2.HTTPError:
+            logger.warning(
+                "diff file read failed",
+                extra={"repo_full_name": repo.full_name, "path": path, "ref": ref},
+                exc_info=True,
+            )
+            return None
+    if content is None or len(content) > PR_DIFF_MAX_FILE_BYTES:
         return None
     try:
-        return response.content.decode("utf-8")
+        return content.decode("utf-8")
     except UnicodeDecodeError:
         return None
 
 
+async def resolve_merge_base(repo: RepoClient, base_ref: str, head_ref: str) -> str:
+    """Where ``base...head`` starts: the "before" side of every file in its diff."""
+    with _github_answers("revision not found on GitHub"):
+        return await repo.merge_base(base_ref, head_ref)
+
+
 async def fetch_file_versions(
-    client: httpx2.AsyncClient,
-    full_name: str,
-    path: str,
-    original_path: str,
-    base_ref: str,
-    head_ref: str,
+    repo: RepoClient, path: str, original_path: str, base_ref: str, head_ref: str
 ) -> dict[str, str | None]:
     """Return one path's contents at both refs, for hydrating a partial diff."""
     for candidate in (path, original_path):
@@ -68,8 +85,8 @@ async def fetch_file_versions(
             raise HTTPException(400, "invalid repository-relative file path")
     semaphore = asyncio.Semaphore(PR_DIFF_FETCH_CONCURRENCY)
     original, modified = await asyncio.gather(
-        _fetch_file_at_ref(client, semaphore, full_name, original_path, base_ref),
-        _fetch_file_at_ref(client, semaphore, full_name, path, head_ref),
+        _read_text(repo, semaphore, original_path, base_ref),
+        _read_text(repo, semaphore, path, head_ref),
     )
     return {"originalContent": original, "modifiedContent": modified}
 
@@ -89,190 +106,120 @@ def _git_patch(path: str, original_path: str, status: str, patch: str | None) ->
     return f"{header}--- {old}\n+++ {new}\n{body}"
 
 
-async def _fetch_comparison(
-    client: httpx2.AsyncClient, full_name: str, base_ref: str, head_ref: str
-) -> dict[str, Any]:
-    """Fetch ``base...head``; refs are fully escaped so neither can widen the path."""
-    base = quote(base_ref, safe="")
-    head = quote(head_ref, safe="")
-    response = await client.get(f"{_GITHUB_API}/repos/{full_name}/compare/{base}...{head}")
-    if response.status_code == 404:
-        raise HTTPException(404, "branch not found on GitHub")
-    if response.status_code != 200:
-        raise HTTPException(502, f"github API error ({response.status_code})")
-    comparison = response.json()
-    if not isinstance(comparison, dict):
-        raise HTTPException(502, "github API returned an unexpected compare payload")
-    return comparison
-
-
-def _merge_base_sha(comparison: dict[str, Any]) -> str:
-    merge_base = comparison.get("merge_base_commit")
-    base_sha = merge_base.get("sha") if isinstance(merge_base, dict) else None
-    if not isinstance(base_sha, str):
-        raise HTTPException(502, "github API returned an unexpected compare payload")
-    return base_sha
-
-
-async def _pull_branch_shas(
-    client: httpx2.AsyncClient, full_name: str, pr_number: int
-) -> tuple[str, str]:
-    pull_response = await client.get(f"{_GITHUB_API}/repos/{full_name}/pulls/{pr_number}")
-    if pull_response.status_code == 404:
-        raise HTTPException(404, "pull request not found")
-    if pull_response.status_code != 200:
-        raise HTTPException(502, f"github API error ({pull_response.status_code})")
-    pull = pull_response.json()
-    base = pull.get("base") if isinstance(pull, dict) else None
-    head = pull.get("head") if isinstance(pull, dict) else None
-    base_sha = base.get("sha") if isinstance(base, dict) else None
-    head_sha = head.get("sha") if isinstance(head, dict) else None
-    if not isinstance(base_sha, str) or not isinstance(head_sha, str):
-        raise HTTPException(502, "github API returned an unexpected pull request payload")
-    return base_sha, head_sha
-
-
-async def pull_request_diff_refs(
-    client: httpx2.AsyncClient, full_name: str, pr_number: int
-) -> tuple[str, str]:
-    """Return the PR's ``(merge_base_sha, head_sha)`` — the refs its diff spans."""
-    base_sha, head_sha = await _pull_branch_shas(client, full_name, pr_number)
-    comparison = await _fetch_comparison(client, full_name, base_sha, head_sha)
-    return _merge_base_sha(comparison), head_sha
-
-
-async def build_pr_diff_files(
-    client: httpx2.AsyncClient,
-    full_name: str,
-    pr_number: int,
-    *,
-    with_contents: bool = True,
-) -> dict[str, Any]:
-    """Return ``{base_sha, head_sha, truncated, files}`` for a PR.
-
-    With ``with_contents``, each file carries full ``originalContent``/
-    ``modifiedContent`` (or ``None`` for binary/oversized blobs, flagged via
-    ``unrenderable``); without it only ``patch`` is populated and the client
-    hydrates on demand. ``client`` must already be configured with auth headers.
-    """
-    base_sha, head_sha = await _pull_branch_shas(client, full_name, pr_number)
-    raw_files: list[Any] = []
-    page = 1
-    while True:
-        response = await client.get(
-            f"{_GITHUB_API}/repos/{full_name}/pulls/{pr_number}/files",
-            params={"per_page": _FILES_PAGE_SIZE, "page": page},
-        )
-        if response.status_code != 200:
-            raise HTTPException(502, f"github API error ({response.status_code})")
-        batch = response.json()
-        if not isinstance(batch, list):
-            raise HTTPException(502, "github API returned an unexpected files payload")
-        raw_files.extend(batch)
-        if len(batch) < _FILES_PAGE_SIZE or len(raw_files) >= GITHUB_MAX_LISTED_FILES:
-            break
-        page += 1
-    comparison = await _fetch_comparison(client, full_name, base_sha, head_sha)
-    return await _build_diff_files(
-        client,
-        full_name,
-        raw_files,
-        _merge_base_sha(comparison),
-        head_sha,
-        with_contents=with_contents,
+def _file_entry(raw: dict[str, Any]) -> dict[str, Any] | None:
+    """One listed file as a git patch; ``None`` when GitHub sent no path."""
+    path = raw.get("filename")
+    if not isinstance(path, str):
+        return None
+    status, previous, raw_patch = raw.get("status"), raw.get("previous_filename"), raw.get("patch")
+    additions, deletions = raw.get("additions"), raw.get("deletions")
+    status = status if isinstance(status, str) else "modified"
+    previous = previous if isinstance(previous, str) else None
+    patch = _git_patch(
+        path, previous or path, status, raw_patch if isinstance(raw_patch, str) else None
     )
+    return {
+        "path": path,
+        "previousPath": previous,
+        "status": status,
+        "additions": additions if isinstance(additions, int) else 0,
+        "deletions": deletions if isinstance(deletions, int) else 0,
+        "patch": patch,
+        # GitHub omits the patch for binary and very large files, which leaves
+        # nothing to render.
+        "unrenderable": patch is None,
+    }
+
+
+def _patches(raw_files: list[dict[str, Any]], base_sha: str, head_sha: str) -> dict[str, Any]:
+    entries = (_file_entry(raw) for raw in raw_files)
+    return {
+        "base_sha": base_sha,
+        "head_sha": head_sha,
+        "truncated": len(raw_files) >= GITHUB_MAX_LISTED_FILES,
+        "files": [entry for entry in entries if entry is not None],
+    }
+
+
+async def _with_contents(repo: RepoClient, diff: dict[str, Any]) -> dict[str, Any]:
+    """``diff`` with each file's full contents read at its ``base_sha`` and ``head_sha``.
+
+    A blob that is binary, oversized or unreadable reads as ``None`` and marks
+    its file ``unrenderable``.
+    """
+    semaphore = asyncio.Semaphore(PR_DIFF_FETCH_CONCURRENCY)
+
+    async def hydrate(entry: dict[str, Any]) -> dict[str, Any]:
+        original: str | None = ""
+        modified: str | None = ""
+        if entry["status"] != "added":
+            original_path = entry["previousPath"] or entry["path"]
+            original = await _read_text(repo, semaphore, original_path, diff["base_sha"])
+        if entry["status"] != "removed":
+            modified = await _read_text(repo, semaphore, entry["path"], diff["head_sha"])
+        return {
+            **entry,
+            "originalContent": original,
+            "modifiedContent": modified,
+            "unrenderable": original is None or modified is None,
+        }
+
+    return {**diff, "files": await asyncio.gather(*map(hydrate, diff["files"]))}
+
+
+async def _pull_files(pull: PullRequestClient) -> tuple[str, str, list[dict[str, Any]]]:
+    """The pull's base branch tip, its head, and every file it changes."""
+    with _github_answers("pull request not found"):
+        payload = await pull.pull()
+        base = payload.get("base")
+        head = payload.get("head")
+        base_sha = base.get("sha") if isinstance(base, dict) else None
+        head_sha = head.get("sha") if isinstance(head, dict) else None
+        if not isinstance(base_sha, str) or not isinstance(head_sha, str):
+            raise ValueError("GitHub answered the pull request without its branches")
+        changed = payload.get("changed_files")
+        files = await pull.files(
+            max_pages=GITHUB_MAX_LISTED_FILES // _FILES_PAGE_SIZE,
+            count=changed if isinstance(changed, int) else None,
+        )
+    return base_sha, head_sha, files
+
+
+async def pull_request_patches(pull: PullRequestClient) -> dict[str, Any]:
+    """Return ``{base_sha, head_sha, truncated, files}`` for a PR, each file a git patch.
+
+    ``base_sha`` is the base branch tip rather than the merge base the patches
+    start from, which would cost a comparison; :func:`resolve_merge_base` finds
+    that when a file's contents are wanted.
+    """
+    base_sha, head_sha, raw_files = await _pull_files(pull)
+    return _patches(raw_files, base_sha, head_sha)
+
+
+async def build_pr_diff_files(pull: PullRequestClient) -> dict[str, Any]:
+    """Return ``{base_sha, head_sha, truncated, files}`` for a PR, with full contents.
+
+    ``base_sha`` is the merge base, so commits landed on the base branch since
+    the PR forked are not attributed to it.
+    """
+    base_tip, head_sha, raw_files = await _pull_files(pull)
+    merge_base = await resolve_merge_base(pull.repo, base_tip, head_sha)
+    return await _with_contents(pull.repo, _patches(raw_files, merge_base, head_sha))
 
 
 async def build_compare_diff_files(
-    client: httpx2.AsyncClient,
-    full_name: str,
-    base_ref: str,
-    head_ref: str,
-    *,
-    with_contents: bool = True,
+    repo: RepoClient, base_ref: str, head_ref: str
 ) -> dict[str, Any]:
-    """Return ``{base_sha, head_sha, truncated, files}`` for ``base...head``.
+    """Return ``{base_sha, head_sha, truncated, files}`` for ``base...head``, with full contents.
 
     Three-dot compare semantics: the base is the merge base of the two refs, so
     commits landed on the base branch since the head branch forked are not
-    attributed to it. Same payload shape as :func:`build_pr_diff_files`; refs
-    are fully escaped, so a ref can never widen the request path.
+    attributed to it. Same payload shape as :func:`build_pr_diff_files`.
 
     ``head_sha`` is the ref itself, not a commit: the compare payload's commit
     list is paginated, so its last entry is not reliably the branch tip. Blobs
     are read at the ref, which always resolves to the tip.
     """
-    comparison = await _fetch_comparison(client, full_name, base_ref, head_ref)
-    base_sha = _merge_base_sha(comparison)
-
-    raw_files = comparison.get("files")
-    if raw_files is None:
-        raw_files = []
-    if not isinstance(raw_files, list):
-        raise HTTPException(502, "github API returned an unexpected files payload")
-
-    return await _build_diff_files(
-        client, full_name, raw_files, base_sha, head_ref, with_contents=with_contents
-    )
-
-
-async def _build_diff_files(
-    client: httpx2.AsyncClient,
-    full_name: str,
-    raw_files: list[Any],
-    base_ref: str,
-    head_ref: str,
-    *,
-    with_contents: bool,
-) -> dict[str, Any]:
-    """Build file entries by reading each blob at ``base_ref`` and ``head_ref``."""
-    truncated = len(raw_files) >= GITHUB_MAX_LISTED_FILES
-
-    semaphore = asyncio.Semaphore(PR_DIFF_FETCH_CONCURRENCY)
-
-    async def build_entry(raw: Any) -> dict[str, Any] | None:
-        if not isinstance(raw, dict):
-            return None
-        path = raw.get("filename")
-        if not isinstance(path, str):
-            return None
-        status = raw.get("status") if isinstance(raw.get("status"), str) else "modified"
-        previous = raw.get("previous_filename")
-        original_path = previous if isinstance(previous, str) else path
-
-        original: str | None = ""
-        modified: str | None = ""
-        if with_contents:
-            if status != "added":
-                original = await _fetch_file_at_ref(
-                    client, semaphore, full_name, original_path, base_ref
-                )
-            if status != "removed":
-                modified = await _fetch_file_at_ref(client, semaphore, full_name, path, head_ref)
-
-        raw_patch = raw.get("patch") if isinstance(raw.get("patch"), str) else None
-        patch = _git_patch(path, original_path, status, raw_patch)
-        return {
-            "path": path,
-            "previousPath": previous if isinstance(previous, str) else None,
-            "status": status,
-            "additions": raw.get("additions") if isinstance(raw.get("additions"), int) else 0,
-            "deletions": raw.get("deletions") if isinstance(raw.get("deletions"), int) else 0,
-            "originalContent": original,
-            "modifiedContent": modified,
-            "patch": patch,
-            # GitHub omits the patch for binary and very large files; without
-            # contents to fall back on there is nothing to render.
-            "unrenderable": (original is None or modified is None)
-            if with_contents
-            else patch is None,
-        }
-
-    entries = await asyncio.gather(*(build_entry(raw) for raw in raw_files))
-
-    return {
-        "base_sha": base_ref,
-        "head_sha": head_ref,
-        "truncated": truncated,
-        "files": [entry for entry in entries if entry is not None],
-    }
+    with _github_answers("branch not found on GitHub"):
+        comparison = await repo.compare(base_ref, head_ref)
+    return await _with_contents(repo, _patches(comparison.files, comparison.merge_base, head_ref))

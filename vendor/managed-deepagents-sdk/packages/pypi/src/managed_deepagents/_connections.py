@@ -37,9 +37,14 @@ from managed_deepagents._agent_auth_http import (
     CredentialStoreError,
     agent_auth_headers,
 )
+from managed_deepagents._channels.reserved_connections import (
+    reserved_agent_connection_slug,
+    reserved_user_connection_error,
+)
 from managed_deepagents._channels.source_providers import is_trusted_source_provider
 from managed_deepagents._identity_runtime import (
     build_runtime_identity,
+    on_channel_thread,
     resolve_runtime_configurable,
 )
 
@@ -208,6 +213,8 @@ class AgentAuthConnectionStore:
             timeout=self._timeout,
         )
         slug = request["slug"]
+        if owner["type"] == "agent":
+            slug = reserved_agent_connection_slug(slug, config.deployment_id)
         return await asyncio.to_thread(_lookup_workspace_connection, client, slug, owner)
 
     def _bind_request(
@@ -247,6 +254,8 @@ class AgentAuthConnectionStore:
 
 def _fetch_local_dev_agent_connection(resolved: Mapping[str, str], slug: str) -> str:
     value = resolved.get(agent_connection_env_key(slug))
+    if value is None:
+        value = resolved.get(_legacy_agent_connection_env_key(slug))
     if value is not None and value.strip():
         return value
     raise CredentialStoreError(
@@ -298,10 +307,20 @@ class _Connections:
         owner: ConnectionOwner | Mapping[str, object],
     ) -> ConnectionReference:
         """Describe a connection lookup; await the handle to read its value."""
-        return ConnectionReference(_normalize_slug(slug), _normalize_owner(owner), self)
+        normalized_slug = _normalize_slug(slug)
+        normalized_owner = _normalize_owner(owner)
+        if normalized_owner["type"] == "user":
+            unsupported = reserved_user_connection_error(normalized_slug)
+            if unsupported is not None:
+                raise ValueError(unsupported)
+        return ConnectionReference(normalized_slug, normalized_owner, self)
 
     async def resolve(self, slug: str, owner: ConnectionOwner) -> str:
         configurable = resolve_runtime_configurable(None)
+        # Agent-owned material belongs to the deployment, not to a caller, so it
+        # resolves outside a run too, e.g. in a channel callback.
+        if configurable is None and owner["type"] == "agent":
+            return await self.resolve_deployment_secret(slug)
         if configurable is None:
             raise RuntimeError(
                 "connections.get(...) must be awaited inside a run: resolve a connection in a "
@@ -352,7 +371,16 @@ def _normalize_slug(slug: str) -> str:
 
 
 def agent_connection_env_key(slug: str) -> str:
-    """Environment variable used for one agent-owned development connection."""
+    """Environment variable used for one agent-owned development connection.
+
+    ``MDA_DEV_`` and the slug uppercased, ``-`` as ``_`` and ``/`` as ``__``
+    (``mda/github-token`` → ``MDA_DEV_MDA__GITHUB_TOKEN``), so shells keep it.
+    """
+    return _legacy_agent_connection_env_key(slug).replace("/", "__")
+
+
+def _legacy_agent_connection_env_key(slug: str) -> str:
+    """The earlier spelling, with ``/`` kept; Linux shells drop such names."""
     return f"{_DEV_CREDENTIAL_PREFIX}{_normalize_slug(slug).upper().replace('-', '_')}"
 
 
@@ -432,6 +460,76 @@ def resolve_agent_auth_context(
     )
 
 
+CHANNEL_THREAD_USER_CONNECTION_ERROR = (
+    "user-owned connections are unavailable when resuming a channel's "
+    "conversation from outside that channel: it holds content from outside "
+    "the workspace, which must not act with your grants"
+)
+"""Why a Studio resume of a channel's conversation gets no user connections.
+
+The conversation holds content from outside the workspace, which must not
+steer the grants of whoever resumes it.
+"""
+
+
+def outside_caller_on_channel_thread(identity: RuntimeIdentity | None) -> bool:
+    """Whether the run continues a channel's conversation for a caller who is not that channel.
+
+    A person resuming it from Studio is one. The channel's own runs, a linked
+    Slack person's included, keep their connections.
+    """
+    if not on_channel_thread():
+        return False
+    source = (identity or {}).get("source") or {}
+    provider = source.get("provider") if isinstance(source, Mapping) else None
+    return not (isinstance(provider, str) and is_trusted_source_provider(provider))
+
+
+_UNMAPPED_SENDER_PROVIDERS = frozenset({"github"})
+"""Channels whose senders a delivery verifies but who cannot be mapped to a
+user of the agent's identity: the principal ``identity.py`` resolves, from
+LangSmith, Supabase or another provider. They cannot use tools that act on a
+user's behalf or own user grants, and asking them to connect an account would
+mean posting the link where everyone sees it."""
+
+
+def unmapped_channel_provider(identity: RuntimeIdentity | None) -> str | None:
+    """The channel, e.g. ``github``, whose sender the run acts for without a user.
+
+    No user of the agent's identity is behind them: such a person has user
+    memory but no user-owned connections.
+    """
+    if identity is None:
+        return None
+    user = identity.get("user") or {}
+    if not isinstance(user, Mapping) or user.get("kind") != "person":
+        return None
+    stamped = identity.get("agent_auth_principal_id")
+    if isinstance(stamped, str) and stamped.strip():
+        return None
+    source = identity.get("source") or {}
+    provider = source.get("provider") if isinstance(source, Mapping) else None
+    return provider if provider in _UNMAPPED_SENDER_PROVIDERS else None
+
+
+def channel_provider(identity: RuntimeIdentity | None) -> str | None:
+    """The channel a run started by a channel event runs as, e.g. ``github``.
+
+    Such a run runs as the channel, not as the person who sent the event, so
+    there is no one to own a user grant.
+    """
+    if identity is None:
+        return None
+    user = identity.get("user") or {}
+    if not isinstance(user, Mapping) or user.get("kind") != "service":
+        return None
+    source = identity.get("source") or {}
+    channel = source.get("provider") if isinstance(source, Mapping) else None
+    if isinstance(channel, str) and is_trusted_source_provider(channel):
+        return channel
+    return None
+
+
 def resolve_credential_principal_id(
     identity: RuntimeIdentity | None,
     config: _AgentAuthConfig,
@@ -446,10 +544,28 @@ def resolve_credential_principal_id(
     user_id = user.get("id") if isinstance(user, Mapping) else None
     if not isinstance(user_id, str) or not user_id.strip():
         raise CredentialStoreError("user connections require an authenticated user principal")
+    if outside_caller_on_channel_thread(identity):
+        raise CredentialStoreError(CHANNEL_THREAD_USER_CONNECTION_ERROR)
+    unmapped = unmapped_channel_provider(identity)
+    if unmapped is not None:
+        raise CredentialStoreError(
+            f"user-owned connections are unavailable to {unmapped} senders: a "
+            f"{unmapped} account cannot be mapped to a user of this agent's identity"
+        )
     kind = user.get("kind") if isinstance(user, Mapping) else None
     if kind == "service":
         if user_id.strip() == _LOCAL_DEV_USER and config.local_dev_principal_id is not None:
             return config.local_dev_principal_id
+        # A channel event (e.g. a GitHub comment) starts a run that acts as the
+        # channel's app, not as the person who triggered it, so there is no one
+        # to own the grant.
+        channel = channel_provider(identity)
+        if channel is not None:
+            raise CredentialStoreError(
+                "user-owned connections require a person principal; "
+                f"a {channel} event starts an agent run that acts as the channel's "
+                "registered app, not as the person who triggered the event"
+            )
         raise CredentialStoreError(
             "user-owned connections require a person principal; "
             "service callers cannot own OAuth grants"

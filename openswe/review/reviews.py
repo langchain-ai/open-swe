@@ -24,8 +24,9 @@ from openswe.database import postgres
 from openswe.github.app import get_github_app_installation_token
 from openswe.github.http import GitHubAppUnavailable, GitHubClient, or_none
 from openswe.github.pull_request_diff import (
-    build_pr_diff_files,
     fetch_file_versions,
+    pull_request_patches,
+    resolve_merge_base,
 )
 from openswe.github.pull_request_status import PullRequestClient
 from openswe.github.webhook import trigger_pr_review_from_ref
@@ -44,6 +45,7 @@ from openswe.thread_ids import reviewer_thread_id
 from openswe.threads import index
 from openswe.threads.status import thread_run_error
 from openswe.threads.succession import SUCCEEDED_BY_KEY
+from openswe.utils import ttl_cache
 from openswe.utils.http_pool import pooled_transport
 from openswe.utils.json_types import ThreadLike, thread_metadata
 from openswe.utils.thread_ops import langgraph_client
@@ -945,26 +947,18 @@ async def get_review_diff(owner: str, repo: str, pr_number: int) -> dict[str, An
     calls :func:`get_review_file_contents` to expand context on demand.
     """
     async with GitHubClient.as_app(timeout=_GITHUB_TIMEOUT) as github:
-        diff = await build_pr_diff_files(
-            github.http, f"{owner}/{repo}", pr_number, with_contents=False
-        )
+        diff = await pull_request_patches(github.repo(owner, repo).pull_request(pr_number))
     files = diff["files"]
     return {
-        "files": [
-            {
-                **{key: value for key, value in f.items() if key not in _CONTENT_KEYS},
-                "baseSha": diff["base_sha"],
-                "headSha": diff["head_sha"],
-            }
-            for f in files
-        ],
+        "files": [{**f, "baseSha": diff["base_sha"], "headSha": diff["head_sha"]} for f in files],
         "total_additions": sum(f["additions"] for f in files),
         "total_deletions": sum(f["deletions"] for f in files),
         "truncated": diff["truncated"],
     }
 
 
-_CONTENT_KEYS = frozenset({"originalContent", "modifiedContent"})
+# Two commits always share the same merge base.
+_MERGE_BASE_TTL_SECONDS = 24 * 60 * 60
 
 
 async def get_review_file_contents(
@@ -976,13 +970,22 @@ async def get_review_file_contents(
     base_sha: str,
     head_sha: str,
 ) -> dict[str, str | None]:
-    """Return one file's contents at the PR's merge base and head."""
+    """Return one file's contents at the merge base of ``base_sha`` and ``head_sha``, and at the head.
+
+    ``base_sha`` is the base branch tip the diff was listed against; every file
+    of one diff resolves the same merge base, so it is looked up once.
+    """
     if not all(re.fullmatch(r"[0-9a-f]{40}", ref) for ref in (base_sha, head_sha)):
         raise HTTPException(400, "invalid diff revision")
-    full_name = f"{owner}/{repo}"
     async with GitHubClient.as_app(timeout=_GITHUB_TIMEOUT) as github:
+        repository = github.repo(owner, repo)
+        merge_base = await ttl_cache.cached(
+            f"merge-base:{repository.full_name}:{base_sha}...{head_sha}",
+            _MERGE_BASE_TTL_SECONDS,
+            lambda: resolve_merge_base(repository, base_sha, head_sha),
+        )
         return await fetch_file_versions(
-            github.http, full_name, path, original_path or path, base_sha, head_sha
+            repository, path, original_path or path, merge_base, head_sha
         )
 
 

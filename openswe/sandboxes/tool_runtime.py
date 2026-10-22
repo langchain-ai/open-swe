@@ -29,7 +29,7 @@ _json = TypeAdapter(JsonValue)
 EXCLUDED_TOOLS = frozenset({"load_integration_tools"})
 # Task workers share the sandbox's tool channel with their coordinator, so task
 # coordination stays the model's: a surface serving the sandbox never offers it.
-MODEL_ONLY_TOOLS = frozenset({"spawn_worker", "control_worker", "message_task_thread"})
+MODEL_ONLY_TOOLS = frozenset({"control_worker", "message_task_thread"})
 
 
 def tool_parameters(tool: BaseTool) -> dict[str, JsonValue]:
@@ -146,6 +146,9 @@ class ToolSurface:
     middleware: Sequence[AgentMiddleware] = ()
     models: SurfaceModels | None = None
     subagents: Sequence[SurfaceSubagent] = ()
+    # Paths the graph's file tools read from this deployment rather than the sandbox,
+    # such as skills.
+    backend_paths: tuple[str, ...] = ()
     # Whether the graph's core tools it seldom needs belong in a runtime's code mode.
     code_mode: bool = False
     # Whether a model loop running elsewhere calls these tools, rather than the sandbox.

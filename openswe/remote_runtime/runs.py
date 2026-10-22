@@ -45,10 +45,8 @@ async def in_graph_context[T](
     *,
     events: list[object] | None = None,
 ) -> T:
-    """Run ``work`` inside a one-node graph so ``get_config`` and the stream writer resolve.
-
-    What ``work`` streams through ``get_stream_writer`` lands in ``events``.
-    """
+    """Run a named backend operation with graph context and capture its custom stream events."""
+    name = config.get("run_name", "backend_callback")
     results: list[T] = []
 
     async def node(state: _NodeState, runtime: Runtime) -> dict[str, bool]:  # noqa: ARG001
@@ -56,10 +54,11 @@ async def in_graph_context[T](
         return {"done": True}
 
     builder = StateGraph(_NodeState)
-    builder.add_node("work", node)
-    builder.add_edge(START, "work")
-    builder.add_edge("work", END)
-    graph = builder.compile()
+    builder.add_node(name, node)
+    builder.add_edge(START, name)
+    builder.add_edge(name, END)
+    graph = builder.compile(name=name)
+    config = {**config, "metadata": {**config.get("metadata", {}), "backend_operation": name}}
     async for chunk in graph.astream(_NodeState(), config, stream_mode="custom"):
         if events is not None:
             events.append(chunk)
