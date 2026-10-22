@@ -19,41 +19,12 @@ def _configurable() -> tuple[RunConfig, Mapping[str, Any]]:
     return RunConfig.from_config(config), config if isinstance(config, Mapping) else {}
 
 
-def dispatch_run_config(
-    cfg: RunConfig, thread_id: str, source_installation_id: int | None
-) -> dict[str, Any]:
-    """The configurable a durable watch stores to wake this thread later."""
-    allowed = (
-        "source",
-        "slack_thread",
-        "linear_issue",
-        "github_issue",
-        "pr_number",
-        "github_login",
-        "user_email",
-        "workspace",
-        # `environment` is the pre-workspaces spelling; a watch started before
-        # the rename still carries it, and both keys mean the same workspace.
-        "environment",
-        "agent_model_id",
-        "agent_effort",
-    )
-    dumped = cfg.dump()
-    result = {key: dumped[key] for key in allowed if dumped.get(key) is not None}
-    if cfg.github_issue and isinstance(dumped.get("repo"), Mapping):
-        result["source_repo"] = dumped["repo"]
-        if source_installation_id is not None:
-            result["source_installation_id"] = source_installation_id
-    result["thread_id"] = thread_id
-    return result
-
-
 def _source_context(cfg: RunConfig) -> SourceContext:
     dumped = cfg.dump()
     return SourceContext.parse(
         {
             key: dumped[key]
-            for key in ("slack_thread", "linear_issue", "github_issue")
+            for key in ("slack_thread", "linear_issue", "notion_page", "github_issue")
             if isinstance(dumped.get(key), Mapping)
         }
     )
@@ -140,7 +111,7 @@ async def manage_baby_sit(
             head_ref=pr_head_ref,
             installation_id=installation_id,
             thread_id=thread_id,
-            run_config=dispatch_run_config(cfg, thread_id, source_installation_id),
+            run_config=cfg.wake_config(thread_id, source_installation_id),
             source_context=_source_context(cfg),
         )
     except Exception as exc:

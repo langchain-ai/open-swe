@@ -1,0 +1,112 @@
+name: Sync fork with upstream
+
+on:
+  schedule:
+    - cron: '0 12 * * *'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  pull-requests: write
+
+jobs:
+  merge-upstream:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Generate app token
+        id: app-token
+        uses: actions/create-github-app-token@v1
+        with:
+          app-id: ${{ secrets.APP_ID }}
+          private-key: ${{ secrets.APP_PRIVATE_KEY }}
+          owner: aeteq
+          repositories: open-swe
+
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+          ref: main
+          persist-credentials: false
+
+      - name: Configure git identity
+        run: |
+          git config user.name "Nikolas Pitsillos"
+          git config user.email "npitsillos@users.noreply.github.com"
+
+      - name: Restore rerere cache
+        uses: actions/cache@v4
+        with:
+          path: .git/rr-cache
+          key: rerere-cache-${{ github.run_id }}
+          restore-keys: rerere-cache-
+
+      - name: Enable rerere
+        run: git config rerere.enabled true
+
+      - name: Fetch upstream
+        run: |
+          git remote add upstream https://github.com/langchain-ai/open-swe.git
+          git fetch upstream
+
+      - name: Create merge branch
+        run: git checkout -B sync-upstream main
+
+      - name: Merge upstream into fork
+        id: merge
+        run: |
+          if git merge upstream/main --no-edit; then
+            echo "clean=true" >> $GITHUB_OUTPUT
+          else
+            # rerere may have auto-resolved some/all conflicts using
+            # previously recorded resolutions
+            REMAINING=$(git diff --name-only --diff-filter=U)
+            if [ -z "$REMAINING" ]; then
+              git add -A
+              git commit --no-edit
+              echo "clean=true" >> $GITHUB_OUTPUT
+            else
+              echo "clean=false" >> $GITHUB_OUTPUT
+              EOF_DELIM=$(dd if=/dev/urandom bs=15 count=1 status=none | base64)
+              echo "conflicts<<$EOF_DELIM" >> $GITHUB_OUTPUT
+              echo "$REMAINING" >> $GITHUB_OUTPUT
+              echo "$EOF_DELIM" >> $GITHUB_OUTPUT
+              git merge --abort
+              git checkout -B sync-upstream upstream/main
+            fi
+          fi
+
+      - name: Push sync branch
+        run: |
+          git remote set-url origin https://x-access-token:${{ steps.app-token.outputs.token }}@github.com/aeteq/open-swe.git
+          git push -u origin sync-upstream --force
+
+      - name: Create or update PR
+        env:
+          GH_TOKEN: ${{ steps.app-token.outputs.token }}
+        run: |
+          EXISTING_PR=$(gh pr list --repo aeteq/open-swe --head sync-upstream --base main --json number --jq '.[0].number')
+          if [ -n "$EXISTING_PR" ]; then
+            echo "PR #$EXISTING_PR already exists, force-pushed update."
+            exit 0
+          fi
+          if [ "${{ steps.merge.outputs.clean }}" = "false" ]; then
+            CONFLICT_FILES="${{ steps.merge.outputs.conflicts }}"
+            FILE_LIST=$(echo "$CONFLICT_FILES" | sed 's/^/- `/' | sed 's/$/`/')
+            BODY="Upstream merge has UNRESOLVED conflicts requiring manual review — rerere had no recorded resolution for these.
+
+            **⚠️ Do NOT squash and merge this PR** — use a regular merge commit so upstream history is preserved. Squashing breaks future syncs.
+
+            **Conflicted files:**
+            ${FILE_LIST}
+
+            Resolve locally: \`git fetch origin && git checkout sync-upstream && git merge upstream/main\`, fix conflicts, commit, push. rerere will remember your resolution for next time."
+            gh pr create --repo aeteq/open-swe --head sync-upstream --base main \
+              --title "chore: sync with upstream (manual conflict resolution needed)" \
+              --body "$BODY"
+          else
+            gh pr create --repo aeteq/open-swe --head sync-upstream --base main \
+              --title "chore: sync with upstream" \
+              --body "Upstream merged cleanly (or auto-resolved via rerere).
+
+            **⚠️ Do NOT squash and merge this PR** — use a regular merge commit so upstream history is preserved. Squashing breaks future syncs."
+          fi

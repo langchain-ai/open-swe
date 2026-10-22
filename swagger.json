@@ -8461,18 +8461,6 @@
             ],
             "title": "Org Guidelines"
           },
-          "pr_summaries": {
-            "agent_feature_flag": true,
-            "anyOf": [
-              {
-                "type": "boolean"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Pr Summaries"
-          },
           "review_draft_prs": {
             "agent_feature_flag": true,
             "anyOf": [
@@ -21288,7 +21276,7 @@
         "summary": "Linear Webhook Verify"
       },
       "post": {
-        "description": "Handle Linear webhooks.\n\nTriggers a new LangGraph run when an issue gets the 'open-swe' label added.",
+        "description": "Handle Linear webhooks.\n\nTriggers a LangGraph run when a new comment on an issue mentions Open SWE.",
         "operationId": "linear_webhook_webhooks_linear_post",
         "responses": {
           "200": {
@@ -21307,6 +21295,50 @@
           }
         },
         "summary": "Linear Webhook"
+      }
+    },
+    "/webhooks/notion": {
+      "get": {
+        "description": "Health check for the Notion webhook endpoint.",
+        "operationId": "notion_webhook_verify_webhooks_notion_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": {
+                    "type": "string"
+                  },
+                  "title": "Response Notion Webhook Verify Webhooks Notion Get",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Notion Webhook Verify"
+      },
+      "post": {
+        "description": "Handle Notion integration webhooks; the work happens in a background task.",
+        "operationId": "notion_webhook_webhooks_notion_post",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": {
+                    "type": "string"
+                  },
+                  "title": "Response Notion Webhook Webhooks Notion Post",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Notion Webhook"
       }
     },
     "/webhooks/rollout": {

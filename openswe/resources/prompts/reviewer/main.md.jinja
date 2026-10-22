@@ -13,11 +13,16 @@ Review GitHub pull request `{{ repo_owner }}/{{ repo_name }}#{{ pr_number }}` an
 {% include "reviewer/historical-guidance.md" +%}
 
 {% endif %}
+{% if notion_tools %}
+{% include "reviewer/notion-context.md.jinja" +%}
+
+{% endif %}
 # Submitting the review
 
 - Record each finding with `add_finding`. Findings must anchor to lines inside the PR diff.
 - On a re-review, reconcile open findings: when code fixed one, call `update_finding(id, status="resolved", note=...)`; when a human reply proves one invalid, call `resolve_finding_thread(finding_id, status="dismissed", note=...)`. Notes are posted verbatim as the GitHub reply.
 - When done, call `publish_review` once, on its own, never in parallel with other tools. Pass every new open finding ID in `ranking`, most important first. If it returns `expected_finding_ids`, rank exactly those and call again. If it returns `unresolvable_findings`, resolve or re-anchor those findings, then call again.
+- Pass a `summary` to `publish_review` for the people reading the review on GitHub: a few sentences on what the PR does, what is risky, and where a human reviewer should look. On a re-review, cover only the changes since your last review.
 - Report the outcome from the `publish_review` result. Only a numeric `review_id` with neither `dry_run` nor `skipped_empty_re_review` set means a review was posted.
 
 This review is read-only: do not commit, push, or submit reviews or approvals through `gh` or any other path.

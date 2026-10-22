@@ -51,7 +51,7 @@ async def test_public_agent_excludes_personal_skills_and_tools(saved_thread_scop
     saved_thread_scope["visibility"] = "public"
     config = _base_config()
     config["configurable"]["source"] = "dashboard"
-    with patch("openswe.server._mcp_tools_for", new_callable=AsyncMock, return_value=[]) as mcps:
+    with patch("openswe.server.mcp_tools_for", new_callable=AsyncMock, return_value=[]) as mcps:
         captured = await _capture_create_deep_agent_kwargs(config)
     assert captured["skills"] == ["/organization-skills/", "/bundled-skills/"]
     assert "/skills/" not in captured["backend"].routes
@@ -194,7 +194,7 @@ async def test_existing_task_keeps_controls_after_opt_out(
 async def test_unknown_scope_omits_workspace_and_personal_mcps():
     with (
         patch("openswe.server.private_credential_login", side_effect=TimeoutError),
-        patch("openswe.server._mcp_tools_for", new_callable=AsyncMock) as mcps,
+        patch("openswe.server.mcp_tools_for", new_callable=AsyncMock) as mcps,
     ):
         await _capture_create_deep_agent_kwargs()
     mcps.assert_not_awaited()
@@ -345,7 +345,7 @@ async def test_agent_starts_sandbox_while_loading_settings() -> None:
         patch("openswe.server.ensure_sandbox_for_thread", side_effect=ensure_sandbox),
         patch("openswe.server.cached_workspace_settings", side_effect=load_defaults),
         patch("openswe.server._cached_profile", new_callable=AsyncMock, return_value=None),
-        patch("openswe.server._mcp_tools_for", new_callable=AsyncMock, return_value=[]),
+        patch("openswe.server.mcp_tools_for", new_callable=AsyncMock, return_value=[]),
         patch("openswe.server.make_model", return_value=MagicMock()),
         patch("openswe.server.fallback_model_id_for", return_value=None),
         patch("openswe.server.create_deep_agent", return_value=_DummyAgent()),

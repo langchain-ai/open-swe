@@ -196,7 +196,11 @@ def test_process_github_pr_comment_invalidates_and_reauths_on_401(
     ) -> list[dict[str, Any]]:
         fetch_calls.append(token)
         return [
-            {"body": "@openswe please look", "author": "octo", "created_at": "2026-01-01T00:00:00Z"}
+            {
+                "body": "@jarvis-aeteq please look",
+                "author": "octo",
+                "created_at": "2026-01-01T00:00:00Z",
+            }
         ]
 
     async def fake_extract_pr_context(
@@ -290,7 +294,7 @@ async def test_publish_review_invalidates_cached_token_on_401(
     monkeypatch.setattr(publish_review_module, "get_thread_id_from_runtime", lambda: "thread-xyz")
     monkeypatch.setattr(publish_review_module, "_record_ranking", AsyncMock(return_value=None))
 
-    result = await publish_review_module.publish_review(ranking=[])
+    result = await publish_review_module.publish_review(ranking=[], summary="Adds docs.")
     assert result["success"] is False
     assert "401" in result["error"]
     assert invalidated["calls"] == 1

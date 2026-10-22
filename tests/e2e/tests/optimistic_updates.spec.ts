@@ -15,7 +15,7 @@ const FAILURE_DETAIL = "E2E forced save failure";
 
 type InstanceSettings = Record<string, unknown> & {
   review_draft_prs?: boolean | null;
-  pr_summaries?: boolean | null;
+  review_trace_links?: boolean | null;
 };
 
 function deferred() {
@@ -100,7 +100,7 @@ test.describe("optimistic settings saves", () => {
     await writeInstanceSettings(page.request, {
       ...original,
       review_draft_prs: false,
-      pr_summaries: false,
+      review_trace_links: false,
     });
   });
 
@@ -121,39 +121,41 @@ test.describe("optimistic settings saves", () => {
 
     await page.goto("/admin");
     const drafts = settingSwitch(page, "Review Draft PRs");
-    const summaries = settingSwitch(page, "PR Summaries");
+    const traceLinks = settingSwitch(page, "Reviewer trace links");
     await expect(drafts).not.toBeChecked();
-    await expect(summaries).not.toBeChecked();
+    await expect(traceLinks).not.toBeChecked();
 
     await drafts.click();
     await expect(drafts).toBeChecked(QUICK);
     await expect.poll(() => puts.length, QUICK).toBe(1);
 
-    await summaries.click();
-    await expect(summaries).toBeChecked(QUICK);
+    await traceLinks.click();
+    await expect(traceLinks).toBeChecked(QUICK);
     await expect(drafts).toBeChecked(QUICK);
     await expect(drafts).toBeEnabled(QUICK);
-    await expect(summaries).toBeEnabled(QUICK);
+    await expect(traceLinks).toBeEnabled(QUICK);
     expect(puts).toHaveLength(1);
 
     firstPutGate.resolve();
     await expect.poll(() => puts.length, QUICK).toBe(2);
     expect(puts[1]).toMatchObject({
       review_draft_prs: true,
-      pr_summaries: true,
+      review_trace_links: true,
     });
 
     await expect
       .poll(async () => {
         const saved = await readInstanceSettings(page.request);
-        return [saved.review_draft_prs, saved.pr_summaries];
+        return [saved.review_draft_prs, saved.review_trace_links];
       }, QUICK)
       .toEqual([true, true]);
     await page.reload();
     await expect(settingSwitch(page, "Review Draft PRs")).toBeChecked(
       PAGE_LOAD,
     );
-    await expect(settingSwitch(page, "PR Summaries")).toBeChecked(QUICK);
+    await expect(settingSwitch(page, "Reviewer trace links")).toBeChecked(
+      QUICK,
+    );
   });
 
   test("a failed save reverts only its own switch", async ({ page }) => {
@@ -171,30 +173,30 @@ test.describe("optimistic settings saves", () => {
 
     await page.goto("/admin");
     const drafts = settingSwitch(page, "Review Draft PRs");
-    const summaries = settingSwitch(page, "PR Summaries");
+    const traceLinks = settingSwitch(page, "Reviewer trace links");
     await expect(drafts).not.toBeChecked();
 
     await drafts.click();
     await expect(drafts).toBeChecked(QUICK);
     await expect.poll(() => puts.length, QUICK).toBe(1);
-    await summaries.click();
-    await expect(summaries).toBeChecked(QUICK);
+    await traceLinks.click();
+    await expect(traceLinks).toBeChecked(QUICK);
 
     const report = watchErrorReport(page);
     firstPutGate.resolve();
     await expect(drafts).not.toBeChecked(QUICK);
     await expectReportedFailure(page, "Couldn't save settings", report);
-    await expect(summaries).toBeChecked(QUICK);
+    await expect(traceLinks).toBeChecked(QUICK);
     await expect.poll(() => puts.length, QUICK).toBe(2);
     expect(puts[1]).toMatchObject({
       review_draft_prs: false,
-      pr_summaries: true,
+      review_trace_links: true,
     });
 
     await expect
       .poll(async () => {
         const saved = await readInstanceSettings(page.request);
-        return [saved.review_draft_prs, saved.pr_summaries];
+        return [saved.review_draft_prs, saved.review_trace_links];
       }, QUICK)
       .toEqual([false, true]);
     await page.reload();
@@ -204,7 +206,9 @@ test.describe("optimistic settings saves", () => {
     await expect(settingSwitch(page, "Review Draft PRs")).not.toBeChecked(
       QUICK,
     );
-    await expect(settingSwitch(page, "PR Summaries")).toBeChecked(QUICK);
+    await expect(settingSwitch(page, "Reviewer trace links")).toBeChecked(
+      QUICK,
+    );
   });
 });
 

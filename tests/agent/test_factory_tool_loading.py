@@ -98,7 +98,7 @@ async def test_workspace_mcps_load_for_non_admins_with_legacy_plan_state(
         patch("openswe.server.construct_system_prompt", return_value="prompt"),
         patch("openswe.server.create_deep_agent", return_value=_DummyAgent()) as build_agent,
         patch("openswe.users.User.email_for_login", new_callable=AsyncMock, return_value=None),
-        patch("openswe.server._mcp_tools_for", new_callable=AsyncMock, return_value=[mcp_tool]),
+        patch("openswe.server.mcp_tools_for", new_callable=AsyncMock, return_value=[mcp_tool]),
     ):
         config = _config()
         config["configurable"]["github_login"] = github_login

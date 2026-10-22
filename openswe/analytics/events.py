@@ -61,6 +61,7 @@ class EntryPoint(StrEnum):
     SCHEDULED = "scheduled"
     API = "api"
     LINEAR = "linear"
+    NOTION = "notion"
     UNKNOWN = "unknown"
 
 

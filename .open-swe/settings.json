@@ -1,3 +1,4 @@
 {
-  "reviewChannel": "#team-open-swe-review"
+  "reviewChannel": "#ai-assisted",
+  "assignHumanReviewer": "after_ai_review"
 }

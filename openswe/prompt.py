@@ -4,6 +4,7 @@ from pathlib import Path
 
 from openswe.bridge.constants import BridgeClient
 from openswe.config import ENV
+from openswe.notion.settings import notion_settings
 from openswe.prompts import prompt
 from openswe.utils.authorship import (
     OPEN_SWE_BOT_EMAIL,
@@ -56,6 +57,10 @@ def _render_source_guidance(
         name = "generic"
     if name in {"slack", "schedule"}:
         guidance = prompt(f"system/source-{name}", breakout=slack_breakout, slack=slack_context)
+    elif name == "notion":
+        guidance = prompt(
+            "system/source-notion", designs=bool(notion_settings().documents_data_source_id)
+        )
     else:
         guidance = prompt(f"system/source-{name}")
     return f"<open_swe_source_context>\n{guidance}\n</open_swe_source_context>"

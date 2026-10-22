@@ -92,3 +92,10 @@ blob-report/
 /vendor/managed-deepagents-sdk/.ruff_cache/
 # The CLI's `logs` module, not log output
 !/vendor/managed-deepagents-sdk/crates/mda/src/logs/
+# Vendored Managed Deep Agents SDK build outputs (`make mda-cli`)
+/vendor/managed-deepagents-sdk/target/
+/vendor/managed-deepagents-sdk/packages/pypi/src/managed_deepagents/_binaries/
+# The CLI's `logs` module, not log output
+!/vendor/managed-deepagents-sdk/crates/mda/src/logs/
+# intellij
+.idea

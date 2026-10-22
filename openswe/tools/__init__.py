@@ -10,7 +10,9 @@ _TOOL_MODULES = {
     "background_task": ".background_task",
     "code_channel_set_view": ".code_channel_set_view",
     "connect_managed_tools": ".connect_managed_tools",
+    "comment_on_notion_task": ".comment_on_notion_task",
     "create_automation": ".automations",
+    "create_notion_design": ".notion_designs",
     "create_sandbox_file_download_url": ".create_sandbox_file_download_url",
     "delete_automation": ".automations",
     "delete_workspace": ".workspaces",
@@ -20,6 +22,7 @@ _TOOL_MODULES = {
     "fetch_review_diff": ".fetch_review_diff",
     "fetch_url": ".fetch_url",
     "get_human_review_status": ".request_human_review",
+    "get_notion_design_template": ".notion_designs",
     "get_thread": ".threads",
     "http_request": ".http_request",
     "list_automations": ".automations",
@@ -93,7 +96,9 @@ __all__ = [
     "background_task",
     "code_channel_set_view",
     "connect_managed_tools",
+    "comment_on_notion_task",
     "create_automation",
+    "create_notion_design",
     "create_sandbox_file_download_url",
     "delete_automation",
     "delete_workspace",
@@ -103,6 +108,7 @@ __all__ = [
     "fetch_review_diff",
     "fetch_url",
     "get_human_review_status",
+    "get_notion_design_template",
     "get_thread",
     "http_request",
     "list_automations",
@@ -197,6 +203,7 @@ if TYPE_CHECKING:
     from openswe.tools.background_execute import background_execute
     from openswe.tools.background_task import background_task
     from openswe.tools.code_channel_set_view import code_channel_set_view
+    from openswe.tools.comment_on_notion_task import comment_on_notion_task
     from openswe.tools.connect_managed_tools import connect_managed_tools
     from openswe.tools.create_sandbox_file_download_url import create_sandbox_file_download_url
     from openswe.tools.expedite_pr_approval import expedite_pr_approval
@@ -210,6 +217,7 @@ if TYPE_CHECKING:
     from openswe.tools.manage_baby_sit import manage_baby_sit
     from openswe.tools.merge_expedited_pr import merge_expedited_pr
     from openswe.tools.monitor import monitor
+    from openswe.tools.notion_designs import create_notion_design, get_notion_design_template
     from openswe.tools.open_pull_request import link_pull_request, open_pull_request
     from openswe.tools.organization_skills import delete_organization_skill, save_organization_skill
     from openswe.tools.output_iframe import output_iframe

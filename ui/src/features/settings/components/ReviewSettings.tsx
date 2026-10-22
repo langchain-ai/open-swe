@@ -38,7 +38,7 @@ export function ReviewSettings({
   const guidelinesDirty = trimmedGuidelines !== savedGuidelines
 
   const toggle = (
-    field: "review_draft_prs" | "pr_summaries" | "review_trace_links",
+    field: "review_draft_prs" | "review_trace_links",
     label: string
   ) => (
     <Switch
@@ -115,13 +115,6 @@ export function ReviewSettings({
             label="Review Draft PRs"
             description="Whether Open SWE Review runs on draft PRs. Each user can override it in their Git settings."
             control={toggle("review_draft_prs", "Review Draft PRs")}
-          />
-          <TierRow
-            settings={settings}
-            fields={["pr_summaries"]}
-            label="PR Summaries"
-            description="Generate descriptions on pull requests"
-            control={toggle("pr_summaries", "PR Summaries")}
           />
           <TierRow
             settings={settings}

@@ -154,7 +154,9 @@ ENV.var(
 ENV.var(
     "LANGSMITH_ENDPOINT",
     "LangSmith API endpoint; set for self-hosted or regional LangSmith.",
-    default="https://api.smith.langchain.com",
+    # LangGraph Platform reserves LANGSMITH_ENDPOINT but sets only LANGSMITH_AUTH_ENDPOINT
+    # on regional (e.g. AWS US) deployments.
+    default=os.environ.get("LANGSMITH_AUTH_ENDPOINT") or "https://api.smith.langchain.com",
 )
 ENV.var(
     "LANGSMITH_TENANT_ID",
@@ -303,6 +305,76 @@ ENV.var(
 )
 ENV.var("SLACK_APP_ID", "Slack app id (A...) whose event deliveries Incidents accepts.")
 ENV.var("LINEAR_WEBHOOK_SECRET", "HMAC secret for Linear webhook deliveries.", secret=True)
+
+# --- Notion tasks ----------------------------------------------------------------------------
+ENV.var("NOTION_API_KEY", "Notion internal integration token for task webhooks.", secret=True)
+ENV.var(
+    "NOTION_AGENT_API_KEY",
+    "Personal access token of the agent's Notion member; comments and task updates are "
+    "written with it so they appear as that member. Defaults to NOTION_API_KEY.",
+    secret=True,
+)
+ENV.var(
+    "NOTION_WEBHOOK_SECRET",
+    "Verification token of the Notion webhook subscription, used to verify deliveries.",
+    secret=True,
+)
+ENV.var(
+    "NOTION_AGENT_USER_IDS",
+    "Comma-separated Notion user ids whose assignment to a task starts Open SWE.",
+)
+ENV.var(
+    "NOTION_TASKS_DATA_SOURCE_ID",
+    "Comma-separated Notion data source ids of the task databases Open SWE works from.",
+)
+ENV.var(
+    "NOTION_DOCUMENTS_DATA_SOURCE_ID",
+    "Notion data source id of the design documents linked from tasks.",
+)
+ENV.var("NOTION_ASSIGNEE_PROPERTY", "People property that assigns a task.", default="Assignee")
+ENV.var("NOTION_REPO_PROPERTY", "Property naming a task's repository.", default="Repository")
+ENV.var("NOTION_STATUS_PROPERTY", "Status property of a task.", default="Status")
+ENV.var("NOTION_PR_PROPERTY", "URL property receiving a task's PR.", default="Pull Request URL")
+ENV.var(
+    "NOTION_STARTABLE_STATUSES",
+    "Comma-separated task statuses from which Open SWE may start work.",
+    default="Not started,In progress",
+)
+ENV.var("NOTION_STATUS_IN_PROGRESS", "Task status once work starts.", default="In progress")
+ENV.var("NOTION_STATUS_IN_REVIEW", "Task status once a PR is open.", default="In review")
+ENV.var("NOTION_STATUS_DONE", "Task status once its PR merges.", default="Done")
+ENV.var("NOTION_DESIGN_PROPERTY", "Relation from a task to its design documents.", default="Design")
+ENV.var("NOTION_DESIGN_STATUS_PROPERTY", "Status property of a design document.", default="Status")
+ENV.var(
+    "NOTION_DESIGN_APPROVED_STATUS",
+    "Design document status that lets linked tasks start.",
+    default="Approved",
+)
+ENV.var(
+    "NOTION_DESIGN_REVIEW_STATUS",
+    "Status given to a design document the agent publishes.",
+    default="In Review",
+)
+ENV.var(
+    "NOTION_DESIGN_TEMPLATE_ID",
+    "Notion page id or URL of the template the agent's design documents follow.",
+)
+ENV.var(
+    "NOTION_DESIGN_TITLE_PREFIX",
+    "Prefix of the title of a design document the agent publishes.",
+    default="Tech Design: ",
+)
+ENV.var("NOTION_DESIGN_ICON", "Emoji icon of a design document the agent publishes.", default="📐")
+ENV.var(
+    "NOTION_DESIGN_TAG_PROPERTY",
+    "Multi-select property tagging a design document.",
+    default="Tag",
+)
+ENV.var(
+    "NOTION_DESIGN_TAGS",
+    "Comma-separated tags given to a design document the agent publishes.",
+    default="Tech Design",
+)
 
 # --- Dashboard ------------------------------------------------------------------------------
 ENV.var(

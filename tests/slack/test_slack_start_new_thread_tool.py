@@ -415,7 +415,7 @@ async def test_slack_breakout_thread_success(
         "explicit" if model is not None or effort is not None else None
     )
     assert "Breakout Instructions" in dispatch["content"]
-    assert "## Open SWE Links" in dispatch["content"]
+    assert "## Jarvis Links" in dispatch["content"]
     assert f"- Web: https://dashboard.example/agents/{expected_thread_id}" in dispatch["content"]
     assert "- Trace: https://smith/x" in dispatch["content"]
     assert dispatch["content"].endswith(

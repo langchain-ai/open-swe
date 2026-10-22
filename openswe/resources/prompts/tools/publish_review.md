@@ -17,6 +17,10 @@ Args:
         severity is an input, not the rule. Pass ``[]`` when there are none.
         A ranking with missing, unknown, or repeated IDs publishes nothing and
         returns ``expected_finding_ids`` so you can rank that exact set.
+    summary: Required. A short Markdown overview shown under the review
+        headline on GitHub: what the PR does, what is risky, and where a
+        human reviewer should look. On a re-review, describe only the changes
+        since the last review. Long summaries are collapsed.
     assessment: Optional structured advisory approval assessment with the full
         ``head_sha`` inspected, integer ``risk_score`` (1 = low, 5 = high),
         ``decision`` (``would_approve`` or ``needs_human_review``), and a short

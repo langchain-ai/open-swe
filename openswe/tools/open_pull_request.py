@@ -23,6 +23,7 @@ from openswe.github.app import get_github_app_installation_token
 from openswe.github.comments import derive_pr_state
 from openswe.github.pull_requests import AGENT_OPENED_LINK_SOURCE, PullRequest, ThreadLink
 from openswe.github.token import GitHubUserAuthRequired
+from openswe.notion.notifications import record_pull_request
 from openswe.remote_runtime.git_metadata import record_pr_target
 from openswe.run_config import RunConfig
 from openswe.slack.client import (
@@ -272,7 +273,7 @@ def _access_failure_payload(
         http_status=http_status,
         reason=reason,
         likely_cause=(
-            "the Open SWE GitHub App or PR author token is not installed on, granted access "
+            "the Jarvis GitHub App or PR author token is not installed on, granted access "
             "to, or able to see this repository or one of the PR branches"
         ),
         branch_pushed=branch_pushed,
@@ -830,7 +831,13 @@ async def _record_pr_telemetry(
                     additions=additions,
                     deletions=deletions,
                     changed_files=changed_files,
-                    threads=[ThreadLink(thread_id=thread_id, source=AGENT_OPENED_LINK_SOURCE)],
+                    threads=[
+                        ThreadLink(
+                            thread_id=thread_id,
+                            source=AGENT_OPENED_LINK_SOURCE,
+                            wake_config=cfg.wake_config(thread_id) if record_opening else None,
+                        )
+                    ],
                 ).save(repository_private=repo_private)
             except Exception:  # noqa: BLE001
                 # The PR exists on GitHub either way; failing the tool over the
@@ -932,6 +939,13 @@ async def _build_source_reference_lines(cfg: RunConfig) -> list[str]:
             lines.append(f"- [{label}]({url})")
         elif identifier:
             lines.append(f"- Linear ticket: {identifier}")
+    elif cfg.source == "notion" and cfg.notion_page:
+        page = cfg.notion_page
+        label = page.identifier or page.title or page.url
+        if page.url:
+            lines.append(f"- Notion task: [{label}]({page.url})")
+        elif label:
+            lines.append(f"- Notion task: {label}")
     elif cfg.source in ("github", "github_issue") and cfg.github_issue:
         url, number = cfg.github_issue.url, cfg.github_issue.number
         if url:
@@ -1217,7 +1231,7 @@ async def open_pull_request(
     state: Annotated[dict[str, Any] | None, InjectedState] = None,
 ) -> dict[str, Any]:
     """Implement the `open_pull_request` tool."""
-    return await _open_pull_request(
+    result = await _open_pull_request(
         owner=owner,
         repo=repo,
         head=head,
@@ -1230,6 +1244,20 @@ async def open_pull_request(
         author=author or None,
         state=state,
     )
+    await _record_on_notion_task(result, opened=result.get("created") is True)
+    return result
+
+
+async def _record_on_notion_task(result: dict[str, Any], *, opened: bool) -> None:
+    pr_url = result.get("url")
+    if not result.get("success") or not isinstance(pr_url, str) or not pr_url:
+        return
+    cfg = _configurable()
+    page = cfg.notion_page
+    if cfg.source != "notion" or page is None or not page.id:
+        return
+    # A question asked in a comment is not the page's task, unless that task is the agent's.
+    await record_pull_request(page.id, pr_url, opened=opened, agent_task_only=page.is_mention)
 
 
 def _ref_name(pr: dict[str, Any], side: str) -> str:

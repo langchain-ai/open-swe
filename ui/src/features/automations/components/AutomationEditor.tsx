@@ -632,7 +632,7 @@ export function AutomationEditor({
             value={prompt}
             onValueChange={setPrompt}
             disabled={!canManage}
-            placeholder="What should Open SWE do each time this runs?"
+            placeholder="What should Jarvis do each time this runs?"
             rows={5}
             className="w-full resize-none bg-transparent text-sm leading-relaxed text-primary outline-none placeholder:text-placeholder"
           />

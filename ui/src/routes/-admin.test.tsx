@@ -141,7 +141,6 @@ describe("UsersSection", () => {
 
 describe("ReviewSettings", () => {
   const settings = (review_draft_prs: boolean): WorkspaceSettings => ({
-    pr_summaries: false,
     review_trace_links: false,
     review_draft_prs,
   })

@@ -53,6 +53,7 @@ from sqlalchemy.orm import Mapped, mapped_column, relationship, selectinload
 from openswe.config import ENV
 from openswe.database import postgres
 from openswe.database.orm import NOW, Base
+from openswe.dispatch import dispatch_agent_run
 from openswe.github.comments import PrState, derive_pr_state
 from openswe.github.pull_request_status import pull_request_identity
 from openswe.github.repositories import Repository
@@ -97,6 +98,8 @@ class ThreadLink(Base):
     )
     role: Mapped[ThreadRole] = mapped_column(Text, default="secondary")
     source: Mapped[str] = mapped_column(server_default="", default="")
+    # The configurable that wakes the thread that opened the PR, as its own source.
+    wake_config: Mapped[JsonObject | None] = mapped_column(JSONB, default=None)
     linked_at: Mapped[datetime | None] = mapped_column(server_default=NOW, init=False)
 
 
@@ -287,14 +290,50 @@ class PullRequest(Base):
         return next((link.thread_id for link in self.threads if link.role == "primary"), None)
 
     @property
-    def agent_thread_id(self) -> str | None:
-        """The agent thread that created this PR; ``None`` for PRs it only linked or reused."""
+    def agent_link(self) -> ThreadLink | None:
+        """The link to the agent thread that created this PR; ``None`` for PRs it only linked or reused."""
         if not self.opening_head_sha:
             return None
         return next(
-            (link.thread_id for link in self.threads if link.source == AGENT_OPENED_LINK_SOURCE),
-            None,
+            (link for link in self.threads if link.source == AGENT_OPENED_LINK_SOURCE), None
         )
+
+    @property
+    def agent_thread_id(self) -> str | None:
+        link = self.agent_link
+        return link.thread_id if link is not None else None
+
+    @property
+    def review_rounds_with_findings(self) -> int:
+        return sum(1 for review in self.reviews if review.finding_count)
+
+    @property
+    def author_wakeable(self) -> bool:
+        """Whether the agent thread that opened this PR stored how to wake it."""
+        link = self.agent_link
+        return link is not None and bool(link.wake_config)
+
+    async def wake_author(self, prompt: str) -> bool:
+        """Queue ``prompt`` on the agent thread that opened this PR; whether it could be woken."""
+        link = self.agent_link
+        if link is None or not link.wake_config:
+            return False
+        configurable: JsonObject = {
+            **link.wake_config,
+            "thread_id": link.thread_id,
+            "repo": {"owner": self.owner, "name": self.repo},
+            "pr_number": self.number,
+        }
+        await dispatch_agent_run(
+            link.thread_id,
+            prompt,
+            configurable,
+            source=str(configurable.get("source") or "github"),
+            thread_title=None,
+            metadata={},
+            multitask_strategy="enqueue",
+        )
+        return True
 
     async def is_authored_by(self, login: str) -> bool:
         """Whether ``login`` resolves to the same Open SWE user as this PR's author."""
@@ -457,7 +496,12 @@ class PullRequest(Base):
                         "secondary" if any(t.role == "primary" for t in row.threads) else "primary"
                     )
                     row.threads.append(
-                        ThreadLink(thread_id=link.thread_id, role=role, source=link.source)
+                        ThreadLink(
+                            thread_id=link.thread_id,
+                            role=role,
+                            source=link.source,
+                            wake_config=link.wake_config,
+                        )
                     )
             for review in (review for review in self.reviews if inspect(review).transient):
                 existing = next((r for r in row.reviews if review.same_as(r)), None)
@@ -565,6 +609,7 @@ class PullRequest(Base):
 
 class PullRequestPayload(BaseModel):
     number: int | None = None
+    html_url: str = ""
     title: str = ""
     body: str | None = None
     state: str = ""

@@ -108,7 +108,7 @@ async def _run(
     config: RunnableConfig | None = None,
 ) -> None:
     config = config or _base_config()
-    with patch("openswe.server._mcp_tools_for", AsyncMock(return_value=[_DOCS_SEARCH])):
+    with patch("openswe.server.mcp_tools_for", AsyncMock(return_value=[_DOCS_SEARCH])):
         kwargs = await _capture_create_deep_agent_kwargs(
             config,
             thread_settings={"owner_login": "octocat", **thread_settings},

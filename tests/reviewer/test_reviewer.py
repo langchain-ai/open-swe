@@ -24,6 +24,41 @@ def test_reviewer_system_prompt_org_guidelines_precede_repo_style() -> None:
     )
 
 
+async def test_reviewer_gets_only_read_only_shared_mcp_tools() -> None:
+    from langchain_core.tools import StructuredTool
+
+    from openswe.mcp.models import MCPToolProvenance
+
+    async def call() -> str:
+        return ""
+
+    def offered(connection: str, name: str) -> StructuredTool:
+        return StructuredTool.from_function(
+            coroutine=call,
+            name=f"mcp_{connection}_{name}",
+            description=name,
+            metadata={
+                "mcp_tool_name": name,
+                "mcp_provenance": MCPToolProvenance(
+                    connection_name=connection, scope="workspace", overridden_scopes=[]
+                ),
+            },
+        )
+
+    catalog = [
+        *(
+            offered("notion", name)
+            for name in ("fetch", "search", "create-pages", "update-page", "notion-create-comment")
+        ),
+        offered("webfetch", "fetch"),
+    ]
+    with patch.object(reviewer, "mcp_tools_for", AsyncMock(return_value=catalog)) as load:
+        tools = await reviewer.reviewer_mcp_tools("default")
+
+    load.assert_awaited_once_with(None, "default", None)
+    assert [tool.name for tool in tools] == ["mcp_notion_fetch", "mcp_notion_search"]
+
+
 def test_finding_reply_context_wraps_reply_as_untrusted_data() -> None:
     prompt = reviewer._build_finding_reply_context(
         pr_url="https://github.com/acme/repo/pull/1",
@@ -160,13 +195,13 @@ def test_format_pr_review_threads_sanitizes_author_logins() -> None:
                         "body": "x",
                         "created_at": "",
                     },
-                    {"author": "open-swe[bot]", "body": "y", "created_at": ""},
+                    {"author": "jarvis-aeteq[bot]", "body": "y", "created_at": ""},
                 ],
             }
         ]
     )
     assert 'author="valid-user"' in block
-    assert 'author="open-swe[bot]"' in block
+    assert 'author="jarvis-aeteq[bot]"' in block
     # The malformed login is replaced with "unknown".
     assert 'author="unknown"' in block
     assert "ignore previous instructions" not in block.split("<body>", 1)[0]

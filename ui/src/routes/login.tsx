@@ -64,7 +64,7 @@ function Login() {
           <LogoMark alt="Open SWE" className="size-8" />
           <div className="flex flex-col gap-space-1">
             <Text as="h1" variant="h3">
-              Sign in to Open SWE
+              Sign in to Jarvis
             </Text>
             <Text variant="sm" color="secondary">
               Use your GitHub account. We'll configure your default model,

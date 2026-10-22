@@ -20,7 +20,8 @@ import logging
 import posixpath
 import re
 import warnings
-from typing import Any, NamedTuple, NotRequired, cast
+from collections.abc import Mapping, Sequence
+from typing import Any, Final, NamedTuple, NotRequired, cast
 
 logger = logging.getLogger(__name__)
 
@@ -42,10 +43,13 @@ from langchain_core.language_models.chat_models import BaseChatModel
 from langchain_core.tools import BaseTool
 
 from openswe.dashboard.options import gate_fable_model
+from openswe.dashboard.repo_access import repo_is_private
 from openswe.dashboard.workspace_settings_cache import cached_workspace_settings
 from openswe.github.app import get_github_app_installation_token_with_expiry
 from openswe.github.sandbox_access import READ_ONLY_REVIEW_PERMISSIONS
 from openswe.github.thread_token import cache_github_token_for_thread
+from openswe.mcp.models import MCPToolProvenance
+from openswe.mcp.tiers import mcp_tools_for
 from openswe.middleware import (
     BasePrepareRunMiddleware,
     ExcludeToolsMiddleware,
@@ -63,7 +67,7 @@ from openswe.middleware import (
 )
 from openswe.middleware.prepare_run import PrepareRunState
 from openswe.middleware.sandbox_circuit_breaker import post_sandbox_unreachable_notification
-from openswe.prompts import apply_tool_descriptions, common_prompt, prompt
+from openswe.prompts import apply_tool_descriptions, common_prompt, escape_for_data_block, prompt
 from openswe.review.approvals import approval_policy_for_review
 from openswe.review.diff import (
     changed_files,
@@ -119,6 +123,7 @@ from openswe.utils.model import (
 )
 from openswe.utils.startup_trace import aphase
 from openswe.walkthrough.record import WalkthroughView
+from openswe.workspaces.store import DEFAULT_WORKSPACE_SLUG
 
 REVIEWER_SUBAGENT_SYSTEM_PROMPT = prompt("reviewer/subagent")
 
@@ -182,6 +187,7 @@ def _reviewer_system_prompt(
     agents_md_content: str | None = None,
     scoped_agents_md: dict[str, str] | None = None,
     api_standards_skill: str | None = None,
+    notion_tools: Sequence[str] = (),
 ) -> str:
     return prompt(
         "reviewer/main",
@@ -207,6 +213,7 @@ def _reviewer_system_prompt(
             for path, content in (scoped_agents_md or {}).items()
         ],
         api_standards_skill=api_standards_skill or "",
+        notion_tools=list(notion_tools),
     )
 
 
@@ -362,10 +369,7 @@ def _safe_login(value: object) -> str:
     return "unknown"
 
 
-# Closing tags of the wrappers used in this module. XML tolerates whitespace
-# around the tag name (e.g. `</body >`, `</ body\n>`), so a literal `.replace()`
-# of the canonical spelling alone is insufficient — we match each end tag
-# whitespace-tolerantly and rewrite it to an inert, human-readable form.
+# The wrappers this module puts untrusted text in.
 _DATA_BLOCK_WRAPPER_TAGS = (
     "pr_review_threads",
     "thread",
@@ -378,20 +382,10 @@ _DATA_BLOCK_WRAPPER_TAGS = (
     "summary",
     "files",
 )
-_CLOSING_TAG_RE = re.compile(
-    r"</\s*(" + "|".join(_DATA_BLOCK_WRAPPER_TAGS) + r")\s*>",
-    re.IGNORECASE,
-)
 
 
 def _escape_for_data_block(text: str) -> str:
-    """Neutralize closing tags so an attacker-controlled body can't break out.
-
-    Matches each wrapper's end tag whitespace-tolerantly (XML allows whitespace
-    before/after the tag name) and rewrites it to an inert ``</name_>`` form
-    that stays human-readable but is no longer a valid closer.
-    """
-    return _CLOSING_TAG_RE.sub(lambda m: f"</{m.group(1).lower()}_>", text)
+    return escape_for_data_block(text, _DATA_BLOCK_WRAPPER_TAGS)
 
 
 def _format_pr_review_threads(threads: list[dict]) -> str:
@@ -610,10 +604,12 @@ class PrepareReviewerRunMiddleware(BasePrepareRunMiddleware):
         thread_id: str,
         config: RunnableConfig,
         use_gateway: bool,
+        notion_tools: Sequence[str] = (),
     ) -> None:
         self._thread_id = thread_id
         self._config = config
         self._use_gateway = use_gateway
+        self._notion_tools = tuple(notion_tools)
 
     def _prepare_config_fingerprint(self) -> Any:
         cfg = RunConfig.from_config(self._config)
@@ -632,7 +628,9 @@ class PrepareReviewerRunMiddleware(BasePrepareRunMiddleware):
         }
 
     async def _prepare(self, state: PrepareRunState, runtime: Runtime) -> dict[str, Any]:  # noqa: ARG002
-        return await prepare_reviewer_run(self._thread_id, self._config, runtime)
+        return await prepare_reviewer_run(
+            self._thread_id, self._config, runtime, notion_tools=self._notion_tools
+        )
 
     async def _rejoin(self, state: PrepareRunState, runtime: Runtime) -> None:  # noqa: ARG002
         await ensure_reviewer_github_token(self._thread_id, RunConfig.from_config(self._config))
@@ -642,6 +640,8 @@ async def prepare_reviewer_run(
     thread_id: str,
     config: RunnableConfig,
     runtime: Runtime,
+    *,
+    notion_tools: Sequence[str] = (),
 ) -> dict[str, Any]:
     """Ready the sandbox, checkout and diff, and render this run's system prompt."""
     cfg = RunConfig.from_config(config)
@@ -952,6 +952,7 @@ async def prepare_reviewer_run(
         agents_md_content=agents_md_content,
         scoped_agents_md=scoped_agents_md,
         api_standards_skill=api_standards_skill,
+        notion_tools=notion_tools,
     )
     if review_context:
         system_prompt = f"{system_prompt}\n\n{review_context}"
@@ -1041,22 +1042,71 @@ async def resolve_reviewer_models(cfg: RunConfig) -> ReviewerModels:
     )
 
 
-def reviewer_tools() -> list[BaseTool]:
-    """The reviewer's tools, wherever the graph that calls them runs."""
-    return apply_tool_descriptions(
-        [
-            fetch_review_diff,
-            add_finding,
-            update_finding,
-            list_findings,
-            publish_review,
-            resolve_finding_thread,
-            reply_to_finding_thread,
-            web_search,
-            fetch_url,
-            http_request,
-        ]
+# Read-only tools by connection name, then by the names Notion's hosted server uses now
+# and used before. Every other tool, which may write, stays off the reviewer: a generic
+# `fetch` from another connection could send requests with that connection's credentials.
+READ_ONLY_MCP_TOOLS: Final[Mapping[str, frozenset[str]]] = {
+    "notion": frozenset(
+        {
+            "search",
+            "ai-search",
+            "fetch",
+            "get-comments",
+            "notion-search",
+            "notion-fetch",
+            "notion-get-comments",
+        }
+    ),
+}
+
+
+def _read_only_mcp_tool(tool: BaseTool) -> bool:
+    metadata = tool.metadata or {}
+    provenance = metadata.get("mcp_provenance")
+    return isinstance(provenance, MCPToolProvenance) and metadata.get(
+        "mcp_tool_name"
+    ) in READ_ONLY_MCP_TOOLS.get(provenance.connection_name, frozenset())
+
+
+async def reviewer_mcp_tools(workspace: str) -> list[BaseTool]:
+    """The instance and workspace MCP tools on the read-only allowlist, never a person's own."""
+    return [
+        tool for tool in await mcp_tools_for(None, workspace, None) if _read_only_mcp_tool(tool)
+    ]
+
+
+async def _reviews_private_repo(cfg: RunConfig) -> bool:
+    """Whether the reviewed repository is known to be private; unknown counts as public."""
+    if cfg.repo_private is not None:
+        return cfg.repo_private
+    if cfg.repo is None:
+        return False
+    full_name = f"{cfg.repo.owner}/{cfg.repo.name}"
+    private = await ttl_cache.cached(
+        f"reviewer:repo-private:{full_name}", 300, lambda: repo_is_private(full_name)
     )
+    return private is True
+
+
+def reviewer_tools(mcp_tools: Sequence[BaseTool] = ()) -> list[BaseTool]:
+    """The reviewer's tools, wherever the graph that calls them runs."""
+    return [
+        *apply_tool_descriptions(
+            [
+                fetch_review_diff,
+                add_finding,
+                update_finding,
+                list_findings,
+                publish_review,
+                resolve_finding_thread,
+                reply_to_finding_thread,
+                web_search,
+                fetch_url,
+                http_request,
+            ]
+        ),
+        *mcp_tools,
+    ]
 
 
 async def get_reviewer_agent(config: RunnableConfig) -> Pregel:
@@ -1086,6 +1136,13 @@ async def build_reviewer_agent(
         ).with_config(bindable_config(config))
 
     models = await resolve_reviewer_models(cfg)
+    # Benchmark runs score the stock reviewer, without our workspace's connections. Public
+    # repos never get them: anyone can steer a review there through the PR's text, and
+    # whatever it reads from private pages could end up in its public comments.
+    mcp_tools: list[BaseTool] = []
+    if not cfg.is_eval and await _reviews_private_repo(cfg):
+        async with aphase(thread_id, "factory.mcp_tools"):
+            mcp_tools = await reviewer_mcp_tools(cfg.workspace_slug or DEFAULT_WORKSPACE_SLUG)
     use_gateway = models.use_gateway
     reviewer_model = _make_model_or_defer(
         models.main.model_id, use_gateway=use_gateway, **models.main.kwargs
@@ -1110,6 +1167,7 @@ async def build_reviewer_agent(
                 thread_id=thread_id,
                 config=config,
                 use_gateway=use_gateway,
+                notion_tools=[tool.name for tool in mcp_tools],
             ),
             AnthropicPromptCachingMiddleware(ttl="1h", unsupported_model_behavior="ignore"),
             ModelCallLimitMiddleware(run_limit=MODEL_CALL_RECURSION_LIMIT, exit_behavior="end"),
@@ -1131,7 +1189,7 @@ async def build_reviewer_agent(
     graph = create_deep_agent(
         model=reviewer_model,
         system_prompt=common_prompt(),
-        tools=reviewer_tools(),
+        tools=reviewer_tools(mcp_tools),
         subagents=[
             {
                 **GENERAL_PURPOSE_SUBAGENT,

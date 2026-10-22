@@ -11,6 +11,7 @@ from openswe.github.app import get_github_app_installation_token
 from openswe.github.comments import post_github_comment
 from openswe.github.thread_token import resolve_thread_github_token
 from openswe.linear.notifications import post_linear_notification
+from openswe.notion.notifications import post_notion_comment
 from openswe.run_config import RunConfig
 from openswe.slack.client import (
     LANGGRAPH_URL,
@@ -46,13 +47,13 @@ def sandbox_unreachable_message(
     which = f" ({', '.join(identifiers)})" if identifiers else ""
     if replacement_attempted:
         return warning(
-            f"This thread's sandbox{which} stopped responding and Open SWE could "
+            f"This thread's sandbox{which} stopped responding and Jarvis could "
             "not provision a replacement, so this run had nowhere to work. "
             "Retrigger this thread to try again."
         )
     return warning(
-        f"This thread's sandbox{which} stopped responding, and Open SWE can't tell "
-        "whether it will come back. Open SWE will not start a replacement on its "
+        f"This thread's sandbox{which} stopped responding, and Jarvis can't tell "
+        "whether it will come back. Jarvis will not start a replacement on its "
         "own: a new sandbox is empty, so swapping one in would throw away anything "
         "not yet committed and pushed while still looking like a recovery. "
         "Retrigger this thread to try the same sandbox again, or start a new thread "
@@ -134,6 +135,12 @@ async def post_sandbox_unreachable_notification(
 
     if cfg.linear_issue and cfg.linear_issue.id:
         await post_linear_notification(cfg.linear_issue.id, message)
+        return
+
+    if cfg.notion_page and cfg.notion_page.id:
+        await post_notion_comment(
+            cfg.notion_page.id, message, discussion_id=cfg.notion_page.discussion_id
+        )
         return
 
     github_target = _get_github_target(cfg)

@@ -13,6 +13,8 @@ import uuid
 __all__ = [
     "github_issue_thread_id",
     "linear_issue_thread_id",
+    "notion_discussion_thread_id",
+    "notion_page_thread_id",
     "pr_comment_thread_id",
     "review_chat_thread_id",
     "reviewer_thread_id",
@@ -59,6 +61,14 @@ def slack_thread_id(channel: str, timestamp: str, nonce: str | None = None) -> s
 
 def linear_issue_thread_id(issue_id: str) -> str:
     return _sha256_uuid(f"linear-issue:{issue_id}")
+
+
+def notion_page_thread_id(page_id: str) -> str:
+    return _sha256_uuid(f"notion-page:{page_id.replace('-', '').lower()}")
+
+
+def notion_discussion_thread_id(discussion_id: str) -> str:
+    return _sha256_uuid(f"notion-discussion:{discussion_id.replace('-', '').lower()}")
 
 
 def github_issue_thread_id(issue_id: str) -> str:

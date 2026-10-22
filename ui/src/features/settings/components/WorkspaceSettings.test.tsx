@@ -66,7 +66,6 @@ const RECORD: WorkspaceRecord = {
 
 const SETTINGS: WorkspaceSettings = {
   review_draft_prs: false,
-  pr_summaries: true,
   review_trace_links: true,
   fable_enabled: false,
 }

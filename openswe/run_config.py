@@ -31,7 +31,7 @@ from pydantic_core import PydanticSerializationError, to_jsonable_python
 
 from openswe.invocation import resolve_invocation_id
 from openswe.openai_responses.client_tools import ClientToolSpec
-from openswe.source_context import GitHubIssueRef, LinearIssueRef, SlackThreadRef
+from openswe.source_context import GitHubIssueRef, LinearIssueRef, NotionPageRef, SlackThreadRef
 
 logger = logging.getLogger(__name__)
 
@@ -84,6 +84,24 @@ class GitHubPROrIssueRef(BaseModel):
     repo: Repo | None = None
 
 
+_WAKE_KEYS = (
+    "source",
+    "slack_thread",
+    "linear_issue",
+    "notion_page",
+    "github_issue",
+    "pr_number",
+    "github_login",
+    "user_email",
+    "workspace",
+    # `environment` is the pre-workspaces spelling; a watch started before
+    # the rename still carries it, and both keys mean the same workspace.
+    "environment",
+    "agent_model_id",
+    "agent_effort",
+)
+
+
 class RunConfig(BaseModel):
     model_config = ConfigDict(extra="allow")
 
@@ -116,6 +134,7 @@ class RunConfig(BaseModel):
     # Where the run came from
     slack_thread: SlackThreadRef | None = None
     linear_issue: LinearIssueRef | None = None
+    notion_page: NotionPageRef | None = None
     github_issue: GitHubIssueRef | None = None
     github_pr_or_issue: GitHubPROrIssueRef | None = None
 
@@ -243,6 +262,19 @@ class RunConfig(BaseModel):
             except PydanticSerializationError:
                 continue
         return encoded
+
+    def wake_config(
+        self, thread_id: str, source_installation_id: int | None = None
+    ) -> dict[str, Any]:
+        """The configurable stored now to wake ``thread_id`` later as this run's source."""
+        dumped = self.dump()
+        result = {key: dumped[key] for key in _WAKE_KEYS if dumped.get(key) is not None}
+        if self.github_issue and isinstance(dumped.get("repo"), Mapping):
+            result["source_repo"] = dumped["repo"]
+            if source_installation_id is not None:
+                result["source_installation_id"] = source_installation_id
+        result["thread_id"] = thread_id
+        return result
 
     def get(self, key: str) -> Any:
         """Value for ``key``, whether it is a declared field or an extra."""
