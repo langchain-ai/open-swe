@@ -128,13 +128,7 @@ class TurnTrace:
             def patch() -> None:
                 for run in runs:
                     if run.end_time is not None and not run.extra.get("__disabled"):
-                        run.client.update_run(
-                            run.id,
-                            end_time=run.end_time,
-                            trace_id=run.trace_id,
-                            dotted_order=run.dotted_order,
-                            extra=run.extra.copy(),
-                        )
+                        run.patch(exclude_inputs=True)
 
             await asyncio.to_thread(patch)
         except Exception:
