@@ -26,18 +26,29 @@ export function statusRef({ owner, repo, number }: PullRequestRef) {
 
 // Every file header and note observes these, so each one scrolling in would
 // otherwise revalidate them; a missing PR stays missing, so 4xx isn't retried.
+const reviewReadOptions = {
+  gcTime: BROWSER_CACHE_MAX_AGE_MS,
+  staleTime: 60_000,
+  retry: (failures: number, error: Error) => {
+    const status = error instanceof DashboardRequestError ? error.status : 0
+    return failures < 1 && !(status >= 400 && status < 500)
+  },
+} as const
+
 // The backend says when the PR or its review changes, so nothing polls.
 export function sharedReviewOptions(pr: PullRequestRef) {
   return {
-    gcTime: BROWSER_CACHE_MAX_AGE_MS,
-    staleTime: 60_000,
-    retry: (failures: number, error: Error) => {
-      const status = error instanceof DashboardRequestError ? error.status : 0
-      return failures < 1 && !(status >= 400 && status < 500)
-    },
+    ...reviewReadOptions,
     meta: { invalidatedBy: [pullRequestTopic(statusRef(pr))] },
   } as const
 }
+
+// The diff changes only with the PR's head or base, which the review page
+// watches, so check runs and review activity on the PR never reload it.
+export const reviewDiffOptions = {
+  ...reviewReadOptions,
+  staleTime: Infinity,
+} as const
 
 // Every observer writes its options onto the shared query, so each must pass these whole.
 export const reviewDetailQuery = (pr: PullRequestRef) =>

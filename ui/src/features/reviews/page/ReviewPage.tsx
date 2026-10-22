@@ -47,15 +47,23 @@ export function ReviewPage({ pr }: { pr: PullRequestRef }) {
   useLayoutEffect(() => open(pr, headSha), [open, pr, headSha])
   useLayoutEffect(() => leave, [leave])
 
-  // A new head means a new diff; the page stays mounted so nothing else resets.
-  const seenSha = useRef(headSha)
+  // A new head or base means a new diff, and nothing else reloads it; the
+  // page stays mounted so nothing else resets.
+  const baseRef = detail.data?.pr.base_ref ?? null
+  const diffRevision =
+    headSha && baseRef !== null ? `${baseRef}:${headSha}` : null
+  const seenRevision = useRef(diffRevision)
   useEffect(() => {
-    if (headSha && seenSha.current && headSha !== seenSha.current)
+    if (
+      diffRevision &&
+      seenRevision.current &&
+      diffRevision !== seenRevision.current
+    )
       void queryClient.invalidateQueries({
         queryKey: reviewQueries.diff(pr).queryKey,
       })
-    if (headSha) seenSha.current = headSha
-  }, [headSha, queryClient, pr])
+    if (diffRevision) seenRevision.current = diffRevision
+  }, [diffRevision, queryClient, pr])
 
   const title = pageTitle(
     detail.data?.pr.title ?? `${pr.owner}/${pr.repo} #${pr.number}`
