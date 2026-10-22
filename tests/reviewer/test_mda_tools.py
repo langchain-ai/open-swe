@@ -394,3 +394,133 @@ async def test_optional_trace_failures_do_not_change_successful_turn_output(
             },
         )
     assert result["messages"][-1].content == "done"
+
+
+@pytest.mark.parametrize("target", ["main", "inherited", "explicit"])
+async def test_discovered_code_only_tools_can_be_invoked(
+    monkeypatch: pytest.MonkeyPatch, target: str
+) -> None:
+    from types import SimpleNamespace
+
+    monkeypatch.syspath_prepend(
+        str(Path(__file__).resolve().parents[2] / "vendor/managed-deepagents-sdk/packages/pypi/src")
+    )
+    from agent import agent
+    from langchain_core.language_models.fake_chat_models import GenericFakeChatModel
+    from langchain_core.messages import AIMessage
+    from rt.backend import Catalog, SubagentSpec, ToolReply
+
+    from openswe.sandboxes.tool_runtime import ToolSurface
+    from openswe.server import code_name
+    from openswe.tools.search_tools import search_tools_tool
+
+    @tool
+    async def get_thread(thread_id: str) -> str:
+        """Retrieve a thread's final outcome."""
+        return f"Outcome for {thread_id}: completed"
+
+    surface = ToolSurface(tools={get_thread.name: get_thread})
+    search = search_tools_tool(surface, code_name)
+    surface.tools[search.name] = search
+    catalog = Catalog(
+        tools=[ToolSpec.model_validate(item.model_dump()) for item in surface.catalog()],
+        code_only=[get_thread.name],
+        subagents=[
+            SubagentSpec(name="inherited", description="Research", system_prompt="Research"),
+            SubagentSpec(
+                name="explicit",
+                description="Research",
+                system_prompt="Research",
+                tools=[search.name, get_thread.name],
+            ),
+        ],
+    )
+    monkeypatch.setenv("OPEN_SWE_BACKEND_URL", "https://backend.invalid")
+    monkeypatch.setattr(OpenSweBackend, "catalog", AsyncMock(return_value=catalog))
+    monkeypatch.setattr(OpenSweBackend, "phase", AsyncMock(return_value=PhaseReply()))
+    monkeypatch.setattr(OpenSweBackend, "model_result", AsyncMock(return_value=[]))
+    monkeypatch.setattr(OpenSweBackend, "tool_started", AsyncMock())
+    monkeypatch.setattr(OpenSweBackend, "tool_result", AsyncMock())
+
+    async def call(backend: OpenSweBackend, body: dict[str, object]) -> ToolReply:
+        name = body["name"]
+        assert isinstance(name, str)
+        result = await surface.tools[name].ainvoke(
+            {
+                "name": name,
+                "args": body["arguments"],
+                "id": body["tool_call_id"],
+                "type": "tool_call",
+            }
+        )
+        assert isinstance(result, ToolMessage)
+        return ToolReply(message=message_to_dict(result))
+
+    monkeypatch.setattr(OpenSweBackend, "tool", call)
+    runtime = SimpleNamespace(
+        execution_runtime=SimpleNamespace(
+            context={
+                "graph": "review-scout",
+                "__run_token": "test-token",
+                "invocation_id": "turn-1",
+            }
+        )
+    )
+    definition = await agent(runtime)
+    config = definition.config
+    if target != "main":
+        subagents = config["subagents"]
+        assert isinstance(subagents, list)
+        config = next(item for item in subagents if item["name"] == target)
+    model = GenericFakeChatModel(
+        messages=iter(
+            [
+                AIMessage(
+                    content="",
+                    tool_calls=[
+                        {
+                            "name": "search_tools",
+                            "args": {"query": "thread outcome"},
+                            "id": "search",
+                        }
+                    ],
+                ),
+                AIMessage(
+                    content="",
+                    tool_calls=[
+                        {
+                            "name": "eval",
+                            "args": {
+                                "code": 'console.log(await tools.getThread({thread_id: "thread-1"}));'
+                            },
+                            "id": "invoke",
+                        }
+                    ],
+                ),
+                AIMessage(content="done"),
+            ]
+        )
+    )
+    offered: list[set[str]] = []
+
+    def bind(
+        model: GenericFakeChatModel, tools: list[object], **kwargs: object
+    ) -> GenericFakeChatModel:
+        offered.append({getattr(item, "name", "") for item in tools})
+        return model
+
+    monkeypatch.setattr(GenericFakeChatModel, "bind_tools", bind)
+    tools = config["tools"]
+    middleware = config["middleware"]
+    assert isinstance(tools, list) and isinstance(middleware, list)
+    graph = create_agent(model, tools=tools, middleware=middleware)
+    result = await graph.ainvoke({"messages": [("user", "Retrieve the thread outcome")]})
+    messages = result["messages"]
+    discovered = next(message for message in messages if isinstance(message, ToolMessage))
+    assert '"code_name": "getThread"' in discovered.text
+    executed = next(
+        message for message in messages if getattr(message, "tool_call_id", None) == "invoke"
+    )
+    assert executed.status == "success"
+    assert "Outcome for thread-1: completed" in executed.text
+    assert all("eval" in names and "get_thread" not in names for names in offered)

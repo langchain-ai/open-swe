@@ -167,7 +167,8 @@ async def agent(runtime: ManagedServerRuntime) -> DeepAgentDefinition:
                 "middleware": [
                     *_backend_reports(backend, by_name.keys()),
                     *replace_sandbox,
-                    ServedToolsMiddleware(subagent_tools[subagent.name], excluded),
+                    ServedToolsMiddleware(subagent_tools[subagent.name], excluded | code_only),
+                    *_code_mode("agent", from_code, catalog.described),
                     ModelRetryMiddleware(retry_on=(TimeoutError,)),
                 ],
             }
