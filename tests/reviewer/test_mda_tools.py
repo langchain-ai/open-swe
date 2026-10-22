@@ -30,7 +30,7 @@ from langgraph_sdk.errors import (
     PermissionDeniedError,
     RateLimitError,
 )
-from langsmith import Client, tracing_context
+from langsmith import Client, agent_address, tracing_context
 from langsmith.run_trees import RunTree
 
 from openswe.remote_runtime.git_metadata import GitTarget, TurnGitMetadata
@@ -389,8 +389,9 @@ async def test_turn_reconciliation_reaches_runtime_root_llm_and_nested_calls(
     assert all(run_id not in created for run_id, _ in updates[previous_update_count:])
 
 
-async def test_backfill_preserves_completed_timestamps_and_does_not_finish_active_runs(
-    monkeypatch: pytest.MonkeyPatch,
+@pytest.mark.parametrize("destination", ["project", "address"])
+async def test_backfill_preserves_destination_timing_and_outputs(
+    monkeypatch: pytest.MonkeyPatch, destination: str
 ) -> None:
     patches: list[dict[str, object]] = []
 
@@ -409,6 +410,8 @@ async def test_backfill_preserves_completed_timestamps_and_does_not_finish_activ
             start_time=started,
             ls_client=client,
             extra={"metadata": {"invocation_id": "turn"}},
+            project_name="source" if destination != "address" else None,
+            address=agent_address("open-swe", "production") if destination == "address" else None,
         )
         child = root.create_child(
             name="model",
@@ -421,9 +424,19 @@ async def test_backfill_preserves_completed_timestamps_and_does_not_finish_activ
         trace.root = root
         await trace.reconcile({"ls_git_repo": "org/repo", "ls_git_branch": "feature"})
     child_patch = next(patch for patch in patches if patch["id"] == child.id)
-    assert child_patch["end_time"] == ended.isoformat()
-    assert [patch["id"] for patch in patches] == [child.id]
-    assert "outputs" not in child_patch
+    for patch in patches:
+        assert patch["end_time"] == ended.isoformat()
+        assert "inputs" not in patch
+        assert patch["outputs"] == {"answer": "done"}
+        assert isinstance(extra := patch["extra"], dict)
+        assert extra["metadata"]["ls_git_repo"] == "org/repo"
+        assert extra["metadata"]["ls_git_branch"] == "feature"
+    assert len(patches) == 1
+    if destination == "project":
+        assert child_patch["session_name"] == "source"
+    else:
+        assert child_patch["address"] == "lrn:agents/open-swe/environments/production"
+    assert child.outputs == {"answer": "done"}
     assert root.end_time is None
     assert root.metadata["ls_git_repo"] == child.metadata["ls_git_repo"] == "org/repo"
 
@@ -449,10 +462,20 @@ async def test_optional_trace_failures_do_not_change_successful_turn_output(
             root = TurnTrace.current_root()
             assert root is not None
             root.metadata["open_swe_git_evidence"] = "invalid"
-        return PhaseReply()
+        return PhaseReply(trace_metadata={"ls_git_repo": "org/actual"})
+
+    export_failed = False
 
     def update(run_id: object, **kwargs: object) -> None:
-        if failure == "export" and "outputs" not in kwargs:
+        nonlocal export_failed
+        extra = kwargs.get("extra")
+        if (
+            failure == "export"
+            and not export_failed
+            and isinstance(extra, dict)
+            and extra.get("metadata", {}).get("ls_git_repo") == "org/actual"
+        ):
+            export_failed = True
             raise RuntimeError("metadata exporter unavailable")
 
     monkeypatch.setattr(backend, "phase", phase)
@@ -471,6 +494,7 @@ async def test_optional_trace_failures_do_not_change_successful_turn_output(
             },
         )
     assert result["messages"][-1].content == "done"
+    assert export_failed == (failure == "export")
 
 
 async def test_box_call_git_evidence_reaches_the_turn_after_its_run_closed(
