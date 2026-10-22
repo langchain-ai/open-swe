@@ -73,13 +73,20 @@ class ParsedGitPush:
                 "same branch on origin and ensure the repository can be inspected. Nothing ran."
             )
 
-    def command_for_head(self, repo_dir: str, head_sha: str) -> str:
+    def command_for_head(self, repo_dir: str, head_sha: str, lease_sha: str) -> str:
+        """The push of ``head_sha`` the owner approves.
+
+        A forced push is leased to ``lease_sha``, the remote tip the approval diff was
+        taken against (empty when the branch did not exist), so it cannot overwrite
+        remote commits the owner never saw.
+        """
         args = ["push"]
         if self.set_upstream:
             args.append("--set-upstream")
-        if self.force_with_lease is not None:
-            args.append(self.force_with_lease)
-        args.extend(self.force_flags)
+        if self.forced:
+            args.append(f"--force-with-lease=refs/heads/{self.remote_branch}:{lease_sha}")
+            if "--force-if-includes" in self.force_flags:
+                args.append("--force-if-includes")
         args.extend([self.remote, f"{head_sha}:refs/heads/{self.remote_branch}"])
         return _git_command(repo_dir, " ".join(shlex.quote(arg) for arg in args))
 
@@ -516,6 +523,9 @@ async def _workflow_change_for_push(
         range_expr = f"{shlex.quote(base_ref)}..{shlex.quote(head)}"
         base_result = await _run_git(backend, root, f"rev-parse {shlex.quote(base_ref)}")
         base_sha = _first_line(base_result.output)
+        lease_sha = base_sha
+        if parsed.forced and not _GIT_OBJECT_ID.fullmatch(base_sha):
+            return parsed.inspection_failed()
     else:
         origin_head = await _run_git(backend, root, "symbolic-ref --short refs/remotes/origin/HEAD")
         base_ref = _first_line(origin_head.output) if origin_head.ok else "origin/main"
@@ -524,6 +534,7 @@ async def _workflow_change_for_push(
             backend, root, f"merge-base {shlex.quote(head)} {shlex.quote(base_ref)}"
         )
         base_sha = _first_line(merge_base.output)
+        lease_sha = ""
 
     names = await _run_git(
         backend,
@@ -553,7 +564,7 @@ async def _workflow_change_for_push(
     remote = await _run_git(backend, root, "config --get remote.origin.url")
     repo = _normalize_remote(_first_line(remote.output)) if remote.ok else ""
     fixed_refspec = f"{head}:refs/heads/{parsed.remote_branch}"
-    fixed_command = parsed.command_for_head(root, head)
+    fixed_command = parsed.command_for_head(root, head, lease_sha)
     payload: dict[str, object] = {
         "repo": repo,
         "branch": branch_name,

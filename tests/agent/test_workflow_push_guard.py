@@ -390,7 +390,12 @@ async def test_approved_workflow_push_runs_fixed_command(
 
     assert isinstance(result, ToolMessage)
     assert result.content == "pushed"
-    options = f"--set-upstream {lease} ".replace("  ", " ")
+    options = "--set-upstream "
+    if lease:
+        # The fake remote has no ``feature`` branch, so a forced push is leased to its absence.
+        options += "--force-with-lease=refs/heads/feature: "
+        if "--force-if-includes" in lease:
+            options += "--force-if-includes "
     assert pushed_command == (f"git -C /repo push {options}origin {'a' * 40}:refs/heads/feature")
 
 
@@ -599,3 +604,60 @@ async def test_rebased_force_push_previews_remote_tip_and_executes_after_approva
     assert result.content == "pushed"
     remote_tip = await backend.aexecute("git rev-parse origin/feature")
     assert remote_tip.output.strip() == payload["head_sha"]
+
+
+async def test_approved_force_push_is_leased_to_the_previewed_remote_tip(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    backend = LocalShellBackend(root_dir=str(repo), virtual_mode=False, inherit_env=True)
+    setup = await backend.aexecute("""
+        set -e
+        git init -q -b main
+        git config user.name Test
+        git config user.email test@example.com
+        mkdir -p .github/workflows
+        printf 'name: old\n' > .github/workflows/ci.yml
+        git add .github/workflows/ci.yml
+        git commit -qm base
+        git init -q --bare -b main ../origin.git
+        git remote add origin ../origin.git
+        git checkout -qb feature
+        git push -qu origin feature
+        git clone -q -b feature ../origin.git ../other
+        git -C ../other -c user.name=Other -c user.email=other@example.com \
+            commit -q --allow-empty -m 'unseen remote commit'
+        git -C ../other push -q origin feature
+        printf 'name: new\n' > .github/workflows/ci.yml
+        git commit -qam workflow
+    """)
+    assert setup.exit_code == 0, setup.output
+    guard.SANDBOX_BACKENDS["thread-1"] = SandboxBackendProxy(backend, thread_id="thread-1")
+
+    async def fake_approved(thread_id: str, fingerprint: str) -> bool:
+        return True
+
+    monkeypatch.setattr(guard, "workflow_push_approved", fake_approved)
+
+    async def handler(request: ToolCallRequest) -> ToolMessage:
+        command = request.tool_call["args"]["command"]
+        assert isinstance(command, str)
+        pushed = await backend.aexecute(command)
+        return ToolMessage(content=str(pushed.exit_code), tool_call_id="call-1")
+
+    stale_tip = (await backend.aexecute("git rev-parse origin/feature")).output.strip()
+    remote_tip = (await backend.aexecute("git ls-remote origin refs/heads/feature")).output
+    assert stale_tip not in remote_tip
+    result = await guard.WorkflowPushGuardMiddleware().awrap_tool_call(
+        cast(
+            ToolCallRequest,
+            _Request(f"git -C {shlex.quote(str(repo))} push --force origin feature"),
+        ),
+        handler,
+    )
+
+    assert isinstance(result, ToolMessage)
+    assert result.content != "0"
+    after = (await backend.aexecute("git ls-remote origin refs/heads/feature")).output
+    assert after == remote_tip
