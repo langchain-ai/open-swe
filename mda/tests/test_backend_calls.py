@@ -1,3 +1,4 @@
+import asyncio
 from collections.abc import Mapping, Sequence
 from contextlib import closing
 from copy import deepcopy
@@ -341,6 +342,71 @@ async def test_the_model_the_backend_names_gets_a_replayable_history(
     assert [m.content for m in named.sent if isinstance(m, AIMessage)] == [
         [{"type": "text", "text": "hello"}]
     ]
+
+
+class _StalledAnthropic(ChatAnthropic):
+    async def _agenerate(
+        self,
+        messages: list[BaseMessage],
+        stop: list[str] | None = None,
+        run_manager: AsyncCallbackManagerForLLMRun | None = None,
+        **kwargs: object,
+    ) -> ChatResult:
+        await asyncio.sleep(60)
+        raise AssertionError("cancelled by the deadline")
+
+
+async def test_a_stalled_model_call_goes_to_the_fallback_model(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("OPEN_SWE_BACKEND_URL", "https://backend.invalid")
+    monkeypatch.setattr("rt.middleware.run_id", lambda: "run-1")
+    fallback = _RecordingAnthropic(model_name="claude-sonnet-5-5", api_key="test-key", sent=[])
+    built = {
+        "anthropic:claude-opus-5-5": _StalledAnthropic(model_name="claude-opus-5-5", api_key="k"),
+        "anthropic:claude-sonnet-5-5": fallback,
+    }
+    monkeypatch.setattr("rt.middleware.build_model", lambda spec, use_gateway: built[spec.model_id])
+    backend = OpenSweBackend("secret-token")
+
+    async def phase(name: str, body: object) -> PhaseReply:
+        if name != "before_model":
+            return PhaseReply()
+        return PhaseReply(
+            system_prompt="You are Open SWE.",
+            model=ModelSpec(model_id="anthropic:claude-opus-5-5", kwargs={}),
+            fallback=ModelSpec(model_id="anthropic:claude-sonnet-5-5", kwargs={}),
+        )
+
+    monkeypatch.setattr(backend, "phase", phase)
+    middleware = cast(
+        list[AgentMiddleware],
+        [
+            BackendRunMiddleware(backend, "invocation-1"),
+            *model_call_guards(timeout_seconds=0.05),
+        ],
+    )
+    graph = create_agent(model=FakeListChatModel(responses=["unused"]), middleware=middleware)
+
+    result = await graph.ainvoke({"messages": [HumanMessage("hi")]})
+
+    assert result["messages"][-1].content == "done"
+    assert fallback.sent
+
+
+async def test_a_stalled_subagent_call_answers_with_the_timeout() -> None:
+    # Its `task` call hands this answer back; a raise would end the delegating run.
+    subagent = create_agent(
+        model=_StalledAnthropic(model_name="claude-opus-5-5", api_key="test-key"),
+        middleware=model_call_guards(timeout_seconds=0.05, subagent=True),
+    )
+
+    result = await subagent.ainvoke({"messages": [HumanMessage("look into it")]})
+
+    answer = result["messages"][-1]
+    assert isinstance(answer, AIMessage)
+    assert "timed out" in answer.text
+    assert "ModelCallTimeoutError" in answer.text
 
 
 async def test_a_failing_backend_hook_fails_the_run_with_what_it_raised(
