@@ -17,6 +17,7 @@ from pydantic.alias_generators import to_camel
 
 from openswe.github.ci import RequiredCheck, unreported_required_checks
 from openswe.github.http import GITHUB_API_BASE, GitHubClient, GraphQLError, RepoClient, or_none
+from openswe.github.org_membership import OPEN_SWE_GITHUB_LOGINS
 from openswe.github.queue import QueuePull, Review, ReviewPage
 
 logger = logging.getLogger(__name__)
@@ -134,6 +135,7 @@ class _GithubReview(BaseModel):
     id: int
     state: ReviewerState | Literal["pending"]
     user: _GithubReviewUser | None = None
+    commit_id: str | None = None
 
     @field_validator("state", mode="before")
     @classmethod
@@ -558,6 +560,60 @@ class PullRequestClient:
             f"repos/{self.repo.full_name}/pulls/{self.number}/reviews/{review_id}/dismissals",
             json={"message": message, "event": "DISMISS"},
         )
+
+    async def withdraw_open_swe_approvals(
+        self,
+        *,
+        reason: str,
+        keep_review_id: int | None = None,
+        keep_commit: str | None = None,
+        scope_to_review_id: int | None = None,
+    ) -> list[int]:
+        """Dismiss Open SWE's standing approvals other than the kept ones; the ids GitHub refused.
+
+        ``scope_to_review_id`` limits this to that review's login. An unknown review dismisses nothing.
+        """
+        reviews = _GITHUB_REVIEWS.validate_python(await self.reviews())
+        only_login: str | None = None
+        if scope_to_review_id is not None:
+            own_review = next((r for r in reviews if r.id == scope_to_review_id), None)
+            if own_review is None or own_review.user is None:
+                return []
+            only_login = own_review.user.login.lower()
+        refused: list[int] = []
+        for review in reviews:
+            if (
+                review.state != "approved"
+                or review.user is None
+                or review.user.login.lower() not in OPEN_SWE_GITHUB_LOGINS
+                or (only_login is not None and review.user.login.lower() != only_login)
+                or review.id == keep_review_id
+                or (keep_commit is not None and review.commit_id == keep_commit)
+            ):
+                continue
+            try:
+                await self.dismiss_review(review.id, reason)
+            except httpx2.HTTPStatusError as exc:
+                if exc.response.status_code == 404:
+                    continue
+                logger.warning(
+                    "GitHub refused to dismiss a stale Open SWE approval",
+                    extra={
+                        **self._log_extra,
+                        "github_review_id": review.id,
+                        "status_code": exc.response.status_code,
+                    },
+                    exc_info=True,
+                )
+                refused.append(review.id)
+            except httpx2.HTTPError:
+                logger.warning(
+                    "Failed to dismiss a stale Open SWE approval",
+                    extra={**self._log_extra, "github_review_id": review.id},
+                    exc_info=True,
+                )
+                refused.append(review.id)
+        return refused
 
     async def request_reviewers(self, logins: list[str]) -> None:
         await self.repo.post(f"pulls/{self.number}/requested_reviewers", {"reviewers": logins})
