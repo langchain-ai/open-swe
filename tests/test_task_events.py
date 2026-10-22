@@ -318,6 +318,8 @@ async def test_duplicate_completion_delivers_one_durable_result_to_idle_or_busy_
     client = SimpleNamespace(threads=AsyncMock())
     client.threads.get.return_value = {"status": "busy" if busy else "idle"}
     client.threads.get_state.return_value = {"values": {"messages": []}}
+    client.threads.get_history.return_value = []
+    monkeypatch.setattr(events, "langgraph_client", lambda: client)
     dispatched: list[dict[str, object]] = []
     attempted_turns: list[object] = []
     inherited_turn = str(uuid4())
