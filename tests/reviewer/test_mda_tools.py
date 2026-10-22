@@ -1,4 +1,5 @@
 import sys
+from collections.abc import Sequence
 from contextlib import closing
 from copy import deepcopy
 from datetime import UTC, datetime, timedelta
@@ -6,18 +7,28 @@ from pathlib import Path
 from typing import Literal
 from unittest.mock import AsyncMock, MagicMock
 
+import httpx
 import httpx2
 import pytest
 from deepagents import create_deep_agent
 from langchain.agents import create_agent
 from langchain.tools import ToolRuntime
-from langchain_core.language_models.fake_chat_models import FakeListChatModel
-from langchain_core.messages import ToolMessage, message_to_dict
+from langchain_core.language_models.fake_chat_models import (
+    FakeListChatModel,
+    GenericFakeChatModel,
+)
+from langchain_core.messages import AIMessage, ToolCall, ToolMessage, message_to_dict
 from langchain_core.runnables import RunnableLambda
 from langchain_core.tools import tool
 from langchain_core.tracers.langchain import LangChainTracer
 from langgraph.checkpoint.memory import InMemorySaver
 from langgraph.types import Command
+from langgraph_sdk.errors import (
+    APIStatusError,
+    InternalServerError,
+    PermissionDeniedError,
+    RateLimitError,
+)
 from langsmith import Client, tracing_context
 from langsmith.run_trees import RunTree
 
@@ -113,10 +124,10 @@ async def test_phase_gateway_failure_is_not_replayed(
 
 
 @pytest.mark.parametrize(("failures", "recovers"), [(10, True), (11, False)])
-@pytest.mark.parametrize("hook", ["prepare", "before_model"])
+@pytest.mark.parametrize("hook", ["prepare", "launch_worker", "before_model"])
 async def test_a_run_waits_out_a_backend_rollout(
     monkeypatch: pytest.MonkeyPatch,
-    hook: Literal["prepare", "before_model"],
+    hook: Literal["prepare", "launch_worker", "before_model"],
     failures: int,
     recovers: bool,
 ) -> None:
@@ -124,9 +135,9 @@ async def test_a_run_waits_out_a_backend_rollout(
     sleep = AsyncMock()
     monkeypatch.setattr("rt.backend.asyncio.sleep", sleep)
     request = httpx2.Request("POST", "https://backend.invalid")
-    # Only a call the backend could not have run is resent; prepare is also resent after a 502.
+    # Only a call the backend could not have run is resent, or one that is safe to repeat.
     unavailable = [httpx2.Response(503, request=request), httpx2.ConnectError("secret-token")]
-    if hook == "prepare":
+    if hook != "before_model":
         unavailable.append(httpx2.Response(502, request=request))
     client = MagicMock(is_closed=False)
     client.post = AsyncMock(
@@ -137,12 +148,12 @@ async def test_a_run_waits_out_a_backend_rollout(
     backend = OpenSweBackend("secret-token")
 
     if recovers:
-        reply = await backend.phase(hook, {})
-        assert reply.update == {"prepared": True}
+        reply = await backend.call(hook, {})
+        assert reply == {"update": {"prepared": True}}
         assert sum(call.args[0] for call in sleep.await_args_list) >= 120
     else:
         with pytest.raises(BackendUnavailableError):
-            await backend.phase(hook, {})
+            await backend.call(hook, {})
     assert client.post.await_count == min(failures + 1, 11)
 
 
@@ -394,3 +405,194 @@ async def test_optional_trace_failures_do_not_change_successful_turn_output(
             },
         )
     assert result["messages"][-1].content == "done"
+
+
+class _ToolCallingModel(GenericFakeChatModel):
+    def bind_tools(self, tools: object, **kwargs: object) -> _ToolCallingModel:
+        return self
+
+
+async def _launch_worker(
+    monkeypatch: pytest.MonkeyPatch, client: MagicMock, *, also: Sequence[ToolCall] = ()
+) -> tuple[list[ToolMessage], list[tuple[str, dict[str, object]]]]:
+    """Run a coordinator that launches a worker through deepagents' ``start_async_task``."""
+    from deepagents.middleware import async_subagents
+    from rt.middleware import AsyncWorkerLaunchMiddleware
+
+    monkeypatch.setenv("OPEN_SWE_BACKEND_URL", "https://backend.invalid")
+    backend = OpenSweBackend("coordinator-token")
+    calls: list[tuple[str, dict[str, object]]] = []
+
+    async def call(hook: str, body: dict[str, object], **kwargs: object) -> dict[str, object]:
+        calls.append((hook, dict(body)))
+        if hook == "launch_worker":
+            return {"grant": "worker-grant", "assignment": "Your assignment: Fix login"}
+        return {"worker": {"worker_thread_id": body["worker_thread_id"], "task_id": "task-1"}}
+
+    monkeypatch.setattr(backend, "call", call)
+    launches = async_subagents.AsyncSubAgentMiddleware(
+        async_subagents=[
+            {
+                "name": "general-purpose",
+                "description": "A task worker.",
+                "graph_id": "open-swe--general-purpose",
+            }
+        ]
+    )
+    # The launch's in-process LangGraph client, the deployment's own Agent Server.
+    monkeypatch.setattr(async_subagents._ClientCache, "get_async", lambda self, name: client)
+    launch: ToolCall = {
+        "name": "start_async_task",
+        "args": {"description": "Fix login", "subagent_type": "general-purpose"},
+        "id": "launch-1",
+    }
+    model = _ToolCallingModel(
+        messages=iter([AIMessage("", tool_calls=[launch, *also]), AIMessage("Launched.")])
+    )
+    graph = create_agent(model, middleware=[AsyncWorkerLaunchMiddleware(backend), launches])
+    values = await graph.ainvoke(
+        {"messages": [("user", "fix login in the background")]},
+        {
+            "configurable": {"thread_id": "coordinator-thread", "assistant_id": "open-swe"},
+            "metadata": {"assistant_id": "open-swe"},
+        },
+        context={"graph": "agent", "__run_token": "coordinator-token"},
+    )
+    # Open SWE's task messages report the worker; deepagents does not poll it too.
+    assert not values.get("async_tasks")
+    return [m for m in values["messages"] if isinstance(m, ToolMessage)], calls
+
+
+async def test_a_launched_worker_carries_a_grant_never_its_coordinators_run_token(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    client = MagicMock()
+    client.threads.create = AsyncMock(return_value={"thread_id": "worker-thread"})
+    client.runs.create = AsyncMock(return_value={"run_id": "worker-run"})
+
+    results, calls = await _launch_worker(
+        monkeypatch,
+        client,
+        also=[
+            {"name": "check_async_task", "args": {"task_id": "worker-thread"}, "id": "check-1"},
+            # An update would interrupt the worker; Open SWE queues messages instead.
+            {
+                "name": "update_async_task",
+                "args": {"task_id": "worker-thread", "message": "Stop"},
+                "id": "update-1",
+            },
+        ],
+    )
+
+    launch = client.runs.create.await_args.kwargs
+    assert launch["context"] == {"graph": "agent", "__worker_grant": "worker-grant"}
+    assert launch["input"] == {
+        "messages": [{"role": "user", "content": "Your assignment: Fix login"}]
+    }
+    assert "coordinator-token" not in repr(client.runs.create.await_args)
+    # No parent assistant, so the worker never wakes the coordinator on MDA's own.
+    assert client.threads.create.await_args.kwargs["metadata"] == {
+        "subagent_name": "general-purpose",
+        "parent_thread_id": "coordinator-thread",
+    }
+    assert calls == [
+        ("launch_worker", {"tool_call_id": "launch-1", "instructions": "Fix login"}),
+        (
+            "worker_launched",
+            {
+                "tool_call_id": "launch-1",
+                "instructions": "Fix login",
+                "worker_thread_id": "worker-thread",
+                "run_id": "worker-run",
+            },
+        ),
+    ]
+    by_call = {m.tool_call_id: m for m in results}
+    assert "worker-thread" in str(by_call["launch-1"].content)
+    assert by_call["check-1"].status == by_call["update-1"].status == "error"
+    client.runs.create.assert_awaited_once()
+
+
+def _mda_error(status: int) -> APIStatusError:
+    error = {429: RateLimitError, 403: PermissionDeniedError}.get(status, InternalServerError)
+    response = httpx.Response(status, request=httpx.Request("POST", "http://api/threads/runs"))
+    return error(f"MDA answered {status}", response=response, body=None)
+
+
+@pytest.mark.parametrize(
+    ("failures", "launched"),
+    [
+        ([_mda_error(503)], True),
+        ([httpx.ConnectError("refused"), _mda_error(429)], True),
+        ([_mda_error(403)], False),
+        ([_mda_error(503)] * 3, False),
+    ],
+)
+async def test_a_worker_launch_mda_failed_to_start_is_made_again_while_it_may_pass(
+    monkeypatch: pytest.MonkeyPatch, failures: list[Exception], launched: bool
+) -> None:
+    monkeypatch.setattr("rt.middleware._LAUNCH_RETRY_SECONDS", (0.0, 0.0))
+    client = MagicMock()
+    client.threads.create = AsyncMock(
+        side_effect=[{"thread_id": f"thread-{n}"} for n in range(len(failures) + 1)]
+    )
+    client.runs.create = AsyncMock(side_effect=[*failures, {"run_id": "worker-run"}])
+
+    [result], calls = await _launch_worker(monkeypatch, client)
+
+    attempts = [body for hook, body in calls if hook == "launch_worker"]
+    # Every attempt is the same launch, so one launch still registers one worker.
+    assert attempts == [{"tool_call_id": "launch-1", "instructions": "Fix login"}] * len(attempts)
+    if launched:
+        assert len(attempts) == len(failures) + 1
+        assert result.status == "success"
+        assert f"thread-{len(failures)}" in str(result.content)
+        assert [hook for hook, _ in calls].count("worker_launched") == 1
+    else:
+        # A refusal is final; a failure that may pass is tried three times in all.
+        assert len(attempts) == min(len(failures), 3)
+        assert result.status == "error"
+        assert "did not launch" in str(result.content)
+        assert "MDA answered" in str(result.content)
+        assert "start_async_task again is safe" in str(result.content)
+        assert "worker_launched" not in [hook for hook, _ in calls]
+
+
+async def test_a_launched_worker_adopts_its_own_run_token_before_anything_runs(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("OPEN_SWE_BACKEND_URL", "https://backend.invalid")
+    monkeypatch.setattr("rt.middleware.run_id", lambda: "worker-run")
+    request = httpx2.Request("POST", "https://backend.invalid")
+    seen: list[tuple[str, str]] = []
+
+    async def post(
+        url: str, *, headers: dict[str, str], json: dict[str, object], **kwargs: object
+    ) -> httpx2.Response:
+        hook = url.rsplit("/", 1)[-1]
+        seen.append((hook, headers["Authorization"]))
+        if hook == "adopt":
+            assert json == {
+                "thread_id": "worker-thread",
+                "run_id": "worker-run",
+                "instructions": "Fix login",
+            }
+            return httpx2.Response(200, request=request, json={"run_token": "worker-token"})
+        return httpx2.Response(200, request=request, json={})
+
+    client = MagicMock(is_closed=False)
+    client.post = AsyncMock(side_effect=post)
+    monkeypatch.setattr("rt.backend.httpx2.AsyncClient", lambda **kwargs: client)
+    backend = OpenSweBackend(None, worker_grant="worker-grant")
+    graph = create_agent(
+        model=FakeListChatModel(responses=["done"]),
+        middleware=[BackendRunMiddleware(backend, None)],
+    )
+
+    await graph.ainvoke(
+        {"messages": [("user", "Fix login")]}, {"configurable": {"thread_id": "worker-thread"}}
+    )
+
+    assert seen[0] == ("adopt", "Bearer worker-grant")
+    assert [hook for hook, _ in seen[1:3]] == ["catalog", "prepare"]
+    assert all(bearer == "Bearer worker-token" for _, bearer in seen[1:])
