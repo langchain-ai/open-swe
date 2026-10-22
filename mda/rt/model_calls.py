@@ -11,10 +11,14 @@ import logging
 from collections.abc import Awaitable, Callable, Sequence
 from typing import Final
 
-from langchain.agents.middleware import AgentMiddleware
+from langchain.agents.middleware import (
+    AgentMiddleware,
+    ModelRetryMiddleware,
+    TracePolicy,
+    omit_payload,
+)
 from langchain.agents.middleware.types import ModelRequest, ModelResponse
 from langchain_anthropic import ChatAnthropic
-from langchain_core.language_models import BaseChatModel
 from langchain_core.messages import AIMessage, AnyMessage, ToolMessage
 from langchain_fireworks import ChatFireworks
 from langchain_openai import ChatOpenAI
@@ -24,6 +28,8 @@ logger = logging.getLogger(__name__)
 # Above the provider client's own request timeout (rt/models.py), so a stalled
 # request fails and retries inside the client first.
 MODEL_CALL_TIMEOUT_SECONDS: Final = 900.0
+# Bindings nest a few deep at most; the bound stops a self-referencing chain.
+_MAX_BINDINGS: Final = 10
 
 
 class ModelCallTimeoutError(TimeoutError):
@@ -33,7 +39,17 @@ class ModelCallTimeoutError(TimeoutError):
     """
 
 
-def _replayable(block: object, model: BaseChatModel) -> bool:
+def _chat_model(model: object) -> object:
+    """The chat model under any bindings around it."""
+    for _ in range(_MAX_BINDINGS):
+        bound = getattr(model, "bound", None)
+        if bound is None or bound is model:
+            break
+        model = bound
+    return model
+
+
+def _replayable(block: object, model: object) -> bool:
     if not isinstance(block, dict):
         return True
     if isinstance(model, ChatAnthropic):
@@ -51,7 +67,7 @@ def _replayable(block: object, model: BaseChatModel) -> bool:
     return True
 
 
-def _for_provider(message: AnyMessage, model: BaseChatModel) -> AnyMessage:
+def _for_provider(message: AnyMessage, model: object) -> AnyMessage:
     if not isinstance(message, AIMessage):
         return message
     update: dict[str, object] = {}
@@ -100,26 +116,27 @@ def _in_call_order(messages: Sequence[AnyMessage]) -> list[AnyMessage]:
     return ordered
 
 
-class ReplayableHistoryMiddleware(AgentMiddleware):
-    """Send each call a history the provider it goes to accepts, in a stable order.
+class _ModelCallGuard(AgentMiddleware):
+    # Its request carries the whole conversation, which the model call's own trace has.
+    trace_policy = TracePolicy(process_inputs=omit_payload)
 
-    Runs inside the middleware that picks the call's model, so it sees the model
-    the call really goes to, the fallback included.
-    """
+
+class ReplayableHistoryMiddleware(_ModelCallGuard):
+    """Send each call a history the provider it goes to accepts, in a stable order."""
 
     async def awrap_model_call(
         self,
         request: ModelRequest,
         handler: Callable[[ModelRequest], Awaitable[ModelResponse]],
     ) -> ModelResponse:
-        model = request.model
+        model = _chat_model(request.model)
         messages = [_for_provider(message, model) for message in _in_call_order(request.messages)]
         if any(a is not b for a, b in zip(messages, request.messages, strict=True)):
             request = request.override(messages=messages)
         return await handler(request)
 
 
-class ModelCallTimeoutMiddleware(AgentMiddleware):
+class ModelCallTimeoutMiddleware(_ModelCallGuard):
     """Fail a model call that outlives its deadline instead of letting it hang."""
 
     def __init__(self, timeout_seconds: float = MODEL_CALL_TIMEOUT_SECONDS) -> None:
@@ -140,3 +157,16 @@ class ModelCallTimeoutMiddleware(AgentMiddleware):
             raise ModelCallTimeoutError(
                 f"Model call exceeded the {self._timeout_seconds}s deadline"
             ) from exc
+
+
+def model_call_guards() -> list[AgentMiddleware]:
+    """Innermost around every model call, inside the middleware that picks its model.
+
+    They see the model the call really goes to, the fallback included. The history
+    is fixed once; a call that times out is retried, the deadline covering each try.
+    """
+    return [
+        ReplayableHistoryMiddleware(),
+        ModelRetryMiddleware(retry_on=(TimeoutError,)),
+        ModelCallTimeoutMiddleware(),
+    ]

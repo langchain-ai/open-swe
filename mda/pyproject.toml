@@ -8,7 +8,8 @@ dependencies = [
     "deepagents==0.7.30",
     "langchain[mcp]>=1.4.7",
     "langchain-anthropic>=1.7.6",
-    "langchain-fireworks>=1.7.1",
+    # Fireworks models the dashboard offers, such as Kimi.
+    "langchain-fireworks>=1.7.1,<2.0.0",
     "langchain-openai>=1.7.2,<2.0.0",
     "langchain-quickjs>=0.3.9,<0.4.0",
     "langsmith>=0.14.12",

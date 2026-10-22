@@ -23,7 +23,6 @@ from deepagents.middleware.subagents import SubAgent
 from langchain.agents.middleware import (
     AgentMiddleware,
     ModelCallLimitMiddleware,
-    ModelRetryMiddleware,
 )
 from langchain_core.tools import BaseTool
 from langchain_quickjs import CodeInterpreterMiddleware
@@ -49,7 +48,7 @@ from rt.middleware import (
     RuntimeToolsMiddleware,
     ServedToolsMiddleware,
 )
-from rt.model_calls import ModelCallTimeoutMiddleware, ReplayableHistoryMiddleware
+from rt.model_calls import model_call_guards
 from rt.models import RunModels, build_model
 from rt.sandbox_tools import SandboxToolsMiddleware
 from rt.tools import backend_tool
@@ -105,11 +104,6 @@ class OpenSweRunContext(BaseModel):
 def _backend_reports(backend: OpenSweBackend, served: Collection[str]) -> list[AgentMiddleware]:
     """The backend's transcript and usage see every reply, and every tool call."""
     return [ReportRepliesMiddleware(backend), RuntimeToolsMiddleware(backend, served)]
-
-
-def _model_calls() -> list[AgentMiddleware]:
-    """Innermost around each model call, so they act on the model it really goes to."""
-    return [ReplayableHistoryMiddleware(), ModelCallTimeoutMiddleware()]
 
 
 def _code_mode(
@@ -207,8 +201,7 @@ async def agent(runtime: ManagedServerRuntime) -> DeepAgentDefinition:
                 *box_tools,
                 *replace_sandbox,
                 ServedToolsMiddleware(subagent_tools[subagent.name], excluded, backend),
-                ModelRetryMiddleware(retry_on=(TimeoutError,)),
-                *_model_calls(),
+                *model_call_guards(),
             ],
         }
         for subagent in catalog.subagents
@@ -231,8 +224,7 @@ async def agent(runtime: ManagedServerRuntime) -> DeepAgentDefinition:
             *_code_mode(context.graph, from_code, catalog.described),
             *_browser(context.graph, backend),
             ModelCallLimitMiddleware(run_limit=_MODEL_CALL_LIMIT, exit_behavior="end"),
-            ModelRetryMiddleware(retry_on=(TimeoutError,)),
-            *_model_calls(),
+            *model_call_guards(),
         ],
     )
     worker: ManagedAsyncSubAgent = {

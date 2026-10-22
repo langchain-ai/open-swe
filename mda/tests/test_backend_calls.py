@@ -2,7 +2,7 @@ from collections.abc import Mapping, Sequence
 from contextlib import closing
 from copy import deepcopy
 from datetime import UTC, datetime, timedelta
-from typing import Literal, Self
+from typing import Literal, Self, cast
 from unittest.mock import AsyncMock, MagicMock
 
 import anthropic
@@ -12,12 +12,23 @@ import openai
 import pytest
 from deepagents import create_deep_agent
 from langchain.agents import create_agent
+from langchain.agents.middleware import AgentMiddleware
 from langchain.tools import ToolRuntime
+from langchain_anthropic import ChatAnthropic
+from langchain_core.callbacks import AsyncCallbackManagerForLLMRun
 from langchain_core.language_models.fake_chat_models import (
     FakeListChatModel,
     GenericFakeChatModel,
 )
-from langchain_core.messages import AIMessage, ToolCall, ToolMessage, message_to_dict
+from langchain_core.messages import (
+    AIMessage,
+    BaseMessage,
+    HumanMessage,
+    ToolCall,
+    ToolMessage,
+    message_to_dict,
+)
+from langchain_core.outputs import ChatGeneration, ChatResult
 from langchain_core.runnables import RunnableConfig, RunnableLambda
 from langchain_core.tools import tool
 from langchain_core.tracers.langchain import LangChainTracer, wait_for_all_tracers
@@ -45,6 +56,8 @@ from rt.backend import (
     ToolSpec,
 )
 from rt.middleware import BackendRunMiddleware, RunState
+from rt.model_calls import model_call_guards
+from rt.models import ModelSpec
 from rt.sandbox import SandboxCreate, SandboxSpec
 from rt.sandbox_tools import SandboxToolsMiddleware
 from rt.tools import backend_tool
@@ -276,6 +289,58 @@ async def test_an_unreachable_backend_fails_the_run(
 
     with pytest.raises(BackendUnavailableError):
         await graph.ainvoke({"messages": [("user", "hello")]})
+
+
+class _RecordingAnthropic(ChatAnthropic):
+    sent: list[BaseMessage] = []
+
+    async def _agenerate(
+        self,
+        messages: list[BaseMessage],
+        stop: list[str] | None = None,
+        run_manager: AsyncCallbackManagerForLLMRun | None = None,
+        **kwargs: object,
+    ) -> ChatResult:
+        self.sent.extend(messages)
+        return ChatResult(generations=[ChatGeneration(message=AIMessage(content="done"))])
+
+
+async def test_the_model_the_backend_names_gets_a_replayable_history(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("OPEN_SWE_BACKEND_URL", "https://backend.invalid")
+    monkeypatch.setattr("rt.middleware.run_id", lambda: "run-1")
+    named = _RecordingAnthropic(model_name="claude-opus-5-5", api_key="test-key", sent=[])
+    monkeypatch.setattr("rt.middleware.build_model", lambda spec, use_gateway: named)
+    backend = OpenSweBackend("secret-token")
+
+    async def phase(name: str, body: object) -> PhaseReply:
+        if name != "before_model":
+            return PhaseReply()
+        return PhaseReply(
+            system_prompt="You are Open SWE.",
+            model=ModelSpec(model_id="anthropic:claude-opus-5-5", kwargs={}),
+        )
+
+    monkeypatch.setattr(backend, "phase", phase)
+    # As the agent orders them: the guards inside the middleware that names the model.
+    middleware = cast(
+        list[AgentMiddleware],
+        [BackendRunMiddleware(backend, "invocation-1"), *model_call_guards()],
+    )
+    graph = create_agent(model=FakeListChatModel(responses=["unused"]), middleware=middleware)
+    reply = AIMessage(
+        content=[
+            {"type": "thinking", "signature": "sig", "thinking": ""},
+            {"type": "text", "text": "hello"},
+        ]
+    )
+
+    await graph.ainvoke({"messages": [HumanMessage("hi"), reply, HumanMessage("again")]})
+
+    assert [m.content for m in named.sent if isinstance(m, AIMessage)] == [
+        [{"type": "text", "text": "hello"}]
+    ]
 
 
 async def test_a_failing_backend_hook_fails_the_run_with_what_it_raised(
