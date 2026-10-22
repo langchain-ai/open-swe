@@ -14,6 +14,8 @@ Trusted users can still expose the agent to malicious instructions in repository
 
 Some workflows, including reviewers and public-repository event threads, use narrower tokens; see [GitHub access and the sandbox image](reference/workspaces.md#github-access-and-the-sandbox-image). For the distinction between server-side user credentials and sandbox credentials, see [Thread credential scope](#thread-credential-scope).
 
+Open SWE's GitHub approvals can affect branch protection. See the [stale-approval threat model](reference/review-approval-threat-model.md) for withdrawal behavior, deployment scoping, and best-effort cleanup limitations.
+
 ## Prerequisites
 
 What a deployment needs:

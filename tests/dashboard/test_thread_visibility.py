@@ -4,7 +4,8 @@ from unittest.mock import AsyncMock
 import pytest
 from fastapi import HTTPException
 
-from openswe.sandboxes.browsers import LangSmithBrowser
+from openswe.sandboxes import browsers
+from openswe.sandboxes.browsers import LangSmithBrowser, ThreadBrowser
 from openswe.threads import (
     access,
     blobs,
@@ -191,7 +192,25 @@ async def test_sharing_deletes_the_threads_browser(private_thread, monkeypatch):
     await handlers.share_thread_with_workspace("private-thread", "alice")
 
     assert deleted == ["browser-1"]
-    assert client.threads.update.call_args.kwargs["metadata"]["browser"] is None
+    # MDA keeps the name, so the panel can still open a fresh browser.
+    metadata = client.threads.update.call_args.kwargs["metadata"]
+    assert metadata["browser_name"] == "browser-1"
+    assert metadata["browser_opened"] is False
+
+
+async def test_a_run_starting_never_undoes_a_browse(private_thread, monkeypatch):
+    _, client = private_thread
+    monkeypatch.setattr(browsers, "langgraph_client", lambda: client)
+    monkeypatch.setattr(Topic.THREAD_BROWSERS, "invalidate", AsyncMock())
+
+    await ThreadBrowser(browser="browser-1", opened=False).report("private-thread")
+    assert client.threads.update.call_args.kwargs["metadata"] == {"browser_name": "browser-1"}
+
+    await ThreadBrowser(browser="browser-1", opened=True).report("private-thread")
+    assert client.threads.update.call_args.kwargs["metadata"] == {
+        "browser_name": "browser-1",
+        "browser_opened": True,
+    }
 
 
 async def test_sharing_waits_for_the_threads_browser_to_go(private_thread, monkeypatch):
