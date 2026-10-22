@@ -1,10 +1,8 @@
-import sys
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 from contextlib import closing
 from copy import deepcopy
 from datetime import UTC, datetime, timedelta
-from pathlib import Path
-from typing import Literal
+from typing import Literal, Self
 from unittest.mock import AsyncMock, MagicMock
 
 import anthropic
@@ -20,7 +18,7 @@ from langchain_core.language_models.fake_chat_models import (
     GenericFakeChatModel,
 )
 from langchain_core.messages import AIMessage, ToolCall, ToolMessage, message_to_dict
-from langchain_core.runnables import RunnableLambda
+from langchain_core.runnables import RunnableConfig, RunnableLambda
 from langchain_core.tools import tool
 from langchain_core.tracers.langchain import LangChainTracer, wait_for_all_tracers
 from langchain_core.tracers.run_collector import RunCollectorCallbackHandler
@@ -35,17 +33,9 @@ from langgraph_sdk.errors import (
 )
 from langsmith import Client, agent_address, get_tracing_context, tracing_context
 from langsmith.run_trees import RunTree, WriteReplica
-
-from openswe.remote_runtime.git_metadata import GitTarget, TurnGitMetadata
-
-sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "mda"))
-sys.path.insert(
-    0,
-    str(Path(__file__).resolve().parents[2] / "vendor/managed-deepagents-sdk/packages/pypi/src"),
-)
-
 from managed_deepagents import define_deep_agent
 from managed_deepagents.runtime import compile_managed_agent_async
+from pydantic import JsonValue
 from rt.backend import (
     BackendCallError,
     BackendUnavailableError,
@@ -54,11 +44,31 @@ from rt.backend import (
     ToolReply,
     ToolSpec,
 )
-from rt.middleware import BackendRunMiddleware
+from rt.middleware import BackendRunMiddleware, RunState
 from rt.sandbox import SandboxCreate, SandboxSpec
 from rt.sandbox_tools import SandboxToolsMiddleware
 from rt.tools import backend_tool
 from rt.tracing import TurnTrace
+
+
+def _run_metadata(patch: Mapping[str, object]) -> Mapping[str, object]:
+    """The metadata a LangSmith run update sets."""
+    extra = patch.get("extra")
+    metadata = extra.get("metadata") if isinstance(extra, Mapping) else None
+    return metadata if isinstance(metadata, Mapping) else {}
+
+
+def _evidence(
+    kind: Literal["work", "pr"], key: str, repo: str, branch: str, observed_at: int
+) -> dict[str, JsonValue]:
+    """Git evidence as the backend's hooks record it for the turn ``turn``."""
+    return {
+        f"git_trace_{kind}:{key}": {
+            "invocation": "turn",
+            "observed_at": observed_at,
+            "targets": [{"repo": repo, "branch": branch}],
+        }
+    }
 
 
 @pytest.mark.parametrize(
@@ -139,7 +149,7 @@ async def test_managed_traces_keep_the_requested_project_without_mirroring(
     [("connect", 10, 11), ("connect", 11, 11), (503, 1, 1), (504, 1, 1)],
 )
 async def test_a_tool_call_the_backend_never_answered(
-    monkeypatch: pytest.MonkeyPatch, failure: str | int, failures: int, attempts: int
+    monkeypatch: pytest.MonkeyPatch, failure: Literal["connect"] | int, failures: int, attempts: int
 ) -> None:
     monkeypatch.setenv("OPEN_SWE_BACKEND_URL", "https://backend.invalid")
     monkeypatch.setattr("rt.tools.run_id", lambda: "run-1")
@@ -167,6 +177,7 @@ async def test_a_tool_call_the_backend_never_answered(
         tool_call_id="call-1",
         store=None,
     )
+    assert served.coroutine is not None
     result = await served.coroutine(runtime=runtime)
     assert isinstance(result, Command)
     [result_message] = result.update["messages"]
@@ -306,9 +317,12 @@ async def test_box_tools_leave_to_the_backend_what_its_guards_and_paths_settle(
     reply = ToolReply(
         message=message_to_dict(ToolMessage(content="guarded", tool_call_id="call-1"))
     )
-    monkeypatch.setattr(backend, "tool", AsyncMock(return_value=reply))
-    monkeypatch.setattr(backend, "tool_started", AsyncMock())
-    monkeypatch.setattr(backend, "tool_result", AsyncMock())
+    on_backend_call = AsyncMock(return_value=reply)
+    started = AsyncMock()
+    finished = AsyncMock()
+    monkeypatch.setattr(backend, "tool", on_backend_call)
+    monkeypatch.setattr(backend, "tool_started", started)
+    monkeypatch.setattr(backend, "tool_result", finished)
     spec = SandboxSpec(
         create=SandboxCreate(fs_capacity_bytes=1, idle_ttl_seconds=1, delete_after_stop_seconds=1),
         tools=["execute", "read_file"],
@@ -336,11 +350,11 @@ async def test_box_tools_leave_to_the_backend_what_its_guards_and_paths_settle(
     )
     await backend.reports.drain()
 
-    assert backend.tool.await_count == int(on_backend)
+    assert on_backend_call.await_count == int(on_backend)
     assert in_box.await_count == int(not on_backend)
     # The backend records the calls it runs; the ones run in the box are reported to it.
-    assert backend.tool_started.await_count == int(not on_backend)
-    assert backend.tool_result.await_count == int(not on_backend)
+    assert started.await_count == int(not on_backend)
+    assert finished.await_count == int(not on_backend)
 
 
 @pytest.mark.parametrize("next_trace_available", [True, False])
@@ -352,48 +366,40 @@ async def test_turn_reconciliation_reaches_runtime_root_llm_and_nested_calls(
     actor = {"ls_repo_provider": "github", "ls_attribution_identifier": "trigger"}
     final = {**actor, "ls_git_repo": "org/actual", "ls_git_branch": "Exact/PR-head"}
     backend = OpenSweBackend("secret-token")
-    git = TurnGitMetadata({"configurable": {"invocation_id": "turn"}, "metadata": actor})
 
     @tool
     async def nested_call(text: str) -> str:
         """Call a nested runnable."""
         TurnTrace.record_evidence(
             {
-                **git.evidence(
-                    [GitTarget(repo="org/actual", branch="local")], "work", observed_at=1
-                ),
-                **git.evidence(
-                    [GitTarget(repo="org/later", branch="later/head")],
-                    "pr-later",
-                    pr=True,
-                    observed_at=2,
-                ),
-                **git.evidence(
-                    [GitTarget(repo="org/actual", branch=final["ls_git_branch"])],
-                    "pr-first",
-                    pr=True,
-                    observed_at=3,
-                ),
+                **_evidence("work", "work", "org/actual", "local", 1),
+                **_evidence("pr", "pr-later", "org/later", "later/head", 2),
+                **_evidence("pr", "pr-first", "org/actual", final["ls_git_branch"], 3),
             }
         )
         return await RunnableLambda(lambda value: value).ainvoke(text)
 
     async def phase(name: str, body: dict[str, object]) -> PhaseReply:
         if name == "prepare":
-            return PhaseReply(update=await git.begin())
+            return PhaseReply(
+                update={"git_trace_baseline": {"invocation": "turn", "snapshot": None}}
+            )
         if name == "before_model":
             assert isinstance(state := body["state"], dict)
             assert "git_trace_work:previous" not in state
             await nested_call.ainvoke({"text": "nested"})
-            return PhaseReply(
-                update=git.evidence(
-                    [GitTarget(repo="org/actual", branch="local")], "work", observed_at=1
-                )
-            )
+            return PhaseReply(update=_evidence("work", "work", "org/actual", "local", 1))
         if name == "after_agent":
-            assert isinstance(state := body["state"], dict)
+            # What the backend reconciles from that evidence: the earliest PR target first.
             return PhaseReply(
-                trace_metadata=await git.reconcile(state), update={"git_trace_baseline": None}
+                trace_metadata={
+                    **final,
+                    "open_swe_git_targets": [
+                        {"repo": "org/actual", "branch": final["ls_git_branch"]},
+                        {"repo": "org/later", "branch": "later/head"},
+                    ],
+                },
+                update={"git_trace_baseline": None},
             )
         return PhaseReply()
 
@@ -413,7 +419,7 @@ async def test_turn_reconciliation_reaches_runtime_root_llm_and_nested_calls(
         middleware=[BackendRunMiddleware(backend, "turn", trace_metadata=actor)],
         checkpointer=InMemorySaver(),
     )
-    config = {
+    config: RunnableConfig = {
         "configurable": {"thread_id": "trace-test"},
         "callbacks": [tracer],
         "metadata": {"invocation_id": "turn", "existing_key": "preserved"},
@@ -436,9 +442,9 @@ async def test_turn_reconciliation_reaches_runtime_root_llm_and_nested_calls(
     assert any(run["run_type"] == "llm" for run in created.values())
     assert any(run["run_type"] == "tool" for run in created.values())
     reconciled = {
-        run_id: patch
+        run_id: metadata
         for run_id, patch in updates
-        if patch.get("extra", {}).get("metadata", {}).get("ls_git_repo") == "org/actual"
+        if (metadata := _run_metadata(patch)).get("ls_git_repo") == "org/actual"
     }
     attributed = {
         run_id
@@ -447,7 +453,7 @@ async def test_turn_reconciliation_reaches_runtime_root_llm_and_nested_calls(
     }
     assert attributed <= reconciled.keys()
     for run_id in attributed:
-        metadata = reconciled[run_id]["extra"]["metadata"]
+        metadata = reconciled[run_id]
         assert metadata.items() >= final.items()
         assert metadata["open_swe_git_targets"] == [
             {"repo": "org/actual", "branch": "Exact/PR-head"},
@@ -584,9 +590,8 @@ async def test_box_call_git_evidence_reaches_the_turn_after_its_run_closed(
 ) -> None:
     """The backend answers a box call's report after the call's run closed; its evidence still counts."""
     monkeypatch.setenv("OPEN_SWE_BACKEND_URL", "https://backend.invalid")
-    git = TurnGitMetadata({"configurable": {"invocation_id": "turn"}})
-    evidence = git.evidence([GitTarget(repo="org/actual", branch="work")], "call-1", observed_at=1)
-    turn = RunTree(name="turn", run_type="chain", metadata={"open_swe_git_evidence": {}})
+    evidence = _evidence("work", "call-1", "org/actual", "work", 1)
+    turn = RunTree(name="turn", run_type="chain", extra={"metadata": {"open_swe_git_evidence": {}}})
     roots: list[RunTree | None] = [turn]
     monkeypatch.setattr(TurnTrace, "current_root", staticmethod(lambda: roots[0]))
     backend = OpenSweBackend("secret-token")
@@ -652,7 +657,7 @@ async def test_a_read_file_the_backend_serves_gets_the_read_checks(
 
 
 class _ToolCallingModel(GenericFakeChatModel):
-    def bind_tools(self, tools: object, **kwargs: object) -> _ToolCallingModel:
+    def bind_tools(self, tools: object, **kwargs: object) -> Self:
         return self
 
 
@@ -703,7 +708,8 @@ async def _launch_worker(
             "configurable": {"thread_id": "coordinator-thread", "assistant_id": "open-swe"},
             "metadata": {"assistant_id": "open-swe"},
         },
-        context={"graph": "agent", "__run_token": "coordinator-token"},
+        # The launch middleware reads this context, though it declares no context type.
+        context={"graph": "agent", "__run_token": "coordinator-token"},  # ty: ignore[invalid-argument-type]
     )
     # Open SWE's task messages report the worker; deepagents does not poll it too.
     assert not values.get("async_tasks")
@@ -731,6 +737,7 @@ async def test_a_launched_worker_carries_a_grant_never_its_coordinators_run_toke
         ],
     )
 
+    assert client.runs.create.await_args is not None
     launch = client.runs.create.await_args.kwargs
     assert launch["context"] == {"graph": "agent", "__worker_grant": "worker-grant"}
     assert launch["input"] == {
@@ -740,6 +747,7 @@ async def test_a_launched_worker_carries_a_grant_never_its_coordinators_run_toke
     # The backend settles the launched run from its webhook, as it does every worker run.
     assert launch["webhook"] == "https://backend.invalid/webhooks/run-complete?token=t"
     # No parent assistant, so the worker never wakes the coordinator on MDA's own.
+    assert client.threads.create.await_args is not None
     assert client.threads.create.await_args.kwargs["metadata"] == {
         "subagent_name": "general-purpose",
         "parent_thread_id": "coordinator-thread",
@@ -875,19 +883,16 @@ async def test_mda_does_not_retry_tool_pairing_errors(
         else openai.APIStatusError(message, response=response, body={})
     )
     handler = AsyncMock(side_effect=[error, ModelResponse(result=[AIMessage(content="fallback")])])
-    request = ModelRequest(
-        model=model,
-        messages=[],
-        state={
-            "messages": [],
-            "open_swe_call": ModelCall(
-                system_prompt="test",
-                model=None,
-                fallback=ModelSpec(model_id="fallback", kwargs={}),
-                use_gateway=False,
-            ).model_dump(),
-        },
-    )
+    state: RunState = {
+        "messages": [],
+        "open_swe_call": ModelCall(
+            system_prompt="test",
+            model=None,
+            fallback=ModelSpec(model_id="fallback", kwargs={}),
+            use_gateway=False,
+        ).model_dump(mode="json"),
+    }
+    request = ModelRequest(model=model, messages=[], state=state)
     middleware = BackendRunMiddleware(OpenSweBackend("token"), "run")
     if retries:
         response = await middleware.awrap_model_call(request, handler)

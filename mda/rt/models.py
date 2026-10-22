@@ -59,7 +59,9 @@ def _build(model_id: str, kwargs_json: str, use_gateway: bool) -> BaseChatModel:
         kwargs.setdefault("include", ["reasoning.encrypted_content"])
     if use_gateway:
         kwargs.update(_gateway_overrides(provider))
-    return init_chat_model(model_id, **kwargs)
+    return init_chat_model(
+        model_id, model_provider=None, configurable_fields=None, config_prefix=None, **kwargs
+    )
 
 
 def build_model(spec: ModelSpec, *, use_gateway: bool) -> BaseChatModel:

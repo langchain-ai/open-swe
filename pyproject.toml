@@ -120,6 +120,7 @@ ignore = [
 
 [tool.ruff.lint.per-file-ignores]
 "tests/**" = ["SLF001", "PLC2701"]
+"mda/tests/**" = ["SLF001", "PLC2701"]
 # Siblings of one package sharing package-internal helpers. PLC2701 cannot tell
 # an intra-package import from a cross-package one; names these modules expose
 # to the rest of the codebase are public.
@@ -137,9 +138,6 @@ include = ["openswe", "tests"]
 # Runs in the mda/ project's environment, against the graph `mda build` compiles.
 # Sandbox scripts run on an older python3; `make typecheck` checks them at 3.8.
 exclude = ["tests/e2e/mda_entrypoint.py", "openswe/sandbox_scripts/*.py"]
-
-[tool.ty.environment]
-extra-paths = ["mda", "vendor/managed-deepagents-sdk/packages/pypi/src"]
 
 [tool.ty.analysis]
 allowed-unresolved-imports = [
