@@ -435,6 +435,36 @@ describe("transcript events", () => {
     expect(inRecord(started)).toBe(true)
   })
 
+  it("shows a steered turn's message once when the run that continues it reopens with it", () => {
+    // After a steer the server records the follow-on run as a new turn that
+    // opens with the steered turn's own message id; the message stays in the
+    // turn that first recorded it, as the server's projection keeps it.
+    const ended = applyEvent(fromSnapshot(twoTurnSnapshot()), {
+      ...appended(11, {}),
+      event_type: "turn.completed",
+      payload: { turn_id: "turn-2" },
+    })
+    const reopened = applyEvent(ended, {
+      ...appended(12, {}),
+      event_type: "turn.requested",
+      payload: {
+        turn_id: "turn-3",
+        message_id: "human-2",
+        text: "second ask",
+        attachments: [],
+      },
+    })
+    const continued = applyEvent(reopened, {
+      ...appended(13, {}),
+      event_type: "turn.started",
+      payload: { turn_id: "turn-3" },
+    })
+
+    expect(
+      toMessages(continued).filter((message) => message.id === "human-2")
+    ).toHaveLength(1)
+  })
+
   it("stays running while a queued follow-up waits behind the turn that ended", () => {
     const base = fromSnapshot(twoTurnSnapshot())
     const running = applyEvent(base, {
