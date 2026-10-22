@@ -29,6 +29,26 @@ export class AgentsApiError extends DashboardRequestError {
     super(status, message, requestId)
     this.name = "AgentsApiError"
   }
+
+  /** A failed response, named by its `detail` when the body has one. */
+  static async fromResponse(
+    response: Response,
+    requestId?: string
+  ): Promise<AgentsApiError> {
+    let message = response.statusText
+    try {
+      const body: unknown = await response.json()
+      const detail =
+        body !== null && typeof body === "object" && "detail" in body
+          ? (body as { detail: unknown }).detail
+          : undefined
+      if (typeof detail === "string" && detail) message = detail
+      else if (detail !== undefined) message = JSON.stringify(detail)
+    } catch {
+      // Not a JSON error body; the status text is all we have.
+    }
+    return new AgentsApiError(response.status, message, requestId)
+  }
 }
 
 /** Where a thread moves: onto this Mac through its bridge, or to the cloud. */
@@ -516,5 +536,10 @@ export const agentsApi = {
   getThreadBrowser: (threadId: string) =>
     agentsRequest<ThreadBrowser>(
       `/threads/${encodeURIComponent(threadId)}/browser`
+    ),
+  openThreadBrowser: (threadId: string) =>
+    agentsRequest<ThreadBrowser>(
+      `/threads/${encodeURIComponent(threadId)}/browser`,
+      { method: "POST" }
     ),
 }

@@ -26,6 +26,7 @@ from urllib.error import HTTPError, URLError
 from urllib.parse import urljoin, urlsplit
 from urllib.request import Request as UrlRequest
 from urllib.request import urlopen
+from uuid import UUID
 
 from langgraph_sdk import Auth
 from langgraph_sdk.auth import is_studio_user
@@ -47,10 +48,12 @@ from langgraph_sdk.auth.types import (
 )
 
 from managed_deepagents._identity_runtime import (
+    CHANNEL_THREAD_METADATA,
     _field,
     _runtime_user_id,
     build_runtime_identity,
 )
+from managed_deepagents._log import logger
 from managed_deepagents._schedule_auth import (
     ScheduleHandoffUser,
     authorize_schedule,
@@ -194,6 +197,120 @@ class ManagedAuthError(Exception):
         self.detail = detail
 
 
+def _is_resume_only(value: object) -> bool:
+    """Whether a run only answers the interrupts of an existing thread.
+
+    A ``command`` with nothing but a ``resume`` value, no new input, and no
+    webhook to report the thread elsewhere. Encrypted or otherwise opaque run
+    payloads are not.
+
+    Studio resumes with ``multitask_strategy: "rollback"``, the thread's
+    checkpoint and the user's breakpoints, so none of those can be refused.
+    """
+    if not isinstance(value, Mapping):
+        return False
+    thread_id = value.get("thread_id")
+    kwargs = value.get("kwargs")
+    # The Agent Server passes a ``UUID``; a JSON round trip, a string.
+    if not isinstance(thread_id, UUID | str) or not str(thread_id).strip():
+        return False
+    if not isinstance(kwargs, Mapping) or kwargs.get("input") is not None:
+        return False
+    if _changes_more_than_the_resume(value, kwargs):
+        return False
+    command = kwargs.get("command")
+    return (
+        isinstance(command, Mapping)
+        and set(command) == {"resume"}
+        and command.get("resume") is not None
+    )
+
+
+def _changes_more_than_the_resume(
+    value: Mapping[str, object], kwargs: Mapping[str, object]
+) -> bool:
+    """Whether a run would report the thread elsewhere or unmark it.
+
+    The run's metadata merges over the thread's, so it may not name the
+    channel-thread marker.
+    """
+    if kwargs.get("webhook") is not None or _claims_channel_thread(value.get("metadata")):
+        return True
+    config = kwargs.get("config")
+    if config is None:
+        return False
+    return not isinstance(config, Mapping) or _claims_channel_thread(config.get("metadata"))
+
+
+def _claims_channel_thread(metadata: object) -> bool:
+    """Whether run metadata names the channel-thread marker at all."""
+    if metadata is None:
+        return False
+    return not isinstance(metadata, Mapping) or CHANNEL_THREAD_METADATA in metadata
+
+
+def _studio_may_run(value: object) -> bool:
+    """Whether a Studio run only resumes interrupts, so it may run on channel threads."""
+    if _is_resume_only(value):
+        return True
+    # Owner-scoped instead, so Studio sees "not found"; say why, by shape only.
+    logger.info(
+        "studio run is not a resume, so it is owner-scoped %s", json.dumps(_run_shape(value))
+    )
+    return False
+
+
+def _run_shape(value: object) -> dict[str, object]:
+    """What a run payload holds, without its values, to explain a refusal."""
+    if not isinstance(value, Mapping):
+        return {"value": type(value).__name__}
+    kwargs = value.get("kwargs")
+    command = kwargs.get("command") if isinstance(kwargs, Mapping) else None
+    return {
+        "threadId": type(value.get("thread_id")).__name__,
+        "kwargs": type(kwargs).__name__,
+        "input": type(kwargs.get("input")).__name__ if isinstance(kwargs, Mapping) else "missing",
+        "webhook": isinstance(kwargs, Mapping) and kwargs.get("webhook") is not None,
+        "command": (
+            [logger.log_identifier(str(key)) for key in list(command)[:8]]
+            if isinstance(command, Mapping)
+            else type(command).__name__
+        ),
+    }
+
+
+def _stamp_thread_metadata(payload: JsonObject, user: object, key: str, action: str) -> None:
+    """Stamp the caller's owner key on a thread payload's metadata.
+
+    Only managed ingress marks a thread as a channel's; no client can. Searches
+    keep finding threads made before the marker existed.
+    """
+    metadata = payload.get("metadata")
+    if not isinstance(metadata, dict):
+        metadata = {}
+        payload["metadata"] = metadata
+    stamped = cast("JsonObject", metadata)
+    stamped["owner"] = key
+    stamped.pop(CHANNEL_THREAD_METADATA, None)
+    if action != "search" and _channel_conversation_owner_key(user) is not None:
+        stamped[CHANNEL_THREAD_METADATA] = "true"
+    # A run's config metadata merges into what the run sees as well, so a run
+    # can't claim the marker there either.
+    _drop_channel_thread_marker(payload.get("config"))
+
+
+def _drop_channel_thread_marker(holder: object) -> None:
+    """Remove the channel-thread marker from a payload's ``metadata``.
+
+    A run's metadata is its assistant's, thread's, config's and own metadata
+    merged, and only managed ingress may mark a channel's thread.
+    """
+    if isinstance(holder, dict):
+        metadata = holder.get("metadata")
+        if isinstance(metadata, dict):
+            metadata.pop(CHANNEL_THREAD_METADATA, None)
+
+
 def build_managed_auth(identity: IdentityDefinitionLike) -> Auth:
     """Build the managed ``langgraph_sdk.Auth`` handler from a declared identity."""
     cfg: IdentityConfig = identity.config
@@ -224,27 +341,26 @@ def build_managed_auth(identity: IdentityDefinitionLike) -> Auth:
 
 async def _scope_threads(ctx: AuthContext, value: ThreadsValue) -> FilterType | None:
     # Let Studio inspect every deployment thread so channel-triggered runs
-    # and their interrupts are visible there. Keep mutations owner-scoped:
-    # Studio identity is reachable by any holder of a workspace LangSmith
-    # API key, so exempting all actions would let that key alter caller
-    # threads too.
+    # and their interrupts are visible there, and answer those interrupts on
+    # channel threads, which channels link to. Keep other mutations
+    # owner-scoped: Studio identity is reachable by any holder of a workspace
+    # LangSmith API key, so exempting all actions would let that key alter
+    # caller threads or speak in a channel's conversation.
     user = ctx.user
     if ctx.action == "search" and schedule_access(user) is not None:
         return None
     if is_local_dev_unscoped_user(user):
         return None
-    if is_studio_user(user) and ctx.action in {"read", "search"}:
+    studio = is_studio_user(user)
+    if studio and ctx.action in {"read", "search"}:
         return None
+    if studio and ctx.action == "create_run" and _studio_may_run(value):
+        return {CHANNEL_THREAD_METADATA: "true"}
     key = _thread_owner_key(user)
     if isinstance(value, dict):
         # Stamp ownership on every threads payload, including the actions
         # whose upstream TypedDict does not declare ``metadata``.
-        payload = cast("JsonObject", value)
-        metadata = payload.get("metadata")
-        if not isinstance(metadata, dict):
-            metadata = {}
-            payload["metadata"] = metadata
-        cast("JsonObject", metadata)["owner"] = key
+        _stamp_thread_metadata(cast("JsonObject", value), user, key, ctx.action)
     return {"owner": key}
 
 
@@ -264,7 +380,7 @@ async def _scope_store(ctx: AuthContext, value: dict[str, Any]) -> None:
         raise _http_exception(err) from err
 
 
-async def _scope_any(ctx: AuthContext, value: dict[str, Any]) -> None:  # noqa: ARG001
+async def _scope_any(ctx: AuthContext, value: dict[str, Any]) -> None:
     """Global (catch-all) authorization handler; the SDK requires ``value``.
 
     LangGraph authorization is fail-open: an unhandled resource is permitted,
@@ -273,6 +389,11 @@ async def _scope_any(ctx: AuthContext, value: dict[str, Any]) -> None:  # noqa: 
     registered alongside this one take precedence over it, so threads and
     store keep their own scoping.
     """
+    # An assistant's metadata merges into its runs' too, so no caller, Studio
+    # included, may mark an assistant as a channel's.
+    if ctx.resource == "assistants" and isinstance(value, dict):
+        _drop_channel_thread_marker(value)
+        _drop_channel_thread_marker(value.get("config"))
     if _is_unscoped_principal(ctx.user):
         return
     try:
