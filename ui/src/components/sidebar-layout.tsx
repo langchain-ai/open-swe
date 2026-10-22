@@ -11,6 +11,7 @@ import { IconButton } from "@langchain/macaw-components/IconButton"
 import { SidebarSimpleIcon } from "@phosphor-icons/react/dist/ssr/SidebarSimple"
 
 import { cn } from "@/lib/utils"
+import { withViewTransition } from "@/lib/motion"
 
 const STORAGE_WIDTH = "open-swe.sidebar.width"
 const STORAGE_COLLAPSED = "open-swe.sidebar.collapsed"
@@ -56,7 +57,7 @@ export function useSidebarLayout() {
   }, [])
 
   const toggle = useCallback(
-    () => setCollapsed(!collapsed),
+    () => withViewTransition(() => setCollapsed(!collapsed)),
     [collapsed, setCollapsed]
   )
 

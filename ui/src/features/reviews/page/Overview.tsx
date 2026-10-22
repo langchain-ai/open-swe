@@ -159,6 +159,7 @@ function Description({
       </header>
       <div
         ref={ref}
+        data-motion-clamp=""
         className={cn(
           "relative flow-root max-w-[100ch] text-xs leading-[1.65]",
           clamped && "overflow-hidden"

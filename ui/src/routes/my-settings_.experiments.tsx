@@ -20,6 +20,11 @@ function ExperimentsPage() {
     >
       <SettingsSection title="Interface">
         <AssistantUiPreference />
+        <ProfileSwitchRow
+          field="experimental_ui_motion"
+          label="Interface motion (experimental)"
+          description="Animate expanding and collapsing content, and the sidebar and side panel. Follows your system's reduced-motion setting."
+        />
       </SettingsSection>
       <SettingsSection title="Slack">
         <ProfileSwitchRow

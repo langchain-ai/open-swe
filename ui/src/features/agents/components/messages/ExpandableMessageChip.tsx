@@ -3,6 +3,7 @@ import { useId, useState } from "react"
 import type { ReactNode } from "react"
 
 import { cn } from "@/lib/utils"
+import { useRevealOnToggle } from "@/lib/motion"
 
 export function ExpandableMessageChip({
   label,
@@ -18,6 +19,7 @@ export function ExpandableMessageChip({
   accessibleLabel?: string
 }) {
   const [open, setOpen] = useState(false)
+  const reveal = useRevealOnToggle(open)
   const contentId = useId()
 
   return (
@@ -45,7 +47,11 @@ export function ExpandableMessageChip({
         </button>
         {actions}
       </div>
-      {open && <div id={contentId}>{children}</div>}
+      {open && (
+        <div id={contentId} {...reveal}>
+          {children}
+        </div>
+      )}
     </div>
   )
 }

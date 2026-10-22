@@ -14,6 +14,7 @@
 @config "../tailwind.config.mjs";
 @import "./styles/agents.css";
 @import "./styles/markdown.css";
+@import "./styles/motion.css";
 @source "../node_modules/streamdown/dist/*.js";
 
 @custom-variant dark (&:where(.dark, .dark *));

@@ -27,6 +27,7 @@ import { terminalTabTitle } from "@/features/agents/lib/terminalTabTitle"
 import { workspaceTargetKey } from "@/features/agents/lib/workspaceFiles"
 import { useRegisterAppCommands } from "@/lib/appCommands"
 import { cn } from "@/lib/utils"
+import { withViewTransition } from "@/lib/motion"
 
 export interface AgentRightPanelProps {
   threadRef: PanelThreadRef
@@ -199,7 +200,7 @@ export function AgentRightPanel(props: AgentRightPanelProps) {
           aliases: ["show panel", "hide panel", "right panel"],
           shortcuts: ["mod+alt+b"],
           group: "Workspace",
-          run: () => onCollapsedChange(!collapsed),
+          run: () => withViewTransition(() => onCollapsedChange(!collapsed)),
         },
         ...(diffAvailable
           ? [
@@ -252,7 +253,7 @@ export function AgentRightPanel(props: AgentRightPanelProps) {
         color="secondary"
         icon={SidebarSimpleIcon}
         label="Show panel"
-        onClick={() => onCollapsedChange(false)}
+        onClick={() => withViewTransition(() => onCollapsedChange(false))}
         tooltipProps={{ side: "left" }}
         variant="plain"
       />
@@ -282,10 +283,12 @@ export function AgentRightPanel(props: AgentRightPanelProps) {
         color="secondary"
         icon={SidebarSimpleIcon}
         label="Hide panel"
-        onClick={() => {
-          setMaximized(false)
-          onCollapsedChange(true)
-        }}
+        onClick={() =>
+          withViewTransition(() => {
+            setMaximized(false)
+            onCollapsedChange(true)
+          })
+        }
         variant="plain"
       />
     </div>

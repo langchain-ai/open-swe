@@ -3,7 +3,14 @@ import pytest
 from openswe.dashboard.profiles import ProfileUpdate, get_profile, upsert_profile
 
 
-@pytest.mark.parametrize("flag", ["experimental_assistant_ui", "auto_human_review_enabled"])
+@pytest.mark.parametrize(
+    "flag",
+    [
+        "experimental_assistant_ui",
+        "experimental_ui_motion",
+        "auto_human_review_enabled",
+    ],
+)
 async def test_conversation_preference_is_personal_and_survives_other_profile_edits(
     user_records, flag
 ):

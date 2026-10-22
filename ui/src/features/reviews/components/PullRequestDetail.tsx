@@ -20,6 +20,7 @@ import { TextPopover } from "./TextPopover"
 import { PullRequestFiles } from "./PullRequestFiles"
 import { api } from "@/lib/api"
 import { optimisticUpdate } from "@/lib/optimistic"
+import { useRevealOnToggle } from "@/lib/motion"
 import { cn } from "@/lib/utils"
 import {
   PULL_REQUEST_STATUS,
@@ -312,6 +313,7 @@ function Conversation({
   resolve: ReturnType<typeof useResolveThreads>
 }) {
   const [open, setOpen] = useState(false)
+  const reveal = useRevealOnToggle(open)
   const [clamped, setClamped] = useState(false)
   // Only offer the toggle when there is something hidden to show.
   const measure = useCallback((node: HTMLParagraphElement | null) => {
@@ -356,7 +358,7 @@ function Conversation({
         </div>
       </div>
       {open ? (
-        <div className="mt-space-1 max-w-[72ch]">
+        <div className="mt-space-1 max-w-[72ch]" {...reveal}>
           <Markdown content={thread.body} />
           {thread.replies.length > 0 && (
             <ul className="mt-space-2 space-y-space-2 border-t border-default pt-space-2">

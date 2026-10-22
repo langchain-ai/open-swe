@@ -25,6 +25,7 @@ import type {
 import { api } from "@/lib/api"
 import { useSession } from "@/lib/session"
 import { cn } from "@/lib/utils"
+import { useRevealOnToggle } from "@/lib/motion"
 import { subtleLink } from "@/features/reviews/lib/styles"
 import { Markdown } from "@/features/agents/components/chat/Markdown"
 import { MarkPullRequestReady } from "@/features/reviews/components/MarkPullRequestReady"
@@ -378,6 +379,7 @@ function ChecksRow({
   login: string
 }) {
   const [expanded, setExpanded] = useState(status.ci === "failing")
+  const reveal = useRevealOnToggle(expanded)
   const askInChat = useReviewPage((state) => state.askInChat)
   const states = checks.map(checkState)
   const failed = states.filter((s) => s === "fail").length
@@ -429,7 +431,10 @@ function ChecksRow({
         {summary}
       </Row>
       {expanded && (
-        <ul className="max-h-64 overflow-y-auto pr-space-4 pb-space-2 pl-space-7">
+        <ul
+          {...reveal}
+          className="max-h-64 overflow-y-auto pr-space-4 pb-space-2 pl-space-7"
+        >
           {sorted.map(({ check, state }) => (
             <li
               key={check.name}
@@ -505,6 +510,7 @@ function ReviewsRow({
     (state) => state.showOpenConversations
   )
   const [expanded, setExpanded] = useState(false)
+  const reveal = useRevealOnToggle(expanded)
   const open = useOpenConversations(pr)
   const reviewers = reviewerRows(
     status.reviewers ?? [],
@@ -564,10 +570,12 @@ function ReviewsRow({
         {decision}
       </Row>
       {expanded && (
-        <ReviewerList
-          rows={reviewers}
-          className="pr-space-4 pb-space-3 pl-space-7"
-        />
+        <div {...reveal}>
+          <ReviewerList
+            rows={reviewers}
+            className="pr-space-4 pb-space-3 pl-space-7"
+          />
+        </div>
       )}
     </div>
   )
@@ -682,6 +690,7 @@ function OpenSweRow({
     setFlashes((count) => count + 1)
   })
   const expanded = chosen ?? bugs + flags > 0
+  const reveal = useRevealOnToggle(expanded)
   const reReview = useMutation({
     mutationFn: () => api.reReview(pr.owner, pr.repo, pr.number),
     meta: { errorTitle: "Couldn't start the Open SWE review" },
@@ -765,6 +774,7 @@ function OpenSweRow({
         <div
           // Remounting replays the flash each time something asks for the findings.
           key={flashes}
+          {...reveal}
           className={cn(
             "pr-space-4 pb-space-3 pl-space-7",
             flashes > 0 && "motion-safe:animate-attention-flash"

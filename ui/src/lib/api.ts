@@ -310,6 +310,7 @@ export interface Profile {
   concierge_mode?: boolean
   pr_review_links?: boolean
   pr_failure_reactions?: boolean
+  experimental_ui_motion?: boolean
   experimental_monitor?: boolean | null
   experimental_act_as_approval?: boolean
   act_as_always_allowed?: boolean
@@ -332,6 +333,7 @@ export interface ProfileUpdate {
   concierge_mode?: boolean
   pr_review_links?: boolean
   pr_failure_reactions?: boolean
+  experimental_ui_motion?: boolean
   experimental_monitor?: boolean | null
   experimental_act_as_approval?: boolean
   draft_prs?: boolean

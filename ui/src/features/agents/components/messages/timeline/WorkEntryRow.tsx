@@ -22,6 +22,7 @@ import type { KeyboardEvent, ReactNode } from "react"
 import type { WorkEntryIconName, WorkEntryView } from "./workEntry"
 import { formatHoverTimestamp } from "@/features/agents/lib/messageTimestamps"
 import { cn } from "@/lib/utils"
+import { useRevealOnToggle } from "@/lib/motion"
 
 const ICONS: Record<WorkEntryIconName, IconComponent> = {
   bot: RobotIcon,
@@ -130,6 +131,7 @@ export function WorkEntryRow({
   defaultExpanded?: boolean
 }) {
   const [expanded, setExpanded] = useState(defaultExpanded)
+  const reveal = useRevealOnToggle(expanded)
   const toggle = useCallback(() => setExpanded((value) => !value), [])
   const [loadedText, setLoadedText] = useState<string | null>(null)
   const [loadError, setLoadError] = useState<string | null>(null)
@@ -287,6 +289,7 @@ export function WorkEntryRow({
 
       {expanded && canExpand && (
         <div
+          {...reveal}
           className="ms-space-5 mt-space-1 cursor-default border-s border-subtle ps-space-3 pt-0.5"
           onClick={stopRowToggle}
           onPointerDown={stopRowToggle}
