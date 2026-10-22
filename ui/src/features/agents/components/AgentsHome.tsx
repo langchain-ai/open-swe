@@ -687,6 +687,8 @@ export function AgentsHome({
           collapsed={panelCollapsed}
           onCollapsedChange={handlePanelCollapsedChange}
           renderDiff={() => null}
+          renderBrowser={() => null}
+          browserAvailable={false}
         />
       )}
     </>

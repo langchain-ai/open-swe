@@ -20,7 +20,7 @@ from langchain_core.tools import BaseTool, StructuredTool, ToolException
 
 from mcp.shared.exceptions import MCPError
 from mcp.types import Tool
-from openswe.analytics.segment import record_mcp_tool
+from openswe.analytics.posthog import record_mcp_tool
 from openswe.mcp.models import MCPConnection, MCPScope, MCPToolProvenance
 from openswe.mcp.oauth import MCPOAuthError, connection_auth
 from openswe.mcp.transport import MCPDiscoveryError, mcp_http_client

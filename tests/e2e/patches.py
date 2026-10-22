@@ -312,6 +312,12 @@ def apply() -> None:
     workspace_refresh._create_builder_sandbox = _fake_builder_sandbox
     workspace_refresh._release_builder_sandbox = _release_nothing
 
+    # Every MDA run names its thread's browser, so sharing a thread deletes it.
+    # No browser exists without LangSmith, so deleting one finds nothing.
+    from openswe.sandboxes.browsers import LangSmithBrowser
+
+    LangSmithBrowser.delete = _delete_nothing
+
     # The review diff reads against a REST base its module captured at import time.
     from openswe.github import pull_request_diff
     from openswe.review import chat as review_chat
@@ -390,6 +396,10 @@ async def _fake_builder_sandbox(_record: object, _snapshot_id: object = None) ->
 
 
 async def _release_nothing(_sandbox_id: str) -> None:
+    return None
+
+
+async def _delete_nothing(_browser: object) -> None:
     return None
 
 

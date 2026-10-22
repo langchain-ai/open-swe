@@ -37,7 +37,7 @@ export interface AgentRightPanelProps {
   diffAvailable: boolean
   /** Rendered for the Changes surface; `fullScreen` drives layout-only extras. */
   renderDiff: (state: { fullScreen: boolean }) => ReactNode
-  /** Rendered for the Browser surface, which only threads that can open a browser offer. */
+  /** Rendered for the Browser surface, which only cloud threads offer. */
   renderBrowser?: () => ReactNode
   browserAvailable?: boolean
   collapsed: boolean
