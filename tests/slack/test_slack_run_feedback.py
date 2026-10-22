@@ -8,7 +8,17 @@ import pytest
 
 from openswe.slack import run_feedback
 from openswe.slack.payloads import SlackChannelContext, SlackInteraction
-from openswe.utils.json_types import JsonObject
+from openswe.slack.records import SlackMessage
+
+
+def _mapping(run_id: str, triggering_user_id: str | None) -> SlackMessage:
+    return SlackMessage(
+        channel_id="C1",
+        message_ts="2.0",
+        run_id=run_id,
+        thread_ts="1.0",
+        triggering_user_id=triggering_user_id,
+    )
 
 
 def interaction(rating: Literal["up", "down"] = "up") -> SlackInteraction:
@@ -39,7 +49,7 @@ async def saved_feedback(monkeypatch: pytest.MonkeyPatch) -> AsyncMock:
     monkeypatch.setattr(
         run_feedback,
         "lookup_slack_run_mapping",
-        AsyncMock(return_value={"run_id": "run-1", "triggering_user_id": "U1"}),
+        AsyncMock(return_value=_mapping("run-1", "U1")),
     )
     monkeypatch.setattr(
         run_feedback.SlackChannel,
@@ -76,13 +86,13 @@ async def test_rerating_updates_same_feedback_on_exact_reply_run(saved_feedback:
     "mapping",
     [
         None,
-        {"run_id": "other-run", "triggering_user_id": "U1"},
-        {"run_id": "run-1", "triggering_user_id": "other-user"},
-        {"run_id": "run-1"},
+        _mapping("other-run", "U1"),
+        _mapping("run-1", "other-user"),
+        _mapping("run-1", None),
     ],
 )
 async def test_unknown_message_run_or_requester_cannot_be_rated(
-    saved_feedback: AsyncMock, monkeypatch: pytest.MonkeyPatch, mapping: JsonObject | None
+    saved_feedback: AsyncMock, monkeypatch: pytest.MonkeyPatch, mapping: SlackMessage | None
 ) -> None:
     monkeypatch.setattr(run_feedback, "lookup_slack_run_mapping", AsyncMock(return_value=mapping))
     payload = interaction()

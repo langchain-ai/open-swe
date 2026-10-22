@@ -3,7 +3,6 @@ to the same agent thread. Off by default, where a DM keeps a thread per message.
 """
 
 import json
-from types import SimpleNamespace
 from typing import Any, cast
 from unittest.mock import AsyncMock
 
@@ -84,7 +83,7 @@ def _patch(monkeypatch: pytest.MonkeyPatch) -> None:
     async def repo_config(*_args: Any, **_kwargs: Any) -> dict[str, str]:
         return {"owner": "langchain-ai", "name": "open-swe"}
 
-    monkeypatch.setattr(slack_events, "get_client", lambda url: _FakeClient())
+    monkeypatch.setattr(slack_events.event_claims, "claim", AsyncMock(return_value=True))
     monkeypatch.setattr(webhook_common, "verify_slack_signature", lambda **_kwargs: True)
     monkeypatch.setattr(webhook_common, "resolve_slack_thread_id", AsyncMock(return_value="t1"))
     monkeypatch.setattr(webhook_common, "lookup_slack_thread_id", AsyncMock(return_value="t1"))
@@ -158,10 +157,6 @@ async def test_external_dm_is_preserved_while_concierge_is_busy_or_idle(
 ) -> None:
     from openswe.slack import dm
 
-    threads = AsyncMock()
-    threads.get.return_value = {"status": status}
-    client = SimpleNamespace(threads=threads)
-    monkeypatch.setattr(dm, "langgraph_client", lambda: client)
     monkeypatch.setattr(dm, "lookup_slack_thread_id", AsyncMock(return_value="concierge-thread"))
     queue = AsyncMock(return_value=True)
     monkeypatch.setattr(dm, "queue_message_for_thread", queue)
@@ -174,7 +169,6 @@ async def test_external_dm_is_preserved_while_concierge_is_busy_or_idle(
     assert "Mark the PR ready for review" in note
     assert "not written by this person" in note
     assert "already sent" in note
-    threads.update_state.assert_not_awaited()
 
 
 @pytest.mark.asyncio
@@ -187,14 +181,13 @@ async def test_a_note_reaches_the_concierge_thread_only_in_concierge_mode(
     monkeypatch.setattr(dm.User, "concierge_mode_for_slack", AsyncMock(return_value=concierge_on))
     lookup = AsyncMock(return_value="concierge-thread")
     monkeypatch.setattr(dm, "lookup_slack_thread_id", lookup)
-    monkeypatch.setattr(dm, "langgraph_client", lambda: object())
     queue = AsyncMock(return_value=True)
     monkeypatch.setattr(dm, "queue_message_for_thread", queue)
 
     await dm.note_for_concierge("U1", "D1", "a note")
 
     if concierge_on:
-        assert lookup.await_args.args[1:] == ("D1", CONCIERGE_TS)
+        lookup.assert_awaited_once_with("D1", CONCIERGE_TS)
         queue.assert_awaited_once_with("concierge-thread", [{"type": "text", "text": "a note"}])
     else:
         queue.assert_not_awaited()

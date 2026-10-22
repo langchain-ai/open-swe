@@ -1,6 +1,5 @@
 """Binary content deepagents offloads out of thread state, kept in PostgreSQL."""
 
-import logging
 import re
 from collections.abc import Iterable, Mapping, Sequence
 from datetime import datetime
@@ -15,11 +14,7 @@ from sqlalchemy.orm import Mapped, mapped_column
 from openswe.database import postgres
 from openswe.database.agent_store import AgentStore
 from openswe.database.orm import NOW, Base
-from openswe.database.store_imports import StoreImport, run_store_import
-from openswe.store import StoreEntry, delete_value, search_entries
 from openswe.utils.json_types import JsonObject
-
-logger = logging.getLogger(__name__)
 
 THREAD_BLOBS_NAMESPACE = "thread_blobs"
 _BLOB_REF_KEY = "deepagents_blob"
@@ -116,34 +111,3 @@ async def copy_thread_blobs(
             )
             .on_conflict_do_nothing()
         )
-
-
-async def run_blob_import() -> None:
-    """Drain thread blobs from the Store in the background, so a backlog never delays startup."""
-    try:
-        await run_store_import("thread_blobs", import_store_blobs)
-    except Exception:
-        logger.exception("Importing thread blobs from the LangGraph Store failed")
-
-
-async def import_store_blobs() -> StoreImport:
-    """Move blobs still in the LangGraph Store into PostgreSQL, a page at a time."""
-    moved = 0
-    while page := await search_entries([THREAD_BLOBS_NAMESPACE]):
-        for entry in page:
-            await _import_blob(entry)
-        moved += len(page)
-    return StoreImport(moved=moved)
-
-
-async def _import_blob(entry: StoreEntry) -> None:
-    namespace = entry.namespace or [THREAD_BLOBS_NAMESPACE]
-    if len(namespace) != 2:
-        raise ValueError(f"unexpected thread blob namespace {namespace!r}")
-    async with postgres.session() as session:
-        await session.execute(
-            insert(ThreadBlob)
-            .values(thread_id=namespace[1], path=entry.key, value=entry.value)
-            .on_conflict_do_nothing()
-        )
-    await delete_value(namespace, entry.key)

@@ -20,6 +20,7 @@ from openswe.threads.access import (
 )
 from openswe.threads.machine_reads import machine_thread
 from openswe.threads.principals import Principal
+from openswe.threads.router import POSTING_COMMANDS
 from openswe.threads.runs import (
     _ASSISTANT_ID,
     QUEUED_BY_KEY,
@@ -50,9 +51,6 @@ _TTFT_OBSERVER_TASKS: set[asyncio.Task[None]] = set()
 _PROXY_REQUEST_TIMEOUT = httpx2.Timeout(30.0, connect=5.0)
 _PROXY_STREAM_TIMEOUT = httpx2.Timeout(None)
 _DISCOVERY_HISTORY_LIMIT = 5
-_THREAD_POST_COMMAND_METHODS = frozenset(
-    {"run.start", "input.respond", "input.inject", "state.fork"}
-)
 
 
 def require_json_content_type(content_type: str) -> None:
@@ -194,7 +192,7 @@ async def proxy_dashboard_thread_commands(
     method = parsed.get("method")
     try:
         thread = await langgraph_client().threads.get(thread_id)
-    except Exception:  # noqa: BLE001
+    except NotFoundError:
         thread = None
 
     creating = False
@@ -206,7 +204,7 @@ async def proxy_dashboard_thread_commands(
         thread_busy = False
     else:
         metadata = thread_metadata(thread)
-        post_command = method in _THREAD_POST_COMMAND_METHODS
+        post_command = method in POSTING_COMMANDS
         if post_command:
             principal.assert_can_post(metadata)
         else:
@@ -312,7 +310,7 @@ async def proxy_dashboard_thread_commands(
             await _fail_requested_turn(thread_id, enriched)
     if run_start_succeeded and not creating and not relayed_from:
         try:
-            await _notify_slack_web_handoff(thread_id, metadata, langgraph_client())
+            await _notify_slack_web_handoff(thread_id, metadata)
         except Exception:
             logger.exception(
                 "Failed to update Slack message for dashboard handoff on %s", thread_id

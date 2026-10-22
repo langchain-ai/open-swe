@@ -4,22 +4,23 @@ import json
 import logging
 from time import perf_counter
 from typing import Annotated, Any, Literal
-from uuid import UUID
 
 from fastapi import APIRouter, HTTPException, Query, Request, Response
 from fastapi.responses import JSONResponse, StreamingResponse
 from pydantic import BaseModel, Field
 
 from openswe.audit_logs.middleware import audit_endpoint
-from openswe.config import ENV
 from openswe.dashboard.deps import ADMIN_DEP, SESSION_DEP, session_is_admin
 from openswe.dashboard.oauth import bind_audit_session, decode_upload_ticket
-from openswe.dashboard.user_preferences import get_user_preferences
 from openswe.github.pull_request_checks import PullRequestState
 from openswe.github.pull_request_context import PullRequestFixScope
 from openswe.github.token_auth import bearer_github_token
 from openswe.message_queue import QueuedPreview
-from openswe.threads import terminal
+from openswe.threads import browser, terminal
+from openswe.threads.background_work import (
+    BackgroundWork,
+    get_dashboard_thread_background_work,
+)
 from openswe.threads.diffs import (
     get_dashboard_thread_branch_diff,
     get_dashboard_thread_recovery_patch,
@@ -44,6 +45,7 @@ from openswe.threads.handlers import (
     get_dashboard_thread_queued_messages,
     get_dashboard_thread_state,
     interrupt_transcript_turns,
+    move_thread,
     rename_dashboard_thread,
     resolve_all_dashboard_threads,
     resolve_dashboard_thread,
@@ -75,22 +77,11 @@ from openswe.threads.runs import (
     create_dashboard_session,
 )
 from openswe.threads.session_upload import UPLOAD_REQUEST_BODY, UploadStream, upload_session
-from openswe.utils.langsmith import get_langsmith_trace_url
 from openswe.utils.timing import server_timing_header
 
 logger = logging.getLogger(__name__)
 
 router = APIRouter(tags=["threads"])
-
-
-@router.get("/me/local-trace-url/{thread_id}")
-async def api_get_local_trace_url(
-    thread_id: UUID,
-    session: dict[str, str] = SESSION_DEP,
-) -> dict[str, str | None]:
-    preferences = await get_user_preferences(session["sub"])
-    project = preferences["local_tracing_project"] or ENV.LANGSMITH_PROJECT.get()
-    return {"trace_url": await get_langsmith_trace_url(str(thread_id), project_name=project)}
 
 
 @router.get("/threads")
@@ -347,6 +338,7 @@ async def api_get_thread(
 
 
 router.include_router(terminal.router)
+router.include_router(browser.router)
 
 
 @router.get("/threads/{thread_id}/recovery.patch")
@@ -399,6 +391,15 @@ async def api_get_thread_path(
     )
 
 
+@router.get("/threads/{thread_id}/background-work")
+async def api_get_thread_background_work(
+    thread_id: str, session: dict[str, Any] = SESSION_DEP
+) -> BackgroundWork:
+    return await get_dashboard_thread_background_work(
+        thread_id, session["sub"], email=session.get("email")
+    )
+
+
 @router.get("/threads/{thread_id}/file-index")
 async def api_get_thread_file_index(
     thread_id: str,
@@ -444,6 +445,29 @@ async def api_share_thread_with_workspace(
     session: dict[str, str] = SESSION_DEP,
 ) -> dict[str, object]:
     return await share_thread_with_workspace(thread_id, session["sub"], email=session.get("email"))
+
+
+class ThreadMoveRequest(BaseModel):
+    """Where to move a thread: onto the caller's machine through a bridge, or to the cloud."""
+
+    sandbox_bridge_id: str | None = None
+    target: Literal["cloud"] | None = None
+
+
+@router.post("/threads/{thread_id}/move")
+@audit_endpoint
+async def api_move_thread(
+    thread_id: str,
+    body: ThreadMoveRequest,
+    session: dict[str, str] = SESSION_DEP,
+) -> dict[str, object]:
+    return await move_thread(
+        thread_id,
+        session["sub"],
+        email=session.get("email"),
+        bridge_id=body.sandbox_bridge_id,
+        target=body.target,
+    )
 
 
 @router.post("/threads/{thread_id}/continue-private")

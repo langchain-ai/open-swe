@@ -73,13 +73,13 @@ jobs:
         run: make typecheck
 
   mda-boundary:
-    name: MDA reviewer import boundary
+    name: MDA import boundary
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@v7.0.1
       - uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7 # v10.2.0
-      - name: Check the reviewer imports nothing from the backend
+      - name: Check the MDA project imports nothing from the backend
         run: make mda-boundary
 
   unit-tests:
@@ -271,7 +271,7 @@ jobs:
             echo "agent_unit_tests=true" >> "$GITHUB_OUTPUT"
           fi
 
-          paths=(openswe ui tests/e2e package.json pnpm-lock.yaml pnpm-workspace.yaml pyproject.toml uv.lock langgraph.json langgraph.desktop.json Makefile .github/workflows/ci.yml)
+          paths=(openswe mda vendor/managed-deepagents-sdk ui tests/e2e package.json pnpm-lock.yaml pnpm-workspace.yaml pyproject.toml uv.lock langgraph.json Makefile .github/workflows/ci.yml)
           if git diff --quiet "$BASE_SHA" HEAD -- "${paths[@]}"; then
             echo "browser=false" >> "$GITHUB_OUTPUT"
           else
@@ -316,6 +316,17 @@ jobs:
       - name: Install Python deps (langgraph dev runtime)
         timeout-minutes: 5
         run: uv sync --locked
+      - name: Install Python deps (Managed Deep Agents runtime)
+        timeout-minutes: 5
+        working-directory: mda
+        run: uv sync --locked
+      - uses: dtolnay/rust-toolchain@29eef336d9b2848a0b548edc03f92a220660cdb8 # stable
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+        with:
+          workspaces: vendor/managed-deepagents-sdk
+      - name: Build the mda CLI
+        timeout-minutes: 15
+        run: make mda-cli
       - run: corepack enable
       # Chromium and the dashboard build are identical across the three shards
       # and change only with their own inputs, so all three restore them rather
@@ -383,6 +394,17 @@ jobs:
       - name: Install Python deps (langgraph dev runtime)
         timeout-minutes: 5
         run: uv sync --locked
+      - name: Install Python deps (Managed Deep Agents runtime)
+        timeout-minutes: 5
+        working-directory: mda
+        run: uv sync --locked
+      - uses: dtolnay/rust-toolchain@29eef336d9b2848a0b548edc03f92a220660cdb8 # stable
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+        with:
+          workspaces: vendor/managed-deepagents-sdk
+      - name: Build the mda CLI
+        timeout-minutes: 15
+        run: make mda-cli
       - run: corepack enable
       - name: Install workspace dependencies
         timeout-minutes: 5

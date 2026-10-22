@@ -15,6 +15,7 @@ from openswe.dispatch import dispatch_agent_run
 from openswe.github.pull_request_status import pull_request_identity
 from openswe.github.pull_requests import PullRequest
 from openswe.prompts import prompt
+from openswe.threads import index
 from openswe.threads.access import _ensure_dashboard_github_token
 from openswe.threads.runs import (
     _build_dashboard_configurable,
@@ -297,7 +298,12 @@ async def _find_or_create_pr_thread(
 ) -> str:
     client = langgraph_client()
     url = f"https://github.com/{owner}/{repo}/pull/{number}"
-    candidates = await find_pr_threads(owner, repo, number, login, email, unlisted=unlisted)
+    # A thread made before Managed Deep Agents takes no new work; a new one starts instead.
+    candidates = [
+        thread
+        for thread in await find_pr_threads(owner, repo, number, login, email, unlisted=unlisted)
+        if await index.live_thread_id(thread["thread_id"]) == thread["thread_id"]
+    ]
     if candidates:
         return candidates[0]["thread_id"]
     thread = await create_dashboard_thread_record(
@@ -366,7 +372,7 @@ async def start_pull_request_thread(
     url = f"https://github.com/{full_name}/pull/{number}"
     prompt = intent.prompt(url)
     client = langgraph_client()
-    async with agent_thread_pr_state_lock(client, _pr_thread_lock_key(login, url)):
+    async with agent_thread_pr_state_lock(_pr_thread_lock_key(login, url)):
         thread_id = await _find_or_create_pr_thread(
             owner,
             repo,
@@ -384,7 +390,7 @@ async def start_pull_request_thread(
         busy = current.get("status") == "busy"
         if busy and not intent.queues_behind_running:
             return PullRequestThreadRun(thread_id=thread_id, already_running=True)
-        async with agent_thread_pr_state_lock(client, thread_id):
+        async with agent_thread_pr_state_lock(thread_id):
             await client.threads.update(
                 thread_id=thread_id,
                 metadata={
@@ -429,7 +435,7 @@ async def dispatch_pull_request_prompt(
     """
     url = f"https://github.com/{owner}/{repo}/pull/{number}"
     client = langgraph_client()
-    async with agent_thread_pr_state_lock(client, _pr_thread_lock_key(login, url)):
+    async with agent_thread_pr_state_lock(_pr_thread_lock_key(login, url)):
         thread_id = await _find_or_create_pr_thread(
             owner, repo, number, login, None, prompt=prompt, title=title, unlisted=unlisted
         )

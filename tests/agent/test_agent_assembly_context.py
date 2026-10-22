@@ -16,7 +16,7 @@ from unittest.mock import ANY, AsyncMock, MagicMock, patch
 
 import langgraph_sdk
 import pytest
-from langchain.agents.middleware.types import ModelRequest, ModelResponse
+from langchain.agents.middleware.types import AgentMiddleware, ModelRequest, ModelResponse
 from langchain_core.language_models import BaseChatModel
 from langchain_core.messages import AIMessage, HumanMessage, ToolMessage
 from langgraph.graph.state import RunnableConfig
@@ -74,6 +74,39 @@ async def test_public_agent_excludes_personal_skills_and_tools(saved_thread_scop
     assert any(isinstance(item, WorkspaceSkillsMiddleware) for item in middleware)
     subagents = cast(list[dict], captured["subagents"])
     assert any(isinstance(item, WorkspaceSkillsMiddleware) for item in subagents[0]["middleware"])
+
+
+async def test_remote_agent_discovers_personal_skills(monkeypatch: pytest.MonkeyPatch) -> None:
+    from deepagents.middleware.skills import SkillsMiddleware
+    from langgraph.runtime import Runtime
+
+    from openswe.remote_runtime.graph import RunSession
+    from openswe.sandboxes.tool_runtime import ToolSurface
+    from openswe.skill_store.store import _record
+
+    monkeypatch.setattr(
+        "openswe.skill_store.backend.agent_skills",
+        AsyncMock(
+            side_effect=lambda login: (
+                [_record("personal-workflow", "A workflow", "Do it.")] if login else []
+            )
+        ),
+    )
+    captured = await _capture_create_deep_agent_kwargs()
+    middleware = [
+        item
+        for item in cast(list[object], captured["middleware"])
+        if isinstance(item, SkillsMiddleware)
+    ]
+    session = RunSession(
+        ToolSurface(middleware=cast(list[AgentMiddleware], middleware)), {}, None, started_here=True
+    )
+    state: dict[str, object] = {"messages": []}
+    with patch("openswe.remote_runtime.graph.get_config", return_value=_base_config()):
+        prepared = await session.run_phase("before_agent", state, Runtime())
+    shaped = await session.model_call({**state, **prepared.update}, Runtime())
+
+    assert "personal-workflow" in shaped.system_prompt
 
 
 @pytest.mark.asyncio
@@ -518,7 +551,8 @@ async def test_a_web_turn_on_a_slack_thread_keeps_the_slack_tools() -> None:
     require_reply = next(
         item for item in middleware if type(item).__name__ == "RequireUserReplyMiddleware"
     )
-    assert require_reply.before_agent({}, MagicMock())["reply_surface"] == "web"
+    prepared = await require_reply.abefore_agent({}, MagicMock())
+    assert prepared["reply_surface"] == "web"
 
 
 @pytest.mark.asyncio
@@ -539,6 +573,8 @@ async def test_an_automation_run_can_post_to_a_channel_without_a_slack_thread() 
 
 @pytest.mark.asyncio
 async def test_general_purpose_subagent_cannot_use_slack_tools() -> None:
+    from openswe.prompt import prompt
+
     config = _base_config()
     configurable = config.get("configurable")
     assert isinstance(configurable, dict)
@@ -585,12 +621,10 @@ async def test_general_purpose_subagent_cannot_use_slack_tools() -> None:
         "submit_review_assessment_feedback",
     }
     assert parent_only_names <= parent_names
-    assert subagent_names == parent_names - {"save_user_settings"}
-
-    from unittest.mock import AsyncMock, MagicMock
+    assert subagent_names == parent_names
+    assert gp["tools"] == parent_tools
 
     from langchain.agents.middleware.types import ToolCallRequest
-    from langchain_core.messages import ToolMessage
 
     guard = next(item for item in gp["middleware"] if item.name == "_SubagentToolGuard")
     handler = AsyncMock(return_value=ToolMessage(content="executed", tool_call_id="allowed"))
@@ -599,13 +633,14 @@ async def test_general_purpose_subagent_cannot_use_slack_tools() -> None:
         "read_incident",
         "search_incidents",
         "record_incident_report",
+        "task",
     }:
         request = MagicMock(spec=ToolCallRequest)
         request.tool_call = {"name": name, "args": {}, "id": name, "type": "tool_call"}
         result = await guard.awrap_tool_call(request, handler)
         assert isinstance(result, ToolMessage)
         assert result.tool_call_id == name
-        assert "inside a subagent" in result.content
+        assert result.content == prompt("tools/subagent-unavailable")
     handler.assert_not_awaited()
     request.tool_call = {"name": "execute", "args": {}, "id": "allowed", "type": "tool_call"}
     assert (await guard.awrap_tool_call(request, handler)).content == "executed"

@@ -593,6 +593,20 @@ describe("My PRs", () => {
     expect(within(card).getByRole("button", { name: MERGE })).toBeTruthy()
   })
 
+  it("shows review required instead of approved when approvals are still missing", async () => {
+    vi.mocked(api.openPullRequests).mockResolvedValue({
+      ...payload,
+      pullRequests: [
+        pull(1, { reviewDecision: "approved", reviewRequired: true }),
+      ],
+    })
+    mount()
+    const card = (await screen.findByText("Change 1")).closest("li")!
+    expect(within(card).getByText("Review required")).toBeTruthy()
+    expect(within(card).queryByText("Approved")).toBeNull()
+    expect(within(card).queryByRole("button", { name: MERGE })).toBeNull()
+  })
+
   it("names a required check that never reported instead of offering the merge", async () => {
     vi.mocked(api.openPullRequests).mockResolvedValue({
       ...payload,
@@ -712,7 +726,7 @@ describe("My PRs", () => {
     mount()
     await screen.findByText("Change 1")
     expect(
-      await screen.findByRole("button", { name: "Choose how to merge" })
+      await screen.findByRole("button", { name: "Squash and merge" })
     ).toBeTruthy()
     await chooseMergeMethod(1, "Rebase merge")
     fireEvent.click(screen.getByRole("button", { name: "Rebase and merge" }))
@@ -761,7 +775,7 @@ describe("My PRs", () => {
     expect(await mergeOptions(2)).toEqual(["Squash merge", "Merge commit"])
     const pair = screen.getByText("Change 2").closest("li")!
     expect(
-      within(pair).getByRole("button", { name: "Choose how to merge" })
+      within(pair).getByRole("button", { name: "Squash and merge" })
     ).toBeTruthy()
     fireEvent.click(only)
     await waitFor(() =>

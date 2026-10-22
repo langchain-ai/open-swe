@@ -14,19 +14,19 @@ from openswe.dashboard.user_preferences import (
     UserPreferencesUpdate,
     set_user_preferences,
 )
-from openswe.store import now_iso
 from openswe.users import User, UserPreferencesPatch
+from openswe.utils.time import now_iso
 
 SQL_SETTING_KEYS = feature_flag_names(UserPreferencesPatch)
 
 PROFILE_SETTING_KEYS = frozenset(
     {
         "default_repo",
+        "workspace_default_repos",
         "base_branch",
         "branch_prefix",
         "auto_fix_ci",
         "auto_human_review_enabled",
-        "recent_thread_context_enabled",
         "draft_prs",
         "review_draft_prs",
     }
@@ -34,12 +34,11 @@ PROFILE_SETTING_KEYS = frozenset(
 PREFERENCE_SETTING_KEYS = frozenset(
     {
         "default_visibility",
-        "local_tracing_project",
         "default_workspace",
         "follow_up_behavior",
     }
 )
-type SettingValue = str | bool | None
+type SettingValue = str | bool | dict[str, str] | None
 
 
 async def patch_personal_settings(

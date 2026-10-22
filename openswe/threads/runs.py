@@ -12,7 +12,6 @@ from fastapi import HTTPException
 from langchain_core.messages.content import ImageContentBlock, create_image_block
 from pydantic import BaseModel, ConfigDict, Field
 
-from openswe.bridge.constants import HANDOFF_FROM_KEY
 from openswe.bridge.store import Bridge, BridgeStore, SandboxBridgeBinding
 from openswe.dashboard.admin import is_admin
 from openswe.dashboard.options import (
@@ -34,7 +33,8 @@ from openswe.dashboard.workspace_settings import (
 from openswe.database import postgres
 from openswe.dispatch import (
     FOLLOW_UP_PICKUP_KIND,
-    _run_user_id,
+    TURN_ATTRIBUTION_FIELDS,
+    _run_user_metadata,
     create_durable_run,
     dispatch_agent_run,
 )
@@ -50,10 +50,8 @@ from openswe.input_messages import (
 from openswe.invocation import new_invocation_id, with_invocation_id
 from openswe.message_queue import QueuedMessage
 from openswe.prompts import prompt
-from openswe.slack.client import (
-    lookup_slack_thread_run_mapping,
-    update_slack_trace_reply_for_web_handoff,
-)
+from openswe.slack.client import update_slack_trace_reply_for_web_handoff
+from openswe.slack.records import lookup_slack_thread_run_mapping
 from openswe.source_context import SourceContext
 from openswe.threads.access import (
     _ensure_dashboard_github_token,
@@ -61,6 +59,7 @@ from openswe.threads.access import (
     resolve_run_email,
 )
 from openswe.threads.creation import create_thread
+from openswe.threads.moves import SANDBOX_HANDOFF_SYSTEM, SANDBOX_MOVED_KEY, SandboxMove
 from openswe.threads.principals import STARTED_BY_ID, STARTED_BY_NAME, Principal, ThreadType
 from openswe.threads.summary import (
     DASHBOARD_SOURCE,
@@ -69,7 +68,6 @@ from openswe.threads.summary import (
     _now_ms,
     _parse_repo,
     repo_config_from_metadata,
-    thread_is_owner,
     thread_source,
 )
 from openswe.transcript.attachments import PendingAttachment
@@ -85,6 +83,7 @@ from openswe.transcript.events import (
 )
 from openswe.transcript.turns import OpenTurn, recorded_turn_id
 from openswe.users import User
+from openswe.users.repository_defaults import RepositoryDefaults
 from openswe.utils.dashboard_handoff import (
     DASHBOARD_HANDOFF_BODY,
     RELAYED_FROM_KEY,
@@ -117,11 +116,6 @@ _MAX_DASHBOARD_IMAGE_BYTES = 10 * 1024 * 1024
 _DASHBOARD_HANDOFF_SYSTEM: SystemIdentity = {
     "id": "system:dashboard-handoff",
     "display_name": "Dashboard handoff",
-    "platform": "open-swe",
-}
-_SANDBOX_HANDOFF_SYSTEM: SystemIdentity = {
-    "id": "system:sandbox-handoff",
-    "display_name": "Sandbox handoff",
     "platform": "open-swe",
 }
 _PULL_REQUEST_THREAD_SYSTEM: SystemIdentity = {
@@ -423,8 +417,14 @@ async def create_dashboard_session(
     body: SessionCreateBody, login: str, *, email: str | None = None
 ) -> str:
     """Create a fresh owned thread using the person's dashboard defaults."""
-    profile = await get_profile(login) or {}
-    repo = body.repo if body.repo is not None else profile.get("default_repo")
+    profile = RepositoryDefaults.model_validate(await get_profile(login) or {})
+    repo = body.repo if body.repo is not None else profile.repository()
+    workspace = await _resolve_requested_workspace(body.workspace, _parse_repo(repo), login=login)
+    if body.repo is None:
+        preferred_workspace = await _resolve_requested_workspace(body.workspace, None, login=login)
+        if profile.workspace_default_repos.get(preferred_workspace):
+            workspace = preferred_workspace
+        repo = profile.repository(workspace)
     repo_config = _parse_repo(repo) or {}
     if repo:
         if not repo_config:
@@ -438,7 +438,7 @@ async def create_dashboard_session(
         repo_config=repo_config,
         prompt=body.prompt,
         visibility=await _requested_visibility({"visibility": body.visibility}, login=login),
-        workspace=await _resolve_requested_workspace(body.workspace, repo_config, login=login),
+        workspace=workspace,
     )
     return str(thread["thread_id"])
 
@@ -670,44 +670,6 @@ async def _resolve_sandbox_bridge(requested: object, *, owner_id: str) -> Bridge
     return await BridgeStore.require_open(requested.strip(), owner_id=owner_id)
 
 
-async def _sandbox_handoff(
-    thread_id: str,
-    metadata: Mapping[str, Any],
-    *,
-    bridge: Bridge | None,
-    target: object,
-    login: str,
-) -> dict[str, Any] | None:
-    """The metadata that moves an existing thread to ``bridge`` or to the cloud, if it moves.
-
-    The checkout itself moves at the start of the next run, from the sandbox
-    recorded under ``HANDOFF_FROM_KEY``; a handoff still pending keeps its source.
-    """
-    if target not in (None, "cloud"):
-        raise HTTPException(422, "sandbox_target must be cloud")
-    current = metadata.get("sandbox_id")
-    if bridge is not None and bridge.sandbox_id != current:
-        if metadata.get("visibility") != "private" or not thread_is_owner(metadata, login):
-            raise HTTPException(409, "only its owner's private thread can move to their machine")
-        update: dict[str, Any] = SandboxBridgeBinding.of(bridge).dump()
-    elif bridge is None and target == "cloud" and Bridge.bridge_id_of(current) is not None:
-        update = {"sandbox_id": None, "sandbox_kind": None, "sandbox_bridge_client": None}
-    else:
-        return None
-    if (await langgraph_client().threads.get(thread_id)).get("status") == "busy":
-        raise HTTPException(409, "stop the run before moving this thread")
-    source = metadata.get(HANDOFF_FROM_KEY) or current
-    if (
-        bridge is None
-        and Bridge.bridge_id_of(source)
-        and not await BridgeStore.is_connected(source)
-    ):
-        # A checkout no Mac is serving stays behind; the cloud starts from what was pushed.
-        source = None
-    update[HANDOFF_FROM_KEY] = None if source == update["sandbox_id"] else source
-    return update
-
-
 async def _bind_thread_to_bridge(
     thread_id: str, bridge: Bridge, metadata: dict[str, Any]
 ) -> dict[str, Any]:
@@ -763,7 +725,6 @@ async def _attributed_run_messages(
     creating: bool,
     email: str | None,
     client: Any,
-    sandbox_handoff: Mapping[str, Any] | None = None,
     review_chat_pr_url: str | None = None,
     relayed_from: str | None = None,
 ) -> tuple[list[RunMessage], set[str], set[str]]:
@@ -785,8 +746,8 @@ async def _attributed_run_messages(
             values = prior_state.get("values") if isinstance(prior_state, dict) else None
             if isinstance(values, dict):
                 messages = values.get("messages")
-                injected.update(dynamic_context_hashes_from_messages(messages))
                 if isinstance(messages, list):
+                    injected = dynamic_context_hashes_from_messages(messages)
                     persisted_message_ids = {
                         message_id
                         for message in messages
@@ -802,13 +763,16 @@ async def _attributed_run_messages(
     notices: list[tuple[SystemIdentity, str]] = []
     if metadata.get("source") == "slack" and relayed_from is None:
         notices.append((_DASHBOARD_HANDOFF_SYSTEM, DASHBOARD_HANDOFF_BODY))
-    if sandbox_handoff is not None:
-        to_cloud = sandbox_handoff.get("sandbox_id") is None
-        carried = sandbox_handoff.get(HANDOFF_FROM_KEY) is not None
+    moved = metadata.get(SANDBOX_MOVED_KEY)
+    if isinstance(moved, Mapping):
         notices.append(
             (
-                _SANDBOX_HANDOFF_SYSTEM,
-                prompt("runs/sandbox-handoff", to_cloud=to_cloud, carried=carried),
+                SANDBOX_HANDOFF_SYSTEM,
+                prompt(
+                    "runs/sandbox-handoff",
+                    to_cloud=moved.get("to_cloud") is True,
+                    carried=moved.get("carried") is True,
+                ),
             )
         )
     pr_url = _LinkedPullRequest.model_validate(metadata).pr_url
@@ -883,17 +847,25 @@ async def _enrich_run_start_command(
         client_configurable.get("sandbox_bridge_id"),
         owner_id=Principal.of_login(login, email).sender_id,
     )
-    sandbox_handoff = (
+    move = (
         None
         if creating
-        else await _sandbox_handoff(
+        else await SandboxMove.requested(
             thread_id,
             metadata,
+            login=login,
             bridge=sandbox_bridge,
             target=client_configurable.get("sandbox_target"),
-            login=login,
         )
     )
+    if move is not None:
+        # A client that still moves a thread with its next message gets the same
+        # move, finished before the run starts.
+        try:
+            await move.carry_out()
+        except Exception as exc:
+            raise HTTPException(502, f"could not move this thread: {exc}") from exc
+        metadata = {**metadata, **move.update}
     content = _command_message_content(params)
     relayed_from = _relayed_from(params)
     if offloading and creating:
@@ -914,7 +886,15 @@ async def _enrich_run_start_command(
         # configurable; it never reaches the run config (which is rebuilt from
         # the stamped metadata below).
         visibility = await _requested_visibility(client_configurable, login=login)
+        if sandbox_bridge is not None:
+            # Whoever can prompt a thread runs commands on its machine.
+            visibility = "private"
         repo_config = _parse_repo(client_configurable.get("repo")) or {}
+        workspace = await _resolve_requested_workspace(
+            client_configurable.get("workspace") or client_configurable.get("environment"),
+            repo_config,
+            login=login,
+        )
         thread = await create_dashboard_thread_record(
             thread_id,
             login=login,
@@ -927,11 +907,7 @@ async def _enrich_run_start_command(
             model_id=client_configurable.get("agent_model_id"),
             effort=client_configurable.get("agent_effort"),
             model_selection=model_selection or "auto",
-            workspace=await _resolve_requested_workspace(
-                client_configurable.get("workspace") or client_configurable.get("environment"),
-                repo_config,
-                login=login,
-            ),
+            workspace=workspace,
         )
         metadata = thread_metadata(thread)
         if sandbox_bridge is not None:
@@ -961,7 +937,6 @@ async def _enrich_run_start_command(
         creating=creating,
         email=email,
         client=client,
-        sandbox_handoff=sandbox_handoff,
         review_chat_pr_url=client_configurable.get("review_chat_pr_url"),
         relayed_from=relayed_from,
     )
@@ -989,7 +964,8 @@ async def _enrich_run_start_command(
         "model_selection": model_selection,
         **await participant_metadata(metadata, login=login, email=email),
         "injected_dynamic_context_hashes": sorted(injected),
-        **(sandbox_handoff or {}),
+        # The agent is told about a move once, with the message after it.
+        **({SANDBOX_MOVED_KEY: None} if metadata.get(SANDBOX_MOVED_KEY) else {}),
     }
     if command_images and run_model and run_effort:
         overrides["agent_model_id"] = run_model
@@ -1007,7 +983,7 @@ async def _enrich_run_start_command(
     metadata_update["updated_at_ms"] = _now_ms()
     pr_linked = any(metadata.get(key) for key in ("pr_url", "pr_urls", "pull_requests"))
     if not creating and (pr_linked or metadata.get("auto_resolved_by_prs") is True):
-        async with agent_thread_pr_state_lock(client, thread_id):
+        async with agent_thread_pr_state_lock(thread_id):
             current = await client.threads.get(thread_id)
             metadata = thread_metadata(current)
             if _is_thread_resolved(metadata):
@@ -1085,14 +1061,8 @@ async def _enrich_run_start_command(
             **{
                 key: value
                 for key, value in run_metadata.items()
-                if key
-                not in {
-                    "visibility",
-                    "owner_type",
-                    "owner_login",
-                    "system_authorization",
-                    "user_id",
-                }
+                if key not in TURN_ATTRIBUTION_FIELDS
+                and key not in {"visibility", "owner_type", "owner_login", "system_authorization"}
             },
             **agent_version_metadata(),
             "invocation_started_at": invocation_started_at,
@@ -1112,9 +1082,9 @@ async def _enrich_run_start_command(
     params["assistant_id"] = _ASSISTANT_ID
     params.setdefault("stream_mode", list(DASHBOARD_STREAM_MODES))
     params.setdefault("stream_resumable", True)
-    user_id = await _run_user_id({"configurable": merged_configurable}, source=DASHBOARD_SOURCE)
-    if user_id:
-        run_metadata["user_id"] = user_id
+    run_metadata.update(
+        await _run_user_metadata({"configurable": merged_configurable}, source=DASHBOARD_SOURCE)
+    )
     config_metadata = client_config.get("metadata")
     if not isinstance(config_metadata, dict):
         config_metadata = {}
@@ -1122,7 +1092,7 @@ async def _enrich_run_start_command(
         **client_config,
         "configurable": merged_configurable,
         "metadata": {
-            **{k: v for k, v in config_metadata.items() if k != "user_id"},
+            **{k: v for k, v in config_metadata.items() if k not in TURN_ATTRIBUTION_FIELDS},
             **run_metadata,
         },
     }
@@ -1274,7 +1244,7 @@ async def steer_running_thread(
     )
     if not relayed_from:
         try:
-            await _notify_slack_web_handoff(thread_id, metadata, client)
+            await _notify_slack_web_handoff(thread_id, metadata)
         except Exception:
             logger.exception(
                 "Failed to update Slack message for dashboard handoff on %s", thread_id
@@ -1455,9 +1425,7 @@ def _slack_thread_context(metadata: Mapping[str, Any]) -> JsonObject | None:
     return context.dump()["slack_thread"]
 
 
-async def _notify_slack_web_handoff(
-    thread_id: str, metadata: Mapping[str, Any], client: Any
-) -> None:
+async def _notify_slack_web_handoff(thread_id: str, metadata: Mapping[str, Any]) -> None:
     if metadata.get("source") != "slack":
         return
     slack_thread = _slack_thread_context(metadata)
@@ -1472,11 +1440,9 @@ async def _notify_slack_web_handoff(
 
     trace_message_ts = slack_thread.get("trace_message_ts")
     if not isinstance(trace_message_ts, str) or not trace_message_ts:
-        mapping = await lookup_slack_thread_run_mapping(client, channel_id, thread_ts)
-        if isinstance(mapping, dict):
-            candidate = mapping.get("trace_message_ts")
-            if isinstance(candidate, str) and candidate:
-                trace_message_ts = candidate
+        mapping = await lookup_slack_thread_run_mapping(channel_id, thread_ts)
+        if mapping is not None:
+            trace_message_ts = mapping.trace_message_ts
     if not isinstance(trace_message_ts, str) or not trace_message_ts:
         logger.info(
             "Skipping Slack web handoff update for thread %s: missing trace message ts", thread_id

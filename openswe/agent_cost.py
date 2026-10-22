@@ -2,6 +2,7 @@
 
 import logging
 from collections.abc import Mapping
+from datetime import UTC, datetime, timedelta
 from typing import Any, Literal, NotRequired
 
 from langgraph_sdk.client import LangGraphClient
@@ -14,6 +15,7 @@ from openswe.analytics.usage import (
     record_agent_invocation_cost,
 )
 from openswe.invocation import resolve_invocation_id
+from openswe.jobs import queue
 from openswe.utils.langsmith import LangSmithCostUnavailable, get_langsmith_thread_cost
 from openswe.utils.run_usage import summarize_run_usage
 from openswe.utils.thread_ops import langgraph_client
@@ -65,9 +67,7 @@ def _payload(state: Mapping[str, Any], attempt: int) -> AgentCostRefresh | None:
     return payload
 
 
-async def schedule_agent_cost_refresh(
-    state: Mapping[str, Any], *, attempt: int = 0, client: LangGraphClient | None = None
-) -> bool:
+async def schedule_agent_cost_refresh(state: Mapping[str, Any], *, attempt: int = 0) -> bool:
     """Schedule one stateless, delayed cost refresh attempt."""
     if attempt < 0 or attempt >= len(_RETRY_DELAYS_SECONDS):
         return False
@@ -78,15 +78,12 @@ async def schedule_agent_cost_refresh(
             extra={"usage_attempt": attempt},
         )
         return False
-    client = client or langgraph_client()
     try:
-        await client.runs.create(
-            None,
-            "scheduler",
-            input=payload,
+        await queue.schedule(
+            "agent_cost",
+            payload,
+            due_at=datetime.now(UTC) + timedelta(seconds=_RETRY_DELAYS_SECONDS[attempt]),
             metadata={"kind": "agent_cost_refresh", "run_id": payload["invocation_id"]},
-            after_seconds=_RETRY_DELAYS_SECONDS[attempt],
-            on_completion="delete",
         )
     except Exception:  # noqa: BLE001
         logger.warning(
@@ -173,7 +170,7 @@ async def run_agent_cost_refresh(
             extra={"usage_run_id": payload["invocation_id"], "usage_attempt": attempt},
         )
         return {"status": "exhausted", "reason": "LangSmith cost unavailable"}
-    scheduled = await schedule_agent_cost_refresh(state, attempt=next_attempt, client=client)
+    scheduled = await schedule_agent_cost_refresh(state, attempt=next_attempt)
     return {
         "status": "retry_scheduled" if scheduled else "unavailable",
         "reason": "LangSmith cost unavailable",

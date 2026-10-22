@@ -1,16 +1,19 @@
 import json
 import logging
-import uuid
 from collections.abc import Mapping
 from dataclasses import replace
+from datetime import timedelta
 from typing import Annotated, Any, Literal
 
+import httpx2
 from langchain_core.messages import BaseMessage, ToolMessage
+from langchain_core.messages.content import create_text_block
 from langgraph.config import get_config
 from langgraph.prebuilt import InjectedState
 from langgraph_sdk.client import LangGraphClient
-from langgraph_sdk.errors import ConflictError
 
+from openswe import event_claims
+from openswe.dashboard.options import model_supports_images
 from openswe.input_messages import input_message_timestamps
 from openswe.prompts import prompt
 from openswe.run_config import RunConfig
@@ -29,7 +32,6 @@ from openswe.slack.client import (
     remove_slack_reaction,
     replace_slack_command_message,
     slack_thread_mutation_lock,
-    store_slack_message_run_mapping,
 )
 from openswe.slack.events import claim_slack_event
 from openswe.slack.http import SLACK_REQUEST_ERRORS, SlackClient, SlackRequestError, slack_error
@@ -39,18 +41,22 @@ from openswe.slack.orphan import (
     move_thread_to_dashboard,
     slack_thread_detached,
 )
+from openswe.slack.records import SlackRun, SlackThread, store_slack_message_run_mapping
 from openswe.slack.run_feedback import feedback_block
 from openswe.slack.thinking import restore_slack_thinking_status, settle_slack_thread_status
 from openswe.slack.tools.read_thread_messages import fetch_and_format_thread
-from openswe.threads.creation import create_lock_thread
+from openswe.utils.http import DEFAULT_HTTP_TIMEOUT
+from openswe.utils.http_pool import pooled_transport
 from openswe.utils.json_types import thread_metadata
+from openswe.utils.multimodal import fetch_image_block, vision_not_supported_warning
 from openswe.utils.run_usage import RunUsageSummary, summarize_run_usage
 from openswe.utils.thread_ops import langgraph_client as get_langgraph_client
 
 logger = logging.getLogger(__name__)
 
 _NATIVE_MARKDOWN_MAX_CHARS = MARKDOWN_TEXT_MAX_CHARS
-_BY_THE_WAY_ANSWER_TTL_MINUTES = 7 * 24 * 60
+_BY_THE_WAY_ANSWER_SCOPE = "slack_btw_answer"
+_BY_THE_WAY_ANSWER_TTL = timedelta(days=7)
 # The posting helpers append a dashboard-link context block.
 _WEB_LINK_BLOCKS = 1
 
@@ -76,8 +82,34 @@ async def slack_reply(
     options: list[str] | None = None,
     blocks: list[dict[str, Any]] | None = None,
     state: Annotated[dict[str, Any] | None, InjectedState] = None,
-) -> dict[str, Any]:
+) -> dict[str, Any] | list[dict[str, object]]:
     """Implement the `slack_reply` tool."""
+    result = await send_slack_reply(message, response_type, options, blocks, state)
+    image_urls = result.pop("image_urls", None)
+    if not image_urls:
+        return result
+    cfg = RunConfig.from_config(get_config())
+    model_id = (state or {}).get("selected_model_id") or cfg.resolved_agent_model_id
+    if model_id and not model_supports_images(model_id):
+        result["images"] = vision_not_supported_warning(model_id, len(image_urls)).strip()
+        return result
+    async with httpx2.AsyncClient(
+        transport=pooled_transport(), timeout=DEFAULT_HTTP_TIMEOUT
+    ) as http_client:
+        images = [
+            block for url in image_urls if (block := await fetch_image_block(url, http_client))
+        ]
+    return [dict(create_text_block(json.dumps(result))), *map(dict, images)]
+
+
+async def send_slack_reply(
+    message: str,
+    response_type: Literal["progress", "final"],
+    options: list[str] | None = None,
+    blocks: list[dict[str, Any]] | None = None,
+    state: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    """Post a reply in the run's Slack thread."""
     config = get_config()
     cfg = RunConfig.from_config(config)
     run_id = _current_run_id(config)
@@ -162,7 +194,6 @@ async def slack_reply(
                     if is_code_channel_session(str(thread_ts))
                     else str(thread_id or "") or None
                 ),
-                langgraph_client=client,
                 run_id=run_id,
                 triggering_user_id=_triggering_user_id(cfg),
             )
@@ -182,7 +213,6 @@ async def slack_reply(
         if message_ts and cfg.source == "slack" and not is_code_channel_session(str(thread_ts)):
             try:
                 await _handle_kickoff(
-                    client,
                     str(channel_id),
                     str(thread_ts),
                     message_ts,
@@ -206,18 +236,7 @@ async def _stale_reply_guard(
     messages = state.get("messages")
     if not isinstance(messages, list):
         return None
-    client = get_langgraph_client()
-    namespace = ("slack_reply_freshness", run_id)
-    item = await client.store.get_item(namespace, "progress")
-    progress = item.get("value", {}) if item else {}
-    stored_seen = progress.get("seen", [])
-    seen = (
-        {ts for ts in stored_seen if isinstance(ts, str)}
-        if isinstance(stored_seen, list)
-        else set()
-    )
-    stored_conflicts = progress.get("conflicts", 0)
-    conflicts = stored_conflicts if isinstance(stored_conflicts, int) else 0
+    seen, conflicts = await SlackRun.reply_progress(channel_id, run_id)
     for message in messages:
         if not isinstance(message, BaseMessage):
             continue
@@ -239,18 +258,18 @@ async def _stale_reply_guard(
         logger.warning("Could not check Slack reply freshness", exc_info=True)
         return None
     timestamps = latest.get("human_timestamps")
-    if not isinstance(timestamps, list) or not any(
-        isinstance(ts, str) and ts not in seen and ts > max(seen) for ts in timestamps
-    ):
+    if not isinstance(timestamps, list):
         return None
-    await client.store.put_item(
-        namespace,
-        "progress",
-        {
-            "seen": sorted(seen | {ts for ts in timestamps if isinstance(ts, str)}),
-            "conflicts": conflicts + 1,
-        },
+    arrived = [ts for ts in timestamps if isinstance(ts, str) and ts not in seen and ts > max(seen)]
+    if not arrived:
+        return None
+    await SlackRun.record_reply_conflict(
+        channel_id,
+        thread_ts,
+        run_id,
+        sorted(seen | {ts for ts in timestamps if isinstance(ts, str)}),
     )
+    image_urls = latest.get("image_urls") or {}
     return {
         "success": False,
         "error": "new_slack_messages",
@@ -258,11 +277,11 @@ async def _stale_reply_guard(
         "hint": prompt("tools/slack-reply-conflict"),
         "formatted": latest.get("formatted"),
         "human_timestamps": timestamps,
+        "image_urls": [url for ts in arrived for url in image_urls.get(ts, [])],
     }
 
 
 async def _handle_kickoff(
-    client: LangGraphClient,
     channel_id: str,
     thread_ts: str,
     update_ts: str,
@@ -270,16 +289,13 @@ async def _handle_kickoff(
     response_type: Literal["progress", "final"],
     eligible: bool,
 ) -> None:
-    namespace = ("slack_kickoff", channel_id)
-    item = await client.store.get_item(namespace, thread_ts)
-    value = item.get("value") if isinstance(item, dict) else None
-    if isinstance(value, dict) and value.get("removed") is True:
+    thread = await SlackThread.find(channel_id, thread_ts)
+    if thread is None or not thread.kickoff_recorded:
+        if eligible and response_type == "progress" and update_ts != thread_ts:
+            await SlackThread.record_kickoff(channel_id, thread_ts, update_ts)
         return
-    kickoff_ts = value.get("kickoff_ts") if isinstance(value, dict) else None
-    if not kickoff_ts and eligible and response_type == "progress" and update_ts != thread_ts:
-        await client.store.put_item(namespace, thread_ts, {"kickoff_ts": update_ts})
-        return
-    if not isinstance(kickoff_ts, str) or not kickoff_ts or kickoff_ts == update_ts:
+    kickoff_ts = thread.kickoff_ts
+    if kickoff_ts is None or kickoff_ts == update_ts:
         return
     try:
         async with SlackClient.bot() as slack:
@@ -294,7 +310,7 @@ async def _handle_kickoff(
             },
         )
         return
-    await client.store.put_item(namespace, thread_ts, {"removed": True})
+    await SlackThread.record_kickoff(channel_id, thread_ts, None)
 
 
 async def _by_the_way_reply(
@@ -325,26 +341,27 @@ async def _by_the_way_reply(
         blocks = _reply_blocks(message, None, reserve=0)
         if len(message) > _NATIVE_MARKDOWN_MAX_CHARS:
             message = markdown_to_mrkdwn(message)
-    client = get_langgraph_client()
-    reservation = _by_the_way_answer_id(cfg.thread_id or "")
+    reservation = cfg.thread_id or ""
     try:
-        await create_lock_thread(client, reservation, ttl_minutes=_BY_THE_WAY_ANSWER_TTL_MINUTES)
-    except ConflictError:
-        return {
-            "success": False,
-            "error": "the /btw answer was already posted",
-            "hint": "Do not post again; end the run.",
-        }
+        reserved = await event_claims.claim(
+            _BY_THE_WAY_ANSWER_SCOPE, reservation, ttl=_BY_THE_WAY_ANSWER_TTL
+        )
     except Exception:
         logger.exception(
             "Could not reserve the /btw answer", extra={"agent_thread_id": cfg.thread_id}
         )
         return {"success": False, "error": "could not reserve the answer", "retry": True}
+    if not reserved:
+        return {
+            "success": False,
+            "error": "the /btw answer was already posted",
+            "hint": "Do not post again; end the run.",
+        }
     try:
         await post_slack_thread_reply_with_ts(channel_id, thread_ts, message, blocks=blocks)
     except SlackRequestError as exc:
         try:
-            await client.threads.delete(reservation)
+            await event_claims.release(_BY_THE_WAY_ANSWER_SCOPE, reservation)
         except Exception:
             logger.exception(
                 "Could not release the /btw answer reservation",
@@ -363,10 +380,6 @@ async def _by_the_way_reply(
     # Slack drops a thread's status on any bot post, including a conversation's already there.
     await settle_slack_thread_status(channel_id, thread_ts)
     return {"success": True}
-
-
-def _by_the_way_answer_id(thread_id: str) -> str:
-    return str(uuid.uuid5(uuid.NAMESPACE_URL, f"open-swe:slack-by-the-way-answer:{thread_id}"))
 
 
 async def _ephemeral_reply(
@@ -563,7 +576,6 @@ async def _post_and_store_mapping(
     blocks: list[dict[str, Any]] | None = None,
     usage: RunUsageSummary | None = None,
     agent_thread_id: str | None = None,
-    langgraph_client: Any | None = None,
     run_id: str | None = None,
     triggering_user_id: str | None = None,
     post_thread_ts: str | None = None,
@@ -577,9 +589,7 @@ async def _post_and_store_mapping(
         agent_thread_id=agent_thread_id,
     )
     if message_ts:
-        resolved_client = langgraph_client or get_langgraph_client()
         await store_slack_message_run_mapping(
-            resolved_client,
             channel_id,
             thread_ts,
             message_ts,

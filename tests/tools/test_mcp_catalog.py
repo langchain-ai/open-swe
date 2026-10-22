@@ -32,7 +32,7 @@ async def names() -> list[str]:
     return [(tool.metadata or {})["mcp_tool_name"] for tool in tools]
 
 
-async def test_changed_connection_rediscovers(fake_store, monkeypatch):
+async def test_changed_connection_rediscovers(registry_db, monkeypatch):
     await save(allowed_tools=["search", "fetch"])
     discover = AsyncMock(side_effect=[[SEARCH], [SEARCH, FETCH]])
     monkeypatch.setattr(runtime, "_discover_tools", discover)
@@ -43,7 +43,7 @@ async def test_changed_connection_rediscovers(fake_store, monkeypatch):
     assert sorted(await names()) == ["fetch", "search"]
 
 
-async def test_stale_catalog_is_served_then_refreshed(fake_store, monkeypatch):
+async def test_stale_catalog_is_served_then_refreshed(registry_db, monkeypatch):
     from langgraph_api import cache
 
     await save(allowed_tools=["search", "fetch"])

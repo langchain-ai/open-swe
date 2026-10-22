@@ -271,8 +271,8 @@ async def api_my_managed_tools(session: dict[str, Any] = SESSION_DEP) -> Managed
 
 async def _card(thread_id: str, card_id: str, login: str, gateway: str) -> ConnectCard:
     """The connect card the agent offered this person in their thread."""
-    card = await ConnectCard.load(thread_id, card_id)
-    if card is None or not card.owned_by(login, gateway):
+    card = await ConnectCard.load(thread_id, card_id, login, gateway)
+    if card is None:
         raise HTTPException(404, "Unknown connect card")
     return card
 
@@ -295,7 +295,7 @@ async def api_connect_managed_tool(
         else:
             configured = await instance_gateway()
             if configured is None or gateway_id(gateway) != gateway_id(configured):
-                raise HTTPException(404, "This Open SWE does not use this gateway")
+                raise HTTPException(404, "This Open SWE does not use this tool kit")
             link = await connect_service(session["sub"], gateway, slug)
     except ManagedToolsError as exc:
         raise HTTPException(400, str(exc)) from None

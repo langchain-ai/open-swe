@@ -1,6 +1,6 @@
 import asyncio
 import json
-from collections.abc import AsyncIterator, Sequence
+from collections.abc import AsyncIterator
 from typing import cast
 from unittest.mock import AsyncMock
 
@@ -8,11 +8,8 @@ import httpx
 import pytest
 from langgraph_sdk.client import LangGraphClient
 
-from openswe.database.store_imports import StoreImport
-from openswe.store import StoreEntry
 from openswe.threads import listing, pins, summary
 from openswe.users.models import User
-from tests.conftest import FakeStore
 
 
 class ThreadAPI:
@@ -140,29 +137,3 @@ async def test_latest_run_requests_are_bounded_and_legacy_idle_status_is_refresh
     assert thread_api.count("POST", "/search") == 1
     assert thread_api.count("GET", "/runs") == 20
     assert 1 < thread_api.peak_runs <= 8
-
-
-async def test_store_import_moves_known_peoples_pins_and_keeps_the_rest_waiting(
-    people: None, fake_store: FakeStore, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    await pins.pin_thread("alice", "kept")
-    for login in ("alice", "carol"):
-        fake_store.seed(
-            [pins.LEGACY_THREAD_PINS_NAMESPACE, login], "legacy", {"thread_id": "legacy"}
-        )
-
-    async def search_all_entries(namespace: Sequence[str]) -> list[StoreEntry]:
-        return [
-            StoreEntry(list(item_namespace), value, key)
-            for item_namespace, items in fake_store.items.items()
-            if item_namespace[: len(namespace)] == tuple(namespace)
-            for key, value in items.items()
-        ]
-
-    monkeypatch.setattr(pins, "search_all_entries", search_all_entries)
-
-    assert await pins.import_store_pins() == StoreImport(moved=1, waiting=1)
-    assert await pins.import_store_pins() == StoreImport(waiting=1)
-    assert await pins.list_thread_pin_ids("alice") == ["kept", "legacy"]
-    assert list(fake_store.values([pins.LEGACY_THREAD_PINS_NAMESPACE, "alice"])) == []
-    assert list(fake_store.values([pins.LEGACY_THREAD_PINS_NAMESPACE, "carol"])) == ["legacy"]

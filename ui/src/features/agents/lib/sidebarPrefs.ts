@@ -17,21 +17,14 @@ export type PinnedSort = (typeof PINNED_SORTS)[number]
 export interface SidebarPrefs {
   compact: boolean
   filters: SidebarFilters
-  /**
-   * Pins for local threads. Cloud pins live server-side (`thread_pins`); local
-   * threads only exist on this machine, so their pins do too.
-   */
-  pinnedLocalIds: Array<string>
   /** Repositories pinned into the sidebar's Pinned section. Client-side only. */
   pinnedRepoKeys: Array<string>
   collapsedRepoKeys: Array<string>
   expandedRepoKeys: Array<string>
   /** Which of "pinned" | "repos" | "recents" are collapsed. */
   collapsedSectionKeys: Array<string>
-  /** Whether subagent sub-threads start folded away. */
-  collapseSubagentsByDefault: boolean
-  /** Thread rows whose fold state differs from the default. */
-  collapsedSubagentKeys: Array<string>
+  /** Thread rows whose subagent threads are expanded. */
+  expandedSubagentKeys: Array<string>
   /** Nav links moved into the "More" menu. */
   hiddenNavItems: Array<string>
   organize: OrganizeMode
@@ -42,13 +35,11 @@ export interface SidebarPrefs {
 export const DEFAULT_SIDEBAR_PREFS: SidebarPrefs = {
   compact: false,
   filters: DEFAULT_SIDEBAR_FILTERS,
-  pinnedLocalIds: [],
   pinnedRepoKeys: [],
   collapsedRepoKeys: [],
   expandedRepoKeys: [],
   collapsedSectionKeys: [],
-  collapseSubagentsByDefault: true,
-  collapsedSubagentKeys: [],
+  expandedSubagentKeys: [],
   hiddenNavItems: ["/agents/bots", "/incidents"],
   organize: "workspace",
   sortChats: "created",
@@ -119,7 +110,6 @@ function sanitizePrefs(value: unknown): SidebarPrefs {
         ? raw.compact
         : DEFAULT_SIDEBAR_PREFS.compact,
     filters: sanitizeFilters(raw.filters),
-    pinnedLocalIds: asStringArray(raw.pinnedLocalIds),
     pinnedRepoKeys: repoKeys(raw, "pinnedRepoKeys", "pinnedProjectKeys"),
     collapsedRepoKeys: repoKeys(
       raw,
@@ -130,14 +120,12 @@ function sanitizePrefs(value: unknown): SidebarPrefs {
     collapsedSectionKeys: asStringArray(raw.collapsedSectionKeys).map((key) =>
       key === "projects" ? "repos" : key
     ),
-    collapseSubagentsByDefault:
-      typeof raw.collapseSubagentsByDefault === "boolean"
-        ? raw.collapseSubagentsByDefault
-        : DEFAULT_SIDEBAR_PREFS.collapseSubagentsByDefault,
-    collapsedSubagentKeys:
-      typeof raw.collapseSubagentsByDefault === "boolean"
-        ? asStringArray(raw.collapsedSubagentKeys)
-        : [],
+    expandedSubagentKeys: asStringArray(
+      raw.expandedSubagentKeys ??
+        (raw.collapseSubagentsByDefault === true
+          ? raw.collapsedSubagentKeys
+          : [])
+    ),
     hiddenNavItems: Array.isArray(raw.hiddenNavItems)
       ? asStringArray(raw.hiddenNavItems)
       : DEFAULT_SIDEBAR_PREFS.hiddenNavItems,
@@ -237,14 +225,6 @@ export function useSidebarPrefs() {
     (filters: SidebarFilters) => setPrefs((prev) => ({ ...prev, filters })),
     []
   )
-  const toggleLocalPin = useCallback(
-    (threadId: string) =>
-      setPrefs((prev) => ({
-        ...prev,
-        pinnedLocalIds: toggleMembership(prev.pinnedLocalIds, threadId),
-      })),
-    []
-  )
   const toggleRepoPin = useCallback(
     (key: string) =>
       setPrefs((prev) => ({
@@ -271,23 +251,11 @@ export function useSidebarPrefs() {
     []
   )
 
-  const setCollapseSubagentsByDefault = useCallback(
-    (collapseSubagentsByDefault: boolean) =>
-      setPrefs((prev) => ({
-        ...prev,
-        collapseSubagentsByDefault,
-        collapsedSubagentKeys: [],
-      })),
-    []
-  )
   const toggleSubagentsCollapsed = useCallback(
     (key: string) =>
       setPrefs((prev) => ({
         ...prev,
-        collapsedSubagentKeys: toggleMembership(
-          prev.collapsedSubagentKeys,
-          key
-        ),
+        expandedSubagentKeys: toggleMembership(prev.expandedSubagentKeys, key),
       })),
     []
   )
@@ -321,10 +289,8 @@ export function useSidebarPrefs() {
     prefs,
     setCompact,
     setFilters,
-    toggleLocalPin,
     toggleRepoPin,
     toggleRepoCollapsed,
-    setCollapseSubagentsByDefault,
     toggleSubagentsCollapsed,
     toggleSectionCollapsed,
     expandRepo,

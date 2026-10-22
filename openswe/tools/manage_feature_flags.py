@@ -5,19 +5,17 @@ from typing import Literal
 from openswe.audit_logs.tools import audit_tool
 from openswe.dashboard.feature_flags import feature_flag_names
 from openswe.dashboard.workspace_settings import (
-    INSTANCE_SETTINGS_KEY,
-    INSTANCE_SETTINGS_NAMESPACE,
-    WORKSPACE_SETTINGS_NAMESPACE,
     WorkspaceSettingsUpdate,
     get_instance_settings,
+    instance_record,
     upsert_instance_settings,
     upsert_workspace_overrides,
+    workspace_record,
     workspace_settings_view,
 )
-from openswe.store import get_value
 from openswe.tools.access import Policy, access, ack
 from openswe.tools.mcp_exposure import expose_mcp
-from openswe.workspaces.store import DEFAULT_WORKSPACE_SLUG, WORKSPACES, slugify
+from openswe.workspaces.store import WORKSPACES, slugify
 
 FEATURE_FLAGS = feature_flag_names(WorkspaceSettingsUpdate)
 _READ = Policy(trusted="admin_surface", actor="admin")
@@ -49,11 +47,9 @@ async def manage_feature_flags(
         if await WORKSPACES.get(slug) is None:
             raise ValueError("Workspace not found")
         if flags:
-            record = await get_value(WORKSPACE_SETTINGS_NAMESPACE, slug)
-            if record is None and slug != DEFAULT_WORKSPACE_SLUG:
-                record = await get_value(INSTANCE_SETTINGS_NAMESPACE, slug)
             view = await upsert_workspace_overrides(
-                slug, WorkspaceSettingsUpdate.model_validate({**(record or {}), **flags})
+                slug,
+                WorkspaceSettingsUpdate.model_validate({**await workspace_record(slug), **flags}),
             )
         else:
             view = await workspace_settings_view(slug)
@@ -68,9 +64,8 @@ async def manage_feature_flags(
         }
 
     if flags:
-        existing = await get_value(INSTANCE_SETTINGS_NAMESPACE, INSTANCE_SETTINGS_KEY) or {}
         await upsert_instance_settings(
-            WorkspaceSettingsUpdate.model_validate({**existing, **flags})
+            WorkspaceSettingsUpdate.model_validate({**await instance_record(), **flags})
         )
     effective = await get_instance_settings()
     return {

@@ -14,7 +14,7 @@ INJECTED_DYNAMIC_CONTEXT_HASHES_KEY = "injected_dynamic_context_hashes"
 # summary message followed by messages[cutoff_index:].
 SUMMARIZATION_EVENT_KEY = "_summarization_event"
 
-Surface = Literal["slack", "linear", "github", "web", "desktop", "automation", "eval", "deployment"]
+Surface = Literal["slack", "linear", "github", "web", "automation", "eval", "deployment"]
 EntityKind = Literal["person", "channel", "system"]
 MessageKind = Literal["human", "system"]
 
@@ -220,7 +220,7 @@ def delivered_event_match_ids(messages: Sequence[object]) -> set[str]:
     }
 
 
-def dynamic_context_hash(content: object) -> str | None:
+def _dynamic_context(content: object) -> tuple[tuple[str, str], str] | None:
     values = content if isinstance(content, list) else [content]
     for value in values:
         text = value.get("text") if isinstance(value, dict) else value
@@ -236,8 +236,14 @@ def dynamic_context_hash(content: object) -> str | None:
         canonical = ElementTree.tostring(root, encoding="unicode")
         context_hash = hashlib.sha256(canonical.encode()).hexdigest()
         if claimed_hash is None or claimed_hash == context_hash:
-            return context_hash
+            key = (root.get("kind", ""), root.get("id") or context_hash)
+            return key, context_hash
     return None
+
+
+def dynamic_context_hash(content: object) -> str | None:
+    context = _dynamic_context(content)
+    return context[1] if context else None
 
 
 def _message_content(message: object) -> object:
@@ -252,12 +258,13 @@ def _message_content(message: object) -> object:
 def dynamic_context_hashes_from_messages(messages: object) -> set[str]:
     if not isinstance(messages, (list, tuple)):
         return set()
-    hashes: set[str] = set()
+    latest: dict[tuple[str, str], str] = {}
     for message in messages:
-        context_hash = dynamic_context_hash(_message_content(message))
-        if context_hash is not None:
-            hashes.add(context_hash)
-    return hashes
+        context = _dynamic_context(_message_content(message))
+        if context is not None:
+            key, context_hash = context
+            latest[key] = context_hash
+    return set(latest.values())
 
 
 def visible_dynamic_context_hashes(state: Mapping[str, Any]) -> set[str]:

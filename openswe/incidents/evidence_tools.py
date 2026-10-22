@@ -7,7 +7,7 @@ from typing import Any
 from urllib.parse import urlsplit, urlunsplit
 
 from openswe.incidents.models import Evidence
-from openswe.store import now_iso
+from openswe.utils.time import now_iso
 
 # Every repetition is bounded so a long hostile string cannot make matching
 # polynomial; real tokens, e-mail addresses, and PEM blocks fit comfortably.

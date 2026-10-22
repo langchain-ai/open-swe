@@ -120,7 +120,7 @@ class RequireUserReplyMiddleware(OpenSWEMiddleware):
         # Other tools whose successful call answers the person, such as a walkthrough's chunk.
         self._replies = replies
 
-    def before_agent(self, state: Any, runtime: Any) -> dict[str, Any] | None:  # noqa: ARG002
+    async def abefore_agent(self, state: AgentState, runtime: Runtime) -> dict[str, object]:  # noqa: ARG002
         # Resolved fresh every run: the surface a previous run ended on says
         # nothing about where this one was triggered from.
         return {"reply_surface": self._initial_surface, "reply_nudges": 0}
@@ -180,9 +180,9 @@ class RequireUserReplyMiddleware(OpenSWEMiddleware):
         if not text:
             logger.warning("Nothing to post on the model's behalf: it wrote no text this turn")
             return
-        from openswe.slack.tools.reply import slack_reply
+        from openswe.slack.tools.reply import send_slack_reply
 
-        result = await slack_reply(text, "final", state=dict(state))
+        result = await send_slack_reply(text, "final", state=dict(state))
         logger.warning(
             "Posted the model's final message on its behalf after it ignored the reply tool",
             extra={"reply_tool": self._tool_name, "reply_fallback_result": result},

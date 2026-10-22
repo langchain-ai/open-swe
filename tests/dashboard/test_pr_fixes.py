@@ -8,6 +8,8 @@ from fastapi import HTTPException
 
 from openswe.threads import pr_fixes
 
+pytestmark = pytest.mark.usefixtures("no_local_threads")
+
 CAMEL_CASE_CONTEXT: dict[str, Any] = {
     "title": "Broken build",
     "headRef": "feature/fix",
@@ -103,7 +105,7 @@ async def test_every_intent_locks_on_the_same_key_so_only_one_thread_is_created(
     keys: list[str] = []
 
     @asynccontextmanager
-    async def recording_lock(_client, key: str):
+    async def recording_lock(key: str):
         keys.append(key)
         yield
 
