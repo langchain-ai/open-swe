@@ -32,6 +32,7 @@ import {
   useSubmitAgentBatch,
 } from "@/features/reviews/lib/agentBatch"
 import { pullRequestKey } from "@/features/reviews/lib/status"
+import { PullRequestPageLink } from "../PullRequestLinks"
 import {
   PullRequestActions,
   type PullRequestOutcome,
@@ -514,14 +515,17 @@ export function PullRequestDetail({
             </p>
           )}
         </div>
-        <IconButton
-          icon={XIcon}
-          label="Close pull request preview"
-          color="secondary"
-          variant="plain"
-          className="-mt-space-1 -mr-space-1"
-          onClick={onClose}
-        />
+        <div className="-mt-space-1 -mr-space-1 flex items-center gap-space-1">
+          <PullRequestPageLink repo={pr.repo} number={pr.number} />
+          <IconButton
+            icon={XIcon}
+            label="Close pull request preview"
+            size="xs"
+            color="secondary"
+            variant="plain"
+            onClick={onClose}
+          />
+        </div>
       </header>
 
       <div className="border-b border-default px-space-4 py-space-3">
@@ -531,6 +535,7 @@ export function PullRequestDetail({
           outcome={outcome}
           onSettled={onSettled}
           onReady={onReady}
+          pageLink={false}
         />
       </div>
 
