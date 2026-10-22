@@ -2,6 +2,8 @@
 
 import json
 
+import pytest
+
 from openswe.incidents import evidence_tools
 from openswe.incidents.models import Evidence
 from openswe.incidents.report import CONTEXT_MARKER, ReportDraft, context_evidence, finalize_report
@@ -64,3 +66,37 @@ def test_digest_fields_strip_citations_without_erasing_bracketed_findings():
 
     assert digest_fields(first) != digest_fields(changed)
     assert digest_fields(first)["summary"] == "Connection failed [Errno 111]"
+
+
+@pytest.mark.parametrize(
+    ("draft", "accepted"),
+    [
+        ({}, False),
+        ({"summary": [{"text": "x", "evidence_ids": ["slack:1"]}]}, False),
+        ({"cause": [{"text": "placeholder", "evidence_ids": ["slack:1"]}]}, False),
+        ({"summary": [{"text": "API down", "evidence_ids": ["missing"]}]}, False),
+        ({"summary": [{"text": "API down", "evidence_ids": ["slack:1", "missing"]}]}, False),
+        ({"hypotheses": [{"title": "test", "evidence_ids": ["slack:1"]}]}, False),
+        ({"gaps": ["TBD"], "questions": ["placeholder?"]}, False),
+        (
+            {
+                "summary": [
+                    {"text": "API failures affect every region", "evidence_ids": ["slack:1"]}
+                ]
+            },
+            True,
+        ),
+        ({"impact": [{"text": "No data loss", "evidence_ids": ["slack:1"]}]}, True),
+        ({"hypotheses": [{"title": "Pool exhausted", "evidence_ids": ["slack:1"]}]}, True),
+        ({"gaps": ["Metrics access denied; impact is unknown."]}, False),
+        ({"questions": ["Which region fired the alert?"]}, False),
+    ],
+)
+def test_only_retained_investigation_content_makes_a_draft_meaningful(draft, accepted):
+    collector = evidence_tools.EvidenceCollector()
+    collector.evidence = [Evidence(id="slack:1", source="slack", summary="Reported errors")]
+    collector.gaps = ["Metrics source unavailable."]
+    candidate = ReportDraft.model_validate(draft)
+    assert (
+        not candidate.validation_error(collector, finalize_report(candidate, collector))
+    ) is accepted

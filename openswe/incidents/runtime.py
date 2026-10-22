@@ -118,8 +118,27 @@ class IncidentSession:
         draft = ReportDraft.model_validate(kwargs)
         report = finalize_report(draft, self.collector)
         record = self.record
-        digest = service.fingerprint(digest_fields(report))
         previous = await service.REPORTS.get(record.id)
+        error = draft.validation_error(
+            self.collector, report, previous.report if previous else None
+        )
+        if error:
+            return {
+                "recorded": False,
+                "posted": False,
+                "error": (
+                    f"Report rejected: {error} No documents, stored reports, or channel posts changed. "
+                    "Expected claim shape for summary, problem, impact, cause, and next_steps: "
+                    'summary=[{"text": "A substantive supported observation", '
+                    '"evidence_ids": ["<known evidence ID>"]}]. '
+                    "summary/problem text must be at least 20 characters after stripping whitespace. "
+                    'hypotheses=[{"title": "Specific suspected cause", "assessment": "plausible", '
+                    '"evidence_ids": ["<known evidence ID>"]}]. '
+                    "Assessments: plausible, supported, rejected. gaps/questions are lists of strings "
+                    "and do not replace claims. Never probe this write tool with placeholders."
+                ),
+            }
+        digest = service.fingerprint(digest_fields(report))
         run_id = current_run_id()
         # The postmortem update runs first: if it fails, nothing is recorded and the agent
         # sees the error instead of a report that was never fully written.

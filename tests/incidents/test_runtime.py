@@ -119,7 +119,9 @@ async def test_failed_slack_delivery_is_retried_on_the_next_report(incident):
     await runtime.IncidentMiddleware(session).awrap_model_call(
         request(context_message("1.0")), AsyncMock()
     )
-    draft = {"summary": [{"text": "Errors reported", "evidence_ids": ["slack:1.0"]}]}
+    draft = {
+        "summary": [{"text": "Responders reported gateway errors", "evidence_ids": ["slack:1.0"]}]
+    }
     runtime.post_slack_thread_reply_with_ts.side_effect = SlackRequestError("channel_not_found")
 
     first = await session._record_incident_report(**draft)
@@ -136,11 +138,18 @@ async def test_failed_slack_delivery_is_retried_on_the_next_report(incident):
 
 async def test_postmortem_failure_records_nothing(incident, monkeypatch):
     session = await runtime.load_incident_session(config())
+    await runtime.IncidentMiddleware(session).awrap_model_call(
+        request(context_message("1.0")), AsyncMock()
+    )
     monkeypatch.setattr(
         documents, "update_from_report", AsyncMock(side_effect=RuntimeError("store"))
     )
     with pytest.raises(RuntimeError, match="store"):
-        await session._record_incident_report(summary=[])
+        await session._record_incident_report(
+            next_steps=[
+                {"text": "Check telemetry access to verify impact", "evidence_ids": ["slack:1.0"]}
+            ]
+        )
     assert await service.REPORTS.get("incident") is None
     runtime.post_slack_thread_reply_with_ts.assert_not_awaited()
 
@@ -189,7 +198,9 @@ async def test_an_inconclusive_first_turn_does_not_spend_the_automatic_message(i
 
     await middleware.awrap_model_call(request(context_message("1.0")), AsyncMock())
     empty = await session._record_incident_report(
-        summary=[{"text": "Unsupported guess", "evidence_ids": ["nope"]}]
+        next_steps=[
+            {"text": "Check telemetry access to verify impact", "evidence_ids": ["slack:1.0"]}
+        ]
     )
 
     assert empty["posted"] is False
@@ -223,3 +234,129 @@ async def test_questions_are_answered_after_the_investigation_is_published(incid
 
     assert answer["posted"] is True
     assert runtime.post_slack_thread_reply_with_ts.await_count == 2
+
+
+@pytest.mark.parametrize("existing", [False, True])
+@pytest.mark.parametrize(
+    "draft",
+    [
+        {},
+        {"summary": [{"text": "x", "evidence_ids": ["slack:1.0"]}]},
+        {"summary": [{"text": "  API down  ", "evidence_ids": ["slack:1.0"]}]},
+        {
+            "summary": [
+                {"text": "API errors rose across the gateway", "evidence_ids": ["slack:1.0"]}
+            ],
+            "problem": [{"text": "x", "evidence_ids": ["slack:1.0"]}],
+        },
+        {"gaps": ["Telemetry access failed; impact is unverified."]},
+        {
+            "cause": [{"text": "TBD", "evidence_ids": ["slack:1.0"]}],
+            "gaps": ["placeholder"],
+            "questions": ["test?"],
+        },
+        {"hypotheses": [{"title": "placeholder", "evidence_ids": ["slack:1.0"]}]},
+        {"summary": [{"text": "API errors rose across the gateway", "evidence_ids": ["missing"]}]},
+        {
+            "impact": [
+                {
+                    "text": "API errors rose across the gateway",
+                    "evidence_ids": ["slack:1.0", "missing"],
+                }
+            ]
+        },
+    ],
+)
+async def test_rejected_reports_preserve_state_and_the_automatic_post(
+    incident, monkeypatch, existing, draft
+):
+    session = await runtime.load_incident_session(config())
+    await runtime.IncidentMiddleware(session).awrap_model_call(
+        request(context_message("1.0")), AsyncMock()
+    )
+    if existing:
+        await session._record_incident_report(
+            next_steps=[
+                {"text": "Check metrics access to verify impact", "evidence_ids": ["slack:1.0"]}
+            ]
+        )
+    previous = await service.REPORTS.get("incident")
+    postmortem = await documents.POSTMORTEMS.get("incident")
+    update = AsyncMock(wraps=documents.update_from_report)
+    monkeypatch.setattr(documents, "update_from_report", update)
+    store = AsyncMock(wraps=service.REPORTS.put)
+    monkeypatch.setattr(service.REPORTS, "put", store)
+
+    rejected = await session._record_incident_report(**draft)
+
+    assert rejected["recorded"] is False
+    assert rejected["posted"] is False
+    assert "evidence_ids" in rejected["error"]
+    update.assert_not_awaited()
+    store.assert_not_awaited()
+    assert await service.REPORTS.get("incident") == previous
+    assert await documents.POSTMORTEMS.get("incident") == postmortem
+    runtime.post_slack_thread_reply_with_ts.assert_not_awaited()
+
+    accepted = await session._record_incident_report(
+        summary=[{"text": "API errors rose across the gateway", "evidence_ids": ["slack:1.0"]}]
+    )
+    assert accepted["recorded"] is True
+    assert accepted["posted"] is True
+    runtime.post_slack_thread_reply_with_ts.assert_awaited_once()
+    latest = await service.REPORTS.get("incident")
+    assert latest.investigation_posted is True
+    assert latest.report.summary == "API errors rose across the gateway [slack:1.0]"
+    retried = await session._record_incident_report(
+        **{
+            "summary": [
+                {"text": "API errors rose across the gateway", "evidence_ids": ["slack:1.0"]}
+            ]
+        }
+    )
+    assert retried["recorded"] is True
+    assert retried["posted"] is False
+    runtime.post_slack_thread_reply_with_ts.assert_awaited_once()
+
+
+@pytest.mark.parametrize("regression", ["subset", "inconclusive"])
+async def test_regressive_report_cannot_overwrite_findings(incident, monkeypatch, regression):
+    session = await runtime.load_incident_session(config(incident_request="investigate"))
+    await runtime.IncidentMiddleware(session).awrap_model_call(
+        request(context_message("1.0")), AsyncMock()
+    )
+    summary = [
+        {"text": "API errors rose across the gateway", "evidence_ids": ["slack:1.0"]},
+        {"text": "Failures began after the latest deploy", "evidence_ids": ["slack:1.0"]},
+    ]
+    impact = [{"text": "All API requests fail", "evidence_ids": ["slack:1.0"]}]
+    await session._record_incident_report(summary=summary, impact=impact)
+    previous = await service.REPORTS.get("incident")
+    postmortem = await documents.POSTMORTEMS.get("incident")
+    update = AsyncMock(wraps=documents.update_from_report)
+    store = AsyncMock(wraps=service.REPORTS.put)
+    monkeypatch.setattr(documents, "update_from_report", update)
+    monkeypatch.setattr(service.REPORTS, "put", store)
+    runtime.post_slack_thread_reply_with_ts.reset_mock()
+
+    draft = {"summary": summary[:1]} if regression == "subset" else {"impact": impact}
+    rejected = await session._record_incident_report(**draft)
+
+    assert rejected["recorded"] is False
+    assert rejected["posted"] is False
+    assert "stored findings" in rejected["error"]
+    update.assert_not_awaited()
+    store.assert_not_awaited()
+    runtime.post_slack_thread_reply_with_ts.assert_not_awaited()
+    assert await service.REPORTS.get("incident") == previous
+    assert await documents.POSTMORTEMS.get("incident") == postmortem
+
+    corrected = await session._record_incident_report(
+        summary=[
+            {"text": "API errors have recovered across the gateway", "evidence_ids": ["slack:1.0"]}
+        ]
+    )
+    assert corrected["recorded"] is True
+    assert (await service.REPORTS.get("incident")).report.summary.startswith(
+        "API errors have recovered"
+    )

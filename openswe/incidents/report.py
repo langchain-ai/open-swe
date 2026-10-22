@@ -27,6 +27,37 @@ _EVIDENCE_REF = r"[A-Za-z][A-Za-z0-9_-]*:[A-Za-z0-9._:-]+"
 _CITATION = re.compile(rf"\s*\[{_EVIDENCE_REF}(?:\s*,\s*{_EVIDENCE_REF})*\]")
 
 
+def supported_refs(ids: list[str], known_ids: set[str]) -> bool:
+    return bool(ids) and all(evidence_id in known_ids for evidence_id in ids)
+
+
+def meaningful_text(text: str) -> bool:
+    words = re.findall(r"\w+", text.casefold())
+    placeholders = {
+        "x",
+        "test",
+        "testing",
+        "placeholder",
+        "todo",
+        "tbd",
+        "dummy",
+        "sample",
+        "probe",
+        "schema",
+        "report",
+        "draft",
+        "foo",
+        "bar",
+        "unknown",
+        "none",
+        "n",
+        "a",
+        "this",
+        "is",
+    }
+    return any(len(word) > 1 and word not in placeholders for word in words)
+
+
 class Claim(BaseModel):
     text: str = Field(max_length=1200)
     evidence_ids: list[str] = Field(default_factory=list, max_length=10)
@@ -42,6 +73,71 @@ class ReportDraft(BaseModel):
     hypotheses: list[Hypothesis] = Field(default_factory=list, max_length=8)
     gaps: list[str] = Field(default_factory=list, max_length=10)
     questions: list[str] = Field(default_factory=list, max_length=5)
+
+    def has_meaningful_content(self, collector: EvidenceCollector) -> bool:
+        known_ids = {evidence.id for evidence in collector.evidence}
+        claims = [
+            *self.summary,
+            *self.problem,
+            *self.impact,
+            *self.cause,
+            *self.next_steps,
+        ]
+        texts = [
+            redact(claim.text, 1200)
+            for claim in claims
+            if supported_refs(claim.evidence_ids, known_ids)
+        ]
+        texts.extend(
+            redact(hypothesis.title, 1200)
+            for hypothesis in self.hypotheses
+            if supported_refs(hypothesis.evidence_ids, known_ids)
+        )
+        return any(meaningful_text(text) for text in texts)
+
+    def validation_error(
+        self,
+        collector: EvidenceCollector,
+        report: IncidentReport,
+        previous: IncidentReport | None = None,
+    ) -> str:
+        if any(len(claim.text.strip()) < 20 for claim in [*self.summary, *self.problem]):
+            return (
+                "Every summary and problem claim must contain at least 20 non-padding characters."
+            )
+        if not self.has_meaningful_content(collector):
+            return "Provide substantive evidence-backed claims or hypotheses, not only gaps or questions."
+
+        def content(value: IncidentReport) -> set[tuple[str, str]]:
+            sections = {
+                "summary": [value.summary],
+                "problem": [value.problem],
+                "previous_occurrence": [value.previous_occurrence],
+                "impact": [value.impact],
+                "cause": [value.cause],
+                "next_steps": value.next_steps,
+                "hypotheses": [f"{item.title}: {item.assessment}" for item in value.hypotheses],
+            }
+            return {
+                (section, normalized)
+                for section, texts in sections.items()
+                for text in texts
+                for part in _CITATION.split(text)
+                if (normalized := " ".join(part.split()))
+                and normalized
+                not in {
+                    "No evidence-backed conclusion was established.",
+                    "No previous-occurrence check was recorded.",
+                    "Impact remains unverified.",
+                }
+            }
+
+        if previous and (
+            (previous.outcome == "findings" and report.outcome != "findings")
+            or content(report) < content(previous)
+        ):
+            return "This draft regresses or only repeats a subset of the stored findings; retain the full report."
+        return ""
 
 
 INCIDENT_PROMPT = prompt("incidents/report")
@@ -109,7 +205,7 @@ def finalize_report(draft: ReportDraft, collector: EvidenceCollector) -> Inciden
 
     def valid_refs(ids: list[str]) -> bool:
         nonlocal dropped
-        valid = bool(ids) and all(evidence_id in known_ids for evidence_id in ids)
+        valid = supported_refs(ids, known_ids)
         if not valid:
             dropped = True
         return valid

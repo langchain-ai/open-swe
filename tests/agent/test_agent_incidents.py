@@ -215,9 +215,9 @@ async def test_main_agent_records_the_incident_report_through_the_tool(
                 evidence_id = (
                     observation.text.rsplit("Incident evidence: ", 1)[1].strip().split("\n", 1)[0]
                 )
-                reply = report_call(evidence_id, "Opened the fix PR")
+                reply = report_call(evidence_id, "Opened the fix PR for the gateway")
             else:
-                reply = report_call("slack:1.0", "Errors reported")
+                reply = report_call("slack:1.0", "Responders reported gateway errors")
             return ChatResult(generations=[ChatGeneration(message=reply)])
 
     model = TurnModel(responses=[])
@@ -258,13 +258,13 @@ async def test_main_agent_records_the_incident_report_through_the_tool(
     assert latest is not None
     if requested_action:
         performed.assert_awaited_once()
-        assert "Opened the fix PR" in latest.report.summary
+        assert "Opened the fix PR for the gateway" in latest.report.summary
         assert any(
             item.url == "https://github.com/acme/api/pull/42" for item in latest.report.evidence
         )
     else:
         performed.assert_not_awaited()
-        assert latest.report.summary == "Errors reported [slack:1.0]"
+        assert latest.report.summary == "Responders reported gateway errors [slack:1.0]"
     posted.assert_awaited_once()
     assert posted.await_args.args[:2] == ("C1", "0")
     assert result["messages"][-1].type == "ai"
