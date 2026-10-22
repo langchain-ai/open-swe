@@ -20,6 +20,7 @@ import posixpath
 import random
 import re
 from collections.abc import Awaitable, Callable, Mapping
+from dataclasses import replace
 from functools import partial
 from typing import Final
 
@@ -94,7 +95,7 @@ class SandboxToolsMiddleware(AgentMiddleware):
             return await handler(request)
         if self._on_backend(call["name"], call["args"]):
             # The backend turns its own errors into results and records the call.
-            return await self._checked(request, self._run_on_backend, errors=None)
+            return await self._checked_answer(request, await self._run_on_backend(request))
         in_box = partial(_retried, handler=partial(self._within_deadline, handler=handler))
         return await reported(
             self._backend,
@@ -120,6 +121,33 @@ class SandboxToolsMiddleware(AgentMiddleware):
             if check is not None:
                 checked = partial(check.awrap_tool_call, handler=checked)
         return await checked(request)
+
+    async def _checked_answer(self, request: ToolCallRequest, command: Command) -> Command:
+        """The read checks on the tool message a backend call answered with, inside its command."""
+        update = command.update if isinstance(command.update, dict) else {}
+        messages = update.get("messages")
+        call_id = request.tool_call.get("id")
+        answer = next(
+            (
+                message
+                for message in (messages if isinstance(messages, list) else [])
+                if isinstance(message, ToolMessage) and message.tool_call_id == call_id
+            ),
+            None,
+        )
+        if answer is None or not isinstance(messages, list):
+            return command
+
+        async def answered(_request: ToolCallRequest) -> ToolMessage:
+            return answer
+
+        checked = await self._checked(request, answered, errors=None)
+        if checked is answer or not isinstance(checked, ToolMessage):
+            return command
+        return replace(
+            command,
+            update={**update, "messages": [checked if m is answer else m for m in messages]},
+        )
 
     async def _run_on_backend(self, request: ToolCallRequest) -> Command:
         call = request.tool_call

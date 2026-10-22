@@ -480,3 +480,55 @@ async def test_box_call_git_evidence_reaches_the_turn_after_its_run_closed(
     await backend.reports.drain()
 
     assert turn.metadata["open_swe_git_evidence"] == evidence
+
+
+async def test_a_read_file_the_backend_serves_gets_the_read_checks(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A /blobs/ file with an image's extension but not its bytes never reaches the model as one."""
+    monkeypatch.setenv("OPEN_SWE_BACKEND_URL", "https://backend.invalid")
+    monkeypatch.setattr("rt.tools.run_id", lambda: "run-1")
+    backend = OpenSweBackend("secret-token")
+    fake = ToolMessage(
+        content=[
+            {"type": "image", "base64": "eyJlcnJvciI6ICJleHBpcmVkIn0=", "mime_type": "image/png"}
+        ],
+        tool_call_id="call-1",
+        name="read_file",
+    )
+    monkeypatch.setattr(
+        backend, "tool", AsyncMock(return_value=ToolReply(message=message_to_dict(fake)))
+    )
+    spec = SandboxSpec(
+        create=SandboxCreate(fs_capacity_bytes=1, idle_ttl_seconds=1, delete_after_stop_seconds=1),
+        tools=["read_file"],
+        backend_paths=["/blobs/"],
+    )
+    runtime = ToolRuntime(
+        state={"messages": []},
+        context=None,
+        config={},
+        stream_writer=lambda event: None,
+        tool_call_id="call-1",
+        store=None,
+    )
+    request = ToolCallRequest(
+        tool_call={
+            "name": "read_file",
+            "args": {"file_path": "/blobs/shot.png"},
+            "id": "call-1",
+            "type": "tool_call",
+        },
+        tool=None,
+        state={"messages": []},
+        runtime=runtime,
+    )
+
+    result = await SandboxToolsMiddleware(backend, spec, 300, check_reads=True).awrap_tool_call(
+        request, AsyncMock()
+    )
+
+    assert isinstance(result, Command)
+    [message] = result.update["messages"]
+    assert message.status == "error"
+    assert "not a valid image" in message.content
