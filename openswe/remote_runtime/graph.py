@@ -478,9 +478,11 @@ class RunSession:
         return _ASYNC_TASK_TOOLS
 
     def start_models(self) -> RunModels:
+        fallback = fallback_model_choice(self.models.subagent.model_id)
         return RunModels(
             model=_model_spec(self.models.main),
             subagent_model=_model_spec(self.models.subagent),
+            subagent_fallback=None if fallback is None else _model_spec(fallback),
             use_gateway=self.models.use_gateway,
         )
 

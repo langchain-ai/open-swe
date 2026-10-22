@@ -816,3 +816,93 @@ async def test_mda_does_not_retry_tool_pairing_errors(
         with pytest.raises(type(error)) as caught:
             await middleware.awrap_model_call(request, handler)
         assert caught.value is error
+
+
+@pytest.mark.parametrize("fallback_outcome", ["success", "failure", "unconfigured"])
+async def test_task_subagent_model_fallback(
+    monkeypatch: pytest.MonkeyPatch, fallback_outcome: str
+) -> None:
+    from collections.abc import Callable
+
+    import openai
+    from deepagents import create_deep_agent
+    from langchain.agents.middleware import ModelRetryMiddleware
+    from langchain_core.language_models.fake_chat_models import GenericFakeChatModel
+    from langchain_core.messages import AIMessage, HumanMessage
+    from langchain_core.tools import BaseTool
+    from rt.middleware import SubagentModelFallbackMiddleware
+    from rt.models import ModelSpec
+
+    class TaskModel(GenericFakeChatModel):
+        def bind_tools(
+            self,
+            tools: Sequence[BaseTool | Callable[..., object] | dict[str, object]],
+            **kwargs: object,
+        ) -> TaskModel:
+            return self
+
+    parent = TaskModel(
+        messages=iter(
+            [
+                AIMessage(
+                    content="",
+                    tool_calls=[
+                        {
+                            "name": "task",
+                            "args": {"description": "Assess security", "subagent_type": "worker"},
+                            "id": "task-1",
+                        }
+                    ],
+                ),
+                AIMessage(content="Assessment complete"),
+            ]
+        )
+    )
+    primary = TaskModel(messages=iter([]))
+    fallback = TaskModel(messages=iter([AIMessage(content="Security assessment")]))
+    overload = openai.APIError(
+        "The server is overloaded or not ready yet",
+        request=httpx2.Request("POST", "https://api.openai.com/v1/responses"),
+        body=None,
+    )
+    primary_call = AsyncMock(side_effect=overload)
+    fallback_call = AsyncMock(side_effect=overload)
+    monkeypatch.setattr(primary, "_agenerate", primary_call)
+    if fallback_outcome == "failure":
+        monkeypatch.setattr(fallback, "_agenerate", fallback_call)
+    spec = ModelSpec(model_id="anthropic:fallback", kwargs={"max_tokens": 64000})
+
+    def build_model(selected: ModelSpec, *, use_gateway: bool) -> TaskModel:
+        assert selected == spec
+        assert use_gateway is True
+        return fallback
+
+    monkeypatch.setattr("rt.middleware.build_model", build_model)
+    graph = create_deep_agent(
+        model=parent,
+        subagents=[
+            {
+                "name": "worker",
+                "description": "Assess security",
+                "system_prompt": "Assess security",
+                "model": primary,
+                "middleware": [
+                    SubagentModelFallbackMiddleware(
+                        None if fallback_outcome == "unconfigured" else spec, use_gateway=True
+                    ),
+                    ModelRetryMiddleware(retry_on=(TimeoutError,)),
+                ],
+            }
+        ],
+    )
+    if fallback_outcome == "success":
+        result = await graph.ainvoke({"messages": [HumanMessage(content="Assess security")]})
+        task_reply = next(m for m in result["messages"] if isinstance(m, ToolMessage))
+        assert task_reply.content == "Security assessment"
+        assert result["messages"][-1].content == "Assessment complete"
+    else:
+        with pytest.raises(openai.APIError) as raised:
+            await graph.ainvoke({"messages": [HumanMessage(content="Assess security")]})
+        assert raised.value is overload
+    assert primary_call.await_count == 1
+    assert fallback_call.await_count == (1 if fallback_outcome == "failure" else 0)
