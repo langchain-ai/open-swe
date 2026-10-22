@@ -27,7 +27,7 @@ Open SWE turns engineering work into a repeatable system: investigate a codebase
 > [!NOTE]
 > **Under active development.** Expect breaking changes and rough edges. We’re not accepting issues or external contributions at this time. You’re welcome to explore and fork the code, but correctness, stability, and compatibility are not guaranteed.
 >
-> If you really want to deploy it yourself, follow the [installation guide](docs/INSTALLATION.md). Deploying it as is requires access to the [Managed Deep Agents](https://docs.langchain.com/langsmith/python/managed-deep-agents-overview) private beta, which runs its agent; without it, we recommend forking and adapting the code to your own runtime.
+> If you really want to deploy it yourself, follow the [installation guide](docs/INSTALLATION.md). Deploying it as is requires [Managed Deep Agents](https://docs.langchain.com/langsmith/python/managed-deep-agents-overview), which runs its agent; without it, we recommend forking and adapting the code to your own runtime.
 
 ## What Open SWE does
 
@@ -47,7 +47,7 @@ flowchart LR
 - **Operate:** Schedule recurring tasks and monitor opted-in PRs with `/baby-sit`, diagnosing failures and rerunning only evidence-backed flaky jobs.
 - **Customize:** Choose models, reasoning effort, instructions, skills, integrations, and sandbox providers.
 
-Start and continue work from the **dashboard**, **GitHub issues and PR conversations**, or **Slack**. [Linear](docs/INSTALLATION.md#linear) supports issue-comment triggers and replies through a configured Linear MCP connection. Cloud coding follow-ups reuse the thread’s context and sandbox; independent threads can run in parallel.
+Start and continue work from the **dashboard**, **GitHub issues and PR conversations**, or **Slack**. In [Linear](docs/INSTALLATION.md#linear), mention or delegate an issue to the Open SWE app to open an agent session. Cloud coding follow-ups reuse the thread’s context and sandbox; independent threads can run in parallel.
 
 ## How it works
 
@@ -76,3 +76,5 @@ Sandboxes have powerful tools and may have network access. Use least-privilege c
 ## License
 
 Open SWE is licensed under the [MIT License](LICENSE).
+
+That license covers Open SWE's own code only. It does not cover anything under [`vendor/`](vendor/README.md), which is not licensed by this repository at all.

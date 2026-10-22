@@ -8,8 +8,9 @@ own middleware, which the MDA run hands each phase of its loop to:
 - ``prepare`` runs every ``before_agent`` hook: run preparation (the thread's
   sandbox, checkout and prompt), the transcript turn, skills, reply bookkeeping
 - ``before_model`` runs every ``before_model`` hook (follow-up queue, event matches,
-  proxy refresh, task coordination, model routing), then renders the system prompt
-  through the graph's own model-call middleware and names the model to call
+  proxy refresh, task coordination, model routing), then runs the graph's own
+  model-call middleware for the system prompt and the tools it hides from this
+  call, and names the model to call
 - ``model_result`` lets the transcript and usage middleware observe each response
 - ``after_model`` runs ``after_model`` hooks, such as the reply nudges, which can
   send the loop back to the model
@@ -55,15 +56,24 @@ from langchain_core.messages import (
     messages_to_dict,
 )
 from langchain_core.runnables import RunnableConfig
+from langchain_core.tools import BaseTool
 from langchain_quickjs import CodeInterpreterMiddleware
 from langgraph.config import get_config
 from langgraph.runtime import Runtime
 from pydantic import BaseModel, JsonValue, TypeAdapter, ValidationError
 
+from openswe.github.sandbox_access import READ_ONLY_REVIEW_PERMISSIONS
 from openswe.middleware.conversation_offloading import ConversationOffloadingMiddleware
 from openswe.middleware.model_selection import PersistedRoute, normalize_route
 from openswe.middleware.record_run_usage import RecordRunUsageMiddleware
 from openswe.middleware.transcript import TranscriptMiddleware, within_namespace
+from openswe.prompts import common_prompt, prompt
+from openswe.remote_runtime.git_metadata import (
+    BASELINE,
+    OBSERVED_TOOLS,
+    TurnGitMetadata,
+    collect_pr_targets,
+)
 from openswe.remote_runtime.runs import (
     ModelSpec,
     RunModels,
@@ -74,12 +84,14 @@ from openswe.remote_runtime.server import UnknownHookError
 from openswe.remote_runtime.tokens import RemoteRun
 from openswe.run_config import RunConfig
 from openswe.runtime.constants import DEFAULT_LLM_MAX_TOKENS
+from openswe.sandboxes.browsers import ThreadBrowser
+from openswe.sandboxes.lifecycle import bind_mda_sandbox, reconnect_replaced_sandbox
+from openswe.sandboxes.managed import ManagedSandbox
 from openswe.sandboxes.tool_runtime import (
     EXCLUDED_TOOLS,
     ModelChoice,
     SurfaceModels,
     ToolSurface,
-    tool_parameters,
 )
 from openswe.server import code_only, direct_and_from_code, fallback_model_choice
 from openswe.utils.model import provider_model_kwargs
@@ -88,6 +100,8 @@ logger = logging.getLogger(__name__)
 
 # MDA's own deep agent runs subagents and code.
 _MDA_TOOLS: Final = frozenset({"task", "eval"})
+# Tools the model labels each call of, for the dashboard to show in place of a bare name.
+_DESCRIBED_TOOLS: Final = ("eval",)
 # Model-call middleware that is MDA's own, or that observes rather than shapes a call.
 _NOT_PROMPT_SHAPING: Final = (
     FilesystemMiddleware,
@@ -123,12 +137,21 @@ class HookBody(BaseModel):
     state: dict[str, JsonValue] = {}
     # The ``task`` calls the run's subagent is nested in; empty for the agent itself.
     namespace: list[str] = []
+    # ``prepare``: the box MDA opened for the thread, None when it could not.
+    sandbox_id: str | None = None
 
 
 class CallBody(HookBody):
     name: str
     arguments: dict[str, JsonValue] = {}
     tool_call_id: str
+
+
+class BrowserBody(HookBody):
+    """``browser``: the LangSmith browser MDA names for the thread's agent."""
+
+    browser: str
+    opened: bool = True
 
 
 class ToolResultBody(HookBody):
@@ -193,6 +216,14 @@ def _model_spec(choice: ModelChoice) -> ModelSpec:
 
 def _overrides(middleware: AgentMiddleware, hook: str) -> bool:
     return getattr(type(middleware), hook) is not getattr(AgentMiddleware, hook)
+
+
+class ModelCallShape(BaseModel):
+    """What the graph's own model-call middleware makes of the next call."""
+
+    system_prompt: str
+    # Tools the middleware takes off this call's list, as it would in-process.
+    hidden_tools: list[str]
 
 
 class PhaseResult(BaseModel):
@@ -287,18 +318,15 @@ class RunSession:
         return _json_object.validate_python(
             {
                 "tools": [
-                    {
-                        "name": name,
-                        "description": tool.description,
-                        "parameters": tool_parameters(tool),
-                    }
-                    for name, tool in tools.items()
+                    tool.model_dump(mode="json")
+                    for tool in self.surface.catalog()
+                    if tool.name in tools
                 ],
                 "subagents": [
                     {
                         "name": subagent.name,
                         "description": subagent.description,
-                        "system_prompt": subagent.system_prompt,
+                        "system_prompt": common_prompt(subagent.system_prompt),
                         "tools": None
                         if subagent.tools is None
                         else [name for name in subagent.tools if name in tools],
@@ -319,7 +347,37 @@ class RunSession:
                 "also_from_code": sorted(
                     name for name in tools if self.surface.code_mode and direct_and_from_code(name)
                 ),
+                "described": {
+                    name: prompt("tools/display-description") for name in _DESCRIBED_TOOLS
+                },
             }
+        )
+
+    async def sandbox(self) -> ManagedSandbox | None:
+        """The thread's box as MDA creates it, when MDA owns it."""
+        cfg = RunConfig.from_config(self.config)
+        if cfg.thread_id is None:
+            return None
+        return await ManagedSandbox.for_thread(cfg.thread_id, cfg.workspace_slug)
+
+    async def bind_sandbox(self, sandbox_id: str | None) -> None:
+        """Bind the thread to the box MDA opened before preparing, if MDA owns it."""
+        cfg = RunConfig.from_config(self.config)
+        if cfg.thread_id is not None and await self.sandbox() is not None:
+            await bind_mda_sandbox(cfg.thread_id, sandbox_id, workspace_slug=cfg.workspace_slug)
+
+    async def reconnect_sandbox(self, assistant_id: str) -> None:
+        """Connect again to the thread's box, which MDA replaced with a fresh one."""
+        cfg = RunConfig.from_config(self.config)
+        if cfg.thread_id is None:
+            raise ValueError("This run has no thread")
+        reviewing = assistant_id in {"reviewer", "review-scout"}
+        repositories = [cfg.repo.full_name] if cfg.repo else []
+        await reconnect_replaced_sandbox(
+            cfg.thread_id,
+            workspace_slug=cfg.workspace_slug,
+            github_proxy_repositories=repositories if reviewing else None,
+            github_proxy_permissions=READ_ONLY_REVIEW_PERMISSIONS if reviewing else None,
         )
 
     def start_models(self) -> RunModels:
@@ -367,18 +425,26 @@ class RunSession:
             update=_json_state(update), messages=dump_messages(added), jump_to=jump_to
         )
 
-    def _request(self, state: Mapping[str, object], runtime: Runtime) -> ModelRequest:
+    def _offered(self) -> list[BaseTool]:
+        return [tool for name, tool in self.surface.tools.items() if name not in _MDA_TOOLS]
+
+    def _request(
+        self,
+        state: Mapping[str, object],
+        runtime: Runtime,
+        tools: Sequence[BaseTool] = (),
+    ) -> ModelRequest:
         return ModelRequest(
             model=FakeListChatModel(responses=[""]),
             messages=_as_list(state.get("messages")),
             state=cast(AgentState, dict(state)),
             runtime=runtime,
-            tools=[],
+            tools=list(tools),
             model_settings={},
         )
 
-    async def system_prompt(self, state: Mapping[str, object], runtime: Runtime) -> str:
-        """The system prompt the graph's own model-call middleware would send."""
+    async def model_call(self, state: Mapping[str, object], runtime: Runtime) -> ModelCallShape:
+        """The system prompt and tool list the graph's own model-call middleware would send."""
         captured: list[ModelRequest] = []
 
         async def capture(request: ModelRequest) -> ModelResponse:
@@ -390,10 +456,18 @@ class RunSession:
             for m in self.surface.middleware
             if _overrides(m, "awrap_model_call") and not isinstance(m, _NOT_PROMPT_SHAPING)
         ]
-        await _chain(shaping, capture)(self._request(state, runtime))
-        if not captured or captured[0].system_message is None:
-            return ""
-        return captured[0].system_message.text
+        offered = self._offered()
+        await _chain(shaping, capture)(self._request(state, runtime, offered))
+        if not captured:
+            return ModelCallShape(system_prompt=common_prompt(), hidden_tools=[])
+        request = captured[0]
+        kept = {getattr(tool, "name", None) for tool in request.tools}
+        return ModelCallShape(
+            system_prompt=common_prompt(
+                request.system_message.text if request.system_message else ""
+            ),
+            hidden_tools=sorted(tool.name for tool in offered if tool.name not in kept),
+        )
 
     def model_for(self, state: Mapping[str, object]) -> ModelChoice:
         """The model the graph's model selection would call next."""
@@ -512,7 +586,7 @@ class RemoteGraph:
         if not fresh and cached is not None and time.monotonic() < cached.expires_at:
             return cached
         config = self._config(run, run_id)
-        surface = ToolSurface()
+        surface = ToolSurface(for_model=True)
         await self._build(config, surface)
         await surface.prepare({})
         session = RunSession(surface, config, self._restore_state, started_here=fresh)
@@ -531,10 +605,28 @@ class RemoteGraph:
             return await self._call(run, CallBody.model_validate(raw))
         body = HookBody.model_validate(raw)
         if hook == "catalog":
-            return (await self.session(run, body.run_id)).catalog()
+            session = await self.session(run, body.run_id)
+            sandbox = await session.sandbox()
+            return {
+                **session.catalog(),
+                "trace_metadata": TurnGitMetadata(session.config).actor,
+                "sandbox": None if sandbox is None else _json.validate_python(sandbox.model_dump()),
+            }
         if hook == "prepare":
             session = await self.session(run, body.run_id, fresh=True)
+            # MDA opened the box before preparing; preparation connects to it as to any other.
+            await session.bind_sandbox(body.sandbox_id)
             return await self._phase(session, "before_agent", body)
+        if hook == "browser":
+            body = BrowserBody.model_validate(raw)
+            await ThreadBrowser(browser=body.browser, opened=body.opened).report(run.thread_id)
+            return {}
+        if hook == "sandbox":
+            session = await self.session(run, body.run_id)
+            await in_graph_context(
+                session.config, lambda _runtime: session.reconnect_sandbox(run.assistant_id)
+            )
+            return {}
         session = await self.session(run, body.run_id)
         if hook == "before_model":
             return await self._phase(session, "before_model", body)
@@ -560,10 +652,16 @@ class RemoteGraph:
             await session.join(state, runtime)
             result = await session.run_phase(phase, state, runtime)
             reply = result.model_dump()
+            git = TurnGitMetadata(session.config)
+            if phase == "before_agent":
+                reply["update"].update(await git.begin())
+            elif phase == "after_agent":
+                reply["trace_metadata"] = await git.reconcile(state)
+                reply["update"][BASELINE] = None
             if phase == "before_model" and result.jump_to is None:
                 model = session.model_for(state)
                 fallback = fallback_model_choice(model.model_id)
-                reply["system_prompt"] = await session.system_prompt(state, runtime)
+                reply.update((await session.model_call(state, runtime)).model_dump())
                 reply["model"] = _model_spec(model).model_dump()
                 reply["fallback"] = None if fallback is None else _model_spec(fallback).model_dump()
                 reply["use_gateway"] = session.models.use_gateway
@@ -635,8 +733,11 @@ class RemoteGraph:
             }
         state = session.state(body)
         await in_graph_context(session.config, partial(session.join, state))
+        git = TurnGitMetadata(session.config)
+        before = git.work_baseline(state) if body.name in OBSERVED_TOOLS else None
+        observed_at = time.time_ns()
         try:
-            with within_namespace(body.namespace):
+            with within_namespace(body.namespace), collect_pr_targets() as pr_targets:
                 result = await session.surface.run(
                     session.config,
                     state,
@@ -664,7 +765,11 @@ class RemoteGraph:
             {
                 "message": dump_messages([result.message])[0],
                 "messages": dump_messages(_with_ids(result.messages)),
-                "update": _json_state(result.update),
+                "update": {
+                    **_json_state(result.update),
+                    **git.evidence(pr_targets, body.tool_call_id, pr=True, observed_at=observed_at),
+                    **await git.work_evidence(before, body.tool_call_id, observed_at),
+                },
                 "events": [_json_or_text(e) for e in result.events],
             }
         )

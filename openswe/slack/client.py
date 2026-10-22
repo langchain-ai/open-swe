@@ -999,6 +999,38 @@ async def stop_slack_stream(
             raise
 
 
+_TRANSIENT_SLACK_ERRORS = (
+    "rate_limited",
+    "http_error",
+    "invalid_response",
+    "invalid_slack_response",
+    "internal_error",
+    "fatal_error",
+    "service_unavailable",
+    "request_timeout",
+)
+
+
+async def _set_agent_session_status(channel_id: str, thread_ts: str, status: str) -> bool:
+    """Set a thread's agent session status, which carries Slack's native Stop button.
+
+    Returns False when Slack has no agent session there; transient failures raise.
+    """
+    try:
+        data = await _slack_stream_call(
+            "agents.sessions.setStatus",
+            {"channel_id": channel_id, "thread_ts": thread_ts, "status": status},
+        )
+    except SlackStreamError as exc:
+        if exc.code.startswith(_TRANSIENT_SLACK_ERRORS):
+            raise
+        logger.info("Slack agent session status unavailable: %s", exc.code)
+        return False
+    if data.get("warning"):
+        logger.warning("Slack agent session status warning: %s", data["warning"])
+    return True
+
+
 async def set_slack_thread_status(channel_id: str, thread_ts: str, status: str) -> bool:
     """Set (or clear, with "") the animated assistant status shown under a thread."""
     from openswe.slack.dm import CONCIERGE_TS
@@ -1006,6 +1038,10 @@ async def set_slack_thread_status(channel_id: str, thread_ts: str, status: str) 
     if channel_id.startswith("D") and thread_ts == CONCIERGE_TS:
         return True
     try:
+        if await _set_agent_session_status(
+            channel_id, thread_ts, "processing" if status else "active"
+        ):
+            return True
         await _slack_stream_call(
             "assistant.threads.setStatus",
             {"channel_id": channel_id, "thread_ts": thread_ts, "status": status},
@@ -1335,7 +1371,7 @@ async def invite_to_slack_channel(channel_id: str, user_ids: Iterable[str]) -> l
 
 
 async def _post_slack_callback(
-    response_url: str, payload: dict[str, Any], path_prefix: str
+    response_url: str, payload: dict[str, Any], path_prefix: str | tuple[str, ...]
 ) -> bool:
     try:
         parsed = urlparse(response_url)
@@ -1387,7 +1423,7 @@ async def acknowledge_slack_command(response_url: str, text: str) -> bool:
     return await _post_slack_callback(
         response_url,
         {"response_type": "ephemeral", "text": text},
-        "/commands/",
+        ("/commands/", "/actions/"),
     )
 
 
@@ -1399,22 +1435,24 @@ async def replace_slack_command_message(
     usage: RunUsageSummary | None = None,
     agent_thread_id: str | None = None,
 ) -> bool:
-    """Overwrite a slash command's acknowledgement with the reply it stood in for."""
+    """Replace a command acknowledgement or publish a new ephemeral shortcut answer."""
     text, blocks = await pr_review_links(text, blocks)
     dashboard_url = dashboard_thread_url(agent_thread_id) if agent_thread_id else None
     payload: dict[str, Any] = {
         "response_type": "ephemeral",
-        "replace_original": True,
+        "replace_original": urlparse(response_url).path.startswith("/commands/"),
         "text": append_slack_web_link_footer(text, dashboard_url, usage),
     }
     updated_blocks = _with_slack_web_link_context_block(text, blocks, dashboard_url, usage)
     if updated_blocks:
         payload["blocks"] = updated_blocks
-    return await _post_slack_callback(response_url, payload, "/commands/")
+    return await _post_slack_callback(response_url, payload, ("/commands/", "/actions/"))
 
 
 async def clear_slack_command_message(response_url: str) -> bool:
     """Remove a slash command's acknowledgement when something else answers instead."""
+    if urlparse(response_url).path.startswith("/actions/"):
+        return True
     return await _post_slack_callback(response_url, {"delete_original": True}, "/commands/")
 
 

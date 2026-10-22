@@ -14,6 +14,8 @@ Trusted users can still expose the agent to malicious instructions in repository
 
 Some workflows, including reviewers and public-repository event threads, use narrower tokens; see [GitHub access and the sandbox image](reference/workspaces.md#github-access-and-the-sandbox-image). For the distinction between server-side user credentials and sandbox credentials, see [Thread credential scope](#thread-credential-scope).
 
+Open SWE's GitHub approvals can affect branch protection. See the [stale-approval threat model](reference/review-approval-threat-model.md) for withdrawal behavior, deployment scoping, and best-effort cleanup limitations.
+
 ## Prerequisites
 
 What a deployment needs:
@@ -31,13 +33,13 @@ What a deployment needs:
 
 GitHub and Slack are the two surfaces every deployment has; Linear is an optional add-on. Every variable Open SWE reads is declared in `openswe/config.py` with its description and default; that file is the complete reference.
 
-### Optional Segment usage tracking
+### Optional PostHog usage tracking
 
-Create a Segment HTTP API source and set its write key as the backend's `SEGMENT_WRITE_KEY` secret. Set `DD_ENV` to distinguish deployments. Without a key, no events are sent; no frontend key or additional dependency is needed.
+Set `POSTHOG_API_KEY` to your PostHog project API key. `POSTHOG_HOST` defaults to `https://us.i.posthog.com`; use `https://eu.i.posthog.com` for EU projects or your self-hosted ingestion host. Without a key, capture is disabled. No frontend key or additional dependency is needed.
 
-Authenticated dashboard navigation sends Segment `page` events with a normalized `page_name`. Agent MCP executions send `MCP Tool Called` events with the tool name and `is_error`. Both resolve the GitHub login to the internal user UUID used by webhook events, with email and GitHub login traits and `product: open-swe`. Usage capture skips unresolved users rather than sending a second login-based identity. Tool arguments/results, page URLs, query strings, and thread identifiers are excluded. Configure the Segment warehouse destination separately to query these events in Hex.
+Authenticated dashboard navigation sends `$pageview` events with normalized `page_name`; MCP executions send `MCP Tool Called` with tool name, `is_error`, and the run repository name; persisted webhook deliveries send `Webhook Received` with source, event type, action, resolved workspace/repository/PR IDs, and the repository name on GitHub events. `DD_ENV` identifies the deployment. Resolved users share the internal user UUID, with email and GitHub login traits on usage events. Unresolved usage is skipped; unresolved webhooks use a source-specific ID without creating person profiles.
 
-Every newly persisted GitHub, Slack, and Linear event-log delivery also sends `Webhook Received`, including events without a resolved user. Properties include source, event type, action, environment, and resolved workspace/repository/PR IDs; the raw webhook payload stays in the local event log. Resolved users use the event log's internal user UUID; unresolved events use a source-specific anonymous ID. This is best-effort delivery, not a historical backfill or durable export.
+Delivery is best effort, not a durable export or historical backfill. Tool arguments/results, page URLs/query strings/thread identifiers, and raw webhook payloads are excluded; only allowlisted metadata properties are exported; IP geolocation is disabled.
 
 ## 1. Create the deployment
 
@@ -279,7 +281,7 @@ MDA_RUNTIME_API_KEY=""                # LangSmith key to call it with; defaults 
 REMOTE_RUNTIME_TOKEN_SECRET=""        # openssl rand -hex 32     (signs the run tokens it calls back with); required
 ```
 
-Agent and reviewer threads run their model loop on a [Managed Deep Agents](https://docs.langchain.com/langsmith/python/managed-deep-agents-overview) deployment of the project in `mda/`, and the backend refuses to start without one. Deploy it with `mda deploy` as [mda/README.md](../mda/README.md#build-and-deploy) describes, with `OPEN_SWE_BACKEND_URL` set to this deployment's URL.
+Every Open SWE thread runs its model loop on a [Managed Deep Agents](https://docs.langchain.com/langsmith/python/managed-deep-agents-overview) deployment of the project in `mda/`, and the backend refuses to start without one. Deploy it with `mda deploy` as [mda/README.md](../mda/README.md#build-and-deploy) describes, with `OPEN_SWE_BACKEND_URL` set to this deployment's URL.
 
 On LangGraph Platform, set them under the deployment's environment variables; saving rolls out a new revision. With Docker, put them in the file you pass as `--env-file`. `DASHBOARD_BASE_URL` and `DASHBOARD_API_BASE_URL` are not needed: they default to `LANGGRAPH_URL` because the dashboard is served from the same origin.
 
@@ -305,6 +307,8 @@ Open a section when you want that feature; everything above keeps working withou
 **"Sign in with Slack" account linking.** Lets a user link their Slack identity to their GitHub login from **Settings → Connections**, so Slack-triggered runs resolve to the right GitHub user through Slack's verified claims. Without it, Slack senders stay unlinked until they connect from **Settings → Connections**; **Admin → Users** shows who has. The manifest already registers the OIDC redirect; make sure the `openid`, `email`, and `profile` user scopes are available, then set `SLACK_CLIENT_ID` and `SLACK_CLIENT_SECRET` from **Basic Information → App Credentials**, and optionally `SLACK_TEAM_ID` (`T...`) to restrict linking to one workspace. When they are unset the link is simply hidden.
 
 **Kitchen channels.** Admins turn kitchen mode on per channel in the workspace editor (**Workspaces → edit workspace → Slack channels**); a channel must be bound to a workspace to be a kitchen channel, and Open SWE must have joined it. In a kitchen channel, a top-level human message starts a new agent thread and replies continue it without tagging Open SWE; ordinary untagged replies queue behind an active run. Other channels still require mentions. To enable private channels, update the Slack app with the current manifest and reinstall it so Slack sends the `message.groups` event (the base manifest already includes the `groups:history` scope). Existing Slack app installations must update their event subscriptions; saving the dashboard setting alone does not change them.
+
+**Native Stop.** Update existing Slack apps with the generated manifest (or add the `agent_session_stopped` bot event) and enable Agent view. Open SWE marks ordinary threads as processing agent sessions so Slack shows Stop; this replaces the rotating working status there. Switching to Agent view is irreversible and app-wide; apps that stay on the assistant view keep the rotating status without Stop. Stop uses the linked clicker's dashboard cancellation permissions, interrupts current work, and clears the indicator without resolving the conversation or undoing completed actions. Other participants' queued runs and pending follow-ups are preserved and may continue; a later message can also continue the thread. Anyone who can read a bot-triggered thread can stop it; it otherwise stays read-only.
 
 **Code channels (early access).** To enable Slack [code channels](https://api.slack.com/partners/code-channels), open **Admin → Slack integration**, turn on **Slack Code Channels**, copy the generated manifest, update the Slack app, and reinstall it. In a code channel the whole channel is one Open SWE session: it answers without an `@`-mention, replies at the channel level by default, reports session status, and keeps the context bar current; the `manage_code_channel` tool covers channel lifecycle, status, views, and canvases. This requires the `code_channels:manage` bot scope, the `agent_session_stopped` and `code_channel_action` bot events, and `features.code_channels.enabled`; `slash_command_url` delivers runtime-registered commands to the signed Open SWE endpoint. If your workspace is not enrolled, leave the toggle off.
 
@@ -389,13 +393,16 @@ A workflow that names no `repo` works in its own repository. A machine caller re
 <details id="linear">
 <summary><strong>Linear</strong></summary>
 
-Open SWE listens for Linear comments that mention `@openswe`.
+Open SWE works in Linear as an app, through the Linear channel of its Managed Deep Agents deployment (`mda/channels/linear.py`). Mentioning the app on an issue, or delegating the issue to it, opens an agent session. The agent answers there, a reply in the session continues the conversation, and **Stop** cancels the run. Each session is its own conversation and thread; mentioning the app again on the same issue opens a new one. The dashboard shows these threads read-only: continue them in Linear.
 
-1. **Settings → API → Webhooks → New webhook**: label `Open SWE`, URL `<URL>/webhooks/linear`, a secret from `openssl rand -hex 32` saved as `LINEAR_WEBHOOK_SECRET`, and under **Data change events** **Comments → Create**, plus **Issues** when workspace automations should run on Linear issue events.
-2. Add a Linear MCP server named `linear` under **Workspaces → the workspace → MCP connections** and select the tools Open SWE may use. Include `save_comment` (or `create_comment` if offered) so the backend can post run, authentication, and sandbox failure notices even after the agent stops.
-3. Set a workspace default repository under **Open SWE Agent**. Add a `repo:owner/name` token or GitHub URL to a Linear comment when the issue belongs to another repository.
+1. Pick a secret (`openssl rand -hex 32`) and set it as `MDA_SERVICE_SECRET` in both `mda/.env` and the backend's environment. The deployment signs each Linear event it hands the backend with it, as Standard Webhooks does, and the backend answers only calls whose signature it verifies.
+2. Run `mda deploy` in `mda/`. Deploy sets up the Linear app, which takes a Linear workspace admin: it opens Linear's new-app page filled in with the app's name, redirect URI, webhook URL and events, then asks for the app's client ID, client secret and webhook signing secret, and the admin approves the install. The deployment checks each delivery's signature with that secret; the backend needs no Linear secret.
+3. Add a Linear MCP server named `linear` under **Workspaces → the workspace → MCP connections** and select the tools Open SWE may use to read issues and change them. Include `save_comment` (or `create_comment` if offered) so a run can still post a notice on the issue, such as when its sandbox keeps failing; the session's answer and errors need no tool.
+4. Set a workspace default repository under **Open SWE Agent**. Add a `repo:owner/name` token or GitHub URL to the message that mentions the app when the issue belongs to another repository.
 
-**Verify:** comment `@openswe what files are in this repo?` on an issue, adding `repo:owner/name` when needed.
+Issue events still reach workspace automations and `listen_events`: the channel forwards them to the backend.
+
+**Verify:** mention the app on an issue with `what files are in this repo?`, adding `repo:owner/name` when needed.
 
 </details>
 
@@ -455,8 +462,8 @@ Open SWE keeps all of its state in PostgreSQL and no longer reads the LangGraph 
 ### Webhook not receiving events
 
 - The URL configured in GitHub, Slack, or Linear must be the deployment's URL; GitHub shows each delivery and its response under the App's **Advanced** tab. A new webhook or signing secret takes effect only after the deployment restarts with it; deliveries in between are rejected as `Invalid signature`, and Slack then needs **Retry** on its Request URL under **Event Subscriptions**.
-- Enable the right events: Issue comment and the pull request review events for GitHub, `app_mention` for Slack, Comments → Create (and Issues, for automations) for Linear.
-- Webhook secrets are required: without `GITHUB_WEBHOOK_SECRET`, `SLACK_SIGNING_SECRET`, or `LINEAR_WEBHOOK_SECRET`, every request to that endpoint is rejected with 401.
+- Enable the right events: Issue comment and the pull request review events for GitHub, `app_mention` for Slack. `mda deploy` subscribes the Linear app to the events its channel handles.
+- Webhook secrets are required: without `GITHUB_WEBHOOK_SECRET` or `SLACK_SIGNING_SECRET`, every request to that endpoint is rejected with 401. Linear deliveries reach the backend only from the MDA deployment, which verifies them and signs its calls with `MDA_SERVICE_SECRET`, needed on both sides.
 
 ### Thread credential scope
 
@@ -529,7 +536,7 @@ User identity and membership checks still apply to public runs.
 ### Agent not responding to comments
 
 - GitHub: the comment must contain a configured handle (`@openswe` by default, case-insensitive), and the commenter must have signed in to the dashboard once; otherwise the log says `No email mapping for GitHub user`.
-- Linear: the comment must contain the handle; Slack: the bot must be in the channel and `@`-mentioned.
+- Linear: mention the app itself, or delegate the issue to it; a session opens on the issue. Slack: the bot must be in the channel and `@`-mentioned.
 - Check the server log for webhook processing errors.
 
 ### Token encryption errors

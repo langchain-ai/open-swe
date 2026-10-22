@@ -7,6 +7,7 @@ Run Open SWE on your machine: the backend and the dashboard on `http://localhost
 - **Python 3.14+** and [uv](https://docs.astral.sh/uv/)
 - [LangGraph CLI](https://docs.langchain.com/langsmith/cli) (installed by `uv sync`)
 - Node 22.22.2+ and [pnpm](https://pnpm.io/) for the dashboard
+- Rust (`cargo`, e.g. via [rustup](https://rustup.rs/)): `make dev-mda` builds the `mda` CLI from the vendored Managed Deep Agents SDK ([vendor/README.md](../vendor/README.md))
 - A free [ngrok](https://ngrok.com/) account, so GitHub and Slack can reach your local backend (step 3)
 - A Slack workspace where you may create apps, and a GitHub account or organization where you may create a GitHub App
 
@@ -91,7 +92,7 @@ MDA_RUNTIME_URL="http://localhost:2025"   # `make dev-mda`; the backend refuses 
 REMOTE_RUNTIME_TOKEN_SECRET=""  # openssl rand -hex 32     (signs the run tokens Managed Deep Agents calls back with)
 ```
 
-Agent and reviewer threads run their model loop on Managed Deep Agents, from the project in `mda/`. Locally that is `make dev-mda` on port 2025, which reads its own `mda/.env`: set `OPEN_SWE_BACKEND_URL=http://localhost:2024` there, plus `LANGSMITH_API_KEY` and the same model key as above ([mda/README.md](../mda/README.md#run-locally)).
+Every Open SWE thread runs its model loop on Managed Deep Agents, from the project in `mda/`. Locally that is `make dev-mda` on port 2025, which reads its own `mda/.env`: set `OPEN_SWE_BACKEND_URL=http://localhost:2024` there, plus `LANGSMITH_API_KEY` and the same model key as above ([mda/README.md](../mda/README.md#run-locally)).
 
 `LANGGRAPH_URL` defaults to `http://localhost:2024`, and `DASHBOARD_BASE_URL` / `DASHBOARD_API_BASE_URL` default to it, so none of the three is needed locally. Keep them on localhost when setting `SLACK_PUBLIC_BASE_URL` to the tunnel. You only need one model credential: either a provider key or a gateway key if you route model calls through an LLM gateway, such as the [LangSmith Gateway](INSTALLATION.md#4-model-providers-and-api-keys). How the running model is chosen is covered in the same section. Linear, if you use it, comes from the [Linear](INSTALLATION.md#linear) section of the installation guide, with your ngrok domain as the URL.
 
@@ -108,7 +109,7 @@ With a database, every thread created from then on is also recorded into the app
 ```bash
 make build-dashboard   # pnpm install + Vite build into ui/.output/public
 make dev               # langgraph dev on http://localhost:2024, serving the API and the dashboard (starts the Postgres container first)
-make dev-mda           # in a second terminal: Managed Deep Agents on http://localhost:2025, where agent and reviewer threads run
+make dev-mda           # in a second terminal: Managed Deep Agents on http://localhost:2025, where every Open SWE thread runs
 ```
 
 `langgraph dev` serves the graphs, the FastAPI app, and the dashboard build together on port 2024. The bundled UI is a static build, so rebuild it when you pull UI changes, or skip `make build-dashboard` if you only need webhooks and the API. It reloads on code changes only: after editing `.env`, restart it.
@@ -125,9 +126,10 @@ make dev-ui   # Vite on :3000 and the backend on :2024 forwarding UI requests to
 |---|---|
 | `/` | Dashboard |
 | `POST /webhooks/github` | GitHub issue, PR, and comment webhooks |
+| `POST /github/channel/events` | The MDA deployment's GitHub channel asking what an issue mention starts |
 | `POST /webhooks/slack`, `POST /webhooks/slack/interactivity` | Slack events and Block Kit interactions |
 | `POST /webhooks/slack/commands` | The `/oswe` slash command |
-| `POST /webhooks/linear` | Linear comment webhooks |
+| `POST /linear/channel/events` | The MDA deployment's Linear channel asking what a Linear event starts |
 | `GET /dashboard/api/auth/login`, `GET /dashboard/api/auth/callback` | GitHub login |
 | `/dashboard/api/*` | Dashboard API |
 | `GET /ok`, `GET /health` | Health checks |
@@ -266,7 +268,8 @@ For "how long until the agent answers", read `@context.step_generation_start_ms`
 | Target | What it does |
 |---|---|
 | `make dev` | `langgraph dev` on port 2024: graphs, webhooks, dashboard API, and the bundled dashboard when a build exists |
-| `make dev-mda` | `mda dev` on port 2025: the Managed Deep Agents runtime agent and reviewer threads run on |
+| `make dev-mda` | `mda dev` on port 2025: the Managed Deep Agents runtime every Open SWE thread runs on |
+| `make mda-cli` | Build the `mda` CLI from the vendored SDK (`make dev-mda` does it first) |
 | `make dev-ui` | `make web` and `make dev` together, the backend fronting Vite so the UI hot-reloads on port 2024 |
 | `make web` | The Vite dev server alone on port 3000 |
 | `make build-dashboard` | Installs the dashboard's dependencies and builds it into `ui/.output/public` |
@@ -276,7 +279,7 @@ For "how long until the agent answers", read `@context.step_generation_start_ms`
 | `make install` | `uv sync --extra dev` |
 | `make test [TEST_FILE=tests/…]` | `pytest -vvv` on `tests/` or the given path |
 | `make lint`, `make format`, `make format-check` | ruff check and format (`format` rewrites files) |
-| `make typecheck` | `ty check agent tests` |
+| `make typecheck` | `ty check openswe tests` |
 
 ## Troubleshooting
 
@@ -284,7 +287,7 @@ For "how long until the agent answers", read `@context.step_generation_start_ms`
 
 - The tunnel must be running (`make tunnel`) against port 2024, and the URL in GitHub or Slack must be your ngrok domain. Do not swap in a tunnel that forwards the whole port; see step 3. GitHub shows each delivery under the App's **Advanced** tab; ngrok's inspector at `http://localhost:4040` shows what arrived. With the webhooks-only policy, ngrok itself answers 404 for anything outside `/webhooks/*`, so test with `/webhooks/slack`, not `/ok`.
 - Restart the backend after changing `.env`: `langgraph dev` reloads on code changes only, so a new `GITHUB_WEBHOOK_SECRET` or `SLACK_SIGNING_SECRET` is not picked up until then, and every delivery is rejected as `Invalid signature` in the meantime. Slack then needs **Retry** on its Request URL under **Event Subscriptions**.
-- Webhook secrets are required: without `GITHUB_WEBHOOK_SECRET`, `SLACK_SIGNING_SECRET`, or `LINEAR_WEBHOOK_SECRET`, every request to that endpoint is rejected with 401.
+- Webhook secrets are required: without `GITHUB_WEBHOOK_SECRET` or `SLACK_SIGNING_SECRET`, every request to that endpoint is rejected with 401, and the Linear channel's routes verify the deployment's signature with `MDA_SERVICE_SECRET`, the same value as `mda/.env`'s.
 
 ### Dashboard login fails or won't stay logged in
 

@@ -29,7 +29,7 @@ from uuid import UUID, uuid7
 from langgraph_sdk import get_client
 from langgraph_sdk.errors import NotFoundError as LangGraphSDKNotFoundError
 from pydantic import BaseModel, ValidationError
-from sqlalchemy import BigInteger, ForeignKey, ForeignKeyConstraint, Select, func, select
+from sqlalchemy import BigInteger, ForeignKey, ForeignKeyConstraint, Select, func, select, update
 from sqlalchemy.dialects.postgresql import JSONB, insert
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import Mapped, mapped_column, relationship, selectinload
@@ -38,6 +38,7 @@ from openswe.database import postgres
 from openswe.database.orm import NOW, Base
 from openswe.github.pull_request_key import PullRequestKey
 from openswe.run_config import RunConfig
+from openswe.thread_ids import mda_successor_thread_id
 from openswe.ui_invalidations import Topic
 from openswe.users.models import UserIdentity
 
@@ -700,11 +701,24 @@ async def _ensure_finding_state(thread_id: str, metadata: Mapping[str, Any] | No
             .returning(FindingState.pull_request_id)
         )
         if created is None:
-            if (pull_request_id := await _stored_pull_request_id(session, thread_id)) is None:
+            if (pull_request_id := await _stored_pull_request_id(session, thread_id)) is not None:
+                return pull_request_id
+            holder = await session.scalar(
+                select(FindingState.reviewer_thread_id).where(
+                    FindingState.pull_request_id == pull_request.id
+                )
+            )
+            # A successor carries on its predecessor's review, findings included.
+            if holder is None or mda_successor_thread_id(holder) != thread_id:
                 raise RuntimeError(
                     f"Pull request {pull_request.url} already stores findings from another reviewer thread"
                 )
-            return pull_request_id
+            await session.execute(
+                update(FindingState)
+                .where(FindingState.pull_request_id == pull_request.id)
+                .values(reviewer_thread_id=thread_id)
+            )
+            return pull_request.id
         rows = [
             FindingRow.of(pull_request.id, position, finding)
             for position, finding in enumerate(legacy)

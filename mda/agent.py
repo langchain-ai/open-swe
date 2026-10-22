@@ -1,14 +1,14 @@
-"""Open SWE's coding agent and pull request reviewer as one Managed Deep Agent.
+"""Open SWE's graphs as one Managed Deep Agent.
 
-Open SWE dispatch names the graph a run plays (``agent`` or ``reviewer``) in its
-context. The model loop and its checkpoints run here. The Open SWE backend
+Open SWE dispatch names the graph a run plays (``agent``, ``reviewer`` or
+``review-scout``) in its context. The model loop and its checkpoints run here. The Open SWE backend
 holds every credential, the sandbox and the graph itself: this factory takes the
 graph's tools, subagents and models from the backend's catalog for the run, and
 ``BackendRunMiddleware`` hands each phase of the loop to the graph's own
 middleware there. The run token in the context authenticates every call.
 """
 
-from collections.abc import Collection, Sequence
+from collections.abc import Collection, Mapping, Sequence
 from typing import Final, Literal
 
 from langchain.agents.middleware import (
@@ -25,8 +25,11 @@ from managed_deepagents import (
 )
 from pydantic import BaseModel, ConfigDict, Field, JsonValue
 from rt.backend import Catalog, OpenSweBackend
+from rt.browser import ReportedBrowserMiddleware
+from rt.managed_sandbox import ReplaceSandboxMiddleware, definition, opened_sandbox
 from rt.middleware import (
     BackendRunMiddleware,
+    DescribedToolsMiddleware,
     ReportRepliesMiddleware,
     RuntimeToolsMiddleware,
     ServedToolsMiddleware,
@@ -34,7 +37,7 @@ from rt.middleware import (
 from rt.models import RunModels, build_model
 from rt.tools import backend_tool
 
-Graph = Literal["agent", "reviewer"]
+Graph = Literal["agent", "reviewer", "review-scout"]
 _DEFAULT_MODEL: Final = "anthropic:claude-opus-5-5"
 # Matches the in-process graphs' cap on model calls per run.
 _MODEL_CALL_LIMIT: Final = 5_000
@@ -76,14 +79,26 @@ def _backend_reports(backend: OpenSweBackend, served: Collection[str]) -> list[A
     return [ReportRepliesMiddleware(backend), RuntimeToolsMiddleware(backend, served)]
 
 
-def _code_mode(graph: Graph, from_code: Sequence[BaseTool]) -> list[AgentMiddleware]:
+def _code_mode(
+    graph: Graph, from_code: Sequence[BaseTool], described: Mapping[str, str]
+) -> list[AgentMiddleware]:
     """The graph's code mode, with every tool the catalog offers from code callable from it."""
     if graph == "reviewer":
-        return [CodeInterpreterMiddleware(ptc=[*_REVIEWER_PTC_TOOLS, *from_code])]
-    if not from_code:
+        interpreter = CodeInterpreterMiddleware(ptc=[*_REVIEWER_PTC_TOOLS, *from_code])
+    elif from_code:
+        # As the in-process agent's code mode: state per turn, subagents through `task`.
+        interpreter = CodeInterpreterMiddleware(ptc=list(from_code), subagents=False, mode="turn")
+    else:
         return []
-    # As the in-process agent's code mode: state per turn, subagents through `task`.
-    return [CodeInterpreterMiddleware(ptc=list(from_code), subagents=False, mode="turn")]
+    return [interpreter, *([DescribedToolsMiddleware(described)] if described else [])]
+
+
+def _browser(graph: Graph, backend: OpenSweBackend) -> list[AgentMiddleware]:
+    """The coding agent's browser, a LangSmith browser per thread the dashboard shows.
+
+    The deployment's workspace needs the LangSmith browser beta.
+    """
+    return [ReportedBrowserMiddleware(backend)] if graph == "agent" else []
 
 
 # `mda build` reads the agent's name without running this factory, so its body
@@ -124,6 +139,9 @@ async def agent(runtime: ManagedServerRuntime) -> DeepAgentDefinition:
         else [by_name[name] for name in subagent.tools if name in by_name]
         for subagent in catalog.subagents
     }
+    replace_sandbox = (
+        [ReplaceSandboxMiddleware(backend, catalog.sandbox)] if catalog.sandbox is not None else []
+    )
     return define_deep_agent(
         name="open-swe",
         model=model,
@@ -132,7 +150,13 @@ async def agent(runtime: ManagedServerRuntime) -> DeepAgentDefinition:
         # and shell tools: the backend runs them in the thread's sandbox. Code-only
         # tools stay callable by name, as in-process, though no request offers them.
         tools=tools,
-        sandbox=None,
+        # The thread's box, for MDA's own use of it such as the browser's screenshots;
+        # the backend's tools run in the same box.
+        sandbox=(
+            definition(catalog.sandbox.create, catalog.sandbox.thread_id)
+            if catalog.sandbox is not None
+            else None
+        ),
         subagents=[
             {
                 "name": subagent.name,
@@ -142,6 +166,7 @@ async def agent(runtime: ManagedServerRuntime) -> DeepAgentDefinition:
                 "tools": subagent_tools[subagent.name],
                 "middleware": [
                     *_backend_reports(backend, by_name.keys()),
+                    *replace_sandbox,
                     ServedToolsMiddleware(subagent_tools[subagent.name], excluded),
                     ModelRetryMiddleware(retry_on=(TimeoutError,)),
                 ],
@@ -149,10 +174,17 @@ async def agent(runtime: ManagedServerRuntime) -> DeepAgentDefinition:
             for subagent in catalog.subagents
         ],
         middleware=[
-            BackendRunMiddleware(backend, context.invocation_id),
+            BackendRunMiddleware(
+                backend,
+                context.invocation_id,
+                opened_sandbox if catalog.sandbox is not None else None,
+                trace_metadata=catalog.trace_metadata,
+            ),
+            *replace_sandbox,
             *_backend_reports(backend, by_name.keys()),
             ServedToolsMiddleware(offered, excluded | code_only),
-            *_code_mode(context.graph, from_code),
+            *_code_mode(context.graph, from_code, catalog.described),
+            *_browser(context.graph, backend),
             ModelCallLimitMiddleware(run_limit=_MODEL_CALL_LIMIT, exit_behavior="end"),
             ModelRetryMiddleware(retry_on=(TimeoutError,)),
         ],

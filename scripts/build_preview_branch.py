@@ -556,19 +556,25 @@ The preview resets to plain `main` every Sunday, in the
             "fetch", "--no-tags", "--force", "origin", f"refs/heads/{branch}:{ref}", check=False
         )
         if fetched.code != 0:
-            self.skipped.append(f"`{branch}` — could not fetch the branch")
-            return
-        sha = await rev_parse(ref)
-        match await merge(sha, f"preview: merge branch {branch}"):
-            case Merged() as merged:
-                self.included.append(f"`{branch}` — `{sha[:7]}`{merged.suffix()}")
-            case Conflicted(paths=paths):
-                self.conflicted = True
-                self.skipped.append(
-                    f"`{branch}` — merge conflict with `main` — rebuild the branch{listed_paths(paths)}"
-                )
-            case Unmergeable(reason=reason):
-                self.skipped.append(f"`{branch}` — {reason}")
+            reason = f"could not fetch the branch: {fetched.first_line}"
+        else:
+            sha = await rev_parse(ref)
+            match await merge(sha, f"preview: merge branch {branch}"):
+                case Merged() as merged:
+                    self.included.append(f"`{branch}` — `{sha[:7]}`{merged.suffix()}")
+                    return
+                case Conflicted(paths=paths):
+                    reason = f"merge conflict with `main` — rebuild the branch{listed_paths(paths)}"
+                case Unmergeable(reason=reason):
+                    pass
+        summary(
+            "## Preview build failed — nothing published",
+            "",
+            f"`{branch}` — {reason}",
+            "",
+            f"Repair `{branch}` and rerun the build. The preview cannot be deployed without it.",
+        )
+        raise PreviewError(f"{branch}: {reason}; nothing was published")
 
     async def merge_pulls(self, defer_conflicts: bool) -> list[Pending]:
         s = self.settings

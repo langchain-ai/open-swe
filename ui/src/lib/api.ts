@@ -302,16 +302,15 @@ export interface Profile {
   login?: string
   email?: string
   default_repo?: string | null
+  workspace_default_repos?: Record<string, string>
   base_branch?: string | null
   branch_prefix?: string | null
   auto_fix_ci?: boolean
   auto_human_review_enabled?: boolean
-  recent_thread_context_enabled?: boolean
   concierge_mode?: boolean
   pr_review_links?: boolean
   pr_failure_reactions?: boolean
-  prefer_tools_in_sandbox?: boolean
-  experimental_mcp_ptc?: boolean
+  experimental_monitor?: boolean | null
   experimental_act_as_approval?: boolean
   act_as_always_allowed?: boolean
   draft_prs?: boolean
@@ -325,16 +324,15 @@ export interface ProfileUpdate {
   experimental_assistant_ui?: boolean | null
   experimental_background_callbacks?: boolean | null
   default_repo?: string | null
+  workspace_default_repos?: Record<string, string>
   base_branch?: string | null
   branch_prefix?: string | null
   auto_fix_ci?: boolean
   auto_human_review_enabled?: boolean
-  recent_thread_context_enabled?: boolean
   concierge_mode?: boolean
   pr_review_links?: boolean
   pr_failure_reactions?: boolean
-  prefer_tools_in_sandbox?: boolean
-  experimental_mcp_ptc?: boolean
+  experimental_monitor?: boolean | null
   experimental_act_as_approval?: boolean
   draft_prs?: boolean
   review_draft_prs?: boolean | null
@@ -397,8 +395,6 @@ export interface WorkspaceSettings {
   default_reviewer_reasoning_effort?: string | null
   default_reviewer_subagent_model?: string | null
   default_reviewer_subagent_reasoning_effort?: string | null
-  default_chat_model?: string | null
-  default_chat_reasoning_effort?: string | null
   default_thread_title_model?: string | null
   default_thread_title_reasoning_effort?: string | null
   updated_at?: string | null
@@ -1127,7 +1123,6 @@ export interface PullRequestSearchResult {
   number: number
   url: string
   title: string
-  body: string
   state: "open" | "draft" | "merged" | "closed"
 }
 

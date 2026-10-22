@@ -95,7 +95,7 @@ def test_card_draws_only_unexcluded_hunks_and_lists_every_exclusion_by_guideline
     drawn = [text for text in texts if text.startswith("```")]
     assert drawn == ["```\n@@ -1,3 +1,3 @@\n-DEBUG = True\n+DEBUG = False\n a\n b\n```"]
     assert "`src/app.py`  +1 −1" in texts
-    assert texts[-3:-1] == [
+    assert texts[-2:] == [
         "*Tests (not shown)*\n`tests/test_app.py`  +5 −0",
         "*Open SWE judged these auto-approvable under `.open-swe/APPROVALS.md` (not shown)*\n"
         "_Generated constants_: `src/app.py` 1 hunk +12 −0\n"

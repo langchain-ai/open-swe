@@ -1,4 +1,4 @@
-"""Sandbox capabilities for the associated thread's tools."""
+"""Sandbox capabilities for calling back to the associated thread."""
 
 import shlex
 from typing import TYPE_CHECKING
@@ -53,10 +53,6 @@ async def sandbox_host_thread_id(thread_id: str) -> str:
     thread = await get_client().threads.get(thread_id)
     host = (thread.get("metadata") or {}).get(SANDBOX_HOST_THREAD_KEY)
     return host if isinstance(host, str) and host else thread_id
-
-
-def tools_endpoint_configured() -> bool:
-    return bool(ENV.DASHBOARD_JWT_SECRET.optional() and tools_base_url())
 
 
 async def issue_tool_access(thread_id: str, sandbox_id: str) -> tuple[str, str] | None:

@@ -224,6 +224,14 @@ ENV.var(
     secret=True,
 )
 ENV.var(
+    "MDA_SERVICE_SECRET",
+    "Secret shared with the MDA deployment at MDA_RUNTIME_URL (its MDA_SERVICE_SECRET): MDA "
+    "signs each call its channels make to /linear/channel/* and /github/channel/* with it "
+    "(Standard Webhooks), and the backend verifies the signature; required for the Linear "
+    "and GitHub channels.",
+    secret=True,
+)
+ENV.var(
     "REMOTE_RUNTIME_TOKEN_SECRET",
     "HMAC key(s) signing the run tokens remote runtimes present to /remote-runtime/hooks; "
     "comma-separated, the first signs and every one verifies. Required.",
@@ -312,7 +320,6 @@ ENV.var(
     "DASHBOARD_API_BASE_URL. Use the ngrok URL when the dashboard runs on localhost.",
 )
 ENV.var("SLACK_APP_ID", "Slack app id (A...) whose event deliveries Incidents accepts.")
-ENV.var("LINEAR_WEBHOOK_SECRET", "HMAC secret for Linear webhook deliveries.", secret=True)
 
 # --- Dashboard ------------------------------------------------------------------------------
 ENV.var(
@@ -380,11 +387,14 @@ ENV.var(
 )
 ENV.var(
     "OPENSWE_ENV",
-    "Deployment environment; `preview` lets startup drop superseded migration revisions and "
-    "turns off reviewer auto-assignment.",
+    "Agent prompt deployment environment (production, staging, preview, or local); "
+    "`preview` also lets startup drop superseded migration revisions and turns off reviewer auto-assignment.",
 )
-ENV.var("SEGMENT_WRITE_KEY", "Optional server-side Segment source write key.", default="")
-ENV.var("DD_ENV", "Shared Datadog, Segment, and analytics environment.", default="production")
+ENV.var(
+    "POSTHOG_API_KEY", "Optional PostHog project API key for server-side usage capture.", default=""
+)
+ENV.var("POSTHOG_HOST", "PostHog ingestion host.", default="https://us.i.posthog.com")
+ENV.var("DD_ENV", "Shared Datadog and analytics environment.", default="production")
 ENV.var("ANALYTICS_SUMMARY_VERSION", "Active metric semantics version.", default="1")
 ENV.var("ANALYTICS_PR_MATURITY_DAYS", "PR cohort maturity period.", default="14")
 ENV.var("ANALYTICS_MIN_COHORT_SIZE", "Minimum aggregate cohort size.", default="5")
@@ -393,9 +403,11 @@ ENV.var(
     "Log application queries at or above this duration in milliseconds; 0 disables.",
     default="1000",
 )
-ENV.var("ANALYTICS_POOL_SIZE", "Analytics PostgreSQL connection pool size.", default="5")
-ENV.var("ANALYTICS_POOL_OVERFLOW", "Analytics PostgreSQL pool overflow.", default="5")
-ENV.var("ANALYTICS_POOL_TIMEOUT_SECONDS", "Analytics pool checkout timeout.", default="5")
+ENV.var("ANALYTICS_POOL_SIZE", "PostgreSQL connection pool size per process.", default="20")
+ENV.var(
+    "ANALYTICS_POOL_OVERFLOW", "PostgreSQL connections allowed beyond the pool size.", default="20"
+)
+ENV.var("ANALYTICS_POOL_TIMEOUT_SECONDS", "PostgreSQL pool checkout timeout.", default="5")
 ENV.var("ANALYTICS_HEALTH_TIMEOUT_SECONDS", "Analytics readiness timeout.", default="3")
 ENV.var("ANALYTICS_OUTBOX_MAX_ATTEMPTS", "Delivery attempts before dead-lettering.", default="10")
 ENV.var("ANALYTICS_RAW_EVENT_MONTHS", "Online raw-event retention.", default="25")

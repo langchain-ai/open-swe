@@ -34,7 +34,7 @@ warnings.filterwarnings("ignore", message=".*Pydantic V1.*", category=UserWarnin
 from deepagents import create_deep_agent
 from deepagents.backends.protocol import SandboxBackendProtocol
 from deepagents.middleware.skills import SkillsMiddleware, SkillsState
-from deepagents.middleware.subagents import SubAgent
+from deepagents.middleware.subagents import GENERAL_PURPOSE_SUBAGENT, SubAgent
 from langchain.agents.middleware import ModelCallLimitMiddleware, ModelRetryMiddleware
 from langchain.agents.middleware.types import AgentMiddleware
 from langchain_anthropic.middleware import AnthropicPromptCachingMiddleware
@@ -44,6 +44,7 @@ from langchain_core.tools import BaseTool
 from openswe.dashboard.options import gate_fable_model
 from openswe.dashboard.workspace_settings_cache import cached_workspace_settings
 from openswe.github.app import get_github_app_installation_token_with_expiry
+from openswe.github.sandbox_access import READ_ONLY_REVIEW_PERMISSIONS
 from openswe.github.thread_token import cache_github_token_for_thread
 from openswe.middleware import (
     BasePrepareRunMiddleware,
@@ -62,7 +63,7 @@ from openswe.middleware import (
 )
 from openswe.middleware.prepare_run import PrepareRunState
 from openswe.middleware.sandbox_circuit_breaker import post_sandbox_unreachable_notification
-from openswe.prompts import apply_tool_descriptions, prompt
+from openswe.prompts import apply_tool_descriptions, common_prompt, prompt
 from openswe.review.approvals import approval_policy_for_review
 from openswe.review.diff import (
     changed_files,
@@ -126,7 +127,7 @@ def _reviewer_subagent(model: BaseChatModel) -> SubAgent:
     return {
         "name": "reviewer",
         "description": prompt("reviewer/subagent-description"),
-        "system_prompt": REVIEWER_SUBAGENT_SYSTEM_PROMPT,
+        "system_prompt": common_prompt(REVIEWER_SUBAGENT_SYSTEM_PROMPT),
         "model": model,
         # Subagents compile into their own graphs, so the reviewer's own
         # middleware never wraps their model calls.
@@ -559,6 +560,7 @@ async def ensure_reviewer_sandbox_for_thread(
         thread_id,
         workspace_slug=cfg.workspace_slug,
         github_proxy_repositories=[cfg.repo.full_name] if cfg.repo else [],
+        github_proxy_permissions=READ_ONLY_REVIEW_PERMISSIONS,
         # A reviewer sandbox holds nothing but a checkout `prepare_review_repo`
         # re-derives every run, and reviewer threads outlive their sandbox: one
         # thread per PR, re-triggered on every push. Refusing to replace an
@@ -1128,9 +1130,15 @@ async def build_reviewer_agent(
     )
     graph = create_deep_agent(
         model=reviewer_model,
-        system_prompt="",
+        system_prompt=common_prompt(),
         tools=reviewer_tools(),
-        subagents=[_reviewer_subagent(reviewer_subagent_model)],
+        subagents=[
+            {
+                **GENERAL_PURPOSE_SUBAGENT,
+                "system_prompt": common_prompt(GENERAL_PURPOSE_SUBAGENT["system_prompt"]),
+            },
+            _reviewer_subagent(reviewer_subagent_model),
+        ],
         backend=backend,
         middleware=middleware,
     ).with_config(bindable_config(config))

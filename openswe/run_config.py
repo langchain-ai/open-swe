@@ -18,7 +18,7 @@ byte-identical.
 
 **Everything is optional.** Which keys are present depends on the graph and the
 trigger; a reviewer run has no ``agent_model_id`` and a Slack run has no
-``chat_pr_number``.
+``pr_number``.
 """
 
 import logging
@@ -169,15 +169,6 @@ class RunConfig(BaseModel):
     slack_by_the_way_message_ts: str | None = None
     # Set on a private thread whose transcript was copied from a collaborative one.
     continued_from_thread_id: str | None = None
-
-    # Dashboard review chat
-    chat_repo_owner: str | None = None
-    chat_repo_name: str | None = None
-    chat_pr_number: Int | None = None
-    chat_head_sha: str | None = None
-    chat_model_id: str | None = None
-    chat_effort: str | None = None
-    chat_github_token: str | None = None
 
     # Eval harness
     eval: bool | None = None

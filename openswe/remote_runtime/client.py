@@ -1,11 +1,12 @@
-"""The Managed Deep Agents deployment that hosts the agent and reviewer graphs.
+"""The Managed Deep Agents deployment that hosts every Open SWE graph.
 
-``mda`` serves both as one graph; a run's context names the graph it
+``mda`` serves them as one graph; a run's context names the graph it
 plays. Dispatch stamps a signed run token into that context, and the deployment
 calls back with it for the graph's tools and run hooks.
 """
 
-from typing import Final, Literal, NotRequired, TypedDict
+from collections.abc import Mapping
+from typing import Final, Literal, NotRequired, TypedDict, get_args
 from urllib.parse import urlsplit
 
 from pydantic import JsonValue, TypeAdapter
@@ -16,13 +17,14 @@ from openswe.run_config import RunConfig
 
 # The graph id `mda build` derives from the project's agent name.
 MDA_GRAPH_ID: Final = "open-swe"
-HostedGraph = Literal["agent", "reviewer"]
-HOSTED_GRAPHS: Final[frozenset[str]] = frozenset({"agent", "reviewer"})
+HostedGraph = Literal["agent", "reviewer", "review-scout"]
+HOSTED_GRAPHS: Final[frozenset[str]] = frozenset(get_args(HostedGraph))
 # Thread metadata naming where a thread's runs and checkpoints live.
 RUNTIME_METADATA_KEY: Final = "runtime"
 MDA_RUNTIME: Final = "mda"
 
-_configurable = TypeAdapter(dict[str, JsonValue])
+_json_object = TypeAdapter(dict[str, JsonValue])
+_hosted_graph = TypeAdapter(HostedGraph)
 
 
 # The run context the MDA deployment builds its graph from. The token's key is a
@@ -46,7 +48,7 @@ def mda_runtime_url() -> str:
     url = ENV.MDA_RUNTIME_URL.optional()
     if url is None:
         raise RemoteRuntimeConfigurationError(
-            "MDA_RUNTIME_URL is required: the agent and reviewer graphs run on Managed Deep Agents"
+            "MDA_RUNTIME_URL is required: Open SWE's graphs run on Managed Deep Agents"
         )
     parsed = urlsplit(url)
     if parsed.scheme not in {"http", "https"} or not parsed.hostname:
@@ -69,29 +71,40 @@ def mda_runtime_api_key() -> str | None:
     return ENV.MDA_RUNTIME_API_KEY.optional() or ENV.LANGSMITH_API_KEY.optional()
 
 
+#: Sent with the LangSmith key on reads only: MDA then treats the call as LangSmith
+#: Studio's, which may read and search every thread, channel threads included. Writes
+#: go without it, so MDA keeps them scoped to the threads the backend owns.
+MDA_STUDIO_READ_HEADERS: Final[Mapping[str, str]] = {"x-auth-scheme": "langsmith"}
+
+
 async def remote_run_context(
-    configurable: dict[str, JsonValue], *, thread_id: str, assistant_id: str
+    configurable: dict[str, JsonValue],
+    *,
+    metadata: dict[str, JsonValue],
+    thread_id: str,
+    assistant_id: str,
 ) -> RemoteRunContext:
     """Everything an MDA run needs, since a run takes either context or configurable.
 
-    The configurable rides inside the signed token; the deployment calls back with
-    the token rather than reading it.
+    The configurable and metadata ride inside the signed token; the deployment calls
+    back with the token rather than reading it.
     """
     if assistant_id not in HOSTED_GRAPHS:
         raise RemoteRuntimeConfigurationError(f"Managed Deep Agents does not host {assistant_id}")
-    graph: HostedGraph = "agent" if assistant_id == "agent" else "reviewer"
+    graph = _hosted_graph.validate_python(assistant_id)
     token = sign_runtime_token(
         RemoteRun(
             thread_id=thread_id,
             assistant_id=assistant_id,
-            configurable=_configurable.validate_python(configurable),
+            configurable=_json_object.validate_python(configurable),
+            metadata=_json_object.validate_python(metadata),
         )
     )
     # The webapp must not import the agent stack at startup.
-    from openswe.remote_runtime import agent, reviewer
+    from openswe.remote_runtime.hosted import hosted_graphs
 
     cfg = RunConfig.parse(configurable)
-    models = await (agent.run_models(cfg) if graph == "agent" else reviewer.run_models(cfg))
+    models = await hosted_graphs()[graph].start_models(cfg)
     context: RemoteRunContext = {
         "graph": graph,
         "__run_token": token,
