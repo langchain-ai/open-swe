@@ -172,9 +172,10 @@ async def get_github_app_installation_token_with_expiry(
         or not resolved_installation_id.isdigit()
         or int(resolved_installation_id) <= 0
     ):
-        local_token = await _local_dev_token()
-        if local_token:
-            return local_token, None
+        if permissions is None:
+            local_token = await _local_dev_token()
+            if local_token:
+                return local_token, None
         logger.debug("GitHub App env vars not fully configured, skipping app token")
         return None, None
 
