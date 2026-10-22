@@ -273,8 +273,17 @@ export function useTranscriptScroll({
       let elapsed = 0
       let last: number | null = null
       const step = (now: number) => {
+        if (!pin.glide || state.current.pin !== pin) return
         const message = pinnedElement(el)
-        if (!pin.glide || state.current.pin !== pin || !message) return
+        if (!message) {
+          // Gone mid-glide (a failed send, a re-keyed bubble): end the glide,
+          // so the scroll button and scroll handling stop treating it as
+          // moving, and glide again from wherever it is if it comes back.
+          pin.glide = null
+          pin.placed = false
+          settle(el, el.scrollTop)
+          return
+        }
         elapsed += Math.min(now - (last ?? now), PIN_GLIDE_MAX_FRAME_MS)
         last = now
         const progress = Math.min(1, elapsed / PIN_GLIDE_MS)
