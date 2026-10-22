@@ -94,7 +94,7 @@ async def test_start_thread_refuses_unverified_automation_actor(
 
     result = await threads_tool.start_thread("Fix login", "Fix the login bug")
 
-    assert result == {"success": False, "error": "No verified triggering user is available"}
+    assert result == {"success": False, "error": threads_tool._NO_WRITER}
     start.assert_not_awaited()
 
 
