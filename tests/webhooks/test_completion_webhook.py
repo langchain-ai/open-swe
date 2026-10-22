@@ -102,32 +102,6 @@ async def test_reviewer_cleanup_failure_does_not_block_failure_reply(
 
 
 @pytest.mark.asyncio
-async def test_a_channel_run_leaves_its_failure_to_the_channel(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    metadata = {
-        "source": "linear",
-        "source_context": {"linear_issue": {"id": "issue-1", "title": "Bug"}},
-    }
-    monkeypatch.setattr(completion, "langgraph_client", lambda: _FakeClient(metadata))
-    notify = AsyncMock(return_value=True)
-    monkeypatch.setattr(completion, "post_linear_notification", notify)
-
-    # MDA's Linear channel started this run; it reports the failure in the session.
-    result = await completion.handle_run_completion(
-        {"thread_id": "t1", "run_id": "run-1", "status": "error", "metadata": {"channel": "linear"}}
-    )
-    assert result == {"status": "ignored", "reason": "the channel reports the failure"}
-    notify.assert_not_awaited()
-
-    # A run the backend started on the same thread still gets its notice.
-    await completion.handle_run_completion(
-        {"thread_id": "t1", "run_id": "run-2", "status": "error"}
-    )
-    notify.assert_awaited_once()
-
-
-@pytest.mark.asyncio
 @pytest.mark.parametrize(
     ("status", "metadata", "worker", "cancelled", "picks_up"),
     [
@@ -136,8 +110,6 @@ async def test_a_channel_run_leaves_its_failure_to_the_channel(
         ("success", {"kind": "follow_up_pickup"}, False, False, False),
         ("success", {}, True, False, True),
         ("success", {}, True, True, False),
-        # An MDA channel starts every run on its threads; the backend can't start one there.
-        ("success", {"channel": "linear"}, False, False, False),
     ],
 )
 async def test_leftover_follow_ups_get_one_pickup_run(

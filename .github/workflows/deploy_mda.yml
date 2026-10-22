@@ -92,13 +92,6 @@ jobs:
           ENVIRONMENT: ${{ matrix.environment }}
           # Reserved by `mda deploy`: it authenticates the deploy and is never forwarded as a deployment secret.
           LANGSMITH_API_KEY: ${{ secrets.PREVIEW_DEPLOY_API_KEY || secrets.LANGSMITH_API_KEY }}
-          # Shared with this environment's backend: MDA signs each call its channels make to it.
-          # Each secret is named statically, so the runner gets only these, not every secret.
-          MDA_SERVICE_SECRET: >-
-            ${{ matrix.environment == 'prod' && secrets.MDA_SERVICE_SECRET_PROD
-            || matrix.environment == 'staging' && secrets.MDA_SERVICE_SECRET_STAGING
-            || matrix.environment == 'preview' && secrets.MDA_SERVICE_SECRET_PREVIEW
-            || '' }}
           # The backend's gateway key. Without it, model calls fall back to the deployment's
           # own key and count against the workspace's gateway spend cap.
           # Each secret is named, so the runner gets only the one this deployment uses.
@@ -132,8 +125,8 @@ jobs:
             exit 1
           fi
           # The project .env is forwarded as the deployment's secrets: the backend it calls back,
-          # the gateway key it calls models with, and the secret it signs its calls to the backend with.
-          printf 'OPEN_SWE_BACKEND_URL=%s\nLANGSMITH_GATEWAY_API_KEY=%s\nMDA_SERVICE_SECRET=%s\n' "$backend" "$LANGSMITH_GATEWAY_API_KEY" "$MDA_SERVICE_SECRET" >mda/.env
+          # and the gateway key it calls models with.
+          printf 'OPEN_SWE_BACKEND_URL=%s\nLANGSMITH_GATEWAY_API_KEY=%s\n' "$backend" "$LANGSMITH_GATEWAY_API_KEY" >mda/.env
           uv run --project mda --locked --python 3.13 mda deploy mda \
             --name "open-swe-mda-$ENVIRONMENT" \
             --deployment-type prod \

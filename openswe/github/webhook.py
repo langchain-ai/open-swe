@@ -11,7 +11,6 @@ from pydantic import AliasChoices, AliasPath, BaseModel, Field, ValidationError
 
 from openswe.baby_sit import handle_ci_webhook
 from openswe.database import postgres
-from openswe.dispatch import channel_of
 from openswe.expedited_review.reviews import REVIEW_BODY_PREFIX
 from openswe.github.comments import GitHubAuthError
 from openswe.github.notifications import notify_slack_review
@@ -1080,52 +1079,6 @@ async def untagged_agent_pr_thread_id(payload: dict[str, Any], event_type: str) 
     return pull_request.agent_thread_id if pull_request is not None else None
 
 
-#: How many of a channel conversation's latest messages a PR thread starts with.
-CHANNEL_HISTORY_MESSAGES = 50
-#: PR thread metadata naming the channel conversation it continues.
-CONTINUES_THREAD_KEY = "continues_thread"
-
-
-def _state_messages(state: object) -> list[dict[str, Any]]:
-    values = state.get("values") if isinstance(state, Mapping) else None
-    messages = values.get("messages") if isinstance(values, Mapping) else None
-    return [m for m in messages if isinstance(m, dict)] if isinstance(messages, list) else []
-
-
-def _starts_turn(messages: list[dict[str, Any]], index: int) -> bool:
-    """Whether a copy may start at ``index``: not at a tool result, nor between an AI
-    message's tool calls and their results."""
-    if messages[index].get("type") == "tool":
-        return False
-    previous = messages[index - 1] if index else {}
-    return not (previous.get("type") == "ai" and previous.get("tool_calls"))
-
-
-def recent_turns(messages: list[dict[str, Any]], limit: int) -> list[dict[str, Any]]:
-    """The latest ``limit`` messages at most, starting at a turn boundary."""
-    start = max(len(messages) - limit, 0)
-    while start < len(messages) and not _starts_turn(messages, start):
-        start += 1
-    return messages[start:]
-
-
-async def _channel_history(channel_thread_id: str, pr_thread_id: str) -> list[dict[str, Any]]:
-    """The channel conversation a PR thread continues, for the PR thread's first run."""
-    client = common.get_client(url=common.LANGGRAPH_URL)
-    try:
-        if _state_messages(await client.threads.get_state(pr_thread_id)):
-            return []
-        messages = _state_messages(await client.threads.get_state(channel_thread_id))
-    except Exception:  # noqa: BLE001 - the review still runs, without the conversation
-        common.logger.warning(
-            "Could not read the channel conversation a PR thread continues",
-            extra={"thread_id": pr_thread_id, "continues_thread": channel_thread_id},
-            exc_info=True,
-        )
-        return []
-    return recent_turns(messages, CHANNEL_HISTORY_MESSAGES)
-
-
 async def process_github_pr_comment(
     payload: dict[str, Any], event_type: str, *, agent_thread_id: str | None = None
 ) -> None:
@@ -1190,31 +1143,6 @@ async def process_github_pr_comment(
                 common.logger.warning(
                     "Failed to persist branch_name metadata for thread %s", thread_id
                 )
-
-    # A channel (Linear, GitHub issues) starts the runs on its own threads, so
-    # feedback on a PR its conversation opened continues on the PR's own thread.
-    channel_metadata = await common.get_thread_metadata_safe(thread_id)
-    continues_thread: str | None = None
-    if channel_metadata is not None and channel_of(channel_metadata):
-        if not pr_number:
-            return
-        # The PR thread starts with the conversation's history, so only who may prompt
-        # the conversation continues it, as when its own thread took the feedback.
-        if common.thread_is_private(channel_metadata) and not common.thread_is_promptable(
-            channel_metadata, github_login
-        ):
-            return
-        continues_thread = thread_id
-        thread_id = pr_comment_thread_id(
-            repo_config.get("owner", ""), repo_config.get("name", ""), pr_number
-        )
-        await create_thread(
-            common.get_client(url=common.LANGGRAPH_URL),
-            thread_id,
-            title=f"PR #{pr_number}",
-            if_exists="do_nothing",
-            metadata={"branch_name": branch_name, CONTINUES_THREAD_KEY: continues_thread},
-        )
 
     repo = Repo.parse(repo_config)
     if pr_number and repo is not None and repo.owner and repo.name:
@@ -1332,6 +1260,30 @@ async def process_github_pr_comment(
     ):
         return
 
+    if comment_id:
+        try:
+            await common.react_to_github_comment(
+                repo_config,
+                comment_id,
+                event_type=event_type,
+                token=github_token,
+                pull_number=pr_number,
+                node_id=node_id,
+            )
+        except GitHubAuthError:
+            github_token = await common.refresh_thread_github_token_after_401(thread_id, email)
+            if not github_token:
+                common.logger.warning("Re-auth failed for thread %s after 401; skipping", thread_id)
+                return
+            await common.react_to_github_comment(
+                repo_config,
+                comment_id,
+                event_type=event_type,
+                token=github_token,
+                pull_number=pr_number,
+                node_id=node_id,
+            )
+
     trusted = await _trusted_authors(github_login, comments=comments)
     prompt = common.build_pr_prompt(comments, pr_url, repo_config=repo_config, trusted=trusted)
     pr_author = _PrAuthorEvent.author_of(payload)
@@ -1384,8 +1336,6 @@ async def process_github_pr_comment(
                 },
             )
         )
-    if continues_thread is not None:
-        messages = [*await _channel_history(continues_thread, thread_id), *messages]
     dispatched = await common.trigger_or_queue_run(
         thread_id,
         prompt,
@@ -1396,34 +1346,7 @@ async def process_github_pr_comment(
         pr_number=pr_number,
         token_repositories=common.event_thread_token_repositories(repo_config, payload),
     )
-    if not dispatched:
-        return
-    # Only once the run is on its way, so a failure never shows 👀 and then nothing.
-    if comment_id:
-        try:
-            await common.react_to_github_comment(
-                repo_config,
-                comment_id,
-                event_type=event_type,
-                token=github_token,
-                pull_number=pr_number,
-                node_id=node_id,
-            )
-        except GitHubAuthError:
-            github_token = await common.refresh_thread_github_token_after_401(thread_id, email)
-            if github_token:
-                await common.react_to_github_comment(
-                    repo_config,
-                    comment_id,
-                    event_type=event_type,
-                    token=github_token,
-                    pull_number=pr_number,
-                    node_id=node_id,
-                )
-            else:
-                common.logger.warning("Re-auth failed for thread %s after 401", thread_id)
-
-    if event_type == "pull_request_review":
+    if dispatched and event_type == "pull_request_review":
         await notify_slack_review(
             thread_id,
             reviewer=event_comment["author"],
