@@ -84,6 +84,7 @@ async def infer_requested_model(
     *,
     messages: Sequence[BaseMessage],
     requested_models: Mapping[str, ModelOption],
+    performance_model: tuple[str, str | None] | None = None,
     slack_event_ts: str | None = None,
     decision: JevDecision | None = None,
     effort_decision: JevDecision | None = None,
@@ -96,6 +97,7 @@ async def infer_requested_model(
         for model_id, option in requested_models.items()
     }
     criteria.update(
+        performance=prompt("model-request/performance"),
         no_request=prompt("model-request/no-request"),
         unavailable=prompt("model-request/unavailable"),
     )
@@ -127,9 +129,16 @@ async def infer_requested_model(
     choice, effort_choice = choices["runtime_model"], choices["runtime_effort"]
     if choice is None or choice not in criteria:
         return None
+    requested_model = choice if choice in requested_models else None
+    requested_effort = effort_choice if effort_choice in efforts else None
+    unavailable_model = choice == "unavailable"
+    if choice == "performance":
+        requested_model, tier_effort = performance_model or (None, None)
+        unavailable_model = requested_model not in requested_models
+        requested_effort = requested_effort or tier_effort
     return ModelRequestIntent(
-        requested_model=choice if choice in requested_models else None,
-        unavailable_model=choice == "unavailable",
-        requested_effort=effort_choice if effort_choice in efforts else None,
+        requested_model=requested_model,
+        unavailable_model=unavailable_model,
+        requested_effort=requested_effort,
         unavailable_effort=effort_choice == "unavailable",
     )

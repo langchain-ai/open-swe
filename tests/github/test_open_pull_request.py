@@ -9,6 +9,7 @@ import langgraph_sdk
 import pytest
 
 import openswe.tools.open_pull_request  # noqa: F401
+from openswe.remote_runtime.git_metadata import GitTarget, collect_pr_targets
 
 opr = sys.modules["openswe.tools.open_pull_request"]
 
@@ -588,20 +589,23 @@ async def test_record_pr_telemetry_retitles_only_new_prs_when_enabled(
         "merged": False,
         "title": "feat: x",
         "user": {"login": "octo"},
+        "head": {"ref": "Actual/PR-head"},
     }
     client = _FakeClient(post=_FakeResponse(201, {}), get=_FakeResponse(200, details))
 
-    await opr._record_pr_telemetry(
-        client=client,  # type: ignore[arg-type]
-        token="tok",
-        owner="langchain-ai",
-        repo="open-swe",
-        head="open-swe/feature",
-        base="main",
-        pr=details,
-        retitle_thread=retitle_thread,
-        record_opening=record_opening,
-    )
+    with collect_pr_targets() as targets:
+        await opr._record_pr_telemetry(
+            client=client,  # type: ignore[arg-type]
+            token="tok",
+            owner="langchain-ai",
+            repo="open-swe",
+            head="open-swe/feature",
+            base="main",
+            pr=details,
+            retitle_thread=retitle_thread,
+            record_opening=record_opening,
+        )
+    assert targets == [GitTarget(repo="langchain-ai/open-swe", branch="Actual/PR-head")]
 
     if concierge:
         langgraph.threads.update.assert_not_awaited()

@@ -10,7 +10,6 @@ never from the body.
 
 import logging
 from collections.abc import Awaitable, Callable, Mapping
-from functools import cache
 from typing import Final
 
 from pydantic import JsonValue, TypeAdapter, ValidationError
@@ -34,13 +33,11 @@ class UnknownHookError(LookupError):
 Hook = Callable[[RemoteRun, str, Mapping[str, JsonValue]], Awaitable[JsonValue]]
 
 
-@cache
 def _graphs() -> Mapping[str, Hook]:
     # The webapp must not import the agent stack at startup.
-    from openswe.remote_runtime.agent import AGENT
-    from openswe.remote_runtime.reviewer import REVIEWER
+    from openswe.remote_runtime.hosted import hosted_graphs
 
-    return {graph.assistant_id: graph.hook for graph in (AGENT, REVIEWER)}
+    return {assistant_id: graph.hook for assistant_id, graph in hosted_graphs().items()}
 
 
 def _scope_run(scope: Scope) -> RemoteRun:
@@ -74,11 +71,14 @@ async def hook_endpoint(scope: Scope, receive: Receive, send: Send) -> None:
             scope, receive, send
         )
         return
-    except Exception:
+    except Exception as exc:
         logger.exception(
             "Remote runtime hook failed", extra={"hook": hook, "thread_id": run.thread_id}
         )
-        raise
+        # The run fails with what failed here, as it would have in-process.
+        failure = {"error": type(exc).__name__, "message": str(exc)}
+        await JSONResponse(failure, status_code=500)(scope, receive, send)
+        return
     await JSONResponse(result)(scope, receive, send)
 
 

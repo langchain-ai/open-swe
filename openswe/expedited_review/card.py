@@ -35,10 +35,8 @@ def _button_value(action: str, approval: HumanReviewRequest) -> str:
     return json.dumps({"type": BUTTON_TYPE, "action": action, "fingerprint": str(approval.id)})
 
 
-def _vote_summary(approval: HumanReviewRequest, author: str) -> str:
-    """``author`` and the approvers are Slack mentions, so none of this is escaped."""
-    if not approval.approvals:
-        return f"Needs one approval from someone other than {author}."
+def _vote_summary(approval: HumanReviewRequest) -> str:
+    """Approvers are Slack mentions, so none of this is escaped."""
     return f"Approved by {', '.join(vote.slack_mention for vote in approval.approvals)}."
 
 
@@ -232,7 +230,6 @@ def _status(approval: HumanReviewRequest, author: str, choices: list[ChannelChoi
             actions(_dismiss_button(approval)),
         ]
     return [
-        section(_vote_summary(approval, author)),
         actions(*_vote_buttons(approval)),
         *_send_controls(approval, choices),
     ]
@@ -257,7 +254,7 @@ def open_card(
     pr = approval.pull_request
     if approval.approved and not approval.awaiting_ready:
         label = pr.label
-        heading = f"Expedited review: {_vote_summary(approval, author)}"
+        heading = f"Expedited review: {_vote_summary(approval)}"
         return f"{heading} — {pr.url}", [
             section(f":white_check_mark: *{heading}*\n<{pr.url}|{label}> {escape(title)}")
         ]
@@ -298,7 +295,7 @@ def closed_card(
         divider(),
         *_voting_diff(approval, files, diff_image_id),
         section(f"*{outcome}*"),
-        context(_vote_summary(approval, author)),
+        *([context(_vote_summary(approval))] if approval.approvals else []),
     ]
     return f"{outcome} — {pr.url}", blocks
 

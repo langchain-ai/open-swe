@@ -22,6 +22,7 @@ from openswe.github.app import get_github_app_installation_token
 from openswe.github.comments import derive_pr_state
 from openswe.github.pull_requests import AGENT_OPENED_LINK_SOURCE, PullRequest, ThreadLink
 from openswe.github.token import GitHubUserAuthRequired
+from openswe.remote_runtime.git_metadata import record_pr_target
 from openswe.run_config import RunConfig
 from openswe.slack.client import (
     get_active_slack_thread,
@@ -658,6 +659,9 @@ async def _record_pr_telemetry(
             )
     try:
         details = await _fetch_pr_details(client, token, owner, repo, pr_number)
+        pr_head = details.get("head") or pr.get("head")
+        if isinstance(pr_head, dict) and isinstance(pr_head.get("ref"), str):
+            record_pr_target(f"{owner}/{repo}", pr_head["ref"])
         config = get_config()
         cfg = RunConfig.from_config(config)
         thread_id = cfg.thread_id

@@ -15,6 +15,7 @@ from pydantic import BaseModel
 from openswe.review.session import ReviewSessionMetadata
 from openswe.tasks.flags import task_coordination_enabled
 from openswe.tasks.store import SidebarTaskMembership, sidebar_memberships
+from openswe.threads import index
 from openswe.threads.pins import list_thread_pin_ids, pin_thread, unpin_thread
 from openswe.threads.summary import (
     _SURFACED_SOURCES,
@@ -75,14 +76,7 @@ def _participant_search_filters(
 ) -> list[dict[str, Any]]:
     if include_all:
         return [{}]
-    filters = participant_search_filters(login, email)
-    # Threads created before participants existed carry only these two keys, and
-    # object containment cannot match them. Drop both once those threads have
-    # aged out or been backfilled.
-    filters.append({"github_login": login})
-    if email and email.strip():
-        filters.append({"triggering_user_email": email.strip().lower()})
-    return filters
+    return participant_search_filters(login, email)
 
 
 def _search_metadata_filter(
@@ -115,7 +109,13 @@ async def _search_threads_batch(
     limit: int,
     offset: int,
     sort_by: _ThreadSortBy = "updated_at",
+    text: str | None = None,
 ) -> list[ThreadLike]:
+    """A page of threads, best ``text`` matches first when there is one.
+
+    The thread index narrows to and ranks ``text`` matches in SQL; callers still
+    match each thread exactly with :func:`_metadata_matches_filters`.
+    """
     batch = await client.threads.search(
         metadata=metadata,
         limit=limit,
@@ -123,8 +123,14 @@ async def _search_threads_batch(
         sort_by=sort_by,
         sort_order="desc",
         select=_THREAD_LIST_SELECT,
+        params={"text": text} if text else None,
     )
     return [thread for thread in batch or [] if isinstance(thread, Mapping)]
+
+
+def _search_rank(thread: ThreadLike) -> float:
+    rank = thread.get("search_rank")
+    return float(rank) if isinstance(rank, (int, float)) else 0.0
 
 
 def _search_matches(values: Sequence[object], query: str) -> bool:
@@ -257,7 +263,9 @@ async def settle_review_walkthrough(client: Any, thread: ThreadLike) -> ThreadLi
     if review is None or review.walkthrough_state != "building" or not thread_id:
         return thread
     try:
-        runs = await client.runs.list(review.scout_thread_id, limit=1)
+        runs = await client.runs.list(
+            await index.current_thread_id(review.scout_thread_id), limit=1
+        )
     except NotFoundError:
         runs = []
     except Exception:
@@ -603,6 +611,7 @@ async def _collect_thread_candidates(
                 limit=_THREADS_SEARCH_PAGE,
                 offset=offset,
                 sort_by=sort_by,
+                text=query,
             )
             if not batch:
                 break
@@ -704,7 +713,9 @@ async def _collect_thread_candidates(
                 break
             offset += _THREADS_SEARCH_PAGE
     return sorted(
-        seen.values(), key=lambda thread: _thread_timestamp_ms(thread, sort_by), reverse=True
+        seen.values(),
+        key=lambda thread: (_search_rank(thread), _thread_timestamp_ms(thread, sort_by)),
+        reverse=True,
     )
 
 

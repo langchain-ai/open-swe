@@ -302,18 +302,15 @@ export interface Profile {
   login?: string
   email?: string
   default_repo?: string | null
+  workspace_default_repos?: Record<string, string>
   base_branch?: string | null
   branch_prefix?: string | null
   auto_fix_ci?: boolean
   auto_human_review_enabled?: boolean
-  recent_thread_context_enabled?: boolean
   concierge_mode?: boolean
   pr_review_links?: boolean
   pr_failure_reactions?: boolean
-  prefer_tools_in_sandbox?: boolean
-  experimental_mcp_ptc?: boolean
-  run_on_mda?: boolean
-  mda_available?: boolean
+  experimental_monitor?: boolean | null
   draft_prs?: boolean
   review_draft_prs?: boolean | null
   slack_onboarding_dismissed?: boolean
@@ -325,17 +322,15 @@ export interface ProfileUpdate {
   experimental_assistant_ui?: boolean | null
   experimental_background_callbacks?: boolean | null
   default_repo?: string | null
+  workspace_default_repos?: Record<string, string>
   base_branch?: string | null
   branch_prefix?: string | null
   auto_fix_ci?: boolean
   auto_human_review_enabled?: boolean
-  recent_thread_context_enabled?: boolean
   concierge_mode?: boolean
   pr_review_links?: boolean
   pr_failure_reactions?: boolean
-  prefer_tools_in_sandbox?: boolean
-  experimental_mcp_ptc?: boolean
-  run_on_mda?: boolean
+  experimental_monitor?: boolean | null
   draft_prs?: boolean
   review_draft_prs?: boolean | null
   slack_onboarding_dismissed?: boolean
@@ -379,8 +374,6 @@ export interface WorkspaceSettings {
   fable_enabled?: boolean
   /** Experimental: approve and merge tiny PRs from their Slack thread. Off by default. */
   expedited_review_enabled?: boolean
-  /** Threads no person starts run on Managed Deep Agents, when it is configured. */
-  run_on_mda?: boolean
   /** LangSmith Managed Tools gateway private threads load with the owner's LangSmith login. */
   managed_tools_gateway_id?: string | null
   org_guidelines?: string | null
@@ -399,8 +392,6 @@ export interface WorkspaceSettings {
   default_reviewer_reasoning_effort?: string | null
   default_reviewer_subagent_model?: string | null
   default_reviewer_subagent_reasoning_effort?: string | null
-  default_chat_model?: string | null
-  default_chat_reasoning_effort?: string | null
   default_thread_title_model?: string | null
   default_thread_title_reasoning_effort?: string | null
   updated_at?: string | null
@@ -1129,7 +1120,6 @@ export interface PullRequestSearchResult {
   number: number
   url: string
   title: string
-  body: string
   state: "open" | "draft" | "merged" | "closed"
 }
 

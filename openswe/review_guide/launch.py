@@ -7,6 +7,7 @@ Slack archived its channel. Only the reader's own message reopens it.
 
 import logging
 import time
+import uuid
 
 from langgraph_sdk.client import LangGraphClient
 from pydantic import BaseModel, Field
@@ -36,6 +37,7 @@ from openswe.slack.code_channels import (
     set_context_bar,
     set_session_status,
 )
+from openswe.slack.dm import post_dm
 from openswe.slack.http import SlackRequestError
 from openswe.slack.records import bind_slack_thread_id
 from openswe.source_context import SlackThreadRef, SourceContext
@@ -50,19 +52,43 @@ logger = logging.getLogger(__name__)
 _SENDER_ID = "system:review-guide"
 
 
+class GuideStartError(RuntimeError):
+    """The review guide could not be opened; the message says why."""
+
+
+class GuideOrigin(BaseModel):
+    """Who asked for a review guide, and from where."""
+
+    requester_slack_id: str
+    team_id: str = ""
+    # The Slack message asked from; empty when the ask came from outside Slack.
+    channel_id: str = ""
+    message_ts: str = ""
+    # The conversation the walkthrough is forked from, sandbox included; None starts it fresh.
+    source_thread_id: str | None = None
+    workspace_slug: str | None = None
+    is_private: bool = False
+
+    async def message(self, pull_request: PullRequest, title: str) -> tuple[str, str]:
+        """The Slack message the channel opens from, DMing the requester when there is none."""
+        if self.channel_id:
+            return self.channel_id, self.message_ts
+        try:
+            return await post_dm(
+                self.requester_slack_id,
+                f"Opening a review channel for "
+                f"<{pull_request.url}|{pull_request.repo}#{pull_request.number}>: {title}",
+            )
+        except SlackRequestError as exc:
+            raise GuideStartError(f"Slack could not DM the requester: {exc}") from exc
+
+
 class GuideStart(BaseModel):
     owner: str
     repo: str
     number: int
-    # The conversation the walkthrough is forked from, sandbox included.
-    source_thread_id: str
-    requester_slack_id: str
-    origin_channel_id: str
-    origin_message_ts: str
-    team_id: str = ""
-    workspace_slug: str | None = None
+    origin: GuideOrigin
     invite: list[str] = []
-    is_private: bool = False
 
 
 class StartedGuide(BaseModel):
@@ -70,12 +96,9 @@ class StartedGuide(BaseModel):
     channel_id: str
 
 
-class GuideStartError(RuntimeError):
-    """The review guide could not be opened; the message says why."""
-
-
 async def start_review_guide(start: GuideStart) -> StartedGuide:
-    user = await User.for_identity("slack", start.requester_slack_id)
+    origin = start.origin
+    user = await User.for_identity("slack", origin.requester_slack_id)
     login = user.github_login if user else ""
     if user is None or not login:
         raise GuideStartError("the requester has no GitHub account linked to Open SWE")
@@ -96,24 +119,30 @@ async def start_review_guide(start: GuideStart) -> StartedGuide:
         if head.author.lower() == login.lower() or await pull_request.is_authored_by(login)
         else "reviewer"
     )
-    client = langgraph_client()
-    thread_id = await _fork(client, start.source_thread_id, login, is_private=start.is_private)
+    origin_channel_id, origin_message_ts = await origin.message(pull_request, head.title)
+    thread_id = (
+        await _fork(
+            langgraph_client(), origin.source_thread_id, login, is_private=origin.is_private
+        )
+        if origin.source_thread_id
+        else str(uuid.uuid4())
+    )
     try:
         channel_id = await create_code_channel(
             name=f"Review {start.repo}#{start.number}: {head.title}"[:200],
             session_id=thread_id,
-            origin_channel_id=start.origin_channel_id,
-            origin_message_ts=start.origin_message_ts,
-            team_id=start.team_id,
-            is_private=start.is_private,
+            origin_channel_id=origin_channel_id,
+            origin_message_ts=origin_message_ts,
+            team_id=origin.team_id,
+            is_private=origin.is_private,
         )
     except SlackRequestError as exc:
         raise GuideStartError(f"Slack could not create the code channel: {exc}") from exc
     location = SlackThreadRef(
         channel_id=channel_id,
         thread_ts=CODE_CHANNEL_SESSION_TS,
-        triggering_event_ts=start.origin_message_ts,
-        team_id=start.team_id,
+        triggering_event_ts=origin_message_ts,
+        team_id=origin.team_id,
     )
     try:
         if not await upsert_agent_thread_metadata(
@@ -124,7 +153,8 @@ async def start_review_guide(start: GuideStart) -> StartedGuide:
             title=f"Review {start.repo}#{start.number}: {head.title}",
             static_title=True,
             source_context=SourceContext(slack_thread=location),
-            workspace=start.workspace_slug,
+            workspace=origin.workspace_slug,
+            visibility="private" if origin.is_private else "public",
             owner_login=login,
         ):
             raise GuideStartError("could not create the review thread")
@@ -134,7 +164,7 @@ async def start_review_guide(start: GuideStart) -> StartedGuide:
             pull_request=pull_request,
             user_id=user.id,
             slack_channel_id=channel_id,
-            workspace_slug=start.workspace_slug,
+            workspace_slug=origin.workspace_slug,
             mode=mode,
         )
     except Exception:
@@ -148,7 +178,7 @@ async def start_review_guide(start: GuideStart) -> StartedGuide:
             )
         raise
     try:
-        await invite_to_slack_channel(channel_id, [start.requester_slack_id, *start.invite])
+        await invite_to_slack_channel(channel_id, [origin.requester_slack_id, *start.invite])
     except SlackRequestError as exc:
         logger.warning(
             "Could not invite everyone to a review guide channel",

@@ -28,6 +28,7 @@ const BASE_BOT_EVENTS = [
   "channel_created",
   "channel_rename",
   "channel_archive",
+  "agent_session_stopped",
 ]
 
 const BACKEND_URL_PLACEHOLDER = "https://<your-backend-url>"
@@ -58,6 +59,14 @@ export function slackAppManifest(
       messages_tab_read_only_enabled: false,
     },
     bot_user: { display_name: "Open SWE", always_online: true },
+    shortcuts: [
+      {
+        name: "Explain This",
+        type: "message",
+        callback_id: "open_swe_explain",
+        description: "Ask Open SWE to explain this message",
+      },
+    ],
     slash_commands: [
       {
         command: ASK_COMMAND,
@@ -101,7 +110,7 @@ export function slackAppManifest(
       event_subscriptions: {
         request_url: `${backendUrl}/webhooks/slack`,
         bot_events: codeChannelsEnabled
-          ? [...BASE_BOT_EVENTS, "agent_session_stopped", "code_channel_action"]
+          ? [...BASE_BOT_EVENTS, "code_channel_action"]
           : BASE_BOT_EVENTS,
       },
       interactivity: {

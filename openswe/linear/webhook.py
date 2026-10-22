@@ -20,6 +20,7 @@ from openswe.input_messages import (
 from openswe.prompts import prompt
 from openswe.source_context import SourceContext
 from openswe.thread_ids import linear_issue_thread_id
+from openswe.threads import index
 from openswe.users import User
 from openswe.utils.http_pool import pooled_transport
 from openswe.webhooks import common
@@ -36,7 +37,7 @@ def _linear_person(author: dict[str, Any]) -> PersonIdentity:
 
 
 async def process_linear_issue(  # noqa: PLR0912, PLR0915
-    issue_data: dict[str, Any], repo_config: dict[str, str]
+    issue_data: dict[str, Any], repo_config: dict[str, str], *, workspace: str | None = None
 ) -> None:
     """Process a Linear issue by creating a new LangGraph thread and run.
 
@@ -52,7 +53,7 @@ async def process_linear_issue(  # noqa: PLR0912, PLR0915
         repo_config.get("name"),
     )
 
-    thread_id = linear_issue_thread_id(issue_id)
+    thread_id = await index.live_thread_id(linear_issue_thread_id(issue_id))
 
     full_issue = issue_data
 
@@ -189,9 +190,11 @@ async def process_linear_issue(  # noqa: PLR0912, PLR0915
     # A follow-up stays in its thread's workspace; a new issue lands in the
     # repository's preferred one. Either way its default model and Fable flag
     # are the ones the vision fallback checks.
-    workspace = await common.get_thread_workspace(
-        thread_id
-    ) or await common.workspace_for_repo_config(repo_config)
+    workspace = (
+        await common.get_thread_workspace(thread_id)
+        or workspace
+        or await common.workspace_for_repo_config(repo_config)
+    )
 
     image_model_override: tuple[str, str] | None = None
     if image_urls:

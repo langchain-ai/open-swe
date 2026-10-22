@@ -364,9 +364,7 @@ export function SidebarThreadRow({
     subagents.some((subagent) => subagent.toolCallId === activeSubagentId)
       ? activeSubagentId
       : null
-  const subagentsCollapsed =
-    prefs.collapseSubagentsByDefault !==
-    prefs.collapsedSubagentKeys.includes(item.key)
+  const subagentsCollapsed = !prefs.expandedSubagentKeys.includes(item.key)
   const rowIsActive =
     (isActive && (!activeSubagent || subagentsCollapsed)) ||
     (Boolean(activeWorkerId) && !workersExpanded)
@@ -864,9 +862,9 @@ function SidebarTaskWorkerRow({
   const activeSubagent =
     isActive &&
     subagents.some((subagent) => subagent.toolCallId === activeSubagentId)
-  const subagentsCollapsed =
-    prefs.collapseSubagentsByDefault !==
-    prefs.collapsedSubagentKeys.includes(`cloud:${worker.id}`)
+  const subagentsCollapsed = !prefs.expandedSubagentKeys.includes(
+    `cloud:${worker.id}`
+  )
   const rowIsActive = isActive && (!activeSubagent || subagentsCollapsed)
   const SubagentCaret = subagentsCollapsed ? CaretRightIcon : CaretDownIcon
   const status =

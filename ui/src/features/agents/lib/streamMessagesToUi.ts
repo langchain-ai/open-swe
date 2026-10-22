@@ -39,6 +39,7 @@ type ToolKind = ToolExecutionChunk["toolKind"]
 export function toolKind(name: string): ToolKind {
   const lowered = name.toLowerCase()
   if (lowered === "task") return "task"
+  if (lowered === "eval") return "code"
   if (lowered === "read_only_sql") return "sql"
   if (lowered === "slack_reply") return "slack"
   if (lowered === "connect_managed_tools") return "managed-tools"

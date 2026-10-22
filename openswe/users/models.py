@@ -87,6 +87,10 @@ class User(Base):
         return self._identity_field("slack", "external_id")
 
     @property
+    def slack_team_id(self) -> str:
+        return self._identity_field("slack", "team_id")
+
+    @property
     def email(self) -> str:
         """The address to reach this person, work address first.
 
@@ -101,7 +105,7 @@ class User(Base):
         )
 
     def _identity_field(
-        self, provider: Provider, field: Literal["login", "email", "external_id"]
+        self, provider: Provider, field: Literal["login", "email", "external_id", "team_id"]
     ) -> str:
         return next(
             (
@@ -229,6 +233,20 @@ class User(Base):
             return None
         user = await cls.for_login("github", login.strip())
         return (user.email or None) if user is not None else None
+
+    async def default_repo(
+        self, workspace: str | None = None, *, fallback_global: bool = True
+    ) -> dict[str, str] | None:
+        """This person's repository default in the selected workspace."""
+        from openswe.users.records import UserRecords
+        from openswe.users.repository_defaults import RepositoryDefaults
+
+        if not self.github_login:
+            return None
+        profile = await UserRecords("profile").get(self.github_login) or {}
+        return RepositoryDefaults.model_validate(profile).repo_config(
+            workspace, fallback_global=fallback_global
+        )
 
     @property
     def typed_preferences(self) -> UserPreferences:

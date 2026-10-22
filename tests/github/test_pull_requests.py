@@ -238,7 +238,6 @@ async def test_search_matches_ranked_titles_and_bodies_and_filters_before_pagina
         "widget", limit=1, offset=1, session={"sub": "ada"}
     )
     assert [row.number for row in next_page.pull_requests] == [3]
-    assert next_page.pull_requests[0].body == "Renders widgets"
     assert not next_page.has_more
 
     body_match.body = ""

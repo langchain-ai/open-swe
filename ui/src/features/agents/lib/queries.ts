@@ -18,6 +18,7 @@ import { localThreadKeys } from "./desktopLocal"
 import type { InfiniteData, QueryClient, QueryKey } from "@tanstack/react-query"
 import type {
   ScheduleUpdateRequest,
+  ThreadMoveDestination,
   ThreadsPage,
   ThreadsPageParams,
 } from "./api"
@@ -57,12 +58,16 @@ export const agentThreadKeys = {
     ["agent-threads", threadId, "pull-request-status"] as const,
   queuedMessages: (threadId: string) =>
     ["agent-threads", threadId, "queued-messages"] as const,
+  backgroundWork: (threadId: string) =>
+    ["agent-threads", threadId, "background-work"] as const,
   branchDiff: (threadId: string) =>
     ["agent-threads", threadId, "branch-diff"] as const,
   workingTreeDiff: (threadId: string) =>
     ["agent-threads", threadId, "working-tree-diff"] as const,
   workflowApprovals: (threadId: string) =>
     ["agent-threads", threadId, "workflow-approvals"] as const,
+  browser: (threadId: string) =>
+    ["agent-threads", threadId, "browser"] as const,
   page: (params: ThreadsPageParams) =>
     ["agent-threads", "lists", "page", params] as const,
   infinitePages: (params: Omit<ThreadsPageParams, "offset">) =>
@@ -895,6 +900,52 @@ export function useAgentThreadQueuedMessages(threadId: string) {
   })
 }
 
+// Each read mints a new act link and reloads the framed page, so a link is kept
+// until shortly before it expires rather than refetched on every focus.
+const BROWSER_LINK_REFRESH_MARGIN_MS = 5 * 60_000
+
+export function useAgentThreadBrowser(threadId: string, enabled: boolean) {
+  return useQuery({
+    queryKey: agentThreadKeys.browser(threadId),
+    queryFn: () => agentsApi.getThreadBrowser(threadId),
+    enabled: enabled && Boolean(threadId),
+    retry: false,
+    staleTime: (query) => {
+      const expiresAt = query.state.data?.expires_at
+      return expiresAt
+        ? Math.max(
+            Date.parse(expiresAt) - Date.now() - BROWSER_LINK_REFRESH_MARGIN_MS,
+            0
+          )
+        : 0
+    },
+    meta: { invalidatedBy: [invalidationTopic("thread-browsers", threadId)] },
+  })
+}
+
+// Opening creates a browser and a window, so the panel waits for them rather
+// than showing one that isn't there yet.
+export function useOpenAgentThreadBrowser(threadId: string) {
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: () => agentsApi.openThreadBrowser(threadId),
+    meta: { errorTitle: "Couldn't open the browser" },
+    onSuccess: (browser) =>
+      queryClient.setQueryData(agentThreadKeys.browser(threadId), browser),
+  })
+}
+
+export function useAgentThreadBackgroundWork(threadId: string) {
+  return useQuery({
+    queryKey: agentThreadKeys.backgroundWork(threadId),
+    queryFn: () => agentsApi.getThreadBackgroundWork(threadId),
+    enabled: Boolean(threadId),
+    meta: {
+      invalidatedBy: [invalidationTopic("thread-background-work", threadId)],
+    },
+  })
+}
+
 export function useAgentThreadBranchDiff(threadId: string, enabled: boolean) {
   return useQuery({
     queryKey: agentThreadKeys.branchDiff(threadId),
@@ -1242,6 +1293,39 @@ export function useShareThreadWithWorkspace() {
       storeAgentThread(queryClient, thread)
       invalidateAgentThreadLists(queryClient)
     },
+  })
+}
+
+/** Move a thread to the cloud, or onto a fresh checkout on this Mac, before its next message. */
+export function useMoveThread(
+  thread: Pick<AgentThread, "id" | "repoFullName">
+) {
+  const queryClient = useQueryClient()
+
+  return useMutation({
+    mutationFn: async (to: "cloud" | "local") => {
+      let destination: ThreadMoveDestination = { target: "cloud" }
+      if (to === "local") {
+        if (!window.openSweDesktop)
+          throw new Error(
+            "Open this thread in the Open SWE app to move it here"
+          )
+        destination = {
+          sandbox_bridge_id: await window.openSweDesktop.takeOverThread({
+            threadId: thread.id,
+            repo: thread.repoFullName,
+          }),
+        }
+      }
+      return agentsApi.moveThread(thread.id, destination)
+    },
+    meta: { errorTitle: "Couldn't move thread" },
+    onSuccess: (moved) => {
+      storeAgentThread(queryClient, moved)
+      invalidateAgentThreadLists(queryClient)
+    },
+    onSettled: () =>
+      queryClient.invalidateQueries({ queryKey: localThreadKeys.all }),
   })
 }
 

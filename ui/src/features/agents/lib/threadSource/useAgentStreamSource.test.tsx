@@ -2,10 +2,12 @@
 
 import { cleanup, renderHook } from "@testing-library/react"
 import { afterEach, beforeEach, expect, it, vi } from "vitest"
+import { AgentsApiError } from "@/features/agents/lib/api"
 import type { AgentStream } from "@/features/agents/lib/stream/connection"
+import type { RunAcceptance } from "@/features/agents/lib/stream/runAcceptance"
 import { useAgentStreamSource } from "./useAgentStreamSource"
 
-const accepted = vi.fn<() => Promise<boolean>>()
+const accepted = vi.fn<() => Promise<RunAcceptance>>()
 const stream = {
   messages: [],
   toolCalls: [],
@@ -31,13 +33,23 @@ beforeEach(() => {
 })
 afterEach(cleanup)
 
-it.each([false, true])(
-  "rejects a failed submission only if run creation was rejected (accepted=%s)",
-  async (wasAccepted) => {
-    const error = new Error("Run failed")
-    let respond!: (value: boolean) => void
+const error = new Error("Run failed")
+const refusal = new AgentsApiError(410, "This thread is read-only.")
+
+it.each<[string, RunAcceptance, PromiseSettledResult<void>]>([
+  ["rejected", { accepted: false }, { status: "rejected", reason: error }],
+  ["accepted", { accepted: true }, { status: "fulfilled", value: undefined }],
+  [
+    "refused",
+    { accepted: false, refusal },
+    { status: "rejected", reason: refusal },
+  ],
+])(
+  "settles a failed submission by whether run creation was %s",
+  async (_, acceptance, settled) => {
+    let respond!: (value: RunAcceptance) => void
     accepted.mockReturnValueOnce(
-      new Promise<boolean>((resolve) => {
+      new Promise<RunAcceptance>((resolve) => {
         respond = resolve
       })
     )
@@ -49,11 +61,7 @@ it.each([false, true])(
       message: { id: "message-1", text: "Continue" },
       configurable: {},
     })
-    respond(wasAccepted)
-    expect(await Promise.allSettled([submission])).toEqual([
-      wasAccepted
-        ? { status: "fulfilled", value: undefined }
-        : { status: "rejected", reason: error },
-    ])
+    respond(acceptance)
+    expect(await Promise.allSettled([submission])).toEqual([settled])
   }
 )
