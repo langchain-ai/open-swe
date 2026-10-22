@@ -198,8 +198,20 @@ class ToolSurface:
             raise HTTPException(404, "Tool is unavailable")
         parameters = tool_parameters(tool)
         properties = parameters.get("properties", {})
-        if not isinstance(properties, dict) or set(arguments) - properties.keys():
-            raise HTTPException(422, "Unexpected tool arguments")
+        if not isinstance(properties, dict):
+            raise HTTPException(422, "Tool parameter schema properties must be an object")
+        unexpected = sorted(set(arguments) - properties.keys())
+        if unexpected:
+            required = parameters.get("required", [])
+            accepted = ", ".join(
+                f"{key}{'*' if isinstance(required, list) and key in required else ''}"
+                for key in sorted(properties)
+            )
+            raise HTTPException(
+                422,
+                f"Unexpected tool arguments: {', '.join(unexpected)}. "
+                f"Accepted parameters: {accepted or '(none)'} (* = required)",
+            )
         if self.graph is None:
             raise RuntimeError("Tool graph was not initialized")
         node = self.graph.builder.nodes["tools"].runnable
