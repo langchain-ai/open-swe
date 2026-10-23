@@ -34,6 +34,7 @@ async def test_controller_rejects_changed_trusted_inputs(
             repository="acme/widgets",
             repository_id=42,
             dispatch_url="https://dispatcher.example/queue",
+            operator_emails=frozenset({"operator@example.com"}),
             workflow_digest=hashlib.sha256(workflow).hexdigest(),
             policy=QueuePolicy(
                 checks={"checks": CheckSource(app_id=1, workflow_path=".github/workflows/ci.yml")},
