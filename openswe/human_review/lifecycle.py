@@ -58,9 +58,9 @@ from openswe.slack.client import (
 )
 from openswe.slack.dm import note_for_concierge, send_dm, send_dm_with_location
 from openswe.slack.http import SlackRequestError
-from openswe.slack.thread_owner import wake_thread_owner
 from openswe.threads.pr_fixes import dispatch_pull_request_prompt
 from openswe.users import User
+from openswe.utils.dashboard_links import dashboard_review_url
 from openswe.utils.preview import skip_on_preview
 
 logger = logging.getLogger(__name__)
@@ -90,6 +90,23 @@ async def delete_legacy_crons(watch_key: str) -> dict[str, int]:
                 exc_info=True,
             )
     return {"deleted": deleted}
+
+
+def _failure_line(row: HumanReviewRequest) -> str:
+    """One deterministic line saying which checks put ⚠️ on a watched post."""
+    checks = row.run_config.get("posted_failing_checks") or []
+    pr = row.pull_request
+    if len(checks) == 1:
+        failing = f"`{escape(checks[0])}` is failing"
+    elif checks:
+        failing = f"{len(checks)} checks are failing"
+    else:
+        failing = "Checks are failing"
+    review = dashboard_review_url(pr.owner, pr.repo, pr.number)
+    links = f"<{pr.url}|{escape(pr.repo)}#{pr.number}>" + (
+        f" · <{review}|review page>" if review else ""
+    )
+    return f":warning: {failing} on {links}"
 
 
 @dataclass
@@ -785,19 +802,18 @@ class ReviewCard:
                     "failure",
                     "blocked",
                 }
-                reason = ", ".join(snapshot.failing_checks) or "a check finished without success"
                 row.run_config = {
                     **row.run_config,
-                    "posted_failure": reason if failing else "",
+                    "posted_failing_checks": sorted(snapshot.failing_checks) if failing else None,
                     "posted_draft": snapshot.draft,
                     "posted_conflicted": snapshot.mergeable is False
                     or snapshot.mergeable_state == "dirty",
                 }
             active = [row for row in rows if row.state == "open"]
             failures = sorted(
-                f"{row.pull_request.url}: {row.run_config['posted_failure']}"
+                _failure_line(row)
                 for row in active
-                if row.run_config.get("posted_failure")
+                if isinstance(row.run_config.get("posted_failing_checks"), list)
             )
             expected = row.run_config.get("posted_pr_urls")
             complete = not isinstance(expected, list) or set(expected) == {
@@ -832,18 +848,17 @@ class ReviewCard:
             if notice and not failure_reacted:
                 return
             if notice and first.run_config.get("posted_failure_notice") != notice:
-                requester = first.requested_by
-                if requester is not None and requester.slack_user_id:
-                    try:
-                        await wake_thread_owner(
-                            request.slack_channel_id,
-                            request.slack_message_ts,
-                            requester.slack_user_id,
-                            prompt("slack/pr-failure-reaction", failures=notice),
-                        )
-                    except Exception:
-                        logger.warning("Could not explain PR failure reaction", exc_info=True)
-                        return
+                try:
+                    await post_slack_thread_reply_with_ts(
+                        request.slack_channel_id,
+                        request.slack_message_ts,
+                        notice,
+                        unfurl_links=False,
+                        unfurl_media=False,
+                    )
+                except Exception:
+                    logger.warning("Could not explain PR failure reaction", exc_info=True)
+                    return
             first.run_config = {**first.run_config, "posted_failure_notice": notice}
 
     async def mark_merged(self) -> None:

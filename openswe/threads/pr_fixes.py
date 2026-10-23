@@ -18,7 +18,7 @@ from openswe.prompts import prompt
 from openswe.threads import index
 from openswe.threads.access import _ensure_dashboard_github_token
 from openswe.threads.runs import (
-    _build_dashboard_configurable,
+    build_dashboard_configurable,
     create_dashboard_thread_record,
 )
 from openswe.threads.summary import _assert_thread_postable
@@ -402,7 +402,7 @@ async def start_pull_request_thread(
             )
         current = await client.threads.get(thread_id)
         _assert_thread_postable(thread_metadata(current), login, email)
-        configurable = await _build_dashboard_configurable(
+        configurable = await build_dashboard_configurable(
             thread_id, login, thread_metadata(current)
         )
         await dispatch_agent_run(
@@ -442,7 +442,7 @@ async def dispatch_pull_request_prompt(
         await before_dispatch(thread_id)
         await client.threads.update(thread_id=thread_id, metadata={"review_chat": False})
         current = await client.threads.get(thread_id)
-        configurable = await _build_dashboard_configurable(
+        configurable = await build_dashboard_configurable(
             thread_id, login, thread_metadata(current)
         )
         await dispatch_agent_run(

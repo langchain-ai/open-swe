@@ -91,7 +91,7 @@ def setup(monkeypatch):
         "dispatch_agent_run",
     ):
         monkeypatch.setattr(pr_fixes, name, AsyncMock())
-    monkeypatch.setattr(pr_fixes, "_build_dashboard_configurable", AsyncMock(return_value={}))
+    monkeypatch.setattr(pr_fixes, "build_dashboard_configurable", AsyncMock(return_value={}))
     monkeypatch.setattr(
         pr_fixes,
         "create_dashboard_thread_record",
@@ -217,7 +217,7 @@ async def test_new_thread_supplies_pr_context_to_first_user_run(setup, monkeypat
     metadata = setup.client.threads.update.await_args.kwargs["metadata"]
     assert metadata["review_chat"] is True
     monkeypatch.setattr(runs, "resolve_run_email", AsyncMock(return_value=None))
-    configurable = await runs._build_dashboard_configurable(
+    configurable = await runs.build_dashboard_configurable(
         "new",
         "alice",
         {**metadata, "repo_owner": "acme", "repo_name": "app", "source": "dashboard"},

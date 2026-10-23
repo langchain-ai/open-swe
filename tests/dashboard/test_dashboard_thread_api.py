@@ -1429,7 +1429,7 @@ async def test_cancel_settles_its_runs_before_the_queued_follow_up(
 
     patch_thread_module(monkeypatch, "langgraph_client", lambda: FakeClient())
     patch_thread_module(monkeypatch, "settle_run_turn", fake_settle)
-    patch_thread_module(monkeypatch, "_build_dashboard_configurable", fake_configurable)
+    patch_thread_module(monkeypatch, "build_dashboard_configurable", fake_configurable)
     patch_thread_module(monkeypatch, "dispatch_agent_run", fake_dispatch)
     patch_thread_module(monkeypatch, "_thread_summary", fake_summary)
 

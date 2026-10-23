@@ -24,7 +24,7 @@ from openswe.threads.plan_store import (
     save_plan_content,
     write_plan_to_sandbox,
 )
-from openswe.threads.runs import _build_dashboard_configurable
+from openswe.threads.runs import build_dashboard_configurable
 from openswe.threads.summary import (
     _assert_thread_postable,
     _assert_thread_promptable,
@@ -209,7 +209,7 @@ async def submit_plan_comments(
     if not any(comment.get("author_login") == login for comment in comments):
         raise HTTPException(422, "no comments to submit")
     await _ensure_dashboard_github_token(login)
-    configurable = await _build_dashboard_configurable(thread_id, login, metadata)
+    configurable = await build_dashboard_configurable(thread_id, login, metadata)
     await dispatch_agent_run(
         thread_id,
         prompt("threads/submit-artifact-comments"),

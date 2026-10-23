@@ -5,6 +5,7 @@ import logging
 from openswe.github.http import GitHubAppUnavailable
 from openswe.github.pull_request_status import PullRequestClient
 from openswe.github.pull_requests import PullRequestPayload
+from openswe.human_review.post_intent import PullRequestPost
 from openswe.human_review.requests import HumanReviewRequest
 from openswe.slack.client import GitHubPrRef
 from openswe.slack.suggested_actions import SuggestedAction, register
@@ -52,12 +53,21 @@ async def _reviewable(pr_ref: GitHubPrRef) -> bool:
 
 
 async def offer_review(
-    channel_id: str, thread_ts: str, reply_thread_ts: str, slack_user_id: str, pr_ref: GitHubPrRef
+    channel_id: str,
+    thread_ts: str,
+    reply_thread_ts: str,
+    slack_user_id: str,
+    pr_ref: GitHubPrRef,
+    text: str,
+    message_ts: str,
 ) -> None:
-    """Suggest getting the linked pull request reviewed, when it could be."""
+    """Suggest getting the linked pull request reviewed, when it could be and was posted for it."""
     if skip_on_preview("offer_review"):
         return
     if await User.for_identity("slack", slack_user_id) is None or not await _reviewable(pr_ref):
+        return
+    post = PullRequestPost(channel_id, slack_user_id, text, message_ts, reply_thread_ts)
+    if not await post.shares_for_review(pr_ref):
         return
     await GET_REVIEWED.suggest(
         channel_id,

@@ -358,7 +358,7 @@ async def create_dashboard_thread_record(
     return as_thread_dict(thread)
 
 
-async def _build_dashboard_configurable(
+async def build_dashboard_configurable(
     thread_id: str,
     login: str,
     metadata: Mapping[str, Any],
@@ -477,7 +477,7 @@ async def start_dashboard_thread(
     await dispatch_agent_run(
         thread_id,
         prompt,
-        await _build_dashboard_configurable(thread_id, login, thread_metadata(thread)),
+        await build_dashboard_configurable(thread_id, login, thread_metadata(thread)),
         source=DASHBOARD_SOURCE,
         thread_title=None,
         client=client,
@@ -497,7 +497,7 @@ async def start_sandbox_guest_run(
     await _ensure_dashboard_github_token(login)
     client = langgraph_client()
     metadata = thread_metadata(await client.threads.get(thread_id))
-    configurable = await _build_dashboard_configurable(
+    configurable = await build_dashboard_configurable(
         thread_id, login, metadata, overrides=overrides
     )
     if tool_results:
@@ -1046,7 +1046,7 @@ async def _enrich_run_start_command(
     overrides["model_selection_changed"] = (
         client_configurable.get("model_selection_changed") is True
     )
-    merged_configurable = await _build_dashboard_configurable(
+    merged_configurable = await build_dashboard_configurable(
         thread_id,
         login,
         metadata,
@@ -1402,7 +1402,7 @@ async def dispatch_pending_follow_ups(
     """
     if not await QueuedMessage.for_thread(thread_id):
         return None
-    configurable = await _build_dashboard_configurable(thread_id, login, metadata)
+    configurable = await build_dashboard_configurable(thread_id, login, metadata)
     run = await dispatch_agent_run(
         thread_id,
         None,

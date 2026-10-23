@@ -244,7 +244,7 @@ async def test_as_user_asks_for_sign_in_when_github_rejects_the_refreshed_token(
 
 @pytest.mark.parametrize("conclusion", ["cancelled", "stale", "failure"])
 @pytest.mark.parametrize("replacement", ["success", "failure", None])
-async def test_check_runs_only_discards_superseded_cancellations(
+async def test_check_runs_discard_unsuccessful_runs_a_newer_run_superseded(
     monkeypatch: pytest.MonkeyPatch, conclusion: str, replacement: str | None
 ) -> None:
     runs = [
@@ -265,13 +265,13 @@ async def test_check_runs_only_discards_superseded_cancellations(
     monkeypatch.setattr(github_http.RepoClient, "pages", pages)
     async with httpx2.AsyncClient() as http:
         result = await GitHubClient(http).repo("acme", "app").check_runs("a" * 40)
-    assert result == (runs if conclusion == "failure" else [runs[1]])
+    assert result == [runs[1]]
 
 
 @pytest.mark.parametrize(
     "distinct", ["workflow", "app", "event", "same_run", "older_success", "unavailable"]
 )
-async def test_check_runs_retains_cancellations_without_a_known_replacement(
+async def test_check_runs_retain_unsuccessful_runs_without_a_known_replacement(
     monkeypatch: pytest.MonkeyPatch, distinct: str
 ) -> None:
     runs = [
