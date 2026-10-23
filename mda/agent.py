@@ -44,6 +44,7 @@ from rt.managed_sandbox import (
 )
 from rt.middleware import (
     AsyncWorkerLaunchMiddleware,
+    AwaitClientCallsMiddleware,
     BackendRunMiddleware,
     DescribedToolsMiddleware,
     IncidentEvidenceMiddleware,
@@ -241,11 +242,15 @@ async def agent(runtime: ManagedServerRuntime) -> DeepAgentDefinition:
     agent_middleware = cast(
         list[AgentMiddleware],
         [
+            # Before anything asks the backend for the next call: a client's call
+            # waits for the client.
+            AwaitClientCallsMiddleware(),
             BackendRunMiddleware(
                 backend,
                 context.invocation_id,
                 opened_sandbox if catalog.sandbox is not None else None,
                 trace_metadata=catalog.trace_metadata,
+                refreshes_github_access=catalog.refreshes_github_access,
             ),
             *replace_sandbox,
             *_backend_reports(backend, catalog),

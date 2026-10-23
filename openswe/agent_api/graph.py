@@ -8,10 +8,11 @@ served as the typed API both sides import (``runtime_api``):
   subagents, models and sandbox, and the checks around its file and shell tools
 - ``prepare`` runs every ``before_agent`` hook: run preparation (the thread's
   sandbox, checkout and prompt), the transcript turn, skills, reply bookkeeping
-- ``before_model`` runs every ``before_model`` hook (follow-up queue, event matches,
-  proxy refresh, task coordination, model routing), then asks the graph's
-  middleware what it adds to the call (``ShapesModelCalls``: sections of the system
-  prompt, tools it keeps from the call), and names the model to call
+- ``next_model_call`` says what goes into each model call: the messages the thread
+  is owed (follow-ups, event matches, task messages), the model its route picks,
+  and what the graph's middleware adds to the call (sections of the system
+  prompt, tools it keeps from it); or that the run ends instead
+- ``github_access`` keeps the sandbox's GitHub access fresh beside each call
 - ``model_result`` lets the transcript and usage middleware observe each response
 - ``after_model`` runs ``after_model`` hooks, such as the reply nudges, which can
   send the loop back to the model
@@ -109,20 +110,21 @@ from runtime_api.files import (
 from runtime_api.loop import (
     AFTER_AGENT,
     AFTER_MODEL,
-    BEFORE_MODEL,
     BROWSER,
+    GITHUB_ACCESS,
     MODEL_RESULT,
+    NEXT_MODEL_CALL,
     PREPARE,
     SANDBOX_REPLACED,
     SANDBOX_UNREACHABLE,
     TOOL_RESULT,
     TOOL_STARTED,
     AfterAgent,
-    BeforeModel,
     BrowserReport,
     Done,
     ModelCall,
     ModelResult,
+    NextModelCall,
     ObservedResponse,
     PhaseResult,
     Prepare,
@@ -163,7 +165,14 @@ from openswe.github.sandbox_access import READ_ONLY_REVIEW_PERMISSIONS
 from openswe.incidents.runtime import IncidentMiddleware
 from openswe.middleware.client_tools import ClientToolsMiddleware
 from openswe.middleware.conversation_offloading import ConversationOffloadingMiddleware
-from openswe.middleware.model_call_shape import CallShape, ShapesModelCalls
+from openswe.middleware.model_call_shape import (
+    CallShape,
+    DeliversOwedMessages,
+    EndsLoop,
+    PicksModelRoute,
+    RefreshesGitHubAccess,
+    ShapesModelCalls,
+)
 from openswe.middleware.model_selection import PersistedRoute, normalize_route
 from openswe.middleware.prepare_run import BasePrepareRunMiddleware
 from openswe.middleware.record_run_usage import RecordRunUsageMiddleware
@@ -228,7 +237,7 @@ _json_object = TypeAdapter(dict[str, JsonValue])
 _json_list = TypeAdapter(list[JsonValue])
 _json_dicts = TypeAdapter(list[dict[str, JsonValue]])
 
-Phase = Literal["before_agent", "before_model", "after_model", "after_agent"]
+Phase = Literal["before_agent", "after_model", "after_agent"]
 type PhaseAnswer[R: PhaseResult] = Callable[[PhaseResult, dict[str, object], Runtime], Awaitable[R]]
 RunPlanner = Callable[[RunnableConfig, ToolSurface], Awaitable[None]]
 StartModels = Callable[[RunConfig], Awaitable[RunModels]]
@@ -445,6 +454,9 @@ class RunSession:
             incident_evidence=self._incident is not None,
             worker_webhook=COMPLETION_WEBHOOK_URL if self._delegates else None,
             skill_sources=list(self.surface.skill_sources),
+            refreshes_github_access=any(
+                isinstance(m, RefreshesGitHubAccess) for m in self.surface.middleware
+            ),
             model_call_limit=next(
                 (
                     m.run_limit
@@ -679,27 +691,15 @@ class RunSession:
     async def run_phase(
         self, phase: Phase, state: dict[str, object], runtime: Runtime
     ) -> PhaseResult:
-        update: dict[str, object] = {}
-        added: list[BaseMessage] = []
-        jump_to: str | None = None
+        writes = _StateWrites(state)
         for middleware in self._phase_middleware(phase):
             result = await _call_hook(getattr(middleware, f"a{phase}"), state, runtime)
-            if not result:
-                continue
-            values = dict(result)
+            values = dict(result or {})
             target = values.pop("jump_to", None)
-            if "messages" in values:
-                messages = _as_messages(values.pop("messages"))
-                added.extend(messages)
-                state["messages"] = [*_as_list(state.get("messages")), *messages]
-            update.update(values)
-            state.update(values)
+            writes.apply(values)
             if isinstance(target, str) and target:
-                jump_to = target
-                break
-        return PhaseResult(
-            update=_json_state(update), messages=dump_messages(added), jump_to=jump_to
-        )
+                return writes.result(jump_to=target)
+        return writes.result()
 
     async def _answer_phase[R: PhaseResult](
         self, phase: Phase, call: RunCall, answer: PhaseAnswer[R]
@@ -730,26 +730,60 @@ class RunSession:
 
         return await self._answer_phase("before_agent", request, begun)
 
-    async def before_model(self, request: RunCall) -> BeforeModel:
-        async def planned(
-            result: PhaseResult, state: dict[str, object], runtime: Runtime
-        ) -> BeforeModel:
-            if result.jump_to is not None:
-                return BeforeModel(**result.model_dump())
-            model = self.model_for(state)
-            vision = self.vision_for(model)
-            fallback = fallback_model_choice(model.model_id)
-            call = (await self.model_call(state, runtime)).model_copy(
-                update={
-                    "model": _model_spec(model),
-                    "vision": None if vision is None else _model_spec(vision),
-                    "fallback": None if fallback is None else _model_spec(fallback),
-                    "use_gateway": self.models.use_gateway,
-                }
-            )
-            return BeforeModel(**result.model_dump(), call=call)
+    async def next_model_call(self, request: RunCall) -> NextModelCall:
+        """What goes into the run's next model call, or that the run ends instead."""
+        state = self.state(request)
 
-        return await self._answer_phase("before_model", request, planned)
+        async def planned(runtime: Runtime) -> NextModelCall:
+            await self.join(state, runtime)
+            answer = await self._next_model_call(state, runtime)
+            await self.flush(runtime)
+            return answer
+
+        events: list[object] = []
+        answer = await in_graph_context(
+            {**self.config, "run_name": "next_model_call"}, planned, events=events
+        )
+        return answer.model_copy(update={"events": [_json_or_text(e) for e in events]})
+
+    async def _next_model_call(self, state: dict[str, object], runtime: Runtime) -> NextModelCall:
+        for middleware in self.surface.middleware:
+            if isinstance(middleware, EndsLoop):
+                end = await middleware.aend_instead(state, runtime)
+                if end is not None:
+                    return NextModelCall(update=_json_state(end.update), end=True)
+        writes = _StateWrites(state)
+        for middleware in self.surface.middleware:
+            if isinstance(middleware, DeliversOwedMessages):
+                writes.apply(await middleware.adeliver_owed(state, runtime) or {})
+        # The route reads the messages just delivered, such as a follow-up asking for a model.
+        for middleware in self.surface.middleware:
+            if isinstance(middleware, PicksModelRoute):
+                writes.apply(await middleware.apick_route(state, runtime))
+        model = self.model_for(state)
+        vision = self.vision_for(model)
+        fallback = fallback_model_choice(model.model_id)
+        call = (await self.model_call(state, runtime)).model_copy(
+            update={
+                "model": _model_spec(model),
+                "vision": None if vision is None else _model_spec(vision),
+                "fallback": None if fallback is None else _model_spec(fallback),
+                "use_gateway": self.models.use_gateway,
+            }
+        )
+        written = writes.result()
+        return NextModelCall(messages=written.messages, update=written.update, call=call)
+
+    async def github_access(self, _request: RunRequest) -> Done:
+        """Refresh the sandbox's GitHub access, where it is near running out."""
+
+        async def refresh() -> Done:
+            for middleware in self.surface.middleware:
+                if isinstance(middleware, RefreshesGitHubAccess):
+                    await middleware.arefresh_github_access()
+            return Done()
+
+        return await self.in_run("github_access", refresh)
 
     async def after_model(self, request: RunCall) -> PhaseResult:
         return await self._answer_phase("after_model", request, _as_is)
@@ -903,6 +937,29 @@ async def _call_hook(
     if "config" in inspect.signature(hook).parameters:
         return await hook(cast(AgentState, state), runtime, get_config())
     return await hook(cast(AgentState, state), runtime)
+
+
+class _StateWrites:
+    """What the graph's middleware wrote to a run's state: messages added, and the rest."""
+
+    def __init__(self, state: dict[str, object]) -> None:
+        self._state = state
+        self._update: dict[str, object] = {}
+        self._added: list[BaseMessage] = []
+
+    def apply(self, written: Mapping[str, object]) -> None:
+        values = dict(written)
+        if "messages" in values:
+            messages = _as_messages(values.pop("messages"))
+            self._added.extend(messages)
+            self._state["messages"] = [*_as_list(self._state.get("messages")), *messages]
+        self._update.update(values)
+        self._state.update(values)
+
+    def result(self, *, jump_to: str | None = None) -> PhaseResult:
+        return PhaseResult(
+            update=_json_state(self._update), messages=dump_messages(self._added), jump_to=jump_to
+        )
 
 
 async def _as_is(result: PhaseResult, _state: dict[str, object], _runtime: Runtime) -> PhaseResult:
@@ -1154,7 +1211,8 @@ RUN_CALLS.serve(BROWSER, _browser)
 API: Final = Handlers[RunSession]()
 API.serve(CATALOG, RunSession.plan)
 API.serve(PREPARE, RunSession.prepare)
-API.serve(BEFORE_MODEL, RunSession.before_model)
+API.serve(NEXT_MODEL_CALL, RunSession.next_model_call)
+API.serve(GITHUB_ACCESS, RunSession.github_access)
 API.serve(MODEL_RESULT, RunSession.model_result)
 API.serve(AFTER_MODEL, RunSession.after_model)
 API.serve(AFTER_AGENT, RunSession.after_agent)

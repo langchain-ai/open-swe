@@ -2,11 +2,9 @@
 
 from collections.abc import Generator
 from datetime import UTC, datetime, timedelta
-from typing import cast
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import AsyncMock, patch
 
 import pytest
-from langchain.agents.middleware import AgentState
 
 from openswe.github import proxy as github_proxy
 from openswe.github.proxy import (
@@ -50,7 +48,7 @@ class TestProxyTokenNeedsRefresh:
 class TestRefreshGithubProxyMiddleware:
     @pytest.mark.asyncio
     async def test_calls_refresh_with_thread_id(self) -> None:
-        from openswe.middleware.refresh_github_proxy import refresh_github_proxy_before_model
+        from openswe.middleware.refresh_github_proxy import github_access_refresh
 
         with (
             patch(
@@ -62,16 +60,13 @@ class TestRefreshGithubProxyMiddleware:
                 new=AsyncMock(return_value=True),
             ) as mock_refresh,
         ):
-            result = await refresh_github_proxy_before_model.abefore_model(
-                cast(AgentState, {}), MagicMock()
-            )
+            await github_access_refresh.arefresh_github_access()
 
-        assert result is None
         mock_refresh.assert_awaited_once_with("thread-9")
 
     @pytest.mark.asyncio
     async def test_swallows_refresh_errors(self) -> None:
-        from openswe.middleware.refresh_github_proxy import refresh_github_proxy_before_model
+        from openswe.middleware.refresh_github_proxy import github_access_refresh
 
         with (
             patch(
@@ -83,8 +78,4 @@ class TestRefreshGithubProxyMiddleware:
                 new=AsyncMock(side_effect=RuntimeError("boom")),
             ),
         ):
-            result = await refresh_github_proxy_before_model.abefore_model(
-                cast(AgentState, {}), MagicMock()
-            )
-
-        assert result is None
+            await github_access_refresh.arefresh_github_access()

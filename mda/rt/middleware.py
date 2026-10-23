@@ -61,15 +61,18 @@ from runtime_api.endpoint import Endpoint, call
 from runtime_api.loop import (
     AFTER_AGENT,
     AFTER_MODEL,
-    BEFORE_MODEL,
+    GITHUB_ACCESS,
     MODEL_RESULT,
+    NEXT_MODEL_CALL,
     PREPARE,
     ModelCall,
     ModelResult,
+    NextModelCall,
     PhaseResult,
     Prepare,
     RunCall,
 )
+from runtime_api.operations import CLIENT_CALL_KEY, RunRequest
 from runtime_api.workers import LAUNCH_WORKER, WORKER_LAUNCHED, Launch, Launched
 
 from rt.backend import (
@@ -163,7 +166,8 @@ def _decode(value: object) -> object:
     return value
 
 
-def _apply(reply: PhaseResult) -> dict[str, object]:
+def _apply(reply: PhaseResult | NextModelCall) -> dict[str, object]:
+    """What a reply wrote to the run's state, as this graph's state update."""
     TurnTrace.record_evidence(reply.update)
     for event in reply.events:
         get_stream_writer()(event)
@@ -175,8 +179,11 @@ def _apply(reply: PhaseResult) -> dict[str, object]:
         update[key] = _decode(reply.update[key])
     if reply.messages:
         update["messages"] = messages_from_dict(reply.messages)
-    if reply.jump_to:
-        update["jump_to"] = reply.jump_to
+    jump_to = reply.jump_to if isinstance(reply, PhaseResult) else "end" if reply.end else None
+    if jump_to:
+        update["jump_to"] = jump_to
+    if isinstance(reply, NextModelCall) and reply.call is not None:
+        update["open_swe_call"] = reply.call.model_dump()
     return update
 
 
@@ -318,9 +325,11 @@ class BackendRunMiddleware(AgentMiddleware[RunState]):
         open_sandbox: Callable[[Runtime], Awaitable[str | None]] | None = None,
         *,
         trace_metadata: Mapping[str, JsonValue] | None = None,
+        refreshes_github_access: bool = False,
     ) -> None:
         self._backend = backend
         self._invocation_id = invocation_id
+        self._refreshes_github_access = refreshes_github_access
         self._trace_metadata = trace_metadata or {}
         self._trace = TurnTrace()
         # Opens the thread's box before preparing, so the backend binds the thread to it.
@@ -353,13 +362,22 @@ class BackendRunMiddleware(AgentMiddleware[RunState]):
 
     @hook_config(can_jump_to=["end"])
     async def abefore_model(self, state: RunState, runtime: Runtime) -> dict[str, object] | None:  # noqa: ARG002
-        planned = await self._phase(BEFORE_MODEL, run_call(RunCall, run_id(), state))
-        update = _apply(planned)
-        if planned.call is not None:
-            update["open_swe_call"] = planned.call.model_dump()
-        return update
+        planned, _refreshed = await asyncio.gather(
+            self._phase(NEXT_MODEL_CALL, run_call(RunCall, run_id(), state)),
+            self._refresh_github_access(),
+        )
+        return _apply(planned)
 
-    async def _phase[Call: RunCall, Result: PhaseResult](
+    async def _refresh_github_access(self) -> None:
+        if not self._refreshes_github_access:
+            return
+        try:
+            await call(self._backend, GITHUB_ACCESS, RunRequest(run_id=run_id()))
+        except BackendCallError:
+            # The box's GitHub calls fail once its token runs out; the model call need not.
+            logger.warning("Could not refresh the sandbox's GitHub access", exc_info=True)
+
+    async def _phase[Call: RunCall, Result: BaseModel](
         self, endpoint: Endpoint[Call, Result], request: Call
     ) -> Result:
         await self._backend.reports.drain()
@@ -416,6 +434,22 @@ class BackendRunMiddleware(AgentMiddleware[RunState]):
             return None
         finally:
             await self._trace.reconcile(metadata)
+
+
+class AwaitClientCallsMiddleware(AgentMiddleware):
+    """End the run while a client tool's call waits for the client's answer.
+
+    The client answers in a later run, which picks up from the call.
+    """
+
+    @hook_config(can_jump_to=["end"])
+    async def abefore_model(self, state: AgentState, runtime: Runtime) -> dict[str, object] | None:  # noqa: ARG002
+        for message in reversed(state["messages"]):
+            if not isinstance(message, ToolMessage):
+                return None
+            if isinstance(message.artifact, dict) and message.artifact.get(CLIENT_CALL_KEY):
+                return {"jump_to": "end"}
+        return None
 
 
 class ReportRepliesMiddleware(AgentMiddleware):

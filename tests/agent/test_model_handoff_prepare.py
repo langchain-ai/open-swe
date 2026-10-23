@@ -223,7 +223,7 @@ async def test_explicit_auto_selection_replaces_checkpoint_route(
     assert prepared["selected_model_id"] == (
         "openai:gpt-6-luna" if fresh_route == "fast" else "openai:gpt-6.1-sol"
     )
-    assert (await selection.abefore_model(state, MagicMock()))["model_route"] == fresh_route
+    assert (await selection.apick_route(state, MagicMock()))["model_route"] == fresh_route
     classify.assert_awaited_once_with("Fix the typo")
 
 

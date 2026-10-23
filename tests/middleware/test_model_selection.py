@@ -57,7 +57,7 @@ async def test_route_is_stored_in_state_and_used_for_model_calls(
     middleware, models = _middleware()
     state = {"messages": [HumanMessage(content="Update the README")]}
 
-    state.update(await middleware.abefore_model(cast(Any, state), MagicMock()))
+    state.update(await middleware.apick_route(cast(Any, state), MagicMock()))
 
     assert state["model_route"] == "fast"
     assert (await _invoke(middleware, state)).model is models["fast"]
@@ -81,7 +81,7 @@ async def test_fast_mode_skips_classifier_and_routing_event(
     if existing_route is not None:
         state["model_route"] = existing_route
 
-    state.update(await middleware.abefore_model(cast(Any, state), MagicMock()))
+    state.update(await middleware.apick_route(cast(Any, state), MagicMock()))
 
     expected_route = existing_route or "fast"
     assert state["model_route"] == expected_route
@@ -96,8 +96,8 @@ async def test_routing_decision_only_runs_once(monkeypatch: pytest.MonkeyPatch) 
     middleware, _ = _middleware()
     state = {"messages": [HumanMessage(content="Update the README")]}
 
-    state.update(await middleware.abefore_model(cast(Any, state), MagicMock()))
-    await middleware.abefore_model(cast(Any, state), MagicMock())
+    state.update(await middleware.apick_route(cast(Any, state), MagicMock()))
+    await middleware.apick_route(cast(Any, state), MagicMock())
 
     jev.assert_awaited_once()
 
@@ -126,7 +126,7 @@ async def test_jev_sees_the_human_request_not_injected_context(
         "messages": [HumanMessage(content=_HUMAN_ENVELOPE), HumanMessage(content=_PERSON_BLOCK)]
     }
 
-    await middleware.abefore_model(cast(Any, state), MagicMock())
+    await middleware.apick_route(cast(Any, state), MagicMock())
 
     jev.assert_awaited_once_with("how's the weather in sf today")
 
@@ -228,7 +228,7 @@ async def test_requested_model_wins_and_emits_actual_model(
         "requested_model": "anthropic:claude-opus-5-5",
         "requested_effort": "max",
     }
-    state["model_route"] = (await middleware.abefore_model(state, MagicMock()))["model_route"]
+    state["model_route"] = (await middleware.apick_route(state, MagicMock()))["model_route"]
     assert (await _invoke(middleware, dict(state))).model is chosen
     factory.assert_called_with("anthropic:claude-opus-5-5", "max")
     jev.assert_not_awaited()
@@ -249,7 +249,7 @@ async def test_handoff_without_routing_keeps_default_model(monkeypatch: pytest.M
         "messages": [HumanMessage(content="Fix this")],
         "model_route": "fast",
     }
-    state["model_route"] = (await middleware.abefore_model(state, MagicMock()))["model_route"]
+    state["model_route"] = (await middleware.apick_route(state, MagicMock()))["model_route"]
     assert state["model_route"] == "default"
     assert (await _invoke(middleware, dict(state))).model is default
     jev.assert_not_awaited()

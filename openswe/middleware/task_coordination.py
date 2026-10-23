@@ -3,7 +3,6 @@ from collections.abc import Mapping
 from typing import Self
 from uuid import uuid4
 
-from langchain.agents.middleware import AgentState
 from langgraph.runtime import Runtime
 
 from openswe.database import postgres
@@ -53,20 +52,30 @@ class TaskCoordinationMiddleware(OpenSWEMiddleware):
     def can_delegate(self) -> bool:
         return self.enabled and not self.is_worker
 
-    async def abefore_model(
-        self, state: AgentState, runtime: Runtime
-    ) -> dict[str, list[RunMessage]] | None:
+    async def _task_context(self) -> TaskContext | None:
         if self.context is None:
             self.context = await TaskMembership.context_for_thread(self.thread_id)
-        if self.context is not None and self.is_worker:
-            try:
-                await maybe_refresh_proxy_token(self.context.task.require_coordinator())
-            except Exception:
-                logger.warning(
-                    "Failed to refresh the task's GitHub proxy",
-                    exc_info=True,
-                    extra={"thread_id": self.thread_id},
-                )
+        return self.context
+
+    async def arefresh_github_access(self) -> None:
+        """A worker works in its coordinator's box, through the coordinator's proxy."""
+        context = await self._task_context()
+        if context is None or not self.is_worker:
+            return
+        try:
+            await maybe_refresh_proxy_token(context.task.require_coordinator())
+        except Exception:
+            logger.warning(
+                "Failed to refresh the task's GitHub proxy",
+                exc_info=True,
+                extra={"thread_id": self.thread_id},
+            )
+
+    async def adeliver_owed(
+        self, state: Mapping[str, object], runtime: Runtime
+    ) -> dict[str, list[RunMessage]] | None:
+        """The task's context, when the model no longer sees it, and the task's messages."""
+        await self._task_context()
         messages: list[RunMessage] = []
         if self.context is not None:
             content = prompt(
@@ -80,7 +89,8 @@ class TaskCoordinationMiddleware(OpenSWEMiddleware):
                     {"role": "user", "id": f"task-context:{uuid4()}", "content": content}
                 )
         if postgres.configured():
-            owed = await TaskMessage.owed(self.thread_id, state["messages"])
+            seen = state.get("messages")
+            owed = await TaskMessage.owed(self.thread_id, seen if isinstance(seen, list) else [])
             messages.extend(TaskMessage.messages(owed))
         return {"messages": messages} if messages else None
 

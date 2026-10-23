@@ -3,10 +3,11 @@
 from typing import Literal
 
 from pydantic import BaseModel, Field, JsonValue
+from runtime_api.operations import CLIENT_CALL_KEY
 
 type ClientToolKind = Literal["function", "custom"]
 
-PENDING_ARTIFACT_KEY = "open_swe_client_call"
+PENDING_ARTIFACT_KEY = CLIENT_CALL_KEY
 CUSTOM_TOOL_PARAMETERS: dict[str, JsonValue] = {
     "type": "object",
     "properties": {"input": {"type": "string", "description": "The tool's raw text input."}},

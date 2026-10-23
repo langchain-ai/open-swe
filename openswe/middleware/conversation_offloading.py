@@ -1,8 +1,8 @@
 """Expose Deep Agents compaction without streaming its internal model output."""
 
-from collections.abc import Awaitable, Callable
+from collections.abc import Awaitable, Callable, Mapping
 from contextvars import ContextVar
-from typing import Annotated, Any, NotRequired
+from typing import Annotated, Any, NotRequired, cast
 
 from deepagents.middleware.summarization import (
     SummarizationMiddleware,
@@ -20,6 +20,8 @@ from langchain.agents.middleware.types import (
 from langchain_core.messages import AnyMessage
 from langgraph.config import get_stream_writer
 from langgraph.runtime import Runtime
+
+from openswe.middleware.model_call_shape import LoopEnd
 
 _manual = ContextVar("manual_offloading", default=False)
 
@@ -99,7 +101,8 @@ class ConversationOffloadingMiddleware(SummarizationMiddleware):
         return response
 
     @hook_config(can_jump_to=["end"])
-    async def abefore_model(self, state: AgentState, runtime: Runtime) -> dict[str, Any] | None:
+    async def aend_instead(self, state: Mapping[str, object], runtime: Runtime) -> LoopEnd | None:
+        """A requested offload: summarize the conversation, then end the run."""
         if not self.manual:
             return None
 
@@ -111,9 +114,11 @@ class ConversationOffloadingMiddleware(SummarizationMiddleware):
             response = await self.awrap_model_call(
                 ModelRequest(
                     model=self.model,
-                    messages=state.get("messages", []),
+                    messages=messages
+                    if isinstance(messages := state.get("messages"), list)
+                    else [],
                     tools=[],
-                    state=state,
+                    state=cast(AgentState, state),
                     runtime=runtime,
                 ),
                 finish,
@@ -125,6 +130,6 @@ class ConversationOffloadingMiddleware(SummarizationMiddleware):
             )
             if not isinstance(update, dict):
                 update = {"conversation_offloading": self._status("skipped")}
-            return {**update, "jump_to": "end"}
+            return LoopEnd(update)
         finally:
             _manual.reset(token)

@@ -3,8 +3,8 @@ from types import ModuleType
 from typing import TYPE_CHECKING, Any
 
 _MIDDLEWARE_MODULES = {
-    "check_message_queue_before_model": ".check_message_queue",
-    "deliver_event_matches_before_model": ".deliver_event_matches",
+    "queued_follow_ups": ".check_message_queue",
+    "owed_event_matches": ".deliver_event_matches",
     "DynamicToolMiddleware": ".dynamic_tools",
     "IntegrationGroup": ".dynamic_tools",
     "ExcludeToolsMiddleware": ".exclude_tools",
@@ -16,7 +16,7 @@ _MIDDLEWARE_MODULES = {
     "BasePrepareRunMiddleware": ".prepare_run",
     "PullRequestCreationGuardMiddleware": ".pr_creation_guard",
     "record_run_usage": ".record_run_usage",
-    "refresh_github_proxy_before_model": ".refresh_github_proxy",
+    "github_access_refresh": ".refresh_github_proxy",
     "RepairOrphanedToolCallsMiddleware": ".repair_orphaned_tool_calls",
     "RequireUserReplyMiddleware": ".require_user_reply",
     "settle_review_check_on_exit": ".settle_review_check",
@@ -36,17 +36,17 @@ __all__ = [
     "RepairOrphanedToolCallsMiddleware",
     "RequireUserReplyMiddleware",
     "WorkflowPushGuardMiddleware",
-    "check_message_queue_before_model",
-    "deliver_event_matches_before_model",
+    "queued_follow_ups",
+    "owed_event_matches",
     "notify_step_limit_reached",
     "record_run_usage",
-    "refresh_github_proxy_before_model",
+    "github_access_refresh",
     "settle_review_check_on_exit",
 ]
 
 if TYPE_CHECKING:
-    from openswe.middleware.check_message_queue import check_message_queue_before_model
-    from openswe.middleware.deliver_event_matches import deliver_event_matches_before_model
+    from openswe.middleware.check_message_queue import queued_follow_ups
+    from openswe.middleware.deliver_event_matches import owed_event_matches
     from openswe.middleware.dynamic_tools import DynamicToolMiddleware, IntegrationGroup
     from openswe.middleware.exclude_tools import ExcludeToolsMiddleware
     from openswe.middleware.model_errors import ModelErrorMiddleware
@@ -56,7 +56,7 @@ if TYPE_CHECKING:
     from openswe.middleware.pr_creation_guard import PullRequestCreationGuardMiddleware
     from openswe.middleware.prepare_run import BasePrepareRunMiddleware, PrepareRunState
     from openswe.middleware.record_run_usage import record_run_usage
-    from openswe.middleware.refresh_github_proxy import refresh_github_proxy_before_model
+    from openswe.middleware.refresh_github_proxy import github_access_refresh
     from openswe.middleware.repair_orphaned_tool_calls import RepairOrphanedToolCallsMiddleware
     from openswe.middleware.require_user_reply import RequireUserReplyMiddleware
     from openswe.middleware.settle_review_check import settle_review_check_on_exit

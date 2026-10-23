@@ -62,11 +62,11 @@ from runtime_api.endpoint import Delivery, Endpoint, call
 from runtime_api.loop import (
     AFTER_AGENT,
     AFTER_MODEL,
-    BEFORE_MODEL,
+    NEXT_MODEL_CALL,
     PREPARE,
     AfterAgent,
-    BeforeModel,
     ModelCall,
+    NextModelCall,
     PhaseResult,
     Prepare,
     ToolCallReport,
@@ -236,8 +236,8 @@ async def test_a_tool_call_the_backend_never_answered(
     ("endpoint", "status"),
     [
         (PREPARE, 504),
-        (BEFORE_MODEL, 502),
-        (BEFORE_MODEL, 504),
+        (NEXT_MODEL_CALL, 502),
+        (NEXT_MODEL_CALL, 504),
         (AFTER_MODEL, 503),
         (AFTER_AGENT, 504),
     ],
@@ -264,7 +264,7 @@ async def test_phase_gateway_failure_is_not_replayed(
 
 
 @pytest.mark.parametrize(("failures", "recovers"), [(10, True), (11, False)])
-@pytest.mark.parametrize("endpoint", [PREPARE, LAUNCH_WORKER, BEFORE_MODEL])
+@pytest.mark.parametrize("endpoint", [PREPARE, LAUNCH_WORKER, NEXT_MODEL_CALL])
 async def test_a_run_waits_out_a_backend_rollout(
     monkeypatch: pytest.MonkeyPatch, endpoint: Endpoint, failures: int, recovers: bool
 ) -> None:
@@ -274,7 +274,7 @@ async def test_a_run_waits_out_a_backend_rollout(
     request = httpx2.Request("POST", "https://backend.invalid")
     # Only a call the backend could not have run is resent, or one that is safe to repeat.
     unavailable = [httpx2.Response(503, request=request), httpx2.ConnectError("secret-token")]
-    if endpoint is not BEFORE_MODEL:
+    if endpoint is not NEXT_MODEL_CALL:
         unavailable.append(httpx2.Response(502, request=request))
     client = MagicMock(is_closed=False)
     client.post = AsyncMock(
@@ -296,7 +296,7 @@ async def test_a_run_waits_out_a_backend_rollout(
     assert client.post.await_count == min(failures + 1, 11)
 
 
-@pytest.mark.parametrize("hook", ["prepare", "before_model", "after_model"])
+@pytest.mark.parametrize("hook", ["prepare", "next_model_call", "after_model"])
 async def test_an_unreachable_backend_fails_the_run(
     monkeypatch: pytest.MonkeyPatch, hook: str
 ) -> None:
@@ -344,9 +344,9 @@ async def test_the_model_the_backend_names_gets_a_replayable_history(
     backend = OpenSweBackend("secret-token")
 
     async def phase(name: str, body: dict[str, JsonValue]) -> BaseModel:
-        if name != "before_model":
+        if name != "next_model_call":
             return PhaseResult()
-        return BeforeModel(
+        return NextModelCall(
             call=ModelCall(
                 system_prompt="You are Open SWE.",
                 model=ModelSpec(model_id="anthropic:claude-opus-5-5", kwargs={}),
@@ -398,9 +398,9 @@ async def test_the_anthropic_model_the_backend_names_caches_for_an_hour(
     backend = OpenSweBackend("secret-token")
 
     async def phase(name: str, body: dict[str, JsonValue]) -> BaseModel:
-        if name != "before_model":
+        if name != "next_model_call":
             return PhaseResult()
-        return BeforeModel(
+        return NextModelCall(
             call=ModelCall(
                 system_prompt="You are Open SWE.",
                 model=ModelSpec(model_id="anthropic:claude-opus-5-5", kwargs={}),
@@ -453,9 +453,9 @@ async def test_a_stalled_model_call_goes_to_the_fallback_model(
     backend = OpenSweBackend("secret-token")
 
     async def phase(name: str, body: dict[str, JsonValue]) -> BaseModel:
-        if name != "before_model":
+        if name != "next_model_call":
             return PhaseResult()
-        return BeforeModel(
+        return NextModelCall(
             call=ModelCall(
                 system_prompt="You are Open SWE.",
                 model=ModelSpec(model_id="anthropic:claude-opus-5-5", kwargs={}),
@@ -605,11 +605,11 @@ async def test_turn_reconciliation_reaches_runtime_root_llm_and_nested_calls(
             return PhaseResult(
                 update={"git_trace_baseline": {"invocation": "turn", "snapshot": None}}
             )
-        if name == "before_model":
+        if name == "next_model_call":
             assert isinstance(state := body["state"], dict)
             assert "git_trace_work:previous" not in state
             await nested_call.ainvoke({"text": "nested"})
-            return BeforeModel(update=_evidence("work", "work", "org/actual", "local", 1))
+            return NextModelCall(update=_evidence("work", "work", "org/actual", "local", 1))
         if name == "after_agent":
             # What the backend reconciles from that evidence: the earliest PR target first.
             return AfterAgent(
@@ -765,7 +765,7 @@ async def test_optional_trace_failures_do_not_change_successful_turn_output(
         monkeypatch.setattr(TurnTrace, "current_root", staticmethod(unavailable_trace))
 
     async def phase(name: str, body: dict[str, JsonValue]) -> BaseModel:
-        if name == "before_model":
+        if name == "next_model_call":
             TurnTrace.record_evidence({"git_trace_pr:call": {"invocation": "turn", "targets": []}})
         if failure == "evidence" and name == "after_model":
             root = TurnTrace.current_root()
@@ -1124,6 +1124,28 @@ async def test_each_run_lists_only_the_skills_it_may_see_and_reads_them_here(
     assert not [name for name in asked if name.startswith("files.")]
 
 
+async def test_a_run_stops_while_a_client_call_waits_and_goes_on_once_answered() -> None:
+    from rt.middleware import AwaitClientCallsMiddleware
+    from runtime_api.operations import CLIENT_CALL_KEY
+
+    called = AIMessage("", tool_calls=[{"name": "exec_command", "args": {}, "id": "call-1"}])
+    waiting = ToolMessage(
+        content="pending", tool_call_id="call-1", artifact={CLIENT_CALL_KEY: True}
+    )
+    answered = ToolMessage(content="a.py", tool_call_id="call-1")
+    stop = AwaitClientCallsMiddleware()
+
+    assert await stop.abefore_model(
+        {"messages": [HumanMessage("list files"), called, waiting]}, MagicMock()
+    ) == {"jump_to": "end"}
+    assert (
+        await stop.abefore_model(
+            {"messages": [HumanMessage("list files"), called, answered]}, MagicMock()
+        )
+        is None
+    )
+
+
 class _ToolCallingModel(GenericFakeChatModel):
     def bind_tools(self, tools: object, **kwargs: object) -> Self:
         return self
@@ -1433,7 +1455,7 @@ async def test_backend_calls_carry_the_running_spans_trace_without_its_metadata(
             },
         )
     [turn] = [run for run in collector.traced_runs if run.name == "LangGraph"]
-    assert {"before_model", "tool_started", "tool_result", "after_agent"} <= sent.keys()
+    assert {"next_model_call", "tool_started", "tool_result", "after_agent"} <= sent.keys()
     for hook, headers in sent.items():
         assert headers["Authorization"] == "Bearer secret-token", hook
         root, _, span = headers["langsmith-trace"].partition(".")

@@ -112,6 +112,8 @@ class Catalog(BaseModel):
     # Where the run's skills are (``runtime_api.skills``), a later source's skill
     # taking the place of an earlier one's of the same name.
     skill_sources: list[str] = []
+    # Whether the run's sandbox GitHub access needs refreshing as it works (``GITHUB_ACCESS``).
+    refreshes_github_access: bool = False
 
 
 # Only reads the plan, so it is safe to send again.

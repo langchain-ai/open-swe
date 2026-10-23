@@ -6,7 +6,7 @@ import pytest
 from openswe.message_queue import QueuedMessage
 from openswe.middleware.check_message_queue import (
     LinearNotifyState,
-    check_message_queue_before_model,
+    queued_follow_ups,
 )
 
 
@@ -23,9 +23,7 @@ async def _run(state: dict[str, Any]) -> dict[str, Any] | None:
         "openswe.middleware.check_message_queue.get_config",
         return_value={"configurable": {"thread_id": "thread-1"}},
     ):
-        return await check_message_queue_before_model.abefore_model(
-            cast(LinearNotifyState, state), MagicMock()
-        )
+        return await queued_follow_ups.adeliver_owed(cast(LinearNotifyState, state), MagicMock())
 
 
 @pytest.mark.asyncio

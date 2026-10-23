@@ -107,6 +107,58 @@ def test_remote_model_switch_overrides_cached_route_and_effort(requested: str) -
     assert choice.kwargs == provider_model_kwargs(requested, "medium", max_tokens=64_000)
 
 
+async def test_the_next_model_call_carries_owed_messages_and_the_route_they_ask_for() -> None:
+    from langchain.agents.middleware.types import AgentMiddleware
+    from langchain_core.messages import HumanMessage
+    from langgraph.runtime import Runtime
+    from runtime_api.loop import RunCall
+
+    from openswe.agent_api.graph import RunSession
+    from openswe.middleware.model_call_shape import LoopEnd
+    from openswe.sandboxes.tool_runtime import ModelChoice, SurfaceModels, ToolSurface
+
+    class FollowUps(AgentMiddleware):
+        async def adeliver_owed(
+            self, state: Mapping[str, object], runtime: Runtime
+        ) -> Mapping[str, object]:
+            return {"messages": [HumanMessage("Use the fast model.", id="follow-up")]}
+
+    class Routes(AgentMiddleware):
+        async def apick_route(
+            self, state: Mapping[str, object], runtime: Runtime
+        ) -> Mapping[str, object]:
+            messages = state.get("messages")
+            asked = isinstance(messages, list) and any(
+                "fast" in getattr(m, "text", "") for m in messages
+            )
+            return {"model_route": "fast" if asked else "default"}
+
+    class Stops(AgentMiddleware):
+        async def aend_instead(self, state: Mapping[str, object], runtime: Runtime) -> LoopEnd:
+            return LoopEnd({"stopped": True})
+
+    main, fast = ModelChoice("openai:gpt-6.1-sol", {}), ModelChoice("google_genai:fast", {})
+    models = SurfaceModels(main=main, subagent=main, use_gateway=False, routes={"fast": fast})
+
+    def session(*middleware: AgentMiddleware) -> RunSession:
+        surface = ToolSurface(middleware=list(middleware), models=models)
+        return RunSession(surface, {"configurable": {}}, None, started_here=True)
+
+    planned = await session(FollowUps(), Routes()).next_model_call(RunCall())
+
+    assert [m["data"]["id"] for m in planned.messages] == ["follow-up"]
+    assert planned.update["model_route"] == "fast"
+    assert planned.call is not None and planned.call.model is not None
+    assert planned.call.model.model_id == "google_genai:fast"
+    ended = await session(Stops(), FollowUps(), Routes()).next_model_call(RunCall())
+    assert (ended.end, ended.call, ended.messages, ended.update) == (
+        True,
+        None,
+        [],
+        {"stopped": True},
+    )
+
+
 async def test_mda_calls_hide_the_tools_the_graph_middleware_hides_from_each_call() -> None:
     from langchain.agents.middleware.types import AgentMiddleware
     from langchain_core.tools import tool
@@ -355,9 +407,9 @@ async def test_hook_failure_log_names_the_mda_run(monkeypatch: pytest.MonkeyPatc
     scope: Scope = {
         "type": "http",
         "method": "POST",
-        "path": "/agent-api/before_model",
+        "path": "/agent-api/next_model_call",
         "headers": [],
-        "path_params": {"endpoint": "before_model"},
+        "path_params": {"endpoint": "next_model_call"},
         "state": {"remote_run": RUN},
     }
 
@@ -375,7 +427,7 @@ async def test_hook_failure_log_names_the_mda_run(monkeypatch: pytest.MonkeyPatc
         server.logger.removeHandler(handler)
 
     assert len(lines) == 1
-    assert all(value in lines[0] for value in ("mda-run-1", "thread-1", "before_model"))
+    assert all(value in lines[0] for value in ("mda-run-1", "thread-1", "next_model_call"))
 
 
 async def test_mda_catalog_leaves_integrations_and_code_mode_to_mda(
@@ -636,7 +688,7 @@ async def _call_status(
     served: list[tuple[str, str]] = []
 
     async def graph(run: RemoteRun, called: str, body: object) -> dict[str, object]:
-        if called not in {"catalog", "prepare", "before_model", "after_agent"}:
+        if called not in {"catalog", "prepare", "next_model_call", "after_agent"}:
             raise UnknownEndpointError(called)
         served.append((called, run.thread_id))
         return {}
@@ -700,8 +752,8 @@ async def test_a_call_nests_under_the_runtime_span_that_made_it(
     scope: Scope = {
         "type": "http",
         "method": "POST",
-        "path": "/agent-api/before_model",
-        "path_params": {"endpoint": "before_model"},
+        "path": "/agent-api/next_model_call",
+        "path_params": {"endpoint": "next_model_call"},
         "headers": [
             (b"authorization", f"Bearer {token}".encode()),
             (b"langsmith-trace", headers["langsmith-trace"].encode()),
@@ -725,7 +777,7 @@ async def test_a_call_nests_under_the_runtime_span_that_made_it(
         for run in client.create_run.call_args_list
         if run.kwargs["parent_run_id"] is None or run.kwargs["parent_run_id"] == caller.id
     ]
-    assert hook["name"] == "before_model"
+    assert hook["name"] == "next_model_call"
     assert hook["parent_run_id"] == caller.id
     assert hook["trace_id"] == caller.trace_id
     assert hook["session_name"] == "turns"
@@ -746,7 +798,7 @@ async def test_a_worker_grant_reads_its_coordinators_catalog_and_adopts_nothing_
         [("catalog", "coordinator")],
     )
     assert await _call_status(monkeypatch, grant, "adopt") == (200, [("adopt", "coordinator")])
-    for endpoint in ("prepare", "before_model", "operation", "after_agent", "launch_worker"):
+    for endpoint in ("prepare", "next_model_call", "operation", "after_agent", "launch_worker"):
         assert await _call_status(monkeypatch, grant, endpoint) == (403, [])
     # A run token never adopts: only a launched worker's grant does.
     status, _ = await _call_status(monkeypatch, sign_runtime_token(coordinator), "adopt")

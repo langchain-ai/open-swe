@@ -12,7 +12,7 @@ The model loop, its checkpoints and every tool call run here. The backend plans 
 - **Incident evidence:** in an incident run, each tool result is recorded as evidence the report can cite (`record_evidence`), and carries the id it was recorded under.
 - **Phases:** `BackendRunMiddleware` hands each phase of the loop to the graph's own middleware on the backend:
   - `prepare`: before the run (preparation, transcript turn, reply bookkeeping);
-  - `before_model`: follow-up queue, event matches, proxy refresh, task coordination, model routing, a requested conversation offload, plus the system prompt and model for the call;
+  - `next_model_call`, before each model call: what goes into it. That is the messages the thread is owed (follow-ups queued while it ran, events it watches, task messages), the model its route picks, the system prompt and the tools kept from the call. Or the run ends instead: a requested conversation offload, a scout with nothing to plan. `github_access` refreshes the sandbox's GitHub token alongside it, and `AwaitClientCallsMiddleware` ends the run first while a client tool's call waits for the client;
   - `model_result` (`ReportRepliesMiddleware`): the transcript and usage see each response;
   - `after_model`: reply nudges, which can send the loop back to the model;
   - `after_agent`: usage, transcript, step-limit notice, review-check settle.

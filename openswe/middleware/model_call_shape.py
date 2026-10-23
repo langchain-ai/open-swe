@@ -1,13 +1,20 @@
-"""What a graph's middleware adds to each model call its MDA run makes.
+"""What a graph's middleware has to do with each model call its MDA run makes.
 
-MDA makes the call; the backend says what goes in it. Middleware that adds a
-section to the system prompt, or keeps a tool from the call, says so through
-``ashape_model_call``, from the run's state. The run's session folds what each
-says, in the graph's middleware order (``openswe.agent_api.graph``).
+MDA makes the call; the backend says what goes in it (``next_model_call``). Each
+piece of middleware says which of these it does, from the run's state, and the
+run's session asks each in the graph's middleware order (``openswe.agent_api.graph``):
+
+- ``EndsLoop``: end the run instead of making the call
+- ``DeliversOwedMessages``: messages the thread is owed first, such as follow-ups
+  queued while it ran
+- ``PicksModelRoute``: which of the graph's models the call goes to
+- ``ShapesModelCalls``: a section of the system prompt, or tools kept from the call
+
+and, beside the call, ``RefreshesGitHubAccess``: keep the sandbox's GitHub access fresh.
 """
 
 from collections.abc import Iterable, Mapping
-from dataclasses import dataclass, replace
+from dataclasses import dataclass, field, replace
 from typing import Protocol, Self, runtime_checkable
 
 from langgraph.runtime import Runtime
@@ -41,3 +48,40 @@ class ShapesModelCalls(Protocol):
     async def ashape_model_call(
         self, call: CallShape, state: Mapping[str, object], runtime: Runtime
     ) -> CallShape: ...
+
+
+@dataclass(frozen=True)
+class LoopEnd:
+    """The run ends instead of the next model call, with what it last writes to state."""
+
+    update: Mapping[str, object] = field(default_factory=dict)
+
+
+@runtime_checkable
+class EndsLoop(Protocol):
+    async def aend_instead(
+        self, state: Mapping[str, object], runtime: Runtime
+    ) -> LoopEnd | None: ...
+
+
+@runtime_checkable
+class DeliversOwedMessages(Protocol):
+    """Returns the state update that delivers them: ``messages``, and any state they move."""
+
+    async def adeliver_owed(
+        self, state: Mapping[str, object], runtime: Runtime
+    ) -> Mapping[str, object] | None: ...
+
+
+@runtime_checkable
+class PicksModelRoute(Protocol):
+    """Returns the state update that names the route."""
+
+    async def apick_route(
+        self, state: Mapping[str, object], runtime: Runtime
+    ) -> Mapping[str, object]: ...
+
+
+@runtime_checkable
+class RefreshesGitHubAccess(Protocol):
+    async def arefresh_github_access(self) -> None: ...

@@ -500,7 +500,7 @@ async def test_repaired_task_thread_checkpoints_owed_messages_once(
     middleware = task_coordination.TaskCoordinationMiddleware(thread_id, True, context)
     monkeypatch.setattr(task_coordination, "maybe_refresh_proxy_token", AsyncMock())
 
-    delivered = await middleware.abefore_model({"messages": []}, Runtime())
+    delivered = await middleware.adeliver_owed({"messages": []}, Runtime())
     assert delivered is not None
     assert delivered["messages"][-1]["id"] == f"event-match:{message.id}"
     assert "Check logout too" in delivered["messages"][-1]["content"]
@@ -509,7 +509,7 @@ async def test_repaired_task_thread_checkpoints_owed_messages_once(
         content = entry["content"]
         assert isinstance(content, str)
         checkpoint["messages"].append(HumanMessage(content=content, id=entry.get("id")))
-    assert await middleware.abefore_model(checkpoint, Runtime()) is None
+    assert await middleware.adeliver_owed(checkpoint, Runtime()) is None
     async with postgres.session() as session:
         saved = await session.get_one(TaskMessage, message.id)
         assert saved.delivered_at is not None
@@ -542,7 +542,7 @@ async def test_task_context_is_checkpointed_once_without_changing_request_prefix
             )
         )
 
-    assert await middleware.abefore_model(state, Runtime()) is None
+    assert await middleware.adeliver_owed(state, Runtime()) is None
     await model_call()
     state["messages"] = add_messages(
         state["messages"],
@@ -554,7 +554,7 @@ async def test_task_context_is_checkpointed_once_without_changing_request_prefix
         ],
     )
     lookup.return_value = context
-    update = await middleware.abefore_model(state, Runtime())
+    update = await middleware.adeliver_owed(state, Runtime())
     assert update is not None
     assert len(update["messages"]) == 1
     state["messages"] = add_messages(state["messages"], update["messages"])
@@ -571,9 +571,9 @@ async def test_task_context_is_checkpointed_once_without_changing_request_prefix
             ToolMessage(content="Done", tool_call_id="quiet"),
         ],
     )
-    assert await middleware.abefore_model(state, Runtime()) is None
+    assert await middleware.adeliver_owed(state, Runtime()) is None
     middleware = task_coordination.TaskCoordinationMiddleware(_COORDINATOR, enabled, None)
-    assert await middleware.abefore_model(state, Runtime()) is None
+    assert await middleware.adeliver_owed(state, Runtime()) is None
     await model_call()
     # The task's context arrives as a message, so the system prompt stays the same.
     assert len({call.system_prompt for call in received}) == 1
@@ -594,7 +594,7 @@ async def test_task_context_returns_after_summarization_without_replacing_histor
     monkeypatch.setattr(postgres, "configured", lambda: False)
     state: SummarizationState = {"messages": [HumanMessage(content="Repair login")]}
     middleware = task_coordination.TaskCoordinationMiddleware(_COORDINATOR, False, context)
-    initial = await middleware.abefore_model(state, Runtime())
+    initial = await middleware.adeliver_owed(state, Runtime())
     assert initial is not None
     state["messages"] = add_messages(state["messages"], initial["messages"])
     original_context = state["messages"][-1]
@@ -616,7 +616,7 @@ async def test_task_context_returns_after_summarization_without_replacing_histor
         before = list(state["messages"])
         visible_before = _DeepAgentsSummarizationMiddleware._apply_event_to_messages(before, event)
         assert original_context not in visible_before
-        update = await middleware.abefore_model(state, Runtime())
+        update = await middleware.adeliver_owed(state, Runtime())
         assert update is not None
         state["messages"] = add_messages(before, update["messages"])
         assert state["messages"][:-1] == before
@@ -627,7 +627,7 @@ async def test_task_context_returns_after_summarization_without_replacing_histor
         assert visible[-1].content == original_context.content
         assert visible[-1].id != original_context.id
         middleware = task_coordination.TaskCoordinationMiddleware(_COORDINATOR, False, context)
-        assert await middleware.abefore_model(state, Runtime()) is None
+        assert await middleware.adeliver_owed(state, Runtime()) is None
 
 
 async def test_workspace_deletion_cascades_through_tasks_and_messages(registry_db: None) -> None:

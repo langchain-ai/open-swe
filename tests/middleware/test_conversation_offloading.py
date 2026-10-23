@@ -1,3 +1,6 @@
+from typing import Any, cast
+from unittest.mock import MagicMock
+
 import pytest
 from deepagents.backends import FilesystemBackend
 from deepagents.graph import _apply_custom_middleware
@@ -6,62 +9,61 @@ from langchain.agents import create_agent
 from langchain.agents.middleware.types import ModelRequest, ModelResponse
 from langchain_core.language_models.fake_chat_models import FakeListChatModel
 from langchain_core.messages import AIMessage, HumanMessage
+from langchain_core.runnables import RunnableConfig
 from langgraph.checkpoint.memory import InMemorySaver
 
 from openswe.middleware.conversation_offloading import ConversationOffloadingMiddleware
-from openswe.middleware.prepare_run import BasePrepareRunMiddleware
 
 
-async def test_manual_offload_preserves_history_and_hides_summary_stream(tmp_path):
+async def test_a_requested_offload_ends_the_run_with_the_summary_in_its_state(tmp_path):
+    from openswe.agent_api.runs import in_graph_context
+
     model = FakeListChatModel(responses=["A private summary of the old conversation."])
     middleware = ConversationOffloadingMiddleware(
         model, FilesystemBackend(root_dir=str(tmp_path), virtual_mode=True), manual=True
     )
     middleware._lc_helper.keep = ("messages", 2)
-    graph = create_agent(model=model, middleware=[middleware], checkpointer=InMemorySaver())
     messages = [
         HumanMessage(content="Remember the deployment decision.", id="human-1"),
         AIMessage(content="Use the staging environment.", id="ai-1"),
         HumanMessage(content="What next?", id="human-2"),
         AIMessage(content="Run the smoke tests.", id="ai-2"),
     ]
-    config = {"configurable": {"thread_id": "offloading-test"}}
-    chunks = [
-        chunk
-        async for chunk in graph.astream(
-            {"messages": messages}, config, stream_mode=["messages", "custom"]
-        )
+    config: RunnableConfig = {"configurable": {"thread_id": "offloading-test"}}
+    statuses: list[object] = []
+
+    end = await in_graph_context(
+        config,
+        lambda runtime: middleware.aend_instead({"messages": messages}, runtime),
+        events=statuses,
+    )
+
+    assert end is not None
+    assert [event["status"] for event in cast(list[dict[str, str]], statuses)] == [
+        "started",
+        "completed",
     ]
-    assert not [data for mode, data in chunks if mode == "messages"]
-    statuses = [data for mode, data in chunks if mode == "custom"]
-    assert [event["status"] for event in statuses] == ["started", "completed"]
-    assert statuses[-1]["trigger"] == "manual"
-    state = await graph.aget_state(config)
-    assert state.values["messages"] == messages
-    event = state.values["_summarization_event"]
+    assert cast(list[dict[str, str]], statuses)[-1]["trigger"] == "manual"
+    # The history stays; the summary rides in state for the runtime's summarization.
+    assert "messages" not in end.update
+    event = cast(dict[str, Any], end.update["_summarization_event"])
     assert event["cutoff_index"] == 2
     assert "private summary" in event["summary_message"].content
     assert "deployment decision" in (tmp_path / event["file_path"].lstrip("/")).read_text()
-    assert state.values["conversation_offloading"]["status"] == "completed"
-
-    chunks = [chunk async for chunk in graph.astream({}, config, stream_mode="custom")]
-    assert chunks[-1]["status"] == "skipped"
-    assert (await graph.aget_state(config)).values["_summarization_event"] == event
-
-    normal = ConversationOffloadingMiddleware(
+    again: list[object] = []
+    ended_again = await in_graph_context(
+        config,
+        lambda runtime: middleware.aend_instead(
+            {"messages": messages, "_summarization_event": event}, runtime
+        ),
+        events=again,
+    )
+    assert ended_again is not None
+    assert cast(list[dict[str, str]], again)[-1]["status"] == "skipped"
+    automatic = ConversationOffloadingMiddleware(
         model, FilesystemBackend(root_dir=str(tmp_path), virtual_mode=True)
     )
-    graph = create_agent(model=model, middleware=[normal], checkpointer=graph.checkpointer)
-    chunks = [
-        chunk
-        async for chunk in graph.astream(
-            {"messages": [HumanMessage(content="Continue.")]},
-            config,
-            stream_mode=["messages", "custom"],
-        )
-    ]
-    assert any(mode == "messages" for mode, _ in chunks)
-    assert not any(mode == "custom" for mode, _ in chunks)
+    assert await automatic.aend_instead({"messages": messages}, MagicMock()) is None
 
 
 def test_name_replaces_default_summarization(tmp_path):
@@ -127,32 +129,3 @@ async def test_automatic_completion_precedes_handler_and_suppresses_tokens(
     assert (await graph.aget_state(config)).values["conversation_offloading"][
         "status"
     ] == "completed"
-
-
-async def test_manual_before_model_runs_after_prepare(tmp_path, monkeypatch):
-    prepared = []
-
-    class Prepare(BasePrepareRunMiddleware):
-        async def _prepare(self, state, runtime):
-            prepared.append(True)
-            return {"work_dir": str(tmp_path)}
-
-    model = FakeListChatModel(responses=["summary"])
-    middleware = ConversationOffloadingMiddleware(
-        model, FilesystemBackend(root_dir=str(tmp_path), virtual_mode=True), manual=True
-    )
-    original_status = middleware._status
-
-    def status(value, **details):
-        assert prepared == [True]
-        return original_status(value, **details)
-
-    monkeypatch.setattr(middleware, "_status", status)
-    graph = create_agent(
-        model=model, middleware=[middleware, Prepare()], checkpointer=InMemorySaver()
-    )
-    config = {"configurable": {"thread_id": "manual-prepare"}}
-    await graph.ainvoke({"messages": [HumanMessage(content="hello")]}, config)
-    state = (await graph.aget_state(config)).values
-    assert state["run_prepared"] is True
-    assert state["conversation_offloading"]["status"] == "skipped"

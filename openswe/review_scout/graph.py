@@ -17,7 +17,6 @@ from deepagents.middleware.subagents import GENERAL_PURPOSE_SUBAGENT
 from langchain.agents.middleware import ModelCallLimitMiddleware, ModelRetryMiddleware
 from langchain.agents.middleware.types import (
     AgentMiddleware,
-    hook_config,
 )
 from langchain_anthropic.middleware import AnthropicPromptCachingMiddleware
 from langchain_core.language_models.chat_models import BaseChatModel
@@ -36,7 +35,7 @@ from openswe.middleware import (
     ModelErrorMiddleware,
     RepairOrphanedToolCallsMiddleware,
 )
-from openswe.middleware.model_call_shape import CallShape
+from openswe.middleware.model_call_shape import CallShape, LoopEnd
 from openswe.middleware.prepare_run import PrepareRunState
 from openswe.middleware.trace import OpenSWEMiddleware
 from openswe.prompts import apply_tool_descriptions, prompt
@@ -187,13 +186,13 @@ class PrepareReviewScoutRunMiddleware(BasePrepareRunMiddleware):
             "has_human_input": history is not None,
         }
 
-    @hook_config(can_jump_to=["end"])
-    async def abefore_model(
+    async def aend_instead(
         self,
-        state: ReviewScoutState,
+        state: Mapping[str, object],
         runtime: Runtime,  # noqa: ARG002
-    ) -> dict[str, Any] | None:
-        return {"jump_to": "end"} if state.get("scout_nothing_to_plan") else None
+    ) -> LoopEnd | None:
+        """Nothing in the pull request needs a walkthrough."""
+        return LoopEnd() if state.get("scout_nothing_to_plan") else None
 
     async def ashape_model_call(
         self, call: CallShape, state: Mapping[str, object], runtime: Runtime

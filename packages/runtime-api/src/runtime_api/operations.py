@@ -4,11 +4,15 @@ An operation takes its arguments and returns its result. The tool call around it
 with its result message, errors and transcript, is the runtime's.
 """
 
-from typing import Literal
+from typing import Final, Literal
 
 from pydantic import BaseModel, JsonValue
 
 from runtime_api.endpoint import Endpoint
+
+# In an operation result's artifact: the call is a client's to answer, in a later
+# run, so the run ends until then.
+CLIENT_CALL_KEY: Final = "open_swe_client_call"
 
 
 class RunRequest(BaseModel):

@@ -1,6 +1,6 @@
 import logging
 from collections.abc import Awaitable, Callable, Mapping, Sequence
-from typing import Annotated, Literal, NotRequired
+from typing import Annotated, Literal, NotRequired, cast
 
 from langchain.agents.middleware.types import (
     AgentState,
@@ -144,13 +144,13 @@ class ModelSelectionMiddleware(OpenSWEMiddleware[ModelSelectionState]):
         task = _latest_human_task(messages)[-8_000:]
         return await _select_jev_route(task)
 
-    async def abefore_model(
+    async def apick_route(
         self,
-        state: ModelSelectionState,
+        state: Mapping[str, object],
         runtime: Runtime,
     ) -> dict[str, SelectedRoute]:
         del runtime
-        route = await self.select_route(state)
+        route = await self.select_route(cast(ModelSelectionState, state))
         if self._routing_mode == "auto" or state.get("requested_model"):
             await _emit_routed_model(self._models, self._route_model_ids, route)
         return {"model_route": route}

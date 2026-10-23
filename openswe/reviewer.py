@@ -48,8 +48,8 @@ from openswe.middleware import (
     ExcludeToolsMiddleware,
     ModelErrorMiddleware,
     RepairOrphanedToolCallsMiddleware,
-    check_message_queue_before_model,
-    refresh_github_proxy_before_model,
+    github_access_refresh,
+    queued_follow_ups,
     settle_review_check_on_exit,
 )
 from openswe.middleware.prepare_run import PrepareRunState
@@ -1058,8 +1058,8 @@ async def plan_reviewer(config: RunnableConfig, surface: ToolSurface) -> None:
             AnthropicPromptCachingMiddleware(ttl="1h", unsupported_model_behavior="ignore"),
             ModelCallLimitMiddleware(run_limit=MODEL_CALL_RECURSION_LIMIT, exit_behavior="end"),
             ExcludeToolsMiddleware(excluded=SHELL_SEARCH_EXCLUDED_TOOLS),
-            refresh_github_proxy_before_model,
-            check_message_queue_before_model,
+            github_access_refresh,
+            queued_follow_ups,
             RepairOrphanedToolCallsMiddleware(),
             ModelRetryMiddleware(retry_on=(TimeoutError,)),
             ModelErrorMiddleware(),

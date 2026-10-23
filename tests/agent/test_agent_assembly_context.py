@@ -767,7 +767,7 @@ async def test_queued_images_reach_vision_fallback_for_text_only_main_model(
     from openswe.message_queue import QueuedMessage
     from openswe.middleware.check_message_queue import (
         LinearNotifyState,
-        check_message_queue_before_model,
+        queued_follow_ups,
     )
 
     config = _base_config()
@@ -782,7 +782,7 @@ async def test_queued_images_reach_vision_fallback_for_text_only_main_model(
         patch("openswe.middleware.check_message_queue.get_config", return_value=config),
         patch("openswe.middleware.check_message_queue.fetch_image_block", return_value=image),
     ):
-        update = await check_message_queue_before_model.abefore_model(
+        update = await queued_follow_ups.adeliver_owed(
             cast(LinearNotifyState, {"messages": []}), MagicMock()
         )
     assert update is not None

@@ -1,9 +1,9 @@
-"""The calls the runtime's model loop makes on the backend, phase by phase.
+"""The calls the runtime's model loop makes on the backend.
 
-The backend runs the graph's own middleware for each phase: preparation before
-the run, the follow-up queue, routing and the system prompt before each model
-call, the transcript and usage after it, reply nudges after the model, and the
-end-of-run work. Graph state those hooks write that the runtime does not know
+Preparation before the run; before each model call, what goes into it (the
+messages the thread is owed, the model, the system prompt and the tools kept from
+it) and the sandbox's GitHub access; the transcript and usage after it, reply
+nudges after the model, and the end-of-run work. Graph state those hooks write that the runtime does not know
 comes back in ``update``, and goes back with every later call in ``state``.
 """
 
@@ -53,9 +53,18 @@ class ModelCall(BaseModel):
     use_gateway: bool = False
 
 
-class BeforeModel(PhaseResult):
-    # None when a hook sent the loop elsewhere.
+class NextModelCall(BaseModel):
+    """What goes into the next model call, or that the run ends instead of making it."""
+
+    # Messages the thread is owed first: follow-ups queued while it ran, events it
+    # watches for, and task messages.
+    messages: list[dict[str, JsonValue]] = []
+    update: dict[str, JsonValue] = {}
+    # None when the run ends instead.
     call: ModelCall | None = None
+    end: bool = False
+    # Custom stream events the backend emitted, for the runtime to emit again.
+    events: list[JsonValue] = []
 
 
 class AfterAgent(PhaseResult):
@@ -110,8 +119,12 @@ class Done(BaseModel):
 # Preparation the runtime makes again on a restarted run anyway.
 PREPARE = Endpoint("prepare", Prepare, PhaseResult, delivery="idempotent")
 # Builds the next call, so it is sent again to a backend that never took it.
-BEFORE_MODEL = Endpoint(
-    "before_model", RunCall, BeforeModel, seconds=LOOP_CALL_SECONDS, delivery="unprocessed"
+NEXT_MODEL_CALL = Endpoint(
+    "next_model_call", RunCall, NextModelCall, seconds=LOOP_CALL_SECONDS, delivery="unprocessed"
+)
+# The sandbox's GitHub access, made fresh again before its token runs out mid-run.
+GITHUB_ACCESS = Endpoint(
+    "github_access", RunRequest, Done, seconds=LOOP_CALL_SECONDS, delivery="idempotent"
 )
 MODEL_RESULT = Endpoint("model_result", ModelResult, ObservedResponse, seconds=LOOP_CALL_SECONDS)
 AFTER_MODEL = Endpoint("after_model", RunCall, PhaseResult, seconds=LOOP_CALL_SECONDS)

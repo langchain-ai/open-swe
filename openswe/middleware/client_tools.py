@@ -6,12 +6,9 @@ message id, replacing it in place.
 """
 
 from collections.abc import Sequence
-from typing import Any
 
-from langchain.agents.middleware.types import AgentState, hook_config
 from langchain_core.messages import ToolMessage
 from langchain_core.tools import BaseTool, StructuredTool
-from langgraph.runtime import Runtime
 
 from openswe.middleware.trace import OpenSWEMiddleware
 from openswe.openai_responses.client_tools import PENDING_ARTIFACT_KEY, ClientToolSpec
@@ -46,12 +43,3 @@ class ClientToolsMiddleware(OpenSWEMiddleware):
             id=ClientToolSpec.result_message_id(call_id),
             artifact={PENDING_ARTIFACT_KEY: True},
         )
-
-    @hook_config(can_jump_to=["end"])
-    async def abefore_model(self, state: AgentState, runtime: Runtime) -> dict[str, Any] | None:
-        for message in reversed(state["messages"]):
-            if not isinstance(message, ToolMessage):
-                return None
-            if isinstance(message.artifact, dict) and message.artifact.get(PENDING_ARTIFACT_KEY):
-                return {"jump_to": "end"}
-        return None

@@ -94,11 +94,11 @@ from openswe.middleware import (
     PullRequestCreationGuardMiddleware,
     RequireUserReplyMiddleware,
     WorkflowPushGuardMiddleware,
-    check_message_queue_before_model,
-    deliver_event_matches_before_model,
+    github_access_refresh,
     notify_step_limit_reached,
+    owed_event_matches,
+    queued_follow_ups,
     record_run_usage,
-    refresh_github_proxy_before_model,
 )
 from openswe.middleware.client_tools import ClientToolsMiddleware
 from openswe.middleware.conversation_offloading import ConversationOffloadingMiddleware
@@ -1904,16 +1904,8 @@ async def plan_agent(config: RunnableConfig, surface: ToolSurface) -> None:
             ),
             ExcludeToolsMiddleware(excluded=excluded_tools),
             *([task_coordination] if task_coordination else []),
-            *(
-                []
-                if task_coordination and task_coordination.is_worker
-                else [refresh_github_proxy_before_model]
-            ),
-            *(
-                []
-                if stop_summary_mode
-                else [check_message_queue_before_model, deliver_event_matches_before_model]
-            ),
+            *([] if task_coordination and task_coordination.is_worker else [github_access_refresh]),
+            *([] if stop_summary_mode else [queued_follow_ups, owed_event_matches]),
             RequireUserReplyMiddleware(
                 _registered_tool_name(slack_reply),
                 _registered_tool_name(slack_no_reply_needed),
