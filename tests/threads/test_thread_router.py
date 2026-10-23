@@ -556,6 +556,24 @@ async def test_a_run_started_by_command_on_mda_settles_through_the_completion_we
     assert sent["webhook"] == "https://swe.test/webhooks/run-complete"
 
 
+@pytest.mark.parametrize(
+    ("params", "resumable"),
+    [({}, True), ({"stream_resumable": False}, False)],
+    ids=["streaming-client", "transcript-reader"],
+)
+async def test_a_run_started_by_command_keeps_its_stream_unless_the_client_opts_out(
+    monkeypatch: pytest.MonkeyPatch, secret: None, params: dict[str, JsonValue], resumable: bool
+) -> None:
+    harness = _Harness(monkeypatch)
+    await harness.request("POST", "/threads", {"thread_id": THREAD})
+    command = {"id": 1, "method": "run.start", "params": {"assistant_id": "agent", **params}}
+
+    await harness.request("POST", f"/threads/{THREAD}/commands", command)
+
+    [(_, sent)] = harness.forwarded
+    assert sent["stream_resumable"] is resumable
+
+
 async def test_a_copy_of_an_mda_thread_is_indexed_on_mda(monkeypatch: pytest.MonkeyPatch) -> None:
     harness = _Harness(monkeypatch)
     await index.create(THREAD, runtime="mda", metadata={"title": "source"})
