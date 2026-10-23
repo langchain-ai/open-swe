@@ -1,6 +1,7 @@
 import json
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
+from types import SimpleNamespace
 from typing import Literal
 from unittest.mock import AsyncMock
 
@@ -9,6 +10,58 @@ import pytest
 from openswe.slack import run_feedback
 from openswe.slack.payloads import SlackChannelContext, SlackInteraction
 from openswe.slack.records import SlackMessage
+
+
+async def test_only_earlier_own_feedback_is_removed_across_pages(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    content = {"type": "markdown", "text": "Earlier answer"}
+    other_control = {"type": "button", "action_id": "keep_me"}
+    rating = run_feedback.feedback_block("run-1")
+    replies = AsyncMock(
+        side_effect=[
+            {
+                "messages": [
+                    {
+                        "user": "BOT",
+                        "ts": "1.1",
+                        "text": "Earlier answer",
+                        "blocks": [content, rating],
+                    },
+                    {"user": "OTHER", "ts": "1.2", "blocks": [rating]},
+                ],
+                "response_metadata": {"next_cursor": "page-2"},
+            },
+            {
+                "messages": [
+                    {
+                        "user": "BOT",
+                        "ts": "1.3",
+                        "text": "Mixed controls",
+                        "blocks": [{**rating, "elements": [*rating["elements"], other_control]}],
+                    },
+                    {"user": "BOT", "ts": "2.0", "blocks": [rating]},
+                    {"user": "BOT", "ts": "3.0", "blocks": [rating]},
+                ],
+            },
+        ]
+    )
+    update = AsyncMock()
+
+    @asynccontextmanager
+    async def bot() -> AsyncIterator[SimpleNamespace]:
+        yield SimpleNamespace(conversations_replies=replies, chat_update=update)
+
+    monkeypatch.setattr(run_feedback.SlackClient, "bot", bot)
+    monkeypatch.setattr(run_feedback, "slack_identity", AsyncMock(return_value={"user_id": "BOT"}))
+    await run_feedback.remove_earlier_feedback("C1", "1.0", "2.0")
+    assert [call.kwargs["ts"] for call in update.await_args_list] == ["1.1", "1.3"]
+    assert update.await_args_list[0].kwargs["blocks"] == [content]
+    assert update.await_args_list[0].kwargs["text"] == "Earlier answer"
+    assert update.await_args_list[1].kwargs["blocks"] == [
+        {"type": "context_actions", "elements": [other_control]}
+    ]
+    assert replies.await_args_list[1].kwargs["cursor"] == "page-2"
 
 
 def _mapping(run_id: str, triggering_user_id: str | None) -> SlackMessage:

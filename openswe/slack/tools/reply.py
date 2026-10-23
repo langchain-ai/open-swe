@@ -42,7 +42,7 @@ from openswe.slack.orphan import (
     slack_thread_detached,
 )
 from openswe.slack.records import SlackRun, SlackThread, store_slack_message_run_mapping
-from openswe.slack.run_feedback import feedback_block
+from openswe.slack.run_feedback import feedback_block, remove_earlier_feedback
 from openswe.slack.thinking import restore_slack_thinking_status, settle_slack_thread_status
 from openswe.slack.tools.read_thread_messages import fetch_and_format_thread
 from openswe.utils.http import DEFAULT_HTTP_TIMEOUT
@@ -210,6 +210,8 @@ async def send_slack_reply(
                 "message_chars": len(message),
                 "hint": _slack_reply_failure_hint(exc.code),
             }
+        if message_ts:
+            await remove_earlier_feedback(str(channel_id), post_thread_ts, message_ts)
         if message_ts and cfg.source == "slack" and not is_code_channel_session(str(thread_ts)):
             try:
                 await _handle_kickoff(

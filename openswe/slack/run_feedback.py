@@ -8,6 +8,7 @@ from openswe.analytics.feedback import record_feedback_submission
 from openswe.slack.blocks import ContextActionsBlock, plain_text
 from openswe.slack.channels import SlackChannel
 from openswe.slack.client import slack_thread_mutation_lock
+from openswe.slack.http import SLACK_REQUEST_ERRORS, SlackClient, slack_identity
 from openswe.slack.payloads import (
     SlackBlockAction,
     SlackInteraction,
@@ -15,6 +16,7 @@ from openswe.slack.payloads import (
     parse_json_object,
 )
 from openswe.slack.records import lookup_slack_run_mapping
+from openswe.utils.json_types import JsonObject
 from openswe.utils.langsmith import create_langsmith_feedback
 from openswe.utils.thread_ops import langgraph_client
 
@@ -48,6 +50,64 @@ def feedback_block(run_id: str) -> ContextActionsBlock:
             }
         ],
     }
+
+
+def _without_feedback(blocks: list[JsonObject]) -> list[JsonObject]:
+    remaining: list[JsonObject] = []
+    for block in blocks:
+        elements = block.get("elements")
+        if block.get("type") != "context_actions" or not isinstance(elements, list):
+            remaining.append(block)
+            continue
+        kept = [
+            element
+            for element in elements
+            if not isinstance(element, dict) or element.get("action_id") != FEEDBACK_ACTION
+        ]
+        if kept == elements:
+            remaining.append(block)
+        elif kept:
+            remaining.append({**block, "elements": kept})
+    return remaining
+
+
+async def remove_earlier_feedback(channel_id: str, thread_ts: str, message_ts: str) -> None:
+    """Remove our rating controls from replies preceding the newly posted message."""
+    try:
+        async with SlackClient.bot() as slack:
+            identity = await slack_identity(slack)
+            bot_user_id = identity.get("user_id")
+            if not bot_user_id:
+                return
+            cursor = None
+            while True:
+                page = await slack.conversations_replies(
+                    channel=channel_id, ts=thread_ts, latest=message_ts, limit=200, cursor=cursor
+                )
+                for message in page.get("messages", []):
+                    if message.get("user") != bot_user_id or message.get("ts", "") >= message_ts:
+                        continue
+                    blocks = message.get("blocks", [])
+                    remaining = _without_feedback(blocks)
+                    if remaining != blocks:
+                        try:
+                            await slack.chat_update(
+                                channel=channel_id,
+                                ts=message["ts"],
+                                text=message.get("text", ""),
+                                blocks=remaining,
+                                unfurl_links=False,
+                                unfurl_media=False,
+                            )
+                        except SLACK_REQUEST_ERRORS:
+                            logger.warning(
+                                "Could not remove earlier Slack reply feedback", exc_info=True
+                            )
+                cursor = page.get("response_metadata", {}).get("next_cursor")
+                if not cursor:
+                    break
+    except SLACK_REQUEST_ERRORS:
+        logger.warning("Could not fetch earlier Slack reply feedback", exc_info=True)
 
 
 async def process_feedback(interaction: SlackInteraction, action: SlackBlockAction) -> None:
