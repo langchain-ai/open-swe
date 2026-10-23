@@ -769,19 +769,6 @@ class RepoClient:
                 raise ValueError("Unexpected artifact contents")
             return TypeAdapter(dict[str, JsonValue]).validate_json(archive.read(files[0]))
 
-    async def dispatch_validation(self, workflow: str, contract: str) -> None:
-        """Exactly one HTTP attempt; recover ambiguous responses by discovering the run."""
-        if self.github.login is not None:
-            raise ValueError("Validation dispatch requires a controller identity")
-        response = await self.github.http.post(
-            f"{GITHUB_API_BASE}/repos/{self.full_name}/actions/workflows/"
-            f"{quote(workflow, safe='')}/dispatches",
-            json={"ref": "main", "inputs": {"contract": contract}},
-            follow_redirects=False,
-        )
-        if response.status_code != 204:
-            raise GitHubError(response)
-
     async def validation_runs(self, workflow: str, since: datetime) -> tuple[ValidationRun, ...]:
         runs: list[ValidationRun] = []
         for page in range(1, 11):

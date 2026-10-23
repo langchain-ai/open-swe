@@ -23,6 +23,7 @@ from openswe.remote_runtime.client import (
     mda_runtime_url,
     remote_run_context,
 )
+from openswe.source_context import SourceContext
 from openswe.threads.index import INDEXED_FIELDS, IndexedThread, Runtime, ThreadStatus
 
 logger = logging.getLogger(__name__)
@@ -128,13 +129,26 @@ class MdaRuntime:
         self._mda_threads.add(thread_id)
 
     async def run_payload(
-        self, thread_id: str, payload: dict[str, JsonValue], *, graph_id: str = MDA_GRAPH_ID
+        self,
+        thread_id: str,
+        payload: dict[str, JsonValue],
+        *,
+        thread_metadata: Mapping[str, JsonValue],
+        graph_id: str = MDA_GRAPH_ID,
     ) -> dict[str, JsonValue]:
         """Rewrite a run-create body for the thread's MDA graph: configurable becomes context."""
         raw_metadata = payload.get("metadata")
-        run_metadata = raw_metadata if isinstance(raw_metadata, dict) else {}
+        run_metadata = dict(raw_metadata) if isinstance(raw_metadata, dict) else {}
         config = payload.get("config")
         config = dict(config) if isinstance(config, dict) else {}
+        slack_thread = SourceContext.from_metadata(thread_metadata).slack_thread
+        if slack_thread is not None and (permalink := slack_thread.permalink.strip()):
+            run_metadata["slack_thread_url"] = permalink
+            raw_config_metadata = config.get("metadata")
+            config["metadata"] = {
+                **(raw_config_metadata if isinstance(raw_config_metadata, dict) else {}),
+                "slack_thread_url": permalink,
+            }
         raw_configurable = config.pop("configurable", None)
         configurable = dict(raw_configurable) if isinstance(raw_configurable, dict) else {}
         streaming = configurable.pop(_V3_STREAMING_KEY, None)
@@ -152,7 +166,12 @@ class MdaRuntime:
         if streaming:
             # Context replaces configurable on the server, so the stream marker rides in it.
             context[_V3_STREAMING_KEY] = True
-        rewritten = {**payload, "assistant_id": graph_id, "context": context}
+        rewritten = {
+            **payload,
+            "assistant_id": graph_id,
+            "context": context,
+            "metadata": run_metadata,
+        }
         if not payload.get("langsmith_tracer"):
             # Traced into this deployment's project, beside its in-process runs.
             rewritten["langsmith_tracer"] = {"project_name": get_tracer_project()}
@@ -168,6 +187,7 @@ class MdaRuntime:
         command: Mapping[str, JsonValue],
         params: Mapping[str, JsonValue],
         *,
+        thread_metadata: Mapping[str, JsonValue],
         graph_id: str = MDA_GRAPH_ID,
     ) -> dict[str, JsonValue]:
         """Answer a protocol v2 ``run.start`` by creating the run here with its context.
@@ -201,7 +221,9 @@ class MdaRuntime:
         if dispatch.COMPLETION_WEBHOOK_URL:
             payload["webhook"] = dispatch.COMPLETION_WEBHOOK_URL
         await self.ensure_remote_thread(thread_id)
-        rewritten = await self.run_payload(thread_id, payload, graph_id=graph_id)
+        rewritten = await self.run_payload(
+            thread_id, payload, thread_metadata=thread_metadata, graph_id=graph_id
+        )
         response = await self.http.post(f"/threads/{thread_id}/runs", json=rewritten)
         if response.is_error:
             logger.warning(
