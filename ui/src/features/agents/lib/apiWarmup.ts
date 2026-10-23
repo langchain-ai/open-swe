@@ -27,6 +27,7 @@ function warmApiRequests(
     let includeAutomations = false
     let includeResolved = false
     let owned = false
+    let includeClaudeCode = true
     let repoMode = true
     let sortByCreated = true
     try {
@@ -42,6 +43,7 @@ function warmApiRequests(
             filters.sources.indexOf("schedule") !== -1)
         includeResolved = filters.includeResolved === true
         owned = filters.ownedOnly === true
+        includeClaudeCode = filters.includeClaudeCode !== false
       }
     } catch {
       // An unreadable preference just means the default (false).
@@ -56,6 +58,7 @@ function warmApiRequests(
     search.set("scope", includeAutomations ? "all" : "interactive")
     if (repoMode) search.set("ownerless", "true")
     if (owned) search.set("owned", "true")
+    if (!includeClaudeCode) search.append("exclude_source", "claude_code")
     search.set("sort_by", sortByCreated ? "created_at" : "updated_at")
     targets.push(sidebarPath + "?" + search.toString())
   }

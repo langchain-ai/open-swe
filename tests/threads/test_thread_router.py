@@ -334,6 +334,42 @@ async def test_a_new_thread_runs_on_mda(
     }
 
 
+@pytest.mark.parametrize("command", [False, True], ids=["rest", "command"])
+@pytest.mark.parametrize(
+    "permalink", ["https://langchain.slack.com/archives/C123/p1234567890000000", ""]
+)
+async def test_runs_include_the_current_slack_thread_link(
+    monkeypatch: pytest.MonkeyPatch, secret: None, command: bool, permalink: str
+) -> None:
+    harness = _Harness(monkeypatch)
+    await harness.request("POST", "/threads", {"thread_id": THREAD})
+    await harness.request(
+        "PATCH",
+        f"/threads/{THREAD}",
+        {"metadata": {"source_context": {"slack_thread": {"permalink": permalink}}}},
+    )
+    params: dict[str, JsonValue] = {
+        "assistant_id": "agent",
+        "input": {},
+        "metadata": {"kind": "follow_up"},
+        "config": {"metadata": {"invocation_id": "turn-1"}},
+    }
+    if command:
+        status, _ = await harness.request(
+            "POST",
+            f"/threads/{THREAD}/commands",
+            {"id": 1, "method": "run.start", "params": params},
+        )
+    else:
+        status, _ = await harness.request("POST", f"/threads/{THREAD}/runs", params)
+
+    assert status == 200
+    [(_, sent)] = harness.forwarded
+    expected: dict[str, JsonValue] = {"slack_thread_url": permalink} if permalink else {}
+    assert sent["metadata"] == {"kind": "follow_up", **expected}
+    assert sent["config"] == {"metadata": {"invocation_id": "turn-1", **expected}}
+
+
 async def test_deleting_a_thread_removes_every_copy(monkeypatch: pytest.MonkeyPatch) -> None:
     harness = _Harness(monkeypatch)
     await index.create(THREAD, runtime="mda")

@@ -29,6 +29,7 @@ import type {
   WorkflowApprovalStatus,
   WorkflowPushApprovalsResponse,
 } from "./types"
+import { CLAUDE_CODE_SOURCE } from "./sidebarFilter"
 import { useSidebarPrefsHydrated } from "./sidebarPrefs"
 import type { ChatSort } from "./sidebarPrefs"
 import type { Skill, SkillInput } from "@/lib/api"
@@ -45,6 +46,7 @@ export const agentThreadKeys = {
     includeResolved: boolean
     includeAutomations: boolean
     owned: boolean
+    includeClaudeCode: boolean
   }) => ["agent-threads", "lists", "repos", params] as const,
   sidebarActive: (threadId: string) =>
     ["agent-threads", "lists", "sidebar-active", threadId] as const,
@@ -629,14 +631,23 @@ export function useSeedAgentThreadDetails(
 
 export const SIDEBAR_PAGE_SIZE = 10
 
+/** The sources the sidebar asks the server to leave out. */
+function excludedSources(
+  includeClaudeCode: boolean
+): Pick<ThreadsPageParams, "excludeSources"> {
+  return includeClaudeCode ? {} : { excludeSources: [CLAUDE_CODE_SOURCE] }
+}
+
 function sidebarPageParams({
   includeAutomations,
   includeResolved,
   owned,
+  includeClaudeCode,
 }: {
   includeAutomations: boolean
   includeResolved: boolean
   owned: boolean
+  includeClaudeCode: boolean
 }): Omit<ThreadsPageParams, "offset"> {
   return {
     limit: SIDEBAR_PAGE_SIZE,
@@ -644,6 +655,7 @@ function sidebarPageParams({
     ...(includeResolved ? {} : { resolved: false }),
     scope: includeAutomations ? "all" : "interactive",
     ...(owned ? { owned } : {}),
+    ...excludedSources(includeClaudeCode),
   }
 }
 
@@ -662,18 +674,24 @@ export function useSidebarRepos({
   includeAutomations = false,
   includeResolved = false,
   owned = false,
+  includeClaudeCode = true,
   enabled = true,
 }: {
   includeAutomations?: boolean
   includeResolved?: boolean
   owned?: boolean
+  includeClaudeCode?: boolean
   enabled?: boolean
 }) {
   const params = { includeAutomations, includeResolved, owned }
   const hydrated = useSidebarPrefsHydrated()
   return useQuery({
-    queryKey: agentThreadKeys.repos(params),
-    queryFn: () => agentsApi.listThreadRepos(params),
+    queryKey: agentThreadKeys.repos({ ...params, includeClaudeCode }),
+    queryFn: () =>
+      agentsApi.listThreadRepos({
+        ...params,
+        ...excludedSources(includeClaudeCode),
+      }),
     enabled: enabled && hydrated,
     placeholderData: (previous) => previous,
     refetchOnMount: "always",
@@ -740,16 +758,23 @@ export function sidebarRecentsParams({
   includeAutomations = false,
   includeResolved = false,
   owned = false,
+  includeClaudeCode = true,
   sort = "created",
 }: {
   repoMode: boolean
   includeAutomations?: boolean
   includeResolved?: boolean
   owned?: boolean
+  includeClaudeCode?: boolean
   sort?: ChatSort
 }): Omit<ThreadsPageParams, "offset"> {
   return {
-    ...sidebarPageParams({ includeAutomations, includeResolved, owned }),
+    ...sidebarPageParams({
+      includeAutomations,
+      includeResolved,
+      owned,
+      includeClaudeCode,
+    }),
     ...(repoMode ? { ownerless: true } : {}),
     sortBy: sort === "created" ? "created_at" : "updated_at",
   }
@@ -760,6 +785,7 @@ export function useSidebarRecents({
   includeAutomations = false,
   includeResolved = false,
   owned = false,
+  includeClaudeCode = true,
   sort = "created",
   enabled = true,
 }: {
@@ -767,6 +793,7 @@ export function useSidebarRecents({
   includeAutomations?: boolean
   includeResolved?: boolean
   owned?: boolean
+  includeClaudeCode?: boolean
   sort?: ChatSort
   enabled?: boolean
 }) {
@@ -776,6 +803,7 @@ export function useSidebarRecents({
       includeAutomations,
       includeResolved,
       owned,
+      includeClaudeCode,
       sort,
     }),
     enabled
@@ -787,6 +815,7 @@ export function useSidebarRepoThreads({
   includeAutomations = false,
   includeResolved = false,
   owned = false,
+  includeClaudeCode = true,
   sort = "created",
   enabled = true,
 }: {
@@ -794,12 +823,18 @@ export function useSidebarRepoThreads({
   includeAutomations?: boolean
   includeResolved?: boolean
   owned?: boolean
+  includeClaudeCode?: boolean
   sort?: ChatSort
   enabled?: boolean
 }) {
   return useSidebarThreadPages(
     {
-      ...sidebarPageParams({ includeAutomations, includeResolved, owned }),
+      ...sidebarPageParams({
+        includeAutomations,
+        includeResolved,
+        owned,
+        includeClaudeCode,
+      }),
       ...(repoFullName ? { repo: repoFullName } : {}),
       sortBy: sort === "created" ? "created_at" : "updated_at",
     },

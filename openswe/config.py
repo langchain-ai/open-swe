@@ -270,6 +270,11 @@ ENV.var(
 ENV.var("GITHUB_APP_INSTALLATION_ID", "GitHub App installation used when a run names none.")
 ENV.var("GITHUB_WEBHOOK_SECRET", "HMAC secret for GitHub webhook deliveries.", secret=True)
 ENV.var(
+    "MERGE_QUEUE_DISPATCH_SECRET",
+    "Backend-only signing secret for the queue dispatch gateway; never used by agents.",
+    secret=True,
+)
+ENV.var(
     "GITHUB_OIDC_AUDIENCE",
     "Audience a federated GitHub Actions token must carry; defaults to the dashboard URL.",
 )

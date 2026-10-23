@@ -2,7 +2,8 @@
 
 Dispatch signs a run token into each run's context. The backend reads the thread,
 repository and run configuration from that token, so nothing the model writes can
-point a call elsewhere. Every call is ``POST /remote-runtime/hooks/{hook}``.
+point a call elsewhere. The loop's calls are ``POST /remote-runtime/hooks/{hook}``;
+the tools' are the typed API (``runtime_api``) under ``/remote-runtime/api/``.
 
 A task worker launched as an async subagent starts with a worker grant instead:
 enough to read its coordinator's catalog, then ``adopt`` a run token of its own.
@@ -21,9 +22,8 @@ import httpx2
 from langchain_core.messages import BaseMessage, ToolMessage, messages_to_dict
 from langsmith.run_trees import RunTree
 from pydantic import BaseModel, JsonValue, TypeAdapter, ValidationError
+from runtime_api.catalog import Catalog, ModelSpec
 
-from rt.models import ModelSpec, RunModels
-from rt.sandbox import SandboxSpec
 from rt.tracing import TurnTrace
 
 logger = logging.getLogger(__name__)
@@ -33,11 +33,11 @@ BACKEND_URL_ENV: Final = "OPEN_SWE_BACKEND_URL"
 _FORWARDED_STATE_KEYS: Final = ("run_model_call_count", "thread_model_call_count")
 # Preparation waits on the review scout's walkthrough for up to ten minutes; a tool
 # call can run a long command.
-_LONG_CALL_SECONDS: Final = 1800.0
+LONG_CALL_SECONDS: Final = 1800.0
 _HOOK_SECONDS: Final = 300.0
-# What a tool call takes past its own ``timeout`` before it answers that it ran out:
-# the sandbox's grace for an overrunning command, killing it, and the tool middleware.
-_TOOL_CALL_SLACK_SECONDS: Final = 300.0
+# What a call takes past its own ``timeout`` before it answers that it ran out: the
+# sandbox's grace for an overrunning command, and killing it.
+TOOL_CALL_SLACK_SECONDS: Final = 300.0
 
 Hook = Literal[
     "catalog",
@@ -46,7 +46,6 @@ Hook = Literal[
     "model_result",
     "after_model",
     "after_agent",
-    "call",
     "tool_started",
     "tool_result",
     # The thread's box was replaced: the backend connects to the fresh one.
@@ -72,11 +71,31 @@ _RETRY_SECONDS: Final = (1.0, 2.0, 4.0, 8.0, 15.0, 30.0, 30.0, 30.0, 30.0, 30.0)
 _REPEATABLE_HOOKS: Final[frozenset[Hook]] = frozenset({"catalog", "prepare", "launch_worker"})
 _RESENT_AFTER_503: Final[frozenset[Hook]] = frozenset({*_REPEATABLE_HOOKS, "before_model"})
 _GATEWAY_STATUSES: Final = frozenset({502, 503, 504})
+_json = TypeAdapter(JsonValue)
 _json_object = TypeAdapter(dict[str, JsonValue])
 _json_list = TypeAdapter(list[JsonValue])
 
 # The ``task`` calls whose subagent is running right now; empty for the agent itself.
 _namespace: ContextVar[tuple[str, ...]] = ContextVar("open_swe_namespace", default=())
+
+
+# The tool call the agent's own tool-call chain is reporting right now, if any.
+_reported_call: ContextVar[str | None] = ContextVar("open_swe_reported_call", default=None)
+
+
+@contextmanager
+def reporting(tool_call_id: str) -> Iterator[None]:
+    """Name ``tool_call_id`` as the call being reported while the block runs it."""
+    token = _reported_call.set(tool_call_id)
+    try:
+        yield
+    finally:
+        _reported_call.reset(token)
+
+
+def reported_call() -> str | None:
+    """The call the tool-call chain is reporting, or None outside any."""
+    return _reported_call.get()
 
 
 @contextmanager
@@ -111,41 +130,6 @@ class BackendUnavailableError(BackendCallError):
     """A transport or gateway failure left the call without a usable response."""
 
 
-class ToolSpec(BaseModel):
-    name: str
-    description: str
-    parameters: dict[str, JsonValue]
-
-
-class SubagentSpec(BaseModel):
-    name: str
-    description: str
-    system_prompt: str
-    # None: every tool the parent has.
-    tools: list[str] | None = None
-
-
-class Catalog(BaseModel):
-    """The tools, subagents and models of the graph this run plays."""
-
-    tools: list[ToolSpec] = []
-    subagents: list[SubagentSpec] = []
-    models: RunModels | None = None
-    trace_metadata: dict[str, JsonValue] = {}
-    # Tools the graph keeps from the model, including MDA's own of the same name.
-    excluded: list[str] = []
-    # Tools the model calls from code mode rather than directly.
-    code_only: list[str] = []
-    # Tools the model calls both directly and from code mode.
-    also_from_code: list[str] = []
-    # Tools the model labels each call of, with what the label argument tells it.
-    described: dict[str, str] = {}
-    # The thread's box; None runs every file and shell tool on the backend alone.
-    sandbox: SandboxSpec | None = None
-    # Where the Agent Server reports a launched worker's run ending; None launches none.
-    worker_webhook: str | None = None
-
-
 class AdoptReply(BaseModel):
     run_token: str
 
@@ -163,13 +147,6 @@ class PhaseReply(BaseModel):
     fallback: ModelSpec | None = None
     use_gateway: bool = False
     trace_metadata: dict[str, JsonValue] = {}
-
-
-class ToolReply(BaseModel):
-    message: dict[str, JsonValue]
-    messages: list[dict[str, JsonValue]] = []
-    update: dict[str, JsonValue] = {}
-    events: list[JsonValue] = []
 
 
 def run_body(
@@ -271,18 +248,55 @@ class OpenSweBackend:
         *,
         seconds: float | None = None,
     ) -> dict[str, JsonValue]:
+        if seconds is None:
+            seconds = LONG_CALL_SECONDS if hook == "prepare" else _HOOK_SECONDS
+        reply = await self._post(
+            f"/remote-runtime/hooks/{hook}",
+            hook,
+            body,
+            seconds=seconds,
+            repeatable=hook in _REPEATABLE_HOOKS,
+            resent_after_503=hook in _RESENT_AFTER_503,
+        )
+        return _json_object.validate_python(reply)
+
+    async def post(
+        self, path: str, body: dict[str, JsonValue], *, timeout: float | None = None
+    ) -> JsonValue:
+        """One call of the typed API, as this run: ``runtime_api``'s transport.
+
+        It may have done its work before failing, so it is resent only when it never
+        reached the backend.
+        """
+        return await self._post(
+            path,
+            path.rsplit("/", 1)[-1],
+            body,
+            seconds=timeout if timeout is not None else LONG_CALL_SECONDS,
+            repeatable=False,
+            resent_after_503=False,
+        )
+
+    async def _post(
+        self,
+        path: str,
+        label: str,
+        body: Mapping[str, JsonValue] | None,
+        *,
+        seconds: float,
+        repeatable: bool,
+        resent_after_503: bool,
+    ) -> JsonValue:
         bearer = self._run_token or self._worker_grant
         if bearer is None:
             raise BackendCallError(
                 "This run carries no Open SWE run token; start it through Open SWE"
             )
-        if seconds is None:
-            seconds = _LONG_CALL_SECONDS if hook == "prepare" else _HOOK_SECONDS
         waits = iter(_RETRY_SECONDS)
         while True:
             try:
                 response = await _CONNECTIONS.client().post(
-                    f"{self._base}/remote-runtime/hooks/{hook}",
+                    f"{self._base}{path}",
                     headers={"Authorization": f"Bearer {bearer}"},
                     json=dict(body or {}),
                     timeout=seconds,
@@ -290,7 +304,7 @@ class OpenSweBackend:
                 response.raise_for_status()
                 break
             except httpx2.TimeoutException as exc:
-                raise BackendTimeoutError(f"{hook} failed ({type(exc).__name__})") from exc
+                raise BackendTimeoutError(f"{label} failed ({type(exc).__name__})") from exc
             except httpx2.HTTPError as exc:
                 status = (
                     exc.response.status_code if isinstance(exc, httpx2.HTTPStatusError) else None
@@ -298,17 +312,17 @@ class OpenSweBackend:
                 if isinstance(exc, httpx2.HTTPStatusError) and (
                     failure := _hook_failure(exc.response)
                 ):
-                    # What the hook itself raised, so the run fails with the cause, as in-process.
-                    raise BackendCallError(f"{hook} failed: {failure.describe()}") from exc
+                    # What the backend itself raised, so the run fails with the cause, as in-process.
+                    raise BackendCallError(f"{label} failed: {failure.describe()}") from exc
                 unreached = (
                     isinstance(exc, httpx2.ConnectError)
-                    or (status == 503 and hook in _RESENT_AFTER_503)
-                    or (status == 502 and hook in _REPEATABLE_HOOKS)
+                    or (status == 503 and resent_after_503)
+                    or (status == 502 and repeatable)
                 )
                 if unreached and (wait := next(waits, None)) is not None:
                     logger.warning(
                         "Backend unavailable; retrying",
-                        extra={"hook": hook, "status_code": status, "wait_seconds": wait},
+                        extra={"hook": label, "status_code": status, "wait_seconds": wait},
                     )
                     await asyncio.sleep(wait)
                     continue
@@ -317,24 +331,14 @@ class OpenSweBackend:
                     if isinstance(exc, httpx2.TransportError) or status in _GATEWAY_STATUSES
                     else BackendCallError
                 )
-                raise error(f"{hook} failed ({type(exc).__name__})") from exc
-        return _json_object.validate_python(response.json())
+                raise error(f"{label} failed ({type(exc).__name__})") from exc
+        return _json.validate_python(response.json())
 
     async def catalog(self, run_id: str | None) -> Catalog:
         return Catalog.model_validate(await self.call("catalog", {"run_id": run_id}))
 
     async def phase(self, hook: Hook, body: Mapping[str, JsonValue]) -> PhaseReply:
         return PhaseReply.model_validate(await self.call(hook, body))
-
-    async def tool(self, body: Mapping[str, JsonValue]) -> ToolReply:
-        arguments = body.get("arguments")
-        requested = arguments.get("timeout") if isinstance(arguments, dict) else None
-        # A call with its own timeout, such as a long ``execute``, must be able to run it
-        # out and answer that it did, as it does in-process, rather than outlive this one.
-        seconds = _LONG_CALL_SECONDS
-        if isinstance(requested, int | float) and not isinstance(requested, bool):
-            seconds = max(seconds, requested + _TOOL_CALL_SLACK_SECONDS)
-        return ToolReply.model_validate(await self.call("call", body, seconds=seconds))
 
     async def model_result(
         self, body: Mapping[str, JsonValue], response: Sequence[BaseMessage]

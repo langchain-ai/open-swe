@@ -121,6 +121,8 @@ export interface ChatComposerProps {
   /** Enables the stop button for the thread's live run. */
   activeRun?: ActiveRun
   onStop?: () => void | Promise<void>
+  /** False when this viewer may not stop the live run. */
+  stoppable?: boolean
   onSubmit?: (
     value: string,
     images: Array<ImageChunk>,
@@ -266,6 +268,7 @@ export const ChatComposer = memo(function ChatComposer({
   canOffload = false,
   activeRun,
   onStop,
+  stoppable,
   onSubmit,
   followUpBehavior = "steer",
   restoreDraft = null,
@@ -853,7 +856,7 @@ export const ChatComposer = memo(function ChatComposer({
           onCommandKeyDown={handleCommandKeyDown}
           onPaste={handlePaste}
           placeholder={
-            busy
+            busy && !disabled
               ? followUpBehavior === "steer"
                 ? "Send a message to steer the run..."
                 : "Send a message to queue next..."
@@ -922,6 +925,7 @@ export const ChatComposer = memo(function ChatComposer({
               followUpBehavior === "steer" ? "Steer agent" : "Queue message"
             }
             onStop={onStop}
+            stoppable={stoppable}
             stopOnEscape={!menuOpen && !modelPickerOpen && !extrasMenuOpen}
             submitting={isSubmitting}
           />

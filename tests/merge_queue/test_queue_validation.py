@@ -3,12 +3,12 @@ from datetime import UTC, datetime, timedelta
 from unittest.mock import AsyncMock, Mock
 from uuid import uuid7
 
-import httpx2
 import pytest
 
-from openswe.github.http import GitHubError, RepoClient
+from openswe.github.http import RepoClient
 from openswe.github.queue import Artifact, ValidationJob, ValidationRun
 from openswe.merge_queue.admission import QueuePolicy
+from openswe.merge_queue.dispatch import DispatchGateway, DispatchRejected
 from openswe.merge_queue.git import Candidate, PullHead
 from openswe.merge_queue.models import Attempt, Batch, Lease
 from openswe.merge_queue.store import MergeQueue, ValidationWork
@@ -74,7 +74,6 @@ def validation() -> tuple[CandidateValidation, ValidationWork, Lease]:
     repo = Mock(spec=RepoClient, full_name=request.repository)
     repo.branch_sha = AsyncMock(return_value=request.workflow_sha)
     repo.ref_sha = AsyncMock(return_value=request.candidate_sha)
-    repo.dispatch_validation = AsyncMock()
     repo.validation_runs = AsyncMock(return_value=(run,))
     repo.validation_run = AsyncMock(return_value=run)
     repo.validation_jobs = AsyncMock(
@@ -103,7 +102,10 @@ def validation() -> tuple[CandidateValidation, ValidationWork, Lease]:
     )
     return (
         CandidateValidation(
-            queue, repo, QueuePolicy(checks={}, validation=ValidationPolicy(dispatch_actor_id=123))
+            queue,
+            repo,
+            QueuePolicy(checks={}, validation=ValidationPolicy(dispatch_actor_id=123)),
+            Mock(spec=DispatchGateway, dispatch=AsyncMock()),
         ),
         work,
         Lease(uuid7(), 1),
@@ -130,7 +132,7 @@ async def test_discovers_run_when_database_clock_is_ahead(
     assert finish.call_args.args[1]["artifact_id"] == 7
 
 
-@pytest.mark.parametrize("status", [403, 404, 422, 429, 503])
+@pytest.mark.parametrize("status", [403, 404, 409, 410, 422])
 async def test_definite_dispatch_rejection_records_failure_immediately(
     validation: tuple[CandidateValidation, ValidationWork, Lease],
     monkeypatch: pytest.MonkeyPatch,
@@ -147,15 +149,8 @@ async def test_definite_dispatch_rejection_records_failure_immediately(
             ]
         ),
     )
-    dispatch = AsyncMock(
-        side_effect=GitHubError(
-            httpx2.Response(
-                status,
-                request=httpx2.Request("POST", "https://api.github.com"),
-            )
-        )
-    )
-    monkeypatch.setattr(controller.repo, "dispatch_validation", dispatch)
+    dispatch = AsyncMock(side_effect=DispatchRejected(status))
+    monkeypatch.setattr(controller.dispatcher, "dispatch", dispatch)
     await controller.reconcile(lease)
     assert dispatch.await_count == 1
     assert work.attempt is not None and work.request is not None
@@ -165,7 +160,7 @@ async def test_definite_dispatch_rejection_records_failure_immediately(
         work.attempt.id,
         {
             **work.request.model_dump(mode="json"),
-            "error": "GitHub rejected the workflow dispatch",
+            "error": "Dispatch gateway rejected the workflow dispatch",
             "http_status": status,
         },
         lease,

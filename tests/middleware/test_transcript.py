@@ -646,9 +646,7 @@ async def test_an_mda_subagent_is_recorded_under_its_task_call(
     """MDA runs ``task`` and its subagent; the backend's hooks file their events under the call."""
     # A provider MDA declares no box for, so preparing reads no thread metadata.
     monkeypatch.setenv("SANDBOX_TYPE", "local")
-    from langchain.agents import create_agent
     from langchain_core.messages import messages_to_dict
-    from langchain_core.tools import tool
 
     from openswe.remote_runtime.graph import RemoteGraph
     from openswe.remote_runtime.tokens import RemoteRun
@@ -656,17 +654,8 @@ async def test_an_mda_subagent_is_recorded_under_its_task_call(
 
     engine = _install(monkeypatch, transcribed=True, turn_id=uuid7())
 
-    @tool
-    def read_file(path: str) -> str:
-        """Read a file."""
-        return f"contents of {path}"
-
     async def build(config: Any, surface: ToolSurface) -> None:
-        middleware = [mw.TranscriptMiddleware()]
-        surface.graph = create_agent(
-            GenericFakeChatModel(messages=iter([])), tools=[read_file], middleware=middleware
-        )
-        surface.middleware = middleware
+        surface.middleware = [mw.TranscriptMiddleware()]
 
     async def start_models(cfg: Any) -> Any:
         raise AssertionError("not asked for")
@@ -692,15 +681,12 @@ async def test_an_mda_subagent_is_recorded_under_its_task_call(
     task = {"name": "task", "arguments": {"description": "look"}, "tool_call_id": "task-1"}
     await graph.hook(run, "tool_started", {"run_id": RUN_ID, "messages": root, **task})
     inside = {"run_id": RUN_ID, "messages": nested, "namespace": ["task-1"]}
+    # MDA reports every call it makes, the subagent's included, under its ``task`` call.
+    read = {"name": "read_file", "arguments": {"path": "a.py"}, "tool_call_id": "sub-call-1"}
+    await graph.hook(run, "tool_started", {**inside, **read})
+    contents = ToolMessage(content="contents of a.py", tool_call_id="sub-call-1")
     await graph.hook(
-        run,
-        "call",
-        {
-            **inside,
-            "name": "read_file",
-            "arguments": {"path": "a.py"},
-            "tool_call_id": "sub-call-1",
-        },
+        run, "tool_result", {**inside, **read, "result": messages_to_dict([contents])[0]}
     )
     await graph.hook(run, "model_result", {**inside, "response": messages_to_dict([answer])})
     result = ToolMessage(content="found it", tool_call_id="task-1")

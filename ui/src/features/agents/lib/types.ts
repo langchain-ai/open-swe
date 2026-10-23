@@ -27,6 +27,7 @@ export type AgentSource =
   | "slack"
   | "linear"
   | "schedule"
+  | "claude_code"
 
 export type AgentThreadCategory =
   | "interactive"

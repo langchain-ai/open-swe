@@ -586,11 +586,12 @@ async def test_approved_card_collapses_without_closing_the_request(
         patch.object(HumanReviewRequest, "author_mention", AsyncMock(return_value="<@U_ada>")),
     ):
         text, blocks = await ReviewCard(request).render(None)
-    assert ("Review request: approved" in text) is collapsed
+    assert text.startswith(":white_check_mark: ") is collapsed
     assert (len(blocks) == 1) is collapsed
     assert "<@U_ada>" in str(block_payload(blocks))
     if collapsed:
-        assert "by <@U_ada>" in text
+        assert "\n" not in text
+        assert "authored by <@U_ada> — approved by @grace" in text
     if pending and not auto_merge:
         assert "linus" in str(block_payload(blocks))
         assert "awaiting manual merge" not in text

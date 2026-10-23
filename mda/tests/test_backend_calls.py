@@ -1,4 +1,5 @@
 import asyncio
+import json
 from collections.abc import Mapping, Sequence
 from contextlib import closing
 from copy import deepcopy
@@ -27,7 +28,6 @@ from langchain_core.messages import (
     HumanMessage,
     ToolCall,
     ToolMessage,
-    message_to_dict,
 )
 from langchain_core.outputs import ChatGeneration, ChatResult
 from langchain_core.runnables import RunnableConfig, RunnableLambda
@@ -36,7 +36,6 @@ from langchain_core.tracers.langchain import LangChainTracer, wait_for_all_trace
 from langchain_core.tracers.run_collector import RunCollectorCallbackHandler
 from langgraph.checkpoint.memory import InMemorySaver
 from langgraph.prebuilt.tool_node import ToolCallRequest
-from langgraph.types import Command
 from langgraph_sdk.errors import (
     APIStatusError,
     InternalServerError,
@@ -53,16 +52,14 @@ from rt.backend import (
     BackendUnavailableError,
     OpenSweBackend,
     PhaseReply,
-    ToolReply,
-    ToolSpec,
 )
+from rt.file_tools import FileToolsMiddleware
 from rt.middleware import BackendRunMiddleware, RunState
 from rt.model_calls import model_call_guards
-from rt.models import ModelSpec
-from rt.sandbox import SandboxCreate, SandboxSpec
-from rt.sandbox_tools import SandboxToolsMiddleware
-from rt.tools import backend_tool
+from rt.tools import operation_tool
 from rt.tracing import TurnTrace
+from runtime_api.catalog import FilesSpec, ModelSpec, OperationSpec
+from runtime_api.operations import OperationResult, ShellVerdict
 
 
 def _run_metadata(patch: Mapping[str, object]) -> Mapping[str, object]:
@@ -169,8 +166,9 @@ async def test_a_tool_call_the_backend_never_answered(
     monkeypatch.setattr("rt.tools.run_id", lambda: "run-1")
     monkeypatch.setattr("rt.backend.asyncio.sleep", AsyncMock())
     request = httpx2.Request("POST", "https://backend.invalid")
-    message = message_to_dict(ToolMessage(content="done", tool_call_id="call-1"))
-    response = httpx2.Response(200, request=request, json={"message": message})
+    response = httpx2.Response(
+        200, request=request, json=OperationResult(content="done").model_dump(mode="json")
+    )
     failure_result = (
         httpx2.ConnectError("secret-token")
         if failure == "connect"
@@ -179,8 +177,10 @@ async def test_a_tool_call_the_backend_never_answered(
     client = MagicMock(is_closed=False)
     client.post = AsyncMock(side_effect=[failure_result] * failures + [response])
     monkeypatch.setattr("rt.backend.httpx2.AsyncClient", lambda **kwargs: client)
-    served = backend_tool(
-        ToolSpec(name="execute", description="Execute", parameters={"type": "object"}),
+    served = operation_tool(
+        OperationSpec(
+            name="background_execute", description="Execute", parameters={"type": "object"}
+        ),
         OpenSweBackend("secret-token"),
     )
     runtime = ToolRuntime(
@@ -192,9 +192,8 @@ async def test_a_tool_call_the_backend_never_answered(
         store=None,
     )
     assert served.coroutine is not None
-    result = await served.coroutine(runtime=runtime)
-    assert isinstance(result, Command)
-    [result_message] = result.update["messages"]
+    result_message = await served.coroutine(runtime=runtime)
+    assert isinstance(result_message, ToolMessage)
     assert result_message.tool_call_id == "call-1"
     assert result_message.status == ("success" if failures == 10 else "error")
     assert "secret-token" not in result_message.content
@@ -344,6 +343,57 @@ async def test_the_model_the_backend_names_gets_a_replayable_history(
     ]
 
 
+class _PayloadAnthropic(ChatAnthropic):
+    payloads: list[dict[str, object]] = []
+
+    async def _agenerate(
+        self,
+        messages: list[BaseMessage],
+        stop: list[str] | None = None,
+        run_manager: AsyncCallbackManagerForLLMRun | None = None,
+        **kwargs: object,
+    ) -> ChatResult:
+        self.payloads.append(self._get_request_payload(messages, stop=stop, **kwargs))
+        return ChatResult(generations=[ChatGeneration(message=AIMessage(content="done"))])
+
+
+async def test_the_anthropic_model_the_backend_names_caches_for_an_hour(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("OPEN_SWE_BACKEND_URL", "https://backend.invalid")
+    monkeypatch.setattr("rt.middleware.run_id", lambda: "run-1")
+    named = _PayloadAnthropic(model_name="claude-opus-5-5", api_key="test-key", payloads=[])
+    monkeypatch.setattr("rt.middleware.build_model", lambda spec, use_gateway: named)
+    backend = OpenSweBackend("secret-token")
+
+    async def phase(name: str, body: object) -> PhaseReply:
+        if name != "before_model":
+            return PhaseReply()
+        return PhaseReply(
+            system_prompt="You are Open SWE.",
+            model=ModelSpec(model_id="anthropic:claude-opus-5-5", kwargs={}),
+        )
+
+    monkeypatch.setattr(backend, "phase", phase)
+    # deepagents installs its own 5m cache; the guards' must take its place.
+    middleware = cast(
+        list[AgentMiddleware],
+        [BackendRunMiddleware(backend, "invocation-1"), *model_call_guards()],
+    )
+    graph = create_deep_agent(model=FakeListChatModel(responses=["unused"]), middleware=middleware)
+
+    await graph.ainvoke({"messages": [HumanMessage("hi")]})
+
+    [payload] = named.payloads
+    hour = {"type": "ephemeral", "ttl": "1h"}
+    system = cast(list[dict[str, object]], payload["system"])
+    tools = cast(list[dict[str, object]], payload["tools"])
+    assert system[-1]["cache_control"] == hour
+    assert tools[-1]["cache_control"] == hour
+    assert payload["cache_control"] == hour
+    assert '"5m"' not in json.dumps(payload)
+
+
 class _StalledAnthropic(ChatAnthropic):
     async def _agenerate(
         self,
@@ -424,42 +474,43 @@ async def test_a_failing_backend_hook_fails_the_run_with_what_it_raised(
 
 
 @pytest.mark.parametrize(
-    ("name", "arguments", "on_backend"),
+    ("name", "arguments", "checked", "remote"),
     [
-        ("execute", {"command": "cd /workspace/repo && git push origin HEAD"}, True),
-        ("execute", {"command": "bash -c 'gh pr create --fill'"}, True),
-        ("execute", {"command": "curl -X POST https://api.github.com/repos/o/r/pulls"}, True),
-        ("execute", {"command": 'g"h" pr create --fill'}, True),
-        ("execute", {"command": "git pu''sh origin HEAD"}, True),
-        ("execute", {"command": "git pu\\\nsh origin HEAD"}, True),
-        ("read_file", {"file_path": "/skills/deploy/SKILL.md"}, True),
-        ("execute", {"command": "uv run pytest -q tests/unit"}, False),
-        ("read_file", {"file_path": "/workspace/repo/README.md"}, False),
+        ("execute", {"command": "cd /workspace/repo && git push origin HEAD"}, True, False),
+        ("execute", {"command": "bash -c 'gh pr create --fill'"}, True, False),
+        (
+            "execute",
+            {"command": "curl -X POST https://api.github.com/repos/o/r/pulls"},
+            True,
+            False,
+        ),
+        ("execute", {"command": 'g"h" pr create --fill'}, True, False),
+        ("execute", {"command": "git pu''sh origin HEAD"}, True, False),
+        ("execute", {"command": "git pu\\\nsh origin HEAD"}, True, False),
+        ("read_file", {"file_path": "/skills/deploy/SKILL.md"}, False, True),
+        ("execute", {"command": "uv run pytest -q tests/unit"}, False, False),
+        ("read_file", {"file_path": "/workspace/repo/README.md"}, False, False),
     ],
 )
-async def test_box_tools_leave_to_the_backend_what_its_guards_and_paths_settle(
-    monkeypatch: pytest.MonkeyPatch, name: str, arguments: dict[str, str], on_backend: bool
+async def test_box_tools_ask_the_guards_and_reach_the_backends_paths(
+    monkeypatch: pytest.MonkeyPatch,
+    name: str,
+    arguments: dict[str, str],
+    checked: bool,
+    remote: bool,
 ) -> None:
-    """A command the push guards may stop never runs in the box, where they cannot see it."""
+    """A command the push guards may stop is put to them first; a backend path is read there."""
     monkeypatch.setenv("OPEN_SWE_BACKEND_URL", "https://backend.invalid")
-    for module in ("rt.middleware", "rt.tools"):
+    for module in ("rt.middleware", "rt.tools", "rt.file_tools"):
         monkeypatch.setattr(f"{module}.run_id", lambda: "run-1")
     backend = OpenSweBackend("secret-token")
-    reply = ToolReply(
-        message=message_to_dict(ToolMessage(content="guarded", tool_call_id="call-1"))
-    )
-    on_backend_call = AsyncMock(return_value=reply)
-    started = AsyncMock()
-    finished = AsyncMock()
-    monkeypatch.setattr(backend, "tool", on_backend_call)
-    monkeypatch.setattr(backend, "tool_started", started)
-    monkeypatch.setattr(backend, "tool_result", finished)
-    spec = SandboxSpec(
-        create=SandboxCreate(fs_capacity_bytes=1, idle_ttl_seconds=1, delete_after_stop_seconds=1),
-        tools=["execute", "read_file"],
-        checks=["push_guards"],
-        backend_paths=["/skills/"],
-    )
+    checks = AsyncMock(return_value=ShellVerdict(allowed=True).model_dump(mode="json"))
+    monkeypatch.setattr(backend, "post", checks)
+    monkeypatch.setattr(backend, "tool_started", AsyncMock())
+    monkeypatch.setattr(backend, "tool_result", AsyncMock(return_value={}))
+    served = MagicMock()
+    served.name = "read_file"
+    served.ainvoke = AsyncMock(return_value=ToolMessage(content="skill", tool_call_id="call-1"))
     runtime = ToolRuntime(
         state={"messages": []},
         context=None,
@@ -475,17 +526,21 @@ async def test_box_tools_leave_to_the_backend_what_its_guards_and_paths_settle(
         runtime=runtime,
     )
     in_box = AsyncMock(return_value=ToolMessage(content="ran", tool_call_id="call-1"))
-
-    await SandboxToolsMiddleware(backend, spec, 300, check_reads=True).awrap_tool_call(
-        request, in_box
+    files = FileToolsMiddleware(
+        backend,
+        FilesSpec(backend_paths=["/skills/"], guards=["shell_commands"]),
+        300,
+        remote={"read_file": served},
+        remote_files=MagicMock(),
+        in_box=True,
     )
+
+    await files.awrap_tool_call(request, in_box)
     await backend.reports.drain()
 
-    assert on_backend_call.await_count == int(on_backend)
-    assert in_box.await_count == int(not on_backend)
-    # The backend records the calls it runs; the ones run in the box are reported to it.
-    assert started.await_count == int(not on_backend)
-    assert finished.await_count == int(not on_backend)
+    assert checks.await_count == int(checked)
+    assert served.ainvoke.await_count == int(remote)
+    assert in_box.await_count == int(not remote)
 
 
 @pytest.mark.parametrize("next_trace_available", [True, False])
@@ -735,13 +790,173 @@ async def test_box_call_git_evidence_reaches_the_turn_after_its_run_closed(
     assert turn.metadata["open_swe_git_evidence"] == evidence
 
 
+async def test_an_operation_code_mode_calls_is_reported_and_cited_under_its_eval_call(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Code mode calls tools past the tool-call chain, so the tool reports itself."""
+    from rt.backend import reporting, subagent_of
+    from runtime_api.operations import EvidenceReply
+
+    monkeypatch.setenv("OPEN_SWE_BACKEND_URL", "https://backend.invalid")
+    monkeypatch.setattr("rt.tools.run_id", lambda: "run-1")
+    backend = OpenSweBackend("secret-token")
+    answers = {
+        "/remote-runtime/api/operation": OperationResult(content="found it"),
+        "/remote-runtime/api/record_evidence": EvidenceReply(
+            content="found it\n\nIncident evidence: ev-1"
+        ),
+    }
+
+    async def post(path: str, body: dict[str, object], **kwargs: object) -> object:
+        return answers[path].model_dump(mode="json")
+
+    monkeypatch.setattr(backend, "post", post)
+    started = AsyncMock()
+    finished = AsyncMock(return_value={})
+    monkeypatch.setattr(backend, "tool_started", started)
+    monkeypatch.setattr(backend, "tool_result", finished)
+    search = operation_tool(
+        OperationSpec(name="search_incidents", description="Search", parameters={"type": "object"}),
+        backend,
+        cites_evidence=True,
+    )
+    runtime = ToolRuntime(
+        state={"messages": []},
+        context=None,
+        config={},
+        stream_writer=lambda event: None,
+        tool_call_id=None,
+        store=None,
+    )
+
+    # As inside the eval call the agent's chain reports.
+    assert search.coroutine is not None
+    with subagent_of("eval-1"), reporting("eval-1"):
+        result = await search.coroutine(runtime=runtime)
+    await backend.reports.drain()
+
+    assert isinstance(result, ToolMessage)
+    assert result.content == "found it\n\nIncident evidence: ev-1"
+    [[body]] = [call.args for call in started.await_args_list]
+    assert body["name"] == "search_incidents"
+    assert body["namespace"] == ["eval-1"]
+    [[_body, recorded]] = [call.args for call in finished.await_args_list]
+    assert recorded.content == result.content
+
+
+async def test_a_command_the_guards_refuse_is_recorded_with_their_reason(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("OPEN_SWE_BACKEND_URL", "https://backend.invalid")
+    for module in ("rt.middleware", "rt.tools", "rt.file_tools"):
+        monkeypatch.setattr(f"{module}.run_id", lambda: "run-1")
+    backend = OpenSweBackend("secret-token")
+    refusal = ShellVerdict(allowed=False, refusal="pr_creation_fallback_blocked")
+    monkeypatch.setattr(backend, "post", AsyncMock(return_value=refusal.model_dump(mode="json")))
+    started = AsyncMock()
+    finished = AsyncMock(return_value={})
+    monkeypatch.setattr(backend, "tool_started", started)
+    monkeypatch.setattr(backend, "tool_result", finished)
+    runtime = ToolRuntime(
+        state={"messages": []},
+        context=None,
+        config={},
+        stream_writer=lambda event: None,
+        tool_call_id="call-1",
+        store=None,
+    )
+    request = ToolCallRequest(
+        tool_call={
+            "name": "execute",
+            "args": {"command": "gh pr create --fill"},
+            "id": "call-1",
+            "type": "tool_call",
+        },
+        tool=None,
+        state={"messages": []},
+        runtime=runtime,
+    )
+    in_box = AsyncMock()
+    files = FileToolsMiddleware(
+        backend,
+        FilesSpec(guards=["shell_commands"]),
+        300,
+        remote={},
+        remote_files=MagicMock(),
+        in_box=True,
+    )
+
+    refused = await files.awrap_tool_call(request, in_box)
+    await backend.reports.drain()
+
+    assert isinstance(refused, ToolMessage) and refused.status == "error"
+    in_box.assert_not_awaited()
+    started.assert_awaited_once()
+    [[_body, recorded]] = [call.args for call in finished.await_args_list]
+    assert recorded.content == "pr_creation_fallback_blocked"
+
+
+async def test_a_command_code_mode_runs_is_put_to_the_guards_too(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Code mode calls tools past the tool-call chain, so its shell tool checks each call itself."""
+    from langchain.agents.middleware.types import ModelRequest
+    from rt.remote_files import RemoteFiles, remote_file_tools
+
+    monkeypatch.setenv("OPEN_SWE_BACKEND_URL", "https://backend.invalid")
+    for module in ("rt.middleware", "rt.tools", "rt.file_tools"):
+        monkeypatch.setattr(f"{module}.run_id", lambda: "run-1")
+    backend = OpenSweBackend("secret-token")
+    refusal = ShellVerdict(allowed=False, refusal="pr_creation_fallback_blocked")
+    monkeypatch.setattr(backend, "post", AsyncMock(return_value=refusal.model_dump(mode="json")))
+    monkeypatch.setattr(backend, "tool_started", AsyncMock())
+    monkeypatch.setattr(backend, "tool_result", AsyncMock(return_value={}))
+    ran = AsyncMock(return_value="opened")
+
+    @tool("execute")
+    async def box_execute(command: str) -> str:
+        """Run a command in the box."""
+        return await ran(command)
+
+    remote = RemoteFiles(backend, lambda: "run-1")
+    files = FileToolsMiddleware(
+        backend,
+        FilesSpec(guards=["shell_commands"]),
+        300,
+        remote=remote_file_tools(remote, "/"),
+        remote_files=remote,
+        in_box=True,
+    )
+    model_request = MagicMock(spec=ModelRequest)
+    model_request.tools = [box_execute]
+    await files.awrap_model_call(model_request, AsyncMock())
+    [execute] = files.code_tools(["execute", "web_search"])
+    runtime = ToolRuntime(
+        state={"messages": []},
+        context=None,
+        config={},
+        stream_writer=lambda event: None,
+        tool_call_id="ptc_execute_1",
+        store=None,
+    )
+
+    assert execute.coroutine is not None
+    refused = await execute.coroutine(runtime=runtime, command="gh pr create --fill")
+
+    assert isinstance(refused, ToolMessage) and refused.content == "pr_creation_fallback_blocked"
+    ran.assert_not_awaited()
+
+
 async def test_a_read_file_the_backend_serves_gets_the_read_checks(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """A /blobs/ file with an image's extension but not its bytes never reaches the model as one."""
     monkeypatch.setenv("OPEN_SWE_BACKEND_URL", "https://backend.invalid")
-    monkeypatch.setattr("rt.tools.run_id", lambda: "run-1")
+    for module in ("rt.middleware", "rt.tools"):
+        monkeypatch.setattr(f"{module}.run_id", lambda: "run-1")
     backend = OpenSweBackend("secret-token")
+    monkeypatch.setattr(backend, "tool_started", AsyncMock())
+    monkeypatch.setattr(backend, "tool_result", AsyncMock(return_value={}))
     fake = ToolMessage(
         content=[
             {"type": "image", "base64": "eyJlcnJvciI6ICJleHBpcmVkIn0=", "mime_type": "image/png"}
@@ -749,14 +964,9 @@ async def test_a_read_file_the_backend_serves_gets_the_read_checks(
         tool_call_id="call-1",
         name="read_file",
     )
-    monkeypatch.setattr(
-        backend, "tool", AsyncMock(return_value=ToolReply(message=message_to_dict(fake)))
-    )
-    spec = SandboxSpec(
-        create=SandboxCreate(fs_capacity_bytes=1, idle_ttl_seconds=1, delete_after_stop_seconds=1),
-        tools=["read_file"],
-        backend_paths=["/blobs/"],
-    )
+    served = MagicMock()
+    served.name = "read_file"
+    served.ainvoke = AsyncMock(return_value=fake)
     runtime = ToolRuntime(
         state={"messages": []},
         context=None,
@@ -776,13 +986,18 @@ async def test_a_read_file_the_backend_serves_gets_the_read_checks(
         state={"messages": []},
         runtime=runtime,
     )
-
-    result = await SandboxToolsMiddleware(backend, spec, 300, check_reads=True).awrap_tool_call(
-        request, AsyncMock()
+    files = FileToolsMiddleware(
+        backend,
+        FilesSpec(backend_paths=["/blobs/"], checks=["image_reads"]),
+        300,
+        remote={"read_file": served},
+        remote_files=MagicMock(),
+        in_box=True,
     )
 
-    assert isinstance(result, Command)
-    [message] = result.update["messages"]
+    message = await files.awrap_tool_call(request, AsyncMock())
+
+    assert isinstance(message, ToolMessage)
     assert message.status == "error"
     assert "not a valid image" in message.content
 

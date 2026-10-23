@@ -11,7 +11,7 @@ access and web storage do not. Honor system light/dark mode with
 `prefers-color-scheme`; ensure readable colors in both modes rather than hard-coding a theme.
 
 Args:
-    plan_file_path: Path to the HTML artifact in the sandbox.
+    artifact_file_path: Path to the HTML artifact in the sandbox.
 
 Returns:
     ``{success: True, path}`` on success, or ``{success: False, error}``.
