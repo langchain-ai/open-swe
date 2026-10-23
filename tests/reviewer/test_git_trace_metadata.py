@@ -20,6 +20,7 @@ async def test_actual_checkout_wins_over_configured_repo(
                 "invocation_id": "turn",
                 "github_login": "different-credential-owner",
                 "repo": {"owner": "wrong", "name": "repo"},
+                "branch_name": "wrong-branch",
             },
             "metadata": {"ls_attribution_identifier": "trigger"},
         }
@@ -108,6 +109,75 @@ async def test_work_order_wins_over_snapshot_order_pr_order_and_completion_order
         {"repo": "org/z", "branch": "Exact/first-head"},
         {"repo": "org/a", "branch": "Later/head"},
     ]
+
+
+@pytest.mark.parametrize("branch", [None, "known-head"])
+async def test_read_only_turn_uses_matching_checkout_without_claiming_observed_work(
+    monkeypatch: pytest.MonkeyPatch, branch: str | None
+) -> None:
+    git = TurnGitMetadata(
+        {
+            "configurable": {
+                "invocation_id": "turn",
+                "repo": {"owner": "org", "name": "z"},
+                "branch_name": branch,
+            }
+        }
+    )
+    snapshot = GitSnapshot(
+        repos={
+            "/workspace/a": GitCheckout(repo="org/a", branch="main"),
+            "/workspace/z": GitCheckout(repo="org/z", branch="checkout-head"),
+        }
+    )
+    monkeypatch.setattr(git, "snapshot", AsyncMock(return_value=snapshot))
+    assert git.actor["ls_git_repo"] == "org/z"
+    if branch:
+        assert git.actor["ls_git_branch"] == branch
+    result = await git.reconcile(await git.begin())
+    assert result["ls_git_repo"] == "org/z"
+    assert result["ls_git_branch"] == (branch or "checkout-head")
+    assert "open_swe_git_targets" not in result
+
+
+async def test_missing_snapshot_keeps_known_context_and_observed_repo_drops_stale_branch(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    git = TurnGitMetadata(
+        {
+            "configurable": {
+                "invocation_id": "turn",
+                "repo": {"owner": "org", "name": "known"},
+                "branch_name": "known-head",
+            }
+        }
+    )
+    monkeypatch.setattr(git, "snapshot", AsyncMock(return_value=None))
+    state = await git.begin()
+    result = await git.reconcile(state)
+    assert result["ls_git_repo"] == "org/known"
+    assert result["ls_git_branch"] == "known-head"
+    state.update(git.evidence([GitTarget(repo="org/actual", branch="")], "work"))
+    result = await git.reconcile(state)
+    assert result["ls_git_repo"] == "org/actual"
+    assert result["ls_git_branch"] is None
+
+
+@pytest.mark.parametrize("ambiguous", [False, True])
+async def test_unconfigured_turn_only_guesses_an_unambiguous_checkout(
+    monkeypatch: pytest.MonkeyPatch, ambiguous: bool
+) -> None:
+    git = TurnGitMetadata({"configurable": {"invocation_id": "turn"}})
+    repos = {"/workspace/a": GitCheckout(repo="org/a", branch="feature")}
+    if ambiguous:
+        repos["/workspace/b"] = GitCheckout(repo="org/b", branch="main")
+    monkeypatch.setattr(git, "snapshot", AsyncMock(return_value=GitSnapshot(repos=repos)))
+    result = await git.reconcile(await git.begin())
+    if ambiguous:
+        assert "ls_git_repo" not in result
+    else:
+        assert result["ls_git_repo"] == "org/a"
+        assert result["ls_git_branch"] == "feature"
 
 
 async def test_invalid_optional_evidence_does_not_discard_valid_pr_outcome(
