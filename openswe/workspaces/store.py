@@ -415,6 +415,7 @@ class WorkspaceCreate(BaseModel):
     repos: list[str] = Field(default_factory=list)
     slack_channel_ids: list[str] = Field(default_factory=list)
     kitchen_channel_ids: list[str] = Field(default_factory=list)
+    firehose_channel_id: str | None = None
     mem_bytes: int | None = Field(default=None, gt=0)
     vcpus: int | None = Field(default=None, gt=0)
     fs_capacity_bytes: int | None = Field(default=None, gt=0)
@@ -450,6 +451,11 @@ class WorkspaceCreate(BaseModel):
     def _check_repos(cls, v: list[str]) -> list[str]:
         return _validate_repos(v)
 
+    @field_validator("firehose_channel_id")
+    @classmethod
+    def _check_firehose_channel_id(cls, value: str | None) -> str | None:
+        return normalize_slack_channel_id(value) if value else None
+
     @field_validator("slack_channel_ids", "kitchen_channel_ids")
     @classmethod
     def _check_slack_channel_ids(cls, v: list[str]) -> list[str]:
@@ -480,6 +486,7 @@ class WorkspaceUpdate(BaseModel):
     repos: list[str] | None = None
     slack_channel_ids: list[str] | None = None
     kitchen_channel_ids: list[str] | None = None
+    firehose_channel_id: str | None = None
     mem_bytes: int | None = Field(default=None, gt=0)
     vcpus: int | None = Field(default=None, gt=0)
     fs_capacity_bytes: int | None = Field(default=None, gt=0)
@@ -509,6 +516,11 @@ class WorkspaceUpdate(BaseModel):
     @classmethod
     def _check_repos(cls, v: list[str] | None) -> list[str] | None:
         return None if v is None else _validate_repos(v)
+
+    @field_validator("firehose_channel_id")
+    @classmethod
+    def _check_firehose_channel_id(cls, value: str | None) -> str | None:
+        return normalize_slack_channel_id(value) if value else None
 
     @field_validator("slack_channel_ids", "kitchen_channel_ids")
     @classmethod
@@ -568,6 +580,7 @@ class Workspace(BaseModel):
     repos: list[str] = Field(default_factory=list)
     slack_channel_ids: list[str] = Field(default_factory=list)
     kitchen_channel_ids: list[str] = Field(default_factory=list)
+    firehose_channel_id: str | None = None
     mem_bytes: int | None = None
     vcpus: int | None = None
     fs_capacity_bytes: int | None = None
@@ -606,6 +619,11 @@ class Workspace(BaseModel):
         """Stripped on the way in, so ``if record.setup_script`` is the whole test."""
         return v.strip() if isinstance(v, str) else ("" if v is None else v)
 
+    @field_validator("firehose_channel_id")
+    @classmethod
+    def _check_firehose_channel_id(cls, value: str | None) -> str | None:
+        return normalize_slack_channel_id(value) if value else None
+
     @field_validator("slack_channel_ids", "kitchen_channel_ids")
     @classmethod
     def _check_slack_channel_ids(cls, v: list[str]) -> list[str]:
@@ -628,6 +646,7 @@ class Workspace(BaseModel):
             repos=create.repos,
             slack_channel_ids=create.slack_channel_ids,
             kitchen_channel_ids=create.kitchen_channel_ids,
+            firehose_channel_id=create.firehose_channel_id,
             mem_bytes=create.mem_bytes,
             vcpus=create.vcpus,
             fs_capacity_bytes=create.fs_capacity_bytes,
@@ -801,6 +820,10 @@ class WorkspaceStore:
         """
         try:
             async with postgres.session() as session:
+                if record.firehose_channel_id:
+                    from openswe.slack.channels import SlackChannel
+
+                    await SlackChannel.ensure(session, record.firehose_channel_id)
                 row = (
                     None
                     if create_only
@@ -1488,6 +1511,7 @@ def _apply(record: Workspace, update: WorkspaceUpdate) -> Workspace:
         "create_params",
         "base_snapshot_id",
         "snapshot_name",
+        "firehose_channel_id",
     ):
         if field in update.model_fields_set:
             setattr(record, field, getattr(update, field))

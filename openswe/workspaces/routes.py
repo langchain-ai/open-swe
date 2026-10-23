@@ -69,6 +69,14 @@ async def _require_kitchen_eligible(channel_ids: list[str]) -> None:
             )
 
 
+async def _require_firehose_eligible(channel_id: str | None) -> None:
+    if channel_id is None:
+        return
+    channel = await SlackChannel.load(channel_id, use_cache=False)
+    if channel is None or not channel.can_be_kitchen:
+        raise HTTPException(400, "Choose an internal firehose channel that Open SWE has joined.")
+
+
 @router.get("/workspaces")
 async def api_list_workspaces(
     _admin: dict[str, Any] = ADMIN_DEP,
@@ -87,6 +95,7 @@ async def api_create_workspace(
     _admin: dict[str, Any] = ADMIN_DEP,
 ) -> Workspace:
     await _require_kitchen_eligible(body.kitchen_channel_ids)
+    await _require_firehose_eligible(body.firehose_channel_id)
     try:
         record = await WORKSPACES.create(body, _admin["sub"])
     except ValueError as e:
@@ -155,6 +164,8 @@ async def api_update_workspace(
     previous = await WORKSPACES.get(normalized)
     if previous is not None:
         await bind_workspace(request, previous)
+    if "firehose_channel_id" in body.model_fields_set:
+        await _require_firehose_eligible(body.firehose_channel_id)
     repos_changed = (
         previous is not None
         and body.repos is not None

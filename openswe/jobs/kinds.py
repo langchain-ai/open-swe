@@ -41,6 +41,8 @@ from openswe.threads.index_import import import_agent_server_threads
 from openswe.threads.status import RECONCILE_JOB as THREAD_STATUS_RECONCILE
 from openswe.threads.status import RECONCILE_SCHEDULE, reconcile_busy_threads
 from openswe.tools.schedule_thread_wakeup import WAKE_THREAD_JOB, run_thread_wakeup
+from openswe.workspaces.firehose import JOB_KIND as WORKSPACE_FIREHOSE
+from openswe.workspaces.firehose import deliver as deliver_workspace_firehose
 from openswe.workspaces.refresh import REFRESH_TASK as WORKSPACE_REFRESH
 from openswe.workspaces.refresh import run_workspace_refresh_tick
 
@@ -52,6 +54,7 @@ RECONCILE: Final = "reconcile"
 _FIRE_CLAIM_TTL: Final = timedelta(days=2)
 
 WORKER.register(MERGE_QUEUE_RECONCILE)(reconcile_queue)
+WORKER.register(WORKSPACE_FIREHOSE)(deliver_workspace_firehose)
 
 
 def _text(job: Job, key: str) -> str | None:

@@ -349,6 +349,7 @@ describe("WorkspaceSettingsPanel", () => {
         repos: ["acme/oss"],
         slack_channel_ids: ["C1"],
         kitchen_channel_ids: [],
+        firehose_channel_id: null,
         prompt: "Run make test.",
       })
     )
