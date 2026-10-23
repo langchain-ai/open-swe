@@ -6,7 +6,6 @@ import { Button } from "@langchain/macaw-components/Button"
 import { Skeleton } from "@langchain/macaw-components/Skeleton"
 import { Spinner } from "@langchain/macaw-components/Spinner"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
-import { Link } from "@tanstack/react-router"
 import { useEffect, useRef, useState } from "react"
 import type { ReactNode } from "react"
 import { ArrowClockwiseIcon } from "@phosphor-icons/react/dist/ssr/ArrowClockwise"
@@ -672,6 +671,7 @@ function OpenSweRow({
   detail: ReviewDetail
 }) {
   const queryClient = useQueryClient()
+  const setRailTab = useReviewPage((state) => state.setRailTab)
   const { bugs, flags } = openFindingCounts(detail.findings)
   // Open while there is something to look at, until the person folds it; a
   // link elsewhere that names the findings opens it again, with a flash.
@@ -736,13 +736,14 @@ function OpenSweRow({
         action={
           <>
             {detail.thread_id && (
-              <Link
-                to="/agents/$threadId"
-                params={{ threadId: detail.thread_id }}
-                className={cn("text-xs", subtleLink)}
+              <Button
+                size="sm"
+                color="secondary"
+                variant="plain"
+                onClick={() => setRailTab("review")}
               >
-                {running ? "Watch it work" : "See how it reviewed"}
-              </Link>
+                {running ? "Watch in progress" : "See how it reviewed"}
+              </Button>
             )}
             {prOpen && (
               <Button

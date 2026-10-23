@@ -127,7 +127,7 @@ export function ReviewPage({ pr }: { pr: PullRequestRef }) {
         {!wide && (
           <SideSheet
             side="right"
-            title="Chat and discussion"
+            title="Chat, discussion, and review threads"
             open={railOpen}
             onClose={() => setRailOpen(false)}
             className={RIGHT_PANEL_SHEET_CLASS_NAME}
