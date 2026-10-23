@@ -14,6 +14,7 @@ type KeyedTopic =
   | "thread-browsers"
   | "thread-background-work"
   | "plugin-documents"
+  | "plugin-chat-calls"
 
 export type InvalidationTopic = string
 

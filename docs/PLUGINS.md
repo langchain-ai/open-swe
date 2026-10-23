@@ -82,7 +82,7 @@ A source is a directory in the same repository, another repository (`github`, wi
   "description": "Pages over the Markdown in your repositories.",
   "entry": "bundle/index.html",
   "sidebar": { "label": "Docs", "icon": "file-text" },
-  "permissions": ["storage", "realtime", "github:read", "github:write", "threads"]
+  "permissions": ["storage", "realtime", "github:read", "github:write", "agent"]
 }
 ```
 
@@ -106,7 +106,7 @@ A source is a directory in the same repository, another repository (`github`, wi
 | `realtime` | join live rooms: an ordered update log plus presence, for editing together |
 | `github:read` | read repository info, refs, trees, files, history and pull requests |
 | `github:write` | create branches, commit files and open pull requests (also allows reads) |
-| `threads` | ask to start agent threads, which the person approves one by one, and list the ones it started |
+| `agent` | an agent the person chats with in a dock beside the plugin, with tools the plugin provides |
 
 The person approves these permissions when they install. **Update** re-reads the plugin's ref. If the new commit asks for more permissions, nothing changes until the person approves them. A call outside the approved set fails with status 403.
 
@@ -191,9 +191,9 @@ A memory-history router fits well; see `PathSync` in [`plugins/docs/src/routes/_
 - `host.ui.toast({ title, description, intent })` shows a web UI toast (`intent` is `success`, `error` or `info`).
 - `host.ui.setTitle(title)` shows `title` beside the plugin's name in the bar above it, and names the browser tab "title · Open SWE". Up to 120 characters; `null` clears it, and the tab goes back to the plugin's name.
 
-The web UI asks the person in dialogs it draws over the plugin: the repository picker, link confirmations and thread approvals. The plugin can neither cover nor imitate them, and their approve buttons work only after a moment on screen.
+The web UI asks the person in dialogs it draws over the plugin: the repository picker and link confirmations. The plugin can neither cover nor imitate them, and their approve buttons work only after a moment on screen.
 
-A plugin behaves like a tab. Once opened, it stays mounted while the person visits threads, pull requests or other pages in the same part of the web UI, and clicking its sidebar entry brings it back exactly as they left it. While hidden it still runs and syncs, but it can't move the web UI or show toasts, and requests that would ask the person something (opening a link, starting a thread, picking repositories) are declined.
+A plugin behaves like a tab. Once opened, it stays mounted while the person visits threads, pull requests or other pages in the same part of the web UI, and clicking its sidebar entry brings it back exactly as they left it. While hidden it still runs and syncs, but it can't move the web UI or show toasts, and requests that would ask the person something (opening a link, picking repositories, opening the agent) are declined.
 
 ### People
 
@@ -313,20 +313,44 @@ live.destroy() // when leaving
 
 The provider batches local edits into one update every 50 ms, retries failed sends, and replaces the log with a snapshot every 200 updates. For other data, `host.joinRoom(scope, { onUpdate, onSynced, onPresence })` gives you the raw room: `publish(update)`, `compact(snapshot, through)`, `presence(client, bytes)` and `leave()`. Limits per message: an update is at most 1 MB, a snapshot 8 MB, and presence 2,900 bytes.
 
-### Agent threads
+### Agent
+
+With the `agent` permission, the bar above your plugin gets an **Agent** button that docks the normal agent thread beside it. The person chats with the agent there; it works as them, with their repository and tools, plus the tools your plugin provides. The person writes every message, and the thread is private to them.
 
 ```ts
-const started = await host.threads.start({
-  repository: "acme/app",
-  title: "Tighten the intro",
-  request: "Rewrite docs/intro.md so it fits on one screen.",
-})
-if (started) host.nav.openThread(started.threadId) // null: the person declined
-const mine = await host.threads.list()              // threads this install started
+// Which chat the dock shows: one per person under each name you choose.
+await host.agent.use({ name: "repository", repository: "acme/app" }) // or name: path, for one per page
+
+// Tools the agent can call, run here in your frame. Calling provide again replaces them.
+const withdraw = host.agent.provide(
+  {
+    read_page: {
+      description: "The open page's Markdown and the person's selection.",
+      parameters: { type: "object", properties: {} },
+      run: () => ({ path, markdown: editor.getMarkdown() }),
+    },
+    replace_text: {
+      description: "Replaces a passage on the open page.",
+      parameters: {
+        type: "object",
+        properties: { find: { type: "string" }, replace: { type: "string" } },
+        required: ["find", "replace"],
+      },
+      run: ({ find, replace }) => replaceInEditor(find, replace),
+    },
+  },
+  "Use read_page before changing anything." // instructions for the agent, optional
+)
+
+await host.agent.open({ draft: "> the passage the person selected\n\n" }) // the person presses Send
 ```
 
-The web UI shows the person your request word for word before anything runs. The thread is theirs: private, working with their access, and its prompt says which plugin asked. The title is at most 120 characters and the request at most 40,000.
+- **Chats** are yours to scope. `use` picks the chat without opening the dock; each name, with or without a repository the person shared, is one thread per person that picks up where it left off.
+- **Tools** reach the agent as `<plugin>__<name>`, so they never stand in for its own. Names are a lowercase letter, then letters, digits or `_`; at most 32 tools, with descriptions up to 2,000 characters and instructions up to 4,000. `parameters` is a JSON Schema of type `object`.
+- **Calls** run while your plugin is open. The run waits at each call, the dock runs it in your frame, and the thread carries on with what `run` returned, as JSON, or a string as is (up to 200,000 characters). What `run` throws, the agent reads as an error. A call made while your plugin is closed waits until it opens again.
+- **Results are data.** The agent treats them as your plugin's, not as instructions from the person, so a document can't steer it.
 
+### Errors
 ### Errors
 
 A failed request rejects with `HostError`, which carries `message` and an HTTP-like `status`:

@@ -27,7 +27,7 @@ and publishes it as a release asset, which installs read.
   "version": "0.1.0",
   "entry": "bundle/index.html",
   "sidebar": { "label": "Docs", "icon": "file-text" },
-  "permissions": ["storage", "realtime", "github:read", "github:write", "threads"]
+  "permissions": ["storage", "realtime", "github:read", "github:write", "agent"]
 }
 ```
 
@@ -37,7 +37,7 @@ and publishes it as a release asset, which installs read.
 | `realtime` | join live rooms: an ordered update log plus presence, for co-editing |
 | `github:read` | read files, trees, history and pull requests in its repositories |
 | `github:write` | create branches, commit files and open pull requests there |
-| `threads` | ask to start agent threads; the person approves each request |
+| `agent` | an agent the person chats with in a dock beside the plugin, with tools the plugin provides |
 
 A plugin reaches no repository until the person shares one. Ask with
 `host.repositories.pick()`: the dashboard shows them a picker of the

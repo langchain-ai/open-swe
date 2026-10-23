@@ -1113,6 +1113,180 @@
         "title": "ChallengeResponse",
         "type": "object"
       },
+      "ChatBody": {
+        "properties": {
+          "name": {
+            "pattern": "^[A-Za-z0-9._:@/-]{1,200}$",
+            "title": "Name",
+            "type": "string"
+          },
+          "repository": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Repository"
+          }
+        },
+        "required": [
+          "name"
+        ],
+        "title": "ChatBody",
+        "type": "object"
+      },
+      "ChatCallModel": {
+        "properties": {
+          "arguments": {
+            "$ref": "#/components/schemas/openswe__utils__json_types__JsonObject"
+          },
+          "call_id": {
+            "title": "Call Id",
+            "type": "string"
+          },
+          "tool": {
+            "description": "The tool's own name, as the plugin offered it.",
+            "title": "Tool",
+            "type": "string"
+          }
+        },
+        "required": [
+          "call_id",
+          "tool",
+          "arguments"
+        ],
+        "title": "ChatCallModel",
+        "type": "object"
+      },
+      "ChatOpened": {
+        "properties": {
+          "chat_id": {
+            "format": "uuid",
+            "title": "Chat Id",
+            "type": "string"
+          },
+          "thread_id": {
+            "title": "Thread Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "chat_id",
+          "thread_id"
+        ],
+        "title": "ChatOpened",
+        "type": "object"
+      },
+      "ChatOutputBody": {
+        "properties": {
+          "call_id": {
+            "maxLength": 200,
+            "minLength": 1,
+            "title": "Call Id",
+            "type": "string"
+          },
+          "output": {
+            "maxLength": 200000,
+            "title": "Output",
+            "type": "string"
+          }
+        },
+        "required": [
+          "call_id",
+          "output"
+        ],
+        "title": "ChatOutputBody",
+        "type": "object"
+      },
+      "ChatOutputsBody": {
+        "properties": {
+          "outputs": {
+            "items": {
+              "$ref": "#/components/schemas/ChatOutputBody"
+            },
+            "maxItems": 32,
+            "minItems": 1,
+            "title": "Outputs",
+            "type": "array"
+          }
+        },
+        "required": [
+          "outputs"
+        ],
+        "title": "ChatOutputsBody",
+        "type": "object"
+      },
+      "ChatResumed": {
+        "properties": {
+          "run_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Run Id"
+          }
+        },
+        "required": [
+          "run_id"
+        ],
+        "title": "ChatResumed",
+        "type": "object"
+      },
+      "ChatToolBody": {
+        "properties": {
+          "description": {
+            "maxLength": 2000,
+            "title": "Description",
+            "type": "string"
+          },
+          "name": {
+            "pattern": "^[a-z][a-z0-9_]{0,47}$",
+            "title": "Name",
+            "type": "string"
+          },
+          "parameters": {
+            "$ref": "#/components/schemas/JsonObject-Input",
+            "description": "A JSON Schema for the tool's arguments object."
+          }
+        },
+        "required": [
+          "name",
+          "description",
+          "parameters"
+        ],
+        "title": "ChatToolBody",
+        "type": "object"
+      },
+      "ChatToolsBody": {
+        "properties": {
+          "instructions": {
+            "default": "",
+            "maxLength": 4000,
+            "title": "Instructions",
+            "type": "string"
+          },
+          "tools": {
+            "items": {
+              "$ref": "#/components/schemas/ChatToolBody"
+            },
+            "maxItems": 32,
+            "title": "Tools",
+            "type": "array"
+          }
+        },
+        "required": [
+          "tools"
+        ],
+        "title": "ChatToolsBody",
+        "type": "object"
+      },
       "CheckpointFile": {
         "additionalProperties": false,
         "description": "One file a turn changed, as ``git diff --numstat`` counted it.",
@@ -4661,7 +4835,7 @@
           "storage",
           "github:read",
           "github:write",
-          "threads",
+          "agent",
           "realtime"
         ],
         "title": "PluginPermission",
@@ -4763,41 +4937,6 @@
           "installed_at"
         ],
         "title": "PluginSummary",
-        "type": "object"
-      },
-      "PluginThread": {
-        "properties": {
-          "status": {
-            "title": "Status",
-            "type": "string"
-          },
-          "thread_id": {
-            "title": "Thread Id",
-            "type": "string"
-          },
-          "title": {
-            "title": "Title",
-            "type": "string"
-          },
-          "updated_at_ms": {
-            "anyOf": [
-              {
-                "type": "integer"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Updated At Ms"
-          }
-        },
-        "required": [
-          "thread_id",
-          "title",
-          "status",
-          "updated_at_ms"
-        ],
-        "title": "PluginThread",
         "type": "object"
       },
       "PostedReviewComment": {
@@ -7934,33 +8073,6 @@
         "title": "TextAnchor",
         "type": "object"
       },
-      "ThreadBody": {
-        "properties": {
-          "repository": {
-            "title": "Repository",
-            "type": "string"
-          },
-          "request": {
-            "maxLength": 40000,
-            "minLength": 1,
-            "title": "Request",
-            "type": "string"
-          },
-          "title": {
-            "maxLength": 120,
-            "minLength": 1,
-            "title": "Title",
-            "type": "string"
-          }
-        },
-        "required": [
-          "title",
-          "request",
-          "repository"
-        ],
-        "title": "ThreadBody",
-        "type": "object"
-      },
       "ThreadBrowserView": {
         "description": "A thread's browser window as the dashboard embeds it.",
         "properties": {
@@ -8135,19 +8247,6 @@
           }
         },
         "title": "ThreadResolveBody",
-        "type": "object"
-      },
-      "ThreadStarted": {
-        "properties": {
-          "thread_id": {
-            "title": "Thread Id",
-            "type": "string"
-          }
-        },
-        "required": [
-          "thread_id"
-        ],
-        "title": "ThreadStarted",
         "type": "object"
       },
       "ToolCallView": {
@@ -14053,6 +14152,263 @@
         ]
       }
     },
+    "/dashboard/api/plugins/{installation_id}/chats": {
+      "post": {
+        "description": "The person's chat under ``name`` beside the plugin, made the first time it is opened.",
+        "operationId": "api_open_plugin_chat_dashboard_api_plugins__installation_id__chats_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "installation_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Installation Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ChatBody"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ChatOpened"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "DashboardSession": []
+          }
+        ],
+        "summary": "Api Open Plugin Chat",
+        "tags": [
+          "dashboard",
+          "plugins"
+        ]
+      }
+    },
+    "/dashboard/api/plugins/{installation_id}/chats/{chat_id}/calls": {
+      "get": {
+        "description": "Calls the chat's agent made to the plugin's tools that wait for the plugin's frame.",
+        "operationId": "api_plugin_chat_calls_dashboard_api_plugins__installation_id__chats__chat_id__calls_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "chat_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Chat Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "installation_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Installation Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/ChatCallModel"
+                  },
+                  "title": "Response Api Plugin Chat Calls Dashboard Api Plugins  Installation Id  Chats  Chat Id  Calls Get",
+                  "type": "array"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "DashboardSession": []
+          }
+        ],
+        "summary": "Api Plugin Chat Calls",
+        "tags": [
+          "dashboard",
+          "plugins"
+        ]
+      }
+    },
+    "/dashboard/api/plugins/{installation_id}/chats/{chat_id}/outputs": {
+      "post": {
+        "description": "Resume the chat with what the plugin's frame returned for its calls.",
+        "operationId": "api_answer_plugin_chat_calls_dashboard_api_plugins__installation_id__chats__chat_id__outputs_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "chat_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Chat Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "installation_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Installation Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ChatOutputsBody"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ChatResumed"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "DashboardSession": []
+          }
+        ],
+        "summary": "Api Answer Plugin Chat Calls",
+        "tags": [
+          "dashboard",
+          "plugins"
+        ]
+      }
+    },
+    "/dashboard/api/plugins/{installation_id}/chats/{chat_id}/tools": {
+      "put": {
+        "description": "The tools the plugin's frame runs for this chat's next runs, replacing those before.",
+        "operationId": "api_offer_plugin_chat_tools_dashboard_api_plugins__installation_id__chats__chat_id__tools_put",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "chat_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Chat Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "installation_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Installation Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ChatToolsBody"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "204": {
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "DashboardSession": []
+          }
+        ],
+        "summary": "Api Offer Plugin Chat Tools",
+        "tags": [
+          "dashboard",
+          "plugins"
+        ]
+      }
+    },
     "/dashboard/api/plugins/{installation_id}/documents/{collection}/query": {
       "post": {
         "operationId": "api_query_plugin_documents_dashboard_api_plugins__installation_id__documents__collection__query_post",
@@ -15535,116 +15891,6 @@
           }
         ],
         "summary": "Api Plugin Room Update",
-        "tags": [
-          "dashboard",
-          "plugins"
-        ]
-      }
-    },
-    "/dashboard/api/plugins/{installation_id}/threads": {
-      "get": {
-        "operationId": "api_plugin_threads_dashboard_api_plugins__installation_id__threads_get",
-        "parameters": [
-          {
-            "in": "path",
-            "name": "installation_id",
-            "required": true,
-            "schema": {
-              "format": "uuid",
-              "title": "Installation Id",
-              "type": "string"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "items": {
-                    "$ref": "#/components/schemas/PluginThread"
-                  },
-                  "title": "Response Api Plugin Threads Dashboard Api Plugins  Installation Id  Threads Get",
-                  "type": "array"
-                }
-              }
-            },
-            "description": "Successful Response"
-          },
-          "422": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            },
-            "description": "Validation Error"
-          }
-        },
-        "security": [
-          {
-            "DashboardSession": []
-          }
-        ],
-        "summary": "Api Plugin Threads",
-        "tags": [
-          "dashboard",
-          "plugins"
-        ]
-      },
-      "post": {
-        "operationId": "api_plugin_start_thread_dashboard_api_plugins__installation_id__threads_post",
-        "parameters": [
-          {
-            "in": "path",
-            "name": "installation_id",
-            "required": true,
-            "schema": {
-              "format": "uuid",
-              "title": "Installation Id",
-              "type": "string"
-            }
-          }
-        ],
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/ThreadBody"
-              }
-            }
-          },
-          "required": true
-        },
-        "responses": {
-          "201": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ThreadStarted"
-                }
-              }
-            },
-            "description": "Successful Response"
-          },
-          "422": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            },
-            "description": "Validation Error"
-          }
-        },
-        "security": [
-          {
-            "DashboardSession": []
-          }
-        ],
-        "summary": "Api Plugin Start Thread",
         "tags": [
           "dashboard",
           "plugins"

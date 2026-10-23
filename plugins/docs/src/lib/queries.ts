@@ -18,7 +18,6 @@ export const keys = {
     ["history", repository, path, ref] as const,
   pull: (repository: string, branch: string) =>
     ["pull", repository, branch] as const,
-  threads: ["threads"] as const,
   people: (logins: string[]) => ["people", ...logins] as const,
 }
 
@@ -161,15 +160,6 @@ export function usePull(repository: string, branch: string | undefined) {
     queryKey: keys.pull(repository, branch ?? ""),
     queryFn: () => host.github(repository).findPull(branch!),
     enabled: Boolean(branch),
-  })
-}
-
-export function useThreads(enabled: boolean) {
-  const host = usePluginHost()
-  return useQuery({
-    queryKey: keys.threads,
-    queryFn: () => host.threads.list(),
-    enabled,
   })
 }
 

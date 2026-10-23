@@ -61,7 +61,7 @@ export type PluginPermission =
   | "storage"
   | "github:read"
   | "github:write"
-  | "threads"
+  | "agent"
   | "realtime"
 
 export type Theme = "light" | "dark"
@@ -157,13 +157,6 @@ export interface PullRequest {
   base: string
 }
 
-export interface AgentThread {
-  threadId: string
-  title: string
-  status: string
-  updatedAtMs: number | null
-}
-
 export interface RoomScope extends DocumentScope {
   room: string
 }
@@ -180,10 +173,26 @@ export interface RepositoryPickOptions {
   multiple?: boolean
 }
 
-export interface ThreadRequest {
-  repository: string
-  title: string
-  request: string
+/**
+ * Which chat the dock beside the plugin shows: one per person under each
+ * `name` the plugin chooses, optionally about a repository the person shared.
+ * One per repository, per page or per task is the plugin's call.
+ */
+export interface ChatScope {
+  name: string
+  repository?: string
+}
+
+/**
+ * A tool the plugin's frame runs for the agent in its dock. The agent sees it
+ * as `<plugin>__<name>`, with `description` and a JSON Schema for its
+ * arguments; `run` answers each call, and what it returns or throws is the
+ * agent's result.
+ */
+export interface AgentTool<A = JsonObject> {
+  description: string
+  parameters: JsonObject
+  run(args: A): Promise<JsonValue> | JsonValue
 }
 
 export interface CommitRequest {
@@ -346,11 +355,20 @@ export interface HostApi extends RpcTarget {
   /** One repository the person shared, acting with their own GitHub access. */
   github(repository: string): Promise<GitHubRepositoryApi>
   /**
-   * Asks the person to approve starting an agent thread with `request`;
-   * `null` when they decline. The web UI shows them the request word for word.
+   * Offers the agent in the dock tools, as JSON text of
+   * `{ tools: [{ name, description, parameters }], instructions }`, in place
+   * of any offered before; disposing the subscription withdraws them. `run`
+   * gets a call's tool name and the JSON text of its arguments, and resolves
+   * to the result as text.
    */
-  startThread(request: ThreadRequest): Promise<{ threadId: string } | null>
-  threads(): Promise<AgentThread[]>
+  provideTools(
+    json: string,
+    run: (tool: string, argumentsJson: string) => Promise<string>
+  ): Promise<Subscription>
+  /** Chooses the chat the dock shows, without opening it. */
+  chooseChat(scope: ChatScope): Promise<void>
+  /** Opens the dock on the chosen chat, with `draft` in its composer for the person to send. */
+  openChat(draft: string | null): Promise<void>
   /** Joins a live room, scoped like documents; dispose the room to leave it. */
   joinRoom(
     scope: RoomScope,

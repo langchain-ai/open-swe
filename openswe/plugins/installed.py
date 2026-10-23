@@ -7,26 +7,42 @@ person shared with it, and against what the person may do themselves, so a
 plugin can never exceed the person using it.
 """
 
-from collections.abc import AsyncIterator
+from collections.abc import AsyncIterator, Mapping
 from contextlib import asynccontextmanager
 from dataclasses import dataclass
 from uuid import UUID
 
 from fastapi import HTTPException
+from langgraph_sdk.errors import ConflictError
 
 from openswe.dashboard.repo_access import require_repo_access_for_user
 from openswe.github.http import GitHubClient, RepoClient
 from openswe.github.repo_names import RepoFullName, normalize_repo_full_name
+from openswe.openai_responses.client_tools import ClientToolSpec
 from openswe.plugins.manifest import PluginPermission
-from openswe.plugins.records import DocumentScope, Installation, PluginDocuments, PluginThreads
+from openswe.plugins.records import (
+    DocumentScope,
+    Installation,
+    PluginChat,
+    PluginChats,
+    PluginDocuments,
+    tool_prefix,
+)
 from openswe.plugins.rooms import Room
-from openswe.prompts import prompt
-from openswe.threads.runs import start_dashboard_thread
+from openswe.thread_ids import plugin_chat_thread_id
+from openswe.threads.runs import create_dashboard_thread_record, start_run_with_tool_results
+from openswe.threads.summary import PLUGIN_CHAT_KEY
+from openswe.utils.json_types import JsonObject
 
 
 class PluginPermissionDenied(PermissionError):
     def __init__(self, permission: PluginPermission) -> None:
         super().__init__(f"The plugin was not granted {permission.value}")
+
+
+class PluginChatNotFound(LookupError):
+    def __init__(self) -> None:
+        super().__init__("chat not found")
 
 
 class RepositoryNotGranted(PermissionError):
@@ -103,28 +119,62 @@ class InstalledPlugin:
             yield github.repo(owner, repo)
 
     @property
-    def threads(self) -> PluginThreads:
-        return PluginThreads(self.installation.id)
+    def chats(self) -> PluginChats:
+        return PluginChats(self.installation.id, self.user_id)
 
-    async def start_thread(self, *, title: str, request: str, repository: str) -> str:
-        """Start an agent thread the person approved; its prompt says the plugin wrote it."""
-        self.require(PluginPermission.THREADS)
-        name = await self.repository(repository)
-        source = self.installation.source
-        thread_id = await start_dashboard_thread(
-            self.login,
-            self.email,
-            title=title,
-            prompt=prompt(
-                "plugins/thread-request",
-                requester=self.login,
-                plugin=self.installation.manifest.display_name,
-                source=f"{source.repository}/{source.path}".rstrip("/"),
-                repository=name,
-                request=request,
-            ),
-            repos=[name],
-            visibility="private",
+    async def chat(self, name: str, repository: str | None) -> PluginChat:
+        """The person's chat under ``name``, made with its agent thread the first time."""
+        self.require(PluginPermission.AGENT)
+        scope = None if repository is None else await self.repository(repository)
+        found = await self.chats.get(name, scope)
+        if found is not None:
+            return found
+        thread_id = plugin_chat_thread_id(str(self.installation.id), str(self.user_id), name, scope)
+        owner, _, repo = (scope or "").partition("/")
+        display = self.installation.manifest.display_name
+        try:
+            await create_dashboard_thread_record(
+                thread_id,
+                login=self.login,
+                email=self.email,
+                repo_config={"owner": owner, "name": repo} if scope else {},
+                repo_explicitly_none=scope is None,
+                prompt=None,
+                title=f"{display}: {scope}" if scope else display,
+                visibility="private",
+                extra_metadata={PLUGIN_CHAT_KEY: str(self.installation.id)},
+            )
+        except ConflictError:
+            # An earlier attempt made the thread and stopped before recording it.
+            pass
+        return await self.chats.record(name, scope, thread_id)
+
+    async def own_chat(self, chat_id: UUID) -> PluginChat:
+        """One of this person's chats beside the plugin."""
+        self.require(PluginPermission.AGENT)
+        chat = await self.chats.by_id(chat_id)
+        if chat is None:
+            raise PluginChatNotFound
+        return chat
+
+    def tool(self, name: str, description: str, parameters: JsonObject) -> ClientToolSpec:
+        """One of the plugin's tools as the agent sees it, under the plugin's own prefix."""
+        return ClientToolSpec(
+            kind="function",
+            name=f"{tool_prefix(self.installation.manifest.name)}{name}",
+            description=description,
+            parameters=parameters,
         )
-        await self.threads.record(thread_id, by=self.user_id)
-        return thread_id
+
+    async def answer(self, chat: PluginChat, outputs: Mapping[str, str]) -> str | None:
+        """Resume the chat with what the plugin's frame returned; the run, or None if nothing waited."""
+        answered = await chat.calls.answer(list(outputs), by=self.user_id)
+        if not answered:
+            return None
+        return await start_run_with_tool_results(
+            chat.thread_id,
+            self.login,
+            prompt="",
+            tool_results=[ClientToolSpec.result_message(i, outputs[i]) for i in answered],
+            overrides={},
+        )

@@ -22,9 +22,11 @@ import type {
 import { documentsTopicKey, pluginsApi } from "@/features/plugins/lib/api"
 import { PluginRooms } from "@/features/plugins/lib/rooms"
 import type {
+  AgentToolOffer,
   BridgeHost,
+  ChatTarget,
   RepositoryPick,
-  ThreadRequest,
+  ToolRunner,
 } from "@/features/plugins/lib/bridge"
 import {
   PluginHostApi,
@@ -72,9 +74,11 @@ export function PluginFrame({
   openThread,
   setTitle,
   visible,
-  confirmThread,
   confirmLink,
   pickRepositories,
+  provideTools,
+  chooseChat,
+  openChat,
 }: {
   plugin: InstalledPlugin
   html: string
@@ -84,9 +88,11 @@ export function PluginFrame({
   setTitle: (title: string | null) => void
   /** Whether the frame is on screen; a hidden one shows no toasts. */
   visible: () => boolean
-  confirmThread: (request: ThreadRequest) => Promise<boolean>
   confirmLink: (url: string) => Promise<boolean>
   pickRepositories: (pick: RepositoryPick) => Promise<Array<string>>
+  provideTools: (offer: AgentToolOffer, run: ToolRunner) => () => void
+  chooseChat: (chat: ChatTarget) => void
+  openChat: (draft: string | null) => void
 }) {
   const session = useSession()
   const isInBaseOrg = useIsInBaseOrg()
@@ -161,10 +167,12 @@ export function PluginFrame({
             : toast.info
       show(title, { description })
     },
-    confirmThread,
     confirmLink,
     pickRepositories,
     isInBaseOrg,
+    provideTools,
+    chooseChat,
+    openChat,
     watchDocuments: (target, onChange) => {
       const key = documentsTopicKey(plugin.plugin_id, target, userId)
       let watch = documentWatches.current.get(key)

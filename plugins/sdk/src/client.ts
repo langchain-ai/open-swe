@@ -6,6 +6,8 @@ import {
   NONCE_META,
   PROTOCOL_VERSION,
   RUNTIME_GLOBAL,
+  type AgentTool,
+  type ChatScope,
   type CollectionApi,
   type CommitRequest,
   type CursorWire,
@@ -16,6 +18,7 @@ import {
   type HostContext,
   type HostEvent,
   type JsonDocument,
+  type JsonObject,
   type JsonScalar,
   type Person,
   type PullRequestDraft,
@@ -27,7 +30,6 @@ import {
   type RoomScope,
   type StoredDocument,
   type StoredJson,
-  type ThreadRequest,
   type Toast,
 } from "./protocol"
 
@@ -206,9 +208,44 @@ export class PluginHost {
     return found
   }
 
-  readonly threads = {
-    start: (request: ThreadRequest) => settle(this.api.startThread(request)),
-    list: () => settle(this.api.threads()),
+  /** The agent in the dock beside the plugin, which the person chats with. */
+  readonly agent = {
+    /**
+     * Offers the agent `tools`, keyed by name, in place of any offered
+     * before, with `instructions` on when to use them; returns the withdrawal.
+     */
+    provide: (
+      tools: Record<string, AgentTool>,
+      instructions = ""
+    ): (() => void) => {
+      const json = JSON.stringify({
+        tools: Object.entries(tools).map(([name, tool]) => ({
+          name,
+          description: tool.description,
+          parameters: tool.parameters,
+        })),
+        instructions,
+      })
+      const subscription = this.api.provideTools(
+        json,
+        async (name, argumentsJson) => {
+          const tool = Object.hasOwn(tools, name) ? tools[name] : undefined
+          if (!tool)
+            throw new Error(`${name} is not one of this plugin's tools`)
+          const result = await tool.run(JSON.parse(argumentsJson) as JsonObject)
+          return typeof result === "string" ? result : JSON.stringify(result)
+        }
+      )
+      subscription.catch((error: unknown) =>
+        console.error("Open SWE refused the agent's tools", error)
+      )
+      return () => subscription[Symbol.dispose]()
+    },
+    /** Chooses the chat the dock shows, without opening it. */
+    use: (scope: ChatScope) => settle(this.api.chooseChat(scope)),
+    /** Opens the dock on the chosen chat, with `draft` in its composer for the person to send. */
+    open: (options: { draft?: string } = {}) =>
+      settle(this.api.openChat(options.draft ?? null)),
   }
 
   /** Joins a live room; leave it with the returned room's `leave()`. */

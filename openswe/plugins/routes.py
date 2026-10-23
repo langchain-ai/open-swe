@@ -38,6 +38,7 @@ from openswe.github.http import GitHubClient, GitHubError, GitHubSignInRequired,
 from openswe.github.repo_names import normalize_repo_full_name
 from openswe.plugins.installed import (
     InstalledPlugin,
+    PluginChatNotFound,
     PluginPermissionDenied,
     RepositoryNotGranted,
     can_read_repository,
@@ -51,10 +52,10 @@ from openswe.plugins.records import (
     PluginDocument,
     PluginInstallations,
     PluginNameTaken,
+    tool_prefix,
 )
 from openswe.plugins.rooms import MAX_PRESENCE_BYTES, Room, listen
 from openswe.plugins.source import PluginSource, PluginSourceError, catalog
-from openswe.threads.handlers import get_dashboard_thread
 from openswe.users.models import User
 from openswe.utils.json_types import JsonObject
 
@@ -63,7 +64,6 @@ logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/plugins", tags=["plugins"])
 
 MAX_DOCUMENT_BYTES = 256_000
-MAX_THREADS_LISTED = 50
 
 CollectionName = Annotated[str, StringConstraints(pattern=r"^[a-z][a-z0-9_-]{0,63}$")]
 DocumentKey = Annotated[str, StringConstraints(pattern=r"^[A-Za-z0-9._:@/-]{1,200}$")]
@@ -81,6 +81,8 @@ def _as_http() -> Iterator[None]:
         raise HTTPException(404, str(exc)) from exc
     except (PluginPermissionDenied, RepositoryNotGranted) as exc:
         raise HTTPException(403, str(exc)) from exc
+    except PluginChatNotFound as exc:
+        raise HTTPException(404, str(exc)) from exc
     except PluginNameTaken as exc:
         raise HTTPException(409, str(exc)) from exc
     except PluginSourceError as exc:
@@ -670,61 +672,100 @@ async def api_plugin_open_pull(
     return PullRequestModel.of(pull)
 
 
-# ---- Threads -----------------------------------------------------------------------
+# ---- Agent chats -------------------------------------------------------------------
+
+ChatName = Annotated[str, StringConstraints(pattern=r"^[A-Za-z0-9._:@/-]{1,200}$")]
+ToolName = Annotated[str, StringConstraints(pattern=r"^[a-z][a-z0-9_]{0,47}$")]
+MAX_CHAT_TOOLS = 32
 
 
-class ThreadBody(BaseModel):
-    title: str = Field(min_length=1, max_length=120)
-    request: str = Field(min_length=1, max_length=40_000)
-    repository: str
+class ChatBody(BaseModel):
+    name: ChatName
+    repository: str | None = None
 
 
-class ThreadStarted(BaseModel):
+class ChatOpened(BaseModel):
+    chat_id: UUID
     thread_id: str
 
 
-class PluginThread(BaseModel):
-    thread_id: str
-    title: str
-    status: str
-    updated_at_ms: int | None
+class ChatToolBody(BaseModel):
+    name: ToolName
+    description: str = Field(max_length=2_000)
+    parameters: JsonObject = Field(description="A JSON Schema for the tool's arguments object.")
 
 
-@router.post("/{installation_id}/threads", status_code=201)
+class ChatToolsBody(BaseModel):
+    tools: list[ChatToolBody] = Field(max_length=MAX_CHAT_TOOLS)
+    instructions: str = Field("", max_length=4_000)
+
+
+class ChatCallModel(BaseModel):
+    call_id: str
+    tool: str = Field(description="The tool's own name, as the plugin offered it.")
+    arguments: JsonObject
+
+
+class ChatOutputBody(BaseModel):
+    call_id: str = Field(min_length=1, max_length=200)
+    output: str = Field(max_length=200_000)
+
+
+class ChatOutputsBody(BaseModel):
+    outputs: list[ChatOutputBody] = Field(min_length=1, max_length=MAX_CHAT_TOOLS)
+
+
+class ChatResumed(BaseModel):
+    run_id: str | None
+
+
+@router.post("/{installation_id}/chats")
+async def api_open_plugin_chat(body: ChatBody, plugin: PluginDep) -> ChatOpened:
+    """The person's chat under ``name`` beside the plugin, made the first time it is opened."""
+    with _as_http():
+        chat = await plugin.chat(body.name, body.repository)
+    return ChatOpened(chat_id=chat.id, thread_id=chat.thread_id)
+
+
+@router.put("/{installation_id}/chats/{chat_id}/tools", status_code=204)
+async def api_offer_plugin_chat_tools(
+    chat_id: UUID, body: ChatToolsBody, plugin: PluginDep
+) -> None:
+    """The tools the plugin's frame runs for this chat's next runs, replacing those before."""
+    with _as_http():
+        chat = await plugin.own_chat(chat_id)
+        tools = [plugin.tool(t.name, t.description, t.parameters) for t in body.tools]
+    if any(len(tool.name) > 64 for tool in tools):
+        raise HTTPException(422, "a tool's name and the plugin's together exceed 64 characters")
+    if len({tool.name for tool in tools}) < len(tools):
+        raise HTTPException(422, "tool names must be unique")
+    await plugin.chats.offer(chat.id, tools, body.instructions)
+
+
+@router.get("/{installation_id}/chats/{chat_id}/calls")
+async def api_plugin_chat_calls(chat_id: UUID, plugin: PluginDep) -> list[ChatCallModel]:
+    """Calls the chat's agent made to the plugin's tools that wait for the plugin's frame."""
+    with _as_http():
+        chat = await plugin.own_chat(chat_id)
+    prefix = tool_prefix(plugin.installation.manifest.name)
+    return [
+        ChatCallModel(
+            call_id=call.call_id, tool=call.tool.removeprefix(prefix), arguments=call.arguments
+        )
+        for call in await chat.calls.pending()
+    ]
+
+
+@router.post("/{installation_id}/chats/{chat_id}/outputs")
 @audit_endpoint
-async def api_plugin_start_thread(body: ThreadBody, plugin: PluginDep) -> ThreadStarted:
+async def api_answer_plugin_chat_calls(
+    chat_id: UUID, body: ChatOutputsBody, plugin: PluginDep
+) -> ChatResumed:
+    """Resume the chat with what the plugin's frame returned for its calls."""
     with _as_http():
-        thread_id = await plugin.start_thread(
-            title=body.title, request=body.request, repository=body.repository
-        )
-    return ThreadStarted(thread_id=thread_id)
-
-
-@router.get("/{installation_id}/threads")
-async def api_plugin_threads(plugin: PluginDep) -> list[PluginThread]:
-    with _as_http():
-        plugin.require(PluginPermission.THREADS)
-    threads: list[PluginThread] = []
-    for thread_id in await plugin.threads.started_by(plugin.user_id, limit=MAX_THREADS_LISTED):
-        try:
-            thread = await get_dashboard_thread(
-                thread_id, plugin.login, email=plugin.email, mark_viewed=False
-            )
-        except HTTPException as exc:
-            logger.info(
-                "Skipping a plugin thread the person can no longer read",
-                extra={"agent_thread_id": thread_id, "status_code": exc.status_code},
-            )
-            continue
-        threads.append(
-            PluginThread(
-                thread_id=thread_id,
-                title=str(thread.get("title") or ""),
-                status=str(thread.get("status") or "idle"),
-                updated_at_ms=thread.get("updatedAt"),
-            )
-        )
-    return threads
+        chat = await plugin.own_chat(chat_id)
+        run_id = await plugin.answer(chat, {o.call_id: o.output for o in body.outputs})
+    return ChatResumed(run_id=run_id)
 
 
 # ---- People ------------------------------------------------------------------------

@@ -130,6 +130,7 @@ from openswe.middleware.client_tools import ClientToolsMiddleware
 from openswe.middleware.conversation_offloading import ConversationOffloadingMiddleware
 from openswe.middleware.image_model_fallback import ImageModelFallbackMiddleware
 from openswe.middleware.model_selection import ModelSelectionState, RoutingMode
+from openswe.middleware.plugin_chat import PluginChatMiddleware
 from openswe.middleware.prepare_run import PrepareRunState
 from openswe.middleware.require_cli_result import RequireCliResultMiddleware
 from openswe.middleware.require_user_reply import (
@@ -1862,9 +1863,14 @@ async def build_agent(config: RunnableConfig, *, tool_surface: ToolSurface | Non
     # A client's tool replaces any server tool of the same name, so the endpoint's
     # view of which calls the client runs matches the graph's.
     client_tool_names = frozenset(spec.name for spec in cfg.client_tools)
-    client_tools = ClientToolsMiddleware(cfg.client_tools) if cfg.client_tools else None
+    client_tools: ClientToolsMiddleware | None = (
+        ClientToolsMiddleware(cfg.client_tools) if cfg.client_tools else None
+    )
     if client_tools is not None:
         excluded_tools = (excluded_tools | CLIENT_OWNED_SERVER_TOOLS) - client_tool_names
+    elif cfg.plugin_chat is not None and thread_id is not None:
+        # A plugin's tools join the agent's own rather than replace any.
+        client_tools = PluginChatMiddleware(cfg.plugin_chat, thread_id=thread_id)
     main_tools = [
         tool for tool in static_tools if _registered_tool_name(tool) not in client_tool_names
     ]

@@ -2,17 +2,29 @@ import { Button } from "@langchain/macaw-components/Button"
 import { EmptyState } from "@langchain/macaw-components/EmptyState"
 import { ErrorState } from "@langchain/macaw-components/ErrorState"
 import { Skeleton } from "@langchain/macaw-components/Skeleton"
+import { ChatCircleIcon } from "@phosphor-icons/react/dist/ssr/ChatCircle"
 import { PuzzlePieceIcon } from "@phosphor-icons/react/dist/ssr/PuzzlePiece"
 import { ShieldCheckIcon } from "@phosphor-icons/react/dist/ssr/ShieldCheck"
 import { Link, useNavigate } from "@tanstack/react-router"
-import { useEffect, useEffectEvent, useState } from "react"
+import { useEffect, useEffectEvent, useRef, useState } from "react"
 
+import { SideSheet } from "@/components/SideSheet"
+import { RightPanelShell } from "@/features/agents/components/panel/RightPanelShell"
+import { RIGHT_PANEL_SHEET_CLASS_NAME } from "@/features/agents/components/panel/rightPanelLayout"
+import { PluginAgentDock } from "@/features/plugins/components/PluginAgentDock"
+import type { ProvidedTools } from "@/features/plugins/components/PluginAgentDock"
 import { PluginFrame } from "@/features/plugins/components/PluginFrame"
 import { ApprovalDialog } from "@/features/plugins/components/ApprovalDialog"
 import type { InstalledPlugin } from "@/features/plugins/lib/api"
 import { useApproval } from "@/features/plugins/lib/approval"
+import type {
+  AgentToolOffer,
+  ChatTarget,
+  ToolRunner,
+} from "@/features/plugins/lib/bridge"
 import { PluginIcon } from "@/features/plugins/lib/icons"
 import { pageTitle } from "@/lib/pageTitle"
+import { useMediaQuery } from "@/lib/useIsMobile"
 import {
   usePlugin,
   usePluginBundle,
@@ -108,6 +120,18 @@ function InstalledPluginPage({
   const bundle = usePluginBundle(plugin)
   const approval = useApproval()
   const share = useSharePluginRepositories()
+  const agent = useAgentDock(plugin, onScreen)
+  const wide = useMediaQuery("(min-width: 1100px)")
+  const dock = agent.enabled && agent.open && (
+    <PluginAgentDock
+      plugin={plugin}
+      chat={agent.chat}
+      draft={agent.draft}
+      tools={agent.tools}
+      active={active}
+      onClose={() => agent.setOpen(false)}
+    />
+  )
 
   return (
     <main className="flex min-h-0 min-w-0 flex-1 flex-col">
@@ -121,7 +145,7 @@ function InstalledPluginPage({
           {plugin.manifest.displayName}
         </span>
         {title && <span className="truncate text-secondary">{title}</span>}
-        <span className="ml-auto flex shrink-0 items-center gap-space-1 text-secondary">
+        <span className="ml-auto flex shrink-0 items-center gap-space-1 text-secondary max-sm:hidden">
           <ShieldCheckIcon size={14} />
           {plugin.scope === "organization"
             ? "Installed for everyone"
@@ -129,59 +153,102 @@ function InstalledPluginPage({
         </span>
         <Link
           to="/my-settings/plugins"
-          className="shrink-0 text-secondary underline-offset-2 hover:text-primary hover:underline"
+          className="shrink-0 text-secondary underline-offset-2 hover:text-primary hover:underline max-sm:ml-auto"
         >
           Manage
         </Link>
+        {agent.enabled && (
+          <Button
+            size="sm"
+            variant={agent.open ? "outlined" : "plain"}
+            aria-pressed={agent.open}
+            onClick={() => agent.setOpen(!agent.open)}
+          >
+            <ChatCircleIcon size={14} />
+            Agent
+          </Button>
+        )}
       </header>
-      {bundle.data !== undefined ? (
-        <PluginFrame
-          plugin={plugin}
-          html={bundle.data}
-          path={path}
-          navigate={(next, replace) => {
-            onPath(next)
-            if (onScreen())
-              void navigate({
-                to: "/agents/plugins/$name/$",
-                params: { name: plugin.name, _splat: next.slice(1) },
-                replace,
-              })
-          }}
-          openThread={(threadId) => {
-            if (onScreen())
-              void navigate({ to: "/agents/$threadId", params: { threadId } })
-          }}
-          setTitle={setTitle}
-          visible={onScreen}
-          confirmLink={async (url) =>
-            onScreen() && (await approval.ask({ kind: "link", url })) !== null
-          }
-          confirmThread={async (request) =>
-            onScreen() &&
-            (await approval.ask({ kind: "thread", request })) !== null
-          }
-          pickRepositories={async (pick) => {
-            if (!onScreen()) return []
-            const chosen = await approval.ask({ kind: "repositories", pick })
-            if (!Array.isArray(chosen) || chosen.length === 0) return []
-            const updated = await share.mutateAsync({
-              id: plugin.id,
-              repositories: [...chosen],
-            })
-            return chosen.filter((repo) => updated.repositories.includes(repo))
-          }}
-        />
-      ) : bundle.error ? (
-        <div className="flex flex-1 items-center justify-center p-space-5">
-          <ErrorState
-            title={`Couldn't load ${plugin.manifest.displayName}`}
-            message={bundle.error.message}
-            action={null}
-          />
+      <div className="flex min-h-0 flex-1">
+        <div className="flex min-w-0 flex-1 flex-col">
+          {bundle.data !== undefined ? (
+            <PluginFrame
+              plugin={plugin}
+              html={bundle.data}
+              path={path}
+              navigate={(next, replace) => {
+                onPath(next)
+                if (onScreen())
+                  void navigate({
+                    to: "/agents/plugins/$name/$",
+                    params: { name: plugin.name, _splat: next.slice(1) },
+                    replace,
+                  })
+              }}
+              openThread={(threadId) => {
+                if (onScreen())
+                  void navigate({
+                    to: "/agents/$threadId",
+                    params: { threadId },
+                  })
+              }}
+              setTitle={setTitle}
+              visible={onScreen}
+              confirmLink={async (url) =>
+                onScreen() &&
+                (await approval.ask({ kind: "link", url })) !== null
+              }
+              pickRepositories={async (pick) => {
+                if (!onScreen()) return []
+                const chosen = await approval.ask({
+                  kind: "repositories",
+                  pick,
+                })
+                if (!Array.isArray(chosen) || chosen.length === 0) return []
+                const updated = await share.mutateAsync({
+                  id: plugin.id,
+                  repositories: [...chosen],
+                })
+                return chosen.filter((repo) =>
+                  updated.repositories.includes(repo)
+                )
+              }}
+              provideTools={agent.provideTools}
+              chooseChat={agent.chooseChat}
+              openChat={agent.openChat}
+            />
+          ) : bundle.error ? (
+            <div className="flex flex-1 items-center justify-center p-space-5">
+              <ErrorState
+                title={`Couldn't load ${plugin.manifest.displayName}`}
+                message={bundle.error.message}
+                action={null}
+              />
+            </div>
+          ) : (
+            <Skeleton className="m-space-5 flex-1" />
+          )}
         </div>
-      ) : (
-        <Skeleton className="m-space-5 flex-1" />
+        {dock && wide && (
+          <RightPanelShell
+            mode="inline"
+            widthStorageKey="open-swe.plugin-agent.width"
+            defaultWidth={420}
+          >
+            {dock}
+          </RightPanelShell>
+        )}
+      </div>
+      {dock && !wide && (
+        <SideSheet
+          side="right"
+          title="Agent"
+          open
+          onClose={() => agent.setOpen(false)}
+          className={RIGHT_PANEL_SHEET_CLASS_NAME}
+        >
+          {dock}
+        </SideSheet>
       )}
       <ApprovalDialog
         plugin={plugin}
@@ -191,4 +258,50 @@ function InstalledPluginPage({
       />
     </main>
   )
+}
+
+/**
+ * The dock beside a plugin: whether it is open, which chat it shows, the
+ * draft the plugin last put in its composer and the tools the plugin's frame
+ * offers. A hidden plugin can choose its chat but not open the dock.
+ */
+function useAgentDock(plugin: InstalledPlugin, onScreen: () => boolean) {
+  const enabled = plugin.manifest.permissions.includes("agent")
+  const [open, setOpen] = useState(false)
+  const [chat, setChat] = useState<ChatTarget>({
+    name: "default",
+    repository: null,
+  })
+  const [draft, setDraft] = useState<{ key: number; text: string }>()
+  const [tools, setTools] = useState<ProvidedTools | null>(null)
+  const latest = useRef<symbol | null>(null)
+  return {
+    enabled,
+    open,
+    setOpen,
+    chat,
+    draft,
+    tools,
+    provideTools: (offer: AgentToolOffer, run: ToolRunner) => {
+      const offered = Symbol("offer")
+      latest.current = offered
+      setTools({ offer, run })
+      return () => {
+        if (latest.current !== offered) return
+        latest.current = null
+        setTools(null)
+      }
+    },
+    chooseChat: (next: ChatTarget) =>
+      setChat((prev) =>
+        prev.name === next.name && prev.repository === next.repository
+          ? prev
+          : next
+      ),
+    openChat: (text: string | null) => {
+      if (!onScreen()) return
+      setOpen(true)
+      if (text) setDraft((prev) => ({ key: (prev?.key ?? 0) + 1, text }))
+    },
+  }
 }

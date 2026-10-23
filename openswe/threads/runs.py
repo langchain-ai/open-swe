@@ -49,6 +49,7 @@ from openswe.input_messages import (
 )
 from openswe.invocation import new_invocation_id, with_invocation_id
 from openswe.message_queue import QueuedMessage
+from openswe.plugins.records import PluginChat
 from openswe.prompts import prompt
 from openswe.slack.client import update_slack_trace_reply_for_web_handoff
 from openswe.slack.records import lookup_slack_thread_run_mapping
@@ -63,6 +64,7 @@ from openswe.threads.moves import SANDBOX_HANDOFF_SYSTEM, SANDBOX_MOVED_KEY, San
 from openswe.threads.principals import STARTED_BY_ID, STARTED_BY_NAME, Principal, ThreadType
 from openswe.threads.summary import (
     DASHBOARD_SOURCE,
+    PLUGIN_CHAT_KEY,
     TRANSCRIPT_VERSION,
     _is_thread_resolved,
     _now_ms,
@@ -251,7 +253,7 @@ async def create_dashboard_thread_record(
     email: str | None = None,
     repo_config: dict[str, str],
     repo_explicitly_none: bool = False,
-    prompt: str,
+    prompt: str | None,
     images: list[DashboardImageBody] | None = None,
     title: str | None = None,
     model_id: str | None = None,
@@ -261,10 +263,15 @@ async def create_dashboard_thread_record(
     workspace: str | None = None,
     extra_metadata: Mapping[str, Any] | None = None,
 ) -> dict[str, Any]:
-    """Create a dashboard thread with immutable ownership and visibility."""
+    """Create a dashboard thread with immutable ownership and visibility.
+
+    ``prompt`` is its first message, checked here; ``None`` opens it with none
+    yet, named by ``title``.
+    """
+    if prompt is None and not title:
+        raise ValueError("a thread opened without a message needs a title")
     profile = await get_profile(login) or {}
     now_ms = _now_ms()
-    prompt = prompt.strip()
     resolved_model, resolved_effort = await _resolve_agent_model_choice(
         profile, model_id, effort, workspace
     )
@@ -273,7 +280,11 @@ async def create_dashboard_thread_record(
         resolved_effort,
         has_images=bool(images),
     )
-    _user_message_content(prompt, images or [], model_id=resolved_model)
+    if prompt is not None:
+        prompt = prompt.strip()
+        _user_message_content(prompt, images or [], model_id=resolved_model)
+    else:
+        prompt = ""
     chosen_model, chosen_effort = normalize_model_choice(model_id, effort)
     metadata_model = chosen_model or "Default"
     metadata_effort = chosen_effort
@@ -398,6 +409,10 @@ async def _build_dashboard_configurable(
         # that still read it from the run config keep working.
         configurable["workspace"] = workspace
         configurable["environment"] = workspace
+    if metadata.get(PLUGIN_CHAT_KEY):
+        chat = await PluginChat.run_config(thread_id)
+        if chat is not None:
+            configurable["plugin_chat"] = chat.model_dump(mode="json")
     if overrides:
         for key, value in overrides.items():
             if value is not None:
@@ -485,7 +500,7 @@ async def start_dashboard_thread(
     return thread_id
 
 
-async def start_sandbox_guest_run(
+async def start_run_with_tool_results(
     thread_id: str,
     login: str,
     *,
@@ -493,7 +508,7 @@ async def start_sandbox_guest_run(
     tool_results: Sequence[Mapping[str, str]],
     overrides: dict[str, Any],
 ) -> str:
-    """Start a run on a thread a sandbox program talks to, with the tool results it ran for it."""
+    """Start a run with the results of tools its client ran: a sandbox program, or a plugin's frame."""
     await _ensure_dashboard_github_token(login)
     client = langgraph_client()
     metadata = thread_metadata(await client.threads.get(thread_id))

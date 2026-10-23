@@ -1,5 +1,4 @@
 import type {
-  AgentThread,
   Commit,
   CursorWire,
   JsonObject,
@@ -11,6 +10,7 @@ import type {
 } from "@openswe/plugin-sdk"
 
 import { AgentsApiError, agentsRequest } from "@/features/agents/lib/api"
+import type { AgentToolOffer } from "@/features/plugins/lib/bridge"
 
 export type SidebarIcon =
   | "puzzle-piece"
@@ -464,28 +464,34 @@ export const pluginsApi = {
       }),
     }),
 
-  startThread: (
-    id: string,
-    body: { repository: string; title: string; request: string }
-  ) =>
-    agentsRequest<{ thread_id: string }>(`${plugin(id)}/threads`, {
-      method: "POST",
-      ...json(body),
+  openChat: (id: string, chat: { name: string; repository: string | null }) =>
+    agentsRequest<{ chat_id: string; thread_id: string }>(
+      `${plugin(id)}/chats`,
+      { method: "POST", ...json(chat) }
+    ),
+  offerTools: (id: string, chatId: string, offer: AgentToolOffer) =>
+    agentsRequest<void>(`${plugin(id)}/chats/${segment(chatId)}/tools`, {
+      method: "PUT",
+      ...json(offer),
     }),
-  threads: async (id: string) =>
-    (
-      await agentsRequest<
-        Array<{
-          thread_id: string
-          title: string
-          status: string
-          updated_at_ms: number | null
-        }>
-      >(`${plugin(id)}/threads`)
-    ).map((thread): AgentThread => ({
-      threadId: thread.thread_id,
-      title: thread.title,
-      status: thread.status,
-      updatedAtMs: thread.updated_at_ms,
-    })),
+  chatCalls: (id: string, chatId: string) =>
+    agentsRequest<Array<ChatCall>>(
+      `${plugin(id)}/chats/${segment(chatId)}/calls`
+    ),
+  answerCalls: (
+    id: string,
+    chatId: string,
+    outputs: Array<{ call_id: string; output: string }>
+  ) =>
+    agentsRequest<{ run_id: string | null }>(
+      `${plugin(id)}/chats/${segment(chatId)}/outputs`,
+      { method: "POST", ...json({ outputs }) }
+    ),
+}
+
+/** A call the chat's agent made to one of the plugin's tools, waiting for the plugin's frame. */
+export interface ChatCall {
+  call_id: string
+  tool: string
+  arguments: JsonObject
 }

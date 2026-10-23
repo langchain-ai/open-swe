@@ -34,8 +34,10 @@ from sqlalchemy.orm import Mapped, mapped_column
 from openswe.database import postgres
 from openswe.database.orm import NOW, Base
 from openswe.github.repo_names import RepoFullName
+from openswe.openai_responses.client_tools import ClientToolSpec
 from openswe.plugins.manifest import PluginManifest
 from openswe.plugins.source import PluginPackage, PluginSource
+from openswe.run_config import PluginChatConfig
 from openswe.ui_invalidations import Topic
 from openswe.utils.json_types import JsonObject
 
@@ -133,13 +135,37 @@ class PluginDocumentRow(Base):
     )
 
 
-class PluginThreadRow(Base):
-    __tablename__ = "plugin_thread"
+class PluginChatRow(Base):
+    __tablename__ = "plugin_chat"
 
     installation: Mapped[UUID] = mapped_column(
         ForeignKey("plugin_installation.id", ondelete="CASCADE")
     )
+    user_id: Mapped[UUID] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"))
+    name: Mapped[str]
+    repository: Mapped[str | None]
     thread_id: Mapped[str]
+    tool_specs: Mapped[list[JsonObject]] = mapped_column(JSONB, default_factory=list)
+    instructions: Mapped[str] = mapped_column(default="")
+    id: Mapped[UUID] = mapped_column(primary_key=True, default_factory=uuid7)
+    created_at: Mapped[datetime | None] = mapped_column(server_default=NOW, init=False)
+    updated_at: Mapped[datetime | None] = mapped_column(server_default=NOW, init=False)
+    created_by: Mapped[UUID | None] = mapped_column(
+        ForeignKey("users.id", ondelete="SET NULL"), default=None
+    )
+    updated_by: Mapped[UUID | None] = mapped_column(
+        ForeignKey("users.id", ondelete="SET NULL"), default=None
+    )
+
+
+class PluginChatCallRow(Base):
+    __tablename__ = "plugin_chat_call"
+
+    chat: Mapped[UUID] = mapped_column(ForeignKey("plugin_chat.id", ondelete="CASCADE"))
+    call_id: Mapped[str]
+    tool: Mapped[str]
+    arguments: Mapped[JsonObject] = mapped_column(JSONB)
+    answered_at: Mapped[datetime | None] = mapped_column(default=None)
     id: Mapped[UUID] = mapped_column(primary_key=True, default_factory=uuid7)
     created_at: Mapped[datetime | None] = mapped_column(server_default=NOW, init=False)
     updated_at: Mapped[datetime | None] = mapped_column(server_default=NOW, init=False)
@@ -613,33 +639,194 @@ class PluginDocuments:
             return deleted is not None
 
 
-class PluginThreads:
-    """The agent threads one installation started."""
+def tool_prefix(plugin_name: str) -> str:
+    """What the names of a plugin's tools start with: no built-in tool name has ``__``."""
+    return f"{plugin_name}__"
 
-    def __init__(self, installation: UUID) -> None:
-        self.installation = installation
 
-    async def record(self, thread_id: str, *, by: UUID) -> None:
+@dataclass(frozen=True, slots=True)
+class PluginChat:
+    """One person's chat with the agent beside a plugin, and the tools the plugin offers it."""
+
+    id: UUID
+    installation: UUID
+    user_id: UUID
+    name: str
+    repository: str | None
+    thread_id: str
+    tools: list[ClientToolSpec]
+    instructions: str
+
+    @classmethod
+    def of(cls, row: PluginChatRow) -> PluginChat:
+        return cls(
+            id=row.id,
+            installation=row.installation,
+            user_id=row.user_id,
+            name=row.name,
+            repository=row.repository,
+            thread_id=row.thread_id,
+            tools=[ClientToolSpec.model_validate(spec) for spec in row.tool_specs],
+            instructions=row.instructions,
+        )
+
+    @staticmethod
+    async def run_config(thread_id: str) -> PluginChatConfig | None:
+        """What a run of ``thread_id`` gets from the plugin it chats beside, if it is a plugin chat."""
         async with postgres.session() as session:
-            session.add(
-                PluginThreadRow(
+            found = (
+                await session.execute(
+                    select(PluginChatRow, PluginInstallationRow.manifest)
+                    .join(
+                        PluginInstallationRow,
+                        PluginInstallationRow.id == PluginChatRow.installation,
+                    )
+                    .where(PluginChatRow.thread_id == thread_id)
+                )
+            ).one_or_none()
+        if found is None:
+            return None
+        row, manifest = found
+        plugin = PluginManifest.model_validate(manifest)
+        chat = PluginChat.of(row)
+        return PluginChatConfig(
+            chat_id=str(chat.id),
+            plugin=plugin.display_name,
+            prefix=tool_prefix(plugin.name),
+            tools=chat.tools,
+            instructions=chat.instructions,
+        )
+
+    @property
+    def calls(self) -> PluginChatCalls:
+        return PluginChatCalls(self.id, self.thread_id)
+
+
+class PluginChats:
+    """One person's chats with the agent beside one installation of a plugin."""
+
+    def __init__(self, installation: UUID, user_id: UUID) -> None:
+        self.installation = installation
+        self.user_id = user_id
+
+    def _where(self) -> list[ColumnElement[bool]]:
+        return [
+            PluginChatRow.installation == self.installation,
+            PluginChatRow.user_id == self.user_id,
+        ]
+
+    async def get(self, name: str, repository: str | None) -> PluginChat | None:
+        async with postgres.session() as session:
+            row = await session.scalar(
+                select(PluginChatRow).where(
+                    *self._where(),
+                    PluginChatRow.name == name,
+                    PluginChatRow.repository.is_(None)
+                    if repository is None
+                    else PluginChatRow.repository == repository,
+                )
+            )
+        return None if row is None else PluginChat.of(row)
+
+    async def by_id(self, chat_id: UUID) -> PluginChat | None:
+        async with postgres.session() as session:
+            row = await session.scalar(
+                select(PluginChatRow).where(*self._where(), PluginChatRow.id == chat_id)
+            )
+        return None if row is None else PluginChat.of(row)
+
+    async def record(self, name: str, repository: str | None, thread_id: str) -> PluginChat:
+        """The chat under ``name``, recorded with ``thread_id`` unless it already was."""
+        async with postgres.session() as session:
+            await session.execute(
+                insert(PluginChatRow)
+                .values(
+                    id=uuid7(),
                     installation=self.installation,
+                    user_id=self.user_id,
+                    name=name,
+                    repository=repository,
                     thread_id=thread_id,
-                    created_by=by,
+                    created_by=self.user_id,
+                    updated_by=self.user_id,
+                )
+                .on_conflict_do_nothing()
+            )
+        chat = await self.get(name, repository)
+        if chat is None:
+            raise RuntimeError("plugin chat vanished as it was recorded")
+        return chat
+
+    async def offer(
+        self, chat_id: UUID, tools: Sequence[ClientToolSpec], instructions: str
+    ) -> bool:
+        """Give the chat's next runs ``tools``; false when it is not this person's."""
+        async with postgres.session() as session:
+            updated = await session.scalar(
+                update(PluginChatRow)
+                .where(*self._where(), PluginChatRow.id == chat_id)
+                .values(
+                    tool_specs=[tool.model_dump(mode="json") for tool in tools],
+                    instructions=instructions,
+                    updated_at=func.clock_timestamp(),
+                    updated_by=self.user_id,
+                )
+                .returning(PluginChatRow.id)
+            )
+        return updated is not None
+
+
+@dataclass(frozen=True, slots=True)
+class PluginChatCall:
+    call_id: str
+    tool: str
+    arguments: JsonObject
+
+
+class PluginChatCalls:
+    """The calls a chat's agent made to the plugin's tools, which the plugin's frame answers."""
+
+    def __init__(self, chat: UUID, thread_id: str) -> None:
+        self.chat = chat
+        self.thread_id = thread_id
+
+    async def record(self, call_id: str, tool: str, arguments: JsonObject) -> None:
+        async with postgres.session() as session:
+            await session.execute(
+                insert(PluginChatCallRow)
+                .values(id=uuid7(), chat=self.chat, call_id=call_id, tool=tool, arguments=arguments)
+                .on_conflict_do_nothing()
+            )
+            await Topic.PLUGIN_CHAT_CALLS.invalidate(session, key=self.thread_id)
+
+    async def pending(self) -> list[PluginChatCall]:
+        """Calls still waiting for the plugin, oldest first."""
+        async with postgres.session() as session:
+            rows = await session.scalars(
+                select(PluginChatCallRow)
+                .where(PluginChatCallRow.chat == self.chat, PluginChatCallRow.answered_at.is_(None))
+                .order_by(PluginChatCallRow.created_at)
+            )
+            return [PluginChatCall(row.call_id, row.tool, row.arguments) for row in rows]
+
+    async def answer(self, call_ids: Sequence[str], *, by: UUID) -> list[str]:
+        """Mark ``call_ids`` answered; the ones that were still waiting, so each is answered once."""
+        async with postgres.session() as session:
+            answered = await session.scalars(
+                update(PluginChatCallRow)
+                .where(
+                    PluginChatCallRow.chat == self.chat,
+                    PluginChatCallRow.call_id.in_(call_ids),
+                    PluginChatCallRow.answered_at.is_(None),
+                )
+                .values(
+                    answered_at=func.clock_timestamp(),
+                    updated_at=func.clock_timestamp(),
                     updated_by=by,
                 )
+                .returning(PluginChatCallRow.call_id)
             )
-
-    async def started_by(self, user_id: UUID, *, limit: int) -> list[str]:
-        """Thread ids ``user_id`` started through this installation, newest first."""
-        async with postgres.session() as session:
-            ids = await session.scalars(
-                select(PluginThreadRow.thread_id)
-                .where(
-                    PluginThreadRow.installation == self.installation,
-                    PluginThreadRow.created_by == user_id,
-                )
-                .order_by(PluginThreadRow.created_at.desc())
-                .limit(limit)
-            )
-            return list(ids)
+            ids = list(answered)
+            if ids:
+                await Topic.PLUGIN_CHAT_CALLS.invalidate(session, key=self.thread_id)
+            return ids

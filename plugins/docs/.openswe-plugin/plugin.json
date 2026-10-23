@@ -13,6 +13,6 @@
     "realtime",
     "github:read",
     "github:write",
-    "threads"
+    "agent"
   ]
 }

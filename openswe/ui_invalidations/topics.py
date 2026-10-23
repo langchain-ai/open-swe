@@ -111,6 +111,9 @@ class Topic(BaseTopic):
     ANNOUNCEMENTS: ClassVar[Topic]
     """Admin announcements and their delivery progress; admins only."""
 
+    PLUGIN_CHAT_CALLS: ClassVar[KeyedTopic[str]]
+    """Keyed by thread id: the calls that thread's agent made to the tools of the plugin it chats beside."""
+
     PLUGIN_DOCUMENTS: ClassVar[KeyedTopic[str]]
     """Keyed: one plugin's documents in one scope, ``<plugin id>/<owner>/<repo>`` for
     those shared through a repository and ``<plugin id>/user/<user id>`` for one person's."""
@@ -256,3 +259,4 @@ Topic.THREAD_BACKGROUND_WORK = KeyedTopic(
 )
 Topic.ANNOUNCEMENTS = AdminTopic("announcements")
 Topic.PLUGIN_DOCUMENTS = KeyedTopic("plugin-documents", authorize_keys=_readable_plugin_documents)
+Topic.PLUGIN_CHAT_CALLS = KeyedTopic("plugin-chat-calls", authorize_keys=_readable_threads)

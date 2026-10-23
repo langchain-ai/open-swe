@@ -1,13 +1,9 @@
 import { useRef, useState } from "react"
 
-import type {
-  RepositoryPick,
-  ThreadRequest,
-} from "@/features/plugins/lib/bridge"
+import type { RepositoryPick } from "@/features/plugins/lib/bridge"
 import { BridgeRequestError } from "@/features/plugins/lib/bridge"
 
 export type Approval =
-  | { kind: "thread"; request: ThreadRequest }
   | { kind: "link"; url: string }
   | { kind: "repositories"; pick: RepositoryPick }
 

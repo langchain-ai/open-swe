@@ -4,6 +4,8 @@ import { Outlet, createFileRoute } from "@tanstack/react-router"
 
 import { ShareRepository } from "@/components/ShareRepository"
 import { Sidebar } from "@/components/Sidebar"
+import { OpenPage, useAgentTools } from "@/lib/agent"
+import type { Draft } from "@/lib/model"
 import {
   useDrafts,
   useRepositories,
@@ -52,16 +54,40 @@ function Space({ repository }: { repository: string }) {
       </div>
     )
   return (
-    <div className="flex h-svh min-h-0">
-      <Sidebar
-        repository={repository}
-        pages={space.data.pages}
-        drafts={drafts.data}
-        truncated={space.data.truncated}
-      />
-      <main className="flex min-w-0 flex-1 flex-col">
-        <Outlet />
-      </main>
-    </div>
+    <Loaded
+      repository={repository}
+      pages={space.data.pages}
+      drafts={drafts.data}
+      truncated={space.data.truncated}
+    />
+  )
+}
+
+function Loaded({
+  repository,
+  pages,
+  drafts,
+  truncated,
+}: {
+  repository: string
+  pages: string[]
+  drafts: Map<string, Draft>
+  truncated: boolean
+}) {
+  const openPage = useAgentTools(repository, pages, drafts)
+  return (
+    <OpenPage.Provider value={openPage}>
+      <div className="flex h-svh min-h-0">
+        <Sidebar
+          repository={repository}
+          pages={pages}
+          drafts={drafts}
+          truncated={truncated}
+        />
+        <main className="flex min-w-0 flex-1 flex-col">
+          <Outlet />
+        </main>
+      </div>
+    </OpenPage.Provider>
   )
 }

@@ -28,8 +28,8 @@ class PluginPermission(StrEnum):
     """Read files, trees, branches, history and pull requests in its repositories."""
     GITHUB_WRITE = "github:write"
     """Create branches, commit files and open pull requests in its repositories."""
-    THREADS = "threads"
-    """Start agent threads, each one only after the person approves its request."""
+    AGENT = "agent"
+    """Chat with an agent in a dock beside the plugin, which can call tools the plugin provides."""
     REALTIME = "realtime"
     """Join live rooms: broadcast updates and presence to others with the same access."""
 

@@ -7,6 +7,7 @@ import pytest
 
 from openswe.github.http import GitHubClient, Release, ReleaseAsset
 from openswe.github.repo_names import RepoFullName
+from openswe.openai_responses.client_tools import ClientToolSpec
 from openswe.plugins import installed as installed_module
 from openswe.plugins.installed import InstalledPlugin, PluginPermissionDenied, RepositoryNotGranted
 from openswe.plugins.manifest import PluginManifest, PluginPermission
@@ -15,6 +16,8 @@ from openswe.plugins.records import (
     DocumentQuery,
     DocumentScope,
     Installation,
+    PluginChat,
+    PluginChats,
     PluginDocuments,
     PluginInstallations,
     PluginNameTaken,
@@ -119,6 +122,35 @@ async def test_documents_come_back_ordered_and_bounded() -> None:
         prefix="t-", order_by=("at", "rank"), descending=True, start=Cursor(10), end=Cursor(2)
     )
     assert await keys(newest) == ["t-b", "t-a", "t-Z"]
+
+
+async def test_a_chat_is_its_persons_and_each_call_is_answered_once() -> None:
+    ada, bob = await _person("ada", "1"), await _person("bob", "2")
+    installation = await PluginInstallations.install(
+        _package("acme/docs", permissions=["agent"]), user_id=None, by=ada
+    )
+    mine, theirs = PluginChats(installation, ada), PluginChats(installation, bob)
+    chat = await mine.record("repo", "acme/app", "thread-1")
+    read_page = ClientToolSpec(
+        kind="function", name="docs__read_page", parameters={"type": "object", "properties": {}}
+    )
+
+    # Opening it again keeps the thread it was made with.
+    assert (await mine.record("repo", "acme/app", "thread-2")).thread_id == "thread-1"
+    assert await theirs.by_id(chat.id) is None
+    assert not await theirs.offer(chat.id, [read_page], "")
+    assert await mine.offer(chat.id, [read_page], "Read the page first.")
+    config = await PluginChat.run_config("thread-1")
+    assert config is not None
+    assert (config.prefix, [t.name for t in config.tools]) == ("docs__", ["docs__read_page"])
+
+    # A replayed tool call is one call, and the frame answers it once.
+    await chat.calls.record("call-1", "docs__read_page", {})
+    await chat.calls.record("call-1", "docs__read_page", {})
+    assert [call.call_id for call in await chat.calls.pending()] == ["call-1"]
+    assert await chat.calls.answer(["call-1"], by=ada) == ["call-1"]
+    assert await chat.calls.answer(["call-1"], by=ada) == []
+    assert await chat.calls.pending() == []
 
 
 async def test_a_name_installed_for_everyone_wins_and_cannot_be_installed_twice() -> None:

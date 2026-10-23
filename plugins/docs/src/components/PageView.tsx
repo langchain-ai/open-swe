@@ -11,7 +11,6 @@ import {
 } from "@langchain/macaw-components/DropdownMenu"
 import { IconButton } from "@langchain/macaw-components/IconButton"
 import { Spinner } from "@langchain/macaw-components/Spinner"
-import { Textarea } from "@langchain/macaw-components/Textarea"
 import { useHostContext, usePluginHost } from "@openswe/plugin-sdk/react"
 import { DotsThreeIcon } from "@phosphor-icons/react/dist/ssr/DotsThree"
 import { SparkleIcon } from "@phosphor-icons/react/dist/ssr/Sparkle"
@@ -27,7 +26,8 @@ import {
   type Composing,
 } from "@/components/Comments"
 import { PageEditor } from "@/components/Editor"
-import { resolveAnchor, type Highlight } from "@/lib/anchors"
+import { useOpenPageTools } from "@/lib/agent"
+import { anchorFor, resolveAnchor, type Highlight } from "@/lib/anchors"
 import { errorMessage } from "@/lib/host"
 import { asLiveMarkdown, useLiveDoc, usePresence } from "@/lib/live"
 import { preserveFormatting } from "@/lib/preserve"
@@ -42,7 +42,6 @@ import {
   splitFrontMatter,
   timeAgo,
   withTrailingNewline,
-  type Anchor,
   type CommentStatus,
   type Draft,
   type PageComment,
@@ -57,7 +56,6 @@ import {
   usePeople,
   usePull,
   useSpace,
-  useThreads,
 } from "@/lib/queries"
 
 type Tab = "comments" | "activity"
@@ -99,7 +97,6 @@ export function PageView({
   const [tab, setTab] = useState<Tab>("comments")
   const [composing, setComposing] = useState<Composing | null>(null)
   const [activeId, setActiveId] = useState<string | null>(null)
-  const [asking, setAsking] = useState<{ anchor: Anchor | null } | null>(null)
   const [pendingAccept, setPendingAccept] = useState<string | null>(null)
 
   // Opening the draft swaps the read-only editor for the live one, and the page
@@ -334,54 +331,84 @@ export function PageView({
     // eslint-disable-next-line react-hooks/exhaustive-deps -- runs when the editor becomes live.
   }, [pendingAccept, live, synced, doc])
 
-  const askAgent = async (instruction: string, anchor: Anchor | null) => {
-    const active = await ensureDraft()
-    if (dirty) await save()
-    const request = [
-      `Edit \`${path}\` in ${repository} on the existing branch \`${active.branch}\`.`,
-      "",
-      instruction,
-      ...(anchor
-        ? [
-            "",
-            "This applies to the passage:",
-            "",
-            `> ${anchor.quote.replace(/\n/g, "\n> ")}`,
-          ]
-        : []),
-      "",
-      `Commit your change to \`${active.branch}\` and push it. Do not open a pull request, and leave the rest of the page as it is.`,
-    ].join("\n")
-    const started = await host.threads.start({
-      repository,
-      title: `Docs: ${pageTitle(path)}`,
-      request,
-    })
-    if (started) {
-      await queryClient.invalidateQueries({ queryKey: keys.threads })
-      void host.ui.toast({
-        title: "The agent is on it",
-        description:
-          "Its commit lands on this draft; you'll be offered it here.",
-        intent: "success",
-      })
+  const openComments = threads.filter((t) => t.comment.status === "open")
+  const askInChat = (draftText?: string) =>
+    void host.agent.open(draftText ? { draft: draftText } : {})
+
+  /** The live editor, starting the draft first; tools that change the page wait for it. */
+  const liveEditor = async (): Promise<Editor> => {
+    await ensureDraft()
+    for (let tries = 0; tries < 150; tries++) {
+      const ready = mounted()
+      if (ready?.isEditable) return ready
+      await new Promise((resolve) => setTimeout(resolve, 100))
     }
+    throw new Error("The draft didn't open in time; try again.")
   }
 
-  const openComments = threads.filter((t) => t.comment.status === "open")
-  const addressComments = () =>
-    askAgent(
-      [
-        "Address these review comments on the page:",
-        "",
-        ...openComments.map(({ comment }) =>
-          comment.suggestion !== null
-            ? `- Replace "${comment.quote}" with "${comment.suggestion}"${comment.body ? ` (${comment.body})` : ""}`
-            : `- On "${comment.quote}": ${comment.body}`
-        ),
-      ].join("\n"),
-      null
-    )
+  const selectedText = (): string | null => {
+    const view = mounted()?.view
+    const selection = document.getSelection()
+    if (!view || !selection || selection.isCollapsed) return null
+    const range = selection.getRangeAt(0)
+    if (!view.dom.contains(range.commonAncestorContainer)) return null
+    return selection.toString() || null
+  }
+
+  useOpenPageTools({
+    read: () => ({
+      repository,
+      path,
+      draft: draft
+        ? { branch: draft.branch, startedBy: draft.startedBy }
+        : null,
+      markdown: mounted()?.getMarkdown() ?? split.body,
+      selection: selectedText(),
+      openComments: openComments.map(({ id, comment }) => ({
+        id,
+        quote: comment.quote,
+        body: comment.body,
+        suggestion: comment.suggestion,
+        author: comment.author,
+      })),
+    }),
+    edit: async (find, replace) => {
+      const view = await liveEditor()
+      const range = resolveAnchor(view.state.doc, {
+        quote: find,
+        prefix: "",
+        suffix: "",
+      })
+      if (!range)
+        throw new Error("That text isn't on the page; read_page shows what is.")
+      const parsed = view.markdown?.parse(replace)
+      const blocks = parsed?.content ?? []
+      // One paragraph replaces text within its block rather than splitting it.
+      const content =
+        blocks.length === 1 && blocks[0]?.type === "paragraph"
+          ? (blocks[0].content ?? [])
+          : blocks
+      view.chain().insertContentAt(range, content).run()
+      return { edited: path, draft: (await ensureDraft()).branch }
+    },
+    comment: async (quote, body, suggestion) => {
+      const view = mounted()
+      const range =
+        view && resolveAnchor(view.state.doc, { quote, prefix: "", suffix: "" })
+      const anchor =
+        view && range && anchorFor(view.state.doc, range.from, range.to)
+      if (!anchor)
+        throw new Error("That text isn't on the page; read_page shows what is.")
+      const id = crypto.randomUUID()
+      await putComment(
+        id,
+        newComment({ parent: null, ...anchor, body, suggestion })
+      )
+      setTab("comments")
+      setActiveId(id)
+      return { commented: id }
+    },
+  })
 
   const onLink = (href: string) => {
     const target = resolveLink(href, path)
@@ -495,17 +522,14 @@ export function PageView({
               />
             </DropdownMenuTrigger>
             <DropdownMenuContent align="end" className="w-64">
-              <DropdownMenuItem
-                onSelect={() => {
-                  setAsking({ anchor: null })
-                  setTab("comments")
-                }}
-              >
-                <SparkleIcon size={14} /> Ask the agent for a change
+              <DropdownMenuItem onSelect={() => askInChat()}>
+                <SparkleIcon size={14} /> Ask the agent
               </DropdownMenuItem>
               <DropdownMenuItem
                 disabled={openComments.length === 0}
-                onSelect={() => act("Ask the agent")(addressComments)}
+                onSelect={() =>
+                  askInChat("Address the open comments on this page.")
+                }
               >
                 <SparkleIcon size={14} /> Ask the agent to address{" "}
                 {openComments.length} open comment
@@ -579,10 +603,8 @@ export function PageView({
                 setComposing({ anchor, kind: "suggestion" })
                 setTab("comments")
               },
-              askAgent: (anchor) => {
-                setAsking({ anchor })
-                setTab("comments")
-              },
+              askAgent: (anchor) =>
+                askInChat(`> ${anchor.quote.replace(/\n/g, "\n> ")}\n\n`),
             }}
             onSelectComment={(id) => {
               setActiveId(id)
@@ -622,17 +644,6 @@ export function PageView({
             </button>
           ))}
         </nav>
-        {tab === "comments" && asking && (
-          <AskAgent
-            anchor={asking.anchor}
-            onCancel={() => setAsking(null)}
-            onSubmit={(instruction) => {
-              const anchor = asking.anchor
-              setAsking(null)
-              act("Ask the agent")(() => askAgent(instruction, anchor))
-            }}
-          />
-        )}
         {tab === "comments" ? (
           <CommentsPanel
             threads={threads}
@@ -794,10 +805,6 @@ function Activity({
 }) {
   const host = usePluginHost()
   const history = useHistory(repository, path, gitRef)
-  const threads = useThreads(true)
-  const mine = (threads.data ?? []).filter(
-    (thread) => thread.title === `Docs: ${pageTitle(path)}`
-  )
   return (
     <div className="flex min-h-0 flex-1 flex-col gap-space-4 overflow-y-auto p-space-3">
       <section className="flex flex-col gap-space-2">
@@ -830,83 +837,6 @@ function Activity({
           ))}
         </ol>
       </section>
-      {mine.length > 0 && (
-        <section className="flex flex-col gap-space-2">
-          <h3 className="flex items-center gap-space-1 text-xs font-medium text-secondary">
-            <SparkleIcon size={12} /> Agent threads
-          </h3>
-          {mine.map((thread) => (
-            <button
-              key={thread.threadId}
-              type="button"
-              onClick={() => void host.nav.openThread(thread.threadId)}
-              className="flex items-center justify-between rounded-md border border-default px-space-2 py-space-1 text-left text-sm text-primary hover:bg-surface-level-2-hover"
-            >
-              <span className="truncate">{thread.title}</span>
-              <Badge size="xxs" color="secondary">
-                {thread.status}
-              </Badge>
-            </button>
-          ))}
-        </section>
-      )}
     </div>
-  )
-}
-
-/** The request to the agent, inline at the top of the side panel. */
-function AskAgent({
-  anchor,
-  onCancel,
-  onSubmit,
-}: {
-  anchor: Anchor | null
-  onCancel: () => void
-  onSubmit: (instruction: string) => void
-}) {
-  const [instruction, setInstruction] = useState("")
-  return (
-    <form
-      className="m-space-3 mb-0 flex flex-col gap-space-2 rounded-lg border border-default bg-surface-level-1 p-space-3"
-      onSubmit={(event) => {
-        event.preventDefault()
-        if (instruction.trim()) onSubmit(instruction.trim())
-      }}
-      onKeyDown={(event) => {
-        if (event.key === "Escape") onCancel()
-      }}
-    >
-      <span className="flex items-center gap-space-1 text-xs font-medium text-secondary">
-        <SparkleIcon size={12} /> Ask the agent
-      </span>
-      {anchor && (
-        <blockquote className="line-clamp-3 border-l-2 border-default pl-space-2 text-xs text-secondary">
-          {anchor.quote}
-        </blockquote>
-      )}
-      <Textarea
-        placeholder={
-          anchor
-            ? "What should change here?"
-            : "What should change on this page?"
-        }
-        value={instruction}
-        onChange={setInstruction}
-        rows={3}
-        autoFocus
-      />
-      <p className="text-xs text-tertiary">
-        It edits this page on its draft and commits there; you&apos;ll see the
-        request before it starts.
-      </p>
-      <div className="flex justify-end gap-space-2">
-        <Button type="button" size="sm" variant="plain" onClick={onCancel}>
-          Cancel
-        </Button>
-        <Button type="submit" size="sm" disabled={!instruction.trim()}>
-          Continue
-        </Button>
-      </div>
-    </form>
   )
 }

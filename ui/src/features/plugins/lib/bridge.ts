@@ -7,6 +7,7 @@
  */
 import type {
   CollectionApi,
+  ChatScope,
   CommitWire,
   CursorWire,
   DocumentScope,
@@ -17,6 +18,7 @@ import type {
   JsonObject,
   JsonScalar,
   JsonValue,
+  PluginPermission,
   PullRequestDraft,
   QueryWire,
   RepositoryPickOptions,
@@ -66,10 +68,19 @@ export function sendableError(error: Error): Error {
   return sent
 }
 
-export interface ThreadRequest {
-  repository: string
-  title: string
-  request: string
+/** What a plugin offers the agent in its dock: its tools, and when to use them. */
+export interface AgentToolOffer {
+  tools: Array<{ name: string; description: string; parameters: JsonObject }>
+  instructions: string
+}
+
+/** Runs one call in the plugin's frame; resolves to its result's text, or rejects with the plugin's error. */
+export type ToolRunner = (tool: string, args: JsonObject) => Promise<string>
+
+/** The chat the dock shows: the person's chat under `name`, about `repository` if any. */
+export interface ChatTarget {
+  name: string
+  repository: string | null
 }
 
 export interface RepositoryPick {
@@ -89,14 +100,18 @@ export interface BridgeHost {
   toast: (toast: Toast) => void
   /** The page's title, before " · Open SWE"; `null` is the plugin's name. */
   setTitle: (title: string | null) => void
-  /** Shows the person the request word for word; resolves whether they approved it. */
-  confirmThread: (request: ThreadRequest) => Promise<boolean>
   /** Asks before leaving for a site other than GitHub; resolves whether to go. */
   confirmLink: (url: string) => Promise<boolean>
   /** Shows the person a picker and shares what they choose; resolves to it, `[]` if they cancel. */
   pickRepositories: (pick: RepositoryPick) => Promise<Array<string>>
   /** Whether `owner/repo` is in one of this Open SWE's organizations; the plugin learns only this bool. */
   isInBaseOrg: (repository: string) => boolean
+  /** Offers the agent in the dock these tools until the returned withdrawal. */
+  provideTools: (offer: AgentToolOffer, run: ToolRunner) => () => void
+  /** Chooses the chat the dock shows. */
+  chooseChat: (chat: ChatTarget) => void
+  /** Opens the dock, with `draft` in its composer. */
+  openChat: (draft: string | null) => void
   /** Calls `onChange` whenever anyone writes to `target`; returns the unsubscribe. */
   watchDocuments: (target: DocumentTarget, onChange: () => void) => () => void
   /** Streams one live room to `onEvent` from after `after`; returns the leave. */
@@ -292,11 +307,55 @@ function webUrl(value: unknown): URL {
 }
 
 /** A callback the plugin passed, kept past the call that brought it. */
-function keep<A>(value: unknown, name: string): RpcStub<(arg: A) => void> {
-  const stub = value as RpcStub<(arg: A) => void> | undefined
+function keep<F extends (...args: never[]) => unknown>(
+  value: unknown,
+  name: string
+): RpcStub<F> {
+  const stub = value as RpcStub<F> | undefined
   if (typeof stub !== "function" || typeof stub.dup !== "function")
     invalid(`${name} must be a function`)
   return stub.dup()
+}
+
+const TOOL_NAME = /^[a-z][a-z0-9_]{0,47}$/
+const CHAT_NAME = /^[A-Za-z0-9._:@/-]{1,200}$/
+const MAX_TOOLS = 32
+/** The most of a tool result the agent gets; the backend refuses more. */
+export const MAX_TOOL_OUTPUT = 200_000
+
+/** Text that may be empty or left out, at most `max` characters. */
+function plainText(value: unknown, name: string, max: number): string {
+  if (value === undefined) return ""
+  if (typeof value !== "string" || value.length > max)
+    invalid(`${name} must be text of at most ${max} characters`)
+  return value
+}
+
+function toolOffer(json: unknown): AgentToolOffer {
+  const fields = record(jsonText(json, "tools", 256_000), "tools")
+  const tools = fields.tools
+  if (!Array.isArray(tools) || tools.length > MAX_TOOLS)
+    invalid(`tools must be a list of at most ${MAX_TOOLS}`)
+  const checked = tools.map((tool: unknown) => {
+    const entry = record(tool, "tool")
+    const name = text(entry.name, "tool name", 48)
+    if (!TOOL_NAME.test(name))
+      invalid("a tool name is a lowercase letter, then letters, digits or _")
+    const parameters = jsonObject(entry.parameters, `${name}.parameters`)
+    if (parameters.type !== "object")
+      invalid(`${name}.parameters must be a JSON Schema of type "object"`)
+    return {
+      name,
+      description: plainText(entry.description, `${name}.description`, 2_000),
+      parameters,
+    }
+  })
+  if (new Set(checked.map((tool) => tool.name)).size < checked.length)
+    invalid("tool names must be unique")
+  return {
+    tools: checked,
+    instructions: plainText(fields.instructions, "instructions", 4_000),
+  }
 }
 
 // ---- Limits -----------------------------------------------------------------------
@@ -459,7 +518,7 @@ function subscription<E>(
   name: string,
   start: (send: (event: E) => void) => () => void
 ): () => void {
-  const kept = keep<E>(listener, name)
+  const kept = keep<(event: E) => void>(listener, name)
   let release: () => void
   try {
     release = budget.claim()
@@ -494,6 +553,14 @@ export class PluginHostApi extends RpcTarget implements HostApi {
 
   context(): Promise<HostContext> {
     return this.#budget.run(() => this.#host().context())
+  }
+
+  #require(permission: PluginPermission): void {
+    if (!this.#host().plugin.manifest.permissions.includes(permission))
+      throw new BridgeRequestError(
+        `The plugin was not granted ${permission}`,
+        403
+      )
   }
 
   subscribe(listener: (event: HostEvent) => void): Promise<Subscription> {
@@ -629,23 +696,59 @@ export class PluginHostApi extends RpcTarget implements HostApi {
     )
   }
 
-  startThread(request: ThreadRequest) {
-    return this.#budget.run(async () => {
-      const fields = record(request, "request")
-      const checked: ThreadRequest = {
-        repository: repositoryName(fields.repository),
-        title: text(fields.title, "title", 120),
-        request: text(fields.request, "request", 40_000),
+  provideTools(
+    json: string,
+    run: (tool: string, argumentsJson: string) => Promise<string>
+  ): Promise<Subscription> {
+    return this.#budget.run(() => {
+      this.#require("agent")
+      const offer = toolOffer(json)
+      const kept = keep<typeof run>(run, "run")
+      let release: () => void
+      try {
+        release = this.#budget.claim()
+      } catch (error) {
+        kept[Symbol.dispose]()
+        throw error
       }
-      const host = this.#host()
-      if (!(await host.confirmThread(checked))) return null
-      const started = await pluginsApi.startThread(host.plugin.id, checked)
-      return { threadId: started.thread_id }
+      const withdraw = this.#host().provideTools(offer, async (tool, args) => {
+        const output: unknown = await kept(tool, JSON.stringify(args))
+        if (typeof output !== "string")
+          throw new Error(`${tool} returned no text`)
+        return output.length > MAX_TOOL_OUTPUT
+          ? `${output.slice(0, MAX_TOOL_OUTPUT)}\n[cut at ${MAX_TOOL_OUTPUT} characters]`
+          : output
+      })
+      return new SubscriptionTarget(() => {
+        withdraw()
+        kept[Symbol.dispose]()
+        release()
+      })
     })
   }
 
-  threads() {
-    return this.#budget.run(() => pluginsApi.threads(this.#host().plugin.id))
+  chooseChat(scope: ChatScope): Promise<void> {
+    return this.#budget.run(() => {
+      this.#require("agent")
+      const fields = record(scope, "scope")
+      const name = text(fields.name, "name", 200)
+      if (!CHAT_NAME.test(name)) invalid("name is not a valid chat name")
+      const host = this.#host()
+      const repository = scopeOf(scope)
+      if (repository !== null && !host.plugin.repositories.includes(repository))
+        throw new BridgeRequestError(
+          `${repository} is not shared with the plugin`,
+          403
+        )
+      host.chooseChat({ name, repository })
+    })
+  }
+
+  openChat(draft: string | null): Promise<void> {
+    return this.#budget.run(() => {
+      this.#require("agent")
+      this.#host().openChat(optionalText(draft, "draft", 20_000) ?? null)
+    })
   }
 
   joinRoom(

@@ -75,6 +75,7 @@ from openswe.github.sandbox_access import READ_ONLY_REVIEW_PERMISSIONS
 from openswe.middleware.conversation_offloading import ConversationOffloadingMiddleware
 from openswe.middleware.dynamic_tools import DynamicToolMiddleware
 from openswe.middleware.model_selection import PersistedRoute, normalize_route
+from openswe.middleware.plugin_chat import PluginChatMiddleware
 from openswe.middleware.pr_creation_guard import PullRequestCreationGuardMiddleware
 from openswe.middleware.record_run_usage import RecordRunUsageMiddleware
 from openswe.middleware.sandbox_circuit_breaker import post_sandbox_unreachable_notification
@@ -168,6 +169,9 @@ _BOX_CHECKS: Final[Sequence[tuple[type, SandboxCheck | None]]] = (
     (FilesystemMiddleware, None),
     (DynamicToolMiddleware, None),
     (ToolRetryMiddleware, None),
+    # Only a plugin's own tools, whose names no box tool shares; a Responses
+    # client's tools replace the box's, so that middleware stays off this list.
+    (PluginChatMiddleware, None),
 )
 # A message inside a state value, as it crosses to MDA and back.
 MESSAGE_KEY: Final = "__lc_message__"
@@ -675,10 +679,20 @@ class RemoteGraph:
             configurable["run_id"] = run_id
         return {**config, "configurable": configurable}
 
+    @staticmethod
+    def _key(run: RemoteRun, run_id: str | None) -> tuple[str, str | None]:
+        # Hooks that name no run, such as the catalog, still differ from run to
+        # run: a plugin chat's tools, for one, can change between them.
+        invocation = run.configurable.get("invocation_id")
+        return (
+            run.thread_id,
+            run_id or (f"invocation:{invocation}" if isinstance(invocation, str) else None),
+        )
+
     async def session(
         self, run: RemoteRun, run_id: str | None, *, fresh: bool = False
     ) -> RunSession:
-        key = (run.thread_id, run_id)
+        key = self._key(run, run_id)
         cached = self._sessions.get(key)
         if not fresh and cached is not None and time.monotonic() < cached.expires_at:
             return cached
@@ -694,7 +708,7 @@ class RemoteGraph:
         return session
 
     def end(self, run: RemoteRun, run_id: str | None) -> None:
-        self._sessions.pop((run.thread_id, run_id), None)
+        self._sessions.pop(self._key(run, run_id), None)
 
     async def hook(self, run: RemoteRun, hook: str, raw: Mapping[str, JsonValue]) -> JsonValue:
         """Answer one call the MDA run makes around its model loop."""

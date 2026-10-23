@@ -24,10 +24,10 @@ export const PERMISSION_COPY: Record<
     description:
       "Share live edits, cursors and who is viewing with everyone using it on the same repository.",
   },
-  threads: {
-    label: "Start agent threads",
+  agent: {
+    label: "Work with an agent",
     description:
-      "Ask you to start an agent thread in a repository you share. You read and approve every request first.",
+      "Offer tools to an agent you chat with beside it. You write every message; the agent works as you, in a private thread.",
   },
 }
 

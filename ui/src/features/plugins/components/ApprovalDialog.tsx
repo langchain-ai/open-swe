@@ -55,27 +55,6 @@ export function ApprovalDialog({
               onAnswer={onAnswer}
             />
           </>
-        ) : approval?.kind === "thread" ? (
-          <>
-            <DialogTitle>Start an agent thread?</DialogTitle>
-            <DialogDescription>
-              {name} wants to start a private agent thread in{" "}
-              <span className="font-medium text-primary">
-                {approval.request.repository}
-              </span>
-              . The agent works as you, with your access. Read the request
-              before you start it.
-            </DialogDescription>
-            <div className="flex flex-col gap-space-1">
-              <span className="text-xs font-medium text-primary">
-                {approval.request.title}
-              </span>
-              <pre className="max-h-72 overflow-auto rounded-md border border-default bg-surface-level-1 p-space-3 text-xs whitespace-pre-wrap text-primary">
-                {approval.request.request}
-              </pre>
-            </div>
-            <Answers armed={armed} confirm="Start thread" onAnswer={onAnswer} />
-          </>
         ) : approval?.kind === "link" ? (
           <>
             <DialogTitle>Open this link?</DialogTitle>
