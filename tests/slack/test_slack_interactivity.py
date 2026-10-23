@@ -8,6 +8,7 @@ import pytest
 from fastapi import BackgroundTasks, Request
 
 from openswe.slack import routes as slack_routes
+from openswe.slack import workflow_approval
 from openswe.slack.payloads import SlackBlockAction, SlackChannelContext, SlackInteraction
 
 
@@ -302,3 +303,120 @@ async def test_code_channel_external_select_returns_registered_suggestions(
 
     assert result == {"options": options}
     get_suggestions.assert_awaited_once_with("C-code", "V-plan", "repository", "open")
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("location", "identity", "state", "approved"),
+    [
+        ("coordinator", "owner", "pending", True),
+        ("legacy", "owner", "pending", True),
+        ("dm", "owner", "pending", True),
+        ("dm-reject", "owner", "pending", False),
+        ("unrelated", "owner", "pending", False),
+        ("wrong-dm", "owner", "pending", False),
+        ("coordinator", "other", "pending", False),
+        ("coordinator", "unlinked", "pending", False),
+        ("bot", "owner", "pending", False),
+        ("coordinator", "owner", "approved", False),
+        ("coordinator", "owner", "rejected", False),
+    ],
+)
+async def test_workflow_approval_requires_owner_and_authorized_card_location(
+    monkeypatch: pytest.MonkeyPatch,
+    location: str,
+    identity: str,
+    state: str,
+    approved: bool,
+) -> None:
+    payload = _option_payload()
+    is_dm = location in {"dm", "dm-reject", "wrong-dm"}
+    target = "coordinator" if location == "legacy" else "worker"
+    button = {
+        "type": "workflow_push_approval",
+        "action": "reject" if location == "dm-reject" else "approve",
+        "fingerprint": "fp",
+    }
+    if location != "legacy":
+        button["thread_id"] = target
+    payload["actions"][0]["value"] = json.dumps(button)
+    metadata = {"source": "slack", "owner_login": "owner", "visibility": "private"}
+    if location == "bot":
+        metadata["trigger_kind"] = "slack_bot"
+    decide = AsyncMock(return_value={"status": "approved" if approved else "rejected"})
+    dispatch = AsyncMock()
+    confirm = AsyncMock()
+    note = AsyncMock()
+    update = AsyncMock()
+    monkeypatch.setattr(slack_routes.common, "verify_slack_signature", lambda **_kwargs: True)
+    monkeypatch.setattr(
+        slack_routes.common,
+        "resolve_slack_channel_context",
+        AsyncMock(
+            return_value=SlackChannelContext(
+                is_im=is_dm, is_ext_shared=False, is_pending_ext_shared=False
+            )
+        ),
+    )
+    monkeypatch.setattr(
+        workflow_approval.User, "concierge_mode_for_slack", AsyncMock(return_value=is_dm)
+    )
+    monkeypatch.setattr(
+        workflow_approval.User,
+        "login_for_slack",
+        AsyncMock(return_value=None if identity == "unlinked" else identity),
+    )
+    monkeypatch.setattr(
+        workflow_approval,
+        "lookup_slack_thread_id",
+        AsyncMock(return_value="unrelated" if location == "unrelated" else "coordinator"),
+    )
+    monkeypatch.setattr(
+        workflow_approval, "fetch_thread_metadata", AsyncMock(return_value=metadata)
+    )
+    monkeypatch.setattr(
+        workflow_approval,
+        "open_dm",
+        AsyncMock(return_value="wrong" if location == "wrong-dm" else "C1"),
+    )
+    monkeypatch.setattr(
+        workflow_approval.TaskMembership,
+        "context_for_thread",
+        AsyncMock(
+            return_value=SimpleNamespace(task=SimpleNamespace(coordinator_thread_id="coordinator"))
+        ),
+    )
+    monkeypatch.setattr(
+        workflow_approval,
+        "get_workflow_push_approvals",
+        AsyncMock(return_value={"fp": {"status": state}}),
+    )
+    monkeypatch.setattr(workflow_approval, "decide_workflow_push_approval", decide)
+    monkeypatch.setattr(workflow_approval, "dispatch_followup", dispatch)
+    monkeypatch.setattr(workflow_approval, "post_slack_ephemeral_message", confirm)
+    monkeypatch.setattr(workflow_approval, "note_for_concierge", note)
+    monkeypatch.setattr(workflow_approval, "update_slack_message", update)
+    background = BackgroundTasks()
+
+    result = await slack_routes.slack_interactivity(_request(payload), background)
+    await background()
+
+    accepted = approved or location == "dm-reject"
+    assert result["status"] == ("accepted" if accepted else "ignored")
+    if not accepted:
+        decide.assert_not_awaited()
+        dispatch.assert_not_awaited()
+        update.assert_not_awaited()
+        return
+    decide.assert_awaited_once_with(target, "fp", approved=approved, actor="owner")
+    assert confirm.await_args.args[:2] == ("C1", "U1")
+    if is_dm:
+        note.assert_awaited_once()
+    if approved:
+        assert dispatch.await_args.args[:2] == (target, metadata)
+        assert dispatch.await_args.kwargs == {
+            "github_login": "owner",
+            "multitask_strategy": "enqueue",
+        }
+    else:
+        dispatch.assert_not_awaited()

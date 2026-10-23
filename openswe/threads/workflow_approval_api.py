@@ -17,6 +17,7 @@ from openswe.threads.summary import (
     thread_source,
 )
 from openswe.threads.workflow_approval import (
+    WorkflowApprovalAlreadyDecided,
     decide_workflow_push_approval,
     get_workflow_push_approvals,
     workflow_push_approval_responses,
@@ -51,9 +52,12 @@ async def approve_workflow_push(
 ) -> dict[str, Any]:
     metadata = await fetch_thread_metadata(thread_id)
     _assert_thread_promptable(metadata, session["sub"])
-    record = await decide_workflow_push_approval(
-        thread_id, fingerprint, approved=True, actor=session["sub"]
-    )
+    try:
+        record = await decide_workflow_push_approval(
+            thread_id, fingerprint, approved=True, actor=session["sub"]
+        )
+    except WorkflowApprovalAlreadyDecided as exc:
+        raise HTTPException(409, str(exc)) from exc
     if record is None:
         raise HTTPException(404, "workflow push approval not found")
     await dispatch_followup(
@@ -73,9 +77,12 @@ async def reject_workflow_push(
 ) -> dict[str, Any]:
     metadata = await fetch_thread_metadata(thread_id)
     _assert_thread_promptable(metadata, session["sub"])
-    record = await decide_workflow_push_approval(
-        thread_id, fingerprint, approved=False, actor=session["sub"]
-    )
+    try:
+        record = await decide_workflow_push_approval(
+            thread_id, fingerprint, approved=False, actor=session["sub"]
+        )
+    except WorkflowApprovalAlreadyDecided as exc:
+        raise HTTPException(409, str(exc)) from exc
     if record is None:
         raise HTTPException(404, "workflow push approval not found")
     return {"status": "rejected", "fingerprint": fingerprint}

@@ -252,7 +252,11 @@ async def test_get_thread_counts_pending_run_outside_history_window(
     monkeypatch.setattr(threads_tool, "langgraph_client", lambda: client)
     monkeypatch.setattr(threads_tool, "get_plan_content", AsyncMock(return_value={}))
     monkeypatch.setattr(threads_tool, "list_plan_comments", AsyncMock(return_value=[]))
-    monkeypatch.setattr(threads_tool, "get_workflow_push_approvals", AsyncMock(return_value={}))
+    monkeypatch.setattr(
+        threads_tool,
+        "get_workflow_push_approvals",
+        AsyncMock(return_value={"fp": {"fingerprint": "fp", "status": "pending"}}),
+    )
     monkeypatch.setattr(threads_tool, "get_langsmith_thread_cost", AsyncMock(return_value=None))
 
     result = await threads_tool.get_thread("thread-1")
@@ -262,6 +266,10 @@ async def test_get_thread_counts_pending_run_outside_history_window(
     # independent status="pending" fetch. The message queue also has one, so
     # the total is 2.
     assert result["queued_message_count"] == 2
+    assert result["workflow_approvals"][0]["status"] == "pending"
+    assert "share_workflow_approval" in result["available_actions"]
+    assert "approve_workflow_push" not in result["available_actions"]
+    assert "reject_workflow_push" not in result["available_actions"]
 
 
 async def test_list_threads_resolves_slack_reply_link(
@@ -393,6 +401,45 @@ async def test_manage_thread_uses_followup_sender_for_owner_checks(
 
     assert result == {"success": False, "error": "thread not found", "status_code": 404}
     cancel.assert_awaited_once_with("thread-1", "reviewer", email=None)
+
+
+@pytest.mark.parametrize("action", ["approve_workflow_push", "reject_workflow_push"])
+async def test_manage_thread_cannot_decide_workflow_approval(
+    monkeypatch: pytest.MonkeyPatch, action: str
+) -> None:
+    monkeypatch.setattr(threads_tool, "_actor", AsyncMock(return_value=_actor()))
+
+    result = await threads_tool.manage_thread("thread-1", action, fingerprint="fp")
+
+    assert result == {
+        "success": False,
+        "error": f"Unexpected arguments for {action}: fingerprint",
+    }
+
+
+async def test_manage_thread_shares_workflow_approval_from_current_thread(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    share = AsyncMock(return_value={"shared": True})
+    monkeypatch.setattr(threads_tool, "_actor", AsyncMock(return_value=_actor()))
+    monkeypatch.setattr(
+        threads_tool,
+        "get_dashboard_thread",
+        AsyncMock(return_value={"id": "worker-thread"}),
+    )
+    monkeypatch.setattr(
+        threads_tool, "_config", lambda: {"configurable": {"thread_id": "coordinator-thread"}}
+    )
+    monkeypatch.setattr(threads_tool, "share_workflow_approval", share)
+
+    result = await threads_tool.manage_thread(
+        "worker-thread", "share_workflow_approval", fingerprint="fp"
+    )
+
+    assert result == {"success": True, "shared": True}
+    share.assert_awaited_once_with(
+        "worker-thread", "fp", current_thread_id="coordinator-thread", actor_login="octocat"
+    )
 
 
 async def test_manage_thread_rechecks_admin_cancel(monkeypatch: pytest.MonkeyPatch) -> None:

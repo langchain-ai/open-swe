@@ -17,7 +17,7 @@ from openswe.review_guide.advance import advance
 from openswe.review_guide.buttons import NEXT_LABELS
 from openswe.review_guide.launch import close_guide_for_channel
 from openswe.review_guide.sessions import ReviewGuideSession
-from openswe.slack import suggested_actions
+from openswe.slack import suggested_actions, workflow_approval
 from openswe.slack import webhook as service
 from openswe.slack.allowed_bots import resolve_allowed_slack_bot
 from openswe.slack.ask import (
@@ -1133,75 +1133,14 @@ async def slack_interactivity(
         if button.type == act_as.BUTTON_TYPE:
             return await act_as.handle_button(interaction, button, background_tasks)
 
-        if button.type == "workflow_push_approval":
-            if not channel_id or not thread_ts or not button.fingerprint:
-                return ignored("Missing workflow approval context")
-
-            thread_id = await common.lookup_slack_thread_id(channel_id, thread_ts)
-            if not thread_id:
-                return ignored("Slack thread is not associated")
-            if button.action not in {"approve", "reject"}:
-                return ignored("Unknown workflow approval action")
-            approved = button.action == "approve"
-            record = await common.decide_workflow_push_approval(
-                thread_id, button.fingerprint, approved=approved, actor=user_id
-            )
-            if record is None:
-                await common.post_slack_thread_reply(
-                    channel_id=channel_id,
-                    thread_ts=reply_ts,
-                    text="I couldn't find that workflow approval request. Trigger the push again to create a fresh approval.",
-                    agent_thread_id=thread_id,
-                )
-                return ignored("workflow approval not found")
-            background_tasks.add_task(
-                _update_selected_option_message,
+        if button.type == workflow_approval.BUTTON_TYPE:
+            return await workflow_approval.handle_button(
                 interaction,
-                action,
-                "Approve workflow push" if approved else "Reject workflow push",
-            )
-            if not approved:
-                await common.post_slack_thread_reply(
-                    channel_id=channel_id,
-                    thread_ts=reply_ts,
-                    text=f"Workflow push rejected for fingerprint `{button.fingerprint}`. No workflow files will be pushed.",
-                    agent_thread_id=thread_id,
-                )
-                return accepted("Workflow push rejected")
-
-            await common.post_slack_thread_reply(
-                channel_id=channel_id,
-                thread_ts=reply_ts,
-                text=f"Workflow push approved for fingerprint `{button.fingerprint}`. Open SWE will retry the blocked push.",
-                agent_thread_id=thread_id,
-            )
-            repo = await common.get_slack_repo_config(
-                channel_id,
-                thread_ts,
-                slack_user_id=user_id,
+                button,
+                background_tasks,
                 channel_context=channel_context,
-                thread_id=thread_id,
+                thread_ts=thread_ts,
             )
-            background_tasks.add_task(
-                service.process_slack_mention,
-                SlackRequest(
-                    channel_id=channel_id,
-                    channel_context=channel_context,
-                    thread_ts=thread_ts,
-                    event_ts=interaction.message.ts,
-                    user_id=user_id,
-                    text=(
-                        "The workflow-file push approval was approved. Retry the blocked "
-                        "git push now; do not alter workflow files before pushing."
-                    ),
-                    bot_user_id=common.SLACK_BOT_USER_ID,
-                    thread_id=thread_id,
-                    concierge_mode=in_concierge_mode,
-                    reply_thread_ts=reply_thread_ts,
-                ),
-                repo,
-            )
-            return accepted("Workflow push approved, retry queued")
 
         if button.type != "open_swe_option":
             return ignored("Unknown action type")

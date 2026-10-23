@@ -26,6 +26,10 @@ from openswe.slack.client import (
     post_slack_thread_reply_with_ts,
 )
 from openswe.slack.tools.reply import build_workflow_approval_blocks
+from openswe.slack.workflow_approval_cards import (
+    propagate_workflow_approval,
+    workflow_approval_message,
+)
 from openswe.threads.workflow_approval import (
     ensure_workflow_push_pending,
     mark_workflow_push_notified,
@@ -594,40 +598,10 @@ def _override_execute_command(request: ToolCallRequest, command: str) -> ToolCal
     return request.override(tool_call=cast(ToolCall, {**dict(tool_call), "args": args}))
 
 
-def _approval_slack_message(change: WorkflowPushChange, approval_url: str | None = None) -> str:
-    files = "\n".join(f"• `{path}`" for path in change.files[:10])
-    if len(change.files) > 10:
-        files += f"\n• …and {len(change.files) - 10} more"
-    repo = change.repo or "the repository"
-    branch = change.branch or "the current branch"
-    stats = change.diff_stats
-    web_review = f"\n\n*Review diff:* <{approval_url}|Open in Web>" if approval_url else ""
-    if change.inherited_from:
-        headline = "*Confirm workflow changes inherited from the base branch*"
-        source = (
-            f"This branch now includes {len(change.files)} GitHub Actions files from merging "
-            f"`{change.inherited_from}`. Open SWE did not author these workflow changes."
-        )
-    else:
-        headline = "*Confirm GitHub Actions workflow changes*"
-        source = f"Open SWE is ready to push workflow changes in `{repo}` on `{branch}`."
-    return (
-        f"{headline}\n{source}\n\n"
-        "*Why confirmation is required:* Workflow files control CI jobs and may access "
-        "repository secrets.\n\n"
-        f"*Files:*\n{files}\n\n"
-        f"*Diff stat:* {stats.get('files', len(change.files))} files, "
-        f"+{stats.get('additions', 0)} / -{stats.get('deletions', 0)}\n"
-        f"*Approval ID:* `{change.fingerprint}`{web_review}\n\n"
-        "Approval resumes this exact push only. If the workflow files change, Open SWE will "
-        "ask again."
-    )
-
-
 async def _post_slack_approval_if_needed(
     request: ToolCallRequest, change: WorkflowPushChange, record: Mapping[str, Any]
 ) -> None:
-    if record.get("notified") is True:
+    if record.get("notified") is True or record.get("status") != "pending":
         return
     cfg = _configurable(request)
     active = await get_active_slack_thread(
@@ -636,19 +610,22 @@ async def _post_slack_approval_if_needed(
         cfg.slack_thread.dump() if cfg.slack_thread else None,
     )
     if not active:
+        thread_id = _thread_id(request)
+        if thread_id and await propagate_workflow_approval(thread_id, record):
+            await mark_workflow_push_notified(thread_id, change.fingerprint)
         return
     channel_id = active.get("channel_id")
     thread_ts = active.get("thread_ts")
     if not isinstance(channel_id, str) or not isinstance(thread_ts, str):
         return
-    message = _approval_slack_message(
-        change, _approval_url(_thread_id(request), change.fingerprint)
-    )
+    message = workflow_approval_message(cfg.thread_id or "", record)
     await post_slack_thread_reply_with_ts(
         channel_id,
         thread_ts,
         message,
-        blocks=build_workflow_approval_blocks(message, change.fingerprint),
+        blocks=build_workflow_approval_blocks(
+            message, change.fingerprint, thread_id=_thread_id(request)
+        ),
         agent_thread_id=cfg.thread_id,
     )
     thread_id = _thread_id(request)
