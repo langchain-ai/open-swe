@@ -1,0 +1,23 @@
+vendor/managed-deepagents-sdk/packages/pypi/src/managed_deepagents/_browser_recording.py
+  s_bf247046117b65::t_0f16a750a256f2 269-274,277-283,285-328,342,347,428,432,439,441
+vendor/managed-deepagents-sdk/packages/pypi/src/managed_deepagents/browser.py
+  s_bf247046117b65::t_581330d2ae4730 526
+vendor/mda-upstream-prs
+  s_bf247046117b65::t_5b0d005f2c2b9c 4
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "af792301b9626575bf9db19b310ce4f19ebe1eff",
+  "prompts": {},
+  "sessions": {
+    "s_bf247046117b65": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "83c6a65b-66e1-489e-af9d-84284821b1e8",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "Sydney Runkle <sydneymarierunkle@gmail.com>"
+    }
+  }
+}
