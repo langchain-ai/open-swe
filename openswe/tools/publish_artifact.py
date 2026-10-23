@@ -1,4 +1,4 @@
-"""Tool: ``save_plan``. Publish a sandbox HTML artifact for review or sharing."""
+"""Tool: ``publish_artifact``. Publish a sandbox HTML artifact for review or sharing."""
 
 import logging
 import re
@@ -16,22 +16,22 @@ from openswe.utils.html_artifact import DEFAULT_TITLE, wrap_html_artifact
 
 logger = logging.getLogger(__name__)
 
-_MAX_PLAN_LINES = 20_000
+_MAX_ARTIFACT_LINES = 20_000
 
 
-async def save_plan(
-    plan_file_path: str,
+async def publish_artifact(
+    artifact_file_path: str,
 ) -> dict[str, Any]:
-    """Implement the `save_plan` tool."""
-    if not isinstance(plan_file_path, str):
-        return {"success": False, "error": "plan_file_path must be a string"}
-    path = plan_file_path.strip()
+    """Implement the `publish_artifact` tool."""
+    if not isinstance(artifact_file_path, str):
+        return {"success": False, "error": "artifact_file_path must be a string"}
+    path = artifact_file_path.strip()
     if not path:
-        return {"success": False, "error": "plan_file_path cannot be empty"}
+        return {"success": False, "error": "artifact_file_path cannot be empty"}
     if not _is_html_path(path):
         return {
             "success": False,
-            "error": f"plan_file_path must point to an HTML file in {PLAN_FILE_DIRECTORY}",
+            "error": f"artifact_file_path must point to an HTML file in {PLAN_FILE_DIRECTORY}",
         }
 
     cfg = RunConfig.from_runtime()
@@ -40,36 +40,36 @@ async def save_plan(
         return {"success": False, "error": "no thread_id in run config"}
 
     try:
-        content = (await _read_plan_file(str(thread_id), path)).strip()
+        content = (await _read_artifact_file(str(thread_id), path)).strip()
         if not content:
-            return {"success": False, "error": "plan file cannot be empty"}
+            return {"success": False, "error": "artifact file cannot be empty"}
         document = wrap_html_artifact(content, title=_title_from_path(path))
         await save_plan_content(
             str(thread_id), html=document, status=PLAN_STATUS_SHARED, plan_file_path=path
         )
     except Exception as exc:  # noqa: BLE001
-        logger.exception("save_plan failed for thread %s", thread_id)
-        return {"success": False, "error": f"failed to save plan: {exc}"}
+        logger.exception("publish_artifact failed for thread %s", thread_id)
+        return {"success": False, "error": f"failed to publish artifact: {exc}"}
     return {"success": True, "path": path}
 
 
-async def _read_plan_file(thread_id: str, path: str) -> str:
+async def _read_artifact_file(thread_id: str, path: str) -> str:
     backend = await get_sandbox_backend(thread_id)
-    result = await backend.aread(path, offset=0, limit=_MAX_PLAN_LINES)
+    result = await backend.aread(path, offset=0, limit=_MAX_ARTIFACT_LINES)
     error = _value(result, "error")
     if error:
         raise ValueError(error)
     file_data = _value(result, "file_data")
     if file_data is None:
-        raise ValueError("plan file could not be read")
+        raise ValueError("artifact file could not be read")
     encoding = _value(file_data, "encoding")
     if encoding is not None and encoding != "utf-8":
-        raise ValueError("plan file must be UTF-8 text")
+        raise ValueError("artifact file must be UTF-8 text")
     content = _value(file_data, "content")
     if not isinstance(content, str):
-        raise ValueError("plan file content was not text")
-    if content.count("\n") + 1 >= _MAX_PLAN_LINES:
-        raise ValueError("plan file is too large")
+        raise ValueError("artifact file content was not text")
+    if content.count("\n") + 1 >= _MAX_ARTIFACT_LINES:
+        raise ValueError("artifact file is too large")
     return content
 
 
@@ -87,7 +87,7 @@ def _is_html_path(path: str) -> bool:
 
 
 def _title_from_path(path: str) -> str:
-    """Fallback artifact name for a plan file that carries no title of its own."""
+    """Fallback artifact name for an artifact file that carries no title of its own."""
     stem = path.rsplit("/", 1)[-1].removesuffix(".html")
     stem = re.sub(r"^\d{4}-\d{2}-\d{2}-", "", stem)
     words = stem.replace("-", " ").replace("_", " ").strip()

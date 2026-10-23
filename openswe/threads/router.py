@@ -325,7 +325,10 @@ class ThreadRouter:
         mda = RUNTIMES.mda_runtime
         await mda.ensure_remote_thread(thread_id)
         rewritten = await mda.run_payload(
-            thread_id, payload, graph_id=mda_graph_for(thread.metadata)
+            thread_id,
+            payload,
+            thread_metadata=thread.metadata,
+            graph_id=mda_graph_for(thread.metadata),
         )
         await forward(mda.http, scope, recorder, json.dumps(rewritten).encode())
 
@@ -344,7 +347,11 @@ class ThreadRouter:
         params = command.get("params")
         if method == "run.start" and isinstance(params, dict):
             reply = await RUNTIMES.mda_runtime.start_command_run(
-                thread_id, command, params, graph_id=mda_graph_for(thread.metadata)
+                thread_id,
+                command,
+                params,
+                thread_metadata=thread.metadata,
+                graph_id=mda_graph_for(thread.metadata),
             )
             if reply.get("type") == "success":
                 await index.set_status(thread_id, "busy")

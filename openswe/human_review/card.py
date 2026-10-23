@@ -171,12 +171,15 @@ def closed_card(
     outcome: str,
     review_states: dict[str, str],
 ) -> tuple[str, list[Block]]:
-    """A finished request collapses to one line; ``outcome`` is our own mrkdwn."""
-    pr = request.pull_request
-    if outcome == "merged" and (approvers := _approvers(request, review_states)):
-        outcome = f"merged — approved by {approvers}"
-    return f"Review request: {outcome} — {pr.url} — by {author}", [
-        section(
-            f"*Review request: {outcome}*\n<{pr.url}|{_label(request)}> {escape(title)} — by {author}"
-        )
-    ]
+    """A finished or approved request collapses to one line; ``outcome`` is our own mrkdwn."""
+    pull = f"<{request.pull_request.url}|{_label(request)}> {escape(title)} — authored by {author}"
+    approvers = _approvers(request, review_states)
+    if outcome in ("approved", "merged"):
+        line = f":{'merged' if outcome == 'merged' else 'white_check_mark'}: {pull}"
+        if approvers:
+            line += f" — approved by {approvers}"
+        if outcome == "approved" and not request.auto_merge:
+            line += " — awaiting manual merge"
+    else:
+        line = f"Review request: {outcome} — {pull}"
+    return line, [section(line)]

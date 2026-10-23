@@ -2,7 +2,7 @@
 
 import asyncio
 import logging
-from collections.abc import Awaitable, Callable, Mapping, Sequence
+from collections.abc import Awaitable, Callable, Collection, Mapping, Sequence
 from datetime import UTC, datetime
 from typing import Any, Literal
 
@@ -150,6 +150,7 @@ def _metadata_matches_filters(
     ownerless: bool = False,
     admin_threads: bool | None = None,
     owner: str | None = None,
+    exclude_sources: Collection[str] = (),
 ) -> bool:
     """Metadata-only filters that don't require fetching the latest run."""
     if thread_is_unlisted(metadata):
@@ -177,6 +178,8 @@ def _metadata_matches_filters(
     if resolved is not None and _is_thread_resolved(metadata) is not resolved:
         return False
     if source and thread_source(metadata) != source:
+        return False
+    if thread_source(metadata) in exclude_sources:
         return False
     if query:
         pull_requests = metadata.get("pull_requests")
@@ -576,6 +579,7 @@ async def _collect_thread_candidates(
     ownerless: bool = False,
     owned: bool = False,
     admin_threads: bool | None = None,
+    exclude_sources: Collection[str] = (),
     viewer_login: str | None = None,
     viewer_email: str | None = None,
     include_private: bool = True,
@@ -639,6 +643,7 @@ async def _collect_thread_candidates(
                     ownerless=ownerless,
                     admin_threads=admin_threads,
                     owner=viewer_login if owned else None,
+                    exclude_sources=exclude_sources,
                 ):
                     continue
                 thread_id = _thread_id(thread)
@@ -800,6 +805,7 @@ async def list_dashboard_thread_repos(
     include_automations: bool = False,
     owned: bool = False,
     include_all: bool = False,
+    exclude_sources: Collection[str] = (),
 ) -> list[dict[str, Any]]:
     """The repositories the viewer's threads ran in, newest activity first.
 
@@ -815,6 +821,7 @@ async def list_dashboard_thread_repos(
         resolved=None if include_resolved else False,
         scope="all" if include_automations else "interactive",
         owned=owned,
+        exclude_sources=exclude_sources,
     )
     repos: dict[str, dict[str, Any]] = {}
     for thread in candidates:
@@ -870,6 +877,7 @@ async def list_dashboard_threads_page(
     repo: str | None = None,
     ownerless: bool = False,
     owned: bool = False,
+    exclude_sources: Collection[str] = (),
     filter_participant_login: str | None = None,
     include_private: bool = True,
     surfaced_only: bool = False,
@@ -907,6 +915,7 @@ async def list_dashboard_threads_page(
         ownerless=ownerless,
         owned=owned,
         admin_threads=admin_threads,
+        exclude_sources=exclude_sources,
         viewer_login=login,
         viewer_email=email,
         include_private=include_private,
@@ -943,6 +952,7 @@ async def list_dashboard_threads_page(
                     ownerless=ownerless,
                     admin_threads=admin_threads,
                     owner=login if owned else None,
+                    exclude_sources=exclude_sources,
                 )
                 and (
                     not surfaced_only

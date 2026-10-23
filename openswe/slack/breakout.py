@@ -8,7 +8,12 @@ from uuid import uuid4
 from openswe.slack import webhook as service
 from openswe.slack.blocks import block_payload, section
 from openswe.slack.breakout_destination import resolve_breakout_destination
-from openswe.slack.breakout_links import mark_broken_out, notify_breakout, source_thread_line
+from openswe.slack.breakout_links import (
+    breakout_root_blocks,
+    mark_broken_out,
+    notify_breakout,
+    source_thread_line,
+)
 from openswe.slack.channels import SlackChannel
 from openswe.slack.client import (
     append_slack_web_link_footer,
@@ -196,7 +201,7 @@ async def _start(
                 target,
                 new_ts,
                 append_slack_web_link_footer(root_text, web_url),
-                blocks=block_payload([section(append_slack_web_link_footer(root_text, web_url))]),
+                blocks=block_payload(breakout_root_blocks(root_text, web_url)),
                 unfurl_links=False,
                 unfurl_media=False,
             )
