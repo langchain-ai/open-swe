@@ -510,6 +510,51 @@
         "title": "AssessmentFeedback",
         "type": "object"
       },
+      "AttemptView": {
+        "properties": {
+          "created_at": {
+            "format": "date-time",
+            "title": "Created At",
+            "type": "string"
+          },
+          "finished_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Finished At"
+          },
+          "id": {
+            "format": "uuid",
+            "title": "Id",
+            "type": "string"
+          },
+          "state": {
+            "enum": [
+              "running",
+              "succeeded",
+              "failed",
+              "timed_out",
+              "cancelled"
+            ],
+            "title": "State",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "state",
+          "created_at",
+          "finished_at"
+        ],
+        "title": "AttemptView",
+        "type": "object"
+      },
       "AuditLog": {
         "properties": {
           "api_key_id": {
@@ -860,6 +905,48 @@
           }
         },
         "title": "BackgroundWork",
+        "type": "object"
+      },
+      "BatchView": {
+        "properties": {
+          "attempts": {
+            "items": {
+              "$ref": "#/components/schemas/AttemptView"
+            },
+            "title": "Attempts",
+            "type": "array"
+          },
+          "candidate": {
+            "anyOf": [
+              {
+                "additionalProperties": {
+                  "$ref": "#/components/schemas/JsonValue"
+                },
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Candidate"
+          },
+          "id": {
+            "format": "uuid",
+            "title": "Id",
+            "type": "string"
+          },
+          "state": {
+            "title": "State",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "state",
+          "candidate",
+          "attempts"
+        ],
+        "title": "BatchView",
         "type": "object"
       },
       "BlockSuggestionResponse": {
@@ -1858,6 +1945,23 @@
           "enabled"
         ],
         "title": "EnabledReviewRepoUpdate",
+        "type": "object"
+      },
+      "EntryView": {
+        "properties": {
+          "number": {
+            "title": "Number",
+            "type": "integer"
+          },
+          "request": {
+            "$ref": "#/components/schemas/RequestView"
+          }
+        },
+        "required": [
+          "number",
+          "request"
+        ],
+        "title": "EntryView",
         "type": "object"
       },
       "ExcludedHunk": {
@@ -3079,6 +3183,43 @@
         "title": "MergeAction",
         "type": "object"
       },
+      "MergeIntent": {
+        "additionalProperties": false,
+        "properties": {
+          "dependencies": {
+            "default": [],
+            "items": {
+              "exclusiveMinimum": 0.0,
+              "type": "integer"
+            },
+            "maxItems": 100,
+            "title": "Dependencies",
+            "type": "array"
+          },
+          "head_sha": {
+            "pattern": "^[0-9a-f]{40}$",
+            "title": "Head Sha",
+            "type": "string"
+          },
+          "number": {
+            "exclusiveMinimum": 0.0,
+            "title": "Number",
+            "type": "integer"
+          },
+          "request_key": {
+            "format": "uuid",
+            "title": "Request Key",
+            "type": "string"
+          }
+        },
+        "required": [
+          "number",
+          "head_sha",
+          "request_key"
+        ],
+        "title": "MergeIntent",
+        "type": "object"
+      },
       "MessageIntent": {
         "properties": {
           "intent": {
@@ -4011,6 +4152,20 @@
         "title": "PageView",
         "type": "object"
       },
+      "PauseChange": {
+        "additionalProperties": false,
+        "properties": {
+          "paused": {
+            "title": "Paused",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "paused"
+        ],
+        "title": "PauseChange",
+        "type": "object"
+      },
       "PendingReview": {
         "description": "The viewer's unsubmitted GitHub review on a PR, with its line comments.",
         "properties": {
@@ -4425,6 +4580,22 @@
           "path"
         ],
         "title": "PreviewThread",
+        "type": "object"
+      },
+      "PriorityChange": {
+        "additionalProperties": false,
+        "properties": {
+          "priority": {
+            "maximum": 100.0,
+            "minimum": -100.0,
+            "title": "Priority",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "priority"
+        ],
+        "title": "PriorityChange",
         "type": "object"
       },
       "ProfileUpdate": {
@@ -5143,6 +5314,68 @@
         "title": "PullRequestThreadStatus",
         "type": "object"
       },
+      "QueueStatus": {
+        "properties": {
+          "active_batch_id": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Active Batch Id"
+          },
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/EntryView"
+            },
+            "title": "Items",
+            "type": "array"
+          },
+          "next_cursor": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Next Cursor"
+          },
+          "operator": {
+            "title": "Operator",
+            "type": "boolean"
+          },
+          "paused": {
+            "title": "Paused",
+            "type": "boolean"
+          },
+          "queue_id": {
+            "format": "uuid",
+            "title": "Queue Id",
+            "type": "string"
+          },
+          "repository": {
+            "title": "Repository",
+            "type": "string"
+          }
+        },
+        "required": [
+          "queue_id",
+          "repository",
+          "paused",
+          "operator",
+          "items",
+          "next_cursor",
+          "active_batch_id"
+        ],
+        "title": "QueueStatus",
+        "type": "object"
+      },
       "QueuedPreview": {
         "properties": {
           "id": {
@@ -5449,6 +5682,81 @@
           "type"
         ],
         "title": "RequestTool",
+        "type": "object"
+      },
+      "RequestView": {
+        "properties": {
+          "blocked_reason": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Blocked Reason"
+          },
+          "created_at": {
+            "format": "date-time",
+            "title": "Created At",
+            "type": "string"
+          },
+          "created_by": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Created By"
+          },
+          "dependencies": {
+            "items": {
+              "type": "integer"
+            },
+            "title": "Dependencies",
+            "type": "array"
+          },
+          "head_sha": {
+            "title": "Head Sha",
+            "type": "string"
+          },
+          "id": {
+            "format": "uuid",
+            "title": "Id",
+            "type": "string"
+          },
+          "priority": {
+            "title": "Priority",
+            "type": "integer"
+          },
+          "state": {
+            "enum": [
+              "waiting_for_review",
+              "queued",
+              "batched",
+              "merged",
+              "withdrawn"
+            ],
+            "title": "State",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "head_sha",
+          "state",
+          "priority",
+          "dependencies",
+          "blocked_reason",
+          "created_by",
+          "created_at"
+        ],
+        "title": "RequestView",
         "type": "object"
       },
       "ResolveReviewThreads": {
@@ -12002,6 +12310,368 @@
         "tags": [
           "dashboard",
           "user-preferences"
+        ]
+      }
+    },
+    "/dashboard/api/merge-queue/{workspace_id}": {
+      "get": {
+        "operationId": "queue_status_dashboard_api_merge_queue__workspace_id__get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "workspace_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Workspace Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "page_size",
+            "required": false,
+            "schema": {
+              "default": 20,
+              "maximum": 100,
+              "minimum": 1,
+              "title": "Page Size",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "cursor",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "maxLength": 512,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Cursor"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/QueueStatus"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "DashboardSession": []
+          }
+        ],
+        "summary": "Queue Status",
+        "tags": [
+          "dashboard",
+          "merge-queue"
+        ]
+      }
+    },
+    "/dashboard/api/merge-queue/{workspace_id}/batches/{batch_id}": {
+      "get": {
+        "operationId": "batch_status_dashboard_api_merge_queue__workspace_id__batches__batch_id__get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "batch_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Batch Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "workspace_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Workspace Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BatchView"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "DashboardSession": []
+          }
+        ],
+        "summary": "Batch Status",
+        "tags": [
+          "dashboard",
+          "merge-queue"
+        ]
+      }
+    },
+    "/dashboard/api/merge-queue/{workspace_id}/pause": {
+      "patch": {
+        "operationId": "set_paused_dashboard_api_merge_queue__workspace_id__pause_patch",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "workspace_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Workspace Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PauseChange"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "204": {
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "DashboardSession": []
+          }
+        ],
+        "summary": "Set Paused",
+        "tags": [
+          "dashboard",
+          "merge-queue"
+        ]
+      }
+    },
+    "/dashboard/api/merge-queue/{workspace_id}/requests": {
+      "post": {
+        "operationId": "request_merge_dashboard_api_merge_queue__workspace_id__requests_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "workspace_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Workspace Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/MergeIntent"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RequestView"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "DashboardSession": []
+          }
+        ],
+        "summary": "Request Merge",
+        "tags": [
+          "dashboard",
+          "merge-queue"
+        ]
+      }
+    },
+    "/dashboard/api/merge-queue/{workspace_id}/requests/{request_id}": {
+      "delete": {
+        "operationId": "withdraw_request_dashboard_api_merge_queue__workspace_id__requests__request_id__delete",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "request_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Request Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "workspace_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Workspace Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "DashboardSession": []
+          }
+        ],
+        "summary": "Withdraw Request",
+        "tags": [
+          "dashboard",
+          "merge-queue"
+        ]
+      }
+    },
+    "/dashboard/api/merge-queue/{workspace_id}/requests/{request_id}/priority": {
+      "patch": {
+        "operationId": "set_priority_dashboard_api_merge_queue__workspace_id__requests__request_id__priority_patch",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "request_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Request Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "workspace_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Workspace Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PriorityChange"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "204": {
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "DashboardSession": []
+          }
+        ],
+        "summary": "Set Priority",
+        "tags": [
+          "dashboard",
+          "merge-queue"
         ]
       }
     },

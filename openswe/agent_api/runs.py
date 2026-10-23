@@ -7,7 +7,7 @@ from langgraph.graph import END, START, StateGraph
 from langgraph.runtime import Runtime
 from pydantic import BaseModel
 
-from openswe.remote_runtime.tokens import RemoteRun
+from openswe.agent_api.tokens import RemoteRun
 
 
 class _NodeState(BaseModel):
