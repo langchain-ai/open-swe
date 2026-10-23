@@ -7830,6 +7830,17 @@
             "title": "Name",
             "type": "string"
           },
+          "old_region_snapshot_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Old Region Snapshot Id"
+          },
           "prompt": {
             "default": "",
             "title": "Prompt",

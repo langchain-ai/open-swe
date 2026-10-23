@@ -577,6 +577,9 @@ class Workspace(BaseModel):
     snapshot_id: str | None = None
     # The LangSmith API root the snapshot lives at; None for the deployment's own.
     snapshot_api: str | None = None
+    # The last snapshot in the deployment's own LangSmith, kept once captures moved to the
+    # new sandbox region: boxes still in the old region boot from it, and none is made there.
+    old_region_snapshot_id: str | None = None
     snapshot_name: str | None = None
     snapshot_status: SnapshotStatus = "none"
     status_message: str | None = None
@@ -655,14 +658,16 @@ class Workspace(BaseModel):
         return self.snapshot_id or None
 
     def snapshot_at(self, api: SandboxAPI) -> str | None:
-        """The ready snapshot, when it lives where ``api`` creates boxes.
+        """The snapshot a box created at ``api`` boots from, which must live there too.
 
-        A box boots only from a snapshot in its own LangSmith; elsewhere it gets the
-        base image until a refresh captures one there.
+        Boxes in the new sandbox region get the base image until a refresh captures one
+        there; boxes still in the old region get the snapshot kept for them.
         """
-        if self.ready_snapshot_id is None or not api.holds(self.snapshot_api):
-            return None
-        return self.ready_snapshot_id
+        if self.ready_snapshot_id is not None and api.holds(self.snapshot_api):
+            return self.ready_snapshot_id
+        if api.is_deployment:
+            return self.old_region_snapshot_id
+        return None
 
     @property
     def instructions(self) -> str | None:
@@ -1158,6 +1163,7 @@ class WorkspaceStore:
 
         await remove_refresh_cron(record)
         await _delete_snapshot(record.snapshot_id, record.snapshot_api)
+        await _delete_snapshot(record.old_region_snapshot_id, None)
         return True
 
     async def mark_capturing(self, slug: str) -> Workspace | None:
@@ -1511,7 +1517,18 @@ def _stamp_captured(
     source: SandboxRef,
     snapshot_tag: str = SNAPSHOT_TAG,
 ) -> None:
-    """The snapshot lives in the LangSmith of the box it was captured from."""
+    """The snapshot lives in the LangSmith of the box it was captured from.
+
+    The first capture in the new sandbox region keeps the old region's snapshot for
+    the boxes still there instead of letting it be retired.
+    """
+    old_region = SandboxAPI.deployment()
+    if (
+        record.ready_snapshot_id is not None
+        and old_region.holds(record.snapshot_api)
+        and not old_region.holds(source.api)
+    ):
+        record.old_region_snapshot_id = record.ready_snapshot_id
     record.snapshot_status = "ready"
     record.status_message = None
     record.snapshot_id = snapshot_id
@@ -1693,5 +1710,9 @@ async def retire_superseded_snapshot(
     if previous is None or not previous.snapshot_id or previous.snapshot_id == current_id:
         return
     current = await WORKSPACES.get(slug)
-    if current is not None and current.snapshot_id == current_id:
+    if (
+        current is not None
+        and current.snapshot_id == current_id
+        and current.old_region_snapshot_id != previous.snapshot_id
+    ):
         await _delete_snapshot(previous.snapshot_id, previous.snapshot_api)

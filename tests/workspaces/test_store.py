@@ -185,6 +185,35 @@ async def test_failed_recapture_keeps_booting_from_the_previous_snapshot() -> No
     delete_snapshot.assert_not_awaited()
 
 
+@pytest.mark.asyncio
+@pytest.mark.usefixtures("registry_db")
+async def test_the_first_new_region_capture_keeps_the_old_regions_snapshot(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Old-region boxes recreated after the move still boot the workspace's image."""
+    monkeypatch.setenv("LANGSMITH_ENDPOINT", "https://api.smith.example")
+    monkeypatch.setenv("NEW_SANDBOX_REGION_ENDPOINT", "https://aws.api.smith.example")
+    monkeypatch.setenv("NEW_SANDBOX_REGION_API_KEY", "lsv2-new-region-key")
+    delete_snapshot = AsyncMock()
+    await WORKSPACES.create(WorkspaceCreate(name="base", repos=["acme/base"]), "ramon")
+    previous = await WORKSPACES.mark_captured(
+        "base", snapshot_id="snap-gcp", snapshot_name="base", source=SandboxRef("sb-gcp")
+    )
+    current = await WORKSPACES.mark_captured(
+        "base",
+        snapshot_id="snap-aws",
+        snapshot_name="base",
+        source=SandboxRef("sb-aws", "https://aws.api.smith.example"),
+    )
+    with patch.object(env_store, "_delete_snapshot", delete_snapshot):
+        await env_store.retire_superseded_snapshot("base", previous, "snap-aws")
+
+    assert current is not None
+    assert current.snapshot_at(SandboxAPI.new_sandbox_region()) == "snap-aws"
+    assert current.snapshot_at(SandboxAPI.deployment()) == "snap-gcp"
+    delete_snapshot.assert_not_awaited()
+
+
 # --- per-thread selection ---
 
 
@@ -292,6 +321,7 @@ def _fully_populated(now: str) -> Workspace:
         status_message="captured",
         snapshot_tag="latest",
         snapshot_api="https://aws.api.smith.example",
+        old_region_snapshot_id="snap-old-region",
         source_sandbox_id="sb-1",
         last_captured_at=now,
         refresh_status="success",

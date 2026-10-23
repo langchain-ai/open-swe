@@ -159,6 +159,7 @@ async def control_reset_default_workspace() -> JSONResponse:
     if record is not None:
         await remove_refresh_cron(record)
         await store._delete_snapshot(record.snapshot_id, record.snapshot_api)
+        await store._delete_snapshot(record.old_region_snapshot_id, None)
         await store.WORKSPACES.delete(store.DEFAULT_WORKSPACE_SLUG)
     async with postgres.transaction() as connection:
         await connection.execute(
