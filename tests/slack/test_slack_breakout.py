@@ -89,16 +89,21 @@ def test_breakout_command_from_message(text, expected):
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize(
-    ("explicit", "expected", "email_only"),
+    ("explicit", "expected", "email_only", "private_channel"),
     [
-        ("", "C1", False),
-        ("C3", "C3", False),
-        ("", "C1", True),
+        ("", "C1", False, False),
+        ("C3", "C3", False, False),
+        ("", "C1", True, False),
+        ("", "C1", False, True),
+        ("C1", "C1", False, True),
     ],
 )
 async def test_breakout_with_text_starts_new_thread_with_old_transcript(
-    monkeypatch, explicit, expected, email_only
+    monkeypatch, explicit, expected, email_only, private_channel, public_channels
 ):
+    public_channels.side_effect = lambda channel_id, **_: _channel(
+        channel_id, private=private_channel
+    )
     posted = _patch_slack(monkeypatch)
     root = AsyncMock(return_value="200.0")
     monkeypatch.setattr(breakout, "post_slack_top_level_message_with_ts", root)
@@ -280,7 +285,7 @@ async def test_bare_breakout_refuses_private_threads(monkeypatch):
 @pytest.mark.asyncio
 @pytest.mark.parametrize(
     "command",
-    [Command("fix it", "<#G2|secret>", "G2"), Command("fix it"), Command("")],
+    [Command("fix it", "<#G2|secret>", "G2"), Command("", "<#G2|secret>", "G2")],
 )
 async def test_breakout_never_goes_to_a_private_channel(monkeypatch, public_channels, command):
     posted = _patch_slack(monkeypatch)
@@ -299,14 +304,15 @@ async def test_breakout_never_goes_to_a_private_channel(monkeypatch, public_chan
 
 
 @pytest.mark.asyncio
-async def test_breakout_refuses_a_channel_it_cannot_look_up(monkeypatch, public_channels):
+@pytest.mark.parametrize("target", ["", "C1", "C2"])
+async def test_breakout_refuses_a_channel_it_cannot_look_up(monkeypatch, public_channels, target):
     posted = _patch_slack(monkeypatch)
     public_channels.side_effect = None
     public_channels.return_value = None
     root = AsyncMock()
     monkeypatch.setattr(breakout, "post_slack_top_level_message_with_ts", root)
 
-    await breakout.process_slack_breakout(_request(), Command("fix it", "<#C2>", "C2"), None)
+    await breakout.process_slack_breakout(_request(), Command("fix it", channel_id=target), None)
 
     root.assert_not_awaited()
     posted.ephemeral.assert_awaited_once()
@@ -325,4 +331,4 @@ async def test_breakout_never_leaves_a_private_channel(monkeypatch, public_chann
 
     root.assert_not_awaited()
     posted.reactions.assert_not_awaited()
-    assert "<#C1>" in posted.ephemeral.await_args.args[2]
+    assert "public source channel and destination" in posted.ephemeral.await_args.args[2]
