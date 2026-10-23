@@ -426,7 +426,7 @@ describe("My PRs", () => {
       within(card)
         .queryAllByRole("button", { name: /^Fix / })
         .map((button) => button.textContent)
-    expect(fixes(shown[0]!)).toEqual(["Fix conflicts"])
+    await waitFor(() => expect(fixes(shown[0]!)).toEqual(["Fix conflicts"]))
     expect(fixes(shown[1]!)).toEqual(["Fix checks"])
     expect(fixes(shown[2]!)).toEqual([])
   })
@@ -495,31 +495,19 @@ describe("My PRs", () => {
     )
   })
 
-  it("reads details for the first rows only, leaving the rest to scrolling", async () => {
+  it("renders whole rows from the listing without reading each one", async () => {
     vi.mocked(api.openPullRequests).mockResolvedValue({
       ...payload,
-      pullRequests: Array.from({ length: 12 }, (_, index) =>
-        pull(index + 1, { detailsLoading: true, additions: null })
-      ),
+      pullRequests: Array.from({ length: 12 }, (_, index) => pull(index + 1)),
     })
-    let resolve!: (value: OpenPullRequest) => void
-    vi.mocked(api.pullRequestStatus).mockImplementation(
-      () =>
-        new Promise((done) => {
-          resolve = done
-        })
-    )
     mount()
     await screen.findByText("Change 10")
     expect(screen.queryByText("Change 11")).toBeNull()
     expect(cards()).toHaveLength(10)
-    await waitFor(() => expect(api.pullRequestStatus).toHaveBeenCalledTimes(10))
-    resolve(pull(10))
-    await waitFor(() =>
-      expect(
-        screen.getByLabelText("10 lines added, 3 lines deleted")
-      ).toBeTruthy()
-    )
+    expect(
+      screen.getByLabelText("10 lines added, 3 lines deleted")
+    ).toBeTruthy()
+    expect(api.pullRequestStatus).not.toHaveBeenCalled()
   })
 
   it("loads the next GitHub page as soon as the loaded rows run out", async () => {
@@ -645,7 +633,7 @@ describe("My PRs", () => {
     expect(within(card).getByText("Failing")).toBeTruthy()
     expect(within(card).getByText("Browser E2E")).toBeTruthy()
     expect(
-      within(card).getByRole("button", { name: "Fix checks" })
+      await within(card).findByRole("button", { name: "Fix checks" })
     ).toBeTruthy()
     expect(within(card).getByRole("button", { name: MERGE })).toBeTruthy()
   })
@@ -814,22 +802,6 @@ describe("My PRs", () => {
         "rebase"
       )
     )
-  })
-
-  it("rediscovers a reopened PR on manual refresh", async () => {
-    vi.mocked(api.openPullRequests).mockResolvedValue({
-      ...payload,
-      pullRequests: [pull(1, { detailsLoading: true })],
-    })
-    vi.mocked(api.pullRequestStatus)
-      .mockResolvedValueOnce(null)
-      .mockResolvedValue(pull(1))
-    mount()
-    await waitFor(() => expect(api.pullRequestStatus).toHaveBeenCalledOnce())
-    await waitFor(() => expect(screen.queryByText("Change 1")).toBeNull())
-    fireEvent.click(screen.getByRole("button", { name: "Refresh" }))
-    expect(await screen.findByText("Change 1")).toBeTruthy()
-    await waitFor(() => expect(api.pullRequestStatus).toHaveBeenCalledTimes(2))
   })
 
   it("filters conflicts and sends the applied repository to the server", async () => {
@@ -1086,12 +1058,13 @@ describe("My PRs", () => {
         expect.objectContaining({ number: 1, draft: true })
       )
     )
-    const marked = await within(shown[0]!).findByRole("button", {
-      name: "Marked ready",
-    })
-    expect((marked as HTMLButtonElement).disabled).toBe(true)
-    expect(toast.success).toHaveBeenCalledWith(
-      "Marked acme/app#1 ready for review"
+    // The card leaves draft before GitHub confirms, and with it the button.
+    await waitFor(() => expect(statuses(cards()[0]!)).toEqual(["Reviewable"]))
+    expect(screen.queryByRole("button", { name: "Mark ready" })).toBeNull()
+    await waitFor(() =>
+      expect(toast.success).toHaveBeenCalledWith(
+        "Marked acme/app#1 ready for review"
+      )
     )
   })
 

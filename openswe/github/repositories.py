@@ -41,6 +41,8 @@ class Repository(Base):
     github_checked_at: Mapped[datetime | None] = mapped_column(default=None, init=False)
     # Automatic review is opt-in; ``None`` means nobody has turned it on or off yet.
     review_enabled: Mapped[bool | None] = mapped_column(default=None, init=False)
+    # GitHub ``updated_at`` up to which the pull request sweep has compared every PR.
+    pull_requests_swept_through: Mapped[datetime | None] = mapped_column(default=None, init=False)
 
     def __post_init__(self) -> None:
         self.full_name = normalize_repo_full_name(self.full_name)

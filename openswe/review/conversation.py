@@ -1,21 +1,32 @@
 """A pull request's conversation on GitHub: timeline, inline threads, and the viewer's replies."""
 
-import asyncio
 import logging
 import re
-from collections.abc import Iterator, Mapping
+from collections.abc import Iterator, Mapping, Sequence
 from contextlib import contextmanager
-from datetime import datetime
+from datetime import UTC, datetime
 from typing import Annotated, Any, Literal, Self
+from uuid import UUID
 
 from fastapi import APIRouter, HTTPException
-from pydantic import BaseModel, Field, TypeAdapter, ValidationError
+from pydantic import BaseModel, Field, ValidationError
+from sqlalchemy import select
 
 from openswe.audit_logs.middleware import audit_endpoint
 from openswe.dashboard.deps import SESSION_DEP
 from openswe.dashboard.repo_access import require_repo_access_for_user
+from openswe.database import postgres
 from openswe.github.http import GitHubClient
+from openswe.github.mirror import conversation as mirrored
+from openswe.github.mirror.ingest import (
+    remember_comment,
+    remember_review_comment,
+    remember_thread_resolution,
+)
+from openswe.github.mirror.sync import PullRequestSync
+from openswe.github.mirror.views import avatar_url
 from openswe.github.pull_request_status import PullRequestClient
+from openswe.github.repos import ReadableRepositories
 
 logger = logging.getLogger(__name__)
 
@@ -51,15 +62,6 @@ class _GitHubIssueComment(BaseModel):
     html_url: str
 
 
-class _GitHubReview(BaseModel):
-    id: int
-    user: _GitHubUser | None = None
-    state: str
-    submitted_at: datetime | None = None
-    body: str | None = None
-    html_url: str
-
-
 class _GitHubReviewComment(BaseModel):
     id: int
     pull_request_review_id: int | None = None
@@ -74,40 +76,6 @@ class _GitHubReviewComment(BaseModel):
     original_line: int | None = None
     start_line: int | None = None
     side: DiffSide | None = None
-
-
-class _GitHubCommitPerson(BaseModel):
-    date: datetime
-
-
-class _GitHubCommitDetail(BaseModel):
-    message: str
-    author: _GitHubCommitPerson
-
-
-class _GitHubCommit(BaseModel):
-    sha: str
-    html_url: str
-    commit: _GitHubCommitDetail
-    author: _GitHubUser | None = None
-
-
-class _ThreadRootComment(BaseModel):
-    fullDatabaseId: str
-
-
-class _ThreadRootComments(BaseModel):
-    nodes: list[_ThreadRootComment] = []
-
-
-class _ThreadState(BaseModel):
-    id: str
-    isResolved: bool
-    isOutdated: bool
-    comments: _ThreadRootComments = _ThreadRootComments()
-
-
-_THREAD_STATES = TypeAdapter(list[_ThreadState])
 
 
 @contextmanager
@@ -144,6 +112,16 @@ class ConversationAuthor(BaseModel):
             return None
         return cls(login=user.login, avatar_url=user.avatar_url, bot=user.type == "Bot")
 
+    @classmethod
+    def stored(cls, login: str, github_id: int | None, account_type: str) -> Self | None:
+        if not login:
+            return None
+        return cls(
+            login=login,
+            avatar_url=avatar_url(github_id) or f"https://github.com/{login}.png",
+            bot=account_type == "Bot",
+        )
+
 
 class ConversationComment(BaseModel):
     kind: Literal["comment"] = "comment"
@@ -164,8 +142,21 @@ class ConversationComment(BaseModel):
         )
 
     @classmethod
+    def stored(cls, comment: mirrored.IssueComment) -> Self:
+        return cls(
+            id=comment.github_id,
+            author=ConversationAuthor.stored(
+                comment.author_login, comment.author_github_id, comment.author_type
+            ),
+            created_at=_created(comment.github_created_at, comment.created_at),
+            body=_display_body(comment.body),
+            html_url=comment.html_url,
+        )
+
+    @classmethod
     async def post(cls, pull: PullRequestClient, body: str) -> Self:
         created = await pull.comment(body)
+        await remember_comment(pull.repo.owner, pull.repo.name, pull.number, created)
         with _expected_shape(pull):
             return cls.of(_GitHubIssueComment.model_validate(created))
 
@@ -215,8 +206,22 @@ class ThreadComment(BaseModel):
         )
 
     @classmethod
+    def stored(cls, comment: mirrored.ReviewComment) -> Self:
+        return cls(
+            id=comment.github_id,
+            review_id=comment.review_github_id,
+            author=ConversationAuthor.stored(
+                comment.author_login, comment.author_github_id, comment.author_type
+            ),
+            created_at=_created(comment.github_created_at, comment.created_at),
+            body=_display_body(comment.body),
+            html_url=comment.html_url,
+        )
+
+    @classmethod
     async def reply(cls, pull: PullRequestClient, comment_id: int, body: str) -> Self:
         created = await pull.reply_to_review_comment(comment_id, body)
+        await remember_review_comment(pull.repo.owner, pull.repo.name, pull.number, created)
         with _expected_shape(pull):
             return cls.of(_GitHubReviewComment.model_validate(created))
 
@@ -238,55 +243,42 @@ class ReviewThread(BaseModel):
 
     @classmethod
     def group(
-        cls, review_comments: list[_GitHubReviewComment], states: Mapping[int, _ThreadState]
+        cls,
+        review_comments: Sequence[mirrored.ReviewComment],
+        states: Mapping[int, mirrored.ReviewThread],
     ) -> list[Self]:
         """Group inline comments into threads; a reply points at its thread's first comment."""
-        ordered = sorted(review_comments, key=lambda c: c.created_at)
-        replies: dict[int, list[_GitHubReviewComment]] = {}
+        ordered = sorted(
+            review_comments,
+            key=lambda c: (_created(c.github_created_at, c.created_at), c.github_id),
+        )
+        replies: dict[int, list[mirrored.ReviewComment]] = {}
         for comment in ordered:
-            if comment.in_reply_to_id is not None:
-                replies.setdefault(comment.in_reply_to_id, []).append(comment)
+            if comment.in_reply_to_github_id is not None:
+                replies.setdefault(comment.in_reply_to_github_id, []).append(comment)
         threads: list[Self] = []
         for root in ordered:
-            if root.in_reply_to_id is not None:
+            if root.in_reply_to_github_id is not None:
                 continue
-            state = states.get(root.id)
+            state = states.get(root.github_id)
             threads.append(
                 cls(
-                    id=root.id,
-                    node_id=state.id if state else None,
+                    id=root.github_id,
+                    node_id=(state.node_id or None) if state else None,
                     path=root.path,
                     line=root.line,
                     start_line=root.start_line,
-                    side=root.side or "RIGHT",
+                    side="LEFT" if root.side == "LEFT" else "RIGHT",
                     original_line=root.original_line,
                     diff_hunk=root.diff_hunk,
-                    outdated=state.isOutdated if state else root.line is None,
-                    resolved=state.isResolved if state else False,
-                    comments=[ThreadComment.of(c) for c in [root, *replies.get(root.id, [])]],
+                    outdated=state.outdated if state else root.line is None,
+                    resolved=state.resolved if state else False,
+                    comments=[
+                        ThreadComment.stored(c) for c in [root, *replies.get(root.github_id, [])]
+                    ],
                 )
             )
         return threads
-
-    @staticmethod
-    async def states(pull: PullRequestClient) -> dict[int, _ThreadState]:
-        """Each thread's node id and resolution, keyed by its first comment's id."""
-        threads = _THREAD_STATES.validate_python(await pull.review_threads())
-        return {
-            int(thread.comments.nodes[0].fullDatabaseId): thread
-            for thread in threads
-            if thread.comments.nodes
-        }
-
-
-_ISSUE_COMMENTS = TypeAdapter(list[_GitHubIssueComment])
-_REVIEWS = TypeAdapter(list[_GitHubReview])
-_REVIEW_COMMENTS = TypeAdapter(list[_GitHubReviewComment])
-_COMMITS = TypeAdapter(list[_GitHubCommit])
-_REVIEW_STATE = TypeAdapter(ReviewState)
-_REVIEW_STATES: frozenset[str] = frozenset(
-    ("APPROVED", "CHANGES_REQUESTED", "COMMENTED", "DISMISSED")
-)
 
 
 class Conversation(BaseModel):
@@ -294,72 +286,81 @@ class Conversation(BaseModel):
     threads: list[ReviewThread]
 
     @classmethod
-    def of(
-        cls,
-        comments: list[_GitHubIssueComment],
-        reviews: list[_GitHubReview],
-        review_comments: list[_GitHubReviewComment],
-        commits: list[_GitHubCommit],
-        states: Mapping[int, _ThreadState],
-    ) -> Self:
-        items: list[ConversationItem] = [ConversationComment.of(comment) for comment in comments]
-        for review in reviews:
-            if review.state not in _REVIEW_STATES or review.submitted_at is None:
-                continue
-            items.append(
-                ConversationReview(
-                    id=review.id,
-                    author=ConversationAuthor.of(review.user),
-                    created_at=review.submitted_at,
-                    body=_display_body(review.body),
-                    html_url=review.html_url,
-                    state=_REVIEW_STATE.validate_python(review.state),
+    async def stored(cls, pull_request_id: UUID) -> Self:
+        """The conversation as the mirror holds it; pending reviews never reach the mirror."""
+        async with postgres.session() as session:
+            comments = await session.scalars(
+                select(mirrored.IssueComment).where(
+                    mirrored.IssueComment.pull_request_id == pull_request_id
                 )
             )
+            reviews = await session.scalars(
+                select(mirrored.Review).where(mirrored.Review.pull_request_id == pull_request_id)
+            )
+            review_comments = list(
+                await session.scalars(
+                    select(mirrored.ReviewComment).where(
+                        mirrored.ReviewComment.pull_request_id == pull_request_id
+                    )
+                )
+            )
+            commits = await session.scalars(
+                select(mirrored.PullRequestCommit).where(
+                    mirrored.PullRequestCommit.pull_request_id == pull_request_id
+                )
+            )
+            threads = await session.scalars(
+                select(mirrored.ReviewThread).where(
+                    mirrored.ReviewThread.pull_request_id == pull_request_id
+                )
+            )
+        items: list[ConversationItem] = [ConversationComment.stored(c) for c in comments]
+        items.extend(
+            ConversationReview(
+                id=review.github_id,
+                author=ConversationAuthor.stored(
+                    review.author_login, review.author_github_id, "User"
+                ),
+                created_at=review.submitted_at,
+                body=_display_body(review.body),
+                html_url=review.html_url,
+                state=_REVIEW_STATES[review.state],
+            )
+            for review in reviews
+            if review.submitted_at is not None
+        )
         items.extend(
             ConversationCommit(
                 sha=commit.sha,
-                author=ConversationAuthor.of(commit.author),
-                created_at=commit.commit.author.date,
-                message=commit.commit.message,
+                author=ConversationAuthor.stored(
+                    commit.author_login, commit.author_github_id, commit.author_type
+                ),
+                created_at=commit.authored_at,
+                message=commit.message,
                 html_url=commit.html_url,
             )
             for commit in commits
+            if commit.authored_at is not None
         )
         items.sort(key=lambda item: item.created_at)
-        return cls(items=items, threads=ReviewThread.group(review_comments, states))
+        return cls(
+            items=items,
+            threads=ReviewThread.group(
+                review_comments, {t.root_comment_github_id: t for t in threads}
+            ),
+        )
 
-    @classmethod
-    async def load(cls, pull: PullRequestClient) -> Self:
-        with _expected_shape(pull):
-            (
-                raw_comments,
-                raw_reviews,
-                raw_review_comments,
-                raw_commits,
-                states,
-            ) = await asyncio.gather(
-                pull.issue_comments(),
-                pull.reviews(),
-                pull.review_comments(),
-                pull.commits(),
-                ReviewThread.states(pull),
-            )
-            reviews = _REVIEWS.validate_python(raw_reviews)
-            pending = {review.id for review in reviews if review.state == "PENDING"}
-            # The viewer's unsubmitted comments belong to their pending review, not the conversation.
-            review_comments = [
-                c
-                for c in _REVIEW_COMMENTS.validate_python(raw_review_comments)
-                if c.pull_request_review_id not in pending
-            ]
-            return cls.of(
-                _ISSUE_COMMENTS.validate_python(raw_comments),
-                reviews,
-                review_comments,
-                _COMMITS.validate_python(raw_commits),
-                states,
-            )
+
+def _created(github: datetime | None, stored: datetime | None) -> datetime:
+    return github or stored or datetime.fromtimestamp(0, UTC)
+
+
+_REVIEW_STATES: Mapping[mirrored.ReviewState, ReviewState] = {
+    "approved": "APPROVED",
+    "changes_requested": "CHANGES_REQUESTED",
+    "commented": "COMMENTED",
+    "dismissed": "DISMISSED",
+}
 
 
 class ConversationCommentCreate(BaseModel):
@@ -384,9 +385,11 @@ async def api_get_review_conversation(
     pr_number: int,
     session: dict[str, Any] = SESSION_DEP,
 ) -> Conversation:
-    await require_repo_access_for_user(session["sub"], f"{owner}/{repo}")
-    async with GitHubClient.as_user(session["sub"]) as github:
-        return await Conversation.load(github.repo(owner, repo).pull_request(pr_number))
+    (await ReadableRepositories.of(session["sub"])).require(f"{owner}/{repo}")
+    stored = await PullRequestSync(owner, repo, pr_number).mirrored()
+    if stored is None:
+        raise HTTPException(404, "pull request not found")
+    return await Conversation.stored(stored.id)
 
 
 @router.post("/reviews/{owner}/{repo}/{pr_number}/conversation/comments")
@@ -443,3 +446,4 @@ async def api_set_review_thread_resolution(
             .pull_request(pr_number)
             .set_thread_resolved(thread_node_id, resolution.resolved)
         )
+    await remember_thread_resolution(thread_node_id, resolved=resolution.resolved)

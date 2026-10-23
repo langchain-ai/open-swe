@@ -34,11 +34,14 @@ from uuid import UUID, uuid7
 from pydantic import AliasPath, BaseModel, Field, ValidationError
 from sqlalchemy import (
     BigInteger,
+    ColumnElement,
     Computed,
     ForeignKey,
     Index,
     Text,
     UniqueConstraint,
+    and_,
+    case,
     desc,
     func,
     inspect,
@@ -49,6 +52,7 @@ from sqlalchemy import (
 from sqlalchemy.dialects.postgresql import JSONB, TSVECTOR, insert
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import Mapped, mapped_column, relationship, selectinload
+from sqlalchemy.sql.base import ColumnCollection
 
 from openswe.config import ENV
 from openswe.database import postgres
@@ -67,8 +71,25 @@ ThreadRole = Literal["primary", "secondary"]
 AGENT_OPENED_LINK_SOURCE = "open_pull_request"
 
 _SEARCH_PAGE_SIZE = 50
-_GITHUB_COLUMNS = ("state", "title", "body", "head_ref", "base_ref", "author")
-_DIFF_COLUMNS = ("additions", "deletions", "changed_files")
+# What GitHub says of the PR, overwritten whole by any newer description of it.
+_GITHUB_COLUMNS = (
+    "state",
+    "title",
+    "body",
+    "head_ref",
+    "base_ref",
+    "author",
+    "node_id",
+    "head_sha",
+    "base_sha",
+    "github_created_at",
+    "merged_at",
+    "closed_at",
+)
+# GitHub columns some descriptions leave out (a webhook's abridged PR, a listing):
+# ``None`` keeps what is stored.
+_PARTIAL_COLUMNS = ("additions", "deletions", "changed_files", "github_id", "commit_count")
+_LIST_COLUMNS = ("labels", "assignees", "requested_reviewers", "requested_teams")
 _WRITE_ONCE_COLUMNS = (
     "opening_base_sha",
     "opening_head_sha",
@@ -86,6 +107,24 @@ class DiffStats(TypedDict):
     files: int
     additions: int
     deletions: int
+
+
+class Label(TypedDict):
+    name: str
+    color: str
+    description: str
+
+
+class GitHubAccount(TypedDict):
+    """A GitHub user as a pull request names one; requests are matched by ``id``."""
+
+    id: int | None
+    login: str
+
+
+class GitHubTeam(TypedDict):
+    id: int | None
+    slug: str
 
 
 class ThreadLink(Base):
@@ -169,6 +208,28 @@ class PullRequest(Base):
     additions: Mapped[int | None] = mapped_column(default=None)
     deletions: Mapped[int | None] = mapped_column(default=None)
     changed_files: Mapped[int | None] = mapped_column(default=None)
+    github_id: Mapped[int | None] = mapped_column(BigInteger, default=None)
+    node_id: Mapped[str] = mapped_column(server_default="", default="")
+    head_sha: Mapped[str] = mapped_column(server_default="", default="")
+    base_sha: Mapped[str] = mapped_column(server_default="", default="")
+    # ``None`` while GitHub is still computing it, or until something has read it.
+    mergeable: Mapped[bool | None] = mapped_column(default=None)
+    mergeable_state: Mapped[str] = mapped_column(server_default="", default="")
+    # GraphQL's ``reviewDecision`` lowercased, ``none`` when branch protection
+    # asks for no review; ``""`` until a refresh has read it.
+    review_decision: Mapped[str] = mapped_column(server_default="", default="")
+    commit_count: Mapped[int | None] = mapped_column(default=None)
+    # ``None`` on an unsaved record: the description it came from left them out.
+    labels: Mapped[list[Label] | None] = mapped_column(JSONB, default=None)
+    assignees: Mapped[list[GitHubAccount] | None] = mapped_column(JSONB, default=None)
+    requested_reviewers: Mapped[list[GitHubAccount] | None] = mapped_column(JSONB, default=None)
+    requested_teams: Mapped[list[GitHubTeam] | None] = mapped_column(JSONB, default=None)
+    github_created_at: Mapped[datetime | None] = mapped_column(default=None)
+    github_updated_at: Mapped[datetime | None] = mapped_column(default=None)
+    merged_at: Mapped[datetime | None] = mapped_column(default=None)
+    closed_at: Mapped[datetime | None] = mapped_column(default=None)
+    synced_at: Mapped[datetime | None] = mapped_column(default=None, init=False)
+    synced_head_sha: Mapped[str] = mapped_column(server_default="", default="", init=False)
     threads: Mapped[list[ThreadLink]] = relationship(
         default_factory=list,
         cascade="all, delete-orphan",
@@ -243,22 +304,27 @@ class PullRequest(Base):
             return list(rows)
 
     @classmethod
-    async def diff_stats_for(
-        cls, prs: Sequence[tuple[str, int]]
-    ) -> dict[tuple[str, int], DiffStats]:
-        """Stored line counts keyed by lowercased ``(repo_full_name, number)``."""
-        keys = [(repo_full_name.lower(), number) for repo_full_name, number in prs]
+    async def many(cls, prs: Sequence[tuple[str, int]]) -> dict[tuple[str, int], Self]:
+        """Stored rows, without their links, keyed by lowercased ``(repo_full_name, number)``."""
+        keys = list({(repo_full_name.lower(), number) for repo_full_name, number in prs})
         if not keys or not postgres.configured():
             return {}
         async with postgres.session() as session:
             rows = await session.scalars(
                 select(cls).join(cls.repository).where(tuple_(Repository.key, cls.number).in_(keys))
             )
-            return {
-                (row.repo_full_name.lower(), row.number): stats
-                for row in rows
-                if (stats := row.diff_stats) is not None
-            }
+            return {(row.repo_full_name.lower(), row.number): row for row in rows}
+
+    @classmethod
+    async def diff_stats_for(
+        cls, prs: Sequence[tuple[str, int]]
+    ) -> dict[tuple[str, int], DiffStats]:
+        """Stored line counts keyed by lowercased ``(repo_full_name, number)``."""
+        return {
+            key: stats
+            for key, row in (await cls.many(prs)).items()
+            if (stats := row.diff_stats) is not None
+        }
 
     @property
     def diff_stats(self) -> DiffStats | None:
@@ -317,8 +383,10 @@ class PullRequest(Base):
     async def save(self, *, repository_private: bool | None = None) -> Self:
         """Write the PR as GitHub describes it and register its repository.
 
-        Overwrites the GitHub-owned columns; ``resolves_thread`` can only be set,
-        never cleared. Queued ``threads``/``reviews`` are linked as well. The
+        Overwrites the GitHub-owned columns unless the stored description is
+        newer by ``github_updated_at``; a record without one only fills a row no
+        GitHub description has reached yet. ``None`` columns keep what is stored.
+        ``resolves_thread`` can only be set, never cleared. Queued ``threads``/``reviews`` are linked as well. The
         author is linked to a registered user when one matches their GitHub id
         or, failing that, their login; an unregistered author leaves it unset.
         """
@@ -498,6 +566,56 @@ class PullRequest(Base):
             .limit(1)
         )
 
+    def _github_changes(self, excluded: ColumnCollection) -> dict[str, object]:
+        """The ``ON CONFLICT`` assignments that write what this record says GitHub holds."""
+        cls = type(self)
+        # A delivery can arrive after a newer one; the older description loses.
+        fresh = or_(
+            cls.github_updated_at.is_(None),
+            excluded.github_updated_at >= cls.github_updated_at,
+        )
+
+        def newest(column: str, value: ColumnElement[object]) -> ColumnElement[object]:
+            return case((fresh, value), else_=getattr(cls, column))
+
+        def kept(column: str) -> ColumnElement[object]:
+            return func.coalesce(getattr(excluded, column), getattr(cls, column))
+
+        # GitHub recomputes mergeability for every new head and answers null meanwhile.
+        moved = and_(excluded.head_sha != "", excluded.head_sha != cls.head_sha)
+        return {
+            **{column: newest(column, getattr(excluded, column)) for column in _GITHUB_COLUMNS},
+            **{
+                column: func.coalesce(
+                    func.nullif(getattr(cls, column), ""), getattr(excluded, column)
+                )
+                for column in _WRITE_ONCE_COLUMNS
+            },
+            "author_github_id": kept("author_github_id"),
+            "author_user_id": kept("author_user_id"),
+            "resolves_thread": or_(cls.resolves_thread, excluded.resolves_thread),
+            **{column: newest(column, kept(column)) for column in _PARTIAL_COLUMNS},
+            **{
+                column: newest(column, getattr(excluded, column))
+                for column in _LIST_COLUMNS
+                if getattr(self, column) is not None
+            },
+            "mergeable": newest(
+                "mergeable", case((moved, excluded.mergeable), else_=kept("mergeable"))
+            ),
+            "mergeable_state": newest(
+                "mergeable_state",
+                case(
+                    (moved, excluded.mergeable_state),
+                    else_=func.coalesce(
+                        func.nullif(excluded.mergeable_state, ""), cls.mergeable_state
+                    ),
+                ),
+            ),
+            **({"review_decision": excluded.review_decision} if self.review_decision else {}),
+            "github_updated_at": func.greatest(cls.github_updated_at, excluded.github_updated_at),
+        }
+
     async def _upsert(
         self,
         session: AsyncSession,
@@ -519,34 +637,18 @@ class PullRequest(Base):
             author_github_id=self.author_github_id,
             author_user_id=self.author_user_id,
             resolves_thread=self.resolves_thread,
-            **{column: getattr(self, column) for column in _DIFF_COLUMNS},
+            **{column: getattr(self, column) for column in _PARTIAL_COLUMNS},
+            **{column: getattr(self, column) or [] for column in _LIST_COLUMNS},
+            mergeable=self.mergeable,
+            mergeable_state=self.mergeable_state,
+            review_decision=self.review_decision,
+            github_updated_at=self.github_updated_at,
             legacy_threads_discovered_at=func.clock_timestamp() if legacy_discovered else None,
         )
         discovery_change = (
             {"legacy_threads_discovered_at": func.clock_timestamp()} if legacy_discovered else {}
         )
-        github_changes = (
-            {
-                **{column: getattr(upsert.excluded, column) for column in _GITHUB_COLUMNS},
-                **{
-                    column: func.coalesce(
-                        func.nullif(getattr(cls, column), ""), getattr(upsert.excluded, column)
-                    )
-                    for column in _WRITE_ONCE_COLUMNS
-                },
-                "author_github_id": func.coalesce(
-                    upsert.excluded.author_github_id, cls.author_github_id
-                ),
-                "author_user_id": func.coalesce(upsert.excluded.author_user_id, cls.author_user_id),
-                "resolves_thread": or_(cls.resolves_thread, upsert.excluded.resolves_thread),
-                **{
-                    column: func.coalesce(getattr(upsert.excluded, column), getattr(cls, column))
-                    for column in _DIFF_COLUMNS
-                },
-            }
-            if overwrite
-            else {}
-        )
+        github_changes = self._github_changes(upsert.excluded) if overwrite else {}
         pull_request_id = await session.scalar(
             upsert.on_conflict_do_update(
                 index_elements=[cls.repository_id, cls.number],
@@ -563,8 +665,35 @@ class PullRequest(Base):
         return row
 
 
+class _Account(BaseModel):
+    id: int | None = None
+    login: str = ""
+
+    def as_account(self) -> GitHubAccount:
+        return GitHubAccount(id=self.id, login=self.login)
+
+
+class _Team(BaseModel):
+    id: int | None = None
+    slug: str = ""
+
+
+class _Label(BaseModel):
+    name: str
+    color: str = ""
+    description: str | None = None
+
+
 class PullRequestPayload(BaseModel):
+    """A pull request as GitHub's REST API and webhooks describe it.
+
+    Abridged descriptions (a review webhook's, a listing's) leave out some
+    fields; those stay ``None`` and keep what is stored.
+    """
+
     number: int | None = None
+    id: int | None = None
+    node_id: str = ""
     title: str = ""
     body: str | None = None
     state: str = ""
@@ -573,6 +702,9 @@ class PullRequestPayload(BaseModel):
     additions: int | None = None
     deletions: int | None = None
     changed_files: int | None = None
+    commits: int | None = None
+    mergeable: bool | None = None
+    mergeable_state: str | None = None
     author: str = Field("", validation_alias=AliasPath("user", "login"))
     author_id: int | None = Field(None, validation_alias=AliasPath("user", "id"))
     head_ref: str = Field("", validation_alias=AliasPath("head", "ref"))
@@ -580,10 +712,76 @@ class PullRequestPayload(BaseModel):
     base_ref: str = Field("", validation_alias=AliasPath("base", "ref"))
     base_sha: str = Field("", validation_alias=AliasPath("base", "sha"))
     merge_commit_sha: str | None = None
+    created_at: datetime | None = None
+    updated_at: datetime | None = None
+    merged_at: datetime | None = None
+    closed_at: datetime | None = None
+    labels: list[_Label] | None = None
+    assignees: list[_Account] | None = None
+    requested_reviewers: list[_Account] | None = None
+    requested_teams: list[_Team] | None = None
+
+    @property
+    def pr_state(self) -> PrState:
+        return derive_pr_state(
+            state=self.state or None,
+            merged=self.merged or self.merged_at is not None,
+            draft=self.draft,
+        )
+
+    def to_pull_request(self, owner: str, repo: str, number: int) -> PullRequest:
+        """An unsaved record carrying what this description says about the PR."""
+        return PullRequest(
+            owner=owner,
+            repo=repo,
+            number=number,
+            github_id=self.id,
+            node_id=self.node_id,
+            state=self.pr_state,
+            title=self.title,
+            body=self.body or "",
+            head_ref=self.head_ref,
+            head_sha=self.head_sha,
+            base_ref=self.base_ref,
+            base_sha=self.base_sha,
+            author=self.author,
+            author_github_id=self.author_id,
+            additions=self.additions,
+            deletions=self.deletions,
+            changed_files=self.changed_files,
+            commit_count=self.commits,
+            mergeable=self.mergeable,
+            mergeable_state=(self.mergeable_state or "").lower(),
+            github_created_at=self.created_at,
+            github_updated_at=self.updated_at,
+            merged_at=self.merged_at,
+            closed_at=self.closed_at,
+            labels=(
+                None
+                if self.labels is None
+                else [
+                    Label(name=label.name, color=label.color, description=label.description or "")
+                    for label in self.labels
+                ]
+            ),
+            assignees=(
+                None if self.assignees is None else [user.as_account() for user in self.assignees]
+            ),
+            requested_reviewers=(
+                None
+                if self.requested_reviewers is None
+                else [user.as_account() for user in self.requested_reviewers]
+            ),
+            requested_teams=(
+                None
+                if self.requested_teams is None
+                else [GitHubTeam(id=team.id, slug=team.slug) for team in self.requested_teams]
+            ),
+        )
 
 
 class PullRequestEvent(BaseModel):
-    """The slice of a GitHub ``pull_request`` webhook a PR row is built from."""
+    """The slice of a GitHub webhook naming a pull request that a PR row is built from."""
 
     pull_request: PullRequestPayload
     repo_full_name: str = Field("", validation_alias=AliasPath("repository", "full_name"))
@@ -604,29 +802,10 @@ class PullRequestEvent(BaseModel):
 
     @property
     def state(self) -> PrState:
-        return derive_pr_state(
-            state=self.pull_request.state or None,
-            merged=self.pull_request.merged,
-            draft=self.pull_request.draft,
-        )
+        return self.pull_request.pr_state
 
     def to_pull_request(self) -> PullRequest | None:
         """An unsaved record carrying what this event says about the PR."""
         if self.identity is None:
             return None
-        owner, repo, number = self.identity
-        return PullRequest(
-            owner=owner,
-            repo=repo,
-            number=number,
-            state=self.state,
-            title=self.pull_request.title,
-            body=self.pull_request.body or "",
-            head_ref=self.pull_request.head_ref,
-            base_ref=self.pull_request.base_ref,
-            author=self.pull_request.author,
-            author_github_id=self.pull_request.author_id,
-            additions=self.pull_request.additions,
-            deletions=self.pull_request.deletions,
-            changed_files=self.pull_request.changed_files,
-        )
+        return self.pull_request.to_pull_request(*self.identity)

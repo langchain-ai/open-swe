@@ -8,6 +8,7 @@ from fastapi import HTTPException
 from pydantic import BaseModel, Field, ValidationError
 
 from openswe.github.http import GITHUB_API_BASE, GITHUB_GRAPHQL, github_request
+from openswe.github.mirror.sync import PullRequestSync
 from openswe.github.pull_request_status import PullRequestClient, pull_request_identity
 from openswe.github.repo_merge_methods import MergeMethod
 from openswe.github.squash_message import GitHubUser, SquashSource
@@ -388,4 +389,17 @@ async def act_on_pull_request(
             exc_info=exc.__cause__ is not None,
         )
         raise
+    await _remember(owner, repo, number)
     return PullRequestActionResult(action=action.action, done=True)
+
+
+async def _remember(owner: str, repo: str, number: int) -> None:
+    """Mirror what the action changed now, so a reader asking next sees it before the webhook."""
+    try:
+        await PullRequestSync(owner, repo, number).refresh()
+    except Exception:
+        logger.warning(
+            "Could not refresh the mirror after a pull request action",
+            extra={"pr_repo_full_name": f"{owner}/{repo}", "pr_number": number},
+            exc_info=True,
+        )

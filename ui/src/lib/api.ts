@@ -1039,8 +1039,6 @@ export interface ReviewListPayload {
 }
 
 export interface OpenPullRequest {
-  detailsLoading?: boolean
-  detailsError?: boolean
   repo: string
   number: number
   title: string
@@ -1845,7 +1843,7 @@ export const api = {
     scope: "mine" | "review-assigned" | "review-requested" = "mine"
   ) =>
     request<OpenPullRequestsPayload>(
-      `${scope === "review-assigned" ? "/review-assignments" : "/pull-requests"}?repo=${encodeURIComponent(repo)}&lightweight=true&sort=${sort === "createdAt" ? "created" : "updated"}&direction=${direction}&page=${page}&scope=${scope}`
+      `${scope === "review-assigned" ? "/review-assignments" : "/pull-requests"}?repo=${encodeURIComponent(repo)}&sort=${sort === "createdAt" ? "created" : "updated"}&direction=${direction}&page=${page}&scope=${scope}`
     ),
   pullRequestStatus: (repo: string, number: number) =>
     loadPrDetails(repo, number),

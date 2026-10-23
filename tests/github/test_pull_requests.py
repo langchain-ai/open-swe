@@ -7,6 +7,7 @@ import pytest
 
 from openswe.github import pull_request_dashboard_routes, pull_requests, routes
 from openswe.github.pull_requests import PullRequest, PullRequestEvent
+from openswe.github.repos import ReadableRepositories
 from openswe.github.repositories import Repository
 from openswe.webhooks import common
 from scripts import sync_pull_request_descriptions
@@ -225,9 +226,9 @@ async def test_search_matches_ranked_titles_and_bodies_and_filters_before_pagina
         owner="lc", repo="repo", number=3, title="Improve rendering", body="Renders widgets"
     ).save()
     monkeypatch.setattr(
-        pull_request_dashboard_routes,
-        "accessible_repo_full_names",
-        AsyncMock(return_value={"lc/repo"}),
+        ReadableRepositories,
+        "of",
+        AsyncMock(return_value=ReadableRepositories(frozenset({"lc/repo"}))),
     )
     page = await pull_request_dashboard_routes.api_search_pull_requests(
         "widget", limit=1, offset=0, session={"sub": "ada"}

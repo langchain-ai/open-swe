@@ -3,6 +3,7 @@
 from fastapi import APIRouter, Response
 
 from openswe.github import webhook as service
+from openswe.github.mirror.ingest import ingest as mirror_ingest
 from openswe.github.repo_cache import forget_cached_repos
 from openswe.human_review.completed_reviews import CompletedReview
 from openswe.review_guide.launch import notify_pr_updated
@@ -50,8 +51,6 @@ async def github_webhook(
         delivery_id=delivery_id,
         refs=refs,
     )
-    if refs.pull_request is not None:
-        await Topic.PULL_REQUESTS.invalidate(key=refs.pull_request)
     if event_type in {"installation", "installation_repositories"}:
         await forget_cached_repos()
     common.logger.info(
@@ -62,10 +61,6 @@ async def github_webhook(
             "github_payload": body.decode("utf-8", errors="replace"),
         },
     )
-
-    if event_type not in common.SUPPORTED_GH_EVENTS:
-        common.logger.info("Ignoring unsupported GitHub event type: %s", event_type)
-        return {"status": "ignored", "reason": f"Unsupported event type: {event_type}"}
 
     try:
         payload = common.json.loads(body)
@@ -101,6 +96,15 @@ async def github_webhook(
                 extra={"repository": repository},
             )
             return {"status": "ignored", "reason": "repository is not assigned to a workspace"}
+
+    # Before any handler runs, so everything it triggers reads the delivery back.
+    await mirror_ingest(event_type, payload)
+    if refs.pull_request is not None:
+        await Topic.PULL_REQUESTS.invalidate(key=refs.pull_request)
+
+    if event_type not in common.SUPPORTED_GH_EVENTS:
+        common.logger.info("Ignoring unsupported GitHub event type: %s", event_type)
+        return {"status": "ignored", "reason": f"Unsupported event type: {event_type}"}
 
     issue = payload.get("issue", {})
     is_pull_request_comment = bool(event_type == "issue_comment" and issue.get("pull_request"))

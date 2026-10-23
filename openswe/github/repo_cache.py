@@ -4,7 +4,7 @@ Listing them fans out to ``/user/installations`` plus a paginated
 ``/user/installations/{id}/repositories`` sweep per installation, which takes
 10s+ for users whose App is installed across hundreds of repos. The listing is
 cached per person in ``user_record``, where every replica sees it. The repo
-picker serves it stale-while-revalidate; ``repos.accessible_repo_full_names``,
+picker serves it stale-while-revalidate; ``repos.ReadableRepositories``,
 an authorization boundary, trusts it only briefly. Installation webhooks clear
 every listing.
 

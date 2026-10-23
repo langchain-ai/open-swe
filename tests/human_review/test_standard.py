@@ -10,7 +10,7 @@ import httpx2
 import pytest
 
 from openswe.expedited_review.readiness import PullRequestSnapshot
-from openswe.github.http import GitHubClient, GitHubError, RepoClient
+from openswe.github.http import GitHubClient, RepoClient
 from openswe.github.pull_requests import PullRequest
 from openswe.github.repo_files import RepoSettings
 from openswe.human_review.lifecycle import ReviewCard, ReviewPicks
@@ -642,7 +642,10 @@ async def test_missing_or_invalid_settings_have_no_review_channel(status: int, t
 async def test_assignment_inbox_is_personal_and_hides_completed_or_inaccessible_reviews(
     monkeypatch,
 ):
+    from openswe.database import postgres
+    from openswe.github.mirror.conversation import Review
     from openswe.github.pull_requests import PullRequest
+    from openswe.github.repos import ReadableRepositories
     from openswe.human_review.requests import (
         HumanReviewParticipant,
         HumanReviewRequest,
@@ -679,22 +682,23 @@ async def test_assignment_inbox_is_personal_and_hides_completed_or_inaccessible_
             ],
         ).save()
 
-    @asynccontextmanager
-    async def as_user(login: str) -> AsyncIterator[GitHubClient]:
-        yield GitHubClient(MagicMock())
+        if number == 5:
+            async with postgres.session() as session:
+                await Review.store(
+                    session,
+                    [
+                        Review(
+                            pull_request_id=pr.id,
+                            github_id=500,
+                            state="approved",
+                            author_login="ada",
+                            author_github_id=1,
+                        )
+                    ],
+                )
 
-    async def info(repo: RepoClient) -> dict[str, object]:
-        if repo.name == "hidden":
-            raise GitHubError(_response(404))
-        return {}
-
-    async def states(pull, author):
-        return {"ada": "APPROVED"} if pull.number == 5 else {}
-
-    with (
-        patch("openswe.human_review.routes.GitHubClient.as_user", as_user),
-        patch.object(RepoClient, "info", info),
-        patch("openswe.human_review.routes.latest_review_states", states),
+    with patch.object(
+        ReadableRepositories, "of", AsyncMock(return_value=ReadableRepositories(frozenset({"o/r"})))
     ):
         result = await api_review_assignments(page=1, session={"sub": "ada"})
     assert [row.number for row in result.pull_requests] == [1]

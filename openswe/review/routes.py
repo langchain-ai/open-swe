@@ -15,9 +15,10 @@ from openswe.dashboard.oauth import session_user_id
 from openswe.dashboard.options import model_supports_effort
 from openswe.dashboard.repo_access import require_repo_access_for_user
 from openswe.github.http import GitHubClient, RepoClient
+from openswe.github.mirror.sync import PullRequestSync
 from openswe.github.pull_request_status import pull_request_identity
 from openswe.github.repo_names import normalize_repo_full_name
-from openswe.github.repos import accessible_repo_full_names
+from openswe.github.repos import ReadableRepositories
 from openswe.review.approvals import fetch_approvals_md
 from openswe.review.assessment_feedback import (
     AssessmentFeedback,
@@ -172,11 +173,9 @@ async def api_get_review_summaries(
         if identity is None:
             raise HTTPException(422, "invalid pull request reference")
         identities.append(identity)
-    accessible = await accessible_repo_full_names(session["sub"])
+    readable = await ReadableRepositories.of(session["sub"])
     authorized = [
-        (owner, repo, number)
-        for owner, repo, number in identities
-        if f"{owner}/{repo}".lower() in accessible
+        (owner, repo, number) for owner, repo, number in identities if f"{owner}/{repo}" in readable
     ]
     return await get_review_summaries(authorized) if authorized else {}
 
@@ -188,10 +187,10 @@ async def api_list_reviews(
     session: dict[str, Any] = SESSION_DEP,
 ) -> dict[str, Any]:
     login = session["sub"]
-    accessible = await accessible_repo_full_names(login)
+    readable = await ReadableRepositories.of(login)
 
     async def is_accessible(summary: dict[str, Any]) -> bool:
-        return summary["full_name"].lower() in accessible
+        return summary["full_name"] in readable
 
     page = max(page, 0)
     reviews, has_more = await list_reviews(
@@ -210,7 +209,7 @@ async def api_get_review(
     pr_number: int,
     session: dict[str, Any] = SESSION_DEP,
 ) -> dict[str, Any]:
-    await require_repo_access_for_user(session["sub"], f"{owner}/{repo}")
+    (await ReadableRepositories.of(session["sub"])).require(f"{owner}/{repo}")
     return await get_review(owner, repo, pr_number)
 
 
@@ -249,8 +248,11 @@ async def api_get_pull_request_preview(
     pr_number: int,
     session: dict[str, Any] = SESSION_DEP,
 ) -> PullRequestPreview:
-    async with _as_viewer(session, owner, repo) as repository:
-        return await get_pull_request_preview(repository.pull_request(pr_number))
+    (await ReadableRepositories.of(session["sub"])).require(f"{owner}/{repo}")
+    pull = await PullRequestSync(owner, repo, pr_number).mirrored()
+    if pull is None:
+        raise HTTPException(404, "pull request not found")
+    return await get_pull_request_preview(pull)
 
 
 @router.get("/reviews/{owner}/{repo}/{pr_number}/labels")

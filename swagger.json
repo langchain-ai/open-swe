@@ -3693,11 +3693,6 @@
             ],
             "title": "Deletions"
           },
-          "detailsLoading": {
-            "default": false,
-            "title": "Detailsloading",
-            "type": "boolean"
-          },
           "draft": {
             "anyOf": [
               {
@@ -5072,44 +5067,6 @@
           "has_more"
         ],
         "title": "PullRequestSearchResults",
-        "type": "object"
-      },
-      "PullRequestState": {
-        "description": "Live GitHub truth for one PR: check verdict plus open/merged/closed.",
-        "properties": {
-          "checks": {
-            "enum": [
-              "failing",
-              "passing",
-              "pending",
-              "unknown"
-            ],
-            "title": "Checks",
-            "type": "string"
-          },
-          "state": {
-            "anyOf": [
-              {
-                "enum": [
-                  "open",
-                  "draft",
-                  "merged",
-                  "closed"
-                ],
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "State"
-          }
-        },
-        "required": [
-          "checks",
-          "state"
-        ],
-        "title": "PullRequestState",
         "type": "object"
       },
       "PullRequestThreadRun": {
@@ -6761,6 +6718,44 @@
           "prompt"
         ],
         "title": "SessionCreateBody",
+        "type": "object"
+      },
+      "SidebarPullRequest": {
+        "description": "One PR's dot in the thread sidebar: check verdict plus open/merged/closed.",
+        "properties": {
+          "checks": {
+            "enum": [
+              "failing",
+              "passing",
+              "pending",
+              "unknown"
+            ],
+            "title": "Checks",
+            "type": "string"
+          },
+          "state": {
+            "anyOf": [
+              {
+                "enum": [
+                  "open",
+                  "draft",
+                  "merged",
+                  "closed"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "State"
+          }
+        },
+        "required": [
+          "checks",
+          "state"
+        ],
+        "title": "SidebarPullRequest",
         "type": "object"
       },
       "SkillCreate": {
@@ -13170,16 +13165,6 @@
           },
           {
             "in": "query",
-            "name": "lightweight",
-            "required": false,
-            "schema": {
-              "default": false,
-              "title": "Lightweight",
-              "type": "boolean"
-            }
-          },
-          {
-            "in": "query",
             "name": "sort",
             "required": false,
             "schema": {
@@ -13212,6 +13197,7 @@
             "required": false,
             "schema": {
               "default": 1,
+              "minimum": 1,
               "title": "Page",
               "type": "integer"
             }
@@ -18530,7 +18516,7 @@
               "application/json": {
                 "schema": {
                   "additionalProperties": {
-                    "$ref": "#/components/schemas/PullRequestState"
+                    "$ref": "#/components/schemas/SidebarPullRequest"
                   },
                   "title": "Response Api Get Pull Request Checks Dashboard Api Threads Pull Request Checks Post",
                   "type": "object"

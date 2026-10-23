@@ -12,7 +12,7 @@ from pydantic import BaseModel, Field
 from openswe.audit_logs.middleware import audit_endpoint
 from openswe.dashboard.deps import ADMIN_DEP, SESSION_DEP, session_is_admin
 from openswe.dashboard.oauth import bind_audit_session, decode_upload_ticket
-from openswe.github.pull_request_checks import PullRequestState
+from openswe.github.mirror.views import SidebarPullRequest
 from openswe.github.pull_request_context import PullRequestFixScope
 from openswe.github.token_auth import bearer_github_token
 from openswe.message_queue import QueuedPreview
@@ -275,7 +275,7 @@ class PullRequestChecksRequest(BaseModel):
 async def api_get_pull_request_checks(
     payload: PullRequestChecksRequest,
     session: dict[str, Any] = SESSION_DEP,
-) -> dict[str, PullRequestState]:
+) -> dict[str, SidebarPullRequest]:
     return await get_dashboard_pull_request_checks(
         [ref.model_dump() for ref in payload.pullRequests], session["sub"]
     )

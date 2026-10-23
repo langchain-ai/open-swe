@@ -13,9 +13,12 @@ from langgraph_sdk.errors import NotFoundError
 
 from openswe.bridge.store import BridgeStore, SandboxBridgeBinding
 from openswe.github.http import GitHubClient
-from openswe.github.pull_request_checks import PullRequestState, get_pull_request_check_states
+from openswe.github.mirror.sync import PullRequestSync
+from openswe.github.mirror.views import PullRequestView, SidebarPullRequest, unavailable_health
 from openswe.github.pull_request_context import PullRequestFixScope, get_pull_request_context
-from openswe.github.pull_request_status import get_pull_request_statuses
+from openswe.github.pull_request_status import pull_request_identity
+from openswe.github.pull_requests import PullRequest
+from openswe.github.repos import ReadableRepositories
 from openswe.github.thread_token import invalidate_cached_github_token
 from openswe.message_queue import QueuedMessage, QueuedPreview
 from openswe.review.session import ReviewSession, ReviewSessionMetadata
@@ -68,6 +71,8 @@ from openswe.utils.thread_settings import THREAD_SETTINGS_KEY
 from openswe.utils.timing import phase
 
 logger = logging.getLogger(__name__)
+
+_SIDEBAR_PULL_REQUESTS = 50
 
 
 async def _mark_thread_viewed(
@@ -687,23 +692,61 @@ def _tracked_pull_requests(metadata: Mapping[str, Any]) -> list[object]:
 async def get_dashboard_thread_pull_request_status(
     thread_id: str, login: str, *, email: str | None = None
 ) -> dict[str, Any]:
-    """Return live GitHub health for every pull request tracked by the thread."""
+    """Health for every pull request tracked by the thread, from the mirror."""
     metadata = await _readable_thread_metadata(thread_id, login=login, email=email)
     tracked = _tracked_pull_requests(metadata)
     if not tracked:
         return {"pullRequests": []}
-    async with GitHubClient.as_user(login) as github:
-        return {"pullRequests": await get_pull_request_statuses(github, tracked)}
+    readable = await ReadableRepositories.of(login)
+
+    async def health(record: object) -> dict[str, Any]:
+        identity = pull_request_identity(record)
+        if identity is None or f"{identity[0]}/{identity[1]}" not in readable:
+            return unavailable_health(record)
+        stored = await PullRequestSync(*identity).mirrored()
+        if stored is None:
+            return unavailable_health(record)
+        (view,) = await PullRequestView.load([stored])
+        return await view.health()
+
+    return {"pullRequests": list(await asyncio.gather(*(health(r) for r in tracked)))}
 
 
 async def get_dashboard_pull_request_checks(
     records: Sequence[object], login: str
-) -> dict[str, PullRequestState]:
-    """Return batched live state for the pull requests the sidebar is showing."""
-    if not records:
+) -> dict[str, SidebarPullRequest]:
+    """The sidebar's dot for each pull request it shows, from the mirror."""
+    identities = [
+        identity
+        for record in records[:_SIDEBAR_PULL_REQUESTS]
+        if (identity := pull_request_identity(_sidebar_record(record))) is not None
+    ]
+    if not identities:
         return {}
-    async with GitHubClient.as_user(login) as github:
-        return dict(await get_pull_request_check_states(github, records, login))
+    readable = await ReadableRepositories.of(login)
+    visible = [i for i in identities if f"{i[0]}/{i[1]}" in readable]
+    stored = await PullRequest.many(
+        [(f"{owner}/{repo}", number) for owner, repo, number in visible]
+    )
+    views = {
+        (view.pull.repo_full_name.lower(), view.pull.number): view
+        for view in await PullRequestView.load(list(stored.values()))
+    }
+    states: dict[str, SidebarPullRequest] = {}
+    for owner, repo, number in visible:
+        view = views.get((f"{owner}/{repo}".lower(), number))
+        if view is None:
+            await PullRequestSync(owner, repo, number).schedule(full=True)
+        states[f"{owner}/{repo}#{number}"] = (
+            view.sidebar() if view is not None else {"checks": "unknown", "state": None}
+        )
+    return states
+
+
+def _sidebar_record(record: object) -> dict[str, object]:
+    if not isinstance(record, Mapping):
+        return {}
+    return {"repo_full_name": record.get("repoFullName"), "number": record.get("number")}
 
 
 async def get_dashboard_thread_pull_request_context(
