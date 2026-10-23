@@ -3908,6 +3908,17 @@
             "title": "Repo",
             "type": "string"
           },
+          "requiredChecksPassing": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Requiredcheckspassing"
+          },
           "reviewDecision": {
             "anyOf": [
               {
