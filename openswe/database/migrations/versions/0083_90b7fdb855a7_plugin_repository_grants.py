@@ -16,8 +16,10 @@ depends_on = None
 
 
 def upgrade() -> None:
+    # Every statement can run again: a preview database may keep these tables after
+    # forgetting it stamped them, when its branch left the preview tree for a while.
     op.execute("""
-        CREATE TABLE plugin_repository_grant (
+        CREATE TABLE IF NOT EXISTS plugin_repository_grant (
             id uuid PRIMARY KEY,
             installation uuid NOT NULL REFERENCES plugin_installation (id) ON DELETE CASCADE,
             user_id uuid NOT NULL REFERENCES users (id) ON DELETE CASCADE,
@@ -29,19 +31,29 @@ def upgrade() -> None:
         )
     """)
     op.execute("""
-        CREATE UNIQUE INDEX plugin_repository_grant_key
+        CREATE UNIQUE INDEX IF NOT EXISTS plugin_repository_grant_key
             ON plugin_repository_grant (installation, user_id, repository)
     """)
     op.execute("""
-        INSERT INTO plugin_repository_grant (id, installation, user_id, repository, created_by, updated_by)
-        SELECT gen_random_uuid(), i.id, owner, repository, owner, owner
-        FROM plugin_installation i
-        CROSS JOIN LATERAL (SELECT COALESCE(i.user_id, i.created_by) AS owner) o
-        CROSS JOIN LATERAL unnest(i.repositories) AS repository
-        WHERE owner IS NOT NULL
-        ON CONFLICT DO NOTHING
+        DO $$
+        BEGIN
+            IF EXISTS (
+                SELECT 1 FROM information_schema.columns
+                WHERE table_schema = current_schema()
+                    AND table_name = 'plugin_installation'
+                    AND column_name = 'repositories'
+            ) THEN
+                INSERT INTO plugin_repository_grant (id, installation, user_id, repository, created_by, updated_by)
+                SELECT gen_random_uuid(), i.id, owner, repository, owner, owner
+                FROM plugin_installation i
+                CROSS JOIN LATERAL (SELECT COALESCE(i.user_id, i.created_by) AS owner) o
+                CROSS JOIN LATERAL unnest(i.repositories) AS repository
+                WHERE owner IS NOT NULL
+                ON CONFLICT DO NOTHING;
+                ALTER TABLE plugin_installation DROP COLUMN repositories;
+            END IF;
+        END $$
     """)
-    op.execute("ALTER TABLE plugin_installation DROP COLUMN repositories")
 
 
 def downgrade() -> None:

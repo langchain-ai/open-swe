@@ -15,8 +15,10 @@ depends_on = None
 
 
 def upgrade() -> None:
-    op.execute("ALTER TABLE plugin_chat_call ADD COLUMN output text")
-    op.execute("ALTER TABLE plugin_chat_call ADD COLUMN delivered_at timestamptz")
+    # Every statement can run again: a preview database may keep these tables after
+    # forgetting it stamped them, when its branch left the preview tree for a while.
+    op.execute("ALTER TABLE plugin_chat_call ADD COLUMN IF NOT EXISTS output text")
+    op.execute("ALTER TABLE plugin_chat_call ADD COLUMN IF NOT EXISTS delivered_at timestamptz")
 
 
 def downgrade() -> None:

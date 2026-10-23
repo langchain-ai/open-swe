@@ -22,8 +22,10 @@ depends_on = None
 
 
 def upgrade() -> None:
+    # Every statement can run again: a preview database may keep these tables after
+    # forgetting it stamped them, when its branch left the preview tree for a while.
     op.execute("""
-        CREATE TABLE plugin_chat (
+        CREATE TABLE IF NOT EXISTS plugin_chat (
             id uuid PRIMARY KEY,
             installation uuid NOT NULL REFERENCES plugin_installation (id) ON DELETE CASCADE,
             user_id uuid NOT NULL REFERENCES users (id) ON DELETE CASCADE,
@@ -39,12 +41,12 @@ def upgrade() -> None:
         )
     """)
     op.execute("""
-        CREATE UNIQUE INDEX plugin_chat_key
+        CREATE UNIQUE INDEX IF NOT EXISTS plugin_chat_key
             ON plugin_chat (installation, user_id, name, repository) NULLS NOT DISTINCT
     """)
-    op.execute("CREATE UNIQUE INDEX plugin_chat_thread_id ON plugin_chat (thread_id)")
+    op.execute("CREATE UNIQUE INDEX IF NOT EXISTS plugin_chat_thread_id ON plugin_chat (thread_id)")
     op.execute("""
-        CREATE TABLE plugin_chat_call (
+        CREATE TABLE IF NOT EXISTS plugin_chat_call (
             id uuid PRIMARY KEY,
             chat uuid NOT NULL REFERENCES plugin_chat (id) ON DELETE CASCADE,
             call_id text NOT NULL,
@@ -57,8 +59,8 @@ def upgrade() -> None:
             updated_by uuid REFERENCES users (id) ON DELETE SET NULL
         )
     """)
-    op.execute("CREATE UNIQUE INDEX plugin_chat_call_key ON plugin_chat_call (chat, call_id)")
-    op.execute("DROP TABLE plugin_thread")
+    op.execute("CREATE UNIQUE INDEX IF NOT EXISTS plugin_chat_call_key ON plugin_chat_call (chat, call_id)")
+    op.execute("DROP TABLE IF EXISTS plugin_thread")
     # ``agent`` reaches further than approving each thread did, so an install
     # that had ``threads`` loses it and asks for ``agent`` on its next update.
     op.execute("""

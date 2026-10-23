@@ -25,8 +25,10 @@ depends_on = None
 
 
 def upgrade() -> None:
+    # Every statement can run again: a preview database may keep these tables after
+    # forgetting it stamped them, when its branch left the preview tree for a while.
     op.execute("""
-        CREATE TABLE plugin (
+        CREATE TABLE IF NOT EXISTS plugin (
             id uuid PRIMARY KEY,
             repository text NOT NULL,
             path text NOT NULL,
@@ -36,9 +38,9 @@ def upgrade() -> None:
             updated_by uuid REFERENCES users (id) ON DELETE SET NULL
         )
     """)
-    op.execute("CREATE UNIQUE INDEX plugin_source ON plugin (repository, path)")
+    op.execute("CREATE UNIQUE INDEX IF NOT EXISTS plugin_source ON plugin (repository, path)")
     op.execute("""
-        CREATE TABLE plugin_bundle (
+        CREATE TABLE IF NOT EXISTS plugin_bundle (
             id uuid PRIMARY KEY,
             sha256 text NOT NULL,
             html text NOT NULL,
@@ -48,9 +50,9 @@ def upgrade() -> None:
             updated_by uuid REFERENCES users (id) ON DELETE SET NULL
         )
     """)
-    op.execute("CREATE UNIQUE INDEX plugin_bundle_sha256 ON plugin_bundle (sha256)")
+    op.execute("CREATE UNIQUE INDEX IF NOT EXISTS plugin_bundle_sha256 ON plugin_bundle (sha256)")
     op.execute("""
-        CREATE TABLE plugin_installation (
+        CREATE TABLE IF NOT EXISTS plugin_installation (
             id uuid PRIMARY KEY,
             plugin uuid NOT NULL REFERENCES plugin (id),
             user_id uuid REFERENCES users (id) ON DELETE CASCADE,
@@ -66,11 +68,11 @@ def upgrade() -> None:
         )
     """)
     op.execute("""
-        CREATE UNIQUE INDEX plugin_installation_name
+        CREATE UNIQUE INDEX IF NOT EXISTS plugin_installation_name
             ON plugin_installation (user_id, (manifest ->> 'name')) NULLS NOT DISTINCT
     """)
     op.execute("""
-        CREATE TABLE plugin_document (
+        CREATE TABLE IF NOT EXISTS plugin_document (
             id uuid PRIMARY KEY,
             plugin uuid NOT NULL REFERENCES plugin (id) ON DELETE CASCADE,
             collection text NOT NULL,
@@ -86,11 +88,11 @@ def upgrade() -> None:
         )
     """)
     op.execute("""
-        CREATE UNIQUE INDEX plugin_document_key
+        CREATE UNIQUE INDEX IF NOT EXISTS plugin_document_key
             ON plugin_document (plugin, collection, repository, user_id, key) NULLS NOT DISTINCT
     """)
     op.execute("""
-        CREATE TABLE plugin_thread (
+        CREATE TABLE IF NOT EXISTS plugin_thread (
             id uuid PRIMARY KEY,
             installation uuid NOT NULL REFERENCES plugin_installation (id) ON DELETE CASCADE,
             thread_id text NOT NULL,
@@ -100,10 +102,10 @@ def upgrade() -> None:
             updated_by uuid REFERENCES users (id) ON DELETE SET NULL
         )
     """)
-    op.execute("CREATE UNIQUE INDEX plugin_thread_thread_id ON plugin_thread (thread_id)")
-    op.execute("CREATE INDEX plugin_thread_installation ON plugin_thread (installation)")
+    op.execute("CREATE UNIQUE INDEX IF NOT EXISTS plugin_thread_thread_id ON plugin_thread (thread_id)")
+    op.execute("CREATE INDEX IF NOT EXISTS plugin_thread_installation ON plugin_thread (installation)")
     op.execute("""
-        CREATE TABLE plugin_room_update (
+        CREATE TABLE IF NOT EXISTS plugin_room_update (
             id uuid PRIMARY KEY,
             seq bigint GENERATED ALWAYS AS IDENTITY,
             plugin uuid NOT NULL REFERENCES plugin (id) ON DELETE CASCADE,
@@ -118,9 +120,9 @@ def upgrade() -> None:
             CONSTRAINT plugin_room_update_one_scope CHECK ((repository IS NULL) <> (user_id IS NULL))
         )
     """)
-    op.execute("CREATE UNIQUE INDEX plugin_room_update_seq ON plugin_room_update (seq)")
+    op.execute("CREATE UNIQUE INDEX IF NOT EXISTS plugin_room_update_seq ON plugin_room_update (seq)")
     op.execute("""
-        CREATE INDEX plugin_room_update_room
+        CREATE INDEX IF NOT EXISTS plugin_room_update_room
             ON plugin_room_update (plugin, room, repository, user_id, seq)
     """)
 
