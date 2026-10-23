@@ -1111,19 +1111,32 @@ async def test_a_launched_worker_adopts_its_own_run_token_before_anything_runs(
     assert all(bearer == "Bearer worker-token" for _, bearer in seen[1:])
 
 
+_PROVIDER_REQUEST = httpx2.Request("POST", "https://provider.invalid")
+
+
+@pytest.mark.parametrize(
+    ("error", "code"),
+    [
+        (
+            anthropic.APIStatusError(
+                "Overloaded",
+                response=httpx2.Response(529, request=_PROVIDER_REQUEST),
+                body={"type": "error", "error": {"type": "overloaded_error"}},
+            ),
+            "provider_overloaded",
+        ),
+        # A client or gateway can let the HTTP library's failure through unwrapped.
+        (httpx2.ReadTimeout("timed out", request=_PROVIDER_REQUEST), "provider_timeout"),
+        (httpx.ConnectError("refused"), "provider_unavailable"),
+    ],
+)
 async def test_a_provider_failure_ends_the_run_and_tells_the_backend_why(
-    monkeypatch: pytest.MonkeyPatch,
+    monkeypatch: pytest.MonkeyPatch, error: Exception, code: str
 ) -> None:
     monkeypatch.setenv("OPEN_SWE_BACKEND_URL", "https://backend.invalid")
     monkeypatch.setattr("rt.middleware.run_id", lambda: "run-1")
     model = FakeListChatModel(responses=["unused"])
     monkeypatch.setattr("rt.middleware.build_model", lambda *args, **kwargs: model)
-    response = httpx2.Response(529, request=httpx2.Request("POST", "https://provider.invalid"))
-    error = anthropic.APIStatusError(
-        "Overloaded",
-        response=response,
-        body={"type": "error", "error": {"type": "overloaded_error", "message": "Overloaded"}},
-    )
     backend = OpenSweBackend("token")
     reported: list[tuple[str, dict[str, JsonValue]]] = []
 
@@ -1144,7 +1157,7 @@ async def test_a_provider_failure_ends_the_run_and_tells_the_backend_why(
     }
     request = ModelRequest(model=model, messages=[], state=state)
 
-    with pytest.raises(anthropic.APIStatusError) as caught:
+    with pytest.raises(type(error)) as caught:
         await BackendRunMiddleware(backend, "run").awrap_model_call(
             request, AsyncMock(side_effect=error)
         )
@@ -1155,8 +1168,8 @@ async def test_a_provider_failure_ends_the_run_and_tells_the_backend_why(
             "/remote-runtime/api/model_failure",
             {
                 "run_id": "run-1",
-                "code": "provider_overloaded",
-                "error_type": "APIStatusError",
+                "code": code,
+                "error_type": type(error).__name__,
                 "model_id": "anthropic:claude-opus-5-5",
             },
         )

@@ -11,6 +11,8 @@ import logging
 from collections.abc import Awaitable, Callable, Sequence
 from typing import Final
 
+import httpx
+import httpx2
 from langchain.agents.middleware import (
     AgentMiddleware,
     ModelRetryMiddleware,
@@ -76,6 +78,11 @@ def provider_failure_code(exc: BaseException) -> ModelFailureCode | None:
     if "model_not_available" in haystack or "model_not_found" in haystack:
         return "model_unavailable"
     if isinstance(status, int) and status >= 500:
+        return "provider_unavailable"
+    # A client or gateway can let the HTTP library's own failure through unwrapped.
+    if isinstance(exc, (httpx.TimeoutException, httpx2.TimeoutException)):
+        return "provider_timeout"
+    if isinstance(exc, (httpx.TransportError, httpx2.TransportError)):
         return "provider_unavailable"
     return _FAILURE_CODES_BY_TYPE.get(type(exc).__name__)
 

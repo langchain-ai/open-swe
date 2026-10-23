@@ -26,6 +26,7 @@ _PROVIDER_NAMES: Final = {
     "google_genai": "Google",
     "fireworks": "Fireworks",
     "baseten": "Baseten",
+    "groq": "Groq",
 }
 
 
