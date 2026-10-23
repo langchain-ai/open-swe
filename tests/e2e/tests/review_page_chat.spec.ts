@@ -687,6 +687,14 @@ test("opens the review thread beside the diff for completed and running reviews"
     });
   });
   await openReview(page, pull);
+  await expect(page.getByRole("heading", { level: 1 })).toHaveCSS(
+    "font-family",
+    /Inter/,
+  );
+  await expect(page.getByRole("tab", { name: "Review Threads" })).toHaveCSS(
+    "font-family",
+    /Inter/,
+  );
   const url = page.url();
   await page.getByRole("button", { name: "See how it reviewed" }).click();
   await expect(
