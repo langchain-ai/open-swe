@@ -6,6 +6,8 @@ from typing import Any
 
 from langgraph_sdk.client import LangGraphClient
 
+from openswe.slack.blocks import block_payload
+from openswe.slack.breakout_links import breakout_root_blocks
 from openswe.slack.client import (
     append_slack_web_link_footer,
     get_active_slack_thread,
@@ -178,6 +180,7 @@ async def move_slack_thread(
         new_ts = await post_slack_top_level_message_with_ts(
             target_channel,
             root_text,
+            blocks=block_payload(breakout_root_blocks(message, dashboard_thread_url(thread_id))),
             unfurl_links=False,
             unfurl_media=False,
         )

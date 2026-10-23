@@ -4,11 +4,11 @@ from typing import Final
 
 from langchain_core.runnables import RunnableConfig
 from pydantic import JsonValue, TypeAdapter
+from runtime_api.catalog import ModelSpec, RunModels
 
 from openswe.remote_runtime.graph import RemoteGraph
-from openswe.remote_runtime.runs import ModelSpec, RunModels
 from openswe.review.diff import compute_diff_line_set
-from openswe.reviewer import ReviewerModelChoice, build_reviewer_agent, resolve_reviewer_models
+from openswe.reviewer import ReviewerModelChoice, plan_reviewer, resolve_reviewer_models
 from openswe.run_config import RunConfig
 from openswe.sandboxes.tool_runtime import ToolSurface
 
@@ -17,8 +17,8 @@ ASSISTANT_ID: Final = "reviewer"
 _json = TypeAdapter(JsonValue)
 
 
-async def _build(config: RunnableConfig, surface: ToolSurface) -> object:
-    return await build_reviewer_agent(config, tool_surface=surface)
+async def _plan(config: RunnableConfig, surface: ToolSurface) -> None:
+    await plan_reviewer(config, surface)
 
 
 def _restore(state: dict[str, object]) -> None:
@@ -41,4 +41,4 @@ async def run_models(cfg: RunConfig) -> RunModels:
     )
 
 
-REVIEWER: Final = RemoteGraph(ASSISTANT_ID, _build, run_models, restore_state=_restore)
+REVIEWER: Final = RemoteGraph(ASSISTANT_ID, _plan, run_models, restore_state=_restore)

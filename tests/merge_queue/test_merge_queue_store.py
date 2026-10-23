@@ -7,16 +7,19 @@ from datetime import UTC, datetime, timedelta
 from unittest.mock import AsyncMock, Mock
 from uuid import UUID, uuid7
 
-import httpx2
 import pytest
 from sqlalchemy import func, select, update
 from sqlalchemy.exc import IntegrityError
 
 from openswe.database import postgres
-from openswe.github.http import GitHubError, RepoClient
+from openswe.github.http import RepoClient
 from openswe.github.pull_requests import PullRequest
 from openswe.github.repositories import Repository
-from openswe.merge_queue.admission import Admission, AdmissionReader, QueuePolicy
+from openswe.merge_queue import controller, runtime
+from openswe.merge_queue.admission import Admission, AdmissionReader, CheckSource, QueuePolicy
+from openswe.merge_queue.configuration import QueueConfiguration
+from openswe.merge_queue.controller import QueueController
+from openswe.merge_queue.dispatch import DispatchGateway, DispatchRejected
 from openswe.merge_queue.git import Candidate, CandidateGit, PullHead, candidate_ref
 from openswe.merge_queue.models import (
     Attempt,
@@ -836,7 +839,7 @@ async def test_validation_job_expires_saved_budget_during_github_outage(
         raise RuntimeError("GitHub unavailable")
         yield  # pragma: no cover
 
-    runtime = QueueRuntime({queue.id: policy}, unavailable)
+    runtime = QueueRuntime({queue.id: policy}, unavailable, Mock(spec=DispatchGateway))
     with pytest.raises(RuntimeError, match="GitHub unavailable"):
         await runtime.reconcile(QueueJob(queue_id=queue.id, workspace_id=queue.workspace_id))
     history = await queue.history(batch.id)
@@ -870,13 +873,9 @@ async def test_validation_precedes_cleanup_and_cancellation_skips_it(
     repo = Mock(spec=RepoClient, full_name="acme/widgets")
     repo.branch_sha = AsyncMock(return_value=candidate.base_sha)
     repo.ref_sha = AsyncMock(return_value=candidate.sha)
-    repo.dispatch_validation = AsyncMock(
-        side_effect=GitHubError(
-            httpx2.Response(403, request=httpx2.Request("POST", "https://api.github.com"))
-        )
-    )
+    dispatcher = Mock(spec=DispatchGateway, dispatch=AsyncMock(side_effect=DispatchRejected(403)))
     if cancelled:
-        repo.dispatch_validation.side_effect = asyncio.CancelledError()
+        dispatcher.dispatch.side_effect = asyncio.CancelledError()
 
     def pull(number: int) -> Mock:
         return Mock(
@@ -909,7 +908,7 @@ async def test_validation_precedes_cleanup_and_cancellation_skips_it(
     async def open_repo(_queue: MergeQueue) -> AsyncIterator[RepoClient]:
         yield repo
 
-    runtime = QueueRuntime({queue.id: policy}, open_repo)
+    runtime = QueueRuntime({queue.id: policy}, open_repo, dispatcher)
     payload = QueueJob(queue_id=queue.id, workspace_id=queue.workspace_id)
     if cancelled:
         with pytest.raises(asyncio.CancelledError):
@@ -918,3 +917,89 @@ async def test_validation_precedes_cleanup_and_cancellation_skips_it(
         await runtime.reconcile(payload)
     assert states_at_cleanup == ([] if cancelled else ["failed"])
     assert (await queue.history(expired.id)).batch.ref_deleted_at is None
+
+
+@pytest.fixture
+async def queue_controller(queue: MergeQueue, monkeypatch: pytest.MonkeyPatch) -> QueueController:
+    monkeypatch.setenv("MERGE_QUEUE_DISPATCH_SECRET", "s" * 32)
+    monkeypatch.setenv("GITHUB_APP_ID", "99")
+    monkeypatch.setenv("SANDBOX_TYPE", "langsmith")
+    monkeypatch.setattr(runtime, "RUNTIME", None)
+    monkeypatch.setattr(controller, "CONTROLLER", None)
+    config = QueueConfiguration(
+        workspace_id=queue.workspace_id,
+        repository="acme/widgets",
+        repository_id=42,
+        dispatch_url="https://dispatcher.example/queue",
+        workflow_digest="a" * 64,
+        policy=QueuePolicy(
+            checks={"checks": CheckSource(app_id=1, workflow_path=".github/workflows/ci.yml")},
+            validation=ValidationPolicy(dispatch_actor_id=789),
+        ),
+    )
+    async with postgres.session() as session:
+        await session.execute(
+            update(WorkspaceRow)
+            .where(WorkspaceRow.id == queue.workspace_id)
+            .values(merge_queue_config=config.model_dump(mode="json", exclude={"workspace_id"}))
+        )
+    await controller.start_queue()
+    assert controller.CONTROLLER is not None
+    return controller.CONTROLLER
+
+
+async def test_queue_startup_preserves_state_and_running_job(
+    queue_controller: QueueController,
+) -> None:
+    from sqlalchemy import text
+
+    from openswe.jobs import queue as jobs
+
+    queue = queue_controller.queue
+    assert queue.paused
+    pending = await request(queue, 1)
+    first_job = await jobs.get(f"merge-queue:{queue.id}")
+    assert first_job is not None
+    # Hold the recurring job while a second replica starts.
+    async with postgres.transaction() as conn:
+        await conn.execute(
+            text("UPDATE job SET due_at = clock_timestamp() WHERE id = :id"), {"id": first_job.id}
+        )
+        await conn.execute(update(MergeQueue).where(MergeQueue.id == queue.id).values(paused=False))
+    claimed = next(job for job in await jobs.claim_due(100) if job.id == first_job.id)
+
+    await controller.start_queue()
+    assert controller.CONTROLLER is not None
+    assert controller.CONTROLLER.config == queue_controller.config
+    next_job = await jobs.get(f"merge-queue:{queue.id}")
+    assert next_job is not None and next_job.claim_token == claimed.claim_token
+    restored = await MergeQueue.load(queue.id, queue.workspace_id)
+    assert restored is not None and not restored.paused
+    assert [row.id for row in await restored.requests()] == [pending.id]
+
+    async with postgres.session() as session:
+        await session.execute(
+            update(WorkspaceRow)
+            .where(WorkspaceRow.id == queue.workspace_id)
+            .values(merge_queue_config=None)
+        )
+    await controller.start_queue()
+    assert controller.CONTROLLER is None and runtime.RUNTIME is None
+
+
+async def test_queue_startup_rejects_multiple_configured_workspaces(
+    queue_controller: QueueController,
+) -> None:
+    async with postgres.session() as session:
+        session.add(
+            WorkspaceRow(
+                slug="other-canary",
+                name="Other canary",
+                merge_queue_config=queue_controller.config.model_dump(
+                    mode="json", exclude={"workspace_id"}
+                ),
+            )
+        )
+    with pytest.raises(ValueError, match="Only one canary workspace"):
+        await controller.start_queue()
+    assert controller.CONTROLLER is None and runtime.RUNTIME is None

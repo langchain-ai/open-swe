@@ -56,7 +56,7 @@ _TOOL_MODULES = {
     "delete_organization_skill": ".organization_skills",
     "publish_workspace": ".workspaces",
     "save_organization_skill": ".organization_skills",
-    "save_plan": ".save_plan",
+    "publish_artifact": ".publish_artifact",
     "save_user_instructions": ".save_user_instructions",
     "save_user_settings": ".save_user_settings",
     "save_user_skill": ".user_skills",
@@ -139,7 +139,7 @@ __all__ = [
     "publish_workspace",
     "save_organization_skill",
     "delete_organization_skill",
-    "save_plan",
+    "publish_artifact",
     "save_user_instructions",
     "save_user_settings",
     "save_user_skill",
@@ -213,6 +213,7 @@ if TYPE_CHECKING:
     from openswe.tools.open_pull_request import link_pull_request, open_pull_request
     from openswe.tools.organization_skills import delete_organization_skill, save_organization_skill
     from openswe.tools.output_iframe import output_iframe
+    from openswe.tools.publish_artifact import publish_artifact
     from openswe.tools.publish_review import publish_review
     from openswe.tools.read_only_sql import read_only_sql
     from openswe.tools.read_user_settings import read_user_settings
@@ -230,7 +231,6 @@ if TYPE_CHECKING:
     )
     from openswe.tools.request_rollout_check import request_rollout_check
     from openswe.tools.resolve_finding_thread import resolve_finding_thread
-    from openswe.tools.save_plan import save_plan
     from openswe.tools.save_user_instructions import save_user_instructions
     from openswe.tools.save_user_settings import save_user_settings
     from openswe.tools.schedule_thread_wakeup import schedule_thread_wakeup

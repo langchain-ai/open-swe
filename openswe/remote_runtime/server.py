@@ -1,8 +1,9 @@
 """What Managed Deep Agents runs call back into, behind the run token.
 
 Every call is ``POST /remote-runtime/hooks/{hook}`` with a JSON body: the graph's
-catalog, each phase of the run's model loop, and its tool calls (see
-``openswe.remote_runtime.graph``). The middleware verifies the bearer token once
+catalog and each phase of the run's model loop (see ``openswe.remote_runtime.graph``).
+The run's tools call ``POST /remote-runtime/api/{endpoint}``, the typed API in
+``runtime_api``. The middleware verifies the bearer token once
 per request and leaves the verified run for the handler, which picks the graph
 the token was signed for and reads the thread and run configuration from it,
 never from the body.
@@ -16,6 +17,8 @@ from collections.abc import Awaitable, Callable, Mapping
 from typing import Final
 
 from pydantic import JsonValue, TypeAdapter, ValidationError
+from runtime_api.endpoint import API_PATH as _API_PATH
+from runtime_api.endpoint import UnknownEndpointError
 from starlette.requests import Request
 from starlette.responses import JSONResponse
 from starlette.types import ASGIApp, Receive, Scope, Send
@@ -31,6 +34,7 @@ from openswe.remote_runtime.tokens import (
 logger = logging.getLogger(__name__)
 
 HOOKS_PATH: Final = "/remote-runtime/hooks/{hook}"
+API_PATH: Final = _API_PATH
 _RUN_STATE_KEY: Final = "remote_run"
 _hook_body = TypeAdapter(dict[str, JsonValue])
 
@@ -40,6 +44,7 @@ class UnknownHookError(LookupError):
 
 
 Hook = Callable[[RemoteRun, str, Mapping[str, JsonValue]], Awaitable[JsonValue]]
+Api = Callable[[RemoteRun, str, JsonValue], Awaitable[JsonValue]]
 RunHook = Callable[[RemoteRun, Mapping[str, JsonValue]], Awaitable[JsonValue]]
 GrantHook = Callable[[WorkerGrant, Mapping[str, JsonValue]], Awaitable[JsonValue]]
 
@@ -49,6 +54,12 @@ def _graphs() -> Mapping[str, Hook]:
     from openswe.remote_runtime.hosted import hosted_graphs
 
     return {assistant_id: graph.hook for assistant_id, graph in hosted_graphs().items()}
+
+
+def _apis() -> Mapping[str, Api]:
+    from openswe.remote_runtime.hosted import hosted_graphs
+
+    return {assistant_id: graph.api for assistant_id, graph in hosted_graphs().items()}
 
 
 def _run_hooks() -> Mapping[str, RunHook]:
@@ -123,6 +134,49 @@ async def hook_endpoint(scope: Scope, receive: Receive, send: Send) -> None:
     await JSONResponse(result)(scope, receive, send)
 
 
+async def api_endpoint(scope: Scope, receive: Receive, send: Send) -> None:
+    principal = _scope_principal(scope)
+    endpoint = scope["path_params"]["endpoint"]
+    if not isinstance(principal, RemoteRun):
+        await JSONResponse({"detail": "A worker grant only adopts a run token"}, 403)(
+            scope, receive, send
+        )
+        return
+    api = _apis().get(principal.assistant_id)
+    if api is None:
+        await JSONResponse({"detail": f"No remote runtime serves {principal.assistant_id}"}, 403)(
+            scope, receive, send
+        )
+        return
+    raw = await Request(scope, receive).body()
+    try:
+        body = _hook_body.validate_json(raw) if raw.strip() else {}
+    except ValidationError:
+        await JSONResponse({"detail": "The request body must be a JSON object"}, status_code=422)(
+            scope, receive, send
+        )
+        return
+    try:
+        result = await api(principal, endpoint, body)
+    except UnknownEndpointError:
+        await JSONResponse({"detail": f"Unknown endpoint {endpoint}"}, status_code=404)(
+            scope, receive, send
+        )
+        return
+    except ValidationError as exc:
+        await JSONResponse({"detail": str(exc)}, status_code=422)(scope, receive, send)
+        return
+    except Exception as exc:
+        logger.exception(
+            "Remote runtime API call failed",
+            extra={"endpoint": endpoint, "thread_id": principal.thread_id},
+        )
+        failure = {"error": type(exc).__name__, "message": str(exc)}
+        await JSONResponse(failure, status_code=500)(scope, receive, send)
+        return
+    await JSONResponse(result)(scope, receive, send)
+
+
 async def _refuse(scope: Scope, receive: Receive, send: Send, detail: str, challenge: str) -> None:
     response = JSONResponse(
         {"detail": detail}, status_code=401, headers={"WWW-Authenticate": challenge}
@@ -170,3 +224,4 @@ def _verify(token: str) -> RemoteRun | WorkerGrant:
 
 
 HOOKS: Final = RunTokenMiddleware(hook_endpoint)
+API: Final = RunTokenMiddleware(api_endpoint)

@@ -26,8 +26,8 @@ test("labels each eval call with the description the model gave it", async ({
   const worked = page.getByRole("button", {
     name: /^Worked(?: for .+)? · \d+ actions?$/,
   });
-  await expect(worked).toBeVisible({ timeout: 30_000 });
-  await worked.click();
+  await expect(worked.first()).toBeVisible({ timeout: 30_000 });
+  for (const fold of await worked.all()) await fold.click();
 
   const count = page.getByRole("button", {
     name: /Eval\s*Count the files in the repository/,

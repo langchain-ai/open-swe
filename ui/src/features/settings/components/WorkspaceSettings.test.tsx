@@ -774,7 +774,7 @@ describe("WorkspaceSettingsPanel", () => {
 
     // The selector stays disabled until the workspace's settings have loaded.
     const trigger = await screen.findByRole("button", {
-      name: /Pick a repository/,
+      name: "No default repository",
     })
     await waitFor(() => expect(trigger.hasAttribute("disabled")).toBe(false))
     fireEvent.click(trigger)
