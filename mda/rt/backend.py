@@ -79,6 +79,25 @@ _json_list = TypeAdapter(list[JsonValue])
 _namespace: ContextVar[tuple[str, ...]] = ContextVar("open_swe_namespace", default=())
 
 
+# The tool call the agent's own tool-call chain is reporting right now, if any.
+_reported_call: ContextVar[str | None] = ContextVar("open_swe_reported_call", default=None)
+
+
+@contextmanager
+def reporting(tool_call_id: str) -> Iterator[None]:
+    """Name ``tool_call_id`` as the call being reported while the block runs it."""
+    token = _reported_call.set(tool_call_id)
+    try:
+        yield
+    finally:
+        _reported_call.reset(token)
+
+
+def reported_call() -> str | None:
+    """The call the tool-call chain is reporting, or None outside any."""
+    return _reported_call.get()
+
+
 @contextmanager
 def subagent_of(tool_call_id: str) -> Iterator[None]:
     """Name ``tool_call_id`` in the block's calls, as the ``task`` call its subagent runs in."""

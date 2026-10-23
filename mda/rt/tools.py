@@ -11,6 +11,7 @@ own (``rt.file_tools``).
 import logging
 from collections.abc import Mapping
 from typing import Final
+from uuid import uuid4
 
 from langchain.tools import ToolRuntime
 from langchain_core.messages import BaseMessage, ToolMessage, messages_to_dict
@@ -20,14 +21,22 @@ from langgraph.types import Command
 from pydantic import JsonValue, TypeAdapter
 from runtime_api.catalog import OperationSpec
 from runtime_api.endpoint import call
-from runtime_api.operations import OPERATION, OperationResult, RunOperation
+from runtime_api.operations import (
+    OPERATION,
+    RECORD_EVIDENCE,
+    OperationResult,
+    RunOperation,
+    ToolEvidence,
+)
 
 from rt.backend import (
     LONG_CALL_SECONDS,
     TOOL_CALL_SLACK_SECONDS,
+    BackendCallError,
     BackendTimeoutError,
     BackendUnavailableError,
     OpenSweBackend,
+    reported_call,
     run_body,
 )
 from rt.tracing import TurnTrace
@@ -43,7 +52,10 @@ _UNREACHABLE: Final = (
     "Error: The Open SWE backend could not be reached for this tool call. "
     "It may or may not have run; check state before retrying."
 )
+_json = TypeAdapter(JsonValue)
 _json_list = TypeAdapter(list[dict[str, JsonValue]])
+_json_object = TypeAdapter(dict[str, JsonValue])
+_json_content = TypeAdapter(str | list[JsonValue])
 
 
 class SandboxGoneError(RuntimeError):
@@ -124,14 +136,33 @@ def _result(answer: OperationResult, tool_call_id: str, name: str) -> ToolMessag
     return Command(update={"messages": [message], STATE_KEY: answer.state})
 
 
-async def run_operation(
+async def cited(
+    backend: OpenSweBackend, name: str, arguments: Mapping[str, object], result: ToolMessage
+) -> ToolMessage:
+    """``result``, recorded as incident evidence, citing the id it was recorded under."""
+    evidence = ToolEvidence(
+        run_id=run_id(),
+        tool=name,
+        arguments=_json_object.validate_python(arguments),
+        content=_json_content.validate_python(result.content),
+        status=result.status,
+        artifact=_json.validate_python(result.artifact) if result.artifact is not None else None,
+    )
+    try:
+        reply = await call(backend, RECORD_EVIDENCE, evidence)
+    except BackendCallError:
+        logger.warning("Could not record a tool result as incident evidence", exc_info=True)
+        return result
+    return result.model_copy(update={"content": _content(reply.content)})
+
+
+async def _operate(
     backend: OpenSweBackend,
     spec: OperationSpec,
     arguments: Mapping[str, JsonValue],
     runtime: ToolRuntime,
+    tool_call_id: str,
 ) -> ToolMessage | Command:
-    """Call ``spec``'s operation with ``arguments``, for one tool call."""
-    tool_call_id = runtime.tool_call_id or ""
     request = _reading(spec, runtime.state).model_copy(
         update={"run_id": run_id(), "arguments": dict(arguments), "request_id": tool_call_id}
     )
@@ -150,9 +181,64 @@ async def run_operation(
     return _result(answer, tool_call_id, spec.name)
 
 
-def operation_tool(spec: OperationSpec, backend: OpenSweBackend) -> StructuredTool:
+async def run_operation(
+    backend: OpenSweBackend,
+    spec: OperationSpec,
+    arguments: Mapping[str, JsonValue],
+    runtime: ToolRuntime,
+    *,
+    cites_evidence: bool = False,
+) -> ToolMessage | Command:
+    """Call ``spec``'s operation with ``arguments``, for one tool call.
+
+    Code mode calls tools directly, past the agent's tool-call chain that reports each
+    call and cites it as incident evidence, so a call it makes does both itself, under
+    the code mode call that ran it.
+    """
+    outer = reported_call()
+    if outer is None or outer == runtime.tool_call_id:
+        return await _operate(backend, spec, arguments, runtime, runtime.tool_call_id or "")
+    tool_call_id = f"{outer}:{spec.name}:{uuid4().hex[:8]}"
+    body = tool_body(runtime.state, name=spec.name, arguments=arguments, tool_call_id=tool_call_id)
+    backend.reports.started(body)
+    try:
+        result = await _operate(backend, spec, arguments, runtime, tool_call_id)
+    except Exception as exc:
+        failure = ToolMessage(
+            content=f"{type(exc).__name__}: {exc}", tool_call_id=tool_call_id, status="error"
+        )
+        backend.reports.finished(body, failure)
+        raise
+    message = result if isinstance(result, ToolMessage) else _answer(result, tool_call_id)
+    if cites_evidence:
+        message = await cited(backend, spec.name, arguments, message)
+    backend.reports.finished(body, message)
+    if isinstance(result, ToolMessage):
+        return message
+    return Command(update={**_update(result), "messages": [message]})
+
+
+def _answer(result: Command, tool_call_id: str) -> ToolMessage:
+    messages = _update(result).get("messages")
+    return next(
+        (
+            m
+            for m in (messages if isinstance(messages, list) else [])
+            if isinstance(m, ToolMessage) and m.tool_call_id == tool_call_id
+        ),
+        ToolMessage(content="", tool_call_id=tool_call_id),
+    )
+
+
+def _update(result: Command) -> dict[str, object]:
+    return dict(result.update) if isinstance(result.update, Mapping) else {}
+
+
+def operation_tool(
+    spec: OperationSpec, backend: OpenSweBackend, *, cites_evidence: bool = False
+) -> StructuredTool:
     async def operate(runtime: ToolRuntime, **arguments: JsonValue) -> ToolMessage | Command:
-        return await run_operation(backend, spec, arguments, runtime)
+        return await run_operation(backend, spec, arguments, runtime, cites_evidence=cites_evidence)
 
     return StructuredTool.from_function(
         coroutine=operate,

@@ -56,20 +56,19 @@ from langgraph.runtime import Runtime
 from langgraph.types import Command
 from langgraph_sdk.errors import APIConnectionError, APIStatusError
 from pydantic import BaseModel, JsonValue, TypeAdapter
-from runtime_api.endpoint import call
-from runtime_api.operations import RECORD_EVIDENCE, ToolEvidence
 
 from rt.backend import (
     BackendCallError,
     Hook,
     OpenSweBackend,
     PhaseReply,
+    reporting,
     run_body,
     subagent_of,
 )
 from rt.models import ModelSpec, build_model
 from rt.remote_files import FILE_TOOLS
-from rt.tools import STATE_KEY, run_id, tool_body
+from rt.tools import STATE_KEY, cited, run_id, tool_body
 from rt.tracing import TurnTrace
 
 logger = logging.getLogger(__name__)
@@ -465,7 +464,7 @@ async def reported(
     )
     backend.reports.started(body)
     try:
-        with subagent_of(tool_call_id):
+        with subagent_of(tool_call_id), reporting(tool_call_id):
             result = await handler(request)
     except asyncio.CancelledError:
         # A stopped call stays open, as it does in-process.
@@ -530,22 +529,9 @@ class IncidentEvidenceMiddleware(AgentMiddleware):
         return result
 
     async def _cited(self, request: ToolCallRequest, result: ToolMessage) -> ToolMessage:
-        evidence = ToolEvidence(
-            run_id=run_id(),
-            tool=request.tool_call["name"],
-            arguments=_json_object.validate_python(request.tool_call["args"]),
-            content=_json_content.validate_python(result.content),
-            status=result.status,
-            artifact=_json.validate_python(result.artifact)
-            if result.artifact is not None
-            else None,
+        return await cited(
+            self._backend, request.tool_call["name"], request.tool_call["args"], result
         )
-        try:
-            reply = await call(self._backend, RECORD_EVIDENCE, evidence)
-        except BackendCallError:
-            logger.warning("Could not record a tool result as incident evidence", exc_info=True)
-            return result
-        return result.model_copy(update={"content": reply.content})
 
 
 class _Launched(BaseModel):

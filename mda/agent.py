@@ -158,7 +158,10 @@ async def agent(runtime: ManagedServerRuntime) -> DeepAgentDefinition:
         if models is not None
         else _DEFAULT_MODEL
     )
-    tools = [operation_tool(spec, backend) for spec in catalog.operations]
+    tools = [
+        operation_tool(spec, backend, cites_evidence=catalog.incident_evidence)
+        for spec in catalog.operations
+    ]
     remote = RemoteFiles(backend, run_id)
     remote_tools = remote_file_tools(remote, catalog.files.artifacts_root)
     in_box = catalog.sandbox is not None

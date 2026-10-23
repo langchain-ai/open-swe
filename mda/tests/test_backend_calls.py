@@ -672,6 +672,60 @@ async def test_box_call_git_evidence_reaches_the_turn_after_its_run_closed(
     assert turn.metadata["open_swe_git_evidence"] == evidence
 
 
+async def test_an_operation_code_mode_calls_is_reported_and_cited_under_its_eval_call(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Code mode calls tools past the tool-call chain, so the tool reports itself."""
+    from rt.backend import reporting, subagent_of
+    from runtime_api.operations import EvidenceReply
+
+    monkeypatch.setenv("OPEN_SWE_BACKEND_URL", "https://backend.invalid")
+    monkeypatch.setattr("rt.tools.run_id", lambda: "run-1")
+    backend = OpenSweBackend("secret-token")
+    answers = {
+        "/remote-runtime/api/operation": OperationResult(content="found it"),
+        "/remote-runtime/api/record_evidence": EvidenceReply(
+            content="found it\n\nIncident evidence: ev-1"
+        ),
+    }
+
+    async def post(path: str, body: dict[str, object], **kwargs: object) -> object:
+        return answers[path].model_dump(mode="json")
+
+    monkeypatch.setattr(backend, "post", post)
+    started = AsyncMock()
+    finished = AsyncMock(return_value={})
+    monkeypatch.setattr(backend, "tool_started", started)
+    monkeypatch.setattr(backend, "tool_result", finished)
+    search = operation_tool(
+        OperationSpec(name="search_incidents", description="Search", parameters={"type": "object"}),
+        backend,
+        cites_evidence=True,
+    )
+    runtime = ToolRuntime(
+        state={"messages": []},
+        context=None,
+        config={},
+        stream_writer=lambda event: None,
+        tool_call_id=None,
+        store=None,
+    )
+
+    # As inside the eval call the agent's chain reports.
+    assert search.coroutine is not None
+    with subagent_of("eval-1"), reporting("eval-1"):
+        result = await search.coroutine(runtime=runtime)
+    await backend.reports.drain()
+
+    assert isinstance(result, ToolMessage)
+    assert result.content == "found it\n\nIncident evidence: ev-1"
+    [[body]] = [call.args for call in started.await_args_list]
+    assert body["name"] == "search_incidents"
+    assert body["namespace"] == ["eval-1"]
+    [[_body, recorded]] = [call.args for call in finished.await_args_list]
+    assert recorded.content == result.content
+
+
 async def test_a_command_the_guards_refuse_is_recorded_with_their_reason(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
