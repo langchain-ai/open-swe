@@ -12,8 +12,21 @@ sandbox requests, runs them locally, and posts the results back.
 
 ## Install
 
-Every desktop release, stable and nightly, ships `oswe` twice: inside the app
-at `Open SWE.app/Contents/Resources/bin/oswe`, and as standalone downloads for
+On Apple Silicon Macs running macOS Ventura or later, you can install with
+Homebrew. It installs the desktop app and links `oswe` onto your `PATH`;
+the CLI updates with the app.
+
+```sh
+brew install --cask langchain-ai/tap/open-swe-desktop
+```
+
+If you installed the cask before it linked `oswe`, run
+`brew reinstall --cask open-swe-desktop` once to get the link (a plain
+`brew upgrade` skips auto-updating casks).
+
+For Intel Macs, Linux, or just the CLI, use a standalone download. Every desktop
+release, stable and nightly, ships `oswe` inside the app at
+`Open SWE.app/Contents/Resources/bin/oswe` and as standalone downloads for
 `darwin-arm64`, `darwin-x64`, `linux-arm64` and `linux-x64` with an
 `oswe-SHA256SUMS` file. The macOS binaries are signed and notarized.
 
