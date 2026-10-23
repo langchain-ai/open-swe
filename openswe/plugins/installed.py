@@ -184,10 +184,11 @@ class InstalledPlugin:
         The plugin's results resume it at most ``MAX_AUTOMATIC_RESUMES`` times
         after each message from the person; past that the agent waits for them.
         """
-        answered = await chat.calls.answer(list(outputs), by=self.user_id)
+        answered = await chat.calls.answer(outputs, by=self.user_id)
         if not answered:
             return ChatAnswer(run_id=None, paused=False)
         if not await chat.calls.spend_resume(MAX_AUTOMATIC_RESUMES):
+            # The results wait for the person's next message, which carries them.
             return ChatAnswer(run_id=None, paused=True)
         try:
             run_id = await start_run_with_tool_results(
@@ -196,10 +197,12 @@ class InstalledPlugin:
                 prompt="",
                 tool_results=[ClientToolSpec.result_message(i, outputs[i]) for i in answered],
                 overrides={},
+                plugin_tools=True,
             )
         except Exception:
             # Nothing resumed, so the calls wait to be answered again.
             await chat.calls.reopen(answered)
             await chat.calls.refund_resume()
             raise
+        await chat.calls.deliver(answered)
         return ChatAnswer(run_id=run_id, paused=False)

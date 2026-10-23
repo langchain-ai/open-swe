@@ -34,7 +34,9 @@ does not know rides in the MDA run's state and comes back with every call.
 """
 
 import base64
+import hashlib
 import inspect
+import json
 import logging
 import time
 from collections.abc import Awaitable, Callable, Mapping, Sequence
@@ -845,13 +847,13 @@ class RemoteGraph:
 
     @staticmethod
     def _key(run: RemoteRun, run_id: str | None) -> tuple[str, str | None]:
-        # Hooks that name no run, such as the catalog, still differ from run to
-        # run: a plugin chat's tools, for one, can change between them.
-        invocation = run.configurable.get("invocation_id")
-        return (
-            run.thread_id,
-            run_id or (f"invocation:{invocation}" if isinstance(invocation, str) else None),
-        )
+        # Hooks that name no run, such as the catalog, serve all of a thread's runs,
+        # except that a plugin chat's tools can change from one run to the next.
+        chat = run.configurable.get("plugin_chat")
+        if run_id or chat is None:
+            return (run.thread_id, run_id)
+        tools = hashlib.sha256(json.dumps(chat, sort_keys=True).encode()).hexdigest()
+        return (run.thread_id, f"plugin-tools:{tools[:16]}")
 
     async def session(
         self, run: RemoteRun, run_id: str | None, *, fresh: bool = False

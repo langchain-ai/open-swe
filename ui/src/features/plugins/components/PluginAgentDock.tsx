@@ -26,6 +26,8 @@ export interface ProvidedTools {
 }
 
 const NO_TOOLS: AgentToolOffer = { tools: [], instructions: "" }
+// The backend gives the plugin's tools only to runs sent from the dock.
+const FROM_THE_DOCK = { plugin_dock: true } as const
 
 /**
  * The agent a plugin works with, docked beside it: the person's chat under the
@@ -61,6 +63,7 @@ export function PluginAgentDock({
   const answering = useAnsweredCalls(plugin, chatId, threadId, tools)
   const embedded = useMemo(
     () => ({
+      runConfigurable: FROM_THE_DOCK,
       emptyState: (
         <p className="max-w-xs text-center text-xs text-tertiary">
           Ask the agent about what you have open in{" "}
@@ -156,11 +159,7 @@ function sendOffer(
   offers.set(chatId, sent)
 }
 
-/**
- * Gives the chat's next runs what the plugin offers now, and takes it back
- * when the dock closes, so a run started elsewhere never waits on a tool
- * nothing here will answer.
- */
+/** Gives the chat's runs from the dock what the plugin offers now, and takes it back when the dock closes. */
 function useToolOffer(
   plugin: InstalledPlugin,
   chatId: string | undefined,

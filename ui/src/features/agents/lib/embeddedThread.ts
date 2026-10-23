@@ -9,4 +9,6 @@ import type { ReactNode } from "react"
 export const EmbeddedThreadContext = createContext<{
   /** What an empty thread shows: ways in, specific to the page around it. */
   emptyState?: ReactNode
+  /** Run config keys for every message sent from here, which the backend reads by name. */
+  runConfigurable?: Readonly<Record<string, boolean | string>>
 } | null>(null)

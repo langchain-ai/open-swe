@@ -149,16 +149,18 @@ async def test_a_chat_is_its_persons_and_each_call_is_answered_once() -> None:
     await chat.calls.record("call-1", "docs__read_page", {})
     assert [call.call_id for call in await chat.calls.claim()] == ["call-1"]
     assert await chat.calls.claim() == []
-    assert await chat.calls.answer(["call-1"], by=ada) == ["call-1"]
-    assert await chat.calls.answer(["call-1"], by=ada) == []
+    assert await chat.calls.answer({"call-1": "# Hi"}, by=ada) == ["call-1"]
+    assert await chat.calls.answer({"call-1": "# Again"}, by=ada) == []
     # A resume that never started leaves the call to be answered again.
     await chat.calls.reopen(["call-1"])
-    assert await chat.calls.answer(["call-1"], by=ada) == ["call-1"]
+    assert await chat.calls.answer({"call-1": "# Hi"}, by=ada) == ["call-1"]
     assert await chat.calls.pending() == []
 
-    # The plugin's results resume the chat only so often before the person writes again.
+    # The plugin's results resume the chat only so often before the person writes again,
+    # and what no run delivered goes to the agent with their message, once.
     assert [await chat.calls.spend_resume(2) for _ in range(3)] == [True, True, False]
-    await PluginChat.person_wrote("thread-1")
+    assert [m["content"] for m in await PluginChat.person_wrote("thread-1")] == ["# Hi"]
+    assert await PluginChat.person_wrote("thread-1") == []
     assert await chat.calls.spend_resume(2)
 
 

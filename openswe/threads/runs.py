@@ -376,7 +376,13 @@ async def _build_dashboard_configurable(
     *,
     profile: dict[str, Any] | None = None,
     overrides: dict[str, Any] | None = None,
+    plugin_tools: bool = False,
 ) -> dict[str, Any]:
+    """The run config of a dashboard run on ``thread_id``.
+
+    ``plugin_tools`` gives a plugin chat's run the plugin's tools: only runs
+    sent from its dock, where the plugin is open to answer them, get them.
+    """
     profile = profile if profile is not None else await get_profile(login) or {}
     source = thread_source(metadata)
     configurable: dict[str, Any] = {
@@ -409,7 +415,7 @@ async def _build_dashboard_configurable(
         # that still read it from the run config keep working.
         configurable["workspace"] = workspace
         configurable["environment"] = workspace
-    if metadata.get(PLUGIN_CHAT_KEY):
+    if plugin_tools and metadata.get(PLUGIN_CHAT_KEY):
         chat = await PluginChat.run_config(thread_id)
         if chat is not None:
             configurable["plugin_chat"] = chat.model_dump(mode="json")
@@ -507,13 +513,14 @@ async def start_run_with_tool_results(
     prompt: str,
     tool_results: Sequence[Mapping[str, str]],
     overrides: dict[str, Any],
+    plugin_tools: bool = False,
 ) -> str:
     """Start a run with the results of tools its client ran: a sandbox program, or a plugin's frame."""
     await _ensure_dashboard_github_token(login)
     client = langgraph_client()
     metadata = thread_metadata(await client.threads.get(thread_id))
     configurable = await _build_dashboard_configurable(
-        thread_id, login, metadata, overrides=overrides
+        thread_id, login, metadata, overrides=overrides, plugin_tools=plugin_tools
     )
     if tool_results:
         user = [{"role": "user", "content": prompt}] if prompt else []
@@ -883,9 +890,13 @@ async def _enrich_run_start_command(
         metadata = {**metadata, **move.update}
     content = _command_message_content(params)
     relayed_from = _relayed_from(params)
-    if metadata.get(PLUGIN_CHAT_KEY) and not offloading:
-        # The person wrote, so the plugin's results may resume the chat again.
+    # The person wrote, so the plugin's results may resume the chat again; any
+    # that waited for them reach the agent with their message.
+    held_results = (
         await PluginChat.person_wrote(thread_id)
+        if metadata.get(PLUGIN_CHAT_KEY) and not offloading
+        else []
+    )
     if offloading and creating:
         raise HTTPException(400, "offloading requires an existing conversation")
     command_images = _dashboard_images_from_content(content)
@@ -973,7 +984,7 @@ async def _enrich_run_start_command(
         structured[-1]["id"] = message_id
     run_input = params.get("input")
     if isinstance(run_input, dict):
-        run_input["messages"] = structured
+        run_input["messages"] = [*held_results, *structured]
     metadata_update: dict[str, Any] = {
         # A relay keeps the thread answering where its person is.
         **({} if relayed_from else {"source": DASHBOARD_SOURCE}),
@@ -1069,6 +1080,7 @@ async def _enrich_run_start_command(
         login,
         metadata,
         overrides=overrides,
+        plugin_tools=client_configurable.get("plugin_dock") is True,
     )
 
     run_metadata = params.get("metadata")

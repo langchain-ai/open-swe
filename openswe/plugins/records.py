@@ -2,7 +2,7 @@
 
 import hashlib
 import logging
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
 from typing import Literal
@@ -168,6 +168,8 @@ class PluginChatCallRow(Base):
     arguments: Mapped[JsonObject] = mapped_column(JSONB)
     claimed_at: Mapped[datetime | None] = mapped_column(default=None)
     answered_at: Mapped[datetime | None] = mapped_column(default=None)
+    output: Mapped[str | None] = mapped_column(default=None)
+    delivered_at: Mapped[datetime | None] = mapped_column(default=None)
     id: Mapped[UUID] = mapped_column(primary_key=True, default_factory=uuid7)
     created_at: Mapped[datetime | None] = mapped_column(server_default=NOW, init=False)
     updated_at: Mapped[datetime | None] = mapped_column(server_default=NOW, init=False)
@@ -643,6 +645,7 @@ class PluginDocuments:
 
 # A dock that closed mid-call leaves its claim; after this, another dock may run the call.
 CLAIM_TIMEOUT = timedelta(minutes=2)
+_EPOCH = datetime.min.replace(tzinfo=UTC)
 
 
 def tool_prefix(plugin_name: str) -> str:
@@ -708,14 +711,35 @@ class PluginChat:
         return PluginChatCalls(self.id, self.thread_id)
 
     @staticmethod
-    async def person_wrote(thread_id: str) -> None:
-        """The person wrote in the chat, so the plugin's results may resume it again."""
+    async def person_wrote(thread_id: str) -> list[dict[str, str]]:
+        """The person wrote in the chat, so the plugin's results may resume it again.
+
+        Returns the results no run took to the agent yet, for the person's
+        message to carry, and counts them delivered.
+        """
         async with postgres.session() as session:
-            await session.execute(
+            chat = await session.scalar(
                 update(PluginChatRow)
-                .where(PluginChatRow.thread_id == thread_id, PluginChatRow.automatic_resumes > 0)
+                .where(PluginChatRow.thread_id == thread_id)
                 .values(automatic_resumes=0)
+                .returning(PluginChatRow.id)
             )
+            if chat is None:
+                return []
+            held = await session.scalars(
+                update(PluginChatCallRow)
+                .where(
+                    PluginChatCallRow.chat == chat,
+                    PluginChatCallRow.answered_at.is_not(None),
+                    PluginChatCallRow.delivered_at.is_(None),
+                )
+                .values(delivered_at=func.clock_timestamp(), updated_at=func.clock_timestamp())
+                .returning(PluginChatCallRow)
+            )
+            return [
+                ClientToolSpec.result_message(row.call_id, row.output or "")
+                for row in sorted(held, key=lambda row: row.created_at or _EPOCH)
+            ]
 
 
 class PluginChats:
@@ -842,32 +866,42 @@ class PluginChatCalls:
                 .values(claimed_at=func.clock_timestamp(), updated_at=func.clock_timestamp())
                 .returning(PluginChatCallRow)
             )
-            claimed = sorted(
-                rows, key=lambda row: row.created_at or datetime.min.replace(tzinfo=UTC)
-            )
+            claimed = sorted(rows, key=lambda row: row.created_at or _EPOCH)
             return [PluginChatCall(row.call_id, row.tool, row.arguments) for row in claimed]
 
-    async def answer(self, call_ids: Sequence[str], *, by: UUID) -> list[str]:
-        """Mark ``call_ids`` answered; the ones that were still waiting, so each is answered once."""
+    async def answer(self, outputs: Mapping[str, str], *, by: UUID) -> list[str]:
+        """Keep what the frame returned for each call still waiting; those calls, so each is answered once."""
+        answered: list[str] = []
         async with postgres.session() as session:
-            answered = await session.scalars(
-                update(PluginChatCallRow)
-                .where(
-                    PluginChatCallRow.chat == self.chat,
-                    PluginChatCallRow.call_id.in_(call_ids),
-                    PluginChatCallRow.answered_at.is_(None),
-                )
-                .values(
-                    answered_at=func.clock_timestamp(),
-                    updated_at=func.clock_timestamp(),
-                    updated_by=by,
-                )
-                .returning(PluginChatCallRow.call_id)
-            )
-            ids = list(answered)
-            if ids:
+            for call_id, output in outputs.items():
+                if await session.scalar(
+                    update(PluginChatCallRow)
+                    .where(
+                        PluginChatCallRow.chat == self.chat,
+                        PluginChatCallRow.call_id == call_id,
+                        PluginChatCallRow.answered_at.is_(None),
+                    )
+                    .values(
+                        output=output,
+                        answered_at=func.clock_timestamp(),
+                        updated_at=func.clock_timestamp(),
+                        updated_by=by,
+                    )
+                    .returning(PluginChatCallRow.id)
+                ):
+                    answered.append(call_id)
+            if answered:
                 await Topic.PLUGIN_CHAT_CALLS.invalidate(session, key=self.thread_id)
-            return ids
+        return answered
+
+    async def deliver(self, call_ids: Sequence[str]) -> None:
+        """A run took these calls' results to the agent."""
+        async with postgres.session() as session:
+            await session.execute(
+                update(PluginChatCallRow)
+                .where(PluginChatCallRow.chat == self.chat, PluginChatCallRow.call_id.in_(call_ids))
+                .values(delivered_at=func.clock_timestamp(), updated_at=func.clock_timestamp())
+            )
 
     async def reopen(self, call_ids: Sequence[str]) -> None:
         """Let ``call_ids`` be answered again, as when the run their answers started never began."""
@@ -875,7 +909,12 @@ class PluginChatCalls:
             await session.execute(
                 update(PluginChatCallRow)
                 .where(PluginChatCallRow.chat == self.chat, PluginChatCallRow.call_id.in_(call_ids))
-                .values(answered_at=None, claimed_at=None, updated_at=func.clock_timestamp())
+                .values(
+                    answered_at=None,
+                    claimed_at=None,
+                    output=None,
+                    updated_at=func.clock_timestamp(),
+                )
             )
             await Topic.PLUGIN_CHAT_CALLS.invalidate(session, key=self.thread_id)
 
