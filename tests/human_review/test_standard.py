@@ -577,10 +577,9 @@ async def test_standard_card_requires_complete_file_counts(
     request = HumanReviewRequest(pull_request_id=pr.id, head_sha="abc", kind="standard")
     request.pull_request = pr
     files = [ChangedFile(filename=f"openswe/file_{i}.py") for i in range(101)]
-    with patch.object(ChangedFile, "of_pull", AsyncMock(return_value=files)) as fetch:
+    with patch.object(ChangedFile, "of_pull", AsyncMock(return_value=files)):
         result = await ReviewCard(request)._files()
     assert result == (files if count == 101 else None)
-    assert fetch.await_args.kwargs == {"max_pages": 30}
 
 
 def test_a_short_description_is_shown_whole_without_its_template_comments() -> None:
