@@ -1027,6 +1027,29 @@
         "title": "BridgeRequestsResponse",
         "type": "object"
       },
+      "BrowserTab": {
+        "properties": {
+          "id": {
+            "title": "Id",
+            "type": "string"
+          },
+          "title": {
+            "default": "",
+            "title": "Title",
+            "type": "string"
+          },
+          "url": {
+            "default": "",
+            "title": "Url",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id"
+        ],
+        "title": "BrowserTab",
+        "type": "object"
+      },
       "ChallengeResponse": {
         "properties": {
           "challenge": {
@@ -1583,6 +1606,48 @@
           "state"
         ],
         "title": "ConversationReview",
+        "type": "object"
+      },
+      "CoordinatorActivity": {
+        "description": "A thread's runs since the one a client last followed, and the workers it coordinates.",
+        "properties": {
+          "awaiting_delivery": {
+            "title": "Awaiting Delivery",
+            "type": "boolean"
+          },
+          "running": {
+            "title": "Running",
+            "type": "boolean"
+          },
+          "runs": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Runs",
+            "type": "array"
+          },
+          "settled": {
+            "description": "Nothing more will run on the thread unless someone prompts it.",
+            "readOnly": true,
+            "title": "Settled",
+            "type": "boolean"
+          },
+          "workers": {
+            "items": {
+              "$ref": "#/components/schemas/WorkerActivity"
+            },
+            "title": "Workers",
+            "type": "array"
+          }
+        },
+        "required": [
+          "runs",
+          "running",
+          "awaiting_delivery",
+          "workers",
+          "settled"
+        ],
+        "title": "CoordinatorActivity",
         "type": "object"
       },
       "CreateResponseRequest": {
@@ -3286,6 +3351,63 @@
         "title": "MintedApiKey",
         "type": "object"
       },
+      "MintedSyncToken": {
+        "description": "The creation response: the only place the secret appears, ready to paste into Claude Code.",
+        "properties": {
+          "created_at": {
+            "format": "date-time",
+            "title": "Created At",
+            "type": "string"
+          },
+          "id": {
+            "format": "uuid",
+            "title": "Id",
+            "type": "string"
+          },
+          "last_used_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Last Used At"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "secret": {
+            "title": "Secret",
+            "type": "string"
+          },
+          "settings": {
+            "additionalProperties": {
+              "$ref": "#/components/schemas/JsonValue"
+            },
+            "title": "Settings",
+            "type": "object"
+          },
+          "token_suffix": {
+            "title": "Token Suffix",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "name",
+          "token_suffix",
+          "created_at",
+          "last_used_at",
+          "secret",
+          "settings"
+        ],
+        "title": "MintedSyncToken",
+        "type": "object"
+      },
       "MissingCredential": {
         "description": "A service in the gateway this person has not connected yet.",
         "properties": {
@@ -4418,17 +4540,6 @@
               }
             ],
             "title": "Experimental Monitor"
-          },
-          "experimental_task_coordination": {
-            "anyOf": [
-              {
-                "type": "boolean"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Experimental Task Coordination"
           },
           "pr_failure_reactions": {
             "anyOf": [
@@ -6916,6 +7027,65 @@
         "title": "SubmittedReview",
         "type": "object"
       },
+      "SyncTokenCreate": {
+        "properties": {
+          "name": {
+            "maxLength": 120,
+            "minLength": 1,
+            "title": "Name",
+            "type": "string"
+          }
+        },
+        "required": [
+          "name"
+        ],
+        "title": "SyncTokenCreate",
+        "type": "object"
+      },
+      "SyncTokenView": {
+        "description": "A stored token as its owner sees it. Has no field for the secret.",
+        "properties": {
+          "created_at": {
+            "format": "date-time",
+            "title": "Created At",
+            "type": "string"
+          },
+          "id": {
+            "format": "uuid",
+            "title": "Id",
+            "type": "string"
+          },
+          "last_used_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Last Used At"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "token_suffix": {
+            "title": "Token Suffix",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "name",
+          "token_suffix",
+          "created_at",
+          "last_used_at"
+        ],
+        "title": "SyncTokenView",
+        "type": "object"
+      },
       "TelemetryConfig": {
         "properties": {
           "environment": {
@@ -6980,6 +7150,34 @@
           "end"
         ],
         "title": "TextAnchor",
+        "type": "object"
+      },
+      "ThreadBrowserView": {
+        "description": "A thread's browser window as the dashboard embeds it.",
+        "properties": {
+          "act_url": {
+            "title": "Act Url",
+            "type": "string"
+          },
+          "expires_at": {
+            "format": "date-time",
+            "title": "Expires At",
+            "type": "string"
+          },
+          "tabs": {
+            "items": {
+              "$ref": "#/components/schemas/BrowserTab"
+            },
+            "title": "Tabs",
+            "type": "array"
+          }
+        },
+        "required": [
+          "tabs",
+          "act_url",
+          "expires_at"
+        ],
+        "title": "ThreadBrowserView",
         "type": "object"
       },
       "ThreadComment-Input": {
@@ -7594,6 +7792,79 @@
         ],
         "title": "WebhookResponse",
         "type": "object"
+      },
+      "WorkerActivity": {
+        "properties": {
+          "active": {
+            "readOnly": true,
+            "title": "Active",
+            "type": "boolean"
+          },
+          "error": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Error"
+          },
+          "instructions": {
+            "title": "Instructions",
+            "type": "string"
+          },
+          "run_status": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Run Status"
+          },
+          "state": {
+            "$ref": "#/components/schemas/WorkerState"
+          },
+          "thread_url": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Thread Url"
+          },
+          "worker_thread_id": {
+            "title": "Worker Thread Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "worker_thread_id",
+          "thread_url",
+          "instructions",
+          "state",
+          "active"
+        ],
+        "title": "WorkerActivity",
+        "type": "object"
+      },
+      "WorkerState": {
+        "enum": [
+          "starting",
+          "running",
+          "reporting",
+          "done",
+          "failed",
+          "cancelled"
+        ],
+        "type": "string"
       },
       "Workspace": {
         "properties": {
@@ -10312,6 +10583,150 @@
         "tags": [
           "dashboard",
           "sandbox-bridge"
+        ]
+      }
+    },
+    "/dashboard/api/claude-code/hooks": {
+      "post": {
+        "operationId": "api_claude_code_hook_dashboard_api_claude_code_hooks_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object"
+              }
+            }
+          },
+          "description": "A Claude Code hook event, as Claude Code posts it. Authorized by a Claude Code sync token as a bearer token.",
+          "required": true
+        },
+        "responses": {
+          "204": {
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Api Claude Code Hook",
+        "tags": [
+          "dashboard",
+          "claude-code"
+        ]
+      }
+    },
+    "/dashboard/api/claude-code/tokens": {
+      "get": {
+        "operationId": "api_list_claude_code_tokens_dashboard_api_claude_code_tokens_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/SyncTokenView"
+                  },
+                  "title": "Response Api List Claude Code Tokens Dashboard Api Claude Code Tokens Get",
+                  "type": "array"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "security": [
+          {
+            "DashboardSession": []
+          }
+        ],
+        "summary": "Api List Claude Code Tokens",
+        "tags": [
+          "dashboard",
+          "claude-code"
+        ]
+      },
+      "post": {
+        "operationId": "api_create_claude_code_token_dashboard_api_claude_code_tokens_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SyncTokenCreate"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MintedSyncToken"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "DashboardSession": []
+          }
+        ],
+        "summary": "Api Create Claude Code Token",
+        "tags": [
+          "dashboard",
+          "claude-code"
+        ]
+      }
+    },
+    "/dashboard/api/claude-code/tokens/{token_id}": {
+      "delete": {
+        "operationId": "api_revoke_claude_code_token_dashboard_api_claude_code_tokens__token_id__delete",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "token_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Token Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "DashboardSession": []
+          }
+        ],
+        "summary": "Api Revoke Claude Code Token",
+        "tags": [
+          "dashboard",
+          "claude-code"
         ]
       }
     },
@@ -17986,6 +18401,25 @@
           },
           {
             "in": "query",
+            "name": "exclude_source",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "items": {
+                    "type": "string"
+                  },
+                  "type": "array"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Exclude Source"
+            }
+          },
+          {
+            "in": "query",
             "name": "sort_by",
             "required": false,
             "schema": {
@@ -18170,6 +18604,25 @@
               "default": false,
               "title": "All",
               "type": "boolean"
+            }
+          },
+          {
+            "in": "query",
+            "name": "exclude_source",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "items": {
+                    "type": "string"
+                  },
+                  "type": "array"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Exclude Source"
             }
           }
         ],
@@ -18521,6 +18974,103 @@
         "summary": "Api Get Thread Branch Diff",
         "tags": [
           "dashboard",
+          "threads"
+        ]
+      }
+    },
+    "/dashboard/api/threads/{thread_id}/browser": {
+      "get": {
+        "operationId": "api_thread_browser_dashboard_api_threads__thread_id__browser_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "thread_id",
+            "required": true,
+            "schema": {
+              "title": "Thread Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ThreadBrowserView"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "DashboardSession": []
+          }
+        ],
+        "summary": "Api Thread Browser",
+        "tags": [
+          "dashboard",
+          "threads",
+          "threads"
+        ]
+      },
+      "post": {
+        "description": "Open the thread's browser for a person, before or after the agent has.",
+        "operationId": "api_open_thread_browser_dashboard_api_threads__thread_id__browser_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "thread_id",
+            "required": true,
+            "schema": {
+              "title": "Thread Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ThreadBrowserView"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "DashboardSession": []
+          }
+        ],
+        "summary": "Api Open Thread Browser",
+        "tags": [
+          "dashboard",
+          "threads",
           "threads"
         ]
       }
@@ -20014,6 +20564,108 @@
         "tags": [
           "dashboard",
           "transcript"
+        ]
+      }
+    },
+    "/dashboard/api/threads/{thread_id}/workers": {
+      "get": {
+        "description": "The thread's workers, and its runs created after the run ``after``.",
+        "operationId": "api_thread_workers_dashboard_api_threads__thread_id__workers_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "thread_id",
+            "required": true,
+            "schema": {
+              "title": "Thread Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "after",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "After"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CoordinatorActivity"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Api Thread Workers",
+        "tags": [
+          "dashboard"
+        ]
+      }
+    },
+    "/dashboard/api/threads/{thread_id}/workers/cancel": {
+      "post": {
+        "description": "Stop every worker of the thread's task that is still running, without it reporting back.",
+        "operationId": "api_cancel_thread_workers_dashboard_api_threads__thread_id__workers_cancel_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "thread_id",
+            "required": true,
+            "schema": {
+              "title": "Thread Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CoordinatorActivity"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Api Cancel Thread Workers",
+        "tags": [
+          "dashboard"
         ]
       }
     },

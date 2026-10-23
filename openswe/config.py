@@ -260,6 +260,11 @@ ENV.var(
 ENV.var("GITHUB_APP_INSTALLATION_ID", "GitHub App installation used when a run names none.")
 ENV.var("GITHUB_WEBHOOK_SECRET", "HMAC secret for GitHub webhook deliveries.", secret=True)
 ENV.var(
+    "MERGE_QUEUE_DISPATCH_SECRET",
+    "Backend-only signing secret for the queue dispatch gateway; never used by agents.",
+    secret=True,
+)
+ENV.var(
     "GITHUB_OIDC_AUDIENCE",
     "Audience a federated GitHub Actions token must carry; defaults to the dashboard URL.",
 )
@@ -373,8 +378,11 @@ ENV.var(
     "Agent prompt deployment environment (production, staging, preview, or local); "
     "`preview` also lets startup drop superseded migration revisions and turns off reviewer auto-assignment.",
 )
-ENV.var("SEGMENT_WRITE_KEY", "Optional server-side Segment source write key.", default="")
-ENV.var("DD_ENV", "Shared Datadog, Segment, and analytics environment.", default="production")
+ENV.var(
+    "POSTHOG_API_KEY", "Optional PostHog project API key for server-side usage capture.", default=""
+)
+ENV.var("POSTHOG_HOST", "PostHog ingestion host.", default="https://us.i.posthog.com")
+ENV.var("DD_ENV", "Shared Datadog and analytics environment.", default="production")
 ENV.var("ANALYTICS_SUMMARY_VERSION", "Active metric semantics version.", default="1")
 ENV.var("ANALYTICS_PR_MATURITY_DAYS", "PR cohort maturity period.", default="14")
 ENV.var("ANALYTICS_MIN_COHORT_SIZE", "Minimum aggregate cohort size.", default="5")

@@ -27,6 +27,7 @@ export type AgentSource =
   | "slack"
   | "linear"
   | "schedule"
+  | "claude_code"
 
 export type AgentThreadCategory =
   | "interactive"
@@ -104,6 +105,7 @@ export type OutputIframeDisplay =
 export interface ToolExecutionChunk {
   kind: "tool-execution"
   toolCallId: string
+  toolName?: string
   /** Server time the tool call was made, shown on hover. */
   timestamp?: string
   title: string
@@ -141,6 +143,8 @@ export interface ToolExecutionChunk {
 export interface TextChunk {
   kind: "text"
   text: string
+  /** When the agent message that wrote it started; bounds the work around it. */
+  timestamp?: string
 }
 
 export interface ReasoningChunk {
@@ -606,6 +610,12 @@ export interface AgentThread {
   sandboxBridgeClient?: "cli" | "desktop" | null
   /** Whether that machine is serving the thread's checkout right now; null in lists. */
   sandboxBridgeOnline?: boolean | null
+  /**
+   * The thread's LangSmith browser: "opened" once the agent or a person has
+   * opened it, "available" while it can be opened, null before the agent's
+   * first run names it.
+   */
+  browser?: "opened" | "available" | null
   messages: Array<Message>
   pendingMessages?: Array<PendingThreadMessage>
   pr?: AgentPullRequestSummary

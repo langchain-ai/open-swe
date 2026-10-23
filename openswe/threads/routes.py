@@ -16,7 +16,7 @@ from openswe.github.pull_request_checks import PullRequestState
 from openswe.github.pull_request_context import PullRequestFixScope
 from openswe.github.token_auth import bearer_github_token
 from openswe.message_queue import QueuedPreview
-from openswe.threads import terminal
+from openswe.threads import browser, terminal
 from openswe.threads.background_work import (
     BackgroundWork,
     get_dashboard_thread_background_work,
@@ -166,6 +166,7 @@ async def api_list_thread_repos(
     include_automations: bool = False,
     owned: bool = False,
     all: bool = False,
+    exclude_source: Annotated[list[str] | None, Query()] = None,
     session: dict[str, Any] = SESSION_DEP,
 ) -> list[dict[str, Any]]:
     if all and not session_is_admin(session):
@@ -177,6 +178,7 @@ async def api_list_thread_repos(
         include_automations=include_automations,
         owned=owned,
         include_all=all,
+        exclude_sources=frozenset(exclude_source or ()),
     )
 
 
@@ -223,6 +225,7 @@ async def api_list_threads_page(
     repo: str | None = None,
     ownerless: bool = False,
     owned: bool = False,
+    exclude_source: Annotated[list[str] | None, Query()] = None,
     sort_by: Literal["created_at", "updated_at"] = "updated_at",
     hierarchy: bool = False,
     session: dict[str, Any] = SESSION_DEP,
@@ -253,6 +256,7 @@ async def api_list_threads_page(
         repo=repo,
         ownerless=ownerless,
         owned=owned,
+        exclude_sources=frozenset(exclude_source or ()),
         sort_by=sort_by,
         hierarchy=hierarchy,
     )
@@ -338,6 +342,7 @@ async def api_get_thread(
 
 
 router.include_router(terminal.router)
+router.include_router(browser.router)
 
 
 @router.get("/threads/{thread_id}/recovery.patch")

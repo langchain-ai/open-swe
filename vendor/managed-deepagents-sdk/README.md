@@ -649,8 +649,9 @@ mda delete
 
 `mda delete` (alias `mda destroy`) removes the LangSmith deployment, the tracing
 project created alongside it, the deployment's Context Hub repo (plus any legacy
-per-user or org child memory repos left from older runtimes), and the managed
-sandboxes the deployment created. It asks for confirmation first; pass `--yes`
+per-user or org child memory repos left from older runtimes), the managed
+sandboxes the deployment created, and the Agent Auth connections its channels
+set up. It asks for confirmation first; pass `--yes`
 to skip the prompt in scripts. Agent memory and thread history are not
 recoverable afterwards.
 

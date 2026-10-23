@@ -130,6 +130,13 @@ What happens:
    `exit_code`. The CLI prints that `stdout` verbatim as its only output on
    stdout, releases the bridge, and exits with that code.
 
+The agent may hand parts of the work to task workers, which run on this
+machine through the same bridge. While any worker is still running, a result
+is not final: the CLI keeps the bridge open, notes each worker's dashboard
+link and state on stderr as it changes, and follows the agent through the runs
+that workers' reports wake it for. It exits on the result of the last run,
+once no worker is left running and no report is still on its way to the agent.
+
 So a run composes like any other command:
 
 ```sh
@@ -143,8 +150,9 @@ not tell. A run that fails, or ends without calling `cli_result`, prints the
 reason to stderr and exits 1. The server re-prompts the agent twice before giving up on a
 missing result.
 
-Ctrl-C once cancels the run, releases the bridge and exits. Ctrl-C twice exits
-immediately.
+Ctrl-C once cancels the run and every worker still running, releases the
+bridge and exits with 130, as an interrupted command does. Ctrl-C twice exits
+immediately, also with 130.
 
 Options:
 

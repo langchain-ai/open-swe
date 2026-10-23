@@ -374,6 +374,13 @@ def _is_reply_nudge(message: BaseMessage) -> bool:
     return isinstance(message, HumanMessage) and _REPLY_GUARD_SENDER_ID in _text(message.content)
 
 
+def _is_dynamic_context(message: BaseMessage) -> bool:
+    """Context the backend adds to a turn, such as the task a watch joined: never a turn itself."""
+    return isinstance(message, HumanMessage) and _text(message.content).lstrip().startswith(
+        "<dynamic-context "
+    )
+
+
 def _is_framing_block(header: str) -> bool:
     """A system envelope that describes where the next turn came from."""
     return 'kind="system"' in header and any(
@@ -419,9 +426,9 @@ def _script_humans(messages: list[BaseMessage]) -> list[HumanMessage]:
     for index, message in enumerate(messages):
         if not isinstance(message, HumanMessage):
             continue
-        text = _text(message.content).lstrip()
-        if text.startswith("<dynamic-context "):
+        if _is_dynamic_context(message):
             continue
+        text = _text(message.content).lstrip()
         if text.startswith("<input-message "):
             header = text.split(">", 1)[0]
             if _is_framing_block(header):
@@ -796,14 +803,14 @@ def _write_plan_step(_messages: list[BaseMessage]) -> AIMessage:
     )
 
 
-def _save_plan_step(_messages: list[BaseMessage]) -> AIMessage:
+def _publish_artifact_step(_messages: list[BaseMessage]) -> AIMessage:
     return AIMessage(
-        content="Saving the plan for review.",
+        content="Publishing the HTML artifact.",
         tool_calls=[
             {
-                "name": "save_plan",
-                "args": {"plan_file_path": PLAN_FILE_PATH},
-                "id": "call-save-plan",
+                "name": "publish_artifact",
+                "args": {"artifact_file_path": PLAN_FILE_PATH},
+                "id": "call-publish-artifact",
             }
         ],
     )
@@ -1487,7 +1494,7 @@ SCRIPT_LIBRARY: dict[str, tuple[StepSpec, ...]] = {
         _dynamic_step(_plan_link_step),
         _dynamic_step(_plan_research_step),
         _dynamic_step(_write_plan_step),
-        _dynamic_step(_save_plan_step),
+        _dynamic_step(_publish_artifact_step),
         _dynamic_step(_plan_complete_step),
         StepSpec(content="The requested plan is published as an HTML artifact."),
     ),
@@ -1718,7 +1725,9 @@ class FakeScriptedChatModel(BaseChatModel):
             (
                 i
                 for i, m in enumerate(messages)
-                if isinstance(m, HumanMessage) and not _is_reply_nudge(m)
+                if isinstance(m, HumanMessage)
+                and not _is_reply_nudge(m)
+                and not _is_dynamic_context(m)
             ),
             default=-1,
         )

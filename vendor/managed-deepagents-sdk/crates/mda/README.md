@@ -8,8 +8,10 @@ compile, deploy, logs, delete, channel management, and local `mda dev`.
 Commands that talk to LangSmith (`deploy`, `delete`, `logs`, and
 credential-backed `mda dev` paths) resolve an API key in this order:
 
-1. **`LANGSMITH_API_KEY` in the project `.env` or process environment** — treated
-   as a durable credential the developer chose to keep.
+1. **`LANGSMITH_API_KEY` in the process environment or project `.env`** — treated
+   as a durable credential the developer chose to keep. The shell wins when both
+   set it (as for `LANGSMITH_ENDPOINT` and `LANGSMITH_WORKSPACE_ID`), and the CLI
+   warns once when they differ.
 2. **CLI-minted session PAT** — an unexpired personal access token created after
    browser device login, cached on this machine (see below).
 3. **Interactive prompt** (TTY only) — paste a key (saved to `.env`) or press

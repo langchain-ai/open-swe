@@ -11,7 +11,7 @@ use std::path::{Path, PathBuf};
 use anyhow::{Context, Result};
 
 use crate::error::{categorized, ErrorCategory};
-use crate::langsmith::lookup_env;
+use crate::langsmith::{lookup_env_with_origin, EnvOrigin};
 
 /// Matches the server's cap. A file is checked against its metadata and stdin is
 /// read through a limit, so an oversized value never reaches memory either way.
@@ -47,17 +47,17 @@ pub(crate) fn resolve_value(
 ) -> Result<ResolvedValue> {
     match source {
         ValueSource::FromEnv(name) => {
-            let value = lookup_env(name, env_vars, &mut |key| std::env::var(key).ok()).ok_or_else(
-                || {
-                    categorized(
-                        ErrorCategory::UserInput,
-                        format!("{name} is not set in the environment or the project .env"),
-                    )
-                },
-            )?;
-            let origin = match env_vars.get(name).map(|value| value.trim()) {
-                Some(from_file) if !from_file.is_empty() => ".env",
-                _ => "the shell",
+            let (value, origin) =
+                lookup_env_with_origin(name, env_vars, &mut |key| std::env::var(key).ok())
+                    .ok_or_else(|| {
+                        categorized(
+                            ErrorCategory::UserInput,
+                            format!("{name} is not set in the environment or the project .env"),
+                        )
+                    })?;
+            let origin = match origin {
+                EnvOrigin::Shell => "the shell",
+                EnvOrigin::EnvFile => ".env",
             };
             Ok(ResolvedValue {
                 value,
@@ -105,7 +105,7 @@ pub(crate) fn read_piped_stdin_secret() -> Result<Option<String>> {
     optional_secret_from_reader(io::stdin().lock())
 }
 
-fn value_from_file(path: &Path) -> Result<String> {
+pub(crate) fn value_from_file(path: &Path) -> Result<String> {
     let size = std::fs::metadata(path)
         .with_context(|| format!("failed to read {}", path.display()))?
         .len();

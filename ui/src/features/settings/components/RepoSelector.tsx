@@ -36,7 +36,7 @@ interface RepoSelectorProps {
 
 export function RepoSelector({
   repos,
-  selectedRepo = null,
+  selectedRepo,
   selectedLabel,
   onRepoChange,
   placeholder = "Select repository",
@@ -85,7 +85,9 @@ export function RepoSelector({
           >
             <FolderIcon size={14} weight="regular" className="shrink-0" />
             <span className="flex-1 truncate text-left">
-              {selectedRepo ? (selectedLabel ?? selectedRepo) : placeholder}
+              {selectedRepo === undefined
+                ? placeholder
+                : (selectedLabel ?? selectedRepo ?? emptySelectionLabel)}
             </span>
             <CaretDownIcon
               size={12}
@@ -145,11 +147,11 @@ export function RepoSelector({
               }}
               className={cn(
                 "flex w-full items-center px-space-2 py-space-1 text-left transition-colors hover:bg-elevated-hover",
-                selectedRepo ? "text-secondary" : "text-primary"
+                selectedRepo === null ? "text-primary" : "text-secondary"
               )}
             >
               {emptySelectionLabel}
-              {!selectedRepo && (
+              {selectedRepo === null && (
                 <CheckIcon
                   size={12}
                   weight="regular"

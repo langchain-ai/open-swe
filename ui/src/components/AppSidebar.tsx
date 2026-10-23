@@ -19,6 +19,7 @@ import { PaintBrushIcon } from "@phosphor-icons/react/dist/ssr/PaintBrush"
 import { PulseIcon } from "@phosphor-icons/react/dist/ssr/Pulse"
 import { PuzzlePieceIcon } from "@phosphor-icons/react/dist/ssr/PuzzlePiece"
 import { SparkleIcon } from "@phosphor-icons/react/dist/ssr/Sparkle"
+import { TerminalWindowIcon } from "@phosphor-icons/react/dist/ssr/TerminalWindow"
 import { UsersIcon } from "@phosphor-icons/react/dist/ssr/Users"
 import { Link, useRouterState } from "@tanstack/react-router"
 import { Fragment } from "react"
@@ -64,6 +65,11 @@ const NAV: Array<NavGroup> = [
         to: "/my-settings/connections",
         label: "Connections",
         icon: LinkIcon,
+      },
+      {
+        to: "/my-settings/claude-code",
+        label: "Claude Code",
+        icon: TerminalWindowIcon,
       },
       {
         to: "/my-settings/experiments",

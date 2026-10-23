@@ -51,7 +51,7 @@ async def api_page_view(
     body: PageView,
     session: dict[str, Any] = SESSION_DEP,
 ) -> None:
-    from openswe.analytics.segment import record_usage
+    from openswe.analytics.posthog import record_usage
 
     await record_usage(
         login=session["sub"],
