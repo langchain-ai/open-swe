@@ -13,6 +13,10 @@ keeps working unchanged:
   warning for each. Local threads are read-only: starting a run, cron or
   posting command there, or copying one, is refused. A run started on MDA
   marks the thread busy; the run-complete webhook and a reconcile job settle it.
+- Reads reach MDA as LangSmith Studio's, which may read every thread; writes stay
+  scoped to the threads the backend owns. A thread an MDA channel owns (its index
+  metadata names the ``channel``) is read-only here: the channel starts its runs,
+  so a run, a cancel, a state write or a copy is refused with 409.
 - A thread the index does not know yet is read from the Agent Server, indexed,
   and served from then on.
 """
@@ -30,6 +34,7 @@ from starlette.datastructures import Headers
 from starlette.types import ASGIApp, Receive, Scope, Send
 
 from openswe.api.agent_server_auth import backend_call
+from openswe.dispatch import CHANNEL_METADATA_KEY, channel_of
 from openswe.remote_runtime.asgi import (
     StatusRecorder,
     forward,
@@ -59,6 +64,17 @@ _THREAD: Final = re.compile(r"^(?:/noauth)?/threads/(?P<thread_id>[0-9a-fA-F-]{3
 _CANCEL_MANY: Final = re.compile(r"^(?:/noauth)?/runs/cancel$")
 _CREATE_RUN: Final = re.compile(r"^/runs(?:/stream|/wait)?$")
 _CREATE_CRON: Final = "/runs/crons"
+# Thread routes that read though they are POSTs.
+_POST_READS: Final = frozenset({"/history", "/state/checkpoint"})
+# Protocol v2 commands that only watch a thread; ``run.start`` and ``input.respond`` act.
+_READ_COMMANDS: Final = frozenset(
+    {
+        "agent.getTree",
+        "subscription.subscribe",
+        "subscription.unsubscribe",
+        "subscription.reconnect",
+    }
+)
 # Commands that add to a thread rather than read or stop it.
 POSTING_COMMANDS: Final = frozenset({"run.start", "input.respond", "input.inject", "state.fork"})
 
@@ -90,6 +106,70 @@ def _marks_busy(thread_id: str) -> Callable[[], Awaitable[None]]:
         await index.set_status(thread_id, "busy")
 
     return mark
+
+
+async def adopt_channel_run(thread_id: str, channel: str) -> None:
+    """Index an MDA channel's thread for the run the channel is about to start on it.
+
+    Call it before the thread's metadata is written. The channel creates the thread
+    on MDA as its conversation's own when it starts the run, so the backend indexes
+    it and keeps its own copy, but never creates it there, as it does a new thread
+    of its own; it marks it the channel's, so it stays read-only here. Mark it busy
+    with :func:`channel_run_starting` once the run is ready.
+    """
+    thread = await index.get(thread_id)
+    if thread is None:
+        thread = await index.create(
+            thread_id,
+            runtime="mda",
+            metadata={RUNTIME_METADATA_KEY: MDA_RUNTIME, CHANNEL_METADATA_KEY: channel},
+            if_exists="do_nothing",
+        )
+        await RUNTIMES.local.create(thread_id, thread.metadata)
+    elif channel_of(thread.metadata) != channel:
+        await index.update(thread_id, {CHANNEL_METADATA_KEY: channel})
+        await RUNTIMES.local.update(thread_id, {CHANNEL_METADATA_KEY: channel})
+
+
+async def channel_run_starting(thread_id: str) -> None:
+    """Busy once the channel's run is ready to start, so the dashboard shows it.
+
+    Last, so a run that fails to come together never leaves the thread busy. Its
+    run-complete webhook settles it, or the reconcile job.
+    """
+    await index.set_status(thread_id, "busy")
+
+
+def _reads(method: str, rest: str, body: bytes) -> bool:
+    """Whether a call to a thread's runtime only reads it."""
+    if method in {"GET", "HEAD"}:
+        return True
+    if method != "POST":
+        return False
+    if rest in _POST_READS:
+        return True
+    if rest == "/commands":
+        command = json_body(body) or {}
+        return command.get("method") in _READ_COMMANDS
+    return False
+
+
+async def _refuse_channel_write(send: Send, thread: IndexedThread) -> bool:
+    """Refuse a write to a thread an MDA channel owns; ``False`` when the thread is not one."""
+    channel = channel_of(thread.metadata)
+    if channel is None:
+        return False
+    await send_json(
+        send,
+        409,
+        {
+            "detail": (
+                f"Thread {thread.thread_id} belongs to the {channel} channel, which starts "
+                f"its runs: continue the conversation in {channel.capitalize()}."
+            )
+        },
+    )
+    return True
 
 
 def _warn_local(scope: Scope, thread: IndexedThread) -> None:
@@ -268,7 +348,11 @@ class ThreadRouter:
     async def _copy_metadata(self, thread: IndexedThread, patch: Mapping[str, JsonValue]) -> None:
         if not patch:
             return
-        for runtime in RUNTIMES.copies(thread.runtime):
+        # A channel's thread on MDA is the channel's; this deployment's copy feeds the traces here.
+        copies = (
+            [RUNTIMES.local] if channel_of(thread.metadata) else RUNTIMES.copies(thread.runtime)
+        )
+        for runtime in copies:
             try:
                 await runtime.update(
                     thread.thread_id, _for_mda(patch) if runtime is not RUNTIMES.local else patch
@@ -316,6 +400,8 @@ class ThreadRouter:
                 await _not_found(send, thread_id)
                 return
             thread = await self._index_new(thread_id, {}, if_exists="do_nothing")
+        if await _refuse_channel_write(send, thread):
+            return
         if thread.runtime == "local":
             await _refuse_local(scope, send, thread)
             return
@@ -346,6 +432,19 @@ class ThreadRouter:
             return
         params = command.get("params")
         if method == "run.start" and isinstance(params, dict):
+            if (channel := channel_of(thread.metadata)) is not None:
+                await send_json(
+                    send,
+                    200,
+                    {
+                        "type": "error",
+                        "id": command.get("id", 0),
+                        "error": "invalid_argument",
+                        "message": f"This thread belongs to the {channel} channel, which "
+                        f"starts its runs: continue the conversation in {channel.capitalize()}.",
+                    },
+                )
+                return
             reply = await RUNTIMES.mda_runtime.start_command_run(
                 thread_id,
                 command,
@@ -364,6 +463,8 @@ class ThreadRouter:
         thread = await self._thread(thread_id)
         if thread is None:
             await _not_found(send, thread_id)
+            return
+        if await _refuse_channel_write(send, thread):
             return
         if thread.runtime == "local":
             await _refuse_local(scope, send, thread)
@@ -389,9 +490,16 @@ class ThreadRouter:
     ) -> None:
         thread = await self._thread(thread_id)
         if thread is not None and thread.runtime == "mda":
+            match = _THREAD.match(scope["path"])
+            rest = (match["rest"] or "") if match else ""
+            reads = _reads(scope["method"], rest, body)
+            if not reads and await _refuse_channel_write(send, thread):
+                return
             mda = RUNTIMES.mda_runtime
-            await mda.ensure_remote_thread(thread_id)
-            await forward(mda.http, scope, send, body)
+            if channel_of(thread.metadata) is None:
+                # The channel created its threads there; the backend's own may need it.
+                await mda.ensure_remote_thread(thread_id)
+            await forward(mda.read_http if reads else mda.http, scope, send, body)
             return
         if thread is not None:
             _warn_local(scope, thread)

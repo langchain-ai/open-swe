@@ -118,6 +118,8 @@ struct FakeEnv {
     /// What app_connection reports once a setup step has failed.
     after_failure: Option<AppConnection>,
     source: Option<AppSource>,
+    /// What the CLI-only env vars choose, so nobody is asked.
+    env_source: Option<AppSource>,
     start_errors: VecDeque<anyhow::Error>,
     started: Option<OAuthAuthorizationSession>,
     polls: VecDeque<OAuthAuthorizationSession>,
@@ -186,6 +188,10 @@ impl SetupEnv for FakeEnv {
     fn choose_app_source(&mut self) -> Result<AppSource> {
         self.log.push("choose".into());
         Ok(self.source.expect("app source"))
+    }
+
+    fn app_source_from_env(&self) -> Option<AppSource> {
+        self.env_source
     }
 
     fn create_app(
@@ -349,7 +355,7 @@ fn an_installed_app_syncs_and_reports_without_prompting() {
 fn without_a_terminal_setup_prints_the_link_and_waits() {
     // The fake's owner stands in for MDA_GITHUB_APP_OWNER.
     let mut env = FakeEnv {
-        source: Some(AppSource::New),
+        env_source: Some(AppSource::New),
         polls: VecDeque::from([session("completed")]),
         syncs: VecDeque::from([GitHubSyncOutcome::Synced(Box::new(status(true)))]),
         ..FakeEnv::default()
@@ -358,9 +364,8 @@ fn without_a_terminal_setup_prints_the_link_and_waits() {
     run_setup(&mut env, &channel()).unwrap();
 
     assert_eq!(
-        &env.log[..4],
+        &env.log[..3],
         &[
-            "choose".to_string(),
             "owner".to_string(),
             format!(
                 "create acme-triage for {:?}",
@@ -374,9 +379,27 @@ fn without_a_terminal_setup_prints_the_link_and_waits() {
 }
 
 #[test]
+fn env_credentials_skip_the_app_prompt_in_a_terminal_too() {
+    for (source, step) in [(AppSource::New, "owner"), (AppSource::Existing, "existing")] {
+        let mut env = FakeEnv::interactive();
+        env.env_source = Some(source);
+        env.started = Some(session("completed"));
+        env.replace_webhook = true;
+        env.syncs = VecDeque::from([
+            GitHubSyncOutcome::Synced(Box::new(status(true))),
+            GitHubSyncOutcome::Synced(Box::new(status(true))),
+        ]);
+
+        run_setup(&mut env, &channel()).unwrap();
+
+        assert!(!env.log.contains(&"choose".to_string()), "{:?}", env.log);
+        assert_eq!(env.log[0], step, "{:?}", env.log);
+    }
+}
+
+#[test]
 fn without_a_terminal_a_missing_owner_fails_before_anything_is_created() {
     let mut env = FakeEnv {
-        source: Some(AppSource::New),
         owner_error: Some(anyhow::anyhow!(OWNER_REQUIRED)),
         ..FakeEnv::default()
     };
@@ -384,8 +407,8 @@ fn without_a_terminal_a_missing_owner_fails_before_anything_is_created() {
     let error = run_setup(&mut env, &channel()).unwrap_err().to_string();
 
     assert_eq!(error, OWNER_REQUIRED);
-    // No retry prompt and no pending connection left behind.
-    assert_eq!(env.log, vec!["choose".to_string(), "owner".to_string()]);
+    // No question, no retry prompt and no pending connection left behind.
+    assert_eq!(env.log, vec!["owner".to_string()]);
 }
 
 #[test]
@@ -1220,25 +1243,54 @@ fn several_installations_keep_the_token() {
     assert!(env.log.last().unwrap().contains("installed more than once"));
 }
 
+const TEST_KEY: &str = "-----BEGIN RSA PRIVATE KEY-----\nMIIB\n-----END RSA PRIVATE KEY-----";
+
+fn existing_env() -> ExistingAppEnv {
+    ExistingAppEnv {
+        app_id: "42".into(),
+        private_key: PrivateKeyPem::parse(TEST_KEY).unwrap(),
+        webhook_secret: "whsec".into(),
+    }
+}
+
 #[test]
-fn unattended_setup_needs_an_owner_only_for_a_new_app() {
-    // No deployment or connection yet: a new App needs an owner.
-    assert_eq!(unattended_setup_problem(None, false), Some(OWNER_REQUIRED));
-    assert_eq!(unattended_setup_problem(None, true), None);
+fn unattended_setup_needs_an_owner_or_an_existing_app_only_for_a_new_app() {
+    let none = AppEnv::default();
+    let owner = AppEnv {
+        owner: Some(AppOwner::Personal),
+        ..AppEnv::default()
+    };
+    let existing = AppEnv {
+        existing: Some(existing_env()),
+        ..AppEnv::default()
+    };
+    let installation = AppEnv {
+        installation_id: Some("777".into()),
+        ..AppEnv::default()
+    };
+    // No deployment or connection yet: a new App needs an owner, or the env
+    // brings an existing one.
+    assert_eq!(unattended_setup_problem(None, &none), Some(OWNER_REQUIRED));
+    assert_eq!(unattended_setup_problem(None, &owner), None);
+    assert_eq!(unattended_setup_problem(None, &existing), None);
     let pending = connection(GitHubAppState::Pending, false);
     assert_eq!(
-        unattended_setup_problem(Some(&pending), false),
+        unattended_setup_problem(Some(&pending), &none),
         Some(OWNER_REQUIRED)
     );
-    assert_eq!(unattended_setup_problem(Some(&pending), true), None);
+    assert_eq!(unattended_setup_problem(Some(&pending), &owner), None);
     // A created App only needs its install link.
     let created = connection(GitHubAppState::Created, false);
-    assert_eq!(unattended_setup_problem(Some(&created), false), None);
-    // A brought App needs its installation ID, which only a prompt takes.
+    assert_eq!(unattended_setup_problem(Some(&created), &none), None);
+    // A brought App needs its installation, from a prompt or the env.
     let brought = connection(GitHubAppState::External, false);
     assert_eq!(
-        unattended_setup_problem(Some(&brought), true),
+        unattended_setup_problem(Some(&brought), &owner),
         Some(EXISTING_APP_NEEDS_TERMINAL)
+    );
+    assert_eq!(
+        unattended_setup_problem(Some(&brought), &installation),
+        None
     );
     for state in [
         GitHubAppState::Pending,
@@ -1246,8 +1298,91 @@ fn unattended_setup_needs_an_owner_only_for_a_new_app() {
         GitHubAppState::External,
     ] {
         let installed = connection(state, true);
-        assert_eq!(unattended_setup_problem(Some(&installed), false), None);
+        assert_eq!(unattended_setup_problem(Some(&installed), &none), None);
     }
+}
+
+#[test]
+fn the_app_env_vars_are_checked_as_a_group_and_never_echo_values() {
+    let dir = tempfile::tempdir().unwrap();
+    let key = dir.path().join("app.pem");
+    std::fs::write(&key, TEST_KEY).unwrap();
+    let not_a_key = dir.path().join("notes.txt");
+    std::fs::write(&not_a_key, "hello").unwrap();
+    let vars = |pairs: &[(&str, &str)]| {
+        pairs
+            .iter()
+            .map(|(key, value)| (key.to_string(), value.to_string()))
+            .collect::<BTreeMap<_, _>>()
+    };
+    let key_path = key.to_str().unwrap();
+
+    assert!(app_env(&vars(&[])).unwrap().existing.is_none());
+    let brought = app_env(&vars(&[
+        (APP_ID_ENV, "42"),
+        (PRIVATE_KEY_FILE_ENV, key_path),
+        (WEBHOOK_SECRET_ENV, "whsec-value"),
+        (INSTALLATION_ID_ENV, "777"),
+    ]))
+    .unwrap();
+    let existing = brought.existing.unwrap();
+    assert_eq!(existing.app_id, "42");
+    assert_eq!(existing.webhook_secret, "whsec-value");
+    assert_eq!(brought.installation_id.as_deref(), Some("777"));
+    assert!(!format!("{existing:?}").contains("whsec-value"));
+
+    for (pairs, names) in [
+        (vec![(APP_ID_ENV, "42")], PRIVATE_KEY_FILE_ENV),
+        (
+            vec![(APP_ID_ENV, "42"), (PRIVATE_KEY_FILE_ENV, key_path)],
+            WEBHOOK_SECRET_ENV,
+        ),
+        (
+            vec![
+                (APP_ID_ENV, "app"),
+                (PRIVATE_KEY_FILE_ENV, key_path),
+                (WEBHOOK_SECRET_ENV, "whsec-value"),
+            ],
+            APP_ID_ENV,
+        ),
+        (
+            vec![
+                (APP_ID_ENV, "42"),
+                (PRIVATE_KEY_FILE_ENV, not_a_key.to_str().unwrap()),
+                (WEBHOOK_SECRET_ENV, "whsec-value"),
+            ],
+            PRIVATE_KEY_FILE_ENV,
+        ),
+        (vec![(INSTALLATION_ID_ENV, "x9")], INSTALLATION_ID_ENV),
+        (
+            vec![
+                (APP_OWNER_ENV, "acme"),
+                (APP_ID_ENV, "42"),
+                (PRIVATE_KEY_FILE_ENV, key_path),
+                (WEBHOOK_SECRET_ENV, "whsec-value"),
+            ],
+            APP_OWNER_ENV,
+        ),
+    ] {
+        let error = format!("{:#}", app_env(&vars(&pairs)).unwrap_err());
+        assert!(error.contains(names), "{names}: {error}");
+        assert!(!error.contains("whsec-value"), "{error}");
+        assert!(!error.contains("hello"), "{error}");
+    }
+}
+
+#[test]
+fn the_cli_webhook_secret_is_never_uploaded_but_the_runtime_override_is() {
+    let env_vars = BTreeMap::from([
+        (WEBHOOK_SECRET_ENV.to_string(), "cli".to_string()),
+        (APP_ID_ENV.to_string(), "42".to_string()),
+        (PRIVATE_KEY_FILE_ENV.to_string(), "app.pem".to_string()),
+        (INSTALLATION_ID_ENV.to_string(), "7".to_string()),
+        ("GH_WEBHOOK_SECRET".to_string(), "runtime".to_string()),
+    ]);
+    let secrets = crate::deploy::helpers::secrets_from_env(&env_vars);
+    let names: Vec<_> = secrets.iter().map(|secret| secret.name.as_str()).collect();
+    assert_eq!(names, ["GH_WEBHOOK_SECRET"]);
 }
 
 /// A brought App, installed, whose webhook the report says points at `url`.
