@@ -10,7 +10,7 @@ from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 from typing import Final, Literal, Protocol
 
-from pydantic import BaseModel, JsonValue
+from pydantic import BaseModel, JsonValue, ValidationError
 
 API_PREFIX: Final = "/remote-runtime/api/"
 # The route the backend serves every endpoint under.
@@ -76,6 +76,10 @@ class UnknownEndpointError(LookupError):
     """A call named an endpoint this backend does not serve."""
 
 
+class InvalidRequestError(ValueError):
+    """A call's body is not its endpoint's request; what its handler raises never is."""
+
+
 type Handler[Context, Request: BaseModel, Response: BaseModel] = Callable[
     [Context, Request], Awaitable[Response]
 ]
@@ -93,7 +97,11 @@ class Handlers[Context]:
         handler: Handler[Context, Request, Response],
     ) -> None:
         async def dispatch(context: Context, raw: JsonValue) -> JsonValue:
-            response = await handler(context, endpoint.request.model_validate(raw))
+            try:
+                request = endpoint.request.model_validate(raw)
+            except ValidationError as exc:
+                raise InvalidRequestError(f"{endpoint.name}: {exc}") from exc
+            response = await handler(context, request)
             return response.model_dump(mode="json")
 
         self._served[endpoint.name] = dispatch

@@ -19,7 +19,7 @@ from typing import Final
 from pydantic import JsonValue, TypeAdapter, ValidationError
 from runtime_api.catalog import CATALOG
 from runtime_api.endpoint import API_PATH as _API_PATH
-from runtime_api.endpoint import UnknownEndpointError
+from runtime_api.endpoint import InvalidRequestError, UnknownEndpointError
 from starlette.requests import Request
 from starlette.responses import JSONResponse
 from starlette.types import ASGIApp, Receive, Scope, Send
@@ -101,7 +101,7 @@ async def api_endpoint(scope: Scope, receive: Receive, send: Send) -> None:
             scope, receive, send
         )
         return
-    except ValidationError as exc:
+    except InvalidRequestError as exc:
         await JSONResponse({"detail": str(exc)}, status_code=422)(scope, receive, send)
         return
     except Exception as exc:

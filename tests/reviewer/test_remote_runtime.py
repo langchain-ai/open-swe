@@ -653,6 +653,57 @@ async def test_a_worker_grant_reads_its_coordinators_catalog_and_adopts_nothing_
     assert status == 404
 
 
+async def test_only_a_body_unlike_its_request_is_refused_and_a_failure_inside_is_logged(
+    monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+) -> None:
+    from pydantic import BaseModel, JsonValue
+    from runtime_api.endpoint import Handlers
+    from runtime_api.loop import PREPARE, PhaseResult, Prepare
+
+    from openswe.remote_runtime import server
+
+    class Strict(BaseModel):
+        count: int
+
+    async def prepare(run: RemoteRun, request: Prepare) -> PhaseResult:
+        # A bug in the phase's own code, not in what MDA sent.
+        Strict.model_validate({"count": "many"})
+        return PhaseResult()
+
+    handlers = Handlers[RemoteRun]()
+    handlers.serve(PREPARE, prepare)
+
+    async def graph(run: RemoteRun, endpoint: str, body: JsonValue) -> JsonValue:
+        return await handlers.dispatch(endpoint, run, body)
+
+    monkeypatch.setattr(server, "_graphs", lambda: {"agent": graph})
+    token = sign_runtime_token(RemoteRun(thread_id="t", assistant_id="agent", configurable={}))
+
+    async def status(body: bytes) -> int:
+        scope: Scope = {
+            "type": "http",
+            "method": "POST",
+            "path": "/remote-runtime/api/prepare",
+            "path_params": {"endpoint": "prepare"},
+            "headers": [(b"authorization", f"Bearer {token}".encode())],
+        }
+        sent: list[Message] = []
+
+        async def receive() -> Message:
+            return {"type": "http.request", "body": body}
+
+        async def send(message: Message) -> None:
+            sent.append(message)
+
+        await server.API(scope, receive, send)
+        return sent[0]["status"]
+
+    assert await status(b'{"sandbox_id": 3}') == 422
+    assert "Remote runtime call failed" not in caplog.text
+    assert await status(b'{"sandbox_id": "sb-1"}') == 500
+    assert "Remote runtime call failed" in caplog.text
+
+
 async def test_an_adopted_worker_acts_as_its_own_thread_never_its_coordinator(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
