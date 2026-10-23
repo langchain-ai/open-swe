@@ -129,12 +129,16 @@ _ENTITY_FIELDS: dict[EntityKind, tuple[str, ...]] = {
 _INVALID_XML_CHARS = re.compile(r"[^\x09\x0a\x0d\x20-\ud7ff\ue000-\ufffd\U00010000-\U0010ffff]")
 
 
+def strip_invalid_xml_characters(value: str) -> str:
+    return _INVALID_XML_CHARS.sub("", value)
+
+
 def _xml_text(value: object) -> str:
-    return escape(_INVALID_XML_CHARS.sub("", str(value)), quote=False)
+    return escape(strip_invalid_xml_characters(str(value)), quote=False)
 
 
 def _xml_attr(value: object) -> str:
-    return escape(_INVALID_XML_CHARS.sub("", str(value)), quote=True)
+    return escape(strip_invalid_xml_characters(str(value)), quote=True)
 
 
 def split_person_id(person: PersonIdentity) -> tuple[str, str]:

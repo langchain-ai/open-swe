@@ -323,7 +323,7 @@ async def test_events_past_the_allowance_stop_the_monitors(
 
 
 def test_monitor_deliveries_are_parseable_and_share_visible_identity() -> None:
-    output = "\x1b[?25l\x1b[31mERROR\x1b[0m\x1b]0;title\x07\x1b(B one\x00"
+    output = "\x1b[?25l\x1b[38:2:255:0:0mERROR\x1b[0m\x1b]0;title\x07\x1b(B one\x00\ud800\ufffe"
     event = MonitorEvent(seq=1, at_raw_line=2, lines=[output])
     monitor = PendingMonitor(
         monitor_id="mon-1",
@@ -342,6 +342,12 @@ def test_monitor_deliveries_are_parseable_and_share_visible_identity() -> None:
             [delivery._event_content(monitor, event), delivery._end_content(monitor)]
         )
     ]
+    for match in matches:
+        assert "\x00" not in match.content
+        assert "\ud800" not in match.content
+        assert "\ufffe" not in match.content
+        assert "\x1b" not in match.content
+        assert "ERROR one" in match.content
     first = EventMatch.messages(matches[:1])
     second = EventMatch.messages(
         matches[1:],

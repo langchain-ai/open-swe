@@ -19,6 +19,7 @@ from pydantic import JsonValue
 
 from openswe.background_tasks import completion_configurable
 from openswe.database import postgres
+from openswe.input_messages import strip_invalid_xml_characters
 from openswe.jobs import queue
 from openswe.monitors.budget import EVENTS_SPENT_REASON, ThreadMonitorBudget
 from openswe.monitors.sandbox import MonitorEvent, PendingMonitor, SandboxMonitors, owner_of
@@ -39,9 +40,7 @@ _WAKE_LIMIT_REASON = (
     f"runs started by monitor events reached {MONITOR_WAKES.limit} since the last human message"
 )
 _BACKTICKS = re.compile(r"`+")
-_ANSI_ESCAPES = re.compile(
-    r"\x1b(?:\[[0-9;?]*[ -/]*[@-~]|\][^\x07\x1b]*(?:\x07|\x1b\\)|[ -/]*[@-~])"
-)
+_ANSI_ESCAPES = re.compile(r"\x1b(?:\[[0-?]*[ -/]*[@-~]|\][^\x07\x1b]*(?:\x07|\x1b\\)|[ -/]*[@-~])")
 
 
 def _tracked(metadata: Mapping[str, object]) -> list[str]:
@@ -72,8 +71,12 @@ def _numbered(lines: list[tuple[int, str]]) -> str:
     return "\n".join(f"{number:>6}\t{text}" for number, text in lines)
 
 
+def _clean_output(value: str) -> str:
+    return strip_invalid_xml_characters(_ANSI_ESCAPES.sub("", value))
+
+
 def _event_content(monitor: PendingMonitor, event: MonitorEvent) -> str:
-    lines = _ANSI_ESCAPES.sub("", "\n".join(event.lines))
+    lines = _clean_output("\n".join(event.lines))
     return prompt(
         "runs/monitor-event",
         monitor_id=monitor.monitor_id,
@@ -86,8 +89,8 @@ def _event_content(monitor: PendingMonitor, event: MonitorEvent) -> str:
 
 def _end_content(monitor: PendingMonitor) -> str:
     end = monitor.end
-    tail = _ANSI_ESCAPES.sub("", _numbered(end.tail)) if end else ""
-    filter_errors = _ANSI_ESCAPES.sub("", end.filter_errors) if end else ""
+    tail = _clean_output(_numbered(end.tail)) if end else ""
+    filter_errors = _clean_output(end.filter_errors) if end else ""
     return prompt(
         "runs/monitor-ended",
         monitor_id=monitor.monitor_id,
