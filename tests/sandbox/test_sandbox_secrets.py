@@ -44,7 +44,8 @@ def _threads(monkeypatch: pytest.MonkeyPatch, **threads: dict[str, object]) -> N
     client = SimpleNamespace(
         threads=SimpleNamespace(get=AsyncMock(side_effect=lambda tid: {"metadata": threads[tid]}))
     )
-    monkeypatch.setattr(proxy, "get_client", lambda: client)
+    monkeypatch.setattr(proxy.tool_access, "get_client", lambda: client)
+    monkeypatch.setattr(proxy.postgres, "configured", lambda: True)
 
 
 def _private(owner: object, **extra: object) -> dict[str, object]:

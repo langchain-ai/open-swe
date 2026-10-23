@@ -3,17 +3,18 @@
 import logging
 from uuid import UUID
 
-from langgraph_sdk import get_client
 from pydantic import ValidationError
 
+from openswe.database import postgres
 from openswe.sandbox_secrets.models import SandboxSecret, SecretView
+from openswe.sandboxes import tool_access
 from openswe.tasks.schemas import ThreadMetadata, user_for_login
 
 logger = logging.getLogger(__name__)
 
 
 async def _metadata(thread_id: str) -> ThreadMetadata | None:
-    thread = await get_client().threads.get(thread_id)
+    thread = await tool_access.get_client().threads.get(thread_id)
     try:
         return ThreadMetadata.model_validate(thread.get("metadata") or {})
     except ValidationError:
@@ -36,6 +37,8 @@ async def thread_secret_rules(thread_id: str) -> list[dict[str, object]]:
     A sandbox shared with another thread carries them only while both threads are
     private to the same person, so a public guest strips them from the box.
     """
+    if not postgres.configured():
+        return []
     metadata = await _metadata(thread_id)
     owner = await _private_owner(metadata)
     host_id = metadata.sandbox_host_thread_id if metadata is not None else None

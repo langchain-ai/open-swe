@@ -6649,6 +6649,92 @@
         "title": "ScheduleUpdateBody",
         "type": "object"
       },
+      "SecretUpdate": {
+        "properties": {
+          "header_format": {
+            "default": "Bearer {value}",
+            "title": "Header Format",
+            "type": "string"
+          },
+          "header_name": {
+            "default": "Authorization",
+            "title": "Header Name",
+            "type": "string"
+          },
+          "hosts": {
+            "items": {
+              "type": "string"
+            },
+            "maxItems": 10,
+            "minItems": 1,
+            "title": "Hosts",
+            "type": "array"
+          },
+          "value": {
+            "anyOf": [
+              {
+                "maxLength": 16384,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Value"
+          }
+        },
+        "required": [
+          "hosts"
+        ],
+        "title": "SecretUpdate",
+        "type": "object"
+      },
+      "SecretView": {
+        "description": "A stored secret as the dashboard and agent see it. Has no field for the value.",
+        "properties": {
+          "header_format": {
+            "default": "Bearer {value}",
+            "title": "Header Format",
+            "type": "string"
+          },
+          "header_name": {
+            "default": "Authorization",
+            "title": "Header Name",
+            "type": "string"
+          },
+          "hosts": {
+            "items": {
+              "type": "string"
+            },
+            "maxItems": 10,
+            "minItems": 1,
+            "title": "Hosts",
+            "type": "array"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "updated_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Updated At"
+          }
+        },
+        "required": [
+          "hosts",
+          "name"
+        ],
+        "title": "SecretView",
+        "type": "object"
+      },
       "SessionCreateBody": {
         "properties": {
           "prompt": {
@@ -11720,6 +11806,127 @@
         "tags": [
           "dashboard",
           "user-preferences"
+        ]
+      }
+    },
+    "/dashboard/api/me/sandbox-secrets": {
+      "get": {
+        "operationId": "api_list_sandbox_secrets_dashboard_api_me_sandbox_secrets_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/SecretView"
+                  },
+                  "title": "Response Api List Sandbox Secrets Dashboard Api Me Sandbox Secrets Get",
+                  "type": "array"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "security": [
+          {
+            "DashboardSession": []
+          }
+        ],
+        "summary": "Api List Sandbox Secrets",
+        "tags": [
+          "dashboard",
+          "sandbox-secrets"
+        ]
+      }
+    },
+    "/dashboard/api/me/sandbox-secrets/{name}": {
+      "delete": {
+        "operationId": "api_delete_sandbox_secret_dashboard_api_me_sandbox_secrets__name__delete",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "name",
+            "required": true,
+            "schema": {
+              "title": "Name",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "DashboardSession": []
+          }
+        ],
+        "summary": "Api Delete Sandbox Secret",
+        "tags": [
+          "dashboard",
+          "sandbox-secrets"
+        ]
+      },
+      "put": {
+        "operationId": "api_save_sandbox_secret_dashboard_api_me_sandbox_secrets__name__put",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "name",
+            "required": true,
+            "schema": {
+              "title": "Name",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SecretUpdate"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "204": {
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "DashboardSession": []
+          }
+        ],
+        "summary": "Api Save Sandbox Secret",
+        "tags": [
+          "dashboard",
+          "sandbox-secrets"
         ]
       }
     },
