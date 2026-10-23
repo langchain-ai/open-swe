@@ -12,8 +12,8 @@ sandbox requests, runs them locally, and posts the results back.
 
 ## Install
 
-On Apple Silicon Macs running macOS Ventura or later, Homebrew is the recommended
-install option. It installs the desktop app and links `oswe` onto your `PATH`;
+On Apple Silicon Macs running macOS Ventura or later, you can install with
+Homebrew. It installs the desktop app and links `oswe` onto your `PATH`;
 the CLI updates with the app.
 
 ```sh
