@@ -6,7 +6,7 @@ long it may take and when it may be sent again. The runtime calls it through
 definition, so a change to a call is a type error on the side that has not caught up.
 """
 
-from collections.abc import Awaitable, Callable
+from collections.abc import Awaitable, Callable, Mapping
 from dataclasses import dataclass
 from typing import Final, Literal, Protocol
 
@@ -44,7 +44,11 @@ class Endpoint[Request: BaseModel, Response: BaseModel]:
 
 
 class Transport(Protocol):
-    """How the runtime reaches the backend: one JSON POST, authenticated as the run."""
+    """How the runtime reaches the backend: one JSON POST, authenticated as the run.
+
+    ``headers`` carries what the call says beyond its body, such as the trace
+    position the backend nests its spans under.
+    """
 
     async def post(
         self,
@@ -53,6 +57,7 @@ class Transport(Protocol):
         *,
         timeout: float,
         delivery: Delivery,
+        headers: Mapping[str, str] | None = None,
     ) -> JsonValue: ...
 
 
@@ -62,12 +67,14 @@ async def call[Request: BaseModel, Response: BaseModel](
     request: Request,
     *,
     timeout: float | None = None,
+    headers: Mapping[str, str] | None = None,
 ) -> Response:
     raw = await transport.post(
         endpoint.path,
         request.model_dump(mode="json"),
         timeout=endpoint.seconds if timeout is None else timeout,
         delivery=endpoint.delivery,
+        headers=headers,
     )
     return endpoint.response.model_validate(raw)
 

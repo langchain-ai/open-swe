@@ -631,6 +631,66 @@ async def _call_status(
     return sent[0]["status"], served
 
 
+async def test_a_call_nests_under_the_runtime_span_that_made_it(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from unittest.mock import MagicMock
+
+    from langchain_core.tracers.langchain import LangChainTracer, wait_for_all_tracers
+    from langgraph.runtime import Runtime
+    from langsmith import Client
+    from langsmith.run_trees import RunTree
+
+    from openswe.remote_runtime import server
+    from openswe.remote_runtime.runs import in_graph_context
+
+    client = MagicMock(spec=Client)
+    tracer = LangChainTracer(client=client, project_name="backend")
+
+    async def graph(run: RemoteRun, called: str, body: object) -> dict[str, object]:
+        async def operation(runtime: Runtime) -> dict[str, object]:  # noqa: ARG001
+            return {}
+
+        return await in_graph_context({"callbacks": [tracer], "run_name": called}, operation)
+
+    monkeypatch.setattr(server, "_graphs", lambda: {"agent": graph})
+    caller = RunTree(name="model", run_type="chain", project_name="turns")
+    headers = caller.to_headers()
+    token = sign_runtime_token(RemoteRun(thread_id="t", assistant_id="agent", configurable={}))
+    scope: Scope = {
+        "type": "http",
+        "method": "POST",
+        "path": "/remote-runtime/api/before_model",
+        "path_params": {"endpoint": "before_model"},
+        "headers": [
+            (b"authorization", f"Bearer {token}".encode()),
+            (b"langsmith-trace", headers["langsmith-trace"].encode()),
+            (b"baggage", headers["baggage"].encode()),
+        ],
+    }
+    sent: list[Message] = []
+
+    async def receive() -> Message:
+        return {"type": "http.request", "body": b"{}"}
+
+    async def send(message: Message) -> None:
+        sent.append(message)
+
+    await server.API(scope, receive, send)
+
+    wait_for_all_tracers()
+    assert sent[0]["status"] == 200
+    [hook] = [
+        run.kwargs
+        for run in client.create_run.call_args_list
+        if run.kwargs["parent_run_id"] is None or run.kwargs["parent_run_id"] == caller.id
+    ]
+    assert hook["name"] == "before_model"
+    assert hook["parent_run_id"] == caller.id
+    assert hook["trace_id"] == caller.trace_id
+    assert hook["session_name"] == "turns"
+
+
 async def test_a_worker_grant_reads_its_coordinators_catalog_and_adopts_nothing_else(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

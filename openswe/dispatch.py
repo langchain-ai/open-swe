@@ -13,12 +13,10 @@ busy-check and the custom store-queue) with one function that uses:
   step in prod); dashboard-started runs already use the platform's async default.
 - ``webhook=COMPLETION_WEBHOOK_URL`` — the platform calls us on completion or
   failure so every run ends with a signal even if the agent died.
-- ``stream_resumable=True`` — the run's event stream is retained so a client that
-  attaches later can replay it. Without this the dashboard cannot observe a run
-  it did not start: the v3 protocol only synthesizes the ``lifecycle: running``
-  event that drives ``stream.isLoading`` when it can replay the run's events, so
-  a Slack/Linear/GitHub-triggered run looked idle in the web UI (no stop button)
-  until it happened to emit its next event.
+- ``stream_resumable=False`` — nothing replays these runs' streams: the dashboard
+  reads a thread from its transcript, so keeping every event in the Agent
+  Server's Redis only costs it memory. A client streaming the thread through the
+  SDK sees a run's events from when it joins.
 - the v3 run shape — the same ``stream_mode`` set, ``stream_subgraphs`` and
   compatibility marker that ``langgraph_api``'s ``run.start`` command applies
   when the dashboard submits a run. The server fixes a run's streaming protocol
@@ -366,7 +364,6 @@ async def create_durable_run(
     multitask_strategy: str = "interrupt",
     durability: Durability = "async",
     if_not_exists: str = "create",
-    stream_resumable: bool = True,
     after_seconds: int | float | None = None,
     source_context: SourceContext | None = None,
 ) -> Run:
@@ -402,7 +399,7 @@ async def create_durable_run(
         "if_not_exists": if_not_exists,
         "stream_mode": list(V3_RUN_STREAM_MODES),
         "stream_subgraphs": True,
-        "stream_resumable": stream_resumable,
+        "stream_resumable": False,
     }
     if COMPLETION_WEBHOOK_URL:
         create_kwargs["webhook"] = COMPLETION_WEBHOOK_URL
