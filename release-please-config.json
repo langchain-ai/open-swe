@@ -1,0 +1,38 @@
+{
+  "$schema": "https://raw.githubusercontent.com/googleapis/release-please/main/schemas/config.json",
+  "skip-github-release": true,
+  "draft-pull-request": true,
+  "separate-pull-requests": true,
+  "component-no-space": true,
+  "pull-request-title-pattern": "chore(${component}): release ${version}",
+  "pull-request-header": "Merging this PR automatically builds, signs, notarizes, and publishes Open SWE Desktop and its bundled CLI. Review the changelog before merging.",
+  "packages": {
+    ".": {
+      "release-type": "simple",
+      "component": "desktop",
+      "include-component-in-tag": true,
+      "include-v-in-tag": true,
+      "tag-separator": "-",
+      "bump-minor-pre-major": true,
+      "bump-patch-for-minor-pre-major": true,
+      "changelog-path": "desktop/CHANGELOG.md",
+      "extra-files": [
+        {
+          "type": "json",
+          "path": "desktop/package.json",
+          "jsonpath": "$.version"
+        }
+      ],
+      "exclude-paths": [
+        "openswe",
+        "mda",
+        "vendor",
+        "openwiki",
+        "docs",
+        "evals",
+        "examples",
+        "tests"
+      ]
+    }
+  }
+}
