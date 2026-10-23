@@ -3,7 +3,8 @@
 A thread's history is replayed to the provider on every call, and to whichever
 provider routing or the fallback picks, so a block one provider wrote can break
 every later call on another. A provider stall that never raises would park the
-run with nothing for the retry or the fallback to react to.
+run with nothing for the retry or the fallback to react to. Anthropic's prompt
+cache is marked here too, where the call's real model is known.
 """
 
 import asyncio
@@ -19,6 +20,7 @@ from langchain.agents.middleware import (
 )
 from langchain.agents.middleware.types import ModelRequest, ModelResponse
 from langchain_anthropic import ChatAnthropic
+from langchain_anthropic.middleware import AnthropicPromptCachingMiddleware
 from langchain_core.messages import AIMessage, AnyMessage, ToolMessage
 from langchain_fireworks import ChatFireworks
 from langchain_openai import ChatOpenAI
@@ -28,6 +30,8 @@ logger = logging.getLogger(__name__)
 # Above the provider client's own request timeout (rt/models.py), so a stalled
 # request fails and retries inside the client first.
 MODEL_CALL_TIMEOUT_SECONDS: Final = 900.0
+# As the in-process graphs': a tool call can outlast the 5m default between model calls.
+PROMPT_CACHE_TTL: Final = "1h"
 # Bindings nest a few deep at most; the bound stops a self-referencing chain.
 _MAX_BINDINGS: Final = 10
 
@@ -164,9 +168,11 @@ def model_call_guards() -> list[AgentMiddleware]:
 
     They see the model the call really goes to, the fallback included. The history
     is fixed once; a call that times out is retried, the deadline covering each try.
+    The prompt cache replaces deepagents' own 5m one by name, in place.
     """
     return [
         ReplayableHistoryMiddleware(),
         ModelRetryMiddleware(retry_on=(TimeoutError,)),
         ModelCallTimeoutMiddleware(),
+        AnthropicPromptCachingMiddleware(ttl=PROMPT_CACHE_TTL, unsupported_model_behavior="ignore"),
     ]
