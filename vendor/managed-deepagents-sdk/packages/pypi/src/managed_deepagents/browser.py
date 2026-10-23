@@ -6,7 +6,7 @@ threads share logins but not tabs. Each
 browser has one Stagehand client in this process (the extension serves one at a
 time), released between runs and after a minute idle so the browser can idle out.
 
-``request_user`` hands the window to the user and returns at once. When the user
+``browser_handoff`` hands the window to the user and returns at once. When the user
 hands it back, MDA enqueues a run on the thread with a notification, as deepagents
 tells an agent its async task finished.
 
@@ -100,7 +100,7 @@ _WITH_USER = (
     "The browser is with the user until they hand it back; wait for the notification "
     "that they did before using it."
 )
-_HANDED_OVER = (  # what the model reads from request_user
+_HANDED_OVER = (  # what the model reads from browser_handoff
     "The browser is with the user. You'll get a notification when they hand it back; "
     "until then, don't use the browser. Tell the user what to do in it."
 )
@@ -108,7 +108,7 @@ _HANDED_OVER = (  # what the model reads from request_user
 _WAKE_TEXT = {
     "handed_back": (
         "The browser was handed back. Take a snapshot of the page; if the user hasn't "
-        "finished, call request_user again."
+        "finished, call browser_handoff again."
     ),
     "ended": "The browser handoff ended. Take a snapshot to see whether the user finished.",
 }
@@ -117,7 +117,7 @@ _LOG = logging.getLogger("mda.browser")
 
 
 class BrowserHandoff(TypedDict):
-    """The ``request_user`` tool's artifact: what a client shows the user.
+    """The ``browser_handoff`` tool's artifact: what a client shows the user.
 
     The tool returns at once; the model reads only the tool's text, never this.
     """
@@ -338,7 +338,10 @@ class BrowserMiddleware(AgentMiddleware):
         # The link reaches the user through the artifact; the model never sees it.
         handoff: BrowserHandoff = {"type": "browser_handoff", "message": reason, "url": url}
         reply = ToolMessage(
-            _HANDED_OVER, artifact=handoff, name="request_user", tool_call_id=runtime.tool_call_id
+            _HANDED_OVER,
+            artifact=handoff,
+            name="browser_handoff",
+            tool_call_id=runtime.tool_call_id,
         )
         return Command(update={"mda_browser_handoff": pending, "messages": [reply]})
 
@@ -446,7 +449,7 @@ class BrowserMiddleware(AgentMiddleware):
             return [{"type": "text", "text": text}, image]
 
         @tool
-        async def request_user(runtime: ManagedToolRuntime, reason: str) -> Command | str:
+        async def browser_handoff(runtime: ManagedToolRuntime, reason: str) -> Command | str:
             """Hand the browser to the user; you'll be notified when they hand it back.
 
             Use it for what only they should do: log in, solve a CAPTCHA, approve a
@@ -454,7 +457,7 @@ class BrowserMiddleware(AgentMiddleware):
             """
             return await self._hand_to_user(runtime, reason)
 
-        return [run, snapshot, screenshot, request_user]
+        return [run, snapshot, screenshot, browser_handoff]
 
 
 def _pending(state: object) -> _PendingHandoff | None:
