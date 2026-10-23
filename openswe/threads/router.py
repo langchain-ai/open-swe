@@ -13,6 +13,10 @@ keeps working unchanged:
   warning for each. Local threads are read-only: starting a run, cron or
   posting command there, or copying one, is refused. A run started on MDA
   marks the thread busy; the run-complete webhook and a reconcile job settle it.
+- Reads reach MDA as LangSmith Studio's, which may read every thread; writes stay
+  scoped to the threads the backend owns. A thread an MDA channel owns (its index
+  metadata names the ``channel``) is read-only here: the channel starts its runs,
+  so a run, a cancel, a state write or a copy is refused with 409.
 - A thread the index does not know yet is read from the Agent Server, indexed,
   and served from then on.
 """
@@ -43,10 +47,11 @@ from openswe.agent_api.client import (
     mda_graph_for,
 )
 from openswe.api.agent_server_auth import backend_call
+from openswe.dispatch import CHANNEL_METADATA_KEY, channel_of
 from openswe.threads import index
 from openswe.threads.index import IndexedThread, ThreadExistsError, ThreadSearch
 from openswe.threads.runtimes import LOCAL_HEADER, RUNTIMES, now_ms
-from openswe.threads.store import READ_ONLY, THREADS, for_mda
+from openswe.threads.store import READ_COMMANDS, READ_ONLY, THREADS, channel_write_refusal, for_mda
 
 logger = logging.getLogger(__name__)
 
@@ -87,6 +92,65 @@ def _started(thread_id: str, starting_ms: int) -> Callable[[Headers], Awaitable[
             )
 
     return started
+
+
+# Thread routes that read though they are POSTs.
+_POST_READS: Final = frozenset({"/history", "/state/checkpoint"})
+
+
+async def adopt_channel_run(thread_id: str, channel: str) -> None:
+    """Index an MDA channel's thread for the run the channel is about to start on it.
+
+    Call it before the thread's metadata is written. The channel creates the thread
+    on MDA as its conversation's own when it starts the run, so the backend indexes
+    it and keeps its own copy, but never creates it there, as it does a new thread
+    of its own; it marks it the channel's, so it stays read-only here. Mark it busy
+    with :func:`channel_run_starting` once the run is ready.
+    """
+    thread = await index.get(thread_id)
+    if thread is None:
+        thread = await index.create(
+            thread_id,
+            runtime="mda",
+            metadata={RUNTIME_METADATA_KEY: MDA_RUNTIME, CHANNEL_METADATA_KEY: channel},
+            if_exists="do_nothing",
+        )
+        await RUNTIMES.local.create(thread_id, thread.metadata)
+    elif channel_of(thread.metadata) != channel:
+        await index.update(thread_id, {CHANNEL_METADATA_KEY: channel})
+        await RUNTIMES.local.update(thread_id, {CHANNEL_METADATA_KEY: channel})
+
+
+async def channel_run_starting(thread_id: str) -> None:
+    """Busy once the channel's run is ready to start, so the dashboard shows it.
+
+    Last, so a run that fails to come together never leaves the thread busy. Its
+    run-complete webhook settles it, or the reconcile job.
+    """
+    await index.set_status(thread_id, "busy")
+
+
+def _reads(method: str, rest: str, body: bytes) -> bool:
+    """Whether a call to a thread's runtime only reads it."""
+    if method in {"GET", "HEAD"}:
+        return True
+    if method != "POST":
+        return False
+    if rest in _POST_READS:
+        return True
+    if rest == "/commands":
+        command = json_body(body) or {}
+        return command.get("method") in READ_COMMANDS
+    return False
+
+
+async def _refuse_channel_write(send: Send, thread: IndexedThread) -> bool:
+    """Refuse a write to a thread an MDA channel owns; ``False`` when the thread is not one."""
+    refusal = channel_write_refusal(thread)
+    if refusal is None:
+        return False
+    await send_json(send, 409, {"detail": refusal})
+    return True
 
 
 def _warn_local(scope: Scope, thread: IndexedThread) -> None:
@@ -272,6 +336,8 @@ class ThreadRouter:
                 await _not_found(send, thread_id)
                 return
             thread = await self._index_new(thread_id, {}, if_exists="do_nothing")
+        if await _refuse_channel_write(send, thread):
+            return
         if thread.runtime == "local":
             await _refuse_local(scope, send, thread)
             return
@@ -302,6 +368,8 @@ class ThreadRouter:
         if thread is None:
             await _not_found(send, thread_id)
             return
+        if await _refuse_channel_write(send, thread):
+            return
         if thread.runtime == "local":
             await _refuse_local(scope, send, thread)
             return
@@ -326,9 +394,16 @@ class ThreadRouter:
     ) -> None:
         thread = await THREADS.get(thread_id)
         if thread is not None and thread.runtime == "mda":
+            match = _THREAD.match(scope["path"])
+            rest = (match["rest"] or "") if match else ""
+            reads = _reads(scope["method"], rest, body)
+            if not reads and await _refuse_channel_write(send, thread):
+                return
             mda = RUNTIMES.mda_runtime
-            await mda.ensure_remote_thread(thread_id)
-            await forward(mda.http, scope, send, body)
+            if channel_of(thread.metadata) is None:
+                # The channel created its threads there; the backend's own may need it.
+                await mda.ensure_remote_thread(thread_id)
+            await forward(mda.read_http if reads else mda.http, scope, send, body)
             return
         if thread is not None:
             _warn_local(scope, thread)
