@@ -391,6 +391,7 @@ function PullRequestLink({
         <HoverCardTrigger asChild>
           <a
             href={pullRequest.url}
+            data-thread-pull-request
             target="_blank"
             rel="noreferrer"
             aria-label={`Open ${pullRequest.repoFullName} pull request #${pullRequest.number}`}
