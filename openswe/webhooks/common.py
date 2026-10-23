@@ -1603,6 +1603,7 @@ async def update_agent_thread_pr_state(payload: dict[str, Any]) -> None:
                     repo=repo,
                     number=number,
                     metadata=metadata,
+                    sha=event.pull_request.merge_commit_sha or "",
                 )
 
 

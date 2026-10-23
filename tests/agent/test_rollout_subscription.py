@@ -95,8 +95,15 @@ async def test_ask_to_monitor_rollout_asks_when_a_yes_can_subscribe(
     _ready(monkeypatch)
     dispatch = AsyncMock()
     monkeypatch.setattr("openswe.rollout_events.dispatch_agent_run", dispatch)
-    await ask_to_monitor_rollout("thread-1", owner="lc", repo="repo", number=7, metadata={})
+    await ask_to_monitor_rollout(
+        "thread-1", owner="lc", repo="repo", number=7, metadata={}, sha=_SHA.upper()
+    )
     dispatch.assert_awaited_once()
+    message = dispatch.await_args.args[1]
+    assert isinstance(message, str)
+    assert ".agents/skills/rollout-check/SKILL.md" in message
+    assert _SHA in message
+    assert "stop without messaging" in message
 
 
 @pytest.mark.asyncio

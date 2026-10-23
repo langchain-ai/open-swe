@@ -440,6 +440,7 @@ async def test_merged_pr_asks_to_monitor_when_no_rollout_check_was_requested() -
     assert ask.await_args is not None
     assert ask.await_args.kwargs["owner"] == "lc"
     assert ask.await_args.kwargs["number"] == 7
+    assert ask.await_args.kwargs["sha"] == _MERGE_SHA
     assert client.threads.update.await_args is not None
     stored = client.threads.update.await_args.kwargs["metadata"]
     assert stored["merge_commit_sha"] == _MERGE_SHA

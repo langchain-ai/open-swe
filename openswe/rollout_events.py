@@ -116,11 +116,23 @@ def _delivery_id(target: str, commits: list[str]) -> str:
     return hashlib.sha256(canonical.encode()).hexdigest()
 
 
-_ASK_TO_MONITOR = (
-    "This pull request just merged. Ask the person, on this thread's existing channel, "
-    "whether to monitor its rollout after it deploys. Ask once. If they agree, call "
-    "request_rollout_check. If they decline, stop. Do not call listen_events yourself."
-)
+def _ask_to_monitor(sha: str) -> str:
+    """Tell the run to offer monitoring only when the repo skill says this change qualifies."""
+    merge_sha = remembered_merge_sha(sha)
+    commit = (
+        f"merge commit {merge_sha}"
+        if merge_sha
+        else "the merge commit recorded for this pull request"
+    )
+    return (
+        "This pull request just merged. Read `.agents/skills/rollout-check/SKILL.md` "
+        f"at {commit}, not from a stale checkout. Look at what merged. Ask the person, "
+        "on this thread's existing channel, whether to monitor its rollout only when that "
+        "skill says this change qualifies. Ask once. If the skill file is missing, or it "
+        "does not say to offer monitoring for this change, stop without messaging them. "
+        "If they agree, call request_rollout_check. If they decline, stop. "
+        "Do not call listen_events yourself."
+    )
 _PR_URL_RE = re.compile(r"https://github\.com/([^/]+)/([^/]+)/pull/(\d+)")
 
 
@@ -323,8 +335,9 @@ async def ask_to_monitor_rollout(
     repo: str,
     number: int,
     metadata: dict[str, object],
+    sha: str = "",
 ) -> None:
-    """Ask once, on the thread's own channel, whether to monitor this rollout."""
+    """Start a run that asks only when the repository rollout skill says to."""
     try:
         if await _deployment_workspace(owner, repo) is None:
             return
@@ -340,7 +353,7 @@ async def ask_to_monitor_rollout(
         source = config.get("source")
         await dispatch_agent_run(
             thread_id,
-            _ASK_TO_MONITOR,
+            _ask_to_monitor(sha),
             config,
             source=source if isinstance(source, str) else "github",
             thread_title=None,
