@@ -91,8 +91,12 @@ class GatewayCredentialsRequired(ManagedToolsError):
 class ConnectedService(BaseModel):
     """A service in the gateway this person has connected."""
 
+    id: str
+    """LMT's server ID or built-in key, which disconnecting names."""
     name: str
     tool_count: int
+    disconnectable: bool = False
+    """This person has a stored credential for it; public services have none to remove."""
 
 
 class Gateway(BaseModel):
@@ -275,10 +279,12 @@ async def _gateway_detail(login: str, gateway: str) -> dict[str, object]:
 
 @dataclass(frozen=True)
 class _Server:
-    """What LMT's server list says about one server: its name and credential slugs."""
+    """What LMT's server list says about one server: its name, credential slugs, and
+    whether the caller has stored a credential for it."""
 
     name: str
     slugs: frozenset[str]
+    has_credential: bool = False
 
 
 def _server(item: dict[str, object]) -> _Server:
@@ -291,7 +297,11 @@ def _server(item: dict[str, object]) -> _Server:
         slug := connection.get("agent_auth_connection_slug"), str
     ):
         slugs.add(slug)
-    return _Server(name=str(item["name"]), slugs=frozenset(slugs))
+    return _Server(
+        name=str(item["name"]),
+        slugs=frozenset(slugs),
+        has_credential=item.get("has_credential") is True,
+    )
 
 
 async def _servers(login: str) -> dict[str, _Server]:
@@ -385,7 +395,14 @@ def _connected_services(
             count = sum(tool in listing.tool_names for tool in source.tool_names)
             if not count:
                 continue
-        connected.append(ConnectedService(name=name, tool_count=count))
+        connected.append(
+            ConnectedService(
+                id=source.id,
+                name=name,
+                tool_count=count,
+                disconnectable=server.has_credential if server else False,
+            )
+        )
     return connected
 
 
@@ -506,6 +523,34 @@ async def connect_link(login: str, gateway: str, slug: str) -> ConsentLink | Non
     if any(item.slug == slug for item in listing.missing):
         raise ManagedToolsError("LangSmith did not return a consent link; retry")
     return None
+
+
+async def disconnect_service(login: str, gateway: str, service: str) -> None:
+    """Delete ``login``'s own LangSmith credential for one service in the gateway.
+
+    LangSmith keeps the server and everyone else's credentials; the person can connect again.
+    """
+    if service not in {source.id for source in _sources(await _gateway_detail(login, gateway))}:
+        raise ManagedToolsError("This tool kit has no such service")
+    headers = await _headers(login)
+    async with _client() as client:
+        response = await client.delete(
+            f"{langsmith_issuer()}{SERVERS_PATH}/{quote(service, safe='')}/credential",
+            headers=headers,
+        )
+    if response.status_code == 409:
+        raise ManagedToolsError("This service has no connection to remove")
+    if not response.is_success:
+        raise _failure(response)
+    try:
+        await refresh_tools(login, gateway)
+    except Exception:
+        # A gateway that now misses a service may refuse to list; its stale list expires.
+        logger.warning(
+            "Managed tools refresh after disconnect failed",
+            extra={"gateway": gateway},
+            exc_info=True,
+        )
 
 
 async def refresh_tools(login: str, gateway: str) -> None:
