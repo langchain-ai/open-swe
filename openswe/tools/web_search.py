@@ -30,21 +30,14 @@ async def web_search(
         from exa_py import Exa  # deferred: heavy import
 
         client = Exa(api_key=api_key)
-        if include_contents:
-            result = await asyncio.to_thread(
-                client.search_and_contents,
-                query,
-                text=True,
-                num_results=num_results,
-                type="auto",
-            )
-        else:
-            result = await asyncio.to_thread(
-                client.search,
-                query,
-                num_results=num_results,
-                type="auto",
-            )
+        # search() returns truncated page text unless contents is set explicitly.
+        result = await asyncio.to_thread(
+            client.search,
+            query,
+            contents={"text": True} if include_contents else False,
+            num_results=num_results,
+            type="auto",
+        )
         results = str(result)
         try:
             results_path = await write_sandbox_output(
