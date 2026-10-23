@@ -4517,6 +4517,18 @@
             ],
             "title": "Review Draft Prs"
           },
+          "sandbox_tools_via_eval": {
+            "agent_feature_flag": true,
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Sandbox Tools Via Eval"
+          },
           "slack_onboarding_dismissed": {
             "default": false,
             "title": "Slack Onboarding Dismissed",
