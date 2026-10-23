@@ -161,7 +161,7 @@ async def _release_builder_sandbox(sandbox_id: str) -> None:
     uncommitted work gets destroyed, so reclamation stays the platform's job.
     """
     try:
-        async with SandboxAPI.for_new_boxes().client() as client:
+        async with SandboxAPI.new_sandbox_region().client() as client:
             await client.stop_sandbox(sandbox_id)
     except Exception:
         logger.warning(
@@ -231,7 +231,7 @@ def is_snapshot_stale(
     Every sandbox gets its own copy of the snapshot, so while the image is stale
     each one needs the script; once a capture lands, they all boot fresh.
     """
-    if not record.update_script or record.snapshot_at(SandboxAPI.for_new_boxes()) is None:
+    if not record.update_script or record.snapshot_at(SandboxAPI.new_sandbox_region()) is None:
         return False
     captured = _parse_iso(record.last_captured_at)
     if captured is None:
@@ -242,8 +242,8 @@ def is_snapshot_stale(
 def is_update_due(record: Workspace) -> bool:
     """Whether a new sandbox should also kick off a background snapshot update.
 
-    Same staleness test, or a snapshot in another LangSmith than new boxes, which
-    they cannot boot from; plus: no refresh already running, and the last attempt
+    Same staleness test, or a snapshot outside the new sandbox region, which new boxes
+    cannot boot from; plus: no refresh already running, and the last attempt
     — success *or* failure — is older than the interval. Counting failures keeps
     a broken script or network from enqueueing a builder on every creation.
     """
@@ -258,10 +258,10 @@ def is_update_due(record: Workspace) -> bool:
 
 
 def _snapshot_elsewhere(record: Workspace) -> bool:
-    """Whether the snapshot lives in another LangSmith than the one new boxes are created in."""
+    """Whether the snapshot lives outside the new sandbox region."""
     return (
         record.ready_snapshot_id is not None
-        and record.snapshot_at(SandboxAPI.for_new_boxes()) is None
+        and record.snapshot_at(SandboxAPI.new_sandbox_region()) is None
     )
 
 
@@ -298,11 +298,11 @@ async def refresh_workspace(slug: str, kind: RefreshKind = "full") -> dict[str, 
     if kind == "full" and not record.setup_script:
         return {"status": "no_setup_script", "slug": slug}
     if kind == "update" and _snapshot_elsewhere(record) and record.setup_script:
-        # An update layers on the snapshot, which new boxes cannot boot from there.
+        # An update layers on the snapshot, which boxes in the new sandbox region cannot boot.
         kind = "full"
     if kind == "update" and not record.update_script:
         return {"status": "no_update_script", "slug": slug}
-    if kind == "update" and record.snapshot_at(SandboxAPI.for_new_boxes()) is None:
+    if kind == "update" and record.snapshot_at(SandboxAPI.new_sandbox_region()) is None:
         return {"status": "no_snapshot_to_update", "slug": slug}
     if is_refresh_in_flight(record):
         return {"status": "already_refreshing", "slug": slug}
@@ -312,7 +312,7 @@ async def refresh_workspace(slug: str, kind: RefreshKind = "full") -> dict[str, 
         return {"status": "unsupported", "slug": slug, "error": str(exc)}
 
     base = (
-        record.snapshot_at(SandboxAPI.for_new_boxes())
+        record.snapshot_at(SandboxAPI.new_sandbox_region())
         if kind == "update"
         else record.base_snapshot_id
     )
@@ -442,8 +442,10 @@ async def _read_builder_log(sandbox_id: str, path: str) -> str | None:
     from openswe.sandboxes.providers.registry import create_sandbox
 
     try:
-        # Builders are created where new boxes are.
-        backend = await create_sandbox(SandboxRef(sandbox_id, SandboxAPI.for_new_boxes().api_root))
+        # Builders are created in the new sandbox region.
+        backend = await create_sandbox(
+            SandboxRef(sandbox_id, SandboxAPI.new_sandbox_region().api_root)
+        )
         result = await backend.aexecute(
             f"tail -c {LIVE_LOG_MAX_BYTES} {shlex.quote(path)} 2>/dev/null",
             timeout=LIVE_LOG_READ_TIMEOUT_SECONDS,

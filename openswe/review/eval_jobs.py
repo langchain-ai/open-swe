@@ -404,7 +404,7 @@ async def _launch_sandbox(
             (report_url, REPORT_TOKEN_HEADER, report_token),
         ]
     )
-    async with SandboxAPI.for_new_boxes().client() as client:
+    async with SandboxAPI.new_sandbox_region().client() as client:
         sandbox = await client.create_sandbox(
             idle_ttl_seconds=0,
             delete_after_stop_seconds=DELETE_AFTER_STOP_SECONDS,

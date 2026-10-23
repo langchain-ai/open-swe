@@ -32,9 +32,9 @@ logger = logging.getLogger(__name__)
 _json_object = TypeAdapter(dict[str, JsonValue])
 # As the backend's sandbox: a command without a timeout of its own gets five minutes.
 EXECUTE_TIMEOUT_SECONDS: Final = 300
-# The backend's own names for the LangSmith new boxes go to, when not the deployment's.
-_SANDBOX_ENDPOINT_ENV: Final = "SANDBOX_LANGSMITH_ENDPOINT"
-_SANDBOX_API_KEY_ENV: Final = "SANDBOX_LANGSMITH_API_KEY"
+# The backend's own names for the new sandbox region, when it is not the deployment's LangSmith.
+_SANDBOX_ENDPOINT_ENV: Final = "NEW_SANDBOX_REGION_ENDPOINT"
+_SANDBOX_API_KEY_ENV: Final = "NEW_SANDBOX_REGION_API_KEY"
 _SANDBOX_API_SUFFIX: Final = "/v2/sandboxes"
 
 
@@ -63,7 +63,7 @@ def _sandbox_langsmith(api_root: str | None) -> tuple[str | None, str | None]:
     """The sandbox API and key of the LangSmith the backend says the box lives at.
 
     ``None`` is this deployment's own, which needs neither. Any other must be the one
-    new boxes go to, the only other LangSmith this deployment holds a key for.
+    new sandbox region, the only other LangSmith this deployment holds a key for.
     """
     if api_root is None:
         return None, None

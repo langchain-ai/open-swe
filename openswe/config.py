@@ -157,16 +157,16 @@ ENV.var(
     default="https://api.smith.langchain.com",
 )
 ENV.var(
-    "SANDBOX_LANGSMITH_API_KEY",
-    "LangSmith API key for SANDBOX_LANGSMITH_ENDPOINT; defaults to LANGSMITH_API_KEY. The MDA "
+    "NEW_SANDBOX_REGION_API_KEY",
+    "LangSmith API key for the new sandbox region; defaults to LANGSMITH_API_KEY. The MDA "
     "deployment needs the same value.",
     secret=True,
 )
 ENV.var(
-    "SANDBOX_LANGSMITH_ENDPOINT",
-    "LangSmith API endpoint new sandboxes and snapshots are created at, such as another region; "
-    "defaults to LANGSMITH_ENDPOINT. Each box and snapshot records where it lives, so existing "
-    "ones stay reachable where they were. The MDA deployment needs the same value.",
+    "NEW_SANDBOX_REGION_ENDPOINT",
+    "LangSmith API endpoint of the new sandbox region, where new sandboxes and snapshots are "
+    "created; defaults to LANGSMITH_ENDPOINT. Each box and snapshot records where it lives, so "
+    "existing ones stay reachable where they were. The MDA deployment needs the same value.",
 )
 ENV.var(
     "LANGSMITH_TENANT_ID",

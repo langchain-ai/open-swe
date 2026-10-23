@@ -1,8 +1,9 @@
 """This deployment's LangSmith sandbox APIs, for the routes the langsmith SDK does not model.
 
 Boxes and snapshots may live in two LangSmiths: the deployment's own, where everything
-created before ``SANDBOX_LANGSMITH_ENDPOINT`` was set stays, and the one new ones are
-created in. Each records the API root it lives at; an unrecorded one is the deployment's.
+created before ``NEW_SANDBOX_REGION_ENDPOINT`` was set stays, and the new sandbox region,
+where new ones are created. Each records the API root it lives at; an unrecorded one is
+the deployment's.
 
 Kept apart from the LangSmith provider so the dashboard can call the API without
 importing the agent stack the provider's sandbox backend pulls in.
@@ -32,7 +33,7 @@ class UnknownSandboxAPIError(RuntimeError):
     def __init__(self, api_root: str) -> None:
         super().__init__(
             f"No LangSmith API key is configured for {api_root}, where this sandbox lives; "
-            "it is neither LANGSMITH_ENDPOINT nor SANDBOX_LANGSMITH_ENDPOINT"
+            "it is neither LANGSMITH_ENDPOINT nor the new sandbox region's NEW_SANDBOX_REGION_ENDPOINT"
         )
 
 
@@ -44,11 +45,11 @@ class SandboxAPI:
         self.api_key = api_key
 
     @classmethod
-    def for_new_boxes(cls) -> Self:
-        """The API new boxes and snapshots are created at, which may be another LangSmith."""
+    def new_sandbox_region(cls) -> Self:
+        """The new sandbox region, where new boxes and snapshots are created."""
         return cls(
-            ENV.SANDBOX_LANGSMITH_ENDPOINT.optional() or ENV.LANGSMITH_ENDPOINT.get(),
-            ENV.SANDBOX_LANGSMITH_API_KEY.optional() or ENV.LANGSMITH_API_KEY.optional(),
+            ENV.NEW_SANDBOX_REGION_ENDPOINT.optional() or ENV.LANGSMITH_ENDPOINT.get(),
+            ENV.NEW_SANDBOX_REGION_API_KEY.optional() or ENV.LANGSMITH_API_KEY.optional(),
         )
 
     @classmethod
@@ -64,7 +65,7 @@ class SandboxAPI:
         """
         if api_root is None:
             return cls.deployment()
-        for api in (cls.for_new_boxes(), cls.deployment()):
+        for api in (cls.new_sandbox_region(), cls.deployment()):
             if api.api_root == _api_root(api_root):
                 return api
         raise UnknownSandboxAPIError(api_root)

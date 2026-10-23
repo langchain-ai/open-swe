@@ -7968,6 +7968,17 @@
             "title": "Slug",
             "type": "string"
           },
+          "snapshot_api": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Snapshot Api"
+          },
           "snapshot_id": {
             "anyOf": [
               {

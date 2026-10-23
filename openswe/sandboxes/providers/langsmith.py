@@ -503,7 +503,7 @@ async def create_langsmith_sandbox(
         fs_capacity_bytes: Optional filesystem capacity override for a newly-created sandbox.
         create_params: Optional additional fields merged into the sandbox create body.
         prepare_work_dir: Whether a new sandbox creates ``/workspace`` before returning.
-        api: Where the sandbox lives; new ones default to where new boxes are created.
+        api: Where the sandbox lives; new ones default to the new sandbox region.
 
     Returns:
         SandboxBackendProtocol instance
@@ -515,7 +515,7 @@ async def create_langsmith_sandbox(
         fs_capacity_bytes=fs_capacity_bytes,
         create_params=create_params,
     )
-    provider = LangSmithProvider(api or SandboxAPI.for_new_boxes())
+    provider = LangSmithProvider(api or SandboxAPI.new_sandbox_region())
     backend = await provider.get_or_create(
         sandbox_id=sandbox_id,
         snapshot_id=options.snapshot_id or "",

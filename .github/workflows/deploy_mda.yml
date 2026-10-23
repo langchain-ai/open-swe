@@ -96,17 +96,17 @@ jobs:
           # own key and count against the workspace's gateway spend cap.
           # Each secret is named, so the runner gets only the one this deployment uses.
           LANGSMITH_GATEWAY_API_KEY: ${{ matrix.environment == 'prod' && secrets.LANGSMITH_GATEWAY_API_KEY_PROD || matrix.environment == 'staging' && secrets.LANGSMITH_GATEWAY_API_KEY_STAGING || '' }}
-          # The backend's sandbox LangSmith, when its thread sandboxes live outside this deployment's
-          # LangSmith (another region). Both or neither, with the backend's values.
-          SANDBOX_LANGSMITH_ENDPOINT: >-
-            ${{ matrix.environment == 'prod' && secrets.SANDBOX_LANGSMITH_ENDPOINT_PROD
-            || matrix.environment == 'staging' && secrets.SANDBOX_LANGSMITH_ENDPOINT_STAGING
-            || matrix.environment == 'preview' && secrets.SANDBOX_LANGSMITH_ENDPOINT_PREVIEW
+          # The backend's new sandbox region, when new thread sandboxes go to another LangSmith than
+          # this deployment's. Both or neither, with the backend's values.
+          NEW_SANDBOX_REGION_ENDPOINT: >-
+            ${{ matrix.environment == 'prod' && secrets.NEW_SANDBOX_REGION_ENDPOINT_PROD
+            || matrix.environment == 'staging' && secrets.NEW_SANDBOX_REGION_ENDPOINT_STAGING
+            || matrix.environment == 'preview' && secrets.NEW_SANDBOX_REGION_ENDPOINT_PREVIEW
             || '' }}
-          SANDBOX_LANGSMITH_API_KEY: >-
-            ${{ matrix.environment == 'prod' && secrets.SANDBOX_LANGSMITH_API_KEY_PROD
-            || matrix.environment == 'staging' && secrets.SANDBOX_LANGSMITH_API_KEY_STAGING
-            || matrix.environment == 'preview' && secrets.SANDBOX_LANGSMITH_API_KEY_PREVIEW
+          NEW_SANDBOX_REGION_API_KEY: >-
+            ${{ matrix.environment == 'prod' && secrets.NEW_SANDBOX_REGION_API_KEY_PROD
+            || matrix.environment == 'staging' && secrets.NEW_SANDBOX_REGION_API_KEY_STAGING
+            || matrix.environment == 'preview' && secrets.NEW_SANDBOX_REGION_API_KEY_PREVIEW
             || '' }}
         run: |
           case "$ENVIRONMENT" in
@@ -122,12 +122,12 @@ jobs:
           # The project .env is forwarded as the deployment's secrets: the backend it calls back,
           # and the gateway key it calls models with.
           printf 'OPEN_SWE_BACKEND_URL=%s\nLANGSMITH_GATEWAY_API_KEY=%s\n' "$backend" "$LANGSMITH_GATEWAY_API_KEY" >mda/.env
-          if [[ -n "$SANDBOX_LANGSMITH_ENDPOINT" || -n "$SANDBOX_LANGSMITH_API_KEY" ]]; then
-            if [[ -z "$SANDBOX_LANGSMITH_ENDPOINT" || -z "$SANDBOX_LANGSMITH_API_KEY" ]]; then
-              echo "::error::Set both SANDBOX_LANGSMITH_ENDPOINT_${ENVIRONMENT^^} and SANDBOX_LANGSMITH_API_KEY_${ENVIRONMENT^^}, or neither."
+          if [[ -n "$NEW_SANDBOX_REGION_ENDPOINT" || -n "$NEW_SANDBOX_REGION_API_KEY" ]]; then
+            if [[ -z "$NEW_SANDBOX_REGION_ENDPOINT" || -z "$NEW_SANDBOX_REGION_API_KEY" ]]; then
+              echo "::error::Set both NEW_SANDBOX_REGION_ENDPOINT_${ENVIRONMENT^^} and NEW_SANDBOX_REGION_API_KEY_${ENVIRONMENT^^}, or neither."
               exit 1
             fi
-            printf 'SANDBOX_LANGSMITH_ENDPOINT=%s\nSANDBOX_LANGSMITH_API_KEY=%s\n' "$SANDBOX_LANGSMITH_ENDPOINT" "$SANDBOX_LANGSMITH_API_KEY" >>mda/.env
+            printf 'NEW_SANDBOX_REGION_ENDPOINT=%s\nNEW_SANDBOX_REGION_API_KEY=%s\n' "$NEW_SANDBOX_REGION_ENDPOINT" "$NEW_SANDBOX_REGION_API_KEY" >>mda/.env
           fi
           uv run --project mda --locked --python 3.13 mda deploy mda \
             --name "open-swe-mda-$ENVIRONMENT" \

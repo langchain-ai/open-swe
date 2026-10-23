@@ -90,20 +90,20 @@ async def test_mda_owns_new_threads_and_its_own_boxes(
 
 
 _DEPLOYMENT_API = "https://api.smith.example"
-_NEW_BOX_API = "https://aws.api.smith.example"
+_NEW_REGION_API = "https://aws.api.smith.example"
 
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize(
     ("metadata", "api", "snapshot_id"),
     [
-        # A thread's first box goes where new boxes go, which cannot boot the old snapshot.
-        ({}, _NEW_BOX_API, None),
+        # A thread's first box goes to the new sandbox region, which cannot boot the old snapshot.
+        ({}, _NEW_REGION_API, None),
         # One bound before regions were recorded stays in the deployment's LangSmith.
         ({"sandbox_id": "mda-box", "sandbox_owner": "mda"}, None, "snap-1"),
         (
-            {"sandbox_id": "mda-box", "sandbox_owner": "mda", "sandbox_api": _NEW_BOX_API},
-            _NEW_BOX_API,
+            {"sandbox_id": "mda-box", "sandbox_owner": "mda", "sandbox_api": _NEW_REGION_API},
+            _NEW_REGION_API,
             None,
         ),
     ],
@@ -129,7 +129,7 @@ async def test_mda_keeps_each_box_in_the_langsmith_it_lives_in(
 
     monkeypatch.setenv("SANDBOX_TYPE", "langsmith")
     monkeypatch.setenv("LANGSMITH_ENDPOINT", _DEPLOYMENT_API)
-    monkeypatch.setenv("SANDBOX_LANGSMITH_ENDPOINT", _NEW_BOX_API)
+    monkeypatch.setenv("NEW_SANDBOX_REGION_ENDPOINT", _NEW_REGION_API)
     monkeypatch.setattr("openswe.sandboxes.lifecycle.load_workspace", load)
     monkeypatch.setattr("openswe.sandboxes.managed.get_sandbox_metadata", read_metadata)
     monkeypatch.setattr("openswe.sandboxes.lifecycle.get_sandbox_metadata", read_metadata)
@@ -204,7 +204,7 @@ async def test_the_backend_binds_the_box_mda_reports(
     monkeypatch.setattr("openswe.sandboxes.lifecycle.client.threads.update", write_metadata)
     monkeypatch.setattr("openswe.sandboxes.lifecycle.maybe_start_update", _no_update)
     monkeypatch.setenv("LANGSMITH_ENDPOINT", "https://api.smith.langchain.com")
-    monkeypatch.delenv("SANDBOX_LANGSMITH_ENDPOINT", raising=False)
+    monkeypatch.delenv("NEW_SANDBOX_REGION_ENDPOINT", raising=False)
 
     await bind_mda_sandbox("thread-1", reported)
 

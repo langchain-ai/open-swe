@@ -111,9 +111,9 @@ def github(
 
 
 def _box() -> TimeoutLangSmithSandbox:
-    """A LangSmith box where new ones go, as the provider hands one back."""
+    """A LangSmith box in the new sandbox region, as the provider hands one back."""
     box = MagicMock(spec=TimeoutLangSmithSandbox, id="sandbox", aexecute=AsyncMock())
-    box.api = SandboxAPI.for_new_boxes()
+    box.api = SandboxAPI.new_sandbox_region()
     box.ref = SandboxRef(box.id, box.api.api_root)
     return box
 

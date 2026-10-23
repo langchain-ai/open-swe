@@ -11,7 +11,7 @@ DEFAULT_FS_CAPACITY = 32 * 1024**3  # 32 GiB
 
 
 def main() -> None:
-    api = SandboxAPI.for_new_boxes()
+    api = SandboxAPI.new_sandbox_region()
     parser = argparse.ArgumentParser(description="Create a LangSmith sandbox snapshot")
     parser.add_argument(
         "--name", default="open-swe-gh-amd64", help="Snapshot name (default: open-swe-gh-amd64)"
@@ -28,12 +28,12 @@ def main() -> None:
     parser.add_argument(
         "--api-key",
         default=api.api_key,
-        help="LangSmith API key (default: SANDBOX_LANGSMITH_API_KEY, else LANGSMITH_API_KEY)",
+        help="LangSmith API key (default: NEW_SANDBOX_REGION_API_KEY, else LANGSMITH_API_KEY)",
     )
     args = parser.parse_args()
 
     if not args.api_key:
-        raise SystemExit("Set SANDBOX_LANGSMITH_API_KEY or LANGSMITH_API_KEY, or pass --api-key")
+        raise SystemExit("Set NEW_SANDBOX_REGION_API_KEY or LANGSMITH_API_KEY, or pass --api-key")
 
     client = SandboxClient(api_key=args.api_key, api_endpoint=api.endpoint)
     snapshot = client.create_snapshot(

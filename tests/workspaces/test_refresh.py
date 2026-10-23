@@ -208,11 +208,11 @@ async def test_an_update_boots_from_the_current_snapshot_and_runs_only_the_updat
 
 @pytest.mark.usefixtures("registry_db")
 @pytest.mark.asyncio
-async def test_a_snapshot_left_in_the_old_langsmith_is_rebuilt_where_new_boxes_go(
+async def test_a_snapshot_left_in_the_old_langsmith_is_rebuilt_in_the_new_sandbox_region(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     monkeypatch.setenv("LANGSMITH_ENDPOINT", "https://api.smith.example")
-    monkeypatch.setenv("SANDBOX_LANGSMITH_ENDPOINT", "https://aws.api.smith.example")
+    monkeypatch.setenv("NEW_SANDBOX_REGION_ENDPOINT", "https://aws.api.smith.example")
     backend = _backend(_Result("provisioned", 0), _Result("Already up to date.", 0))
     create_builder = AsyncMock(return_value=backend)
     with (
@@ -239,7 +239,7 @@ async def test_a_snapshot_left_in_the_old_langsmith_is_rebuilt_where_new_boxes_g
         )
         assert captured is not None
         # New boxes cannot boot from it, so it is due for a rebuild however fresh it is.
-        assert captured.snapshot_at(SandboxAPI.for_new_boxes()) is None
+        assert captured.snapshot_at(SandboxAPI.new_sandbox_region()) is None
         assert refresh.is_update_due(captured)
         result = await refresh.refresh_workspace("base", "update")
 

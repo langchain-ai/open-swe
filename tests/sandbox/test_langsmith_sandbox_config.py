@@ -186,8 +186,8 @@ def _serve(
         ({}, "https://api.smith.langchain.com", "lsv2-key"),
         (
             {
-                "SANDBOX_LANGSMITH_ENDPOINT": "https://aws.api.example",
-                "SANDBOX_LANGSMITH_API_KEY": "lsv2-aws-key",
+                "NEW_SANDBOX_REGION_ENDPOINT": "https://aws.api.example",
+                "NEW_SANDBOX_REGION_API_KEY": "lsv2-aws-key",
             },
             "https://aws.api.example",
             "lsv2-aws-key",
@@ -219,7 +219,7 @@ async def test_service_url_asks_for_a_workspace_grant(
 
     box = MagicMock(spec=TimeoutLangSmithSandbox)
     box.id = "sandbox-1"
-    box.api = SandboxAPI.for_new_boxes()
+    box.api = SandboxAPI.new_sandbox_region()
     service_url = await create_workspace_service_url(box, 3000)
 
     assert service_url == "https://l-abc.sandbox.example/"

@@ -166,7 +166,7 @@ async def test_proxy_refresh_preserves_tools_and_custom_rules(
     custom = {"name": "custom", "match_hosts": ["custom.example.test"]}
     box = MagicMock(spec=langsmith.TimeoutLangSmithSandbox)
     box.id = "sandbox-a"
-    box.api = SandboxAPI.for_new_boxes()
+    box.api = SandboxAPI.new_sandbox_region()
     await langsmith.configure_sandbox_proxy(
         box,
         "test-github-token",

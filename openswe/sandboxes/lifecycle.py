@@ -87,7 +87,7 @@ class SandboxCreateConfig:
         source: SandboxSource = "workspace",
         api: SandboxAPI | None = None,
     ) -> SandboxCreateConfig:
-        """What a box created at ``api``, by default where new boxes go, boots from."""
+        """What a box created at ``api``, by default the new sandbox region, boots from."""
         workspace = None if source == "base" else await load_workspace(workspace_slug)
         if workspace is not None and workspace.inherit_default_sandbox:
             workspace = await load_workspace(None)
@@ -96,7 +96,7 @@ class SandboxCreateConfig:
         if workspace is None:
             return cls(snapshot_id=None, create_params=create_params)
         return cls(
-            snapshot_id=workspace.snapshot_at(api or SandboxAPI.for_new_boxes()),
+            snapshot_id=workspace.snapshot_at(api or SandboxAPI.new_sandbox_region()),
             resources=workspace.sandbox_resources(),
             create_params=create_params,
             workspace=workspace,
@@ -244,10 +244,10 @@ def _ref_of(sandbox_backend: SandboxBackendProtocol) -> SandboxRef:
 
 
 def mda_box_api(metadata: ThreadMetadata) -> SandboxAPI:
-    """Where the thread's MDA box lives: its recorded LangSmith once bound, else where new ones go."""
+    """Where the thread's MDA box lives: its recorded LangSmith once bound, else the new sandbox region."""
     if metadata.sandbox_owner == "mda" and metadata.sandbox_id is not None:
         return SandboxAPI.at(metadata.sandbox_api)
-    return SandboxAPI.for_new_boxes()
+    return SandboxAPI.new_sandbox_region()
 
 
 async def _refresh_github_proxy(

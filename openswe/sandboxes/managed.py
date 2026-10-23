@@ -7,8 +7,8 @@ binds the thread to it and connects as to any reused box: proxy credentials, git
 identity, tool channel. MDA leaves the box's proxy config to the backend. The
 backend never creates or replaces an MDA-owned box itself.
 
-A box stays in the LangSmith it was created in. MDA creates a thread's first box
-where new boxes go, and keeps adopting and replacing a box in the LangSmith it lives in.
+A box stays in the LangSmith it was created in. MDA creates a thread's first box in
+the new sandbox region, and keeps adopting and replacing a box in the LangSmith it lives in.
 """
 
 from pydantic import BaseModel
