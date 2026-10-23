@@ -254,7 +254,9 @@ class SlackInteraction(SlackPayload):
 
     type: str = ""
     trigger_id: str = ""
+    callback_id: str = ""
     response_url: str = ""
+    team: SlackRef = Field(default_factory=SlackRef)
     action_id: str = ""
     value: str = ""
     container: SlackInteractionContainer = Field(default_factory=SlackInteractionContainer)
@@ -298,6 +300,7 @@ class SlackButtonValue(SlackPayload):
     thread_id: str = ""
     thread_ts: str = ""
     response: str = ""
+    user_id: str | None = None
     kind: str = ""
     subject: str = ""
 
@@ -354,6 +357,7 @@ class SlackChannelContext(SlackPayload):
     is_pending_ext_shared: bool | None = None
     is_im: bool | None = None
     is_mpim: bool | None = None
+    lookup_retry_after: int | None = Field(default=None, exclude=True)
 
     def dump(self) -> JsonObject:
         """The JSON value to store in thread metadata."""

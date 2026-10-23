@@ -235,6 +235,11 @@ test.describe("Slack → web handoff (real dashboard UI)", () => {
     await page.goto(`/agents/${threadId}`);
     const sentMessage = page.getByText("On it!", { exact: true });
     await expect(sentMessage).toBeVisible();
+    // Stop only once the delegated task is under way: the model loop runs on
+    // Managed Deep Agents, so its start reaches the transcript a hop after the reply.
+    await expect(
+      page.getByRole("button", { name: /^Delegating .* · 1 action$/ }),
+    ).toBeVisible();
     const stopRun = page.getByRole("button", { name: "Stop run" });
     await expect(stopRun).toBeVisible();
     await stopRun.click();
@@ -291,13 +296,23 @@ test.describe("Slack → web handoff (real dashboard UI)", () => {
       name: /^Worked(?: for .*)? · 1 action$/,
     });
     await expect(folds).toHaveCount(2);
-    await expectInDocumentOrder([
+    const ordered = [
       page.getByText("On it!", { exact: true }),
+      page.getByText("Exploring before reporting progress.", { exact: true }),
       folds.first(),
+      page.getByText("Reporting progress mid-run.", { exact: true }),
       page.getByText("Found the cause.", { exact: true }),
+      page.getByText(
+        "Running a long fix while the progress reply is on screen.",
+        { exact: true },
+      ),
       folds.last(),
+      page.getByText("Reporting the outcome.", { exact: true }),
       page.getByText("Fixed it.", { exact: true }),
-    ]);
+    ];
+    await expectInDocumentOrder(ordered);
+    await page.reload();
+    await expectInDocumentOrder(ordered);
   });
 
   test("keeps follow-ups visible across the queued-to-transcript handoff", async ({

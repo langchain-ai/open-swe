@@ -102,14 +102,6 @@ def _render_collaboration_section() -> str:
     )
 
 
-def _working_environment_prompt(source: str, *, local_checkout: bool) -> str:
-    if source == "desktop":
-        return "system/working-environment-desktop"
-    if local_checkout:
-        return "system/working-environment-local"
-    return "system/working-environment"
-
-
 def construct_system_prompt(
     working_dir: str,
     dashboard_base_url: str = "",
@@ -129,7 +121,6 @@ def construct_system_prompt(
     slack_by_the_way: bool = False,
     slack_follow_up_suggestions: bool = False,
     sandbox_file_downloads: bool = False,
-    prefer_tools_in_sandbox: bool = False,
     continued_from_collaborative: bool = False,
     local_checkout: bool = False,
     local_checkout_client: BridgeClient = "cli",
@@ -150,7 +141,6 @@ def construct_system_prompt(
         working_dir=working_dir,
         local_checkout=local_checkout,
         worktree_handoff=local_checkout and local_checkout_client == "desktop",
-        desktop=source == "desktop",
         admin_workspaces=admin_workspaces,
         sole_writer=sole_writer,
         continued_from_collaborative=continued_from_collaborative,
@@ -161,10 +151,9 @@ def construct_system_prompt(
             else ""
         ),
         working_environment_section=prompt(
-            _working_environment_prompt(source, local_checkout=local_checkout),
+            "system/working-environment-local" if local_checkout else "system/working-environment",
             working_dir=working_dir,
             desktop=local_checkout_client == "desktop",
-            prefer_tools_in_sandbox=prefer_tools_in_sandbox,
         ),
         dashboard_context_section=prompt(
             "system/dashboard-context",

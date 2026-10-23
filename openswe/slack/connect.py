@@ -65,6 +65,7 @@ def _clear_slack_state_cookie(response: Response) -> None:
 
 @router.get("/slack/login")
 async def slack_login(
+    redirect_to: str | None = None,
     desktop_handoff: str | None = None,
     desktop_port: int | None = Query(default=None, ge=1024, le=65535),
     _session: dict[str, Any] = SESSION_DEP,
@@ -75,7 +76,9 @@ async def slack_login(
     redirect_uri = f"{slack_base_url()}/dashboard/api/slack/callback"
     nonce = new_state_nonce()
     state = issue_state(
-        redirect_to=f"{frontend_base_url()}/my-settings/connections",
+        redirect_to=sanitize_redirect_to(redirect_to)
+        if redirect_to
+        else f"{frontend_base_url()}/my-settings/connections",
         nonce_hash=hash_state_nonce(nonce),
         handoff_challenge=valid_handoff_challenge(desktop_handoff),
         handoff_port=desktop_port,

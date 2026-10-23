@@ -17,7 +17,6 @@
 
 import {
   INTERNAL_TOOLS,
-  mergeTextChunks,
   toolKind,
   toolTitle,
 } from "@/features/agents/lib/streamMessagesToUi"
@@ -66,6 +65,8 @@ export interface TranscriptMessageState {
   attachments: ReadonlyArray<TranscriptAttachment>
   /** The GitHub login of a human message's sender, when the server knows it. */
   senderLogin: string | null
+  /** What a system message's sender is called when its text introduces no name. */
+  senderName?: string
   /** Invocation an AI message ran under, when the provider reported usage. */
   invocationId?: string
   createdAt: string
@@ -184,6 +185,7 @@ function indexMessages(
       namespace: row.namespace,
       attachments: row.attachments ?? [],
       senderLogin: row.sender?.login ?? null,
+      senderName: row.sender?.display_name ?? undefined,
       invocationId: row.usage?.invocation_id ?? undefined,
       createdAt: row.created_at,
     }
@@ -617,6 +619,7 @@ export function applyEvent(
         namespace: [],
         attachments: payload.attachments,
         senderLogin: payload.sender?.login ?? null,
+        senderName: payload.sender?.display_name ?? undefined,
         createdAt: at,
       })
       break
@@ -697,6 +700,7 @@ export function applyEvent(
         namespace: payload.namespace,
         attachments: payload.attachments ?? existing?.attachments ?? [],
         senderLogin: payload.sender?.login ?? existing?.senderLogin ?? null,
+        senderName: payload.sender?.display_name ?? existing?.senderName,
         invocationId: payload.usage?.invocation_id ?? undefined,
         createdAt: payload.created_at || existing?.createdAt || at,
       })
@@ -849,6 +853,7 @@ function toolChunk(
   const chunk: ToolExecutionChunk = {
     kind: "tool-execution",
     toolCallId: call.toolCallId,
+    toolName: call.name,
     timestamp: call.startedAt,
     title: toolTitle(call.name, call.input),
     toolKind: kind,
@@ -869,6 +874,27 @@ function toolChunk(
     chunk.subagentNamespace = [...call.namespace, call.toolCallId]
   }
   return chunk
+}
+
+/**
+ * The tool calls an `eval` call's code made: the transcript records them under
+ * a namespace that ends in the `eval` call's id, as it does a subagent's.
+ */
+function codeCalls(
+  state: TranscriptState,
+  turn: TranscriptTurnState,
+  call: TranscriptToolCallState
+): Array<ToolExecutionChunk> {
+  const namespace = [...call.namespace, call.toolCallId]
+  const calls: Array<ToolExecutionChunk> = []
+  for (const item of turn.items) {
+    if (item.kind !== "tool") continue
+    const nested = state.toolCalls[item.id]
+    if (!nested || !sameNamespace(nested.namespace, namespace)) continue
+    if (INTERNAL_TOOLS.has(nested.name)) continue
+    calls.push(toolChunk(state.threadId, nested))
+  }
+  return calls
 }
 
 /**
@@ -958,7 +984,8 @@ function buildHumanMessage(
           structuredSurface: parsed.surface,
           structuredSenderName:
             entity?.displayName ??
-            (entity?.handle ? `@${entity.handle}` : undefined),
+            (entity?.handle ? `@${entity.handle}` : undefined) ??
+            row.senderName,
           structuredSenderNote:
             entity?.senderType !== "bot" &&
             entity?.openSweAccount === "unlinked"
@@ -1038,7 +1065,7 @@ function turnMessages(
       ...(agent.invocationIds.length
         ? { invocationIds: agent.invocationIds }
         : {}),
-      chunks: mergeTextChunks(agent.chunks),
+      chunks: agent.chunks,
     })
     agent = null
   }
@@ -1084,14 +1111,19 @@ function turnMessages(
       if (reasoning) chunks.push({ kind: "reasoning", text: reasoning })
       chunks.push(...imageChunks(state.threadId, row.attachments))
       const text = row.text.trim()
-      if (text) chunks.push({ kind: "text", text })
+      if (text) chunks.push({ kind: "text", text, timestamp: row.createdAt })
       append(row.messageId, row.createdAt, chunks, row.invocationId)
       continue
     }
     const call = state.toolCalls[item.id]
     if (!call || !sameNamespace(call.namespace, namespace)) continue
     if (INTERNAL_TOOLS.has(call.name)) continue
-    append(call.toolCallId, call.startedAt, [toolChunk(state.threadId, call)])
+    const chunk = toolChunk(state.threadId, call)
+    if (chunk.toolKind === "code") {
+      const calls = codeCalls(state, turn, call)
+      if (calls.length) chunk.calls = calls
+    }
+    append(call.toolCallId, call.startedAt, [chunk])
   }
   flush()
 

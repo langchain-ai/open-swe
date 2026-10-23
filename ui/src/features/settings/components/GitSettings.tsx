@@ -8,6 +8,7 @@ import { api, DEFAULT_WORKSPACE_SLUG, type ProfileUpdate } from "@/lib/api"
 import { useRepos } from "@/lib/profile"
 import { ProfileSwitchRow, useProfileSettings } from "./ProfileSwitchRow"
 import { RepoSelector } from "./RepoSelector"
+import { useWorkspaceOptions } from "@/features/agents/lib/queries"
 
 type DraftReviewChoice = "team_default" | "always_on" | "always_off"
 
@@ -87,6 +88,10 @@ function TextSettingInput({
 export function GitSettings() {
   const { profile, ready, save } = useProfileSettings()
   const repos = useRepos()
+  const workspaceOptions = useWorkspaceOptions()
+  const [workspaceOverride, setWorkspaceOverride] = useState<string | null>(
+    null
+  )
   // Which team default applies depends on the workspace a pull request's
   // repository belongs to; the user's own workspace is the one answer this
   // page can give, and it is where their new threads run.
@@ -96,6 +101,15 @@ export function GitSettings() {
   })
   const workspace =
     preferences.data?.default_workspace ?? DEFAULT_WORKSPACE_SLUG
+  const repositoryWorkspace =
+    workspaceOverride ??
+    workspaceOptions.data?.workspaces.find((item) => item.slug === workspace)
+      ?.slug ??
+    workspaceOptions.data?.default_slug ??
+    workspace
+  const inheritedRepository = profile?.default_repo
+    ? `Inherit global (${profile.default_repo})`
+    : "Inherit global (no default)"
   const workspaceSettings = useQuery({
     queryKey: ["workspaceSettings", workspace],
     queryFn: () => api.getWorkspaceSettings(workspace),
@@ -122,7 +136,7 @@ export function GitSettings() {
       >
         <SettingsRow
           label="Default Repository"
-          description="Used when a request doesn't name a repository."
+          description="Used unless you set a workspace-specific default or name a repository."
           control={
             <div className="w-56">
               <RepoSelector
@@ -133,7 +147,51 @@ export function GitSettings() {
                 emptySelectionLabel="No default repository"
                 disabled={!ready}
                 triggerClassName="h-7 w-full max-w-none rounded-md border border-default bg-surface-level-1 px-space-2 py-space-1 text-xs text-primary transition-colors hover:bg-surface-level-1-hover"
-                dropdownClassName="w-56"
+              />
+            </div>
+          }
+        />
+        <SettingsRow
+          label="Workspace"
+          description="Choose a workspace to customize your default repository."
+          control={
+            <Select
+              aria-label="Repository workspace"
+              size="md"
+              value={repositoryWorkspace}
+              options={
+                workspaceOptions.data?.workspaces.map((item) => ({
+                  value: item.slug,
+                  label: item.name,
+                })) ?? []
+              }
+              onChange={(slug) => slug && setWorkspaceOverride(slug)}
+              disabled={!ready || !workspaceOptions.data}
+              triggerClassName="w-56"
+            />
+          }
+        />
+        <SettingsRow
+          label="Workspace Default Repository"
+          description="Overrides your global default only in the selected workspace."
+          control={
+            <div className="w-56">
+              <RepoSelector
+                repos={repos.data?.repositories ?? []}
+                selectedRepo={
+                  profile?.workspace_default_repos?.[repositoryWorkspace] ??
+                  null
+                }
+                placeholder={inheritedRepository}
+                emptySelectionLabel={inheritedRepository}
+                onRepoChange={(repo) => {
+                  const defaults = { ...profile?.workspace_default_repos }
+                  if (repo) defaults[repositoryWorkspace] = repo
+                  else delete defaults[repositoryWorkspace]
+                  save({ workspace_default_repos: defaults })
+                }}
+                disabled={!ready || !workspaceOptions.data}
+                triggerClassName="h-7 w-full max-w-none rounded-md border border-default bg-surface-level-1 px-space-2 py-space-1 text-xs text-primary transition-colors hover:bg-surface-level-1-hover"
               />
             </div>
           }

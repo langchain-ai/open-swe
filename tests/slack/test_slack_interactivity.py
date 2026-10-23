@@ -1,13 +1,14 @@
 import json
 from types import SimpleNamespace
 from typing import Any
-from unittest.mock import ANY, AsyncMock
+from unittest.mock import AsyncMock
 from urllib.parse import urlencode
 
 import pytest
 from fastapi import BackgroundTasks, Request
 
 from openswe.slack import routes as slack_routes
+from openswe.slack.blocks import option_actions
 from openswe.slack.payloads import SlackBlockAction, SlackChannelContext, SlackInteraction
 
 
@@ -26,6 +27,36 @@ def _request(payload: dict[str, Any]) -> Request:
         },
         receive,
     )
+
+
+@pytest.mark.asyncio
+async def test_explain_shortcut_preserves_selected_message_and_private_reply(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(slack_routes.common, "verify_slack_signature", lambda **_kwargs: True)
+    process = AsyncMock()
+    monkeypatch.setattr(slack_routes, "process_slack_ask", process)
+    background = BackgroundTasks()
+    payload = {
+        "type": "message_action",
+        "callback_id": "open_swe_explain",
+        "trigger_id": "trigger-1",
+        "response_url": "https://hooks.slack.com/actions/T1/1/x",
+        "team": {"id": "T1"},
+        "channel": {"id": "C1"},
+        "user": {"id": "U1"},
+        "message": {"ts": "2.0", "thread_ts": "1.0", "text": "Ship the migration"},
+    }
+
+    assert await slack_routes.slack_interactivity(_request(payload), background) == {}
+    await background()
+
+    selected = process.await_args.args[0]
+    assert selected.selected_message == "Ship the migration"
+    assert selected.user_id == "U1"
+    assert selected.response_url == payload["response_url"]
+    assert selected.message_ts == "2.0"
+    assert not selected.by_the_way
 
 
 def _option_payload() -> dict[str, Any]:
@@ -108,10 +139,19 @@ async def test_external_channel_interaction_is_blocked(
 
 
 @pytest.mark.asyncio
-async def test_option_interaction_schedules_update_before_agent_processing(
+@pytest.mark.parametrize("recipient", [None, "U1", "U2"])
+async def test_option_interaction_schedules_update_only_for_authorized_actor(
     monkeypatch: pytest.MonkeyPatch,
+    recipient: str | None,
 ) -> None:
     payload = _option_payload()
+    actions = option_actions(["Option B"], user_id=recipient)
+    action = actions[0]["elements"][0]
+    payload["actions"][0]["value"] = action["value"]
+    payload["message"]["blocks"][1]["elements"][0]["value"] = action["value"]
+    notify = AsyncMock()
+    repo = AsyncMock(return_value={"owner": "langchain-ai", "name": "open-swe"})
+    monkeypatch.setattr(slack_routes.common, "post_slack_ephemeral_message", notify)
     update = AsyncMock()
     process = AsyncMock()
     monkeypatch.setattr(slack_routes.common, "verify_slack_signature", lambda **_kwargs: True)
@@ -128,17 +168,27 @@ async def test_option_interaction_schedules_update_before_agent_processing(
             )
         ),
     )
-    monkeypatch.setattr(
-        slack_routes.common,
-        "get_slack_repo_config",
-        AsyncMock(return_value={"owner": "langchain-ai", "name": "open-swe"}),
-    )
+    monkeypatch.setattr(slack_routes.common, "get_slack_repo_config", repo)
     monkeypatch.setattr(slack_routes, "_update_selected_option_message", update)
     monkeypatch.setattr(slack_routes.service, "process_slack_mention", process)
     background_tasks = BackgroundTasks()
 
     result = await slack_routes.slack_interactivity(_request(payload), background_tasks)
 
+    if recipient == "U2":
+        assert result == {
+            "status": "ignored",
+            "reason": "Only the choice recipient can select an option",
+        }
+        assert background_tasks.tasks == []
+        repo.assert_not_awaited()
+        update.assert_not_awaited()
+        process.assert_not_awaited()
+        notify.assert_awaited_once_with(
+            "C1", "U1", "This choice is for someone else. No action was taken.", thread_ts="1.0"
+        )
+        return
+    notify.assert_not_awaited()
     assert result == {"status": "accepted", "message": "Slack option queued"}
     assert [task.func for task in background_tasks.tasks] == [update, process]
     await background_tasks()
@@ -271,4 +321,4 @@ async def test_code_channel_external_select_returns_registered_suggestions(
     result = await slack_routes.slack_interactivity(_request(payload), BackgroundTasks())
 
     assert result == {"options": options}
-    get_suggestions.assert_awaited_once_with(ANY, "C-code", "V-plan", "repository", "open")
+    get_suggestions.assert_awaited_once_with("C-code", "V-plan", "repository", "open")

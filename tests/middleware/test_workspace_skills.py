@@ -3,7 +3,8 @@ from unittest.mock import MagicMock
 
 import pytest
 from deepagents.backends.state import StateBackend
-from langchain.agents.middleware.types import ModelRequest
+
+from openswe.middleware.model_call_shape import CallShape
 
 
 @pytest.mark.asyncio
@@ -31,19 +32,10 @@ async def test_resumed_public_skill_prompt_excludes_cached_personal_context():
         ],
         "skills_load_errors": ["private diagnostic"],
     }
-    request = ModelRequest(
-        model=MagicMock(), messages=[], tools=[], runtime=MagicMock(), state=state
-    )
-    seen = []
-
-    async def capture(request):
-        seen.append(request.system_message.text)
-        return MagicMock()
-
-    await middleware.awrap_model_call(request, capture)
-    assert "team detail" in seen[0]
-    assert "private detail" not in seen[0]
-    assert "private diagnostic" not in seen[0]
+    prompt = (await middleware.ashape_model_call(CallShape(), state, MagicMock())).system_prompt
+    assert "team detail" in prompt
+    assert "private detail" not in prompt
+    assert "private diagnostic" not in prompt
     assert len(state["skills_metadata"]) == 2
     update = await middleware.abefore_agent(cast(Any, state), MagicMock(), {})
     assert [skill["name"] for skill in update["skills_metadata"]] == ["workspace"]

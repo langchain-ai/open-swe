@@ -157,7 +157,6 @@ export function DefaultRepoSection({
                 placeholder="Pick a repository…"
                 emptySelectionLabel="No default repository"
                 triggerClassName="h-7 w-full max-w-none rounded-md border border-default bg-surface-level-1 px-space-2 py-space-1 text-xs text-primary transition-colors hover:bg-surface-level-1-hover"
-                dropdownClassName="w-56"
                 disabled={!settings.data}
               />
             </div>
@@ -175,12 +174,6 @@ interface ModelRowProps {
   description: string
   modelField: StringSettingField
   effortField: StringSettingField
-  /**
-   * Label of the picker's "unset" option on the instance, for roles that fall
-   * back to another role there. On a workspace the same option only clears the
-   * override, so it reads as inheritance instead: the instance may set a model.
-   */
-  inheritLabel?: string
 }
 
 function ModelRow({
@@ -190,7 +183,6 @@ function ModelRow({
   description,
   modelField,
   effortField,
-  inheritLabel,
 }: ModelRowProps) {
   const patch = (model: string | null, effort: string | null) => {
     const next: Partial<WorkspaceSettings> = {}
@@ -203,7 +195,11 @@ function ModelRow({
       settings={settings}
       fields={[modelField, effortField]}
       label={label}
-      description={description}
+      description={
+        modelField === "default_agent_subagent_model"
+          ? `${description} When this matches the main agent's model, effort follows the parent run. Saved effort applies only to a different model.`
+          : description
+      }
       control={
         <ModelPairControl
           label={label}
@@ -212,17 +208,9 @@ function ModelRow({
           effort={settings.data?.[effortField] ?? null}
           onChange={(model, effort) => settings.save(patch(model, effort))}
           disabled={!settings.data}
-          inheritLabel={
-            inheritLabel && settings.scope.kind === "workspace"
-              ? "Inherit instance setting"
-              : inheritLabel
-          }
-          onInherit={
-            inheritLabel
-              ? () =>
-                  settings.scope.kind === "instance"
-                    ? settings.save(patch(null, null))
-                    : settings.reset(modelField, effortField)
+          parentModel={
+            modelField === "default_agent_subagent_model"
+              ? settings.data?.default_agent_model
               : undefined
           }
         />
@@ -331,19 +319,6 @@ export function ModelDefaultsSection({
           modelField="default_reviewer_subagent_model"
           effortField="default_reviewer_subagent_reasoning_effort"
         />
-        <ModelRow
-          settings={settings}
-          models={models}
-          label="Open SWE Review Chat"
-          description={`Model used by the 'chat with this PR' assistant on the review page. ${
-            scoped
-              ? "Unset here it follows the instance setting, and only falls back to the Agent default when the instance leaves it unset too."
-              : "Falls back to the Agent default when unset."
-          }`}
-          modelField="default_chat_model"
-          effortField="default_chat_reasoning_effort"
-          inheritLabel="Agent default"
-        />
       </div>
     </SettingsSection>
   )
@@ -357,6 +332,7 @@ interface ModelPairControlProps {
   effort: string | null
   onChange: (model: string, effort: string) => void
   disabled: boolean
+  parentModel?: string | null
   /**
    * When set, the model dropdown gains a leading "unset" option with this
    * label. Selecting it calls {@link onInherit}; an unset `model` renders as
@@ -376,6 +352,7 @@ export function ModelPairControl({
   effort,
   onChange,
   disabled,
+  parentModel,
   inheritLabel,
   onInherit,
 }: ModelPairControlProps) {
@@ -394,6 +371,9 @@ export function ModelPairControl({
   }, [model, effort, inheritFallback])
 
   const isInherit = localModel === INHERIT_VALUE
+  const inheritsParentEffort = Boolean(
+    parentModel && localModel === parentModel
+  )
   const selectedModel = models.find((m) => m.id === localModel)
   const availableEfforts = selectedModel?.efforts ?? []
 
@@ -434,10 +414,14 @@ export function ModelPairControl({
       <Select
         aria-label={`${label} reasoning effort`}
         placeholder="effort"
-        options={availableEfforts.map((e) => ({ value: e, label: e }))}
-        value={localEffort || undefined}
+        options={
+          inheritsParentEffort
+            ? [{ value: INHERIT_VALUE, label: "Parent run" }]
+            : availableEfforts.map((e) => ({ value: e, label: e }))
+        }
+        value={inheritsParentEffort ? INHERIT_VALUE : localEffort || undefined}
         onChange={handleEffortChange}
-        disabled={disabled || !localModel || isInherit}
+        disabled={disabled || !localModel || isInherit || inheritsParentEffort}
         triggerClassName="w-28"
       />
     </div>

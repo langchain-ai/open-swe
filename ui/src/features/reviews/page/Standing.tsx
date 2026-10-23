@@ -70,7 +70,7 @@ import {
   type Standing,
   type StandingTone,
 } from "./pullRequestStanding"
-import { useReviewPage } from "./store"
+import { usePageEvent, useReviewPage } from "./store"
 import { plural } from "./text"
 
 const toneColor: Record<StandingTone, string> = {
@@ -289,14 +289,6 @@ function Row({
       <span className="min-w-0 flex-1 truncate text-xs text-secondary">
         {children}
       </span>
-      {expandable && (
-        <CaretRightIcon
-          className={cn(
-            "size-3 shrink-0 text-secondary transition-transform",
-            expanded && "rotate-90"
-          )}
-        />
-      )}
     </>
   )
   return (
@@ -316,7 +308,25 @@ function Row({
         </div>
       )}
       {action && (
-        <div className="flex shrink-0 items-center gap-space-2">{action}</div>
+        <div className="flex shrink-0 items-center gap-space-2 empty:hidden">
+          {action}
+        </div>
+      )}
+      {expandable && (
+        <button
+          type="button"
+          tabIndex={-1}
+          aria-hidden
+          onClick={onToggle}
+          className="-my-space-1 flex shrink-0 items-center self-stretch py-space-1"
+        >
+          <CaretRightIcon
+            className={cn(
+              "size-3 text-secondary transition-transform",
+              expanded && "rotate-90"
+            )}
+          />
+        </button>
       )}
     </div>
   )
@@ -411,7 +421,7 @@ function ChecksRow({
             <PullRequestThreadAction
               pr={status}
               login={login}
-              actions={["fix-checks"]}
+              actions={["fix"]}
             />
           ) : null
         }
@@ -586,7 +596,7 @@ function BranchRow({
             <PullRequestThreadAction
               pr={status}
               login={login}
-              actions={["fix-conflicts"]}
+              actions={["fix"]}
             />
           }
         >
@@ -664,17 +674,14 @@ function OpenSweRow({
   const queryClient = useQueryClient()
   const { bugs, flags } = openFindingCounts(detail.findings)
   // Open while there is something to look at, until the person folds it; a
-  // link elsewhere that names the findings opens it again.
-  const findingsKey = useReviewPage((state) => state.findingsKey)
-  const [folded, setFolded] = useState<{ value: boolean; key: number } | null>(
-    null
-  )
-  const expanded =
-    folded === null || folded.key !== findingsKey
-      ? bugs + flags > 0 || findingsKey > 0
-      : !folded.value
-  const setExpanded = (change: (value: boolean) => boolean) =>
-    setFolded({ value: !change(expanded), key: findingsKey })
+  // link elsewhere that names the findings opens it again, with a flash.
+  const [chosen, setChosen] = useState<boolean | null>(null)
+  const [flashes, setFlashes] = useState(0)
+  usePageEvent("showFindings", () => {
+    setChosen(true)
+    setFlashes((count) => count + 1)
+  })
+  const expanded = chosen ?? bugs + flags > 0
   const reReview = useMutation({
     mutationFn: () => api.reReview(pr.owner, pr.repo, pr.number),
     meta: { errorTitle: "Couldn't start the Open SWE review" },
@@ -725,7 +732,7 @@ function OpenSweRow({
         label="Open SWE"
         expandable={canExpand}
         expanded={expanded}
-        onToggle={() => setExpanded((value) => !value)}
+        onToggle={() => setChosen(!expanded)}
         action={
           <>
             {detail.thread_id && (
@@ -757,10 +764,10 @@ function OpenSweRow({
       {expanded && canExpand && (
         <div
           // Remounting replays the flash each time something asks for the findings.
-          key={findingsKey}
+          key={flashes}
           className={cn(
             "pr-space-4 pb-space-3 pl-space-7",
-            findingsKey > 0 && "motion-safe:animate-attention-flash"
+            flashes > 0 && "motion-safe:animate-attention-flash"
           )}
         >
           {detail.findings.length > 0 && (
@@ -812,12 +819,23 @@ function FindingQueue({ findings }: { findings: Array<ReviewFinding> }) {
                 type="button"
                 aria-expanded={open}
                 onClick={() => setOpenId(open ? null : finding.id)}
-                className={cn(
-                  "min-w-[16ch] flex-1 text-left leading-5 text-primary hover:underline",
-                  settled && "line-through decoration-text-tertiary"
-                )}
+                className="flex min-w-[16ch] flex-1 items-start gap-space-1 text-left leading-5 text-primary hover:underline"
               >
-                <InlineCode text={finding.title} />
+                <CaretRightIcon
+                  aria-hidden
+                  className={cn(
+                    "mt-space-1 size-3 shrink-0 text-icon-secondary motion-safe:transition-transform",
+                    open && "rotate-90"
+                  )}
+                />
+                <span
+                  className={cn(
+                    "min-w-0",
+                    settled && "line-through decoration-text-tertiary"
+                  )}
+                >
+                  <InlineCode text={finding.title} />
+                </span>
               </button>
               <span className="ml-auto flex shrink-0 items-baseline gap-space-1 text-xxs text-secondary">
                 <button

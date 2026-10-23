@@ -18,6 +18,9 @@ HANDOFF_FROM_KEY = "sandbox_handoff_from"
 SANDBOX_ID_PREFIX = "bridge:"
 """What a thread's ``sandbox_id`` starts with when its sandbox is the machine running the CLI."""
 
+LOCAL_ARTIFACTS_DIR = "/tmp/open-swe"
+"""Where a bridged thread offloads large tool results; the machine's ``/`` is not writable."""
+
 HEARTBEAT_INTERVAL_SECONDS = 20
 ALIVE_THRESHOLD_SECONDS = 75
 

@@ -255,6 +255,9 @@ async def me(response: Response, session: dict[str, Any] = SESSION_DEP) -> dict[
             extra={"github_login": session["sub"]},
             exc_info=True,
         )
+    else:
+        if user is None and postgres.configured():
+            raise HTTPException(401, "Open SWE account not found — sign in with GitHub again")
     if user is not None and session_user_id(session) != user.id:
         # The dashboard boots here, so every stale cookie is repaired on its next load.
         set_session_cookie(response, rebind_session(session, str(user.id)))

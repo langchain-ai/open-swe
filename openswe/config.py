@@ -204,18 +204,19 @@ ENV.var(
     default="http://localhost:2024",
 )
 ENV.var(
-    "REVIEWER_RUNTIME_URL",
-    "Managed Deep Agents deployment that runs reviewer graphs; unset keeps them on LANGGRAPH_URL.",
+    "MDA_RUNTIME_URL",
+    "Managed Deep Agents deployment (mda/) that runs the agent and reviewer graphs; "
+    "required, the backend refuses to start without it.",
 )
 ENV.var(
-    "REVIEWER_RUNTIME_API_KEY",
-    "LangSmith service key the backend uses to call REVIEWER_RUNTIME_URL.",
+    "MDA_RUNTIME_API_KEY",
+    "LangSmith key the backend uses to call MDA_RUNTIME_URL; defaults to LANGSMITH_API_KEY.",
     secret=True,
 )
 ENV.var(
     "REMOTE_RUNTIME_TOKEN_SECRET",
-    "HMAC key(s) signing the run tokens remote runtimes present to /remote-runtime/mcp; "
-    "comma-separated, the first signs and every one verifies.",
+    "HMAC key(s) signing the run tokens MDA runs present to the agent API (/agent-api); "
+    "comma-separated, the first signs and every one verifies. Required.",
     secret=True,
 )
 ENV.var(
@@ -258,6 +259,11 @@ ENV.var(
 )
 ENV.var("GITHUB_APP_INSTALLATION_ID", "GitHub App installation used when a run names none.")
 ENV.var("GITHUB_WEBHOOK_SECRET", "HMAC secret for GitHub webhook deliveries.", secret=True)
+ENV.var(
+    "MERGE_QUEUE_DISPATCH_SECRET",
+    "Backend-only signing secret for the queue dispatch gateway; never used by agents.",
+    secret=True,
+)
 ENV.var(
     "GITHUB_OIDC_AUDIENCE",
     "Audience a federated GitHub Actions token must carry; defaults to the dashboard URL.",
@@ -369,11 +375,14 @@ ENV.var(
 )
 ENV.var(
     "OPENSWE_ENV",
-    "Deployment environment; `preview` lets startup drop superseded migration revisions and "
-    "turns off reviewer auto-assignment.",
+    "Agent prompt deployment environment (production, staging, preview, or local); "
+    "`preview` also lets startup drop superseded migration revisions and turns off reviewer auto-assignment.",
 )
-ENV.var("SEGMENT_WRITE_KEY", "Optional server-side Segment source write key.", default="")
-ENV.var("DD_ENV", "Shared Datadog, Segment, and analytics environment.", default="production")
+ENV.var(
+    "POSTHOG_API_KEY", "Optional PostHog project API key for server-side usage capture.", default=""
+)
+ENV.var("POSTHOG_HOST", "PostHog ingestion host.", default="https://us.i.posthog.com")
+ENV.var("DD_ENV", "Shared Datadog and analytics environment.", default="production")
 ENV.var("ANALYTICS_SUMMARY_VERSION", "Active metric semantics version.", default="1")
 ENV.var("ANALYTICS_PR_MATURITY_DAYS", "PR cohort maturity period.", default="14")
 ENV.var("ANALYTICS_MIN_COHORT_SIZE", "Minimum aggregate cohort size.", default="5")
@@ -382,9 +391,11 @@ ENV.var(
     "Log application queries at or above this duration in milliseconds; 0 disables.",
     default="1000",
 )
-ENV.var("ANALYTICS_POOL_SIZE", "Analytics PostgreSQL connection pool size.", default="5")
-ENV.var("ANALYTICS_POOL_OVERFLOW", "Analytics PostgreSQL pool overflow.", default="5")
-ENV.var("ANALYTICS_POOL_TIMEOUT_SECONDS", "Analytics pool checkout timeout.", default="5")
+ENV.var("ANALYTICS_POOL_SIZE", "PostgreSQL connection pool size per process.", default="20")
+ENV.var(
+    "ANALYTICS_POOL_OVERFLOW", "PostgreSQL connections allowed beyond the pool size.", default="20"
+)
+ENV.var("ANALYTICS_POOL_TIMEOUT_SECONDS", "PostgreSQL pool checkout timeout.", default="5")
 ENV.var("ANALYTICS_HEALTH_TIMEOUT_SECONDS", "Analytics readiness timeout.", default="3")
 ENV.var("ANALYTICS_OUTBOX_MAX_ATTEMPTS", "Delivery attempts before dead-lettering.", default="10")
 ENV.var("ANALYTICS_RAW_EVENT_MONTHS", "Online raw-event retention.", default="25")
@@ -479,21 +490,7 @@ ENV.var("E2B_API_KEY", "E2B API key.", secret=True)
 ENV.var("E2B_TEMPLATE", "E2B template new sandboxes boot from.")
 ENV.var("RUNLOOP_API_KEY", "Runloop API key.", secret=True)
 
-# --- Desktop, local auth and debugging -------------------------------------------------------
-ENV.var(
-    "OPEN_SWE_LOCAL_PROJECTS_FILE", "Allowlist file of local projects the desktop agent may open."
-)
-ENV.var("OPEN_SWE_LOCAL_WORKTREES_DIR", "Directory for desktop worktrees.")
-ENV.var("OPEN_SWE_LOCAL_ARTIFACTS_DIR", "Directory for desktop artifacts.")
-ENV.var("OPEN_SWE_LOCAL_AUTH_TOKEN", "Bearer token the desktop backend requires.", secret=True)
-ENV.var(
-    "OPEN_SWE_OPENAI_OAUTH_BROKER_URL", "Broker the desktop app uses to obtain OpenAI OAuth tokens."
-)
-ENV.var(
-    "OPEN_SWE_OPENAI_OAUTH_BROKER_TOKEN",
-    "Token authenticating to the OpenAI OAuth broker.",
-    secret=True,
-)
+# --- Debugging -------------------------------------------------------
 ENV.var("BG_JOB_ISOLATED_LOOPS", "LangGraph background-job event-loop isolation flag.")
 ENV.var("DEBUG_TRACEMALLOC", "Start tracemalloc to attribute unclosed-session warnings.")
 ENV.var("DEBUG_TRACEMALLOC_FRAMES", "Frames tracemalloc records per allocation.", default="25")

@@ -6,7 +6,6 @@ import {
 } from "@tanstack/react-query"
 import { useState } from "react"
 import { Button } from "@langchain/macaw-components/Button"
-import { Input } from "@langchain/macaw-components/Input"
 import { Select } from "@langchain/macaw-components/Select"
 import { Switch } from "@langchain/macaw-components/Switch"
 
@@ -20,7 +19,6 @@ import {
 } from "@/lib/notifications"
 import { agentsApi } from "@/features/agents/lib/api"
 import { useWorkspaceOptions } from "@/features/agents/lib/queries"
-import { useSidebarPrefs } from "@/features/agents/lib/sidebarPrefs"
 import { api } from "@/lib/api"
 import type {
   FollowUpBehavior,
@@ -55,7 +53,6 @@ const SAVE_PREFERENCES_KEY = ["saveMyPreferences"]
 
 export function GeneralSettings() {
   const { theme, setTheme } = useTheme()
-  const { prefs, setCollapseSubagentsByDefault } = useSidebarPrefs()
   const qc = useQueryClient()
   const pendingPreferences = useMutationState({
     filters: {
@@ -189,7 +186,7 @@ export function GeneralSettings() {
         />
         <SettingsRow
           label="Follow-up behavior"
-          description="Queue follow-ups until the run ends, or steer the current run with them. ⌘↵ does the opposite for one message; Enter on an empty composer sends the next queued message now."
+          description="Queue follow-ups until the run ends, or steer the current run with them. ⌘↵ does the opposite for one message."
           control={
             <Select
               aria-label="Follow-up behavior"
@@ -200,17 +197,6 @@ export function GeneralSettings() {
               }
               disabled={preferences.isLoading}
               triggerClassName="w-40"
-            />
-          }
-        />
-        <SettingsRow
-          label="Collapse subagent threads"
-          description="Keep nested subagent threads folded in the sidebar until you expand them."
-          control={
-            <Switch
-              aria-label="Collapse subagent threads"
-              checked={prefs.collapseSubagentsByDefault}
-              onChange={setCollapseSubagentsByDefault}
             />
           }
         />
@@ -236,30 +222,6 @@ export function GeneralSettings() {
           }
         />
       </SettingsSection>
-
-      {typeof window !== "undefined" && window.openSweDesktop && (
-        <SettingsSection title="Desktop App">
-          <SettingsRow
-            label="Local tracing project"
-            description="Project used for local desktop runs. Leave blank to use the shared cloud project. Restart the desktop app after changing it."
-            control={
-              <LocalTracingProjectInput
-                // Remount once preferences load so the field shows the saved value.
-                key={`${preferences.isSuccess}`}
-                saved={preferences.data?.local_tracing_project ?? ""}
-                placeholder={
-                  preferences.data?.default_local_tracing_project ??
-                  "Shared cloud project"
-                }
-                disabled={preferences.isLoading}
-                onSave={(value) =>
-                  savePreferences.mutate({ local_tracing_project: value })
-                }
-              />
-            }
-          />
-        </SettingsSection>
-      )}
 
       <SettingsSection title="Data">
         <SettingsRow
@@ -293,31 +255,5 @@ export function GeneralSettings() {
         onConfirm={() => archiveThreads.mutate()}
       />
     </>
-  )
-}
-
-function LocalTracingProjectInput({
-  saved,
-  placeholder,
-  disabled,
-  onSave,
-}: {
-  saved: string
-  placeholder: string
-  disabled: boolean
-  onSave: (value: string | null) => void
-}) {
-  const [draft, setDraft] = useState(saved)
-  return (
-    <Input
-      aria-label="Local tracing project"
-      size="md"
-      className="w-56"
-      placeholder={placeholder}
-      value={draft}
-      onChange={setDraft}
-      disabled={disabled}
-      onBlur={() => onSave(draft.trim() || null)}
-    />
   )
 }

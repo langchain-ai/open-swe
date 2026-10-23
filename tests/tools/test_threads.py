@@ -286,9 +286,7 @@ async def test_list_threads_resolves_slack_reply_link(
         "channel_id": "C123",
         "thread_ts": "1788425314.774339",
     }
-    awaited = lookup.await_args
-    assert awaited is not None
-    lookup.assert_awaited_once_with(awaited.args[0], "C123", "1788425314.774339")
+    lookup.assert_awaited_once_with("C123", "1788425314.774339")
     get_dashboard_thread.assert_awaited_once_with(
         "thread-1", "octocat", email="octocat@example.com", mark_viewed=False
     )
@@ -453,6 +451,9 @@ async def test_manage_thread_starts_idle_message_with_fixed_command(
         AsyncMock(return_value={"id": "thread-1", "planMode": True}),
     )
     monkeypatch.setattr(threads_tool, "proxy_dashboard_thread_commands", proxy)
+    monkeypatch.setattr(
+        threads_tool, "_config", lambda: {"configurable": {"thread_id": "coordinator"}}
+    )
 
     result = await threads_tool.manage_thread("thread-1", "send_message", message="Continue")
 
@@ -465,6 +466,7 @@ async def test_manage_thread_starts_idle_message_with_fixed_command(
     assert isinstance(command["id"], int)
     assert command["method"] == "run.start"
     assert "plan_mode" not in command["params"]["config"]["configurable"]
+    assert awaited.kwargs["relayed_from"] == "coordinator"
 
 
 async def test_manage_thread_rejects_plan_format_conversion(

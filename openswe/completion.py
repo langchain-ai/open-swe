@@ -2,7 +2,6 @@
 
 The platform POSTs a run-completion payload to ``/webhooks/run-complete`` (wired
 as the ``webhook`` on every dispatched run, see ``openswe.dispatch``). Successful
-runs schedule a private feedback prompt five quiet minutes later, and successful
 Slack runs enqueue deferred session-cost enrichment. Failures (``error`` /
 ``timeout``) post a short reply so a run that died never leaves the user silent.
 
@@ -34,12 +33,12 @@ from openswe.slack.code_channels import is_code_channel_session, set_session_sta
 from openswe.slack.thinking import sync_slack_background_status
 from openswe.source_context import SourceContext
 from openswe.tasks.messages import TASK_MESSAGE_KIND, TaskMessage
-from openswe.thread_feedback import schedule_answer_feedback
+from openswe.threads.status import refresh_thread_status
 from openswe.transcript.turns import TurnOutcome, settle_run_turn
 from openswe.ui_invalidations import Topic
 from openswe.utils.errors import LAST_MODEL_ERROR_KEY, code_for_error_type
 from openswe.utils.json_types import thread_metadata
-from openswe.utils.langsmith import get_langsmith_trace_url
+from openswe.utils.langsmith import get_langsmith_error_url
 from openswe.utils.thread_ops import langgraph_client
 from openswe.utils.user_messages import warning
 from openswe.webhooks.event_matches import EVENT_MATCH_KIND
@@ -97,12 +96,14 @@ _REASON_TEXT = {
     "context_too_long": "the conversation outgrew the model's context window",
     "model_unavailable": "the selected model isn't available to this workspace",
     "sandbox_unreachable": "the run lost its sandbox",
+    "backend_interrupted": "the connection to the Open SWE backend was interrupted",
     "step_limit": "the run hit its step limit",
 }
 _DEFAULT_FOLLOW_UP = "Send another message and it will pick this back up."
 _REASON_FOLLOW_UP = {
     "context_too_long": "Start a new thread to continue.",
     "model_unavailable": "Pick a different model in Open SWE Web, then retry.",
+    "backend_interrupted": "Re-trigger the run to try again.",
 }
 
 
@@ -190,7 +191,13 @@ async def _settle_failed_reviewer_check(thread_id: str, metadata: dict[str, Any]
 
 
 async def _post_failure_reply(
-    thread_id: str, metadata: dict[str, Any], status: str, reason_code: str | None = None
+    thread_id: str,
+    metadata: dict[str, Any],
+    status: str,
+    reason_code: str | None = None,
+    *,
+    invocation_id: str | None = None,
+    terminal_error: str | None = None,
 ) -> bool:
     """Post a failure reply to the run's originating channel. Best-effort."""
     source = metadata.get("source")
@@ -199,7 +206,7 @@ async def _post_failure_reply(
     if source == "slack" or ctx.slack_thread is not None:
         location = ctx.slack_location
         if location is not None:
-            trace_url = await get_langsmith_trace_url(thread_id)
+            trace_url = await get_langsmith_error_url(thread_id, invocation_id, terminal_error)
             slack_text = _failure_text(status, trace_url, reason_code)
             return await post_slack_thread_reply(
                 location[0],
@@ -371,14 +378,6 @@ async def _handle_successful_run(
     await _settle_code_channel_session(client, thread_id, metadata)
     await sync_slack_background_status(client, thread_id)
     payload_metadata = payload.get("metadata")
-    automated = (
-        isinstance(payload_metadata, dict) and payload_metadata.get("kind") == "thread_wakeup"
-    )
-    if not automated:
-        try:
-            await schedule_answer_feedback(thread_id, run_id, metadata)
-        except Exception:
-            logger.warning("Could not schedule completion feedback", extra={"thread_id": thread_id})
     invocation_id = _invocation_id(payload)
     if invocation_id is None:
         return {"status": "ignored", "reason": "missing or conflicting invocation_id"}
@@ -407,7 +406,6 @@ async def _handle_successful_run(
             "channel_id": channel_id,
             "thread_ts": thread_ts,
         },
-        client=client,
     )
     if not scheduled:
         return {"status": "error", "reason": "cost refresh scheduling failed"}
@@ -502,16 +500,20 @@ def _log_run_failure(thread_id: str, run_id: str | None, status: object, error: 
 
 
 async def handle_run_completion(payload: dict[str, Any]) -> dict[str, str]:
-    """Handle a platform run-completion webhook POST.
-
-    Schedules feedback prompts, enqueues cost refreshes, and posts failure replies.
-    """
+    """Settle a completed run, enqueue cost refreshes, and post failure replies."""
     status = payload.get("status")
     thread_id = payload.get("thread_id")
     raw_run_id = payload.get("run_id")
     run_id = raw_run_id if isinstance(raw_run_id, str) and raw_run_id else None
     if not isinstance(thread_id, str) or not thread_id:
         return {"status": "ignored", "reason": "missing thread_id"}
+    try:
+        await refresh_thread_status(thread_id)
+    except Exception:
+        # The reconcile job settles it later; the rest of completion must still run.
+        logger.warning(
+            "Could not refresh the thread status", extra={"thread_id": thread_id}, exc_info=True
+        )
     await _finalize_agent_usage_telemetry(thread_id, status, payload)
     await _settle_transcript_turn(thread_id, run_id, status)
     is_worker = False
@@ -617,7 +619,15 @@ async def handle_run_completion(payload: dict[str, Any]) -> dict[str, str]:
         return {"status": "ignored", "reason": "repeated failures"}
 
     reason_code = _failure_reason_code(error, metadata, run_id)
-    posted = await _post_failure_reply(thread_id, metadata, status, reason_code)
+    error_message = error.get("message") if isinstance(error, dict) else error
+    posted = await _post_failure_reply(
+        thread_id,
+        metadata,
+        status,
+        reason_code,
+        invocation_id=_invocation_id(payload),
+        terminal_error=error_message if isinstance(error_message, str) else None,
+    )
     if not posted:
         return {"status": "ignored", "reason": "no reply posted"}
 

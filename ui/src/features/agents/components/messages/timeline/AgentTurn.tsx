@@ -11,6 +11,7 @@ import { CopyIconButton } from "@langchain/macaw-components/CopyButton"
 import { DiffView } from "../../chat/DiffView"
 import { ChunkRenderer } from "../ChunkRenderer"
 import { MessageTimestamp } from "../MessageTimestamp"
+import { WorkerLaunchMessage } from "../TaskEventMessage"
 import { ReasoningBlock } from "../ReasoningBlock"
 import {
   buildRenderItems,
@@ -22,6 +23,7 @@ import { WorkEntryRow } from "./WorkEntryRow"
 import { describeWorkEntry, latestDiff } from "./workEntry"
 import { TurnFoldRow, WorkGroupToggleRow } from "./foldRows"
 import { ShellEntryBody } from "./entryBodies"
+import { ToolResultBody } from "./ToolResultBody"
 import type { ReactNode } from "react"
 import type { RenderItem, TurnSegment } from "../renderItems"
 import type { ApprovalCallbacks } from "../types"
@@ -62,6 +64,47 @@ function EditWorkEntry({
       timestamp={chunk.timestamp}
       body={diff ? <DiffView diffData={diff} snippet /> : undefined}
       defaultExpanded={chunk.status === "pending"}
+    />
+  )
+}
+
+/**
+ * A code-mode `eval` call, open on the tool calls its code made. Its own output
+ * mostly repeats what those returned, so it shows only when the code failed.
+ */
+function CodeWorkEntry({
+  chunk,
+  calls,
+  repoPath,
+}: {
+  chunk: ToolExecutionChunk
+  /** The nested calls, rendered; null when the code called no tools. */
+  calls: ReactNode
+  repoPath?: string
+}) {
+  const entry = describeWorkEntry(chunk, repoPath)
+  if (calls == null) {
+    return <WorkEntryRow entry={entry} timestamp={chunk.timestamp} />
+  }
+  const failed = chunk.status === "error"
+  // Keyed apart from the plain row: calls arrive after the row first renders,
+  // and only a fresh row opens by default.
+  return (
+    <WorkEntryRow
+      key="calls"
+      entry={failed ? entry : { ...entry, loadExpandedText: null }}
+      timestamp={chunk.timestamp}
+      body={({ loadedText, loadError }) => (
+        <div className="space-y-space-2">
+          <div>{calls}</div>
+          {failed && (
+            <ToolResultBody
+              value={loadError ?? loadedText ?? entry.expandedText ?? ""}
+            />
+          )}
+        </div>
+      )}
+      defaultExpanded
     />
   )
 }
@@ -170,9 +213,12 @@ export function AgentTurn({
     setExpandedFolds((prev) => ({ ...prev, [key]: !(prev[key] ?? false) }))
   }, [])
 
+  // The answer is what follows the last stretch of work; earlier replies are
+  // commentary the agent wrote along the way.
   const replyText = useMemo(
     () =>
       segments
+        .slice(segments.findLastIndex((s) => s.type === "work") + 1)
         .map((segment) => {
           if (segment.type !== "reply") return ""
           const { item } = segment
@@ -252,6 +298,21 @@ export function AgentTurn({
             defaultExpanded={item.chunk.status === "pending"}
           />
         )
+
+      case "code-item": {
+        const { calls } = item.chunk
+        return (
+          <CodeWorkEntry
+            key={item.key}
+            chunk={item.chunk}
+            calls={calls ? buildRenderItems(calls).map(renderItem) : null}
+            repoPath={repoPath}
+          />
+        )
+      }
+
+      case "worker-launch-item":
+        return <WorkerLaunchMessage key={item.key} chunk={item.chunk} />
 
       case "reply-item":
         return <ReplyCard key={item.key} chunk={item.chunk} />
@@ -364,8 +425,10 @@ export function AgentTurn({
 function replyTimestamp(segment?: TurnSegment): string | undefined {
   if (segment?.type !== "reply") return undefined
   const { item } = segment
-  return "chunk" in item && item.chunk.kind === "tool-execution"
-    ? item.chunk.timestamp
+  if (!("chunk" in item)) return undefined
+  const { chunk } = item
+  return chunk.kind === "tool-execution" || chunk.kind === "text"
+    ? chunk.timestamp
     : undefined
 }
 

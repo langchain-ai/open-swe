@@ -14,9 +14,6 @@ LOCAL_SHELL_ENV_EXCLUDE = {
     "GOOGLE_API_KEY",
     "GROQ_API_KEY",
     "LANGSMITH_API_KEY",
-    "OPEN_SWE_OPENAI_OAUTH_ACCOUNT_FILE",
-    "OPEN_SWE_OPENAI_OAUTH_BROKER_TOKEN",
-    "OPEN_SWE_OPENAI_OAUTH_BROKER_URL",
     "OPENAI_API_KEY",
 }
 
@@ -51,6 +48,8 @@ def create_local_sandbox(sandbox_id: str | None = None):
     Returns:
         LocalShellBackend instance implementing SandboxBackendProtocol.
     """
+    if ENV.MERGE_QUEUE_DISPATCH_SECRET.is_set():
+        raise ValueError("Local shells cannot share a host with queue credentials")
     root_dir = ENV.LOCAL_SANDBOX_ROOT_DIR.get(os.getcwd())
     os.makedirs(root_dir, exist_ok=True)
 

@@ -1,8 +1,8 @@
 """Workspace settings: model defaults, review toggles and guidelines, the gateway
-and Fable toggles, and the default repository, stored in the LangGraph Store.
+and Fable toggles, and the default repository, stored in PostgreSQL by
+:mod:`openswe.dashboard.settings_records`.
 
-They resolve by tier. The instance record (the pre-workspaces "team settings"
-record, still under its original key) applies to every workspace; a
+They resolve by tier. The instance record applies to every workspace; a
 workspace's own record holds only the fields an admin overrode there. Per-user
 profile settings and a thread's ``configurable`` layer on top in the callers
 that honour them. Per-repo style prompts live in :mod:`openswe.review.styles`.
@@ -32,21 +32,14 @@ from openswe.dashboard.options import (
     model_supports_effort,
     provider_fallback_pair,
 )
+from openswe.dashboard.settings_records import INSTANCE_SETTINGS, WORKSPACE_SETTINGS
 from openswe.run_config import RunConfig
-from openswe.store import delete_value, get_value, now_iso, put_value
 from openswe.ui_invalidations import Topic
 from openswe.utils.gateway import gateway_overrides, resolve_gateway_enabled
+from openswe.utils.time import now_iso
 from openswe.workspaces.store import DEFAULT_WORKSPACE_SLUG, WORKSPACES, slugify
 
 logger = logging.getLogger(__name__)
-
-INSTANCE_SETTINGS_NAMESPACE: list[str] = ["team_settings"]
-# The instance record keeps the key the pre-workspaces ("team settings") record
-# used, so an upgrade needs no data migration.
-INSTANCE_SETTINGS_KEY = "default"
-# One sparse record per workspace slug: a field that is missing or None
-# inherits the instance value.
-WORKSPACE_SETTINGS_NAMESPACE: list[str] = ["workspace_settings"]
 
 # Cap the guidelines so a runaway value can't dominate the reviewer
 # prompt. Generous enough for a detailed policy, small enough to stay bounded.
@@ -93,9 +86,12 @@ class WorkspaceSettingsUpdate(BaseModel):
     slack_follow_up_suggestions: bool | None = Field(
         default=None, json_schema_extra={"agent_feature_flag": True}
     )
+    human_review_auto_merge_enabled: bool | None = Field(
+        default=None, json_schema_extra={"agent_feature_flag": True}
+    )
     human_review_auto_assign_minutes: int | None = Field(default=None, ge=1, strict=True)
     # The LangSmith Managed Tools gateway private threads load with the owner's own
-    # LangSmith connection; unset means none.
+    # LangSmith connection; unset means none. Only the instance record's value is read.
     managed_tools_gateway_id: str | None = None
     org_guidelines: str | None = None
     default_agent_model: str | None = None
@@ -113,8 +109,6 @@ class WorkspaceSettingsUpdate(BaseModel):
     default_reviewer_reasoning_effort: str | None = None
     default_reviewer_subagent_model: str | None = None
     default_reviewer_subagent_reasoning_effort: str | None = None
-    default_chat_model: str | None = None
-    default_chat_reasoning_effort: str | None = None
     default_thread_title_model: str | None = None
     default_thread_title_reasoning_effort: str | None = None
 
@@ -179,10 +173,6 @@ class WorkspaceSettingsUpdate(BaseModel):
             self.default_reviewer_subagent_model,
             self.default_reviewer_subagent_reasoning_effort,
         )
-        self.default_chat_model, self.default_chat_reasoning_effort = _normalize_stale_model_pair(
-            self.default_chat_model,
-            self.default_chat_reasoning_effort,
-        )
         self.default_thread_title_model, self.default_thread_title_reasoning_effort = (
             _normalize_stale_model_pair(
                 self.default_thread_title_model,
@@ -210,9 +200,6 @@ class WorkspaceSettingsUpdate(BaseModel):
             self.default_reviewer_subagent_model,
             self.default_reviewer_subagent_reasoning_effort,
             "reviewer subagent",
-        )
-        _validate_model_effort_pair(
-            self.default_chat_model, self.default_chat_reasoning_effort, "review chat"
         )
         _validate_model_effort_pair(
             self.default_thread_title_model,
@@ -255,7 +242,6 @@ class WorkspaceSettingsUpdate(BaseModel):
                 ),
                 ("default_reviewer_model", "default_reviewer_reasoning_effort"),
                 ("default_reviewer_subagent_model", "default_reviewer_subagent_reasoning_effort"),
-                ("default_chat_model", "default_chat_reasoning_effort"),
                 ("default_thread_title_model", "default_thread_title_reasoning_effort"),
             ):
                 model = getattr(self, model_field)
@@ -300,7 +286,6 @@ _MODEL_PAIR_FIELDS: tuple[tuple[str, str], ...] = (
     ),
     ("default_reviewer_model", "default_reviewer_reasoning_effort"),
     ("default_reviewer_subagent_model", "default_reviewer_subagent_reasoning_effort"),
-    ("default_chat_model", "default_chat_reasoning_effort"),
     ("default_thread_title_model", "default_thread_title_reasoning_effort"),
 )
 
@@ -343,6 +328,7 @@ def _default_settings() -> dict[str, Any]:
         "gateway_enabled": None,
         "fable_enabled": False,
         "expedited_review_enabled": False,
+        "human_review_auto_merge_enabled": True,
         "human_review_auto_assign_minutes": 120,
         "sandbox_openai_enabled": False,
         "slack_follow_up_suggestions": False,
@@ -363,9 +349,6 @@ def _default_settings() -> dict[str, Any]:
         "default_reviewer_reasoning_effort": fallback_effort,
         "default_reviewer_subagent_model": fallback_model,
         "default_reviewer_subagent_reasoning_effort": fallback_effort,
-        # No hardcoded chat default: unset means "inherit the Agent default".
-        "default_chat_model": None,
-        "default_chat_reasoning_effort": None,
         "default_thread_title_model": DEFAULT_THREAD_TITLE_MODEL,
         "default_thread_title_reasoning_effort": DEFAULT_THREAD_TITLE_REASONING_EFFORT,
         "updated_at": None,
@@ -426,17 +409,24 @@ def _finish(merged: dict[str, Any]) -> WorkspaceSettings:
     return WorkspaceSettings(normalize_workspace_settings_for_response(merged))
 
 
-async def _instance_record() -> dict[str, Any]:
-    return _set_fields(await get_value(INSTANCE_SETTINGS_NAMESPACE, INSTANCE_SETTINGS_KEY))
+async def instance_record() -> dict[str, Any]:
+    """The instance record's set fields, without defaults."""
+    return _set_fields(await INSTANCE_SETTINGS.get())
 
 
-async def _workspace_record(slug: str) -> dict[str, Any]:
-    record = await get_value(WORKSPACE_SETTINGS_NAMESPACE, slug)
-    if record is None and slug != DEFAULT_WORKSPACE_SLUG:
-        # #2807 stored every workspace's record beside the instance one; a
-        # record written there stays in force until the workspace is saved again.
-        record = await get_value(INSTANCE_SETTINGS_NAMESPACE, slug)
-    return _set_fields(record)
+async def workspace_record(slug: str) -> dict[str, Any]:
+    """The fields ``slug``'s own record overrides; a field missing or None inherits."""
+    return _set_fields(await WORKSPACE_SETTINGS.get(slug))
+
+
+def fallback_settings() -> WorkspaceSettings:
+    """The hardcoded defaults, for when the store cannot be read."""
+    return WorkspaceSettings(_default_settings())
+
+
+async def load_instance_settings() -> WorkspaceSettings:
+    """:func:`get_instance_settings`, but raising when the store read fails."""
+    return _finish({**_default_settings(), **await instance_record()})
 
 
 async def get_instance_settings() -> WorkspaceSettings:
@@ -445,13 +435,11 @@ async def get_instance_settings() -> WorkspaceSettings:
     Every workspace inherits these; see :func:`get_workspace_settings` for what a
     run actually sees.
     """
-    defaults = _default_settings()
     try:
-        instance = await _instance_record()
+        return await load_instance_settings()
     except Exception:
         logger.warning("instance settings lookup failed; using defaults", exc_info=True)
-        return WorkspaceSettings(defaults)
-    return _finish({**defaults, **instance})
+        return fallback_settings()
 
 
 async def get_workspace_settings(workspace: str | None = None) -> WorkspaceSettings:
@@ -465,14 +453,18 @@ async def get_workspace_settings(workspace: str | None = None) -> WorkspaceSetti
     to pick a model, so an unreachable store must degrade to the defaults
     rather than fail every run at once.
     """
-    defaults = _default_settings()
-    slug = resolve_settings_workspace(workspace)
     try:
-        instance, overrides = await asyncio.gather(_instance_record(), _workspace_record(slug))
+        return await load_workspace_settings(workspace)
     except Exception:
         logger.warning("workspace settings lookup failed; using defaults", exc_info=True)
-        return WorkspaceSettings(defaults)
-    return _finish({**defaults, **instance, **overrides})
+        return fallback_settings()
+
+
+async def load_workspace_settings(workspace: str | None = None) -> WorkspaceSettings:
+    """:func:`get_workspace_settings`, but raising when the store read fails."""
+    slug = resolve_settings_workspace(workspace)
+    instance, overrides = await asyncio.gather(instance_record(), workspace_record(slug))
+    return _finish({**_default_settings(), **instance, **overrides})
 
 
 class WorkspaceSettingsView(TypedDict):
@@ -483,7 +475,7 @@ class WorkspaceSettingsView(TypedDict):
 
 
 async def workspace_settings_view(slug: str) -> WorkspaceSettingsView:
-    overrides = await _workspace_record(slug)
+    overrides = await workspace_record(slug)
     overrides.pop("updated_at", None)
     return {"effective": dict(await get_workspace_settings(slug)), "overrides": overrides}
 
@@ -511,9 +503,7 @@ async def _settings_changes(
     try:
         async with asyncio.timeout(2):
             before = (
-                await _instance_record()
-                if workspace is None
-                else await _workspace_record(workspace)
+                await instance_record() if workspace is None else await workspace_record(workspace)
             )
         return {
             field: SettingsChange(
@@ -544,8 +534,9 @@ async def upsert_instance_settings(update: WorkspaceSettingsUpdate) -> dict[str,
     update.apply_fable_policy(fable_enabled=bool(update.fable_enabled))
     value = _record_values(update)
     changes = await _settings_changes(value)
-    await put_value(INSTANCE_SETTINGS_NAMESPACE, INSTANCE_SETTINGS_KEY, value)
+    await INSTANCE_SETTINGS.put("", value)
     _bind_settings_changes(changes)
+    await _forget_cached_settings()
     await Topic.WORKSPACES.invalidate()
     return value
 
@@ -564,19 +555,17 @@ async def upsert_workspace_overrides(
     update.apply_fable_policy(fable_enabled=fable_enabled)
     value = {k: v for k, v in _record_values(update).items() if v is not None}
     changes = await _settings_changes(value, workspace=slug)
-    await put_value(WORKSPACE_SETTINGS_NAMESPACE, slug, value)
+    await WORKSPACE_SETTINGS.put(slug, value)
     _bind_settings_changes(changes, workspace=slug)
-    if slug != DEFAULT_WORKSPACE_SLUG:
-        await delete_value(INSTANCE_SETTINGS_NAMESPACE, slug)
+    await _forget_cached_settings()
     await Topic.WORKSPACES.invalidate()
     return await workspace_settings_view(slug)
 
 
 async def delete_workspace_settings(slug: str) -> None:
-    """Forget the workspace's overrides, wherever they were written."""
-    await delete_value(WORKSPACE_SETTINGS_NAMESPACE, slug)
-    if slug != DEFAULT_WORKSPACE_SLUG:
-        await delete_value(INSTANCE_SETTINGS_NAMESPACE, slug)
+    """Forget the workspace's overrides."""
+    await WORKSPACE_SETTINGS.delete(slug)
+    await _forget_cached_settings()
     await Topic.WORKSPACES.invalidate()
 
 
@@ -588,9 +577,7 @@ def _gate_openai_title_model(pair: tuple[str, str], *, gateway_enabled: bool) ->
     # bypassed and the call still needs a real OpenAI credential.
     if gateway_enabled and gateway_overrides(pair[0]) is not None:
         return pair
-    from openswe.utils.openai_oauth import desktop_openai_oauth_available
-
-    if ENV.OPENAI_API_KEY.optional() or desktop_openai_oauth_available():
+    if ENV.OPENAI_API_KEY.optional():
         return pair
     if not ENV.ANTHROPIC_API_KEY.optional():
         return pair
@@ -641,7 +628,7 @@ class WorkspaceSettings(Mapping[str, Any]):
     def default_repo(self) -> dict[str, str] | None:
         return _parse_repo(self.get("default_repo"))
 
-    def default_model(self, role: Literal["agent", "reviewer", "chat"]) -> tuple[str, str]:
+    def default_model(self, role: Literal["agent", "reviewer"]) -> tuple[str, str]:
         """The default ``(model_id, reasoning_effort)`` for ``role``.
 
         Always a valid pair, resolved in order: the configured pair if still
@@ -649,24 +636,8 @@ class WorkspaceSettings(Mapping[str, Any]):
         (so a stale Anthropic/OpenAI selection stays on its provider rather
         than jumping cross-provider); otherwise the hardcoded global default
         from :func:`openswe.dashboard.options.default_model_pair`.
-
-        ``"chat"`` (the review-page PR chat) has no hardcoded default: when its
-        setting is unset/invalid it inherits the **agent** default.
         """
-        if role == "chat":
-            model = self.get("default_chat_model")
-            effort = self.get("default_chat_reasoning_effort")
-            if (
-                isinstance(model, str)
-                and isinstance(effort, str)
-                and model in SUPPORTED_MODEL_IDS
-                and model_supports_effort(model, effort)
-            ):
-                return _resolve_default_pair(model, effort)
-            # Inherit the Agent default when no chat-specific model is configured.
-            model = self.get("default_agent_model")
-            effort = self.get("default_agent_reasoning_effort")
-        elif role == "agent":
+        if role == "agent":
             model = self.get("default_agent_model")
             effort = self.get("default_agent_reasoning_effort")
         else:
@@ -764,6 +735,12 @@ class WorkspaceSettings(Mapping[str, Any]):
         return value if isinstance(value, bool) else False
 
     @property
+    def human_review_auto_merge_enabled(self) -> bool:
+        """Whether standard human-review requests merge automatically by default."""
+        value = self.get("human_review_auto_merge_enabled")
+        return value if isinstance(value, bool) else True
+
+    @property
     def human_review_auto_assign_minutes(self) -> int:
         value = self.get("human_review_auto_assign_minutes")
         return value if type(value) is int and value > 0 else 120
@@ -786,6 +763,13 @@ class WorkspaceSettings(Mapping[str, Any]):
         if isinstance(value, str) and value.strip():
             return value.strip()
         return None
+
+
+async def _forget_cached_settings() -> None:
+    # The cache module imports this one, so it is imported here.
+    from openswe.dashboard.workspace_settings_cache import forget_cached_settings
+
+    await forget_cached_settings()
 
 
 router = APIRouter(tags=["settings"])

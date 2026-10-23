@@ -7,14 +7,14 @@ from unittest.mock import AsyncMock
 import pytest
 from langchain_core.tools import tool as make_tool
 
-from openswe.thread_feedback import Feedback, feedback_store
+from openswe.thread_feedback import FEEDBACK, Feedback
 from openswe.tools.submit_thread_feedback import submit_thread_feedback
 
 tool = importlib.import_module("openswe.tools.submit_thread_feedback")
 
 
 @pytest.fixture
-async def context(fake_store: Any, monkeypatch: pytest.MonkeyPatch) -> AsyncMock:
+async def context(registry_db: None, monkeypatch: pytest.MonkeyPatch) -> AsyncMock:
     export = AsyncMock(return_value=True)
 
     @asynccontextmanager
@@ -22,7 +22,6 @@ async def context(fake_store: Any, monkeypatch: pytest.MonkeyPatch) -> AsyncMock
         yield
 
     monkeypatch.setattr(tool, "agent_thread_pr_state_lock", unlocked)
-    monkeypatch.setattr(tool, "langgraph_client", lambda: None)
     monkeypatch.setattr(tool, "create_langsmith_thread_feedback", export)
     monkeypatch.setattr(tool, "record_feedback_submission", AsyncMock())
     return export
@@ -49,7 +48,7 @@ async def test_submits_explicit_feedback_with_run_context(context: AsyncMock) ->
         "comment": "Needed a stronger model.",
         "export_status": "exported",
     }
-    assert await feedback_store().get("thread-1") == Feedback(
+    assert await FEEDBACK.get("thread-1") == Feedback(
         status="completed",
         event_id="tool:run-1",
         answer_run_id="run-1",
@@ -79,7 +78,7 @@ async def test_submits_explicit_feedback_with_run_context(context: AsyncMock) ->
 
 
 async def test_updates_existing_feedback_submission(context: AsyncMock) -> None:
-    await feedback_store().put(
+    await FEEDBACK.put(
         "thread-1", Feedback(status="completed", rating="good", comment="Already saved")
     )
 
@@ -91,7 +90,7 @@ async def test_updates_existing_feedback_submission(context: AsyncMock) -> None:
         "comment": "Replace me",
         "export_status": "exported",
     }
-    assert await feedback_store().get("thread-1") == Feedback(
+    assert await FEEDBACK.get("thread-1") == Feedback(
         status="completed", rating="bad", comment="Replace me"
     )
     context.assert_awaited_once()

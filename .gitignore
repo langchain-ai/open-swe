@@ -18,7 +18,6 @@
 # production
 /build
 /desktop/build
-/desktop/resources/local-backend/
 /dist
 **/dist
 .turbo/
@@ -83,3 +82,13 @@ logs/
 test-results/
 playwright-report/
 blob-report/
+
+# The vendored SDK is tracked, even where a global gitignore excludes `/vendor`;
+# otherwise staging it needs `git add -f`, which skips the rules below.
+!/vendor/
+# Vendored Managed Deep Agents SDK build outputs (`make mda-cli`)
+/vendor/managed-deepagents-sdk/target/
+/vendor/managed-deepagents-sdk/packages/pypi/src/managed_deepagents/_binaries/
+/vendor/managed-deepagents-sdk/.ruff_cache/
+# The CLI's `logs` module, not log output
+!/vendor/managed-deepagents-sdk/crates/mda/src/logs/

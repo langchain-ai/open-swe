@@ -64,11 +64,11 @@ test.describe("finished transcript (shared fixture thread)", () => {
     const edit = page.getByRole("button", { name: "Edited greet.py" });
 
     // Folded: the acknowledgement shows, the individual tool calls do not.
-    await expect(worked).toBeVisible();
+    await expect(worked.first()).toBeVisible();
     await expect(acknowledgement).toBeVisible();
     await expect(edit).toHaveCount(0);
 
-    await worked.click();
+    for (const fold of await worked.all()) await fold.click();
     await expect(edit).toBeVisible();
     await expect(acknowledgement).toBeVisible();
     expect(
@@ -293,16 +293,19 @@ test.describe("transcript rendering", () => {
     });
     expect(response.ok()).toBeTruthy();
 
+    // Managed Deep Agents runs carry their configurable inside the signed run
+    // token in their context.
     await expect
       .poll(async () => {
         const runs = (await (
           await page.request.get(`/threads/${threadId}/runs`)
-        ).json()) as Array<{
-          kwargs?: {
-            config?: { configurable?: { agent_model_id?: string } };
-          };
-        }>;
-        return runs[0]?.kwargs?.config?.configurable?.agent_model_id;
+        ).json()) as Array<{ kwargs?: { context?: { __run_token?: string } } }>;
+        const token = runs[0]?.kwargs?.context?.__run_token;
+        if (!token) return undefined;
+        const claims = JSON.parse(
+          Buffer.from(token.split(".")[1], "base64url").toString(),
+        ) as { cfg?: { agent_model_id?: string } };
+        return claims.cfg?.agent_model_id;
       })
       .toBe("anthropic:claude-opus-5-5");
   });

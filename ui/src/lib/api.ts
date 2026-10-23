@@ -97,6 +97,21 @@ export interface WorkspaceApiKey {
   status: "active" | "expired" | "revoked"
 }
 
+/** A token that lets one person's Claude Code hooks mirror their sessions. */
+export interface ClaudeCodeSyncToken {
+  id: string
+  name: string
+  token_suffix: string
+  created_at: string
+  last_used_at: string | null
+}
+
+/** A freshly minted token: the only time its secret and hooks settings are shown. */
+export interface MintedClaudeCodeSyncToken extends ClaudeCodeSyncToken {
+  secret: string
+  settings: Record<string, unknown>
+}
+
 const API_BASE = dashboardApiBase()
 
 const GITHUB_IMAGE_HOST_RE =
@@ -296,21 +311,20 @@ export interface OptionsPayload {
 }
 
 export interface Profile {
-  experimental_task_coordination?: boolean
   experimental_assistant_ui?: boolean | null
   experimental_background_callbacks?: boolean | null
   login?: string
   email?: string
   default_repo?: string | null
+  workspace_default_repos?: Record<string, string>
   base_branch?: string | null
   branch_prefix?: string | null
   auto_fix_ci?: boolean
-  recent_thread_context_enabled?: boolean
+  auto_human_review_enabled?: boolean
   concierge_mode?: boolean
-  preserve_sandbox_memory?: boolean
   pr_review_links?: boolean
   pr_failure_reactions?: boolean
-  prefer_tools_in_sandbox?: boolean
+  experimental_monitor?: boolean | null
   experimental_act_as_approval?: boolean
   act_as_always_allowed?: boolean
   draft_prs?: boolean
@@ -320,19 +334,18 @@ export interface Profile {
 }
 
 export interface ProfileUpdate {
-  experimental_task_coordination?: boolean
   experimental_assistant_ui?: boolean | null
   experimental_background_callbacks?: boolean | null
   default_repo?: string | null
+  workspace_default_repos?: Record<string, string>
   base_branch?: string | null
   branch_prefix?: string | null
   auto_fix_ci?: boolean
-  recent_thread_context_enabled?: boolean
+  auto_human_review_enabled?: boolean
   concierge_mode?: boolean
-  preserve_sandbox_memory?: boolean
   pr_review_links?: boolean
   pr_failure_reactions?: boolean
-  prefer_tools_in_sandbox?: boolean
+  experimental_monitor?: boolean | null
   experimental_act_as_approval?: boolean
   draft_prs?: boolean
   review_draft_prs?: boolean | null
@@ -395,8 +408,6 @@ export interface WorkspaceSettings {
   default_reviewer_reasoning_effort?: string | null
   default_reviewer_subagent_model?: string | null
   default_reviewer_subagent_reasoning_effort?: string | null
-  default_chat_model?: string | null
-  default_chat_reasoning_effort?: string | null
   default_thread_title_model?: string | null
   default_thread_title_reasoning_effort?: string | null
   updated_at?: string | null
@@ -464,12 +475,19 @@ export interface ManagedToolsMissingCredential {
   kind: "oauth" | "secret"
 }
 
+export interface ManagedToolsConnectedService {
+  name: string
+  tool_count: number
+}
+
 export interface ManagedToolsGatewayStatus {
   gateway: ManagedToolsGateway
-  workspaces: string[]
   ready: boolean
   tool_count?: number | null
   missing: ManagedToolsMissingCredential[]
+  connected?: ManagedToolsConnectedService[]
+  /** LangSmith offers no tools until every missing service is connected. */
+  all_required: boolean
 }
 
 /** The card the agent offered in a thread, identified by its tool call. */
@@ -492,6 +510,22 @@ export interface AdminUser {
   display_name: string
   avatar_url: string
   is_admin: boolean
+}
+
+export interface AnnouncementSummary {
+  id: string
+  text: string
+  author: string
+  created_at: string
+  finished_at: string | null
+  recipients: number
+  sent: number
+  failed: number
+}
+
+export interface AnnouncementsView {
+  recipients: number
+  items: Array<AnnouncementSummary>
 }
 
 export interface AdminUsersPage {
@@ -734,8 +768,6 @@ export type FollowUpBehavior = "queue" | "steer"
 
 export interface UserPreferences {
   default_visibility: ThreadVisibility
-  local_tracing_project: string | null
-  default_local_tracing_project: string
   default_workspace: string | null
   follow_up_behavior: FollowUpBehavior
 }
@@ -1070,15 +1102,11 @@ export type PullRequestThreadIntent =
   | { intent: "message"; title: string; message: string }
   | {
       intent: "fix"
-      scope: PullRequestFixScope
       context: OpenPullRequest | null
     }
   | { intent: "address-comments" }
   | { intent: "address-comment"; comment_url: string; instructions: string }
   | { intent: "comments"; comments: Array<AgentBatchComment> }
-
-/** One kind of PR problem a fix run handles; comments go through address-comments. */
-export type PullRequestFixScope = "conflicts" | "checks"
 
 export type AgentBatchComment =
   | ({ kind: "line" } & Omit<ReviewCommentCreate, "start_side">)
@@ -1104,7 +1132,6 @@ export interface PullRequestSearchResult {
   number: number
   url: string
   title: string
-  body: string
   state: "open" | "draft" | "merged" | "closed"
 }
 
@@ -1376,7 +1403,6 @@ export interface ReviewerEvalProgress {
 }
 
 export interface ReviewerEvalStatus {
-  name: string
   status: "idle" | "starting" | "running" | "completed" | "failed"
   run_name?: string
   langsmith_project: string
@@ -1385,15 +1411,11 @@ export interface ReviewerEvalStatus {
   started_at: string | null
   finished_at: string | null
   created_by: string | null
-  pid: number | null
-  exit_code: number | null
   experiment_url: string | null
   error: string | null
   log_tail: string | null
   progress?: ReviewerEvalProgress | null
   worker_id?: string | null
-  trigger?: string | null
-  updated_at: string
 }
 
 export interface HumanReviewRequestResult {
@@ -1558,6 +1580,17 @@ export const api = {
     ),
   deleteAgentInstructions: (full_name: string) =>
     request<void>(`/agent-instructions/${encodeURIComponent(full_name)}`, {
+      method: "DELETE",
+    }),
+  listClaudeCodeSyncTokens: () =>
+    request<ClaudeCodeSyncToken[]>("/claude-code/tokens"),
+  createClaudeCodeSyncToken: (name: string) =>
+    request<MintedClaudeCodeSyncToken>("/claude-code/tokens", {
+      method: "POST",
+      body: JSON.stringify({ name }),
+    }),
+  revokeClaudeCodeSyncToken: (id: string) =>
+    request<void>(`/claude-code/tokens/${encodeURIComponent(id)}`, {
       method: "DELETE",
     }),
   listWorkspaceApiKeys: (slug: string) =>
@@ -1788,6 +1821,12 @@ export const api = {
     request<AdminUsersPage>(
       `/admin/users?page=${page}&page_size=${pageSize}&search=${encodeURIComponent(search)}`
     ),
+  listAnnouncements: () => request<AnnouncementsView>("/admin/announcements"),
+  sendAnnouncement: (text: string, test: boolean) =>
+    request<{ test: boolean; recipients: number }>("/admin/announcements", {
+      method: "POST",
+      body: JSON.stringify({ text, test }),
+    }),
   listReviews: (page: number, mine: boolean) =>
     request<ReviewListPayload>(`/reviews?page=${page}&mine=${mine}`),
   searchPullRequests: (query: string, offset = 0) =>
@@ -1806,12 +1845,8 @@ export const api = {
     ),
   pullRequestStatus: (repo: string, number: number) =>
     loadPrDetails(repo, number),
-  fixPullRequest: (pr: OpenPullRequest, scope: PullRequestFixScope) =>
-    pullRequestThread(pr.repo, pr.number, {
-      intent: "fix",
-      scope,
-      context: pr,
-    }),
+  fixPullRequest: (pr: OpenPullRequest) =>
+    pullRequestThread(pr.repo, pr.number, { intent: "fix", context: pr }),
   addressPullRequestComments: (pr: OpenPullRequest) =>
     pullRequestThread(pr.repo, pr.number, { intent: "address-comments" }),
   sendCommentsToAgent: (
@@ -1866,7 +1901,12 @@ export const api = {
   ): Promise<PullRequestActionResult> =>
     pullRequestAction(pr, { action: "mark-ready" }),
   humanReviewAvailability: (pr: OpenPullRequest) =>
-    request<{ available: boolean; blockers: string[] }>(
+    request<{
+      available: boolean
+      active: boolean
+      permalink: string
+      blockers: string[]
+    }>(
       `/repos/${pr.repo.split("/").map(encodeURIComponent).join("/")}/pulls/${pr.number}/human-review`
     ),
   requestHumanReview: (pr: OpenPullRequest, channel = "") =>
@@ -2071,8 +2111,13 @@ export function connectService(
 ) {
   const pending = window.openSweDesktop?.connectService(provider)
   if (!pending) {
-    const query = redirectTo
-      ? `?${new URLSearchParams({ redirect_to: redirectTo })}`
+    const target =
+      redirectTo ??
+      (provider === "slack"
+        ? `${window.location.pathname}${window.location.search}${window.location.hash}`
+        : "")
+    const query = target
+      ? `?${new URLSearchParams({ redirect_to: target })}`
       : ""
     window.location.assign(
       `${API_BASE}/dashboard/api/${provider}/login${query}`

@@ -15,6 +15,7 @@ from openswe.dispatch import dispatch_agent_run
 from openswe.github.pull_request_status import pull_request_identity
 from openswe.github.pull_requests import PullRequest
 from openswe.prompts import prompt
+from openswe.threads import index
 from openswe.threads.access import _ensure_dashboard_github_token
 from openswe.threads.runs import (
     _build_dashboard_configurable,
@@ -97,35 +98,25 @@ class MessageIntent(_PullRequestIntentBase):
         return self.title
 
 
-FixScope = Literal["conflicts", "checks"]
-
-# The snapshot carries only the fields its scope concerns, so a conflict fix is
-# never handed failing checks to chase, nor a check fix the merge state.
-_SNAPSHOT_EXCLUDES: dict[FixScope, set[str]] = {
-    "conflicts": {"ci", "failing_checks", "pending_checks", "review_decision"},
-    "checks": {"mergeable", "merge_state", "review_decision"},
-}
-
-
 class FixIntent(_PullRequestIntentBase):
     intent: Literal["fix"]
-    scope: FixScope
     context: PullRequestFixContext | None = None
 
     dispatches_run: ClassVar[bool] = True
 
     def prompt(self, url: str) -> str:
-        text = prompt("runs/pull-request-fix", url=url, scope=self.scope)
+        text = prompt("runs/pull-request-fix", url=url, scope="repair")
         if self.context is None:
             return text
+        # Review state belongs to Address comments, so a fix is never handed it to chase.
         snapshot = prompt(
             "runs/pull-request-fix-context",
-            snapshot=self.context.model_dump_json(indent=2, exclude=_SNAPSHOT_EXCLUDES[self.scope]),
+            snapshot=self.context.model_dump_json(indent=2, exclude={"review_decision"}),
         )
         return f"{text}\n\n{snapshot}"
 
     def thread_title(self, full_name: str, number: int) -> str:
-        return f"Fix {self.scope} on {full_name}#{number}"
+        return f"Fix {full_name}#{number}"
 
 
 class AddressCommentsIntent(_PullRequestIntentBase):
@@ -245,7 +236,7 @@ async def _pr_thread_ids(owner: str, repo: str, number: int) -> list[str]:
 
 
 async def find_pr_threads(
-    owner: str, repo: str, number: int, login: str, email: str | None
+    owner: str, repo: str, number: int, login: str, email: str | None, *, unlisted: bool = False
 ) -> list[Thread]:
     client = langgraph_client()
     candidates: dict[str, Thread] = {}
@@ -258,6 +249,8 @@ async def find_pr_threads(
             continue
         metadata = thread_metadata(thread)
         if metadata.get("kind") or metadata.get("graph_id") not in (None, "agent"):
+            continue
+        if (metadata.get("unlisted") is True) is not unlisted:
             continue
         try:
             _assert_thread_postable(metadata, login, email)
@@ -290,11 +283,17 @@ async def _find_or_create_pr_thread(
     *,
     prompt: str,
     title: str,
+    unlisted: bool = False,
     review_chat: bool = False,
 ) -> str:
     client = langgraph_client()
     url = f"https://github.com/{owner}/{repo}/pull/{number}"
-    candidates = await find_pr_threads(owner, repo, number, login, email)
+    # A thread made before Managed Deep Agents takes no new work; a new one starts instead.
+    candidates = [
+        thread
+        for thread in await find_pr_threads(owner, repo, number, login, email, unlisted=unlisted)
+        if await index.live_thread_id(thread["thread_id"]) == thread["thread_id"]
+    ]
     if candidates:
         return candidates[0]["thread_id"]
     thread = await create_dashboard_thread_record(
@@ -312,6 +311,7 @@ async def _find_or_create_pr_thread(
             "pr_url": url,
             "pr_number": number,
             "source_context": {"pr_number": number},
+            "unlisted": unlisted,
             "review_chat": review_chat,
         },
     )
@@ -362,7 +362,7 @@ async def start_pull_request_thread(
     url = f"https://github.com/{full_name}/pull/{number}"
     prompt = intent.prompt(url)
     client = langgraph_client()
-    async with agent_thread_pr_state_lock(client, _pr_thread_lock_key(login, url)):
+    async with agent_thread_pr_state_lock(_pr_thread_lock_key(login, url)):
         thread_id = await _find_or_create_pr_thread(
             owner,
             repo,
@@ -380,7 +380,7 @@ async def start_pull_request_thread(
         busy = current.get("status") == "busy"
         if busy and not intent.queues_behind_running:
             return PullRequestThreadRun(thread_id=thread_id, already_running=True)
-        async with agent_thread_pr_state_lock(client, thread_id):
+        async with agent_thread_pr_state_lock(thread_id):
             await client.threads.update(
                 thread_id=thread_id,
                 metadata={
@@ -416,6 +416,7 @@ async def dispatch_pull_request_prompt(
     *,
     title: str,
     before_dispatch: Callable[[str], Awaitable[None]],
+    unlisted: bool = False,
 ) -> str:
     """Enqueue ``prompt`` on ``login``'s thread for a pull request, creating it if needed; its id.
 
@@ -424,9 +425,9 @@ async def dispatch_pull_request_prompt(
     """
     url = f"https://github.com/{owner}/{repo}/pull/{number}"
     client = langgraph_client()
-    async with agent_thread_pr_state_lock(client, _pr_thread_lock_key(login, url)):
+    async with agent_thread_pr_state_lock(_pr_thread_lock_key(login, url)):
         thread_id = await _find_or_create_pr_thread(
-            owner, repo, number, login, None, prompt=prompt, title=title
+            owner, repo, number, login, None, prompt=prompt, title=title, unlisted=unlisted
         )
         await before_dispatch(thread_id)
         await client.threads.update(thread_id=thread_id, metadata={"review_chat": False})

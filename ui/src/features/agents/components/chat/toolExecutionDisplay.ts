@@ -97,7 +97,26 @@ export interface ToolDisplayParts {
   previewTooltip?: string
 }
 
+const DISPLAY_DESCRIPTION = "display_description"
+
+/** A described call reads as its description; what it would have shown moves to the tooltip. */
 export function formatToolDisplayParts(
+  title: string,
+  toolKind: AcpToolKind,
+  input: Record<string, unknown> | undefined,
+  repoPath?: string
+): ToolDisplayParts {
+  const parts = toolDisplayParts(title, toolKind, input, repoPath)
+  const description = firstStringArg(input, [DISPLAY_DESCRIPTION])
+  if (!description) return parts
+  return {
+    heading: parts.heading,
+    preview: truncateMiddle(description, 80),
+    previewTooltip: parts.previewTooltip ?? parts.preview ?? description,
+  }
+}
+
+function toolDisplayParts(
   title: string,
   toolKind: AcpToolKind,
   input: Record<string, unknown> | undefined,

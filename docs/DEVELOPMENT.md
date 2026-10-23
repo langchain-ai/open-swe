@@ -7,6 +7,7 @@ Run Open SWE on your machine: the backend and the dashboard on `http://localhost
 - **Python 3.14+** and [uv](https://docs.astral.sh/uv/)
 - [LangGraph CLI](https://docs.langchain.com/langsmith/cli) (installed by `uv sync`)
 - Node 22.22.2+ and [pnpm](https://pnpm.io/) for the dashboard
+- Rust (`cargo`, e.g. via [rustup](https://rustup.rs/)): `make dev-mda` builds the `mda` CLI from the vendored Managed Deep Agents SDK ([vendor/README.md](../vendor/README.md))
 - A free [ngrok](https://ngrok.com/) account, so GitHub and Slack can reach your local backend (step 3)
 - A Slack workspace where you may create apps, and a GitHub account or organization where you may create a GitHub App
 
@@ -84,7 +85,12 @@ DASHBOARD_JWT_SECRET=""         # openssl rand -hex 32     (signs the session co
 CONFIGURED_ADMINS=""            # your GitHub login or email; admins see the Admin pages
 
 POSTGRES_URI=""                 # local dev defaults to localhost:5433; set this to use another database
+
+MDA_RUNTIME_URL="http://localhost:2025"   # `make dev-mda`; the backend refuses to start without it
+REMOTE_RUNTIME_TOKEN_SECRET=""  # openssl rand -hex 32     (signs the run tokens Managed Deep Agents calls back with)
 ```
+
+Every Open SWE thread runs its model loop on Managed Deep Agents, from the project in `mda/`. Locally that is `make dev-mda` on port 2025, which reads its own `mda/.env`: set `OPEN_SWE_BACKEND_URL=http://localhost:2024` there, plus `LANGSMITH_API_KEY` and the same model key as above ([mda/README.md](../mda/README.md#run-locally)).
 
 `LANGGRAPH_URL` defaults to `http://localhost:2024`, and `DASHBOARD_BASE_URL` / `DASHBOARD_API_BASE_URL` default to it, so none of the three is needed locally. Keep them on localhost when setting `SLACK_PUBLIC_BASE_URL` to the tunnel. You only need one model credential: either a provider key or a gateway key if you route model calls through an LLM gateway, such as the [LangSmith Gateway](INSTALLATION.md#4-model-providers-and-api-keys). How the running model is chosen is covered in the same section. Linear, if you use it, comes from the [Linear](INSTALLATION.md#linear) section of the installation guide, with your ngrok domain as the URL.
 
@@ -101,6 +107,7 @@ With a database, every thread created from then on is also recorded into the app
 ```bash
 make build-dashboard   # pnpm install + Vite build into ui/.output/public
 make dev               # langgraph dev on http://localhost:2024, serving the API and the dashboard (starts the Postgres container first)
+make dev-mda           # in a second terminal: Managed Deep Agents on http://localhost:2025, where every Open SWE thread runs
 ```
 
 `langgraph dev` serves the graphs, the FastAPI app, and the dashboard build together on port 2024. The bundled UI is a static build, so rebuild it when you pull UI changes, or skip `make build-dashboard` if you only need webhooks and the API. It reloads on code changes only: after editing `.env`, restart it.
@@ -169,6 +176,10 @@ It is refused with a 404 outside `langgraph dev`, which is the only runtime repo
 What still needs the App, and answers `503 GitHub App token unavailable` without one: a published review and its diff, inline review comment reads and writes, and the webhook flows. The reviews list and each PR's preview read as you, so they work.
 
 The `local-gh-dev` skill in `.claude/skills/` walks through the whole loop, including the port and Postgres conflicts between worktrees.
+
+## Mirror your Claude Code sessions
+
+Connect Claude Code from **Settings → Claude Code** on your local dashboard, then run a session with the settings it gives you (`claude --settings ./open-swe-hooks.json`). Each hook event lands on the local backend, and the session shows up as a read-only thread. See [Mirroring Claude Code sessions](reference/claude-code-sync.md).
 
 ## Dashboard on the Vite dev server directly
 
@@ -258,6 +269,8 @@ For "how long until the agent answers", read `@context.step_generation_start_ms`
 | Target | What it does |
 |---|---|
 | `make dev` | `langgraph dev` on port 2024: graphs, webhooks, dashboard API, and the bundled dashboard when a build exists |
+| `make dev-mda` | `mda dev` on port 2025: the Managed Deep Agents runtime every Open SWE thread runs on |
+| `make mda-cli` | Build the `mda` CLI from the vendored SDK (`make dev-mda` does it first) |
 | `make dev-ui` | `make web` and `make dev` together, the backend fronting Vite so the UI hot-reloads on port 2024 |
 | `make web` | The Vite dev server alone on port 3000 |
 | `make build-dashboard` | Installs the dashboard's dependencies and builds it into `ui/.output/public` |
@@ -267,7 +280,7 @@ For "how long until the agent answers", read `@context.step_generation_start_ms`
 | `make install` | `uv sync --extra dev` |
 | `make test [TEST_FILE=tests/…]` | `pytest -vvv` on `tests/` or the given path |
 | `make lint`, `make format`, `make format-check` | ruff check and format (`format` rewrites files) |
-| `make typecheck` | `ty check agent tests` |
+| `make typecheck` | `ty check openswe tests` |
 
 ## Troubleshooting
 

@@ -44,7 +44,6 @@ vi.mock("@langchain/react", () => ({
 
 vi.mock("@/lib/langgraph-client", () => ({
   createDashboardClient: () => ({}),
-  createLocalGraphClient: () => ({}),
   dashboardFetch: fetch,
 }))
 

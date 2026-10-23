@@ -29,7 +29,7 @@ def _button_value(action: str, request: HumanReviewRequest) -> str:
 
 def _label(request: HumanReviewRequest) -> str:
     pr = request.pull_request
-    return f"{pr.owner}/{pr.repo}#{pr.number}"
+    return pr.label
 
 
 def _reviewer_line(reviewer: HumanReviewParticipant, states: dict[str, str]) -> str:
@@ -151,6 +151,9 @@ def open_card(
     if request.tldr:
         blocks.append(section("\n".join(f">{line}" for line in escape(request.tldr).splitlines())))
     blocks.append(context(_stats(request, author, requester)))
+    blocks.append(
+        context("Auto-merge enabled" if request.auto_merge else "Manual merge — auto-merge is off")
+    )
     blocks.extend(_reviewers(request, review_states))
     blocks.append(actions(*_buttons(request)))
     return f"Review requested for {_label(request)}: {title}", blocks
@@ -164,15 +167,20 @@ def closed_card(
     outcome: str,
     review_states: dict[str, str],
 ) -> tuple[str, list[Block]]:
-    """A finished request collapses to one line; ``outcome`` is our own mrkdwn."""
+    """A finished or approved request collapses to one line; ``outcome`` is our own mrkdwn."""
     pr = request.pull_request
-    if outcome == "merged":
-        line = f":merged: <{pr.url}|{escape(title)}> — by {author}"
-        if approvers := _approvers(request, review_states):
+    pull = (
+        f"<{pr.url}|{escape(title)}> — by {author}"
+        if outcome == "merged"
+        else f"<{pr.url}|{_label(request)}> {escape(title)} — authored by {author}"
+    )
+    approvers = _approvers(request, review_states)
+    if outcome in ("approved", "merged"):
+        line = f":{'merged' if outcome == 'merged' else 'white_check_mark'}: {pull}"
+        if approvers:
             line += f" — approved by {approvers}"
-        return line, [section(line)]
-    return f"Review request: {outcome} — {pr.url} — by {author}", [
-        section(
-            f"*Review request: {outcome}*\n<{pr.url}|{_label(request)}> {escape(title)} — by {author}"
-        )
-    ]
+        if outcome == "approved" and not request.auto_merge:
+            line += " — awaiting manual merge"
+    else:
+        line = f"Review request: {outcome} — {pull}"
+    return line, [section(line)]

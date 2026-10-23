@@ -142,9 +142,6 @@ export function usePatchProfile() {
     },
     onSuccess: (saved, write) => {
       qc.setQueryData(profileQueryKey(write.login), saved)
-      if (write.patch.experimental_task_coordination !== undefined) {
-        void qc.invalidateQueries({ queryKey: ["agent-threads"] })
-      }
     },
     onSettled: async (_saved, _error, write) => {
       if (
@@ -171,11 +168,11 @@ export function buildProfileUpdate(
 ): ProfileUpdate {
   return {
     default_repo: current?.default_repo ?? null,
+    workspace_default_repos: current?.workspace_default_repos ?? {},
     base_branch: current?.base_branch ?? null,
     branch_prefix: current?.branch_prefix ?? null,
     auto_fix_ci: current?.auto_fix_ci ?? true,
-    recent_thread_context_enabled:
-      current?.recent_thread_context_enabled ?? false,
+    auto_human_review_enabled: current?.auto_human_review_enabled ?? true,
     draft_prs: current?.draft_prs ?? true,
     review_draft_prs: current?.review_draft_prs ?? null,
     experimental_assistant_ui: current?.experimental_assistant_ui ?? null,

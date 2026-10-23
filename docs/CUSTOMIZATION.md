@@ -1,25 +1,17 @@
 # Customization Guide
 
-Open SWE is designed to be forked and customized for your org. The core agent is assembled in a single function — `get_agent()` in `openswe/server.py` — where you can swap out the sandbox, model, tools, and triggers.
+Open SWE is designed to be forked and customized for your org. Every run's model loop runs on Managed Deep Agents (`mda/`). What the run gets from the backend is decided in one function, `plan_agent()` in `openswe/server.py` (`plan_reviewer()` and `plan_review_scout()` for the reviewer and the review scout). It records the run's tools, middleware, models and subagents in a `ToolSurface` (`openswe/sandboxes/tool_runtime.py`), and that is where you swap out the model, tools and middleware.
 
 ```python
-# openswe/server.py — the key lines
-model_id = os.environ.get("LLM_MODEL_ID", DEFAULT_LLM_MODEL_ID)
-model_kwargs = {"max_tokens": DEFAULT_LLM_MAX_TOKENS}
-if model_id == DEFAULT_LLM_MODEL_ID:
-    model_kwargs["reasoning"] = DEFAULT_LLM_REASONING
-
-return create_deep_agent(
-    model=make_model(model_id, **model_kwargs),
-    system_prompt=construct_system_prompt(...),
-    tools=[http_request, fetch_url, slack_reply],
-    backend=sandbox_backend,
-    middleware=[
-        ToolErrorMiddleware(),
-        check_message_queue_before_model,
-        notify_step_limit_reached,
-    ],
+# openswe/server.py — the end of plan_agent()
+surface.base_tools = main_tools  # tools the run can call
+surface.middleware = middleware  # hooks the run's loop hands each phase to
+surface.models = SurfaceModels(
+    main=ModelChoice(model_id, dict(model_kwargs)),
+    subagent=ModelChoice(subagent_model_id, dict(subagent_model_kwargs)),
+    use_gateway=bool(use_gateway),
 )
+surface.subagents = [SurfaceSubagent(name="general-purpose", ...)]
 ```
 
 ---
@@ -150,52 +142,42 @@ Either variable can be set independently. When only the model is set, `medium` i
 
 These defaults apply below explicit run, thread, profile, and team selections, including inherited reviewer and subagent defaults. Existing selections are not overwritten. Restart the backend after changing its environment.
 
+Forked tasks configured with the main model reuse its model instance and reasoning effort for prompt-cache compatibility. A different subagent model retains its own effort but cannot share the main model's cache.
+
 `max_tokens` is a maximum completion/output token budget, not the model's total context window. For OpenAI reasoning models, this budget can include both internal reasoning tokens and final response tokens.
 
 ### Switching models
 
-Use the `provider:model` format:
+Models are named in the `provider:model` format, with their provider settings, as a `ModelChoice`. The MDA run builds the chat model from it (`mda/rt/models.py`), so a model object built in `plan_agent()` never reaches the run:
 
 ```python
 # Anthropic
-model = make_model("anthropic:claude-opus-5-5", temperature=0, max_tokens=16_000)
+ModelChoice("anthropic:claude-opus-5-5", {"temperature": 0, "max_tokens": 16_000})
 
-# OpenAI (uses Responses API by default)
-model = make_model("openai:gpt-6.1-sol", max_tokens=128_000, reasoning={"effort": "medium"})
+# OpenAI (uses the Responses API on MDA)
+ModelChoice("openai:gpt-6.1-sol", {"max_tokens": 128_000, "reasoning": {"effort": "medium"}})
 
 # Google
-model = make_model("google_genai:gemini-2.5-pro", temperature=0, max_tokens=16_000)
+ModelChoice("google_genai:gemini-2.5-pro", {"temperature": 0, "max_tokens": 16_000})
 ```
 
-The `make_model()` helper in `openswe/utils/model.py` wraps `langchain.chat_models.init_chat_model`. For OpenAI models, it automatically enables the Responses API. For full control, pass a pre-configured model instance directly:
-
-```python
-from langchain_anthropic import ChatAnthropic
-
-model = ChatAnthropic(model_name="claude-opus-5-5", temperature=0, max_tokens=16_000)
-
-return create_deep_agent(
-    model=model,
-    ...
-)
-```
+`provider_model_kwargs()` in `openswe/utils/model.py` builds those settings for a catalog model and effort. To change how a provider's chat model is built (its client, retries or gateway routing), edit `mda/rt/models.py`.
 
 ### Using different models per context
 
-You can route to different models based on task complexity, repo, or trigger source:
+You can route to different models based on task complexity, repo, or trigger source, in `plan_agent()`:
 
 ```python
-async def get_agent(config: RunnableConfig) -> Pregel:
-    source = config["configurable"].get("source")
-    
-    if source == "slack":
-        # Faster model for Slack Q&A
-        model = make_model("anthropic:claude-opus-5-5", temperature=0, max_tokens=16_000)
-    else:
-        # Full model for code changes from Linear
-        model = make_model("openai:gpt-6.1-sol", max_tokens=128_000, reasoning={"effort": "medium"})
-    
-    return create_deep_agent(model=model, ...)
+if cfg.source == "slack":
+    # Faster model for Slack Q&A
+    main = ModelChoice("anthropic:claude-opus-5-5", {"temperature": 0, "max_tokens": 16_000})
+else:
+    # Full model for code changes from Linear
+    main = ModelChoice(
+        "openai:gpt-6.1-sol", {"max_tokens": 128_000, "reasoning": {"effort": "medium"}}
+    )
+
+surface.models = SurfaceModels(main=main, subagent=main, use_gateway=bool(use_gateway))
 ```
 
 ### Auto model routing with Jev
@@ -262,13 +244,13 @@ connections or reveal saved credentials.
    HTTPS server URL, and its transport (**Streamable HTTP** or **SSE**).
 2. Choose **Headers / API key** or **OAuth client credentials** for authentication.
    For headers, values are encrypted using `TOKEN_ENCRYPTION_KEY`
-   in the LangGraph Store; normal dashboard responses only return header names.
+   in PostgreSQL; normal dashboard responses only return header names.
    Admins can use the eye icon (**Show saved headers**) to reveal values on demand,
    then the crossed-out eye to clear them from the editor. Entered or imported
    values also have an eye icon to show or hide them. Use headers
    for credentials, rather than URL query parameters.
    For OAuth, enter the token URL, client ID, client secret, scopes, and the
-   provider's client authentication method. The secret is encrypted in the Store
+   provider's client authentication method. The secret is encrypted in PostgreSQL
    and is never returned to the browser. Leave it blank when editing to keep it.
 3. Choose **Save and discover tools**. For new connections, all discovered tools
    are selected by default. Review the selection, then choose **Save connection**
@@ -419,8 +401,8 @@ Investigate graphs.
 
 Any signed-in user can connect remote MCP servers with their own credentials under
 **Settings → Connections → MCP servers**. The form, JSON import, OAuth, header handling, and
-tool discovery work exactly like workspace connections. Records live in the Store
-under `["user_mcps", <trimmed lowercase github login>]`, so one user's connections and credentials are
+tool discovery work exactly like workspace connections. Records live in PostgreSQL under the
+person's `users` row, so one user's connections and credentials are
 never visible to, reused by, or revealed to another user. The dashboard API is
 `/dashboard/api/my-mcps` and requires only a signed-in session.
 
@@ -461,22 +443,18 @@ def datadog_search(query: str, time_range: str = "1h") -> dict[str, Any]:
     ...
 ```
 
-Then register it in `openswe/server.py`:
+Then register it in `plan_agent()` in `openswe/server.py`, where the run's tools are listed:
 
 ```python
-from .tools import fetch_url, http_request, slack_reply
-from .tools.datadog_search import datadog_search
+from openswe.tools.datadog_search import datadog_search
 
-return create_deep_agent(
-    ...
-    tools=[
-        http_request, fetch_url,
-        slack_reply,
-        datadog_search,  # new tool
-    ],
-    ...
-)
+static_tools = [
+    *static_tools,
+    datadog_search,  # new tool
+]
 ```
+
+The backend runs it whenever the MDA run calls it, through the run's tool-call middleware.
 
 The agent will automatically see the tool's name, docstring, and parameter types — the docstring serves as the tool description, so write it clearly.
 
@@ -490,14 +468,13 @@ You can vary the toolset based on the trigger source:
 
 ```python
 base_tools = [http_request, fetch_url]
-source = config["configurable"].get("source")
 
-if source == "slack":
+if cfg.source == "slack":
     tools = [*base_tools, slack_reply]
 else:
     tools = base_tools
 
-return create_deep_agent(tools=tools, ...)
+surface.base_tools = tools
 ```
 
 ---
@@ -622,7 +599,7 @@ The system prompt is the template `openswe/resources/prompts/system/main.md.jinj
 
 | File | What it controls |
 |---|---|
-| `working-environment.md` | Sandbox paths and execution constraints (`working-environment-desktop.md` and `working-environment-local.md` for desktop and bridged runs) |
+| `working-environment.md` | Sandbox paths and execution constraints (`working-environment-local.md` for bridged runs) |
 | `repository-setup.md.jinja` | Cloning or syncing the repository, commit identity, and branch choice |
 | `task-execution.md` | Workflow steps (understand → implement → verify → submit) and PR review dispatch |
 | `dependencies.md` | Installing, vetting, and managing project dependencies |
@@ -686,7 +663,7 @@ Middleware hooks run around the agent loop. Open SWE includes:
 
 There is intentionally no after-agent middleware that opens a PR for the agent. The agent is responsible for committing, pushing, opening/updating the draft PR, and replying in the source channel. If you want a deterministic backstop for your fork, add an `@after_agent` hook here.
 
-Add custom middleware by appending to the middleware list in `get_agent()`. See the [LangChain middleware docs](https://python.langchain.com/docs/concepts/agents/#middleware) for the `@before_model` and `@after_agent` decorators.
+Add custom middleware by appending to the middleware list in `plan_agent()`. The MDA run hands each phase of its loop to it (`openswe/agent_api/graph.py`), so `before_agent`, `before_model`, `after_model` and `after_agent` hooks run on the backend as they would in a graph. Tool calls are the MDA run's: a check around them goes in `mda/rt` (`rt/file_tools.py` for the file and shell tools), or behind an endpoint of the typed API in `packages/runtime-api` where it needs the backend, as the shell-command guards do. See the [LangChain middleware docs](https://python.langchain.com/docs/concepts/agents/#middleware) for the `@before_model` and `@after_agent` decorators.
 
 **Example — adding a CI check after agent completion:**
 

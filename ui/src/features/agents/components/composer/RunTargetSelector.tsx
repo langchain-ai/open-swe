@@ -7,7 +7,6 @@ import {
   DropdownMenuSeparator,
   DropdownMenuSub,
   DropdownMenuSubContent,
-  DropdownMenuSubTrigger,
   DropdownMenuTrigger,
 } from "@langchain/macaw-components/DropdownMenu"
 import { Input } from "@langchain/macaw-components/Input"
@@ -31,6 +30,7 @@ import {
   ComposerMenuOption,
   ComposerTriggerIcon,
 } from "./ComposerControl"
+import { DropdownMenuSubTrigger } from "@/components/MenuItem"
 import type {
   DesktopProject,
   DesktopProjectRef,
@@ -56,10 +56,12 @@ export function RunTargetSelector({
         icon={value === "local" ? LaptopRegularIcon : CloudIcon}
       />
       <span>{value === "local" ? "This Mac" : "Cloud"}</span>
-      {pending && <span className="text-tertiary">· next message</span>}
+      {pending && <span className="text-tertiary">· moving…</span>}
     </>
   )
-  const title = pending ? "Moves with your next message" : undefined
+  const title = pending
+    ? "Moving this thread and its checkout; send once it's there"
+    : undefined
   if (!onChange)
     return (
       <span
@@ -172,7 +174,7 @@ export function LocalRepoSelector({
           </ComposerMenuOption>
           {repos.length > 0 && (
             <DropdownMenuSub>
-              <DropdownMenuSubTrigger className="gap-space-2 text-xs" size="sm">
+              <DropdownMenuSubTrigger className="text-xs" size="sm">
                 <TrashIcon
                   className="size-3.5 shrink-0 text-icon-secondary"
                   weight="regular"

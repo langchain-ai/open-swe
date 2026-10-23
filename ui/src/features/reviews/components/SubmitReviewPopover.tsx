@@ -5,6 +5,7 @@ import {
   PopoverContent,
   PopoverTrigger,
 } from "@langchain/macaw-components/Popover"
+import { Link } from "@langchain/macaw-components/Link"
 import { RadioButton } from "@langchain/macaw-components/RadioButton"
 import { RadioGroup } from "@langchain/macaw-components/RadioGroup"
 import { Text } from "@langchain/macaw-components/Text"
@@ -13,8 +14,9 @@ import { useMutation, useQueryClient } from "@tanstack/react-query"
 import { useState } from "react"
 import { toast } from "sonner"
 
+import { SubmitShortcut } from "@/components/SubmitShortcut"
 import type { OpenPullRequest, PullRequestReviewEvent } from "@/lib/api"
-import { api } from "@/lib/api"
+import { api, ApiError } from "@/lib/api"
 import { optimisticUpdate } from "@/lib/optimistic"
 import { useSession } from "@/lib/session"
 import { pullRequestStatusQuery } from "@/features/reviews/lib/cache"
@@ -80,7 +82,7 @@ export function SubmitReviewPopover({
   const [chosen, setEvent] = useState<PullRequestReviewEvent>(defaultVerdict)
   const event: PullRequestReviewEvent = isAuthor ? "COMMENT" : chosen
   const [openedOn, setOpenedOn] = useState<PullRequestReviewEvent | null>(null)
-  if (open && openedOn !== defaultVerdict) {
+  if (open && openedOn === null) {
     setOpenedOn(defaultVerdict)
     setEvent(defaultVerdict)
   } else if (!open && openedOn !== null) {
@@ -89,6 +91,7 @@ export function SubmitReviewPopover({
   const [body, setBody] = useState("")
   const needsBody = event !== "APPROVE" && pendingCount === 0
   const submit = useMutation({
+    retry: false,
     mutationFn: () =>
       api.submitPullRequestReview(owner, repo, number, {
         event,
@@ -127,6 +130,11 @@ export function SubmitReviewPopover({
     },
   })
   const canSubmit = !submit.isPending && (!needsBody || body.trim().length > 0)
+  const submitLabel = submit.isPending
+    ? "Submitting…"
+    : isAuthor
+      ? "Comment"
+      : "Submit review"
 
   return (
     <Popover
@@ -146,7 +154,9 @@ export function SubmitReviewPopover({
               : "Review changes"
           }
         >
-          Review<span className="max-sm:hidden"> changes</span>
+          <Text as="span" variant="sm" weight="normal">
+            Review<span className="max-sm:hidden"> changes</span>
+          </Text>
         </Button>
       </PopoverTrigger>
       <PopoverContent
@@ -158,6 +168,17 @@ export function SubmitReviewPopover({
           onSubmit={(e) => {
             e.preventDefault()
             if (canSubmit) submit.mutate()
+          }}
+          onKeyDown={(e) => {
+            if (
+              e.target instanceof Element &&
+              e.target.closest('a, button:not([role="radio"])')
+            )
+              return
+            if ((e.metaKey || e.ctrlKey) && e.key === "Enter") {
+              e.preventDefault()
+              e.currentTarget.requestSubmit()
+            }
           }}
         >
           <Text as="h2" variant="sm" weight="semibold">
@@ -174,12 +195,6 @@ export function SubmitReviewPopover({
             aria-label="Review summary"
             value={body}
             onChange={setBody}
-            onKeyDown={(e) => {
-              if ((e.metaKey || e.ctrlKey) && e.key === "Enter") {
-                e.preventDefault()
-                if (canSubmit) submit.mutate()
-              }
-            }}
             placeholder="Leave a comment"
             rows={5}
             className="mt-space-2"
@@ -226,9 +241,30 @@ export function SubmitReviewPopover({
             </RadioGroup>
           )}
           {submit.error && (
-            <p className="mt-space-2 text-xs break-words text-error-secondary">
-              {submit.error.message}
-            </p>
+            <div role="alert" className="mt-space-2 space-y-space-1">
+              <Text
+                as="p"
+                variant="xs"
+                className="break-words text-error-secondary"
+              >
+                {submit.error instanceof ApiError && submit.error.status < 500
+                  ? `Review submission was rejected: ${submit.error.message}`
+                  : `We couldn't confirm your review was submitted: ${submit.error.message}`}
+              </Text>
+              <Text as="p" variant="xs" className="text-secondary">
+                {submit.error instanceof ApiError && submit.error.status < 500
+                  ? `Your draft is preserved.${submit.error.status === 404 ? " Check that you can access this pull request on GitHub." : " Address the error before submitting again."}`
+                  : "Your draft is preserved. Check GitHub before submitting again; the review may already have been posted."}
+              </Text>
+              <Link
+                variant="xs"
+                href={`https://github.com/${owner}/${repo}/pull/${number}#pullrequestreview`}
+                target="_blank"
+                rel="noopener noreferrer"
+              >
+                Check review on GitHub
+              </Link>
+            </div>
           )}
           <div className="mt-space-3 flex items-center justify-end gap-space-2">
             {pending.review && (
@@ -254,12 +290,15 @@ export function SubmitReviewPopover({
             >
               Cancel
             </Button>
-            <Button type="submit" size="xs" disabled={!canSubmit}>
-              {submit.isPending
-                ? "Submitting…"
-                : isAuthor
-                  ? "Comment"
-                  : "Submit review"}
+            <Button
+              type="submit"
+              size="xs"
+              aria-label={submitLabel}
+              aria-keyshortcuts="Meta+Enter Control+Enter"
+              disabled={!canSubmit}
+            >
+              {submitLabel}
+              {!submit.isPending && <SubmitShortcut />}
             </Button>
           </div>
         </form>

@@ -15,6 +15,7 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from typing import Any
 
+import httpx
 from e2e_env import (
     BASE_BRANCH,
     DEMO_CHANNEL,
@@ -40,6 +41,7 @@ from langchain_core.messages import (
     ToolMessage,
 )
 from langchain_core.outputs import ChatGeneration, ChatResult
+from langchain_core.utils.function_calling import convert_to_openai_tool
 
 
 def _slack_thread_ts(messages: list[BaseMessage]) -> str:
@@ -124,8 +126,7 @@ with open("CHANGELOG.md", "a") as changelog:
 PY
 git add -A
 git commit -m "{EXPEDITE_PR_TITLE}"
-git push origin {FEATURE_BRANCH}
-echo PUSHED_OK
+echo COMMITTED_OK
 """.strip()
 
 # Only a test file changes, and the card never draws tests: the votes cast on
@@ -167,7 +168,6 @@ def greet(name):
 EOF
 git add -A
 git commit -m "{PR_TITLE}"
-git push origin {FEATURE_BRANCH}
 cd ..
 git clone "$E2E_SECOND_REMOTE" companion
 cd companion
@@ -180,8 +180,7 @@ def connect():
 EOF
 git add -A
 git commit -m "{SECOND_PR_TITLE}"
-git push origin {SECOND_FEATURE_BRANCH}
-echo BOTH_PUSHED_OK
+echo BOTH_COMMITTED_OK
 """.strip()
 
 _MANY_FILES_IMPLEMENT_SCRIPT = f"""
@@ -242,9 +241,26 @@ curl --fail --silent --show-error \
   "{FAKE_GITHUB_API}/repos/{OWNER}/{REPO}/pulls"
 """.strip()
 
-# The system prompt of the most recent model call, so specs can assert what the
-# agent was actually told (e.g. the workspace section) rather than infer it.
-LAST_SYSTEM_PROMPT: dict[str, str] = {"text": ""}
+
+class SystemPromptRecord:
+    """The system prompt of the most recent model call, so specs can assert what the
+    agent was actually told (e.g. the workspace section) rather than infer it.
+
+    The harness serves it. A model running in another process, as on the Managed
+    Deep Agents server, sends each prompt there through ``report_to``.
+    """
+
+    def __init__(self) -> None:
+        self.text = ""
+        self.report_to: str | None = None
+
+    def record(self, text: str) -> None:
+        self.text = text
+        if self.report_to is not None:
+            httpx.post(self.report_to, json={"text": text}, timeout=10).raise_for_status()
+
+
+LAST_SYSTEM_PROMPT = SystemPromptRecord()
 
 _BUSY_HOLD_RE = re.compile(r"E2E_BUSY_HOLD(?::(\d+(?:\.\d+)?))?")
 _PLAN_URL_RE = re.compile(r"https?://[^\s\"'<>)\]|]+/plan\b")
@@ -259,6 +275,14 @@ SUBAGENT_TASK_MARKER = "E2E_SUBAGENT_TASK"
 SLACK_REPLY_ORDER_MARKER = "E2E_SLACK_REPLY_ORDER"
 SLACK_REPLY_GROUPED_ORDER_MARKER = "E2E_SLACK_REPLY_GROUPED_ORDER"
 SLACK_REPLY_SEGMENTS_MARKER = "E2E_SLACK_REPLY_SEGMENTS"
+EVAL_DESCRIPTION_MARKER = "E2E_EVAL_DESCRIPTION"
+BACKGROUND_WORK_MARKER = "E2E_BACKGROUND_WORK"
+# Long enough to outlast the spec, short enough not to linger on the host.
+BACKGROUND_WORK_COMMAND = "echo 'building assets'; sleep 110"
+BACKGROUND_WORK_MONITOR_COMMAND = (
+    'for i in $(seq 1 110); do echo "GET /health 200 ($i)"; sleep 1; done'
+)
+BACKGROUND_WORK_MONITOR_DESCRIPTION = "errors in the dev server log"
 
 ToolArgs = dict[str, Any]
 StepFactory = Callable[[list[BaseMessage]], AIMessage]
@@ -350,6 +374,13 @@ def _is_reply_nudge(message: BaseMessage) -> bool:
     return isinstance(message, HumanMessage) and _REPLY_GUARD_SENDER_ID in _text(message.content)
 
 
+def _is_dynamic_context(message: BaseMessage) -> bool:
+    """Context the backend adds to a turn, such as the task a watch joined: never a turn itself."""
+    return isinstance(message, HumanMessage) and _text(message.content).lstrip().startswith(
+        "<dynamic-context "
+    )
+
+
 def _is_framing_block(header: str) -> bool:
     """A system envelope that describes where the next turn came from."""
     return 'kind="system"' in header and any(
@@ -395,9 +426,9 @@ def _script_humans(messages: list[BaseMessage]) -> list[HumanMessage]:
     for index, message in enumerate(messages):
         if not isinstance(message, HumanMessage):
             continue
-        text = _text(message.content).lstrip()
-        if text.startswith("<dynamic-context "):
+        if _is_dynamic_context(message):
             continue
+        text = _text(message.content).lstrip()
         if text.startswith("<input-message "):
             header = text.split(">", 1)[0]
             if _is_framing_block(header):
@@ -772,14 +803,14 @@ def _write_plan_step(_messages: list[BaseMessage]) -> AIMessage:
     )
 
 
-def _save_plan_step(_messages: list[BaseMessage]) -> AIMessage:
+def _publish_artifact_step(_messages: list[BaseMessage]) -> AIMessage:
     return AIMessage(
-        content="Saving the plan for review.",
+        content="Publishing the HTML artifact.",
         tool_calls=[
             {
-                "name": "save_plan",
-                "args": {"plan_file_path": PLAN_FILE_PATH},
-                "id": "call-save-plan",
+                "name": "publish_artifact",
+                "args": {"artifact_file_path": PLAN_FILE_PATH},
+                "id": "call-publish-artifact",
             }
         ],
     )
@@ -1043,6 +1074,33 @@ SCRIPT_LIBRARY: dict[str, tuple[StepSpec, ...]] = {
             "call-code-channel-followup",
         ),
     ),
+    "background_work": (
+        _tool_step(
+            "Acknowledging the background work request.",
+            "slack_reply",
+            {"message": "Starting the background work now."},
+            "call-background-work-ack",
+        ),
+        _tool_step(
+            "Building the assets in the background.",
+            "background_execute",
+            {"command": BACKGROUND_WORK_COMMAND, "timeout": 120},
+            "call-background-work-execute",
+        ),
+        _tool_step(
+            "Watching the dev server log for errors.",
+            "monitor",
+            {
+                "action": "start",
+                "command": BACKGROUND_WORK_MONITOR_COMMAND,
+                "filter": "grep -E 'ERROR|Traceback'",
+                "description": BACKGROUND_WORK_MONITOR_DESCRIPTION,
+                "timeout": 120,
+            },
+            "call-background-work-monitor",
+        ),
+        StepSpec(content="Started the build and the log monitor."),
+    ),
     "iframe": (
         _tool_step(
             "Acknowledging the iframe preview request.",
@@ -1075,6 +1133,39 @@ SCRIPT_LIBRARY: dict[str, tuple[StepSpec, ...]] = {
             "call-desktop-impl",
         ),
         _dynamic_step(_desktop_reply_step),
+    ),
+    # Code-mode calls, each labeled with the description the dashboard shows.
+    "eval_description": (
+        _tool_step(
+            "Acknowledging the request.",
+            "slack_reply",
+            {"message": "On it!", "response_type": "progress"},
+            "call-eval-ack",
+        ),
+        _tool_step(
+            "Counting with code.",
+            "eval",
+            {
+                "display_description": "Count the files in the repository",
+                "code": "['greet.py', 'README.md'].length",
+            },
+            "call-eval-count",
+        ),
+        _tool_step(
+            "Checking the greeting with code.",
+            "eval",
+            {
+                "display_description": "Check the greeting the helper returns",
+                "code": "`Hello, ${'Ada'}!`",
+            },
+            "call-eval-greeting",
+        ),
+        _tool_step(
+            "Reporting back.",
+            "slack_reply",
+            {"message": "The repository has 2 files."},
+            "call-eval-reply",
+        ),
     ),
     "slack_reply_order": (
         _tool_step(
@@ -1199,10 +1290,18 @@ SCRIPT_LIBRARY: dict[str, tuple[StepSpec, ...]] = {
             "call-expedite-ack",
         ),
         _tool_step(
-            "Making the change and pushing the branch.",
+            "Making the change.",
             "execute",
             {"command": _EXPEDITE_SETUP_SCRIPT},
             "call-expedite-setup",
+        ),
+        # A clone in the same command leaves nothing for the workflow push guard to
+        # inspect, so the push runs on its own.
+        _tool_step(
+            "Pushing the branch.",
+            "execute",
+            {"command": f"git -C repo push origin {FEATURE_BRANCH}"},
+            "call-expedite-push",
         ),
         _tool_step(
             "Opening a pull request that is ready for review.",
@@ -1284,10 +1383,22 @@ SCRIPT_LIBRARY: dict[str, tuple[StepSpec, ...]] = {
             "call-multi-ack",
         ),
         _tool_step(
-            "Implementing and pushing both repository changes.",
+            "Implementing both repository changes.",
             "execute",
             {"command": _MULTI_REPO_SCRIPT},
             "call-multi-repos",
+        ),
+        _tool_step(
+            "Pushing the primary branch.",
+            "execute",
+            {"command": f"git -C repo push origin {FEATURE_BRANCH}"},
+            "call-multi-push-primary",
+        ),
+        _tool_step(
+            "Pushing the companion branch.",
+            "execute",
+            {"command": f"git -C companion push origin {SECOND_FEATURE_BRANCH}"},
+            "call-multi-push-companion",
         ),
         _tool_step(
             "Opening the primary pull request.",
@@ -1383,7 +1494,7 @@ SCRIPT_LIBRARY: dict[str, tuple[StepSpec, ...]] = {
         _dynamic_step(_plan_link_step),
         _dynamic_step(_plan_research_step),
         _dynamic_step(_write_plan_step),
-        _dynamic_step(_save_plan_step),
+        _dynamic_step(_publish_artifact_step),
         _dynamic_step(_plan_complete_step),
         StepSpec(content="The requested plan is published as an HTML artifact."),
     ),
@@ -1456,7 +1567,7 @@ def _is_pull_request_fix(text: str) -> bool:
 
     Without this it lands on the catch-all implement script and opens a *new* PR,
     which renumbers the fake store under whichever spec runs next."""
-    return "Fix merge conflicts and failing CI checks on" in text
+    return "Resolve the merge conflicts and fix the failing CI checks on" in text
 
 
 SCRIPT_RULES: tuple[ScriptRule, ...] = (
@@ -1478,6 +1589,10 @@ SCRIPT_RULES: tuple[ScriptRule, ...] = (
         lambda ctx: SLACK_REPLY_ORDER_MARKER in ctx.first_text,
     ),
     ScriptRule(
+        "eval_description",
+        lambda ctx: ctx.human_count <= 1 and EVAL_DESCRIPTION_MARKER in ctx.first_text,
+    ),
+    ScriptRule(
         "thread_tools",
         lambda ctx: ctx.human_count <= 1 and _is_thread_tools_request(ctx.first_text),
     ),
@@ -1488,6 +1603,10 @@ SCRIPT_RULES: tuple[ScriptRule, ...] = (
     ScriptRule(
         "code_channel",
         lambda ctx: ctx.human_count <= 1 and "E2E_CODE_CHANNEL" in ctx.first_text,
+    ),
+    ScriptRule(
+        "background_work",
+        lambda ctx: ctx.human_count <= 1 and BACKGROUND_WORK_MARKER in ctx.first_text,
     ),
     ScriptRule("iframe", lambda ctx: ctx.human_count <= 1 and _is_iframe_request(ctx.first_text)),
     ScriptRule(
@@ -1565,12 +1684,19 @@ class FakeScriptedChatModel(BaseChatModel):
         "max_input_tokens": 128_000,
     }
     script: list[Any] = []
+    described_tool_names: list[str] = []
 
     @property
     def _llm_type(self) -> str:
         return "fake-scripted"
 
     def bind_tools(self, tools: Any, **kwargs: Any) -> FakeScriptedChatModel:  # noqa: ARG002
+        self.described_tool_names = [
+            spec["function"]["name"]
+            for offered in tools
+            if (spec := convert_to_openai_tool(offered)).get("type") == "function"
+            and "display_description" in spec["function"].get("parameters", {}).get("required", [])
+        ]
         return self
 
     def _generate(
@@ -1582,7 +1708,7 @@ class FakeScriptedChatModel(BaseChatModel):
     ) -> ChatResult:
         for message in messages:
             if isinstance(message, SystemMessage):
-                LAST_SYSTEM_PROMPT["text"] = _text(message.content)
+                LAST_SYSTEM_PROMPT.record(_text(message.content))
                 break
         humans = _script_humans(messages)
         context = ScriptContext(
@@ -1592,12 +1718,16 @@ class FakeScriptedChatModel(BaseChatModel):
             pending_text=_latest_turn_text(messages),
         )
         script = _script_for(context)
+        if EVAL_DESCRIPTION_MARKER in context.first_text:
+            assert self.described_tool_names == ["eval"], self.described_tool_names
 
         last_human = max(
             (
                 i
                 for i, m in enumerate(messages)
-                if isinstance(m, HumanMessage) and not _is_reply_nudge(m)
+                if isinstance(m, HumanMessage)
+                and not _is_reply_nudge(m)
+                and not _is_dynamic_context(m)
             ),
             default=-1,
         )

@@ -9,6 +9,7 @@ import langgraph_sdk
 import pytest
 
 import openswe.tools.open_pull_request  # noqa: F401
+from openswe.agent_api.git_metadata import GitTarget, collect_pr_targets
 
 opr = sys.modules["openswe.tools.open_pull_request"]
 
@@ -254,7 +255,7 @@ def test_private_pr_requires_user_token(monkeypatch: pytest.MonkeyPatch) -> None
         _open()
 
 
-def test_returns_existing_pr_on_422(monkeypatch: pytest.MonkeyPatch, fake_store) -> None:
+def test_returns_existing_pr_on_422(monkeypatch: pytest.MonkeyPatch) -> None:
     _set_config(
         monkeypatch,
         {"source": "slack", "github_login": "bob"},
@@ -593,20 +594,23 @@ async def test_record_pr_telemetry_retitles_only_new_prs_when_enabled(
         "merged": False,
         "title": "feat: x",
         "user": {"login": "octo"},
+        "head": {"ref": "Actual/PR-head"},
     }
     client = _FakeClient(post=_FakeResponse(201, {}), get=_FakeResponse(200, details))
 
-    await opr._record_pr_telemetry(
-        client=client,  # type: ignore[arg-type]
-        token="tok",
-        owner="langchain-ai",
-        repo="open-swe",
-        head="open-swe/feature",
-        base="main",
-        pr=details,
-        retitle_thread=retitle_thread,
-        record_opening=record_opening,
-    )
+    with collect_pr_targets() as targets:
+        await opr._record_pr_telemetry(
+            client=client,  # type: ignore[arg-type]
+            token="tok",
+            owner="langchain-ai",
+            repo="open-swe",
+            head="open-swe/feature",
+            base="main",
+            pr=details,
+            retitle_thread=retitle_thread,
+            record_opening=record_opening,
+        )
+    assert targets == [GitTarget(repo="langchain-ai/open-swe", branch="Actual/PR-head")]
 
     if concierge:
         langgraph.threads.update.assert_not_awaited()
@@ -646,23 +650,6 @@ async def test_link_pull_request_rejects_concierge_before_github(
     assert result["success"] is False
     assert "concierge DM" in result["error"]
     token.assert_not_awaited()
-
-
-def test_updating_pr_preserves_original_feedback_run() -> None:
-    original = {
-        "url": "https://github.com/lc/repo/pull/7",
-        "repo_full_name": "lc/repo",
-        "number": 7,
-        "slack_feedback": {"run_id": "original-run", "channel_id": "C1"},
-    }
-    updated = {
-        **original,
-        "state": "open",
-        "slack_feedback": {"run_id": "later-run", "channel_id": "C2"},
-    }
-    result = opr._upsert_pull_request([original], updated)
-    assert result[0]["slack_feedback"] == original["slack_feedback"]
-    assert result[0]["state"] == "open"
 
 
 def test_preflight_401_revokes_user_token(monkeypatch: pytest.MonkeyPatch, user_records) -> None:

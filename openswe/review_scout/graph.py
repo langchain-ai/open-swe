@@ -9,40 +9,34 @@ none it finishes without a model call.
 
 import logging
 import re
-from collections.abc import Awaitable, Callable
+from collections.abc import Mapping
 from typing import Any, NotRequired, cast
 
-from deepagents import create_deep_agent
 from deepagents.backends.protocol import SandboxBackendProtocol
+from deepagents.middleware.subagents import GENERAL_PURPOSE_SUBAGENT
 from langchain.agents.middleware import ModelCallLimitMiddleware, ModelRetryMiddleware
 from langchain.agents.middleware.types import (
     AgentMiddleware,
-    ModelRequest,
-    ModelResponse,
     hook_config,
 )
 from langchain_anthropic.middleware import AnthropicPromptCachingMiddleware
 from langchain_core.language_models.chat_models import BaseChatModel
 from langgraph.graph.state import RunnableConfig
-from langgraph.pregel import Pregel
 from langgraph.runtime import Runtime
 
 from openswe.dashboard.options import gate_fable_model
 from openswe.dashboard.workspace_settings_cache import cached_workspace_settings
 from openswe.github.app import get_github_app_installation_token_with_expiry
 from openswe.github.pull_request_key import PullRequestKey
+from openswe.github.sandbox_access import READ_ONLY_REVIEW_PERMISSIONS
 from openswe.github.thread_token import cache_github_token_for_thread
 from openswe.middleware import (
     BasePrepareRunMiddleware,
-    ModelCallTimeoutMiddleware,
+    ExcludeToolsMiddleware,
     ModelErrorMiddleware,
     RepairOrphanedToolCallsMiddleware,
-    SanitizeFireworksMessagesMiddleware,
-    SanitizeOpenAIResponsesMiddleware,
-    SanitizeThinkingBlocksMiddleware,
-    StableToolResultOrderMiddleware,
-    ToolErrorMiddleware,
 )
+from openswe.middleware.model_call_shape import CallShape
 from openswe.middleware.prepare_run import PrepareRunState
 from openswe.middleware.trace import OpenSWEMiddleware
 from openswe.prompts import apply_tool_descriptions, prompt
@@ -50,17 +44,17 @@ from openswe.review.author_guidance import SteeringHistory
 from openswe.run_config import RunConfig
 from openswe.runtime import (
     DEFAULT_LLM_MAX_TOKENS,
-    DEFAULT_RECURSION_LIMIT,
-    bindable_config,
     ensure_sandbox_for_thread,
     get_cached_sandbox_backend,
-    graph_loaded_for_execution,
 )
 from openswe.sandboxes.repo_prep import prepare_review_repo
+from openswe.sandboxes.tool_runtime import ModelChoice, SurfaceModels, SurfaceSubagent, ToolSurface
+from openswe.search_policy import SHELL_SEARCH_EXCLUDED_TOOLS
 from openswe.tools.plan_walkthrough import (
     walkthrough_describe_other,
     walkthrough_move_to_other,
     walkthrough_plan_chunk,
+    walkthrough_split_hunks,
 )
 from openswe.tools.record_human_input import record_human_input
 from openswe.ui_invalidations import Topic
@@ -109,6 +103,7 @@ async def _ensure_scout_sandbox(thread_id: str, cfg: RunConfig) -> SandboxBacken
         thread_id,
         workspace_slug=cfg.workspace_slug,
         github_proxy_repositories=[cfg.repo.full_name] if cfg.repo else [],
+        github_proxy_permissions=READ_ONLY_REVIEW_PERMISSIONS,
         allow_replacement=True,
     )
 
@@ -200,17 +195,12 @@ class PrepareReviewScoutRunMiddleware(BasePrepareRunMiddleware):
     ) -> dict[str, Any] | None:
         return {"jump_to": "end"} if state.get("scout_nothing_to_plan") else None
 
-    async def awrap_model_call(
-        self,
-        request: ModelRequest,
-        handler: Callable[[ModelRequest], Awaitable[ModelResponse]],
-    ) -> ModelResponse:
+    async def ashape_model_call(
+        self, call: CallShape, state: Mapping[str, object], runtime: Runtime
+    ) -> CallShape:
+        call = await super().ashape_model_call(call, state, runtime)
         # Without messages from the people who asked for the PR, the model would summarize its description instead.
-        if not request.state.get("has_human_input"):
-            request = request.override(
-                tools=[t for t in request.tools if getattr(t, "name", None) != _HUMAN_INPUT_TOOL]
-            )
-        return await super().awrap_model_call(request, handler)
+        return call if state.get("has_human_input") else call.hiding([_HUMAN_INPUT_TOOL])
 
 
 class FinishPlanMiddleware(OpenSWEMiddleware[ReviewScoutState]):
@@ -265,74 +255,73 @@ def _make_model_or_defer(model_id: str, *, use_gateway: bool, **kwargs: Any) -> 
         return make_deferred_error_model(e, model_id=model_id)
 
 
-async def get_review_scout(config: RunnableConfig) -> Pregel:
-    config = config.copy()
-    configurable = dict(config.get("configurable") or {})
-    config["configurable"] = configurable
-    config.setdefault("recursion_limit", DEFAULT_RECURSION_LIMIT)
-    cfg = RunConfig.parse(configurable)
-    thread_id = cfg.thread_id
-
-    if thread_id is None or not graph_loaded_for_execution(config):
-        return create_deep_agent(
-            system_prompt="",
-            tools=[],
-            middleware=[
-                AnthropicPromptCachingMiddleware(ttl="1h", unsupported_model_behavior="ignore")
-            ],
-        ).with_config(bindable_config(config))
-
+async def scout_models(cfg: RunConfig) -> SurfaceModels:
+    """The model the workspace picked for its review scout, which plans without subagents."""
     settings = await cached_workspace_settings(cfg.workspace_slug)
     model_id, effort = settings.review_scout_model
     model_id, effort = gate_fable_model(model_id, effort, fable_enabled=settings.fable_enabled)
-    model = _make_model_or_defer(
+    choice = ModelChoice(
         model_id,
-        use_gateway=settings.effective_gateway_enabled,
-        **provider_model_kwargs(
-            model_id,
-            effort,
-            max_tokens=DEFAULT_LLM_MAX_TOKENS,
-            openai_reasoning_default=DEFAULT_LLM_REASONING,
+        dict(
+            provider_model_kwargs(
+                model_id,
+                effort,
+                max_tokens=DEFAULT_LLM_MAX_TOKENS,
+                openai_reasoning_default=DEFAULT_LLM_REASONING,
+            )
         ),
     )
+    return SurfaceModels(
+        main=choice, subagent=choice, use_gateway=settings.effective_gateway_enabled
+    )
+
+
+async def plan_review_scout(config: RunnableConfig, surface: ToolSurface) -> None:
+    """Plan a scout run into ``surface``: the tools, middleware, models and subagents its MDA run plays."""
+    config = config.copy()
+    configurable = dict(config.get("configurable") or {})
+    config["configurable"] = configurable
+    cfg = RunConfig.parse(configurable)
+    thread_id = cfg.thread_id
+    if thread_id is None:
+        raise ValueError("A scout run needs a thread")
+
+    models = await scout_models(cfg)
 
     async def reconnect_backend(
         _thread_id: str = thread_id, _cfg: RunConfig = cfg
     ) -> SandboxBackendProtocol:
         return await _ensure_scout_sandbox(_thread_id, _cfg)
 
-    return create_deep_agent(
-        model=model,
-        system_prompt="",
-        tools=apply_tool_descriptions(
-            [
-                walkthrough_plan_chunk,
-                walkthrough_move_to_other,
-                walkthrough_describe_other,
-                record_human_input,
-            ]
-        ),
-        backend=get_cached_sandbox_backend(thread_id, reconnect=reconnect_backend),
-        middleware=cast(
-            list[AgentMiddleware[Any, Any, Any]],
-            [
-                PrepareReviewScoutRunMiddleware(thread_id=thread_id, config=config),
-                AnthropicPromptCachingMiddleware(ttl="1h", unsupported_model_behavior="ignore"),
-                ModelCallLimitMiddleware(run_limit=SCOUT_MODEL_CALL_LIMIT, exit_behavior="end"),
-                ToolErrorMiddleware(),
-                SanitizeFireworksMessagesMiddleware(),
-                SanitizeOpenAIResponsesMiddleware(),
-                SanitizeThinkingBlocksMiddleware(),
-                RepairOrphanedToolCallsMiddleware(),
-                StableToolResultOrderMiddleware(),
-                ModelRetryMiddleware(retry_on=(TimeoutError,)),
-                ModelErrorMiddleware(),
-                ModelCallTimeoutMiddleware(),
-                FinishPlanMiddleware(thread_id=thread_id, config=config),
-            ],
-        ),
-    ).with_config(bindable_config(config))
-
-
-# langgraph.json entrypoint. Runs trace into LANGSMITH_PROJECT like everything else.
-traced_review_scout = get_review_scout
+    middleware = cast(
+        list[AgentMiddleware[Any, Any, Any]],
+        [
+            PrepareReviewScoutRunMiddleware(thread_id=thread_id, config=config),
+            AnthropicPromptCachingMiddleware(ttl="1h", unsupported_model_behavior="ignore"),
+            ModelCallLimitMiddleware(run_limit=SCOUT_MODEL_CALL_LIMIT, exit_behavior="end"),
+            ExcludeToolsMiddleware(excluded=SHELL_SEARCH_EXCLUDED_TOOLS),
+            RepairOrphanedToolCallsMiddleware(),
+            ModelRetryMiddleware(retry_on=(TimeoutError,)),
+            ModelErrorMiddleware(),
+            FinishPlanMiddleware(thread_id=thread_id, config=config),
+        ],
+    )
+    surface.base_tools = apply_tool_descriptions(
+        [
+            walkthrough_plan_chunk,
+            walkthrough_split_hunks,
+            walkthrough_move_to_other,
+            walkthrough_describe_other,
+            record_human_input,
+        ]
+    )
+    surface.middleware = middleware
+    surface.files = get_cached_sandbox_backend(thread_id, reconnect=reconnect_backend)
+    surface.models = models
+    surface.subagents = [
+        SurfaceSubagent(
+            name=GENERAL_PURPOSE_SUBAGENT["name"],
+            description=GENERAL_PURPOSE_SUBAGENT["description"],
+            system_prompt=GENERAL_PURPOSE_SUBAGENT["system_prompt"],
+        )
+    ]

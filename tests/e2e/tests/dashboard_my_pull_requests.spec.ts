@@ -319,19 +319,11 @@ test.describe("my pull requests", () => {
     await expectStatus(card(page, ok), "Approved");
 
     const fixButtons = (pr: SeededPullRequest) =>
-      card(page, pr).getByRole("button", { name: /^Fix (conflicts|checks)$/ });
-    const fix = card(page, broken).getByRole("button", {
-      name: "Fix checks",
-      exact: true,
-    });
+      card(page, pr).getByRole("button", { name: "Fix", exact: true });
+    const fix = fixButtons(broken);
     await expect(fix).toBeEnabled();
     await expect(fixButtons(broken)).toHaveCount(1);
-    await expect(
-      card(page, conflict).getByRole("button", {
-        name: "Fix conflicts",
-        exact: true,
-      }),
-    ).toBeEnabled();
+    await expect(fixButtons(conflict)).toBeEnabled();
     await expect(fixButtons(conflict)).toHaveCount(1);
     await expect(fixButtons(ok)).toHaveCount(0);
 
@@ -348,7 +340,7 @@ test.describe("my pull requests", () => {
     const response = await dispatched;
     expect(response.status(), await response.text()).toBe(200);
     await expect(
-      page.getByText(`Check fix queued for ${COMPANION}#${broken.number}`),
+      page.getByText(`Fix queued for ${COMPANION}#${broken.number}`),
     ).toBeVisible();
   });
 
@@ -396,7 +388,7 @@ test.describe("my pull requests", () => {
     ).toBe(false);
   });
 
-  test("withholds the merge until a method is chosen on the card", async ({
+  test("defaults to squash while allowing a different method on the card", async ({
     page,
   }) => {
     await setRepoMergeMethods(page, DEMO, ["squash", "rebase"]);
@@ -412,14 +404,14 @@ test.describe("my pull requests", () => {
     const method = card(page, mine).getByLabel(
       `Merge method for PR #${mine.number}`,
     );
-    // With two methods allowed and none used before, the button asks rather than guesses.
-    const choose = card(page, mine).getByRole("button", {
-      name: "Choose how to merge",
-      exact: true,
-    });
+    await expect(
+      card(page, mine).getByRole("button", {
+        name: "Squash and merge",
+        exact: true,
+      }),
+    ).toBeEnabled();
     await expect(method).toBeEnabled();
-    await expect(choose).toBeVisible();
-    await choose.click();
+    await method.click();
     await expect(
       page.getByRole("menuitemradio", { name: /^Merge commit/ }),
     ).toHaveCount(0);

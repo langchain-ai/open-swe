@@ -1,4 +1,4 @@
-.PHONY: all format format-check lint typecheck test tests integration_tests help run dev dev-ui postgres migration tunnel web build-dashboard desktop install-desktop install-checkout swagger cli
+.PHONY: all format format-check lint typecheck mda-typecheck mda-test test tests integration_tests help run dev dev-mda mda-cli dev-ui postgres migration tunnel web build-dashboard desktop install-desktop install-checkout swagger cli
 
 # Default target executed when no arguments are given to make.
 all: help
@@ -18,6 +18,22 @@ dev: $(if $(POSTGRES_URI),,postgres)
 		echo 'Port 2024 is already in use (a stale container or another backend?):' >&2; \
 		lsof -nP -iTCP:2024 -sTCP:LISTEN >&2; exit 1; fi
 	uv run langgraph dev --no-browser --port 2024 --n-jobs-per-worker 10
+
+# The Managed Deep Agents runtime `make dev` sends every agent run to (mda/README.md).
+dev-mda: mda-cli
+	cd mda && uv run --locked mda dev --port 2025 --no-browser
+
+# The `mda` CLI, built from the vendored SDK (vendor/README.md) into the runtime
+# package mda/ installs, where its `mda` command runs it from. Rebuilt only when its
+# sources change: the vendored build script, missing its .git, always reruns.
+MDA_SDK := vendor/managed-deepagents-sdk
+MDA_CLI := $(MDA_SDK)/packages/pypi/src/managed_deepagents/_binaries/mda
+mda-cli: $(MDA_CLI)
+$(MDA_CLI): $(MDA_SDK)/Cargo.toml $(MDA_SDK)/Cargo.lock $(MDA_SDK)/UPSTREAM $(shell find $(MDA_SDK)/crates -type f)
+	MDA_GIT_SHA=$$(cut -d' ' -f1 $(MDA_SDK)/UPSTREAM) MDA_GIT_DATE=$$(cut -d' ' -f2 $(MDA_SDK)/UPSTREAM) \
+		cargo build --locked --release --manifest-path $(MDA_SDK)/Cargo.toml
+	mkdir -p $(@D)
+	cp $(MDA_SDK)/target/release/mda $@
 
 postgres:
 	docker compose up -d --wait postgres
@@ -119,7 +135,16 @@ format-check:
 	uv run ruff format $(PYTHON_FILES) --check
 
 typecheck:
-	uv run ty check openswe tests
+	uv run ty check openswe packages tests
+	uv run ty check --python-version 3.8 openswe/sandbox_scripts/*.py
+
+# mda/ is its own project: checked and tested against its own environment alone,
+# so an import reaching for the backend (`openswe`) or a database driver fails here.
+mda-typecheck:
+	cd mda && uv sync --locked --group test && uv run --with ty==0.0.84 ty check --python .venv
+
+mda-test:
+	cd mda && uv run --locked --group test pytest $(PYTEST_ARGS)
 
 ######################
 # HELP
@@ -128,12 +153,14 @@ typecheck:
 help:
 	@echo '----'
 	@echo 'dev                          - run LangGraph dev server (starts the local PostgreSQL container unless POSTGRES_URI is set)'
+	@echo 'dev-mda                      - Managed Deep Agents dev server on :2025, where every agent run goes'
+	@echo 'mda-cli                      - build the mda CLI from the vendored SDK (needs cargo)'
 	@echo 'dev-ui                       - Vite dev server plus the LangGraph dev server fronting it (UI hot reload on :2024)'
 	@echo 'postgres                     - start the local PostgreSQL container on 127.0.0.1:5433'
 	@echo 'migration m="..."            - create the next database migration'
 	@echo 'web                          - run the dashboard web server'
 	@echo 'tunnel                       - ngrok tunnel to :2024 on NGROK_DOMAIN, webhooks only (any other tunnel works too)'
-	@echo 'run                          - run webhook server'
+	@echo 'run                          - run the FastAPI app alone on :8000'
 	@echo 'swagger                      - regenerate swagger.json from the backend routes'
 	@echo 'desktop                      - run the Electron desktop app (backend must be running)'
 	@echo 'install-desktop              - install or update Open SWE Desktop on macOS'
@@ -143,6 +170,8 @@ help:
 	@echo 'format                       - run code formatters'
 	@echo 'lint                         - run linters'
 	@echo 'typecheck                    - run ty on openswe/ and tests/'
+	@echo 'mda-typecheck                - type-check mda/ against its own environment'
+	@echo 'mda-test                     - run mda/ tests in its own environment'
 	@echo 'test                         - run unit tests'
 	@echo 'integration_tests            - run integration tests'
 	@echo '----'

@@ -4,7 +4,6 @@ import { Banner } from "@langchain/macaw-components/Banner"
 import {
   DropdownMenu,
   DropdownMenuContent,
-  DropdownMenuItem,
   DropdownMenuTrigger,
 } from "@langchain/macaw-components/DropdownMenu"
 import { IconButton } from "@langchain/macaw-components/IconButton"
@@ -40,6 +39,7 @@ import type {
 } from "./ComposerPromptEditor"
 import type { ComposerSlashCommand, ComposerTrigger } from "./composerTrigger"
 import type { RunTarget } from "./RunTargetSelector"
+import { DropdownMenuItem } from "@/components/MenuItem"
 import type {
   DesktopProject,
   DesktopProjectRef,
@@ -121,16 +121,13 @@ export interface ChatComposerProps {
   /** Enables the stop button for the thread's live run. */
   activeRun?: ActiveRun
   onStop?: () => void | Promise<void>
+  /** False when this viewer may not stop the live run. */
+  stoppable?: boolean
   onSubmit?: (
     value: string,
     images: Array<ImageChunk>,
     options?: SubmitOptions
   ) => void | Promise<void>
-  /**
-   * Enter on an empty composer while a run is live. The thread view uses it to
-   * send the next queued message now.
-   */
-  onEmptySubmit?: () => void
   /** What a message sent while a run is live does; drives copy only. */
   followUpBehavior?: FollowUpBehavior
   /** Content to put back in front of whatever is being typed. */
@@ -146,7 +143,7 @@ export interface ChatComposerProps {
   /** Desktop-only execution target. Omit this prop to keep the control out of the web UI. */
   runTarget?: RunTarget
   onRunTargetChange?: (next: RunTarget) => void
-  /** The run target is a staged move that takes effect with the next message. */
+  /** The thread is still moving to the run target, checkout and all. */
   runTargetPending?: boolean
   localRepos?: Array<DesktopProject>
   selectedLocalRepoPath?: string | null
@@ -271,8 +268,8 @@ export const ChatComposer = memo(function ChatComposer({
   canOffload = false,
   activeRun,
   onStop,
+  stoppable,
   onSubmit,
-  onEmptySubmit,
   followUpBehavior = "steer",
   restoreDraft = null,
   droppedFiles = null,
@@ -557,16 +554,6 @@ export const ChatComposer = memo(function ChatComposer({
       if (key === "Enter" && !event.shiftKey) {
         if (canSubmit) {
           void handleSubmit({ alternate: event.metaKey || event.ctrlKey })
-        } else if (
-          composerEmpty &&
-          busy &&
-          !disabled &&
-          !isSubmitting &&
-          onEmptySubmit
-        ) {
-          // Only a truly empty composer sends the queue head. A draft that
-          // cannot be sent (images on a text-only model) must stay put.
-          onEmptySubmit()
         }
         // Swallow it either way: a bare Enter must never insert a newline in a
         // composer whose Enter means "send".
@@ -576,15 +563,10 @@ export const ChatComposer = memo(function ChatComposer({
     },
     [
       activeItem,
-      busy,
       canSubmit,
       commandItems,
-      composerEmpty,
-      disabled,
       handleSubmit,
-      isSubmitting,
       menuOpen,
-      onEmptySubmit,
       selectCommandItem,
       triggerKey,
     ]
@@ -874,7 +856,7 @@ export const ChatComposer = memo(function ChatComposer({
           onCommandKeyDown={handleCommandKeyDown}
           onPaste={handlePaste}
           placeholder={
-            busy
+            busy && !disabled
               ? followUpBehavior === "steer"
                 ? "Send a message to steer the run..."
                 : "Send a message to queue next..."
@@ -902,7 +884,7 @@ export const ChatComposer = memo(function ChatComposer({
               sideOffset={7}
             >
               <DropdownMenuItem
-                className="gap-space-2 text-xs"
+                className="text-xs"
                 disabled={disabled || pendingImages.length >= MAX_IMAGE_COUNT}
                 onSelect={() => fileInputRef.current?.click()}
                 size="sm"
@@ -943,6 +925,7 @@ export const ChatComposer = memo(function ChatComposer({
               followUpBehavior === "steer" ? "Steer agent" : "Queue message"
             }
             onStop={onStop}
+            stoppable={stoppable}
             stopOnEscape={!menuOpen && !modelPickerOpen && !extrasMenuOpen}
             submitting={isSubmitting}
           />

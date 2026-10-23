@@ -4,7 +4,6 @@ import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuGroup,
-  DropdownMenuItem,
   DropdownMenuLabel,
   DropdownMenuTrigger,
 } from "@langchain/macaw-components/DropdownMenu"
@@ -14,6 +13,7 @@ import { GithubLogoIcon } from "@phosphor-icons/react/dist/ssr/GithubLogo"
 import { KanbanIcon } from "@phosphor-icons/react/dist/ssr/Kanban"
 import { SlackLogoIcon } from "@phosphor-icons/react/dist/ssr/SlackLogo"
 
+import { DropdownMenuItem } from "@/components/MenuItem"
 import { AUTOMATION_EVENT_PROVIDERS } from "@/features/agents/lib/types"
 import { CRON_PRESETS } from "@/features/automations/lib/cron"
 
@@ -77,7 +77,7 @@ function TriggerItem({
     <DropdownMenuItem
       size="sm"
       onSelect={onSelect}
-      className="gap-space-2 text-secondary focus:text-primary"
+      className="text-secondary focus:text-primary"
     >
       <span className="flex-1">{label}</span>
       {more && (

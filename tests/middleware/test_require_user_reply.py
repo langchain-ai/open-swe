@@ -200,7 +200,7 @@ class TestRequireUserReplyMiddleware:
         import openswe.slack.tools.reply as reply_tool
 
         posted = AsyncMock(return_value={"success": True})
-        monkeypatch.setattr(reply_tool, "slack_reply", posted)
+        monkeypatch.setattr(reply_tool, "send_slack_reply", posted)
         state = _state(
             HumanMessage(content="what is up"),
             AIMessage(content="all good"),
@@ -219,7 +219,7 @@ class TestRequireUserReplyMiddleware:
         import openswe.slack.tools.reply as reply_tool
 
         posted = AsyncMock(return_value={"success": True})
-        monkeypatch.setattr(reply_tool, "slack_reply", posted)
+        monkeypatch.setattr(reply_tool, "send_slack_reply", posted)
         middleware = _middleware(max_retries=2)
         messages: list[Any] = [HumanMessage(content="what is up"), AIMessage(content="all good")]
         for attempt in (1, 2):
@@ -239,7 +239,7 @@ class TestRequireUserReplyMiddleware:
         import openswe.slack.tools.reply as reply_tool
 
         posted = AsyncMock(return_value={"success": True})
-        monkeypatch.setattr(reply_tool, "slack_reply", posted)
+        monkeypatch.setattr(reply_tool, "send_slack_reply", posted)
 
         await _middleware(max_retries=2).aafter_model(
             _state(HumanMessage(content="what is up"), AIMessage(content=""), reply_nudges=2),
@@ -263,7 +263,7 @@ class TestRequireUserReplyMiddleware:
         import openswe.slack.tools.reply as reply_tool
 
         posted = AsyncMock(return_value={"success": True})
-        monkeypatch.setattr(reply_tool, "slack_reply", posted)
+        monkeypatch.setattr(reply_tool, "send_slack_reply", posted)
         seen: list[ModelRequest] = []
 
         @wrap_model_call
@@ -315,12 +315,13 @@ class TestRequireUserReplyMiddleware:
         assert posted.await_args is not None
         assert posted.await_args.args[:2] == ("all good", "final")
 
-    def test_each_run_resolves_its_own_surface(self) -> None:
+    @pytest.mark.asyncio
+    async def test_each_run_resolves_its_own_surface(self) -> None:
         middleware = RequireUserReplyMiddleware(
             TOOL, NO_REPLY_TOOL, initial_surface=WEB_REPLY_SURFACE
         )
 
-        assert middleware.before_agent(_state(), _runtime()) == {
+        assert await middleware.abefore_agent(_state(), _runtime()) == {
             "reply_surface": WEB_REPLY_SURFACE,
             "reply_nudges": 0,
         }

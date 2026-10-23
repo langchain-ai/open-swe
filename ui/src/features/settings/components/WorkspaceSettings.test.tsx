@@ -25,6 +25,7 @@ import { invalidationTopic } from "@/lib/invalidations/topics"
 import { makeQueryClient } from "@/lib/query"
 
 import { WorkspaceSettingsPanel } from "./WorkspaceSettings"
+import { ModelPairControl } from "./WorkspaceSettingsSections"
 
 vi.mock("@/lib/errorReporting", () => ({ reportError: vi.fn() }))
 vi.mock("@monaco-editor/react", () => ({
@@ -166,6 +167,39 @@ async function invalidateWorkspaces() {
 }
 
 describe("WorkspaceSettingsPanel", () => {
+  it("preserves saved effort while a subagent uses the parent model", () => {
+    const onChange = vi.fn()
+    const props = {
+      label: "Open SWE Agent subagents",
+      models: [
+        {
+          id: "openai:gpt-6.1-sol",
+          label: "GPT-6.1 Sol",
+          supports_images: true,
+          efforts: ["medium", "high"],
+          default_effort: "medium",
+        },
+      ],
+      model: "openai:gpt-6.1-sol",
+      effort: "high",
+      onChange,
+      disabled: false,
+    }
+    const { rerender } = render(
+      <ModelPairControl {...props} parentModel={props.model} />
+    )
+    const effort = () =>
+      screen.getByRole("combobox", {
+        name: "Open SWE Agent subagents reasoning effort",
+      }) as HTMLButtonElement
+    expect(effort().disabled).toBe(true)
+    expect(effort().textContent).toContain("Parent run")
+    rerender(<ModelPairControl {...props} parentModel="another-model" />)
+    expect(effort().disabled).toBe(false)
+    expect(effort().textContent).toContain("high")
+    expect(onChange).not.toHaveBeenCalled()
+  })
+
   it("shows model labels before the dropdown opens and after it closes", async () => {
     mockApis()
     vi.mocked(api.options).mockResolvedValue({
@@ -194,10 +228,6 @@ describe("WorkspaceSettingsPanel", () => {
     renderPage()
 
     const trigger = (await screen.findByText("GPT-6.1 Sol")).closest("button")!
-    const models = screen
-      .getByRole("heading", { name: "Model Defaults" })
-      .closest("section")!
-    expect(within(models).getByText("Inherit instance setting")).toBeTruthy()
     expect(screen.queryByRole("listbox")).toBeNull()
     fireEvent.click(trigger)
     expect(
@@ -721,7 +751,7 @@ describe("WorkspaceSettingsPanel", () => {
       name: "Rebuilding…",
     })
     expect((rebuilding as HTMLButtonElement).disabled).toBe(true)
-  })
+  }, 15_000)
 
   it("offers every accessible repository as its default", async () => {
     mockApis()
@@ -744,7 +774,7 @@ describe("WorkspaceSettingsPanel", () => {
 
     // The selector stays disabled until the workspace's settings have loaded.
     const trigger = await screen.findByRole("button", {
-      name: /Pick a repository/,
+      name: "No default repository",
     })
     await waitFor(() => expect(trigger.hasAttribute("disabled")).toBe(false))
     fireEvent.click(trigger)

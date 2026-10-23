@@ -2,16 +2,14 @@
 
 import json
 import logging
-from collections.abc import Awaitable, Callable, Mapping
-from dataclasses import replace
+from collections.abc import Mapping
 from typing import Any
 
 import langgraph_sdk
-from langchain.agents.middleware.types import ModelRequest, ModelResponse
-from langchain_core.messages import HumanMessage, SystemMessage, ToolMessage
+from langchain_core.messages import HumanMessage, ToolMessage
 from langchain_core.tools import BaseTool, StructuredTool
 from langgraph.config import get_config
-from langgraph.types import Command
+from langgraph.runtime import Runtime
 
 from openswe.incidents import documents, service
 from openswe.incidents.evidence_tools import EvidenceCollector, source_url
@@ -25,14 +23,15 @@ from openswe.incidents.report import (
     finalize_report,
 )
 from openswe.incidents.turns import SESSION_TS
+from openswe.middleware.model_call_shape import CallShape
 from openswe.middleware.trace import OpenSWEMiddleware
 from openswe.prompts import prompt
 from openswe.run_config import RunConfig
 from openswe.slack.client import post_slack_thread_reply_with_ts
 from openswe.slack.http import SlackRequestError
 from openswe.source_context import SlackThreadRef
-from openswe.store import now_iso
 from openswe.utils.dashboard_links import dashboard_incident_url
+from openswe.utils.time import now_iso
 
 logger = logging.getLogger(__name__)
 
@@ -210,7 +209,7 @@ async def load_incident_session(config: Mapping[str, Any]) -> IncidentSession:
     thread_id = cfg.get("thread_id")
     if not isinstance(thread_id, str) or not thread_id:
         raise PermissionError("Incident runs require a thread")
-    if cfg.get("github_login") or cfg.get("user_email") or cfg.get("local_run"):
+    if cfg.get("github_login") or cfg.get("user_email"):
         raise PermissionError("Incident runs cannot carry personal execution identity")
     thread = await langgraph_sdk.get_client().threads.get(thread_id)
     metadata = thread.get("metadata") if isinstance(thread, dict) else None
@@ -243,26 +242,18 @@ class IncidentMiddleware(OpenSWEMiddleware):
     def __init__(self, session: IncidentSession) -> None:
         self.session = session
 
-    async def awrap_model_call(
-        self,
-        request: ModelRequest,
-        handler: Callable[[ModelRequest], Awaitable[ModelResponse]],
-    ) -> ModelResponse:
+    async def ashape_model_call(
+        self, call: CallShape, state: Mapping[str, object], runtime: Runtime
+    ) -> CallShape:
         await self.session.check()
-        for message in request.messages:
+        messages = state.get("messages")
+        for message in messages if isinstance(messages, list) else []:
             if isinstance(message, HumanMessage):
                 context_evidence(message.text, self.session.collector)
-        existing = request.system_message.text if request.system_message else ""
-        prompt = self.session.prompt
-        return await handler(
-            request.override(
-                system_message=SystemMessage(
-                    content=f"{existing}\n\n{prompt}" if existing else prompt
-                )
-            )
-        )
+        return call.appending(self.session.prompt)
 
-    def _observe(self, message: ToolMessage, call: dict[str, Any]) -> ToolMessage:
+    def observe(self, message: ToolMessage, call: Mapping[str, Any]) -> ToolMessage:
+        """``message``, the result of ``call``, recorded as evidence the report can cite."""
         artifact = message.artifact if isinstance(message.artifact, dict) else {}
         content = artifact.get("structured_content")
         if content is None:
@@ -314,24 +305,3 @@ class IncidentMiddleware(OpenSWEMiddleware):
             else [*message.content, {"type": "text", "text": reference}]
         )
         return message.model_copy(update={"content": enriched})
-
-    async def awrap_tool_call(self, request: Any, handler: Callable[..., Awaitable[Any]]) -> Any:
-        result = await handler(request)
-        if isinstance(result, ToolMessage):
-            return self._observe(result, request.tool_call)
-        if isinstance(result, Command) and isinstance(result.update, dict):
-            messages = result.update.get("messages")
-            if isinstance(messages, list):
-                return replace(
-                    result,
-                    update={
-                        **result.update,
-                        "messages": [
-                            self._observe(message, request.tool_call)
-                            if isinstance(message, ToolMessage)
-                            else message
-                            for message in messages
-                        ],
-                    },
-                )
-        return result

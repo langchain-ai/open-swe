@@ -1,11 +1,9 @@
 import { CaretDownIcon, CheckIcon } from "@langchain/macaw-components/icons"
-import {
-  DropdownMenuItem,
-  DropdownMenuLabel,
-} from "@langchain/macaw-components/DropdownMenu"
+import { DropdownMenuLabel } from "@langchain/macaw-components/DropdownMenu"
 import type { IconComponent } from "@langchain/macaw-components/Icon"
 import type { ReactNode } from "react"
 
+import { DropdownMenuItem } from "@/components/MenuItem"
 import { cn } from "@/lib/utils"
 
 export const COMPOSER_TRIGGER_CLASS_NAME =
@@ -57,7 +55,7 @@ export function ComposerMenuOption({
   return (
     <DropdownMenuItem
       className={cn(
-        "gap-space-2 text-xs",
+        "text-xs",
         destructive && "text-error-secondary focus:bg-error-subtle"
       )}
       disabled={disabled}

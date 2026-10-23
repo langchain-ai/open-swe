@@ -1,15 +1,52 @@
-"""Exclude personal skill context retained by public thread checkpoints."""
+"""The skills a run may load, listed in each model call's system prompt.
 
-from collections.abc import Awaitable, Callable
+A thread anyone in the workspace can open leaves out personal skills its
+checkpoints kept.
+"""
+
+from collections.abc import Mapping
 from typing import Any, cast
 
-from deepagents.middleware.skills import SkillsMiddleware, SkillsState, SkillsStateUpdate
-from langchain.agents.middleware.types import ModelRequest, ModelResponse
+from deepagents.middleware.skills import (
+    SkillMetadata,
+    SkillsMiddleware,
+    SkillsState,
+    SkillsStateUpdate,
+)
 from langchain_core.runnables import RunnableConfig
 from langgraph.runtime import Runtime
 
+from openswe.middleware.model_call_shape import CallShape
 
-class WorkspaceSkillsMiddleware(SkillsMiddleware):
+
+class RunSkillsMiddleware(SkillsMiddleware):
+    """deepagents' skills, whose section each model call's system prompt ends with."""
+
+    async def ashape_model_call(
+        self, call: CallShape, state: Mapping[str, object], runtime: Runtime
+    ) -> CallShape:
+        if self.system_prompt_template is None:
+            return call
+        listed = state.get("skills_metadata")
+        errors = state.get("skills_load_errors")
+        return call.appending(
+            self.system_prompt_template.format(
+                skills_locations=self._format_skills_locations(),
+                skills_load_warnings=self._format_skills_load_warnings(
+                    [error for error in errors if isinstance(error, str)]
+                    if isinstance(errors, list)
+                    else []
+                ),
+                skills_list=self._format_skills_list(
+                    [cast(SkillMetadata, skill) for skill in listed if isinstance(skill, dict)]
+                    if isinstance(listed, list)
+                    else []
+                ),
+            )
+        )
+
+
+class WorkspaceSkillsMiddleware(RunSkillsMiddleware):
     @property
     def name(self) -> str:
         # Replace the built-in middleware in its existing stack position.
@@ -40,8 +77,8 @@ class WorkspaceSkillsMiddleware(SkillsMiddleware):
             skills_load_errors=[],
         )
 
-    async def awrap_model_call(
-        self, request: ModelRequest, handler: Callable[[ModelRequest], Awaitable[ModelResponse]]
-    ) -> ModelResponse:
-        request = request.override(state=self._scoped_state(cast(dict[str, Any], request.state)))
-        return await super().awrap_model_call(request, handler)
+    async def ashape_model_call(
+        self, call: CallShape, state: Mapping[str, object], runtime: Runtime
+    ) -> CallShape:
+        scoped = self._scoped_state(dict(state))
+        return await super().ashape_model_call(call, cast(Mapping[str, object], scoped), runtime)

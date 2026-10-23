@@ -3,8 +3,10 @@
 This drives the **whole happy path** through two mock UIs:
 
 1. A user asks Open SWE to implement something in a **mock Slack** thread.
-2. The **real agent** runs (via `langgraph dev`): it implements the change in a
-   **local temp-dir sandbox**, pushes a branch, and opens a PR on a **fake GitHub**.
+2. The **real agent** runs: its model loop on a local **Managed Deep Agents**
+   server (the real `mda/` project), its tools and middleware on the backend
+   (`langgraph dev`). It implements the change in a **local temp-dir sandbox**,
+   pushes a branch, and opens a PR on a **fake GitHub**.
 3. It posts the PR link back to the **same Slack thread** — visible in the mock UI.
 
 ## What is faked vs. real
@@ -16,6 +18,7 @@ code runs for real.
 | ---------------------------------------------------------------- | -------------------------------------------------------------------------- |
 | Slack webhook → `process_slack_mention` → run dispatch           | **real** (`openswe.webapp`)                                                  |
 | `get_agent`, deepagents loop, tools, middleware, prompt          | **real**                                                                   |
+| Managed Deep Agents runtime (`mda/`, compiled by `mda build`)    | **real**, served locally by `mda-dev.sh` on `E2E_MDA_PORT` (default 2025)   |
 | `open_pull_request`, `slack_reply` tools                  | **real**                                                                   |
 | Sandbox                                                          | **real** `local` provider, rooted in a throwaway temp dir                  |
 | Git remote ("GitHub")                                            | **real git**, a local bare repo the agent clones/pushes                    |
@@ -30,7 +33,7 @@ code runs for real.
 | GitHub webhook deliveries (CI, review, PR events)                | **real** route, driven by `POST /control/github-event` (signed)            |
 | Run-completion webhook (`/webhooks/run-complete`)                | **real** — LangGraph delivers it for every dispatched run; `langgraph.e2e.json` allows the loopback URL production rejects |
 | Submitted PR reviews, conditional merge, collaborator permission  | **fake** (`/fake-gh/...`), enforcing self-approval and head-SHA rules      |
-| Review page chat (`chat` graph) and its diff/comment/review tools | **real**; PR contents, compare and inline comments served by `/fake-gh`    |
+| Review page chat (the PR's `agent` thread) and its diff/comment/review tools | **real**; PR contents, compare and inline comments served by `/fake-gh`    |
 | Review scout sandbox                                              | **fake** (`patches.py`) — provisioning fails after a delay, so a scout run ends in a known error |
 | `users` rows + provider identities for the named test users      | **real** (seeded through `User.sign_in` / `link`)                          |
 
@@ -43,8 +46,12 @@ so what Playwright asserts on is exactly what the real agent produced.
   fake API URLs, isolated `GIT_CONFIG_GLOBAL`, bot-token-only mode).
 - `fake_llm.py` — the scripted `BaseChatModel` (the only faked agent piece).
 - `patches.py` — monkeypatches the boundaries (LLM, GitHub/Slack URLs, token mint).
-- `agent_entrypoint.py` — langgraph `agent` graph: applies patches, re-exports the
-  real `traced_agent`.
+- `agent_entrypoint.py` — langgraph `agent` graph: applies patches in the backend
+  worker, re-exports the read-only `traced_agent`. Every Open SWE thread runs on
+  Managed Deep Agents, whose hooks the backend answers from `plan_agent`.
+- `mda-dev.sh` + `mda_entrypoint.py` — the Managed Deep Agents server: `mda build`
+  output served by `langgraph dev` as `mda dev` serves it, with the fake model
+  and loopback completion webhooks.
 - `harness.py` — langgraph `http.app`: the real `openswe.webapp` plus the fake
   GitHub/Slack APIs, the mock UIs, and the control/compose endpoints.
 - `fakes.py` — in-memory PR/Slack stores + git seeding of the bare remote. PR
@@ -123,9 +130,10 @@ or `langgraph dev` (a throwaway `docker run -d -p 5433:5432 -e POSTGRES_PASSWORD
 with `POSTGRES_URI=postgresql://postgres:postgres@localhost:5433/postgres` is enough).
 CI provides one as a job service.
 
-Poke at it by hand (from the repo root):
+Poke at it by hand (from the repo root), each server in its own terminal:
 
 ```bash
+tests/e2e/mda-dev.sh
 uv run langgraph dev --config tests/e2e/langgraph.e2e.json --port 2024 \
   --no-browser --allow-blocking --no-reload
 # open http://127.0.0.1:2024/mock/slack  and  /mock/github
