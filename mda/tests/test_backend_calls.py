@@ -672,6 +672,58 @@ async def test_box_call_git_evidence_reaches_the_turn_after_its_run_closed(
     assert turn.metadata["open_swe_git_evidence"] == evidence
 
 
+async def test_a_command_the_guards_refuse_is_recorded_with_their_reason(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("OPEN_SWE_BACKEND_URL", "https://backend.invalid")
+    for module in ("rt.middleware", "rt.tools", "rt.file_tools"):
+        monkeypatch.setattr(f"{module}.run_id", lambda: "run-1")
+    backend = OpenSweBackend("secret-token")
+    refusal = ShellVerdict(allowed=False, refusal="pr_creation_fallback_blocked")
+    monkeypatch.setattr(backend, "post", AsyncMock(return_value=refusal.model_dump(mode="json")))
+    started = AsyncMock()
+    finished = AsyncMock(return_value={})
+    monkeypatch.setattr(backend, "tool_started", started)
+    monkeypatch.setattr(backend, "tool_result", finished)
+    runtime = ToolRuntime(
+        state={"messages": []},
+        context=None,
+        config={},
+        stream_writer=lambda event: None,
+        tool_call_id="call-1",
+        store=None,
+    )
+    request = ToolCallRequest(
+        tool_call={
+            "name": "execute",
+            "args": {"command": "gh pr create --fill"},
+            "id": "call-1",
+            "type": "tool_call",
+        },
+        tool=None,
+        state={"messages": []},
+        runtime=runtime,
+    )
+    in_box = AsyncMock()
+    files = FileToolsMiddleware(
+        backend,
+        FilesSpec(guards=["shell_commands"]),
+        300,
+        remote={},
+        remote_files=MagicMock(),
+        in_box=True,
+    )
+
+    refused = await files.awrap_tool_call(request, in_box)
+    await backend.reports.drain()
+
+    assert isinstance(refused, ToolMessage) and refused.status == "error"
+    in_box.assert_not_awaited()
+    started.assert_awaited_once()
+    [[_body, recorded]] = [call.args for call in finished.await_args_list]
+    assert recorded.content == "pr_creation_fallback_blocked"
+
+
 async def test_a_read_file_the_backend_serves_gets_the_read_checks(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

@@ -104,15 +104,24 @@ class FileToolsMiddleware(AgentMiddleware):
         call_ = request.tool_call
         if call_["name"] not in FILE_TOOLS:
             return await handler(request)
-        screened = await self._screened(request)
-        if isinstance(screened, ToolMessage):
-            return screened
-        request = screened
         if self._in_box and self._on_backend(call_["name"], call_["args"]):
             run: Handler = self._run_remote
         else:
             run = partial(_retried, handler=partial(self._within_deadline, handler=handler))
-        return await reported(self._backend, request, partial(self._checked, handler=run))
+        # The transcript records a call the guards refuse, with their reason, as any other.
+        return await reported(
+            self._backend,
+            request,
+            partial(self._checked, handler=partial(self._screened_run, handler=run)),
+        )
+
+    async def _screened_run(
+        self, request: ToolCallRequest, handler: Handler
+    ) -> ToolMessage | Command:
+        screened = await self._screened(request)
+        if isinstance(screened, ToolMessage):
+            return screened
+        return await handler(screened)
 
     def _on_backend(self, name: str, arguments: Mapping[str, object]) -> bool:
         path = _absolute(arguments.get(_PATH_ARGUMENTS.get(name, "")))
