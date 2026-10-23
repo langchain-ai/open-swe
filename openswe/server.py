@@ -134,6 +134,7 @@ from openswe.runtime.constants import (
 from openswe.runtime.constants import (
     DEFAULT_LLM_MODEL_ID as DEFAULT_LLM_MODEL_ID,
 )
+from openswe.sandbox_secrets.proxy import secrets_for_login
 from openswe.sandboxes.lifecycle import (
     ensure_sandbox_for_thread,
     get_cached_sandbox_backend,
@@ -1315,6 +1316,13 @@ class PrepareAgentRunMiddleware(BasePrepareRunMiddleware):
                 )
                 is True,
                 sandbox_file_downloads=_sandbox_file_downloads_enabled(cfg, bridged=bridged),
+                sandbox_secrets=(
+                    await secrets_for_login(self._credential_login)
+                    if self._credential_login
+                    and not bridged
+                    and ENV.SANDBOX_TYPE.get() == "langsmith"
+                    else ()
+                ),
                 continued_from_collaborative=bool(cfg.continued_from_thread_id),
                 local_checkout=bridged,
                 local_checkout_client=self._bridge_client or "cli",

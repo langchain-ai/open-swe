@@ -25,6 +25,7 @@ from openswe.incidents.routes import router as incidents_router
 from openswe.mcp.routes import router as mcp_router
 from openswe.review.conversation import router as review_conversation_router
 from openswe.review.routes import router as review_router
+from openswe.sandbox_secrets.routes import router as sandbox_secrets_router
 from openswe.schedules.routes import router as schedules_router
 from openswe.skill_store.routes import router as skills_router
 from openswe.slack.dashboard_routes import router as slack_router
@@ -46,6 +47,7 @@ router.include_router(auth_router)
 router.include_router(client_errors_router)
 router.include_router(user_instructions_router)
 router.include_router(user_preferences_router)
+router.include_router(sandbox_secrets_router)
 router.include_router(options_router)
 router.include_router(profiles_router)
 router.include_router(users_router)

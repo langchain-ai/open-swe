@@ -62,3 +62,7 @@ When a repository is not explicitly mentioned, use `{{ default_repo }}`.
 
 {% include "system/sandbox-file-downloads.md" +%}
 {% endif %}
+{% if sandbox_secrets_section %}
+
+{{ sandbox_secrets_section }}
+{% endif %}

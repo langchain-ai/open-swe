@@ -82,6 +82,21 @@ export interface AuditLogsPage {
   cursor: string | null
 }
 
+export interface SandboxSecret {
+  name: string
+  hosts: string[]
+  header_name: string
+  header_format: string
+  updated_at: string | null
+}
+
+export interface SandboxSecretUpdate {
+  hosts: string[]
+  header_name: string
+  header_format: string
+  value?: string | null
+}
+
 export interface WorkspaceApiKey {
   id: string
   workspace: string
@@ -1508,6 +1523,16 @@ export const api = {
     }),
   deleteMyInstructions: () =>
     request<void>("/me/instructions", { method: "DELETE" }),
+  listSandboxSecrets: () => request<SandboxSecret[]>("/me/sandbox-secrets"),
+  saveSandboxSecret: (name: string, body: SandboxSecretUpdate) =>
+    request<void>(`/me/sandbox-secrets/${encodeURIComponent(name)}`, {
+      method: "PUT",
+      body: JSON.stringify(body),
+    }),
+  deleteSandboxSecret: (name: string) =>
+    request<void>(`/me/sandbox-secrets/${encodeURIComponent(name)}`, {
+      method: "DELETE",
+    }),
   getMyPreferences: () => request<UserPreferences>("/me/preferences"),
   saveMyPreferences: (preferences: UserPreferences) =>
     request<UserPreferences>("/me/preferences", {

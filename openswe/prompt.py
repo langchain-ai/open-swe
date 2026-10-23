@@ -1,10 +1,12 @@
 import logging
+from collections.abc import Sequence
 from importlib import resources
 from pathlib import Path
 
 from openswe.bridge.constants import BridgeClient
 from openswe.config import ENV
 from openswe.prompts import prompt
+from openswe.sandbox_secrets.models import SecretView
 from openswe.utils.authorship import (
     OPEN_SWE_BOT_EMAIL,
     OPEN_SWE_BOT_NAME,
@@ -121,6 +123,7 @@ def construct_system_prompt(
     slack_by_the_way: bool = False,
     slack_follow_up_suggestions: bool = False,
     sandbox_file_downloads: bool = False,
+    sandbox_secrets: Sequence[SecretView] = (),
     continued_from_collaborative: bool = False,
     local_checkout: bool = False,
     local_checkout_client: BridgeClient = "cli",
@@ -145,6 +148,9 @@ def construct_system_prompt(
         sole_writer=sole_writer,
         continued_from_collaborative=continued_from_collaborative,
         sandbox_file_downloads=sandbox_file_downloads,
+        sandbox_secrets_section=(
+            prompt("system/sandbox-secrets", secrets=sandbox_secrets) if sandbox_secrets else ""
+        ),
         default_repo=(
             f"{default_repo['owner']}/{default_repo['name']}"
             if default_repo and default_repo.get("owner") and default_repo.get("name")
