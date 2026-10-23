@@ -107,6 +107,53 @@ async def test_create_durable_run_applies_defaults(monkeypatch: pytest.MonkeyPat
     assert isinstance(invocation_id, str)
 
 
+@pytest.mark.parametrize(
+    ("revision", "config_version", "explicit_version", "expected_version"),
+    [
+        ("deployed-sha", None, None, "deployed-sha"),
+        (None, None, None, None),
+        ("", None, None, None),
+        ("deployed-sha", "config-sha", None, "config-sha"),
+        ("deployed-sha", "config-sha", "explicit-sha", "explicit-sha"),
+    ],
+)
+async def test_durable_run_deploy_version(
+    monkeypatch: pytest.MonkeyPatch,
+    revision: str | None,
+    config_version: str | None,
+    explicit_version: str | None,
+    expected_version: str | None,
+) -> None:
+    if revision is None:
+        monkeypatch.delenv("LANGCHAIN_REVISION_ID", raising=False)
+    else:
+        monkeypatch.setenv("LANGCHAIN_REVISION_ID", revision)
+    client = _FakeClient()
+    config_metadata = {"LANGSMITH_AGENT_VERSION": config_version} if config_version else {}
+    metadata = {"scout_head_sha": "head-sha"}
+    if explicit_version is not None:
+        metadata["LANGSMITH_AGENT_VERSION"] = explicit_version
+
+    await dispatch.create_durable_run(
+        "thread-1",
+        "review-scout",
+        input={"messages": []},
+        source="review-scout",
+        thread_title=None,
+        config={"metadata": config_metadata},
+        metadata=metadata,
+        client=client,
+    )
+
+    created = client.runs.created[0]
+    for run_metadata in (created["metadata"], created["config"]["metadata"]):
+        assert run_metadata["scout_head_sha"] == "head-sha"
+        if expected_version is None:
+            assert "LANGSMITH_AGENT_VERSION" not in run_metadata
+        else:
+            assert run_metadata["LANGSMITH_AGENT_VERSION"] == expected_version
+
+
 async def test_run_metadata_uses_users_id_across_slack_and_github(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

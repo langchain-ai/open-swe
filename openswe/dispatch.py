@@ -307,6 +307,9 @@ def prepare_run_config(
         merged_metadata.pop(key, None)
     if metadata is not None:
         merged_metadata.update(metadata)
+    revision = ENV.LANGCHAIN_REVISION_ID.optional()
+    if revision:
+        merged_metadata.setdefault("LANGSMITH_AGENT_VERSION", revision)
     merged_metadata.update(_slack_channel_metadata(configurable))
     merged_metadata["ls_repo_provider"] = "github"
     invocation_id = resolve_invocation_id(configurable, merged_metadata) or new_invocation_id()
