@@ -210,6 +210,38 @@ def _list_item(item: Mapping[str, Any], *, locator: str | None = None) -> dict[s
     return result
 
 
+async def _compact_list_item(item: Mapping[str, object]) -> dict[str, object]:
+    result = {key: item.get(key) for key in ("id", "status", "createdAt", "updatedAt", "title")}
+    result["webUrl"] = _web_link(item)
+    pr = item.get("pr")
+    result["pr"] = (
+        {key: pr.get(key) for key in ("url", "number", "state")}
+        if isinstance(pr, Mapping)
+        else None
+    )
+    messages = item.get("messages")
+    final_message = item.get("final_message")
+    outcome = (
+        final_message
+        if isinstance(final_message, str) and final_message
+        else _last_assistant_outcome(messages if isinstance(messages, list) else [])
+    )
+    thread_id = item.get("id")
+    if outcome is None and isinstance(thread_id, str):
+        thread_state = await langgraph_client().threads.get_state(thread_id)
+        outcome = _last_assistant_outcome(_state_messages(thread_state))
+    result["final_message"] = outcome
+    return result
+
+
+def _last_assistant_outcome(messages: list[object]) -> str | None:
+    for message in reversed(messages):
+        if _message_kind(message) in {"ai", "assistant"} and not _value(message, "tool_calls"):
+            if text := _plain_message_text(_message_content(message)):
+                return text
+    return None
+
+
 def _exact_locator_filters(
     *,
     participant: str | None,
@@ -258,6 +290,7 @@ async def list_threads(
     scope: ThreadScope = "all",
     automation_id: str | None = None,
     admin_threads: bool | None = None,
+    summary_only: bool | None = None,
     state: Annotated[dict[str, Any] | None, InjectedState] = None,
 ) -> dict[str, Any]:
     """Implement the `list_threads` tool."""
@@ -272,6 +305,7 @@ async def list_threads(
     if scope not in {"all", "interactive", "automation"}:
         return _failure("scope must be all, interactive, or automation")
 
+    compact = summary_only if summary_only is not None else scope == "automation"
     normalized_query = query.strip() if isinstance(query, str) else ""
     exact_locator = (
         parse_langsmith_locator(normalized_query) is not None
@@ -306,9 +340,20 @@ async def list_threads(
             if isinstance(resolved_locator, dict):
                 return resolved_locator
             _, summary = resolved_locator
+            try:
+                item = (
+                    await _compact_list_item(summary)
+                    if compact
+                    else _list_item(summary, locator=normalized_query)
+                )
+            except Exception:
+                logger.exception(
+                    "Could not load thread outcome", extra={"thread_id": summary.get("id")}
+                )
+                return _failure("Could not list threads")
             return {
                 "success": True,
-                "items": [_list_item(summary, locator=normalized_query)],
+                "items": [item],
                 "limit": 1,
                 "offset": 0,
                 "has_more": False,
@@ -347,9 +392,16 @@ async def list_threads(
     items = [item for item in page.get("items", []) if isinstance(item, Mapping)]
     if pr_ref:
         items = [item for item in items if _summary_matches_pr(item, pr_ref.url)]
+    try:
+        results = [
+            await _compact_list_item(item) if compact else _list_item(item) for item in items
+        ]
+    except Exception:
+        logger.exception("Could not load thread outcomes")
+        return _failure("Could not list threads")
     return {
         "success": True,
-        "items": [_list_item(item) for item in items],
+        "items": results,
         "limit": page.get("limit"),
         "offset": page.get("offset"),
         "has_more": page.get("hasMore", False),

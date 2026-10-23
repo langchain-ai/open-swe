@@ -1,6 +1,10 @@
 List surfaced threads by locator, participant, admin mode, status, source, or text.
 Pass a canonical GitHub pull request URL as `query` to find accessible threads linked to that PR, including the original implementation conversation.
 By default, results are limited to threads you own or participate in; pass `all_users=True` to search other authors' accessible threads as well.
-Follow `has_more` with `offset` to page through matches, and use `get_thread` to inspect a matching conversation.
+Follow `has_more` with `offset` to page through matches.
+`summary_only=True` returns compact metadata and the full last available assistant outcome as `final_message` (null if unavailable); this defaults on for `scope="automation"`.
+Use smaller `limit` pages to keep outcomes inline, including when scanning 50 records.
+Outcomes preserve retry details for your eligibility and retry decisions.
+Pass `summary_only=False` for full list metadata, and use `get_thread` for deeper inspection.
 In an automation run, results cover every public thread.
 Results obey the triggering user's access and privacy restrictions; an empty result does not prove no original thread exists.
