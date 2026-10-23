@@ -7,10 +7,6 @@ requires-python = ">=3.14"
 license = { text = "MIT" }
 dependencies = [
     "deepagents==0.7.30",
-    # The types of the event endpoint requests the MDA deployment's channels send (mda/).
-    "managed-deepagents==0.10.0.dev15",
-    # Verifies the signature MDA puts on those requests (MDA_SERVICE_SECRET).
-    "standardwebhooks>=1.1.0",
     "fastapi>=0.141.1",
     "uvicorn>=0.52.4",
     "httpx2>=2.12.0",
@@ -80,8 +76,8 @@ sandbox-providers = [
 # or sandbox-providers extra).
 override-dependencies = ["deepagents==0.7.30", "wcmatch>=11.0"]
 constraint-dependencies = [
-    "langgraph-api>=0.16.4,<0.17",
-    "langgraph-runtime-inmem>=0.36.4,<0.37",
+    "langgraph-api==0.18.0.dev9",
+    "langgraph-runtime-inmem==0.38.0.dev9",
 ]
 
 [build-system]
@@ -124,13 +120,11 @@ ignore = [
 
 [tool.ruff.lint.per-file-ignores]
 "tests/**" = ["SLF001", "PLC2701"]
+"mda/tests/**" = ["SLF001", "PLC2701"]
 # Siblings of one package sharing package-internal helpers. PLC2701 cannot tell
 # an intra-package import from a cross-package one; names these modules expose
 # to the rest of the codebase are public.
 "openswe/threads/*" = ["PLC2701"]
-# MDA builds the deployment on Python 3.13, which evaluates annotations as it
-# defines them, so a name imported only for type checking stays quoted there.
-"mda/**" = ["UP037"]
 
 [tool.ruff.lint.flake8-tidy-imports.banned-api]
 "__future__.annotations".msg = "Do not use postponed annotation evaluation."
@@ -144,9 +138,6 @@ include = ["openswe", "tests"]
 # Runs in the mda/ project's environment, against the graph `mda build` compiles.
 # Sandbox scripts run on an older python3; `make typecheck` checks them at 3.8.
 exclude = ["tests/e2e/mda_entrypoint.py", "openswe/sandbox_scripts/*.py"]
-
-[tool.ty.environment]
-extra-paths = ["mda"]
 
 [tool.ty.analysis]
 allowed-unresolved-imports = [

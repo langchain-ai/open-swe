@@ -1,6 +1,9 @@
+/** @vitest-environment jsdom */
+
 import { describe, expect, it, vi } from "vitest"
 
 import { createNewThreadCommand, resolveAppCommands } from "./appCommands"
+import { eventMatchesShortcut } from "./hotkeys"
 import type { AgentThread } from "@/features/agents/lib/types"
 import type { AppCommand } from "./appCommands"
 import { buildPaletteResults } from "@/components/AppCommandPalette"
@@ -10,12 +13,20 @@ function command(id: string, label = id): AppCommand {
 }
 
 describe("app commands", () => {
-  it("uses Linear-style C for new threads on web and desktop", () => {
+  it("requires a modifier to create a new thread", () => {
     const newThread = createNewThreadCommand(vi.fn())
+    const matches = (key: string, ctrlKey = false, shiftKey = false) =>
+      newThread.shortcuts?.some((shortcut) =>
+        eventMatchesShortcut(
+          new KeyboardEvent("keydown", { key, ctrlKey, shiftKey }),
+          shortcut,
+          "other"
+        )
+      )
 
-    expect(newThread.shortcuts).toEqual(["c", "mod+n", "mod+shift+o"])
-    expect(newThread.desktopShortcuts).toBeUndefined()
-    expect(newThread.desktopId).toBe("new-thread")
+    expect(matches("c")).toBe(false)
+    expect(matches("n", true)).toBe(true)
+    expect(matches("o", true, true)).toBe(true)
   })
 
   it("lets the latest contextual registration replace a command", () => {

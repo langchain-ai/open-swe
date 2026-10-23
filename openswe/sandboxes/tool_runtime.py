@@ -123,6 +123,8 @@ class SurfaceModels:
     # Model routes the agent's model selection picks between, by route name.
     routes: Mapping[str, ModelChoice] = field(default_factory=dict)
     fallback: ModelChoice | None = None
+    # What a text-only model's call goes to once the conversation holds an image.
+    vision: ModelChoice | None = None
 
 
 @dataclass(frozen=True)
@@ -146,6 +148,9 @@ class ToolSurface:
     middleware: Sequence[AgentMiddleware] = ()
     models: SurfaceModels | None = None
     subagents: Sequence[SurfaceSubagent] = ()
+    # Paths the graph's file tools read from this deployment rather than the sandbox,
+    # such as skills.
+    backend_paths: tuple[str, ...] = ()
     # Whether the graph's core tools it seldom needs belong in a runtime's code mode.
     code_mode: bool = False
     # Whether a model loop running elsewhere calls these tools, rather than the sandbox.

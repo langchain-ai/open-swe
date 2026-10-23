@@ -37,13 +37,8 @@ from openswe.github.thread_token import cache_github_token_for_thread
 from openswe.middleware import (
     BasePrepareRunMiddleware,
     ExcludeToolsMiddleware,
-    ModelCallTimeoutMiddleware,
     ModelErrorMiddleware,
     RepairOrphanedToolCallsMiddleware,
-    SanitizeFireworksMessagesMiddleware,
-    SanitizeOpenAIResponsesMiddleware,
-    SanitizeThinkingBlocksMiddleware,
-    StableToolResultOrderMiddleware,
     ToolErrorMiddleware,
 )
 from openswe.middleware.prepare_run import PrepareRunState
@@ -335,14 +330,9 @@ async def build_review_scout(
             ModelCallLimitMiddleware(run_limit=SCOUT_MODEL_CALL_LIMIT, exit_behavior="end"),
             ToolErrorMiddleware(),
             ExcludeToolsMiddleware(excluded=SHELL_SEARCH_EXCLUDED_TOOLS),
-            SanitizeFireworksMessagesMiddleware(),
-            SanitizeOpenAIResponsesMiddleware(),
-            SanitizeThinkingBlocksMiddleware(),
             RepairOrphanedToolCallsMiddleware(),
-            StableToolResultOrderMiddleware(),
             ModelRetryMiddleware(retry_on=(TimeoutError,)),
             ModelErrorMiddleware(),
-            ModelCallTimeoutMiddleware(),
             FinishPlanMiddleware(thread_id=thread_id, config=config),
         ],
     )

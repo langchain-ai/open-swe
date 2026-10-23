@@ -10,6 +10,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { useEffect, useMemo, useRef, useState } from "react"
 import { GitCommitIcon } from "@phosphor-icons/react/dist/ssr/GitCommit"
 
+import { SubmitShortcut } from "@/components/SubmitShortcut"
 import {
   postReviewConversationComment,
   type Conversation,
@@ -662,10 +663,13 @@ function CommentBox({ pr }: { pr: PullRequestRef }) {
       <div className="mt-space-2 flex justify-end">
         <Button
           size="sm"
+          aria-label={post.isPending ? "Commenting…" : "Comment"}
+          aria-keyshortcuts="Meta+Enter Control+Enter"
           disabled={!body.trim() || post.isPending}
           onClick={send}
         >
           {post.isPending ? "Commenting…" : "Comment"}
+          {!post.isPending && <SubmitShortcut />}
         </Button>
       </div>
     </div>

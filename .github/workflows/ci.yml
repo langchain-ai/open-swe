@@ -72,15 +72,15 @@ jobs:
       - name: Run typecheck
         run: make typecheck
 
-  mda-boundary:
-    name: MDA import boundary
+  mda-typecheck:
+    name: MDA typecheck
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@v7.0.1
       - uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7 # v10.2.0
-      - name: Check the MDA project imports nothing from the backend
-        run: make mda-boundary
+      - name: Type-check the MDA project against its own environment
+        run: make mda-typecheck
 
   unit-tests:
     name: Agent unit tests
@@ -117,6 +117,8 @@ jobs:
           -c "SELECT pg_reload_conf()"
       - name: Run unit tests
         run: make test PYTEST_ARGS="-n auto"
+      - name: Run MDA unit tests
+        run: make mda-test
 
   js-format:
     name: JS format check
@@ -264,7 +266,7 @@ jobs:
             exit 0
           fi
 
-          agent_unit_test_paths=(openswe tests pyproject.toml uv.lock langgraph.json Makefile .github/workflows/ci.yml ":(exclude)tests/e2e")
+          agent_unit_test_paths=(openswe tests mda vendor/managed-deepagents-sdk pyproject.toml uv.lock langgraph.json Makefile .github/workflows/ci.yml ":(exclude)tests/e2e")
           if git diff --quiet "$BASE_SHA" HEAD -- "${agent_unit_test_paths[@]}"; then
             echo "agent_unit_tests=false" >> "$GITHUB_OUTPUT"
           else
@@ -338,6 +340,13 @@ jobs:
         with:
           path: ~/.cache/ms-playwright
           key: playwright-${{ runner.os }}-${{ hashFiles('tests/e2e/package.json', 'pnpm-lock.yaml') }}
+      # The system packages Chromium needs come from the runner's Ubuntu mirror,
+      # which can stall mid-download until the install times out.
+      - name: Cache Chromium's system packages
+        uses: actions/cache@v6
+        with:
+          path: ~/.cache/apt-archives
+          key: playwright-apt-${{ runner.os }}-${{ env.ImageOS }}-${{ hashFiles('tests/e2e/package.json', 'pnpm-lock.yaml') }}
       - name: Cache dashboard build
         uses: actions/cache@v6
         with:
@@ -352,7 +361,17 @@ jobs:
         timeout-minutes: 5
         run: |
           sudo rm -f /etc/apt/sources.list.d/{azure-cli,google-chrome,microsoft-prod}.*
+          # Keep downloaded packages where the cache above restores them, and retry
+          # a stalled download instead of waiting out the step's timeout.
+          mkdir -p ~/.cache/apt-archives/partial
+          printf '%s\n' \
+            "Dir::Cache::Archives \"$HOME/.cache/apt-archives\";" \
+            'Acquire::Retries "3";' \
+            'Acquire::http::Timeout "20";' \
+            | sudo tee /etc/apt/apt.conf.d/99-ci-chromium >/dev/null
           pnpm run test:e2e:install
+          # apt leaves its lock and partial/ readable only by root; the cache saves as the runner.
+          sudo chown -R "$(id -u):$(id -g)" ~/.cache/apt-archives
       - name: Run browser E2E
         run: pnpm run test:e2e --shard=${{ matrix.shard }}/3
       - name: Upload Playwright report
@@ -423,7 +442,7 @@ jobs:
 
   e2e:
     name: Playwright E2E
-    if: ${{ always() }}
+    if: ${{ !cancelled() }}
     needs: [e2e-changes, browser-e2e, desktop-e2e]
     runs-on: ubuntu-latest
     timeout-minutes: 5
