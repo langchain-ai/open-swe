@@ -332,7 +332,7 @@ async function shootCard(page: Page, name: string) {
   await page.locator(`[data-channel-id="${REVIEW_CHANNEL}"]`).click();
   const card = page
     .locator(".msg.bot")
-    .filter({ hasText: /Review request/i })
+    .filter({ hasText: /Review request|authored by/i })
     .last();
   await expect(card).toBeVisible({ timeout: 30_000 });
   // The mock UI re-renders every poll, so a screenshot can land on a detached node.
