@@ -7,6 +7,7 @@ from datetime import UTC, datetime, timedelta
 from unittest.mock import AsyncMock, Mock
 from uuid import UUID, uuid7
 
+import httpx2
 import pytest
 from sqlalchemy import func, select, update
 from sqlalchemy.exc import IntegrityError
@@ -127,6 +128,8 @@ async def test_workspace_scoping_and_rebinding_cannot_create_a_second_owner(
     )
     with pytest.raises(ValueError, match="not bound"):
         await forged.requests()
+    with pytest.raises(ValueError, match="Queue not found"):
+        await forged.snapshot(limit=1)
     foreign = await PullRequest(owner="other", repo="repo", number=1, base_ref="main").save()
     with pytest.raises(ValueError, match="does not target"):
         await queue.request_merge(foreign.id, "a" * 40, "foreign")
@@ -140,10 +143,33 @@ async def test_workspace_scoping_and_rebinding_cannot_create_a_second_owner(
         )
     with pytest.raises(ValueError, match="not bound"):
         await queue.requests()
+    with pytest.raises(ValueError, match="binding changed"):
+        await queue.snapshot(limit=1)
     with pytest.raises(ValueError, match="explicit handoff"):
         await MergeQueue.register(other.id, queue.repository_id, "main")
     with pytest.raises(ValueError, match="Queue not found"):
         await forged.claim(uuid7(), timedelta(minutes=1))
+
+
+async def test_status_reads_do_not_wait_for_worker_locks(queue: MergeQueue) -> None:
+    created = await batch(queue, await claim(queue))
+    async with postgres.transaction() as conn:
+        await conn.execute(
+            select(WorkspaceRepositoryRow)
+            .where(WorkspaceRepositoryRow.workspace_id == queue.workspace_id)
+            .with_for_update()
+        )
+        await conn.execute(update(MergeQueue).where(MergeQueue.id == queue.id).values(paused=False))
+        async with asyncio.timeout(5):
+            paused, entries, active_batch_id = await queue.snapshot(limit=1)
+            history = await queue.history(created.id)
+        assert paused is True
+        assert active_batch_id == history.batch.id == created.id
+        assert [entry.request.id for entry in entries] == [
+            member.request_id for member in history.members
+        ]
+    paused, _, _ = await queue.snapshot(limit=1)
+    assert paused is False
 
 
 async def test_fencing_rejects_old_owners_even_when_the_owner_id_is_reused(
@@ -932,6 +958,7 @@ async def queue_controller(queue: MergeQueue, monkeypatch: pytest.MonkeyPatch) -
         repository_id=42,
         dispatch_url="https://dispatcher.example/queue",
         workflow_digest="a" * 64,
+        operator_emails=frozenset({"operator@example.com"}),
         policy=QueuePolicy(
             checks={"checks": CheckSource(app_id=1, workflow_path=".github/workflows/ci.yml")},
             validation=ValidationPolicy(dispatch_actor_id=789),
@@ -1003,3 +1030,201 @@ async def test_queue_startup_rejects_multiple_configured_workspaces(
     with pytest.raises(ValueError, match="Only one canary workspace"):
         await controller.start_queue()
     assert controller.CONTROLLER is None and runtime.RUNTIME is None
+
+
+async def test_queue_dashboard_authorization(
+    queue_controller: QueueController, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    import httpx
+    from fastapi import Depends, FastAPI
+
+    from openswe.dashboard import profiles, repo_access
+    from openswe.dashboard.oauth import issue_session, require_same_origin_for_mutations
+    from openswe.github.http import GitHubClient
+    from openswe.merge_queue import routes
+    from openswe.users.models import UserIdentity
+
+    queue = queue_controller.queue
+    monkeypatch.setenv("DASHBOARD_JWT_SECRET", "queue-test-session-secret")
+    monkeypatch.setenv("DASHBOARD_BASE_URL", "http://testserver")
+    async with postgres.session() as session:
+        people = [
+            User(
+                identities=[
+                    UserIdentity(
+                        provider="github", external_id=str(index), login=login, email=email
+                    )
+                ]
+            )
+            for index, (login, email) in enumerate(
+                (
+                    ("author", "author@example.com"),
+                    ("coworker", "coworker@example.com"),
+                    ("operator", "operator@example.com"),
+                ),
+                1,
+            )
+        ]
+        session.add_all(people)
+    author, coworker, operator = people
+    permission, available = "write", True
+
+    async def user_token(login: str, **kwargs: object) -> str:
+        return login
+
+    def github_response(request: httpx2.Request) -> httpx2.Response:
+        if not available:
+            return httpx2.Response(404, json={"message": "Not Found"})
+        if request.url.path.endswith("/permission"):
+            return httpx2.Response(200, json={"permission": permission})
+        if request.url.path == "/graphql":
+            return httpx2.Response(
+                200,
+                json={
+                    "data": {
+                        "repository": {
+                            "pullRequest": {
+                                "number": 1,
+                                "state": "OPEN",
+                                "merged": False,
+                                "isDraft": False,
+                                "headRefOid": "a" * 40,
+                                "baseRefOid": "b" * 40,
+                                "baseRefName": "main",
+                                "baseRef": {"target": {"oid": "b" * 40}},
+                                "headRepository": {"nameWithOwner": "acme/widgets"},
+                                "baseRepository": {"nameWithOwner": "acme/widgets"},
+                                "reviewDecision": "REVIEW_REQUIRED",
+                                "reviews": {
+                                    "nodes": [],
+                                    "pageInfo": {"hasNextPage": False, "endCursor": None},
+                                },
+                            }
+                        }
+                    }
+                },
+            )
+        assert request.url.path == "/repos/acme/widgets"
+        return httpx2.Response(200, json={"id": 42})
+
+    @asynccontextmanager
+    async def as_user(login: str) -> AsyncIterator[GitHubClient]:
+        async with httpx2.AsyncClient(transport=httpx2.MockTransport(github_response)) as client:
+            yield GitHubClient(client, login=login)
+
+    monkeypatch.setattr(repo_access, "get_valid_access_token", user_token)
+    monkeypatch.setattr(profiles, "get_valid_access_token", user_token)
+    monkeypatch.setattr(
+        repo_access, "pooled_transport", lambda: httpx2.MockTransport(github_response)
+    )
+    monkeypatch.setattr(GitHubClient, "as_user", as_user)
+    app = FastAPI()
+    app.include_router(routes.router, dependencies=[Depends(require_same_origin_for_mutations)])
+    path = f"/merge-queue/{queue.workspace_id}"
+    async with httpx.AsyncClient(
+        transport=httpx.ASGITransport(app=app),
+        base_url="http://testserver",
+        headers={"Origin": "http://testserver"},
+    ) as client:
+        assert (
+            await client.get(path, headers={"Authorization": "Bearer agent-key"})
+        ).status_code == 401
+        client.cookies.set(
+            "osw_session",
+            issue_session(
+                login=author.github_login,
+                email=author.email,
+                avatar_url=None,
+                user_id=str(author.id),
+            ),
+        )
+        assert (await client.get(f"/merge-queue/{uuid7()}")).status_code == 404
+        available = False
+        assert (await client.get(path)).status_code == 404
+        available = True
+        body = {"number": 1, "head_sha": "a" * 40, "request_key": str(uuid7())}
+        permission = "read"
+        assert (await client.post(f"{path}/requests", json=body)).status_code == 403
+        permission = "write"
+        assert (
+            await client.post(
+                f"{path}/requests", json=body, headers={"Origin": "http://evil.example"}
+            )
+        ).status_code == 403
+        response = await client.post(f"{path}/requests", json=body)
+        assert response.status_code == 200, response.text
+        requested = response.json()
+        assert requested["state"] == "waiting_for_review"
+        assert (await client.post(f"{path}/requests", json=body)).json()["id"] == requested["id"]
+        assert (await client.patch(f"{path}/pause", json={"paused": False})).status_code == 403
+        client.cookies.set(
+            "osw_session",
+            issue_session(
+                login=coworker.github_login,
+                email=operator.email,
+                avatar_url=None,
+                user_id=str(coworker.id),
+            ),
+        )
+        # An email claim cannot override the current stored person's identity.
+        assert (await client.patch(f"{path}/pause", json={"paused": False})).status_code == 403
+        assert (await client.delete(f"{path}/requests/{requested['id']}")).status_code == 403
+        client.cookies.set(
+            "osw_session",
+            issue_session(
+                login=operator.github_login,
+                email=operator.email,
+                avatar_url=None,
+                user_id=str(operator.id),
+            ),
+        )
+        assert (await client.patch(f"{path}/pause", json={"paused": False})).status_code == 204
+        snapshot = (await client.get(path)).json()
+        assert snapshot["paused"] is False and len(snapshot["items"]) == 1
+        assert snapshot["next_cursor"] is None
+        assert (await client.get(path, params={"cursor": "invalid"})).status_code == 400
+        second, third, fourth = [await request(queue, number) for number in (2, 3, 4)]
+        await queue.set_priority(fourth.id, -1)
+        async with postgres.session() as session:
+            await session.execute(
+                update(MergeRequest)
+                .where(MergeRequest.queue_id == queue.id)
+                .values(created_at=datetime.now(UTC))
+            )
+        page = (await client.get(path, params={"page_size": 2})).json()
+        assert [item["request"]["id"] for item in page["items"]] == [
+            requested["id"],
+            str(second.id),
+        ]
+        assert page["next_cursor"] is not None
+        missing = uuid7()
+        assert (await client.get(f"{path}/batches/{missing}")).status_code == 404
+        assert (
+            await client.patch(f"{path}/requests/{missing}/priority", json={"priority": 1})
+        ).status_code == 404
+        assert (await client.delete(f"{path}/requests/{missing}")).status_code == 204
+        assert (await client.delete(f"{path}/requests/{requested['id']}")).status_code == 204
+        assert (await client.delete(f"{path}/requests/{requested['id']}")).status_code == 204
+        assert (
+            await client.patch(f"{path}/requests/{requested['id']}/priority", json={"priority": 1})
+        ).status_code == 409
+        assert (await client.delete(f"{path}/requests/{second.id}")).status_code == 204
+        page = (
+            await client.get(path, params={"page_size": 2, "cursor": page["next_cursor"]})
+        ).json()
+        assert [item["request"]["id"] for item in page["items"]] == [
+            str(third.id),
+            str(fourth.id),
+        ]
+        assert page["next_cursor"] is None
+        for pending in (third, fourth):
+            assert (await client.delete(f"{path}/requests/{pending.id}")).status_code == 204
+        assert (await client.get(path)).json()["items"] == []
+        async with postgres.session() as session:
+            await session.execute(
+                update(WorkspaceRow)
+                .where(WorkspaceRow.id == queue.workspace_id)
+                .values(merge_queue_config=None)
+            )
+        await controller.start_queue()
+        assert (await client.get(path)).status_code == 404
