@@ -475,6 +475,38 @@ async def test_an_operation_gets_the_state_it_reads_and_answers_the_state_it_cha
     assert result.state == {"requested_model": "after-fast"}
 
 
+async def test_the_files_api_reaches_the_threads_files_as_the_run() -> None:
+    """A bridge checks who the run is for, which it reads from the run's own config."""
+    from deepagents.backends.protocol import ExecuteResponse, SandboxBackendProtocol
+
+    from openswe.remote_runtime.graph import API, RunSession
+    from openswe.run_config import RunConfig
+    from openswe.sandboxes.tool_runtime import ToolSurface
+
+    seen: list[str | None] = []
+
+    class Machine(SandboxBackendProtocol):
+        @property
+        def id(self) -> str:
+            return "machine"
+
+        async def aexecute(self, command: str, *, timeout: int | None = None) -> ExecuteResponse:
+            seen.append(RunConfig.from_runtime().thread_id)
+            return ExecuteResponse(output=f"ran {command}", exit_code=0)
+
+    session = RunSession(
+        ToolSurface(files=Machine()),
+        {"configurable": {"thread_id": "thread-1"}},
+        None,
+        started_here=True,
+    )
+
+    reply = await API.dispatch("files.execute", session, {"command": "ls"})
+
+    assert reply == {"output": "ran ls", "exit_code": 0, "truncated": False}
+    assert seen == ["thread-1"]
+
+
 async def test_a_cancelled_operation_ends_the_call_rather_than_answering() -> None:
     from langchain_core.tools import tool
     from langgraph.errors import NodeCancelledError

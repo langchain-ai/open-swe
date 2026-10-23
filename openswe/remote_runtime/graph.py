@@ -522,10 +522,13 @@ class RunSession:
             (m for m in self.surface.middleware if isinstance(m, ClientToolsMiddleware)), None
         )
 
-    async def _in_run[T](self, name: str, work: Callable[[Runtime], Awaitable[T]]) -> T:
+    async def in_run[T](self, name: str, work: Callable[[], Awaitable[T]]) -> T:
+        """``work`` as this run: what it reads of the run's config, such as who the run is
+        for, is the run's own."""
+
         async def run(runtime: Runtime) -> T:
             await self.rejoin_preparation(runtime)
-            return await work(runtime)
+            return await work()
 
         return await in_graph_context({**self.config, "run_name": name}, run)
 
@@ -596,7 +599,7 @@ class RunSession:
     async def check_shell(self, request: ShellCheck) -> ShellVerdict:
         """Whether the push and pull request guards let ``request``'s command run as it is."""
 
-        async def decide(_runtime: Runtime) -> ShellVerdict:
+        async def decide() -> ShellVerdict:
             decision = await self._shell_guards.decide(request.tool, {"command": request.command})
             if decision.arguments is None:
                 return ShellVerdict(allowed=False, refusal=decision.refusal)
@@ -608,7 +611,7 @@ class RunSession:
                 else None,
             )
 
-        return await self._in_run("check_shell", decide)
+        return await self.in_run("check_shell", decide)
 
     async def record_evidence(self, request: ToolEvidence) -> EvidenceReply:
         """An incident run's tool result, recorded as evidence the result then cites."""
@@ -971,18 +974,19 @@ class RemoteGraph:
         if not isinstance(result, ToolMessage):
             raise ValueError("A tool result must be a tool message")
 
-        async def record(runtime: Runtime) -> None:
+        async def record(runtime: Runtime) -> dict[str, JsonValue]:
             await session.join(state, runtime)
             with within_namespace(body.namespace):
                 await session.tool_finished(result)
             await session.flush(runtime)
+            # A file or shell tool may have started the turn's work; the snapshot is taken
+            # now, off the call's path, as the run, which a bridged machine checks.
+            git = TurnGitMetadata(session.config)
+            before = git.work_baseline(state) if body.name in OBSERVED_TOOLS else None
+            return await git.work_evidence(before, body.tool_call_id, time.time_ns())
 
-        await in_graph_context({**session.config, "run_name": "tool_result"}, record)
-        # A file or shell tool MDA ran in the box may have started the turn's work, as
-        # one run here would; the snapshot is taken now, off the call's path.
-        git = TurnGitMetadata(session.config)
-        before = git.work_baseline(state) if body.name in OBSERVED_TOOLS else None
-        return {"update": await git.work_evidence(before, body.tool_call_id, time.time_ns())}
+        update = await in_graph_context({**session.config, "run_name": "tool_result"}, record)
+        return {"update": update}
 
     async def api(self, run: RemoteRun, endpoint: str, raw: JsonValue) -> JsonValue:
         """Answer one call to the typed API the run's tools make (``runtime_api``)."""
@@ -1041,40 +1045,52 @@ def _b64(data: bytes | None) -> str | None:
 
 
 async def _ls(session: RunSession, request: PathRequest) -> LsReply:
-    result = await session.files.als(request.path)
+    result = await session.in_run("files.ls", lambda: session.files.als(request.path))
     return LsReply.model_validate(asdict(result))
 
 
 async def _read(session: RunSession, request: ReadRequest) -> ReadReply:
-    result = await session.files.aread(request.file_path, request.offset, request.limit)
+    result = await session.in_run(
+        "files.read", lambda: session.files.aread(request.file_path, request.offset, request.limit)
+    )
     return ReadReply.model_validate(asdict(result))
 
 
 async def _write(session: RunSession, request: WriteRequest) -> FileReply:
-    result = await session.files.awrite(request.file_path, request.content)
+    result = await session.in_run(
+        "files.write", lambda: session.files.awrite(request.file_path, request.content)
+    )
     return FileReply.model_validate(asdict(result))
 
 
 async def _edit(session: RunSession, request: EditRequest) -> FileReply:
-    result = await session.files.aedit(
-        request.file_path, request.old_string, request.new_string, request.replace_all
+    result = await session.in_run(
+        "files.edit",
+        lambda: session.files.aedit(
+            request.file_path, request.old_string, request.new_string, request.replace_all
+        ),
     )
     return FileReply.model_validate(asdict(result))
 
 
 async def _delete(session: RunSession, request: DeleteRequest) -> FileReply:
-    result = await session.files.adelete(request.file_path)
+    result = await session.in_run("files.delete", lambda: session.files.adelete(request.file_path))
     return FileReply.model_validate(asdict(result))
 
 
 async def _glob(session: RunSession, request: GlobRequest) -> GlobReply:
-    result = await session.files.aglob(request.pattern, request.path)
+    result = await session.in_run(
+        "files.glob", lambda: session.files.aglob(request.pattern, request.path)
+    )
     return GlobReply.model_validate(asdict(result))
 
 
 async def _grep(session: RunSession, request: GrepRequest) -> GrepReply:
-    result = await session.files.agrep(
-        request.pattern, request.path, request.glob, max_count=request.max_count
+    result = await session.in_run(
+        "files.grep",
+        lambda: session.files.agrep(
+            request.pattern, request.path, request.glob, max_count=request.max_count
+        ),
     )
     return GrepReply.model_validate(asdict(result))
 
@@ -1083,23 +1099,26 @@ async def _execute(session: RunSession, request: ExecuteRequest) -> ExecuteReply
     files = session.files
     if not isinstance(files, SandboxBackendProtocol | CompositeBackend):
         return ExecuteReply(output="Error: this thread's files cannot run commands", exit_code=1)
-    result = await files.aexecute(request.command, timeout=request.timeout)
+    result = await session.in_run(
+        "files.execute", lambda: files.aexecute(request.command, timeout=request.timeout)
+    )
     return ExecuteReply(
         output=result.output, exit_code=result.exit_code, truncated=result.truncated
     )
 
 
 async def _upload(session: RunSession, request: UploadRequest) -> TransferReplies:
-    uploaded = await session.files.aupload_files(
-        [(file.path, base64.b64decode(file.content_base64)) for file in request.files]
-    )
+    uploads = [(file.path, base64.b64decode(file.content_base64)) for file in request.files]
+    uploaded = await session.in_run("files.upload", lambda: session.files.aupload_files(uploads))
     return TransferReplies(
         files=[TransferReply(path=reply.path, error=reply.error) for reply in uploaded]
     )
 
 
 async def _download(session: RunSession, request: DownloadRequest) -> TransferReplies:
-    downloaded = await session.files.adownload_files(request.paths)
+    downloaded = await session.in_run(
+        "files.download", lambda: session.files.adownload_files(request.paths)
+    )
     return TransferReplies(
         files=[
             TransferReply(path=reply.path, error=reply.error, content_base64=_b64(reply.content))
