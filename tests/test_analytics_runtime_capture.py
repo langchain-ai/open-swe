@@ -77,13 +77,25 @@ async def test_context_offloaded_records_compaction(monkeypatch, capture_config)
     enqueue = AsyncMock()
     monkeypatch.setattr(emitter, "enqueue", enqueue)
 
-    await usage.record_context_offloaded(trigger="automatic", status="completed", cutoff_index=42)
+    await usage.record_context_offloaded(
+        trigger="automatic",
+        status="completed",
+        cutoff_index=42,
+        messages_summarized=42,
+        summarized_tokens=90_000,
+        summary_tokens=1_200,
+        duration_ms=3_500,
+    )
 
     [event] = [call.args[0] for call in enqueue.await_args_list]
     assert event.event_name == EventName.CONTEXT_OFFLOADED
     assert event.payload.trigger == "automatic"
     assert event.payload.status == "completed"
     assert event.payload.cutoff_index == 42
+    assert event.payload.messages_summarized == 42
+    assert event.payload.summarized_tokens == 90_000
+    assert event.payload.summary_tokens == 1_200
+    assert event.payload.duration_ms == 3_500
     assert event.run_id is not None
     assert event.thread_id is not None
 
@@ -94,8 +106,18 @@ async def test_context_offloaded_failure_keeps_cutoff_unknown(monkeypatch, captu
     enqueue = AsyncMock()
     monkeypatch.setattr(emitter, "enqueue", enqueue)
 
-    await usage.record_context_offloaded(trigger="manual", status="failed")
+    await usage.record_context_offloaded(
+        trigger="manual",
+        status="failed",
+        messages_summarized=12,
+        summarized_tokens=40_000,
+        duration_ms=800,
+    )
 
     [event] = [call.args[0] for call in enqueue.await_args_list]
     assert event.payload.status == "failed"
     assert event.payload.cutoff_index is None
+    assert event.payload.messages_summarized == 12
+    assert event.payload.summarized_tokens == 40_000
+    assert event.payload.summary_tokens is None
+    assert event.payload.duration_ms == 800

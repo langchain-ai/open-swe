@@ -193,12 +193,18 @@ class ContextOffloadedPayload(StrictPayload):
 
     ``cutoff_index`` is the number of leading messages the summary stands in
     for; the offloaded history itself stays in the sandbox and is deliberately
-    not recorded here.
+    not recorded here. Token counts are estimates from the middleware token
+    counter: ``summarized_tokens`` covers the messages the summary replaced and
+    ``summary_tokens`` covers the replacement itself.
     """
 
     trigger: Literal["manual", "automatic"]
     status: Literal["completed", "failed"]
     cutoff_index: int | None = Field(default=None, ge=0)
+    messages_summarized: int | None = Field(default=None, ge=0)
+    summarized_tokens: int | None = Field(default=None, ge=0)
+    summary_tokens: int | None = Field(default=None, ge=0)
+    duration_ms: int | None = Field(default=None, ge=0)
 
 
 EventPayload = Annotated[

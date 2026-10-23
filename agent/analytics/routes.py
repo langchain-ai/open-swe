@@ -82,6 +82,29 @@ async def api_pr_merge_rate_by_model(
         raise HTTPException(503, "PR analytics is unavailable on this deployment.") from exc
 
 
+@router.get("/analytics/context-offloaded")
+async def api_context_offloaded(
+    period: str | None = "30d",
+    _session: dict[str, Any] = SESSION_DEP,
+) -> dict[str, Any]:
+    from asyncpg import PostgresError
+    from sqlalchemy.exc import SQLAlchemyError
+
+    from agent.analytics.queries import context_offloaded_summary
+    from agent.database import configured
+
+    try:
+        if not configured():
+            raise HTTPException(503, "Compaction analytics is unavailable on this deployment.")
+        return await context_offloaded_summary(period=period)
+    except (SQLAlchemyError, PostgresError, OSError, RuntimeError, ValueError) as exc:
+        logger.warning(
+            "Compaction analytics report unavailable",
+            extra={"analytics_error_type": type(exc).__name__},
+        )
+        raise HTTPException(503, "Compaction analytics is unavailable on this deployment.") from exc
+
+
 @router.get("/analytics/readiness")
 async def api_analytics_readiness(
     _admin: dict[str, Any] = ADMIN_DEP,

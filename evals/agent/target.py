@@ -15,7 +15,7 @@ from agent.evaluation import AgentEvaluationArtifact, AgentEvaluationConfig
 from agent.input_messages import InputMessageContext, SystemIdentity, build_run_input
 from agent.prompts import render_prompt
 from agent.sandboxes.environment import ExecutionEnvironment
-from evals.agent.models import EvalInputs, FailureStage, TargetResult
+from evals.agent.models import CompactionTelemetry, EvalInputs, FailureStage, TargetResult
 
 logger = logging.getLogger(__name__)
 DEFAULT_AGENT_ASSISTANT_ID = "agent"
@@ -117,10 +117,19 @@ class _Message(BaseModel):
     usage_metadata: _Usage | None = None
 
 
+class _OffloadState(BaseModel):
+    count: int = Field(default=0, ge=0)
+    total_messages_summarized: int = Field(default=0, ge=0)
+    total_summarized_tokens: int = Field(default=0, ge=0)
+    total_summary_tokens: int = Field(default=0, ge=0)
+    total_duration_ms: int = Field(default=0, ge=0)
+
+
 class _GraphResult(BaseModel):
     messages: list[_Message] = Field(default_factory=list)
     agent_eval_result: AgentEvaluationArtifact | None = None
     execution_environment: ExecutionEnvironment | None = None
+    conversation_offloading: _OffloadState | None = None
 
 
 async def solve_task(inputs: dict[str, object]) -> dict[str, object]:
@@ -152,6 +161,15 @@ async def solve_task(inputs: dict[str, object]) -> dict[str, object]:
         output.failure_stage = FailureStage.PATCH_COLLECTION
         result = _GraphResult.model_validate(raw)
         output.execution_environment = result.execution_environment
+        if result.conversation_offloading is not None:
+            offloading = result.conversation_offloading
+            output.compaction = CompactionTelemetry(
+                count=offloading.count,
+                messages_summarized=offloading.total_messages_summarized,
+                summarized_tokens=offloading.total_summarized_tokens,
+                summary_tokens=offloading.total_summary_tokens,
+                duration_ms=offloading.total_duration_ms,
+            )
         messages = [message for message in result.messages if message.type == "ai"]
         output.steps = len(messages)
         usages = [

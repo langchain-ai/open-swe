@@ -124,9 +124,96 @@ async def test_automatic_completion_precedes_handler_and_suppresses_tokens(
     streamed = "".join(str(data[0].content) for mode, data in chunks if mode == "messages")
     assert ("PRIVATE SUMMARY" in streamed) is not suppress
     assert events == ["started", "completed"]
-    assert (await graph.aget_state(config)).values["conversation_offloading"][
-        "status"
-    ] == "completed"
+    offloading = (await graph.aget_state(config)).values["conversation_offloading"]
+    assert offloading["status"] == "completed"
+    assert offloading["messages_summarized"] == 2
+    assert offloading["summarized_tokens"] > 0
+    assert offloading["summary_tokens"] > 0
+    assert offloading["duration_ms"] >= 0
+    assert offloading["count"] == 1
+    assert offloading["total_messages_summarized"] == 2
+    assert offloading["total_summarized_tokens"] == offloading["summarized_tokens"]
+    assert offloading["total_summary_tokens"] == offloading["summary_tokens"]
+    assert offloading["total_duration_ms"] == offloading["duration_ms"]
+
+
+async def test_repeated_compaction_accumulates_totals(tmp_path):
+    model = FakeListChatModel(responses=["SUMMARY ONE", "SUMMARY TWO"])
+    middleware = ConversationOffloadingMiddleware(
+        model, FilesystemBackend(root_dir=str(tmp_path), virtual_mode=True)
+    )
+    middleware._lc_helper.keep = ("messages", 2)
+    middleware._lc_helper._trigger_clauses = [{"messages": 4}]
+    graph = create_agent(model=model, middleware=[middleware], checkpointer=InMemorySaver())
+    config = {"configurable": {"thread_id": "accumulate"}}
+    await graph.ainvoke(
+        {
+            "messages": [
+                HumanMessage(content="old"),
+                AIMessage(content="old reply"),
+                HumanMessage(content="recent"),
+                AIMessage(content="recent reply"),
+            ]
+        },
+        config,
+    )
+    first = (await graph.aget_state(config)).values["conversation_offloading"]
+    assert first["count"] == 1
+    await graph.ainvoke(
+        {"messages": [HumanMessage(content="next"), AIMessage(content="next reply")]},
+        config,
+    )
+    second = (await graph.aget_state(config)).values["conversation_offloading"]
+    assert second["count"] == 2
+    assert second["total_messages_summarized"] > first["total_messages_summarized"]
+    assert second["total_summarized_tokens"] >= first["total_summarized_tokens"]
+    assert second["total_summary_tokens"] >= first["total_summary_tokens"]
+    assert second["total_duration_ms"] >= first["total_duration_ms"]
+
+
+async def test_failed_summary_records_partial_metrics(tmp_path, monkeypatch):
+    from agent.middleware import conversation_offloading as module
+
+    recorded = []
+
+    async def record(**kwargs):
+        recorded.append(kwargs)
+
+    async def fail(self, messages_to_summarize):
+        raise RuntimeError("summary model unavailable")
+
+    monkeypatch.setattr(module, "record_context_offloaded", record)
+    monkeypatch.setattr(SummarizationMiddleware, "_acreate_summary", fail)
+
+    model = FakeListChatModel(responses=["unused"])
+    middleware = ConversationOffloadingMiddleware(
+        model, FilesystemBackend(root_dir=str(tmp_path), virtual_mode=True)
+    )
+    middleware._lc_helper.keep = ("messages", 2)
+    middleware._lc_helper._trigger_clauses = [{"messages": 4}]
+    graph = create_agent(model=model, middleware=[middleware], checkpointer=InMemorySaver())
+    config = {"configurable": {"thread_id": "failure"}}
+    with pytest.raises(RuntimeError, match="summary model unavailable"):
+        async for _ in graph.astream(
+            {
+                "messages": [
+                    HumanMessage(content="old"),
+                    AIMessage(content="old reply"),
+                    HumanMessage(content="recent"),
+                    AIMessage(content="recent reply"),
+                ]
+            },
+            config,
+            stream_mode="custom",
+        ):
+            pass
+
+    [event] = recorded
+    assert event["status"] == "failed"
+    assert event["messages_summarized"] == 2
+    assert event["summarized_tokens"] > 0
+    assert "summary_tokens" not in event
+    assert event["duration_ms"] >= 0
 
 
 async def test_manual_before_model_runs_after_prepare(tmp_path, monkeypatch):

@@ -290,6 +290,86 @@ async def pr_merge_rate_by_model(
     }
 
 
+_CONTEXT_OFFLOADED_SQL = """
+SELECT
+    coalesce(payload->>'trigger', 'unknown') AS trigger,
+    count(*) AS events,
+    count(*) FILTER (WHERE payload->>'status' = 'completed') AS completed,
+    count(*) FILTER (WHERE payload->>'status' = 'failed') AS failed,
+    coalesce(sum((payload->>'messages_summarized')::bigint)
+        FILTER (WHERE payload->>'status' = 'completed'), 0)::bigint AS messages_summarized,
+    coalesce(sum((payload->>'summarized_tokens')::bigint)
+        FILTER (WHERE payload->>'status' = 'completed'), 0)::bigint AS summarized_tokens,
+    coalesce(sum((payload->>'summary_tokens')::bigint)
+        FILTER (WHERE payload->>'status' = 'completed'), 0)::bigint AS summary_tokens,
+    coalesce(sum((payload->>'duration_ms')::bigint), 0)::bigint AS duration_ms
+FROM events
+WHERE workspace_id = :workspace_id
+  AND event_name = :event_name
+  AND occurred_at >= :start
+GROUP BY 1
+ORDER BY 1
+"""
+
+_COMPACTION_COUNTERS = (
+    "events",
+    "completed",
+    "failed",
+    "messages_summarized",
+    "summarized_tokens",
+    "summary_tokens",
+    "duration_ms",
+)
+
+
+def _ratio(numerator: int, denominator: int) -> float | None:
+    return round(numerator / denominator, 2) if denominator else None
+
+
+async def context_offloaded_summary(*, period: str | None) -> dict[str, Any]:
+    """Aggregate compaction events: counts, token estimates, duration, ratio.
+
+    Counts come from raw `context.offloaded` events because no projection exists
+    for them. Token values are middleware estimates, not billed usage, and older
+    events may lack them; those rows count as zero.
+    """
+    normalized = period if period in {"7d", "30d", "all"} else "30d"
+    async with connection() as conn:
+        await conn.execute(text("SET TRANSACTION ISOLATION LEVEL REPEATABLE READ, READ ONLY"))
+        start = await _reporting_start(conn, normalized)
+        metadata = await reporting_metadata(conn)
+        result = await conn.execute(
+            text(_CONTEXT_OFFLOADED_SQL),
+            {
+                "workspace_id": workspace_id(),
+                "event_name": "context.offloaded",
+                "start": start,
+            },
+        )
+        by_trigger: list[dict[str, Any]] = []
+        totals: dict[str, int | float | None] = dict.fromkeys(_COMPACTION_COUNTERS, 0)
+        for row in result.mappings():
+            item: dict[str, Any] = {
+                "trigger": row["trigger"],
+                **{key: _integer(row[key]) for key in _COMPACTION_COUNTERS},
+            }
+            item["compression_ratio"] = _ratio(item["summarized_tokens"], item["summary_tokens"])
+            by_trigger.append(item)
+            for key in _COMPACTION_COUNTERS:
+                totals[key] = _integer(totals[key]) + item[key]
+        totals["compression_ratio"] = _ratio(
+            _integer(totals["summarized_tokens"]), _integer(totals["summary_tokens"])
+        )
+    return {
+        **metadata,
+        "period": normalized,
+        "data_source": "events",
+        "token_source": "middleware_estimate",
+        "compaction": totals,
+        "by_trigger": by_trigger,
+    }
+
+
 def _encode_usage_cursor(
     as_of: datetime,
     offset: int,

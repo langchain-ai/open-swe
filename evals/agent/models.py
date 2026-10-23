@@ -39,6 +39,20 @@ class GradingSpec(BaseModel):
     test_command: str = "pytest"
 
 
+class CompactionTelemetry(BaseModel):
+    """Run-level conversation compaction totals reported by the agent graph.
+
+    Estimates come from the agent token counter; they cover messages replaced
+    by summaries, not billed model usage.
+    """
+
+    count: int = Field(default=0, ge=0)
+    messages_summarized: int = Field(default=0, ge=0)
+    summarized_tokens: int = Field(default=0, ge=0)
+    summary_tokens: int = Field(default=0, ge=0)
+    duration_ms: int = Field(default=0, ge=0)
+
+
 class TargetResult(BaseModel):
     instance_id: str = ""
     repo: str = ""
@@ -52,3 +66,4 @@ class TargetResult(BaseModel):
     failure_stage: FailureStage = FailureStage.NONE
     error: str = ""
     execution_environment: ExecutionEnvironment | None = None
+    compaction: CompactionTelemetry | None = None

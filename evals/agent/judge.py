@@ -55,6 +55,7 @@ class InstanceResult(TypedDict):
     output_tokens: NotRequired[int | None]
     usage_complete: NotRequired[bool]
     execution_environment: NotRequired[dict[str, object] | None]
+    compaction: NotRequired[dict[str, object] | None]
 
 
 _records: list[InstanceResult] = []
@@ -432,6 +433,7 @@ async def evaluate_target(
         "execution_environment": (
             target.execution_environment.model_dump() if target.execution_environment else None
         ),
+        "compaction": target.compaction.model_dump() if target.compaction else None,
     }
 
 
@@ -459,6 +461,14 @@ async def judge_resolution(run: Run, example: Example | None) -> EvaluationResul
     )
 
 
+def _compaction_value(record: InstanceResult, key: str) -> int:
+    compaction = record.get("compaction")
+    if not isinstance(compaction, dict):
+        return 0
+    value = compaction.get(key)
+    return value if isinstance(value, int) and not isinstance(value, bool) and value >= 0 else 0
+
+
 def summarize_results(records: list[InstanceResult]) -> dict[str, float]:
     if not records:
         return {}
@@ -475,6 +485,15 @@ def summarize_results(records: list[InstanceResult]) -> dict[str, float]:
     known_steps = [steps for r in records if (steps := r["steps"]) is not None]
     if known_steps:
         summary["median_steps"] = float(median(known_steps))
+    compaction_counts = [_compaction_value(r, "count") for r in records]
+    summary["compaction_rate"] = sum(value > 0 for value in compaction_counts) / count
+    summary["mean_compactions"] = sum(compaction_counts) / count
+    summarized_tokens = sum(_compaction_value(r, "summarized_tokens") for r in records)
+    summary_tokens = sum(_compaction_value(r, "summary_tokens") for r in records)
+    summary["mean_compaction_summarized_tokens"] = summarized_tokens / count
+    summary["mean_compaction_summary_tokens"] = summary_tokens / count
+    if summary_tokens:
+        summary["compaction_compression_ratio"] = summarized_tokens / summary_tokens
     for stage in FailureStage:
         if stage != FailureStage.NONE:
             summary[f"failure_rate.{stage}"] = (

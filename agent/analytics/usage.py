@@ -504,6 +504,10 @@ async def record_context_offloaded(
     trigger: Literal["manual", "automatic"],
     status: Literal["completed", "failed"],
     cutoff_index: int | None = None,
+    messages_summarized: int | None = None,
+    summarized_tokens: int | None = None,
+    summary_tokens: int | None = None,
+    duration_ms: int | None = None,
 ) -> None:
     """Record that conversation compaction replaced messages with a summary."""
     invocation_id, thread_id = _runtime_identity()
@@ -515,7 +519,11 @@ async def record_context_offloaded(
         ContextOffloadedPayload(
             trigger=trigger,
             status=status,
-            cutoff_index=max(0, cutoff_index) if cutoff_index is not None else None,
+            cutoff_index=_count(cutoff_index),
+            messages_summarized=_count(messages_summarized),
+            summarized_tokens=_count(summarized_tokens),
+            summary_tokens=_count(summary_tokens),
+            duration_ms=_count(duration_ms),
         ),
         run_id=opaque_id("run", invocation_id),
         thread_id=opaque_id("thread", thread_id),

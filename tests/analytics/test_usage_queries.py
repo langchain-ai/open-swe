@@ -6,9 +6,11 @@ from uuid import UUID, uuid4
 import pytest
 from sqlalchemy import text
 
-from agent.analytics import directory, queries
+from agent.analytics import directory, ingestion, queries
+from agent.analytics.events import ContextOffloadedPayload, EventName
 from agent.database import analytics as database
 from agent.database import postgres
+from tests.analytics import helpers
 from tests.analytics.conftest import initialize_database
 
 NOW = datetime(2026, 9, 11, tzinfo=UTC)
@@ -527,3 +529,56 @@ async def test_reused_handles_do_not_transfer_an_immutable_owners_usage(usage_db
             == original
         )
     assert await directory.resolve_person(immutable_person_key=123) == original
+
+
+async def test_context_offload_summary_reports_tokens_and_failures(usage_db):
+    workspace = database.workspace_id()
+    payloads = [
+        ContextOffloadedPayload(
+            trigger="automatic",
+            status="completed",
+            cutoff_index=10,
+            messages_summarized=10,
+            summarized_tokens=5_000,
+            summary_tokens=400,
+            duration_ms=1_200,
+        ),
+        ContextOffloadedPayload(
+            trigger="automatic",
+            status="completed",
+            cutoff_index=6,
+            messages_summarized=6,
+            summarized_tokens=3_000,
+            summary_tokens=200,
+            duration_ms=800,
+        ),
+        ContextOffloadedPayload(
+            trigger="manual",
+            status="failed",
+            messages_summarized=4,
+            summarized_tokens=1_000,
+            duration_ms=300,
+        ),
+    ]
+    for payload in payloads:
+        envelope = helpers.event(workspace, EventName.CONTEXT_OFFLOADED, payload, day=0)
+        assert await ingestion.ingest(envelope)
+
+    result = await queries.context_offloaded_summary(period="7d")
+
+    assert result["period"] == "7d"
+    assert result["data_source"] == "events"
+    assert result["token_source"] == "middleware_estimate"
+    assert result["compaction"]["events"] == 3
+    assert result["compaction"]["completed"] == 2
+    assert result["compaction"]["failed"] == 1
+    assert result["compaction"]["messages_summarized"] == 16
+    assert result["compaction"]["summarized_tokens"] == 8_000
+    assert result["compaction"]["summary_tokens"] == 600
+    assert result["compaction"]["duration_ms"] == 2_300
+    assert result["compaction"]["compression_ratio"] == 13.33
+    by_trigger = {row["trigger"]: row for row in result["by_trigger"]}
+    assert by_trigger["automatic"]["events"] == 2
+    assert by_trigger["automatic"]["compression_ratio"] == 13.33
+    assert by_trigger["manual"]["failed"] == 1
+    assert by_trigger["manual"]["compression_ratio"] is None

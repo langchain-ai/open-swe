@@ -47,8 +47,35 @@ async def test_patch_is_collected_without_a_second_model_run(sdk: AsyncMock) -> 
     assert output["steps"] == 1
     assert output["input_tokens"] == 100
     assert output["usage_complete"] is True
+    assert output["compaction"] is None
     assert sdk.runs.wait.await_count == 1
     assert target.drain_thread_ids() == {"thread-1"}
+
+
+async def test_compaction_totals_are_reported_from_graph_state(sdk: AsyncMock) -> None:
+    sdk.runs.wait.return_value = {
+        "messages": [],
+        "agent_eval_result": {"status": "collected", "patch": ""},
+        "conversation_offloading": {
+            "status": "completed",
+            "trigger": "automatic",
+            "count": 2,
+            "total_messages_summarized": 12,
+            "total_summarized_tokens": 4_000,
+            "total_summary_tokens": 300,
+            "total_duration_ms": 900,
+            "file_path": "/conversation_history/session.md",
+            "cutoff_index": 10,
+        },
+    }
+    output = await target.solve_task(_INPUTS)
+    assert output["compaction"] == {
+        "count": 2,
+        "messages_summarized": 12,
+        "summarized_tokens": 4_000,
+        "summary_tokens": 300,
+        "duration_ms": 900,
+    }
 
 
 @pytest.mark.parametrize("artifact", [None, {"status": "collection_error", "error": "git failed"}])

@@ -7,10 +7,12 @@ import pytest
 
 from evals.agent.build_dataset import InstanceError, build_example
 from evals.agent.judge import (
+    InstanceResult,
     _install_env,
     extract_patch,
     parse_test_outcomes,
     resolution_from_outcomes,
+    summarize_results,
 )
 from evals.agent.judge import (
     test_timeout_seconds as judge_test_timeout_seconds,
@@ -78,6 +80,44 @@ def test_build_example_rejects_empty_fail_to_pass() -> None:
     raw = dict(_INSTANCE, fail_to_pass=[])
     with pytest.raises(InstanceError, match="fail_to_pass"):
         build_example(raw)
+
+
+def _result(instance_id: str, compaction: dict[str, object] | None) -> InstanceResult:
+    return InstanceResult(
+        instance_id=instance_id,
+        repo="r/r",
+        resolved=True,
+        patch_applied=True,
+        fail_to_pass_rate=1.0,
+        pass_to_pass_rate=1.0,
+        steps=5,
+        wall_clock_seconds=10.0,
+        error="",
+        usage_complete=True,
+        compaction=compaction,
+    )
+
+
+def test_summarize_results_reports_compaction_coverage() -> None:
+    records = [
+        _result(
+            "compact-1",
+            {
+                "count": 2,
+                "messages_summarized": 10,
+                "summarized_tokens": 1_000,
+                "summary_tokens": 100,
+                "duration_ms": 500,
+            },
+        ),
+        _result("compact-0", None),
+    ]
+    summary = summarize_results(records)
+    assert summary["compaction_rate"] == 0.5
+    assert summary["mean_compactions"] == 1.0
+    assert summary["mean_compaction_summarized_tokens"] == 500.0
+    assert summary["mean_compaction_summary_tokens"] == 50.0
+    assert summary["compaction_compression_ratio"] == 10.0
 
 
 def test_build_example_rejects_non_string_test_ids() -> None:
