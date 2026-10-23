@@ -1,0 +1,33 @@
+mda/rt/backend.py
+  s_b35d826fa62e9d::t_653e97b004422f 51-52
+mda/rt/browser.py
+  s_b35d826fa62e9d::t_ea8a4863a783f8 11,41-47
+openswe/browser_handoff.py
+  s_b35d826fa62e9d::t_7c568842be6326 1-49
+openswe/remote_runtime/graph.py
+  s_b35d826fa62e9d::t_4364530a636878 65,150-156,615-618
+tests/reviewer/test_remote_runtime.py
+  s_b35d826fa62e9d::t_efefed014af45e 3,377-429
+vendor/managed-deepagents-sdk/packages/pypi/src/managed_deepagents/_channels/assistant_text.py
+  s_b35d826fa62e9d::t_c00b4562e7ab27 73-78
+vendor/managed-deepagents-sdk/packages/pypi/src/managed_deepagents/browser.py
+  s_b35d826fa62e9d::t_79026647159d07 9-12,29,34,41,43,45-46,61,73,97-114,119-158,166,172-186,201,229,240-245,247-254,266-268,309-315,336-392,465-509,561-573,664-670,674-675,692-694,702,709,748-754,778
+vendor/mda-upstream-prs
+  s_b35d826fa62e9d::t_ebaa536746924b 3
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "a1853a121abe660b00cf81723e64b9bc495a3327",
+  "prompts": {},
+  "sessions": {
+    "s_b35d826fa62e9d": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "2b6b8806-93bb-4d14-bffd-fb396f8e89c7",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "Sydney Runkle <sydneymarierunkle@gmail.com>"
+    }
+  }
+}
