@@ -177,6 +177,20 @@ pub const PYTHON_BROWSER_TOOLS: Dependency = Dependency {
     version: "==0.1.0",
 };
 
+/// PyPI packages behind the browser's `record` tool: PyAV encodes the
+/// screencast as H.264 (its wheels bundle FFmpeg and libx264, so deployments
+/// need no system ffmpeg), and Pillow decodes frames and draws clicks.
+pub const PYTHON_BROWSER_RECORDING: [Dependency; 2] = [
+    Dependency {
+        name: "av",
+        version: ">=15,<20",
+    },
+    Dependency {
+        name: "pillow",
+        version: ">=11",
+    },
+];
+
 /// npm package that provides the local LangGraph in-memory dev server.
 ///
 /// The caret range keeps local development on compatible LangGraph CLI updates;
@@ -745,6 +759,18 @@ mod tests {
             pyproject.contains(&pin),
             "pyproject.toml does not pin {pin}"
         );
+    }
+
+    #[test]
+    fn browser_recording_dependencies_match_the_packages_typing_pins() {
+        let pyproject = include_str!("../../../packages/pypi/pyproject.toml");
+        for dep in PYTHON_BROWSER_RECORDING {
+            let pin = format!("\"{}{}\"", dep.name, dep.version);
+            assert!(
+                pyproject.contains(&pin),
+                "pyproject.toml does not pin {pin}"
+            );
+        }
     }
 
     #[test]

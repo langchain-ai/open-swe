@@ -170,6 +170,7 @@ pub(super) fn inject_managed_dependencies(
     if browser {
         deps.push(dependencies::PYTHON_BROWSER);
         deps.push(dependencies::PYTHON_BROWSER_TOOLS);
+        deps.extend_from_slice(&dependencies::PYTHON_BROWSER_RECORDING);
     }
     if include_local_dev {
         deps.extend_from_slice(dependencies::local_dev_dependencies(project.language));

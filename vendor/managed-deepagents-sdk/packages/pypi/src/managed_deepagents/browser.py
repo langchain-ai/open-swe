@@ -60,6 +60,7 @@ from stagehand_middleware.facade import (
 )
 from stagehand_middleware.facade.tools import sanitize_error_message
 
+from managed_deepagents import _browser_recording as recording
 from managed_deepagents._channels.assistant_text import MDA_NOTIFICATION_KEY
 from managed_deepagents._managed_tools import ManagedToolRuntime  # noqa: TC001 - tool annotations
 from managed_deepagents.identity import ManagedServerInfo
@@ -96,6 +97,18 @@ _LOCALHOST_NOTE = (  # a thread's browser shares its sandbox's localhost
     "Servers running in your sandbox are reachable at http://localhost:<port> "
     "(any port but 80 and 443)."
 )
+_RECORDINGS = f"{_WORKSPACE}/recordings"
+_RECORD_DESCRIPTION = f"""Record the browser tab as a video, to show a person what you did.
+
+`start`, act as usual, then `stop`: it saves an H.264 mp4 to `path` in your sandbox
+(default {_RECORDINGS}/<time>.mp4), with what happened when beside it as JSON (the same
+path, ending .json), and shows you its first and last frames. The video shows a cursor
+gliding to each click, the clicks, and what is typed (masked in password fields). While
+recording, the viewport is {recording.VIEWPORT[0]}x{recording.VIEWPORT[1]}, and each
+pause between your calls plays for at most {recording.MAX_HOLD_S:g}s.
+A recording ends, and is saved under {_RECORDINGS}/, when the run ends or you hand
+the browser to the user: it never shows what they do. It stops at
+{recording.MAX_S // 60} minutes."""
 _HANDOFF_LINK_TTL_S = 900  # how long the link a user gets for a handoff works
 _HAND_BACK_POLL_S = 2.0
 _WITH_USER = (
@@ -189,6 +202,8 @@ class _Session:
     # The sandbox whose localhost the browser shares. By handle, not name: one MDA
     # replaces mid-run keeps its name but gets a new handle.
     shared: SandboxBackendProtocol | None = None
+    cdp_url: str = ""  # this window's CDP, through the browsers API
+    take: _Take | None = None  # a recording in progress
 
     async def close(self) -> None:
         # Not `browser.close()`, which closes the browser. Closing Stagehand frees the
@@ -207,8 +222,16 @@ _RELEASES: dict[str, asyncio.Task[None]] = {}
 _WATCHERS: set[asyncio.Task[None]] = set()  # held until done: the loop keeps weak references
 
 
+@dataclass
+class _Take:
+    recorder: recording.Recorder
+    runtime: ManagedToolRuntime  # whose sandbox the recording is saved to
+
+
 async def _release(key: str) -> None:
     if session := _SESSIONS.pop(key, None):
+        with contextlib.suppress(Exception):  # best effort: the client goes regardless
+            await _finish_recording(session, None)
         await session.close()
 
 
@@ -229,7 +252,8 @@ async def _release_when_idle(key: str) -> None:
 
 
 class BrowserMiddleware(AgentMiddleware[BrowserState, Any, Any]):
-    """Give the agent Stagehand's tools, named ``browser_run``, ``browser_snapshot`` and so on."""
+    """Give the agent Stagehand's tools, named ``browser_run``, ``browser_snapshot`` and so on,
+    plus ``browser_handoff`` to hand the browser over and ``browser_record`` for a video."""
 
     name = "mda-browser"
     state_schema = BrowserState
@@ -266,7 +290,9 @@ class BrowserMiddleware(AgentMiddleware[BrowserState, Any, Any]):
                 if key not in _SESSIONS:
                     _SESSIONS[key] = await _open(key, window, self.idle_ttl_seconds)
                 await self._share(_SESSIONS[key], _SESSIONS[key].browser, key, runtime)
-                return await fn(_SESSIONS[key])
+                result = await fn(_SESSIONS[key])
+                await _follow_tab(key)
+                return result
             except StagehandFacadeInputError as err:
                 return f"error: {err}"
             except StagehandFacadeExecutionError as err:  # thrown by run code
@@ -488,7 +514,30 @@ class BrowserMiddleware(AgentMiddleware[BrowserState, Any, Any]):
             """
             return await self._hand_to_user(runtime, reason)
 
-        return [run, snapshot, screenshot, browser_handoff]
+        @tool("browser_record", description=_RECORD_DESCRIPTION)
+        async def record(
+            runtime: ManagedToolRuntime,
+            action: Literal["start", "stop"],
+            path: str | None = None,
+        ) -> list[dict[str, str]] | str:
+            async def start(session: _Session) -> str:
+                if session.take:
+                    return "error: already recording. Stop this recording first."
+                tab = await _newest_tab(session.stagehand.browser.context)
+                recorder = recording.Recorder(session.cdp_url, _api()[1])
+                await recorder.start(tab.page_id)
+                session.take = _Take(recorder, runtime)
+                width, height = recording.VIEWPORT
+                return (
+                    f"Recording. The viewport is {width}x{height} until you stop, "
+                    "so take a browser_snapshot before acting on the page."
+                )
+
+            if action == "start":
+                return await self._call(runtime, start)
+            return await self._call(runtime, lambda s: _finish_recording(s, path))
+
+        return [run, snapshot, screenshot, browser_handoff, record]
 
 
 def _pending(state: BrowserState | Mapping[str, Any] | None) -> PendingBrowserHandoff | None:
@@ -526,6 +575,70 @@ def _wake_message(status: BrowserHandoffStatus) -> BrowserHandoffWake:
 def _is_handoff_notification(message: BaseMessage) -> bool:
     notification = message.additional_kwargs.get(MDA_NOTIFICATION_KEY)
     return isinstance(notification, dict) and notification.get("type") == "browser_handoff"
+
+
+async def _follow_tab(key: str) -> None:
+    """Point ``key``'s recording at its window's newest tab, where the tools act."""
+    if (session := _SESSIONS.get(key)) and session.take:
+        with contextlib.suppress(Exception):  # it keeps the tab it had
+            tab = await _newest_tab(session.stagehand.browser.context)
+            await session.take.recorder.follow(tab.page_id)
+
+
+async def _finish_recording(session: _Session, path: str | None) -> list[dict[str, str]] | str:
+    """Stop the session's recording and save it to ``path``, or under recordings/.
+
+    Returns what was saved and the first and last frames, for the model to check.
+    """
+    if (take := session.take) is None:
+        return (
+            "error: not recording. A recording ends when the run ends or you hand the "
+            f"browser to the user, and is saved under {_RECORDINGS}/."
+        )
+    session.take = None
+    captured = await take.recorder.stop()
+    if not captured.frames:
+        return "error: the recording has no frames: the tab never painted."
+    video = await asyncio.to_thread(recording.encode, captured)
+    path = path or f"{_RECORDINGS}/{time.strftime('%Y%m%d-%H%M%S')}.mp4"
+    saved = await _save(take.runtime, path, video)
+    if saved.startswith("error:"):
+        return saved
+    happened = recording.events(captured)
+    timeline = f"{posixpath.splitext(posixpath.normpath(path))[0]}.json"
+    noted = await _save(take.runtime, timeline, json.dumps(happened, indent=1).encode())
+    length = recording.Clock(captured).length
+    text = f"{saved[:-1]}: {length:.0f}s, {len(video) / 1e6:.1f} MB. {noted}"
+    if captured.capped:
+        text += f" It stopped at {recording.MAX_S // 60} minutes of recording."
+    text += "\nWhat happened, at video time:\n" + _summary(happened)
+    text += "\nIts first and last frames follow; check them before sharing it."
+    return [
+        {"type": "text", "text": text},
+        *(
+            {"type": "image", "url": f"data:image/jpeg;base64,{base64.b64encode(f.jpeg).decode()}"}
+            for f in (captured.frames[0], captured.frames[-1])
+        ),
+    ]
+
+
+def _summary(happened: list[dict[str, object]], limit: int = 30) -> str:
+    """A line per event, for the model to caption or describe the video with."""
+
+    def line(event: dict[str, object]) -> str:
+        at = f"{event['t']:>6.1f}s"
+        if event["type"] == "navigate":
+            return f"{at} opened {event['url']}"
+        if event["type"] == "click":
+            return f"{at} clicked {event['target'] or 'the page'} at ({event['x']}, {event['y']})"
+        if event["type"] == "type":
+            return f"{at} typed {event['text']!r} into {event['target'] or 'the page'}"
+        return f"{at} pressed {event['key']}"
+
+    lines = [line(event) for event in happened[:limit]]
+    if len(happened) > limit:
+        lines.append(f"... and {len(happened) - limit} more in the JSON.")
+    return "\n".join(lines) or "(nothing)"
 
 
 def _unexpected(arguments: dict[str, object]) -> str:
@@ -815,7 +928,7 @@ async def _connect(
     # cannot see (another thread's, or the shared localhost one), and `set_active_page`
     # does not move headless Chrome's focus. It has no hook for the page, so name ours.
     tools._active_page = lambda: _newest_tab(browser.context)  # ty: ignore[invalid-assignment]  # noqa: SLF001
-    return _Session(window, stagehand, tools, artifacts, browser_name)
+    return _Session(window, stagehand, tools, artifacts, browser_name, cdp_url=cdp_url)
 
 
 async def _newest_tab(context: BrowserContext) -> Page:
