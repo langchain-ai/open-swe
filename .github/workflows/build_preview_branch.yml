@@ -117,6 +117,14 @@ jobs:
           fi
       - uses: dtolnay/rust-toolchain@29eef336d9b2848a0b548edc03f92a220660cdb8 # stable
         if: steps.mda-changed.outputs.deploy == 'true'
+      # Restore only: this job runs labeled PRs' code, and the cache deploy_mda.yml
+      # saves from main is what staging and prod build with.
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+        if: steps.mda-changed.outputs.deploy == 'true'
+        with:
+          workspaces: preview-tree/vendor/managed-deepagents-sdk
+          shared-key: mda-cli
+          save-if: false
       - name: Build the mda CLI
         if: steps.mda-changed.outputs.deploy == 'true'
         working-directory: preview-tree
