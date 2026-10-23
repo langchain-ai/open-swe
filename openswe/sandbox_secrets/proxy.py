@@ -3,8 +3,6 @@
 import logging
 from uuid import UUID
 
-from pydantic import ValidationError
-
 from openswe.database import postgres
 from openswe.sandbox_secrets.models import SandboxSecret, SecretView
 from openswe.sandboxes import tool_access
@@ -14,11 +12,16 @@ logger = logging.getLogger(__name__)
 
 
 async def _metadata(thread_id: str) -> ThreadMetadata | None:
-    thread = await tool_access.get_client().threads.get(thread_id)
+    """The thread's metadata, or None when it cannot be read: such a thread gets no secrets."""
     try:
+        thread = await tool_access.get_client().threads.get(thread_id)
         return ThreadMetadata.model_validate(thread.get("metadata") or {})
-    except ValidationError:
-        logger.warning("Unrecognized thread metadata for sandbox secrets", exc_info=True)
+    except Exception:
+        logger.warning(
+            "Could not read thread metadata for sandbox secrets",
+            extra={"thread_id": thread_id},
+            exc_info=True,
+        )
         return None
 
 
