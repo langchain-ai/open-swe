@@ -1,10 +1,13 @@
 import shlex
 from typing import cast
 
+import pytest
 from deepagents.backends.protocol import ExecuteResponse, SandboxBackendProtocol
 
+from openswe.bridge.constants import SANDBOX_ID_PREFIX
 from openswe.sandboxes.lifecycle import configure_git_identity
 from openswe.sandboxes.paths import resolve_repo_dir, resolve_sandbox_work_dir
+from openswe.sandboxes.state import SandboxBackendProxy
 
 
 class _FakeProvider:
@@ -57,6 +60,60 @@ class _FakeSandboxBackend:
             return ExecuteResponse(output="", exit_code=exit_code, truncated=False)
 
         return ExecuteResponse(output="", exit_code=1, truncated=False)
+
+
+class _ProviderBackend(_FakeSandboxBackend):
+    def get_work_dir(self) -> str:
+        assert self.sandbox is not None
+        return self.sandbox.get_work_dir()
+
+
+class _LocalBackend(_ProviderBackend):
+    @property
+    def id(self) -> str:
+        return f"{SANDBOX_ID_PREFIX}local-checkout"
+
+
+@pytest.mark.parametrize("local_checkout", [False, True])
+async def test_cold_proxy_uses_declared_work_dir(
+    local_checkout: bool, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr("openswe.sandboxes.state.SANDBOX_BACKENDS", {})
+    monkeypatch.setattr("openswe.sandboxes.state.SANDBOX_CONNECTIONS", {})
+    work_dir = "/home/user/checkout" if local_checkout else "/workspace"
+    backend_type = _LocalBackend if local_checkout else _ProviderBackend
+    backend = backend_type(
+        provider=_FakeProvider(work_dir=work_dir),
+        shell_paths={"pwd": "/root"},
+        writable_dirs={work_dir, "/root"},
+    )
+
+    async def reconnect() -> SandboxBackendProtocol:
+        return cast(SandboxBackendProtocol, backend)
+
+    proxy = SandboxBackendProxy(thread_id="cold-path-test", reconnect=reconnect)
+
+    assert await resolve_sandbox_work_dir(proxy) == work_dir
+    assert await resolve_repo_dir(proxy, "open-swe") == (
+        work_dir if local_checkout else "/workspace/open-swe"
+    )
+
+
+@pytest.mark.parametrize("shell_command", ["pwd", "printf '%s' \"$HOME\""])
+async def test_shell_fallback_does_not_mask_provider_work_dir(shell_command: str) -> None:
+    provider = _FakeProvider()
+    backend = _FakeSandboxBackend(
+        provider=provider,
+        shell_paths={shell_command: "/root"},
+        writable_dirs={"/root", "/workspace"},
+    )
+    sandbox = cast(SandboxBackendProtocol, backend)
+
+    assert await resolve_sandbox_work_dir(sandbox) == "/root"
+
+    provider._work_dir = "/workspace"
+
+    assert await resolve_sandbox_work_dir(sandbox) == "/workspace"
 
 
 async def test_resolve_repo_dir_uses_provider_work_dir() -> None:
