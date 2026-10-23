@@ -266,6 +266,17 @@ class User(Base):
         return user is not None and user.typed_preferences.concierge_mode
 
     @classmethod
+    async def in_concierge_mode(cls) -> list[Self]:
+        """Everyone who keeps their bot DM as one conversation."""
+        async with postgres.session() as session:
+            rows = await session.scalars(
+                cls._with_identities(select(cls)).where(
+                    cls.preferences.contains({"concierge_mode": True})
+                )
+            )
+            return list(rows.all())
+
+    @classmethod
     async def update_preferences(
         cls, login: str, patch: UserPreferencesPatch
     ) -> UserPreferences | None:

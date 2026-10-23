@@ -37,6 +37,11 @@ from openswe.sandboxes.retry import (
 )
 from openswe.schedules.store import AGENT_SCHEDULE_JOB_KIND, launch_scheduled_agent_run
 from openswe.session_cost import run_session_cost_refresh
+from openswe.slack.concierge_checkin import (
+    CHECKIN_JOB,
+    CHECKIN_SCHEDULE,
+    check_in_with_concierge_users,
+)
 from openswe.threads.index_import import import_agent_server_threads
 from openswe.threads.status import RECONCILE_JOB as THREAD_STATUS_RECONCILE
 from openswe.threads.status import RECONCILE_SCHEDULE, reconcile_busy_threads
@@ -167,6 +172,12 @@ async def _thread_status_reconcile(_job: Job) -> object:
     return {"threads_settled": await reconcile_busy_threads()}
 
 
+@WORKER.register(CHECKIN_JOB)
+async def _concierge_checkin(job: Job) -> None:
+    woken = await check_in_with_concierge_users()
+    logger.info("Job ran", extra={"job_kind": job.kind, "job_id": str(job.id), "job_result": woken})
+
+
 @WORKER.register(WAKE_THREAD_JOB)
 async def _wake_thread(job: Job) -> None:
     # Never retried: a run the server started before the client saw an error would start twice.
@@ -186,6 +197,7 @@ async def start_jobs() -> None:
         lambda: queue.schedule(
             THREAD_STATUS_RECONCILE, cron=RECONCILE_SCHEDULE, key=THREAD_STATUS_RECONCILE
         ),
+        lambda: queue.schedule(CHECKIN_JOB, cron=CHECKIN_SCHEDULE, key=CHECKIN_JOB),
     ]
     for step in steps:
         try:
