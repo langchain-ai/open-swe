@@ -50,10 +50,17 @@ class SandboxAPI:
 
         Without one configured it is the deployment's own LangSmith. Its endpoint and key
         are set together: either alone would pair one LangSmith's key with another's API.
+        It must be another LangSmith: boxes and snapshots are told apart by API root, so
+        another workspace on the deployment's own would pass for the deployment.
         """
         endpoint = ENV.NEW_SANDBOX_REGION_ENDPOINT.optional()
         api_key = ENV.NEW_SANDBOX_REGION_API_KEY.optional()
         if endpoint and api_key:
+            if _api_root(endpoint) == _api_root(ENV.LANGSMITH_ENDPOINT.get()):
+                msg = (
+                    "NEW_SANDBOX_REGION_ENDPOINT must be another LangSmith than LANGSMITH_ENDPOINT"
+                )
+                raise ValueError(msg)
             return cls(endpoint, api_key)
         if endpoint or api_key:
             msg = "Set both NEW_SANDBOX_REGION_ENDPOINT and NEW_SANDBOX_REGION_API_KEY, or neither"

@@ -245,3 +245,18 @@ def test_a_half_configured_new_sandbox_region_fails_at_startup(
 
     with pytest.raises(ValueError, match="or neither"):
         validate_sandbox_startup_config()
+
+
+def test_a_new_sandbox_region_on_the_deployments_own_langsmith_fails_at_startup(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Boxes are told apart by API root, so another workspace there would pass for the deployment."""
+    from openswe.sandboxes.providers.registry import validate_sandbox_startup_config
+
+    monkeypatch.setenv("SANDBOX_TYPE", "langsmith")
+    monkeypatch.setenv("LANGSMITH_ENDPOINT", "https://api.smith.example")
+    monkeypatch.setenv("NEW_SANDBOX_REGION_ENDPOINT", "https://api.smith.example/v2/sandboxes")
+    monkeypatch.setenv("NEW_SANDBOX_REGION_API_KEY", "lsv2-other-workspace-key")
+
+    with pytest.raises(ValueError, match="another LangSmith"):
+        validate_sandbox_startup_config()
