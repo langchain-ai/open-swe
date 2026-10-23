@@ -215,7 +215,7 @@ ENV.var(
 )
 ENV.var(
     "REMOTE_RUNTIME_TOKEN_SECRET",
-    "HMAC key(s) signing the run tokens remote runtimes present to /remote-runtime/hooks; "
+    "HMAC key(s) signing the run tokens remote runtimes present to /remote-runtime/api; "
     "comma-separated, the first signs and every one verifies. Required.",
     secret=True,
 )

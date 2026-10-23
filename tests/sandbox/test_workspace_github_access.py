@@ -263,7 +263,7 @@ async def test_legacy_review_replacement_uses_authenticated_run_scope(
         configurable={"repo": {"owner": "acme", "name": "api"}} if known_repo else {},
     )
 
-    await graph.hook(run, "sandbox", {})
+    await graph.api(run, "sandbox_replaced", {})
     assert await proxy.maybe_refresh_proxy_token(
         "thread", now=datetime.now(UTC) + timedelta(hours=1)
     )

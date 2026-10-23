@@ -32,10 +32,10 @@ from deepagents.middleware.filesystem import FilesystemMiddleware
 from langchain_core.tools import BaseTool
 from pydantic import BaseModel
 from runtime_api import files as file_api
-from runtime_api.endpoint import Endpoint, Transport, call
+from runtime_api.endpoint import LONG_CALL_SECONDS, Endpoint, Transport, call
 from runtime_api.operations import RunRequest
 
-from rt.backend import LONG_CALL_SECONDS, TOOL_CALL_SLACK_SECONDS
+from rt.backend import TOOL_CALL_SLACK_SECONDS
 
 _SYNC: Final = "The backend's files are reached asynchronously"
 # deepagents' file and shell tools.
