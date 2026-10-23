@@ -1049,7 +1049,7 @@ pub(crate) fn recipe_spec_from_project(
     let Some(manifest) = compile::load_sandbox_recipe_manifest(out_dir)? else {
         return Ok(None);
     };
-    let setup = compile::read_setup_script(project)?.unwrap_or_default();
+    let setup = compile::read_sandbox_setup(project)?.unwrap_or_default();
     Ok(Some(RecipeSpec {
         setup_script: setup,
         snapshot_name: manifest.snapshot_name,

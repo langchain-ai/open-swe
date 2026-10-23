@@ -14,7 +14,8 @@ use crate::agent_config::read_agent_static_config;
 use crate::deploy::helpers::recipe_digest;
 use crate::project::{Language, Project};
 
-use super::discovery::{find_sandbox_entry, read_setup_script};
+use super::discovery::find_sandbox_entry;
+use super::sandbox_workspace::read_sandbox_setup;
 use super::static_extract::{
     extract_python_selected_keyword_config, extract_typescript_selected_object_config,
 };
@@ -69,7 +70,7 @@ pub(crate) fn project_uses_sandbox(project: &Project) -> Result<bool> {
         return Ok(true);
     }
     let has_setup_script =
-        read_setup_script(project)?.is_some_and(|setup| !setup.trim().is_empty());
+        read_sandbox_setup(project)?.is_some_and(|setup| !setup.trim().is_empty());
     Ok(has_setup_script && read_agent_static_config(project)?.is_factory)
 }
 
@@ -85,7 +86,7 @@ pub(super) fn write_sandbox_recipe_manifest(
     factory: bool,
 ) -> Result<Option<SandboxRecipeManifest>> {
     let path = out_dir.join(SANDBOX_RECIPE_FILE);
-    let setup = read_setup_script(project)?.unwrap_or_default();
+    let setup = read_sandbox_setup(project)?.unwrap_or_default();
     let has_setup_script = !setup.trim().is_empty();
     let bases = match find_sandbox_entry(project) {
         Some(entry) => extract_sandbox_bases(project, &entry)?,
@@ -435,6 +436,44 @@ mod tests {
             manifest.digest,
             recipe_digest(b"echo ready\n", None, None, None, None)
         );
+    }
+
+    #[test]
+    fn workspace_without_setup_emits_a_recipe_for_static_and_factory_agents() {
+        let root = tempfile::tempdir().unwrap();
+        write_sandbox(
+            root.path(),
+            "sandbox/workspace/browser_cli.py",
+            "print('ready')\n",
+        );
+        write_sandbox(
+            root.path(),
+            "sandbox/__init__.py",
+            "sandbox = define_sandbox()\n",
+        );
+        let mut project = sandbox_project(root.path(), Language::Python, "sandbox/__init__.py");
+        let out = root.path().join("build");
+        let manifest = write_sandbox_recipe_manifest(&project, &out, false)
+            .unwrap()
+            .unwrap();
+        assert!(manifest.has_setup_script);
+        let spec = crate::deploy::recipe_spec_from_project(&project, &out)
+            .unwrap()
+            .unwrap();
+        assert_eq!(
+            manifest.digest,
+            recipe_digest(spec.setup_script.as_bytes(), None, None, None, None)
+        );
+        project.files.clear();
+        let factory = write_sandbox_recipe_manifest(&project, &out, true)
+            .unwrap()
+            .unwrap();
+        assert_eq!(manifest.digest, factory.digest);
+        fs::remove_file(root.path().join("sandbox/workspace/browser_cli.py")).unwrap();
+        assert!(write_sandbox_recipe_manifest(&project, &out, true)
+            .unwrap()
+            .is_none());
+        assert!(!out.join(SANDBOX_RECIPE_FILE).exists());
     }
 
     #[test]

@@ -35,6 +35,7 @@ mod model;
 pub(crate) mod requirements;
 mod runtime;
 mod sandbox_recipe;
+mod sandbox_workspace;
 pub(crate) mod schedules;
 mod static_extract;
 
@@ -44,7 +45,7 @@ pub(crate) mod test_support;
 #[path = "tests.rs"]
 mod tests;
 
-pub(crate) use discovery::{find_sandbox_entry, read_setup_script};
+pub(crate) use discovery::find_sandbox_entry;
 pub(crate) use identity::{
     identity_requires_ingress_secret, read_identity_summary, INGRESS_SECRET_ENV,
 };
@@ -64,6 +65,7 @@ pub(crate) use requirements::{
 pub(crate) use sandbox_recipe::{
     load_sandbox_recipe_manifest, project_uses_sandbox, SandboxRegistryManifest,
 };
+pub(crate) use sandbox_workspace::read_sandbox_setup;
 
 use discovery::{
     agent_import_specifier, find_browser_entry, find_identity_entry, find_memory_entry,
