@@ -53,6 +53,7 @@ from langchain.agents.middleware.types import (
     ModelRequest,
     ModelResponse,
 )
+from langchain_anthropic.middleware import AnthropicPromptCachingMiddleware
 from langchain_core.language_models.fake_chat_models import FakeListChatModel
 from langchain_core.messages import (
     AIMessage,
@@ -183,6 +184,7 @@ _DESCRIBED_TOOLS: Final = ("eval",)
 _NOT_PROMPT_SHAPING: Final = (
     FilesystemMiddleware,
     CodeInterpreterMiddleware,
+    AnthropicPromptCachingMiddleware,
     ConversationOffloadingMiddleware,
     TranscriptMiddleware,
     RecordRunUsageMiddleware,

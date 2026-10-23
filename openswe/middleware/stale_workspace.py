@@ -47,6 +47,18 @@ async def warn_stale_workspace(
     """Warn on the dashboard, and in Slack when the run came from there. Never raises."""
     if not is_snapshot_stale(workspace, interval_seconds=2 * 60 * 60):
         return
+    logger.info(
+        "Run booted a stale workspace image",
+        extra={
+            "workspace": workspace.slug,
+            "agent_thread_id": thread_id,
+            "captured_at": workspace.last_captured_at,
+            "refresh_status": workspace.refresh_status,
+            "refresh_run_id": workspace.refresh_run_id,
+            "refresh_started_at": workspace.refresh_started_at,
+            "refresh_finished_at": workspace.refresh_finished_at,
+        },
+    )
     queue_run_notice(
         thread_id,
         "workspace_stale",

@@ -7,6 +7,7 @@ from openswe.announcements.routes import router as announcements_router
 from openswe.api_keys.routes import router as api_keys_router
 from openswe.audit_logs.routes import router as audit_logs_router
 from openswe.bridge.routes import router as bridge_router
+from openswe.claude_code.routes import router as claude_code_router
 from openswe.dashboard.agent_instructions import router as agent_instructions_router
 from openswe.dashboard.auth_routes import router as auth_router
 from openswe.dashboard.client_errors import router as client_errors_router
@@ -70,4 +71,5 @@ router.include_router(tasks_router)
 router.include_router(transcript_router)
 router.include_router(api_keys_router)
 router.include_router(bridge_router)
+router.include_router(claude_code_router)
 router.include_router(ui_invalidations_router)
