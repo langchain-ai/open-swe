@@ -18,6 +18,7 @@ from langchain.agents.middleware.types import ModelRequest
 from langchain.tools import ToolRuntime
 from langchain_anthropic import ChatAnthropic
 from langchain_core.callbacks import AsyncCallbackManagerForLLMRun
+from langchain_core.exceptions import ModelRateLimitError
 from langchain_core.language_models.fake_chat_models import (
     FakeListChatModel,
     GenericFakeChatModel,
@@ -1166,6 +1167,14 @@ async def test_a_launched_worker_adopts_its_own_run_token_before_anything_runs(
 _PROVIDER_REQUEST = httpx2.Request("POST", "https://provider.invalid")
 
 
+class _StatusInCode(Exception):
+    """As google-genai's own errors carry the HTTP status."""
+
+    def __init__(self, code: int) -> None:
+        super().__init__(f"{code} UNAVAILABLE")
+        self.code = code
+
+
 @pytest.mark.parametrize(
     ("error", "code"),
     [
@@ -1180,6 +1189,9 @@ _PROVIDER_REQUEST = httpx2.Request("POST", "https://provider.invalid")
         # A client or gateway can let the HTTP library's failure through unwrapped.
         (httpx2.ReadTimeout("timed out", request=_PROVIDER_REQUEST), "provider_timeout"),
         (httpx.ConnectError("refused"), "provider_unavailable"),
+        # google-genai: a typed LangChain error, or the SDK's own with its status in `code`.
+        (ModelRateLimitError("429 RESOURCE_EXHAUSTED"), "provider_rate_limited"),
+        (_StatusInCode(503), "provider_unavailable"),
     ],
 )
 async def test_a_provider_failure_ends_the_run_and_tells_the_backend_why(

@@ -23,6 +23,15 @@ from langchain.agents.middleware import (
 from langchain.agents.middleware.types import ModelRequest, ModelResponse
 from langchain_anthropic import ChatAnthropic
 from langchain_anthropic.middleware import AnthropicPromptCachingMiddleware
+from langchain_core.exceptions import (
+    ContextOverflowError,
+    ModelAPIError,
+    ModelConnectionError,
+    ModelError,
+    ModelNotFoundError,
+    ModelRateLimitError,
+    ModelTimeoutError,
+)
 from langchain_core.messages import AIMessage, AnyMessage, ToolMessage
 from langchain_fireworks import ChatFireworks
 from langchain_openai import ChatOpenAI
@@ -59,6 +68,17 @@ _FAILURE_CODES_BY_TYPE: Final[dict[str, ModelFailureCode]] = {
 }
 
 
+# LangChain's provider-neutral model errors, which integrations raise beside their SDK's own.
+_FAILURE_CODES_BY_CLASS: Final[tuple[tuple[type[ModelError], ModelFailureCode], ...]] = (
+    (ModelRateLimitError, "provider_rate_limited"),
+    (ModelTimeoutError, "provider_timeout"),
+    (ModelConnectionError, "provider_unavailable"),
+    (ContextOverflowError, "context_too_long"),
+    (ModelNotFoundError, "model_unavailable"),
+    (ModelAPIError, "provider_unavailable"),
+)
+
+
 def provider_failure_code(exc: BaseException) -> ModelFailureCode | None:
     """Why the provider failed a call, by its status and error body; None if not a provider failure.
 
@@ -66,6 +86,9 @@ def provider_failure_code(exc: BaseException) -> ModelFailureCode | None:
     from a 529 to a bare ``APIError`` carrying ``overloaded_error`` in its body.
     """
     status = getattr(exc, "status_code", None)
+    if status is None and isinstance(code := getattr(exc, "code", None), int):
+        # google-genai keeps the HTTP status in ``code``.
+        status = code
     body = getattr(exc, "body", None)
     provider_code = ""
     if isinstance(body, dict):
@@ -83,6 +106,9 @@ def provider_failure_code(exc: BaseException) -> ModelFailureCode | None:
         return "model_unavailable"
     if isinstance(status, int) and status >= 500:
         return "provider_unavailable"
+    for model_error, failure in _FAILURE_CODES_BY_CLASS:
+        if isinstance(exc, model_error):
+            return failure
     # A client or gateway can let the HTTP library's own failure through unwrapped.
     if isinstance(exc, (httpx.TimeoutException, httpx2.TimeoutException)):
         return "provider_timeout"
