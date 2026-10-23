@@ -12,10 +12,10 @@ import httpx
 import httpx2
 import pytest
 
+from openswe.agent_api.graph import RemoteGraph
+from openswe.agent_api.tokens import RemoteRun
 from openswe.github import app, proxy, sandbox_access
 from openswe.github.repositories import Repository
-from openswe.remote_runtime.graph import RemoteGraph
-from openswe.remote_runtime.tokens import RemoteRun
 from openswe.sandboxes import lifecycle
 from openswe.sandboxes.providers.langsmith import LangSmithProvider
 from openswe.workspaces.refresh import _create_builder_sandbox

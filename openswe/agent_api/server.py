@@ -1,9 +1,9 @@
 """What Managed Deep Agents runs call back into, behind the run token.
 
-Every call is ``POST /remote-runtime/api/{endpoint}``, the typed API in
+Every call is ``POST /agent-api/{endpoint}``, the typed API in
 ``runtime_api``: the graph's catalog, each phase of the run's model loop and the
-work of its tools (see ``openswe.remote_runtime.graph``), and the launch of its
-task workers (``openswe.remote_runtime.async_workers``). The middleware verifies
+work of its tools (see ``openswe.agent_api.graph``), and the launch of its
+task workers (``openswe.agent_api.async_workers``). The middleware verifies
 the bearer token once per request and leaves the verified run for the handler,
 which picks the graph the token was signed for and reads the thread and run
 configuration from it, never from the body.
@@ -27,7 +27,7 @@ from starlette.requests import Request
 from starlette.responses import JSONResponse
 from starlette.types import ASGIApp, Receive, Scope, Send
 
-from openswe.remote_runtime.tokens import (
+from openswe.agent_api.tokens import (
     RemoteRun,
     RuntimeTokenError,
     WorkerGrant,
@@ -50,7 +50,7 @@ class RefusedCallError(PermissionError):
 
 def _graphs() -> Mapping[str, Api]:
     # The webapp must not import the agent stack at startup.
-    from openswe.remote_runtime.hosted import hosted_graphs
+    from openswe.agent_api.hosted import hosted_graphs
 
     return {assistant_id: graph.api for assistant_id, graph in hosted_graphs().items()}
 
@@ -86,7 +86,7 @@ def _scope_principal(scope: Scope) -> RemoteRun | WorkerGrant:
 
 async def _answer(principal: RemoteRun | WorkerGrant, endpoint: str, body: JsonValue) -> JsonValue:
     """What ``endpoint`` answers ``body`` with, as the run or worker grant that called it."""
-    from openswe.remote_runtime import async_workers
+    from openswe.agent_api import async_workers
 
     if isinstance(principal, WorkerGrant):
         if async_workers.GRANT_API.serves(endpoint):
@@ -101,7 +101,7 @@ async def _answer(principal: RemoteRun | WorkerGrant, endpoint: str, body: JsonV
             return await async_workers.RUN_API.dispatch(endpoint, run, body)
     graph = _graphs().get(run.assistant_id)
     if graph is None:
-        raise RefusedCallError(f"No remote runtime serves {run.assistant_id}")
+        raise RefusedCallError(f"This backend serves no {run.assistant_id} graph")
     return await graph(run, endpoint, body)
 
 
@@ -133,7 +133,7 @@ async def api_endpoint(scope: Scope, receive: Receive, send: Send) -> None:
     except Exception as exc:
         run = principal.coordinator if isinstance(principal, WorkerGrant) else principal
         logger.exception(
-            "Remote runtime call failed", extra={"endpoint": endpoint, "thread_id": run.thread_id}
+            "Agent API call failed", extra={"endpoint": endpoint, "thread_id": run.thread_id}
         )
         # The run fails with what failed here, as it would have in-process.
         failure = {"error": type(exc).__name__, "message": str(exc)}
@@ -166,7 +166,7 @@ class RunTokenMiddleware:
         try:
             principal = _verify(token.strip())
         except RuntimeTokenError as exc:
-            logger.info("Remote runtime call refused", extra={"refusal": str(exc)})
+            logger.info("Agent API call refused", extra={"refusal": str(exc)})
             await _refuse(
                 scope,
                 receive,

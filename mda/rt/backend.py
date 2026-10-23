@@ -3,7 +3,7 @@
 Dispatch signs a run token into each run's context. The backend reads the thread,
 repository and run configuration from that token, so nothing the model writes can
 point a call elsewhere. Every call, the loop's and the tools', is one endpoint of
-the typed API both sides import (``runtime_api``), under ``/remote-runtime/api/``.
+the typed API both sides import (``runtime_api``), under ``/agent-api/``.
 
 A task worker launched as an async subagent starts with a worker grant instead:
 enough to read its coordinator's catalog, then ``adopt`` a run token of its own.

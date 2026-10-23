@@ -648,8 +648,8 @@ async def test_an_mda_subagent_is_recorded_under_its_task_call(
     monkeypatch.setenv("SANDBOX_TYPE", "local")
     from langchain_core.messages import messages_to_dict
 
-    from openswe.remote_runtime.graph import RemoteGraph
-    from openswe.remote_runtime.tokens import RemoteRun
+    from openswe.agent_api.graph import RemoteGraph
+    from openswe.agent_api.tokens import RemoteRun
     from openswe.sandboxes.tool_runtime import ToolSurface
 
     engine = _install(monkeypatch, transcribed=True, turn_id=uuid7())

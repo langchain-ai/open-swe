@@ -839,10 +839,8 @@ async def test_an_operation_code_mode_calls_is_reported_and_cited_under_its_eval
     monkeypatch.setattr("rt.tools.run_id", lambda: "run-1")
     backend = OpenSweBackend("secret-token")
     answers = {
-        "/remote-runtime/api/operation": OperationResult(content="found it"),
-        "/remote-runtime/api/record_evidence": EvidenceReply(
-            content="found it\n\nIncident evidence: ev-1"
-        ),
+        "/agent-api/operation": OperationResult(content="found it"),
+        "/agent-api/record_evidence": EvidenceReply(content="found it\n\nIncident evidence: ev-1"),
     }
 
     async def post(path: str, body: dict[str, object], **kwargs: object) -> object:

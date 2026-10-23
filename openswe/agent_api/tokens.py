@@ -16,7 +16,7 @@ from pydantic import BaseModel, ConfigDict, JsonValue, TypeAdapter, ValidationEr
 from openswe.config import ENV
 
 _ISSUER: Final = "open-swe"
-_AUDIENCE: Final = "open-swe-remote-runtime"
+_AUDIENCE: Final = "open-swe-agent-api"
 # A worker grant names the run that launched a worker, never the worker itself.
 _GRANT_AUDIENCE: Final = "open-swe-worker-grant"
 _ALGORITHM: Final = "HS256"

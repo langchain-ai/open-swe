@@ -12,7 +12,7 @@ from typing import Final, Literal, Protocol
 
 from pydantic import BaseModel, JsonValue, ValidationError
 
-API_PREFIX: Final = "/remote-runtime/api/"
+API_PREFIX: Final = "/agent-api/"
 # The route the backend serves every endpoint under.
 API_PATH: Final = API_PREFIX + "{endpoint}"
 # Preparation waits on the review scout's walkthrough for up to ten minutes; a tool
