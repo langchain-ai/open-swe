@@ -475,6 +475,27 @@ async def test_an_operation_gets_the_state_it_reads_and_answers_the_state_it_cha
     assert result.state == {"requested_model": "after-fast"}
 
 
+async def test_a_cancelled_operation_ends_the_call_rather_than_answering() -> None:
+    from langchain_core.tools import tool
+    from langgraph.errors import NodeCancelledError
+    from runtime_api.operations import RunOperation
+
+    from openswe.remote_runtime.graph import RunSession
+    from openswe.sandboxes.tool_runtime import ToolSurface
+
+    @tool
+    async def wait() -> str:
+        """Wait for something."""
+        raise NodeCancelledError("tools")
+
+    surface = ToolSurface(base_tools=[wait])
+    await surface.prepare()
+    session = RunSession(surface, {"configurable": {}}, None, started_here=True)
+
+    with pytest.raises(NodeCancelledError):
+        await session.operation(RunOperation(name="wait", request_id="call-1"))
+
+
 async def test_an_operation_that_runs_a_command_is_put_to_the_shell_guards_first() -> None:
     from langchain_core.tools import tool
     from runtime_api.operations import RunOperation

@@ -68,6 +68,7 @@ from langchain_core.runnables import RunnableConfig
 from langchain_core.tools import BaseTool
 from langchain_quickjs import CodeInterpreterMiddleware
 from langgraph.config import get_config
+from langgraph.errors import NodeCancelledError
 from langgraph.runtime import Runtime
 from langgraph.types import Command
 from pydantic import BaseModel, JsonValue, TypeAdapter, ValidationError
@@ -569,6 +570,9 @@ class RunSession:
                     outcome = await invoke(
                         tool, decision.arguments, self._operation_state(request), request.request_id
                     )
+                except NodeCancelledError:
+                    # The run is being cancelled: that ends the call, not just its result.
+                    raise
                 except Exception as exc:
                     failure = await OperationFailure.of(
                         exc, operation=request.name, config=self.config

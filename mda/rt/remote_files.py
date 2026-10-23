@@ -10,6 +10,7 @@ import base64
 from collections.abc import Callable
 from typing import Final
 
+from deepagents.backends.composite import CompositeBackend
 from deepagents.backends.protocol import (
     ContextLine,
     DeleteResult,
@@ -33,6 +34,8 @@ from pydantic import BaseModel
 from runtime_api import files as file_api
 from runtime_api.endpoint import Endpoint, Transport, call
 from runtime_api.operations import RunRequest
+
+from rt.backend import LONG_CALL_SECONDS, TOOL_CALL_SLACK_SECONDS
 
 _SYNC: Final = "The backend's files are reached asynchronously"
 # deepagents' file and shell tools.
@@ -86,10 +89,13 @@ class RemoteFiles(SandboxBackendProtocol):
         return "open-swe-backend"
 
     async def _call[Request: RunRequest, Reply: BaseModel](
-        self, endpoint: Endpoint[Request, Reply], request: Request
+        self, endpoint: Endpoint[Request, Reply], request: Request, *, timeout: float | None = None
     ) -> Reply:
         return await call(
-            self._transport, endpoint, request.model_copy(update={"run_id": self._run_id()})
+            self._transport,
+            endpoint,
+            request.model_copy(update={"run_id": self._run_id()}),
+            timeout=timeout,
         )
 
     async def als(self, path: str) -> LsResult:
@@ -177,8 +183,14 @@ class RemoteFiles(SandboxBackendProtocol):
         raise NotImplementedError(_SYNC)
 
     async def aexecute(self, command: str, *, timeout: int | None = None) -> ExecuteResponse:  # noqa: ASYNC109
+        # A command may run out its own timeout and answer that it did, past the
+        # call's usual deadline.
         reply = await self._call(
-            file_api.EXECUTE, file_api.ExecuteRequest(command=command, timeout=timeout)
+            file_api.EXECUTE,
+            file_api.ExecuteRequest(command=command, timeout=timeout),
+            timeout=None
+            if timeout is None
+            else max(LONG_CALL_SECONDS, timeout + TOOL_CALL_SLACK_SECONDS),
         )
         return ExecuteResponse(
             output=reply.output, exit_code=reply.exit_code, truncated=reply.truncated
@@ -210,6 +222,11 @@ class RemoteFiles(SandboxBackendProtocol):
         ]
 
 
-def remote_file_tools(remote: RemoteFiles) -> dict[str, BaseTool]:
-    """deepagents' own file and shell tools, against the backend's file_api."""
-    return {tool.name: tool for tool in FilesystemMiddleware(backend=remote).tools}
+def remote_file_tools(remote: RemoteFiles, artifacts_root: str) -> dict[str, BaseTool]:
+    """deepagents' own file and shell tools, against the backend's files.
+
+    Large results go under the thread's artifacts root, as on the backend, not the
+    root of a person's machine; the tools read it only from a composite backend.
+    """
+    files = CompositeBackend(default=remote, routes={}, artifacts_root=artifacts_root)
+    return {tool.name: tool for tool in FilesystemMiddleware(backend=files).tools}

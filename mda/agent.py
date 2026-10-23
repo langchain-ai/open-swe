@@ -160,7 +160,7 @@ async def agent(runtime: ManagedServerRuntime) -> DeepAgentDefinition:
     )
     tools = [operation_tool(spec, backend) for spec in catalog.operations]
     remote = RemoteFiles(backend, run_id)
-    remote_tools = remote_file_tools(remote)
+    remote_tools = remote_file_tools(remote, catalog.files.artifacts_root)
     in_box = catalog.sandbox is not None
     # Without a box of MDA's, deepagents' own file and shell tools act on the thread's
     # files on the backend, in place of MDA's own of the same name.
