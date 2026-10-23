@@ -331,15 +331,76 @@ def test_transcript_filters_private_and_tool_content() -> None:
         }
     }
 
-    transcript = threads_tool._transcript(state)
+    transcript = threads_tool._Transcript("thread-1", state).page(None, 100)
 
     assert [message["text"] for message in transcript["messages"]] == [
         "Visible request",
         "Visible answer",
     ]
     assert transcript["message_count"] == 5
+    assert transcript["hidden_count"] == 3
     assert transcript["omitted_count"] == 3
-    assert transcript["truncated"] is True
+    assert transcript["truncated"] is False
+
+
+def _long_thread_state(turns: int, *, answer_chars: int) -> dict[str, object]:
+    messages: list[dict[str, object]] = []
+    for turn in range(turns):
+        messages.append(
+            {"type": "human", "content": f"request {turn} " + "q" * 3_000, "id": f"u{turn}"}
+        )
+        messages.append({"type": "tool", "content": "tool output", "id": f"t{turn}"})
+        messages.append(
+            {"type": "ai", "content": f"answer {turn} " + "a" * answer_chars, "id": f"a{turn}"}
+        )
+    return {"values": {"messages": messages}}
+
+
+def test_transcript_pages_reach_every_message_and_keep_the_final_answer() -> None:
+    transcript = threads_tool._Transcript("thread-1", _long_thread_state(40, answer_chars=3_000))
+
+    first = transcript.page(None, 100)
+
+    assert first["visible_count"] == 80
+    assert first["messages"][-1]["id"] == "a39"
+    assert first["messages"][-1]["truncated"] is False
+    assert first["truncated"] is True
+    seen = [message["index"] for message in first["messages"][:-1]]
+    page = first
+    while page["next_page"] is not None:
+        arguments = page["next_page"]["arguments"]
+        assert arguments["thread_id"] == "thread-1"
+        page = transcript.page(arguments["message_offset"], arguments["message_limit"])
+        seen.extend(message["index"] for message in page["messages"])
+    assert seen == list(range(80))
+    assert [m["id"] for m in transcript.page(-2, 100)["messages"]] == ["u39", "a39"]
+
+
+async def test_get_thread_reads_a_long_message_in_full(monkeypatch: pytest.MonkeyPatch) -> None:
+    state = _long_thread_state(1, answer_chars=120_000)
+    answer = "answer 0 " + "a" * 120_000
+    client = SimpleNamespace(threads=SimpleNamespace(get_state=AsyncMock(return_value=state)))
+    monkeypatch.setattr(threads_tool, "_actor", AsyncMock(return_value=_actor()))
+    monkeypatch.setattr(
+        threads_tool, "get_dashboard_thread", AsyncMock(return_value={"id": "thread-1"})
+    )
+    monkeypatch.setattr(threads_tool, "langgraph_client", lambda: client)
+
+    default = threads_tool._Transcript("thread-1", state).page(None, 100)
+    message = default["messages"][-1]
+    text = message["text"]
+    call = message["continue_with"]
+    while call is not None:
+        assert call["tool"] == "get_thread"
+        result = await threads_tool.get_thread(**call["arguments"])
+        assert result["success"] is True
+        text += result["message"]["text"]
+        call = result["message"].get("continue_with")
+
+    assert len(message["text"]) == threads_tool._MAX_FINAL_MESSAGE_CHARS
+    assert text == answer
+    rejected = await threads_tool.get_thread("thread-1", char_offset=10)
+    assert rejected == {"success": False, "error": "char_offset requires message_id"}
 
 
 def test_admin_thread_actions_require_admin() -> None:
