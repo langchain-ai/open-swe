@@ -819,12 +819,23 @@ function FindingQueue({ findings }: { findings: Array<ReviewFinding> }) {
                 type="button"
                 aria-expanded={open}
                 onClick={() => setOpenId(open ? null : finding.id)}
-                className={cn(
-                  "min-w-[16ch] flex-1 text-left leading-5 text-primary hover:underline",
-                  settled && "line-through decoration-text-tertiary"
-                )}
+                className="flex min-w-[16ch] flex-1 items-start gap-space-1 text-left leading-5 text-primary hover:underline"
               >
-                <InlineCode text={finding.title} />
+                <CaretRightIcon
+                  aria-hidden
+                  className={cn(
+                    "mt-space-1 size-3 shrink-0 text-icon-secondary motion-safe:transition-transform",
+                    open && "rotate-90"
+                  )}
+                />
+                <span
+                  className={cn(
+                    "min-w-0",
+                    settled && "line-through decoration-text-tertiary"
+                  )}
+                >
+                  <InlineCode text={finding.title} />
+                </span>
               </button>
               <span className="ml-auto flex shrink-0 items-baseline gap-space-1 text-xxs text-secondary">
                 <button

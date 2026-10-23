@@ -71,7 +71,12 @@ async def test_preview_forgets_revision_whose_script_left_the_tree(deployment_db
     heads = migrations.get_heads()
     async with postgres.engine().begin() as conn:
         await conn.execute(text("CREATE SCHEMA open_swe"))
-        await conn.run_sync(postgres.upgrade, migrations, "open_swe", "heads")
+        await conn.run_sync(
+            postgres.upgrade,
+            migrations,
+            "open_swe",
+            migrations.get_revision(heads[0]).down_revision,
+        )
         await conn.execute(text("INSERT INTO alembic_version VALUES ('a8caff4f6051')"))
     with pytest.raises(CommandError, match="a8caff4f6051"):
         await postgres.migrate()

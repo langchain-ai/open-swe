@@ -64,6 +64,14 @@ test.describe("thread pull requests", () => {
       }),
     ).toBeVisible();
     await expect(companionLink).toBeVisible();
+
+    await companionLink.click();
+    await expect(page).toHaveURL(
+      /\/agents\/reviews\/anotherorg\/companion\/2$/,
+    );
+    await expect(
+      page.getByRole("heading", { name: /Add companion integration/ }),
+    ).toBeVisible();
   });
 
   test("shows live pull request health and submits actionable fixes", async ({

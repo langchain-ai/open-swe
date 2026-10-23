@@ -11,6 +11,7 @@ import pytest
 from openswe.github import routes as github_routes
 from openswe.github import webhook as github_webhooks
 from openswe.github.pull_requests import AGENT_OPENED_LINK_SOURCE, PullRequest, ThreadLink
+from openswe.review.reviews import trigger_re_review
 from openswe.slack.client import GitHubPrRef
 from openswe.slack.payloads import SlackChannelContext
 from openswe.users import User
@@ -438,7 +439,10 @@ def test_trigger_pr_review_from_ref_refuses_draft(monkeypatch) -> None:
     assert ref.url in result["error"]
 
 
-def test_trigger_pr_review_from_ref_creates_reviewer_run(monkeypatch) -> None:
+@pytest.mark.parametrize("dashboard_draft", [False, True])
+def test_trigger_pr_review_from_ref_creates_reviewer_run(
+    monkeypatch, dashboard_draft: bool
+) -> None:
     captured: dict[str, object] = {}
     auto_review_checked = False
 
@@ -459,6 +463,7 @@ def test_trigger_pr_review_from_ref_creates_reviewer_run(monkeypatch) -> None:
         captured["metadata_token"] = token
         return {
             "html_url": pr_ref.url,
+            "draft": dashboard_draft,
             "base": {"sha": "base-sha"},
             "head": {"sha": "head-sha", "ref": "feature-branch"},
         }
@@ -514,7 +519,9 @@ def test_trigger_pr_review_from_ref_creates_reviewer_run(monkeypatch) -> None:
     monkeypatch.setattr(webhook_common, "get_client", lambda url: _FakeLangGraphClient())
 
     result = asyncio.run(
-        github_webhooks.trigger_pr_review_from_ref(
+        trigger_re_review("langchain-ai", "open-swe", 1244, "octocat")
+        if dashboard_draft
+        else github_webhooks.trigger_pr_review_from_ref(
             GitHubPrRef(
                 owner="langchain-ai",
                 repo="open-swe",
@@ -542,14 +549,17 @@ def test_trigger_pr_review_from_ref_creates_reviewer_run(monkeypatch) -> None:
     assert captured["metadata_token"] == "app-token"
     assert "\nbase_sha: base-sha\n" in prompt
     assert "\nhead_sha: head-sha\n" in prompt
-    assert config["source"] == "slack"
+    assert config["source"] == ("dashboard" if dashboard_draft else "slack")
     assert config["repo"] == {"owner": "langchain-ai", "name": "open-swe"}
     assert config["pr_number"] == 1244
     assert config["review_requested"] is True
-    assert config["slack_thread"] == {
-        "channel_id": "C123",
-        "thread_ts": "1700000000.000100",
-    }
+    if dashboard_draft:
+        assert "slack_thread" not in config
+    else:
+        assert config["slack_thread"] == {
+            "channel_id": "C123",
+            "thread_ts": "1700000000.000100",
+        }
     # The live head must be persisted to metadata so resolve_review_head_sha
     # doesn't return a stale head left by a prior push/ready dispatch.
     metadata_kwargs = cast(dict[str, object], captured["set_metadata_kwargs"])
