@@ -20,7 +20,9 @@ def upgrade() -> None:
     # Every statement can run again: a preview database may keep these tables after
     # forgetting it stamped them, when its branch left the preview tree for a while.
     op.execute("ALTER TABLE plugin_chat_call ADD COLUMN IF NOT EXISTS claimed_at timestamptz")
-    op.execute("ALTER TABLE plugin_chat ADD COLUMN IF NOT EXISTS automatic_resumes integer NOT NULL DEFAULT 0")
+    op.execute(
+        "ALTER TABLE plugin_chat ADD COLUMN IF NOT EXISTS automatic_resumes integer NOT NULL DEFAULT 0"
+    )
 
 
 def downgrade() -> None:

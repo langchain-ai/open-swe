@@ -102,8 +102,12 @@ def upgrade() -> None:
             updated_by uuid REFERENCES users (id) ON DELETE SET NULL
         )
     """)
-    op.execute("CREATE UNIQUE INDEX IF NOT EXISTS plugin_thread_thread_id ON plugin_thread (thread_id)")
-    op.execute("CREATE INDEX IF NOT EXISTS plugin_thread_installation ON plugin_thread (installation)")
+    op.execute(
+        "CREATE UNIQUE INDEX IF NOT EXISTS plugin_thread_thread_id ON plugin_thread (thread_id)"
+    )
+    op.execute(
+        "CREATE INDEX IF NOT EXISTS plugin_thread_installation ON plugin_thread (installation)"
+    )
     op.execute("""
         CREATE TABLE IF NOT EXISTS plugin_room_update (
             id uuid PRIMARY KEY,
@@ -120,7 +124,9 @@ def upgrade() -> None:
             CONSTRAINT plugin_room_update_one_scope CHECK ((repository IS NULL) <> (user_id IS NULL))
         )
     """)
-    op.execute("CREATE UNIQUE INDEX IF NOT EXISTS plugin_room_update_seq ON plugin_room_update (seq)")
+    op.execute(
+        "CREATE UNIQUE INDEX IF NOT EXISTS plugin_room_update_seq ON plugin_room_update (seq)"
+    )
     op.execute("""
         CREATE INDEX IF NOT EXISTS plugin_room_update_room
             ON plugin_room_update (plugin, room, repository, user_id, seq)

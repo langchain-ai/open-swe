@@ -95,7 +95,8 @@ async def test_preview_reruns_a_branch_it_forgot_over_the_tables_it_left(
     monkeypatch.setenv("OPENSWE_ENV", "preview")
     await postgres.migrate()
     merge = postgres.load_migrations().get_revision("64588d50fce1")
-    main_side, plugin_side = merge.down_revision
+    assert merge is not None and isinstance(merge.down_revision, tuple)
+    main_side = merge.down_revision[0]
     async with postgres.engine().begin() as conn:
         await conn.execute(
             text(

@@ -59,7 +59,9 @@ def upgrade() -> None:
             updated_by uuid REFERENCES users (id) ON DELETE SET NULL
         )
     """)
-    op.execute("CREATE UNIQUE INDEX IF NOT EXISTS plugin_chat_call_key ON plugin_chat_call (chat, call_id)")
+    op.execute(
+        "CREATE UNIQUE INDEX IF NOT EXISTS plugin_chat_call_key ON plugin_chat_call (chat, call_id)"
+    )
     op.execute("DROP TABLE IF EXISTS plugin_thread")
     # ``agent`` reaches further than approving each thread did, so an install
     # that had ``threads`` loses it and asks for ``agent`` on its next update.
