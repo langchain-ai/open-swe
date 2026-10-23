@@ -213,6 +213,7 @@ async def test_a_snapshot_left_in_the_old_langsmith_is_rebuilt_in_the_new_sandbo
 ) -> None:
     monkeypatch.setenv("LANGSMITH_ENDPOINT", "https://api.smith.example")
     monkeypatch.setenv("NEW_SANDBOX_REGION_ENDPOINT", "https://aws.api.smith.example")
+    monkeypatch.setenv("NEW_SANDBOX_REGION_API_KEY", "lsv2-new-region-key")
     backend = _backend(_Result("provisioned", 0), _Result("Already up to date.", 0))
     create_builder = AsyncMock(return_value=backend)
     with (
@@ -256,6 +257,7 @@ def test_an_old_region_snapshot_without_a_setup_script_is_not_due(
     """No refresh can rebuild it, so one would only re-enqueue on every new box."""
     monkeypatch.setenv("LANGSMITH_ENDPOINT", "https://api.smith.example")
     monkeypatch.setenv("NEW_SANDBOX_REGION_ENDPOINT", "https://aws.api.smith.example")
+    monkeypatch.setenv("NEW_SANDBOX_REGION_API_KEY", "lsv2-new-region-key")
     record = Workspace(
         slug="published", snapshot_status="ready", snapshot_id="snap-gcp", update_script="git pull"
     )

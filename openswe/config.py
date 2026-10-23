@@ -158,15 +158,16 @@ ENV.var(
 )
 ENV.var(
     "NEW_SANDBOX_REGION_API_KEY",
-    "LangSmith API key for the new sandbox region; defaults to LANGSMITH_API_KEY. The MDA "
-    "deployment needs the same value.",
+    "LangSmith API key for the new sandbox region, set together with "
+    "NEW_SANDBOX_REGION_ENDPOINT. The MDA deployment needs the same value.",
     secret=True,
 )
 ENV.var(
     "NEW_SANDBOX_REGION_ENDPOINT",
     "LangSmith API endpoint of the new sandbox region, where new sandboxes and snapshots are "
-    "created; defaults to LANGSMITH_ENDPOINT. Each box and snapshot records where it lives, so "
-    "existing ones stay reachable where they were. The MDA deployment needs the same value.",
+    "created, set together with NEW_SANDBOX_REGION_API_KEY; unset, they stay in LANGSMITH_ENDPOINT. "
+    "Each box and snapshot records where it lives, so existing ones stay reachable where they "
+    "were. The MDA deployment needs the same value.",
 )
 ENV.var(
     "LANGSMITH_TENANT_ID",

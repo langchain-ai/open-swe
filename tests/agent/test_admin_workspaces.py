@@ -183,6 +183,7 @@ async def test_a_sandbox_outside_the_new_sandbox_region_is_never_published(
     monkeypatch.setenv("CONFIGURED_ADMINS", "ramonn")
     monkeypatch.setenv("LANGSMITH_ENDPOINT", "https://api.smith.langchain.com")
     monkeypatch.setenv("NEW_SANDBOX_REGION_ENDPOINT", "https://aws.api.smith.langchain.com")
+    monkeypatch.setenv("NEW_SANDBOX_REGION_API_KEY", "lsv2-new-region-key")
     with _Publish(existing=None, saved=_saved()) as seams:
         result = await env_tools.publish_workspace("base", "prompt")
 

@@ -46,11 +46,19 @@ class SandboxAPI:
 
     @classmethod
     def new_sandbox_region(cls) -> Self:
-        """The new sandbox region, where new boxes and snapshots are created."""
-        return cls(
-            ENV.NEW_SANDBOX_REGION_ENDPOINT.optional() or ENV.LANGSMITH_ENDPOINT.get(),
-            ENV.NEW_SANDBOX_REGION_API_KEY.optional() or ENV.LANGSMITH_API_KEY.optional(),
-        )
+        """The new sandbox region, where new boxes and snapshots are created.
+
+        Without one configured it is the deployment's own LangSmith. Its endpoint and key
+        are set together: either alone would pair one LangSmith's key with another's API.
+        """
+        endpoint = ENV.NEW_SANDBOX_REGION_ENDPOINT.optional()
+        api_key = ENV.NEW_SANDBOX_REGION_API_KEY.optional()
+        if endpoint and api_key:
+            return cls(endpoint, api_key)
+        if endpoint or api_key:
+            msg = "Set both NEW_SANDBOX_REGION_ENDPOINT and NEW_SANDBOX_REGION_API_KEY, or neither"
+            raise ValueError(msg)
+        return cls.deployment()
 
     @classmethod
     def deployment(cls) -> Self:

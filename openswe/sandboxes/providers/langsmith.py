@@ -796,6 +796,7 @@ class LangSmithProvider(SandboxProvider):
     @classmethod
     def validate_startup_config(cls) -> None:
         """Validate env-var configuration at server startup. Raises ValueError if invalid."""
+        SandboxAPI.new_sandbox_region()
         for name in (
             "DEFAULT_SANDBOX_SNAPSHOT_FS_CAPACITY_BYTES",
             "DEFAULT_SANDBOX_VCPUS",

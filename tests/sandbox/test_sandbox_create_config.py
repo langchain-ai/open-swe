@@ -130,6 +130,7 @@ async def test_mda_keeps_each_box_in_the_langsmith_it_lives_in(
     monkeypatch.setenv("SANDBOX_TYPE", "langsmith")
     monkeypatch.setenv("LANGSMITH_ENDPOINT", _DEPLOYMENT_API)
     monkeypatch.setenv("NEW_SANDBOX_REGION_ENDPOINT", _NEW_REGION_API)
+    monkeypatch.setenv("NEW_SANDBOX_REGION_API_KEY", "lsv2-new-region-key")
     monkeypatch.setattr("openswe.sandboxes.lifecycle.load_workspace", load)
     monkeypatch.setattr("openswe.sandboxes.managed.get_sandbox_metadata", read_metadata)
     monkeypatch.setattr("openswe.sandboxes.lifecycle.get_sandbox_metadata", read_metadata)

@@ -227,3 +227,21 @@ async def test_service_url_asks_for_a_workspace_grant(
     assert str(request.url) == f"{api}/v2/sandboxes/boxes/sandbox-1/service-url"
     assert request.headers["X-API-Key"] == key
     assert json.loads(request.content) == {"port": 3000, "access": "workspace"}
+
+
+@pytest.mark.parametrize(
+    "half", ["NEW_SANDBOX_REGION_ENDPOINT", "NEW_SANDBOX_REGION_API_KEY"], ids=["endpoint", "key"]
+)
+def test_a_half_configured_new_sandbox_region_fails_at_startup(
+    monkeypatch: pytest.MonkeyPatch, half: str
+) -> None:
+    """Either alone would pair one LangSmith's key with another's API."""
+    from openswe.sandboxes.providers.registry import validate_sandbox_startup_config
+
+    monkeypatch.setenv("SANDBOX_TYPE", "langsmith")
+    monkeypatch.delenv("NEW_SANDBOX_REGION_ENDPOINT", raising=False)
+    monkeypatch.delenv("NEW_SANDBOX_REGION_API_KEY", raising=False)
+    monkeypatch.setenv(half, "https://aws.api.smith.example")
+
+    with pytest.raises(ValueError, match="or neither"):
+        validate_sandbox_startup_config()
