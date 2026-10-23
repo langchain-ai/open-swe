@@ -219,7 +219,7 @@ async def agent(runtime: ManagedServerRuntime) -> DeepAgentDefinition:
                 file_tools,
                 *replace_sandbox,
                 ServedToolsMiddleware(subagent_tools[subagent.name], excluded, backend),
-                *model_call_guards(),
+                *model_call_guards(subagent=True),
             ],
         }
         for subagent in catalog.subagents
