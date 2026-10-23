@@ -1,156 +1,204 @@
 ---
-type: integration reference
-title: Observability, Browser, and MCP Integrations
-description: Optional Datadog, LangSmith, Corridor, Notion, Currents, and Stagehand integrations, including credential boundaries, authorization, loading behavior, and LangSmith LLM Gateway routing.
-tags: [integrations, observability, mcp, credentials, authorization, langsmith, browser]
+type: integration architecture
+title: MCP, model gateways, and observability integrations
+description: How Open SWE resolves scoped MCP connections, protects credentials, routes eligible model calls through the LangSmith LLM Gateway, and records tracing and product-usage signals without making optional integrations run-critical.
+tags: [integrations, mcp, oauth, observability, analytics, langsmith, model-gateway]
 verified:
   - by: openwiki/0.4.2
-    at: 2026-09-08T08:15:30.533Z
+    at: 2026-10-23T08:13:55.386Z
 sources:
-  - id: openwiki-source-ef92164b6963a5a6100712cb
-    resource: repo://agent/dashboard/admin.py
-  - id: openwiki-source-b26707b64bee931c416620a7
-    resource: repo://agent/dashboard/notion_oauth.py
-  - id: openwiki-source-054ae1f93e565567e2cc7462
-    resource: repo://agent/dashboard/team_credentials.py
-  - id: openwiki-source-941341430e1d08d8e7e54dfe
-    resource: repo://agent/dashboard/user_credentials.py
-  - id: openwiki-source-10938886c8b24d0cdc72ad9e
-    resource: repo://agent/prompt.py
-  - id: openwiki-source-856ade03ef31ac38e1347f7c
-    resource: repo://agent/server.py
-  - id: openwiki-source-e4901f6a09c372487ff11987
-    resource: repo://agent/tool_loaders/corridor_mcp.py
-  - id: openwiki-source-252c217caee95d761fdf9d4b
-    resource: repo://agent/tool_loaders/currents.py
-  - id: openwiki-source-7b11edd9f01f467abe58409b
-    resource: repo://agent/tool_loaders/datadog_mcp.py
-  - id: openwiki-source-6de9e7b7779ea6aada343f2a
-    resource: repo://agent/tool_loaders/langsmith.py
-  - id: openwiki-source-2cd7e2018ae35c5972204803
-    resource: repo://agent/tool_loaders/notion_mcp.py
-  - id: openwiki-source-49907d748d9e1812d9705ce0
-    resource: repo://agent/tool_loaders/stagehand_browser.py
-  - id: openwiki-source-f0db445078d7a8158aa93724
-    resource: repo://agent/utils/gateway.py
-  - id: openwiki-source-56ade344fdbe7d47c84f008f
-    resource: repo://agent/utils/model.py
-  - id: openwiki-source-7c60191e42b8e30b62935af1
-    resource: repo://agent/utils/thread_participants.py
-  - id: openwiki-source-afa26f9f18a24a492620d2a2
-    resource: repo://tests/agent/test_factory_tool_loading.py
-  - id: openwiki-source-40272ff4fc53752817bc0d7b
-    resource: repo://tests/tools/test_corridor_mcp.py
-  - id: openwiki-source-0cae9f5b38531985e575f78c
-    resource: repo://tests/tools/test_currents_tools.py
-  - id: openwiki-source-56c83feb683034fa0b0af4d8
-    resource: repo://tests/tools/test_observability_tools.py
-  - id: openwiki-source-5594297dbbc1ca48fc990bce
-    resource: repo://tests/tools/test_stagehand_browser.py
-generated: { by: "openwiki/0.4.2", at: "2026-09-08T08:15:30.533Z" }
+  - id: openwiki-source-dcac5237c97d18021dd8e1b7
+    resource: repo://openswe/agent_cost.py
+  - id: openwiki-source-a4aaa0f63a38b5655ce97972
+    resource: repo://openswe/analytics/capture.py
+  - id: openwiki-source-1061d71fc2bd28ea7d68acb3
+    resource: repo://openswe/analytics/emitter.py
+  - id: openwiki-source-9fcb687a67ed857e2da77896
+    resource: repo://openswe/analytics/outbox.py
+  - id: openwiki-source-b23248ea29f610c9e611ae8c
+    resource: repo://openswe/analytics/usage.py
+  - id: openwiki-source-f66a8da4ee15886c6d545ddd
+    resource: repo://openswe/analytics/worker.py
+  - id: openwiki-source-4b1279a0a1e5ec2d55a4558a
+    resource: repo://openswe/api/app.py
+  - id: openwiki-source-1c10d1b4bdf51f06452acf76
+    resource: repo://openswe/api/tracing.py
+  - id: openwiki-source-85d59a2f000c990f6db4c03b
+    resource: repo://openswe/mcp/caller.py
+  - id: openwiki-source-4afcd479d253b0b0aa95860a
+    resource: repo://openswe/mcp/managed.py
+  - id: openwiki-source-6db7b33a8f25326a89817057
+    resource: repo://openswe/mcp/models.py
+  - id: openwiki-source-bcad329e419936bbe20b5ee9
+    resource: repo://openswe/mcp/oauth.py
+  - id: openwiki-source-67faae85e3ecd320e29f3e28
+    resource: repo://openswe/mcp/records.py
+  - id: openwiki-source-a6687d72005026e50df258b3
+    resource: repo://openswe/mcp/routes.py
+  - id: openwiki-source-573a0cf072c076b2dd72dbbd
+    resource: repo://openswe/mcp/runtime.py
+  - id: openwiki-source-563ab1621a41c1ea51c9968f
+    resource: repo://openswe/mcp/server.py
+  - id: openwiki-source-1bb7e3d3e685fc7afc4840c7
+    resource: repo://openswe/mcp/token_store.py
+  - id: openwiki-source-2fd20ac11a2c3a0b401e75c6
+    resource: repo://openswe/remote_runtime/agent.py
+  - id: openwiki-source-919e16feae379651f2cbc1c9
+    resource: repo://openswe/server.py
+  - id: openwiki-source-cbab46b11893a9efc599e687
+    resource: repo://openswe/utils/gateway.py
+  - id: openwiki-source-4cc74089c0207ec1e5a6ca3b
+    resource: repo://openswe/utils/model.py
+  - id: openwiki-source-bdff71435ed587bc18be89f8
+    resource: repo://tests/mcp/test_instance_mcps.py
+  - id: openwiki-source-66f61baee2e26b839fc929f6
+    resource: repo://tests/mcp/test_managed_mcps.py
+  - id: openwiki-source-cd81434200d884b3420b0fc9
+    resource: repo://tests/mcp/test_mcp_oauth_entries.py
+  - id: openwiki-source-08efbfe845998f500fab418d
+    resource: repo://tests/mcp/test_tool_caller.py
+  - id: openwiki-source-5d5924c74fc47dd6489b2a6f
+    resource: repo://tests/mcp/test_workspace_mcps_sharded.py
+  - id: openwiki-source-72fb34b832807b302aeea76e
+    resource: repo://tests/models/test_model_fallback_resolution.py
+generated: { by: "openwiki/0.4.2", at: "2026-10-23T08:13:55.386Z" }
 ---
 
-# Observability, Browser, and MCP Integrations
+# MCP, model gateways, and observability integrations
 
-The agent offers several optional external tool surfaces: Datadog and LangSmith observability, Corridor security analysis, Notion MCP, Currents e2e investigation, and a sandbox-local Stagehand browser. It also can route supported model calls through the LangSmith LLM Gateway. None is a prerequisite for creating an agent: unavailable credentials, providers, or tool handshakes remove the optional surface rather than preventing the run.
+Open SWE has three related but distinct integration boundaries:
 
-See [Authentication and security](../concepts/auth-and-security.md) for the broader trust model, [Tools](../concepts/tools.md) for dynamic tool availability, [Models, profiles, and instructions](../concepts/models-profiles-instructions.md) for model selection, and [Configuration](../operations/configuration.md) for environment settings.
+- **MCP connections** make selected remote tools available to a run, with instance, workspace, personal, and managed-tool scopes.
+- **The LangSmith LLM Gateway** is optional routing for model-provider requests, not an MCP tool connection.
+- **Observability and analytics** respectively improve request tracing and capture product-usage events; both are designed not to interrupt the user-facing operation when their optional work fails.
 
-## Execution and credential boundary
+These mechanisms keep provider credentials in server-side stores and make access, scope precedence, and failure behavior explicit. For broader runtime and security context, see [Managed runtime](../architecture/managed-runtime.md), [Authentication and security](../concepts/auth-and-security.md), [Configuration and model resolution](../concepts/configuration-and-model-resolution.md), and [Runs, inputs, and tools](../concepts/runs-inputs-and-tools.md).
 
-Server-side integrations—Datadog, LangSmith tools, Corridor, Notion, and Currents—make hosted MCP or REST requests in the LangGraph server process. Their tokens are supplied on that server-to-provider connection; these integrations do not place their third-party credentials in the task sandbox. Stagehand is deliberately different: its browser operations are dispatched into the thread's sandbox.
+## Scoped MCP connections
 
-Team Datadog and LangSmith records are kept in the separate `team_credentials` Store namespace. API keys are encrypted with `agent.encryption`; status reads expose connection metadata and last four characters rather than keys. Per-user Currents, LangSmith, and Notion records live below `user_credentials/<login>` and store encrypted secrets as well. The separation from plaintext team settings ensures an ordinary settings read does not reveal team credentials.
+An MCP connection is a named, HTTPS-only remote server configuration. It supports `streamable_http` or `sse`, an enabled flag, encrypted authentication headers, an optional OAuth 2.0 `client_credentials` configuration, and an explicit `allowed_tools` list. A connection offers no tools until that allowlist is non-empty. URLs cannot include credentials, fragments, whitespace, or secret-like query parameters; blocked hop-by-hop and proxy headers cannot be saved. Connection names are constrained to a short lowercase identifier, which makes the name a stable scope-override key.
+
+Credentials are not part of the public connection response. Headers and client secrets are encrypted before persistence; the dashboard displays header names and OAuth metadata, and its separate reveal endpoint returns headers with `Cache-Control: no-store` to an administrator. Updating a connection can reuse credentials only from the same scope and name. Changing a server URL requires headers to be explicitly replaced or cleared, preventing credentials from silently following a changed destination.
+
+### Tiers, namespaces, and precedence
+
+Instance and workspace records live in PostgreSQL's `mcp_connection` table, while personal records use the user-record store. Each source has an owner-specific namespace: `instance_mcps`, `workspace_mcps/<workspace>`, or `user_mcps/<login>`. Namespaces isolate discovery cache entries and OAuth client-token caches as well as storage ownership.
+
+A normal run supplies sources in this order: instance, workspace, then its credential owner's personal source; a configured LangSmith Managed Tools source is appended last. Connections with the same name do not merge: the later source replaces the whole earlier record. Thus a workspace can replace an instance connection, and a personal connection can replace both. A lower-tier connection is never used as a silent fallback once a higher tier owns that name.
 
 ```mermaid
 flowchart TD
-  Trigger["Triggering user"] --> Gate["Per-run authorization"]
-  Gate --> Obs["Observability group"]
-  Trigger --> Personal["Participant-scoped groups"]
-  Obs --> Server["LangGraph server"]
-  Personal --> Server
-  Server --> Datadog["Datadog MCP"]
-  Server --> LangSmith["LangSmith API"]
-  Server --> Notion["Notion MCP"]
-  Server --> Currents["Currents REST API"]
-  Sandbox["Thread task sandbox"] --> Browser["Stagehand Chromium"]
+  Instance["Instance connection named incident"] --> Resolve["Resolve named connections"]
+  Workspace["Workspace connection named incident"] --> Resolve
+  Personal["Personal connection named incident"] --> Resolve
+  Managed["Managed Tools connection named lmt"] --> Resolve
+  Resolve --> Winner["Later source replaces same name"]
+  Winner --> Allowed["Enabled and allowlisted tools only"]
+  Allowed --> Catalog["Cached remote discovery"]
+  Catalog --> Wrapped["Wrapped tool with provenance"]
+  Wrapped --> Call["Reauthorize and reread connection per call"]
 ```
 
-The server owns credentialed provider calls; only Stagehand browser automation is sent to the sandbox.
+This shows source ordering and whole-connection replacement before discovery; `lmt` normally has its own name and is appended only for an eligible credential owner.
 
-## Observability tools
+The dashboard exposes scoped list, save, delete, reveal-header, and discovery operations. Instance and workspace operations require an administrator; personal operations use the authenticated session. Discovery can run against a persisted connection or an unsaved validated draft, returns only tool names/descriptions, and never executes a tool.
 
-### Datadog
+## Discovery and execution lifecycle
 
-`load_datadog_tools` obtains the team's decrypted API/application key pair and creates a `MultiServerMCPClient` using `streamable_http`. It connects to `https://mcp.<site>/api/unstable/mcp-server/mcp`, attaches `DD_API_KEY` and `DD_APPLICATION_KEY`, and requests the configured `toolsets`. `DATADOG_MCP_TOOLSETS` defaults to `core`, the query-oriented logs, metrics, traces, dashboards, monitors, incidents, hosts, services, and events set.
+At load time, Open SWE reads all sources concurrently. If any scope cannot be read, it returns no MCP tools rather than risking exposure of a lower-precedence record with incomplete override information. It then selects the last record for each connection name, skips disabled or empty-allowlist records, discovers each selected server catalog concurrently, and retains only allowlisted definitions.
 
-A Datadog connection validates and normalizes its site before storage. Only `datadoghq.com`, `us3.datadoghq.com`, `us5.datadoghq.com`, `datadoghq.eu`, `ap1.datadoghq.com`, and `ap2.datadoghq.com` are accepted, so the derived MCP host is an approved hosted-MCP site. Missing credentials or an MCP failure produces no Datadog tools.
+Discovery uses the configured transport and has a 30-second limit. Results are stale-while-revalidate cached for 10 minutes and may be served up to 24 hours; the cache key includes source namespace, connection name, and connection revision. A save creates a new revision, isolating the new server/configuration from the prior catalog. Discovery rejects duplicate remote tool names and reduces failures to safe, actionable messages without echoing request credentials. Individual discovery failures remove that connection's tools and are reported in logs and catalog outcome counters, rather than failing all other connections or the run.
 
-### LangSmith run inspection
+The resulting LangChain tool name is sanitized and receives a hash suffix, while its metadata preserves the upstream MCP tool name plus credential-free provenance: connection name, winning scope, and overridden scopes. This permits the tool surface to explain where a tool came from without exposing URL credentials.
 
-The LangSmith tool surface is intentionally read-only:
+Execution deliberately does **not** trust the discovery-time record. On every invocation the wrapper:
 
-- `langsmith_get_trace` reads one run and can include child runs.
-- `langsmith_list_runs` lists a project's recent runs, clamps `limit` to 1–50, and accepts an optional LangSmith filter.
+1. calls any authorization hook for the source that originally supplied the catalog;
+2. resolves the connection name again with the same precedence order;
+3. rejects a missing/disabled connection, a scope change, a changed URL or transport, or a tool no longer in the allowlist;
+4. creates a fresh MCP client and invokes asynchronously under the same 30-second limit.
 
-Both tools resolve credentials when invoked, after resolving `on_behalf_of` to the acting participant. A connected personal LangSmith key wins; a team key is considered only when the loader created the tools with `allow_team=True`. Failures are returned as a structured `{ "success": false, "error": ... }` tool result. This is separate from the LangSmith sandbox backend.
+Unexpected invocation failures are logged without provider details and become `ToolException("MCP call failed; check its connection and credentials")`; expected policy changes get specific tool errors. MCP tool calls also emit a PostHog MCP-tool outcome signal. The net effect is that a configuration change takes effect safely during a run: a stale schema cannot turn into a call against a different endpoint or broader permission set.
 
-### Authorization tiers
+## Client-credentials OAuth for configured MCPs
 
-Team observability content is treated as attacker-influenceable: traces, logs, and run inputs/outputs can contain prompt injection. The server therefore evaluates observability access for every run, using the user who triggered that run, not a capability retained by the thread.
+A configured connection can obtain bearer tokens using only the OAuth `client_credentials` grant. The secret stays encrypted in the connection record. Token acquisition supports `client_secret_post` and `client_secret_basic`, sends an optional scope, validates bearer tokens, caches an auth object by namespace, connection name, settings, and encrypted secret, and refreshes shortly before expiry. A `401` causes one token refresh and retry. Changing credentials or settings naturally selects a new cache entry.
 
-The check accepts configured admins (`CONFIGURED_ADMINS`) by email or GitHub login, and the explicit email allowlist (`OBSERVABILITY_AUTHORIZED_EMAILS`). It considers configured `user_email`, a Slack triggering email, the selected GitHub login, and the email resolved for that login. The resulting tool grant is tiered:
+OAuth failures are normalized to messages suitable for an administrator, such as a failed token request with status and configuration hints. They do not disclose the secret or provider response body.
 
-1. An explicitly authorized user receives Datadog and LangSmith with team fallback.
-2. An active member of an `ALLOWED_GITHUB_ORGS` organization receives LangSmith with team fallback.
-3. Everyone else receives LangSmith only if they have a personal connection; team fallback is disabled.
+## Open SWE as an MCP server
 
-The authorization decision is intentionally not cached because it relies on per-run configuration. The expensive provider/credential and organization-membership work is cached separately, so cache reuse cannot carry team access from an authorized caller to an untrusted caller.
+Open SWE also exposes its own tool catalog at `/oswe/mcp` for external MCP clients such as Claude Code, Claude.ai, or Cursor. The server authenticates through the dashboard's GitHub App OAuth flow when its GitHub client credentials and `TOKEN_ENCRYPTION_KEY` are configured; local development may instead use a GitHub token verifier. It is not mounted when neither option is available.
 
-## MCP providers and participant-scoped calls
+The remote server is stateless: every list or call derives a `ToolCaller` from the access-token GitHub subject, verifies that the corresponding Open SWE user may sign in, and resolves that person's catalog. The catalog combines exposed native tools—admin-only tools only for administrators—with instance, default-workspace, and personal MCP connections. Tool invocation runs through the same `ToolNode` path and configuration used by a private owned thread, so parameter validation, injected state, and access policy are rechecked rather than trusting a prior `tools/list` response.
 
-### Corridor
+The OAuth proxy's registrations, transactions, authorization codes, upstream tokens, refresh tokens, and consent state are stored in PostgreSQL so any replica can handle a step. Store collections declare the small set of readable metadata; every other field is encrypted with `TOKEN_ENCRYPTION_KEY`, and authorization-code keys themselves are hashed. Expired entries read as absent and writes opportunistically sweep expired rows. An unknown collection fails closed, ensuring a FastMCP upgrade cannot persist a new unreviewed secret field in plaintext.
 
-Corridor is a server-side MCP integration for `analyzePlan`. Configuration requires `CORRIDOR_API_TOKEN`; a legacy `token` or `api_key` query parameter in `CORRIDOR_MCP_URL` may supply the token and is removed before connecting. The URL is pinned to HTTPS `app.corridor.dev` at `/api/mcp`; an absent token or any other endpoint means Corridor is unconfigured, avoiding bearer-token delivery to an arbitrary host.
+## LangSmith Managed Tools
 
-The loader uses HTTP MCP with a 30-second connection timeout, attaches `Authorization: Bearer ...`, and filters the discovered catalog to the `analyzePlan` allowlist. When configured, the server registers Corridor as an `IntegrationGroup` whose static advertised name is `analyzePlan`; the handshake is deferred until the agent requests it rather than delaying the first model call. The prompt directs the agent to use it before substantial security-sensitive code changes, but to report an unavailable tool once and continue without retrying.
+Managed Tools is a special MCP source, separate from the LLM Gateway. An instance administrator chooses one curated LangSmith tool-kit gateway; workspaces cannot override that selection. In a private thread, the owner can load that gateway using their own LangSmith OAuth token. LangSmith owns service provider grants and proxies calls, so neither provider tokens, consent URLs, nor the LangSmith token become tool arguments, sandbox state, or stored MCP credentials.
 
-### Notion
+The `managed` source has namespace `managed_tools/<login>/<gateway-id>` and re-resolves its in-memory authorization header for each connection lookup. Its authorization hook verifies that the current thread is private and owned by that same login. If the owner lacks a LangSmith connection or token refresh fails, only the managed source is omitted; ordinary instance/workspace/user MCPs remain available.
 
-Notion uses the hosted `https://mcp.notion.com/mcp` server over `streamable_http` and a per-user OAuth bearer token. `load_notion_tools(login)` uses that login only to discover the MCP catalog. It wraps each discovered definition so every user sees the same schema, augmented with required `on_behalf_of`.
+A gateway may withhold every tool until all services are connected, returning HTTP 428, or may offer tools from connected services while naming missing credentials in MCP metadata. Open SWE exposes readiness, missing OAuth/secret services, and optionally connected service counts. OAuth services receive a fresh single-service consent link for the signed-in owner; secret services must be configured in LangSmith. Consent polling has a bounded deadline and a minimum pause between long polls. After consent, Open SWE refreshes the MCP catalog; refresh failure does not stop the thread from resuming once the services requested by its connection card are ready.
 
-At invocation, the wrapper validates the participant, obtains that participant's current Notion access token, reconnects to retrieve the named MCP tool, and calls it. Notion credentials refresh expired tokens under a per-login lock; a reauthorization-required refresh removes the dead stored connection. Thus a catalog loaded using one person's token does not authorize calls as that person, and a missing current token produces a reconnect error.
+```mermaid
+sequenceDiagram
+  participant Owner as Private thread owner
+  participant OpenSWE as Open SWE server
+  participant Smith as LangSmith Managed Tools
+  participant Provider as Connected service
+  Owner->>OpenSWE: Run or request connection
+  OpenSWE->>Smith: List tools using owner token
+  alt Credentials missing
+    Smith-->>OpenSWE: Missing services and consent link
+    OpenSWE-->>Owner: Connection card or settings status
+    Owner->>Smith: Complete consent
+    OpenSWE->>Smith: Refresh catalog
+  else Services ready
+    Smith-->>OpenSWE: Curated tool catalog
+  end
+  OpenSWE->>Smith: Invoke selected MCP tool
+  Smith->>Provider: Proxy call with owner grant
+  Provider-->>Smith: Result
+  Smith-->>OpenSWE: Result
+```
 
-### Currents
+This shows the managed-tool boundary: Open SWE presents and invokes curated tools, while LangSmith holds the provider grants and performs the provider call.
 
-Currents is a server-side, read-only REST integration at `https://api.currents.dev/v1`. Its five tools list projects, retrieve a run, find a matching run, list project runs, and retrieve a spec-execution instance. Each request resolves the participant's decrypted Currents key at call time and sends it as a bearer header. The list endpoints cap page size at 50; provider errors become structured failure results.
+## LangSmith LLM Gateway model routing
 
-For Currents and Notion, the triggering login merely decides whether the tool group is offered: it requires a known login with that provider connected. It does not select a permanent credential for calls.
+The LLM Gateway is applied centrally in `make_model`. When routing is enabled, supported provider calls authenticate to LangSmith with `LANGSMITH_GATEWAY_API_KEY` (preferred) or `LANGSMITH_API_KEY`, and LangSmith resolves the actual provider secret from workspace Provider Secrets. The gateway can enforce spend, PII, and secrets policies and trace calls. This routing is independent of both run-inspection/managed MCP functionality and the MCP connection records above.
 
-### Participant invariant
+A workspace `gateway_enabled` value is authoritative; when absent, `LANGSMITH_GATEWAY_ENABLED` controls the deployment default. If that variable is unset, configuring a dedicated gateway key enables routing by default. `LANGSMITH_GATEWAY_BASE_URL` overrides the default `https://gateway.smith.langchain.com` for regional or self-hosted deployments. Remote-runtime model specifications carry the already-resolved workspace `use_gateway` flag so the graph builds primary and subagent models consistently.
 
-All participant-scoped calls use `resolve_participant`. `on_behalf_of` must be nonempty, case-insensitively match the GitHub login that triggered the current run, and be among verified thread participants. Calls cannot select a different participant's connection, and uncertainty while verifying participants is rejected rather than silently accepted.
+Supported provider prefixes are `openai`, `anthropic`, `baseten`, `fireworks`, and `google_genai`; each maps to the corresponding gateway base path. Unsupported providers—including `google_vertexai`—or missing LangSmith credentials produce a warning and preserve direct-provider routing instead of failing model construction. Gateway-routed OpenAI uses the Responses API by default; `LANGSMITH_GATEWAY_OPENAI_USE_RESPONSES=false` is an explicit compatibility opt-out for Chat Completions.
 
-## Stagehand browser in the sandbox
+## Request tracing, analytics, and degradation
 
-The five Stagehand tools—`browser_navigate`, `browser_act`, `browser_observe`, `browser_extract`, and `browser_close`—operate through the thread's sandbox backend. They can navigate sandbox-local `localhost` services. For each request, the server encodes operation, model, headless setting, and input as base64 JSON and executes the Stagehand runtime in the sandbox. It health-checks a Unix socket, starts a long-lived runtime if necessary, then returns its JSON response; sandbox execution or malformed output becomes a failure result.
+Datadog APM integration is optional. At API creation, `OPENSWE_ENV` is copied to `DD_ENV` and, when `ddtrace` is installed, its configured environment. Middleware renames the current Datadog root span to the routed HTTP resource such as `GET /path-template` after routing or while an endpoint unwinds. This avoids collapsing dashboard traffic into one generic route, but missing tracing libraries or span-renaming errors only generate debug logs and do not affect the response.
 
-Browser tools are available only when `SANDBOX_TYPE` is `langsmith`, the selected Stagehand model has an `anthropic` or `openai` provider prefix, and a model API key can be sourced from `STAGEHAND_MODEL_API_KEY`, `MODEL_API_KEY`, or `ANTHROPIC_API_KEY`. `STAGEHAND_MODEL` defaults to `anthropic/claude-sonnet-4-5`; `STAGEHAND_HEADLESS` is enabled unless set to `0`, `false`, or `no`.
+Product analytics is PostgreSQL-backed rather than a direct in-request provider call. Lifecycle producers create strict, versioned event envelopes with opaque IDs for runs, threads, tasks, people, repositories, and models. They record run starts and terminal token usage, cost observations, PR/review/finding lifecycle events, and feedback. Event capture is fail-soft: it runs only when the database is configured, catches/logs errors, and never interrupts the product transition that emitted it.
 
-## Loading lifecycle and failures
+Events are inserted idempotently into an outbox in the same database transaction. A worker claims pending work with `FOR UPDATE SKIP LOCKED`, ingests events, acknowledges successful delivery, and retries failures with jittered exponential backoff. After the configured maximum attempts, an event is dead-lettered; outbox status reports pending, dead-letter, and stale counts. Worker-loop failure is also logged and retried on the next iteration.
 
-While building an executable non-local, non-summary agent, the server concurrently loads observability and participant-scoped Currents/Notion groups. It adds browser tools under the same run restrictions. Corridor is configured into a lazy group instead. Summary-stop and local/desktop runs skip observability, Currents, Notion, browser, and Corridor integration groups.
+Run cost is a deferred LangSmith enrichment: after terminal usage is recorded, Open SWE may schedule bounded refresh attempts for LangSmith's run-only cost. A successful lookup writes a `run.cost_recorded` event and thread metadata. An unavailable LangSmith cost or a persistence failure yields retry scheduling or an unavailable/exhausted result, never changes the run's terminal outcome.
 
-Server loaders use a stale-while-revalidate TTL cache and a loader timeout. Datadog and Corridor cache for 600 seconds; LangSmith, Currents, and Notion caches use 300 seconds, with cache keys scoped to login and LangSmith team-fallback mode where needed. An exception or timeout returns an empty list. Credential reads on the tool-loading path also deliberately fail soft when Store access fails, whereas dashboard status reads surface Store failures. The operational invariant is that optional integration loss reduces available tools, not the ability to start a run.
+```mermaid
+flowchart LR
+  Request["Dashboard request"] --> API["FastAPI application"]
+  API --> APM["Optional Datadog root span naming"]
+  Run["Run lifecycle"] --> Emit["Fail-soft analytics emitter"]
+  Emit --> Outbox["PostgreSQL outbox"]
+  Outbox --> Worker["Analytics worker"]
+  Worker --> Ingest["Analytics ingestion and projections"]
+  Run --> Cost["Deferred LangSmith cost lookup"]
+  Cost -->|"available"| Emit
+  Cost -->|"unavailable"| Retry["Bounded retry or unavailable"]
+```
 
-## LangSmith LLM Gateway
+This distinguishes synchronous product work from optional tracing and asynchronous usage/cost processing.
 
-The LLM Gateway is not the LangSmith run-inspection toolset. It is an optional model-routing layer applied centrally by `make_model`: supported provider calls go through the gateway, which authenticates with a LangSmith key and resolves real provider secrets from workspace Provider Secrets while enforcing gateway policies and tracing calls.
+## Verification focus
 
-A team `gateway_enabled` setting overrides the deployment default; when it is unset, `LANGSMITH_GATEWAY_ENABLED` decides, or merely setting `LANGSMITH_GATEWAY_API_KEY` enables routing by default. `LANGSMITH_GATEWAY_BASE_URL` can replace the default `https://gateway.smith.langchain.com`. The gateway-specific key is preferred over `LANGSMITH_API_KEY`; it is useful when the ordinary injected key lacks `gateway:invoke` permission.
-
-Only `openai`, `anthropic`, `baseten`, `fireworks`, and `google_genai` model prefixes have gateway paths. Unsupported providers or a missing LangSmith key log a warning and continue with direct provider routing instead of failing model construction. Gateway-routed OpenAI retains the Responses API by default; set `LANGSMITH_GATEWAY_OPENAI_USE_RESPONSES=false` only when a deployment needs Chat Completions.
-
-## Focused verification
-
-The relevant tests cover failure-to-empty behavior and Datadog/Notion/LangSmith wrappers in `tests/tools/test_observability_tools.py`, Corridor URL/token validation and lazy registration in `tests/tools/test_corridor_mcp.py`, Currents tool contracts in `tests/tools/test_currents_tools.py`, Stagehand sandbox dispatch and enablement in `tests/tools/test_stagehand_browser.py`, and concurrent factory loading in `tests/agent/test_factory_tool_loading.py`.
+The MCP tests exercise tier isolation, same-name precedence and per-call allowlist rechecks, remote-server schema and administrator gating, sealed OAuth storage and expiry behavior, and managed-gateway ownership, credential challenges, consent/resume behavior, and graceful LangSmith outages. Model tests cover fallback-resolution and request-timeout behavior; gateway routing itself is centralized in the model factory so supported and unsupported provider behavior remains a focused configuration boundary.

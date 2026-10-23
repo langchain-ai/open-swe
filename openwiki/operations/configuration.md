@@ -1,143 +1,127 @@
 ---
 type: operations reference
-title: Configuration and Startup Validation
-description: Explains Open SWE's lazy environment registry, persisted administrator settings, model and sandbox selection, secrets, and the validation that can stop a server from starting.
-tags: [configuration, operations, environment-variables, startup-validation, sandbox, models, security]
+title: Configuration, secrets, and startup validation
+description: Operator reference for Open SWE's centralized environment registry, required backend and Managed Deep Agents configuration, persistence, credentials, sandbox providers, and boot-time failure behavior.
+tags: [configuration, operations, secrets, startup-validation, database, sandbox, managed-deep-agents]
+verified:
+  - by: openwiki/0.4.2
+    at: 2026-10-23T08:13:55.386Z
 sources:
-  - id: openwiki-source-328bde9e94017848bb09ba23
-    resource: repo://agent/api/app.py
-  - id: openwiki-source-068d65a84c760eb8d555055e
-    resource: repo://agent/completion.py
-  - id: openwiki-source-b05c9910677cf23a9325276c
-    resource: repo://agent/config.py
-  - id: openwiki-source-61ace7d4952db9ddb8316aeb
-    resource: repo://agent/dashboard/routes.py
-  - id: openwiki-source-07762d55411a883aaa28e2ed
-    resource: repo://agent/dashboard/sandbox_settings.py
-  - id: openwiki-source-23002b87792ed6949edb723b
-    resource: repo://agent/dashboard/team_settings.py
-  - id: openwiki-source-c48b309c5ca416cf623f0866
-    resource: repo://agent/dispatch.py
-  - id: openwiki-source-eb53b48336d1b5fc0816441a
-    resource: repo://agent/encryption.py
-  - id: openwiki-source-2dedcea02c5aa03c54d81c32
-    resource: repo://agent/sandboxes/providers/langsmith.py
-  - id: openwiki-source-49bfbb811c25e99235121924
-    resource: repo://agent/sandboxes/providers/registry.py
-  - id: openwiki-source-856ade03ef31ac38e1347f7c
-    resource: repo://agent/server.py
-  - id: openwiki-source-f0db445078d7a8158aa93724
-    resource: repo://agent/utils/gateway.py
-  - id: openwiki-source-56ade344fdbe7d47c84f008f
-    resource: repo://agent/utils/model.py
   - id: openwiki-source-8010c6e64af5a375d8d3b70b
     resource: repo://docs/CUSTOMIZATION.md
   - id: openwiki-source-5bbba7b2a8ea8360ff233d63
     resource: repo://langgraph.json
-verified:
-  - by: openwiki/0.4.2
-    at: 2026-09-08T08:15:30.533Z
-generated: { by: "openwiki/0.4.2", at: "2026-09-08T08:15:30.533Z" }
+  - id: openwiki-source-4b1279a0a1e5ec2d55a4558a
+    resource: repo://openswe/api/app.py
+  - id: openwiki-source-b3a1e5fc7fe45f62e902bef9
+    resource: repo://openswe/config.py
+  - id: openwiki-source-50d64b46ab06b6436266b4d0
+    resource: repo://openswe/dashboard/oauth.py
+  - id: openwiki-source-a13697e04823548408653de5
+    resource: repo://openswe/database/postgres.py
+  - id: openwiki-source-b11ec0af4e40439361058935
+    resource: repo://openswe/encryption.py
+  - id: openwiki-source-9bd3a8003cde29c1b2ffa556
+    resource: repo://openswe/remote_runtime/client.py
+  - id: openwiki-source-8813511c8e2188e838ca5502
+    resource: repo://openswe/remote_runtime/tokens.py
+  - id: openwiki-source-e2d4ab22e08f00169bb3c374
+    resource: repo://openswe/sandboxes/providers/langsmith_api.py
+  - id: openwiki-source-d16a45e9fc6aa80a3708c88c
+    resource: repo://openswe/sandboxes/providers/langsmith.py
+  - id: openwiki-source-a4c632cb1c0a9a7a637ab9fe
+    resource: repo://openswe/sandboxes/providers/registry.py
+generated: { by: "openwiki/0.4.2", at: "2026-10-23T08:13:55.386Z" }
 ---
 
-# Configuration and Startup Validation
+# Configuration, secrets, and startup validation
 
-Open SWE has two configuration planes:
+Open SWE has two deployment surfaces which must be configured separately:
 
-- **Deployment configuration** is declared centrally in `agent/config.py` and normally supplied through environment variables (including the `.env` file named by `langgraph.json`). It covers connectivity, credentials, provider selection, UI URLs, and deployment defaults.
-- **Administrator settings** are instance-wide records in LangGraph Store. They change selected behavior without a redeploy, notably the default sandbox snapshot and team-wide review/model settings. These are not substitutes for secrets or provider credentials, which remain deployment configuration.
+- The **backend** is the LangGraph/FastAPI deployment declared by `langgraph.json`. It owns the dashboard, webhook intake, PostgreSQL-backed application state, sandbox provisioning, and dispatch.
+- **Managed Deep Agents (MDA)** is a separate deployment of `mda/` where every Open SWE graph actually executes. The backend calls it through `MDA_RUNTIME_URL`; MDA calls backend tool and hook endpoints with a signed run token.
 
-This page describes ownership and failure behavior rather than listing every variable. `agent/config.py` is the complete variable catalog; [deployment](deployment.md) provides installation procedures. See [models, profiles, and instructions](../concepts/models-profiles-instructions.md), [auth and security](../concepts/auth-and-security.md), and [sandbox providers](../integrations/sandbox-providers.md) for their respective domains.
+Environment variables are deployment configuration: use the deployment secret manager or a protected `.env` for local development. Do not put real values in source, documentation, or dashboard settings. The definitive variable catalog, descriptions, defaults, aliases, and secret markings is [`openswe/config.py`](../../openswe/config.py).
 
-## Configuration ownership and value semantics
+## Configuration model
 
-`ENV` is the single registry for application configuration. Code reads values through an `EnvVar` object rather than taking an import-time snapshot of `os.environ`: reads are lazy, so late secret hydration, key rotation, and test monkeypatching can be observed. Whitespace-only values count as unset. The registry also records descriptions, defaults, secret classification, aliases, and deprecated names; its typed accessors parse comma-separated lists, integers, and conventional boolean strings.
+`ENV` is the sole application registry. Values are read lazily, so process code sees late secret injection, key rotation, and test overrides rather than an import-time copy. Blank or whitespace-only values are unset. A canonical variable wins over aliases; declared accessors parse comma-separated lists, integers, and conventional boolean values. Accessing an undeclared name raises, making a new setting an explicit registry change.
 
-The canonical name takes precedence over aliases. Deprecated aliases are centralized in the registry, rather than scattered through consumers; `deprecated_in_use()` can report an alias or deprecated setting, suppressing a deprecated warning when its replacement is also set. An undeclared `ENV.NAME` or `ENV["NAME"]` is an error, which makes adding a variable an explicit configuration-schema change.
+`langgraph.json` loads `.env`, mounts `openswe.webapp:app`, and registers the `agent`, `reviewer`, and `review-scout` graphs. Its checkpointer uses delete-based TTL cleanup with a 60-minute sweep and a 43,200-minute default TTL (30 days). Those are runtime/checkpoint settings, not a replacement for the application database described below.
 
-### Deployment topology
+## Required startup dependencies
 
-`langgraph.json` registers five graphs (`agent`, `reviewer`, `analyzer`, `chat`, and `scheduler`) and mounts `agent.webapp:app` as the platform HTTP application for dashboard and webhook routes. Its checkpointer uses delete-based TTL cleanup: a 60-minute sweep and a default TTL of 43200 minutes (30 days). The file names `.env` as its environment file.
-
-## Startup lifecycle and failures
-
-The FastAPI composition entrypoint is `agent.api.app:create_app`. It pins the process to a single event loop before queue work is constructed and again in lifespan startup. The lifespan then validates the active sandbox configuration and local-development model credentials. It yields only if both succeed; on shutdown it closes all cached model clients.
+The FastAPI lifespan is the operational gate. It pins the event loop, then performs the checks and setup below before serving. Failure in a mandatory step prevents startup. Some auxiliary subsystems log a warning and continue, deliberately preserving dashboard and run availability.
 
 ```mermaid
 flowchart TD
-    Init["Import application"] --> Pin["Pin one event loop"]
-    Pin --> Build["Create FastAPI application"]
-    Build --> Start["Lifespan startup"]
-    Start --> CheckSandbox["Validate active sandbox configuration"]
-    CheckSandbox --> CheckModel["Validate localhost model credential"]
-    CheckModel --> Serve["Serve routes and runs"]
-    CheckSandbox --> Stop["Raise and abort startup"]
-    CheckModel --> Stop
-    Serve --> Close["Close cached model clients"]
+    Boot["FastAPI lifespan"] --> Gate["Validate login gate and sandbox"]
+    Gate --> MDA["Validate MDA URL and run token secret"]
+    MDA --> DB["Require PostgreSQL and run migrations"]
+    DB --> Optional["Start analytics and listeners"]
+    Optional --> Serve["Serve application"]
+    Gate --> Abort["Raise and abort startup"]
+    MDA --> Abort
+    DB --> Abort
+    Serve --> Shutdown["Stop workers and close HTTP and database pools"]
 ```
 
-The diagram shows the boot-time checks performed by the FastAPI lifespan and cleanup on shutdown.
+The diagram shows the hard startup gates and best-effort services in the FastAPI lifespan.
 
-Not every bad setting is checked at boot. The sandbox validator is provider-specific: it currently validates LangSmith resource fields and extra JSON only when `SANDBOX_TYPE=langsmith`; an unknown provider name is rejected when the registry is asked to create a sandbox. Likewise, model startup validation deliberately applies only when an explicitly configured `DASHBOARD_BASE_URL` starts with `http://localhost`; it checks the credential needed by the deployment's `LLM_MODEL_ID` (or default) and does not attempt to validate models that may later be chosen through team, profile, or thread settings.
+Hard gates include:
 
-`DASHBOARD_ALLOWED_ORIGINS` is separately checked while the application is built: if it contains `*`, construction raises because credentialed CORS cannot safely use a wildcard. Nonempty explicit origins enable credentialed CORS for the dashboard API.
+- At least one of `ALLOWED_GITHUB_ORGS` or `ALLOWED_GITHUB_USERS` is required. This prevents an unintentionally open dashboard login policy.
+- The active sandbox is validated. For `langsmith`, malformed numeric capacity/TTL fields, negative TTLs, or invalid/non-object `SANDBOX_CREATE_EXTRA_JSON` raise at boot. Selecting an optional provider without its dependency extra also fails at boot.
+- `MDA_RUNTIME_URL` is required and must be an absolute URL; non-localhost `http` is rejected, so a remote runtime must use HTTPS. `REMOTE_RUNTIME_TOKEN_SECRET` is also required.
+- `POSTGRES_URI` is required outside the local-development default. Startup migrates the `open_swe` schema under a PostgreSQL advisory transaction lock, so concurrent replicas serialize migration work.
 
-## Sandboxes: provider, snapshot, and runtime override
+Analytics reporting, transcript and bridge listeners, and the UI invalidation hub are started after migration but failures there are logged rather than fatal. The job worker is started, while agent warming is best effort. Shutdown stops those services and disposes the HTTP and database pools.
 
-`SANDBOX_TYPE` defaults to `langsmith`. The lazy provider registry maps `langsmith`, `daytona`, `modal`, `runloop`, `e2b`, and `local` to provider factories. An unsupported value raises `ValueError` and lists the supported values. The local provider executes on the host and has no isolation, so it is for local development rather than untrusted work.
+### Backend database configuration
 
-The registry passes `snapshot_id`, resource overrides, and arbitrary create parameters only to the LangSmith factory; other providers receive only an optional existing sandbox ID. For LangSmith, the normal base snapshot comes from `DEFAULT_SANDBOX_SNAPSHOT_ID` (otherwise the provider root snapshot), with defaults of 128 GiB filesystem, 4 vCPUs, 16 GiB memory, 7200 seconds idle TTL, and 2592000 seconds deletion-after-stop TTL. The two TTL values allow `0` to disable their expiration behavior. Malformed numeric resource values, negative TTLs, and invalid/non-object `SANDBOX_CREATE_EXTRA_JSON` fail LangSmith startup validation.
+`POSTGRES_URI` is Open SWE's application database connection, distinct from any Agent Server `DATABASE_URI`. It accepts `postgres://`, `postgresql://`, or `postgresql+asyncpg://`; the first two are normalized to asyncpg. `sslmode` is translated to asyncpg's `ssl` query option, but specifying both is rejected. The database role must be able to create/manage the `open_swe` schema and migrations.
 
-`SANDBOX_LANGSMITH_API_KEY` and `SANDBOX_LANGSMITH_ENDPOINT` let sandbox operations use another LangSmith workspace; each falls back to its normal `LANGSMITH_*` counterpart. The selected credentials apply to sandbox API operations, proxy setup, and environment snapshot work, so a configured base snapshot must exist in that workspace. `ENVIRONMENT_SNAPSHOT_PREFIX` defaults to `openswe` and separates environment snapshot names when deployments share a workspace.
+The backend creates an async SQLAlchemy pool using `ANALYTICS_POOL_SIZE` (20), `ANALYTICS_POOL_OVERFLOW` (20), and `ANALYTICS_POOL_TIMEOUT_SECONDS` (5). `POSTGRES_SLOW_QUERY_MS` defaults to 1000 and logs slower queries; set it to `0` to disable that logging. In the `local_dev` API variant only, an unset URI defaults to `postgresql://postgres:postgres@127.0.0.1:5433/postgres`.
 
-### Stored base snapshot precedence
+## MDA runtime and callback trust
 
-The sandbox-settings record is one instance-wide LangGraph Store value. An administrator can read or update it at `GET`/`PUT /dashboard/api/sandbox-settings`; the route accepts a dashboard admin or configured admin token identity. The stored `base_snapshot_id` is trimmed opaque text, capped at 512 characters, and its update records time and updater. A stored value wins over `DEFAULT_SANDBOX_SNAPSHOT_ID`; clearing it restores the environment default. An already-ready captured environment remains a higher-level selection than this base snapshot.
+`MDA_RUNTIME_URL` identifies the separately deployed MDA service. `MDA_RUNTIME_API_KEY` authenticates backend-to-MDA calls and falls back to `LANGSMITH_API_KEY`. MDA hosts the backend's `agent`, `reviewer`, and `review-scout` graph choices; a requested graph outside that set is rejected before dispatch.
 
-The read used during provisioning is intentionally fail-soft: a Store exception is logged and treated as no override, allowing the environment default to keep runs working. In contrast, the dashboard read reports the stored, environment, and effective values plus whether the source is `admin`, `env`, or `unset`.
+For each remote run, the backend signs a JWT carrying the thread ID, assistant ID, configurable data, and metadata. `REMOTE_RUNTIME_TOKEN_SECRET` supports a comma-separated ordered key list: signing uses the first key and verification tries each, allowing rotation. Tokens require the expected issuer, audience, subject, issue/expiry claims, use HS256, have a 48-hour lifetime, and permit 60 seconds of clock leeway. MDA must return this bearer token to backend hooks; backend tools use verified claims rather than model-controlled arguments for run identity.
 
-## Models and team settings
+## Dashboard URLs, browser security, and integration secrets
 
-`LLM_MODEL_ID` and `LLM_REASONING_EFFORT` establish the deployment fallback pair. Resolution accepts only catalog models allowed as defaults and validates that the effort is supported; an unsupported model or effort raises when defaults are resolved. The deployment default is used when no durable team setting supplies a valid choice. Model selection can be more specific at team, profile, thread, or run scope; changing the environment does not overwrite existing selections.
+`LANGGRAPH_URL` is the deployment URL and is the default for `DASHBOARD_BASE_URL` and `DASHBOARD_API_BASE_URL` when the backend serves the dashboard. `DASHBOARD_STATIC_DIR` selects a built UI; `DASHBOARD_DEV_SERVER_URL` is the local Vite proxy target. `DASHBOARD_ALLOWED_ORIGINS` is a comma-separated list of additional browser origins. `create_app` rejects `*`, because CORS allows credentials, and always adds `open-swe://app` for the desktop client. Dashboard redirect handling normalizes origins and allows only `DASHBOARD_BASE_URL` plus this explicit allowlist.
 
-The team-settings record is also a single Store record keyed `default`. It includes review toggles, organization guidelines, review trace project, default repository, transcription model, gateway toggle, Fable opt-in, and main/subagent model-and-effort pairs for agent and reviewer, plus grouping, chat, and thread title settings. Input validation rejects unsupported model/effort combinations, an effort without a model, invalid transcription identifiers, and oversized guidelines or trace-project text. Deprecated model IDs are cleared and canonical pairs are normalized. When Fable is disabled, persisted Fable defaults are replaced with safe fallback pairs.
+`DASHBOARD_JWT_SECRET` signs dashboard session cookies and OAuth state. `TOKEN_ENCRYPTION_KEY` protects stored OAuth and MCP credentials. It accepts one Fernet key or a newest-first comma/newline list: new ciphertext uses the first key and reads try all keys. Rotate by prepending a new valid key, retaining previous keys until old ciphertext is retired or re-encrypted. Missing encryption configuration prevents encryption; a decrypt failure is logged and yields no plaintext.
 
-Store reads for team settings are fail-soft because model selection is on the run path: unavailable or absent Store data returns hardcoded defaults. Invalid/stale model data resolves first to a supported model from the same provider where possible, then to the global fallback. Chat inherits the agent default when unset, and review grouping inherits the reviewer subagent default.
+Keep third-party credentials as backend deployment secrets. Common integration settings include GitHub App identity and webhook signing (`GITHUB_APP_ID`, `GITHUB_APP_CLIENT_ID`, `GITHUB_APP_CLIENT_SECRET`, `GITHUB_APP_PRIVATE_KEY`, `GITHUB_WEBHOOK_SECRET`, and optional installation ID), Slack bot/signing and OAuth values, `LINEAR_WEBHOOK_SECRET`, and LangSmith credentials. `CONFIGURED_ADMINS` is a separate comma-separated list of GitHub logins/emails that grants administrative access; it is not the dashboard login allowlist.
 
-`DEFAULT_LLM_MAX_TOKENS` is 64000 and is an output/completion budget, not a context-window size. `LLM_FALLBACK_MODEL_ID` can name a fallback; otherwise Anthropic and OpenAI primary models have cross-provider defaults. Fallback middleware is installed only if the fallback exists and differs from the selected primary. `make_model` caches constructed clients per running event loop and model options, and startup shutdown closes that cache.
+## Models and provider credentials
 
-Each supported direct provider request receives up to six retries; OpenAI, Anthropic, Baseten, Google GenAI, and Fireworks also receive a 600-second default request timeout. These bounds complement the agent's separate model-call deadline and run recursion limits described in [models, profiles, and instructions](../concepts/models-profiles-instructions.md).
+Use a provider key (`ANTHROPIC_API_KEY`, `OPENAI_API_KEY`, `GOOGLE_API_KEY`, `GROQ_API_KEY`, `FIREWORKS_API_KEY`, or `BASETEN_API_KEY`) or configure the LangSmith Gateway. `LLM_MODEL_ID`, `LLM_REASONING_EFFORT`, and `LLM_FALLBACK_MODEL_ID` select deployment defaults; `OPENAI_BASE_URL` changes the OpenAI-compatible endpoint. `EXA_API_KEY` enables web search.
 
-### Gateway precedence
+Gateway routing is deployment-controlled by `LANGSMITH_GATEWAY_ENABLED`; when unset, a configured `LANGSMITH_GATEWAY_API_KEY` enables it. `LANGSMITH_GATEWAY_BASE_URL` defaults to `https://gateway.smith.langchain.com`, and `LANGSMITH_GATEWAY_OPENAI_USE_RESPONSES` defaults to true. The gateway key is preferred for gateway calls, with `LANGSMITH_API_KEY` as fallback. Workspace settings can override the deployment gateway choice; do not confuse that persisted policy with provider secrets.
 
-LangSmith LLM Gateway routing is centrally applied by `make_model`. `LANGSMITH_GATEWAY_ENABLED` is authoritative when set; otherwise setting `LANGSMITH_GATEWAY_API_KEY` turns routing on. A team setting is tri-state: `true` or `false` overrides this deployment default, while unset inherits it. Gateway authentication prefers `LANGSMITH_GATEWAY_API_KEY` and falls back to `LANGSMITH_API_KEY`; `LANGSMITH_GATEWAY_BASE_URL` changes the gateway host and `LANGSMITH_GATEWAY_OPENAI_USE_RESPONSES` defaults to true.
+## Sandbox provider configuration
 
-Only OpenAI, Anthropic, Baseten, Fireworks, and Google GenAI have gateway routes. If routing is enabled but the provider is not routable, or no LangSmith key is available, the code logs a warning and calls the provider directly rather than failing the run. Direct Baseten calls are stricter: with gateway routing unavailable, `BASETEN_API_KEY` is required.
+`SANDBOX_TYPE` defaults to `langsmith`; valid built-ins are `langsmith`, `daytona`, `modal`, `runloop`, `e2b`, and `local`. The registry lazily loads the provider factory and rejects unknown names with the supported list. `daytona`, `modal`, `runloop`, and `e2b` are optional dependency groups: install `sandbox-<provider>` or `sandbox-providers` before selecting one. `local` executes on the host and is for trusted local development, not isolation.
 
-## Secrets, identity, and completion delivery
+For LangSmith sandboxes, use the backend deployment's `LANGSMITH_API_KEY` and `LANGSMITH_ENDPOINT`; the historical `SANDBOX_LANGSMITH_*` overrides are not used. Optional resource settings default to 128 GiB filesystem (`DEFAULT_SANDBOX_SNAPSHOT_FS_CAPACITY_BYTES`), 4 vCPUs (`DEFAULT_SANDBOX_VCPUS`), 16 GiB memory (`DEFAULT_SANDBOX_MEM_BYTES`), a 7200-second idle TTL, and a 2,592,000-second delete-after-stop TTL. A TTL of `0` disables that expiration. `SANDBOX_CREATE_EXTRA_JSON` is an object merged into LangSmith create requests.
 
-Keep secrets in deployment configuration or the encrypted credential stores appropriate to their integration; do not place user GitHub access tokens in deployment environment variables. For LangSmith sandboxes, GitHub proxy rules mint an installation token at runtime and inject it on the wire for `github.com` and `api.github.com`; sandbox processes see placeholders rather than the real credential.
+`WORKSPACE_SNAPSHOT_PREFIX` defaults to `openswe` (and recognizes the deprecated `ENVIRONMENT_SNAPSHOT_PREFIX` alias). Workspace snapshots, rather than a global `DEFAULT_SANDBOX_SNAPSHOT_ID`, are the current baseline mechanism. `OPENSWE_SCRIPT_ROOT` defaults to `/open-swe/environment`; local providers may need a writable alternative. Provider-specific credentials/settings are `DAYTONA_API_KEY` and optional `DAYTONA_SANDBOX_SNAPSHOT`, `E2B_API_KEY` and `E2B_TEMPLATE`, `RUNLOOP_API_KEY`, and `MODAL_APP_NAME`.
 
-Important identity settings include GitHub App credentials (`GITHUB_APP_ID`, `GITHUB_APP_PRIVATE_KEY`, installation ID, client ID/secret, and webhook secret), Slack signing and bot credentials, dashboard cookie/OAuth-state signing (`DASHBOARD_JWT_SECRET`), and `TOKEN_ENCRYPTION_KEY`. The latter accepts one Fernet key or a comma/newline-separated newest-first list: encryption uses the first key and decryption tries all keys, permitting key rotation. Encryption fails when a key is absent; decryption logs and returns an empty string for missing keys or invalid ciphertext.
+## Operator checklist and focused tests
 
-`CONFIGURED_ADMINS` is a normalized, comma-separated allowlist of GitHub logins and/or emails; with an empty value, no dashboard identity is an admin. `OBSERVABILITY_AUTHORIZED_EMAILS` separately grants the read-only observability tools, while configured admins are always authorized. Repository allowlists use `ALLOWED_GITHUB_ORGS` and `ALLOWED_GITHUB_REPOS`: if both are empty, any repository passes; otherwise an allowlisted owner or exact `owner/repo` is required.
-
-Run-completion replies require both a secret and a usable delivery URL. `RUN_COMPLETE_WEBHOOK_SECRET` makes `/webhooks/run-complete` fail closed: every callback is rejected without it. Dispatch attaches a callback only when the secret exists and `COMPLETION_WEBHOOK_URL` is absolute and non-loopback; a relative or loopback URL is warned about and omitted so it cannot make run creation fail. The dispatch URL carries the token query parameter for the completion endpoint's constant-time comparison.
-
-## Operating guidance
-
-1. Declare new environment variables in `agent/config.py`, including whether they are secret and any alias/deprecation relationship; consume them through `ENV` rather than a new direct environment read.
-2. Treat environment values as deployment defaults and credentials. Use the dashboard's persisted settings only for the explicitly supported instance-wide choices, and account for their fail-soft Store reads when designing changes.
-3. Before rollout, exercise lifespan startup with the selected sandbox and model configuration. In local development, set an explicit `http://localhost...` `DASHBOARD_BASE_URL` to activate model-key validation.
-4. Configure `COMPLETION_WEBHOOK_URL` as the public HTTPS `.../webhooks/run-complete` URL together with `RUN_COMPLETE_WEBHOOK_SECRET` if completion/failure replies are required.
-5. Rotate `TOKEN_ENCRYPTION_KEY` by prepending a new valid key while retaining old keys, then remove old keys only after stored tokens have been re-encrypted or retired.
-
-Focused tests should cover the registry's blank/alias/typed-value behavior, invalid LangSmith numeric and JSON settings during lifespan startup, sandbox override precedence and Store failure fallback, model-pair normalization/inheritance, gateway precedence, and the completion webhook's missing-secret and non-public-URL cases.
+1. Configure and secure the backend values: PostgreSQL, login allowlist, GitHub/Slack secrets as needed, dashboard signing/encryption secrets, LangSmith/sandbox credentials, and model or gateway credentials.
+2. Deploy MDA separately; set its public URL in `MDA_RUNTIME_URL`, give the backend an MDA API key if it differs from `LANGSMITH_API_KEY`, and configure the same ordered `REMOTE_RUNTIME_TOKEN_SECRET` rotation set on the trust boundary.
+3. On local development, run the backend and MDA separately (`make dev` and `make dev-mda`); keep `MDA_RUNTIME_URL` at the local MDA address and configure `OPEN_SWE_BACKEND_URL` in MDA's own environment. This is MDA deployment configuration, not a backend replacement.
+4. Restart after environment changes. Exercise boot with the selected sandbox provider and PostgreSQL role; a passing health endpoint does not substitute for observing migration and MDA validation.
+5. Test registry alias/blank/type handling (`tests/utils/test_config.py`), LangSmith sandbox creation/retry/extra fields (`tests/sandbox/test_langsmith_sandbox_config.py`), and remote token rotation plus missing-MDA lifespan failure (`tests/reviewer/test_remote_runtime.py`).
 
 ## See also
 
-- [Deployment](deployment.md)
 - [Authentication and security](../concepts/auth-and-security.md)
-- [Models, profiles, and instructions](../concepts/models-profiles-instructions.md)
+- [Configuration and model resolution](../concepts/configuration-and-model-resolution.md)
 - [Sandbox providers](../integrations/sandbox-providers.md)
-- [Observability and MCP](../integrations/observability-and-mcp.md)
+- [Local development and deployment](local-development-and-deployment.md)

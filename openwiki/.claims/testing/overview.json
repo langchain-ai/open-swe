@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "pageVersion": "sha256:75920d28bad5b192afd797dfb84208215370aa54fa04f783dbddc72b010939e9",
+  "pageVersion": "sha256:0a5e9b701d700a811ed630922df19056d3676c00b1004fa3eb80433dc3c8d91d",
   "claims": [
     {
       "id": "claim_9a77e9c5301a46b8bbd02832b9de5a90",
@@ -8,7 +8,7 @@
       "evidence": [
         {
           "resource": "repo://pyproject.toml",
-          "version": "repo-file-v1:sha256:6a4ff3c5410f45c156688f8f18dee9c03925403a45b034352810673cc679ad98"
+          "version": "repo-file-v1:sha256:e0a517b466dd7d4ae3d795097759bbd8b2d46bd81c00d49a6a33d9365bb553b8"
         }
       ]
     },
@@ -18,41 +18,31 @@
       "evidence": [
         {
           "resource": "repo://pyproject.toml",
-          "version": "repo-file-v1:sha256:6a4ff3c5410f45c156688f8f18dee9c03925403a45b034352810673cc679ad98"
+          "version": "repo-file-v1:sha256:e0a517b466dd7d4ae3d795097759bbd8b2d46bd81c00d49a6a33d9365bb553b8"
         }
       ]
     },
     {
       "id": "claim_51ddbe6a89c1461d9c078e3e373030cf",
-      "statement": "Test tooling (pytest, pytest-asyncio, Ruff, ty, Pygments) is declared in the dev optional-dependency group and installed via `make install` which runs `uv sync --extra dev`.",
+      "statement": "`make install` runs `uv sync --extra dev`; the root dev extra declares ty, pytest, pytest-asyncio, pytest-xdist, and Ruff.",
       "evidence": [
         {
           "resource": "repo://Makefile",
-          "version": "repo-file-v1:sha256:1f1adc33a073a0642af282d579fc461f86853f4a522bf69d6ee4d63c35c7787d"
+          "version": "repo-file-v1:sha256:0215e98c210cf883b3d86a065779d2235b89a0cd47ef4d4ef8733f3a61621829"
         },
         {
           "resource": "repo://pyproject.toml",
-          "version": "repo-file-v1:sha256:6a4ff3c5410f45c156688f8f18dee9c03925403a45b034352810673cc679ad98"
-        }
-      ]
-    },
-    {
-      "id": "claim_eea0ef759dcc4bd6970fa63b41d2b78b",
-      "statement": "tests/conftest.py provides a fake_store fixture that routes every agent.store access to an in-memory FakeStore, which round-trips values through the real agent.store code path (model_dump/model_validate) the way production does.",
-      "evidence": [
-        {
-          "resource": "repo://tests/conftest.py",
-          "version": "repo-file-v1:sha256:e12e2fdd4702568c7428d0f1726e3a56654431d0738e495ae733a1f4a600ca94"
+          "version": "repo-file-v1:sha256:e0a517b466dd7d4ae3d795097759bbd8b2d46bd81c00d49a6a33d9365bb553b8"
         }
       ]
     },
     {
       "id": "claim_171bda1f715d4ff09eb92853149b0dfd",
-      "statement": "An autouse _reset_ttl_cache fixture clears the process-global TTL cache before and after each test so cached team settings do not leak between tests.",
+      "statement": "An autouse `_reset_ttl_cache` fixture clears both the process-global TTL cache and, when applicable, the in-process LangGraph cache before and after each test so cached settings and MCP catalogs do not leak between tests.",
       "evidence": [
         {
           "resource": "repo://tests/conftest.py",
-          "version": "repo-file-v1:sha256:e12e2fdd4702568c7428d0f1726e3a56654431d0738e495ae733a1f4a600ca94"
+          "version": "repo-file-v1:sha256:0e2822d1df28eaf8ac37bf5db5e18d420a1b5f42e454eaa500159d427a0b8df5"
         }
       ]
     },
@@ -62,21 +52,17 @@
       "evidence": [
         {
           "resource": "repo://tests/conftest.py",
-          "version": "repo-file-v1:sha256:e12e2fdd4702568c7428d0f1726e3a56654431d0738e495ae733a1f4a600ca94"
+          "version": "repo-file-v1:sha256:0e2822d1df28eaf8ac37bf5db5e18d420a1b5f42e454eaa500159d427a0b8df5"
         }
       ]
     },
     {
       "id": "claim_7e94c7f70e5e40e8aeb75ffaff2f38f7",
-      "statement": "Unit tests are run with `make test` (aliased `make tests`), which executes `uv run pytest -vvv $(TEST_FILE)` where TEST_FILE defaults to tests/; use TEST_FILE for an existing test path and invoke `uv run pytest` directly for a single `file.py::test_name` node id.",
+      "statement": "`make test` (aliased `make tests`) executes `uv run pytest -vvv $(PYTEST_ARGS) $(TEST_FILE)` when TEST_FILE is an existing file or directory; use direct `uv run pytest` for a single `file.py::test_name` node id because the Makefile checks paths.",
       "evidence": [
         {
-          "resource": "repo://AGENTS.md",
-          "version": "repo-file-v1:sha256:1d76197da0a0227d4bf93caeff444a5075a90a63c87f5019fbf89c50f164f83d"
-        },
-        {
           "resource": "repo://Makefile",
-          "version": "repo-file-v1:sha256:1f1adc33a073a0642af282d579fc461f86853f4a522bf69d6ee4d63c35c7787d"
+          "version": "repo-file-v1:sha256:0215e98c210cf883b3d86a065779d2235b89a0cd47ef4d4ef8733f3a61621829"
         }
       ]
     },
@@ -86,21 +72,21 @@
       "evidence": [
         {
           "resource": "repo://Makefile",
-          "version": "repo-file-v1:sha256:1f1adc33a073a0642af282d579fc461f86853f4a522bf69d6ee4d63c35c7787d"
+          "version": "repo-file-v1:sha256:0215e98c210cf883b3d86a065779d2235b89a0cd47ef4d4ef8733f3a61621829"
         }
       ]
     },
     {
       "id": "claim_fe7eb017df4c4e74975555cce254dd5a",
-      "statement": "Lint, format, and type checks are separate gates from tests: `make lint` runs Ruff check plus a Ruff format diff, `make format` fixes in place, and `make typecheck` runs `ty check agent tests`.",
+      "statement": "Lint, format, and type checks are separate gates: `make lint` runs Ruff check plus a Ruff format diff, `make format` fixes in place, and `make typecheck` checks `openswe` and `tests` plus sandbox scripts with Python 3.8.",
       "evidence": [
         {
           "resource": "repo://Makefile",
-          "version": "repo-file-v1:sha256:1f1adc33a073a0642af282d579fc461f86853f4a522bf69d6ee4d63c35c7787d"
+          "version": "repo-file-v1:sha256:0215e98c210cf883b3d86a065779d2235b89a0cd47ef4d4ef8733f3a61621829"
         },
         {
           "resource": "repo://pyproject.toml",
-          "version": "repo-file-v1:sha256:6a4ff3c5410f45c156688f8f18dee9c03925403a45b034352810673cc679ad98"
+          "version": "repo-file-v1:sha256:e0a517b466dd7d4ae3d795097759bbd8b2d46bd81c00d49a6a33d9365bb553b8"
         }
       ]
     },
@@ -110,15 +96,15 @@
       "evidence": [
         {
           "resource": "repo://package.json",
-          "version": "repo-file-v1:sha256:85ff550163c48dcb3e9d2ac1a9c2558cbd366fd833a1ea789c66ea62877be443"
+          "version": "repo-file-v1:sha256:448c10173e8cd0d561069c0a53fe7eadce7d9b8d42c9b1402a131764bba7dc26"
         },
         {
           "resource": "repo://tests/e2e/README.md",
-          "version": "repo-file-v1:sha256:25804f68296219bcdadd846a23ad8650eeab90d20a980a26a2cc939906fc35c0"
+          "version": "repo-file-v1:sha256:602e71c753e943bae8f58e01819c4aed240cc82c59d27c9318e278cab6b017fd"
         },
         {
           "resource": "repo://tests/e2e/package.json",
-          "version": "repo-file-v1:sha256:981b65f11401a69f73d6a16aa41f841d66e909351724e7f8235c53c6e2443117"
+          "version": "repo-file-v1:sha256:b6fcf09e4a622ea718913233d4df125b3d90cb88da99ae83975e73d37234e6af"
         }
       ]
     },
@@ -128,11 +114,11 @@
       "evidence": [
         {
           "resource": "repo://tests/e2e/README.md",
-          "version": "repo-file-v1:sha256:25804f68296219bcdadd846a23ad8650eeab90d20a980a26a2cc939906fc35c0"
+          "version": "repo-file-v1:sha256:602e71c753e943bae8f58e01819c4aed240cc82c59d27c9318e278cab6b017fd"
         },
         {
           "resource": "repo://tests/e2e/tests/full_flow.spec.ts",
-          "version": "repo-file-v1:sha256:aa6448ee98680d23e193fcf8d705ceb07e8b43564f2f4372f67741b87a7f248f"
+          "version": "repo-file-v1:sha256:04768890138d2e8eabf72bff0887b33c7a2e308be331267ddc82328b0695ac5d"
         }
       ]
     },
@@ -142,19 +128,19 @@
       "evidence": [
         {
           "resource": "repo://tests/e2e/README.md",
-          "version": "repo-file-v1:sha256:25804f68296219bcdadd846a23ad8650eeab90d20a980a26a2cc939906fc35c0"
+          "version": "repo-file-v1:sha256:602e71c753e943bae8f58e01819c4aed240cc82c59d27c9318e278cab6b017fd"
         },
         {
           "resource": "repo://tests/e2e/fake_llm.py",
-          "version": "repo-file-v1:sha256:8a386531e01339f5eabebb20046d277fa65463800b4c86156ee627064b8a7bb5"
+          "version": "repo-file-v1:sha256:1784328b7d4f73287622c10ebad47e3d825453718e0b70c9383d07cb5cce7e3e"
         },
         {
           "resource": "repo://tests/e2e/fakes.py",
-          "version": "repo-file-v1:sha256:c4b8854658a210e1bc99007fa635555ccec52327e36876782a9d2ea466ad1185"
+          "version": "repo-file-v1:sha256:8fd207549ba35e92b5940eb9bc50293d91619a59df1e0e1b2df1b5e48a68888a"
         },
         {
           "resource": "repo://tests/e2e/patches.py",
-          "version": "repo-file-v1:sha256:4435a4f3db5704112880f22751e8b6db788a4816c3ca45d10626295e6e63eb72"
+          "version": "repo-file-v1:sha256:319046c5f2b4afcfce290e5cb96742091f70d0dfee22bb031c1b7d0efc57753c"
         }
       ]
     },
@@ -164,7 +150,7 @@
       "evidence": [
         {
           "resource": "repo://tests/e2e/README.md",
-          "version": "repo-file-v1:sha256:25804f68296219bcdadd846a23ad8650eeab90d20a980a26a2cc939906fc35c0"
+          "version": "repo-file-v1:sha256:602e71c753e943bae8f58e01819c4aed240cc82c59d27c9318e278cab6b017fd"
         }
       ]
     },
@@ -174,11 +160,11 @@
       "evidence": [
         {
           "resource": "repo://tests/e2e/README.md",
-          "version": "repo-file-v1:sha256:25804f68296219bcdadd846a23ad8650eeab90d20a980a26a2cc939906fc35c0"
+          "version": "repo-file-v1:sha256:602e71c753e943bae8f58e01819c4aed240cc82c59d27c9318e278cab6b017fd"
         },
         {
           "resource": "repo://tests/e2e/playwright.config.ts",
-          "version": "repo-file-v1:sha256:a141ed1837003e8633b25762bd1bd59c6a006d2046ac3de40804a0526b7e0a4c"
+          "version": "repo-file-v1:sha256:99c357a5d6acd3764068a44f082d03ed4e39a4238a0717fce6c453baa0f01ee7"
         }
       ]
     },
@@ -188,19 +174,19 @@
       "evidence": [
         {
           "resource": "repo://desktop/package.json",
-          "version": "repo-file-v1:sha256:9e32829ce8dbe938b0183b27f62da576f1a6103de152a69997ff1f87027a9c38"
+          "version": "repo-file-v1:sha256:db3a8b533a86509695b1c55fc8961e975d09eace995b188f4d137b5a41ba9827"
         },
         {
           "resource": "repo://package.json",
-          "version": "repo-file-v1:sha256:85ff550163c48dcb3e9d2ac1a9c2558cbd366fd833a1ea789c66ea62877be443"
+          "version": "repo-file-v1:sha256:448c10173e8cd0d561069c0a53fe7eadce7d9b8d42c9b1402a131764bba7dc26"
         },
         {
           "resource": "repo://turbo.json",
-          "version": "repo-file-v1:sha256:2baddedda518d07ffac1f38d843cdb9bf2cb068b0cd2a241a571a718f8462878"
+          "version": "repo-file-v1:sha256:2f24f96b09df8df4352f90dbaa8726133d11c02a0e41357b38ed9f2a522986bc"
         },
         {
           "resource": "repo://ui/package.json",
-          "version": "repo-file-v1:sha256:255dd35a1c97c11cb6df943917f4253f40ebb564e1bd7158e71195b45676b082"
+          "version": "repo-file-v1:sha256:d70d397baf4e8678771978b48b4b0914f6756140c2d59fdea21dea4892451126"
         }
       ]
     },
@@ -210,7 +196,7 @@
       "evidence": [
         {
           "resource": "repo://tests/e2e/playwright.config.ts",
-          "version": "repo-file-v1:sha256:a141ed1837003e8633b25762bd1bd59c6a006d2046ac3de40804a0526b7e0a4c"
+          "version": "repo-file-v1:sha256:99c357a5d6acd3764068a44f082d03ed4e39a4238a0717fce6c453baa0f01ee7"
         },
         {
           "resource": "repo://tests/e2e/playwright.desktop.config.ts",
@@ -224,7 +210,7 @@
       "evidence": [
         {
           "resource": "repo://tests/e2e/tests/desktop.spec.ts",
-          "version": "repo-file-v1:sha256:b88e21c2a84ae15f268e2763f93ec98e4e5683e90ddc54c2e18f3106b95995e4"
+          "version": "repo-file-v1:sha256:910bffce089c558c53d95514564681b3ae6cb8e863687b84a328b3ac53698a89"
         }
       ]
     },
@@ -244,7 +230,7 @@
       "evidence": [
         {
           "resource": "repo://tests/sandbox/test_sandbox_state.py",
-          "version": "repo-file-v1:sha256:704700326ac575264e748a198dc1aef627d6cfc9fbe3e51d0728548a44e1e46e"
+          "version": "repo-file-v1:sha256:62becfcb94bcb96d21b056badfe507c6403f45b455d47e7a10c80dbe45874001"
         }
       ]
     },
@@ -254,7 +240,7 @@
       "evidence": [
         {
           "resource": "repo://tests/e2e/tests/desktop.spec.ts",
-          "version": "repo-file-v1:sha256:b88e21c2a84ae15f268e2763f93ec98e4e5683e90ddc54c2e18f3106b95995e4"
+          "version": "repo-file-v1:sha256:910bffce089c558c53d95514564681b3ae6cb8e863687b84a328b3ac53698a89"
         }
       ]
     },
@@ -264,11 +250,11 @@
       "evidence": [
         {
           "resource": "repo://tests/e2e/README.md",
-          "version": "repo-file-v1:sha256:25804f68296219bcdadd846a23ad8650eeab90d20a980a26a2cc939906fc35c0"
+          "version": "repo-file-v1:sha256:602e71c753e943bae8f58e01819c4aed240cc82c59d27c9318e278cab6b017fd"
         },
         {
           "resource": "repo://tests/e2e/harness.py",
-          "version": "repo-file-v1:sha256:32e58b95ad959129b17559790d370ed5903c54bd4fe2717df949ac1d113d2e05"
+          "version": "repo-file-v1:sha256:eb40d3d5b0d80dfca6b934bd070cb07073ac9cac77d545a045b28fc2afcc4557"
         }
       ]
     },
@@ -278,7 +264,7 @@
       "evidence": [
         {
           "resource": "repo://tests/agent/test_agent_assembly_context.py",
-          "version": "repo-file-v1:sha256:a99b1f9f5092164c751fa8d1cf746f30dd34ef569416761073f724d74d87c4df"
+          "version": "repo-file-v1:sha256:4f7e29d1183cb25a0c2f64eb0f1b369f3a21628b7ef83e5142b5c8c2e7978cee"
         }
       ]
     },
@@ -288,17 +274,7 @@
       "evidence": [
         {
           "resource": "repo://tests/conftest.py",
-          "version": "repo-file-v1:sha256:e12e2fdd4702568c7428d0f1726e3a56654431d0738e495ae733a1f4a600ca94"
-        }
-      ]
-    },
-    {
-      "id": "claim_042824ee41904e208b9cfaf17c6bd077",
-      "statement": "Reviewer outcome tests map resolved and dismissed finding states and GitHub or Slack feedback to true- or false-positive outcomes; outcome storage is a no-op without the required credentials or repository configuration.",
-      "evidence": [
-        {
-          "resource": "repo://tests/reviewer/test_reviewer_outcomes.py",
-          "version": "repo-file-v1:sha256:31422a5720b56432896df04361eb9b2b47b879ac1fe48dd302ff31d54f85b1ca"
+          "version": "repo-file-v1:sha256:0e2822d1df28eaf8ac37bf5db5e18d420a1b5f42e454eaa500159d427a0b8df5"
         }
       ]
     },
@@ -308,13 +284,105 @@
       "evidence": [
         {
           "resource": "repo://tests/webhooks/test_completion_webhook.py",
-          "version": "repo-file-v1:sha256:70779e22596916b0bfbd9b3415925b57bb2060c9825030ad46e3bb46d5c5bee4"
+          "version": "repo-file-v1:sha256:e30156bbe078cc7820d57740b195c74a53fa7ddbca5f390cc4ae9e2f713723ab"
+        }
+      ]
+    },
+    {
+      "id": "claim_64a6ac0874e64ff1803fccee83c2d80b",
+      "statement": "The root pytest conftest autouse offline guard refuses HTTP requests to non-loopback hosts and to the configured LangGraph server, while allowing mock transports, ASGI transport, and local fakes.",
+      "evidence": [
+        {
+          "resource": "repo://tests/conftest.py",
+          "version": "repo-file-v1:sha256:0e2822d1df28eaf8ac37bf5db5e18d420a1b5f42e454eaa500159d427a0b8df5"
+        }
+      ]
+    },
+    {
+      "id": "claim_9960952772434e4cbd11b2664c1c2464",
+      "statement": "Database regressions opt into an isolated migrated PostgreSQL schema through `registry_db`, which skips unless `TEST_ANALYTICS_POSTGRES_URI` is configured; `registry_db_if_available` instead exposes the unconfigured path when no URI exists.",
+      "evidence": [
+        {
+          "resource": "repo://tests/conftest.py",
+          "version": "repo-file-v1:sha256:0e2822d1df28eaf8ac37bf5db5e18d420a1b5f42e454eaa500159d427a0b8df5"
+        }
+      ]
+    },
+    {
+      "id": "claim_6b9cd773e71542849c01317235e985ee",
+      "statement": "`mda/` is a separately tested and type-checked project whose tests must not import `openswe`; backend and MDA tests should validate the JSON exchanged across hooks from their respective environments.",
+      "evidence": [
+        {
+          "resource": "repo://AGENTS.md",
+          "version": "repo-file-v1:sha256:3c1f51fe03844fd0ab37f78e3ea0b6b9265c5193e91f63266c99f06b00d9ed2e"
+        },
+        {
+          "resource": "repo://Makefile",
+          "version": "repo-file-v1:sha256:0215e98c210cf883b3d86a065779d2235b89a0cd47ef4d4ef8733f3a61621829"
+        },
+        {
+          "resource": "repo://mda/pyproject.toml",
+          "version": "repo-file-v1:sha256:e9c708ddd9af8f0ea2998a520e00e9f356adcdb43b410d87beef04355fb98732"
+        }
+      ]
+    },
+    {
+      "id": "claim_6a00cefc761040b08bd97899fa4612c8",
+      "statement": "The authenticated remote-runtime hook endpoint verifies a bearer run token, selects the graph and run configuration from that token rather than the request body, and restricts worker grants to catalog access and run-token adoption.",
+      "evidence": [
+        {
+          "resource": "repo://openswe/remote_runtime/server.py",
+          "version": "repo-file-v1:sha256:c1e83984e363eac7b157ff1186d3dd00bfeb07c44f858f7da70cf813a44e3821"
+        }
+      ]
+    },
+    {
+      "id": "claim_e0246f57551042659512df28a408e409",
+      "statement": "Managed Deep Agents owns the model loop, checkpoints, and sandbox-resident file/shell tools; the backend graph provides catalog, phase, and tool-call hook behavior, with known box-tool checks applied in MDA and unrecognized tool-call middleware routed back to the backend.",
+      "evidence": [
+        {
+          "resource": "repo://AGENTS.md",
+          "version": "repo-file-v1:sha256:3c1f51fe03844fd0ab37f78e3ea0b6b9265c5193e91f63266c99f06b00d9ed2e"
+        },
+        {
+          "resource": "repo://openswe/remote_runtime/graph.py",
+          "version": "repo-file-v1:sha256:d412d3ea249e663480c24f386637126ed77877e2e7afef7961ccad00187a04c0"
+        }
+      ]
+    },
+    {
+      "id": "claim_b42edef954ca4976bfdb8a0d11ad12bf",
+      "statement": "MDA backend-call tests distinguish retryable tool calls during backend rollout from phase gateway failures that must not replay, and protect tool routing, worker grants, and hook failure propagation.",
+      "evidence": [
+        {
+          "resource": "repo://mda/tests/test_backend_calls.py",
+          "version": "repo-file-v1:sha256:7c2a28419a2fdf37cdb71fc132374ce3c8355b8e95ecdf60f7dc7426e66ac7b9"
+        }
+      ]
+    },
+    {
+      "id": "claim_28a681ecd52449d28f3cd87c14f1c8d8",
+      "statement": "MDA model-call tests protect replay normalization for provider-specific message formats, timeout behavior, and selecting a vision model for image-bearing requests.",
+      "evidence": [
+        {
+          "resource": "repo://mda/tests/test_model_calls.py",
+          "version": "repo-file-v1:sha256:83166263ee535ead6a49fde9953bb28356b97bdf7567c7a9f45f877a041713ed"
+        }
+      ]
+    },
+    {
+      "id": "claim_67876f4244a94943be14b7282f05fae7",
+      "statement": "`make mda-test` runs pytest from MDA's locked test environment and `make mda-typecheck` syncs that environment before running `ty`, keeping runtime validation independent from the backend environment.",
+      "evidence": [
+        {
+          "resource": "repo://Makefile",
+          "version": "repo-file-v1:sha256:0215e98c210cf883b3d86a065779d2235b89a0cd47ef4d4ef8733f3a61621829"
         }
       ]
     }
   ],
   "verification": {
     "by": "openwiki/0.4.2",
-    "at": "2026-09-08T08:15:30.533Z"
+    "at": "2026-10-23T08:13:55.386Z"
   }
 }

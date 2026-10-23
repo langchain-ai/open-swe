@@ -1,0 +1,276 @@
+{
+  "schemaVersion": 1,
+  "pageVersion": "sha256:8be9dfd978607e10869f9a10c51a6c26823fcd88ad1e39c3d14c26ec0958edf3",
+  "claims": [
+    {
+      "id": "claim_53cbdfa619a14f59a7e6d7c87fa2c7af",
+      "statement": "A workspace is a PostgreSQL-backed execution-environment record whose repository and Slack-channel bindings are stored separately; database keys ensure that each bound repository and channel has exactly one workspace owner.",
+      "evidence": [
+        {
+          "resource": "repo://openswe/workspaces/rows.py#L74-L94",
+          "version": "repo-lines-v1:sha256:a1c261a7672e973aabca0d09c8cff409d37ec44ded0e625ad270e03ffebb1d13:eyJzZWxlY3RlZExpbmVDb3VudCI6MjEsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6IjA5MmY0Y2MxMTkyNGUxY2Y0ZWM3MTgwMGYyYjU4MmI2ZmZmZmEzNDdlMmFlN2M4ZDgwY2M4YzE2YmExMmNmNzAiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6IjI4NDc5MTg2YTA2ODA3NWFiN2ZmNGZhZDVlNzhhYzNmYjRmMmQ4MDAxNTliODI2MmRlODNhNzIxZTAyYmY4MmMiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6ImViNmJkZTk2Yjk5NzI1MmM2NTI0Y2FjMmZmMWQ5YzFjMjU5OTBmNzMwMzY2MDdiY2E0NzNhNGFlMjkwNzZlNzIiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6ImQ3OTIzN2M5YzRhMTkyZDhlNmRlYWQ0NWI2N2VlZTFjNTYwNTExMmZjNjQyOGRjYTM5Y2U1YjYyNGFmNGEwY2IifQ"
+        },
+        {
+          "resource": "repo://openswe/workspaces/store.py#L714-L723",
+          "version": "repo-lines-v1:sha256:e4ea0dea3a315b2e50a6b8f3ec8ecafd8a1149f758ca94f942d1cd982f2a8a56:eyJzZWxlY3RlZExpbmVDb3VudCI6MTAsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6IjlkZjEzMTNhOWVhNmU2OTA3ZmM4OWM4YTU0MDk4ZjU1YjcwNGQwMmRiNGFmYmM3YjdjODJhMWNkZjliNTcyY2QiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6ImE2YTcxNTI1NzJlZTg0ZjEwOTA2Yzc0YjlmMmE5MjQzNGRkYWIwZTNjNDI4MTNiMDRlNTk3ZWZjZWM5NTFiMjYiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6ImMyMDY4MjMxMWU1YzBkOGUxZGRkNmI1MmY1ZTQxNmE4NmU2YTBiM2RhNDU4MzgxNGVlMzdlZTE4ZjJmYzEzMzIiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6ImY3YTUwMTViYWY0NjM0YzQwMjE0NTRhNjk0MThkNTA3NTcyZGQyYzYzNjYxOTExZjZlODgyNDFhN2Q3ODdmZDEifQ"
+        },
+        {
+          "resource": "repo://tests/workspaces/test_migration.py#L100-L123",
+          "version": "repo-lines-v1:sha256:bad5f075fa821ad7c5fb071d708a5f4a4336b742927e464f7de655273673057d:eyJzZWxlY3RlZExpbmVDb3VudCI6MjQsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6IjNiNzY2MTFiOGI2NmZlMGFlMWE2NTRhMTllMDFmMWRmMjFjMGNlNWVkNjIxZjk1MjBkN2RhNDZmZTYxMGY4NTkiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6IjU1MDMyZTk2NGQwOTMyMzUxZTVkMTg1MjY5MjgxYjE3MWEzYTA5YjA4YjI4NmU2NjFlYTQ3MDMyM2M4MmViNGQiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6ImZkY2FmMzQzNGM0MzFjYzhjNzg5ZDA5MDRjZjYyYTkzYTJlMDIzNTJjMTM3ZWIzZWFhY2RkMWQxZmQ2NTRmYTgiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjowLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6ImUzYjBjNDQyOThmYzFjMTQ5YWZiZjRjODk5NmZiOTI0MjdhZTQxZTQ2NDliOTM0Y2E0OTU5OTFiNzg1MmI4NTUifQ"
+        },
+        {
+          "resource": "repo://tests/workspaces/test_migration.py#L47-L71",
+          "version": "repo-lines-v1:sha256:ff373181f2afb0c83d31148d5e99cd2c72cee0d9e589239f1030cfc582f6602a:eyJzZWxlY3RlZExpbmVDb3VudCI6MjUsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6ImQ5MWFmZjA1OWQ5MjM4NjIyMGMzOTljZmExOWFiMDdiN2U2NmNmZTA5MTM0ZDk3YmVmMTMxYjA4NTI3YmQ1MDAiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6IjU1MDMyZTk2NGQwOTMyMzUxZTVkMTg1MjY5MjgxYjE3MWEzYTA5YjA4YjI4NmU2NjFlYTQ3MDMyM2M4MmViNGQiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6ImMwNThkNzUwYzE1N2RhZWRlMzUyZTUyMmZkYmVjMmJlYzg1ZDg0NDU3MDM0ZTZlZDBjYThlYzA4YzFlZGJiZTIiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6IjU2ODBiMGYyOTI4YWMwZGJmM2RkNGEzMWQ1YzE2ZTkxOThhMjlhNjA4NmQzOWNmYjU3YzIwZjYwYmUzM2E2NWQifQ"
+        }
+      ]
+    },
+    {
+      "id": "claim_7e9257ff8741436781391d2c9ec395a9",
+      "statement": "Workspace definitions include prompts, sandbox scripts and create parameters, resource limits, repository and Slack bindings, snapshot metadata, and refresh state; persisted sandbox create parameters are validated as bounded JSON and must not contain secrets or authentication credentials.",
+      "evidence": [
+        {
+          "resource": "repo://openswe/workspaces/store.py#L407-L466",
+          "version": "repo-lines-v1:sha256:67bc45eefac64ff79afbb34ffc8f63585b20599bc0c8f94d741bade6a28f5bfc:eyJzZWxlY3RlZExpbmVDb3VudCI6NjAsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6ImVlNjE2ZTQzZWY1YThkYTUzMjM4ZDgwYjA5NTk2MzdjZDk5YzY1M2E3MzU2YmM5NjdkYjFlMmYzNjk1Zjc1ZDUiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6ImEyYWIwOTBiY2QxNjIwZmE2MmVhZWUxNTdhNzRmY2E2MzVhYTI5ZTEyY2JmZmQ2MThiNTc5MmQ4N2JjMDNhM2YiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6ImU3NDA0NTZkNjBkMzRmMzVjOGYwYjYyODM5ZmU1NzJiY2Y1ODFmNTAyNmMyOWQyZDY2OGZjNmNjOThiMTRmNGMiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6IjU1MGI0NzBjMWRlNDFkMGY2OTNjMDNhOWQzZjRhYWU0ZTU4NWFhNDYyNjRjMjY4YTM2MTQ5Y2E5NTg3YzdjZTQifQ"
+        },
+        {
+          "resource": "repo://openswe/workspaces/store.py#L555-L686",
+          "version": "repo-lines-v1:sha256:87b8ec9d5075fcc3a94b6aca5164f66a22fb4c9416a70cbd464546341fe0cf1d:eyJzZWxlY3RlZExpbmVDb3VudCI6MTMyLCJmaXJzdFNlbGVjdGVkTGluZUhhc2giOiIxYjI0NjdlMTA0YzlmNDUwMTY2YWZlNGZkNWJhODc3YmY0NmMxOTFiN2FjY2RiOWRiYjkxMjdhNDQ2MzI1ODllIiwibGFzdFNlbGVjdGVkTGluZUhhc2giOiI0YmY1YzllMmE3NmQ2YzJhNmEyY2UwMmExYjlmYzkwMWEwYjUwMjUwYTI2YzBlZGY4YTExMzY1ZDNjMjM1NDUxIiwicHJlY2VkaW5nQ29udGV4dExpbmVDb3VudCI6MywicHJlY2VkaW5nQ29udGV4dEhhc2giOiI0MjAyYmNhYjc1YzJiZjZmODY2NWE1Yzc3MzYxYWViM2Q5YTVmYzc2YWY5ZjM3NWE1NDg2MDM1MWU2ZGY4MTM4IiwiZm9sbG93aW5nQ29udGV4dExpbmVDb3VudCI6MywiZm9sbG93aW5nQ29udGV4dEhhc2giOiJjYjhlMGI3N2IzMmJkNjhjMjc2Y2I2NmFhNDNjOTZmYmVhMWYzYWUyOTNmMzkzODgzYjg1MGY5YWI3MWYzZWRlIn0"
+        },
+        {
+          "resource": "repo://tests/workspaces/test_store.py#L24-L54",
+          "version": "repo-lines-v1:sha256:25f6630d634699a4e5a25dc72dd465ff024474039085dfd956c3778a1c37151e:eyJzZWxlY3RlZExpbmVDb3VudCI6MzEsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6ImFmMzQ1ODNhNTk4NzY3YmY1NmFlZmViNjVlMjAzM2ExNjUxY2M0YzhkN2U2ZjBhZjNlNWNmZDMyOTNmOTMzYjMiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6IjU5MDlhNTNhNjE4ZDAyOGUxZDMwMDBjMGE3YWJjZWVjYmU1ZmIzN2Y0ZTUxMWVmZTQ2NjQzZmFkNmU2Njg3MmYiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6IjFhMWI0YWUzMmUzMzlkOTBlMWRjMTVjNDRlMzczZGI4Y2RkM2Q5OWY0ZWJhOGYxMzQyYTFiMTRlY2YyMmI4YjMiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6IjNkMmIzOTE2MWE1ZWI4MmQ5ZjE5MDAxNTQ3YTc3OTQ1NzI4NTIzYzNlZmRmMjk3NTNmYWYyNzdiZDkxODcxN2EifQ"
+        }
+      ]
+    },
+    {
+      "id": "claim_4f51182f5b1945ff8284b2e308491802",
+      "statement": "Non-default workspaces can inherit the default workspace sandbox, while the default workspace cannot inherit from itself and cannot be deleted.",
+      "evidence": [
+        {
+          "resource": "repo://openswe/sandboxes/lifecycle.py#L79-L97",
+          "version": "repo-lines-v1:sha256:0823621608bd464421e5b7883efe7fa15fab0a4dbd48da6a0cd4cfbac71db6db:eyJzZWxlY3RlZExpbmVDb3VudCI6MTksImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6ImYxMzAwYTE0OWRiOGVhMDY0MzUyMGM3Zjc0Mjk2MWU4M2U1OTk4ODAzOWE2ZjM2MTY5YTY4ODc5OTE5OGMyYjEiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6IjU5MDlhNTNhNjE4ZDAyOGUxZDMwMDBjMGE3YWJjZWVjYmU1ZmIzN2Y0ZTUxMWVmZTQ2NjQzZmFkNmU2Njg3MmYiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6ImViY2RkYjM1NmE1NjZhNDg1NjVmN2M0YjdhZTVmMDQ4NWI0NzFjY2Y5YjYyM2ZlYzYyMzk3NmUwZjlhYWIwNjQiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6IjZkZTUwNmQ3Y2I5ZmQ2YmFiNmVlODBjM2RlZmE0MjkzOWFmNDY1ZTI1MjJiNjc2ZjNmMjg1MDQyYzE3ZGUyMGIifQ"
+        },
+        {
+          "resource": "repo://openswe/workspaces/store.py#L1130-L1152",
+          "version": "repo-lines-v1:sha256:6ed8fad00750934923748b8162d91073a65cd1e939ce005ae00b88ddc2af6276:eyJzZWxlY3RlZExpbmVDb3VudCI6MjMsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6IjUxYTk1N2UyYmM3YTdkMmQxNzgwNzcyYmNkNzA4ZjAzZDFjN2RlYzA4ODg1ZDNiMzdjNThlMzdlZTE0NmJhMjMiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6ImQxMDQyNGJkZTNhZDkxZmY4ZGFlYTgxYTRhYTUwNGIyZmU5ZDM3OTIzZjU5Mzc5MTUyZDU0M2Q3YjRkZWFmNzEiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6ImJmNDFmZTljODI1M2U5ODU0YjZjMjc3MWUxZjllZDMwZjJkNTg4YTliZmMwYWNhYWE0NGYxYTAxYWUyMWYxMmYiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6ImJlNGFhYjdkMTFkN2RhZjk3M2ExN2Q2YTk0OGExZGI3ZTdlYjVjYjZmNTVjZjBlNjk3NjkwMDFjYmIwOGEyYmMifQ"
+        },
+        {
+          "resource": "repo://openswe/workspaces/store.py#L1459-L1464",
+          "version": "repo-lines-v1:sha256:471b3e81d52319bb9e340e63b0bfa3c3c41e5fa5e7cb675d13b61a34a3c89ad2:eyJzZWxlY3RlZExpbmVDb3VudCI6NiwiZmlyc3RTZWxlY3RlZExpbmVIYXNoIjoiMjM0OWI5ZDcwYjFmZmExOGU5ZjZjNGUyY2VjYzBkOWZjOGY3MzU1NjY3YWYwNGYwMTkxNzQ1MTdlMjUyMmFlZiIsImxhc3RTZWxlY3RlZExpbmVIYXNoIjoiMmI1NWVlNDI2ODU3NzgwN2I5YzVlNTgwM2U1MGE0NzZmYmI1MTY0MjJmZTFiM2I4YTVhODkzNGZhNTM0MzJkMyIsInByZWNlZGluZ0NvbnRleHRMaW5lQ291bnQiOjMsInByZWNlZGluZ0NvbnRleHRIYXNoIjoiNWVhYWE5MTNjODExOTljNWUyODhkYzViN2NkZjhhZDIyNTFkMTVmOGM0ZGJlYmZhNTFmNjFlY2U3NjE0N2QxYyIsImZvbGxvd2luZ0NvbnRleHRMaW5lQ291bnQiOjMsImZvbGxvd2luZ0NvbnRleHRIYXNoIjoiZDhmOWRkYzIwNDJkMGUzMzQ0ZDI2MmRkM2RiZjRkNWQzZDQ0ZmYzNGExOTQ4Y2NiMTZiOGI2NmJiYzY1ZTBiMSJ9"
+        },
+        {
+          "resource": "repo://openswe/workspaces/store.py#L614-L638",
+          "version": "repo-lines-v1:sha256:44c44a2c4afcb8626349d632a246645407937470abfa2ad24e176cc035a0434e:eyJzZWxlY3RlZExpbmVDb3VudCI6MjUsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6IjgyMGI0NTNmNWUwYzkyZDVmNmMyNTFhNWVhMTk2MGQ3MmYzYmQwNzk1NmFlODU3ZGEyMGUzMWE4OGM1NTk2OWYiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6IjU5MDlhNTNhNjE4ZDAyOGUxZDMwMDBjMGE3YWJjZWVjYmU1ZmIzN2Y0ZTUxMWVmZTQ2NjQzZmFkNmU2Njg3MmYiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6ImQ4ODAyNDk4ZTMxMzJmZTIwOGQ2MDRiNzljM2ZiZDVlNzk2ZjE4NzViNTc5YzY3MGM4MjgwODg0NDM1YTJlOGUiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6ImVkOGEwZjM3MTMyODE2OTAyM2FiMDkwMTgzYzg4ZWVkMmQyYzA5ZWJmZTU0YjZjODc3NGI0ODY0ZTZkZWYwNjUifQ"
+        }
+      ]
+    },
+    {
+      "id": "claim_a0c76aa98074460ab683ba4403ce1377",
+      "statement": "Workspace resolution is centralized and uses the first applicable source in this order: recorded thread workspace, valid explicit tag, bound Slack channel, repository owner, valid user default, then the instance default.",
+      "evidence": [
+        {
+          "resource": "repo://openswe/workspaces/routing.py#L141-L190",
+          "version": "repo-lines-v1:sha256:f6e96cc929973a1bc31fc0dfd421254aee3b69b232792b622cb556a037f27496:eyJzZWxlY3RlZExpbmVDb3VudCI6NTAsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6IjQwMmQ0YjdjOWJhZTg2ODhmZWMxYWFiN2Y3YTBhNzBiOWVlMjRjYzUyODE0NDVhYzVkYzZhMmM1NzQyMTU1ZjMiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6IjVlZGVkMDJkYjAzM2IxM2Y5ODgzZGE4ODcwYjQ2ZTE3MGFkNzA2MjMxMDY4OGVlMjY3ODllZWQxNDdlODZkYzAiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6ImMwNTMwNGI3ZTFhYTI4NGE5NTI4NDU1MzJkNDExNjk3MjRjOTBkNWEzNWViZDZlNWM3ODE5Mzk0MmViNWE2NjYiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjowLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6ImUzYjBjNDQyOThmYzFjMTQ5YWZiZjRjODk5NmZiOTI0MjdhZTQxZTQ2NDliOTM0Y2E0OTU5OTFiNzg1MmI4NTUifQ"
+        },
+        {
+          "resource": "repo://tests/workspaces/test_routing.py#L31-L78",
+          "version": "repo-lines-v1:sha256:aec39d55faf3cc1a0281aae2c4fb9a460b50a906b57c4cd874b46cfec48897a8:eyJzZWxlY3RlZExpbmVDb3VudCI6NDgsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6IjJiMzcxNGRiY2U0YmRiMDhmMmNiZGVhNTZhZjk5MjUxMWM3NGYwOTQ1MjljNjQ0MmZlOWJhZmZmN2U3NDQyZTEiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6ImQ4ODEyZDVlOGNkYzVlODVjMjRmOGQxOWQxOTg2ZDc4MWVmM2E3ODMwOWY2MWQ4NDFkODJiYjY3ZDQzYjZhM2IiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6IjhjYzRhN2QxY2M3OTZhYmEzZTQ2NzIzMzI3ZjUxN2U5ZjgxMTk4MmQyNTBmMDcwMjk4NmU0YjU3NjRhZDk1ODkiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6IjEyNjcxMTZhYzE1MzA0OTRiYjE5N2IxMTA2ZThjYTlkMWNiYjYyNjA3MjY3MGM1NDUxYTcyZjM5MTY3MzZlNzcifQ"
+        }
+      ]
+    },
+    {
+      "id": "claim_d06d23049edb494bbf5cae023488081a",
+      "statement": "A Slack-channel binding outranks repository ownership during resolution so messages in a workspace channel remain in that workspace even when they reference a repository bound to another workspace.",
+      "evidence": [
+        {
+          "resource": "repo://openswe/slack/ask.py#L235-L255",
+          "version": "repo-lines-v1:sha256:e44caaca5ae1b4afd5f7fcc994258eae4c5ffb40101a76d57619a82514300dfe:eyJzZWxlY3RlZExpbmVDb3VudCI6MjEsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6Ijk4YjE5ZGZjOWE1NTJlNjdmOTYzZjUyYjA4MzcyNWY5ZDNmZmQ5MDUzYWY4MWM0NWE1NzI3ZmVlNzExNjdlYmQiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6ImRjYmI1ODAwYWY1YjViZjE3OWExNGUwYzE1ZjUxYjI1NDY2NzVlZjhhYzRmMjZkZDRiZjQxMjVhOWUxZGRhZGIiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6IjI0OTdlNWNkMmZlYTkwMWIwZTdiNDYxMTVjOGRlMDhmODIxNTYzZDA4YzFhMGQ1OTBkNzUyZDg2MWIwZTU1M2EiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6IjljZmExNWE2NDYzNDY2OGE1Mzg0YTZlMmM5YTk4NWE5ODM0NGI1ZTQwNmE4NzNmZjgwOTdhNDk4NDdmN2M3NmUifQ"
+        },
+        {
+          "resource": "repo://openswe/workspaces/routing.py#L155-L162",
+          "version": "repo-lines-v1:sha256:0bca2138835aa2f90ef703df2bfa265b30f0ec3c11a7242fcefe74b187d09943:eyJzZWxlY3RlZExpbmVDb3VudCI6OCwiZmlyc3RTZWxlY3RlZExpbmVIYXNoIjoiOWU0NWI3YTQzNjNmNWNjNTMwZDdjYzhhYWYzMjZhNGIxOGQxYjc0NmU0YzEyZDZlMzA2OGQzYjVjOTE3MzljMSIsImxhc3RTZWxlY3RlZExpbmVIYXNoIjoiYWZhYzExOTE1M2E1NDQwMGJhYjdmYTJmNzY5Njc4N2FhNTNiZjhiYTdmMzk3ZWYyNDM3MGQyMjU5MTZiZjRiNCIsInByZWNlZGluZ0NvbnRleHRMaW5lQ291bnQiOjMsInByZWNlZGluZ0NvbnRleHRIYXNoIjoiY2IyZmQxOTkwY2IzNTFmMmIzOGI0MzI0MTViOTgxNjVhOTlkZWUwMzM4ZjYwYWVjOGY3ZDNkMDE4MDE5YmVkNCIsImZvbGxvd2luZ0NvbnRleHRMaW5lQ291bnQiOjMsImZvbGxvd2luZ0NvbnRleHRIYXNoIjoiOTJiNjUzYjZjYmZkOTZhYzY4YmU2MjhiMzVmYjE2MzEwNWRkYTkzZjFiYTY4ZGRjNDI4YmFhY2E1MzFjMWRkZCJ9"
+        },
+        {
+          "resource": "repo://tests/workspaces/test_routing.py#L58-L70",
+          "version": "repo-lines-v1:sha256:d8b06def8406fa903c1cde5f0d2ee793822670dfbf887082e02bf36e2bf6d09d:eyJzZWxlY3RlZExpbmVDb3VudCI6MTMsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6ImQxNDJlODRmYWRmYzVkZDEwNDVjZDMyZWFhMmYzMWYzZWRkOTE3OTM3NzM3ZTdlNjQ4NTliNzIyYzc5NmM1N2QiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6IjMwYzFmMTg4ZjE0MmVkN2E4MjQ2ODBiMjA3MTcyYzU1MTliYzYxNGE0OGZkYTdjZjE2N2VkYjhkZGY3OTk1NmMiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6IjhjYzRhN2QxY2M3OTZhYmEzZTQ2NzIzMzI3ZjUxN2U5ZjgxMTk4MmQyNTBmMDcwMjk4NmU0YjU3NjRhZDk1ODkiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6ImRjY2FmNDY4YTg0ZjRiODRlMTI0YTI5MzY5NzNjNDRmOTUxNDI2MTBlNjRkN2E5MWNkM2MzNDMwM2E2YzM4M2IifQ"
+        }
+      ]
+    },
+    {
+      "id": "claim_b722a77aff8c46f3b241474307fc1276",
+      "statement": "For GitHub admission, an owned repository is routable and an unowned repository is accepted or ignored according to OPEN_SWE_UNASSIGNED_REPO_WORKSPACE; unreadable ownership propagates as an error so the webhook route responds 503 for GitHub retry rather than dropping a possibly owned delivery.",
+      "evidence": [
+        {
+          "resource": "repo://openswe/github/routes.py#L82-L103",
+          "version": "repo-lines-v1:sha256:e1d758a92f5d1ec691ba772074ba5cc071e7841790d7c9b3ca84d3c97bb579b9:eyJzZWxlY3RlZExpbmVDb3VudCI6MjIsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6ImU5NmY0OGFmYzg2ZTI4NjdiMTRlNjE4NmM0ZWRiODFkM2ViNGUyZDczNWFhZThkZTUxZDA4YjNiOTY4NDJiMTAiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6IjE3ZjNiMTc5OGFhZDUzZjA5MjRkNDBmNGUxYWFkNzFhMDJlYTVhMzE4Nzc0ZDZiOGY2ODM2NGZkOWMxZDllODgiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6IjA3NWIxYjQxNjJjMzYwZDg3MWYyN2RmMWZkZjhhYjAyZjM2NDE0MzI1NzRhZjZiZTg4Y2NiZmJmMGNlODRkYjgiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6IjNhMDQwNTAxMzRmNTlmOGY3OGU1NTc3ZjNkNTc1YjM1NjVkMDVkNzcyMzFhNGIzYTQ1NTEwNjdkM2E5OWIxZTUifQ"
+        },
+        {
+          "resource": "repo://openswe/workspaces/routing.py#L124-L138",
+          "version": "repo-lines-v1:sha256:6096498199c3ec671f6c799e92da2a4591f6644869d24ca1c15040db64113b17:eyJzZWxlY3RlZExpbmVDb3VudCI6MTUsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6ImNjOTQ3MjExZmFjYzRlNmEzMDkyYTQ2NzgyNTU5NzllYWRlZDg5NGI4NGI5YTk0NmU1MTc4NTkxOWVhNGZiYWIiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6IjM3YmY2MDFjYTU1YWFkMmM3NTU1NmM3MTZjMmU2ZjMwZGUwZjAzODgxZmI2YTFlNWQxYmNmZmY1OGZhZGFlNWEiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6ImY5OWVmZWRmZDJkOTcwNmQ4OTFjN2JhOTgzZTdmODRlMDVhZDBlMDE5MWMxMzI3OThiZTVlM2MxY2M1MzA0MjYiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6IjQ3NDdkZjdjNDAwMDk2NjI5ZDhiODRmYWUwNDdkOGIxM2FhYzZhYWNjNTM1ZTVmMGI3OWYxMzdjNWVhNjVkMGYifQ"
+        },
+        {
+          "resource": "repo://tests/workspaces/test_routing.py#L81-L114",
+          "version": "repo-lines-v1:sha256:157f1b664d9b48825acb7881f3bd24b57d3c287e5cb3a3abbf114999efa58ca5:eyJzZWxlY3RlZExpbmVDb3VudCI6MzQsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6ImVlYjc0NjRkYWRjY2M5MmIwYWI4MmU5MzBkNjk3MjA0M2EyZTM3ODU5NWQ5Y2Q0MDVjZWQyYzg3MTljNGMxYjMiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6IjA1OWU5ZmNhYTU1NWYzMDEyMGUwMzNmNGYxYjIzMmQwMjc1ZWQ0NmE1ODU1ZDFhNThhMjMzZjRiMWZmOWViMjkiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6Ijg3ZTcxZTJjN2UyNDBlNmJlYmM5NTdjYmQ5MmNhOGI3YmI1OTU1NjFiZTdkNmI4YTI5YmJlMjI2NDZhMDQ2ZTEiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjowLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6ImUzYjBjNDQyOThmYzFjMTQ5YWZiZjRjODk5NmZiOTI0MjdhZTQxZTQ2NDliOTM0Y2E0OTU5OTFiNzg1MmI4NTUifQ"
+        }
+      ]
+    },
+    {
+      "id": "claim_54388c1d9ba04b94871a4586e9f54028",
+      "statement": "Run-placement lookups deliberately fail soft: repository and Slack ownership helpers treat an unreadable binding as unbound after logging, resolve_workspace selects the instance default on lookup failure, and kitchen-channel lookup disables kitchen behavior on failure.",
+      "evidence": [
+        {
+          "resource": "repo://openswe/workspaces/routing.py#L170-L190",
+          "version": "repo-lines-v1:sha256:e22eac06ea23016b819319965ad0467e14fe8153ba5661cca10d7fd9f721f8a3:eyJzZWxlY3RlZExpbmVDb3VudCI6MjEsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6IjBiYzcxMjVmMmNjY2RhNTIwNmVmOTFkNGQ3ZThkNzVkYjI5ODY2YjlmNWYzNWIzNDZlNTM3OTEwZmI1NjBjMDYiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6IjVlZGVkMDJkYjAzM2IxM2Y5ODgzZGE4ODcwYjQ2ZTE3MGFkNzA2MjMxMDY4OGVlMjY3ODllZWQxNDdlODZkYzAiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6ImQ3MDE0OWUwNjlhZDY3ZWNjZjQ3MzY0NmZmMWM3NTAwNTBkMzI5ZDExMDAxOGRjNTc2Njg3OGVhZmExZDYwN2QiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjowLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6ImUzYjBjNDQyOThmYzFjMTQ5YWZiZjRjODk5NmZiOTI0MjdhZTQxZTQ2NDliOTM0Y2E0OTU5OTFiNzg1MmI4NTUifQ"
+        },
+        {
+          "resource": "repo://openswe/workspaces/routing.py#L71-L121",
+          "version": "repo-lines-v1:sha256:e35856bfa5fd9c62668a82dbc5ba954dbbc624d0cf8643b807fb1a5c1eb132ee:eyJzZWxlY3RlZExpbmVDb3VudCI6NTEsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6IjRkZTA0NGEwZDg0YWVhYjEzYjgxNDE5MzhmOWQzNmNjYmJlMjRlMGRmZDVlYWEzMGQwNWVkM2Y5MWJlZWM3N2IiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6ImI5N2M3MTI0N2FmM2NkMWVkZjU1NWE3ZDEwNzU5MzE1N2Y2ZGMyYTIyYWYwZGU4MmU3Nzc0YWJmMTBmOGFkZTEiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6ImM3YTgyZmM5OTEwMGRlYzg5YjI2ODczZWJhNjliY2JmMGRjNWMxMWIzY2ViNjk0ZjlhMTQ1ZWIwYTZkNzA0NTUiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6IjQ1YjNkOWZhNjQ2NjFkMGE3OTljZThkNTRlMTE2YmNhYWYyMjc0NjA4YzNhOTk0YjVmNDc3NmZlYjNiZDc5YzQifQ"
+        }
+      ]
+    },
+    {
+      "id": "claim_587a3d18cbef4cacab3017b769c137d0",
+      "statement": "Sandbox creation loads the selected workspace snapshot, resources, and validated create parameters; missing or deleted workspace selection falls back to default, and unreadable default workspace data falls back to the provider base environment rather than failing sandbox creation.",
+      "evidence": [
+        {
+          "resource": "repo://openswe/sandboxes/lifecycle.py#L69-L121",
+          "version": "repo-lines-v1:sha256:310e49717006c90902af2aa5b05c6528c4fdd8a8666a44a680e6eb5d21959cdd:eyJzZWxlY3RlZExpbmVDb3VudCI6NTMsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6IjBlM2ZiMWU1OGZiYzkwNDc5NGQ1MDczMTRmYTkxYzlmMmYxOThjODhkM2ZmMzk1ZTAwODI4OTAxYzM3ZGM5MWIiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6IjU5MDlhNTNhNjE4ZDAyOGUxZDMwMDBjMGE3YWJjZWVjYmU1ZmIzN2Y0ZTUxMWVmZTQ2NjQzZmFkNmU2Njg3MmYiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6ImJmN2JiMjQ3M2E1MWJiNTIwMmZmYWFkNjE4MjkyOTM4YWVlMmMxMzg5N2JkMDE5ZjA1MWY5M2JiYTA5YzNjZTgiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6Ijg1YWZjZWMyNTE2NzFhZWRmOTM0MDcyZTY4OTVlNzEzYmIxNGM1NTA2MzAzYjBjYTI4OTIyZDE4OTZjOTg1ZTAifQ"
+        },
+        {
+          "resource": "repo://openswe/workspaces/store.py#L1517-L1550",
+          "version": "repo-lines-v1:sha256:b8f897505208d7d74d6625c2ce01ffc6bc3bb8330a18603bca2826e3a78adc9f:eyJzZWxlY3RlZExpbmVDb3VudCI6MzQsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6IjQ3NzBhZjNkYjI1MzRlYjNkNWEwY2I0YTA2NzNlMDQ5M2I3ZWY3NDVlOGI4N2Q5MzU0OGI3YTQ0OTljNTM4YzkiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6ImQ4ZWNlNTQ2NGYxZDc3ZjJkYzFiNGYxNDQ1NDY0YmE2OTIxOGQwNjkyZjU0ZjY5ZjA4ZWQ1MTU1NTQ4ZDI3ZjgiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6IjlhN2ZlNjAyNjI4ZWZlYmZhNjYxOTMwYWE5NmU3OTM1ZDQ0MDc2MDdmNGE0ZTRkOTlmZjkyYTI1Y2RhZDBiNTYiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6IjdmMzNmNmU2YjljYTIwNDQzMzc5YmEzZDZjMzcyM2NkYWEzOWM0NzdlOTI1NDEzYjNlZjZlZDk5OGRjNDVjZGEifQ"
+        }
+      ]
+    },
+    {
+      "id": "claim_d80dc1e86b4d40cfac0f35fddc872a3f",
+      "statement": "Effective workspace settings merge hard-coded defaults, instance settings, and non-null workspace overrides, and settings reads fail soft to hard-coded defaults when their store cannot be read.",
+      "evidence": [
+        {
+          "resource": "repo://openswe/dashboard/workspace_settings.py#L445-L467",
+          "version": "repo-lines-v1:sha256:3341a781040149d5f2ad6d83a55f9a519a01fa42b790142f70328bc6fd069524:eyJzZWxlY3RlZExpbmVDb3VudCI6MjMsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6IjA3YmMzY2FmZTNjMjY2Y2NhZDk1ZDcwYjBlNDIwYzVjMzY1YTk4NjdhZDVkNDhmMjc0MTZkN2NlNTA1MGI0OTUiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6IjQ2MmYxY2E3OTJjOTcwM2M5OWQ1MGIyMjE1NTI2NjkwYWVjNzQzZWRjNjdiZDk0ZDVmNTBmNDhhMjIyNzI4MDMiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6IjQzYzMxNDA2MTA5YzRhOTNmZDQxNjZkMTM4YmVkODYzYjI1Y2MzMzg5ZjE1NzEwNmYxMTAyNjA1N2ZiZTc4NDAiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6IjMwN2IwYzZjZTcwNDcxZWYzM2FjMGJlM2JmMTBkOTc1YWZlZmMzYTM0MzI3Yjg1NGQ1YWU0M2NjY2NmZjRhZjkifQ"
+        },
+        {
+          "resource": "repo://openswe/dashboard/workspace_settings.py#L532-L569",
+          "version": "repo-lines-v1:sha256:b9a4a8c4188ae827ac125914082dbc381a5e0dbcf98746b9c2644784f96c2605:eyJzZWxlY3RlZExpbmVDb3VudCI6MzgsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6ImFiYjRkNTZmOTNiZjMzZDBiOGI5ZjUxZGUwMmNhYjhjOWZiZjVlYTAxZmE4ZjMxZjNkZjNkMDU2Nzc3ZTg3MGMiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6IjcyODI5MTA2YjAxNjBmYjU0Zjc1ODM2ZDQxNGFiMTBhZWM2Y2ExZjA4NGFjYTJkMGE1OWJhOTgzNjhjNmYxYzUiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6Ijg1ODhhMTJjMDkyMDVkZjY2MjRjNGU5MDNjNGI1M2JlNmMwYjc3MTdjNzYyZTI2MGJjMzdkOTEyNmZkYjljODciLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6ImNjNDY1ZmE2NmQ5YTkxMDcxZTk3OTBhZjBlYjA2YjY3OTc2NzEzZmVmNzA0MDhhOWY0MTY0YjdkMDIzNTMwMGIifQ"
+        }
+      ]
+    },
+    {
+      "id": "claim_766c6c29cfc14e6dabee85e9840b55b3",
+      "statement": "Workspace MCP connections are stored per workspace slug and agent construction loads instance, workspace, and then user sources, with a later same-named connection replacing an earlier one.",
+      "evidence": [
+        {
+          "resource": "repo://openswe/mcp/records.py#L93-L124",
+          "version": "repo-lines-v1:sha256:f4828f04100ff0b0331b145a2b34a3865cc06eb00c2148bd2ff7eee615c80d30:eyJzZWxlY3RlZExpbmVDb3VudCI6MzIsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6IjJkYzkyNDg2NWQzNTJmZTI1YWVmYjBiNjE0OTkzYjk1ZjhhNmQ0ZmVlMWQ5NDM0OWIyMDc2YzViYzBmOTkzODgiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6IjU1MDMyZTk2NGQwOTMyMzUxZTVkMTg1MjY5MjgxYjE3MWEzYTA5YjA4YjI4NmU2NjFlYTQ3MDMyM2M4MmViNGQiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6ImIzZGYyYWNmMDZlOGMzZjAzYzcxMzVjNmU4YWM1YTljYTU0MzJhYmUwNmE3NGFjYTBmZGQ5YTUzYTAwOGY5ODciLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6ImY5NmRlNjMyMjk3ZTcwNzFkOTZiMTdmNzg5MmJhNmE5ZjExNDIxYzc3YTM0YmFhMDY1M2JiOTQzZmMyOWZmYzkifQ"
+        },
+        {
+          "resource": "repo://openswe/mcp/workspace.py#L58-L96",
+          "version": "repo-lines-v1:sha256:bde7d9cac16b558cb88c8fbfe19ed4f73866d11543e441a66337695886a4486e:eyJzZWxlY3RlZExpbmVDb3VudCI6MzksImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6IjVhMmRiMTczZGRmNmFiYzczMzdjZmMxZTE1ZmRmMjAyOTkwYWEzZGE1MTk3YmNkNDY2MjY0MTA0ODIxZWZhYmIiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6IjAxOTA4ZDY5ODQxZjc1YjRlYmI3ZjljZTQwMDBjYjRlNzQ4ODc3MjVkNzJkZWY1YTgwM2U1M2M5NjFiYzE4ZTAiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6Ijk1YjE0ZWU3OTlkOGM2ZDk3NDY0NDM1ODFlMDNiY2NiNmY5MzFjNGE5MTNiNjIxYmU3YzM1MmVlYmM4ZWYxNTMiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjowLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6ImUzYjBjNDQyOThmYzFjMTQ5YWZiZjRjODk5NmZiOTI0MjdhZTQxZTQ2NDliOTM0Y2E0OTU5OTFiNzg1MmI4NTUifQ"
+        },
+        {
+          "resource": "repo://openswe/server.py#L780-L802",
+          "version": "repo-lines-v1:sha256:bb4b7e607d016cd577bf37b7c656583af207897b3ac2d2d44dbbf500fc88dc74:eyJzZWxlY3RlZExpbmVDb3VudCI6MjMsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6IjExNmQ2NzlhZjk1OGE0NGY2OTI4YTkzZTVmMjA2NjU0OTMwMWYzNTFmNTBlMGRjYmUxNjJkZDNlYzUyZjg5N2MiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6IjhiZTFkNzllMWI2YzQ2NjlmMDQwYjU0M2I4MjdlOTg0YjY1ZmVjZjAxZDliMGQzYzdmY2RhM2ZjZDg1ZTIzNTYiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6ImRkMjMyNzVhZmJmZjE5YzdjNTg5ZTI4NjhmMmM5YWNjMmYwZmNhYzkyYzBlZGJjYWM0OTA5MjZkODU0YTA3NmUiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6IjAyYjljMTk2ZTcwYmQ4NmJhNzM1NzViMWUyZjU0NjhlNTFjNGE0OGRmZTUyMTMzMjAwOTQ0Y2U3NTIzZGIyYWUifQ"
+        }
+      ]
+    },
+    {
+      "id": "claim_9cca4b147ec34813b42dcf52c39ff399",
+      "statement": "The snapshot used to boot new sandboxes remains available while a replacement capture is in progress, because ready_snapshot_id returns the prior ID for ready or capturing status.",
+      "evidence": [
+        {
+          "resource": "repo://openswe/workspaces/store.py#L640-L651",
+          "version": "repo-lines-v1:sha256:218968f9c38a81cabdf4bd6ab98972e22cb888a0fc92fdea5ceb9da8c9a9970a:eyJzZWxlY3RlZExpbmVDb3VudCI6MTIsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6ImYzZDAwY2YyNzA5NjRkNDRhMTNkZmFjODc1MmIwOWZjYzQzNWIwZjE5YjMxNmFiY2Y4MWE3YWE2NGJiMTIyZDYiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6IjVlOTFhMzk0ZjRiZjE3OGEwYWM1OTYwZWZlNjFmNGE1MDdlYjNmZDdjYmI1OTY1OTM3ZGM1ZGJmZDZlZmFkZDIiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6ImE1MjE2ODIwZWM5NWQxYTU2ZTE0OTljZGM1ODU4MzliYjllOTJmNDFmNzBmNzQ3MzcxY2M5MWZlNTg1ZGFiNjgiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6IjA3N2RjNGM5YTk3NzNlYzc2ZGE4NTI0YTQ5MWRmYTk2Zjc5NjNmYjlmZGE0NjBiMDM1MmQ4ZTQ4NTM1NDlmNDkifQ"
+        },
+        {
+          "resource": "repo://tests/workspaces/test_store.py#L155-L186",
+          "version": "repo-lines-v1:sha256:36a4231941250f504a9bb016c392cedd58dc694b294fef288a4a7691153d008e:eyJzZWxlY3RlZExpbmVDb3VudCI6MzIsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6ImJkOTk0MmRlYjdkYmFiYzExNGIxYzQ4ZDAyZGE0NjM4NmU5YWNhNTE1YTUyZmI3YjNjNDEyZGM2Mjc5MjFiMDgiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6ImJkYThmOWRlYjZiNDA3NWUwZGIzNDc5MDE4NDJhMzdmMTM1YTk4YTM5ODRhM2MxODMyMmE4YjczYjIyNWIzMWUiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6ImUxMTU4OTc3MjcyMTNmNjE2NmU2MGRkYTMzNjFmMzBjNTljY2MwYjIyMWVjNjA1MjlhZjZmMWE0ODU0MzY3NmQiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6IjQ2ODEzNWRhYTM4ZTYyMzQ4ZGYwYTk0YTg5ODVhYzc3ZTM3Y2M5YmFiZDA5N2IwYWM2Mjk1NWUyNGQxNDcyMjMifQ"
+        }
+      ]
+    },
+    {
+      "id": "claim_d3d4f098777f4f70b19d5c427942cee9",
+      "statement": "A full refresh boots from the base snapshot and runs setup then update scripts, while an update refresh boots from the current snapshot and runs only the update script; capture occurs only after every required script succeeds and a failure leaves the prior snapshot in use.",
+      "evidence": [
+        {
+          "resource": "repo://openswe/workspaces/refresh.py#L193-L216",
+          "version": "repo-lines-v1:sha256:16d69dbdc62193981e01133778de9dabb25ec2d915632500d1eef1235e2efa2e:eyJzZWxlY3RlZExpbmVDb3VudCI6MjQsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6IjZhODcxNTUyOWMxNTI4MWZhMTM2YTIzOTE2YzhhYWE4ZDIwYjRhNmE1ODZiZjA0ODJkMjdmODEyZWJjOWI3NjQiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6IjU4MmI1MGMwMGE4YmM2MGJmOTMyMjMxMzk1ODRjZjg3NTIzOWRkMzZhOTgzN2U5ZjY1MmMzOGViNmZlZGZlODUiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6ImIxNWY2YWE3OTAyMzE4MmE2NzYzNDRhMmQ5YmZhNDdkNDk5MjViY2M1OTYwYThlOGE5NGQxMjE0ZWY4N2UyZDIiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6IjNhMGY3MGIyYmQ4NjA1YjcyNDFkM2MzZDhhNzkzNzMyN2NkZDEwNTZlMzNhMDYzNDU1NmVjNzI1MWJlYWU3Y2YifQ"
+        },
+        {
+          "resource": "repo://openswe/workspaces/refresh.py#L267-L348",
+          "version": "repo-lines-v1:sha256:3332c56bd044bbd29f65d1d4f89c20e2e30afc440e78615136395caae3035327:eyJzZWxlY3RlZExpbmVDb3VudCI6ODIsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6IjljZWEzMWJiMGI1NTkzMjc1Y2Q4NzFlYTc5Zjg2MmQxNGFmYTdkNjJlNGYxZjlhZjE1NWUxY2NiYjhjMDg4NzMiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6ImEyZTE1ZGE1NTAyNjNmMGQzZjI4NzQ4MzY3Nzc4OTM2NDJhZTQ2ZDdkYWY1Zjg1YjRjZTIxYTM0ZWM5NDczZDYiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6IjczM2U4NDg3Yzg1ZGZkY2Y5ZmE3YjkzYzc0NmM5NDYyNWFlNDdlMTIwYzc5N2U3OTFlNzM3ZjllZDdmZmM3M2QiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6IjZlYTY1YWFlYTYyM2IzYzdkMzFiNmUyMzE1M2Y3ZDhlMWJlYjI2NzFjYjhkN2Y2MTM3YTA0OGUxNWZhNmZiYmYifQ"
+        },
+        {
+          "resource": "repo://tests/workspaces/test_refresh.py#L168-L205",
+          "version": "repo-lines-v1:sha256:6bd018c56adf5817a32263aec31d912763d85e36143a303bee02ede1e3814292:eyJzZWxlY3RlZExpbmVDb3VudCI6MzgsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6IjIyNWUyMzY4ODcwZmFjNmQ4YzUzY2E4ZDYzMDk2NGI1Mjc2YzU0NzFlMjk0ZjhhZTdjNDk1MGQ0ZWEwOTczYmYiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6IjAxYmE0NzE5YzgwYjZmZTkxMWIwOTFhN2MwNTEyNGI2NGVlZWNlOTY0ZTA5YzA1OGVmOGY5ODA1ZGFjYTU0NmIiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6IjMyOTIyZTAzOTgyYjdlNzFmMGJjMjMyN2Y1ZWQxNzc5ZWYzY2NhZThkODYwMTlmYmZkMmNlNjM0NTQ1OGNhMjkiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6Ijk4YzAyNTU1YzA0ZGE4MmMyMWE4OWFmZWM1NzY3ODdhOGJmZThkZTE2MDkyMWY4NjBmZTdhZjgwODY2YTgzYjcifQ"
+        },
+        {
+          "resource": "repo://tests/workspaces/test_refresh.py#L40-L109",
+          "version": "repo-lines-v1:sha256:f23e5fe8ad6d1828fad817d861e5c57399ba337102a79dbbd8adcc48a76a9be2:eyJzZWxlY3RlZExpbmVDb3VudCI6NzAsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6ImU1ZjhkZDhkNDFjYmI3MjNkMmEzNmZiNDA0NjJkZDlhZDE3YTVkY2NlNmE3NmE1ODI2MDgwYWU5ZmQ1NDAwMTQiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6IjAxYmE0NzE5YzgwYjZmZTkxMWIwOTFhN2MwNTEyNGI2NGVlZWNlOTY0ZTA5YzA1OGVmOGY5ODA1ZGFjYTU0NmIiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6IjMyOTIyZTAzOTgyYjdlNzFmMGJjMjMyN2Y1ZWQxNzc5ZWYzY2NhZThkODYwMTlmYmZkMmNlNjM0NTQ1OGNhMjkiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6IjMyOTIyZTAzOTgyYjdlNzFmMGJjMjMyN2Y1ZWQxNzc5ZWYzY2NhZThkODYwMTlmYmZkMmNlNjM0NTQ1OGNhMjkifQ"
+        }
+      ]
+    },
+    {
+      "id": "claim_87bbaadcad9b4d3284994013718b8c64",
+      "statement": "Scripted non-inheriting workspace creation starts an initial background refresh and idempotent daily cron, repository-binding changes start a full rebuild, and manual refresh rejects a workspace without setup script or one with an in-flight refresh.",
+      "evidence": [
+        {
+          "resource": "repo://openswe/workspaces/refresh.py#L94-L119",
+          "version": "repo-lines-v1:sha256:cbad1952a6aeb023ace0480e07385420e965de6eccafb47a0248767910130781:eyJzZWxlY3RlZExpbmVDb3VudCI6MjYsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6IjU5ZWRlODQzNmVmMzRkYWU2ZjkwYmMzY2Y1ZGViM2M2NWZlNzI0NDNkM2VlNzJhYTYzZTFhZDU4ZWRiZDY4ZTQiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6ImRlODAwMTNkY2VlMjNlMGEwOGNkMTk3NDYzYzdjNjlmNzBmOWFhMTRiZmJmNTc3ZTJiOTAxMTVkMmMwYmUzMDEiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6IjFjMmNhMjBmMzYxZjMwODlkOGI2OTQyMjRjZTEzNmI1NjdkMDFhZDRiODVmZjBiODJhODQ2YWM5NGRkYjgxNjYiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6ImJiOWY4OGZkOGUxYzYxZTIyM2IxYzY5ODM1ZTM5OTEwYTlhNDFjOGZiYzVmMzZhYmEwMTE0M2E5NWMyM2Q5MTEifQ"
+        },
+        {
+          "resource": "repo://openswe/workspaces/routes.py#L146-L186",
+          "version": "repo-lines-v1:sha256:987770acea9691cda2a2f19a31c32a1bcc06272d218ac6a59a2eca88a58486c5:eyJzZWxlY3RlZExpbmVDb3VudCI6NDEsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6ImM5YTRiY2U2ZWJjMjM1NjU4Njc4OGUyMTQ3MTRkNjlmZTY1NmQ3MTQwYjc2MDhkZjI1ZjY0NzVhYzZmN2NiNTAiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6ImQ4ZWNlNTQ2NGYxZDc3ZjJkYzFiNGYxNDQ1NDY0YmE2OTIxOGQwNjkyZjU0ZjY5ZjA4ZWQ1MTU1NTQ4ZDI3ZjgiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6ImNiNzczOGI0NDI3ZGEyM2E5NzQ2MDIxOWFjOTE0ZTNmMTM5NWUzMjRlMDQ1NTAxMDUwYzI4MGJhMGI3MWE0ZDIiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6IjRmZDk0NDhjZDNmODdmMjVhNDJlNmJmYTFiMjBjMzgwOTk5MjRlYjhlN2NiOGE2MjkwOTk1NjE2NGNmOWU0ZDUifQ"
+        },
+        {
+          "resource": "repo://openswe/workspaces/routes.py#L237-L261",
+          "version": "repo-lines-v1:sha256:872d08124f354c55b5b74d8bdc82470d5e330476544174460ccf76799005c624:eyJzZWxlY3RlZExpbmVDb3VudCI6MjUsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6ImI4YWE0ZDRjYjM2ZjI5ODVjZmM0ZDRhZmQwNTA4OWU3NjMyNWM3NWU0Njk5ODBmNzBhNTRmODlkMmY5NDA2NjMiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6IjgwNzBiYzlhZGRiODI5OTM1OGRkMjNkMGE3MzZiMmY1YjVmYjc1Y2M1NjhhYzU1YWEzM2M4ZjYxYjZhODY3NmEiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6IjUzMzU5ODQyOTkxMWRiM2IxYmI3ZjAxOWE2NzNjNmQ2NzMzNjQ1ODE3MjUxOTgzNmFjNDg5MjU1OWExMTg5YjUiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6IjYzNTNkMjRmNzg0Y2FlOWQwN2UxODJlM2JmZDEzZDVhZTAxZjU2N2Y3MGRkODQyMDc1MjQ5ZWNmZDQxMmE1ZWUifQ"
+        },
+        {
+          "resource": "repo://openswe/workspaces/routes.py#L82-L105",
+          "version": "repo-lines-v1:sha256:930fd697a3862b9003249d775e9564a2e894c6a33484938c95b7cc6739473da9:eyJzZWxlY3RlZExpbmVDb3VudCI6MjQsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6IjAwMzIxNDk3NGRmOTQ4NjU5MWU2ODkxNTUwZGNjYzVmMmIzODNiMDFlZTZkNDhmYTk5ZmM3MTM4NGU4MTk3YmEiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6ImQ4ZWNlNTQ2NGYxZDc3ZjJkYzFiNGYxNDQ1NDY0YmE2OTIxOGQwNjkyZjU0ZjY5ZjA4ZWQ1MTU1NTQ4ZDI3ZjgiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6IjRmYmQwMDkzMTRiYzI3MDg0MTY3MzRhMDJhZTVmZjM5YTFlNDhhMDUwYmU5MWY0M2IyZmFhOTIwMDJjNjJiZmMiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6ImIzOTFjZjhkYTQwZDU1ZDFmZTZkNjBlYmIwY2Y5NTgwNGQyMTI1YWE3ZWQyOTE5OGFiZThhNmJlMTZjNzA0NzUifQ"
+        },
+        {
+          "resource": "repo://tests/workspaces/test_routes.py#L41-L110",
+          "version": "repo-lines-v1:sha256:0f0619c59711c52c76f9b74769712167169ee535da8e628b693d762ecd07a445:eyJzZWxlY3RlZExpbmVDb3VudCI6NzAsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6ImFmMzQ1ODNhNTk4NzY3YmY1NmFlZmViNjVlMjAzM2ExNjUxY2M0YzhkN2U2ZjBhZjNlNWNmZDMyOTNmOTMzYjMiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6IjMzYzg1ZDg1NWY5ZTI3M2IyOTE1ODBmMjQyY2E2ZGVjNzNlMjk1YTZkYTI3NTUwMWMxNDJkNWYwNjAyM2FkOTEiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6Ijc3Nzg0ZmJiODM5MDgxZDViM2FiYzE4ODcwOTBiNmJmNDgyZDJhZmFjMzYyZDY5M2M0YzQ2Mzk4NTM4MjQ2YzQiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6ImFiZDExMzQ4ZTQ3ZTRhMGIyYWU0ZDk3MDdkNzNmZDljMzc2ZDZlYjliNzU1MTQ1NTNiMmZhNTBiMWFmYzBlMjQifQ"
+        }
+      ]
+    },
+    {
+      "id": "claim_ad4de53593d24a9e9916da0d355f3e3e",
+      "statement": "When a snapshot with an update script becomes stale, sandbox creation starts a due update refresh in the background without delaying the current sandbox boot; due logic suppresses concurrent attempts and throttles repeated failures.",
+      "evidence": [
+        {
+          "resource": "repo://openswe/sandboxes/lifecycle.py#L188-L205",
+          "version": "repo-lines-v1:sha256:71ad9d97a381c8b0abd56a111ac1940c005c6280f77db6abdd930983988649cc:eyJzZWxlY3RlZExpbmVDb3VudCI6MTgsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6ImZmOGRkNDEyMzBjNTdkMzhjMTNkMjZiMTBiMDcxNzAxMmMyNmViMmE2NDk4NDI2MzcxMDBhYzdjZmQwYjQ4NWIiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6IjAxYmE0NzE5YzgwYjZmZTkxMWIwOTFhN2MwNTEyNGI2NGVlZWNlOTY0ZTA5YzA1OGVmOGY5ODA1ZGFjYTU0NmIiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6IjlhZjI4MjFkZDQ3YTYyMzZhMTUxNGYwM2UwOWZjYzU4YzU1ZWY1ZThiOTVkZWVkMzdlOGIzMTY1ODM4YmJhZDEiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6Ijc3MGU3N2IzYWM1NTUxZDQ3NGRhMDYzYjNlYWMwNDBhYzAyMDhjYzg1MTk3NDk0MDc1Yjc2ZWY5NWUzNDQzN2MifQ"
+        },
+        {
+          "resource": "repo://openswe/workspaces/refresh.py#L219-L264",
+          "version": "repo-lines-v1:sha256:d6fffddbc5e51bd19f9e711c9980557a53544b5fc101e15f79cc9d3c801f6006:eyJzZWxlY3RlZExpbmVDb3VudCI6NDYsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6IjcwOTkwODZiZmFkZTJlNTE3MGE3NTUwYTQzYTk4NTBhMWRhMGM4ZjY3NmEyY2I1MmM4NzVjYjVkYWNkN2RmMmEiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6ImVlN2M5NTdiY2I0NGZiNjczYzk4YjAwNTBhNzVkMzgwODJkYjgxZDkxOGRlMzEzYTNmMDdjMTIzNTMwNmQ3ZWMiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6IjFkNWVjNTE0YWQ4YmM0YjFlMDYwMDE3NzJiMGJlM2FkNDE2ZDcxNDU4OGJjYWU5NzJiYWU5N2E3NmIzMDVjNGQiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6IjgyYmY3YTQ4ZmFmYmU2Y2Q0MWU2NGI0MmIwY2FjMjIyOTNiOTYwZGFmYWQ2MjE1MTVmYTg1YWYxZjI1YjNhMDkifQ"
+        }
+      ]
+    },
+    {
+      "id": "claim_8799b62b298744dc8ad82f99cbf03802",
+      "statement": "Refresh state writes are isolated from workspace definition writes under a row lock, preventing a long refresh from overwriting newer definition edits or a definition edit from restoring stale refresh state.",
+      "evidence": [
+        {
+          "resource": "repo://openswe/workspaces/store.py#L1057-L1080",
+          "version": "repo-lines-v1:sha256:10d7b81927ec6c1b1bf75e1a65328fe87ea0d0c857ff66b6d13603eefa92a581:eyJzZWxlY3RlZExpbmVDb3VudCI6MjQsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6IjBmNzdkYjMxOTc2N2QzYTkzZDgxYzRjZDg2NzhlNDM3NTViMGRkOWQ2MDNjZjFlNzE3YmY4OWNmM2Y0NDE0MTYiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6IjVkYTg5ZjU2MTFhMjczYjhjYmIxNmViMmI5OGQ3Nzk5NDkxOGE5ZjQ5NjU2MTE4ODk2N2EwY2UwM2YxNzM5MTYiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6IjBlOWFhMWQ0NTA4ZWI3ZjBjNjEwYzI4MmExZjcxYjhmZjEwZGQ3YjM4MGI1YWI5YmQwYjAyNWI1YzU4M2Q4ZTYiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6IjhhZDJlNmM3MDEwYTBmMWQ4Zjc0NDA0ZGI4ZWVlMGNjMTk5YWIyYTBlZTU3OGQxMWQ2NTkzYzg3ZWVjZTc0YmMifQ"
+        },
+        {
+          "resource": "repo://openswe/workspaces/store.py#L786-L841",
+          "version": "repo-lines-v1:sha256:c0e464a6159264b473fb820d269ea40962d8df41751f2ad9b54241870cc16454:eyJzZWxlY3RlZExpbmVDb3VudCI6NTYsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6IjM1ZmZhZDkwYTBkNmE1ZmExY2VhMzhlYTVhZGMxNDhjYmIxMWNmNGVkMDg0OGIwYWQzNDM3ZjQ5NWQwOGY0OTMiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6IjU1MDMyZTk2NGQwOTMyMzUxZTVkMTg1MjY5MjgxYjE3MWEzYTA5YjA4YjI4NmU2NjFlYTQ3MDMyM2M4MmViNGQiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6Ijc2NmQ4NWQ4ZWYxMjRmNzU3ZDEyZWQ0MDc3ZjgwZmRlZDdmNmFjMDIyYTIyYWI5MzQxMDJhZGI4ZDkwZDljYTMiLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6IjFkMjUzYzAwMGUwNmQ5ZDYyYmZiYWE5NjlhMjA0YzdkNWZiMzc2MmM2ZWI5YTc2MTZkMjRiMGM5YTkxNmFjNjEifQ"
+        },
+        {
+          "resource": "repo://tests/workspaces/test_store.py#L105-L140",
+          "version": "repo-lines-v1:sha256:5a296a759d146b540770ae16a2188c22df2fda062b0d07875b264a0a6c500b8c:eyJzZWxlY3RlZExpbmVDb3VudCI6MzYsImZpcnN0U2VsZWN0ZWRMaW5lSGFzaCI6ImJkOTk0MmRlYjdkYmFiYzExNGIxYzQ4ZDAyZGE0NjM4NmU5YWNhNTE1YTUyZmI3YjNjNDEyZGM2Mjc5MjFiMDgiLCJsYXN0U2VsZWN0ZWRMaW5lSGFzaCI6ImNlOWQ4OWY1NDlmYjIyNjQ1NTY1ZjBmMjAzNGIwYzg2MTcxOGVmNDA0MjEyZjlhNjA4MWRiZDgxNWE3MzFhMDMiLCJwcmVjZWRpbmdDb250ZXh0TGluZUNvdW50IjozLCJwcmVjZWRpbmdDb250ZXh0SGFzaCI6IjA5ZjkzMDgzYzE5NzEyMWI5ODI3MDBiYThhZmFiZDE3MjJjZjFkM2U3NDA0NTA5ZTgwZWZhMjcyNDdmNjJmMDciLCJmb2xsb3dpbmdDb250ZXh0TGluZUNvdW50IjozLCJmb2xsb3dpbmdDb250ZXh0SGFzaCI6IjliYWUyMzg2OGM2MjIxNzg1ODdmNjc4MDFlNzIzYjAxMzdlNWE3N2VkN2E0YzlkNWMyMTA2OGFmNGViYTdkYWUifQ"
+        }
+      ]
+    }
+  ],
+  "verification": {
+    "by": "openwiki/0.4.2",
+    "at": "2026-10-23T08:13:55.386Z"
+  }
+}
