@@ -3,7 +3,7 @@ import { usePluginHost } from "@openswe/plugin-sdk/react"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { useEffect, useMemo } from "react"
 
-import { commentsIn, draftsIn, isMarkdown } from "@/lib/model"
+import { commentsIn, draftsIn, isMarkdown, repositoryLabel } from "@/lib/model"
 
 export const keys = {
   repositories: ["repositories"] as const,
@@ -30,6 +30,14 @@ export function useRepositories() {
     queryFn: () => host.repositories.list(),
     staleTime: Infinity,
   })
+}
+
+/** How to show `repository`: its name alone when it is in one of this Open SWE's organizations. */
+export function useRepositoryLabel(repository: string): string {
+  const shared = useRepositories().data?.find(
+    (one) => one.fullName === repository
+  )
+  return shared ? repositoryLabel(shared) : repository
 }
 
 /** Asks the person to share a repository; resolves to it, or `null` if they cancel. */
