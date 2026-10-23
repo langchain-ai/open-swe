@@ -90,6 +90,10 @@ class TurnGitMetadata:
         metadata: dict[str, JsonValue] = {"ls_repo_provider": "github"}
         if isinstance(self.attribution, str) and self.attribution:
             metadata["ls_attribution_identifier"] = self.attribution
+        if self.config.repo:
+            metadata["ls_git_repo"] = self.config.repo.full_name
+            if self.config.branch_name:
+                metadata["ls_git_branch"] = self.config.branch_name
         return metadata
 
     async def snapshot(self) -> GitSnapshot | None:
@@ -174,6 +178,8 @@ class TurnGitMetadata:
                 for target in observation.targets:
                     pr_branches.setdefault(target.repo, []).append(target.branch)
         baseline = state.get(BASELINE)
+        before = None
+        after = None
         if isinstance(baseline, dict) and baseline.get("invocation") == self.config.invocation_id:
             before = GitSnapshot.parse(baseline.get("snapshot"))
             after = await self.snapshot()
@@ -190,6 +196,21 @@ class TurnGitMetadata:
             ]
             repo, branch = next(iter(targets))
             metadata["ls_git_repo"] = repo
-            if branch:
-                metadata["ls_git_branch"] = branch
+            metadata["ls_git_branch"] = branch or None
+        else:
+            snapshot = after or before
+            candidates = (
+                {
+                    (checkout.repo, checkout.branch)
+                    for checkout in snapshot.repos.values()
+                    if not self.config.repo or checkout.repo == self.config.repo.full_name
+                }
+                if snapshot is not None
+                else set()
+            )
+            if len(candidates) == 1:
+                repo, branch = candidates.pop()
+                metadata["ls_git_repo"] = repo
+                if branch and not self.config.branch_name:
+                    metadata["ls_git_branch"] = branch
         return metadata
