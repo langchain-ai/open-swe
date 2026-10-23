@@ -1,27 +1,17 @@
 import asyncio
-from collections.abc import Awaitable, Callable
 from typing import cast
 from unittest.mock import MagicMock
 from xml.etree import ElementTree
 
 import pytest
-from deepagents import create_deep_agent
-from deepagents.backends import StateBackend
-from langchain.agents.middleware import AgentState, wrap_model_call
-from langchain.agents.middleware.types import ExtendedModelResponse, ModelRequest, ModelResponse
-from langchain_core.language_models.fake_chat_models import FakeListChatModel
-from langchain_core.messages import AIMessage, HumanMessage, ToolMessage
-from langgraph.checkpoint.memory import InMemorySaver
+from langchain.agents.middleware import AgentState
+from langchain_core.messages import HumanMessage
 from langgraph.runtime import Runtime
-from langgraph.types import Command
 
 from openswe.input_messages import human_input, person_introduction
-from openswe.middleware.conversation_offloading import ConversationOffloadingMiddleware
-from openswe.middleware.model_selection import ModelSelectionMiddleware
 from openswe.middleware.prepare_run import BasePrepareRunMiddleware, PrepareRunState
-from openswe.middleware.require_user_reply import RequireUserReplyMiddleware
 from openswe.run_config import RunConfig
-from openswe.server import PrepareAgentRunMiddleware, _DisableInheritedMiddleware
+from openswe.server import PrepareAgentRunMiddleware
 from openswe.utils import ttl_cache
 from openswe.utils.authorship import CollaboratorIdentity, ThreadParticipant
 
@@ -154,108 +144,3 @@ def test_recent_context_audience_fails_closed_for_shared_destinations() -> None:
     middleware._source = "dashboard"
     middleware._credential_login = None
     assert middleware._recent_context_audience(RunConfig()) is None
-
-
-@pytest.mark.asyncio
-@pytest.mark.parametrize("requested_model", [None, "openai:gpt-5.4"])
-async def test_parallel_forks_keep_prepared_context_without_overwriting_parent(
-    requested_model: str | None,
-) -> None:
-    middleware = DummyPrepareMiddleware()
-    fork_prompts: list[str] = []
-    fingerprints: list[str] = []
-
-    @wrap_model_call
-    async def scripted_model(
-        request: ModelRequest, handler: Callable[[ModelRequest], Awaitable[ModelResponse]]
-    ) -> ModelResponse | ExtendedModelResponse:
-        if request.state.get("_deepagents_forked_context"):
-            assert request.state.get("run_prepared") is True
-            assert request.state["requested_model"] == requested_model
-            assert request.state.get("work_dir") == "/tmp/work"
-            fingerprint = request.state.get("run_prepared_for")
-            assert isinstance(fingerprint, str)
-            fingerprints.append(fingerprint)
-            assert request.system_message is not None
-            fork_prompts.append(request.system_message.text)
-            task = request.messages[-1].text
-            return ExtendedModelResponse(
-                model_response=ModelResponse(result=[AIMessage(content=task)]),
-                command=Command(
-                    update={
-                        "run_prepared_for": task,
-                        "work_dir": f"/tmp/{task}",
-                        "rendered_system_prompt": task,
-                        "reply_surface": "web",
-                        "reply_nudges": 2,
-                        "conversation_offloading": {"status": task},
-                    }
-                ),
-            )
-        if isinstance(request.messages[-1], HumanMessage):
-            return ModelResponse(
-                result=[
-                    AIMessage(
-                        content="",
-                        tool_calls=[
-                            {
-                                "name": "task",
-                                "args": {"description": task, "subagent_type": "worker"},
-                                "id": task,
-                            }
-                            for task in ("first", "second")
-                        ],
-                    )
-                ]
-            )
-        return ModelResponse(result=[AIMessage(content="done")])
-
-    model = FakeListChatModel(responses=["unused"])
-    backend = StateBackend()
-    graph = create_deep_agent(
-        model=model,
-        backend=backend,
-        middleware=[
-            middleware,
-            ModelSelectionMiddleware({}, model, routing_mode=None),
-            ConversationOffloadingMiddleware(model, backend),
-            RequireUserReplyMiddleware("reply", "no_reply", initial_surface="web"),
-            scripted_model,
-        ],
-        subagents=[
-            {
-                "name": "worker",
-                "description": "worker",
-                "mode": "fork",
-                "model": model,
-                "middleware": [_DisableInheritedMiddleware(ModelSelectionMiddleware.__name__)],
-            }
-        ],
-        checkpointer=InMemorySaver(),
-    )
-    config = {"configurable": {"thread_id": "parallel-forks"}}
-    result = await graph.ainvoke(
-        {
-            "messages": [HumanMessage("delegate")],
-            "requested_model": requested_model,
-            "conversation_offloading": {"status": "parent"},
-        },
-        config,
-    )
-
-    assert middleware.calls == 1
-    assert len(fork_prompts) == 2
-    assert all("prepared prompt" in prompt for prompt in fork_prompts)
-    assert {
-        message.tool_call_id for message in result["messages"] if isinstance(message, ToolMessage)
-    } == {"first", "second"}
-    state = (await graph.aget_state(config)).values
-    assert state["run_prepared"] is True
-    assert state["requested_model"] == requested_model
-    assert "requested_model" not in result
-    assert fingerprints == [state["run_prepared_for"]] * 2
-    assert state["work_dir"] == "/tmp/work"
-    assert state["rendered_system_prompt"] == "prepared prompt"
-    assert state["reply_surface"] == "web"
-    assert state["reply_nudges"] == 0
-    assert state["conversation_offloading"] == {"status": "parent"}

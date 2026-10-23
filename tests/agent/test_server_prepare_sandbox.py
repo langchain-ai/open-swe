@@ -4,6 +4,7 @@ import pytest
 
 import openswe.server as server
 from openswe.middleware import task_coordination
+from openswe.sandboxes.tool_runtime import ToolSurface
 from openswe.tasks.store import Task, TaskContext, TaskDelegation, TaskMembership
 from openswe.utils import thread_reads
 from openswe.workspaces.rows import WorkspaceRow
@@ -35,18 +36,18 @@ async def test_cancelled_worker_wakeup_cannot_reconnect_or_start_work(
         task_coordination.TaskMembership, "context_for_thread", AsyncMock(return_value=context)
     )
     monkeypatch.setattr(task_coordination.TaskDelegation, "get", AsyncMock(return_value=delegation))
-    monkeypatch.setattr(server, "graph_loaded_for_execution", lambda _: True)
     monkeypatch.setattr(server, "resolve_github_login", AsyncMock(return_value="owner"))
     monkeypatch.setattr(server, "private_credential_login", AsyncMock(return_value="owner"))
     backend = MagicMock(side_effect=AssertionError("Cancelled worker reached sandbox startup"))
     monkeypatch.setattr(server, "get_cached_sandbox_backend", backend)
 
     with pytest.raises(PermissionError, match="cancelled"):
-        await server.get_agent(
+        await server.plan_agent(
             {
                 "configurable": {"thread_id": "worker", "source": "dashboard"},
                 "metadata": {"kind": "thread_wakeup"},
-            }
+            },
+            ToolSurface(),
         )
 
     backend.assert_not_called()

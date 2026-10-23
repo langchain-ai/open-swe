@@ -22,6 +22,7 @@ from langchain_anthropic import ChatAnthropic
 from langchain_core.messages import AIMessage, AnyMessage, ToolMessage
 from langchain_fireworks import ChatFireworks
 from langchain_openai import ChatOpenAI
+from runtime_api.model_calls import ModelFailureCode
 
 logger = logging.getLogger(__name__)
 
@@ -40,7 +41,7 @@ class ModelCallTimeoutError(TimeoutError):
     """
 
 
-_FAILURE_CODES_BY_TYPE: Final = {
+_FAILURE_CODES_BY_TYPE: Final[dict[str, ModelFailureCode]] = {
     "RateLimitError": "provider_rate_limited",
     "OverloadedError": "provider_overloaded",
     "APIConnectionError": "provider_unavailable",
@@ -52,7 +53,7 @@ _FAILURE_CODES_BY_TYPE: Final = {
 }
 
 
-def provider_failure_code(exc: BaseException) -> str | None:
+def provider_failure_code(exc: BaseException) -> ModelFailureCode | None:
     """Why the provider failed a call, by its status and error body; None if not a provider failure.
 
     Provider-agnostic on purpose: a gateway can surface an overload as anything

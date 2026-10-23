@@ -13,6 +13,7 @@ on:
     branches: [main]
     paths:
       - "mda/**"
+      - "packages/runtime-api/**"
       - "vendor/managed-deepagents-sdk/**"
       - ".github/workflows/deploy_mda.yml"
   workflow_dispatch:
@@ -72,7 +73,7 @@ jobs:
             echo "mda/agent.py does not exist at this commit; nothing to deploy."
             echo "deploy=false" >>"$GITHUB_OUTPUT"
           elif git rev-parse -q --verify "refs/tags/${DEPLOYED_TAG}" >/dev/null \
-            && git diff --quiet "refs/tags/${DEPLOYED_TAG}" HEAD -- mda vendor/managed-deepagents-sdk .github/workflows/deploy_mda.yml; then
+            && git diff --quiet "refs/tags/${DEPLOYED_TAG}" HEAD -- mda packages/runtime-api vendor/managed-deepagents-sdk .github/workflows/deploy_mda.yml; then
             echo "Nothing deployed changed since ${DEPLOYED_TAG}; nothing to deploy."
             echo "deploy=false" >>"$GITHUB_OUTPUT"
           else
