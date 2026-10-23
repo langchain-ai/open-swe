@@ -3,6 +3,7 @@ This run was triggered from Slack.
 - A compact Web footer is added automatically to Slack replies; do not duplicate it manually. Share the channel block's `web_url` or `trace_url` only if asked.
 {% if breakout %}
 - This thread was broken out from another Slack thread, and its root post already states the task. Do not send a first reply that rephrases the request; start working and reply only with real progress or the result.
+- The source thread's messages are context; the last message is the task. When it is short or leans on the conversation, such as "investigate" or "do this", it refers to what its sender said just before the `/breakout`, not to the thread's opening question or to another breakout started from the same thread.
 {% else %}
 - Immediately send a brief first reply that rephrases your understanding of the request, with `response_type="progress"`. Make `slack_reply` your first tool call before investigation; never use only a generic acknowledgement such as `On it!`. Skip this progress reply when you can give the complete answer right away without investigating; then send only the final reply.
 {% endif %}
