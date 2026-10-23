@@ -21,8 +21,6 @@ _MIDDLEWARE_MODULES = {
     "RequireUserReplyMiddleware": ".require_user_reply",
     "settle_review_check_on_exit": ".settle_review_check",
     "WorkflowPushGuardMiddleware": ".workflow_push_guard",
-    "RunSkillsMiddleware": ".workspace_skills",
-    "WorkspaceSkillsMiddleware": ".workspace_skills",
 }
 
 __all__ = [
@@ -37,9 +35,7 @@ __all__ = [
     "PullRequestCreationGuardMiddleware",
     "RepairOrphanedToolCallsMiddleware",
     "RequireUserReplyMiddleware",
-    "RunSkillsMiddleware",
     "WorkflowPushGuardMiddleware",
-    "WorkspaceSkillsMiddleware",
     "check_message_queue_before_model",
     "deliver_event_matches_before_model",
     "notify_step_limit_reached",
@@ -65,7 +61,6 @@ if TYPE_CHECKING:
     from openswe.middleware.require_user_reply import RequireUserReplyMiddleware
     from openswe.middleware.settle_review_check import settle_review_check_on_exit
     from openswe.middleware.workflow_push_guard import WorkflowPushGuardMiddleware
-    from openswe.middleware.workspace_skills import RunSkillsMiddleware, WorkspaceSkillsMiddleware
 
 
 def _load_export(name: str) -> Any:

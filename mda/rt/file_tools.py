@@ -2,7 +2,8 @@
 
 They run in the thread's box, which MDA owns, or against the thread's files on the
 backend (``rt.remote_files``): where the box is not MDA's, such as a thread bridged
-to a person's machine, and on the paths the backend serves, such as skills.
+to a person's machine, and on the paths the backend serves. Reads of the run's
+skills are answered from the skills this runtime keeps (``rt.skills``).
 
 Around every call: a command that may push or open a pull request is first put to
 the backend's guards, which inspect the push and may need a person's approval, so
@@ -87,10 +88,15 @@ class FileToolsMiddleware(AgentMiddleware):
         remote: Mapping[str, BaseTool],
         remote_files: BackendProtocol,
         in_box: bool,
+        skills: Mapping[str, BaseTool] | None = None,
+        skill_sources: Iterable[str] = (),
     ) -> None:
         self._backend = backend
         self._remote = dict(remote)
         self._in_box = in_box
+        # The run's skills, which this runtime keeps itself (``rt.skills``).
+        self._skills = dict(skills or {})
+        self._skill_sources = tuple(skill_sources)
         # The box's own tools, as the model is offered them; code mode runs them from here.
         self._box: dict[str, BaseTool] = {}
         self._backend_paths = tuple(spec.backend_paths)
@@ -144,8 +150,10 @@ class FileToolsMiddleware(AgentMiddleware):
         call_ = request.tool_call
         if call_["name"] not in FILE_TOOLS:
             return await handler(request)
-        if self._in_box and self._on_backend(call_["name"], call_["args"]):
-            run: Handler = self._run_remote
+        if self._skills and _under(self._skill_sources, call_["name"], call_["args"]):
+            run: Handler = self._run_skill
+        elif self._in_box and _under(self._backend_paths, call_["name"], call_["args"]):
+            run = self._run_remote
         else:
             run = partial(_retried, handler=partial(self._within_deadline, handler=handler))
         # The transcript records a call the guards refuse, with their reason, as any other.
@@ -162,12 +170,6 @@ class FileToolsMiddleware(AgentMiddleware):
         if isinstance(screened, ToolMessage):
             return screened
         return await handler(screened)
-
-    def _on_backend(self, name: str, arguments: Mapping[str, object]) -> bool:
-        path = _absolute(arguments.get(_PATH_ARGUMENTS.get(name, "")))
-        return path is not None and any(
-            path == prefix.rstrip("/") or path.startswith(prefix) for prefix in self._backend_paths
-        )
 
     async def _screened(self, request: ToolCallRequest) -> ToolCallRequest | ToolMessage:
         """``request`` as the guards let it run, an approved push as they fixed it, or their refusal."""
@@ -197,6 +199,18 @@ class FileToolsMiddleware(AgentMiddleware):
     async def _run_remote(self, request: ToolCallRequest) -> ToolMessage | Command:
         """The call against the backend's files, as the box's own tool would run it."""
         return await _invoked(self._remote[request.tool_call["name"]], request)
+
+    async def _run_skill(self, request: ToolCallRequest) -> ToolMessage | Command:
+        """The call against the run's skills, as the box's own tool would run it."""
+        tool = self._skills.get(request.tool_call["name"])
+        if tool is None:
+            return ToolMessage(
+                content="Skills are read-only here",
+                tool_call_id=request.tool_call.get("id") or "",
+                name=request.tool_call["name"],
+                status="error",
+            )
+        return await _invoked(tool, request)
 
     async def _run_own(self, request: ToolCallRequest) -> ToolMessage | Command:
         """A code mode call, run by the tool the model's own call of it runs."""
@@ -245,6 +259,14 @@ async def _invoked(tool: BaseTool, request: ToolCallRequest) -> ToolMessage | Co
     if isinstance(result, ToolMessage | Command):
         return result
     return ToolMessage(content=str(result), tool_call_id=call_id, name=tool.name)
+
+
+def _under(prefixes: Iterable[str], name: str, arguments: Mapping[str, object]) -> bool:
+    """Whether the path ``name``'s call acts on is under one of ``prefixes``."""
+    path = _absolute(arguments.get(_PATH_ARGUMENTS.get(name, "")))
+    return path is not None and any(
+        path == prefix.rstrip("/") or path.startswith(prefix) for prefix in prefixes
+    )
 
 
 def _guarded(command: str) -> bool:

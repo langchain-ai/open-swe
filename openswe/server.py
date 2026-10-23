@@ -93,9 +93,7 @@ from openswe.middleware import (
     ModelSelectionMiddleware,
     PullRequestCreationGuardMiddleware,
     RequireUserReplyMiddleware,
-    RunSkillsMiddleware,
     WorkflowPushGuardMiddleware,
-    WorkspaceSkillsMiddleware,
     check_message_queue_before_model,
     deliver_event_matches_before_model,
     notify_step_limit_reached,
@@ -1855,11 +1853,6 @@ async def plan_agent(config: RunnableConfig, surface: ToolSurface) -> None:
         use_gateway=use_gateway,
         **title_model_kwargs,
     )
-    skills_middleware = (
-        WorkspaceSkillsMiddleware(backend=agent_backend, sources=skill_sources)
-        if credential_login is None
-        else RunSkillsMiddleware(backend=agent_backend, sources=skill_sources)
-    )
     run_preparation = PrepareAgentRunMiddleware(
         credential_login=credential_login,
         thread_id=thread_id,
@@ -1903,7 +1896,6 @@ async def plan_agent(config: RunnableConfig, surface: ToolSurface) -> None:
             TranscriptMiddleware(),
             *([client_tools] if client_tools else []),
             *([IncidentMiddleware(incident_session)] if incident_session is not None else []),
-            skills_middleware,
             ModelCallLimitMiddleware(
                 run_limit=incident_session.policy.max_model_calls
                 if incident_session is not None
@@ -1986,7 +1978,9 @@ async def plan_agent(config: RunnableConfig, surface: ToolSurface) -> None:
         )
     ]
     surface.dynamic = dynamic_tool_middleware
-    surface.backend_paths = tuple(skill_routes)
+    # The runtime lists the skills and answers reads of them itself (``runtime_api.skills``).
+    surface.skill_sources = tuple(skill_sources)
+    surface.backend_paths = tuple(route for route in skill_routes if route not in skill_sources)
     surface.code_mode = True
     surface.excluded = (
         STOP_SUMMARY_EXCLUDED_TOOLS

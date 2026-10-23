@@ -42,6 +42,7 @@ import time
 from collections.abc import Awaitable, Callable, Mapping, Sequence
 from dataclasses import asdict
 from functools import partial
+from pathlib import PurePosixPath
 from typing import Final, Literal, Protocol, cast, get_args, runtime_checkable
 from uuid import uuid4
 
@@ -143,6 +144,7 @@ from runtime_api.operations import (
     ShellVerdict,
     ToolEvidence,
 )
+from runtime_api.skills import SKILLS, RunSkills, SkillFile
 
 from openswe.agent_api.failures import OperationFailure
 from openswe.agent_api.git_metadata import (
@@ -218,6 +220,7 @@ MESSAGE_KEY: Final = "__lc_message__"
 # PersistedRoute is a union of literals: its arguments are the literals, not the names.
 _ROUTES: Final = frozenset(name for route in get_args(PersistedRoute) for name in get_args(route))
 _SESSION_TTL_SECONDS: Final = 6 * 60 * 60
+_SKILL_FILE: Final = "SKILL.md"
 _SESSION_LIMIT: Final = 512
 
 _json = TypeAdapter(JsonValue)
@@ -441,6 +444,7 @@ class RunSession:
             ),
             incident_evidence=self._incident is not None,
             worker_webhook=COMPLETION_WEBHOOK_URL if self._delegates else None,
+            skill_sources=list(self.surface.skill_sources),
             model_call_limit=next(
                 (
                     m.run_limit
@@ -462,6 +466,26 @@ class RunSession:
                 else SandboxSpec.model_validate(sandbox.model_dump(mode="json")),
             }
         )
+
+    async def skills(self, _request: RunRequest) -> RunSkills:
+        """Every skill the run may load: each source's skill folders and their ``SKILL.md``."""
+
+        async def listed() -> RunSkills:
+            folders: list[str] = []
+            for source in self.surface.skill_sources:
+                listing = await self.files.als(source)
+                folders += [entry["path"] for entry in listing.entries or [] if entry.get("is_dir")]
+            paths = [str(PurePosixPath(folder) / _SKILL_FILE) for folder in folders]
+            downloaded = await self.files.adownload_files(paths) if paths else []
+            return RunSkills(
+                files=[
+                    SkillFile(path=file.path, content=file.content.decode())
+                    for file in downloaded
+                    if file.content is not None
+                ]
+            )
+
+        return await self.in_run("skills", listed)
 
     async def sandbox(self) -> ManagedSandbox | None:
         """The thread's box as MDA creates it, when MDA owns it."""
@@ -1138,6 +1162,7 @@ API.serve(TOOL_STARTED, RunSession.tool_started)
 API.serve(TOOL_RESULT, RunSession.tool_result)
 API.serve(SANDBOX_REPLACED, RunSession.sandbox_replaced)
 API.serve(SANDBOX_UNREACHABLE, RunSession.sandbox_unreachable)
+API.serve(SKILLS, RunSession.skills)
 API.serve(OPERATION, RunSession.operation)
 API.serve(CHECK_SHELL, RunSession.check_shell)
 API.serve(RECORD_EVIDENCE, RunSession.record_evidence)

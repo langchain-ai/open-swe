@@ -19,6 +19,7 @@ from collections.abc import Mapping, Sequence
 from pathlib import Path
 from typing import TYPE_CHECKING, Final, Literal, cast
 
+from deepagents.middleware.filesystem import FilesystemMiddleware
 from deepagents.middleware.subagents import SubAgent
 from langchain.agents.middleware import (
     AgentMiddleware,
@@ -53,6 +54,7 @@ from rt.middleware import (
 from rt.model_calls import model_call_guards
 from rt.models import build_model
 from rt.remote_files import FILE_TOOLS, RemoteFiles, remote_file_tools
+from rt.skills import RunSkillsMiddleware, SkillFiles
 from rt.task_retry import task_retry
 from rt.tools import operation_tool, run_id
 from runtime_api.catalog import Catalog, RunModels
@@ -174,6 +176,13 @@ async def agent(runtime: ManagedServerRuntime) -> DeepAgentDefinition:
     ]
     remote = RemoteFiles(backend, run_id)
     remote_tools = remote_file_tools(remote, catalog.files.artifacts_root)
+    # The run's skills, listed for the agent and its subagents and read from here.
+    skill_files = SkillFiles(backend, run_id)
+    skills = (
+        [RunSkillsMiddleware(backend=skill_files, sources=catalog.skill_sources)]
+        if catalog.skill_sources
+        else []
+    )
     in_box = catalog.sandbox is not None
     # Without a box of MDA's, deepagents' own file and shell tools act on the thread's
     # files on the backend, in place of MDA's own of the same name.
@@ -201,6 +210,8 @@ async def agent(runtime: ManagedServerRuntime) -> DeepAgentDefinition:
         remote=remote_tools,
         remote_files=remote,
         in_box=in_box,
+        skills={tool.name: tool for tool in FilesystemMiddleware(backend=skill_files).tools},
+        skill_sources=catalog.skill_sources,
     )
     from_code = [
         *in_code,
@@ -216,6 +227,7 @@ async def agent(runtime: ManagedServerRuntime) -> DeepAgentDefinition:
             "tools": subagent_tools[subagent.name],
             "middleware": [
                 *_backend_reports(backend, catalog),
+                *skills,
                 file_tools,
                 *replace_sandbox,
                 ServedToolsMiddleware(subagent_tools[subagent.name], excluded, backend),
@@ -237,6 +249,7 @@ async def agent(runtime: ManagedServerRuntime) -> DeepAgentDefinition:
             ),
             *replace_sandbox,
             *_backend_reports(backend, catalog),
+            *skills,
             file_tools,
             task_retry(),
             ServedToolsMiddleware(offered, excluded | code_only, backend),

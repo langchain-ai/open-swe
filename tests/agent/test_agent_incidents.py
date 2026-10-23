@@ -125,7 +125,6 @@ async def test_incident_uses_system_sandbox_tools_integrations_and_delegation(
     assert {
         "PrepareAgentRunMiddleware",
         "IncidentMiddleware",
-        "WorkspaceSkillsMiddleware",
     } <= {type(item).__name__ for item in middleware}
     surface = cast(ToolSurface, result["surface"])
     assert "PullRequestCreationGuardMiddleware" in {
