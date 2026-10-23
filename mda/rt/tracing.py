@@ -2,6 +2,7 @@
 
 import asyncio
 import logging
+import os
 from collections.abc import Mapping
 from typing import Final
 
@@ -61,6 +62,16 @@ class TurnTrace:
             self.root = self.current_root()
             if self.root is not None:
                 self.root.metadata.update(metadata)
+                if revision := os.environ.get("LANGSMITH_REVISION_ID"):
+                    self.root.metadata["revision_id"] = revision
+                deployment = os.environ.get("MDA_DEPLOYMENT_NAME", "")
+                environment = {
+                    "open-swe-mda-prod": "production",
+                    "open-swe-mda-staging": "staging",
+                    "open-swe-mda-preview": "preview",
+                }.get(deployment)
+                if environment is not None:
+                    self.root.metadata["environment"] = environment
                 self.root.metadata["open_swe_git_evidence"] = {}
         except Exception:
             logger.warning("Could not tag the turn trace", exc_info=True)

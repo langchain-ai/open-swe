@@ -617,8 +617,10 @@ async def test_hook_failure_log_names_the_mda_run(monkeypatch: pytest.MonkeyPatc
     assert all(value in lines[0] for value in ("mda-run-1", "thread-1", "before_model"))
 
 
+@pytest.mark.parametrize("queued_metadata", [{}, {"LANGSMITH_AGENT_VERSION": "queued-sha"}])
 async def test_mda_catalog_leaves_integrations_and_code_mode_to_mda(
     monkeypatch: pytest.MonkeyPatch,
+    queued_metadata: dict[str, JsonValue],
 ) -> None:
     """Seldom-needed tools go to MDA's code mode, not the model's schemas; the graph's own stays here."""
     from unittest.mock import AsyncMock
@@ -627,6 +629,7 @@ async def test_mda_catalog_leaves_integrations_and_code_mode_to_mda(
 
     # A thread with no box of MDA's, so the catalog reads no thread metadata.
     monkeypatch.setattr(ManagedSandbox, "for_thread", AsyncMock(return_value=None))
+    monkeypatch.setenv("LANGCHAIN_REVISION_ID", "current-backend-sha")
     from langchain.agents.middleware import ModelCallLimitMiddleware
     from langchain.agents.middleware.types import AgentMiddleware
     from langchain_core.runnables import RunnableConfig
@@ -687,11 +690,14 @@ async def test_mda_catalog_leaves_integrations_and_code_mode_to_mda(
         surface.models = SurfaceModels(main=choice, subagent=choice, use_gateway=False)
 
     graph = RemoteGraph("agent", build)
-    run = RUN.granting()
+    run = RUN.model_copy(update={"metadata": queued_metadata}).granting()
     started = await graph.start_run(run)
     catalog = started.catalog.model_dump(mode="json")
 
     assert isinstance(catalog, dict)
+    metadata = catalog["trace_metadata"]
+    assert isinstance(metadata, dict)
+    assert metadata["LANGSMITH_AGENT_VERSION"] == "current-backend-sha"
     operations = catalog["operations"]
     assert isinstance(operations, list)
     names = {op["name"] for op in operations if isinstance(op, dict)}

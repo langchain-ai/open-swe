@@ -149,6 +149,11 @@ cd mda
 uv run --locked mda deploy --name open-swe-mda-staging --deployment-type prod
 ```
 
+Include `LANGSMITH_REVISION_ID` in `mda/.env`, set to the full source commit SHA checked out for that MDA build (`git rev-parse HEAD`).
+Both `deploy_mda.yml` and `build_preview_branch.yml` must write it alongside the existing secrets before deploying; it must be refreshed on every deploy.
+The runtime tags each root with this revision and derives `environment` from the CLI-injected `MDA_DEPLOYMENT_NAME`: `open-swe-mda-prod` reports `production`, while staging and preview retain their names.
+The per-run backend catalog supplies `LANGSMITH_AGENT_VERSION` from the backend's current `LANGCHAIN_REVISION_ID`, independently of metadata saved with queued work.
+
 CI and manual deploys run the CLI from this project's locked environment.
 `managed-deepagents` is the SDK vendored in [`vendor/managed-deepagents-sdk`](../vendor/README.md): `mda/` installs its runtime as an editable path source, and `make mda-cli` builds its CLI with cargo into that runtime, where the `mda` command runs it.
 Run it before `mda build`, `mda dev` or `mda deploy`: until it has, the runtime has no CLI, and it rebuilds whenever the vendored CLI changed; `mda build` and `mda deploy` bundle that runtime, so what deploys is exactly the vendored tree.
