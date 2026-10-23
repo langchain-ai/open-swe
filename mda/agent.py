@@ -15,6 +15,7 @@ The same agent runs as the async ``general-purpose`` subagent, the graph
 worker grant, adopts its own run token, and runs this agent's middleware as it.
 """
 
+import json
 from collections.abc import Mapping, Sequence
 from pathlib import Path
 from typing import TYPE_CHECKING, Final, Literal, cast
@@ -24,9 +25,12 @@ from deepagents.middleware.subagents import SubAgent
 from langchain.agents.middleware import (
     AgentMiddleware,
     ModelCallLimitMiddleware,
+    ModelRequest,
 )
 from langchain_core.tools import BaseTool
 from langchain_quickjs import CodeInterpreterMiddleware
+from langchain_quickjs._ptc import to_camel_case  # noqa: PLC2701
+from langchain_quickjs.middleware import filter_tools_for_ptc
 from managed_deepagents import (
     DeepAgentDefinition,
     ManagedServerRuntime,
@@ -89,6 +93,52 @@ _REVIEWER_PTC_TOOLS: Final = (
 )
 
 
+class CompactCodeInterpreterMiddleware(CodeInterpreterMiddleware):
+    """Keep all code bindings while documenting only frequently used argument schemas."""
+
+    def _prepare_for_call(self, request: ModelRequest) -> str:
+        """Seed QuickJS's reference cache without rendering the complete catalog."""
+        exposed = filter_tools_for_ptc(
+            [tool for tool in request.tools if isinstance(tool, BaseTool)],
+            self._ptc or [],
+            self_tool_name=self._tool_name,
+        )
+        names = frozenset(tool.name for tool in exposed)
+        if self._ptc_prompt_cache is None or self._ptc_prompt_cache[0] != names:
+            common = {
+                "slack_list_channel_members",
+                "slack_add_reaction",
+                "list_threads",
+                "schedule_thread_wakeup",
+                "save_plan",
+                *_REVIEWER_PTC_TOOLS,
+            }
+            schemas = {}
+            for tool in sorted(exposed, key=lambda tool: tool.name):
+                if tool.name in common or (
+                    "homebase" in tool.name.lower()
+                    and "releases" in tool.name.lower()
+                    and "active" in tool.name.lower()
+                ):
+                    schema = tool.args_schema
+                    schemas[to_camel_case(tool.name)] = (
+                        schema
+                        if isinstance(schema, dict)
+                        else schema.model_json_schema()
+                        if schema is not None and issubclass(schema, BaseModel)
+                        else schema.schema()
+                        if schema is not None
+                        else {}
+                    )
+            reference = Path(__file__).with_name("code_tools.md").read_text()
+            # QuickJS 0.3 renders dict schemas as untyped signatures and has no reference-renderer hook.
+            self._ptc_prompt_cache = (
+                names,
+                reference + json.dumps(schemas, sort_keys=True, separators=(",", ":")),
+            )
+        return super()._prepare_for_call(request)
+
+
 class OpenSweRunContext(BaseModel):
     """What Open SWE dispatch passes as the run context."""
 
@@ -124,7 +174,7 @@ def _code_mode(
 ) -> list[AgentMiddleware | CodeInterpreterMiddleware]:
     """The graph's code mode, with every tool the catalog offers from code callable from it."""
     if graph == "reviewer":
-        interpreter = CodeInterpreterMiddleware(
+        interpreter = CompactCodeInterpreterMiddleware(
             ptc=[
                 *(name for name in _REVIEWER_PTC_TOOLS if name not in FILE_TOOLS),
                 *file_tools.code_tools(_REVIEWER_PTC_TOOLS),
@@ -133,7 +183,9 @@ def _code_mode(
         )
     elif from_code:
         # As the in-process agent's code mode: state per turn, subagents through `task`.
-        interpreter = CodeInterpreterMiddleware(ptc=list(from_code), subagents=False, mode="turn")
+        interpreter = CompactCodeInterpreterMiddleware(
+            ptc=list(from_code), subagents=False, mode="turn"
+        )
     else:
         return []
     return [interpreter, *([DescribedToolsMiddleware(described)] if described else [])]

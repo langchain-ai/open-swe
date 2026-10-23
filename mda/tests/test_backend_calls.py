@@ -1440,3 +1440,87 @@ async def test_backend_calls_carry_the_running_spans_trace_without_its_metadata(
         assert root.endswith(str(turn.id)) and span, hook
         assert "langsmith-project=turns" in headers["baggage"], hook
         assert "metadata" not in headers["baggage"], hook
+
+
+@pytest.mark.parametrize("graph", ["agent", "reviewer", "review-scout"])
+async def test_code_mode_keeps_large_catalog_callable_without_rendering_its_descriptions(
+    graph: Literal["agent", "reviewer", "review-scout"],
+) -> None:
+    from agent import CompactCodeInterpreterMiddleware, _code_mode
+    from langchain.agents.middleware.types import ModelRequest, ModelResponse
+    from langchain_core.tools import StructuredTool
+    from langchain_quickjs.middleware import REPLState
+
+    async def lookup(channel: str) -> str:
+        return channel
+
+    parameters = {
+        "type": "object",
+        "properties": {"channel": {"type": "string"}},
+        "required": ["channel"],
+    }
+    catalog = [
+        StructuredTool.from_function(
+            coroutine=lookup,
+            name=f"integration_tool_{index}",
+            description="Integration documentation " + "details " * 100,
+            args_schema=parameters,
+        )
+        for index in range(400)
+    ]
+    common_names = (
+        "slack_list_channel_members",
+        "slack_add_reaction",
+        "list_threads",
+        "schedule_thread_wakeup",
+        "save_plan",
+        "homebase_releases_active",
+    )
+    catalog.extend(
+        StructuredTool.from_function(
+            coroutine=lookup,
+            name=name,
+            description="Common tool",
+            args_schema=parameters,
+        )
+        for name in common_names
+    )
+    files = MagicMock(spec=FileToolsMiddleware)
+    files.code_tools.return_value = []
+    prompts: list[str] = []
+
+    async def capture(request: ModelRequest) -> ModelResponse:
+        assert request.system_message is not None
+        prompts.append(request.system_message.text)
+        return ModelResponse(result=[AIMessage(content="done")])
+
+    for tools in (catalog, list(reversed(catalog))):
+        [interpreter] = _code_mode(graph, tools, {}, files)
+        assert isinstance(interpreter, CompactCodeInterpreterMiddleware)
+        state: REPLState = {"messages": [], "_quickjs_slot_id": "test-code-reference"}
+        request = ModelRequest(
+            model=FakeListChatModel(responses=["done"]),
+            messages=[HumanMessage(content="hello")],
+            tools=[],
+            state=state,
+            runtime=MagicMock(),
+        )
+        try:
+            await interpreter.awrap_model_call(request, capture)
+            slot = interpreter._slot_id(request.state)
+            result = await interpreter._registry.get(slot).eval_async(
+                'console.log(await tools.integrationTool_399({channel: "C123"}))'
+            )
+            assert result.error_type is None
+            assert result.stdout.strip() == "C123"
+        finally:
+            await interpreter._registry.aevict("test-code-reference")
+
+    assert prompts[0] == prompts[1]
+    assert len(prompts[0]) < 15_000
+    assert "Integration documentation" not in prompts[0]
+    schemas = json.loads(prompts[0].splitlines()[-1])
+    assert len(schemas) == len(common_names)
+    assert schemas["slackAddReaction"] == parameters
+    assert schemas["homebaseReleasesActive"] == parameters
+    assert "search_tools" in prompts[0] and "code_name" in prompts[0]
