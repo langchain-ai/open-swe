@@ -2,7 +2,7 @@
 
 import asyncio
 import logging
-from collections.abc import Awaitable, Callable, Mapping, Sequence
+from collections.abc import Awaitable, Callable, Collection, Mapping, Sequence
 from datetime import UTC, datetime
 from typing import Any, Literal
 
@@ -13,7 +13,6 @@ from langgraph_sdk.schema import ThreadSelectField
 from pydantic import BaseModel
 
 from openswe.review.session import ReviewSessionMetadata
-from openswe.tasks.flags import task_coordination_enabled
 from openswe.tasks.store import SidebarTaskMembership, sidebar_memberships
 from openswe.threads import index
 from openswe.threads.pins import list_thread_pin_ids, pin_thread, unpin_thread
@@ -151,6 +150,7 @@ def _metadata_matches_filters(
     ownerless: bool = False,
     admin_threads: bool | None = None,
     owner: str | None = None,
+    exclude_sources: Collection[str] = (),
 ) -> bool:
     """Metadata-only filters that don't require fetching the latest run."""
     if thread_is_unlisted(metadata):
@@ -178,6 +178,8 @@ def _metadata_matches_filters(
     if resolved is not None and _is_thread_resolved(metadata) is not resolved:
         return False
     if source and thread_source(metadata) != source:
+        return False
+    if thread_source(metadata) in exclude_sources:
         return False
     if query:
         pull_requests = metadata.get("pull_requests")
@@ -396,7 +398,8 @@ def _attach_task_membership(
             }
         ):
             label = " ".join(membership.instructions.split())[:64].strip() or "Worker"
-            summary["title"] = f"{label} · {membership.thread_id[:8]}"
+            # The tail, as worker launch chips show it: a UUIDv7 starts with a shared timestamp.
+            summary["title"] = f"{label} · {membership.thread_id[-8:]}"
         if membership.cancelled:
             summary["status"] = "interrupted"
         elif membership.launch_error:
@@ -418,9 +421,6 @@ async def attach_task_workers(
     ids = [thread_id for summary in summaries if isinstance(thread_id := summary.get("id"), str)]
     memberships = await sidebar_memberships(ids)
     if not memberships:
-        return
-    if not await task_coordination_enabled(login):
-        _attach_flat_task_memberships(summaries, memberships)
         return
     coordinator_ids = [
         key for key, membership in memberships.items() if membership.role == "coordinator"
@@ -579,6 +579,7 @@ async def _collect_thread_candidates(
     ownerless: bool = False,
     owned: bool = False,
     admin_threads: bool | None = None,
+    exclude_sources: Collection[str] = (),
     viewer_login: str | None = None,
     viewer_email: str | None = None,
     include_private: bool = True,
@@ -642,6 +643,7 @@ async def _collect_thread_candidates(
                     ownerless=ownerless,
                     admin_threads=admin_threads,
                     owner=viewer_login if owned else None,
+                    exclude_sources=exclude_sources,
                 ):
                     continue
                 thread_id = _thread_id(thread)
@@ -803,6 +805,7 @@ async def list_dashboard_thread_repos(
     include_automations: bool = False,
     owned: bool = False,
     include_all: bool = False,
+    exclude_sources: Collection[str] = (),
 ) -> list[dict[str, Any]]:
     """The repositories the viewer's threads ran in, newest activity first.
 
@@ -818,6 +821,7 @@ async def list_dashboard_thread_repos(
         resolved=None if include_resolved else False,
         scope="all" if include_automations else "interactive",
         owned=owned,
+        exclude_sources=exclude_sources,
     )
     repos: dict[str, dict[str, Any]] = {}
     for thread in candidates:
@@ -873,6 +877,7 @@ async def list_dashboard_threads_page(
     repo: str | None = None,
     ownerless: bool = False,
     owned: bool = False,
+    exclude_sources: Collection[str] = (),
     filter_participant_login: str | None = None,
     include_private: bool = True,
     surfaced_only: bool = False,
@@ -882,7 +887,6 @@ async def list_dashboard_threads_page(
 ) -> dict[str, Any]:
     client = langgraph_client()
     search_login = filter_participant_login or login
-    hierarchy = hierarchy and await task_coordination_enabled(login)
     search_email = email if search_login == login else None
     if scope == "automation" and filter_participant_login is None:
         searches = [{"thread_category": "automation"}, {"source": "schedule"}]
@@ -911,6 +915,7 @@ async def list_dashboard_threads_page(
         ownerless=ownerless,
         owned=owned,
         admin_threads=admin_threads,
+        exclude_sources=exclude_sources,
         viewer_login=login,
         viewer_email=email,
         include_private=include_private,
@@ -947,6 +952,7 @@ async def list_dashboard_threads_page(
                     ownerless=ownerless,
                     admin_threads=admin_threads,
                     owner=login if owned else None,
+                    exclude_sources=exclude_sources,
                 )
                 and (
                     not surfaced_only

@@ -610,7 +610,7 @@ pub(crate) fn normalize_platform_api_url(value: &str) -> Option<String> {
 /// 3. The host URL itself (local/custom single-origin installs)
 /// 4. GCP US prod default
 ///
-/// `env` should prefer project `.env` over process env when both exist.
+/// `env` should prefer process env over project `.env` when both exist.
 pub(crate) fn resolve_login_api_url(
     host_url: &str,
     env: impl Fn(&str) -> Option<String>,

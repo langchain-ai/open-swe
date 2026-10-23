@@ -50,6 +50,11 @@ class JobWorker:
             logger.error("No handler for job kind", extra=extra)
             await job.retry_later()
             return
+        if job.lapsed_lease is not None:
+            logger.warning(
+                "Job taken over after its lease lapsed",
+                extra={**extra, "lapsed_lease": job.lapsed_lease.isoformat()},
+            )
         work = asyncio.create_task(handler(job))
         try:
             while not (await asyncio.wait({work}, timeout=_HEARTBEAT_SECONDS))[0]:
@@ -60,6 +65,7 @@ class JobWorker:
                     return
         except asyncio.CancelledError:
             # Shutdown: the handler stops too, and the job is claimed again once its lease lapses.
+            logger.warning("Job cut short by shutdown", extra=extra)
             work.cancel()
             await asyncio.gather(work, return_exceptions=True)
             raise

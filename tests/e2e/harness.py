@@ -26,7 +26,7 @@ from contextlib import asynccontextmanager
 from datetime import UTC, datetime, timedelta
 from html import escape
 from pathlib import Path
-from typing import Any
+from typing import Annotated, Any
 from urllib.parse import quote, urlencode
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
@@ -54,7 +54,7 @@ from e2e_env import (  # noqa: E402
     TEST_USERS,
     UNLINKED_USER,
 )
-from fastapi import HTTPException, Request  # noqa: E402
+from fastapi import Body, HTTPException, Request  # noqa: E402
 from fastapi.responses import (  # noqa: E402
     FileResponse,
     HTMLResponse,
@@ -1423,6 +1423,12 @@ async def mock_github_pr(owner: str, repo: str, number: int) -> HTMLResponse:  #
 
 
 # --- fake GitHub REST API (open_pull_request hits this) --------------------
+# The backend calls these over HTTP from this same process, and they run git,
+# so they are sync handlers FastAPI runs off the event loop. Those that change
+# pull requests stay async: ``_publishing`` delivers the webhooks for the change.
+_JsonBody = Annotated[dict[str, Any], Body()]
+
+
 @app.get("/fake-gh/user/installations")
 async def gh_user_installations() -> JSONResponse:
     return JSONResponse(
@@ -1537,7 +1543,7 @@ async def gh_list_installation_repositories() -> JSONResponse:
 
 
 @app.get("/fake-gh/repos/{owner}/{repo}")
-async def gh_get_repo(owner: str, repo: str) -> JSONResponse:
+def gh_get_repo(owner: str, repo: str) -> JSONResponse:
     return JSONResponse(
         {
             "full_name": f"{owner}/{repo}",
@@ -1548,7 +1554,7 @@ async def gh_get_repo(owner: str, repo: str) -> JSONResponse:
 
 
 @app.get("/fake-gh/search/issues")
-async def gh_search_issues(
+def gh_search_issues(
     q: str = "",
     per_page: int = 100,
     page: int = 1,
@@ -1597,26 +1603,25 @@ async def gh_search_issues(
 
 
 @app.get("/fake-gh/repos/{owner}/{repo}/branches/{branch:path}")
-async def gh_get_branch(owner: str, repo: str, branch: str) -> JSONResponse:  # noqa: ARG001
+def gh_get_branch(owner: str, repo: str, branch: str) -> JSONResponse:  # noqa: ARG001
     if not fakes.branch_exists(owner, repo, branch):
         return JSONResponse({"message": "Branch not found"}, status_code=404)
     return JSONResponse({"name": branch, "commit": {"sha": "deadbeef"}})
 
 
 @app.get("/fake-gh/repos/{owner}/{repo}/rules/branches/{branch:path}")
-async def gh_get_branch_rules(owner: str, repo: str, branch: str) -> JSONResponse:  # noqa: ARG001
+def gh_get_branch_rules(owner: str, repo: str, branch: str) -> JSONResponse:  # noqa: ARG001
     return JSONResponse([])
 
 
 @app.get("/fake-gh/repos/{owner}/{repo}/pulls")
-async def gh_list_pulls(owner: str, repo: str) -> JSONResponse:  # noqa: ARG001
+def gh_list_pulls(owner: str, repo: str) -> JSONResponse:  # noqa: ARG001
     return JSONResponse([])
 
 
 @app.post("/fake-gh/repos/{owner}/{repo}/pulls")
-async def gh_create_pull(owner: str, repo: str, request: Request) -> JSONResponse:
+async def gh_create_pull(owner: str, repo: str, request: Request, body: _JsonBody) -> JSONResponse:
     """Open a pull request authored by the person whose token opened it, as GitHub does."""
-    body = await request.json()
     author = _token_login(request) or "open-swe[bot]"
     async with _publishing(author):
         pr = fakes.create_pull(
@@ -1633,7 +1638,7 @@ async def gh_create_pull(owner: str, repo: str, request: Request) -> JSONRespons
 
 
 @app.get("/fake-gh/repos/{owner}/{repo}/pulls/{number}")
-async def gh_get_pull(owner: str, repo: str, number: int, request: Request) -> Response:
+def gh_get_pull(owner: str, repo: str, number: int, request: Request) -> Response:
     pr = fakes.find_pull(number, owner, repo)
     if pr is None:
         return JSONResponse({"message": "Not Found"}, status_code=404)
@@ -1643,7 +1648,7 @@ async def gh_get_pull(owner: str, repo: str, number: int, request: Request) -> R
 
 
 @app.get("/fake-gh/repos/{owner}/{repo}/pulls/{number}/commits")
-async def gh_list_pull_commits(owner: str, repo: str, number: int, page: int = 1) -> JSONResponse:
+def gh_list_pull_commits(owner: str, repo: str, number: int, page: int = 1) -> JSONResponse:
     pr = fakes.find_pull(number, owner, repo)
     if pr is None:
         return JSONResponse({"message": "Not Found"}, status_code=404)
@@ -1651,7 +1656,7 @@ async def gh_list_pull_commits(owner: str, repo: str, number: int, page: int = 1
 
 
 @app.get("/fake-gh/repos/{owner}/{repo}/pulls/{number}/comments")
-async def gh_list_pull_comments(
+def gh_list_pull_comments(
     owner: str, repo: str, number: int, request: Request, page: int = 1
 ) -> JSONResponse:
     pr = fakes.find_pull(number, owner, repo)
@@ -1662,14 +1667,12 @@ async def gh_list_pull_comments(
 
 
 @app.post("/fake-gh/repos/{owner}/{repo}/pulls/{number}/comments")
-async def gh_create_pull_comment(
-    owner: str, repo: str, number: int, request: Request
-) -> JSONResponse:
+def gh_create_pull_comment(owner: str, repo: str, number: int, body: _JsonBody) -> JSONResponse:
     """A standalone inline comment. Recorded so a spec can prove nothing posts one."""
     pr = fakes.find_pull(number, owner, repo)
     if pr is None:
         return JSONResponse({"message": "Not Found"}, status_code=404)
-    pr["standalone_comment_posts"].append(await request.json())
+    pr["standalone_comment_posts"].append(body)
     return JSONResponse({"message": "Standalone comments are not used"}, status_code=422)
 
 
@@ -1687,9 +1690,8 @@ async def gh_delete_pull_comment(
 
 @app.post("/fake-gh/repos/{owner}/{repo}/pulls/{number}/reviews/{review_id}/events")
 async def gh_submit_pending_review(
-    owner: str, repo: str, number: int, review_id: int, request: Request
+    owner: str, repo: str, number: int, review_id: int, request: Request, body: _JsonBody
 ) -> JSONResponse:
-    body = await request.json()
     author = _token_login(request)
     async with _publishing(author):
         status, payload = fakes.submit_pending_review(
@@ -1715,7 +1717,7 @@ async def gh_delete_pending_review(
 
 
 @app.get("/fake-gh/repos/{owner}/{repo}/issues/{number}/comments")
-async def gh_list_issue_comments(owner: str, repo: str, number: int, page: int = 1) -> JSONResponse:
+def gh_list_issue_comments(owner: str, repo: str, number: int, page: int = 1) -> JSONResponse:
     pr = fakes.find_pull(number, owner, repo)
     if pr is None:
         return JSONResponse({"message": "Not Found"}, status_code=404)
@@ -1723,7 +1725,7 @@ async def gh_list_issue_comments(owner: str, repo: str, number: int, page: int =
 
 
 @app.get("/fake-gh/repos/{owner}/{repo}/compare/{basehead:path}")
-async def gh_compare(owner: str, repo: str, basehead: str) -> JSONResponse:
+def gh_compare(owner: str, repo: str, basehead: str) -> JSONResponse:
     base, _, head = basehead.partition("...")
     merge_base = fakes.merge_base(owner, repo, base, head)
     if merge_base is None:
@@ -1737,9 +1739,7 @@ async def gh_compare(owner: str, repo: str, basehead: str) -> JSONResponse:
 
 
 @app.get("/fake-gh/repos/{owner}/{repo}/commits")
-async def gh_list_commits(
-    owner: str, repo: str, path: str = "", sha: str = BASE_BRANCH
-) -> JSONResponse:
+def gh_list_commits(owner: str, repo: str, path: str = "", sha: str = BASE_BRANCH) -> JSONResponse:
     """Commits touching ``path``; an author is a GitHub user only when a test user owns the email."""
     logins = {user["email"]: user["login"] for user in TEST_USERS}
     return JSONResponse(
@@ -1751,7 +1751,7 @@ async def gh_list_commits(
 
 
 @app.get("/fake-gh/repos/{owner}/{repo}/contents/{path:path}")
-async def gh_get_contents(owner: str, repo: str, path: str, ref: str = BASE_BRANCH) -> Response:
+def gh_get_contents(owner: str, repo: str, path: str, ref: str = BASE_BRANCH) -> Response:
     content = fakes.file_at_ref(owner, repo, path, ref)
     if content is None:
         return JSONResponse({"message": "Not Found"}, status_code=404)
@@ -1759,11 +1759,12 @@ async def gh_get_contents(owner: str, repo: str, path: str, ref: str = BASE_BRAN
 
 
 @app.patch("/fake-gh/repos/{owner}/{repo}/pulls/{number}")
-async def gh_update_pull(owner: str, repo: str, number: int, request: Request) -> JSONResponse:
+async def gh_update_pull(
+    owner: str, repo: str, number: int, request: Request, body: _JsonBody
+) -> JSONResponse:
     pr = fakes.find_pull(number, owner, repo)
     if pr is None:
         return JSONResponse({"message": "Not Found"}, status_code=404)
-    body = await request.json()
     state = body.get("state")
     if state is not None and state not in {"open", "closed"}:
         return JSONResponse({"message": "Invalid value for state"}, status_code=422)
@@ -1777,19 +1778,23 @@ async def gh_update_pull(owner: str, repo: str, number: int, request: Request) -
 
 
 @app.get("/fake-gh/repos/{owner}/{repo}/pulls/{number}/files")
-async def gh_list_pull_files(owner: str, repo: str, number: int) -> JSONResponse:
+def gh_list_pull_files(
+    owner: str, repo: str, number: int, page: int = 1, per_page: int = 30
+) -> JSONResponse:
+    """One page of the pull's files; like GitHub, at most 3000 of them in all."""
     pr = fakes.find_pull(number, owner, repo)
     if pr is None:
         return JSONResponse({"message": "Not Found"}, status_code=404)
-    return JSONResponse(pr["files"])
+    size = max(min(per_page, 100), 1)
+    start = max(page - 1, 0) * size
+    return JSONResponse(pr["files"][:3000][start : start + size])
 
 
 @app.post("/fake-gh/repos/{owner}/{repo}/pulls/{number}/reviews")
 async def gh_submit_pull_review(
-    owner: str, repo: str, number: int, request: Request
+    owner: str, repo: str, number: int, request: Request, body: _JsonBody
 ) -> JSONResponse:
     """Submit a review as the person whose token was used, as GitHub does."""
-    body = await request.json()
     author = _token_login(request)
     if not author:
         return JSONResponse({"message": "Resource not accessible by integration"}, status_code=403)
@@ -1813,12 +1818,11 @@ async def gh_submit_pull_review(
 
 @app.post("/fake-gh/repos/{owner}/{repo}/issues/{number}/comments")
 async def gh_create_issue_comment(
-    owner: str, repo: str, number: int, request: Request
+    owner: str, repo: str, number: int, request: Request, body: _JsonBody
 ) -> JSONResponse:
     pr = fakes.find_pull(number, owner, repo)
     if pr is None:
         return JSONResponse({"message": "Not Found"}, status_code=404)
-    body = await request.json()
     author = _token_login(request)
     async with _publishing(author):
         comment = fakes.add_issue_comment(pr, author=author, body=str(body.get("body") or ""))
@@ -1827,12 +1831,11 @@ async def gh_create_issue_comment(
 
 @app.post("/fake-gh/repos/{owner}/{repo}/pulls/{number}/requested_reviewers")
 async def gh_request_reviewers(
-    owner: str, repo: str, number: int, request: Request
+    owner: str, repo: str, number: int, request: Request, body: _JsonBody
 ) -> JSONResponse:
     pr = fakes.find_pull(number, owner, repo)
     if pr is None:
         return JSONResponse({"message": "Not Found"}, status_code=404)
-    body = await request.json()
     logins = [str(login) for login in body.get("reviewers") or []]
     if pr["author"] in logins:
         return JSONResponse(
@@ -1848,12 +1851,11 @@ async def gh_request_reviewers(
 
 @app.delete("/fake-gh/repos/{owner}/{repo}/pulls/{number}/requested_reviewers")
 async def gh_remove_requested_reviewers(
-    owner: str, repo: str, number: int, request: Request
+    owner: str, repo: str, number: int, request: Request, body: _JsonBody
 ) -> JSONResponse:
     pr = fakes.find_pull(number, owner, repo)
     if pr is None:
         return JSONResponse({"message": "Not Found"}, status_code=404)
-    body = await request.json()
     removed = set(body.get("reviewers") or [])
     async with _publishing(_token_login(request)):
         pr["requested_reviewers"] = [
@@ -1863,8 +1865,9 @@ async def gh_remove_requested_reviewers(
 
 
 @app.put("/fake-gh/repos/{owner}/{repo}/pulls/{number}/merge")
-async def gh_merge_pull(owner: str, repo: str, number: int, request: Request) -> JSONResponse:
-    body = await request.json()
+async def gh_merge_pull(
+    owner: str, repo: str, number: int, request: Request, body: _JsonBody
+) -> JSONResponse:
     async with _publishing(_token_login(request)):
         status, payload = fakes.merge_pull(
             number,
@@ -1877,7 +1880,7 @@ async def gh_merge_pull(owner: str, repo: str, number: int, request: Request) ->
 
 
 @app.get("/fake-gh/repos/{owner}/{repo}/pulls/{number}/reviews")
-async def gh_list_pull_reviews(
+def gh_list_pull_reviews(
     owner: str, repo: str, number: int, request: Request, page: int = 1
 ) -> JSONResponse:
     """Submitted reviews, plus a pending one only for its author, as GitHub does."""
@@ -1897,14 +1900,14 @@ async def gh_list_pull_reviews(
 
 
 @app.get("/fake-gh/repos/{owner}/{repo}/collaborators/{username}/permission")
-async def gh_collaborator_permission(owner: str, repo: str, username: str) -> JSONResponse:  # noqa: ARG001
+def gh_collaborator_permission(owner: str, repo: str, username: str) -> JSONResponse:  # noqa: ARG001
     return JSONResponse(
         {"permission": fakes.collaborator_permission(username), "user": {"login": username}}
     )
 
 
 @app.get("/fake-gh/repos/{owner}/{repo}/commits/{sha}/check-runs")
-async def gh_get_check_runs(owner: str, repo: str, sha: str, page: int = 1) -> JSONResponse:
+def gh_get_check_runs(owner: str, repo: str, sha: str, page: int = 1) -> JSONResponse:
     runs = [
         fakes.check_run_json(pull, run)
         for pull in fakes.pulls()
@@ -1917,7 +1920,7 @@ async def gh_get_check_runs(owner: str, repo: str, sha: str, page: int = 1) -> J
 
 
 @app.get("/fake-gh/repos/{owner}/{repo}/commits/{sha}/status")
-async def gh_get_commit_status(owner: str, repo: str, sha: str, page: int = 1) -> JSONResponse:
+def gh_get_commit_status(owner: str, repo: str, sha: str, page: int = 1) -> JSONResponse:
     pr = fakes.find_pull_by_sha(owner, repo, sha)
     statuses = pr["statuses"] if pr is not None and page == 1 else []
     states = {status["state"] for status in statuses}
@@ -1939,13 +1942,12 @@ async def gh_get_commit_status(owner: str, repo: str, sha: str, page: int = 1) -
 
 
 @app.get("/fake-gh/repos/{owner}/{repo}/actions/runs")
-async def gh_list_workflow_runs(owner: str, repo: str, head_sha: str = "") -> JSONResponse:  # noqa: ARG001
+def gh_list_workflow_runs(owner: str, repo: str, head_sha: str = "") -> JSONResponse:  # noqa: ARG001
     return JSONResponse({"total_count": 0, "workflow_runs": []})
 
 
 @app.post("/fake-gh/graphql")
-async def gh_graphql(request: Request) -> JSONResponse:
-    body = await request.json()
+async def gh_graphql(request: Request, body: _JsonBody) -> JSONResponse:
     variables = body.get("variables", {})
     query = body.get("query", "")
     viewer = _token_login(request)

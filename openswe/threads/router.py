@@ -42,6 +42,7 @@ from openswe.remote_runtime.client import (
     MDA_GRAPH_ID,
     MDA_RUNTIME,
     RUNTIME_METADATA_KEY,
+    mda_graph_for,
 )
 from openswe.threads import index
 from openswe.threads.index import IndexedThread, ThreadExistsError, ThreadSearch
@@ -323,7 +324,12 @@ class ThreadRouter:
         recorder = StatusRecorder(send, on_success=None if cron else _marks_busy(thread_id))
         mda = RUNTIMES.mda_runtime
         await mda.ensure_remote_thread(thread_id)
-        rewritten = await mda.run_payload(thread_id, payload)
+        rewritten = await mda.run_payload(
+            thread_id,
+            payload,
+            thread_metadata=thread.metadata,
+            graph_id=mda_graph_for(thread.metadata),
+        )
         await forward(mda.http, scope, recorder, json.dumps(rewritten).encode())
 
     async def _command(
@@ -340,7 +346,13 @@ class ThreadRouter:
             return
         params = command.get("params")
         if method == "run.start" and isinstance(params, dict):
-            reply = await RUNTIMES.mda_runtime.start_command_run(thread_id, command, params)
+            reply = await RUNTIMES.mda_runtime.start_command_run(
+                thread_id,
+                command,
+                params,
+                thread_metadata=thread.metadata,
+                graph_id=mda_graph_for(thread.metadata),
+            )
             if reply.get("type") == "success":
                 await index.set_status(thread_id, "busy")
             await send_json(send, 200, reply)

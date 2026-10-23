@@ -594,6 +594,30 @@ def _configurable_from_runtime(
     return None
 
 
+CHANNEL_THREAD_METADATA = "mda_channel_thread"
+"""Thread metadata marking a thread a channel conversation owns.
+
+Only managed ingress sets it. Studio may start runs on these, to answer the
+interrupts channels link to.
+"""
+
+
+def on_channel_thread() -> bool:
+    """Whether the running graph continues a channel's conversation.
+
+    That conversation holds content from outside the workspace. The Agent
+    Server merges a thread's metadata into each of its runs', so a Studio
+    resume on a channel thread carries the marker too. ``False`` outside a run.
+    """
+    try:
+        config = get_config()
+    except RuntimeError:
+        # Called outside a runnable context.
+        return False
+    metadata = config.get("metadata") if isinstance(config, Mapping) else None
+    return isinstance(metadata, Mapping) and metadata.get(CHANNEL_THREAD_METADATA) == "true"
+
+
 def _ambient_configurable() -> Mapping[str, object] | None:
     """``configurable`` from the running LangGraph node, if any."""
     try:

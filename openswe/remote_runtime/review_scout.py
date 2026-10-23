@@ -4,10 +4,10 @@ from typing import Final
 
 from langchain_core.runnables import RunnableConfig
 from pydantic import JsonValue, TypeAdapter
+from runtime_api.catalog import ModelSpec, RunModels
 
 from openswe.remote_runtime.graph import RemoteGraph
-from openswe.remote_runtime.runs import ModelSpec, RunModels
-from openswe.review_scout.graph import build_review_scout, scout_models
+from openswe.review_scout.graph import plan_review_scout, scout_models
 from openswe.run_config import RunConfig
 from openswe.sandboxes.tool_runtime import ModelChoice, ToolSurface
 
@@ -16,8 +16,8 @@ ASSISTANT_ID: Final = "review-scout"
 _json = TypeAdapter(dict[str, JsonValue])
 
 
-async def _build(config: RunnableConfig, surface: ToolSurface) -> object:
-    return await build_review_scout(config, tool_surface=surface)
+async def _plan(config: RunnableConfig, surface: ToolSurface) -> None:
+    await plan_review_scout(config, surface)
 
 
 def _model_spec(choice: ModelChoice) -> ModelSpec:
@@ -33,4 +33,4 @@ async def run_models(cfg: RunConfig) -> RunModels:
     )
 
 
-REVIEW_SCOUT: Final = RemoteGraph(ASSISTANT_ID, _build, run_models)
+REVIEW_SCOUT: Final = RemoteGraph(ASSISTANT_ID, _plan, run_models)

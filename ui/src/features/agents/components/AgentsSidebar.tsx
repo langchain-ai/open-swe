@@ -257,6 +257,7 @@ export function AgentsSidebar({
     includeAutomations,
     includeResolved: prefs.filters.includeResolved,
     owned: prefs.filters.ownedOnly,
+    includeClaudeCode: prefs.filters.includeClaudeCode,
     sort: prefs.sortChats,
     enabled: true,
   })
@@ -264,6 +265,7 @@ export function AgentsSidebar({
     includeAutomations,
     includeResolved: prefs.filters.includeResolved,
     owned: prefs.filters.ownedOnly,
+    includeClaudeCode: prefs.filters.includeClaudeCode,
     enabled: repoMode,
   })
   const workspaceOptionsQuery = useWorkspaceOptions(workspaceOrganize)
@@ -547,6 +549,14 @@ export function AgentsSidebar({
           Show automations
         </MenuCheckItem>
         <MenuCheckItem
+          checked={prefs.filters.includeClaudeCode}
+          onCheckedChange={(checked) =>
+            setFilters({ ...prefs.filters, includeClaudeCode: checked })
+          }
+        >
+          Show Claude Code
+        </MenuCheckItem>
+        <MenuCheckItem
           checked={prefs.filters.ownedOnly}
           onCheckedChange={(checked) =>
             setFilters({ ...prefs.filters, ownedOnly: checked })
@@ -582,6 +592,7 @@ export function AgentsSidebar({
       includeResolved={prefs.filters.includeResolved}
       includeAutomations={includeAutomations}
       owned={prefs.filters.ownedOnly}
+      includeClaudeCode={prefs.filters.includeClaudeCode}
       sort={prefs.sortChats}
       activeThreadId={activeThreadId}
       openThread={openThread}
@@ -976,6 +987,7 @@ function RepoGroup({
   includeResolved,
   includeAutomations,
   owned,
+  includeClaudeCode,
   sort,
   activeThreadId,
   openThread,
@@ -998,6 +1010,7 @@ function RepoGroup({
   includeResolved: boolean
   includeAutomations: boolean
   owned: boolean
+  includeClaudeCode: boolean
   sort: ChatSort
   activeThreadId?: string
   openThread: (threadId: string) => void
@@ -1021,6 +1034,7 @@ function RepoGroup({
     includeResolved,
     includeAutomations,
     owned,
+    includeClaudeCode,
     sort,
     enabled: !collapsed,
   })

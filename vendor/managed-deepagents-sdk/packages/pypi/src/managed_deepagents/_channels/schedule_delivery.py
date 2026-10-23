@@ -1,23 +1,42 @@
-"""Deliver trusted schedule results through captured or explicit channel targets."""
+"""Deliver run results to channels the run itself didn't come from.
+
+Trusted schedule results go to a captured or explicit channel target. Task
+notification replies go to the channel thread the task started from: deepagents
+wakes an agent when one of its async subagent tasks ends by starting a run on
+the agent's thread, which carries no channel delivery of its own. The agent's
+thread remembers the channel binding of its last channel run; a notification
+run restores it, after the caller's identity is checked against it, and posts
+the agent's reply there.
+"""
 
 from __future__ import annotations
 
 import os
 import uuid
 from collections.abc import Awaitable, Callable, Mapping
-from typing import TYPE_CHECKING, Any, Literal, TypedDict, cast
+from contextvars import ContextVar
+from typing import TYPE_CHECKING, Annotated, Any, Literal, NotRequired, TypedDict, cast
 
-from langchain.agents.middleware.types import AgentMiddleware, AgentState
+from langchain.agents.middleware.types import AgentMiddleware, AgentState, OmitFromInput
 from langgraph.config import get_config
 from langgraph.runtime import Runtime
 
 from managed_deepagents._channels.assistant_text import (
-    extract_assistant_content,
+    NOTIFICATION_KEY,
+    QUIET_REPLY,
+    RUN_START_KEY,
     extract_assistant_text,
+    extract_reply_content,
+    extract_reply_text,
+    is_task_notification,
+    run_start_id,
 )
 from managed_deepagents._channels.binding import (
     SLACK_BOT_TOKEN_ENV,
+    ChannelBinding,
+    _current_channel,
     _current_routing,
+    resolve_channel_binding,
     resolve_runtime_channel,
 )
 from managed_deepagents._channels.trigger.client import create_trigger_client
@@ -249,6 +268,27 @@ def _resolve_schedule_metadata() -> Mapping[str, object] | None:
     return None
 
 
+async def _post_to_saved_channel(
+    saved_channel: object,
+    configurable: Mapping[str, object] | None,
+    output: Mapping[str, object],
+    *,
+    start_id: str | None = None,
+) -> bool:
+    """Post a run's reply to a saved channel; ``False`` when it can't be delivered to."""
+    channel = resolve_runtime_channel({"mda_channel": saved_channel}, configurable)
+    if channel is None or channel.post is None:
+        return False
+    content = (
+        extract_reply_text(output, start_id=start_id) or None
+        if isinstance(saved_channel, Mapping) and saved_channel.get("transport") == "trigger_server"
+        else extract_reply_content(output, start_id=start_id)
+    )
+    if content is not None:
+        await channel.post({"type": "content", "content": content})
+    return True
+
+
 async def _deliver_captured_result(
     configurable: Mapping[str, object] | None,
     output: Mapping[str, object],
@@ -258,17 +298,8 @@ async def _deliver_captured_result(
     routing = _current_routing.get() or {}
     saved_channel = routing.get("mda_channel")
     if saved_channel is not None:
-        channel = resolve_runtime_channel({"mda_channel": saved_channel}, configurable)
-        if channel is None or channel.post is None:
+        if not await _post_to_saved_channel(saved_channel, configurable, output):
             raise RuntimeError("Scheduled channel delivery is unavailable")
-        content = (
-            reply_text or None
-            if isinstance(saved_channel, Mapping)
-            and saved_channel.get("transport") == "trigger_server"
-            else extract_assistant_content(output)
-        )
-        if content is not None:
-            await channel.post({"type": "content", "content": content})
         return
     deliver_to = read_schedule_deliver_to(_field(routing.get("mda_schedule"), "deliver_to"))
     if deliver_to is not None:
@@ -322,12 +353,186 @@ def create_schedule_delivery_middleware(
     return _ScheduleDeliveryMiddleware(deliver_impl=deliver_fn)
 
 
+#: State key holding the channel binding of the thread's last channel run.
+SAVED_CHANNEL_KEY = "mda_channel"
+
+#: Set for the steps of a notification run whose channel binding was restored.
+_delivering_notification: ContextVar[bool] = ContextVar(
+    "mda_delivering_notification", default=False
+)
+
+
+class ChannelNotificationState(AgentState):
+    """Thread state remembering where the agent's channel conversation is."""
+
+    mda_channel: Annotated[NotRequired[dict[str, Any]], OmitFromInput]
+    mda_run_start: Annotated[NotRequired[str | None], OmitFromInput]
+    """ID of the task notification that started the current notification run (kept
+    across its resumes), so its reply never repeats an answer an earlier run posted."""
+
+
+def is_task_notification_input(input_value: object) -> bool:
+    """Whether a run's input carries a deepagents task notification."""
+    messages = input_value.get("messages") if isinstance(input_value, Mapping) else None
+    if not isinstance(messages, list):
+        return False
+    return any(is_task_notification(message) for message in messages)
+
+
+def restored_channel(
+    saved: object, configurable: Mapping[str, object] | None
+) -> ChannelBinding | None:
+    """Return the thread's saved binding if this run's caller may deliver to it."""
+    if saved is None:
+        return None
+    return resolve_channel_binding({"mda_channel": saved}, configurable)
+
+
+def _saved_form(binding: ChannelBinding) -> dict[str, Any]:
+    """What to keep in state: the binding without the raw provider event."""
+    return {key: value for key, value in binding.items() if key != "raw_event"}
+
+
+async def _post_notification_reply(
+    binding: ChannelBinding,
+    configurable: Mapping[str, object] | None,
+    messages: object,
+    start_id: str | None,
+) -> None:
+    output = {"messages": messages}
+    text = extract_reply_text(output, start_id=start_id).strip()
+    if not text or text == QUIET_REPLY:
+        return
+    if not await _post_to_saved_channel(binding, configurable, output, start_id=start_id):
+        logger.error("task notification reply: channel delivery is unavailable")
+
+
+async def report_notification_interrupts(
+    binding: ChannelBinding,
+    *,
+    run_thread_id: str,
+    run_id: str,
+    interrupts: list[dict[str, object]],
+) -> None:
+    """Show a paused notification run's pending interrupts in its channel thread.
+
+    Sends the same ``run.interrupted`` event a channel-started run sends, so
+    Trigger shows the approval in the thread and its answer resumes this run.
+    Only Trigger channels show interrupts; elsewhere MDA leaves them to the app.
+    """
+    target = binding["target"]
+    if (
+        binding["transport"] != "trigger_server"
+        or not interrupts
+        or not isinstance(target, Mapping)
+    ):
+        return
+    from managed_deepagents._channels.trigger.http import (  # noqa: PLC0415 - avoids an import cycle
+        _best_effort,
+        _runtime_event,
+    )
+
+    client = create_trigger_client()
+    if client is None:
+        logger.error("task notification interrupt: Trigger channel is unavailable")
+        return
+    event = {
+        "delivery_id": binding["delivery_id"],
+        "source_thread_key": binding["source_thread_key"],
+        "address": target["address"],
+    }
+    started = {"thread_id": run_thread_id, "run_id": run_id}
+    body = _runtime_event(
+        "run.interrupted", cast("Any", event), cast("Any", started), cast("Any", interrupts)
+    )
+    await _best_effort(client.post_runtime_event(str(target["channel_id"]), body))
+
+
+def create_channel_notification_middleware() -> AgentMiddleware:
+    """Remember channel threads, and post replies to task notifications there."""
+
+    class _ChannelNotificationMiddleware(AgentMiddleware):
+        state_schema = ChannelNotificationState
+
+        @property
+        def name(self) -> str:
+            return "mda-channel-notifications"
+
+        def before_agent(
+            self,
+            state: object,
+            runtime: object | None = None,  # noqa: ARG002 - signature set by AgentMiddleware
+        ) -> dict[str, Any] | None:
+            return _remember_channel(state)
+
+        async def abefore_agent(
+            self,
+            state: object,
+            runtime: object | None = None,  # noqa: ARG002 - signature set by AgentMiddleware
+        ) -> dict[str, Any] | None:
+            return _remember_channel(state)
+
+        def after_agent(
+            self, state: object, runtime: object | None = None
+        ) -> dict[str, Any] | None:
+            # Local langgraph may invoke the sync hook; bridge to the async delivery path.
+            return await_if_needed(self.aafter_agent(state, runtime))
+
+        async def aafter_agent(
+            self, state: object, runtime: object | None = None
+        ) -> dict[str, Any] | None:
+            binding = _current_channel.get()
+            if not _delivering_notification.get() or binding is None:
+                return None
+            from_runtime = _configurable_from_runtime(runtime)
+            configurable = from_runtime if from_runtime is not None else _ambient_configurable()
+            messages = state.get("messages") if isinstance(state, Mapping) else None
+            start_id = run_start_id(state)
+            try:
+                await _post_notification_reply(binding, configurable, messages, start_id)
+            except Exception as error:  # noqa: BLE001 - delivery must not fail the agent's run
+                logger.error(
+                    "task notification reply: posting failed (%s)", logger.safe_error_label(error)
+                )
+            return None
+
+    return _ChannelNotificationMiddleware()
+
+
+def _remember_channel(state: object) -> dict[str, Any] | None:
+    """Save a channel run's binding; a notification run records where it starts instead."""
+    binding = _current_channel.get()
+    if binding is None:
+        return None
+    if _delivering_notification.get():
+        messages = state.get("messages") if isinstance(state, Mapping) else None
+        start_id = _field(messages[-1], "id") if isinstance(messages, list) and messages else None
+        return {RUN_START_KEY: start_id} if isinstance(start_id, str) else None
+    update: dict[str, Any] = {}
+    # An ordinary run replies with its last answer, so drop an earlier notification's start.
+    if isinstance(state, Mapping) and state.get(RUN_START_KEY) is not None:
+        update[RUN_START_KEY] = None
+    saved = _saved_form(binding)
+    current = state.get(SAVED_CHANNEL_KEY) if isinstance(state, Mapping) else None
+    if current != saved:
+        update[SAVED_CHANNEL_KEY] = saved
+    return update or None
+
+
 __all__ = [
+    "NOTIFICATION_KEY",
+    "QUIET_REPLY",
+    "SAVED_CHANNEL_KEY",
+    "ChannelNotificationState",
     "NormalizedScheduleDeliverTo",
     "address_from_deliver_to",
+    "create_channel_notification_middleware",
     "create_schedule_delivery_middleware",
     "deliver_schedule_result",
     "get_deployment_id",
+    "is_task_notification_input",
     "is_trusted_schedule_delivery_run",
     "read_schedule_deliver_to",
+    "report_notification_interrupts",
+    "restored_channel",
 ]

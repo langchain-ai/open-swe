@@ -166,6 +166,7 @@ async def api_list_thread_repos(
     include_automations: bool = False,
     owned: bool = False,
     all: bool = False,
+    exclude_source: Annotated[list[str] | None, Query()] = None,
     session: dict[str, Any] = SESSION_DEP,
 ) -> list[dict[str, Any]]:
     if all and not session_is_admin(session):
@@ -177,6 +178,7 @@ async def api_list_thread_repos(
         include_automations=include_automations,
         owned=owned,
         include_all=all,
+        exclude_sources=frozenset(exclude_source or ()),
     )
 
 
@@ -223,6 +225,7 @@ async def api_list_threads_page(
     repo: str | None = None,
     ownerless: bool = False,
     owned: bool = False,
+    exclude_source: Annotated[list[str] | None, Query()] = None,
     sort_by: Literal["created_at", "updated_at"] = "updated_at",
     hierarchy: bool = False,
     session: dict[str, Any] = SESSION_DEP,
@@ -253,6 +256,7 @@ async def api_list_threads_page(
         repo=repo,
         ownerless=ownerless,
         owned=owned,
+        exclude_sources=frozenset(exclude_source or ()),
         sort_by=sort_by,
         hierarchy=hierarchy,
     )

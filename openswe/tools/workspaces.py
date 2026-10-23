@@ -63,7 +63,7 @@ async def _start_refresh(slug: str, name: str) -> dict[str, Any]:
         }
     if not record.setup_script:
         return {"status": "error", "error": f"workspace {name!r} has no setup_script to run"}
-    if refresh.is_refresh_in_flight(record):
+    if record.refresh_in_flight():
         return {
             "status": "error",
             "error": f"a refresh of {name!r} is already running",

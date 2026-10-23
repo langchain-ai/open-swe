@@ -461,8 +461,13 @@ fn compile_builds_python_factory_entry_without_running_factory() {
     assert!(summary.has_skills);
     let langgraph: serde_json::Value =
         serde_json::from_str(&fs::read_to_string(out_dir.join("langgraph.json")).unwrap()).unwrap();
-    assert_eq!(langgraph["graphs"]["support"], "./_mda_entry.py:agent");
-    assert_eq!(langgraph["graphs"].as_object().unwrap().len(), 1);
+    assert_eq!(
+        langgraph["graphs"],
+        serde_json::json!({
+            "support": "./_mda_entry.py:agent",
+            "support--general-purpose": "./_mda_entry.py:agent__general_purpose",
+        })
+    );
     let entry = fs::read_to_string(out_dir.join("_mda_entry.py")).unwrap();
     assert!(!entry.contains("assert_static_agent_definition"), "{entry}");
     assert!(entry.contains("_connectors"), "{entry}");
@@ -1251,6 +1256,147 @@ fn compile_generates_a_python_entry() {
 }
 
 #[test]
+fn compile_builds_a_graph_per_async_subagent() {
+    if !python3_available() {
+        return;
+    }
+    let root = tempfile::tempdir().unwrap();
+    write_file(
+        root.path(),
+        "agent.py",
+        concat!(
+            "agent = define_deep_agent(name=\"lead\", subagents=[\n",
+            "    {\"name\": \"researcher\", \"description\": \"d\", \"async\": True},\n",
+            "    {\"name\": \"helper\", \"description\": \"d\"},\n",
+            "])\n",
+        ),
+    );
+    let project = Project {
+        root: root.path().to_path_buf(),
+        language: Language::Python,
+        agent_file: PathBuf::from("agent.py"),
+        files: vec![PathBuf::from("agent.py")],
+    };
+    let out_dir = root.path().join("build");
+
+    with_py_runtime(root.path(), || compile(&project, &out_dir)).unwrap();
+
+    let manifest: serde_json::Value =
+        serde_json::from_str(&fs::read_to_string(out_dir.join("langgraph.json")).unwrap()).unwrap();
+    assert_eq!(
+        manifest["graphs"],
+        serde_json::json!({
+            "lead": "./_mda_entry.py:agent",
+            "lead--researcher": "./_mda_entry.py:agent__researcher",
+            "lead--general-purpose": "./_mda_entry.py:agent__general_purpose",
+        })
+    );
+    let entry = fs::read_to_string(out_dir.join("_mda_entry.py")).unwrap();
+    assert!(
+        entry.contains(
+            "_async_subagent_graphs = {\"researcher\": \"lead--researcher\", \"general-purpose\": \"lead--general-purpose\"}"
+        ),
+        "{entry}"
+    );
+    assert!(
+        entry.contains("async_subagent_graphs=_async_subagent_graphs"),
+        "{entry}"
+    );
+    assert!(
+        entry.contains(
+            "@asynccontextmanager\nasync def agent__researcher(config, runtime: ServerRuntime):\n    async with parent_run(config):"
+        ),
+        "{entry}"
+    );
+    assert!(entry.contains("async_subagent=\"researcher\")"), "{entry}");
+}
+
+#[test]
+fn eval_builds_no_async_general_purpose_subagent() {
+    if !python3_available() {
+        return;
+    }
+    let root = tempfile::tempdir().unwrap();
+    write_file(
+        root.path(),
+        "agent.py",
+        "agent = define_deep_agent(name=\"lead\")\n",
+    );
+    let project = Project {
+        root: root.path().to_path_buf(),
+        language: Language::Python,
+        agent_file: PathBuf::from("agent.py"),
+        files: vec![PathBuf::from("agent.py")],
+    };
+    let out_dir = root.path().join("build");
+
+    with_py_runtime(root.path(), || compile_for_eval(&project, &out_dir)).unwrap();
+
+    let entry = fs::read_to_string(out_dir.join("_mda_eval_entry.py")).unwrap();
+    assert!(!entry.contains("general_purpose"), "{entry}");
+    assert!(!entry.contains("async_subagent_graphs"), "{entry}");
+}
+
+#[test]
+fn eval_rejects_async_subagents() {
+    if !python3_available() {
+        return;
+    }
+    let root = tempfile::tempdir().unwrap();
+    write_file(
+        root.path(),
+        "agent.py",
+        "agent = define_deep_agent(name=\"lead\", subagents=[{\"name\": \"r\", \"description\": \"d\", \"async\": True}])\n",
+    );
+    let project = Project {
+        root: root.path().to_path_buf(),
+        language: Language::Python,
+        agent_file: PathBuf::from("agent.py"),
+        files: vec![PathBuf::from("agent.py")],
+    };
+
+    let error = compile_for_eval(&project, &root.path().join("build")).unwrap_err();
+
+    assert!(
+        error.to_string().contains("not supported in eval"),
+        "{error}"
+    );
+}
+
+#[test]
+fn compile_warns_about_subagents_it_cannot_read() {
+    if !python3_available() {
+        return;
+    }
+    let root = tempfile::tempdir().unwrap();
+    write_file(
+        root.path(),
+        "agent.py",
+        "agent = define_deep_agent(name=\"lead\", subagents=[make_subagent()])\n",
+    );
+    let project = Project {
+        root: root.path().to_path_buf(),
+        language: Language::Python,
+        agent_file: PathBuf::from("agent.py"),
+        files: vec![PathBuf::from("agent.py")],
+    };
+
+    let summary = with_py_runtime(root.path(), || {
+        compile(&project, &root.path().join("build"))
+    })
+    .unwrap();
+
+    assert!(
+        summary
+            .warnings
+            .iter()
+            .any(|warning| warning.contains("1 subagent entry")),
+        "{:?}",
+        summary.warnings
+    );
+}
+
+#[test]
 fn compile_ignores_python_config_for_typescript() {
     // A TypeScript manifest keys the runtime on `node_version`, so Python
     // configuration is irrelevant to it. An unparseable `requires-python` at the
@@ -1898,7 +2044,7 @@ fn compile_wires_local_context_hub_for_python() {
     assert!(entry_out.contains("_context_root = "));
     assert!(entry_out.contains("_has_skills = False"));
     assert!(entry_out.contains(
-        "await compile_managed_agent_async(_definition, config, context_root=_context_root, has_skills=_has_skills, runtime=runtime)"
+        "await compile_managed_agent_async(_definition, config, context_root=_context_root, has_skills=_has_skills, async_subagent_graphs=_async_subagent_graphs, runtime=runtime)"
     ));
     assert!(!entry_out.contains("_system_prompt"));
 }
@@ -1943,7 +2089,7 @@ fn compile_for_deploy_wires_context_hub_metadata_for_python() {
     assert!(entry_out.contains("_context_repo = \"my-agent\""));
     assert!(entry_out.contains("_has_skills = False"));
     assert!(entry_out.contains(
-        "await compile_managed_agent_async(_definition, config, context_repo=_context_repo, has_skills=_has_skills, runtime=runtime)"
+        "await compile_managed_agent_async(_definition, config, context_repo=_context_repo, has_skills=_has_skills, async_subagent_graphs=_async_subagent_graphs, runtime=runtime)"
     ));
     // Commit pinning is not wired in the runtime yet — do not emit it.
     assert!(!entry_out.contains("_context_commit"));
@@ -2103,7 +2249,7 @@ fn compile_wires_python_sandbox_without_setup_script() {
     assert!(!entry_out.contains("setup_script="));
     assert!(entry_out
         .contains(
-            "await compile_managed_agent_async(_definition, config, context_root=_context_root, has_skills=_has_skills, sandbox=_sandbox, runtime=runtime)",
+            "await compile_managed_agent_async(_definition, config, context_root=_context_root, has_skills=_has_skills, sandbox=_sandbox, async_subagent_graphs=_async_subagent_graphs, runtime=runtime)",
         ));
     assert!(
         entry_out.contains("from managed_deepagents.runtime import compile_managed_agent_async")
@@ -2241,7 +2387,7 @@ fn compile_marks_python_factory_sandbox_setup() {
 
     let entry_out = fs::read_to_string(out_dir.join("_mda_entry.py")).unwrap();
     assert!(entry_out.contains(
-        "await compile_managed_agent_async(_definition, config, context_root=_context_root, has_skills=_has_skills, sandbox=_sandbox, sandbox_setup=True, runtime=runtime)"
+        "await compile_managed_agent_async(_definition, config, context_root=_context_root, has_skills=_has_skills, sandbox=_sandbox, sandbox_setup=True, async_subagent_graphs=_async_subagent_graphs, runtime=runtime)"
     ));
 }
 
@@ -2366,7 +2512,7 @@ fn compile_wires_tools_python_mcp() {
     assert!(entry_out.contains("from _mda_connectors import connectors as _connectors"));
     assert!(entry_out
         .contains(
-            "await compile_managed_agent_async(_definition, config, context_root=_context_root, has_skills=_has_skills, connectors=_connectors, runtime=runtime)",
+            "await compile_managed_agent_async(_definition, config, context_root=_context_root, has_skills=_has_skills, connectors=_connectors, async_subagent_graphs=_async_subagent_graphs, runtime=runtime)",
         ));
 
     let connectors_out = fs::read_to_string(out_dir.join("_mda_connectors.py")).unwrap();
@@ -2846,6 +2992,91 @@ fn compile_requires_identity_for_python_ingress_channel() {
 }
 
 #[test]
+fn compile_requires_identity_for_github_channel() {
+    let root = tempfile::tempdir().unwrap();
+    setup_mock_ts_runtime(root.path());
+    write_file(
+        root.path(),
+        "agent.ts",
+        "export const agent = defineDeepAgent({ name: \"agent\", model: \"openai:gpt-5\" });\n",
+    );
+    write_file(
+        root.path(),
+        "channels/github.ts",
+        concat!(
+            "import { channels } from \"managed-deepagents\";\n",
+            "export const channel = channels.github({ onEvent: {} });\n",
+        ),
+    );
+    write_file(
+        root.path(),
+        "package.json",
+        "{\n  \"name\": \"example\",\n  \"dependencies\": {}\n}\n",
+    );
+
+    let project = Project {
+        root: root.path().to_path_buf(),
+        language: Language::TypeScript,
+        agent_file: PathBuf::from("agent.ts"),
+        files: vec![
+            PathBuf::from("agent.ts"),
+            PathBuf::from("channels/github.ts"),
+            PathBuf::from("package.json"),
+        ],
+    };
+
+    let out_dir = root.path().join(".mda").join("build");
+    let error = compile(&project, &out_dir).unwrap_err().to_string();
+    assert!(
+        error.contains("require a root identity"),
+        "expected identity gate for GitHub channel, got: {error}"
+    );
+}
+
+#[test]
+fn compile_requires_identity_for_python_github_channel() {
+    let root = tempfile::tempdir().unwrap();
+    write_file(
+        root.path(),
+        "agent.py",
+        "agent = define_deep_agent(name=\"agent\", model=\"openai:gpt-5\")\n",
+    );
+    write_file(
+        root.path(),
+        "channels/github.py",
+        concat!(
+            "from managed_deepagents import channels\n",
+            "channel = channels.github(on_event={})\n",
+        ),
+    );
+    write_file(
+        root.path(),
+        "pyproject.toml",
+        "[project]\nname = \"example\"\nversion = \"0.0.0\"\ndependencies = []\n",
+    );
+
+    let project = Project {
+        root: root.path().to_path_buf(),
+        language: Language::Python,
+        agent_file: PathBuf::from("agent.py"),
+        files: vec![
+            PathBuf::from("agent.py"),
+            PathBuf::from("channels/github.py"),
+            PathBuf::from("pyproject.toml"),
+        ],
+    };
+
+    let out_dir = root.path().join(".mda").join("build");
+    let error = with_py_runtime(root.path(), || compile(&project, &out_dir))
+        .unwrap_err()
+        .to_string();
+    assert!(
+        error.contains("require a root identity"),
+        "expected identity gate for GitHub channel, got: {error}"
+    );
+}
+
+#[test]
 fn compile_wires_typescript_http_app_to_live_channels() {
     let root = tempfile::tempdir().unwrap();
     setup_mock_ts_runtime(root.path());
@@ -2904,7 +3135,9 @@ fn compile_wires_typescript_http_app_to_live_channels() {
 
     let http_out = fs::read_to_string(out_dir.join("_mda_http.ts")).unwrap();
     assert!(
-        http_out.contains("buildManagedHttpApp({ identity, channels })"),
+        http_out.contains(
+            "buildManagedHttpApp({ identity, channels, root: fileURLToPath(new URL(\".\", import.meta.url)) })"
+        ),
         "expected channels kwargs in buildManagedHttpApp call:\n{http_out}"
     );
     assert!(
@@ -2971,7 +3204,7 @@ fn compile_wires_python_http_app_to_live_channels() {
 
     let http_out = fs::read_to_string(out_dir.join("_mda_http.py")).unwrap();
     assert!(
-        http_out.contains("channels=_channels"),
+        http_out.contains("channels=_channels, root=str(_Path(__file__).resolve().parent)"),
         "expected channels kwargs in build_managed_http_app call:\n{http_out}"
     );
     assert!(
@@ -3158,7 +3391,7 @@ fn compile_wires_python_identity() {
     assert!(entry_out.contains("from identity import identity as _identity"));
     assert!(
         entry_out.contains(
-            "await compile_managed_agent_async(_definition, config, context_root=_context_root, has_skills=_has_skills, identity=_identity, runtime=runtime)",
+            "await compile_managed_agent_async(_definition, config, context_root=_context_root, has_skills=_has_skills, identity=_identity, async_subagent_graphs=_async_subagent_graphs, runtime=runtime)",
         )
     );
 
@@ -4098,7 +4331,7 @@ fn compile_preserves_named_memory_policies() {
         )));
         assert!(entry_out.contains(language.ident(
             "identity, memory }, runtime)",
-            "identity=_identity, memory=_memory, runtime=runtime)",
+            "identity=_identity, memory=_memory, async_subagent_graphs=_async_subagent_graphs, runtime=runtime)",
         )));
         assert!(!entry_out.contains("must not run at build time"));
     }
@@ -4177,7 +4410,7 @@ fn compile_wires_python_memory() {
     assert!(entry_out.contains("from memory import memory as _memory"));
     assert!(entry_out.contains(
         "await compile_managed_agent_async(_definition, config, context_root=_context_root, \
-         has_skills=_has_skills, memory=_memory, runtime=runtime)"
+         has_skills=_has_skills, memory=_memory, async_subagent_graphs=_async_subagent_graphs, runtime=runtime)"
     ));
 }
 

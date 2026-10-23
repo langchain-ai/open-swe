@@ -318,13 +318,10 @@ def apply() -> None:
 
     LangSmithBrowser.delete = _delete_nothing
 
-    # The review diff reads against a REST base its module captured at import time.
-    from openswe.github import pull_request_diff
     from openswe.review import chat as review_chat
     from openswe.review import reviews as review_reviews
     from openswe.review_scout import graph as review_scout_graph
 
-    pull_request_diff.__dict__["_GITHUB_API"] = FAKE_GITHUB_API
     for module in (review_reviews, review_chat):
         module.__dict__["get_github_app_installation_token"] = _dummy_install_token
     review_chat.__dict__["fetch_pr_diff"] = _fake_fetch_pr_diff

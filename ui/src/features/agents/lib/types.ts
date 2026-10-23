@@ -27,6 +27,7 @@ export type AgentSource =
   | "slack"
   | "linear"
   | "schedule"
+  | "claude_code"
 
 export type AgentThreadCategory =
   | "interactive"
@@ -104,6 +105,7 @@ export type OutputIframeDisplay =
 export interface ToolExecutionChunk {
   kind: "tool-execution"
   toolCallId: string
+  toolName?: string
   /** Stable arrival time for the tool call, shown on hover. */
   timestamp?: string
   title: string
@@ -141,6 +143,8 @@ export interface ToolExecutionChunk {
 export interface TextChunk {
   kind: "text"
   text: string
+  /** When the agent message that wrote it started; bounds the work around it. */
+  timestamp?: string
 }
 
 export interface ReasoningChunk {

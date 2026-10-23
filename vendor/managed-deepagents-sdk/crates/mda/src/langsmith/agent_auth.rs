@@ -15,10 +15,13 @@ use serde_json::{json, Map, Value};
 use super::{ApiError, Client};
 use crate::error::{categorized, ErrorCategory};
 
-const CONNECTIONS_PATH: &str = "/v1/agent-auth/connections";
+pub(super) const CONNECTIONS_PATH: &str = "/v1/agent-auth/connections";
 const OAUTH_PROVIDERS_PATH: &str = "/v1/agent-auth/oauth-providers";
-const OAUTH_AUTHORIZATION_SESSIONS_PATH: &str = "/v1/agent-auth/oauth-authorization-sessions";
+const CREDENTIALS_PATH: &str = "/v1/agent-auth/credentials";
+pub(super) const OAUTH_AUTHORIZATION_SESSIONS_PATH: &str =
+    "/v1/agent-auth/oauth-authorization-sessions";
 const OAUTH_CALLBACK_PATH: &str = "/v1/agent-auth/oauth/callback";
+const OAUTH_CLIENT_METADATA_PATH: &str = "/v1/agent-auth/oauth/client-metadata.json";
 const PRINCIPALS_PATH: &str = "/v1/agent-auth/principals";
 const SAAS_PLATFORM_AUTH_PATH: &str = "/auth";
 const SELF_HOSTED_PLATFORM_AUTH_PATH: &str = "/v1/auth";
@@ -123,6 +126,10 @@ pub struct CreateOAuthConnection<'a> {
 struct OAuthProviderRecord {
     id: String,
     slug: String,
+    #[serde(default)]
+    client_id: String,
+    #[serde(default)]
+    grant_type: String,
 }
 
 #[derive(Debug, Deserialize)]
@@ -151,6 +158,9 @@ pub(crate) struct OAuthAuthorizationSession {
     pub status: String,
     #[serde(default)]
     pub verification_url: String,
+    /// Why a failed session failed, e.g. `app_store_failed`.
+    #[serde(default)]
+    pub error_code: Option<String>,
 }
 
 impl Client {
@@ -272,7 +282,13 @@ impl Client {
         options: CreateOAuthConnection<'_>,
     ) -> Result<ConnectionSummary> {
         let base = self.public_platform_base()?;
-        let provider = oauth_provider_create_body(&options)?;
+        let mut provider = oauth_provider_create_body(&options)?;
+        // The provider is named after the connection unless it has its own
+        // slug, and provider slugs can't have the "/" namespaces connection
+        // slugs can (`mda/linear-app/<deployment>`).
+        if options.slug.contains('/') {
+            provider["slug"] = json!(options.slug.replace('/', "-"));
+        }
         let payload = json!({
             "slug": options.slug,
             "display_name": options.slug,
@@ -298,17 +314,28 @@ impl Client {
         connection_id: &str,
         owner_id: &str,
     ) -> Result<OAuthAuthorizationSession> {
+        self.start_agent_oauth_authorization_session(connection_id, owner_id, Map::new())
+    }
+
+    /// [`Self::create_agent_oauth_authorization_session`] with fields a grant
+    /// adds, such as a GitHub App's `installation_id`.
+    pub(crate) fn start_agent_oauth_authorization_session(
+        &self,
+        connection_id: &str,
+        owner_id: &str,
+        fields: Map<String, Value>,
+    ) -> Result<OAuthAuthorizationSession> {
         let base = self.public_platform_base()?;
+        let mut payload = fields;
+        payload.insert("connection_id".into(), json!(connection_id));
+        payload.insert("owner_type".into(), json!("agent"));
+        payload.insert("owner_id".into(), json!(owner_id));
         let value = self.request(
             &base,
             Method::POST,
             OAUTH_AUTHORIZATION_SESSIONS_PATH,
             &[],
-            Some(json!({
-                "connection_id": connection_id,
-                "owner_type": "agent",
-                "owner_id": owner_id,
-            })),
+            Some(Value::Object(payload)),
         )?;
         let session: OAuthAuthorizationSession = serde_json::from_value(value)
             .context("failed to decode the OAuth authorization session")?;
@@ -382,6 +409,60 @@ impl Client {
         Ok(found.is_some_and(|value| credential_id(&value).is_some()))
     }
 
+    /// The state of the OAuth grant an agent holds on a connection, from
+    /// Agent Auth's credential metadata. Never reads the token itself.
+    pub(crate) fn agent_oauth_grant(
+        &self,
+        connection_id: &str,
+        agent_owner_id: &str,
+    ) -> Result<AgentGrant> {
+        let base = self.public_platform_base()?;
+        let params = [
+            ("credential_owner_type", OWNER_POLICY_AGENT),
+            ("credential_owner_id", agent_owner_id),
+        ];
+        let Some(connection) = self.request_optional(
+            &base,
+            Method::GET,
+            &connection_path(connection_id),
+            &params,
+            None,
+        )?
+        else {
+            return Ok(AgentGrant::Missing);
+        };
+        let Some(credential_id) = credential_id(&connection) else {
+            return Ok(AgentGrant::Missing);
+        };
+        // The credential's metadata: its stored status, no token.
+        let path = format!("{CREDENTIALS_PATH}/{}", path_id(credential_id));
+        let Some(credential) = self.request_optional(&base, Method::GET, &path, &[], None)? else {
+            return Ok(AgentGrant::Missing);
+        };
+        Ok(AgentGrant::from_status(
+            credential.pointer("/oauth2/status").and_then(Value::as_str),
+        ))
+    }
+
+    /// The redirect URI Agent Auth sends OAuth providers, when it publishes
+    /// it: its OAuth client metadata, served only for an HTTPS callback.
+    pub(crate) fn published_oauth_redirect_uri(&self) -> Result<Option<String>> {
+        let base = self.public_platform_base()?;
+        let Some(metadata) =
+            self.request_optional(&base, Method::GET, OAUTH_CLIENT_METADATA_PATH, &[], None)?
+        else {
+            return Ok(None);
+        };
+        Ok(metadata
+            .get("redirect_uris")
+            .and_then(Value::as_array)
+            .and_then(|uris| uris.first())
+            .and_then(Value::as_str)
+            .map(str::trim)
+            .filter(|uri| !uri.is_empty())
+            .map(str::to_string))
+    }
+
     pub fn find_workspace_connection_by_slug(
         &self,
         slug: &str,
@@ -416,7 +497,20 @@ impl Client {
             .collect())
     }
 
-    fn list_connections_raw(&self) -> Result<Vec<ConnectionSummary>> {
+    /// The OAuth providers that mint tokens for the GitHub App `app_id`. Agent
+    /// Auth registers an App's provider with the App ID as its `client_id`.
+    pub(crate) fn github_app_provider_ids(&self, app_id: &str) -> Result<BTreeSet<String>> {
+        Ok(self
+            .oauth_provider_index()?
+            .into_values()
+            .filter(|provider| provider.grant_type == "github_app" && provider.client_id == app_id)
+            .map(|provider| provider.id)
+            .collect())
+    }
+
+    /// Every connection row, without the OAuth provider slugs
+    /// [`Self::list_workspace_connections`] looks up for display.
+    pub(crate) fn list_connections_raw(&self) -> Result<Vec<ConnectionSummary>> {
         let base = self.public_platform_base()?;
         let page_size = PAGE_SIZE.to_string();
         let mut cursor: Option<String> = None;
@@ -595,11 +689,62 @@ fn enrich_connection(
 }
 
 fn connection_path(connection_id: &str) -> String {
-    format!("{CONNECTIONS_PATH}/{connection_id}")
+    format!("{CONNECTIONS_PATH}/{}", path_id(connection_id))
 }
 
 fn oauth_authorization_session_path(session_id: &str) -> String {
-    format!("{OAUTH_AUTHORIZATION_SESSIONS_PATH}/{session_id}")
+    format!(
+        "{OAUTH_AUTHORIZATION_SESSIONS_PATH}/{}",
+        path_id(session_id)
+    )
+}
+
+pub(super) fn oauth_provider_path(provider_id: &str) -> String {
+    format!("{OAUTH_PROVIDERS_PATH}/{}", path_id(provider_id))
+}
+
+/// The OAuth grant an agent holds on a connection, as Agent Auth records it.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) enum AgentGrant {
+    /// No credential: nobody approved the install, or it was removed.
+    Missing,
+    Active,
+    /// The grant lapsed (the provider refused to renew it) and needs consent
+    /// again. Agent Auth keeps the credential, and a new authorization
+    /// session on the same connection makes it active again.
+    AuthorizationRequired,
+    /// The grant was revoked and Agent Auth is removing the credential. The
+    /// app itself, its connection and webhook secret, is still good, so setup
+    /// keeps it and has an admin approve it again, as for
+    /// [`Self::AuthorizationRequired`]. Counting it as [`Self::Missing`] would
+    /// delete the connection and ask for a brand-new app instead. It is its own
+    /// variant so setup can say why consent is needed.
+    Revoked,
+    /// A status this CLI does not know, kept verbatim so setup can name it
+    /// rather than quietly treating the grant as healthy.
+    Unknown(String),
+}
+
+impl AgentGrant {
+    /// Agent Auth's `oauth2.status`. A credential without a status is active,
+    /// as Agent Auth treats it.
+    fn from_status(status: Option<&str>) -> Self {
+        match status {
+            None | Some("active") => Self::Active,
+            Some("authorization_required") => Self::AuthorizationRequired,
+            Some("revocation_pending") => Self::Revoked,
+            Some(other) => Self::Unknown(other.to_string()),
+        }
+    }
+}
+
+/// Agent Auth ids are UUIDs; anything else must not change the request path.
+fn path_id(id: &str) -> &str {
+    if uuid::Uuid::try_parse(id).is_ok() {
+        id
+    } else {
+        "invalid"
+    }
 }
 
 /// Linked credential id from a connection read with owner query parameters.
@@ -614,7 +759,7 @@ fn credential_id(connection: &Value) -> Option<&str> {
 
 /// Flatten nested `credential.{kind,oauth_provider_id}` onto the summary shape
 /// the CLI and deploy gates already speak.
-fn decode_connection(value: Value) -> Result<ConnectionSummary> {
+pub(super) fn decode_connection(value: Value) -> Result<ConnectionSummary> {
     let Value::Object(mut obj) = value else {
         bail!("connection response must be a JSON object");
     };
@@ -704,6 +849,7 @@ mod tests {
     use serde_json::json;
 
     use super::*;
+    use crate::langsmith::test_support::serve_once;
     use crate::langsmith::{Credential, REQUEST_TIMEOUT};
 
     const CONN: &str = "77777777-7777-7777-7777-777777777777";
@@ -758,51 +904,6 @@ mod tests {
             host_backend_url: "http://unused.invalid".into(),
             platform_api_url: Some(base_url),
         }
-    }
-
-    /// Serves one response, then hands the request back so a test can assert on
-    /// the body. Reads to the end of the body so the assertion does not depend
-    /// on it landing in the same TCP read as the headers.
-    fn serve_once(status: &'static str, body: String) -> (String, Receiver<String>) {
-        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
-        let addr = listener.local_addr().unwrap();
-        let (tx, rx) = mpsc::channel();
-        thread::spawn(move || {
-            let Ok((mut stream, _)) = listener.accept() else {
-                return;
-            };
-            let mut buf = Vec::new();
-            let mut tmp = [0_u8; 1024];
-            while let Ok(read) = stream.read(&mut tmp) {
-                if read == 0 {
-                    break;
-                }
-                buf.extend_from_slice(&tmp[..read]);
-                let request = String::from_utf8_lossy(&buf);
-                if let Some(headers_end) = request.find("\r\n\r\n") {
-                    let content_length = request
-                        .lines()
-                        .find_map(|line| {
-                            let (name, value) = line.split_once(':')?;
-                            (name.eq_ignore_ascii_case("content-length"))
-                                .then(|| value.trim().parse::<usize>().ok())
-                                .flatten()
-                        })
-                        .unwrap_or(0);
-                    if buf.len() >= headers_end + 4 + content_length {
-                        break;
-                    }
-                }
-            }
-            let _ = tx.send(String::from_utf8(buf).unwrap());
-            let response = format!(
-                "HTTP/1.1 {status}\r\nContent-Type: application/json\r\n\
-                 Content-Length: {}\r\nConnection: close\r\n\r\n{body}",
-                body.len()
-            );
-            let _ = stream.write_all(response.as_bytes());
-        });
-        (format!("http://{addr}"), rx)
     }
 
     /// Serves a fixed sequence of responses on successive connections.
@@ -1127,6 +1228,122 @@ mod tests {
     }
 
     #[test]
+    fn grant_statuses_map_to_what_setup_does_with_them() {
+        assert_eq!(AgentGrant::from_status(None), AgentGrant::Active);
+        assert_eq!(AgentGrant::from_status(Some("active")), AgentGrant::Active);
+        assert_eq!(
+            AgentGrant::from_status(Some("authorization_required")),
+            AgentGrant::AuthorizationRequired
+        );
+        // A revoke keeps the app and asks for consent again; it is not missing.
+        assert_eq!(
+            AgentGrant::from_status(Some("revocation_pending")),
+            AgentGrant::Revoked
+        );
+        assert_eq!(
+            AgentGrant::from_status(Some("something_new")),
+            AgentGrant::Unknown("something_new".to_string())
+        );
+    }
+
+    #[test]
+    fn agent_oauth_grant_reads_the_credentials_status_never_its_token() {
+        const CREDENTIAL: &str = "88888888-8888-4888-8888-888888888888";
+        const AGENT: &str = "11111111-1111-4111-8111-111111111111";
+        let mut connection = workspace_connection_json("mda/linear-app/x");
+        connection["credential"]["credential_id"] = json!(CREDENTIAL);
+        let metadata = |status: &str| {
+            json!({
+                "credential_id": CREDENTIAL,
+                "kind": "oauth2",
+                "oauth2": { "status": status, "token_type": "Bearer", "scopes": ["read"] },
+            })
+            .to_string()
+        };
+        let (url, rx) = serve_pages(vec![
+            ("200 OK", connection.to_string()),
+            ("200 OK", metadata("active")),
+        ]);
+        assert_eq!(
+            client_for(url).agent_oauth_grant(CONN, AGENT).unwrap(),
+            AgentGrant::Active
+        );
+        let owner = rx.recv().unwrap();
+        assert!(owner.contains("credential_owner_id=11111111"), "{owner}");
+        let read = rx.recv().unwrap();
+        assert!(
+            read.starts_with(&format!("GET /v1/agent-auth/credentials/{CREDENTIAL} ")),
+            "{read}"
+        );
+
+        // A lapsed grant keeps its credential, marked for consent.
+        let (url, _rx) = serve_pages(vec![
+            ("200 OK", connection.to_string()),
+            ("200 OK", metadata("authorization_required")),
+        ]);
+        assert_eq!(
+            client_for(url).agent_oauth_grant(CONN, AGENT).unwrap(),
+            AgentGrant::AuthorizationRequired
+        );
+        let (url, _rx) = serve_pages(vec![
+            ("200 OK", connection.to_string()),
+            ("200 OK", metadata("revocation_pending")),
+        ]);
+        assert_eq!(
+            client_for(url).agent_oauth_grant(CONN, AGENT).unwrap(),
+            AgentGrant::Revoked
+        );
+        // A status this CLI does not know is named, not taken as active.
+        let (url, _rx) = serve_pages(vec![
+            ("200 OK", connection.to_string()),
+            ("200 OK", metadata("suspended")),
+        ]);
+        assert_eq!(
+            client_for(url).agent_oauth_grant(CONN, AGENT).unwrap(),
+            AgentGrant::Unknown("suspended".to_string())
+        );
+        // No credential for the agent at all.
+        let (url, _rx) = serve_once(
+            "200 OK",
+            workspace_connection_json("mda/linear-app/x").to_string(),
+        );
+        assert_eq!(
+            client_for(url).agent_oauth_grant(CONN, AGENT).unwrap(),
+            AgentGrant::Missing
+        );
+    }
+
+    #[test]
+    fn published_oauth_redirect_uri_reads_agent_auths_client_metadata() {
+        let (url, rx) = serve_once(
+            "200 OK",
+            json!({
+                "client_id": "https://api.smith.example/v1/agent-auth/oauth/client-metadata.json",
+                "redirect_uris": ["https://api.smith.example/v1/agent-auth/oauth/callback"],
+            })
+            .to_string(),
+        );
+        assert_eq!(
+            client_for(url)
+                .published_oauth_redirect_uri()
+                .unwrap()
+                .as_deref(),
+            Some("https://api.smith.example/v1/agent-auth/oauth/callback")
+        );
+        let request = rx.recv().unwrap();
+        assert!(
+            request.starts_with("GET /v1/agent-auth/oauth/client-metadata.json "),
+            "{request}"
+        );
+        // Not published, e.g. for an http:// callback.
+        let (url, _rx) = serve_once("404 Not Found", "{}".to_string());
+        assert_eq!(
+            client_for(url).published_oauth_redirect_uri().unwrap(),
+            None
+        );
+    }
+
+    #[test]
     fn a_connection_without_a_credential_for_the_owner_is_not_owned() {
         let (url, _rx) = serve_once(
             "200 OK",
@@ -1211,6 +1428,66 @@ mod tests {
             ["linear".to_string(), "notion".to_string()]
                 .into_iter()
                 .collect()
+        );
+    }
+
+    #[test]
+    fn github_app_provider_ids_match_the_app_id() {
+        let (url, _rx) = serve_once(
+            "200 OK",
+            json!({
+                "items": [
+                    { "id": "p-1", "slug": "mda-github-app-dep-1", "client_id": "42", "grant_type": "github_app" },
+                    { "id": "p-2", "slug": "mda-github-app-dep-2", "client_id": "43", "grant_type": "github_app" },
+                    { "id": "p-3", "slug": "notion", "client_id": "42", "grant_type": "authorization_code" }
+                ],
+                "next_cursor": null
+            })
+            .to_string(),
+        );
+
+        let ids = client_for(url).github_app_provider_ids("42").unwrap();
+
+        assert_eq!(ids, ["p-1".to_string()].into_iter().collect());
+    }
+
+    #[test]
+    fn create_oauth_workspace_connection_names_a_namespaced_provider() {
+        let (url, rx) = serve_once(
+            "201 Created",
+            oauth_connection_json(
+                "mda/linear-app/dep-1",
+                "11111111-1111-1111-1111-111111111111",
+            )
+            .to_string(),
+        );
+        client_for(url)
+            .create_oauth_workspace_connection(CreateOAuthConnection {
+                slug: "mda/linear-app/dep-1",
+                owner_policy: ConnectionOwnerPolicy::Agent,
+                service: None,
+                client_id: Some("client-id"),
+                client_secret: Some("client-secret"),
+                scopes: &["read".to_string()],
+                authorize_url: Some("https://linear.app/oauth/authorize"),
+                token_url: Some("https://api.linear.app/oauth/token"),
+                token_endpoint_auth_method: "client_secret_post",
+                authorization_params: &Map::new(),
+                grant_type: "authorization_code",
+                token_params: &Map::new(),
+                token_request_headers: &Map::new(),
+                display_name: "Linear",
+                allowed_scopes: &["read".to_string()],
+                client_registration_url: None,
+                mcp_server_url: None,
+            })
+            .unwrap();
+
+        let body = request_json_body(&rx.recv().unwrap());
+        assert_eq!(body["slug"], "mda/linear-app/dep-1");
+        assert_eq!(
+            body["credential"]["provider"]["slug"],
+            "mda-linear-app-dep-1"
         );
     }
 
