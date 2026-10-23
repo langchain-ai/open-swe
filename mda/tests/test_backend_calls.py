@@ -7,7 +7,7 @@ from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Final, Literal, Self, cast
 from unittest.mock import AsyncMock, MagicMock
-from uuid import UUID
+from uuid import UUID, uuid4
 
 import anthropic
 import httpx
@@ -50,6 +50,7 @@ from langgraph_sdk.errors import (
 from langsmith import Client, agent_address, get_tracing_context, tracing_context
 from langsmith.run_trees import RunTree, WriteReplica
 from managed_deepagents import define_deep_agent
+from managed_deepagents._run_input import ManagedTurnTracer
 from managed_deepagents.runtime import compile_managed_agent_async
 from pydantic import BaseModel, JsonValue
 from rt.backend import (
@@ -95,6 +96,75 @@ from runtime_api.loop import (
 from runtime_api.operations import OperationResult, ShellVerdict
 from runtime_api.reports import REPORTS, Reports, ReportsTaken
 from runtime_api.workers import LAUNCH_WORKER
+
+
+class UserInterrupt(Exception):
+    pass
+
+
+@pytest.mark.parametrize(
+    ("failure", "reason"),
+    [
+        (None, "completed"),
+        (
+            asyncio.CancelledError(
+                UserInterrupt(
+                    "superseded by run 00000000-0000-4000-8000-000000000001 "
+                    "(multitask_strategy=interrupt)"
+                )
+            ),
+            "superseded",
+        ),
+        (asyncio.CancelledError(), "cancelled"),
+        (GeneratorExit(), "cancelled"),
+        (RuntimeError("provider failed"), "failed"),
+    ],
+)
+async def test_managed_root_records_its_end_reason(
+    failure: BaseException | None, reason: str
+) -> None:
+    client = MagicMock(spec=Client)
+    tracer = ManagedTurnTracer(client=client, project_name="test")
+    root_id = uuid4()
+    with tracing_context(enabled=True):
+        tracer.on_chain_start({}, {}, run_id=root_id)
+        if failure is None:
+            tracer.on_chain_end({"answer": "done"}, run_id=root_id)
+        else:
+            tracer.on_chain_error(failure, run_id=root_id)
+    patches = [
+        call.kwargs for call in client.update_run.call_args_list if call.kwargs["run_id"] == root_id
+    ]
+    assert patches
+    assert _run_metadata(patches[-1])["end_reason"] == reason
+    assert bool(patches[-1].get("error")) == (reason == "failed")
+
+
+async def test_root_termination_closes_children_and_suppresses_late_spans() -> None:
+    client = MagicMock(spec=Client)
+    tracer = ManagedTurnTracer(client=client, project_name="test")
+    root_id, tool_id, model_id = uuid4(), uuid4(), uuid4()
+    with tracing_context(enabled=True):
+        root = tracer.on_chain_start({}, {}, run_id=root_id, name="turn")
+        tracer.on_tool_start({}, "input", run_id=tool_id, parent_run_id=root_id)
+        tracer.on_chat_model_start(
+            {}, [[HumanMessage(content="hello")]], run_id=model_id, parent_run_id=root_id
+        )
+        tracer.on_chain_error(asyncio.CancelledError(), run_id=root_id)
+        tracer.on_tool_end("late result", run_id=tool_id)
+        tracer.on_llm_error(RuntimeError("late error"), run_id=model_id)
+        posted = client.create_run.call_count
+        late_id = uuid4()
+        tracer.on_chain_start({}, {}, run_id=late_id, parent_run_id=tool_id)
+        tracer.on_tool_start({}, "late", run_id=uuid4(), parent_run_id=late_id)
+        tracer.on_chat_model_start(
+            {}, [[HumanMessage(content="late")]], run_id=uuid4(), parent_run_id=root_id
+        )
+    assert client.create_run.call_count == posted
+    ended = {
+        call.kwargs["run_id"]: call.kwargs["end_time"] for call in client.update_run.call_args_list
+    }
+    assert ended[root_id] == ended[tool_id] == ended[model_id] == root.end_time
 
 
 def _run_metadata(patch: Mapping[str, object]) -> Mapping[str, object]:
@@ -228,6 +298,19 @@ async def test_managed_traces_keep_the_requested_project_without_mirroring(
             assert get_tracing_context()["replicas"] == replicas
     wait_for_all_tracers()
     assert len([run for run in callbacks.traced_runs if run.name == "test-agent"]) == 2
+    root_ids = {
+        call.kwargs["id"]
+        for call in client.create_run.call_args_list
+        if call.kwargs["name"] == "test-agent"
+    }
+    assert root_ids
+    root_patches = {
+        call.kwargs["run_id"]: _run_metadata(call.kwargs)
+        for call in client.update_run.call_args_list
+        if call.kwargs["run_id"] in root_ids
+    }
+    assert root_ids <= root_patches.keys()
+    assert all(metadata["end_reason"] == "completed" for metadata in root_patches.values())
     spans = [call.kwargs for call in client.create_run.call_args_list]
     assert {span["session_name"] for span in spans} == projects
     for project in projects:

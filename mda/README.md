@@ -150,6 +150,7 @@ uv run --locked mda deploy --name open-swe-mda-staging --deployment-type prod
 ```
 
 CI and manual deploys run the CLI from this project's locked environment.
+The deploy CLI passes the checkout's commit SHA as `LANGSMITH_REVISION_ID` so traces identify the MDA code they ran; a project deployed without git can set it in `.env`.
 `managed-deepagents` is the SDK vendored in [`vendor/managed-deepagents-sdk`](../vendor/README.md): `mda/` installs its runtime as an editable path source, and `make mda-cli` builds its CLI with cargo into that runtime, where the `mda` command runs it.
 Run it before `mda build`, `mda dev` or `mda deploy`: until it has, the runtime has no CLI, and it rebuilds whenever the vendored CLI changed; `mda build` and `mda deploy` bundle that runtime, so what deploys is exactly the vendored tree.
 Only the SDK's `main` is vendored: `uv run scripts/vendor.py [sha]` vendors main's head or a commit on it, records the exact commit in `UPSTREAM`, three-way merges upstream's changes into the files we edited there, and relocks `mda/`; `--pr <n>` carries an upstream pull request not yet on main, recorded in `vendor/mda-upstream-prs`; `--diff` prints our changes ([`vendor/README.md`](../vendor/README.md)).

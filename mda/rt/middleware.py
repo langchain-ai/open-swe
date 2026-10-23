@@ -339,8 +339,10 @@ class BackendRunMiddleware(AgentMiddleware[RunState]):
         return build_model(models.model, use_gateway=models.use_gateway)
 
     def _trace_metadata(self) -> dict[str, JsonValue]:
-        """Who the run acts for."""
-        return {**self._backend.run.catalog.trace_metadata}
+        """Who the run acts for, and the model it runs on."""
+        catalog = self._backend.run.catalog
+        model = {} if catalog.models is None else {"model": catalog.models.model.model_id}
+        return {**catalog.trace_metadata, **model}
 
     def _carrying(
         self, state: Mapping[str, object], update: dict[str, object] | None
