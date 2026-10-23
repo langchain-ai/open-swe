@@ -152,7 +152,7 @@ strings and arrays remain explicit selections. Select memory with `define_memory
 selected memory cannot use `allow`. Root `memory.py` remains the fallback.
 
 On direct runs, `execution_runtime.context` is application context or `None`.
-On channel runs, it is `None`; read delivery data from `runtime.channel`.
+On channel runs, it is `None`; read the conversation from `runtime.thread`.
 `ManagedServerRuntime[AppContext]` preserves the application's context type.
 It extends the native `langgraph_sdk.runtime.ServerRuntime` variants with managed
 fields. `access_context` identifies the Agent Server operation that called the
@@ -292,8 +292,10 @@ When the subagent pauses for approval, the agent sees the task as waiting. If th
 agent was started from a Slack channel, the approval shows in that Slack thread,
 and the answer there resumes the subagent. Otherwise, answer it in the subagent's
 own thread. When a task finishes, the agent's reply about it is posted to the
-same Slack thread. The subagent's tools and middleware can also post to that
-thread through `runtime.channel`, for example to show progress.
+same Slack thread. A subagent's `runtime.thread` is its starting agent's thread,
+so its tools and middleware can also post to that Slack thread through
+`runtime.thread.origin.channel`, for example to show progress. The subagent's
+own answer is not posted.
 
 With tracing on, a subagent's runs appear in the starting agent's trace, under
 the call that started it. Nesting follows the trace headers on the request, so
@@ -345,8 +347,8 @@ await client.runs.create(
 
 Direct API runs use your authored `context_schema` and native LangGraph context
 validation. On channel runs, tools, middleware, and authored factories receive
-`None` as context. Use `runtime.channel.event` for the typed event and
-`runtime.channel.raw_event` for optional provider data. The application schema
+`None` as context. Use `runtime.thread.origin.channel.event` for the typed event
+and `runtime.thread.origin.channel.raw_event` for optional provider data. The application schema
 stays on the graph, but its required fields do not apply to channel runs.
 Supplying a `channel` field in a direct API call does not establish a trusted
 channel source.
@@ -358,23 +360,52 @@ in the graph factory for each run or resume. Direct callers of the managed
 compiler must build a fresh graph with the execution's context; a compiled graph
 is scoped to that execution.
 
-`runtime.channel` describes the current verified delivery. It is absent on
-ordinary API and schedule runs. Its facts are available even when the channel
-cannot send. `post` uses a private, verified reply target. The channel helper
-does not expose the target or let callers replace it.
+`runtime.thread` describes the thread the run belongs to (`ManagedThread`):
+
+- `id` is the LangGraph thread ID. An async subagent's thread is its starting
+  agent's thread.
+- `origin` is the channel conversation the thread came from, or `None`. Its
+  `channel` (a `RuntimeChannel`) is the delivery that started the run. On a
+  run that no channel message started, such as a resume from LangSmith Studio,
+  a task notification that wakes the agent, or a scheduled run, it is the
+  thread's last channel conversation. Then `event` and `raw_event` are `None`,
+  except that a scheduled run has a `schedule` event. `origin.sender` is the
+  participant who sent the latest message, or `None` when that was not a person.
+- `participants` lists the people who wrote in the thread, as
+  `ThreadParticipant(id, role)`. The first person is the `owner`; later people
+  are `member`s. `id` is the same as `runtime.server_info.principal.id`.
+
+Managed channel ingress records the origin and participants in thread metadata
+when a message arrives. They hold routing and principal IDs only, never message
+content. Only managed ingress can write them.
+
+The channel facts are available even when the channel cannot send. `post` uses
+a private, verified reply target. The channel helper does not expose the target
+or let callers replace it.
 
 ```python
-if runtime.channel is not None and runtime.channel.post is not None:
-    await runtime.channel.post({"type": "content", "content": "I am checking that now."})
+origin = runtime.thread.origin
+if origin is not None and origin.channel.post is not None:
+    await origin.channel.post({"type": "content", "content": "I am checking that now."})
 ```
 
-The built-in Slack `runtime.channel.post` sends text content through Trigger.
+`runtime.channel` is deprecated: use `runtime.thread.origin.channel`. It has the
+same value and is removed in 0.11.
+
+The built-in Slack `channel.post` sends text content through Trigger.
 It rejects native payloads and content it cannot send. For channels that support
 native messages, set `type` to `"native"` and supply the JSON in `native`.
 For content messages, set `type` to `"content"` and supply `content`.
 Supply only the matching payload. Native JSON has no extra provider or payload
-wrapper. The `runtime.channel` helper has no `address`, `update`, or destination override.
+wrapper. The channel helper has no `address`, `update`, or destination override.
 A post sends an additional message; the normal final agent reply remains automatic.
+
+When a run with a thread origin ends, MDA posts the run's answers to that
+origin. A Studio resume of a channel thread answers in the channel, and the
+run that a finished async task starts posts only its new answers. A run that
+stops for approval shows the approval in a Slack thread instead. An answer of
+exactly `[quiet]` is not posted. If a Slack post fails, the run fails; if an
+HTTP channel post fails, MDA logs the error and the run still succeeds.
 
 Managed Slack channels save incoming files under `/workspace/attachments/` and
 add `upload_files(paths)` so the agent can attach completed workspace files
@@ -621,12 +652,13 @@ them before posting.
 
 A run can still stop on an interrupt: a review from `interrupt_on`, or a value
 the agent passed to `interrupt()`. The GitHub channel neither asks for nor
-answers interrupts. When a run stops on one, the App replies with a link to the
-conversation's thread in LangSmith Studio, in the LangSmith environment
-`mda deploy` recorded. While the conversation waits, events on it start nothing
-and get the same link. Anyone with access
+answers interrupts. When a run stops on one, the run itself comments with a link
+to the thread in LangSmith Studio where the decision is made, in the LangSmith
+environment `mda deploy` recorded. It does so as it ends, so a run that Studio
+resumes, or a scheduled run, that stops again comments too. While the
+conversation waits, events on it start nothing and get the same link. Anyone with access
 to the deployment's LangSmith workspace can answer there, reviews included;
-Studio can only resume the conversation's interrupts, not start new turns in it.
+Studio can only resume a thread's interrupts, not start new turns in it.
 The resumed run uses no user connections, even though a person answered: the
 conversation holds content from outside the workspace, which must not act with
 the grants of whoever resumes it from Studio.
@@ -679,7 +711,7 @@ Callbacks receive a normalized event and its `thread` (`thread.id`,
 `thread.channel.name`, and `thread.interrupted` while it waits on an interrupt). The event includes
 the original payload, delivery and installation IDs, repository and sender.
 Types describe handwritten subsets, not the complete GitHub schema. Run code can
-inspect the normalized event through `runtime.channel.raw_event`. Logs correlate the GitHub
+inspect the normalized event through `runtime.thread.origin.channel.raw_event`. Logs correlate the GitHub
 delivery ID to the fresh thread and run IDs without printing the payload.
 `GitHub handler returned run input` records the callback decision;
 `channel run started` confirms run creation.
@@ -739,9 +771,9 @@ handler, the run starts with Linear's prompt for the session (`promptContext`),
 and a reply in the session continues the conversation. Each session is a
 thread of its own. The run's reply appears in the session, and Stop cancels
 that session's run. A run that stops on interrupts, such
-as a review from `interrupt_on`, answers with a link to its thread in LangSmith
-Studio, where the decision is made; replies in the session meanwhile get the
-same link. Comments that a
+as a review from `interrupt_on`, answers as it ends with a link to its thread in
+LangSmith Studio, where the decision is made, also when Studio resumed it;
+replies in the session meanwhile get the same link. Comments that a
 session already delivers, such as the mention itself and replies in the
 session, don't also reach a `Comment.create` handler.
 
@@ -792,22 +824,22 @@ A message returned by `parse` contains `user_id`, `thread_id`, `content`, and
 `target`. `thread_id` is the stable LangGraph thread UUID. `target` is separate
 JSON that the adapter needs to reply, such as a Photon conversation ID or a Slack
 channel and thread timestamp. MDA keeps this target private and binds it to
-`runtime.channel.post`. The adapter's `post(message)` callback receives the
+`runtime.thread.origin.channel.post`. The adapter's `post(message)` callback receives the
 target for reply routing.
 
 `verify` runs first with the original bytes and headers. `verify` and `parse`
 each get a separately readable request body. `parse` owns body decoding and can
 read JSON, form data, text, or bytes. It returns the existing `message` or `ignore`
-result. MDA creates `runtime.channel.event` from the parsed message.
+result. MDA creates `runtime.thread.origin.channel.event` from the parsed message.
 
 To expose provider data, return
 `{"type": "message", "message": message, "raw_event": event}` from `parse`.
 MDA validates this value as finite, acyclic JSON and copies it into
-`runtime.channel.raw_event`. If you omit `raw_event`,
-`runtime.channel.raw_event` is `None`. MDA does not decode the body again.
+the channel's `raw_event`. If you omit `raw_event`, it is `None`. MDA does not
+decode the body again.
 An explicit `None` is a valid JSON null.
 
-HTTP and Slack Trigger runs expose delivery through `runtime.channel`.
+HTTP and Slack Trigger runs expose delivery through `runtime.thread.origin.channel`.
 
 The callback receives one `HttpChannelPostInput` dictionary:
 
@@ -828,7 +860,7 @@ target and credentials when it calls the provider API. Native routing or
 authentication fields must not replace them.
 
 Automatic agent replies use the `content` form. An explicit
-`await runtime.channel.post({"type": "native", "native": ...})` reaches your
+`await runtime.thread.origin.channel.post({"type": "native", "native": ...})` reaches your
 adapter without conversion. If `post` is omitted, the channel can receive events
 and exposes facts, but has no runtime `post` method. The webhook path is
 `/channels/<name>/events`, where `<name>` is the channel file name. An existing
@@ -889,8 +921,9 @@ answer.
 GitHub and Linear take `on_finish(event, thread, finished)`, `finished` as
 above without the delivery's own fields, with
 their parsed event and the thread its handler saw, called after their own
-notices, such as the comment or the session elicitation that a decision is
-pending, or Linear's "Stopped.".
+notices, such as the link for a message that found the thread waiting on a
+decision, or Linear's "Stopped.". A run that stops on interrupts posts its own
+notice as it ends, before its delivery finishes.
 
 ### Asking your service what to start
 
@@ -1065,8 +1098,26 @@ await runtime.schedules.create(
 ```
 
 Set `new_thread` to choose whether a run starts a new thread or continues the
-current thread. When a schedule is created from a channel such as Slack,
-each run posts its final answer to that channel. Runtime schedules stay when you deploy again.
+current thread. When a schedule is created in a thread with a channel origin,
+such as a Slack thread, each run posts its final answer to that channel. A
+same-thread schedule posts to the thread's origin when it runs, so it follows
+the thread's latest channel conversation. A new-thread schedule posts a new
+message in the channel conversation it was created from. Runtime schedules stay
+when you deploy again.
+
+A user schedule can run as another person in the thread. Pass one of
+`runtime.thread.participants` as `run_as`. The schedule still belongs to you:
+only you can list, update, and delete it. Its runs act as that person, with
+their connections. `get` and `list` show it as `run_as`. A schedule record's
+`channel` and `target` name a new-thread schedule's channel; they are `None`
+for a same-thread schedule, which posts to its thread's origin.
+
+```python
+bob = next(person for person in runtime.thread.participants if person.role == "member")
+await runtime.schedules.create(
+    owner={"type": "user"}, cron="0 9 * * 1", prompt="Send Bob the weekly report.", run_as=bob
+)
+```
 
 Each owner can have at most 20 runtime schedules per agent, paused ones
 included. Set `MDA_MAX_AGENT_SCHEDULES` or `MDA_MAX_USER_SCHEDULES` in the
@@ -1145,9 +1196,6 @@ declared server. In `mda dev`, an agent-owned connection reads from
 `MDA_DEV_<SLUG>` with the slug uppercased, hyphens changed to underscores, and
 slashes to double underscores (`mda/github-token` → `MDA_DEV_MDA__GITHUB_TOKEN`).
 Hosted deployments resolve workspace connections from Agent Auth:
-
-The old `connectors/mcp.py` file API remains available with a warning during
-`0.7.x`. It will be removed in `0.8.0`.
 
 ```python
 from managed_deepagents import define_mcp, connections

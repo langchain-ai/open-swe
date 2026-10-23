@@ -35,6 +35,7 @@ if TYPE_CHECKING:
 
     from managed_deepagents._channels.http.types import JsonValue
     from managed_deepagents._channels.manifest import ChannelManifest
+    from managed_deepagents._channels.messaging_registry import PausedNotice
     from managed_deepagents._channels.types import ChannelMessage, PostedChannelMessage
 
 
@@ -68,6 +69,8 @@ class HttpChannel(Channel):
         self.on_received = on_received
         self.on_finish = on_finish
         self.messaging = self._build_messaging if post is not None else None
+        #: Internal: the notice a paused run posts as it ends (GitHub, Linear).
+        self.paused_notice: PausedNotice | None = None
 
     def _build_messaging(self, _env: Mapping[str, str]) -> _HttpReplyTransport | None:
         if self.post is None:

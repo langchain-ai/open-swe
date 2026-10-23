@@ -153,9 +153,10 @@ def github_channel(
         )
 
     async def notify_interrupted(target: JsonValue, delivery: HttpFinishedDelivery) -> None:
-        """Tell the issue or pull request when its thread waits on a decision.
+        """Tell the issue or pull request that a new event found its thread waiting on a decision.
 
-        Only for an event its handler would act on, so the handler's filters,
+        A run that stops on interrupts posts its own notice as it ends. Only
+        for an event its handler would act on, so the handler's filters,
         such as trusted senders or mentions, decide who gets a notice. The
         handler knows it is only asked, so it can skip side effects.
         """
@@ -188,7 +189,14 @@ def github_channel(
         provider_config=provider_config,
         multitask_strategy=multitask_strategy,
     )
+    channel.paused_notice = _post_paused_notice
     return channel
+
+
+async def _post_paused_notice(target: JsonValue, delivery: HttpDelivery) -> None:
+    """A run stopped on interrupts. The handler already accepted the event that
+    started it, so there is nothing to ask it again."""
+    await _post_interrupted_notice(target, delivery, "interrupted")
 
 
 def _endpoint_fields(event: GitHubEvent) -> GitHubEndpointFields:

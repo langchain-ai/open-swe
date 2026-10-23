@@ -23,9 +23,6 @@ use super::write_if_changed;
 /// Build artifact next to `langgraph.json`.
 pub const SANDBOX_RECIPE_FILE: &str = "sandbox-recipe.json";
 
-const LEGACY_THREAD_SCOPE_WARNING: &str =
-    "sandbox scope \"thread\" is deprecated and ignored. Remove it from the sandbox declaration. Support for this option will be removed in v0.7.0.";
-
 /// Secret-safe private registry declaration compiled from the authoring API.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
@@ -192,10 +189,11 @@ fn extract_sandbox_bases(project: &Project, entry: &PathBuf) -> Result<BakeBases
     bases_from_config(&config, project.language)
 }
 
-/// Return the migration warning when the legacy thread scope is statically identifiable.
-pub(super) fn legacy_thread_scope_warning(project: &Project) -> Result<Option<String>> {
+/// Fail the build when the sandbox declaration still passes the removed `scope`
+/// option, which `defineSandbox` / `define_sandbox` reject at startup.
+pub(super) fn reject_removed_sandbox_scope(project: &Project) -> Result<()> {
     let Some(entry) = find_sandbox_entry(project) else {
-        return Ok(None);
+        return Ok(());
     };
     let path = project.root.join(&entry);
     let source =
@@ -216,16 +214,19 @@ pub(super) fn legacy_thread_scope_warning(project: &Project) -> Result<Option<St
             &["scope"],
         ),
     };
+    // A declaration compile cannot read statically is reported by recipe
+    // extraction later in this compile, and the runtime still rejects a dynamic
+    // `scope` at startup.
     let Ok(config) = config else {
-        // Warning detection is advisory. Recipe extraction later in this compile
-        // validates the declaration, while runtime validation handles dynamic scope.
-        return Ok(None);
+        return Ok(());
     };
-
-    Ok(
-        (config.get("scope").and_then(Value::as_str) == Some("thread"))
-            .then(|| LEGACY_THREAD_SCOPE_WARNING.to_string()),
-    )
+    if config.get("scope").is_some() {
+        bail!(
+            "{} passes the removed sandbox `scope` option. Sandbox reuse is always one box per thread: remove `scope` from the sandbox declaration.",
+            entry.display()
+        );
+    }
+    Ok(())
 }
 
 fn bases_from_config(config: &Value, language: Language) -> Result<BakeBases> {
@@ -526,7 +527,7 @@ mod tests {
     }
 
     #[test]
-    fn warns_when_typescript_declares_legacy_thread_scope() {
+    fn rejects_typescript_sandbox_scope() {
         let root = tempfile::tempdir().unwrap();
         write_sandbox(
             root.path(),
@@ -540,14 +541,15 @@ mod tests {
         );
         let project = sandbox_project(root.path(), Language::TypeScript, "sandbox/index.ts");
 
-        assert_eq!(
-            legacy_thread_scope_warning(&project).unwrap().as_deref(),
-            Some(LEGACY_THREAD_SCOPE_WARNING)
-        );
+        let error = reject_removed_sandbox_scope(&project)
+            .unwrap_err()
+            .to_string();
+        assert!(error.contains("sandbox/index.ts"), "{error}");
+        assert!(error.contains("removed sandbox `scope` option"), "{error}");
     }
 
     #[test]
-    fn warns_when_python_declares_legacy_thread_scope() {
+    fn rejects_python_sandbox_scope() {
         let root = tempfile::tempdir().unwrap();
         write_sandbox(
             root.path(),
@@ -561,14 +563,15 @@ mod tests {
         );
         let project = sandbox_project(root.path(), Language::Python, "sandbox/__init__.py");
 
-        assert_eq!(
-            legacy_thread_scope_warning(&project).unwrap().as_deref(),
-            Some(LEGACY_THREAD_SCOPE_WARNING)
-        );
+        let error = reject_removed_sandbox_scope(&project)
+            .unwrap_err()
+            .to_string();
+        assert!(error.contains("sandbox/__init__.py"), "{error}");
+        assert!(error.contains("removed sandbox `scope` option"), "{error}");
     }
 
     #[test]
-    fn does_not_warn_when_sandbox_omits_scope() {
+    fn accepts_sandbox_without_scope() {
         let root = tempfile::tempdir().unwrap();
         write_sandbox(
             root.path(),
@@ -577,11 +580,11 @@ mod tests {
         );
         let project = sandbox_project(root.path(), Language::TypeScript, "sandbox/index.ts");
 
-        assert_eq!(legacy_thread_scope_warning(&project).unwrap(), None);
+        reject_removed_sandbox_scope(&project).unwrap();
     }
 
     #[test]
-    fn does_not_fail_compile_when_legacy_scope_is_dynamic() {
+    fn leaves_dynamic_sandbox_scope_to_the_runtime() {
         let root = tempfile::tempdir().unwrap();
         write_sandbox(
             root.path(),
@@ -590,6 +593,6 @@ mod tests {
         );
         let project = sandbox_project(root.path(), Language::TypeScript, "sandbox/index.ts");
 
-        assert_eq!(legacy_thread_scope_warning(&project).unwrap(), None);
+        reject_removed_sandbox_scope(&project).unwrap();
     }
 }

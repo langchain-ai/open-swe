@@ -8,10 +8,9 @@ import os
 import uuid
 from collections.abc import Awaitable, Callable, Mapping
 from importlib import import_module
-from typing import TYPE_CHECKING, Never, NoReturn, Protocol, TypeVar, cast
+from typing import TYPE_CHECKING, Never, NoReturn, Protocol, TypedDict, TypeVar
 
 from managed_deepagents._agent_auth_http import missing_workspace_connection_slug
-from managed_deepagents._channels.assistant_text import extract_reply_text, run_start_id
 from managed_deepagents._channels.context import (
     normalized_user_prompt_response,
     trigger_channel_binding,
@@ -41,9 +40,9 @@ from managed_deepagents._channels.trigger.ingress import (
     start_ingress_agent,
 )
 from managed_deepagents._channels.trigger.tracing_project import tracer_session_id
-from managed_deepagents._channels.trigger.transport import TriggerTransport
 from managed_deepagents._channels.trigger.types import (
     TRIGGER_SERVICE_KEY_HEADER,
+    TriggerChannelAddress,
     TriggerChannelEvent,
     TriggerChannelInterrupt,
     TriggerChannelMessageEvent,
@@ -63,7 +62,6 @@ if TYPE_CHECKING:
         PendingInterrupt,
         ResumeTarget,
     )
-    from managed_deepagents._channels.types import JsonValue
     from managed_deepagents._ingress_runs import StartedIngressRun
 
 ASSISTANT_ID_ENV = "MDA_ASSISTANT_ID"
@@ -311,7 +309,7 @@ async def handle_trigger_channel_event_request(  # noqa: C901, PLR0911
         return _json_response({"error": "invalid channel event"}, status_code=400)
 
     try:
-        user_id = _principal_for_event(
+        user_id = await _principal_for_event(
             event,
             identity_context_key=identity_context_key,
             identity_context_issuer=identity_context_issuer,
@@ -440,9 +438,7 @@ async def _observe_accepted_run(
     reactions: ReactionChoice = DEFAULT_REACTION_EMOJI,
 ) -> None:
     async def lifecycle(
-        event_type: TriggerChannelRuntimeEventType,
-        interrupts: list[TriggerChannelInterrupt] | None = None,
-        message: str | None = None,
+        event_type: TriggerChannelRuntimeEventType, message: str | None = None
     ) -> None:
         logger.info(
             "Channel outgoing event (type=%s, delivery_id=%s, channel_id=%s, run_id=%s)",
@@ -455,8 +451,7 @@ async def _observe_accepted_run(
             event_type,
             event,
             started,
-            interrupts,
-            message,
+            message=message,
             tracer_session_id=await tracer_session_id(),
         )
         await _best_effort(client.post_runtime_event(event["channel_id"], request))
@@ -485,38 +480,14 @@ async def _observe_accepted_run(
             await lifecycle("run.failed", message=_missing_connection_failure_message(error))
             return
 
+        # The run itself posts its answer, or shows its interrupts, as it ends.
         if _is_interrupted_run(observed):
-            await lifecycle("run.interrupted", _forwarded_interrupts(observed["values"]))
             return
 
         if observed["status"] != "success":
             await lifecycle("run.failed")
             return
 
-        text = extract_reply_text(observed["values"], start_id=run_start_id(observed["values"]))
-        if text:
-            logger.info(
-                "Channel outgoing action (type=post, delivery_id=%s, channel_id=%s, run_id=%s)",
-                logger.log_identifier(event["delivery_id"]),
-                logger.log_identifier(event["channel_id"]),
-                logger.log_identifier(started["run_id"]),
-            )
-            action = await _best_effort(
-                TriggerTransport(client, action_id=event["event_id"]).post(
-                    message={"type": "content", "content": text},
-                    target=cast(
-                        "JsonValue",
-                        {
-                            "channel_id": event["channel_id"],
-                            "address": event["address"],
-                            "source_thread_key": event["source_thread_key"],
-                        },
-                    ),
-                )
-            )
-            if action is None:
-                await lifecycle("run.failed")
-                return
         await lifecycle("run.completed")
     finally:
         await reaction
@@ -629,23 +600,6 @@ def _has_interrupt(values: object) -> bool:
     return bool(_interrupt_entries(values))
 
 
-def _forwarded_interrupts(values: object) -> list[TriggerChannelInterrupt]:
-    """The resumable interrupts in ``values``, with their ``response_schema``."""
-    interrupts: list[TriggerChannelInterrupt] = []
-    for entry in _interrupt_entries(values):
-        if not isinstance(entry, Mapping) or "value" not in entry:
-            continue
-        interrupt_id = entry.get("id")
-        if not isinstance(interrupt_id, str) or not interrupt_id.strip():
-            continue
-        interrupt: TriggerChannelInterrupt = {"id": interrupt_id, "value": entry["value"]}
-        schema = entry.get("response_schema")
-        if isinstance(schema, dict):
-            interrupt["response_schema"] = schema
-        interrupts.append(interrupt)
-    return interrupts
-
-
 def _interrupt_entries(values: object) -> list[object]:
     """``__interrupt__`` arrives as a flat list, or keyed by task id."""
     if not isinstance(values, Mapping):
@@ -664,9 +618,17 @@ def _interrupt_entries(values: object) -> list[object]:
     return entries
 
 
+class RuntimeEventRoute(TypedDict):
+    """Where a runtime event goes: the delivery and its conversation."""
+
+    delivery_id: str
+    source_thread_key: str
+    address: TriggerChannelAddress
+
+
 def _runtime_event(
     event_type: TriggerChannelRuntimeEventType,
-    event: TriggerChannelEvent,
+    event: RuntimeEventRoute,
     started: StartedIngressRun,
     interrupts: list[TriggerChannelInterrupt] | None = None,
     message: str | None = None,
@@ -710,7 +672,7 @@ class _MissingIdentityContextError(ValueError):
     """A message event arrived without a Trigger identity_context token."""
 
 
-def _principal_for_event(
+async def _principal_for_event(
     event: TriggerChannelEvent,
     *,
     identity_context_key: IdentityContextKey | None,
@@ -720,7 +682,10 @@ def _principal_for_event(
     raw_identity_context = event.get("identity_context")
     if not isinstance(raw_identity_context, str) or not raw_identity_context.strip():
         raise _MissingIdentityContextError
-    return principal_id_from_identity_context(
+    # PyJWKClient fetches the LangSmith JWKS with blocking urllib; run the
+    # verification off the event loop.
+    return await asyncio.to_thread(
+        principal_id_from_identity_context,
         raw_identity_context,
         key=identity_context_key,
         issuer=identity_context_issuer,
