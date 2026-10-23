@@ -232,10 +232,11 @@ async def test_disconnect_removes_only_the_callers_credential_for_a_gateway_serv
         "tools": [{"server_id": notion_id, "tool_name": "search", "mcp_name": "notion_search"}],
     }
     requests: list[httpx.Request] = []
+    status = [204]
 
     def handle(request: httpx.Request) -> httpx.Response:
         requests.append(request)
-        return httpx.Response(204)
+        return httpx.Response(status[0])
 
     monkeypatch.setattr(managed, "_gateway_detail", AsyncMock(return_value=detail))
     monkeypatch.setattr(managed, "refresh_tools", AsyncMock())
@@ -253,6 +254,10 @@ async def test_disconnect_removes_only_the_callers_credential_for_a_gateway_serv
         f"{managed.SERVERS_PATH}/{notion_id}/credential",
     )
     assert requests[-1].headers["Authorization"] == "Bearer alice-langsmith-token"
+
+    status[0] = 404
+    with pytest.raises(managed.ManagedToolsError, match="service no longer exists"):
+        await managed.disconnect_service("alice", GATEWAY_ID, notion_id)
 
 
 def private_thread(monkeypatch, owner: str) -> dict[str, str]:

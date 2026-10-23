@@ -543,6 +543,8 @@ async def disconnect_service(login: str, gateway: str, service: str) -> None:
             f"{langsmith_issuer()}{SERVERS_PATH}/{quote(service, safe='')}/credential",
             headers=headers,
         )
+    if response.status_code == 404:
+        raise ManagedToolsError("This service no longer exists in LangSmith")
     if response.status_code == 409:
         raise ManagedToolsError("This service has no connection to remove")
     if not response.is_success:
