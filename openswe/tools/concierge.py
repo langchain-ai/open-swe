@@ -9,9 +9,12 @@ from openswe.users import User
 
 _MAX_INSTRUCTIONS_CHARS = 8_000
 _MAX_REPORT_CHARS = 8_000
+_READ = Policy(trusted="private", actor="owner")
+# Only the person's own message may change what the background thread does unasked.
+_WRITE = Policy(trusted="private", actor="owner", direct=True)
 
 
-@access(Policy(trusted="private", actor="owner"))
+@access(_READ, per_call=lambda args: _READ if args.get("instructions") is None else _WRITE)
 async def concierge_background(instructions: str | None = None) -> dict[str, object]:
     """Implement the `concierge_background` tool."""
     cfg = RunConfig.from_runtime()
