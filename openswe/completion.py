@@ -36,7 +36,7 @@ from openswe.tasks.messages import TASK_MESSAGE_KIND, TaskMessage
 from openswe.threads.status import refresh_thread_status
 from openswe.transcript.turns import TurnOutcome, settle_run_turn
 from openswe.ui_invalidations import Topic
-from openswe.utils.errors import LAST_MODEL_ERROR_KEY, code_for_error_type
+from openswe.utils.errors import LAST_MODEL_ERROR_KEY, ModelOutageError, code_for_error_type
 from openswe.utils.json_types import thread_metadata
 from openswe.utils.langsmith import get_langsmith_trace_url
 from openswe.utils.thread_ops import langgraph_client
@@ -523,6 +523,23 @@ async def handle_run_completion(payload: dict[str, Any]) -> dict[str, str]:
             )
             raise
     payload_metadata = payload.get("metadata")
+    if isinstance(payload_metadata, dict) and run_id and payload_metadata.get("schedule_id"):
+        error = payload.get("error")
+        outage = (
+            status == "error"
+            and isinstance(error, dict)
+            and error.get("error") == ModelOutageError.__name__
+        )
+        if outage or (
+            status == "success" and payload_metadata.get("schedule_outage_retry") is True
+        ):
+            from openswe.schedules.store import handle_schedule_model_outage
+
+            result = await handle_schedule_model_outage(
+                thread_id, run_id, str(status), payload_metadata
+            )
+            if outage:
+                return result
     if isinstance(payload_metadata, dict) and status in _TERMINAL_RUN_STATUSES:
         if pull_request := RunMetadata.model_validate(payload_metadata).pull_request:
             await Topic.PULL_REQUESTS.invalidate(key=pull_request)
