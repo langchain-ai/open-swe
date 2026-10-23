@@ -1,12 +1,14 @@
 # Stable box names under `mda dev`
 
-**Verdict: upstream as-is.** A fix any project running `mda dev` benefits from.
+**Verdict: upstream as-is.**
+A fix any project running `mda dev` benefits from.
 
 **Changed:** `managed_deepagents/runtime.py` (`_managed_deployment_name`, `_local_dev_deployment_name`).
 
 ## What
 
-With no deployment name, which is the case under `mda dev`, MDA names boxes `mda-dev-<digest of machine and project directory>--<thread digest>` instead of leaving them unnamed. Only box names fall back to it: a name read from a given env, as Studio links read it, stays the deployment's or none.
+With no deployment name, which is the case under `mda dev`, MDA names boxes `mda-dev-<digest of machine and project directory>--<thread digest>` instead of leaving them unnamed.
+Only box names fall back to it: a name read from a given env, as Studio links read it, stays the deployment's or none.
 
 ## Why
 
