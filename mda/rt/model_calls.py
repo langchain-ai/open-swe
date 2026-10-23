@@ -79,16 +79,29 @@ _FAILURE_CODES_BY_CLASS: Final[tuple[tuple[type[ModelError], ModelFailureCode], 
 )
 
 
+def http_status(exc: BaseException) -> int | None:
+    """The HTTP status a failed call reports: on the error, on its response, or in an int ``code``.
+
+    httpx keeps it on the response; google-genai's own errors keep it in ``code``.
+    """
+    response = getattr(exc, "response", None)
+    for status in (
+        getattr(exc, "status_code", None),
+        getattr(response, "status_code", None),
+        getattr(exc, "code", None),
+    ):
+        if isinstance(status, int):
+            return status
+    return None
+
+
 def provider_failure_code(exc: BaseException) -> ModelFailureCode | None:
     """Why the provider failed a call, by its status and error body; None if not a provider failure.
 
     Provider-agnostic on purpose: a gateway can surface an overload as anything
     from a 529 to a bare ``APIError`` carrying ``overloaded_error`` in its body.
     """
-    status = getattr(exc, "status_code", None)
-    if status is None and isinstance(code := getattr(exc, "code", None), int):
-        # google-genai keeps the HTTP status in ``code``.
-        status = code
+    status = http_status(exc)
     body = getattr(exc, "body", None)
     provider_code = ""
     if isinstance(body, dict):

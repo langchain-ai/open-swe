@@ -1192,6 +1192,10 @@ class _StatusInCode(Exception):
         # google-genai: a typed LangChain error, or the SDK's own with its status in `code`.
         (ModelRateLimitError("429 RESOURCE_EXHAUSTED"), "provider_rate_limited"),
         (_StatusInCode(503), "provider_unavailable"),
+        (
+            httpx2.HTTPStatusError("503", request=_PROVIDER_REQUEST, response=httpx2.Response(503)),
+            "provider_unavailable",
+        ),
     ],
 )
 async def test_a_provider_failure_ends_the_run_and_tells_the_backend_why(
