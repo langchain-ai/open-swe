@@ -188,6 +188,10 @@ class Deployer:
                 await self.check_superseded()
         except SupersededDeploy as exc:
             print(f"::warning::{exc}", flush=True)
+            # The workflow skips the superseded tree's MDA deploy, so the newer tree's deploy starts.
+            if output := os.environ.get("GITHUB_OUTPUT"):
+                with open(output, "a") as file:
+                    file.write("superseded=true\n")
             return
         if revision.status != "DEPLOYED":
             await self.print_logs(revision)
