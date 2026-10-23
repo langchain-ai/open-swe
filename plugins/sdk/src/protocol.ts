@@ -110,6 +110,17 @@ export interface DocumentScope {
   repository?: string
 }
 
+/**
+ * A repository the person shared with the plugin. `isInBaseOrg` says it
+ * belongs to one of the organizations this Open SWE serves, so its name alone
+ * is clear enough to show; which organizations those are stays private.
+ */
+export interface SharedRepository {
+  /** `owner/repo`, lowercase. */
+  fullName: string
+  isInBaseOrg: boolean
+}
+
 export interface RepositoryInfo {
   fullName: string
   defaultBranch: string
@@ -316,21 +327,21 @@ export interface HostApi extends RpcTarget {
   /** Opens a web link in a new tab; outside github.com, only once the person agrees. */
   openExternal(url: string): Promise<void>
   toast(toast: Toast): Promise<void>
-  /** Names the browser tab "<title> · Open SWE"; `null` goes back to the plugin's name. */
+  /** Shows `title` beside the plugin's name above its frame and names the browser tab "<title> · Open SWE"; `null` clears it. */
   setTitle(title: string | null): Promise<void>
   /** Profiles for GitHub logins, in the order asked; at most 100 per call. */
   people(logins: string[]): Promise<Person[]>
   /**
-   * The GitHub repositories (`owner/repo`, lowercase) the person shared with
-   * the plugin. It reaches no other: a call naming one fails with status 403.
+   * The GitHub repositories the person shared with the plugin. It reaches no
+   * other: a call naming one fails with status 403.
    */
-  repositories(): Promise<string[]>
+  repositories(): Promise<SharedRepository[]>
   /**
    * Asks the person to share repositories, in a picker the web UI draws from
    * those they can read. Resolves to the ones they chose, or `[]` when they
    * cancel; already-shared suggestions resolve at once, without asking.
    */
-  pickRepositories(options: RepositoryPickOptions): Promise<string[]>
+  pickRepositories(options: RepositoryPickOptions): Promise<SharedRepository[]>
   collection(name: string, scope: DocumentScope): Promise<CollectionApi>
   /** One repository the person shared, acting with their own GitHub access. */
   github(repository: string): Promise<GitHubRepositoryApi>

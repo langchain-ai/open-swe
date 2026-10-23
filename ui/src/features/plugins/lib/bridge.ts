@@ -23,6 +23,7 @@ import type {
   RoomApi,
   RoomEvent,
   RoomScope,
+  SharedRepository,
   StoredDocument,
   StoredJson,
   Subscription,
@@ -94,6 +95,8 @@ export interface BridgeHost {
   confirmLink: (url: string) => Promise<boolean>
   /** Shows the person a picker and shares what they choose; resolves to it, `[]` if they cancel. */
   pickRepositories: (pick: RepositoryPick) => Promise<Array<string>>
+  /** Whether `owner/repo` is in one of this Open SWE's organizations; the plugin learns only this bool. */
+  isInBaseOrg: (repository: string) => boolean
   /** Calls `onChange` whenever anyone writes to `target`; returns the unsubscribe. */
   watchDocuments: (target: DocumentTarget, onChange: () => void) => () => void
   /** Streams one live room to `onEvent` from after `after`; returns the leave. */
@@ -557,12 +560,24 @@ export class PluginHostApi extends RpcTarget implements HostApi {
     })
   }
 
-  repositories(): Promise<Array<string>> {
-    return this.#budget.run(() => [...this.#host().plugin.repositories])
+  repositories(): Promise<Array<SharedRepository>> {
+    return this.#budget.run(() =>
+      this.#shared(this.#host().plugin.repositories)
+    )
   }
 
-  pickRepositories(options: RepositoryPickOptions): Promise<Array<string>> {
-    return this.#budget.run(() => {
+  #shared(repositories: ReadonlyArray<string>): Array<SharedRepository> {
+    const host = this.#host()
+    return repositories.map((fullName) => ({
+      fullName,
+      isInBaseOrg: host.isInBaseOrg(fullName),
+    }))
+  }
+
+  pickRepositories(
+    options: RepositoryPickOptions
+  ): Promise<Array<SharedRepository>> {
+    return this.#budget.run(async () => {
       const fields = options === undefined ? {} : record(options, "options")
       const suggested = [
         ...new Set(
@@ -577,11 +592,13 @@ export class PluginHostApi extends RpcTarget implements HostApi {
         suggested.length > 0 &&
         suggested.every((name) => host.plugin.repositories.includes(name))
       )
-        return suggested
-      return host.pickRepositories({
-        suggested,
-        multiple: fields.multiple === true,
-      })
+        return this.#shared(suggested)
+      return this.#shared(
+        await host.pickRepositories({
+          suggested,
+          multiple: fields.multiple === true,
+        })
+      )
     })
   }
 

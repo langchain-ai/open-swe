@@ -189,7 +189,7 @@ A memory-history router fits well; see `PathSync` in [`plugins/docs/src/routes/_
 - `host.nav.openThread(threadId)` opens an agent thread in the web UI.
 - `host.nav.openExternal(url)` opens a web link in a new tab. github.com links open directly; anything else opens only after the person confirms it.
 - `host.ui.toast({ title, description, intent })` shows a web UI toast (`intent` is `success`, `error` or `info`).
-- `host.ui.setTitle(title)` names the browser tab "title · Open SWE", up to 120 characters; `null` goes back to the plugin's name.
+- `host.ui.setTitle(title)` shows `title` beside the plugin's name in the bar above it, and names the browser tab "title · Open SWE". Up to 120 characters; `null` clears it, and the tab goes back to the plugin's name.
 
 The web UI asks the person inline, in a panel it draws between the plugin's header and its frame, never in a modal: the picker, link confirmations and thread approvals all appear there, where the plugin can neither cover nor imitate them.
 

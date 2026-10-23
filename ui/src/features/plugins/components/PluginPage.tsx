@@ -8,7 +8,7 @@ import { Link, useNavigate } from "@tanstack/react-router"
 import { useEffect, useEffectEvent, useState } from "react"
 
 import { PluginFrame } from "@/features/plugins/components/PluginFrame"
-import { ApprovalPanel } from "@/features/plugins/components/ApprovalPanel"
+import { ApprovalDialog } from "@/features/plugins/components/ApprovalDialog"
 import type { InstalledPlugin } from "@/features/plugins/lib/api"
 import { useApproval } from "@/features/plugins/lib/approval"
 import { PluginIcon } from "@/features/plugins/lib/icons"
@@ -108,9 +108,6 @@ function InstalledPluginPage({
   const bundle = usePluginBundle(plugin)
   const approval = useApproval()
   const share = useSharePluginRepositories()
-  const source = [plugin.source.repository, plugin.source.path]
-    .filter(Boolean)
-    .join("/")
 
   return (
     <main className="flex min-h-0 min-w-0 flex-1 flex-col">
@@ -123,9 +120,7 @@ function InstalledPluginPage({
         <span className="truncate font-medium text-primary">
           {plugin.manifest.displayName}
         </span>
-        <span className="truncate text-secondary" title={plugin.commit_sha}>
-          {source}@{plugin.commit_sha.slice(0, 7)}
-        </span>
+        {title && <span className="truncate text-secondary">{title}</span>}
         <span className="ml-auto flex shrink-0 items-center gap-space-1 text-secondary">
           <ShieldCheckIcon size={14} />
           {plugin.scope === "organization"
@@ -139,14 +134,6 @@ function InstalledPluginPage({
           Manage
         </Link>
       </header>
-      {approval.shown && (
-        <ApprovalPanel
-          plugin={plugin}
-          approval={approval.shown}
-          armed={approval.armed}
-          onAnswer={approval.answer}
-        />
-      )}
       {bundle.data !== undefined ? (
         <PluginFrame
           plugin={plugin}
@@ -196,6 +183,12 @@ function InstalledPluginPage({
       ) : (
         <Skeleton className="m-space-5 flex-1" />
       )}
+      <ApprovalDialog
+        plugin={plugin}
+        approval={approval.shown}
+        armed={approval.armed}
+        onAnswer={approval.answer}
+      />
     </main>
   )
 }

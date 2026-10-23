@@ -39,8 +39,9 @@ import {
   pluginShell,
 } from "@/features/plugins/lib/shell"
 import { invalidationTopic } from "@/lib/invalidations/topics"
-import { useSession } from "@/lib/session"
+import { useIsInBaseOrg, useSession } from "@/lib/session"
 import { useResolvedTheme } from "@/lib/theme"
+import { cn } from "@/lib/utils"
 
 /** One connected frame: its Cap'n Web session, its allowance and its live rooms. */
 interface Connection {
@@ -88,6 +89,7 @@ export function PluginFrame({
   pickRepositories: (pick: RepositoryPick) => Promise<Array<string>>
 }) {
   const session = useSession()
+  const isInBaseOrg = useIsInBaseOrg()
   const theme = useResolvedTheme()
   const queryClient = useQueryClient()
   const frameRef = useRef<HTMLIFrameElement>(null)
@@ -98,6 +100,9 @@ export function PluginFrame({
   const documentWatches = useRef(new Map<string, DocumentWatch>())
   const [generation, setGeneration] = useState(0)
   const [escaped, setEscaped] = useState(false)
+  // A new frame paints a blank light page until its document loads; keep it
+  // hidden until then so dark mode doesn't flash white.
+  const [painted, setPainted] = useState(false)
   const [watched, setWatched] = useState<ReadonlyArray<DocumentTarget>>([])
   const [initialTheme] = useState(theme)
   const login = session.data?.login ?? ""
@@ -159,6 +164,7 @@ export function PluginFrame({
     confirmThread,
     confirmLink,
     pickRepositories,
+    isInBaseOrg,
     watchDocuments: (target, onChange) => {
       const key = documentsTopicKey(plugin.plugin_id, target, userId)
       let watch = documentWatches.current.get(key)
@@ -195,6 +201,7 @@ export function PluginFrame({
   // A second document in the frame means it navigated away from the bundle.
   const loaded = () => {
     loads.current += 1
+    setPainted(true)
     if (loads.current > 1) {
       teardown()
       setEscaped(true)
@@ -312,6 +319,7 @@ export function PluginFrame({
             variant="outlined"
             onClick={() => {
               loads.current = 0
+              setPainted(false)
               setEscaped(false)
               setNonce(crypto.randomUUID())
               setGeneration((value) => value + 1)
@@ -334,7 +342,7 @@ export function PluginFrame({
       allow={PLUGIN_ALLOW}
       onLoad={loaded}
       csp={PLUGIN_CSP}
-      className="h-full min-h-0 flex-1"
+      className={cn("h-full min-h-0 flex-1", !painted && "invisible")}
     />
   )
 }

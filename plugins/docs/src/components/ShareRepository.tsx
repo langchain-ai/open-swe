@@ -15,7 +15,7 @@ export function useOpenPickedRepository() {
       pick.mutate(suggested, {
         onSuccess: (picked) => {
           if (!picked) return
-          const [owner = "", repo = ""] = picked.split("/")
+          const [owner = "", repo = ""] = picked.fullName.split("/")
           void navigate({ to: "/$owner/$repo", params: { owner, repo } })
         },
       }),

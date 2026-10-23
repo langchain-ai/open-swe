@@ -26,7 +26,7 @@ function SpaceLayout() {
       </div>
     )
   // A link someone shared can name a repository this person has not shared yet.
-  if (!shared.data?.includes(repository))
+  if (!shared.data?.some((one) => one.fullName === repository))
     return <ShareRepository repository={repository} />
   return <Space key={repository} repository={repository} />
 }

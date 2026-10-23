@@ -1,4 +1,4 @@
-import type { PluginHost } from "@openswe/plugin-sdk"
+import type { PluginHost, SharedRepository } from "@openswe/plugin-sdk"
 
 /**
  * What Docs keeps. Pages are the repository's Markdown files; a draft is a
@@ -51,6 +51,13 @@ export function commentsIn(host: PluginHost, repository: string) {
   return host.storage.collection<string, PageComment>("comments", {
     repository,
   })
+}
+
+/** A repository's name alone when it is in one of this Open SWE's organizations, else `owner/repo`. */
+export function repositoryLabel(repository: SharedRepository): string {
+  return repository.isInBaseOrg
+    ? (repository.fullName.split("/")[1] ?? repository.fullName)
+    : repository.fullName
 }
 
 export function isMarkdown(path: string): boolean {

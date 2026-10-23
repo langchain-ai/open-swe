@@ -17,7 +17,7 @@ function Home() {
     )
   const first = repositories.data?.[0]
   if (first) {
-    const [owner = "", repo = ""] = first.split("/")
+    const [owner = "", repo = ""] = first.fullName.split("/")
     return <Navigate to="/$owner/$repo" params={{ owner, repo }} replace />
   }
   return <ShareRepository />

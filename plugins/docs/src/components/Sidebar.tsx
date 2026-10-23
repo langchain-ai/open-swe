@@ -9,7 +9,13 @@ import { useNavigate, useParams } from "@tanstack/react-router"
 import { useMemo, useState } from "react"
 
 import { useOpenPickedRepository } from "@/components/ShareRepository"
-import { isHidden, isMarkdown, pageTitle, type Draft } from "@/lib/model"
+import {
+  isHidden,
+  isMarkdown,
+  pageTitle,
+  repositoryLabel,
+  type Draft,
+} from "@/lib/model"
 import { useRepositories } from "@/lib/queries"
 
 interface Folder {
@@ -52,7 +58,9 @@ export function Sidebar({
   drafts: Map<string, Draft>
   truncated: boolean
 }) {
-  const repositories = useRepositories().data ?? [repository]
+  const repositories = useRepositories().data ?? [
+    { fullName: repository, isInBaseOrg: false },
+  ]
   const share = useOpenPickedRepository()
   const navigate = useNavigate()
   const params = useParams({ strict: false }) as { _splat?: string }
@@ -96,9 +104,9 @@ export function Sidebar({
             })
           }}
         >
-          {repositories.map((name) => (
-            <option key={name} value={name}>
-              {name}
+          {repositories.map((shared) => (
+            <option key={shared.fullName} value={shared.fullName}>
+              {repositoryLabel(shared)}
             </option>
           ))}
         </select>

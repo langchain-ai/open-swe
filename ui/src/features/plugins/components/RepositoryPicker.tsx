@@ -10,25 +10,17 @@ import { useMemo, useState } from "react"
 import type { InstalledPlugin } from "@/features/plugins/lib/api"
 import type { RepositoryPick } from "@/features/plugins/lib/bridge"
 import { useRefreshRepos, useRepos } from "@/lib/profile"
+import { useIsInBaseOrg } from "@/lib/session"
 import { cn } from "@/lib/utils"
 
 const OWNER_REPO = /^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/
 
 /**
- * The web UI's picker for a plugin's `repositories.pick`, drawn inline above
- * the plugin: the person chooses from the repositories they can read, and the
- * plugin gets only those.
+ * The list a plugin's `repositories.pick` shows: the person chooses from the
+ * repositories they can read, and the plugin gets only those. Repositories in
+ * this Open SWE's own organizations go by name alone.
  */
-export function RepositoryPicker(props: {
-  plugin: InstalledPlugin
-  pick: RepositoryPick
-  armed: boolean
-  onAnswer: (chosen: ReadonlyArray<string> | null) => void
-}) {
-  return <Picker {...props} />
-}
-
-function Picker({
+export function RepositoryPicker({
   plugin,
   pick,
   armed,
@@ -41,11 +33,11 @@ function Picker({
 }) {
   const repos = useRepos()
   const refresh = useRefreshRepos()
+  const isInBaseOrg = useIsInBaseOrg()
   const [query, setQuery] = useState("")
   const [chosen, setChosen] = useState<ReadonlyArray<string>>(() =>
     pick.multiple ? pick.suggested : pick.suggested.slice(0, 1)
   )
-  const name = plugin.manifest.displayName
 
   const options = useMemo(() => {
     const readable = (repos.data?.repositories ?? [])
@@ -54,7 +46,7 @@ function Picker({
     const all = [...new Set([...pick.suggested, ...readable])]
     const q = query.trim().toLowerCase()
     const matching = all.filter((repo) => repo.includes(q))
-    // Someone may read a repository the dashboard has not listed for them.
+    // Someone may read a repository the web UI has not listed for them.
     if (OWNER_REPO.test(q) && !all.includes(q)) matching.unshift(q)
     return matching
   }, [pick.suggested, query, repos.data])
@@ -70,13 +62,6 @@ function Picker({
 
   return (
     <>
-      <h2 className="text-sm font-medium text-primary">
-        Share {pick.multiple ? "repositories" : "a repository"} with {name}?
-      </h2>
-      <p className="text-xs text-secondary">
-        {name} reaches only the repositories you choose, as you and with your
-        access. You can stop sharing them in Settings → Plugins.
-      </p>
       <div className="flex flex-col overflow-hidden rounded-md border border-default">
         <div className="border-b border-default">
           <Input
@@ -129,7 +114,9 @@ function Picker({
                     onCheckedChange={() => toggle(repo)}
                     aria-label={repo}
                   />
-                  <span className="min-w-0 flex-1 truncate">{repo}</span>
+                  <span className="min-w-0 flex-1 truncate" title={repo}>
+                    {isInBaseOrg(repo) ? repo.split("/")[1] : repo}
+                  </span>
                   {shared && (
                     <Badge size="xxs" color="secondary">
                       Shared
