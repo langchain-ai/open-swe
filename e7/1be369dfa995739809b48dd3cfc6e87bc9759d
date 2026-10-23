@@ -1,0 +1,19 @@
+openswe/resources/prompts/system/sandbox-file-downloads.md
+  s_bf247046117b65::t_1bb715fe8c0b19 16-26
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "e71be369dfa995739809b48dd3cfc6e87bc9759d",
+  "prompts": {},
+  "sessions": {
+    "s_bf247046117b65": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "83c6a65b-66e1-489e-af9d-84284821b1e8",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "Sydney Runkle <sydneymarierunkle@gmail.com>"
+    }
+  }
+}
