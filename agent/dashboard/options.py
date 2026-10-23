@@ -18,9 +18,14 @@ class ModelOption(TypedDict):
     context_window: NotRequired[int | None]
 
 
+# 本地自托管模型：复用 ``openai:`` 前缀只为走 OpenAI 兼容协议，实际跑在本机
+# Ollama 上。它们不参与跨 provider 降级，也不会被选为云端模型的替代。
+LOCAL_MODEL_IDS: frozenset[str] = frozenset({"openai:qwen3:8b", "openai:qwen3.5:9b"})
+
+
 SUPPORTED_MODELS: list[ModelOption] = [
     # 本地模型：Ollama 上的 Qwen3 8B（走 OpenAI 兼容 Chat Completions，
-    # 见 agent/utils/model.py 的 OPENAI_CHAT_COMPLETIONS_MODEL_IDS）
+    # 见 LOCAL_MODEL_IDS 与 agent/utils/model.py）
     {
         "id": "openai:qwen3:8b",
         "label": "Qwen3 8B (local Ollama)",
@@ -357,6 +362,8 @@ def provider_fallback_pair(model_id: object, effort: object = None) -> tuple[str
             if _provider_of(m["id"]) == provider and _claude_family_of(m["id"]) == family:
                 return m["id"], _fallback_effort_for(m, effort) or m["default_effort"]
     for m in SUPPORTED_MODELS:
+        if m["id"] in LOCAL_MODEL_IDS:
+            continue
         if _provider_of(m["id"]) == provider:
             return m["id"], _fallback_effort_for(m, effort) or m["default_effort"]
     return None

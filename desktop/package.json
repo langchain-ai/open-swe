@@ -69,6 +69,13 @@
         "to": "ui/licenses/libghostty-vt.LICENSE"
       },
       {
+        "from": "../agent/resources/prompts",
+        "to": "prompts",
+        "filter": [
+          "**/*.md"
+        ]
+      },
+      {
         "from": "resources/local-backend",
         "to": "local-backend",
         "filter": [

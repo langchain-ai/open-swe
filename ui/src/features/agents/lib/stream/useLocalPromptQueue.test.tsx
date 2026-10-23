@@ -1,12 +1,12 @@
 /** @vitest-environment jsdom */
 
 import { act, renderHook, waitFor } from "@testing-library/react"
-import { describe, expect, it, vi } from "vitest"
+import { afterEach, describe, expect, it, vi } from "vitest"
 
 import { useLocalPromptQueue } from "./useLocalPromptQueue"
 import type { Client } from "@langchain/langgraph-sdk"
 
-function fakeClient() {
+function fakeClient(unreachable?: { value: boolean }) {
   const items = new Map<string, { value: Record<string, unknown> }>()
   const key = (namespace: Array<string>, name: string) =>
     [...namespace, name].join("/")
@@ -14,13 +14,16 @@ function fakeClient() {
     items,
     client: {
       store: {
-        getItem: async (namespace: Array<string>, name: string) =>
-          items.get(key(namespace, name)) ?? null,
+        getItem: async (namespace: Array<string>, name: string) => {
+          if (unreachable?.value) throw new TypeError("fetch failed")
+          return items.get(key(namespace, name)) ?? null
+        },
         putItem: async (
           namespace: Array<string>,
           name: string,
           value: Record<string, unknown>
         ) => {
+          if (unreachable?.value) throw new TypeError("fetch failed")
           items.set(key(namespace, name), { value })
         },
         deleteItem: async (namespace: Array<string>, name: string) => {
@@ -47,6 +50,10 @@ function setup(isRunning: boolean, accepted = true) {
   )
   return { ...hook, items, submit }
 }
+
+afterEach(() => {
+  vi.useRealTimers()
+})
 
 describe("useLocalPromptQueue", () => {
   it("sends what the user queued once the run they stopped is gone", async () => {
@@ -99,5 +106,70 @@ describe("useLocalPromptQueue", () => {
     await waitFor(() =>
       expect(submit).toHaveBeenCalledWith("first\n\nsecond", [])
     )
+  })
+
+  it("holds follow-ups out of the store until the recovery releases them", async () => {
+    const { client, items } = fakeClient()
+    const submit = vi.fn(async () => true)
+    const hook = renderHook(
+      (props: { hold: boolean }) =>
+        useLocalPromptQueue({
+          client,
+          sessionId: "session-1",
+          login: "alice",
+          isRunning: true,
+          hold: props.hold,
+          submit,
+        }),
+      { initialProps: { hold: true } }
+    )
+
+    await act(() => hook.result.current.enqueue("pick this up after the outage", []))
+    expect(hook.result.current.queued).toHaveLength(1)
+    // Nothing reaches the store: the run that would drain it is being replaced.
+    expect(items.size).toBe(0)
+
+    hook.rerender({ hold: false })
+
+    await waitFor(() => expect(items.size).toBe(1))
+    expect(submit).not.toHaveBeenCalled()
+  })
+
+  it("keeps a held follow-up when releasing it cannot reach the backend", async () => {
+    vi.useFakeTimers()
+    const unreachable = { value: true }
+    const { client, items } = fakeClient(unreachable)
+    const submit = vi.fn(async () => true)
+    const hook = renderHook(
+      (props: { hold: boolean }) =>
+        useLocalPromptQueue({
+          client,
+          sessionId: "session-1",
+          login: "alice",
+          isRunning: true,
+          hold: props.hold,
+          submit,
+        }),
+      { initialProps: { hold: true } }
+    )
+
+    await act(async () => {
+      await hook.result.current.enqueue("survives the outage", [])
+      hook.rerender({ hold: false })
+      await vi.advanceTimersByTimeAsync(0)
+    })
+
+    expect(items.size).toBe(0)
+    expect(hook.result.current.error).toBeNull()
+    expect(hook.result.current.queued).toHaveLength(1)
+
+    unreachable.value = false
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(3_000)
+    })
+
+    expect(items.size).toBe(1)
+    expect(hook.result.current.queued).toHaveLength(1)
+    expect(submit).not.toHaveBeenCalled()
   })
 })

@@ -17,6 +17,17 @@ export function useReconnectNotice(streamId: string) {
     if (timer.current) clearTimeout(timer.current)
     timer.current = null
     pending.current = null
+    // A recovery chain owns the connection while it holds the turn; the SDK
+    // reconnecting or stopping underneath it must not erase that state.
+    const entry = useStreamPool
+      .getState()
+      .entries.find((candidate) => candidate.id === streamId)
+    const connection = entry?.connection
+    if (
+      connection?.status === "failed" ||
+      (connection?.status === "reconnecting" && connection.source === "resume")
+    )
+      return
     useStreamPool.getState().streamLive(streamId)
   }
 

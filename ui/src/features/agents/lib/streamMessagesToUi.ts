@@ -1,5 +1,6 @@
 import { AIMessage, HumanMessage, ToolMessage } from "@langchain/core/messages"
 import { messageArrivalTimestamp } from "./messageTimestamps"
+import { mergeNetworkRecoveryAttempts } from "./networkRecovery"
 import {
   collectStructuredEntities,
   parseStructuredInput,
@@ -103,11 +104,33 @@ function maybeDiffFromArgs(args: Record<string, unknown>): DiffData | null {
   }
 }
 
-function mergeTextChunks(chunks: Array<Chunk>): Array<Chunk> {
+/**
+ * One text chunk per turn: several assistant messages inside a turn are the
+ * same answer continuing, so only the last text is placed in the flow — except
+ * for a recovered turn, where the earlier text is real answer content that the
+ * continuation carried on from and has to be kept.
+ */
+function mergeTextChunks(chunks: Array<Chunk>, joinText = false): Array<Chunk> {
   const textIndices = chunks.flatMap((c, i) => (c.kind === "text" ? [i] : []))
   if (textIndices.length <= 1) return chunks
   const lastText = textIndices[textIndices.length - 1]
-  return chunks.filter((c, i) => c.kind !== "text" || i === lastText)
+  if (lastText === undefined) return chunks
+  if (!joinText)
+    return chunks.filter((c, i) => c.kind !== "text" || i === lastText)
+  const texts: Array<string> = []
+  for (const index of textIndices) {
+    const chunk = chunks[index]
+    if (chunk?.kind !== "text") continue
+    const text = chunk.text.trim()
+    if (text) texts.push(text)
+  }
+  const merged: Chunk = { kind: "text", text: texts.join("\n\n") }
+  const result: Array<Chunk> = []
+  chunks.forEach((chunk, index) => {
+    if (chunk.kind !== "text") result.push(chunk)
+    else if (index === lastText) result.push(merged)
+  })
+  return result
 }
 
 type AgentTurn = {
@@ -117,6 +140,8 @@ type AgentTurn = {
   turnKey?: string
   startedAt: string
   timestampIsFallback?: boolean
+  /** This turn continues an attempt that a network recovery interrupted. */
+  continued?: boolean
   chunks: Array<Chunk>
 }
 
@@ -323,6 +348,10 @@ export function streamMessagesToUi(
   toolCalls: ReadonlyArray<AssembledToolCall> = [],
   resolveCreatedAt?: (messageId: string) => string | undefined
 ): Array<Message> {
+  // Recovery continuations are dropped first so the assistant turn before and
+  // after them is appended to one agent turn: one question, one continuous answer.
+  const { messages: visible, continued } =
+    mergeNetworkRecoveryAttempts(messages)
   const toolCallsById = new Map<string, AssembledToolCall>()
   for (const toolCall of toolCalls) {
     const id = toolCall.id || toolCall.callId
@@ -330,14 +359,14 @@ export function streamMessagesToUi(
   }
 
   const toolMessagesById = new Map<string, ToolMessage>()
-  for (const raw of messages) {
+  for (const raw of visible) {
     if (ToolMessage.isInstance(raw) && typeof raw.tool_call_id === "string") {
       toolMessagesById.set(raw.tool_call_id, raw)
     }
   }
 
   const structuredEntities = collectStructuredEntities(
-    messages
+    visible
       .filter((message) => HumanMessage.isInstance(message))
       .map((message) => message.text)
   )
@@ -347,7 +376,11 @@ export function streamMessagesToUi(
 
   const flushAgentTurn = () => {
     if (!agentTurn) return
-    uiMessages.push({ ...agentTurn, chunks: mergeTextChunks(agentTurn.chunks) })
+    const { continued: carried, chunks, ...turn } = agentTurn
+    uiMessages.push({
+      ...turn,
+      chunks: mergeTextChunks(chunks, carried === true),
+    })
     agentTurn = null
   }
 
@@ -355,7 +388,8 @@ export function streamMessagesToUi(
     msgId: string,
     timestamp: string,
     timestampIsFallback: boolean,
-    chunks: Array<Chunk>
+    chunks: Array<Chunk>,
+    continued = false
   ) => {
     if (!agentTurn) {
       agentTurn = {
@@ -365,17 +399,19 @@ export function streamMessagesToUi(
         turnKey,
         startedAt: timestamp,
         timestampIsFallback,
+        ...(continued ? { continued: true } : {}),
         chunks: [...chunks],
       }
     } else {
       agentTurn.timestamp = timestamp
       agentTurn.timestampIsFallback =
         agentTurn.timestampIsFallback || timestampIsFallback
+      if (continued) agentTurn.continued = true
       agentTurn.chunks.push(...chunks)
     }
   }
 
-  messages.forEach((raw, index) => {
+  visible.forEach((raw, index) => {
     const msgId = typeof raw.id === "string" && raw.id ? raw.id : `msg-${index}`
     const { value: timestamp, isFallback: timestampIsFallback } =
       messageTimestamp(raw, msgId, resolveCreatedAt)
@@ -461,7 +497,13 @@ export function streamMessagesToUi(
       }
 
       if (chunks.length) {
-        appendAgentChunks(msgId, timestamp, timestampIsFallback, chunks)
+        appendAgentChunks(
+          msgId,
+          timestamp,
+          timestampIsFallback,
+          chunks,
+          continued.has(index)
+        )
       }
     }
 

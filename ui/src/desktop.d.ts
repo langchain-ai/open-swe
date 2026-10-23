@@ -118,6 +118,87 @@ export type DesktopUpdateState = {
   version?: string
 }
 
+export type DesktopRecoveryReason = "backend-down" | "network" | "run-lost"
+
+export type DesktopRecoveryOutcome =
+  | "completed"
+  | "taken-over"
+  | "disarmed"
+  | "timed-out"
+  | "disabled"
+
+export interface DesktopNetworkResumeChain {
+  threadId: string
+  /** `waiting` holds the turn, `dispatching` has a continuation on the wire. */
+  phase: "waiting" | "dispatching" | "inflight"
+  reason: DesktopRecoveryReason
+  rootRunId: string | null
+  previousRunId: string | null
+  generation: number
+  sendTicket: number
+  closing: boolean
+  firstWaitingAt: number
+  /** The continuation run has been accepted by the backend. */
+  dispatched: boolean
+}
+
+export interface DesktopNetworkResumeSnapshot {
+  epoch: string
+  revision: number
+  enabled: boolean
+  network: { reachable: boolean | null; checkedAt: number }
+  chains: Array<DesktopNetworkResumeChain>
+}
+
+export type DesktopNetworkResumeChange =
+  | { kind: "network" }
+  | { kind: "chain-updated"; threadId: string }
+  | {
+      kind: "chain-removed"
+      threadId: string
+      outcome: DesktopRecoveryOutcome
+    }
+
+export interface DesktopNetworkResumeEvent {
+  snapshot: DesktopNetworkResumeSnapshot
+  change: DesktopNetworkResumeChange | null
+}
+
+/** What the desktop decided to do about a local stream that went quiet. */
+export type DesktopNetworkResumeStall =
+  /** The backend is unreachable: a recovery chain now owns the turn. */
+  | { action: "arm" }
+  /** The backend is fine but the stream is stale: reconnect it. */
+  | { action: "resync" }
+  /** The run is still executing: leave it alone. */
+  | { action: "none" }
+
+export interface DesktopNetworkResumeBridge {
+  arm: (input: {
+    threadId: string
+    reason: DesktopRecoveryReason
+    runId?: string | null
+  }) => Promise<DesktopNetworkResumeChain | null>
+  disarm: (input: { threadId: string }) => Promise<boolean>
+  /** The thread's stream serves again: a dispatching chain becomes `inflight`. */
+  working: (input: { threadId: string }) => Promise<boolean>
+  complete: (input: { threadId: string }) => Promise<boolean>
+  /** The stream stopped producing events while a run was loading. */
+  stall: (input: { threadId: string }) => Promise<DesktopNetworkResumeStall>
+  snapshot: () => Promise<DesktopNetworkResumeSnapshot | null>
+  onChange: (callback: (event: DesktopNetworkResumeEvent) => void) => () => void
+  /**
+   * The local backend process exited. Fires before the SDK has given up its
+   * retry loop, so a loading turn can arm its recovery chain immediately.
+   */
+  onBackendLost: (callback: (event: DesktopLocalBackendLost) => void) => () => void
+}
+
+export interface DesktopLocalBackendLost {
+  at: number
+  message: string
+}
+
 export interface DesktopTerminalBridge {
   attach: (
     input: DesktopTerminalTarget & {
@@ -233,6 +314,7 @@ declare global {
       getLocalDiff: (threadId: string) => Promise<DesktopLocalDiff>
       getLocalPrDiff: (threadId: string) => Promise<DesktopLocalDiff>
       getProjectDiff: (cwd: string) => Promise<DesktopLocalDiff>
+      networkResume: DesktopNetworkResumeBridge
       terminal: DesktopTerminalBridge
     }
   }

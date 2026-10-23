@@ -11,6 +11,10 @@ const HOST = "127.0.0.1";
 // `langgraph dev` runs one job per worker unless told otherwise; every thread
 // has its own worktree, so runs no longer have to wait for each other.
 const JOBS_PER_WORKER = "10";
+// `langgraph dev` otherwise installs blockbuster, and building the agent graph
+// resolves a path through the synchronous `os.getcwd` that deepagents' version
+// helper calls on Windows — every request then fails with a 500.
+const ALLOW_BLOCKING = "--allow-blocking";
 const START_TIMEOUT_MS = 60_000;
 const STOP_TIMEOUT_MS = 5_000;
 const THREAD_STATUS = { busy: "running", error: "error" };
@@ -40,6 +44,7 @@ function devBackendTarget({ repoRoot, port, stateDir, env = process.env }) {
       String(port),
       "--n-jobs-per-worker",
       JOBS_PER_WORKER,
+      ALLOW_BLOCKING,
       "--config",
       path.resolve(repoRoot, config),
     ],
@@ -73,6 +78,7 @@ function packagedBackendTarget({
       String(port),
       "--n-jobs-per-worker",
       JOBS_PER_WORKER,
+      ALLOW_BLOCKING,
       "--config",
       path.join(root, "langgraph.json"),
     ],
@@ -164,6 +170,10 @@ class BackendSupervisor {
     this.ready = null;
     this.failure = null;
     this.gatewayEnv = null;
+    // Streaming responses outlive the request that opened them. Without this
+    // bookkeeping a proxy response whose backend died would never end, leaving
+    // the renderer stuck on `Working…` forever.
+    this.inflight = new Set();
   }
 
   gatewayEnvironment() {
@@ -228,6 +238,10 @@ class BackendSupervisor {
             }
           : {}),
         PYTHONUNBUFFERED: "1",
+        // Python's UTF-8 mode. Without it, a Windows locale that is not UTF-8
+        // (cp936, cp950, cp1252, …) makes langgraph_api decode its bundled
+        // openapi.json with that codec while importing and the server aborts.
+        PYTHONUTF8: "1",
       },
       stdio: ["ignore", "pipe", "pipe"],
       windowsHide: true,
@@ -243,7 +257,10 @@ class BackendSupervisor {
     const exited = new Promise((resolve) => {
       child.once("error", (error) => {
         startupError = error;
-        if (!this.closing) this.failure = error;
+        if (!this.closing) {
+          this.failure = error;
+          this.backendLost(error);
+        }
         resolve();
       });
       child.once("exit", (code, signal) => {
@@ -253,7 +270,10 @@ class BackendSupervisor {
             `Local LangGraph backend stopped with ${reason}`,
           );
         }
-        if (!this.closing) this.failure = startupError;
+        if (!this.closing) {
+          this.failure = startupError;
+          this.backendLost(startupError);
+        }
         resolve();
       });
     });
@@ -268,6 +288,7 @@ class BackendSupervisor {
         });
         if (response.ok) {
           this.failure = null;
+          await this.reconcileOrphanedRuns();
           return this.publicConfig();
         }
       } catch {}
@@ -281,6 +302,43 @@ class BackendSupervisor {
     throw new Error(
       `Local LangGraph backend did not become healthy${detail ? `\n${detail}` : ""}`,
     );
+  }
+
+  /**
+   * Nothing can be executing right after boot, so any run the backend still
+   * reports as pending or running was orphaned by the process that died — or by
+   * the last shutdown. The dev server restores its run registry from a snapshot
+   * and never reconciles it, which leaves those threads busy forever: the next
+   * run on them queues behind a run that has no worker and never starts.
+   *
+   * This runs before `start()` resolves, so no proxied request can race it.
+   */
+  async reconcileOrphanedRuns() {
+    try {
+      const response = await this.fetch(
+        `http://${HOST}:${this.port}/runs/cancel?action=interrupt`,
+        {
+          method: "POST",
+          headers: {
+            authorization: `Bearer ${this.token}`,
+            "content-type": "application/json",
+          },
+          body: JSON.stringify({ status: "all" }),
+          signal: AbortSignal.timeout(5_000),
+        },
+      );
+      if (!response.ok && response.status !== 204) {
+        this.logs = `${this.logs}orphaned run reconciliation returned ${response.status}\n`.slice(
+          -16_000,
+        );
+      }
+    } catch (error) {
+      // A backend that cannot reconcile is still usable, but the reason its
+      // threads stay busy has to be visible in the boot log.
+      this.logs = `${this.logs}orphaned run reconciliation failed: ${error instanceof Error ? error.message : String(error)}\n`.slice(
+        -16_000,
+      );
+    }
   }
 
   credentialStatus(modelId) {
@@ -308,6 +366,52 @@ class BackendSupervisor {
       ...init,
       headers,
     });
+  }
+
+  /** The backend process is gone: fail every response it was still streaming. */
+  backendLost(error) {
+    this.abortInflight();
+    this.options.onExit?.(error);
+  }
+
+  abortInflight() {
+    const aborted = this.inflight.size;
+    if (aborted > 0) {
+      // Recorded on the backend log so a dead-stream bug report shows whether the
+      // exit actually failed the requests instead of leaving them hanging.
+      this.logs = `${this.logs}aborted ${aborted} in-flight proxy response(s) on backend exit\n`.slice(
+        -16_000
+      );
+    }
+    for (const controller of this.inflight) {
+      try {
+        controller.abort();
+      } catch {}
+    }
+    this.inflight.clear();
+  }
+
+  /**
+   * Health probe for the resume coordinator. A missing child counts as
+   * unreachable; starting the backend stays `start()`'s job.
+   */
+  async probe(timeoutMs = 1_000) {
+    if (!this.child || !this.port || !this.token) {
+      return { reachable: false, checkedAt: Date.now(), status: null };
+    }
+    try {
+      const response = await this.fetch(`http://${HOST}:${this.port}/ok`, {
+        headers: { authorization: `Bearer ${this.token}` },
+        signal: AbortSignal.timeout(timeoutMs),
+      });
+      return {
+        reachable: response.status < 500,
+        checkedAt: Date.now(),
+        status: response.status,
+      };
+    } catch {
+      return { reachable: false, checkedAt: Date.now(), status: null };
+    }
   }
 
   async threadActivity() {
@@ -385,16 +489,69 @@ class BackendSupervisor {
     const body = ["GET", "HEAD"].includes(request.method)
       ? undefined
       : request.body;
-    return this.request(
-      `${source.pathname.slice(prefix.length) || "/"}${source.search}`,
-      {
-        method: request.method,
-        headers,
-        body,
-        redirect: "manual",
-        ...(body ? { duplex: "half" } : {}),
+    const controller = new AbortController();
+    this.inflight.add(controller);
+    try {
+      const response = await this.request(
+        `${source.pathname.slice(prefix.length) || "/"}${source.search}`,
+        {
+          method: request.method,
+          headers,
+          body,
+          redirect: "manual",
+          signal: request.signal
+            ? AbortSignal.any([controller.signal, request.signal])
+            : controller.signal,
+          ...(body ? { duplex: "half" } : {}),
+        },
+      );
+      return this.trackResponse(response, controller);
+    } catch (error) {
+      this.inflight.delete(controller);
+      throw error;
+    }
+  }
+
+  /**
+   * Keep an in-flight proxy response registered until its body really ends, so
+   * a backend exit can abort it. Unregistering on `await` alone would leak one
+   * entry per reconnect.
+   */
+  trackResponse(response, controller) {
+    const release = () => this.inflight.delete(controller);
+    if (
+      !response.body ||
+      [204, 205, 304].includes(response.status)
+    ) {
+      release();
+      return response;
+    }
+    const reader = response.body.getReader();
+    const stream = new ReadableStream({
+      async pull(streamController) {
+        try {
+          const { done, value } = await reader.read();
+          if (done) {
+            release();
+            streamController.close();
+            return;
+          }
+          streamController.enqueue(value);
+        } catch (error) {
+          release();
+          streamController.error(error);
+        }
       },
-    );
+      cancel(reason) {
+        release();
+        return reader.cancel(reason).catch(() => {});
+      },
+    });
+    return new Response(stream, {
+      status: response.status,
+      statusText: response.statusText,
+      headers: response.headers,
+    });
   }
 
   async close() {
@@ -406,6 +563,7 @@ class BackendSupervisor {
     this.token = null;
     this.ready = null;
     this.failure = null;
+    this.abortInflight();
     if (!child || child.exitCode !== null || child.signalCode !== null) return;
     await new Promise((resolve) => {
       const timer = setTimeout(() => {

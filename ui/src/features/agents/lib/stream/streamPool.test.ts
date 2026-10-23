@@ -147,7 +147,28 @@ describe("streamPool", () => {
         status: "reconnecting",
         attempt: 3,
         retryAt: NOW + 4_000,
+        source: "sdk",
       })
+    })
+
+    it("lets a recovery chain own the connection of its thread", () => {
+      pool().activate("local", "thread-1")
+      pool().activate("cloud", "thread-1")
+
+      pool().resumeConnection("thread-1", {
+        status: "reconnecting",
+        attempt: 1,
+        retryAt: 0,
+        source: "resume",
+      })
+
+      const entries = pool().entries.filter(
+        (entry) => entry.threadId === "thread-1"
+      )
+      expect(entries.map((entry) => entry.connection)).toEqual([
+        { status: "reconnecting", attempt: 1, retryAt: 0, source: "resume" },
+        { status: "reconnecting", attempt: 1, retryAt: 0, source: "resume" },
+      ])
     })
 
     it("returns to live once a stream opens again", () => {
@@ -158,6 +179,36 @@ describe("streamPool", () => {
       pool().streamLive(id)
 
       expect(activeEntry()!.connection).toEqual({ status: "live" })
+    })
+
+    it("remounts one stream without touching its neighbours", () => {
+      pool().activate("local", "stalled")
+      const stalled = activeEntry()!
+      pool().activate("local", "other")
+      const other = activeEntry()!
+
+      pool().refreshStream(stalled.id)
+
+      const entries = new Map(pool().entries.map((entry) => [entry.id, entry]))
+      expect(entries.get(stalled.id)?.reconnectEpoch).toBe(1)
+      expect(entries.get(stalled.id)?.connection).toEqual({ status: "live" })
+      expect(entries.get(other.id)?.reconnectEpoch).toBe(0)
+    })
+
+    it("remounts only streams waiting on a retry when the network returns", () => {
+      pool().activate("cloud", "waiting")
+      const waiting = activeEntry()!
+      pool().activate("cloud", "live")
+      const live = activeEntry()!
+      pool().streamReconnecting(waiting.id, 2, NOW + 4_000)
+
+      pool().wakeReconnecting()
+
+      const entries = new Map(pool().entries.map((entry) => [entry.id, entry]))
+      expect(entries.get(waiting.id)?.connection).toEqual({ status: "live" })
+      expect(entries.get(waiting.id)?.reconnectEpoch).toBe(1)
+      expect(entries.get(live.id)?.connection).toEqual({ status: "live" })
+      expect(entries.get(live.id)?.reconnectEpoch).toBe(0)
     })
   })
 })

@@ -60,7 +60,11 @@ import { visibleQueuedMessages } from "@/features/agents/lib/queuedMessages"
 import { messageArrivalTimestamp } from "@/features/agents/lib/messageTimestamps"
 import { useIsMobile } from "@/lib/useIsMobile"
 import { useSession } from "@/lib/session"
-import { useAgentStream } from "@/features/agents/lib/stream/AgentStreamProvider"
+import {
+  useAgentStream,
+  useAgentStreamConnection,
+} from "@/features/agents/lib/stream/AgentStreamProvider"
+import { useReconnectStatus } from "@/features/agents/lib/stream/useReconnectStatus"
 import {
   threadHydrated,
   threadHydrationFailed,
@@ -191,11 +195,17 @@ export function LocalAgentThreadView({ sessionId }: { sessionId: string }) {
     [queryClient, refetchProjectRefs, sessionId]
   )
 
+  const connection = useAgentStreamConnection("local", sessionId)
   const activity = useLocalThreadActivity()[sessionId]
+  // Once a recovery chain gives up, the turn is over and has to read as over:
+  // the last activity snapshot is from a backend that is no longer there, and
+  // `thread.pending` is a prompt whose run never started.
+  const turnFailed = connection.status === "failed"
   const isRunning =
-    stream.isLoading ||
-    (Boolean(thread?.pending) && !error) ||
-    activity === "running"
+    !turnFailed &&
+    (stream.isLoading ||
+      (Boolean(thread?.pending) && !error) ||
+      activity === "running")
   const diffVisible =
     !panelCollapsed && activeSurfaceId === "diff" && Boolean(thread)
   const selectScope = useDiffPanelStore((state) => state.selectScope)
@@ -350,14 +360,28 @@ export function LocalAgentThreadView({ sessionId }: { sessionId: string }) {
     [activeSelection, rememberSelection, stream, thread]
   )
 
+  const reconnect = useReconnectStatus("local", sessionId)
+  // While a recovery chain owns the turn, follow-ups wait in memory: the store
+  // would be drained by a run that is about to be replaced.
+  const hold =
+    connection.status === "reconnecting" && connection.source === "resume"
+
   const queue = useLocalPromptQueue({
     client: stream.client,
     sessionId,
     login,
     isRunning,
+    hold,
     submit,
   })
   const shownError = error ?? (queue.error ? errorMessage(queue.error) : null)
+  const failureNotice =
+    shownError ??
+    (connection.status === "failed"
+      ? connection.message
+      : activity === "error"
+        ? "The local Open SWE agent stopped unexpectedly."
+        : null)
 
   useEffect(() => {
     if (modelsLoading || !thread || initialPromptRef.current === sessionId)
@@ -449,13 +473,11 @@ export function LocalAgentThreadView({ sessionId }: { sessionId: string }) {
           target="This Mac"
           panelCollapsed={panelCollapsed}
         />
-        {(shownError || activity === "error") && (
+        {failureNotice && (
           <div className="mx-auto w-full max-w-3xl px-4 pt-3">
             <Alert variant="error">
               <CircleAlert />
-              <AlertDescription>
-                {shownError || "The local Open SWE agent stopped unexpectedly."}
-              </AlertDescription>
+              <AlertDescription>{failureNotice}</AlertDescription>
             </Alert>
           </div>
         )}
@@ -464,6 +486,7 @@ export function LocalAgentThreadView({ sessionId }: { sessionId: string }) {
             contentWidthClass="max-w-3xl"
             isStreaming={isRunning}
             isThinking={isRunning}
+            reconnectLabel={reconnect.label}
             messages={messages}
             scrollKey={sessionId}
             onOpenFile={handleOpenFile}
@@ -508,6 +531,11 @@ export function LocalAgentThreadView({ sessionId }: { sessionId: string }) {
               selection={activeSelection}
               onSelectionChange={setSelection}
               onStop={async () => {
+                // A user stop cancels the recovery: this turn must not be
+                // continued behind their back.
+                await window.openSweDesktop?.networkResume
+                  ?.disarm({ threadId: thread.id })
+                  .catch(() => {})
                 try {
                   await stream.stop()
                 } catch (cause) {

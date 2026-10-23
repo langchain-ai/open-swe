@@ -1,5 +1,8 @@
 import { MAX_RECONNECT_ATTEMPTS, type StreamConnection } from "./streamPool"
 
+const RESUME_LABEL = "Connection lost. Continuing automatically when it returns."
+const FAILED_LABEL = "Connection lost. Send a message to pick the task back up."
+
 /**
  * The activity line's text while the event stream is not serving. Mirrors how
  * Claude Code and Codex report a retry: attempt count plus a countdown, in the
@@ -10,6 +13,10 @@ export function reconnectLabel(
   now: number
 ): string | null {
   if (connection.status === "live") return null
+  if (connection.status === "failed") return FAILED_LABEL
+  // A recovery chain replaces the SDK's backoff with a reachability probe, so
+  // there is no attempt to count down.
+  if (connection.source === "resume") return RESUME_LABEL
   const seconds = Math.max(0, Math.ceil((connection.retryAt - now) / 1000))
   const progress = `${connection.attempt}/${MAX_RECONNECT_ATTEMPTS}`
   return seconds > 0

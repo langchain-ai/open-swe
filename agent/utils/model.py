@@ -4,7 +4,11 @@ from typing import Any, Literal, TypedDict, Unpack, cast
 from langchain.chat_models import init_chat_model
 
 from agent.config import ENV
-from agent.dashboard.options import DEFAULT_MODEL_ID, model_profile_with_context_override
+from agent.dashboard.options import (
+    DEFAULT_MODEL_ID,
+    LOCAL_MODEL_IDS,
+    model_profile_with_context_override,
+)
 from agent.utils.gateway import gateway_env_default, gateway_overrides
 from agent.utils.openai_oauth import (
     build_desktop_openai_oauth_model,
@@ -15,13 +19,8 @@ OPENAI_RESPONSES_WS_BASE_URL = "wss://api.openai.com/v1"
 BASETEN_BASE_URL = "https://inference.baseten.co/v1"
 
 # 本地/自托管 OpenAI 兼容模型（如 Ollama）只支持 Chat Completions，
-# 不走 OpenAI Responses API。在 agent/dashboard/options.py 注册后加入此集合。
-OPENAI_CHAT_COMPLETIONS_MODEL_IDS: frozenset[str] = frozenset(
-    {
-        "openai:qwen3:8b",
-        "openai:qwen3.5:9b",
-    }
-)
+# 不走 OpenAI Responses API。集合由 agent/dashboard/options.py 注册。
+OPENAI_CHAT_COMPLETIONS_MODEL_IDS: frozenset[str] = LOCAL_MODEL_IDS
 
 # Anthropic SDK default is 2; a 529 burst can outlive that. Bump to give the
 # primary provider a fair chance before the fallback middleware kicks in.
@@ -234,6 +233,10 @@ def fallback_model_id_for(primary_model_id: str) -> str | None:
     when the provider has no configured cross-provider fallback (e.g. Google,
     local, or self-hosted providers we don't want to silently route off-host).
     """
+    # 本地 Ollama 模型复用了 ``openai:`` 前缀，但不是 OpenAI 的模型：
+    # 跨 provider 降级会把本地运行悄然推到需要云端凭据的 Anthropic 上。
+    if primary_model_id in LOCAL_MODEL_IDS:
+        return None
     if primary_model_id.startswith("anthropic:"):
         return "openai:gpt-5.6-sol"
     if primary_model_id.startswith("openai:"):

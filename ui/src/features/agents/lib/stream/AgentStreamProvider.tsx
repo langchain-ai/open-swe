@@ -5,6 +5,7 @@ import {
   useEffect,
   useLayoutEffect,
   useMemo,
+  useRef,
   useState,
 } from "react"
 import { useChannelEffect, useStream } from "@langchain/react"
@@ -21,9 +22,11 @@ import {
   dashboardFetch,
 } from "@/lib/langgraph-client"
 import { RunTracker } from "@/lib/perf/streaming"
+import { classifyStreamError } from "@/features/agents/lib/networkRecovery"
 import { useReconnectNotice } from "./useReconnectNotice"
 import {
   MAX_RECONNECT_ATTEMPTS,
+  STALL_QUIET_MS,
   reconnectDelayMs,
   selectConnectionFor,
   selectStreamFor,
@@ -45,6 +48,7 @@ export type {
 
 const AGENT_ASSISTANT_ID = "agent"
 const SWEEP_INTERVAL_MS = 10_000
+const STALL_CHECK_INTERVAL_MS = 5_000
 
 const AgentStreamContext = createContext<AgentStream | null>(null)
 
@@ -66,6 +70,8 @@ function PooledStream({ entry }: { entry: StreamPoolEntry }) {
     [cloud]
   )
   const pool = useStreamPool.getState
+  const networkResume = window.openSweDesktop?.networkResume
+  const armedError = useRef<unknown>(null)
   const { schedule: scheduleReconnectNotice, clear: clearReconnectNotice } =
     useReconnectNotice(entry.id)
   const [runTracker] = useState(
@@ -87,7 +93,15 @@ function PooledStream({ entry }: { entry: StreamPoolEntry }) {
     maxReconnectAttempts: MAX_RECONNECT_ATTEMPTS,
     reconnectDelayMs,
     onReconnect: scheduleReconnectNotice,
-    onConnected: clearReconnectNotice,
+    onConnected: () => {
+      clearReconnectNotice()
+      const threadId = pool().entries.find((e) => e.id === entry.id)?.threadId
+      if (!threadId) return
+      // Reports that this thread's stream is serving again: a dispatching chain
+      // moves to `inflight`. A waiting chain stays put — reconnecting to the
+      // thread is not proof that the interrupted run survived.
+      void networkResume?.working({ threadId }).catch(() => {})
+    },
     onThreadId: (threadId) => {
       runTracker.bindThread(threadId)
       pool().rekey(entry.id, threadId)
@@ -96,13 +110,17 @@ function PooledStream({ entry }: { entry: StreamPoolEntry }) {
       runTracker.created()
       setIsOffloading(false)
       pool().runAccepted(entry.id)
+      // The server just accepted a run, so the connection that gave up is
+      // history: without this a recovered thread keeps its failure state.
+      useStreamPool.getState().streamLive(entry.id)
       if (cloud) invalidateAgentThreadLists(queryClient)
     },
     onCompleted: (info) => {
       runTracker.completed(info.reason)
       setIsOffloading(false)
-      if (!cloud) return
       const threadId = pool().entries.find((e) => e.id === entry.id)?.threadId
+      if (threadId) void networkResume?.complete({ threadId }).catch(() => {})
+      if (!cloud) return
       if (threadId) {
         void queryClient.invalidateQueries({
           queryKey: agentThreadKeys.detail(threadId),
@@ -134,6 +152,21 @@ function PooledStream({ entry }: { entry: StreamPoolEntry }) {
     onEvent: (event) => runTracker.event(event),
   })
 
+  const liveStream = useRef(stream)
+  useEffect(() => {
+    liveStream.current = stream
+  }, [stream])
+  // Progress is whatever the transport delivers; a blackholed link delivers none.
+  const lastProgressAt = useRef(Date.now())
+  useChannelEffect(stream, ["messages", "updates", "lifecycle"], {
+    onEvent: () => {
+      lastProgressAt.current = Date.now()
+    },
+  })
+  useEffect(() => {
+    lastProgressAt.current = Date.now()
+  }, [stream.messages, stream.toolCalls])
+
   // Every send goes through the published handle, so timing it here covers
   // the composer, the home page and the local queue alike.
   const submit = useCallback<AgentStream["submit"]>(
@@ -159,6 +192,72 @@ function PooledStream({ entry }: { entry: StreamPoolEntry }) {
     if (!thread) return
     return thread.onError(clearReconnectNotice)
   }, [clearReconnectNotice, stream])
+
+  // A local stream that failed for transport reasons hands the turn to the
+  // desktop's recovery coordinator, which alone decides when to continue.
+  useEffect(() => {
+    const failure = stream.error
+    if (!networkResume || entry.transport !== "local" || !failure) return
+    if (armedError.current === failure) return
+    const threadId = pool().entries.find((e) => e.id === entry.id)?.threadId
+    if (!threadId) return
+    const reason = classifyStreamError(failure, navigator.onLine !== false)
+    if (!reason) return
+    armedError.current = failure
+    void networkResume.arm({ threadId, reason }).catch(() => {})
+  }, [entry.id, entry.transport, networkResume, pool, stream.error])
+
+  // A loading local stream whose backend process exited hands the turn to the
+  // coordinator immediately. The SDK's SSE transport would otherwise retry for
+  // roughly 23 minutes before it reports an error, and until then nothing arms
+  // the chain. `isLoading` keeps an idle thread from being armed.
+  useEffect(() => {
+    const bridge = networkResume
+    const onBackendLost = bridge?.onBackendLost
+    if (
+      !bridge ||
+      typeof onBackendLost !== "function" ||
+      entry.transport !== "local"
+    )
+      return
+    return onBackendLost(() => {
+      if (!liveStream.current.isLoading) return
+      const threadId = pool().entries.find((e) => e.id === entry.id)?.threadId
+      if (!threadId) return
+      void bridge.arm({ threadId, reason: "backend-down" }).catch(() => {})
+    })
+  }, [entry.id, entry.transport, networkResume, pool])
+
+  // A loading local stream that stops producing events is either a quiet tool
+  // call or a dead link, and only the backend can tell the two apart. Asking it
+  // keeps a black hole from reading as permanent work.
+  useEffect(() => {
+    const stall = networkResume?.stall
+    if (typeof stall !== "function" || entry.transport !== "local") return
+    let checking = false
+    const timer = setInterval(() => {
+      if (!liveStream.current.isLoading) {
+        lastProgressAt.current = Date.now()
+        return
+      }
+      if (checking || Date.now() - lastProgressAt.current < STALL_QUIET_MS) return
+      const threadId = pool().entries.find((e) => e.id === entry.id)?.threadId
+      if (!threadId) return
+      checking = true
+      // Whatever the answer, the window restarts: one question per quiet period,
+      // not one per tick.
+      lastProgressAt.current = Date.now()
+      void stall({ threadId })
+        .then((result) => {
+          if (result.action === "resync") pool().refreshStream(entry.id)
+        })
+        .catch(() => {})
+        .finally(() => {
+          checking = false
+        })
+    }, STALL_CHECK_INTERVAL_MS)
+    return () => clearInterval(timer)
+  }, [entry.id, entry.transport, networkResume, pool])
 
   return null
 }
@@ -210,7 +309,10 @@ export function AgentStreamProvider({
   return (
     <>
       {entries.map((entry) => (
-        <PooledStream key={entry.id} entry={entry} />
+        <PooledStream
+          key={`${entry.id}:${entry.reconnectEpoch}`}
+          entry={entry}
+        />
       ))}
       {stream && (
         <AgentStreamContext.Provider value={stream}>

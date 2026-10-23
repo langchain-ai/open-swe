@@ -1,5 +1,6 @@
 const test = require("node:test");
 const assert = require("node:assert/strict");
+const os = require("node:os");
 const path = require("node:path");
 
 const {
@@ -30,6 +31,7 @@ test("development target isolates repository LangGraph state", () => {
       "49152",
       "--n-jobs-per-worker",
       "10",
+      "--allow-blocking",
       "--config",
       path.join(repoRoot, "langgraph.desktop.json"),
     ],
@@ -145,6 +147,46 @@ test("concurrent starts share one backend launch", async () => {
   assert.equal(second, first);
 });
 
+test("boot interrupts runs a previous backend left marked as running", async () => {
+  const { EventEmitter } = require("node:events");
+  const os = require("node:os");
+  const requests = [];
+  const supervisor = new BackendSupervisor({
+    repoRoot: path.resolve("/work/open-swe"),
+    projectsFile: path.join(os.tmpdir(), "projects.json"),
+    worktreesDir: path.join(os.tmpdir(), "open-swe-test-worktrees"),
+    reservePort: async () => 49152,
+    spawn: () =>
+      Object.assign(new EventEmitter(), {
+        stdout: null,
+        stderr: null,
+        exitCode: null,
+        signalCode: null,
+        kill() {},
+      }),
+    fetch: async (url, init) => {
+      requests.push({ url: String(url), init });
+      return new Response(null, {
+        status: String(url).includes("/runs/cancel") ? 204 : 200,
+      });
+    },
+  });
+
+  await supervisor.start();
+
+  const cancel = requests.find((request) =>
+    request.url.includes("/runs/cancel")
+  );
+  assert.ok(cancel, "boot must reconcile orphaned runs");
+  assert.equal(cancel.init.method, "POST");
+  assert.match(cancel.url, /\/runs\/cancel\?action=interrupt$/);
+  assert.deepEqual(JSON.parse(cancel.init.body), { status: "all" });
+  assert.equal(
+    new Headers(cancel.init.headers).get("authorization"),
+    `Bearer ${supervisor.token}`
+  );
+});
+
 test("creates the local LangGraph thread before stream hydration", async () => {
   const supervisor = new BackendSupervisor({});
   let request;
@@ -205,6 +247,97 @@ test("derives thread activity from the backend without starting it", async () =>
     throw new Error("connection refused");
   };
   assert.equal(await supervisor.threadActivity(), null);
+});
+
+test("probes a running backend without starting one", async () => {
+  const idle = new BackendSupervisor({
+    fetch: () => assert.fail("must not reach a backend that is not running"),
+  });
+  assert.equal((await idle.probe()).reachable, false);
+
+  const supervisor = new BackendSupervisor({
+    fetch: async () => new Response(null, { status: 200 }),
+  });
+  supervisor.child = {};
+  supervisor.port = 49152;
+  supervisor.token = "token";
+  const probed = await supervisor.probe();
+  assert.equal(probed.reachable, true);
+  assert.equal(probed.status, 200);
+  assert.equal(typeof probed.checkedAt, "number");
+
+  supervisor.fetch = async () => {
+    throw new Error("connection refused");
+  };
+  assert.equal((await supervisor.probe()).reachable, false);
+});
+
+test("a lost backend fails the streaming proxy responses it opened", async () => {
+  const http = require("node:http");
+  const server = http.createServer((request, response) => {
+    response.writeHead(200, { "content-type": "text/event-stream" });
+    response.write("data: {}\n\n");
+  });
+  await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve));
+  const port = server.address().port;
+  const supervisor = new BackendSupervisor({});
+  supervisor.child = {};
+  supervisor.port = port;
+  supervisor.token = "token";
+  supervisor.ready = Promise.resolve({});
+
+  try {
+    const response = await supervisor.proxy(
+      new Request("http://app/local-graph/threads/one/stream/events", {
+        method: "POST",
+        body: "{}",
+      }),
+    );
+    const reader = response.body.getReader();
+    const first = await reader.read();
+    assert.equal(first.done, false);
+    assert.equal(supervisor.inflight.size, 1);
+
+    supervisor.abortInflight();
+
+    await assert.rejects(() => reader.read());
+    assert.equal(supervisor.inflight.size, 0);
+  } finally {
+    server.closeAllConnections?.();
+    await new Promise((resolve) => server.close(resolve));
+  }
+});
+
+test("a child exit reports the lost backend and aborts in-flight responses", async () => {
+  const { EventEmitter } = require("node:events");
+  const child = Object.assign(new EventEmitter(), {
+    stdout: null,
+    stderr: null,
+    exitCode: null,
+    signalCode: null,
+    kill() {},
+  });
+  const exits = [];
+  const supervisor = new BackendSupervisor({
+    repoRoot: path.resolve("/work/open-swe"),
+    projectsFile: path.join(os.tmpdir(), "projects.json"),
+    worktreesDir: path.join(os.tmpdir(), "open-swe-test-worktrees"),
+    reservePort: async () => 49152,
+    spawn: () => child,
+    fetch: async () => new Response(null, { status: 200 }),
+    onExit: (error) => exits.push(error),
+  });
+  await supervisor.start();
+  const controller = new AbortController();
+  supervisor.inflight.add(controller);
+
+  child.exitCode = 1;
+  child.emit("exit", 1, null);
+
+  assert.equal(exits.length, 1);
+  assert.match(exits[0].message, /exit code 1/);
+  assert.equal(controller.signal.aborted, true);
+  assert.equal(supervisor.inflight.size, 0);
 });
 
 test("packaged target runs the bundled backend", () => {

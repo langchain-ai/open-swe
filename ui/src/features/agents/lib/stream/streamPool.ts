@@ -9,10 +9,19 @@ export type AgentStream = UseStreamReturn & {
 
 export type AgentThreadTransport = "cloud" | "local"
 
+/** Who decided the stream is down: the SDK's own backoff, or a resume chain. */
+export type StreamConnectionSource = "sdk" | "resume"
+
 /** Liveness of an instance's event stream. */
 export type StreamConnection =
   | { status: "live" }
-  | { status: "reconnecting"; attempt: number; retryAt: number }
+  | {
+      status: "reconnecting"
+      attempt: number
+      retryAt: number
+      source: StreamConnectionSource
+    }
+  | { status: "failed"; message: string }
 
 export interface StreamPoolEntry {
   /** Stable identity for the mounted `useStream` instance. */
@@ -24,6 +33,8 @@ export interface StreamPoolEntry {
   awaitingCreation: boolean
   lastActiveAt: number
   connection: StreamConnection
+  /** Bumped to remount a stream and connect immediately after the network returns. */
+  reconnectEpoch: number
 }
 
 export interface StreamBinding {
@@ -33,6 +44,13 @@ export interface StreamBinding {
 
 export const IDLE_STREAM_TTL_MS = 60_000
 export const MAX_IDLE_STREAMS = 8
+
+/**
+ * How long a loading stream may produce no events before the desktop is asked
+ * whether its backend is still there. Long enough for a quiet tool call, short
+ * enough that a blackholed link never reads as permanent work.
+ */
+export const STALL_QUIET_MS = 60_000
 
 /** 1s doubling to a 5min ceiling spends this budget over roughly 23 minutes. */
 export const MAX_RECONNECT_ATTEMPTS = 12
@@ -65,9 +83,24 @@ export interface StreamPoolState {
   /** The server accepted a run on this instance. */
   runAccepted(id: string): void
   /** The transport is about to retry; `attempt` is 1-based. */
-  streamReconnecting(id: string, attempt: number, retryAt: number): void
+  streamReconnecting(
+    id: string,
+    attempt: number,
+    retryAt: number,
+    source?: StreamConnectionSource
+  ): void
+  /**
+   * A recovery chain owns the connection of the thread it belongs to. The
+   * renderer does not decide when to retry; it renders what the coordinator
+   * reports.
+   */
+  resumeConnection(threadId: string, connection: StreamConnection): void
   /** An event stream opened or its run ended, so it is no longer reconnecting. */
   streamLive(id: string): void
+  /** Reconnect every stream waiting on a retry, without touching live ones. */
+  wakeReconnecting(): void
+  /** Remount one stream so it reconnects now, e.g. after a silent stall. */
+  refreshStream(id: string): void
   consumeCreatedThread(): void
   /** Drop idle instances past the TTL or cap; active and running ones stay. */
   sweep(now: number): void
@@ -122,6 +155,7 @@ export const useStreamPool = create<StreamPoolState>((set, get) => ({
       awaitingCreation: threadId === null,
       lastActiveAt: now,
       connection: LIVE,
+      reconnectEpoch: 0,
     }
     set((state) => ({
       activeId: entry.id,
@@ -172,17 +206,29 @@ export const useStreamPool = create<StreamPoolState>((set, get) => ({
     })
   },
 
-  streamReconnecting(id, attempt, retryAt) {
+  streamReconnecting(id, attempt, retryAt, source = "sdk") {
     set((state) => ({
       entries: state.entries.map((entry) =>
         entry.id === id
           ? {
               ...entry,
-              connection: { status: "reconnecting", attempt, retryAt },
+              connection: { status: "reconnecting", attempt, retryAt, source },
             }
           : entry
       ),
     }))
+  },
+
+  resumeConnection(threadId, connection) {
+    set((state) => {
+      let changed = false
+      const entries = state.entries.map((entry) => {
+        if (entry.threadId !== threadId) return entry
+        changed = true
+        return { ...entry, connection }
+      })
+      return changed ? { entries } : state
+    })
   },
 
   streamLive(id) {
@@ -195,6 +241,30 @@ export const useStreamPool = create<StreamPoolState>((set, get) => ({
         ),
       }
     })
+  },
+
+  wakeReconnecting() {
+    set((state) => ({
+      entries: state.entries.map((entry) =>
+        entry.connection.status === "reconnecting"
+          ? {
+              ...entry,
+              connection: LIVE,
+              reconnectEpoch: entry.reconnectEpoch + 1,
+            }
+          : entry
+      ),
+    }))
+  },
+
+  refreshStream(id) {
+    set((state) => ({
+      entries: state.entries.map((entry) =>
+        entry.id === id
+          ? { ...entry, reconnectEpoch: entry.reconnectEpoch + 1 }
+          : entry
+      ),
+    }))
   },
 
   consumeCreatedThread() {

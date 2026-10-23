@@ -6,6 +6,7 @@ from agent.dashboard import options
 from agent.dashboard.agent_overrides import normalize_profile_overrides
 from agent.dashboard.options import (
     FABLE_MODEL_IDS,
+    LOCAL_MODEL_IDS,
     SUPPORTED_MODEL_IDS,
     SUPPORTED_MODELS,
     default_model_pair,
@@ -23,6 +24,7 @@ from agent.dashboard.workspace_settings import (
     WorkspaceSettingsUpdate,
     normalize_workspace_settings_for_response,
 )
+from agent.utils.model import fallback_model_id_for
 
 STALE_ANTHROPIC = "anthropic:claude-opus-4-7"
 SUPPORTED_ANTHROPIC = "anthropic:claude-opus-5"
@@ -69,6 +71,18 @@ def test_provider_fallback_resolves_openai_within_provider() -> None:
     assert effort == "low"
 
 
+@pytest.mark.parametrize("model_id", ["openai:gpt-5-legacy", STALE_ANTHROPIC])
+def test_provider_fallback_never_selects_local_models(model_id: str) -> None:
+    fallback = provider_fallback_pair(model_id, "high")
+    assert fallback is not None
+    assert fallback[0] not in LOCAL_MODEL_IDS
+
+
+@pytest.mark.parametrize("model_id", sorted(LOCAL_MODEL_IDS))
+def test_local_models_do_not_fall_back_across_providers(model_id: str) -> None:
+    assert fallback_model_id_for(model_id) is None
+
+
 @pytest.mark.parametrize("model_id", [DEPRECATED_OPENAI, DEPRECATED_ANTHROPIC, DEPRECATED_GLM])
 def test_deprecated_models_are_no_longer_selectable(model_id: str) -> None:
     assert model_id not in SUPPORTED_MODEL_IDS
@@ -103,13 +117,17 @@ def test_models_with_profile_context_windows_enriches_copies() -> None:
     ]
     enriched = models_with_profile_context_windows(models)
     assert all("context_window" not in model for model in models)
-    assert {model["id"]: model.get("context_window") for model in enriched} == {
-        "openai:gpt-6-astra": 272_000,
-        "openai:gpt-5.6-sol": 272_000,
-        "openai:gpt-5.6-terra": 272_000,
-        "openai:gpt-5.6-luna": 272_000,
-        SUPPORTED_KIMI: 1_048_576,
-    }
+    by_id = {model["id"]: model.get("context_window") for model in enriched}
+    for gpt_model_id in (
+        SUPPORTED_ASTRA,
+        SUPPORTED_OPENAI,
+        "openai:gpt-5.6-terra",
+        "openai:gpt-5.6-luna",
+    ):
+        assert by_id[gpt_model_id] == 272_000
+    assert by_id[SUPPORTED_KIMI] == 1_048_576
+    # 本地 Ollama 模型没有 profile 上下文窗口，不能被凭空补上数值。
+    assert all(by_id[model_id] is None for model_id in LOCAL_MODEL_IDS)
 
 
 @pytest.mark.parametrize("model_id", ["unknown:model", "no-colon", "", None, 123])

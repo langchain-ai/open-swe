@@ -231,6 +231,8 @@ export interface QueuedThreadMessage {
   content: string
   images?: Array<ImageChunk>
   createdAt: number
+  /** Held locally while a recovery chain owns the turn; not in the store yet. */
+  held?: boolean
 }
 
 export interface PendingThreadMessage extends QueuedThreadMessage {

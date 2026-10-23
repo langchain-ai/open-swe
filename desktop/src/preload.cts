@@ -84,6 +84,31 @@ contextBridge.exposeInMainWorld("openSweDesktop", {
     return () =>
       ipcRenderer.removeListener("desktop:projects-changed", listener);
   },
+  networkResume: {
+    arm: (input) =>
+      ipcRenderer.invoke("desktop:network-resume-arm", { ...input }),
+    disarm: (input) =>
+      ipcRenderer.invoke("desktop:network-resume-disarm", { ...input }),
+    working: (input) =>
+      ipcRenderer.invoke("desktop:network-resume-working", { ...input }),
+    complete: (input) =>
+      ipcRenderer.invoke("desktop:network-resume-complete", { ...input }),
+    stall: (input) =>
+      ipcRenderer.invoke("desktop:network-resume-stall", { ...input }),
+    snapshot: () => ipcRenderer.invoke("desktop:network-resume-snapshot"),
+    onChange: (callback) => {
+      const listener = (_event, payload) => callback(payload);
+      ipcRenderer.on("desktop:network-resume-changed", listener);
+      return () =>
+        ipcRenderer.removeListener("desktop:network-resume-changed", listener);
+    },
+    onBackendLost: (callback) => {
+      const listener = (_event, payload) => callback(payload);
+      ipcRenderer.on("desktop:local-backend-lost", listener);
+      return () =>
+        ipcRenderer.removeListener("desktop:local-backend-lost", listener);
+    },
+  },
   terminal: {
     attach: (input) =>
       ipcRenderer.invoke("desktop:terminal-attach", { ...input }),

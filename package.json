@@ -14,6 +14,7 @@
     "test": "turbo run test",
     "test:e2e": "pnpm --filter open-swe-e2e run test",
     "test:e2e:desktop": "pnpm --filter open-swe-e2e run test:desktop",
+    "test:e2e:network-recovery": "pnpm --filter open-swe-e2e run test:network-recovery",
     "test:e2e:install": "pnpm --filter open-swe-e2e exec playwright install --with-deps chromium",
     "typecheck": "turbo run typecheck",
     "format": "oxfmt"

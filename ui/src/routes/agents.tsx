@@ -51,9 +51,15 @@ function AgentsLayout() {
   })
   const pathname = location.pathname
   const localOnly = !session.data && isDesktopLocalModeEnabled()
+  // Derived from the pathname rather than the route match: `useMatch` and
+  // `useRouterState` subscribe separately, so the render right after the
+  // composer navigates to `/agents/local/<id>` can already see the new
+  // location while the match is still missing. Reading that render as "not a
+  // local route" redirected local-mode users to /login on their first send.
   const isLocalRoute =
     pathname === "/agents" ||
     pathname === "/agents/" ||
+    pathname.startsWith("/agents/local/") ||
     Boolean(activeLocalSessionId)
 
   useEffect(() => {

@@ -22,6 +22,12 @@ const {
 const { autoUpdater } = require("electron-updater");
 const { BackendSupervisor } = require("./backend-supervisor.cjs");
 const {
+  classifyStall,
+  classifyThreadState,
+  createNetworkResumeCoordinator,
+} = require("./network-resume.cjs");
+const { resumeNetworkRun } = require("./network-resume-run.cjs");
+const {
   ConsoleLogBuffer,
   buildDiagnosticsReport,
   captureProcessConsole,
@@ -122,6 +128,7 @@ let quitting = false;
 let localThreadStore = null;
 let lastActivity = {};
 let backendSupervisor = null;
+let networkResume = null;
 let openAiOAuth = null;
 type DesktopUpdateState = {
   status: "idle" | "downloading" | "ready" | "installing";
@@ -467,6 +474,84 @@ async function discardThreadWorktree(thread) {
   for (const worktree of owned) await removeWorktree(repo, worktree);
 }
 
+/** Prompt text for a hidden continuation, shared with the agent's prompt tree. */
+const NETWORK_RESUME_PROMPT = "agent/resources/prompts/runs/network-resume.md";
+let networkResumePrompt: string | null = null;
+
+function readNetworkResumePrompt(): string {
+  if (networkResumePrompt) return networkResumePrompt;
+  const candidates = [
+    path.join(process.resourcesPath, "prompts/runs/network-resume.md"),
+    path.resolve(__dirname, "../..", NETWORK_RESUME_PROMPT),
+  ];
+  for (const candidate of candidates) {
+    try {
+      const text = fs.readFileSync(candidate, "utf8").trim();
+      if (text) {
+        networkResumePrompt = text;
+        return text;
+      }
+    } catch {}
+  }
+  throw new Error("The network resume prompt is missing");
+}
+
+async function resumeLocalNetworkRun(input) {
+  const thread = localThreadStore?.get(input.threadId);
+  if (!thread) throw new Error(`Unknown local thread: ${input.threadId}`);
+  return resumeNetworkRun({
+    supervisor: backendSupervisor,
+    thread,
+    readPrompt: readNetworkResumePrompt,
+    resume: input,
+  });
+}
+
+/**
+ * The local backend's process is gone. The renderer has to hear this from the
+ * main process: the SDK's SSE transport retries for roughly 23 minutes before
+ * surfacing an error, and only an already-armed chain skips that backoff.
+ */
+function notifyBackendLost(error: unknown): void {
+  if (!mainWindow || mainWindow.isDestroyed()) return;
+  mainWindow.webContents.send("desktop:local-backend-lost", {
+    at: Date.now(),
+    message: error instanceof Error ? error.message : String(error ?? ""),
+  });
+}
+
+function createNetworkResume() {
+  const flag = String(process.env.OPEN_SWE_NETWORK_RESUME ?? "")
+    .trim()
+    .toLowerCase();
+  const enabled = !["0", "false", "no", "off"].includes(flag);
+  console.info("network resume recovery", { enabled });
+  const coordinator = createNetworkResumeCoordinator({
+    enabled,
+    // Probing also restarts a backend that died, so recovery needs no separate
+    // restart path and a failed start simply reads as unreachable.
+    probe: async () => {
+      if (!backendSupervisor) return false;
+      try {
+        await backendSupervisor.start();
+      } catch {
+        return false;
+      }
+      return (await backendSupervisor.probe()).reachable;
+    },
+    resumeRun: resumeLocalNetworkRun,
+  });
+  coordinator.onChange((snapshot, change) => {
+    if (mainWindow && !mainWindow.isDestroyed()) {
+      mainWindow.webContents.send("desktop:network-resume-changed", {
+        snapshot,
+        change,
+      });
+    }
+  });
+  return coordinator;
+}
+
 function configureDesktopIpc() {
   ipcMain.handle("desktop:write-clipboard", (event, value) => {
     requireTrustedDesktopIpc(event);
@@ -508,6 +593,100 @@ function configureDesktopIpc() {
       failDesktopUpdate(error);
       return false;
     }
+  });
+
+  ipcMain.handle("desktop:network-resume-arm", (event, input) => {
+    requireTrustedDesktopIpc(event);
+    if (!networkResume || typeof input?.threadId !== "string") return null;
+    const reason =
+      input.reason === "backend-down" || input.reason === "run-lost"
+        ? input.reason
+        : "network";
+    const chain = networkResume.arm({
+      threadId: input.threadId,
+      reason,
+      runId: typeof input.runId === "string" ? input.runId : null,
+    });
+    // Probe now instead of on the next interval: this is the moment the backend
+    // needs restarting, and the renderer is already showing the wait.
+    void networkResume.poke().catch(() => {});
+    return chain;
+  });
+  /**
+   * A local stream went quiet while its run was still loading. Starting the
+   * backend here is deliberate: a dead child is exactly what a stall looks like,
+   * and the renderer has no other way to bring it back.
+   */
+  ipcMain.handle("desktop:network-resume-stall", async (event, input) => {
+    requireTrustedDesktopIpc(event);
+    if (
+      !networkResume?.enabled ||
+      !backendSupervisor ||
+      typeof input?.threadId !== "string"
+    ) {
+      return { action: "none" };
+    }
+    let reachable = false;
+    try {
+      await backendSupervisor.start();
+      reachable = (await backendSupervisor.probe()).reachable;
+    } catch {
+      reachable = false;
+    }
+    // A reachable backend can still have lost the run. The state endpoint is
+    // the only way to tell "finished while we were disconnected" from "the
+    // process that owned this step is gone".
+    let threadState = "unknown";
+    if (reachable) {
+      try {
+        const response = await backendSupervisor.request(
+          `/threads/${encodeURIComponent(input.threadId)}/state`,
+          { method: "GET" },
+        );
+        threadState = classifyThreadState(
+          response.status,
+          response.ok ? await response.json().catch(() => null) : null,
+        );
+      } catch {
+        threadState = "unknown";
+      }
+    }
+    const action = classifyStall({
+      reachable,
+      activity: reachable ? await backendSupervisor.threadActivity() : null,
+      threadId: input.threadId,
+      threadState,
+    });
+    if (action === "arm") {
+      // A missing thread or a pending super-step means the run died with its
+      // process, not that the backend is unreachable.
+      const reason =
+        threadState === "missing" || threadState === "pending"
+          ? "run-lost"
+          : "backend-down";
+      networkResume.arm({ threadId: input.threadId, reason });
+      void networkResume.poke().catch(() => {});
+    }
+    return { action };
+  });
+  ipcMain.handle("desktop:network-resume-disarm", (event, input) => {
+    requireTrustedDesktopIpc(event);
+    if (!networkResume || typeof input?.threadId !== "string") return false;
+    return networkResume.disarm({ threadId: input.threadId });
+  });
+  ipcMain.handle("desktop:network-resume-working", (event, input) => {
+    requireTrustedDesktopIpc(event);
+    if (!networkResume || typeof input?.threadId !== "string") return false;
+    return networkResume.notifyWorking({ threadId: input.threadId });
+  });
+  ipcMain.handle("desktop:network-resume-complete", (event, input) => {
+    requireTrustedDesktopIpc(event);
+    if (!networkResume || typeof input?.threadId !== "string") return false;
+    return networkResume.complete({ threadId: input.threadId });
+  });
+  ipcMain.handle("desktop:network-resume-snapshot", (event) => {
+    requireTrustedDesktopIpc(event);
+    return networkResume?.snapshot() ?? null;
   });
 
   ipcMain.handle("desktop:projects", (event) => {
@@ -753,6 +932,7 @@ function configureDesktopIpc() {
     const activity = await backendSupervisor.threadActivity();
     if (!activity || activity[threadId] === "running")
       throw new Error("Stop the local agent before deleting it");
+    networkResume?.disarm({ threadId });
     await closeThreadTerminals(threadId);
     try {
       await backendSupervisor.deleteThread(threadId);
@@ -1618,6 +1798,9 @@ if (!hasSingleInstanceLock) {
       stateDir: path.join(app.getPath("userData"), "local-backend"),
       projectsFile: projectsPath(),
       worktreesDir: worktreesPath(),
+      // A dead child is the earliest signal a turn's run is gone; waiting for
+      // the stream to fail means waiting out the SDK's retry budget.
+      onExit: notifyBackendLost,
       tracingEnv: async () => {
         if (!backendUrl) return {};
         try {
@@ -1642,6 +1825,7 @@ if (!hasSingleInstanceLock) {
         openAiOAuth?.status().signedIn === true &&
         Boolean(openAiOAuth?.backendEnv().OPEN_SWE_OPENAI_OAUTH_BROKER_URL),
     });
+    networkResume = createNetworkResume();
     protocol.handle("open-swe", serveBundledUi);
     configurePermissions();
     configureDesktopIpc();

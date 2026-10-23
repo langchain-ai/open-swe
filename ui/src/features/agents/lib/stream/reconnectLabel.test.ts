@@ -12,7 +12,12 @@ describe("reconnectLabel", () => {
 
   it("counts down to the next attempt", () => {
     const label = reconnectLabel(
-      { status: "reconnecting", attempt: 2, retryAt: NOW + 4_000 },
+      {
+        status: "reconnecting",
+        attempt: 2,
+        retryAt: NOW + 4_000,
+        source: "sdk",
+      },
       NOW
     )
 
@@ -23,10 +28,30 @@ describe("reconnectLabel", () => {
 
   it("drops the countdown once the deadline has passed", () => {
     const label = reconnectLabel(
-      { status: "reconnecting", attempt: 2, retryAt: NOW - 1 },
+      {
+        status: "reconnecting",
+        attempt: 2,
+        retryAt: NOW - 1,
+        source: "sdk",
+      },
       NOW
     )
 
     expect(label).toBe(`Reconnecting… 2/${MAX_RECONNECT_ATTEMPTS}`)
+  })
+
+  it("promises a continuation while a recovery chain holds the turn", () => {
+    const label = reconnectLabel(
+      { status: "reconnecting", attempt: 1, retryAt: 0, source: "resume" },
+      NOW
+    )
+
+    expect(label).toContain("Continuing automatically")
+  })
+
+  it("asks for a new message once recovery gave up", () => {
+    const label = reconnectLabel({ status: "failed", message: "timeout" }, NOW)
+
+    expect(label).toContain("Send a message")
   })
 })
