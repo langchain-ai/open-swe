@@ -7,6 +7,7 @@ from langchain.agents.middleware import AgentState, before_model
 from langgraph.runtime import Runtime
 
 from openswe.database import postgres
+from openswe.input_messages import visible_dynamic_context_hashes
 from openswe.middleware.trace import scrub_middleware_inputs
 from openswe.run_config import RunConfig
 from openswe.webhooks.event_matches import EventMatch
@@ -33,4 +34,8 @@ async def deliver_event_matches_before_model(
         return None
     if not owed:
         return None
-    return {"messages": EventMatch.messages(owed)}
+    return {
+        "messages": EventMatch.messages(
+            owed, injected_dynamic_context_hashes=visible_dynamic_context_hashes(state)
+        )
+    }

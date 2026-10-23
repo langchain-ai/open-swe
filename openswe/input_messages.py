@@ -1,6 +1,7 @@
 """Typed construction and serialization for application-owned model inputs."""
 
 import hashlib
+import re
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from html import escape
@@ -125,12 +126,15 @@ _ENTITY_FIELDS: dict[EntityKind, tuple[str, ...]] = {
 }
 
 
+_INVALID_XML_CHARS = re.compile(r"[^\x09\x0a\x0d\x20-\ud7ff\ue000-\ufffd\U00010000-\U0010ffff]")
+
+
 def _xml_text(value: object) -> str:
-    return escape(str(value), quote=False)
+    return escape(_INVALID_XML_CHARS.sub("", str(value)), quote=False)
 
 
 def _xml_attr(value: object) -> str:
-    return escape(str(value), quote=True)
+    return escape(_INVALID_XML_CHARS.sub("", str(value)), quote=True)
 
 
 def split_person_id(person: PersonIdentity) -> tuple[str, str]:
@@ -211,13 +215,25 @@ def input_message_timestamps(content: object) -> set[str]:
 
 
 def delivered_event_match_ids(messages: Sequence[object]) -> set[str]:
-    """Ids of the event matches whose envelopes are already among ``messages``."""
-    return {
+    """Ids of event matches already present by message id or serialized envelope."""
+    delivered = {
         match_id
         for message in messages
         for element in _input_message_elements(_message_content(message))
         if (match_id := element.get("event_match"))
     }
+
+    for message in messages:
+        if isinstance(message, BaseMessage):
+            message_id = message.id
+        elif isinstance(message, Mapping):
+            message_id = message.get("id")
+        else:
+            continue
+        if isinstance(message_id, str) and message_id.startswith("event-match:"):
+            if match_id := message_id.removeprefix("event-match:"):
+                delivered.add(match_id)
+    return delivered
 
 
 def _dynamic_context(content: object) -> tuple[tuple[str, str], str] | None:

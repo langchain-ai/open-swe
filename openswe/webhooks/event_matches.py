@@ -128,8 +128,10 @@ class EventMatch(Base):
             return list(rows)
 
     @classmethod
-    def messages(cls, matches: Sequence[Self]) -> list[RunMessage]:
-        introduced: set[str] = set()
+    def messages(
+        cls, matches: Sequence[Self], *, injected_dynamic_context_hashes: set[str] | None = None
+    ) -> list[RunMessage]:
+        introduced = set(injected_dynamic_context_hashes or ())
         messages: list[RunMessage] = []
         for match in matches:
             data: dict[str, str] = {"event_match": str(match.id)}

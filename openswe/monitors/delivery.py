@@ -39,6 +39,9 @@ _WAKE_LIMIT_REASON = (
     f"runs started by monitor events reached {MONITOR_WAKES.limit} since the last human message"
 )
 _BACKTICKS = re.compile(r"`+")
+_ANSI_ESCAPES = re.compile(
+    r"\x1b(?:\[[0-9;?]*[ -/]*[@-~]|\][^\x07\x1b]*(?:\x07|\x1b\\)|[ -/]*[@-~])"
+)
 
 
 def _tracked(metadata: Mapping[str, object]) -> list[str]:
@@ -70,7 +73,7 @@ def _numbered(lines: list[tuple[int, str]]) -> str:
 
 
 def _event_content(monitor: PendingMonitor, event: MonitorEvent) -> str:
-    lines = "\n".join(event.lines)
+    lines = _ANSI_ESCAPES.sub("", "\n".join(event.lines))
     return prompt(
         "runs/monitor-event",
         monitor_id=monitor.monitor_id,
@@ -83,8 +86,8 @@ def _event_content(monitor: PendingMonitor, event: MonitorEvent) -> str:
 
 def _end_content(monitor: PendingMonitor) -> str:
     end = monitor.end
-    tail = _numbered(end.tail) if end else ""
-    filter_errors = end.filter_errors if end else ""
+    tail = _ANSI_ESCAPES.sub("", _numbered(end.tail)) if end else ""
+    filter_errors = _ANSI_ESCAPES.sub("", end.filter_errors) if end else ""
     return prompt(
         "runs/monitor-ended",
         monitor_id=monitor.monitor_id,
