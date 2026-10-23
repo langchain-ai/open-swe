@@ -33,8 +33,24 @@ class ModelFailure(RunRequest):
     via_gateway: bool = False
 
 
+class ModelRecovery(RunRequest):
+    """The run's model calls started or stopped waiting for their provider to recover.
+
+    ``waiting`` is sent when the first call starts waiting and again, false, when
+    none waits any longer; the person is told the first time a run waits.
+    """
+
+    waiting: bool
+    # Why the provider failed the call that started the wait.
+    code: ModelFailureCode | None = None
+    # provider:model, the model the run keeps waiting for.
+    model_id: str | None = None
+    via_gateway: bool = False
+
+
 class Recorded(BaseModel):
     """The backend kept what it was told."""
 
 
 MODEL_FAILURE = Endpoint("model_failure", ModelFailure, Recorded)
+MODEL_RECOVERY = Endpoint("model_recovery", ModelRecovery, Recorded)

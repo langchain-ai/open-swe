@@ -52,6 +52,7 @@ from rt.middleware import (
 )
 from rt.model_calls import model_call_guards
 from rt.models import build_model
+from rt.provider_recovery import ProviderRecovery, ProviderRecoveryMiddleware
 from rt.remote_files import FILE_TOOLS, RemoteFiles, remote_file_tools
 from rt.task_retry import task_retry
 from rt.tools import operation_tool, run_id
@@ -207,6 +208,7 @@ async def agent(runtime: ManagedServerRuntime) -> DeepAgentDefinition:
         *(tool for tool in tools if tool.name in catalog.also_from_code and tool not in in_code),
         *file_tools.code_tools(catalog.also_from_code),
     ]
+    recovery = ProviderRecovery(backend)
     sync_subagents: list[SubAgent] = [
         {
             "name": subagent.name,
@@ -219,7 +221,14 @@ async def agent(runtime: ManagedServerRuntime) -> DeepAgentDefinition:
                 file_tools,
                 *replace_sandbox,
                 ServedToolsMiddleware(subagent_tools[subagent.name], excluded, backend),
-                *model_call_guards(subagent=True),
+                *model_call_guards(
+                    subagent=True,
+                    recovery=ProviderRecoveryMiddleware(
+                        recovery,
+                        models.subagent_model if models is not None else None,
+                        via_gateway=models is not None and models.use_gateway,
+                    ),
+                ),
             ],
         }
         for subagent in catalog.subagents
@@ -234,6 +243,7 @@ async def agent(runtime: ManagedServerRuntime) -> DeepAgentDefinition:
                 context.invocation_id,
                 opened_sandbox if catalog.sandbox is not None else None,
                 trace_metadata=catalog.trace_metadata,
+                recovery=recovery,
             ),
             *replace_sandbox,
             *_backend_reports(backend, catalog),

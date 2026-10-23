@@ -104,7 +104,13 @@ from runtime_api.files import (
     UploadRequest,
     WriteRequest,
 )
-from runtime_api.model_calls import MODEL_FAILURE, ModelFailure, Recorded
+from runtime_api.model_calls import (
+    MODEL_FAILURE,
+    MODEL_RECOVERY,
+    ModelFailure,
+    ModelRecovery,
+    Recorded,
+)
 from runtime_api.operations import (
     CHECK_SHELL,
     OPERATION,
@@ -129,7 +135,7 @@ from openswe.middleware.record_run_usage import RecordRunUsageMiddleware
 from openswe.middleware.sandbox_circuit_breaker import post_sandbox_unreachable_notification
 from openswe.middleware.task_coordination import TaskCoordinationMiddleware
 from openswe.middleware.transcript import TranscriptMiddleware, within_namespace
-from openswe.model_failures import ModelError
+from openswe.model_failures import ModelError, ProviderWait
 from openswe.prompts import common_prompt, prompt
 from openswe.remote_runtime.failures import OperationFailure
 from openswe.remote_runtime.git_metadata import (
@@ -1061,6 +1067,12 @@ async def _model_failure(session: RunSession, request: ModelFailure) -> Recorded
     return Recorded()
 
 
+async def _model_recovery(session: RunSession, request: ModelRecovery) -> Recorded:
+    """The run's model calls started or stopped waiting for their provider to recover."""
+    await ProviderWait.model_validate(request.model_dump()).report(session.config)
+    return Recorded()
+
+
 async def _ls(session: RunSession, request: PathRequest) -> LsReply:
     result = await session.in_run("files.ls", lambda: session.files.als(request.path))
     return LsReply.model_validate(asdict(result))
@@ -1150,6 +1162,7 @@ API.serve(OPERATION, RunSession.operation)
 API.serve(CHECK_SHELL, RunSession.check_shell)
 API.serve(RECORD_EVIDENCE, RunSession.record_evidence)
 API.serve(MODEL_FAILURE, _model_failure)
+API.serve(MODEL_RECOVERY, _model_recovery)
 API.serve(file_api.LS, _ls)
 API.serve(file_api.READ, _read)
 API.serve(file_api.WRITE, _write)

@@ -5,9 +5,9 @@ from collections.abc import Mapping
 from datetime import UTC, datetime
 from typing import Any
 
-from openswe.middleware.sandbox_circuit_breaker import get_slack_target
 from openswe.middleware.transcript import queue_run_notice
 from openswe.run_config import RunConfig
+from openswe.run_source import get_slack_target
 from openswe.slack.client import post_slack_thread_reply
 from openswe.utils.user_messages import warning
 from openswe.workspaces.refresh import is_snapshot_stale
