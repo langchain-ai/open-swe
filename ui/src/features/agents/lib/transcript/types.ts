@@ -34,6 +34,7 @@ export type NoticeKind =
   | "model_routed"
   | "conversation_offloading"
   | "workspace_stale"
+  | "provider_recovery"
 
 /**
  * A file attached to a message. The log stores metadata only — never base64

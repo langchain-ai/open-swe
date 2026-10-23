@@ -273,17 +273,23 @@ class SubagentTimeoutReplyMiddleware(_ModelCallGuard):
 
 
 def model_call_guards(
-    timeout_seconds: float = MODEL_CALL_TIMEOUT_SECONDS, *, subagent: bool = False
+    timeout_seconds: float = MODEL_CALL_TIMEOUT_SECONDS,
+    *,
+    subagent: bool = False,
+    recovery: AgentMiddleware | None = None,
 ) -> list[AgentMiddleware]:
     """Innermost around every model call, inside the middleware that picks its model.
 
     They see the model the call really goes to. One deadline covers the call and its
-    retries. An agent's call that still fails raises and ends the run, which the
-    backend reports as the provider's failure; a subagent's that times out becomes
-    its answer. The prompt cache replaces deepagents' own 5m one by name, in place.
+    retries; ``recovery``, outside it, waits out a provider outage with a fresh
+    deadline for each call again. An agent's call that still fails raises and ends
+    the run, which the backend reports as the provider's failure; a subagent's that
+    times out becomes its answer. The prompt cache replaces deepagents' own 5m one by
+    name, in place.
     """
     return [
         *([SubagentTimeoutReplyMiddleware()] if subagent else []),
+        *([recovery] if recovery is not None else []),
         ReplayableHistoryMiddleware(),
         ModelCallTimeoutMiddleware(timeout_seconds),
         # Its default answers with the error as the model's reply instead of raising.

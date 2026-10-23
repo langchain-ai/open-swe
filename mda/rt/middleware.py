@@ -70,6 +70,7 @@ from rt.backend import (
 )
 from rt.model_calls import provider_failure_code
 from rt.models import ModelSpec, build_model
+from rt.provider_recovery import ProviderRecovery
 from rt.remote_files import FILE_TOOLS
 from rt.tools import STATE_KEY, cited, run_id, tool_body
 from rt.tracing import TurnTrace
@@ -301,8 +302,11 @@ class BackendRunMiddleware(AgentMiddleware[RunState]):
         open_sandbox: Callable[[Runtime], Awaitable[str | None]] | None = None,
         *,
         trace_metadata: Mapping[str, JsonValue] | None = None,
+        recovery: ProviderRecovery | None = None,
     ) -> None:
         self._backend = backend
+        # Shared with the run's subagents, which wait on the same outage.
+        self._recovery = recovery or ProviderRecovery(backend)
         self._invocation_id = invocation_id
         self._trace_metadata = trace_metadata or {}
         self._trace = TurnTrace()
@@ -368,7 +372,7 @@ class BackendRunMiddleware(AgentMiddleware[RunState]):
         if model is not None:
             request = request.override(model=build_model(model, use_gateway=call.use_gateway))
         try:
-            return await handler(request)
+            return await self._recovery.call(request, handler, model, via_gateway=call.use_gateway)
         except Exception as exc:
             await self._report_model_failure(model, exc, via_gateway=call.use_gateway)
             raise
