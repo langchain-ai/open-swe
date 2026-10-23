@@ -7,7 +7,9 @@ call names; code mode reaches the same tools (``RunCodeInterpreter``). A subagen
 prompt and model, and the run's limit on model calls, are the run's too.
 """
 
+import json
 from collections.abc import Awaitable, Callable, Mapping, Sequence
+from pathlib import Path
 from typing import Final
 from weakref import finalize
 
@@ -17,10 +19,12 @@ from langchain_core.language_models import BaseChatModel
 from langchain_core.messages import SystemMessage, ToolMessage
 from langchain_core.tools import BaseTool
 from langchain_quickjs import CodeInterpreterMiddleware
-from langchain_quickjs.middleware import PersistenceMode, REPLState
+from langchain_quickjs._ptc import to_camel_case  # noqa: PLC2701
+from langchain_quickjs.middleware import PersistenceMode, REPLState, filter_tools_for_ptc
 from langgraph.prebuilt.tool_node import ToolCallRequest
 from langgraph.runtime import Runtime
 from langgraph.types import Command
+from pydantic import BaseModel
 from runtime_api.catalog import Catalog, SubagentSpec
 from runtime_api.loop import ModelCall
 
@@ -33,6 +37,20 @@ from rt.tracing import MIDDLEWARE_TRACE_POLICY
 
 _TASK_TOOL: Final = "task"
 _EVAL_TOOL: Final = "eval"
+# What code mode documents in place of every tool's signature, when ``search_tools``
+# finds the rest.
+_CODE_REFERENCE: Final = Path(__file__).parent.parent.joinpath("code_tools.md").read_text()
+# The tools code mode calls most, whose argument schemas the reference spells out
+# alongside those the graph names for its code mode.
+_COMMON_CODE_TOOLS: Final = frozenset(
+    {
+        "slack_list_channel_members",
+        "slack_add_reaction",
+        "list_threads",
+        "schedule_thread_wakeup",
+        "save_plan",
+    }
+)
 
 ToolHandler = Callable[[ToolCallRequest], Awaitable[ToolMessage | Command]]
 ModelHandler = Callable[[ModelRequest], Awaitable[ModelResponse]]
@@ -195,6 +213,34 @@ class RunSubagentMiddleware(AgentMiddleware):
         return await handler(request)
 
 
+def _code_reference(tools: Sequence[BaseTool], named: frozenset[str]) -> str:
+    """Code mode's reference: how to find any tool, and the common tools' argument schemas."""
+    schemas = {
+        to_camel_case(tool.name): _argument_schema(tool)
+        for tool in sorted(tools, key=lambda tool: tool.name)
+        if tool.name in _COMMON_CODE_TOOLS | named or _is_active_releases(tool.name)
+    }
+    # The interpreter renders a dict schema as an untyped signature, so the schemas go as JSON.
+    return _CODE_REFERENCE + json.dumps(schemas, sort_keys=True, separators=(",", ":")) + "\n"
+
+
+def _is_active_releases(name: str) -> bool:
+    """Whether ``name`` is Homebase's tool for the active releases, whatever its server's prefix."""
+    lowered = name.lower()
+    return all(part in lowered for part in ("homebase", "releases", "active"))
+
+
+def _argument_schema(tool: BaseTool) -> object:
+    schema = tool.args_schema
+    if schema is None:
+        return {}
+    if isinstance(schema, dict):
+        return schema
+    if issubclass(schema, BaseModel):
+        return schema.model_json_schema()
+    return schema.schema()
+
+
 class RunCodeInterpreter(CodeInterpreterMiddleware):
     """Code mode over the run's tools: the graph's own it names, and those the run offers from code.
 
@@ -216,18 +262,32 @@ class RunCodeInterpreter(CodeInterpreterMiddleware):
         self._toolsets = toolsets
         self._named = list(named)
         self._active = active
-        self._prompts = RunLocal[list[tuple[frozenset[str], str] | None]](lambda: [None])
         self._slots = RunLocal[set[str]](set)
         super().__init__(ptc=[], subagents=subagents, mode=mode)
 
-    @property
-    def _ptc_prompt_cache(self) -> tuple[frozenset[str], str] | None:
-        return self._prompts.get(current_run())[0]
+    def _prepare_for_call(self, request: ModelRequest) -> str:
+        """Bind the run's tools; where ``search_tools`` finds them, document only the common ones.
 
-    @_ptc_prompt_cache.setter
-    def _ptc_prompt_cache(self, value: tuple[frozenset[str], str] | None) -> None:
-        if value is not None:
-            self._prompts.get(current_run())[0] = value
+        Every tool a catalog offers from code would otherwise put its signature in each
+        model call's system prompt. The interpreter has no hook for its reference, so
+        this seeds the per-slot cache it renders from.
+        """
+        if self._toolsets.get().catalog.search_tools:
+            exposed = tuple(
+                filter_tools_for_ptc(
+                    [tool for tool in request.tools if isinstance(tool, BaseTool)],
+                    self._ptc,
+                    self_tool_name=self._tool_name,
+                )
+            )
+            slot_id = self._slot_id(request.state)
+            cached = self._ptc_prompt_by_slot.get(slot_id)
+            if exposed and (cached is None or cached[0] != exposed):
+                named = frozenset(
+                    tool if isinstance(tool, str) else tool.name for tool in self._named
+                )
+                self._ptc_prompt_by_slot[slot_id] = (exposed, _code_reference(exposed, named))
+        return super()._prepare_for_call(request)
 
     def _slot_id(self, state: Mapping[str, object]) -> str:
         slot_id = super()._slot_id(state)
@@ -240,6 +300,7 @@ class RunCodeInterpreter(CodeInterpreterMiddleware):
 
     def _evict(self, slot_id: str) -> None:
         self._ptc_tools_by_slot.pop(slot_id, None)
+        self._ptc_prompt_by_slot.pop(slot_id, None)
         self._registry.evict(slot_id)
 
     @property

@@ -1,5 +1,6 @@
 import asyncio
 import gc
+import json
 import weakref
 from collections import OrderedDict
 from collections.abc import Iterator
@@ -457,6 +458,68 @@ async def test_code_prompt_uses_each_runs_schema_even_when_names_match(
 
     assert "first_parameter" in prompts[0] and "second_parameter" not in prompts[0]
     assert "second_parameter" in prompts[1] and "first_parameter" not in prompts[1]
+
+
+async def test_code_prompt_documents_only_common_tools_where_search_finds_the_rest(
+    monkeypatch: pytest.MonkeyPatch, backend_calls: BackendCalls
+) -> None:
+    """A large catalog offered from code stays callable from ``eval`` without each tool's
+    signature in every prompt; the common tools' argument schemas are spelled out."""
+    parameters: dict[str, JsonValue] = {
+        "type": "object",
+        "properties": {"channel": {"type": "string"}},
+        "required": ["channel"],
+    }
+    names = [
+        *(f"integration_tool_{index}" for index in range(400)),
+        "slack_add_reaction",
+        "homebase_releases_active",
+    ]
+    catalog = _catalog("lookup", "grant").model_copy(
+        update={
+            "operations": [
+                OperationSpec(
+                    name=name,
+                    description="Integration documentation " + "details " * 100,
+                    parameters=parameters,
+                    grant="grant",
+                )
+                for name in names
+            ],
+            "code_only": names,
+            "search_tools": True,
+        }
+    )
+    prompts: list[str] = []
+    results: list[ToolMessage] = []
+
+    async def generate(
+        model: GenericFakeChatModel, messages: list[BaseMessage], **kwargs: object
+    ) -> ChatResult:
+        prompts.append(
+            "\n".join(message.text for message in messages if isinstance(message, SystemMessage))
+        )
+        results.extend(message for message in messages if isinstance(message, ToolMessage))
+        code = 'console.log(await tools.integrationTool_399({channel: "C123"}))'
+        reply = (
+            AIMessage(content="done")
+            if results
+            else AIMessage(
+                content="", tool_calls=[ToolCall(name="eval", args={"code": code}, id="eval")]
+            )
+        )
+        return ChatResult(generations=[ChatGeneration(message=reply)])
+
+    monkeypatch.setattr(GenericFakeChatModel, "_agenerate", generate)
+    monkeypatch.setattr(agent, "_DEFAULT_MODEL", _calling())
+    await _run(InMemoryStore(), "large-catalog", _context("agent", "token", catalog))
+
+    assert "integration_tool_399:grant" in {operation for _, _, operation in backend_calls}
+    assert results[0].status == "success"
+    assert "Integration documentation" not in prompts[0]
+    assert "search_tools" in prompts[0]
+    schemas = json.loads(prompts[0].split("keyed by `code_name`:\n", 1)[1].split("\n", 1)[0])
+    assert schemas == {"homebaseReleasesActive": parameters, "slackAddReaction": parameters}
 
 
 async def test_sync_subagent_uses_its_runs_prompt_model_and_tools(
