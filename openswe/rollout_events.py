@@ -133,6 +133,8 @@ def _ask_to_monitor(sha: str) -> str:
         "If they agree, call request_rollout_check. If they decline, stop. "
         "Do not call listen_events yourself."
     )
+
+
 _PR_URL_RE = re.compile(r"https://github\.com/([^/]+)/([^/]+)/pull/(\d+)")
 
 
