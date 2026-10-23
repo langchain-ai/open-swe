@@ -504,9 +504,8 @@ async def ensure_sandbox_for_thread(
 ) -> SandboxBackendProtocol:
     """Get-or-create a healthy sandbox bound to ``thread_id``.
 
-    Three cases (dispatch uses ``multitask_strategy="interrupt"``, so a thread
-    never provisions two sandboxes concurrently — no cross-process sentinel is
-    needed):
+    Three cases (dispatch uses ``multitask_strategy="interrupt"``, but an
+    interrupted run's provisioning may still overlap the next run's):
 
     1. Metadata has an id -> reuse this process's connection to that sandbox if
        it has one, else reconnect; then refresh proxy.

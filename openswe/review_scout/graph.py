@@ -7,6 +7,7 @@ the lines the carried-over plan does not already cover, and when there are
 none it finishes without a model call.
 """
 
+import asyncio
 import logging
 import re
 from collections.abc import Awaitable, Callable
@@ -30,6 +31,7 @@ from openswe.dashboard.options import gate_fable_model
 from openswe.dashboard.workspace_settings_cache import cached_workspace_settings
 from openswe.github.app import get_github_app_installation_token_with_expiry
 from openswe.github.pull_request_key import PullRequestKey
+from openswe.github.pull_request_status import PullRequestClient
 from openswe.github.sandbox_access import READ_ONLY_REVIEW_PERMISSIONS
 from openswe.github.thread_token import cache_github_token_for_thread
 from openswe.middleware import (
@@ -48,7 +50,7 @@ from openswe.runtime import (
     ensure_sandbox_for_thread,
     get_cached_sandbox_backend,
 )
-from openswe.sandboxes.repo_prep import prepare_review_repo
+from openswe.sandboxes.repo_prep import ReviewRepoPreparationError, prepare_review_repo_or_raise
 from openswe.sandboxes.tool_runtime import ModelChoice, SurfaceModels, SurfaceSubagent, ToolSurface
 from openswe.search_policy import SHELL_SEARCH_EXCLUDED_TOOLS
 from openswe.tools.plan_walkthrough import (
@@ -134,17 +136,47 @@ class PrepareReviewScoutRunMiddleware(BasePrepareRunMiddleware):
         backend = await _ensure_scout_sandbox(self._thread_id, cfg)
         checkout = await PinnedCheckout.locate(backend, cfg.repo.name)
         work_dir = checkout.repo_dir.rpartition("/")[0]
-        ready = await prepare_review_repo(
-            backend,
-            work_dir=work_dir,
-            repo_owner=cfg.repo.owner,
-            repo_name=cfg.repo.name,
-            head_sha=cfg.head_sha,
-            pr_number=cfg.pr_number,
-            base_sha=cfg.base_sha,
-        )
-        if not ready:
-            raise RuntimeError("review scout could not check out the pull request")
+        nothing_to_plan = {
+            "work_dir": work_dir,
+            "rendered_system_prompt": "",
+            "scout_nothing_to_plan": True,
+            "has_human_input": False,
+        }
+        for attempt in range(2):
+            failure: ReviewRepoPreparationError | None = None
+            try:
+                await prepare_review_repo_or_raise(
+                    backend,
+                    work_dir=work_dir,
+                    repo_owner=cfg.repo.owner,
+                    repo_name=cfg.repo.name,
+                    head_sha=cfg.head_sha,
+                    pr_number=cfg.pr_number,
+                    base_sha=cfg.base_sha,
+                )
+            except ReviewRepoPreparationError as exc:
+                failure = exc
+                logger.warning(
+                    "Review scout repository preparation failed",
+                    extra={"pr_number": cfg.pr_number, "prep_attempt": attempt + 1},
+                    exc_info=True,
+                )
+            async with PullRequestClient.as_app(
+                cfg.repo.owner, cfg.repo.name, cfg.pr_number
+            ) as pull:
+                if await pull.head_sha() != cfg.head_sha:
+                    logger.info(
+                        "Review scout head is stale; nothing to plan",
+                        extra={"pr_number": cfg.pr_number, "scout_head_sha": cfg.head_sha},
+                    )
+                    return nothing_to_plan
+            if failure is None:
+                break
+            if attempt == 1:
+                raise RuntimeError(
+                    f"review scout could not check out the pull request: {failure}"
+                ) from failure
+            await asyncio.sleep(3)
         await checkout.pin(
             full_name=cfg.repo.full_name,
             pr_number=cfg.pr_number,
@@ -161,12 +193,7 @@ class PrepareReviewScoutRunMiddleware(BasePrepareRunMiddleware):
             )
             workspace = None
         if workspace is None or workspace.complete:
-            return {
-                "work_dir": work_dir,
-                "rendered_system_prompt": "",
-                "scout_nothing_to_plan": True,
-                "has_human_input": False,
-            }
+            return nothing_to_plan
         system_prompt = prompt(
             "review-scout/main",
             pr_number=cfg.pr_number,
