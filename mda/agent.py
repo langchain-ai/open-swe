@@ -119,13 +119,14 @@ def _code_mode(
     from_code: Sequence[BaseTool],
     described: Mapping[str, str],
     file_tools: FileToolsMiddleware,
-) -> list[AgentMiddleware | CodeInterpreterMiddleware]:
+) -> list[AgentMiddleware]:
     """The graph's code mode, with every tool the catalog offers from code callable from it."""
     if graph == "reviewer":
+        reviewer_tools = set(_REVIEWER_PTC_TOOLS) - {tool.name for tool in from_code}
         interpreter = CodeInterpreterMiddleware(
             ptc=[
-                *(name for name in _REVIEWER_PTC_TOOLS if name not in FILE_TOOLS),
-                *file_tools.code_tools(_REVIEWER_PTC_TOOLS),
+                *(name for name in sorted(reviewer_tools) if name not in FILE_TOOLS),
+                *file_tools.code_tools(reviewer_tools),
                 *from_code,
             ]
         )
@@ -134,7 +135,10 @@ def _code_mode(
         interpreter = CodeInterpreterMiddleware(ptc=list(from_code), subagents=False, mode="turn")
     else:
         return []
-    return [interpreter, *([DescribedToolsMiddleware(described)] if described else [])]
+    return cast(
+        list[AgentMiddleware],
+        [interpreter, *([DescribedToolsMiddleware(described)] if described else [])],
+    )
 
 
 def _browser(graph: Graph, backend: OpenSweBackend) -> list[AgentMiddleware]:
@@ -205,7 +209,7 @@ async def agent(runtime: ManagedServerRuntime) -> DeepAgentDefinition:
     from_code = [
         *in_code,
         *(tool for tool in tools if tool.name in catalog.also_from_code and tool not in in_code),
-        *file_tools.code_tools(catalog.also_from_code),
+        *file_tools.code_tools([*catalog.code_only, *catalog.also_from_code]),
     ]
     sync_subagents: list[SubAgent] = [
         {
@@ -218,7 +222,23 @@ async def agent(runtime: ManagedServerRuntime) -> DeepAgentDefinition:
                 *_backend_reports(backend, catalog),
                 file_tools,
                 *replace_sandbox,
-                ServedToolsMiddleware(subagent_tools[subagent.name], excluded, backend),
+                ServedToolsMiddleware(subagent_tools[subagent.name], excluded | code_only, backend),
+                *(
+                    _code_mode(
+                        context.graph,
+                        [
+                            tool
+                            for tool in from_code
+                            if tool.name in FILE_TOOLS
+                            or subagent.tools is None
+                            or tool.name in subagent.tools
+                        ],
+                        catalog.described,
+                        file_tools,
+                    )
+                    if code_only & FILE_TOOLS
+                    else []
+                ),
                 *model_call_guards(subagent=True),
             ],
         }

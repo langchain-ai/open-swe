@@ -844,18 +844,25 @@ async def test_a_command_the_guards_refuse_is_recorded_with_their_reason(
     assert recorded.content == "pr_creation_fallback_blocked"
 
 
+@pytest.mark.parametrize("code_only", [False, True])
+@pytest.mark.parametrize("allowed", [False, True])
 async def test_a_command_code_mode_runs_is_put_to_the_guards_too(
     monkeypatch: pytest.MonkeyPatch,
+    code_only: bool,
+    allowed: bool,
 ) -> None:
     """Code mode calls tools past the tool-call chain, so its shell tool checks each call itself."""
-    from langchain.agents.middleware.types import ModelRequest
+    from langchain.agents.middleware.types import ModelRequest, ModelResponse
+    from rt.middleware import ServedToolsMiddleware
     from rt.remote_files import RemoteFiles, remote_file_tools
 
     monkeypatch.setenv("OPEN_SWE_BACKEND_URL", "https://backend.invalid")
     for module in ("rt.middleware", "rt.tools", "rt.file_tools"):
         monkeypatch.setattr(f"{module}.run_id", lambda: "run-1")
     backend = OpenSweBackend("secret-token")
-    refusal = ShellVerdict(allowed=False, refusal="pr_creation_fallback_blocked")
+    refusal = ShellVerdict(
+        allowed=allowed, refusal=None if allowed else "pr_creation_fallback_blocked"
+    )
     monkeypatch.setattr(backend, "post", AsyncMock(return_value=refusal.model_dump(mode="json")))
     monkeypatch.setattr(backend, "tool_started", AsyncMock())
     monkeypatch.setattr(backend, "tool_result", AsyncMock(return_value={}))
@@ -875,9 +882,22 @@ async def test_a_command_code_mode_runs_is_put_to_the_guards_too(
         remote_files=remote,
         in_box=True,
     )
-    model_request = MagicMock(spec=ModelRequest)
-    model_request.tools = [box_execute]
-    await files.awrap_model_call(model_request, AsyncMock())
+    model_request = ModelRequest(
+        model=FakeListChatModel(responses=["done"]),
+        messages=[],
+        tools=[box_execute],
+    )
+    served = ServedToolsMiddleware(
+        [], frozenset({"execute"}) if code_only else frozenset(), backend
+    )
+    handler = AsyncMock()
+
+    async def offer(request: ModelRequest) -> ModelResponse:
+        return await served.awrap_model_call(request, handler)
+
+    await files.awrap_model_call(model_request, offer)
+    [offered] = handler.call_args.args
+    assert [tool.name for tool in offered.tools] == ([] if code_only else ["execute"])
     [execute] = files.code_tools(["execute", "web_search"])
     runtime = ToolRuntime(
         state={"messages": []},
@@ -891,8 +911,13 @@ async def test_a_command_code_mode_runs_is_put_to_the_guards_too(
     assert execute.coroutine is not None
     refused = await execute.coroutine(runtime=runtime, command="gh pr create --fill")
 
-    assert isinstance(refused, ToolMessage) and refused.content == "pr_creation_fallback_blocked"
-    ran.assert_not_awaited()
+    assert isinstance(refused, ToolMessage)
+    if allowed:
+        assert refused.content == "opened"
+        ran.assert_awaited_once_with("gh pr create --fill")
+    else:
+        assert refused.content == "pr_creation_fallback_blocked"
+        ran.assert_not_awaited()
 
 
 async def test_a_read_file_the_backend_serves_gets_the_read_checks(

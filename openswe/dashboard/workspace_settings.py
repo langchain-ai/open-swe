@@ -83,6 +83,9 @@ class WorkspaceSettingsUpdate(BaseModel):
     sandbox_openai_enabled: bool | None = Field(
         default=None, json_schema_extra={"agent_feature_flag": True}
     )
+    sandbox_tools_via_eval: bool | None = Field(
+        default=None, json_schema_extra={"agent_feature_flag": True}
+    )
     slack_follow_up_suggestions: bool | None = Field(
         default=None, json_schema_extra={"agent_feature_flag": True}
     )
@@ -331,6 +334,7 @@ def _default_settings() -> dict[str, Any]:
         "human_review_auto_merge_enabled": True,
         "human_review_auto_assign_minutes": 120,
         "sandbox_openai_enabled": False,
+        "sandbox_tools_via_eval": False,
         "slack_follow_up_suggestions": False,
         "managed_tools_gateway_id": None,
         "org_guidelines": None,
@@ -749,6 +753,11 @@ class WorkspaceSettings(Mapping[str, Any]):
     def sandbox_openai_enabled(self) -> bool:
         """Whether sandbox clients may use the experimental Responses API."""
         return self.get("sandbox_openai_enabled") is True
+
+    @property
+    def sandbox_tools_via_eval(self) -> bool:
+        """Whether sandbox tools are offered only through code mode."""
+        return self.get("sandbox_tools_via_eval") is True
 
     @property
     def managed_tools_gateway_id(self) -> str | None:

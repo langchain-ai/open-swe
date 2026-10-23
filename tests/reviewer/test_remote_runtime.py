@@ -338,17 +338,24 @@ async def test_tool_server_hands_the_verified_run_to_its_handlers() -> None:
     assert await _status(f"Bearer {sign_runtime_token(RUN)}") == (200, RUN)
 
 
+@pytest.mark.parametrize("sandbox_tools_via_eval", [False, True])
+@pytest.mark.parametrize("code_mode", [False, True])
 async def test_mda_catalog_leaves_integrations_and_code_mode_to_mda(
     monkeypatch: pytest.MonkeyPatch,
+    sandbox_tools_via_eval: bool,
+    code_mode: bool,
 ) -> None:
     """Seldom-needed tools go to MDA's code mode, not the model's schemas; the graph's own stays here."""
     # A provider MDA declares no box for, so the catalog reads no thread metadata.
     monkeypatch.setenv("SANDBOX_TYPE", "local")
+    from unittest.mock import AsyncMock
+
     from langchain.agents.middleware import ModelCallLimitMiddleware
     from langchain.agents.middleware.types import AgentMiddleware
     from langchain_core.tools import StructuredTool
     from langchain_quickjs import CodeInterpreterMiddleware
 
+    from openswe.dashboard.workspace_settings import WorkspaceSettings
     from openswe.mcp.models import MCPToolProvenance
     from openswe.middleware.dynamic_tools import DynamicToolMiddleware
     from openswe.middleware.task_coordination import TaskCoordinationMiddleware
@@ -384,6 +391,7 @@ async def test_mda_catalog_leaves_integrations_and_code_mode_to_mda(
                 "slack_reply",
                 "message_task_thread",
                 "load_integration_tools",
+                "background_execute",
             )
         ]
         middleware: list[AgentMiddleware] = [
@@ -393,7 +401,7 @@ async def test_mda_catalog_leaves_integrations_and_code_mode_to_mda(
             ModelCallLimitMiddleware(run_limit=20, exit_behavior="end"),
         ]
         surface.base_tools = core
-        surface.code_mode = True
+        surface.code_mode = code_mode
         surface.excluded = frozenset({"grep", "glob"})
         surface.middleware = middleware
         surface.subagents = [SurfaceSubagent("general-purpose", "helper", "instructions")]
@@ -403,8 +411,14 @@ async def test_mda_catalog_leaves_integrations_and_code_mode_to_mda(
     async def start_models(cfg: object) -> object:
         raise AssertionError("not asked for")
 
+    settings = AsyncMock(
+        return_value=WorkspaceSettings({"sandbox_tools_via_eval": sandbox_tools_via_eval})
+    )
+    monkeypatch.setattr("openswe.remote_runtime.graph.get_workspace_settings", settings)
     graph = RemoteGraph("agent", build, start_models)
-    catalog = await graph.hook(RUN, "catalog", {"run_id": "run-1"})
+    run = RUN.model_copy(update={"configurable": {**RUN.configurable, "workspace": "test-space"}})
+    catalog = await graph.hook(run, "catalog", {"run_id": "run-1"})
+    settings.assert_awaited_once_with("test-space")
 
     assert isinstance(catalog, dict)
     operations = catalog["operations"]
@@ -432,20 +446,29 @@ async def test_mda_catalog_leaves_integrations_and_code_mode_to_mda(
     assert "private-token" not in str(catalog)
     assert "private-owner" not in str(catalog)
     assert "private-gateway" not in str(catalog)
-    assert catalog["code_only"] == ["manage_thread", "mcp_search"]
-    # MDA runs the graph's cap on model calls, such as an incident policy's.
-    assert catalog["model_call_limit"] == 20
-    # Code mode calls the file and shell tools too, through MDA's own with their checks,
-    # but never one the graph excludes.
-    assert catalog["also_from_code"] == [
+    sandbox_tools = {
+        "background_execute",
         "delete",
         "edit_file",
         "execute",
         "ls",
         "read_file",
-        "web_search",
         "write_file",
-    ]
+    }
+    assert catalog["code_only"] == sorted(
+        {"mcp_search"}
+        | ({"manage_thread"} if code_mode else set())
+        | (sandbox_tools if sandbox_tools_via_eval else set())
+    )
+    # MDA runs the graph's cap on model calls, such as an incident policy's.
+    assert catalog["model_call_limit"] == 20
+    # Code mode calls the file and shell tools too, through MDA's own with their checks,
+    # but never one the graph excludes.
+    assert catalog["also_from_code"] == sorted(
+        ({"web_search"} | (set() if sandbox_tools_via_eval else sandbox_tools))
+        if code_mode
+        else set()
+    )
 
 
 async def test_an_operation_gets_the_state_it_reads_and_answers_the_state_it_changed() -> None:

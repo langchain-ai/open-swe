@@ -116,6 +116,7 @@ from runtime_api.operations import (
 )
 
 from openswe.dashboard.options import model_supports_images
+from openswe.dashboard.workspace_settings import get_workspace_settings
 from openswe.dispatch import COMPLETION_WEBHOOK_URL
 from openswe.github.sandbox_access import READ_ONLY_REVIEW_PERMISSIONS
 from openswe.incidents.runtime import IncidentMiddleware
@@ -154,6 +155,7 @@ from openswe.sandboxes.tool_runtime import (
 )
 from openswe.server import (
     DEEP_AGENT_TOOL_NAMES,
+    SANDBOX_TOOL_NAMES,
     code_only,
     direct_and_from_code,
     fallback_model_choice,
@@ -408,7 +410,7 @@ class RunSession:
             self._restore(state)
         return state
 
-    def catalog(self) -> Catalog:
+    def catalog(self, *, sandbox_tools_via_eval: bool = False) -> Catalog:
         operations = {
             name: tool for name, tool in self.surface.tools.items() if name not in _MDA_TOOLS
         }
@@ -418,6 +420,9 @@ class RunSession:
         )
         # Code mode calls tools past the model's list, so what the graph excludes stays out.
         from_code = offered - excluded if self.surface.code_mode else frozenset()
+        sandbox_code_only = (
+            (offered - excluded) & SANDBOX_TOOL_NAMES if sandbox_tools_via_eval else frozenset()
+        )
         return Catalog(
             operations=[
                 OperationSpec(
@@ -446,13 +451,18 @@ class RunSession:
             excluded=sorted(excluded),
             # Called from MDA's code mode, never offered to the model as schemas.
             code_only=sorted(
-                name
-                for name in operations.keys() - excluded
-                if code_only(name)
-                and (self.surface.code_mode or name in self.surface.integration_names)
+                sandbox_code_only
+                | {
+                    name
+                    for name in operations.keys() - excluded
+                    if code_only(name)
+                    and (self.surface.code_mode or name in self.surface.integration_names)
+                }
             ),
             # Offered to the model, and callable from MDA's code mode too.
-            also_from_code=sorted(name for name in from_code if direct_and_from_code(name)),
+            also_from_code=sorted(
+                name for name in from_code - sandbox_code_only if direct_and_from_code(name)
+            ),
             described={name: prompt("tools/display-description") for name in _DESCRIBED_TOOLS},
             files=FilesSpec(
                 backend_paths=list(self.surface.backend_paths),
@@ -866,7 +876,12 @@ class RemoteGraph:
         if hook == "catalog":
             session = await self.session(run, body.run_id)
             sandbox = await session.sandbox()
-            catalog = session.catalog().model_copy(
+            settings = await get_workspace_settings(
+                RunConfig.from_config(session.config).workspace_slug
+            )
+            catalog = session.catalog(
+                sandbox_tools_via_eval=settings.sandbox_tools_via_eval
+            ).model_copy(
                 update={
                     "trace_metadata": TurnGitMetadata(session.config).actor,
                     "sandbox": None
