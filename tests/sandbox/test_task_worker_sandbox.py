@@ -16,8 +16,10 @@ from openswe.users.models import UserIdentity
 from openswe.workspaces.rows import WorkspaceRow
 
 
-@pytest.fixture
-def shared_sandbox(monkeypatch: pytest.MonkeyPatch) -> dict[str, dict[str, object]]:
+@pytest.fixture(params=["user", "system"])
+def shared_sandbox(
+    request: pytest.FixtureRequest, monkeypatch: pytest.MonkeyPatch
+) -> dict[str, dict[str, object]]:
     workspace = WorkspaceRow(slug="default", name="Default")
     task = Task(
         coordinator_thread_id="coordinator",
@@ -31,8 +33,8 @@ def shared_sandbox(monkeypatch: pytest.MonkeyPatch) -> dict[str, dict[str, objec
     monkeypatch.setattr(User, "get", AsyncMock(return_value=owner))
     metadata: dict[str, dict[str, object]] = {
         "coordinator": {
-            "owner_type": "user",
-            "owner_login": "owner",
+            "owner_type": request.param,
+            **({"owner_login": "owner"} if request.param == "user" else {}),
             "workspace": "default",
             "sandbox_id": "sb-old",
             "github_token_repositories": ["langchain-ai/open-swe"],
@@ -93,6 +95,9 @@ async def test_worker_attaches_to_replaced_host_without_guest_proxy_identity(
     assert attached.id == host_sandbox_id
     assert SANDBOX_BACKENDS["coordinator"].id == SANDBOX_BACKENDS["worker"].id
     assert shared_sandbox["worker"]["sandbox_id"] == host_sandbox_id
+    if shared_sandbox["worker"]["owner_type"] == "system":
+        assert "owner_user_id" not in shared_sandbox["worker"]
+        assert "owner_user_id" not in shared_sandbox["coordinator"]
     connect.assert_awaited_once_with(host_sandbox_id)
     assert refresh.await_args.kwargs["thread_id"] == "coordinator"
 
@@ -184,7 +189,8 @@ async def test_worker_does_not_replace_a_deleted_host_sandbox(
 
 
 @pytest.mark.parametrize(
-    "invalid_binding", ["membership", "repository_scope", "workspace", "owner"]
+    "invalid_binding",
+    ["membership", "repository_scope", "workspace", "owner", "admin_thread", "visibility"],
 )
 async def test_worker_cannot_attach_to_a_host_outside_its_permissions(
     shared_sandbox: dict[str, dict[str, object]],
@@ -195,11 +201,32 @@ async def test_worker_cannot_attach_to_a_host_outside_its_permissions(
         shared_sandbox["worker"]["sandbox_host_thread_id"] = "another-coordinator"
     elif invalid_binding == "workspace":
         shared_sandbox["worker"]["workspace"] = "another-workspace"
+    elif invalid_binding == "admin_thread":
+        shared_sandbox["worker"]["admin_thread"] = True
+    elif invalid_binding == "visibility":
+        shared_sandbox["worker"]["visibility"] = "private"
     elif invalid_binding == "owner":
+        shared_sandbox["worker"]["owner_type"] = "user"
         shared_sandbox["worker"]["owner_user_id"] = str(uuid4())
         monkeypatch.setattr(User, "get", AsyncMock(return_value=User()))
     else:
         shared_sandbox["worker"]["github_token_repositories"] = []
+    connect = AsyncMock()
+    monkeypatch.setattr(lifecycle, "create_sandbox", connect)
+
+    with pytest.raises(PermissionError):
+        await lifecycle.ensure_sandbox_for_thread("worker")
+
+    connect.assert_not_awaited()
+    assert "worker" not in SANDBOX_BACKENDS
+
+
+async def test_worker_cannot_attach_to_a_host_with_a_different_owner_type(
+    shared_sandbox: dict[str, dict[str, object]], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    shared_sandbox["worker"]["owner_type"] = (
+        "user" if shared_sandbox["coordinator"]["owner_type"] == "system" else "system"
+    )
     connect = AsyncMock()
     monkeypatch.setattr(lifecycle, "create_sandbox", connect)
 
