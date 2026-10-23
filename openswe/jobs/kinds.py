@@ -29,6 +29,11 @@ from openswe.monitors.delivery import POLL_JOB_KIND as MONITOR_POLL
 from openswe.monitors.delivery import poll_monitors
 
 __all__ = ["WORKER"]
+from openswe.concierge.checkin import (
+    CHECKIN_JOB,
+    CHECKIN_SCHEDULE,
+    check_in_with_concierge_users,
+)
 from openswe.reconcile import reconcile_stale_runs
 from openswe.sandboxes.retry import (
     SANDBOX_ATTACH_MAX_ELAPSED,
@@ -37,11 +42,6 @@ from openswe.sandboxes.retry import (
 )
 from openswe.schedules.store import AGENT_SCHEDULE_JOB_KIND, launch_scheduled_agent_run
 from openswe.session_cost import run_session_cost_refresh
-from openswe.slack.concierge_checkin import (
-    CHECKIN_JOB,
-    CHECKIN_SCHEDULE,
-    check_in_with_concierge_users,
-)
 from openswe.threads.index_import import import_agent_server_threads
 from openswe.threads.status import RECONCILE_JOB as THREAD_STATUS_RECONCILE
 from openswe.threads.status import RECONCILE_SCHEDULE, reconcile_busy_threads

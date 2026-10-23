@@ -6,6 +6,7 @@ import pytest
 from deepagents.backends.protocol import ExecuteResponse
 
 from openswe import background_tasks
+from openswe.concierge.records import ConciergeBackground
 from openswe.sandboxes import lifecycle
 from openswe.sandboxes.providers.registry import SandboxGoneError
 from openswe.sandboxes.state import SANDBOX_BACKENDS, SANDBOX_CONNECTIONS, SandboxUnreachableError
@@ -208,3 +209,23 @@ async def test_worker_cannot_attach_to_a_host_outside_its_permissions(
 
     connect.assert_not_awaited()
     assert "worker" not in SANDBOX_BACKENDS
+
+
+@pytest.mark.parametrize("paired", [True, False])
+async def test_concierge_background_shares_only_its_dm_threads_sandbox(
+    shared_sandbox: dict[str, dict[str, object]],
+    monkeypatch: pytest.MonkeyPatch,
+    paired: bool,
+) -> None:
+    del shared_sandbox["worker"]["task_id"]
+    monkeypatch.setattr(ConciergeBackground, "shares_sandbox", AsyncMock(return_value=paired))
+    monkeypatch.setattr(lifecycle, "create_sandbox", AsyncMock(return_value=MagicMock(id="sb-old")))
+    monkeypatch.setattr(lifecycle, "_refresh_github_proxy", AsyncMock())
+
+    if paired:
+        attached = await lifecycle.ensure_sandbox_for_thread("worker", workspace_slug="default")
+        assert attached.id == SANDBOX_BACKENDS["coordinator"].id == "sb-old"
+    else:
+        with pytest.raises(PermissionError):
+            await lifecycle.ensure_sandbox_for_thread("worker", workspace_slug="default")
+        assert "worker" not in SANDBOX_BACKENDS

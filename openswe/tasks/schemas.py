@@ -1,3 +1,4 @@
+from collections.abc import Mapping
 from datetime import UTC, datetime
 from typing import Literal, Self
 from uuid import UUID
@@ -18,6 +19,11 @@ async def user_for_login(login: str) -> User | None:
         return None
     identity = next((item for item in user.identities if item.provider == "github"), None)
     return await User.for_identity("github", identity.external_id) if identity is not None else None
+
+
+def shares_sandbox(metadata: Mapping[str, object]) -> bool:
+    """Whether a thread works in another's sandbox: a task worker or concierge background."""
+    return metadata.get("task_id") is not None or bool(metadata.get("sandbox_host_thread_id"))
 
 
 class ThreadMetadata(BaseModel):
@@ -49,6 +55,15 @@ class ThreadMetadata(BaseModel):
     model_selection: Literal["auto", "explicit"] | None = None
     model: str | None = None
     effort: str | None = None
+
+    @property
+    def shares_sandbox(self) -> bool:
+        """:func:`shares_sandbox` for validated metadata."""
+        return self.task_id is not None or self.sandbox_host_thread_id is not None
+
+    @property
+    def workspace_slug(self) -> str:
+        return self.workspace or self.environment or "default"
 
     def json_metadata(self) -> dict[str, JsonValue]:
         return _JSON_OBJECT.validate_python(self.model_dump(mode="json", exclude_unset=True))

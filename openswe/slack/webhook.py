@@ -915,7 +915,7 @@ async def _process_slack_mention_impl(
                 user_timezone = timezone_value.strip()
 
     context_thread_ts = request.context_thread_ts or reply_thread_ts or thread_ts
-    mapped_login, thread_record, thread_messages, _ = await asyncio.gather(
+    mapped_login, thread_record, thread_messages, _, _ = await asyncio.gather(
         slack_login(user_id, user_email) if allowed_bot is None else _resolved(None),
         common.ThreadRecord.read(thread_id),
         _resolved([])
@@ -924,6 +924,7 @@ async def _process_slack_mention_impl(
             request.context_channel_id or channel_id, context_thread_ts
         ),
         persist_display_name(user_id, user_name) if allowed_bot is None else _resolved(None),
+        common.User.remember_slack_timezone(user_id, user_timezone),
     )
     thread_metadata = thread_record.authorize(mapped_login or "")
     # The thread's state only matters once dispatching, but reading it is one of
