@@ -19,6 +19,7 @@ dependencies = [
     "stagehand==4.3.0",
     "mcp>=2.2.0",
     "pydantic>=2.11",
+    "open-swe-runtime-api",
 ]
 
 # Not `dev`, which uv installs by default: deploys stay without test tooling.
@@ -32,6 +33,8 @@ test = [
 # Editable, so that CLI is read from the source tree.
 [tool.uv.sources]
 managed-deepagents = { path = "../vendor/managed-deepagents-sdk/packages/pypi", editable = true }
+# Shared with the backend; `mda build` bundles it as a local package.
+open-swe-runtime-api = { path = "../packages/runtime-api", editable = true }
 
 [tool.mda]
 # bsdiff4 (via langchain-quickjs) has no 3.14 wheels and MDA build images have no compiler: langchain-ai/deepagents#6878.

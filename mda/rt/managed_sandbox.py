@@ -21,9 +21,9 @@ from langgraph.types import Command
 from managed_deepagents import define_sandbox
 from managed_deepagents.sandbox import SandboxDefinition, open_sandbox, replace_sandbox
 from pydantic import JsonValue, TypeAdapter, ValidationError
+from runtime_api.catalog import SandboxCreate, SandboxSpec
 
 from rt.backend import OpenSweBackend, run_body
-from rt.sandbox import SandboxCreate, SandboxSpec
 from rt.tools import run_id
 
 logger = logging.getLogger(__name__)

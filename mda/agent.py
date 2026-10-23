@@ -1,13 +1,13 @@
 """Open SWE's graphs as one Managed Deep Agent.
 
 Open SWE dispatch names the graph a run plays (``agent``, ``reviewer`` or
-``review-scout``) in its context. The model loop and its checkpoints run here. The Open SWE backend
-holds every credential and the graph itself: this factory takes the graph's tools,
-subagents and models from the backend's catalog for the run, and
-``BackendRunMiddleware`` hands each phase of the loop to the graph's own
-middleware there. Where MDA owns the thread's box, the file and shell tools run in
-it from here (``SandboxToolsMiddleware``). The run token in the context
-authenticates every call.
+``review-scout``) in its context. The model loop, its checkpoints and every tool call
+run here. The Open SWE backend holds every credential and plans the run: this factory
+takes the graph's operations, subagents and models from the backend's catalog for the
+run, makes a tool of each operation (``rt.tools``), and ``BackendRunMiddleware`` hands
+each phase of the loop to the graph's own middleware there. The file and shell tools
+are this runtime's own, in the thread's box or against its files on the backend
+(``rt.file_tools``). The run token in the context authenticates every call.
 
 The same agent runs as the async ``general-purpose`` subagent, the graph
 ``open-swe--general-purpose``, for the task workers a coordinator launches with
@@ -15,7 +15,7 @@ The same agent runs as the async ``general-purpose`` subagent, the graph
 worker grant, adopts its own run token, and runs this agent's middleware as it.
 """
 
-from collections.abc import Collection, Mapping, Sequence
+from collections.abc import Mapping, Sequence
 from pathlib import Path
 from typing import TYPE_CHECKING, Final, Literal, cast
 
@@ -32,8 +32,9 @@ from managed_deepagents import (
     define_deep_agent,
 )
 from pydantic import BaseModel, ConfigDict, Field, JsonValue
-from rt.backend import Catalog, OpenSweBackend
+from rt.backend import OpenSweBackend
 from rt.browser import ReportedBrowserMiddleware
+from rt.file_tools import FileToolsMiddleware
 from rt.managed_sandbox import (
     EXECUTE_TIMEOUT_SECONDS,
     ReplaceSandboxMiddleware,
@@ -44,14 +45,16 @@ from rt.middleware import (
     AsyncWorkerLaunchMiddleware,
     BackendRunMiddleware,
     DescribedToolsMiddleware,
+    IncidentEvidenceMiddleware,
     ReportRepliesMiddleware,
     RuntimeToolsMiddleware,
     ServedToolsMiddleware,
 )
 from rt.model_calls import model_call_guards
-from rt.models import RunModels, build_model
-from rt.sandbox_tools import SandboxToolsMiddleware
-from rt.tools import backend_tool
+from rt.models import build_model
+from rt.remote_files import FILE_TOOLS, RemoteFiles, remote_file_tools
+from rt.tools import operation_tool, run_id
+from runtime_api.catalog import Catalog, RunModels
 
 if TYPE_CHECKING:
     from managed_deepagents.define_deep_agent import ManagedAsyncSubAgent
@@ -101,9 +104,13 @@ class OpenSweRunContext(BaseModel):
     models: dict[str, JsonValue] | None = None
 
 
-def _backend_reports(backend: OpenSweBackend, served: Collection[str]) -> list[AgentMiddleware]:
-    """The backend's transcript and usage see every reply, and every tool call."""
-    return [ReportRepliesMiddleware(backend), RuntimeToolsMiddleware(backend, served)]
+def _backend_reports(backend: OpenSweBackend, catalog: Catalog) -> list[AgentMiddleware]:
+    """The backend's transcript and usage see every reply and every tool call."""
+    return [
+        ReportRepliesMiddleware(backend),
+        RuntimeToolsMiddleware(backend, FILE_TOOLS),
+        *([IncidentEvidenceMiddleware(backend)] if catalog.incident_evidence else []),
+    ]
 
 
 def _code_mode(
@@ -151,11 +158,13 @@ async def agent(runtime: ManagedServerRuntime) -> DeepAgentDefinition:
         if models is not None
         else _DEFAULT_MODEL
     )
-    tools = [backend_tool(spec, backend) for spec in catalog.tools]
-    # MDA's own file and shell tools serve the ones the thread's box runs here. Code
-    # mode keeps the backend's: its calls skip tool-call middleware, the checks included.
-    in_box = frozenset(catalog.sandbox.tools if catalog.sandbox is not None else ())
-    registered = [tool for tool in tools if tool.name not in in_box]
+    tools = [operation_tool(spec, backend) for spec in catalog.operations]
+    remote = RemoteFiles(backend, run_id)
+    remote_tools = remote_file_tools(remote)
+    in_box = catalog.sandbox is not None
+    # Without a box of MDA's, deepagents' own file and shell tools act on the thread's
+    # files on the backend, in place of MDA's own of the same name.
+    registered = [*tools, *(() if in_box else remote_tools.values())]
     by_name = {tool.name: tool for tool in registered}
     excluded = frozenset(catalog.excluded)
     # Every schema offered costs each call its context, and OpenAI answers some requests
@@ -176,19 +185,14 @@ async def agent(runtime: ManagedServerRuntime) -> DeepAgentDefinition:
     replace_sandbox = (
         [ReplaceSandboxMiddleware(backend, catalog.sandbox)] if catalog.sandbox is not None else []
     )
-    box_tools = (
-        [
-            SandboxToolsMiddleware(
-                backend,
-                catalog.sandbox,
-                EXECUTE_TIMEOUT_SECONDS,
-                check_reads=context.graph == "agent",
-            )
-        ]
-        if catalog.sandbox is not None and in_box
-        else []
+    file_tools = FileToolsMiddleware(
+        backend,
+        catalog.files,
+        EXECUTE_TIMEOUT_SECONDS,
+        remote=remote_tools,
+        remote_files=remote,
+        in_box=in_box,
     )
-    reported_elsewhere = {*by_name, *in_box}
     sync_subagents: list[SubAgent] = [
         {
             "name": subagent.name,
@@ -197,8 +201,8 @@ async def agent(runtime: ManagedServerRuntime) -> DeepAgentDefinition:
             "model": subagent_model,
             "tools": subagent_tools[subagent.name],
             "middleware": [
-                *_backend_reports(backend, reported_elsewhere),
-                *box_tools,
+                *_backend_reports(backend, catalog),
+                file_tools,
                 *replace_sandbox,
                 ServedToolsMiddleware(subagent_tools[subagent.name], excluded, backend),
                 *model_call_guards(),
@@ -218,8 +222,8 @@ async def agent(runtime: ManagedServerRuntime) -> DeepAgentDefinition:
                 trace_metadata=catalog.trace_metadata,
             ),
             *replace_sandbox,
-            *_backend_reports(backend, reported_elsewhere),
-            *box_tools,
+            *_backend_reports(backend, catalog),
+            file_tools,
             ServedToolsMiddleware(offered, excluded | code_only, backend),
             *_code_mode(context.graph, from_code, catalog.described),
             *_browser(context.graph, backend),
@@ -244,14 +248,13 @@ async def agent(runtime: ManagedServerRuntime) -> DeepAgentDefinition:
         replicate_traces=False,
         model=model,
         context_schema=OpenSweRunContext,
-        # Named as the in-process graph names them, these replace MDA's own file and
-        # shell tools where the backend runs them. Code-only tools stay callable by
-        # name, as in-process, though no request offers them.
+        # Code-only tools stay callable by name, as in-process, though no request
+        # offers them.
         tools=registered,
-        # The thread's box, for the file and shell tools run in it from here and for
-        # MDA's own use of it, such as the browser's screenshots; the backend's tools
-        # run in the same box. A worker's catalog is its coordinator's, so the worker
-        # shares the coordinator's box.
+        # The thread's box, for the file and shell tools run in it and for MDA's own use
+        # of it, such as the browser's screenshots; the backend's operations work in the
+        # same box. A worker's catalog is its coordinator's, so the worker shares the
+        # coordinator's box.
         sandbox=(
             definition(catalog.sandbox.create, catalog.sandbox.thread_id)
             if catalog.sandbox is not None

@@ -44,7 +44,7 @@ def test_finding_reply_context_wraps_reply_as_untrusted_data() -> None:
 
 async def _planned_prepare(config: RunnableConfig) -> AgentMiddleware:
     """The reviewer's run preparation, as its planner sets it up for ``config``."""
-    surface = ToolSurface(for_model=True)
+    surface = ToolSurface()
     await reviewer.plan_reviewer(config, surface)
     return next(
         m for m in surface.middleware if isinstance(m, reviewer.PrepareReviewerRunMiddleware)

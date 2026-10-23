@@ -98,7 +98,7 @@ async def test_workspace_mcps_load_for_non_admins_with_legacy_plan_state(
         config = _config()
         config["configurable"]["github_login"] = github_login
         config["configurable"]["plan_mode"] = initial_plan_mode
-        surface = ToolSurface(for_model=True)
+        surface = ToolSurface()
         await plan_agent(config, surface)
 
     tool_names = {

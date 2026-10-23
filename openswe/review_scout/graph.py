@@ -13,7 +13,6 @@ from collections.abc import Awaitable, Callable
 from typing import Any, NotRequired, cast
 
 from deepagents.backends.protocol import SandboxBackendProtocol
-from deepagents.middleware.filesystem import FilesystemMiddleware
 from deepagents.middleware.subagents import GENERAL_PURPOSE_SUBAGENT
 from langchain.agents.middleware import ModelCallLimitMiddleware, ModelRetryMiddleware
 from langchain.agents.middleware.types import (
@@ -38,7 +37,6 @@ from openswe.middleware import (
     ExcludeToolsMiddleware,
     ModelErrorMiddleware,
     RepairOrphanedToolCallsMiddleware,
-    ToolErrorMiddleware,
 )
 from openswe.middleware.prepare_run import PrepareRunState
 from openswe.middleware.trace import OpenSWEMiddleware
@@ -304,13 +302,9 @@ async def plan_review_scout(config: RunnableConfig, surface: ToolSurface) -> Non
     middleware = cast(
         list[AgentMiddleware[Any, Any, Any]],
         [
-            FilesystemMiddleware(
-                backend=get_cached_sandbox_backend(thread_id, reconnect=reconnect_backend)
-            ),
             PrepareReviewScoutRunMiddleware(thread_id=thread_id, config=config),
             AnthropicPromptCachingMiddleware(ttl="1h", unsupported_model_behavior="ignore"),
             ModelCallLimitMiddleware(run_limit=SCOUT_MODEL_CALL_LIMIT, exit_behavior="end"),
-            ToolErrorMiddleware(),
             ExcludeToolsMiddleware(excluded=SHELL_SEARCH_EXCLUDED_TOOLS),
             RepairOrphanedToolCallsMiddleware(),
             ModelRetryMiddleware(retry_on=(TimeoutError,)),
@@ -328,6 +322,7 @@ async def plan_review_scout(config: RunnableConfig, surface: ToolSurface) -> Non
         ]
     )
     surface.middleware = middleware
+    surface.files = get_cached_sandbox_backend(thread_id, reconnect=reconnect_backend)
     surface.models = models
     surface.subagents = [
         SurfaceSubagent(

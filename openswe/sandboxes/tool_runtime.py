@@ -1,8 +1,7 @@
-"""What a graph factory plans for a run, and its tools node, run without a model.
+"""What a graph factory plans for a run: its tools, middleware, models and subagents.
 
-The factory names the run's tools, middleware, models and subagents; the model
-loop runs on Managed Deep Agents, and the backend runs the tools it is called for
-through the node an agent with those tools and middleware would run them in.
+The model loop runs on Managed Deep Agents, which builds a tool for each of the
+planned tools and calls the backend to run it (``openswe.remote_runtime``).
 """
 
 import math
@@ -13,17 +12,17 @@ from dataclasses import dataclass, field
 from typing import cast
 from uuid import uuid4
 
-from fastapi import HTTPException
-from langchain.agents import create_agent
+from deepagents.backends.protocol import BackendProtocol
 from langchain.agents.middleware.types import AgentMiddleware
-from langchain_core.language_models.fake_chat_models import FakeListChatModel
 from langchain_core.messages import AIMessage, AnyMessage, ToolMessage
 from langchain_core.runnables import RunnableConfig
 from langchain_core.tools import BaseTool
+from langchain_core.tools import tool as as_tool
 from langgraph.graph import END, START, StateGraph
 from langgraph.prebuilt import ToolNode
-from langgraph.typing import StateLike, StateT
+from langgraph.typing import StateT
 from pydantic import BaseModel, JsonValue, TypeAdapter
+from runtime_api.catalog import FileCheck
 
 from openswe.mcp.models import MCPToolProvenance
 from openswe.middleware.dynamic_tools import DynamicToolMiddleware
@@ -33,9 +32,6 @@ from openswe.sandboxes.tool_models import ToolDescription
 _json = TypeAdapter(JsonValue)
 # Every surface lists the integration tools themselves, so none offers their loader.
 EXCLUDED_TOOLS = frozenset({"load_integration_tools"})
-# Task workers share the sandbox's tool channel with their coordinator, so task
-# coordination stays the model's: a surface serving the sandbox never offers it.
-MODEL_ONLY_TOOLS = frozenset({"control_worker", "message_task_thread"})
 
 
 def tool_parameters(tool: BaseTool) -> dict[str, JsonValue]:
@@ -146,26 +142,6 @@ type PlannedTool = BaseTool | Callable[..., object] | dict[str, object]
 
 
 @dataclass
-class _ToolsNode:
-    node: ToolNode
-    state_schema: type[StateLike]
-
-
-def _tools_node(tools: Sequence[PlannedTool], middleware: Sequence[AgentMiddleware]) -> _ToolsNode:
-    """The tools node an agent with ``tools`` and ``middleware`` runs, wrapped in its tool-call middleware.
-
-    Its model never runs: a run's model loop is Managed Deep Agents'.
-    """
-    agent = create_agent(
-        FakeListChatModel(responses=[""]), tools=list(tools), middleware=list(middleware)
-    )
-    node = agent.builder.nodes["tools"].runnable
-    if not isinstance(node, ToolNode):
-        raise RuntimeError("Agent tools node is unavailable")
-    return _ToolsNode(node, agent.builder.state_schema)
-
-
-@dataclass
 class ToolSurface:
     """A run as its graph factory plans it."""
 
@@ -180,26 +156,37 @@ class ToolSurface:
     middleware: Sequence[AgentMiddleware] = ()
     models: SurfaceModels | None = None
     subagents: Sequence[SurfaceSubagent] = ()
-    # Paths the graph's file tools read from this deployment rather than the sandbox,
-    # such as skills.
+    # The thread's files: its sandbox, with the paths this deployment serves routed in.
+    files: BackendProtocol | None = None
+    # Paths under ``files`` this deployment serves rather than the sandbox, such as skills.
     backend_paths: tuple[str, ...] = ()
+    # Where large tool results and binary reads are offloaded.
+    artifacts_root: str = "/"
+    # The guards on the shell commands the run's tools run, as tool-call middleware.
+    shell_guards: Sequence[AgentMiddleware] = ()
+    # The checks on what the run's ``read_file`` calls return.
+    file_checks: tuple[FileCheck, ...] = ()
     # Whether the graph's core tools it seldom needs belong in a runtime's code mode.
     code_mode: bool = False
-    # Whether a model loop running elsewhere calls these tools, rather than the sandbox.
-    for_model: bool = False
 
-    _node: _ToolsNode | None = field(default=None, init=False, repr=False)
-
-    async def prepare(self, state: Mapping[str, object]) -> None:
-        self._node = _tools_node(self.base_tools, self.middleware)
-        tools = dict(self._node.node.tools_by_name)
+    async def prepare(self) -> None:
+        planned = [
+            *self.base_tools,
+            *(tool for middleware in self.middleware for tool in getattr(middleware, "tools", ())),
+        ]
+        tools = {
+            tool.name: tool
+            for tool in (
+                item if isinstance(item, BaseTool) else as_tool(item)
+                for item in planned
+                if not isinstance(item, dict)
+            )
+        }
         if self.dynamic:
             integrations = await self.dynamic.catalog_tools()
             self.integration_names = [tool.name for tool in integrations]
             tools.update({tool.name: tool for tool in integrations})
-        excluded = (
-            self.excluded | EXCLUDED_TOOLS | (frozenset() if self.for_model else MODEL_ONLY_TOOLS)
-        )
+        excluded = self.excluded | EXCLUDED_TOOLS
         self.tools = {name: tool for name, tool in tools.items() if name not in excluded}
 
     def catalog(self) -> list[ToolDescription]:
@@ -214,39 +201,6 @@ class ToolSurface:
             key=lambda item: -item[1],
         )
         return [describe_tool(name, self.tools[name]) for name, _ in ranked[:limit]]
-
-    async def run(
-        self,
-        config: RunnableConfig,
-        state: Mapping[str, object],
-        name: str,
-        arguments: Mapping[str, JsonValue],
-        *,
-        call_id: str | None = None,
-    ) -> ToolNodeResult:
-        """Run one call through the run's tools node, keeping its state updates."""
-        tool = self.tools.get(name)
-        if tool is None:
-            raise HTTPException(404, "Tool is unavailable")
-        parameters = tool_parameters(tool)
-        properties = parameters.get("properties", {})
-        if not isinstance(properties, dict) or set(arguments) - properties.keys():
-            raise HTTPException(422, "Unexpected tool arguments")
-        if self._node is None:
-            raise RuntimeError("The surface was not prepared")
-        loaded = state.get("loaded_integration_tools", [])
-        integration_names = list(loaded) if isinstance(loaded, list) else []
-        if name in self.integration_names and name not in integration_names:
-            integration_names.append(name)
-        return await run_tool_node(
-            self._node.node,
-            self._node.state_schema,
-            {**state, "loaded_integration_tools": integration_names},
-            config,
-            name,
-            arguments,
-            call_id=call_id,
-        )
 
 
 @dataclass(frozen=True)

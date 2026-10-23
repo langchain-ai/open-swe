@@ -135,7 +135,7 @@ format-check:
 	uv run ruff format $(PYTHON_FILES) --check
 
 typecheck:
-	uv run ty check openswe tests
+	uv run ty check openswe packages tests
 	uv run ty check --python-version 3.8 openswe/sandbox_scripts/*.py
 
 # mda/ is its own project: checked and tested against its own environment alone,

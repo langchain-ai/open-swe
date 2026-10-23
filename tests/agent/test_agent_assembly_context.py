@@ -99,22 +99,15 @@ async def test_remote_agent_discovers_personal_skills(monkeypatch: pytest.Monkey
     assert "personal-workflow" in shaped.system_prompt
 
 
-@pytest.mark.asyncio
-async def test_binary_content_is_offloaded_to_a_thread_scoped_store():
+async def test_offloaded_images_are_served_from_a_thread_scoped_store() -> None:
     from deepagents.backends.store import StoreBackend
-    from deepagents.middleware.filesystem import FilesystemMiddleware
 
     captured = await _plan_agent()
     blobs = captured["backend"].routes["/blobs/"]
     assert isinstance(blobs, StoreBackend)
     assert blobs._namespace(MagicMock()) == ("thread_blobs", "thread-ctx")
-    filesystem = next(
-        item
-        for item in cast(list[object], captured["middleware"])
-        if isinstance(item, FilesystemMiddleware)
-    )
-    assert filesystem.backend is captured["backend"]
-    assert filesystem._offload_binary_content
+    surface = cast(ToolSurface, captured["surface"])
+    assert "/blobs/" in surface.backend_paths
 
 
 @pytest.mark.parametrize(
@@ -200,12 +193,11 @@ async def _plan_agent(
     make_model: Callable[..., BaseChatModel] | None = None,
 ) -> dict[str, object]:
     """The run ``config`` plans, with the parts tests read pulled out of its middleware."""
-    from deepagents.middleware.filesystem import FilesystemMiddleware
     from deepagents.middleware.skills import SkillsMiddleware
 
     from openswe.middleware.model_selection import ModelSelectionMiddleware
 
-    surface = ToolSurface(for_model=True)
+    surface = ToolSurface()
     make_model_calls: list[tuple[str, dict[str, object]]] = []
     config = config or _base_config()
     thread_id = str((config.get("configurable") or {}).get("thread_id"))
@@ -262,7 +254,6 @@ async def _plan_agent(
 
     SANDBOX_BACKENDS.pop(thread_id, None)
     middleware = list(surface.middleware)
-    filesystem = next(m for m in middleware if isinstance(m, FilesystemMiddleware))
     skills = next(m for m in middleware if isinstance(m, SkillsMiddleware))
     selection = next(m for m in middleware if isinstance(m, ModelSelectionMiddleware))
     return {
@@ -270,7 +261,7 @@ async def _plan_agent(
         "tools": list(surface.base_tools),
         "middleware": middleware,
         "subagents": list(surface.subagents),
-        "backend": filesystem.backend,
+        "backend": surface.files,
         "skills": skills.sources,
         "model": selection._models["default"],
         "make_model_calls": make_model_calls,

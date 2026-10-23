@@ -3,10 +3,10 @@
 from typing import Final
 
 from langchain_core.runnables import RunnableConfig
+from runtime_api.catalog import ModelSpec, RunModels
 
 from openswe.dashboard.workspace_settings_cache import cached_workspace_settings
 from openswe.remote_runtime.graph import RemoteGraph
-from openswe.remote_runtime.runs import ModelSpec, RunModels
 from openswe.run_config import RunConfig
 from openswe.runtime.constants import DEFAULT_LLM_MAX_TOKENS
 from openswe.sandboxes.tool_runtime import ToolSurface

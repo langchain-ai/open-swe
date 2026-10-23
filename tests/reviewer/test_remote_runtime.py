@@ -173,11 +173,7 @@ async def test_remote_prompts_include_deployment_context(
     main_prompt = (
         await session.model_call({"rendered_system_prompt": "main instructions"}, Runtime())
     ).system_prompt
-    subagents = session.catalog()["subagents"]
-    assert isinstance(subagents, list)
-    assert isinstance(subagents[0], dict)
-    subagent_prompt = subagents[0]["system_prompt"]
-    assert isinstance(subagent_prompt, str)
+    subagent_prompt = session.catalog().subagents[0].system_prompt
 
     for rendered, original in (
         (main_prompt, "main instructions"),
@@ -203,8 +199,9 @@ async def test_app_lifespan_exits_without_managed_deep_agents(
             pass
 
 
+@pytest.mark.parametrize("first_call", ["phase", "operation"])
 async def test_reviewer_tools_get_a_github_token_on_a_replica_that_did_not_prepare_the_run(
-    monkeypatch: pytest.MonkeyPatch,
+    monkeypatch: pytest.MonkeyPatch, first_call: str
 ) -> None:
     import openswe.reviewer as reviewer
     from openswe.github.thread_token import (
@@ -234,7 +231,11 @@ async def test_reviewer_tools_get_a_github_token_on_a_replica_that_did_not_prepa
         started_here=False,
     )
 
-    await session.join({"messages": [], "run_prepared": True}, None)
+    # An operation's call carries no run state, so only preparation rejoins for it.
+    if first_call == "phase":
+        await session.join({"messages": [], "run_prepared": True}, None)
+    else:
+        await session.rejoin_preparation(None)
 
     assert await resolve_thread_github_token(config) == "ghs_reviewer"
 
@@ -377,7 +378,7 @@ async def test_mda_catalog_leaves_integrations_and_code_mode_to_mda(
         core = [
             integration(name)
             for name in (
-                "read_file",
+                "web_search",
                 "manage_thread",
                 "slack_reply",
                 "message_task_thread",
@@ -403,11 +404,10 @@ async def test_mda_catalog_leaves_integrations_and_code_mode_to_mda(
     catalog = await graph.hook(RUN, "catalog", {"run_id": "run-1"})
 
     assert isinstance(catalog, dict)
-    tools = catalog["tools"]
-    assert isinstance(tools, list)
-    names = {tool["name"] for tool in tools if isinstance(tool, dict)}
-    assert {"mcp_search", "mcp.dotted", "read_file", "manage_thread", "slack_reply"} <= names
-    # The sandbox's tool channel never offers task coordination; the model does.
+    operations = catalog["operations"]
+    assert isinstance(operations, list)
+    names = {op["name"] for op in operations if isinstance(op, dict)}
+    assert {"mcp_search", "mcp.dotted", "web_search", "manage_thread", "slack_reply"} <= names
     assert "message_task_thread" in names
     assert "eval" not in names
     excluded = catalog["excluded"]
@@ -418,72 +418,102 @@ async def test_mda_catalog_leaves_integrations_and_code_mode_to_mda(
     # And delegates only through them: no synchronous subagents, nor deepagents' default.
     assert catalog["subagents"] == []
     assert "task" in excluded
-    search = next(tool for tool in tools if isinstance(tool, dict) and tool["name"] == "mcp_search")
+    search = next(op for op in operations if isinstance(op, dict) and op["name"] == "mcp_search")
     assert isinstance(search, dict)
     expected = {
         "connection_name": "lmt",
         "scope": "managed",
         "overridden_scopes": ["instance", "user"],
     }
-    assert search["mcp_provenance"] == expected
     assert json.dumps(expected, separators=(",", ":")) in str(search["description"])
     assert "private-token" not in str(catalog)
     assert "private-owner" not in str(catalog)
     assert "private-gateway" not in str(catalog)
     assert catalog["code_only"] == ["manage_thread", "mcp_search"]
-    assert catalog["also_from_code"] == ["read_file"]
+    assert catalog["also_from_code"] == ["web_search"]
 
 
-@pytest.mark.parametrize("unknown", [False, True])
-def test_mda_runs_box_tools_itself_only_with_tool_middleware_it_applies(unknown: bool) -> None:
-    """Tool-call middleware MDA does not know keeps every call here, where it sees it."""
-    from collections.abc import Awaitable, Callable
+async def test_an_operation_gets_the_state_it_reads_and_answers_the_state_it_changed() -> None:
+    """An operation is its tool's work alone: what it reads comes with the call, what it writes goes back."""
+    from typing import Annotated
 
-    from langchain.agents.middleware.types import AgentMiddleware
     from langchain_core.messages import ToolMessage
-    from langchain_core.tools import StructuredTool
-    from langgraph.prebuilt.tool_node import ToolCallRequest
+    from langchain_core.tools import InjectedToolCallId, tool
+    from langgraph.prebuilt import InjectedState
     from langgraph.types import Command
+    from runtime_api.operations import RunOperation
 
-    from openswe.middleware.tool_error_handler import ToolErrorMiddleware
-    from openswe.middleware.workflow_push_guard import WorkflowPushGuardMiddleware
+    from openswe.remote_runtime.graph import RunSession
+    from openswe.remote_runtime.operations import Injections
+    from openswe.sandboxes.tool_runtime import ToolSurface
+
+    @tool
+    def switch(
+        route: Annotated[str | None, InjectedState("model_route")],
+        call_id: Annotated[str, InjectedToolCallId],
+    ) -> Command:
+        """Switch to the performance model."""
+        return Command(
+            update={
+                "requested_model": f"after-{route}",
+                "messages": [ToolMessage(content="switched", tool_call_id=call_id)],
+            }
+        )
+
+    surface = ToolSurface(base_tools=[switch])
+    await surface.prepare()
+    session = RunSession(surface, {"configurable": {}}, None, started_here=True)
+
+    reads = Injections.of(surface.tools["switch"])
+    result = await session.operation(
+        RunOperation(name="switch", state={"model_route": "fast"}, request_id="call-1")
+    )
+
+    assert reads.reads == ["model_route"]
+    assert not reads.reads_all
+    assert result.content == "switched"
+    assert result.state == {"requested_model": "after-fast"}
+
+
+async def test_an_operation_that_runs_a_command_is_put_to_the_shell_guards_first() -> None:
+    from langchain_core.tools import tool
+    from runtime_api.operations import RunOperation
+
+    from openswe.middleware.pr_creation_guard import PullRequestCreationGuardMiddleware
     from openswe.remote_runtime.graph import RunSession
     from openswe.sandboxes.tool_runtime import ToolSurface
 
-    class Unknown(AgentMiddleware):
-        async def awrap_tool_call(
-            self,
-            request: ToolCallRequest,
-            handler: Callable[[ToolCallRequest], Awaitable[ToolMessage | Command]],
-        ) -> ToolMessage | Command:
-            return await handler(request)
+    ran: list[str] = []
 
-    def tool(name: str) -> StructuredTool:
-        async def run() -> str:
-            return name
-
-        return StructuredTool.from_function(coroutine=run, name=name, description=name)
+    @tool
+    def background_execute(command: str) -> str:
+        """Run a command in the background."""
+        ran.append(command)
+        return "started"
 
     surface = ToolSurface(
-        tools={name: tool(name) for name in ("execute", "read_file", "slack_reply")},
-        middleware=[
-            ToolErrorMiddleware(),
-            WorkflowPushGuardMiddleware(),
-            *([Unknown()] if unknown else []),
-        ],
-        backend_paths=("/skills/",),
+        base_tools=[background_execute], shell_guards=[PullRequestCreationGuardMiddleware()]
+    )
+    await surface.prepare()
+    session = RunSession(surface, {"configurable": {}}, None, started_here=True)
+
+    refused = await session.operation(
+        RunOperation(
+            name="background_execute",
+            arguments={"command": "gh pr create --fill"},
+            request_id="call-1",
+        )
+    )
+    started = await session.operation(
+        RunOperation(
+            name="background_execute", arguments={"command": "make test"}, request_id="call-2"
+        )
     )
 
-    in_box = RunSession(surface, {}, None, started_here=True).box_tools()
-
-    if unknown:
-        assert in_box == {"tools": [], "checks": [], "backend_paths": []}
-    else:
-        assert in_box == {
-            "tools": ["execute", "read_file"],
-            "checks": ["push_guards", "tool_errors"],
-            "backend_paths": ["/skills/"],
-        }
+    assert refused.status == "error"
+    assert "pr_creation_fallback_blocked" in str(refused.content)
+    assert started.content == "started"
+    assert ran == ["make test"]
 
 
 async def _hook_status(
@@ -552,9 +582,10 @@ async def test_an_adopted_worker_acts_as_its_own_thread_never_its_coordinator(
 ) -> None:
     from unittest.mock import AsyncMock, MagicMock
 
+    from runtime_api.catalog import ModelSpec, RunModels
+
     from openswe.prompts import prompt
     from openswe.remote_runtime import async_workers, hosted
-    from openswe.remote_runtime.runs import ModelSpec, RunModels
 
     coordinator = RemoteRun(
         thread_id="coordinator", assistant_id="agent", configurable={"github_login": "owner"}

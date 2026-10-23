@@ -55,7 +55,9 @@ from langgraph.prebuilt.tool_node import ToolCallRequest, ToolRuntime
 from langgraph.runtime import Runtime
 from langgraph.types import Command
 from langgraph_sdk.errors import APIConnectionError, APIStatusError
-from pydantic import BaseModel, JsonValue
+from pydantic import BaseModel, JsonValue, TypeAdapter
+from runtime_api.endpoint import call
+from runtime_api.operations import RECORD_EVIDENCE, ToolEvidence
 
 from rt.backend import (
     BackendCallError,
@@ -66,10 +68,15 @@ from rt.backend import (
     subagent_of,
 )
 from rt.models import ModelSpec, build_model
+from rt.remote_files import FILE_TOOLS
 from rt.tools import STATE_KEY, run_id, tool_body
 from rt.tracing import TurnTrace
 
 logger = logging.getLogger(__name__)
+
+_json = TypeAdapter(JsonValue)
+_json_object = TypeAdapter(dict[str, JsonValue])
+_json_content = TypeAdapter(str | list[JsonValue])
 
 # Graph state MDA's own middleware reads: a requested offload's summarization
 # event, which MDA's summarization then applies to every model call.
@@ -196,7 +203,7 @@ class ServedToolsMiddleware(AgentMiddleware):
         adopted = self._backend.adopted
         if adopted is None:
             return frozenset()
-        own = {spec.name for spec in adopted.tools}
+        own = {spec.name for spec in adopted.operations} | FILE_TOOLS
         return frozenset(adopted.excluded) | {t.name for t in self._tools if t.name not in own}
 
     async def awrap_model_call(
@@ -474,15 +481,15 @@ async def reported(
 
 
 class RuntimeToolsMiddleware(AgentMiddleware):
-    """Report the tool calls this runtime runs itself, such as ``task``, to the backend's transcript.
+    """Report every tool call this runtime makes to the backend's transcript.
 
-    The backend records the calls of its own tools as it runs them, and
-    ``SandboxToolsMiddleware`` reports the calls this runtime runs in the box.
+    ``FileToolsMiddleware`` reports the file and shell calls itself, as ``reported``
+    is around the checks it applies; ``reported_elsewhere`` names them.
     """
 
-    def __init__(self, backend: OpenSweBackend, served: Collection[str]) -> None:
+    def __init__(self, backend: OpenSweBackend, reported_elsewhere: Collection[str]) -> None:
         self._backend = backend
-        self._served = frozenset(served)
+        self._served = frozenset(reported_elsewhere)
 
     async def awrap_tool_call(
         self,
@@ -492,6 +499,53 @@ class RuntimeToolsMiddleware(AgentMiddleware):
         if request.tool_call["name"] in self._served:
             return await handler(request)
         return await reported(self._backend, request, handler)
+
+
+class IncidentEvidenceMiddleware(AgentMiddleware):
+    """Record each tool result of an incident run as evidence, which the result then cites.
+
+    The report the run writes cites what it found by evidence id, so each result
+    carries the id the backend recorded it under.
+    """
+
+    def __init__(self, backend: OpenSweBackend) -> None:
+        self._backend = backend
+
+    async def awrap_tool_call(
+        self,
+        request: ToolCallRequest,
+        handler: Callable[[ToolCallRequest], Awaitable[ToolMessage | Command]],
+    ) -> ToolMessage | Command:
+        result = await handler(request)
+        if isinstance(result, ToolMessage):
+            return await self._cited(request, result)
+        if isinstance(result, Command) and isinstance(result.update, dict):
+            messages = result.update.get("messages")
+            if isinstance(messages, list):
+                cited = [
+                    await self._cited(request, m) if isinstance(m, ToolMessage) else m
+                    for m in messages
+                ]
+                return dataclasses.replace(result, update={**result.update, "messages": cited})
+        return result
+
+    async def _cited(self, request: ToolCallRequest, result: ToolMessage) -> ToolMessage:
+        evidence = ToolEvidence(
+            run_id=run_id(),
+            tool=request.tool_call["name"],
+            arguments=_json_object.validate_python(request.tool_call["args"]),
+            content=_json_content.validate_python(result.content),
+            status=result.status,
+            artifact=_json.validate_python(result.artifact)
+            if result.artifact is not None
+            else None,
+        )
+        try:
+            reply = await call(self._backend, RECORD_EVIDENCE, evidence)
+        except BackendCallError:
+            logger.warning("Could not record a tool result as incident evidence", exc_info=True)
+            return result
+        return result.model_copy(update={"content": reply.content})
 
 
 class _Launched(BaseModel):

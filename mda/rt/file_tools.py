@@ -1,41 +1,45 @@
-"""The file and shell tools of the thread's box, run here with the graph's own checks.
+"""The run's file and shell tools, with the checks around them.
 
-Where MDA owns the thread's box, MDA's own file and shell tools serve the graph's
-against it, with no call to the backend in between. Tool errors become results the
-model can act on, where the backend's catalog lists that check for the graph, and
-for the coding agent a file posing as an image is not attached and reading a file
-loads the ``AGENTS.md`` files above it. The transcript hears of each call alongside it.
+They run in the thread's box, which MDA owns, or against the thread's files on the
+backend (``rt.remote_files``): where the box is not MDA's, such as a thread bridged
+to a person's machine, and on the paths the backend serves, such as skills.
 
-The backend still runs the calls only it can settle: calls on the paths it serves,
-such as skills, and, where the graph guards pushes and pull requests, commands that
-may push or open one. Those guards inspect the push and may need a person's
-approval, so the match here is wider than what they block: nothing they would stop
-runs in the box. The checks on what ``read_file`` returns apply to those calls too;
-code mode's calls skip them, as code mode always has.
+Around every call: a command that may push or open a pull request is first put to
+the backend's guards, which inspect the push and may need a person's approval, so
+the match here is wider than what they block. Tool errors become results the model
+can act on. Where the catalog lists the checks, a file posing as an image is not
+attached and reading a file loads the ``AGENTS.md`` files above it. The transcript
+hears of each call alongside it. Code mode's calls skip the checks, as code mode
+always has.
 """
 
 import asyncio
+import json
 import logging
 import posixpath
 import random
 import re
 from collections.abc import Awaitable, Callable, Mapping
-from dataclasses import replace
 from functools import partial
 from typing import Final
 
+from deepagents.backends.protocol import BackendProtocol
 from langchain.agents.middleware import AgentMiddleware
-from langchain_core.messages import ToolMessage
+from langchain_core.messages import ToolCall, ToolMessage
+from langchain_core.tools import BaseTool
 from langgraph.prebuilt.tool_node import ToolCallRequest
 from langgraph.types import Command
 from langsmith.sandbox import SandboxRetryableConnectionError
+from runtime_api.catalog import FilesSpec
+from runtime_api.endpoint import call
+from runtime_api.operations import CHECK_SHELL, ShellCheck
 
 from rt.backend import OpenSweBackend
 from rt.middleware import reported
-from rt.sandbox import SandboxSpec
+from rt.remote_files import FILE_TOOLS
 from rt.subdir_agents import SubdirAgentsReadMiddleware
 from rt.tool_errors import ToolErrorMiddleware
-from rt.tools import run_on_backend
+from rt.tools import run_id
 from rt.validate_image_reads import ValidateImageReadsMiddleware
 
 logger = logging.getLogger(__name__)
@@ -67,91 +71,103 @@ _TRANSIENT_BACKOFF_SECONDS: Final = (0.5, 1.0, 2.0)
 Handler = Callable[[ToolCallRequest], Awaitable[ToolMessage | Command]]
 
 
-class SandboxToolsMiddleware(AgentMiddleware):
-    """Run the box's file and shell tools here, and the calls only the backend can settle there."""
+class FileToolsMiddleware(AgentMiddleware):
+    """Run the file and shell tools where the thread's files are, with their checks."""
 
     def __init__(
         self,
         backend: OpenSweBackend,
-        spec: SandboxSpec,
+        spec: FilesSpec,
         execute_timeout: int,
         *,
-        check_reads: bool,
+        remote: Mapping[str, BaseTool],
+        remote_files: BackendProtocol,
+        in_box: bool,
     ) -> None:
         self._backend = backend
-        self._tools = frozenset(spec.tools)
-        self._guards_pushes = "push_guards" in spec.checks
+        self._remote = dict(remote)
+        self._in_box = in_box
         self._backend_paths = tuple(spec.backend_paths)
+        self._guards_shell = "shell_commands" in spec.guards
         self._execute_timeout = execute_timeout
-        self._image_reads = ValidateImageReadsMiddleware() if check_reads else None
-        self._tool_errors = ToolErrorMiddleware(backend) if "tool_errors" in spec.checks else None
-        self._agents_md = SubdirAgentsReadMiddleware() if check_reads else None
+        self._tool_errors = ToolErrorMiddleware(backend)
+        self._image_reads = ValidateImageReadsMiddleware() if "image_reads" in spec.checks else None
+        self._agents_md = (
+            SubdirAgentsReadMiddleware(None if in_box else remote_files)
+            if "agents_md" in spec.checks
+            else None
+        )
 
     async def awrap_tool_call(
         self, request: ToolCallRequest, handler: Handler
     ) -> ToolMessage | Command:
-        call = request.tool_call
-        if call["name"] not in self._tools:
+        call_ = request.tool_call
+        if call_["name"] not in FILE_TOOLS:
             return await handler(request)
-        if self._on_backend(call["name"], call["args"]):
-            # The backend turns its own errors into results and records the call.
-            return await self._checked_answer(request, await self._run_on_backend(request))
-        in_box = partial(_retried, handler=partial(self._within_deadline, handler=handler))
-        return await reported(
-            self._backend,
-            request,
-            partial(self._checked, handler=in_box, errors=self._tool_errors),
-        )
+        screened = await self._screened(request)
+        if isinstance(screened, ToolMessage):
+            return screened
+        request = screened
+        if self._in_box and self._on_backend(call_["name"], call_["args"]):
+            run: Handler = self._run_remote
+        else:
+            run = partial(_retried, handler=partial(self._within_deadline, handler=handler))
+        return await reported(self._backend, request, partial(self._checked, handler=run))
 
     def _on_backend(self, name: str, arguments: Mapping[str, object]) -> bool:
-        if name == "execute":
-            command = arguments.get("command")
-            return self._guards_pushes and isinstance(command, str) and _guarded(command)
         path = _absolute(arguments.get(_PATH_ARGUMENTS.get(name, "")))
         return path is not None and any(
             path == prefix.rstrip("/") or path.startswith(prefix) for prefix in self._backend_paths
         )
 
-    async def _checked(
-        self, request: ToolCallRequest, handler: Handler, errors: ToolErrorMiddleware | None
-    ) -> ToolMessage | Command:
+    async def _screened(self, request: ToolCallRequest) -> ToolCallRequest | ToolMessage:
+        """``request`` as the guards let it run, an approved push as they fixed it, or their refusal."""
+        command = request.tool_call["args"].get("command")
+        if (
+            request.tool_call["name"] != "execute"
+            or not self._guards_shell
+            or not isinstance(command, str)
+            or not _guarded(command)
+        ):
+            return request
+        verdict = await call(
+            self._backend, CHECK_SHELL, ShellCheck(run_id=run_id(), tool="execute", command=command)
+        )
+        if not verdict.allowed:
+            return ToolMessage(
+                content=verdict.refusal or json.dumps({"status": "error", "error": "refused"}),
+                tool_call_id=request.tool_call.get("id") or "",
+                name="execute",
+                status="error",
+            )
+        if verdict.command is None:
+            return request
+        arguments = {**request.tool_call["args"], "command": verdict.command}
+        return request.override(tool_call={**request.tool_call, "args": arguments})
+
+    async def _run_remote(self, request: ToolCallRequest) -> ToolMessage | Command:
+        """The call against the backend's files, as the box's own tool would run it."""
+        tool = self._remote[request.tool_call["name"]]
+        call_id = request.tool_call.get("id") or ""
+        result = await tool.ainvoke(
+            ToolCall(
+                name=tool.name,
+                args={**request.tool_call["args"], "runtime": request.runtime},
+                id=call_id,
+                type="tool_call",
+            )
+        )
+        if isinstance(result, ToolMessage | Command):
+            return result
+        return ToolMessage(content=str(result), tool_call_id=call_id, name=tool.name)
+
+    async def _checked(self, request: ToolCallRequest, handler: Handler) -> ToolMessage | Command:
         """``handler`` in the graph's own order: image reads, then tool errors, then AGENTS.md."""
         checked = handler
-        for check in (self._agents_md, errors, self._image_reads):
+        for check in (self._agents_md, self._tool_errors, self._image_reads):
             if check is not None:
                 checked = partial(check.awrap_tool_call, handler=checked)
         return await checked(request)
-
-    async def _checked_answer(self, request: ToolCallRequest, command: Command) -> Command:
-        """The read checks on the tool message a backend call answered with, inside its command."""
-        update = command.update if isinstance(command.update, dict) else {}
-        messages = update.get("messages")
-        call_id = request.tool_call.get("id")
-        answer = next(
-            (
-                message
-                for message in (messages if isinstance(messages, list) else [])
-                if isinstance(message, ToolMessage) and message.tool_call_id == call_id
-            ),
-            None,
-        )
-        if answer is None or not isinstance(messages, list):
-            return command
-
-        async def answered(_request: ToolCallRequest) -> ToolMessage:
-            return answer
-
-        checked = await self._checked(request, answered, errors=None)
-        if checked is answer or not isinstance(checked, ToolMessage):
-            return command
-        return replace(
-            command,
-            update={**update, "messages": [checked if m is answer else m for m in messages]},
-        )
-
-    async def _run_on_backend(self, request: ToolCallRequest) -> Command:
-        call = request.tool_call
-        return await run_on_backend(self._backend, call["name"], call["args"], request.runtime)
 
     async def _within_deadline(
         self, request: ToolCallRequest, handler: Handler

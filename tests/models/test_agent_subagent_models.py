@@ -39,7 +39,7 @@ async def test_agent_subagent_uses_workspace_defaults_despite_profile_override()
         },
         "metadata": {},
     }
-    surface = ToolSurface(for_model=True)
+    surface = ToolSurface()
 
     with (
         patch(
@@ -93,7 +93,7 @@ async def test_agent_ignores_disabled_fable_profile() -> None:
         },
         "metadata": {},
     }
-    surface = ToolSurface(for_model=True)
+    surface = ToolSurface()
 
     with (
         patch(

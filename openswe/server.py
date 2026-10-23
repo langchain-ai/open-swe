@@ -38,10 +38,9 @@ from deepagents.backends.composite import CompositeBackend
 from deepagents.backends.filesystem import FilesystemBackend
 from deepagents.backends.protocol import BackendProtocol, SandboxBackendProtocol
 from deepagents.backends.store import StoreBackend
-from deepagents.middleware.filesystem import FilesystemMiddleware
 from deepagents.middleware.skills import SkillsMiddleware
 from deepagents.middleware.subagents import GENERAL_PURPOSE_SUBAGENT
-from langchain.agents.middleware import ModelCallLimitMiddleware, ToolRetryMiddleware
+from langchain.agents.middleware import ModelCallLimitMiddleware
 from langchain.agents.middleware.types import AgentMiddleware
 from langchain_anthropic.middleware import AnthropicPromptCachingMiddleware
 from langchain_core.language_models import BaseChatModel
@@ -95,9 +94,6 @@ from openswe.middleware import (
     ModelSelectionMiddleware,
     PullRequestCreationGuardMiddleware,
     RequireUserReplyMiddleware,
-    SubdirAgentsReadMiddleware,
-    ToolErrorMiddleware,
-    ValidateImageReadsMiddleware,
     WorkflowPushGuardMiddleware,
     WorkspaceSkillsMiddleware,
     check_message_queue_before_model,
@@ -105,8 +101,6 @@ from openswe.middleware import (
     notify_step_limit_reached,
     record_run_usage,
     refresh_github_proxy_before_model,
-    task_on_failure,
-    task_retry_on,
 )
 from openswe.middleware.client_tools import ClientToolsMiddleware
 from openswe.middleware.conversation_offloading import ConversationOffloadingMiddleware
@@ -1896,7 +1890,6 @@ async def plan_agent(config: RunnableConfig, surface: ToolSurface) -> None:
     middleware = cast(
         list[AgentMiddleware[Any, Any, Any]],
         [
-            FilesystemMiddleware(backend=agent_backend, offload_binary_content=True),
             AnthropicPromptCachingMiddleware(ttl="1h", unsupported_model_behavior="ignore"),
             ConversationOffloadingMiddleware(
                 main_model, agent_backend, manual=cfg.offload_conversation is True
@@ -1911,26 +1904,13 @@ async def plan_agent(config: RunnableConfig, surface: ToolSurface) -> None:
             *([client_tools] if client_tools else []),
             *([IncidentMiddleware(incident_session)] if incident_session is not None else []),
             skills_middleware,
-            ValidateImageReadsMiddleware(),
             ModelCallLimitMiddleware(
                 run_limit=incident_session.policy.max_model_calls
                 if incident_session is not None
                 else MODEL_CALL_RECURSION_LIMIT,
                 exit_behavior="end",
             ),
-            ToolErrorMiddleware(),
             ExcludeToolsMiddleware(excluded=excluded_tools),
-            SubdirAgentsReadMiddleware(),
-            ToolRetryMiddleware(
-                max_retries=2,
-                tools=["task"],
-                retry_on=task_retry_on,
-                on_failure=task_on_failure,
-                initial_delay=1.0,
-                max_delay=10.0,
-            ),
-            PullRequestCreationGuardMiddleware(),
-            WorkflowPushGuardMiddleware(),
             *([task_coordination] if task_coordination else []),
             *(
                 []
@@ -1965,6 +1945,10 @@ async def plan_agent(config: RunnableConfig, surface: ToolSurface) -> None:
     )
     surface.base_tools = main_tools
     surface.middleware = middleware
+    surface.files = agent_backend
+    surface.artifacts_root = artifacts_root
+    surface.shell_guards = [PullRequestCreationGuardMiddleware(), WorkflowPushGuardMiddleware()]
+    surface.file_checks = ("image_reads", "agents_md")
     surface.models = SurfaceModels(
         main=ModelChoice(model_id, dict(model_kwargs)),
         subagent=ModelChoice(

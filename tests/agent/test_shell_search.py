@@ -21,7 +21,7 @@ async def _planned(kind: str) -> ToolSurface:
         return planned
     module = reviewer if kind == "reviewer" else scout
     plan = reviewer.plan_reviewer if kind == "reviewer" else scout.plan_review_scout
-    surface = ToolSurface(for_model=True)
+    surface = ToolSurface()
     with patch.object(
         module, "cached_workspace_settings", AsyncMock(return_value=WorkspaceSettings({}))
     ):
@@ -41,14 +41,16 @@ async def test_shell_agent_planners_apply_shared_search_policy(
 
 
 @pytest.mark.parametrize("kind", _PLANNERS)
-async def test_a_planned_run_serves_its_tools_and_the_file_tools(
+async def test_a_planned_run_names_its_operations_and_where_its_files_are(
     kind: str, saved_thread_scope: dict[str, object]
 ) -> None:
     surface = await _planned(kind)
 
-    await surface.prepare({})
+    await surface.prepare()
 
-    assert {"ls", "read_file", "write_file", "edit_file", "execute"} <= surface.tools.keys()
+    # The file and shell tools are MDA's own; the backend serves the thread's files.
+    assert surface.files is not None
+    assert not {"ls", "read_file", "write_file", "edit_file", "execute"} & surface.tools.keys()
     assert {
         getattr(tool, "name", getattr(tool, "__name__", "")) for tool in surface.base_tools
     } <= (surface.tools.keys() | SHELL_SEARCH_EXCLUDED_TOOLS)

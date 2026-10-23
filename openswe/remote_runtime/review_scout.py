@@ -4,9 +4,9 @@ from typing import Final
 
 from langchain_core.runnables import RunnableConfig
 from pydantic import JsonValue, TypeAdapter
+from runtime_api.catalog import ModelSpec, RunModels
 
 from openswe.remote_runtime.graph import RemoteGraph
-from openswe.remote_runtime.runs import ModelSpec, RunModels
 from openswe.review_scout.graph import plan_review_scout, scout_models
 from openswe.run_config import RunConfig
 from openswe.sandboxes.tool_runtime import ModelChoice, ToolSurface

@@ -31,7 +31,6 @@ warnings.filterwarnings("ignore", module="langchain_core._api.deprecation")
 warnings.filterwarnings("ignore", message=".*Pydantic V1.*", category=UserWarning)
 
 from deepagents.backends.protocol import SandboxBackendProtocol
-from deepagents.middleware.filesystem import FilesystemMiddleware
 from deepagents.middleware.skills import SkillsMiddleware, SkillsState
 from langchain.agents.middleware import ModelCallLimitMiddleware, ModelRetryMiddleware
 from langchain.agents.middleware.types import AgentMiddleware
@@ -49,7 +48,6 @@ from openswe.middleware import (
     ExcludeToolsMiddleware,
     ModelErrorMiddleware,
     RepairOrphanedToolCallsMiddleware,
-    ToolErrorMiddleware,
     check_message_queue_before_model,
     refresh_github_proxy_before_model,
     settle_review_check_on_exit,
@@ -1052,7 +1050,6 @@ async def plan_reviewer(config: RunnableConfig, surface: ToolSurface) -> None:
     middleware = cast(
         list[AgentMiddleware[Any, Any, Any]],
         [
-            FilesystemMiddleware(backend=backend),
             PrepareReviewerRunMiddleware(
                 thread_id=thread_id,
                 config=config,
@@ -1060,7 +1057,6 @@ async def plan_reviewer(config: RunnableConfig, surface: ToolSurface) -> None:
             ),
             AnthropicPromptCachingMiddleware(ttl="1h", unsupported_model_behavior="ignore"),
             ModelCallLimitMiddleware(run_limit=MODEL_CALL_RECURSION_LIMIT, exit_behavior="end"),
-            ToolErrorMiddleware(),
             ExcludeToolsMiddleware(excluded=SHELL_SEARCH_EXCLUDED_TOOLS),
             refresh_github_proxy_before_model,
             check_message_queue_before_model,
@@ -1072,6 +1068,7 @@ async def plan_reviewer(config: RunnableConfig, surface: ToolSurface) -> None:
     )
     surface.base_tools = reviewer_tools()
     surface.middleware = middleware
+    surface.files = backend
     surface.excluded = SHELL_SEARCH_EXCLUDED_TOOLS
     surface.models = SurfaceModels(
         main=ModelChoice(models.main.model_id, dict(models.main.kwargs)),
