@@ -1,0 +1,7 @@
+Expose a port of the active LangSmith sandbox on the web and return a dashboard link that shows
+the app full-size, with a chat with this thread beside it. Prefer this over `expose_port` when
+sharing an app for a person to try or review, so they can ask you for changes while looking at it.
+`app_url` in the result is the bare service URL `expose_port` would return; use it for API clients
+and anything that is not a person in a browser.
+
+{% include "tools/service-url.md.jinja" %}

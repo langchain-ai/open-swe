@@ -112,7 +112,7 @@ async def mark_review_session_viewed(review: ReviewSession) -> None:
 async def get_promptable_thread_metadata(thread_id: str, login: str) -> Mapping[str, object]:
     """The metadata of a thread ``login`` may prompt, for opening its live capabilities.
 
-    A shell or a browser is a live capability into the owner's sandbox, so admins
+    A shell, a browser or a shared port is a live capability into the owner's sandbox, so admins
     who may view a private thread still cannot open one.
     """
     client = langgraph_client()
@@ -125,7 +125,7 @@ async def get_promptable_thread_metadata(thread_id: str, login: str) -> Mapping[
     return metadata
 
 
-async def get_dashboard_terminal_sandbox(
+async def get_dashboard_live_sandbox(
     thread_id: str, login: str, *, email: str | None = None
 ) -> tuple[str, str | None]:
     metadata = await get_promptable_thread_metadata(thread_id, login)

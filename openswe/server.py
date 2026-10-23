@@ -196,6 +196,7 @@ from openswe.tools import (
     monitor,
     open_pull_request,
     output_iframe,
+    preview_port,
     publish_workspace,
     read_only_sql,
     read_user_settings,
@@ -344,7 +345,8 @@ SOURCE_FREE_SLACK_TOOLS: frozenset[str] = frozenset({"slack_read_channel_message
 
 
 def _tool_description_values() -> dict[str, dict[str, object]]:
-    return {"expose_port": {"jwks_url": service_identity_jwks_url(), "port": "<port>"}}
+    service_url = {"jwks_url": service_identity_jwks_url(), "port": "<port>"}
+    return {"expose_port": service_url, "preview_port": service_url}
 
 
 def warm_agent_build() -> None:
@@ -546,6 +548,7 @@ INCIDENT_AUTOMATIC_EXCLUDED_TOOLS: frozenset[str] = frozenset(
         "background_task",
         "monitor",
         "expose_port",
+        "preview_port",
         "http_request",
         "expedite_pr_approval",
         "merge_expedited_pr",
@@ -1636,7 +1639,12 @@ async def plan_agent(config: RunnableConfig, surface: ToolSurface) -> None:
         open_pull_request,
         link_pull_request,
         *(
-            (output_iframe, create_sandbox_file_download_url, expose_port)
+            (
+                output_iframe,
+                create_sandbox_file_download_url,
+                expose_port,
+                *((preview_port,) if dashboard_base_url() else ()),
+            )
             if sandbox_file_downloads
             else ()
         ),
