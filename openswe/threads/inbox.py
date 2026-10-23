@@ -169,8 +169,16 @@ class ThreadInbox:
         """Everything owed besides ``delivered``, the event ids the thread already holds."""
         taken = Taken()
         if self.events and postgres.configured():
-            owed = await TaskMessage.owed_besides(self.thread_id, delivered)
-            taken.messages.extend(TaskMessage.messages(owed))
+            try:
+                owed = await TaskMessage.owed_besides(self.thread_id, delivered)
+            except Exception:
+                logger.warning(
+                    "Loading owed task messages failed",
+                    extra={"agent_thread_id": self.thread_id},
+                    exc_info=True,
+                )
+            else:
+                taken.messages.extend(TaskMessage.messages(owed))
         try:
             await self._read_follow_ups(taken, surface)
         except Exception:

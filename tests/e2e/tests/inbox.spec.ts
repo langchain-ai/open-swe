@@ -1,4 +1,4 @@
-import { test, expect, type APIResponse, type Page } from "@playwright/test";
+import { test, expect, type APIResponse } from "@playwright/test";
 
 import {
   SAME_USER,
