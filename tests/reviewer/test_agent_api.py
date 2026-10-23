@@ -270,7 +270,7 @@ def test_run_token_signed_with_a_rotated_out_key_still_verifies(
             jwt.encode(
                 {
                     "iss": "open-swe",
-                    "aud": "open-swe-agent-api",
+                    "aud": "open-swe-remote-runtime",
                     "iat": 0,
                     "exp": 1,
                     "sub": "thread-1",
@@ -286,7 +286,7 @@ def test_run_token_signed_with_a_rotated_out_key_still_verifies(
             jwt.encode(
                 {
                     "iss": "open-swe",
-                    "aud": "open-swe-agent-api",
+                    "aud": "open-swe-remote-runtime",
                     "iat": int(time.time()),
                     "exp": int(time.time()) + 60,
                     "sub": "thread-1",
