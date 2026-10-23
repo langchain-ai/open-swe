@@ -54,7 +54,7 @@ from rt.backend import (
     PhaseReply,
 )
 from rt.file_tools import FileToolsMiddleware
-from rt.middleware import BackendRunMiddleware, RunState
+from rt.middleware import BackendRunMiddleware, RunState, RuntimeToolsMiddleware
 from rt.model_calls import model_call_guards
 from rt.tools import operation_tool
 from rt.tracing import TurnTrace
@@ -1247,3 +1247,68 @@ async def test_mda_does_not_retry_tool_pairing_errors(
         with pytest.raises(type(error)) as caught:
             await middleware.awrap_model_call(request, handler)
         assert caught.value is error
+
+
+async def test_backend_calls_carry_the_running_spans_trace_without_its_metadata(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Every hook the turn calls, tool reports answered after their call closed included,
+    names a span of the turn's trace, so the backend's spans nest in it."""
+    monkeypatch.setenv("OPEN_SWE_BACKEND_URL", "https://backend.invalid")
+    monkeypatch.setattr("rt.middleware.run_id", lambda: "run-1")
+    request = httpx2.Request("POST", "https://backend.invalid")
+    sent: dict[str, Mapping[str, str]] = {}
+
+    async def post(url: str, *, headers: Mapping[str, str], **kwargs: object) -> httpx2.Response:
+        sent[url.rsplit("/", 1)[-1]] = headers
+        return httpx2.Response(200, request=request, json={})
+
+    client = MagicMock(is_closed=False)
+    client.post = post
+    monkeypatch.setattr("rt.backend.httpx2.AsyncClient", lambda **kwargs: client)
+    monkeypatch.setattr(GenericFakeChatModel, "bind_tools", lambda self, *args, **kwargs: self)
+    backend = OpenSweBackend("secret-token")
+
+    @tool
+    async def look() -> str:
+        """Look around."""
+        return "seen"
+
+    # One list of differently-stated middleware, as the runtime assembles it.
+    middleware = cast(
+        "list[AgentMiddleware]",
+        [
+            BackendRunMiddleware(backend, "turn"),
+            RuntimeToolsMiddleware(backend, reported_elsewhere=()),
+        ],
+    )
+    graph = create_agent(
+        model=GenericFakeChatModel(
+            messages=iter(
+                [
+                    AIMessage(content="", tool_calls=[ToolCall(name="look", args={}, id="call-1")]),
+                    AIMessage(content="done"),
+                ]
+            )
+        ),
+        tools=[look],
+        middleware=middleware,
+    )
+    traced = MagicMock(spec=Client)
+    collector = RunCollectorCallbackHandler()
+    with tracing_context(enabled=True):
+        await graph.ainvoke(
+            {"messages": [("user", "hello")]},
+            {
+                "callbacks": [LangChainTracer(client=traced, project_name="turns"), collector],
+                "metadata": {"invocation_id": "turn", "secret_ish": "x" * 10_000},
+            },
+        )
+    [turn] = [run for run in collector.traced_runs if run.name == "LangGraph"]
+    assert {"before_model", "tool_started", "tool_result", "after_agent"} <= sent.keys()
+    for hook, headers in sent.items():
+        assert headers["Authorization"] == "Bearer secret-token", hook
+        root, _, span = headers["langsmith-trace"].partition(".")
+        assert root.endswith(str(turn.id)) and span, hook
+        assert "langsmith-project=turns" in headers["baggage"], hook
+        assert "metadata" not in headers["baggage"], hook

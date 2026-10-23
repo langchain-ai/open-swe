@@ -20,10 +20,6 @@ permissions:
   issues: write
   pull-requests: write
 
-concurrency:
-  group: build-preview-branch
-  cancel-in-progress: false
-
 jobs:
   build:
     name: Rebuild preview from main and labeled PRs
@@ -32,6 +28,11 @@ jobs:
       || contains(github.event.pull_request.labels.*.name, 'preview')
       || github.event.label.name == 'preview'
     runs-on: ubuntu-latest
+    # Only the build: a deploy in flight must not hold back the next tree, which
+    # supersedes it (deploy_preview.py stops waiting once the branch moves).
+    concurrency:
+      group: build-preview-branch
+      cancel-in-progress: false
     outputs:
       changed: ${{ steps.assemble.outputs.changed }}
       sha: ${{ steps.assemble.outputs.sha }}
@@ -94,6 +95,7 @@ jobs:
           sparse-checkout: scripts
       - uses: astral-sh/setup-uv@20cfd1bf945f4377ade1205e4dbc17946fc9a30d # v10.0.1
       - name: Roll out the preview revision
+        id: rollout
         env:
           DEPLOYMENT_ID: ${{ vars.PREVIEW_DEPLOYMENT_ID }}
           EXPECTED_SHA: ${{ needs.build.outputs.sha }}
@@ -103,6 +105,7 @@ jobs:
       # The Managed Deep Agents runtime the preview backend calls (open-swe-mda-preview),
       # from the same tree. Last: `mda deploy` runs the tree's code, labeled PRs included.
       - uses: actions/checkout@v7.0.1
+        if: steps.rollout.outputs.superseded != 'true'
         with:
           ref: ${{ needs.build.outputs.sha }}
           path: preview-tree
@@ -110,6 +113,7 @@ jobs:
           persist-credentials: false
       - name: Check whether the MDA preview is behind
         id: mda-changed
+        if: steps.rollout.outputs.superseded != 'true'
         working-directory: preview-tree
         run: |
           if [[ -f mda/agent.py ]] && ! git diff --quiet refs/tags/mda-deployed/preview HEAD -- mda packages/runtime-api vendor/managed-deepagents-sdk .github/workflows/build_preview_branch.yml; then
