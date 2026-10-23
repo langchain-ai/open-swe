@@ -3,13 +3,29 @@
 import hashlib
 import logging
 from collections.abc import Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import datetime
 from typing import Literal
 from uuid import UUID, uuid7
 
 from pydantic import ValidationError
-from sqlalchemy import ColumnElement, ForeignKey, Text, cast, delete, func, or_, select, update
+from sqlalchemy import (
+    ColumnElement,
+    ForeignKey,
+    Numeric,
+    SQLColumnExpression,
+    String,
+    Text,
+    case,
+    cast,
+    delete,
+    func,
+    literal,
+    or_,
+    select,
+    tuple_,
+    update,
+)
 from sqlalchemy.dialects.postgresql import ARRAY, JSONB, aggregate_order_by, array, insert
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -413,6 +429,97 @@ class PluginDocument:
     updated_at: datetime | None
 
 
+JsonScalar = str | int | float | bool | None
+
+
+@dataclass(frozen=True, slots=True)
+class Cursor:
+    """Where a query's range starts or ends: a key, or a field's value and a key that breaks ties."""
+
+    value: JsonScalar
+    key: str | None = None
+    inclusive: bool = True
+
+
+@dataclass(frozen=True, slots=True)
+class DocumentQuery:
+    """
+    Which documents to read and in what order: by key, or by one field and then key.
+
+    Keys compare byte by byte. A field orders like Firebase's: missing or null,
+    then false and true, numbers, strings byte by byte, and objects and arrays
+    last. Cursors follow the direction: in descending order ``start`` is the
+    highest.
+    """
+
+    where: JsonObject = field(default_factory=dict)
+    order_by: tuple[str, ...] = ()
+    descending: bool = False
+    prefix: str | None = None
+    start: Cursor | None = None
+    end: Cursor | None = None
+    limit: int = 200
+
+    def _sort(self) -> tuple[SQLColumnExpression[object], ...]:
+        key = PluginDocumentRow.key.collate("C")
+        if not self.order_by:
+            return (key,)
+        value = PluginDocumentRow.document[self.order_by]
+        kind = func.jsonb_typeof(value)
+        return (
+            case(
+                (kind == "boolean", 1),
+                (kind == "number", 2),
+                (kind == "string", 3),
+                (kind.in_(["object", "array"]), 4),
+                else_=0,
+            ),
+            func.coalesce(case((kind == "number", cast(value.astext, Numeric))), 0),
+            func.coalesce(case((kind.in_(["boolean", "string"]), value.astext)), "").collate("C"),
+            key,
+        )
+
+    def _position(self, cursor: Cursor) -> tuple[SQLColumnExpression[object], ...]:
+        if not self.order_by:
+            return (literal(cursor.value, String),)
+        match cursor.value:
+            case None:
+                rank, number, text = 0, 0, ""
+            case bool():
+                rank, number, text = 1, 0, "true" if cursor.value else "false"
+            case int() | float():
+                rank, number, text = 2, cursor.value, ""
+            case str():
+                rank, number, text = 3, 0, cursor.value
+        position = [literal(rank), literal(number, Numeric), literal(text, String)]
+        if cursor.key is not None:
+            position.append(literal(cursor.key, String))
+        return tuple(position)
+
+    def _bound(self, cursor: Cursor, *, start: bool) -> ColumnElement[bool]:
+        position = self._position(cursor)
+        here = tuple_(*self._sort()[: len(position)])
+        there = tuple_(*position)
+        if start != self.descending:
+            return here >= there if cursor.inclusive else here > there
+        return here <= there if cursor.inclusive else here < there
+
+    def clauses(self) -> list[ColumnElement[bool]]:
+        clauses: list[ColumnElement[bool]] = []
+        if self.where:
+            clauses.append(PluginDocumentRow.document.contains(self.where))
+        if self.prefix:
+            clauses.append(PluginDocumentRow.key.startswith(self.prefix, autoescape=True))
+        if self.start is not None:
+            clauses.append(self._bound(self.start, start=True))
+        if self.end is not None:
+            clauses.append(self._bound(self.end, start=False))
+        return clauses
+
+    def order(self) -> list[SQLColumnExpression[object]]:
+        return [column.desc() if self.descending else column.asc() for column in self._sort()]
+
+
 class PluginDocuments:
     """One plugin's documents, the same for every installation of it."""
 
@@ -441,15 +548,14 @@ class PluginDocuments:
         return None if row is None else PluginDocument(row.key, row.document, row.updated_at)
 
     async def query(
-        self, collection: str, scope: DocumentScope, where: JsonObject, *, limit: int
+        self, collection: str, scope: DocumentScope, query: DocumentQuery
     ) -> list[PluginDocument]:
-        """Documents whose fields include every field of ``where``, oldest first."""
         async with postgres.session() as session:
             rows = await session.scalars(
                 select(PluginDocumentRow)
-                .where(*self._where(collection, scope), PluginDocumentRow.document.contains(where))
-                .order_by(PluginDocumentRow.created_at)
-                .limit(limit)
+                .where(*self._where(collection, scope), *query.clauses())
+                .order_by(*query.order())
+                .limit(query.limit)
             )
             return [PluginDocument(row.key, row.document, row.updated_at) for row in rows]
 

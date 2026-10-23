@@ -151,7 +151,7 @@ export const hostReady = connect() // resolves once the port and context arrive
 - the web UI's `theme` (`"light"` or `"dark"`);
 - the plugin's own `path` after its web UI URL.
 
-`host.on(listener)` receives events: `theme`, `path`, `storage.changed` and the room events.
+`host.on(listener)` receives `theme` and `path` events. Storage changes come through each collection's [`watch`](#changes), and room events through the room's handlers.
 
 ### React
 
@@ -206,7 +206,7 @@ The frame can't load remote images, so the web UI fetches each picture and hands
 
 ### Storage
 
-Documents are JSON objects in named collections. Open a collection in one of two scopes:
+Storage works like Firebase: named collections of JSON documents, ordered by key, that you can read in order and in ranges, and watch for changes. Open a collection in one of two scopes:
 
 - **Private to the person**, when no `repository` is given.
 - **Shared per repository**: everyone using the plugin who has shared that repository and can read it.
@@ -218,24 +218,53 @@ interface Comment {
   body: string
   status: "open" | "resolved"
   parent: string | null
+  createdAt: string
 }
 
 const comments = host.storage.collection<`c-${string}`, Comment>("comments", { repository: "acme/app" })
 
-await comments.put("c-1", { body: "Looks good", status: "open", parent: null })
-const one = await comments.get("c-1")                                    // { key, document, updatedAt } | null
-const open = await comments.query({ where: { status: "open" }, limit: 50 }) // oldest first
+await comments.put("c-1", { body: "Looks good", status: "open", parent: null, createdAt: new Date().toISOString() })
+const one = await comments.get("c-1") // { key, document, updatedAt } | null
 await comments.delete("c-1")
-
-const stop = comments.watch(() => refetch()) // anyone's write to this collection, in this scope
 ```
 
 The SDK trusts these types; nothing checks documents at runtime. Validate what you read if older versions of your plugin may have written it.
 
+#### Queries
+
+`query` returns documents in order, by key unless you pass `orderBy`:
+
+```ts
+await comments.query({ prefix: "c-", limit: 50 })                    // by key
+await comments.query({ startAt: "c-100", endBefore: "c-200" })       // a key range
+await comments.query({ where: { status: "open" }, orderBy: "createdAt", direction: "desc", limit: 20 })
+
+// The next page starts after the last document of this one, ties included.
+const page = await comments.query({ orderBy: "createdAt", limit: 20 })
+const next = await comments.query({ orderBy: "createdAt", limit: 20, startAfter: page.at(-1) })
+```
+
+- **Key order:** keys compare character by character, so `"B"` comes before `"a"`. Keys that sort by time, such as ISO timestamps or zero-padded counters, keep a collection in insertion order.
+- **`orderBy`:** a dotted path to a field holding a string, number, boolean or `null` (`"createdAt"`, `"meta.rank"`). The types offer only those paths. Documents come by that field, then by key. Values order like Firebase: missing or `null`, `false`, `true`, numbers, then strings character by character.
+- **Bounds:** `startAt` or `startAfter`, and `endAt` or `endBefore`, take a key, or with `orderBy` a value of that field, or a document you read, which stands for its value and then its key. They follow `direction`, so in descending order `startAt` is the highest.
+- **`where`:** a document matches when it contains every field of `where`, nested objects included.
+- **`prefix`:** only documents whose key starts with it.
+- **`limit`:** 1 to 500, 200 by default. With `direction: "desc"`, it takes the last ones.
+
+#### Changes
+
+`watch` calls you whenever anyone writes or deletes a document in the collection, in this scope. It says only that something changed, so read again what you show:
+
+```ts
+const stop = comments.watch(() => queryClient.invalidateQueries({ queryKey: ["comments"] }))
+stop() // when you no longer show them
+```
+
+#### Limits
+
 - **Collection names:** a lowercase letter, then up to 63 more lowercase letters, digits, `_` or `-`.
 - **Keys:** up to 200 of `A–Z a–z 0–9 . _ : @ / -`, with no empty, `.` or `..` path segment.
 - **Size:** a document is at most 256 KB as JSON.
-- **Queries:** a document matches when it contains every field of `where` (nested objects included), and `limit` is 1–500 (200 by default).
 
 Data belongs to the plugin's source, its repository and directory. Updating keeps it. A plugin with the same name installed from another source never sees it.
 

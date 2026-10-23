@@ -100,4 +100,45 @@ describe("documents over Cap'n Web", () => {
       plain: 3,
     })
   })
+
+  it("page after a document by its field's value and its key", async () => {
+    const fetch = vi.fn(
+      async () =>
+        new Response("[]", {
+          status: 200,
+          headers: { "Content-Type": "application/json" },
+        })
+    )
+    vi.stubGlobal("fetch", fetch)
+    const { port1, port2 } = new MessageChannel()
+    using session = newMessagePortRpcSession(port1, hostApi())
+    void session
+    const remote = newMessagePortRpcSession<HostApi>(port2)
+    const tasks = new Collection<string, { at: { rank: number } }>(
+      remote.collection("tasks", {}) as unknown as RpcStub<CollectionApi>,
+      "tasks",
+      {}
+    )
+    const last = { key: "t-7", document: { at: { rank: 3 } }, updatedAt: null }
+
+    await tasks.query({
+      orderBy: "at.rank",
+      direction: "desc",
+      startAfter: last,
+    })
+    await tasks.query({ prefix: "t-", endBefore: last })
+
+    const bodies = fetch.mock.calls.map(
+      (call: unknown[]) =>
+        JSON.parse(String((call[1] as RequestInit).body)) as object
+    )
+    expect(bodies).toMatchObject([
+      {
+        order_by: "at.rank",
+        direction: "desc",
+        start: { value: 3, key: "t-7", inclusive: false },
+      },
+      { prefix: "t-", end: { value: "t-7", inclusive: false } },
+    ])
+  })
 })

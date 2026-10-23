@@ -8,14 +8,17 @@
 import type {
   CollectionApi,
   CommitWire,
+  CursorWire,
   DocumentScope,
   GitHubRepositoryApi,
   HostApi,
   HostContext,
   HostEvent,
   JsonObject,
+  JsonScalar,
   JsonValue,
   PullRequestDraft,
+  QueryWire,
   RepositoryPickOptions,
   RoomApi,
   RoomEvent,
@@ -223,6 +226,30 @@ function pathName(
 
 const COLLECTION = /^[a-z][a-z0-9_-]{0,63}$/
 const DOCUMENT_KEY = /^[A-Za-z0-9._:@/-]{1,200}$/
+const FIELD_PATH = /^[A-Za-z0-9_-]{1,64}(\.[A-Za-z0-9_-]{1,64}){0,7}$/
+
+function cursor(value: unknown, name: string): CursorWire | undefined {
+  if (value === undefined) return undefined
+  const fields = record(value, name)
+  const at: unknown = fields.value
+  if (
+    !(at === null || typeof at === "boolean" || typeof at === "string") &&
+    !(typeof at === "number" && Number.isFinite(at))
+  )
+    invalid(`${name}.value must be a JSON string, number, boolean or null`)
+  if (typeof at === "string" && at.length > 4_000)
+    invalid(`${name}.value is too long`)
+  if (typeof fields.inclusive !== "boolean")
+    invalid(`${name}.inclusive must be a boolean`)
+  return {
+    value: at as JsonScalar,
+    key:
+      fields.key === undefined
+        ? undefined
+        : pathName(fields.key, `${name}.key`, DOCUMENT_KEY),
+    inclusive: fields.inclusive,
+  }
+}
 const ROOM = /^[A-Za-z0-9._:@/-]{1,200}$/
 const REPOSITORY = /^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/
 
@@ -666,12 +693,15 @@ class CollectionTarget extends RpcTarget implements CollectionApi {
     })
   }
 
-  query(options: {
-    where?: string
-    limit?: number
-  }): Promise<Array<StoredJson>> {
+  query(query: QueryWire): Promise<Array<StoredJson>> {
     return this.#budget.run(async () => {
-      const fields = options === undefined ? {} : record(options, "options")
+      const fields = query === undefined ? {} : record(query, "query")
+      if (
+        fields.direction !== undefined &&
+        fields.direction !== "asc" &&
+        fields.direction !== "desc"
+      )
+        invalid('direction must be "asc" or "desc"')
       const found = await pluginsApi.queryDocuments(
         this.#host().plugin.id,
         this.#target.collection,
@@ -681,6 +711,14 @@ class CollectionTarget extends RpcTarget implements CollectionApi {
             fields.where === undefined
               ? {}
               : jsonText(fields.where, "where", 64_000),
+          order_by:
+            fields.orderBy === undefined
+              ? undefined
+              : pathName(fields.orderBy, "orderBy", FIELD_PATH, 600),
+          direction: fields.direction,
+          prefix: optionalText(fields.prefix, "prefix", 200),
+          start: cursor(fields.start, "start"),
+          end: cursor(fields.end, "end"),
           limit: optionalInteger(fields.limit, "limit"),
         }
       )

@@ -134,7 +134,8 @@ export function useComments(repository: string, path: string) {
   const comments = commentsIn(usePluginHost(), repository)
   return useQuery({
     queryKey: keys.comments(repository, path),
-    queryFn: () => comments.query({ where: { path }, limit: 500 }),
+    queryFn: () =>
+      comments.query({ where: { path }, orderBy: "createdAt", limit: 500 }),
   })
 }
 

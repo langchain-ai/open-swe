@@ -195,6 +195,95 @@ export interface StoredJson {
   updatedAt: string | null
 }
 
+/** A JSON value a query can order documents by. */
+export type JsonScalar = string | number | boolean | null
+
+type Present<T> = Exclude<T, undefined>
+
+/** The dotted paths to the fields of `V` that hold a `JsonScalar`: what a query can order by. */
+export type FieldPath<V> = {
+  [P in keyof V & string]-?: Present<V[P]> extends JsonScalar
+    ? P
+    : Exclude<V[P], undefined | null> extends readonly unknown[]
+      ? never
+      : Exclude<V[P], undefined | null> extends object
+        ? `${P}.${FieldPath<Exclude<V[P], undefined | null>>}`
+        : never
+}[keyof V & string]
+
+/** The type of the field at path `P` in `V`. */
+export type FieldValue<
+  V,
+  P extends string,
+> = P extends `${infer Head}.${infer Rest}`
+  ? Head extends keyof V
+    ? FieldValue<Exclude<V[Head], undefined | null>, Rest>
+    : never
+  : P extends keyof V
+    ? Present<V[P]>
+    : never
+
+/**
+ * A position in a query's order: a key, or with `orderBy` a value of that
+ * field, or a document read earlier, which stands for its value and then its
+ * key, so paging past ties loses nothing.
+ */
+export type QueryBound<
+  V extends JsonDocument<V>,
+  K extends string,
+  P extends FieldPath<V> | undefined,
+> =
+  | (P extends string ? FieldValue<V, P> & JsonScalar : K)
+  | StoredDocument<V, K>
+
+/**
+ * What to read from a collection and in what order. Without `orderBy`,
+ * documents come by key; keys compare character by character, so `"B"` comes
+ * before `"a"`. With it, they come by that field and then by key, ordered like
+ * Firebase: missing or `null`, `false`, `true`, numbers, then strings.
+ * The bounds follow `direction`: in descending order, `startAt` is the highest.
+ * Pass at most one of `startAt` and `startAfter`, and of `endAt` and `endBefore`.
+ */
+export interface QueryOptions<
+  V extends JsonDocument<V>,
+  K extends string,
+  P extends FieldPath<V> | undefined = undefined,
+> {
+  /** Only documents that contain every one of these fields, nested objects included. */
+  where?: Partial<V>
+  orderBy?: P
+  direction?: "asc" | "desc"
+  /** Only documents whose key starts with this. */
+  prefix?: string
+  startAt?: QueryBound<V, K, P>
+  startAfter?: QueryBound<V, K, P>
+  endAt?: QueryBound<V, K, P>
+  endBefore?: QueryBound<V, K, P>
+  /** 1 to 500; 200 by default. */
+  limit?: number
+}
+
+/** Where a query's range starts or ends, as it crosses the wire. */
+export interface CursorWire {
+  /** The key, or with `orderBy` the field's value. */
+  value: JsonScalar
+  /** With `orderBy`, the key that breaks ties at `value`. */
+  key?: string
+  inclusive: boolean
+}
+
+export interface QueryWire {
+  /** JSON text of the fields every document contains. */
+  where?: string
+  /** A dotted field path; omitted orders by key. */
+  orderBy?: string
+  direction?: "asc" | "desc"
+  prefix?: string
+  start?: CursorWire
+  end?: CursorWire
+  limit?: number
+}
+
 export interface PullRequestDraft {
   head: string
   base: string
@@ -262,8 +351,8 @@ export interface HostApi extends RpcTarget {
 /** One collection of JSON documents in one scope. */
 export interface CollectionApi extends RpcTarget {
   get(key: string): Promise<StoredJson | null>
-  /** Documents that contain every field of `where` (JSON text), oldest first. */
-  query(options: { where?: string; limit?: number }): Promise<StoredJson[]>
+  /** The documents `query` selects, in its order. */
+  query(query: QueryWire): Promise<StoredJson[]>
   /** Stores `json`, the text of a JSON object. */
   put(key: string, json: string): Promise<StoredJson>
   delete(key: string): Promise<void>

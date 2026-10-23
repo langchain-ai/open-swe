@@ -11,6 +11,8 @@ from openswe.plugins import installed as installed_module
 from openswe.plugins.installed import InstalledPlugin, PluginPermissionDenied, RepositoryNotGranted
 from openswe.plugins.manifest import PluginManifest, PluginPermission
 from openswe.plugins.records import (
+    Cursor,
+    DocumentQuery,
     DocumentScope,
     Installation,
     PluginDocuments,
@@ -72,9 +74,51 @@ async def test_documents_stay_in_their_plugin_and_scope() -> None:
     assert await other.get("comments", shared, "c1") is None
     assert await docs.get("comments", DocumentScope(repository="acme/web"), "c1") is None
     assert await docs.get("notes", DocumentScope(user_id=bob), "n1") is None
-    assert [d.key for d in await docs.query("comments", shared, {"body": "shared"}, limit=10)] == [
-        "c1"
+    assert [
+        d.key for d in await docs.query("comments", shared, DocumentQuery(where={"body": "shared"}))
+    ] == ["c1"]
+
+
+async def test_documents_come_back_ordered_and_bounded() -> None:
+    ada = await _person("ada", "1")
+    installation = await PluginInstallations.install(_package("acme/docs"), user_id=ada, by=ada)
+    docs = PluginDocuments((await PluginInstallations.get(installation, ada)).plugin)
+    mine = DocumentScope(user_id=ada)
+    for key, document in {
+        "t-b": {"at": {"rank": 10}},
+        "t-a": {"at": {"rank": 10}},
+        "t-Z": {"at": {"rank": 2}},
+        "t-c": {"at": {"rank": "first"}},
+        "t-d": {"at": {"rank": True}},
+        "t-e": {"at": {}},
+        "u-a": {"at": {"rank": 1}},
+    }.items():
+        await docs.put("tasks", mine, key, document, by=ada)
+
+    async def keys(query: DocumentQuery) -> list[str]:
+        return [d.key for d in await docs.query("tasks", mine, query)]
+
+    # Keys compare byte by byte, so uppercase sorts before lowercase.
+    assert await keys(DocumentQuery(prefix="t-")) == ["t-Z", "t-a", "t-b", "t-c", "t-d", "t-e"]
+    assert await keys(DocumentQuery(start=Cursor("t-a", inclusive=False), end=Cursor("t-d"))) == [
+        "t-b",
+        "t-c",
+        "t-d",
     ]
+    # Missing first, then booleans, numbers by value (2 before 10) and strings; ties by key.
+    by_rank = DocumentQuery(prefix="t-", order_by=("at", "rank"))
+    assert await keys(by_rank) == ["t-e", "t-d", "t-Z", "t-a", "t-b", "t-c"]
+    # Paging resumes after the last document seen, ties included, in either direction.
+    page = DocumentQuery(prefix="t-", order_by=("at", "rank"), limit=4)
+    assert await keys(page) == ["t-e", "t-d", "t-Z", "t-a"]
+    resumed = DocumentQuery(
+        prefix="t-", order_by=("at", "rank"), start=Cursor(10, "t-a", inclusive=False)
+    )
+    assert await keys(resumed) == ["t-b", "t-c"]
+    newest = DocumentQuery(
+        prefix="t-", order_by=("at", "rank"), descending=True, start=Cursor(10), end=Cursor(2)
+    )
+    assert await keys(newest) == ["t-b", "t-a", "t-Z"]
 
 
 async def test_a_name_installed_for_everyone_wins_and_cannot_be_installed_twice() -> None:

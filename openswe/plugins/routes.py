@@ -20,7 +20,16 @@ from uuid import UUID
 import httpx2
 from fastapi import APIRouter, Depends, HTTPException, Query
 from fastapi.responses import Response, StreamingResponse
-from pydantic import BaseModel, Field, StringConstraints
+from pydantic import (
+    BaseModel,
+    Field,
+    StrictBool,
+    StrictFloat,
+    StrictInt,
+    StrictStr,
+    StringConstraints,
+    model_validator,
+)
 
 from openswe.audit_logs.middleware import audit_endpoint
 from openswe.dashboard.deps import SESSION_DEP, session_is_admin
@@ -35,6 +44,8 @@ from openswe.plugins.installed import (
 )
 from openswe.plugins.manifest import PluginManifest, PluginPermission
 from openswe.plugins.records import (
+    Cursor,
+    DocumentQuery,
     Installation,
     InstallationNotFound,
     PluginDocument,
@@ -56,6 +67,9 @@ MAX_THREADS_LISTED = 50
 
 CollectionName = Annotated[str, StringConstraints(pattern=r"^[a-z][a-z0-9_-]{0,63}$")]
 DocumentKey = Annotated[str, StringConstraints(pattern=r"^[A-Za-z0-9._:@/-]{1,200}$")]
+FieldPath = Annotated[
+    str, StringConstraints(pattern=r"^[A-Za-z0-9_-]{1,64}(\.[A-Za-z0-9_-]{1,64}){0,7}$")
+]
 
 
 @contextmanager
@@ -333,10 +347,47 @@ class DocumentModel(BaseModel):
         return cls(key=document.key, document=document.document, updated_at=document.updated_at)
 
 
-class DocumentQuery(BaseModel):
+class CursorModel(BaseModel):
+    """A key, or with ``order_by`` the field's value and optionally the key that breaks ties."""
+
+    value: StrictStr | StrictInt | StrictFloat | StrictBool | None
+    key: DocumentKey | None = None
+    inclusive: bool = True
+
+    def cursor(self) -> Cursor:
+        return Cursor(self.value, self.key, self.inclusive)
+
+
+class DocumentQueryBody(BaseModel):
     repository: str | None = None
     where: JsonObject = Field(default_factory=dict)
+    order_by: FieldPath | None = Field(
+        None, description="A dotted field path; omitted orders by key."
+    )
+    direction: Literal["asc", "desc"] = "asc"
+    prefix: Annotated[str, StringConstraints(max_length=200)] | None = None
+    start: CursorModel | None = None
+    end: CursorModel | None = None
     limit: int = Field(200, ge=1, le=500)
+
+    @model_validator(mode="after")
+    def _cursors_fit_the_order(self) -> DocumentQueryBody:
+        if self.order_by is None:
+            for cursor in (self.start, self.end):
+                if cursor is not None and (not isinstance(cursor.value, str) or cursor.key):
+                    raise ValueError("in key order a cursor's value is a key, with no separate key")
+        return self
+
+    def query(self) -> DocumentQuery:
+        return DocumentQuery(
+            where=self.where,
+            order_by=tuple(self.order_by.split(".")) if self.order_by else (),
+            descending=self.direction == "desc",
+            prefix=self.prefix,
+            start=self.start.cursor() if self.start else None,
+            end=self.end.cursor() if self.end else None,
+            limit=self.limit,
+        )
 
 
 class DocumentWrite(BaseModel):
@@ -346,11 +397,11 @@ class DocumentWrite(BaseModel):
 
 @router.post("/{installation_id}/documents/{collection}/query")
 async def api_query_plugin_documents(
-    collection: CollectionName, body: DocumentQuery, plugin: PluginDep
+    collection: CollectionName, body: DocumentQueryBody, plugin: PluginDep
 ) -> list[DocumentModel]:
     with _as_http():
         scope = await plugin.document_scope(body.repository)
-        found = await plugin.documents.query(collection, scope, body.where, limit=body.limit)
+        found = await plugin.documents.query(collection, scope, body.query())
     return [DocumentModel.of(document) for document in found]
 
 

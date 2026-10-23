@@ -8,14 +8,19 @@ import {
   RUNTIME_GLOBAL,
   type CollectionApi,
   type CommitRequest,
+  type CursorWire,
   type DocumentScope,
+  type FieldPath,
   type GitHubRepositoryApi,
   type HostApi,
   type HostContext,
   type HostEvent,
   type JsonDocument,
+  type JsonScalar,
   type Person,
   type PullRequestDraft,
+  type QueryBound,
+  type QueryOptions,
   type RepositoryPickOptions,
   type RoomApi,
   type RoomEvent,
@@ -229,16 +234,38 @@ export class Collection<K extends string, V extends JsonDocument<V>> {
     return found && this.#fromWire(found)
   }
 
-  /** Documents whose fields include every field of `where`, oldest first; at most `limit` (500). */
-  async query(
-    options: { where?: Partial<V>; limit?: number } = {}
+  /**
+   * Documents in order, by key or by the field `orderBy` names, within the
+   * bounds given; see `QueryOptions`. To page, start after the last document
+   * of the page before.
+   */
+  async query<P extends FieldPath<V> | undefined = undefined>(
+    options: QueryOptions<V, K, P> = {}
   ): Promise<StoredDocument<V, K>[]> {
+    const { where, orderBy, startAt, startAfter, endAt, endBefore } = options
+    if (startAt !== undefined && startAfter !== undefined)
+      throw new TypeError("pass startAt or startAfter, not both")
+    if (endAt !== undefined && endBefore !== undefined)
+      throw new TypeError("pass endAt or endBefore, not both")
+    const cursor = (
+      bound: QueryBound<V, K, P> | undefined,
+      inclusive: boolean
+    ): CursorWire | undefined => {
+      if (bound === undefined) return undefined
+      if (typeof bound !== "object" || bound === null)
+        return { value: bound, inclusive }
+      return orderBy === undefined
+        ? { value: bound.key, inclusive }
+        : { value: fieldAt(bound.document, orderBy), key: bound.key, inclusive }
+    }
     const found = await settle(
       this.stub.query({
-        where:
-          options.where === undefined
-            ? undefined
-            : JSON.stringify(options.where),
+        where: where === undefined ? undefined : JSON.stringify(where),
+        orderBy,
+        direction: options.direction,
+        prefix: options.prefix,
+        start: cursor(startAt ?? startAfter, startAfter === undefined),
+        end: cursor(endAt ?? endBefore, endBefore === undefined),
         limit: options.limit,
       })
     )
@@ -267,6 +294,20 @@ export class Collection<K extends string, V extends JsonDocument<V>> {
     const subscription = this.stub.watch(() => onChange())
     return () => subscription[Symbol.dispose]()
   }
+}
+
+/** The scalar at a dotted path in a document; `null` when it is missing or not a scalar. */
+function fieldAt(document: object, path: string): JsonScalar {
+  let value: unknown = document
+  for (const name of path.split(".")) {
+    if (!value || typeof value !== "object" || !Object.hasOwn(value, name))
+      return null
+    value = (value as Record<string, unknown>)[name]
+  }
+  return value === null ||
+    ["string", "number", "boolean"].includes(typeof value)
+    ? (value as JsonScalar)
+    : null
 }
 
 /** One repository the person shared, acting with their own GitHub access. */

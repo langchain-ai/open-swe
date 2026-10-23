@@ -1,6 +1,7 @@
 import type {
   AgentThread,
   Commit,
+  CursorWire,
   JsonObject,
   PluginPermission,
   PullRequest,
@@ -255,7 +256,16 @@ export const pluginsApi = {
   queryDocuments: async (
     id: string,
     collection: string,
-    body: { repository?: string; where?: JsonObject; limit?: number }
+    body: {
+      repository?: string
+      where?: JsonObject
+      order_by?: string
+      direction?: "asc" | "desc"
+      prefix?: string
+      start?: CursorWire
+      end?: CursorWire
+      limit?: number
+    }
   ) =>
     (
       await agentsRequest<Array<DocumentWire>>(

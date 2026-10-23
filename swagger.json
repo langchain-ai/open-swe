@@ -1845,6 +1845,53 @@
         ],
         "type": "string"
       },
+      "CursorModel": {
+        "description": "A key, or with ``order_by`` the field's value and optionally the key that breaks ties.",
+        "properties": {
+          "inclusive": {
+            "default": true,
+            "title": "Inclusive",
+            "type": "boolean"
+          },
+          "key": {
+            "anyOf": [
+              {
+                "pattern": "^[A-Za-z0-9._:@/-]{1,200}$",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Key"
+          },
+          "value": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "integer"
+              },
+              {
+                "type": "number"
+              },
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Value"
+          }
+        },
+        "required": [
+          "value"
+        ],
+        "title": "CursorModel",
+        "type": "object"
+      },
       "CustomToolCallItem": {
         "properties": {
           "call_id": {
@@ -1952,14 +1999,58 @@
         "title": "DocumentModel",
         "type": "object"
       },
-      "DocumentQuery": {
+      "DocumentQueryBody": {
         "properties": {
+          "direction": {
+            "default": "asc",
+            "enum": [
+              "asc",
+              "desc"
+            ],
+            "title": "Direction",
+            "type": "string"
+          },
+          "end": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/CursorModel"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
           "limit": {
             "default": 200,
             "maximum": 500.0,
             "minimum": 1.0,
             "title": "Limit",
             "type": "integer"
+          },
+          "order_by": {
+            "anyOf": [
+              {
+                "pattern": "^[A-Za-z0-9_-]{1,64}(\\.[A-Za-z0-9_-]{1,64}){0,7}$",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "A dotted field path; omitted orders by key.",
+            "title": "Order By"
+          },
+          "prefix": {
+            "anyOf": [
+              {
+                "maxLength": 200,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Prefix"
           },
           "repository": {
             "anyOf": [
@@ -1972,11 +2063,21 @@
             ],
             "title": "Repository"
           },
+          "start": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/CursorModel"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
           "where": {
             "$ref": "#/components/schemas/JsonObject-Input"
           }
         },
-        "title": "DocumentQuery",
+        "title": "DocumentQueryBody",
         "type": "object"
       },
       "DocumentWrite": {
@@ -13981,7 +14082,7 @@
           "content": {
             "application/json": {
               "schema": {
-                "$ref": "#/components/schemas/DocumentQuery"
+                "$ref": "#/components/schemas/DocumentQueryBody"
               }
             }
           },
