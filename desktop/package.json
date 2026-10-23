@@ -106,7 +106,7 @@
   "homepage": "https://github.com/langchain-ai/open-swe",
   "devDependencies": {
     "@types/node": "26.6.3",
-    "electron": "44.5.0",
+    "electron": "44.9.1",
     "electron-builder": "26.15.3",
     "typescript": "7.0.2"
   },
