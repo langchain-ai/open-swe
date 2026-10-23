@@ -52,6 +52,7 @@ from openswe.middleware import (
     settle_review_check_on_exit,
 )
 from openswe.middleware.prepare_run import PrepareRunState
+from openswe.middleware.require_user_reply import WEB_REPLY_SURFACE
 from openswe.middleware.sandbox_circuit_breaker import post_sandbox_unreachable_notification
 from openswe.prompts import apply_tool_descriptions, prompt
 from openswe.review.approvals import approval_policy_for_review
@@ -1067,7 +1068,7 @@ async def plan_reviewer(config: RunnableConfig, surface: ToolSurface) -> None:
     )
     surface.base_tools = reviewer_tools()
     surface.middleware = middleware
-    surface.inbox = ThreadInbox(thread_id, events=False)
+    surface.inbox = ThreadInbox(thread_id, events=False, surface=WEB_REPLY_SURFACE)
     surface.files = backend
     surface.excluded = SHELL_SEARCH_EXCLUDED_TOOLS
     surface.models = SurfaceModels(

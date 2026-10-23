@@ -1,5 +1,5 @@
 from typing import Any
-from unittest.mock import patch
+from unittest.mock import AsyncMock, patch
 
 import pytest
 
@@ -22,7 +22,7 @@ async def _read(surface: ReplySurface = "web") -> Taken:
         "openswe.threads.inbox.get_config",
         return_value={"configurable": {"thread_id": "thread-1"}},
     ):
-        return await ThreadInbox("thread-1", events=False).read([], surface)
+        return await ThreadInbox("thread-1", events=False, surface=surface).read("run-1")
 
 
 @pytest.mark.asyncio
@@ -93,7 +93,40 @@ async def test_inbox_receives_only_the_follow_ups_it_read(
         taken = await _read()
 
     assert "first" in _envelope(taken.messages[-1])
-    await ThreadInbox("thread-1", events=False).receive(taken.queued)
+    await ThreadInbox("thread-1", events=False, surface="web").receive(taken.queued)
     assert [message.content for message in await QueuedMessage.for_thread("thread-1")] == [
         {"text": "queued during the image fetch"}
     ]
+
+
+@pytest.mark.asyncio
+async def test_a_run_holds_the_events_it_was_started_with_once_prepared(
+    registry_db: None, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from runtime_api.loop import Prepare
+
+    from openswe.agent_api.graph import RunSession
+    from openswe.database import postgres
+    from openswe.sandboxes.tool_runtime import ToolSurface
+    from openswe.webhooks.event_matches import EventMatch
+
+    carried = EventMatch(
+        thread_id="thread-1", source="sandbox", delivery_id="m:1", content="ran", run_config={}
+    )
+    pending = EventMatch(
+        thread_id="thread-1", source="sandbox", delivery_id="m:2", content="ran", run_config={}
+    )
+    async with postgres.session() as session:
+        await carried.record(session)
+        await pending.record(session)
+    surface = ToolSurface(inbox=ThreadInbox("thread-1", events=True, surface="web"))
+    config = {
+        "configurable": {"thread_id": "thread-1"},
+        "metadata": {"event_match_ids": [str(carried.id)]},
+    }
+
+    # The thread has no box here; preparing would otherwise connect to it.
+    monkeypatch.setattr(RunSession, "bind_sandbox", AsyncMock())
+    await RunSession(surface, config, None, started_here=True).prepare(Prepare(run_id="run-1"))
+
+    assert [match.id for match in await EventMatch.owed("thread-1")] == [pending.id]

@@ -12,7 +12,7 @@ The model loop, its checkpoints and every tool call run here. The backend plans 
 - **Incident evidence:** in an incident run, each tool result is recorded as evidence the report can cite (`record_evidence`), and carries the id it was recorded under.
 - **Phases:** `BackendRunMiddleware` hands each phase of the loop to the graph's own middleware on the backend:
   - `prepare`: before the run (preparation, transcript turn, reply bookkeeping);
-  - `inbox`, before each model call: only what was sent to the thread while the run worked (queued follow-ups and notes, event matches, task messages). The run sends the ids of the event messages its conversation already holds, so none arrives twice, and keeps the conversation to itself. Reading takes nothing: once `before_model` lets the model call go ahead, `inbox_received` takes the follow-ups off the queue, and a run that phase ends leaves them for the next;
+  - `inbox`, before each model call: only what was sent to the thread while the run worked (queued follow-ups and notes, event matches, task messages). The request names only the run: the backend keeps what each thread is owed. Once `before_model` lets the model call go ahead, the run hands the items back through `inbox_received`, alongside the call as the transcript's reports go, and the next read waits for it; a run that phase ends leaves them owed. A run started to carry events receives them at `prepare`;
   - `before_model`: proxy refresh, task coordination, model routing, a requested conversation offload, plus the system prompt and model for the call;
   - `model_result` (`ReportRepliesMiddleware`): the transcript and usage see each response;
   - `after_model`: reply nudges, which can send the loop back to the model;

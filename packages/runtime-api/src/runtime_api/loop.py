@@ -6,11 +6,12 @@ and usage after it, reply nudges after the model, and the end-of-run work. Graph
 state those hooks write that the runtime does not know comes back in ``update``,
 and goes back with every later call in ``state``.
 
-Before each model call the runtime also takes the thread's inbox: what was sent
-to the thread while its run worked, and only that.
+Before each model call the runtime also reads the thread's inbox: what was sent
+to the thread while its run worked, and only that. The request names nothing but
+the run; the backend keeps what each thread is owed until a run receives it.
 """
 
-from typing import Final, Literal
+from uuid import UUID
 
 from pydantic import BaseModel, JsonValue
 
@@ -108,34 +109,26 @@ class BrowserReport(RunCall):
     opened: bool = True
 
 
-# Starts the id of every message that carries an event sent to the thread, such as
-# monitor output or a task report, whether the inbox or a run's input carried it.
-EVENT_MESSAGE_PREFIX: Final = "event-match:"
+class InboxItems(BaseModel):
+    """What an inbox reply carries: its queued follow-ups, its events and task messages."""
 
-
-class InboxRequest(RunRequest):
-    """What the conversation already holds, so the inbox sends nothing twice."""
-
-    # The ids of the conversation's messages that start with ``EVENT_MESSAGE_PREFIX``.
-    delivered: list[str] = []
-    # The surface the agent answers on, as the backend's state holds it: a person's
-    # follow-up from the dashboard moves it to the web.
-    reply_surface: Literal["slack", "web"] = "web"
+    queued: list[int] = []
+    events: list[UUID] = []
 
 
 class Inbox(BaseModel):
     """What was sent to the thread since the last model call, oldest first."""
 
     messages: list[dict[str, JsonValue]] = []
-    # Graph state taking them changed, such as the surface replies move to.
+    # Graph state taking them changes, such as the surface replies move to.
     update: dict[str, JsonValue] = {}
-    # The queued follow-ups among ``messages``: they stay queued until the run says,
-    # through ``inbox_received``, that its next model call answers them.
-    queued: list[int] = []
+    # Owed until the run hands them back through ``inbox_received``, once the model
+    # call it read them for goes ahead.
+    items: InboxItems = InboxItems()
 
 
 class InboxReceipt(RunRequest):
-    queued: list[int]
+    items: InboxItems
 
 
 class Done(BaseModel):
@@ -149,8 +142,8 @@ BEFORE_MODEL = Endpoint(
     "before_model", RunCall, BeforeModel, seconds=LOOP_CALL_SECONDS, delivery="unprocessed"
 )
 # Only reads, so it is safe to send again.
-INBOX = Endpoint("inbox", InboxRequest, Inbox, seconds=LOOP_CALL_SECONDS, delivery="idempotent")
-# Takes the follow-ups a model call will answer off the queue; removing them twice is a no-op.
+INBOX = Endpoint("inbox", RunRequest, Inbox, seconds=LOOP_CALL_SECONDS, delivery="idempotent")
+# What a model call will answer is owed no more; receiving it twice is a no-op.
 INBOX_RECEIVED = Endpoint(
     "inbox_received", InboxReceipt, Done, seconds=LOOP_CALL_SECONDS, delivery="idempotent"
 )

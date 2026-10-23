@@ -6,16 +6,17 @@ event matches and task messages. A run reads all of them before each model call,
 so the agent sees them without waiting for the run to end, and only they travel:
 the conversation stays with the run.
 
-Reading takes nothing. Follow-ups leave the queue once the run says the model call
-it read them for goes ahead (``receive``); a run that ends first leaves them for
-the run their pickup starts. Events and task messages count as delivered once the
-run's conversation holds them.
+Reading takes nothing, and asks the run for nothing but who it is: the backend
+keeps what each thread is owed. All of it stays owed until the run says the model
+call it read it for goes ahead (``receive``), so a run that ends first leaves it
+for the next. A run started to carry events receives them as it is prepared.
 """
 
 import logging
 from collections.abc import Collection
 from dataclasses import dataclass, field
 from typing import Any, cast
+from uuid import UUID
 
 import httpx2
 from langgraph.config import get_config
@@ -156,21 +157,28 @@ class Taken:
     reply_surface: ReplySurface | None = None
     # The queue entries the follow-ups among ``messages`` came from.
     queued: list[int] = field(default_factory=list)
+    # The event matches and task messages among ``messages``.
+    events: list[UUID] = field(default_factory=list)
 
 
 class ThreadInbox:
-    """One thread's inbox; ``events`` takes event matches and task messages besides follow-ups."""
+    """One thread's inbox; ``events`` takes event matches and task messages besides follow-ups.
 
-    def __init__(self, thread_id: str, *, events: bool) -> None:
+    ``surface`` is where the run starts answering: a run that starts on Slack is
+    told when a person's dashboard follow-up moves its answers to the web.
+    """
+
+    def __init__(self, thread_id: str, *, events: bool, surface: ReplySurface) -> None:
         self.thread_id = thread_id
         self.events = events
+        self.surface = surface
 
-    async def read(self, delivered: Collection[str], surface: ReplySurface) -> Taken:
-        """Everything owed besides ``delivered``, the event ids the thread already holds."""
+    async def read(self, run_id: str) -> Taken:
+        """Everything the thread is owed, for ``run_id``'s next model call."""
         taken = Taken()
         if self.events and postgres.configured():
             try:
-                owed = await TaskMessage.owed_besides(self.thread_id, delivered)
+                owed = await TaskMessage.owed(self.thread_id)
             except Exception:
                 logger.warning(
                     "Loading owed task messages failed",
@@ -179,15 +187,16 @@ class ThreadInbox:
                 )
             else:
                 taken.messages.extend(TaskMessage.messages(owed))
+                taken.events.extend(message.id for message in owed)
         try:
-            await self._read_follow_ups(taken, surface)
+            await self._read_follow_ups(taken, run_id)
         except Exception:
             logger.exception(
                 "Reading queued follow-ups failed", extra={"agent_thread_id": self.thread_id}
             )
         if self.events and postgres.configured():
             try:
-                matches = await EventMatch.owed_besides(self.thread_id, delivered)
+                matches = await EventMatch.owed(self.thread_id)
             except Exception:
                 logger.warning(
                     "Loading owed event matches failed",
@@ -196,14 +205,19 @@ class ThreadInbox:
                 )
             else:
                 taken.messages.extend(EventMatch.messages(matches))
+                taken.events.extend(match.id for match in matches)
         return taken
 
-    async def receive(self, queued: Collection[int]) -> None:
-        """Take the ``queued`` follow-ups off the queue: the run's next model call answers them."""
+    async def receive(self, queued: Collection[int] = (), events: Collection[UUID] = ()) -> None:
+        """A run holds ``queued`` follow-ups and ``events``: none is owed again."""
         await QueuedMessage.remove(self.thread_id, queued)
+        if events and postgres.configured():
+            await TaskMessage.received(self.thread_id, events)
+            await EventMatch.received(self.thread_id, events)
 
-    async def _read_follow_ups(self, taken: Taken, surface: ReplySurface) -> None:  # noqa: C901, PLR0912
+    async def _read_follow_ups(self, taken: Taken, run_id: str) -> None:  # noqa: C901, PLR0912
         """Follow-ups queued for the thread, oldest first."""
+        surface = self.surface
         queued_updates: list[dict[str, Any]] = []
         moved: ReplySurface | None = None
         content_blocks: list[dict[str, Any]] = []
@@ -244,29 +258,28 @@ class ThreadInbox:
                 _flush_blocks(queued_updates, content_blocks, injected)
                 # Only the move itself is worth announcing. Re-announcing it on
                 # every later web follow-up stacks identical handoff notices in
-                # the dashboard stream.
+                # the dashboard stream, so the run's notice keeps one id: a later
+                # batch's copy replaces it where it is.
                 if surface == SLACK_REPLY_SURFACE:
-                    queued_updates.extend(
-                        cast(
-                            list[dict[str, Any]],
-                            build_input_messages(
-                                DASHBOARD_HANDOFF_BODY,
-                                {
-                                    "sender_id": "system:dashboard-handoff",
-                                    "surface": "automation",
-                                    "kind": "system",
-                                },
-                                systems=[
-                                    {
-                                        "id": "system:dashboard-handoff",
-                                        "display_name": "Dashboard handoff",
-                                        "platform": "open-swe",
-                                    }
-                                ],
-                                injected_dynamic_context_hashes=injected,
-                            ),
-                        )
+                    handoff = build_input_messages(
+                        DASHBOARD_HANDOFF_BODY,
+                        {
+                            "sender_id": "system:dashboard-handoff",
+                            "surface": "automation",
+                            "kind": "system",
+                        },
+                        systems=[
+                            {
+                                "id": "system:dashboard-handoff",
+                                "display_name": "Dashboard handoff",
+                                "platform": "open-swe",
+                            }
+                        ],
+                        injected_dynamic_context_hashes=injected,
                     )
+                    for index, message in enumerate(handoff):
+                        message["id"] = f"dashboard-handoff:{run_id}:{index}"
+                    queued_updates.extend(cast(list[dict[str, Any]], handoff))
                 surface = moved = WEB_REPLY_SURFACE
             if isinstance(content, dict) and (
                 "text" in content or "image_urls" in content or "images" in content

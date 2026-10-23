@@ -1879,6 +1879,7 @@ async def plan_agent(config: RunnableConfig, surface: ToolSurface) -> None:
         for tool in static_tools
         if _registered_tool_name(tool) != _registered_tool_name(save_user_settings)
     ]
+    initial_surface = _initial_reply_surface(cfg) if reply_tool_offered else WEB_REPLY_SURFACE
     middleware = cast(
         list[AgentMiddleware[Any, Any, Any]],
         [
@@ -1911,9 +1912,7 @@ async def plan_agent(config: RunnableConfig, surface: ToolSurface) -> None:
             RequireUserReplyMiddleware(
                 _registered_tool_name(slack_reply),
                 _registered_tool_name(slack_no_reply_needed),
-                initial_surface=(
-                    _initial_reply_surface(cfg) if reply_tool_offered else WEB_REPLY_SURFACE
-                ),
+                initial_surface=initial_surface,
                 replies=GUIDE_REPLY_TOOLS if guide is not None else frozenset(),
             ),
             *(
@@ -1931,7 +1930,9 @@ async def plan_agent(config: RunnableConfig, surface: ToolSurface) -> None:
     )
     surface.base_tools = main_tools
     surface.middleware = middleware
-    surface.inbox = None if stop_summary_mode else ThreadInbox(thread_id, events=True)
+    surface.inbox = (
+        None if stop_summary_mode else ThreadInbox(thread_id, events=True, surface=initial_surface)
+    )
     surface.files = agent_backend
     surface.artifacts_root = artifacts_root
     surface.shell_guards = [PullRequestCreationGuardMiddleware(), WorkflowPushGuardMiddleware()]

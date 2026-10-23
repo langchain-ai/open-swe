@@ -64,26 +64,23 @@ from runtime_api.loop import (
     AFTER_AGENT,
     AFTER_MODEL,
     BEFORE_MODEL,
-    EVENT_MESSAGE_PREFIX,
     INBOX,
-    INBOX_RECEIVED,
     MODEL_RESULT,
     PREPARE,
     Inbox,
     InboxReceipt,
-    InboxRequest,
     ModelCall,
     ModelResult,
     PhaseResult,
     Prepare,
     RunCall,
 )
+from runtime_api.operations import RunRequest
 from runtime_api.workers import LAUNCH_WORKER, WORKER_LAUNCHED, Launch, Launched
 
 from rt.backend import (
     BackendCallError,
     OpenSweBackend,
-    held_state,
     reporting,
     run_call,
     subagent_of,
@@ -362,7 +359,7 @@ class BackendRunMiddleware(AgentMiddleware[RunState]):
 
     @hook_config(can_jump_to=["end"])
     async def abefore_model(self, state: RunState, runtime: Runtime) -> dict[str, object] | None:  # noqa: ARG002
-        inbox = await self._read_inbox(state)
+        inbox = await self._read_inbox()
         # The phase sees what the inbox brought, as the model will.
         with_inbox = {
             **state,
@@ -373,10 +370,9 @@ class BackendRunMiddleware(AgentMiddleware[RunState]):
         if planned.jump_to is not None:
             # No model call answers the inbox now: it stays for the run that comes next.
             return _apply(planned)
-        if inbox.queued:
-            await call(
-                self._backend, INBOX_RECEIVED, InboxReceipt(run_id=run_id(), queued=inbox.queued)
-            )
+        if inbox.items.queued or inbox.items.events:
+            # Alongside the call it is answered by, as the transcript's reports go.
+            self._backend.reports.received(InboxReceipt(run_id=run_id(), items=inbox.items))
         update = _apply(
             planned.model_copy(
                 update={
@@ -389,22 +385,10 @@ class BackendRunMiddleware(AgentMiddleware[RunState]):
             update["open_swe_call"] = planned.call.model_dump()
         return update
 
-    async def _read_inbox(self, state: RunState) -> Inbox:
+    async def _read_inbox(self) -> Inbox:
+        # After the last call's receipt, so nothing it received comes again.
         await self._backend.reports.drain()
-        surface = held_state(state).get("reply_surface")
-        return await call(
-            self._backend,
-            INBOX,
-            InboxRequest(
-                run_id=run_id(),
-                delivered=[
-                    message.id
-                    for message in state["messages"]
-                    if message.id and message.id.startswith(EVENT_MESSAGE_PREFIX)
-                ],
-                reply_surface="slack" if surface == "slack" else "web",
-            ),
-        )
+        return await call(self._backend, INBOX, RunRequest(run_id=run_id()))
 
     async def _phase[Call: RunCall, Result: PhaseResult](
         self, endpoint: Endpoint[Call, Result], request: Call

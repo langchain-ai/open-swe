@@ -6,6 +6,7 @@ from copy import deepcopy
 from datetime import UTC, datetime, timedelta
 from typing import Literal, Self, cast
 from unittest.mock import AsyncMock, MagicMock
+from uuid import UUID
 
 import anthropic
 import httpx
@@ -69,8 +70,8 @@ from runtime_api.loop import (
     AfterAgent,
     BeforeModel,
     Inbox,
+    InboxItems,
     InboxReceipt,
-    InboxRequest,
     ModelCall,
     PhaseResult,
     Prepare,
@@ -326,27 +327,30 @@ async def test_an_unreachable_backend_fails_the_run(
         await graph.ainvoke({"messages": [("user", "hello")]})
 
 
-async def test_what_the_inbox_brings_reaches_the_model_once(
+async def test_the_inbox_names_only_the_run_and_hands_back_what_the_model_answers(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     monkeypatch.setenv("OPEN_SWE_BACKEND_URL", "https://backend.invalid")
     monkeypatch.setattr("rt.middleware.run_id", lambda: "run-1")
     backend = OpenSweBackend("secret-token")
     report = HumanMessage(content="The worker finished", id="event-match:report-1")
-    taken: list[InboxRequest] = []
+    items = InboxItems(queued=[7], events=[UUID("0199a1b2-0000-7000-8000-000000000001")])
+    called: list[str] = []
+    reads: list[dict[str, JsonValue]] = []
     received: list[InboxReceipt] = []
     planned: list[RunCall] = []
 
     async def phase(name: str, body: dict[str, JsonValue]) -> BaseModel:
+        called.append(name)
         if name == "inbox":
-            taken.append(InboxRequest.model_validate(body))
-            if len(taken) > 1:
+            reads.append(body)
+            if received:
                 return Inbox()
             return Inbox.model_validate(
                 {
                     "messages": messages_to_dict([report]),
                     "update": {"reply_surface": "web"},
-                    "queued": [7],
+                    "items": items.model_dump(mode="json"),
                 }
             )
         if name == "inbox_received":
@@ -365,11 +369,13 @@ async def test_what_the_inbox_brings_reaches_the_model_once(
 
     result = await graph.ainvoke({"messages": [("user", "hello")]})
 
-    assert [request.delivered for request in taken] == [[], ["event-match:report-1"]]
+    assert reads == [{"run_id": "run-1"}, {"run_id": "run-1"}]
     assert messages_from_dict(planned[0].messages)[-1].id == "event-match:report-1"
     assert planned[0].state["reply_surface"] == "web"
     assert [message.id for message in result["messages"]].count("event-match:report-1") == 1
-    assert [receipt.queued for receipt in received] == [[7]]
+    assert [receipt.items for receipt in received] == [items]
+    # The next read waits for the receipt, so it cannot hand the same items back.
+    assert called.index("inbox_received") < len(called) - called[::-1].index("inbox") - 1
 
 
 async def test_a_run_the_phase_ends_leaves_the_inbox_queued(
@@ -385,7 +391,9 @@ async def test_a_run_the_phase_ends_leaves_the_inbox_queued(
     async def phase(name: str, body: dict[str, JsonValue]) -> BaseModel:
         called.append(name)
         if name == "inbox":
-            return Inbox.model_validate({"messages": messages_to_dict([follow_up]), "queued": [7]})
+            return Inbox.model_validate(
+                {"messages": messages_to_dict([follow_up]), "items": {"queued": [7]}}
+            )
         if name == "before_model":
             return BeforeModel(jump_to="end")
         return PhaseResult()

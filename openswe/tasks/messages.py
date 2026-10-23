@@ -1,4 +1,4 @@
-"""Durable task messages, retained until checkpointed by their recipient."""
+"""Durable task messages, retained until a run of their recipient receives them."""
 
 import logging
 from collections.abc import Collection, Sequence
@@ -6,9 +6,7 @@ from datetime import datetime, timedelta
 from typing import Literal, Self
 from uuid import NAMESPACE_URL, UUID, uuid5, uuid7
 
-from langgraph_sdk.client import LangGraphClient
 from pydantic import BaseModel, JsonValue, ValidationError
-from runtime_api.loop import EVENT_MESSAGE_PREFIX
 from sqlalchemy import ColumnElement, ForeignKey, delete, func, select, text, update
 from sqlalchemy.dialects.postgresql import JSONB, insert
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -18,10 +16,10 @@ from openswe.database import postgres
 from openswe.database.orm import NOW, Base
 from openswe.dispatch import create_durable_run, dispatch_client
 from openswe.input_messages import (
+    EVENT_MESSAGE_PREFIX,
     RunMessage,
     SystemIdentity,
     build_input_messages,
-    delivered_event_match_ids,
 )
 from openswe.tasks.presentation import TaskEventMetadata
 from openswe.tasks.store import TaskDelegation
@@ -35,14 +33,6 @@ _SYSTEM: SystemIdentity = {
     "display_name": "Task coordination",
     "platform": "open-swe",
 }
-
-
-class _ThreadValues(BaseModel):
-    messages: list[JsonValue] = []
-
-
-class _ThreadState(BaseModel):
-    values: _ThreadValues | None = None
 
 
 class _Thread(BaseModel):
@@ -86,29 +76,9 @@ class TaskMessage(Base):
         return recorded is not None
 
     @classmethod
-    async def owed(cls, thread_id: str, messages: Sequence[object]) -> list[Self]:
-        return await cls.owed_besides(thread_id, delivered_event_match_ids(messages))
-
-    @classmethod
-    async def owed_besides(cls, thread_id: str, message_ids: Collection[str]) -> list[Self]:
-        """Undelivered messages, oldest first, once ``message_ids``, which the thread holds, count as delivered."""
-        delivered: list[UUID] = []
-        for message_id in message_ids:
-            try:
-                delivered.append(UUID(message_id))
-            except ValueError:
-                logger.warning(
-                    "Ignoring a malformed delivered task-message id",
-                    extra={"agent_thread_id": thread_id, "message_id": message_id},
-                )
+    async def owed(cls, thread_id: str) -> list[Self]:
+        """Messages no run of the thread has received yet, oldest first."""
         async with postgres.session() as session:
-            await session.execute(
-                update(cls)
-                .where(
-                    cls.thread_id == thread_id, cls.id.in_(delivered), cls.delivered_at.is_(None)
-                )
-                .values(delivered_at=func.now())
-            )
             await session.execute(delete(cls).where(cls.delivered_at < func.now() - _RETAINED))
             return list(
                 await session.scalars(
@@ -116,6 +86,22 @@ class TaskMessage(Base):
                     .where(cls.thread_id == thread_id, cls.delivered_at.is_(None))
                     .order_by(cls.matched_at, cls.id)
                 )
+            )
+
+    @classmethod
+    async def received(cls, thread_id: str, message_ids: Collection[UUID]) -> None:
+        """A run of ``thread_id`` holds ``message_ids``: none is owed again."""
+        if not message_ids:
+            return
+        async with postgres.session() as session:
+            await session.execute(
+                update(cls)
+                .where(
+                    cls.thread_id == thread_id,
+                    cls.id.in_(list(message_ids)),
+                    cls.delivered_at.is_(None),
+                )
+                .values(delivered_at=func.now())
             )
 
     @classmethod
@@ -184,13 +170,8 @@ class TaskMessage(Base):
         return found is not None
 
     @classmethod
-    async def _owed_now(cls, client: LangGraphClient, thread_id: str) -> list[Self]:
-        state = _ThreadState.model_validate(await client.threads.get_state(thread_id))
-        return await cls.owed(thread_id, state.values.messages if state.values else [])
-
-    @classmethod
     async def awaiting_delivery(cls, thread_id: str, *, since: datetime | None) -> bool:
-        """Whether a message has yet to reach the thread's checkpoint.
+        """Whether a message has yet to reach a run of the thread.
 
         Only messages recorded after ``since`` count, when given. A message that ran out of
         delivery attempts awaits nothing.
@@ -203,7 +184,7 @@ class TaskMessage(Base):
         return any(
             message.delivery_attempts < _MAX_ATTEMPTS
             and (since is None or (message.matched_at is not None and message.matched_at >= since))
-            for message in await cls._owed_now(dispatch_client(), thread_id)
+            for message in await cls.owed(thread_id)
         )
 
     @classmethod
@@ -223,7 +204,7 @@ class TaskMessage(Base):
                 thread = _Thread.model_validate(await client.threads.get(thread_id))
                 if thread.status == "busy":
                     return False
-            owed = await cls._owed_now(client, thread_id)
+            owed = await cls.owed(thread_id)
             if all(message.delivery_attempts >= _MAX_ATTEMPTS for message in owed):
                 return False
             owed_ids = [message.id for message in owed]

@@ -440,12 +440,12 @@ async def control_release_inbox_gate() -> JSONResponse:
 
 @app.post("/control/monitors/sync")
 async def control_sync_monitors(thread_id: str) -> JSONResponse:
-    """Read the thread's monitors now, as the per-minute poll does, and count the events it holds."""
+    """Read the thread's monitors now, as the per-minute poll does, and count the events it is owed."""
     from openswe.monitors.delivery import poll_monitors
     from openswe.webhooks.event_matches import EventMatch
 
     await poll_monitors(thread_id)
-    return JSONResponse({"events": len(await EventMatch.owed(thread_id, []))})
+    return JSONResponse({"events": len(await EventMatch.owed(thread_id))})
 
 
 @app.post("/control/collaborator-permission")

@@ -780,7 +780,7 @@ async def test_queued_images_reach_vision_fallback_for_text_only_main_model(
         patch("openswe.threads.inbox.get_config", return_value=config),
         patch("openswe.threads.inbox.fetch_image_block", return_value=image),
     ):
-        taken = await surface.inbox.read([], "web")
+        taken = await surface.inbox.read("run-1")
     messages = convert_to_messages(taken.messages)
     content = messages[-1].content
     assert isinstance(content, list) and image in content
