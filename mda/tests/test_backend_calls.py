@@ -1,4 +1,5 @@
 import asyncio
+import json
 from collections.abc import Mapping, Sequence
 from contextlib import closing
 from copy import deepcopy
@@ -340,6 +341,57 @@ async def test_the_model_the_backend_names_gets_a_replayable_history(
     assert [m.content for m in named.sent if isinstance(m, AIMessage)] == [
         [{"type": "text", "text": "hello"}]
     ]
+
+
+class _PayloadAnthropic(ChatAnthropic):
+    payloads: list[dict[str, object]] = []
+
+    async def _agenerate(
+        self,
+        messages: list[BaseMessage],
+        stop: list[str] | None = None,
+        run_manager: AsyncCallbackManagerForLLMRun | None = None,
+        **kwargs: object,
+    ) -> ChatResult:
+        self.payloads.append(self._get_request_payload(messages, stop=stop, **kwargs))
+        return ChatResult(generations=[ChatGeneration(message=AIMessage(content="done"))])
+
+
+async def test_the_anthropic_model_the_backend_names_caches_for_an_hour(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("OPEN_SWE_BACKEND_URL", "https://backend.invalid")
+    monkeypatch.setattr("rt.middleware.run_id", lambda: "run-1")
+    named = _PayloadAnthropic(model_name="claude-opus-5-5", api_key="test-key", payloads=[])
+    monkeypatch.setattr("rt.middleware.build_model", lambda spec, use_gateway: named)
+    backend = OpenSweBackend("secret-token")
+
+    async def phase(name: str, body: object) -> PhaseReply:
+        if name != "before_model":
+            return PhaseReply()
+        return PhaseReply(
+            system_prompt="You are Open SWE.",
+            model=ModelSpec(model_id="anthropic:claude-opus-5-5", kwargs={}),
+        )
+
+    monkeypatch.setattr(backend, "phase", phase)
+    # deepagents installs its own 5m cache; the guards' must take its place.
+    middleware = cast(
+        list[AgentMiddleware],
+        [BackendRunMiddleware(backend, "invocation-1"), *model_call_guards()],
+    )
+    graph = create_deep_agent(model=FakeListChatModel(responses=["unused"]), middleware=middleware)
+
+    await graph.ainvoke({"messages": [HumanMessage("hi")]})
+
+    [payload] = named.payloads
+    hour = {"type": "ephemeral", "ttl": "1h"}
+    system = cast(list[dict[str, object]], payload["system"])
+    tools = cast(list[dict[str, object]], payload["tools"])
+    assert system[-1]["cache_control"] == hour
+    assert tools[-1]["cache_control"] == hour
+    assert payload["cache_control"] == hour
+    assert '"5m"' not in json.dumps(payload)
 
 
 class _StalledAnthropic(ChatAnthropic):
