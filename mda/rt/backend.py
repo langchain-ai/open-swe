@@ -53,6 +53,8 @@ Hook = Literal[
     "sandbox",
     # A tool this runtime ran in the box found it gone: the backend tells the person.
     "sandbox_unreachable",
+    # A model call failed at its provider: the backend keeps why for the run's end.
+    "model_error",
     # The LangSmith browser MDA gave the thread's agent, for the dashboard to show.
     "browser",
     "launch_worker",
@@ -160,7 +162,6 @@ class PhaseReply(BaseModel):
     hidden_tools: list[str] = []
     model: ModelSpec | None = None
     vision: ModelSpec | None = None
-    fallback: ModelSpec | None = None
     use_gateway: bool = False
     trace_metadata: dict[str, JsonValue] = {}
 

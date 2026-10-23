@@ -270,7 +270,6 @@ async def _capture_create_deep_agent_kwargs(
             new_callable=AsyncMock,
             return_value=thread_settings or {},
         ),
-        patch("openswe.server.fallback_model_id_for", return_value=None),
         patch("openswe.server.make_model", side_effect=fake_make_model),
         patch("openswe.server.construct_system_prompt", return_value="prompt"),
         patch("openswe.server.create_deep_agent", side_effect=fake_create_deep_agent),
@@ -342,7 +341,6 @@ async def test_agent_starts_sandbox_while_loading_settings() -> None:
         patch("openswe.server._cached_profile", new_callable=AsyncMock, return_value=None),
         patch("openswe.server._mcp_tools_for", new_callable=AsyncMock, return_value=[]),
         patch("openswe.server.make_model", return_value=MagicMock()),
-        patch("openswe.server.fallback_model_id_for", return_value=None),
         patch("openswe.server.create_deep_agent", return_value=_DummyAgent()),
     ):
         agent_task = asyncio.create_task(get_agent(_base_config()))

@@ -264,3 +264,33 @@ async def test_completion_waits_for_running_background_tasks(monkeypatch, status
     monkeypatch.setattr(slack_thinking, "set_slack_thread_status", set_status)
     await completion.handle_run_completion({"thread_id": "t1", "run_id": "run-1", "status": status})
     assert set_status.await_args.args == ("C1", "123.45", "Waiting for background tasks…")
+
+
+@pytest.mark.asyncio
+async def test_provider_failure_reported_by_the_run_names_the_provider(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    metadata = _slack_metadata()
+    metadata["last_model_error"] = {
+        "run_id": "run-1",
+        "error_type": "APIStatusError",
+        "code": "provider_overloaded",
+        "model_id": "anthropic:claude-opus-5-5",
+    }
+    monkeypatch.setattr(completion, "langgraph_client", lambda: _FakeClient(metadata))
+    monkeypatch.setattr(completion, "get_langsmith_trace_url", AsyncMock(return_value=None))
+    reply = AsyncMock(return_value=True)
+    monkeypatch.setattr(completion, "post_slack_thread_reply", reply)
+
+    await completion.handle_run_completion(
+        {
+            "thread_id": "t1",
+            "run_id": "run-1",
+            "status": "error",
+            "error": {"error": "APIStatusError", "message": ""},
+        }
+    )
+
+    text = reply.await_args.args[2]
+    assert "Anthropic was overloaded" in text
+    assert "not with your task" in text

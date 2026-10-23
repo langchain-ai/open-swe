@@ -1,9 +1,9 @@
-"""What every model call here sends the provider, and how long it may take.
+"""What every model call here sends the provider, how long it may take, and why it failed.
 
 A thread's history is replayed to the provider on every call, and to whichever
-provider routing or the fallback picks, so a block one provider wrote can break
-every later call on another. A provider stall that never raises would park the
-run with nothing for the retry or the fallback to react to.
+provider routing picks, so a block one provider wrote can break every later call
+on another. A provider stall that never raises would park the run with nothing
+for the retry to react to.
 """
 
 import asyncio
@@ -38,6 +38,45 @@ class ModelCallTimeoutError(TimeoutError):
 
     The backend's run-complete webhook reads this class name as a provider timeout.
     """
+
+
+_FAILURE_CODES_BY_TYPE: Final = {
+    "RateLimitError": "provider_rate_limited",
+    "OverloadedError": "provider_overloaded",
+    "APIConnectionError": "provider_unavailable",
+    "APIError": "provider_unavailable",
+    "APIStatusError": "provider_unavailable",
+    "InternalServerError": "provider_unavailable",
+    "APITimeoutError": "provider_timeout",
+    "ModelCallTimeoutError": "provider_timeout",
+}
+
+
+def provider_failure_code(exc: BaseException) -> str | None:
+    """Why the provider failed a call, by its status and error body; None if not a provider failure.
+
+    Provider-agnostic on purpose: a gateway can surface an overload as anything
+    from a 529 to a bare ``APIError`` carrying ``overloaded_error`` in its body.
+    """
+    status = getattr(exc, "status_code", None)
+    body = getattr(exc, "body", None)
+    provider_code = ""
+    if isinstance(body, dict):
+        inner = body.get("error")
+        if isinstance(inner, dict):
+            provider_code = str(inner.get("type") or inner.get("code") or "")
+    haystack = f"{provider_code} {exc}".lower()
+    if status == 429 or "rate_limit" in haystack:
+        return "provider_rate_limited"
+    if status == 529 or "overloaded" in haystack:
+        return "provider_overloaded"
+    if "context_length_exceeded" in haystack or "prompt is too long" in haystack:
+        return "context_too_long"
+    if "model_not_available" in haystack or "model_not_found" in haystack:
+        return "model_unavailable"
+    if isinstance(status, int) and status >= 500:
+        return "provider_unavailable"
+    return _FAILURE_CODES_BY_TYPE.get(type(exc).__name__)
 
 
 def _chat_model(model: object) -> object:
@@ -163,8 +202,8 @@ class ModelCallTimeoutMiddleware(_ModelCallGuard):
 class SubagentTimeoutReplyMiddleware(_ModelCallGuard):
     """Answer with a subagent's timed-out model call instead of raising it.
 
-    A subagent has no fallback model, and its ``task`` call does not catch what it
-    raises, so a stall would end the run that delegated to it. As its answer, the
+    A subagent's ``task`` call does not catch what it raises, so a stall would end
+    the run that delegated to it. As its answer, the
     timeout goes back to that agent, which can try again or carry on.
     """
 
@@ -187,10 +226,10 @@ def model_call_guards(
 ) -> list[AgentMiddleware]:
     """Innermost around every model call, inside the middleware that picks its model.
 
-    They see the model the call really goes to, the fallback included. One deadline
-    covers the call and its retries. An agent's call that still fails raises, so the
-    fallback takes over and the run-complete webhook sees why; a subagent's that
-    times out becomes its answer.
+    They see the model the call really goes to. One deadline covers the call and its
+    retries. An agent's call that still fails raises and ends the run, which the
+    backend reports as the provider's failure; a subagent's that times out becomes
+    its answer.
     """
     return [
         *([SubagentTimeoutReplyMiddleware()] if subagent else []),

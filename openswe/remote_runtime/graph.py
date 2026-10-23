@@ -31,9 +31,9 @@ MDA does not know runs every call here, so new middleware reaches MDA runs as is
 A call made from inside a subagent names the namespace of its ``task`` calls, so
 its tool calls and replies land under the subagent, as they do in-process.
 
-The graph's model-call shaping (caching, retries, fallback, summarization, call
-limits, provider history fixes, the call deadline, and the swap to a vision model
-this graph names) is MDA's own. Graph state the hooks write that MDA
+The graph's model-call shaping (caching, retries, summarization, call limits,
+provider history fixes, the call deadline, and the swap to a vision model this
+graph names) is MDA's own. Graph state the hooks write that MDA
 does not know rides in the MDA run's state and comes back with every call.
 """
 
@@ -76,6 +76,7 @@ from openswe.dispatch import COMPLETION_WEBHOOK_URL
 from openswe.github.sandbox_access import READ_ONLY_REVIEW_PERMISSIONS
 from openswe.middleware.conversation_offloading import ConversationOffloadingMiddleware
 from openswe.middleware.dynamic_tools import DynamicToolMiddleware
+from openswe.middleware.model_errors import ModelError
 from openswe.middleware.model_selection import PersistedRoute, normalize_route
 from openswe.middleware.pr_creation_guard import PullRequestCreationGuardMiddleware
 from openswe.middleware.record_run_usage import RecordRunUsageMiddleware
@@ -116,7 +117,6 @@ from openswe.server import (
     DEEP_AGENT_TOOL_NAMES,
     code_only,
     direct_and_from_code,
-    fallback_model_choice,
 )
 from openswe.utils.model import provider_model_kwargs
 
@@ -709,6 +709,10 @@ class RemoteGraph:
         """Answer one call the MDA run makes around its model loop."""
         if hook == "call":
             return await self._call(run, CallBody.model_validate(raw))
+        if hook == "model_error":
+            # The run's model call failed at its provider; the run ends once this is kept.
+            await ModelError.model_validate(raw).record(run.thread_id)
+            return {}
         body = HookBody.model_validate(raw)
         if hook == "catalog":
             session = await self.session(run, body.run_id)
@@ -776,12 +780,10 @@ class RemoteGraph:
                 reply["update"][BASELINE] = None
             if phase == "before_model" and result.jump_to is None:
                 model = session.model_for(state)
-                fallback = fallback_model_choice(model.model_id)
                 vision = session.vision_for(model)
                 reply.update((await session.model_call(state, runtime)).model_dump())
                 reply["model"] = _model_spec(model).model_dump()
                 reply["vision"] = None if vision is None else _model_spec(vision).model_dump()
-                reply["fallback"] = None if fallback is None else _model_spec(fallback).model_dump()
                 reply["use_gateway"] = session.models.use_gateway
             await session.flush(runtime)
             return _json_object.validate_python(reply)

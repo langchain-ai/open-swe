@@ -8,7 +8,6 @@ import pytest
 from deepagents import create_deep_agent
 from deepagents.backends.state import StateBackend
 from langchain_anthropic import ChatAnthropic
-from langchain_core.language_models import BaseChatModel
 from langchain_core.messages import AIMessage, BaseMessage, HumanMessage, ToolMessage
 from langchain_core.outputs import ChatGeneration, ChatResult
 from langchain_core.tools import StructuredTool
@@ -48,7 +47,6 @@ class _Sent:
 class _Providers:
     """Answers every provider call offline and records the request it would have sent."""
 
-    failing: type[BaseChatModel] | None = None
     delegate: bool = False
     sent: list[_Sent] = field(default_factory=list)
 
@@ -67,8 +65,6 @@ class _Providers:
         payload = model._get_request_payload(messages, stop=stop, **kwargs)
         self.sent.append(_Sent(model_id, payload))
         loaded = any(isinstance(message, ToolMessage) for message in messages)
-        if loaded and self.failing is not None and isinstance(model, self.failing):
-            raise TimeoutError("provider unavailable")
         if self.delegate and len(self.sent) == 1:
             reply = AIMessage(
                 "",
@@ -165,7 +161,6 @@ def _openai_offer(payload: Mapping[str, object]) -> tuple[list[str], list[str]]:
 def provider_keys(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("ANTHROPIC_API_KEY", "test")
     monkeypatch.setenv("OPENAI_API_KEY", "test")
-    monkeypatch.delenv("LLM_FALLBACK_MODEL_ID", raising=False)
 
 
 async def test_a_routed_call_receives_loaded_tools_in_the_routed_models_format(
@@ -187,21 +182,6 @@ async def test_a_routed_call_receives_loaded_tools_in_the_routed_models_format(
     )
 
     assert [sent.model_id for sent in providers.sent] == [_GPT, _GPT]
-    in_tools, added = _openai_offer(providers.sent[-1].payload)
-    assert added == ["docs-search"]
-    assert "docs-search" not in in_tools
-
-
-async def test_a_fallback_attempt_receives_loaded_tools_in_the_fallback_models_format(
-    registry_db: None,
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    monkeypatch.setenv("LLM_FALLBACK_MODEL_ID", _GPT)
-    providers = _Providers(failing=ChatAnthropic)
-
-    await _run(providers, thread_settings={"model_id": _OPUS})
-
-    assert [sent.model_id for sent in providers.sent] == [_OPUS, _OPUS, _GPT]
     in_tools, added = _openai_offer(providers.sent[-1].payload)
     assert added == ["docs-search"]
     assert "docs-search" not in in_tools

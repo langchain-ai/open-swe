@@ -146,20 +146,6 @@ def make_model(model_id: str, *, use_gateway: bool | None = None, **kwargs: Unpa
     return init_chat_model(model=init_model_id, **cast(dict[str, Any], model_kwargs))
 
 
-def fallback_model_id_for(primary_model_id: str) -> str | None:
-    """Return the cross-provider fallback model id for a given primary, if any.
-
-    Anthropic primaries fall back to OpenAI and vice versa. Returns ``None``
-    when the provider has no configured cross-provider fallback (e.g. Google,
-    local, or self-hosted providers we don't want to silently route off-host).
-    """
-    if primary_model_id.startswith("anthropic:"):
-        return "openai:gpt-6.1-sol"
-    if primary_model_id.startswith("openai:"):
-        return "anthropic:claude-opus-5-5"
-    return None
-
-
 def model_request_defaults(model_id: str) -> ModelKwargs:
     if model_id == "google_genai:gemini-4-argon":
         return {"timeout": 900.0, "temperature": None}
