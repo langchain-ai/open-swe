@@ -3,7 +3,7 @@
 MDA makes the call; the backend says what goes in it. Middleware that adds a
 section to the system prompt, or keeps a tool from the call, says so through
 ``ashape_model_call``, from the run's state. The run's session folds what each
-says, in the graph's middleware order (``openswe.remote_runtime.graph``).
+says, in the graph's middleware order (``openswe.agent_api.graph``).
 """
 
 from collections.abc import Iterable, Mapping

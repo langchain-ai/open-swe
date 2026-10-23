@@ -144,6 +144,17 @@ from runtime_api.operations import (
     ToolEvidence,
 )
 
+from openswe.agent_api.failures import OperationFailure
+from openswe.agent_api.git_metadata import (
+    BASELINE,
+    OBSERVED_TOOLS,
+    TurnGitMetadata,
+    collect_pr_targets,
+)
+from openswe.agent_api.operations import Injections, invoke
+from openswe.agent_api.runs import in_graph_context, run_config
+from openswe.agent_api.shell_guards import ShellGuards
+from openswe.agent_api.tokens import RemoteRun
 from openswe.dashboard.options import model_supports_images
 from openswe.dispatch import COMPLETION_WEBHOOK_URL
 from openswe.github.sandbox_access import READ_ONLY_REVIEW_PERMISSIONS
@@ -158,17 +169,6 @@ from openswe.middleware.sandbox_circuit_breaker import post_sandbox_unreachable_
 from openswe.middleware.task_coordination import TaskCoordinationMiddleware
 from openswe.middleware.transcript import TranscriptMiddleware, within_namespace
 from openswe.prompts import common_prompt, prompt
-from openswe.remote_runtime.failures import OperationFailure
-from openswe.remote_runtime.git_metadata import (
-    BASELINE,
-    OBSERVED_TOOLS,
-    TurnGitMetadata,
-    collect_pr_targets,
-)
-from openswe.remote_runtime.operations import Injections, invoke
-from openswe.remote_runtime.runs import in_graph_context, run_config
-from openswe.remote_runtime.shell_guards import ShellGuards
-from openswe.remote_runtime.tokens import RemoteRun
 from openswe.run_config import RunConfig
 from openswe.runtime.constants import DEFAULT_LLM_MAX_TOKENS
 from openswe.sandboxes.browsers import ThreadBrowser

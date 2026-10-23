@@ -7,7 +7,7 @@ from langsmith.sandbox import (
     SandboxRetryableConnectionError,
 )
 
-from openswe.remote_runtime.failures import OperationFailure
+from openswe.agent_api.failures import OperationFailure
 
 _CONFIG = {"configurable": {"thread_id": "thread-1"}}
 
@@ -22,7 +22,7 @@ async def test_unreachable_sandbox_notifies_then_ends_the_run() -> None:
     """
     with (
         patch(
-            "openswe.remote_runtime.failures.post_sandbox_unreachable_notification",
+            "openswe.agent_api.failures.post_sandbox_unreachable_notification",
             new_callable=AsyncMock,
         ) as notify,
         patch(
@@ -47,7 +47,7 @@ async def test_transient_sandbox_error_keeps_the_sandbox_and_asks_for_a_retry() 
     the model is told to retry the call.
     """
     with patch(
-        "openswe.remote_runtime.failures.post_sandbox_unreachable_notification",
+        "openswe.agent_api.failures.post_sandbox_unreachable_notification",
         new_callable=AsyncMock,
     ) as notify:
         failure = await OperationFailure.of(
@@ -75,7 +75,7 @@ async def test_command_level_sandbox_error_does_not_end_the_run() -> None:
     would be both wrong and unrecoverable.
     """
     with patch(
-        "openswe.remote_runtime.failures.post_sandbox_unreachable_notification",
+        "openswe.agent_api.failures.post_sandbox_unreachable_notification",
         new_callable=AsyncMock,
     ) as notify:
         failure = await OperationFailure.of(
