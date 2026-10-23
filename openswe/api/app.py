@@ -169,10 +169,9 @@ def create_app() -> FastAPI:
     app.include_router(sandbox_tool_router)
     app.include_router(sandbox_openai_router)
     app.include_router(reviewer_eval_report_router)
-    # Routed at the exact path so no redirect sits between MDA and the agent API.
-    app.router.routes.append(
-        Route(agent_api_server.API_PATH, agent_api_server.API, methods=["POST"])
-    )
+    # Routed at the exact paths so no redirect sits between MDA and the agent API.
+    for path, agent_api in agent_api_server.ROUTES:
+        app.router.routes.append(Route(path, agent_api, methods=["POST"]))
     if AGENT_MCP is not None:
         app.state.fastmcp_server = AGENT_MCP.app.state.fastmcp_server
         app.router.routes.extend(AGENT_MCP.root_routes)

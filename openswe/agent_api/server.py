@@ -10,11 +10,15 @@ configuration from it, never from the body.
 
 An async subagent's first run carries a worker grant instead: it may read its
 coordinator's catalog and ``adopt`` a run token of its own, nothing else.
+
+Runs of earlier MDA revisions reach the same endpoints at the paths they were
+built for, as their contract names the calls (``openswe.agent_api.contracts``).
 """
 
 import logging
 from collections.abc import Awaitable, Callable, Iterator, Mapping
 from contextlib import contextmanager
+from functools import partial
 from typing import Final
 
 from langsmith import tracing_context
@@ -27,6 +31,7 @@ from starlette.requests import Request
 from starlette.responses import JSONResponse
 from starlette.types import ASGIApp, Receive, Scope, Send
 
+from openswe.agent_api import contracts
 from openswe.agent_api.tokens import (
     RemoteRun,
     RuntimeTokenError,
@@ -105,11 +110,12 @@ async def _answer(principal: RemoteRun | WorkerGrant, endpoint: str, body: JsonV
     return await graph(run, endpoint, body)
 
 
-async def api_endpoint(scope: Scope, receive: Receive, send: Send) -> None:
+async def api_endpoint(
+    scope: Scope, receive: Receive, send: Send, *, contract: contracts.Contract = contracts.CURRENT
+) -> None:
     from langgraph_api.logging import set_logging_context
 
     principal = _scope_principal(scope)
-    endpoint = scope["path_params"]["endpoint"]
     raw = await Request(scope, receive).body()
     try:
         body = _request_body.validate_json(raw) if raw.strip() else {}
@@ -118,6 +124,7 @@ async def api_endpoint(scope: Scope, receive: Receive, send: Send) -> None:
             scope, receive, send
         )
         return
+    endpoint, body = contract.request(scope["path_params"]["endpoint"], body)
     run = principal.coordinator if isinstance(principal, WorkerGrant) else principal
     context = {"thread_id": run.thread_id, "endpoint": endpoint}
     if isinstance(run_id := body.get("run_id"), str):
@@ -125,7 +132,7 @@ async def api_endpoint(scope: Scope, receive: Receive, send: Send) -> None:
     set_logging_context(context)
     try:
         with _traced_under_caller(scope):
-            result = await _answer(principal, endpoint, body)
+            result = contract.reply(endpoint, await _answer(principal, endpoint, body))
     except RefusedCallError as exc:
         await JSONResponse({"detail": str(exc)}, 403)(scope, receive, send)
         return
@@ -193,3 +200,12 @@ def _verify(token: str) -> RemoteRun | WorkerGrant:
 
 
 API: Final = RunTokenMiddleware(api_endpoint)
+# Each path the backend serves the agent API at, behind the run token.
+ROUTES: Final = (
+    (API_PATH, API),
+    (
+        contracts.REMOTE_RUNTIME_HOOKS_PATH,
+        RunTokenMiddleware(partial(api_endpoint, contract=contracts.REMOTE_RUNTIME_HOOKS)),
+    ),
+    (contracts.REMOTE_RUNTIME_API_PATH, API),
+)

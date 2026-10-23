@@ -753,6 +753,79 @@ async def test_a_worker_grant_reads_its_coordinators_catalog_and_adopts_nothing_
     assert status == 404
 
 
+async def test_a_run_of_an_mda_revision_before_the_agent_api_keeps_its_calls_answered(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import httpx
+    from runtime_api.endpoint import Handlers
+    from runtime_api.loop import BeforeModel, ModelCall
+    from runtime_api.workers import WORKER_LAUNCHED, Launched, Worker
+    from starlette.applications import Starlette
+    from starlette.routing import Route
+
+    from openswe.agent_api import async_workers, server
+
+    served: list[tuple[str, JsonValue]] = []
+
+    async def graph(run: RemoteRun, endpoint: str, body: JsonValue) -> JsonValue:
+        served.append((endpoint, body))
+        if endpoint == "before_model":
+            return BeforeModel(call=ModelCall(system_prompt="Be brief")).model_dump(mode="json")
+        return {}
+
+    async def launched(run: RemoteRun, body: Launched) -> Worker:
+        served.append(("worker_launched", body.worker_run_id))
+        return Worker(worker={"worker_thread_id": body.worker_thread_id})
+
+    runs = Handlers[RemoteRun]()
+    runs.serve(WORKER_LAUNCHED, launched)
+    monkeypatch.setattr(server, "_graphs", lambda: {"agent": graph})
+    monkeypatch.setattr(async_workers, "RUN_API", runs)
+    app = Starlette(routes=[Route(path, api, methods=["POST"]) for path, api in server.ROUTES])
+    token = sign_runtime_token(RemoteRun(thread_id="t", assistant_id="agent", configurable={}))
+    auth = {"Authorization": f"Bearer {token}"}
+
+    async with httpx.AsyncClient(
+        transport=httpx.ASGITransport(app=app), base_url="https://backend"
+    ) as client:
+        for path in ("/remote-runtime/hooks/before_model", "/remote-runtime/api/operation"):
+            assert (await client.post(path, json={})).status_code == 401
+            refused = await client.post(path, json={}, headers={"Authorization": "Bearer forged"})
+            assert refused.status_code == 401
+        assert served == []
+
+        old = await client.post("/remote-runtime/hooks/before_model", json={}, headers=auth)
+        new = await client.post("/agent-api/before_model", json={}, headers=auth)
+        replaced = await client.post("/remote-runtime/hooks/sandbox", json={}, headers=auth)
+        registered = await client.post(
+            "/remote-runtime/hooks/worker_launched",
+            json={
+                "tool_call_id": "call-1",
+                "instructions": "Fix it",
+                "worker_thread_id": "worker",
+                "run_id": "worker-run",
+            },
+            headers=auth,
+        )
+        operated = await client.post(
+            "/remote-runtime/api/operation", json={"name": "grep"}, headers=auth
+        )
+
+    assert old.json()["system_prompt"] == "Be brief"
+    assert "call" not in old.json()
+    assert new.json()["call"]["system_prompt"] == "Be brief"
+    assert replaced.status_code == registered.status_code == operated.status_code == 200
+    assert registered.json() == {"worker": {"worker_thread_id": "worker"}}
+    assert [endpoint for endpoint, _ in served] == [
+        "before_model",
+        "before_model",
+        "sandbox_replaced",
+        "worker_launched",
+        "operation",
+    ]
+    assert served[3] == ("worker_launched", "worker-run")
+
+
 async def test_only_a_body_unlike_its_request_is_refused_and_a_failure_inside_is_logged(
     monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
 ) -> None:
