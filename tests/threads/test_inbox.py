@@ -17,12 +17,12 @@ def _envelope(message: RunMessage) -> str:
     return "".join(block["text"] for block in content if block.get("type") == "text")
 
 
-async def _take(surface: ReplySurface = "web") -> Taken:
+async def _read(surface: ReplySurface = "web") -> Taken:
     with patch(
         "openswe.threads.inbox.get_config",
         return_value={"configurable": {"thread_id": "thread-1"}},
     ):
-        return await ThreadInbox("thread-1", events=False).take([], surface)
+        return await ThreadInbox("thread-1", events=False).read([], surface)
 
 
 @pytest.mark.asyncio
@@ -41,7 +41,7 @@ async def test_inbox_announces_the_move_to_web_only_once(registry_db: None) -> N
         },
     )
 
-    taken = await _take("web")
+    taken = await _read("web")
 
     envelopes = [_envelope(message) for message in taken.messages]
     assert not any("system:dashboard-handoff" in envelope for envelope in envelopes)
@@ -61,7 +61,7 @@ async def test_inbox_keeps_slack_for_a_message_relayed_by_another_thread(
         },
     )
 
-    taken = await _take("slack")
+    taken = await _read("slack")
 
     assert taken.reply_surface is None
     envelopes = "".join(_envelope(message) for message in taken.messages)
@@ -71,7 +71,7 @@ async def test_inbox_keeps_slack_for_a_message_relayed_by_another_thread(
 
 
 @pytest.mark.asyncio
-async def test_inbox_keeps_follow_ups_queued_while_it_builds(
+async def test_inbox_receives_only_the_follow_ups_it_read(
     registry_db: None,
 ) -> None:
     await QueuedMessage.put("thread-1", {"text": "first", "image_urls": ["https://img.test/a.png"]})
@@ -90,9 +90,10 @@ async def test_inbox_keeps_follow_ups_queued_while_it_builds(
             side_effect=build_and_queue,
         ),
     ):
-        taken = await _take()
+        taken = await _read()
 
     assert "first" in _envelope(taken.messages[-1])
+    await ThreadInbox("thread-1", events=False).receive(taken.queued)
     assert [message.content for message in await QueuedMessage.for_thread("thread-1")] == [
         {"text": "queued during the image fetch"}
     ]

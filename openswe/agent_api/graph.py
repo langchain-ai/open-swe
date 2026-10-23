@@ -9,7 +9,8 @@ served as the typed API both sides import (``runtime_api``):
 - ``prepare`` runs every ``before_agent`` hook: run preparation (the thread's
   sandbox, checkout and prompt), the transcript turn, skills, reply bookkeeping
 - ``inbox`` hands the run what was sent to its thread since the last model call:
-  queued follow-ups and notes, event matches and task messages (``ThreadInbox``)
+  queued follow-ups and notes, event matches and task messages (``ThreadInbox``);
+  ``inbox_received`` takes the follow-ups off the queue once the call goes ahead
 - ``before_model`` runs every ``before_model`` hook (proxy refresh, task
   coordination, model routing), then asks the graph's middleware what it adds to
   the call (``ShapesModelCalls``: sections of the system prompt, tools it keeps
@@ -115,6 +116,7 @@ from runtime_api.loop import (
     BROWSER,
     EVENT_MESSAGE_PREFIX,
     INBOX,
+    INBOX_RECEIVED,
     MODEL_RESULT,
     PREPARE,
     SANDBOX_REPLACED,
@@ -126,6 +128,7 @@ from runtime_api.loop import (
     BrowserReport,
     Done,
     Inbox,
+    InboxReceipt,
     InboxRequest,
     ModelCall,
     ModelResult,
@@ -767,16 +770,22 @@ class RunSession:
             if message_id.startswith(EVENT_MESSAGE_PREFIX)
         ]
 
-        async def take() -> Inbox:
-            taken = await inbox.take(delivered, request.reply_surface)
+        async def read() -> Inbox:
+            taken = await inbox.read(delivered, request.reply_surface)
             return Inbox(
                 messages=dump_messages(_as_messages(taken.messages)),
                 update={}
                 if taken.reply_surface is None
                 else {"reply_surface": taken.reply_surface},
+                queued=taken.queued,
             )
 
-        return await self.in_run("inbox", take)
+        return await self.in_run("inbox", read)
+
+    async def inbox_received(self, request: InboxReceipt) -> Done:
+        if self.surface.inbox is not None:
+            await self.surface.inbox.receive(request.queued)
+        return Done()
 
     async def after_model(self, request: RunCall) -> PhaseResult:
         return await self._answer_phase("after_model", request, _as_is)
@@ -1182,6 +1191,7 @@ API: Final = Handlers[RunSession]()
 API.serve(CATALOG, RunSession.plan)
 API.serve(PREPARE, RunSession.prepare)
 API.serve(INBOX, RunSession.inbox)
+API.serve(INBOX_RECEIVED, RunSession.inbox_received)
 API.serve(BEFORE_MODEL, RunSession.before_model)
 API.serve(MODEL_RESULT, RunSession.model_result)
 API.serve(AFTER_MODEL, RunSession.after_model)

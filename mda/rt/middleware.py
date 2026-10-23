@@ -66,9 +66,11 @@ from runtime_api.loop import (
     BEFORE_MODEL,
     EVENT_MESSAGE_PREFIX,
     INBOX,
+    INBOX_RECEIVED,
     MODEL_RESULT,
     PREPARE,
     Inbox,
+    InboxReceipt,
     InboxRequest,
     ModelCall,
     ModelResult,
@@ -360,15 +362,21 @@ class BackendRunMiddleware(AgentMiddleware[RunState]):
 
     @hook_config(can_jump_to=["end"])
     async def abefore_model(self, state: RunState, runtime: Runtime) -> dict[str, object] | None:  # noqa: ARG002
-        inbox = await self._take_inbox(state)
-        taken = messages_from_dict(inbox.messages)
+        inbox = await self._read_inbox(state)
         # The phase sees what the inbox brought, as the model will.
         with_inbox = {
             **state,
-            "messages": [*state["messages"], *taken],
+            "messages": [*state["messages"], *messages_from_dict(inbox.messages)],
             STATE_KEY: {**state.get(STATE_KEY, {}), **inbox.update},
         }
         planned = await self._phase(BEFORE_MODEL, run_call(RunCall, run_id(), with_inbox))
+        if planned.jump_to is not None:
+            # No model call answers the inbox now: it stays for the run that comes next.
+            return _apply(planned)
+        if inbox.queued:
+            await call(
+                self._backend, INBOX_RECEIVED, InboxReceipt(run_id=run_id(), queued=inbox.queued)
+            )
         update = _apply(
             planned.model_copy(
                 update={
@@ -381,7 +389,7 @@ class BackendRunMiddleware(AgentMiddleware[RunState]):
             update["open_swe_call"] = planned.call.model_dump()
         return update
 
-    async def _take_inbox(self, state: RunState) -> Inbox:
+    async def _read_inbox(self, state: RunState) -> Inbox:
         await self._backend.reports.drain()
         surface = held_state(state).get("reply_surface")
         return await call(

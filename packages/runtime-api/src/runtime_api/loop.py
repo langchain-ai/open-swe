@@ -129,6 +129,13 @@ class Inbox(BaseModel):
     messages: list[dict[str, JsonValue]] = []
     # Graph state taking them changed, such as the surface replies move to.
     update: dict[str, JsonValue] = {}
+    # The queued follow-ups among ``messages``: they stay queued until the run says,
+    # through ``inbox_received``, that its next model call answers them.
+    queued: list[int] = []
+
+
+class InboxReceipt(RunRequest):
+    queued: list[int]
 
 
 class Done(BaseModel):
@@ -141,8 +148,12 @@ PREPARE = Endpoint("prepare", Prepare, PhaseResult, delivery="idempotent")
 BEFORE_MODEL = Endpoint(
     "before_model", RunCall, BeforeModel, seconds=LOOP_CALL_SECONDS, delivery="unprocessed"
 )
-# Takes the follow-ups it returns off the queue, so it is never sent again.
-INBOX = Endpoint("inbox", InboxRequest, Inbox, seconds=LOOP_CALL_SECONDS)
+# Only reads, so it is safe to send again.
+INBOX = Endpoint("inbox", InboxRequest, Inbox, seconds=LOOP_CALL_SECONDS, delivery="idempotent")
+# Takes the follow-ups a model call will answer off the queue; removing them twice is a no-op.
+INBOX_RECEIVED = Endpoint(
+    "inbox_received", InboxReceipt, Done, seconds=LOOP_CALL_SECONDS, delivery="idempotent"
+)
 MODEL_RESULT = Endpoint("model_result", ModelResult, ObservedResponse, seconds=LOOP_CALL_SECONDS)
 AFTER_MODEL = Endpoint("after_model", RunCall, PhaseResult, seconds=LOOP_CALL_SECONDS)
 AFTER_AGENT = Endpoint("after_agent", RunCall, AfterAgent, seconds=LOOP_CALL_SECONDS)

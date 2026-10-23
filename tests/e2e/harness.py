@@ -107,9 +107,14 @@ if os.environ.get("E2E_EXIT_WHEN_ORPHANED"):
 
 
 # --- control + Slack compose (the test driver) -----------------------------
+# Where the inbox spec holds its run: the fake model waits on it, the spec releases it.
+INBOX_GATE = {"waiting": False, "released": False}
+
+
 @app.post("/control/reset")
 async def control_reset() -> JSONResponse:
     fakes.reset()
+    INBOX_GATE.update(waiting=False, released=False)
     CURRENT_THREAD["channel"] = DEMO_CHANNEL
     CURRENT_THREAD["thread_ts"] = None
     LAST_SLACK_EVENT["payload"] = None
@@ -417,6 +422,30 @@ async def control_thread_idle(thread_id: str) -> JSONResponse:
             "idle": all(run["status"] not in {"pending", "running"} for run in runs),
         }
     )
+
+
+@app.get("/control/inbox-gate")
+async def control_inbox_gate(waiting: bool = False) -> JSONResponse:
+    """Whether the held run may go on; the fake model asking with ``waiting`` marks it held."""
+    if waiting:
+        INBOX_GATE["waiting"] = True
+    return JSONResponse(INBOX_GATE)
+
+
+@app.post("/control/inbox-gate")
+async def control_release_inbox_gate() -> JSONResponse:
+    INBOX_GATE["released"] = True
+    return JSONResponse(INBOX_GATE)
+
+
+@app.post("/control/monitors/sync")
+async def control_sync_monitors(thread_id: str) -> JSONResponse:
+    """Read the thread's monitors now, as the per-minute poll does, and count the events it holds."""
+    from openswe.monitors.delivery import poll_monitors
+    from openswe.webhooks.event_matches import EventMatch
+
+    await poll_monitors(thread_id)
+    return JSONResponse({"events": len(await EventMatch.owed(thread_id, []))})
 
 
 @app.post("/control/collaborator-permission")

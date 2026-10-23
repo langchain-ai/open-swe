@@ -1,10 +1,15 @@
-"""What is sent to a thread while its agent runs, taken before each model call.
+"""What is sent to a thread while its agent runs, read before each model call.
 
 A person's follow-ups and the notes background work leaves for the thread wait on
 the follow-up queue; events the thread subscribed to and task messages wait as
-event matches and task messages. A run takes all of them before each model call,
+event matches and task messages. A run reads all of them before each model call,
 so the agent sees them without waiting for the run to end, and only they travel:
 the conversation stays with the run.
+
+Reading takes nothing. Follow-ups leave the queue once the run says the model call
+it read them for goes ahead (``receive``); a run that ends first leaves them for
+the run their pickup starts. Events and task messages count as delivered once the
+run's conversation holds them.
 """
 
 import logging
@@ -144,11 +149,13 @@ def _flush_blocks(
 
 @dataclass
 class Taken:
-    """What a run took from its thread's inbox."""
+    """What a run read from its thread's inbox."""
 
     messages: list[RunMessage] = field(default_factory=list)
     # The surface replies move to, when a follow-up moved them.
     reply_surface: ReplySurface | None = None
+    # The queue entries the follow-ups among ``messages`` came from.
+    queued: list[int] = field(default_factory=list)
 
 
 class ThreadInbox:
@@ -158,17 +165,17 @@ class ThreadInbox:
         self.thread_id = thread_id
         self.events = events
 
-    async def take(self, delivered: Collection[str], surface: ReplySurface) -> Taken:
+    async def read(self, delivered: Collection[str], surface: ReplySurface) -> Taken:
         """Everything owed besides ``delivered``, the event ids the thread already holds."""
         taken = Taken()
         if self.events and postgres.configured():
             owed = await TaskMessage.owed_besides(self.thread_id, delivered)
             taken.messages.extend(TaskMessage.messages(owed))
         try:
-            await self._take_follow_ups(taken, surface)
+            await self._read_follow_ups(taken, surface)
         except Exception:
             logger.exception(
-                "Taking queued follow-ups failed", extra={"agent_thread_id": self.thread_id}
+                "Reading queued follow-ups failed", extra={"agent_thread_id": self.thread_id}
             )
         if self.events and postgres.configured():
             try:
@@ -183,22 +190,26 @@ class ThreadInbox:
                 taken.messages.extend(EventMatch.messages(matches))
         return taken
 
-    async def _take_follow_ups(self, taken: Taken, surface: ReplySurface) -> None:  # noqa: C901, PLR0912
-        """Follow-ups queued for the thread, oldest first, taken off the queue once built."""
+    async def receive(self, queued: Collection[int]) -> None:
+        """Take the ``queued`` follow-ups off the queue: the run's next model call answers them."""
+        await QueuedMessage.remove(self.thread_id, queued)
+
+    async def _read_follow_ups(self, taken: Taken, surface: ReplySurface) -> None:  # noqa: C901, PLR0912
+        """Follow-ups queued for the thread, oldest first."""
         queued_updates: list[dict[str, Any]] = []
         moved: ReplySurface | None = None
         content_blocks: list[dict[str, Any]] = []
         # Each batch introduces its senders again: the run, not the backend, holds what it saw.
         injected: set[str] = set()
 
-        # A snapshot: what this call consumes, whatever is queued meanwhile.
+        # A snapshot: what this call reads, whatever is queued meanwhile.
         queued_messages = await QueuedMessage.for_thread(self.thread_id)
         contents = [message.content for message in queued_messages]
         if not contents:
             return
 
         logger.info(
-            "Taking queued follow-ups",
+            "Reading queued follow-ups",
             extra={"agent_thread_id": self.thread_id, "count": len(contents)},
         )
 
@@ -284,8 +295,6 @@ class ThreadInbox:
                 content_blocks.append({"type": "text", "text": content})
 
         _flush_blocks(queued_updates, content_blocks, injected)
-        # Cleared only once every message is built: a failure above leaves
-        # them for the next model call instead of losing them.
-        await QueuedMessage.remove(queued_messages)
         taken.messages.extend(cast(list[RunMessage], queued_updates))
         taken.reply_surface = moved
+        taken.queued = [message.seq for message in queued_messages]

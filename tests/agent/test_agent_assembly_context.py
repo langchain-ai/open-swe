@@ -780,14 +780,13 @@ async def test_queued_images_reach_vision_fallback_for_text_only_main_model(
         patch("openswe.threads.inbox.get_config", return_value=config),
         patch("openswe.threads.inbox.fetch_image_block", return_value=image),
     ):
-        taken = await surface.inbox.take([], "web")
+        taken = await surface.inbox.read([], "web")
     messages = convert_to_messages(taken.messages)
     content = messages[-1].content
     assert isinstance(content, list) and image in content
     session = RunSession(surface, {}, None, started_here=True)
     vision = session.vision_for(session.models.main)
     assert vision is not None and vision.model_id != session.models.main.model_id
-    assert await QueuedMessage.for_thread("thread-ctx") == []
 
 
 @pytest.mark.asyncio

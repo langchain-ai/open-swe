@@ -496,10 +496,10 @@ async def test_repaired_task_thread_checkpoints_owed_messages_once(
             await message.record(session)
     inbox = ThreadInbox(thread_id, events=True)
 
-    taken = await inbox.take([], "web")
+    taken = await inbox.read([], "web")
     assert taken.messages[-1]["id"] == f"event-match:{message.id}"
     assert "Check logout too" in taken.messages[-1]["content"]
-    assert (await inbox.take([str(message.id)], "web")).messages == []
+    assert (await inbox.read([str(message.id)], "web")).messages == []
     async with postgres.session() as session:
         saved = await session.get_one(TaskMessage, message.id)
         assert saved.delivered_at is not None

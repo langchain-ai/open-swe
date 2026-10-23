@@ -69,6 +69,7 @@ from runtime_api.loop import (
     AfterAgent,
     BeforeModel,
     Inbox,
+    InboxReceipt,
     InboxRequest,
     ModelCall,
     PhaseResult,
@@ -333,6 +334,7 @@ async def test_what_the_inbox_brings_reaches_the_model_once(
     backend = OpenSweBackend("secret-token")
     report = HumanMessage(content="The worker finished", id="event-match:report-1")
     taken: list[InboxRequest] = []
+    received: list[InboxReceipt] = []
     planned: list[RunCall] = []
 
     async def phase(name: str, body: dict[str, JsonValue]) -> BaseModel:
@@ -341,8 +343,14 @@ async def test_what_the_inbox_brings_reaches_the_model_once(
             if len(taken) > 1:
                 return Inbox()
             return Inbox.model_validate(
-                {"messages": messages_to_dict([report]), "update": {"reply_surface": "web"}}
+                {
+                    "messages": messages_to_dict([report]),
+                    "update": {"reply_surface": "web"},
+                    "queued": [7],
+                }
             )
+        if name == "inbox_received":
+            received.append(InboxReceipt.model_validate(body))
         if name == "before_model":
             planned.append(RunCall.model_validate(body))
         if name == "after_model" and len(planned) == 1:
@@ -361,6 +369,37 @@ async def test_what_the_inbox_brings_reaches_the_model_once(
     assert messages_from_dict(planned[0].messages)[-1].id == "event-match:report-1"
     assert planned[0].state["reply_surface"] == "web"
     assert [message.id for message in result["messages"]].count("event-match:report-1") == 1
+    assert [receipt.queued for receipt in received] == [[7]]
+
+
+async def test_a_run_the_phase_ends_leaves_the_inbox_queued(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A model-call limit ends the run before any call answers the follow-up: it stays queued."""
+    monkeypatch.setenv("OPEN_SWE_BACKEND_URL", "https://backend.invalid")
+    monkeypatch.setattr("rt.middleware.run_id", lambda: "run-1")
+    backend = OpenSweBackend("secret-token")
+    follow_up = HumanMessage(content="One more thing", id="queued-1")
+    called: list[str] = []
+
+    async def phase(name: str, body: dict[str, JsonValue]) -> BaseModel:
+        called.append(name)
+        if name == "inbox":
+            return Inbox.model_validate({"messages": messages_to_dict([follow_up]), "queued": [7]})
+        if name == "before_model":
+            return BeforeModel(jump_to="end")
+        return PhaseResult()
+
+    _answering(monkeypatch, backend, phase)
+    graph = create_agent(
+        model=FakeListChatModel(responses=["unused"]),
+        middleware=[BackendRunMiddleware(backend, "invocation-1")],
+    )
+
+    result = await graph.ainvoke({"messages": [("user", "hello")]})
+
+    assert "inbox_received" not in called
+    assert "queued-1" not in [message.id for message in result["messages"]]
 
 
 class _RecordingAnthropic(ChatAnthropic):
