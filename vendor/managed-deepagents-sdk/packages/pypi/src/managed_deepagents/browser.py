@@ -6,6 +6,10 @@ threads share logins but not tabs. Each
 browser has one Stagehand client in this process (the extension serves one at a
 time), released between runs and after a minute idle so the browser can idle out.
 
+``request_user`` hands the window to the user and returns at once. When the user
+hands it back, MDA enqueues a run on the thread with a notification, as deepagents
+tells an agent its async task finished.
+
 Only projects that declare ``browser.py`` import this module or install Stagehand.
 """
 
@@ -22,20 +26,24 @@ import posixpath
 import shlex
 import shutil
 import tempfile
+import time
 import uuid
 import weakref
 from dataclasses import dataclass
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, Literal, TypeVar
+from typing import TYPE_CHECKING, Annotated, Any, Literal, NotRequired, TypedDict, TypeVar
 
 import httpx
 import websockets
 from deepagents.backends import CompositeBackend
 from deepagents.backends.protocol import SandboxBackendProtocol
 from langchain.agents.middleware import AgentMiddleware
+from langchain.agents.middleware.types import AgentState, OmitFromInput
 from langchain.tools import BaseTool, tool
-from langchain_core.messages import SystemMessage
+from langchain_core.messages import BaseMessage, SystemMessage, ToolMessage
 from langchain_core.messages.content import create_text_block
+from langgraph.types import Command
+from langgraph_sdk import get_client
 from langsmith.sandbox import AsyncSandbox, AsyncSandboxClient
 from langsmith.utils import get_env_var
 from stagehand import BrowserContext, Page, Stagehand, get_extension_archive, local_browser
@@ -50,6 +58,7 @@ from stagehand_middleware.facade import (
 )
 from stagehand_middleware.facade.tools import sanitize_error_message
 
+from managed_deepagents._channels.assistant_text import MDA_NOTIFICATION_KEY
 from managed_deepagents._managed_tools import ManagedToolRuntime  # noqa: TC001 - tool annotations
 from managed_deepagents.identity import ManagedServerInfo
 from managed_deepagents.runtime import (
@@ -61,7 +70,7 @@ from managed_deepagents.runtime import (
 if TYPE_CHECKING:
     from collections.abc import Awaitable, Callable
 
-    from langchain.agents.middleware.types import AgentState, ModelRequest, ModelResponse
+    from langchain.agents.middleware.types import ModelRequest, ModelResponse
     from langgraph.runtime import Runtime
 
 T = TypeVar("T")
@@ -85,8 +94,66 @@ _LOCALHOST_NOTE = (  # a thread's browser shares its sandbox's localhost
     "Servers running in your sandbox are reachable at http://localhost:<port> "
     "(any port but 80 and 443)."
 )
+_HANDOFF_LINK_TTL_S = 900  # how long the link a user gets for a handoff works
+_HAND_BACK_POLL_S = 2.0
+_WITH_USER = (
+    "The browser is with the user until they hand it back; wait for the notification "
+    "that they did before using it."
+)
+_HANDED_OVER = (  # what the model reads from request_user
+    "The browser is with the user. You'll get a notification when they hand it back; "
+    "until then, don't use the browser. Tell the user what to do in it."
+)
+#: Clients such as Studio show a notification's first sentence, so it reads for both.
+_WAKE_TEXT = {
+    "handed_back": (
+        "The browser was handed back. Take a snapshot of the page; if the user hasn't "
+        "finished, call request_user again."
+    ),
+    "ended": "The browser handoff ended. Take a snapshot to see whether the user finished.",
+}
 _RELEASE_AFTER_S = 60.0  # a run that raises or interrupts never reaches aafter_agent
 _LOG = logging.getLogger("mda.browser")
+
+
+class BrowserHandoff(TypedDict):
+    """The ``request_user`` tool's artifact: what a client shows the user.
+
+    The tool returns at once; the model reads only the tool's text, never this.
+    """
+
+    type: Literal["browser_handoff"]
+    """Tells clients how to read this artifact."""
+
+    message: str
+    """What the agent asked the user to do."""
+
+    url: str
+    """A link that lets whoever holds it drive the window, for 15 minutes."""
+
+
+class BrowserHandoffNotification(TypedDict):
+    """Marks the message that tells the agent a handoff ended, under
+    ``additional_kwargs["mda_notification"]``, so clients can tell it from the user's."""
+
+    type: Literal["browser_handoff"]
+    """Tells clients how to read this notification."""
+
+    status: Literal["handed_back", "ended"]
+    """handed_back when the user hands the window back; ended when the handoff's
+    link ran out, or its window is gone."""
+
+
+class _PendingHandoff(TypedDict):
+    browser: str
+    window_id: str
+    until: float  # when the user's link runs out, in epoch seconds
+
+
+class BrowserState(AgentState):
+    """The thread's handoff that waits on the user, as deepagents keeps its async tasks."""
+
+    mda_browser_handoff: Annotated[NotRequired[_PendingHandoff | None], OmitFromInput]
 
 
 @dataclass
@@ -96,10 +163,26 @@ class _Session:
     tools: StagehandFacadeTools
     artifacts: str  # where the facade writes run code's screenshots
     browser: str  # the browser's name, which a later generation may have replaced
+    window_id: str
     closing: bool = False  # run code called `browser.close()`: released after the call
     # The sandbox whose localhost the browser shares. By handle, not name: one MDA
     # replaces mid-run keeps its name but gets a new handle.
     shared: SandboxBackendProtocol | None = None
+
+    async def hand_over(self) -> str:
+        """Give the user the window; a short-lived link they can drive it with.
+
+        The client is released after the call, so the next one connects afresh and
+        takes the window back.
+        """
+        self.closing = True
+        async with httpx.AsyncClient(
+            headers=_api()[1], timeout=30, event_hooks={"response": [_raise]}
+        ) as api:
+            window = _window_api(self.browser, self.window_id)
+            await api.post(f"{window}/controller", json={"controller": "user"})
+            body = {"ttl_seconds": _HANDOFF_LINK_TTL_S, "embed_origins": _embed_origins()}
+            return (await api.post(f"{window}/links", json=body)).json()["act_url"]
 
     async def close(self) -> None:
         # Not `browser.close()`, which closes the browser. Closing Stagehand frees the
@@ -115,6 +198,7 @@ class _Session:
 _SESSIONS: dict[str, _Session] = {}
 _LOCKS: weakref.WeakValueDictionary[str, asyncio.Lock] = weakref.WeakValueDictionary()
 _RELEASES: dict[str, asyncio.Task[None]] = {}
+_WATCHERS: set[asyncio.Task[None]] = set()  # held until done: the loop keeps weak references
 
 
 async def _release(key: str) -> None:
@@ -142,6 +226,7 @@ class BrowserMiddleware(AgentMiddleware):
     """Give the agent Stagehand's tools, named ``browser_run``, ``browser_snapshot`` and so on."""
 
     name = "mda-browser"
+    state_schema = BrowserState
 
     def __init__(self, *, scope: Scope = "thread", idle_ttl_seconds: int = 600) -> None:
         super().__init__()
@@ -152,10 +237,21 @@ class BrowserMiddleware(AgentMiddleware):
         if scope == "thread":
             self._instructions += f" {_LOCALHOST_NOTE}"
 
-    async def _call(
-        self, runtime: ManagedToolRuntime, fn: Callable[[_Session], Awaitable[T]]
+    async def _call(  # noqa: C901 - one flat chain of error handling
+        self,
+        runtime: ManagedToolRuntime,
+        fn: Callable[[_Session], Awaitable[T]],
+        *,
+        handing_over: bool = False,
     ) -> T | str:
-        """Run ``fn`` on the run's session. Errors go to the model; nothing is retried."""
+        """Run ``fn`` on the run's session. Errors go to the model; nothing is retried.
+
+        While the user has the window, only another handoff may use it.
+        """
+        # The handoff is asked about here too: after a restart no watcher says it ended.
+        pending = None if handing_over else _pending(runtime.state)
+        if pending and await _handoff_status(pending) is None:
+            return f"error: {_WITH_USER}"
         try:
             thread = _thread_id(runtime)
             key = _browser_key(runtime.server_info, thread, self.scope)
@@ -167,7 +263,9 @@ class BrowserMiddleware(AgentMiddleware):
                 if (session := _SESSIONS.get(key)) and session.window != window:
                     await _release(key)  # another of the user's threads: move windows
                 if key not in _SESSIONS:
-                    _SESSIONS[key] = await _open(key, window, self.idle_ttl_seconds)
+                    _SESSIONS[key] = await _open(
+                        key, window, self.idle_ttl_seconds, reclaim=not handing_over
+                    )
                 await self._share(_SESSIONS[key], _SESSIONS[key].browser, key, runtime)
                 return await fn(_SESSIONS[key])
             except StagehandFacadeInputError as err:
@@ -208,6 +306,13 @@ class BrowserMiddleware(AgentMiddleware):
             return
         session.shared = sandbox
 
+    async def abefore_agent(self, state: AgentState, runtime: Runtime) -> dict[str, Any] | None:  # noqa: ARG002
+        """A run the handoff's notification starts ends the handoff."""
+        messages = state.get("messages") or []
+        if _pending(state) and messages and _is_handoff_notification(messages[-1]):
+            return {"mda_browser_handoff": None}
+        return None
+
     async def aafter_agent(self, state: AgentState, runtime: Runtime) -> None:  # noqa: ARG002
         """Release the client between runs; the browser and its windows stay."""
         with contextlib.suppress(RuntimeError):  # no thread or user, so no session
@@ -227,6 +332,63 @@ class BrowserMiddleware(AgentMiddleware):
             create_text_block(self._instructions),
         ]
         return await handler(request.override(system_message=SystemMessage(content_blocks=blocks)))
+
+    async def _hand_to_user(self, runtime: ManagedToolRuntime, reason: str) -> Command | str:
+        """Give the user the window and return at once, keeping the handoff in state."""
+
+        async def hand_over(session: _Session) -> tuple[_PendingHandoff, str]:
+            url = await session.hand_over()
+            until = time.time() + _HANDOFF_LINK_TTL_S
+            return {"browser": session.browser, "window_id": session.window_id, "until": until}, url
+
+        handed = await self._call(runtime, hand_over, handing_over=True)
+        if isinstance(handed, str):
+            return handed  # an error
+        pending, url = handed
+        watcher = asyncio.create_task(self._wake_on_hand_back(runtime, pending))
+        _WATCHERS.add(watcher)
+        watcher.add_done_callback(_WATCHERS.discard)
+        # The link reaches the user through the artifact; the model never sees it.
+        handoff: BrowserHandoff = {"type": "browser_handoff", "message": reason, "url": url}
+        reply = ToolMessage(
+            _HANDED_OVER, artifact=handoff, name="request_user", tool_call_id=runtime.tool_call_id
+        )
+        return Command(update={"mda_browser_handoff": pending, "messages": [reply]})
+
+    async def _wake_on_hand_back(
+        self, runtime: ManagedToolRuntime, pending: _PendingHandoff
+    ) -> None:
+        """Once the handoff ends, notify the thread, unless a newer handoff replaced it.
+
+        The watcher lives in this process. After a restart nothing notifies the
+        thread; its browser tools still work once the handoff has ended.
+        """
+        status = None
+        while status is None:
+            await asyncio.sleep(_HAND_BACK_POLL_S)
+            status = await _handoff_status(pending)
+        thread_id = _thread_id(runtime)
+        try:
+            thread = await get_client().threads.get(thread_id)
+            if _pending(thread.get("values")) == pending:
+                await self._wake(runtime, _wake_message(status))
+        except Exception as err:  # noqa: BLE001 - the browser tools still work once it ended
+            _LOG.warning("could not notify thread %s after a handoff: %s", thread_id, err)
+
+    async def _wake(self, runtime: ManagedToolRuntime, message: dict[str, Any]) -> None:
+        """Enqueue a run on the thread with the handoff's notification.
+
+        A host whose runs must start through its own backend overrides this, as it
+        turns off an async subagent's ``notify_parent`` and delivers the result itself.
+        """
+        if runtime.server_info is None:
+            return
+        await get_client().runs.create(
+            _thread_id(runtime),
+            runtime.server_info.assistant_id,
+            input={"messages": [message]},
+            multitask_strategy="enqueue",  # after a run that is going on
+        )
 
     def _tools(self) -> list[BaseTool]:  # noqa: C901 - three flat tool closures
         """The facade's tools as its hosts advertise them, names prefixed ``browser_``.
@@ -300,7 +462,51 @@ class BrowserMiddleware(AgentMiddleware):
             image = {"type": "image", "url": f"data:{shot['mimeType']};base64,{shot['data']}"}
             return [{"type": "text", "text": text}, image]
 
-        return [run, snapshot, screenshot]
+        @tool
+        async def request_user(runtime: ManagedToolRuntime, reason: str) -> Command | str:
+            """Hand the browser to the user; you'll be notified when they hand it back.
+
+            Use it for what only they should do: log in, solve a CAPTCHA, approve a
+            2FA prompt. Never ask for passwords. Say in `reason` what they need to do.
+            """
+            return await self._hand_to_user(runtime, reason)
+
+        return [run, snapshot, screenshot, request_user]
+
+
+def _pending(state: object) -> _PendingHandoff | None:
+    return state.get("mda_browser_handoff") if isinstance(state, dict) else None
+
+
+async def _handoff_status(pending: _PendingHandoff) -> Literal["handed_back", "ended"] | None:
+    """How the handoff ended, or ``None`` while the user still has the window."""
+    url, headers = _api()
+    with contextlib.suppress(httpx.HTTPError, ValueError, KeyError):  # asked again later
+        async with httpx.AsyncClient(headers=headers, timeout=10) as api:
+            browser = (await api.get(f"{url}/browsers/{pending['browser']}")).raise_for_status()
+        windows = browser.json().get("attachments") or []
+        window = next((w for w in windows if w["id"] == pending["window_id"]), None)
+        if window is None:
+            return "ended"
+        if window.get("controller") == "agent":
+            return "handed_back"
+    return "ended" if time.time() >= pending["until"] else None
+
+
+def _wake_message(status: Literal["handed_back", "ended"]) -> dict[str, Any]:
+    """A notification in deepagents' task notification's shape: a user-role message
+    framed as a system notification, its event under its own key."""
+    notification: BrowserHandoffNotification = {"type": "browser_handoff", "status": status}
+    return {
+        "role": "user",
+        "content": f"[SYSTEM NOTIFICATION - NOT USER INPUT]\n{_WAKE_TEXT[status]}",
+        MDA_NOTIFICATION_KEY: notification,
+    }
+
+
+def _is_handoff_notification(message: BaseMessage) -> bool:
+    notification = message.additional_kwargs.get(MDA_NOTIFICATION_KEY)
+    return isinstance(notification, dict) and notification.get("type") == "browser_handoff"
 
 
 def _unexpected(arguments: dict[str, object]) -> str:
@@ -350,6 +556,19 @@ def _browser_key(info: object, thread: str, scope: Scope) -> str:
         if principal.kind == "person":
             return f"user:{principal.id}"
     return f"thread:{thread}"
+
+
+def _embed_origins() -> list[str]:
+    """Origins whose pages may frame a handoff's window: the LangSmith UI, plus any in
+    ``MDA_BROWSER_EMBED_ORIGINS`` (comma-separated), such as a UI preview build."""
+    extra = (os.environ.get("MDA_BROWSER_EMBED_ORIGINS") or "").split(",")
+    return list(dict.fromkeys([_langsmith_ui_origin(), *filter(None, map(str.strip, extra))]))
+
+
+def _langsmith_ui_origin() -> str:
+    """The LangSmith UI's origin, where Studio may embed a handoff's window."""
+    endpoint = httpx.URL(get_env_var("ENDPOINT") or "https://api.smith.langchain.com")
+    return f"https://{endpoint.host.replace('api.smith.', 'smith.', 1)}"
 
 
 def _thread_id(runtime: ManagedToolRuntime | Runtime) -> str:
@@ -442,11 +661,18 @@ def _api() -> tuple[str, dict[str, str]]:
     return f"{endpoint}/v2/sandboxes", {"X-Api-Key": get_env_var("API_KEY") or "", **tenant}
 
 
-async def _open(key: str, window_name: str, idle_ttl_seconds: int) -> _Session:
+def _window_api(browser: str, window_id: str) -> str:
+    return f"{_api()[0]}/browsers/{browser}/attachments/{window_id}"
+
+
+async def _open(
+    key: str, window_name: str, idle_ttl_seconds: int, *, reclaim: bool = True
+) -> _Session:
     """Attach Stagehand to a window of ``key``'s browser, creating either as needed.
 
     The client reaches Chrome through the API's CDP proxy; the extension, inside the
-    browser sandbox, dials the window's local port.
+    browser sandbox, dials the window's local port. A window the user still holds
+    from an ended handoff is taken back, unless ``reclaim`` is off for a new handoff.
     """
     url, headers = _api()
     browsers = f"{url}/browsers"
@@ -463,6 +689,9 @@ async def _open(key: str, window_name: str, idle_ttl_seconds: int) -> _Session:
         if window is None:
             body = {"name": window_name, "controller": "agent"}
             window = (await api.post(f"{browsers}/{name}/attachments", json=body)).json()
+        if reclaim and window.get("controller") == "user":
+            controller = f"{browsers}/{name}/attachments/{window['id']}/controller"
+            await api.post(controller, json={"controller": "agent"})
         cdp_url = (await api.get(f"{window['api_cdp_url']}/json/version")).json()[
             "webSocketDebuggerUrl"
         ]
@@ -470,14 +699,14 @@ async def _open(key: str, window_name: str, idle_ttl_seconds: int) -> _Session:
 
     local_url = f"ws://127.0.0.1:{port}/devtools/browser/{window['id']}"
     try:
-        return await _connect(key, window_name, name, cdp_url, local_url, headers)
+        return await _connect(key, window_name, name, window["id"], cdp_url, local_url, headers)
     except Exception as err:
         if "already initialized" not in str(err):
             raise
     # A client that never closed (a crash, another replica) left its claim in the
     # extension; reinstalling it clears the claim without restarting Chrome.
     await _reinstall_extension(cdp_url, headers)
-    return await _connect(key, window_name, name, cdp_url, local_url, headers)
+    return await _connect(key, window_name, name, window["id"], cdp_url, local_url, headers)
 
 
 async def _share_localhost(name: str, sandbox: str) -> None:
@@ -516,7 +745,13 @@ async def _raise(response: httpx.Response) -> None:
 
 
 async def _connect(
-    key: str, window: str, browser_name: str, cdp_url: str, local_url: str, headers: dict[str, str]
+    key: str,
+    window: str,
+    browser_name: str,
+    window_id: str,
+    cdp_url: str,
+    local_url: str,
+    headers: dict[str, str],
 ) -> _Session:
     browser = await local_browser.connect(
         cdp_url=cdp_url, extension_cdp_url=local_url, headers=headers
@@ -540,7 +775,7 @@ async def _connect(
     # cannot see (another thread's, or the shared localhost one), and `set_active_page`
     # does not move headless Chrome's focus. It has no hook for the page, so name ours.
     tools._active_page = lambda: _newest_tab(browser.context)  # ty: ignore[invalid-assignment]  # noqa: SLF001
-    return _Session(window, stagehand, tools, artifacts, browser_name)
+    return _Session(window, stagehand, tools, artifacts, browser_name, window_id)
 
 
 async def _newest_tab(context: BrowserContext) -> Page:

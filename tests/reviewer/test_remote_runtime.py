@@ -1,5 +1,6 @@
 import json
 import time
+from typing import Any, cast
 
 import jwt
 import pytest
@@ -373,3 +374,56 @@ async def test_mda_catalog_leaves_integrations_and_code_mode_to_mda(
     assert "private-gateway" not in str(catalog)
     assert catalog["code_only"] == ["manage_thread", "mcp_search"]
     assert catalog["also_from_code"] == ["read_file"]
+
+
+async def test_wake_starts_a_run_through_dispatch_for_the_runs_own_thread(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """MDA can't sign a run, so the backend starts the one that tells the agent its browser is back."""
+    from types import SimpleNamespace
+
+    from openswe import browser_handoff
+    from openswe.remote_runtime.graph import RemoteGraph
+
+    dispatched: list[dict[str, object]] = []
+
+    class Threads:
+        async def get(self, thread_id: str) -> dict[str, object]:
+            return {"thread_id": thread_id, "metadata": {"owner_type": "user"}}
+
+    async def configurable(thread_id: str, metadata: object) -> dict[str, object]:
+        return {"thread_id": thread_id, "source": "dashboard", "background_task_completion": True}
+
+    async def dispatch(thread_id: str, content: object, cfg: object, **kwargs: object) -> None:
+        dispatched.append({"thread_id": thread_id, "content": content, "cfg": cfg, **kwargs})
+
+    monkeypatch.setattr(
+        browser_handoff, "get_client", lambda **_: SimpleNamespace(threads=Threads())
+    )
+    monkeypatch.setattr(browser_handoff, "completion_configurable", configurable)
+    monkeypatch.setattr(browser_handoff, "dispatch_agent_run", dispatch)
+
+    async def unused(*_: object) -> None:
+        raise AssertionError("not asked for")
+
+    notification = {"type": "browser_handoff", "status": "handed_back"}
+    graph = RemoteGraph("agent", unused, unused)
+    reply = await graph.hook(
+        RUN,
+        "wake",
+        {"run_id": "run-1", "text": "The browser was handed back.", "notification": notification},
+    )
+
+    assert reply == {}
+    [run] = dispatched
+    assert run["thread_id"] == RUN.thread_id  # the token's thread, never one the body names
+    assert run["multitask_strategy"] == "enqueue"
+    messages = cast("dict[str, Any]", run["input"])["messages"]
+    # A system sender, as for a background task's completion, and MDA's marker kept,
+    # so MDA ends the handoff when the run starts.
+    assert messages[0]["content"].startswith(
+        '<dynamic-context kind="system" id="system:browser-handoff">'
+    )
+    assert "The browser was handed back." in messages[-1]["content"]
+    assert 'kind="system"' in messages[-1]["content"]
+    assert messages[-1]["mda_notification"] == notification

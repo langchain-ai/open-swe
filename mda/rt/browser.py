@@ -8,6 +8,7 @@ thread's Browser panel can frame the window the agent drives.
 import asyncio
 import logging
 from collections.abc import Mapping
+from typing import Any
 
 from managed_deepagents import ManagedToolRuntime
 from managed_deepagents.browser import BrowserMiddleware
@@ -36,6 +37,13 @@ class ReportedBrowserMiddleware(BrowserMiddleware):
             return
         # In the background: a backend that is slow or down must not hold up browsing.
         self._reporting[name] = asyncio.create_task(self._report(name, runtime.state))
+
+    async def _wake(self, runtime: ManagedToolRuntime, message: dict[str, Any]) -> None:
+        # Open SWE runs only what its backend signs, so the backend starts the run that
+        # notifies the thread, as it delivers a worker's result (``notify_parent`` off).
+        # The watcher calls this once the run has ended, so there is no run id.
+        body = run_body(None, {}, text=message["content"], notification=message["mda_notification"])
+        await self._backend.call("wake", body)
 
     async def _report(self, name: str, state: Mapping[str, object]) -> None:
         try:

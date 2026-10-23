@@ -48,6 +48,8 @@ Hook = Literal[
     "sandbox",
     # The LangSmith browser MDA gave the thread's agent, for the dashboard to show.
     "browser",
+    # The person handed the agent's browser back: the backend starts the run that tells it.
+    "wake",
 ]
 # Waits before resending a call, for as long as a backend rollout takes. A refused
 # connection never reached the backend, so every hook is resent after one. A gateway
