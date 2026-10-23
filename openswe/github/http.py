@@ -662,11 +662,19 @@ class RepoClient:
         await self.delete(f"pulls/comments/{comment_id}")
 
     async def check_runs(self, sha: str) -> list[dict[str, Any]]:
-        """Latest checks on ``sha``, excluding superseded Actions cancellations."""
+        """Latest checks on ``sha``, excluding superseded Actions cancellations and failures."""
         runs = await self.pages(
             f"commits/{sha}/check-runs", key="check_runs", params={"filter": "latest"}
         )
-        if not any(run.get("conclusion") in {"cancelled", "stale"} for run in runs):
+        supersedable = {
+            "cancelled",
+            "stale",
+            "failure",
+            "timed_out",
+            "action_required",
+            "startup_failure",
+        }
+        if not any(run.get("conclusion") in supersedable for run in runs):
             return runs
         try:
             payloads = await self.pages(
@@ -685,6 +693,7 @@ class RepoClient:
             return runs
         identities: dict[int, tuple[int, int, str, str]] = {}
         latest: dict[tuple[int, int, str, str], int] = {}
+        successes: dict[tuple[int, int, str, str], int] = {}
         orders: dict[int, int] = {}
         for index, run in enumerate(runs):
             app, suite = run.get("app"), run.get("check_suite")
@@ -704,12 +713,18 @@ class RepoClient:
             order = workflow.id
             identities[index], orders[index] = identity, order
             latest[identity] = max(latest.get(identity, order), order)
+            if run.get("status") == "completed" and run.get("conclusion") == "success":
+                successes[identity] = max(successes.get(identity, order), order)
         return [
             run
             for index, run in enumerate(runs)
-            if run.get("conclusion") not in {"cancelled", "stale"}
+            if run.get("conclusion") not in supersedable
             or index not in identities
             or orders[index] == latest[identities[index]]
+            or (
+                run.get("conclusion") not in {"cancelled", "stale"}
+                and successes.get(identities[index]) != latest[identities[index]]
+            )
         ]
 
     async def workflow_for_suite(self, suite_id: int) -> WorkflowRun:
