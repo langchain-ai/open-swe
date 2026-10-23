@@ -297,7 +297,8 @@ async def test_a_tool_call_the_backend_never_answered(
         (PREPARE, 504),
         (BEFORE_MODEL, 502),
         (BEFORE_MODEL, 504),
-        (AFTER_MODEL, 503),
+        (AFTER_MODEL, 502),
+        (AFTER_MODEL, 504),
         (AFTER_AGENT, 504),
     ],
 )
@@ -323,7 +324,7 @@ async def test_phase_gateway_failure_is_not_replayed(
 
 
 @pytest.mark.parametrize(("failures", "recovers"), [(10, True), (11, False)])
-@pytest.mark.parametrize("endpoint", [PREPARE, LAUNCH_WORKER, BEFORE_MODEL])
+@pytest.mark.parametrize("endpoint", [PREPARE, LAUNCH_WORKER, BEFORE_MODEL, AFTER_MODEL])
 async def test_a_run_waits_out_a_backend_rollout(
     monkeypatch: pytest.MonkeyPatch, endpoint: Endpoint, failures: int, recovers: bool
 ) -> None:
@@ -333,7 +334,7 @@ async def test_a_run_waits_out_a_backend_rollout(
     request = httpx2.Request("POST", "https://backend.invalid")
     # Only a call the backend could not have run is resent, or one that is safe to repeat.
     unavailable = [httpx2.Response(503, request=request), httpx2.ConnectError("secret-token")]
-    if endpoint is not BEFORE_MODEL:
+    if endpoint.delivery == "idempotent":
         unavailable.append(httpx2.Response(502, request=request))
     client = MagicMock(is_closed=False)
     client.post = AsyncMock(
