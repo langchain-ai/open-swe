@@ -210,8 +210,9 @@ async def publish_workspace(
             "ok": False,
             "error": (
                 "this thread's sandbox is outside the new sandbox region, so new sandboxes "
-                "could not boot from its snapshot; recreate_sandbox gives it one there, "
-                "then provision and publish again"
+                "could not boot from its snapshot, and recreating it keeps it where it is; "
+                "start a new thread, whose sandbox is in the new sandbox region, and "
+                "provision and publish from there"
             ),
         }
     try:
