@@ -72,7 +72,7 @@ _EXECUTE_GRACE_SECONDS: Final = 30
 # A sandbox call rejected before it started cannot have run, so it is sent again.
 _TRANSIENT_BACKOFF_SECONDS: Final = (0.5, 1.0, 2.0)
 
-Handler = Callable[[ToolCallRequest], Awaitable[ToolMessage | Command]]
+type Handler = Callable[[ToolCallRequest], Awaitable[ToolMessage | Command]]
 
 
 class FileToolsMiddleware(AgentMiddleware):

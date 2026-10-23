@@ -39,7 +39,7 @@ _HOOK_SECONDS: Final = 300.0
 # sandbox's grace for an overrunning command, and killing it.
 TOOL_CALL_SLACK_SECONDS: Final = 300.0
 
-Hook = Literal[
+type Hook = Literal[
     "catalog",
     "prepare",
     "before_model",
