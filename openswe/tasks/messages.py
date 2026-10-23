@@ -3,7 +3,7 @@
 import logging
 from collections.abc import Sequence
 from datetime import datetime, timedelta
-from typing import Self
+from typing import Literal, Self
 from uuid import NAMESPACE_URL, UUID, uuid5, uuid7
 
 from langgraph_sdk.client import LangGraphClient
@@ -15,7 +15,7 @@ from sqlalchemy.orm import Mapped, mapped_column
 
 from openswe.database import postgres
 from openswe.database.orm import NOW, Base
-from openswe.dispatch import create_durable_run, dispatch_client, run_in_flight_carries
+from openswe.dispatch import create_durable_run, dispatch_client
 from openswe.input_messages import (
     RunMessage,
     SystemIdentity,
@@ -149,7 +149,7 @@ class TaskMessage(Base):
         if not postgres.configured():
             return
         try:
-            await cls.deliver(thread_id)
+            await cls.deliver(thread_id, "enqueue")
         except Exception:
             logger.warning(
                 "Could not deliver pending task messages",
@@ -201,12 +201,7 @@ class TaskMessage(Base):
         )
 
     @classmethod
-    async def deliver(cls, thread_id: str) -> bool:
-        """Start a run carrying what the thread is owed, interrupting one it is in.
-
-        The thread's agent owns its conversation: a message reaches it as a run's
-        input, never by the run asking for it.
-        """
+    async def deliver(cls, thread_id: str, strategy: Literal["enqueue", "interrupt"]) -> bool:
         if not await cls._any_undelivered(thread_id):
             return False
         client = dispatch_client()
@@ -218,12 +213,14 @@ class TaskMessage(Base):
             delegation = await TaskDelegation.get(thread_id)
             if delegation is not None and delegation.cancelled:
                 return False
+            if strategy == "enqueue":
+                thread = _Thread.model_validate(await client.threads.get(thread_id))
+                if thread.status == "busy":
+                    return False
             owed = await cls._owed_now(client, thread_id)
             if all(message.delivery_attempts >= _MAX_ATTEMPTS for message in owed):
                 return False
             owed_ids = [message.id for message in owed]
-            if await run_in_flight_carries(client, thread_id, [str(id_) for id_ in owed_ids]):
-                return False
             async with postgres.session() as session:
                 await session.execute(
                     update(cls)
@@ -243,7 +240,7 @@ class TaskMessage(Base):
                 source="task",
                 thread_title=None,
                 client=client,
-                multitask_strategy="interrupt",
+                multitask_strategy=strategy,
                 if_not_exists="reject",
             )
             return True

@@ -5,8 +5,8 @@ person's ``experimental_background_callbacks`` flag: the runner calling
 ``/monitors/{id}/sync`` through the sandbox tools channel, or a per-thread job
 polling every minute. Either one records each event as an ``EventMatch``
 keyed by monitor and sequence number, so a reading that both triggers make
-records it once, then lets ``EventMatch`` deliver it in a run started for it,
-which interrupts one the thread is in.
+records it once, then lets ``EventMatch`` deliver it: before the next model call
+of a running thread, or in a run started for it.
 """
 
 import logging
@@ -215,9 +215,12 @@ class ThreadMonitorDelivery:
 
     async def _wake(self, pending: list[PendingMonitor]) -> None:
         """Deliver what is owed; once monitor wakes are spent, stop the monitors instead."""
-        if await EventMatch.deliver(self._thread_id, "interrupt"):
+        if await EventMatch.deliver(self._thread_id, "enqueue"):
             return
-        if not await MONITOR_WAKES.exhausted(langgraph_client(), self._thread_id):
+        client = langgraph_client()
+        thread = await client.threads.get(self._thread_id)
+        busy = isinstance(thread, dict) and thread.get("status") == "busy"
+        if busy or not await MONITOR_WAKES.exhausted(client, self._thread_id):
             return
         # What is owed now waits for the next run a person starts.
         await self._stop_running(pending, _WAKE_LIMIT_REASON)

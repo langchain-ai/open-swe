@@ -7,7 +7,7 @@ from uuid import NAMESPACE_URL, uuid4, uuid5
 import pytest
 from fastapi import HTTPException
 from pydantic import JsonValue
-from sqlalchemy import func, select
+from sqlalchemy import func, select, update
 
 from openswe.bridge.store import BridgeStore
 from openswe.dashboard.workspace_settings import WorkspaceSettings
@@ -515,7 +515,7 @@ async def test_cancel_discards_owed_events_without_reviving_worker(
     assert await EventMatch.owed(worker_id, []) == []
     assert await EventSubscription.for_thread(worker_id) == []
     assert await EventMatch.deliver(worker_id, "enqueue") is False
-    assert await TaskMessage.deliver(worker_id) is False
+    assert await TaskMessage.deliver(worker_id, "interrupt") is False
     assert not client.created_runs
 
     # Unlike a person stopping the task, the coordinator that cancelled still hears the outcome.
@@ -574,7 +574,6 @@ async def test_finished_worker_can_receive_follow_up_and_gain_a_sibling(
     assert context.membership.role == "worker"
     assert len(await store.TaskDelegation.for_task(context.task.id)) == 2
 
-    # A report reaches a coordinator that is working, too: it interrupts the run it is in.
     client.statuses[COORDINATOR] = "busy"
     senders = [worker_id, str(sibling["worker_thread_id"])]
     reports = ['Blocked on "login" & <schema>; can you help?', "Checked:\n```python\na < b\n```"]
@@ -585,7 +584,7 @@ async def test_finished_worker_can_receive_follow_up_and_gain_a_sibling(
             worker_thread_id=None,
             request_id="report",
         )
-    assert len(client.created_runs) == 3
+    assert len(client.created_runs) == 1
     owed = await TaskMessage.owed(COORDINATOR, [])
     displays = [TaskEventMetadata.model_validate(event.task_event) for event in owed]
     assert [str(display.sender_thread_id) for display in displays] == senders
@@ -593,9 +592,9 @@ async def test_finished_worker_can_receive_follow_up_and_gain_a_sibling(
     assert all(display.sender_label is None for display in displays)
     assert all(display.kind == "message" and display.status is None for display in displays)
     message_ids = [f"event-match:{event.id}" for event in owed]
-    # The latest run carries both reports, so delivering again interrupts nothing.
-    assert not await TaskMessage.deliver(COORDINATOR)
-    assert len(client.created_runs) == 3
+    client.statuses[COORDINATOR] = "idle"
+    assert await TaskMessage.deliver(COORDINATOR, "enqueue")
+    assert len(client.created_runs) == 2
     wake = client.created_runs[-1]
     assert wake["thread_id"] == COORDINATOR
     delivered_ids = [message["id"] for message in wake["input"]["messages"] if "id" in message]
@@ -658,7 +657,7 @@ async def test_coordinator_settles_once_every_worker_report_has_reached_it(
 
 
 @pytest.mark.usefixtures("registry_db")
-async def test_a_report_reaches_a_coordinator_in_a_run_that_interrupts_its_long_one(
+async def test_report_held_through_a_long_coordinator_run_is_awaited_once_it_ends(
     client: MagicMock, monkeypatch: pytest.MonkeyPatch, launch: Launch
 ) -> None:
     from openswe.tasks import activity
@@ -689,18 +688,18 @@ async def test_a_report_reaches_a_coordinator_in_a_run_that_interrupts_its_long_
     )
     answer = {"values": {"messages": [{"type": "ai", "content": "Implemented"}]}}
     await worker_finished(worker_id, worker_run, "success", answer)
+    async with postgres.session() as session:
+        await session.execute(update(TaskMessage).values(matched_at=long_ago))
 
-    (report,) = await TaskMessage.owed(COORDINATOR, [])
-    (delivery,) = [
-        run
-        for run in client.created_runs
-        if run["thread_id"] == COORDINATOR and run is not coordinating
-    ]
-    assert [m["id"] for m in delivery["input"]["messages"] if "id" in m] == [
-        f"event-match:{report.id}"
-    ]
-    # The coordinator is not settled while the run carrying the report is still to run.
-    assert not (await activity.CoordinatorActivity.of(COORDINATOR, after=first)).settled
+    current = await activity.CoordinatorActivity.of(COORDINATOR, after=first)
+    assert (current.runs, current.running, current.settled) == ([], True, False)
+    coordinating.update(status="success", updated_at=datetime.now(UTC).isoformat())
+    client.statuses[COORDINATOR] = "idle"
+    current = await activity.CoordinatorActivity.of(COORDINATOR, after=first)
+    assert current.awaiting_delivery
+    assert not current.settled
+    coordinating["updated_at"] = long_ago.isoformat()
+    assert (await activity.CoordinatorActivity.of(COORDINATOR, after=first)).settled
 
 
 @pytest.mark.usefixtures("registry_db")
@@ -736,6 +735,7 @@ async def test_cancelling_a_coordinators_workers_spares_finished_ones(
     assert [message.delivery_id for message in owed] == [
         finished_delivery_id(finished, finished_run)
     ]
+    assert not [run for run in client.created_runs if run["thread_id"] == COORDINATOR]
     current = await activity.CoordinatorActivity.of(COORDINATOR)
     assert {worker.worker_thread_id: worker.state for worker in current.workers} == {
         running: "cancelled",
@@ -807,7 +807,10 @@ async def test_async_subagent_becomes_one_ordinary_worker_of_its_coordinators_ta
     assert await worker_finished(worker, "run-1", "success", payload)
     (report,) = await TaskMessage.owed(COORDINATOR, [])
     assert "Fixed login." in report.content
-    # The report reaches the busy coordinator in one run, whatever the settles retried.
+    # A busy coordinator picks the report up before its next model call; an idle one wakes.
+    assert not [run for run in client.created_runs if run["thread_id"] == COORDINATOR]
+    client.statuses[COORDINATOR] = "idle"
+    assert await TaskMessage.deliver(COORDINATOR, "enqueue")
     (wake,) = [run for run in client.created_runs if run["thread_id"] == COORDINATOR]
     assert [m["id"] for m in wake["input"]["messages"] if "id" in m] == [f"event-match:{report.id}"]
 
@@ -824,7 +827,7 @@ async def test_async_subagent_becomes_one_ordinary_worker_of_its_coordinators_ta
         await service.message_task_thread(
             actor, message="One more thing", worker_thread_id=worker, request_id="late"
         )
-    assert await TaskMessage.deliver(worker) is False
+    assert await TaskMessage.deliver(worker, "enqueue") is False
     with pytest.raises(ValueError, match="cancelled"):
         await service.register_async_worker(actor, "launch", worker, "Implement login fix")
 

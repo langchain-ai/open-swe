@@ -95,6 +95,7 @@ from openswe.middleware import (
     RequireUserReplyMiddleware,
     WorkflowPushGuardMiddleware,
     check_message_queue_before_model,
+    deliver_event_matches_before_model,
     notify_step_limit_reached,
     record_run_usage,
     refresh_github_proxy_before_model,
@@ -1908,7 +1909,11 @@ async def plan_agent(config: RunnableConfig, surface: ToolSurface) -> None:
                 if task_coordination and task_coordination.is_worker
                 else [refresh_github_proxy_before_model]
             ),
-            *([] if stop_summary_mode else [check_message_queue_before_model]),
+            *(
+                []
+                if stop_summary_mode
+                else [check_message_queue_before_model, deliver_event_matches_before_model]
+            ),
             RequireUserReplyMiddleware(
                 _registered_tool_name(slack_reply),
                 _registered_tool_name(slack_no_reply_needed),

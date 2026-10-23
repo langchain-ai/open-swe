@@ -21,7 +21,7 @@ from sqlalchemy.orm import Mapped, mapped_column
 
 from openswe.database import postgres
 from openswe.database.orm import NOW, Base
-from openswe.dispatch import create_durable_run, dispatch_client, run_in_flight_carries
+from openswe.dispatch import create_durable_run, dispatch_client
 from openswe.input_messages import (
     RunMessage,
     Surface,
@@ -159,8 +159,8 @@ class EventMatch(Base):
     async def deliver(cls, thread_id: str, strategy: MultitaskStrategy) -> bool:
         """Start a run carrying everything the thread is owed; ``False`` when none was needed.
 
-        ``enqueue`` leaves a busy thread alone: the completion webhook calls this again
-        once its run ends, and the new run carries what is owed. A match
+        ``enqueue`` leaves a busy thread alone: its next model call takes what is
+        owed, and the completion webhook calls this again once it finishes. A match
         that ``_MAX_ATTEMPTS`` runs failed to deliver no longer starts one, so a
         thread whose runs keep failing is not retried forever.
         Raises ``NotFoundError`` when the thread is gone.
@@ -178,10 +178,6 @@ class EventMatch(Base):
             state = _ThreadState.model_validate(await client.threads.get_state(thread_id))
             owed = await cls.owed(thread_id, state.values.messages if state.values else [])
             if all(match.delivery_attempts >= _MAX_ATTEMPTS for match in owed):
-                return False
-            if strategy == "interrupt" and await run_in_flight_carries(
-                client, thread_id, [str(match.id) for match in owed]
-            ):
                 return False
             # Monitor output alone may start only so many runs between human
             # messages; past that it waits for a run a person starts.
