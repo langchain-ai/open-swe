@@ -1,0 +1,310 @@
+tests/e2e/tests/dashboard_transcript.spec.ts
+  s_27878fb276b595::t_fdd1c056ad0842 67,71
+desktop/package.json
+  s_27878fb276b595::t_fdd1c056ad0842 3,109
+openswe/linear/comments.py
+  s_27878fb276b595::t_fdd1c056ad0842 1-39
+openswe/middleware/task_coordination.py
+  s_27878fb276b595::t_fdd1c056ad0842 37-39
+docs/CUSTOMIZATION.md
+  s_27878fb276b595::t_fdd1c056ad0842 315-317
+README.md
+  s_27878fb276b595::t_fdd1c056ad0842 50
+tests/sandbox/test_gateway.py
+  s_27878fb276b595::t_fdd1c056ad0842 12
+openswe/webhooks/common.py
+  s_27878fb276b595::t_fdd1c056ad0842 5,74,176,250,293,321,984-1004
+  s_27878fb276b595::t_616ac9b6f10c1c 1005-1006
+openswe/linear/webhook.py
+  s_27878fb276b595::t_fdd1c056ad0842 1-343
+openswe/github/queue.py
+  s_27878fb276b595::t_fdd1c056ad0842 69-108
+mda/tests/test_validate_image_reads.py
+  s_27878fb276b595::t_fdd1c056ad0842 1-50
+openswe/tasks/routes.py
+  s_27878fb276b595::t_fdd1c056ad0842 1-41
+mda/rt/backend.py
+  s_27878fb276b595::t_fdd1c056ad0842 14,22,27,54-55,73,145-146,162,245,352-354,356-404
+tests/merge_queue/test_queue_scheduler.py
+  s_27878fb276b595::t_fdd1c056ad0842 54-55,79-81,91-92,96-98,100-106
+ui/src/features/reviews/page/notes/ReplyBox.tsx
+  s_27878fb276b595::t_fdd1c056ad0842 5,81-87,89
+openswe/jobs/kinds.py
+  s_27878fb276b595::t_fdd1c056ad0842 26-27,54-55,167
+openswe/threads/listing.py
+  s_27878fb276b595::t_fdd1c056ad0842 398-399
+openswe/threads/status.py
+  s_27878fb276b595::t_fdd1c056ad0842 24-25,29,44,46
+tests/dashboard/test_public_repo_org_gate.py
+  s_27878fb276b595::t_fdd1c056ad0842 207,210,340
+tests/merge_queue/test_queue_validation.py
+  s_27878fb276b595::t_fdd1c056ad0842 1-270
+openswe/github/http.py
+  s_27878fb276b595::t_fdd1c056ad0842 26,34-44,738-740,743,747,760,765,768-769,772-825
+  s_27878fb276b595::t_d3357c66c8f1d9 826
+openswe/api/app.py
+  s_27878fb276b595::t_fdd1c056ad0842 21,164
+openswe/tasks/messages.py
+  s_27878fb276b595::t_fdd1c056ad0842 9,11,161-171,173,175,178-205,220,248-263
+  s_27878fb276b595::t_463956691276f1 264
+openswe/server.py
+  s_27878fb276b595::t_fdd1c056ad0842 624-625,1547-1551,1896-1898,1909,1912,1914-1917,1921,2128,2146
+openswe/config.py
+  s_27878fb276b595::t_fdd1c056ad0842 315
+AGENTS.md
+  s_27878fb276b595::t_fdd1c056ad0842 11,39
+  s_27878fb276b595::t_cd25d0d2c82539 40
+ui/src/features/agents/lib/transcript/reducer.ts
+  s_27878fb276b595::t_fdd1c056ad0842 856,1068,1114
+pyproject.toml
+  s_27878fb276b595::t_fdd1c056ad0842 79-80,123
+ui/src/features/reviews/components/PendingReviewCommentCard.tsx
+  s_27878fb276b595::t_fdd1c056ad0842 6,111-117,119
+mda/tests/test_backend_calls.py
+  s_27878fb276b595::t_fdd1c056ad0842 1-1034
+mda/tests/test_subdir_agents.py
+  s_27878fb276b595::t_fdd1c056ad0842 1-101
+openswe/remote_runtime/runs.py
+  s_27878fb276b595::t_fdd1c056ad0842 48-49,57-61
+tests/e2e/tests/dashboard.spec.ts
+  s_27878fb276b595::t_fdd1c056ad0842 299,301,303,305-308,310,312-315
+tests/e2e/tests/thread_tools.spec.ts
+  s_27878fb276b595::t_fdd1c056ad0842 181-182
+openswe/database/migrations/versions/0079_fd87e6781048_task_delegation_start_and_silent_stop.py
+  s_27878fb276b595::t_fdd1c056ad0842 1-30
+openswe/github/webhook.py
+  s_27878fb276b595::t_fdd1c056ad0842 7,45,1263-1286,1349,1491-1492,1519,1524,1526,1649,1651-1652,1686-1696
+tests/github/test_github_workspace_routing.py
+  s_27878fb276b595::t_fdd1c056ad0842 9,38,40,58-59,61,85
+openswe/review/approvals.py
+  s_27878fb276b595::t_fdd1c056ad0842 23
+openswe/tasks/schemas.py
+  s_27878fb276b595::t_fdd1c056ad0842 1,8,56-57,59,152,155-169,173-179
+tests/agent/test_thread_ids.py
+  s_27878fb276b595::t_fdd1c056ad0842 7-15
+tests/test_task_threads.py
+  s_27878fb276b595::t_fdd1c056ad0842 10,12,159-162,164-165,167,240,246-248,250,252-254,256-260,521-527,604-745,773,775,780,783,832,854
+ui/src/components/SubmitShortcut.tsx
+  s_27878fb276b595::t_fdd1c056ad0842 1-12
+ui/src/features/reviews/page/Discussion.tsx
+  s_27878fb276b595::t_fdd1c056ad0842 13,666-667,672
+openswe/resources/prompts/tasks/role.md.jinja
+  s_27878fb276b595::t_fdd1c056ad0842 14
+tests/agent/test_agent_assembly_context.py
+  s_27878fb276b595::t_fdd1c056ad0842 19,21,26-27,132,134-137,140-144,149-150,218,278-281,688-691,707-709,746,749,754-755,767,769-776,882,885-886,889,905-907
+openswe/merge_queue/store.py
+  s_27878fb276b595::t_fdd1c056ad0842 37,60-68,80-86,478-479,553-580,582-629,631-705,970-997
+openswe/merge_queue/validation_contract.py
+  s_27878fb276b595::t_fdd1c056ad0842 1-40
+ui/src/features/reviews/components/SubmitReviewPopover.tsx
+  s_27878fb276b595::t_fdd1c056ad0842 17,133-137,293-301
+mda/rt/model_calls.py
+  s_27878fb276b595::t_fdd1c056ad0842 1-201
+openswe/resources/prompts/system/source-linear.md
+  s_27878fb276b595::t_fdd1c056ad0842 1-2,4
+mda/rt/models.py
+  s_27878fb276b595::t_fdd1c056ad0842 62-64
+cli/src/main.ts
+  s_27878fb276b595::t_fdd1c056ad0842 6-11,26,77-105,247-252,255-256,259,264,266,268,277-281,309,311-317,326,329-332
+mda/rt/sandbox.py
+  s_27878fb276b595::t_fdd1c056ad0842 8-9,12-15,32-36
+ui/src/features/agents/lib/streamMessagesToUi.test.ts
+  s_27878fb276b595::t_fdd1c056ad0842 122-125
+docs/INSTALLATION.md
+  s_27878fb276b595::t_fdd1c056ad0842 396,398-400,402,462-463,536
+swagger.json
+  s_27878fb276b595::t_fdd1c056ad0842 1000,1180,1611-1652,2526,3160,3899,5351,5376,5533,7680-7752,7768,8080,8671,8831,8838,20272-20373,21477-21479,21485-21489,21496,21499-21502,21511,21519,21522-21525,21531-21535,21542-21543,21545-21546,21555,21563
+ui/src/features/agents/lib/types.ts
+  s_27878fb276b595::t_fdd1c056ad0842 107,145-146
+ui/src/features/reviews/components/PullRequestFiles.tsx
+  s_27878fb276b595::t_fdd1c056ad0842 22,538-539,543
+openswe/resources/prompts/tools/cli_result.md
+  s_27878fb276b595::t_fdd1c056ad0842 5-6
+tests/reviewer/test_remote_runtime.py
+  s_27878fb276b595::t_fdd1c056ad0842 34-80,441-492,597,648,657-661,663-664,667,669-674,676-679,681-685,691-692
+cli/test/stream.test.ts
+  s_27878fb276b595::t_fdd1c056ad0842 3-4,7,76,134,191,278-444
+mda/rt/tracing.py
+  s_27878fb276b595::t_fdd1c056ad0842 61-71,78,131
+openswe/remote_runtime/async_workers.py
+  s_27878fb276b595::t_fdd1c056ad0842 16-19,101,124,131,141,163,184-185,191-192,194-195,197-205
+ui/src/features/agents/components/messages/Messages.test.tsx
+  s_27878fb276b595::t_fdd1c056ad0842 13,99,113-222,363-431
+  s_27878fb276b595::t_14aa98caa0999d 432
+openswe/middleware/model_fallback.py
+  s_27878fb276b595::t_fdd1c056ad0842 4,60
+ui/src/features/agents/components/PlanReview.tsx
+  s_27878fb276b595::t_fdd1c056ad0842 7,267
+openswe/github/org_membership.py
+  s_27878fb276b595::t_fdd1c056ad0842 3,18,60,62-66
+tests/auth/test_github_token_ttl.py
+  s_27878fb276b595::t_fdd1c056ad0842 217-218
+ui/src/features/settings/components/RepoSelector.tsx
+  s_27878fb276b595::t_fdd1c056ad0842 39,88-90,150,154
+openswe/merge_queue/runtime.py
+  s_27878fb276b595::t_fdd1c056ad0842 1-96
+ui/src/features/agents/lib/streamMessagesToUi.ts
+  s_27878fb276b595::t_fdd1c056ad0842 280,369-375,387
+ui/src/lib/appCommands.tsx
+  s_27878fb276b595::t_fdd1c056ad0842 43
+openswe/slack/tools/start_new_thread.py
+  s_27878fb276b595::t_fdd1c056ad0842 4,7,44,175,181-185
+mda/rt/subdir_agents.py
+  s_27878fb276b595::t_fdd1c056ad0842 1-190
+tests/e2e/tests/eval_descriptions.spec.ts
+  s_27878fb276b595::t_fdd1c056ad0842 29-30
+tests/webhooks/test_linear_automation_routes.py
+  s_27878fb276b595::t_fdd1c056ad0842 1-40
+.github/workflows/deploy_mda.yml
+  s_27878fb276b595::t_fdd1c056ad0842 111-112
+openswe/completion.py
+  s_27878fb276b595::t_fdd1c056ad0842 23,531-532,547
+cli/src/api.ts
+  s_27878fb276b595::t_fdd1c056ad0842 20-52,234-278
+  s_27878fb276b595::t_1d64998af263c0 279
+openswe/database/migrations/versions/0080_a7c12a7f1462_stop_tracking_async_worker_launch_runs.py
+  s_27878fb276b595::t_fdd1c056ad0842 1-19
+openswe/merge_queue/scheduler.py
+  s_27878fb276b595::t_fdd1c056ad0842 5,27-29,32-40,42-53,55-70,73-75,77,79,82,85-86,192-201,203-220
+openswe/tasks/service.py
+  s_27878fb276b595::t_fdd1c056ad0842 226-227,244-256,265,276-277,422-423,443,477,479,496,611-612,615,619,627-663,672
+ui/src/features/agents/components/panel/RightPanelTabs.tsx
+  s_27878fb276b595::t_fdd1c056ad0842 101,166,177,185,203,364-368,385-389
+openswe/threads/router.py
+  s_27878fb276b595::t_fdd1c056ad0842 271,386-387
+mda/rt/tool_errors.py
+  s_27878fb276b595::t_fdd1c056ad0842 1-113
+openswe/dispatch.py
+  s_27878fb276b595::t_fdd1c056ad0842 384-395
+.github/workflows/build_preview_branch.yml
+  s_27878fb276b595::t_fdd1c056ad0842 115,132,135-140
+mda/pyproject.toml
+  s_27878fb276b595::t_fdd1c056ad0842 11-12,24-30,43-49
+mda/rt/sandbox_tools.py
+  s_27878fb276b595::t_fdd1c056ad0842 1-197
+openswe/merge_queue/validation.py
+  s_27878fb276b595::t_fdd1c056ad0842 1-167
+tests/dashboard/test_dashboard_github_login_gate.py
+  s_27878fb276b595::t_fdd1c056ad0842 3,6,11,98-128
+  s_27878fb276b595::t_5c7d78fa862f43 129-130
+cli/src/stream.ts
+  s_27878fb276b595::t_fdd1c056ad0842 1-6,9,80-81,112-120,128-132,182,250-253,269,294-346
+openswe/tasks/activity.py
+  s_27878fb276b595::t_fdd1c056ad0842 1-164
+ui/src/features/agents/components/messages/renderItems.ts
+  s_27878fb276b595::t_fdd1c056ad0842 41,48,56,59-60,255-263
+openswe/linear/routes.py
+  s_27878fb276b595::t_fdd1c056ad0842 1-219
+tests/github/test_github_http.py
+  s_27878fb276b595::t_fdd1c056ad0842 4-5,22-56
+  s_27878fb276b595::t_2620c37b15c52b 57-58
+mda/rt/middleware.py
+  s_27878fb276b595::t_fdd1c056ad0842 3,12-13,69,98-125,133-135,352,362,380-382,385-386,399,427-428,440-475,479-480,492,494,641-642
+docs/DEVELOPMENT.md
+  s_27878fb276b595::t_fdd1c056ad0842 131,289
+mda/agent.py
+  s_27878fb276b595::t_fdd1c056ad0842 5-6,8-10,20,37-42,51,53,111,155-159,165-169,179-191,200-201,204,210-229,231-232,238-240,244,247-254
+openswe/dashboard/routes.py
+  s_27878fb276b595::t_fdd1c056ad0842 31,69
+openswe/tasks/store.py
+  s_27878fb276b595::t_fdd1c056ad0842 180-182
+openswe/tasks/events.py
+  s_27878fb276b595::t_fdd1c056ad0842 22-26,52-68,80-85,91-97,110
+openswe/bridge/cli_result.py
+  s_27878fb276b595::t_fdd1c056ad0842 6
+openswe/thread_ids.py
+  s_27878fb276b595::t_fdd1c056ad0842 9,14-15,34-38,61-66
+  s_27878fb276b595::t_e3431b7313b8d9 67-68
+tests/threads/test_thread_status.py
+  s_27878fb276b595::t_fdd1c056ad0842 29-30
+tests/github/test_repo_extraction.py
+  s_27878fb276b595::t_fdd1c056ad0842 1,3,20-33,35,37,40-41,44,46,48-50,52-53,55-56,58-60,63-81,83,85-88,92-104
+ui/src/features/agents/components/messages/timeline/AgentTurn.tsx
+  s_27878fb276b595::t_fdd1c056ad0842 14,216-217,221,314-316,428-431
+mda/README.md
+  s_27878fb276b595::t_fdd1c056ad0842 5,7,9-10,19,23,70
+ui/src/features/reviews/components/TextPopover.tsx
+  s_27878fb276b595::t_fdd1c056ad0842 11-12,82-87,89
+ui/src/features/agents/components/messages/TaskEventMessage.tsx
+  s_27878fb276b595::t_fdd1c056ad0842 9,30-106,108-122,140-151,156
+openswe/resources/prompts/system/shared-base.md
+  s_27878fb276b595::t_fdd1c056ad0842 21
+mda/identity.py
+  s_27878fb276b595::t_fdd1c056ad0842 1
+mda/rt/managed_sandbox.py
+  s_27878fb276b595::t_fdd1c056ad0842 14,32-33,43
+cli/README.md
+  s_27878fb276b595::t_fdd1c056ad0842 133-139,153-155
+tests/github/test_github_issue_webhook.py
+  s_27878fb276b595::t_fdd1c056ad0842 666,668-676,699,712-713,734-735,739,748,752-759,787,796-797,814
+tests/test_task_events.py
+  s_27878fb276b595::t_fdd1c056ad0842 101-104,248-276,284-286,321-322,729
+mda/tests/test_model_calls.py
+  s_27878fb276b595::t_fdd1c056ad0842 1-215
+ui/src/features/settings/components/WorkspaceSettings.test.tsx
+  s_27878fb276b595::t_fdd1c056ad0842 777
+openswe/github/routes.py
+  s_27878fb276b595::t_fdd1c056ad0842 215,287
+openswe/merge_queue/admission.py
+  s_27878fb276b595::t_fdd1c056ad0842 15,36
+.github/workflows/ci.yml
+  s_27878fb276b595::t_fdd1c056ad0842 75-76,82-83,120-121,269,343-349,364-371,373-374,445
+ui/src/features/agents/components/panel/RightPanelTabs.test.ts
+  s_27878fb276b595::t_fdd1c056ad0842 6-8,14,27-28,30-33
+ui/src/lib/appCommands.test.ts
+  s_27878fb276b595::t_fdd1c056ad0842 1-2,6,16,18-25,27-29
+tests/merge_queue/test_merge_queue_store.py
+  s_27878fb276b595::t_fdd1c056ad0842 10,16,19,30,33,704-920
+openswe/remote_runtime/graph.py
+  s_27878fb276b595::t_fdd1c056ad0842 4,22-29,35-36,49,74-75,78,80,82-83,85,87-88,115-120,153-173,176-177,199-200,217,416,427-448,588-593,719-723,737-738,741-745,780,783,790,810,823,838-843,857-859,887
+openswe/sandboxes/tool_runtime.py
+  s_27878fb276b595::t_fdd1c056ad0842 126-127,151-153
+mda/rt/tools.py
+  s_27878fb276b595::t_fdd1c056ad0842 7-9,13,18,49-83,85,87-99
+tests/slack/test_slack_start_new_thread_tool.py
+  s_27878fb276b595::t_fdd1c056ad0842 66-82
+tests/webhooks/test_linear_webhook_author.py
+  s_27878fb276b595::t_fdd1c056ad0842 1-178
+mda/rt/validate_image_reads.py
+  s_27878fb276b595::t_fdd1c056ad0842 1-88
+openswe/threads/runtimes.py
+  s_27878fb276b595::t_fdd1c056ad0842 60,62,67,73,116-121,279
+ui/src/features/settings/components/RepoSelector.test.tsx
+  s_27878fb276b595::t_fdd1c056ad0842 15-44
+Makefile
+  s_27878fb276b595::t_fdd1c056ad0842 1,141-147,173-174
+mda/uv.lock
+  s_27878fb276b595::t_ab0199fe64156a 22-185,602-610,834-942,1041-1053,1089-1097,1390-1405,1666-1803,1813,1823-1828,1835,1845-1850,2006-2125,2353-2381,3313-3428
+pnpm-lock.yaml
+  s_27878fb276b595::t_dfd912c1249d01 101-102,4519-4520,11101
+uv.lock
+  s_27878fb276b595::t_a38135fcd1bf8d 11-12,2027,2066,2068,2108,2114,2116,2121,2132,2134
+vendor/managed-deepagents-sdk/crates/mda/src/compile/mod.rs
+  s_27878fb276b595::t_1aa5bdd968453a 124,129
+vendor/managed-deepagents-sdk/packages/pypi/src/managed_deepagents/_run_input.py
+  s_27878fb276b595::t_b237991d36d4a9 4,13,59-78,104-105,118-119,146-147,161-162,178-183
+vendor/managed-deepagents-sdk/packages/pypi/src/managed_deepagents/define_deep_agent.py
+  s_27878fb276b595::t_8b97f4da9a5280 121,199-200
+vendor/managed-deepagents-sdk/packages/pypi/src/managed_deepagents/runtime.py
+  s_27878fb276b595::t_f11834c63dff61 886,929-933,1006
+vendor/mda-changes/2026-10-20-requested-project-tracing.md
+  s_27878fb276b595::t_566a8d22196d85 1-7
+vendor/mda-changes/2026-10-22-agent-server-dev-release.md
+  s_27878fb276b595::t_d1de30f27f926c 1-7
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "ab67113c772313c9b890e3cab55a92688d82b985",
+  "prompts": {},
+  "sessions": {
+    "s_27878fb276b595": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "45ee8f61-55f2-484d-a39a-c3b1cad86d8d",
+        "model": "claude-sonnet-5-5"
+      },
+      "human_author": "Kiewan Villatel <kiewan@langchain.dev>"
+    }
+  }
+}
