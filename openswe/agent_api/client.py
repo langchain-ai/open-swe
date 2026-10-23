@@ -83,6 +83,12 @@ def mda_runtime_api_key() -> str | None:
     return ENV.MDA_RUNTIME_API_KEY.optional() or ENV.LANGSMITH_API_KEY.optional()
 
 
+#: Sent with the LangSmith key on reads only: MDA then treats the call as LangSmith
+#: Studio's, which may read and search every thread, channel threads included. Writes
+#: go without it, so MDA keeps them scoped to the threads the backend owns.
+MDA_STUDIO_READ_HEADERS: Final[Mapping[str, str]] = {"x-auth-scheme": "langsmith"}
+
+
 async def remote_run_context(
     configurable: dict[str, JsonValue],
     *,

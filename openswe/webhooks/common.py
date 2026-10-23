@@ -2,7 +2,6 @@
 
 import asyncio
 import hashlib
-import hmac
 import json
 import logging
 from collections.abc import Collection, Mapping, Sequence
@@ -71,7 +70,6 @@ from openswe.github.token import (
 )
 from openswe.github.token_scope import GITHUB_TOKEN_REPOSITORIES_KEY, event_token_repositories
 from openswe.input_messages import PersonIdentity
-from openswe.linear.comments import get_recent_comments  # noqa: F401
 from openswe.prompts import prompt
 from openswe.review.enabled_repos import is_review_repo_enabled
 from openswe.review.findings import (
@@ -173,7 +171,6 @@ __all__ = [
     "GITHUB_WEBHOOK_SECRET",
     "HTTPException",
     "LANGGRAPH_URL",
-    "LINEAR_WEBHOOK_SECRET",
     "OPEN_SWE_TAGS",
     "REVIEWER_THREAD_KIND",
     "Request",
@@ -247,7 +244,6 @@ __all__ = [
     "get_github_app_installation_token",
     "get_github_app_installation_token_with_expiry",
     "get_profile_default_repo",
-    "get_recent_comments",
     "SlackRepoResolution",
     "get_slack_repo_config",
     "get_slack_user_info",
@@ -290,7 +286,6 @@ __all__ = [
     "update_slack_message",
     "upsert_agent_thread_metadata",
     "verify_github_signature",
-    "verify_linear_signature",
     "verify_slack_signature",
     "workspace_for_repo_config",
 ]
@@ -318,7 +313,6 @@ if ENV.DEBUG_TRACEMALLOC.optional():
     )
 
 
-LINEAR_WEBHOOK_SECRET = ENV.LINEAR_WEBHOOK_SECRET.get()
 GITHUB_WEBHOOK_SECRET = ENV.GITHUB_WEBHOOK_SECRET.get()
 SLACK_SIGNING_SECRET = ENV.SLACK_SIGNING_SECRET.get()
 SLACK_BOT_USER_ID = ENV.SLACK_BOT_USER_ID.get()
@@ -979,29 +973,6 @@ async def post_account_link_prompt(
             )
     except Exception:  # noqa: BLE001
         logger.debug("Failed to post account-link prompt to Slack", exc_info=True)
-
-
-def verify_linear_signature(body: bytes, signature: str, secret: str) -> bool:
-    """Verify the Linear webhook signature.
-
-    Args:
-        body: Raw request body bytes
-        signature: The Linear-Signature header value
-        secret: The webhook signing secret
-
-    Returns:
-        True if signature is valid, False otherwise
-    """
-    if not secret:
-        logger.warning("LINEAR_WEBHOOK_SECRET is not configured — rejecting webhook request")
-        return False
-
-    if not signature:
-        return False
-
-    expected = hmac.new(secret.encode("utf-8"), body, hashlib.sha256).hexdigest()
-
-    return hmac.compare_digest(expected, signature)
 
 
 GITHUB_CI_EVENTS = frozenset(["check_run", "check_suite", "workflow_run", "status"])

@@ -292,9 +292,11 @@ header. The Currents REST API URL itself does not speak MCP, and the local
 Optional reviewer trace resolution and personal LangSmith credential proxying
 have been removed. Configure agent access to LangSmith through Workspace MCPs.
 Sandbox provisioning uses the deployment's `LANGSMITH_API_KEY` and
-`LANGSMITH_ENDPOINT`. Linear webhook intake uses the signed webhook setup;
-configure Linear replies and other agent operations through Workspace MCPs.
-Automatic failure notices use the workspace connection named `linear` and its
+`LANGSMITH_ENDPOINT`. Linear sessions arrive through the MDA deployment's Linear
+channel, which posts the agent's answer in the session; configure other Linear
+operations through Workspace MCPs. The channel reports a session's failed run in
+the session. Notices a run posts on its issue itself, such as a failing sandbox,
+use the workspace connection named `linear` and its
 selected `save_comment` tool (`create_comment` is also supported). These notices
 run independently of the agent and honor the connection's enabled state and tool
 selection. Delivery failures are logged without marking the run as notified.

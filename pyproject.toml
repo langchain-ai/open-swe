@@ -7,6 +7,10 @@ requires-python = ">=3.14"
 license = { text = "MIT" }
 dependencies = [
     "deepagents==0.7.32",
+    # The types of the event endpoint requests the MDA deployment's channels send (mda/).
+    "managed-deepagents==0.10.0.dev15",
+    # Verifies the signature MDA puts on those requests (MDA_SERVICE_SECRET).
+    "standardwebhooks>=1.1.0",
     "fastapi>=0.141.1",
     "uvicorn>=0.52.4",
     "httpx2>=2.12.0",
@@ -130,6 +134,9 @@ ignore = [
 # an intra-package import from a cross-package one; names these modules expose
 # to the rest of the codebase are public.
 "openswe/threads/*" = ["PLC2701"]
+# MDA builds the deployment on Python 3.13, which evaluates annotations as it
+# defines them, so a name imported only for type checking stays quoted there.
+"mda/**" = ["UP037"]
 
 [tool.ruff.lint.flake8-tidy-imports.banned-api]
 "__future__.annotations".msg = "Do not use postponed annotation evaluation."

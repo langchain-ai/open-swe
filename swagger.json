@@ -920,7 +920,7 @@
             "anyOf": [
               {
                 "additionalProperties": {
-                  "$ref": "#/components/schemas/JsonValue"
+                  "$ref": "#/components/schemas/pydantic__types__JsonValue"
                 },
                 "type": "object"
               },
@@ -1084,7 +1084,7 @@
             "anyOf": [
               {
                 "additionalProperties": {
-                  "$ref": "#/components/schemas/JsonValue"
+                  "$ref": "#/components/schemas/JsonValue-Input"
                 },
                 "type": "object"
               },
@@ -1264,7 +1264,7 @@
           },
           "params": {
             "additionalProperties": {
-              "$ref": "#/components/schemas/JsonValue"
+              "$ref": "#/components/schemas/pydantic__types__JsonValue"
             },
             "title": "Params",
             "type": "object"
@@ -1947,6 +1947,125 @@
         "title": "EnabledReviewRepoUpdate",
         "type": "object"
       },
+      "EndpointAnswer": {
+        "additionalProperties": false,
+        "description": "The run an endpoint answers with: its input, and the run options a handler\nmay set, all JSON. An endpoint answers ``null`` (or HTTP 204) instead to start\nnothing.",
+        "properties": {
+          "context": {
+            "additionalProperties": {
+              "$ref": "#/components/schemas/managed_deepagents___channels__types__JsonValue"
+            },
+            "title": "Context",
+            "type": "object"
+          },
+          "input": {
+            "$ref": "#/components/schemas/managed_deepagents___channels__types__JsonValue"
+          },
+          "metadata": {
+            "additionalProperties": {
+              "$ref": "#/components/schemas/managed_deepagents___channels__types__JsonValue"
+            },
+            "title": "Metadata",
+            "type": "object"
+          },
+          "webhook": {
+            "title": "Webhook",
+            "type": "string"
+          }
+        },
+        "required": [
+          "input"
+        ],
+        "title": "EndpointAnswer",
+        "type": "object"
+      },
+      "EndpointEvent_str_dict_str__Any__": {
+        "description": "The event a channel sends its endpoint, as the provider sent it.\n\n``EndpointEvent[Literal[\"AgentSessionEvent.created\"], LinearSessionCreatedPayload]``\ntypes one event key's payload; ``LinearEndpointRequest`` and\n``GitHubEndpointRequest`` are the unions of a channel's keys.",
+        "properties": {
+          "deliveryId": {
+            "title": "Deliveryid",
+            "type": "string"
+          },
+          "key": {
+            "title": "Key",
+            "type": "string"
+          },
+          "payload": {
+            "additionalProperties": true,
+            "title": "Payload",
+            "type": "object"
+          }
+        },
+        "required": [
+          "key",
+          "deliveryId",
+          "payload"
+        ],
+        "title": "EndpointEvent",
+        "type": "object"
+      },
+      "EndpointEvent_str_dict_str__JsonValue__": {
+        "description": "The event a channel sends its endpoint, as the provider sent it.\n\n``EndpointEvent[Literal[\"AgentSessionEvent.created\"], LinearSessionCreatedPayload]``\ntypes one event key's payload; ``LinearEndpointRequest`` and\n``GitHubEndpointRequest`` are the unions of a channel's keys.",
+        "properties": {
+          "deliveryId": {
+            "title": "Deliveryid",
+            "type": "string"
+          },
+          "key": {
+            "title": "Key",
+            "type": "string"
+          },
+          "payload": {
+            "additionalProperties": {
+              "$ref": "#/components/schemas/JsonValue-Input"
+            },
+            "title": "Payload",
+            "type": "object"
+          }
+        },
+        "required": [
+          "key",
+          "deliveryId",
+          "payload"
+        ],
+        "title": "EndpointEvent",
+        "type": "object"
+      },
+      "EndpointThread": {
+        "description": "The conversation's thread an endpoint request is about.",
+        "properties": {
+          "channel": {
+            "$ref": "#/components/schemas/EndpointThreadChannel"
+          },
+          "id": {
+            "title": "Id",
+            "type": "string"
+          },
+          "interrupted": {
+            "title": "Interrupted",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "id",
+          "channel"
+        ],
+        "title": "EndpointThread",
+        "type": "object"
+      },
+      "EndpointThreadChannel": {
+        "properties": {
+          "name": {
+            "title": "Name",
+            "type": "string"
+          }
+        },
+        "required": [
+          "name"
+        ],
+        "title": "EndpointThreadChannel",
+        "type": "object"
+      },
       "EntryView": {
         "properties": {
           "number": {
@@ -2276,6 +2395,23 @@
           "ready"
         ],
         "title": "GatewayStatus",
+        "type": "object"
+      },
+      "GitHubChannelCall": {
+        "description": "What MDA's GitHub channel POSTs: the event and its thread.\n\nMDA's ``EndpointRequest``, with its fields named here: pydantic doesn't apply a\ngeneric TypedDict's type arguments to a subclass, and the API schema gets a\nname of its own.",
+        "properties": {
+          "event": {
+            "$ref": "#/components/schemas/EndpointEvent_str_dict_str__Any__"
+          },
+          "thread": {
+            "$ref": "#/components/schemas/EndpointThread"
+          }
+        },
+        "required": [
+          "event",
+          "thread"
+        ],
+        "title": "GitHubChannelCall",
         "type": "object"
       },
       "GitHubTrigger": {
@@ -2618,7 +2754,7 @@
         ],
         "type": "string"
       },
-      "JsonValue": {},
+      "JsonValue-Input": {},
       "LabelChange": {
         "properties": {
           "name": {
@@ -2691,6 +2827,23 @@
           "body"
         ],
         "title": "LineComment",
+        "type": "object"
+      },
+      "LinearChannelCall": {
+        "description": "What MDA's Linear channel POSTs: the event it validated and its thread.\n\nMDA's ``EndpointRequest``, with its fields named here: pydantic doesn't apply a\ngeneric TypedDict's type arguments to a subclass, and the API schema gets a\nname of its own.",
+        "properties": {
+          "event": {
+            "$ref": "#/components/schemas/EndpointEvent_str_dict_str__JsonValue__"
+          },
+          "thread": {
+            "$ref": "#/components/schemas/EndpointThread"
+          }
+        },
+        "required": [
+          "event",
+          "thread"
+        ],
+        "title": "LinearChannelCall",
         "type": "object"
       },
       "LinearTrigger": {
@@ -3289,7 +3442,7 @@
             "anyOf": [
               {
                 "items": {
-                  "$ref": "#/components/schemas/JsonValue"
+                  "$ref": "#/components/schemas/pydantic__types__JsonValue"
                 },
                 "type": "array"
               },
@@ -3518,7 +3671,7 @@
           },
           "settings": {
             "additionalProperties": {
-              "$ref": "#/components/schemas/JsonValue"
+              "$ref": "#/components/schemas/pydantic__types__JsonValue"
             },
             "title": "Settings",
             "type": "object"
@@ -4085,7 +4238,7 @@
         "properties": {
           "annotations": {
             "items": {
-              "$ref": "#/components/schemas/JsonValue"
+              "$ref": "#/components/schemas/pydantic__types__JsonValue"
             },
             "title": "Annotations",
             "type": "array"
@@ -5629,7 +5782,7 @@
             "anyOf": [
               {
                 "additionalProperties": {
-                  "$ref": "#/components/schemas/JsonValue"
+                  "$ref": "#/components/schemas/JsonValue-Input"
                 },
                 "type": "object"
               },
@@ -5654,7 +5807,7 @@
             "anyOf": [
               {
                 "additionalProperties": {
-                  "$ref": "#/components/schemas/JsonValue"
+                  "$ref": "#/components/schemas/JsonValue-Input"
                 },
                 "type": "object"
               },
@@ -5886,7 +6039,7 @@
           },
           "tools": {
             "items": {
-              "$ref": "#/components/schemas/JsonValue"
+              "$ref": "#/components/schemas/pydantic__types__JsonValue"
             },
             "title": "Tools",
             "type": "array"
@@ -8180,7 +8333,7 @@
           },
           "create_params": {
             "additionalProperties": {
-              "$ref": "#/components/schemas/JsonValue"
+              "$ref": "#/components/schemas/pydantic__types__JsonValue"
             },
             "title": "Create Params",
             "type": "object"
@@ -8492,7 +8645,7 @@
           },
           "create_params": {
             "additionalProperties": {
-              "$ref": "#/components/schemas/JsonValue"
+              "$ref": "#/components/schemas/JsonValue-Input"
             },
             "title": "Create Params",
             "type": "object"
@@ -9083,7 +9236,7 @@
             "anyOf": [
               {
                 "additionalProperties": {
-                  "$ref": "#/components/schemas/JsonValue"
+                  "$ref": "#/components/schemas/JsonValue-Input"
                 },
                 "type": "object"
               },
@@ -9241,16 +9394,48 @@
         "title": "WorkspaceUpdate",
         "type": "object"
       },
+      "managed_deepagents___channels__types__JsonValue": {
+        "anyOf": [
+          {
+            "type": "boolean"
+          },
+          {
+            "type": "integer"
+          },
+          {
+            "type": "number"
+          },
+          {
+            "type": "string"
+          },
+          {
+            "items": {
+              "$ref": "#/components/schemas/managed_deepagents___channels__types__JsonValue"
+            },
+            "type": "array"
+          },
+          {
+            "additionalProperties": {
+              "$ref": "#/components/schemas/managed_deepagents___channels__types__JsonValue"
+            },
+            "type": "object"
+          },
+          {
+            "type": "null"
+          }
+        ]
+      },
       "openswe__transcript__events__JsonObject": {
         "additionalProperties": {
-          "$ref": "#/components/schemas/JsonValue"
+          "$ref": "#/components/schemas/pydantic__types__JsonValue"
         },
         "type": "object"
       },
       "openswe__utils__json_types__JsonObject": {
         "additionalProperties": true,
         "type": "object"
-      }
+      },
+      "pydantic__types__JsonValue": {}
     },
     "securitySchemes": {
       "DashboardSession": {
@@ -22438,6 +22623,53 @@
         ]
       }
     },
+    "/github/channel/events": {
+      "post": {
+        "description": "The run an @openswe mention on an issue starts on the channel's thread, or ``None``.\n\nWhile the thread waits on an interrupt nothing starts: a non-null answer only\ntells the channel Open SWE would act, so it points the issue to the decision.",
+        "operationId": "github_channel_event_github_channel_events_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/GitHubChannelCall"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "anyOf": [
+                    {
+                      "$ref": "#/components/schemas/EndpointAnswer"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ],
+                  "title": "Response Github Channel Event Github Channel Events Post"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Github Channel Event"
+      }
+    },
     "/health": {
       "get": {
         "operationId": "health_check_health_get",
@@ -22458,6 +22690,53 @@
           }
         },
         "summary": "Health Check"
+      }
+    },
+    "/linear/channel/events": {
+      "post": {
+        "description": "The run a Linear event starts, or ``None`` to start nothing.\n\nAn agent session turn starts the run it prepares; ``None`` there declines, and\nthe channel tells the session. Issue events run Linear automations.",
+        "operationId": "linear_channel_event_linear_channel_events_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/LinearChannelCall"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "anyOf": [
+                    {
+                      "$ref": "#/components/schemas/EndpointAnswer"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ],
+                  "title": "Response Linear Channel Event Linear Channel Events Post"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Linear Channel Event"
       }
     },
     "/webhooks/github": {
@@ -22481,50 +22760,6 @@
           }
         },
         "summary": "Github Webhook"
-      }
-    },
-    "/webhooks/linear": {
-      "get": {
-        "description": "Verify endpoint for Linear webhook setup.",
-        "operationId": "linear_webhook_verify_webhooks_linear_get",
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "additionalProperties": {
-                    "type": "string"
-                  },
-                  "title": "Response Linear Webhook Verify Webhooks Linear Get",
-                  "type": "object"
-                }
-              }
-            },
-            "description": "Successful Response"
-          }
-        },
-        "summary": "Linear Webhook Verify"
-      },
-      "post": {
-        "description": "Handle Linear webhooks.\n\nTriggers a new LangGraph run when an issue gets the 'open-swe' label added.",
-        "operationId": "linear_webhook_webhooks_linear_post",
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "additionalProperties": {
-                    "type": "string"
-                  },
-                  "title": "Response Linear Webhook Webhooks Linear Post",
-                  "type": "object"
-                }
-              }
-            },
-            "description": "Successful Response"
-          }
-        },
-        "summary": "Linear Webhook"
       }
     },
     "/webhooks/rollout": {
