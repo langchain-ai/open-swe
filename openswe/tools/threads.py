@@ -44,6 +44,7 @@ from openswe.threads.workflow_approval import (
     get_workflow_push_approvals,
     workflow_push_approval_responses,
 )
+from openswe.tools.lookup_user import github_login_for_ref
 from openswe.tools.mcp_exposure import expose_mcp
 from openswe.users import User
 from openswe.utils.dashboard_links import (
@@ -264,9 +265,14 @@ async def list_threads(
     actor = await _reader(state)
     if actor is None:
         return _failure(_NO_ACTOR)
-    requested = (
-        participant.strip() if isinstance(participant, str) and participant.strip() else None
-    )
+    try:
+        requested = (
+            await github_login_for_ref(participant)
+            if isinstance(participant, str) and participant.strip()
+            else None
+        )
+    except ValueError as exc:
+        return _failure(str(exc))
     if requested and all_users:
         return _failure("participant and all_users cannot be used together")
     if scope not in {"all", "interactive", "automation"}:

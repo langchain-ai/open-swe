@@ -41,6 +41,8 @@ logger = logging.getLogger(__name__)
 
 Provider = Literal["github", "slack"]
 
+USER_REF_PREFIX = "user:"
+
 
 class UserIdentity(Base):
     __tablename__ = "user_identity"
@@ -76,6 +78,11 @@ class User(Base):
     def login_for(self, provider: Provider) -> str:
         """This person's handle on ``provider``, for display; never an identity key."""
         return self._identity_field(provider, "login") or self.display_name or str(self.id)[:8]
+
+    @property
+    def ref(self) -> str:
+        """The id agents and their tools name this person by: ``user:<uuid>``."""
+        return f"{USER_REF_PREFIX}{self.id}"
 
     @property
     def github_login(self) -> str:
@@ -120,6 +127,15 @@ class User(Base):
     async def get(cls, user_id: UUID) -> Self | None:
         async with postgres.session() as session:
             return await cls._load(session, user_id)
+
+    @classmethod
+    async def for_ref(cls, ref: str) -> Self | None:
+        """The person a ``user:<uuid>`` id names, or ``None``."""
+        try:
+            user_id = UUID(ref.strip().removeprefix(USER_REF_PREFIX))
+        except ValueError:
+            return None
+        return await cls.get(user_id) if postgres.configured() else None
 
     @classmethod
     async def for_session(cls, user_id: UUID | None, github_login: str) -> Self | None:
@@ -209,7 +225,7 @@ class User(Base):
         What the agent is told about a person is built from this row by the run,
         so an ingress only needs the key that ties its surface to it.
         """
-        return {**person, "id": f"user:{self.id}"}
+        return {**person, "id": self.ref}
 
     @classmethod
     async def login_for_slack(cls, slack_user_id: str | None) -> str | None:

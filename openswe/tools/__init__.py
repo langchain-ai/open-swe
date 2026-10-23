@@ -25,6 +25,7 @@ _TOOL_MODULES = {
     "list_automations": ".automations",
     "list_event_types": ".listen_events",
     "listen_events": ".listen_events",
+    "lookup_user": ".lookup_user",
     "monitor": ".monitor",
     "list_workspaces": ".workspaces",
     "list_findings": ".list_findings",
@@ -108,6 +109,7 @@ __all__ = [
     "list_automations",
     "list_event_types",
     "listen_events",
+    "lookup_user",
     "monitor",
     "list_workspaces",
     "list_findings",
@@ -207,6 +209,7 @@ if TYPE_CHECKING:
     from openswe.tools.list_findings import list_findings
     from openswe.tools.list_review_findings import list_review_findings
     from openswe.tools.listen_events import list_event_types, listen_events
+    from openswe.tools.lookup_user import lookup_user
     from openswe.tools.manage_baby_sit import manage_baby_sit
     from openswe.tools.merge_expedited_pr import merge_expedited_pr
     from openswe.tools.monitor import monitor

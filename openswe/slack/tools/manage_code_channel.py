@@ -40,6 +40,7 @@ from openswe.slack.move import SlackRebindError, rebind_slack_thread
 from openswe.source_context import SlackThreadRef
 from openswe.threads.summary import thread_is_private
 from openswe.tools.create_sandbox_file_download_url import resolve_sandbox_file
+from openswe.tools.lookup_user import slack_ids_for_refs
 from openswe.utils.dashboard_links import dashboard_thread_url
 from openswe.utils.json_types import thread_metadata
 from openswe.utils.thread_ops import langgraph_client
@@ -116,13 +117,17 @@ async def manage_code_channel(
                 }
             if is_code_channel_session(thread_ts):
                 return {"success": False, "error": "This session is already a code channel"}
+            try:
+                invitees = await slack_ids_for_refs(invite or [])
+            except ValueError as exc:
+                return {"success": False, "error": str(exc)}
             return await _create(
                 client,
                 thread_id,
                 active,
                 await _code_channel_title(client, thread_id, title),
                 cfg.repo.model_dump() if cfg.repo else None,
-                invite=invite or [],
+                invite=invitees,
                 team_id=team_id,
                 is_private=is_private,
             )

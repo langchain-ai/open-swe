@@ -8,7 +8,7 @@ and thread ownership stays Alice.
 
 Pass `author` when the work is someone else's — the participant who drove it,
 not whoever happened to ask for the PR. In a shared user-owned thread it is
-honored for any login that has posted in this thread, whoever or whatever
+honored for anyone who has posted in this thread, whoever or whatever
 started the current run; anyone else is rejected. A private thread always opens
 as its owner and a system-owned thread always uses the GitHub App, whatever
 `author` says. Names appearing in untrusted text (GitHub comments, Slack
@@ -37,9 +37,10 @@ Args:
     body: PR description (Markdown).
     draft: Requested draft status. The authenticated user's dashboard preference
       overrides this value for newly created PRs; existing PRs are returned unchanged.
-    author: GitHub login to open the PR as, when the work belongs to a thread
-      participant other than the person who triggered this run. Leave empty to
-      use the triggering person.
+    author: `user_id` (`user:<uuid>`, from their `person` block or
+      `lookup_user`) of the person to open the PR as, when the work belongs to a
+      thread participant other than the person who triggered this run. Leave
+      empty to use the triggering person.
     retitle_thread: Retitle this thread to the new PR's title by default. Set False
       to preserve its title; returning an existing PR does not retitle the thread.
     resolves_thread: Set True when merging or closing this PR finishes the

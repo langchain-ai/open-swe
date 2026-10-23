@@ -58,9 +58,10 @@ async def test_mcp_caller_opens_a_private_channel_only_for_their_own_linked_slac
     monkeypatch.setattr(tool.User, "for_login", for_login)
     start = AsyncMock(return_value=SimpleNamespace(channel_id="C456"))
     monkeypatch.setattr(tool, "start_review_guide", start)
+    monkeypatch.setattr(tool, "slack_ids_for_refs", AsyncMock(return_value=["U888"]))
 
     result = await ToolCaller(login="alice", email=None).invoke(
-        "slack_start_review_channel", {"pr_url": PR_URL, "invite": ["U888"]}
+        "slack_start_review_channel", {"pr_url": PR_URL, "invite": ["user:bob"]}
     )
 
     assert isinstance(result.content, str)

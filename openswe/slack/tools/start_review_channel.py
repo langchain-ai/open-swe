@@ -9,6 +9,7 @@ from openswe.run_config import RunConfig
 from openswe.slack.client import get_active_slack_thread
 from openswe.source_context import SlackThreadRef
 from openswe.threads.summary import thread_is_private
+from openswe.tools.lookup_user import slack_ids_for_refs
 from openswe.tools.mcp_exposure import expose_mcp
 from openswe.users import User
 from openswe.utils.json_types import thread_metadata
@@ -29,13 +30,17 @@ async def slack_start_review_channel(
     owner, repo, number = parsed
     cfg = RunConfig.from_runtime()
     try:
+        invitees = await slack_ids_for_refs(invite or [])
+    except ValueError as exc:
+        return {"success": False, "error": str(exc)}
+    try:
         origin = (
             await _mcp_caller_origin(caller)
             if (caller := cfg.mcp_caller)
             else await _slack_origin(cfg)
         )
         started = await start_review_guide(
-            GuideStart(owner=owner, repo=repo, number=number, origin=origin, invite=invite or [])
+            GuideStart(owner=owner, repo=repo, number=number, origin=origin, invite=invitees)
         )
     except GuideStartError as exc:
         return {"success": False, "error": str(exc)}
