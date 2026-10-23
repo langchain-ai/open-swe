@@ -106,6 +106,7 @@ The deployment's `.env`, forwarded as deployment secrets by `mda deploy`:
 | `LANGSMITH_API_KEY` | Authenticates the LLM Gateway and tracing |
 | `ANTHROPIC_API_KEY`, `OPENAI_API_KEY`, … | Model keys for direct (non-gateway) model calls and deepagents' summarization |
 | `LANGSMITH_GATEWAY_API_KEY` | Gateway key, the backend's; falls back to `LANGSMITH_API_KEY` |
+| `MDA_SERVICE_SECRET` | Shared with the backend: MDA signs each call its channels make to the backend's endpoints with it, as Standard Webhooks does |
 
 The backend:
 
@@ -114,6 +115,7 @@ The backend:
 | `MDA_RUNTIME_URL` | This deployment's URL; every new agent, reviewer and review scout thread runs here |
 | `MDA_RUNTIME_API_KEY` | LangSmith service key the backend calls this deployment with |
 | `REMOTE_RUNTIME_TOKEN_SECRET` | Signs run tokens; comma-separated for rotation |
+| `MDA_SERVICE_SECRET` | The same value as this deployment's; `/linear/channel/*` and `/github/channel/*` answer only calls signed with it |
 
 ## Run locally
 
@@ -136,12 +138,12 @@ Each Open SWE backend calls its own MDA deployment, created with `mda deploy`:
 | `open-swe-mda-preview` | `open-swe-preview` |
 | `open-swe-mda-prod` | `open-swe-v3` |
 
-Each deployment's configuration is `OPEN_SWE_BACKEND_URL` and `LANGSMITH_GATEWAY_API_KEY`, in the project `.env` that `mda deploy` forwards as secrets, replacing any set before.
+Each deployment's configuration is `OPEN_SWE_BACKEND_URL`, `LANGSMITH_GATEWAY_API_KEY` and `MDA_SERVICE_SECRET` (repository secret `MDA_SERVICE_SECRET_<ENVIRONMENT>`), in the project `.env` that `mda deploy` forwards as secrets, replacing any set before.
 The gateway key is its backend's, so model calls count against that key's gateway spend cap; without it they fall back to the deployment's own LangSmith key and the workspace's cap.
 `deploy_mda.yml` reads it from the `LANGSMITH_GATEWAY_API_KEY_PROD` or `LANGSMITH_GATEWAY_API_KEY_STAGING` repository secret; `build_preview_branch.yml` reads `LANGSMITH_GATEWAY_API_KEY_PREVIEW`.
 Deploys fail if their gateway key is missing.
 The backends' `MDA_RUNTIME_URL` and `REMOTE_RUNTIME_TOKEN_SECRET` live in their Terraform.
-To deploy one by hand from the repository root, with `mda/.env` holding that deployment's backend URL and gateway key:
+To deploy one by hand from the repository root, with `mda/.env` holding that deployment's backend URL, gateway key and `MDA_SERVICE_SECRET`:
 
 ```bash
 make mda-cli
@@ -159,6 +161,46 @@ Nothing here is generated from the backend: operations, subagents and models com
 
 Locally, each fresh `mda dev` start rebuilds `.mda/build` and starts with empty checkpoints.
 MDA's dev server also refuses loopback webhooks, so the completion webhook (`COMPLETION_WEBHOOK_URL`) needs the backend at a non-loopback URL.
+
+## Linear
+
+The deployment's Linear channel (`channels/linear.py`) is how Open SWE works in Linear.
+Mentioning the app on an issue, or delegating the issue to it, opens an agent session.
+Each session is its own conversation: the channel starts its runs on the session's own thread, so the answer, Stop, interrupt notices and errors reach the session.
+A reply in the session is the next run there; a new mention on the same issue opens a new session and thread.
+
+The channel verifies each delivery (Linear's signature and timestamp).
+The backend decides everything else, as for any other run: the repository, the workspace, the input, and the signed run token.
+Every handled event goes to the backend's endpoint, `POST /linear/channel/events` (the channel's `on_event` names it): MDA posts `{event: {key, deliveryId, payload}, thread}`, with the payload it validated.
+For a session event the backend indexes the thread and answers with the run's input, context, metadata and webhook; issue and comment events start no conversation, so it answers `null`, after logging them for `listen_events` and running Linear automations.
+The endpoint answers only calls MDA signed with `MDA_SERVICE_SECRET`.
+
+Threads of Linear sessions belong to the channel, and MDA scopes threads by owner.
+The backend reads them as LangSmith Studio does (its LangSmith key with `x-auth-scheme: langsmith`), which MDA allows for reads only, so the dashboard shows them read-only: the backend starts no runs on them and writes nothing there.
+Each run carries the backend's run-complete webhook, so `/webhooks/run-complete` completes it as it does the backend's own runs.
+The channel reports failures in the session itself.
+
+`mda deploy` sets up the Linear app, which takes a Linear workspace admin; see [Linear](../docs/INSTALLATION.md#linear).
+
+## GitHub
+
+The deployment's GitHub channel (`channels/github.py`) handles `@openswe` mentions on issues: `issues.opened`, `edited` and `reopened` with the handle in the title or body, and `issue_comment.created` and `edited` with it in the comment, on issues only.
+One issue is one conversation, on the channel's own thread, and a new mention interrupts the run in progress, as before.
+Pull requests, reviews, CI, the reviewer and automations stay on the backend.
+
+The channel uses Open SWE's own GitHub App: `mda deploy` brings it (App ID, private key, installation ID and webhook secret), and its webhook stays at the backend's `/webhooks/github`.
+The backend forwards the issue events that would start a run to `<deployment>/channels/github/events` exactly as GitHub sent them, instead of starting the run itself.
+Deploy remembers that the webhook stays at the backend once you answer "No" to moving it; without a terminal, `MDA_GITHUB_WEBHOOK_ELSEWHERE` names the backend's URL.
+
+Without a terminal, deploy brings the App from `MDA_GITHUB_APP_ID`, `MDA_GITHUB_APP_PRIVATE_KEY_FILE`, `MDA_GITHUB_APP_INSTALLATION_ID` and `MDA_GITHUB_WEBHOOK_SECRET`, all or none, and hands them to Agent Auth only.
+Both deploy workflows set them for a deployment that has no App yet: the App and installation IDs are the ones its backend uses, and the key and webhook secret come from the `MDA_GITHUB_APP_PRIVATE_KEY_<ENVIRONMENT>` and `MDA_GITHUB_WEBHOOK_SECRET_<ENVIRONMENT>` repository secrets, the same values as the backend's `GITHUB_APP_PRIVATE_KEY` and `GITHUB_WEBHOOK_SECRET`.
+A deployment that already has its App keeps it.
+Without them, the deploy of a deployment with no App fails before uploading anything.
+
+The channel's `on_event` names the backend's endpoint, `POST /github/channel/events`, which it asks what each event starts: MDA posts `{event: {key, deliveryId, payload}, thread}`.
+The backend applies the same gates as its own intake, reacts to the comment, builds the prompt, writes and indexes the thread, and answers with the input, the run context with a run token signed for the channel's thread, the run metadata and the run-complete webhook, or `null` to start nothing.
+While the thread waits on an interrupt it only answers whether Open SWE would act, so the channel points the issue to the decision.
+Its threads are the channel's, as Linear sessions' are: read-only on the backend, and completed through `/webhooks/run-complete`, which also posts Open SWE's failure reply on the issue, as before.
 
 ## Observability
 

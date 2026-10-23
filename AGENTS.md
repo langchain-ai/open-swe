@@ -38,6 +38,7 @@ Shrink it toward named APIs and MDA middleware; add nothing to it.
   A new class must own real state, never be a bag of arguments.
 - Call GitHub through named `RepoClient`/`PullRequestClient` methods (e.g. `pull.comment(body)`); outside `openswe/github/http.py` and `openswe/github/pull_request_status.py`, never pass a REST path or GraphQL query to the transport (`get`, `post`, `patch`, `delete`, `pages`, `graphql`, `request`).
   Open the client as who it acts for, `GitHubClient.as_user(login)` or `GitHubClient.as_app(owner, repo)`; `GitHubClient.connect(token=...)` is only for a token a run was handed.
+- Build a per-call `httpx2.AsyncClient` with `transport=pooled_transport()` (an `aiohttp` session with `connector=pooled_connector(), connector_owner=False`) from `openswe/utils/http_pool.py`, so it reuses the event loop's warm connections instead of opening new ones.
 - Absolute imports across packages; same-package imports may start with one dot.
   Never use parent-relative imports.
 - New dashboard endpoints go in the `router` of the package that owns the feature, never in `openswe/dashboard/routes.py`.
