@@ -1,3 +1,8 @@
+from collections.abc import AsyncIterator
+from datetime import UTC, datetime
+from types import SimpleNamespace
+from unittest.mock import AsyncMock
+
 import pytest
 
 from openswe.utils import langsmith as ls_utils
@@ -135,6 +140,75 @@ async def test_tenant_id_falls_back_to_listing_projects(monkeypatch: pytest.Monk
     assert await ls_utils.resolve_tenant_id() == "tenant-listed"
     assert await ls_utils.resolve_tenant_id() == "tenant-listed"
     assert calls == 1
+
+
+@pytest.mark.parametrize("legacy", [False, True])
+async def test_error_url_selects_last_failed_descendant(
+    monkeypatch: pytest.MonkeyPatch, legacy: bool
+) -> None:
+    thread_url = "https://smith.example/o/tenant/projects/p/pid/t/thread"
+    monkeypatch.setattr(ls_utils, "get_langsmith_trace_url", AsyncMock(return_value=thread_url))
+    monkeypatch.setattr(ls_utils, "_resolve_project_id_by_name", _resolver({}, default="pid"))
+    start = datetime(2026, 1, 1, tzinfo=UTC)
+    monkeypatch.setattr(ls_utils, "_project_lookup_start", AsyncMock(return_value=start))
+    queries: list[dict[str, object]] = []
+
+    def query(**kwargs: object) -> AsyncIterator[SimpleNamespace]:
+        queries.append(kwargs)
+
+        async def results() -> AsyncIterator[SimpleNamespace]:
+            if legacy and len(queries) == 1:
+                return
+            for run_id, order in [("root", "1"), ("failed-model", "1.3.4"), ("old", "1.2")]:
+                yield SimpleNamespace(id=run_id, dotted_order=order)
+
+        return results()
+
+    monkeypatch.setattr(
+        ls_utils,
+        "_build_langsmith_client",
+        lambda: SimpleNamespace(runs=SimpleNamespace(query=query)),
+    )
+
+    assert await ls_utils.get_langsmith_error_url("thread", "invocation") == (
+        "https://smith.example/o/tenant/projects/p/pid/r/failed-model"
+    )
+    assert len(queries) == (2 if legacy else 1)
+    for query_args in queries:
+        assert query_args["project_ids"] == ["pid"]
+        assert query_args["has_error"] is True
+        assert query_args["min_start_time"] == start
+        assert ls_utils._langsmith_metadata_filter("thread_id", "thread") in str(
+            query_args["filter"]
+        )
+        field = "prepare_run_id" if legacy and query_args is queries[-1] else "invocation_id"
+        assert ls_utils._langsmith_metadata_filter(field, "invocation") in str(query_args["filter"])
+
+
+@pytest.mark.parametrize("scenario", ["no-invocation", "no-spans", "unavailable"])
+async def test_error_url_falls_back_to_thread(
+    monkeypatch: pytest.MonkeyPatch, scenario: str
+) -> None:
+    thread_url = "https://smith.example/o/tenant/projects/p/pid/t/thread"
+    monkeypatch.setattr(ls_utils, "get_langsmith_trace_url", AsyncMock(return_value=thread_url))
+    monkeypatch.setattr(ls_utils, "_resolve_project_id_by_name", _resolver({}, default="pid"))
+    monkeypatch.setattr(
+        ls_utils, "_project_lookup_start", AsyncMock(return_value=datetime(2026, 1, 1, tzinfo=UTC))
+    )
+
+    async def query(**kwargs: object) -> AsyncIterator[SimpleNamespace]:
+        if scenario == "unavailable":
+            raise RuntimeError("LangSmith unavailable")
+        if False:
+            yield SimpleNamespace()
+
+    monkeypatch.setattr(
+        ls_utils,
+        "_build_langsmith_client",
+        lambda: SimpleNamespace(runs=SimpleNamespace(query=query)),
+    )
+    invocation = None if scenario == "no-invocation" else "invocation"
+    assert await ls_utils.get_langsmith_error_url("thread", invocation) == thread_url
 
 
 async def test_trace_url_uses_discovered_tenant(monkeypatch: pytest.MonkeyPatch) -> None:

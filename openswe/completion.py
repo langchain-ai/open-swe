@@ -38,7 +38,7 @@ from openswe.transcript.turns import TurnOutcome, settle_run_turn
 from openswe.ui_invalidations import Topic
 from openswe.utils.errors import LAST_MODEL_ERROR_KEY, code_for_error_type
 from openswe.utils.json_types import thread_metadata
-from openswe.utils.langsmith import get_langsmith_trace_url
+from openswe.utils.langsmith import get_langsmith_error_url
 from openswe.utils.thread_ops import langgraph_client
 from openswe.utils.user_messages import warning
 from openswe.webhooks.event_matches import EVENT_MATCH_KIND
@@ -191,7 +191,12 @@ async def _settle_failed_reviewer_check(thread_id: str, metadata: dict[str, Any]
 
 
 async def _post_failure_reply(
-    thread_id: str, metadata: dict[str, Any], status: str, reason_code: str | None = None
+    thread_id: str,
+    metadata: dict[str, Any],
+    status: str,
+    reason_code: str | None = None,
+    *,
+    invocation_id: str | None = None,
 ) -> bool:
     """Post a failure reply to the run's originating channel. Best-effort."""
     source = metadata.get("source")
@@ -200,7 +205,7 @@ async def _post_failure_reply(
     if source == "slack" or ctx.slack_thread is not None:
         location = ctx.slack_location
         if location is not None:
-            trace_url = await get_langsmith_trace_url(thread_id)
+            trace_url = await get_langsmith_error_url(thread_id, invocation_id)
             slack_text = _failure_text(status, trace_url, reason_code)
             return await post_slack_thread_reply(
                 location[0],
@@ -613,7 +618,9 @@ async def handle_run_completion(payload: dict[str, Any]) -> dict[str, str]:
         return {"status": "ignored", "reason": "repeated failures"}
 
     reason_code = _failure_reason_code(error, metadata, run_id)
-    posted = await _post_failure_reply(thread_id, metadata, status, reason_code)
+    posted = await _post_failure_reply(
+        thread_id, metadata, status, reason_code, invocation_id=_invocation_id(payload)
+    )
     if not posted:
         return {"status": "ignored", "reason": "no reply posted"}
 

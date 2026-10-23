@@ -196,6 +196,42 @@ async def get_langsmith_trace_url(thread_id: str, project_name: str | None = Non
     return f"{project_url}/t/{thread_id}" if project_url else None
 
 
+async def get_langsmith_error_url(thread_id: str, invocation_id: str | None) -> str | None:
+    """Link to the last failing span in this invocation, falling back to the thread."""
+    thread_url = await get_langsmith_trace_url(thread_id)
+    client = _build_langsmith_client()
+    if not thread_url or not invocation_id or client is None:
+        return thread_url
+    try:
+        async with asyncio.timeout(5):
+            project_id = await _resolve_project_id_by_name(tracing_project())
+            if not project_id:
+                return thread_url
+            lookup_start = await _project_lookup_start(project_id)
+            for field in ("invocation_id", "prepare_run_id"):
+                runs = client.runs.query(
+                    project_ids=[project_id],
+                    has_error=True,
+                    filter=(
+                        f"and({_langsmith_metadata_filter('thread_id', thread_id)}, "
+                        f"{_langsmith_metadata_filter(field, invocation_id)})"
+                    ),
+                    selects=["ID", "DOTTED_ORDER"],
+                    min_start_time=lookup_start,
+                )
+                failed_runs = [run async for run in runs]
+                if failed_runs:
+                    failed_run = max(failed_runs, key=lambda run: run.dotted_order)
+                    return f"{thread_url.rsplit('/t/', 1)[0]}/r/{failed_run.id}"
+    except Exception:
+        logger.warning(
+            "Could not resolve the failing LangSmith span",
+            extra={"thread_id": thread_id, "invocation_id": invocation_id},
+            exc_info=True,
+        )
+    return thread_url
+
+
 def _langsmith_web_origins() -> set[str]:
     values = ["https://smith.langchain.com", langsmith_host_url()]
     origins: set[str] = set()
