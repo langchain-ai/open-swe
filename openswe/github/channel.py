@@ -115,7 +115,10 @@ async def _prepare_run(
         source="github_issue",
     )
     rewritten = await RUNTIMES.mda_runtime.run_payload(
-        thread_id, {"assistant_id": "agent", "config": cast(JsonValue, run_config)}
+        thread_id,
+        {"assistant_id": "agent", "config": cast(JsonValue, run_config)},
+        # A channel thread has no Slack thread to link.
+        thread_metadata={},
     )
     run: EndpointAnswer = {
         "input": cast(JsonValue, prepared.input),
