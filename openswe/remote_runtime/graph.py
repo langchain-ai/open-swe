@@ -62,6 +62,7 @@ from langgraph.config import get_config
 from langgraph.runtime import Runtime
 from pydantic import BaseModel, JsonValue, TypeAdapter, ValidationError
 
+from openswe.browser_handoff import wake_after_handoff
 from openswe.middleware.conversation_offloading import ConversationOffloadingMiddleware
 from openswe.middleware.model_selection import PersistedRoute, normalize_route
 from openswe.middleware.record_run_usage import RecordRunUsageMiddleware
@@ -144,6 +145,13 @@ class BrowserBody(HookBody):
     """``browser``: the LangSmith browser MDA gave the thread's agent."""
 
     browser: str
+
+
+class WakeBody(HookBody):
+    """``wake``: the person handed the agent's browser back, or their link ran out."""
+
+    text: str
+    notification: dict[str, JsonValue]
 
 
 class ToolResultBody(HookBody):
@@ -603,6 +611,10 @@ class RemoteGraph:
             return await self._phase(session, "before_agent", body)
         if hook == "browser":
             await ThreadBrowser(browser=BrowserBody.model_validate(raw).browser).save(run.thread_id)
+            return {}
+        if hook == "wake":
+            wake = WakeBody.model_validate(raw)
+            await wake_after_handoff(run.thread_id, wake.text, wake.notification)
             return {}
         if hook == "sandbox":
             session = await self.session(run, body.run_id)

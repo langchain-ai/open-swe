@@ -70,7 +70,12 @@ def _content_as_text(content: object) -> str:
     return str(content)
 
 
-__all__ = ["extract_assistant_text"]
+#: Message field (``additional_kwargs`` key) MDA marks its own notifications with, such
+#: as a browser handoff ending, as deepagents marks a task notification.
+MDA_NOTIFICATION_KEY = "mda_notification"
+
+
+__all__ = ["MDA_NOTIFICATION_KEY", "extract_assistant_text"]
 
 
 def extract_assistant_content(run: Mapping[str, object]) -> MessageContent | None:
