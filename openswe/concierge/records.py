@@ -4,7 +4,7 @@ from datetime import datetime
 from typing import Self
 from uuid import UUID, uuid7
 
-from sqlalchemy import ForeignKey, select, update
+from sqlalchemy import ForeignKey, select
 from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -101,14 +101,3 @@ class ConciergeBackground(Base):
                 select(cls.id).where(cls.thread_id == thread_id, cls.dm_thread_id == host_thread_id)
             )
         return found is not None
-
-    async def forget_thread(self) -> None:
-        """Drop a background thread that is gone, so the next check-in starts a new one."""
-        async with postgres.session() as session:
-            await session.execute(
-                update(type(self))
-                .where(type(self).id == self.id, type(self).thread_id == self.thread_id)
-                .values(thread_id=None, dm_thread_id=None, updated_by=None, updated_at=NOW)
-            )
-        self.thread_id = None
-        self.dm_thread_id = None
