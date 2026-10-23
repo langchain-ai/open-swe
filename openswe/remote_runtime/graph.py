@@ -116,7 +116,7 @@ from runtime_api.operations import (
 )
 
 from openswe.dashboard.options import model_supports_images
-from openswe.dashboard.workspace_settings import get_workspace_settings
+from openswe.dashboard.profiles import get_profile
 from openswe.dispatch import COMPLETION_WEBHOOK_URL
 from openswe.github.sandbox_access import READ_ONLY_REVIEW_PERMISSIONS
 from openswe.incidents.runtime import IncidentMiddleware
@@ -876,11 +876,12 @@ class RemoteGraph:
         if hook == "catalog":
             session = await self.session(run, body.run_id)
             sandbox = await session.sandbox()
-            settings = await get_workspace_settings(
-                RunConfig.from_config(session.config).workspace_slug
-            )
+            login = RunConfig.from_config(session.config).github_login
+            profile = await get_profile(login) if login else None
             catalog = session.catalog(
-                sandbox_tools_via_eval=settings.sandbox_tools_via_eval
+                sandbox_tools_via_eval=bool(
+                    profile and profile.get("sandbox_tools_via_eval") is True
+                )
             ).model_copy(
                 update={
                     "trace_metadata": TurnGitMetadata(session.config).actor,

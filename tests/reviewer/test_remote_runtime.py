@@ -338,10 +338,21 @@ async def test_tool_server_hands_the_verified_run_to_its_handlers() -> None:
     assert await _status(f"Bearer {sign_runtime_token(RUN)}") == (200, RUN)
 
 
-@pytest.mark.parametrize("sandbox_tools_via_eval", [False, True])
+@pytest.mark.parametrize(
+    ("login", "profile", "sandbox_tools_via_eval"),
+    [
+        ("alice", {"sandbox_tools_via_eval": True}, True),
+        ("bob", {"sandbox_tools_via_eval": False}, False),
+        ("bob", {}, False),
+        ("bob", None, False),
+        (None, {"sandbox_tools_via_eval": True}, False),
+    ],
+)
 @pytest.mark.parametrize("code_mode", [False, True])
 async def test_mda_catalog_leaves_integrations_and_code_mode_to_mda(
     monkeypatch: pytest.MonkeyPatch,
+    login: str | None,
+    profile: dict[str, bool] | None,
     sandbox_tools_via_eval: bool,
     code_mode: bool,
 ) -> None:
@@ -355,7 +366,6 @@ async def test_mda_catalog_leaves_integrations_and_code_mode_to_mda(
     from langchain_core.tools import StructuredTool
     from langchain_quickjs import CodeInterpreterMiddleware
 
-    from openswe.dashboard.workspace_settings import WorkspaceSettings
     from openswe.mcp.models import MCPToolProvenance
     from openswe.middleware.dynamic_tools import DynamicToolMiddleware
     from openswe.middleware.task_coordination import TaskCoordinationMiddleware
@@ -411,14 +421,15 @@ async def test_mda_catalog_leaves_integrations_and_code_mode_to_mda(
     async def start_models(cfg: object) -> object:
         raise AssertionError("not asked for")
 
-    settings = AsyncMock(
-        return_value=WorkspaceSettings({"sandbox_tools_via_eval": sandbox_tools_via_eval})
-    )
-    monkeypatch.setattr("openswe.remote_runtime.graph.get_workspace_settings", settings)
+    load_profile = AsyncMock(return_value=profile)
+    monkeypatch.setattr("openswe.remote_runtime.graph.get_profile", load_profile)
     graph = RemoteGraph("agent", build, start_models)
-    run = RUN.model_copy(update={"configurable": {**RUN.configurable, "workspace": "test-space"}})
+    run = RUN.model_copy(update={"configurable": {**RUN.configurable, "github_login": login}})
     catalog = await graph.hook(run, "catalog", {"run_id": "run-1"})
-    settings.assert_awaited_once_with("test-space")
+    if login:
+        load_profile.assert_awaited_once_with(login)
+    else:
+        load_profile.assert_not_awaited()
 
     assert isinstance(catalog, dict)
     operations = catalog["operations"]
