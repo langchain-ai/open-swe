@@ -20,12 +20,8 @@ _MIDDLEWARE_MODULES = {
     "RepairOrphanedToolCallsMiddleware": ".repair_orphaned_tool_calls",
     "RequireUserReplyMiddleware": ".require_user_reply",
     "settle_review_check_on_exit": ".settle_review_check",
-    "SubdirAgentsReadMiddleware": ".subdir_agents",
-    "task_on_failure": ".task_retry",
-    "task_retry_on": ".task_retry",
-    "ToolErrorMiddleware": ".tool_error_handler",
-    "ValidateImageReadsMiddleware": ".validate_image_reads",
     "WorkflowPushGuardMiddleware": ".workflow_push_guard",
+    "RunSkillsMiddleware": ".workspace_skills",
     "WorkspaceSkillsMiddleware": ".workspace_skills",
 }
 
@@ -41,9 +37,7 @@ __all__ = [
     "PullRequestCreationGuardMiddleware",
     "RepairOrphanedToolCallsMiddleware",
     "RequireUserReplyMiddleware",
-    "SubdirAgentsReadMiddleware",
-    "ToolErrorMiddleware",
-    "ValidateImageReadsMiddleware",
+    "RunSkillsMiddleware",
     "WorkflowPushGuardMiddleware",
     "WorkspaceSkillsMiddleware",
     "check_message_queue_before_model",
@@ -52,8 +46,6 @@ __all__ = [
     "record_run_usage",
     "refresh_github_proxy_before_model",
     "settle_review_check_on_exit",
-    "task_on_failure",
-    "task_retry_on",
 ]
 
 if TYPE_CHECKING:
@@ -72,12 +64,8 @@ if TYPE_CHECKING:
     from openswe.middleware.repair_orphaned_tool_calls import RepairOrphanedToolCallsMiddleware
     from openswe.middleware.require_user_reply import RequireUserReplyMiddleware
     from openswe.middleware.settle_review_check import settle_review_check_on_exit
-    from openswe.middleware.subdir_agents import SubdirAgentsReadMiddleware
-    from openswe.middleware.task_retry import task_on_failure, task_retry_on
-    from openswe.middleware.tool_error_handler import ToolErrorMiddleware
-    from openswe.middleware.validate_image_reads import ValidateImageReadsMiddleware
     from openswe.middleware.workflow_push_guard import WorkflowPushGuardMiddleware
-    from openswe.middleware.workspace_skills import WorkspaceSkillsMiddleware
+    from openswe.middleware.workspace_skills import RunSkillsMiddleware, WorkspaceSkillsMiddleware
 
 
 def _load_export(name: str) -> Any:

@@ -1816,6 +1816,7 @@ dependencies = [
     { name = "langsmith" },
     { name = "managed-deepagents" },
     { name = "mcp" },
+    { name = "open-swe-runtime-api" },
     { name = "pydantic" },
     { name = "stagehand" },
 ]
@@ -1838,6 +1839,7 @@ requires-dist = [
     { name = "langsmith", specifier = ">=0.14.12" },
     { name = "managed-deepagents", editable = "../vendor/managed-deepagents-sdk/packages/pypi" },
     { name = "mcp", specifier = ">=2.2.0" },
+    { name = "open-swe-runtime-api", editable = "../packages/runtime-api" },
     { name = "pydantic", specifier = ">=2.11" },
     { name = "stagehand", specifier = "==4.3.0" },
 ]
@@ -1847,6 +1849,17 @@ test = [
     { name = "pytest", specifier = ">=9.1.1" },
     { name = "pytest-asyncio", specifier = ">=1.4.0" },
 ]
+
+[[package]]
+name = "open-swe-runtime-api"
+version = "0.0.0"
+source = { editable = "../packages/runtime-api" }
+dependencies = [
+    { name = "pydantic" },
+]
+
+[package.metadata]
+requires-dist = [{ name = "pydantic", specifier = ">=2.11" }]
 
 [[package]]
 name = "openai"

@@ -11,7 +11,8 @@ from typing import Final
 
 from langchain.chat_models import init_chat_model
 from langchain_core.language_models import BaseChatModel
-from pydantic import BaseModel, JsonValue, TypeAdapter
+from pydantic import JsonValue, TypeAdapter
+from runtime_api.catalog import ModelSpec
 
 _DEFAULT_GATEWAY_BASE_URL: Final = "https://gateway.smith.langchain.com"
 _GATEWAY_PROVIDER_PATHS: Final = {
@@ -24,17 +25,6 @@ _GATEWAY_PROVIDER_PATHS: Final = {
 _DEFAULT_MAX_RETRIES: Final = 6
 _DEFAULT_REQUEST_TIMEOUT_SECONDS: Final = 600.0
 _kwargs = TypeAdapter(dict[str, JsonValue])
-
-
-class ModelSpec(BaseModel):
-    model_id: str
-    kwargs: dict[str, JsonValue]
-
-
-class RunModels(BaseModel):
-    model: ModelSpec
-    subagent_model: ModelSpec
-    use_gateway: bool
 
 
 def _gateway_overrides(provider: str) -> dict[str, JsonValue]:

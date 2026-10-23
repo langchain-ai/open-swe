@@ -434,11 +434,10 @@ async def _attach_guest_sandbox(
         raise PermissionError("This thread names no other thread's sandbox to share")
     workspace = await _guest_workspace(thread_id, worker, host_id)
     host = ThreadMetadata.model_validate(await get_sandbox_metadata(host_id))
-    owner = await worker.owner()
-    host_owner = await host.owner()
     if (
         host.shares_sandbox
-        or owner.id != host_owner.id
+        or worker.owner_type != host.owner_type
+        or (worker.owner_type == "system" and worker.visibility != "public")
         or worker.workspace_slug != workspace
         or host.workspace_slug != workspace
         or (workspace_slug is not None and workspace_slug != workspace)
@@ -457,9 +456,14 @@ async def _attach_guest_sandbox(
         )
     ):
         raise PermissionError("The shared sandbox grants repositories outside this worker's scope")
-    for target_id, binding, person in ((thread_id, worker, owner), (host_id, host, host_owner)):
-        if binding.owner_user_id is None:
-            await client.threads.update(target_id, metadata={"owner_user_id": str(person.id)})
+    if worker.owner_type != "system":
+        owner = await worker.owner()
+        host_owner = await host.owner()
+        if owner.id != host_owner.id:
+            raise PermissionError("The shared sandbox host has different ownership or permissions")
+        for target_id, binding in ((thread_id, worker), (host_id, host)):
+            if binding.owner_user_id is None:
+                await client.threads.update(target_id, metadata={"owner_user_id": str(owner.id)})
     backend = await ensure_sandbox_for_thread(
         host_id, workspace_slug=workspace, require_existing=True
     )

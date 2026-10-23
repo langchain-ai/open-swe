@@ -7,8 +7,8 @@ import pytest
 from pydantic import JsonValue
 from starlette.types import Message, Receive, Scope, Send
 
-from openswe.remote_runtime.runs import run_config
-from openswe.remote_runtime.tokens import RemoteRun, sign_runtime_token, verify_runtime_token
+from openswe.agent_api.runs import run_config
+from openswe.agent_api.tokens import RemoteRun, sign_runtime_token, verify_runtime_token
 from openswe.threads import index, router, runtimes
 from openswe.threads.index import Runtime, ThreadStatus
 
@@ -334,6 +334,42 @@ async def test_a_new_thread_runs_on_mda(
     }
 
 
+@pytest.mark.parametrize("command", [False, True], ids=["rest", "command"])
+@pytest.mark.parametrize(
+    "permalink", ["https://langchain.slack.com/archives/C123/p1234567890000000", ""]
+)
+async def test_runs_include_the_current_slack_thread_link(
+    monkeypatch: pytest.MonkeyPatch, secret: None, command: bool, permalink: str
+) -> None:
+    harness = _Harness(monkeypatch)
+    await harness.request("POST", "/threads", {"thread_id": THREAD})
+    await harness.request(
+        "PATCH",
+        f"/threads/{THREAD}",
+        {"metadata": {"source_context": {"slack_thread": {"permalink": permalink}}}},
+    )
+    params: dict[str, JsonValue] = {
+        "assistant_id": "agent",
+        "input": {},
+        "metadata": {"kind": "follow_up"},
+        "config": {"metadata": {"invocation_id": "turn-1"}},
+    }
+    if command:
+        status, _ = await harness.request(
+            "POST",
+            f"/threads/{THREAD}/commands",
+            {"id": 1, "method": "run.start", "params": params},
+        )
+    else:
+        status, _ = await harness.request("POST", f"/threads/{THREAD}/runs", params)
+
+    assert status == 200
+    [(_, sent)] = harness.forwarded
+    expected: dict[str, JsonValue] = {"slack_thread_url": permalink} if permalink else {}
+    assert sent["metadata"] == {"kind": "follow_up", **expected}
+    assert sent["config"] == {"metadata": {"invocation_id": "turn-1", **expected}}
+
+
 async def test_deleting_a_thread_removes_every_copy(monkeypatch: pytest.MonkeyPatch) -> None:
     harness = _Harness(monkeypatch)
     await index.create(THREAD, runtime="mda")
@@ -368,6 +404,24 @@ async def test_a_run_started_by_command_on_mda_settles_through_the_completion_we
     assert path == f"/threads/{THREAD}/runs"
     assert sent["assistant_id"] == graph
     assert sent["webhook"] == "https://swe.test/webhooks/run-complete"
+
+
+@pytest.mark.parametrize(
+    ("params", "resumable"),
+    [({}, True), ({"stream_resumable": False}, False)],
+    ids=["streaming-client", "transcript-reader"],
+)
+async def test_a_run_started_by_command_keeps_its_stream_unless_the_client_opts_out(
+    monkeypatch: pytest.MonkeyPatch, secret: None, params: dict[str, JsonValue], resumable: bool
+) -> None:
+    harness = _Harness(monkeypatch)
+    await harness.request("POST", "/threads", {"thread_id": THREAD})
+    command = {"id": 1, "method": "run.start", "params": {"assistant_id": "agent", **params}}
+
+    await harness.request("POST", f"/threads/{THREAD}/commands", command)
+
+    [(_, sent)] = harness.forwarded
+    assert sent["stream_resumable"] is resumable
 
 
 async def test_a_copy_of_an_mda_thread_is_indexed_on_mda(monkeypatch: pytest.MonkeyPatch) -> None:

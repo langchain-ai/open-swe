@@ -8,8 +8,8 @@ resolution-markers = [
 
 [manifest]
 constraints = [
-    { name = "langgraph-api", specifier = "==0.18.0.dev9" },
-    { name = "langgraph-runtime-inmem", specifier = "==0.38.0.dev9" },
+    { name = "langgraph-api", specifier = "==0.18.0.dev11" },
+    { name = "langgraph-runtime-inmem", specifier = "==0.38.0.dev11" },
 ]
 overrides = [
     { name = "deepagents", specifier = "==0.7.30" },
@@ -2024,7 +2024,7 @@ wheels = [
 
 [[package]]
 name = "langgraph-api"
-version = "0.18.0.dev9"
+version = "0.18.0.dev11"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "anyio" },
@@ -2043,11 +2043,13 @@ dependencies = [
     { name = "langgraph-runtime-inmem" },
     { name = "langgraph-sdk" },
     { name = "langsmith", extra = ["otel"] },
+    { name = "mcp" },
     { name = "opentelemetry-api" },
     { name = "opentelemetry-exporter-otlp-proto-http" },
     { name = "opentelemetry-exporter-prometheus" },
     { name = "opentelemetry-sdk" },
     { name = "orjson" },
+    { name = "packaging" },
     { name = "prometheus-client" },
     { name = "protobuf" },
     { name = "pyjwt" },
@@ -2063,9 +2065,9 @@ dependencies = [
     { name = "websockets" },
     { name = "zstandard" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/a5/2f/d4233b5ea10f034a435b3c387f96bf7fe93697dcc6dceba22e137f6ce0aa/langgraph_api-0.18.0.dev9.tar.gz", hash = "sha256:59cdfcaab041de8d06da7cd6d914c917de6142c83e9cb072683520177a5565d0", size = 894003, upload-time = "2026-10-22T13:14:08.626Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/f3/b1/c9eae221e87d65a2b08ee33c4c0192a201ce1dde35a554abb6c713cd4e97/langgraph_api-0.18.0.dev11.tar.gz", hash = "sha256:79623506c0e3ac48cc27cea9e6912b17411a17c247a94a1969ffa8f7998fa871", size = 917061, upload-time = "2026-10-23T17:59:17.08Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/fb/1d/03470cc9048fc8fef7453b058c284527eafae4ebfdf63db0e03fd842c063/langgraph_api-0.18.0.dev9-py3-none-any.whl", hash = "sha256:3f469394b70ebfde41a7d5b149e38b9386073d963f125a1515aaf74d8df1107e", size = 673874, upload-time = "2026-10-22T13:14:06.507Z" },
+    { url = "https://files.pythonhosted.org/packages/89/95/15198a81c648c308031a273873fddfc48aa6e8152c9f05ee9fa8c775a3d0/langgraph_api-0.18.0.dev11-py3-none-any.whl", hash = "sha256:d4739c37504e9c42bb8e27ba343dccf299d90aa8c8ae5b0f60619ef1eac1b446", size = 674211, upload-time = "2026-10-23T17:59:15.267Z" },
 ]
 
 [[package]]
@@ -2118,7 +2120,7 @@ wheels = [
 
 [[package]]
 name = "langgraph-runtime-inmem"
-version = "0.38.0.dev9"
+version = "0.38.0.dev11"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "blockbuster" },
@@ -2129,9 +2131,9 @@ dependencies = [
     { name = "starlette" },
     { name = "structlog" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/48/d3/de62c1e8a406de7d6e216fc776214cecc935f7da64ad5c11ddd46cd8eb53/langgraph_runtime_inmem-0.38.0.dev9.tar.gz", hash = "sha256:5687145e0ea53b22de2014b22c33913086eaf1479f8741c5046aff9db8fe0cb7", size = 143034, upload-time = "2026-10-22T13:10:24.642Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/36/97/15b24c879cec3747fecb7c33ac9b4fc63e904f7574b7c666c1ee70945862/langgraph_runtime_inmem-0.38.0.dev11.tar.gz", hash = "sha256:619584ff2eb975d4783473959a0131e06f5194f8b5bc7abfa291b5c8fb6e0f6e", size = 143096, upload-time = "2026-10-23T17:55:14.672Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/24/48/1d0f3541fb6de114c985243cd665df99ea2314cd402ca6b9cd6d6e320b59/langgraph_runtime_inmem-0.38.0.dev9-py3-none-any.whl", hash = "sha256:3b2c6781336acebfca2c4fe482455f95e4059a13f58c7102c128f62d2daf1bbc", size = 63005, upload-time = "2026-10-22T13:10:23.273Z" },
+    { url = "https://files.pythonhosted.org/packages/43/f4/b2838375886fff464b1ba72721e0eb21d9a071574946070da43b04e83b57/langgraph_runtime_inmem-0.38.0.dev11-py3-none-any.whl", hash = "sha256:33de4cd90fdf5aa3d27d906dca588faf54bee3c73d620b811063f30ffe45209c", size = 63075, upload-time = "2026-10-23T17:55:13.261Z" },
 ]
 
 [[package]]
@@ -2527,6 +2529,7 @@ dependencies = [
     { name = "langsmith" },
     { name = "markdown-it-py" },
     { name = "markdownify" },
+    { name = "open-swe-runtime-api" },
     { name = "openai" },
     { name = "pillow" },
     { name = "pygments" },
@@ -2600,6 +2603,7 @@ requires-dist = [
     { name = "langsmith", specifier = ">=0.14.12" },
     { name = "markdown-it-py", specifier = "==4.2.0" },
     { name = "markdownify", specifier = ">=1.2.3" },
+    { name = "open-swe-runtime-api", editable = "packages/runtime-api" },
     { name = "openai", specifier = ">=3.10.0" },
     { name = "pillow", specifier = ">=12.1.0" },
     { name = "pygments", specifier = ">=2.21.0" },
@@ -2615,6 +2619,17 @@ requires-dist = [
     { name = "websockets", specifier = ">=16.1.1" },
 ]
 provides-extras = ["dev", "sandbox-daytona", "sandbox-modal", "sandbox-runloop", "sandbox-e2b", "sandbox-providers"]
+
+[[package]]
+name = "open-swe-runtime-api"
+version = "0.0.0"
+source = { editable = "packages/runtime-api" }
+dependencies = [
+    { name = "pydantic" },
+]
+
+[package.metadata]
+requires-dist = [{ name = "pydantic", specifier = ">=2.11" }]
 
 [[package]]
 name = "openai"

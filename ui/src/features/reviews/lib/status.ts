@@ -83,13 +83,12 @@ export function hasUnresolvedConversations(pr: OpenPullRequest) {
   return pr.unresolvedThreads === null || pr.unresolvedThreads > 0
 }
 
-/** What Open SWE could fix on this PR, conflicts first since they block the rest. */
+/** What Open SWE could fix on this PR: one fix for conflicts and checks, then comments. */
 export function pullRequestFixes(
   pr: OpenPullRequest
 ): Array<PullRequestThreadActionName> {
   return [
-    ...(isConflicted(pr) ? (["fix-conflicts"] as const) : []),
-    ...(hasFailingChecks(pr) ? (["fix-checks"] as const) : []),
+    ...(isConflicted(pr) || hasFailingChecks(pr) ? (["fix"] as const) : []),
     ...(hasUnresolvedConversations(pr) ? (["address-comments"] as const) : []),
   ]
 }

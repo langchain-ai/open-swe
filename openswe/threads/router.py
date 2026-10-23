@@ -29,8 +29,7 @@ from pydantic import JsonValue, TypeAdapter, ValidationError
 from starlette.datastructures import Headers
 from starlette.types import ASGIApp, Receive, Scope, Send
 
-from openswe.api.agent_server_auth import backend_call
-from openswe.remote_runtime.asgi import (
+from openswe.agent_api.asgi import (
     StatusRecorder,
     forward,
     json_body,
@@ -38,12 +37,13 @@ from openswe.remote_runtime.asgi import (
     replay,
     send_json,
 )
-from openswe.remote_runtime.client import (
+from openswe.agent_api.client import (
     MDA_GRAPH_ID,
     MDA_RUNTIME,
     RUNTIME_METADATA_KEY,
     mda_graph_for,
 )
+from openswe.api.agent_server_auth import backend_call
 from openswe.threads import index
 from openswe.threads.index import IndexedThread, ThreadExistsError, ThreadSearch
 from openswe.threads.runtimes import LOCAL_HEADER, RUNTIMES
@@ -325,7 +325,10 @@ class ThreadRouter:
         mda = RUNTIMES.mda_runtime
         await mda.ensure_remote_thread(thread_id)
         rewritten = await mda.run_payload(
-            thread_id, payload, graph_id=mda_graph_for(thread.metadata)
+            thread_id,
+            payload,
+            thread_metadata=thread.metadata,
+            graph_id=mda_graph_for(thread.metadata),
         )
         await forward(mda.http, scope, recorder, json.dumps(rewritten).encode())
 
@@ -344,7 +347,11 @@ class ThreadRouter:
         params = command.get("params")
         if method == "run.start" and isinstance(params, dict):
             reply = await RUNTIMES.mda_runtime.start_command_run(
-                thread_id, command, params, graph_id=mda_graph_for(thread.metadata)
+                thread_id,
+                command,
+                params,
+                thread_metadata=thread.metadata,
+                graph_id=mda_graph_for(thread.metadata),
             )
             if reply.get("type") == "success":
                 await index.set_status(thread_id, "busy")

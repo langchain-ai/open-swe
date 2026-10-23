@@ -97,6 +97,21 @@ export interface WorkspaceApiKey {
   status: "active" | "expired" | "revoked"
 }
 
+/** A token that lets one person's Claude Code hooks mirror their sessions. */
+export interface ClaudeCodeSyncToken {
+  id: string
+  name: string
+  token_suffix: string
+  created_at: string
+  last_used_at: string | null
+}
+
+/** A freshly minted token: the only time its secret and hooks settings are shown. */
+export interface MintedClaudeCodeSyncToken extends ClaudeCodeSyncToken {
+  secret: string
+  settings: Record<string, unknown>
+}
+
 const API_BASE = dashboardApiBase()
 
 const GITHUB_IMAGE_HOST_RE =
@@ -1087,15 +1102,11 @@ export type PullRequestThreadIntent =
   | { intent: "message"; title: string; message: string }
   | {
       intent: "fix"
-      scope: PullRequestFixScope
       context: OpenPullRequest | null
     }
   | { intent: "address-comments" }
   | { intent: "address-comment"; comment_url: string; instructions: string }
   | { intent: "comments"; comments: Array<AgentBatchComment> }
-
-/** One kind of PR problem a fix run handles; comments go through address-comments. */
-export type PullRequestFixScope = "conflicts" | "checks"
 
 export type AgentBatchComment =
   | ({ kind: "line" } & Omit<ReviewCommentCreate, "start_side">)
@@ -1571,6 +1582,17 @@ export const api = {
     request<void>(`/agent-instructions/${encodeURIComponent(full_name)}`, {
       method: "DELETE",
     }),
+  listClaudeCodeSyncTokens: () =>
+    request<ClaudeCodeSyncToken[]>("/claude-code/tokens"),
+  createClaudeCodeSyncToken: (name: string) =>
+    request<MintedClaudeCodeSyncToken>("/claude-code/tokens", {
+      method: "POST",
+      body: JSON.stringify({ name }),
+    }),
+  revokeClaudeCodeSyncToken: (id: string) =>
+    request<void>(`/claude-code/tokens/${encodeURIComponent(id)}`, {
+      method: "DELETE",
+    }),
   listWorkspaceApiKeys: (slug: string) =>
     request<WorkspaceApiKey[]>(
       `/admin/api-keys?workspace=${encodeURIComponent(slug)}`
@@ -1823,12 +1845,8 @@ export const api = {
     ),
   pullRequestStatus: (repo: string, number: number) =>
     loadPrDetails(repo, number),
-  fixPullRequest: (pr: OpenPullRequest, scope: PullRequestFixScope) =>
-    pullRequestThread(pr.repo, pr.number, {
-      intent: "fix",
-      scope,
-      context: pr,
-    }),
+  fixPullRequest: (pr: OpenPullRequest) =>
+    pullRequestThread(pr.repo, pr.number, { intent: "fix", context: pr }),
   addressPullRequestComments: (pr: OpenPullRequest) =>
     pullRequestThread(pr.repo, pr.number, { intent: "address-comments" }),
   sendCommentsToAgent: (

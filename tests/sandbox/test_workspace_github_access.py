@@ -12,10 +12,10 @@ import httpx
 import httpx2
 import pytest
 
+from openswe.agent_api.graph import RemoteGraph
+from openswe.agent_api.tokens import RemoteRun
 from openswe.github import app, proxy, sandbox_access
 from openswe.github.repositories import Repository
-from openswe.remote_runtime.graph import RemoteGraph
-from openswe.remote_runtime.tokens import RemoteRun
 from openswe.sandboxes import lifecycle
 from openswe.sandboxes.providers.langsmith import LangSmithProvider
 from openswe.workspaces.refresh import _create_builder_sandbox
@@ -263,7 +263,7 @@ async def test_legacy_review_replacement_uses_authenticated_run_scope(
         configurable={"repo": {"owner": "acme", "name": "api"}} if known_repo else {},
     )
 
-    await graph.hook(run, "sandbox", {})
+    await graph.api(run, "sandbox_replaced", {})
     assert await proxy.maybe_refresh_proxy_token(
         "thread", now=datetime.now(UTC) + timedelta(hours=1)
     )
