@@ -285,34 +285,46 @@ class ReviewCard:
             )
             return {}
 
+    async def _approvers(self, states: dict[str, str]) -> str:
+        reviewers = {r.github_login.lower(): r.slack_mention for r in self.request.reviewers}
+        return ", ".join(
+            [
+                reviewers.get(login.lower()) or await User.slack_mention_for_login(login)
+                for login, state in states.items()
+                if state == "APPROVED"
+            ]
+        )
+
     async def _render_standard(self, outcome: str | None) -> tuple[str, list[Block]]:
         request = self.request
         pr = request.pull_request
         author = await request.author_mention()
         states = await self._review_states() if outcome in (None, "merged") else {}
+        approvers = await self._approvers(states)
         if outcome is not None:
             return standard_card.closed_card(
-                request, title=pr.title, author=author, outcome=outcome, review_states=states
+                request,
+                title=pr.title,
+                author=author,
+                outcome=outcome,
+                approvers=approvers,
             )
         from openswe.human_review.standard import merge_wait
 
-        if (
-            "CHANGES_REQUESTED" not in states.values()
-            and merge_wait(
-                [reviewer.github_login for reviewer in request.reviewers],
-                request.created_at,
-                states,
-                datetime.now(UTC),
-                auto_merge=request.auto_merge,
-            )
-            is None
-        ):
+        waiting = merge_wait(
+            request.reviewers,
+            request.created_at,
+            states,
+            datetime.now(UTC),
+            auto_merge=request.auto_merge,
+        )
+        if "CHANGES_REQUESTED" not in states.values() and waiting is None:
             return standard_card.closed_card(
                 request,
                 title=pr.title,
                 author=author,
                 outcome="approved" if request.auto_merge else "approved — awaiting manual merge",
-                review_states=states,
+                approvers=approvers,
             )
         requester = request.requested_by
         return standard_card.open_card(
@@ -321,6 +333,8 @@ class ReviewCard:
             author=author,
             requester=standard_card.mention(requester) if requester is not None else None,
             review_states=states,
+            approvers=approvers,
+            waiting=waiting,
         )
 
     async def render(

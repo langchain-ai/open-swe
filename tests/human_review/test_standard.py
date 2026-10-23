@@ -474,15 +474,28 @@ async def test_unclaimed_deadline_honors_workspace_timeout(minutes: int, expecte
         assert await run_deadline(str(request.id), "unclaimed") == {"status": expected}
 
 
+def _reviewer(login: str) -> HumanReviewParticipant:
+    user = User(
+        identities=[
+            UserIdentity(provider="github", external_id=login, login=login),
+            UserIdentity(provider="slack", external_id=f"U_{login}"),
+        ]
+    )
+    reviewer = HumanReviewParticipant(user_id=user.id, decision="review")
+    reviewer.user = user
+    return reviewer
+
+
 def test_nothing_merges_without_an_approval() -> None:
     long_ago = _NOW - timedelta(days=1)
+    grace = _reviewer("grace")
     assert merge_wait([], long_ago, {}, _NOW) == "an approval on GitHub"
-    assert merge_wait(["grace"], long_ago, {"grace": "CHANGES_REQUESTED"}, _NOW) is not None
+    assert merge_wait([grace], long_ago, {"grace": "CHANGES_REQUESTED"}, _NOW) is not None
 
 
 def test_every_reviewer_approving_merges_before_the_deadline() -> None:
     states = {"grace": "APPROVED", "Linus": "APPROVED"}
-    assert merge_wait(["grace", "linus"], _NOW, states, _NOW) is None
+    assert merge_wait([_reviewer("grace"), _reviewer("linus")], _NOW, states, _NOW) is None
 
 
 @pytest.mark.parametrize("auto_merge", [False, True])
@@ -490,10 +503,11 @@ def test_one_approval_waits_for_the_other_reviewers_until_the_deadline(auto_merg
     states = {"grace": "APPROVED"}
     early = _NOW - timedelta(hours=1)
     late = _NOW - timedelta(hours=2)
+    reviewers = [_reviewer("grace"), _reviewer("linus")]
 
-    assert merge_wait(["grace", "linus"], early, states, _NOW) == "approval from @linus"
-    assert merge_wait(["grace", "linus"], late, states, _NOW, auto_merge=auto_merge) == (
-        None if auto_merge else "approval from @linus"
+    assert merge_wait(reviewers, early, states, _NOW) == "approval from <@U_linus>"
+    assert merge_wait(reviewers, late, states, _NOW, auto_merge=auto_merge) == (
+        None if auto_merge else "approval from <@U_linus>"
     )
 
 
@@ -504,24 +518,29 @@ def test_an_approval_from_someone_who_did_not_sign_up_counts() -> None:
 @pytest.mark.parametrize(
     "states", [{"Grace": "APPROVED", "hopper": "APPROVED", "linus": "DISMISSED"}, None]
 )
+@pytest.mark.parametrize("linked", [True, False])
 async def test_merged_card_names_only_actual_approvers(
-    states: dict[str, str] | None, github_app: AsyncMock
+    states: dict[str, str] | None, linked: bool, github_app: AsyncMock
 ) -> None:
     pr = PullRequest(owner="lc", repo="repo", number=7, author="ada")
     request = HumanReviewRequest(pull_request_id=pr.id, head_sha="abc", kind="standard")
     request.pull_request = pr
-    for login in ("grace", "linus"):
-        user = User(
-            identities=[
-                UserIdentity(provider="github", external_id=login, login=login),
-                UserIdentity(provider="slack", external_id=f"U_{login}"),
-            ]
-        )
-        participant = HumanReviewParticipant(user_id=user.id, decision="review")
-        participant.user = user
-        request.participants.append(participant)
-    with patch(
-        "openswe.human_review.lifecycle.latest_review_states", AsyncMock(return_value=states)
+    request.participants.extend([_reviewer("grace"), _reviewer("linus")])
+    hopper = User(
+        identities=[
+            UserIdentity(provider="github", external_id="hopper", login="hopper"),
+            UserIdentity(provider="slack", external_id="U_hopper"),
+        ]
+    )
+
+    async def lookup(provider: str, login: str) -> User | None:
+        return hopper if linked and provider == "github" and login.lower() == "hopper" else None
+
+    with (
+        patch(
+            "openswe.human_review.lifecycle.latest_review_states", AsyncMock(return_value=states)
+        ),
+        patch.object(User, "for_login", lookup),
     ):
         text, blocks = await ReviewCard(request).render("merged")
     payload = block_payload(blocks)
@@ -531,7 +550,8 @@ async def test_merged_card_names_only_actual_approvers(
         assert "merged" in message
         assert "by @ada" in message
         if states:
-            assert "approved by <@U_grace>, @hopper" in message
+            approver = "<@U_hopper>" if linked else "@hopper"
+            assert f"approved by <@U_grace>, {approver}" in message
         else:
             assert "approved by" not in message
         assert "linus" not in message
@@ -830,6 +850,4 @@ async def test_only_auto_merge_requests_merge_when_approved(
     assert merge.await_count == int(auto_merge)
     if not auto_merge:
         assert request.state == "open"
-        assert request.detail == (
-            "approval from @linus" if pending else "approved — awaiting manual merge"
-        )
+        assert request.detail == ("" if pending else "approved — awaiting manual merge")

@@ -16,6 +16,7 @@ from openswe.slack.client import (
 )
 from openswe.slack.http import SlackRequestError
 from openswe.slack.thinking import sync_slack_background_status
+from openswe.users import User
 
 logger = logging.getLogger(__name__)
 
@@ -48,6 +49,7 @@ async def notify_slack_review(
         f"{review_url}:{action}:{edited_at or edited_body or ''}".encode()
     ).hexdigest()
     try:
+        who = await User.slack_mention_for_login(reviewer)
         location = await get_active_slack_thread(client, thread_id)
         while location is not None:
             async with slack_thread_mutation_lock(
@@ -64,7 +66,7 @@ async def notify_slack_review(
                     await post_slack_thread_reply_with_ts(
                         location["channel_id"],
                         location["thread_ts"],
-                        f"@{escape(reviewer, quote=False)} <{review_url}|{notice}>{suffix}",
+                        f"{who} <{review_url}|{notice}>{suffix}",
                         agent_thread_id=thread_id,
                         unfurl_links=False,
                         unfurl_media=False,

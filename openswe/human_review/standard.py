@@ -58,7 +58,12 @@ from openswe.human_review.picking import (
     Wait,
     choose_reviewer,
 )
-from openswe.human_review.requests import HumanReviewParticipant, HumanReviewRequest, RequestKind
+from openswe.human_review.requests import (
+    HumanReviewParticipant,
+    HumanReviewRequest,
+    RequestKind,
+    slack_mention,
+)
 from openswe.jobs import queue
 from openswe.prompts import prompt
 from openswe.run_config import RunConfig
@@ -716,7 +721,7 @@ async def assign(
     ):
         await ReviewPicks(request).drop(
             others,
-            f"Open SWE asked @{github_login} to review {label} *{escape(pr.title)}* instead, "
+            f"Open SWE asked {slack_mention(user, github_login)} to review {label} *{escape(pr.title)}* instead, "
             "so you no longer need to.",
         )
         request = await HumanReviewRequest.get(request.id) or request
@@ -866,29 +871,34 @@ async def _set_detail(request: HumanReviewRequest, detail: str) -> HumanReviewRe
 
 
 def merge_wait(
-    reviewers: list[str],
+    reviewers: list[HumanReviewParticipant],
     requested_at: datetime | None,
     states: dict[str, str],
     now: datetime,
     *,
     auto_merge: bool = True,
 ) -> str | None:
-    """What approvals the merge still waits for, or ``None`` when they are enough.
+    """What approvals the merge still waits for as mrkdwn, or ``None`` when they are enough.
 
     ``states`` maps each GitHub login to its latest review state.
     """
     approvers = {login.lower() for login, state in states.items() if state == "APPROVED"}
     if not approvers:
         return "an approval on GitHub"
-    pending = [login for login in reviewers if login.lower() not in approvers]
+    pending = [r for r in reviewers if r.github_login.lower() not in approvers]
     deadline_passed = (
         auto_merge
         and requested_at is not None
         and now >= requested_at + timedelta(hours=AUTO_MERGE_AFTER_HOURS)
     )
     if pending and not deadline_passed:
-        return "approval from " + ", ".join(f"@{login}" for login in pending)
+        return "approval from " + ", ".join(r.slack_mention for r in pending)
     return None
+
+
+async def _approved_it(approvers: list[str]) -> str:
+    mentions = [await User.slack_mention_for_login(login) for login in approvers]
+    return ", ".join(mentions) + " approved it"
 
 
 async def _settle_posted(
@@ -921,9 +931,7 @@ async def _settle_posted(
             )
     if approved:
         await ReviewCard(request).mark_approved()
-        await ReviewPicks(request).release(
-            ", ".join(f"@{login}" for login in sorted(approvers)) + " approved it"
-        )
+        await ReviewPicks(request).release(await _approved_it(sorted(approvers)))
         return
     await _pick_remaining_owners(request, sorted(approvers))
     async with HumanReviewRequest.locked(request.id) as (_, row):
@@ -1029,25 +1037,22 @@ async def _settle(request: HumanReviewRequest, pull: PullRequestClient) -> bool:
             await _pick_remaining_owners(request, approvers)
         else:
             picked = len(request.reviewers) + len(request.picks)
-            request = await ReviewPicks(request).release(
-                ", ".join(f"@{login}" for login in approvers) + " approved it"
-            )
+            request = await ReviewPicks(request).release(await _approved_it(approvers))
             # The unclaimed deadline already fired, so only a fresh one can pick again if the approval goes.
             if request.kind == "standard" and len(request.reviewers) + len(request.picks) < picked:
                 await _schedule(
                     request, "unclaimed", timedelta(minutes=await _assignment_minutes(request))
                 )
     waiting = merge_wait(
-        [reviewer.github_login for reviewer in request.reviewers],
+        request.reviewers,
         request.created_at,
         states,
         datetime.now(UTC),
         auto_merge=request.auto_merge,
     )
-    if waiting is None and readiness.blockers:
-        waiting = "; ".join(readiness.blockers)
-    if waiting is not None:
-        await ReviewCard(await _set_detail(request, waiting)).refresh()
+    if waiting is not None or readiness.blockers:
+        blockers = "" if waiting is not None else "; ".join(readiness.blockers)
+        await ReviewCard(await _set_detail(request, blockers)).refresh()
         return True
     async with HumanReviewRequest.locked(request.id) as (_, row):
         if row is None or row.state != "open":
