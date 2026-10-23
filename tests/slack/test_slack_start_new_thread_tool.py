@@ -379,8 +379,20 @@ async def test_slack_breakout_thread_success(
     assert captured["top_level_post"]["blocks"] == [
         {
             "type": "section",
-            "text": {"type": "mrkdwn", "text": captured["top_level_post"]["text"]},
-        }
+            "text": {
+                "type": "mrkdwn",
+                "text": "`/breakout`: Investigate follow-up · <https://p/src|(source)> · <@U1>",
+            },
+        },
+        {
+            "type": "context",
+            "elements": [
+                {
+                    "type": "mrkdwn",
+                    "text": f"<https://dashboard.example/agents/{expected_thread_id}|Open in Web>",
+                }
+            ],
+        },
     ]
     source_line.assert_awaited_once_with("C1", "1700000000.000002")
     react.assert_awaited_once_with("C1", "1700000000.000001", "1700000000.000002", target, new_ts)
