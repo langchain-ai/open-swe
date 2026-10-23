@@ -6,11 +6,17 @@ resolution, per-thread reuse, deploy-time snapshot bake, and lifecycle.
 
 from __future__ import annotations
 
-from collections.abc import Mapping
+from collections.abc import Awaitable, Callable, Mapping
 from dataclasses import dataclass
-from typing import ClassVar, Literal, TypedDict
+from typing import TYPE_CHECKING, ClassVar, Literal, TypeAlias, TypedDict
 
 from managed_deepagents._connections import ConnectionReference, is_connection_reference
+
+if TYPE_CHECKING:
+    from deepagents.backends.protocol import SandboxBackendProtocol
+
+SandboxPrepare: TypeAlias = "Callable[[SandboxBackendProtocol], Awaitable[None] | None]"
+"""Deploy-time callback that provisions the bake builder before its snapshot is captured."""
 
 
 @dataclass(frozen=True, repr=False)
@@ -73,11 +79,12 @@ class SandboxDefinition:
 
     A Managed Deep Agent declares its execution environment with
     ``sandbox = define_sandbox(...)``. MDA owns how it is *resolved*:
-    construction, per-thread reuse, deploy-time ``setup.sh`` bake, and
-    lifecycle/TTL.
+    construction, per-thread reuse, deploy-time ``setup.sh`` and ``prepare``
+    bake, and lifecycle/TTL.
     """
 
     options: dict[str, object]
+    prepare: SandboxPrepare | None = None
     kind: ClassVar[str] = "sandbox"
 
     #: Option keys MDA owns; a project must not set these.
@@ -233,6 +240,7 @@ __all__ = [
     "ProxyHeader",
     "ProxyRule",
     "SandboxDefinition",
+    "SandboxPrepare",
     "SandboxReplacement",
     "basic",
     "bearer",
