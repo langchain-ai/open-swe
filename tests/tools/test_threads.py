@@ -91,6 +91,106 @@ async def test_list_threads_intersects_participant_and_admin_filters(
     assert awaited.kwargs["admin_threads"] is True
 
 
+@pytest.mark.parametrize(
+    ("scope", "summary_only", "compact"),
+    [
+        ("automation", None, True),
+        ("automation", False, False),
+        ("interactive", None, False),
+        ("all", None, False),
+        ("interactive", True, True),
+    ],
+)
+async def test_list_threads_outcomes_and_pagination(
+    monkeypatch: pytest.MonkeyPatch, scope: str, summary_only: bool | None, compact: bool
+) -> None:
+    outcome = "Backport investigation. " * 30 + (
+        "source=org/repo#123 target=release-2 attempts=3 "
+        "last_attempt=2026-10-23T08:00:00Z status=terminal"
+    )
+    records = [
+        {
+            "id": f"thread-{index}",
+            "status": "idle",
+            "title": "Backport",
+            "createdAt": "2026-10-23T07:00:00Z",
+            "updatedAt": "2026-10-23T08:00:00Z",
+            "messages": [],
+            "plan": {"content": "large dashboard detail" * 200},
+            "pr": {
+                "url": "https://github.com/org/repo/pull/123",
+                "number": 123,
+                "state": "merged",
+                "title": "Extra PR metadata",
+            },
+        }
+        for index in range(50)
+    ]
+
+    async def page(*args: object, **kwargs: object) -> dict[str, object]:
+        offset = kwargs["offset"]
+        limit = kwargs["limit"]
+        assert isinstance(offset, int) and isinstance(limit, int)
+        return {
+            "items": records[offset : offset + limit],
+            "limit": limit,
+            "offset": offset,
+            "hasMore": offset + limit < len(records),
+        }
+
+    records[0]["final_message"] = outcome
+    records[1]["messages"] = [{"role": "assistant", "content": outcome}]
+
+    async def get_state(thread_id: str) -> dict[str, object]:
+        assert thread_id not in {"thread-0", "thread-1"}
+        return {
+            "values": {
+                "messages": [
+                    {
+                        "role": "assistant",
+                        "content": outcome if thread_id == "thread-2" else "No eligible backports.",
+                    },
+                    {"role": "assistant", "content": "", "tool_calls": [{"name": "read_file"}]},
+                    {"role": "tool", "content": "tool output"},
+                ]
+                if thread_id != "thread-49"
+                else []
+            }
+        }
+
+    monkeypatch.setattr(threads_tool, "_actor", AsyncMock(return_value=_actor()))
+    monkeypatch.setattr(threads_tool, "list_dashboard_threads_page", page)
+    monkeypatch.setattr(
+        threads_tool,
+        "langgraph_client",
+        lambda: SimpleNamespace(threads=SimpleNamespace(get_state=get_state)),
+    )
+    result = await threads_tool.list_threads(scope=scope, summary_only=summary_only, limit=50)
+    assert result["success"] is True
+    assert result["offset"] == 0
+    assert result["limit"] == 50
+    assert result["has_more"] is False
+    collected = result["items"]
+    assert len(collected) == 50
+    if compact:
+        assert len(json.dumps(result)) < 20_000
+        assert collected[0] == {
+            **{key: records[0][key] for key in ("id", "status", "createdAt", "updatedAt", "title")},
+            "webUrl": threads_tool.dashboard_thread_url("thread-0"),
+            "pr": {"url": "https://github.com/org/repo/pull/123", "number": 123, "state": "merged"},
+            "final_message": outcome[:500],
+        }
+        assert collected[1]["final_message"] == outcome[:500]
+        assert collected[2]["final_message"] == outcome[:500]
+        assert collected[3]["final_message"] == "No eligible backports."
+        assert collected[-1]["final_message"] is None
+    else:
+        assert collected[0]["plan"] == records[0]["plan"]
+        assert collected[0]["pr"] == records[0]["pr"]
+        assert collected[0]["final_message"] == outcome
+        assert "final_message" not in collected[2]
+
+
 _AUTOMATION_ID = "706242c0-edba-4ab7-a342-154c354f9946"
 
 
