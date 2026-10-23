@@ -437,12 +437,26 @@ def _message_id(message: Any) -> str | None:
     return str(value) if value else None
 
 
+def _last_assistant_message(state: object) -> dict[str, object] | None:
+    for message in reversed(_state_messages(state)):
+        if _message_kind(message) not in {"ai", "assistant"}:
+            continue
+        text = _plain_message_text(_message_content(message))
+        if text:
+            return {
+                "text": text[-_MAX_DETAIL_MESSAGE_CHARS:],
+                "truncated": len(text) > _MAX_DETAIL_MESSAGE_CHARS,
+                "timestamp": _message_timestamp(message),
+            }
+    return None
+
+
 def _transcript(state: Any) -> dict[str, Any]:
     messages = _state_messages(state)
     visible: list[dict[str, Any]] = []
     omitted = 0
     used_chars = 0
-    for message in messages:
+    for message in reversed(messages):
         kind = _message_kind(message)
         if kind not in {"human", "user", "ai", "assistant"}:
             omitted += 1
@@ -456,7 +470,7 @@ def _transcript(state: Any) -> dict[str, Any]:
             omitted += 1
             continue
         remaining = _MAX_TRANSCRIPT_CHARS - used_chars
-        returned_text = text[: min(_MAX_DETAIL_MESSAGE_CHARS, remaining)]
+        returned_text = text[-min(_MAX_DETAIL_MESSAGE_CHARS, remaining) :]
         visible.append(
             {
                 "id": _message_id(message),
@@ -469,7 +483,7 @@ def _transcript(state: Any) -> dict[str, Any]:
         )
         used_chars += len(returned_text)
     return {
-        "messages": visible,
+        "messages": list(reversed(visible)),
         "message_count": len(messages),
         "returned_count": len(visible),
         "omitted_count": omitted,
@@ -766,7 +780,7 @@ async def get_thread(
     thread_id: str,
     state: Annotated[dict[str, Any] | None, InjectedState] = None,
 ) -> dict[str, Any]:
-    """Implement the `get_thread` tool."""
+    """Inspect a thread, including last_assistant_message (text tail, truncated, timestamp) or None."""
     actor = await _reader(state)
     if actor is None:
         return _failure(_NO_ACTOR)
@@ -838,6 +852,7 @@ async def get_thread(
         "latest_run": _run_detail(latest_run),
         "recent_runs": _run_history(runs),
         "last_user_message": _last_user_message(thread_state),
+        "last_assistant_message": _last_assistant_message(thread_state),
         "transcript": _transcript(thread_state),
         "state": _state_summary(thread_state),
         "queued_message_count": queued_count,

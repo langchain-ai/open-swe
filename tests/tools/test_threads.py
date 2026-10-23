@@ -342,6 +342,85 @@ def test_transcript_filters_private_and_tool_content() -> None:
     assert transcript["truncated"] is True
 
 
+@pytest.mark.parametrize("role", ["ai", "assistant"])
+@pytest.mark.parametrize("outcome", ["Done", "x" * 5_000 + "\nretry ledger: complete"])
+async def test_get_thread_exposes_latest_outcome(
+    monkeypatch: pytest.MonkeyPatch, role: str, outcome: str
+) -> None:
+    client = _DetailClient()
+    timestamp = "2026-08-20T12:01:00Z"
+    client.threads.get_state.return_value = {
+        "values": {
+            "messages": [
+                {"type": "human", "content": "instructions" * 1_000},
+                {"type": "ai", "content": "Older outcome"},
+                {"role": role, "content": outcome, "created_at": timestamp},
+                {"type": "ai", "content": [{"type": "reasoning", "text": "hidden"}]},
+                {"type": "tool", "content": "tool output"},
+            ]
+        }
+    }
+    monkeypatch.setattr(threads_tool, "_reader", AsyncMock(return_value=_actor()))
+    monkeypatch.setattr(
+        threads_tool,
+        "_authorized_locator",
+        AsyncMock(return_value=("thread-1", {"id": "thread-1", "status": "finished"})),
+    )
+    monkeypatch.setattr(threads_tool, "langgraph_client", lambda: client)
+    monkeypatch.setattr(threads_tool, "get_plan_content", AsyncMock(return_value={}))
+    monkeypatch.setattr(threads_tool, "list_plan_comments", AsyncMock(return_value=[]))
+    monkeypatch.setattr(threads_tool, "get_workflow_push_approvals", AsyncMock(return_value={}))
+    monkeypatch.setattr(threads_tool, "_queued_message_count", AsyncMock(return_value=0))
+    monkeypatch.setattr(threads_tool, "get_langsmith_thread_cost", AsyncMock(return_value=None))
+
+    result = await threads_tool.get_thread("thread-1")
+
+    assert result["last_assistant_message"] == {
+        "text": outcome[-4_000:],
+        "truncated": len(outcome) > 4_000,
+        "timestamp": timestamp,
+    }
+
+
+def test_latest_outcome_without_nonempty_assistant_message() -> None:
+    state = {
+        "values": {
+            "messages": [
+                {"type": "human", "content": "request"},
+                {"type": "ai", "content": "   "},
+                {"type": "assistant", "content": [{"type": "reasoning", "text": "hidden"}]},
+            ]
+        }
+    }
+
+    assert threads_tool._last_assistant_message(state) is None
+
+
+@pytest.mark.parametrize("count, width, retained", [(105, 10, 100), (15, 4_000, 13)])
+def test_transcript_budgets_keep_newest_messages(count: int, width: int, retained: int) -> None:
+    messages = [
+        {"type": "ai", "id": str(index), "content": str(index).zfill(width)}
+        for index in range(count)
+    ]
+
+    transcript = threads_tool._transcript({"values": {"messages": messages}})
+    returned = transcript["messages"]
+
+    assert [message["id"] for message in returned] == [
+        str(index) for index in range(count - retained, count)
+    ]
+    assert returned[-1]["text"] == messages[-1]["content"]
+    assert transcript["omitted_count"] == count - retained
+    assert transcript["returned_count"] == retained
+    assert transcript["message_count"] == count
+    assert transcript["truncated"] is True
+    assert sum(len(message["text"]) for message in returned) <= 50_000
+    if width == 4_000:
+        assert returned[0]["truncated"] is True
+        assert returned[0]["text"] == messages[count - retained]["content"][-2_000:]
+        assert all(not message["truncated"] for message in returned[1:])
+
+
 def test_admin_thread_actions_require_admin() -> None:
     options = {
         "admin_thread": True,
