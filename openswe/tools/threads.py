@@ -10,7 +10,6 @@ from typing import Annotated, Any, Literal
 
 from fastapi import HTTPException
 from langchain_core.messages import BaseMessage
-from langgraph.config import get_config
 from langgraph.prebuilt import InjectedState
 from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
@@ -22,7 +21,7 @@ from openswe.input_messages import dynamic_context_hash, input_message_text, mes
 from openswe.invocation import resolve_invocation_id
 from openswe.message_queue import QueuedMessage
 from openswe.prompts import prompt
-from openswe.run_config import RunConfig
+from openswe.run_config import RunConfig, current_config
 from openswe.schedules import store as schedules
 from openswe.slack.client import parse_github_pr_url, parse_slack_thread_url
 from openswe.slack.code_channels import CODE_CHANNEL_SESSION_TS
@@ -112,11 +111,7 @@ class _Actor:
 
 
 def _config() -> dict[str, Any]:
-    try:
-        config = get_config()
-    except Exception:
-        return {}
-    return as_json_object(config)
+    return as_json_object(current_config())
 
 
 async def _actor(state: Mapping[str, Any] | None = None) -> _Actor | None:

@@ -33,7 +33,7 @@ from openswe.dashboard.options import (
     provider_fallback_pair,
 )
 from openswe.dashboard.settings_records import INSTANCE_SETTINGS, WORKSPACE_SETTINGS
-from openswe.run_config import RunConfig
+from openswe.run_config import RunConfig, current_config
 from openswe.ui_invalidations import Topic
 from openswe.utils.gateway import gateway_overrides, resolve_gateway_enabled
 from openswe.utils.time import now_iso
@@ -365,10 +365,7 @@ def resolve_settings_workspace(explicit: str | None = None) -> str:
     """
     candidate = explicit
     if not (isinstance(candidate, str) and candidate.strip()):
-        try:
-            candidate = RunConfig.from_runtime().workspace_slug
-        except Exception:  # noqa: BLE001
-            candidate = None
+        candidate = RunConfig.from_config(current_config()).workspace_slug
     if not (isinstance(candidate, str) and candidate.strip()):
         return DEFAULT_WORKSPACE_SLUG
     try:

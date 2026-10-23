@@ -559,7 +559,7 @@ async def test_reconcile_enqueues_one_claimed_completion(
         )
     if worker:
         config = {"configurable": configurable}
-        monkeypatch.setattr(threads, "get_config", lambda: config)
+        monkeypatch.setattr("openswe.run_config.get_config", lambda: config)
         monkeypatch.setattr(task_service, "get_config", lambda: config)
         assert await task_service.Actor.resolve({}) == task_service.Actor(
             thread_id="thread-1", login="worker-owner"

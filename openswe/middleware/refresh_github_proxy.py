@@ -11,11 +11,11 @@ import logging
 from typing import Any
 
 from langchain.agents.middleware import AgentState, before_model
-from langgraph.config import get_config
 from langgraph.runtime import Runtime
 
 from openswe.github.proxy import maybe_refresh_proxy_token
 from openswe.middleware.trace import scrub_middleware_inputs
+from openswe.run_config import RunConfig, current_config
 
 logger = logging.getLogger(__name__)
 
@@ -27,12 +27,7 @@ async def refresh_github_proxy_before_model(
     runtime: Runtime,  # noqa: ARG001
 ) -> dict[str, Any] | None:
     """Refresh the sandbox proxy's GitHub token before it expires mid-run."""
-    try:
-        config = get_config()
-        thread_id = config.get("configurable", {}).get("thread_id")
-    except Exception:  # noqa: BLE001
-        return None
-
+    thread_id = RunConfig.from_config(current_config()).thread_id
     if not thread_id:
         return None
 
