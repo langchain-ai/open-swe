@@ -133,7 +133,8 @@ def _ask_to_monitor(sha: str) -> str:
         "on this thread's existing channel, whether to monitor its rollout only when that "
         "skill says this change qualifies. Ask once. If the skill file is missing, or it "
         "does not say to offer monitoring for this change, stop without messaging them. "
-        "If they agree, call request_rollout_check. If they decline, stop. "
+        "If they decline, stop. If they agree, follow that skill's accepted-offer steps. "
+        "Do not call request_rollout_check until those steps say to. "
         "Do not call listen_events yourself."
     )
 
