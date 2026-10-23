@@ -76,8 +76,9 @@ export function useAgentStreamSource(threadId: string): StreamThreadSource {
       } catch (error) {
         submitError = error
       }
-      const wasAccepted = await accepted?.()
-      if (submitError && !wasAccepted) throw submitError
+      const acceptance = (await accepted?.()) ?? { accepted: false }
+      if (submitError && !acceptance.accepted)
+        throw acceptance.refusal ?? submitError
     },
     [trackRunAcceptance, stream]
   )

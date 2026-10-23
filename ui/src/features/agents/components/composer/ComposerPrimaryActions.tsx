@@ -23,6 +23,8 @@ export interface ComposerPrimaryActionsProps {
    * LangGraph assigns a thread id); inside one it replaces the source's stop.
    */
   onStop?: () => void | Promise<void>
+  /** False when this viewer may not stop the live run, such as a mirrored Claude Code session. */
+  stoppable?: boolean
   /** Set false while the composer owns Escape (an open command menu or model picker). */
   stopOnEscape?: boolean
   /** Label of the send button while a run is live. */
@@ -123,7 +125,8 @@ function ThreadPrimaryActions(props: ComposerPrimaryActionsProps) {
   }
 
   const running =
-    props.submitting || source.isRunning || props.activeRun?.running
+    props.stoppable !== false &&
+    (props.submitting || source.isRunning || props.activeRun?.running)
   useEscapeToStop(
     Boolean(running && props.canSubmit && props.stopOnEscape !== false),
     () => void handleStop()

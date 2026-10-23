@@ -12,6 +12,7 @@ from openswe.github.ci import RequiredCheck
 from openswe.github.http import RepoClient
 from openswe.github.queue import Check, QueuePull, WorkflowRun
 from openswe.merge_queue.git import SHA
+from openswe.merge_queue.validation_contract import ValidationPolicy
 
 ADMISSION_MAX_AGE = timedelta(seconds=120)
 
@@ -32,6 +33,7 @@ class QueuePolicy(BaseModel):
     max_build_attempts: int = Field(default=3, ge=1, le=10)
     max_attempts: int = Field(default=3, ge=1, le=10)
     max_plans: int = Field(default=3, ge=0, le=100)
+    validation: ValidationPolicy | None = None
 
     @property
     def fingerprint(self) -> str:

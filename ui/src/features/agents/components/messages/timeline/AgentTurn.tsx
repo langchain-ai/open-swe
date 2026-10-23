@@ -11,6 +11,7 @@ import { CopyIconButton } from "@langchain/macaw-components/CopyButton"
 import { DiffView } from "../../chat/DiffView"
 import { ChunkRenderer } from "../ChunkRenderer"
 import { MessageTimestamp } from "../MessageTimestamp"
+import { WorkerLaunchMessage } from "../TaskEventMessage"
 import { ReasoningBlock } from "../ReasoningBlock"
 import {
   buildRenderItems,
@@ -212,9 +213,12 @@ export function AgentTurn({
     setExpandedFolds((prev) => ({ ...prev, [key]: !(prev[key] ?? false) }))
   }, [])
 
+  // The answer is what follows the last stretch of work; earlier replies are
+  // commentary the agent wrote along the way.
   const replyText = useMemo(
     () =>
       segments
+        .slice(segments.findLastIndex((s) => s.type === "work") + 1)
         .map((segment) => {
           if (segment.type !== "reply") return ""
           const { item } = segment
@@ -306,6 +310,9 @@ export function AgentTurn({
           />
         )
       }
+
+      case "worker-launch-item":
+        return <WorkerLaunchMessage key={item.key} chunk={item.chunk} />
 
       case "reply-item":
         return <ReplyCard key={item.key} chunk={item.chunk} />
@@ -418,8 +425,10 @@ export function AgentTurn({
 function replyTimestamp(segment?: TurnSegment): string | undefined {
   if (segment?.type !== "reply") return undefined
   const { item } = segment
-  return "chunk" in item && item.chunk.kind === "tool-execution"
-    ? item.chunk.timestamp
+  if (!("chunk" in item)) return undefined
+  const { chunk } = item
+  return chunk.kind === "tool-execution" || chunk.kind === "text"
+    ? chunk.timestamp
     : undefined
 }
 

@@ -11,6 +11,7 @@ answers as it does in-process.
 import json
 import logging
 from collections.abc import Awaitable, Callable
+from typing import Final
 
 from langchain.agents.middleware import AgentMiddleware
 from langchain.agents.middleware.types import ToolCallRequest
@@ -20,14 +21,16 @@ from langgraph.types import Command
 from managed_deepagents import define_sandbox
 from managed_deepagents.sandbox import SandboxDefinition, open_sandbox, replace_sandbox
 from pydantic import JsonValue, TypeAdapter, ValidationError
+from runtime_api.catalog import SandboxCreate, SandboxSpec
 
 from rt.backend import OpenSweBackend, run_body
-from rt.sandbox import SandboxCreate, SandboxSpec
 from rt.tools import run_id
 
 logger = logging.getLogger(__name__)
 
 _json_object = TypeAdapter(dict[str, JsonValue])
+# As the backend's sandbox: a command without a timeout of its own gets five minutes.
+EXECUTE_TIMEOUT_SECONDS: Final = 300
 
 
 def definition(create: SandboxCreate, thread_id: str | None) -> SandboxDefinition:
@@ -37,6 +40,7 @@ def definition(create: SandboxCreate, thread_id: str | None) -> SandboxDefinitio
         _openswe_thread_id=thread_id,
         _openswe_no_manage_proxy=True,
         _openswe_create_fields=dict(create.extra_fields),
+        default_timeout=EXECUTE_TIMEOUT_SECONDS,
         snapshot_id=create.snapshot_id,
         idle_ttl_seconds=create.idle_ttl_seconds,
         delete_after_stop_seconds=create.delete_after_stop_seconds,

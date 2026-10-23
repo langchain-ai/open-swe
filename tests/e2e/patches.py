@@ -312,13 +312,16 @@ def apply() -> None:
     workspace_refresh._create_builder_sandbox = _fake_builder_sandbox
     workspace_refresh._release_builder_sandbox = _release_nothing
 
-    # The review diff reads against a REST base its module captured at import time.
-    from openswe.github import pull_request_diff
+    # Every MDA run names its thread's browser, so sharing a thread deletes it.
+    # No browser exists without LangSmith, so deleting one finds nothing.
+    from openswe.sandboxes.browsers import LangSmithBrowser
+
+    LangSmithBrowser.delete = _delete_nothing
+
     from openswe.review import chat as review_chat
     from openswe.review import reviews as review_reviews
     from openswe.review_scout import graph as review_scout_graph
 
-    pull_request_diff.__dict__["_GITHUB_API"] = FAKE_GITHUB_API
     for module in (review_reviews, review_chat):
         module.__dict__["get_github_app_installation_token"] = _dummy_install_token
     review_chat.__dict__["fetch_pr_diff"] = _fake_fetch_pr_diff
@@ -390,6 +393,10 @@ async def _fake_builder_sandbox(_record: object, _snapshot_id: object = None) ->
 
 
 async def _release_nothing(_sandbox_id: str) -> None:
+    return None
+
+
+async def _delete_nothing(_browser: object) -> None:
     return None
 
 

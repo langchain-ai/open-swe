@@ -29,6 +29,26 @@ export class AgentsApiError extends DashboardRequestError {
     super(status, message, requestId)
     this.name = "AgentsApiError"
   }
+
+  /** A failed response, named by its `detail` when the body has one. */
+  static async fromResponse(
+    response: Response,
+    requestId?: string
+  ): Promise<AgentsApiError> {
+    let message = response.statusText
+    try {
+      const body: unknown = await response.json()
+      const detail =
+        body !== null && typeof body === "object" && "detail" in body
+          ? (body as { detail: unknown }).detail
+          : undefined
+      if (typeof detail === "string" && detail) message = detail
+      else if (detail !== undefined) message = JSON.stringify(detail)
+    } catch {
+      // Not a JSON error body; the status text is all we have.
+    }
+    return new AgentsApiError(response.status, message, requestId)
+  }
 }
 
 /** Where a thread moves: onto this Mac through its bridge, or to the cloud. */
@@ -146,6 +166,8 @@ export interface ThreadsPageParams {
   repo?: string
   ownerless?: boolean
   owned?: boolean
+  /** Thread sources to leave out, such as `claude_code`. */
+  excludeSources?: Array<string>
   sortBy?: ThreadSortBy
 }
 
@@ -302,6 +324,8 @@ function buildThreadsPageQuery(params: ThreadsPageParams): string {
   if (params.ownerless != null)
     search.set("ownerless", String(params.ownerless))
   if (params.owned) search.set("owned", "true")
+  for (const source of params.excludeSources ?? [])
+    search.append("exclude_source", source)
   if (params.sortBy) search.set("sort_by", params.sortBy)
   const query = search.toString()
   return query ? `?${query}` : ""
@@ -311,6 +335,7 @@ function buildReposQuery(params: {
   includeResolved?: boolean
   includeAutomations?: boolean
   owned?: boolean
+  excludeSources?: Array<string>
 }): string {
   const search = new URLSearchParams()
   if (params.includeResolved != null)
@@ -319,6 +344,8 @@ function buildReposQuery(params: {
     search.set("include_automations", String(params.includeAutomations))
   }
   if (params.owned) search.set("owned", "true")
+  for (const source of params.excludeSources ?? [])
+    search.append("exclude_source", source)
   const query = search.toString()
   return query ? `?${query}` : ""
 }
@@ -344,6 +371,7 @@ export const agentsApi = {
       includeResolved?: boolean
       includeAutomations?: boolean
       owned?: boolean
+      excludeSources?: Array<string>
     } = {}
   ) =>
     agentsRequest<Array<SidebarRepo>>(
@@ -516,5 +544,10 @@ export const agentsApi = {
   getThreadBrowser: (threadId: string) =>
     agentsRequest<ThreadBrowser>(
       `/threads/${encodeURIComponent(threadId)}/browser`
+    ),
+  openThreadBrowser: (threadId: string) =>
+    agentsRequest<ThreadBrowser>(
+      `/threads/${encodeURIComponent(threadId)}/browser`,
+      { method: "POST" }
     ),
 }

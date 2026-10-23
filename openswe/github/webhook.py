@@ -47,6 +47,7 @@ from openswe.thread_ids import (
     reviewer_thread_id,
     thread_id_from_branch,
 )
+from openswe.threads import index, succession
 from openswe.threads.creation import create_thread
 from openswe.users import User
 from openswe.walkthrough.record import Walkthrough
@@ -268,6 +269,7 @@ async def trigger_pr_review_from_ref(
     github_user_id: int | None = None,
     slack_channel_id: str = "",
     slack_thread_ts: str = "",
+    allow_draft: bool = False,
 ) -> dict[str, Any]:
     repo_config = {"owner": pr_ref.owner, "name": pr_ref.repo}
 
@@ -282,7 +284,7 @@ async def trigger_pr_review_from_ref(
     if not pr_metadata:
         return {"success": False, "error": "Could not fetch pull request metadata"}
 
-    if pr_metadata.get("draft"):
+    if pr_metadata.get("draft") and not allow_draft:
         return {
             "success": False,
             "error": f"{pr_ref.url} is a draft. " + prompt("tools/human-review-blocked"),
@@ -310,7 +312,9 @@ async def trigger_pr_review_from_ref(
         common.logger.warning("Missing base/head SHA for Slack PR review request")
         return {"success": False, "error": "Pull request metadata is missing base/head SHA"}
 
-    thread_id = reviewer_thread_id(pr_ref.owner, pr_ref.repo, pr_ref.number)
+    thread_id = await succession.succeed(
+        reviewer_thread_id(pr_ref.owner, pr_ref.repo, pr_ref.number)
+    )
     langgraph_client = common.get_client(url=common.LANGGRAPH_URL)
     if not await common.ensure_thread_exists_for_metadata(
         thread_id,
@@ -418,8 +422,8 @@ async def _dispatch_first_review_from_pr_payload(payload: dict[str, Any], *, sou
         common.logger.warning("Missing PR context for reviewer dispatch, skipping run")
         return
 
-    thread_id = reviewer_thread_id(
-        repo_config.get("owner", ""), repo_config.get("name", ""), pr_number
+    thread_id = await index.current_thread_id(
+        reviewer_thread_id(repo_config.get("owner", ""), repo_config.get("name", ""), pr_number)
     )
 
     pr_meta: ReviewerPRMeta = {
@@ -459,6 +463,7 @@ async def _dispatch_first_review_from_pr_payload(payload: dict[str, Any], *, sou
         common.logger.warning("No GitHub App token available for reviewer dispatch")
         return
 
+    thread_id = await succession.succeed(thread_id)
     langgraph_client = common.get_client(url=common.LANGGRAPH_URL)
     if not await common.ensure_thread_exists_for_metadata(
         thread_id,
@@ -613,8 +618,8 @@ async def process_github_pr_close(payload: dict[str, Any]) -> None:
     if not pr_number or not isinstance(pr_number, int):
         return
 
-    thread_id = reviewer_thread_id(
-        repo_config.get("owner", ""), repo_config.get("name", ""), pr_number
+    thread_id = await index.current_thread_id(
+        reviewer_thread_id(repo_config.get("owner", ""), repo_config.get("name", ""), pr_number)
     )
     metadata = await common.get_thread_metadata_safe(thread_id)
     if metadata is None or metadata.get("kind") != common.REVIEWER_THREAD_KIND:
@@ -794,7 +799,9 @@ async def _process_github_head_update(
         )
         return
 
-    thread_id = reviewer_thread_id(repo_config["owner"], repo_config["name"], pr_number)
+    thread_id = await index.current_thread_id(
+        reviewer_thread_id(repo_config["owner"], repo_config["name"], pr_number)
+    )
     metadata = await common.get_thread_metadata_safe(thread_id)
     if metadata is None or metadata.get("kind") != common.REVIEWER_THREAD_KIND:
         common.logger.info(
@@ -889,6 +896,7 @@ async def _process_github_head_update(
         )
         return
 
+    thread_id = await succession.succeed(thread_id)
     langgraph_client = common.get_client(url=common.LANGGRAPH_URL)
     if not await common.ensure_thread_exists_for_metadata(
         thread_id,
@@ -1103,20 +1111,23 @@ async def process_github_pr_comment(
         branch_name,
     )
 
-    thread_id = agent_thread_id or (thread_id_from_branch(branch_name) if branch_name else None)
-    if not thread_id:
-        if not pr_number:
-            common.logger.warning(
-                "Could not determine thread_id for branch '%s' (no pr_number), skipping",
-                branch_name,
-            )
-            return
-        thread_id = pr_comment_thread_id(
+    own_thread_id = agent_thread_id or (thread_id_from_branch(branch_name) if branch_name else None)
+    if own_thread_id:
+        derived_thread_id = own_thread_id
+    elif pr_number:
+        derived_thread_id = pr_comment_thread_id(
             repo_config.get("owner", ""), repo_config.get("name", ""), pr_number
         )
-        common.logger.info(
-            "Generated thread_id %s for non-open-swe branch '%s'", thread_id, branch_name
+    else:
+        common.logger.warning(
+            "Could not determine thread_id for branch '%s' (no pr_number), skipping",
+            branch_name,
         )
+        return
+    thread_id = await index.live_thread_id(derived_thread_id)
+    # The agent's own thread exists; a PR thread or a successor may not yet.
+    if thread_id != own_thread_id:
+        common.logger.info("Using thread_id %s for branch '%s'", thread_id, branch_name)
         langgraph_client = common.get_client(url=common.LANGGRAPH_URL)
         try:
             await langgraph_client.threads.update(thread_id, metadata={"branch_name": branch_name})
@@ -1371,8 +1382,8 @@ async def process_github_review_finding_reply(payload: dict[str, Any]) -> None:
     if not isinstance(pr_number, int):
         return
 
-    thread_id = reviewer_thread_id(
-        repo_config.get("owner", ""), repo_config.get("name", ""), pr_number
+    thread_id = await index.current_thread_id(
+        reviewer_thread_id(repo_config.get("owner", ""), repo_config.get("name", ""), pr_number)
     )
     metadata = await common.get_thread_metadata_safe(thread_id)
     if metadata is None or metadata.get("kind") != common.REVIEWER_THREAD_KIND:
@@ -1422,6 +1433,7 @@ async def process_github_review_finding_reply(payload: dict[str, Any]) -> None:
     }
     await common.append_finding_interaction(thread_id, finding_id, interaction)
 
+    thread_id = await succession.succeed(thread_id)
     base_sha = pull_request.get("base", {}).get("sha", "")
     head_sha = pull_request.get("head", {}).get("sha", "")
     pr_url = pull_request.get("html_url", "") or pull_request.get("url", "")
@@ -1512,7 +1524,7 @@ async def process_github_issue(payload: dict[str, Any], event_type: str) -> None
         common.logger.warning("No email mapping for GitHub user '%s', skipping", github_login)
         return
 
-    thread_id = github_issue_thread_id(issue_id)
+    thread_id = await index.live_thread_id(github_issue_thread_id(issue_id))
     existing_thread = await common.thread_exists(thread_id)
     github_token = await common.get_or_resolve_thread_github_token(thread_id, email)
     app_token = await common.get_github_app_installation_token()

@@ -39,6 +39,7 @@ import { Route as IncidentsIndexRouteImport } from './routes/incidents/index'
 import { Route as IncidentsIncidentIdRouteImport } from './routes/incidents/$incidentId'
 import { Route as MySettingsAboutRouteImport } from './routes/my-settings_.about'
 import { Route as MySettingsAgentRouteImport } from './routes/my-settings_.agent'
+import { Route as MySettingsClaudeCodeRouteImport } from './routes/my-settings_.claude-code'
 import { Route as MySettingsConnectionsRouteImport } from './routes/my-settings_.connections'
 import { Route as MySettingsExperimentsRouteImport } from './routes/my-settings_.experiments'
 import { Route as MySettingsGitRouteImport } from './routes/my-settings_.git'
@@ -205,6 +206,11 @@ const MySettingsAgentRoute = MySettingsAgentRouteImport.update({
   path: '/my-settings/agent',
   getParentRoute: () => rootRouteImport,
 } as any)
+const MySettingsClaudeCodeRoute = MySettingsClaudeCodeRouteImport.update({
+  id: '/my-settings_/claude-code',
+  path: '/my-settings/claude-code',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const MySettingsConnectionsRoute = MySettingsConnectionsRouteImport.update({
   id: '/my-settings_/connections',
   path: '/my-settings/connections',
@@ -311,6 +317,7 @@ export interface FileRoutesByFullPath {
   '/incidents/$incidentId': typeof IncidentsIncidentIdRoute
   '/my-settings/about': typeof MySettingsAboutRoute
   '/my-settings/agent': typeof MySettingsAgentRoute
+  '/my-settings/claude-code': typeof MySettingsClaudeCodeRoute
   '/my-settings/connections': typeof MySettingsConnectionsRoute
   '/my-settings/experiments': typeof MySettingsExperimentsRoute
   '/my-settings/git': typeof MySettingsGitRoute
@@ -355,6 +362,7 @@ export interface FileRoutesByTo {
   '/incidents/$incidentId': typeof IncidentsIncidentIdRoute
   '/my-settings/about': typeof MySettingsAboutRoute
   '/my-settings/agent': typeof MySettingsAgentRoute
+  '/my-settings/claude-code': typeof MySettingsClaudeCodeRoute
   '/my-settings/connections': typeof MySettingsConnectionsRoute
   '/my-settings/experiments': typeof MySettingsExperimentsRoute
   '/my-settings/git': typeof MySettingsGitRoute
@@ -403,6 +411,7 @@ export interface FileRoutesById {
   '/incidents/$incidentId': typeof IncidentsIncidentIdRoute
   '/my-settings_/about': typeof MySettingsAboutRoute
   '/my-settings_/agent': typeof MySettingsAgentRoute
+  '/my-settings_/claude-code': typeof MySettingsClaudeCodeRoute
   '/my-settings_/connections': typeof MySettingsConnectionsRoute
   '/my-settings_/experiments': typeof MySettingsExperimentsRoute
   '/my-settings_/git': typeof MySettingsGitRoute
@@ -452,6 +461,7 @@ export interface FileRouteTypes {
     | '/incidents/$incidentId'
     | '/my-settings/about'
     | '/my-settings/agent'
+    | '/my-settings/claude-code'
     | '/my-settings/connections'
     | '/my-settings/experiments'
     | '/my-settings/git'
@@ -496,6 +506,7 @@ export interface FileRouteTypes {
     | '/incidents/$incidentId'
     | '/my-settings/about'
     | '/my-settings/agent'
+    | '/my-settings/claude-code'
     | '/my-settings/connections'
     | '/my-settings/experiments'
     | '/my-settings/git'
@@ -543,6 +554,7 @@ export interface FileRouteTypes {
     | '/incidents/$incidentId'
     | '/my-settings_/about'
     | '/my-settings_/agent'
+    | '/my-settings_/claude-code'
     | '/my-settings_/connections'
     | '/my-settings_/experiments'
     | '/my-settings_/git'
@@ -587,6 +599,7 @@ export interface RootRouteChildren {
   AgentsWorkspacesRoute: typeof AgentsWorkspacesRoute
   MySettingsAboutRoute: typeof MySettingsAboutRoute
   MySettingsAgentRoute: typeof MySettingsAgentRoute
+  MySettingsClaudeCodeRoute: typeof MySettingsClaudeCodeRoute
   MySettingsConnectionsRoute: typeof MySettingsConnectionsRoute
   MySettingsExperimentsRoute: typeof MySettingsExperimentsRoute
   MySettingsGitRoute: typeof MySettingsGitRoute
@@ -809,6 +822,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof MySettingsAgentRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/my-settings_/claude-code': {
+      id: '/my-settings_/claude-code'
+      path: '/my-settings/claude-code'
+      fullPath: '/my-settings/claude-code'
+      preLoaderRoute: typeof MySettingsClaudeCodeRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/my-settings_/connections': {
       id: '/my-settings_/connections'
       path: '/my-settings/connections'
@@ -998,6 +1018,7 @@ const rootRouteChildren: RootRouteChildren = {
   AgentsWorkspacesRoute: AgentsWorkspacesRoute,
   MySettingsAboutRoute: MySettingsAboutRoute,
   MySettingsAgentRoute: MySettingsAgentRoute,
+  MySettingsClaudeCodeRoute: MySettingsClaudeCodeRoute,
   MySettingsConnectionsRoute: MySettingsConnectionsRoute,
   MySettingsExperimentsRoute: MySettingsExperimentsRoute,
   MySettingsGitRoute: MySettingsGitRoute,

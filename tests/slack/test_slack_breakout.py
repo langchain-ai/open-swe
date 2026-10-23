@@ -172,7 +172,16 @@ async def test_breakout_with_text_starts_new_thread_with_old_transcript(
         {"type": "section", "text": {"type": "mrkdwn", "text": root.await_args.args[1]}}
     ]
     assert update.await_args.kwargs["blocks"] == [
-        {"type": "section", "text": {"type": "mrkdwn", "text": update.await_args.args[2]}}
+        {"type": "section", "text": {"type": "mrkdwn", "text": root.await_args.args[1]}},
+        {
+            "type": "context",
+            "elements": [
+                {
+                    "type": "mrkdwn",
+                    "text": "<https://dashboard.example/agents/new-thread|Open in Web>",
+                }
+            ],
+        },
     ]
     posted.source_line.assert_awaited_once_with("C1", "105.0")
     posted.reactions.assert_awaited_once_with("C1", "100.0", "105.0", expected, "200.0")

@@ -332,7 +332,7 @@ async function shootCard(page: Page, name: string) {
   await page.locator(`[data-channel-id="${REVIEW_CHANNEL}"]`).click();
   const card = page
     .locator(".msg.bot")
-    .filter({ hasText: /Review request/i })
+    .filter({ hasText: /Review request|authored by/i })
     .last();
   await expect(card).toBeVisible({ timeout: 30_000 });
   // The mock UI re-renders every poll, so a screenshot can land on a detached node.
@@ -488,9 +488,7 @@ test.describe("Human review in Slack", () => {
     });
     expect((await pull(request, seeded.number)).merged).toBe(true);
     expect((await latestRequest(request)).state).toBe("merged");
-    expect(cardText(await reviewCard(request, posted))).toContain(
-      "Review request: merged",
-    );
+    expect(cardText(await reviewCard(request, posted))).toMatch(/^:merged: /);
     await shootCard(page, "merged");
   });
 
