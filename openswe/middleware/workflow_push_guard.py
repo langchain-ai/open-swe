@@ -11,14 +11,13 @@ from typing import Any, cast
 
 from langchain.agents.middleware.types import AgentState
 from langchain_core.messages import ToolCall, ToolMessage
-from langgraph.config import get_config
 from langgraph.prebuilt.tool_node import ToolCallRequest
 from langgraph.types import Command
 from langgraph_sdk import get_client
 
 from openswe.middleware.pr_creation_guard import executable_name, shell_commands, shell_tokens
 from openswe.middleware.trace import OpenSWEMiddleware
-from openswe.run_config import RunConfig
+from openswe.run_config import RunConfig, current_config
 from openswe.sandboxes.state import SANDBOX_BACKENDS
 from openswe.slack.client import (
     LANGGRAPH_URL,
@@ -120,11 +119,7 @@ def _config(request: ToolCallRequest) -> Mapping[str, Any]:
     runtime_config = getattr(getattr(request, "runtime", None), "config", None)
     if isinstance(runtime_config, Mapping):
         return runtime_config
-    try:
-        config = get_config()
-    except Exception:
-        return {}
-    return config if isinstance(config, Mapping) else {}
+    return current_config() or {}
 
 
 def _configurable(request: ToolCallRequest) -> RunConfig:

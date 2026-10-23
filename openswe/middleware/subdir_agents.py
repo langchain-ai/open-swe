@@ -9,12 +9,11 @@ from typing import Any
 
 from langchain.agents.middleware.types import AgentState
 from langchain_core.messages import ToolMessage
-from langgraph.config import get_config
 from langgraph.prebuilt.tool_node import ToolCallRequest
 from langgraph.types import Command
 
 from openswe.middleware.trace import OpenSWEMiddleware
-from openswe.run_config import RunConfig
+from openswe.run_config import RunConfig, current_config
 from openswe.sandboxes.state import SANDBOX_BACKENDS, SandboxBackendProxy
 
 logger = logging.getLogger(__name__)
@@ -47,15 +46,7 @@ def _thread_id(request: ToolCallRequest) -> str | None:
     config: Mapping[str, Any] | None = (
         runtime_config if isinstance(runtime_config, Mapping) else None
     )
-    if config is None:
-        try:
-            maybe_config = get_config()
-        except Exception:
-            return None
-        config = maybe_config if isinstance(maybe_config, Mapping) else None
-    if config is None:
-        return None
-    return RunConfig.from_config(config).thread_id or None
+    return RunConfig.from_config(config or current_config()).thread_id or None
 
 
 def _file_path(args: Mapping[str, Any]) -> str | None:

@@ -54,7 +54,7 @@ class TestRefreshGithubProxyMiddleware:
 
         with (
             patch(
-                "openswe.middleware.refresh_github_proxy.get_config",
+                "openswe.run_config.get_config",
                 return_value={"configurable": {"thread_id": "thread-9"}},
             ),
             patch(
@@ -75,7 +75,7 @@ class TestRefreshGithubProxyMiddleware:
 
         with (
             patch(
-                "openswe.middleware.refresh_github_proxy.get_config",
+                "openswe.run_config.get_config",
                 return_value={"configurable": {"thread_id": "thread-9"}},
             ),
             patch(

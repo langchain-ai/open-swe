@@ -37,8 +37,7 @@ async def test_task_event_preserves_latest_human_actor(monkeypatch: pytest.Monke
     from openswe.tools import threads
 
     monkeypatch.setattr(
-        threads,
-        "get_config",
+        "openswe.run_config.get_config",
         lambda: {"configurable": {"github_login": "alice", "user_email": "alice@example.test"}},
     )
     monkeypatch.setattr(threads, "enforce_github_login_gate", AsyncMock())

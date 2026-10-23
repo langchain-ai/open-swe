@@ -24,7 +24,7 @@ from openswe.github.comments import derive_pr_state
 from openswe.github.pull_requests import AGENT_OPENED_LINK_SOURCE, PullRequest, ThreadLink
 from openswe.github.token import GitHubUserAuthRequired
 from openswe.remote_runtime.git_metadata import record_pr_target
-from openswe.run_config import RunConfig
+from openswe.run_config import RunConfig, current_config
 from openswe.slack.client import (
     get_active_slack_thread,
     get_slack_permalink,
@@ -151,10 +151,7 @@ def _effective_draft(draft: bool) -> bool:
 
 
 def _configurable() -> RunConfig:
-    try:
-        return RunConfig.from_runtime()
-    except Exception:
-        return RunConfig()
+    return RunConfig.from_config(current_config())
 
 
 def _head_branch_for_repo(owner: str, head: str) -> str | None:

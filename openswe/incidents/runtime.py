@@ -10,7 +10,6 @@ import langgraph_sdk
 from langchain.agents.middleware.types import ModelRequest, ModelResponse
 from langchain_core.messages import HumanMessage, SystemMessage, ToolMessage
 from langchain_core.tools import BaseTool, StructuredTool
-from langgraph.config import get_config
 from langgraph.types import Command
 
 from openswe.incidents import documents, service
@@ -27,7 +26,7 @@ from openswe.incidents.report import (
 from openswe.incidents.turns import SESSION_TS
 from openswe.middleware.trace import OpenSWEMiddleware
 from openswe.prompts import prompt
-from openswe.run_config import RunConfig
+from openswe.run_config import RunConfig, current_config
 from openswe.slack.client import post_slack_thread_reply_with_ts
 from openswe.slack.http import SlackRequestError
 from openswe.source_context import SlackThreadRef
@@ -42,9 +41,8 @@ INCIDENT_TOOL_NAMES = frozenset({"record_incident_report", "search_incidents", "
 
 def current_run_id() -> str:
     """The id of the run executing right now, or "" outside a run."""
-    try:
-        config = get_config()
-    except Exception:  # noqa: BLE001
+    config = current_config()
+    if config is None:
         return ""
     candidates = [config.get("run_id"), RunConfig.from_config(config).run_id]
     return next((str(candidate) for candidate in candidates if candidate), "")

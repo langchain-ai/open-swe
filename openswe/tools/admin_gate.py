@@ -1,17 +1,14 @@
 """Admin identity checks shared by tool access policies."""
 
 from openswe.dashboard.admin import is_admin
-from openswe.run_config import RunConfig
+from openswe.run_config import RunConfig, current_config
 from openswe.schedules.store import authorized_admin_schedule
 from openswe.slack.dm import is_dm_channel
 from openswe.users import User
 
 
 def configurable() -> RunConfig:
-    try:
-        return RunConfig.from_runtime()
-    except Exception:
-        return RunConfig()
+    return RunConfig.from_config(current_config())
 
 
 async def actor_is_admin(cfg: RunConfig, *, login: str | None = None) -> bool:

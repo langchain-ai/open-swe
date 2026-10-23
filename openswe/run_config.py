@@ -25,6 +25,7 @@ import logging
 from collections.abc import Mapping
 from typing import Annotated, Any, Literal, Self
 
+from langchain_core.runnables import RunnableConfig
 from langgraph.config import get_config
 from pydantic import BaseModel, BeforeValidator, ConfigDict, Field, ValidationError
 from pydantic_core import PydanticSerializationError, to_jsonable_python
@@ -34,6 +35,14 @@ from openswe.openai_responses.client_tools import ClientToolSpec
 from openswe.source_context import GitHubIssueRef, LinearIssueRef, SlackThreadRef
 
 logger = logging.getLogger(__name__)
+
+
+def current_config() -> RunnableConfig | None:
+    """The running graph's ``RunnableConfig``, or None outside a run."""
+    try:
+        return get_config()
+    except RuntimeError:
+        return None
 
 
 def _reject_bool(value: Any) -> Any:

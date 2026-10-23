@@ -26,8 +26,7 @@ def _actor(*, login: str = "octocat", admin: bool = False) -> object:
 
 async def test_actor_uses_latest_verified_dashboard_sender(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(
-        threads_tool,
-        "get_config",
+        "openswe.run_config.get_config",
         lambda: {
             "configurable": {
                 "github_login": "thread-owner",
@@ -56,8 +55,7 @@ async def test_list_threads_denies_actor_outside_allowed_org(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     monkeypatch.setattr(
-        threads_tool,
-        "get_config",
+        "openswe.run_config.get_config",
         lambda: {"configurable": {"github_login": "external-user"}},
     )
     monkeypatch.setattr(
@@ -98,8 +96,7 @@ def _automation_run(
     monkeypatch: pytest.MonkeyPatch, thread_metadata: dict[str, object]
 ) -> AsyncMock:
     monkeypatch.setattr(
-        threads_tool,
-        "get_config",
+        "openswe.run_config.get_config",
         lambda: {
             "configurable": {
                 "source": "schedule",
@@ -363,8 +360,7 @@ async def test_manage_thread_uses_followup_sender_for_owner_checks(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     monkeypatch.setattr(
-        threads_tool,
-        "get_config",
+        "openswe.run_config.get_config",
         lambda: {
             "configurable": {
                 "github_login": "thread-owner",
