@@ -449,8 +449,8 @@ async def create_langsmith_thread_feedback(
     try:
         await client._arequest_with_retries("POST", "/feedback", json=payload)  # noqa: SLF001
         return True
-    except Exception:  # noqa: BLE001
-        pass
+    except Exception:
+        logger.debug("LangSmith feedback create failed; updating it instead", exc_info=True)
     try:
         await client._arequest_with_retries(  # noqa: SLF001
             "PATCH",
@@ -505,8 +505,8 @@ async def create_langsmith_feedback(
             )
             any_success = True
             continue
-        except Exception:  # noqa: BLE001 - feedback already exists; update in place
-            pass
+        except Exception:
+            logger.debug("LangSmith feedback create failed; updating it instead", exc_info=True)
         try:
             await _update_feedback(api_key, api_url, feedback_id, score=score, comment=comment)
             any_success = True

@@ -1944,7 +1944,9 @@ async def get_active_slack_thread(
             if isinstance(metadata, Mapping) and metadata.get(SLACK_DETACHED_AT_KEY):
                 return None
         except Exception:
-            logger.debug("Could not resolve active Slack location for thread %s", thread_id)
+            logger.debug(
+                "Could not resolve active Slack location for thread %s", thread_id, exc_info=True
+            )
     if isinstance(fallback, Mapping):
         location = dict(fallback)
         try:

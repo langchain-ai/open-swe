@@ -113,14 +113,18 @@ select = [
     "TID251",
     "SLF",  # flake8-self: no cross-module access to _private names
     "PLC2701",  # no cross-module imports of _private names
+    "BLE001",  # blind except must re-raise or log the traceback
+    "S110",  # no silent try/except/pass
 ]
 ignore = [
     "E501",  # line too long (handled by formatter)
 ]
+logger-objects = ["openswe.webhooks.common.logger"]
 
 [tool.ruff.lint.per-file-ignores]
-"tests/**" = ["SLF001", "PLC2701"]
-"mda/tests/**" = ["SLF001", "PLC2701"]
+"tests/**" = ["SLF001", "PLC2701", "BLE001", "S110"]
+"mda/tests/**" = ["SLF001", "PLC2701", "BLE001", "S110"]
+"evals/**" = ["BLE001", "S110"]
 # Siblings of one package sharing package-internal helpers. PLC2701 cannot tell
 # an intra-package import from a cross-package one; names these modules expose
 # to the rest of the codebase are public.

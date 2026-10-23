@@ -140,7 +140,7 @@ def _discovery_error(error: Exception) -> str:
 async def discover_tools(record: MCPConnection, namespace: tuple[str, ...]) -> list[Tool]:
     try:
         return await asyncio.wait_for(_discover_tools(record, namespace), timeout=_TIMEOUT_SECONDS)
-    except Exception as exc:
+    except Exception as exc:  # noqa: BLE001 - re-raised with the upstream text redacted
         # The shared cache logs refresh failures, so redact before handing errors to it.
         raise ValueError(_discovery_error(exc)) from None
 
@@ -189,7 +189,7 @@ def _wrap_tool(
         except ToolException:
             is_error = True
             raise
-        except Exception:
+        except Exception:  # noqa: BLE001 - upstream text may hold credentials
             is_error = True
             logger.warning("MCP call failed", extra={"mcp_name": name})
             raise ToolException("MCP call failed; check its connection and credentials") from None
@@ -273,7 +273,7 @@ async def _load_tools(
             if record.allows_tool(definition.name)
         ]
         return tools, outcome
-    except Exception:
+    except Exception:  # noqa: BLE001 - upstream text may hold credentials
         logger.warning("MCP discovery failed", extra={"mcp_name": record.name})
         return [], "failed"
 
@@ -288,7 +288,7 @@ async def load_mcp_tools(*sources: MCPSource, connection_name: str | None = None
             for record in records:
                 resolved[record.name] = (source, record)
                 scopes.setdefault(record.name, []).append(source.scope)
-    except Exception:
+    except Exception:  # noqa: BLE001 - upstream text may hold credentials
         # Missing scope data must not silently expose a lower-precedence connection.
         logger.warning("MCP settings unavailable")
         return []

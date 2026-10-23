@@ -1,6 +1,7 @@
 """Tool that posts a Slack approval card for a tiny pull request."""
 
 import hashlib
+import logging
 from collections.abc import Mapping
 from typing import Any, Literal
 from uuid import UUID
@@ -40,6 +41,8 @@ from openswe.slack.http import SlackRequestError
 from openswe.tools.manage_baby_sit import dispatch_run_config
 from openswe.tools.mcp_exposure import expose_mcp
 from openswe.users import User
+
+logger = logging.getLogger(__name__)
 
 
 def _failure(error: str) -> dict[str, Any]:
@@ -200,6 +203,7 @@ async def expedite_pr_approval(
     except HTTPException as exc:
         return _failure(f"You cannot access {pr_ref.owner}/{pr_ref.repo}: {exc.detail}")
     except Exception as exc:
+        logger.warning("GitHub token resolution failed", exc_info=True)
         return _failure(f"GitHub authentication failed: {exc}")
     async with GitHubClient.connect(token=token) as github:
         pull = github.repo(pr_ref.owner, pr_ref.repo).pull_request(pr_ref.number)

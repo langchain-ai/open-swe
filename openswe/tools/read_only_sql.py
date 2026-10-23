@@ -58,7 +58,7 @@ async def read_only_sql(query: str) -> dict[str, object]:
             result = await conn.stream(text(query))
             columns = [str(column) for column in result.keys()]
             fetched = await result.fetchmany(_MAX_ROWS + 1)
-    except Exception as exc:
+    except Exception as exc:  # noqa: BLE001 - query errors may echo row data
         logger.warning(
             "Read-only SQL query failed",
             extra={"error_type": type(exc).__name__},

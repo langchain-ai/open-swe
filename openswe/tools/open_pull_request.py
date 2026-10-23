@@ -114,7 +114,7 @@ def _auth_headers(token: str) -> dict[str, str]:
 def _github_message(resp: httpx2.Response) -> str:
     try:
         data = resp.json()
-    except Exception:
+    except ValueError:
         return resp.text.strip() or f"HTTP {resp.status_code}"
     if isinstance(data, dict):
         message = data.get("message")
@@ -153,7 +153,7 @@ def _effective_draft(draft: bool) -> bool:
 def _configurable() -> RunConfig:
     try:
         return RunConfig.from_runtime()
-    except Exception:
+    except RuntimeError:
         return RunConfig()
 
 

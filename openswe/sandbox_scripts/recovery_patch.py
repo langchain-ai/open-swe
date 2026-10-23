@@ -132,6 +132,6 @@ try:
     base = merge_base(repo)
     patch_path = write_patch(repo, base)
     print(json.dumps({"ok": True, "path": str(patch_path), "size": patch_path.stat().st_size}))
-except Exception as exc:
+except Exception as exc:  # noqa: BLE001 - reported to the caller on stdout
     print(json.dumps({"ok": False, "error": str(exc)}))
     sys.exit(1)

@@ -51,7 +51,10 @@ async def web_search(
                 "web-search", chunk_output_as_jsonl(results), "jsonl"
             )
         except Exception:
-            logger.info("Web search sandbox unavailable; returning bounded inline results")
+            logger.info(
+                "Web search sandbox unavailable; returning bounded inline results",
+                exc_info=True,
+            )
             return {
                 "success": True,
                 "results_path": None,

@@ -122,7 +122,7 @@ def _config(request: ToolCallRequest) -> Mapping[str, Any]:
         return runtime_config
     try:
         config = get_config()
-    except Exception:
+    except RuntimeError:
         return {}
     return config if isinstance(config, Mapping) else {}
 

@@ -114,7 +114,7 @@ class _Actor:
 def _config() -> dict[str, Any]:
     try:
         config = get_config()
-    except Exception:
+    except RuntimeError:
         return {}
     return as_json_object(config)
 
@@ -654,6 +654,11 @@ async def _private_thread_context(actor: _Actor) -> bool:
     try:
         thread = await langgraph_client().threads.get(thread_id)
     except Exception:
+        logger.warning(
+            "Could not load the current thread to check private ownership",
+            extra={"thread_id": thread_id},
+            exc_info=True,
+        )
         return False
     metadata = thread_metadata(thread)
     return metadata.get("visibility") == "private" and thread_is_owner(metadata, actor.login)

@@ -81,8 +81,8 @@ def schedule_repo_cache_refresh(login: str, refresh: Callable[[], Awaitable[Any]
     async def run() -> None:
         try:
             await refresh()
-        except Exception as e:
-            logger.warning("background repo list refresh for %s failed: %s", key, e)
+        except Exception:
+            logger.warning("background repo list refresh for %s failed", key, exc_info=True)
         finally:
             _refreshing.discard(key)
 
