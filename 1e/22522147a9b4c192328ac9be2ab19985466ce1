@@ -1,0 +1,35 @@
+mda/uv.lock
+  s_bf247046117b65::t_b28ddb0d1b227a 84-109,1296,1301,1380,1390,1398,1408,1560-1635
+vendor/managed-deepagents-sdk/crates/mda/src/compile/manifest.rs
+  s_bf247046117b65::t_fc349b7c0df589 173
+vendor/managed-deepagents-sdk/crates/mda/src/compile/tests.rs
+  s_bf247046117b65::t_39ebdc18019625 4229
+vendor/managed-deepagents-sdk/crates/mda/src/dependencies.rs
+  s_bf247046117b65::t_895c0aeaacbec3 180-193,764-775
+vendor/managed-deepagents-sdk/packages/pypi/pyproject.toml
+  s_bf247046117b65::t_ce75895d25a062 153-155
+vendor/managed-deepagents-sdk/packages/pypi/src/managed_deepagents/_browser_recording.py
+  s_bf247046117b65::t_0df5e28a375049 1-550
+vendor/managed-deepagents-sdk/packages/pypi/src/managed_deepagents/browser.py
+  s_bf247046117b65::t_97be3c3347d146 25,29,31,41,56,92-121,126-154,162-163,168-186,202-209,214-215,236-237,251-255,269-270,272-274,333-381,454-663,715-749,840-842,863-865,873,880,919-925,949-951
+vendor/managed-deepagents-sdk/packages/pypi/uv.lock
+  s_bf247046117b65::t_1bb695b61d3c4c 2,8-9,86-146,175-176,914,1361-1362,1367,1398,1403,1646-1735
+vendor/mda-upstream-prs
+  s_bf247046117b65::t_835265d4c54643 3-5
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "1e22522147a9b4c192328ac9be2ab19985466ce1",
+  "prompts": {},
+  "sessions": {
+    "s_bf247046117b65": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "83c6a65b-66e1-489e-af9d-84284821b1e8",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "Sydney Runkle <sydneymarierunkle@gmail.com>"
+    }
+  }
+}

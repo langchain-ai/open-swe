@@ -1,0 +1,27 @@
+mda/rt/backend.py
+  s_bf247046117b65::t_2b5b3b2f701ff9 51-52
+mda/rt/browser.py
+  s_bf247046117b65::t_3a349dcc9c4b91 11,41-56
+openswe/browser_handoff.py
+  s_bf247046117b65::t_a94800c4b5c9f3 1-41
+openswe/remote_runtime/graph.py
+  s_bf247046117b65::t_86b141426dbf5a 65,150-155,614-616
+tests/reviewer/test_remote_runtime.py
+  s_bf247046117b65::t_c951b8251757b5 376-423
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "420daf36b146334bfd3d22df072a7cc26c87a1eb",
+  "prompts": {},
+  "sessions": {
+    "s_bf247046117b65": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "83c6a65b-66e1-489e-af9d-84284821b1e8",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "Sydney Runkle <sydneymarierunkle@gmail.com>"
+    }
+  }
+}
