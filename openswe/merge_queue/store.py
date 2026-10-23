@@ -42,6 +42,10 @@ class LeaseLost(ValueError):
     """This controller no longer owns the queue."""
 
 
+class QueueItemNotFound(ValueError):
+    """The requested item does not exist in this queue."""
+
+
 @dataclass(frozen=True)
 class QueueEntry:
     request: MergeRequest
@@ -278,7 +282,7 @@ class MergeQueue(Record):
             )
         )
         if request is None:
-            raise ValueError("Merge request not found")
+            raise QueueItemNotFound("Merge request not found")
         return request
 
     async def refresh_head(self, request_id: UUID, head_sha: str, lease: Lease) -> None:
@@ -440,7 +444,7 @@ class MergeQueue(Record):
             select(Batch).where(Batch.id == batch_id, Batch.queue_id == self.id)
         )
         if batch is None:
-            raise ValueError("Batch not found")
+            raise QueueItemNotFound("Batch not found")
         return batch
 
     async def _active_batch(self, session: AsyncSession) -> Batch:

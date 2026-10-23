@@ -1156,7 +1156,17 @@ async def test_queue_dashboard_authorization(
         assert (await client.patch(f"{path}/pause", json={"paused": False})).status_code == 204
         snapshot = (await client.get(path)).json()
         assert snapshot["paused"] is False and len(snapshot["entries"]) == 1
+        missing = uuid7()
+        assert (await client.get(f"{path}/batches/{missing}")).status_code == 404
+        assert (
+            await client.patch(f"{path}/requests/{missing}/priority", json={"priority": 1})
+        ).status_code == 404
+        assert (await client.delete(f"{path}/requests/{missing}")).status_code == 204
         assert (await client.delete(f"{path}/requests/{requested['id']}")).status_code == 204
+        assert (await client.delete(f"{path}/requests/{requested['id']}")).status_code == 204
+        assert (
+            await client.patch(f"{path}/requests/{requested['id']}/priority", json={"priority": 1})
+        ).status_code == 409
         assert (await client.get(path)).json()["entries"] == []
         async with postgres.session() as session:
             await session.execute(

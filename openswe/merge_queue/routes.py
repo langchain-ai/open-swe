@@ -1,5 +1,6 @@
 """Human-only queue controls; admission and GitHub mutations belong to the worker."""
 
+import logging
 from collections.abc import AsyncIterator
 from dataclasses import dataclass
 from datetime import datetime
@@ -18,8 +19,10 @@ from openswe.github.pull_requests import PullRequest
 from openswe.merge_queue import controller
 from openswe.merge_queue.git import SHA
 from openswe.merge_queue.models import RequestState
-from openswe.merge_queue.store import MergeQueue
+from openswe.merge_queue.store import MergeQueue, QueueItemNotFound
 from openswe.users.models import User
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/merge-queue/{workspace_id}", tags=["merge-queue"])
 
@@ -128,6 +131,8 @@ async def queue_access(
             )
         except PermissionError as exc:
             raise HTTPException(403, str(exc)) from exc
+        except QueueItemNotFound as exc:
+            raise HTTPException(404, str(exc)) from exc
         except ValueError as exc:
             raise HTTPException(409, str(exc)) from exc
 
@@ -200,7 +205,10 @@ async def request_merge(body: MergeIntent, access: QueueAccess = ACCESS) -> Requ
 @audit_endpoint
 async def withdraw_request(request_id: UUID, access: QueueAccess = ACCESS) -> None:
     await access.require_writer()
-    await access.queue.withdraw(request_id, actor=access.user.id, operator=access.operator)
+    try:
+        await access.queue.withdraw(request_id, actor=access.user.id, operator=access.operator)
+    except QueueItemNotFound:
+        logger.debug("Merge request already absent", extra={"request_id": str(request_id)})
 
 
 @router.patch("/requests/{request_id}/priority", status_code=204)
