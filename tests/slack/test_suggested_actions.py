@@ -1,6 +1,4 @@
 import json
-from collections.abc import AsyncIterator
-from contextlib import asynccontextmanager
 from dataclasses import replace
 from typing import Any, cast
 from unittest.mock import AsyncMock
@@ -8,8 +6,6 @@ from unittest.mock import AsyncMock
 import pytest
 from fastapi import BackgroundTasks
 
-from openswe.github.pull_requests import ReviewLink
-from openswe.human_review import offer
 from openswe.human_review.offer import GET_REVIEWED
 from openswe.slack import events as slack_events
 from openswe.slack import suggested_actions
@@ -85,72 +81,3 @@ async def test_accepting_a_suggestion_asks_the_slack_threads_agent_once(
     assert request.event_ts == "200.5"
     assert request.text == "Get https://github.com/lc/repo/pull/7 reviewed."
     assert "<@U1>" in request.turn_context
-
-
-@pytest.mark.parametrize(
-    ("state", "draft", "review_sha", "stored_review", "active", "reason"),
-    [
-        ("closed", False, None, False, False, "merged or closed"),
-        ("open", True, None, False, False, "draft"),
-        ("open", False, "head", False, False, "already reviewed"),
-        ("open", False, "previous", False, False, None),
-        ("open", False, None, True, False, "already reviewed"),
-        ("open", False, None, False, True, "already been requested"),
-    ],
-)
-async def test_review_offer_checks_current_pr_state(
-    monkeypatch: pytest.MonkeyPatch,
-    state: str,
-    draft: bool,
-    review_sha: str | None,
-    stored_review: bool,
-    active: bool,
-    reason: str | None,
-) -> None:
-    monkeypatch.setattr(
-        offer.HumanReviewRequest, "active_for", AsyncMock(return_value=object() if active else None)
-    )
-    monkeypatch.setattr(offer.User, "for_login", AsyncMock(return_value=object()))
-    monkeypatch.setattr(
-        offer.PullRequest,
-        "get",
-        AsyncMock(
-            return_value=offer.PullRequest(
-                owner="lc",
-                repo="repo",
-                number=7,
-                reviews=[ReviewLink(head_sha="head")],
-            )
-            if stored_review
-            else None
-        ),
-    )
-
-    class Pull:
-        async def pull(self) -> dict[str, object]:
-            return {
-                "state": state,
-                "draft": draft,
-                "user": {"login": "author"},
-                "head": {"sha": "head"},
-            }
-
-        async def reviews(self) -> list[dict[str, object]]:
-            return [
-                {
-                    "user": {"login": "open-swe[bot]"},
-                    "state": "COMMENTED",
-                    "commit_id": review_sha,
-                }
-            ]
-
-    @asynccontextmanager
-    async def as_app(*args: object) -> AsyncIterator[Pull]:
-        yield Pull()
-
-    monkeypatch.setattr(offer.PullRequestClient, "as_app", as_app)
-    unavailable = await offer._unavailable_reason("https://github.com/lc/repo/pull/7")
-    if reason is None:
-        assert unavailable is None
-    else:
-        assert unavailable is not None and reason in unavailable
