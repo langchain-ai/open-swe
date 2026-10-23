@@ -300,6 +300,7 @@ class SlackButtonValue(SlackPayload):
     thread_id: str = ""
     thread_ts: str = ""
     response: str = ""
+    user_id: str | None = None
     kind: str = ""
     subject: str = ""
 

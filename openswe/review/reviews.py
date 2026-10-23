@@ -1263,7 +1263,9 @@ async def trigger_re_review(owner: str, repo: str, pr_number: int, login: str) -
         number=pr_number,
         url=f"https://github.com/{owner}/{repo}/pull/{pr_number}",
     )
-    result = await trigger_pr_review_from_ref(pr_ref, source="dashboard", github_login=login)
+    result = await trigger_pr_review_from_ref(
+        pr_ref, source="dashboard", github_login=login, allow_draft=True
+    )
     if not result.get("success"):
         raise HTTPException(502, str(result.get("error") or "could not trigger review"))
     return result

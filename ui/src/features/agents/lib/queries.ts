@@ -728,6 +728,9 @@ export function useSidebarActiveThread({
   })
   // An open worker is already listed under its coordinator; listing it again on its own duplicates it.
   if (loaded && loaded.id !== activeThreadId) return loaded
+  if (detail && loaded?.taskWorkers) {
+    return { ...detail, taskWorkers: loaded.taskWorkers }
+  }
   return detail ?? loaded ?? query.data
 }
 
