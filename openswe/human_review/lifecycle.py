@@ -331,9 +331,7 @@ class ReviewCard:
         text, blocks = await self._warn_target(await self._render_card(outcome, copy=copy))
         if copy or dm or self.request.kind == "standard":
             source = RunConfig.parse(self.request.run_config).slack_thread
-            blocks.extend(
-                await origin_footer(self.request.thread_id, source.location if source else None)
-            )
+            blocks.extend(await origin_footer(self.request.thread_id, fallback=source))
         return text, blocks
 
     async def _render_card(self, outcome: str | None, *, copy: bool) -> tuple[str, list[Block]]:

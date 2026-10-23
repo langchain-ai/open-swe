@@ -600,8 +600,9 @@ async def test_approved_card_collapses_without_closing_the_request(
 
 @pytest.mark.parametrize("in_thread", [False, True])
 @pytest.mark.parametrize("outcome", [None, "merged"])
+@pytest.mark.parametrize("source", ["unavailable", "moved", "detached"])
 async def test_review_card_keeps_its_originating_slack_thread(
-    in_thread: bool, outcome: str | None, github_app: AsyncMock
+    in_thread: bool, outcome: str | None, source: str, github_app: AsyncMock
 ) -> None:
     pr = PullRequest(owner="lc", repo="repo", number=7, author="ada")
     request = HumanReviewRequest(
@@ -615,22 +616,40 @@ async def test_review_card_keeps_its_originating_slack_thread(
     )
     request.pull_request = pr
     request.requested_by = None
-    source_url = "https://langchain.slack.com/archives/C_SOURCE/p123456"
+    channel = "C_MOVED" if source == "moved" else "C_SOURCE"
+    source_url = f"https://langchain.slack.com/archives/{channel}/p123456"
+    client = MagicMock()
+    client.threads.get = AsyncMock(
+        return_value={
+            "metadata": {
+                "source_context": {
+                    "slack_thread": {"channel_id": "C_MOVED", "thread_ts": "123.456"}
+                }
+            }
+            if source == "moved"
+            else {"slack_thread_detached_at": "2026-10-23T00:00:00Z"}
+        },
+        side_effect=RuntimeError("Metadata unavailable") if source == "unavailable" else None,
+    )
     with (
         patch.object(ReviewCard, "_review_states", AsyncMock(return_value={})),
         patch.object(ReviewCard, "_warn_target", side_effect=lambda card: card),
-        patch("openswe.slack.cards.get_active_slack_thread", AsyncMock(return_value=None)),
+        patch("openswe.slack.cards.get_client", return_value=client),
         patch(
             "openswe.slack.cards.get_slack_permalink",
             AsyncMock(
-                side_effect=lambda channel, ts: (
-                    source_url if (channel, ts) == ("C_SOURCE", "123.456") else None
+                side_effect=lambda target, ts: (
+                    source_url if (target, ts) == (channel, "123.456") else None
                 )
             ),
         ),
     ):
         _, blocks = await ReviewCard(request).render(outcome)
-    assert f"<{source_url}|Slack thread>" in str(block_payload(blocks))
+    rendered = str(block_payload(blocks))
+    if source == "detached":
+        assert "|Slack thread>" not in rendered
+    else:
+        assert f"<{source_url}|Slack thread>" in rendered
 
 
 def _response(status: int, text: str = "") -> httpx2.Response:
