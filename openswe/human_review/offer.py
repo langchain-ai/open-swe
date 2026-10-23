@@ -18,7 +18,6 @@ GET_REVIEWED = register(
         kind="review",
         question="Want Open SWE to get {subject} reviewed?",
         accept_label="Get it reviewed",
-        accepted="Asked Open SWE to get {subject} reviewed.",
         request="Get {subject} reviewed.",
         prompt_name="runs/suggested-review",
     )
