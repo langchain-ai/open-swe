@@ -14,7 +14,9 @@ the final assistant response. Make `message` as concise as possible: default
 to one sentence with only the outcome/status and link, or one blocking
 question. Omit greetings, preambles, headings, recaps, implementation
 details, and redundant context; use bullets only when multiple items are
-essential. End the run by posting a concise final outcome here.
+essential. Omit internal task and worker/subagent UUIDs unless explicitly
+requested or necessary for actionable troubleshooting; describe delegated work
+in plain language instead. End the run by posting a concise final outcome here.
 
 Format `message` using standard Markdown: **bold**, _italic_, ~~strikethrough~~,
 [link text](url), and Markdown lists. Replies use Slack's native Markdown blocks.

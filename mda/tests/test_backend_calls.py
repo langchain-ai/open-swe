@@ -31,7 +31,7 @@ from langchain_core.messages import (
 )
 from langchain_core.outputs import ChatGeneration, ChatResult
 from langchain_core.runnables import RunnableConfig, RunnableLambda
-from langchain_core.tools import tool
+from langchain_core.tools import BaseTool, tool
 from langchain_core.tracers.langchain import LangChainTracer, wait_for_all_tracers
 from langchain_core.tracers.run_collector import RunCollectorCallbackHandler
 from langgraph.checkpoint.memory import InMemorySaver
@@ -1003,7 +1003,17 @@ async def test_a_read_file_the_backend_serves_gets_the_read_checks(
 
 
 class _ToolCallingModel(GenericFakeChatModel):
+    worker_launch_description: str | None = None
+
     def bind_tools(self, tools: object, **kwargs: object) -> Self:
+        if self.worker_launch_description is not None:
+            assert isinstance(tools, list)
+            launch = next(
+                tool
+                for tool in tools
+                if isinstance(tool, BaseTool) and tool.name == "start_async_task"
+            )
+            assert launch.description == self.worker_launch_description
         return self
 
 
@@ -1044,10 +1054,14 @@ async def _launch_worker(
         "args": {"description": "Fix login", "subagent_type": "general-purpose"},
         "id": "launch-1",
     }
+    description = "Coordinate workers using Open SWE's task tools."
     model = _ToolCallingModel(
-        messages=iter([AIMessage("", tool_calls=[launch, *also]), AIMessage("Launched.")])
+        messages=iter([AIMessage("", tool_calls=[launch, *also]), AIMessage("Launched.")]),
+        worker_launch_description=description,
     )
-    graph = create_agent(model, middleware=[AsyncWorkerLaunchMiddleware(backend), launches])
+    graph = create_agent(
+        model, middleware=[AsyncWorkerLaunchMiddleware(backend, description), launches]
+    )
     values = await graph.ainvoke(
         {"messages": [("user", "fix login in the background")]},
         {

@@ -464,6 +464,7 @@ class RunSession:
             ),
             incident_evidence=self._incident is not None,
             worker_webhook=COMPLETION_WEBHOOK_URL if self._delegates else None,
+            worker_launch_description=prompt("tools/start_async_task") if self._delegates else None,
             model_call_limit=next(
                 (
                     m.run_limit

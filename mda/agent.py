@@ -282,5 +282,8 @@ async def agent(runtime: ManagedServerRuntime) -> DeepAgentDefinition:
         ),
         # `mda build` reads `worker`'s literal name to build its graph.
         subagents=[*sync_subagents, worker],
-        middleware=[*agent_middleware, AsyncWorkerLaunchMiddleware(backend)],
+        middleware=[
+            *agent_middleware,
+            AsyncWorkerLaunchMiddleware(backend, catalog.worker_launch_description),
+        ],
     )

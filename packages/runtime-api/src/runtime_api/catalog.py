@@ -104,5 +104,6 @@ class Catalog(BaseModel):
     incident_evidence: bool = False
     # Where the Agent Server reports a launched worker's run ending; None launches none.
     worker_webhook: str | None = None
+    worker_launch_description: str | None = None
     # The most model calls one run of the graph makes; None leaves it to the runtime.
     model_call_limit: int | None = None

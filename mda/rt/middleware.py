@@ -593,8 +593,24 @@ class AsyncWorkerLaunchMiddleware(AgentMiddleware):
     becomes the worker, the other refused and stopped.
     """
 
-    def __init__(self, backend: OpenSweBackend) -> None:
+    def __init__(self, backend: OpenSweBackend, description: str | None = None) -> None:
         self._backend = backend
+        self._description = description
+
+    async def awrap_model_call(
+        self,
+        request: ModelRequest,
+        handler: Callable[[ModelRequest], Awaitable[ModelResponse]],
+    ) -> ModelResponse:
+        tools = [
+            tool.model_copy(update={"description": self._description})
+            if isinstance(tool, BaseTool)
+            and tool.name == LAUNCH_WORKER_TOOL
+            and self._description is not None
+            else tool
+            for tool in request.tools
+        ]
+        return await handler(request.override(tools=tools))
 
     async def awrap_tool_call(
         self,
