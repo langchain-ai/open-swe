@@ -230,7 +230,7 @@ async def _compact_list_item(item: Mapping[str, object]) -> dict[str, object]:
     if outcome is None and isinstance(thread_id, str):
         thread_state = await langgraph_client().threads.get_state(thread_id)
         outcome = _last_assistant_outcome(_state_messages(thread_state))
-    result["final_message"] = outcome
+    result["final_message"] = outcome[:500] if outcome else None
     return result
 
 
