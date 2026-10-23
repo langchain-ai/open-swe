@@ -394,6 +394,7 @@ async def test_mda_catalog_leaves_integrations_and_code_mode_to_mda(
         ]
         surface.base_tools = core
         surface.code_mode = True
+        surface.excluded = frozenset({"grep", "glob"})
         surface.middleware = middleware
         surface.subagents = [SurfaceSubagent("general-purpose", "helper", "instructions")]
         choice = ModelChoice("openai:gpt-6.1-sol", {})
@@ -434,13 +435,12 @@ async def test_mda_catalog_leaves_integrations_and_code_mode_to_mda(
     assert catalog["code_only"] == ["manage_thread", "mcp_search"]
     # MDA runs the graph's cap on model calls, such as an incident policy's.
     assert catalog["model_call_limit"] == 20
-    # Code mode calls the file and shell tools too, through MDA's own with their checks.
+    # Code mode calls the file and shell tools too, through MDA's own with their checks,
+    # but never one the graph excludes.
     assert catalog["also_from_code"] == [
         "delete",
         "edit_file",
         "execute",
-        "glob",
-        "grep",
         "ls",
         "read_file",
         "web_search",

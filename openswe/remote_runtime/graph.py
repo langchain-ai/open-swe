@@ -413,6 +413,11 @@ class RunSession:
             name: tool for name, tool in self.surface.tools.items() if name not in _MDA_TOOLS
         }
         offered = operations.keys() | _FILE_TOOLS
+        excluded = ((self.surface.excluded | EXCLUDED_TOOLS) - _MDA_TOOLS) | (
+            self._unoffered_delegation_tools()
+        )
+        # Code mode calls tools past the model's list, so what the graph excludes stays out.
+        from_code = offered - excluded if self.surface.code_mode else frozenset()
         return Catalog(
             operations=[
                 OperationSpec(
@@ -438,21 +443,16 @@ class RunSession:
             ],
             models=self.start_models(),
             # Hidden from the model, as the in-process graph hides them.
-            excluded=sorted(
-                ((self.surface.excluded | EXCLUDED_TOOLS) - _MDA_TOOLS)
-                | self._unoffered_delegation_tools()
-            ),
+            excluded=sorted(excluded),
             # Called from MDA's code mode, never offered to the model as schemas.
             code_only=sorted(
                 name
-                for name in operations
+                for name in operations.keys() - excluded
                 if code_only(name)
                 and (self.surface.code_mode or name in self.surface.integration_names)
             ),
             # Offered to the model, and callable from MDA's code mode too.
-            also_from_code=sorted(
-                name for name in offered if self.surface.code_mode and direct_and_from_code(name)
-            ),
+            also_from_code=sorted(name for name in from_code if direct_and_from_code(name)),
             described={name: prompt("tools/display-description") for name in _DESCRIBED_TOOLS},
             files=FilesSpec(
                 backend_paths=list(self.surface.backend_paths),
