@@ -112,7 +112,7 @@ jobs:
         id: mda-changed
         working-directory: preview-tree
         run: |
-          if [[ -f mda/agent.py ]] && ! git diff --quiet refs/tags/mda-deployed/preview HEAD -- mda vendor/managed-deepagents-sdk; then
+          if [[ -f mda/agent.py ]] && ! git diff --quiet refs/tags/mda-deployed/preview HEAD -- mda vendor/managed-deepagents-sdk .github/workflows/build_preview_branch.yml; then
             echo "deploy=true" >>"$GITHUB_OUTPUT"
           fi
       - uses: dtolnay/rust-toolchain@29eef336d9b2848a0b548edc03f92a220660cdb8 # stable
@@ -129,10 +129,15 @@ jobs:
         env:
           # Reserved by `mda deploy`: it authenticates the deploy and is never forwarded as a deployment secret.
           LANGSMITH_API_KEY: ${{ secrets.PREVIEW_DEPLOY_API_KEY || secrets.LANGSMITH_API_KEY }}
+          LANGSMITH_GATEWAY_API_KEY: ${{ secrets.LANGSMITH_GATEWAY_API_KEY_PREVIEW }}
           TREE_SHA: ${{ needs.build.outputs.sha }}
         run: |
-          # The project .env is forwarded as the deployment's secrets: only the backend it calls back.
-          printf 'OPEN_SWE_BACKEND_URL=%s\n' "https://open-swe-preview-cc53e8fbe667565d843d0843f84ee92c.us.langgraph.app" >mda/.env
+          if [[ -z "$LANGSMITH_GATEWAY_API_KEY" ]]; then
+            echo "::error::Set the LANGSMITH_GATEWAY_API_KEY_PREVIEW secret to the preview backend's gateway key."
+            exit 1
+          fi
+          # The project .env is forwarded as the deployment's secrets: the backend it calls back and its gateway key.
+          printf 'OPEN_SWE_BACKEND_URL=%s\nLANGSMITH_GATEWAY_API_KEY=%s\n' "https://open-swe-preview-cc53e8fbe667565d843d0843f84ee92c.us.langgraph.app" "$LANGSMITH_GATEWAY_API_KEY" >mda/.env
           uv run --project mda --locked --python 3.13 mda deploy mda \
             --name open-swe-mda-preview \
             --deployment-type prod \

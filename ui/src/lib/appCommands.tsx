@@ -40,7 +40,7 @@ export function createNewThreadCommand(run: () => void): AppCommand {
     id: "new-thread",
     label: "New thread",
     aliases: ["new chat", "start thread"],
-    shortcuts: ["c", "mod+n", "mod+shift+o"],
+    shortcuts: ["mod+n", "mod+shift+o"],
     group: "General",
     run,
     desktopId: "new-thread",

@@ -894,6 +894,7 @@ async def _compile_resolved_managed_agent_async(
     declared_memory_layers = _declared_memory_layers(run_memory)
     from managed_deepagents._run_input import (  # noqa: PLC0415
         ManagedCompiledAgent,
+        SingleProjectManagedAgent,
         execution_context,
         is_channel_execution,
     )
@@ -936,7 +937,11 @@ async def _compile_resolved_managed_agent_async(
     )
     if not isinstance(agent, CompiledAgent):
         return agent
-    agent.__class__ = ManagedCompiledAgent
+    agent.__class__ = (
+        SingleProjectManagedAgent
+        if definition.config.get("replicate_traces") is False
+        else ManagedCompiledAgent
+    )
     defaults = graph_default_config(config)
     if is_run:
         _, _, routing = execution_context(run_context, config, None)
@@ -1009,6 +1014,7 @@ def _compile_managed_agent(
     merged.pop("memory", None)
     merged.pop("mcp", None)
     merged.pop("sandbox", None)
+    merged.pop("replicate_traces", None)
     merged["context_schema"] = context_schema
 
     sandbox_backend = (

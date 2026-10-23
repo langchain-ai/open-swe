@@ -1,15 +1,10 @@
 """Tests for subdirectory AGENTS.md auto-loading on read_file."""
 
-import sys
-from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
 
 from deepagents.backends.protocol import BackendProtocol
 from langchain_core.messages import ToolMessage
-
-sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "mda"))
-
 from rt.subdir_agents import SubdirAgentsReadMiddleware
 
 

@@ -142,6 +142,8 @@ export interface ToolExecutionChunk {
 export interface TextChunk {
   kind: "text"
   text: string
+  /** When the agent message that wrote it started; bounds the work around it. */
+  timestamp?: string
 }
 
 export interface ReasoningChunk {

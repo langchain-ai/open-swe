@@ -17,13 +17,12 @@ worker grant, adopts its own run token, and runs this agent's middleware as it.
 
 from collections.abc import Collection, Mapping, Sequence
 from pathlib import Path
-from typing import TYPE_CHECKING, Final, Literal
+from typing import TYPE_CHECKING, Final, Literal, cast
 
 from deepagents.middleware.subagents import SubAgent
 from langchain.agents.middleware import (
     AgentMiddleware,
     ModelCallLimitMiddleware,
-    ModelRetryMiddleware,
 )
 from langchain_core.tools import BaseTool
 from langchain_quickjs import CodeInterpreterMiddleware
@@ -49,6 +48,7 @@ from rt.middleware import (
     RuntimeToolsMiddleware,
     ServedToolsMiddleware,
 )
+from rt.model_calls import model_call_guards
 from rt.models import RunModels, build_model
 from rt.sandbox_tools import SandboxToolsMiddleware
 from rt.tools import backend_tool
@@ -108,7 +108,7 @@ def _backend_reports(backend: OpenSweBackend, served: Collection[str]) -> list[A
 
 def _code_mode(
     graph: Graph, from_code: Sequence[BaseTool], described: Mapping[str, str]
-) -> list[AgentMiddleware]:
+) -> list[AgentMiddleware | CodeInterpreterMiddleware]:
     """The graph's code mode, with every tool the catalog offers from code callable from it."""
     if graph == "reviewer":
         interpreter = CodeInterpreterMiddleware(ptc=[*_REVIEWER_PTC_TOOLS, *from_code])
@@ -201,28 +201,32 @@ async def agent(runtime: ManagedServerRuntime) -> DeepAgentDefinition:
                 *box_tools,
                 *replace_sandbox,
                 ServedToolsMiddleware(subagent_tools[subagent.name], excluded, backend),
-                ModelRetryMiddleware(retry_on=(TimeoutError,)),
+                *model_call_guards(subagent=True),
             ],
         }
         for subagent in catalog.subagents
     ]
     # This agent's own, as the agent a worker is; deepagents passes no middleware down.
-    agent_middleware = [
-        BackendRunMiddleware(
-            backend,
-            context.invocation_id,
-            opened_sandbox if catalog.sandbox is not None else None,
-            trace_metadata=catalog.trace_metadata,
-        ),
-        *replace_sandbox,
-        *_backend_reports(backend, reported_elsewhere),
-        *box_tools,
-        ServedToolsMiddleware(offered, excluded | code_only, backend),
-        *_code_mode(context.graph, from_code, catalog.described),
-        *_browser(context.graph, backend),
-        ModelCallLimitMiddleware(run_limit=_MODEL_CALL_LIMIT, exit_behavior="end"),
-        ModelRetryMiddleware(retry_on=(TimeoutError,)),
-    ]
+    # Middleware types are invariant in the state they extend; the agent merges them all.
+    agent_middleware = cast(
+        list[AgentMiddleware],
+        [
+            BackendRunMiddleware(
+                backend,
+                context.invocation_id,
+                opened_sandbox if catalog.sandbox is not None else None,
+                trace_metadata=catalog.trace_metadata,
+            ),
+            *replace_sandbox,
+            *_backend_reports(backend, reported_elsewhere),
+            *box_tools,
+            ServedToolsMiddleware(offered, excluded | code_only, backend),
+            *_code_mode(context.graph, from_code, catalog.described),
+            *_browser(context.graph, backend),
+            ModelCallLimitMiddleware(run_limit=_MODEL_CALL_LIMIT, exit_behavior="end"),
+            *model_call_guards(),
+        ],
+    )
     worker: ManagedAsyncSubAgent = {
         # MDA's build reads `name` and `async` as literals after any spread.
         **({"webhook": catalog.worker_webhook} if catalog.worker_webhook else {}),
@@ -237,6 +241,7 @@ async def agent(runtime: ManagedServerRuntime) -> DeepAgentDefinition:
     }
     return define_deep_agent(
         name="open-swe",
+        replicate_traces=False,
         model=model,
         context_schema=OpenSweRunContext,
         # Named as the in-process graph names them, these replace MDA's own file and

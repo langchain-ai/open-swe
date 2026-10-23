@@ -16,14 +16,15 @@ from unittest.mock import ANY, AsyncMock, MagicMock, patch
 
 import langgraph_sdk
 import pytest
-from langchain.agents.middleware.types import AgentMiddleware, ModelRequest, ModelResponse
+from langchain.agents.middleware.types import AgentMiddleware
 from langchain_core.language_models import BaseChatModel
-from langchain_core.messages import AIMessage, HumanMessage, ToolMessage
+from langchain_core.messages import ToolMessage
 from langgraph.graph.state import RunnableConfig
 
 from openswe.dashboard.workspace_settings import WorkspaceSettings
 from openswe.sandboxes.state import SANDBOX_BACKENDS
-from openswe.server import _registered_tool_name, get_agent
+from openswe.sandboxes.tool_runtime import ToolSurface
+from openswe.server import _registered_tool_name, build_agent, get_agent
 
 _MODEL_DEFAULTS = {
     "default_agent_model": "openai:gpt-6.1-sol",
@@ -214,6 +215,7 @@ async def _capture_create_deep_agent_kwargs(
     thread_settings: dict[str, object] | None = None,
     workspace_settings: WorkspaceSettings | None = None,
     make_model: Callable[..., BaseChatModel] | None = None,
+    tool_surface: ToolSurface | None = None,
 ) -> dict[str, object]:
     captured: dict[str, object] = {}
     make_model_calls: list[tuple[str, dict[str, object]]] = []
@@ -273,7 +275,10 @@ async def _capture_create_deep_agent_kwargs(
         patch("openswe.server.construct_system_prompt", return_value="prompt"),
         patch("openswe.server.create_deep_agent", side_effect=fake_create_deep_agent),
     ):
-        await get_agent(config)
+        if tool_surface is None:
+            await get_agent(config)
+        else:
+            await build_agent(config, tool_surface=tool_surface)
 
     SANDBOX_BACKENDS.pop(thread_id, None)
     captured["make_model_calls"] = make_model_calls
@@ -680,7 +685,10 @@ def pinned_settings() -> dict[str, object]:
     }
 
 
-async def test_explicit_breakout_model_survives_startup_and_followup() -> None:
+@pytest.mark.parametrize("followup_source", ["slack", "dashboard"])
+async def test_explicit_breakout_model_survives_startup_and_followup(
+    followup_source: str,
+) -> None:
     from openswe.server import PrepareAgentRunMiddleware
 
     config = _base_config()
@@ -696,7 +704,9 @@ async def test_explicit_breakout_model_survives_startup_and_followup() -> None:
     snapshot = cast(dict[str, object], store.call_args.args[2])
     assert snapshot["model_handoff_complete"] is True
     assert snapshot["model_routing_enabled"] is False
-    followup = await _capture_create_deep_agent_kwargs(_base_config(), thread_settings=snapshot)
+    followup_config = _base_config()
+    followup_config["configurable"].update(source=followup_source, model_selection="auto")
+    followup = await _capture_create_deep_agent_kwargs(followup_config, thread_settings=snapshot)
     for agent in (initial, followup):
         calls = cast(list[tuple[str, dict[str, object]]], agent["make_model_calls"])
         assert calls[0][0] == "anthropic:claude-opus-5-5"
@@ -732,19 +742,17 @@ async def test_requested_model_survives_auto_followups_but_explicit_selection_wi
     assert configurable["resolved_agent_model_id"] == "openai:gpt-6.1-sol"
 
 
-@pytest.mark.parametrize("image_source", ["initial", "retained", "tool"])
 @pytest.mark.parametrize("route", ["fast", "balanced", "performance"])
-async def test_text_only_adaptive_route_uses_vision_fallback_after_handoff(
-    image_source: Literal["initial", "retained", "tool"],
+async def test_text_only_adaptive_route_names_a_vision_model_after_handoff(
     route: Literal["fast", "balanced", "performance"],
 ) -> None:
-    from openswe.middleware.image_model_fallback import ImageModelFallbackMiddleware
-    from openswe.middleware.model_selection import ModelSelectionMiddleware, ModelSelectionState
+    from openswe.remote_runtime.graph import RunSession
 
     model_id = "fireworks:accounts/fireworks/models/kimi-k3"
     config = _base_config()
     config["configurable"].update(source="dashboard", model_selection="auto")
-    captured = await _capture_create_deep_agent_kwargs(
+    surface = ToolSurface(for_model=True)
+    await _capture_create_deep_agent_kwargs(
         config,
         thread_settings={
             "model_id": "openai:gpt-6.1-sol",
@@ -756,41 +764,16 @@ async def test_text_only_adaptive_route_uses_vision_fallback_after_handoff(
                 route: {"model_id": model_id, "effort": "high"},
             },
         },
-        make_model=lambda model_id, **_: MagicMock(model_id=model_id),
+        tool_surface=surface,
     )
-    middleware = cast(list[object], captured["middleware"])
-    selection = next(item for item in middleware if isinstance(item, ModelSelectionMiddleware))
-    fallback = next(
-        (item for item in middleware if isinstance(item, ImageModelFallbackMiddleware)), None
-    )
-    image = [{"type": "image_url", "image_url": {"url": "https://example.com/image.png"}}]
-    state: ModelSelectionState = {
-        "messages": [
-            ToolMessage(content=image, tool_call_id="screenshot")
-            if image_source == "tool"
-            else HumanMessage(content=image)
-        ],
-        "model_route": route,
-    }
-    if image_source == "retained":
-        state["messages"].append(HumanMessage(content="Explain the screenshot"))
-    handler = AsyncMock(return_value=ModelResponse(result=[AIMessage(content="Done")]))
+    session = RunSession(surface, {}, None, started_here=True)
 
-    async def handle_selected(request: ModelRequest) -> ModelResponse:
-        if fallback is not None:
-            return await fallback.awrap_model_call(request, handler)
-        return await handler(request)
+    routed = session.model_for({"model_route": route})
+    vision = session.vision_for(routed)
 
-    for with_image in (True, False):
-        request = ModelRequest(
-            model=cast(BaseChatModel, captured["model"]),
-            messages=state["messages"] if with_image else [HumanMessage(content="Continue")],
-            state=state,
-        )
-        await selection.awrap_model_call(request, handle_selected)
-        actual = handler.call_args.args[0]
-        assert actual.model.model_id == ("openai:gpt-6.1-sol" if with_image else model_id)
-        assert actual.messages == request.messages
+    assert routed.model_id == model_id
+    assert vision is not None and vision.model_id == "openai:gpt-6.1-sol"
+    assert session.vision_for(vision) is None
 
 
 @pytest.mark.asyncio
@@ -896,13 +879,14 @@ async def test_queued_images_reach_vision_fallback_for_text_only_main_model(
         LinearNotifyState,
         check_message_queue_before_model,
     )
-    from openswe.middleware.image_model_fallback import ImageModelFallbackMiddleware
+    from openswe.remote_runtime.graph import RunSession
 
     config = _base_config()
-    captured = await _capture_create_deep_agent_kwargs(
+    surface = ToolSurface(for_model=True)
+    await _capture_create_deep_agent_kwargs(
         config,
         thread_settings={"model_id": "fireworks:accounts/fireworks/models/kimi-k3"},
-        make_model=lambda model_id, **_: MagicMock(model_id=model_id),
+        tool_surface=surface,
     )
     url = "https://example.com/image.png"
     image = {"type": "image_url", "image_url": {"url": url}}
@@ -918,17 +902,9 @@ async def test_queued_images_reach_vision_fallback_for_text_only_main_model(
     messages = convert_to_messages(update["messages"])
     content = messages[-1].content
     assert isinstance(content, list) and image in content
-    fallback = next(
-        item
-        for item in cast(list[object], captured["middleware"])
-        if isinstance(item, ImageModelFallbackMiddleware)
-    )
-    handler = AsyncMock(return_value=ModelResponse(result=[AIMessage(content="Done")]))
-    await fallback.awrap_model_call(
-        ModelRequest(model=cast(BaseChatModel, captured["model"]), messages=messages), handler
-    )
-    assert handler.call_args.args[0].model is not captured["model"]
-    assert handler.call_args.args[0].messages == messages
+    session = RunSession(surface, {}, None, started_here=True)
+    vision = session.vision_for(session.models.main)
+    assert vision is not None and vision.model_id != session.models.main.model_id
     assert await QueuedMessage.for_thread("thread-ctx") == []
 
 

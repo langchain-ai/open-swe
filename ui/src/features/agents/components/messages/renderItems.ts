@@ -53,24 +53,11 @@ export type TurnSegment =
   | { type: "reply"; item: RenderItem }
   | { type: "work"; key: string; items: Array<RenderItem> }
 
-/**
- * Splits a turn at every reply so each stretch of work folds on its own, in the
- * order it happened. Trailing prose is the turn's answer, so it stays a reply.
- */
+/** Splits a turn at every reply so each stretch of work folds in order. */
 export function segmentTurn(items: Array<RenderItem>): Array<TurnSegment> {
-  let trailingReplyIndex = items.length
-  while (trailingReplyIndex > 0) {
-    const prev = items[trailingReplyIndex - 1]
-    if (!prev || !REPLY_ITEM_TYPES.has(prev.type)) break
-    trailingReplyIndex -= 1
-  }
-
   const segments: Array<TurnSegment> = []
-  items.forEach((item, index) => {
-    if (
-      index >= trailingReplyIndex ||
-      (item.type !== "text-chunk" && REPLY_ITEM_TYPES.has(item.type))
-    ) {
+  items.forEach((item) => {
+    if (REPLY_ITEM_TYPES.has(item.type)) {
       segments.push({ type: "reply", item })
       return
     }
