@@ -518,10 +518,12 @@ async def run_on_system_message(
     """Run a person's dashboard thread on a message Open SWE wrote, queued behind any run."""
     client = langgraph_client()
     thread = await client.threads.get(thread_id)
+    configurable = await _build_dashboard_configurable(thread_id, login, thread_metadata(thread))
+    configurable["background_event"] = True
     await dispatch_agent_run(
         thread_id,
         text,
-        await _build_dashboard_configurable(thread_id, login, thread_metadata(thread)),
+        configurable,
         source=DASHBOARD_SOURCE,
         thread_title=None,
         context={"sender_id": system["id"], "surface": "automation", "kind": "system"},

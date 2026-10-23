@@ -1281,6 +1281,8 @@ async def _process_slack_mention_impl(
         configurable["admin_thread"] = True
     if request.context_thread_ts:
         configurable["slack_breakout"] = True
+    if request.background_event:
+        configurable["background_event"] = True
     if thread_workspace:
         configurable["workspace"] = thread_workspace
         configurable["environment"] = thread_workspace

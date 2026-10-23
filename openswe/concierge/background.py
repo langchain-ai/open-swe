@@ -22,7 +22,7 @@ from openswe.slack.dm import CONCIERGE_TS, open_dm
 from openswe.slack.records import lookup_slack_thread_id
 from openswe.slack.thread_notes import note_for_thread_owner
 from openswe.slack.thread_owner import wake_thread_owner
-from openswe.tasks.schemas import ThreadMetadata
+from openswe.tasks.schemas import CONCIERGE_BACKGROUND_KEY, ThreadMetadata
 from openswe.threads import index
 from openswe.threads.runs import create_system_thread, run_on_system_message
 from openswe.users import User
@@ -113,6 +113,7 @@ class Concierge:
             workspace=host.workspace or host.environment,
             extra_metadata={
                 SANDBOX_HOST_THREAD_KEY: self.dm_thread_id,
+                CONCIERGE_BACKGROUND_KEY: True,
                 "admin_thread": host.admin_thread,
             },
         )

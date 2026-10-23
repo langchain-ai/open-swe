@@ -135,6 +135,7 @@ async def test_workspace_repo_patch_preserves_global_and_rejects_invalid_maps(
         ({"background_task_completion": True}, {}),
         ({"schedule_id": "schedule-1"}, {}),
         ({"watch_key": "watch-1"}, {}),
+        ({"background_event": True}, {}),
         ({"source": "incidents_agent"}, {}),
         ({"source": "github"}, {}),
         ({"source": None}, {}),
