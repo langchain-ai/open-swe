@@ -1,30 +1,51 @@
-"""This deployment's LangSmith sandbox API, for the routes the langsmith SDK does not model.
+"""This deployment's LangSmith sandbox APIs, for the routes the langsmith SDK does not model.
+
+Boxes and snapshots may live in two LangSmiths: the deployment's own, where everything
+created before ``SANDBOX_LANGSMITH_ENDPOINT`` was set stays, and the one new ones are
+created in. Each records the API root it lives at; an unrecorded one is the deployment's.
 
 Kept apart from the LangSmith provider so the dashboard can call the API without
 importing the agent stack the provider's sandbox backend pulls in.
 """
 
-from typing import Literal, Self
+from typing import TYPE_CHECKING, Literal, Self
 
 import httpx2
 
 from openswe.config import ENV
 from openswe.utils.http_pool import pooled_transport
 
+if TYPE_CHECKING:
+    from langsmith.sandbox import AsyncSandboxClient
+
 _ERROR_BODY_CHARS = 500
 _SANDBOX_API_SUFFIX = "/v2/sandboxes"
+
+
+def _api_root(url: str) -> str:
+    return url.rstrip("/").removesuffix(_SANDBOX_API_SUFFIX)
+
+
+class UnknownSandboxAPIError(RuntimeError):
+    """A box or snapshot lives at a LangSmith this deployment holds no key for."""
+
+    def __init__(self, api_root: str) -> None:
+        super().__init__(
+            f"No LangSmith API key is configured for {api_root}, where this sandbox lives; "
+            "it is neither LANGSMITH_ENDPOINT nor SANDBOX_LANGSMITH_ENDPOINT"
+        )
 
 
 class SandboxAPI:
     """Where the LangSmith API is, and the key this deployment calls it with."""
 
     def __init__(self, root: str, api_key: str | None) -> None:
-        self.api_root = root.rstrip("/").removesuffix(_SANDBOX_API_SUFFIX)
+        self.api_root = _api_root(root)
         self.api_key = api_key
 
     @classmethod
-    def from_env(cls) -> Self:
-        """The API thread sandboxes live at, which may be another LangSmith than tracing's."""
+    def for_new_boxes(cls) -> Self:
+        """The API new boxes and snapshots are created at, which may be another LangSmith."""
         return cls(
             ENV.SANDBOX_LANGSMITH_ENDPOINT.optional() or ENV.LANGSMITH_ENDPOINT.get(),
             ENV.SANDBOX_LANGSMITH_API_KEY.optional() or ENV.LANGSMITH_API_KEY.optional(),
@@ -34,6 +55,44 @@ class SandboxAPI:
     def deployment(cls) -> Self:
         """The deployment's own LangSmith, where MDA opens each thread's browser."""
         return cls(ENV.LANGSMITH_ENDPOINT.get(), ENV.LANGSMITH_API_KEY.optional())
+
+    @classmethod
+    def at(cls, api_root: str | None) -> Self:
+        """The API a box or snapshot recorded at ``api_root`` lives at.
+
+        ``None`` is one recorded before regions were: it lives in the deployment's own.
+        """
+        if api_root is None:
+            return cls.deployment()
+        for api in (cls.for_new_boxes(), cls.deployment()):
+            if api.api_root == _api_root(api_root):
+                return api
+        raise UnknownSandboxAPIError(api_root)
+
+    def holds(self, api_root: str | None) -> bool:
+        """Whether a box or snapshot recorded at ``api_root`` lives at this API."""
+        recorded = _api_root(api_root) if api_root else SandboxAPI.deployment().api_root
+        return recorded == self.api_root
+
+    @property
+    def is_deployment(self) -> bool:
+        """Whether this is the deployment's own LangSmith, the one MDA runs in too."""
+        return self.api_root == SandboxAPI.deployment().api_root
+
+    @property
+    def jwks_url(self) -> str:
+        """Where an app in one of this API's boxes verifies the identity token LangSmith forwards.
+
+        The keys are served by the API host, not by the app origin the token names as
+        its issuer.
+        """
+        return f"{self.api_root}/.well-known/jwks.json"
+
+    def client(self) -> AsyncSandboxClient:
+        """The langsmith SDK's sandbox client for this API."""
+        from langsmith.sandbox import AsyncSandboxClient
+
+        return AsyncSandboxClient(api_key=self.api_key, api_endpoint=self.endpoint)
 
     @property
     def endpoint(self) -> str:

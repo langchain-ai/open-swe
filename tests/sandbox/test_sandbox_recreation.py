@@ -13,7 +13,7 @@ from openswe.sandboxes.state import SANDBOX_BACKENDS, set_sandbox_backend
 def sandbox_client() -> Iterator[AsyncMock]:
     client = AsyncMock()
     with (
-        patch("openswe.sandboxes.providers.langsmith.get_async_sandbox_client") as factory,
+        patch("openswe.sandboxes.providers.langsmith_api.SandboxAPI.client") as factory,
         patch.dict(os.environ, {"SANDBOX_TYPE": "langsmith"}),
     ):
         factory.return_value.__aenter__ = AsyncMock(return_value=client)
@@ -121,7 +121,7 @@ async def test_recreate_sandbox_hands_off_after_metadata_persists(
     configure.assert_awaited_once_with(new_sandbox)
     update.assert_awaited_once_with(
         thread_id=thread_id,
-        metadata={"sandbox_id": "sandbox-new"},
+        metadata={"sandbox_id": "sandbox-new", "sandbox_api": None},
     )
     assert SANDBOX_BACKENDS[thread_id] is proxy
     assert proxy.current is new_sandbox

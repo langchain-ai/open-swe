@@ -9,8 +9,17 @@ import pytest
 from openswe.github.sandbox_access import SandboxGitHubAccess
 from openswe.sandboxes.providers.langsmith import (
     PROXY_CONFIG_RETRY_WINDOW_SECONDS,
+    TimeoutLangSmithSandbox,
     configure_sandbox_proxy,
 )
+from openswe.sandboxes.providers.langsmith_api import SandboxAPI
+
+
+def _box(name: str) -> TimeoutLangSmithSandbox:
+    box = MagicMock(spec=TimeoutLangSmithSandbox)
+    box.id = name
+    box.api = SandboxAPI("https://api.smith.langchain.com", "ls-api-key")
+    return box
 
 
 def _mock_async_client(mock_client_cls: MagicMock, inner: MagicMock) -> None:
@@ -33,7 +42,7 @@ class TestConfigureSandboxProxy:
             _mock_async_client(mock_client_cls, mock_client)
 
             await configure_sandbox_proxy(
-                "sandbox-abc123",
+                _box("sandbox-abc123"),
                 None,
                 base_proxy_config={"rules": [{"name": "github", "headers": [{"value": "old"}]}]},
             )
@@ -54,7 +63,7 @@ class TestConfigureSandboxProxy:
             _mock_async_client(mock_client_cls, mock_client)
 
             await configure_sandbox_proxy(
-                "sandbox-abc123",
+                _box("sandbox-abc123"),
                 "token",
                 base_proxy_config={"rules": [custom_rule], "enabled": True},
             )
@@ -88,7 +97,7 @@ class TestConfigureSandboxProxy:
             mock_client.patch = AsyncMock(side_effect=[failed_response, successful_response])
             _mock_async_client(mock_client_cls, mock_client)
 
-            await configure_sandbox_proxy("sandbox-abc", "token")
+            await configure_sandbox_proxy(_box("sandbox-abc"), "token")
 
             assert mock_client.patch.call_count == 2
             mock_sleep.assert_awaited_once_with(7.0)
@@ -130,10 +139,10 @@ class TestConfigureSandboxProxy:
             _mock_async_client(mock_client_cls, mock_client)
 
             if suspend_seconds < PROXY_CONFIG_RETRY_WINDOW_SECONDS:
-                await configure_sandbox_proxy("sandbox-abc", "token")
+                await configure_sandbox_proxy(_box("sandbox-abc"), "token")
             else:
                 with pytest.raises(httpx2.HTTPStatusError, match="failed to push proxy config"):
-                    await configure_sandbox_proxy("sandbox-abc", "token")
+                    await configure_sandbox_proxy(_box("sandbox-abc"), "token")
                 assert clock.now == PROXY_CONFIG_RETRY_WINDOW_SECONDS
 
     async def test_raises_on_non_retryable_http_error(self) -> None:
@@ -155,7 +164,7 @@ class TestConfigureSandboxProxy:
             _mock_async_client(mock_client_cls, mock_client)
 
             with pytest.raises(httpx2.HTTPStatusError):
-                await configure_sandbox_proxy("sandbox-abc", "token")
+                await configure_sandbox_proxy(_box("sandbox-abc"), "token")
 
             mock_client.patch.assert_called_once()
             mock_sleep.assert_not_called()

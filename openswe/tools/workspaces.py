@@ -194,13 +194,14 @@ async def publish_workspace(
         else store.default_snapshot_name_for(slug)
     )
     try:
+        from openswe.sandboxes.providers.langsmith import langsmith_box
         from openswe.sandboxes.state import get_sandbox_backend, unwrap_sandbox_backend
 
         # ready() reconnects through the provider, which starts a stopped/idle box
         # before handing it back — so the capture always targets a running sandbox.
-        backend = unwrap_sandbox_backend(await get_sandbox_backend(thread_id))
+        source = langsmith_box(unwrap_sandbox_backend(await get_sandbox_backend(thread_id))).ref
         snapshot_id = await store.capture_sandbox_snapshot(
-            backend.id, published_name, timeout=refresh.capture_timeout()
+            source, published_name, timeout=refresh.capture_timeout()
         )
     except Exception as exc:
         logger.exception("Failed to capture sandbox for workspace", extra={"workspace": slug})
@@ -215,17 +216,15 @@ async def publish_workspace(
             definition,
             snapshot_id=snapshot_id,
             snapshot_name=published_name,
-            source_sandbox_id=backend.id,
+            source=source,
             created_by=login if isinstance(login, str) else "open-swe",
         )
     except Exception as exc:
         logger.exception("Failed to record workspace after capture", extra={"workspace": slug})
-        await store.discard_unreferenced_snapshot(slug, snapshot_id)
+        await store.discard_unreferenced_snapshot(slug, snapshot_id, source)
         return {"ok": False, "error": f"failed to record the workspace: {exc}"}
 
-    await store.retire_superseded_snapshot(
-        slug, existing.snapshot_id if existing is not None else None, snapshot_id
-    )
+    await store.retire_superseded_snapshot(slug, existing, snapshot_id)
     if record.setup_script:
         await refresh.ensure_refresh_cron(slug)
     return {"ok": True, "workspace": _summary(record), "created": existing is None}

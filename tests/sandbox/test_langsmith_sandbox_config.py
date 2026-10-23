@@ -11,6 +11,7 @@ from langsmith.sandbox import AsyncSandboxClient, ResourceNotFoundError
 
 from openswe.sandboxes.providers import langsmith as langsmith_provider
 from openswe.sandboxes.providers.langsmith import (
+    TimeoutLangSmithSandbox,
     _create_sandbox_with_retry,
     _install_create_extra_fields,
     _reuse_existing_sandbox,
@@ -18,6 +19,7 @@ from openswe.sandboxes.providers.langsmith import (
     create_langsmith_sandbox,
     create_workspace_service_url,
 )
+from openswe.sandboxes.providers.langsmith_api import SandboxAPI
 from openswe.sandboxes.providers.registry import SandboxGoneError
 
 
@@ -215,7 +217,10 @@ async def test_service_url_asks_for_a_workspace_grant(
         monkeypatch.setenv(name, value)
     _serve(monkeypatch, handler)
 
-    service_url = await create_workspace_service_url("sandbox-1", 3000)
+    box = MagicMock(spec=TimeoutLangSmithSandbox)
+    box.id = "sandbox-1"
+    box.api = SandboxAPI.for_new_boxes()
+    service_url = await create_workspace_service_url(box, 3000)
 
     assert service_url == "https://l-abc.sandbox.example/"
     request = requests[0]

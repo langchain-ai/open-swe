@@ -23,6 +23,7 @@ from langsmith.sandbox import (
     AsyncSandboxClient,
     CommandTimeoutError,
     ResourceNotFoundError,
+    Sandbox,
     SandboxClientError,
     SandboxConnectionError,
     SandboxOperationError,
@@ -34,6 +35,7 @@ from openswe.config import ENV
 from openswe.sandboxes.paths import WORKSPACE_DIR
 from openswe.sandboxes.providers.langsmith_api import SandboxAPI
 from openswe.sandboxes.providers.registry import SandboxGoneError
+from openswe.sandboxes.ref import SandboxRef
 from openswe.sandboxes.retry import retry_transient_sandbox_errors
 from openswe.utils.http_pool import pooled_transport
 from openswe.utils.startup_trace import asubphase
@@ -68,15 +70,6 @@ _LS_MAX_ENTRIES = 1000
 # Above this, a file API read would pull the whole file into the worker to return
 # one page; the base class's read script pages inside the sandbox instead.
 _FILE_API_READ_MAX_BYTES = 2 * 1024 * 1024
-
-
-def service_identity_jwks_url() -> str:
-    """Where an app in a sandbox verifies the identity token LangSmith forwards to it.
-
-    The keys are served by the API host, not by the app origin the token names as
-    its issuer.
-    """
-    return f"{SandboxAPI.from_env().api_root}/.well-known/jwks.json"
 
 
 def _parse_optional_int(name: str, default: int) -> int:
@@ -368,14 +361,15 @@ async def _patch_proxy_config(
 
 
 async def configure_sandbox_proxy(
-    sandbox_name: str,
+    sandbox: TimeoutLangSmithSandbox,
     github_token: str | None,
     *,
     base_proxy_config: dict[str, Any] | None = None,
     thread_id: str | None = None,
 ) -> None:
     """Inject GitHub and thread-tool credentials while preserving custom proxy settings."""
-    api = SandboxAPI.from_env()
+    api = sandbox.api
+    sandbox_name = sandbox.id
     if not api.api_key:
         logger.warning("No LangSmith API key found, skipping sandbox proxy configuration")
         return
@@ -418,7 +412,7 @@ class WorkspaceServiceURL(BaseModel):
     access: Literal["workspace"]
 
 
-async def create_workspace_service_url(sandbox_id: str, port: int) -> str:
+async def create_workspace_service_url(sandbox: TimeoutLangSmithSandbox, port: int) -> str:
     """Share ``port`` of a sandbox with the workspace and return its URL.
 
     The URL carries no token and never expires, so the same link keeps working
@@ -427,19 +421,13 @@ async def create_workspace_service_url(sandbox_id: str, port: int) -> str:
     exists for the same port, and while the tenant's
     ``sandbox_service_url_langsmith_login`` flag is off.
     """
-    response = await SandboxAPI.from_env().request(
+    response = await sandbox.api.request(
         "POST",
-        f"/boxes/{sandbox_id}/service-url",
+        f"/boxes/{sandbox.id}/service-url",
         json={"port": port, "access": "workspace"},
         timeout=SERVICE_URL_TIMEOUT_SECONDS,
     )
     return WorkspaceServiceURL.model_validate(response.json()).service_url
-
-
-def get_async_sandbox_client() -> AsyncSandboxClient:
-    """Build an ``AsyncSandboxClient`` from the resolved sandbox LangSmith credentials."""
-    api = SandboxAPI.from_env()
-    return AsyncSandboxClient(api_key=api.api_key, api_endpoint=api.endpoint)
 
 
 async def capture_snapshot_with_tag(
@@ -476,10 +464,10 @@ async def capture_snapshot_with_tag(
         client._http.post = original_post  # noqa: SLF001 # ty: ignore[invalid-assignment]
 
 
-async def connect_async_langsmith_sandbox(sandbox_id: str) -> tuple[AsyncSandboxClient, Any]:
-    client = get_async_sandbox_client()
+async def connect_async_langsmith_sandbox(ref: SandboxRef) -> tuple[AsyncSandboxClient, Any]:
+    client = SandboxAPI.at(ref.api).client()
     try:
-        return client, await client.get_sandbox(name=sandbox_id)
+        return client, await client.get_sandbox(name=ref.id)
     except Exception:
         await client.aclose()
         raise
@@ -495,7 +483,8 @@ async def create_langsmith_sandbox(
     fs_capacity_bytes: int | None = None,
     create_params: dict[str, Any] | None = None,
     prepare_work_dir: bool = True,
-) -> SandboxBackendProtocol:
+    api: SandboxAPI | None = None,
+) -> TimeoutLangSmithSandbox:
     """Create or connect to a LangSmith sandbox without automatic cleanup.
 
     This function directly uses the LangSmithProvider to create/connect to sandboxes
@@ -514,6 +503,7 @@ async def create_langsmith_sandbox(
         fs_capacity_bytes: Optional filesystem capacity override for a newly-created sandbox.
         create_params: Optional additional fields merged into the sandbox create body.
         prepare_work_dir: Whether a new sandbox creates ``/workspace`` before returning.
+        api: Where the sandbox lives; new ones default to where new boxes are created.
 
     Returns:
         SandboxBackendProtocol instance
@@ -525,7 +515,7 @@ async def create_langsmith_sandbox(
         fs_capacity_bytes=fs_capacity_bytes,
         create_params=create_params,
     )
-    provider = LangSmithProvider(api_key=SandboxAPI.from_env().api_key)
+    provider = LangSmithProvider(api or SandboxAPI.for_new_boxes())
     backend = await provider.get_or_create(
         sandbox_id=sandbox_id,
         snapshot_id=options.snapshot_id or "",
@@ -542,13 +532,9 @@ async def create_langsmith_sandbox(
     if sandbox_id is None and github_token:
         proxy_config = get_sandbox_proxy_config(create_params)
         if proxy_config is not None:
-            await configure_sandbox_proxy(
-                backend.id,
-                github_token,
-                base_proxy_config=proxy_config,
-            )
+            await configure_sandbox_proxy(backend, github_token, base_proxy_config=proxy_config)
         else:
-            await configure_sandbox_proxy(backend.id, github_token)
+            await configure_sandbox_proxy(backend, github_token)
 
     return backend
 
@@ -573,9 +559,18 @@ class TimeoutLangSmithSandbox(LangSmithSandbox):
     its own request deadline.
     """
 
+    def __init__(self, sandbox: Sandbox, api: SandboxAPI) -> None:
+        super().__init__(sandbox)
+        self.api = api
+
     @property
     def sandbox(self) -> Any:
         return self._sandbox
+
+    @property
+    def ref(self) -> SandboxRef:
+        """This box, as a thread's metadata binds it."""
+        return SandboxRef(self.id, self.api.api_root)
 
     def get_work_dir(self) -> str:
         """Repositories live in ``/workspace/<repo>``, where workspace images preload them."""
@@ -761,6 +756,14 @@ class TimeoutLangSmithSandbox(LangSmithSandbox):
             return await self._abase_execute(command, timeout)
 
 
+def langsmith_box(backend: SandboxBackendProtocol) -> TimeoutLangSmithSandbox:
+    """``backend`` as the LangSmith box it is, for the calls only LangSmith offers."""
+    if not isinstance(backend, TimeoutLangSmithSandbox):
+        msg = f"{type(backend).__name__} is not a LangSmith sandbox"
+        raise TypeError(msg)
+    return backend
+
+
 class SandboxProvider(ABC):
     """Interface for creating sandbox backends.
 
@@ -784,13 +787,11 @@ class SandboxProvider(ABC):
 class LangSmithProvider(SandboxProvider):
     """LangSmith sandbox provider implementation."""
 
-    def __init__(self, api_key: str | None = None) -> None:
-        api = SandboxAPI.from_env()
-        self._api_key = api_key or api.api_key
-        self._api_endpoint = api.endpoint
-        if not self._api_key:
-            msg = "SANDBOX_LANGSMITH_API_KEY or LANGSMITH_API_KEY not set"
+    def __init__(self, api: SandboxAPI) -> None:
+        if not api.api_key:
+            msg = f"No LangSmith API key for {api.api_root}"
             raise ValueError(msg)
+        self._api = api
 
     @classmethod
     def validate_startup_config(cls) -> None:
@@ -835,7 +836,7 @@ class LangSmithProvider(SandboxProvider):
         delete_after_stop_seconds: int | None = None,
         create_params: dict[str, Any] | None = None,
         **kwargs: Any,
-    ) -> SandboxBackendProtocol:
+    ) -> TimeoutLangSmithSandbox:
         """Get existing or create new LangSmith sandbox.
 
         Provisioning runs natively async via ``AsyncSandboxClient``. The
@@ -846,12 +847,10 @@ class LangSmithProvider(SandboxProvider):
         if kwargs:
             msg = f"Received unsupported arguments: {list(kwargs.keys())}"
             raise TypeError(msg)
-        async with AsyncSandboxClient(
-            api_key=self._api_key, api_endpoint=self._api_endpoint
-        ) as client:
+        async with self._api.client() as client:
             if sandbox_id:
                 sandbox = await _reuse_existing_sandbox(client, sandbox_id)
-                return TimeoutLangSmithSandbox(sandbox.to_sync())
+                return TimeoutLangSmithSandbox(sandbox.to_sync(), self._api)
 
             effective_snapshot_id = snapshot_id or ""
             extra_fields = _merge_sandbox_create_extra_fields(create_params)
@@ -876,4 +875,4 @@ class LangSmithProvider(SandboxProvider):
                 msg = f"Failed to create sandbox from snapshot '{snapshot_id}': {e}"
                 raise RuntimeError(msg) from e
 
-            return TimeoutLangSmithSandbox(sandbox.to_sync())
+            return TimeoutLangSmithSandbox(sandbox.to_sync(), self._api)

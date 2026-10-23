@@ -9,6 +9,7 @@ from fastapi import HTTPException
 from pydantic import BaseModel, Field, TypeAdapter
 
 from openswe.sandboxes import scripts as sandbox_scripts
+from openswe.sandboxes.ref import SandboxRef
 from openswe.threads.access import _readable_thread_metadata
 from openswe.threads.diffs import _response_output, connect_sandbox
 from openswe.threads.summary import _assert_thread_promptable, _metadata_repo
@@ -75,13 +76,13 @@ async def _run_workspace_script(
     # Reading the live sandbox is shell-equivalent access, so it follows the
     # terminal's rule: admins who may view a private thread still cannot.
     _assert_thread_promptable(metadata, login)
-    sandbox_id = metadata.get("sandbox_id")
-    if not isinstance(sandbox_id, str) or not sandbox_id:
+    bound = SandboxRef.of(metadata)
+    if bound is None:
         raise HTTPException(404, "thread has no workspace")
     try:
-        sandbox = await connect_sandbox(sandbox_id, thread_id=thread_id)
+        sandbox = await connect_sandbox(bound, thread_id=thread_id)
     except Exception as exc:  # noqa: BLE001
-        logger.exception("Could not connect to sandbox for files", extra={"sandbox": sandbox_id})
+        logger.exception("Could not connect to sandbox for files", extra={"sandbox": bound.id})
         raise HTTPException(503, "Could not connect to the workspace.") from exc
     work_dir = await resolve_sandbox_work_dir(sandbox)
     _, repo_name, _ = _metadata_repo(metadata)

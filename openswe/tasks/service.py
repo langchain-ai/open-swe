@@ -21,6 +21,7 @@ from openswe.dispatch import COMPLETION_WEBHOOK_URL
 from openswe.github.token_scope import GITHUB_TOKEN_REPOSITORIES_KEY
 from openswe.prompts import prompt
 from openswe.remote_runtime.client import MDA_GRAPH_METADATA_KEY, MDA_WORKER_GRAPH_ID
+from openswe.sandboxes.ref import SANDBOX_API_METADATA_KEY
 from openswe.sandboxes.tool_access import SANDBOX_PROXY_CONFIG_METADATA_KEY
 from openswe.source_context import SourceContext
 from openswe.tasks import presentation, store
@@ -324,6 +325,7 @@ def _worker_metadata(
             "base_branch",
             "branch_prefix",
             "sandbox_id",
+            SANDBOX_API_METADATA_KEY,
             "sandbox_kind",
             "sandbox_bridge_client",
             SANDBOX_PROXY_CONFIG_METADATA_KEY,

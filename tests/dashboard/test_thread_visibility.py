@@ -6,6 +6,7 @@ from fastapi import HTTPException
 
 from openswe.sandboxes import browsers
 from openswe.sandboxes.browsers import LangSmithBrowser, ThreadBrowser
+from openswe.sandboxes.ref import SandboxRef
 from openswe.threads import (
     access,
     blobs,
@@ -110,7 +111,10 @@ async def test_admin_can_view_but_not_open_terminal(private_thread):
     with pytest.raises(HTTPException) as exc:
         await handlers.get_dashboard_terminal_sandbox("private-thread", "admin")
     assert exc.value.status_code == 404
-    assert await handlers.get_dashboard_terminal_sandbox("private-thread", "alice") == ("sbx", None)
+    assert await handlers.get_dashboard_terminal_sandbox("private-thread", "alice") == (
+        SandboxRef("sbx"),
+        None,
+    )
 
 
 async def test_admin_can_read_artifact_but_not_mutate(private_thread, monkeypatch):

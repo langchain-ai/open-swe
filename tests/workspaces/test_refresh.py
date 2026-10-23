@@ -3,6 +3,8 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
+from openswe.sandboxes.providers.langsmith_api import SandboxAPI
+from openswe.sandboxes.ref import SandboxRef
 from openswe.workspaces import refresh
 from openswe.workspaces.store import WORKSPACES, WorkspaceCreate
 
@@ -95,7 +97,7 @@ async def test_a_failing_script_is_never_captured() -> None:
             "base",
             snapshot_id="snap-1",
             snapshot_name="openswe-environment-base",
-            source_sandbox_id="sb-prior",
+            source=SandboxRef("sb-prior"),
         )
         result = await refresh.refresh_workspace("base")
         record = await WORKSPACES.get("base")
@@ -188,7 +190,7 @@ async def test_an_update_boots_from_the_current_snapshot_and_runs_only_the_updat
             "base",
             snapshot_id="snap-1",
             snapshot_name="openswe-environment-base",
-            source_sandbox_id="sb-prior",
+            source=SandboxRef("sb-prior"),
         )
         result = await refresh.refresh_workspace("base", "update")
         record = await WORKSPACES.get("base")
@@ -202,6 +204,50 @@ async def test_an_update_boots_from_the_current_snapshot_and_runs_only_the_updat
     capture.assert_awaited_once()
     assert record is not None
     assert record.refresh_kind == "update"
+
+
+@pytest.mark.usefixtures("registry_db")
+@pytest.mark.asyncio
+async def test_a_snapshot_left_in_the_old_langsmith_is_rebuilt_where_new_boxes_go(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("LANGSMITH_ENDPOINT", "https://api.smith.example")
+    monkeypatch.setenv("SANDBOX_LANGSMITH_ENDPOINT", "https://aws.api.smith.example")
+    backend = _backend(_Result("provisioned", 0), _Result("Already up to date.", 0))
+    create_builder = AsyncMock(return_value=backend)
+    with (
+        patch.object(refresh, "_create_builder_sandbox", create_builder),
+        patch.object(refresh, "_release_builder_sandbox", AsyncMock()),
+        patch.object(refresh, "capture_workspace_snapshot", AsyncMock()),
+    ):
+        await WORKSPACES.create(
+            WorkspaceCreate(
+                inherit_default_sandbox=False,
+                name="base",
+                repos=["acme/base"],
+                setup_script="make setup",
+                update_script="git pull",
+            ),
+            "ramon",
+        )
+        # Captured before regions were recorded: it lives in the deployment's own LangSmith.
+        captured = await WORKSPACES.mark_captured(
+            "base",
+            snapshot_id="snap-gcp",
+            snapshot_name="openswe-environment-base",
+            source=SandboxRef("sb-prior"),
+        )
+        assert captured is not None
+        # New boxes cannot boot from it, so it is due for a rebuild however fresh it is.
+        assert captured.snapshot_at(SandboxAPI.for_new_boxes()) is None
+        assert refresh.is_update_due(captured)
+        result = await refresh.refresh_workspace("base", "update")
+
+    assert result["status"] == "success"
+    assert result["kind"] == "full"
+    assert create_builder.await_args is not None
+    assert create_builder.await_args.args[1] is None
+    assert _scripts_run(backend) == ["make setup", "git pull"]
 
 
 # --- cron ---

@@ -28,10 +28,12 @@ import logging
 import shlex
 import uuid
 from datetime import UTC, datetime
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from openswe.config import ENV, EnvVar
 from openswe.jobs import queue
+from openswe.sandboxes.providers.langsmith_api import SandboxAPI
+from openswe.sandboxes.ref import SandboxRef
 from openswe.workspaces.store import (
     WORKSPACES,
     RefreshKind,
@@ -41,6 +43,9 @@ from openswe.workspaces.store import (
     script_command,
     script_log_path,
 )
+
+if TYPE_CHECKING:
+    from openswe.sandboxes.providers.langsmith import TimeoutLangSmithSandbox
 
 logger = logging.getLogger(__name__)
 
@@ -155,10 +160,8 @@ async def _release_builder_sandbox(sandbox_id: str) -> None:
     Nothing here deletes a sandbox: an id-keyed delete is how a running box with
     uncommitted work gets destroyed, so reclamation stays the platform's job.
     """
-    from openswe.sandboxes.providers.langsmith import get_async_sandbox_client
-
     try:
-        async with get_async_sandbox_client() as client:
+        async with SandboxAPI.for_new_boxes().client() as client:
             await client.stop_sandbox(sandbox_id)
     except Exception:
         logger.warning(
@@ -166,7 +169,9 @@ async def _release_builder_sandbox(sandbox_id: str) -> None:
         )
 
 
-async def _create_builder_sandbox(record: Workspace, snapshot_id: str | None) -> Any:
+async def _create_builder_sandbox(
+    record: Workspace, snapshot_id: str | None
+) -> TimeoutLangSmithSandbox:
     from openswe.github.sandbox_access import installation_token
     from openswe.sandboxes.providers.langsmith import (
         configure_sandbox_proxy,
@@ -185,7 +190,7 @@ async def _create_builder_sandbox(record: Workspace, snapshot_id: str | None) ->
         **record.sandbox_resources(),
     )
     await configure_sandbox_proxy(
-        backend.id, access.token, base_proxy_config=get_sandbox_proxy_config(create_params)
+        backend, access.token, base_proxy_config=get_sandbox_proxy_config(create_params)
     )
     return backend
 
@@ -226,7 +231,7 @@ def is_snapshot_stale(
     Every sandbox gets its own copy of the snapshot, so while the image is stale
     each one needs the script; once a capture lands, they all boot fresh.
     """
-    if not record.update_script or record.ready_snapshot_id is None:
+    if not record.update_script or record.snapshot_at(SandboxAPI.for_new_boxes()) is None:
         return False
     captured = _parse_iso(record.last_captured_at)
     if captured is None:
@@ -237,11 +242,12 @@ def is_snapshot_stale(
 def is_update_due(record: Workspace) -> bool:
     """Whether a new sandbox should also kick off a background snapshot update.
 
-    Same staleness test, plus: no refresh already running, and the last attempt
+    Same staleness test, or a snapshot in another LangSmith than new boxes, which
+    they cannot boot from; plus: no refresh already running, and the last attempt
     — success *or* failure — is older than the interval. Counting failures keeps
     a broken script or network from enqueueing a builder on every creation.
     """
-    if not is_snapshot_stale(record):
+    if not (is_snapshot_stale(record) or _snapshot_elsewhere(record)):
         return False
     if is_refresh_in_flight(record):
         return False
@@ -249,6 +255,14 @@ def is_update_due(record: Workspace) -> bool:
     if finished is None:
         return True
     return (datetime.now(UTC) - finished).total_seconds() >= UPDATE_INTERVAL_SECONDS
+
+
+def _snapshot_elsewhere(record: Workspace) -> bool:
+    """Whether the snapshot lives in another LangSmith than the one new boxes are created in."""
+    return (
+        record.ready_snapshot_id is not None
+        and record.snapshot_at(SandboxAPI.for_new_boxes()) is None
+    )
 
 
 async def maybe_start_update(record: Workspace | None) -> str | None:
@@ -283,9 +297,12 @@ async def refresh_workspace(slug: str, kind: RefreshKind = "full") -> dict[str, 
         return {"status": "inherited_sandbox", "slug": slug}
     if kind == "full" and not record.setup_script:
         return {"status": "no_setup_script", "slug": slug}
+    if kind == "update" and _snapshot_elsewhere(record) and record.setup_script:
+        # An update layers on the snapshot, which new boxes cannot boot from there.
+        kind = "full"
     if kind == "update" and not record.update_script:
         return {"status": "no_update_script", "slug": slug}
-    if kind == "update" and record.ready_snapshot_id is None:
+    if kind == "update" and record.snapshot_at(SandboxAPI.for_new_boxes()) is None:
         return {"status": "no_snapshot_to_update", "slug": slug}
     if is_refresh_in_flight(record):
         return {"status": "already_refreshing", "slug": slug}
@@ -294,7 +311,11 @@ async def refresh_workspace(slug: str, kind: RefreshKind = "full") -> dict[str, 
     except RuntimeError as exc:
         return {"status": "unsupported", "slug": slug, "error": str(exc)}
 
-    base = record.ready_snapshot_id if kind == "update" else record.base_snapshot_id
+    base = (
+        record.snapshot_at(SandboxAPI.for_new_boxes())
+        if kind == "update"
+        else record.base_snapshot_id
+    )
     await WORKSPACES.mark_refreshing(slug, kind)
     started = datetime.now(UTC)
     sandbox_id: str | None = None
@@ -302,7 +323,7 @@ async def refresh_workspace(slug: str, kind: RefreshKind = "full") -> dict[str, 
     try:
         await WORKSPACES.start_refresh_step(slug, "boot")
         backend = await _create_builder_sandbox(record, base)
-        sandbox_id = str(backend.id)
+        sandbox_id = backend.id
         await WORKSPACES.finish_refresh_step(slug, "boot", "success")
         # Published before the first script so a poll can tail the trace while it
         # runs; cleared when the refresh settles and the builder is released.
@@ -329,7 +350,7 @@ async def refresh_workspace(slug: str, kind: RefreshKind = "full") -> dict[str, 
                 }
             await WORKSPACES.finish_refresh_step(slug, label, "success", exit_code=0)
         await WORKSPACES.start_refresh_step(slug, "capture")
-        await capture_workspace_snapshot(slug, sandbox_id, timeout=capture_timeout())
+        await capture_workspace_snapshot(slug, backend.ref, timeout=capture_timeout())
         await WORKSPACES.finish_refresh_step(slug, "capture", "success")
     except Exception as exc:
         logger.warning("Refresh failed", extra={"workspace": slug}, exc_info=True)
@@ -421,7 +442,8 @@ async def _read_builder_log(sandbox_id: str, path: str) -> str | None:
     from openswe.sandboxes.providers.registry import create_sandbox
 
     try:
-        backend = await create_sandbox(sandbox_id=sandbox_id)
+        # Builders are created where new boxes are.
+        backend = await create_sandbox(SandboxRef(sandbox_id, SandboxAPI.for_new_boxes().api_root))
         result = await backend.aexecute(
             f"tail -c {LIVE_LOG_MAX_BYTES} {shlex.quote(path)} 2>/dev/null",
             timeout=LIVE_LOG_READ_TIMEOUT_SECONDS,

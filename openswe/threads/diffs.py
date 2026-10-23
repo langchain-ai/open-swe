@@ -10,6 +10,7 @@ from fastapi import HTTPException
 from openswe.github.http import GitHubClient
 from openswe.github.pull_request_diff import build_compare_diff_files, build_pr_diff_files
 from openswe.sandboxes import scripts as sandbox_scripts
+from openswe.sandboxes.ref import SandboxRef
 from openswe.slack.client import parse_github_pr_url
 from openswe.threads.access import _authorized_thread, _readable_thread_metadata
 from openswe.threads.proxy import _PROXY_REQUEST_TIMEOUT
@@ -26,11 +27,11 @@ _RECOVERY_PATCH_TIMEOUT_SECONDS = 120
 _UNSAFE_REF_CHARACTERS = set(" ~^:?*[\\\x7f") | {chr(code) for code in range(32)}
 
 
-async def connect_sandbox(sandbox_id: str, *, thread_id: str) -> SandboxBackendProtocol:
+async def connect_sandbox(sandbox: SandboxRef, *, thread_id: str) -> SandboxBackendProtocol:
     # deferred: pulls deepagents -> langchain_anthropic -> anthropic at import time
     from openswe.sandboxes.connect import connect_sandbox as _connect_sandbox
 
-    return await _connect_sandbox(sandbox_id, thread_id=thread_id)
+    return await _connect_sandbox(sandbox, thread_id=thread_id)
 
 
 def _recovery_patch_script() -> str:
@@ -97,14 +98,14 @@ async def get_dashboard_thread_recovery_patch(
 ) -> tuple[bytes, str]:
     thread = await _authorized_thread(thread_id, login, email=email)
     metadata = thread_metadata(thread)
-    sandbox_id = metadata.get("sandbox_id")
-    if not isinstance(sandbox_id, str) or not sandbox_id:
+    bound = SandboxRef.of(metadata)
+    if bound is None:
         raise HTTPException(404, "thread has no recoverable sandbox")
 
     try:
-        sandbox = await connect_sandbox(sandbox_id, thread_id=thread_id)
+        sandbox = await connect_sandbox(bound, thread_id=thread_id)
     except Exception as exc:  # noqa: BLE001
-        logger.debug("Could not connect to sandbox %s for recovery", sandbox_id, exc_info=True)
+        logger.debug("Could not connect to sandbox %s for recovery", bound.id, exc_info=True)
         raise HTTPException(502, "could not connect to thread sandbox") from exc
 
     try:
@@ -170,13 +171,13 @@ async def get_dashboard_thread_working_tree_diff(
     from openswe.utils.turn_checkpoint import read_turn_diff
 
     metadata = await _readable_thread_metadata(thread_id, login=login, email=email)
-    sandbox_id = metadata.get("sandbox_id")
-    if not isinstance(sandbox_id, str) or not sandbox_id:
+    bound = SandboxRef.of(metadata)
+    if bound is None:
         return _missing_diff()
     try:
-        sandbox = await connect_sandbox(sandbox_id, thread_id=thread_id)
+        sandbox = await connect_sandbox(bound, thread_id=thread_id)
     except Exception as exc:  # noqa: BLE001
-        logger.exception("Could not connect to sandbox %s for working tree diff", sandbox_id)
+        logger.exception("Could not connect to sandbox %s for working tree diff", bound.id)
         raise HTTPException(503, "Could not connect to the workspace.") from exc
     work_dir = await resolve_sandbox_work_dir(sandbox)
     _, repo_name, _ = _metadata_repo(metadata)

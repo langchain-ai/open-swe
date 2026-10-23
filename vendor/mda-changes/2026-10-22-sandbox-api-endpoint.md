@@ -2,7 +2,7 @@
 
 **Verdict: upstream as-is.** It pairs with the existing `api_key` option: a definition can already bring its own key, and now that key's LangSmith too, such as another region.
 
-**Changed:** `managed_deepagents/namespaces.py` (`define_sandbox`, `_LangSmithSandboxArgs`), `sandbox.py` (`normalize_sandbox_options`), `runtime.py` (`_sandbox_client_kwargs`, `_sandbox_create_kwargs`, `_validated_sandbox_api_endpoint`), `_sandbox_proxy.py` (`patch_sandbox_proxy_config`, which now takes the endpoint from the client kwargs). Open SWE sets it in `mda/rt/managed_sandbox.py` from `SANDBOX_LANGSMITH_ENDPOINT` and `SANDBOX_LANGSMITH_API_KEY`.
+**Changed:** `managed_deepagents/namespaces.py` (`define_sandbox`, `_LangSmithSandboxArgs`), `sandbox.py` (`normalize_sandbox_options`), `runtime.py` (`_sandbox_client_kwargs`, `_sandbox_create_kwargs`, `_validated_sandbox_api_endpoint`), `_sandbox_proxy.py` (`patch_sandbox_proxy_config`, which now takes the endpoint from the client kwargs). Open SWE sets it in `mda/rt/managed_sandbox.py` when the backend's catalog says the thread's box lives at `SANDBOX_LANGSMITH_ENDPOINT`, with `SANDBOX_LANGSMITH_API_KEY`.
 
 ## What
 
@@ -10,7 +10,7 @@
 
 ## Why
 
-Open SWE keeps its thread sandboxes in AWS US prod while the MDA deployment and its tracing stay in GCP US prod. The backend binds the thread to the box MDA reports and then reaches it itself, for its proxy config, snapshots and service URLs, so both must use the same LangSmith. `MDA_SANDBOX_API_ENDPOINT` is reserved and always set to the deploy's own platform API, so without this a deployment cannot move its boxes.
+Open SWE creates new thread sandboxes in AWS US prod while the MDA deployment, its tracing and every box created before stay in GCP US prod. Each box stays where it was created, so the definition, which MDA builds per run, names the box's LangSmith: the backend records it with the thread and tells MDA in the catalog. The backend binds the thread to the box MDA reports and then reaches it itself, for its proxy config, snapshots and service URLs, so both must use the same LangSmith. `MDA_SANDBOX_API_ENDPOINT` is reserved and always set to the deploy's own platform API, so without this a deployment cannot move its boxes.
 
 ## Upstream
 

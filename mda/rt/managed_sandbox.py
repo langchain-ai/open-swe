@@ -32,18 +32,19 @@ logger = logging.getLogger(__name__)
 _json_object = TypeAdapter(dict[str, JsonValue])
 # As the backend's sandbox: a command without a timeout of its own gets five minutes.
 EXECUTE_TIMEOUT_SECONDS: Final = 300
-# The backend's own names for the LangSmith its sandboxes live in, when not the deployment's.
+# The backend's own names for the LangSmith new boxes go to, when not the deployment's.
 _SANDBOX_ENDPOINT_ENV: Final = "SANDBOX_LANGSMITH_ENDPOINT"
 _SANDBOX_API_KEY_ENV: Final = "SANDBOX_LANGSMITH_API_KEY"
 _SANDBOX_API_SUFFIX: Final = "/v2/sandboxes"
 
 
-def definition(create: SandboxCreate, thread_id: str | None) -> SandboxDefinition:
-    """The box MDA keeps for ``thread_id`` (the run's own by default), created from ``create``."""
-    endpoint, api_key = _sandbox_langsmith()
+def definition(spec: SandboxSpec, create: SandboxCreate | None = None) -> SandboxDefinition:
+    """The box MDA keeps for the spec's thread, created from ``create`` (the spec's by default)."""
+    create = create or spec.create
+    endpoint, api_key = _sandbox_langsmith(spec.api)
     return define_sandbox(
         _openswe_per_thread=True,
-        _openswe_thread_id=thread_id,
+        _openswe_thread_id=spec.thread_id,
         _openswe_no_manage_proxy=True,
         _openswe_create_fields=dict(create.extra_fields),
         api_key=api_key,
@@ -58,20 +59,27 @@ def definition(create: SandboxCreate, thread_id: str | None) -> SandboxDefinitio
     )
 
 
-def _sandbox_langsmith() -> tuple[str | None, str | None]:
-    """The backend's sandbox API and key, so MDA creates boxes where the backend looks for them.
+def _sandbox_langsmith(api_root: str | None) -> tuple[str | None, str | None]:
+    """The sandbox API and key of the LangSmith the backend says the box lives at.
 
-    Both None leaves the box in this deployment's LangSmith.
+    ``None`` is this deployment's own, which needs neither. Any other must be the one
+    new boxes go to, the only other LangSmith this deployment holds a key for.
     """
-    endpoint = os.environ.get(_SANDBOX_ENDPOINT_ENV, "").strip()
-    api_key = os.environ.get(_SANDBOX_API_KEY_ENV, "").strip()
-    if not endpoint and not api_key:
+    if api_root is None:
         return None, None
-    if not endpoint or not api_key:
-        msg = f"Set both {_SANDBOX_ENDPOINT_ENV} and {_SANDBOX_API_KEY_ENV}, or neither"
+    endpoint = _root(os.environ.get(_SANDBOX_ENDPOINT_ENV, ""))
+    api_key = os.environ.get(_SANDBOX_API_KEY_ENV, "").strip()
+    if endpoint != _root(api_root) or not api_key:
+        msg = (
+            f"The thread's sandbox lives at {api_root}, but this deployment's "
+            f"{_SANDBOX_ENDPOINT_ENV} and {_SANDBOX_API_KEY_ENV} do not name it"
+        )
         raise RuntimeError(msg)
-    root = endpoint.rstrip("/").removesuffix(_SANDBOX_API_SUFFIX)
-    return f"{root}{_SANDBOX_API_SUFFIX}", api_key
+    return f"{endpoint}{_SANDBOX_API_SUFFIX}", api_key
+
+
+def _root(url: str) -> str:
+    return url.strip().rstrip("/").removesuffix(_SANDBOX_API_SUFFIX)
 
 
 async def opened_sandbox(runtime: Runtime) -> str | None:
@@ -108,7 +116,7 @@ class ReplaceSandboxMiddleware(AgentMiddleware):
             return result
         try:
             replacement = await replace_sandbox(
-                getattr(request.runtime, "backend", None), definition(create, self._spec.thread_id)
+                getattr(request.runtime, "backend", None), definition(self._spec, create)
             )
             await self._backend.call("sandbox", run_body(run_id(), request.state))
         except Exception as exc:

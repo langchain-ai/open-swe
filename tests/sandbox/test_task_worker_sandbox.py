@@ -8,6 +8,7 @@ from deepagents.backends.protocol import ExecuteResponse
 from openswe import background_tasks
 from openswe.sandboxes import lifecycle
 from openswe.sandboxes.providers.registry import SandboxGoneError
+from openswe.sandboxes.ref import SandboxRef
 from openswe.sandboxes.state import SANDBOX_BACKENDS, SANDBOX_CONNECTIONS, SandboxUnreachableError
 from openswe.tasks import service as task_service
 from openswe.tasks.store import Task, TaskContext, TaskMembership
@@ -93,7 +94,7 @@ async def test_worker_attaches_to_replaced_host_without_guest_proxy_identity(
     assert attached.id == host_sandbox_id
     assert SANDBOX_BACKENDS["coordinator"].id == SANDBOX_BACKENDS["worker"].id
     assert shared_sandbox["worker"]["sandbox_id"] == host_sandbox_id
-    connect.assert_awaited_once_with(host_sandbox_id)
+    connect.assert_awaited_once_with(SandboxRef(host_sandbox_id))
     assert refresh.await_args.kwargs["thread_id"] == "coordinator"
 
 
@@ -103,7 +104,7 @@ async def test_worker_refreshes_binding_during_concurrent_host_reconnect(
     monkeypatch.setattr(
         lifecycle,
         "create_sandbox",
-        AsyncMock(side_effect=lambda sandbox_id: MagicMock(id=sandbox_id)),
+        AsyncMock(side_effect=lambda sandbox: MagicMock(id=sandbox.id)),
     )
     monkeypatch.setattr(lifecycle, "_refresh_github_proxy", AsyncMock())
     await lifecycle.ensure_sandbox_for_thread("worker")

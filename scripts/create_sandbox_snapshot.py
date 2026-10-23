@@ -11,7 +11,7 @@ DEFAULT_FS_CAPACITY = 32 * 1024**3  # 32 GiB
 
 
 def main() -> None:
-    api = SandboxAPI.from_env()
+    api = SandboxAPI.for_new_boxes()
     parser = argparse.ArgumentParser(description="Create a LangSmith sandbox snapshot")
     parser.add_argument(
         "--name", default="open-swe-gh-amd64", help="Snapshot name (default: open-swe-gh-amd64)"

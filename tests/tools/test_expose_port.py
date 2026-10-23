@@ -1,4 +1,5 @@
 import importlib
+from types import SimpleNamespace
 from typing import Any
 
 import pytest
@@ -6,8 +7,12 @@ import pytest
 service_tool = importlib.import_module("openswe.tools.expose_port")
 
 
+_JWKS_URL = "https://api.example/.well-known/jwks.json"
+
+
 class _Backend:
     id = "sandbox-1"
+    api = SimpleNamespace(jwks_url=_JWKS_URL)
 
 
 def _configure(monkeypatch: pytest.MonkeyPatch) -> tuple[_Backend, list[tuple[str, int]]]:
@@ -20,12 +25,13 @@ def _configure(monkeypatch: pytest.MonkeyPatch) -> tuple[_Backend, list[tuple[st
     async def get_backend(_thread_id: str) -> _Backend:
         return backend
 
-    async def create_url(sandbox_id: str, port: int) -> str:
-        calls.append((sandbox_id, port))
+    async def create_url(sandbox: _Backend, port: int) -> str:
+        calls.append((sandbox.id, port))
         return "https://l-abc123.sandbox.example/"
 
     monkeypatch.setattr(service_tool, "get_sandbox_backend", get_backend)
     monkeypatch.setattr(service_tool, "unwrap_sandbox_backend", lambda value: value)
+    monkeypatch.setattr(service_tool, "langsmith_box", lambda value: value)
     monkeypatch.setattr(service_tool, "create_workspace_service_url", create_url)
     return backend, calls
 
@@ -37,7 +43,11 @@ async def test_expose_port_shares_the_port_with_the_workspace(
 
     result = await service_tool.expose_port(3000)
 
-    assert result == {"url": "https://l-abc123.sandbox.example/", "port": 3000}
+    assert result == {
+        "url": "https://l-abc123.sandbox.example/",
+        "port": 3000,
+        "jwks_url": _JWKS_URL,
+    }
     assert calls == [("sandbox-1", 3000)]
 
 

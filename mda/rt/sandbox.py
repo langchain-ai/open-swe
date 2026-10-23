@@ -29,6 +29,8 @@ class SandboxSpec(BaseModel):
     create: SandboxCreate
     # The thread whose box this one works in, a task worker's coordinator; None for its own.
     thread_id: str | None = None
+    # The LangSmith API root the box lives at; None for this deployment's own.
+    api: str | None = None
     # The file and shell tools this runtime runs in the box itself, rather than the backend.
     tools: list[str] = []
     checks: list[SandboxCheck] = []

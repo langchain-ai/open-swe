@@ -381,7 +381,7 @@ async def _launch_sandbox(
     API keys and the report token never enter the sandbox: its proxy injects
     them on the wire.
     """
-    from openswe.sandboxes.providers.langsmith import get_async_sandbox_client
+    from openswe.sandboxes.providers.langsmith_api import SandboxAPI
 
     api_key = ENV.LANGSMITH_API_KEY.get()
     endpoint = ENV.LANGSMITH_ENDPOINT.get().rstrip("/")
@@ -404,7 +404,7 @@ async def _launch_sandbox(
             (report_url, REPORT_TOKEN_HEADER, report_token),
         ]
     )
-    async with get_async_sandbox_client() as client:
+    async with SandboxAPI.for_new_boxes().client() as client:
         sandbox = await client.create_sandbox(
             idle_ttl_seconds=0,
             delete_after_stop_seconds=DELETE_AFTER_STOP_SECONDS,

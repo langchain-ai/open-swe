@@ -52,7 +52,8 @@ def _configure(monkeypatch: pytest.MonkeyPatch, backend: _Backend) -> _AsyncClie
     monkeypatch.setattr(download_tool, "get_sandbox_backend", get_backend)
     monkeypatch.setattr(download_tool, "resolve_sandbox_work_dir", work_dir)
     monkeypatch.setattr(download_tool, "unwrap_sandbox_backend", lambda value: value)
-    monkeypatch.setattr(download_tool, "get_async_sandbox_client", lambda: client)
+    monkeypatch.setattr(download_tool, "langsmith_box", lambda value: value)
+    backend.api = SimpleNamespace(client=lambda: client)
     return client
 
 

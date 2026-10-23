@@ -9,6 +9,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 
 from openswe.sandboxes.lifecycle import SANDBOX_BACKENDS, ensure_sandbox_for_thread
+from openswe.sandboxes.ref import SandboxRef
 from openswe.sandboxes.state import (
     SANDBOX_CONNECTIONS,
     get_or_create_sandbox_backend_proxy,
@@ -46,7 +47,7 @@ async def test_ensure_sandbox_creates_new_when_no_metadata() -> None:
     # The new sandbox id is persisted to thread metadata (no sentinel writes).
     assert update_thread.await_args_list[-1].kwargs == {
         "thread_id": thread_id,
-        "metadata": {"sandbox_id": "sandbox-new"},
+        "metadata": {"sandbox_id": "sandbox-new", "sandbox_api": None},
     }
     SANDBOX_BACKENDS.clear()
 
@@ -93,7 +94,7 @@ async def test_ensure_sandbox_reconnects_to_metadata_sandbox() -> None:
         result = await ensure_sandbox_for_thread(thread_id)
 
     assert result.id == "sandbox-existing"
-    connect_sandbox.assert_awaited_once_with("sandbox-existing")
+    connect_sandbox.assert_awaited_once_with(SandboxRef("sandbox-existing"))
     assert refresh_proxy.await_count == 1
     # Metadata already holds this id, so no update is issued.
     update_thread.assert_not_awaited()
@@ -144,7 +145,7 @@ async def test_ensure_sandbox_resolves_unresolved_backend_proxy() -> None:
 
     assert result is proxy
     assert proxy.current is existing_backend
-    connect_sandbox.assert_awaited_once_with("sandbox-existing")
+    connect_sandbox.assert_awaited_once_with(SandboxRef("sandbox-existing"))
     assert refresh_proxy.await_count == 1
     update_thread.assert_not_awaited()
     SANDBOX_BACKENDS.clear()
@@ -197,7 +198,7 @@ async def test_ensure_sandbox_never_reuses_connection_to_another_sandbox() -> No
 
     assert result is proxy
     assert proxy.current is new_backend
-    connect_sandbox.assert_awaited_once_with("sandbox-new")
+    connect_sandbox.assert_awaited_once_with(SandboxRef("sandbox-new"))
     # Only a sandbox created in this call binds the thread; reconnecting never does.
     update_thread.assert_not_awaited()
     assert "sandbox-old" not in SANDBOX_CONNECTIONS

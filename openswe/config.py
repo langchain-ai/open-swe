@@ -158,15 +158,15 @@ ENV.var(
 )
 ENV.var(
     "SANDBOX_LANGSMITH_API_KEY",
-    "LangSmith API key for thread sandboxes and their snapshots, when they live in another "
-    "LangSmith than LANGSMITH_API_KEY's workspace; defaults to LANGSMITH_API_KEY. The MDA "
+    "LangSmith API key for SANDBOX_LANGSMITH_ENDPOINT; defaults to LANGSMITH_API_KEY. The MDA "
     "deployment needs the same value.",
     secret=True,
 )
 ENV.var(
     "SANDBOX_LANGSMITH_ENDPOINT",
-    "LangSmith API endpoint for thread sandboxes, such as another region; defaults to "
-    "LANGSMITH_ENDPOINT. The MDA deployment needs the same value.",
+    "LangSmith API endpoint new sandboxes and snapshots are created at, such as another region; "
+    "defaults to LANGSMITH_ENDPOINT. Each box and snapshot records where it lives, so existing "
+    "ones stay reachable where they were. The MDA deployment needs the same value.",
 )
 ENV.var(
     "LANGSMITH_TENANT_ID",

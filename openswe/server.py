@@ -167,7 +167,6 @@ from openswe.sandboxes.lifecycle import (
     take_stale_boot,
 )
 from openswe.sandboxes.paths import resolve_sandbox_work_dir
-from openswe.sandboxes.providers.langsmith import service_identity_jwks_url
 from openswe.sandboxes.read_only_backend import ReadOnlyBackend
 from openswe.sandboxes.retry import SANDBOX_ATTACH_MAX_ELAPSED, retry_transient_sandbox_errors
 from openswe.sandboxes.state import (
@@ -371,7 +370,7 @@ SOURCE_FREE_SLACK_TOOLS: frozenset[str] = frozenset({"slack_read_channel_message
 
 
 def _tool_description_values() -> dict[str, dict[str, object]]:
-    return {"expose_port": {"jwks_url": service_identity_jwks_url(), "port": "<port>"}}
+    return {"expose_port": {"port": "<port>"}}
 
 
 def warm_agent_build() -> None:

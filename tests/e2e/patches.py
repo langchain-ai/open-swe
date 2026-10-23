@@ -296,9 +296,19 @@ def apply() -> None:
     # fake store instead. The workspace tools, store writes, name/tag scheme
     # and status transitions all still run for real.
     from openswe.sandboxes.providers import langsmith as langsmith_integration
+    from openswe.sandboxes.providers.langsmith_api import SandboxAPI
     from openswe.workspaces import store as workspaces_store
 
-    langsmith_integration.get_async_sandbox_client = _FakeSandboxClient
+    SandboxAPI.client = lambda _api: _FakeSandboxClient()
+    # Publishing captures the thread's box by its ref, which a local box has no LangSmith for.
+    real_langsmith_box = langsmith_integration.langsmith_box
+
+    def _langsmith_or_local_box(backend: object) -> object:
+        if isinstance(backend, langsmith_integration.TimeoutLangSmithSandbox):
+            return real_langsmith_box(backend)
+        return _LocalBox(backend)
+
+    langsmith_integration.langsmith_box = _langsmith_or_local_box
     # The capture path refuses to run off the langsmith provider; with that
     # provider's snapshot API faked above, the E2E's local sandbox is capturable.
     workspaces_store.require_capture_support = lambda: None
@@ -386,10 +396,24 @@ async def _fake_assert_repo_access(full_name: str, token: str) -> str:
     return normalized
 
 
+class _LocalBox:
+    """A local sandbox, with the ref the capture path reads off a LangSmith box."""
+
+    def __init__(self, backend: object) -> None:
+        from openswe.sandboxes.ref import SandboxRef
+
+        self._backend = backend
+        self.id = backend.id
+        self.ref = SandboxRef(backend.id)
+
+    async def aexecute(self, *args: object, **kwargs: object) -> object:
+        return await self._backend.aexecute(*args, **kwargs)
+
+
 async def _fake_builder_sandbox(_record: object, _snapshot_id: object = None) -> object:
     from openswe.sandboxes.providers.registry import create_sandbox
 
-    return await create_sandbox()
+    return _LocalBox(await create_sandbox())
 
 
 async def _release_nothing(_sandbox_id: str) -> None:

@@ -11,6 +11,7 @@ from pydantic import BaseModel, Field, ValidationError
 
 from openswe.config import ENV
 from openswe.dashboard.workspace_settings import get_workspace_settings
+from openswe.sandboxes.ref import SandboxRef
 from openswe.utils.dashboard_links import dashboard_api_base_url
 
 if TYPE_CHECKING:
@@ -32,6 +33,12 @@ SANDBOX_PROXY_CONFIG_METADATA_KEY = "sandbox_base_proxy_config"
 class ToolAccess(BaseModel):
     thread_id: str = Field(strict=True, min_length=1)
     sandbox_id: str = Field(strict=True, min_length=1)
+    # From the thread's metadata once authenticated, never from the token.
+    sandbox_api: str | None = Field(default=None, exclude=True)
+
+    @property
+    def sandbox(self) -> SandboxRef:
+        return SandboxRef(self.sandbox_id, self.sandbox_api)
 
 
 def tools_base_url() -> str | None:
@@ -86,8 +93,10 @@ async def authenticate_tool_access(token: str | None) -> ToolAccess:
         if getattr(getattr(exc, "response", None), "status_code", None) == 404:
             raise HTTPException(401, "Invalid sandbox capability") from exc
         raise
-    if (thread.get("metadata") or {}).get("sandbox_id") != access.sandbox_id:
+    bound = SandboxRef.of(thread.get("metadata") or {})
+    if bound is None or bound.id != access.sandbox_id:
         raise HTTPException(401, "Invalid sandbox capability")
+    access.sandbox_api = bound.api
     return access
 
 

@@ -20,6 +20,7 @@ from langgraph_sdk.errors import NotFoundError
 from openswe import background_tasks
 from openswe.background_tasks import monitor_background_tasks, reconcile_background_tasks
 from openswe.sandboxes import tool_access, tool_routes
+from openswe.sandboxes.ref import SandboxRef
 from openswe.sandboxes.scripts import source
 from openswe.slack import thinking as slack_thinking
 from openswe.tasks import service as task_service
@@ -287,7 +288,7 @@ async def test_heartbeat_keeps_the_sandbox_alive_only_for_a_running_task(
         )
     assert unauthenticated.status_code == 401
     assert response.status_code == status_code
-    create_sandbox.assert_awaited_once_with("sandbox-a")
+    create_sandbox.assert_awaited_once_with(SandboxRef("sandbox-a"))
 
 
 @pytest.mark.parametrize(

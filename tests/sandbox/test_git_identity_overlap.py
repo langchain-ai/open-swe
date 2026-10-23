@@ -12,6 +12,7 @@ import pytest
 
 from openswe.github.sandbox_access import SandboxGitHubAccess
 from openswe.sandboxes.lifecycle import SandboxCreateConfig, _create_sandbox_with_proxy
+from openswe.sandboxes.providers.langsmith import TimeoutLangSmithSandbox
 
 
 def _backend(started: asyncio.Event) -> MagicMock:
@@ -19,7 +20,9 @@ def _backend(started: asyncio.Event) -> MagicMock:
         started.set()
         return "ok"
 
-    return MagicMock(id="sandbox-new", aexecute=AsyncMock(side_effect=aexecute))
+    return MagicMock(
+        spec=TimeoutLangSmithSandbox, id="sandbox-new", aexecute=AsyncMock(side_effect=aexecute)
+    )
 
 
 @pytest.mark.asyncio
@@ -59,7 +62,9 @@ async def test_identity_is_written_while_the_proxy_is_configured() -> None:
 @pytest.mark.asyncio
 async def test_identity_failure_fails_the_sandbox() -> None:
     backend = MagicMock(
-        id="sandbox-new", aexecute=AsyncMock(side_effect=RuntimeError("identity failed"))
+        spec=TimeoutLangSmithSandbox,
+        id="sandbox-new",
+        aexecute=AsyncMock(side_effect=RuntimeError("identity failed")),
     )
 
     with (
@@ -94,7 +99,9 @@ async def test_a_failed_proxy_does_not_leave_the_identity_write_running() -> Non
         await release.wait()
         return "ok"
 
-    backend = MagicMock(id="sandbox-new", aexecute=AsyncMock(side_effect=aexecute))
+    backend = MagicMock(
+        spec=TimeoutLangSmithSandbox, id="sandbox-new", aexecute=AsyncMock(side_effect=aexecute)
+    )
 
     with (
         patch(
@@ -131,7 +138,9 @@ async def test_a_failed_proxy_does_not_leave_the_identity_write_running() -> Non
 @pytest.mark.asyncio
 async def test_proxy_token_is_minted_while_the_sandbox_boots() -> None:
     minting = asyncio.Event()
-    backend = MagicMock(id="sandbox-new", aexecute=AsyncMock(return_value="ok"))
+    backend = MagicMock(
+        spec=TimeoutLangSmithSandbox, id="sandbox-new", aexecute=AsyncMock(return_value="ok")
+    )
 
     async def boot(*_args: object, **_kwargs: object) -> MagicMock:
         # A token minted only after boot returns would never set this.

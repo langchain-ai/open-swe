@@ -5,6 +5,8 @@ from importlib import import_module
 from typing import TYPE_CHECKING, Any
 
 from openswe.config import ENV
+from openswe.sandboxes.providers.langsmith_api import SandboxAPI
+from openswe.sandboxes.ref import SandboxRef
 
 if TYPE_CHECKING:
     from deepagents.backends.protocol import SandboxBackendProtocol
@@ -71,7 +73,7 @@ def _load_sandbox_factory(sandbox_type: str) -> SandboxFactory:
 
 
 async def create_sandbox(
-    sandbox_id: str | None = None,
+    sandbox: SandboxRef | None = None,
     *,
     snapshot_id: str | None = None,
     mem_bytes: int | None = None,
@@ -91,7 +93,7 @@ async def create_sandbox(
     ``langchain_*`` wrappers bind synchronous SDK handles.
 
     Args:
-        sandbox_id: Optional existing sandbox ID to reconnect to.
+        sandbox: Optional existing sandbox to reconnect to, in the LangSmith it lives in.
         snapshot_id: Optional snapshot to boot a new sandbox from. Only the
             langsmith provider honors this; others ignore it. When omitted the
             langsmith provider uses its root snapshot.
@@ -119,7 +121,13 @@ async def create_sandbox(
             }.items()
             if value is not None
         }
-        return await factory(sandbox_id, prepare_work_dir=prepare_work_dir, **options)
+        return await factory(
+            sandbox.id if sandbox else None,
+            prepare_work_dir=prepare_work_dir,
+            api=SandboxAPI.at(sandbox.api) if sandbox else None,
+            **options,
+        )
+    sandbox_id = sandbox.id if sandbox else None
     if inspect.iscoroutinefunction(factory):
         return await factory(sandbox_id)
     return await asyncio.to_thread(factory, sandbox_id)
