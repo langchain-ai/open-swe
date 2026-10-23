@@ -163,26 +163,10 @@ class _Session:
     tools: StagehandFacadeTools
     artifacts: str  # where the facade writes run code's screenshots
     browser: str  # the browser's name, which a later generation may have replaced
-    window_id: str
     closing: bool = False  # run code called `browser.close()`: released after the call
     # The sandbox whose localhost the browser shares. By handle, not name: one MDA
     # replaces mid-run keeps its name but gets a new handle.
     shared: SandboxBackendProtocol | None = None
-
-    async def hand_over(self) -> str:
-        """Give the user the window; a short-lived link they can drive it with.
-
-        The client is released after the call, so the next one connects afresh and
-        takes the window back.
-        """
-        self.closing = True
-        async with httpx.AsyncClient(
-            headers=_api()[1], timeout=30, event_hooks={"response": [_raise]}
-        ) as api:
-            window = _window_api(self.browser, self.window_id)
-            await api.post(f"{window}/controller", json={"controller": "user"})
-            body = {"ttl_seconds": _HANDOFF_LINK_TTL_S, "embed_origins": _embed_origins()}
-            return (await api.post(f"{window}/links", json=body)).json()["act_url"]
 
     async def close(self) -> None:
         # Not `browser.close()`, which closes the browser. Closing Stagehand frees the
@@ -238,19 +222,14 @@ class BrowserMiddleware(AgentMiddleware):
             self._instructions += f" {_LOCALHOST_NOTE}"
 
     async def _call(  # noqa: C901 - one flat chain of error handling
-        self,
-        runtime: ManagedToolRuntime,
-        fn: Callable[[_Session], Awaitable[T]],
-        *,
-        handing_over: bool = False,
+        self, runtime: ManagedToolRuntime, fn: Callable[[_Session], Awaitable[T]]
     ) -> T | str:
         """Run ``fn`` on the run's session. Errors go to the model; nothing is retried.
 
-        While the user has the window, only another handoff may use it.
+        While the user has the window, the agent waits.
         """
         # The handoff is asked about here too: after a restart no watcher says it ended.
-        pending = None if handing_over else _pending(runtime.state)
-        if pending and await _handoff_status(pending) is None:
+        if (pending := _pending(runtime.state)) and await _handoff_status(pending) is None:
             return f"error: {_WITH_USER}"
         try:
             thread = _thread_id(runtime)
@@ -263,9 +242,7 @@ class BrowserMiddleware(AgentMiddleware):
                 if (session := _SESSIONS.get(key)) and session.window != window:
                     await _release(key)  # another of the user's threads: move windows
                 if key not in _SESSIONS:
-                    _SESSIONS[key] = await _open(
-                        key, window, self.idle_ttl_seconds, reclaim=not handing_over
-                    )
+                    _SESSIONS[key] = await _open(key, window, self.idle_ttl_seconds)
                 await self._share(_SESSIONS[key], _SESSIONS[key].browser, key, runtime)
                 return await fn(_SESSIONS[key])
             except StagehandFacadeInputError as err:
@@ -334,17 +311,27 @@ class BrowserMiddleware(AgentMiddleware):
         return await handler(request.override(system_message=SystemMessage(content_blocks=blocks)))
 
     async def _hand_to_user(self, runtime: ManagedToolRuntime, reason: str) -> Command | str:
-        """Give the user the window and return at once, keeping the handoff in state."""
+        """Give the user the window and return at once, keeping the handoff in state.
 
-        async def hand_over(session: _Session) -> tuple[_PendingHandoff, str]:
-            url = await session.hand_over()
-            until = time.time() + _HANDOFF_LINK_TTL_S
-            return {"browser": session.browser, "window_id": session.window_id, "until": until}, url
-
-        handed = await self._call(runtime, hand_over, handing_over=True)
-        if isinstance(handed, str):
-            return handed  # an error
-        pending, url = handed
+        It needs no client, only the browsers API: a window a person controls turns a
+        client away, so a second handoff could not connect. The agent's client lets go,
+        and the next browser call connects afresh and takes the window back.
+        """
+        try:
+            thread = _thread_id(runtime)
+            key = _browser_key(runtime.server_info, thread, self.scope)
+        except RuntimeError as err:
+            return f"error: {err}"
+        async with _LOCKS.setdefault(key, asyncio.Lock()):
+            await _release(key)
+            try:
+                browser, window_id, url = await _hand_over(
+                    key, _window_name(key, thread), self.idle_ttl_seconds
+                )
+            except Exception as err:  # noqa: BLE001 - reported to the model
+                return f"error: {sanitize_error_message(f'{type(err).__name__}: {err}')}"
+        until = time.time() + _HANDOFF_LINK_TTL_S
+        pending: _PendingHandoff = {"browser": browser, "window_id": window_id, "until": until}
         watcher = asyncio.create_task(self._wake_on_hand_back(runtime, pending))
         _WATCHERS.add(watcher)
         watcher.add_done_callback(_WATCHERS.discard)
@@ -657,18 +644,12 @@ def _api() -> tuple[str, dict[str, str]]:
     return f"{endpoint}/v2/sandboxes", {"X-Api-Key": get_env_var("API_KEY") or "", **tenant}
 
 
-def _window_api(browser: str, window_id: str) -> str:
-    return f"{_api()[0]}/browsers/{browser}/attachments/{window_id}"
-
-
-async def _open(
-    key: str, window_name: str, idle_ttl_seconds: int, *, reclaim: bool = True
-) -> _Session:
+async def _open(key: str, window_name: str, idle_ttl_seconds: int) -> _Session:
     """Attach Stagehand to a window of ``key``'s browser, creating either as needed.
 
     The client reaches Chrome through the API's CDP proxy; the extension, inside the
     browser sandbox, dials the window's local port. A window the user still holds
-    from an ended handoff is taken back, unless ``reclaim`` is off for a new handoff.
+    from an ended handoff is taken back.
     """
     url, headers = _api()
     browsers = f"{url}/browsers"
@@ -680,12 +661,8 @@ async def _open(
         name, box = await _usable_browser(api, sandboxes, browsers, key, idle_ttl_seconds)
         await _install_extension(box)
         await api.post(f"{browsers}/{name}/extensions/load")  # a no-op once loaded
-        windows = (await api.get(f"{browsers}/{name}")).json().get("attachments") or []
-        window = next((w for w in windows if w["name"] == window_name), None)
-        if window is None:
-            body = {"name": window_name, "controller": "agent"}
-            window = (await api.post(f"{browsers}/{name}/attachments", json=body)).json()
-        if reclaim and window.get("controller") == "user":
+        window = await _window(api, f"{browsers}/{name}", window_name)
+        if window.get("controller") == "user":
             controller = f"{browsers}/{name}/attachments/{window['id']}/controller"
             await api.post(controller, json={"controller": "agent"})
         cdp_url = (await api.get(f"{window['api_cdp_url']}/json/version")).json()[
@@ -695,14 +672,44 @@ async def _open(
 
     local_url = f"ws://127.0.0.1:{port}/devtools/browser/{window['id']}"
     try:
-        return await _connect(key, window_name, name, window["id"], cdp_url, local_url, headers)
+        return await _connect(key, window_name, name, cdp_url, local_url, headers)
     except Exception as err:
         if "already initialized" not in str(err):
             raise
     # A client that never closed (a crash, another replica) left its claim in the
     # extension; reinstalling it clears the claim without restarting Chrome.
     await _reinstall_extension(cdp_url, headers)
-    return await _connect(key, window_name, name, window["id"], cdp_url, local_url, headers)
+    return await _connect(key, window_name, name, cdp_url, local_url, headers)
+
+
+async def _window(api: httpx.AsyncClient, browser: str, name: str) -> dict[str, Any]:
+    """The browser's window ``name``, created for the agent if it has none."""
+    windows = (await api.get(browser)).json().get("attachments") or []
+    if window := next((w for w in windows if w["name"] == name), None):
+        return window
+    body = {"name": name, "controller": "agent"}
+    return (await api.post(f"{browser}/attachments", json=body)).json()
+
+
+async def _hand_over(key: str, window_name: str, idle_ttl_seconds: int) -> tuple[str, str, str]:
+    """Give the user ``key``'s window, creating either as needed.
+
+    Returns the browser's name, the window's id, and a short-lived link the user
+    drives it with.
+    """
+    url, headers = _api()
+    browsers = f"{url}/browsers"
+    async with (
+        httpx.AsyncClient(headers=headers, timeout=90, event_hooks={"response": [_raise]}) as api,
+        AsyncSandboxClient(api_key=headers["X-Api-Key"], headers=headers) as sandboxes,
+    ):
+        name, _ = await _usable_browser(api, sandboxes, browsers, key, idle_ttl_seconds)
+        window = await _window(api, f"{browsers}/{name}", window_name)
+        window_api = f"{browsers}/{name}/attachments/{window['id']}"
+        await api.post(f"{window_api}/controller", json={"controller": "user"})
+        body = {"ttl_seconds": _HANDOFF_LINK_TTL_S, "embed_origins": _embed_origins()}
+        link = (await api.post(f"{window_api}/links", json=body)).json()["act_url"]
+    return name, window["id"], link
 
 
 async def _share_localhost(name: str, sandbox: str) -> None:
@@ -741,13 +748,7 @@ async def _raise(response: httpx.Response) -> None:
 
 
 async def _connect(
-    key: str,
-    window: str,
-    browser_name: str,
-    window_id: str,
-    cdp_url: str,
-    local_url: str,
-    headers: dict[str, str],
+    key: str, window: str, browser_name: str, cdp_url: str, local_url: str, headers: dict[str, str]
 ) -> _Session:
     browser = await local_browser.connect(
         cdp_url=cdp_url, extension_cdp_url=local_url, headers=headers
@@ -771,7 +772,7 @@ async def _connect(
     # cannot see (another thread's, or the shared localhost one), and `set_active_page`
     # does not move headless Chrome's focus. It has no hook for the page, so name ours.
     tools._active_page = lambda: _newest_tab(browser.context)  # ty: ignore[invalid-assignment]  # noqa: SLF001
-    return _Session(window, stagehand, tools, artifacts, browser_name, window_id)
+    return _Session(window, stagehand, tools, artifacts, browser_name)
 
 
 async def _newest_tab(context: BrowserContext) -> Page:
