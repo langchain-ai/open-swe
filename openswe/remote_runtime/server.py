@@ -13,9 +13,12 @@ coordinator's catalog and ``adopt`` a run token of its own, nothing else.
 """
 
 import logging
-from collections.abc import Awaitable, Callable, Mapping
+from collections.abc import Awaitable, Callable, Iterator, Mapping
+from contextlib import contextmanager
 from typing import Final
 
+from langsmith import tracing_context
+from langsmith.run_trees import RunTree
 from pydantic import JsonValue, TypeAdapter, ValidationError
 from runtime_api.endpoint import API_PATH as _API_PATH
 from runtime_api.endpoint import UnknownEndpointError
@@ -75,6 +78,28 @@ def _grant_hooks() -> Mapping[str, GrantHook]:
     return {"adopt": async_workers.adopt}
 
 
+@contextmanager
+def _traced_under_caller(scope: Scope) -> Iterator[None]:
+    """Nest what the call traces under the runtime span that made it, when it says which.
+
+    Without it every hook would start a trace of its own, apart from the run's turn.
+    """
+    headers = Request(scope).headers
+    parent: RunTree | None = None
+    if dotted_order := headers.get("langsmith-trace"):
+        try:
+            parent = RunTree.from_headers(
+                {"langsmith-trace": dotted_order, "baggage": headers.get("baggage", "")}
+            )
+        except Exception:
+            logger.warning("Ignoring unusable trace headers", exc_info=True)
+    if parent is None:
+        yield
+        return
+    with tracing_context(parent=parent):
+        yield
+
+
 def _scope_principal(scope: Scope) -> RemoteRun | WorkerGrant:
     principal = scope.get("state", {}).get(_RUN_STATE_KEY)
     if not isinstance(principal, RemoteRun | WorkerGrant):
@@ -112,12 +137,13 @@ async def hook_endpoint(scope: Scope, receive: Receive, send: Send) -> None:
         )
         return
     try:
-        if isinstance(principal, WorkerGrant) and grant_hook is not None:
-            result = await grant_hook(principal, body)
-        elif run_hook is not None:
-            result = await run_hook(run, body)
-        else:
-            result = await graph(run, hook, body)
+        with _traced_under_caller(scope):
+            if isinstance(principal, WorkerGrant) and grant_hook is not None:
+                result = await grant_hook(principal, body)
+            elif run_hook is not None:
+                result = await run_hook(run, body)
+            else:
+                result = await graph(run, hook, body)
     except UnknownHookError:
         await JSONResponse({"detail": f"Unknown hook {hook}"}, status_code=404)(
             scope, receive, send
@@ -157,7 +183,8 @@ async def api_endpoint(scope: Scope, receive: Receive, send: Send) -> None:
         )
         return
     try:
-        result = await api(principal, endpoint, body)
+        with _traced_under_caller(scope):
+            result = await api(principal, endpoint, body)
     except UnknownEndpointError:
         await JSONResponse({"detail": f"Unknown endpoint {endpoint}"}, status_code=404)(
             scope, receive, send
