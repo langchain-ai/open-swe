@@ -1,16 +1,15 @@
-from typing import Any, cast
-from unittest.mock import MagicMock, patch
+from typing import Any
+from unittest.mock import patch
 
 import pytest
 
+from openswe.input_messages import RunMessage
 from openswe.message_queue import QueuedMessage
-from openswe.middleware.check_message_queue import (
-    LinearNotifyState,
-    check_message_queue_before_model,
-)
+from openswe.middleware.require_user_reply import ReplySurface
+from openswe.threads.inbox import Taken, ThreadInbox
 
 
-def _envelope(message: dict) -> str:
+def _envelope(message: RunMessage) -> str:
     """The message's envelope text, whether its content is a string or blocks."""
     content = message["content"]
     if isinstance(content, str):
@@ -18,18 +17,16 @@ def _envelope(message: dict) -> str:
     return "".join(block["text"] for block in content if block.get("type") == "text")
 
 
-async def _run(state: dict[str, Any]) -> dict[str, Any] | None:
+async def _take(surface: ReplySurface = "web") -> Taken:
     with patch(
-        "openswe.middleware.check_message_queue.get_config",
+        "openswe.threads.inbox.get_config",
         return_value={"configurable": {"thread_id": "thread-1"}},
     ):
-        return await check_message_queue_before_model.abefore_model(
-            cast(LinearNotifyState, state), MagicMock()
-        )
+        return await ThreadInbox("thread-1", events=False).take([], surface)
 
 
 @pytest.mark.asyncio
-async def test_check_message_queue_announces_the_move_to_web_only_once(registry_db: None) -> None:
+async def test_inbox_announces_the_move_to_web_only_once(registry_db: None) -> None:
     await QueuedMessage.put(
         "thread-1",
         {
@@ -44,15 +41,14 @@ async def test_check_message_queue_announces_the_move_to_web_only_once(registry_
         },
     )
 
-    result = await _run({"messages": [], "reply_surface": "web"})
+    taken = await _take("web")
 
-    assert result is not None
-    envelopes = [_envelope(message) for message in result["messages"]]
+    envelopes = [_envelope(message) for message in taken.messages]
     assert not any("system:dashboard-handoff" in envelope for envelope in envelopes)
 
 
 @pytest.mark.asyncio
-async def test_check_message_queue_keeps_slack_for_a_message_relayed_by_another_thread(
+async def test_inbox_keeps_slack_for_a_message_relayed_by_another_thread(
     registry_db: None,
 ) -> None:
     await QueuedMessage.put(
@@ -65,18 +61,17 @@ async def test_check_message_queue_keeps_slack_for_a_message_relayed_by_another_
         },
     )
 
-    result = await _run({"messages": [], "reply_surface": "slack"})
+    taken = await _take("slack")
 
-    assert result is not None
-    assert "reply_surface" not in result
-    envelopes = "".join(_envelope(message) for message in result["messages"])
+    assert taken.reply_surface is None
+    envelopes = "".join(_envelope(message) for message in taken.messages)
     assert "system:dashboard-handoff" not in envelopes
     assert 'surface="automation"' in envelopes
     assert 'relayed_from_thread="worker-thread"' in envelopes
 
 
 @pytest.mark.asyncio
-async def test_check_message_queue_keeps_follow_ups_queued_while_it_builds(
+async def test_inbox_keeps_follow_ups_queued_while_it_builds(
     registry_db: None,
 ) -> None:
     await QueuedMessage.put("thread-1", {"text": "first", "image_urls": ["https://img.test/a.png"]})
@@ -87,18 +82,17 @@ async def test_check_message_queue_keeps_follow_ups_queued_while_it_builds(
 
     with (
         patch(
-            "openswe.middleware.check_message_queue._resolve_thread_model_id",
+            "openswe.threads.inbox._resolve_thread_model_id",
             return_value=None,
         ),
         patch(
-            "openswe.middleware.check_message_queue._build_blocks_from_payload",
+            "openswe.threads.inbox._build_blocks_from_payload",
             side_effect=build_and_queue,
         ),
     ):
-        result = await _run({"messages": []})
+        taken = await _take()
 
-    assert result is not None
-    assert "first" in _envelope(result["messages"][-1])
+    assert "first" in _envelope(taken.messages[-1])
     assert [message.content for message in await QueuedMessage.for_thread("thread-1")] == [
         {"text": "queued during the image fetch"}
     ]

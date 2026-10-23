@@ -48,7 +48,6 @@ from openswe.middleware import (
     ExcludeToolsMiddleware,
     ModelErrorMiddleware,
     RepairOrphanedToolCallsMiddleware,
-    check_message_queue_before_model,
     refresh_github_proxy_before_model,
     settle_review_check_on_exit,
 )
@@ -83,6 +82,7 @@ from openswe.sandboxes.repo_prep import materialize_trusted_skills, prepare_revi
 from openswe.sandboxes.state import SandboxUnreachableError
 from openswe.sandboxes.tool_runtime import ModelChoice, SurfaceModels, SurfaceSubagent, ToolSurface
 from openswe.search_policy import SHELL_SEARCH_EXCLUDED_TOOLS
+from openswe.threads.inbox import ThreadInbox
 from openswe.tools import (
     add_finding,
     fetch_review_diff,
@@ -1059,7 +1059,6 @@ async def plan_reviewer(config: RunnableConfig, surface: ToolSurface) -> None:
             ModelCallLimitMiddleware(run_limit=MODEL_CALL_RECURSION_LIMIT, exit_behavior="end"),
             ExcludeToolsMiddleware(excluded=SHELL_SEARCH_EXCLUDED_TOOLS),
             refresh_github_proxy_before_model,
-            check_message_queue_before_model,
             RepairOrphanedToolCallsMiddleware(),
             ModelRetryMiddleware(retry_on=(TimeoutError,)),
             ModelErrorMiddleware(),
@@ -1068,6 +1067,7 @@ async def plan_reviewer(config: RunnableConfig, surface: ToolSurface) -> None:
     )
     surface.base_tools = reviewer_tools()
     surface.middleware = middleware
+    surface.inbox = ThreadInbox(thread_id, events=False)
     surface.files = backend
     surface.excluded = SHELL_SEARCH_EXCLUDED_TOOLS
     surface.models = SurfaceModels(

@@ -27,6 +27,7 @@ from openswe.tasks import events, presentation, store
 from openswe.tasks import messages as task_messages
 from openswe.tasks.messages import TaskMessage
 from openswe.tasks.presentation import TaskEventMetadata
+from openswe.threads.inbox import ThreadInbox
 
 _WORKER = "86186b55-1999-52e2-bf4b-ca3de907043e"
 _COORDINATOR = "3b8f4848-78b4-45d5-a617-3f4610feff4d"
@@ -456,12 +457,9 @@ async def test_task_message_retention_preserves_owed_work_and_deduplicates_prune
 )
 async def test_repaired_task_thread_checkpoints_owed_messages_once(
     registry_db: None,
-    monkeypatch: pytest.MonkeyPatch,
     thread_id: str,
     missing_task_message: bool,
 ) -> None:
-    from openswe.middleware import task_coordination
-
     task, _ = await store.Task.reserve_worker(
         _COORDINATOR,
         _WORKER,
@@ -496,20 +494,12 @@ async def test_repaired_task_thread_checkpoints_owed_messages_once(
     if missing_task_message:
         async with postgres.session() as session:
             await message.record(session)
-    context = await store.TaskMembership.context_for_thread(thread_id)
-    middleware = task_coordination.TaskCoordinationMiddleware(thread_id, True, context)
-    monkeypatch.setattr(task_coordination, "maybe_refresh_proxy_token", AsyncMock())
+    inbox = ThreadInbox(thread_id, events=True)
 
-    delivered = await middleware.abefore_model({"messages": []}, Runtime())
-    assert delivered is not None
-    assert delivered["messages"][-1]["id"] == f"event-match:{message.id}"
-    assert "Check logout too" in delivered["messages"][-1]["content"]
-    checkpoint: AgentState = {"messages": []}
-    for entry in delivered["messages"]:
-        content = entry["content"]
-        assert isinstance(content, str)
-        checkpoint["messages"].append(HumanMessage(content=content, id=entry.get("id")))
-    assert await middleware.abefore_model(checkpoint, Runtime()) is None
+    taken = await inbox.take([], "web")
+    assert taken.messages[-1]["id"] == f"event-match:{message.id}"
+    assert "Check logout too" in taken.messages[-1]["content"]
+    assert (await inbox.take([str(message.id)], "web")).messages == []
     async with postgres.session() as session:
         saved = await session.get_one(TaskMessage, message.id)
         assert saved.delivered_at is not None

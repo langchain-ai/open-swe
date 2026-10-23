@@ -1,11 +1,13 @@
 """The run hooks that hand each phase of this model loop to the Open SWE backend.
 
 The backend holds the in-process graph and its own middleware, and
-runs that middleware for every phase here: preparation before the run, the
-follow-up queue, routing and the system prompt before each model call, the
-transcript and usage after it, reply nudges after the model, and the end-of-run
-work. Graph state those hooks write rides in ``open_swe_state`` and goes back
-with every call.
+runs that middleware for every phase here: preparation before the run, routing
+and the system prompt before each model call, the transcript and usage after it,
+reply nudges after the model, and the end-of-run work. Graph state those hooks
+write rides in ``open_swe_state`` and goes back with every call.
+
+Before each model call the run also takes its thread's inbox: what was sent to
+the thread while the run worked, such as a person's follow-up or a task report.
 
 Subagents run here too. Their replies and the tools this runtime runs itself,
 such as ``task``, go to the backend as well, so its transcript records them
@@ -62,8 +64,12 @@ from runtime_api.loop import (
     AFTER_AGENT,
     AFTER_MODEL,
     BEFORE_MODEL,
+    EVENT_MESSAGE_PREFIX,
+    INBOX,
     MODEL_RESULT,
     PREPARE,
+    Inbox,
+    InboxRequest,
     ModelCall,
     ModelResult,
     PhaseResult,
@@ -75,6 +81,7 @@ from runtime_api.workers import LAUNCH_WORKER, WORKER_LAUNCHED, Launch, Launched
 from rt.backend import (
     BackendCallError,
     OpenSweBackend,
+    held_state,
     reporting,
     run_call,
     subagent_of,
@@ -353,11 +360,43 @@ class BackendRunMiddleware(AgentMiddleware[RunState]):
 
     @hook_config(can_jump_to=["end"])
     async def abefore_model(self, state: RunState, runtime: Runtime) -> dict[str, object] | None:  # noqa: ARG002
-        planned = await self._phase(BEFORE_MODEL, run_call(RunCall, run_id(), state))
-        update = _apply(planned)
+        inbox = await self._take_inbox(state)
+        taken = messages_from_dict(inbox.messages)
+        # The phase sees what the inbox brought, as the model will.
+        with_inbox = {
+            **state,
+            "messages": [*state["messages"], *taken],
+            STATE_KEY: {**state.get(STATE_KEY, {}), **inbox.update},
+        }
+        planned = await self._phase(BEFORE_MODEL, run_call(RunCall, run_id(), with_inbox))
+        update = _apply(
+            planned.model_copy(
+                update={
+                    "messages": [*inbox.messages, *planned.messages],
+                    "update": {**inbox.update, **planned.update},
+                }
+            )
+        )
         if planned.call is not None:
             update["open_swe_call"] = planned.call.model_dump()
         return update
+
+    async def _take_inbox(self, state: RunState) -> Inbox:
+        await self._backend.reports.drain()
+        surface = held_state(state).get("reply_surface")
+        return await call(
+            self._backend,
+            INBOX,
+            InboxRequest(
+                run_id=run_id(),
+                delivered=[
+                    message.id
+                    for message in state["messages"]
+                    if message.id and message.id.startswith(EVENT_MESSAGE_PREFIX)
+                ],
+                reply_surface="slack" if surface == "slack" else "web",
+            ),
+        )
 
     async def _phase[Call: RunCall, Result: PhaseResult](
         self, endpoint: Endpoint[Call, Result], request: Call

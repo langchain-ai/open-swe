@@ -1,13 +1,14 @@
 """Durable task messages, retained until checkpointed by their recipient."""
 
 import logging
-from collections.abc import Sequence
+from collections.abc import Collection, Sequence
 from datetime import datetime, timedelta
 from typing import Literal, Self
 from uuid import NAMESPACE_URL, UUID, uuid5, uuid7
 
 from langgraph_sdk.client import LangGraphClient
 from pydantic import BaseModel, JsonValue, ValidationError
+from runtime_api.loop import EVENT_MESSAGE_PREFIX
 from sqlalchemy import ColumnElement, ForeignKey, delete, func, select, text, update
 from sqlalchemy.dialects.postgresql import JSONB, insert
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -86,8 +87,13 @@ class TaskMessage(Base):
 
     @classmethod
     async def owed(cls, thread_id: str, messages: Sequence[object]) -> list[Self]:
+        return await cls.owed_besides(thread_id, delivered_event_match_ids(messages))
+
+    @classmethod
+    async def owed_besides(cls, thread_id: str, message_ids: Collection[str]) -> list[Self]:
+        """Undelivered messages, oldest first, once ``message_ids``, which the thread holds, count as delivered."""
         delivered: list[UUID] = []
-        for message_id in delivered_event_match_ids(messages):
+        for message_id in message_ids:
             try:
                 delivered.append(UUID(message_id))
             except ValueError:
@@ -140,7 +146,7 @@ class TaskMessage(Base):
                 systems=[_SYSTEM],
                 injected_dynamic_context_hashes=introduced,
             )
-            built[-1]["id"] = f"event-match:{match.id}"
+            built[-1]["id"] = f"{EVENT_MESSAGE_PREFIX}{match.id}"
             messages.extend(built)
         return messages
 

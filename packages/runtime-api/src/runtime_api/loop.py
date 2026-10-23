@@ -1,11 +1,16 @@
 """The calls the runtime's model loop makes on the backend, phase by phase.
 
 The backend runs the graph's own middleware for each phase: preparation before
-the run, the follow-up queue, routing and the system prompt before each model
-call, the transcript and usage after it, reply nudges after the model, and the
-end-of-run work. Graph state those hooks write that the runtime does not know
-comes back in ``update``, and goes back with every later call in ``state``.
+the run, routing and the system prompt before each model call, the transcript
+and usage after it, reply nudges after the model, and the end-of-run work. Graph
+state those hooks write that the runtime does not know comes back in ``update``,
+and goes back with every later call in ``state``.
+
+Before each model call the runtime also takes the thread's inbox: what was sent
+to the thread while its run worked, and only that.
 """
+
+from typing import Final, Literal
 
 from pydantic import BaseModel, JsonValue
 
@@ -103,6 +108,29 @@ class BrowserReport(RunCall):
     opened: bool = True
 
 
+# Starts the id of every message that carries an event sent to the thread, such as
+# monitor output or a task report, whether the inbox or a run's input carried it.
+EVENT_MESSAGE_PREFIX: Final = "event-match:"
+
+
+class InboxRequest(RunRequest):
+    """What the conversation already holds, so the inbox sends nothing twice."""
+
+    # The ids of the conversation's messages that start with ``EVENT_MESSAGE_PREFIX``.
+    delivered: list[str] = []
+    # The surface the agent answers on, as the backend's state holds it: a person's
+    # follow-up from the dashboard moves it to the web.
+    reply_surface: Literal["slack", "web"] = "web"
+
+
+class Inbox(BaseModel):
+    """What was sent to the thread since the last model call, oldest first."""
+
+    messages: list[dict[str, JsonValue]] = []
+    # Graph state taking them changed, such as the surface replies move to.
+    update: dict[str, JsonValue] = {}
+
+
 class Done(BaseModel):
     """The backend did what it was asked; there is nothing more to say."""
 
@@ -113,6 +141,8 @@ PREPARE = Endpoint("prepare", Prepare, PhaseResult, delivery="idempotent")
 BEFORE_MODEL = Endpoint(
     "before_model", RunCall, BeforeModel, seconds=LOOP_CALL_SECONDS, delivery="unprocessed"
 )
+# Takes the follow-ups it returns off the queue, so it is never sent again.
+INBOX = Endpoint("inbox", InboxRequest, Inbox, seconds=LOOP_CALL_SECONDS)
 MODEL_RESULT = Endpoint("model_result", ModelResult, ObservedResponse, seconds=LOOP_CALL_SECONDS)
 AFTER_MODEL = Endpoint("after_model", RunCall, PhaseResult, seconds=LOOP_CALL_SECONDS)
 AFTER_AGENT = Endpoint("after_agent", RunCall, AfterAgent, seconds=LOOP_CALL_SECONDS)

@@ -28,6 +28,8 @@ from langchain_core.messages import (
     HumanMessage,
     ToolCall,
     ToolMessage,
+    messages_from_dict,
+    messages_to_dict,
 )
 from langchain_core.outputs import ChatGeneration, ChatResult
 from langchain_core.runnables import RunnableConfig, RunnableLambda
@@ -66,9 +68,12 @@ from runtime_api.loop import (
     PREPARE,
     AfterAgent,
     BeforeModel,
+    Inbox,
+    InboxRequest,
     ModelCall,
     PhaseResult,
     Prepare,
+    RunCall,
     ToolCallReport,
 )
 from runtime_api.operations import OperationResult, ShellVerdict
@@ -318,6 +323,44 @@ async def test_an_unreachable_backend_fails_the_run(
 
     with pytest.raises(BackendUnavailableError):
         await graph.ainvoke({"messages": [("user", "hello")]})
+
+
+async def test_what_the_inbox_brings_reaches_the_model_once(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("OPEN_SWE_BACKEND_URL", "https://backend.invalid")
+    monkeypatch.setattr("rt.middleware.run_id", lambda: "run-1")
+    backend = OpenSweBackend("secret-token")
+    report = HumanMessage(content="The worker finished", id="event-match:report-1")
+    taken: list[InboxRequest] = []
+    planned: list[RunCall] = []
+
+    async def phase(name: str, body: dict[str, JsonValue]) -> BaseModel:
+        if name == "inbox":
+            taken.append(InboxRequest.model_validate(body))
+            if len(taken) > 1:
+                return Inbox()
+            return Inbox.model_validate(
+                {"messages": messages_to_dict([report]), "update": {"reply_surface": "web"}}
+            )
+        if name == "before_model":
+            planned.append(RunCall.model_validate(body))
+        if name == "after_model" and len(planned) == 1:
+            return PhaseResult(jump_to="model")
+        return PhaseResult()
+
+    _answering(monkeypatch, backend, phase)
+    graph = create_agent(
+        model=FakeListChatModel(responses=["first", "second"]),
+        middleware=[BackendRunMiddleware(backend, "invocation-1")],
+    )
+
+    result = await graph.ainvoke({"messages": [("user", "hello")]})
+
+    assert [request.delivered for request in taken] == [[], ["event-match:report-1"]]
+    assert messages_from_dict(planned[0].messages)[-1].id == "event-match:report-1"
+    assert planned[0].state["reply_surface"] == "web"
+    assert [message.id for message in result["messages"]].count("event-match:report-1") == 1
 
 
 class _RecordingAnthropic(ChatAnthropic):

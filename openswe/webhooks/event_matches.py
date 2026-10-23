@@ -8,12 +8,13 @@ everything still owed, oldest first.
 """
 
 import logging
-from collections.abc import Sequence
+from collections.abc import Collection, Sequence
 from datetime import datetime, timedelta
 from typing import Literal, Self
 from uuid import UUID, uuid7
 
 from pydantic import BaseModel, JsonValue
+from runtime_api.loop import EVENT_MESSAGE_PREFIX
 from sqlalchemy import Text, delete, func, select, text, update
 from sqlalchemy.dialects.postgresql import JSONB, insert
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -106,8 +107,13 @@ class EventMatch(Base):
     @classmethod
     async def owed(cls, thread_id: str, messages: Sequence[object]) -> list[Self]:
         """Matches no message in ``messages`` carries yet, oldest first."""
+        return await cls.owed_besides(thread_id, delivered_event_match_ids(messages))
+
+    @classmethod
+    async def owed_besides(cls, thread_id: str, match_ids: Collection[str]) -> list[Self]:
+        """Matches other than ``match_ids``, which the thread already holds, oldest first."""
         delivered: list[UUID] = []
-        for match_id in delivered_event_match_ids(messages):
+        for match_id in match_ids:
             try:
                 delivered.append(UUID(match_id))
             except ValueError:
@@ -145,7 +151,7 @@ class EventMatch(Base):
                 systems=[system],
                 injected_dynamic_context_hashes=introduced,
             )
-            built[-1]["id"] = f"event-match:{match.id}"
+            built[-1]["id"] = f"{EVENT_MESSAGE_PREFIX}{match.id}"
             messages.extend(built)
         return messages
 
