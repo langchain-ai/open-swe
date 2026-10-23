@@ -3,7 +3,8 @@
 from alembic import op
 
 revision = "da2e20c061b6"
-down_revision = "a7c12a7f1462"
+# Also joins the two heads main left: merge queue configuration and Claude Code sync tokens.
+down_revision = ("a887e76ff00e", "b48266ec5989")
 branch_labels = None
 depends_on = None
 
