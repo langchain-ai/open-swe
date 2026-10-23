@@ -106,6 +106,8 @@ async def _answer(principal: RemoteRun | WorkerGrant, endpoint: str, body: JsonV
 
 
 async def api_endpoint(scope: Scope, receive: Receive, send: Send) -> None:
+    from langgraph_api.logging import set_logging_context
+
     principal = _scope_principal(scope)
     endpoint = scope["path_params"]["endpoint"]
     raw = await Request(scope, receive).body()
@@ -116,6 +118,11 @@ async def api_endpoint(scope: Scope, receive: Receive, send: Send) -> None:
             scope, receive, send
         )
         return
+    run = principal.coordinator if isinstance(principal, WorkerGrant) else principal
+    context = {"thread_id": run.thread_id, "endpoint": endpoint}
+    if isinstance(run_id := body.get("run_id"), str):
+        context["run_id"] = run_id
+    set_logging_context(context)
     try:
         with _traced_under_caller(scope):
             result = await _answer(principal, endpoint, body)
@@ -131,10 +138,7 @@ async def api_endpoint(scope: Scope, receive: Receive, send: Send) -> None:
         await JSONResponse({"detail": str(exc)}, status_code=422)(scope, receive, send)
         return
     except Exception as exc:
-        run = principal.coordinator if isinstance(principal, WorkerGrant) else principal
-        logger.exception(
-            "Agent API call failed", extra={"endpoint": endpoint, "thread_id": run.thread_id}
-        )
+        logger.exception("Agent API call failed")
         # The run fails with what failed here, as it would have in-process.
         failure = {"error": type(exc).__name__, "message": str(exc)}
         await JSONResponse(failure, status_code=500)(scope, receive, send)

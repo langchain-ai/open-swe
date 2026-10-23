@@ -2158,19 +2158,10 @@
             "const": "fix",
             "title": "Intent",
             "type": "string"
-          },
-          "scope": {
-            "enum": [
-              "conflicts",
-              "checks"
-            ],
-            "title": "Scope",
-            "type": "string"
           }
         },
         "required": [
-          "intent",
-          "scope"
+          "intent"
         ],
         "title": "FixIntent",
         "type": "object"
@@ -20276,8 +20267,7 @@
             "required": true,
             "schema": {
               "enum": [
-                "conflicts",
-                "checks",
+                "repair",
                 "comments"
               ],
               "title": "Scope",
