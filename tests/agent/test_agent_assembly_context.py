@@ -246,7 +246,6 @@ async def _plan_agent(
             new_callable=AsyncMock,
             return_value=thread_settings or {},
         ),
-        patch("openswe.server.fallback_model_id_for", return_value=None),
         patch("openswe.server.make_model", side_effect=fake_make_model),
         patch("openswe.server.construct_system_prompt", return_value="prompt"),
     ):

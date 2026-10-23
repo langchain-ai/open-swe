@@ -760,8 +760,8 @@ export function AgentThreadView({
                 ) : undefined
               }
             >
-              The last run hit an error before it could finish. Send another
-              message to retry.
+              {(source.kind === "transcript" && source.failureReason) ||
+                "The last run hit an error before it could finish. Send another message to retry."}
             </Banner>
           </div>
         )}

@@ -56,6 +56,8 @@ from langgraph.runtime import Runtime
 from langgraph.types import Command
 from langgraph_sdk.errors import APIConnectionError, APIStatusError
 from pydantic import BaseModel, JsonValue, TypeAdapter
+from runtime_api.endpoint import call
+from runtime_api.model_calls import MODEL_FAILURE, ModelFailure
 
 from rt.backend import (
     BackendCallError,
@@ -66,6 +68,7 @@ from rt.backend import (
     run_body,
     subagent_of,
 )
+from rt.model_calls import provider_failure_code
 from rt.models import ModelSpec, build_model
 from rt.remote_files import FILE_TOOLS
 from rt.tools import STATE_KEY, cited, run_id, tool_body
@@ -101,32 +104,12 @@ def _merge(
     return {**held, **(right or {})}
 
 
-_TOOL_PAIRING_ERRORS: Final = (
-    "no tool output found for function call",
-    "no tool call found for function call output",
-    "unexpected `tool_use_id`",
-    "unexpected tool_use_id",
-    "without `tool_result`",
-    "must be followed by tool messages",
-    "must be a response to a preceeding message with 'tool_calls'",
-    "must be a response to a preceding message with 'tool_calls'",
-)
-
-
 def _has_image(request: ModelRequest) -> bool:
     return any(
         block.get("type") == "image"
         for message in request.messages
         for block in message.content_blocks
     )
-
-
-def _tool_pairing_error(exc: Exception) -> bool:
-    """A 400 over unpaired tool history, which the fallback would get as well."""
-    if getattr(exc, "status_code", None) != 400:
-        return False
-    message = str(exc).lower()
-    return any(marker in message for marker in _TOOL_PAIRING_ERRORS)
 
 
 class ModelCall(BaseModel):
@@ -139,7 +122,6 @@ class ModelCall(BaseModel):
     # What a call to that model goes to instead when the conversation holds an
     # image: None where the model reads images itself.
     vision: ModelSpec | None = None
-    fallback: ModelSpec | None
     use_gateway: bool
 
 
@@ -366,7 +348,6 @@ class BackendRunMiddleware(AgentMiddleware[RunState]):
                 hidden_tools=reply.hidden_tools,
                 model=reply.model,
                 vision=reply.vision,
-                fallback=reply.fallback,
                 use_gateway=reply.use_gateway,
             ).model_dump()
         return update
@@ -389,13 +370,33 @@ class BackendRunMiddleware(AgentMiddleware[RunState]):
         try:
             return await handler(request)
         except Exception as exc:
-            if call.fallback is None or _tool_pairing_error(exc):
-                raise
-            # As the in-process graph does: another provider before failing the run.
-            logger.warning("Model call failed; retrying on the fallback model", exc_info=True)
-            return await handler(
-                request.override(model=build_model(call.fallback, use_gateway=call.use_gateway))
-            )
+            await self._report_model_failure(model, exc, via_gateway=call.use_gateway)
+            raise
+
+    async def _report_model_failure(
+        self, model: ModelSpec | None, exc: Exception, *, via_gateway: bool
+    ) -> None:
+        """Tell the backend why the provider failed, which the run's end alone cannot."""
+        code = provider_failure_code(exc)
+        model_id = model.model_id if model is not None else None
+        logger.warning(
+            "Model call failed",
+            exc_info=exc,
+            extra={"model_call_failure": {"model_id": model_id, "code": code}},
+        )
+        if code is None:
+            return
+        failure = ModelFailure(
+            run_id=run_id(),
+            code=code,
+            error_type=type(exc).__name__,
+            model_id=model_id,
+            via_gateway=via_gateway,
+        )
+        try:
+            await call(self._backend, MODEL_FAILURE, failure)
+        except BackendCallError:
+            logger.warning("Could not tell the backend why the model call failed", exc_info=True)
 
     @hook_config(can_jump_to=["model", "end"])
     async def aafter_model(self, state: RunState, runtime: Runtime) -> dict[str, object] | None:  # noqa: ARG002

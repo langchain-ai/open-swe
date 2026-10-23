@@ -101,6 +101,8 @@ export interface TranscriptTurnState {
   requestedAt: string
   startedAt: string | null
   error: string | null
+  /** Why a failed turn failed, in words for the person; null where unknown. */
+  reason: string | null
   items: ReadonlyArray<TurnItem>
   /** Bumped whenever this turn or anything it holds changed; the memo key. */
   revision: number
@@ -252,6 +254,7 @@ function turnStates(
       requestedAt: row.requested_at,
       startedAt: row.started_at ?? null,
       error: row.error,
+      reason: row.reason ?? null,
       items: orderItems(
         Object.values(messages).filter(
           (message) => message.turnId === row.turn_id
@@ -417,6 +420,7 @@ function ensureTurn(
     requestedAt: occurredAt,
     startedAt: state === "running" ? occurredAt : null,
     error: null,
+    reason: null,
     items: [],
     revision: 0,
   }
@@ -654,7 +658,11 @@ export function applyEvent(
       const payload = event.payload
       const turn = draft.state.turns[payload.turn_id]
       if (!turn) break
-      patchTurn(draft, turn, { state: "failed", error: payload.error })
+      patchTurn(draft, turn, {
+        state: "failed",
+        error: payload.error,
+        reason: payload.reason ?? null,
+      })
       dropTransientNotices(draft, payload.turn_id)
       draft.state = { ...draft.state, status: settledStatus(draft, "error") }
       break
@@ -802,6 +810,12 @@ export function staleWorkspaceNotice(
     workspaceName: typeof name === "string" ? name : "workspace",
     capturedAt: typeof capturedAt === "string" ? capturedAt : null,
   }
+}
+
+/** Why the newest turn failed, when it failed and the backend said why. */
+export function failureReason(state: TranscriptState): string | null {
+  const newest = state.turns[state.turnOrder[state.turnOrder.length - 1] ?? ""]
+  return newest?.state === "failed" ? newest.reason : null
 }
 
 export function isOffloading(state: TranscriptState): boolean {

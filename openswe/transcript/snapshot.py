@@ -81,6 +81,7 @@ class TurnView(BaseModel):
     started_at: datetime | None
     completed_at: datetime | None
     error: str | None
+    reason: str | None
     checkpoint: CheckpointView | None
 
 
@@ -230,7 +231,7 @@ async def load_access(thread_id: str, *, conn: AsyncConnection | None = None) ->
 # turn, and every reader that wants a turn wants what it changed.
 _TURN_COLUMNS = """
     turn.turn_id, turn.run_id, turn.state, turn.requested_at, turn.started_at,
-    turn.completed_at, turn.error,
+    turn.completed_at, turn.error, turn.reason,
     checkpoint.checkpoint_turn_count, checkpoint.checkpoint_ref, checkpoint.commit,
     checkpoint.status AS checkpoint_status, checkpoint.files,
     checkpoint.assistant_message_id, checkpoint.error AS checkpoint_error

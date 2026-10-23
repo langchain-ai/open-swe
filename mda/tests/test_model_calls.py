@@ -180,7 +180,7 @@ async def test_a_hanging_model_call_fails_as_a_timeout() -> None:
         await ModelCallTimeoutMiddleware(timeout_seconds=0.01).awrap_model_call(
             cast(ModelRequest, MagicMock()), hang
         )
-    # The retry and the fallback both act on TimeoutError.
+    # The retry acts on TimeoutError.
     assert isinstance(raised.value, TimeoutError)
 
 
@@ -196,7 +196,6 @@ async def test_a_text_only_model_hands_images_to_the_vision_model(
         system_prompt="prompt",
         model=ModelSpec(model_id="fireworks:kimi", kwargs={}),
         vision=ModelSpec(model_id="openai:gpt", kwargs={}),
-        fallback=None,
         use_gateway=False,
     )
     image = [{"type": "image", "url": "https://example.com/screenshot.png"}]

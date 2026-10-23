@@ -27,9 +27,9 @@ evidence. None of them is a tool call here: no tools node, no tool-call middlewa
 A call made from inside a subagent names the namespace of its ``task`` calls, so
 its tool calls and replies land under the subagent, as they do in-process.
 
-The graph's model-call shaping (caching, retries, fallback, summarization, call
-limits, provider history fixes, the call deadline, and the swap to a vision model
-this graph names) is MDA's own. Graph state the hooks write that MDA
+The graph's model-call shaping (caching, retries, summarization, call limits,
+provider history fixes, the call deadline, and the swap to a vision model this
+graph names) is MDA's own. Graph state the hooks write that MDA
 does not know rides in the MDA run's state and comes back with every call.
 """
 
@@ -104,6 +104,7 @@ from runtime_api.files import (
     UploadRequest,
     WriteRequest,
 )
+from runtime_api.model_calls import MODEL_FAILURE, ModelFailure, Recorded
 from runtime_api.operations import (
     CHECK_SHELL,
     OPERATION,
@@ -128,6 +129,7 @@ from openswe.middleware.record_run_usage import RecordRunUsageMiddleware
 from openswe.middleware.sandbox_circuit_breaker import post_sandbox_unreachable_notification
 from openswe.middleware.task_coordination import TaskCoordinationMiddleware
 from openswe.middleware.transcript import TranscriptMiddleware, within_namespace
+from openswe.model_failures import ModelError
 from openswe.prompts import common_prompt, prompt
 from openswe.remote_runtime.failures import OperationFailure
 from openswe.remote_runtime.git_metadata import (
@@ -157,7 +159,6 @@ from openswe.server import (
     DEEP_AGENT_TOOL_NAMES,
     code_only,
     direct_and_from_code,
-    fallback_model_choice,
 )
 from openswe.utils.model import provider_model_kwargs
 
@@ -931,12 +932,10 @@ class RemoteGraph:
                 reply["update"][BASELINE] = None
             if phase == "before_model" and result.jump_to is None:
                 model = session.model_for(state)
-                fallback = fallback_model_choice(model.model_id)
                 vision = session.vision_for(model)
                 reply.update((await session.model_call(state, runtime)).model_dump())
                 reply["model"] = _model_spec(model).model_dump()
                 reply["vision"] = None if vision is None else _model_spec(vision).model_dump()
-                reply["fallback"] = None if fallback is None else _model_spec(fallback).model_dump()
                 reply["use_gateway"] = session.models.use_gateway
             await session.flush(runtime)
             return _json_object.validate_python(reply)
@@ -1054,6 +1053,14 @@ def _b64(data: bytes | None) -> str | None:
     return None if data is None else base64.b64encode(data).decode()
 
 
+async def _model_failure(session: RunSession, request: ModelFailure) -> Recorded:
+    """The run's model call failed at its provider; the run ends once this is kept."""
+    thread_id = RunConfig.from_config(session.config).thread_id
+    if thread_id is not None:
+        await ModelError.model_validate(request.model_dump()).record(thread_id)
+    return Recorded()
+
+
 async def _ls(session: RunSession, request: PathRequest) -> LsReply:
     result = await session.in_run("files.ls", lambda: session.files.als(request.path))
     return LsReply.model_validate(asdict(result))
@@ -1142,6 +1149,7 @@ API: Final = Handlers[RunSession]()
 API.serve(OPERATION, RunSession.operation)
 API.serve(CHECK_SHELL, RunSession.check_shell)
 API.serve(RECORD_EVIDENCE, RunSession.record_evidence)
+API.serve(MODEL_FAILURE, _model_failure)
 API.serve(file_api.LS, _ls)
 API.serve(file_api.READ, _read)
 API.serve(file_api.WRITE, _write)
