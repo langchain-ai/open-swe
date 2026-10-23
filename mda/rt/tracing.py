@@ -3,6 +3,7 @@
 import asyncio
 import logging
 from collections.abc import Mapping
+from typing import Final
 
 from langchain_core.callbacks import AsyncCallbackManager, CallbackManager
 from langchain_core.runnables.config import ensure_config
@@ -11,6 +12,9 @@ from langsmith.run_trees import RunTree
 from pydantic import JsonValue, TypeAdapter
 
 logger = logging.getLogger(__name__)
+
+# Baggage that describes the span itself rather than where its children belong.
+_SPAN_ONLY_BAGGAGE: Final = ("langsmith-metadata=", "langsmith-tags=")
 
 
 class TurnTrace:
@@ -56,6 +60,35 @@ class TurnTrace:
                 self.root.metadata["open_swe_git_evidence"] = {}
         except Exception:
             logger.warning("Could not tag the turn trace", exc_info=True)
+
+    @staticmethod
+    def current_headers() -> dict[str, str]:
+        """Distributed-tracing headers for the running call's span, so a backend hook nests under it.
+
+        Only the trace position and destination travel: the span's metadata and tags
+        stay out, since the backend sets its own and they can outgrow a header.
+        """
+        try:
+            config = ensure_config()
+            callbacks = config.get("callbacks")
+            if not isinstance(callbacks, (AsyncCallbackManager, CallbackManager)):
+                return {}
+            for tracer in callbacks.handlers:
+                if not isinstance(tracer, LangChainTracer):
+                    continue
+                span = tracer.run_map.get(str(callbacks.parent_run_id))
+                if span is None or span.extra.get("__disabled") or not span.trace_id:
+                    return {}
+                headers = span.to_headers()
+                headers["baggage"] = ",".join(
+                    item
+                    for item in headers.get("baggage", "").split(",")
+                    if item and not item.startswith(_SPAN_ONLY_BAGGAGE)
+                )
+                return headers
+        except Exception:
+            logger.warning("Could not read the running span's trace headers", exc_info=True)
+        return {}
 
     @staticmethod
     def live_root() -> RunTree | None:
