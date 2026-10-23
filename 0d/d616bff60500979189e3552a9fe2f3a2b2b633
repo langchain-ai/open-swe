@@ -1,0 +1,24 @@
+openswe/github/sandbox_access.py
+  s_45ce6cb3804470::t_09ac7302fbc81f 24
+openswe/sandboxes/lifecycle.py
+  s_45ce6cb3804470::t_7e8d41182f4809 523
+tests/sandbox/test_workspace_github_access.py
+  s_45ce6cb3804470::t_ebcd1ddf0ec2f4 176
+  s_45ce6cb3804470::t_96eec64f1163f8 217
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "0dd616bff60500979189e3552a9fe2f3a2b2b633",
+  "prompts": {},
+  "sessions": {
+    "s_45ce6cb3804470": {
+      "agent_id": {
+        "tool": "cursor",
+        "id": "c6f5b80a-c2c7-4691-a461-8b0450f235e1",
+        "model": "auto-smart"
+      },
+      "human_author": "Joaquin Borggio <joaquin@langchain.dev>"
+    }
+  }
+}
