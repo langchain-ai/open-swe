@@ -111,7 +111,7 @@ jobs:
           # The project .env is forwarded as the deployment's secrets: the backend it calls back,
           # and the gateway key it calls models with.
           printf 'OPEN_SWE_BACKEND_URL=%s\nLANGSMITH_GATEWAY_API_KEY=%s\n' "$backend" "$LANGSMITH_GATEWAY_API_KEY" >mda/.env
-          uv run --project mda --locked --python 3.13 mda deploy mda \
+          uv run --project mda --locked --python 3.14 mda deploy mda \
             --name "open-swe-mda-$ENVIRONMENT" \
             --deployment-type prod \
             --workspace-id ebbaf2eb-769b-4505-aca2-d11de10372a4 \
