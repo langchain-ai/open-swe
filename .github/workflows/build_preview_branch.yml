@@ -20,10 +20,6 @@ permissions:
   issues: write
   pull-requests: write
 
-concurrency:
-  group: build-preview-branch
-  cancel-in-progress: false
-
 jobs:
   build:
     name: Rebuild preview from main and labeled PRs
@@ -32,6 +28,11 @@ jobs:
       || contains(github.event.pull_request.labels.*.name, 'preview')
       || github.event.label.name == 'preview'
     runs-on: ubuntu-latest
+    # Only the build: a deploy in flight must not hold back the next tree, which
+    # supersedes it (deploy_preview.py stops waiting once the branch moves).
+    concurrency:
+      group: build-preview-branch
+      cancel-in-progress: false
     outputs:
       changed: ${{ steps.assemble.outputs.changed }}
       sha: ${{ steps.assemble.outputs.sha }}
