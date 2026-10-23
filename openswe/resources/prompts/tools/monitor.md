@@ -1,6 +1,6 @@
 Run a long-lived sandbox command and get its output as events while you keep working.
 
-`start` returns at once. The command keeps running after this run ends, and every event wakes this thread: it is added before your next model call while a run is active, or starts a new run when the thread is idle. Each event costs a model turn, so filter for the lines you would act on.
+`start` returns at once. The command keeps running after this run ends, and every event wakes this thread: it starts a new run, stopping the current one if the thread is running. The stopped run's completed work is kept; a tool call in progress returns as cancelled. Each event costs a model turn, so filter for the lines you would act on.
 
 How output becomes events:
 - The command's stdout and stderr, merged, are saved line by line, numbered from 1, in the monitor's raw log. Nothing is lost to the filter; `output` reads it back. The log rotates into 10 MiB segment files (`raw_logs`) and keeps the newest 50 MiB, so a long run drops its oldest lines.

@@ -153,7 +153,7 @@ async def test_spent_wake_budget_holds_monitor_output_on_every_delivery_path(
         get=AsyncMock(return_value={"status": "idle", "metadata": spent}),
         get_state=AsyncMock(return_value={"values": {"messages": []}}),
     )
-    client = SimpleNamespace(threads=threads)
+    client = SimpleNamespace(threads=threads, runs=SimpleNamespace(list=AsyncMock(return_value=[])))
     monkeypatch.setattr(delivery, "langgraph_client", lambda: client)
     monkeypatch.setattr(event_matches, "dispatch_client", lambda: client)
     monkeypatch.setattr(

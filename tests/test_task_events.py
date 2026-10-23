@@ -33,9 +33,8 @@ _COORDINATOR = "3b8f4848-78b4-45d5-a617-3f4610feff4d"
 _RESULT = 'Login passes: "ready" & <result>\n```python\nassert ready < limit\n```'
 
 
-@pytest.mark.parametrize("strategy", ["enqueue", "interrupt"])
 async def test_event_waiting_on_cancellation_cannot_restart_the_worker(
-    monkeypatch: pytest.MonkeyPatch, strategy: Literal["enqueue", "interrupt"]
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     delegation = store.TaskDelegation(
         worker_thread_id=_WORKER,
@@ -73,7 +72,7 @@ async def test_event_waiting_on_cancellation_cannot_restart_the_worker(
     monkeypatch.setattr(TaskMessage, "owed", AsyncMock(return_value=[match]))
     monkeypatch.setattr(task_messages, "create_durable_run", dispatch)
 
-    assert await TaskMessage.deliver(_WORKER, strategy) is False
+    assert await TaskMessage.deliver(_WORKER) is False
     dispatch.assert_not_awaited()
 
 
@@ -300,9 +299,8 @@ async def test_cancelled_worker_only_reports_interruption_without_restarting_owe
     events.EventSubscription.deliver_to.assert_not_awaited()
 
 
-@pytest.mark.parametrize("busy", [False, True])
-async def test_duplicate_completion_delivers_one_durable_result_to_idle_or_busy_coordinator(
-    registry_db: None, monkeypatch: pytest.MonkeyPatch, busy: bool
+async def test_duplicate_completion_delivers_one_durable_result_to_the_coordinator(
+    registry_db: None, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     from openswe.tasks import service
 
@@ -315,20 +313,25 @@ async def test_duplicate_completion_delivers_one_durable_result_to_idle_or_busy_
         model="openai:gpt-5.5",
         effort="high",
     )
-    client = SimpleNamespace(threads=AsyncMock())
-    client.threads.get.return_value = {"status": "busy" if busy else "idle"}
+    dispatched: list[dict[str, object]] = []
+
+    async def runs(thread_id: str, *, status: str, limit: int) -> list[dict[str, object]]:
+        # The delivery run is still pending: it carries what it delivers.
+        return [{"metadata": run["metadata"]} for run in dispatched] if status == "pending" else []
+
+    client = SimpleNamespace(threads=AsyncMock(), runs=SimpleNamespace(list=runs))
+    client.threads.get.return_value = {"status": "idle"}
     client.threads.get_state.return_value = {"values": {"messages": []}}
     client.threads.get_history.return_value = []
     monkeypatch.setattr(events, "langgraph_client", lambda: client)
-    dispatched: list[dict[str, object]] = []
     attempted_turns: list[object] = []
     inherited_turn = str(uuid4())
-    fail_first_wake = not busy
+    fail_first_wake = True
 
     async def dispatch(thread_id: str, assistant_id: str, **kwargs: object) -> dict[str, str]:
         nonlocal fail_first_wake
         assert thread_id == _COORDINATOR
-        assert kwargs["multitask_strategy"] == "enqueue"
+        assert kwargs["multitask_strategy"] == "interrupt"
         config = kwargs["config"]
         assert isinstance(config, dict)
         attempted_turns.append(config["configurable"]["transcript_turn_id"])
@@ -346,14 +349,13 @@ async def test_duplicate_completion_delivers_one_durable_result_to_idle_or_busy_
     )
     monkeypatch.setattr(events.EventSubscription, "deliver_to", AsyncMock())
     payload = {"values": {"messages": [{"type": "ai", "content": _RESULT}]}}
-    if not busy:
-        with pytest.raises(ConnectionError, match="temporary dispatch failure"):
-            await events.worker_finished(_WORKER, "run", "success", payload)
-        assert len(await TaskMessage.owed(_COORDINATOR, [])) == 1
+    with pytest.raises(ConnectionError, match="temporary dispatch failure"):
+        await events.worker_finished(_WORKER, "run", "success", payload)
+    assert len(await TaskMessage.owed(_COORDINATOR, [])) == 1
     assert await events.worker_finished(_WORKER, "run", "success", payload)
     (original,) = await TaskMessage.owed(_COORDINATOR, [])
     assert "Login passes" in original.content
-    assert len(dispatched) == (0 if busy else 1)
+    assert len(dispatched) == 1
 
     async with postgres.session() as session:
         await session.execute(
@@ -364,20 +366,7 @@ async def test_duplicate_completion_delivers_one_durable_result_to_idle_or_busy_
     assert await events.worker_finished(_WORKER, "run", "success", payload)
     (retried,) = await TaskMessage.owed(_COORDINATOR, [])
     assert retried.id == original.id
-    assert len(dispatched) == (0 if busy else 1)
-
-    if busy:
-        client.threads.get.return_value = {"status": "idle"}
-        monkeypatch.setattr(completion, "_finalize_agent_usage_telemetry", AsyncMock())
-        monkeypatch.setattr(completion, "_settle_transcript_turn", AsyncMock())
-        monkeypatch.setattr(completion, "_start_run_for_pending_follow_ups", AsyncMock())
-        monkeypatch.setattr(completion, "_handle_successful_run", AsyncMock())
-        subscriptions = AsyncMock()
-        monkeypatch.setattr(events.EventSubscription, "deliver_to", subscriptions)
-        await completion.handle_run_completion(
-            {"thread_id": _COORDINATOR, "run_id": "coordinator-run", "status": "success"}
-        )
-        subscriptions.assert_awaited_once_with(_COORDINATOR, "enqueue")
+    # The pending delivery run already carries it, so the retry interrupts nothing.
     assert len(dispatched) == 1
     assert inherited_turn not in attempted_turns
     assert len(set(attempted_turns)) == len(attempted_turns)
@@ -460,8 +449,6 @@ async def test_repaired_task_thread_checkpoints_owed_messages_once(
     thread_id: str,
     missing_task_message: bool,
 ) -> None:
-    from openswe.middleware import task_coordination
-
     task, _ = await store.Task.reserve_worker(
         _COORDINATOR,
         _WORKER,
@@ -496,20 +483,16 @@ async def test_repaired_task_thread_checkpoints_owed_messages_once(
     if missing_task_message:
         async with postgres.session() as session:
             await message.record(session)
-    context = await store.TaskMembership.context_for_thread(thread_id)
-    middleware = task_coordination.TaskCoordinationMiddleware(thread_id, True, context)
-    monkeypatch.setattr(task_coordination, "maybe_refresh_proxy_token", AsyncMock())
-
-    delivered = await middleware.abefore_model({"messages": []}, Runtime())
-    assert delivered is not None
-    assert delivered["messages"][-1]["id"] == f"event-match:{message.id}"
-    assert "Check logout too" in delivered["messages"][-1]["content"]
-    checkpoint: AgentState = {"messages": []}
-    for entry in delivered["messages"]:
-        content = entry["content"]
-        assert isinstance(content, str)
-        checkpoint["messages"].append(HumanMessage(content=content, id=entry.get("id")))
-    assert await middleware.abefore_model(checkpoint, Runtime()) is None
+    (owed,) = await TaskMessage.owed(thread_id, [])
+    assert owed.id == message.id
+    # What the run delivering it carries, as its checkpoint then holds it.
+    delivered = TaskMessage.messages([owed])
+    assert delivered[-1]["id"] == f"event-match:{message.id}"
+    assert "Check logout too" in str(delivered[-1]["content"])
+    checkpoint = [
+        HumanMessage(content=str(entry["content"]), id=entry.get("id")) for entry in delivered
+    ]
+    assert await TaskMessage.owed(thread_id, checkpoint) == []
     async with postgres.session() as session:
         saved = await session.get_one(TaskMessage, message.id)
         assert saved.delivered_at is not None

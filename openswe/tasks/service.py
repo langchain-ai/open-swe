@@ -274,7 +274,7 @@ async def notify(
     task_event: TaskEventMetadata | None = None,
 ) -> None:
     if await record_event(task, recipient_thread_id, delivery_id, content, task_event=task_event):
-        await TaskMessage.deliver(recipient_thread_id, "enqueue")
+        await TaskMessage.deliver(recipient_thread_id)
 
 
 async def owned_worker(
@@ -598,7 +598,7 @@ async def message_task_thread(
         ),
     )
     try:
-        await TaskMessage.deliver(recipient, "enqueue")
+        await TaskMessage.deliver(recipient)
     except Exception:
         # The message is saved, so reporting failure would invite a duplicate resend.
         logger.exception(

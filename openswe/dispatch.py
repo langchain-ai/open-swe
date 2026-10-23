@@ -25,7 +25,7 @@ busy-check and the custom store-queue) with one function that uses:
 """
 
 import logging
-from collections.abc import Mapping
+from collections.abc import Collection, Mapping
 from datetime import UTC, datetime
 from typing import Any, Self
 from urllib.parse import urlparse
@@ -349,6 +349,26 @@ async def _run_user_metadata(
     except Exception:
         logger.warning("Could not resolve run user for trace metadata", exc_info=True)
     return metadata
+
+
+class _CarriedEvents(BaseModel):
+    event_match_ids: list[str] = []
+
+
+async def run_in_flight_carries(
+    client: LangGraphClient, thread_id: str, event_match_ids: Collection[str]
+) -> bool:
+    """Whether a pending or running run of the thread already carries every one of ``event_match_ids``.
+
+    A delivery run carries what it delivers in its metadata, so a second delivery of the
+    same messages, such as a retried webhook's, does not interrupt the first.
+    """
+    for status in ("running", "pending"):
+        for run in await client.runs.list(thread_id, status=status, limit=10):
+            carried = _CarriedEvents.model_validate(run.get("metadata") or {})
+            if set(event_match_ids) <= set(carried.event_match_ids):
+                return True
+    return False
 
 
 async def create_durable_run(
