@@ -305,3 +305,26 @@ async def test_add_finding_returns_structured_error_when_thread_missing() -> Non
     assert result["error"] == "thread_not_found"
     assert result["thread_id"] == "tid-1"
     assert "Do not retry" in result["note"]
+
+
+async def test_finding_reads_hunk_from_sandbox_diff() -> None:
+    from types import SimpleNamespace
+    from unittest.mock import MagicMock
+
+    from openswe.review.diff import extract_diff_hunk, is_range_in_diff
+    from openswe.run_config import RunConfig
+    from openswe.tools.add_finding import _resolve_diff_context
+
+    diff = b"diff --git a/foo.py b/foo.py\n@@ -1 +1 @@\n-old\n+new\n"
+    backend = MagicMock(
+        adownload_files=AsyncMock(return_value=[SimpleNamespace(content=diff, error=None)])
+    )
+    state = {
+        "diff_path": "/workspace/review.patch",
+        "diff_line_set": {"foo.py": {"RIGHT": [1], "LEFT": [1]}},
+    }
+    with patch("openswe.tools.add_finding.get_cached_sandbox_backend", return_value=backend):
+        lines, text = await _resolve_diff_context(state, RunConfig(thread_id="tid-1"))
+    assert lines is not None
+    assert is_range_in_diff(lines, "foo.py", 1, 1)
+    assert extract_diff_hunk(text, "foo.py", 1, 1) == "@@ -1 +1 @@\n-old\n+new"

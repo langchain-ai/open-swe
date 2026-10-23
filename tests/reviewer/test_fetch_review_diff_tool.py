@@ -1,3 +1,4 @@
+from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
@@ -85,7 +86,10 @@ async def test_fetch_review_diff_uses_incremental_range_for_re_review() -> None:
     with (
         patch("openswe.run_config.get_config", return_value=config),
         patch(
-            "openswe.tools.fetch_review_diff.get_cached_sandbox_backend", return_value=MagicMock()
+            "openswe.tools.fetch_review_diff.get_cached_sandbox_backend",
+            return_value=MagicMock(
+                aexecute=AsyncMock(return_value=SimpleNamespace(exit_code=0, output="a" * 40))
+            ),
         ),
         patch(
             "openswe.tools.fetch_review_diff.resolve_sandbox_work_dir",

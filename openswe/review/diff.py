@@ -15,6 +15,7 @@ The reviewer needs three things from a PR diff:
 import hashlib
 import logging
 import re
+import shlex
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Literal
 
@@ -329,8 +330,10 @@ async def fetch_pr_metadata(
     return (title if isinstance(title, str) else "", body if isinstance(body, str) else "")
 
 
-def review_diff_range(
+async def review_diff_range(
+    sandbox_backend: SandboxBackendProtocol,
     *,
+    work_dir: str,
     base_sha: str,
     head_sha: str,
     last_reviewed_sha: str = "",
@@ -340,6 +343,23 @@ def review_diff_range(
     base_ref = last_reviewed_sha if re_review and last_reviewed_sha else base_sha
     if not _GIT_SHA_RE.fullmatch(base_ref) or not _GIT_SHA_RE.fullmatch(head_sha):
         raise ValueError("review diff requires valid Git commit SHAs")
+    if re_review and last_reviewed_sha:
+        if not _GIT_SHA_RE.fullmatch(base_sha):
+            raise ValueError("review diff requires valid Git commit SHAs")
+        result = await sandbox_backend.aexecute(
+            f"cd {shlex.quote(work_dir)} && git merge-base {base_sha} {head_sha}"
+        )
+        merged_base = _stdout_from_result(result).strip()
+        if result.exit_code != 0 or not _GIT_SHA_RE.fullmatch(merged_base):
+            raise RuntimeError("Failed to resolve review merge base")
+        ancestry = await sandbox_backend.aexecute(
+            f"cd {shlex.quote(work_dir)} && "
+            f"git merge-base --is-ancestor {merged_base} {last_reviewed_sha}"
+        )
+        if ancestry.exit_code == 1:
+            return base_sha.lower(), head_sha.lower(), True
+        if ancestry.exit_code != 0:
+            raise RuntimeError("Failed to check reviewed base ancestry")
     return base_ref.lower(), head_sha.lower(), not re_review
 
 

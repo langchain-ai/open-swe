@@ -22,7 +22,7 @@ async def _plan(config: RunnableConfig, surface: ToolSurface) -> None:
 
 
 def _restore(state: dict[str, object]) -> None:
-    # Sets do not cross to MDA and back; the diff they index does.
+    # Legacy checkpoints carry the diff instead of a JSON-safe line index.
     diff_text = state.get("diff_text")
     if isinstance(diff_text, str) and diff_text and "diff_line_set" not in state:
         state["diff_line_set"] = compute_diff_line_set(diff_text)

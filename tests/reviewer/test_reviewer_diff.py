@@ -1,5 +1,7 @@
 """Unit tests for the unified-diff parsing helpers."""
 
+from pathlib import Path
+
 import pytest
 
 from openswe.review.diff import (
@@ -80,3 +82,87 @@ async def test_compute_diff_in_sandbox_uses_three_dot_for_merge_base() -> None:
     assert "base...head" in cmd
     assert "base..head" not in cmd.replace("base...head", "")
     assert "--no-prefix" not in cmd  # invalid flag must not appear
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("merge_base,pr_change", [(False, True), (True, False), (True, True)])
+async def test_re_review_excludes_new_base_changes(
+    tmp_path: Path, merge_base: bool, pr_change: bool
+) -> None:
+    import asyncio
+    import subprocess
+    from types import SimpleNamespace
+    from unittest.mock import MagicMock
+
+    from openswe.review.diff import materialize_review_diff, review_diff_range
+    from openswe.utils.agents_md import fetch_scoped_agents_md
+
+    def git(*args: str) -> str:
+        return subprocess.check_output(["git", "-C", str(tmp_path), *args]).decode().strip()
+
+    git("init", "-q", "-b", "main")
+    git("config", "user.name", "Test")
+    git("config", "user.email", "test@example.com")
+    (tmp_path / "src").mkdir()
+    (tmp_path / "src" / "AGENTS.md").write_text("trusted scoped rules")
+    (tmp_path / "base.txt").write_text("base\n")
+    git("add", ".")
+    git("commit", "-qm", "base")
+    git("checkout", "-qb", "feature")
+    (tmp_path / "src" / "pr.txt").write_text("reviewed\n")
+    git("add", ".")
+    git("commit", "-qm", "reviewed")
+    reviewed = git("rev-parse", "HEAD")
+    git("checkout", "-q", "main")
+    (tmp_path / "base.txt").write_text("main only\n" * 100_000)
+    git("add", ".")
+    git("commit", "-qm", "main change")
+    base = git("rev-parse", "HEAD")
+    git("checkout", "-q", "feature")
+    if merge_base:
+        git("merge", "-qm", "merge main", "main")
+    if pr_change:
+        (tmp_path / "src" / "pr.txt").write_text("new PR change\n")
+        git("add", ".")
+        git("commit", "-qm", "PR change")
+    head = git("rev-parse", "HEAD")
+
+    async def execute(command: str) -> SimpleNamespace:
+        process = await asyncio.create_subprocess_shell(command, stdout=asyncio.subprocess.PIPE)
+        output, _ = await process.communicate()
+        return SimpleNamespace(exit_code=process.returncode, output=output.decode())
+
+    async def upload(files: list[tuple[str, bytes]]) -> list[SimpleNamespace]:
+        for path, content in files:
+            Path(path).write_bytes(content)
+        return [SimpleNamespace(error=None) for _ in files]
+
+    async def download(paths: list[str]) -> list[SimpleNamespace]:
+        return [SimpleNamespace(content=None, error="not found") for _ in paths]
+
+    backend = MagicMock(aexecute=execute, aupload_files=upload, adownload_files=download)
+    start, end, three_dot = await review_diff_range(
+        backend,
+        work_dir=str(tmp_path),
+        base_sha=base,
+        head_sha=head,
+        last_reviewed_sha=reviewed,
+        re_review=True,
+    )
+    materialized = await materialize_review_diff(
+        backend, work_dir=str(tmp_path), base_ref=start, head_ref=end, merge_base=three_dot
+    )
+    diff = Path(materialized.path).read_text()
+    if merge_base and not pr_change:
+        docs = await fetch_scoped_agents_md(
+            backend,
+            str(tmp_path),
+            base,
+            ["src/pr.txt", *(f"dir{i}/nested/file.py" for i in range(20_000))],
+        )
+        assert docs == {"src/AGENTS.md": "trusted scoped rules"}
+    assert "base.txt" not in diff
+    assert len(diff) < 1000
+    assert ("new PR change" in diff) == pr_change
+    if not merge_base:
+        assert start == reviewed
