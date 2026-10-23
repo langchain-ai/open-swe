@@ -305,7 +305,12 @@ def _server(item: dict[str, object]) -> _Server:
 
 
 async def _servers(login: str) -> dict[str, _Server]:
-    """Servers by id and key. OAuth built-ins are not listed; callers fall back."""
+    """Servers by id and key: every server a tool kit can hold.
+
+    LMT lists only the built-ins it supports (public and API-key ones) and admits only
+    those into tool kits, so OAuth built-ins are neither listed nor in a kit. Callers
+    fall back to a name from the kit when this read fails.
+    """
     headers = await _headers(login)
     servers: dict[str, _Server] = {}
     async with _client() as client:
