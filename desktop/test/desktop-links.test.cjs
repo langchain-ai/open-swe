@@ -1,58 +1,20 @@
 const test = require("node:test");
 const assert = require("node:assert/strict");
-const { EventEmitter } = require("node:events");
-const { readFileSync } = require("node:fs");
-const { runInNewContext } = require("node:vm");
-const { desktopDeepLinkUrl } = require("../build/config.cjs");
+const { DesktopLinks } = require("../build/desktop-links.cjs");
 
 function desktopLinks(backendUrl) {
-  const source = readFileSync(require.resolve("../build/main.cjs"), "utf8");
   const browserLinks = [];
   const appLinks = [];
-  const window = {
-    isDestroyed: () => false,
-    isMinimized: () => false,
-    show() {},
-    focus() {},
-  };
-  const context = {
-    app: new EventEmitter(),
-    backendUrl,
-    desktopDeepLinkUrl,
-    mainWindow: window,
-    createWindow: (url) => {
-      appLinks.push(url);
-      return window;
-    },
-    loadApp: (_window, url) => appLinks.push(url),
-    shell: {
-      openExternal: async (url) => browserLinks.push(url),
-    },
-    URL,
-    console,
-  };
-  runInNewContext(
-    source.slice(
-      source.indexOf("let pendingDeepLink"),
-      source.indexOf("const hasSingleInstanceLock"),
-    ),
-    context,
-  );
+  const links = new DesktopLinks({
+    backendUrl: () => backendUrl,
+    openApp: (url) => appLinks.push(url),
+    openExternal: async (url) => browserLinks.push(url),
+  });
   return {
     browserLinks,
     appLinks,
-    ready: () => runInNewContext("openPendingDesktopLink()", context),
-    open: (url) => {
-      let prevented = false;
-      context.app.emit(
-        "continue-activity",
-        { preventDefault: () => (prevented = true) },
-        "NSUserActivityTypeBrowsingWeb",
-        {},
-        { webpageURL: url },
-      );
-      assert.equal(prevented, true);
-    },
+    ready: () => links.ready(),
+    open: (url) => links.receive(url),
   };
 }
 

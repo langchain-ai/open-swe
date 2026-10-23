@@ -65,6 +65,7 @@ const {
   readWorkspacePath,
 } = require("./workspace-files.cjs");
 const { isDesktopCommandId } = require("./commands.cjs");
+const { DesktopLinks } = require("./desktop-links.cjs");
 const {
   APP_ORIGIN,
   APP_URL,
@@ -75,7 +76,6 @@ const {
   connectExchangeUrl,
   connectLoginUrl,
   desktopLoginUrl,
-  desktopDeepLinkUrl,
   isAppLoginUrl,
   isAppUrl,
   isConnectProvider,
@@ -1749,28 +1749,13 @@ function configurePermissions() {
   );
 }
 
-let pendingDeepLink = null;
-let desktopLinksReady = false;
+const desktopLinks = new DesktopLinks({
+  backendUrl: () => backendUrl,
+  openApp: openDesktopLink,
+  openExternal: (url: string) => shell.openExternal(url),
+});
 
-function openPendingDesktopLink() {
-  desktopLinksReady = true;
-  const url = pendingDeepLink;
-  pendingDeepLink = null;
-  return url ? openDesktopLink(url) : false;
-}
-
-function openDesktopLink(url) {
-  const target = backendUrl && desktopDeepLinkUrl(url, backendUrl);
-  if (!target) {
-    if (URL.canParse(url) && new URL(url).protocol === "https:") {
-      void shell
-        .openExternal(url)
-        .catch((error) =>
-          console.warn("Could not open desktop link in the browser", error),
-        );
-    }
-    return false;
-  }
+function openDesktopLink(target: string) {
   const existingWindow =
     mainWindow && !mainWindow.isDestroyed() ? mainWindow : null;
   const window = existingWindow || createWindow(target);
@@ -1788,8 +1773,7 @@ app.on("will-continue-activity", (event, type) => {
 app.on("continue-activity", (event, type, _userInfo, details) => {
   if (type !== "NSUserActivityTypeBrowsingWeb" || !details.webpageURL) return;
   event.preventDefault();
-  if (!desktopLinksReady) pendingDeepLink = details.webpageURL;
-  else openDesktopLink(details.webpageURL);
+  desktopLinks.receive(details.webpageURL);
 });
 
 const hasSingleInstanceLock = app.requestSingleInstanceLock();
@@ -1851,7 +1835,7 @@ if (!hasSingleInstanceLock) {
     configurePermissions();
     configureDesktopIpc();
     createMenu();
-    if (!openPendingDesktopLink()) createWindow();
+    if (!desktopLinks.ready()) createWindow();
     configureAutoUpdater();
     configureTerminalIpc({
       ipcMain,
