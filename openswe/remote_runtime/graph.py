@@ -644,6 +644,13 @@ class RunSession:
 
     def _phase_middleware(self, phase: Phase) -> list[AgentMiddleware]:
         hook = f"a{phase}"
+        # Phases replay only async hooks, so a sync-only one would silently never run here.
+        if sync_only := [
+            type(m).__name__
+            for m in self.surface.middleware
+            if _overrides(m, phase) and not _overrides(m, hook)
+        ]:
+            raise TypeError(f"Middleware must implement {hook}, not only {phase}: {sync_only}")
         middleware = [
             m
             for m in self.surface.middleware

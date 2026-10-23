@@ -46,7 +46,7 @@ class RequireCliResultMiddleware(OpenSWEMiddleware):
         self._tool_name = tool_name
         self._max_retries = max_retries
 
-    def before_agent(self, state: Any, runtime: Any) -> dict[str, Any] | None:  # noqa: ARG002
+    async def abefore_agent(self, state: AgentState, runtime: Runtime) -> dict[str, Any] | None:  # noqa: ARG002
         return {"cli_result_nudges": 0}
 
     def _satisfied(self, messages: Sequence[BaseMessage]) -> bool:
