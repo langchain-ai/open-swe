@@ -136,6 +136,8 @@ class SurfaceSubagent:
     system_prompt: str
     # None gives the subagent every tool its parent has.
     tools: tuple[str, ...] | None = None
+    # The parent's middleware that adds to the subagent's system prompt, such as its skills.
+    prompt_middleware: tuple[AgentMiddleware, ...] = ()
 
 
 type PlannedTool = BaseTool | Callable[..., object] | dict[str, object]

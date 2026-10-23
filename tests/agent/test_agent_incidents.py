@@ -222,7 +222,7 @@ async def test_main_agent_records_the_incident_report_through_the_tool(
         assert latest.report.summary == "Errors reported [slack:1.0]"
     posted.assert_awaited_once()
     assert posted.await_args.args[:2] == ("C1", "0")
-    catalog = session.catalog()
+    catalog = await session.catalog(None)
     offered = {spec.name for spec in catalog.operations} - set(catalog.excluded)
     assert {"record_incident_report", "search_incidents"} <= offered
     assert ("open_pull_request" in offered) is requested_action

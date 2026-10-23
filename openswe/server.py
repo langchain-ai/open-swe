@@ -1983,6 +1983,7 @@ async def plan_agent(config: RunnableConfig, surface: ToolSurface) -> None:
                     if not _is_subagent_excluded_tool(name)
                 ),
             ),
+            prompt_middleware=(cast(AgentMiddleware, skills_middleware),),
         )
     ]
     surface.dynamic = dynamic_tool_middleware

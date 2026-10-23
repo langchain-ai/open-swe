@@ -1,5 +1,6 @@
 import json
 import time
+from pathlib import Path
 
 import jwt
 import pytest
@@ -173,7 +174,7 @@ async def test_remote_prompts_include_deployment_context(
     main_prompt = (
         await session.model_call({"rendered_system_prompt": "main instructions"}, Runtime())
     ).system_prompt
-    subagent_prompt = session.catalog().subagents[0].system_prompt
+    subagent_prompt = (await session.catalog(Runtime())).subagents[0].system_prompt
 
     for rendered, original in (
         (main_prompt, "main instructions"),
@@ -184,6 +185,58 @@ async def test_remote_prompts_include_deployment_context(
         else:
             assert rendered.count(f"**{environment}**") == 1
             assert rendered.endswith(original)
+
+
+async def test_subagents_list_the_skills_their_parent_lists(tmp_path: Path) -> None:
+    from deepagents.backends import FilesystemBackend
+    from deepagents.middleware.skills import SkillsMiddleware
+    from langgraph.runtime import Runtime
+
+    from openswe.remote_runtime.graph import RunSession
+    from openswe.remote_runtime.runs import in_graph_context
+    from openswe.sandboxes.tool_runtime import (
+        ModelChoice,
+        SurfaceModels,
+        SurfaceSubagent,
+        ToolSurface,
+    )
+
+    skill = tmp_path / "skills" / "release-notes" / "SKILL.md"
+    skill.parent.mkdir(parents=True)
+    skill.write_text("---\nname: release-notes\ndescription: Write release notes.\n---\nSteps.\n")
+    skills = SkillsMiddleware(
+        backend=FilesystemBackend(root_dir=tmp_path, virtual_mode=True), sources=["/skills/"]
+    )
+    model = ModelChoice("openai:gpt-6.1-sol", {})
+    session = RunSession(
+        ToolSurface(
+            middleware=[skills],
+            models=SurfaceModels(main=model, subagent=model, use_gateway=False),
+            subagents=[
+                SurfaceSubagent(
+                    "worker", "worker", "subagent instructions", prompt_middleware=(skills,)
+                )
+            ],
+        ),
+        {},
+        None,
+        started_here=True,
+    )
+
+    async def prompts(runtime: Runtime) -> tuple[str, str]:
+        state: dict[str, object] = {"messages": []}
+        state.update((await session.run_phase("before_agent", state, runtime)).update)
+        main = (await session.model_call(state, runtime)).system_prompt
+        return main, (await session.catalog(runtime)).subagents[0].system_prompt
+
+    main_prompt, subagent_prompt = await in_graph_context({}, prompts)
+
+    listing = (
+        "- **release-notes**: Write release notes.\n  -> Read `/skills/release-notes/SKILL.md`"
+    )
+    assert listing in main_prompt
+    assert "subagent instructions" in subagent_prompt
+    assert listing in subagent_prompt
 
 
 async def test_app_lifespan_exits_without_managed_deep_agents(

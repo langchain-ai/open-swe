@@ -4,7 +4,8 @@ MDA keeps the model loop, its checkpoints and every tool call. Everything else i
 the run as its graph factory plans it (``ToolSurface``), with no graph compiled:
 
 - ``catalog`` names the run's operations (each the work of one of its tools), its
-  subagents, models and sandbox, and the checks around its file and shell tools
+  subagents (with what their middleware, such as skills, adds to their system
+  prompts), models and sandbox, and the checks around its file and shell tools
 - ``prepare`` runs every ``before_agent`` hook: run preparation (the thread's
   sandbox, checkout and prompt), the transcript turn, skills, reply bookkeeping
 - ``before_model`` runs every ``before_model`` hook (follow-up queue, event matches,
@@ -58,6 +59,7 @@ from langchain_core.messages import (
     AIMessage,
     AnyMessage,
     BaseMessage,
+    SystemMessage,
     ToolCall,
     ToolMessage,
     convert_to_messages,
@@ -149,6 +151,7 @@ from openswe.sandboxes.tool_runtime import (
     EXCLUDED_TOOLS,
     ModelChoice,
     SurfaceModels,
+    SurfaceSubagent,
     ToolSurface,
     tool_parameters,
 )
@@ -408,7 +411,7 @@ class RunSession:
             self._restore(state)
         return state
 
-    def catalog(self) -> Catalog:
+    async def catalog(self, runtime: Runtime) -> Catalog:
         operations = {
             name: tool for name, tool in self.surface.tools.items() if name not in _MDA_TOOLS
         }
@@ -434,7 +437,7 @@ class RunSession:
                 SubagentSpec(
                     name=subagent.name,
                     description=subagent.description,
-                    system_prompt=common_prompt(subagent.system_prompt),
+                    system_prompt=await self._subagent_prompt(subagent, runtime),
                     tools=None
                     if subagent.tools is None
                     else [name for name in subagent.tools if name in offered],
@@ -700,22 +703,10 @@ class RunSession:
 
     async def model_call(self, state: Mapping[str, object], runtime: Runtime) -> ModelCallShape:
         """The system prompt and tool list the graph's own model-call middleware would send."""
-        captured: list[ModelRequest] = []
-
-        async def capture(request: ModelRequest) -> ModelResponse:
-            captured.append(request)
-            return ModelResponse(result=[AIMessage(content="")])
-
-        shaping = [
-            m
-            for m in self.surface.middleware
-            if _overrides(m, "awrap_model_call") and not isinstance(m, _NOT_PROMPT_SHAPING)
-        ]
         offered = self._offered()
-        await _chain(shaping, capture)(self._request(state, runtime, offered))
-        if not captured:
+        request = await _shaped(self.surface.middleware, self._request(state, runtime, offered))
+        if request is None:
             return ModelCallShape(system_prompt=common_prompt(), hidden_tools=[])
-        request = captured[0]
         kept = {getattr(tool, "name", None) for tool in request.tools}
         return ModelCallShape(
             system_prompt=common_prompt(
@@ -723,6 +714,22 @@ class RunSession:
             ),
             hidden_tools=sorted(tool.name for tool in offered if tool.name not in kept),
         )
+
+    async def _subagent_prompt(self, subagent: SurfaceSubagent, runtime: Runtime) -> str:
+        """The system prompt the subagent's first model call sends, as its middleware shapes it."""
+        # A subagent starts from state of its own, so its middleware loads what it adds afresh.
+        state: dict[str, object] = {"messages": []}
+        for middleware in subagent.prompt_middleware:
+            if _overrides(middleware, "abefore_agent"):
+                state.update(await _call_hook(middleware.abefore_agent, state, runtime) or {})
+        request = await _shaped(
+            subagent.prompt_middleware,
+            self._request(state, runtime).override(
+                system_message=SystemMessage(content=subagent.system_prompt)
+            ),
+        )
+        shaped = request.system_message if request is not None else None
+        return common_prompt(shaped.text if shaped is not None else subagent.system_prompt)
 
     def model_for(self, state: Mapping[str, object]) -> ModelChoice:
         """The model the graph's model selection would call next."""
@@ -780,6 +787,25 @@ async def _call_hook(
     if "config" in inspect.signature(hook).parameters:
         return await hook(cast(AgentState, state), runtime, get_config())
     return await hook(cast(AgentState, state), runtime)
+
+
+async def _shaped(
+    middleware: Sequence[AgentMiddleware], request: ModelRequest
+) -> ModelRequest | None:
+    """``request`` as ``middleware`` that shapes prompts would send it, None if one ends the call."""
+    captured: list[ModelRequest] = []
+
+    async def capture(request: ModelRequest) -> ModelResponse:
+        captured.append(request)
+        return ModelResponse(result=[AIMessage(content="")])
+
+    shaping = [
+        m
+        for m in middleware
+        if _overrides(m, "awrap_model_call") and not isinstance(m, _NOT_PROMPT_SHAPING)
+    ]
+    await _chain(shaping, capture)(request)
+    return captured[0] if captured else None
 
 
 def _as_list(value: object) -> list[AnyMessage]:
@@ -866,7 +892,9 @@ class RemoteGraph:
         if hook == "catalog":
             session = await self.session(run, body.run_id)
             sandbox = await session.sandbox()
-            catalog = session.catalog().model_copy(
+            catalog = (
+                await in_graph_context({**session.config, "run_name": "catalog"}, session.catalog)
+            ).model_copy(
                 update={
                     "trace_metadata": TurnGitMetadata(session.config).actor,
                     "sandbox": None
