@@ -1,7 +1,7 @@
 import { Button } from "@langchain/macaw-components/Button"
 import { useQuery, useQueryClient } from "@tanstack/react-query"
 import { Link } from "@tanstack/react-router"
-import { useEffect, useLayoutEffect, useRef } from "react"
+import { useEffect, useLayoutEffect, useRef, type ReactNode } from "react"
 
 import { useIsHydrated } from "@/lib/hydration"
 import { useMediaQuery } from "@/lib/useIsMobile"
@@ -15,6 +15,7 @@ import { ChatDraftsProvider } from "@/features/reviews/lib/chatDrafts"
 import { githubUrls } from "@/features/reviews/lib/githubUrls"
 import { reviewOpenedFromSidebar } from "@/features/reviews/lib/reviewEntry"
 import { useReviewChat } from "@/features/reviews/lib/reviewKeys"
+import type { ReviewsSearch } from "../search"
 import { Changes } from "./Changes"
 import { Header } from "./Header"
 import { Navigator } from "./Navigator"
@@ -26,9 +27,15 @@ import { NAVIGATOR_INLINE_QUERY, useReviewPage } from "./store"
 export function ReviewPage({
   pr,
   onClose,
+  actions,
+  position,
+  onPositionChange,
 }: {
   pr: PullRequestRef
   onClose?: () => void
+  actions?: ReactNode
+  position?: Pick<ReviewsSearch, "files" | "at">
+  onPositionChange?: (position: Pick<ReviewsSearch, "files" | "at">) => void
 }) {
   const inline = Boolean(onClose)
   const queryClient = useQueryClient()
@@ -121,6 +128,11 @@ export function ReviewPage({
             !inline && (roomForNavigator ? navigatorOpen : navigatorOverlay)
           }
         />
+        {actions && (
+          <div className="border-b border-default px-space-4 py-space-3">
+            {actions}
+          </div>
+        )}
         {detail.isError ? (
           <PullRequestUnavailable pr={pr} message={detail.error.message} />
         ) : (
@@ -131,7 +143,11 @@ export function ReviewPage({
               </div>
             )}
             <section aria-label="Changes" className="min-w-0 flex-1">
-              <Changes pr={pr} />
+              <Changes
+                pr={pr}
+                position={position}
+                onPositionChange={onPositionChange}
+              />
             </section>
             {!inline && wide && (
               <RightPanelShell

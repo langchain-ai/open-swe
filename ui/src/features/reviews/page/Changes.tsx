@@ -13,6 +13,8 @@ import type {
 } from "@pierre/diffs/react"
 import type { CodeView as CoreCodeView } from "@pierre/diffs"
 
+import type { ReviewsSearch } from "../search"
+import { formatScrollAnchor, parseScrollAnchor } from "../lib/scrollAnchor"
 import { useResolvedTheme } from "@/lib/theme"
 import {
   buildDiffOptions,
@@ -130,7 +132,15 @@ function useCodeViewItems(
 }
 
 /** The centre column: the overview, then every file, in one virtualized scroll. */
-export const Changes = memo(function Changes({ pr }: { pr: PullRequestRef }) {
+export const Changes = memo(function Changes({
+  pr,
+  position,
+  onPositionChange,
+}: {
+  pr: PullRequestRef
+  position?: Pick<ReviewsSearch, "files" | "at">
+  onPositionChange?: (position: Pick<ReviewsSearch, "files" | "at">) => void
+}) {
   const diff = useQuery(reviewQueries.diff(pr))
   const detailQuery = useQuery(reviewQueries.detail(pr))
   const detail = detailQuery.data
@@ -139,6 +149,7 @@ export const Changes = memo(function Changes({ pr }: { pr: PullRequestRef }) {
   const drafts = useChatDrafts()
   const order = useReviewPage((state) => state.order)
   const diffStyle = useReviewPage((state) => state.diffStyle)
+  const viewedSha = useReviewPage((state) => state.viewedSha)
   const viewed = useReviewPage((state) => state.viewed)
   const flipped = useReviewPage((state) => state.collapsed)
   const composer = useReviewPage((state) => state.composer)
@@ -337,6 +348,77 @@ export const Changes = memo(function Changes({ pr }: { pr: PullRequestRef }) {
     [pr]
   )
 
+  const initialPosition = useRef(position)
+  const positionRestored = useRef(false)
+  const positionChange = useRef(onPositionChange)
+  useEffect(() => {
+    positionChange.current = onPositionChange
+  }, [onPositionChange])
+  const anchor = useRef(position?.at)
+  const writePositionTimer = useRef(0)
+  const writePosition = useCallback(() => {
+    window.clearTimeout(writePositionTimer.current)
+    writePositionTimer.current = window.setTimeout(() => {
+      const state = useReviewPage.getState()
+      const expandedPaths = [
+        ...new Set(
+          state.entryOrder
+            .filter((entry) => !isCollapsed(state, entry))
+            .map((entry) => entry.file.path)
+        ),
+      ]
+      positionChange.current?.({ files: expandedPaths, at: anchor.current })
+    }, 250)
+  }, [])
+  useEffect(() => () => window.clearTimeout(writePositionTimer.current), [])
+  useEffect(() => {
+    if (
+      positionRestored.current ||
+      !diff.isSuccess ||
+      !detailQuery.isSuccess ||
+      viewedSha !== detail?.head_sha
+    )
+      return
+    const initial = initialPosition.current
+    if (initial?.files) {
+      const expanded = new Set(initial.files)
+      useReviewPage.setState({
+        collapsed: new Set(
+          allEntries
+            .filter(
+              (entry) =>
+                expanded.has(entry.file.path) ===
+                (viewed.has(entry.readKey) || viewed.has(entry.file.path))
+            )
+            .map((entry) => entry.readKey)
+        ),
+      })
+    }
+    const saved = parseScrollAnchor(initial?.at)
+    const entry =
+      saved &&
+      allEntries.find((candidate) => candidate.file.path === saved.path)
+    if (entry && saved)
+      handle.current?.scrollTo({
+        type: "item",
+        id: entry.id,
+        align: "start",
+        offset: -saved.offset,
+        behavior: "instant",
+      })
+    positionRestored.current = true
+  }, [
+    diff.isSuccess,
+    detailQuery.isSuccess,
+    allEntries,
+    viewed,
+    viewedSha,
+    detail?.head_sha,
+  ])
+  useEffect(() => {
+    if (positionRestored.current && positionChange.current) writePosition()
+  }, [flipped, viewed, writePosition])
+
   const highlightTimer = useRef(0)
   const scrollTo = useCallback(
     (target: DiffTarget) => {
@@ -436,9 +518,26 @@ export const Changes = memo(function Changes({ pr }: { pr: PullRequestRef }) {
           }
         }
         setActive(active, atEnd)
+        if (positionRestored.current && positionChange.current) {
+          const anchored =
+            active ??
+            viewer
+              .getRenderedItems()
+              .map((item) => entryMap.get(item.id))
+              .find((entry) => entry !== undefined)
+          const top = anchored && viewer.getTopForItem(anchored.id)
+          anchor.current =
+            anchored && top != null
+              ? formatScrollAnchor({
+                  path: anchored.file.path,
+                  offset: Math.round(scrollTop - top),
+                })
+              : undefined
+          writePosition()
+        }
       })
     },
-    [entryMap, stepItems, setActive]
+    [entryMap, stepItems, setActive, writePosition]
   )
 
   const [selection, setSelection] = useState<TextSelection | null>(null)

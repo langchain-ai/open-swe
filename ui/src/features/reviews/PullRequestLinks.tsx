@@ -61,10 +61,12 @@ export function PullRequestLinks({
   repo,
   number,
   title,
+  pageLink = true,
 }: {
   repo: string
   number: number
   title: string
+  pageLink?: boolean
 }) {
   const navigate = useNavigate()
   const [messageOpen, setMessageOpen] = useState(false)
@@ -160,7 +162,7 @@ export function PullRequestLinks({
             </form>
           </DialogContent>
         </Dialog>
-        <PullRequestPageLink repo={repo} number={number} />
+        {pageLink && <PullRequestPageLink repo={repo} number={number} />}
         <IconButton
           asChild
           icon={GithubLogoIcon}

@@ -27,6 +27,7 @@ export function PullRequestActions({
   onSettled,
   onSettledConfirmed,
   onReady,
+  pageLink = true,
 }: {
   pr: OpenPullRequest
   login: string
@@ -35,6 +36,7 @@ export function PullRequestActions({
   /** Runs once GitHub confirms a merge or close; the list leaves it unset to keep the row. */
   onSettledConfirmed?: () => void
   onReady: () => void
+  pageLink?: boolean
 }) {
   const settle = (next: PullRequestOutcome) => {
     onSettled(next)
@@ -81,7 +83,12 @@ export function PullRequestActions({
           onClosed={onSettledConfirmed}
         />
       </div>
-      <PullRequestLinks repo={pr.repo} number={pr.number} title={pr.title} />
+      <PullRequestLinks
+        repo={pr.repo}
+        number={pr.number}
+        title={pr.title}
+        pageLink={pageLink}
+      />
     </div>
   )
 }

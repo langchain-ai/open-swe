@@ -532,6 +532,19 @@ export function OpenPullRequests({
             <PullRequestDetail
               key={selected}
               pr={selectedRow}
+              position={filters}
+              onPositionChange={(position) => onFiltersChange(position, true)}
+              actions={{
+                login,
+                outcome: settled[pullRequestKey(selectedRow)],
+                onSettled: (outcome) =>
+                  setSettled((previous) => ({
+                    ...previous,
+                    [pullRequestKey(selectedRow)]: outcome,
+                  })),
+                onReady: () =>
+                  refreshPullRequest(queryClient, login, selectedRow),
+              }}
               onClose={() => onFiltersChange({ pr: undefined })}
             />
           </div>

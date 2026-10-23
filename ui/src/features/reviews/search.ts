@@ -102,7 +102,7 @@ export function validateReviewsSearch(
       typeof search.pr === "string" && prSelectionPattern.test(search.pr)
         ? search.pr
         : undefined,
-    files: expandedFiles.length ? expandedFiles : undefined,
+    files: Array.isArray(search.files) ? expandedFiles : undefined,
     at:
       typeof search.at === "string" &&
       search.at.length <= 520 &&
