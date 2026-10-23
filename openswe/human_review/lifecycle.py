@@ -849,8 +849,8 @@ class ReviewCard:
     async def mark_merged(self) -> None:
         updated = await self.retire("merged", "merged")
         if updated is not None:
-            # ✅ means approved, so a workspace without :merged: gets 🔀 instead.
-            await self._react("merged", "twisted_rightwards_arrows")
+            if updated.kind == "posted":
+                await self._react("merged", "twisted_rightwards_arrows")
             await ReviewPicks(updated).release("it was merged")
 
     async def mark_closed(self) -> None:
@@ -1078,7 +1078,7 @@ async def close_for_pull_request(owner: str, repo: str, number: int) -> None:
     """Settle a PR's open card once the PR is closed on GitHub, whoever closed it.
 
     Reads the PR's current state, so a late webhook cannot close a card for a reopened
-    PR. Only the card and the merged reaction change: nothing new is posted and the
+    PR. Only the card changes: nothing new is posted and the
     agent is not woken.
     """
     request = await HumanReviewRequest.active_for(owner, repo, number)
