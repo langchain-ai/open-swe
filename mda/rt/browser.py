@@ -40,7 +40,8 @@ class ReportedBrowserMiddleware(BrowserMiddleware):
 
     async def _wake(self, runtime: ManagedToolRuntime, message: dict[str, Any]) -> None:
         # Open SWE runs only what its backend signs, so the backend starts the run that
-        # notifies the thread, as it delivers a worker's result (``notify_parent`` off).
+        # notifies the thread, as it delivers a worker's result. ``_wake`` is MDA's
+        # private method, like ``_share``: it may change with MDA.
         # The watcher calls this once the run has ended, so there is no run id.
         body = run_body(None, {}, text=message["content"], notification=message["mda_notification"])
         await self._backend.call("wake", body)

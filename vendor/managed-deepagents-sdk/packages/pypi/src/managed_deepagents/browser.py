@@ -376,11 +376,7 @@ class BrowserMiddleware(AgentMiddleware):
             _LOG.warning("could not notify thread %s after a handoff: %s", thread_id, err)
 
     async def _wake(self, runtime: ManagedToolRuntime, message: dict[str, Any]) -> None:
-        """Enqueue a run on the thread with the handoff's notification.
-
-        A host whose runs must start through its own backend overrides this, as it
-        turns off an async subagent's ``notify_parent`` and delivers the result itself.
-        """
+        """Enqueue a run on the thread with the handoff's notification."""
         if runtime.server_info is None:
             return
         await get_client().runs.create(
