@@ -54,11 +54,14 @@ generated: { by: "openwiki/0.4.2", at: "2026-09-08T08:15:30.533Z" }
 
 # Open SWE Codebase Guide
 
-Open SWE is a LangGraph and Deep Agents software-engineering framework: work can arrive from the dashboard, GitHub, Slack, Linear, or a schedule; coding work runs in a thread-scoped isolated sandbox and can produce a pull request. This page is a change-routing hub. Read the relevant source and tests first; the linked OpenWiki pages are optional just-in-time context, not an authority over the repository.
+Open SWE is a LangGraph and Deep Agents software-engineering framework: work can arrive from the dashboard, GitHub, Slack, Linear, or a schedule; coding work runs in a thread-scoped isolated sandbox and can produce a pull request.
+This page is a change-routing hub.
+Read the relevant source and tests first; the linked OpenWiki pages are optional just-in-time context, not an authority over the repository.
 
 ## Start a local developer loop
 
-Use Python 3.14 and `uv` for the backend. The dashboard and desktop workspace use `pnpm`.
+Use Python 3.14 and `uv` for the backend.
+The dashboard and desktop workspace use `pnpm`.
 
 ```bash
 make install            # uv sync --extra dev
@@ -69,13 +72,19 @@ make web                # pnpm run dev
 make desktop            # pnpm run dev:desktop
 ```
 
-Use `make dev` when a change needs LangGraph graph execution; it serves the registered graphs and HTTP app. `make run` is FastAPI-only. `make dev-ui` fronts Vite through the backend at `:2024`; `make desktop` starts Electron and requires the backend separately. For local webhook exposure, `make tunnel NGROK_DOMAIN=<name>.ngrok-free.dev` restricts the ngrok policy to `/webhooks/*` because the development server has no authentication.
+Use `make dev` when a change needs LangGraph graph execution; it serves the registered graphs and HTTP app.
+`make run` is FastAPI-only.
+`make dev-ui` fronts Vite through the backend at `:2024`; `make desktop` starts Electron and requires the backend separately.
+For local webhook exposure, `make tunnel NGROK_DOMAIN=<name>.ngrok-free.dev` restricts the ngrok policy to `/webhooks/*` because the development server has no authentication.
 
-Python is async-first: implement the async path. Add a synchronous method only when an interface requires it, and make that method raise `NotImplementedError`; do not maintain parallel implementations.
+Python is async-first: implement the async path.
+Add a synchronous method only when an interface requires it, and make that method raise `NotImplementedError`; do not maintain parallel implementations.
 
 ## Entrypoints and execution boundaries
 
-`langgraph.json` is the deployment registration point. Its graph targets are thin `agent/graphs/` re-export shims; change the owning module, not the shim, unless the public entrypoint itself must move. It also mounts `agent.webapp:app` and configures the deployed checkpointer with delete-based TTL cleanup (60-minute sweep and 43,200-minute default retention).
+`langgraph.json` is the deployment registration point.
+Its graph targets are thin `agent/graphs/` re-export shims; change the owning module, not the shim, unless the public entrypoint itself must move.
+It also mounts `agent.webapp:app` and configures the deployed checkpointer with delete-based TTL cleanup (60-minute sweep and 43,200-minute default retention).
 
 | Entrypoint | Owning concern | Start here for changes to… |
 | --- | --- | --- |
@@ -100,11 +109,16 @@ This is the principal work-routing boundary: interactive coding and review trigg
 
 ### Invariants worth preserving
 
-- The main agent factory is stateless and rebuilt for execution. Thread continuity belongs to LangGraph state/metadata and the thread sandbox, not to a long-lived graph object.
-- A missing sandbox may be recreated, but do **not** silently replace an unreachable main-agent sandbox: it could contain uncommitted work. Reviewer code may opt into replacement because it recreates its checkout for each review.
-- The reviewer has no commit, push, or PR-opening tools. PR chat is also sandbox-less and excludes shell and file mutation; it receives `/pr/` virtual files and uses a repository-scoped GitHub App token for GitHub-backed reads.
-- `dispatch_agent_run` is the shared Slack, Linear, GitHub, and dashboard creation contract for `agent` or `reviewer`. Its default multitask strategy is `interrupt`, and callers must choose either a prebuilt input or content/context/identities—not both.
-- FastAPI pins a single event loop before queue construction, validates sandbox and local-development model configuration at startup, and closes cached models at shutdown. Credentialed CORS is added only for configured origins; `*` is rejected.
+- The main agent factory is stateless and rebuilt for execution.
+  Thread continuity belongs to LangGraph state/metadata and the thread sandbox, not to a long-lived graph object.
+- A missing sandbox may be recreated, but do **not** silently replace an unreachable main-agent sandbox: it could contain uncommitted work.
+  Reviewer code may opt into replacement because it recreates its checkout for each review.
+- The reviewer has no commit, push, or PR-opening tools.
+  PR chat is also sandbox-less and excludes shell and file mutation; it receives `/pr/` virtual files and uses a repository-scoped GitHub App token for GitHub-backed reads.
+- `dispatch_agent_run` is the shared Slack, Linear, GitHub, and dashboard creation contract for `agent` or `reviewer`.
+  Its default multitask strategy is `interrupt`, and callers must choose either a prebuilt input or content/context/identities—not both.
+- FastAPI pins a single event loop before queue construction, validates sandbox and local-development model configuration at startup, and closes cached models at shutdown.
+  Credentialed CORS is added only for configured origins; `*` is rejected.
 
 ## Choose the detailed guide
 
@@ -137,7 +151,8 @@ This is the principal work-routing boundary: interactive coding and review trigg
 
 ## Validate only the changed boundary
 
-**Never run the full suite locally.** Select the narrowest test that owns the behavior, then run the relevant quality check.
+**Never run the full suite locally.**
+Select the narrowest test that owns the behavior, then run the relevant quality check.
 
 ```bash
 make test TEST_FILE=tests/github/test_open_pull_request.py
@@ -147,9 +162,12 @@ make format-check
 make typecheck
 ```
 
-`make test` accepts an existing path; use direct `pytest` for a node id. Pytest uses asyncio auto mode; shared fixtures substitute an in-memory store through the production serialization route, clear the global TTL cache before and after each case, hide any locally bundled dashboard, and enable auto-review by default. Override those defaults explicitly when testing their gates.
+`make test` accepts an existing path; use direct `pytest` for a node id.
+Pytest uses asyncio auto mode; shared fixtures substitute an in-memory store through the production serialization route, clear the global TTL cache before and after each case, hide any locally bundled dashboard, and enable auto-review by default.
+Override those defaults explicitly when testing their gates.
 
-Use focused pytest families such as `tests/agent/`, `tests/reviewer/`, `tests/sandbox/`, `tests/webhooks/`, `tests/dashboard/`, `tests/github/`, `tests/slack/`, `tests/middleware/`, or `tests/tools/` according to the changed owner. Run a focused dashboard or desktop workspace check through its package when changing frontend code.
+Use focused pytest families such as `tests/agent/`, `tests/reviewer/`, `tests/sandbox/`, `tests/webhooks/`, `tests/dashboard/`, `tests/github/`, `tests/slack/`, `tests/middleware/`, or `tests/tools/` according to the changed owner.
+Run a focused dashboard or desktop workspace check through its package when changing frontend code.
 
 Escalate to a single Playwright spec only for a genuine cross-boundary contract:
 
@@ -159,4 +177,6 @@ pnpm run test:e2e:install
 pnpm exec playwright test tests/full_flow.spec.ts
 ```
 
-The E2E harness exercises real agent code, a temporary local sandbox, local git, the real dashboard, and Electron paths while faking the model and external SaaS HTTP boundaries. Browser runs use one worker; the separate desktop configuration selects `desktop.spec.ts`. See [Focused Validation Strategy](testing/overview.md) for test ownership, fakes, artifacts, and narrow frontend/desktop commands.
+The E2E harness exercises real agent code, a temporary local sandbox, local git, the real dashboard, and Electron paths while faking the model and external SaaS HTTP boundaries.
+Browser runs use one worker; the separate desktop configuration selects `desktop.spec.ts`.
+See [Focused Validation Strategy](testing/overview.md) for test ownership, fakes, artifacts, and narrow frontend/desktop commands.

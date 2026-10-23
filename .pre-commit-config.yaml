@@ -1,0 +1,10 @@
+repos:
+  - repo: local
+    hooks:
+      - id: rumdl
+        name: Markdown sentence-per-line formatting
+        entry: rumdl check --fix --color never
+        language: python
+        additional_dependencies: [rumdl==0.3.0]
+        files: \.md$
+        exclude: ^vendor/managed-deepagents-sdk/

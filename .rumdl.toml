@@ -1,0 +1,10 @@
+[global]
+enable = ["MD013"]
+exclude = ["vendor/managed-deepagents-sdk/**"]
+
+[MD013]
+line-length = 0
+reflow = true
+reflow-mode = "sentence-per-line"
+code-blocks = false
+tables = false
