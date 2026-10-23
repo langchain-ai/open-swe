@@ -145,7 +145,10 @@ async def test_slack_reply_preserves_option_recipient(
     monkeypatch.setattr(slack_reply_tool, "_post_and_store_mapping", post)
 
     result = await slack_reply_tool.slack_reply(
-        "<@U2>, choose", "final", options=["Keep fallback"], option_user_id=recipient
+        "<@U2>, choose",
+        "final",
+        options=["Keep fallback", "Drop fallback"],
+        option_user_id=recipient,
     )
 
     assert result["success"] is True
@@ -159,10 +162,39 @@ async def test_slack_reply_preserves_option_recipient(
     }
 
 
+async def test_single_option_must_be_recommended_and_is_scheduled_for_auto_select(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(slack_reply_tool, "get_config", _config)
+    post = AsyncMock(return_value="2.0")
+    schedule = AsyncMock()
+    monkeypatch.setattr(slack_reply_tool, "_post_and_store_mapping", post)
+    monkeypatch.setattr(slack_reply_tool.PendingOption, "schedule", schedule)
+
+    rejected = await slack_reply_tool.slack_reply("Proceed?", "final", options=["Proceed"])
+    assert rejected["success"] is False
+    post.assert_not_awaited()
+
+    result = await slack_reply_tool.slack_reply(
+        "Proceed?",
+        "final",
+        options=["Proceed"],
+        recommended_option="Proceed",
+        option_user_id="U2",
+    )
+
+    assert result["success"] is True
+    blocks = post.await_args.kwargs["blocks"]
+    button = next(block for block in blocks if block["type"] == "actions")["elements"][0]
+    assert button["style"] == "primary"
+    assert json.loads(button["value"])["auto_select"] is True
+    schedule.assert_awaited_once()
+
+
 @pytest.mark.parametrize(
     ("recipient", "options", "blocks"),
     [
-        (recipient, ["Yes"], None)
+        (recipient, ["Yes", "No"], None)
         for recipient in (
             "",
             " ",
@@ -174,7 +206,7 @@ async def test_slack_reply_preserves_option_recipient(
             "C123ABC",
         )
     ]
-    + [("U2", None, None), ("U2", ["Yes"], [])],
+    + [("U2", None, None), ("U2", ["Yes", "No"], [])],
 )
 async def test_scoped_options_reject_inputs_that_cannot_carry_the_recipient(
     monkeypatch: pytest.MonkeyPatch,
@@ -429,7 +461,7 @@ async def test_slack_reply_rejects_oversized_message_with_options(
     monkeypatch.setattr(slack_reply_tool, "get_config", _config)
     monkeypatch.setattr(slack_reply_tool, "_post_and_store_mapping", post)
 
-    result = await slack_reply_tool.slack_reply("x" * 12001, "final", options=["Yes"])
+    result = await slack_reply_tool.slack_reply("x" * 12001, "final", options=["Yes", "No"])
 
     assert result["success"] is False
     assert result["retry"] is True

@@ -38,6 +38,7 @@ from openswe.sandboxes.retry import (
 )
 from openswe.schedules.store import AGENT_SCHEDULE_JOB_KIND, launch_scheduled_agent_run
 from openswe.session_cost import run_session_cost_refresh
+from openswe.slack.option_auto_select import AUTO_SELECT_JOB, PendingOption
 from openswe.threads.index_import import import_agent_server_threads
 from openswe.threads.status import RECONCILE_JOB as THREAD_STATUS_RECONCILE
 from openswe.threads.status import RECONCILE_SCHEDULE, reconcile_busy_threads
@@ -168,6 +169,17 @@ async def _reconcile(_job: Job) -> object:
 @_sandbox_work(THREAD_STATUS_RECONCILE)
 async def _thread_status_reconcile(_job: Job) -> object:
     return {"threads_settled": await reconcile_busy_threads()}
+
+
+@WORKER.register(AUTO_SELECT_JOB)
+async def _option_auto_select(job: Job) -> None:
+    # Never retried: the thread's agent may already have been woken with the choice.
+    try:
+        chosen = await PendingOption.model_validate(job.payload).choose()
+    except Exception:
+        logger.exception("Option auto-select failed", extra={"job_id": str(job.id)})
+        return
+    logger.info("Option auto-select ran", extra={"job_id": str(job.id), "chosen": chosen})
 
 
 @WORKER.register(WAKE_THREAD_JOB)

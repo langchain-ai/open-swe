@@ -34,9 +34,11 @@ from openswe.slack.client import (
     replace_slack_command_message,
     slack_thread_mutation_lock,
 )
+from openswe.slack.dm import CONCIERGE_TS
 from openswe.slack.events import claim_slack_event
 from openswe.slack.http import SLACK_REQUEST_ERRORS, SlackClient, SlackRequestError, slack_error
 from openswe.slack.markdown import markdown_blocks, markdown_to_mrkdwn
+from openswe.slack.option_auto_select import PendingOption
 from openswe.slack.orphan import (
     dashboard_handoff_message,
     move_thread_to_dashboard,
@@ -85,10 +87,27 @@ async def slack_reply(
     state: Annotated[dict[str, Any] | None, InjectedState] = None,
     *,
     option_user_id: str | None = None,
+    recommended_option: str | None = None,
 ) -> dict[str, Any] | list[dict[str, object]]:
     """Implement the `slack_reply` tool."""
+    if recommended_option is None and len([o for o in options or [] if o.strip()]) == 1:
+        return {
+            "success": False,
+            "error": "a single option must be passed as recommended_option",
+            "retry": True,
+            "hint": (
+                "Nothing was posted. With only one option, set `recommended_option` to it so "
+                "it is chosen automatically if nobody answers in time, or offer more options."
+            ),
+        }
     result = await send_slack_reply(
-        message, response_type, options, blocks, state, option_user_id=option_user_id
+        message,
+        response_type,
+        options,
+        blocks,
+        state,
+        option_user_id=option_user_id,
+        recommended_option=recommended_option,
     )
     image_urls = result.pop("image_urls", None)
     if not image_urls:
@@ -115,8 +134,20 @@ async def send_slack_reply(
     state: dict[str, Any] | None = None,
     *,
     option_user_id: str | None = None,
+    recommended_option: str | None = None,
 ) -> dict[str, Any]:
-    """Post a reply in the run's Slack thread."""
+    """Post a reply in the run's Slack thread.
+
+    A ``recommended_option`` is chosen for the asker when nobody answers in time.
+    """
+    if recommended_option is not None and (
+        blocks is not None
+        or recommended_option.strip() not in {option.strip() for option in options or []}
+    ):
+        return {
+            "success": False,
+            "error": "recommended_option must be one of options and cannot be combined with custom blocks",
+        }
     if option_user_id is not None and (
         not re.fullmatch(r"[UW][A-Z0-9]+", option_user_id) or not options or blocks is not None
     ):
@@ -181,10 +212,16 @@ async def send_slack_reply(
             return _oversized_options_error(message)
         feedback = bool(response_type == "final" and run_id and _triggering_user_id(cfg))
         slack_blocks = blocks
+        buttons_shown = False
         if blocks is None:
             slack_blocks = _reply_blocks(
-                message, options, reserve=_WEB_LINK_BLOCKS + feedback, option_user_id=option_user_id
+                message,
+                options,
+                reserve=_WEB_LINK_BLOCKS + feedback,
+                option_user_id=option_user_id,
+                recommended_option=recommended_option,
             )
+            buttons_shown = slack_blocks is not None
             if len(message) > _NATIVE_MARKDOWN_MAX_CHARS:
                 message = markdown_to_mrkdwn(message)
         if feedback and run_id:
@@ -226,6 +263,29 @@ async def send_slack_reply(
                 "message_chars": len(message),
                 "hint": _slack_reply_failure_hint(exc.code),
             }
+        if (
+            message_ts
+            and recommended_option is not None
+            and buttons_shown
+            and post_thread_ts == str(thread_ts)
+            and str(thread_ts) != CONCIERGE_TS
+            and not is_code_channel_session(str(thread_ts))
+            and (chooser := option_user_id or _triggering_user_id(cfg))
+        ):
+            pending = PendingOption(
+                channel_id=str(channel_id),
+                thread_ts=str(thread_ts),
+                message_ts=message_ts,
+                option=recommended_option.strip(),
+                user_id=chooser,
+            )
+            try:
+                await pending.schedule()
+            except Exception:
+                logger.exception(
+                    "Could not schedule an option auto-select",
+                    extra={"slack_channel": channel_id, "slack_thread_ts": thread_ts},
+                )
         if message_ts and cfg.source == "slack" and not is_code_channel_session(str(thread_ts)):
             try:
                 await _handle_kickoff(
@@ -516,10 +576,15 @@ def _oversized_options_error(message: str) -> dict[str, str | int | bool]:
 
 
 def _reply_blocks(
-    message: str, options: list[str] | None, *, reserve: int, option_user_id: str | None = None
+    message: str,
+    options: list[str] | None,
+    *,
+    reserve: int,
+    option_user_id: str | None = None,
+    recommended_option: str | None = None,
 ) -> list[dict[str, Any]] | None:
     """``message`` then option buttons; ``None`` when they cannot fit in one message."""
-    actions = option_actions(options, user_id=option_user_id)
+    actions = option_actions(options, user_id=option_user_id, recommended=recommended_option)
     body = markdown_blocks(message)
     if body is None or len(body) + len(actions) + reserve > MESSAGE_MAX_BLOCKS:
         return None

@@ -303,6 +303,7 @@ class SlackButtonValue(SlackPayload):
     user_id: str | None = None
     kind: str = ""
     subject: str = ""
+    auto_select: bool = False
 
 
 class SlackViewSubmission(SlackPayload):
