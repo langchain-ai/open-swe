@@ -128,6 +128,8 @@ async def test_workspace_scoping_and_rebinding_cannot_create_a_second_owner(
     )
     with pytest.raises(ValueError, match="not bound"):
         await forged.requests()
+    with pytest.raises(ValueError, match="Queue not found"):
+        await forged.snapshot(limit=1)
     foreign = await PullRequest(owner="other", repo="repo", number=1, base_ref="main").save()
     with pytest.raises(ValueError, match="does not target"):
         await queue.request_merge(foreign.id, "a" * 40, "foreign")
@@ -141,10 +143,33 @@ async def test_workspace_scoping_and_rebinding_cannot_create_a_second_owner(
         )
     with pytest.raises(ValueError, match="not bound"):
         await queue.requests()
+    with pytest.raises(ValueError, match="binding changed"):
+        await queue.snapshot(limit=1)
     with pytest.raises(ValueError, match="explicit handoff"):
         await MergeQueue.register(other.id, queue.repository_id, "main")
     with pytest.raises(ValueError, match="Queue not found"):
         await forged.claim(uuid7(), timedelta(minutes=1))
+
+
+async def test_status_reads_do_not_wait_for_worker_locks(queue: MergeQueue) -> None:
+    created = await batch(queue, await claim(queue))
+    async with postgres.transaction() as conn:
+        await conn.execute(
+            select(WorkspaceRepositoryRow)
+            .where(WorkspaceRepositoryRow.workspace_id == queue.workspace_id)
+            .with_for_update()
+        )
+        await conn.execute(update(MergeQueue).where(MergeQueue.id == queue.id).values(paused=False))
+        async with asyncio.timeout(5):
+            paused, entries, active_batch_id = await queue.snapshot(limit=1)
+            history = await queue.history(created.id)
+        assert paused is True
+        assert active_batch_id == history.batch.id == created.id
+        assert [entry.request.id for entry in entries] == [
+            member.request_id for member in history.members
+        ]
+    paused, _, _ = await queue.snapshot(limit=1)
+    assert paused is False
 
 
 async def test_fencing_rejects_old_owners_even_when_the_owner_id_is_reused(
@@ -1155,7 +1180,23 @@ async def test_queue_dashboard_authorization(
         )
         assert (await client.patch(f"{path}/pause", json={"paused": False})).status_code == 204
         snapshot = (await client.get(path)).json()
-        assert snapshot["paused"] is False and len(snapshot["entries"]) == 1
+        assert snapshot["paused"] is False and len(snapshot["items"]) == 1
+        assert snapshot["next_cursor"] is None
+        assert (await client.get(path, params={"cursor": "invalid"})).status_code == 400
+        second, third, fourth = [await request(queue, number) for number in (2, 3, 4)]
+        await queue.set_priority(fourth.id, -1)
+        async with postgres.session() as session:
+            await session.execute(
+                update(MergeRequest)
+                .where(MergeRequest.queue_id == queue.id)
+                .values(created_at=datetime.now(UTC))
+            )
+        page = (await client.get(path, params={"page_size": 2})).json()
+        assert [item["request"]["id"] for item in page["items"]] == [
+            requested["id"],
+            str(second.id),
+        ]
+        assert page["next_cursor"] is not None
         missing = uuid7()
         assert (await client.get(f"{path}/batches/{missing}")).status_code == 404
         assert (
@@ -1167,7 +1208,18 @@ async def test_queue_dashboard_authorization(
         assert (
             await client.patch(f"{path}/requests/{requested['id']}/priority", json={"priority": 1})
         ).status_code == 409
-        assert (await client.get(path)).json()["entries"] == []
+        assert (await client.delete(f"{path}/requests/{second.id}")).status_code == 204
+        page = (
+            await client.get(path, params={"page_size": 2, "cursor": page["next_cursor"]})
+        ).json()
+        assert [item["request"]["id"] for item in page["items"]] == [
+            str(third.id),
+            str(fourth.id),
+        ]
+        assert page["next_cursor"] is None
+        for pending in (third, fourth):
+            assert (await client.delete(f"{path}/requests/{pending.id}")).status_code == 204
+        assert (await client.get(path)).json()["items"] == []
         async with postgres.session() as session:
             await session.execute(
                 update(WorkspaceRow)

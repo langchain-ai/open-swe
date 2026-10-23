@@ -82,8 +82,13 @@ limited to the configured workspace and current GitHub repository access.
 
 Under `/dashboard/api/merge-queue/{workspace_id}`:
 
-- `GET` lists active requests, pause state and the active batch ID; `limit` and
-  `offset` paginate requests. `GET /batches/{batch_id}` shows candidate and attempt status.
+- `GET` lists active requests in `items`, pause state and the active batch ID.
+  Use `page_size` (default 20, maximum 100) and the returned `next_cursor` as `cursor`
+  to continue; `next_cursor: null` ends the list. Ordering is priority descending,
+  then creation time and ID. Pages reflect the live queue: restart without a cursor
+  when refreshing after priority changes, which can move entries across the boundary.
+  `GET /batches/{batch_id}` shows candidate and attempt status. Both reads use a
+  consistent database snapshot without taking the queue's write locks.
 - `POST /requests` accepts `number`, `head_sha`, an idempotency UUID `request_key`,
   and optional PR-number `dependencies`. It requires repository write access and
   records intent before reviews finish. The worker separately checks admission.

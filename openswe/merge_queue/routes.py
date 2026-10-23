@@ -19,7 +19,7 @@ from openswe.github.pull_requests import PullRequest
 from openswe.merge_queue import controller
 from openswe.merge_queue.git import SHA
 from openswe.merge_queue.models import RequestState
-from openswe.merge_queue.store import MergeQueue, QueueItemNotFound
+from openswe.merge_queue.store import MergeQueue, QueueCursor, QueueItemNotFound
 from openswe.users.models import User
 
 logger = logging.getLogger(__name__)
@@ -70,8 +70,8 @@ class QueueStatus(BaseModel):
     repository: str
     paused: bool
     operator: bool
-    entries: list[EntryView]
-    has_more: bool
+    items: list[EntryView]
+    next_cursor: str | None
     active_batch_id: UUID | None
 
 
@@ -142,21 +142,29 @@ ACCESS = Depends(queue_access)
 
 @router.get("")
 async def queue_status(
-    limit: int = Query(default=50, ge=1, le=100),
-    offset: int = Query(default=0, ge=0),
+    page_size: int = Query(default=20, ge=1, le=100),
+    cursor: str | None = Query(default=None, max_length=512),
     access: QueueAccess = ACCESS,
 ) -> QueueStatus:
-    paused, entries, batch_id = await access.queue.snapshot(limit=limit + 1, offset=offset)
+    try:
+        after = QueueCursor.decode(cursor, access.queue.id) if cursor is not None else None
+    except ValueError as exc:
+        raise HTTPException(400, "Invalid queue cursor") from exc
+    paused, entries, batch_id = await access.queue.snapshot(limit=page_size + 1, cursor=after)
     return QueueStatus(
         queue_id=access.queue.id,
         repository=access.repo.full_name,
         paused=paused,
         operator=access.operator,
-        entries=[
+        items=[
             EntryView(number=entry.number, request=RequestView.model_validate(entry.request))
-            for entry in entries[:limit]
+            for entry in entries[:page_size]
         ],
-        has_more=len(entries) > limit,
+        next_cursor=(
+            QueueCursor.model_validate(entries[page_size - 1].request).encode()
+            if len(entries) > page_size
+            else None
+        ),
         active_batch_id=batch_id,
     )
 

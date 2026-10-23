@@ -1,10 +1,11 @@
 """Transactional queue storage; callers supply an already authorized workspace.
 
-Every operation rechecks the repository binding. The binding and queue row are
-locked in that order, serializing ordering, budgets and lease changes. No GitHub
-calls, admission decisions or job registration live here.
+Every operation rechecks the repository binding. Mutations lock the binding and
+queue row in that order; status reads use a consistent, non-locking snapshot.
+No GitHub calls, admission decisions or job registration live here.
 """
 
+import base64
 from collections.abc import AsyncIterator, Sequence
 from contextlib import asynccontextmanager
 from copy import deepcopy
@@ -13,8 +14,8 @@ from datetime import datetime, timedelta
 from typing import Self
 from uuid import UUID, uuid7
 
-from pydantic import JsonValue
-from sqlalchemy import BigInteger, ForeignKey, delete, func, select
+from pydantic import AwareDatetime, BaseModel, ConfigDict, Field, JsonValue
+from sqlalchemy import BigInteger, ForeignKey, delete, func, select, tuple_
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -50,6 +51,26 @@ class QueueItemNotFound(ValueError):
 class QueueEntry:
     request: MergeRequest
     number: int
+
+
+class QueueCursor(BaseModel):
+    model_config = ConfigDict(frozen=True, extra="forbid", from_attributes=True)
+
+    queue_id: UUID
+    priority: int = Field(strict=True, ge=-(2**31), lt=2**31)
+    created_at: AwareDatetime
+    id: UUID
+
+    def encode(self) -> str:
+        return base64.urlsafe_b64encode(self.model_dump_json().encode()).decode().rstrip("=")
+
+    @classmethod
+    def decode(cls, value: str, queue_id: UUID) -> Self:
+        payload = base64.b64decode(value + "=" * (-len(value) % 4), altchars=b"-_", validate=True)
+        cursor = cls.model_validate_json(payload)
+        if cursor.queue_id != queue_id:
+            raise ValueError("Cursor belongs to another queue")
+        return cursor
 
 
 @dataclass(frozen=True)
@@ -167,6 +188,29 @@ class MergeQueue(Record):
             ):
                 raise LeaseLost("Queue lease expired or was replaced")
             yield session, queue, now
+
+    @asynccontextmanager
+    async def _read_snapshot(self) -> AsyncIterator[tuple[AsyncSession, Self]]:
+        async with (
+            postgres.snapshot_transaction() as conn,
+            AsyncSession(bind=conn, expire_on_commit=False) as session,
+        ):
+            queue = await session.scalar(
+                select(type(self))
+                .join(
+                    WorkspaceRepositoryRow,
+                    (WorkspaceRepositoryRow.workspace_id == type(self).workspace_id)
+                    & (WorkspaceRepositoryRow.repository_id == type(self).repository_id),
+                )
+                .where(
+                    type(self).id == self.id,
+                    type(self).workspace_id == self.workspace_id,
+                    type(self).repository_id == self.repository_id,
+                )
+            )
+            if queue is None:
+                raise QueueItemNotFound("Queue not found or repository binding changed")
+            yield session, queue
 
     async def claim(self, owner: UUID, ttl: timedelta) -> Lease | None:
         if ttl <= timedelta(0):
@@ -757,7 +801,7 @@ class MergeQueue(Record):
             return decision
 
     async def history(self, batch_id: UUID) -> BatchHistory:
-        async with self._locked() as (session, _, _):
+        async with self._read_snapshot() as (session, _):
             batch = await self._batch(session, batch_id)
             return BatchHistory(
                 batch=batch,
@@ -838,26 +882,37 @@ class MergeQueue(Record):
             return len(batches) + len(requests)
 
     async def snapshot(
-        self, *, limit: int, offset: int
+        self, *, limit: int, cursor: QueueCursor | None = None
     ) -> tuple[bool, list[QueueEntry], UUID | None]:
-        async with self._locked() as (session, queue, _):
-            entries = await self._entries(session, limit=limit, offset=offset)
+        async with self._read_snapshot() as (session, queue):
+            entries = await self._entries(session, limit=limit, cursor=cursor)
             batch_id = await session.scalar(
                 select(Batch.id).where(Batch.queue_id == queue.id, Batch.state == "active")
             )
             return queue.paused, entries, batch_id
 
     async def _entries(
-        self, session: AsyncSession, *, limit: int | None = None, offset: int = 0
+        self, session: AsyncSession, *, limit: int | None = None, cursor: QueueCursor | None = None
     ) -> list[QueueEntry]:
-        rows = await session.execute(
+        query = (
             select(MergeRequest, PullRequest.number)
             .join(PullRequest)
             .where(MergeRequest.queue_id == self.id, MergeRequest.finished_at.is_(None))
             .order_by(MergeRequest.priority.desc(), MergeRequest.created_at, MergeRequest.id)
             .limit(limit)
-            .offset(offset)
         )
+        if cursor is not None:
+            query = query.where(
+                (MergeRequest.priority < cursor.priority)
+                | (
+                    (MergeRequest.priority == cursor.priority)
+                    & (
+                        tuple_(MergeRequest.created_at, MergeRequest.id)
+                        > (cursor.created_at, cursor.id)
+                    )
+                )
+            )
+        rows = await session.execute(query)
         return [QueueEntry(request, number) for request, number in rows.tuples()]
 
     async def entries(self, lease: Lease) -> list[QueueEntry]:

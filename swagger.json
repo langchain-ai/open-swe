@@ -5328,16 +5328,23 @@
             ],
             "title": "Active Batch Id"
           },
-          "entries": {
+          "items": {
             "items": {
               "$ref": "#/components/schemas/EntryView"
             },
-            "title": "Entries",
+            "title": "Items",
             "type": "array"
           },
-          "has_more": {
-            "title": "Has More",
-            "type": "boolean"
+          "next_cursor": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Next Cursor"
           },
           "operator": {
             "title": "Operator",
@@ -5362,8 +5369,8 @@
           "repository",
           "paused",
           "operator",
-          "entries",
-          "has_more",
+          "items",
+          "next_cursor",
           "active_batch_id"
         ],
         "title": "QueueStatus",
@@ -12300,25 +12307,31 @@
           },
           {
             "in": "query",
-            "name": "limit",
+            "name": "page_size",
             "required": false,
             "schema": {
-              "default": 50,
+              "default": 20,
               "maximum": 100,
               "minimum": 1,
-              "title": "Limit",
+              "title": "Page Size",
               "type": "integer"
             }
           },
           {
             "in": "query",
-            "name": "offset",
+            "name": "cursor",
             "required": false,
             "schema": {
-              "default": 0,
-              "minimum": 0,
-              "title": "Offset",
-              "type": "integer"
+              "anyOf": [
+                {
+                  "maxLength": 512,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Cursor"
             }
           }
         ],
