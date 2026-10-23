@@ -789,6 +789,7 @@ async def fetch_pr_review_threads(
     """
     out: list[dict[str, Any]] = []
     cursor: str | None = None
+    seen: set[str] = set()
     async with github_client(token=token) as client:
         while len(out) < max_threads:
             try:
@@ -815,9 +816,12 @@ async def fetch_pr_review_threads(
                     repo,
                     pr_number,
                 )
-                return out
+                return []
             data = response.json()
-            data_root = data.get("data") if isinstance(data, dict) else None
+            if not isinstance(data, dict) or data.get("errors"):
+                logger.warning("Incomplete GitHub review-thread response")
+                return []
+            data_root = data.get("data")
             repository = data_root.get("repository") if isinstance(data_root, dict) else None
             if not isinstance(repository, dict):
                 logger.warning(
@@ -827,14 +831,19 @@ async def fetch_pr_review_threads(
                     repo,
                     pr_number,
                 )
-                return out
+                return []
             pull_request = repository.get("pullRequest")
             threads = pull_request.get("reviewThreads") if isinstance(pull_request, dict) else None
             if not isinstance(threads, dict):
-                return out
-            for thread in threads.get("nodes", []) or []:
-                if not isinstance(thread, dict):
-                    continue
+                return []
+            nodes = threads.get("nodes")
+            if not isinstance(nodes, list):
+                logger.warning("GitHub review threads missing nodes")
+                return []
+            for thread in nodes:
+                if not isinstance(thread, dict) or not isinstance(thread.get("isResolved"), bool):
+                    logger.warning("Invalid GitHub review-thread resolution state")
+                    return []
                 comments_block = thread.get("comments") or {}
                 comments_nodes = comments_block.get("nodes") or []
                 comments: list[dict[str, Any]] = []
@@ -873,13 +882,21 @@ async def fetch_pr_review_threads(
                         "comments": comments,
                     }
                 )
-                if len(out) >= max_threads:
-                    break
-            page_info = threads.get("pageInfo") or {}
-            if not page_info.get("hasNextPage"):
-                break
+            page_info = threads.get("pageInfo")
+            if not isinstance(page_info, dict) or not isinstance(
+                page_info.get("hasNextPage"), bool
+            ):
+                logger.warning("GitHub review threads missing pagination")
+                return []
+            if not page_info["hasNextPage"]:
+                return out
             cursor = page_info.get("endCursor")
-    return out
+            if not isinstance(cursor, str) or not cursor or cursor in seen:
+                logger.warning("GitHub review-thread pagination did not advance")
+                return []
+            seen.add(cursor)
+    logger.warning("GitHub review-thread snapshot exceeded its limit")
+    return []
 
 
 async def fetch_review_thread_id_for_comment(

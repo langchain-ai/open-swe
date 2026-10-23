@@ -1011,6 +1011,7 @@ SUPPORTED_GH_EVENTS = frozenset(
         "issues",
         "pull_request",
         "pull_request_review_comment",
+        "pull_request_review_thread",
         "pull_request_review",
         "push",
         *GITHUB_CI_EVENTS,
