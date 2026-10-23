@@ -9,8 +9,8 @@ them. Every run of the thread gets those tools.
 there; the dock beside the plugin runs the call in the plugin's frame and
 resumes the thread with its result, marking the call answered.
 
-Plugins no longer start threads of their own, so ``plugin_thread`` goes, and
-installs that were granted ``threads`` hold ``agent`` instead.
+Plugins no longer start threads of their own, so ``plugin_thread`` and the
+``threads`` permission go.
 """
 
 from alembic import op
@@ -59,16 +59,11 @@ def upgrade() -> None:
     """)
     op.execute("CREATE UNIQUE INDEX plugin_chat_call_key ON plugin_chat_call (chat, call_id)")
     op.execute("DROP TABLE plugin_thread")
+    # ``agent`` reaches further than approving each thread did, so an install
+    # that had ``threads`` loses it and asks for ``agent`` on its next update.
     op.execute("""
         UPDATE plugin_installation
-        SET manifest = jsonb_set(
-            manifest,
-            '{permissions}',
-            (
-                SELECT jsonb_agg(CASE WHEN p = '"threads"' THEN '"agent"'::jsonb ELSE p END)
-                FROM jsonb_array_elements(manifest -> 'permissions') AS p
-            )
-        )
+        SET manifest = jsonb_set(manifest, '{permissions}', (manifest -> 'permissions') - 'threads')
         WHERE manifest -> 'permissions' ? 'threads'
     """)
 

@@ -1,15 +1,16 @@
+import { Banner } from "@langchain/macaw-components/Banner"
 import { IconButton } from "@langchain/macaw-components/IconButton"
 import { Skeleton } from "@langchain/macaw-components/Skeleton"
 import { ArrowsOutIcon } from "@phosphor-icons/react/dist/ssr/ArrowsOut"
 import { XIcon } from "@phosphor-icons/react/dist/ssr/X"
-import { useQuery, useQueryClient } from "@tanstack/react-query"
+import { useQuery } from "@tanstack/react-query"
 import { Link } from "@tanstack/react-router"
-import { useEffect, useEffectEvent, useMemo, useRef } from "react"
+import { useEffect, useEffectEvent, useMemo, useRef, useState } from "react"
 import { toast } from "sonner"
 
 import { AgentThreadPage } from "@/features/agents/components/AgentThreadPage"
 import { EmbeddedThreadContext } from "@/features/agents/lib/embeddedThread"
-import type { ChatCall, InstalledPlugin } from "@/features/plugins/lib/api"
+import type { InstalledPlugin } from "@/features/plugins/lib/api"
 import { pluginsApi } from "@/features/plugins/lib/api"
 import type {
   AgentToolOffer,
@@ -57,7 +58,7 @@ export function PluginAgentDock({
   const chatId = opened.data?.chat_id
   const threadId = opened.data?.thread_id
   useToolOffer(plugin, chatId, tools?.offer ?? NO_TOOLS)
-  useAnsweredCalls(plugin, chatId, threadId, tools)
+  const answering = useAnsweredCalls(plugin, chatId, threadId, tools)
   const embedded = useMemo(
     () => ({
       emptyState: (
@@ -106,6 +107,16 @@ export function PluginAgentDock({
         </p>
       ) : threadId ? (
         <EmbeddedThreadContext.Provider value={embedded}>
+          {answering.paused && (
+            <Banner
+              intent="neutral"
+              className="m-space-3 mb-0"
+              onDismiss={answering.dismiss}
+            >
+              The agent paused after many calls to {plugin.manifest.displayName}
+              &apos;s tools. Send a message to let it go on.
+            </Banner>
+          )}
           <div className="flex min-h-0 flex-1 flex-col [&>*]:min-h-0 [&>*]:flex-1">
             <AgentThreadPage
               key={threadId}
@@ -126,32 +137,52 @@ export function PluginAgentDock({
   )
 }
 
-/** Gives the chat's next runs what the plugin offers now. */
+// Offers to one chat go out in order, so withdrawing on close never lands after a reopen's offer.
+const offers = new Map<string, Promise<void>>()
+
+function sendOffer(
+  plugin: InstalledPlugin,
+  chatId: string,
+  offer: AgentToolOffer
+) {
+  const sent = (offers.get(chatId) ?? Promise.resolve())
+    .then(() => pluginsApi.offerTools(plugin.id, chatId, offer))
+    .catch((error: unknown) => {
+      toast.error(
+        `Couldn't give the agent ${plugin.manifest.displayName}'s tools`,
+        { description: error instanceof Error ? error.message : undefined }
+      )
+    })
+  offers.set(chatId, sent)
+}
+
+/**
+ * Gives the chat's next runs what the plugin offers now, and takes it back
+ * when the dock closes, so a run started elsewhere never waits on a tool
+ * nothing here will answer.
+ */
 function useToolOffer(
   plugin: InstalledPlugin,
   chatId: string | undefined,
   offer: AgentToolOffer
 ) {
   const json = JSON.stringify(offer)
+  const current = useEffectEvent(() => plugin)
+  useEffect(() => {
+    if (chatId) sendOffer(current(), chatId, JSON.parse(json) as AgentToolOffer)
+  }, [chatId, json])
   useEffect(() => {
     if (!chatId) return
-    pluginsApi
-      .offerTools(plugin.id, chatId, JSON.parse(json) as AgentToolOffer)
-      .catch((error: unknown) =>
-        toast.error(
-          `Couldn't give the agent ${plugin.manifest.displayName}'s tools`,
-          {
-            description: error instanceof Error ? error.message : undefined,
-          }
-        )
-      )
-  }, [plugin.id, plugin.manifest.displayName, chatId, json])
+    return () => sendOffer(current(), chatId, NO_TOOLS)
+  }, [chatId])
 }
 
 /**
- * Runs the calls the agent made to the plugin's tools in its frame, each once,
- * and resumes the thread with their results. Calls wait while the frame has
- * offered nothing yet, as it loads.
+ * Runs the calls the agent made to the plugin's tools in its frame and
+ * resumes the thread with their results. The dock claims calls first, so a
+ * second open dock never runs them too, and runs them in order; a result it
+ * could not deliver is sent again rather than run again. Calls wait while the
+ * frame has offered nothing yet, as it loads.
  */
 function useAnsweredCalls(
   plugin: InstalledPlugin,
@@ -159,10 +190,8 @@ function useAnsweredCalls(
   threadId: string | undefined,
   tools: ProvidedTools | null
 ) {
-  const queryClient = useQueryClient()
-  const key = ["plugin-chat-calls", plugin.id, chatId] as const
   const calls = useQuery({
-    queryKey: key,
+    queryKey: ["plugin-chat-calls", plugin.id, chatId],
     queryFn: () => pluginsApi.chatCalls(plugin.id, chatId!),
     enabled: Boolean(chatId && threadId),
     meta: {
@@ -171,39 +200,55 @@ function useAnsweredCalls(
         : [],
     },
   })
-  const answering = useRef(new Set<string>())
-  const answer = useEffectEvent((waiting: ReadonlyArray<ChatCall>) => {
-    if (!chatId || !tools) return
-    const fresh = waiting.filter((call) => !answering.current.has(call.call_id))
-    if (fresh.length === 0) return
-    for (const call of fresh) answering.current.add(call.call_id)
-    const offered = new Set(tools.offer.tools.map((tool) => tool.name))
-    void Promise.all(
-      fresh.map(async (call) => ({
-        call_id: call.call_id,
-        output: offered.has(call.tool)
+  const [paused, setPaused] = useState(false)
+  const [retries, setRetries] = useState(0)
+  const busy = useRef(false)
+  const undelivered = useRef(new Map<string, string>())
+  const retry = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const name = plugin.manifest.displayName
+
+  const answer = useEffectEvent(async () => {
+    if (!chatId || !tools || busy.current) return
+    busy.current = true
+    try {
+      const offered = new Set(tools.offer.tools.map((tool) => tool.name))
+      for (const call of await pluginsApi.claimCalls(plugin.id, chatId)) {
+        if (undelivered.current.has(call.call_id)) continue
+        const output = offered.has(call.tool)
           ? await tools
               .run(call.tool, call.arguments)
               .catch(
                 (error: unknown) =>
                   `Error: ${error instanceof Error ? error.message : String(error)}`
               )
-          : `Error: ${plugin.manifest.displayName} does not offer ${call.tool} now.`,
+          : `Error: ${name} does not offer ${call.tool} now.`
+        undelivered.current.set(call.call_id, output)
+      }
+      const outputs = [...undelivered.current].map(([call_id, output]) => ({
+        call_id,
+        output,
       }))
-    )
-      .then((outputs) => pluginsApi.answerCalls(plugin.id, chatId, outputs))
-      .then(() => queryClient.invalidateQueries({ queryKey: key }))
-      .catch((error: unknown) => {
-        for (const call of fresh) answering.current.delete(call.call_id)
-        toast.error(
-          `Couldn't send ${plugin.manifest.displayName}'s answer to the agent`,
-          {
-            description: error instanceof Error ? error.message : undefined,
-          }
-        )
+      if (outputs.length === 0) return
+      const sent = await pluginsApi.answerCalls(plugin.id, chatId, outputs)
+      undelivered.current.clear()
+      setPaused(sent.paused)
+    } catch (error) {
+      toast.error(`Couldn't send ${name}'s answer to the agent`, {
+        description: error instanceof Error ? error.message : undefined,
       })
+      retry.current = setTimeout(() => setRetries((n) => n + 1), 5_000)
+    } finally {
+      busy.current = false
+    }
   })
   useEffect(() => {
-    if (calls.data?.length) answer(calls.data)
-  }, [calls.data, tools])
+    if (calls.data?.length || undelivered.current.size) void answer()
+  }, [calls.data, tools, retries])
+  useEffect(
+    () => () => {
+      if (retry.current) clearTimeout(retry.current)
+    },
+    []
+  )
+  return { paused, dismiss: () => setPaused(false) }
 }

@@ -4,7 +4,7 @@ import hashlib
 import logging
 from collections.abc import Sequence
 from dataclasses import dataclass, field
-from datetime import datetime
+from datetime import UTC, datetime, timedelta
 from typing import Literal
 from uuid import UUID, uuid7
 
@@ -147,6 +147,7 @@ class PluginChatRow(Base):
     thread_id: Mapped[str]
     tool_specs: Mapped[list[JsonObject]] = mapped_column(JSONB, default_factory=list)
     instructions: Mapped[str] = mapped_column(default="")
+    automatic_resumes: Mapped[int] = mapped_column(default=0)
     id: Mapped[UUID] = mapped_column(primary_key=True, default_factory=uuid7)
     created_at: Mapped[datetime | None] = mapped_column(server_default=NOW, init=False)
     updated_at: Mapped[datetime | None] = mapped_column(server_default=NOW, init=False)
@@ -165,6 +166,7 @@ class PluginChatCallRow(Base):
     call_id: Mapped[str]
     tool: Mapped[str]
     arguments: Mapped[JsonObject] = mapped_column(JSONB)
+    claimed_at: Mapped[datetime | None] = mapped_column(default=None)
     answered_at: Mapped[datetime | None] = mapped_column(default=None)
     id: Mapped[UUID] = mapped_column(primary_key=True, default_factory=uuid7)
     created_at: Mapped[datetime | None] = mapped_column(server_default=NOW, init=False)
@@ -639,6 +641,10 @@ class PluginDocuments:
             return deleted is not None
 
 
+# A dock that closed mid-call leaves its claim; after this, another dock may run the call.
+CLAIM_TIMEOUT = timedelta(minutes=2)
+
+
 def tool_prefix(plugin_name: str) -> str:
     """What the names of a plugin's tools start with: no built-in tool name has ``__``."""
     return f"{plugin_name}__"
@@ -700,6 +706,16 @@ class PluginChat:
     @property
     def calls(self) -> PluginChatCalls:
         return PluginChatCalls(self.id, self.thread_id)
+
+    @staticmethod
+    async def person_wrote(thread_id: str) -> None:
+        """The person wrote in the chat, so the plugin's results may resume it again."""
+        async with postgres.session() as session:
+            await session.execute(
+                update(PluginChatRow)
+                .where(PluginChatRow.thread_id == thread_id, PluginChatRow.automatic_resumes > 0)
+                .values(automatic_resumes=0)
+            )
 
 
 class PluginChats:
@@ -809,6 +825,28 @@ class PluginChatCalls:
             )
             return [PluginChatCall(row.call_id, row.tool, row.arguments) for row in rows]
 
+    async def claim(self) -> list[PluginChatCall]:
+        """Take the waiting calls no other dock is running, to run them; oldest first."""
+        stale = func.clock_timestamp() - CLAIM_TIMEOUT
+        async with postgres.session() as session:
+            rows = await session.scalars(
+                update(PluginChatCallRow)
+                .where(
+                    PluginChatCallRow.chat == self.chat,
+                    PluginChatCallRow.answered_at.is_(None),
+                    or_(
+                        PluginChatCallRow.claimed_at.is_(None),
+                        PluginChatCallRow.claimed_at < stale,
+                    ),
+                )
+                .values(claimed_at=func.clock_timestamp(), updated_at=func.clock_timestamp())
+                .returning(PluginChatCallRow)
+            )
+            claimed = sorted(
+                rows, key=lambda row: row.created_at or datetime.min.replace(tzinfo=UTC)
+            )
+            return [PluginChatCall(row.call_id, row.tool, row.arguments) for row in claimed]
+
     async def answer(self, call_ids: Sequence[str], *, by: UUID) -> list[str]:
         """Mark ``call_ids`` answered; the ones that were still waiting, so each is answered once."""
         async with postgres.session() as session:
@@ -830,3 +868,32 @@ class PluginChatCalls:
             if ids:
                 await Topic.PLUGIN_CHAT_CALLS.invalidate(session, key=self.thread_id)
             return ids
+
+    async def reopen(self, call_ids: Sequence[str]) -> None:
+        """Let ``call_ids`` be answered again, as when the run their answers started never began."""
+        async with postgres.session() as session:
+            await session.execute(
+                update(PluginChatCallRow)
+                .where(PluginChatCallRow.chat == self.chat, PluginChatCallRow.call_id.in_(call_ids))
+                .values(answered_at=None, claimed_at=None, updated_at=func.clock_timestamp())
+            )
+            await Topic.PLUGIN_CHAT_CALLS.invalidate(session, key=self.thread_id)
+
+    async def spend_resume(self, limit: int) -> bool:
+        """Count one run the plugin's results start; false once ``limit`` ran since the person wrote."""
+        async with postgres.session() as session:
+            spent = await session.scalar(
+                update(PluginChatRow)
+                .where(PluginChatRow.id == self.chat, PluginChatRow.automatic_resumes < limit)
+                .values(automatic_resumes=PluginChatRow.automatic_resumes + 1)
+                .returning(PluginChatRow.id)
+            )
+            return spent is not None
+
+    async def refund_resume(self) -> None:
+        async with postgres.session() as session:
+            await session.execute(
+                update(PluginChatRow)
+                .where(PluginChatRow.id == self.chat, PluginChatRow.automatic_resumes > 0)
+                .values(automatic_resumes=PluginChatRow.automatic_resumes - 1)
+            )

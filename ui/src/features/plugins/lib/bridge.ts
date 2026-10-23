@@ -715,9 +715,9 @@ export class PluginHostApi extends RpcTarget implements HostApi {
         const output: unknown = await kept(tool, JSON.stringify(args))
         if (typeof output !== "string")
           throw new Error(`${tool} returned no text`)
-        return output.length > MAX_TOOL_OUTPUT
-          ? `${output.slice(0, MAX_TOOL_OUTPUT)}\n[cut at ${MAX_TOOL_OUTPUT} characters]`
-          : output
+        if (output.length <= MAX_TOOL_OUTPUT) return output
+        const note = `\n[cut: the plugin returned ${output.length} characters]`
+        return output.slice(0, MAX_TOOL_OUTPUT - note.length) + note
       })
       return new SubscriptionTarget(() => {
         withdraw()

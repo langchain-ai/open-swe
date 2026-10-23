@@ -1221,6 +1221,11 @@
       },
       "ChatResumed": {
         "properties": {
+          "paused": {
+            "description": "The agent stopped to wait for the person: the plugin's results resumed it too often.",
+            "title": "Paused",
+            "type": "boolean"
+          },
           "run_id": {
             "anyOf": [
               {
@@ -1234,7 +1239,8 @@
           }
         },
         "required": [
-          "run_id"
+          "run_id",
+          "paused"
         ],
         "title": "ChatResumed",
         "type": "object"
@@ -14270,6 +14276,70 @@
           }
         ],
         "summary": "Api Plugin Chat Calls",
+        "tags": [
+          "dashboard",
+          "plugins"
+        ]
+      }
+    },
+    "/dashboard/api/plugins/{installation_id}/chats/{chat_id}/calls/claim": {
+      "post": {
+        "description": "Take the waiting calls to run them in this dock's frame, so no other open dock runs them too.",
+        "operationId": "api_claim_plugin_chat_calls_dashboard_api_plugins__installation_id__chats__chat_id__calls_claim_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "chat_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Chat Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "installation_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Installation Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/ChatCallModel"
+                  },
+                  "title": "Response Api Claim Plugin Chat Calls Dashboard Api Plugins  Installation Id  Chats  Chat Id  Calls Claim Post",
+                  "type": "array"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "DashboardSession": []
+          }
+        ],
+        "summary": "Api Claim Plugin Chat Calls",
         "tags": [
           "dashboard",
           "plugins"

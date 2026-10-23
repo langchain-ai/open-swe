@@ -883,6 +883,9 @@ async def _enrich_run_start_command(
         metadata = {**metadata, **move.update}
     content = _command_message_content(params)
     relayed_from = _relayed_from(params)
+    if metadata.get(PLUGIN_CHAT_KEY) and not offloading:
+        # The person wrote, so the plugin's results may resume the chat again.
+        await PluginChat.person_wrote(thread_id)
     if offloading and creating:
         raise HTTPException(400, "offloading requires an existing conversation")
     command_images = _dashboard_images_from_content(content)

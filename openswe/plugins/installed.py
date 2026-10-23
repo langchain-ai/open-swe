@@ -40,6 +40,18 @@ class PluginPermissionDenied(PermissionError):
         super().__init__(f"The plugin was not granted {permission.value}")
 
 
+MAX_AUTOMATIC_RESUMES = 20
+"""Runs a plugin's tool results may start after one message from the person."""
+
+
+@dataclass(frozen=True, slots=True)
+class ChatAnswer:
+    run_id: str | None
+    """The run the answers started, if any."""
+    paused: bool
+    """Whether the agent stopped to wait for the person, its resumes spent."""
+
+
 class PluginChatNotFound(LookupError):
     def __init__(self) -> None:
         super().__init__("chat not found")
@@ -166,15 +178,28 @@ class InstalledPlugin:
             parameters=parameters,
         )
 
-    async def answer(self, chat: PluginChat, outputs: Mapping[str, str]) -> str | None:
-        """Resume the chat with what the plugin's frame returned; the run, or None if nothing waited."""
+    async def answer(self, chat: PluginChat, outputs: Mapping[str, str]) -> ChatAnswer:
+        """Resume the chat with what the plugin's frame returned for its calls.
+
+        The plugin's results resume it at most ``MAX_AUTOMATIC_RESUMES`` times
+        after each message from the person; past that the agent waits for them.
+        """
         answered = await chat.calls.answer(list(outputs), by=self.user_id)
         if not answered:
-            return None
-        return await start_run_with_tool_results(
-            chat.thread_id,
-            self.login,
-            prompt="",
-            tool_results=[ClientToolSpec.result_message(i, outputs[i]) for i in answered],
-            overrides={},
-        )
+            return ChatAnswer(run_id=None, paused=False)
+        if not await chat.calls.spend_resume(MAX_AUTOMATIC_RESUMES):
+            return ChatAnswer(run_id=None, paused=True)
+        try:
+            run_id = await start_run_with_tool_results(
+                chat.thread_id,
+                self.login,
+                prompt="",
+                tool_results=[ClientToolSpec.result_message(i, outputs[i]) for i in answered],
+                overrides={},
+            )
+        except Exception:
+            # Nothing resumed, so the calls wait to be answered again.
+            await chat.calls.reopen(answered)
+            await chat.calls.refund_resume()
+            raise
+        return ChatAnswer(run_id=run_id, paused=False)

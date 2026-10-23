@@ -347,7 +347,7 @@ await host.agent.open({ draft: "> the passage the person selected\n\n" }) // the
 
 - **Chats** are yours to scope. `use` picks the chat without opening the dock; each name, with or without a repository the person shared, is one thread per person that picks up where it left off.
 - **Tools** reach the agent as `<plugin>__<name>`, so they never stand in for its own. Names are a lowercase letter, then letters, digits or `_`; at most 32 tools, with descriptions up to 2,000 characters and instructions up to 4,000. `parameters` is a JSON Schema of type `object`.
-- **Calls** run while your plugin is open. The run waits at each call, the dock runs it in your frame, and the thread carries on with what `run` returned, as JSON, or a string as is (up to 200,000 characters). What `run` throws, the agent reads as an error. A call made while your plugin is closed waits until it opens again.
+- **Calls** run while your plugin is open. The run waits at each call, the dock runs it in your frame, and the thread carries on with what `run` returned, as JSON, or a string as is (up to 200,000 characters). What `run` throws, the agent reads as an error. Open in two tabs, your plugin runs each call once. Closing the dock withdraws your tools, and a call made while your plugin is closed waits until it opens again. After 20 runs your results started since the person last wrote, the agent waits for them.
 - **Results are data.** The agent treats them as your plugin's, not as instructions from the person, so a document can't steer it.
 
 ### Errors

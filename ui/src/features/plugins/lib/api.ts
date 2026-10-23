@@ -478,12 +478,17 @@ export const pluginsApi = {
     agentsRequest<Array<ChatCall>>(
       `${plugin(id)}/chats/${segment(chatId)}/calls`
     ),
+  claimCalls: (id: string, chatId: string) =>
+    agentsRequest<Array<ChatCall>>(
+      `${plugin(id)}/chats/${segment(chatId)}/calls/claim`,
+      { method: "POST" }
+    ),
   answerCalls: (
     id: string,
     chatId: string,
     outputs: Array<{ call_id: string; output: string }>
   ) =>
-    agentsRequest<{ run_id: string | null }>(
+    agentsRequest<{ run_id: string | null; paused: boolean }>(
       `${plugin(id)}/chats/${segment(chatId)}/outputs`,
       { method: "POST", ...json({ outputs }) }
     ),

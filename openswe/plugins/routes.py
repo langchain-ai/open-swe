@@ -10,7 +10,7 @@ import asyncio
 import base64
 import json
 import logging
-from collections.abc import AsyncGenerator, Iterator
+from collections.abc import AsyncGenerator, Iterator, Sequence
 from contextlib import contextmanager
 from datetime import datetime
 from typing import Annotated, Any, Literal
@@ -49,6 +49,7 @@ from openswe.plugins.records import (
     DocumentQuery,
     Installation,
     InstallationNotFound,
+    PluginChatCall,
     PluginDocument,
     PluginInstallations,
     PluginNameTaken,
@@ -717,6 +718,9 @@ class ChatOutputsBody(BaseModel):
 
 class ChatResumed(BaseModel):
     run_id: str | None
+    paused: bool = Field(
+        description="The agent stopped to wait for the person: the plugin's results resumed it too often."
+    )
 
 
 @router.post("/{installation_id}/chats")
@@ -747,12 +751,24 @@ async def api_plugin_chat_calls(chat_id: UUID, plugin: PluginDep) -> list[ChatCa
     """Calls the chat's agent made to the plugin's tools that wait for the plugin's frame."""
     with _as_http():
         chat = await plugin.own_chat(chat_id)
+    return _calls(plugin, await chat.calls.pending())
+
+
+@router.post("/{installation_id}/chats/{chat_id}/calls/claim")
+async def api_claim_plugin_chat_calls(chat_id: UUID, plugin: PluginDep) -> list[ChatCallModel]:
+    """Take the waiting calls to run them in this dock's frame, so no other open dock runs them too."""
+    with _as_http():
+        chat = await plugin.own_chat(chat_id)
+    return _calls(plugin, await chat.calls.claim())
+
+
+def _calls(plugin: InstalledPlugin, calls: Sequence[PluginChatCall]) -> list[ChatCallModel]:
     prefix = tool_prefix(plugin.installation.manifest.name)
     return [
         ChatCallModel(
             call_id=call.call_id, tool=call.tool.removeprefix(prefix), arguments=call.arguments
         )
-        for call in await chat.calls.pending()
+        for call in calls
     ]
 
 
@@ -764,8 +780,8 @@ async def api_answer_plugin_chat_calls(
     """Resume the chat with what the plugin's frame returned for its calls."""
     with _as_http():
         chat = await plugin.own_chat(chat_id)
-        run_id = await plugin.answer(chat, {o.call_id: o.output for o in body.outputs})
-    return ChatResumed(run_id=run_id)
+        answer = await plugin.answer(chat, {o.call_id: o.output for o in body.outputs})
+    return ChatResumed(run_id=answer.run_id, paused=answer.paused)
 
 
 # ---- People ------------------------------------------------------------------------
