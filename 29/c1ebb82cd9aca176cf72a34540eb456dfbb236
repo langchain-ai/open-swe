@@ -1,0 +1,23 @@
+openswe/browser_handoff.py
+  s_b35d826fa62e9d::t_388ba053b083c9 3
+vendor/managed-deepagents-sdk/packages/pypi/src/managed_deepagents/browser.py
+  s_b35d826fa62e9d::t_6b3514b1d229e4 9,103,111,120,341-344,452,460
+vendor/mda-upstream-prs
+  s_b35d826fa62e9d::t_5d12644906cd19 3
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "29c1ebb82cd9aca176cf72a34540eb456dfbb236",
+  "prompts": {},
+  "sessions": {
+    "s_b35d826fa62e9d": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "2b6b8806-93bb-4d14-bffd-fb396f8e89c7",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "Sydney Runkle <sydneymarierunkle@gmail.com>"
+    }
+  }
+}
