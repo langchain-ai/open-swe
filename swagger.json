@@ -920,7 +920,7 @@
             "anyOf": [
               {
                 "additionalProperties": {
-                  "$ref": "#/components/schemas/pydantic__types__JsonValue"
+                  "$ref": "#/components/schemas/JsonValue"
                 },
                 "type": "object"
               },
@@ -1084,7 +1084,7 @@
             "anyOf": [
               {
                 "additionalProperties": {
-                  "$ref": "#/components/schemas/JsonValue-Input"
+                  "$ref": "#/components/schemas/JsonValue"
                 },
                 "type": "object"
               },
@@ -1264,7 +1264,7 @@
           },
           "params": {
             "additionalProperties": {
-              "$ref": "#/components/schemas/pydantic__types__JsonValue"
+              "$ref": "#/components/schemas/JsonValue"
             },
             "title": "Params",
             "type": "object"
@@ -1947,125 +1947,6 @@
         "title": "EnabledReviewRepoUpdate",
         "type": "object"
       },
-      "EndpointAnswer": {
-        "additionalProperties": false,
-        "description": "The run an endpoint answers with: its input, and the run options a handler\nmay set, all JSON. An endpoint answers ``null`` (or HTTP 204) instead to start\nnothing.",
-        "properties": {
-          "context": {
-            "additionalProperties": {
-              "$ref": "#/components/schemas/managed_deepagents___channels__types__JsonValue"
-            },
-            "title": "Context",
-            "type": "object"
-          },
-          "input": {
-            "$ref": "#/components/schemas/managed_deepagents___channels__types__JsonValue"
-          },
-          "metadata": {
-            "additionalProperties": {
-              "$ref": "#/components/schemas/managed_deepagents___channels__types__JsonValue"
-            },
-            "title": "Metadata",
-            "type": "object"
-          },
-          "webhook": {
-            "title": "Webhook",
-            "type": "string"
-          }
-        },
-        "required": [
-          "input"
-        ],
-        "title": "EndpointAnswer",
-        "type": "object"
-      },
-      "EndpointEvent_str_dict_str__Any__": {
-        "description": "The event a channel sends its endpoint, as the provider sent it.\n\n``EndpointEvent[Literal[\"AgentSessionEvent.created\"], LinearSessionCreatedPayload]``\ntypes one event key's payload; ``LinearEndpointRequest`` and\n``GitHubEndpointRequest`` are the unions of a channel's keys.",
-        "properties": {
-          "deliveryId": {
-            "title": "Deliveryid",
-            "type": "string"
-          },
-          "key": {
-            "title": "Key",
-            "type": "string"
-          },
-          "payload": {
-            "additionalProperties": true,
-            "title": "Payload",
-            "type": "object"
-          }
-        },
-        "required": [
-          "key",
-          "deliveryId",
-          "payload"
-        ],
-        "title": "EndpointEvent",
-        "type": "object"
-      },
-      "EndpointEvent_str_dict_str__JsonValue__": {
-        "description": "The event a channel sends its endpoint, as the provider sent it.\n\n``EndpointEvent[Literal[\"AgentSessionEvent.created\"], LinearSessionCreatedPayload]``\ntypes one event key's payload; ``LinearEndpointRequest`` and\n``GitHubEndpointRequest`` are the unions of a channel's keys.",
-        "properties": {
-          "deliveryId": {
-            "title": "Deliveryid",
-            "type": "string"
-          },
-          "key": {
-            "title": "Key",
-            "type": "string"
-          },
-          "payload": {
-            "additionalProperties": {
-              "$ref": "#/components/schemas/JsonValue-Input"
-            },
-            "title": "Payload",
-            "type": "object"
-          }
-        },
-        "required": [
-          "key",
-          "deliveryId",
-          "payload"
-        ],
-        "title": "EndpointEvent",
-        "type": "object"
-      },
-      "EndpointThread": {
-        "description": "The conversation's thread an endpoint request is about.",
-        "properties": {
-          "channel": {
-            "$ref": "#/components/schemas/EndpointThreadChannel"
-          },
-          "id": {
-            "title": "Id",
-            "type": "string"
-          },
-          "interrupted": {
-            "title": "Interrupted",
-            "type": "boolean"
-          }
-        },
-        "required": [
-          "id",
-          "channel"
-        ],
-        "title": "EndpointThread",
-        "type": "object"
-      },
-      "EndpointThreadChannel": {
-        "properties": {
-          "name": {
-            "title": "Name",
-            "type": "string"
-          }
-        },
-        "required": [
-          "name"
-        ],
-        "title": "EndpointThreadChannel",
-        "type": "object"
-      },
       "EntryView": {
         "properties": {
           "number": {
@@ -2404,23 +2285,6 @@
           "ready"
         ],
         "title": "GatewayStatus",
-        "type": "object"
-      },
-      "GitHubChannelCall": {
-        "description": "What MDA's GitHub channel POSTs: the event and its thread.\n\nMDA's ``EndpointRequest``, with its fields named here: pydantic doesn't apply a\ngeneric TypedDict's type arguments to a subclass, and the API schema gets a\nname of its own.",
-        "properties": {
-          "event": {
-            "$ref": "#/components/schemas/EndpointEvent_str_dict_str__Any__"
-          },
-          "thread": {
-            "$ref": "#/components/schemas/EndpointThread"
-          }
-        },
-        "required": [
-          "event",
-          "thread"
-        ],
-        "title": "GitHubChannelCall",
         "type": "object"
       },
       "GitHubTrigger": {
@@ -2763,7 +2627,7 @@
         ],
         "type": "string"
       },
-      "JsonValue-Input": {},
+      "JsonValue": {},
       "LabelChange": {
         "properties": {
           "name": {
@@ -2836,23 +2700,6 @@
           "body"
         ],
         "title": "LineComment",
-        "type": "object"
-      },
-      "LinearChannelCall": {
-        "description": "What MDA's Linear channel POSTs: the event it validated and its thread.\n\nMDA's ``EndpointRequest``, with its fields named here: pydantic doesn't apply a\ngeneric TypedDict's type arguments to a subclass, and the API schema gets a\nname of its own.",
-        "properties": {
-          "event": {
-            "$ref": "#/components/schemas/EndpointEvent_str_dict_str__JsonValue__"
-          },
-          "thread": {
-            "$ref": "#/components/schemas/EndpointThread"
-          }
-        },
-        "required": [
-          "event",
-          "thread"
-        ],
-        "title": "LinearChannelCall",
         "type": "object"
       },
       "LinearTrigger": {
@@ -3451,7 +3298,7 @@
             "anyOf": [
               {
                 "items": {
-                  "$ref": "#/components/schemas/pydantic__types__JsonValue"
+                  "$ref": "#/components/schemas/JsonValue"
                 },
                 "type": "array"
               },
@@ -3643,6 +3490,63 @@
           "secret"
         ],
         "title": "MintedApiKey",
+        "type": "object"
+      },
+      "MintedSyncToken": {
+        "description": "The creation response: the only place the secret appears, ready to paste into Claude Code.",
+        "properties": {
+          "created_at": {
+            "format": "date-time",
+            "title": "Created At",
+            "type": "string"
+          },
+          "id": {
+            "format": "uuid",
+            "title": "Id",
+            "type": "string"
+          },
+          "last_used_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Last Used At"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "secret": {
+            "title": "Secret",
+            "type": "string"
+          },
+          "settings": {
+            "additionalProperties": {
+              "$ref": "#/components/schemas/JsonValue"
+            },
+            "title": "Settings",
+            "type": "object"
+          },
+          "token_suffix": {
+            "title": "Token Suffix",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "name",
+          "token_suffix",
+          "created_at",
+          "last_used_at",
+          "secret",
+          "settings"
+        ],
+        "title": "MintedSyncToken",
         "type": "object"
       },
       "MissingCredential": {
@@ -4190,7 +4094,7 @@
         "properties": {
           "annotations": {
             "items": {
-              "$ref": "#/components/schemas/pydantic__types__JsonValue"
+              "$ref": "#/components/schemas/JsonValue"
             },
             "title": "Annotations",
             "type": "array"
@@ -5727,7 +5631,7 @@
             "anyOf": [
               {
                 "additionalProperties": {
-                  "$ref": "#/components/schemas/JsonValue-Input"
+                  "$ref": "#/components/schemas/JsonValue"
                 },
                 "type": "object"
               },
@@ -5752,7 +5656,7 @@
             "anyOf": [
               {
                 "additionalProperties": {
-                  "$ref": "#/components/schemas/JsonValue-Input"
+                  "$ref": "#/components/schemas/JsonValue"
                 },
                 "type": "object"
               },
@@ -5984,7 +5888,7 @@
           },
           "tools": {
             "items": {
-              "$ref": "#/components/schemas/pydantic__types__JsonValue"
+              "$ref": "#/components/schemas/JsonValue"
             },
             "title": "Tools",
             "type": "array"
@@ -7424,6 +7328,65 @@
         "title": "SubmittedReview",
         "type": "object"
       },
+      "SyncTokenCreate": {
+        "properties": {
+          "name": {
+            "maxLength": 120,
+            "minLength": 1,
+            "title": "Name",
+            "type": "string"
+          }
+        },
+        "required": [
+          "name"
+        ],
+        "title": "SyncTokenCreate",
+        "type": "object"
+      },
+      "SyncTokenView": {
+        "description": "A stored token as its owner sees it. Has no field for the secret.",
+        "properties": {
+          "created_at": {
+            "format": "date-time",
+            "title": "Created At",
+            "type": "string"
+          },
+          "id": {
+            "format": "uuid",
+            "title": "Id",
+            "type": "string"
+          },
+          "last_used_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Last Used At"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "token_suffix": {
+            "title": "Token Suffix",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "name",
+          "token_suffix",
+          "created_at",
+          "last_used_at"
+        ],
+        "title": "SyncTokenView",
+        "type": "object"
+      },
       "TelemetryConfig": {
         "properties": {
           "environment": {
@@ -8219,7 +8182,7 @@
           },
           "create_params": {
             "additionalProperties": {
-              "$ref": "#/components/schemas/pydantic__types__JsonValue"
+              "$ref": "#/components/schemas/JsonValue"
             },
             "title": "Create Params",
             "type": "object"
@@ -8531,7 +8494,7 @@
           },
           "create_params": {
             "additionalProperties": {
-              "$ref": "#/components/schemas/JsonValue-Input"
+              "$ref": "#/components/schemas/JsonValue"
             },
             "title": "Create Params",
             "type": "object"
@@ -9122,7 +9085,7 @@
             "anyOf": [
               {
                 "additionalProperties": {
-                  "$ref": "#/components/schemas/JsonValue-Input"
+                  "$ref": "#/components/schemas/JsonValue"
                 },
                 "type": "object"
               },
@@ -9280,48 +9243,16 @@
         "title": "WorkspaceUpdate",
         "type": "object"
       },
-      "managed_deepagents___channels__types__JsonValue": {
-        "anyOf": [
-          {
-            "type": "boolean"
-          },
-          {
-            "type": "integer"
-          },
-          {
-            "type": "number"
-          },
-          {
-            "type": "string"
-          },
-          {
-            "items": {
-              "$ref": "#/components/schemas/managed_deepagents___channels__types__JsonValue"
-            },
-            "type": "array"
-          },
-          {
-            "additionalProperties": {
-              "$ref": "#/components/schemas/managed_deepagents___channels__types__JsonValue"
-            },
-            "type": "object"
-          },
-          {
-            "type": "null"
-          }
-        ]
-      },
       "openswe__transcript__events__JsonObject": {
         "additionalProperties": {
-          "$ref": "#/components/schemas/pydantic__types__JsonValue"
+          "$ref": "#/components/schemas/JsonValue"
         },
         "type": "object"
       },
       "openswe__utils__json_types__JsonObject": {
         "additionalProperties": true,
         "type": "object"
-      },
-      "pydantic__types__JsonValue": {}
+      }
     },
     "securitySchemes": {
       "DashboardSession": {
@@ -10953,6 +10884,150 @@
         "tags": [
           "dashboard",
           "sandbox-bridge"
+        ]
+      }
+    },
+    "/dashboard/api/claude-code/hooks": {
+      "post": {
+        "operationId": "api_claude_code_hook_dashboard_api_claude_code_hooks_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object"
+              }
+            }
+          },
+          "description": "A Claude Code hook event, as Claude Code posts it. Authorized by a Claude Code sync token as a bearer token.",
+          "required": true
+        },
+        "responses": {
+          "204": {
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Api Claude Code Hook",
+        "tags": [
+          "dashboard",
+          "claude-code"
+        ]
+      }
+    },
+    "/dashboard/api/claude-code/tokens": {
+      "get": {
+        "operationId": "api_list_claude_code_tokens_dashboard_api_claude_code_tokens_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/SyncTokenView"
+                  },
+                  "title": "Response Api List Claude Code Tokens Dashboard Api Claude Code Tokens Get",
+                  "type": "array"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "security": [
+          {
+            "DashboardSession": []
+          }
+        ],
+        "summary": "Api List Claude Code Tokens",
+        "tags": [
+          "dashboard",
+          "claude-code"
+        ]
+      },
+      "post": {
+        "operationId": "api_create_claude_code_token_dashboard_api_claude_code_tokens_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SyncTokenCreate"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MintedSyncToken"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "DashboardSession": []
+          }
+        ],
+        "summary": "Api Create Claude Code Token",
+        "tags": [
+          "dashboard",
+          "claude-code"
+        ]
+      }
+    },
+    "/dashboard/api/claude-code/tokens/{token_id}": {
+      "delete": {
+        "operationId": "api_revoke_claude_code_token_dashboard_api_claude_code_tokens__token_id__delete",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "token_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Token Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "DashboardSession": []
+          }
+        ],
+        "summary": "Api Revoke Claude Code Token",
+        "tags": [
+          "dashboard",
+          "claude-code"
         ]
       }
     },
@@ -18983,6 +19058,25 @@
           },
           {
             "in": "query",
+            "name": "exclude_source",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "items": {
+                    "type": "string"
+                  },
+                  "type": "array"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Exclude Source"
+            }
+          },
+          {
+            "in": "query",
             "name": "sort_by",
             "required": false,
             "schema": {
@@ -19167,6 +19261,25 @@
               "default": false,
               "title": "All",
               "type": "boolean"
+            }
+          },
+          {
+            "in": "query",
+            "name": "exclude_source",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "items": {
+                    "type": "string"
+                  },
+                  "type": "array"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Exclude Source"
             }
           }
         ],
@@ -22316,53 +22429,6 @@
         ]
       }
     },
-    "/github/channel/events": {
-      "post": {
-        "description": "The run an @openswe mention on an issue starts on the channel's thread, or ``None``.\n\nWhile the thread waits on an interrupt nothing starts: a non-null answer only\ntells the channel Open SWE would act, so it points the issue to the decision.",
-        "operationId": "github_channel_event_github_channel_events_post",
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/GitHubChannelCall"
-              }
-            }
-          },
-          "required": true
-        },
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "anyOf": [
-                    {
-                      "$ref": "#/components/schemas/EndpointAnswer"
-                    },
-                    {
-                      "type": "null"
-                    }
-                  ],
-                  "title": "Response Github Channel Event Github Channel Events Post"
-                }
-              }
-            },
-            "description": "Successful Response"
-          },
-          "422": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            },
-            "description": "Validation Error"
-          }
-        },
-        "summary": "Github Channel Event"
-      }
-    },
     "/health": {
       "get": {
         "operationId": "health_check_health_get",
@@ -22383,53 +22449,6 @@
           }
         },
         "summary": "Health Check"
-      }
-    },
-    "/linear/channel/events": {
-      "post": {
-        "description": "The run a Linear event starts, or ``None`` to start nothing.\n\nAn agent session turn starts the run it prepares; ``None`` there declines, and\nthe channel tells the session. Issue events run Linear automations.",
-        "operationId": "linear_channel_event_linear_channel_events_post",
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/LinearChannelCall"
-              }
-            }
-          },
-          "required": true
-        },
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "anyOf": [
-                    {
-                      "$ref": "#/components/schemas/EndpointAnswer"
-                    },
-                    {
-                      "type": "null"
-                    }
-                  ],
-                  "title": "Response Linear Channel Event Linear Channel Events Post"
-                }
-              }
-            },
-            "description": "Successful Response"
-          },
-          "422": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            },
-            "description": "Validation Error"
-          }
-        },
-        "summary": "Linear Channel Event"
       }
     },
     "/webhooks/github": {
@@ -22453,6 +22472,50 @@
           }
         },
         "summary": "Github Webhook"
+      }
+    },
+    "/webhooks/linear": {
+      "get": {
+        "description": "Verify endpoint for Linear webhook setup.",
+        "operationId": "linear_webhook_verify_webhooks_linear_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": {
+                    "type": "string"
+                  },
+                  "title": "Response Linear Webhook Verify Webhooks Linear Get",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Linear Webhook Verify"
+      },
+      "post": {
+        "description": "Handle Linear webhooks.\n\nTriggers a new LangGraph run when an issue gets the 'open-swe' label added.",
+        "operationId": "linear_webhook_webhooks_linear_post",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": {
+                    "type": "string"
+                  },
+                  "title": "Response Linear Webhook Webhooks Linear Post",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Linear Webhook"
       }
     },
     "/webhooks/rollout": {

@@ -55,21 +55,27 @@ from langgraph.prebuilt.tool_node import ToolCallRequest, ToolRuntime
 from langgraph.runtime import Runtime
 from langgraph.types import Command
 from langgraph_sdk.errors import APIConnectionError, APIStatusError
-from pydantic import BaseModel, JsonValue
+from pydantic import BaseModel, JsonValue, TypeAdapter
 
 from rt.backend import (
     BackendCallError,
     Hook,
     OpenSweBackend,
     PhaseReply,
+    reporting,
     run_body,
     subagent_of,
 )
 from rt.models import ModelSpec, build_model
-from rt.tools import STATE_KEY, run_id, tool_body
+from rt.remote_files import FILE_TOOLS
+from rt.tools import STATE_KEY, cited, run_id, tool_body
 from rt.tracing import TurnTrace
 
 logger = logging.getLogger(__name__)
+
+_json = TypeAdapter(JsonValue)
+_json_object = TypeAdapter(dict[str, JsonValue])
+_json_content = TypeAdapter(str | list[JsonValue])
 
 # Graph state MDA's own middleware reads: a requested offload's summarization
 # event, which MDA's summarization then applies to every model call.
@@ -95,6 +101,34 @@ def _merge(
     return {**held, **(right or {})}
 
 
+_TOOL_PAIRING_ERRORS: Final = (
+    "no tool output found for function call",
+    "no tool call found for function call output",
+    "unexpected `tool_use_id`",
+    "unexpected tool_use_id",
+    "without `tool_result`",
+    "must be followed by tool messages",
+    "must be a response to a preceeding message with 'tool_calls'",
+    "must be a response to a preceding message with 'tool_calls'",
+)
+
+
+def _has_image(request: ModelRequest) -> bool:
+    return any(
+        block.get("type") == "image"
+        for message in request.messages
+        for block in message.content_blocks
+    )
+
+
+def _tool_pairing_error(exc: Exception) -> bool:
+    """A 400 over unpaired tool history, which the fallback would get as well."""
+    if getattr(exc, "status_code", None) != 400:
+        return False
+    message = str(exc).lower()
+    return any(marker in message for marker in _TOOL_PAIRING_ERRORS)
+
+
 class ModelCall(BaseModel):
     """What the backend's middleware says the next model call sends."""
 
@@ -102,6 +136,9 @@ class ModelCall(BaseModel):
     # Tools the graph's own middleware takes off this call's list.
     hidden_tools: list[str] = []
     model: ModelSpec | None
+    # What a call to that model goes to instead when the conversation holds an
+    # image: None where the model reads images itself.
+    vision: ModelSpec | None = None
     fallback: ModelSpec | None
     use_gateway: bool
 
@@ -165,7 +202,7 @@ class ServedToolsMiddleware(AgentMiddleware):
         adopted = self._backend.adopted
         if adopted is None:
             return frozenset()
-        own = {spec.name for spec in adopted.tools}
+        own = {spec.name for spec in adopted.operations} | FILE_TOOLS
         return frozenset(adopted.excluded) | {t.name for t in self._tools if t.name not in own}
 
     async def awrap_model_call(
@@ -328,6 +365,7 @@ class BackendRunMiddleware(AgentMiddleware[RunState]):
                 system_prompt=reply.system_prompt,
                 hidden_tools=reply.hidden_tools,
                 model=reply.model,
+                vision=reply.vision,
                 fallback=reply.fallback,
                 use_gateway=reply.use_gateway,
             ).model_dump()
@@ -345,12 +383,13 @@ class BackendRunMiddleware(AgentMiddleware[RunState]):
         existing = request.system_message.text if request.system_message is not None else ""
         prompt = f"{call.system_prompt}\n\n{existing}" if existing else call.system_prompt
         request = request.override(system_message=SystemMessage(content=prompt))
-        if call.model is not None:
-            request = request.override(model=build_model(call.model, use_gateway=call.use_gateway))
+        model = call.vision if call.vision is not None and _has_image(request) else call.model
+        if model is not None:
+            request = request.override(model=build_model(model, use_gateway=call.use_gateway))
         try:
             return await handler(request)
-        except Exception:
-            if call.fallback is None:
+        except Exception as exc:
+            if call.fallback is None or _tool_pairing_error(exc):
                 raise
             # As the in-process graph does: another provider before failing the run.
             logger.warning("Model call failed; retrying on the fallback model", exc_info=True)
@@ -425,7 +464,7 @@ async def reported(
     )
     backend.reports.started(body)
     try:
-        with subagent_of(tool_call_id):
+        with subagent_of(tool_call_id), reporting(tool_call_id):
             result = await handler(request)
     except asyncio.CancelledError:
         # A stopped call stays open, as it does in-process.
@@ -441,15 +480,15 @@ async def reported(
 
 
 class RuntimeToolsMiddleware(AgentMiddleware):
-    """Report the tool calls this runtime runs itself, such as ``task``, to the backend's transcript.
+    """Report every tool call this runtime makes to the backend's transcript.
 
-    The backend records the calls of its own tools as it runs them, and
-    ``SandboxToolsMiddleware`` reports the calls this runtime runs in the box.
+    ``FileToolsMiddleware`` reports the file and shell calls itself, as ``reported``
+    is around the checks it applies; ``reported_elsewhere`` names them.
     """
 
-    def __init__(self, backend: OpenSweBackend, served: Collection[str]) -> None:
+    def __init__(self, backend: OpenSweBackend, reported_elsewhere: Collection[str]) -> None:
         self._backend = backend
-        self._served = frozenset(served)
+        self._served = frozenset(reported_elsewhere)
 
     async def awrap_tool_call(
         self,
@@ -459,6 +498,40 @@ class RuntimeToolsMiddleware(AgentMiddleware):
         if request.tool_call["name"] in self._served:
             return await handler(request)
         return await reported(self._backend, request, handler)
+
+
+class IncidentEvidenceMiddleware(AgentMiddleware):
+    """Record each tool result of an incident run as evidence, which the result then cites.
+
+    The report the run writes cites what it found by evidence id, so each result
+    carries the id the backend recorded it under.
+    """
+
+    def __init__(self, backend: OpenSweBackend) -> None:
+        self._backend = backend
+
+    async def awrap_tool_call(
+        self,
+        request: ToolCallRequest,
+        handler: Callable[[ToolCallRequest], Awaitable[ToolMessage | Command]],
+    ) -> ToolMessage | Command:
+        result = await handler(request)
+        if isinstance(result, ToolMessage):
+            return await self._cited(request, result)
+        if isinstance(result, Command) and isinstance(result.update, dict):
+            messages = result.update.get("messages")
+            if isinstance(messages, list):
+                cited = [
+                    await self._cited(request, m) if isinstance(m, ToolMessage) else m
+                    for m in messages
+                ]
+                return dataclasses.replace(result, update={**result.update, "messages": cited})
+        return result
+
+    async def _cited(self, request: ToolCallRequest, result: ToolMessage) -> ToolMessage:
+        return await cited(
+            self._backend, request.tool_call["name"], request.tool_call["args"], result
+        )
 
 
 class _Launched(BaseModel):

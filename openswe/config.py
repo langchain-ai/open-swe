@@ -214,14 +214,6 @@ ENV.var(
     secret=True,
 )
 ENV.var(
-    "MDA_SERVICE_SECRET",
-    "Secret shared with the MDA deployment at MDA_RUNTIME_URL (its MDA_SERVICE_SECRET): MDA "
-    "signs each call its channels make to /linear/channel/* and /github/channel/* with it "
-    "(Standard Webhooks), and the backend verifies the signature; required for the Linear "
-    "and GitHub channels.",
-    secret=True,
-)
-ENV.var(
     "REMOTE_RUNTIME_TOKEN_SECRET",
     "HMAC key(s) signing the run tokens remote runtimes present to /remote-runtime/hooks; "
     "comma-separated, the first signs and every one verifies. Required.",
@@ -267,7 +259,6 @@ ENV.var(
 )
 ENV.var("GITHUB_APP_INSTALLATION_ID", "GitHub App installation used when a run names none.")
 ENV.var("GITHUB_WEBHOOK_SECRET", "HMAC secret for GitHub webhook deliveries.", secret=True)
-ENV.var("MERGE_QUEUE_CONFIG", "Trusted canary queue configuration as JSON; unset disables it.")
 ENV.var(
     "MERGE_QUEUE_DISPATCH_SECRET",
     "Backend-only signing secret for the queue dispatch gateway; never used by agents.",
@@ -316,6 +307,7 @@ ENV.var(
     "DASHBOARD_API_BASE_URL. Use the ngrok URL when the dashboard runs on localhost.",
 )
 ENV.var("SLACK_APP_ID", "Slack app id (A...) whose event deliveries Incidents accepts.")
+ENV.var("LINEAR_WEBHOOK_SECRET", "HMAC secret for Linear webhook deliveries.", secret=True)
 
 # --- Dashboard ------------------------------------------------------------------------------
 ENV.var(

@@ -124,10 +124,9 @@ make dev-ui   # Vite on :3000 and the backend on :2024 forwarding UI requests to
 |---|---|
 | `/` | Dashboard |
 | `POST /webhooks/github` | GitHub issue, PR, and comment webhooks |
-| `POST /github/channel/events` | The MDA deployment's GitHub channel asking what an issue mention starts |
 | `POST /webhooks/slack`, `POST /webhooks/slack/interactivity` | Slack events and Block Kit interactions |
 | `POST /webhooks/slack/commands` | The `/oswe` slash command |
-| `POST /linear/channel/events` | The MDA deployment's Linear channel asking what a Linear event starts |
+| `POST /webhooks/linear` | Linear comment webhooks |
 | `GET /dashboard/api/auth/login`, `GET /dashboard/api/auth/callback` | GitHub login |
 | `/dashboard/api/*` | Dashboard API |
 | `GET /ok`, `GET /health` | Health checks |
@@ -177,6 +176,10 @@ It is refused with a 404 outside `langgraph dev`, which is the only runtime repo
 What still needs the App, and answers `503 GitHub App token unavailable` without one: a published review and its diff, inline review comment reads and writes, and the webhook flows. The reviews list and each PR's preview read as you, so they work.
 
 The `local-gh-dev` skill in `.claude/skills/` walks through the whole loop, including the port and Postgres conflicts between worktrees.
+
+## Mirror your Claude Code sessions
+
+Connect Claude Code from **Settings → Claude Code** on your local dashboard, then run a session with the settings it gives you (`claude --settings ./open-swe-hooks.json`). Each hook event lands on the local backend, and the session shows up as a read-only thread. See [Mirroring Claude Code sessions](reference/claude-code-sync.md).
 
 ## Dashboard on the Vite dev server directly
 
@@ -285,7 +288,7 @@ For "how long until the agent answers", read `@context.step_generation_start_ms`
 
 - The tunnel must be running (`make tunnel`) against port 2024, and the URL in GitHub or Slack must be your ngrok domain. Do not swap in a tunnel that forwards the whole port; see step 3. GitHub shows each delivery under the App's **Advanced** tab; ngrok's inspector at `http://localhost:4040` shows what arrived. With the webhooks-only policy, ngrok itself answers 404 for anything outside `/webhooks/*`, so test with `/webhooks/slack`, not `/ok`.
 - Restart the backend after changing `.env`: `langgraph dev` reloads on code changes only, so a new `GITHUB_WEBHOOK_SECRET` or `SLACK_SIGNING_SECRET` is not picked up until then, and every delivery is rejected as `Invalid signature` in the meantime. Slack then needs **Retry** on its Request URL under **Event Subscriptions**.
-- Webhook secrets are required: without `GITHUB_WEBHOOK_SECRET` or `SLACK_SIGNING_SECRET`, every request to that endpoint is rejected with 401, and the Linear channel's routes verify the deployment's signature with `MDA_SERVICE_SECRET`, the same value as `mda/.env`'s.
+- Webhook secrets are required: without `GITHUB_WEBHOOK_SECRET`, `SLACK_SIGNING_SECRET`, or `LINEAR_WEBHOOK_SECRET`, every request to that endpoint is rejected with 401.
 
 ### Dashboard login fails or won't stay logged in
 

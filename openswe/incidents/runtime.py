@@ -3,7 +3,6 @@
 import json
 import logging
 from collections.abc import Awaitable, Callable, Mapping
-from dataclasses import replace
 from typing import Any
 
 import langgraph_sdk
@@ -11,7 +10,6 @@ from langchain.agents.middleware.types import ModelRequest, ModelResponse
 from langchain_core.messages import HumanMessage, SystemMessage, ToolMessage
 from langchain_core.tools import BaseTool, StructuredTool
 from langgraph.config import get_config
-from langgraph.types import Command
 
 from openswe.incidents import documents, service
 from openswe.incidents.evidence_tools import EvidenceCollector, source_url
@@ -262,7 +260,8 @@ class IncidentMiddleware(OpenSWEMiddleware):
             )
         )
 
-    def _observe(self, message: ToolMessage, call: dict[str, Any]) -> ToolMessage:
+    def observe(self, message: ToolMessage, call: Mapping[str, Any]) -> ToolMessage:
+        """``message``, the result of ``call``, recorded as evidence the report can cite."""
         artifact = message.artifact if isinstance(message.artifact, dict) else {}
         content = artifact.get("structured_content")
         if content is None:
@@ -314,24 +313,3 @@ class IncidentMiddleware(OpenSWEMiddleware):
             else [*message.content, {"type": "text", "text": reference}]
         )
         return message.model_copy(update={"content": enriched})
-
-    async def awrap_tool_call(self, request: Any, handler: Callable[..., Awaitable[Any]]) -> Any:
-        result = await handler(request)
-        if isinstance(result, ToolMessage):
-            return self._observe(result, request.tool_call)
-        if isinstance(result, Command) and isinstance(result.update, dict):
-            messages = result.update.get("messages")
-            if isinstance(messages, list):
-                return replace(
-                    result,
-                    update={
-                        **result.update,
-                        "messages": [
-                            self._observe(message, request.tool_call)
-                            if isinstance(message, ToolMessage)
-                            else message
-                            for message in messages
-                        ],
-                    },
-                )
-        return result

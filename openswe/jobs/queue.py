@@ -59,6 +59,9 @@ class Job(BaseModel):
     created_at: datetime
     # The claim a worker's run holds this job under; ``None`` while it waits.
     claim_token: uuid.UUID | None = None
+    # When this claim took the job over from one whose lease ran out: its worker
+    # died or stalled mid-run.
+    lapsed_lease: datetime | None = None
 
     @classmethod
     def from_row(cls, row: RowMapping) -> Self:
@@ -269,7 +272,7 @@ async def claim_due(limit: int) -> list[Job]:
                 text(
                     f"""
                     WITH due AS (
-                        SELECT id FROM job
+                        SELECT id, locked_until AS lapsed_lease FROM job
                         WHERE due_at <= clock_timestamp()
                             AND (locked_until IS NULL OR locked_until < clock_timestamp())
                         ORDER BY due_at
@@ -279,7 +282,8 @@ async def claim_due(limit: int) -> list[Job]:
                     UPDATE job SET locked_until = clock_timestamp() + CAST(:ttl AS interval),
                         claim_token = gen_random_uuid(), {_SYSTEM_WRITE}
                     FROM due WHERE job.id = due.id
-                    RETURNING {", ".join(f"job.{c.strip()}" for c in _COLUMNS.split(","))}
+                    RETURNING {", ".join(f"job.{c.strip()}" for c in _COLUMNS.split(","))},
+                        due.lapsed_lease
                     """
                 ),
                 {"limit": limit, "ttl": CLAIM_TTL},

@@ -939,14 +939,19 @@ async def queue_controller(queue: MergeQueue, monkeypatch: pytest.MonkeyPatch) -
             validation=ValidationPolicy(dispatch_actor_id=789),
         ),
     )
-    monkeypatch.setenv("MERGE_QUEUE_CONFIG", config.model_dump_json())
+    async with postgres.session() as session:
+        await session.execute(
+            update(WorkspaceRow)
+            .where(WorkspaceRow.id == queue.workspace_id)
+            .values(merge_queue_config=config.model_dump(mode="json", exclude={"workspace_id"}))
+        )
     await controller.start_queue()
     assert controller.CONTROLLER is not None
     return controller.CONTROLLER
 
 
 async def test_queue_startup_preserves_state_and_running_job(
-    queue_controller: QueueController, monkeypatch: pytest.MonkeyPatch
+    queue_controller: QueueController,
 ) -> None:
     from sqlalchemy import text
 
@@ -966,14 +971,39 @@ async def test_queue_startup_preserves_state_and_running_job(
     claimed = next(job for job in await jobs.claim_due(100) if job.id == first_job.id)
 
     await controller.start_queue()
+    assert controller.CONTROLLER is not None
+    assert controller.CONTROLLER.config == queue_controller.config
     next_job = await jobs.get(f"merge-queue:{queue.id}")
     assert next_job is not None and next_job.claim_token == claimed.claim_token
     restored = await MergeQueue.load(queue.id, queue.workspace_id)
     assert restored is not None and not restored.paused
     assert [row.id for row in await restored.requests()] == [pending.id]
 
-    monkeypatch.delenv("MERGE_QUEUE_CONFIG")
+    async with postgres.session() as session:
+        await session.execute(
+            update(WorkspaceRow)
+            .where(WorkspaceRow.id == queue.workspace_id)
+            .values(merge_queue_config=None)
+        )
     await controller.start_queue()
+    assert controller.CONTROLLER is None and runtime.RUNTIME is None
+
+
+async def test_queue_startup_rejects_multiple_configured_workspaces(
+    queue_controller: QueueController,
+) -> None:
+    async with postgres.session() as session:
+        session.add(
+            WorkspaceRow(
+                slug="other-canary",
+                name="Other canary",
+                merge_queue_config=queue_controller.config.model_dump(
+                    mode="json", exclude={"workspace_id"}
+                ),
+            )
+        )
+    with pytest.raises(ValueError, match="Only one canary workspace"):
+        await controller.start_queue()
     assert controller.CONTROLLER is None and runtime.RUNTIME is None
 
 
@@ -1128,6 +1158,11 @@ async def test_queue_dashboard_authorization(
         assert snapshot["paused"] is False and len(snapshot["entries"]) == 1
         assert (await client.delete(f"{path}/requests/{requested['id']}")).status_code == 204
         assert (await client.get(path)).json()["entries"] == []
-        monkeypatch.delenv("MERGE_QUEUE_CONFIG")
+        async with postgres.session() as session:
+            await session.execute(
+                update(WorkspaceRow)
+                .where(WorkspaceRow.id == queue.workspace_id)
+                .values(merge_queue_config=None)
+            )
         await controller.start_queue()
         assert (await client.get(path)).status_code == 404

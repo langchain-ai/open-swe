@@ -1,12 +1,15 @@
-"""Deployment-owned canary configuration; never supplied by a job or API caller."""
+"""Operator-managed canary configuration stored on its owning workspace."""
 
 from typing import Self
 from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field, HttpUrl, model_validator
+from sqlalchemy import select
 
 from openswe.config import ENV
+from openswe.database import postgres
 from openswe.merge_queue.admission import QueuePolicy
+from openswe.workspaces.rows import WorkspaceRow
 
 
 class QueueConfiguration(BaseModel):
@@ -20,6 +23,25 @@ class QueueConfiguration(BaseModel):
     operator_emails: frozenset[str] = Field(min_length=1)
     policy: QueuePolicy
     retention_days: int = Field(default=90, ge=7, le=365)
+
+    @classmethod
+    async def load(cls) -> Self | None:
+        async with postgres.session() as session:
+            rows = (
+                await session.execute(
+                    select(WorkspaceRow.id, WorkspaceRow.merge_queue_config)
+                    .where(WorkspaceRow.merge_queue_config.is_not(None))
+                    .limit(2)
+                )
+            ).all()
+        if not rows:
+            return None
+        if len(rows) != 1:
+            raise ValueError("Only one canary workspace may configure a merge queue")
+        workspace_id, config = rows[0]
+        if not isinstance(config, dict):
+            raise ValueError("Queue configuration must be a JSON object")
+        return cls.model_validate({**config, "workspace_id": workspace_id})
 
     @model_validator(mode="after")
     def validate_controller(self) -> Self:
@@ -40,8 +62,3 @@ class QueueConfiguration(BaseModel):
         ):
             raise ValueError("Dispatch URL must use HTTPS without credentials, query or fragment")
         return self
-
-
-def load_configuration() -> QueueConfiguration | None:
-    raw = ENV.MERGE_QUEUE_CONFIG.optional()
-    return QueueConfiguration.model_validate_json(raw) if raw else None

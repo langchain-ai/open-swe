@@ -311,7 +311,7 @@ class ReviewCard:
                 request,
                 title=pr.title,
                 author=author,
-                outcome="approved" if request.auto_merge else "approved — awaiting manual merge",
+                outcome="approved",
                 review_states=states,
             )
         requester = request.requested_by

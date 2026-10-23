@@ -115,7 +115,9 @@ async def _baby_sit(job: Job) -> str | None:
 @_sandbox_work(WORKSPACE_REFRESH)
 async def _workspace_refresh(job: Job) -> object:
     kind = "update" if job.payload.get("refresh_kind") == "update" else "full"
-    return await run_workspace_refresh_tick(_text(job, "workspace_slug"), kind)
+    # A cron's id outlives each of its runs, so only a one-shot job names one refresh.
+    run_id = None if job.cron else str(job.id)
+    return await run_workspace_refresh_tick(_text(job, "workspace_slug"), kind, run_id=run_id)
 
 
 @WORKER.register(AGENT_SCHEDULE_JOB_KIND)
