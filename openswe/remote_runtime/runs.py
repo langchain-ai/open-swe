@@ -1,26 +1,13 @@
-"""What every graph's MDA run shares: the models it starts with, and running as that run."""
+"""What every graph's MDA run shares: its config, and running as that run."""
 
 from collections.abc import Awaitable, Callable
 
 from langchain_core.runnables import RunnableConfig
 from langgraph.graph import END, START, StateGraph
 from langgraph.runtime import Runtime
-from pydantic import BaseModel, JsonValue
+from pydantic import BaseModel
 
 from openswe.remote_runtime.tokens import RemoteRun
-
-
-class ModelSpec(BaseModel):
-    model_id: str
-    kwargs: dict[str, JsonValue]
-
-
-class RunModels(BaseModel):
-    """The models an MDA run builds its graph with."""
-
-    model: ModelSpec
-    subagent_model: ModelSpec
-    use_gateway: bool
 
 
 class _NodeState(BaseModel):

@@ -13,7 +13,8 @@ from langgraph.graph.state import RunnableConfig
 from openswe.dashboard.workspace_settings import WorkspaceSettings
 from openswe.middleware.dynamic_tools import DynamicToolMiddleware
 from openswe.sandboxes.state import SANDBOX_BACKENDS
-from openswe.server import get_agent
+from openswe.sandboxes.tool_runtime import ToolSurface
+from openswe.server import plan_agent
 
 _MODEL_DEFAULTS = {
     "default_agent_model": "openai:gpt-5.6-sol",
@@ -21,11 +22,6 @@ _MODEL_DEFAULTS = {
     "default_agent_subagent_model": "openai:gpt-5.6-sol",
     "default_agent_subagent_reasoning_effort": "low",
 }
-
-
-class _DummyAgent:
-    def with_config(self, config: RunnableConfig) -> _DummyAgent:
-        return self
 
 
 def _config() -> RunnableConfig:
@@ -96,18 +92,17 @@ async def test_workspace_mcps_load_for_non_admins_with_legacy_plan_state(
         patch("openswe.server.fallback_model_id_for", return_value=None),
         patch("openswe.server.make_model", return_value=MagicMock()),
         patch("openswe.server.construct_system_prompt", return_value="prompt"),
-        patch("openswe.server.create_deep_agent", return_value=_DummyAgent()) as build_agent,
         patch("openswe.users.User.email_for_login", new_callable=AsyncMock, return_value=None),
         patch("openswe.server._mcp_tools_for", new_callable=AsyncMock, return_value=[mcp_tool]),
     ):
         config = _config()
         config["configurable"]["github_login"] = github_login
         config["configurable"]["plan_mode"] = initial_plan_mode
-        await get_agent(config)
+        surface = ToolSurface()
+        await plan_agent(config, surface)
 
     tool_names = {
-        tool.name if hasattr(tool, "name") else tool.__name__
-        for tool in build_agent.call_args.kwargs["tools"]
+        tool.name if hasattr(tool, "name") else tool.__name__ for tool in surface.base_tools
     }
     assert not tool_names.intersection(
         {
@@ -122,7 +117,7 @@ async def test_workspace_mcps_load_for_non_admins_with_legacy_plan_state(
         }
     )
 
-    middleware = build_agent.call_args.kwargs["middleware"]
+    middleware = surface.middleware
     dynamic = next(item for item in middleware if isinstance(item, DynamicToolMiddleware))
     captured: list[str] = []
 

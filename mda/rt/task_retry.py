@@ -1,4 +1,13 @@
+"""Retries a synchronous subagent's ``task`` call through a provider's passing failures.
+
+A subagent has no fallback model, so retrying the delegated task is how it
+recovers; an error the model can fix, such as a prompt too long, is its result.
+"""
+
 import json
+
+import httpx2
+from langchain.agents.middleware import ToolRetryMiddleware
 
 _RETURN_TO_MODEL_CODES = frozenset({"invalid_prompt", "context_length_exceeded"})
 _RETURN_TO_MODEL_STATUS_CODES = frozenset({400, 422})
@@ -8,6 +17,8 @@ _TRANSIENT_ERROR_NAMES = frozenset(
         "APIConnectionError",
         "APITimeoutError",
         "ConnectTimeout",
+        # A subagent's wedged model call (rt.model_calls).
+        "ModelCallTimeoutError",
         "ReadTimeout",
         "TimeoutException",
         "TransportError",
@@ -48,10 +59,6 @@ def _error_fields(exc: Exception) -> dict[str, object]:
 
 
 def _is_httpx_transport_error(exc: Exception) -> bool:
-    try:
-        import httpx2
-    except ImportError:  # pragma: no cover - dependency is declared in production
-        return False
     return isinstance(exc, httpx2.TransportError)
 
 
@@ -77,4 +84,15 @@ def task_on_failure(exc: Exception) -> str:
     return json.dumps(
         {"status": "failed", "source": "subagent", "error": error},
         sort_keys=True,
+    )
+
+
+def task_retry() -> ToolRetryMiddleware:
+    return ToolRetryMiddleware(
+        max_retries=2,
+        tools=["task"],
+        retry_on=task_retry_on,
+        on_failure=task_on_failure,
+        initial_delay=1.0,
+        max_delay=10.0,
     )

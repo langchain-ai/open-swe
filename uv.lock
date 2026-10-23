@@ -2527,6 +2527,7 @@ dependencies = [
     { name = "langsmith" },
     { name = "markdown-it-py" },
     { name = "markdownify" },
+    { name = "open-swe-runtime-api" },
     { name = "openai" },
     { name = "pillow" },
     { name = "pygments" },
@@ -2600,6 +2601,7 @@ requires-dist = [
     { name = "langsmith", specifier = ">=0.14.12" },
     { name = "markdown-it-py", specifier = "==4.2.0" },
     { name = "markdownify", specifier = ">=1.2.3" },
+    { name = "open-swe-runtime-api", editable = "packages/runtime-api" },
     { name = "openai", specifier = ">=3.10.0" },
     { name = "pillow", specifier = ">=12.1.0" },
     { name = "pygments", specifier = ">=2.21.0" },
@@ -2615,6 +2617,17 @@ requires-dist = [
     { name = "websockets", specifier = ">=16.1.1" },
 ]
 provides-extras = ["dev", "sandbox-daytona", "sandbox-modal", "sandbox-runloop", "sandbox-e2b", "sandbox-providers"]
+
+[[package]]
+name = "open-swe-runtime-api"
+version = "0.0.0"
+source = { editable = "packages/runtime-api" }
+dependencies = [
+    { name = "pydantic" },
+]
+
+[package.metadata]
+requires-dist = [{ name = "pydantic", specifier = ">=2.11" }]
 
 [[package]]
 name = "openai"
