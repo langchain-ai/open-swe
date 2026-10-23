@@ -143,8 +143,12 @@ async def test_tenant_id_falls_back_to_listing_projects(monkeypatch: pytest.Monk
 
 
 @pytest.mark.parametrize("legacy", [False, True])
-async def test_error_url_selects_last_failed_descendant(
-    monkeypatch: pytest.MonkeyPatch, legacy: bool
+@pytest.mark.parametrize(
+    ("scenario", "expected"),
+    [("recovered-tool", "failed-model"), ("ambiguous", "root"), ("no-message", "root")],
+)
+async def test_error_url_follows_terminal_failure(
+    monkeypatch: pytest.MonkeyPatch, legacy: bool, scenario: str, expected: str
 ) -> None:
     thread_url = "https://smith.example/o/tenant/projects/p/pid/t/thread"
     monkeypatch.setattr(ls_utils, "get_langsmith_trace_url", AsyncMock(return_value=thread_url))
@@ -159,8 +163,19 @@ async def test_error_url_selects_last_failed_descendant(
         async def results() -> AsyncIterator[SimpleNamespace]:
             if legacy and len(queries) == 1:
                 return
-            for run_id, order in [("root", "1"), ("failed-model", "1.3.4"), ("old", "1.2")]:
-                yield SimpleNamespace(id=run_id, dotted_order=order)
+            for run_id, order, error in [
+                ("root", "1", "TimeoutError('model timed out')"),
+                ("model-call", "1.2", "TimeoutError('model timed out')"),
+                ("failed-model", "1.2.3", "TimeoutError('model timed out')"),
+                ("recovered-tool", "1.4", "ValueError('bad tool input')"),
+            ]:
+                yield SimpleNamespace(id=run_id, dotted_order=order, error=error)
+            if scenario == "ambiguous":
+                yield SimpleNamespace(
+                    id="recovered-timeout",
+                    dotted_order="1.5",
+                    error="TimeoutError('model timed out')",
+                )
 
         return results()
 
@@ -170,8 +185,9 @@ async def test_error_url_selects_last_failed_descendant(
         lambda: SimpleNamespace(runs=SimpleNamespace(query=query)),
     )
 
-    assert await ls_utils.get_langsmith_error_url("thread", "invocation") == (
-        "https://smith.example/o/tenant/projects/p/pid/r/failed-model"
+    terminal_error = None if scenario == "no-message" else "model timed out"
+    assert await ls_utils.get_langsmith_error_url("thread", "invocation", terminal_error) == (
+        f"https://smith.example/o/tenant/projects/p/pid/r/{expected}"
     )
     assert len(queries) == (2 if legacy else 1)
     for query_args in queries:

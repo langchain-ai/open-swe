@@ -196,8 +196,10 @@ async def get_langsmith_trace_url(thread_id: str, project_name: str | None = Non
     return f"{project_url}/t/{thread_id}" if project_url else None
 
 
-async def get_langsmith_error_url(thread_id: str, invocation_id: str | None) -> str | None:
-    """Link to the last failing span in this invocation, falling back to the thread."""
+async def get_langsmith_error_url(
+    thread_id: str, invocation_id: str | None, terminal_error: str | None = None
+) -> str | None:
+    """Follow the terminal error's unique parent chain, otherwise link to its root."""
     thread_url = await get_langsmith_trace_url(thread_id)
     client = _build_langsmith_client()
     if not thread_url or not invocation_id or client is None:
@@ -216,13 +218,33 @@ async def get_langsmith_error_url(thread_id: str, invocation_id: str | None) -> 
                         f"and({_langsmith_metadata_filter('thread_id', thread_id)}, "
                         f"{_langsmith_metadata_filter(field, invocation_id)})"
                     ),
-                    selects=["ID", "DOTTED_ORDER"],
+                    selects=["ID", "DOTTED_ORDER", "ERROR"],
                     min_start_time=lookup_start,
                 )
                 failed_runs = [run async for run in runs]
-                if failed_runs:
-                    failed_run = max(failed_runs, key=lambda run: run.dotted_order)
-                    return f"{thread_url.rsplit('/t/', 1)[0]}/r/{failed_run.id}"
+                if not failed_runs:
+                    continue
+                roots = [
+                    run for run in failed_runs if run.dotted_order and "." not in run.dotted_order
+                ]
+                if len(roots) != 1:
+                    return thread_url
+                root = failed_run = roots[0]
+                if terminal_error and root.error and terminal_error in root.error:
+                    signature = root.error.splitlines()[0]
+                    while children := [
+                        run
+                        for run in failed_runs
+                        if run.dotted_order
+                        and run.dotted_order.rpartition(".")[0] == failed_run.dotted_order
+                        and run.error
+                        and run.error.splitlines()[0] == signature
+                    ]:
+                        if len(children) != 1:
+                            failed_run = root
+                            break
+                        failed_run = children[0]
+                return f"{thread_url.rsplit('/t/', 1)[0]}/r/{failed_run.id}"
     except Exception:
         logger.warning(
             "Could not resolve the failing LangSmith span",

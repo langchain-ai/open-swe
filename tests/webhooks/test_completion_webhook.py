@@ -215,12 +215,13 @@ async def test_later_failed_run_posts_even_if_prior_run_replied(
             "thread_id": "t1",
             "run_id": "run-2",
             "status": "timeout",
+            "error": {"error": "TimeoutError", "message": "model timed out"},
             "metadata": {"invocation_id": "invocation-2"},
         }
     )
 
     assert result["status"] == "ok"
-    trace.assert_awaited_once_with("t1", "invocation-2")
+    trace.assert_awaited_once_with("t1", "invocation-2", "model timed out")
     reply.assert_awaited_once()
     assert reply.await_args is not None
     assert f"<{error_url}|LangSmith>" in reply.await_args.args[2]

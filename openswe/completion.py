@@ -197,6 +197,7 @@ async def _post_failure_reply(
     reason_code: str | None = None,
     *,
     invocation_id: str | None = None,
+    terminal_error: str | None = None,
 ) -> bool:
     """Post a failure reply to the run's originating channel. Best-effort."""
     source = metadata.get("source")
@@ -205,7 +206,7 @@ async def _post_failure_reply(
     if source == "slack" or ctx.slack_thread is not None:
         location = ctx.slack_location
         if location is not None:
-            trace_url = await get_langsmith_error_url(thread_id, invocation_id)
+            trace_url = await get_langsmith_error_url(thread_id, invocation_id, terminal_error)
             slack_text = _failure_text(status, trace_url, reason_code)
             return await post_slack_thread_reply(
                 location[0],
@@ -618,8 +619,14 @@ async def handle_run_completion(payload: dict[str, Any]) -> dict[str, str]:
         return {"status": "ignored", "reason": "repeated failures"}
 
     reason_code = _failure_reason_code(error, metadata, run_id)
+    error_message = error.get("message") if isinstance(error, dict) else error
     posted = await _post_failure_reply(
-        thread_id, metadata, status, reason_code, invocation_id=_invocation_id(payload)
+        thread_id,
+        metadata,
+        status,
+        reason_code,
+        invocation_id=_invocation_id(payload),
+        terminal_error=error_message if isinstance(error_message, str) else None,
     )
     if not posted:
         return {"status": "ignored", "reason": "no reply posted"}
