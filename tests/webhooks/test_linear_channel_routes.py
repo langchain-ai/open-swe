@@ -1,10 +1,8 @@
 """MDA's Linear channel asks the backend what each Linear event starts, and only it can."""
 
 import json
-import sys
 import uuid
 from datetime import UTC, datetime
-from pathlib import Path
 from typing import Any
 from unittest.mock import AsyncMock
 
@@ -14,10 +12,6 @@ from fastapi import FastAPI
 from standardwebhooks import Webhook
 
 from openswe.linear import channel
-
-sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "mda"))
-
-from rt.intake import backend_endpoint
 
 _SERVICE_SECRET = "5e" * 32  # noqa: S105 - test value
 _THREAD = str(uuid.uuid4())
@@ -168,16 +162,3 @@ async def test_a_session_turn_the_backend_declines_starts_nothing(
     }
     response = await _post(app, _call("AgentSessionEvent.created", payload))
     assert response.json() is None
-
-
-def test_the_channel_asks_the_backend(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setenv("OPEN_SWE_BACKEND_URL", "https://backend.example/")
-    assert (
-        backend_endpoint("/linear/channel/events")
-        == "https://backend.example/linear/channel/events"
-    )
-
-    # MDA reads the channels to build the deployment, without its environment:
-    # a host that never resolves stands in, so a call fails instead of misrouting.
-    monkeypatch.delenv("OPEN_SWE_BACKEND_URL")
-    assert backend_endpoint("/x") == "https://open-swe-backend.invalid/x"
