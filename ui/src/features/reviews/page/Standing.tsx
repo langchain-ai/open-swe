@@ -421,7 +421,7 @@ function ChecksRow({
             <PullRequestThreadAction
               pr={status}
               login={login}
-              actions={["fix-checks"]}
+              actions={["fix"]}
             />
           ) : null
         }
@@ -596,7 +596,7 @@ function BranchRow({
             <PullRequestThreadAction
               pr={status}
               login={login}
-              actions={["fix-conflicts"]}
+              actions={["fix"]}
             />
           }
         >

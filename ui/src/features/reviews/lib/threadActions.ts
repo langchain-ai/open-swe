@@ -4,10 +4,7 @@ import {
   type PullRequestThreadResult,
 } from "@/lib/api"
 
-export type PullRequestThreadActionName =
-  | "fix-conflicts"
-  | "fix-checks"
-  | "address-comments"
+export type PullRequestThreadActionName = "fix" | "address-comments"
 
 export interface ThreadActionLabels {
   idle: string
@@ -32,37 +29,21 @@ export interface ThreadAction {
 
 export const threadActions: Record<PullRequestThreadActionName, ThreadAction> =
   {
-    "fix-conflicts": {
+    fix: {
       labels: {
-        idle: "Fix conflicts",
-        running: "Fixing conflicts",
+        idle: "Fix",
+        running: "Fixing",
         checking: "Checking…",
-        unavailable: "Fix conflicts unavailable",
-        queued: "Conflict fix queued",
-        retry: "Retry fix conflicts",
+        unavailable: "Fix unavailable",
+        queued: "Fix queued",
+        retry: "Retry fix",
       },
       toasts: {
-        queued: "Conflict fix queued for",
-        running: "Already fixing conflicts for",
-        failed: "Could not queue a conflict fix for",
+        queued: "Fix queued for",
+        running: "Already fixing",
+        failed: "Could not queue a fix for",
       },
-      run: (pr) => api.fixPullRequest(pr, "conflicts"),
-    },
-    "fix-checks": {
-      labels: {
-        idle: "Fix checks",
-        running: "Fixing checks",
-        checking: "Checking…",
-        unavailable: "Fix checks unavailable",
-        queued: "Check fix queued",
-        retry: "Retry fix checks",
-      },
-      toasts: {
-        queued: "Check fix queued for",
-        running: "Already fixing checks for",
-        failed: "Could not queue a check fix for",
-      },
-      run: (pr) => api.fixPullRequest(pr, "checks"),
+      run: (pr) => api.fixPullRequest(pr),
     },
     "address-comments": {
       labels: {
