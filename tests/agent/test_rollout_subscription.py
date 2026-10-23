@@ -1,11 +1,13 @@
 """A merged agent thread subscribes to later release deploys of its commit."""
 
+from contextlib import asynccontextmanager
 from types import SimpleNamespace
 from unittest.mock import AsyncMock
 from uuid import uuid4
 
 import pytest
 
+from openswe.github.http import GitHubAppUnavailable
 from openswe.rollout_events import ask_to_monitor_rollout, subscribe_merged_thread
 
 _SHA = "ab" * 20
@@ -88,22 +90,69 @@ async def test_subscribe_merged_thread_does_not_listen_twice(
     assert created == []
 
 
+def _skill_file(
+    monkeypatch: pytest.MonkeyPatch, body: bytes | None, *, fail: BaseException | None = None
+) -> AsyncMock:
+    raw_file = AsyncMock(return_value=body)
+
+    @asynccontextmanager
+    async def as_app(owner: str, repo: str):
+        if fail is not None:
+            raise fail
+        assert (owner, repo) == ("lc", "repo")
+        yield SimpleNamespace(repo=lambda _owner, _name: SimpleNamespace(raw_file=raw_file))
+
+    monkeypatch.setattr("openswe.rollout_events.GitHubClient.as_app", as_app)
+    return raw_file
+
+
 @pytest.mark.asyncio
 async def test_ask_to_monitor_rollout_asks_when_a_yes_can_subscribe(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     _ready(monkeypatch)
+    raw_file = _skill_file(monkeypatch, b"name: rollout-check\n")
     dispatch = AsyncMock()
     monkeypatch.setattr("openswe.rollout_events.dispatch_agent_run", dispatch)
     await ask_to_monitor_rollout(
         "thread-1", owner="lc", repo="repo", number=7, metadata={}, sha=_SHA.upper()
     )
+    raw_file.assert_awaited_once_with(".agents/skills/rollout-check/SKILL.md", _SHA)
     dispatch.assert_awaited_once()
     message = dispatch.await_args.args[1]
     assert isinstance(message, str)
     assert ".agents/skills/rollout-check/SKILL.md" in message
     assert _SHA in message
     assert "stop without messaging" in message
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "blocker",
+    ["missing", "unreadable", "unknown_sha"],
+)
+async def test_ask_to_monitor_rollout_does_not_ask_without_a_rollout_skill(
+    monkeypatch: pytest.MonkeyPatch, blocker: str
+) -> None:
+    _ready(monkeypatch)
+    raw_file = _skill_file(
+        monkeypatch,
+        None if blocker == "missing" else b"name: rollout-check\n",
+        fail=GitHubAppUnavailable("no token") if blocker == "unreadable" else None,
+    )
+    dispatch = AsyncMock()
+    monkeypatch.setattr("openswe.rollout_events.dispatch_agent_run", dispatch)
+    await ask_to_monitor_rollout(
+        "thread-1",
+        owner="lc",
+        repo="repo",
+        number=7,
+        metadata={},
+        sha="" if blocker == "unknown_sha" else _SHA,
+    )
+    dispatch.assert_not_awaited()
+    if blocker == "unknown_sha":
+        raw_file.assert_not_awaited()
 
 
 @pytest.mark.asyncio

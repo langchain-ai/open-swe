@@ -13,6 +13,7 @@ from datetime import UTC, datetime, timedelta
 from typing import Literal, TypedDict
 from uuid import UUID
 
+import httpx2
 from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel, JsonValue
 
@@ -20,6 +21,7 @@ from openswe.database import configured
 from openswe.dispatch import dispatch_agent_run
 from openswe.federation.github_oidc import GitHubActionsClaims, InvalidFederatedToken
 from openswe.federation.github_oidc import verify as verify_github_oidc
+from openswe.github.http import GitHubAppUnavailable, GitHubClient
 from openswe.github.repositories import Repository
 from openswe.source_context import SourceContext
 from openswe.webhooks.event_log import EventLog, EventRefs
@@ -46,6 +48,7 @@ _DEPLOYED = "deployed"
 _MAX_COMMITS = 5000
 _MAX_SUBSCRIPTIONS = 5
 _LISTEN_DAYS = 7
+_ROLLOUT_SKILL = ".agents/skills/rollout-check/SKILL.md"
 _SHA_RE = re.compile(r"^[0-9a-fA-F]{40}$")
 _TARGET_RE = re.compile(r"^[a-z0-9][a-z0-9._-]{0,80}$")
 _CONFIG_KEYS = (
@@ -330,6 +333,34 @@ async def subscribe_merged_thread(
         )
 
 
+async def _rollout_skill_at_merge(owner: str, repo: str, sha: str) -> bool:
+    """Whether this merge commit contains the repository rollout skill."""
+    merge_sha = remembered_merge_sha(sha)
+    if not merge_sha:
+        logger.info(
+            "Skipping rollout question; merge commit is unknown",
+            extra={"repository": f"{owner}/{repo}"},
+        )
+        return False
+    try:
+        async with GitHubClient.as_app(owner, repo) as github:
+            body = await github.repo(owner, repo).raw_file(_ROLLOUT_SKILL, merge_sha)
+    except GitHubAppUnavailable, httpx2.HTTPError:
+        logger.warning(
+            "Skipping rollout question; rollout skill could not be read",
+            extra={"repository": f"{owner}/{repo}"},
+            exc_info=True,
+        )
+        return False
+    if body is None:
+        logger.info(
+            "Skipping rollout question; repository has no rollout skill at the merge commit",
+            extra={"repository": f"{owner}/{repo}"},
+        )
+        return False
+    return True
+
+
 async def ask_to_monitor_rollout(
     thread_id: str,
     *,
@@ -342,6 +373,8 @@ async def ask_to_monitor_rollout(
     """Start a run that asks only when the repository rollout skill says to."""
     try:
         if await _deployment_workspace(owner, repo) is None:
+            return
+        if not await _rollout_skill_at_merge(owner, repo, sha):
             return
         workspace = metadata.get("workspace")
         config = _run_config(
