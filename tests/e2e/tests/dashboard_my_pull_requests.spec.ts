@@ -78,6 +78,46 @@ test.describe("my pull requests", () => {
     await expect(
       preview.getByRole("article", { name: "Description" }),
     ).toContainText("The description stays with the review in both layouts.");
+    await expect(
+      preview.getByRole("button", { name: "Close", exact: true }),
+    ).toBeVisible();
+    await preview.getByRole("button", { name: "Agent options" }).click();
+    await page.getByRole("menuitem", { name: "Send a message…" }).click();
+    await expect(
+      page.getByRole("dialog", { name: "Send a message to the agent" }),
+    ).toBeVisible();
+    await page.getByRole("button", { name: "Cancel", exact: true }).click();
+    await preview
+      .getByRole("button", { name: "Collapse src/shared.ts", exact: true })
+      .click();
+    await expect
+      .poll(() => new URL(page.url()).searchParams.get("files"))
+      .toBe("[]");
+    await page.reload();
+    await expect(
+      preview.getByRole("button", {
+        name: "Expand src/shared.ts",
+        exact: true,
+      }),
+    ).toBeVisible();
+    await preview
+      .getByRole("button", { name: "Expand src/shared.ts", exact: true })
+      .click();
+    await preview
+      .getByRole("checkbox", { name: "Viewed src/shared.ts" })
+      .hover();
+    await page.mouse.wheel(0, 650);
+    await expect
+      .poll(() => new URL(page.url()).searchParams.get("at"))
+      .toMatch(/@src\/shared\.ts$/);
+    const savedUrl = page.url();
+    await page.reload();
+    await expect(
+      preview.getByRole("checkbox", { name: "Viewed src/shared.ts" }),
+    ).toBeInViewport();
+    expect(new URL(page.url()).searchParams.get("at")).toBe(
+      new URL(savedUrl).searchParams.get("at"),
+    );
     await preview
       .getByRole("checkbox", { name: "Viewed src/shared.ts" })
       .click();

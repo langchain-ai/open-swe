@@ -2,21 +2,10 @@ import type { QueryClient } from "@tanstack/react-query"
 
 import { api, type OpenPullRequest } from "@/lib/api"
 import { invalidationTopic } from "@/lib/invalidations/topics"
-import { BROWSER_CACHE_MAX_AGE_MS, expiresInBrowser } from "@/lib/query"
 
 type PullRequestRef = { repo: string; number: number }
 
 export const PULL_REQUEST_STATUS = "pull-request-status"
-
-export function pullRequestPreviewQuery(pr: PullRequestRef) {
-  const [owner = "", name = ""] = pr.repo.split("/")
-  return {
-    queryKey: ["pr-preview", owner, name, pr.number],
-    queryFn: () => api.getPullRequestPreview(owner, name, pr.number),
-    ...expiresInBrowser,
-    gcTime: BROWSER_CACHE_MAX_AGE_MS,
-  } as const
-}
 
 /** Invalidated whenever the pull request or its review changes; `repo` is `owner/name`. */
 export function pullRequestTopic(pr: PullRequestRef) {
