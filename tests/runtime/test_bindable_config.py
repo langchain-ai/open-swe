@@ -1,6 +1,6 @@
-"""Factories must not bake the server's runtime plumbing into the graphs they return."""
+"""The read-only graph must not bake the server's runtime plumbing into what it returns."""
 
-from openswe.reviewer import get_reviewer_agent
+from openswe.graphs.read_only import read_only_graph
 from openswe.runtime import bindable_config
 
 
@@ -34,7 +34,7 @@ async def test_factory_graph_carries_no_runtime_from_the_read_path() -> None:
         "configurable": {"thread_id": "t1", "__pregel_runtime": _ReadOnlyRuntime()},
     }
 
-    graph = await get_reviewer_agent(config)
+    graph = await read_only_graph(config)
 
     assert "__pregel_runtime" not in (graph.config or {}).get("configurable", {})
     assert graph.config["configurable"]["thread_id"] == "t1"

@@ -12,7 +12,6 @@ import re
 from collections.abc import Awaitable, Callable
 from typing import Any, NotRequired, cast
 
-from deepagents import create_deep_agent
 from deepagents.backends.protocol import SandboxBackendProtocol
 from deepagents.middleware.subagents import GENERAL_PURPOSE_SUBAGENT
 from langchain.agents.middleware import ModelCallLimitMiddleware, ModelRetryMiddleware
@@ -25,7 +24,6 @@ from langchain.agents.middleware.types import (
 from langchain_anthropic.middleware import AnthropicPromptCachingMiddleware
 from langchain_core.language_models.chat_models import BaseChatModel
 from langgraph.graph.state import RunnableConfig
-from langgraph.pregel import Pregel
 from langgraph.runtime import Runtime
 
 from openswe.dashboard.options import gate_fable_model
@@ -39,20 +37,16 @@ from openswe.middleware import (
     ExcludeToolsMiddleware,
     ModelErrorMiddleware,
     RepairOrphanedToolCallsMiddleware,
-    ToolErrorMiddleware,
 )
 from openswe.middleware.prepare_run import PrepareRunState
 from openswe.middleware.trace import OpenSWEMiddleware
-from openswe.prompts import apply_tool_descriptions, common_prompt, prompt
+from openswe.prompts import apply_tool_descriptions, prompt
 from openswe.review.author_guidance import SteeringHistory
 from openswe.run_config import RunConfig
 from openswe.runtime import (
     DEFAULT_LLM_MAX_TOKENS,
-    DEFAULT_RECURSION_LIMIT,
-    bindable_config,
     ensure_sandbox_for_thread,
     get_cached_sandbox_backend,
-    graph_loaded_for_execution,
 )
 from openswe.sandboxes.repo_prep import prepare_review_repo
 from openswe.sandboxes.tool_runtime import ModelChoice, SurfaceModels, SurfaceSubagent, ToolSurface
@@ -288,34 +282,17 @@ async def scout_models(cfg: RunConfig) -> SurfaceModels:
     )
 
 
-async def get_review_scout(config: RunnableConfig) -> Pregel:
-    return await build_review_scout(config)
-
-
-async def build_review_scout(
-    config: RunnableConfig, *, tool_surface: ToolSurface | None = None
-) -> Pregel:
-    """The review scout graph; ``tool_surface`` also receives what a remote model loop needs."""
+async def plan_review_scout(config: RunnableConfig, surface: ToolSurface) -> None:
+    """Plan a scout run into ``surface``: the tools, middleware, models and subagents its MDA run plays."""
     config = config.copy()
     configurable = dict(config.get("configurable") or {})
     config["configurable"] = configurable
-    config.setdefault("recursion_limit", DEFAULT_RECURSION_LIMIT)
     cfg = RunConfig.parse(configurable)
     thread_id = cfg.thread_id
-
-    if thread_id is None or not graph_loaded_for_execution(config):
-        return create_deep_agent(
-            system_prompt="",
-            tools=[],
-            middleware=[
-                AnthropicPromptCachingMiddleware(ttl="1h", unsupported_model_behavior="ignore")
-            ],
-        ).with_config(bindable_config(config))
+    if thread_id is None:
+        raise ValueError("A scout run needs a thread")
 
     models = await scout_models(cfg)
-    model = _make_model_or_defer(
-        models.main.model_id, use_gateway=models.use_gateway, **models.main.kwargs
-    )
 
     async def reconnect_backend(
         _thread_id: str = thread_id, _cfg: RunConfig = cfg
@@ -328,7 +305,6 @@ async def build_review_scout(
             PrepareReviewScoutRunMiddleware(thread_id=thread_id, config=config),
             AnthropicPromptCachingMiddleware(ttl="1h", unsupported_model_behavior="ignore"),
             ModelCallLimitMiddleware(run_limit=SCOUT_MODEL_CALL_LIMIT, exit_behavior="end"),
-            ToolErrorMiddleware(),
             ExcludeToolsMiddleware(excluded=SHELL_SEARCH_EXCLUDED_TOOLS),
             RepairOrphanedToolCallsMiddleware(),
             ModelRetryMiddleware(retry_on=(TimeoutError,)),
@@ -336,40 +312,22 @@ async def build_review_scout(
             FinishPlanMiddleware(thread_id=thread_id, config=config),
         ],
     )
-    graph = create_deep_agent(
-        model=model,
-        system_prompt=common_prompt(),
-        subagents=[
-            {
-                **GENERAL_PURPOSE_SUBAGENT,
-                "system_prompt": common_prompt(GENERAL_PURPOSE_SUBAGENT["system_prompt"]),
-            },
-        ],
-        tools=apply_tool_descriptions(
-            [
-                walkthrough_plan_chunk,
-                walkthrough_split_hunks,
-                walkthrough_move_to_other,
-                walkthrough_describe_other,
-                record_human_input,
-            ]
-        ),
-        backend=get_cached_sandbox_backend(thread_id, reconnect=reconnect_backend),
-        middleware=middleware,
-    ).with_config(bindable_config(config))
-    if tool_surface is not None:
-        tool_surface.graph = graph
-        tool_surface.middleware = middleware
-        tool_surface.models = models
-        tool_surface.subagents = [
-            SurfaceSubagent(
-                name=GENERAL_PURPOSE_SUBAGENT["name"],
-                description=GENERAL_PURPOSE_SUBAGENT["description"],
-                system_prompt=GENERAL_PURPOSE_SUBAGENT["system_prompt"],
-            )
+    surface.base_tools = apply_tool_descriptions(
+        [
+            walkthrough_plan_chunk,
+            walkthrough_split_hunks,
+            walkthrough_move_to_other,
+            walkthrough_describe_other,
+            record_human_input,
         ]
-    return graph
-
-
-# langgraph.json entrypoint. Runs trace into LANGSMITH_PROJECT like everything else.
-traced_review_scout = get_review_scout
+    )
+    surface.middleware = middleware
+    surface.files = get_cached_sandbox_backend(thread_id, reconnect=reconnect_backend)
+    surface.models = models
+    surface.subagents = [
+        SurfaceSubagent(
+            name=GENERAL_PURPOSE_SUBAGENT["name"],
+            description=GENERAL_PURPOSE_SUBAGENT["description"],
+            system_prompt=GENERAL_PURPOSE_SUBAGENT["system_prompt"],
+        )
+    ]
