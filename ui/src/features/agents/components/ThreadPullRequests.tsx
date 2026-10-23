@@ -459,22 +459,21 @@ function PullRequestLink({
 }
 
 const FIX_LABELS: Record<ThreadFixScope, string> = {
-  conflicts: "Fix conflicts",
-  checks: "Fix checks",
+  repair: "Fix",
   comments: "Address comments",
 }
 
-/** One item per problem, so a fix never quietly takes on the others. */
+/** Conflicts and checks share one fix; comments stay separate. */
 function fixScopes(
   pullRequest: AgentPullRequest,
   health: AgentPullRequestHealth | undefined
 ): Array<ThreadFixScope> {
   if (!health || !hasActionableIssues(pullRequest, health)) return []
   return [
-    ...(health.mergeConflictState === "conflicting"
-      ? (["conflicts"] as const)
+    ...(health.mergeConflictState === "conflicting" ||
+    health.failingChecks.length > 0
+      ? (["repair"] as const)
       : []),
-    ...(health.failingChecks.length > 0 ? (["checks"] as const) : []),
     ...((health.unresolvedReviewThreadCount ?? 0) > 0
       ? (["comments"] as const)
       : []),
