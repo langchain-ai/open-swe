@@ -1035,6 +1035,92 @@ async def test_a_read_file_the_backend_serves_gets_the_read_checks(
     assert "not a valid image" in message.content
 
 
+async def test_each_run_lists_only_the_skills_it_may_see_and_reads_them_here(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from deepagents.middleware.filesystem import FilesystemMiddleware
+    from deepagents.middleware.skills import SkillsState
+    from rt.skills import RunSkillsMiddleware, SkillFiles
+    from runtime_api.loop import ToolResultReply
+    from runtime_api.skills import RunSkills, SkillFile
+
+    monkeypatch.setenv("OPEN_SWE_BACKEND_URL", "https://backend.invalid")
+    for module in ("rt.middleware", "rt.tools", "rt.file_tools"):
+        monkeypatch.setattr(f"{module}.run_id", lambda: "run-1")
+    backend = OpenSweBackend("secret-token")
+    asked: list[str] = []
+
+    async def answer(name: str, body: dict[str, JsonValue]) -> BaseModel:
+        asked.append(name)
+        if name != "skills":
+            return ToolResultReply()
+        deploy = "---\nname: deploy\ndescription: Ship it\n---\n\nRun make deploy.\n"
+        return RunSkills(
+            files=[SkillFile(path="/organization-skills/deploy/SKILL.md", content=deploy)]
+        )
+
+    _answering(monkeypatch, backend, answer)
+    sources = ["/skills/", "/organization-skills/"]
+    skill_files = SkillFiles(backend, lambda: "run-1")
+    # A run that acted for someone listed their skill; this thread's checkpoint kept it.
+    kept = cast(
+        SkillsState,
+        {
+            "messages": [],
+            "skills_metadata": [
+                {"name": "personal", "description": "private", "path": "/skills/personal/SKILL.md"}
+            ],
+        },
+    )
+
+    listed = await RunSkillsMiddleware(backend=skill_files, sources=sources).abefore_agent(
+        kept, MagicMock(), {}
+    )
+
+    assert listed is not None
+    assert [skill["name"] for skill in listed["skills_metadata"]] == ["deploy"]
+    files = FileToolsMiddleware(
+        backend,
+        FilesSpec(),
+        300,
+        remote={},
+        remote_files=MagicMock(),
+        in_box=True,
+        skills={tool.name: tool for tool in FilesystemMiddleware(backend=skill_files).tools},
+        skill_sources=sources,
+    )
+    runtime = ToolRuntime(
+        state={"messages": []},
+        context=None,
+        config={},
+        stream_writer=lambda event: None,
+        tool_call_id="call-1",
+        store=None,
+    )
+    in_box = AsyncMock()
+    read = await files.awrap_tool_call(
+        ToolCallRequest(
+            tool_call={
+                "name": "read_file",
+                "args": {"file_path": "/organization-skills/deploy/SKILL.md"},
+                "id": "call-1",
+                "type": "tool_call",
+            },
+            tool=None,
+            state={"messages": []},
+            runtime=runtime,
+        ),
+        in_box,
+    )
+    await backend.reports.drain()
+
+    assert isinstance(read, ToolMessage) and "Run make deploy." in read.text
+    in_box.assert_not_awaited()
+    # Listed once for the run, and no file was read through the backend's files.
+    assert asked.count("skills") == 1
+    assert not [name for name in asked if name.startswith("files.")]
+
+
 class _ToolCallingModel(GenericFakeChatModel):
     def bind_tools(self, tools: object, **kwargs: object) -> Self:
         return self

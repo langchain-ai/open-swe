@@ -109,6 +109,9 @@ class Catalog(BaseModel):
     worker_webhook: str | None = None
     # The most model calls one run of the graph makes; None leaves it to the runtime.
     model_call_limit: int | None = None
+    # Where the run's skills are (``runtime_api.skills``), a later source's skill
+    # taking the place of an earlier one's of the same name.
+    skill_sources: list[str] = []
 
 
 # Only reads the plan, so it is safe to send again.

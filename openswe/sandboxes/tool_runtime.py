@@ -158,8 +158,11 @@ class ToolSurface:
     subagents: Sequence[SurfaceSubagent] = ()
     # The thread's files: its sandbox, with the paths this deployment serves routed in.
     files: BackendProtocol | None = None
-    # Paths under ``files`` this deployment serves rather than the sandbox, such as skills.
+    # Paths under ``files`` this deployment serves rather than the sandbox.
     backend_paths: tuple[str, ...] = ()
+    # Where the run's skills are under ``files``, a later source's skill taking the
+    # place of an earlier one's of the same name.
+    skill_sources: tuple[str, ...] = ()
     # Where large tool results and binary reads are offloaded.
     artifacts_root: str = "/"
     # The guards on the shell commands the run's tools run, as tool-call middleware.
