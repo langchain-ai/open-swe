@@ -53,6 +53,7 @@ from rt.middleware import (
 from rt.model_calls import model_call_guards
 from rt.models import build_model
 from rt.remote_files import FILE_TOOLS, RemoteFiles, remote_file_tools
+from rt.task_retry import task_retry
 from rt.tools import operation_tool, run_id
 from runtime_api.catalog import Catalog, RunModels
 
@@ -227,6 +228,7 @@ async def agent(runtime: ManagedServerRuntime) -> DeepAgentDefinition:
             *replace_sandbox,
             *_backend_reports(backend, catalog),
             file_tools,
+            task_retry(),
             ServedToolsMiddleware(offered, excluded | code_only, backend),
             *_code_mode(context.graph, from_code, catalog.described),
             *_browser(context.graph, backend),
