@@ -72,7 +72,7 @@ _WORKER_DESCRIPTION: Final = (
 )
 # Callable from the reviewer's code mode, so large results can be filtered or written
 # to files without passing through the model.
-_REVIEWER_PTC_TOOLS: Final[list[str | BaseTool]] = [
+_REVIEWER_PTC_TOOLS: Final = (
     "read_file",
     "write_file",
     "web_search",
@@ -84,7 +84,7 @@ _REVIEWER_PTC_TOOLS: Final[list[str | BaseTool]] = [
     "publish_review",
     "resolve_finding_thread",
     "reply_to_finding_thread",
-]
+)
 
 
 class OpenSweRunContext(BaseModel):
@@ -115,11 +115,20 @@ def _backend_reports(backend: OpenSweBackend, catalog: Catalog) -> list[AgentMid
 
 
 def _code_mode(
-    graph: Graph, from_code: Sequence[BaseTool], described: Mapping[str, str]
+    graph: Graph,
+    from_code: Sequence[BaseTool],
+    described: Mapping[str, str],
+    file_tools: FileToolsMiddleware,
 ) -> list[AgentMiddleware | CodeInterpreterMiddleware]:
     """The graph's code mode, with every tool the catalog offers from code callable from it."""
     if graph == "reviewer":
-        interpreter = CodeInterpreterMiddleware(ptc=[*_REVIEWER_PTC_TOOLS, *from_code])
+        interpreter = CodeInterpreterMiddleware(
+            ptc=[
+                *(name for name in _REVIEWER_PTC_TOOLS if name not in FILE_TOOLS),
+                *file_tools.code_tools(_REVIEWER_PTC_TOOLS),
+                *from_code,
+            ]
+        )
     elif from_code:
         # As the in-process agent's code mode: state per turn, subagents through `task`.
         interpreter = CodeInterpreterMiddleware(ptc=list(from_code), subagents=False, mode="turn")
@@ -176,10 +185,6 @@ async def agent(runtime: ManagedServerRuntime) -> DeepAgentDefinition:
     code_only = frozenset(catalog.code_only)
     in_code = [tool for tool in tools if tool.name in code_only]
     offered = [tool for tool in registered if tool.name not in code_only]
-    from_code = [
-        *in_code,
-        *(tool for tool in tools if tool.name in catalog.also_from_code and tool not in in_code),
-    ]
     subagent_tools = {
         subagent.name: offered
         if subagent.tools is None
@@ -197,6 +202,11 @@ async def agent(runtime: ManagedServerRuntime) -> DeepAgentDefinition:
         remote_files=remote,
         in_box=in_box,
     )
+    from_code = [
+        *in_code,
+        *(tool for tool in tools if tool.name in catalog.also_from_code and tool not in in_code),
+        *file_tools.code_tools(catalog.also_from_code),
+    ]
     sync_subagents: list[SubAgent] = [
         {
             "name": subagent.name,
@@ -230,7 +240,7 @@ async def agent(runtime: ManagedServerRuntime) -> DeepAgentDefinition:
             file_tools,
             task_retry(),
             ServedToolsMiddleware(offered, excluded | code_only, backend),
-            *_code_mode(context.graph, from_code, catalog.described),
+            *_code_mode(context.graph, from_code, catalog.described, file_tools),
             *_browser(context.graph, backend),
             ModelCallLimitMiddleware(run_limit=_MODEL_CALL_LIMIT, exit_behavior="end"),
             *model_call_guards(),

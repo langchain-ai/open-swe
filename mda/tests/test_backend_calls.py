@@ -778,6 +778,57 @@ async def test_a_command_the_guards_refuse_is_recorded_with_their_reason(
     assert recorded.content == "pr_creation_fallback_blocked"
 
 
+async def test_a_command_code_mode_runs_is_put_to_the_guards_too(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Code mode calls tools past the tool-call chain, so its shell tool checks each call itself."""
+    from langchain.agents.middleware.types import ModelRequest
+    from rt.remote_files import RemoteFiles, remote_file_tools
+
+    monkeypatch.setenv("OPEN_SWE_BACKEND_URL", "https://backend.invalid")
+    for module in ("rt.middleware", "rt.tools", "rt.file_tools"):
+        monkeypatch.setattr(f"{module}.run_id", lambda: "run-1")
+    backend = OpenSweBackend("secret-token")
+    refusal = ShellVerdict(allowed=False, refusal="pr_creation_fallback_blocked")
+    monkeypatch.setattr(backend, "post", AsyncMock(return_value=refusal.model_dump(mode="json")))
+    monkeypatch.setattr(backend, "tool_started", AsyncMock())
+    monkeypatch.setattr(backend, "tool_result", AsyncMock(return_value={}))
+    ran = AsyncMock(return_value="opened")
+
+    @tool("execute")
+    async def box_execute(command: str) -> str:
+        """Run a command in the box."""
+        return await ran(command)
+
+    remote = RemoteFiles(backend, lambda: "run-1")
+    files = FileToolsMiddleware(
+        backend,
+        FilesSpec(guards=["shell_commands"]),
+        300,
+        remote=remote_file_tools(remote, "/"),
+        remote_files=remote,
+        in_box=True,
+    )
+    model_request = MagicMock(spec=ModelRequest)
+    model_request.tools = [box_execute]
+    await files.awrap_model_call(model_request, AsyncMock())
+    [execute] = files.code_tools(["execute", "web_search"])
+    runtime = ToolRuntime(
+        state={"messages": []},
+        context=None,
+        config={},
+        stream_writer=lambda event: None,
+        tool_call_id="ptc_execute_1",
+        store=None,
+    )
+
+    assert execute.coroutine is not None
+    refused = await execute.coroutine(runtime=runtime, command="gh pr create --fill")
+
+    assert isinstance(refused, ToolMessage) and refused.content == "pr_creation_fallback_blocked"
+    ran.assert_not_awaited()
+
+
 async def test_a_read_file_the_backend_serves_gets_the_read_checks(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

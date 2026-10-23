@@ -451,7 +451,7 @@ class RunSession:
             ),
             # Offered to the model, and callable from MDA's code mode too.
             also_from_code=sorted(
-                name for name in operations if self.surface.code_mode and direct_and_from_code(name)
+                name for name in offered if self.surface.code_mode and direct_and_from_code(name)
             ),
             described={name: prompt("tools/display-description") for name in _DESCRIBED_TOOLS},
             files=FilesSpec(

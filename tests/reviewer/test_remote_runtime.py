@@ -430,7 +430,18 @@ async def test_mda_catalog_leaves_integrations_and_code_mode_to_mda(
     assert "private-owner" not in str(catalog)
     assert "private-gateway" not in str(catalog)
     assert catalog["code_only"] == ["manage_thread", "mcp_search"]
-    assert catalog["also_from_code"] == ["web_search"]
+    # Code mode calls the file and shell tools too, through MDA's own with their checks.
+    assert catalog["also_from_code"] == [
+        "delete",
+        "edit_file",
+        "execute",
+        "glob",
+        "grep",
+        "ls",
+        "read_file",
+        "web_search",
+        "write_file",
+    ]
 
 
 async def test_an_operation_gets_the_state_it_reads_and_answers_the_state_it_changed() -> None:

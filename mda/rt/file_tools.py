@@ -9,8 +9,8 @@ the backend's guards, which inspect the push and may need a person's approval, s
 the match here is wider than what they block. Tool errors become results the model
 can act on. Where the catalog lists the checks, a file posing as an image is not
 attached and reading a file loads the ``AGENTS.md`` files above it. The transcript
-hears of each call alongside it. Code mode's calls skip the checks, as code mode
-always has.
+hears of each call alongside it. Code mode calls them through ``code_tools``, so
+its calls meet the same checks.
 """
 
 import asyncio
@@ -19,17 +19,21 @@ import logging
 import posixpath
 import random
 import re
-from collections.abc import Awaitable, Callable, Mapping
+from collections.abc import Awaitable, Callable, Iterable, Mapping
 from functools import partial
 from typing import Final
 
 from deepagents.backends.protocol import BackendProtocol
 from langchain.agents.middleware import AgentMiddleware
+from langchain.agents.middleware.types import ModelRequest, ModelResponse
+from langchain.tools import ToolRuntime
 from langchain_core.messages import ToolCall, ToolMessage
-from langchain_core.tools import BaseTool
+from langchain_core.tools import BaseTool, StructuredTool
+from langchain_core.utils.function_calling import convert_to_openai_tool
 from langgraph.prebuilt.tool_node import ToolCallRequest
 from langgraph.types import Command
 from langsmith.sandbox import SandboxRetryableConnectionError
+from pydantic import JsonValue
 from runtime_api.catalog import FilesSpec
 from runtime_api.endpoint import call
 from runtime_api.operations import CHECK_SHELL, ShellCheck
@@ -87,6 +91,8 @@ class FileToolsMiddleware(AgentMiddleware):
         self._backend = backend
         self._remote = dict(remote)
         self._in_box = in_box
+        # The box's own tools, as the model is offered them; code mode runs them from here.
+        self._box: dict[str, BaseTool] = {}
         self._backend_paths = tuple(spec.backend_paths)
         self._guards_shell = "shell_commands" in spec.guards
         self._execute_timeout = execute_timeout
@@ -97,6 +103,40 @@ class FileToolsMiddleware(AgentMiddleware):
             if "agents_md" in spec.checks
             else None
         )
+
+    def code_tools(self, names: Iterable[str]) -> list[StructuredTool]:
+        """The file and shell tools among ``names``, for code mode, each call checked."""
+        return [self._code_tool(self._remote[name]) for name in sorted({*names} & {*self._remote})]
+
+    def _code_tool(self, template: BaseTool) -> StructuredTool:
+        name = template.name
+
+        async def run(runtime: ToolRuntime, **arguments: JsonValue) -> ToolMessage | Command:
+            call_ = ToolCall(name=name, args=arguments, id=runtime.tool_call_id, type="tool_call")
+            request = ToolCallRequest(
+                tool_call=call_, tool=template, state=runtime.state, runtime=runtime
+            )
+            return await self.awrap_tool_call(request, self._run_own)
+
+        return StructuredTool.from_function(
+            coroutine=run,
+            name=name,
+            description=template.description,
+            args_schema=convert_to_openai_tool(template)["function"]["parameters"],
+        )
+
+    async def awrap_model_call(
+        self,
+        request: ModelRequest,
+        handler: Callable[[ModelRequest], Awaitable[ModelResponse]],
+    ) -> ModelResponse:
+        if self._in_box:
+            self._box.update(
+                (tool.name, tool)
+                for tool in request.tools
+                if isinstance(tool, BaseTool) and tool.name in FILE_TOOLS
+            )
+        return await handler(request)
 
     async def awrap_tool_call(
         self, request: ToolCallRequest, handler: Handler
@@ -156,19 +196,12 @@ class FileToolsMiddleware(AgentMiddleware):
 
     async def _run_remote(self, request: ToolCallRequest) -> ToolMessage | Command:
         """The call against the backend's files, as the box's own tool would run it."""
-        tool = self._remote[request.tool_call["name"]]
-        call_id = request.tool_call.get("id") or ""
-        result = await tool.ainvoke(
-            ToolCall(
-                name=tool.name,
-                args={**request.tool_call["args"], "runtime": request.runtime},
-                id=call_id,
-                type="tool_call",
-            )
-        )
-        if isinstance(result, ToolMessage | Command):
-            return result
-        return ToolMessage(content=str(result), tool_call_id=call_id, name=tool.name)
+        return await _invoked(self._remote[request.tool_call["name"]], request)
+
+    async def _run_own(self, request: ToolCallRequest) -> ToolMessage | Command:
+        """A code mode call, run by the tool the model's own call of it runs."""
+        tools = self._box if self._in_box else self._remote
+        return await _invoked(tools[request.tool_call["name"]], request)
 
     async def _checked(self, request: ToolCallRequest, handler: Handler) -> ToolMessage | Command:
         """``handler`` in the graph's own order: image reads, then tool errors, then AGENTS.md."""
@@ -197,6 +230,21 @@ class FileToolsMiddleware(AgentMiddleware):
                 name=request.tool_call["name"],
                 status="error",
             )
+
+
+async def _invoked(tool: BaseTool, request: ToolCallRequest) -> ToolMessage | Command:
+    call_id = request.tool_call.get("id") or ""
+    result = await tool.ainvoke(
+        ToolCall(
+            name=tool.name,
+            args={**request.tool_call["args"], "runtime": request.runtime},
+            id=call_id,
+            type="tool_call",
+        )
+    )
+    if isinstance(result, ToolMessage | Command):
+        return result
+    return ToolMessage(content=str(result), tool_call_id=call_id, name=tool.name)
 
 
 def _guarded(command: str) -> bool:
