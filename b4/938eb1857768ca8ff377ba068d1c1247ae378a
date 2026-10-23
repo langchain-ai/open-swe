@@ -1,0 +1,43 @@
+openswe/server.py
+  s_8c15db54e0c42b::t_c4334412de13b5 234
+  s_8c15db54e0c42b::t_580aa6d6439ebf 547
+  s_8c15db54e0c42b::t_d8b07c0620d046 627
+  s_8c15db54e0c42b::t_b8322cb118073d 1752
+openswe/webhooks/common.py
+  s_8c15db54e0c42b::t_59c4c8f46d848c 1541-1544,1546
+  s_8c15db54e0c42b::t_7c9444358fa952 1539,1545
+openswe/tools/__init__.py
+  s_8c15db54e0c42b::t_e199e43ba43c5c 53
+  s_8c15db54e0c42b::t_873482a77d363d 136
+  s_8c15db54e0c42b::t_36b09704d79e1c 232
+openswe/rollout_events.py
+  s_8c15db54e0c42b::t_bef8af59ed15ac 40
+  s_8c15db54e0c42b::t_a51325de27db4e 4-5
+openswe/tools/request_rollout_check.py
+  s_8c15db54e0c42b::t_c8eeb17e18ee15 1-17
+tests/tools/test_request_rollout_check.py
+  s_8c15db54e0c42b::t_159c1d964c3b7d 1-39
+openswe/resources/prompts/tools/request_rollout_check.md
+  s_8c15db54e0c42b::t_fdd9cca48cb282 1-3
+tests/agent/test_agent_thread_pr_state.py
+  s_8c15db54e0c42b::t_e3f3f6cd10bf66 463-482
+  s_8c15db54e0c42b::t_38a29008f63c22 489
+  s_8c15db54e0c42b::t_e7026c44c39146 435,440
+  s_8c15db54e0c42b::t_ac4beb41afdec0 462
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "b4938eb1857768ca8ff377ba068d1c1247ae378a",
+  "prompts": {},
+  "sessions": {
+    "s_8c15db54e0c42b": {
+      "agent_id": {
+        "tool": "cursor",
+        "id": "b496840a-1bef-4d5a-8172-c0a066b24285",
+        "model": "grok-4.7"
+      },
+      "human_author": "Joaquin Borggio <joaquin@langchain.dev>"
+    }
+  }
+}

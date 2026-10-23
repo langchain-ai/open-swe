@@ -1,0 +1,47 @@
+tests/webhooks/test_rollout_webhook.py
+  s_8c15db54e0c42b::t_f7f0f0a66ea8cb 54-55,57
+  s_8c15db54e0c42b::t_0676c511b2270c 166-184
+  s_8c15db54e0c42b::t_2f8b39c85ea55e 5
+  s_8c15db54e0c42b::t_df3f823282af5e 76-79
+tests/agent/test_rollout_subscription.py
+  s_8c15db54e0c42b::t_e2ea2e29d416b5 1-102
+  s_8c15db54e0c42b::t_735a2f05a79d21 103-104
+tests/agent/test_agent_thread_pr_state.py
+  s_8c15db54e0c42b::t_9f3dc72ff78390 422-487
+  s_8c15db54e0c42b::t_fe880688dacc3d 33-41,43-45
+agent/webhooks/common.py
+  s_8c15db54e0c42b::t_9bad887bc8083f 1442
+  s_8c15db54e0c42b::t_8c038dcf6679ee 1527-1536,1538
+  s_8c15db54e0c42b::t_ec5b1946c91ac1 1443
+  s_8c15db54e0c42b::t_f69da9c1003207 1473-1477
+  s_8c15db54e0c42b::t_5b2c31e9f64865 1537
+agent/github/pull_requests.py
+  s_8c15db54e0c42b::t_d7fa73dbae9eac 526
+agent/rollout_events.py
+  s_8c15db54e0c42b::t_7d11ae965c9506 3-5,8,12,16,19-20,22-26,40-41,43-44,46,48-63,66-71,90-92,111-166,195,199,207-271,274-276,278,284-294
+agent/webhooks/event_subscriptions.py
+  s_8c15db54e0c42b::t_b7bc3be8a6520a 233-249
+  s_8c15db54e0c42b::t_76c22d07d09bf3 170-171
+  s_8c15db54e0c42b::t_f2d20528ce772c 232
+agent/webhooks/event_log.py
+  s_8c15db54e0c42b::t_8820f4699cec0a 267,275
+  s_8c15db54e0c42b::t_d238af74e84257 1
+  s_8c15db54e0c42b::t_3f89f98b2874a7 232-237,241
+  s_8c15db54e0c42b::t_f9600148270d52 22
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "82a2cb7bf836e8f3fe1e1e12ae4f5bf8efa6f588",
+  "prompts": {},
+  "sessions": {
+    "s_8c15db54e0c42b": {
+      "agent_id": {
+        "tool": "cursor",
+        "id": "b496840a-1bef-4d5a-8172-c0a066b24285",
+        "model": "grok-4.7"
+      },
+      "human_author": "Joaquin Borggio <joaquin@langchain.dev>"
+    }
+  }
+}

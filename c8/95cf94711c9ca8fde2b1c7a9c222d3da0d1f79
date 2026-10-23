@@ -1,0 +1,67 @@
+agent/resources/prompts/runs/rollout-expired.md.jinja
+  s_8c15db54e0c42b::t_22f505ede75db9 1-2
+agent/resources/prompts/system/commit-pr.md
+  s_8c15db54e0c42b::t_0f3ebe4526d35a 14
+tests/agent/test_agent_thread_pr_state.py
+  s_8c15db54e0c42b::t_c7f8dc3ff33e43 135-173
+  s_8c15db54e0c42b::t_a4dfb831138ce7 134
+agent/tools/__init__.py
+  s_8c15db54e0c42b::t_3f86feadb73d34 124
+  s_8c15db54e0c42b::t_08c7194b27ad93 43-44
+  s_8c15db54e0c42b::t_ed3dc408948d3e 119
+  s_8c15db54e0c42b::t_40422863e69dd4 201
+  s_8c15db54e0c42b::t_698889f96aa098 212
+agent/thread_ids.py
+  s_8c15db54e0c42b::t_135c9b8ac2aea4 21
+  s_8c15db54e0c42b::t_5631b1d350f0b4 71-74
+agent/resources/prompts/runs/rollout-check.md.jinja
+  s_8c15db54e0c42b::t_e2040ddbc870d4 1-21
+agent/resources/prompts/runs/rollout-dev.md.jinja
+  s_8c15db54e0c42b::t_71a7ffa20b4eac 1-2
+agent/tools/rollout_page_check.py
+  s_8c15db54e0c42b::t_0576b59f9dbd06 1-37
+agent/webhooks/common.py
+  s_8c15db54e0c42b::t_5c7621fa7a0d49 1488-1490,1494,1500
+  s_8c15db54e0c42b::t_0bc69b1b43f808 1524-1530
+agent/tools/record_rollout_check.py
+  s_8c15db54e0c42b::t_cd6e73986fe6a5 44,47-49
+  s_8c15db54e0c42b::t_0ddf405470872f 3
+  s_8c15db54e0c42b::t_72352095e90066 9
+  s_8c15db54e0c42b::t_e6e9a0516fb35e 1-2,4-8,10-43,45-46,50-71
+agent/resources/prompts/tools/record_rollout_check.md
+  s_8c15db54e0c42b::t_4d230ec2240a67 1
+tests/agent/test_rollouts.py
+  s_8c15db54e0c42b::t_faf7e8a21a9877 1-3,5-16,20-347
+  s_8c15db54e0c42b::t_2278f83ad0a902 4,17-19
+  s_8c15db54e0c42b::t_479b9ce80bfbc5 348
+agent/resources/prompts/tools/rollout_page_check.md
+  s_8c15db54e0c42b::t_badd353765960b 1
+agent/scheduler.py
+  s_8c15db54e0c42b::t_4574275b851bdc 71-75
+  s_8c15db54e0c42b::t_931f80fe6e3753 19
+agent/server.py
+  s_8c15db54e0c42b::t_de4ec026e5c299 1644-1645
+  s_8c15db54e0c42b::t_4d2ff5f1802bfd 525-526
+  s_8c15db54e0c42b::t_b3f9580dd8436d 211
+  s_8c15db54e0c42b::t_a0717505b68ce3 217
+agent/rollouts.py
+  s_8c15db54e0c42b::t_4b140917d3b393 1-513,518-522,524-534,536-538,541
+  s_8c15db54e0c42b::t_8e7314c9a0b252 517,523,535,539-540
+  s_8c15db54e0c42b::t_7bb1c047790a65 514-516
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "c895cf94711c9ca8fde2b1c7a9c222d3da0d1f79",
+  "prompts": {},
+  "sessions": {
+    "s_8c15db54e0c42b": {
+      "agent_id": {
+        "tool": "cursor",
+        "id": "b496840a-1bef-4d5a-8172-c0a066b24285",
+        "model": "grok-4.7"
+      },
+      "human_author": "Joaquin Borggio <joaquin@langchain.dev>"
+    }
+  }
+}

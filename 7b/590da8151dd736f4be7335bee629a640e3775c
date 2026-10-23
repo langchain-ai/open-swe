@@ -1,0 +1,25 @@
+tests/webhooks/test_rollout_webhook.py
+  s_8c15db54e0c42b::t_e006282d334b9b 49-51,53
+  s_8c15db54e0c42b::t_91f06c6bd19f15 94-96,103,106,110
+openswe/rollout_events.py
+  s_8c15db54e0c42b::t_d456a63acb3b1c 40-67
+  s_8c15db54e0c42b::t_0af50887678d1e 130-131,135,138,143
+  s_8c15db54e0c42b::t_a9e9dc66e39c1a 14,20
+  s_8c15db54e0c42b::t_056627b3d3353a 91,100,102-106
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "7b590da8151dd736f4be7335bee629a640e3775c",
+  "prompts": {},
+  "sessions": {
+    "s_8c15db54e0c42b": {
+      "agent_id": {
+        "tool": "cursor",
+        "id": "b496840a-1bef-4d5a-8172-c0a066b24285",
+        "model": "grok-4.7"
+      },
+      "human_author": "Joaquin Borggio <joaquin@langchain.dev>"
+    }
+  }
+}

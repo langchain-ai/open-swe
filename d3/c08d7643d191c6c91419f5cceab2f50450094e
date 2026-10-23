@@ -1,0 +1,24 @@
+openswe/threads/runtimes.py
+  s_30a39b9625d194::t_4245cc435cd76b 27
+  s_30a39b9625d194::t_363519bd58c722 152
+openswe/utils/tracing.py
+  s_30a39b9625d194::t_363519bd58c722 3-4,18-25
+openswe/utils/langsmith.py
+  s_30a39b9625d194::t_363519bd58c722 15,172-175
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "d3c08d7643d191c6c91419f5cceab2f50450094e",
+  "prompts": {},
+  "sessions": {
+    "s_30a39b9625d194": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "bfdce3a1-d304-41eb-bba0-703a4018521b",
+        "model": "claude-sonnet-5-5"
+      },
+      "human_author": "Kiewan Villatel <kiewan@langchain.dev>"
+    }
+  }
+}

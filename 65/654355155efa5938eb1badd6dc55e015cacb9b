@@ -1,0 +1,29 @@
+tests/webhooks/test_deployment_event.py
+  s_8c15db54e0c42b::t_1a63955da5df7b 1-26
+agent/rollout_events.py
+  s_8c15db54e0c42b::t_cd4268843db6e0 4
+  s_8c15db54e0c42b::t_03d34c09f62171 3
+  s_8c15db54e0c42b::t_541ed693e8da06 7,16-17,19,33-34,36,40-45,64-66,85-102,131,135,145-147,149,155-165
+agent/webhooks/event_log.py
+  s_8c15db54e0c42b::t_e9a9afa4dd604c 1,22,232-237,241,267,275
+agent/webhooks/event_subscriptions.py
+  s_8c15db54e0c42b::t_1e6e187289e833 170-171,232-249
+tests/webhooks/test_rollout_webhook.py
+  s_8c15db54e0c42b::t_5d37da1a2f857d 5,54-55,57,76-84,166-182,188-206
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "65654355155efa5938eb1badd6dc55e015cacb9b",
+  "prompts": {},
+  "sessions": {
+    "s_8c15db54e0c42b": {
+      "agent_id": {
+        "tool": "cursor",
+        "id": "b496840a-1bef-4d5a-8172-c0a066b24285",
+        "model": "grok-4.7"
+      },
+      "human_author": "Joaquin Borggio <joaquin@langchain.dev>"
+    }
+  }
+}

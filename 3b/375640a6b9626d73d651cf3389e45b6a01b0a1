@@ -1,0 +1,31 @@
+agent/resources/prompts/runs/rollout-expired.md.jinja
+  s_8c15db54e0c42b::t_c2765b55319854 1
+agent/rollouts.py
+  s_8c15db54e0c42b::t_cc35e994ad8661 653
+  s_8c15db54e0c42b::t_4ce3c196f5c086 3
+  s_8c15db54e0c42b::t_cbc8330390e80c 4-5
+  s_8c15db54e0c42b::t_d83b8e8c76a8a1 39-41
+  s_8c15db54e0c42b::t_2b1ac396a7e42b 275-297,305
+  s_8c15db54e0c42b::t_f2702b43dae9c7 340
+tests/agent/test_rollouts.py
+  s_8c15db54e0c42b::t_84efa81a2bc87d 163-164
+  s_8c15db54e0c42b::t_7f4c5294437bd3 162,165-178
+agent/config.py
+  s_8c15db54e0c42b::t_ed7c24c4b758fe 301-310
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "3b375640a6b9626d73d651cf3389e45b6a01b0a1",
+  "prompts": {},
+  "sessions": {
+    "s_8c15db54e0c42b": {
+      "agent_id": {
+        "tool": "cursor",
+        "id": "b496840a-1bef-4d5a-8172-c0a066b24285",
+        "model": "grok-4.7"
+      },
+      "human_author": "Joaquin Borggio <joaquin@langchain.dev>"
+    }
+  }
+}

@@ -1,0 +1,79 @@
+agent/docs/__init__.py
+  s_1a3ac8f281779f::t_0da25b2eac10ca 1
+agent/docs/browser.py
+  s_1a3ac8f281779f::t_41fc7e80cc3220 20,33
+agent/docs/coordinator.py
+  s_1a3ac8f281779f::t_b228329d874277 14,16-19,78-93,97-109,113,132,141,144-146,157-182,186-197,199-215,222,227-237,240-241,278-279,371-380
+agent/docs/models.py
+  s_1a3ac8f281779f::t_adbb4ad308ec91 84-87,98,116-117,130-132
+agent/docs/routes.py
+  s_1a3ac8f281779f::t_2b5914f2d794b6 8,10,13,24-66,71-78
+agent/docs/runtime.py
+  s_1a3ac8f281779f::t_eee2a38d2906f3 1,8,24,124-131,134-144,146-184,187,190-192,194-196,198-206,208-218,220-223,225-226,228-229,231-255,258-278
+agent/github/routes.py
+  s_1a3ac8f281779f::t_f32b3904dc1a41 71-115,117-118,147,175-178,203-210
+agent/middleware/settle_review_check.py
+  s_1a3ac8f281779f::t_f7a4f0b3281db1 14,33-38
+agent/resources/prompts/docs/main.md.jinja
+  s_1a3ac8f281779f::t_935b909ddd1bd8 1-8,28,52-54
+agent/resources/prompts/reviewer/dispatch.md.jinja
+  s_1a3ac8f281779f::t_c351304e33f4ff 1-16
+agent/resources/prompts/reviewer/main.md.jinja
+  s_1a3ac8f281779f::t_a07bc9899d5791 21-24,27,90-91,129-131,133
+agent/review/routes.py
+  s_1a3ac8f281779f::t_03290e9b4111b2 98-100
+agent/reviewer.py
+  s_1a3ac8f281779f::t_8e0253be0e4714 23-26,174,183,527-532,535,537,548,555-558,563,578,583,589-591,606-614,889,932-934,957-961,1020-1048,1053-1057,1066
+agent/run_config.py
+  s_1a3ac8f281779f::t_6df30c8ac46138 114-115
+agent/sandboxes/lifecycle.py
+  s_1a3ac8f281779f::t_bdac5d9a8c297e 303-304,312-316,401-405,486-490,504-508,526-530,630-634
+agent/sandboxes/tool_access.py
+  s_1a3ac8f281779f::t_4e519f60a6817e 91-93,104-106
+docs/DOCS_AGENT.md
+  s_1a3ac8f281779f::t_b07b9014786957 4-8,10-11,33-39,44-47,78
+swagger.json
+  s_1a3ac8f281779f::t_9de8beb7de49a9 1346-1403,8385-8538
+tests/docs/test_capabilities.py
+  s_1a3ac8f281779f::t_23345d675b2346 12-17,20
+tests/docs/test_workflow.py
+  s_1a3ac8f281779f::t_4fc8165051d886 25-27,189,191,195-197,207-210,228-234,245-249,263-265,373,381-382,384-406
+ui/src/components/DocsTargetSection.tsx
+  s_1a3ac8f281779f::t_0852a0b5bc1bc1 1-124
+ui/src/lib/api.ts
+  s_1a3ac8f281779f::t_c9840a4cd1e5f5 1305-1310,1313-1316
+ui/src/routes/-docs.test.tsx
+  s_1a3ac8f281779f::t_cf2f21dfe12075 8-12,19,27,30-32,40,43,46,49,52-59,62-65,67-69
+ui/src/routes/-review-repositories-owner.test.tsx
+  s_1a3ac8f281779f::t_1f69011f056d93 12,45-48,131-154
+ui/src/routes/docs.tsx
+  s_1a3ac8f281779f::t_d7f65bbc09ad2c 1,4-5
+ui/src/routes/review.tsx
+  s_1a3ac8f281779f::t_54df647721cc91 11,41,44,69-73,94,135-140
+ui/src/routes/review_.repositories.$owner.tsx
+  s_1a3ac8f281779f::t_e952891f95dcca 41-78,157,165,176-181,229,251-259
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "00060bce400be23f34760429b93d918ace0cabe0",
+  "prompts": {},
+  "humans": {
+    "h_3a9d271fbf3886": {
+      "author": "Caroline di Vittorio <43390382+carolinedivittorio@users.noreply.github.com>"
+    },
+    "h_fd2bd7aaf435a7": {
+      "author": "open-swe[bot] <open-swe@users.noreply.github.com>"
+    }
+  },
+  "sessions": {
+    "s_1a3ac8f281779f": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a0fd7c-6bd3-7083-b326-0bf98c2a0a67",
+        "model": "gpt-6.1-sol"
+      },
+      "human_author": "Caroline di Vittorio <43390382+carolinedivittorio@users.noreply.github.com>"
+    }
+  }
+}

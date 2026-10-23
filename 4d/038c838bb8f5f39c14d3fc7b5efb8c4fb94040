@@ -1,0 +1,22 @@
+openswe/rollout_events.py
+  s_8c15db54e0c42b::t_6629226b5aa2cc 124-129,139-143,147-149
+  s_8c15db54e0c42b::t_2b827dea7c8e00 150
+tests/agent/test_rollout_subscription.py
+  s_8c15db54e0c42b::t_f9115df260db91 53-57,70-71
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "4d038c838bb8f5f39c14d3fc7b5efb8c4fb94040",
+  "prompts": {},
+  "sessions": {
+    "s_8c15db54e0c42b": {
+      "agent_id": {
+        "tool": "cursor",
+        "id": "b496840a-1bef-4d5a-8172-c0a066b24285",
+        "model": "grok-4.7"
+      },
+      "human_author": null
+    }
+  }
+}

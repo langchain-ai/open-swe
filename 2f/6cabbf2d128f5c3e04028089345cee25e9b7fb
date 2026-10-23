@@ -1,0 +1,42 @@
+openswe/tools/request_rollout_check.py
+  s_8c15db54e0c42b::t_03a30af83151c2 3-7,17-22,26-38
+openswe/resources/prompts/tools/request_rollout_check.md
+  s_8c15db54e0c42b::t_bda4e830b014e6 1,3
+openswe/rollout_events.py
+  s_8c15db54e0c42b::t_b299e87c999153 302-309
+  s_8c15db54e0c42b::t_303485e17a48b8 42
+  s_8c15db54e0c42b::t_5b8068ab7c0fd8 117-142
+  s_8c15db54e0c42b::t_7e8a81b361fe88 19
+  s_8c15db54e0c42b::t_05157ea8ed3602 291-301,310-326
+tests/tools/test_request_rollout_check.py
+  s_8c15db54e0c42b::t_650c9945bda7b7 14,26,33-62
+  s_8c15db54e0c42b::t_f3cf11f8e9db02 63-64
+tests/agent/test_agent_thread_pr_state.py
+  s_8c15db54e0c42b::t_ea72f61d8c980e 442-443
+  s_8c15db54e0c42b::t_94cf549009b8e1 403
+  s_8c15db54e0c42b::t_292184f6444ba1 425,427
+  s_8c15db54e0c42b::t_7033deb9a6fae9 419,439-441
+  s_8c15db54e0c42b::t_b07e04956dc877 415
+  s_8c15db54e0c42b::t_11a515f3d3043b 433,444
+openswe/webhooks/common.py
+  s_8c15db54e0c42b::t_29aaa3df400519 1576-1592
+  s_8c15db54e0c42b::t_5fa26093ebf9bb 1554-1557
+  s_8c15db54e0c42b::t_3be2bb6a5aba97 91-97
+  s_8c15db54e0c42b::t_c38fabf8062a8a 86-89,1574
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "2f6cabbf2d128f5c3e04028089345cee25e9b7fb",
+  "prompts": {},
+  "sessions": {
+    "s_8c15db54e0c42b": {
+      "agent_id": {
+        "tool": "cursor",
+        "id": "b496840a-1bef-4d5a-8172-c0a066b24285",
+        "model": "grok-4.7"
+      },
+      "human_author": "Joaquin Borggio <joaquin@langchain.dev>"
+    }
+  }
+}
