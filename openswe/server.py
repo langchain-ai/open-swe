@@ -177,6 +177,7 @@ from openswe.sandboxes.tool_runtime import (
 )
 from openswe.search_policy import SHELL_SEARCH_EXCLUDED_TOOLS
 from openswe.skill_store.backend import skills_backend
+from openswe.slack.client import get_slack_user_timezone
 from openswe.slack.dm import is_concierge_thread, is_dm_channel
 from openswe.thread_title import TITLE_GENERATION_MAX_TOKENS, schedule_thread_title_generation
 from openswe.threads.blobs import ThreadBlobs, blob_namespace
@@ -472,13 +473,16 @@ async def _thread_participant(
 ) -> ThreadParticipant:
     user = await _participant_user(identity.github_login, person_id)
     login = (user.github_login if user else "") or identity.github_login
+    slack_user_id = slack_user_id or (user.slack_user_id if user else "")
+    if not timezone and slack_user_id:
+        timezone = await get_slack_user_timezone(slack_user_id)
     if not login:
         return ThreadParticipant(
             identity=identity,
             person_id=person_id or "",
             timezone=timezone,
             linked=user is not None,
-            slack_user_id=slack_user_id or (user.slack_user_id if user else ""),
+            slack_user_id=slack_user_id,
         )
     identity = replace(identity, github_login=login)
     profile, workspace_admin, instructions = await asyncio.gather(
@@ -501,7 +505,7 @@ async def _thread_participant(
         email=(user.email if user else "") or "",
         timezone=timezone,
         linked=user is not None,
-        slack_user_id=slack_user_id or (user.slack_user_id if user else ""),
+        slack_user_id=slack_user_id,
     )
 
 
@@ -533,7 +537,9 @@ async def _thread_participants(
         )
     )
     others = [
-        identity for identity in identities if identity.commit_email != resolved_sender.commit_email
+        identity
+        for identity in identities
+        if identity.github_login.casefold() != resolved_sender.github_login.casefold()
     ]
     return list(
         await asyncio.gather(
