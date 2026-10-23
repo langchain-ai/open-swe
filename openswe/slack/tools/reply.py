@@ -1,5 +1,6 @@
 import json
 import logging
+import re
 from collections.abc import Mapping
 from dataclasses import replace
 from datetime import timedelta
@@ -117,11 +118,11 @@ async def send_slack_reply(
 ) -> dict[str, Any]:
     """Post a reply in the run's Slack thread."""
     if option_user_id is not None and (
-        not option_user_id.strip() or not options or blocks is not None
+        not re.fullmatch(r"[UW][A-Z0-9]+", option_user_id) or not options or blocks is not None
     ):
         return {
             "success": False,
-            "error": "option_user_id requires a Slack user ID, options, and no custom blocks",
+            "error": "option_user_id requires a canonical Slack member ID (U/W followed by uppercase letters or digits), options, and no custom blocks",
         }
     config = get_config()
     cfg = RunConfig.from_config(config)

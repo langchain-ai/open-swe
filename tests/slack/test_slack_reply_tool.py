@@ -136,7 +136,7 @@ async def test_kickoff_delete_failure_does_not_interrupt_update(
     assert thread is not None and thread.kickoff_recorded and thread.kickoff_ts is None
 
 
-@pytest.mark.parametrize("recipient", [None, "U2"])
+@pytest.mark.parametrize("recipient", [None, "U2", "W123ABC"])
 async def test_slack_reply_preserves_option_recipient(
     monkeypatch: pytest.MonkeyPatch, recipient: str | None
 ) -> None:
@@ -161,7 +161,20 @@ async def test_slack_reply_preserves_option_recipient(
 
 @pytest.mark.parametrize(
     ("recipient", "options", "blocks"),
-    [("", ["Yes"], None), ("U2", None, None), ("U2", ["Yes"], [])],
+    [
+        (recipient, ["Yes"], None)
+        for recipient in (
+            "",
+            " ",
+            "Ramon",
+            "<@U123ABC>",
+            " U123ABC",
+            "U123ABC ",
+            "u123abc",
+            "C123ABC",
+        )
+    ]
+    + [("U2", None, None), ("U2", ["Yes"], [])],
 )
 async def test_scoped_options_reject_inputs_that_cannot_carry_the_recipient(
     monkeypatch: pytest.MonkeyPatch,
