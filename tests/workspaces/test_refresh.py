@@ -6,7 +6,7 @@ import pytest
 from openswe.sandboxes.providers.langsmith_api import SandboxAPI
 from openswe.sandboxes.ref import SandboxRef
 from openswe.workspaces import refresh
-from openswe.workspaces.store import WORKSPACES, WorkspaceCreate
+from openswe.workspaces.store import WORKSPACES, Workspace, WorkspaceCreate
 
 
 class _Result:
@@ -248,6 +248,19 @@ async def test_a_snapshot_left_in_the_old_langsmith_is_rebuilt_in_the_new_sandbo
     assert create_builder.await_args is not None
     assert create_builder.await_args.args[1] is None
     assert _scripts_run(backend) == ["make setup", "git pull"]
+
+
+def test_an_old_region_snapshot_without_a_setup_script_is_not_due(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """No refresh can rebuild it, so one would only re-enqueue on every new box."""
+    monkeypatch.setenv("LANGSMITH_ENDPOINT", "https://api.smith.example")
+    monkeypatch.setenv("NEW_SANDBOX_REGION_ENDPOINT", "https://aws.api.smith.example")
+    record = Workspace(
+        slug="published", snapshot_status="ready", snapshot_id="snap-gcp", update_script="git pull"
+    )
+
+    assert not refresh.is_update_due(record)
 
 
 # --- cron ---

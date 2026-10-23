@@ -7,6 +7,7 @@ import logging
 from typing import Any
 
 from openswe.audit_logs.tools import audit_tool
+from openswe.sandboxes.providers.langsmith_api import SandboxAPI
 from openswe.tools.access import Policy, access, ack
 from openswe.tools.admin_gate import configurable as _configurable
 from openswe.tools.mcp_exposure import expose_mcp
@@ -200,6 +201,20 @@ async def publish_workspace(
         # ready() reconnects through the provider, which starts a stopped/idle box
         # before handing it back — so the capture always targets a running sandbox.
         source = langsmith_box(unwrap_sandbox_backend(await get_sandbox_backend(thread_id))).ref
+    except Exception as exc:
+        logger.exception("Failed to reach sandbox for workspace", extra={"workspace": slug})
+        return {"ok": False, "error": f"snapshot capture failed: {exc}"}
+    # New boxes boot only from snapshots in the new sandbox region, the only place they are made.
+    if not SandboxAPI.new_sandbox_region().holds(source.api):
+        return {
+            "ok": False,
+            "error": (
+                "this thread's sandbox is outside the new sandbox region, so new sandboxes "
+                "could not boot from its snapshot; recreate_sandbox gives it one there, "
+                "then provision and publish again"
+            ),
+        }
+    try:
         snapshot_id = await store.capture_sandbox_snapshot(
             source, published_name, timeout=refresh.capture_timeout()
         )

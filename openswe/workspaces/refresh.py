@@ -243,11 +243,13 @@ def is_update_due(record: Workspace) -> bool:
     """Whether a new sandbox should also kick off a background snapshot update.
 
     Same staleness test, or a snapshot outside the new sandbox region, which new boxes
-    cannot boot from; plus: no refresh already running, and the last attempt
+    cannot boot from, when a setup script can rebuild it there (a workspace published from
+    a sandbox without one is republished from the new region instead); plus: no refresh
+    already running, and the last attempt
     — success *or* failure — is older than the interval. Counting failures keeps
     a broken script or network from enqueueing a builder on every creation.
     """
-    if not (is_snapshot_stale(record) or _snapshot_elsewhere(record)):
+    if not (is_snapshot_stale(record) or (_snapshot_elsewhere(record) and record.setup_script)):
         return False
     if is_refresh_in_flight(record):
         return False

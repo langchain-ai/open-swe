@@ -176,6 +176,24 @@ async def test_a_failed_capture_writes_nothing(monkeypatch: pytest.MonkeyPatch) 
 
 
 @pytest.mark.asyncio
+async def test_a_sandbox_outside_the_new_sandbox_region_is_never_published(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """New boxes could not boot its snapshot, and it would retire the one they can."""
+    monkeypatch.setenv("CONFIGURED_ADMINS", "ramonn")
+    monkeypatch.setenv("LANGSMITH_ENDPOINT", "https://api.smith.langchain.com")
+    monkeypatch.setenv("NEW_SANDBOX_REGION_ENDPOINT", "https://aws.api.smith.langchain.com")
+    with _Publish(existing=None, saved=_saved()) as seams:
+        result = await env_tools.publish_workspace("base", "prompt")
+
+    assert result["ok"] is False
+    assert "new sandbox region" in result["error"]
+    seams.capture.assert_not_awaited()
+    seams.publish.assert_not_awaited()
+    seams.retire.assert_not_awaited()
+
+
+@pytest.mark.asyncio
 async def test_a_failed_record_write_discards_the_orphaned_image(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
