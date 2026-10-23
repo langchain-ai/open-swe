@@ -5,8 +5,8 @@ import jwt
 import pytest
 from starlette.types import Message, Receive, Scope, Send
 
-from openswe.remote_runtime.server import RunTokenMiddleware
-from openswe.remote_runtime.tokens import (
+from openswe.agent_api.server import RunTokenMiddleware
+from openswe.agent_api.tokens import (
     RemoteRun,
     RuntimeTokenError,
     WorkerGrant,
@@ -37,7 +37,7 @@ async def test_backend_operation_traces_keep_runtime_events_and_errors(fails: bo
     from langgraph.config import get_config, get_stream_writer
     from langgraph.runtime import Runtime
 
-    from openswe.remote_runtime.runs import in_graph_context
+    from openswe.agent_api.runs import in_graph_context
 
     collector = RunCollectorCallbackHandler()
     events: list[object] = []
@@ -80,7 +80,7 @@ async def test_backend_operation_traces_keep_runtime_events_and_errors(fails: bo
 
 @pytest.mark.parametrize("requested", ["anthropic:claude-opus-5-5", "openai:gpt-6.1-sol"])
 def test_remote_model_switch_overrides_cached_route_and_effort(requested: str) -> None:
-    from openswe.remote_runtime.graph import RunSession
+    from openswe.agent_api.graph import RunSession
     from openswe.sandboxes.tool_runtime import ModelChoice, SurfaceModels, ToolSurface
     from openswe.utils.model import provider_model_kwargs
 
@@ -110,8 +110,8 @@ async def test_mda_calls_hide_the_tools_the_graph_middleware_hides_from_each_cal
     from langchain_core.tools import tool
     from langgraph.runtime import Runtime
 
+    from openswe.agent_api.graph import RunSession
     from openswe.middleware.model_call_shape import CallShape
-    from openswe.remote_runtime.graph import RunSession
     from openswe.sandboxes.tool_runtime import ToolSurface
 
     @tool
@@ -147,8 +147,8 @@ async def test_remote_prompts_include_deployment_context(
 ) -> None:
     from langgraph.runtime import Runtime
 
+    from openswe.agent_api.graph import RunSession
     from openswe.middleware.prepare_run import BasePrepareRunMiddleware
-    from openswe.remote_runtime.graph import RunSession
     from openswe.sandboxes.tool_runtime import (
         ModelChoice,
         SurfaceModels,
@@ -187,8 +187,8 @@ async def test_remote_prompts_include_deployment_context(
 async def test_app_lifespan_exits_without_managed_deep_agents(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    from openswe.agent_api.client import RemoteRuntimeConfigurationError
     from openswe.api.app import app, lifespan
-    from openswe.remote_runtime.client import RemoteRuntimeConfigurationError
 
     monkeypatch.delenv("MDA_RUNTIME_URL", raising=False)
 
@@ -202,11 +202,11 @@ async def test_reviewer_tools_get_a_github_token_on_a_replica_that_did_not_prepa
     monkeypatch: pytest.MonkeyPatch, first_call: str
 ) -> None:
     import openswe.reviewer as reviewer
+    from openswe.agent_api.graph import RunSession
     from openswe.github.thread_token import (
         invalidate_cached_github_token,
         resolve_thread_github_token,
     )
-    from openswe.remote_runtime.graph import RunSession
     from openswe.sandboxes.tool_runtime import ToolSurface
 
     async def mint(*, repositories: list[str] | None = None) -> tuple[str, str | None]:
@@ -270,7 +270,7 @@ def test_run_token_signed_with_a_rotated_out_key_still_verifies(
             jwt.encode(
                 {
                     "iss": "open-swe",
-                    "aud": "open-swe-remote-runtime",
+                    "aud": "open-swe-agent-api",
                     "iat": 0,
                     "exp": 1,
                     "sub": "thread-1",
@@ -286,7 +286,7 @@ def test_run_token_signed_with_a_rotated_out_key_still_verifies(
             jwt.encode(
                 {
                     "iss": "open-swe",
-                    "aud": "open-swe-remote-runtime",
+                    "aud": "open-swe-agent-api",
                     "iat": int(time.time()),
                     "exp": int(time.time()) + 60,
                     "sub": "thread-1",
@@ -347,10 +347,10 @@ async def test_mda_catalog_leaves_integrations_and_code_mode_to_mda(
     from langchain_core.tools import StructuredTool
     from langchain_quickjs import CodeInterpreterMiddleware
 
+    from openswe.agent_api.graph import RemoteGraph
     from openswe.mcp.models import MCPToolProvenance
     from openswe.middleware.dynamic_tools import DynamicToolMiddleware
     from openswe.middleware.task_coordination import TaskCoordinationMiddleware
-    from openswe.remote_runtime.graph import RemoteGraph
     from openswe.sandboxes.tool_runtime import (
         ModelChoice,
         SurfaceModels,
@@ -456,8 +456,8 @@ async def test_an_operation_gets_the_state_it_reads_and_answers_the_state_it_cha
     from langgraph.types import Command
     from runtime_api.operations import RunOperation
 
-    from openswe.remote_runtime.graph import RunSession
-    from openswe.remote_runtime.operations import Injections
+    from openswe.agent_api.graph import RunSession
+    from openswe.agent_api.operations import Injections
     from openswe.sandboxes.tool_runtime import ToolSurface
 
     @tool
@@ -492,7 +492,7 @@ async def test_the_files_api_reaches_the_threads_files_as_the_run() -> None:
     """A bridge checks who the run is for, which it reads from the run's own config."""
     from deepagents.backends.protocol import ExecuteResponse, SandboxBackendProtocol
 
-    from openswe.remote_runtime.graph import API, RunSession
+    from openswe.agent_api.graph import API, RunSession
     from openswe.run_config import RunConfig
     from openswe.sandboxes.tool_runtime import ToolSurface
 
@@ -525,7 +525,7 @@ async def test_a_cancelled_operation_ends_the_call_rather_than_answering() -> No
     from langgraph.errors import NodeCancelledError
     from runtime_api.operations import RunOperation
 
-    from openswe.remote_runtime.graph import RunSession
+    from openswe.agent_api.graph import RunSession
     from openswe.sandboxes.tool_runtime import ToolSurface
 
     @tool
@@ -545,8 +545,8 @@ async def test_an_operation_that_runs_a_command_is_put_to_the_shell_guards_first
     from langchain_core.tools import tool
     from runtime_api.operations import RunOperation
 
+    from openswe.agent_api.graph import RunSession
     from openswe.middleware.pr_creation_guard import PullRequestCreationGuardMiddleware
-    from openswe.remote_runtime.graph import RunSession
     from openswe.sandboxes.tool_runtime import ToolSurface
 
     ran: list[str] = []
@@ -589,7 +589,7 @@ async def _call_status(
     from runtime_api.endpoint import Handlers, UnknownEndpointError
     from runtime_api.workers import ADOPT, Adopt, Adopted
 
-    from openswe.remote_runtime import async_workers, server
+    from openswe.agent_api import async_workers, server
 
     served: list[tuple[str, str]] = []
 
@@ -610,7 +610,7 @@ async def _call_status(
     scope: Scope = {
         "type": "http",
         "method": "POST",
-        "path": f"/remote-runtime/api/{endpoint}",
+        "path": f"/agent-api/{endpoint}",
         "path_params": {"endpoint": endpoint},
         "headers": [(b"authorization", f"Bearer {token}".encode())],
     }
@@ -639,8 +639,8 @@ async def test_a_call_nests_under_the_runtime_span_that_made_it(
     from langsmith import Client
     from langsmith.run_trees import RunTree
 
-    from openswe.remote_runtime import server
-    from openswe.remote_runtime.runs import in_graph_context
+    from openswe.agent_api import server
+    from openswe.agent_api.runs import in_graph_context
 
     client = MagicMock(spec=Client)
     tracer = LangChainTracer(client=client, project_name="backend")
@@ -658,7 +658,7 @@ async def test_a_call_nests_under_the_runtime_span_that_made_it(
     scope: Scope = {
         "type": "http",
         "method": "POST",
-        "path": "/remote-runtime/api/before_model",
+        "path": "/agent-api/before_model",
         "path_params": {"endpoint": "before_model"},
         "headers": [
             (b"authorization", f"Bearer {token}".encode()),
@@ -718,7 +718,7 @@ async def test_only_a_body_unlike_its_request_is_refused_and_a_failure_inside_is
     from runtime_api.endpoint import Handlers
     from runtime_api.loop import PREPARE, PhaseResult, Prepare
 
-    from openswe.remote_runtime import server
+    from openswe.agent_api import server
 
     class Strict(BaseModel):
         count: int
@@ -741,7 +741,7 @@ async def test_only_a_body_unlike_its_request_is_refused_and_a_failure_inside_is
         scope: Scope = {
             "type": "http",
             "method": "POST",
-            "path": "/remote-runtime/api/prepare",
+            "path": "/agent-api/prepare",
             "path_params": {"endpoint": "prepare"},
             "headers": [(b"authorization", f"Bearer {token}".encode())],
         }
@@ -757,9 +757,9 @@ async def test_only_a_body_unlike_its_request_is_refused_and_a_failure_inside_is
         return sent[0]["status"]
 
     assert await status(b'{"sandbox_id": 3}') == 422
-    assert "Remote runtime call failed" not in caplog.text
+    assert "Agent API call failed" not in caplog.text
     assert await status(b'{"sandbox_id": "sb-1"}') == 500
-    assert "Remote runtime call failed" in caplog.text
+    assert "Agent API call failed" in caplog.text
 
 
 async def test_an_adopted_worker_acts_as_its_own_thread_never_its_coordinator(
@@ -770,8 +770,8 @@ async def test_an_adopted_worker_acts_as_its_own_thread_never_its_coordinator(
     from runtime_api.catalog import ModelSpec, RunModels
     from runtime_api.workers import Adopt
 
+    from openswe.agent_api import async_workers, hosted
     from openswe.prompts import prompt
-    from openswe.remote_runtime import async_workers, hosted
 
     coordinator = RemoteRun(
         thread_id="coordinator", assistant_id="agent", configurable={"github_login": "owner"}
@@ -815,7 +815,7 @@ async def test_a_replayed_launch_reports_the_worker_it_registered_and_stops_the_
 
     from runtime_api.workers import Launched
 
-    from openswe.remote_runtime import async_workers
+    from openswe.agent_api import async_workers
     from openswe.tasks import store
     from openswe.threads import runtimes
 
@@ -862,7 +862,7 @@ async def test_a_launched_run_that_ended_before_its_worker_was_registered_is_set
     from runtime_api.workers import Launched
 
     from openswe import completion
-    from openswe.remote_runtime import async_workers
+    from openswe.agent_api import async_workers
     from openswe.threads import runtimes
 
     coordinator = RemoteRun(thread_id="coordinator", assistant_id="agent", configurable={})

@@ -64,7 +64,7 @@ async def test_public_agent_excludes_personal_skills_and_tools(saved_thread_scop
 async def test_remote_agent_lists_personal_skills(monkeypatch: pytest.MonkeyPatch) -> None:
     from runtime_api.operations import RunRequest
 
-    from openswe.remote_runtime.graph import RunSession
+    from openswe.agent_api.graph import RunSession
     from openswe.skill_store.store import _record
 
     monkeypatch.setattr(
@@ -641,7 +641,7 @@ async def test_requested_model_survives_auto_followups_but_explicit_selection_wi
 async def test_text_only_adaptive_route_names_a_vision_model_after_handoff(
     route: Literal["fast", "balanced", "performance"],
 ) -> None:
-    from openswe.remote_runtime.graph import RunSession
+    from openswe.agent_api.graph import RunSession
 
     model_id = "fireworks:accounts/fireworks/models/kimi-k3"
     config = _base_config()
@@ -763,12 +763,12 @@ async def test_queued_images_reach_vision_fallback_for_text_only_main_model(
 ) -> None:
     from langchain_core.messages import convert_to_messages
 
+    from openswe.agent_api.graph import RunSession
     from openswe.message_queue import QueuedMessage
     from openswe.middleware.check_message_queue import (
         LinearNotifyState,
         check_message_queue_before_model,
     )
-    from openswe.remote_runtime.graph import RunSession
 
     config = _base_config()
     planned = await _plan_agent(

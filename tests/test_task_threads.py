@@ -747,7 +747,7 @@ async def test_cancelling_a_coordinators_workers_spares_finished_ones(
 async def test_async_subagent_becomes_one_ordinary_worker_of_its_coordinators_task(
     client: MagicMock, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    from openswe.remote_runtime.client import MDA_GRAPH_METADATA_KEY, MDA_WORKER_GRAPH_ID
+    from openswe.agent_api.client import MDA_GRAPH_METADATA_KEY, MDA_WORKER_GRAPH_ID
     from openswe.tasks.events import worker_finished
 
     actor = service.Actor(COORDINATOR, OWNER)

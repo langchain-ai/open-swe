@@ -154,8 +154,8 @@ async def test_main_agent_records_the_incident_report_through_the_tool(
     registry_db, monkeypatch, saved_thread_scope, requested_action
 ):
 
-    from openswe.remote_runtime.graph import RunSession
-    from openswe.remote_runtime.runs import in_graph_context
+    from openswe.agent_api.graph import RunSession
+    from openswe.agent_api.runs import in_graph_context
 
     await service.POLICIES.put(IncidentPolicy(enabled=True, workspace_id="T1"))
     await service.INCIDENTS.put(

@@ -1,7 +1,7 @@
 """What a graph factory plans for a run: its tools, middleware, models and subagents.
 
 The model loop runs on Managed Deep Agents, which builds a tool for each of the
-planned tools and calls the backend to run it (``openswe.remote_runtime``).
+planned tools and calls the backend to run it (``openswe.agent_api``).
 """
 
 import math
