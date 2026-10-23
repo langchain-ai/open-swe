@@ -267,8 +267,16 @@ async def test_completion_waits_for_running_background_tasks(monkeypatch, status
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("via_gateway", "named"),
+    [
+        (False, "Anthropic was overloaded"),
+        # The gateway can fail the call itself, so the provider alone is not blamed.
+        (True, "Anthropic or the LangSmith Gateway in front of it was overloaded"),
+    ],
+)
 async def test_provider_failure_reported_by_the_run_names_the_provider_everywhere(
-    monkeypatch: pytest.MonkeyPatch,
+    monkeypatch: pytest.MonkeyPatch, via_gateway: bool, named: str
 ) -> None:
     metadata = _slack_metadata()
     metadata["last_model_error"] = {
@@ -276,6 +284,7 @@ async def test_provider_failure_reported_by_the_run_names_the_provider_everywher
         "error_type": "APIStatusError",
         "code": "provider_overloaded",
         "model_id": "anthropic:claude-opus-5-5",
+        "via_gateway": via_gateway,
     }
     monkeypatch.setattr(completion, "langgraph_client", lambda: _FakeClient(metadata))
     monkeypatch.setattr(completion, "get_langsmith_trace_url", AsyncMock(return_value=None))
@@ -294,5 +303,5 @@ async def test_provider_failure_reported_by_the_run_names_the_provider_everywher
     )
 
     for said in (reply.await_args.args[2], settle.await_args.kwargs["reason"]):
-        assert "Anthropic was overloaded" in said
-        assert "not with your task" in said
+        assert named in said
+        assert "not a problem with your task" in said

@@ -29,6 +29,8 @@ class ModelFailure(RunRequest):
     error_type: str
     # provider:model, when the call named its model.
     model_id: str | None = None
+    # Whether the call went through the LangSmith Gateway, which can fail it too.
+    via_gateway: bool = False
 
 
 class Recorded(BaseModel):

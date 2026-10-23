@@ -111,8 +111,8 @@ _REASON_FOLLOW_UP = {
     "backend_interrupted": "Re-trigger the run to try again.",
 }
 _PROVIDER_FOLLOW_UP = (
-    "That's a problem on {provider}'s side, not with your task. Send another message "
-    "to retry, or switch to a different model."
+    "That's not a problem with your task. Send another message to retry, or switch to "
+    "a different model."
 )
 
 
@@ -121,7 +121,7 @@ class _FailureReason:
     """Why a run failed, as far as the completion webhook can tell."""
 
     code: str | None = None
-    # The model provider's display name, when the failing call named its model.
+    # Who failed the call, as the reply names them, when the run recorded it.
     provider: str | None = None
 
     @classmethod
@@ -163,7 +163,7 @@ class _FailureReason:
         if code in _PROVIDER_REASON_TEXT:
             return (
                 _PROVIDER_REASON_TEXT[code].format(provider=provider),
-                _PROVIDER_FOLLOW_UP.format(provider=provider),
+                _PROVIDER_FOLLOW_UP,
             )
         return (
             _REASON_TEXT.get(code) or _status_reason(status),

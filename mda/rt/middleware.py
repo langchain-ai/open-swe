@@ -370,10 +370,12 @@ class BackendRunMiddleware(AgentMiddleware[RunState]):
         try:
             return await handler(request)
         except Exception as exc:
-            await self._report_model_failure(model, exc)
+            await self._report_model_failure(model, exc, via_gateway=call.use_gateway)
             raise
 
-    async def _report_model_failure(self, model: ModelSpec | None, exc: Exception) -> None:
+    async def _report_model_failure(
+        self, model: ModelSpec | None, exc: Exception, *, via_gateway: bool
+    ) -> None:
         """Tell the backend why the provider failed, which the run's end alone cannot."""
         code = provider_failure_code(exc)
         model_id = model.model_id if model is not None else None
@@ -385,7 +387,11 @@ class BackendRunMiddleware(AgentMiddleware[RunState]):
         if code is None:
             return
         failure = ModelFailure(
-            run_id=run_id(), code=code, error_type=type(exc).__name__, model_id=model_id
+            run_id=run_id(),
+            code=code,
+            error_type=type(exc).__name__,
+            model_id=model_id,
+            via_gateway=via_gateway,
         )
         try:
             await call(self._backend, MODEL_FAILURE, failure)

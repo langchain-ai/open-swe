@@ -1220,7 +1220,7 @@ async def test_a_provider_failure_ends_the_run_and_tells_the_backend_why(
         "open_swe_call": ModelCall(
             system_prompt="test",
             model=ModelSpec(model_id="anthropic:claude-opus-5-5", kwargs={}),
-            use_gateway=False,
+            use_gateway=True,
         ).model_dump(mode="json"),
     }
     request = ModelRequest(model=model, messages=[], state=state)
@@ -1239,6 +1239,7 @@ async def test_a_provider_failure_ends_the_run_and_tells_the_backend_why(
                 "code": code,
                 "error_type": type(error).__name__,
                 "model_id": "anthropic:claude-opus-5-5",
+                "via_gateway": True,
             },
         )
     ]

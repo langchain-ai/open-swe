@@ -38,6 +38,8 @@ class ModelError(BaseModel):
     code: str
     # provider:model, when the failing side knew which model it called.
     model_id: str | None = None
+    # The call went through the LangSmith Gateway, which may be what failed it.
+    via_gateway: bool = False
 
     @classmethod
     def last_on(cls, metadata: Mapping[str, object]) -> Self | None:
@@ -53,11 +55,12 @@ class ModelError(BaseModel):
 
     @property
     def provider(self) -> str | None:
-        """The provider's display name, or None when the model or provider is unknown."""
-        if self.model_id is None:
-            return None
-        provider, _, name = self.model_id.partition(":")
-        return _PROVIDER_NAMES.get(provider) if name else None
+        """Who failed the call, as the reply names it; None when nothing names them."""
+        provider, _, name = (self.model_id or "").partition(":")
+        named = _PROVIDER_NAMES.get(provider) if name else None
+        if not self.via_gateway:
+            return named
+        return f"{named or 'the model provider'} or the LangSmith Gateway in front of it"
 
     async def record(self, thread_id: str) -> None:
         """Leave this on the thread for the run-completion reply."""
