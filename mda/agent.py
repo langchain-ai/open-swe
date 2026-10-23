@@ -89,6 +89,58 @@ _REVIEWER_PTC_TOOLS: Final = (
 )
 
 
+class _CodeModeSchema(dict[str, object]):
+    """A dictionary schema readable by QuickJS's model-schema renderer."""
+
+    def model_json_schema(self) -> dict[str, object]:
+        properties = self.get("properties")
+        return {
+            **self,
+            "properties": {
+                name: {key: value for key, value in field.items() if key != "description"}
+                if isinstance(field, dict)
+                else field
+                for name, field in properties.items()
+            }
+            if isinstance(properties, dict)
+            else {},
+        }
+
+
+def _code_mode_tool(tool: BaseTool) -> BaseTool:
+    """Expose frequent tools' dictionary schemas to the existing signature renderer."""
+    frequent = tool.name in {
+        "slack_list_channel_members",
+        "list_threads",
+        "get_thread",
+        "slack_add_reaction",
+        "expedite_pr_approval",
+        "schedule_thread_wakeup",
+        "save_plan",
+    }
+    mcp_name = tool.name.rsplit("_", 1)[0].replace("_", "").lower()
+    frequent |= (
+        mcp_name.startswith("mcphomebase")
+        and mcp_name.endswith("releasesactive")
+        or mcp_name.startswith("mcpcorridor")
+        and mcp_name.endswith("analyzeplan")
+        or mcp_name.startswith(("mcplinear", "mcplmtlinear"))
+        and mcp_name.endswith(
+            (
+                "listissues",
+                "getissue",
+                "createissue",
+                "updateissue",
+                "listcomments",
+                "createcomment",
+            )
+        )
+    )
+    if frequent and isinstance(tool.args_schema, dict):
+        return tool.model_copy(update={"args_schema": _CodeModeSchema(tool.args_schema)})
+    return tool
+
+
 class OpenSweRunContext(BaseModel):
     """What Open SWE dispatch passes as the run context."""
 
@@ -123,6 +175,7 @@ def _code_mode(
     file_tools: FileToolsMiddleware,
 ) -> list[AgentMiddleware | CodeInterpreterMiddleware]:
     """The graph's code mode, with every tool the catalog offers from code callable from it."""
+    from_code = [_code_mode_tool(tool) for tool in from_code]
     if graph == "reviewer":
         interpreter = CodeInterpreterMiddleware(
             ptc=[
