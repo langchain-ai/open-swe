@@ -12,9 +12,21 @@ from openswe.merge_queue.dispatch import DispatchGateway, DispatchRejected
 from openswe.merge_queue.validation_contract import ValidationRequest
 
 
-@pytest.mark.parametrize("status", [204, 403, 503, 307])
-async def test_dispatch_signs_exact_contract_and_never_retries_or_redirects(
-    monkeypatch: pytest.MonkeyPatch, status: int
+@pytest.mark.parametrize(
+    ("status", "retry"),
+    [
+        (204, "none"),
+        (403, "none"),
+        (502, "none"),
+        (503, "none"),
+        (307, "none"),
+        (503, "wrong-request"),
+        (503, "once"),
+        (503, "always"),
+    ],
+)
+async def test_dispatch_retries_only_authenticated_preflight_failures(
+    monkeypatch: pytest.MonkeyPatch, status: int, retry: str
 ) -> None:
     sent: list[httpx2.Request] = []
     secret = "s" * 32
@@ -35,16 +47,28 @@ async def test_dispatch_signs_exact_contract_and_never_retries_or_redirects(
             == hmac.digest(secret.encode(), request.content, "sha256").hex()
         )
         assert json.loads(request.content)["contract"] == contract.model_dump(mode="json")
-        return httpx2.Response(status, headers={"Location": "https://other.example/"})
+        headers = {"Location": "https://other.example/"}
+        if retry != "none":
+            headers["X-Merge-Queue-Retry-Signature"] = hmac.digest(
+                secret.encode(),
+                b"retry:" + (b"different request" if retry == "wrong-request" else request.content),
+                "sha256",
+            ).hex()
+        return httpx2.Response(
+            204 if retry == "once" and len(sent) > 1 else status, headers=headers
+        )
 
     monkeypatch.setattr(dispatch, "pooled_transport", lambda: httpx2.MockTransport(handle))
     gateway = DispatchGateway("https://dispatcher.example/queue", SecretStr(secret))
-    if status == 204:
+    if status == 204 or retry == "once":
         await gateway.dispatch(contract, deadline)
     else:
-        with pytest.raises(DispatchRejected if status == 403 else RuntimeError):
+        with pytest.raises(
+            DispatchRejected if status == 403 or retry == "always" else RuntimeError
+        ):
             await gateway.dispatch(contract, deadline)
-    assert len(sent) == 1
+    assert len(sent) == {"once": 2, "always": 3}.get(retry, 1)
+    assert all(request.content == sent[0].content for request in sent)
 
 
 def test_dispatch_secret_disables_local_agent_shell(monkeypatch: pytest.MonkeyPatch) -> None:

@@ -198,26 +198,47 @@ class OpenSweBackend:
         self.adopted = await self.catalog(run_id)
 
     async def post(
-        self, path: str, body: dict[str, JsonValue], *, timeout: float, delivery: Delivery
+        self,
+        path: str,
+        body: dict[str, JsonValue],
+        *,
+        timeout: float,
+        delivery: Delivery,
+        headers: Mapping[str, str] | None = None,
     ) -> JsonValue:
-        """One call of the typed API, as this run: ``runtime_api``'s transport."""
-        return await self._post(path, body, seconds=timeout, delivery=delivery)
+        """One call of the typed API, as this run: ``runtime_api``'s transport.
+
+        ``headers`` is the trace position to nest the call's spans under, by default
+        the running call's span.
+        """
+        return await self._post(path, body, seconds=timeout, delivery=delivery, trace=headers)
 
     async def _post(
-        self, path: str, body: Mapping[str, JsonValue], *, seconds: float, delivery: Delivery
+        self,
+        path: str,
+        body: Mapping[str, JsonValue],
+        *,
+        seconds: float,
+        delivery: Delivery,
+        trace: Mapping[str, str] | None = None,
     ) -> JsonValue:
+        """POST as this run, its spans nested under ``trace``, by default the running call's span."""
         label = path.rsplit("/", 1)[-1]
         bearer = self._run_token or self._worker_grant
         if bearer is None:
             raise BackendCallError(
                 "This run carries no Open SWE run token; start it through Open SWE"
             )
+        headers = {
+            **(TurnTrace.current_headers() if trace is None else trace),
+            "Authorization": f"Bearer {bearer}",
+        }
         waits = iter(_RETRY_SECONDS)
         while True:
             try:
                 response = await _CONNECTIONS.client().post(
                     f"{self._base}{path}",
-                    headers={"Authorization": f"Bearer {bearer}"},
+                    headers=headers,
                     json=dict(body),
                     timeout=seconds,
                 )
@@ -257,15 +278,21 @@ class OpenSweBackend:
     async def catalog(self, run_id: str | None) -> Catalog:
         return await call(self, CATALOG, RunRequest(run_id=run_id))
 
-    async def tool_started(self, report: ToolCallReport) -> None:
-        await call(self, TOOL_STARTED, report)
+    async def tool_started(
+        self, report: ToolCallReport, *, trace: Mapping[str, str] | None = None
+    ) -> None:
+        await call(self, TOOL_STARTED, report, headers=trace)
 
     async def tool_result(
-        self, report: ToolCallReport, result: ToolMessage
+        self,
+        report: ToolCallReport,
+        result: ToolMessage,
+        *,
+        trace: Mapping[str, str] | None = None,
     ) -> dict[str, JsonValue]:
         [message] = _json_dicts.validate_python(messages_to_dict([result]))
         finished = ToolResultReport.model_validate({**report.model_dump(), "result": message})
-        return (await call(self, TOOL_RESULT, finished)).update
+        return (await call(self, TOOL_RESULT, finished, headers=trace)).update
 
 
 class ToolReports:
@@ -281,12 +308,14 @@ class ToolReports:
         self._last: asyncio.Task[None] | None = None
 
     def started(self, report: ToolCallReport) -> None:
-        self._send(self._backend.tool_started(report))
+        self._send(self._backend.tool_started(report, trace=TurnTrace.current_headers()))
 
     def finished(self, report: ToolCallReport, result: ToolMessage) -> None:
         # The call's run closes before the report is answered, and with it the way to
-        # the turn's trace, so the trace is found now.
-        self._send(self._finished(report, result, TurnTrace.live_root()))
+        # the turn's trace and the call's span, so both are found now.
+        self._send(
+            self._finished(report, result, TurnTrace.live_root(), TurnTrace.current_headers())
+        )
 
     async def drain(self) -> None:
         """Wait for every report made so far, so the transcript has them before what follows."""
@@ -294,10 +323,15 @@ class ToolReports:
             await asyncio.shield(self._last)
 
     async def _finished(
-        self, report: ToolCallReport, result: ToolMessage, turn: RunTree | None
+        self,
+        report: ToolCallReport,
+        result: ToolMessage,
+        turn: RunTree | None,
+        trace: Mapping[str, str],
     ) -> None:
         # What the call changed in the thread's checkouts, for the turn's git metadata.
-        TurnTrace.record_evidence(await self._backend.tool_result(report, result), turn)
+        update = await self._backend.tool_result(report, result, trace=trace)
+        TurnTrace.record_evidence(update, turn)
 
     def _send(self, report: Coroutine[object, object, None]) -> None:
         self._last = asyncio.ensure_future(self._after(self._last, report))
