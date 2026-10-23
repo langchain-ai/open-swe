@@ -413,7 +413,9 @@ async def _finish_watch(watch: BabySitWatch, message: str) -> str:
                 multitask_strategy="enqueue",
             )
         except Exception:
-            logger.warning("Failed to dispatch terminal baby-sit update for %s", watch.key)
+            logger.warning(
+                "Failed to dispatch terminal baby-sit update for %s", watch.key, exc_info=True
+            )
     await stop_watch(watch.key)
     return "stopped"
 

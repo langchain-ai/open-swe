@@ -223,6 +223,7 @@ async def get_settings() -> dict[str, Any]:
                 if not connection["required_scopes_present"]:
                     connection["error"] = "Slack installation is missing required Incidents scopes."
         except Exception:
+            logger.warning("Incidents Slack verification failed", exc_info=True)
             connection["error"] = "Slack verification failed; check installation and permissions."
     if not app_id:
         connection["error"] = (

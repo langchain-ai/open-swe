@@ -434,7 +434,7 @@ async def _with_session[T](
         async with asyncio.timeout(_TIMEOUT_SECONDS):
             async with _gateway_client(headers, gateway) as client:
                 return await use(client)
-    except Exception as exc:
+    except Exception as exc:  # noqa: BLE001 - re-raised with the upstream text redacted
         if (found := _wrapped(exc, ManagedToolsError)) is not None:
             raise found from None
         raise ManagedToolsError("Could not reach the tool kit; retry later") from None

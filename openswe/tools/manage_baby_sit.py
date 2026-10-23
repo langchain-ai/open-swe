@@ -1,5 +1,6 @@
 """Tool for managing durable `/baby-sit` PR watches."""
 
+import logging
 from collections.abc import Mapping
 from typing import Any, Literal
 
@@ -12,6 +13,8 @@ from openswe.github.token import resolve_github_token
 from openswe.run_config import RunConfig
 from openswe.slack.client import parse_github_pr_url
 from openswe.source_context import SourceContext
+
+logger = logging.getLogger(__name__)
 
 
 def _configurable() -> tuple[RunConfig, Mapping[str, Any]]:
@@ -104,6 +107,7 @@ async def manage_baby_sit(
     try:
         token, _ = await resolve_github_token(config, thread_id)
     except Exception as exc:
+        logger.warning("GitHub token resolution failed", exc_info=True)
         return {"success": False, "error": f"GitHub authentication failed: {exc}"}
     async with GitHubClient.connect(token=token) as github:
         pr = await or_none(
@@ -144,6 +148,7 @@ async def manage_baby_sit(
             source_context=_source_context(cfg),
         )
     except Exception as exc:
+        logger.warning("Could not start baby-sit watch", exc_info=True)
         return {"success": False, "error": f"Could not start baby-sit watch: {exc}"}
     return {
         "success": True,

@@ -108,6 +108,11 @@ async def manage_code_channel(
             try:
                 metadata = thread_metadata(await client.threads.get(thread_id))
             except Exception:
+                logger.warning(
+                    "Could not load the thread to verify its credential scope",
+                    extra={"thread_id": thread_id},
+                    exc_info=True,
+                )
                 return {"success": False, "error": "Cannot verify thread credential scope"}
             if thread_is_private(metadata):
                 return {

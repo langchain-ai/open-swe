@@ -10,7 +10,7 @@ from openswe.users import User
 def configurable() -> RunConfig:
     try:
         return RunConfig.from_runtime()
-    except Exception:
+    except RuntimeError:
         return RunConfig()
 
 

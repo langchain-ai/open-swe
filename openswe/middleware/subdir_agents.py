@@ -50,7 +50,7 @@ def _thread_id(request: ToolCallRequest) -> str | None:
     if config is None:
         try:
             maybe_config = get_config()
-        except Exception:
+        except RuntimeError:
             return None
         config = maybe_config if isinstance(maybe_config, Mapping) else None
     if config is None:

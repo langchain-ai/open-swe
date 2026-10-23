@@ -1,5 +1,6 @@
 """Tools that ask people in Slack to review a pull request, assign or report its reviewer, or dismiss the ask."""
 
+import logging
 import re
 from collections.abc import Mapping
 from typing import Any
@@ -34,6 +35,8 @@ from openswe.tools.manage_baby_sit import dispatch_run_config
 from openswe.tools.mcp_exposure import expose_mcp
 from openswe.users import User
 
+logger = logging.getLogger(__name__)
+
 
 def _failure(error: str) -> dict[str, Any]:
     return {"success": False, "error": error}
@@ -56,6 +59,7 @@ async def _repository_refusal(pr_ref: GitHubPrRef, cfg: RunConfig) -> str | None
             config if isinstance(config, Mapping) else {}, cfg.thread_id
         )
     except Exception as exc:
+        logger.warning("GitHub token resolution failed", exc_info=True)
         return f"GitHub authentication failed: {exc}"
     try:
         await repo_access.assert_repo_access(repo, token)

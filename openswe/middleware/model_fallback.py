@@ -235,7 +235,7 @@ class ModelFallbackMiddleware(OpenSWEMiddleware):
                         if delay > 0:
                             await asyncio.sleep(delay)
                         response = await handler(attempt_request)
-                    except Exception as exc:
+                    except Exception as exc:  # noqa: BLE001 - re-raised after the span closes
                         retry_span.end(error=type(exc).__name__)
                         retry_error = exc
                     else:

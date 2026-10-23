@@ -35,6 +35,7 @@ def _load_default_prompt() -> str:
         logger.warning(
             "Failed to read default prompt from %s",
             DEFAULT_PROMPT_PATH or "openswe.resources/default_prompt.md",
+            exc_info=True,
         )
     return ""
 

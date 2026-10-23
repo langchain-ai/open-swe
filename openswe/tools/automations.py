@@ -77,7 +77,7 @@ async def create_automation(
             allow_admin_thread=True,
             use_workspace_credentials=configurable().source == "schedule",
         )
-    except Exception as exc:
+    except Exception as exc:  # noqa: BLE001 - _error logs it
         return _error(exc)
     return {"ok": True, "automation": record}
 
@@ -120,7 +120,7 @@ async def update_automation(
             allow_admin_thread=True,
             use_workspace_credentials=configurable().source == "schedule",
         )
-    except Exception as exc:
+    except Exception as exc:  # noqa: BLE001 - _error logs it
         return _error(exc)
     return {"ok": True, "automation": record}
 
@@ -132,7 +132,7 @@ async def trigger_automation(automation_id: str) -> dict[str, Any]:
     """Implement the `trigger_automation` tool."""
     try:
         result = await schedules.trigger_agent_schedule(automation_id)
-    except Exception as exc:
+    except Exception as exc:  # noqa: BLE001 - _error logs it
         return _error(exc)
     return {"ok": True, **result}
 
@@ -144,6 +144,6 @@ async def delete_automation(automation_id: str) -> dict[str, Any]:
     """Implement the `delete_automation` tool."""
     try:
         await schedules.delete_agent_schedule(automation_id)
-    except Exception as exc:
+    except Exception as exc:  # noqa: BLE001 - _error logs it
         return _error(exc)
     return {"ok": True, "deleted": True}

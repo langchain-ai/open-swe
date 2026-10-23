@@ -154,8 +154,8 @@ async def _cloud_terminal(websocket: WebSocket, thread_id: str, session: dict[st
             await websocket.send_text(
                 json.dumps({"type": "error", "message": "Cloud terminal disconnected"})
             )
-        except Exception:  # noqa: BLE001
-            pass
+        except Exception:
+            logger.debug("Could not tell the client the cloud terminal closed", exc_info=True)
     finally:
         if handle is not None:
             await handle.kill()

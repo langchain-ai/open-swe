@@ -45,7 +45,7 @@ async def post_linear_notification(issue_id: str, body: str) -> bool:
                 if isinstance(result, ToolMessage) and result.status == "success":
                     return True
                 break
-    except Exception:
+    except Exception:  # noqa: BLE001 - upstream text may hold credentials
         # Upstream exception text can contain connection credentials or comment content.
         logger.warning("Linear MCP notification failed", extra={"linear_issue_id": issue_id})
         return False

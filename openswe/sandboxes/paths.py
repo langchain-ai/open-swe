@@ -180,4 +180,8 @@ def _cache_work_dir(sandbox_backend: SandboxBackendProtocol, work_dir: str) -> N
     try:
         setattr(sandbox_backend, _WORK_DIR_CACHE_ATTR, work_dir)
     except Exception:
-        logger.debug("Failed to cache sandbox work dir on %s", type(sandbox_backend).__name__)
+        logger.debug(
+            "Failed to cache sandbox work dir on %s",
+            type(sandbox_backend).__name__,
+            exc_info=True,
+        )

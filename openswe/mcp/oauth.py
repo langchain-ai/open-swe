@@ -69,7 +69,7 @@ class _ClientCredentialsAuth(httpx2.Auth):
                     raise ValueError("Invalid bearer token")
             except MCPOAuthError:
                 raise
-            except Exception:
+            except Exception:  # noqa: BLE001 - re-raised with the upstream text redacted
                 raise MCPOAuthError(
                     "OAuth token request failed; check the token URL and client credentials"
                 ) from None
