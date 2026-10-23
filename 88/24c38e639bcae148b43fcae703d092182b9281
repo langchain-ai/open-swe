@@ -1,0 +1,23 @@
+mda/rt/browser.py
+  s_b35d826fa62e9d::t_5ab04c6cfcb1f5 43-44
+vendor/managed-deepagents-sdk/packages/pypi/src/managed_deepagents/browser.py
+  s_b35d826fa62e9d::t_063501fa615b10 379
+vendor/mda-upstream-prs
+  s_b35d826fa62e9d::t_c0f4c4aeecc2d2 3
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "8824c38e639bcae148b43fcae703d092182b9281",
+  "prompts": {},
+  "sessions": {
+    "s_b35d826fa62e9d": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "2b6b8806-93bb-4d14-bffd-fb396f8e89c7",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "Sydney Runkle <sydneymarierunkle@gmail.com>"
+    }
+  }
+}
