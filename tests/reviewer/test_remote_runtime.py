@@ -344,6 +344,7 @@ async def test_mda_catalog_leaves_integrations_and_code_mode_to_mda(
     """Seldom-needed tools go to MDA's code mode, not the model's schemas; the graph's own stays here."""
     # A provider MDA declares no box for, so the catalog reads no thread metadata.
     monkeypatch.setenv("SANDBOX_TYPE", "local")
+    from langchain.agents.middleware import ModelCallLimitMiddleware
     from langchain.agents.middleware.types import AgentMiddleware
     from langchain_core.tools import StructuredTool
     from langchain_quickjs import CodeInterpreterMiddleware
@@ -389,6 +390,7 @@ async def test_mda_catalog_leaves_integrations_and_code_mode_to_mda(
             surface.dynamic,
             CodeInterpreterMiddleware(ptc=[integration("mcp_search")]),
             TaskCoordinationMiddleware(RUN.thread_id, True, None),
+            ModelCallLimitMiddleware(run_limit=20, exit_behavior="end"),
         ]
         surface.base_tools = core
         surface.code_mode = True
@@ -430,6 +432,8 @@ async def test_mda_catalog_leaves_integrations_and_code_mode_to_mda(
     assert "private-owner" not in str(catalog)
     assert "private-gateway" not in str(catalog)
     assert catalog["code_only"] == ["manage_thread", "mcp_search"]
+    # MDA runs the graph's cap on model calls, such as an incident policy's.
+    assert catalog["model_call_limit"] == 20
     # Code mode calls the file and shell tools too, through MDA's own with their checks.
     assert catalog["also_from_code"] == [
         "delete",

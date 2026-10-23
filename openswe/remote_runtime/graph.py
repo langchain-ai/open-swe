@@ -462,6 +462,14 @@ class RunSession:
             ),
             incident_evidence=self._incident is not None,
             worker_webhook=COMPLETION_WEBHOOK_URL if self._delegates else None,
+            model_call_limit=next(
+                (
+                    m.run_limit
+                    for m in self.surface.middleware
+                    if isinstance(m, ModelCallLimitMiddleware)
+                ),
+                None,
+            ),
         )
 
     async def sandbox(self) -> ManagedSandbox | None:

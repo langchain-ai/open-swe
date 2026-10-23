@@ -62,7 +62,7 @@ if TYPE_CHECKING:
 
 Graph = Literal["agent", "reviewer", "review-scout"]
 _DEFAULT_MODEL: Final = "anthropic:claude-opus-5-5"
-# Matches the in-process graphs' cap on model calls per run.
+# The in-process graphs' cap on model calls per run, for a catalog that sets none.
 _MODEL_CALL_LIMIT: Final = 5_000
 # A worker's system prompt starts as this agent's; the backend's prepends the rest.
 _INSTRUCTIONS: Final = Path(__file__).with_name("instructions.md").read_text()
@@ -242,7 +242,12 @@ async def agent(runtime: ManagedServerRuntime) -> DeepAgentDefinition:
             ServedToolsMiddleware(offered, excluded | code_only, backend),
             *_code_mode(context.graph, from_code, catalog.described, file_tools),
             *_browser(context.graph, backend),
-            ModelCallLimitMiddleware(run_limit=_MODEL_CALL_LIMIT, exit_behavior="end"),
+            ModelCallLimitMiddleware(
+                run_limit=_MODEL_CALL_LIMIT
+                if catalog.model_call_limit is None
+                else catalog.model_call_limit,
+                exit_behavior="end",
+            ),
             *model_call_guards(),
         ],
     )
