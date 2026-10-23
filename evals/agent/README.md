@@ -29,8 +29,9 @@ evals/agent/
 └── run_eval.py        # client.aevaluate entrypoint
 ```
 
-Instances live outside this directory as JSONL (see below); keep large files out
-of the repo and point `instances_path` at them.
+Instances live as JSONL (see below). Keep large benchmark exports out of the
+repo and point `instances_path` at them; the checked-in `instances/` folder only
+holds the small self-contained sets `smoke.jsonl` and `long_context.jsonl`.
 
 ## Instance schema
 
@@ -207,6 +208,31 @@ Unknown turn/usage values are excluded from the corresponding paired metric and
 the number of usable pairs is reported. Execution failures stay in the resolution
 denominator. This prevents missing observations from looking like cost savings.
 
+Comparisons also report each run's experimental condition (model and compaction
+arm), paired compaction count and token deltas, overflow-triggered compaction
+totals, and a baseline-to-candidate failure-stage transition matrix.
+
+### Compaction experiments
+
+[LONG_CONTEXT_TASKS.md](LONG_CONTEXT_TASKS.md) describes the ten-task
+`instances/long_context.jsonl` set and the arm protocol. The arm travels through
+the eval `configurable`, so only compaction changes between runs:
+
+```bash
+AGENT_EVAL_COMPACTION_TRIGGER_TOKENS=16000 \
+AGENT_EVAL_COMPACTION_SUMMARY_PROMPT=structured \
+uv run python -m evals.agent.run_local \
+    --instances evals/agent/instances/long_context.jsonl \
+    --output-dir artifacts/agent-eval/structured-1
+```
+
+`run_eval` exposes the same settings as `--compaction-trigger-tokens`,
+`--compaction-trigger-messages`, `--compaction-trigger-fraction`, and
+`--compaction-summary-prompt`. Only one trigger dimension may be set; leaving all
+of them unset keeps the model-derived defaults. `trigger_tokens` works for models
+without a context-window profile. The structured prompt lives at
+`agent/resources/prompts/compaction/structured-summary.md`.
+
 `--mode reference` grades the task's `patch`; `--mode empty` grades no changes.
 Both modes skip the agent and mark their reports as having no model predictions.
 Reference mode requires every selected task to have a nonempty gold patch.
@@ -271,14 +297,19 @@ Per instance (`judge_resolution`):
 | `phase_seconds` | checkout, installation, patch application, and test durations |
 | `execution_environment` | observed sandbox capabilities and environment probe errors |
 | `input_tokens`, `output_tokens`, `usage_complete` | observed main-agent message usage and its completeness |
+| `compaction` | run-level compaction count, messages/tokens summarized, summary tokens, duration, and overflow count |
 
 Across the experiment (`aggregate_resolution`): `resolve_rate`,
 `patch_applied_rate`, `error_rate`, mean per-test rates, and median
-steps/wall-clock, per-stage failure rates, and usage coverage. Every evaluated row,
-including execution failures, stays in the resolution-rate denominator. Unknown
-model-turn counts are excluded from the observed-turn median, rather than counted
-as zero. Token counts cover main-agent messages only: subagents, compaction, and
-retry costs need tracing data. Monetary cost is not estimated here.
+steps/wall-clock, per-stage failure rates, and usage coverage. Compaction
+metrics are `compaction_rate`, `mean_compactions`, mean summarized/summary
+tokens, `compaction_compression_ratio`, `overflow_compaction_rate`, and
+`mean_overflow_compactions`. Every evaluated row, including execution failures,
+stays in the resolution-rate denominator. Unknown model-turn counts are excluded
+from the observed-turn median, rather than counted as zero. Token counts cover
+main-agent messages only: subagents and compaction model calls need tracing
+data; compaction token values are middleware estimates. Monetary cost is not
+estimated here.
 
 The LangSmith `resolution` feedback contains the score, the failure stage as its
 value, and structured diagnosis in `evaluator_info`. `--output-dir` additionally

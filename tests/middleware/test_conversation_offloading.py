@@ -3,12 +3,18 @@ from deepagents.backends import FilesystemBackend
 from deepagents.graph import _apply_custom_middleware
 from deepagents.middleware.summarization import SummarizationMiddleware
 from langchain.agents import create_agent
+from langchain.agents.middleware import wrap_model_call
 from langchain.agents.middleware.types import ModelRequest, ModelResponse
+from langchain_core.exceptions import ContextOverflowError
 from langchain_core.language_models.fake_chat_models import FakeListChatModel
 from langchain_core.messages import AIMessage, HumanMessage
 from langgraph.checkpoint.memory import InMemorySaver
 
-from agent.middleware.conversation_offloading import ConversationOffloadingMiddleware
+from agent.middleware import conversation_offloading as module
+from agent.middleware.conversation_offloading import (
+    CompactionSettings,
+    ConversationOffloadingMiddleware,
+)
 from agent.middleware.prepare_run import BasePrepareRunMiddleware
 
 
@@ -97,8 +103,6 @@ async def test_automatic_completion_precedes_handler_and_suppresses_tokens(
         assert events == ["started", "completed"]
         assert list(tmp_path.rglob("*.md"))
         return ModelResponse(result=[AIMessage(content="NORMAL ANSWER")])
-
-    from langchain.agents.middleware import wrap_model_call
 
     @wrap_model_call
     async def answer(request, next_handler):
@@ -239,3 +243,62 @@ async def test_manual_before_model_runs_after_prepare(tmp_path, monkeypatch):
     state = await graph.ainvoke({"messages": [HumanMessage(content="hello")]})
     assert state["run_prepared"] is True
     assert state["conversation_offloading"]["status"] == "skipped"
+
+
+def test_settings_override_trigger_and_summary_prompt(tmp_path):
+    model = FakeListChatModel(responses=["summary"])
+    middleware = ConversationOffloadingMiddleware(
+        model,
+        FilesystemBackend(root_dir=str(tmp_path), virtual_mode=True),
+        settings=CompactionSettings(trigger_tokens=1234, summary_prompt="CUSTOM PROMPT {messages}"),
+    )
+    assert middleware._lc_helper._trigger_clauses == [{"tokens": 1234}]
+    assert middleware._lc_helper.summary_prompt == "CUSTOM PROMPT {messages}"
+
+
+async def test_context_overflow_escape_is_recorded(tmp_path, monkeypatch):
+    model = FakeListChatModel(responses=["SUMMARY", "ANSWER"])
+    middleware = ConversationOffloadingMiddleware(
+        model,
+        FilesystemBackend(root_dir=str(tmp_path), virtual_mode=True),
+        settings=CompactionSettings(trigger_tokens=10**9),
+    )
+    middleware._lc_helper.keep = ("messages", 2)
+    recorded = []
+
+    async def record(**kwargs):
+        recorded.append(kwargs)
+
+    monkeypatch.setattr(module, "record_context_offloaded", record)
+
+    attempts = {"count": 0}
+
+    @wrap_model_call
+    async def overflow_once(request, handler):
+        if attempts["count"] == 0:
+            attempts["count"] += 1
+            raise ContextOverflowError("prompt too long")
+        return await handler(request)
+
+    graph = create_agent(
+        model=model, middleware=[middleware, overflow_once], checkpointer=InMemorySaver()
+    )
+    config = {"configurable": {"thread_id": "overflow"}}
+    await graph.ainvoke(
+        {
+            "messages": [
+                HumanMessage(content="old"),
+                AIMessage(content="old reply"),
+                HumanMessage(content="recent"),
+                AIMessage(content="recent reply"),
+            ]
+        },
+        config,
+    )
+    state = (await graph.aget_state(config)).values["conversation_offloading"]
+    assert state["trigger"] == "overflow"
+    assert state["count"] == 1
+    assert state["overflow_count"] == 1
+    [event] = recorded
+    assert event["trigger"] == "overflow"
+    assert event["status"] == "completed"

@@ -43,7 +43,8 @@ class CompactionTelemetry(BaseModel):
     """Run-level conversation compaction totals reported by the agent graph.
 
     Estimates come from the agent token counter; they cover messages replaced
-    by summaries, not billed model usage.
+    by summaries, not billed model usage. ``overflow_count`` counts compactions
+    caused by a provider context-overflow rejection rather than the threshold.
     """
 
     count: int = Field(default=0, ge=0)
@@ -51,6 +52,7 @@ class CompactionTelemetry(BaseModel):
     summarized_tokens: int = Field(default=0, ge=0)
     summary_tokens: int = Field(default=0, ge=0)
     duration_ms: int = Field(default=0, ge=0)
+    overflow_count: int = Field(default=0, ge=0)
 
 
 class TargetResult(BaseModel):

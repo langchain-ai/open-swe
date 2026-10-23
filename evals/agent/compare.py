@@ -3,6 +3,7 @@
 import argparse
 import asyncio
 import json
+from collections import Counter
 from pathlib import Path
 from statistics import median
 
@@ -11,6 +12,15 @@ from pydantic import BaseModel, Field
 from agent.prompts import render_prompt
 from evals.agent.dataset import TaskSet
 from evals.agent.models import FailureStage
+
+_CONDITION_KEYS = (
+    "model_id",
+    "reasoning_effort",
+    "compaction_trigger_tokens",
+    "compaction_trigger_messages",
+    "compaction_trigger_fraction",
+    "compaction_summary_prompt",
+)
 
 
 class _RunConfig(BaseModel):
@@ -29,6 +39,15 @@ class _Summary(BaseModel):
     config: _RunConfig
 
 
+class _Compaction(BaseModel):
+    count: int = Field(default=0, ge=0)
+    messages_summarized: int = Field(default=0, ge=0)
+    summarized_tokens: int = Field(default=0, ge=0)
+    summary_tokens: int = Field(default=0, ge=0)
+    duration_ms: int = Field(default=0, ge=0)
+    overflow_count: int = Field(default=0, ge=0)
+
+
 class _Row(BaseModel):
     instance_id: str
     repo: str
@@ -39,10 +58,15 @@ class _Row(BaseModel):
     input_tokens: int | None = Field(default=None, ge=0)
     output_tokens: int | None = Field(default=None, ge=0)
     usage_complete: bool = False
+    compaction: _Compaction | None = None
 
 
-def _load(directory: Path) -> tuple[_Summary, dict[str, _Row]]:
-    summary = _Summary.model_validate_json((directory / "summary.json").read_bytes())
+def _load(directory: Path) -> tuple[_Summary, dict[str, _Row], dict[str, object]]:
+    raw_summary: object = json.loads((directory / "summary.json").read_bytes())
+    summary = _Summary.model_validate(raw_summary)
+    config = raw_summary.get("config", {}) if isinstance(raw_summary, dict) else {}
+    if not isinstance(config, dict):
+        config = {}
     if summary.schema_version != 1 or not summary.completed:
         raise ValueError(f"Experiment is incomplete or unsupported: {directory}")
     if summary.config.run_mode != "agent" or not summary.config.contains_model_predictions:
@@ -65,12 +89,20 @@ def _load(directory: Path) -> tuple[_Summary, dict[str, _Row]]:
         or len(rows) != summary.evaluated_instances
     ):
         raise ValueError("Missing, unexpected, or mismatched experiment results")
-    return summary, rows
+    return summary, rows, config
+
+
+def _condition(config: dict[str, object]) -> dict[str, object]:
+    return {key: config[key] for key in _CONDITION_KEYS if key in config}
+
+
+def _compaction(row: _Row) -> _Compaction:
+    return row.compaction or _Compaction()
 
 
 def compare_runs(baseline: Path, candidate: Path) -> dict[str, object]:
-    before, left = _load(baseline)
-    after, right = _load(candidate)
+    before, left, baseline_config = _load(baseline)
+    after, right, candidate_config = _load(candidate)
     if before.config.dataset_sha256 != after.config.dataset_sha256:
         raise ValueError("Cannot compare different task sets")
     if (
@@ -96,11 +128,23 @@ def compare_runs(baseline: Path, candidate: Path) -> dict[str, object]:
         and (new_in := right[key].input_tokens) is not None
         and (new_out := right[key].output_tokens) is not None
     ]
+    compaction_pairs = [
+        (old, new)
+        for key in left
+        if (old := left[key].compaction) and (new := right[key].compaction)
+    ]
+    baseline_compactions = [_compaction(left[key]).count for key in left]
+    candidate_compactions = [_compaction(right[key]).count for key in left]
+    transitions = Counter(
+        (str(left[key].failure_stage), str(right[key].failure_stage)) for key in left
+    )
     return {
         "schema_version": 1,
         "baseline": str(baseline),
         "candidate": str(candidate),
         "dataset_sha256": before.config.dataset_sha256,
+        "baseline_condition": _condition(baseline_config),
+        "candidate_condition": _condition(candidate_config),
         "paired_instances": count,
         "baseline_resolve_rate": sum(row.resolved for row in left.values()) / count,
         "candidate_resolve_rate": sum(row.resolved for row in right.values()) / count,
@@ -116,6 +160,36 @@ def compare_runs(baseline: Path, candidate: Path) -> dict[str, object]:
         "median_paired_steps_delta": median(step_deltas) if step_deltas else None,
         "complete_usage_pairs": len(token_deltas),
         "median_paired_main_agent_tokens_delta": median(token_deltas) if token_deltas else None,
+        "baseline_compaction_rate": sum(value > 0 for value in baseline_compactions) / count,
+        "candidate_compaction_rate": sum(value > 0 for value in candidate_compactions) / count,
+        "mean_compactions_delta": (sum(candidate_compactions) - sum(baseline_compactions)) / count,
+        "compaction_pairs": len(compaction_pairs),
+        "median_paired_compaction_count_delta": (
+            median(new.count - old.count for old, new in compaction_pairs)
+            if compaction_pairs
+            else None
+        ),
+        "complete_compaction_token_pairs": sum(
+            1 for old, new in compaction_pairs if old.summary_tokens and new.summary_tokens
+        ),
+        "median_paired_summarized_tokens_delta": (
+            median(new.summarized_tokens - old.summarized_tokens for old, new in compaction_pairs)
+            if compaction_pairs
+            else None
+        ),
+        "median_paired_summary_tokens_delta": (
+            median(new.summary_tokens - old.summary_tokens for old, new in compaction_pairs)
+            if compaction_pairs
+            else None
+        ),
+        "baseline_overflow_compactions": sum(_compaction(left[key]).overflow_count for key in left),
+        "candidate_overflow_compactions": sum(
+            _compaction(right[key]).overflow_count for key in left
+        ),
+        "failure_stage_transitions": [
+            {"baseline_stage": baseline_stage, "candidate_stage": candidate_stage, "instances": n}
+            for (baseline_stage, candidate_stage), n in sorted(transitions.items())
+        ],
         "instances": [
             {
                 "instance_id": key,
@@ -123,6 +197,8 @@ def compare_runs(baseline: Path, candidate: Path) -> dict[str, object]:
                 "candidate_stage": right[key].failure_stage,
                 "baseline_resolved": left[key].resolved,
                 "candidate_resolved": right[key].resolved,
+                "baseline_compactions": _compaction(left[key]).count,
+                "candidate_compactions": _compaction(right[key]).count,
             }
             for key in left
         ],

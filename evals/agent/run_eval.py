@@ -45,6 +45,10 @@ _ENV_MAPPING: dict[str, str] = {
     "run_source": "AGENT_EVAL_RUN_SOURCE",
     "local_project_dir": "AGENT_EVAL_LOCAL_PROJECT_DIR",
     "test_timeout_seconds": "AGENT_EVAL_TEST_TIMEOUT_SECONDS",
+    "compaction_trigger_tokens": "AGENT_EVAL_COMPACTION_TRIGGER_TOKENS",
+    "compaction_trigger_messages": "AGENT_EVAL_COMPACTION_TRIGGER_MESSAGES",
+    "compaction_trigger_fraction": "AGENT_EVAL_COMPACTION_TRIGGER_FRACTION",
+    "compaction_summary_prompt": "AGENT_EVAL_COMPACTION_SUMMARY_PROMPT",
 }
 
 
@@ -60,6 +64,10 @@ class AgentEvalConfig(TypedDict, total=False):
     run_source: str
     local_project_dir: str
     test_timeout_seconds: int
+    compaction_trigger_tokens: int
+    compaction_trigger_messages: int
+    compaction_trigger_fraction: float
+    compaction_summary_prompt: str
 
 
 DEFAULT_CONFIG: AgentEvalConfig = {
@@ -76,7 +84,13 @@ DEFAULT_CONFIG: AgentEvalConfig = {
     "test_timeout_seconds": 1800,
 }
 
-_INT_KEYS = {"max_concurrency", "test_timeout_seconds"}
+_INT_KEYS = {
+    "max_concurrency",
+    "test_timeout_seconds",
+    "compaction_trigger_tokens",
+    "compaction_trigger_messages",
+}
+_FLOAT_KEYS = {"compaction_trigger_fraction"}
 _CONFIG_ADAPTER = TypeAdapter(AgentEvalConfig)
 
 
@@ -87,8 +101,15 @@ def _parse_int(value: str) -> int | None:
         return None
 
 
+def _parse_float(value: str) -> float | None:
+    try:
+        return float(value)
+    except ValueError:
+        return None
+
+
 def _coerce_config(raw: Mapping[str, object]) -> AgentEvalConfig:
-    config: dict[str, str | int] = {}
+    config: dict[str, str | int | float] = {}
     for key in _ENV_MAPPING:
         value = raw.get(key)
         if value is None or value == "":
@@ -96,6 +117,10 @@ def _coerce_config(raw: Mapping[str, object]) -> AgentEvalConfig:
         if key in _INT_KEYS:
             parsed = _parse_int(str(value))
             if parsed is not None and parsed > 0:
+                config[key] = parsed
+        elif key in _FLOAT_KEYS:
+            parsed = _parse_float(str(value))
+            if parsed is not None and 0 < parsed <= 1:
                 config[key] = parsed
         elif isinstance(value, str):
             config[key] = value
@@ -143,7 +168,13 @@ def _apply_config_to_env(config: AgentEvalConfig) -> None:
         if config_key == "langsmith_project":
             continue
         value = config.get(config_key)  # type: ignore[arg-type]
-        if value is not None:
+        if value is None:
+            continue
+        if isinstance(value, str) and not value:
+            # An unset option must not shadow the target's own default; an
+            # empty LANGGRAPH_URL used to produce a client URL with no scheme.
+            os.environ.pop(env_key, None)
+        else:
             os.environ[env_key] = str(value)
     project = config.get("langsmith_project") or os.environ.get("LANGSMITH_PROJECT")
     os.environ["LANGSMITH_PROJECT"] = project or DEFAULT_LANGSMITH_PROJECT
@@ -183,6 +214,18 @@ async def main() -> None:
     parser.add_argument("--reasoning-effort", dest="reasoning_effort")
     parser.add_argument("--run-source", dest="run_source", choices=["eval", "desktop"])
     parser.add_argument("--local-project-dir", dest="local_project_dir")
+    parser.add_argument("--compaction-trigger-tokens", dest="compaction_trigger_tokens", type=int)
+    parser.add_argument(
+        "--compaction-trigger-messages", dest="compaction_trigger_messages", type=int
+    )
+    parser.add_argument(
+        "--compaction-trigger-fraction", dest="compaction_trigger_fraction", type=float
+    )
+    parser.add_argument(
+        "--compaction-summary-prompt",
+        dest="compaction_summary_prompt",
+        choices=["default", "structured"],
+    )
     parser.add_argument("--test-timeout-seconds", dest="test_timeout_seconds", type=int)
     parser.add_argument(
         "--output-dir", type=Path, help="Save JSONL, summary JSON, and Markdown reports."

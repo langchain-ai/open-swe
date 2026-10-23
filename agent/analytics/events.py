@@ -195,10 +195,12 @@ class ContextOffloadedPayload(StrictPayload):
     for; the offloaded history itself stays in the sandbox and is deliberately
     not recorded here. Token counts are estimates from the middleware token
     counter: ``summarized_tokens`` covers the messages the summary replaced and
-    ``summary_tokens`` covers the replacement itself.
+    ``summary_tokens`` covers the replacement itself. ``trigger`` is
+    ``overflow`` when the provider rejected an over-budget call and the retry
+    compacted first, as opposed to a configured threshold.
     """
 
-    trigger: Literal["manual", "automatic"]
+    trigger: Literal["manual", "automatic", "overflow"]
     status: Literal["completed", "failed"]
     cutoff_index: int | None = Field(default=None, ge=0)
     messages_summarized: int | None = Field(default=None, ge=0)

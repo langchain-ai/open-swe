@@ -494,6 +494,9 @@ def summarize_results(records: list[InstanceResult]) -> dict[str, float]:
     summary["mean_compaction_summary_tokens"] = summary_tokens / count
     if summary_tokens:
         summary["compaction_compression_ratio"] = summarized_tokens / summary_tokens
+    overflow_counts = [_compaction_value(r, "overflow_count") for r in records]
+    summary["overflow_compaction_rate"] = sum(value > 0 for value in overflow_counts) / count
+    summary["mean_overflow_compactions"] = sum(overflow_counts) / count
     for stage in FailureStage:
         if stage != FailureStage.NONE:
             summary[f"failure_rate.{stage}"] = (

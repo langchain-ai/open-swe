@@ -4,9 +4,12 @@ import logging
 import time
 from collections.abc import Awaitable, Callable
 from contextvars import ContextVar
+from dataclasses import dataclass
 from typing import Any, Literal, NotRequired, TypedDict
 
 from deepagents.middleware.summarization import (
+    DEEPAGENTS_DEFAULT_SUMMARY_PROMPT,
+    ContextSize,
     SummarizationMiddleware,
     SummarizationState,
     compute_summarization_defaults,
@@ -18,6 +21,7 @@ from langchain.agents.middleware.types import (
     ModelResponse,
     hook_config,
 )
+from langchain_core.exceptions import ContextOverflowError
 from langchain_core.messages import AIMessage, AnyMessage
 from langgraph.config import get_stream_writer
 from langgraph.runtime import Runtime
@@ -27,6 +31,33 @@ from agent.analytics.usage import record_context_offloaded
 logger = logging.getLogger(__name__)
 
 _manual = ContextVar("manual_offloading", default=False)
+_overflow_cause = ContextVar("offloading_overflow_cause", default=False)
+
+OffloadTrigger = Literal["manual", "automatic", "overflow"]
+
+
+@dataclass(frozen=True)
+class CompactionSettings:
+    """Per-run compaction strategy overrides used by offline experiments.
+
+    ``None`` keeps the model-derived default for that dimension. The summary
+    prompt is the complete template expected by the summarization middleware,
+    including its ``{messages}`` placeholder.
+    """
+
+    trigger_tokens: int | None = None
+    trigger_messages: int | None = None
+    trigger_fraction: float | None = None
+    summary_prompt: str | None = None
+
+    def trigger(self, default: ContextSize) -> ContextSize:
+        if self.trigger_tokens is not None:
+            return ("tokens", self.trigger_tokens)
+        if self.trigger_messages is not None:
+            return ("messages", self.trigger_messages)
+        if self.trigger_fraction is not None:
+            return ("fraction", self.trigger_fraction)
+        return default
 
 
 class OffloadMetrics(TypedDict, total=False):
@@ -55,13 +86,14 @@ class OffloadTotals(TypedDict):
     total_summarized_tokens: int
     total_summary_tokens: int
     total_duration_ms: int
+    overflow_count: int
 
 
 class OffloadState(TypedDict, total=False):
     """State value describing compaction; last-event details plus run totals."""
 
     status: Literal["started", "completed", "failed", "skipped"]
-    trigger: Literal["manual", "automatic"]
+    trigger: OffloadTrigger
     cutoff_index: int | None
     file_path: str | None
     messages_summarized: int
@@ -73,6 +105,7 @@ class OffloadState(TypedDict, total=False):
     total_summarized_tokens: int
     total_summary_tokens: int
     total_duration_ms: int
+    overflow_count: int
 
 
 _offload_metrics: ContextVar[OffloadMetrics | None] = ContextVar("offload_metrics", default=None)
@@ -83,6 +116,7 @@ _TOTAL_KEYS = (
     "total_summarized_tokens",
     "total_summary_tokens",
     "total_duration_ms",
+    "overflow_count",
 )
 
 
@@ -102,6 +136,7 @@ def _prior_totals(state: object) -> OffloadTotals:
         "total_summarized_tokens": _count_value(prior.get("total_summarized_tokens")),
         "total_summary_tokens": _count_value(prior.get("total_summary_tokens")),
         "total_duration_ms": _count_value(prior.get("total_duration_ms")),
+        "overflow_count": _count_value(prior.get("overflow_count")),
     }
 
 
@@ -116,20 +151,43 @@ class ConversationOffloadingMiddleware(SummarizationMiddleware):
     def name(self) -> str:
         return "SummarizationMiddleware"
 
-    def __init__(self, model: Any, backend: Any, *, manual: bool = False) -> None:
+    def __init__(
+        self,
+        model: Any,
+        backend: Any,
+        *,
+        manual: bool = False,
+        settings: CompactionSettings | None = None,
+    ) -> None:
         summary_model = model.model_copy(
             update={"tags": [*(model.tags or []), "nostream", "langsmith:hidden"]}
         )
+        defaults = compute_summarization_defaults(model)
         super().__init__(
-            model=summary_model, backend=backend, **compute_summarization_defaults(model)
+            model=summary_model,
+            backend=backend,
+            trigger=(
+                settings.trigger(defaults["trigger"])
+                if settings is not None
+                else defaults["trigger"]
+            ),
+            keep=defaults["keep"],
+            truncate_args_settings=defaults["truncate_args_settings"],
+            summary_prompt=(
+                settings.summary_prompt
+                if settings is not None and settings.summary_prompt is not None
+                else DEEPAGENTS_DEFAULT_SUMMARY_PROMPT
+            ),
         )
         self.manual = manual
         # Keyed by summary text: `awrap_model_call` generates summaries inside
         # `asyncio.gather`, so task-local context does not carry metrics back.
         self._pending_metrics: dict[str, OffloadMetrics] = {}
 
-    def _trigger(self) -> Literal["manual", "automatic"]:
-        return "manual" if _manual.get() else "automatic"
+    def _trigger(self) -> OffloadTrigger:
+        if _manual.get():
+            return "manual"
+        return "overflow" if _overflow_cause.get() else "automatic"
 
     def _status(
         self,
@@ -195,9 +253,25 @@ class ConversationOffloadingMiddleware(SummarizationMiddleware):
         handler: Callable[[ModelRequest], Awaitable[ModelResponse]],
     ) -> ModelResponse | ExtendedModelResponse:
         _offload_metrics.set(None)
-        response = await super().awrap_model_call(request, handler)
-        metrics: OffloadMetrics = _offload_metrics.get() or {}
-        _offload_metrics.set(None)
+        overflow_token = _overflow_cause.set(False)
+
+        async def detect_overflow(inner: ModelRequest) -> ModelResponse:
+            # The upstream middleware retries an over-budget call after
+            # summarizing; recording the cause here is what separates an
+            # overflow escape from a threshold-triggered compaction.
+            try:
+                return await handler(inner)
+            except ContextOverflowError:
+                _overflow_cause.set(True)
+                raise
+
+        try:
+            response = await super().awrap_model_call(request, detect_overflow)
+            metrics: OffloadMetrics = _offload_metrics.get() or {}
+            trigger = self._trigger()
+        finally:
+            _offload_metrics.set(None)
+            _overflow_cause.reset(overflow_token)
         if isinstance(response, ExtendedModelResponse) and response.command:
             update = response.command.update
             if isinstance(update, dict) and (event := update.get("_summarization_event")):
@@ -205,7 +279,7 @@ class ConversationOffloadingMiddleware(SummarizationMiddleware):
                 totals = _prior_totals(request.state.get("conversation_offloading"))
                 update["conversation_offloading"] = {
                     "status": "completed",
-                    "trigger": self._trigger(),
+                    "trigger": trigger,
                     "cutoff_index": event["cutoff_index"],
                     "file_path": event["file_path"],
                     **metrics,
@@ -218,9 +292,11 @@ class ConversationOffloadingMiddleware(SummarizationMiddleware):
                     + metrics.get("summary_tokens", 0),
                     "total_duration_ms": totals["total_duration_ms"]
                     + metrics.get("duration_ms", 0),
+                    "overflow_count": totals["overflow_count"]
+                    + (1 if trigger == "overflow" else 0),
                 }
                 await record_context_offloaded(
-                    trigger=self._trigger(),
+                    trigger=trigger,
                     status="completed",
                     cutoff_index=cutoff if isinstance(cutoff, int) else None,
                     **metrics,

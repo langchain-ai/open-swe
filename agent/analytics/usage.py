@@ -501,7 +501,7 @@ async def record_tool_output_truncated(
 @fail_soft
 async def record_context_offloaded(
     *,
-    trigger: Literal["manual", "automatic"],
+    trigger: Literal["manual", "automatic", "overflow"],
     status: Literal["completed", "failed"],
     cutoff_index: int | None = None,
     messages_summarized: int | None = None,

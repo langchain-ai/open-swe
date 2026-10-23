@@ -64,6 +64,7 @@ async def test_compaction_totals_are_reported_from_graph_state(sdk: AsyncMock) -
             "total_summarized_tokens": 4_000,
             "total_summary_tokens": 300,
             "total_duration_ms": 900,
+            "overflow_count": 1,
             "file_path": "/conversation_history/session.md",
             "cutoff_index": 10,
         },
@@ -75,6 +76,7 @@ async def test_compaction_totals_are_reported_from_graph_state(sdk: AsyncMock) -
         "summarized_tokens": 4_000,
         "summary_tokens": 300,
         "duration_ms": 900,
+        "overflow_count": 1,
     }
 
 
@@ -108,6 +110,23 @@ async def test_partial_usage_is_not_reported_as_complete(sdk: AsyncMock) -> None
     output = await target.solve_task(_INPUTS)
     assert output["input_tokens"] == 12
     assert output["usage_complete"] is False
+
+
+async def test_compaction_arm_is_sent_to_the_graph(
+    sdk: AsyncMock, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("AGENT_EVAL_COMPACTION_TRIGGER_TOKENS", "12000")
+    monkeypatch.setenv("AGENT_EVAL_COMPACTION_SUMMARY_PROMPT", "structured")
+    sdk.runs.wait.return_value = {
+        "messages": [],
+        "agent_eval_result": {"status": "collected", "patch": ""},
+    }
+    await target.solve_task(_INPUTS)
+    configurable = sdk.runs.wait.await_args.kwargs["config"]["configurable"]
+    compaction = configurable["agent_eval"]["compaction"]
+    assert compaction["trigger_tokens"] == 12000
+    assert compaction["summary_prompt"] == "structured"
+    assert compaction["trigger_fraction"] is None
 
 
 async def test_invalid_instance_does_not_dispatch_a_run(sdk: AsyncMock) -> None:

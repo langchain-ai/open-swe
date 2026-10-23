@@ -67,6 +67,7 @@ from agent.dashboard.workspace_settings import WorkspaceSettings, get_workspace_
 from agent.dashboard.workspace_settings_cache import cached_workspace_settings
 from agent.desktop import create_desktop_backend, desktop_artifact_routes, is_desktop_run
 from agent.desktop_branch import schedule_worktree_branch_rename
+from agent.evaluation import CompactionSummaryPrompt
 from agent.github.token import resolve_github_token
 from agent.input_messages import (
     SystemIdentity,
@@ -110,7 +111,10 @@ from agent.middleware import (
     task_retry_on,
 )
 from agent.middleware.agent_evaluation import AgentEvaluationMiddleware
-from agent.middleware.conversation_offloading import ConversationOffloadingMiddleware
+from agent.middleware.conversation_offloading import (
+    CompactionSettings,
+    ConversationOffloadingMiddleware,
+)
 from agent.middleware.execution_environment import ExecutionEnvironmentMiddleware
 from agent.middleware.model_selection import ModelSelectionState, RoutingMode
 from agent.middleware.prepare_run import PrepareRunState
@@ -618,6 +622,24 @@ def _slack_dm_run(cfg: RunConfig) -> bool:
         _slack_tools_enabled(cfg)
         and cfg.slack_thread is not None
         and is_dm_session(cfg.slack_thread.channel_context, cfg.slack_thread.thread_ts)
+    )
+
+
+def _compaction_settings(cfg: RunConfig) -> CompactionSettings | None:
+    """Evaluation-only compaction strategy arm; other runs keep model defaults."""
+    configured = cfg.agent_eval.compaction if cfg.agent_eval is not None else None
+    if configured is None:
+        return None
+    prompt = (
+        load_prompt("compaction/structured-summary.md")
+        if configured.summary_prompt == CompactionSummaryPrompt.STRUCTURED
+        else None
+    )
+    return CompactionSettings(
+        trigger_tokens=configured.trigger_tokens,
+        trigger_messages=configured.trigger_messages,
+        trigger_fraction=configured.trigger_fraction,
+        summary_prompt=prompt,
     )
 
 
@@ -1382,6 +1404,7 @@ async def get_agent(config: RunnableConfig) -> Pregel:
         if credential_login is None and not local_run
         else None
     )
+    compaction = _compaction_settings(cfg)
     return create_deep_agent(
         model=main_model,
         system_prompt="",
@@ -1394,7 +1417,9 @@ async def get_agent(config: RunnableConfig) -> Pregel:
                 workspace_skills=workspace_skills,
                 dynamic_tools=dynamic_tool_middleware,
                 sandbox_file_downloads=sandbox_file_downloads,
-                offloading=ConversationOffloadingMiddleware(subagent_model, agent_backend),
+                offloading=ConversationOffloadingMiddleware(
+                    subagent_model, agent_backend, settings=compaction
+                ),
                 incident_middleware=IncidentMiddleware(incident_session)
                 if incident_session is not None
                 else None,
@@ -1407,7 +1432,10 @@ async def get_agent(config: RunnableConfig) -> Pregel:
             list[AgentMiddleware[Any, Any, Any]],
             [
                 ConversationOffloadingMiddleware(
-                    main_model, agent_backend, manual=cfg.offload_conversation is True
+                    main_model,
+                    agent_backend,
+                    manual=cfg.offload_conversation is True,
+                    settings=compaction,
                 ),
                 RunDeadlineMiddleware(invocation_id=cfg.invocation_id),
                 PrepareAgentRunMiddleware(

@@ -4,7 +4,9 @@ import os
 from pathlib import Path
 
 import pytest
+from pydantic import ValidationError
 
+from agent.evaluation import CompactionConfig
 from evals.agent.build_dataset import InstanceError, build_example
 from evals.agent.judge import (
     InstanceResult,
@@ -17,6 +19,7 @@ from evals.agent.judge import (
 from evals.agent.judge import (
     test_timeout_seconds as judge_test_timeout_seconds,
 )
+from evals.agent.run_eval import AgentEvalConfig, _apply_config_to_env
 
 _INSTANCE = {
     "instance_id": "django__django-11099",
@@ -108,6 +111,7 @@ def test_summarize_results_reports_compaction_coverage() -> None:
                 "summarized_tokens": 1_000,
                 "summary_tokens": 100,
                 "duration_ms": 500,
+                "overflow_count": 1,
             },
         ),
         _result("compact-0", None),
@@ -118,6 +122,25 @@ def test_summarize_results_reports_compaction_coverage() -> None:
     assert summary["mean_compaction_summarized_tokens"] == 500.0
     assert summary["mean_compaction_summary_tokens"] == 50.0
     assert summary["compaction_compression_ratio"] == 10.0
+    assert summary["overflow_compaction_rate"] == 0.5
+    assert summary["mean_overflow_compactions"] == 0.5
+
+
+def test_compaction_config_allows_at_most_one_trigger() -> None:
+    with pytest.raises(ValidationError, match="At most one"):
+        CompactionConfig(trigger_tokens=1_000, trigger_fraction=0.5)
+    assert CompactionConfig(trigger_tokens=1_000).summary_prompt == "default"
+
+
+def test_empty_config_values_do_not_shadow_target_defaults(monkeypatch) -> None:
+    monkeypatch.setenv("LANGGRAPH_URL", "http://stale.example")
+    monkeypatch.setenv("AGENT_EVAL_LOCAL_PROJECT_DIR", "stale-directory")
+    _apply_config_to_env(
+        AgentEvalConfig(langgraph_url="", local_project_dir="", model_id="openai:test")
+    )
+    assert "LANGGRAPH_URL" not in os.environ
+    assert "AGENT_EVAL_LOCAL_PROJECT_DIR" not in os.environ
+    assert os.environ["AGENT_EVAL_MODEL_ID"] == "openai:test"
 
 
 def test_build_example_rejects_non_string_test_ids() -> None:

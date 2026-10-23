@@ -31,3 +31,10 @@ instances_path = "evals/agent/instances/swe_bench_verified.jsonl"
 # Per-install-command and pytest timeout, seconds. Repo installs for big
 # projects (django, sympy) can take a while on a cold runner.
 test_timeout_seconds = 1800
+
+# Compaction experiment arm (eval-only). Unset keeps the model-derived
+# defaults. Set at most one trigger dimension. See LONG_CONTEXT_TASKS.md.
+# compaction_trigger_tokens = 16000
+# compaction_trigger_messages = 40
+# compaction_trigger_fraction = 0.2
+# compaction_summary_prompt = "structured"  # "default" keeps the prose prompt

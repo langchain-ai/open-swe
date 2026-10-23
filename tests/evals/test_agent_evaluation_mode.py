@@ -12,7 +12,12 @@ from langchain_core.messages import AIMessage
 from langgraph.runtime import Runtime
 
 from agent import server
-from agent.evaluation import AgentEvaluationArtifact, AgentEvaluationConfig
+from agent.evaluation import (
+    AgentEvaluationArtifact,
+    AgentEvaluationConfig,
+    CompactionConfig,
+    CompactionSummaryPrompt,
+)
 from agent.middleware.agent_evaluation import AgentEvaluationMiddleware
 from agent.run_config import RunConfig
 from evals.agent.judge import _run
@@ -151,3 +156,26 @@ async def test_malformed_eval_configuration_cannot_fall_back_to_normal_execution
                 }
             }
         )
+
+
+def test_compaction_arm_loads_the_structured_prompt() -> None:
+    cfg = RunConfig(
+        agent_eval=AgentEvaluationConfig(
+            base_commit="a" * 40,
+            checkout_dir=_CHECKOUT,
+            compaction=CompactionConfig(
+                trigger_tokens=9_000,
+                summary_prompt=CompactionSummaryPrompt.STRUCTURED,
+            ),
+        )
+    )
+    settings = server._compaction_settings(cfg)
+    assert settings is not None
+    assert settings.trigger_tokens == 9_000
+    assert settings.summary_prompt is not None
+    assert "{messages}" in settings.summary_prompt
+    assert "## Objective" in settings.summary_prompt
+
+
+def test_runs_without_an_eval_arm_keep_model_compaction_defaults() -> None:
+    assert server._compaction_settings(RunConfig()) is None

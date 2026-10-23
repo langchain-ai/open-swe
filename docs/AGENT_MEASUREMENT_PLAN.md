@@ -24,7 +24,7 @@
 
 | 字段 | 类型 | 定义 |
 |---|---|---|
-| `trigger` | `manual` / `automatic` | 手动 `/offload` 或阈值自动触发 |
+| `trigger` | `manual` / `automatic` / `overflow` | 手动 `/offload`、阈值自动触发，或 provider 拒绝超预算调用后先压缩再重试 |
 | `status` | `completed` / `failed` | 摘要成功或失败（失败时没有 `summary_tokens`） |
 | `cutoff_index` | int? | 被摘要替换的前导消息数（状态坐标） |
 | `messages_summarized` | int? | 本次送入摘要的消息条数 |
@@ -37,6 +37,7 @@
 | 字段 | 定义 |
 |---|---|
 | `count` | 本次 run 内完成的压缩次数 |
+| `overflow_count` | 其中由 context overflow 触发的压缩次数 |
 | `total_messages_summarized` | 累计被摘要的消息条数 |
 | `total_summarized_tokens` | 累计被替换 token 估计 |
 | `total_summary_tokens` | 累计摘要 token 估计 |
@@ -48,8 +49,12 @@
 - `mean_compactions` = 总压缩次数 / 评测 run 数
 - `mean_compaction_summarized_tokens` = `Σsummarized_tokens` / 评测 run 数
 - `mean_compaction_summary_tokens` = `Σsummary_tokens` / 评测 run 数
+- `overflow_compaction_rate` = `overflow_count > 0` 的 run 数 / 评测 run 数
+- `mean_overflow_compactions` = `Σoverflow_count` / 评测 run 数
 - `compression_ratio` = `Σsummarized_tokens / Σsummary_tokens`；只有大于 1 才说明净节省上下文
-- 生产聚合接口：`GET /dashboard/api/analytics/context-offloaded?period=7d|30d|all`；响应含 `compaction` 总计与 `by_trigger` 分项
+- 生产聚合接口：`GET /dashboard/api/analytics/context-offloaded?period=7d|30d|all`；响应含 `compaction` 总计与 `by_trigger` 分项（`overflow` 是独立分项）
+
+**压缩策略实验条件（eval-only）：** `AgentEvaluationConfig.compaction` 控制触发维度（`trigger_tokens` / `trigger_messages` / `trigger_fraction`，只能选一个）与摘要提示词变体（`default` / `structured`）。结构化摘要提示词位于 `agent/resources/prompts/compaction/structured-summary.md`。该配置只经评测 `configurable` 传入，生产运行保持模型默认策略。
 
 **口径限制：**
 
@@ -82,7 +87,7 @@
 ## 3. 实验协议
 
 1. **固定条件**：模型 ID、reasoning effort、沙箱类型/镜像、依赖安装命令、任务集 SHA-256 指纹。不同条件的运行不得直接比较。
-2. **样本**：正式实验至少 10 题；每题先验证"参考补丁 resolved、空补丁 no_patch"；任务集必须覆盖目标行为（例如压缩实验必须让任务跨过压缩阈值）。
+2. **样本**：正式实验至少 10 题；每题先验证"参考补丁 resolved、空补丁 no_patch"；任务集必须覆盖目标行为（例如压缩实验必须让任务跨过压缩阈值）。压缩实验使用 `evals/agent/instances/long_context.jsonl`，通过 `AGENT_EVAL_COMPACTION_TRIGGER_*` 固定触发条件；若试跑未触发压缩，按 [LONG_CONTEXT_TASKS.md](../evals/agent/LONG_CONTEXT_TASKS.md) 调整阈值并在报告中注明实际维度与数值。
 3. **重复**：每组至少 3 次；报告每次的结果，不只报最好的一次。
 4. **配对**：同一任务集、同一评分策略，使用 `evals/agent/compare.py` 逐题比较；报告 improved / regressed / unchanged、失败阶段迁移、paired delta（百分点）。
 5. **报告必含**：N、重复次数、模型与沙箱版本、任务集指纹、原始结果目录、指标定义引用（第 2 节）。
@@ -135,10 +140,12 @@ uv run python -m evals.agent.compare \
 | 阶段 | 内容 | 状态 | 退出条件 |
 |---|---|---|---|
 | 1 | 压缩遥测：事件字段、图状态累计、聚合查询/API、评测采集与聚合指标 | 已完成（2026-10-23） | focused 测试、ruff、ty 通过；旧事件兼容 |
-| 2 | 长上下文任务集：任务跨过压缩阈值；压缩策略 A/B（触发阈值、结构化摘要、溢出逃生） | 待开始 | N≥10 ×3 配对实验，产出 failure-stage 迁移报告 |
+| 2 | 长上下文任务集：任务跨过压缩阈值；压缩策略 A/B（触发阈值、结构化摘要、溢出逃生） | 进行中（2026-10-24）：任务集与策略开关已完成并通过自检；正式 N≥10 ×3 配对实验待跑 | N≥10 ×3 配对实验，产出 failure-stage 迁移报告 |
 | 3 | 沙箱：启动打点、回收计数、凭证白名单、不可达恢复 | 待开始 | 指标登记 + 前后对比 |
 | 4 | 需求澄清：结构化提问工具、验收标准工件、反馈回灌 | 待开始 | 人工标注集 + 线上返工率口径 |
 | 5 | 入口幂等与持久队列；线上成功率看板 | 待开始 | 故障注入测试 + 看板查询 |
+
+阶段 2 的实现与实验说明见 [evals/agent/LONG_CONTEXT_TASKS.md](../evals/agent/LONG_CONTEXT_TASKS.md)：任务集指纹、reference/empty 自检结果、arm 环境变量与正式运行命令都记录在那里。任务集自检只能证明题目可评分，不能作为模型效果或压缩收益证据。
 
 ## 8. 实现位置索引
 
@@ -147,8 +154,11 @@ uv run python -m evals.agent.compare \
 | 压缩事件定义 | `agent/analytics/events.py`（`ContextOffloadedPayload`） |
 | 压缩事件记录 | `agent/analytics/usage.py::record_context_offloaded` |
 | 压缩中间件与累计状态 | `agent/middleware/conversation_offloading.py` |
+| 压缩策略配置（eval-only） | `agent/evaluation.py::CompactionConfig`、`agent/server.py::_compaction_settings` |
+| 结构化摘要提示词 | `agent/resources/prompts/compaction/structured-summary.md` |
 | 生产聚合查询 | `agent/analytics/queries.py::context_offloaded_summary` |
 | Dashboard API | `agent/analytics/routes.py`（`/analytics/context-offloaded`） |
 | 评测采集 | `evals/agent/target.py::_GraphResult`、`evals/agent/models.py::CompactionTelemetry` |
 | 评测聚合 | `evals/agent/judge.py::summarize_results` |
 | 配对比较 / 冻结回放 | `evals/agent/compare.py`、`evals/agent/regressions.py` |
+| 长上下文任务集 | `evals/agent/instances/long_context.jsonl`、`evals/agent/LONG_CONTEXT_TASKS.md` |

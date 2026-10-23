@@ -37,8 +37,9 @@ def _row(
     steps: int | None = None,
     seconds: float = 1.0,
     tokens: int | None = None,
+    compaction: dict[str, object] | None = None,
 ) -> dict[str, object]:
-    return {
+    row: dict[str, object] = {
         "instance_id": identity,
         "repo": "probe/repo",
         "resolved": stage == FailureStage.NONE,
@@ -49,6 +50,9 @@ def _row(
         "output_tokens": tokens,
         "usage_complete": tokens is not None,
     }
+    if compaction is not None:
+        row["compaction"] = compaction
+    return row
 
 
 def _experiment(directory: Path, rows: list[dict[str, object]], **overrides: object) -> Path:
@@ -163,6 +167,76 @@ def test_comparison_pairs_tasks_and_excludes_missing_usage(tmp_path: Path) -> No
     assert result["complete_usage_pairs"] == 1
     assert result["median_paired_main_agent_tokens_delta"] == -40
     assert result["median_paired_agent_seconds_delta"] == 0
+
+
+def test_comparison_reports_compaction_and_failure_stage_transitions(tmp_path: Path) -> None:
+    baseline = _experiment(
+        tmp_path / "baseline",
+        [
+            _row("a", FailureStage.TARGET_TESTS, compaction={"count": 0}),
+            _row(
+                "b",
+                FailureStage.NONE,
+                compaction={
+                    "count": 1,
+                    "summarized_tokens": 1_000,
+                    "summary_tokens": 100,
+                    "overflow_count": 0,
+                },
+            ),
+        ],
+        model_id="openai:test",
+        compaction_summary_prompt="default",
+    )
+    candidate = _experiment(
+        tmp_path / "candidate",
+        [
+            _row(
+                "a",
+                FailureStage.NONE,
+                compaction={
+                    "count": 2,
+                    "summarized_tokens": 3_000,
+                    "summary_tokens": 200,
+                    "overflow_count": 1,
+                },
+            ),
+            _row(
+                "b",
+                FailureStage.REGRESSION,
+                compaction={
+                    "count": 1,
+                    "summarized_tokens": 1_000,
+                    "summary_tokens": 100,
+                    "overflow_count": 0,
+                },
+            ),
+        ],
+        model_id="openai:test",
+        compaction_summary_prompt="structured",
+    )
+    result = compare_runs(baseline, candidate)
+    assert result["baseline_condition"] == {
+        "model_id": "openai:test",
+        "compaction_summary_prompt": "default",
+    }
+    assert result["candidate_condition"] == {
+        "model_id": "openai:test",
+        "compaction_summary_prompt": "structured",
+    }
+    assert result["baseline_compaction_rate"] == 0.5
+    assert result["candidate_compaction_rate"] == 1.0
+    assert result["mean_compactions_delta"] == 1.0
+    assert result["compaction_pairs"] == 2
+    assert result["median_paired_compaction_count_delta"] == 1.0
+    assert result["median_paired_summarized_tokens_delta"] == 1_500
+    assert result["median_paired_summary_tokens_delta"] == 100
+    assert result["baseline_overflow_compactions"] == 0
+    assert result["candidate_overflow_compactions"] == 1
+    assert result["failure_stage_transitions"] == [
+        {"baseline_stage": "none", "candidate_stage": "regression", "instances": 1},
+        {"baseline_stage": "target_tests", "candidate_stage": "none", "instances": 1},
+    ]
 
 
 @pytest.mark.parametrize(

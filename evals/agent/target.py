@@ -11,7 +11,7 @@ from typing import Literal
 from langgraph_sdk import get_client
 from pydantic import BaseModel, Field, ValidationError
 
-from agent.evaluation import AgentEvaluationArtifact, AgentEvaluationConfig
+from agent.evaluation import AgentEvaluationArtifact, AgentEvaluationConfig, CompactionConfig
 from agent.input_messages import InputMessageContext, SystemIdentity, build_run_input
 from agent.prompts import render_prompt
 from agent.sandboxes.environment import ExecutionEnvironment
@@ -63,6 +63,25 @@ def get_local_project_dir() -> str | None:
     return value or None
 
 
+def get_compaction_config() -> CompactionConfig | None:
+    """Compaction experiment arm, or ``None`` when no override is configured."""
+    raw: dict[str, object] = {}
+    for env_name, field in (
+        ("AGENT_EVAL_COMPACTION_TRIGGER_TOKENS", "trigger_tokens"),
+        ("AGENT_EVAL_COMPACTION_TRIGGER_MESSAGES", "trigger_messages"),
+    ):
+        value = os.getenv(env_name, "").strip()
+        if value:
+            raw[field] = int(value)
+    fraction = os.getenv("AGENT_EVAL_COMPACTION_TRIGGER_FRACTION", "").strip()
+    if fraction:
+        raw["trigger_fraction"] = float(fraction)
+    prompt = os.getenv("AGENT_EVAL_COMPACTION_SUMMARY_PROMPT", "").strip()
+    if prompt:
+        raw["summary_prompt"] = prompt
+    return CompactionConfig.model_validate(raw) if raw else None
+
+
 def _eval_context() -> InputMessageContext:
     return {"sender_id": "system:agent-eval", "surface": "eval", "kind": "system"}
 
@@ -77,7 +96,11 @@ def _build_configurable(
     repo = inputs.get("repo", "")
     owner, _, name = repo.partition("/") if isinstance(repo, str) else ("", "", "")
     options = AgentEvaluationConfig.model_validate(
-        {"base_commit": inputs.get("base_commit"), "checkout_dir": checkout_dir}
+        {
+            "base_commit": inputs.get("base_commit"),
+            "checkout_dir": checkout_dir,
+            "compaction": get_compaction_config(),
+        }
     )
     configurable: dict[str, object] = {
         "__is_for_execution__": True,
@@ -123,6 +146,7 @@ class _OffloadState(BaseModel):
     total_summarized_tokens: int = Field(default=0, ge=0)
     total_summary_tokens: int = Field(default=0, ge=0)
     total_duration_ms: int = Field(default=0, ge=0)
+    overflow_count: int = Field(default=0, ge=0)
 
 
 class _GraphResult(BaseModel):
@@ -169,6 +193,7 @@ async def solve_task(inputs: dict[str, object]) -> dict[str, object]:
                 summarized_tokens=offloading.total_summarized_tokens,
                 summary_tokens=offloading.total_summary_tokens,
                 duration_ms=offloading.total_duration_ms,
+                overflow_count=offloading.overflow_count,
             )
         messages = [message for message in result.messages if message.type == "ai"]
         output.steps = len(messages)
