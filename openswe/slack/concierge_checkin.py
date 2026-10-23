@@ -7,7 +7,7 @@ from typing import Final
 from openswe.prompts import prompt
 from openswe.slack.dm import CONCIERGE_TS, open_dm
 from openswe.slack.records import lookup_slack_thread_id
-from openswe.slack.thread_owner import wake_thread_owner
+from openswe.slack.thread_owner import ThreadOwnerWakeError, wake_thread_owner
 from openswe.threads import index
 from openswe.users import User
 
@@ -15,13 +15,21 @@ logger = logging.getLogger(__name__)
 
 CHECKIN_JOB: Final = "concierge_checkin"
 CHECKIN_SCHEDULE: Final = "*/30 * * * *"
+# Keeps the sweep under Slack's per-method rate limits; a limited DM open would skip the person.
+_CHECKIN_CONCURRENCY: Final = 4
 _CHECKIN_EVENT = prompt("slack/concierge-checkin")
 
 
 async def check_in_with_concierge_users() -> int:
     """Wake every idle concierge conversation; how many were woken."""
     slack_user_ids = [user.slack_user_id for user in await User.in_concierge_mode()]
-    woken = await asyncio.gather(*(_check_in(user_id) for user_id in slack_user_ids if user_id))
+    gate = asyncio.Semaphore(_CHECKIN_CONCURRENCY)
+
+    async def check_in(slack_user_id: str) -> bool:
+        async with gate:
+            return await _check_in(slack_user_id)
+
+    woken = await asyncio.gather(*(check_in(user_id) for user_id in slack_user_ids if user_id))
     return sum(woken)
 
 
@@ -36,6 +44,10 @@ async def _check_in(slack_user_id: str) -> bool:
         if thread is not None and thread.status == "busy":
             return False
         await wake_thread_owner(channel_id, CONCIERGE_TS, slack_user_id, _CHECKIN_EVENT)
+    except ThreadOwnerWakeError:
+        # Usually a person whose GitHub link lapsed; their next message prompts them to fix it.
+        logger.info("Concierge check-in did not start a run", extra={"slack_user": slack_user_id})
+        return False
     except Exception:
         logger.exception("Concierge check-in failed", extra={"slack_user": slack_user_id})
         return False

@@ -23,6 +23,8 @@ class SlackRequest(BaseModel):
     triggering_bot_app_id: str = ""
     # Open SWE wrote the request; ``user_id`` is only who the run acts for.
     trigger_system: SystemIdentity | None = None
+    # Nobody is waiting on this run, so it neither interrupts one nor asks anyone to link GitHub.
+    background_event: bool = False
     thread_id: str | None = None
     channel_context: SlackChannelContext | None = None
     team_id: str = ""
