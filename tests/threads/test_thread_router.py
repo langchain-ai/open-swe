@@ -38,6 +38,7 @@ class _Threads:
 
     def __init__(self) -> None:
         self.threads: dict[str, dict[str, JsonValue]] = {}
+        self.creates: list[dict[str, object]] = []
         self.client = _Client(self)
         self.reachable = True
 
@@ -50,7 +51,21 @@ class _Threads:
         thread = self.threads.get(thread_id)
         return None if thread is None else index.IndexedThread.from_agent_server(thread)
 
-    async def create(self, thread_id: str, metadata: Mapping[str, JsonValue]) -> None:
+    async def create(
+        self,
+        thread_id: str,
+        metadata: Mapping[str, JsonValue],
+        *,
+        supersteps: list[Mapping[str, JsonValue]] | None = None,
+        graph_id: str | None = None,
+    ) -> None:
+        self.creates.append(
+            {
+                "thread_id": thread_id,
+                "supersteps": list(supersteps) if supersteps else None,
+                "graph_id": graph_id,
+            }
+        )
         now = datetime.now(UTC).isoformat()
         self.threads.setdefault(
             thread_id,
@@ -199,6 +214,27 @@ async def test_threads_are_served_from_the_index_and_copied_to_their_runtime(
     assert harness.runtimes.local.threads[THREAD]["metadata"] == read["metadata"]
     assert harness.runtimes.mda.threads[THREAD]["metadata"] == read["metadata"]
     assert harness.reached_here == []
+
+
+async def test_checkpoint_supersteps_are_applied_on_mda_only(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    harness = _Harness(monkeypatch)
+    supersteps = [{"updates": [{"values": {"messages": ["replay"]}}]}]
+
+    status, _ = await harness.request(
+        "POST",
+        "/threads",
+        {"thread_id": THREAD, "metadata": {"owner_login": "ada"}, "supersteps": supersteps},
+    )
+
+    assert status == 200
+    assert harness.runtimes.local.creates == [
+        {"thread_id": THREAD, "supersteps": None, "graph_id": None}
+    ]
+    assert harness.runtimes.mda.creates == [
+        {"thread_id": THREAD, "supersteps": supersteps, "graph_id": "open-swe"}
+    ]
 
 
 async def test_a_thread_only_the_agent_server_knows_is_indexed_on_first_read(

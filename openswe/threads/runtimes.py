@@ -6,7 +6,7 @@ which also runs the graphs Managed Deep Agents does not host.
 """
 
 import logging
-from collections.abc import Mapping
+from collections.abc import Mapping, Sequence
 from typing import Final
 
 import httpx
@@ -73,9 +73,20 @@ class _SdkThreads:
             (thread for raw in found if (thread := IndexedThread.from_agent_server(raw))), None
         )
 
-    async def create(self, thread_id: str, metadata: Mapping[str, JsonValue]) -> None:
+    async def create(
+        self,
+        thread_id: str,
+        metadata: Mapping[str, JsonValue],
+        *,
+        supersteps: Sequence[Mapping[str, JsonValue]] | None = None,
+        graph_id: str | None = None,
+    ) -> None:
         await self.client.threads.create(
-            thread_id=thread_id, if_exists="do_nothing", metadata=dict(metadata)
+            thread_id=thread_id,
+            if_exists="do_nothing",
+            metadata=dict(metadata),
+            supersteps=[dict(step) for step in supersteps] if supersteps else None,
+            graph_id=graph_id,
         )
 
     async def update(self, thread_id: str, metadata: Mapping[str, JsonValue]) -> None:

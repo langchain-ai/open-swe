@@ -85,6 +85,14 @@ def _for_mda(metadata: Mapping[str, JsonValue]) -> dict[str, JsonValue]:
     return copied
 
 
+def _checkpoint_supersteps(payload: Mapping[str, JsonValue]) -> list[dict[str, JsonValue]] | None:
+    """The source checkpoint, when a caller sent one. Only MDA can apply it."""
+    raw = payload.get("supersteps")
+    if not isinstance(raw, list) or not all(isinstance(step, dict) for step in raw):
+        return None
+    return raw or None
+
+
 def _marks_busy(thread_id: str) -> Callable[[], Awaitable[None]]:
     async def mark() -> None:
         await index.set_status(thread_id, "busy")
@@ -211,7 +219,12 @@ class ThreadRouter:
             "do_nothing" if payload.get("if_exists") == "do_nothing" else "raise"
         )
         try:
-            thread = await self._index_new(thread_id, metadata, if_exists=if_exists)
+            thread = await self._index_new(
+                thread_id,
+                metadata,
+                if_exists=if_exists,
+                supersteps=_checkpoint_supersteps(payload),
+            )
         except ThreadExistsError:
             await send_json(send, 409, {"detail": f"Thread {thread_id} already exists"})
             return
@@ -223,6 +236,7 @@ class ThreadRouter:
         metadata: Mapping[str, JsonValue],
         *,
         if_exists: Literal["raise", "do_nothing"],
+        supersteps: list[dict[str, JsonValue]] | None = None,
     ) -> IndexedThread:
         if if_exists == "do_nothing" and (known := await self._thread(thread_id)) is not None:
             return known
@@ -232,8 +246,15 @@ class ThreadRouter:
             metadata={**metadata, RUNTIME_METADATA_KEY: MDA_RUNTIME},
             if_exists=if_exists,
         )
+        # The local graphs are agent, reviewer, and review-scout. An open-swe
+        # checkpoint applies only on the Managed Deep Agents deployment.
         await RUNTIMES.local.create(thread_id, thread.metadata)
-        await RUNTIMES.mda.create(thread_id, _for_mda(thread.metadata))
+        await RUNTIMES.mda.create(
+            thread_id,
+            _for_mda(thread.metadata),
+            supersteps=supersteps,
+            graph_id=MDA_GRAPH_ID if supersteps else None,
+        )
         return thread
 
     async def _thread_itself(
