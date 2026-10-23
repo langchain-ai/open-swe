@@ -8,6 +8,10 @@ import { OwnershipPicker, type PickerItem } from "./OwnershipPicker"
 import { useSlackChannelDirectory } from "@/lib/slack-channels"
 import { RepositoryPicker, SlackChannelPicker } from "./WorkspaceBindingPickers"
 
+vi.mock("@/lib/session", () => ({
+  useSession: () => ({ data: null }),
+}))
+
 vi.mock("@/lib/slack-channels", () => ({
   useSlackChannelDirectory: vi.fn(),
 }))

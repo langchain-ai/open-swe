@@ -10,6 +10,10 @@ const mocks = vi.hoisted(() => ({
   status: "ready",
 }))
 
+vi.mock("@/lib/session", () => ({
+  useSession: () => ({ data: null }),
+}))
+
 vi.mock("@tanstack/react-query", () => ({
   useQuery: () => ({
     data: {

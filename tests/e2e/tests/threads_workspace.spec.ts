@@ -560,20 +560,18 @@ test.describe("threads workspace", () => {
       ]);
 
     const alphaGroup = sidebar
-      .getByRole("button", { name: "alpha", exact: true })
+      .getByRole("button", { name: "acme/alpha", exact: true })
       .locator("..")
       .locator("..");
     const betaGroup = sidebar.getByRole("button", {
-      name: "beta",
+      name: "acme/beta",
       exact: true,
     });
     await expect(
-      sidebar.getByRole("button", { name: "alpha", exact: true }),
+      sidebar.getByRole("button", { name: "acme/alpha", exact: true }),
     ).toBeVisible();
     await expect(betaGroup).toBeVisible();
-    await expect(sidebar.getByText("acme/alpha", { exact: true })).toHaveCount(
-      0,
-    );
+    await expect(sidebar.getByText("alpha", { exact: true })).toHaveCount(0);
 
     // Collapsing a repository hides only that repository's threads.
     await betaGroup.click();
