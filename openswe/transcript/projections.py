@@ -366,7 +366,8 @@ async def _turn_ended(
                 state = :state,
                 run_id = COALESCE(:run_id, run_id),
                 completed_at = :completed_at,
-                error = COALESCE(:error, error)
+                error = COALESCE(:error, error),
+                reason = COALESCE(:reason, reason)
             WHERE turn_id = :turn_id AND thread_id = :thread_id
               AND state IN ('requested', 'running')
             RETURNING turn_id
@@ -379,6 +380,7 @@ async def _turn_ended(
             "run_id": event.run_id or run_id,
             "completed_at": occurred_at,
             "error": event.error if failed else None,
+            "reason": event.reason if failed else None,
         },
     )
     if result.scalar_one_or_none() is None:

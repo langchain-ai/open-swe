@@ -30,6 +30,7 @@ import { fetchOlderTurns, fetchTranscript, openTranscriptEvents } from "./api"
 import {
   applyEvent,
   applySnapshot,
+  failureReason,
   fromSnapshot,
   isOffloading as offloadingFromState,
   prependTurns,
@@ -97,6 +98,8 @@ export interface ThreadTranscript {
   isOffloading: boolean
   routed: { route?: string; modelId?: string | null } | null
   workspaceStale: StaleWorkspace | null
+  /** Why the newest turn failed, when it failed and the backend said why. */
+  failureReason: string | null
   error: unknown
   connection: StreamConnection
   /** Turns older than the loaded window remain on the server. */
@@ -315,6 +318,7 @@ export function useThreadTranscript(
     isOffloading: state ? offloadingFromState(state) : false,
     routed: state ? routedNotice(state) : null,
     workspaceStale: state ? staleWorkspaceNotice(state) : null,
+    failureReason: state ? failureReason(state) : null,
     error,
     connection,
     hasOlder: state?.olderCursor != null,

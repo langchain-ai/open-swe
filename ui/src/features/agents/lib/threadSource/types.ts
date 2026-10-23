@@ -94,6 +94,8 @@ export interface TranscriptThreadSource extends ThreadSourceShared {
   subagentTask: (toolCallId: string) => TranscriptToolCallState | null
   /** The newest turn's sandbox booted from an out-of-date workspace image. */
   workspaceStale: StaleWorkspace | null
+  /** Why the newest turn failed, when it failed and the backend said why. */
+  failureReason: string | null
 }
 
 export type ThreadSource = StreamThreadSource | TranscriptThreadSource

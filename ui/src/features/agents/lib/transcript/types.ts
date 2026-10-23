@@ -72,6 +72,8 @@ export interface TranscriptTurnRow {
   requested_at: string
   started_at: string | null
   error: string | null
+  /** Why a failed turn failed and what to do next, in words for the person. */
+  reason: string | null
 }
 
 /** Who sent a human message; null on AI messages. */
@@ -168,6 +170,7 @@ export interface TurnQueuedPayload extends TurnPayload {
 
 export interface TurnFailedPayload extends TurnPayload {
   error: string
+  reason?: string | null
 }
 
 /** A flush of buffered model output; `text`/`reasoning` are fragments to concatenate. */

@@ -31,6 +31,7 @@ async def settle_run_turn(
     *,
     outcome: TurnOutcome,
     error: str | None = None,
+    reason: str | None = None,
 ) -> UUID | None:
     """End the open turn of ``run_id`` (or the thread's newest open turn).
 
@@ -46,7 +47,9 @@ async def settle_run_turn(
     if outcome == "completed":
         event = TurnCompleted(turn_id=turn_id, run_id=run_id)
     elif outcome == "failed":
-        event = TurnFailed(turn_id=turn_id, run_id=run_id, error=error or "run failed")
+        event = TurnFailed(
+            turn_id=turn_id, run_id=run_id, error=error or "run failed", reason=reason
+        )
     else:
         event = TurnInterrupted(turn_id=turn_id, run_id=run_id)
     await append(

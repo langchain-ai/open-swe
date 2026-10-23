@@ -226,6 +226,9 @@ class TurnFailed(_Body):
     turn_id: UUID
     run_id: str | None = None
     error: str
+    # Why the run failed and what to do next, in words for the person; None
+    # where only the technical ``error`` is known.
+    reason: str | None = None
 
 
 class TurnInterrupted(_Body):

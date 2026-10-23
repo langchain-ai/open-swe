@@ -267,7 +267,7 @@ async def test_completion_waits_for_running_background_tasks(monkeypatch, status
 
 
 @pytest.mark.asyncio
-async def test_provider_failure_reported_by_the_run_names_the_provider(
+async def test_provider_failure_reported_by_the_run_names_the_provider_everywhere(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     metadata = _slack_metadata()
@@ -281,6 +281,8 @@ async def test_provider_failure_reported_by_the_run_names_the_provider(
     monkeypatch.setattr(completion, "get_langsmith_trace_url", AsyncMock(return_value=None))
     reply = AsyncMock(return_value=True)
     monkeypatch.setattr(completion, "post_slack_thread_reply", reply)
+    settle = AsyncMock(return_value=None)
+    monkeypatch.setattr(completion, "settle_run_turn", settle)
 
     await completion.handle_run_completion(
         {
@@ -291,6 +293,6 @@ async def test_provider_failure_reported_by_the_run_names_the_provider(
         }
     )
 
-    text = reply.await_args.args[2]
-    assert "Anthropic was overloaded" in text
-    assert "not with your task" in text
+    for said in (reply.await_args.args[2], settle.await_args.kwargs["reason"]):
+        assert "Anthropic was overloaded" in said
+        assert "not with your task" in said

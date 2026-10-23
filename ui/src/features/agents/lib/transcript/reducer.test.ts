@@ -3,6 +3,7 @@ import { describe, expect, it, vi } from "vitest"
 import {
   applyEvent,
   applySnapshot,
+  failureReason,
   fromSnapshot,
   isOffloading,
   prependTurns,
@@ -46,6 +47,7 @@ function turn(
     requested_at: requestedAt,
     started_at: state === "requested" ? null : requestedAt,
     error: null,
+    reason: null,
   }
 }
 
@@ -485,6 +487,22 @@ describe("transcript events", () => {
       payload: { turn_id: "turn-2" },
     })
     expect(ended.status).toBe("idle")
+  })
+
+  it("explains a failed turn only in the words the backend wrote for the person", () => {
+    const failed = (reason?: string): StoredEvent => ({
+      ...appended(11, {}),
+      event_type: "turn.failed",
+      payload: { turn_id: "turn-2", error: "APIStatusError: 529", reason },
+    })
+    const reason = "Anthropic was overloaded and never recovered."
+
+    expect(
+      failureReason(applyEvent(fromSnapshot(twoTurnSnapshot()), failed()))
+    ).toBeNull()
+    expect(
+      failureReason(applyEvent(fromSnapshot(twoTurnSnapshot()), failed(reason)))
+    ).toBe(reason)
   })
 })
 

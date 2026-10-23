@@ -143,15 +143,41 @@ class _FailureReason:
             return cls(recorded.code, recorded.provider)
         return cls(code_for_error_type(error_type))
 
-    def text(self, status: str, trace_url: str | None = None) -> str:
+    @classmethod
+    async def of_run(cls, thread_id: str, run_id: str | None, error: Any) -> Self:
+        """``of`` against the thread's metadata, or the class name alone when it can't be read."""
+        try:
+            metadata = thread_metadata(await langgraph_client().threads.get(thread_id))
+        except Exception:  # noqa: BLE001
+            logger.warning(
+                "Could not read the thread to classify its failed run",
+                exc_info=True,
+                extra={"run_completion": {"thread_id": thread_id, "run_id": run_id}},
+            )
+            metadata = {}
+        return cls.of(error, metadata, run_id)
+
+    def _parts(self, status: str) -> tuple[str, str]:
         code = self.code or ""
         provider = self.provider or _UNNAMED_PROVIDER
         if code in _PROVIDER_REASON_TEXT:
-            reason = _PROVIDER_REASON_TEXT[code].format(provider=provider)
-            follow_up = _PROVIDER_FOLLOW_UP.format(provider=provider)
-        else:
-            reason = _REASON_TEXT.get(code) or _status_reason(status)
-            follow_up = _REASON_FOLLOW_UP.get(code, _DEFAULT_FOLLOW_UP)
+            return (
+                _PROVIDER_REASON_TEXT[code].format(provider=provider),
+                _PROVIDER_FOLLOW_UP.format(provider=provider),
+            )
+        return (
+            _REASON_TEXT.get(code) or _status_reason(status),
+            _REASON_FOLLOW_UP.get(code, _DEFAULT_FOLLOW_UP),
+        )
+
+    def summary(self, status: str) -> str:
+        """What the dashboard shows on the failed turn."""
+        reason, follow_up = self._parts(status)
+        return f"{reason[:1].upper()}{reason[1:]}. {follow_up}"
+
+    def text(self, status: str, trace_url: str | None = None) -> str:
+        """The reply posted where the run was started."""
+        reason, follow_up = self._parts(status)
         text = warning(f"Open SWE wasn't able to finish that — {reason}. {follow_up}")
         if trace_url:
             text += f" View the error in <{trace_url}|LangSmith>."
@@ -442,7 +468,9 @@ async def _handle_successful_run(
     return {"status": "ok", "reason": "cost refresh scheduled"}
 
 
-async def _settle_transcript_turn(thread_id: str, run_id: str | None, status: object) -> None:
+async def _settle_transcript_turn(
+    thread_id: str, run_id: str | None, status: object, failure: _FailureReason | None
+) -> None:
     """Close the transcript turn of a run that ended without the middleware saying so.
 
     The middleware emits the same event with the same command id, so whichever
@@ -460,6 +488,7 @@ async def _settle_transcript_turn(thread_id: str, run_id: str | None, status: ob
             run_id,
             outcome=outcome,
             error=None if outcome == "completed" else f"run ended as {status}",
+            reason=None if failure is None else failure.summary(str(status)),
         )
     except Exception:  # noqa: BLE001
         # The webhook still has a reply to post; the turn is closed by the
@@ -538,7 +567,12 @@ async def handle_run_completion(payload: dict[str, Any]) -> dict[str, str]:
             "Could not refresh the thread status", extra={"thread_id": thread_id}, exc_info=True
         )
     await _finalize_agent_usage_telemetry(thread_id, status, payload)
-    await _settle_transcript_turn(thread_id, run_id, status)
+    failure = (
+        await _FailureReason.of_run(thread_id, run_id, payload.get("error"))
+        if status in _TERMINAL_FAILURE_STATUSES
+        else None
+    )
+    await _settle_transcript_turn(thread_id, run_id, status, failure)
     is_worker = False
     if run_id and isinstance(status, str) and status in _TERMINAL_RUN_STATUSES:
         from openswe.tasks.events import worker_finished
