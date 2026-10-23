@@ -29,8 +29,7 @@ from pydantic import JsonValue, TypeAdapter, ValidationError
 from starlette.datastructures import Headers
 from starlette.types import ASGIApp, Receive, Scope, Send
 
-from openswe.api.agent_server_auth import backend_call
-from openswe.remote_runtime.asgi import (
+from openswe.agent_api.asgi import (
     StatusRecorder,
     forward,
     json_body,
@@ -38,12 +37,13 @@ from openswe.remote_runtime.asgi import (
     replay,
     send_json,
 )
-from openswe.remote_runtime.client import (
+from openswe.agent_api.client import (
     MDA_GRAPH_ID,
     MDA_RUNTIME,
     RUNTIME_METADATA_KEY,
     mda_graph_for,
 )
+from openswe.api.agent_server_auth import backend_call
 from openswe.threads import index
 from openswe.threads.index import IndexedThread, ThreadExistsError, ThreadSearch
 from openswe.threads.runtimes import LOCAL_HEADER, RUNTIMES

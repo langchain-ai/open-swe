@@ -20,7 +20,8 @@ from langgraph.config import get_config
 from langgraph.types import Command
 from pydantic import JsonValue, TypeAdapter
 from runtime_api.catalog import OperationSpec
-from runtime_api.endpoint import call
+from runtime_api.endpoint import LONG_CALL_SECONDS, call
+from runtime_api.loop import ToolCallReport
 from runtime_api.operations import (
     OPERATION,
     RECORD_EVIDENCE,
@@ -30,14 +31,14 @@ from runtime_api.operations import (
 )
 
 from rt.backend import (
-    LONG_CALL_SECONDS,
     TOOL_CALL_SLACK_SECONDS,
     BackendCallError,
     BackendTimeoutError,
     BackendUnavailableError,
     OpenSweBackend,
+    held_state,
     reported_call,
-    run_body,
+    run_call,
 )
 from rt.tracing import TurnTrace
 
@@ -70,26 +71,28 @@ def run_id() -> str | None:
     return str(raw) if raw else None
 
 
-def tool_body(
+def tool_report(
     state: Mapping[str, object],
     *,
     name: str,
     arguments: Mapping[str, JsonValue],
     tool_call_id: str,
-) -> dict[str, JsonValue]:
+) -> ToolCallReport:
     """A tool call as the backend's transcript takes it, with the turn's git evidence."""
-    body = run_body(
-        run_id(), state, name=name, arguments=dict(arguments), tool_call_id=tool_call_id
+    report = run_call(
+        ToolCallReport,
+        run_id(),
+        state,
+        name=name,
+        arguments=dict(arguments),
+        tool_call_id=tool_call_id,
     )
-    held = body.get("state")
-    body["state"] = {**(held if isinstance(held, dict) else {}), **TurnTrace.current_evidence()}
-    return body
+    return report.model_copy(update={"state": {**report.state, **TurnTrace.current_evidence()}})
 
 
 def _reading(spec: OperationSpec, state: Mapping[str, object]) -> RunOperation:
     """A call of ``spec``'s operation, carrying the run state it says it reads."""
-    held = run_body(None, state).get("state")
-    run_state = held if isinstance(held, dict) else {}
+    run_state = held_state(state)
     keys = list(run_state) if spec.reads_all else [k for k in spec.reads if k != "messages"]
     messages = state.get("messages")
     conversation = (
@@ -199,20 +202,22 @@ async def run_operation(
     if outer is None or outer == runtime.tool_call_id:
         return await _operate(backend, spec, arguments, runtime, runtime.tool_call_id or "")
     tool_call_id = f"{outer}:{spec.name}:{uuid4().hex[:8]}"
-    body = tool_body(runtime.state, name=spec.name, arguments=arguments, tool_call_id=tool_call_id)
-    backend.reports.started(body)
+    report = tool_report(
+        runtime.state, name=spec.name, arguments=arguments, tool_call_id=tool_call_id
+    )
+    backend.reports.started(report)
     try:
         result = await _operate(backend, spec, arguments, runtime, tool_call_id)
     except Exception as exc:
         failure = ToolMessage(
             content=f"{type(exc).__name__}: {exc}", tool_call_id=tool_call_id, status="error"
         )
-        backend.reports.finished(body, failure)
+        backend.reports.finished(report, failure)
         raise
     message = result if isinstance(result, ToolMessage) else _answer(result, tool_call_id)
     if cites_evidence:
         message = await cited(backend, spec.name, arguments, message)
-    backend.reports.finished(body, message)
+    backend.reports.finished(report, message)
     if isinstance(result, ToolMessage):
         return message
     return Command(update={**_update(result), "messages": [message]})

@@ -17,7 +17,7 @@ from langsmith.utils import get_tracer_project
 from pydantic import BaseModel, JsonValue, TypeAdapter
 
 from openswe import dispatch
-from openswe.remote_runtime.client import (
+from openswe.agent_api.client import (
     MDA_GRAPH_ID,
     mda_runtime_api_key,
     mda_runtime_url,

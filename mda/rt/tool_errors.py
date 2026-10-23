@@ -23,8 +23,10 @@ from langsmith.sandbox import (
     SandboxRetryableConnectionError,
     SandboxServerReloadError,
 )
+from runtime_api.endpoint import call
+from runtime_api.loop import SANDBOX_UNREACHABLE, SandboxGone
 
-from rt.backend import BackendCallError, OpenSweBackend, run_body
+from rt.backend import BackendCallError, OpenSweBackend, run_call
 from rt.tools import run_id
 
 logger = logging.getLogger(__name__)
@@ -85,11 +87,14 @@ class ToolErrorMiddleware(AgentMiddleware):
 
     async def _report_unreachable(self, request: ToolCallRequest, exc: Exception) -> None:
         sandbox_id = _SANDBOX_ID.search(str(exc))
-        body = run_body(
-            run_id(), request.state, sandbox_id=sandbox_id.group(0) if sandbox_id else None
+        gone = run_call(
+            SandboxGone,
+            run_id(),
+            request.state,
+            sandbox_id=sandbox_id.group(0) if sandbox_id else None,
         )
         try:
-            await self._backend.call("sandbox_unreachable", body)
+            await call(self._backend, SANDBOX_UNREACHABLE, gone)
         except BackendCallError:
             logger.warning("Could not tell the person the sandbox stopped answering", exc_info=True)
 

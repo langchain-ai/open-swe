@@ -10,6 +10,7 @@ from fastapi.middleware.gzip import GZipMiddleware
 from fastapi.responses import JSONResponse
 from starlette.routing import Route
 
+from openswe.agent_api import server as agent_api_server
 from openswe.api.github_errors import add_github_error_handlers
 from openswe.api.health import router as health_router
 from openswe.api.request_ids import add_request_ids
@@ -21,7 +22,6 @@ from openswe.github.routes import router as github_webhook_router
 from openswe.linear.routes import router as linear_webhook_router
 from openswe.mcp import server as agent_mcp_server
 from openswe.openai_responses.routes import router as sandbox_openai_router
-from openswe.remote_runtime import server as remote_runtime_server
 from openswe.review.eval_report_routes import router as reviewer_eval_report_router
 from openswe.rollout_events import router as rollout_webhook_router
 from openswe.sandboxes.tool_routes import router as sandbox_tool_router
@@ -46,6 +46,7 @@ AGENT_MCP = agent_mcp_server.build_mount()
 @asynccontextmanager
 async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
     from openswe import database
+    from openswe.agent_api.client import validate_mda_startup_config
     from openswe.analytics.worker import start_worker, stop_worker
     from openswe.bridge import listener as bridge_listener
     from openswe.dashboard.admin import configured_admins
@@ -55,7 +56,6 @@ async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
     from openswe.jobs.kinds import WORKER as JOB_WORKER
     from openswe.jobs.kinds import start_jobs
     from openswe.plugins import rooms as plugin_rooms
-    from openswe.remote_runtime.client import validate_mda_startup_config
     from openswe.review.styles import delete_analyzer_crons
     from openswe.sandboxes.providers.registry import validate_sandbox_startup_config
     from openswe.transcript import listener as transcript_listener
@@ -176,12 +176,9 @@ def create_app() -> FastAPI:
     app.include_router(sandbox_tool_router)
     app.include_router(sandbox_openai_router)
     app.include_router(reviewer_eval_report_router)
-    # Routed at the exact paths so no redirect sits between a remote runtime and its hooks or API.
+    # Routed at the exact path so no redirect sits between MDA and the agent API.
     app.router.routes.append(
-        Route(remote_runtime_server.HOOKS_PATH, remote_runtime_server.HOOKS, methods=["POST"])
-    )
-    app.router.routes.append(
-        Route(remote_runtime_server.API_PATH, remote_runtime_server.API, methods=["POST"])
+        Route(agent_api_server.API_PATH, agent_api_server.API, methods=["POST"])
     )
     if AGENT_MCP is not None:
         app.state.fastmcp_server = AGENT_MCP.app.state.fastmcp_server

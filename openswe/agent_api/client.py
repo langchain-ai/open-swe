@@ -11,8 +11,8 @@ from urllib.parse import urlsplit
 
 from pydantic import JsonValue, TypeAdapter
 
+from openswe.agent_api.tokens import RemoteRun, runtime_tokens_configured, sign_runtime_token
 from openswe.config import ENV
-from openswe.remote_runtime.tokens import RemoteRun, runtime_tokens_configured, sign_runtime_token
 from openswe.run_config import RunConfig
 
 # The graph id `mda build` derives from the project's agent name.
@@ -107,7 +107,7 @@ async def remote_run_context(
         )
     )
     # The webapp must not import the agent stack at startup.
-    from openswe.remote_runtime.hosted import hosted_graphs
+    from openswe.agent_api.hosted import hosted_graphs
 
     cfg = RunConfig.parse(configurable)
     models = await hosted_graphs()[graph].start_models(cfg)

@@ -81,8 +81,8 @@ open-swe-runtime-api = { path = "packages/runtime-api", editable = true }
 # or sandbox-providers extra).
 override-dependencies = ["deepagents==0.7.30", "wcmatch>=11.0"]
 constraint-dependencies = [
-    "langgraph-api==0.18.0.dev9",
-    "langgraph-runtime-inmem==0.38.0.dev9",
+    "langgraph-api==0.18.0.dev11",
+    "langgraph-runtime-inmem==0.38.0.dev11",
 ]
 
 [build-system]
