@@ -449,6 +449,7 @@ def _sandbox_create_kwargs(
         not in {
             "scope",
             "api_key",
+            "api_endpoint",
             "default_timeout",
             "template_name",
             *_BAKE_BASE_OPTION_KEYS,
@@ -481,12 +482,10 @@ class _SandboxClientKwargs(TypedDict, total=False):
 
 def _sandbox_client_kwargs(sandbox: SandboxDefinition) -> _SandboxClientKwargs:
     """Client kwargs pinning the endpoint, the API key and the workspace holding the recipe."""
-    from managed_deepagents.sandbox import api_endpoint as declared_endpoint  # noqa: PLC0415
-
     kwargs: _SandboxClientKwargs = {}
-    other_langsmith = declared_endpoint(sandbox.options)
+    other_langsmith = _string_option(sandbox.options.get("api_endpoint"))
     api_endpoint = (
-        _validated_sandbox_api_endpoint(other_langsmith, "_openswe_api_endpoint")
+        _validated_sandbox_api_endpoint(other_langsmith, "api_endpoint")
         if other_langsmith
         else _configured_sandbox_api_endpoint()
     )

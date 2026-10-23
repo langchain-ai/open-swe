@@ -108,6 +108,8 @@ class _LangSmithSandboxArgs(BaseModel):
 
     idle_ttl_seconds: int | None = None
     api_key: str | None = None
+    # The sandbox API of another LangSmith (region) the box lives in, with that LangSmith's key.
+    api_endpoint: str | None = None
     default_timeout: int | None = None
     snapshot_name: str | None = None
     snapshot_id: str | None = None
@@ -121,9 +123,9 @@ def define_sandbox(
     _openswe_thread_id: str | None = None,
     _openswe_create_fields: dict[str, object] | None = None,
     _openswe_no_manage_proxy: bool = False,
-    _openswe_api_endpoint: str | None = None,
     idle_ttl_seconds: int | None = None,
     api_key: str | None = None,
+    api_endpoint: str | None = None,
     default_timeout: int | None = None,
     snapshot_name: str | None = None,
     snapshot_id: str | None = None,
@@ -138,6 +140,7 @@ def define_sandbox(
             **options,
             "idle_ttl_seconds": idle_ttl_seconds,
             "api_key": api_key,
+            "api_endpoint": api_endpoint,
             "default_timeout": default_timeout,
             "snapshot_name": snapshot_name,
             "snapshot_id": snapshot_id,
@@ -155,7 +158,6 @@ def define_sandbox(
                 "_openswe_thread_id": _openswe_thread_id,
                 "_openswe_create_fields": _openswe_create_fields,
                 "_openswe_no_manage_proxy": _openswe_no_manage_proxy or None,
-                "_openswe_api_endpoint": _openswe_api_endpoint,
             }.items()
             if value is not None
         }

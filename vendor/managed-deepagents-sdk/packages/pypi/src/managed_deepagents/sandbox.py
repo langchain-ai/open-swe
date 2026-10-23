@@ -96,7 +96,6 @@ class SandboxDefinition:
         "_openswe_thread_id",
         "_openswe_create_fields",
         "_openswe_no_manage_proxy",
-        "_openswe_api_endpoint",
     )
 
     def __repr__(self) -> str:  # pragma: no cover - debug helper
@@ -128,8 +127,8 @@ def normalize_sandbox_options(options: dict[str, object]) -> dict[str, object]:
 
     _validate_thread_id(normalized.get("_openswe_thread_id"))
     _validate_create_fields(normalized.get("_openswe_create_fields"))
-    if normalized.get("_openswe_api_endpoint") is not None and not normalized.get("api_key"):
-        raise TypeError("_openswe_api_endpoint needs that LangSmith's api_key.")
+    if normalized.get("api_endpoint") is not None and not normalized.get("api_key"):
+        raise TypeError("api_endpoint needs that LangSmith's api_key.")
     if normalized.get("_openswe_no_manage_proxy") and normalized.get("proxy_config") is not None:
         raise TypeError(
             "proxy_config needs MDA to manage the proxy. Remove _openswe_no_manage_proxy."
@@ -212,12 +211,6 @@ def declared_create_fields(options: Mapping[str, object]) -> dict[str, object]:
 def manages_proxy(options: Mapping[str, object]) -> bool:
     """Whether MDA sets the box's proxy config before each command."""
     return options.get("_openswe_no_manage_proxy") is not True
-
-
-def api_endpoint(options: Mapping[str, object]) -> str | None:
-    """The sandbox API of another LangSmith the box lives in, rather than the deployment's."""
-    endpoint = options.get("_openswe_api_endpoint")
-    return endpoint if isinstance(endpoint, str) else None
 
 
 def _validate_thread_id(thread_id: object) -> None:
