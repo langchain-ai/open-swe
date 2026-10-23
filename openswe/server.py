@@ -38,7 +38,6 @@ from deepagents.backends.composite import CompositeBackend
 from deepagents.backends.filesystem import FilesystemBackend
 from deepagents.backends.protocol import BackendProtocol, SandboxBackendProtocol
 from deepagents.backends.store import StoreBackend
-from deepagents.middleware.skills import SkillsMiddleware
 from deepagents.middleware.subagents import GENERAL_PURPOSE_SUBAGENT
 from langchain.agents.middleware import ModelCallLimitMiddleware
 from langchain.agents.middleware.types import AgentMiddleware
@@ -94,6 +93,7 @@ from openswe.middleware import (
     ModelSelectionMiddleware,
     PullRequestCreationGuardMiddleware,
     RequireUserReplyMiddleware,
+    RunSkillsMiddleware,
     WorkflowPushGuardMiddleware,
     WorkspaceSkillsMiddleware,
     check_message_queue_before_model,
@@ -1858,7 +1858,7 @@ async def plan_agent(config: RunnableConfig, surface: ToolSurface) -> None:
     skills_middleware = (
         WorkspaceSkillsMiddleware(backend=agent_backend, sources=skill_sources)
         if credential_login is None
-        else SkillsMiddleware(backend=agent_backend, sources=skill_sources)
+        else RunSkillsMiddleware(backend=agent_backend, sources=skill_sources)
     )
     run_preparation = PrepareAgentRunMiddleware(
         credential_login=credential_login,

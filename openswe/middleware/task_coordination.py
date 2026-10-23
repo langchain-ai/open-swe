@@ -1,16 +1,15 @@
 import logging
-from collections.abc import Awaitable, Callable
+from collections.abc import Mapping
 from typing import Self
 from uuid import uuid4
 
 from langchain.agents.middleware import AgentState
-from langchain.agents.middleware.types import ModelRequest, ModelResponse
-from langchain_core.messages import SystemMessage
 from langgraph.runtime import Runtime
 
 from openswe.database import postgres
 from openswe.github.proxy import maybe_refresh_proxy_token
 from openswe.input_messages import RunMessage, dynamic_context_hash, visible_dynamic_context_hashes
+from openswe.middleware.model_call_shape import CallShape
 from openswe.middleware.trace import OpenSWEMiddleware
 from openswe.prompts import prompt
 from openswe.tasks.messages import TaskMessage
@@ -85,11 +84,7 @@ class TaskCoordinationMiddleware(OpenSWEMiddleware):
             messages.extend(TaskMessage.messages(owed))
         return {"messages": messages} if messages else None
 
-    async def awrap_model_call(
-        self,
-        request: ModelRequest,
-        handler: Callable[[ModelRequest], Awaitable[ModelResponse]],
-    ) -> ModelResponse:
-        blocks = list(request.system_message.content_blocks) if request.system_message else []
-        blocks.append({"type": "text", "text": self.instructions})
-        return await handler(request.override(system_message=SystemMessage(content_blocks=blocks)))
+    async def ashape_model_call(
+        self, call: CallShape, state: Mapping[str, object], runtime: Runtime
+    ) -> CallShape:
+        return call.appending(self.instructions)
