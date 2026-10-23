@@ -40,11 +40,8 @@ class ReportedBrowserMiddleware(BrowserMiddleware):
             self._reported.discard((name, True))
             self._report_later(name, state, opened=False)
 
-    async def _share(
-        self, session: object, name: str, key: str, runtime: ManagedToolRuntime
-    ) -> None:
+    async def _browsing(self, name: str, runtime: ManagedToolRuntime) -> None:
         # Runs before every browser call, with the browser's name once it is open.
-        await super()._share(session, name, key, runtime)  # ty: ignore[invalid-argument-type]
         self._report_later(name, runtime.state, opened=True)
 
     def _report_later(self, name: str, state: Mapping[str, object], *, opened: bool) -> None:
