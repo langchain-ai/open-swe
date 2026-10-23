@@ -117,6 +117,7 @@ from runtime_api.loop import (
     SANDBOX_UNREACHABLE,
     TOOL_RESULT,
     TOOL_STARTED,
+    WAKE,
     AfterAgent,
     BeforeModel,
     BrowserReport,
@@ -131,6 +132,7 @@ from runtime_api.loop import (
     ToolCallReport,
     ToolResultReply,
     ToolResultReport,
+    Wake,
 )
 from runtime_api.operations import (
     CHECK_SHELL,
@@ -157,6 +159,7 @@ from openswe.agent_api.operations import Injections, invoke
 from openswe.agent_api.runs import in_graph_context, run_config
 from openswe.agent_api.shell_guards import ShellGuards
 from openswe.agent_api.tokens import RemoteRun
+from openswe.browser_handoff import wake_after_handoff
 from openswe.dashboard.options import model_supports_images
 from openswe.dispatch import COMPLETION_WEBHOOK_URL
 from openswe.github.sandbox_access import READ_ONLY_REVIEW_PERMISSIONS
@@ -1147,9 +1150,15 @@ async def _browser(run: RemoteRun, request: BrowserReport) -> Done:
     return Done()
 
 
+async def _wake(run: RemoteRun, request: Wake) -> Done:
+    await wake_after_handoff(run.thread_id, request.text, request.notification)
+    return Done()
+
+
 # Calls about the run's thread that need none of its plan.
 RUN_CALLS: Final = Handlers[RemoteRun]()
 RUN_CALLS.serve(BROWSER, _browser)
+RUN_CALLS.serve(WAKE, _wake)
 # The typed API every graph's MDA runs call (``runtime_api``), as the session of their run.
 API: Final = Handlers[RunSession]()
 API.serve(CATALOG, RunSession.plan)

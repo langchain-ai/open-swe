@@ -103,6 +103,13 @@ class BrowserReport(RunCall):
     opened: bool = True
 
 
+class Wake(RunCall):
+    """The browser handoff ended; dispatch a notification to the signed thread."""
+
+    text: str
+    notification: dict[str, JsonValue]
+
+
 class Done(BaseModel):
     """The backend did what it was asked; there is nothing more to say."""
 
@@ -124,3 +131,5 @@ SANDBOX_REPLACED = Endpoint("sandbox_replaced", RunCall, Done, seconds=LOOP_CALL
 SANDBOX_UNREACHABLE = Endpoint("sandbox_unreachable", SandboxGone, Done, seconds=LOOP_CALL_SECONDS)
 # For the dashboard to show the thread's browser.
 BROWSER = Endpoint("browser", BrowserReport, Done, seconds=LOOP_CALL_SECONDS)
+# The person handed the agent's browser back: the backend starts the run that tells it.
+WAKE = Endpoint("wake", Wake, Done, seconds=LOOP_CALL_SECONDS)

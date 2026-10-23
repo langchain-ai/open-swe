@@ -4459,6 +4459,7 @@ fn compile_wires_python_browser_and_adds_stagehand() {
     let pyproject = fs::read_to_string(out_dir.join("pyproject.toml")).unwrap();
     assert!(pyproject.contains("stagehand==4.3.0"));
     assert!(pyproject.contains("stagehand-middleware==0.1.0"));
+    assert!(pyproject.contains("av>=15,<20"));
 
     // Eval trials never get a browser, so they never install its client or tools.
     let eval_dir = root.path().join("eval");
