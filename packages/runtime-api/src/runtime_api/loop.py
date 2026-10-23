@@ -114,7 +114,9 @@ BEFORE_MODEL = Endpoint(
     "before_model", RunCall, BeforeModel, seconds=LOOP_CALL_SECONDS, delivery="unprocessed"
 )
 MODEL_RESULT = Endpoint("model_result", ModelResult, ObservedResponse, seconds=LOOP_CALL_SECONDS)
-AFTER_MODEL = Endpoint("after_model", RunCall, PhaseResult, seconds=LOOP_CALL_SECONDS)
+AFTER_MODEL = Endpoint(
+    "after_model", RunCall, PhaseResult, seconds=LOOP_CALL_SECONDS, delivery="unprocessed"
+)
 AFTER_AGENT = Endpoint("after_agent", RunCall, AfterAgent, seconds=LOOP_CALL_SECONDS)
 TOOL_STARTED = Endpoint("tool_started", ToolCallReport, Done, seconds=LOOP_CALL_SECONDS)
 TOOL_RESULT = Endpoint("tool_result", ToolResultReport, ToolResultReply, seconds=LOOP_CALL_SECONDS)
