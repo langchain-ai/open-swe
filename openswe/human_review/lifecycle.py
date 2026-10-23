@@ -291,7 +291,7 @@ class ReviewCard:
         author = await request.author_mention()
         states = await self._review_states() if outcome in (None, "merged") else {}
         if outcome is not None:
-            return standard_card.closed_card(
+            return await standard_card.closed_card(
                 request, title=pr.title, author=author, outcome=outcome, review_states=states
             )
         from openswe.human_review.standard import merge_wait
@@ -307,7 +307,7 @@ class ReviewCard:
             )
             is None
         ):
-            return standard_card.closed_card(
+            return await standard_card.closed_card(
                 request,
                 title=pr.title,
                 author=author,
@@ -315,7 +315,7 @@ class ReviewCard:
                 review_states=states,
             )
         requester = request.requested_by
-        return standard_card.open_card(
+        return await standard_card.open_card(
             request,
             title=pr.title,
             author=author,
