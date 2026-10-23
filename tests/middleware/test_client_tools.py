@@ -7,9 +7,9 @@ from langchain.agents.middleware.types import AgentState
 from langchain_core.messages import AIMessage, HumanMessage, ToolMessage
 from runtime_api.operations import RunOperation
 
+from openswe.agent_api.graph import RunSession
 from openswe.middleware.client_tools import ClientToolsMiddleware
 from openswe.openai_responses.client_tools import PENDING_ARTIFACT_KEY, ClientToolSpec
-from openswe.remote_runtime.graph import RunSession
 from openswe.sandboxes.tool_runtime import ToolSurface
 
 

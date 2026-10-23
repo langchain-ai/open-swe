@@ -14,15 +14,15 @@ from deepagents.middleware.summarization import (
     SummarizationState,
     _DeepAgentsSummarizationMiddleware,
 )
-from langchain.agents.middleware.types import AgentState, ModelRequest, ModelResponse
-from langchain_core.language_models.fake_chat_models import FakeListChatModel
-from langchain_core.messages import AIMessage, HumanMessage, SystemMessage, ToolMessage
+from langchain.agents.middleware.types import AgentState
+from langchain_core.messages import AIMessage, HumanMessage, ToolMessage
 from langgraph.graph.message import add_messages
 from langgraph.runtime import Runtime
 from sqlalchemy import delete, func, select, text, update
 
 from openswe import completion
 from openswe.database import postgres
+from openswe.middleware.model_call_shape import CallShape
 from openswe.tasks import events, presentation, store
 from openswe.tasks import messages as task_messages
 from openswe.tasks.messages import TaskMessage
@@ -533,22 +533,14 @@ async def test_task_context_is_checkpointed_once_without_changing_request_prefix
     monkeypatch.setattr(postgres, "configured", lambda: False)
     middleware = task_coordination.TaskCoordinationMiddleware(_COORDINATOR, enabled, None)
     state: AgentState = {"messages": [HumanMessage(content="Repair login", id="request")]}
-    received: list[ModelRequest] = []
-
-    async def handler(request: ModelRequest) -> ModelResponse:
-        received.append(request)
-        return ModelResponse(result=[AIMessage(content="ok")])
+    received: list[CallShape] = []
 
     async def model_call() -> None:
-        await middleware.awrap_model_call(
-            ModelRequest(
-                model=FakeListChatModel(responses=["ok"]),
-                messages=list(state["messages"]),
-                system_message=SystemMessage(content="Existing instructions"),
-            ),
-            handler,
+        received.append(
+            await middleware.ashape_model_call(
+                CallShape(system_prompt="Existing instructions"), state, Runtime()
+            )
         )
-        assert received[-1].messages == state["messages"]
 
     assert await middleware.abefore_model(state, Runtime()) is None
     await model_call()
@@ -583,10 +575,8 @@ async def test_task_context_is_checkpointed_once_without_changing_request_prefix
     middleware = task_coordination.TaskCoordinationMiddleware(_COORDINATOR, enabled, None)
     assert await middleware.abefore_model(state, Runtime()) is None
     await model_call()
-    for previous, current in zip(received, received[1:], strict=False):
-        assert previous.system_message == current.system_message
-        assert previous.messages == current.messages[: len(previous.messages)]
-    assert isinstance(received[-1].messages[-1], ToolMessage)
+    # The task's context arrives as a message, so the system prompt stays the same.
+    assert len({call.system_prompt for call in received}) == 1
 
 
 async def test_task_context_returns_after_summarization_without_replacing_history(

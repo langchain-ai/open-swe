@@ -14,7 +14,6 @@ from openswe.slack.breakout_links import (
     notify_breakout,
     source_thread_line,
 )
-from openswe.slack.channels import SlackChannel
 from openswe.slack.client import (
     append_slack_web_link_footer,
     get_active_slack_thread,
@@ -305,15 +304,9 @@ async def process_slack_breakout(
             login=await service.slack_login(request.user_id) if request.user_id else None,
         )
         target = destination.channel_id
-        for channel_id in dict.fromkeys((request.channel_id, target)):
-            channel = await SlackChannel.load(channel_id, use_cache=False)
-            if channel is None or not channel.public:
-                await _tell_sender(
-                    request,
-                    f"<#{channel_id}> is not a public channel. Breakouts only work "
-                    "from and to public channels.",
-                )
-                return
+        if error := await destination.channel_error(request.channel_id):
+            await _tell_sender(request, error)
+            return
         if command.instruction:
             await _start(
                 request,

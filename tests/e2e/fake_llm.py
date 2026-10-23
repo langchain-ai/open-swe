@@ -1567,7 +1567,7 @@ def _is_pull_request_fix(text: str) -> bool:
 
     Without this it lands on the catch-all implement script and opens a *new* PR,
     which renumbers the fake store under whichever spec runs next."""
-    return "Fix merge conflicts and failing CI checks on" in text
+    return "Resolve the merge conflicts and fix the failing CI checks on" in text
 
 
 SCRIPT_RULES: tuple[ScriptRule, ...] = (

@@ -1,28 +1,30 @@
 """One Open SWE graph, played by a run on Managed Deep Agents.
 
 MDA keeps the model loop, its checkpoints and every tool call. Everything else is
-the run as its graph factory plans it (``ToolSurface``), with no graph compiled:
+the run as its graph factory plans it (``ToolSurface``), with no graph compiled,
+served as the typed API both sides import (``runtime_api``):
 
 - ``catalog`` names the run's operations (each the work of one of its tools), its
   subagents, models and sandbox, and the checks around its file and shell tools
 - ``prepare`` runs every ``before_agent`` hook: run preparation (the thread's
   sandbox, checkout and prompt), the transcript turn, skills, reply bookkeeping
 - ``before_model`` runs every ``before_model`` hook (follow-up queue, event matches,
-  proxy refresh, task coordination, model routing), then runs the graph's own
-  model-call middleware for the system prompt and the tools it hides from this
-  call, and names the model to call
+  proxy refresh, task coordination, model routing), then asks the graph's
+  middleware what it adds to the call (``ShapesModelCalls``: sections of the system
+  prompt, tools it keeps from the call), and names the model to call
 - ``model_result`` lets the transcript and usage middleware observe each response
 - ``after_model`` runs ``after_model`` hooks, such as the reply nudges, which can
   send the loop back to the model
 - ``after_agent`` runs ``after_agent`` hooks: usage, transcript, step-limit notice,
   review-check settle
 - ``tool_started`` and ``tool_result`` let the transcript record every tool call
-- ``sandbox_unreachable`` tells the person a tool MDA ran found the box gone
+- ``sandbox_replaced`` connects to the box MDA put in place of the thread's, and
+  ``sandbox_unreachable`` tells the person a tool MDA ran found the box gone
 
-The run's tools call the typed API (``runtime_api``) for their work: an operation
-by name, the thread's files where the box is not MDA's or the path is this
-deployment's, the push and pull request guards on a shell command, and incident
-evidence. None of them is a tool call here: no tools node, no tool-call middleware.
+The run's tools call the same API for their work: an operation by name, the
+thread's files where the box is not MDA's or the path is this deployment's, the
+push and pull request guards on a shell command, and incident evidence. None of
+them is a tool call here: no tools node, no tool-call middleware.
 
 A call made from inside a subagent names the namespace of its ``task`` calls, so
 its tool calls and replies land under the subagent, as they do in-process.
@@ -45,7 +47,6 @@ from uuid import uuid4
 
 from deepagents.backends.composite import CompositeBackend
 from deepagents.backends.protocol import BackendProtocol, SandboxBackendProtocol
-from deepagents.middleware.filesystem import FilesystemMiddleware
 from langchain.agents.middleware import ModelCallLimitMiddleware
 from langchain.agents.middleware.types import (
     AgentMiddleware,
@@ -53,7 +54,6 @@ from langchain.agents.middleware.types import (
     ModelRequest,
     ModelResponse,
 )
-from langchain_anthropic.middleware import AnthropicPromptCachingMiddleware
 from langchain_core.language_models.fake_chat_models import FakeListChatModel
 from langchain_core.messages import (
     AIMessage,
@@ -72,9 +72,10 @@ from langgraph.config import get_config
 from langgraph.errors import NodeCancelledError
 from langgraph.runtime import Runtime
 from langgraph.types import Command
-from pydantic import BaseModel, JsonValue, TypeAdapter, ValidationError
+from pydantic import JsonValue, TypeAdapter, ValidationError
 from runtime_api import files as file_api
 from runtime_api.catalog import (
+    CATALOG,
     Catalog,
     FilesSpec,
     ModelSpec,
@@ -83,7 +84,7 @@ from runtime_api.catalog import (
     SandboxSpec,
     SubagentSpec,
 )
-from runtime_api.endpoint import Handlers
+from runtime_api.endpoint import Handlers, UnknownEndpointError
 from runtime_api.files import (
     DeleteRequest,
     DownloadRequest,
@@ -104,6 +105,32 @@ from runtime_api.files import (
     UploadRequest,
     WriteRequest,
 )
+from runtime_api.loop import (
+    AFTER_AGENT,
+    AFTER_MODEL,
+    BEFORE_MODEL,
+    BROWSER,
+    MODEL_RESULT,
+    PREPARE,
+    SANDBOX_REPLACED,
+    SANDBOX_UNREACHABLE,
+    TOOL_RESULT,
+    TOOL_STARTED,
+    AfterAgent,
+    BeforeModel,
+    BrowserReport,
+    Done,
+    ModelCall,
+    ModelResult,
+    ObservedResponse,
+    PhaseResult,
+    Prepare,
+    RunCall,
+    SandboxGone,
+    ToolCallReport,
+    ToolResultReply,
+    ToolResultReport,
+)
 from runtime_api.operations import (
     CHECK_SHELL,
     OPERATION,
@@ -111,17 +138,30 @@ from runtime_api.operations import (
     EvidenceReply,
     OperationResult,
     RunOperation,
+    RunRequest,
     ShellCheck,
     ShellVerdict,
     ToolEvidence,
 )
 
+from openswe.agent_api.failures import OperationFailure
+from openswe.agent_api.git_metadata import (
+    BASELINE,
+    OBSERVED_TOOLS,
+    TurnGitMetadata,
+    collect_pr_targets,
+)
+from openswe.agent_api.operations import Injections, invoke
+from openswe.agent_api.runs import in_graph_context, run_config
+from openswe.agent_api.shell_guards import ShellGuards
+from openswe.agent_api.tokens import RemoteRun
 from openswe.dashboard.options import model_supports_images
 from openswe.dispatch import COMPLETION_WEBHOOK_URL
 from openswe.github.sandbox_access import READ_ONLY_REVIEW_PERMISSIONS
 from openswe.incidents.runtime import IncidentMiddleware
 from openswe.middleware.client_tools import ClientToolsMiddleware
 from openswe.middleware.conversation_offloading import ConversationOffloadingMiddleware
+from openswe.middleware.model_call_shape import CallShape, ShapesModelCalls
 from openswe.middleware.model_selection import PersistedRoute, normalize_route
 from openswe.middleware.prepare_run import BasePrepareRunMiddleware
 from openswe.middleware.record_run_usage import RecordRunUsageMiddleware
@@ -129,18 +169,6 @@ from openswe.middleware.sandbox_circuit_breaker import post_sandbox_unreachable_
 from openswe.middleware.task_coordination import TaskCoordinationMiddleware
 from openswe.middleware.transcript import TranscriptMiddleware, within_namespace
 from openswe.prompts import common_prompt, prompt
-from openswe.remote_runtime.failures import OperationFailure
-from openswe.remote_runtime.git_metadata import (
-    BASELINE,
-    OBSERVED_TOOLS,
-    TurnGitMetadata,
-    collect_pr_targets,
-)
-from openswe.remote_runtime.operations import Injections, invoke
-from openswe.remote_runtime.runs import in_graph_context, run_config
-from openswe.remote_runtime.server import UnknownHookError
-from openswe.remote_runtime.shell_guards import ShellGuards
-from openswe.remote_runtime.tokens import RemoteRun
 from openswe.run_config import RunConfig
 from openswe.runtime.constants import DEFAULT_LLM_MAX_TOKENS
 from openswe.sandboxes.browsers import ThreadBrowser
@@ -180,15 +208,6 @@ _ASYNC_TASK_TOOLS: Final = frozenset(
 )
 # Tools the model labels each call of, for the dashboard to show in place of a bare name.
 _DESCRIBED_TOOLS: Final = ("eval",)
-# Model-call middleware that is MDA's own, or that observes rather than shapes a call.
-_NOT_PROMPT_SHAPING: Final = (
-    FilesystemMiddleware,
-    CodeInterpreterMiddleware,
-    AnthropicPromptCachingMiddleware,
-    ConversationOffloadingMiddleware,
-    TranscriptMiddleware,
-    RecordRunUsageMiddleware,
-)
 _MODEL_OBSERVERS: Final = (TranscriptMiddleware, RecordRunUsageMiddleware)
 # Loop bookkeeping and code mode MDA's own middleware already does.
 _MDA_PHASES: Final = (ModelCallLimitMiddleware, CodeInterpreterMiddleware)
@@ -204,47 +223,17 @@ _SESSION_LIMIT: Final = 512
 _json = TypeAdapter(JsonValue)
 _json_object = TypeAdapter(dict[str, JsonValue])
 _json_list = TypeAdapter(list[JsonValue])
+_json_dicts = TypeAdapter(list[dict[str, JsonValue]])
 
 Phase = Literal["before_agent", "before_model", "after_model", "after_agent"]
+type PhaseAnswer[R: PhaseResult] = Callable[[PhaseResult, dict[str, object], Runtime], Awaitable[R]]
 RunPlanner = Callable[[RunnableConfig, ToolSurface], Awaitable[None]]
 StartModels = Callable[[RunConfig], Awaitable[RunModels]]
 StateRestorer = Callable[[dict[str, object]], None]
 
 
-class HookBody(BaseModel):
-    """What the MDA run sends with every call: who it is and the state it holds."""
-
-    run_id: str | None = None
-    messages: list[dict[str, JsonValue]] = []
-    state: dict[str, JsonValue] = {}
-    # The ``task`` calls the run's subagent is nested in; empty for the agent itself.
-    namespace: list[str] = []
-    # The thread's box: the one MDA opened for ``prepare``, None when it could not, or
-    # the one a tool found gone for ``sandbox_unreachable``.
-    sandbox_id: str | None = None
-
-
-class CallBody(HookBody):
-    name: str
-    arguments: dict[str, JsonValue] = {}
-    tool_call_id: str
-
-
-class BrowserBody(HookBody):
-    """``browser``: the LangSmith browser MDA names for the thread's agent."""
-
-    browser: str
-    opened: bool = True
-
-
-class ToolResultBody(CallBody):
-    """The result of a tool call MDA ran itself, as a tool message."""
-
-    result: dict[str, JsonValue]
-
-
-def dump_messages(messages: Sequence[BaseMessage]) -> list[JsonValue]:
-    return _json_list.validate_python(messages_to_dict(list(messages)))
+def dump_messages(messages: Sequence[BaseMessage]) -> list[dict[str, JsonValue]]:
+    return _json_dicts.validate_python(messages_to_dict(list(messages)))
 
 
 def _with_ids(messages: Sequence[BaseMessage]) -> list[BaseMessage]:
@@ -301,21 +290,6 @@ def _overrides(middleware: AgentMiddleware, hook: str) -> bool:
     return getattr(type(middleware), hook) is not getattr(AgentMiddleware, hook)
 
 
-class ModelCallShape(BaseModel):
-    """What the graph's own model-call middleware makes of the next call."""
-
-    system_prompt: str
-    # Tools the middleware takes off this call's list, as it would in-process.
-    hidden_tools: list[str]
-
-
-class PhaseResult(BaseModel):
-    update: dict[str, JsonValue] = {}
-    messages: list[JsonValue] = []
-    jump_to: str | None = None
-    events: list[JsonValue] = []
-
-
 @runtime_checkable
 class CarriedAcrossProcesses(Protocol):
     """Middleware whose per-run state outlives the process that started the run.
@@ -348,9 +322,12 @@ class RunSession:
         restore: StateRestorer | None,
         *,
         started_here: bool,
+        assistant_id: str | None = None,
     ) -> None:
         self.surface = surface
         self.config = config
+        # The graph the run plays, which decides what a replaced box may reach.
+        self.assistant_id = assistant_id
         self._restore = restore
         self._joined = self._prepared = started_here
         self._shell_guards = ShellGuards(surface.shell_guards)
@@ -387,11 +364,11 @@ class RunSession:
     def _tool_recorders(self) -> list[RecordsRemoteTools]:
         return [m for m in self.surface.middleware if isinstance(m, RecordsRemoteTools)]
 
-    async def tool_started(self, tool_call: ToolCall, messages: Sequence[BaseMessage]) -> None:
+    async def _record_started(self, tool_call: ToolCall, messages: Sequence[BaseMessage]) -> None:
         for middleware in self._tool_recorders():
             await middleware.atool_started(tool_call, messages)
 
-    async def tool_finished(self, result: ToolMessage) -> None:
+    async def _record_finished(self, result: ToolMessage) -> None:
         for middleware in self._tool_recorders():
             await middleware.atool_finished(result)
 
@@ -401,10 +378,10 @@ class RunSession:
             raise RuntimeError("The graph factory picked no models")
         return self.surface.models
 
-    def state(self, body: HookBody) -> dict[str, object]:
+    def state(self, call: RunCall) -> dict[str, object]:
         state: dict[str, object] = {
-            **{key: decode_state(value) for key, value in body.state.items()},
-            "messages": messages_from_dict(body.messages),
+            **{key: decode_state(value) for key, value in call.state.items()},
+            "messages": messages_from_dict(call.messages),
         }
         if self._restore is not None:
             self._restore(state)
@@ -474,6 +451,18 @@ class RunSession:
             ),
         )
 
+    async def plan(self, _request: RunRequest) -> Catalog:
+        """The catalog, with who the run acts for and the box MDA creates for it."""
+        sandbox = await self.sandbox()
+        return self.catalog().model_copy(
+            update={
+                "trace_metadata": TurnGitMetadata(self.config).actor,
+                "sandbox": None
+                if sandbox is None
+                else SandboxSpec.model_validate(sandbox.model_dump(mode="json")),
+            }
+        )
+
     async def sandbox(self) -> ManagedSandbox | None:
         """The thread's box as MDA creates it, when MDA owns it."""
         cfg = RunConfig.from_config(self.config)
@@ -487,12 +476,18 @@ class RunSession:
         if cfg.thread_id is not None and await self.sandbox() is not None:
             await bind_mda_sandbox(cfg.thread_id, sandbox_id, workspace_slug=cfg.workspace_slug)
 
-    async def reconnect_sandbox(self, assistant_id: str) -> None:
+    async def sandbox_replaced(self, _request: RunCall) -> Done:
         """Connect again to the thread's box, which MDA replaced with a fresh one."""
+        await in_graph_context(
+            {**self.config, "run_name": "sandbox"}, lambda _runtime: self._reconnect_sandbox()
+        )
+        return Done()
+
+    async def _reconnect_sandbox(self) -> None:
         cfg = RunConfig.from_config(self.config)
         if cfg.thread_id is None:
             raise ValueError("This run has no thread")
-        reviewing = assistant_id in {"reviewer", "review-scout"}
+        reviewing = self.assistant_id in {"reviewer", "review-scout"}
         repositories = [cfg.repo.full_name] if cfg.repo else []
         await reconnect_replaced_sandbox(
             cfg.thread_id,
@@ -682,48 +677,150 @@ class RunSession:
             update=_json_state(update), messages=dump_messages(added), jump_to=jump_to
         )
 
+    async def _answer_phase[R: PhaseResult](
+        self, phase: Phase, call: RunCall, answer: PhaseAnswer[R]
+    ) -> R:
+        """Run ``phase``'s hooks on ``call``'s state as the run, and answer with what they did."""
+        state = self.state(call)
+
+        async def run(runtime: Runtime) -> R:
+            await self.join(state, runtime)
+            result = await self.run_phase(phase, state, runtime)
+            answered = await answer(result, state, runtime)
+            await self.flush(runtime)
+            return answered
+
+        events: list[object] = []
+        answered = await in_graph_context({**self.config, "run_name": phase}, run, events=events)
+        return answered.model_copy(update={"events": [_json_or_text(e) for e in events]})
+
+    async def prepare(self, request: Prepare) -> PhaseResult:
+        # MDA opened the box before preparing; preparation connects to it as to any other.
+        await self.bind_sandbox(request.sandbox_id)
+
+        async def begun(
+            result: PhaseResult, _state: dict[str, object], _runtime: Runtime
+        ) -> PhaseResult:
+            begin = await TurnGitMetadata(self.config).begin()
+            return result.model_copy(update={"update": {**result.update, **begin}})
+
+        return await self._answer_phase("before_agent", request, begun)
+
+    async def before_model(self, request: RunCall) -> BeforeModel:
+        async def planned(
+            result: PhaseResult, state: dict[str, object], runtime: Runtime
+        ) -> BeforeModel:
+            if result.jump_to is not None:
+                return BeforeModel(**result.model_dump())
+            model = self.model_for(state)
+            vision = self.vision_for(model)
+            fallback = fallback_model_choice(model.model_id)
+            call = (await self.model_call(state, runtime)).model_copy(
+                update={
+                    "model": _model_spec(model),
+                    "vision": None if vision is None else _model_spec(vision),
+                    "fallback": None if fallback is None else _model_spec(fallback),
+                    "use_gateway": self.models.use_gateway,
+                }
+            )
+            return BeforeModel(**result.model_dump(), call=call)
+
+        return await self._answer_phase("before_model", request, planned)
+
+    async def after_model(self, request: RunCall) -> PhaseResult:
+        return await self._answer_phase("after_model", request, _as_is)
+
+    async def after_agent(self, request: RunCall) -> AfterAgent:
+        async def reconciled(
+            result: PhaseResult, state: dict[str, object], _runtime: Runtime
+        ) -> AfterAgent:
+            trace_metadata = await TurnGitMetadata(self.config).reconcile(state)
+            return AfterAgent(
+                **result.model_dump(exclude={"update"}),
+                update={**result.update, BASELINE: None},
+                trace_metadata=trace_metadata,
+            )
+
+        return await self._answer_phase("after_agent", request, reconciled)
+
+    async def model_result(self, request: ModelResult) -> ObservedResponse:
+        state = self.state(request)
+        response = messages_from_dict(request.response)
+
+        async def observed(runtime: Runtime) -> list[BaseMessage]:
+            await self.join(state, runtime)
+            with within_namespace(request.namespace):
+                seen = await self.observe(state, response, runtime)
+            await self.flush(runtime)
+            return seen
+
+        seen = await in_graph_context({**self.config, "run_name": "model_result"}, observed)
+        return ObservedResponse(response=dump_messages(seen))
+
+    async def tool_started(self, request: ToolCallReport) -> Done:
+        state = self.state(request)
+        tool_call = ToolCall(
+            name=request.name, args=dict(request.arguments), id=request.tool_call_id
+        )
+
+        async def record(runtime: Runtime) -> None:
+            await self.join(state, runtime)
+            with within_namespace(request.namespace):
+                await self._record_started(tool_call, messages_from_dict(request.messages))
+            await self.flush(runtime)
+
+        await in_graph_context({**self.config, "run_name": "tool_started"}, record)
+        return Done()
+
+    async def tool_result(self, request: ToolResultReport) -> ToolResultReply:
+        state = self.state(request)
+        [result] = messages_from_dict([request.result])
+        if not isinstance(result, ToolMessage):
+            raise ValueError("A tool result must be a tool message")
+
+        async def record(runtime: Runtime) -> dict[str, JsonValue]:
+            await self.join(state, runtime)
+            with within_namespace(request.namespace):
+                await self._record_finished(result)
+            await self.flush(runtime)
+            # A file or shell tool may have started the turn's work; the snapshot is taken
+            # now, off the call's path, as the run, which a bridged machine checks.
+            git = TurnGitMetadata(self.config)
+            before = git.work_baseline(state) if request.name in OBSERVED_TOOLS else None
+            return await git.work_evidence(before, request.tool_call_id, time.time_ns())
+
+        update = await in_graph_context({**self.config, "run_name": "tool_result"}, record)
+        return ToolResultReply(update=update)
+
+    async def sandbox_unreachable(self, request: SandboxGone) -> Done:
+        """A tool MDA ran in the box found it gone; the run ends once the person knows."""
+        await post_sandbox_unreachable_notification(self.config, sandbox_id=request.sandbox_id)
+        return Done()
+
     def _offered(self) -> list[BaseTool]:
         return [tool for name, tool in self.surface.tools.items() if name not in _MDA_TOOLS]
 
-    def _request(
-        self,
-        state: Mapping[str, object],
-        runtime: Runtime,
-        tools: Sequence[BaseTool] = (),
-    ) -> ModelRequest:
+    def _request(self, state: Mapping[str, object], runtime: Runtime) -> ModelRequest:
+        """The call MDA made, as the observers of its response read it."""
         return ModelRequest(
             model=FakeListChatModel(responses=[""]),
             messages=_as_list(state.get("messages")),
             state=cast(AgentState, dict(state)),
             runtime=runtime,
-            tools=list(tools),
+            tools=[],
             model_settings={},
         )
 
-    async def model_call(self, state: Mapping[str, object], runtime: Runtime) -> ModelCallShape:
-        """The system prompt and tool list the graph's own model-call middleware would send."""
-        captured: list[ModelRequest] = []
-
-        async def capture(request: ModelRequest) -> ModelResponse:
-            captured.append(request)
-            return ModelResponse(result=[AIMessage(content="")])
-
-        shaping = [
-            m
-            for m in self.surface.middleware
-            if _overrides(m, "awrap_model_call") and not isinstance(m, _NOT_PROMPT_SHAPING)
-        ]
-        offered = self._offered()
-        await _chain(shaping, capture)(self._request(state, runtime, offered))
-        if not captured:
-            return ModelCallShape(system_prompt=common_prompt(), hidden_tools=[])
-        request = captured[0]
-        kept = {getattr(tool, "name", None) for tool in request.tools}
-        return ModelCallShape(
-            system_prompt=common_prompt(
-                request.system_message.text if request.system_message else ""
-            ),
-            hidden_tools=sorted(tool.name for tool in offered if tool.name not in kept),
+    async def model_call(self, state: Mapping[str, object], runtime: Runtime) -> ModelCall:
+        """The system prompt and tool list the graph's own middleware gives the next call."""
+        call = CallShape()
+        for middleware in self.surface.middleware:
+            if isinstance(middleware, ShapesModelCalls):
+                call = await middleware.ashape_model_call(call, state, runtime)
+        offered = {tool.name for tool in self._offered()}
+        return ModelCall(
+            system_prompt=common_prompt(call.system_prompt),
+            hidden_tools=sorted(call.hidden_tools & offered),
         )
 
     def model_for(self, state: Mapping[str, object]) -> ModelChoice:
@@ -782,6 +879,10 @@ async def _call_hook(
     if "config" in inspect.signature(hook).parameters:
         return await hook(cast(AgentState, state), runtime, get_config())
     return await hook(cast(AgentState, state), runtime)
+
+
+async def _as_is(result: PhaseResult, _state: dict[str, object], _runtime: Runtime) -> PhaseResult:
+    return result
 
 
 def _as_list(value: object) -> list[AnyMessage]:
@@ -852,7 +953,13 @@ class RemoteGraph:
         surface = ToolSurface()
         await self._plan(config, surface)
         await surface.prepare()
-        session = RunSession(surface, config, self._restore_state, started_here=fresh)
+        session = RunSession(
+            surface,
+            config,
+            self._restore_state,
+            started_here=fresh,
+            assistant_id=self.assistant_id,
+        )
         if len(self._sessions) >= _SESSION_LIMIT:
             now = time.monotonic()
             self._sessions = {k: s for k, s in self._sessions.items() if s.expires_at > now}
@@ -862,147 +969,21 @@ class RemoteGraph:
     def end(self, run: RemoteRun, run_id: str | None) -> None:
         self._sessions.pop((run.thread_id, run_id), None)
 
-    async def hook(self, run: RemoteRun, hook: str, raw: Mapping[str, JsonValue]) -> JsonValue:
-        """Answer one call the MDA run makes around its model loop."""
-        body = HookBody.model_validate(raw)
-        if hook == "catalog":
-            session = await self.session(run, body.run_id)
-            sandbox = await session.sandbox()
-            catalog = session.catalog().model_copy(
-                update={
-                    "trace_metadata": TurnGitMetadata(session.config).actor,
-                    "sandbox": None
-                    if sandbox is None
-                    else SandboxSpec.model_validate(sandbox.model_dump(mode="json")),
-                }
-            )
-            return catalog.model_dump(mode="json")
-        if hook == "prepare":
-            session = await self.session(run, body.run_id, fresh=True)
-            # MDA opened the box before preparing; preparation connects to it as to any other.
-            await session.bind_sandbox(body.sandbox_id)
-            return await self._phase(session, "before_agent", body)
-        if hook == "browser":
-            body = BrowserBody.model_validate(raw)
-            await ThreadBrowser(browser=body.browser, opened=body.opened).report(run.thread_id)
-            return {}
-        if hook == "sandbox":
-            session = await self.session(run, body.run_id)
-            await in_graph_context(
-                {**session.config, "run_name": "sandbox"},
-                lambda _runtime: session.reconnect_sandbox(run.assistant_id),
-            )
-            return {}
-        if hook == "sandbox_unreachable":
-            # A tool MDA ran in the box found it gone; the run ends once the person knows.
-            session = await self.session(run, body.run_id)
-            await post_sandbox_unreachable_notification(session.config, sandbox_id=body.sandbox_id)
-            return {}
-        session = await self.session(run, body.run_id)
-        if hook == "before_model":
-            return await self._phase(session, "before_model", body)
-        if hook == "after_model":
-            return await self._phase(session, "after_model", body)
-        if hook == "after_agent":
-            try:
-                return await self._phase(session, "after_agent", body)
-            finally:
-                self.end(run, body.run_id)
-        if hook == "model_result":
-            return await self._model_result(session, raw, body)
-        if hook == "tool_started":
-            return await self._tool_started(session, CallBody.model_validate(raw))
-        if hook == "tool_result":
-            return await self._tool_result(session, ToolResultBody.model_validate(raw))
-        raise UnknownHookError(hook)
-
-    async def _phase(self, session: RunSession, phase: Phase, body: HookBody) -> JsonValue:
-        state = session.state(body)
-
-        async def run(runtime: Runtime) -> dict[str, JsonValue]:
-            await session.join(state, runtime)
-            result = await session.run_phase(phase, state, runtime)
-            reply = result.model_dump()
-            git = TurnGitMetadata(session.config)
-            if phase == "before_agent":
-                reply["update"].update(await git.begin())
-            elif phase == "after_agent":
-                reply["trace_metadata"] = await git.reconcile(state)
-                reply["update"][BASELINE] = None
-            if phase == "before_model" and result.jump_to is None:
-                model = session.model_for(state)
-                fallback = fallback_model_choice(model.model_id)
-                vision = session.vision_for(model)
-                reply.update((await session.model_call(state, runtime)).model_dump())
-                reply["model"] = _model_spec(model).model_dump()
-                reply["vision"] = None if vision is None else _model_spec(vision).model_dump()
-                reply["fallback"] = None if fallback is None else _model_spec(fallback).model_dump()
-                reply["use_gateway"] = session.models.use_gateway
-            await session.flush(runtime)
-            return _json_object.validate_python(reply)
-
-        events: list[object] = []
-        reply = await in_graph_context({**session.config, "run_name": phase}, run, events=events)
-        reply["events"] = _json_list.validate_python([_json_or_text(e) for e in events])
-        return reply
-
-    async def _model_result(
-        self, session: RunSession, raw: Mapping[str, JsonValue], body: HookBody
-    ) -> JsonValue:
-        response = raw.get("response")
-        messages = messages_from_dict(
-            [m for m in response if isinstance(m, dict)] if isinstance(response, list) else []
-        )
-        state = session.state(body)
-
-        async def observe(runtime: Runtime) -> list[BaseMessage]:
-            await session.join(state, runtime)
-            with within_namespace(body.namespace):
-                observed = await session.observe(state, messages, runtime)
-            await session.flush(runtime)
-            return observed
-
-        observed = await in_graph_context({**session.config, "run_name": "model_result"}, observe)
-        return {"response": dump_messages(observed)}
-
-    async def _tool_started(self, session: RunSession, body: CallBody) -> JsonValue:
-        state = session.state(body)
-        tool_call = ToolCall(name=body.name, args=dict(body.arguments), id=body.tool_call_id)
-
-        async def record(runtime: Runtime) -> None:
-            await session.join(state, runtime)
-            with within_namespace(body.namespace):
-                await session.tool_started(tool_call, messages_from_dict(body.messages))
-            await session.flush(runtime)
-
-        await in_graph_context({**session.config, "run_name": "tool_started"}, record)
-        return {}
-
-    async def _tool_result(self, session: RunSession, body: ToolResultBody) -> JsonValue:
-        state = session.state(body)
-        [result] = messages_from_dict([body.result])
-        if not isinstance(result, ToolMessage):
-            raise ValueError("A tool result must be a tool message")
-
-        async def record(runtime: Runtime) -> dict[str, JsonValue]:
-            await session.join(state, runtime)
-            with within_namespace(body.namespace):
-                await session.tool_finished(result)
-            await session.flush(runtime)
-            # A file or shell tool may have started the turn's work; the snapshot is taken
-            # now, off the call's path, as the run, which a bridged machine checks.
-            git = TurnGitMetadata(session.config)
-            before = git.work_baseline(state) if body.name in OBSERVED_TOOLS else None
-            return await git.work_evidence(before, body.tool_call_id, time.time_ns())
-
-        update = await in_graph_context({**session.config, "run_name": "tool_result"}, record)
-        return {"update": update}
-
     async def api(self, run: RemoteRun, endpoint: str, raw: JsonValue) -> JsonValue:
-        """Answer one call to the typed API the run's tools make (``runtime_api``)."""
-        run_id = raw.get("run_id") if isinstance(raw, Mapping) else None
-        session = await self.session(run, run_id if isinstance(run_id, str) else None)
-        return await API.dispatch(endpoint, session, raw)
+        """Answer one call the MDA run makes (``runtime_api``), as the session of its run."""
+        if RUN_CALLS.serves(endpoint):
+            return await RUN_CALLS.dispatch(endpoint, run, raw)
+        if not API.serves(endpoint):
+            raise UnknownEndpointError(endpoint)
+        raw_id = raw.get("run_id") if isinstance(raw, Mapping) else None
+        run_id = raw_id if isinstance(raw_id, str) else None
+        # Preparation starts the run's session; the end of the run closes it.
+        session = await self.session(run, run_id, fresh=endpoint == PREPARE.name)
+        try:
+            return await API.dispatch(endpoint, session, raw)
+        finally:
+            if endpoint == AFTER_AGENT.name:
+                self.end(run, run_id)
 
 
 def _json_or_text(value: object) -> JsonValue:
@@ -1137,8 +1118,26 @@ async def _download(session: RunSession, request: DownloadRequest) -> TransferRe
     )
 
 
-# The typed API every graph's MDA runs call (``runtime_api``).
+async def _browser(run: RemoteRun, request: BrowserReport) -> Done:
+    await ThreadBrowser(browser=request.browser, opened=request.opened).report(run.thread_id)
+    return Done()
+
+
+# Calls about the run's thread that need none of its plan.
+RUN_CALLS: Final = Handlers[RemoteRun]()
+RUN_CALLS.serve(BROWSER, _browser)
+# The typed API every graph's MDA runs call (``runtime_api``), as the session of their run.
 API: Final = Handlers[RunSession]()
+API.serve(CATALOG, RunSession.plan)
+API.serve(PREPARE, RunSession.prepare)
+API.serve(BEFORE_MODEL, RunSession.before_model)
+API.serve(MODEL_RESULT, RunSession.model_result)
+API.serve(AFTER_MODEL, RunSession.after_model)
+API.serve(AFTER_AGENT, RunSession.after_agent)
+API.serve(TOOL_STARTED, RunSession.tool_started)
+API.serve(TOOL_RESULT, RunSession.tool_result)
+API.serve(SANDBOX_REPLACED, RunSession.sandbox_replaced)
+API.serve(SANDBOX_UNREACHABLE, RunSession.sandbox_unreachable)
 API.serve(OPERATION, RunSession.operation)
 API.serve(CHECK_SHELL, RunSession.check_shell)
 API.serve(RECORD_EVIDENCE, RunSession.record_evidence)

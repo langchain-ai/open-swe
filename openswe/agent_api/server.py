@@ -1,12 +1,12 @@
 """What Managed Deep Agents runs call back into, behind the run token.
 
-Every call is ``POST /remote-runtime/hooks/{hook}`` with a JSON body: the graph's
-catalog and each phase of the run's model loop (see ``openswe.remote_runtime.graph``).
-The run's tools call ``POST /remote-runtime/api/{endpoint}``, the typed API in
-``runtime_api``. The middleware verifies the bearer token once
-per request and leaves the verified run for the handler, which picks the graph
-the token was signed for and reads the thread and run configuration from it,
-never from the body.
+Every call is ``POST /agent-api/{endpoint}``, the typed API in
+``runtime_api``: the graph's catalog, each phase of the run's model loop and the
+work of its tools (see ``openswe.agent_api.graph``), and the launch of its
+task workers (``openswe.agent_api.async_workers``). The middleware verifies
+the bearer token once per request and leaves the verified run for the handler,
+which picks the graph the token was signed for and reads the thread and run
+configuration from it, never from the body.
 
 An async subagent's first run carries a worker grant instead: it may read its
 coordinator's catalog and ``adopt`` a run token of its own, nothing else.
@@ -20,13 +20,14 @@ from typing import Final
 from langsmith import tracing_context
 from langsmith.run_trees import RunTree
 from pydantic import JsonValue, TypeAdapter, ValidationError
+from runtime_api.catalog import CATALOG
 from runtime_api.endpoint import API_PATH as _API_PATH
-from runtime_api.endpoint import UnknownEndpointError
+from runtime_api.endpoint import InvalidRequestError, UnknownEndpointError
 from starlette.requests import Request
 from starlette.responses import JSONResponse
 from starlette.types import ASGIApp, Receive, Scope, Send
 
-from openswe.remote_runtime.tokens import (
+from openswe.agent_api.tokens import (
     RemoteRun,
     RuntimeTokenError,
     WorkerGrant,
@@ -36,46 +37,22 @@ from openswe.remote_runtime.tokens import (
 
 logger = logging.getLogger(__name__)
 
-HOOKS_PATH: Final = "/remote-runtime/hooks/{hook}"
 API_PATH: Final = _API_PATH
 _RUN_STATE_KEY: Final = "remote_run"
-_hook_body = TypeAdapter(dict[str, JsonValue])
+_request_body = TypeAdapter(dict[str, JsonValue])
 
-
-class UnknownHookError(LookupError):
-    """A remote graph called a hook this backend does not serve."""
-
-
-Hook = Callable[[RemoteRun, str, Mapping[str, JsonValue]], Awaitable[JsonValue]]
 Api = Callable[[RemoteRun, str, JsonValue], Awaitable[JsonValue]]
-RunHook = Callable[[RemoteRun, Mapping[str, JsonValue]], Awaitable[JsonValue]]
-GrantHook = Callable[[WorkerGrant, Mapping[str, JsonValue]], Awaitable[JsonValue]]
 
 
-def _graphs() -> Mapping[str, Hook]:
+class RefusedCallError(PermissionError):
+    """The run's token does not allow this call."""
+
+
+def _graphs() -> Mapping[str, Api]:
     # The webapp must not import the agent stack at startup.
-    from openswe.remote_runtime.hosted import hosted_graphs
-
-    return {assistant_id: graph.hook for assistant_id, graph in hosted_graphs().items()}
-
-
-def _apis() -> Mapping[str, Api]:
-    from openswe.remote_runtime.hosted import hosted_graphs
+    from openswe.agent_api.hosted import hosted_graphs
 
     return {assistant_id: graph.api for assistant_id, graph in hosted_graphs().items()}
-
-
-def _run_hooks() -> Mapping[str, RunHook]:
-    """Hooks a run calls that belong to no graph phase: launching async workers."""
-    from openswe.remote_runtime import async_workers
-
-    return {"launch_worker": async_workers.launch, "worker_launched": async_workers.launched}
-
-
-def _grant_hooks() -> Mapping[str, GrantHook]:
-    from openswe.remote_runtime import async_workers
-
-    return {"adopt": async_workers.adopt}
 
 
 @contextmanager
@@ -107,97 +84,62 @@ def _scope_principal(scope: Scope) -> RemoteRun | WorkerGrant:
     return principal
 
 
-async def hook_endpoint(scope: Scope, receive: Receive, send: Send) -> None:
-    principal = _scope_principal(scope)
-    hook = scope["path_params"]["hook"]
-    grant_hook = _grant_hooks().get(hook) if isinstance(principal, WorkerGrant) else None
+async def _answer(principal: RemoteRun | WorkerGrant, endpoint: str, body: JsonValue) -> JsonValue:
+    """What ``endpoint`` answers ``body`` with, as the run or worker grant that called it."""
+    from openswe.agent_api import async_workers
+
     if isinstance(principal, WorkerGrant):
-        if grant_hook is None and hook != "catalog":
-            await JSONResponse({"detail": "A worker grant only adopts a run token"}, 403)(
-                scope, receive, send
-            )
-            return
+        if async_workers.GRANT_API.serves(endpoint):
+            return await async_workers.GRANT_API.dispatch(endpoint, principal, body)
+        if endpoint != CATALOG.name:
+            raise RefusedCallError("A worker grant only adopts a run token")
         # Its tools, models and schemas only: the worker reads them before it has an identity.
         run = principal.coordinator
     else:
         run = principal
-    run_hook = _run_hooks().get(hook) if isinstance(principal, RemoteRun) else None
+        if async_workers.RUN_API.serves(endpoint):
+            return await async_workers.RUN_API.dispatch(endpoint, run, body)
     graph = _graphs().get(run.assistant_id)
     if graph is None:
-        await JSONResponse({"detail": f"No remote runtime serves {run.assistant_id}"}, 403)(
-            scope, receive, send
-        )
-        return
-    raw = await Request(scope, receive).body()
-    try:
-        body = _hook_body.validate_json(raw) if raw.strip() else {}
-    except ValidationError:
-        await JSONResponse({"detail": "The hook body must be a JSON object"}, status_code=422)(
-            scope, receive, send
-        )
-        return
-    try:
-        with _traced_under_caller(scope):
-            if isinstance(principal, WorkerGrant) and grant_hook is not None:
-                result = await grant_hook(principal, body)
-            elif run_hook is not None:
-                result = await run_hook(run, body)
-            else:
-                result = await graph(run, hook, body)
-    except UnknownHookError:
-        await JSONResponse({"detail": f"Unknown hook {hook}"}, status_code=404)(
-            scope, receive, send
-        )
-        return
-    except Exception as exc:
-        logger.exception(
-            "Remote runtime hook failed", extra={"hook": hook, "thread_id": run.thread_id}
-        )
-        # The run fails with what failed here, as it would have in-process.
-        failure = {"error": type(exc).__name__, "message": str(exc)}
-        await JSONResponse(failure, status_code=500)(scope, receive, send)
-        return
-    await JSONResponse(result)(scope, receive, send)
+        raise RefusedCallError(f"This backend serves no {run.assistant_id} graph")
+    return await graph(run, endpoint, body)
 
 
 async def api_endpoint(scope: Scope, receive: Receive, send: Send) -> None:
+    from langgraph_api.logging import set_logging_context
+
     principal = _scope_principal(scope)
     endpoint = scope["path_params"]["endpoint"]
-    if not isinstance(principal, RemoteRun):
-        await JSONResponse({"detail": "A worker grant only adopts a run token"}, 403)(
-            scope, receive, send
-        )
-        return
-    api = _apis().get(principal.assistant_id)
-    if api is None:
-        await JSONResponse({"detail": f"No remote runtime serves {principal.assistant_id}"}, 403)(
-            scope, receive, send
-        )
-        return
     raw = await Request(scope, receive).body()
     try:
-        body = _hook_body.validate_json(raw) if raw.strip() else {}
+        body = _request_body.validate_json(raw) if raw.strip() else {}
     except ValidationError:
         await JSONResponse({"detail": "The request body must be a JSON object"}, status_code=422)(
             scope, receive, send
         )
         return
+    run = principal.coordinator if isinstance(principal, WorkerGrant) else principal
+    context = {"thread_id": run.thread_id, "endpoint": endpoint}
+    if isinstance(run_id := body.get("run_id"), str):
+        context["run_id"] = run_id
+    set_logging_context(context)
     try:
         with _traced_under_caller(scope):
-            result = await api(principal, endpoint, body)
+            result = await _answer(principal, endpoint, body)
+    except RefusedCallError as exc:
+        await JSONResponse({"detail": str(exc)}, 403)(scope, receive, send)
+        return
     except UnknownEndpointError:
         await JSONResponse({"detail": f"Unknown endpoint {endpoint}"}, status_code=404)(
             scope, receive, send
         )
         return
-    except ValidationError as exc:
+    except InvalidRequestError as exc:
         await JSONResponse({"detail": str(exc)}, status_code=422)(scope, receive, send)
         return
     except Exception as exc:
-        logger.exception(
-            "Remote runtime API call failed",
-            extra={"endpoint": endpoint, "thread_id": principal.thread_id},
-        )
+        logger.exception("Agent API call failed")
+        # The run fails with what failed here, as it would have in-process.
         failure = {"error": type(exc).__name__, "message": str(exc)}
         await JSONResponse(failure, status_code=500)(scope, receive, send)
         return
@@ -228,7 +170,7 @@ class RunTokenMiddleware:
         try:
             principal = _verify(token.strip())
         except RuntimeTokenError as exc:
-            logger.info("Remote runtime call refused", extra={"refusal": str(exc)})
+            logger.info("Agent API call refused", extra={"refusal": str(exc)})
             await _refuse(
                 scope,
                 receive,
@@ -250,5 +192,4 @@ def _verify(token: str) -> RemoteRun | WorkerGrant:
     return verify_worker_grant(token)
 
 
-HOOKS: Final = RunTokenMiddleware(hook_endpoint)
 API: Final = RunTokenMiddleware(api_endpoint)
