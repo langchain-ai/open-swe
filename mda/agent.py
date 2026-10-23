@@ -210,6 +210,7 @@ async def agent(runtime: ManagedServerRuntime) -> DeepAgentDefinition:
         remote=remote_tools,
         remote_files=remote,
         in_box=in_box,
+        excluded=excluded,
         skills={tool.name: tool for tool in FilesystemMiddleware(backend=skill_files).tools},
         skill_sources=catalog.skill_sources,
     )
@@ -250,9 +251,9 @@ async def agent(runtime: ManagedServerRuntime) -> DeepAgentDefinition:
             *replace_sandbox,
             *_backend_reports(backend, catalog),
             *skills,
+            ServedToolsMiddleware(offered, excluded | code_only, backend),
             file_tools,
             task_retry(),
-            ServedToolsMiddleware(offered, excluded | code_only, backend),
             *_code_mode(context.graph, from_code, catalog.described, file_tools),
             *_browser(context.graph, backend),
             ModelCallLimitMiddleware(

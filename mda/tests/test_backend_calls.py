@@ -932,6 +932,59 @@ async def test_a_command_the_guards_refuse_is_recorded_with_their_reason(
     assert recorded.content == "pr_creation_fallback_blocked"
 
 
+@pytest.mark.parametrize("excluded", [frozenset(), frozenset({"grep", "glob"})])
+@pytest.mark.parametrize("in_box", [False, True])
+async def test_search_policy_reaches_served_and_code_mode_execute(
+    monkeypatch: pytest.MonkeyPatch, excluded: frozenset[str], in_box: bool
+) -> None:
+    from langchain.agents.middleware.types import ModelRequest, ModelResponse
+    from rt.middleware import ServedToolsMiddleware
+    from rt.remote_files import RemoteFiles, remote_file_tools
+
+    monkeypatch.setenv("OPEN_SWE_BACKEND_URL", "https://backend.invalid")
+    backend = OpenSweBackend("secret-token")
+    remote = RemoteFiles(backend, lambda: "run-1")
+    tools = remote_file_tools(remote, "/")
+    original = tools["execute"].description
+    files = FileToolsMiddleware(
+        backend,
+        FilesSpec(),
+        300,
+        remote=tools,
+        remote_files=remote,
+        in_box=in_box,
+        excluded=excluded,
+    )
+    served = ServedToolsMiddleware([] if in_box else list(tools.values()), excluded, backend)
+    request = ModelRequest(
+        model=FakeListChatModel(responses=["done"]),
+        messages=[],
+        tools=list(tools.values()) if in_box else [],
+        state={"messages": []},
+    )
+    received = AsyncMock()
+
+    async def describe(request: ModelRequest) -> ModelResponse:
+        return await files.awrap_model_call(request, received)
+
+    await served.awrap_model_call(request, describe)
+    [offered] = received.call_args.args
+    descriptions = [tool.description for tool in offered.tools if tool.name == "execute"]
+    descriptions.extend(tool.description for tool in files.code_tools(["execute"]))
+    assert len(descriptions) == 2
+    assert {tool.name for tool in offered.tools}.isdisjoint(excluded)
+    for description in descriptions:
+        if excluded:
+            assert "git grep -n" in description and "grep -rn" in description
+            assert "through execute" in description
+            assert "no separate grep/glob tools" in description
+            assert "Instead use the grep, glob tools" not in description
+            assert "Use glob tool instead" not in description
+            assert "Use grep tool instead" not in description
+        else:
+            assert description == original
+
+
 async def test_a_command_code_mode_runs_is_put_to_the_guards_too(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
