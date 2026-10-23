@@ -15,8 +15,8 @@ from langgraph_sdk.schema import ThreadSelectField
 from pydantic import BaseModel, ConfigDict, Field, JsonValue, TypeAdapter, ValidationError
 from sqlalchemy import RowMapping, text
 
+from openswe.agent_api.client import MDA_RUNTIME, RUNTIME_METADATA_KEY
 from openswe.database.postgres import transaction
-from openswe.remote_runtime.client import MDA_RUNTIME, RUNTIME_METADATA_KEY
 from openswe.thread_ids import mda_successor_thread_id
 
 Runtime = Literal["local", "mda"]

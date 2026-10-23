@@ -20,7 +20,6 @@ registered is settled at registration instead. Settling is safe to repeat.
 """
 
 import logging
-from collections.abc import Mapping
 from dataclasses import dataclass
 from typing import Final
 from uuid import uuid7
@@ -28,12 +27,24 @@ from uuid import uuid7
 from langgraph.runtime import Runtime
 from langgraph_sdk.errors import NotFoundError
 from pydantic import BaseModel, JsonValue, TypeAdapter
+from runtime_api.endpoint import Handlers
+from runtime_api.workers import (
+    ADOPT,
+    LAUNCH_WORKER,
+    WORKER_LAUNCHED,
+    Adopt,
+    Adopted,
+    Launch,
+    Launched,
+    LaunchReply,
+    Worker,
+)
 
+from openswe.agent_api.client import remote_run_context
+from openswe.agent_api.runs import in_graph_context, run_config
+from openswe.agent_api.tokens import RemoteRun, WorkerGrant, sign_worker_grant
 from openswe.dispatch import prepare_run_config
 from openswe.prompts import prompt
-from openswe.remote_runtime.client import remote_run_context
-from openswe.remote_runtime.runs import in_graph_context, run_config
-from openswe.remote_runtime.tokens import RemoteRun, WorkerGrant, sign_worker_grant
 from openswe.tasks import service, store
 
 logger = logging.getLogger(__name__)
@@ -41,16 +52,6 @@ logger = logging.getLogger(__name__)
 _TERMINAL: Final = frozenset({"success", "error", "timeout", "interrupted"})
 _json_object = TypeAdapter(dict[str, JsonValue])
 _INSTRUCTIONS_MARK: Final = "\x00instructions\x00"
-
-
-class LaunchBody(BaseModel):
-    tool_call_id: str
-    instructions: str
-
-
-class LaunchedBody(LaunchBody):
-    worker_thread_id: str
-    run_id: str
 
 
 class _Run(BaseModel):
@@ -61,13 +62,6 @@ class _Run(BaseModel):
     @property
     def ended(self) -> bool:
         return self.status in _TERMINAL
-
-
-class AdoptBody(BaseModel):
-    thread_id: str
-    run_id: str
-    # The assignment the worker was launched with, its first message.
-    instructions: str
 
 
 def _assignment(coordinator_thread_id: str, instructions: str) -> str:
@@ -101,24 +95,22 @@ async def _actor(run: RemoteRun) -> service.Actor:
     return await in_graph_context({**run_config(run), "run_name": "worker.actor"}, resolve)
 
 
-async def launch(run: RemoteRun, raw: Mapping[str, JsonValue]) -> JsonValue:
+async def launch(run: RemoteRun, body: Launch) -> LaunchReply:
     """A worker grant and assignment for the coordinator's launch, or the worker a replay made."""
-    body = LaunchBody.model_validate(raw)
     actor = await _actor(run)
     launched = await service.authorize_async_worker(actor, body.tool_call_id, body.instructions)
     if launched is not None:
-        return _json_object.validate_python({"worker": launched})
+        return LaunchReply(worker=_json_object.validate_python(launched))
     grant = WorkerGrant(coordinator=run, request_id=body.tool_call_id)
-    return {
-        "grant": sign_worker_grant(grant),
-        "assignment": _assignment(run.thread_id, body.instructions.strip()),
-    }
+    return LaunchReply(
+        grant=sign_worker_grant(grant),
+        assignment=_assignment(run.thread_id, body.instructions.strip()),
+    )
 
 
-async def launched(run: RemoteRun, raw: Mapping[str, JsonValue]) -> JsonValue:
-    body = LaunchedBody.model_validate(raw)
+async def launched(run: RemoteRun, body: Launched) -> Worker:
     actor = await _actor(run)
-    launched_run = LaunchedRun(body.worker_thread_id, body.run_id)
+    launched_run = LaunchedRun(body.worker_thread_id, body.worker_run_id)
     try:
         worker = await service.register_async_worker(
             actor, body.tool_call_id, body.worker_thread_id, body.instructions
@@ -129,12 +121,11 @@ async def launched(run: RemoteRun, raw: Mapping[str, JsonValue]) -> JsonValue:
         worker = service.worker_reply(replay.task, replay.delegation)
     else:
         await launched_run.settle_if_ended()
-    return _json_object.validate_python({"worker": worker})
+    return Worker(worker=_json_object.validate_python(worker))
 
 
-async def adopt(grant: WorkerGrant, raw: Mapping[str, JsonValue]) -> JsonValue:
+async def adopt(grant: WorkerGrant, body: Adopt) -> Adopted:
     """The worker's own run token, for the thread MDA launched from the grant's coordinator."""
-    body = AdoptBody.model_validate(raw)
     actor = await _actor(grant.coordinator)
     # Registered as the coordinator's worker_launched registers it, whichever comes first.
     instructions = _assigned_instructions(grant.coordinator.thread_id, body.instructions)
@@ -155,7 +146,7 @@ async def adopt(grant: WorkerGrant, raw: Mapping[str, JsonValue]) -> JsonValue:
         thread_id=body.thread_id,
         assistant_id=grant.coordinator.assistant_id,
     )
-    return {"run_token": context["__run_token"]}
+    return Adopted(run_token=str(context["__run_token"]))
 
 
 @dataclass(frozen=True)
@@ -204,3 +195,12 @@ class LaunchedRun:
                     "error": run.error,
                 }
             )
+
+
+# What a coordinator's run calls to launch its workers.
+RUN_API: Final = Handlers[RemoteRun]()
+RUN_API.serve(LAUNCH_WORKER, launch)
+RUN_API.serve(WORKER_LAUNCHED, launched)
+# What a launched worker's grant may call, besides reading its coordinator's catalog.
+GRANT_API: Final = Handlers[WorkerGrant]()
+GRANT_API.serve(ADOPT, adopt)

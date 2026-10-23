@@ -8,7 +8,7 @@ successor, so listings can show one thread per piece of work.
 
 from typing import Final
 
-from openswe.remote_runtime.client import RUNTIME_METADATA_KEY
+from openswe.agent_api.client import RUNTIME_METADATA_KEY
 from openswe.threads import index
 from openswe.utils.thread_ops import langgraph_client
 

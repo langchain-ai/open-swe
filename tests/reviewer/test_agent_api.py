@@ -8,9 +8,9 @@ import pytest
 from pydantic import JsonValue
 from starlette.types import Message, Receive, Scope, Send
 
-from openswe.remote_runtime import server
-from openswe.remote_runtime.server import RunTokenMiddleware
-from openswe.remote_runtime.tokens import (
+from openswe.agent_api import server
+from openswe.agent_api.server import RunTokenMiddleware
+from openswe.agent_api.tokens import (
     RemoteRun,
     RuntimeTokenError,
     WorkerGrant,
@@ -41,7 +41,7 @@ async def test_backend_operation_traces_keep_runtime_events_and_errors(fails: bo
     from langgraph.config import get_config, get_stream_writer
     from langgraph.runtime import Runtime
 
-    from openswe.remote_runtime.runs import in_graph_context
+    from openswe.agent_api.runs import in_graph_context
 
     collector = RunCollectorCallbackHandler()
     events: list[object] = []
@@ -84,7 +84,7 @@ async def test_backend_operation_traces_keep_runtime_events_and_errors(fails: bo
 
 @pytest.mark.parametrize("requested", ["anthropic:claude-opus-5-5", "openai:gpt-6.1-sol"])
 def test_remote_model_switch_overrides_cached_route_and_effort(requested: str) -> None:
-    from openswe.remote_runtime.graph import RunSession
+    from openswe.agent_api.graph import RunSession
     from openswe.sandboxes.tool_runtime import ModelChoice, SurfaceModels, ToolSurface
     from openswe.utils.model import provider_model_kwargs
 
@@ -113,7 +113,7 @@ async def test_mda_calls_hide_the_tools_the_graph_middleware_hides_from_each_cal
     from langchain.agents.middleware.types import AgentMiddleware, ModelRequest, ModelResponse
     from langchain_core.tools import tool
 
-    from openswe.remote_runtime.graph import RunSession
+    from openswe.agent_api.graph import RunSession
     from openswe.sandboxes.tool_runtime import ToolSurface
 
     @tool
@@ -153,8 +153,8 @@ async def test_remote_prompts_include_deployment_context(
 ) -> None:
     from langgraph.runtime import Runtime
 
+    from openswe.agent_api.graph import RunSession
     from openswe.middleware.prepare_run import BasePrepareRunMiddleware
-    from openswe.remote_runtime.graph import RunSession
     from openswe.sandboxes.tool_runtime import (
         ModelChoice,
         SurfaceModels,
@@ -193,8 +193,8 @@ async def test_remote_prompts_include_deployment_context(
 async def test_app_lifespan_exits_without_managed_deep_agents(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    from openswe.agent_api.client import RemoteRuntimeConfigurationError
     from openswe.api.app import app, lifespan
-    from openswe.remote_runtime.client import RemoteRuntimeConfigurationError
 
     monkeypatch.delenv("MDA_RUNTIME_URL", raising=False)
 
@@ -208,11 +208,11 @@ async def test_reviewer_tools_get_a_github_token_on_a_replica_that_did_not_prepa
     monkeypatch: pytest.MonkeyPatch, first_call: str
 ) -> None:
     import openswe.reviewer as reviewer
+    from openswe.agent_api.graph import RunSession
     from openswe.github.thread_token import (
         invalidate_cached_github_token,
         resolve_thread_github_token,
     )
-    from openswe.remote_runtime.graph import RunSession
     from openswe.sandboxes.tool_runtime import ToolSurface
 
     async def mint(*, repositories: list[str] | None = None) -> tuple[str, str | None]:
@@ -359,9 +359,9 @@ async def test_hook_failure_log_names_the_mda_run(monkeypatch: pytest.MonkeyPatc
     scope: Scope = {
         "type": "http",
         "method": "POST",
-        "path": "/remote-runtime/hooks/before_model",
+        "path": "/agent-api/before_model",
         "headers": [],
-        "path_params": {"hook": "before_model"},
+        "path_params": {"endpoint": "before_model"},
         "state": {"remote_run": RUN},
     }
 
@@ -374,7 +374,7 @@ async def test_hook_failure_log_names_the_mda_run(monkeypatch: pytest.MonkeyPatc
     handler = Capture()
     server.logger.addHandler(handler)
     try:
-        await server.hook_endpoint(scope, receive, send)
+        await server.api_endpoint(scope, receive, send)
     finally:
         server.logger.removeHandler(handler)
 
@@ -393,10 +393,10 @@ async def test_mda_catalog_leaves_integrations_and_code_mode_to_mda(
     from langchain_core.tools import StructuredTool
     from langchain_quickjs import CodeInterpreterMiddleware
 
+    from openswe.agent_api.graph import RemoteGraph
     from openswe.mcp.models import MCPToolProvenance
     from openswe.middleware.dynamic_tools import DynamicToolMiddleware
     from openswe.middleware.task_coordination import TaskCoordinationMiddleware
-    from openswe.remote_runtime.graph import RemoteGraph
     from openswe.sandboxes.tool_runtime import (
         ModelChoice,
         SurfaceModels,
@@ -448,7 +448,7 @@ async def test_mda_catalog_leaves_integrations_and_code_mode_to_mda(
         raise AssertionError("not asked for")
 
     graph = RemoteGraph("agent", build, start_models)
-    catalog = await graph.hook(RUN, "catalog", {"run_id": "run-1"})
+    catalog = await graph.api(RUN, "catalog", {"run_id": "run-1"})
 
     assert isinstance(catalog, dict)
     operations = catalog["operations"]
@@ -502,8 +502,8 @@ async def test_an_operation_gets_the_state_it_reads_and_answers_the_state_it_cha
     from langgraph.types import Command
     from runtime_api.operations import RunOperation
 
-    from openswe.remote_runtime.graph import RunSession
-    from openswe.remote_runtime.operations import Injections
+    from openswe.agent_api.graph import RunSession
+    from openswe.agent_api.operations import Injections
     from openswe.sandboxes.tool_runtime import ToolSurface
 
     @tool
@@ -538,7 +538,7 @@ async def test_the_files_api_reaches_the_threads_files_as_the_run() -> None:
     """A bridge checks who the run is for, which it reads from the run's own config."""
     from deepagents.backends.protocol import ExecuteResponse, SandboxBackendProtocol
 
-    from openswe.remote_runtime.graph import API, RunSession
+    from openswe.agent_api.graph import API, RunSession
     from openswe.run_config import RunConfig
     from openswe.sandboxes.tool_runtime import ToolSurface
 
@@ -571,7 +571,7 @@ async def test_a_cancelled_operation_ends_the_call_rather_than_answering() -> No
     from langgraph.errors import NodeCancelledError
     from runtime_api.operations import RunOperation
 
-    from openswe.remote_runtime.graph import RunSession
+    from openswe.agent_api.graph import RunSession
     from openswe.sandboxes.tool_runtime import ToolSurface
 
     @tool
@@ -591,8 +591,8 @@ async def test_an_operation_that_runs_a_command_is_put_to_the_shell_guards_first
     from langchain_core.tools import tool
     from runtime_api.operations import RunOperation
 
+    from openswe.agent_api.graph import RunSession
     from openswe.middleware.pr_creation_guard import PullRequestCreationGuardMiddleware
-    from openswe.remote_runtime.graph import RunSession
     from openswe.sandboxes.tool_runtime import ToolSurface
 
     ran: list[str] = []
@@ -628,46 +628,54 @@ async def test_an_operation_that_runs_a_command_is_put_to_the_shell_guards_first
     assert ran == ["make test"]
 
 
-async def _hook_status(
-    monkeypatch: pytest.MonkeyPatch, token: str, hook: str
+async def _call_status(
+    monkeypatch: pytest.MonkeyPatch, token: str, endpoint: str
 ) -> tuple[int, list[tuple[str, str]]]:
-    """Call ``hook`` with ``token`` and report the status and what served it, as whom."""
-    from openswe.remote_runtime import server
+    """Call ``endpoint`` with ``token`` and report the status and what served it, as whom."""
+    from runtime_api.endpoint import Handlers, UnknownEndpointError
+    from runtime_api.workers import ADOPT, Adopt, Adopted
+
+    from openswe.agent_api import async_workers, server
 
     served: list[tuple[str, str]] = []
 
     async def graph(run: RemoteRun, called: str, body: object) -> dict[str, object]:
-        if called not in {"catalog", "prepare", "before_model", "call", "after_agent"}:
-            raise server.UnknownHookError(called)
+        if called not in {"catalog", "prepare", "before_model", "after_agent"}:
+            raise UnknownEndpointError(called)
         served.append((called, run.thread_id))
         return {}
 
-    async def adopt(grant: WorkerGrant, body: object) -> dict[str, object]:
+    async def adopt(grant: WorkerGrant, body: Adopt) -> Adopted:
         served.append(("adopt", grant.coordinator.thread_id))
-        return {}
+        return Adopted(run_token="worker-token")
 
+    grants = Handlers[WorkerGrant]()
+    grants.serve(ADOPT, adopt)
     monkeypatch.setattr(server, "_graphs", lambda: {"agent": graph})
-    monkeypatch.setattr(server, "_grant_hooks", lambda: {"adopt": adopt})
+    monkeypatch.setattr(async_workers, "GRANT_API", grants)
     scope: Scope = {
         "type": "http",
         "method": "POST",
-        "path": f"/remote-runtime/hooks/{hook}",
-        "path_params": {"hook": hook},
+        "path": f"/agent-api/{endpoint}",
+        "path_params": {"endpoint": endpoint},
         "headers": [(b"authorization", f"Bearer {token}".encode())],
     }
     sent: list[Message] = []
 
     async def receive() -> Message:
-        return {"type": "http.request", "body": b"{}"}
+        body = (
+            b'{"thread_id": "worker", "instructions": "Fix it"}' if endpoint == "adopt" else b"{}"
+        )
+        return {"type": "http.request", "body": body}
 
     async def send(message: Message) -> None:
         sent.append(message)
 
-    await server.HOOKS(scope, receive, send)
+    await server.API(scope, receive, send)
     return sent[0]["status"], served
 
 
-async def test_a_hook_nests_under_the_runtime_span_that_called_it(
+async def test_a_call_nests_under_the_runtime_span_that_made_it(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     from unittest.mock import MagicMock
@@ -677,8 +685,8 @@ async def test_a_hook_nests_under_the_runtime_span_that_called_it(
     from langsmith import Client
     from langsmith.run_trees import RunTree
 
-    from openswe.remote_runtime import server
-    from openswe.remote_runtime.runs import in_graph_context
+    from openswe.agent_api import server
+    from openswe.agent_api.runs import in_graph_context
 
     client = MagicMock(spec=Client)
     tracer = LangChainTracer(client=client, project_name="backend")
@@ -696,8 +704,8 @@ async def test_a_hook_nests_under_the_runtime_span_that_called_it(
     scope: Scope = {
         "type": "http",
         "method": "POST",
-        "path": "/remote-runtime/hooks/before_model",
-        "path_params": {"hook": "before_model"},
+        "path": "/agent-api/before_model",
+        "path_params": {"endpoint": "before_model"},
         "headers": [
             (b"authorization", f"Bearer {token}".encode()),
             (b"langsmith-trace", headers["langsmith-trace"].encode()),
@@ -712,7 +720,7 @@ async def test_a_hook_nests_under_the_runtime_span_that_called_it(
     async def send(message: Message) -> None:
         sent.append(message)
 
-    await server.HOOKS(scope, receive, send)
+    await server.API(scope, receive, send)
 
     wait_for_all_tracers()
     assert sent[0]["status"] == 200
@@ -737,16 +745,67 @@ async def test_a_worker_grant_reads_its_coordinators_catalog_and_adopts_nothing_
     with pytest.raises(RuntimeTokenError):
         verify_worker_grant(sign_runtime_token(coordinator))
 
-    assert await _hook_status(monkeypatch, grant, "catalog") == (
+    assert await _call_status(monkeypatch, grant, "catalog") == (
         200,
         [("catalog", "coordinator")],
     )
-    assert await _hook_status(monkeypatch, grant, "adopt") == (200, [("adopt", "coordinator")])
-    for hook in ("prepare", "before_model", "call", "after_agent", "launch_worker"):
-        assert await _hook_status(monkeypatch, grant, hook) == (403, [])
+    assert await _call_status(monkeypatch, grant, "adopt") == (200, [("adopt", "coordinator")])
+    for endpoint in ("prepare", "before_model", "operation", "after_agent", "launch_worker"):
+        assert await _call_status(monkeypatch, grant, endpoint) == (403, [])
     # A run token never adopts: only a launched worker's grant does.
-    status, _ = await _hook_status(monkeypatch, sign_runtime_token(coordinator), "adopt")
+    status, _ = await _call_status(monkeypatch, sign_runtime_token(coordinator), "adopt")
     assert status == 404
+
+
+async def test_only_a_body_unlike_its_request_is_refused_and_a_failure_inside_is_logged(
+    monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+) -> None:
+    from pydantic import BaseModel
+    from runtime_api.endpoint import Handlers
+    from runtime_api.loop import PREPARE, PhaseResult, Prepare
+
+    from openswe.agent_api import server
+
+    class Strict(BaseModel):
+        count: int
+
+    async def prepare(run: RemoteRun, request: Prepare) -> PhaseResult:
+        # A bug in the phase's own code, not in what MDA sent.
+        Strict.model_validate({"count": "many"})
+        return PhaseResult()
+
+    handlers = Handlers[RemoteRun]()
+    handlers.serve(PREPARE, prepare)
+
+    async def graph(run: RemoteRun, endpoint: str, body: JsonValue) -> JsonValue:
+        return await handlers.dispatch(endpoint, run, body)
+
+    monkeypatch.setattr(server, "_graphs", lambda: {"agent": graph})
+    token = sign_runtime_token(RemoteRun(thread_id="t", assistant_id="agent", configurable={}))
+
+    async def status(body: bytes) -> int:
+        scope: Scope = {
+            "type": "http",
+            "method": "POST",
+            "path": "/agent-api/prepare",
+            "path_params": {"endpoint": "prepare"},
+            "headers": [(b"authorization", f"Bearer {token}".encode())],
+        }
+        sent: list[Message] = []
+
+        async def receive() -> Message:
+            return {"type": "http.request", "body": body}
+
+        async def send(message: Message) -> None:
+            sent.append(message)
+
+        await server.API(scope, receive, send)
+        return sent[0]["status"]
+
+    assert await status(b'{"sandbox_id": 3}') == 422
+    assert "Agent API call failed" not in caplog.text
+    assert await status(b'{"sandbox_id": "sb-1"}') == 500
+    assert "Agent API call failed" in caplog.text
 
 
 async def test_an_adopted_worker_acts_as_its_own_thread_never_its_coordinator(
@@ -755,9 +814,10 @@ async def test_an_adopted_worker_acts_as_its_own_thread_never_its_coordinator(
     from unittest.mock import AsyncMock, MagicMock
 
     from runtime_api.catalog import ModelSpec, RunModels
+    from runtime_api.workers import Adopt
 
+    from openswe.agent_api import async_workers, hosted
     from openswe.prompts import prompt
-    from openswe.remote_runtime import async_workers, hosted
 
     coordinator = RemoteRun(
         thread_id="coordinator", assistant_id="agent", configurable={"github_login": "owner"}
@@ -784,13 +844,10 @@ async def test_an_adopted_worker_acts_as_its_own_thread_never_its_coordinator(
         "tasks/assignment", coordinator_thread_id="coordinator", instructions="Fix it"
     )
     reply = await async_workers.adopt(
-        grant, {"thread_id": "worker", "run_id": "run-1", "instructions": assignment}
+        grant, Adopt(thread_id="worker", run_id="run-1", instructions=assignment)
     )
 
-    assert isinstance(reply, dict)
-    token = reply["run_token"]
-    assert isinstance(token, str)
-    adopted = verify_runtime_token(token)
+    adopted = verify_runtime_token(reply.run_token)
     assert adopted.thread_id == "worker"
     assert adopted.configurable["thread_id"] == "worker"
     register.assert_awaited_once_with("actor", "call-1", "worker", "Fix it")
@@ -802,7 +859,9 @@ async def test_a_replayed_launch_reports_the_worker_it_registered_and_stops_the_
     from unittest.mock import AsyncMock, MagicMock
     from uuid import uuid7
 
-    from openswe.remote_runtime import async_workers
+    from runtime_api.workers import Launched
+
+    from openswe.agent_api import async_workers
     from openswe.tasks import store
     from openswe.threads import runtimes
 
@@ -829,18 +888,15 @@ async def test_a_replayed_launch_reports_the_worker_it_registered_and_stops_the_
 
     reply = await async_workers.launched(
         coordinator,
-        {
-            "tool_call_id": "call-1",
-            "instructions": "Fix login",
-            "worker_thread_id": "second-worker",
-            "run_id": "run-2",
-        },
+        Launched(
+            tool_call_id="call-1",
+            instructions="Fix login",
+            worker_thread_id="second-worker",
+            worker_run_id="run-2",
+        ),
     )
 
-    assert isinstance(reply, dict)
-    worker = reply["worker"]
-    assert isinstance(worker, dict)
-    assert worker["worker_thread_id"] == "first-worker"
+    assert reply.worker["worker_thread_id"] == "first-worker"
     client.runs.cancel.assert_awaited_once_with("second-worker", "run-2")
 
 
@@ -849,8 +905,10 @@ async def test_a_launched_run_that_ended_before_its_worker_was_registered_is_set
 ) -> None:
     from unittest.mock import AsyncMock, MagicMock
 
+    from runtime_api.workers import Launched
+
     from openswe import completion
-    from openswe.remote_runtime import async_workers
+    from openswe.agent_api import async_workers
     from openswe.threads import runtimes
 
     coordinator = RemoteRun(thread_id="coordinator", assistant_id="agent", configurable={})
@@ -865,12 +923,12 @@ async def test_a_launched_run_that_ended_before_its_worker_was_registered_is_set
     monkeypatch.setattr(runtimes.Runtimes, "mda", property(lambda self: mda))
     settle = AsyncMock()
     monkeypatch.setattr(completion, "handle_run_completion", settle)
-    body = {
-        "tool_call_id": "call-1",
-        "instructions": "Fix login",
-        "worker_thread_id": "worker",
-        "run_id": "run-1",
-    }
+    body = Launched(
+        tool_call_id="call-1",
+        instructions="Fix login",
+        worker_thread_id="worker",
+        worker_run_id="run-1",
+    )
 
     # Still running: its webhook reports it, to a registered worker.
     client.runs.get = AsyncMock(return_value={"run_id": "run-1", "status": "running"})

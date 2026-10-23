@@ -16,6 +16,8 @@ from pydantic import BaseModel, ConfigDict, JsonValue, TypeAdapter, ValidationEr
 from openswe.config import ENV
 
 _ISSUER: Final = "open-swe"
+# Kept from before the package was named the agent API: tokens of runs still
+# queued when the name changed must keep verifying.
 _AUDIENCE: Final = "open-swe-remote-runtime"
 # A worker grant names the run that launched a worker, never the worker itself.
 _GRANT_AUDIENCE: Final = "open-swe-worker-grant"

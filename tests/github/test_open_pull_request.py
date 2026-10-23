@@ -9,7 +9,7 @@ import langgraph_sdk
 import pytest
 
 import openswe.tools.open_pull_request  # noqa: F401
-from openswe.remote_runtime.git_metadata import GitTarget, collect_pr_targets
+from openswe.agent_api.git_metadata import GitTarget, collect_pr_targets
 
 opr = sys.modules["openswe.tools.open_pull_request"]
 

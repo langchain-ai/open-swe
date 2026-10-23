@@ -48,6 +48,7 @@ from langchain_core.messages import (
     ToolCall,
     ToolMessage,
     messages_from_dict,
+    messages_to_dict,
 )
 from langchain_core.tools import BaseTool
 from langgraph.config import get_config, get_stream_writer
@@ -56,19 +57,31 @@ from langgraph.runtime import Runtime
 from langgraph.types import Command
 from langgraph_sdk.errors import APIConnectionError, APIStatusError
 from pydantic import BaseModel, JsonValue, TypeAdapter
+from runtime_api.endpoint import Endpoint, call
+from runtime_api.loop import (
+    AFTER_AGENT,
+    AFTER_MODEL,
+    BEFORE_MODEL,
+    MODEL_RESULT,
+    PREPARE,
+    ModelCall,
+    ModelResult,
+    PhaseResult,
+    Prepare,
+    RunCall,
+)
+from runtime_api.workers import LAUNCH_WORKER, WORKER_LAUNCHED, Launch, Launched
 
 from rt.backend import (
     BackendCallError,
-    Hook,
     OpenSweBackend,
-    PhaseReply,
     reporting,
-    run_body,
+    run_call,
     subagent_of,
 )
-from rt.models import ModelSpec, build_model
+from rt.models import build_model
 from rt.remote_files import FILE_TOOLS
-from rt.tools import STATE_KEY, cited, run_id, tool_body
+from rt.tools import STATE_KEY, cited, run_id, tool_report
 from rt.tracing import TurnTrace
 
 logger = logging.getLogger(__name__)
@@ -129,20 +142,6 @@ def _tool_pairing_error(exc: Exception) -> bool:
     return any(marker in message for marker in _TOOL_PAIRING_ERRORS)
 
 
-class ModelCall(BaseModel):
-    """What the backend's middleware says the next model call sends."""
-
-    system_prompt: str
-    # Tools the graph's own middleware takes off this call's list.
-    hidden_tools: list[str] = []
-    model: ModelSpec | None
-    # What a call to that model goes to instead when the conversation holds an
-    # image: None where the model reads images itself.
-    vision: ModelSpec | None = None
-    fallback: ModelSpec | None
-    use_gateway: bool
-
-
 class RunState(AgentState):
     open_swe_state: NotRequired[Annotated[dict[str, JsonValue], OmitFromOutput, _merge]]
     open_swe_call: NotRequired[Annotated[dict[str, JsonValue], OmitFromOutput]]
@@ -164,7 +163,7 @@ def _decode(value: object) -> object:
     return value
 
 
-def _apply(reply: PhaseReply) -> dict[str, object]:
+def _apply(reply: PhaseResult) -> dict[str, object]:
     TurnTrace.record_evidence(reply.update)
     for event in reply.events:
         get_stream_writer()(event)
@@ -210,13 +209,13 @@ class ServedToolsMiddleware(AgentMiddleware):
         request: ModelRequest,
         handler: Callable[[ModelRequest], Awaitable[ModelResponse]],
     ) -> ModelResponse:
-        call = request.state.get("open_swe_call")
+        planned = request.state.get("open_swe_call")
         hidden = (
             self._hidden
             | self._withheld()
             | (
-                frozenset(ModelCall.model_validate(call).hidden_tools)
-                if isinstance(call, Mapping)
+                frozenset(ModelCall.model_validate(planned).hidden_tools)
+                if isinstance(planned, Mapping)
                 else frozenset()
             )
         )
@@ -296,15 +295,15 @@ class DescribedToolsMiddleware(AgentMiddleware):
         request: ToolCallRequest,
         handler: Callable[[ToolCallRequest], Awaitable[ToolMessage | Command]],
     ) -> ToolMessage | Command:
-        call = request.tool_call
+        tool_call = request.tool_call
         if (
-            call["name"] not in self._described
-            or DISPLAY_DESCRIPTION not in call["args"]
+            tool_call["name"] not in self._described
+            or DISPLAY_DESCRIPTION not in tool_call["args"]
             or (request.tool is not None and self._offered_as(request.tool) is request.tool)
         ):
             return await handler(request)
-        args = {key: value for key, value in call["args"].items() if key != DISPLAY_DESCRIPTION}
-        return await handler(request.override(tool_call={**call, "args": args}))
+        args = {k: v for k, v in tool_call["args"].items() if k != DISPLAY_DESCRIPTION}
+        return await handler(request.override(tool_call={**tool_call, "args": args}))
 
 
 class BackendRunMiddleware(AgentMiddleware[RunState]):
@@ -347,29 +346,26 @@ class BackendRunMiddleware(AgentMiddleware[RunState]):
             self._trace.record_evidence(state.get(STATE_KEY, {}))
             return None
         sandbox_id = await self._open_sandbox(runtime) if self._open_sandbox is not None else None
-        update = await self._phase("prepare", state, sandbox_id=sandbox_id)
-        return {**update, "open_swe_prepared_for": invocation}
+        prepared = await self._phase(
+            PREPARE, run_call(Prepare, run_id(), state, sandbox_id=sandbox_id)
+        )
+        return {**_apply(prepared), "open_swe_prepared_for": invocation}
 
     @hook_config(can_jump_to=["end"])
     async def abefore_model(self, state: RunState, runtime: Runtime) -> dict[str, object] | None:  # noqa: ARG002
-        return await self._phase("before_model", state)
-
-    async def _phase(self, hook: Hook, state: RunState, **extra: JsonValue) -> dict[str, object]:
-        await self._backend.reports.drain()
-        # A backend it cannot reach fails the run, as any hook failure does, so every
-        # surface reports it and the person can send the message again.
-        reply = await self._backend.phase(hook, run_body(run_id(), state, **extra))
-        update = _apply(reply)
-        if hook == "before_model" and reply.system_prompt is not None:
-            update["open_swe_call"] = ModelCall(
-                system_prompt=reply.system_prompt,
-                hidden_tools=reply.hidden_tools,
-                model=reply.model,
-                vision=reply.vision,
-                fallback=reply.fallback,
-                use_gateway=reply.use_gateway,
-            ).model_dump()
+        planned = await self._phase(BEFORE_MODEL, run_call(RunCall, run_id(), state))
+        update = _apply(planned)
+        if planned.call is not None:
+            update["open_swe_call"] = planned.call.model_dump()
         return update
+
+    async def _phase[Call: RunCall, Result: PhaseResult](
+        self, endpoint: Endpoint[Call, Result], request: Call
+    ) -> Result:
+        await self._backend.reports.drain()
+        # A backend it cannot reach fails the run, as any failure there does, so every
+        # surface reports it and the person can send the message again.
+        return await call(self._backend, endpoint, request)
 
     async def awrap_model_call(
         self,
@@ -379,38 +375,42 @@ class BackendRunMiddleware(AgentMiddleware[RunState]):
         raw = request.state.get("open_swe_call")
         if not isinstance(raw, Mapping):
             return await handler(request)
-        call = ModelCall.model_validate(raw)
+        planned = ModelCall.model_validate(raw)
         existing = request.system_message.text if request.system_message is not None else ""
-        prompt = f"{call.system_prompt}\n\n{existing}" if existing else call.system_prompt
+        prompt = f"{planned.system_prompt}\n\n{existing}" if existing else planned.system_prompt
         request = request.override(system_message=SystemMessage(content=prompt))
-        model = call.vision if call.vision is not None and _has_image(request) else call.model
+        model = (
+            planned.vision if planned.vision is not None and _has_image(request) else planned.model
+        )
         if model is not None:
-            request = request.override(model=build_model(model, use_gateway=call.use_gateway))
+            request = request.override(model=build_model(model, use_gateway=planned.use_gateway))
         try:
             return await handler(request)
         except Exception as exc:
-            if call.fallback is None or _tool_pairing_error(exc):
+            if planned.fallback is None or _tool_pairing_error(exc):
                 raise
             # As the in-process graph does: another provider before failing the run.
             logger.warning("Model call failed; retrying on the fallback model", exc_info=True)
             return await handler(
-                request.override(model=build_model(call.fallback, use_gateway=call.use_gateway))
+                request.override(
+                    model=build_model(planned.fallback, use_gateway=planned.use_gateway)
+                )
             )
 
     @hook_config(can_jump_to=["model", "end"])
     async def aafter_model(self, state: RunState, runtime: Runtime) -> dict[str, object] | None:  # noqa: ARG002
-        return await self._phase("after_model", state)
+        return _apply(await self._phase(AFTER_MODEL, run_call(RunCall, run_id(), state)))
 
     async def aafter_agent(self, state: RunState, runtime: Runtime) -> dict[str, object] | None:  # noqa: ARG002
-        await self._backend.reports.drain()
         metadata = dict(self._trace_metadata)
         try:
-            body = run_body(run_id(), state)
-            held = body.get("state")
-            body["state"] = {**(held if isinstance(held, dict) else {}), **self._trace.evidence}
-            reply = await self._backend.phase("after_agent", body)
-            metadata.update(reply.trace_metadata)
-            return _apply(reply)
+            request = run_call(RunCall, run_id(), state)
+            ended = await self._phase(
+                AFTER_AGENT,
+                request.model_copy(update={"state": {**request.state, **self._trace.evidence}}),
+            )
+            metadata.update(ended.trace_metadata)
+            return _apply(ended)
         except BackendCallError:
             logger.warning("The backend's end-of-run hooks failed", exc_info=True)
             return None
@@ -432,13 +432,20 @@ class ReportRepliesMiddleware(AgentMiddleware):
         response = await handler(request)
         # The transcript records the calls this reply follows before the reply itself.
         await self._backend.reports.drain()
-        observed = await self._backend.model_result(
-            run_body(run_id(), request.state), response.result
+        observed = await call(
+            self._backend,
+            MODEL_RESULT,
+            run_call(
+                ModelResult,
+                run_id(),
+                request.state,
+                response=_json.validate_python(messages_to_dict(response.result)),
+            ),
         )
-        if not observed:
+        if not observed.response:
             return response
         return ModelResponse(
-            result=messages_from_dict(observed),
+            result=messages_from_dict(observed.response),
             structured_response=response.structured_response,
         )
 
@@ -456,13 +463,13 @@ async def reported(
     tool_call_id = request.tool_call.get("id")
     if not tool_call_id:
         return await handler(request)
-    body = tool_body(
+    report = tool_report(
         request.state,
         name=request.tool_call["name"],
         arguments=request.tool_call["args"],
         tool_call_id=tool_call_id,
     )
-    backend.reports.started(body)
+    backend.reports.started(report)
     try:
         with subagent_of(tool_call_id), reporting(tool_call_id):
             result = await handler(request)
@@ -473,9 +480,9 @@ async def reported(
         failure = ToolMessage(
             content=f"{type(exc).__name__}: {exc}", tool_call_id=tool_call_id, status="error"
         )
-        backend.reports.finished(body, failure)
+        backend.reports.finished(report, failure)
         raise
-    backend.reports.finished(body, _tool_message(result, tool_call_id))
+    backend.reports.finished(report, _tool_message(result, tool_call_id))
     return result
 
 
@@ -601,56 +608,58 @@ class AsyncWorkerLaunchMiddleware(AgentMiddleware):
         request: ToolCallRequest,
         handler: Callable[[ToolCallRequest], Awaitable[ToolMessage | Command]],
     ) -> ToolMessage | Command:
-        call = request.tool_call
-        tool_call_id = call.get("id") or ""
-        if call["name"] in _TRACKED_BY_OPEN_SWE:
+        tool_call = request.tool_call
+        tool_call_id = tool_call.get("id") or ""
+        if tool_call["name"] in _TRACKED_BY_OPEN_SWE:
             return _refused(
-                call["name"],
+                tool_call["name"],
                 tool_call_id,
                 "Open SWE tracks its workers itself: use task_status, message_task_thread "
                 "or control_worker instead.",
             )
-        if call["name"] != LAUNCH_WORKER_TOOL:
+        if tool_call["name"] != LAUNCH_WORKER_TOOL:
             return await handler(request)
-        description = call["args"].get("description")
-        instructions = description if isinstance(description, str) else ""
-        body: dict[str, JsonValue] = {"tool_call_id": tool_call_id, "instructions": instructions}
+        description = tool_call["args"].get("description")
+        launch = Launch(
+            tool_call_id=tool_call_id,
+            instructions=description if isinstance(description, str) else "",
+        )
         try:
-            return await self._launch(request, handler, body)
+            return await self._launch(request, handler, launch)
         except BackendCallError as exc:
-            return _refused(call["name"], tool_call_id, str(exc))
+            return _refused(tool_call["name"], tool_call_id, str(exc))
 
     async def _launch(
         self,
         request: ToolCallRequest,
         handler: Callable[[ToolCallRequest], Awaitable[ToolMessage | Command]],
-        body: dict[str, JsonValue],
+        launch: Launch,
     ) -> ToolMessage:
-        call = request.tool_call
-        tool_call_id = call.get("id") or ""
+        tool_call = request.tool_call
+        tool_call_id = tool_call.get("id") or ""
         waits = iter(_LAUNCH_RETRY_SECONDS)
         while True:
-            reply = await self._backend.call("launch_worker", body)
-            if (worker := reply.get("worker")) is not None:
+            reply = await call(self._backend, LAUNCH_WORKER, launch)
+            if reply.worker is not None:
                 # A replay of a launch that already made its worker.
-                return _worker_message(worker, tool_call_id)
-            grant, assignment = reply.get("grant"), reply.get("assignment")
-            if not isinstance(grant, str) or not isinstance(assignment, str):
+                return _worker_message(reply.worker, tool_call_id)
+            if reply.grant is None or reply.assignment is None:
                 raise BackendCallError("launch_worker returned no grant")
             # The worker is told its assignment as Open SWE words it, not the bare description.
-            launch = ToolCall(
-                name=call["name"],
-                args={**call["args"], "description": assignment},
-                id=call.get("id"),
+            launched_call = ToolCall(
+                name=tool_call["name"],
+                args={**tool_call["args"], "description": reply.assignment},
+                id=tool_call.get("id"),
             )
             with _LAUNCH_ERRORS.catching() as errors:
                 result = await handler(
                     request.override(
-                        tool_call=launch, runtime=_launch_runtime(request.runtime, grant)
+                        tool_call=launched_call,
+                        runtime=_launch_runtime(request.runtime, reply.grant),
                     )
                 )
             if (launched := _launched_task(result)) is not None:
-                return await self._register(body, launched, tool_call_id)
+                return await self._register(launch, launched, tool_call_id)
             if any(map(_transient, errors)) and (wait := next(waits, None)) is not None:
                 logger.warning(
                     "MDA did not start a task worker; launching it again",
@@ -659,22 +668,27 @@ class AsyncWorkerLaunchMiddleware(AgentMiddleware):
                 )
                 await asyncio.sleep(wait)
                 continue
-            return _refused(call["name"], tool_call_id, _not_launched(result, tool_call_id))
+            return _refused(tool_call["name"], tool_call_id, _not_launched(result, tool_call_id))
 
     async def _register(
-        self, body: dict[str, JsonValue], launched: _Launched, tool_call_id: str
+        self, launch: Launch, launched: _Launched, tool_call_id: str
     ) -> ToolMessage:
         try:
-            registered = await self._backend.call(
-                "worker_launched",
-                {**body, "worker_thread_id": launched.thread_id, "run_id": launched.run_id},
+            registered = await call(
+                self._backend,
+                WORKER_LAUNCHED,
+                Launched(
+                    **launch.model_dump(),
+                    worker_thread_id=launched.thread_id,
+                    worker_run_id=launched.run_id,
+                ),
             )
         except BackendCallError:
             # The worker is running and registers itself when it adopts its run token;
             # reporting a failed launch would only start a second worker.
             logger.warning("The backend did not register a launched worker", exc_info=True)
             return _worker_message({"worker_thread_id": launched.thread_id}, tool_call_id)
-        return _worker_message(registered.get("worker"), tool_call_id)
+        return _worker_message(registered.worker, tool_call_id)
 
 
 def _launch_runtime(runtime: ToolRuntime, grant: str) -> ToolRuntime:
