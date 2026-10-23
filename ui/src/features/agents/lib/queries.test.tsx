@@ -535,6 +535,47 @@ describe("sidebar queries", () => {
     ).toBe("success")
   })
 
+  it("refreshes an active coordinator's workers from sidebar pages without opening them", () => {
+    const worker = { id: "worker-thread", status: "running" } as AgentThread
+    const coordinator = {
+      id: "coordinator-thread",
+      title: "Onscreen coordinator",
+      status: "finished",
+      taskMembership: { role: "coordinator" },
+      taskWorkers: [worker],
+    } as AgentThread
+    const client = testClient()
+    client.setQueryData(agentThreadKeys.detail(coordinator.id), coordinator)
+    const { result, rerender } = renderHook(
+      ({ loaded }: { loaded: AgentThread }) =>
+        useSidebarActiveThread({
+          activeThreadId: coordinator.id,
+          loadedThreads: [loaded],
+        }),
+      {
+        initialProps: { loaded: coordinator },
+        wrapper: ({ children }) => (
+          <QueryClientProvider client={client}>{children}</QueryClientProvider>
+        ),
+      }
+    )
+
+    expect(result.current?.taskWorkers?.[0]?.status).toBe("running")
+    rerender({
+      loaded: {
+        ...coordinator,
+        title: "Older sidebar title",
+        taskWorkers: [{ ...worker, status: "finished" }],
+      },
+    })
+
+    expect(result.current?.taskWorkers?.[0]?.status).toBe("finished")
+    expect(result.current?.title).toBe(coordinator.title)
+    expect(
+      client.getQueryData(agentThreadKeys.detail(worker.id))
+    ).toBeUndefined()
+  })
+
   it("returns the loaded coordinator when the active thread is one of its workers", () => {
     const worker = { id: "worker-thread", title: "Worker" } as AgentThread
     const coordinator = {
