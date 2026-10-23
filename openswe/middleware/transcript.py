@@ -1191,7 +1191,7 @@ class TranscriptMiddleware(OpenSWEMiddleware):
         return result
 
     async def atool_started(self, tool_call: ToolCall, messages: Sequence[BaseMessage]) -> None:
-        """Record a tool call that another process runs, such as a remote runtime's ``task``."""
+        """Record a tool call that another process runs, such as MDA's ``task``."""
         state = _lookup_state()
         tool_call_id = tool_call.get("id")
         if state.enabled and tool_call_id:

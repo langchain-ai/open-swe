@@ -648,8 +648,8 @@ async def test_an_mda_subagent_is_recorded_under_its_task_call(
     monkeypatch.setenv("SANDBOX_TYPE", "local")
     from langchain_core.messages import messages_to_dict
 
-    from openswe.remote_runtime.graph import RemoteGraph
-    from openswe.remote_runtime.tokens import RemoteRun
+    from openswe.agent_api.graph import RemoteGraph
+    from openswe.agent_api.tokens import RemoteRun
     from openswe.sandboxes.tool_runtime import ToolSurface
 
     engine = _install(monkeypatch, transcribed=True, turn_id=uuid7())
@@ -677,20 +677,20 @@ async def test_an_mda_subagent_is_recorded_under_its_task_call(
     nested = messages_to_dict([HumanMessage(content="look", id="sub-human"), looked])
     answer = AIMessage(content="found it", id="sub-ai-2")
 
-    await graph.hook(run, "prepare", {"run_id": RUN_ID, "messages": root[:1]})
+    await graph.api(run, "prepare", {"run_id": RUN_ID, "messages": root[:1]})
     task = {"name": "task", "arguments": {"description": "look"}, "tool_call_id": "task-1"}
-    await graph.hook(run, "tool_started", {"run_id": RUN_ID, "messages": root, **task})
+    await graph.api(run, "tool_started", {"run_id": RUN_ID, "messages": root, **task})
     inside = {"run_id": RUN_ID, "messages": nested, "namespace": ["task-1"]}
     # MDA reports every call it makes, the subagent's included, under its ``task`` call.
     read = {"name": "read_file", "arguments": {"path": "a.py"}, "tool_call_id": "sub-call-1"}
-    await graph.hook(run, "tool_started", {**inside, **read})
+    await graph.api(run, "tool_started", {**inside, **read})
     contents = ToolMessage(content="contents of a.py", tool_call_id="sub-call-1")
-    await graph.hook(
+    await graph.api(
         run, "tool_result", {**inside, **read, "result": messages_to_dict([contents])[0]}
     )
-    await graph.hook(run, "model_result", {**inside, "response": messages_to_dict([answer])})
+    await graph.api(run, "model_result", {**inside, "response": messages_to_dict([answer])})
     result = ToolMessage(content="found it", tool_call_id="task-1")
-    await graph.hook(
+    await graph.api(
         run,
         "tool_result",
         {"run_id": RUN_ID, "messages": root, **task, "result": messages_to_dict([result])[0]},
