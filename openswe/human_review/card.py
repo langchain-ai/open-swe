@@ -82,7 +82,8 @@ def _stats(
         non_test_files = [file for file in files if not file.is_test]
         additions = sum(file.additions for file in non_test_files)
         deletions = sum(file.deletions for file in non_test_files)
-        parts.append(f"+{additions} −{deletions} in {len(non_test_files)} non-test files")
+        noun = "file" if len(non_test_files) == 1 else "files"
+        parts.append(f"+{additions} −{deletions} in {len(non_test_files)} non-test {noun}")
     if pr.head_ref and pr.base_ref:
         parts.append(f"`{escape(pr.head_ref)}` → `{escape(pr.base_ref)}`")
     if requester is not None and requester != author:

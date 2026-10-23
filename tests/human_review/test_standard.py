@@ -564,7 +564,7 @@ async def test_open_card_counts_only_non_test_files(available: bool) -> None:
     ):
         _, blocks = await ReviewCard(request)._render_standard(None)
     rendered = str(block_payload(blocks))
-    assert ("+10 −5 in 1 non-test files" in rendered) is available
+    assert ("+10 −5 in 1 non-test file" in rendered) is available
     assert "+110" not in rendered
     assert "−55" not in rendered
 
