@@ -249,7 +249,10 @@ async def test_schedule_thread_wakeup_schedules_a_wakeup(monkeypatch: pytest.Mon
     assert captured["fire_time"].microsecond == 0
 
 
-async def test_new_human_message_resets_wakeup_limit(monkeypatch: pytest.MonkeyPatch) -> None:
+async def test_new_human_message_resets_wakeup_limit(
+    monkeypatch: pytest.MonkeyPatch, fake_jobs: _FakeJobs
+) -> None:
+    monkeypatch.setenv("LANGCHAIN_REVISION_ID", "deployed-sha")
     human = _input_message("user-1", kind="human", sender="slack:U1")
     client = _FakeClient([], messages=[human])
     generation = _human_message_key(human)
@@ -271,6 +274,10 @@ async def test_new_human_message_resets_wakeup_limit(monkeypatch: pytest.MonkeyP
     result = await wakeup_tool.schedule_thread_wakeup(5)
 
     assert result["success"] is True
+    payload = fake_jobs.scheduled[0]["payload"]
+    assert payload["metadata"]["LANGSMITH_AGENT_VERSION"] == "deployed-sha"
+    assert payload["metadata"]["kind"] == "thread_wakeup"
+    assert payload["config"]["metadata"] == payload["metadata"]
     assert client.threads.metadata[wake_budget.THREAD_WAKEUP_COUNT_KEY] == 1
     assert client.threads.metadata[wake_budget.THREAD_WAKEUP_GENERATION_KEY] != generation
 
