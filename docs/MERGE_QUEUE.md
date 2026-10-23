@@ -59,7 +59,7 @@ ordinary agent credentials.
 The gateway contract is a POST containing `contract` (the version-1 validation
 request) and `expires_at` (the persisted attempt deadline). The
 `X-Merge-Queue-Signature` header is the lowercase hex HMAC-SHA256 of the exact UTF-8
-body with the shared secret. No redirects or automatic retries are followed.
+body with the shared secret. Redirects are never followed.
 The gateway must verify the signature, expiry, configured repository and numeric
 ID, exact candidate ref/SHA, current main/workflow revision, reviewed workflow
 digest and reserved `MERGE_QUEUE_DISPATCH_ACTOR_ID` variable. The workflow actor
@@ -69,7 +69,13 @@ is the gateway's bot, not the Open SWE App. Dispatch only
 Before sending to GitHub, the gateway commits a durable receipt keyed by attempt
 ID and bound to the request body. Duplicate requests never dispatch again, even
 following restart or an uncertain GitHub response. It returns 204 for accepted or
-already-recorded requests, 4xx for rejected inputs, and 5xx for uncertain outcomes.
+already-recorded requests and 4xx for rejected inputs. A failure before entering
+the receipt transaction returns 503 with `X-Merge-Queue-Retry-Signature`: the
+lowercase hex HMAC-SHA256 of `b"retry:" + body` with the shared secret. Only that
+authenticated response permits retrying the exact request, up to three deliveries
+with one second between them, within the worker's existing timeout. Three such
+failures reject the attempt immediately. Receipt/dispatch failures, unsigned 5xx
+responses and transport errors remain uncertain and go to run discovery.
 An accepted request is not successful validation: Open SWE independently verifies
 GitHub runs, jobs and artifacts. Failed delivery can consume an attempt without
 starting a run; discovery and the saved deadline handle that case.
