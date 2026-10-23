@@ -176,9 +176,12 @@ def create_app() -> FastAPI:
     app.include_router(sandbox_tool_router)
     app.include_router(sandbox_openai_router)
     app.include_router(reviewer_eval_report_router)
-    # Routed at the exact path so no redirect sits between a remote runtime and its hooks.
+    # Routed at the exact paths so no redirect sits between a remote runtime and its hooks or API.
     app.router.routes.append(
         Route(remote_runtime_server.HOOKS_PATH, remote_runtime_server.HOOKS, methods=["POST"])
+    )
+    app.router.routes.append(
+        Route(remote_runtime_server.API_PATH, remote_runtime_server.API, methods=["POST"])
     )
     if AGENT_MCP is not None:
         app.state.fastmcp_server = AGENT_MCP.app.state.fastmcp_server

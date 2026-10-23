@@ -10,8 +10,6 @@ from uuid import UUID
 
 from langchain.agents.middleware.types import ModelRequest, ModelResponse
 from langchain_core.messages import SystemMessage, ToolMessage
-from langgraph.prebuilt.tool_node import ToolCallRequest
-from langgraph.types import Command
 
 from openswe.middleware.client_tools import ClientToolsMiddleware
 from openswe.plugins.records import PluginChatCalls
@@ -31,17 +29,13 @@ class PluginChatMiddleware(ClientToolsMiddleware):
             instructions=chat.instructions,
         )
 
-    async def awrap_tool_call(
-        self,
-        request: ToolCallRequest,
-        handler: Callable[[ToolCallRequest], Awaitable[ToolMessage | Command]],
-    ) -> ToolMessage | Command:
-        result = await super().awrap_tool_call(request, handler)
-        call = request.tool_call
-        if call["name"] in self._names and call["id"]:
-            arguments: JsonObject = dict(call["args"])
-            await self.calls.record(call["id"], call["name"], arguments)
-        return result
+    async def pending_result(
+        self, name: str, call_id: str, arguments: JsonObject
+    ) -> ToolMessage | None:
+        pending = await super().pending_result(name, call_id, arguments)
+        if pending is not None:
+            await self.calls.record(call_id, name, arguments)
+        return pending
 
     async def awrap_model_call(
         self,

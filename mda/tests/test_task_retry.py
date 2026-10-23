@@ -2,9 +2,8 @@ import json
 
 import httpx2
 import pytest
-
-from openswe.middleware.model_call_timeout import ModelCallTimeoutError
-from openswe.middleware.task_retry import task_on_failure, task_retry_on
+from rt.model_calls import ModelCallTimeoutError
+from rt.task_retry import task_on_failure, task_retry_on
 
 
 class _HTTPError(Exception):
