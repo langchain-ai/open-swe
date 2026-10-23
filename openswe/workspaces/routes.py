@@ -10,12 +10,12 @@ from pydantic import BaseModel
 
 from openswe.audit_logs.context import bind_workspace
 from openswe.audit_logs.middleware import audit_endpoint
+from openswe.dashboard.agent_overrides import get_profile_default_repo
 from openswe.dashboard.deps import ADMIN_DEP, SESSION_DEP, session_is_admin
 from openswe.dashboard.workspace_settings import delete_workspace_settings, get_workspace_settings
 from openswe.slack.channels import SlackChannel
 from openswe.workspaces.refresh import (
     ensure_refresh_cron,
-    is_refresh_in_flight,
     start_refresh_run,
 )
 from openswe.workspaces.store import (
@@ -104,9 +104,10 @@ async def api_create_workspace(
     return record
 
 
-async def _default_repo_for(slug: str) -> str | None:
+async def _default_repo_for(slug: str, login: str | None = None) -> str | None:
     """The repository a run composed in ``slug`` starts from when none is picked."""
-    repo = (await get_workspace_settings(slug)).default_repo
+    repo = await get_profile_default_repo(login, slug)
+    repo = repo or (await get_workspace_settings(slug)).default_repo
     if not repo:
         return None
     return f"{repo['owner']}/{repo['name']}"
@@ -122,7 +123,9 @@ async def api_workspace_options(
     the workspace is chosen first.
     """
     options = await list_workspace_options(include_logs=session_is_admin(session))
-    defaults = await asyncio.gather(*(_default_repo_for(option["slug"]) for option in options))
+    defaults = await asyncio.gather(
+        *(_default_repo_for(option["slug"], session.get("sub")) for option in options)
+    )
     for option, default_repo in zip(options, defaults, strict=True):
         option["default_repo"] = default_repo
     return {"workspaces": options, "default_slug": DEFAULT_WORKSPACE_SLUG}
@@ -156,7 +159,7 @@ async def api_update_workspace(
         and body.repos is not None
         and {repo.lower() for repo in body.repos} != {repo.lower() for repo in previous.repos}
     )
-    if repos_changed and is_refresh_in_flight(previous):
+    if repos_changed and previous.refresh_in_flight():
         raise HTTPException(409, "a refresh of this workspace is already running")
     if body.kitchen_channel_ids is not None:
         already = set(previous.kitchen_channel_ids) if previous is not None else set()
@@ -249,7 +252,7 @@ async def api_refresh_workspace(
     await bind_workspace(request, record)
     if not record.setup_script:
         raise HTTPException(400, "workspace has no setup script to run")
-    if is_refresh_in_flight(record):
+    if record.refresh_in_flight():
         raise HTTPException(409, "a refresh of this workspace is already running")
     run_id = await start_refresh_run(normalized)
     if run_id is None:

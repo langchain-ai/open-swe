@@ -1,5 +1,4 @@
 import { CaretRightIcon, CheckIcon } from "@langchain/macaw-components/icons"
-import { useState } from "react"
 import { ArrowSquareOutIcon } from "@phosphor-icons/react/dist/ssr/ArrowSquareOut"
 import { ChatCircleIcon } from "@phosphor-icons/react/dist/ssr/ChatCircle"
 
@@ -85,7 +84,11 @@ export function ResolveButton({
   )
 }
 
-/** A GitHub review thread on its line. Settled and bot-only threads fold to one line. */
+/**
+ * A GitHub review thread on its line. Settled and bot-only threads fold to one
+ * line; what the reader opens or folds is kept in the page store, since the
+ * diff unmounts notes it scrolls away.
+ */
 export function ThreadNote({
   pr,
   thread,
@@ -94,7 +97,11 @@ export function ThreadNote({
   thread: ReviewThread
 }) {
   const humans = thread.comments.some((comment) => !comment.author?.bot)
-  const [open, setOpen] = useState(!thread.resolved && humans)
+  const open = useReviewPage(
+    (state) => state.threadsOpen.get(thread.id) ?? (!thread.resolved && humans)
+  )
+  const setThreadOpen = useReviewPage((state) => state.setThreadOpen)
+  const setOpen = (value: boolean) => setThreadOpen(thread.id, value)
   return (
     <NoteFrame className={open ? undefined : "py-space-1"}>
       {open ? (
@@ -307,7 +314,7 @@ export function ThreadCard({
         ))}
       </ol>
       <div className="flex flex-col gap-space-2 border-t border-default bg-surface-level-2 px-space-3 py-space-2">
-        <ReplyBox reply={reply} />
+        <ReplyBox threadId={thread.id} reply={reply} />
         <div className="flex items-center gap-space-1">
           <ResolveButton
             thread={thread}

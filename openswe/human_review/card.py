@@ -153,6 +153,9 @@ def open_card(
     if request.tldr:
         blocks.append(section("\n".join(f">{line}" for line in escape(request.tldr).splitlines())))
     blocks.append(context(_stats(request, author, requester)))
+    blocks.append(
+        context("Auto-merge enabled" if request.auto_merge else "Manual merge — auto-merge is off")
+    )
     blocks.extend(_reviewers(request, review_states))
     if request.detail:
         blocks.append(context(f"Waiting on: {escape(request.detail)}."))
@@ -168,12 +171,15 @@ def closed_card(
     outcome: str,
     review_states: dict[str, str],
 ) -> tuple[str, list[Block]]:
-    """A finished request collapses to one line; ``outcome`` is our own mrkdwn."""
-    pr = request.pull_request
-    if outcome == "merged" and (approvers := _approvers(request, review_states)):
-        outcome = f"merged — approved by {approvers}"
-    return f"Review request: {outcome} — {pr.url} — by {author}", [
-        section(
-            f"*Review request: {outcome}*\n<{pr.url}|{_label(request)}> {escape(title)} — by {author}"
-        )
-    ]
+    """A finished or approved request collapses to one line; ``outcome`` is our own mrkdwn."""
+    pull = f"<{request.pull_request.url}|{_label(request)}> {escape(title)} — authored by {author}"
+    approvers = _approvers(request, review_states)
+    if outcome in ("approved", "merged"):
+        line = f":{'merged' if outcome == 'merged' else 'white_check_mark'}: {pull}"
+        if approvers:
+            line += f" — approved by {approvers}"
+        if outcome == "approved" and not request.auto_merge:
+            line += " — awaiting manual merge"
+    else:
+        line = f"Review request: {outcome} — {pull}"
+    return line, [section(line)]

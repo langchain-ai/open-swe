@@ -32,6 +32,7 @@ import { LockIcon } from "@phosphor-icons/react/dist/ssr/Lock"
 import { PushPinSlashIcon } from "@phosphor-icons/react/dist/ssr/PushPinSlash"
 import { RobotIcon } from "@phosphor-icons/react/dist/ssr/Robot"
 import { SlackLogoIcon } from "@phosphor-icons/react/dist/ssr/SlackLogo"
+import { TerminalWindowIcon } from "@phosphor-icons/react/dist/ssr/TerminalWindow"
 import { WarningCircleIcon } from "@phosphor-icons/react/dist/ssr/WarningCircle"
 import { Link, useSearch } from "@tanstack/react-router"
 import { useEffect, useRef, useState } from "react"
@@ -94,6 +95,10 @@ const SOURCE_META: Record<AgentSource, { icon: IconComponent; label: string }> =
     slack: { icon: SlackLogoIcon, label: "Triggered from Slack" },
     linear: { icon: LinearLogoIcon, label: "Triggered from Linear" },
     schedule: { icon: CalendarBlankIcon, label: "Triggered from a schedule" },
+    claude_code: {
+      icon: TerminalWindowIcon,
+      label: "Mirrored from Claude Code",
+    },
   }
 
 const THIS_MAC_META = { icon: LaptopRegularIcon, label: "Runs on this Mac" }
@@ -364,9 +369,7 @@ export function SidebarThreadRow({
     subagents.some((subagent) => subagent.toolCallId === activeSubagentId)
       ? activeSubagentId
       : null
-  const subagentsCollapsed =
-    prefs.collapseSubagentsByDefault !==
-    prefs.collapsedSubagentKeys.includes(item.key)
+  const subagentsCollapsed = !prefs.expandedSubagentKeys.includes(item.key)
   const rowIsActive =
     (isActive && (!activeSubagent || subagentsCollapsed)) ||
     (Boolean(activeWorkerId) && !workersExpanded)
@@ -864,9 +867,9 @@ function SidebarTaskWorkerRow({
   const activeSubagent =
     isActive &&
     subagents.some((subagent) => subagent.toolCallId === activeSubagentId)
-  const subagentsCollapsed =
-    prefs.collapseSubagentsByDefault !==
-    prefs.collapsedSubagentKeys.includes(`cloud:${worker.id}`)
+  const subagentsCollapsed = !prefs.expandedSubagentKeys.includes(
+    `cloud:${worker.id}`
+  )
   const rowIsActive = isActive && (!activeSubagent || subagentsCollapsed)
   const SubagentCaret = subagentsCollapsed ? CaretRightIcon : CaretDownIcon
   const status =

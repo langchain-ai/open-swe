@@ -106,6 +106,7 @@ def _isolate_publish_review_pr_state() -> Iterator[None]:
         patch("openswe.tools.publish_review.replace_findings", AsyncMock()),
         patch("openswe.tools.publish_review.open_swe_review_exists", AsyncMock(return_value=False)),
         patch("openswe.tools.publish_review.clear_review_started_comment", AsyncMock()),
+        patch("openswe.tools.publish_review._withdraw_open_swe_approvals", AsyncMock()),
         patch(
             "openswe.tools.publish_review.resolve_review_head_sha",
             AsyncMock(
@@ -1101,6 +1102,7 @@ async def test_publication_respects_the_base_policy_and_current_mode(
         patch("openswe.tools.publish_review.set_reviewer_thread_metadata", AsyncMock()),
         patch("openswe.tools.publish_review._record_reviewer_usage", AsyncMock()),
         patch("openswe.tools.publish_review.settle_review_check_run", AsyncMock()),
+        patch("openswe.tools.publish_review._withdraw_open_swe_approvals", AsyncMock()) as withdraw,
     ):
         result = await _publish_review_async(
             owner="o",
@@ -1116,6 +1118,13 @@ async def test_publication_respects_the_base_policy_and_current_mode(
     assert result["success"] is True
     assert post.await_args is not None
     assert post.await_args.kwargs["event"] == expected_event
+    # Every earlier Open SWE approval goes; only an approval this publish posted may stand.
+    assert withdraw.await_args is not None
+    assert withdraw.await_args.kwargs["keep_review_id"] == (
+        77 if expected_event == "APPROVE" else None
+    )
+    # Scoped to this publish's own review so a sibling deployment's approval stands.
+    assert withdraw.await_args.kwargs["scope_to_review_id"] == 77
     body = post.await_args.kwargs["body"]
     assert ("Risk:" in body) is has_assessment
     assert ("(dry run)" in body) is (has_assessment and mode == "dry_run")

@@ -79,6 +79,53 @@ async def test_search_filters_sorts_and_pages_like_the_agent_server() -> None:
     assert await ThreadSearch(metadata={"owner_login": "ada"}, limit=1).count() == 2
 
 
+async def test_a_text_search_ranks_title_matches_and_recent_activity_first() -> None:
+    now = datetime.now(UTC)
+    for thread_id, metadata, age in [
+        ("old-title", {"title": "Widget cache"}, timedelta(days=90)),
+        ("new-branch", {"title": "Fix", "branch_name": "widget-fix"}, timedelta(hours=1)),
+        ("old-branch", {"title": "Fix", "branch_name": "widget-old"}, timedelta(days=30)),
+        ("new-title", {"title": "Speed up widgets"}, timedelta(days=2)),
+        ("repo", {"title": "Other", "repo_owner": "Acme", "repo_name": "Widgets"}, timedelta(0)),
+        ("miss", {"title": "Unrelated"}, timedelta(0)),
+    ]:
+        await index.create(
+            thread_id, runtime="mda", metadata=metadata, created_at=now - age, updated_at=now - age
+        )
+
+    found = await ThreadSearch(text="WIDGET", limit=10).run()
+
+    assert [thread.thread_id for thread in found] == [
+        "new-title",
+        "old-title",
+        "repo",
+        "new-branch",
+        "old-branch",
+    ]
+    assert all(thread.rank is not None for thread in found)
+    assert await ThreadSearch(text="acme/widgets").count() == 1
+    assert "search_rank" not in (await ThreadSearch(limit=1).run())[0].as_langgraph()
+
+
+async def test_a_text_search_matches_derived_titles_and_unescaped_values() -> None:
+    now = datetime.now(UTC)
+    for thread_id, metadata in [
+        ("quoted", {"title": "Fix", "pull_requests": [{"title": 'Handle "retry" in C:\\tmp'}]}),
+        ("untitled", {}),
+        ("review", {"kind": "reviewer", "pr": {"number": 12, "title": "Ship it"}}),
+        ("branch", {"title": "Other", "branch_name": "review-12"}),
+    ]:
+        await index.create(thread_id, runtime="mda", metadata=metadata, updated_at=now)
+
+    async def ids(text: str) -> list[str]:
+        return [thread.thread_id for thread in await ThreadSearch(text=text).run()]
+
+    assert await ids('"retry" in c:\\tmp') == ["quoted"]
+    assert await ids("untitled") == ["untitled"]
+    assert await ids("review: #12") == ["review"]
+    assert await ids("review") == ["review", "branch"]
+
+
 async def test_a_status_change_restarts_its_clock_but_a_repeat_does_not() -> None:
     await index.create("t1", runtime="mda")
 

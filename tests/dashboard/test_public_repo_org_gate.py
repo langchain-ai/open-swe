@@ -337,7 +337,7 @@ class _FakeAsyncClient:
     async def __aexit__(self, *_args) -> None:
         return None
 
-    async def get(self, *_args, **_kwargs):
+    async def request(self, *_args, **_kwargs):
         return self._response
 
 

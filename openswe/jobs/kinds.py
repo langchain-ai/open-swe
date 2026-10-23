@@ -23,6 +23,11 @@ from openswe.jobs import queue
 from openswe.jobs.cron_import import import_agent_server_crons
 from openswe.jobs.queue import Job
 from openswe.jobs.worker import WORKER
+from openswe.merge_queue.controller import start_queue
+from openswe.merge_queue.runtime import JOB_KIND as MERGE_QUEUE_RECONCILE
+from openswe.merge_queue.runtime import reconcile_queue
+from openswe.monitors.delivery import POLL_JOB_KIND as MONITOR_POLL
+from openswe.monitors.delivery import poll_monitors
 
 __all__ = ["WORKER"]
 from openswe.reconcile import reconcile_stale_runs
@@ -46,6 +51,8 @@ AGENT_COST: Final = "agent_cost"
 SESSION_COST: Final = "session_cost"
 RECONCILE: Final = "reconcile"
 _FIRE_CLAIM_TTL: Final = timedelta(days=2)
+
+WORKER.register(MERGE_QUEUE_RECONCILE)(reconcile_queue)
 
 
 def _text(job: Job, key: str) -> str | None:
@@ -90,6 +97,15 @@ async def _background_tasks(job: Job) -> dict[str, JsonValue] | None:
     return None if thread_id is None else await monitor_background_tasks(thread_id)
 
 
+@_sandbox_work(MONITOR_POLL)
+async def _monitors(job: Job) -> bool:
+    thread_id = _text(job, "thread_id")
+    polling = thread_id is not None and await poll_monitors(thread_id)
+    if not polling:
+        await job.stop()
+    return polling
+
+
 @_sandbox_work(WATCH_JOB_KIND)
 async def _baby_sit(job: Job) -> str | None:
     key = _text(job, "watch_key")
@@ -99,7 +115,9 @@ async def _baby_sit(job: Job) -> str | None:
 @_sandbox_work(WORKSPACE_REFRESH)
 async def _workspace_refresh(job: Job) -> object:
     kind = "update" if job.payload.get("refresh_kind") == "update" else "full"
-    return await run_workspace_refresh_tick(_text(job, "workspace_slug"), kind)
+    # A cron's id outlives each of its runs, so only a one-shot job names one refresh.
+    run_id = None if job.cron else str(job.id)
+    return await run_workspace_refresh_tick(_text(job, "workspace_slug"), kind, run_id=run_id)
 
 
 @WORKER.register(AGENT_SCHEDULE_JOB_KIND)
@@ -149,7 +167,7 @@ async def _reconcile(_job: Job) -> object:
 
 @_sandbox_work(THREAD_STATUS_RECONCILE)
 async def _thread_status_reconcile(_job: Job) -> object:
-    return await reconcile_busy_threads()
+    return {"threads_settled": await reconcile_busy_threads()}
 
 
 @WORKER.register(WAKE_THREAD_JOB)
@@ -168,6 +186,7 @@ async def start_jobs() -> None:
     steps: list[Callable[[], Awaitable[object]]] = [
         import_agent_server_crons,
         import_agent_server_threads,
+        start_queue,
         lambda: queue.schedule(
             THREAD_STATUS_RECONCILE, cron=RECONCILE_SCHEDULE, key=THREAD_STATUS_RECONCILE
         ),

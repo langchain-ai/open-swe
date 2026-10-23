@@ -121,7 +121,6 @@ def construct_system_prompt(
     slack_by_the_way: bool = False,
     slack_follow_up_suggestions: bool = False,
     sandbox_file_downloads: bool = False,
-    prefer_tools_in_sandbox: bool = False,
     continued_from_collaborative: bool = False,
     local_checkout: bool = False,
     local_checkout_client: BridgeClient = "cli",
@@ -155,7 +154,6 @@ def construct_system_prompt(
             "system/working-environment-local" if local_checkout else "system/working-environment",
             working_dir=working_dir,
             desktop=local_checkout_client == "desktop",
-            prefer_tools_in_sandbox=prefer_tools_in_sandbox,
         ),
         dashboard_context_section=prompt(
             "system/dashboard-context",

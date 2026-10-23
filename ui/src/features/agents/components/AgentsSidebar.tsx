@@ -1,3 +1,4 @@
+import { LogoMark } from "@/components/Branding"
 import {
   CaretDownIcon,
   CaretRightIcon,
@@ -256,6 +257,7 @@ export function AgentsSidebar({
     includeAutomations,
     includeResolved: prefs.filters.includeResolved,
     owned: prefs.filters.ownedOnly,
+    includeClaudeCode: prefs.filters.includeClaudeCode,
     sort: prefs.sortChats,
     enabled: true,
   })
@@ -263,6 +265,7 @@ export function AgentsSidebar({
     includeAutomations,
     includeResolved: prefs.filters.includeResolved,
     owned: prefs.filters.ownedOnly,
+    includeClaudeCode: prefs.filters.includeClaudeCode,
     enabled: repoMode,
   })
   const workspaceOptionsQuery = useWorkspaceOptions(workspaceOrganize)
@@ -546,6 +549,14 @@ export function AgentsSidebar({
           Show automations
         </MenuCheckItem>
         <MenuCheckItem
+          checked={prefs.filters.includeClaudeCode}
+          onCheckedChange={(checked) =>
+            setFilters({ ...prefs.filters, includeClaudeCode: checked })
+          }
+        >
+          Show Claude Code
+        </MenuCheckItem>
+        <MenuCheckItem
           checked={prefs.filters.ownedOnly}
           onCheckedChange={(checked) =>
             setFilters({ ...prefs.filters, ownedOnly: checked })
@@ -581,23 +592,15 @@ export function AgentsSidebar({
       includeResolved={prefs.filters.includeResolved}
       includeAutomations={includeAutomations}
       owned={prefs.filters.ownedOnly}
+      includeClaudeCode={prefs.filters.includeClaudeCode}
       sort={prefs.sortChats}
       activeThreadId={activeThreadId}
       openThread={openThread}
       hydrate={hydrateRepoThreads}
       onToggleCollapsed={() => toggleRepoCollapsed(group.key)}
       onExpand={() => expandRepo(group.key)}
-      onCompose={() => {
-        layout.closeOnMobile()
-        void navigate({
-          to: group.localRepoPath ? "/agents" : chat.home,
-          search: group.repoFullName
-            ? { repo: group.repoFullName }
-            : group.localRepoPath
-              ? { localRepo: group.localRepoPath }
-              : { noRepo: true },
-        })
-      }}
+      composeTo={group.localRepoPath ? "/agents" : chat.home}
+      onCompose={layout.closeOnMobile}
       onTogglePin={() => toggleRepoPin(group.key)}
       onLoadMore={
         group.key === NO_REPO_GROUP_KEY ? recentsQuery.fetchNextPage : undefined
@@ -645,11 +648,7 @@ export function AgentsSidebar({
           to="/my-settings"
           className="flex items-center gap-space-2 font-heading text-sm font-medium tracking-tight text-primary"
         >
-          <img
-            src={`${import.meta.env.BASE_URL}logo-mark.png`}
-            alt=""
-            className="size-5"
-          />
+          <LogoMark alt="" className="size-5" />
           Open SWE
         </Link>
         <div className="flex items-center gap-space-1">
@@ -988,12 +987,14 @@ function RepoGroup({
   includeResolved,
   includeAutomations,
   owned,
+  includeClaudeCode,
   sort,
   activeThreadId,
   openThread,
   hydrate,
   onToggleCollapsed,
   onExpand,
+  composeTo,
   onCompose,
   onTogglePin,
   onLoadMore,
@@ -1009,12 +1010,14 @@ function RepoGroup({
   includeResolved: boolean
   includeAutomations: boolean
   owned: boolean
+  includeClaudeCode: boolean
   sort: ChatSort
   activeThreadId?: string
   openThread: (threadId: string) => void
   hydrate: (threads: Array<AgentThread>) => Array<SidebarThreadItem>
   onToggleCollapsed: () => void
   onExpand: () => void
+  composeTo: "/agents" | "/assistant"
   onCompose: () => void
   onTogglePin: () => void
   onLoadMore?: () => void
@@ -1031,6 +1034,7 @@ function RepoGroup({
     includeResolved,
     includeAutomations,
     owned,
+    includeClaudeCode,
     sort,
     enabled: !collapsed,
   })
@@ -1096,9 +1100,21 @@ function RepoGroup({
           size="xs"
           color="secondary"
           variant="plain"
-          onClick={onCompose}
+          asChild
           className="hidden group-hover/folder:inline-flex"
-        />
+        >
+          <Link
+            to={composeTo}
+            search={
+              group.repoFullName
+                ? { repo: group.repoFullName }
+                : group.localRepoPath
+                  ? { localRepo: group.localRepoPath }
+                  : { noRepo: true }
+            }
+            onClick={onCompose}
+          />
+        </IconButton>
       </div>
       {!collapsed && (
         <>

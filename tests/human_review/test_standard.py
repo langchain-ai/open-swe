@@ -270,6 +270,76 @@ async def test_opted_out_reviewer_requires_a_verified_person_naming_them(
             assert "opted out" in result["error"]
 
 
+@pytest.mark.parametrize(
+    ("local_time", "out_of_office", "named", "allowed"),
+    [
+        ("2026-10-22T03:00:00", False, False, False),
+        ("2026-10-22T09:00:00", False, False, True),
+        ("2026-10-22T12:00:00", True, False, False),
+        ("2026-10-22T03:00:00", False, True, True),
+    ],
+)
+async def test_assignment_enforces_availability_before_contacting_reviewer(
+    local_time: str, out_of_office: bool, named: bool, allowed: bool
+) -> None:
+    from openswe.human_review import standard
+    from openswe.human_review.people import Participant
+    from openswe.human_review.picking import Coverage, ReviewerAvailability
+
+    zone = ZoneInfo("America/New_York")
+    now = datetime.fromisoformat(local_time).replace(tzinfo=zone).astimezone(UTC)
+    user = User(
+        identities=[
+            UserIdentity(provider="github", external_id="grace", login="grace"),
+            UserIdentity(provider="slack", external_id="U_GRACE", login="grace"),
+        ]
+    )
+    pr = PullRequest(owner="lc", repo="repo", number=7, author="ada")
+    request = HumanReviewRequest(pull_request_id=pr.id, head_sha="abc", kind="standard")
+    request.pull_request = pr
+
+    @asynccontextmanager
+    async def locked(*_: object) -> AsyncIterator[tuple[None, HumanReviewRequest]]:
+        yield None, request
+
+    with (
+        patch.object(standard, "datetime", wraps=datetime) as clock,
+        patch.object(standard, "_github_approvers", AsyncMock(return_value=[])),
+        patch.object(Coverage, "load", AsyncMock(return_value=None)),
+        patch.object(User, "for_login", AsyncMock(return_value=user)),
+        patch.object(standard.PROFILES, "allows_auto_human_review", AsyncMock(return_value=True)),
+        patch.object(
+            ReviewerAvailability,
+            "for_user",
+            AsyncMock(return_value=ReviewerAvailability(zone, out_of_office)),
+        ),
+        patch.object(
+            standard, "resolve_writer", AsyncMock(return_value=Participant(user, "grace"))
+        ),
+        patch.object(HumanReviewRequest, "locked", locked),
+        patch.object(HumanReviewRequest, "get", AsyncMock(return_value=request)),
+        patch.object(ReviewCard, "refresh", AsyncMock()),
+        patch.object(standard, "_request_github_review", AsyncMock()) as github_review,
+        patch.object(standard, "send_dm_with_location", AsyncMock(return_value=None)) as dm,
+        patch.object(standard, "_schedule", AsyncMock(return_value=True)) as schedule,
+        patch.object(standard, "_assignment_minutes", AsyncMock(return_value=120)),
+        patch.object(standard, "_permalink", AsyncMock(return_value="")),
+    ):
+        clock.now.return_value = now
+        result = await standard.assign(request, "grace", "nearby reviewer", replace=named)
+
+    assert result.success is allowed
+    assert bool(request.participants) is allowed
+    if allowed:
+        github_review.assert_awaited_once()
+        dm.assert_awaited_once()
+    else:
+        assert ("out of office" if out_of_office else "outside working hours") in result.error
+        github_review.assert_not_awaited()
+        dm.assert_not_awaited()
+        schedule.assert_not_awaited()
+
+
 @pytest.mark.parametrize("status", [200, 503])
 async def test_reviewer_removal_sends_delete_body_without_aborting(
     status: int, github_app: AsyncMock
@@ -415,13 +485,16 @@ def test_every_reviewer_approving_merges_before_the_deadline() -> None:
     assert merge_wait(["grace", "linus"], _NOW, states, _NOW) is None
 
 
-def test_one_approval_waits_for_the_other_reviewers_until_the_deadline() -> None:
+@pytest.mark.parametrize("auto_merge", [False, True])
+def test_one_approval_waits_for_the_other_reviewers_until_the_deadline(auto_merge: bool) -> None:
     states = {"grace": "APPROVED"}
     early = _NOW - timedelta(hours=1)
     late = _NOW - timedelta(hours=2)
 
     assert merge_wait(["grace", "linus"], early, states, _NOW) == "approval from @linus"
-    assert merge_wait(["grace", "linus"], late, states, _NOW) is None
+    assert merge_wait(["grace", "linus"], late, states, _NOW, auto_merge=auto_merge) == (
+        None if auto_merge else "approval from @linus"
+    )
 
 
 def test_an_approval_from_someone_who_did_not_sign_up_counts() -> None:
@@ -479,20 +552,33 @@ def test_a_long_description_is_cut_at_a_word_with_an_ellipsis() -> None:
 
 
 @pytest.mark.parametrize(
-    ("states", "collapsed"),
+    ("states", "collapsed", "auto_merge", "pending"),
     [
-        ({"grace": "APPROVED"}, True),
-        ({}, False),
-        ({"grace": "APPROVED", "linus": "CHANGES_REQUESTED"}, False),
+        ({"grace": "APPROVED"}, True, True, False),
+        ({"grace": "APPROVED"}, True, False, False),
+        ({"grace": "APPROVED"}, False, False, True),
+        ({"grace": "APPROVED"}, True, True, True),
+        ({}, False, True, False),
+        ({"grace": "APPROVED", "linus": "CHANGES_REQUESTED"}, False, True, False),
     ],
 )
 async def test_approved_card_collapses_without_closing_the_request(
-    states: dict[str, str], collapsed: bool, github_app: AsyncMock
+    states: dict[str, str], collapsed: bool, auto_merge: bool, pending: bool, github_app: AsyncMock
 ) -> None:
     pr = PullRequest(owner="o", repo="r", number=1, title="Fix", author="ada")
-    request = HumanReviewRequest(pull_request_id=pr.id, head_sha="abc", kind="standard")
+    request = HumanReviewRequest(
+        pull_request_id=pr.id, head_sha="abc", kind="standard", auto_merge=auto_merge
+    )
     request.pull_request = pr
     request.requested_by = None
+    request.created_at = datetime.now(UTC) - timedelta(hours=3)
+    if pending:
+        user = User(
+            identities=[UserIdentity(provider="github", external_id="linus", login="linus")]
+        )
+        reviewer = HumanReviewParticipant(user_id=user.id, decision="review")
+        reviewer.user = user
+        request.participants.append(reviewer)
     with (
         patch(
             "openswe.human_review.lifecycle.latest_review_states", AsyncMock(return_value=states)
@@ -500,11 +586,15 @@ async def test_approved_card_collapses_without_closing_the_request(
         patch.object(HumanReviewRequest, "author_mention", AsyncMock(return_value="<@U_ada>")),
     ):
         text, blocks = await ReviewCard(request).render(None)
-    assert ("Review request: approved" in text) is collapsed
+    assert text.startswith(":white_check_mark: ") is collapsed
     assert (len(blocks) == 1) is collapsed
     assert "<@U_ada>" in str(block_payload(blocks))
     if collapsed:
-        assert "by <@U_ada>" in text
+        assert "\n" not in text
+        assert "authored by <@U_ada> — approved by @grace" in text
+    if pending and not auto_merge:
+        assert "linus" in str(block_payload(blocks))
+        assert "awaiting manual merge" not in text
     assert request.state == "open"
 
 
@@ -624,3 +714,123 @@ async def test_review_blockers_refuse_authors_without_an_open_swe_account(
     ):
         blockers = await review_blockers(MagicMock())
     assert blockers == (["its author is not an Open SWE user"] if blocked else [])
+
+
+@pytest.mark.usefixtures("registry_db")
+@pytest.mark.parametrize(
+    ("default", "override", "expected"),
+    [(True, None, True), (False, None, False), (True, False, False), (False, True, True)],
+)
+async def test_review_request_snapshots_merge_mode_and_preserves_it_on_reuse(
+    default: bool,
+    override: bool | None,
+    expected: bool,
+) -> None:
+    from openswe.dashboard.workspace_settings import WorkspaceSettings
+    from openswe.human_review import standard
+    from openswe.human_review.standard import Origin
+    from openswe.slack.channels import SlackChannel
+    from openswe.slack.client import GitHubPrRef
+
+    pr = await PullRequest(owner="lc", repo="repo", number=7, author="ada").save()
+    details = MagicMock(head_sha="abc", body="Fix")
+    ref = GitHubPrRef(owner="lc", repo="repo", number=7, url=pr.url)
+    with (
+        patch.object(standard, "review_blockers", AsyncMock(return_value=[])),
+        patch.object(standard, "_target_channel", AsyncMock(return_value=SlackChannel(id="C1"))),
+        patch.object(standard, "record_pull_request", AsyncMock(return_value=(pr, details))),
+        patch.object(
+            standard,
+            "_workspace_settings",
+            AsyncMock(return_value=WorkspaceSettings({"human_review_auto_merge_enabled": default})),
+        ),
+        patch.object(standard, "_assignment_minutes", AsyncMock(return_value=120)),
+        patch.object(standard, "_schedule", AsyncMock(return_value=True)) as schedule,
+        patch.object(standard, "_permalink", AsyncMock(return_value="")),
+        patch.object(ReviewCard, "post_standard", AsyncMock(return_value="1.0")),
+    ):
+        result = await standard._request_review(
+            ref, MagicMock(), Origin(), channel="", inline_summary="Fix", auto_merge=override
+        )
+        assert result.success and result.auto_merge is expected
+        request = await HumanReviewRequest.active_for("lc", "repo", 7)
+        assert request is not None and request.auto_merge is expected
+        assert [call.args[1] for call in schedule.await_args_list] == (
+            ["unclaimed", "auto_merge"] if expected else ["unclaimed"]
+        )
+        reused = await standard._request_review(
+            ref, MagicMock(), Origin(), channel="", inline_summary="Fix"
+        )
+        assert reused.success and reused.reused and reused.auto_merge is expected
+        refused = await standard._request_review(
+            ref, MagicMock(), Origin(), channel="", inline_summary="Fix", auto_merge=not expected
+        )
+        assert not refused.success
+        assert request.auto_merge is expected
+
+
+@pytest.mark.parametrize("trigger", ["event", "deadline"])
+@pytest.mark.parametrize("pending", [False, True])
+@pytest.mark.parametrize("auto_merge", [False, True])
+async def test_only_auto_merge_requests_merge_when_approved(
+    trigger: str,
+    auto_merge: bool,
+    pending: bool,
+    github_app: AsyncMock,
+) -> None:
+    from openswe.expedited_review.readiness import Readiness
+    from openswe.human_review import standard
+    from openswe.human_review.merging import MergeResult
+    from openswe.human_review.picking import Coverage
+
+    pr = PullRequest(owner="lc", repo="repo", number=7, author="ada")
+    request = HumanReviewRequest(
+        pull_request_id=pr.id, head_sha="abc", kind="standard", auto_merge=auto_merge
+    )
+    request.pull_request = pr
+    request.created_at = datetime.now(UTC) - timedelta(hours=3)
+    if pending:
+        user = User(
+            identities=[UserIdentity(provider="github", external_id="linus", login="linus")]
+        )
+        reviewer = HumanReviewParticipant(user_id=user.id, decision="review")
+        reviewer.user = user
+        request.participants.append(reviewer)
+
+    @asynccontextmanager
+    async def locked(*_: object) -> AsyncIterator[tuple[None, HumanReviewRequest]]:
+        yield None, request
+
+    with (
+        patch.object(HumanReviewRequest, "get", AsyncMock(return_value=request)),
+        patch.object(HumanReviewRequest, "active_for", AsyncMock(return_value=request)),
+        patch.object(HumanReviewRequest, "locked", locked),
+        patch.object(
+            Readiness,
+            "assess",
+            AsyncMock(return_value=Readiness(snapshot=_snapshot(), blockers=[])),
+        ),
+        patch.object(User, "for_login", AsyncMock(return_value=User())),
+        patch.object(
+            standard, "latest_review_states", AsyncMock(return_value={"grace": "APPROVED"})
+        ),
+        patch.object(Coverage, "load", AsyncMock(return_value=None)),
+        patch.object(ReviewPicks, "complete", AsyncMock()),
+        patch.object(ReviewPicks, "release", AsyncMock(return_value=request)),
+        patch.object(ReviewCard, "update_blocked_reactions", AsyncMock()),
+        patch.object(ReviewCard, "mark_merged", AsyncMock()),
+        patch.object(ReviewCard, "refresh", AsyncMock()),
+        patch.object(
+            standard, "merge_pull_request", AsyncMock(return_value=MergeResult("merged", "Merged"))
+        ) as merge,
+    ):
+        if trigger == "deadline":
+            await standard.run_deadline(str(request.id), "auto_merge")
+        else:
+            await standard.settle_pull_request("lc", "repo", 7)
+    assert merge.await_count == int(auto_merge)
+    if not auto_merge:
+        assert request.state == "open"
+        assert request.detail == (
+            "approval from @linus" if pending else "approved — awaiting manual merge"
+        )

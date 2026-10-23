@@ -23,10 +23,8 @@ export interface SidebarPrefs {
   expandedRepoKeys: Array<string>
   /** Which of "pinned" | "repos" | "recents" are collapsed. */
   collapsedSectionKeys: Array<string>
-  /** Whether subagent sub-threads start folded away. */
-  collapseSubagentsByDefault: boolean
-  /** Thread rows whose fold state differs from the default. */
-  collapsedSubagentKeys: Array<string>
+  /** Thread rows whose subagent threads are expanded. */
+  expandedSubagentKeys: Array<string>
   /** Nav links moved into the "More" menu. */
   hiddenNavItems: Array<string>
   organize: OrganizeMode
@@ -41,8 +39,7 @@ export const DEFAULT_SIDEBAR_PREFS: SidebarPrefs = {
   collapsedRepoKeys: [],
   expandedRepoKeys: [],
   collapsedSectionKeys: [],
-  collapseSubagentsByDefault: true,
-  collapsedSubagentKeys: [],
+  expandedSubagentKeys: [],
   hiddenNavItems: ["/agents/bots", "/incidents"],
   organize: "workspace",
   sortChats: "created",
@@ -81,6 +78,10 @@ function sanitizeFilters(value: unknown): SidebarFilters {
         ? raw.includeResolved
         : DEFAULT_SIDEBAR_FILTERS.includeResolved,
     ownedOnly: raw.ownedOnly === true,
+    includeClaudeCode:
+      typeof raw.includeClaudeCode === "boolean"
+        ? raw.includeClaudeCode
+        : DEFAULT_SIDEBAR_FILTERS.includeClaudeCode,
   }
 }
 
@@ -123,14 +124,12 @@ function sanitizePrefs(value: unknown): SidebarPrefs {
     collapsedSectionKeys: asStringArray(raw.collapsedSectionKeys).map((key) =>
       key === "projects" ? "repos" : key
     ),
-    collapseSubagentsByDefault:
-      typeof raw.collapseSubagentsByDefault === "boolean"
-        ? raw.collapseSubagentsByDefault
-        : DEFAULT_SIDEBAR_PREFS.collapseSubagentsByDefault,
-    collapsedSubagentKeys:
-      typeof raw.collapseSubagentsByDefault === "boolean"
-        ? asStringArray(raw.collapsedSubagentKeys)
-        : [],
+    expandedSubagentKeys: asStringArray(
+      raw.expandedSubagentKeys ??
+        (raw.collapseSubagentsByDefault === true
+          ? raw.collapsedSubagentKeys
+          : [])
+    ),
     hiddenNavItems: Array.isArray(raw.hiddenNavItems)
       ? asStringArray(raw.hiddenNavItems)
       : DEFAULT_SIDEBAR_PREFS.hiddenNavItems,
@@ -256,23 +255,11 @@ export function useSidebarPrefs() {
     []
   )
 
-  const setCollapseSubagentsByDefault = useCallback(
-    (collapseSubagentsByDefault: boolean) =>
-      setPrefs((prev) => ({
-        ...prev,
-        collapseSubagentsByDefault,
-        collapsedSubagentKeys: [],
-      })),
-    []
-  )
   const toggleSubagentsCollapsed = useCallback(
     (key: string) =>
       setPrefs((prev) => ({
         ...prev,
-        collapsedSubagentKeys: toggleMembership(
-          prev.collapsedSubagentKeys,
-          key
-        ),
+        expandedSubagentKeys: toggleMembership(prev.expandedSubagentKeys, key),
       })),
     []
   )
@@ -308,7 +295,6 @@ export function useSidebarPrefs() {
     setFilters,
     toggleRepoPin,
     toggleRepoCollapsed,
-    setCollapseSubagentsByDefault,
     toggleSubagentsCollapsed,
     toggleSectionCollapsed,
     expandRepo,

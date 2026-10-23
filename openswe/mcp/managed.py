@@ -600,6 +600,7 @@ def managed_mcp_source(login: str, gateway: str) -> MCPSource:
             raise RuntimeError("Managed tools require the private thread owner")
 
     return MCPSource(
+        scope="managed",
         namespace=("managed_tools", login, gateway_id(gateway)),
         list_connections=partial(_connections, login, gateway),
         get_connection=partial(_connection, login, gateway),

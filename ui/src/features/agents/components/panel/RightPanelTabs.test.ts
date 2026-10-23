@@ -3,14 +3,15 @@ import { describe, expect, it } from "vitest"
 import { surfaceShortcutActionForKey } from "@/features/agents/components/panel/RightPanelTabs"
 
 const actions = [
-  { shortcut: "T", available: true },
-  { shortcut: "D", available: true },
+  { shortcut: undefined, available: true },
+  { shortcut: "F", available: true },
+  { shortcut: "B", available: true },
   { shortcut: "P", available: false },
 ] as const
 
 function event(overrides: Partial<KeyboardEvent> = {}): KeyboardEvent {
   return {
-    key: "t",
+    key: "f",
     altKey: false,
     ctrlKey: false,
     metaKey: false,
@@ -23,11 +24,13 @@ function event(overrides: Partial<KeyboardEvent> = {}): KeyboardEvent {
 describe("surfaceShortcutActionForKey", () => {
   it("matches a shortcut case-insensitively", () => {
     expect(
-      surfaceShortcutActionForKey(actions, event({ key: "t" }))?.shortcut
-    ).toBe("T")
+      surfaceShortcutActionForKey(actions, event({ key: "f" }))?.shortcut
+    ).toBe("F")
     expect(
-      surfaceShortcutActionForKey(actions, event({ key: "D" }))?.shortcut
-    ).toBe("D")
+      surfaceShortcutActionForKey(actions, event({ key: "B" }))?.shortcut
+    ).toBe("B")
+    expect(surfaceShortcutActionForKey(actions, event({ key: "t" }))).toBeNull()
+    expect(surfaceShortcutActionForKey(actions, event({ key: "d" }))).toBeNull()
   })
 
   it("ignores unavailable surfaces", () => {

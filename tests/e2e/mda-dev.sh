@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# The Managed Deep Agents runtime the E2E backend runs agent and reviewer threads
+# The Managed Deep Agents runtime the E2E backend runs every Open SWE thread
 # on: the real mda/ project, compiled by `mda build` and served by `langgraph dev`
 # as `mda dev` serves it. Two things differ: the model is the scripted fake
 # (mda_entrypoint.py), and run-completion webhooks may target the loopback
@@ -10,6 +10,7 @@ E2E="$ROOT/tests/e2e"
 BUILD="$E2E/.mda-build"
 PORT="${E2E_MDA_PORT:-2025}"
 
+make -C "$ROOT" --no-print-directory mda-cli
 (cd "$ROOT/mda" && uv run --locked mda build --out "$BUILD")
 
 # The generated config, serving mda_entrypoint.py instead of the generated entry.

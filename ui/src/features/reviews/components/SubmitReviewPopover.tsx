@@ -14,6 +14,7 @@ import { useMutation, useQueryClient } from "@tanstack/react-query"
 import { useState } from "react"
 import { toast } from "sonner"
 
+import { SubmitShortcut } from "@/components/SubmitShortcut"
 import type { OpenPullRequest, PullRequestReviewEvent } from "@/lib/api"
 import { api, ApiError } from "@/lib/api"
 import { optimisticUpdate } from "@/lib/optimistic"
@@ -129,6 +130,11 @@ export function SubmitReviewPopover({
     },
   })
   const canSubmit = !submit.isPending && (!needsBody || body.trim().length > 0)
+  const submitLabel = submit.isPending
+    ? "Submitting…"
+    : isAuthor
+      ? "Comment"
+      : "Submit review"
 
   return (
     <Popover
@@ -163,6 +169,17 @@ export function SubmitReviewPopover({
             e.preventDefault()
             if (canSubmit) submit.mutate()
           }}
+          onKeyDown={(e) => {
+            if (
+              e.target instanceof Element &&
+              e.target.closest('a, button:not([role="radio"])')
+            )
+              return
+            if ((e.metaKey || e.ctrlKey) && e.key === "Enter") {
+              e.preventDefault()
+              e.currentTarget.requestSubmit()
+            }
+          }}
         >
           <Text as="h2" variant="sm" weight="semibold">
             {isAuthor ? "Comment on your pull request" : "Finish your review"}
@@ -178,12 +195,6 @@ export function SubmitReviewPopover({
             aria-label="Review summary"
             value={body}
             onChange={setBody}
-            onKeyDown={(e) => {
-              if ((e.metaKey || e.ctrlKey) && e.key === "Enter") {
-                e.preventDefault()
-                if (canSubmit) submit.mutate()
-              }
-            }}
             placeholder="Leave a comment"
             rows={5}
             className="mt-space-2"
@@ -279,12 +290,15 @@ export function SubmitReviewPopover({
             >
               Cancel
             </Button>
-            <Button type="submit" size="xs" disabled={!canSubmit}>
-              {submit.isPending
-                ? "Submitting…"
-                : isAuthor
-                  ? "Comment"
-                  : "Submit review"}
+            <Button
+              type="submit"
+              size="xs"
+              aria-label={submitLabel}
+              aria-keyshortcuts="Meta+Enter Control+Enter"
+              disabled={!canSubmit}
+            >
+              {submitLabel}
+              {!submit.isPending && <SubmitShortcut />}
             </Button>
           </div>
         </form>

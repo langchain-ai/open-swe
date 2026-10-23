@@ -228,10 +228,6 @@ describe("WorkspaceSettingsPanel", () => {
     renderPage()
 
     const trigger = (await screen.findByText("GPT-6.1 Sol")).closest("button")!
-    const models = screen
-      .getByRole("heading", { name: "Model Defaults" })
-      .closest("section")!
-    expect(within(models).getByText("Inherit instance setting")).toBeTruthy()
     expect(screen.queryByRole("listbox")).toBeNull()
     fireEvent.click(trigger)
     expect(
@@ -778,7 +774,7 @@ describe("WorkspaceSettingsPanel", () => {
 
     // The selector stays disabled until the workspace's settings have loaded.
     const trigger = await screen.findByRole("button", {
-      name: /Pick a repository/,
+      name: "No default repository",
     })
     await waitFor(() => expect(trigger.hasAttribute("disabled")).toBe(false))
     fireEvent.click(trigger)

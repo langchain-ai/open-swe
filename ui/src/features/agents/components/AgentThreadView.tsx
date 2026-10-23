@@ -1,3 +1,4 @@
+import { LogoMark } from "@/components/Branding"
 import { LaptopRegularIcon } from "@langchain/macaw-components/icons"
 import {
   ReviewChatActionsContext,
@@ -31,6 +32,7 @@ import type {
   ThreadFixScope,
 } from "@/features/agents/lib/types"
 import type { ModelSelection } from "@/features/agents/lib/provider/useModelOptions"
+import { BackgroundWorkSidebar } from "@/features/agents/components/BackgroundWorkSidebar"
 import { AgentGitPanel } from "@/features/agents/components/AgentGitPanel"
 import { AgentThreadHeader } from "@/features/agents/components/AgentThreadHeader"
 import { SIBLING_COLUMN_MIN_WIDTH } from "@/features/agents/components/panel/RightPanelShell"
@@ -152,6 +154,8 @@ export function AgentThreadView({
   const moving = moveThread.isPending ? moveThread.variables : null
   // A Slack bot's thread is steered from its Slack thread, never from here.
   const botThread = thread.triggerKind === "slack_bot"
+  // A mirrored Claude Code session runs in Claude Code; this is a window onto it.
+  const mirroredSession = thread.source === "claude_code"
   const ownsThread = Boolean(
     thread.ownerLogin &&
     session.data &&
@@ -161,6 +165,7 @@ export function AgentThreadView({
     !runsElsewhere &&
     moving === null &&
     !botThread &&
+    !mirroredSession &&
     // Whoever posts in a thread on someone's machine runs commands there.
     (!thread.sandboxBridgeClient || ownsThread) &&
     ((thread.threadCategory !== "automation" && !thread.adminThread) ||
@@ -842,11 +847,7 @@ export function AgentThreadView({
               aria-label="Loading conversation"
               className="flex flex-1 items-center justify-center px-space-5"
             >
-              <img
-                src={`${import.meta.env.BASE_URL}logo-mark.png`}
-                alt=""
-                className="size-12 animate-pulse"
-              />
+              <LogoMark alt="" className="size-12 animate-pulse" />
             </div>
           ) : (
             <ReplyOptionContext.Provider
@@ -934,11 +935,13 @@ export function AgentThreadView({
                       ? "This thread's Mac isn't serving it right now"
                       : botThread
                         ? `Started by ${thread.triggeringBot?.name ?? "a Slack bot"}. Reply in Slack to steer it`
-                        : canPost
-                          ? hasConversation
-                            ? "Add a follow up"
-                            : "Send the first message"
-                          : "Only workspace admins can send messages in this thread"
+                        : mirroredSession
+                          ? "Mirrored from Claude Code. Continue this session there"
+                          : canPost
+                            ? hasConversation
+                              ? "Add a follow up"
+                              : "Send the first message"
+                            : "Only workspace admins can send messages in this thread"
                 }
                 canOffload={!isStreaming}
                 compact
@@ -946,6 +949,7 @@ export function AgentThreadView({
                 busy={isStreaming}
                 activeRun={activeRun}
                 onStop={stopRun}
+                stoppable={!mirroredSession}
                 onSubmit={submitWithExcerpts}
                 followUpBehavior={followUpBehavior}
                 restoreDraft={restoreDraft}
@@ -993,6 +997,7 @@ export function AgentThreadView({
           )}
         </div>
       </div>
+      {!reviewChat && <BackgroundWorkSidebar threadId={thread.id} />}
       {/* The review page is already the diff; a second panel only squeezes the chat. */}
       {!reviewChat && (
         <AgentGitPanel
