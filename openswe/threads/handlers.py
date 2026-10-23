@@ -453,6 +453,20 @@ def _continued_workspace(metadata: Mapping[str, Any]) -> str | None:
     return None
 
 
+async def _drop_sandbox_secrets(thread_id: str, workspace: str | None) -> None:
+    """Reconfigure a newly public thread's sandbox proxy, which leaves out its owner's secrets."""
+    from openswe.sandboxes.lifecycle import ensure_sandbox_for_thread
+
+    try:
+        await ensure_sandbox_for_thread(thread_id, workspace_slug=workspace, require_existing=True)
+    except Exception:
+        logger.warning(
+            "Could not remove personal secrets from a shared thread's sandbox",
+            extra={"thread_id": thread_id},
+            exc_info=True,
+        )
+
+
 async def share_thread_with_workspace(
     thread_id: str, requester_login: str, *, email: str | None = None
 ) -> dict[str, object]:
@@ -500,6 +514,8 @@ async def share_thread_with_workspace(
     await mirror_thread_metadata(thread_id, metadata_update)
     if browser is not None:
         await Topic.THREAD_BROWSERS.invalidate(key=thread_id)
+    if metadata.get("sandbox_id"):
+        await _drop_sandbox_secrets(thread_id, _continued_workspace(metadata))
     return await _thread_summary(
         {**as_thread_dict(thread), "metadata": {**metadata, **metadata_update}}
     )

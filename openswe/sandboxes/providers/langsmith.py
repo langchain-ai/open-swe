@@ -374,7 +374,7 @@ async def configure_sandbox_proxy(
     base_proxy_config: dict[str, Any] | None = None,
     thread_id: str | None = None,
 ) -> None:
-    """Inject GitHub and thread-tool credentials while preserving custom proxy settings."""
+    """Inject GitHub, thread-tool and personal-secret credentials, preserving custom proxy settings."""
     api = SandboxAPI.from_env()
     if not api.api_key:
         logger.warning("No LangSmith API key found, skipping sandbox proxy configuration")
@@ -382,33 +382,52 @@ async def configure_sandbox_proxy(
     url = f"{api.endpoint}/boxes/{sandbox_name}"
     proxy_config = dict(base_proxy_config or {})
     custom_rules = proxy_config.get("rules")
-    # Retire credentials saved by removed built-in integrations.
+    from openswe.sandbox_secrets.models import RULE_PREFIX
+    from openswe.sandbox_secrets.proxy import thread_secret_rules
+    from openswe.sandboxes.tool_access import TOOLS_RULE, tool_proxy_rule
+
+    # Retire credentials saved by removed built-in integrations; managed rules are re-added below.
+    retired = {"github", "github-api", "github-public", "open-swe-langsmith", "stagehand-model"}
     preserved_rules = [
         rule
         for rule in (custom_rules if isinstance(custom_rules, list) else [])
         if not isinstance(rule, dict)
-        or rule.get("name")
-        not in {"github", "github-api", "github-public", "open-swe-langsmith", "stagehand-model"}
-    ]
-    from openswe.sandboxes.tool_access import TOOLS_RULE, tool_proxy_rule
-
-    preserved_rules = [
-        rule
-        for rule in preserved_rules
-        if not isinstance(rule, dict) or rule.get("name") != TOOLS_RULE
+        or (
+            rule.get("name") not in {*retired, TOOLS_RULE}
+            and not str(rule.get("name", "")).startswith(RULE_PREFIX)
+        )
     ]
     tools_rule = await tool_proxy_rule(thread_id, sandbox_name) if thread_id else None
-    proxy_config["rules"] = [
+    secret_rules = await thread_secret_rules(thread_id) if thread_id else []
+    managed_rules = [
         *_github_proxy_rules(github_token),
         *([tools_rule] if tools_rule else []),
         *preserved_rules,
     ]
-    payload = {"proxy_config": proxy_config}
     async with httpx2.AsyncClient(
         transport=pooled_transport(), timeout=PROXY_CONFIG_TIMEOUT_SECONDS
     ) as client:
-        await _patch_proxy_config(client, url, payload, api, sandbox_name)
-    logger.info("Configured sandbox proxy", extra={"sandbox_id": sandbox_name})
+
+        async def patch(rules: list[Any]) -> None:
+            payload = {"proxy_config": {**proxy_config, "rules": rules}}
+            await _patch_proxy_config(client, url, payload, api, sandbox_name)
+
+        try:
+            # Personal secrets go first so Open SWE's and the workspace's rules win any overlap.
+            await patch([*secret_rules, *managed_rules])
+        except httpx2.HTTPStatusError as exc:
+            # A secret the API rejects must not cost the person their sandbox.
+            if not secret_rules or exc.response.status_code not in {400, 422}:
+                raise
+            logger.warning(
+                "Sandbox proxy rejected personal secrets; configuring without them",
+                extra={"sandbox_id": sandbox_name, "status_code": exc.response.status_code},
+            )
+            await patch(managed_rules)
+    logger.info(
+        "Configured sandbox proxy",
+        extra={"sandbox_id": sandbox_name, "personal_secrets": len(secret_rules)},
+    )
 
 
 class WorkspaceServiceURL(BaseModel):
