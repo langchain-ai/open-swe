@@ -211,6 +211,7 @@ from openswe.tools import (
     schedule_thread_wakeup,
     search_pull_requests,
     send_announcement,
+    share_my_settings,
     slack_add_reaction,
     slack_attach_html,
     slack_breakout_thread,
@@ -604,6 +605,7 @@ def _is_subagent_excluded_tool(name: str) -> bool:
         "read_incident",
         "read_only_sql",
         "read_user_settings",
+        "share_my_settings",
         "connect_managed_tools",
         "save_user_settings",
         "record_incident_report",
@@ -1639,6 +1641,7 @@ async def plan_agent(config: RunnableConfig, surface: ToolSurface) -> None:
             else ()
         ),
         read_user_settings,
+        share_my_settings,
         request_pr_review,
         *((connect_managed_tools,) if managed_gateway else ()),
         recreate_sandbox,
