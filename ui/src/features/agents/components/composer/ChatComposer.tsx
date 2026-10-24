@@ -55,11 +55,13 @@ import type { ImageChunk } from "@/features/agents/lib/types"
 import type { ModelSelection } from "@/features/agents/lib/provider/useModelOptions"
 import { ModelPicker } from "@/features/agents/components/ModelPicker"
 import { RepoSelector } from "@/features/settings/components/RepoSelector"
-import { slackChannelMatches } from "@/components/SlackChannelCombobox"
 import type { SlackChannelOption } from "@/lib/api"
 import { useRegisterAppCommands } from "@/lib/appCommands"
 import {
+  rankSlackChannels,
+  rememberSlackChannels,
   slackChannelReference,
+  useRecentSlackChannels,
   useSlackChannelDirectory,
 } from "@/lib/slack-channels"
 import { cn } from "@/lib/utils"
@@ -196,14 +198,13 @@ export function buildCommandItems(
   skills: Array<Skill>,
   includeModelCommand = true,
   includeOffloadCommand = false,
-  slackChannels: Array<SlackChannelOption> = []
+  slackChannels: Array<SlackChannelOption> = [],
+  recentSlackChannels: ReadonlyArray<string> = []
 ): Array<ComposerCommandItem> {
   const query = trigger.query.toLowerCase()
 
   if (trigger.kind === "slack-channel") {
-    return slackChannels
-      .filter((channel) => slackChannelMatches(channel, query))
-      .sort((left, right) => Number(right.is_member) - Number(left.is_member))
+    return rankSlackChannels(slackChannels, query, recentSlackChannels)
       .slice(0, MAX_MENTION_SUGGESTIONS)
       .map((channel) => ({
         id: `channel:${channel.id}`,
@@ -211,7 +212,12 @@ export function buildCommandItems(
         channelId: channel.id,
         name: channel.name,
         label: `#${channel.name}`,
-        description: channel.is_member ? "" : "bot not in channel",
+        description: [
+          recentSlackChannels.includes(channel.id) ? "recently used" : null,
+          channel.is_member ? null : "bot not in channel",
+        ]
+          .filter(Boolean)
+          .join(" · "),
       }))
   }
 
@@ -375,6 +381,7 @@ export const ChatComposer = memo(function ChatComposer({
   const slackChannels = useSlackChannelDirectory(
     trigger?.kind === "slack-channel"
   ).data?.channels
+  const recentSlackChannels = useRecentSlackChannels()
   const skillNames = useMemo(
     () => new Set(skills.map((skill) => skill.name)),
     [skills]
@@ -388,10 +395,19 @@ export const ChatComposer = memo(function ChatComposer({
             skills,
             models.length > 0,
             canOffload,
-            slackChannels
+            slackChannels,
+            recentSlackChannels
           )
         : [],
-    [mentionPaths, models.length, skills, trigger, canOffload, slackChannels]
+    [
+      mentionPaths,
+      models.length,
+      skills,
+      trigger,
+      canOffload,
+      slackChannels,
+      recentSlackChannels,
+    ]
   )
   const menuOpen =
     trigger !== null &&
@@ -496,6 +512,8 @@ export const ChatComposer = memo(function ChatComposer({
         item.type === "skill" ||
         item.type === "slack-channel"
       ) {
+        if (item.type === "slack-channel")
+          rememberSlackChannels([item.channelId])
         const next = replaceTextRange(
           value,
           trigger.rangeStart,

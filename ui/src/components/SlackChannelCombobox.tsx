@@ -3,6 +3,7 @@ import { Button } from "@langchain/macaw-components/Button"
 import { SpinnerIcon } from "@langchain/macaw-components/Spinner"
 import { Typeahead } from "@langchain/macaw-components/Typeahead"
 import { ArrowClockwiseIcon } from "@phosphor-icons/react/dist/ssr/ArrowClockwise"
+import { ClockCounterClockwiseIcon } from "@phosphor-icons/react/dist/ssr/ClockCounterClockwise"
 import { HashIcon } from "@phosphor-icons/react/dist/ssr/Hash"
 import { LockSimpleIcon } from "@phosphor-icons/react/dist/ssr/LockSimple"
 import { useMemo, useState } from "react"
@@ -10,6 +11,10 @@ import { useMemo, useState } from "react"
 import type { SlackChannelOption } from "@/lib/api"
 import {
   normalizeSlackChannelId,
+  rankSlackChannels,
+  rememberSlackChannels,
+  slackChannelMatches,
+  useRecentSlackChannels,
   useSlackChannelDirectory,
 } from "@/lib/slack-channels"
 
@@ -28,30 +33,27 @@ export function SlackChannelIcon({
   )
 }
 
-/** Name or id match, ignoring a leading `#` the way Slack's switcher does. */
-export function slackChannelMatches(
-  channel: Pick<SlackChannelOption, "id" | "name">,
-  query: string
-): boolean {
-  const needle = query.trim().replace(/^#/, "").toLowerCase()
-  if (!needle) return true
-  return (
-    channel.name.toLowerCase().includes(needle) ||
-    channel.id.toLowerCase().includes(needle)
-  )
-}
-
 export function SlackChannelRow({
   channel,
   id,
+  recent = false,
 }: {
   channel: SlackChannelOption | undefined
   id: string
+  /** Chosen recently in this browser. */
+  recent?: boolean
 }) {
   return (
     <>
       <SlackChannelIcon channel={channel} />
       <span className="min-w-0 flex-1 truncate">{channel?.name ?? id}</span>
+      {recent && (
+        <ClockCounterClockwiseIcon
+          aria-label="Recently used"
+          className="shrink-0 text-icon-secondary"
+          size={12}
+        />
+      )}
       {channel && !channel.is_member ? (
         <span className="shrink-0 text-secondary">bot not in channel</span>
       ) : channel?.num_members != null ? (
@@ -64,6 +66,7 @@ export function SlackChannelRow({
 interface ChannelItems {
   items: Array<string>
   byId: Map<string, SlackChannelOption>
+  recent: Set<string>
   label: (id: string) => string
   filter: (ids: Array<string>, query: string) => Array<string>
   setQuery: (query: string) => void
@@ -95,6 +98,8 @@ function useChannelItems(
   eligible: ((channel: SlackChannelOption) => boolean) | undefined
 ): ChannelItems {
   const directory = useSlackChannelDirectory(true)
+  const recentIds = useRecentSlackChannels()
+  const recent = useMemo(() => new Set(recentIds), [recentIds])
   const [query, setQuery] = useState("")
   const byId = useMemo(
     () =>
@@ -105,9 +110,13 @@ function useChannelItems(
   )
   const pasted = normalizeSlackChannelId(query)
   const items = useMemo(() => {
-    const ids = (directory.data?.channels ?? [])
-      .filter((channel) => !eligible || eligible(channel))
-      .map((channel) => channel.id)
+    const ids = rankSlackChannels(
+      (directory.data?.channels ?? []).filter(
+        (channel) => !eligible || eligible(channel)
+      ),
+      "",
+      recentIds
+    ).map((channel) => channel.id)
     const known = new Set(ids)
     for (const id of [...selected, ...(pasted ? [pasted] : [])]) {
       if (!known.has(id)) {
@@ -116,7 +125,7 @@ function useChannelItems(
       }
     }
     return ids
-  }, [directory.data, eligible, selected, pasted])
+  }, [directory.data, eligible, selected, pasted, recentIds])
   const label = (id: string) => {
     const channel = byId.get(id)
     return channel ? `#${channel.name}` : id
@@ -128,6 +137,7 @@ function useChannelItems(
   return {
     items,
     byId,
+    recent,
     label,
     filter,
     setQuery,
@@ -172,7 +182,11 @@ function channelTypeaheadProps(
     ) => channels.filter(ids, inputValue),
     renderOption: (id: string, { selected }: { selected: boolean }) => (
       <>
-        <SlackChannelRow channel={channels.byId.get(id)} id={id} />
+        <SlackChannelRow
+          channel={channels.byId.get(id)}
+          id={id}
+          recent={channels.recent.has(id)}
+        />
         <CheckIcon
           aria-hidden
           className={
@@ -212,7 +226,10 @@ export function SlackChannelCombobox({
           : channels.filter(ids, inputValue)
       }
       value={value}
-      onChange={(next) => onValueChange(next ?? null)}
+      onChange={(next) => {
+        if (next) rememberSlackChannels([next])
+        onValueChange(next ?? null)
+      }}
     />
   )
 }
@@ -234,7 +251,10 @@ export function SlackChannelMultiCombobox({
       multiple
       disableCloseOnSelect
       value={value}
-      onChange={onValueChange}
+      onChange={(next) => {
+        rememberSlackChannels(next.filter((id) => !value.includes(id)))
+        onValueChange(next)
+      }}
     />
   )
 }

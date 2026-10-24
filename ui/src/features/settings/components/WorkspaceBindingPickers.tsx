@@ -1,13 +1,19 @@
-import { GlobeRegularIcon } from "@langchain/macaw-components/icons"
 import { useMemo } from "react"
 import { FolderIcon } from "@phosphor-icons/react/dist/ssr/Folder"
-import { HashIcon } from "@phosphor-icons/react/dist/ssr/Hash"
 import { LockSimpleIcon } from "@phosphor-icons/react/dist/ssr/LockSimple"
 
-import { RefreshSlackChannels } from "@/components/SlackChannelCombobox"
+import {
+  RefreshSlackChannels,
+  SlackChannelIcon,
+} from "@/components/SlackChannelCombobox"
 import { type WorkspaceOption } from "@/lib/api"
 import { useRepos } from "@/lib/profile"
-import { useSlackChannelDirectory } from "@/lib/slack-channels"
+import {
+  rankSlackChannels,
+  rememberSlackChannels,
+  useRecentSlackChannels,
+  useSlackChannelDirectory,
+} from "@/lib/slack-channels"
 import {
   OwnershipPicker,
   type PickerItem,
@@ -129,41 +135,39 @@ export function SlackChannelPicker({
   disabled,
 }: BindingPickerProps) {
   const directory = useSlackChannelDirectory(true)
+  const recent = useRecentSlackChannels()
   const owners = useMemo(
     () => ownersOf(workspaces, (workspace) => workspace.slack_channel_ids),
     [workspaces]
   )
   const items = useMemo<Array<PickerItem>>(
     () =>
-      (directory.data?.channels ?? []).map((channel) => ({
-        id: channel.id,
-        label: `#${channel.name}`,
-        meta: [
-          channel.is_private
-            ? "private"
-            : channel.is_ext_shared
-              ? "shared"
-              : "public",
-          channel.num_members === null
-            ? null
-            : `${channel.num_members} members`,
-        ]
-          .filter((part): part is string => part !== null)
-          .join(" · "),
-        icon: channel.is_private ? (
-          <LockSimpleIcon size={14} weight="regular" />
-        ) : channel.is_ext_shared ? (
-          <GlobeRegularIcon size={14} />
-        ) : (
-          <HashIcon size={14} weight="regular" />
-        ),
-        owner: owners.get(channel.id.toLowerCase()) ?? null,
-        disabled: !channel.is_member,
-        warning: channel.is_member
-          ? undefined
-          : "Invite Open SWE to this channel, then refresh to select it.",
-      })),
-    [directory.data, owners]
+      rankSlackChannels(directory.data?.channels ?? [], "", recent).map(
+        (channel) => ({
+          id: channel.id,
+          label: `#${channel.name}`,
+          meta: [
+            channel.is_private
+              ? "private"
+              : channel.is_ext_shared
+                ? "shared"
+                : "public",
+            channel.num_members === null
+              ? null
+              : `${channel.num_members} members`,
+            recent.includes(channel.id) ? "recently used" : null,
+          ]
+            .filter((part): part is string => part !== null)
+            .join(" · "),
+          icon: <SlackChannelIcon channel={channel} />,
+          owner: owners.get(channel.id.toLowerCase()) ?? null,
+          disabled: !channel.is_member,
+          warning: channel.is_member
+            ? undefined
+            : "Invite Open SWE to this channel, then refresh to select it.",
+        })
+      ),
+    [directory.data, owners, recent]
   )
   return (
     <OwnershipPicker
@@ -175,7 +179,10 @@ export function SlackChannelPicker({
       items={items}
       selected={selected}
       workspaceSlug={workspaceSlug}
-      onChange={onChange}
+      onChange={(next) => {
+        rememberSlackChannels(next.filter((id) => !selected.includes(id)))
+        onChange(next)
+      }}
       searchPlaceholder="Search channels"
       actions={
         <RefreshSlackChannels
