@@ -104,6 +104,18 @@ jobs:
           # own key and count against the workspace's gateway spend cap.
           # Each secret is named, so the runner gets only the one this deployment uses.
           LANGSMITH_GATEWAY_API_KEY: ${{ matrix.environment == 'prod' && secrets.LANGSMITH_GATEWAY_API_KEY_PROD || matrix.environment == 'staging' && secrets.LANGSMITH_GATEWAY_API_KEY_STAGING || '' }}
+          # The backend's new sandbox region, when new thread sandboxes go to another LangSmith than
+          # this deployment's. Both or neither, with the backend's values.
+          NEW_SANDBOX_REGION_ENDPOINT: >-
+            ${{ matrix.environment == 'prod' && secrets.NEW_SANDBOX_REGION_ENDPOINT_PROD
+            || matrix.environment == 'staging' && secrets.NEW_SANDBOX_REGION_ENDPOINT_STAGING
+            || matrix.environment == 'preview' && secrets.NEW_SANDBOX_REGION_ENDPOINT_PREVIEW
+            || '' }}
+          NEW_SANDBOX_REGION_API_KEY: >-
+            ${{ matrix.environment == 'prod' && secrets.NEW_SANDBOX_REGION_API_KEY_PROD
+            || matrix.environment == 'staging' && secrets.NEW_SANDBOX_REGION_API_KEY_STAGING
+            || matrix.environment == 'preview' && secrets.NEW_SANDBOX_REGION_API_KEY_PREVIEW
+            || '' }}
           # This deployment's Linear app, which deploy cannot ask for without a terminal. Deploy
           # hands it to Agent Auth and never to the deployment.
           MDA_LINEAR_CLIENT_ID: >-
@@ -155,6 +167,13 @@ jobs:
           # The project .env is forwarded as the deployment's secrets: the backend it calls back,
           # the gateway key it calls models with, and the secret it signs its calls to the backend with.
           printf 'OPEN_SWE_BACKEND_URL=%s\nLANGSMITH_GATEWAY_API_KEY=%s\nMDA_SERVICE_SECRET=%s\n' "$backend" "$LANGSMITH_GATEWAY_API_KEY" "$MDA_SERVICE_SECRET" >mda/.env
+          if [[ -n "$NEW_SANDBOX_REGION_ENDPOINT" || -n "$NEW_SANDBOX_REGION_API_KEY" ]]; then
+            if [[ -z "$NEW_SANDBOX_REGION_ENDPOINT" || -z "$NEW_SANDBOX_REGION_API_KEY" ]]; then
+              echo "::error::Set both NEW_SANDBOX_REGION_ENDPOINT_${ENVIRONMENT^^} and NEW_SANDBOX_REGION_API_KEY_${ENVIRONMENT^^}, or neither."
+              exit 1
+            fi
+            printf 'NEW_SANDBOX_REGION_ENDPOINT=%s\nNEW_SANDBOX_REGION_API_KEY=%s\n' "$NEW_SANDBOX_REGION_ENDPOINT" "$NEW_SANDBOX_REGION_API_KEY" >>mda/.env
+          fi
           # The GitHub channel's App is Open SWE's own, whose webhook stays at the backend,
           # which forwards issue mentions to the channel.
           export MDA_GITHUB_WEBHOOK_ELSEWHERE="$backend/webhooks/github"

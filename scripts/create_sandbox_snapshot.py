@@ -4,13 +4,14 @@ import argparse
 
 from langsmith.sandbox import SandboxClient
 
-from openswe.config import ENV
+from openswe.sandboxes.providers.langsmith_api import SandboxAPI
 
 DEFAULT_IMAGE = "johanneslangchain/open-swe-sandbox:gh-cli-amd64"
 DEFAULT_FS_CAPACITY = 32 * 1024**3  # 32 GiB
 
 
 def main() -> None:
+    api = SandboxAPI.new_sandbox_region()
     parser = argparse.ArgumentParser(description="Create a LangSmith sandbox snapshot")
     parser.add_argument(
         "--name", default="open-swe-gh-amd64", help="Snapshot name (default: open-swe-gh-amd64)"
@@ -26,15 +27,15 @@ def main() -> None:
     )
     parser.add_argument(
         "--api-key",
-        default=ENV.LANGSMITH_API_KEY.optional(),
-        help="LangSmith API key (default: LANGSMITH_API_KEY)",
+        default=api.api_key,
+        help="LangSmith API key (default: NEW_SANDBOX_REGION_API_KEY, else LANGSMITH_API_KEY)",
     )
     args = parser.parse_args()
 
     if not args.api_key:
-        raise SystemExit("Set LANGSMITH_API_KEY or pass --api-key")
+        raise SystemExit("Set NEW_SANDBOX_REGION_API_KEY or LANGSMITH_API_KEY, or pass --api-key")
 
-    client = SandboxClient(api_key=args.api_key)
+    client = SandboxClient(api_key=args.api_key, api_endpoint=api.endpoint)
     snapshot = client.create_snapshot(
         name=args.name,
         docker_image=args.image,

@@ -17,6 +17,7 @@ from langgraph_sdk import get_client
 from openswe.bridge.constants import HANDOFF_FROM_KEY
 from openswe.sandboxes.connect import connect_sandbox
 from openswe.sandboxes.paths import resolve_checkout_dir, resolve_sandbox_work_dir
+from openswe.sandboxes.ref import SANDBOX_API_METADATA_KEY, SandboxRef
 
 logger = logging.getLogger(__name__)
 
@@ -125,7 +126,12 @@ async def complete_handoff(
     repo = _repo(metadata)
     if repo is not None:
         bundle = f"/tmp/open-swe-handoff-{thread_id}.bundle"
-        source = await connect_sandbox(source_id, thread_id=thread_id)
+        # The thread's recorded API is still the source's: the bound target is not yet.
+        source_api = metadata.get(SANDBOX_API_METADATA_KEY)
+        source = await connect_sandbox(
+            SandboxRef(source_id, source_api if isinstance(source_api, str) else None),
+            thread_id=thread_id,
+        )
         packed = await _pack(source, repo[1], bundle)
         if packed is not None:
             await _unpack(target, repo, bundle, *packed)

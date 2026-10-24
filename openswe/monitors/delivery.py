@@ -24,6 +24,7 @@ from openswe.monitors.budget import EVENTS_SPENT_REASON, ThreadMonitorBudget
 from openswe.monitors.sandbox import MonitorEvent, PendingMonitor, SandboxMonitors, owner_of
 from openswe.prompts import prompt
 from openswe.sandboxes.connect import connect_sandbox
+from openswe.sandboxes.ref import SandboxRef
 from openswe.sandboxes.tool_access import SANDBOX_HOST_THREAD_KEY, ToolAccess
 from openswe.threads.wake_budget import MONITOR_WAKES
 from openswe.ui_invalidations.topics import Topic
@@ -136,14 +137,14 @@ class ThreadMonitorDelivery:
             )
         ):
             raise PermissionError("Monitor owner does not belong to this sandbox")
-        sandbox_id = metadata.get("sandbox_id")
-        if not isinstance(sandbox_id, str) or not sandbox_id:
+        sandbox = SandboxRef.of(metadata)
+        if sandbox is None:
             if _tracked(metadata):
                 await update_background_task_state(
                     langgraph_client(), thread_id, reset=True, key=RUNNING_MONITORS_KEY
                 )
             return None
-        backend = await connect_sandbox(sandbox_id, thread_id=thread_id)
+        backend = await connect_sandbox(sandbox, thread_id=thread_id)
         return cls(thread_id, metadata, SandboxMonitors(backend, thread_id))
 
     async def sync(self) -> bool:
@@ -257,7 +258,7 @@ async def sync_monitor_callback(monitor_id: str, access: ToolAccess) -> None:
     Raises ``LookupError`` for a monitor the sandbox does not hold and
     ``PermissionError`` for one whose thread the sandbox does not serve.
     """
-    backend = await connect_sandbox(access.sandbox_id, thread_id=access.thread_id)
+    backend = await connect_sandbox(access.sandbox, thread_id=access.thread_id)
     owner = await owner_of(backend, monitor_id)
     delivery = await ThreadMonitorDelivery.load(owner, access=access)
     if delivery is not None:

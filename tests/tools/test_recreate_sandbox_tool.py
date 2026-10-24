@@ -32,6 +32,11 @@ async def test_recreate_sandbox_leaves_an_mda_box_to_mda(
             "openswe.sandboxes.lifecycle.load_workspace", new_callable=AsyncMock, return_value=None
         ),
         patch(
+            "openswe.sandboxes.lifecycle.get_sandbox_metadata",
+            new_callable=AsyncMock,
+            return_value=_backend_owned_sandbox.return_value,
+        ),
+        patch(
             "openswe.sandboxes.lifecycle.recreate_sandbox_for_thread", new_callable=AsyncMock
         ) as recreate,
         patch(

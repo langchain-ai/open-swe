@@ -59,6 +59,8 @@ from openswe.config import ENV
 from openswe.database import postgres
 from openswe.github.repo_names import normalize_repo_full_name
 from openswe.github.repositories import Repository
+from openswe.sandboxes.providers.langsmith_api import SandboxAPI
+from openswe.sandboxes.ref import SandboxRef
 from openswe.ui_invalidations import Topic
 from openswe.utils.time import now_iso, parse_iso
 from openswe.workspaces.rows import (
@@ -577,6 +579,11 @@ class Workspace(BaseModel):
     fs_capacity_bytes: int | None = None
     create_params: dict[str, JsonValue] = Field(default_factory=dict)
     snapshot_id: str | None = None
+    # The LangSmith API root the snapshot lives at; None for the deployment's own.
+    snapshot_api: str | None = None
+    # The last snapshot in the deployment's own LangSmith, kept once captures moved to the
+    # new sandbox region: boxes still in the old region boot from it, and none is made there.
+    old_region_snapshot_id: str | None = None
     snapshot_name: str | None = None
     snapshot_status: SnapshotStatus = "none"
     status_message: str | None = None
@@ -653,6 +660,18 @@ class Workspace(BaseModel):
         if self.snapshot_status not in ("ready", "capturing"):
             return None
         return self.snapshot_id or None
+
+    def snapshot_at(self, api: SandboxAPI) -> str | None:
+        """The snapshot a box created at ``api`` boots from, which must live there too.
+
+        Boxes in the new sandbox region get the base image until a refresh captures one
+        there; boxes still in the old region get the snapshot kept for them.
+        """
+        if self.ready_snapshot_id is not None and api.holds(self.snapshot_api):
+            return self.ready_snapshot_id
+        if api.is_deployment:
+            return self.old_region_snapshot_id
+        return None
 
     def refresh_in_flight(self, run_id: str | None = None) -> bool:
         """Whether a refresh other than ``run_id``'s is still plausibly running.
@@ -1173,7 +1192,7 @@ class WorkspaceStore:
         *,
         snapshot_id: str,
         snapshot_name: str,
-        source_sandbox_id: str,
+        source: SandboxRef,
         created_by: str,
     ) -> Workspace:
         """Write a definition and the image it was captured from as one store write.
@@ -1184,12 +1203,7 @@ class WorkspaceStore:
         """
         record = await self._publishable_record(slug, definition, created_by)
         await self._assert_unique(record)
-        _stamp_captured(
-            record,
-            snapshot_id=snapshot_id,
-            snapshot_name=snapshot_name,
-            source_sandbox_id=source_sandbox_id,
-        )
+        _stamp_captured(record, snapshot_id=snapshot_id, snapshot_name=snapshot_name, source=source)
         return await self.save(record)
 
     async def remove(self, slug: str) -> bool:
@@ -1213,7 +1227,8 @@ class WorkspaceStore:
         from openswe.workspaces.refresh import remove_refresh_cron
 
         await remove_refresh_cron(record)
-        await _delete_snapshot(record.snapshot_id)
+        await _delete_snapshot(record.snapshot_id, record.snapshot_api)
+        await _delete_snapshot(record.old_region_snapshot_id, None)
         return True
 
     async def mark_capturing(self, slug: str) -> Workspace | None:
@@ -1240,7 +1255,7 @@ class WorkspaceStore:
         *,
         snapshot_id: str,
         snapshot_name: str,
-        source_sandbox_id: str,
+        source: SandboxRef,
         snapshot_tag: str = SNAPSHOT_TAG,
     ) -> Workspace | None:
         def change(record: Workspace) -> None:
@@ -1248,7 +1263,7 @@ class WorkspaceStore:
                 record,
                 snapshot_id=snapshot_id,
                 snapshot_name=snapshot_name,
-                source_sandbox_id=source_sandbox_id,
+                source=source,
                 snapshot_tag=snapshot_tag,
             )
 
@@ -1601,15 +1616,28 @@ def _stamp_captured(
     *,
     snapshot_id: str,
     snapshot_name: str,
-    source_sandbox_id: str,
+    source: SandboxRef,
     snapshot_tag: str = SNAPSHOT_TAG,
 ) -> None:
+    """The snapshot lives in the LangSmith of the box it was captured from.
+
+    The first capture in the new sandbox region keeps the old region's snapshot for
+    the boxes still there instead of letting it be retired.
+    """
+    old_region = SandboxAPI.deployment()
+    if (
+        record.ready_snapshot_id is not None
+        and old_region.holds(record.snapshot_api)
+        and not old_region.holds(source.api)
+    ):
+        record.old_region_snapshot_id = record.ready_snapshot_id
     record.snapshot_status = "ready"
     record.status_message = None
     record.snapshot_id = snapshot_id
+    record.snapshot_api = source.api
     record.snapshot_name = snapshot_name
     record.snapshot_tag = snapshot_tag
-    record.source_sandbox_id = source_sandbox_id
+    record.source_sandbox_id = source.id
     record.last_captured_at = now_iso()
 
 
@@ -1670,14 +1698,12 @@ def require_capture_support() -> None:
         )
 
 
-async def _delete_snapshot(snapshot_id: object) -> None:
-    """Best-effort delete of a superseded snapshot."""
+async def _delete_snapshot(snapshot_id: object, api_root: str | None) -> None:
+    """Best-effort delete of a superseded snapshot, in the LangSmith it lives in."""
     if not isinstance(snapshot_id, str) or not snapshot_id:
         return
-    from openswe.sandboxes.providers.langsmith import get_async_sandbox_client
-
     try:
-        async with get_async_sandbox_client() as client:
+        async with SandboxAPI.at(api_root).client() as client:
             await client.delete_snapshot(snapshot_id)
     except Exception:  # noqa: BLE001
         logger.warning(
@@ -1689,11 +1715,11 @@ async def _delete_snapshot(snapshot_id: object) -> None:
 
 async def capture_workspace_snapshot(
     slug: str,
-    sandbox_id: str,
+    source: SandboxRef,
     *,
     timeout: int = 600,
 ) -> Workspace:
-    """Capture ``sandbox_id``'s filesystem as this workspace's ``name:tag``.
+    """Capture ``source``'s filesystem as this workspace's ``name:tag``.
 
     The name belongs to the workspace and never moves; each capture publishes
     new content under it and the tag is repointed, which is why nothing here
@@ -1713,11 +1739,10 @@ async def capture_workspace_snapshot(
         raise ValueError(f"no workspace named {slug!r}")
 
     snapshot_name = record.published_snapshot_name
-    previous_snapshot_id = record.snapshot_id
     previous_was_ready = record.ready_snapshot_id is not None
     await WORKSPACES.mark_capturing(slug)
     try:
-        snapshot_id = await capture_sandbox_snapshot(sandbox_id, snapshot_name, timeout=timeout)
+        snapshot_id = await capture_sandbox_snapshot(source, snapshot_name, timeout=timeout)
     except Exception as exc:
         logger.warning("snapshot capture failed", extra={"workspace": slug}, exc_info=True)
         await WORKSPACES.mark_capture_settled(
@@ -1732,28 +1757,25 @@ async def capture_workspace_snapshot(
         snapshot_id=snapshot_id,
         snapshot_name=snapshot_name,
         snapshot_tag=SNAPSHOT_TAG,
-        source_sandbox_id=sandbox_id,
+        source=source,
     )
-    await retire_superseded_snapshot(slug, previous_snapshot_id, snapshot_id)
+    await retire_superseded_snapshot(slug, record, snapshot_id)
     return updated or record
 
 
-async def capture_sandbox_snapshot(sandbox_id: str, snapshot_name: str, *, timeout: int) -> str:
-    """Capture ``sandbox_id`` as ``snapshot_name:latest`` and return the new snapshot id.
+async def capture_sandbox_snapshot(source: SandboxRef, snapshot_name: str, *, timeout: int) -> str:
+    """Capture ``source`` as ``snapshot_name:latest`` in its LangSmith; the new snapshot's id.
 
     Touches no record: callers that must not write anything until the image
     exists — publishing a workspace from a live sandbox — capture first and
     record second.
     """
-    from openswe.sandboxes.providers.langsmith import (
-        capture_snapshot_with_tag,
-        get_async_sandbox_client,
-    )
+    from openswe.sandboxes.providers.langsmith import capture_snapshot_with_tag
 
     require_capture_support()
-    async with get_async_sandbox_client() as client:
+    async with SandboxAPI.at(source.api).client() as client:
         snapshot = await capture_snapshot_with_tag(
-            client, sandbox_id, snapshot_name, SNAPSHOT_TAG, timeout=timeout
+            client, source.id, snapshot_name, SNAPSHOT_TAG, timeout=timeout
         )
     logger.info(
         "Captured snapshot",
@@ -1761,14 +1783,14 @@ async def capture_sandbox_snapshot(sandbox_id: str, snapshot_name: str, *, timeo
             "snapshot_id": str(snapshot.id),
             "snapshot_name": snapshot_name,
             "snapshot_tag": SNAPSHOT_TAG,
-            "sandbox_id": sandbox_id,
+            "sandbox_id": source.id,
         },
     )
     return str(snapshot.id)
 
 
-async def discard_unreferenced_snapshot(slug: str, snapshot_id: str) -> None:
-    """Delete a snapshot that was captured but never made it onto the record.
+async def discard_unreferenced_snapshot(slug: str, snapshot_id: str, source: SandboxRef) -> None:
+    """Delete a snapshot captured from ``source`` that never made it onto the record.
 
     Re-reads first so a capture that *did* land — by this caller or a concurrent
     one — is never deleted from under it.
@@ -1776,17 +1798,23 @@ async def discard_unreferenced_snapshot(slug: str, snapshot_id: str) -> None:
     current = await WORKSPACES.get(slug)
     if current is not None and current.snapshot_id == snapshot_id:
         return
-    await _delete_snapshot(snapshot_id)
+    await _delete_snapshot(snapshot_id, source.api)
 
 
-async def retire_superseded_snapshot(slug: str, previous_id: str | None, current_id: str) -> None:
-    """Delete the snapshot ``current_id`` replaced, if the record still points at ours.
+async def retire_superseded_snapshot(
+    slug: str, previous: Workspace | None, current_id: str
+) -> None:
+    """Delete the snapshot ``previous`` pointed at, if the record still points at ours.
 
     Re-reads first: a concurrent capture may have pointed the record at its own
     snapshot, and deleting ours then would strand it.
     """
-    if not previous_id or previous_id == current_id:
+    if previous is None or not previous.snapshot_id or previous.snapshot_id == current_id:
         return
     current = await WORKSPACES.get(slug)
-    if current is not None and current.snapshot_id == current_id:
-        await _delete_snapshot(previous_id)
+    if (
+        current is not None
+        and current.snapshot_id == current_id
+        and current.old_region_snapshot_id != previous.snapshot_id
+    ):
+        await _delete_snapshot(previous.snapshot_id, previous.snapshot_api)

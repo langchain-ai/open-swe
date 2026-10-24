@@ -7,6 +7,8 @@ from sqlalchemy import select
 
 from openswe.database import postgres
 from openswe.github.repositories import Repository
+from openswe.sandboxes.providers.langsmith_api import SandboxAPI
+from openswe.sandboxes.ref import SandboxRef
 from openswe.utils.time import now_iso
 from openswe.workspaces import store as env_store
 from openswe.workspaces.rows import WorkspaceRepositoryRow, WorkspaceRow
@@ -68,7 +70,7 @@ async def test_rename_preserves_workspace_identity_and_snapshot() -> None:
         "draft",
         snapshot_id="snap-1",
         snapshot_name="draft-image",
-        source_sandbox_id="sb-1",
+        source=SandboxRef("sb-1"),
     )
 
     updated = await WORKSPACES.apply_update("draft", WorkspaceUpdate(name="New name"))
@@ -95,7 +97,7 @@ _STATE_WRITES = {
     "mark_capturing": lambda slug: WORKSPACES.mark_capturing(slug),
     "mark_capture_settled": lambda slug: WORKSPACES.mark_capture_settled(slug, "failed", "boom"),
     "mark_captured": lambda slug: WORKSPACES.mark_captured(
-        slug, snapshot_id="snap-2", snapshot_name="core-image", source_sandbox_id="sb-2"
+        slug, snapshot_id="snap-2", snapshot_name="core-image", source=SandboxRef("sb-2")
     ),
     "set_refresh_run_id": lambda slug: WORKSPACES.set_refresh_run_id(slug, "run-1"),
     "set_refresh_cron_id": lambda slug: WORKSPACES.set_refresh_cron_id(slug, "cron-1"),
@@ -159,21 +161,18 @@ async def test_failed_recapture_keeps_booting_from_the_previous_snapshot() -> No
     delete_snapshot = AsyncMock()
     with (
         patch.object(env_store, "_delete_snapshot", delete_snapshot),
-        patch(
-            "openswe.sandboxes.providers.langsmith.get_async_sandbox_client",
-            return_value=_sandbox_client(capture),
-        ),
+        patch.object(SandboxAPI, "client", return_value=_sandbox_client(capture)),
     ):
         await WORKSPACES.create(WorkspaceCreate(name="base", repos=["acme/base"]), "ramon")
         await WORKSPACES.mark_captured(
             "base",
             snapshot_id="snap-1",
             snapshot_name="prior",
-            source_sandbox_id="sb-prior",
+            source=SandboxRef("sb-prior"),
         )
 
         with pytest.raises(RuntimeError, match="capture exploded"):
-            await env_store.capture_workspace_snapshot("base", "sb-123")
+            await env_store.capture_workspace_snapshot("base", SandboxRef("sb-123"))
 
         record = await WORKSPACES.get("base")
 
@@ -183,6 +182,35 @@ async def test_failed_recapture_keeps_booting_from_the_previous_snapshot() -> No
     assert record.snapshot_status == "ready"
     assert record.ready_snapshot_id == "snap-1"
     assert record.status_message == "capture exploded"
+    delete_snapshot.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+@pytest.mark.usefixtures("registry_db")
+async def test_the_first_new_region_capture_keeps_the_old_regions_snapshot(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Old-region boxes recreated after the move still boot the workspace's image."""
+    monkeypatch.setenv("LANGSMITH_ENDPOINT", "https://api.smith.example")
+    monkeypatch.setenv("NEW_SANDBOX_REGION_ENDPOINT", "https://aws.api.smith.example")
+    monkeypatch.setenv("NEW_SANDBOX_REGION_API_KEY", "lsv2-new-region-key")
+    delete_snapshot = AsyncMock()
+    await WORKSPACES.create(WorkspaceCreate(name="base", repos=["acme/base"]), "ramon")
+    previous = await WORKSPACES.mark_captured(
+        "base", snapshot_id="snap-gcp", snapshot_name="base", source=SandboxRef("sb-gcp")
+    )
+    current = await WORKSPACES.mark_captured(
+        "base",
+        snapshot_id="snap-aws",
+        snapshot_name="base",
+        source=SandboxRef("sb-aws", "https://aws.api.smith.example"),
+    )
+    with patch.object(env_store, "_delete_snapshot", delete_snapshot):
+        await env_store.retire_superseded_snapshot("base", previous, "snap-aws")
+
+    assert current is not None
+    assert current.snapshot_at(SandboxAPI.new_sandbox_region()) == "snap-aws"
+    assert current.snapshot_at(SandboxAPI.deployment()) == "snap-gcp"
     delete_snapshot.assert_not_awaited()
 
 
@@ -202,7 +230,7 @@ async def test_workspace_options_omit_admin_only_settings() -> None:
         "default",
         snapshot_id="snap-1",
         snapshot_name="prior",
-        source_sandbox_id="sb-prior",
+        source=SandboxRef("sb-prior"),
     )
     await WORKSPACES.mark_refresh_settled("default", "success", log="+ TOKEN=hunter2\ndone")
     options = await env_store.list_workspace_options()
@@ -243,7 +271,7 @@ async def test_publish_writes_definition_and_image_together() -> None:
         WorkspaceCreate(name="base", repos=["acme/base"], prompt="p1", setup_script="make setup"),
         snapshot_id="snap-1",
         snapshot_name="openswe-environment-base",
-        source_sandbox_id="sb-1",
+        source=SandboxRef("sb-1"),
         created_by="ramon",
     )
     assert (record.prompt, record.snapshot_id, record.snapshot_status) == ("p1", "snap-1", "ready")
@@ -254,7 +282,7 @@ async def test_publish_writes_definition_and_image_together() -> None:
         WorkspaceUpdate(prompt="p2"),
         snapshot_id="snap-2",
         snapshot_name="openswe-environment-base",
-        source_sandbox_id="sb-2",
+        source=SandboxRef("sb-2"),
         created_by="ramon",
     )
     stored = await WORKSPACES.get("base")
@@ -292,6 +320,8 @@ def _fully_populated(now: str) -> Workspace:
         snapshot_status="ready",
         status_message="captured",
         snapshot_tag="latest",
+        snapshot_api="https://aws.api.smith.example",
+        old_region_snapshot_id="snap-old-region",
         source_sandbox_id="sb-1",
         last_captured_at=now,
         refresh_status="success",

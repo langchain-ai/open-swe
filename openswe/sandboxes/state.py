@@ -25,6 +25,7 @@ from deepagents.backends.sandbox import BaseSandbox
 from langgraph_sdk import get_client
 
 from openswe.github.token_scope import token_repositories_from_metadata
+from openswe.sandboxes.ref import SandboxRef
 
 logger = logging.getLogger(__name__)
 
@@ -148,8 +149,8 @@ class SandboxBackendProxy(BaseSandbox):
                     logger.info("Reconnecting sandbox backend for thread %s", self._thread_id)
                     self.start()
                 else:
-                    sandbox_id = await get_sandbox_id_from_metadata(self._thread_id)
-                    if not sandbox_id:
+                    sandbox = await get_sandbox_ref_from_metadata(self._thread_id)
+                    if sandbox is None:
                         raise ValueError(
                             f"Missing sandbox_id in thread metadata for {self._thread_id}"
                         )
@@ -161,7 +162,7 @@ class SandboxBackendProxy(BaseSandbox):
                     from openswe.sandboxes.connect import connect_sandbox
 
                     self._startup_task = asyncio.create_task(
-                        connect_sandbox(sandbox_id, thread_id=self._thread_id)
+                        connect_sandbox(sandbox, thread_id=self._thread_id)
                     )
                     self._startup_task.add_done_callback(self._startup_completed)
             startup_task = self._startup_task
@@ -433,11 +434,9 @@ def narrowed_repositories(
     return [repo for repo in requested if repo.lower() in allowed]
 
 
-async def get_sandbox_id_from_metadata(thread_id: str) -> str | None:
-    """Fetch sandbox_id from thread metadata."""
-    metadata = await get_sandbox_metadata(thread_id)
-    sandbox_id = metadata.get("sandbox_id")
-    return sandbox_id if isinstance(sandbox_id, str) else None
+async def get_sandbox_ref_from_metadata(thread_id: str) -> SandboxRef | None:
+    """The box the thread's metadata binds it to."""
+    return SandboxRef.of(await get_sandbox_metadata(thread_id))
 
 
 async def get_sandbox_backend(thread_id: str) -> SandboxBackendProxy:

@@ -83,6 +83,7 @@ async def test_new_sandbox_persists_its_base_proxy_config() -> None:
         thread_id=thread_id,
         metadata={
             "sandbox_id": "sandbox-new",
+            "sandbox_api": None,
             "sandbox_base_proxy_config": base_proxy_config,
         },
     )

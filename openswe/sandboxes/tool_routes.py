@@ -66,7 +66,7 @@ async def background_task_complete(task_id: TaskId, access: Access) -> None:
 async def background_task_heartbeat(task_id: TaskId, access: Access) -> None:
     from openswe.background_tasks import keep_sandbox_alive
 
-    outcome = await keep_sandbox_alive(access.sandbox_id, task_id)
+    outcome = await keep_sandbox_alive(access.sandbox, task_id)
     if outcome == "unknown":
         raise HTTPException(404, "No such background task")
     if outcome == "finished":

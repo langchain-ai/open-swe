@@ -64,7 +64,7 @@ async def test_replaces_unreachable_sandbox_when_replacement_allowed() -> None:
     # reconnecting to a sandbox that no longer exists.
     assert update_thread.await_args_list[-1].kwargs == {
         "thread_id": thread_id,
-        "metadata": {"sandbox_id": "sandbox-replacement"},
+        "metadata": {"sandbox_id": "sandbox-replacement", "sandbox_api": None},
     }
     SANDBOX_BACKENDS.clear()
 
@@ -256,7 +256,7 @@ async def test_deleted_sandbox_is_replaced_without_opting_in() -> None:
     create_replacement.assert_awaited_once()
     assert update_thread.await_args_list[-1].kwargs == {
         "thread_id": thread_id,
-        "metadata": {"sandbox_id": "sandbox-replacement"},
+        "metadata": {"sandbox_id": "sandbox-replacement", "sandbox_api": None},
     }
     # The thread binds to the sandbox only once it is created and initialized;
     # the identity write is joined inside the creation step.

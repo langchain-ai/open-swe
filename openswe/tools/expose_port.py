@@ -1,7 +1,7 @@
 from typing import Any
 
 from openswe.run_config import RunConfig
-from openswe.sandboxes.providers.langsmith import create_workspace_service_url
+from openswe.sandboxes.providers.langsmith import create_workspace_service_url, langsmith_box
 from openswe.sandboxes.state import get_sandbox_backend, unwrap_sandbox_backend
 
 
@@ -15,9 +15,9 @@ async def expose_port(port: int) -> dict[str, Any]:
         raise ValueError("no thread_id in run config")
 
     backend_proxy = await get_sandbox_backend(thread_id)
-    backend = unwrap_sandbox_backend(backend_proxy)
-    url = await create_workspace_service_url(backend.id, port)
+    backend = langsmith_box(unwrap_sandbox_backend(backend_proxy))
+    url = await create_workspace_service_url(backend, port)
     if unwrap_sandbox_backend(backend_proxy) is not backend:
         raise RuntimeError("sandbox changed while creating the service URL; retry")
 
-    return {"url": url, "port": port}
+    return {"url": url, "port": port, "jwks_url": backend.api.jwks_url}

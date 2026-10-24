@@ -7,6 +7,7 @@ from pydantic import BaseModel
 
 from openswe.monitors.budget import MAX_EVENTS, MAX_STARTS, MonitorBudget
 from openswe.monitors.sandbox import MonitorState, SandboxMonitors
+from openswe.sandboxes.ref import SandboxRef
 from openswe.threads.access import _readable_thread_metadata
 from openswe.threads.diffs import connect_sandbox
 from openswe.threads.summary import _assert_thread_promptable
@@ -58,14 +59,14 @@ async def get_dashboard_thread_background_work(
     _assert_thread_promptable(metadata, login)
     commands_running = _tracked(metadata, RUNNING_BACKGROUND_TASKS_KEY)
     monitors_running = _tracked(metadata, RUNNING_MONITORS_KEY)
-    sandbox_id = metadata.get("sandbox_id")
-    if not (commands_running or monitors_running) or not isinstance(sandbox_id, str):
+    bound = SandboxRef.of(metadata)
+    if not (commands_running or monitors_running) or bound is None:
         return BackgroundWork()
     try:
-        sandbox = await connect_sandbox(sandbox_id, thread_id=thread_id)
+        sandbox = await connect_sandbox(bound, thread_id=thread_id)
     except Exception as exc:  # noqa: BLE001
         logger.exception(
-            "Could not connect to sandbox for background work", extra={"sandbox": sandbox_id}
+            "Could not connect to sandbox for background work", extra={"sandbox": bound.id}
         )
         raise HTTPException(503, "Could not connect to the workspace.") from exc
     work = BackgroundWork()

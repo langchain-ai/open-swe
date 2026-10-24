@@ -89,6 +89,64 @@ async def test_mda_owns_new_threads_and_its_own_boxes(
     assert sandbox.create.extra_fields == {"preserve_memory_on_stop": True}
 
 
+_DEPLOYMENT_API = "https://api.smith.example"
+_NEW_REGION_API = "https://aws.api.smith.example"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("metadata", "api", "snapshot_id"),
+    [
+        # A thread's first box goes to the new sandbox region, which cannot boot the old snapshot.
+        ({}, _NEW_REGION_API, None),
+        # One bound before regions were recorded stays in the deployment's LangSmith.
+        ({"sandbox_id": "mda-box", "sandbox_owner": "mda"}, None, "snap-1"),
+        (
+            {"sandbox_id": "mda-box", "sandbox_owner": "mda", "sandbox_api": _NEW_REGION_API},
+            _NEW_REGION_API,
+            None,
+        ),
+    ],
+)
+async def test_mda_keeps_each_box_in_the_langsmith_it_lives_in(
+    monkeypatch, metadata: dict[str, str], api: str | None, snapshot_id: str | None
+) -> None:
+    from openswe.sandboxes.lifecycle import bind_mda_sandbox
+    from openswe.sandboxes.managed import ManagedSandbox
+
+    # Captured before regions were recorded, so in the deployment's LangSmith.
+    workspace = Workspace(slug="default", snapshot_status="ready", snapshot_id="snap-1")
+    updates: list[dict[str, object]] = []
+
+    async def load(slug: str | None) -> Workspace:
+        return workspace
+
+    async def read_metadata(thread_id: str) -> dict[str, object]:
+        return {**metadata, **(updates[-1] if updates else {})}
+
+    async def write_metadata(*, thread_id: str, metadata: dict[str, object]) -> None:
+        updates.append(metadata)
+
+    monkeypatch.setenv("SANDBOX_TYPE", "langsmith")
+    monkeypatch.setenv("LANGSMITH_ENDPOINT", _DEPLOYMENT_API)
+    monkeypatch.setenv("NEW_SANDBOX_REGION_ENDPOINT", _NEW_REGION_API)
+    monkeypatch.setenv("NEW_SANDBOX_REGION_API_KEY", "lsv2-new-region-key")
+    monkeypatch.setattr("openswe.sandboxes.lifecycle.load_workspace", load)
+    monkeypatch.setattr("openswe.sandboxes.managed.get_sandbox_metadata", read_metadata)
+    monkeypatch.setattr("openswe.sandboxes.lifecycle.get_sandbox_metadata", read_metadata)
+    monkeypatch.setattr("openswe.sandboxes.lifecycle.client.threads.update", write_metadata)
+    monkeypatch.setattr("openswe.sandboxes.lifecycle.maybe_start_update", _no_update)
+
+    sandbox = await ManagedSandbox.for_thread("thread-1", None)
+    assert sandbox is not None
+    assert sandbox.api == api
+    assert sandbox.create.snapshot_id == snapshot_id
+
+    # The box MDA then reports is recorded where it was told to open it.
+    await bind_mda_sandbox("thread-1", "mda-box" if not metadata else "replaced-box")
+    assert updates[-1]["sandbox_api"] == (api or _DEPLOYMENT_API)
+
+
 @pytest.mark.asyncio
 @pytest.mark.parametrize(
     ("metadata", "reported", "update"),
@@ -99,6 +157,7 @@ async def test_mda_owns_new_threads_and_its_own_boxes(
             {
                 "sandbox_owner": "mda",
                 "sandbox_id": "mda-box",
+                "sandbox_api": "https://api.smith.langchain.com",
                 "sandbox_base_proxy_config": {"rules": []},
             },
         ),
@@ -112,6 +171,7 @@ async def test_mda_owns_new_threads_and_its_own_boxes(
             {
                 "sandbox_owner": "mda",
                 "sandbox_id": "mda-box",
+                "sandbox_api": "https://api.smith.langchain.com",
                 "sandbox_base_proxy_config": {"rules": []},
             },
         ),
@@ -144,6 +204,8 @@ async def test_the_backend_binds_the_box_mda_reports(
     monkeypatch.setattr("openswe.sandboxes.lifecycle.get_sandbox_metadata", read_metadata)
     monkeypatch.setattr("openswe.sandboxes.lifecycle.client.threads.update", write_metadata)
     monkeypatch.setattr("openswe.sandboxes.lifecycle.maybe_start_update", _no_update)
+    monkeypatch.setenv("LANGSMITH_ENDPOINT", "https://api.smith.langchain.com")
+    monkeypatch.delenv("NEW_SANDBOX_REGION_ENDPOINT", raising=False)
 
     await bind_mda_sandbox("thread-1", reported)
 

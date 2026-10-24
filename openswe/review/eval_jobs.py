@@ -381,10 +381,12 @@ async def _launch_sandbox(
     API keys and the report token never enter the sandbox: its proxy injects
     them on the wire.
     """
-    from openswe.sandboxes.providers.langsmith import get_async_sandbox_client
+    from openswe.sandboxes.providers.langsmith_api import SandboxAPI
 
     api_key = ENV.LANGSMITH_API_KEY.get()
     endpoint = ENV.LANGSMITH_ENDPOINT.get().rstrip("/")
+    # The box, and so its self-stop, is in the new sandbox region, which may be another LangSmith.
+    boxes = SandboxAPI.new_sandbox_region()
     langgraph_url = config["langgraph_url"] or ENV.LANGGRAPH_URL.get()
     gateway = gateway_base_url()
     gateway_key = ENV.LANGSMITH_GATEWAY_API_KEY.optional() or api_key
@@ -399,12 +401,13 @@ async def _launch_sandbox(
     rules = _proxy_rules(
         [
             (endpoint, "x-api-key", api_key),
+            (boxes.endpoint, "x-api-key", boxes.headers()["X-API-Key"]),
             (langgraph_url, "x-api-key", api_key),
             (gateway, "x-api-key", gateway_key),
             (report_url, REPORT_TOKEN_HEADER, report_token),
         ]
     )
-    async with get_async_sandbox_client() as client:
+    async with boxes.client() as client:
         sandbox = await client.create_sandbox(
             idle_ttl_seconds=0,
             delete_after_stop_seconds=DELETE_AFTER_STOP_SECONDS,
@@ -412,7 +415,7 @@ async def _launch_sandbox(
             run_config={"env_vars": env},
             timeout=180,
         )
-        stop_url = f"{endpoint}/v2/sandboxes/boxes/{sandbox.name}/stop"
+        stop_url = f"{boxes.endpoint}/boxes/{sandbox.name}/stop"
         try:
             await sandbox.run(
                 _sandbox_command(ref, _harness_args(config, limit), stop_url),

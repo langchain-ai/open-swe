@@ -22,6 +22,7 @@ from openswe.prompts import prompt
 from openswe.review_guide.github import fetch_head
 from openswe.review_guide.messages import pause, refresh_progress
 from openswe.review_guide.sessions import GuideMode, ReviewGuideSession
+from openswe.sandboxes.ref import SANDBOX_API_METADATA_KEY
 from openswe.sandboxes.tool_access import (
     SANDBOX_HOST_THREAD_KEY,
     SANDBOX_PROXY_CONFIG_METADATA_KEY,
@@ -214,6 +215,7 @@ class _ThreadCopy(BaseModel):
 
 class _SourceMetadata(BaseModel):
     sandbox_id: str | None = None
+    sandbox_api: str | None = Field(default=None, alias=SANDBOX_API_METADATA_KEY)
     proxy_config: object = Field(default=None, alias=SANDBOX_PROXY_CONFIG_METADATA_KEY)
 
 
@@ -244,6 +246,7 @@ async def _fork(
                     {
                         SANDBOX_HOST_THREAD_KEY: host,
                         "sandbox_id": source.sandbox_id,
+                        SANDBOX_API_METADATA_KEY: source.sandbox_api,
                         SANDBOX_PROXY_CONFIG_METADATA_KEY: source.proxy_config,
                     }
                     if source.sandbox_id

@@ -108,6 +108,8 @@ class _LangSmithSandboxArgs(BaseModel):
 
     idle_ttl_seconds: int | None = None
     api_key: str | None = None
+    # The sandbox API of another LangSmith (region) the box lives in, with that LangSmith's key.
+    api_endpoint: str | None = None
     default_timeout: int | None = None
     snapshot_name: str | None = None
     snapshot_id: str | None = None
@@ -123,6 +125,7 @@ def define_sandbox(
     _openswe_no_manage_proxy: bool = False,
     idle_ttl_seconds: int | None = None,
     api_key: str | None = None,
+    api_endpoint: str | None = None,
     default_timeout: int | None = None,
     snapshot_name: str | None = None,
     snapshot_id: str | None = None,
@@ -137,6 +140,7 @@ def define_sandbox(
             **options,
             "idle_ttl_seconds": idle_ttl_seconds,
             "api_key": api_key,
+            "api_endpoint": api_endpoint,
             "default_timeout": default_timeout,
             "snapshot_name": snapshot_name,
             "snapshot_id": snapshot_id,

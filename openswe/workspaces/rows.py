@@ -49,6 +49,9 @@ class WorkspaceRow(Base):
         JSONB, server_default=text("'{}'::jsonb"), default_factory=dict
     )
     snapshot_id: Mapped[str | None] = mapped_column(default=None)
+    # The LangSmith API root the snapshot lives at; NULL for the deployment's own.
+    snapshot_api: Mapped[str | None] = mapped_column(default=None)
+    old_region_snapshot_id: Mapped[str | None] = mapped_column(default=None)
     snapshot_name: Mapped[str | None] = mapped_column(default=None)
     # The status columns are plain text with a database check; the record model
     # is where their Literal types live.
@@ -124,6 +127,8 @@ def to_workspace(
             "fs_capacity_bytes": row.fs_capacity_bytes,
             "create_params": row.create_params,
             "snapshot_id": row.snapshot_id,
+            "snapshot_api": row.snapshot_api,
+            "old_region_snapshot_id": row.old_region_snapshot_id,
             "snapshot_name": row.snapshot_name,
             "snapshot_status": row.snapshot_status,
             "status_message": row.status_message,
@@ -193,6 +198,8 @@ def apply_state(row: WorkspaceRow, record: Workspace) -> None:
     was actually published under.
     """
     row.snapshot_id = record.snapshot_id
+    row.snapshot_api = record.snapshot_api
+    row.old_region_snapshot_id = record.old_region_snapshot_id
     row.snapshot_name = record.snapshot_name
     row.snapshot_status = record.snapshot_status
     row.status_message = record.status_message
