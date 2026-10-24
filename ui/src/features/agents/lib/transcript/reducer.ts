@@ -537,12 +537,20 @@ function putMessage(
   turn: TranscriptTurnState,
   message: TranscriptMessageState
 ): void {
+  // A message stays in the turn that first recorded it, as the server's
+  // projection keeps it: the run that continues a steered turn opens a turn of
+  // its own with the steered turn's message, which must not show it twice.
+  const recorded = draft.state.messages[message.messageId]
+  const home = (recorded && draft.state.turns[recorded.turnId]) || turn
   draft.state = {
     ...draft.state,
-    messages: { ...draft.state.messages, [message.messageId]: message },
+    messages: {
+      ...draft.state.messages,
+      [message.messageId]: { ...message, turnId: home.turnId },
+    },
   }
-  draft.touched.add(turn.turnId)
-  addItem(draft, turn, { kind: "message", id: message.messageId })
+  draft.touched.add(home.turnId)
+  addItem(draft, home, { kind: "message", id: message.messageId })
   if (message.role !== "human") return
   // Only a human message's own text can declare an entity, and a write that
   // declares none keeps the very same Map: every per-turn render cache keys on
@@ -992,6 +1000,7 @@ function buildHumanMessage(
             entity?.displayName ??
             (entity?.handle ? `@${entity.handle}` : undefined) ??
             row.senderName,
+          structuredSenderLogin: row.senderLogin ?? undefined,
           structuredSenderNote:
             entity?.senderType !== "bot" &&
             entity?.openSweAccount === "unlinked"

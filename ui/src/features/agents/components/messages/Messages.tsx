@@ -125,8 +125,10 @@ export const Messages = memo(function MessagesComponent({
   const {
     scrollRef,
     contentRef,
+    reserveRef,
     showScrollToBottom,
     scrollToBottom,
+    pinMessage,
     capturePrependAnchor,
   } = useTranscriptScroll({ scrollKey, messages, isStreaming })
 
@@ -146,11 +148,11 @@ export const Messages = memo(function MessagesComponent({
 
   useEffect(() => {
     if (!scrollControlRef) return
-    scrollControlRef.current = { scrollToBottom }
+    scrollControlRef.current = { scrollToBottom, pinMessage }
     return () => {
       scrollControlRef.current = null
     }
-  }, [scrollToBottom, scrollControlRef])
+  }, [pinMessage, scrollToBottom, scrollControlRef])
 
   useEffect(() => {
     onShowScrollToBottomChange?.(showScrollToBottom)
@@ -235,11 +237,7 @@ export const Messages = memo(function MessagesComponent({
                 pollWhileActive={pollWorkflowApprovalsWhileActive}
               />
             )}
-            <QueuedMessages
-              queuedMessages={queuedMessages}
-              onRemove={onRemoveQueuedMessage}
-            />
-            {footer}
+            {/* Above the queue: the live run's activity, then what waits for it. */}
             <ThinkingSpinner
               isActive={
                 !!reconnectLabel ||
@@ -259,7 +257,13 @@ export const Messages = memo(function MessagesComponent({
                 (isOffloading ? "Offloading conversation..." : activityLabel)
               }
             />
+            <QueuedMessages
+              queuedMessages={queuedMessages}
+              onRemove={onRemoveQueuedMessage}
+            />
+            {footer}
           </div>
+          <div ref={reserveRef} aria-hidden />
         </div>
 
         {scrollButtonSlot === "internal" && showScrollToBottom && (
