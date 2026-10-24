@@ -224,6 +224,8 @@ export interface Message {
   structuredSenderId?: string
   structuredSenderKind?: "person" | "system"
   structuredSenderName?: string
+  /** GitHub login of a dashboard sender, so a pending message can borrow their label. */
+  structuredSenderLogin?: string
   structuredSenderNote?: string
   structuredSenderIsBot?: boolean
   structuredSurface?: string

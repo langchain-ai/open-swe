@@ -19,6 +19,8 @@ export interface LoadEarlier {
 
 export type MessagesScrollControl = {
   scrollToBottom: () => void
+  /** Hold a message the user is sending at the top while the reply fills in. */
+  pinMessage: (messageId: string) => void
 }
 
 export interface MessagesProps extends ApprovalCallbacks {
