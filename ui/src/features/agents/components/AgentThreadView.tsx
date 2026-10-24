@@ -64,6 +64,7 @@ import { useQuery, useQueryClient } from "@tanstack/react-query"
 import { toast } from "sonner"
 import {
   materializeImages,
+  pendingSenderName,
   visiblePendingMessages,
 } from "@/features/agents/lib/queuedMessages"
 import type { QueuedTurn } from "@/features/agents/lib/transcript/reducer"
@@ -290,16 +291,22 @@ export function AgentThreadView({
       images: Array<ImageChunk>,
       options?: SubmitOptions
     ) => {
-      scrollControlRef.current?.scrollToBottom()
       // While a run is live the message either waits for it as a queued run of
       // its own, or goes straight in and steers it. The preference sets the
       // default; ⌘↵ flips it for one message.
       const queue =
         (followUpBehavior === "queue") !== (options?.alternate === true)
+      const enqueue = isStreaming && queue
+      const offload = content.trim() === "/offload"
       const messageId = crypto.randomUUID()
+      // A message that goes straight into the transcript sits at the top while
+      // the reply fills in below it. A queued one stays in the queue until its
+      // run starts, and an offload sends no message at all.
+      if (offload) scrollControlRef.current?.scrollToBottom()
+      else if (!enqueue) scrollControlRef.current?.pinMessage(messageId)
       const carriesAutoSelection = autoIntent.claim(
         messageId,
-        content.trim() !== "/offload" && (!isStreaming || queue)
+        !offload && (!isStreaming || queue)
       )
       const restoreAutoSelection = () => autoIntent.restore(messageId)
       try {
@@ -311,7 +318,7 @@ export function AgentThreadView({
           model_id: activeSelection?.modelId ?? null,
           effort: activeSelection?.effort ?? null,
           model_selection_changed: carriesAutoSelection,
-          enqueue: isStreaming && queue,
+          enqueue,
           ...(carriesAutoSelection
             ? { onStartError: restoreAutoSelection }
             : {}),
@@ -567,9 +574,10 @@ export function AgentThreadView({
     () =>
       visiblePendingMessages(
         thread.pendingMessages?.filter((message) => !message.queued),
-        [...baseMessages, ...queued.map((entry) => entry.message)]
+        [...baseMessages, ...queued.map((entry) => entry.message)],
+        pendingSenderName(baseMessages, login)
       ),
-    [baseMessages, queued, thread.pendingMessages]
+    [baseMessages, login, queued, thread.pendingMessages]
   )
   const visibleMessages = useMemo(
     () => [...baseMessages, ...pendingMessages],
