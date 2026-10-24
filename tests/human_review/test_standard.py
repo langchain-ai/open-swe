@@ -933,3 +933,54 @@ async def test_only_auto_merge_requests_merge_when_approved(
         assert request.detail == (
             "approval from @linus" if pending else "approved — awaiting manual merge"
         )
+
+
+@pytest.mark.parametrize("channel", ["", "#current", "#requested"])
+async def test_existing_request_checks_explicit_channel_before_updating_summary(
+    channel: str, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from openswe.github.pull_request_status import PullRequestClient
+    from openswe.human_review import standard
+    from openswe.slack.channels import SlackChannel
+    from openswe.slack.client import GitHubPrRef
+
+    request = HumanReviewRequest(
+        pull_request_id=User().id,
+        head_sha="abc",
+        kind="standard",
+        thread_id="owner",
+        slack_channel_id="C_CURRENT",
+        tldr="Original summary",
+    )
+    monkeypatch.setattr(HumanReviewRequest, "active_for", AsyncMock(return_value=request))
+    monkeypatch.setattr(HumanReviewRequest, "get", AsyncMock(return_value=request))
+    monkeypatch.setattr(
+        SlackChannel,
+        "resolve",
+        AsyncMock(
+            return_value=SlackChannel(id="C_NEW" if channel == "#requested" else "C_CURRENT")
+        ),
+    )
+    monkeypatch.setattr(standard, "_permalink", AsyncMock(return_value="https://slack/card"))
+    monkeypatch.setattr(ReviewCard, "refresh", AsyncMock())
+
+    @asynccontextmanager
+    async def locked(*_: object) -> AsyncIterator[tuple[None, HumanReviewRequest]]:
+        yield None, request
+
+    monkeypatch.setattr(HumanReviewRequest, "locked", locked)
+    result = await standard._request_review(
+        GitHubPrRef(owner="lc", repo="repo", number=7, url="https://github.com/lc/repo/pull/7"),
+        MagicMock(spec=PullRequestClient),
+        standard.Origin(thread_id="owner"),
+        channel=channel,
+        inline_summary="Updated summary",
+    )
+    mismatch = channel == "#requested"
+    assert result.success and result.reused
+    assert result.request_id == str(request.id)
+    assert result.channel == "C_CURRENT"
+    assert result.channel_mismatch is mismatch
+    assert result.requested_channel == ("C_NEW" if mismatch else "")
+    assert result.summary_updated is not mismatch
+    assert request.tldr == ("Original summary" if mismatch else "Updated summary")
