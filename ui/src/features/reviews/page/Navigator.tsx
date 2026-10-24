@@ -3,13 +3,23 @@ import {
   CheckIcon,
   MagnifyingGlassRegularIcon,
 } from "@langchain/macaw-components/icons"
+import { IconButton } from "@langchain/macaw-components/IconButton"
 import { Input } from "@langchain/macaw-components/Input"
 import { ProgressBar } from "@langchain/macaw-components/ProgressBar"
 import { Skeleton } from "@langchain/macaw-components/Skeleton"
 import { useQuery } from "@tanstack/react-query"
-import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react"
+import {
+  memo,
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  type ReactNode,
+} from "react"
 import { ChatCircleIcon } from "@phosphor-icons/react/dist/ssr/ChatCircle"
 import { FolderSimpleIcon } from "@phosphor-icons/react/dist/ssr/FolderSimple"
+import { SquareSplitVerticalIcon } from "@phosphor-icons/react/dist/ssr/SquareSplitVertical"
 
 import type { ReviewDiffFile, ReviewWalkthrough } from "@/lib/api"
 import { cn } from "@/lib/utils"
@@ -100,11 +110,13 @@ function buildTree(files: ReadonlyArray<ReviewDiffFile>): Array<TreeNode> {
   return compacted.name ? [compacted] : compacted.children
 }
 
-/** The left rail: every file with what's been read and what needs attention, or the walkthrough's steps. */
+/** The left rail: the walkthrough's steps and every file with what's been read and what needs attention, behind tabs or stacked. */
 export function Navigator({ pr }: { pr: PullRequestRef }) {
   const files = useQuery(reviewQueries.diff(pr)).data?.files
   const walkthrough = useQuery(reviewQueries.detail(pr)).data?.walkthrough
   const order = useReviewPage((state) => state.order)
+  const stacked = useReviewPage((state) => state.navigatorLayout === "stacked")
+  const toggleLayout = useReviewPage((state) => state.toggleNavigatorLayout)
   const viewedCount = useReviewPage(
     (state) => files?.filter((file) => state.viewed.has(file.path)).length ?? 0
   )
@@ -115,11 +127,32 @@ export function Navigator({ pr }: { pr: PullRequestRef }) {
     <nav aria-label="Files" className="flex h-full min-h-0 flex-col">
       <div className="flex flex-col gap-space-2 px-space-3 pt-space-3 pb-space-2">
         {steps > 0 && (
-          <ReadingOrderTabs
-            steps={steps}
-            files={files?.length}
-            className="w-full [&>*]:flex-1"
-          />
+          <div className="flex items-center gap-space-2">
+            {stacked ? (
+              <span className="flex-1 text-xs text-secondary">
+                Walkthrough and files
+              </span>
+            ) : (
+              <ReadingOrderTabs
+                steps={steps}
+                files={files?.length}
+                className="flex-1 [&>*]:flex-1 [&>*]:whitespace-nowrap"
+              />
+            )}
+            <IconButton
+              icon={SquareSplitVerticalIcon}
+              label={
+                stacked
+                  ? "Show the walkthrough and files as tabs"
+                  : "Show the walkthrough and files together"
+              }
+              aria-pressed={stacked}
+              size="sm"
+              variant={stacked ? "outlined" : "plain"}
+              color={stacked ? "primary" : "secondary"}
+              onClick={toggleLayout}
+            />
+          </div>
         )}
         {files && (
           <>
@@ -147,12 +180,54 @@ export function Navigator({ pr }: { pr: PullRequestRef }) {
             />
           ))}
         </div>
+      ) : walkthrough && steps > 0 && stacked ? (
+        <>
+          <NavigatorSection
+            title="Walkthrough"
+            count={steps}
+            className="max-h-1/2"
+          >
+            <StepList files={files} walkthrough={walkthrough} />
+          </NavigatorSection>
+          <NavigatorSection
+            title="Files changed"
+            count={files.length}
+            className="flex-1"
+          >
+            <FileTree files={files} markers={markers} />
+          </NavigatorSection>
+        </>
       ) : order === "guide" && walkthrough && steps > 0 ? (
         <StepList files={files} walkthrough={walkthrough} />
       ) : (
         <FileTree files={files} markers={markers} />
       )}
     </nav>
+  )
+}
+
+function NavigatorSection({
+  title,
+  count,
+  className,
+  children,
+}: {
+  title: string
+  count: number
+  className: string
+  children: ReactNode
+}) {
+  return (
+    <section
+      aria-label={title}
+      className={cn("flex min-h-0 flex-col border-t border-default", className)}
+    >
+      <h3 className="flex items-center px-space-4 py-space-1 text-xxs font-medium text-tertiary uppercase">
+        {title}
+        <span className="ml-auto tabular-nums">{count}</span>
+      </h3>
+      {children}
+    </section>
   )
 }
 
