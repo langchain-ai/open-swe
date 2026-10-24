@@ -28,6 +28,7 @@ PausedNotice = Callable[["JsonValue", "HttpDelivery"], "Awaitable[None]"]
 
 _provider_by_name: dict[str, str] = {}
 _provider_config_by_name: dict[str, JsonObject] = {}
+_replies_none: set[str] = set()
 
 
 def channel_provider_for_name(name: str) -> str | None:
@@ -38,10 +39,17 @@ def channel_provider_config_for_name(name: str) -> JsonObject | None:
     return _provider_config_by_name.get(name)
 
 
+def channel_auto_replies_for_name(name: str) -> bool:
+    """Whether the channel posts a run's final answer: ``False`` only for one
+    declared with ``reply="none"``, which leaves replying to the agent."""
+    return name not in _replies_none
+
+
 _by_name: dict[str, MessagingFactory] = {}
 _paused_notice_by_name: dict[str, PausedNotice] = {}
 
 __all__ = [
+    "channel_auto_replies_for_name",
     "channel_provider_config_for_name",
     "messaging_transport_for_name",
     "paused_notice_for_name",
@@ -75,16 +83,24 @@ def _register_messaging_sources(sources: Sequence[object]) -> None:
         if isinstance(kind, str) and kind.strip():
             _provider_by_name[name] = kind
         _provider_config_by_name.pop(name, None)
+        if getattr(source, "reply", None) == "none":
+            _replies_none.add(name)
+        else:
+            _replies_none.discard(name)
         requirements = getattr(source, "requirements", None)
         if callable(requirements):
             manifest = requirements(name)
             if isinstance(manifest, Mapping):
-                provider = manifest.get("provider")
-                if isinstance(provider, str) and provider.strip():
-                    _provider_by_name[name] = provider
-                config = manifest.get("providerConfig")
-                if isinstance(config, Mapping):
-                    _provider_config_by_name[name] = cast("JsonObject", config)
+                _register_manifest(name, manifest)
+
+
+def _register_manifest(name: str, manifest: Mapping[str, object]) -> None:
+    provider = manifest.get("provider")
+    if isinstance(provider, str) and provider.strip():
+        _provider_by_name[name] = provider
+    config = manifest.get("providerConfig")
+    if isinstance(config, Mapping):
+        _provider_config_by_name[name] = cast("JsonObject", config)
 
 
 def _register_paused_notice(name: str, source: object) -> None:

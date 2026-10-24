@@ -94,6 +94,7 @@ if TYPE_CHECKING:
         JsonValue,
     )
     from managed_deepagents._channels.run_input import ChannelRunResult
+    from managed_deepagents._channels.types import ChannelReply
 
 
 def linear_channel(
@@ -101,6 +102,7 @@ def linear_channel(
     on_event: LinearHandlers | None = None,
     app: LinearAppOptions | None = None,
     multitask_strategy: MultitaskStrategy = "enqueue",
+    reply: ChannelReply = "auto",
     sessions: bool = True,
     ignore_bots: bool = True,
     on_finish: EventFinished[LinearEvent, LinearChannelThread] | None = None,
@@ -122,6 +124,10 @@ def linear_channel(
             run and starts after it, ``interrupt`` cancels the run, keeping its
             progress, and starts at once, ``rollback`` cancels it and discards
             its progress, and ``reject`` starts nothing.
+        reply: Whether the channel posts the run's final answer, as a comment
+            or the session's response: ``"auto"`` (the default) or ``"none"``,
+            to leave replying to the agent. Session acknowledgements, Stop and
+            error notices still post.
         sessions: Answer Linear agent sessions, which open when someone
             mentions the app or delegates an issue to it. Without a handler, a
             new session runs with Linear's prompt for it (``promptContext``), and
@@ -195,6 +201,7 @@ def linear_channel(
         ),
         provider_config=provider_config,
         multitask_strategy=multitask_strategy,
+        reply=reply,
     )
     channel.paused_notice = _notify_paused
     if app is not None and "icon" in app:

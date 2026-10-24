@@ -22,6 +22,7 @@ from managed_deepagents._channels.assistant_text import (
 )
 from managed_deepagents._channels.binding import _TriggerTargetModel
 from managed_deepagents._channels.messaging_registry import (
+    channel_auto_replies_for_name,
     messaging_transport_for_name,
     paused_notice_for_name,
 )
@@ -71,6 +72,9 @@ async def deliver_run_result(
         return
     # A run stopped at a breakpoint has not finished, and an async subagent never answers.
     if final.next or subagent:
+        return
+    # A channel declared with ``reply="none"`` leaves replying to the agent.
+    if not channel_auto_replies_for_name(binding["name"]):
         return
     values = final.values if isinstance(final.values, Mapping) else {}
     output = {"messages": values.get("messages")}

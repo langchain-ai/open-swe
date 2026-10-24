@@ -29,6 +29,7 @@ from managed_deepagents._channels.http.types import (
     ParseHttpRequest,
     VerifyHttpRequest,
 )
+from managed_deepagents._channels.types import CHANNEL_REPLIES
 from managed_deepagents._ingress_runs import MULTITASK_STRATEGIES
 
 if TYPE_CHECKING:
@@ -37,7 +38,11 @@ if TYPE_CHECKING:
     from managed_deepagents._channels.http.types import JsonValue
     from managed_deepagents._channels.manifest import ChannelManifest
     from managed_deepagents._channels.messaging_registry import PausedNotice
-    from managed_deepagents._channels.types import ChannelMessage, PostedChannelMessage
+    from managed_deepagents._channels.types import (
+        ChannelMessage,
+        ChannelReply,
+        PostedChannelMessage,
+    )
 
 
 class HttpChannel(Channel):
@@ -52,6 +57,7 @@ class HttpChannel(Channel):
         on_error: HttpOnError | None = None,
         input: HttpInput | None = None,
         multitask_strategy: MultitaskStrategy = "enqueue",
+        reply: ChannelReply = "auto",
         on_received: HttpOnReceived | None = None,
         on_finish: HttpOnFinish | None = None,
     ) -> None:
@@ -59,7 +65,10 @@ class HttpChannel(Channel):
             raise TypeError(
                 "channel multitask_strategy must be enqueue, interrupt, rollback or reject"
             )
+        if reply not in CHANNEL_REPLIES:
+            raise TypeError("channel reply must be auto or none")
         self.multitask_strategy: MultitaskStrategy = multitask_strategy
+        self.reply: ChannelReply = reply
         self.provider_config = provider_config or {}
         self.kind = _nonblank(provider, "channels.http provider")
         self.verify = verify
@@ -88,7 +97,7 @@ class HttpChannel(Channel):
             "name": name,
             "provider": self.kind,
             "eventsPath": f"/channels/{name}/events",
-            "autoReply": self.post is not None,
+            "autoReply": self.post is not None and self.reply != "none",
             "requiredPermissions": [],
             "requiredEnv": [],
             "providerConfig": self.provider_config,
@@ -137,6 +146,7 @@ def http_channel(
     on_error: HttpOnError | None = None,
     input: HttpInput | None = None,
     multitask_strategy: MultitaskStrategy = "enqueue",
+    reply: ChannelReply = "auto",
     on_received: HttpOnReceived | None = None,
     on_finish: HttpOnFinish | None = None,
 ) -> HttpChannel:
@@ -166,6 +176,7 @@ def http_channel(
         on_error=on_error,
         input=input,
         multitask_strategy=multitask_strategy,
+        reply=reply,
         on_received=on_received,
         on_finish=on_finish,
     )

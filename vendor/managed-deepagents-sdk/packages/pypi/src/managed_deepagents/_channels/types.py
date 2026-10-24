@@ -103,6 +103,16 @@ class ScheduleEvent(TypedDict):
     new_thread: ReadOnly[bool]
 
 
+ChannelReply: TypeAlias = Literal["auto", "none"]
+"""Whether a channel posts the run's final answer to the conversation:
+``"auto"`` (the default) posts the agent's last reply once the run succeeds,
+and ``"none"`` leaves replying to the agent, through ``runtime.channel.post``
+or its own tools. Either way the channel keeps its other updates, such as
+Slack's status and reactions."""
+
+CHANNEL_REPLIES: frozenset[ChannelReply] = frozenset({"auto", "none"})
+"""Every ``ChannelReply``, for channels that check one."""
+
 ChannelEvent: TypeAlias = (
     MessageEvent | UserPromptResponseEvent | InterruptResumeEvent | ScheduleEvent
 )

@@ -801,7 +801,8 @@ async def _observe_accepted_run(
     multitask_strategy: MultitaskStrategy | None = None,
     newer_run: NewerRunFn | None = None,
 ) -> HttpFinish:
-    """Observe a started run, answer in Slack, and say how the delivery finished."""
+    """Observe a started run and say how the delivery finished; the run itself
+    posts its answer (``_channels/delivery.py``)."""
     was_replaced = functools.partial(
         _replaced_by_newer_message,
         event,

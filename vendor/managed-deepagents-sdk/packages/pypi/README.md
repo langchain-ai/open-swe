@@ -646,6 +646,21 @@ no longer listed is marked complete, since Slack can't remove one, and the
 plan reads "Done" when the run ends. Other apps show the line, or the first
 step not yet done, as the thread's status. Without `status`, nothing changes.
 
+### Replying from the agent
+
+The channel posts the agent's last reply in the thread once a run succeeds.
+`reply="none"` leaves replying to the agent instead, for an agent that posts
+its own messages, with `runtime.channel.post` or its own Slack client, or
+that answers somewhere else:
+
+```python
+channels.slack(reply="none")
+```
+
+Reactions, the status, Stop and `onFinish` work as before. `channels.linear`
+and `channels.http` take the same option. Deploying `reply="none"` needs an
+`mda` CLI from this release; an older one refuses it.
+
 ## GitHub channels
 
 The GitHub channel is a thin HTTP adapter. Add a channel file with event handlers:
@@ -992,6 +1007,10 @@ The channel reads the webhook signing secret from Agent Auth, or from
 connection `mda/linear-app/<deployment-id>`, installed with `actor=app`; read
 its token with `await connections.get("mda/linear-token", {"type": "agent"})` to call Linear's API from tools.
 
+`reply="none"` leaves the run's answer to the agent: the channel doesn't post
+it as a comment or in the session. Session acknowledgements, Stop and error
+notices still post.
+
 ## HTTP channels
 
 Use `channels.http(provider=..., verify=..., parse=..., post=...)` for a
@@ -1045,7 +1064,8 @@ adapter without conversion. If `post` is omitted, the channel can receive events
 and exposes facts, but has no runtime `post` method. The webhook path is
 `/channels/<name>/events`, where `<name>` is the channel file name. An existing
 Photon webhook needs no URL change when the deployment host and channel name
-stay the same.
+stay the same. `reply="none"` turns automatic replies off, so the agent replies
+itself; `post` still serves `runtime.channel.post` and error notices.
 
 If a run fails, MDA uses `post` to send “Something went wrong
 while processing your request.” A failed send is logged without another attempt.

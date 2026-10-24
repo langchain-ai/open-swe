@@ -289,17 +289,13 @@ pub(crate) fn prepare(
         name,
         provider: _provider,
         transport: _transport,
-        auto_reply,
+        // Either value deploys: the channel itself posts the run's answer, or
+        // with `reply: "none"` leaves it to the agent; Trigger Server never does.
+        auto_reply: _auto_reply,
         required_permissions,
         required_env,
         provider_config,
     } = serde_json::from_value(value.clone()).context("Slack channel configuration is invalid.")?;
-    if !auto_reply {
-        bail!(
-            "Slack channel configuration requires {}=true.",
-            language.ident("autoReply", "auto_reply")
-        );
-    }
     if !required_permissions.is_empty() {
         bail!(
             "Slack channel configuration requires {}=[].",
@@ -1035,14 +1031,14 @@ mod tests {
     }
 
     #[test]
-    fn prepare_rejects_a_trigger_channel_with_auto_reply_disabled() {
+    fn prepare_accepts_a_trigger_channel_that_leaves_replying_to_the_agent() {
         let mut manifest = requirements().remove("slack").unwrap();
         manifest["autoReply"] = json!(false);
         let requirements = [("slack".to_string(), manifest)].into_iter().collect();
 
-        let error = prepare(&requirements, true).unwrap_err();
+        let prepared = prepare(&requirements, true).unwrap().unwrap();
 
-        assert!(error.to_string().contains("autoReply=true"));
+        assert_eq!(prepared.name, "slack");
     }
 
     #[test]

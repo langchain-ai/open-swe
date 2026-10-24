@@ -37,7 +37,7 @@ if TYPE_CHECKING:
         TriggerMessageRoute,
     )
     from managed_deepagents._channels.trigger.types import TriggerChannelMessageEvent
-    from managed_deepagents._channels.types import JsonValue
+    from managed_deepagents._channels.types import ChannelReply, JsonValue
     from managed_deepagents._ingress_runs import MultitaskStrategy
 
 _SLACK_APP_NAME_RE = re.compile(r"^[a-zA-Z0-9_.\- ]+$")
@@ -90,6 +90,7 @@ class TriggerSlackChannel(Channel):
         status: SlackStatusChoice | None = None,
         on_event: Mapping[str, SlackEventCallback] | None = None,
         multitask_strategy: MultitaskStrategy = "enqueue",
+        reply: ChannelReply = "auto",
         on_finish: EventFinished[SlackEvent, SlackChannelThread] | None = None,
     ) -> None:
         self.app = app
@@ -99,6 +100,7 @@ class TriggerSlackChannel(Channel):
         self.status = status
         self.on_event = on_event
         self.multitask_strategy = multitask_strategy
+        self.reply = reply
         self.on_finish = on_finish
         self._decided: DecidedSlackEvents | None = None
 
@@ -205,7 +207,8 @@ class TriggerSlackChannel(Channel):
             "name": name,
             "provider": "slack",
             "transport": self.transport,
-            "autoReply": True,
+            # Deploy reads it; ``reply`` lives in no provider config older CLIs reject.
+            "autoReply": self.reply != "none",
             "requiredPermissions": [],
             "requiredEnv": [],
             "providerConfig": provider_config,
@@ -398,6 +401,7 @@ def slack_channel(
     status: SlackStatusChoice | None = None,
     on_event: SlackHandlers | None = None,
     multitask_strategy: MultitaskStrategy = "enqueue",
+    reply: ChannelReply = "auto",
     on_finish: EventFinished[SlackEvent, SlackChannelThread] | None = None,
 ) -> TriggerSlackChannel:
     """Declare a Trigger Server-backed Slack channel.
@@ -452,6 +456,11 @@ def slack_channel(
             and starts after it, ``interrupt`` cancels the run, keeping its
             progress, and starts at once, ``rollback`` cancels it and discards
             its progress, and ``reject`` starts nothing.
+        reply: Whether the channel posts the run's final answer in the thread:
+            ``"auto"`` (the default) or ``"none"``, to leave replying to the
+            agent, through ``runtime.channel.post`` or its own tools. The
+            status, reactions and ``on_finish`` stay as they are. ``"none"``
+            needs an ``mda`` CLI that deploys it.
         on_finish: Called once when a message is done, with the ``SlackEvent``,
             its ``SlackChannelThread``, and how it finished: ``run`` (its run
             ended with ``run["status"]``, and ``interrupts`` lists the
@@ -477,12 +486,15 @@ def slack_channel(
     """
     if on_finish is not None and not callable(on_finish):
         raise TypeError("channels.slack(...) on_finish must be callable")
+    from managed_deepagents._channels.types import CHANNEL_REPLIES  # noqa: PLC0415
     from managed_deepagents._ingress_runs import MULTITASK_STRATEGIES  # noqa: PLC0415
 
     if multitask_strategy not in MULTITASK_STRATEGIES:
         raise ValueError(
             "channels.slack(...) multitask_strategy must be enqueue, interrupt, rollback or reject"
         )
+    if reply not in CHANNEL_REPLIES:
+        raise ValueError("channels.slack(...) reply must be auto or none")
     try:
         parsed = _TriggerSlackArgs.model_validate(
             {
@@ -519,6 +531,7 @@ def slack_channel(
         status=cast("SlackStatusChoice | None", parsed.status),
         on_event=_resolve_handlers(on_event),
         multitask_strategy=multitask_strategy,
+        reply=reply,
         on_finish=on_finish,
     )
 
