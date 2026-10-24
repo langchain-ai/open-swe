@@ -6,6 +6,24 @@ use serde_json::Value;
 
 use super::{humanize_error_body, Client, REQUEST_TIMEOUT, TENANT_HEADER};
 
+/// A channel setup request that may succeed when made again: it never reached
+/// Trigger Server, or Trigger Server or Slack was busy (a 5xx or 429).
+#[derive(Debug)]
+pub(crate) struct TransientSetupError(pub(crate) String);
+
+impl std::fmt::Display for TransientSetupError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(&self.0)
+    }
+}
+
+impl std::error::Error for TransientSetupError {}
+
+/// Whether a failed channel setup may succeed when asked again.
+pub(crate) fn is_transient_setup_error(error: &anyhow::Error) -> bool {
+    error.downcast_ref::<TransientSetupError>().is_some()
+}
+
 const SETUP_ERROR_FIELD_MAX_CHARS: usize = 512;
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -344,7 +362,10 @@ impl Client {
         if let Some(tenant_id) = &self.tenant_id {
             request = request.header(TENANT_HEADER, tenant_id);
         }
-        let response = request.send().context("Channel setup request failed.")?;
+        let response = request.send().map_err(|error| {
+            anyhow::Error::new(error)
+                .context(TransientSetupError("Channel setup request failed.".into()))
+        })?;
         let status = response.status();
         if !status.is_success() {
             let text = response.text().unwrap_or_default();
@@ -359,6 +380,9 @@ impl Client {
                         message = message.replace(secret.as_str(), "[REDACTED]");
                     }
                 }
+            }
+            if status.is_server_error() || status == StatusCode::TOO_MANY_REQUESTS {
+                return Err(TransientSetupError(message).into());
             }
             bail!("{message}");
         }

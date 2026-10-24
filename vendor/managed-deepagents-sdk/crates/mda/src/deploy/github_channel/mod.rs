@@ -37,7 +37,7 @@ use cliclack::log;
 use crate::connection::wait_for_oauth_session;
 use crate::deploy::channel_app::{
     self, agent_auth, env_app_notice, find_connection, is_interactive, override_value, AppSlugs,
-    SetupUi, AGENT_AUTH_URL_ENV,
+    SetupUi, WaitTick, AGENT_AUTH_URL_ENV,
 };
 use crate::error::is_cancellation;
 use crate::github::{validate_login, PrivateKeyPem};
@@ -221,12 +221,6 @@ pub(crate) struct AppConnection {
     /// Digests of the webhook URLs the App keeps on purpose; see
     /// [`WEBHOOK_ELSEWHERE_SUFFIX`].
     pub(crate) kept_webhooks: BTreeSet<String>,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) enum WaitTick {
-    Elapsed,
-    Interrupted,
 }
 
 /// Everything setup does that touches the terminal, the network or Agent
@@ -1686,16 +1680,7 @@ impl SetupEnv for LiveSetup<'_> {
     }
 
     fn wait(&mut self, duration: Duration) -> WaitTick {
-        let Ok(interrupt) = Interrupt::install() else {
-            std::thread::sleep(duration);
-            return WaitTick::Elapsed;
-        };
-        interrupt.sleep_until_interrupted(duration);
-        if interrupt.is_requested() {
-            WaitTick::Interrupted
-        } else {
-            WaitTick::Elapsed
-        }
+        channel_app::wait(duration)
     }
 }
 

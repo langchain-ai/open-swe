@@ -781,6 +781,13 @@ LangSmith creates a managed app in the workspace you already authorized it in,
 and says so. When you haven't authorized it yet, or on self-hosted LangSmith,
 deploy stops before uploading and says what to set.
 
+When Slack still needs you once the deployment is live, to authorize LangSmith
+or to install the new app (some workspaces have an admin approve it first),
+deploy prints the link and waits, continuing as soon as Slack reports it done.
+In a terminal the link also opens in your browser, and Ctrl-C skips the
+channel. Without one, deploy waits up to an hour, so a coding agent running it
+can hand you the link; Ctrl-C stops it.
+
 If a setup step fails once the deployment is live, deploy offers to try again
 or to continue without the Slack channel. Without a terminal the failure ends
 the deploy, once the other channels are set up. An agent with a Slack channel

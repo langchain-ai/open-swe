@@ -50,10 +50,12 @@ pub(crate) use context_hub::RepoOwnership;
 pub use logs::{LogEntry, LogLevel, LogOrder, LogQuery, LogTimestamp};
 pub use sandboxes::{CreateSandboxBoxOptions, SandboxCommandResult};
 pub use snapshots::{SnapshotDelete, DEFAULT_SNAPSHOT_READY_TIMEOUT};
+#[cfg(test)]
+pub(crate) use trigger_server::TransientSetupError;
 pub(crate) use trigger_server::{
-    ChannelSetupRequest, ChannelSetupResponse, ChannelSetupStatus, ChannelSetupTarget,
-    SlackAppInUse, SlackChannelApp, SlackChannelOptions, SlackChannelSetup, SlackCustomerApp,
-    SlackManager, SlackTriggerMode,
+    is_transient_setup_error, ChannelSetupRequest, ChannelSetupResponse, ChannelSetupStatus,
+    ChannelSetupTarget, SlackAppInUse, SlackChannelApp, SlackChannelOptions, SlackChannelSetup,
+    SlackCustomerApp, SlackManager, SlackTriggerMode,
 };
 pub use workspaces::DeployTarget;
 

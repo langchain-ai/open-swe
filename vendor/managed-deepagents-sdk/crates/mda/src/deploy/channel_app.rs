@@ -15,6 +15,7 @@
 
 use std::collections::BTreeMap;
 use std::io::IsTerminal;
+use std::time::Duration;
 
 use anyhow::{bail, Context, Result};
 use cliclack::log;
@@ -26,6 +27,7 @@ use serde_json::Value;
 use crate::compile::ChannelRequirements;
 use crate::deploy::helpers::validated_agent_server_url;
 use crate::error::is_cancellation;
+use crate::interrupt::Interrupt;
 use crate::langsmith::{self, ConnectionSummary};
 
 /// Hidden overrides that send only Agent Auth calls to another LangSmith,
@@ -296,6 +298,27 @@ where
                 current = refresh(env)?;
             }
         }
+    }
+}
+
+/// How a wait while setup polls for the user's action ended.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum WaitTick {
+    Elapsed,
+    Interrupted,
+}
+
+/// Sleep for `duration`, or until Ctrl-C.
+pub(crate) fn wait(duration: Duration) -> WaitTick {
+    let Ok(interrupt) = Interrupt::install() else {
+        std::thread::sleep(duration);
+        return WaitTick::Elapsed;
+    };
+    interrupt.sleep_until_interrupted(duration);
+    if interrupt.is_requested() {
+        WaitTick::Interrupted
+    } else {
+        WaitTick::Elapsed
     }
 }
 

@@ -82,10 +82,9 @@ const PROMPTS: &[(&str, usize, &str)] = &[
     ),
     (
         "deploy/trigger_channels.rs",
-        2,
-        "browser hand-off only shown in an interactive terminal; moving a Slack app another \
-         deployment uses is only offered in one, and without a terminal deploy fails saying the \
-         app stays there",
+        1,
+        "moving a Slack app another deployment uses is only offered in an interactive terminal; \
+         without one, deploy fails saying the app stays there",
     ),
     (
         "secret_input.rs",
