@@ -238,7 +238,8 @@ async def test_a_tool_call_the_backend_never_answered(
         (PREPARE, 504),
         (BEFORE_MODEL, 502),
         (BEFORE_MODEL, 504),
-        (AFTER_MODEL, 503),
+        (AFTER_MODEL, 502),
+        (AFTER_MODEL, 504),
         (AFTER_AGENT, 504),
     ],
 )
@@ -264,7 +265,7 @@ async def test_phase_gateway_failure_is_not_replayed(
 
 
 @pytest.mark.parametrize(("failures", "recovers"), [(10, True), (11, False)])
-@pytest.mark.parametrize("endpoint", [PREPARE, LAUNCH_WORKER, BEFORE_MODEL])
+@pytest.mark.parametrize("endpoint", [PREPARE, LAUNCH_WORKER, BEFORE_MODEL, AFTER_MODEL])
 async def test_a_run_waits_out_a_backend_rollout(
     monkeypatch: pytest.MonkeyPatch, endpoint: Endpoint, failures: int, recovers: bool
 ) -> None:
@@ -274,7 +275,7 @@ async def test_a_run_waits_out_a_backend_rollout(
     request = httpx2.Request("POST", "https://backend.invalid")
     # Only a call the backend could not have run is resent, or one that is safe to repeat.
     unavailable = [httpx2.Response(503, request=request), httpx2.ConnectError("secret-token")]
-    if endpoint is not BEFORE_MODEL:
+    if endpoint.delivery == "idempotent":
         unavailable.append(httpx2.Response(502, request=request))
     client = MagicMock(is_closed=False)
     client.post = AsyncMock(
@@ -294,6 +295,36 @@ async def test_a_run_waits_out_a_backend_rollout(
         with pytest.raises(BackendUnavailableError):
             await send()
     assert client.post.await_count == min(failures + 1, 11)
+
+
+async def test_after_model_continues_after_a_backend_rollout(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("OPEN_SWE_BACKEND_URL", "https://backend.invalid")
+    monkeypatch.setattr("rt.middleware.run_id", lambda: "run-1")
+    monkeypatch.setattr("rt.backend.asyncio.sleep", AsyncMock())
+    after_model_attempts = 0
+
+    async def post(url: str, **kwargs: object) -> httpx2.Response:
+        nonlocal after_model_attempts
+        request = httpx2.Request("POST", url)
+        if url.endswith("/after_model"):
+            after_model_attempts += 1
+            if after_model_attempts == 1:
+                return httpx2.Response(503, request=request)
+        return httpx2.Response(200, request=request, json=PhaseResult().model_dump(mode="json"))
+
+    client = MagicMock(is_closed=False)
+    client.post = post
+    monkeypatch.setattr("rt.backend.httpx2.AsyncClient", lambda **kwargs: client)
+    graph = create_agent(
+        model=FakeListChatModel(responses=["done"]),
+        middleware=[BackendRunMiddleware(OpenSweBackend("secret-token"), "invocation-1")],
+    )
+
+    result = await graph.ainvoke({"messages": [("user", "hello")]})
+
+    assert result["messages"][-1].content == "done"
 
 
 @pytest.mark.parametrize("hook", ["prepare", "before_model", "after_model"])
