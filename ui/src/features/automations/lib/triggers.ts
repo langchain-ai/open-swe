@@ -26,6 +26,7 @@ export type TriggerDraft =
       kind: "github"
       repo: string | null
       events: Array<GitHubTriggerEvent>
+      baseBranches: string
     }
   | {
       key: string
@@ -60,9 +61,16 @@ export function scheduleDraft(cron: string) {
 
 export function githubDraft(
   repo: string | null = null,
-  events: Array<GitHubTriggerEvent> = []
+  events: Array<GitHubTriggerEvent> = [],
+  baseBranches: Array<string> | null = null
 ) {
-  return { key: draftKey(), kind: "github" as const, repo, events }
+  return {
+    key: draftKey(),
+    kind: "github" as const,
+    repo,
+    events,
+    baseBranches: baseBranches?.join(", ") ?? "",
+  }
 }
 
 export function slackDraft(
@@ -103,7 +111,7 @@ export function draftsFor(
       case "schedule":
         return scheduleDraft(trigger.cron)
       case "github":
-        return githubDraft(trigger.repo, trigger.events)
+        return githubDraft(trigger.repo, trigger.events, trigger.base_branches)
       case "slack":
         return slackDraft(trigger)
       case "linear":
@@ -123,6 +131,12 @@ export function draftProblem(draft: TriggerDraft): string | null {
       return draft.cron.trim() ? null : "Enter a cron schedule."
     case "github":
       if (!draft.repo) return "Pick the repository whose events run this."
+      if (
+        draft.baseBranches.trim() &&
+        draft.baseBranches.split(",").some((branch) => !branch.trim())
+      ) {
+        return "Enter non-empty base branch patterns."
+      }
       return draft.events.length === 0 ? "Pick at least one event." : null
     case "slack":
     case "linear": {
@@ -155,7 +169,16 @@ export function toTriggers(
         return [{ kind: "schedule", cron: draft.cron.trim() }]
       case "github":
         return draft.repo
-          ? [{ kind: "github", repo: draft.repo, events: draft.events }]
+          ? [
+              {
+                kind: "github",
+                repo: draft.repo,
+                events: draft.events,
+                base_branches: draft.baseBranches.trim()
+                  ? draft.baseBranches.split(",").map((branch) => branch.trim())
+                  : null,
+              },
+            ]
           : []
       case "slack":
         return draft.channel
@@ -201,7 +224,11 @@ export function describeTriggers(schedule: AgentSchedule): string {
         : trigger.kind === "slack"
           ? trigger.channel
           : trigger.team
-    return `${provider.label} ${scope}: ${named}`
+    const branches =
+      trigger.kind === "github" && trigger.base_branches
+        ? ` (PR base: ${trigger.base_branches.join(", ")})`
+        : ""
+    return `${provider.label} ${scope}: ${named}${branches}`
   })
   return parts.length > 0 ? parts.join(" · ") : "No trigger"
 }
