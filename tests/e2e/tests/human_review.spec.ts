@@ -361,7 +361,7 @@ test.describe("Human review in Slack", () => {
   test("the agent posts a card in the review channel; two sign up; it merges two hours after one approval", async ({
     page,
     request,
-  }) => {
+  }, testInfo) => {
     test.setTimeout(240_000);
     await setReviewChannel(request);
     const seeded = await seedOpenPullRequest(page, {
@@ -411,9 +411,39 @@ test.describe("Human review in Slack", () => {
       .flatMap((block) => block.elements ?? [])
       .find((element) => element.action_id === "open_swe_option_select_review");
     expect(review?.url).toBe(
-      `https://github.com/${REPO.owner}/${REPO.repo}/pull/${seeded.number}`,
+      `http://127.0.0.1:${process.env.E2E_UI_PORT ?? 3100}/agents/reviews/${REPO.owner}/${REPO.repo}/${seeded.number}?reviewLink=true`,
     );
     await shootCard(page, "open");
+    await loginAs(page, ALICE);
+    await control(request, "/control/user-preferences", {
+      login: ALICE.login,
+      preferences: { pr_review_links: true },
+    });
+    await page.goto(review!.url!);
+    await expect(
+      page.getByRole("button", { name: "Review requested", exact: true }),
+    ).toBeEnabled();
+    await expect(page).toHaveURL(/reviewLink=true/);
+    await page.screenshot({
+      path: testInfo.outputPath("review-button-alice.png"),
+    });
+    await control(request, "/control/user-preferences", {
+      login: ALICE.login,
+      preferences: { pr_review_links: false },
+    });
+    await loginAs(page, BOB);
+    await control(request, "/control/user-preferences", {
+      login: BOB.login,
+      preferences: { pr_review_links: false },
+    });
+    await page.route("https://github.com/**", (route) =>
+      route.fulfill({ contentType: "text/html", body: "GitHub pull request" }),
+    );
+    await page.goto(review!.url!);
+    await expect(page).toHaveURL(
+      `https://github.com/${REPO.owner}/${REPO.repo}/pull/${seeded.number}`,
+    );
+    await page.unroute("https://github.com/**");
     await loginAs(page, ALICE);
     await page.goto(
       `/agents/reviews/${REPO.owner}/${REPO.repo}/${seeded.number}`,
