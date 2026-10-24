@@ -3,7 +3,7 @@ from types import SimpleNamespace
 from unittest.mock import AsyncMock, patch
 
 import pytest
-from sqlalchemy import Column, Integer, MetaData, Table
+from sqlalchemy import Column, Integer, MetaData, String, Table
 
 from openswe.tools.repair_data import write_database_rows
 
@@ -56,6 +56,33 @@ async def test_access_gate_blocks_writes(admin_context, monkeypatch, change):
         monkeypatch.setattr("openswe.utils.thread_reads.langgraph_sdk.get_client", lambda: client)
     result = await write_database_rows("users", "insert", {"id": 1}, confirm=True)
     assert result["ok"] is False
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("operation", ["insert", "update", "delete"])
+async def test_confirmed_migration_metadata_repair(monkeypatch, operation):
+    target = Table("alembic_version", MetaData(), Column("version_num", String(32)))
+    conn = AsyncMock()
+    conn.run_sync.return_value = target
+    conn.execute.return_value = SimpleNamespace(rowcount=1)
+
+    @asynccontextmanager
+    async def transaction():
+        yield conn
+
+    monkeypatch.setattr("openswe.tools.repair_data.postgres.transaction", transaction)
+    values = {"version_num": "new_revision"} if operation != "delete" else None
+    where = {"version_num": "old_revision"} if operation != "insert" else None
+    result = await write_database_rows("alembic_version", operation, values, where, confirm=True)
+    assert result == {"ok": True, "row_count": 1}
+    statement = conn.execute.await_args.args[0]
+    assert statement.table is target
+    expected = {}
+    if values:
+        expected["version_num"] = "new_revision"
+    if where:
+        expected["version_num_1"] = "old_revision"
+    assert statement.compile().params == expected
 
 
 @pytest.mark.asyncio
