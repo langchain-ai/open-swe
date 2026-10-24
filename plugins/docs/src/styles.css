@@ -113,3 +113,16 @@
     center / 90% no-repeat;
   border-color: transparent;
 }
+
+.docs-page .docs-diagram {
+  display: flex;
+  justify-content: center;
+  overflow-x: auto;
+  margin: 0.5em 0;
+}
+.docs-page .docs-diagram svg { max-width: 100%; height: auto; }
+.docs-page .docs-diagram-error {
+  justify-content: flex-start;
+  font-size: 0.85em;
+  color: var(--color-text-tertiary, inherit);
+}

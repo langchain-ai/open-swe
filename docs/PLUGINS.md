@@ -385,7 +385,7 @@ A failed request rejects with `HostError`, which carries `message` and an HTTP-l
 
 ## Building the bundle
 
-The build must write the manifest's `entry` as one self-contained HTML file: every script, stylesheet and font inline. It must be at most 8 MB and contain no NUL characters (escape them as `\u0000`). Any build that emits a single file works. Docs builds a TanStack Start SPA with Vite, then [`scripts/inline-bundle.mjs`](../plugins/docs/scripts/inline-bundle.mjs) folds the output into `bundle/index.html`, keeping only the Latin font subsets:
+The build must write the manifest's `entry` as one self-contained HTML file: every script, stylesheet and font inline. It must be at most 64 MB and contain no NUL characters (escape them as `\u0000`). Any build that emits a single file works. Docs builds a TanStack Start SPA with Vite, then [`scripts/inline-bundle.mjs`](../plugins/docs/scripts/inline-bundle.mjs) folds the output into `bundle/index.html`, keeping only the Latin font subsets:
 
 ```bash
 pnpm --filter openswe-plugin-docs run build

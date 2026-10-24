@@ -33,7 +33,7 @@ from openswe.plugins.manifest import (
 logger = logging.getLogger(__name__)
 
 MAX_MANIFEST_CHARS = 64_000
-MAX_BUNDLE_BYTES = 8_000_000
+MAX_BUNDLE_BYTES = 64_000_000
 
 
 def release_tag(name: str, ref: str) -> str:

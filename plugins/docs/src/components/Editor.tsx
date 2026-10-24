@@ -17,6 +17,7 @@ import {
   type Highlight,
 } from "@/lib/anchors"
 import { repositoryImages, type ImageLoader } from "@/lib/images"
+import { DiagramCodeBlock } from "@/lib/mermaid"
 import { FIELD, seedFromMarkdown, type LiveDoc } from "@/lib/live"
 import type { Anchor } from "@/lib/model"
 
@@ -79,9 +80,11 @@ export function PageEditor({
     {
       extensions: [
         StarterKit.configure({
+          codeBlock: false,
           link: { openOnClick: false },
           ...(live ? { undoRedo: false } : {}),
         }),
+        DiagramCodeBlock,
         TableKit,
         TaskList,
         TaskItem.configure({ nested: true }),
