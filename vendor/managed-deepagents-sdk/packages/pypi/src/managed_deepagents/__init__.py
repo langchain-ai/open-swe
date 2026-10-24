@@ -149,7 +149,6 @@ from managed_deepagents.identity import ManagedServerInfo, define_identity
 from managed_deepagents.namespaces import (
     auth,
     channels,
-    connectors,
     define_mcp,
     define_sandbox,
 )
@@ -293,7 +292,6 @@ __all__ = [
     "bearer",
     "channels",
     "connections",
-    "connectors",
     "define_browser",
     "define_deep_agent",
     "define_identity",

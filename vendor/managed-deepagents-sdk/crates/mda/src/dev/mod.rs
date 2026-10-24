@@ -1051,7 +1051,7 @@ fn report_project_features(
     summary: &CompileSummary,
     provision_schedules: bool,
 ) -> Result<()> {
-    let connector_labels = connector_summary_labels(project, &summary.connectors)?;
+    let connector_labels = connector_summary_labels(&summary.connectors);
     let needs_public_url = compile::project_needs_events_public_url(project)?;
     let public_url = read_dev_public_api_url(project);
     for line in feature_summary_lines(
@@ -1145,25 +1145,19 @@ fn format_identity_lines(identity: Option<&IdentitySummary>) -> Vec<String> {
     vec![lines.join("\n")]
 }
 
-/// Label each connector by instance stem, annotating when the factory differs
-/// (e.g. `notion.ts` exporting `defineMcp()` → `notion (mcp)`).
-fn connector_summary_labels(project: &Project, connectors: &[PathBuf]) -> Result<Vec<String>> {
-    let mut labels = Vec::with_capacity(connectors.len());
-    for path in connectors {
-        let stem = path
-            .file_stem()
-            .and_then(|stem| stem.to_str())
-            .unwrap_or("connector");
-        let label = match compile::read_connector_factory(project, path)? {
-            Some(factory) if !factory.eq_ignore_ascii_case(stem) => {
-                format!("{stem} ({factory})")
-            }
-            _ => stem.to_string(),
-        };
-        labels.push(label);
-    }
+/// Label each connector by its file stem (`tools/mcp.ts` → `mcp`).
+fn connector_summary_labels(connectors: &[PathBuf]) -> Vec<String> {
+    let mut labels: Vec<String> = connectors
+        .iter()
+        .map(|path| {
+            path.file_stem()
+                .and_then(|stem| stem.to_str())
+                .unwrap_or("connector")
+                .to_string()
+        })
+        .collect();
     labels.sort_unstable();
-    Ok(labels)
+    labels
 }
 
 fn format_connectors_line(labels: &[String]) -> Option<String> {
@@ -4001,6 +3995,14 @@ mod tests {
     }
 
     #[test]
+    fn connector_label_is_the_file_stem() {
+        assert_eq!(
+            connector_summary_labels(&[PathBuf::from("tools/mcp.ts")]),
+            vec!["mcp".to_string()]
+        );
+    }
+
+    #[test]
     fn public_url_https_is_shown_when_set() {
         assert_eq!(
             format_public_url_line(
@@ -4009,97 +4011,6 @@ mod tests {
             ),
             Some("Public URL     https://tunnel.example".into())
         );
-    }
-
-    #[test]
-    fn connector_label_annotates_mismatched_factory() {
-        let root = tempfile::tempdir().unwrap();
-        fs::write(
-            root.path().join("notion.ts"),
-            "import { defineMcp } from \"managed-deepagents\";\n\
-             export const connector = defineMcp({ servers: {} });\n",
-        )
-        .unwrap();
-        // read_connector_factory expects path relative to project.root
-        let project = Project {
-            root: root.path().to_path_buf(),
-            language: Language::TypeScript,
-            agent_file: PathBuf::from("agent.ts"),
-            files: vec![PathBuf::from("notion.ts")],
-        };
-        // Place file under connectors/ as real projects do.
-        fs::create_dir_all(root.path().join("connectors")).unwrap();
-        fs::rename(
-            root.path().join("notion.ts"),
-            root.path().join("connectors/notion.ts"),
-        )
-        .unwrap();
-        let labels =
-            connector_summary_labels(&project, &[PathBuf::from("connectors/notion.ts")]).unwrap();
-        assert_eq!(labels, vec!["notion (mcp)".to_string()]);
-    }
-
-    #[test]
-    fn connector_label_annotates_mismatched_python_factory() {
-        let root = tempfile::tempdir().unwrap();
-        fs::create_dir_all(root.path().join("connectors")).unwrap();
-        fs::write(
-            root.path().join("connectors/notion.py"),
-            "from managed_deepagents import define_mcp\n\
-             connector = define_mcp(servers={\"docs\": {\"transport\": \"http\", \"url\": \"https://docs.example.com/mcp\"}})\n",
-        )
-        .unwrap();
-        let project = Project {
-            root: root.path().to_path_buf(),
-            language: Language::Python,
-            agent_file: PathBuf::from("agent.py"),
-            files: vec![PathBuf::from("connectors/notion.py")],
-        };
-        let labels =
-            connector_summary_labels(&project, &[PathBuf::from("connectors/notion.py")]).unwrap();
-        assert_eq!(labels, vec!["notion (mcp)".to_string()]);
-    }
-
-    #[test]
-    fn connector_label_omits_matching_mcp_factory() {
-        let root = tempfile::tempdir().unwrap();
-        fs::create_dir_all(root.path().join("connectors")).unwrap();
-        fs::write(
-            root.path().join("connectors/mcp.ts"),
-            "import { defineMcp } from \"managed-deepagents\";\n\
-             export const connector = defineMcp({ servers: {} });\n",
-        )
-        .unwrap();
-        let project = Project {
-            root: root.path().to_path_buf(),
-            language: Language::TypeScript,
-            agent_file: PathBuf::from("agent.ts"),
-            files: vec![PathBuf::from("connectors/mcp.ts")],
-        };
-        let labels =
-            connector_summary_labels(&project, &[PathBuf::from("connectors/mcp.ts")]).unwrap();
-        assert_eq!(labels, vec!["mcp".to_string()]);
-    }
-
-    #[test]
-    fn connector_label_still_resolves_deprecated_connectors_mcp() {
-        let root = tempfile::tempdir().unwrap();
-        fs::create_dir_all(root.path().join("connectors")).unwrap();
-        fs::write(
-            root.path().join("connectors/notion.ts"),
-            "import { connectors } from \"managed-deepagents\";\n\
-             export const connector = connectors.mcp({ servers: {} });\n",
-        )
-        .unwrap();
-        let project = Project {
-            root: root.path().to_path_buf(),
-            language: Language::TypeScript,
-            agent_file: PathBuf::from("agent.ts"),
-            files: vec![PathBuf::from("connectors/notion.ts")],
-        };
-        let labels =
-            connector_summary_labels(&project, &[PathBuf::from("connectors/notion.ts")]).unwrap();
-        assert_eq!(labels, vec!["notion (mcp)".to_string()]);
     }
 
     #[test]

@@ -1146,9 +1146,6 @@ declared server. In `mda dev`, an agent-owned connection reads from
 slashes to double underscores (`mda/github-token` → `MDA_DEV_MDA__GITHUB_TOKEN`).
 Hosted deployments resolve workspace connections from Agent Auth:
 
-The old `connectors/mcp.py` file API remains available with a warning during
-`0.7.x`. It will be removed in `0.8.0`.
-
 ```python
 from managed_deepagents import define_mcp, connections
 

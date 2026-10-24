@@ -5,7 +5,7 @@
 //! hook.
 //! Not every connector needs one: connectors with deploy-time environment,
 //! permission, provider-configuration, or credential requirements implement
-//! the hook. The CLI discovers `connectors/*`, and emits
+//! the hook. The CLI discovers `tools/mcp.{ts,py}`, and emits
 //! deploy manifests by loading the live `_mda_connectors` aggregator and
 //! calling `requirementsFromConnectors` / `requirements_from_connectors` —
 //! not by matching first-party factory names.
@@ -20,8 +20,6 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
 use super::discovery::entry_stem_name;
-#[cfg(test)]
-use super::exports::find_exported_connector_entries;
 use crate::langsmith::ConnectionOwnerPolicy;
 use crate::project::{Language, Project};
 use crate::toolchain;
@@ -97,8 +95,6 @@ for connector in connectors:
     connector_name = getattr(connector, "name", "")
     config = getattr(connector, "config", None)
     servers = config.get("servers") if isinstance(config, dict) else None
-    if not isinstance(servers, dict) and isinstance(config, dict):
-        servers = config.get("mcp_servers")
     if not isinstance(servers, dict):
         continue
     for server_name, server in servers.items():
@@ -127,7 +123,7 @@ Path(__file__).resolve().parent.joinpath("mcp-connections.json").write_text(
 )
 "#;
 
-/// One connection declaration extracted from a live `connectors.mcp(...)` module.
+/// One connection declaration extracted from a live `defineMcp(...)` / `define_mcp(...)` module.
 #[derive(Debug, Clone, Deserialize, Serialize, PartialEq, Eq)]
 pub(crate) struct McpConnectionEntry {
     pub connector_name: String,
@@ -266,28 +262,6 @@ pub(crate) fn connection_owner_policy_for_slug(
     }
 }
 
-/// File-stem connector names discovered under `connectors/` (modules that
-/// export a named `connector`; helpers and co-located tests are omitted).
-///
-/// Enforces stem uniqueness with a clear compile-time error, rather than
-/// deferring to the runtime `collectConnectors` duplicate check — e.g. two
-/// `slack.ts`-equivalents (`connectors/slack.ts` and `connectors/slack.mts`)
-/// would otherwise both resolve to the same instance name.
-#[cfg(test)]
-pub(crate) fn discover_connector_names(project: &Project) -> Result<Vec<String>> {
-    let mut names = Vec::new();
-    let mut seen = HashSet::new();
-    for rel in find_exported_connector_entries(project)? {
-        let name = entry_stem_name(&rel, "connector")?;
-        if !seen.insert(name.clone()) {
-            bail!("duplicate connector name '{name}' from connectors/");
-        }
-        names.push(name);
-    }
-    names.sort();
-    Ok(names)
-}
-
 /// Load requirements previously written by [`emit_connector_requirements_for_entries`].
 pub(crate) fn load_connector_requirements(out_dir: &Path) -> Result<ConnectorRequirements> {
     load_requirements(out_dir, CONNECTOR_REQUIREMENTS_FILE)
@@ -355,9 +329,8 @@ pub(crate) fn emit_channel_requirements_for_entries(
 /// `requirements_from_connectors`, and write [`CONNECTOR_REQUIREMENTS_FILE`].
 ///
 /// Requires a successful compile that vendored `managed-deepagents` and copied
-/// the project's `connectors/` modules into `out_dir`. Reuses connector paths
-/// already discovered during compile (avoids a second AST walk of
-/// `connectors/`). Unlike the former channel manifests (where every channel
+/// the project's connector modules into `out_dir`. Reuses connector paths
+/// already discovered during compile (avoids a second AST walk). Unlike the former channel manifests (where every channel
 /// always had one), not every discovered connector declares requirements, so
 /// this never bails on a discovered name missing from the result.
 pub(crate) fn emit_connector_requirements_for_entries(
@@ -370,7 +343,7 @@ pub(crate) fn emit_connector_requirements_for_entries(
     for rel in entries {
         let name = entry_stem_name(rel, "connector")?;
         if !seen.insert(name.clone()) {
-            bail!("duplicate connector name '{name}' from connectors/");
+            bail!("duplicate connector name '{name}'");
         }
         names.push(name);
     }
@@ -378,7 +351,7 @@ pub(crate) fn emit_connector_requirements_for_entries(
     emit_connector_requirements_named(project, out_dir, &names)
 }
 
-/// Import `_mda_connectors`, read each `connectors.mcp(...)` declaration's
+/// Import `_mda_connectors`, read each `defineMcp(...)` declaration's
 /// named servers, and write [`MCP_CONNECTIONS_FILE`].
 pub(crate) fn emit_mcp_connection_entries_for_entries(
     project: &Project,
@@ -390,7 +363,7 @@ pub(crate) fn emit_mcp_connection_entries_for_entries(
     for rel in entries {
         let name = entry_stem_name(rel, "connector")?;
         if !seen.insert(name.clone()) {
-            bail!("duplicate connector name '{name}' from connectors/");
+            bail!("duplicate connector name '{name}'");
         }
         names.push(name);
     }
@@ -465,7 +438,7 @@ writeFileSync(
     if !status.success() {
         bail!(
             "failed to emit connector requirements via Node/tsx (exit {}). \
-             Ensure `connectors/*` exports branded Connector objects and that \
+             Ensure `tools/mcp` exports a valid `mcp` declaration and that \
              project dependencies are installed.",
             status.code().unwrap_or(-1)
         );
@@ -486,7 +459,7 @@ fn emit_typescript_mcp_connection_entries(out_dir: &Path) -> Result<()> {
     if !status.success() {
         bail!(
             "failed to emit MCP connection entries via Node/tsx (exit {}). \
-             Ensure `connectors/*` exports branded Connector objects and that \
+             Ensure `tools/mcp` exports a valid `mcp` declaration and that \
              project dependencies are installed.",
             status.code().unwrap_or(-1)
         );
@@ -822,8 +795,8 @@ Path(__file__).resolve().parent.joinpath("connector-manifests.json").write_text(
     if !status.success() {
         bail!(
             "failed to emit connector requirements via {} (exit {}). \
-             Install project deps (`uv sync`) and ensure `connectors/*` exports branded \
-             Connector objects.",
+             Install project deps (`uv sync`) and ensure `tools/mcp.py` exports a valid \
+             `mcp` declaration.",
             python.display(),
             status.code().unwrap_or(-1)
         );
@@ -857,7 +830,7 @@ fn emit_python_mcp_connection_entries(project: &Project, out_dir: &Path) -> Resu
     if !status.success() {
         bail!(
             "failed to emit MCP connection entries via {} (exit {}). \
-             Ensure `connectors/*` exports branded Connector objects and that \
+             Ensure `tools/mcp` exports a valid `mcp` declaration and that \
              project dependencies are installed.",
             python.display(),
             status.code().unwrap_or(-1)
@@ -1156,48 +1129,6 @@ connectors = [
         assert_eq!(
             run_python_mcp_connection_script("servers"),
             expected_mcp_connection_entry()
-        );
-    }
-
-    #[test]
-    fn python_mcp_connection_emit_reads_legacy_mcp_servers() {
-        assert_eq!(
-            run_python_mcp_connection_script("mcp_servers"),
-            expected_mcp_connection_entry()
-        );
-    }
-
-    #[test]
-    fn discovers_connector_names_without_helper_allowlist() {
-        let (_root, project) = write_project(
-            Language::TypeScript,
-            &[
-                ("agent.ts", "export const agent = {};\n"),
-                (
-                    "connectors/stripe.ts",
-                    "import { defineStripeConnector } from \"@acme/mda-stripe\";\n\
-                     export const connector = defineStripeConnector({});\n",
-                ),
-            ],
-        );
-        let names = discover_connector_names(&project).unwrap();
-        assert_eq!(names, vec!["stripe".to_string()]);
-    }
-
-    #[test]
-    fn rejects_duplicate_connector_stems() {
-        let (_root, project) = write_project(
-            Language::TypeScript,
-            &[
-                ("agent.ts", "export const agent = {};\n"),
-                ("connectors/slack.ts", "export const connector = {};\n"),
-                ("connectors/slack.mts", "export const connector = {};\n"),
-            ],
-        );
-        let err = discover_connector_names(&project).unwrap_err();
-        assert!(
-            err.to_string().contains("duplicate connector name 'slack'"),
-            "unexpected error: {err}"
         );
     }
 

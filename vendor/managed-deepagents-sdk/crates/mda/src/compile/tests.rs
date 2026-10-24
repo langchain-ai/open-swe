@@ -2542,7 +2542,7 @@ fn compile_wires_tools_python_mcp() {
 }
 
 #[test]
-fn compile_skips_typescript_connector_without_a_connector_export() {
+fn compile_rejects_a_typescript_module_under_the_removed_connectors_layout() {
     let root = tempfile::tempdir().unwrap();
     setup_mock_ts_runtime(root.path());
     write_file(
@@ -2558,73 +2558,6 @@ fn compile_skips_typescript_connector_without_a_connector_export() {
             "export const connector = defineMcp({\n",
             "  servers: { docs: { transport: \"http\", url: \"https://docs.example.com/mcp\" } },\n",
             "});\n",
-        ),
-    );
-    // Co-located unit test / helper: no `connector` export, must not be imported.
-    write_file(
-        root.path(),
-        "connectors/mcp.test.ts",
-        concat!(
-            "import { describe, it, expect } from \"@jest/globals\";\n",
-            "import { connector } from \"./mcp\";\n",
-            "describe(\"mcp\", () => {\n",
-            "  it(\"is defined\", () => { expect(connector).toBeDefined(); });\n",
-            "});\n",
-        ),
-    );
-    write_file(
-        root.path(),
-        "connectors/helper.ts",
-        "export const sharedUrl = \"https://docs.example.com/mcp\";\n",
-    );
-    write_file(
-        root.path(),
-        "package.json",
-        "{\n  \"name\": \"example\",\n  \"dependencies\": {}\n}\n",
-    );
-
-    let project = Project {
-        root: root.path().to_path_buf(),
-        language: Language::TypeScript,
-        agent_file: PathBuf::from("agent.ts"),
-        files: vec![
-            PathBuf::from("agent.ts"),
-            PathBuf::from("connectors/helper.ts"),
-            PathBuf::from("connectors/mcp.test.ts"),
-            PathBuf::from("connectors/mcp.ts"),
-            PathBuf::from("package.json"),
-        ],
-    };
-
-    let out_dir = root.path().join(".mda").join("build");
-    let summary = compile(&project, &out_dir).unwrap();
-    assert_eq!(summary.connectors, vec![PathBuf::from("connectors/mcp.ts")]);
-
-    let connectors_out = fs::read_to_string(out_dir.join("_mda_connectors.ts")).unwrap();
-    assert!(connectors_out.contains("import * as _connector0 from \"./connectors/mcp\";"));
-    assert!(!connectors_out.contains("mcp.test"));
-    assert!(!connectors_out.contains("helper"));
-    // Non-connector files are still copied into the build (uploaded on deploy)
-    // but must not be imported at startup.
-    assert!(out_dir.join("connectors/mcp.test.ts").exists());
-    assert!(out_dir.join("connectors/helper.ts").exists());
-}
-
-#[test]
-fn compile_rejects_a_typescript_connector_exported_as_default() {
-    let root = tempfile::tempdir().unwrap();
-    setup_mock_ts_runtime(root.path());
-    write_file(
-        root.path(),
-        "agent.ts",
-        "export const agent = defineDeepAgent({ name: \"agent\", model: \"openai:gpt-5\" });\n",
-    );
-    write_file(
-        root.path(),
-        "connectors/mcp.ts",
-        concat!(
-            "import { defineMcp } from \"managed-deepagents\";\n",
-            "export default defineMcp({ servers: {} });\n",
         ),
     );
     write_file(
@@ -2646,16 +2579,62 @@ fn compile_rejects_a_typescript_connector_exported_as_default() {
 
     let out_dir = root.path().join(".mda").join("build");
     let error = compile(&project, &out_dir).unwrap_err().to_string();
-    // Silently skipping the old shape would deploy an agent missing its tools.
+    // Silently skipping the old layout would deploy an agent missing its tools.
     assert!(
-        error.contains("connectors/mcp.ts has a default export but no `connector` export"),
+        error.contains("connectors/mcp.ts uses the removed `connectors/` MCP layout"),
         "{error}"
     );
-    assert!(error.contains("export const connector ="), "{error}");
+    assert!(error.contains("tools/mcp.ts"), "{error}");
 }
 
 #[test]
-fn compile_skips_python_connector_without_named_connector() {
+fn compile_rejects_a_default_export_under_the_removed_connectors_layout() {
+    let root = tempfile::tempdir().unwrap();
+    setup_mock_ts_runtime(root.path());
+    write_file(
+        root.path(),
+        "agent.ts",
+        "export const agent = defineDeepAgent({ name: \"agent\", model: \"openai:gpt-5\" });\n",
+    );
+    write_file(
+        root.path(),
+        "connectors/mcp.ts",
+        concat!(
+            "import { defineMcp } from \"managed-deepagents\";\n",
+            "export default defineMcp({\n",
+            "  servers: { docs: { transport: \"http\", url: \"https://docs.example.com/mcp\" } },\n",
+            "});\n",
+        ),
+    );
+    write_file(
+        root.path(),
+        "package.json",
+        "{\n  \"name\": \"example\",\n  \"dependencies\": {}\n}\n",
+    );
+
+    let project = Project {
+        root: root.path().to_path_buf(),
+        language: Language::TypeScript,
+        agent_file: PathBuf::from("agent.ts"),
+        files: vec![
+            PathBuf::from("agent.ts"),
+            PathBuf::from("connectors/mcp.ts"),
+            PathBuf::from("package.json"),
+        ],
+    };
+
+    let out_dir = root.path().join(".mda").join("build");
+    let error = compile(&project, &out_dir).unwrap_err().to_string();
+    // A default export was a hard error before the removal; treating it as a
+    // helper would drop the MCP tools without a word.
+    assert!(
+        error.contains("connectors/mcp.ts uses the removed `connectors/` MCP layout"),
+        "{error}"
+    );
+}
+
+#[test]
+fn compile_rejects_a_python_module_under_the_removed_connectors_layout() {
     let root = tempfile::tempdir().unwrap();
     write_file(
         root.path(),
@@ -2670,22 +2649,6 @@ fn compile_skips_python_connector_without_named_connector() {
             "connector = define_mcp(servers={\"docs\": {\"transport\": \"http\", \"url\": \"https://docs.example.com/mcp\"}})\n",
         ),
     );
-    // Co-located unit test (filename pattern) / helper (no `connector =`).
-    write_file(
-        root.path(),
-        "connectors/test_mcp.py",
-        concat!(
-            "import pytest\n",
-            "from connectors.mcp import connector\n",
-            "def test_connector_kind():\n",
-            "    assert connector.kind == \"mcp_servers\"\n",
-        ),
-    );
-    write_file(
-        root.path(),
-        "connectors/helper.py",
-        "SHARED_URL = \"https://docs.example.com/mcp\"\n",
-    );
     write_file(
         root.path(),
         "pyproject.toml",
@@ -2698,26 +2661,58 @@ fn compile_skips_python_connector_without_named_connector() {
         agent_file: PathBuf::from("agent.py"),
         files: vec![
             PathBuf::from("agent.py"),
-            PathBuf::from("connectors/helper.py"),
             PathBuf::from("connectors/mcp.py"),
-            PathBuf::from("connectors/test_mcp.py"),
             PathBuf::from("pyproject.toml"),
         ],
     };
 
     let out_dir = root.path().join("build");
-    let summary = with_py_runtime(root.path(), || compile(&project, &out_dir)).unwrap();
-    assert_eq!(summary.connectors, vec![PathBuf::from("connectors/mcp.py")]);
-    assert!(summary.warnings.iter().any(|warning| {
-        warning.contains("connectors/") && warning.contains("removed in 0.8.0")
-    }));
+    let error = with_py_runtime(root.path(), || compile(&project, &out_dir))
+        .unwrap_err()
+        .to_string();
+    assert!(
+        error.contains("connectors/mcp.py uses the removed `connectors/` MCP layout"),
+        "{error}"
+    );
+    assert!(error.contains("tools/mcp.py"), "{error}");
+}
 
-    let connectors_out = fs::read_to_string(out_dir.join("_mda_connectors.py")).unwrap();
-    assert!(connectors_out.contains("import connectors.mcp as _connector0"));
-    assert!(!connectors_out.contains("test_mcp"));
-    assert!(!connectors_out.contains("helper"));
-    assert!(out_dir.join("connectors/test_mcp.py").exists());
-    assert!(out_dir.join("connectors/helper.py").exists());
+#[test]
+fn compile_ignores_connectors_helpers_without_a_connector_export() {
+    let root = tempfile::tempdir().unwrap();
+    setup_mock_ts_runtime(root.path());
+    write_file(
+        root.path(),
+        "agent.ts",
+        "export const agent = defineDeepAgent({ name: \"agent\", model: \"openai:gpt-5\" });\n",
+    );
+    write_file(
+        root.path(),
+        "connectors/helper.ts",
+        "export const sharedUrl = \"https://docs.example.com/mcp\";\n",
+    );
+    write_file(
+        root.path(),
+        "package.json",
+        "{\n  \"name\": \"example\",\n  \"dependencies\": {}\n}\n",
+    );
+
+    let project = Project {
+        root: root.path().to_path_buf(),
+        language: Language::TypeScript,
+        agent_file: PathBuf::from("agent.ts"),
+        files: vec![
+            PathBuf::from("agent.ts"),
+            PathBuf::from("connectors/helper.ts"),
+            PathBuf::from("package.json"),
+        ],
+    };
+
+    let out_dir = root.path().join(".mda").join("build");
+    let summary = compile(&project, &out_dir).unwrap();
+    assert!(summary.connectors.is_empty());
+    assert!(!out_dir.join("_mda_connectors.ts").exists());
+    assert!(out_dir.join("connectors/helper.ts").exists());
 }
 
 #[test]
@@ -2761,7 +2756,7 @@ fn compile_omits_connectors_wiring_when_absent() {
     );
 }
 
-// Ingress channels (Slack `on:`) and connectors (GitHub `events:`), aggregators,
+// Ingress channels (Slack `on:`), aggregators,
 // and the managed HTTP app. Helpers / co-located tests under plugin dirs must not be
 // imported; HTTP wiring uses live `_mda_connectors`, never compile-time embeds.
 
