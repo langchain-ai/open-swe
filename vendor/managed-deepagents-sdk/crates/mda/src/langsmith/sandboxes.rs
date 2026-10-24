@@ -165,6 +165,22 @@ impl Client {
         decode_batch_delete(value)
     }
 
+    /// Environment for the Python `langsmith` sandbox SDK to reach the same
+    /// workspace as this client.
+    pub(crate) fn sandbox_sdk_env(&self) -> Result<Vec<(&'static str, String)>> {
+        let mut env = vec![
+            ("LANGSMITH_API_KEY", self.api_key()?),
+            (
+                "MDA_SANDBOX_API_ENDPOINT",
+                format!("{}/v2/sandboxes", self.platform_base()?),
+            ),
+        ];
+        if let Some(tenant_id) = &self.tenant_id {
+            env.push(("LANGSMITH_WORKSPACE_ID", tenant_id.clone()));
+        }
+        Ok(env)
+    }
+
     /// Create a sandbox box (bake builder) and wait until ready.
     pub fn create_sandbox_box(
         &self,

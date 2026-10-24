@@ -351,7 +351,7 @@ const ENTRY_STEM: &str = "_mda_entry";
 const EVAL_ENTRY_STEM: &str = "_mda_eval_entry";
 
 /// Directory holding the managed sandbox declaration and provisioning script.
-const SANDBOX_DIR: &str = "sandbox";
+pub(crate) const SANDBOX_DIR: &str = "sandbox";
 
 /// Provisioning script synced and run once per newly created sandbox.
 const SANDBOX_SETUP_FILE: &str = "setup.sh";

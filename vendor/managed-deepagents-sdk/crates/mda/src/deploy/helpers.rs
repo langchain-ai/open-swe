@@ -358,6 +358,27 @@ pub fn recipe_digest(
     docker_image: Option<&str>,
     registry: Option<&str>,
 ) -> String {
+    recipe_digest_with_prepare(
+        setup_bytes,
+        snapshot_name,
+        snapshot_id,
+        docker_image,
+        registry,
+        None,
+    )
+}
+
+/// [`recipe_digest`] plus the digest of a deploy-time `prepare` callback's inputs.
+///
+/// `prepare` is only hashed when present, so recipes without one keep their digest.
+pub(crate) fn recipe_digest_with_prepare(
+    setup_bytes: &[u8],
+    snapshot_name: Option<&str>,
+    snapshot_id: Option<&str>,
+    docker_image: Option<&str>,
+    registry: Option<&str>,
+    prepare: Option<&str>,
+) -> String {
     use sha2::{Digest, Sha256};
 
     let mut hasher = Sha256::new();
@@ -371,6 +392,10 @@ pub fn recipe_digest(
     if let Some(registry) = registry {
         hasher.update([0]);
         hasher.update(registry.as_bytes());
+    }
+    if let Some(prepare) = prepare {
+        hasher.update(b"\0prepare\0");
+        hasher.update(prepare.as_bytes());
     }
     // digest 0.11's output array no longer implements `LowerHex`; encode bytes.
     let digest = hasher.finalize();

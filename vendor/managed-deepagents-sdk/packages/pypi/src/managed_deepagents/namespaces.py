@@ -25,7 +25,12 @@ from managed_deepagents._channels.linear import linear_channel
 from managed_deepagents._channels.trigger.channel import slack_channel
 from managed_deepagents._connectors.mcp import McpServersConfig, McpServersDefinition, define_mcp
 from managed_deepagents.identity import auth
-from managed_deepagents.sandbox import ProxyConfig, SandboxDefinition, normalize_sandbox_options
+from managed_deepagents.sandbox import (
+    ProxyConfig,
+    SandboxDefinition,
+    SandboxPrepare,
+    normalize_sandbox_options,
+)
 
 __all__ = ["auth", "channels", "connectors", "define_mcp", "define_sandbox"]
 
@@ -129,9 +134,17 @@ def define_sandbox(
     docker_image: str | None = None,
     registry: dict[str, str] | None = None,
     proxy_config: ProxyConfig | dict[str, object] | None = None,
+    prepare: SandboxPrepare | None = None,
     **options: object,
 ) -> SandboxDefinition:
-    """Declare the managed execution environment for an agent."""
+    """Declare the managed execution environment for an agent.
+
+    ``prepare`` runs on the deploy machine during ``mda deploy`` / ``mda dev``
+    with the bake builder sandbox, after ``setup.sh``; the builder is then
+    captured as the snapshot every new sandbox starts from.
+    """
+    if prepare is not None and not callable(prepare):
+        raise TypeError("sandbox prepare must be callable")
     parsed = _LangSmithSandboxArgs.model_validate(
         {
             **options,
@@ -162,7 +175,7 @@ def define_sandbox(
     if proxy_config is not None:
         dumped["proxy_config"] = proxy_config
     normalized = normalize_sandbox_options(dumped)
-    return SandboxDefinition(normalized)
+    return SandboxDefinition(normalized, prepare)
 
 
 channels = _Channels()

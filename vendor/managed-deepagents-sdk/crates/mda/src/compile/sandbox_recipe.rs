@@ -1,24 +1,28 @@
 //! Emit `.mda/build/sandbox-recipe.json` for deploy/dev bake.
 //!
 //! Digests cover `setup.sh` bytes plus optional author bake bases extracted from
-//! `defineSandbox` / `define_sandbox` (string literals only).
+//! `defineSandbox` / `define_sandbox` (string literals only), and, when a Python
+//! `define_sandbox(prepare=...)` callback is declared, the files under `sandbox/`.
 
 use std::fs;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 use anyhow::{bail, Context, Result};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
 use crate::agent_config::read_agent_static_config;
+use crate::deploy::bake::{RecipeSpec, SandboxPrepare};
 use crate::deploy::helpers::recipe_digest;
 use crate::project::{Language, Project};
+use crate::python_extract::{run_python_extractor, scripts};
 
-use super::discovery::{find_sandbox_entry, read_setup_script};
+use super::discovery::{find_sandbox_entry, read_setup_script, sandbox_import_specifier};
 use super::static_extract::{
     extract_python_selected_keyword_config, extract_typescript_selected_object_config,
 };
 use super::write_if_changed;
+use super::SANDBOX_DIR;
 
 /// Build artifact next to `langgraph.json`.
 pub const SANDBOX_RECIPE_FILE: &str = "sandbox-recipe.json";
@@ -43,6 +47,16 @@ impl SandboxRegistryManifest {
     }
 }
 
+/// A Python sandbox's deploy-time `prepare` callback, recorded at compile time.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct SandboxPrepareManifest {
+    /// Dotted module exporting `sandbox`.
+    pub module: String,
+    /// Digest of the files under `sandbox/`, where the callback and its inputs live.
+    pub inputs_digest: String,
+}
+
 /// Author bake bases + setup metadata written at compile time.
 #[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
@@ -55,8 +69,29 @@ pub struct SandboxRecipeManifest {
     pub docker_image: Option<String>,
     /// Private registry declaration. Contains only an env-var name, not a secret.
     pub registry: Option<SandboxRegistryManifest>,
-    /// [`recipe_digest`] over setup bytes + bake bases.
+    /// Deploy-time `prepare` callback, when declared.
+    #[serde(default)]
+    pub prepare: Option<SandboxPrepareManifest>,
+    /// [`RecipeSpec::digest`] over setup bytes, bake bases, and `prepare` inputs.
     pub digest: String,
+}
+
+impl SandboxRecipeManifest {
+    /// The bake inputs this manifest describes, with `setup_script` as read now.
+    pub fn recipe_spec(&self, project_root: &Path, setup_script: String) -> RecipeSpec {
+        RecipeSpec {
+            setup_script,
+            snapshot_name: self.snapshot_name.clone(),
+            snapshot_id: self.snapshot_id.clone(),
+            docker_image: self.docker_image.clone(),
+            registry: self.registry.clone(),
+            prepare: self.prepare.as_ref().map(|prepare| SandboxPrepare {
+                project_root: project_root.to_path_buf(),
+                module: prepare.module.clone(),
+                inputs_digest: prepare.inputs_digest.clone(),
+            }),
+        }
+    }
 }
 
 /// Whether the project needs LangSmith sandboxes: a sandbox declaration, or a
@@ -87,9 +122,12 @@ pub(super) fn write_sandbox_recipe_manifest(
     let path = out_dir.join(SANDBOX_RECIPE_FILE);
     let setup = read_setup_script(project)?.unwrap_or_default();
     let has_setup_script = !setup.trim().is_empty();
-    let bases = match find_sandbox_entry(project) {
-        Some(entry) => extract_sandbox_bases(project, &entry)?,
-        None if factory && has_setup_script => BakeBases::default(),
+    let (bases, prepare) = match find_sandbox_entry(project) {
+        Some(entry) => (
+            extract_sandbox_bases(project, &entry)?,
+            extract_sandbox_prepare(project, &entry)?,
+        ),
+        None if factory && has_setup_script => (BakeBases::default(), None),
         None => {
             if path.exists() {
                 let _ = fs::remove_file(&path);
@@ -97,38 +135,24 @@ pub(super) fn write_sandbox_recipe_manifest(
             return Ok(None);
         }
     };
-    if !has_setup_script && bases.is_empty() {
+    if !has_setup_script && bases.is_empty() && prepare.is_none() {
         if path.exists() {
             let _ = fs::remove_file(&path);
         }
         return Ok(None);
     }
-    let registry_digest = bases
-        .registry
-        .as_ref()
-        .map(SandboxRegistryManifest::digest_input);
-    let digest = recipe_digest(
-        setup.as_bytes(),
-        bases.snapshot_name.as_deref(),
-        bases.snapshot_id.as_deref(),
-        bases.docker_image.as_deref(),
-        registry_digest.as_deref(),
-    );
-    let setup_sha_preview = if !has_setup_script {
-        None
-    } else {
-        Some(recipe_digest(setup.as_bytes(), None, None, None, None))
-    };
-
-    let manifest = SandboxRecipeManifest {
+    let mut manifest = SandboxRecipeManifest {
         has_setup_script,
-        setup_sha_preview,
+        setup_sha_preview: has_setup_script
+            .then(|| recipe_digest(setup.as_bytes(), None, None, None, None)),
         snapshot_name: bases.snapshot_name,
         snapshot_id: bases.snapshot_id,
         docker_image: bases.docker_image,
         registry: bases.registry,
-        digest,
+        prepare,
+        digest: String::new(),
     };
+    manifest.digest = manifest.recipe_spec(&project.root, setup).digest();
 
     let json = serde_json::to_string_pretty(&manifest)
         .context("failed to serialize sandbox-recipe.json")?;
@@ -167,6 +191,59 @@ impl BakeBases {
             && self.docker_image.is_none()
             && self.registry.is_none()
     }
+}
+
+/// Record a Python `sandbox = define_sandbox(prepare=...)` callback.
+///
+/// The callback is code, so it is detected rather than extracted; its digest
+/// covers every project file under `sandbox/`. TypeScript has no `prepare` yet.
+fn extract_sandbox_prepare(
+    project: &Project,
+    entry: &Path,
+) -> Result<Option<SandboxPrepareManifest>> {
+    if project.language != Language::Python {
+        return Ok(None);
+    }
+    let path = project.root.join(entry);
+    let source =
+        fs::read_to_string(&path).with_context(|| format!("failed to read {}", path.display()))?;
+    let declared = run_python_extractor(
+        scripts::SANDBOX_PREPARE,
+        &source,
+        &entry.display().to_string(),
+        "the sandbox prepare callback",
+    )?;
+    if declared.is_none() {
+        return Ok(None);
+    }
+    Ok(Some(SandboxPrepareManifest {
+        module: sandbox_import_specifier(entry, project.language),
+        inputs_digest: sandbox_inputs_digest(project)?,
+    }))
+}
+
+fn sandbox_inputs_digest(project: &Project) -> Result<String> {
+    use sha2::{Digest, Sha256};
+
+    let mut hasher = Sha256::new();
+    for rel in project
+        .files
+        .iter()
+        .filter(|rel| rel.starts_with(SANDBOX_DIR))
+    {
+        let path = project.root.join(rel);
+        let bytes =
+            fs::read(&path).with_context(|| format!("failed to read {}", path.display()))?;
+        hasher.update(crate::path_util::to_unix_path(rel).as_bytes());
+        hasher.update([0]);
+        hasher.update((bytes.len() as u64).to_le_bytes());
+        hasher.update(&bytes);
+    }
+    Ok(hasher
+        .finalize()
+        .iter()
+        .map(|byte| format!("{byte:02x}"))
+        .collect())
 }
 
 fn extract_sandbox_bases(project: &Project, entry: &PathBuf) -> Result<BakeBases> {
@@ -505,6 +582,59 @@ mod tests {
             write_sandbox_recipe_manifest(&project, &root.path().join("build"), false).unwrap();
 
         assert!(manifest.is_none());
+    }
+
+    #[test]
+    fn python_prepare_callback_is_a_recipe_keyed_by_the_sandbox_directory() {
+        let root = tempfile::tempdir().unwrap();
+        write_sandbox(
+            root.path(),
+            "sandbox/__init__.py",
+            "async def prepare(sandbox):\n    pass\n\nsandbox = define_sandbox(prepare=prepare)\n",
+        );
+        write_sandbox(root.path(), "sandbox/files/browser_cli.py", "v1\n");
+        let mut project = sandbox_project(root.path(), Language::Python, "sandbox/__init__.py");
+        project
+            .files
+            .push(PathBuf::from("sandbox/files/browser_cli.py"));
+        let out = root.path().join("build");
+
+        let manifest = write_sandbox_recipe_manifest(&project, &out, false)
+            .unwrap()
+            .unwrap();
+        assert!(!manifest.has_setup_script);
+        assert_eq!(manifest.prepare.as_ref().unwrap().module, "sandbox");
+        assert_eq!(
+            load_sandbox_recipe_manifest(&out).unwrap().as_ref(),
+            Some(&manifest)
+        );
+
+        write_sandbox(root.path(), "sandbox/files/browser_cli.py", "v2\n");
+        let changed = write_sandbox_recipe_manifest(&project, &out, false)
+            .unwrap()
+            .unwrap();
+        assert_ne!(manifest.digest, changed.digest);
+    }
+
+    #[test]
+    fn sandbox_without_prepare_keeps_its_recipe_digest() {
+        let root = tempfile::tempdir().unwrap();
+        write_sandbox(
+            root.path(),
+            "sandbox/__init__.py",
+            "sandbox = define_sandbox(snapshot_name=\"base\")\n",
+        );
+        let project = sandbox_project(root.path(), Language::Python, "sandbox/__init__.py");
+
+        let manifest = write_sandbox_recipe_manifest(&project, &root.path().join("build"), false)
+            .unwrap()
+            .unwrap();
+
+        assert_eq!(manifest.prepare, None);
+        assert_eq!(
+            manifest.digest,
+            recipe_digest(b"", Some("base"), None, None, None)
+        );
     }
 
     #[test]
