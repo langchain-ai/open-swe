@@ -46,8 +46,7 @@ from managed_deepagents._channels.trigger.identity_context import (
     IdentityContextKey,
     IdentityContextUnavailableError,
     InvalidIdentityContextError,
-    VerifiedIdentityContext,
-    verify_identity_context,
+    principal_id_from_identity_context,
 )
 from managed_deepagents._channels.trigger.ingress import (
     cancel_ingress_thread_runs,
@@ -74,6 +73,7 @@ from managed_deepagents._channels.trigger.types import (
     TriggerChannelRuntimeStatus,
     TriggerChannelUserPromptResponseEvent,
     parse_trigger_channel_event,
+    trigger_event_actor,
 )
 from managed_deepagents._ingress import ScheduleFn, schedule_ingress_work
 from managed_deepagents._ingress_runs import lookup_status, rejected_as_busy
@@ -144,7 +144,7 @@ class TriggerFinishedEvent(TypedDict):
 
     delivery: JsonValue
     actor: NotRequired[dict[str, JsonValue]]
-    """Who sent it, as the verified ``identity_context`` names them."""
+    """Who sent it, as Trigger Server named them."""
 
 
 TriggerMessageRoute = TriggerMessageDecision | TriggerMessageBackground
@@ -500,7 +500,7 @@ async def handle_trigger_channel_event_request(  # noqa: C901, PLR0911, PLR0912,
         return _json_response({"error": "invalid channel event"}, status_code=400)
 
     try:
-        verified = await _principal_for_event(
+        user_id = await _principal_for_event(
             event,
             identity_context_key=identity_context_key,
             identity_context_issuer=identity_context_issuer,
@@ -523,9 +523,9 @@ async def handle_trigger_channel_event_request(  # noqa: C901, PLR0911, PLR0912,
             logger.safe_error_label(error),
         )
         return _json_response({"error": "invalid channel identity_context"}, status_code=400)
-    user_id = verified.principal_id
-    # Who sent the message, from the verified token only; never logged.
-    actor = verified.actor
+    # Who the delivery came from, as Trigger Server names them; never logged.
+    # Only as trusted as the service key, which is checked for presence alone.
+    actor = trigger_event_actor(event)
 
     logger.info(
         "Channel incoming event (type=%s, event_id=%s, delivery_id=%s, channel_id=%s)",
@@ -1208,7 +1208,7 @@ async def _principal_for_event(
     *,
     identity_context_key: IdentityContextKey | None,
     identity_context_issuer: str | None,
-) -> VerifiedIdentityContext:
+) -> str:
     """Resolve the verified principal required on every Trigger delivery."""
     raw_identity_context = event.get("identity_context")
     if not isinstance(raw_identity_context, str) or not raw_identity_context.strip():
@@ -1216,7 +1216,7 @@ async def _principal_for_event(
     # PyJWKClient fetches the LangSmith JWKS with blocking urllib; run the
     # verification off the event loop.
     return await asyncio.to_thread(
-        verify_identity_context,
+        principal_id_from_identity_context,
         raw_identity_context,
         key=identity_context_key,
         issuer=identity_context_issuer,

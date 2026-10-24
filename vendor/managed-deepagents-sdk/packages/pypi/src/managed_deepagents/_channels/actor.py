@@ -1,9 +1,9 @@
-"""Who caused a channel event, as its provider verified it.
+"""Who caused a channel event.
 
 The signed sender of a GitHub or Linear webhook, or the Slack user Trigger
-Server signs into a delivery. It is personal data: MDA neither logs it nor adds
-it to a run's metadata. Kept free of the agent stack and PyJWT, so the package
-can name these types without loading either.
+Server names on a delivery, which MDA can't verify yet. It is personal data:
+MDA neither logs it nor adds it to a run's metadata. Kept free of the agent
+stack and PyJWT, so the package can name these types without loading either.
 """
 
 from __future__ import annotations
@@ -16,18 +16,17 @@ from typing_extensions import TypedDict
 
 @dataclass(frozen=True, kw_only=True)
 class SlackActor:
-    """A Slack user, as Trigger Server verified and signed them."""
+    """A Slack user, as Trigger Server read them from Slack's signed request.
+
+    MDA doesn't yet verify the delivery's service key, so this is no identity
+    check."""
 
     provider: Literal["slack"] = "slack"
     id: str
     """The Slack user ID."""
     team_id: str
-    """The Slack workspace (team)."""
-    enterprise_id: str | None = None
-    """The Enterprise Grid organization, when the workspace is in one."""
-    name: str | None = None
-    email: str | None = None
-    """The user's email, when the Slack app may read it."""
+    """Their own Slack workspace (team). In a Slack Connect channel, someone
+    from another organization keeps theirs rather than your app's."""
 
 
 @dataclass(frozen=True, kw_only=True)
@@ -63,11 +62,7 @@ class SlackEndpointActor(TypedDict):
     provider: Literal["slack"]
     id: str
     teamId: str
-    """The Slack workspace (team)."""
-    enterpriseId: NotRequired[str]
-    """The Enterprise Grid organization, when the workspace is in one."""
-    name: NotRequired[str]
-    email: NotRequired[str]
+    """Their own Slack workspace (team)."""
 
 
 class GitHubEndpointActor(TypedDict):
@@ -113,20 +108,16 @@ def endpoint_actor(actor: ChannelActor) -> EndpointActor:
         if actor.email is not None:
             github["email"] = actor.email
         return github
-    sent: SlackEndpointActor | LinearEndpointActor
     if isinstance(actor, SlackActor):
-        sent = {"provider": "slack", "id": actor.id, "teamId": actor.team_id}
-        if actor.enterprise_id is not None:
-            sent["enterpriseId"] = actor.enterprise_id
-    else:
-        sent = {"provider": "linear", "id": actor.id}
-        if actor.type is not None:
-            sent["type"] = actor.type
+        return {"provider": "slack", "id": actor.id, "teamId": actor.team_id}
+    linear: LinearEndpointActor = {"provider": "linear", "id": actor.id}
+    if actor.type is not None:
+        linear["type"] = actor.type
     if actor.name is not None:
-        sent["name"] = actor.name
+        linear["name"] = actor.name
     if actor.email is not None:
-        sent["email"] = actor.email
-    return sent
+        linear["email"] = actor.email
+    return linear
 
 
 __all__ = [

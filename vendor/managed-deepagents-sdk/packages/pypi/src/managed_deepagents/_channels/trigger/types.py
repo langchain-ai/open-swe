@@ -17,6 +17,8 @@ from pydantic import (
     field_validator,
 )
 
+from managed_deepagents._channels.actor import ChannelActor, SlackActor
+
 TRIGGER_SERVICE_KEY_HEADER = "x-service-key"
 
 TriggerChannelAddress: TypeAlias = dict[str, object]
@@ -41,6 +43,7 @@ class TriggerChannelMessageEventRequired(TypedDict):
 
 class TriggerChannelMessageEvent(TriggerChannelMessageEventRequired, total=False):
     identity_context: str | None
+    actor: object
     raw_event: TriggerChannelRawEvent | None
 
 
@@ -68,6 +71,7 @@ class TriggerChannelInterruptResumeEventRequired(TypedDict):
 
 class TriggerChannelInterruptResumeEvent(TriggerChannelInterruptResumeEventRequired, total=False):
     identity_context: str | None
+    actor: object
     raw_event: TriggerChannelRawEvent | None
 
 
@@ -99,6 +103,7 @@ class TriggerChannelSlackUserPromptResponseEvent(
     TriggerChannelSlackUserPromptResponseEventRequired, total=False
 ):
     identity_context: str | None
+    actor: object
     raw_event: TriggerChannelRawEvent | None
 
 
@@ -126,6 +131,7 @@ class TriggerChannelRunCancelEventRequired(TypedDict):
 
 class TriggerChannelRunCancelEvent(TriggerChannelRunCancelEventRequired, total=False):
     identity_context: str | None
+    actor: object
     raw_event: TriggerChannelRawEvent | None
 
 
@@ -408,6 +414,28 @@ _EVENT_ADAPTER = TypeAdapter(
 )
 
 
+def trigger_event_actor(event: TriggerChannelEvent) -> ChannelActor | None:
+    """Who a delivery came from, as Trigger Server verified them from the
+    provider's signed request: for Slack, the user (``subject``) and their own
+    team (``issuer``).
+
+    ``None`` when the delivery names no one, or someone malformed, or a
+    provider Trigger Server doesn't serve: an older Trigger Server sends none,
+    and a delivery never fails over it.
+    """
+    actor = event.get("actor")
+    if not isinstance(actor, Mapping):
+        return None
+    subject, issuer = actor.get("subject"), actor.get("issuer")
+    if not (isinstance(subject, str) and subject.strip()):
+        return None
+    if not (isinstance(issuer, str) and issuer.strip()):
+        return None
+    if actor.get("provider") == "slack":
+        return SlackActor(id=subject, team_id=issuer)
+    return None
+
+
 def parse_trigger_channel_event(value: object) -> TriggerChannelEvent:
     """Validate a v1 message envelope without replacing its opaque mappings."""
     _EVENT_ADAPTER.validate_python(value, strict=True)
@@ -436,4 +464,5 @@ __all__ = [
     "TriggerChannelUserPromptResponseEvent",
     "TriggerChannelUserPromptResponseInteraction",
     "parse_trigger_channel_event",
+    "trigger_event_actor",
 ]

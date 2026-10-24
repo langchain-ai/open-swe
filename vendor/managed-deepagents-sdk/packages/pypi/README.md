@@ -550,18 +550,24 @@ after it, `interrupt` cancels the run, keeping its progress, and starts at
 once, `rollback` cancels it and discards its progress, and `reject` starts
 nothing.
 
-`event.actor` is the Slack user who sent the message, as Trigger Server
-verified and signed it in the delivery's `identity_context`: a `SlackActor`
-with `id`, `team_id`, and `enterprise_id`, `name` and `email` when Slack has
-them (`email` only when the Slack app may read it). `user_id` and `payload`
-are only what Slack's event says, so check `actor` to map a Slack user to your
-own accounts. It is `None` rather than guessed when Trigger Server signs none,
-such as an older Trigger Server or a bot's message.
+`event.actor` is the Slack user who sent the message, as Trigger Server read
+it from Slack's signed request: a `SlackActor` with `id` and `team_id`.
+`team_id` is their own workspace: in a Slack Connect channel, someone from
+another organization keeps theirs. It is `None` rather than guessed when
+Trigger Server names no one, such as an older Trigger Server or a bot's
+message.
+
+> **Not yet an identity check.** Trigger Server sends `actor` as a plain
+> field of the delivery, and MDA doesn't yet verify the key that delivery
+> comes with, only that it has one. Use `actor` to address or describe the
+> sender, not to decide what they may do or which of your accounts they are.
 
 Every channel's events carry `actor` in this shape, a `ChannelActor`
-(`SlackActor`, `GitHubActor` or `LinearActor`): `provider`, `id`, `name` and
-`email`, plus the provider's own fields. GitHub's is the webhook's `sender`
-(`name` is its login, plus `type`), and Linear's is who acted (plus `type`).
+(`SlackActor`, `GitHubActor` or `LinearActor`): `provider` and `id`, plus the
+provider's own fields. GitHub's is the webhook's `sender` (`name` is its
+login, plus `type` and `email`), and Linear's is who acted (plus `type`,
+`name` and `email`); Slack's has no name or email, since Trigger Server's
+delivery names none.
 Endpoints get it as `event["actor"]`, with camelCase keys. It is personal
 data: MDA doesn't log it or add it to a run's metadata; add what you need
 through `metadata` yourself.

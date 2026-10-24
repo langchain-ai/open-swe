@@ -93,11 +93,11 @@ class SlackMessageEvent:
     """The Slack user who sent it, as Slack's event says; ``None`` for some bot messages."""
     files: tuple[SlackFile, ...] = field(default_factory=tuple)
     actor: SlackActor | None = None
-    """The Slack user who sent the message, as Trigger Server verified and
-    signed it; ``user_id`` and ``payload`` are only what Slack's event says.
-    ``None`` when Trigger Server doesn't sign one, such as an older Trigger
-    Server or a message from a bot. It is personal data: MDA neither logs it nor
-    adds it to the run's metadata."""
+    """The Slack user who sent the message, as Trigger Server verified it from
+    Slack's signed request. Its ``team_id`` is their own workspace, which in a
+    Slack Connect channel isn't your app's. ``None`` when Trigger Server names
+    no one, such as an older Trigger Server or a message from a bot. It is
+    personal data: MDA neither logs it nor adds it to the run's metadata."""
 
 
 @dataclass(frozen=True, kw_only=True)
@@ -128,7 +128,7 @@ class SlackInteractionEvent:
     user_id: str | None = None
     """The Slack user who clicked, as Slack's payload says."""
     actor: SlackActor | None = None
-    """The Slack user who clicked, as Trigger Server verified and signed it; see
+    """The Slack user who clicked, as Trigger Server verified it; see
     ``SlackMessageEvent.actor``."""
 
 
