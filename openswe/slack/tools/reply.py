@@ -46,6 +46,7 @@ from openswe.slack.records import SlackRun, SlackThread, store_slack_message_run
 from openswe.slack.run_feedback import feedback_block
 from openswe.slack.thinking import restore_slack_thinking_status, settle_slack_thread_status
 from openswe.slack.tools.read_thread_messages import fetch_and_format_thread
+from openswe.threads.last_reply import LastReply
 from openswe.utils.http import DEFAULT_HTTP_TIMEOUT
 from openswe.utils.http_pool import pooled_transport
 from openswe.utils.json_types import thread_metadata
@@ -162,6 +163,7 @@ async def send_slack_reply(
 
     if not message.strip():
         return {"success": False, "error": "Message cannot be empty"}
+    answer = message
 
     from openswe.slack.code_channels import is_code_channel_session
 
@@ -243,6 +245,8 @@ async def send_slack_reply(
     if run_id and not is_code_channel_session(str(thread_ts)):
         # Slack drops the status when the app posts.
         await restore_slack_thinking_status(str(channel_id), str(thread_ts))
+    if response_type == "final":
+        await LastReply.record(answer, awaiting_choice=bool(options))
     return {"success": True, "message_ts": message_ts}
 
 
