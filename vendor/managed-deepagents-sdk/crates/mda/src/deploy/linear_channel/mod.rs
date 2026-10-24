@@ -103,6 +103,15 @@ pub(crate) struct AppConnection {
     pub(crate) grant: AgentGrant,
 }
 
+/// Where the Linear app comes from when the deployment has none.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum AppSource {
+    /// One an admin creates from the page deploy fills in.
+    New,
+    /// One the workspace already has, pointed at this deployment.
+    Existing,
+}
+
 /// What a Linear admin copies from a new app's settings page.
 #[derive(Clone, PartialEq, Eq)]
 pub(crate) struct AppCredentials {
@@ -134,6 +143,10 @@ pub(crate) trait SetupEnv: SetupUi {
     fn workspace_key(&mut self) -> Result<Option<String>>;
     /// The workspace's URL key from [`WORKSPACE_ENV`] alone, never asked for.
     fn configured_workspace_key(&self) -> Option<String>;
+    /// Ask whether to create a new app or use one the workspace has.
+    fn choose_app_source(&mut self) -> Result<AppSource>;
+    /// Show what an existing app must be set to.
+    fn show_existing_app_settings(&mut self, settings: &str) -> Result<()>;
     /// Show and open the page that creates the app, filled in.
     fn open_create_page(&mut self, url: &str) -> Result<()>;
     /// Ask for what the new app's settings page shows.
@@ -239,7 +252,7 @@ fn unattended_setup_message(create_url: Option<&str>, workspace_known: bool) -> 
         format!(" Set {WORKSPACE_ENV} to the workspace's URL key, as in https://linear.app/<key>/, so the link opens in that workspace.")
     };
     format!(
-        "This agent's Linear channel needs a Linear app, and without a terminal deploy cannot ask for it. Have an admin of the Linear workspace create one{page}, then set {CLIENT_ID_ENV}, {CLIENT_SECRET_ENV} and {WEBHOOK_SECRET_ENV} in the shell or .env and run `mda deploy` again. Deploy prints the install link to approve.{workspace}"
+        "This agent's Linear channel needs a Linear app, and without a terminal deploy cannot ask for it. Have an admin of the Linear workspace create one{page}, or use an app the workspace has, then set {CLIENT_ID_ENV}, {CLIENT_SECRET_ENV} and {WEBHOOK_SECRET_ENV} in the shell or .env and run `mda deploy` again. Deploy prints the install link to approve.{workspace}"
     )
 }
 
@@ -342,6 +355,15 @@ fn store_missing_secret(env: &mut dyn SetupEnv, connection: &AppConnection) -> R
 fn install_new_app(env: &mut dyn SetupEnv, channel: &LinearChannel) -> Result<()> {
     let credentials = match env.credentials_from_env()? {
         Some(credentials) => credentials,
+        None if env.interactive() && env.choose_app_source()? == AppSource::Existing => {
+            env.show_existing_app_settings(&existing_app_settings(
+                channel,
+                env.webhook_url(),
+                env.redirect_uri(),
+                env.configured_workspace_key().as_deref(),
+            ))?;
+            env.ask_credentials()?
+        }
         None => {
             let workspace = env.workspace_key()?;
             let url = create_app_url(
@@ -461,6 +483,31 @@ pub(crate) fn create_app_url(
     url.query_pairs_mut()
         .append_pair("manifest", &manifest.to_string());
     Ok(url.to_string())
+}
+
+/// What an app the workspace already has must be set to, the same as a new
+/// app's page would fill in. Linear has no API to change an app, so an admin
+/// sets these on its settings page.
+pub(crate) fn existing_app_settings(
+    channel: &LinearChannel,
+    webhook_url: &str,
+    redirect_uri: &str,
+    workspace: Option<&str>,
+) -> String {
+    let page = workspace.map_or_else(
+        || "Settings → Administration → API in Linear".to_string(),
+        |key| format!("https://linear.app/{key}/{APPS_PATH}"),
+    );
+    format!(
+        "Point your Linear app at this deployment on its settings page ({page}):\n\
+         \n  Redirect URIs: add {redirect_uri}\n\
+         \x20 Webhooks: turn on, URL {webhook_url}\n\
+         \x20   events: {}\n\
+         \nLinear sends an app's webhooks to one URL, so whatever received this app's \
+         events stops receiving them. Then copy its client ID, client secret and webhook \
+         signing secret into the prompts below.",
+        channel.resource_types.join(", ")
+    )
 }
 
 /// A workspace's URL key, from the key itself or any `linear.app` URL in it.
@@ -626,6 +673,27 @@ impl SetupEnv for LiveSetup<'_> {
 
     fn configured_workspace_key(&self) -> Option<String> {
         configured_workspace_key(self.env_vars)
+    }
+
+    fn choose_app_source(&mut self) -> Result<AppSource> {
+        cliclack::select("This agent's Linear channel needs a Linear app")
+            .item(
+                AppSource::New,
+                "Create a new Linear app",
+                "recommended: deploy opens Linear's create page, filled in",
+            )
+            .item(
+                AppSource::Existing,
+                "Use an existing Linear app",
+                "enter its client ID, client secret and webhook signing secret",
+            )
+            .interact()
+            .context("failed to choose a Linear app")
+    }
+
+    fn show_existing_app_settings(&mut self, settings: &str) -> Result<()> {
+        log::step(settings)?;
+        Ok(())
     }
 
     fn open_create_page(&mut self, url: &str) -> Result<()> {

@@ -63,6 +63,9 @@ struct Fake {
     statuses: VecDeque<String>,
     retry: VecDeque<bool>,
     fail_create: bool,
+    app_source: AppSource,
+    asked_app_source: bool,
+    existing_settings: Option<String>,
     calls: Vec<String>,
 }
 
@@ -78,6 +81,9 @@ impl Fake {
             statuses: VecDeque::from(["completed".to_string()]),
             retry: VecDeque::new(),
             fail_create: false,
+            app_source: AppSource::New,
+            asked_app_source: false,
+            existing_settings: None,
             calls: Vec::new(),
         }
     }
@@ -127,6 +133,14 @@ impl SetupEnv for Fake {
     }
     fn configured_workspace_key(&self) -> Option<String> {
         self.workspace.clone()
+    }
+    fn choose_app_source(&mut self) -> Result<AppSource> {
+        self.asked_app_source = true;
+        Ok(self.app_source)
+    }
+    fn show_existing_app_settings(&mut self, settings: &str) -> Result<()> {
+        self.existing_settings = Some(settings.to_string());
+        Ok(())
     }
     fn open_create_page(&mut self, url: &str) -> Result<()> {
         self.calls.push(format!("open_create_page {url}"));
@@ -247,6 +261,7 @@ fn creates_and_installs_a_new_app_from_a_filled_in_page() {
         format!("success Linear channel ready: the Linear app sends its events to {WEBHOOK}")
     );
     assert!(env.called("delete_connection").is_empty());
+    assert!(env.asked_app_source);
     // A new app gets what the channel says; only a kept one needs the note.
     assert!(!env
         .calls
@@ -631,4 +646,47 @@ fn reads_the_signing_secret_alone_from_the_env() {
     assert!(!error.to_string().contains("not-a-secret"), "{error}");
     // The other two are not needed for it, while a new app still needs all three.
     assert!(credentials_env(&vars(&[(WEBHOOK_SECRET_ENV, "lin_wh_abc")])).is_err());
+}
+
+#[test]
+fn uses_an_existing_app_pointed_at_the_deployment() {
+    let mut env = Fake {
+        app_source: AppSource::Existing,
+        ..Fake::new()
+    };
+    run_setup(&mut env, &sessions()).unwrap();
+
+    assert!(env.called("open_create_page").is_empty());
+    let settings = env.existing_settings.unwrap();
+    assert!(settings.contains("https://linear.app/acme/settings/api"));
+    assert!(settings.contains(&format!("Redirect URIs: add {REDIRECT}")));
+    assert!(settings.contains(&format!("URL {WEBHOOK}")));
+    assert!(settings.contains("events: AgentSessionEvent, OAuthAuthorization, PermissionChange"));
+    assert_eq!(
+        env.calls[..5],
+        [
+            "ask_credentials".to_string(),
+            "create_connection client-1 read,write,app:mentionable,app:assignable".into(),
+            "store_webhook_secret lin_wh_signing".into(),
+            "start_install conn-1".into(),
+            "open_install_page".into(),
+        ]
+    );
+}
+
+#[test]
+fn env_credentials_or_no_terminal_never_ask_where_the_app_comes_from() {
+    let mut with_env = Fake {
+        env_credentials: Some(credentials()),
+        ..Fake::new()
+    };
+    run_setup(&mut with_env, &sessions()).unwrap();
+    assert!(!with_env.asked_app_source);
+
+    let mut unattended = Fake {
+        interactive: false,
+        ..Fake::new()
+    };
+    assert!(run_setup(&mut unattended, &sessions()).is_err());
+    assert!(!unattended.asked_app_source);
 }

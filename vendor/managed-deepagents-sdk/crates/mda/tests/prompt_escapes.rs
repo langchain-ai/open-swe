@@ -49,8 +49,10 @@ const PROMPTS: &[(&str, usize, &str)] = &[
     ),
     (
         "deploy/linear_channel/mod.rs",
-        5,
-        "Linear app setup prompts run only in an interactive terminal: MDA_LINEAR_WORKSPACE \
+        6,
+        "Linear app setup prompts run only in an interactive terminal: choosing a new or an \
+         existing app is only asked there (without one, the env credentials cover either), \
+         MDA_LINEAR_WORKSPACE \
          answers the workspace prompt, and without a terminal MDA_LINEAR_CLIENT_ID, \
          MDA_LINEAR_CLIENT_SECRET and MDA_LINEAR_WEBHOOK_SECRET replace the credential \
          prompts (deploy fails with that hint and the create-app link without them), and \

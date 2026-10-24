@@ -1096,8 +1096,12 @@ filled in with the app's name, redirect URI, webhook URL
 (`<deployment-url>/channels/linear/events`) and events. The admin creates the
 app and pastes its client ID, client secret and webhook signing secret into
 deploy's prompts. Deploy asks for the workspace's URL key (as in
-`https://linear.app/<key>/`) first, so the page opens in that workspace. Deploy
-then opens the install page, where the admin approves the app for the
+`https://linear.app/<key>/`) first, so the page opens in that workspace. To use
+an app the workspace already has, choose "Use an existing Linear app" instead:
+deploy lists the redirect URI, webhook URL and events to set on the app's
+settings page, then asks for the same three values. Linear sends an app's
+webhooks to one URL, so whatever received them before stops receiving them.
+Deploy then opens the install page, where the admin approves the app for the
 workspace. Agent Auth keeps the credentials, and the agent's token, so nothing
 goes into `.env`. Without a terminal, for example when a coding agent deploys,
 set `MDA_LINEAR_CLIENT_ID`, `MDA_LINEAR_CLIENT_SECRET` and
