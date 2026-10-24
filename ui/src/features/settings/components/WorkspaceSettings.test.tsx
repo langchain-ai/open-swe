@@ -131,7 +131,7 @@ function mockApis(record: WorkspaceRecord = RECORD) {
         num_members: 3,
       },
     ],
-    partial: false,
+    refreshing: false,
   })
   vi.spyOn(api, "getWorkspaceMCPs").mockResolvedValue([])
   vi.spyOn(api, "listWorkspaceApiKeys").mockResolvedValue([])
