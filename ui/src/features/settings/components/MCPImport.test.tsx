@@ -58,6 +58,65 @@ it.each([
   ).toThrow(/OAuth/)
 })
 
+it("imports hosted OAuth and explicit tool permissions while warning per local entry", () => {
+  const warnings: string[] = []
+  expect(
+    parseMCPConfig(
+      JSON.stringify({
+        mcpServers: {
+          local: {
+            command: "/Applications/1Password.app/Contents/MacOS/op",
+            args: ["run"],
+          },
+          hosted: {
+            url: "https://mcp.example.com",
+            auth: "oauth",
+            allowedTools: ["search", "search"],
+          },
+          wildcard: { url: "https://mcp.example.com", allowedTools: ["*"] },
+        },
+      }),
+      warnings
+    )
+  ).toEqual([
+    {
+      name: "hosted",
+      url: "https://mcp.example.com",
+      transport: "streamable_http",
+      headers: undefined,
+      auth: "oauth",
+      allowed_tools: ["search"],
+    },
+  ])
+  expect(warnings).toHaveLength(2)
+  expect(warnings[0]).toContain("1Password")
+  expect(warnings[1]).toContain("explicit tool names")
+})
+
+it("requires acknowledgement before reviewing supported entries in a mixed import", () => {
+  const onImport = vi.fn()
+  render(<MCPImport onImport={onImport} onCancel={vi.fn()} />)
+  fireEvent.change(screen.getByLabelText("MCP configuration JSON"), {
+    target: {
+      value: JSON.stringify({
+        mcpServers: {
+          local: { command: "op", args: ["run"] },
+          hosted: { url: "https://mcp.example.com", auth: "oauth" },
+        },
+      }),
+    },
+  })
+  fireEvent.click(screen.getByRole("button", { name: "Review connections" }))
+  expect(onImport).not.toHaveBeenCalled()
+  expect(screen.getByRole("status").textContent).toContain("local command")
+  fireEvent.click(
+    screen.getByRole("button", { name: "Review supported connections" })
+  )
+  expect(onImport).toHaveBeenCalledWith([
+    expect.objectContaining({ name: "hosted", auth: "oauth" }),
+  ])
+})
+
 it("imports multiple remote Claude-style servers with headers and transports", () => {
   expect(
     parseMCPConfig(
@@ -133,6 +192,17 @@ it.each([
       mcpServers: { example: { url: "https://example.com", type: ["http"] } },
     }),
     "type must",
+  ],
+  [
+    JSON.stringify({
+      mcpServers: {
+        corridor: {
+          url: "https://app.corridor.dev/api/mcp",
+          headers: { Authorization: "Bearer " },
+        },
+      },
+    }),
+    "empty bearer token",
   ],
 ])(
   "rejects unsupported or malformed configuration without echoing secrets",

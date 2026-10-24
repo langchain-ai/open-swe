@@ -1,16 +1,19 @@
 """Dashboard API for instance-wide, workspace, and per-user MCP connections."""
 
+import hashlib
 import logging
+import re
 from typing import Any
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import JSONResponse, RedirectResponse
 from pydantic import BaseModel
 
 from openswe.audit_logs.middleware import audit_endpoint
 from openswe.dashboard.deps import ADMIN_DEP, SESSION_DEP
-from openswe.dashboard.oauth import frontend_base_url
+from openswe.dashboard.oauth import COOKIE_NAME, frontend_base_url
 from openswe.mcp.cards import ConnectCard, connect_service
+from openswe.mcp.hosted_oauth import AuthorizationStore, complete_oauth, oauth_status, start_oauth
 from openswe.mcp.instance import (
     delete_instance_mcp,
     discover_instance_mcp,
@@ -33,6 +36,7 @@ from openswe.mcp.models import (
     MCPConnection,
     MCPConnectionPublic,
     MCPConnectionUpdate,
+    MCPOAuthStatus,
     MCPToolDescription,
 )
 from openswe.mcp.user import (
@@ -50,7 +54,7 @@ from openswe.mcp.workspace import (
     save_workspace_mcp,
 )
 from openswe.tool_loaders.workspace_mcp import discover_workspace_mcp
-from openswe.utils.dashboard_links import dashboard_thread_url
+from openswe.utils.dashboard_links import dashboard_base_url, dashboard_thread_url
 from openswe.workspaces.store import slugify
 
 logger = logging.getLogger(__name__)
@@ -176,6 +180,84 @@ async def api_discover_workspace_mcp(
 
 
 user_mcp_router = APIRouter(route_class=MCPRoute)
+
+
+def _oauth_session_binding(request: Request) -> str:
+    cookie = request.cookies.get(COOKIE_NAME)
+    if not cookie:
+        raise HTTPException(401, "Sign in to connect this personal MCP")
+    return hashlib.sha256(cookie.encode()).hexdigest()
+
+
+async def _personal_oauth_record(login: str, name: str) -> MCPConnection:
+    record = await get_user_mcp(login, name)
+    if record is None or record.auth != "oauth":
+        raise HTTPException(404, "Personal OAuth MCP connection not found")
+    return record
+
+
+@user_mcp_router.get("/my-mcps/oauth/callback")
+async def api_my_mcp_oauth_callback(
+    request: Request,
+    state: str = "",
+    code: str = "",
+    iss: str | None = None,
+    error: str | None = None,
+    session: dict[str, Any] = SESSION_DEP,
+) -> RedirectResponse:
+    name = state.partition(".")[0]
+    if not re.fullmatch(r"[a-z][a-z0-9_-]{0,31}", name) or len(state) > 256 or len(code) > 8192:
+        raise HTTPException(400, "Invalid MCP OAuth callback")
+    record = await _personal_oauth_record(session["sub"], name)
+    binding = _oauth_session_binding(request)
+    result = "connected"
+    try:
+        if error or not code:
+            store = AuthorizationStore(session["sub"], name)
+            authorization = await store.consume(record, state, binding)
+            authorization.verifier = None
+            await store.finish(authorization)
+            result = "failed"
+        else:
+            await complete_oauth(session["sub"], record, state, code, binding, iss)
+    except ValueError:
+        result = "failed"
+    return RedirectResponse(
+        f"{dashboard_base_url()}/my-settings/connections?mcp_oauth={result}",
+        status_code=303,
+        headers={"Cache-Control": "no-store", "Referrer-Policy": "no-referrer"},
+    )
+
+
+class PersonalOAuthStart(BaseModel):
+    authorization_url: str
+
+
+@user_mcp_router.post("/my-mcps/{name}/oauth/authorization", response_model=PersonalOAuthStart)
+@audit_endpoint
+async def api_start_my_mcp_oauth(
+    name: str, request: Request, session: dict[str, Any] = SESSION_DEP
+) -> PersonalOAuthStart:
+    record = await _personal_oauth_record(session["sub"], name)
+    try:
+        url = await start_oauth(session["sub"], record, _oauth_session_binding(request))
+        return PersonalOAuthStart(authorization_url=url)
+    except ValueError as exc:
+        raise HTTPException(400, str(exc)) from None
+
+
+@user_mcp_router.get("/my-mcps/{name}/oauth", response_model=MCPOAuthStatus)
+async def api_my_mcp_oauth_status(
+    name: str, session: dict[str, Any] = SESSION_DEP
+) -> MCPOAuthStatus:
+    return await oauth_status(session["sub"], await _personal_oauth_record(session["sub"], name))
+
+
+@user_mcp_router.delete("/my-mcps/{name}/oauth", status_code=204)
+@audit_endpoint
+async def api_disconnect_my_mcp_oauth(name: str, session: dict[str, Any] = SESSION_DEP) -> None:
+    await _personal_oauth_record(session["sub"], name)
+    await AuthorizationStore(session["sub"], name).delete()
 
 
 @user_mcp_router.get("/my-mcps", response_model=list[MCPConnectionPublic])
