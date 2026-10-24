@@ -4,6 +4,7 @@ import { IconButton } from "@langchain/macaw-components/IconButton"
 import { Switch } from "@langchain/macaw-components/Switch"
 import { QuestionIcon } from "@phosphor-icons/react/dist/ssr/Question"
 
+import { SlackChannelCombobox } from "@/components/SlackChannelCombobox"
 import { SlackChannelTextarea } from "@/components/SlackChannelTextarea"
 import { RepositoryPicker, SlackChannelPicker } from "./WorkspaceBindingPickers"
 import { WorkspaceScriptEditor } from "./WorkspaceScriptEditor"
@@ -82,6 +83,7 @@ export interface WorkspaceDraft {
   repos: Array<string>
   slackChannelIds: Array<string>
   kitchenChannelIds: Array<string>
+  firehoseChannelId: string | null
   prompt: string
   setupScript: string
   updateScript: string
@@ -93,6 +95,7 @@ export function draftFromWorkspace(workspace: WorkspaceRecord): WorkspaceDraft {
     repos: workspace.repos,
     slackChannelIds: workspace.slack_channel_ids,
     kitchenChannelIds: workspace.kitchen_channel_ids,
+    firehoseChannelId: workspace.firehose_channel_id ?? null,
     prompt: workspace.prompt,
     setupScript: "",
     updateScript: "",
@@ -104,6 +107,7 @@ export const EMPTY_DRAFT: WorkspaceDraft = {
   repos: [],
   slackChannelIds: [],
   kitchenChannelIds: [],
+  firehoseChannelId: null,
   prompt: "",
   setupScript: "",
   updateScript: "",
@@ -246,6 +250,23 @@ export function WorkspaceEditor({
             workspaces={workspaces}
           />
         </div>
+      </div>
+      <div className="space-y-space-1 text-sm">
+        <div id="firehose-label">Firehose Channel (Optional)</div>
+        <p className="text-xs text-secondary">
+          Post a web link to every new workspace thread, plus its Slack link
+          when available. Private threads use a generic label with no Slack
+          link. Clear the selection to turn this off.
+        </p>
+        <SlackChannelCombobox
+          aria-label="Firehose channel"
+          placeholder="Choose a firehose channel"
+          value={draft.firehoseChannelId}
+          onValueChange={(firehoseChannelId) =>
+            onChange({ ...draft, firehoseChannelId })
+          }
+          eligible={(channel) => channel.is_member && !channel.is_ext_shared}
+        />
       </div>
       <label className="block text-sm">
         Instructions

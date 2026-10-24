@@ -38,6 +38,9 @@ class WorkspaceRow(Base):
     setup_script: Mapped[str] = mapped_column(server_default="", default="")
     update_script: Mapped[str] = mapped_column(server_default="", default="")
     base_snapshot_id: Mapped[str | None] = mapped_column(default=None)
+    firehose_channel_id: Mapped[str | None] = mapped_column(
+        ForeignKey("slack_channel.id", ondelete="SET NULL"), default=None
+    )
     breakout_channel_id: Mapped[str | None] = mapped_column(default=None)
     merge_queue_config: Mapped[dict[str, JsonValue] | None] = mapped_column(
         JSONB(none_as_null=True), default=None
@@ -119,6 +122,7 @@ def to_workspace(
             "repos": repos,
             "slack_channel_ids": channels,
             "kitchen_channel_ids": kitchen_channels,
+            "firehose_channel_id": row.firehose_channel_id,
             "mem_bytes": row.mem_bytes,
             "vcpus": row.vcpus,
             "fs_capacity_bytes": row.fs_capacity_bytes,
@@ -174,6 +178,7 @@ def apply_definition(row: WorkspaceRow, record: Workspace) -> None:
     from reverting the other, such as a refresh restoring revoked access.
     """
     row.inherit_default_sandbox = record.inherit_default_sandbox
+    row.firehose_channel_id = record.firehose_channel_id
     row.name = record.name
     row.prompt = record.prompt
     row.setup_script = record.setup_script

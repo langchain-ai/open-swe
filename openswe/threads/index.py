@@ -255,6 +255,10 @@ async def create(
             .mappings()
             .first()
         )
+        if row is not None and runtime == "mda":
+            from openswe.workspaces.firehose import enqueue
+
+            await enqueue(conn, thread_id, IndexedThread.from_row(row).metadata)
     if row is not None:
         return IndexedThread.from_row(row)
     if if_exists == "raise":
@@ -370,6 +374,13 @@ async def current_thread_id(thread_id: str) -> str:
 async def update(thread_id: str, metadata: Mapping[str, JsonValue]) -> IndexedThread | None:
     """Merge ``metadata`` into the thread's, key by key, as the Agent Server's PATCH does."""
     async with transaction() as conn:
+        assigning_workspace = False
+        if metadata.get("workspace"):
+            previous = await conn.scalar(
+                text("SELECT metadata FROM thread_index WHERE thread_id = :id FOR UPDATE"),
+                {"id": thread_id},
+            )
+            assigning_workspace = isinstance(previous, dict) and not previous.get("workspace")
         row = (
             (
                 await conn.execute(
@@ -384,6 +395,12 @@ async def update(thread_id: str, metadata: Mapping[str, JsonValue]) -> IndexedTh
             .mappings()
             .first()
         )
+        if row is not None and assigning_workspace:
+            from openswe.workspaces.firehose import enqueue
+
+            thread = IndexedThread.from_row(row)
+            if thread.runtime == "mda":
+                await enqueue(conn, thread_id, thread.metadata)
     return None if row is None else IndexedThread.from_row(row)
 
 

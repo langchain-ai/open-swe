@@ -378,6 +378,9 @@ class ThreadRouter:
             raise RuntimeError("The runtime's thread copy returned no thread id")
         made_metadata = made.get("metadata")
         metadata = dict(made_metadata) if isinstance(made_metadata, dict) else dict(thread.metadata)
+        from openswe.workspaces.firehose import DELIVERED_KEY
+
+        metadata.pop(DELIVERED_KEY, None)
         copied = await index.create(
             copy_id, runtime=thread.runtime, metadata=metadata, if_exists="do_nothing"
         )

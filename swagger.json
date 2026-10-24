@@ -8195,6 +8195,17 @@
             "title": "Created By",
             "type": "string"
           },
+          "firehose_channel_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Firehose Channel Id"
+          },
           "fs_capacity_bytes": {
             "anyOf": [
               {
@@ -8496,6 +8507,17 @@
             },
             "title": "Create Params",
             "type": "object"
+          },
+          "firehose_channel_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Firehose Channel Id"
           },
           "fs_capacity_bytes": {
             "anyOf": [
@@ -9092,6 +9114,17 @@
               }
             ],
             "title": "Create Params"
+          },
+          "firehose_channel_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Firehose Channel Id"
           },
           "fs_capacity_bytes": {
             "anyOf": [
