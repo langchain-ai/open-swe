@@ -9,9 +9,9 @@ from fastapi import APIRouter, HTTPException
 from fastapi.responses import Response
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
-from openswe.api_keys.deps import ADMIN_KEY_DEP
 from openswe.api_keys.models import MAX_EXPIRY_DAYS, NAME_MAX_CHARS, ApiKey, ApiKeyStatus
 from openswe.audit_logs.middleware import audit_endpoint
+from openswe.dashboard.deps import ADMIN_DEP
 from openswe.dashboard.oauth import session_user_id
 from openswe.users.models import User
 from openswe.workspaces.store import WORKSPACES
@@ -88,7 +88,7 @@ async def key_view(key: ApiKey) -> ApiKeyView:
 @audit_endpoint
 async def api_create_api_key(
     body: ApiKeyCreate,
-    admin: dict[str, Any] = ADMIN_KEY_DEP,
+    admin: dict[str, Any] = ADMIN_DEP,
 ) -> MintedApiKey:
     creator = await User.for_session(session_user_id(admin), admin["sub"])
     if creator is None:
@@ -116,7 +116,7 @@ async def api_create_api_key(
 @router.get("")
 async def api_list_api_keys(
     workspace: str | None = None,
-    _admin: dict[str, Any] = ADMIN_KEY_DEP,
+    _admin: dict[str, Any] = ADMIN_DEP,
 ) -> list[ApiKeyView]:
     keys = await ApiKey.list_all(workspace.strip() if workspace else None)
     return [await key_view(key) for key in keys]
@@ -126,7 +126,7 @@ async def api_list_api_keys(
 @audit_endpoint
 async def api_revoke_api_key(
     key_id: str,
-    admin: dict[str, Any] = ADMIN_KEY_DEP,
+    admin: dict[str, Any] = ADMIN_DEP,
 ) -> Response:
     if not await ApiKey.revoke(key_id):
         raise HTTPException(404, "api key not found")

@@ -6,7 +6,6 @@ from uuid import uuid4
 from langchain.agents.middleware import AgentState
 from langgraph.runtime import Runtime
 
-from openswe.database import postgres
 from openswe.github.proxy import maybe_refresh_proxy_token
 from openswe.input_messages import RunMessage, dynamic_context_hash, visible_dynamic_context_hashes
 from openswe.middleware.model_call_shape import CallShape
@@ -79,9 +78,8 @@ class TaskCoordinationMiddleware(OpenSWEMiddleware):
                 messages.append(
                     {"role": "user", "id": f"task-context:{uuid4()}", "content": content}
                 )
-        if postgres.configured():
-            owed = await TaskMessage.owed(self.thread_id, state["messages"])
-            messages.extend(TaskMessage.messages(owed))
+        owed = await TaskMessage.owed(self.thread_id, state["messages"])
+        messages.extend(TaskMessage.messages(owed))
         return {"messages": messages} if messages else None
 
     async def ashape_model_call(

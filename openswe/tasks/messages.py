@@ -146,8 +146,6 @@ class TaskMessage(Base):
 
     @classmethod
     async def deliver_to(cls, thread_id: str) -> None:
-        if not postgres.configured():
-            return
         try:
             await cls.deliver(thread_id, "enqueue")
         except Exception:
@@ -190,7 +188,7 @@ class TaskMessage(Base):
         delivery attempts awaits nothing.
         """
         recent = [] if since is None else [cls.matched_at >= since]
-        if not postgres.configured() or not await cls._any_undelivered(
+        if not await cls._any_undelivered(
             thread_id, cls.delivery_attempts < _MAX_ATTEMPTS, *recent
         ):
             return False

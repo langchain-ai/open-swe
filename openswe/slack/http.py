@@ -22,7 +22,6 @@ from slack_sdk.web.async_slack_response import AsyncSlackResponse
 
 from openswe import event_claims
 from openswe.config import ENV
-from openswe.database import postgres
 from openswe.utils import ttl_cache
 from openswe.utils.http_pool import pooled_connector
 
@@ -128,8 +127,7 @@ class _ChannelInfoRequests:
         self, client: AsyncWebClient, key: str, params: dict[str, object]
     ) -> AsyncSlackResponse:
         delay = max(0, self.limited_until - monotonic())
-        if postgres.configured():
-            delay = max(delay, await event_claims.remaining("slack-api-cooldown", self.scope))
+        delay = max(delay, await event_claims.remaining("slack-api-cooldown", self.scope))
         if delay:
             raise _LookupFailure("ratelimited", 429, delay).exception(client)
         if (failed := self.failures.get(key)) is not None:
@@ -173,12 +171,11 @@ class _ChannelInfoRequests:
             )
             if failure.retry_after is not None:
                 self.limited_until = max(self.limited_until, monotonic() + failure.retry_after)
-                if postgres.configured():
-                    await event_claims.defer(
-                        "slack-api-cooldown",
-                        self.scope,
-                        ttl=timedelta(seconds=failure.retry_after),
-                    )
+                await event_claims.defer(
+                    "slack-api-cooldown",
+                    self.scope,
+                    ttl=timedelta(seconds=failure.retry_after),
+                )
             raise failure.exception(client) from None
 
 

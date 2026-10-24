@@ -65,8 +65,6 @@ async def invalidate_standalone(*topics: str) -> None:
     Never raises: the write it follows has already happened, and a reader that
     misses this only waits for its next refetch.
     """
-    if not postgres.configured():
-        return
     try:
         async with postgres.transaction() as conn:
             await invalidate(conn, *topics)

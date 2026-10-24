@@ -37,8 +37,6 @@ async def settle_run_turn(
     Returns the turn it settled, or ``None`` when the thread has no transcript
     or its turn was already closed by the middleware.
     """
-    if not postgres.configured():
-        return None
     turn_id = await _open_turn(thread_id, run_id)
     if turn_id is None:
         return None
@@ -103,8 +101,6 @@ async def steer_target(thread_id: str) -> OpenTurn | None:
     open turn was stranded by a start that never ran or a settlement that failed.
     Modeled in ``docs/tla/SteerRace.tla`` as ``JoinTarget``.
     """
-    if not postgres.configured():
-        return None
     async with postgres.read_only_transaction() as conn:
         result = await conn.execute(
             text(
@@ -136,8 +132,6 @@ async def recorded_turn_id(thread_id: str, command_id: str) -> UUID | None:
     A command that was deduplicated by its receipt leaves the caller holding a
     turn id nothing was written under; this recovers the one that was.
     """
-    if not postgres.configured():
-        return None
     async with postgres.read_only_transaction() as conn:
         result = await conn.execute(
             text(

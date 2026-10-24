@@ -30,7 +30,7 @@ def _load_dotenv_if_available() -> None:
 
 
 async def _run(thread_ids: list[str]) -> int:
-    postgres.require_configured()
+    postgres.uri()
     failures = 0
     try:
         for thread_id in thread_ids:

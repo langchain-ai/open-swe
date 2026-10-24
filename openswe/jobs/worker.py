@@ -5,7 +5,6 @@ import logging
 from collections.abc import Callable, Coroutine
 from typing import Final
 
-from openswe.database import configured
 from openswe.jobs.queue import Hold, Job, claim_due
 
 logger = logging.getLogger(__name__)
@@ -117,7 +116,7 @@ class JobWorker:
         self, *, first: Callable[[], Coroutine[object, object, object]] | None = None
     ) -> None:
         """Start polling; ``first`` runs once in the background before the first poll."""
-        if not configured() or (self._task is not None and not self._task.done()):
+        if self._task is not None and not self._task.done():
             return
         self._stop.clear()
         self._task = asyncio.create_task(self._loop(first), name="job-worker")

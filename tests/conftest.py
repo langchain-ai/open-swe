@@ -164,21 +164,6 @@ async def registry_db(monkeypatch: pytest.MonkeyPatch) -> AsyncIterator[None]:
 
 
 @pytest.fixture
-async def registry_db_if_available(monkeypatch: pytest.MonkeyPatch) -> AsyncIterator[bool]:
-    """``registry_db`` when a database is configured; otherwise the unconfigured path.
-
-    Lets tests whose code under test degrades without PostgreSQL run both ways.
-    """
-    uri = os.environ.get(_TEST_POSTGRES_URI_SETTING)
-    if not uri:
-        monkeypatch.delenv("POSTGRES_URI", raising=False)
-        yield False
-        return
-    async with isolated_database(uri, monkeypatch):
-        yield True
-
-
-@pytest.fixture
 def no_local_threads(monkeypatch: pytest.MonkeyPatch) -> None:
     """Every thread takes new activity itself, for tests without the thread index."""
 
@@ -348,7 +333,7 @@ def github_app(monkeypatch: pytest.MonkeyPatch) -> AsyncMock:
 
 
 @pytest.fixture
-def slack_api(monkeypatch: pytest.MonkeyPatch):
+def slack_api(monkeypatch: pytest.MonkeyPatch, registry_db: None):
     from openswe.slack import channels, client, code_channels, http
     from tests.support.slack_api import slack_api_server
 

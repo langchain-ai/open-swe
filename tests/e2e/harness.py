@@ -191,9 +191,8 @@ async def _reset_durable_pr_state() -> None:
 
     from openswe.database import postgres
 
-    if postgres.configured():
-        async with postgres.transaction() as connection:
-            await connection.execute(text("TRUNCATE human_review_request, pull_request CASCADE"))
+    async with postgres.transaction() as connection:
+        await connection.execute(text("TRUNCATE human_review_request, pull_request CASCADE"))
 
 
 @app.post("/control/prepare-sandbox-repo")

@@ -370,8 +370,6 @@ class HumanReviewRequest(Base):
     @classmethod
     async def card_in_thread(cls, channel_id: str, thread_ts: str) -> Self | None:
         """The Open SWE review-request card this Slack thread holds, with its pull request."""
-        if not postgres.configured():
-            return None
         async with postgres.session() as session:
             return await session.scalar(
                 select(cls)

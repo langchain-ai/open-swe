@@ -584,6 +584,7 @@ def test_trigger_pr_review_from_ref_creates_reviewer_run(
     ],
 )
 async def test_process_github_pr_review_skips_only_empty_untagged_approvals(
+    registry_db,
     monkeypatch: pytest.MonkeyPatch,
     state: str,
     body: str | None,
@@ -644,7 +645,6 @@ async def test_process_github_pr_review_skips_only_empty_untagged_approvals(
     monkeypatch.setattr(webhook_common, "trigger_or_queue_run", dispatch)
     monkeypatch.setattr(User, "email_for_login", AsyncMock(return_value="octocat@example.com"))
     monkeypatch.setattr(User, "known_logins", AsyncMock(return_value=frozenset({"octocat"})))
-    monkeypatch.setattr(github_webhooks.postgres, "configured", lambda: False)
 
     await github_webhooks.process_github_pr_comment(
         {

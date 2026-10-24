@@ -8,7 +8,6 @@ from datetime import UTC, datetime, timedelta
 from githubkit.auth import TokenAuthStrategy
 from pydantic import BaseModel, PositiveInt
 
-from openswe.database import postgres
 from openswe.github.app import (
     PermissionMap,
     get_github_app_installation_token_with_expiry,
@@ -83,8 +82,6 @@ async def repository_token(
 
 async def _stored_repositories(allowed: set[str]) -> dict[str, Repository] | None:
     """The ``repository`` rows for ``allowed``, or ``None`` when they cannot be read."""
-    if not postgres.configured():
-        return None
     try:
         return await Repository.by_keys(allowed)
     except Exception:

@@ -33,8 +33,6 @@ async def append(entry: AuditLog) -> None:
 
 
 async def append_safely(entry: AuditLog) -> None:
-    if not postgres.configured():
-        return
     try:
         with anyio.fail_after(3, shield=True):
             await append(entry)

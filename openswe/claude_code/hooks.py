@@ -269,8 +269,6 @@ def mirror_thread_id(owner_id: UUID, session_id: str) -> str:
 
 async def mirror_of(owner_id: UUID, session_id: str) -> str | None:
     """The thread mirroring this person's session, or ``None`` when it was never mirrored."""
-    if not postgres.configured():
-        return None
     thread_id = mirror_thread_id(owner_id, session_id)
     async with postgres.read_only_transaction() as conn:
         result = await conn.execute(

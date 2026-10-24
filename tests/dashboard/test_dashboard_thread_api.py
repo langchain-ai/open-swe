@@ -47,7 +47,7 @@ async def _unlocked(*args, **kwargs):
 
 
 @pytest.fixture(autouse=True)
-def _empty_thread_pins(monkeypatch) -> None:
+def _empty_thread_pins(monkeypatch, registry_db) -> None:
     async def empty_pins(login: str) -> list[str]:
         return []
 
@@ -683,7 +683,6 @@ async def test_enrich_run_start_command_reuses_a_deduplicated_turn(monkeypatch) 
     patch_thread_module(monkeypatch, "get_profile", fake_get_profile)
     patch_thread_module(monkeypatch, "_ensure_dashboard_github_token", fake_ensure_token)
     patch_thread_module(monkeypatch, "resolve_run_email", fake_resolve_email)
-    monkeypatch.setattr(thread_runs.postgres, "configured", lambda: True)
 
     recorded = uuid7()
     appended: list[str] = []

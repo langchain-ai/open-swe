@@ -13,7 +13,7 @@ from fastapi import Request
 from pydantic import BaseModel, JsonValue, ValidationError
 from sqlalchemy import text
 
-from openswe.database import configured, transaction
+from openswe.database import transaction
 from openswe.github.pull_request_key import PullRequestKey
 from openswe.slack.payloads import SlackEventEnvelope
 from openswe.slack.pr_links import event_pull_requests
@@ -252,8 +252,6 @@ class EventLog:
         """
         from openswe.webhooks.event_subscriptions import EventSubscription  # noqa: PLC0415
 
-        if not configured():
-            return False
         if source == "slack":
             from openswe.slack.channels import SlackChannel
 

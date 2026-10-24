@@ -127,7 +127,7 @@ async def record_agent_invocation_completion(
     failure_code: str | None = None,
     thread_id: str = "",
 ) -> bool:
-    if not invocation_id or not database.configured():
+    if not invocation_id:
         return False
     run_id = opaque_id("run", invocation_id)
     if run_id is None:
@@ -172,7 +172,7 @@ async def record_agent_invocation_completion(
 
 
 async def agent_invocation_needs_cost_refresh(*, invocation_id: str) -> bool:
-    if not invocation_id or not database.configured():
+    if not invocation_id:
         return False
     run_id = opaque_id("run", invocation_id)
     if run_id is None:
@@ -187,7 +187,7 @@ async def agent_invocation_needs_cost_refresh(*, invocation_id: str) -> bool:
 
 
 async def mark_agent_invocation_cost_refresh_scheduled(*, invocation_id: str) -> None:
-    if not invocation_id or not database.configured():
+    if not invocation_id:
         return
     run_id = opaque_id("run", invocation_id)
     if run_id is None or not (await _run_status(run_id))["finished"]:
@@ -203,8 +203,6 @@ async def mark_agent_invocation_cost_refresh_scheduled(*, invocation_id: str) ->
 
 
 async def record_agent_invocation_cost(*, invocation_id: str, cost_usd: float) -> None:
-    if not database.configured():
-        raise RuntimeError("Usage analytics is unavailable")
     if not invocation_id:
         return
     if not math.isfinite(cost_usd) or cost_usd < 0:

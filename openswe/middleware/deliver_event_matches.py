@@ -6,7 +6,6 @@ from typing import Any
 from langchain.agents.middleware import AgentState, before_model
 from langgraph.runtime import Runtime
 
-from openswe.database import postgres
 from openswe.middleware.trace import scrub_middleware_inputs
 from openswe.run_config import RunConfig
 from openswe.webhooks.event_matches import EventMatch
@@ -22,7 +21,7 @@ async def deliver_event_matches_before_model(
 ) -> dict[str, Any] | None:
     """Append every owed event, oldest first, so none waits for the run to end."""
     thread_id = RunConfig.from_runtime().thread_id
-    if not thread_id or not postgres.configured():
+    if not thread_id:
         return None
     try:
         owed = await EventMatch.owed(thread_id, state["messages"])

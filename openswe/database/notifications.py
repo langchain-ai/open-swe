@@ -62,9 +62,6 @@ class PostgresListener:
 
     def start(self) -> None:
         """Begin listening. A database that cannot be reached is logged, not raised."""
-        if not postgres.configured():
-            logger.info("PostgreSQL listener disabled: PostgreSQL is not configured")
-            return
         if self._task is not None and not self._task.done():
             return
         self._stop.clear()
@@ -155,8 +152,6 @@ class PostgresListener:
 def _dsn() -> str:
     """The engine's URI as libpq spells it: no driver prefix, ``sslmode`` not ``ssl``."""
     uri = postgres.uri()
-    if uri is None:
-        raise RuntimeError("PostgreSQL is not configured")
     url = make_url(uri).set(drivername="postgresql")
     query = dict(url.query)
     ssl = query.pop("ssl", None)

@@ -77,8 +77,6 @@ class CompletedReview(Base):
     @classmethod
     async def record(cls, payload: dict[str, object]) -> None:
         """Webhook entry point for a submitted pull request review."""
-        if not postgres.configured():
-            return
         try:
             event = ReviewSubmitted.model_validate(payload)
         except ValidationError:

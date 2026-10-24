@@ -20,7 +20,6 @@ def _ready(
         created.append(self)
         return self
 
-    monkeypatch.setattr("openswe.rollout_events.configured", lambda: True)
     monkeypatch.setattr(
         "openswe.rollout_events.Repository.get",
         AsyncMock(return_value=SimpleNamespace(id=uuid4())),

@@ -114,7 +114,7 @@ class SlackChannel(Base):
     async def save_all(cls, *payloads: JsonObject) -> None:
         """Upsert what Slack just said about these channels."""
         rows = [row for row in (cls.from_payload(item) for item in payloads) if row is not None]
-        if not rows or not postgres.configured():
+        if not rows:
             return
         upsert = insert(cls).values(
             [{"id": row.id, "name": row.name, "payload": row.payload} for row in rows]
@@ -147,15 +147,11 @@ class SlackChannel(Base):
 
     @classmethod
     async def _row(cls, channel_id: str) -> Self | None:
-        if not postgres.configured():
-            return None
         async with postgres.session() as session:
             return await session.get(cls, channel_id)
 
     @classmethod
     async def _row_named(cls, name: str) -> Self | None:
-        if not postgres.configured():
-            return None
         async with postgres.session() as session:
             return await session.scalar(select(cls).where(cls.name == name))
 

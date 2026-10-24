@@ -4,7 +4,6 @@ import logging
 from langgraph_sdk.errors import NotFoundError
 from pydantic import BaseModel, ValidationError
 
-from openswe.database import postgres
 from openswe.dispatch import create_durable_run, dispatch_client
 from openswe.input_messages import build_run_input
 from openswe.invocation import new_invocation_id, with_invocation_id
@@ -238,7 +237,7 @@ class ReviewScoutTarget(BaseModel):
         ``None`` when the scout cannot run or does not finish within
         ``SCOUT_WAIT_SECONDS``; the reviewer then reviews without it.
         """
-        if not postgres.configured() or not self.base_sha or not self.head_sha:
+        if not self.base_sha or not self.head_sha:
             return None
         existing = await self.walkthrough()
         if existing is not None:

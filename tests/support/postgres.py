@@ -70,13 +70,13 @@ async def isolated_database(uri: str, monkeypatch: pytest.MonkeyPatch) -> AsyncI
     consumer imported the database API through.
     """
     monkeypatch.setenv("POSTGRES_URI", uri)
-    uri = postgres.uri() or uri
+    uri = postgres.uri()
     admin = MigratedTemplate.admin_engine(uri)
     try:
         database = await MigratedTemplate.clone(admin, uri)
         monkeypatch.setenv("POSTGRES_URI", MigratedTemplate.database_uri(uri, database))
         engine = create_async_engine(
-            postgres.uri() or uri, connect_args={"server_settings": {"TimeZone": "UTC"}}
+            postgres.uri(), connect_args={"server_settings": {"TimeZone": "UTC"}}
         )
         monkeypatch.setattr(postgres, "SCHEMA", TEST_SCHEMA)
         monkeypatch.setattr(postgres, "_ENGINE", engine)

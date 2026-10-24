@@ -48,7 +48,6 @@ from openswe.dashboard.profiles import (
     upsert_access_token_from_github_response,
 )
 from openswe.dashboard.user_preferences import get_user_preferences
-from openswe.database import postgres
 from openswe.slack.oauth import slack_base_url, slack_oauth_configured
 from openswe.users import User
 from openswe.utils.build_info import build_info
@@ -256,7 +255,7 @@ async def me(response: Response, session: dict[str, Any] = SESSION_DEP) -> dict[
             exc_info=True,
         )
     else:
-        if user is None and postgres.configured():
+        if user is None:
             raise HTTPException(401, "Open SWE account not found — sign in with GitHub again")
     if user is not None and session_user_id(session) != user.id:
         # The dashboard boots here, so every stale cookie is repaired on its next load.
@@ -276,7 +275,7 @@ async def me(response: Response, session: dict[str, Any] = SESSION_DEP) -> dict[
         "follow_up_behavior": preferences["follow_up_behavior"],
         # Whether new threads are stamped `transcript: v2` (`openswe/threads/runs.py`),
         # so the thread the UI seeds after `run.start` can carry the same stamp.
-        "transcript_recording": postgres.configured(),
+        "transcript_recording": True,
         "slack_oauth_enabled": slack_oauth_configured(),
         "api_base_url": dashboard_api_base_url(),
         "slack_base_url": slack_base_url(),

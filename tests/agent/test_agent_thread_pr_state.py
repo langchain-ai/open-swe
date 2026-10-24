@@ -16,12 +16,8 @@ async def _unlocked(*args, **kwargs):
 
 
 @pytest.fixture(autouse=True)
-async def _pr_registry(registry_db_if_available: bool, monkeypatch: pytest.MonkeyPatch) -> None:
-    """Run against PostgreSQL when configured, else the registry-unavailable fallback.
-
-    The registry reads threads through its own client binding, so point it at
-    whichever fake the test installed on the webhook module.
-    """
+async def _pr_registry(registry_db: None, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Point the registry at whichever client the test installed on the webhook module."""
     monkeypatch.setattr(pull_requests, "langgraph_client", lambda: webhook_common.get_client())
 
 

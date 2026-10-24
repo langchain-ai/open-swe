@@ -74,11 +74,7 @@ async def api_agent_usage_leaderboard(
     from asyncpg import PostgresError
     from sqlalchemy.exc import SQLAlchemyError
 
-    from openswe.database import configured
-
     try:
-        if not configured():
-            raise HTTPException(503, "Usage analytics is unavailable on this deployment.")
         return await usage_leaderboard(
             period=period,
             limit=limit,
@@ -113,11 +109,8 @@ async def api_pr_merge_rate_by_model(
     from sqlalchemy.exc import SQLAlchemyError
 
     from openswe.analytics.queries import pr_merge_rate_by_model
-    from openswe.database import configured
 
     try:
-        if not configured():
-            raise HTTPException(503, "PR analytics is unavailable on this deployment.")
         return await pr_merge_rate_by_model(
             period=period,
             maturity_days=maturity_days,
