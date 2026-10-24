@@ -1,13 +1,18 @@
 """The calls the runtime's model loop makes on the backend, phase by phase.
 
 The backend runs the graph's own middleware for each phase: preparation before
-the run, the follow-up queue, routing and the system prompt before each model
-call, the transcript and usage after it, reply nudges after the model, and the
-end-of-run work. Graph state those hooks write that the runtime does not know
-comes back in ``update``, and goes back with every later call in ``state``.
+the run, routing and the system prompt before each model call, the transcript
+and usage after it, reply nudges after the model, and the end-of-run work. Graph
+state those hooks write that the runtime does not know comes back in ``update``,
+and goes back with every later call in ``state``.
+
+Before each model call the runtime also reads the thread's inbox: what was sent
+to the thread while its run worked, and only that. The request names nothing but
+the run; the backend keeps what each thread is owed until a run receives it.
 """
 
 from typing import Literal
+from uuid import UUID
 
 from pydantic import BaseModel, JsonValue
 
@@ -129,6 +134,28 @@ class ModelFailure(RunRequest):
     via_gateway: bool = False
 
 
+class InboxItems(BaseModel):
+    """What an inbox reply carries: its queued follow-ups, its events and task messages."""
+
+    queued: list[int] = []
+    events: list[UUID] = []
+
+
+class Inbox(BaseModel):
+    """What was sent to the thread since the last model call, oldest first."""
+
+    messages: list[dict[str, JsonValue]] = []
+    # Graph state taking them changes, such as the surface replies move to.
+    update: dict[str, JsonValue] = {}
+    # Owed until the run hands them back through ``inbox_received``, once the model
+    # call it read them for goes ahead.
+    items: InboxItems = InboxItems()
+
+
+class InboxReceipt(RunRequest):
+    items: InboxItems
+
+
 class Done(BaseModel):
     """The backend did what it was asked; there is nothing more to say."""
 
@@ -138,6 +165,12 @@ PREPARE = Endpoint("prepare", Prepare, PhaseResult, delivery="idempotent")
 # Builds the next call, so it is sent again to a backend that never took it.
 BEFORE_MODEL = Endpoint(
     "before_model", RunCall, BeforeModel, seconds=LOOP_CALL_SECONDS, delivery="unprocessed"
+)
+# Only reads, so it is safe to send again.
+INBOX = Endpoint("inbox", RunRequest, Inbox, seconds=LOOP_CALL_SECONDS, delivery="idempotent")
+# What a model call will answer is owed no more; receiving it twice is a no-op.
+INBOX_RECEIVED = Endpoint(
+    "inbox_received", InboxReceipt, Done, seconds=LOOP_CALL_SECONDS, delivery="idempotent"
 )
 MODEL_RESULT = Endpoint("model_result", ModelResult, ObservedResponse, seconds=LOOP_CALL_SECONDS)
 AFTER_MODEL = Endpoint("after_model", RunCall, PhaseResult, seconds=LOOP_CALL_SECONDS)

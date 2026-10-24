@@ -1,35 +1,42 @@
-"""Before-model middleware that injects queued messages into state.
+"""What is sent to a thread while its agent runs, read before each model call.
 
-Checks the thread's queued follow-ups for pending messages (e.g. follow-up Linear
-comments that arrived while the agent was busy) and injects them as new
-human messages before the next model call.
+A person's follow-ups and the notes background work leaves for the thread wait on
+the follow-up queue; events the thread subscribed to and task messages wait as
+event matches and task messages. A run reads all of them before each model call,
+so the agent sees them without waiting for the run to end, and only they travel:
+the conversation stays with the run.
+
+Reading takes nothing, and asks the run for nothing but who it is: the backend
+keeps what each thread is owed. All of it stays owed until the run says the model
+call it read it for goes ahead (``receive``), so a run that ends first leaves it
+for the next. A run started to carry events receives them as it is prepared.
 """
 
 import logging
+from collections.abc import Collection
+from dataclasses import dataclass, field
 from typing import Any, cast
+from uuid import UUID
 
 import httpx2
-from langchain.agents.middleware import before_model
 from langgraph.config import get_config
-from langgraph.runtime import Runtime
 from langgraph_sdk import get_client
 
 from openswe.dashboard.options import model_supports_images
+from openswe.database import postgres
 from openswe.input_messages import (
     PersonIdentity,
+    RunMessage,
     SystemIdentity,
     build_input_messages,
-    visible_dynamic_context_hashes,
 )
 from openswe.message_queue import QueuedMessage
 from openswe.middleware.require_user_reply import (
     SLACK_REPLY_SURFACE,
     WEB_REPLY_SURFACE,
     ReplySurface,
-    ReplySurfaceState,
-    current_reply_surface,
 )
-from openswe.middleware.trace import scrub_middleware_inputs
+from openswe.tasks.messages import TaskMessage
 from openswe.users import User
 from openswe.utils.dashboard_handoff import (
     DASHBOARD_HANDOFF_BODY,
@@ -39,14 +46,9 @@ from openswe.utils.dashboard_handoff import (
 from openswe.utils.http import DEFAULT_HTTP_TIMEOUT
 from openswe.utils.http_pool import pooled_transport
 from openswe.utils.multimodal import fetch_image_block, vision_not_supported_warning
+from openswe.webhooks.event_matches import EventMatch
 
 logger = logging.getLogger(__name__)
-
-
-class LinearNotifyState(ReplySurfaceState):
-    """Extended agent state for tracking Linear notifications."""
-
-    linear_messages_sent_count: int
 
 
 async def _resolve_thread_model_id(thread_id: str) -> str | None:
@@ -146,66 +148,91 @@ def _flush_blocks(
     blocks.clear()
 
 
-def _message_update(
-    queued: list[dict[str, Any]],
-    thread_id: str,
-    surface: ReplySurface | None = None,
-) -> dict[str, Any] | None:
-    surface_update = {"reply_surface": surface} if surface is not None else {}
-    if not queued:
-        return surface_update or None
-    logger.info(
-        "Injected %d queued message(s) into state for thread %s",
-        len(queued),
-        thread_id,
-    )
-    return {"messages": queued, **surface_update}
+@dataclass
+class Taken:
+    """What a run read from its thread's inbox."""
+
+    messages: list[RunMessage] = field(default_factory=list)
+    # The surface replies move to, when a follow-up moved them.
+    reply_surface: ReplySurface | None = None
+    # The queue entries the follow-ups among ``messages`` came from.
+    queued: list[int] = field(default_factory=list)
+    # The event matches and task messages among ``messages``.
+    events: list[UUID] = field(default_factory=list)
 
 
-@scrub_middleware_inputs
-@before_model(state_schema=LinearNotifyState)
-async def check_message_queue_before_model(  # noqa: PLR0911
-    state: LinearNotifyState,
-    runtime: Runtime,  # noqa: ARG001
-) -> dict[str, Any] | None:
-    """Middleware that checks for queued messages before each model call.
+class ThreadInbox:
+    """One thread's inbox; ``events`` takes event matches and task messages besides follow-ups.
 
-    If messages are found in the queue for this thread, it extracts all messages,
-    adds them to the conversation state as new human messages, and clears the queue.
-    Messages are processed in FIFO order (oldest first).
-
-    This enables handling of follow-up comments that arrive while the agent is busy.
-    The agent will see the new messages and can incorporate them into its response.
+    ``surface`` is where the run starts answering: a run that starts on Slack is
+    told when a person's dashboard follow-up moves its answers to the web.
     """
-    try:
-        config = get_config()
-        configurable = config.get("configurable", {})
-        thread_id = configurable.get("thread_id")
 
-        if not thread_id:
-            return None
+    def __init__(self, thread_id: str, *, events: bool, surface: ReplySurface) -> None:
+        self.thread_id = thread_id
+        self.events = events
+        self.surface = surface
 
-        queued_updates: list[dict[str, Any]] = []
-        content_blocks: list[dict[str, Any]] = []
-        injected = visible_dynamic_context_hashes(state)
-
+    async def read(self, run_id: str) -> Taken:
+        """Everything the thread is owed, for ``run_id``'s next model call."""
+        taken = Taken()
+        if self.events and postgres.configured():
+            try:
+                owed = await TaskMessage.owed(self.thread_id)
+            except Exception:
+                logger.warning(
+                    "Loading owed task messages failed",
+                    extra={"agent_thread_id": self.thread_id},
+                    exc_info=True,
+                )
+            else:
+                taken.messages.extend(TaskMessage.messages(owed))
+                taken.events.extend(message.id for message in owed)
         try:
-            # A snapshot: what this call consumes, whatever is queued meanwhile.
-            queued_messages = await QueuedMessage.for_thread(thread_id)
-        except Exception as e:  # noqa: BLE001
-            logger.warning("Failed to get queued item: %s", e)
-            _flush_blocks(queued_updates, content_blocks, injected)
-            return _message_update(queued_updates, thread_id)
-        contents = [message.content for message in queued_messages]
+            await self._read_follow_ups(taken, run_id)
+        except Exception:
+            logger.exception(
+                "Reading queued follow-ups failed", extra={"agent_thread_id": self.thread_id}
+            )
+        if self.events and postgres.configured():
+            try:
+                matches = await EventMatch.owed(self.thread_id)
+            except Exception:
+                logger.warning(
+                    "Loading owed event matches failed",
+                    extra={"agent_thread_id": self.thread_id},
+                    exc_info=True,
+                )
+            else:
+                taken.messages.extend(EventMatch.messages(matches))
+                taken.events.extend(match.id for match in matches)
+        return taken
 
+    async def receive(self, queued: Collection[int] = (), events: Collection[UUID] = ()) -> None:
+        """A run holds ``queued`` follow-ups and ``events``: none is owed again."""
+        await QueuedMessage.remove(self.thread_id, queued)
+        if events and postgres.configured():
+            await TaskMessage.received(self.thread_id, events)
+            await EventMatch.received(self.thread_id, events)
+
+    async def _read_follow_ups(self, taken: Taken, run_id: str) -> None:  # noqa: C901, PLR0912
+        """Follow-ups queued for the thread, oldest first."""
+        surface = self.surface
+        queued_updates: list[dict[str, Any]] = []
+        moved: ReplySurface | None = None
+        content_blocks: list[dict[str, Any]] = []
+        # Each batch introduces its senders again: the run, not the backend, holds what it saw.
+        injected: set[str] = set()
+
+        # A snapshot: what this call reads, whatever is queued meanwhile.
+        queued_messages = await QueuedMessage.for_thread(self.thread_id)
+        contents = [message.content for message in queued_messages]
         if not contents:
-            _flush_blocks(queued_updates, content_blocks, injected)
-            return _message_update(queued_updates, thread_id)
+            return
 
         logger.info(
-            "Found %d queued message(s) for thread %s, injecting into state",
-            len(contents),
-            thread_id,
+            "Reading queued follow-ups",
+            extra={"agent_thread_id": self.thread_id, "count": len(contents)},
         )
 
         has_images = any(
@@ -213,6 +240,7 @@ async def check_message_queue_before_model(  # noqa: PLR0911
             for content in contents
         )
         resolved_model_id: str | None = None
+        configurable = get_config().get("configurable", {}) if has_images else {}
         if has_images and not configurable.get("image_model_fallback_enabled"):
             # This run's own model first: thread metadata already names the
             # model of any follow-up queued behind it.
@@ -222,44 +250,40 @@ async def check_message_queue_before_model(  # noqa: PLR0911
             resolved_model_id = (
                 run_model
                 if isinstance(run_model, str) and run_model
-                else await _resolve_thread_model_id(thread_id)
+                else await _resolve_thread_model_id(self.thread_id)
             )
 
-        surface = current_reply_surface(state)
-        moved_surface: ReplySurface | None = None
         for content in contents:
             if _is_dashboard_queued_message(content):
                 _flush_blocks(queued_updates, content_blocks, injected)
                 # Only the move itself is worth announcing. Re-announcing it on
                 # every later web follow-up stacks identical handoff notices in
-                # the dashboard stream.
+                # the dashboard stream, so the run's notice keeps one id: a later
+                # batch's copy replaces it where it is.
                 if surface == SLACK_REPLY_SURFACE:
-                    queued_updates.extend(
-                        cast(
-                            list[dict[str, Any]],
-                            build_input_messages(
-                                DASHBOARD_HANDOFF_BODY,
-                                {
-                                    "sender_id": "system:dashboard-handoff",
-                                    "surface": "automation",
-                                    "kind": "system",
-                                },
-                                systems=[
-                                    {
-                                        "id": "system:dashboard-handoff",
-                                        "display_name": "Dashboard handoff",
-                                        "platform": "open-swe",
-                                    }
-                                ],
-                                injected_dynamic_context_hashes=injected,
-                            ),
-                        )
+                    handoff = build_input_messages(
+                        DASHBOARD_HANDOFF_BODY,
+                        {
+                            "sender_id": "system:dashboard-handoff",
+                            "surface": "automation",
+                            "kind": "system",
+                        },
+                        systems=[
+                            {
+                                "id": "system:dashboard-handoff",
+                                "display_name": "Dashboard handoff",
+                                "platform": "open-swe",
+                            }
+                        ],
+                        injected_dynamic_context_hashes=injected,
                     )
-                surface = moved_surface = WEB_REPLY_SURFACE
+                    for index, message in enumerate(handoff):
+                        message["id"] = f"dashboard-handoff:{run_id}:{index}"
+                    queued_updates.extend(cast(list[dict[str, Any]], handoff))
+                surface = moved = WEB_REPLY_SURFACE
             if isinstance(content, dict) and (
                 "text" in content or "image_urls" in content or "images" in content
             ):
-                logger.debug("Queued message contains text + image URLs")
                 blocks = await _build_blocks_from_payload(content, model_id=resolved_model_id)
                 sender = content.get("sender")
                 if isinstance(sender, dict) and isinstance(sender.get("id"), str):
@@ -286,18 +310,12 @@ async def check_message_queue_before_model(  # noqa: PLR0911
                     content_blocks.extend(blocks)
                 continue
             if isinstance(content, list):
-                logger.debug("Queued message contains %d content block(s)", len(content))
                 content_blocks.extend(content)
                 continue
             if isinstance(content, str) and content:
-                logger.debug("Queued message contains text content")
                 content_blocks.append({"type": "text", "text": content})
 
         _flush_blocks(queued_updates, content_blocks, injected)
-        # Cleared only once every message is built: a failure above leaves
-        # them for the next model call instead of losing them.
-        await QueuedMessage.remove(queued_messages)
-        return _message_update(queued_updates, thread_id, moved_surface)  # noqa: TRY300
-    except Exception:
-        logger.exception("Error in check_message_queue_before_model")
-    return None
+        taken.messages.extend(cast(list[RunMessage], queued_updates))
+        taken.reply_surface = moved
+        taken.queued = [message.seq for message in queued_messages]

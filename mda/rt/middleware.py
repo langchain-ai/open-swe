@@ -1,11 +1,13 @@
 """The run hooks that hand each phase of this model loop to the Open SWE backend.
 
 The backend holds the in-process graph and its own middleware, and
-runs that middleware for every phase here: preparation before the run, the
-follow-up queue, routing and the system prompt before each model call, the
-transcript and usage after it, reply nudges after the model, and the end-of-run
-work. Graph state those hooks write rides in ``open_swe_state`` and goes back
-with every call.
+runs that middleware for every phase here: preparation before the run, routing
+and the system prompt before each model call, the transcript and usage after it,
+reply nudges after the model, and the end-of-run work. Graph state those hooks
+write rides in ``open_swe_state`` and goes back with every call.
+
+Before each model call the run also takes its thread's inbox: what was sent to
+the thread while the run worked, such as a person's follow-up or a task report.
 
 Subagents run here too. Their replies and the tools this runtime runs itself,
 such as ``task``, go to the backend as well, so its transcript records them
@@ -63,9 +65,12 @@ from runtime_api.loop import (
     AFTER_AGENT,
     AFTER_MODEL,
     BEFORE_MODEL,
+    INBOX,
     MODEL_FAILURE,
     MODEL_RESULT,
     PREPARE,
+    Inbox,
+    InboxReceipt,
     ModelCall,
     ModelFailure,
     ModelResult,
@@ -73,6 +78,7 @@ from runtime_api.loop import (
     Prepare,
     RunCall,
 )
+from runtime_api.operations import RunRequest
 from runtime_api.workers import LAUNCH_WORKER, WORKER_LAUNCHED, Launch, Launched
 
 from rt.backend import (
@@ -337,11 +343,36 @@ class BackendRunMiddleware(AgentMiddleware[RunState]):
 
     @hook_config(can_jump_to=["end"])
     async def abefore_model(self, state: RunState, runtime: Runtime) -> dict[str, object] | None:  # noqa: ARG002
-        planned = await self._phase(BEFORE_MODEL, run_call(RunCall, run_id(), state))
-        update = _apply(planned)
+        inbox = await self._read_inbox()
+        # The phase sees what the inbox brought, as the model will.
+        with_inbox = {
+            **state,
+            "messages": [*state["messages"], *messages_from_dict(inbox.messages)],
+            STATE_KEY: {**state.get(STATE_KEY, {}), **inbox.update},
+        }
+        planned = await self._phase(BEFORE_MODEL, run_call(RunCall, run_id(), with_inbox))
+        if planned.jump_to is not None:
+            # No model call answers the inbox now: it stays for the run that comes next.
+            return _apply(planned)
+        if inbox.items.queued or inbox.items.events:
+            # Alongside the call it is answered by, as the transcript's reports go.
+            self._backend.reports.received(InboxReceipt(run_id=run_id(), items=inbox.items))
+        update = _apply(
+            planned.model_copy(
+                update={
+                    "messages": [*inbox.messages, *planned.messages],
+                    "update": {**inbox.update, **planned.update},
+                }
+            )
+        )
         if planned.call is not None:
             update["open_swe_call"] = planned.call.model_dump()
         return update
+
+    async def _read_inbox(self) -> Inbox:
+        # After the last call's receipt, so nothing it received comes again.
+        await self._backend.reports.drain()
+        return await call(self._backend, INBOX, RunRequest(run_id=run_id()))
 
     async def _phase[Call: RunCall, Result: PhaseResult](
         self, endpoint: Endpoint[Call, Result], request: Call

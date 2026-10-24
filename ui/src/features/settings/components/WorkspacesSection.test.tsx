@@ -34,7 +34,7 @@ function renderSection(isAdmin: boolean) {
   if (!vi.isMockFunction(api.listSlackChannels)) {
     vi.spyOn(api, "listSlackChannels").mockResolvedValue({
       channels: [],
-      partial: false,
+      refreshing: false,
     })
   }
   if (!vi.isMockFunction(api.me)) {
@@ -256,7 +256,7 @@ describe("WorkspacesSection", () => {
           num_members: 40,
         },
       ],
-      partial: true,
+      refreshing: true,
     })
     const createSpy = vi.spyOn(api, "createWorkspace").mockResolvedValue({
       slug: "preview",
@@ -303,11 +303,9 @@ describe("WorkspacesSection", () => {
 
     fireEvent.click(screen.getByRole("button", { name: "Choose channels" }))
     // Core's channel is offered but not selectable; the free one is. The
-    // directory came back partial, and the picker says so.
+    // A walk over Slack is under way, and the picker says so.
     const taken = await screen.findByRole("checkbox", { name: "#commits" })
-    expect(
-      screen.getByText(/only channels the bot is in are listed/)
-    ).toBeTruthy()
+    expect(screen.getByText(/Refreshing channels from Slack/)).toBeTruthy()
     expect(taken.hasAttribute("disabled")).toBe(true)
     fireEvent.click(screen.getByRole("checkbox", { name: "#oss-help" }))
     fireEvent.click(screen.getByRole("button", { name: "Save 1 channel" }))
