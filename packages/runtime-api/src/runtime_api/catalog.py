@@ -38,6 +38,7 @@ class OperationSpec(BaseModel):
     reads: list[str] = []
     # Whether it reads all of the run state, the conversation included.
     reads_all: bool = False
+    seconds: float | None = None
 
 
 class SubagentSpec(BaseModel):
