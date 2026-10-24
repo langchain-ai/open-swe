@@ -164,6 +164,7 @@ def test_connection_tool_pairs_cannot_collide():
         ("example", "a/b"),
         ("example", "a_b"),
         ("example", "a" * 128),
+        ("example", runtime._tool_name("example", "a/b").removeprefix("mcp_example_")),
         ("example", "search"),
     ]
     names = [runtime._tool_name(*pair) for pair in pairs]

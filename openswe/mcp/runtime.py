@@ -148,8 +148,14 @@ async def discover_tools(record: MCPConnection, namespace: tuple[str, ...]) -> l
 def _tool_name(connection_name: str, tool_name: str) -> str:
     full_name = f"mcp_{connection_name}_{tool_name}"
     safe = re.sub(r"[^a-zA-Z0-9_-]", "_", full_name)
-    # Without "_" in the connection name, the first "_" after "mcp_" splits the pair unambiguously.
-    if safe == full_name and len(safe) <= 64 and "_" not in connection_name:
+    # Without "_" in the connection name, the first "_" after "mcp_" splits the pair unambiguously;
+    # a plain name never ends like a hashed one, so it can't take another pair's hashed name.
+    if (
+        safe == full_name
+        and len(safe) <= 64
+        and "_" not in connection_name
+        and not re.search(r"_[0-9a-f]{10}$", safe)
+    ):
         return safe
     suffix = hashlib.sha256(json.dumps((connection_name, tool_name)).encode()).hexdigest()[:10]
     return f"{safe[:53]}_{suffix}"
