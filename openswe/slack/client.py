@@ -545,7 +545,7 @@ async def _post_slack_message_with_ts(
     # A code channel is one flowing session: replies belong in the channel.
     reply_ts = None if is_code_channel_session(thread_ts) else thread_ts
     broadcast = {"reply_broadcast": True} if reply_broadcast and reply_ts else {}
-    text, blocks = await pr_review_links(text, blocks, login=login)
+    text, blocks = await pr_review_links(text, blocks)
 
     try:
         async with SlackClient.bot() as client:
@@ -1066,7 +1066,7 @@ async def update_slack_message(
     if not SLACK_BOT_TOKEN:
         raise SlackRequestError("missing_slack_bot_token")
 
-    text, blocks = await pr_review_links(text, blocks, login=login)
+    text, blocks = await pr_review_links(text, blocks)
     try:
         async with SlackClient.bot() as client:
             await client.chat_update(
