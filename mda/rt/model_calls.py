@@ -35,7 +35,7 @@ from langchain_core.exceptions import (
 from langchain_core.messages import AIMessage, AnyMessage, ToolMessage
 from langchain_fireworks import ChatFireworks
 from langchain_openai import ChatOpenAI
-from runtime_api.model_calls import ModelFailureCode
+from runtime_api.loop import ModelFailureCode
 
 logger = logging.getLogger(__name__)
 

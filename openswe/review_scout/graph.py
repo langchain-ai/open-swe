@@ -9,7 +9,7 @@ none it finishes without a model call.
 
 import logging
 import re
-from collections.abc import Awaitable, Callable
+from collections.abc import Mapping
 from typing import Any, NotRequired, cast
 
 from deepagents.backends.protocol import SandboxBackendProtocol
@@ -17,8 +17,6 @@ from deepagents.middleware.subagents import GENERAL_PURPOSE_SUBAGENT
 from langchain.agents.middleware import ModelCallLimitMiddleware, ModelRetryMiddleware
 from langchain.agents.middleware.types import (
     AgentMiddleware,
-    ModelRequest,
-    ModelResponse,
     hook_config,
 )
 from langchain_anthropic.middleware import AnthropicPromptCachingMiddleware
@@ -38,6 +36,7 @@ from openswe.middleware import (
     ModelErrorMiddleware,
     RepairOrphanedToolCallsMiddleware,
 )
+from openswe.middleware.model_call_shape import CallShape
 from openswe.middleware.prepare_run import PrepareRunState
 from openswe.middleware.trace import OpenSWEMiddleware
 from openswe.prompts import apply_tool_descriptions, prompt
@@ -196,17 +195,12 @@ class PrepareReviewScoutRunMiddleware(BasePrepareRunMiddleware):
     ) -> dict[str, Any] | None:
         return {"jump_to": "end"} if state.get("scout_nothing_to_plan") else None
 
-    async def awrap_model_call(
-        self,
-        request: ModelRequest,
-        handler: Callable[[ModelRequest], Awaitable[ModelResponse]],
-    ) -> ModelResponse:
+    async def ashape_model_call(
+        self, call: CallShape, state: Mapping[str, object], runtime: Runtime
+    ) -> CallShape:
+        call = await super().ashape_model_call(call, state, runtime)
         # Without messages from the people who asked for the PR, the model would summarize its description instead.
-        if not request.state.get("has_human_input"):
-            request = request.override(
-                tools=[t for t in request.tools if getattr(t, "name", None) != _HUMAN_INPUT_TOOL]
-            )
-        return await super().awrap_model_call(request, handler)
+        return call if state.get("has_human_input") else call.hiding([_HUMAN_INPUT_TOOL])
 
 
 class FinishPlanMiddleware(OpenSWEMiddleware[ReviewScoutState]):

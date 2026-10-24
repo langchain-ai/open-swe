@@ -16,7 +16,6 @@ from openswe.slack import webhook
 from openswe.slack.blocks import block_payload
 from openswe.slack.breakout_destination import resolve_breakout_destination
 from openswe.slack.breakout_links import breakout_root_blocks, mark_broken_out, source_thread_line
-from openswe.slack.channels import SlackChannel
 from openswe.slack.client import (
     append_slack_web_link_footer,
     get_active_slack_thread,
@@ -227,12 +226,11 @@ async def slack_breakout_thread(
     if not isinstance(source_channel, str) or not source_channel.strip():
         return {"success": False, "error": "Missing slack_thread.channel_id in config"}
     source_channel = source_channel.strip()
-    channel = await SlackChannel.load(source_channel, use_cache=False)
-    if channel is None or not channel.public:
-        return {
-            "success": False,
-            "error": "Breakout threads can only be started in public channels; do not retry.",
-        }
+    destination = await resolve_breakout_destination(
+        source_channel, channel_id, workspace=cfg.workspace_slug
+    )
+    if error := await destination.channel_error(source_channel):
+        return {"success": False, "error": error}
 
     clean_title = _validate_text(title, field="title", max_chars=_TITLE_MAX_CHARS)
     if isinstance(clean_title, dict):
@@ -348,17 +346,12 @@ async def slack_breakout_thread(
             "next_step": "Share the dashboard_url with the requester; the thread is web-only.",
         }
 
-    destination = await resolve_breakout_destination(
-        source_channel, channel_id, workspace=cfg.workspace_slug
-    )
     clean_channel_id = destination.channel_id
-    if clean_channel_id != source_channel:
-        channel = await SlackChannel.load(clean_channel_id, use_cache=False)
-        if visibility == "private" or channel is None or not channel.public:
-            return {
-                "success": False,
-                "error": "Breakouts between channels require a public source thread and destination.",
-            }
+    if clean_channel_id != source_channel and visibility == "private":
+        return {
+            "success": False,
+            "error": "Breakouts between channels require a public source thread and destination.",
+        }
     source_line = (
         await source_thread_line(
             source_channel, cfg.slack_thread.triggering_event_ts or current_thread_ts

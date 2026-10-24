@@ -10,7 +10,7 @@ OPENAI_RESPONSES_WS_BASE_URL = "wss://api.openai.com/v1"
 BASETEN_BASE_URL = "https://inference.baseten.co/v1"
 
 # Anthropic SDK default is 2; a 529 burst can outlive that. Bump to give the
-# primary provider a fair chance before the fallback middleware kicks in.
+# provider a fair chance before the run fails.
 DEFAULT_MAX_RETRIES = 6
 
 # Per-request deadline. Without one a stalled provider connection can park a run

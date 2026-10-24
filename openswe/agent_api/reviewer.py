@@ -6,7 +6,7 @@ from langchain_core.runnables import RunnableConfig
 from pydantic import JsonValue, TypeAdapter
 from runtime_api.catalog import ModelSpec, RunModels
 
-from openswe.remote_runtime.graph import RemoteGraph
+from openswe.agent_api.graph import RemoteGraph
 from openswe.review.diff import compute_diff_line_set
 from openswe.reviewer import ReviewerModelChoice, plan_reviewer, resolve_reviewer_models
 from openswe.run_config import RunConfig

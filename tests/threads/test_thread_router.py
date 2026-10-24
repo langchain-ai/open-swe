@@ -7,8 +7,8 @@ import pytest
 from pydantic import JsonValue
 from starlette.types import Message, Receive, Scope, Send
 
-from openswe.remote_runtime.runs import run_config
-from openswe.remote_runtime.tokens import RemoteRun, sign_runtime_token, verify_runtime_token
+from openswe.agent_api.runs import run_config
+from openswe.agent_api.tokens import RemoteRun, sign_runtime_token, verify_runtime_token
 from openswe.threads import index, router, runtimes
 from openswe.threads.index import Runtime, ThreadStatus
 

@@ -5,7 +5,6 @@ from typing import Any, cast
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
-from langchain.agents.middleware.types import ModelRequest
 from langchain_core.language_models import BaseChatModel
 from langchain_core.messages import AIMessage, HumanMessage
 from langchain_core.outputs import ChatGeneration, ChatResult
@@ -16,6 +15,7 @@ from openswe.incidents import runtime, service, turns
 from openswe.incidents.models import Incident, IncidentPolicy
 from openswe.mcp.instance import instance_mcp_source
 from openswe.mcp.workspace import workspace_mcp_source
+from openswe.middleware.model_call_shape import CallShape
 from openswe.sandboxes.tool_runtime import ToolSurface
 from openswe.slack.channels import SlackChannel
 from openswe.workspaces.store import DEFAULT_WORKSPACE_SLUG
@@ -125,7 +125,6 @@ async def test_incident_uses_system_sandbox_tools_integrations_and_delegation(
     assert {
         "PrepareAgentRunMiddleware",
         "IncidentMiddleware",
-        "WorkspaceSkillsMiddleware",
     } <= {type(item).__name__ for item in middleware}
     surface = cast(ToolSurface, result["surface"])
     assert "PullRequestCreationGuardMiddleware" in {
@@ -140,12 +139,8 @@ async def test_incident_uses_system_sandbox_tools_integrations_and_delegation(
     assert not (runtime.INCIDENT_TOOL_NAMES | {"manage_incident"}) & set(subagent.tools)
     guard = next(item for item in middleware if isinstance(item, runtime.IncidentMiddleware))
     session.check.side_effect = PermissionError("revoked")
-    handler = AsyncMock()
     with pytest.raises(PermissionError, match="revoked"):
-        await guard.awrap_model_call(
-            ModelRequest(model=MagicMock(), messages=[], tools=[], state={"messages": []}), handler
-        )
-    handler.assert_not_awaited()
+        await guard.ashape_model_call(CallShape(), {"messages": []}, MagicMock())
 
 
 async def test_forged_incident_source_on_a_normal_thread_is_refused(saved_thread_scope):
@@ -159,8 +154,8 @@ async def test_main_agent_records_the_incident_report_through_the_tool(
     registry_db, monkeypatch, saved_thread_scope, requested_action
 ):
 
-    from openswe.remote_runtime.graph import RunSession
-    from openswe.remote_runtime.runs import in_graph_context
+    from openswe.agent_api.graph import RunSession
+    from openswe.agent_api.runs import in_graph_context
 
     await service.POLICIES.put(IncidentPolicy(enabled=True, workspace_id="T1"))
     await service.INCIDENTS.put(

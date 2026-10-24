@@ -300,6 +300,9 @@ async def test_provider_failure_reported_by_the_run_names_the_provider_everywher
         "via_gateway": via_gateway,
     }
     monkeypatch.setattr(completion, "langgraph_client", lambda: _FakeClient(metadata))
+    monkeypatch.setattr(
+        completion.index, "get", AsyncMock(return_value=SimpleNamespace(metadata=metadata))
+    )
     monkeypatch.setattr(completion, "get_langsmith_error_url", AsyncMock(return_value=None))
     reply = AsyncMock(return_value=True)
     monkeypatch.setattr(completion, "post_slack_thread_reply", reply)

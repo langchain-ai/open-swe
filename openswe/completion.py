@@ -35,6 +35,7 @@ from openswe.slack.code_channels import is_code_channel_session, set_session_sta
 from openswe.slack.thinking import sync_slack_background_status
 from openswe.source_context import SourceContext
 from openswe.tasks.messages import TASK_MESSAGE_KIND, TaskMessage
+from openswe.threads import index
 from openswe.threads.status import refresh_thread_status
 from openswe.transcript.turns import TurnOutcome, settle_run_turn
 from openswe.ui_invalidations import Topic
@@ -147,15 +148,15 @@ class _FailureReason:
     async def of_run(cls, thread_id: str, run_id: str | None, error: Any) -> Self:
         """``of`` against the thread's metadata, or the class name alone when it can't be read."""
         try:
-            metadata = thread_metadata(await langgraph_client().threads.get(thread_id))
+            thread = await index.get(thread_id)
         except Exception:  # noqa: BLE001
             logger.warning(
                 "Could not read the thread to classify its failed run",
                 exc_info=True,
                 extra={"run_completion": {"thread_id": thread_id, "run_id": run_id}},
             )
-            metadata = {}
-        return cls.of(error, metadata, run_id)
+            thread = None
+        return cls.of(error, thread.metadata if thread is not None else {}, run_id)
 
     def _parts(self, status: str) -> tuple[str, str]:
         code = self.code or ""

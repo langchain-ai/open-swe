@@ -15,8 +15,10 @@ from langchain.agents.middleware import AgentState
 from langgraph.runtime import Runtime
 from managed_deepagents import ManagedToolRuntime
 from managed_deepagents.browser import BrowserMiddleware
+from runtime_api.endpoint import call
+from runtime_api.loop import BROWSER, BrowserReport
 
-from rt.backend import OpenSweBackend, run_body
+from rt.backend import OpenSweBackend, run_call
 from rt.tools import run_id
 
 logger = logging.getLogger(__name__)
@@ -57,8 +59,10 @@ class ReportedBrowserMiddleware(BrowserMiddleware):
     async def _report(self, report: tuple[str, bool], state: Mapping[str, object]) -> None:
         name, opened = report
         try:
-            await self._backend.call(
-                "browser", run_body(run_id(), state, browser=name, opened=opened)
+            await call(
+                self._backend,
+                BROWSER,
+                run_call(BrowserReport, run_id(), state, browser=name, opened=opened),
             )
         except Exception:
             # Tried again on the next run or browser call; until then the panel cannot show it.
