@@ -425,7 +425,7 @@ async def _plugin_id(session: AsyncSession, source: PluginSource, by: UUID) -> U
     ).scalar_one()
 
 
-# A bundle stored this recently may be about to be used by an install still in flight.
+# A bundle stored or reused this recently may be about to be used by an install in flight.
 BUNDLE_GRACE = timedelta(hours=1)
 
 
@@ -433,7 +433,7 @@ async def _drop_unused_bundles(session: AsyncSession) -> None:
     """Forget bundles no install runs any more: each can be tens of megabytes."""
     await session.execute(
         delete(PluginBundleRow).where(
-            PluginBundleRow.created_at < func.clock_timestamp() - BUNDLE_GRACE,
+            PluginBundleRow.updated_at < func.clock_timestamp() - BUNDLE_GRACE,
             ~select(PluginInstallationRow.id)
             .where(PluginInstallationRow.bundle == PluginBundleRow.id)
             .exists(),
@@ -443,13 +443,17 @@ async def _drop_unused_bundles(session: AsyncSession) -> None:
 
 async def _bundle_id(session: AsyncSession, html: str, by: UUID) -> UUID:
     digest = hashlib.sha256(html.encode()).hexdigest()
-    await session.execute(
-        insert(PluginBundleRow)
-        .values(id=uuid7(), sha256=digest, html=html, created_by=by)
-        .on_conflict_do_nothing(index_elements=[PluginBundleRow.sha256])
-    )
+    # Touching a bundle being reused keeps a concurrent cleanup from dropping it.
     return (
-        await session.execute(select(PluginBundleRow.id).where(PluginBundleRow.sha256 == digest))
+        await session.execute(
+            insert(PluginBundleRow)
+            .values(id=uuid7(), sha256=digest, html=html, created_by=by)
+            .on_conflict_do_update(
+                index_elements=[PluginBundleRow.sha256],
+                set_={"updated_at": func.clock_timestamp(), "updated_by": by},
+            )
+            .returning(PluginBundleRow.id)
+        )
     ).scalar_one()
 
 

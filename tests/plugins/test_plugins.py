@@ -1,6 +1,7 @@
 """PostgreSQL regressions for what keeps plugins inside the access they were given."""
 
 from dataclasses import replace
+from datetime import timedelta
 from typing import cast
 from uuid import UUID
 
@@ -12,6 +13,7 @@ from openswe.github.http import GitHubClient, Release, ReleaseAsset
 from openswe.github.repo_names import RepoFullName
 from openswe.openai_responses.client_tools import ClientToolSpec
 from openswe.plugins import installed as installed_module
+from openswe.plugins import records as records_module
 from openswe.plugins.installed import InstalledPlugin, PluginPermissionDenied, RepositoryNotGranted
 from openswe.plugins.manifest import PluginManifest, PluginPermission
 from openswe.plugins.records import (
@@ -167,15 +169,13 @@ async def test_a_chat_is_its_persons_and_each_call_is_answered_once() -> None:
     assert await chat.calls.spend_resume(2)
 
 
-async def test_an_update_forgets_the_bundle_no_install_runs_any_more() -> None:
+async def test_an_update_forgets_the_bundle_no_install_runs_any_more(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # No grace: every bundle counts as old enough that no install is about to use it.
+    monkeypatch.setattr(records_module, "BUNDLE_GRACE", timedelta(0))
     ada = await _person("ada", "1")
-    first = _package("acme/docs")
-    installation = await PluginInstallations.install(first, user_id=ada, by=ada)
-    async with postgres.session() as session:
-        # Old enough that no install could still be about to use it.
-        await session.execute(
-            text("UPDATE plugin_bundle SET created_at = now() - interval '1 day'")
-        )
+    installation = await PluginInstallations.install(_package("acme/docs"), user_id=ada, by=ada)
     newer = replace(_package("acme/docs"), html="<p>docs, newer</p>")
 
     await PluginInstallations.upgrade(installation, newer, by=ada)
