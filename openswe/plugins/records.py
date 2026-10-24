@@ -352,6 +352,7 @@ class PluginInstallations:
                     updated_by=by,
                 )
             )
+            await _drop_unused_bundles(session)
 
     @staticmethod
     async def share(installation_id: UUID, user_id: UUID, repositories: Sequence[str]) -> None:
@@ -394,6 +395,7 @@ class PluginInstallations:
             await session.execute(
                 delete(PluginInstallationRow).where(PluginInstallationRow.id == installation_id)
             )
+            await _drop_unused_bundles(session)
 
     @staticmethod
     async def bundle(installation_id: UUID) -> str:
@@ -421,6 +423,22 @@ async def _plugin_id(session: AsyncSession, source: PluginSource, by: UUID) -> U
             )
         )
     ).scalar_one()
+
+
+# A bundle stored this recently may be about to be used by an install still in flight.
+BUNDLE_GRACE = timedelta(hours=1)
+
+
+async def _drop_unused_bundles(session: AsyncSession) -> None:
+    """Forget bundles no install runs any more: each can be tens of megabytes."""
+    await session.execute(
+        delete(PluginBundleRow).where(
+            PluginBundleRow.created_at < func.clock_timestamp() - BUNDLE_GRACE,
+            ~select(PluginInstallationRow.id)
+            .where(PluginInstallationRow.bundle == PluginBundleRow.id)
+            .exists(),
+        )
+    )
 
 
 async def _bundle_id(session: AsyncSession, html: str, by: UUID) -> UUID:

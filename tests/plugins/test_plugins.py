@@ -1,10 +1,13 @@
 """PostgreSQL regressions for what keeps plugins inside the access they were given."""
 
+from dataclasses import replace
 from typing import cast
 from uuid import UUID
 
 import pytest
+from sqlalchemy import text
 
+from openswe.database import postgres
 from openswe.github.http import GitHubClient, Release, ReleaseAsset
 from openswe.github.repo_names import RepoFullName
 from openswe.openai_responses.client_tools import ClientToolSpec
@@ -162,6 +165,25 @@ async def test_a_chat_is_its_persons_and_each_call_is_answered_once() -> None:
     assert [m["content"] for m in await PluginChat.person_wrote("thread-1")] == ["# Hi"]
     assert await PluginChat.person_wrote("thread-1") == []
     assert await chat.calls.spend_resume(2)
+
+
+async def test_an_update_forgets_the_bundle_no_install_runs_any_more() -> None:
+    ada = await _person("ada", "1")
+    first = _package("acme/docs")
+    installation = await PluginInstallations.install(first, user_id=ada, by=ada)
+    async with postgres.session() as session:
+        # Old enough that no install could still be about to use it.
+        await session.execute(
+            text("UPDATE plugin_bundle SET created_at = now() - interval '1 day'")
+        )
+    newer = replace(_package("acme/docs"), html="<p>docs, newer</p>")
+
+    await PluginInstallations.upgrade(installation, newer, by=ada)
+
+    async with postgres.session() as session:
+        stored = list(await session.scalars(text("SELECT html FROM plugin_bundle")))
+    assert stored == ["<p>docs, newer</p>"]
+    assert await PluginInstallations.bundle(installation) == "<p>docs, newer</p>"
 
 
 async def test_a_name_installed_for_everyone_wins_and_cannot_be_installed_twice() -> None:
