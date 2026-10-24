@@ -163,6 +163,36 @@ async def test_pr_ready_for_review_uses_re_review_after_previous_review(
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("draft", [False, True])
+async def test_description_edit_reviews_unchanged_head(
+    monkeypatch: pytest.MonkeyPatch, draft: bool
+) -> None:
+    fake_client = MagicMock()
+    fake_client.runs.create = AsyncMock()
+    _patch_dispatch_deps(monkeypatch, fake_client)
+    monkeypatch.setattr(
+        webhook_common,
+        "get_thread_metadata_safe",
+        AsyncMock(return_value={"kind": "reviewer", "last_reviewed_sha": "headsha"}),
+    )
+    monkeypatch.setattr(
+        webhook_common,
+        "get_profile",
+        AsyncMock(return_value={"login": "alice", "review_draft_prs": False}),
+    )
+    monkeypatch.setattr(webhook_common, "get_workspace_settings", AsyncMock(return_value={}))
+
+    await github_webhooks.process_github_pr_ready(_pr_payload(action="edited", draft=draft))
+
+    assert fake_client.runs.create.await_count == (0 if draft else 1)
+    if not draft:
+        assert fake_client.runs.create.await_args is not None
+        configurable = fake_client.runs.create.await_args.kwargs["config"]["configurable"]
+        assert configurable["re_review"] is False
+        assert configurable["head_sha"] == "headsha"
+
+
+@pytest.mark.asyncio
 async def test_pr_ready_draft_user_override_off_wins_over_team_on(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

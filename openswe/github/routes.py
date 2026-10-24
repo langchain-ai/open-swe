@@ -141,7 +141,8 @@ async def github_webhook(
             )
             background_tasks.add_task(service.process_github_pr_close, payload)
             return {"status": "accepted", "message": f"Processing PR {action} for reviewer watch"}
-        if action in common.GH_PR_FIRST_REVIEW_ACTIONS:
+        description_changed = action == "edited" and "body" in payload.get("changes", {})
+        if action in common.GH_PR_FIRST_REVIEW_ACTIONS or description_changed:
             if not await common.is_repo_auto_review_enabled(webhook_repo_config):
                 return {"status": "ignored", "reason": "Automatic review disabled for repository"}
             gate_rejection = await common.enforce_public_repo_org_gate(payload, "pull_request")
