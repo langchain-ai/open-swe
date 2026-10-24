@@ -226,6 +226,7 @@ fn run_session(
     let (name, deployment_agent) = agent_target(base_name, opts.agent_environment)?;
 
     let mut secrets = secrets_from_env(&env_vars);
+    set_git_revision_secret(&mut secrets, root)?;
     set_mda_handoff_secret(&mut secrets, &random_handoff_secret());
     // Scope the runtime to the same workspace the deploy clients use,
     // overriding any `LANGSMITH_WORKSPACE_ID` copied from `.env`.
@@ -1057,6 +1058,26 @@ pub(crate) fn recipe_spec_from_project(
         docker_image: manifest.docker_image,
         registry: manifest.registry,
     }))
+}
+
+fn set_git_revision_secret(secrets: &mut Vec<langsmith::Secret>, root: &Path) -> Result<()> {
+    let output = std::process::Command::new("git")
+        .args(["-C"])
+        .arg(root)
+        .args(["rev-parse", "--verify", "HEAD"])
+        .output()
+        .context("could not read the deployment's git revision")?;
+    if !output.status.success() {
+        log::warning("No git revision available; set LANGSMITH_REVISION_ID in the project .env")?;
+        return Ok(());
+    }
+    let revision = String::from_utf8(output.stdout).context("invalid git revision")?;
+    secrets.retain(|secret| secret.name != "LANGSMITH_REVISION_ID");
+    secrets.push(langsmith::Secret {
+        name: "LANGSMITH_REVISION_ID".to_string(),
+        value: revision.trim().to_string(),
+    });
+    Ok(())
 }
 
 /// Non-reserved env vars forwarded onto the bake builder box.
@@ -2717,7 +2738,7 @@ mod tests {
         ensure_requested_deployment_source, first_deploy_collisions, http_channel_links,
         managed_cron_ids, missing_user_owned_mcp_connections, model_api_key_requirement_for_deploy,
         poll_failure_limit_reached, prompt_api_key_choice, require_trigger_registration_url,
-        schedule_cron_request, schedule_reconcile_warning, schedules_summary,
+        schedule_cron_request, schedule_reconcile_warning, schedules_summary, set_git_revision_secret,
         validate_workspace_connections_for_manifest, ApiKeyPromptChoice, CollisionDecision,
         FirstDeployCollisions, WorkspaceSecretKeys, BAKE_SPINNER_TITLE,
     };
@@ -2725,6 +2746,47 @@ mod tests {
     use crate::error::{category_of, ErrorCategory};
     use crate::langsmith::{AgentEnvironment, Client, ConnectionSummary, Secret};
     use crate::project::{Language, Project};
+
+    #[test]
+    fn deployment_revision_tracks_the_checked_out_commit() {
+        let root = tempfile::tempdir().unwrap();
+        for args in [
+            vec!["init"],
+            vec![
+                "-c",
+                "user.name=Test",
+                "-c",
+                "user.email=test@example.com",
+                "commit",
+                "--allow-empty",
+                "-m",
+                "initial",
+            ],
+        ] {
+            let output = std::process::Command::new("git")
+                .current_dir(root.path())
+                .args(args)
+                .output()
+                .unwrap();
+            assert!(output.status.success(), "{:?}", output);
+        }
+        let expected = std::process::Command::new("git")
+            .current_dir(root.path())
+            .args(["rev-parse", "HEAD"])
+            .output()
+            .unwrap();
+        let mut secrets = vec![Secret {
+            name: "LANGSMITH_REVISION_ID".to_string(),
+            value: "stale".to_string(),
+        }];
+        set_git_revision_secret(&mut secrets, root.path()).unwrap();
+        assert_eq!(secrets.len(), 1);
+        assert_eq!(secrets[0].name, "LANGSMITH_REVISION_ID");
+        assert_eq!(
+            secrets[0].value,
+            String::from_utf8(expected.stdout).unwrap().trim()
+        );
+    }
 
     fn test_project(root: PathBuf) -> Project {
         Project {
