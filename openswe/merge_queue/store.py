@@ -11,16 +11,18 @@ from contextlib import asynccontextmanager
 from copy import deepcopy
 from dataclasses import dataclass
 from datetime import datetime, timedelta
-from typing import Self
+from typing import Literal, Self
 from uuid import UUID, uuid7
 
 from pydantic import AwareDatetime, BaseModel, ConfigDict, Field, JsonValue
-from sqlalchemy import BigInteger, ForeignKey, delete, func, select, tuple_
+from sqlalchemy import BigInteger, ForeignKey, Text, delete, func, or_, select, tuple_
+from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import Mapped, mapped_column
 
 from openswe.database import postgres
 from openswe.github.pull_requests import PullRequest
+from openswe.github.queue import NativeQueueSnapshot
 from openswe.github.repositories import Repository
 from openswe.merge_queue.admission import ADMISSION_MAX_AGE, Admission, QueuePolicy
 from openswe.merge_queue.git import Candidate
@@ -97,6 +99,10 @@ class MergeQueue(Record):
     workspace_id: Mapped[UUID] = mapped_column(ForeignKey(WorkspaceRow.id, ondelete="CASCADE"))
     repository_id: Mapped[UUID] = mapped_column(ForeignKey(Repository.id))
     target_branch: Mapped[str]
+    mode: Mapped[Literal["custom", "native"]] = mapped_column(Text, default="custom")
+    native_snapshot: Mapped[dict[str, JsonValue] | None] = mapped_column(
+        JSONB(none_as_null=True), default=None
+    )
     paused: Mapped[bool] = mapped_column(default=True)
     fence: Mapped[int] = mapped_column(BigInteger, default=0)
     lease_owner: Mapped[UUID | None] = mapped_column(default=None)
@@ -179,6 +185,8 @@ class MergeQueue(Record):
             )
             if queue is None:
                 raise ValueError("Queue not found")
+            if queue.mode != self.mode:
+                raise LeaseLost("Queue mode changed")
             now = (await session.execute(select(func.clock_timestamp()))).scalar_one()
             if lease is not None and (
                 queue.lease_owner != lease.owner
@@ -188,6 +196,48 @@ class MergeQueue(Record):
             ):
                 raise LeaseLost("Queue lease expired or was replaced")
             yield session, queue, now
+
+    async def enable_native_observation(self) -> None:
+        async with self._locked() as (session, queue, now):
+            if queue.mode == "native":
+                return
+            if not queue.paused or (queue.lease_until is not None and queue.lease_until > now):
+                raise ValueError("Pause and drain the custom queue before enabling native mode")
+            requests = await session.scalar(
+                select(MergeRequest.id)
+                .where(MergeRequest.queue_id == self.id, MergeRequest.finished_at.is_(None))
+                .limit(1)
+            )
+            batches = await session.scalar(
+                select(Batch.id)
+                .where(
+                    Batch.queue_id == self.id,
+                    or_(
+                        Batch.state == "active",
+                        (Batch.candidate.is_not(None) & Batch.ref_deleted_at.is_(None)),
+                        select(Attempt.id)
+                        .where(Attempt.batch_id == Batch.id, Attempt.state == "running")
+                        .exists(),
+                    ),
+                )
+                .limit(1)
+            )
+            if requests is not None or batches is not None:
+                raise ValueError("Drain custom requests, attempts, and retained refs first")
+            queue.mode = "native"
+            queue.fence += 1
+            queue.lease_owner = queue.lease_until = None
+            queue.updated_by = None
+        self.mode = "native"
+
+    async def record_native_snapshot(self, snapshot: NativeQueueSnapshot, lease: Lease) -> None:
+        async with self._locked(lease) as (_, queue, now):
+            if queue.mode != "native" or snapshot.branch != queue.target_branch:
+                raise ValueError("Queue is not observing this native target")
+            queue.native_snapshot = snapshot.model_copy(update={"observed_at": now}).model_dump(
+                mode="json"
+            )
+            queue.updated_by = None
 
     @asynccontextmanager
     async def _read_snapshot(self) -> AsyncIterator[tuple[AsyncSession, Self]]:

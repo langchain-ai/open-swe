@@ -1,6 +1,6 @@
 """Operator-managed canary configuration stored on its owning workspace."""
 
-from typing import Self
+from typing import Literal, Self
 from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field, HttpUrl, model_validator
@@ -18,10 +18,11 @@ class QueueConfiguration(BaseModel):
     workspace_id: UUID
     repository: str = Field(pattern=r"^[A-Za-z0-9_-]+/[A-Za-z0-9_.-]+$")
     repository_id: int = Field(gt=0, strict=True)
-    dispatch_url: HttpUrl
-    workflow_digest: str = Field(pattern=r"^[0-9a-f]{64}$")
+    mode: Literal["custom", "native"] = "custom"
+    dispatch_url: HttpUrl | None = None
+    workflow_digest: str | None = Field(default=None, pattern=r"^[0-9a-f]{64}$")
     operator_emails: frozenset[str] = Field(min_length=1)
-    policy: QueuePolicy
+    policy: QueuePolicy = Field(default_factory=lambda: QueuePolicy(checks={}))
     retention_days: int = Field(default=90, ge=7, le=365)
 
     @classmethod
@@ -47,13 +48,18 @@ class QueueConfiguration(BaseModel):
     def validate_controller(self) -> Self:
         if ENV.SANDBOX_TYPE.get() == "local":
             raise ValueError("The queue requires isolated agent sandboxes")
-        if self.policy.validation is None or not self.policy.checks:
+        if self.mode == "custom" and (
+            self.policy.validation is None
+            or not self.policy.checks
+            or self.dispatch_url is None
+            or self.workflow_digest is None
+        ):
             raise ValueError("The queue needs validation and required-check provenance")
         if any(
             not email.strip() or email != email.strip().lower() for email in self.operator_emails
         ):
             raise ValueError("Operator emails must be nonempty, lowercase, and trimmed")
-        if (
+        if self.dispatch_url is not None and (
             self.dispatch_url.scheme != "https"
             or self.dispatch_url.username
             or self.dispatch_url.password

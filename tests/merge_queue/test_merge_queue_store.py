@@ -13,8 +13,9 @@ from sqlalchemy import func, select, update
 from sqlalchemy.exc import IntegrityError
 
 from openswe.database import postgres
-from openswe.github.http import RepoClient
+from openswe.github.http import GitHubClient, RepoClient
 from openswe.github.pull_requests import PullRequest
+from openswe.github.queue import NativeQueueSnapshot
 from openswe.github.repositories import Repository
 from openswe.merge_queue import controller, runtime
 from openswe.merge_queue.admission import Admission, AdmissionReader, CheckSource, QueuePolicy
@@ -1012,6 +1013,125 @@ async def test_queue_startup_preserves_state_and_running_job(
         )
     await controller.start_queue()
     assert controller.CONTROLLER is None and runtime.RUNTIME is None
+
+
+async def test_native_observation_survives_restart_and_old_events(
+    queue_controller: QueueController, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from openswe.jobs import queue as jobs
+    from openswe.webhooks import common
+    from tests.conftest import post_signed_github_webhook
+    from tests.merge_queue.test_queue_controller import native_response
+
+    original = queue_controller.queue
+    config = queue_controller.config.model_copy(
+        update={
+            "mode": "native",
+            "dispatch_url": None,
+            "workflow_digest": None,
+            "policy": QueuePolicy(checks={}),
+        }
+    )
+    async with postgres.session() as session:
+        await session.execute(
+            update(WorkspaceRow)
+            .where(WorkspaceRow.id == original.workspace_id)
+            .values(merge_queue_config=config.model_dump(mode="json", exclude={"workspace_id"}))
+        )
+    monkeypatch.delenv("MERGE_QUEUE_DISPATCH_SECRET")
+    response = native_response()
+
+    def respond(request: httpx2.Request) -> httpx2.Response:
+        if request.url.path == "/repos/acme/widgets" and request.method == "GET":
+            return httpx2.Response(200, json={"id": 42})
+        if request.url.path == "/graphql":
+            return httpx2.Response(200, json={"data": {"repository": response}})
+        pytest.fail(
+            f"Native observer attempted another GitHub operation: {request.method} {request.url.path}"
+        )
+
+    @asynccontextmanager
+    async def as_app(
+        owner: str, repo: str, *, permissions: dict[str, str]
+    ) -> AsyncIterator[GitHubClient]:
+        assert (owner, repo) == ("acme", "widgets")
+        async with httpx2.AsyncClient(transport=httpx2.MockTransport(respond)) as http:
+            yield GitHubClient(http)
+
+    monkeypatch.setattr(GitHubClient, "as_app", as_app)
+    await controller.start_queue()
+    assert runtime.RUNTIME is not None
+    payload = QueueJob(queue_id=original.id, workspace_id=original.workspace_id)
+    await runtime.RUNTIME.reconcile(payload)
+    observed = await MergeQueue.load(original.id, original.workspace_id)
+    assert observed is not None and observed.paused and observed.mode == "native"
+    saved = NativeQueueSnapshot.model_validate(observed.native_snapshot)
+    assert saved.observed_at is not None and len(saved.candidates) == 3
+    old_abc = list(saved.candidates)[-1]
+
+    await postgres.close()
+    await controller.start_queue()
+    restored = await MergeQueue.load(original.id, original.workspace_id)
+    assert restored is not None and restored.native_snapshot == observed.native_snapshot
+    # A delayed event is a wakeup only. The next read sees AC, not its old ABC payload.
+    response = native_response((1, 3))
+    monkeypatch.setattr(common, "GITHUB_WEBHOOK_SECRET", "native-observer-test")
+    event = {
+        "action": "checks_requested",
+        "repository": {
+            "id": 42,
+            "full_name": "Acme/Widgets",
+            "owner": {"login": "acme"},
+            "name": "widgets",
+        },
+        "merge_group": {"head_sha": old_abc, "base_ref": "refs/heads/main"},
+    }
+    for _ in range(2):
+        result = await post_signed_github_webhook(
+            "merge_group", event, secret="native-observer-test"
+        )
+        assert result.json()["status"] == "accepted"
+    job = await jobs.get(f"merge-queue-native-wakeup:{original.id}")
+    assert job is not None and runtime.RUNTIME is not None
+    await runtime.RUNTIME.reconcile(QueueJob.model_validate(job.payload))
+    current = await MergeQueue.load(original.id, original.workspace_id)
+    assert current is not None
+    rebuilt = NativeQueueSnapshot.model_validate(current.native_snapshot)
+    assert old_abc not in rebuilt.candidates
+    assert [p.number for p in list(rebuilt.candidates.values())[-1].members] == [1, 3]
+    # A real empty queue retires every candidate; API errors would instead leave the snapshot intact.
+    response = native_response(())
+    await runtime.RUNTIME.reconcile(payload)
+    empty = await MergeQueue.load(original.id, original.workspace_id)
+    assert (
+        empty is not None
+        and not NativeQueueSnapshot.model_validate(empty.native_snapshot).candidates
+    )
+    assert await current.requests() == []
+    with pytest.raises(LeaseLost, match="mode changed"):
+        await original.claim(uuid7(), timedelta(seconds=60))
+    with pytest.raises(ValueError, match="custom controller"):
+        await queue_controller.start()
+
+
+async def test_native_activation_requires_draining_custom_work(queue: MergeQueue) -> None:
+    async with postgres.session() as session:
+        operator = User(display_name="Operator")
+        session.add(operator)
+    pending = await request(queue, 1)
+    with pytest.raises(ValueError, match="Drain custom"):
+        await queue.enable_native_observation()
+    await queue.withdraw(pending.id)
+    lease = await claim(queue)
+    with pytest.raises(ValueError, match="Pause and drain"):
+        await queue.enable_native_observation()
+    await queue.release(lease)
+    await queue.set_paused(False, actor=operator.id)
+    with pytest.raises(ValueError, match="Pause and drain"):
+        await queue.enable_native_observation()
+    await queue.set_paused(True, actor=operator.id)
+    await queue.enable_native_observation()
+    assert queue.mode == "native"
 
 
 async def test_queue_startup_rejects_multiple_configured_workspaces(
