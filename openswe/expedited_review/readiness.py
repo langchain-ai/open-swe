@@ -36,8 +36,8 @@ class PullRequestSnapshot:
     check_state: str
     unresolved_threads: int
     failing_checks: list[str] = field(default_factory=list)
+    failing_required_checks: list[str] = field(default_factory=list)
     unreported_required_checks: list[str] = field(default_factory=list)
-    failures_are_required: bool = True
     changes_requested_by: list[str] = field(default_factory=list)
     allowed_merge_methods: list[str] = field(default_factory=list)
     approved_review_ids: frozenset[int] = frozenset()
@@ -114,6 +114,17 @@ class Readiness:
         mergeable, mergeable_state = _resolve_mergeability(pr, mergeability)
 
         check_state, failures = aggregate_check_state(checks.runs, checks.statuses)
+        failing_required_checks = sorted(
+            {
+                check.name
+                for check in required
+                if aggregate_check_state(
+                    [run for run in checks.runs if check.reported_by([run], [])],
+                    [status for status in checks.statuses if check.reported_by([], [status])],
+                )[0]
+                in {"failure", "blocked"}
+            }
+        )
         author_login = author if isinstance(author, str) else ""
         snapshot = PullRequestSnapshot(
             state=str(pr.get("state") or ""),
@@ -127,12 +138,8 @@ class Readiness:
             check_state=check_state,
             unresolved_threads=len(threads),
             failing_checks=sorted({str(failure["name"]) for failure in failures}),
+            failing_required_checks=failing_required_checks,
             unreported_required_checks=checks.unreported(required),
-            # GitHub says "unstable" when the pull request is mergeable and only
-            # checks it does not require are unhappy, and "blocked" when a required
-            # one is. Trusting it keeps us from having to read branch protection,
-            # which needs admin, and from guessing at ruleset precedence.
-            failures_are_required=mergeable_state != "unstable",
             changes_requested_by=sorted(
                 login
                 for login, state in _latest_reviews_by_user(reviews, author_login).items()
@@ -150,10 +157,8 @@ class Readiness:
 
 
 def _failed_check_blocker(snapshot: PullRequestSnapshot) -> str:
-    if not snapshot.failing_checks:
-        return "a check finished without success"
-    noun = "check" if len(snapshot.failing_checks) == 1 else "checks"
-    return f"failing {noun}: {', '.join(snapshot.failing_checks)}"
+    noun = "check" if len(snapshot.failing_required_checks) == 1 else "checks"
+    return f"failing {noun}: {', '.join(snapshot.failing_required_checks)}"
 
 
 def readiness_blockers(snapshot: PullRequestSnapshot) -> list[str]:
@@ -170,7 +175,7 @@ def readiness_blockers(snapshot: PullRequestSnapshot) -> list[str]:
         blockers.append("GitHub is still computing mergeability")
     if snapshot.check_state == "pending":
         blockers.append("checks are still running")
-    elif snapshot.check_state in {"failure", "blocked"} and snapshot.failures_are_required:
+    elif snapshot.check_state in {"failure", "blocked"} and snapshot.failing_required_checks:
         blockers.append(_failed_check_blocker(snapshot))
     if snapshot.unreported_required_checks:
         names = ", ".join(snapshot.unreported_required_checks)

@@ -197,8 +197,8 @@ def request_blockers(snapshot: PullRequestSnapshot) -> list[str]:
         blockers.append("it is a draft")
     if snapshot.mergeable is False or snapshot.mergeable_state == "dirty":
         blockers.append("it has merge conflicts")
-    if snapshot.check_state in {"failure", "blocked"} and snapshot.failures_are_required:
-        names = ", ".join(snapshot.failing_checks) or "a required check"
+    if snapshot.check_state in {"failure", "blocked"} and snapshot.failing_required_checks:
+        names = ", ".join(snapshot.failing_required_checks)
         blockers.append(f"required checks are failing: {names}")
     return blockers
 
