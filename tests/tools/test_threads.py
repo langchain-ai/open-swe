@@ -1,12 +1,15 @@
 import importlib
 import json
+from datetime import UTC, datetime
 from types import SimpleNamespace
+from typing import get_args
 from unittest.mock import AsyncMock
 
 import pytest
 from fastapi import HTTPException
 
 from openswe.message_queue import QueuedMessage
+from openswe.slack.allowed_bots import AllowedSlackBot
 
 threads_tool = importlib.import_module("openswe.tools.threads")
 
@@ -212,6 +215,98 @@ class _DetailClient:
             ]
 
         self.runs = SimpleNamespace(list=AsyncMock(side_effect=_list_runs))
+
+
+def _slack_bot_run(monkeypatch: pytest.MonkeyPatch) -> AsyncMock:
+    monkeypatch.setattr(
+        threads_tool,
+        "get_config",
+        lambda: {
+            "configurable": {
+                "source": "slack",
+                "slack_thread": {
+                    "team_id": "T123",
+                    "triggering_bot_id": "B123",
+                    "triggering_user_id": "U123",
+                    "triggering_bot_app_id": "A123",
+                },
+            }
+        },
+    )
+    allowed = AsyncMock(
+        return_value=AllowedSlackBot(
+            team_id="T123",
+            bot_id="B123",
+            user_id="U123",
+            app_id="A123",
+            name="Release bot",
+            created_at=datetime(2026, 9, 9, tzinfo=UTC),
+        )
+    )
+    monkeypatch.setattr(AllowedSlackBot, "get", allowed)
+    return allowed
+
+
+async def test_slack_bot_reads_threads_read_only_until_revoked(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    allowed = _slack_bot_run(monkeypatch)
+    page = AsyncMock(return_value={"items": [], "limit": 25, "offset": 0, "hasMore": False})
+    monkeypatch.setattr(threads_tool, "list_dashboard_threads_page", page)
+    detail = AsyncMock(return_value={"id": "thread-1", "status": "finished"})
+    monkeypatch.setattr(threads_tool, "get_dashboard_thread", detail)
+    client = _DetailClient()
+    monkeypatch.setattr(threads_tool, "langgraph_client", lambda: client)
+    monkeypatch.setattr(threads_tool, "get_plan_content", AsyncMock(return_value={}))
+    monkeypatch.setattr(threads_tool, "list_plan_comments", AsyncMock(return_value=[]))
+    monkeypatch.setattr(threads_tool, "get_workflow_push_approvals", AsyncMock(return_value={}))
+    monkeypatch.setattr(threads_tool, "get_langsmith_thread_cost", AsyncMock(return_value=None))
+    monkeypatch.setattr(threads_tool, "_queued_message_count", AsyncMock(return_value=0))
+
+    listed = await threads_tool.list_threads()
+    inspected = await threads_tool.get_thread("thread-1")
+
+    assert listed["success"] is True
+    assert page.await_args is not None
+    assert page.await_args.args == ("system:slack-bot:B123",)
+    assert page.await_args.kwargs["include_all"] is True
+    assert page.await_args.kwargs["include_private"] is False
+    assert inspected["success"] is True
+    assert inspected["available_actions"] == []
+    assert detail.await_args is not None
+    assert detail.await_args.args == ("thread-1", "system:slack-bot:B123")
+
+    for action in get_args(threads_tool.ThreadAction):
+        result = await threads_tool.manage_thread(action=action, thread_id="thread-1")
+        assert result == {"success": False, "error": threads_tool._NO_WRITER}
+    started = await threads_tool.start_thread(title="Fix", instructions="Fix the PR")
+    assert started == {"success": False, "error": threads_tool._NO_WRITER}
+
+    allowed.return_value = None
+    assert await threads_tool.list_threads() == {"success": False, "error": threads_tool._NO_ACTOR}
+    assert await threads_tool.get_thread("thread-1") == {
+        "success": False,
+        "error": threads_tool._NO_ACTOR,
+    }
+
+
+@pytest.mark.parametrize("identity", ["unknown", "wrong-user", "wrong-app"])
+async def test_slack_bot_reader_rejects_unrecognized_identity(
+    monkeypatch: pytest.MonkeyPatch, identity: str
+) -> None:
+    allowed = _slack_bot_run(monkeypatch)
+    if identity == "unknown":
+        allowed.return_value = None
+    elif identity == "wrong-user":
+        allowed.return_value.user_id = "U456"
+    else:
+        allowed.return_value.app_id = "A456"
+
+    assert await threads_tool.list_threads() == {"success": False, "error": threads_tool._NO_ACTOR}
+    assert await threads_tool.get_thread("thread-1") == {
+        "success": False,
+        "error": threads_tool._NO_ACTOR,
+    }
 
 
 async def test_get_thread_counts_pending_run_outside_history_window(
