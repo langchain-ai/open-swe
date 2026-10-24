@@ -88,11 +88,13 @@ class FileToolsMiddleware(AgentMiddleware):
         remote: Mapping[str, BaseTool],
         remote_files: BackendProtocol,
         in_box: bool,
+        excluded: frozenset[str] = frozenset(),
         skills: Mapping[str, BaseTool] | None = None,
         skill_sources: Iterable[str] = (),
     ) -> None:
         self._backend = backend
-        self._remote = dict(remote)
+        self._shell_search = {"grep", "glob"} <= excluded
+        self._remote = {name: self._described_tool(tool) for name, tool in remote.items()}
         self._in_box = in_box
         # The run's skills, which this runtime keeps itself (``rt.skills``).
         self._skills = dict(skills or {})
@@ -109,6 +111,20 @@ class FileToolsMiddleware(AgentMiddleware):
             if "agents_md" in spec.checks
             else None
         )
+
+    def _described_tool(self, tool: BaseTool) -> BaseTool:
+        if tool.name != "execute" or not self._shell_search:
+            return tool
+        description = tool.description.replace(
+            "- You MUST avoid using search commands like find and grep. Instead use the grep, glob tools to search. Use read_file rather than cat/head/tail.\n"
+            "    - execute(command=\"find . -name '*.py'\")  # Use glob tool instead\n"
+            "    - execute(command=\"grep -r 'pattern' .\")  # Use grep tool instead",
+            "- Search repository contents through execute with `git grep -n` or `grep -rn`; "
+            "search file names with shell commands. There are no separate grep/glob tools. "
+            "Follow repository-specific search instructions, including restrictions on ripgrep. "
+            "Use read_file rather than cat/head/tail.",
+        )
+        return tool.model_copy(update={"description": description})
 
     def code_tools(self, names: Iterable[str]) -> list[StructuredTool]:
         """The file and shell tools among ``names``, for code mode, each call checked."""
@@ -136,6 +152,13 @@ class FileToolsMiddleware(AgentMiddleware):
         request: ModelRequest,
         handler: Callable[[ModelRequest], Awaitable[ModelResponse]],
     ) -> ModelResponse:
+        if self._shell_search:
+            request = request.override(
+                tools=[
+                    self._described_tool(tool) if isinstance(tool, BaseTool) else tool
+                    for tool in request.tools
+                ]
+            )
         if self._in_box:
             self._box.update(
                 (tool.name, tool)
