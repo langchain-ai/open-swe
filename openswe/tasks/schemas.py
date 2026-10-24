@@ -1,3 +1,4 @@
+from collections.abc import Mapping
 from datetime import UTC, datetime
 from typing import Literal, Self
 from uuid import UUID
@@ -20,6 +21,18 @@ async def user_for_login(login: str) -> User | None:
     return await User.for_identity("github", identity.external_id) if identity is not None else None
 
 
+CONCIERGE_BACKGROUND_KEY = "concierge_background"
+
+
+def shares_sandbox(metadata: Mapping[str, object]) -> bool:
+    """Whether a thread works in another's sandbox: a task worker or concierge background.
+
+    A review-guide copy names its source as host too, but keeps reconnecting to the
+    sandbox id it was given, as any thread does.
+    """
+    return metadata.get("task_id") is not None or metadata.get(CONCIERGE_BACKGROUND_KEY) is True
+
+
 class ThreadMetadata(BaseModel):
     model_config = ConfigDict(extra="allow")
     __pydantic_extra__: dict[str, JsonValue] = Field(init=False)
@@ -31,6 +44,7 @@ class ThreadMetadata(BaseModel):
     environment: str | None = None
     task_id: UUID | None = None
     sandbox_host_thread_id: str | None = None
+    concierge_background: bool = False
     sandbox_id: str | None = None
     # "mda": Managed Deep Agents names, creates and replaces the box; the backend binds to it.
     sandbox_owner: Literal["mda"] | None = None
@@ -49,6 +63,15 @@ class ThreadMetadata(BaseModel):
     model_selection: Literal["auto", "explicit"] | None = None
     model: str | None = None
     effort: str | None = None
+
+    @property
+    def shares_sandbox(self) -> bool:
+        """:func:`shares_sandbox` for validated metadata."""
+        return self.task_id is not None or self.concierge_background
+
+    @property
+    def workspace_slug(self) -> str:
+        return self.workspace or self.environment or "default"
 
     def json_metadata(self) -> dict[str, JsonValue]:
         return _JSON_OBJECT.validate_python(self.model_dump(mode="json", exclude_unset=True))

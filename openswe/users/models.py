@@ -51,6 +51,8 @@ class UserIdentity(Base):
     login: Mapped[str] = mapped_column(server_default="", default="")
     email: Mapped[str] = mapped_column(server_default="", default="")
     team_id: Mapped[str] = mapped_column(server_default="", default="")
+    # The Slack member's IANA timezone, as their profile last reported it.
+    timezone: Mapped[str] = mapped_column(server_default="", default="")
     linked_at: Mapped[datetime | None] = mapped_column(server_default=NOW, init=False)
     last_seen_at: Mapped[datetime | None] = mapped_column(server_default=NOW, init=False)
 
@@ -91,6 +93,11 @@ class User(Base):
         return self._identity_field("slack", "team_id")
 
     @property
+    def slack_timezone(self) -> str:
+        """The IANA timezone Slack last reported for this person, or ``""``."""
+        return self._identity_field("slack", "timezone")
+
+    @property
     def email(self) -> str:
         """The address to reach this person, work address first.
 
@@ -105,7 +112,9 @@ class User(Base):
         )
 
     def _identity_field(
-        self, provider: Provider, field: Literal["login", "email", "external_id", "team_id"]
+        self,
+        provider: Provider,
+        field: Literal["login", "email", "external_id", "team_id", "timezone"],
     ) -> str:
         return next(
             (
@@ -264,6 +273,34 @@ class User(Base):
             return False
         user = await cls.for_identity("slack", slack_user_id)
         return user is not None and user.typed_preferences.concierge_mode
+
+    @classmethod
+    async def remember_slack_timezone(cls, slack_user_id: str, timezone: str) -> None:
+        """Cache the timezone Slack reports for a member, for work that runs without their message."""
+        timezone = timezone.strip()
+        if not slack_user_id or not timezone or not postgres.configured():
+            return
+        async with postgres.session() as session:
+            await session.execute(
+                update(UserIdentity)
+                .where(
+                    UserIdentity.provider == "slack",
+                    UserIdentity.external_id == slack_user_id,
+                    UserIdentity.timezone != timezone,
+                )
+                .values(timezone=timezone)
+            )
+
+    @classmethod
+    async def in_concierge_mode(cls) -> list[Self]:
+        """Everyone who keeps their bot DM as one conversation."""
+        async with postgres.session() as session:
+            rows = await session.scalars(
+                cls._with_identities(select(cls)).where(
+                    cls.preferences.contains({"concierge_mode": True})
+                )
+            )
+            return list(rows.all())
 
     @classmethod
     async def update_preferences(

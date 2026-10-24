@@ -30,6 +30,11 @@ from openswe.monitors.delivery import POLL_JOB_KIND as MONITOR_POLL
 from openswe.monitors.delivery import poll_monitors
 
 __all__ = ["WORKER"]
+from openswe.concierge.checkin import (
+    CHECKIN_JOB,
+    CHECKIN_SCHEDULE,
+    check_in_with_concierge_users,
+)
 from openswe.reconcile import reconcile_stale_runs
 from openswe.sandboxes.retry import (
     SANDBOX_ATTACH_MAX_ELAPSED,
@@ -170,6 +175,12 @@ async def _thread_status_reconcile(_job: Job) -> object:
     return {"threads_settled": await reconcile_busy_threads()}
 
 
+@WORKER.register(CHECKIN_JOB)
+async def _concierge_checkin(job: Job) -> None:
+    woken = await check_in_with_concierge_users()
+    logger.info("Job ran", extra={"job_kind": job.kind, "job_id": str(job.id), "job_result": woken})
+
+
 @WORKER.register(WAKE_THREAD_JOB)
 async def _wake_thread(job: Job) -> None:
     # Never retried: a run the server started before the client saw an error would start twice.
@@ -190,6 +201,7 @@ async def start_jobs() -> None:
         lambda: queue.schedule(
             THREAD_STATUS_RECONCILE, cron=RECONCILE_SCHEDULE, key=THREAD_STATUS_RECONCILE
         ),
+        lambda: queue.schedule(CHECKIN_JOB, cron=CHECKIN_SCHEDULE, key=CHECKIN_JOB),
     ]
     for step in steps:
         try:
