@@ -6,6 +6,7 @@ Which kind of message each is, and the message as a handler reads it.
 from __future__ import annotations
 
 import copy
+from collections import OrderedDict
 from collections.abc import Awaitable, Callable, Mapping
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Literal, NotRequired, cast
@@ -24,7 +25,7 @@ from managed_deepagents._channels.types import (
 from managed_deepagents._log import logger
 
 if TYPE_CHECKING:
-    from managed_deepagents._channels.http.types import ChannelName
+    from managed_deepagents._channels.http.types import ChannelName, HttpFinishedDelivery
     from managed_deepagents._channels.run_input import ChannelRunResult
     from managed_deepagents._channels.trigger.http import TriggerChannelThread
     from managed_deepagents._channels.trigger.types import TriggerChannelMessageEvent
@@ -272,6 +273,53 @@ def slack_thread(thread: TriggerChannelThread, name: str) -> SlackChannelThread:
     )
 
 
+def _finished_delivery(raw_event: JsonValue | None) -> TriggerChannelMessageEvent | None:
+    """The Trigger delivery a finished message carries; see ``TriggerFinishedEvent``."""
+    delivery = raw_event.get("delivery") if isinstance(raw_event, Mapping) else None
+    return cast("TriggerChannelMessageEvent", delivery) if isinstance(delivery, Mapping) else None
+
+
+_MAX_DECIDED_EVENTS = 1024
+"""How many deliveries' events a channel keeps until they finish."""
+
+
+class DecidedSlackEvents:
+    """The ``SlackEvent`` a handler got for each delivery, so ``on_finish`` gets
+    that same event rather than reading the delivery again, which could read it
+    as another kind. A delivery that never finishes, such as one Trigger Server
+    sends again, is dropped once there are many."""
+
+    def __init__(self) -> None:
+        self._by_delivery: OrderedDict[str, SlackEvent] = OrderedDict()
+
+    def remember(self, delivery_id: str, event: SlackEvent) -> None:
+        self._by_delivery[delivery_id] = event
+        self._by_delivery.move_to_end(delivery_id)
+        if len(self._by_delivery) > _MAX_DECIDED_EVENTS:
+            self._by_delivery.popitem(last=False)
+
+    async def finished(self, raw_event: JsonValue | None) -> SlackEvent | None:
+        """The message a finished delivery carried: as its handler got it, or
+        read from the delivery when no handler did."""
+        delivery = _finished_delivery(raw_event)
+        if delivery is None:
+            return None
+        decided = self._by_delivery.pop(delivery["delivery_id"], None)
+        return decided if decided is not None else await read_slack_event(delivery)
+
+
+def finished_slack_thread(delivery: HttpFinishedDelivery, name: str) -> SlackChannelThread:
+    """The Slack thread of a finished delivery, for a channel named ``name``."""
+    message = _finished_delivery(delivery.get("raw_event"))
+    return slack_thread(
+        {
+            "id": delivery["thread_id"],
+            "source_thread_key": message["source_thread_key"] if message is not None else "",
+        },
+        name,
+    )
+
+
 def slack_event(key: SlackEventKey, event: TriggerChannelMessageEvent) -> SlackEvent | None:
     """The message a delivery carries, as a handler reads it.
 
@@ -326,6 +374,7 @@ def _slack_file(item: object) -> SlackFile | None:
 
 __all__ = [
     "SLACK_EVENT_KEYS",
+    "DecidedSlackEvents",
     "SlackChannelThread",
     "SlackEndpointEvent",
     "SlackEndpointFields",
@@ -337,6 +386,7 @@ __all__ = [
     "SlackFile",
     "SlackHandlers",
     "endpoint_fields",
+    "finished_slack_thread",
     "read_slack_event",
     "reset_slack_bot_user",
     "slack_event",

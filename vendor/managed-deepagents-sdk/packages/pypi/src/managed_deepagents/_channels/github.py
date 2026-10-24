@@ -184,7 +184,9 @@ def github_channel(
             notify_interrupted,
             on_finish,
             _event,
-            lambda thread_id: GitHubChannelThread(id=thread_id, channel=ChannelName(name=name())),
+            lambda delivery: GitHubChannelThread(
+                id=delivery["thread_id"], channel=ChannelName(name=name())
+            ),
         ),
         provider_config=provider_config,
         multitask_strategy=multitask_strategy,

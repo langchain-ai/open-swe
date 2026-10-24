@@ -169,8 +169,8 @@ run it started, why it started none, or that MDA lost it; see ``HttpFinish``."""
 def finish_events(
     notice: HttpOnFinish,
     on_finish: EventFinished[_E, _T] | None,
-    parse: Callable[[JsonValue | None], _E | None],
-    thread: Callable[[str], _T],
+    parse: Callable[[JsonValue | None], _E | Awaitable[_E | None] | None],
+    thread: Callable[[HttpFinishedDelivery], _T],
 ) -> HttpOnFinish:
     """The HTTP channel's ``on_finish`` for a provider channel.
 
@@ -186,10 +186,11 @@ def finish_events(
             logger.error("channel finish notice failed (%s)", type(error).__name__)
         if on_finish is None:
             return
-        event = parse(delivery.get("raw_event"))
+        parsed = parse(delivery.get("raw_event"))
+        event = await parsed if inspect.isawaitable(parsed) else parsed
         if event is None:
             return
-        result = on_finish(event, thread(delivery["thread_id"]), _finish_of(delivery))
+        result = on_finish(event, thread(delivery), _finish_of(delivery))
         if inspect.isawaitable(result):
             await result
 

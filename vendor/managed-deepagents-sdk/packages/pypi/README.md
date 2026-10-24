@@ -547,6 +547,39 @@ after it, `interrupt` cancels the run, keeping its progress, and starts at
 once, `rollback` cancels it and discards its progress, and `reject` starts
 nothing.
 
+`on_finish` is called once when a message is done, with the `SlackEvent`, its
+`SlackChannelThread`, and how it finished, as Linear's `on_finish` is:
+
+- `run`: the message started a run, which ended with `run["status"]`
+  (`success`, `error`, `timeout` or `interrupted`). `interrupts` lists the
+  decisions the thread waits on.
+- `skipped`: no run started. The handler returned nothing or failed
+  (`ignored`), or the thread was busy under `multitask_strategy="reject"`
+  (`rejected`).
+- `failed`: MDA couldn't start the run, or lost track of it.
+
+Use it to record which run answered which message in your own service,
+update memory after a run succeeds, or alert someone when one fails:
+
+```python
+async def on_finish(event: SlackEvent, thread: SlackChannelThread, finished: HttpFinish) -> None:
+    if finished["type"] != "run":
+        return
+    if finished["run"]["status"] == "success":
+        ...  # e.g. record the answer in your service, or update memory
+    else:
+        ...  # e.g. alert someone that the run failed
+
+
+channel = channels.slack(on_finish=on_finish)
+```
+
+It runs in the background after the reply, and errors are logged. Interrupt
+resumes don't call it, and neither does a message Trigger Server will send
+again because its run couldn't start. Like `channels.http`'s, it runs in the deployment's
+process, so a restart loses it: set the run's `webhook` for anything you
+can't miss.
+
 ## GitHub channels
 
 The GitHub channel is a thin HTTP adapter. Add a channel file with event handlers:

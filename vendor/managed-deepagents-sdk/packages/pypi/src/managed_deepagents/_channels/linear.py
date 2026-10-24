@@ -186,7 +186,9 @@ def linear_channel(
             _notify_finished,
             on_finish,
             _event,
-            lambda thread_id: LinearChannelThread(id=thread_id, channel=ChannelName(name=name())),
+            lambda delivery: LinearChannelThread(
+                id=delivery["thread_id"], channel=ChannelName(name=name())
+            ),
         ),
         provider_config=provider_config,
         multitask_strategy=multitask_strategy,

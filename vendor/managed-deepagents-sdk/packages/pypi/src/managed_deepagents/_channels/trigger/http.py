@@ -67,13 +67,22 @@ from managed_deepagents._log import logger
 from managed_deepagents.run_context import INTERRUPT_CORRELATION_KEY
 
 if TYPE_CHECKING:
+    from langgraph_sdk.schema import Interrupt
+
     from managed_deepagents._channels.binding import ChannelBinding
+    from managed_deepagents._channels.http.types import (
+        HttpFinish,
+        HttpFinishedDelivery,
+        HttpOnFinish,
+        HttpSkipReason,
+    )
     from managed_deepagents._channels.run_input import NormalizedRunInput
     from managed_deepagents._channels.trigger.ingress import (
         ObservedIngressRun,
         PendingInterrupt,
         ResumeTarget,
     )
+    from managed_deepagents._channels.types import JsonValue
     from managed_deepagents._ingress_runs import MultitaskStrategy, StartedIngressRun
 
 ASSISTANT_ID_ENV = "MDA_ASSISTANT_ID"
@@ -112,6 +121,13 @@ class TriggerMessageBackground:
     """
 
     decide: Callable[[], Awaitable[TriggerMessageDecision]]
+
+
+class TriggerFinishedEvent(TypedDict):
+    """What a finished message's ``raw_event`` holds: the Trigger delivery, without
+    its identity token."""
+
+    delivery: JsonValue
 
 
 TriggerMessageRoute = TriggerMessageDecision | TriggerMessageBackground
@@ -439,6 +455,7 @@ async def handle_trigger_channel_event_request(  # noqa: C901, PLR0911, PLR0912,
     only_continues_thread: OnlyContinuesThreadFn | None = None,
     decide_message: DecideMessageFn | None = None,
     multitask_strategy: MultitaskStrategy | None = None,
+    on_finish: HttpOnFinish | None = None,
     identity_context_key: IdentityContextKey | None = None,
     identity_context_issuer: str | None = None,
 ) -> object:
@@ -549,8 +566,37 @@ async def handle_trigger_channel_event_request(  # noqa: C901, PLR0911, PLR0912,
                 return None
             raise
 
-    async def observe(started: StartedIngressRun) -> None:
-        await _observe_accepted_run(
+    thread: TriggerChannelThread = {
+        "id": _thread_id(event["source_thread_key"]),
+        "source_thread_key": event["source_thread_key"],
+    }
+
+    async def finish(finished: HttpFinish) -> None:
+        """Tell the provider a message is done, once, as ``http_channel``'s ``on_finish`` hears it.
+
+        The delivery's ``raw_event`` is a ``TriggerFinishedEvent``; a failure is logged.
+        """
+        if event["type"] != "message" or on_finish is None:
+            return
+        message = {key: value for key, value in event.items() if key != "identity_context"}
+        raw: TriggerFinishedEvent = {"delivery": cast("JsonValue", message)}
+        delivery = cast(
+            "HttpFinishedDelivery",
+            {"thread_id": thread["id"], "raw_event": cast("JsonValue", raw), **finished},
+        )
+        try:
+            await on_finish(_trigger_target(event), delivery)
+        except Exception as error:  # noqa: BLE001 - author hooks may raise anything
+            logger.error("channel finish notice failed (%s)", logger.safe_error_label(error))
+
+    def finish_later(finished: HttpFinish) -> None:
+        if on_finish is not None:
+            schedule_ingress_work(
+                lambda: finish(finished), label="Channel finish notice", schedule=schedule
+            )
+
+    async def observe(started: StartedIngressRun) -> HttpFinish:
+        return await _observe_accepted_run(
             event=event,
             started=started,
             client=client,
@@ -574,17 +620,12 @@ async def handle_trigger_channel_event_request(  # noqa: C901, PLR0911, PLR0912,
             "channel message started no run: the agent never ran on its thread (delivery_id=%s)",
             logger.log_identifier(event["delivery_id"]),
         )
+        finish_later(_skipped("ignored"))
         return _accepted_response(event)
 
     decision: TriggerMessageRoute | None = None
     if event["type"] == "message" and decide_message is not None:
-        decision = await decide_message(
-            event,
-            {
-                "id": _thread_id(event["source_thread_key"]),
-                "source_thread_key": event["source_thread_key"],
-            },
-        )
+        decision = await decide_message(event, thread)
     if isinstance(decision, TriggerMessageBackground):
         decide = decision.decide
 
@@ -592,6 +633,7 @@ async def handle_trigger_channel_event_request(  # noqa: C901, PLR0911, PLR0912,
             decided = await decide()
             if decided.type != "input":
                 _log_no_run(event, decided)
+                await finish(_skipped("ignored"))
                 return
             try:
                 started = await start(decided.input)
@@ -600,9 +642,9 @@ async def handle_trigger_channel_event_request(  # noqa: C901, PLR0911, PLR0912,
                     "channel run could not be started (%s)",
                     logger.safe_error_label(error),
                 )
+                await finish({"type": "failed", "reason": "start", "interrupts": []})
                 return
-            if started is not None:
-                await observe(started)
+            await finish(await observe(started) if started is not None else _skipped("rejected"))
 
         # Trigger Server only waits briefly, so it hears first; a failure from
         # here on is logged, and nothing redelivers the message.
@@ -612,7 +654,9 @@ async def handle_trigger_channel_event_request(  # noqa: C901, PLR0911, PLR0912,
         return _accepted_response(event)
     if decision is not None and decision.type == "skipped":
         _log_no_run(event, decision)
+        finish_later(_skipped("ignored"))
         return _accepted_response(event)
+    # Trigger Server may deliver it again, which finishes on its own.
     if decision is not None and decision.type == "failed":
         return _start_failed_response()
 
@@ -635,14 +679,34 @@ async def handle_trigger_channel_event_request(  # noqa: C901, PLR0911, PLR0912,
         )
         return _start_failed_response()
     if started is None:
+        finish_later(_skipped("rejected"))
         return _accepted_response(event)
 
+    async def observe_then_finish() -> None:
+        await finish(await observe(started))
+
     schedule_ingress_work(
-        lambda: observe(started),
+        observe_then_finish,
         label="Channel run observation",
         schedule=schedule,
     )
     return _accepted_response(event)
+
+
+def _trigger_target(event: TriggerChannelEvent) -> JsonValue:
+    """Where a delivery's replies go, as the channel binding names it."""
+    return cast(
+        "JsonValue",
+        {
+            "channel_id": event["channel_id"],
+            "address": event["address"],
+            "source_thread_key": event["source_thread_key"],
+        },
+    )
+
+
+def _skipped(reason: HttpSkipReason) -> HttpFinish:
+    return {"type": "skipped", "reason": reason, "interrupts": []}
 
 
 def _log_no_run(event: TriggerChannelEvent, decision: TriggerMessageDecision) -> None:
@@ -710,7 +774,8 @@ async def _observe_accepted_run(
     reactions: ReactionChoice = DEFAULT_REACTION_EMOJI,
     multitask_strategy: MultitaskStrategy | None = None,
     newer_run: NewerRunFn | None = None,
-) -> None:
+) -> HttpFinish:
+    """Observe a started run, answer in Slack, and say how the delivery finished."""
     was_replaced = functools.partial(
         _replaced_by_newer_message,
         event,
@@ -721,6 +786,13 @@ async def _observe_accepted_run(
         user_id=user_id,
         newer_run=newer_run,
     )
+    # A run a newer message replaced ended ``interrupted``, as the HTTP channel
+    # reports one.
+    replaced: HttpFinish = {
+        "type": "run",
+        "run": {"id": started["run_id"], "status": "interrupted"},
+        "interrupts": [],
+    }
 
     async def lifecycle(
         event_type: TriggerChannelRuntimeEventType, message: str | None = None
@@ -762,24 +834,35 @@ async def _observe_accepted_run(
                 user_id=user_id,
             )
         except Exception as error:  # noqa: BLE001 - only known-safe details leave runtime
-            if not await was_replaced(error):
-                await lifecycle("run.failed", message=_missing_connection_failure_message(error))
-            return
+            if await was_replaced(error):
+                return replaced
+            await lifecycle("run.failed", message=_missing_connection_failure_message(error))
+            return {"type": "failed", "reason": "observe", "interrupts": []}
 
+        def ended(interrupts: list[TriggerChannelInterrupt] | None = None) -> HttpFinish:
+            return {
+                "type": "run",
+                "run": {"id": started["run_id"], "status": observed["status"]},
+                "interrupts": cast("list[Interrupt]", interrupts or []),
+            }
+
+        # Stopped from Slack or Studio: the run ended ``interrupted``, with
+        # nothing waiting on a decision.
         if _is_cancelled_run(observed):
             if not await was_replaced(None):
                 await lifecycle("run.cancelled")
-            return
+            return ended()
 
         # The run itself posts its answer, or shows its interrupts, as it ends.
         if _is_interrupted_run(observed):
-            return
+            return ended(_forwarded_interrupts(observed["values"]))
 
         if observed["status"] != "success":
             await lifecycle("run.failed")
-            return
+            return ended()
 
         await lifecycle("run.completed")
+        return ended()
     finally:
         await reaction
 
@@ -943,6 +1026,23 @@ def _has_interrupt(values: object) -> bool:
     return bool(_interrupt_entries(values))
 
 
+def _forwarded_interrupts(values: object) -> list[TriggerChannelInterrupt]:
+    """The resumable interrupts in ``values``, with their ``response_schema``."""
+    interrupts: list[TriggerChannelInterrupt] = []
+    for entry in _interrupt_entries(values):
+        if not isinstance(entry, Mapping) or "value" not in entry:
+            continue
+        interrupt_id = entry.get("id")
+        if not isinstance(interrupt_id, str) or not interrupt_id.strip():
+            continue
+        interrupt: TriggerChannelInterrupt = {"id": interrupt_id, "value": entry["value"]}
+        schema = entry.get("response_schema")
+        if isinstance(schema, dict):
+            interrupt["response_schema"] = schema
+        interrupts.append(interrupt)
+    return interrupts
+
+
 def _interrupt_entries(values: object) -> list[object]:
     """``__interrupt__`` arrives as a flat list, or keyed by task id."""
     if not isinstance(values, Mapping):
@@ -1093,6 +1193,7 @@ __all__ = [
     "OnlyContinuesThreadFn",
     "ThreadExistsFn",
     "TriggerChannelThread",
+    "TriggerFinishedEvent",
     "TriggerMessageBackground",
     "TriggerMessageDecision",
     "TriggerMessageRoute",
