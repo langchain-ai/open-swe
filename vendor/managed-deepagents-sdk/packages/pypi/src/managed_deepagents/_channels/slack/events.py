@@ -9,10 +9,16 @@ import copy
 from collections import OrderedDict
 from collections.abc import Awaitable, Callable, Mapping
 from dataclasses import dataclass, field
-from typing import TYPE_CHECKING, Literal, NotRequired, cast
+from typing import TYPE_CHECKING, Any, Literal, NotRequired, cast
 
 from typing_extensions import TypedDict
 
+from managed_deepagents._channels.actor import (
+    ChannelActor,
+    SlackActor,
+    SlackEndpointActor,
+    endpoint_actor,
+)
 from managed_deepagents._channels.http.endpoint import (
     EndpointEvent,
     EndpointRequest,
@@ -75,8 +81,14 @@ class SlackEvent:
     payload: dict[str, JsonValue]
     """The Slack event as Slack sent it, from the Events API."""
     user_id: str | None = None
-    """The Slack user who sent it; ``None`` for some bot messages."""
+    """The Slack user who sent it, as Slack's event says; ``None`` for some bot messages."""
     files: tuple[SlackFile, ...] = field(default_factory=tuple)
+    actor: SlackActor | None = None
+    """The Slack user who sent the message, as Trigger Server verified and
+    signed it; ``user_id`` and ``payload`` are only what Slack's event says.
+    ``None`` when Trigger Server doesn't sign one, such as an older Trigger
+    Server or a message from a bot. It is personal data: MDA neither logs it nor
+    adds it to the run's metadata."""
 
 
 @dataclass(frozen=True)
@@ -140,6 +152,8 @@ class SlackEndpointFields(TypedDict, total=False):
     messageTs: str
     threadTs: str
     files: list[SlackEndpointFile]
+    actor: SlackEndpointActor
+    """The verified Slack user; absent when Trigger Server signs none."""
 
 
 class SlackEndpointEvent(EndpointEvent[SlackEventKey, dict[str, JsonValue]], SlackEndpointFields):
@@ -165,6 +179,8 @@ def endpoint_fields(event: SlackEvent) -> SlackEndpointFields:
     }
     if event.user_id is not None:
         fields["userId"] = event.user_id
+    if event.actor is not None:
+        fields["actor"] = endpoint_actor(event.actor)
     return fields
 
 
@@ -251,7 +267,9 @@ def reset_slack_bot_user() -> None:
     _bot_user.reset()
 
 
-async def read_slack_event(event: TriggerChannelMessageEvent) -> SlackEvent | None:
+async def read_slack_event(
+    event: TriggerChannelMessageEvent, actor: ChannelActor | None = None
+) -> SlackEvent | None:
     """The message a delivery carries, of the kind Slack's event says.
 
     ``None`` when the delivery has no Slack event.
@@ -259,7 +277,7 @@ async def read_slack_event(event: TriggerChannelMessageEvent) -> SlackEvent | No
     raw = event.get("raw_event")
     if not isinstance(raw, Mapping):
         return None
-    return slack_event(await slack_event_key(raw), event)
+    return slack_event(await slack_event_key(raw), event, actor)
 
 
 def slack_thread(thread: TriggerChannelThread, name: str) -> SlackChannelThread:
@@ -300,12 +318,18 @@ class DecidedSlackEvents:
 
     async def finished(self, raw_event: JsonValue | None) -> SlackEvent | None:
         """The message a finished delivery carried: as its handler got it, or
-        read from the delivery when no handler did."""
+        read from the delivery, with its verified actor, when no handler did."""
         delivery = _finished_delivery(raw_event)
         if delivery is None:
             return None
         decided = self._by_delivery.pop(delivery["delivery_id"], None)
-        return decided if decided is not None else await read_slack_event(delivery)
+        if decided is not None:
+            return decided
+        actor = raw_event.get("actor") if isinstance(raw_event, Mapping) else None
+        return await read_slack_event(
+            delivery,
+            SlackActor(**cast("dict[str, Any]", actor)) if isinstance(actor, Mapping) else None,
+        )
 
 
 def finished_slack_thread(delivery: HttpFinishedDelivery, name: str) -> SlackChannelThread:
@@ -320,7 +344,9 @@ def finished_slack_thread(delivery: HttpFinishedDelivery, name: str) -> SlackCha
     )
 
 
-def slack_event(key: SlackEventKey, event: TriggerChannelMessageEvent) -> SlackEvent | None:
+def slack_event(
+    key: SlackEventKey, event: TriggerChannelMessageEvent, actor: ChannelActor | None = None
+) -> SlackEvent | None:
     """The message a delivery carries, as a handler reads it.
 
     ``None`` when the delivery has no Slack event to read it from.
@@ -354,6 +380,8 @@ def slack_event(key: SlackEventKey, event: TriggerChannelMessageEvent) -> SlackE
             if (slack_file := _slack_file(item)) is not None
         ),
         payload=cast("dict[str, JsonValue]", copy.deepcopy(dict(raw))),
+        # A Slack message's actor is a Slack user.
+        actor=actor if isinstance(actor, SlackActor) else None,
     )
 
 
@@ -375,6 +403,7 @@ def _slack_file(item: object) -> SlackFile | None:
 __all__ = [
     "SLACK_EVENT_KEYS",
     "DecidedSlackEvents",
+    "SlackActor",
     "SlackChannelThread",
     "SlackEndpointEvent",
     "SlackEndpointFields",

@@ -12,6 +12,7 @@ import httpx
 from langgraph_sdk.schema import MultitaskStrategy
 
 from managed_deepagents._agent_auth_http import ConnectionsNotConfiguredError
+from managed_deepagents._channels.actor import endpoint_actor
 from managed_deepagents._channels.github_connections import (
     GITHUB_TOKEN_SLUG,
     github_app_connection_slug,
@@ -217,6 +218,7 @@ def _endpoint_fields(event: GitHubEvent) -> GitHubEndpointFields:
             "login": event.sender.login,
             "type": event.sender.type,
         },
+        "actor": endpoint_actor(event.actor),
         "mentions": list(event.mentions),
     }
     if event.action is not None:

@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import os
 from collections.abc import Mapping
+from dataclasses import dataclass
 from uuid import UUID
 
 import jwt
@@ -18,6 +19,8 @@ from cryptography.hazmat.primitives.asymmetric.ec import EllipticCurvePublicKey
 from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PublicKey
 from cryptography.hazmat.primitives.asymmetric.rsa import RSAPublicKey
 from jwt import PyJWK, PyJWKClient
+
+from managed_deepagents._channels.actor import ChannelActor, SlackActor
 
 IdentityContextKey = Ed25519PublicKey | RSAPublicKey | EllipticCurvePublicKey | PyJWK
 
@@ -71,6 +74,15 @@ def resolve_identity_context_jwks_url(
     return f"{resolve_identity_context_issuer(env)}/.well-known/jwks.json"
 
 
+@dataclass(frozen=True)
+class VerifiedIdentityContext:
+    """What a verified ``identity_context`` says."""
+
+    principal_id: str
+    actor: ChannelActor | None = None
+    """``None`` when the token carries no well-formed ``actor`` claim."""
+
+
 def principal_id_from_identity_context(
     token: str,
     *,
@@ -79,6 +91,22 @@ def principal_id_from_identity_context(
     env: Mapping[str, str] | None = None,
 ) -> str:
     """Extract the Agent Auth principal UUID from a Trigger identity-context JWT.
+
+    Raises:
+        InvalidIdentityContextError: when the token is missing, malformed, or
+            fails signature / claim checks.
+    """
+    return verify_identity_context(token, key=key, issuer=issuer, env=env).principal_id
+
+
+def verify_identity_context(
+    token: str,
+    *,
+    key: IdentityContextKey | None = None,
+    issuer: str | None = None,
+    env: Mapping[str, str] | None = None,
+) -> VerifiedIdentityContext:
+    """Verify a Trigger identity-context JWT: its principal, and the user it names, if any.
 
     Raises:
         InvalidIdentityContextError: when the token is missing, malformed, or
@@ -99,7 +127,39 @@ def principal_id_from_identity_context(
         raise InvalidIdentityContextError(
             f"identity_context version must be {IDENTITY_CONTEXT_VERSION}"
         )
-    return _principal_id_from_claims(claims)
+    return VerifiedIdentityContext(
+        _principal_id_from_claims(claims), _actor_claim(claims.get("actor"))
+    )
+
+
+def _actor_claim(value: object) -> ChannelActor | None:
+    """The ``actor`` claim, ``{"provider", "id", "name"?, "email"?, ...}`` with the
+    provider's own fields, or ``None`` when it is absent, malformed, or names a
+    provider Trigger Server doesn't serve.
+
+    An older Trigger Server sends none, and a delivery never fails over it.
+    """
+    if not isinstance(value, Mapping):
+        return None
+
+    def text(field: object) -> str | None:
+        return field if isinstance(field, str) and field.strip() else None
+
+    actor_id = text(value.get("id"))
+    if actor_id is None:
+        return None
+    if value.get("provider") == "slack":
+        team_id = text(value.get("team_id"))
+        if team_id is None:
+            return None
+        return SlackActor(
+            id=actor_id,
+            team_id=team_id,
+            enterprise_id=text(value.get("enterprise_id")),
+            name=text(value.get("name")),
+            email=text(value.get("email")),
+        )
+    return None
 
 
 def optional_principal_id_from_identity_context(
@@ -223,8 +283,10 @@ __all__ = [
     "IdentityContextKey",
     "IdentityContextUnavailableError",
     "InvalidIdentityContextError",
+    "VerifiedIdentityContext",
     "optional_principal_id_from_identity_context",
     "principal_id_from_identity_context",
     "resolve_identity_context_issuer",
     "resolve_identity_context_jwks_url",
+    "verify_identity_context",
 ]

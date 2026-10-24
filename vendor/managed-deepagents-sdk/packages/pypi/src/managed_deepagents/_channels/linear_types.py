@@ -4,11 +4,12 @@ from __future__ import annotations
 
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Literal
+from typing import TYPE_CHECKING, Generic, Literal
 
 from typing_extensions import TypedDict, TypeVar
 
-from managed_deepagents._channels.http.endpoint import EndpointEvent, EndpointRequest, EventEndpoint
+from managed_deepagents._channels.actor import LinearActor, LinearEndpointActor
+from managed_deepagents._channels.http.endpoint import EndpointRequest, EventEndpoint
 from managed_deepagents._channels.linear_schema import (
     LinearCommentCreatePayload,
     LinearEventKey,
@@ -27,13 +28,6 @@ if TYPE_CHECKING:
 class LinearTeam:
     id: str
     key: str
-
-
-@dataclass(frozen=True)
-class LinearActor:
-    id: str
-    type: str | None = None
-    name: str | None = None
 
 
 @dataclass(frozen=True, kw_only=True)
@@ -105,15 +99,42 @@ LinearEvent = (
 
 _Event = TypeVar("_Event", bound=LinearEvent, default=LinearEvent)
 
+_Key = TypeVar("_Key", bound=str)
+_EventPayload = TypeVar("_EventPayload")
+
+
+class LinearEndpointFields(TypedDict, total=False):
+    """A Linear event's fields its endpoints are sent beside its key, delivery ID
+    and payload, as a handler gets them on ``LinearEvent``. Optional, so a
+    receiver takes requests from older deployments."""
+
+    actor: LinearEndpointActor
+    """As ``LinearEvent.actor``: who acted, when Linear names someone."""
+
+
+class LinearEndpointEvent(LinearEndpointFields, Generic[_Key, _EventPayload]):
+    """The event a Linear channel sends its endpoint: ``EndpointEvent``'s key,
+    delivery ID and payload, with the fields of ``LinearEndpointFields``.
+
+    The three are declared here rather than inherited from ``EndpointEvent``:
+    pydantic doesn't carry a subclass's type parameters into an inherited
+    generic TypedDict, so the key wouldn't pick the payload's type.
+    """
+
+    key: _Key
+    deliveryId: str
+    payload: _EventPayload
+
+
 LinearEndpointRequest = (
-    EndpointRequest[EndpointEvent[Literal["Issue.create"], LinearIssueCreatePayload]]
-    | EndpointRequest[EndpointEvent[Literal["Issue.update"], LinearIssueUpdatePayload]]
-    | EndpointRequest[EndpointEvent[Literal["Comment.create"], LinearCommentCreatePayload]]
+    EndpointRequest[LinearEndpointEvent[Literal["Issue.create"], LinearIssueCreatePayload]]
+    | EndpointRequest[LinearEndpointEvent[Literal["Issue.update"], LinearIssueUpdatePayload]]
+    | EndpointRequest[LinearEndpointEvent[Literal["Comment.create"], LinearCommentCreatePayload]]
     | EndpointRequest[
-        EndpointEvent[Literal["AgentSessionEvent.created"], LinearSessionCreatedPayload]
+        LinearEndpointEvent[Literal["AgentSessionEvent.created"], LinearSessionCreatedPayload]
     ]
     | EndpointRequest[
-        EndpointEvent[Literal["AgentSessionEvent.prompted"], LinearSessionPromptedPayload]
+        LinearEndpointEvent[Literal["AgentSessionEvent.prompted"], LinearSessionPromptedPayload]
     ]
 )
 """What a Linear channel POSTs an endpoint: its event key picks the payload's type,

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import dataclasses
 import functools
 import json
 import os
@@ -11,7 +12,17 @@ from collections.abc import Awaitable, Callable, Mapping
 from dataclasses import dataclass
 from http import HTTPStatus
 from importlib import import_module
-from typing import TYPE_CHECKING, Literal, Never, NoReturn, Protocol, TypedDict, TypeVar, cast
+from typing import (
+    TYPE_CHECKING,
+    Literal,
+    Never,
+    NoReturn,
+    NotRequired,
+    Protocol,
+    TypedDict,
+    TypeVar,
+    cast,
+)
 
 from managed_deepagents._agent_auth_http import missing_workspace_connection_slug
 from managed_deepagents._channels.binding import binding_with_messages
@@ -35,7 +46,8 @@ from managed_deepagents._channels.trigger.identity_context import (
     IdentityContextKey,
     IdentityContextUnavailableError,
     InvalidIdentityContextError,
-    principal_id_from_identity_context,
+    VerifiedIdentityContext,
+    verify_identity_context,
 )
 from managed_deepagents._channels.trigger.ingress import (
     cancel_ingress_thread_runs,
@@ -69,6 +81,7 @@ from managed_deepagents.run_context import INTERRUPT_CORRELATION_KEY
 if TYPE_CHECKING:
     from langgraph_sdk.schema import Interrupt
 
+    from managed_deepagents._channels.actor import ChannelActor
     from managed_deepagents._channels.binding import ChannelBinding
     from managed_deepagents._channels.http.types import (
         HttpFinish,
@@ -128,13 +141,15 @@ class TriggerFinishedEvent(TypedDict):
     its identity token."""
 
     delivery: JsonValue
+    actor: NotRequired[dict[str, JsonValue]]
+    """Who sent it, as the verified ``identity_context`` names them."""
 
 
 TriggerMessageRoute = TriggerMessageDecision | TriggerMessageBackground
 """What a provider decides a message starts: at once, or in the background."""
 
 DecideMessageFn = Callable[
-    [TriggerChannelMessageEvent, TriggerChannelThread],
+    [TriggerChannelMessageEvent, TriggerChannelThread, "ChannelActor | None"],
     Awaitable[TriggerMessageRoute | None],
 ]
 """Decide what a message event starts, before its run; ``None`` starts it with
@@ -471,7 +486,7 @@ async def handle_trigger_channel_event_request(  # noqa: C901, PLR0911, PLR0912,
         return _json_response({"error": "invalid channel event"}, status_code=400)
 
     try:
-        user_id = await _principal_for_event(
+        verified = await _principal_for_event(
             event,
             identity_context_key=identity_context_key,
             identity_context_issuer=identity_context_issuer,
@@ -494,6 +509,9 @@ async def handle_trigger_channel_event_request(  # noqa: C901, PLR0911, PLR0912,
             logger.safe_error_label(error),
         )
         return _json_response({"error": "invalid channel identity_context"}, status_code=400)
+    user_id = verified.principal_id
+    # Who sent the message, from the verified token only; never logged.
+    actor = verified.actor
 
     logger.info(
         "Channel incoming event (type=%s, event_id=%s, delivery_id=%s, channel_id=%s)",
@@ -580,6 +598,10 @@ async def handle_trigger_channel_event_request(  # noqa: C901, PLR0911, PLR0912,
             return
         message = {key: value for key, value in event.items() if key != "identity_context"}
         raw: TriggerFinishedEvent = {"delivery": cast("JsonValue", message)}
+        if actor is not None:
+            raw["actor"] = {
+                key: value for key, value in dataclasses.asdict(actor).items() if value is not None
+            }
         delivery = cast(
             "HttpFinishedDelivery",
             {"thread_id": thread["id"], "raw_event": cast("JsonValue", raw), **finished},
@@ -625,7 +647,7 @@ async def handle_trigger_channel_event_request(  # noqa: C901, PLR0911, PLR0912,
 
     decision: TriggerMessageRoute | None = None
     if event["type"] == "message" and decide_message is not None:
-        decision = await decide_message(event, thread)
+        decision = await decide_message(event, thread, actor)
     if isinstance(decision, TriggerMessageBackground):
         decide = decision.decide
 
@@ -1120,7 +1142,7 @@ async def _principal_for_event(
     *,
     identity_context_key: IdentityContextKey | None,
     identity_context_issuer: str | None,
-) -> str:
+) -> VerifiedIdentityContext:
     """Resolve the verified principal required on every Trigger delivery."""
     raw_identity_context = event.get("identity_context")
     if not isinstance(raw_identity_context, str) or not raw_identity_context.strip():
@@ -1128,7 +1150,7 @@ async def _principal_for_event(
     # PyJWKClient fetches the LangSmith JWKS with blocking urllib; run the
     # verification off the event loop.
     return await asyncio.to_thread(
-        principal_id_from_identity_context,
+        verify_identity_context,
         raw_identity_context,
         key=identity_context_key,
         issuer=identity_context_issuer,

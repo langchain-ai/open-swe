@@ -17,6 +17,7 @@ from managed_deepagents._channels.reactions import (
 )
 
 if TYPE_CHECKING:
+    from managed_deepagents._channels.actor import ChannelActor
     from managed_deepagents._channels.http.endpoint import EventEndpoint
     from managed_deepagents._channels.http.provider import EventFinished
     from managed_deepagents._channels.http.types import HttpFinishedDelivery
@@ -117,7 +118,9 @@ class TriggerSlackChannel(Channel):
         decided = self._decided_events()
 
         async def decide_message(
-            event: TriggerChannelMessageEvent, thread: TriggerChannelThread
+            event: TriggerChannelMessageEvent,
+            thread: TriggerChannelThread,
+            actor: ChannelActor | None,
         ) -> TriggerMessageRoute | None:
             assert on_event is not None  # noqa: S101 - only passed with handlers
             return await _decide_message(
@@ -125,6 +128,7 @@ class TriggerSlackChannel(Channel):
                 event,
                 thread,
                 name,
+                actor,
                 remember=decided.remember if decided is not None else None,
             )
 
@@ -230,6 +234,7 @@ async def _decide_message(
     delivery: TriggerChannelMessageEvent,
     thread: TriggerChannelThread,
     channel_name: str,
+    actor: ChannelActor | None = None,
     *,
     remember: Callable[[str, SlackEvent], None] | None = None,
 ) -> TriggerMessageRoute | None:
@@ -247,7 +252,7 @@ async def _decide_message(
         TriggerMessageBackground,
     )
 
-    event = await read_slack_event(delivery)
+    event = await read_slack_event(delivery, actor)
     handler = handlers.get(event.key) if event is not None else None
     if event is None or handler is None:
         return None

@@ -17,6 +17,7 @@ from pydantic import ValidationError
 from typing_extensions import TypeIs
 
 from managed_deepagents._channel_icon import validate_channel_icon_path
+from managed_deepagents._channels.actor import endpoint_actor
 from managed_deepagents._channels.http import HttpChannel, channel_thread_id, http_channel
 from managed_deepagents._channels.http.endpoint import is_endpoint_handler
 from managed_deepagents._channels.http.provider import (
@@ -67,6 +68,7 @@ from managed_deepagents._channels.linear_types import (
     LinearAppOptions,
     LinearChannelThread,
     LinearCommentCreateEvent,
+    LinearEndpointFields,
     LinearEvent,
     LinearEventCallback,
     LinearHandlers,
@@ -154,6 +156,7 @@ def linear_channel(
         "Linear",
         # By key; the channel calls each only with its own key's events.
         cast("Mapping[str, LinearEventCallback | EventEndpoint]", on_event or {}),
+        _endpoint_fields,
     )
     check_event_keys("Linear", handlers, SUPPORTED_EVENT_KEYS)
     filters = _Filters(teams=_teams(app), ignore_bots=ignore_bots, sessions=sessions)
@@ -568,6 +571,13 @@ def _session_team(session: LinearAgentSession) -> LinearTeamPayload | None:
 
 def _team(team: LinearTeamPayload | None) -> LinearTeam | None:
     return None if team is None else LinearTeam(id=team["id"], key=team["key"])
+
+
+def _endpoint_fields(event: LinearEvent) -> LinearEndpointFields:
+    """The fields of a Linear event its endpoints are sent beside key, delivery ID
+    and payload: the one place they're listed, as TypeScript's
+    ``LINEAR_ENDPOINT_EVENT_FIELDS``."""
+    return {"actor": endpoint_actor(event.actor)} if event.actor is not None else {}
 
 
 def _actor(actor: LinearActorPayload | None) -> LinearActor | None:

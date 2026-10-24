@@ -517,8 +517,9 @@ thread's mention, the thread's later replies start nothing until someone
 mentions the agent there again.
 
 A handler gets the `SlackEvent` (`text`, `user_id`, `channel_id`,
-`message_ts`, `thread_ts`, `files`, and Slack's own event as `payload`) and
-its `SlackChannelThread` (`id`, `source_thread_key`, `channel.name`). It
+`message_ts`, `thread_ts`, `files`, Slack's own event as `payload`, and
+`actor`) and its `SlackChannelThread` (`id`, `source_thread_key`,
+`channel.name`). It
 returns the run's input, as `agent.invoke` takes it, optionally with
 `context`, `metadata` and `webhook` as `(input, options)`, as the GitHub and
 Linear handlers do. `None` starts no run, and the app neither reacts nor
@@ -546,6 +547,22 @@ thread already runs: `enqueue` (the default) waits for the run and starts
 after it, `interrupt` cancels the run, keeping its progress, and starts at
 once, `rollback` cancels it and discards its progress, and `reject` starts
 nothing.
+
+`event.actor` is the Slack user who sent the message, as Trigger Server
+verified and signed it in the delivery's `identity_context`: a `SlackActor`
+with `id`, `team_id`, and `enterprise_id`, `name` and `email` when Slack has
+them (`email` only when the Slack app may read it). `user_id` and `payload`
+are only what Slack's event says, so check `actor` to map a Slack user to your
+own accounts. It is `None` rather than guessed when Trigger Server signs none,
+such as an older Trigger Server or a bot's message.
+
+Every channel's events carry `actor` in this shape, a `ChannelActor`
+(`SlackActor`, `GitHubActor` or `LinearActor`): `provider`, `id`, `name` and
+`email`, plus the provider's own fields. GitHub's is the webhook's `sender`
+(`name` is its login, plus `type`), and Linear's is who acted (plus `type`).
+Endpoints get it as `event["actor"]`, with camelCase keys. It is personal
+data: MDA doesn't log it or add it to a run's metadata; add what you need
+through `metadata` yourself.
 
 `on_finish` is called once when a message is done, with the `SlackEvent`, its
 `SlackChannelThread`, and how it finished, as Linear's `on_finish` is:

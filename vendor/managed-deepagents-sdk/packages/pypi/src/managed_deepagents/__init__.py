@@ -15,6 +15,7 @@ primitive is not part of the public surface.
 
 from __future__ import annotations
 
+from managed_deepagents._channels.actor import ChannelActor, GitHubActor
 from managed_deepagents._channels.github_types import (
     GitHubAppOptions,
     GitHubChannelThread,
@@ -97,6 +98,7 @@ from managed_deepagents._channels.run_input import (
 )
 from managed_deepagents._channels.runtime import RuntimeChannel
 from managed_deepagents._channels.slack.events import (
+    SlackActor,
     SlackChannelThread,
     SlackEndpointRequest,
     SlackEvent,
@@ -187,6 +189,7 @@ __all__ = [
     "AgentEntry",
     "AgentFactory",
     "BrowserDefinition",
+    "ChannelActor",
     "ChannelContentMessage",
     "ChannelContext",
     "ChannelEvent",
@@ -208,6 +211,7 @@ __all__ = [
     "EventEndpoint",
     "EventFinished",
     "GeneratedSkill",
+    "GitHubActor",
     "GitHubAppOptions",
     "GitHubChannelThread",
     "GitHubCheckRunPayload",
@@ -297,6 +301,7 @@ __all__ = [
     "SchedulePatch",
     "ScheduleRecord",
     "SkillSelection",
+    "SlackActor",
     "SlackChannelThread",
     "SlackEndpointRequest",
     "SlackEvent",
