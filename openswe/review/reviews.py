@@ -48,6 +48,7 @@ from openswe.threads.succession import SUCCEEDED_BY_KEY
 from openswe.utils import ttl_cache
 from openswe.utils.http_pool import pooled_transport
 from openswe.utils.json_types import ThreadLike, thread_metadata
+from openswe.utils.langsmith import get_langsmith_trace_url
 from openswe.utils.thread_ops import langgraph_client
 from openswe.walkthrough.record import WalkthroughView
 from openswe.workspaces.store import WORKSPACES
@@ -722,6 +723,9 @@ async def get_review(owner: str, repo: str, pr_number: int) -> dict[str, Any]:
 
     return {
         **summary,
+        "trace_url": (
+            await get_langsmith_trace_url(thread_id) if isinstance(thread_id, str) else None
+        ),
         "pr": details,
         "checks": checks,
         "findings": findings,
