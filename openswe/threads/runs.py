@@ -827,6 +827,30 @@ async def _attributed_run_messages(
     return structured, injected, persisted_message_ids
 
 
+MAX_PLUGIN_CONTEXT = 8_000
+
+
+def _plugin_context(
+    metadata: Mapping[str, Any], client_configurable: Mapping[str, Any]
+) -> list[dict[str, str]]:
+    """What the plugin beside a chat had open when the person wrote from its dock, ahead of their message."""
+    context = client_configurable.get("plugin_context")
+    if (
+        not metadata.get(PLUGIN_CHAT_KEY)
+        or client_configurable.get("plugin_dock") is not True
+        or not isinstance(context, str)
+        or not context.strip()
+    ):
+        return []
+    return [
+        {
+            "role": "user",
+            "id": f"plugin-context:{uuid.uuid7()}",
+            "content": prompt("plugins/context", context=context[:MAX_PLUGIN_CONTEXT]),
+        }
+    ]
+
+
 async def _enrich_run_start_command(
     thread_id: str,
     login: str,
@@ -892,11 +916,12 @@ async def _enrich_run_start_command(
     relayed_from = _relayed_from(params)
     # The person wrote, so the plugin's results may resume the chat again; any
     # that waited for them reach the agent with their message.
-    held_results = (
+    held_results: list[dict[str, str]] = (
         await PluginChat.person_wrote(thread_id)
         if metadata.get(PLUGIN_CHAT_KEY) and not offloading
         else []
     )
+    held_results.extend(_plugin_context(metadata, client_configurable))
     if offloading and creating:
         raise HTTPException(400, "offloading requires an existing conversation")
     command_images = _dashboard_images_from_content(content)

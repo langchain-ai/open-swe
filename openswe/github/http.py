@@ -708,6 +708,10 @@ class RepoClient:
         """Create branch ``name`` pointing at commit ``sha``."""
         await self.post("git/refs", {"ref": f"refs/heads/{name}", "sha": sha})
 
+    async def delete_branch(self, name: str) -> None:
+        """Delete branch ``name``; GitHub closes any open pull request from it."""
+        await self.delete(f"git/refs/heads/{quote(name, safe='/')}")
+
     async def commit_files(
         self,
         *,

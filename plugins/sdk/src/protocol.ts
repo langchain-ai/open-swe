@@ -367,6 +367,11 @@ export interface HostApi extends RpcTarget {
   ): Promise<Subscription>
   /** Chooses the chat the dock shows, without opening it. */
   chooseChat(scope: ChatScope): Promise<void>
+  /**
+   * What the person has open, as JSON text of at most 8,000 characters; the
+   * agent gets the latest with each message they send from the dock.
+   */
+  shareContext(json: string): Promise<void>
   /** Opens the dock on the chosen chat, with `draft` in its composer for the person to send. */
   openChat(draft: string | null): Promise<void>
   /** Joins a live room, scoped like documents; dispose the room to leave it. */
@@ -395,8 +400,12 @@ export interface GitHubRepositoryApi extends RpcTarget {
   ref(name: string): Promise<string | null>
   tree(sha: string): Promise<RepositoryTree>
   file(path: string, ref: string): Promise<string | null>
+  /** An image file's bytes, for showing with `URL.createObjectURL`; `null` when absent or not an image. */
+  image(path: string, ref: string): Promise<Blob | null>
   history(path: string, ref: string, limit?: number): Promise<Commit[]>
   createBranch(name: string, sha: string): Promise<void>
+  /** Deletes a branch, never the default one; GitHub closes an open pull request from it. */
+  deleteBranch(name: string): Promise<void>
   /** Fails when `branch` moved past `expectedHead`, so no push is overwritten. */
   commit(request: CommitWire): Promise<string>
   findPull(head: string): Promise<PullRequest | null>

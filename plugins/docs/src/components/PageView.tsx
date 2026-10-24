@@ -11,6 +11,7 @@ import {
 } from "@langchain/macaw-components/DropdownMenu"
 import { IconButton } from "@langchain/macaw-components/IconButton"
 import { Spinner } from "@langchain/macaw-components/Spinner"
+import { HostError } from "@openswe/plugin-sdk"
 import { useHostContext, usePluginHost } from "@openswe/plugin-sdk/react"
 import { DotsThreeIcon } from "@phosphor-icons/react/dist/ssr/DotsThree"
 import { SparkleIcon } from "@phosphor-icons/react/dist/ssr/Sparkle"
@@ -26,7 +27,7 @@ import {
   type Composing,
 } from "@/components/Comments"
 import { PageEditor } from "@/components/Editor"
-import { useOpenPageTools } from "@/lib/agent"
+import { useOpenPageTools, useSharedContext } from "@/lib/agent"
 import { anchorFor, resolveAnchor, type Highlight } from "@/lib/anchors"
 import { errorMessage } from "@/lib/host"
 import { asLiveMarkdown, useLiveDoc, usePresence } from "@/lib/live"
@@ -98,6 +99,7 @@ export function PageView({
   const [composing, setComposing] = useState<Composing | null>(null)
   const [activeId, setActiveId] = useState<string | null>(null)
   const [pendingAccept, setPendingAccept] = useState<string | null>(null)
+  const [discarding, setDiscarding] = useState(false)
 
   // Opening the draft swaps the read-only editor for the live one, and the page
   // briefly loses its height; put the reader back where they were.
@@ -285,6 +287,23 @@ export function PageView({
     await refreshDraft()
   }
 
+  /** Throws the draft away: its branch with every change, saved or not, and any pull request from it. */
+  const discardDraft = async () => {
+    if (!draft) return
+    await github.deleteBranch(draft.branch).catch((error: unknown) => {
+      // Already gone, as when its pull request merged and GitHub deleted it.
+      if (
+        !(
+          error instanceof HostError &&
+          (error.status === 404 || error.status === 422)
+        )
+      )
+        throw error
+    })
+    setDiscarding(false)
+    await closeDraft()
+  }
+
   const putComment = async (id: string, comment: PageComment) => {
     await commentsIn(host, repository).put(id, comment)
     await queryClient.invalidateQueries({
@@ -355,6 +374,30 @@ export function PageView({
     return selection.toString() || null
   }
 
+  // What the person selected, kept current so each message to the agent carries it.
+  const [selection, setSelection] = useState<string | null>(null)
+  useEffect(() => {
+    let timer: ReturnType<typeof setTimeout> | undefined
+    const changed = () => {
+      clearTimeout(timer)
+      timer = setTimeout(() => setSelection(selectedText()), 250)
+    }
+    document.addEventListener("selectionchange", changed)
+    return () => {
+      clearTimeout(timer)
+      document.removeEventListener("selectionchange", changed)
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- reads the editor mounted when it fires.
+  }, [])
+  useSharedContext({
+    plugin: "Docs, an editor for the Markdown pages of a GitHub repository",
+    repository,
+    page: path,
+    title: pageTitle(path),
+    draft: draft ? { branch: draft.branch, startedBy: draft.startedBy } : null,
+    selection: selection?.slice(0, 2_000) ?? null,
+  })
+
   useOpenPageTools({
     read: () => ({
       repository,
@@ -409,6 +452,28 @@ export function PageView({
       return { commented: id }
     },
   })
+
+  // Images in the repository, loaded once each as the person's GitHub access allows.
+  const images = useRef(new Map<string, Promise<string | null>>())
+  useEffect(() => {
+    const loaded = images.current
+    return () => {
+      for (const url of loaded.values())
+        void url.then((u) => u && URL.revokeObjectURL(u))
+      loaded.clear()
+    }
+  }, [ref])
+  const loadImage = (imagePath: string) => {
+    let url = images.current.get(imagePath)
+    if (!url) {
+      url = github
+        .image(imagePath, ref)
+        .then((blob) => (blob ? URL.createObjectURL(blob) : null))
+        .catch(() => null)
+      images.current.set(imagePath, url)
+    }
+    return url
+  }
 
   const onLink = (href: string) => {
     const target = resolveLink(href, path)
@@ -488,6 +553,14 @@ export function PageView({
           <Viewers viewers={viewers} people={people} />
           {editing ? (
             <>
+              <Button
+                size="sm"
+                variant="plain"
+                disabled={busy !== null}
+                onClick={() => setDiscarding(true)}
+              >
+                Discard
+              </Button>
               <SaveButton
                 disabled={!dirty || busy !== null}
                 onSave={(message) => act("Save version")(() => save(message))}
@@ -571,6 +644,41 @@ export function PageView({
               </span>
             </Banner>
           )}
+          {editing && discarding && (
+            <Banner intent="warning" className="mb-space-4">
+              <span
+                className="flex flex-wrap items-center gap-space-3"
+                onKeyDown={(event) => {
+                  if (event.key === "Escape") setDiscarding(false)
+                }}
+              >
+                Discard this draft? Every change in it, saved or not, goes with
+                its branch
+                {pull.data
+                  ? `, and pull request #${pull.data.number} closes`
+                  : ""}
+                .
+                <span className="flex gap-space-2">
+                  <Button
+                    size="xs"
+                    color="error"
+                    loading={busy === "Discard draft"}
+                    onClick={() => act("Discard draft")(discardDraft)}
+                    autoFocus
+                  >
+                    Discard draft
+                  </Button>
+                  <Button
+                    size="xs"
+                    variant="outlined"
+                    onClick={() => setDiscarding(false)}
+                  >
+                    Keep editing
+                  </Button>
+                </span>
+              </span>
+            </Banner>
+          )}
           {editing && draft.startedBy !== user.login && (
             <p className="mb-space-3 text-xs text-tertiary">
               {draft.startedBy} started this draft {timeAgo(draft.startedAt)}.
@@ -611,6 +719,8 @@ export function PageView({
               setTab("comments")
             }}
             onLink={onLink}
+            page={path}
+            loadImage={loadImage}
             onReady={(ready) => {
               editor.current = ready
               setSaved(normalize(ready, split.body))

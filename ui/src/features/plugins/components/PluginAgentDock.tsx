@@ -1,10 +1,6 @@
 import { Banner } from "@langchain/macaw-components/Banner"
-import { IconButton } from "@langchain/macaw-components/IconButton"
 import { Skeleton } from "@langchain/macaw-components/Skeleton"
-import { ArrowsOutIcon } from "@phosphor-icons/react/dist/ssr/ArrowsOut"
-import { XIcon } from "@phosphor-icons/react/dist/ssr/X"
 import { useQuery } from "@tanstack/react-query"
-import { Link } from "@tanstack/react-router"
 import { useEffect, useEffectEvent, useMemo, useRef, useState } from "react"
 import { toast } from "sonner"
 
@@ -26,8 +22,6 @@ export interface ProvidedTools {
 }
 
 const NO_TOOLS: AgentToolOffer = { tools: [], instructions: "" }
-// The backend gives the plugin's tools only to runs sent from the dock.
-const FROM_THE_DOCK = { plugin_dock: true } as const
 
 /**
  * The agent a plugin works with, docked beside it: the person's chat under the
@@ -40,17 +34,21 @@ export function PluginAgentDock({
   chat,
   draft,
   tools,
+  context,
   active,
-  onClose,
+  onThread,
 }: {
   plugin: InstalledPlugin
   chat: ChatTarget
   draft: { key: number; text: string } | undefined
   /** `null` until the plugin's frame offers any. */
   tools: ProvidedTools | null
+  /** What the plugin last said the person has open, as JSON; each message carries it. */
+  context: string | null
   /** Whether the plugin's tab is on screen; a hidden one keeps its thread but stops streaming. */
   active: boolean
-  onClose: () => void
+  /** Hears the chat's thread once it is open, for the bar above to link to. */
+  onThread: (threadId: string) => void
 }) {
   const opened = useQuery({
     queryKey: ["plugin-chat", plugin.id, chat],
@@ -61,9 +59,18 @@ export function PluginAgentDock({
   const threadId = opened.data?.thread_id
   useToolOffer(plugin, chatId, tools?.offer ?? NO_TOOLS)
   const answering = useAnsweredCalls(plugin, chatId, threadId, tools)
+  const reportThread = useEffectEvent((id: string) => onThread(id))
+  useEffect(() => {
+    if (threadId) reportThread(threadId)
+  }, [threadId])
   const embedded = useMemo(
     () => ({
-      runConfigurable: FROM_THE_DOCK,
+      // The backend gives the plugin's tools only to runs sent from the dock,
+      // and puts what the plugin has open ahead of each message.
+      runConfigurable: {
+        plugin_dock: true,
+        ...(context ? { plugin_context: context } : {}),
+      } satisfies Record<string, string | boolean>,
       emptyState: (
         <p className="max-w-xs text-center text-xs text-tertiary">
           Ask the agent about what you have open in{" "}
@@ -72,7 +79,7 @@ export function PluginAgentDock({
         </p>
       ),
     }),
-    [plugin.manifest.displayName]
+    [plugin.manifest.displayName, context]
   )
 
   return (
@@ -80,30 +87,6 @@ export function PluginAgentDock({
       aria-label={`Agent for ${plugin.manifest.displayName}`}
       className="flex h-full min-h-0 flex-col"
     >
-      <header className="flex h-10 shrink-0 items-center gap-space-1 border-b border-default px-space-3 text-xs">
-        <span className="min-w-0 flex-1 truncate font-medium text-primary">
-          Agent
-        </span>
-        {threadId && (
-          <Link
-            to="/agents/$threadId"
-            params={{ threadId }}
-            aria-label="Open as a full thread"
-            title="Open as a full thread"
-            className="inline-flex size-6 items-center justify-center rounded-md text-icon-secondary hover:bg-surface-level-1-hover"
-          >
-            <ArrowsOutIcon size={14} />
-          </Link>
-        )}
-        <IconButton
-          icon={XIcon}
-          label="Close the agent"
-          size="xs"
-          variant="plain"
-          color="secondary"
-          onClick={onClose}
-        />
-      </header>
       {opened.isError ? (
         <p className="p-space-4 text-xs text-secondary">
           The agent isn&apos;t available: {opened.error.message}

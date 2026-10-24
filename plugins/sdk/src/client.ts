@@ -20,6 +20,7 @@ import {
   type JsonDocument,
   type JsonObject,
   type JsonScalar,
+  type JsonValue,
   type Person,
   type PullRequestDraft,
   type QueryBound,
@@ -243,6 +244,13 @@ export class PluginHost {
     },
     /** Chooses the chat the dock shows, without opening it. */
     use: (scope: ChatScope) => settle(this.api.chooseChat(scope)),
+    /**
+     * Tells the agent what the person has open: the page, their selection,
+     * anything it should know without asking. Each message the person sends
+     * from the dock carries the latest, so share again as it changes.
+     */
+    share: (context: JsonValue) =>
+      settle(this.api.shareContext(JSON.stringify(context))),
     /** Opens the dock on the chosen chat, with `draft` in its composer for the person to send. */
     open: (options: { draft?: string } = {}) =>
       settle(this.api.openChat(options.draft ?? null)),
@@ -363,11 +371,19 @@ export class GitHubRepository {
   file(path: string, ref: string) {
     return settle(this.stub.file(path, ref))
   }
+  /** An image in the repository as a Blob, for `URL.createObjectURL`; the frame loads none itself. */
+  image(path: string, ref: string) {
+    return settle(this.stub.image(path, ref))
+  }
   history(path: string, ref: string, limit?: number) {
     return settle(this.stub.history(path, ref, limit))
   }
   createBranch(name: string, sha: string) {
     return settle(this.stub.createBranch(name, sha))
+  }
+  /** Deletes a branch, never the default one; GitHub closes an open pull request from it. */
+  deleteBranch(name: string) {
+    return settle(this.stub.deleteBranch(name))
   }
   commit(request: CommitRequest): Promise<string> {
     return settle(

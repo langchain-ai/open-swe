@@ -79,6 +79,7 @@ export function PluginFrame({
   provideTools,
   chooseChat,
   openChat,
+  shareContext,
 }: {
   plugin: InstalledPlugin
   html: string
@@ -93,6 +94,7 @@ export function PluginFrame({
   provideTools: (offer: AgentToolOffer, run: ToolRunner) => () => void
   chooseChat: (chat: ChatTarget) => void
   openChat: (draft: string | null) => void
+  shareContext: (json: string) => void
 }) {
   const session = useSession()
   const isInBaseOrg = useIsInBaseOrg()
@@ -173,6 +175,7 @@ export function PluginFrame({
     provideTools,
     chooseChat,
     openChat,
+    shareContext,
     watchDocuments: (target, onChange) => {
       const key = documentsTopicKey(plugin.plugin_id, target, userId)
       let watch = documentWatches.current.get(key)

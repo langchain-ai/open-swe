@@ -1,7 +1,6 @@
 import { SparkleIcon } from "@phosphor-icons/react/dist/ssr/Sparkle"
 import Collaboration from "@tiptap/extension-collaboration"
 import CollaborationCaret from "@tiptap/extension-collaboration-caret"
-import Image from "@tiptap/extension-image"
 import { TaskItem, TaskList } from "@tiptap/extension-list"
 import Placeholder from "@tiptap/extension-placeholder"
 import { TableKit } from "@tiptap/extension-table"
@@ -17,6 +16,7 @@ import {
   setHighlights,
   type Highlight,
 } from "@/lib/anchors"
+import { repositoryImages, type ImageLoader } from "@/lib/images"
 import { FIELD, seedFromMarkdown, type LiveDoc } from "@/lib/live"
 import type { Anchor } from "@/lib/model"
 
@@ -43,6 +43,8 @@ export function PageEditor({
   onLink,
   onReady,
   onChange,
+  page,
+  loadImage,
 }: {
   markdown: string
   live: LiveDoc | null
@@ -54,6 +56,9 @@ export function PageEditor({
   onLink: (href: string) => void
   onReady: (editor: Editor) => void
   onChange: (editor: Editor) => void
+  /** The page's path, which relative image paths resolve against. */
+  page: string
+  loadImage: ImageLoader
 }) {
   const shell = useRef<HTMLDivElement>(null)
   const [selection, setSelection] = useState<{
@@ -61,8 +66,14 @@ export function PageEditor({
     top: number
     left: number
   } | null>(null)
-  const callbacks = useRef({ onSelectComment, onChange, onLink })
-  callbacks.current = { onSelectComment, onChange, onLink }
+  const callbacks = useRef({
+    onSelectComment,
+    onChange,
+    onLink,
+    page,
+    loadImage,
+  })
+  callbacks.current = { onSelectComment, onChange, onLink, page, loadImage }
 
   const editor = useEditor(
     {
@@ -74,7 +85,10 @@ export function PageEditor({
         TableKit,
         TaskList,
         TaskItem.configure({ nested: true }),
-        Image,
+        repositoryImages(
+          () => callbacks.current.page,
+          () => callbacks.current.loadImage
+        ),
         Placeholder.configure({ placeholder: "Write, or type / for blocks" }),
         Markdown,
         Highlights.configure({

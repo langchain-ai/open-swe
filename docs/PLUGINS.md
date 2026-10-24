@@ -9,7 +9,7 @@ A plugin is a web app that people install from a GitHub repository. It gets an e
 The web UI loads your plugin's single HTML file into a sandboxed `srcdoc` frame, inside a small shell frame the web UI writes itself. Your document gets:
 
 - **An opaque origin.** There are no cookies, and `localStorage`, `sessionStorage` and IndexedDB throw. Keep state in [storage](#storage).
-- **No network.** The page's Content-Security-Policy is `default-src 'none'`, plus inline scripts and styles, `data:` fonts, and `data:`/`blob:` images and media. `fetch`, XHR, WebSocket, EventSource, workers, nested frames and remote scripts, styles, fonts and images are all refused. Anything from the outside world comes through the host API.
+- **No network.** The page's Content-Security-Policy is `default-src 'none'`, plus inline scripts and styles, `data:` fonts, `data:`/`blob:` media, and images that are `data:`, `blob:` or hosted on GitHub (`github.com`, `*.githubusercontent.com`). Images in a repository you can read come through [`github(repo).image(path, ref)`](#github) as Blobs. `fetch`, XHR, WebSocket, EventSource, workers, nested frames and remote scripts, styles, fonts and images are all refused. Anything from the outside world comes through the host API.
 - **No navigation.** The frame cannot navigate, open popups or reach the top window. If its document is ever replaced, the web UI tears the plugin down. Open links with [`nav.openExternal`](#navigation-and-links).
 - **Forms that never submit.** `submit` events fire for your own handlers (call `preventDefault()`), but the browser never sends a form anywhere.
 - **Clipboard writes**, through `navigator.clipboard.writeText`.
@@ -278,9 +278,11 @@ const info = await repo.info()                     // { fullName, defaultBranch,
 const head = await repo.ref(info.defaultBranch)    // commit SHA, or null
 const tree = await repo.tree(head!)                // { sha, truncated, entries: [{ path, type, size }] }
 const text = await repo.file("README.md", head!)   // string, or null when missing
+const logo = await repo.image("docs/logo.png", head!) // Blob for URL.createObjectURL, or null
 const log = await repo.history("README.md", info.defaultBranch, 20)
 
 await repo.createBranch("docs/intro", head!)
+await repo.deleteBranch("docs/old")               // never the default branch; closes its open pull request
 const sha = await repo.commit({
   branch: "docs/intro",
   expectedHead: head!,                             // fails if the branch moved, so no push is lost
@@ -342,10 +344,14 @@ const withdraw = host.agent.provide(
   "Use read_page before changing anything." // instructions for the agent, optional
 )
 
+// What the person has open; each message they send from the dock carries the latest.
+await host.agent.share({ page: "docs/intro.md", selection: "the selected passage" })
+
 await host.agent.open({ draft: "> the passage the person selected\n\n" }) // the person presses Send
 ```
 
 - **Chats** are yours to scope. `use` picks the chat without opening the dock; each name, with or without a repository the person shared, is one thread per person that picks up where it left off.
+- **Context** is what you `share`: JSON of at most 8,000 characters, such as the open page and the selection. It goes to the agent just before each message the person sends from the dock, so the agent knows where it is without calling a tool. Share again whenever it changes.
 - **Tools** reach the agent as `<plugin>__<name>`, so they never stand in for its own. Names are a lowercase letter, then letters, digits or `_`; at most 32 tools, with descriptions up to 2,000 characters and instructions up to 4,000. `parameters` is a JSON Schema of type `object`.
 - **Calls** run while your plugin is open. The run waits at each call, the dock runs it in your frame, and the thread carries on with what `run` returned, as JSON, or a string as is (up to 200,000 characters). What `run` throws, the agent reads as an error. Open in two tabs, your plugin runs each call once. Only messages sent from the dock get your tools, so the same chat opened as a full thread works without them; closing the dock withdraws them. After 20 runs your results started since the person last wrote, the agent waits for them, and their next message brings it what you returned.
 - **Results are data.** The agent treats them as your plugin's, not as instructions from the person, so a document can't steer it.

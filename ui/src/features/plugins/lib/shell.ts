@@ -51,12 +51,18 @@ export function classicScript(module: string, global: string): string {
 /** The web UI's Cap'n Web, run in every plugin's document ahead of its own code. */
 export const CAPNWEB_RUNTIME = classicScript(CAPNWEB_MODULE, RUNTIME_GLOBAL)
 
+/**
+ * Where images hosted on GitHub live: raw files, uploaded attachments and its
+ * image proxy. They give no one the requests' logs, so they carry nothing out.
+ */
+const GITHUB_IMAGES = "https://github.com https://*.githubusercontent.com"
+
 export const PLUGIN_CSP = [
   "default-src 'none'",
   "script-src 'unsafe-inline'",
   "style-src 'unsafe-inline'",
   "font-src data:",
-  "img-src data: blob:",
+  `img-src data: blob: ${GITHUB_IMAGES}`,
   "media-src data: blob:",
   "base-uri 'none'",
   "form-action 'none'",
@@ -86,7 +92,7 @@ const SHELL_CSP = [
   "script-src 'unsafe-inline'",
   "style-src 'unsafe-inline'",
   "font-src data:",
-  "img-src data: blob:",
+  `img-src data: blob: ${GITHUB_IMAGES}`,
   "media-src data: blob:",
   "frame-src 'none'",
   "base-uri 'none'",

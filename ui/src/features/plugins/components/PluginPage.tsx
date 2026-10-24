@@ -2,6 +2,7 @@ import { Button } from "@langchain/macaw-components/Button"
 import { EmptyState } from "@langchain/macaw-components/EmptyState"
 import { ErrorState } from "@langchain/macaw-components/ErrorState"
 import { Skeleton } from "@langchain/macaw-components/Skeleton"
+import { ArrowsOutIcon } from "@phosphor-icons/react/dist/ssr/ArrowsOut"
 import { ChatCircleIcon } from "@phosphor-icons/react/dist/ssr/ChatCircle"
 import { PuzzlePieceIcon } from "@phosphor-icons/react/dist/ssr/PuzzlePiece"
 import { ShieldCheckIcon } from "@phosphor-icons/react/dist/ssr/ShieldCheck"
@@ -128,8 +129,9 @@ function InstalledPluginPage({
       chat={agent.chat}
       draft={agent.draft}
       tools={agent.tools}
+      context={agent.context}
       active={active}
-      onClose={() => agent.setOpen(false)}
+      onThread={agent.setThreadId}
     />
   )
 
@@ -157,6 +159,17 @@ function InstalledPluginPage({
         >
           Manage
         </Link>
+        {agent.enabled && agent.open && agent.threadId && (
+          <Link
+            to="/agents/$threadId"
+            params={{ threadId: agent.threadId }}
+            aria-label="Open the agent's chat as a full thread"
+            title="Open as a full thread"
+            className="inline-flex size-6 shrink-0 items-center justify-center rounded-md text-icon-secondary hover:bg-surface-level-1-hover"
+          >
+            <ArrowsOutIcon size={14} />
+          </Link>
+        )}
         {agent.enabled && (
           <Button
             size="sm"
@@ -216,6 +229,7 @@ function InstalledPluginPage({
               provideTools={agent.provideTools}
               chooseChat={agent.chooseChat}
               openChat={agent.openChat}
+              shareContext={agent.shareContext}
             />
           ) : bundle.error ? (
             <div className="flex flex-1 items-center justify-center p-space-5">
@@ -274,6 +288,8 @@ function useAgentDock(plugin: InstalledPlugin, onScreen: () => boolean) {
   })
   const [draft, setDraft] = useState<{ key: number; text: string }>()
   const [tools, setTools] = useState<ProvidedTools | null>(null)
+  const [context, setContext] = useState<string | null>(null)
+  const [threadId, setThreadId] = useState<string | null>(null)
   const latest = useRef<symbol | null>(null)
   return {
     enabled,
@@ -282,6 +298,10 @@ function useAgentDock(plugin: InstalledPlugin, onScreen: () => boolean) {
     chat,
     draft,
     tools,
+    context,
+    threadId,
+    setThreadId,
+    shareContext: setContext,
     provideTools: (offer: AgentToolOffer, run: ToolRunner) => {
       const offered = Symbol("offer")
       latest.current = offered

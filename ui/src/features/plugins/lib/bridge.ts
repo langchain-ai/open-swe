@@ -112,6 +112,8 @@ export interface BridgeHost {
   chooseChat: (chat: ChatTarget) => void
   /** Opens the dock, with `draft` in its composer. */
   openChat: (draft: string | null) => void
+  /** What the person has open, as the plugin describes it, for the agent's next messages. */
+  shareContext: (json: string) => void
   /** Calls `onChange` whenever anyone writes to `target`; returns the unsubscribe. */
   watchDocuments: (target: DocumentTarget, onChange: () => void) => () => void
   /** Streams one live room to `onEvent` from after `after`; returns the leave. */
@@ -269,6 +271,7 @@ function cursor(value: unknown, name: string): CursorWire | undefined {
   }
 }
 const ROOM = /^[A-Za-z0-9._:@/-]{1,200}$/
+const BRANCH = /^[A-Za-z0-9._/-]{1,200}$/
 const REPOSITORY = /^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/
 
 const repositoryName = (value: unknown, name = "repository") =>
@@ -320,6 +323,8 @@ function keep<F extends (...args: never[]) => unknown>(
 const TOOL_NAME = /^[a-z][a-z0-9_]{0,47}$/
 const CHAT_NAME = /^[A-Za-z0-9._:@/-]{1,200}$/
 const MAX_TOOLS = 32
+/** The backend's `MAX_PLUGIN_CONTEXT`. */
+const MAX_CONTEXT = 8_000
 /** The most of a tool result the agent gets; the backend refuses more. */
 export const MAX_TOOL_OUTPUT = 200_000
 
@@ -744,6 +749,20 @@ export class PluginHostApi extends RpcTarget implements HostApi {
     })
   }
 
+  shareContext(json: string): Promise<void> {
+    return this.#budget.run(() => {
+      this.#require("agent")
+      if (typeof json !== "string" || json.length > MAX_CONTEXT)
+        invalid(`context must be JSON of at most ${MAX_CONTEXT} characters`)
+      try {
+        JSON.parse(json)
+      } catch {
+        invalid("context must be JSON")
+      }
+      this.#host().shareContext(json)
+    })
+  }
+
   openChat(draft: string | null): Promise<void> {
     return this.#budget.run(() => {
       this.#require("agent")
@@ -946,6 +965,17 @@ class RepositoryTarget extends RpcTarget implements GitHubRepositoryApi {
     )
   }
 
+  image(path: string, ref: string): Promise<Blob | null> {
+    return this.#budget.run(() =>
+      pluginsApi.image(
+        this.#plugin,
+        this.#repository,
+        text(path, "path"),
+        text(ref, "ref", 200)
+      )
+    )
+  }
+
   history(path: string, ref: string, limit?: number) {
     return this.#budget.run(() =>
       pluginsApi.history(
@@ -967,6 +997,16 @@ class RepositoryTarget extends RpcTarget implements GitHubRepositoryApi {
         text(sha, "sha", 40)
       )
     })
+  }
+
+  deleteBranch(name: string): Promise<void> {
+    return this.#budget.run(() =>
+      pluginsApi.deleteBranch(
+        this.#plugin,
+        this.#repository,
+        pathName(name, "name", BRANCH)
+      )
+    )
   }
 
   commit(request: CommitWire): Promise<string> {

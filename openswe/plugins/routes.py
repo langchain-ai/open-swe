@@ -13,6 +13,7 @@ import logging
 from collections.abc import AsyncGenerator, Iterator, Sequence
 from contextlib import contextmanager
 from datetime import datetime
+from pathlib import PurePosixPath
 from typing import Annotated, Any, Literal
 from urllib.parse import quote
 from uuid import UUID
@@ -597,6 +598,48 @@ async def api_plugin_file(
     return FileResponse(path=path, text=found[path])
 
 
+IMAGE_TYPES = {
+    ".png": "image/png",
+    ".jpg": "image/jpeg",
+    ".jpeg": "image/jpeg",
+    ".gif": "image/gif",
+    ".webp": "image/webp",
+    ".avif": "image/avif",
+    ".svg": "image/svg+xml",
+    ".ico": "image/x-icon",
+}
+MAX_IMAGE_BYTES = 10 * 1024 * 1024
+
+
+@router.get(
+    "/{installation_id}/github/{owner}/{repo}/image",
+    response_class=Response,
+    responses={200: {"content": {media: {} for media in sorted(set(IMAGE_TYPES.values()))}}},
+)
+async def api_plugin_image(
+    owner: str,
+    repo: str,
+    plugin: PluginDep,
+    path: str = Query(min_length=1, max_length=1000),
+    ref: str = Query(min_length=1, max_length=200),
+) -> Response:
+    """An image in the repository, as bytes the plugin's frame can show; its own policy loads none."""
+    media = IMAGE_TYPES.get(PurePosixPath(path).suffix.lower())
+    if media is None:
+        raise HTTPException(415, "not an image")
+    with _as_http():
+        async with plugin.github(_repository(owner, repo)) as client:
+            data = await client.raw_file(path, ref)
+    if data is None:
+        raise HTTPException(404, "image not found")
+    if len(data) > MAX_IMAGE_BYTES:
+        raise HTTPException(413, "image too large")
+    # An SVG is shown as an image, never as a document that could run its scripts.
+    return Response(
+        data, media_type=media, headers={"Content-Security-Policy": "default-src 'none'"}
+    )
+
+
 @router.get("/{installation_id}/github/{owner}/{repo}/history")
 async def api_plugin_history(
     owner: str,
@@ -628,6 +671,18 @@ async def api_plugin_create_branch(
     with _as_http():
         async with plugin.github(_repository(owner, repo), write=True) as client:
             await client.create_branch(body.name, body.sha)
+    return Response(status_code=204)
+
+
+@router.delete("/{installation_id}/github/{owner}/{repo}/branches/{name:path}", status_code=204)
+@audit_endpoint
+async def api_plugin_delete_branch(owner: str, repo: str, name: str, plugin: PluginDep) -> Response:
+    """Delete a branch, such as a draft's; never the repository's default branch."""
+    with _as_http():
+        async with plugin.github(_repository(owner, repo), write=True) as client:
+            if name == (await client.info()).get("default_branch"):
+                raise HTTPException(403, "the default branch can't be deleted")
+            await client.delete_branch(name)
     return Response(status_code=204)
 
 

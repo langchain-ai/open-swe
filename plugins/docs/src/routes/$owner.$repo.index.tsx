@@ -1,6 +1,7 @@
 import { Text } from "@langchain/macaw-components/Text"
 import { Link, createFileRoute } from "@tanstack/react-router"
 
+import { useSharedContext } from "@/lib/agent"
 import { isHidden, pageTitle } from "@/lib/model"
 import {
   useDrafts,
@@ -16,6 +17,11 @@ function SpaceHome() {
   const repository = `${owner}/${repo}`.toLowerCase()
   const label = useRepositoryLabel(repository)
   useTabTitle(label)
+  useSharedContext({
+    plugin: "Docs, an editor for the Markdown pages of a GitHub repository",
+    repository,
+    page: null,
+  })
   const space = useSpace(repository).data
   const drafts = [...(useDrafts(repository).data ?? new Map()).entries()]
   const pages = (space?.pages ?? []).filter((path) => !isHidden(path))

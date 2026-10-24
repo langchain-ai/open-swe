@@ -10,6 +10,14 @@ import type {
 } from "@openswe/plugin-sdk"
 
 import { AgentsApiError, agentsRequest } from "@/features/agents/lib/api"
+import {
+  DashboardRequestError,
+  REQUEST_ID_HEADER,
+  dashboardApiUrl,
+  dashboardForwardedHeaders,
+  networkError,
+  newRequestId,
+} from "@/lib/dashboard-fetch"
 import type { AgentToolOffer } from "@/features/plugins/lib/bridge"
 
 export type SidebarIcon =
@@ -339,6 +347,31 @@ export const pluginsApi = {
         )
       )
     )?.text ?? null,
+  /** An image in the repository as bytes, `null` when absent or not an image. */
+  image: async (
+    id: string,
+    repository: string,
+    path: string,
+    ref: string
+  ): Promise<Blob | null> => {
+    const requestId = newRequestId()
+    const res = await fetch(
+      dashboardApiUrl(`${repo(id, repository)}/image${query({ path, ref })}`),
+      {
+        credentials: "include",
+        headers: {
+          [REQUEST_ID_HEADER]: requestId,
+          ...dashboardForwardedHeaders(),
+        },
+      }
+    ).catch((cause: unknown) => {
+      throw networkError(cause, requestId)
+    })
+    if (res.status === 404 || res.status === 415) return null
+    if (!res.ok)
+      throw new DashboardRequestError(res.status, res.statusText, requestId)
+    return res.blob()
+  },
   history: async (
     id: string,
     repository: string,
@@ -368,6 +401,11 @@ export const pluginsApi = {
       method: "POST",
       ...json({ name, sha }),
     }),
+  deleteBranch: (id: string, repository: string, name: string) =>
+    agentsRequest<void>(
+      `${repo(id, repository)}/branches/${name.split("/").map(segment).join("/")}`,
+      { method: "DELETE" }
+    ),
   commit: async (
     id: string,
     repository: string,

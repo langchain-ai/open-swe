@@ -15857,6 +15857,76 @@
         ]
       }
     },
+    "/dashboard/api/plugins/{installation_id}/github/{owner}/{repo}/branches/{name}": {
+      "delete": {
+        "description": "Delete a branch, such as a draft's; never the repository's default branch.",
+        "operationId": "api_plugin_delete_branch_dashboard_api_plugins__installation_id__github__owner___repo__branches__name__delete",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "owner",
+            "required": true,
+            "schema": {
+              "title": "Owner",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "repo",
+            "required": true,
+            "schema": {
+              "title": "Repo",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "name",
+            "required": true,
+            "schema": {
+              "title": "Name",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "installation_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Installation Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "DashboardSession": []
+          }
+        ],
+        "summary": "Api Plugin Delete Branch",
+        "tags": [
+          "dashboard",
+          "plugins"
+        ]
+      }
+    },
     "/dashboard/api/plugins/{installation_id}/github/{owner}/{repo}/commits": {
       "post": {
         "operationId": "api_plugin_commit_dashboard_api_plugins__installation_id__github__owner___repo__commits_post",
@@ -16122,6 +16192,98 @@
           }
         ],
         "summary": "Api Plugin History",
+        "tags": [
+          "dashboard",
+          "plugins"
+        ]
+      }
+    },
+    "/dashboard/api/plugins/{installation_id}/github/{owner}/{repo}/image": {
+      "get": {
+        "description": "An image in the repository, as bytes the plugin's frame can show; its own policy loads none.",
+        "operationId": "api_plugin_image_dashboard_api_plugins__installation_id__github__owner___repo__image_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "owner",
+            "required": true,
+            "schema": {
+              "title": "Owner",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "repo",
+            "required": true,
+            "schema": {
+              "title": "Repo",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "installation_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Installation Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "path",
+            "required": true,
+            "schema": {
+              "maxLength": 1000,
+              "minLength": 1,
+              "title": "Path",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "ref",
+            "required": true,
+            "schema": {
+              "maxLength": 200,
+              "minLength": 1,
+              "title": "Ref",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "image/avif": {},
+              "image/gif": {},
+              "image/jpeg": {},
+              "image/png": {},
+              "image/svg+xml": {},
+              "image/webp": {},
+              "image/x-icon": {}
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "DashboardSession": []
+          }
+        ],
+        "summary": "Api Plugin Image",
         "tags": [
           "dashboard",
           "plugins"

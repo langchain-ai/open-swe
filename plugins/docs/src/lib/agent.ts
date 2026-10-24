@@ -164,3 +164,15 @@ export function useOpenPageTools(tools: PageTools) {
     }
   }, [ref])
 }
+
+/**
+ * Tells the agent what the person has open, so each message they send from
+ * the dock carries it; `context` is shared again whenever it changes.
+ */
+export function useSharedContext(context: JsonObject) {
+  const host = usePluginHost()
+  const json = JSON.stringify(context)
+  useEffect(() => {
+    void host.agent.share(JSON.parse(json) as JsonObject)
+  }, [host, json])
+}
