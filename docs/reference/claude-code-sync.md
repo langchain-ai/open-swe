@@ -8,7 +8,9 @@ Claude Code can post its [hook events](https://code.claude.com/docs/en/hooks) to
 2. Merge the settings it shows into `~/.claude/settings.json`. They hold the machine's token, which is not shown again.
 3. Start a new Claude Code session. It appears in the sidebar with a terminal icon on its first prompt.
 
-Revoking a machine under **Machines** on the same page stops that machine from mirroring. Threads it already mirrored stay.
+With Open SWE's MCP server connected to Claude Code, you can skip the dashboard: ask Claude Code to connect this machine to Open SWE. The `connect_claude_code` tool mints the token and returns the same settings, and Claude Code merges them into `~/.claude/settings.json` for you.
+
+Connecting a machine name that is already connected replaces its token, so reconnecting never leaves an old token live. Revoking a machine under **Machines** stops it from mirroring. Threads it already mirrored stay.
 
 The settings register one [HTTP hook](https://code.claude.com/docs/en/hooks#http-hook-fields) per event below, all posting to `POST /dashboard/api/claude-code/hooks` with the token as a bearer token. If your organization limits hook targets with `allowedHttpHookUrls`, allow that URL.
 

@@ -104,6 +104,8 @@ async def test_only_the_owners_token_writes_their_session(
 ) -> None:
     owner = await User.sign_in("github", "1", login="test-user")
     other = await User.sign_in("github", "2", login="trusted-user")
+    _, replaced_secret = await ClaudeCodeSyncToken.create(user_id=owner.id, name="laptop")
+    # Connecting the same machine again replaces its token.
     _, secret = await ClaudeCodeSyncToken.create(user_id=owner.id, name="laptop")
     revoked, revoked_secret = await ClaudeCodeSyncToken.create(user_id=owner.id, name="old")
     await ClaudeCodeSyncToken.revoke(user_id=owner.id, token_id=revoked.id)
@@ -114,7 +116,7 @@ async def test_only_the_owners_token_writes_their_session(
     async with httpx.AsyncClient(
         transport=httpx.ASGITransport(app=app), base_url="http://test"
     ) as client:
-        for presented in ("occ_unknown", revoked_secret):
+        for presented in ("occ_unknown", revoked_secret, replaced_secret):
             refused = await client.post(
                 "/claude-code/hooks", json=prompt, headers={"Authorization": f"Bearer {presented}"}
             )

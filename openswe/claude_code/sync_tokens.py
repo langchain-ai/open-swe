@@ -3,7 +3,7 @@
 The secret is returned once, by :meth:`ClaudeCodeSyncToken.create`, and never
 stored: the row keeps its SHA-256 digest and last characters. A token only
 writes the owner's own mirrored sessions, so it lives until the owner revokes it,
-which deletes the row.
+which deletes the row, or connects the same machine name again, which replaces it.
 """
 
 import hashlib
@@ -55,7 +55,11 @@ class ClaudeCodeSyncToken(Base):
 
     @classmethod
     async def create(cls, *, user_id: UUID, name: str) -> tuple[Self, str]:
-        """Mint a token for ``user_id``, returning the record and the plaintext secret once."""
+        """Mint a token for ``user_id``'s machine ``name``, returning the record and secret once.
+
+        A token the same machine had is deleted in the same transaction, so connecting a
+        machine again never leaves its old token live.
+        """
         secret = TOKEN_PREFIX + secrets.token_urlsafe(SECRET_BYTES)
         token = cls(
             user_id=user_id,
@@ -66,6 +70,10 @@ class ClaudeCodeSyncToken(Base):
             updated_by=user_id,
         )
         async with postgres.session() as session:
+            await session.execute(
+                delete(cls).where(cls.user_id == user_id, cls.name == name),
+                execution_options={"synchronize_session": False},
+            )
             session.add(token)
             await session.flush()
             await session.refresh(token)

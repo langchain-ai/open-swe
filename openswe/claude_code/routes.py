@@ -15,24 +15,19 @@ from pydantic import BaseModel, ConfigDict, Field, JsonValue, ValidationError, f
 
 from openswe.audit_logs.middleware import audit_endpoint, bind_actor
 from openswe.audit_logs.models import AuditLogEnrichments
-from openswe.claude_code.hooks import HOOK_EVENT, MIRRORED_EVENTS, SessionMirror
+from openswe.claude_code.connect import Connection
+from openswe.claude_code.hooks import HOOK_EVENT, SessionMirror
 from openswe.claude_code.sync_tokens import NAME_MAX_CHARS, ClaudeCodeSyncToken
 from openswe.dashboard.deps import SESSION_DEP
 from openswe.dashboard.oauth import session_user_id
 from openswe.database import postgres
 from openswe.github.token_auth import bearer_github_token
 from openswe.users.models import User
-from openswe.utils.dashboard_links import dashboard_api_base_url
 
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/claude-code", tags=["claude-code"])
 
-HOOKS_PATH = "/dashboard/api/claude-code/hooks"
-# Hooks run inline in Claude Code, so a slow mirror must never hold up the session.
-_HOOK_TIMEOUT_SECONDS = 5
-# Claude Code holds each batch of a message off the screen until this hook answers.
-_DISPLAY_HOOK_TIMEOUT_SECONDS = 2
 _INVALID_TOKEN = "invalid Claude Code sync token"
 
 HOOK_REQUEST_BODY: dict[str, object] = {
@@ -112,22 +107,6 @@ class MintedSyncToken(SyncTokenView):
     settings: dict[str, JsonValue]
 
 
-def hook_settings(secret: str) -> dict[str, JsonValue]:
-    """The ``hooks`` block of a Claude Code ``settings.json`` that mirrors every session."""
-
-    def handler(event: str) -> dict[str, JsonValue]:
-        return {
-            "type": "http",
-            "url": dashboard_api_base_url() + HOOKS_PATH,
-            "timeout": _DISPLAY_HOOK_TIMEOUT_SECONDS
-            if event == "MessageDisplay"
-            else _HOOK_TIMEOUT_SECONDS,
-            "headers": {"Authorization": f"Bearer {secret}"},
-        }
-
-    return {"hooks": {event: [{"hooks": [handler(event)]}] for event in sorted(MIRRORED_EVENTS)}}
-
-
 async def _session_user(session: dict[str, Any]) -> User:
     _require_database()
     user = await User.for_session(session_user_id(session), session["sub"])
@@ -153,15 +132,15 @@ async def api_create_claude_code_token(
     session: dict[str, Any] = SESSION_DEP,
 ) -> MintedSyncToken:
     user = await _session_user(session)
-    token, secret = await ClaudeCodeSyncToken.create(user_id=user.id, name=body.name)
+    connection = await Connection.open(user_id=user.id, machine_name=body.name)
     logger.info(
         "Minted a Claude Code sync token",
-        extra={"sync_token_id": str(token.id), "github_login": session["sub"]},
+        extra={"sync_token_id": str(connection.token.id), "github_login": session["sub"]},
     )
     return MintedSyncToken(
-        **SyncTokenView.model_validate(token).model_dump(),
-        secret=secret,
-        settings=hook_settings(secret),
+        **SyncTokenView.model_validate(connection.token).model_dump(),
+        secret=connection.secret,
+        settings=connection.settings,
     )
 
 
