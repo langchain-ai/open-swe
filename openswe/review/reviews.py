@@ -48,6 +48,7 @@ from openswe.threads.succession import SUCCEEDED_BY_KEY
 from openswe.utils import ttl_cache
 from openswe.utils.http_pool import pooled_transport
 from openswe.utils.json_types import ThreadLike, thread_metadata
+from openswe.utils.langsmith import get_langsmith_trace_url
 from openswe.utils.thread_ops import langgraph_client
 from openswe.walkthrough.record import WalkthroughView
 from openswe.workspaces.store import WORKSPACES
@@ -722,6 +723,9 @@ async def get_review(owner: str, repo: str, pr_number: int) -> dict[str, Any]:
 
     return {
         **summary,
+        "trace_url": (
+            await get_langsmith_trace_url(thread_id) if isinstance(thread_id, str) else None
+        ),
         "pr": details,
         "checks": checks,
         "findings": findings,
@@ -1263,7 +1267,9 @@ async def trigger_re_review(owner: str, repo: str, pr_number: int, login: str) -
         number=pr_number,
         url=f"https://github.com/{owner}/{repo}/pull/{pr_number}",
     )
-    result = await trigger_pr_review_from_ref(pr_ref, source="dashboard", github_login=login)
+    result = await trigger_pr_review_from_ref(
+        pr_ref, source="dashboard", github_login=login, allow_draft=True
+    )
     if not result.get("success"):
         raise HTTPException(502, str(result.get("error") or "could not trigger review"))
     return result

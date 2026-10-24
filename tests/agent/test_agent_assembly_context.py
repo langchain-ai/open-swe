@@ -8,7 +8,6 @@ from unittest.mock import ANY, AsyncMock, MagicMock, patch
 
 import langgraph_sdk
 import pytest
-from langchain.agents.middleware.types import AgentMiddleware
 from langchain_core.language_models import BaseChatModel
 from langgraph.graph.state import RunnableConfig
 
@@ -60,18 +59,12 @@ async def test_public_agent_excludes_personal_skills_and_tools(saved_thread_scop
         }
     )
     mcps.assert_awaited_once_with(None, ANY, None)
-    from openswe.middleware import WorkspaceSkillsMiddleware
-
-    middleware = cast(list[object], captured["middleware"])
-    assert any(isinstance(item, WorkspaceSkillsMiddleware) for item in middleware)
 
 
-async def test_remote_agent_discovers_personal_skills(monkeypatch: pytest.MonkeyPatch) -> None:
-    from deepagents.middleware.skills import SkillsMiddleware
-    from langgraph.runtime import Runtime
+async def test_remote_agent_lists_personal_skills(monkeypatch: pytest.MonkeyPatch) -> None:
+    from runtime_api.operations import RunRequest
 
-    from openswe.remote_runtime.graph import RunSession
-    from openswe.sandboxes.tool_runtime import ToolSurface
+    from openswe.agent_api.graph import RunSession
     from openswe.skill_store.store import _record
 
     monkeypatch.setattr(
@@ -83,20 +76,15 @@ async def test_remote_agent_discovers_personal_skills(monkeypatch: pytest.Monkey
         ),
     )
     captured = await _plan_agent()
-    middleware = [
-        item
-        for item in cast(list[object], captured["middleware"])
-        if isinstance(item, SkillsMiddleware)
-    ]
-    session = RunSession(
-        ToolSurface(middleware=cast(list[AgentMiddleware], middleware)), {}, None, started_here=True
-    )
-    state: dict[str, object] = {"messages": []}
-    with patch("openswe.remote_runtime.graph.get_config", return_value=_base_config()):
-        prepared = await session.run_phase("before_agent", state, Runtime())
-    shaped = await session.model_call({**state, **prepared.update}, Runtime())
+    surface = cast(ToolSurface, captured["surface"])
+    session = RunSession(surface, _base_config(), None, started_here=True)
 
-    assert "personal-workflow" in shaped.system_prompt
+    listed = await session.skills(RunRequest())
+
+    personal = next(f for f in listed.files if f.path == "/skills/personal-workflow/SKILL.md")
+    assert "Do it." in personal.content
+    # The runtime answers reads of skills itself; the files API serves none of them.
+    assert not set(surface.skill_sources) & set(surface.backend_paths)
 
 
 async def test_offloaded_images_are_served_from_a_thread_scoped_store() -> None:
@@ -193,8 +181,6 @@ async def _plan_agent(
     make_model: Callable[..., BaseChatModel] | None = None,
 ) -> dict[str, object]:
     """The run ``config`` plans, with the parts tests read pulled out of its middleware."""
-    from deepagents.middleware.skills import SkillsMiddleware
-
     from openswe.middleware.model_selection import ModelSelectionMiddleware
 
     surface = ToolSurface()
@@ -254,7 +240,6 @@ async def _plan_agent(
 
     SANDBOX_BACKENDS.pop(thread_id, None)
     middleware = list(surface.middleware)
-    skills = next(m for m in middleware if isinstance(m, SkillsMiddleware))
     selection = next(m for m in middleware if isinstance(m, ModelSelectionMiddleware))
     return {
         "surface": surface,
@@ -262,7 +247,7 @@ async def _plan_agent(
         "middleware": middleware,
         "subagents": list(surface.subagents),
         "backend": surface.files,
-        "skills": skills.sources,
+        "skills": list(surface.skill_sources),
         "model": selection._models["default"],
         "make_model_calls": make_model_calls,
     }
@@ -656,7 +641,7 @@ async def test_requested_model_survives_auto_followups_but_explicit_selection_wi
 async def test_text_only_adaptive_route_names_a_vision_model_after_handoff(
     route: Literal["fast", "balanced", "performance"],
 ) -> None:
-    from openswe.remote_runtime.graph import RunSession
+    from openswe.agent_api.graph import RunSession
 
     model_id = "fireworks:accounts/fireworks/models/kimi-k3"
     config = _base_config()
@@ -778,12 +763,12 @@ async def test_queued_images_reach_vision_fallback_for_text_only_main_model(
 ) -> None:
     from langchain_core.messages import convert_to_messages
 
+    from openswe.agent_api.graph import RunSession
     from openswe.message_queue import QueuedMessage
     from openswe.middleware.check_message_queue import (
         LinearNotifyState,
         check_message_queue_before_model,
     )
-    from openswe.remote_runtime.graph import RunSession
 
     config = _base_config()
     planned = await _plan_agent(

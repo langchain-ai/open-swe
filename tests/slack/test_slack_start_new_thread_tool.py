@@ -201,6 +201,7 @@ async def test_web_breakout_does_not_post_or_bind_slack(
     ("explicit", "target", "model", "effort", "expected_model", "expected_effort"),
     [
         (None, "C1", None, None, "anthropic:claude-sonnet-4-5", "high"),
+        ("C1", "C1", None, None, "anthropic:claude-sonnet-4-5", "high"),
         ("C3", "C3", None, None, "anthropic:claude-sonnet-4-5", "high"),
         (None, "C1", "anthropic:claude-opus-5-5", "max", "anthropic:claude-opus-5-5", "max"),
         (
@@ -224,6 +225,9 @@ async def test_slack_breakout_thread_success(
     expected_model: str,
     expected_effort: str,
 ) -> None:
+    monkeypatch.setattr(
+        SlackChannel, "load", AsyncMock(return_value=_channel(private=target == "C1"))
+    )
     permalink = None
     captured: dict[str, Any] = {"stored_mappings": []}
     new_ts = "1700000000.111111"
@@ -379,8 +383,20 @@ async def test_slack_breakout_thread_success(
     assert captured["top_level_post"]["blocks"] == [
         {
             "type": "section",
-            "text": {"type": "mrkdwn", "text": captured["top_level_post"]["text"]},
-        }
+            "text": {
+                "type": "mrkdwn",
+                "text": "`/breakout`: Investigate follow-up · <https://p/src|(source)> · <@U1>",
+            },
+        },
+        {
+            "type": "context",
+            "elements": [
+                {
+                    "type": "mrkdwn",
+                    "text": f"<https://dashboard.example/agents/{expected_thread_id}|Open in Web>",
+                }
+            ],
+        },
     ]
     source_line.assert_awaited_once_with("C1", "1700000000.000002")
     react.assert_awaited_once_with("C1", "1700000000.000001", "1700000000.000002", target, new_ts)

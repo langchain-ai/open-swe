@@ -4,9 +4,10 @@ from datetime import datetime, timedelta
 
 from pydantic import JsonValue
 
-from openswe.github.http import GitHubError, RepoClient
+from openswe.github.http import RepoClient
 from openswe.github.queue import ValidationRun
 from openswe.merge_queue.admission import QueuePolicy
+from openswe.merge_queue.dispatch import DispatchGateway, DispatchRejected
 from openswe.merge_queue.git import Candidate, candidate_ref
 from openswe.merge_queue.models import Batch, Lease
 from openswe.merge_queue.store import MergeQueue
@@ -18,8 +19,11 @@ class InvalidValidation(ValueError):
 
 
 class CandidateValidation:
-    def __init__(self, queue: MergeQueue, repo: RepoClient, policy: QueuePolicy):
+    def __init__(
+        self, queue: MergeQueue, repo: RepoClient, policy: QueuePolicy, dispatcher: DispatchGateway
+    ):
         self.queue, self.repo, self.policy = queue, repo, policy
+        self.dispatcher = dispatcher
 
     async def reconcile(self, lease: Lease) -> None:
         if (await self.queue.repository_name(lease)).lower() != self.repo.full_name.lower():
@@ -37,7 +41,7 @@ class CandidateValidation:
         attempt, request = work.attempt, work.request
         assert attempt is not None and request is not None
         if work.dispatch:
-            await self._dispatch(request, lease)
+            await self._dispatch(request, attempt.deadline, lease)
             return
         try:
             run_id = await self._find_run(request, attempt.created_at, work.run_id)
@@ -78,19 +82,16 @@ class CandidateValidation:
             return True
         return False
 
-    async def _dispatch(self, request: ValidationRequest, lease: Lease) -> None:
+    async def _dispatch(self, request: ValidationRequest, deadline: datetime, lease: Lease) -> None:
         try:
-            await self.repo.dispatch_validation(WORKFLOW, request.model_dump_json())
-        except GitHubError as exc:
-            status = exc.response.status_code
-            if status not in {400, 401, 403, 404, 405, 410, 422, 429, 503}:
-                raise
+            await self.dispatcher.dispatch(request, deadline)
+        except DispatchRejected as exc:
             await self.queue.finish_validation(
                 request.attempt_id,
                 {
                     **request.model_dump(mode="json"),
-                    "error": "GitHub rejected the workflow dispatch",
-                    "http_status": status,
+                    "error": "Dispatch gateway rejected the workflow dispatch",
+                    "http_status": exc.status,
                 },
                 lease,
                 succeeded=False,

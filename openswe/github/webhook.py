@@ -269,6 +269,7 @@ async def trigger_pr_review_from_ref(
     github_user_id: int | None = None,
     slack_channel_id: str = "",
     slack_thread_ts: str = "",
+    allow_draft: bool = False,
 ) -> dict[str, Any]:
     repo_config = {"owner": pr_ref.owner, "name": pr_ref.repo}
 
@@ -283,7 +284,7 @@ async def trigger_pr_review_from_ref(
     if not pr_metadata:
         return {"success": False, "error": "Could not fetch pull request metadata"}
 
-    if pr_metadata.get("draft"):
+    if pr_metadata.get("draft") and not allow_draft:
         return {
             "success": False,
             "error": f"{pr_ref.url} is a draft. " + prompt("tools/human-review-blocked"),

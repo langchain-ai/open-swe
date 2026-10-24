@@ -1206,6 +1206,15 @@ async def slack_interactivity(
         if button.type != "open_swe_option":
             return ignored("Unknown action type")
 
+        if button.user_id is not None and button.user_id != user_id:
+            await common.post_slack_ephemeral_message(
+                channel_id,
+                user_id,
+                "This choice is for someone else. No action was taken.",
+                thread_ts=reply_ts or None,
+            )
+            return ignored("Only the choice recipient can select an option")
+
         response = button.response.strip()
         if not response:
             return ignored("Empty response")

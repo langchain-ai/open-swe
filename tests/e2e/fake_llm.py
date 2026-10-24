@@ -803,14 +803,14 @@ def _write_plan_step(_messages: list[BaseMessage]) -> AIMessage:
     )
 
 
-def _save_plan_step(_messages: list[BaseMessage]) -> AIMessage:
+def _publish_artifact_step(_messages: list[BaseMessage]) -> AIMessage:
     return AIMessage(
-        content="Saving the plan for review.",
+        content="Publishing the HTML artifact.",
         tool_calls=[
             {
-                "name": "save_plan",
-                "args": {"plan_file_path": PLAN_FILE_PATH},
-                "id": "call-save-plan",
+                "name": "publish_artifact",
+                "args": {"artifact_file_path": PLAN_FILE_PATH},
+                "id": "call-publish-artifact",
             }
         ],
     )
@@ -1494,7 +1494,7 @@ SCRIPT_LIBRARY: dict[str, tuple[StepSpec, ...]] = {
         _dynamic_step(_plan_link_step),
         _dynamic_step(_plan_research_step),
         _dynamic_step(_write_plan_step),
-        _dynamic_step(_save_plan_step),
+        _dynamic_step(_publish_artifact_step),
         _dynamic_step(_plan_complete_step),
         StepSpec(content="The requested plan is published as an HTML artifact."),
     ),
@@ -1567,7 +1567,7 @@ def _is_pull_request_fix(text: str) -> bool:
 
     Without this it lands on the catch-all implement script and opens a *new* PR,
     which renumbers the fake store under whichever spec runs next."""
-    return "Fix merge conflicts and failing CI checks on" in text
+    return "Resolve the merge conflicts and fix the failing CI checks on" in text
 
 
 SCRIPT_RULES: tuple[ScriptRule, ...] = (

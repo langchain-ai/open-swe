@@ -5,7 +5,7 @@ from unittest.mock import AsyncMock
 import pytest
 from pydantic import JsonValue
 
-from openswe.remote_runtime.git_metadata import GitCheckout, GitSnapshot, GitTarget, TurnGitMetadata
+from openswe.agent_api.git_metadata import GitCheckout, GitSnapshot, GitTarget, TurnGitMetadata
 from openswe.sandboxes.scripts import SandboxScript, SandboxScriptError
 from tests.tools.test_monitor import LocalShell
 
@@ -113,7 +113,7 @@ async def test_work_order_wins_over_snapshot_order_pr_order_and_completion_order
 async def test_invalid_optional_evidence_does_not_discard_valid_pr_outcome(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    module = "openswe.remote_runtime.git_metadata"
+    module = "openswe.agent_api.git_metadata"
     monkeypatch.setattr(f"{module}.get_sandbox_backend", AsyncMock())
     monkeypatch.setattr(f"{module}.resolve_sandbox_work_dir", AsyncMock(return_value="/workspace"))
     monkeypatch.setattr(
