@@ -28,6 +28,7 @@ from openswe.slack.ask import (
     ask_thread_id,
     process_slack_ask,
 )
+from openswe.slack.blocks import is_option_action_id, selected_option_blocks
 from openswe.slack.breakout import BreakoutCommand, process_slack_breakout, process_slack_web
 from openswe.slack.dm import CONCIERGE_TS, is_dm_channel
 from openswe.slack.failures import (
@@ -36,6 +37,7 @@ from openswe.slack.failures import (
     answer_slack_request,
     run_slack_task,
 )
+from openswe.slack.option_auto_select import claim_option_choice
 from openswe.slack.parsed_message import ParsedSlackMessage, SlackAction
 from openswe.slack.payloads import (
     SlackBlockAction,
@@ -43,7 +45,6 @@ from openswe.slack.payloads import (
     SlackChannelContext,
     SlackEventEnvelope,
     SlackInteraction,
-    SlackInteractionMessage,
     parse_json_object,
 )
 from openswe.slack.pr_links import SlackPullRequestLink
@@ -91,7 +92,6 @@ _MEMBERSHIP_SUBTYPES = frozenset(
     }
 )
 _EXTERNAL_CHANNEL_REFUSAL = "Open SWE does not operate in channels with external participants."
-_OPTION_ACTION_ID = "open_swe_option_select"
 
 
 def _synthetic_slack_ts() -> str:
@@ -1245,6 +1245,8 @@ async def slack_interactivity(
             )
             background_tasks.add_task(advance, channel_id, interaction.message_ts)
             return accepted("Slack option queued")
+        if button.auto_select and not await claim_option_choice(channel_id, interaction.message_ts):
+            return ignored("An option was already selected")
         repo = await common.get_slack_repo_config(
             channel_id,
             option_thread_ts,
@@ -1281,7 +1283,7 @@ async def _update_selected_option_message(
     channel_id = interaction.channel_id
     message_ts = interaction.message_ts
     label = ((action.text.text if action.text else "") or fallback_label).strip()[:150]
-    blocks = _selected_option_blocks(interaction.message, label)
+    blocks = selected_option_blocks(interaction.message.blocks, f"Selected: {label}")
     if not channel_id or not message_ts or not label or not blocks:
         return
 
@@ -1302,47 +1304,8 @@ async def _update_selected_option_message(
         return
 
 
-def _selected_option_blocks(message: SlackInteractionMessage, label: str) -> list[JsonObject]:
-    selected_block: JsonObject = {
-        "type": "context",
-        "elements": [{"type": "plain_text", "text": f"Selected: {label}"}],
-    }
-    updated_blocks: list[JsonObject] = []
-    replaced = False
-    for block in message.blocks:
-        elements = block.get("elements")
-        if block.get("type") != "actions" or not _has_option_element(elements):
-            updated_blocks.append(block)
-            continue
-        if not replaced:
-            updated_blocks.append(selected_block)
-            replaced = True
-        if isinstance(elements, list):
-            remaining = [element for element in elements if not _has_option_element([element])]
-            if remaining:
-                updated_blocks.append({**block, "elements": remaining})
-
-    return updated_blocks if replaced else []
-
-
-def _is_option_action_id(action_id: object) -> bool:
-    return isinstance(action_id, str) and (
-        action_id == _OPTION_ACTION_ID or action_id.startswith(f"{_OPTION_ACTION_ID}_")
-    )
-
-
 def _first_option_action(actions: list[SlackBlockAction]) -> SlackBlockAction | None:
-    return next((action for action in actions if _is_option_action_id(action.action_id)), None)
-
-
-def _has_option_element(elements: object) -> bool:
-    """Whether a Block Kit ``elements`` list holds one of Open SWE's option buttons."""
-    if not isinstance(elements, list):
-        return False
-    return any(
-        isinstance(element, dict) and _is_option_action_id(element.get("action_id"))
-        for element in elements
-    )
+    return next((action for action in actions if is_option_action_id(action.action_id)), None)
 
 
 @router.get("/webhooks/slack")

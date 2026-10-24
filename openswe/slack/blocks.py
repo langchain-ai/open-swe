@@ -17,6 +17,8 @@ import json
 from collections.abc import Sequence
 from typing import Any, Literal, NotRequired, TypedDict, cast
 
+from openswe.utils.json_types import JsonObject
+
 SECTION_TEXT_MAX_CHARS = 3000
 # Slack documents no rich-text limit; 4.5k characters is the largest block verified to render.
 CODE_TEXT_MAX_CHARS = 4000
@@ -25,6 +27,7 @@ MARKDOWN_TEXT_MAX_CHARS = 12000
 MESSAGE_MAX_BLOCKS = 50
 BUTTON_TEXT_MAX_CHARS = 75
 OPTION_TEXT_MAX_CHARS = 75
+OPTION_ACTION_ID = "open_swe_option_select"
 ButtonStyle = Literal["primary", "danger"]
 
 
@@ -398,12 +401,16 @@ def block_payload(blocks: Sequence[Block]) -> list[dict[str, Any]]:
 
 
 def option_actions(
-    options: list[str] | None, *, user_id: str | None = None
+    options: list[str] | None, *, user_id: str | None = None, recommended: str | None = None
 ) -> list[dict[str, Any]]:
-    """Up to five option buttons; a click arrives as a message carrying the option's text."""
+    """Up to five option buttons; a click arrives as a message carrying the option's text.
+
+    The ``recommended`` option is highlighted, and every button is marked as auto-selectable.
+    """
     clean_options = [option.strip() for option in options or [] if option.strip()]
     if not clean_options:
         return []
+    recommended = recommended.strip() if recommended else None
     return [
         {
             "type": "actions",
@@ -416,14 +423,56 @@ def option_actions(
                             "type": "open_swe_option",
                             "response": option,
                             **({"user_id": user_id} if user_id is not None else {}),
+                            **({"auto_select": True} if recommended else {}),
                         }
                     ),
                     "action_id": f"open_swe_option_select_{index}",
+                    **({"style": "primary"} if option == recommended else {}),
                 }
                 for index, option in enumerate(clean_options[:5])
             ],
         }
     ]
+
+
+def is_option_action_id(action_id: object) -> bool:
+    return isinstance(action_id, str) and (
+        action_id == OPTION_ACTION_ID or action_id.startswith(f"{OPTION_ACTION_ID}_")
+    )
+
+
+def has_option_element(elements: object) -> bool:
+    """Whether a Block Kit ``elements`` list holds one of Open SWE's option buttons."""
+    if not isinstance(elements, list):
+        return False
+    return any(
+        isinstance(element, dict) and is_option_action_id(element.get("action_id"))
+        for element in elements
+    )
+
+
+def selected_option_blocks(blocks: list[JsonObject], note: str) -> list[JsonObject]:
+    """``blocks`` with their option buttons replaced by ``note``; ``[]`` when there were none."""
+    selected_block: JsonObject = {
+        "type": "context",
+        "elements": [{"type": "plain_text", "text": note}],
+    }
+    updated_blocks: list[JsonObject] = []
+    replaced = False
+    for block in blocks:
+        elements = block.get("elements")
+        if block.get("type") != "actions" or not has_option_element(elements):
+            updated_blocks.append(block)
+            continue
+        if not replaced:
+            updated_blocks.append(selected_block)
+            replaced = True
+        if isinstance(elements, list):
+            remaining = [element for element in elements if not has_option_element([element])]
+            if remaining:
+                updated_blocks.append({**block, "elements": remaining})
+
+    return updated_blocks if replaced else []
 
 
 def view_payload(view: ModalView) -> dict[str, Any]:

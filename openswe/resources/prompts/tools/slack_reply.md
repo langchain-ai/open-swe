@@ -48,6 +48,13 @@ the offer. Do not add options such as "Reply in Slack" or "Tell me more" that me
 ask the user to type a reply; they can already reply manually.
 Do not invent choices for open-ended questions.
 
+When one option is the one you would pick, set `recommended_option` to its exact
+label. It is highlighted, and if nobody clicks a button or replies within 30
+seconds it is selected automatically and you are woken to proceed with it. A
+single option must always be passed as `recommended_option`; the call fails
+otherwise. When an action must not proceed without an explicit human answer,
+ask in `message` without options instead.
+
 When the decision belongs to a specific person, set `option_user_id` to their
 Slack user ID (the `U...` ID, not their name or GitHub login). This restricts
 all option buttons to that person server-side; an @mention alone does not.
