@@ -121,6 +121,8 @@ async def queue_access(
     if queue is None:
         raise HTTPException(404, "Queue not found")
     await require_repo_access_for_user(user.github_login, running.config.repository)
+    if queue.mode == "native":
+        raise HTTPException(409, "Native queue observation is read-only; use GitHub queue controls")
     async with GitHubClient.as_user(user.github_login) as github:
         repo = github.repo(*running.config.repository.split("/", 1))
         if (await repo.info()).get("id") != running.config.repository_id:
