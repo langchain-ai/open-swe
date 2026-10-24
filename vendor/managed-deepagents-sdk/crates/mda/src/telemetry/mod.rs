@@ -11,8 +11,8 @@ mod transport;
 
 pub use command::{CommandContext, CommandInvocation};
 pub use event::EventEnvelope;
-pub use facts::{AuthInfo, DeploymentInfo, ReportableFacts};
+pub use facts::{DeploymentInfo, ReportableFacts};
 pub use gates::is_telemetry_disabled;
 pub use metadata::InvocationMetadata;
-pub use posthog::{posthog_transport, PosthogTransport};
+pub use posthog::posthog_transport;
 pub use transport::TelemetryTransport;

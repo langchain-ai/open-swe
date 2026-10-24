@@ -17,6 +17,12 @@ from typing_extensions import TypedDict
 from managed_deepagents._channels.schedule_delivery import read_schedule_deliver_to
 from managed_deepagents._identity_runtime import _field, is_studio_auth_user
 from managed_deepagents._loopback import is_loopback_url, resolve_loopback_api_url
+from managed_deepagents._thread_record import (
+    THREAD_PARTICIPANTS_METADATA,
+    THREAD_RECORD_METADATA,
+    parse_thread_record,
+    strip_thread_record_keys,
+)
 from managed_deepagents.run_context import ChannelContext, is_managed_key
 
 if TYPE_CHECKING:
@@ -54,11 +60,21 @@ class ExecutionUser(TypedDict):
 
 
 @with_config(ConfigDict(extra="forbid"))
+class ScheduleRunAs(TypedDict):
+    """The thread participant a schedule runs as."""
+
+    id: str
+    role: Literal["owner", "member"]
+
+
+@with_config(ConfigDict(extra="forbid"))
 class ScheduleAccess(TypedDict):
     owner: str
     assistant: str
     execution: ExecutionUser
     thread: NotRequired[str]
+    #: Set when a user schedule runs as another participant of the owner's thread.
+    run_as: NotRequired[ScheduleRunAs]
 
 
 class ScheduleHandoffUser(ExecutionUser, total=False):
@@ -143,8 +159,12 @@ def schedule_handoff_user(
             "mda_agent_auth_principal_id"
         ):
             raise ValueError("Schedule access is not permitted")
+    # A user schedule runs as a person: its owner, or (``run_as``) another
+    # participant of the owner's thread.
     elif (
-        access["owner"] != f"user:{execution['mda_user_id']}"
+        execution["mda_user_id"]
+        not in (access["owner"].removeprefix("user:"), access.get("run_as", {}).get("id"))
+        or not access["owner"].startswith("user:")
         or execution.get("mda_user_kind") == "service"
         or not execution.get("mda_agent_auth_principal_id")
     ):
@@ -176,6 +196,7 @@ async def authorize_schedule(  # noqa: C901 - one branch per cron event check
     # Cron payloads carry ``metadata`` on the wire although the upstream
     # ``CronsCreate`` / ``CronsUpdate`` TypedDicts do not declare it.
     data = cast("dict[str, object]", value)
+    _guard_cron_record(action, data, access)
     metadata = data.get("metadata")
     payload = data.get("payload")
     if access is None:
@@ -213,6 +234,51 @@ async def authorize_schedule(  # noqa: C901 - one branch per cron event check
     if action == "update" and data.get("schedule") is not None:
         await _check_schedule_limit(access, str(data.get("cron_id")))
     return filters
+
+
+def _guard_cron_record(action: str, data: dict[str, object], access: ScheduleAccess | None) -> None:
+    """Keep a thread record only on a runtime new-thread schedule, for its execution.
+
+    The Agent Server copies a cron's metadata into the thread it creates, so a
+    new-thread schedule's record becomes that thread's. A thread's runs merge
+    cron metadata over thread metadata, so a same-thread schedule never carries
+    one; deploy schedules and updates never add one either.
+    """
+    metadata = data.get("metadata")
+    payload = data.get("payload")
+    keep = (
+        action == "create"
+        and access is not None
+        and not data.get("thread_id")
+        and isinstance(metadata, dict)
+        and is_execution_record(metadata, access["execution"])
+    )
+    if keep and isinstance(metadata, dict):
+        record = {key: metadata[key] for key in _RECORD_KEYS}
+        strip_thread_record_keys(metadata)
+        metadata.update(record)
+    else:
+        strip_thread_record_keys(metadata)
+    run_metadata = _field(payload, "metadata")
+    if run_metadata is not metadata:
+        strip_thread_record_keys(run_metadata)
+    strip_thread_record_keys(_field(_field(payload, "config"), "metadata"))
+
+
+_RECORD_KEYS = (THREAD_RECORD_METADATA, THREAD_PARTICIPANTS_METADATA)
+
+
+def is_execution_record(metadata: object, execution: object) -> bool:
+    """A record of the execution's conversation, owned by the execution or by no one."""
+    record = parse_thread_record(metadata, exact=True)
+    if record is None or record.origin is None:
+        return False
+    channel = record.origin.channel
+    return (
+        channel.provider == _field(execution, "mda_source_provider")
+        and channel.source_thread_key == _field(execution, "mda_source_thread_id")
+        and dict(record.participants) in ({}, {_field(execution, "mda_user_id"): "owner"})
+    )
 
 
 _LOCAL_DEV_ENV = "MDA_LOCAL_DEV"

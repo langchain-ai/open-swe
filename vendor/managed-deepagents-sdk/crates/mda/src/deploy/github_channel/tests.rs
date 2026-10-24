@@ -1547,9 +1547,13 @@ fn agent_auth_stub(
             .map(|(status, body)| (status, body.to_string()))
             .collect(),
     );
-    let client =
-        langsmith::Client::new_with_platform(&url, Some(&url), "lsv2_test", Some("tenant".into()))
-            .unwrap();
+    let client = langsmith::Client::new(
+        &url,
+        &url,
+        langsmith::ApiKey::new("lsv2_test"),
+        Some("tenant".into()),
+    )
+    .unwrap();
     (client, rx)
 }
 

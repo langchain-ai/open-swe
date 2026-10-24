@@ -169,6 +169,7 @@ async def start_http_ingress_agent(
             metadata=metadata or None,
             webhook=prepared.get("webhook"),
             multitask_strategy=multitask_strategy,
+            thread_origin={"binding": started_binding, "sender": user_id},
             **build_ingress_run_context(binding=started_binding, context=prepared.get("context")),
         )
     except Exception as error:

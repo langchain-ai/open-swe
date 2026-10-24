@@ -196,6 +196,7 @@ async def start_ingress_agent(
         thread_id=thread_id,
         assistant_id=assistant_id,
         messages=messages,
+        thread_origin={"binding": binding, "sender": user_id},
         **build_ingress_run_context(binding=binding, context=context),
     )
 
@@ -220,6 +221,7 @@ async def resume_ingress_agent(
         thread_id=thread_id,
         assistant_id=assistant_id,
         resume=resume,
+        thread_origin={"binding": binding, "sender": user_id},
         **build_ingress_run_context(binding=binding, context=context),
     )
 

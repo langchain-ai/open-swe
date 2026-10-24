@@ -34,6 +34,7 @@ pub(crate) mod env_file;
 pub(crate) mod github_channel;
 pub(crate) mod helpers;
 mod image;
+pub(crate) mod langsmith_context;
 pub(crate) mod linear_channel;
 pub mod prepare;
 mod trigger_channels;
@@ -56,9 +57,9 @@ use crate::command::CommandCompletion;
 use crate::error::{categorized, category_of, is_cancellation, ErrorCategory};
 use crate::install::Installation;
 use crate::langsmith::{
-    self, is_cli_session_api_key, note_session_api_key, require_str, resolve_preferred_env,
-    ConnectionSummary, ContextHubClient, Credential, DeploymentAgent, Login, RepoOwnership,
-    GATEWAY_API_KEY_ENV, REMOVED_API_KEY_ENVS,
+    self, is_cli_session_api_key, lookup_env_file, lookup_env_or_process, note_session_api_key,
+    require_str, resolve_preferred_env, ApiKey, ConnectionSummary, ContextHubClient,
+    DeploymentAgent, Login, RepoOwnership, GATEWAY_API_KEY_ENV, REMOVED_API_KEY_ENVS,
 };
 use crate::naming::{normalize_name, validate_agent_id};
 use crate::telemetry::{DeploymentInfo, ReportableFacts};
@@ -80,11 +81,10 @@ use helpers::{
     ensure_deployment_name_secret, ensure_langsmith_url_secret, ensure_public_api_url,
     ensure_recipe_snapshot_secret, ensure_sandbox_api_endpoint_secret, find_agent_deployment,
     find_deployment_by_name, find_deployment_id_by_name, is_failed_status, is_interrupted_status,
-    is_request_timeout, is_terminal_status, resolve_context_hub_base_url,
-    resolve_langsmith_api_bases, resolve_platform_api_url, secrets_from_env,
-    set_mda_handoff_secret, set_workspace_id_secret, smith_dashboard_base_url,
-    REMOVED_WORKSPACE_ID_ENVS, RESERVED_ENV_VARS, WORKSPACE_ID_ENV,
+    is_request_timeout, is_terminal_status, secrets_from_env, set_mda_handoff_secret,
+    set_workspace_id_secret, smith_dashboard_base_url, RESERVED_ENV_VARS, WORKSPACE_ID_ENV,
 };
+use langsmith_context::{resolve_workspace_id, LangSmithEndpoints, WORKSPACE_FLAG_HINT};
 
 /// Delay between revision status polls.
 const POLL_INTERVAL: Duration = Duration::from_secs(3);
@@ -194,27 +194,18 @@ fn run_session(
     // -- 1. Env + credentials ----------------------------------------------
     let env_path = root.join(".env");
     let env_vars = env_file::parse_env_file(&env_path);
-    let (default_host, _) = resolve_langsmith_api_bases(&env_vars);
-    let host_url = opts
-        .host_url
-        .as_deref()
-        .map(str::trim)
-        .filter(|value| !value.is_empty())
-        .unwrap_or(default_host.as_str());
+    let endpoints = LangSmithEndpoints::resolve(&env_vars, opts.host_url.as_deref());
     let image_source = image::select_image_source(
-        image::requires_external_image(host_url),
+        image::requires_external_image(&endpoints.host_url),
         opts.push_to.as_deref(),
     )?;
-    let platform_api_url = resolve_platform_api_url(host_url, &env_vars);
-    let credential = resolve_api_key(&env_vars, &env_path, &platform_api_url)?;
-    let workspace_id = resolve_preferred_env(
-        WORKSPACE_ID_ENV,
-        REMOVED_WORKSPACE_ID_ENVS,
-        opts.workspace_id.as_deref(),
-        &env_vars,
-        |key| std::env::var(key).ok(),
-        " or pass --workspace-id instead",
-    )?;
+    let api_key = resolve_api_key(&env_vars, &env_path, &endpoints.platform_api_url)?;
+    let workspace_id =
+        resolve_workspace_id(&env_vars, opts.workspace_id.as_deref(), WORKSPACE_FLAG_HINT)?;
+    let ctx = endpoints.with_auth(api_key, workspace_id);
+    let host_url = ctx.host_url();
+    let platform_api_url = ctx.platform_api_url();
+    let workspace_id = &ctx.workspace_id;
 
     // One agent-file parse for deploy preflight (name / model / memory).
     let agent = agent_config::read_agent_static_config(project)?;
@@ -229,7 +220,7 @@ fn run_session(
     set_mda_handoff_secret(&mut secrets, &random_handoff_secret());
     // Scope the runtime to the same workspace the deploy clients use,
     // overriding any `LANGSMITH_WORKSPACE_ID` copied from `.env`.
-    if let Some(workspace) = &workspace_id {
+    if let Some(workspace) = workspace_id {
         set_workspace_id_secret(&mut secrets, workspace);
     }
     // Let the runtime name its sandboxes after this deployment so `mda delete`
@@ -246,13 +237,7 @@ fn run_session(
     // Agent Server without a second ACAO from the managed HTTP app.
     ensure_cors_allow_origins(&mut secrets, &env_vars);
 
-    let client: &langsmith::Client =
-        client_slot.insert(langsmith::Client::with_credential_and_platform(
-            host_url,
-            Some(platform_api_url.as_str()),
-            credential.clone(),
-            workspace_id.clone(),
-        )?);
+    let client: &langsmith::Client = client_slot.insert(ctx.client()?);
     // The credential may come from a login during this deploy.
     facts.refresh_identity(client);
 
@@ -297,7 +282,7 @@ fn run_session(
     // bake, so this has to run as a preflight. After Context Hub sync it would
     // leave remote state changed on an org that cannot run the agent.
     if compile::project_uses_sandbox(project)? {
-        ensure_sandbox_api_endpoint_secret(&mut secrets, &platform_api_url);
+        ensure_sandbox_api_endpoint_secret(&mut secrets, platform_api_url);
         client.ensure_sandbox_access().context(
             "project declares a managed sandbox, but sandbox access is unavailable for this organization",
         )?;
@@ -310,13 +295,7 @@ fn run_session(
     // `memory` declaration would be a prompt for a deploy that never had a chance.
     let memory = compile::resolve_memory(project)?;
 
-    let context_url = resolve_context_hub_base_url(host_url, &platform_api_url);
-    let context_client = ContextHubClient::with_credential_and_host(
-        &context_url,
-        host_url,
-        credential,
-        workspace_id.clone(),
-    )?;
+    let context_client = ctx.context_hub_client()?;
 
     // -- 2c. Confirm before overwriting same-name resources ----------------
     // Last gate before remote state changes: a first Managed Deep Agent deploy
@@ -446,9 +425,7 @@ fn run_session(
             Some(agent) => {
                 resolve_or_create_agent_deployment(client, agent, opts.deployment_type, &secrets)?
             }
-            None => {
-                resolve_or_create_deployment(client, &name, opts.deployment_type, &secrets, true)?
-            }
+            None => resolve_or_create_deployment(client, &name, opts.deployment_type, &secrets)?,
         };
         (deployment_id, None)
     };
@@ -588,14 +565,12 @@ fn secret_is_available(
     secrets: &[langsmith::Secret],
     client: &langsmith::Client,
     workspace_keys: &mut WorkspaceSecretKeys,
-) -> Result<bool> {
-    if claim_secret_from_local_sources(key, env_vars, secrets)? {
-        return Ok(true);
-    }
-    Ok(matches!(
-        verify_workspace_secret(key, client, workspace_keys),
-        WorkspaceSecretStatus::Present
-    ))
+) -> bool {
+    claim_secret_from_local_sources(key, env_vars, secrets)
+        || matches!(
+            verify_workspace_secret(key, client, workspace_keys),
+            WorkspaceSecretStatus::Present
+        )
 }
 
 /// Run a fallible step under an active spinner, switching the spinner to an
@@ -1071,21 +1046,12 @@ fn bake_env_vars(
 }
 
 /// Look up a LangSmith deployment by name, or create one when missing.
-///
-/// Shared by `mda deploy` and local Slack provisioning in `mda dev`.
-/// When `show_progress` is false (soft-skip paths in `mda dev`), failures are
-/// returned quietly without flashing spinner error lines.
-pub(crate) fn resolve_or_create_deployment(
+fn resolve_or_create_deployment(
     client: &langsmith::Client,
     name: &str,
     deployment_type: DeploymentType,
     secrets: &[langsmith::Secret],
-    show_progress: bool,
 ) -> Result<String> {
-    if !show_progress {
-        return resolve_or_create_deployment_quiet(client, name, deployment_type, secrets);
-    }
-
     let sp = spinner();
     sp.start(format!("Looking up deployment '{name}'"));
     let listed = step(
@@ -1137,31 +1103,6 @@ pub(crate) fn resolve_or_create_deployment(
                 }
             }
         }
-    }
-}
-
-/// Quiet variant used by `mda dev` Slack soft-skips (no spinner chrome).
-fn resolve_or_create_deployment_quiet(
-    client: &langsmith::Client,
-    name: &str,
-    deployment_type: DeploymentType,
-    secrets: &[langsmith::Secret],
-) -> Result<String> {
-    let listed = client.list_deployments(name)?;
-    if let Some(id) = find_deployment_id_by_name(&listed, name) {
-        return Ok(id);
-    }
-    match client.create_deployment(name, deployment_type, secrets) {
-        Ok(created) => require_str(&created, "id", "create deployment"),
-        Err(err) if is_request_timeout(&err) => {
-            let listed = client.list_deployments(name)?;
-            if let Some(id) = find_deployment_id_by_name(&listed, name) {
-                Ok(id)
-            } else {
-                Err(err)
-            }
-        }
-        Err(err) => Err(err),
     }
 }
 
@@ -1351,35 +1292,6 @@ pub(crate) fn ensure_project(path: &Path) -> Result<()> {
     Ok(())
 }
 
-/// Whether a non-empty LangSmith API key is present in `env_vars` only.
-fn langsmith_api_key_in_map(env_vars: &std::collections::BTreeMap<String, String>) -> bool {
-    env_key_in_map(env_vars, API_KEY_ENV)
-}
-
-fn env_key_in_map(env_vars: &std::collections::BTreeMap<String, String>, key: &str) -> bool {
-    env_vars
-        .get(key)
-        .map(|value| value.trim())
-        .is_some_and(|value| !value.is_empty())
-}
-
-fn langsmith_api_key_from_map(
-    env_vars: &std::collections::BTreeMap<String, String>,
-) -> Option<String> {
-    env_vars
-        .get(API_KEY_ENV)
-        .map(|value| value.trim())
-        .filter(|value| !value.is_empty())
-        .map(str::to_string)
-}
-
-fn langsmith_api_key_from_process() -> Option<String> {
-    std::env::var(API_KEY_ENV)
-        .ok()
-        .map(|value| value.trim().to_string())
-        .filter(|value| !value.is_empty())
-}
-
 /// A durable key this process put into its own environment (see
 /// [`export_langsmith_api_key`]). `mda dev` re-resolves on every watch rebuild,
 /// so without this a key first read from `.env` would later pose as a shell
@@ -1389,7 +1301,7 @@ static SELF_EXPORTED_API_KEY: Mutex<Option<String>> = Mutex::new(None);
 /// A durable `LANGSMITH_API_KEY` the developer exported in the shell, as
 /// opposed to a CLI session PAT or a key this process exported itself.
 fn langsmith_api_key_from_shell(platform_api_url: &str) -> Option<String> {
-    let key = langsmith_api_key_from_process()?;
+    let key = lookup_env_or_process(API_KEY_ENV, &BTreeMap::new())?;
     let self_exported = SELF_EXPORTED_API_KEY
         .lock()
         .is_ok_and(|exported| exported.as_deref() == Some(key.as_str()));
@@ -1399,7 +1311,7 @@ fn langsmith_api_key_from_shell(platform_api_url: &str) -> Option<String> {
 /// Export `key` into this process's env so later steps and `mda dev` children
 /// see it, remembering it so it is not later mistaken for a shell export.
 fn export_langsmith_api_key(key: &str) {
-    if langsmith_api_key_from_process().as_deref() == Some(key) {
+    if lookup_env_or_process(API_KEY_ENV, &BTreeMap::new()).as_deref() == Some(key) {
         return;
     }
     if let Ok(mut exported) = SELF_EXPORTED_API_KEY.lock() {
@@ -1425,8 +1337,7 @@ pub(crate) fn is_cli_session_env_entry(project_root: &Path, key: &str, value: &s
         return false;
     }
     let env_vars = env_file::parse_env_file(&env_file::project_env_persist_path(project_root));
-    let (host_url, _) = resolve_langsmith_api_bases(&env_vars);
-    let platform = resolve_platform_api_url(&host_url, &env_vars);
+    let platform = LangSmithEndpoints::resolve(&env_vars, None).platform_api_url;
     is_cli_session_api_key(value, &platform)
 }
 
@@ -1439,7 +1350,7 @@ fn mirror_gateway_api_key(env_path: &Path, key: &str) -> Result<()> {
     if !env.contains_key(GATEWAY_API_KEY_ENV) {
         return Ok(());
     }
-    if env_key_in_map(&env, GATEWAY_API_KEY_ENV) {
+    if lookup_env_file(GATEWAY_API_KEY_ENV, &env).is_some() {
         return Ok(());
     }
     env_file::set_env_key(env_path, GATEWAY_API_KEY_ENV, key)
@@ -1499,15 +1410,14 @@ pub(crate) fn ensure_project_langsmith_api_key(
 ) -> Result<()> {
     let project_env = env_file::project_env_persist_path(project_root);
     let mut env_vars = env_file::parse_env_file(&project_env);
-    let (host_url, _) = resolve_langsmith_api_bases(&env_vars);
-    let platform = resolve_platform_api_url(&host_url, &env_vars);
+    let platform = LangSmithEndpoints::resolve(&env_vars, None).platform_api_url;
 
     // The shell wins over staged and project `.env` keys, like every other CLI
     // setting.
     if let Some(key) = langsmith_api_key_from_shell(&platform) {
         let project_vars = env_file::parse_env_file(&project_env);
         crate::langsmith::warn_if_shell_shadows_env_file(API_KEY_ENV, &key, &project_vars);
-        let seed_project = !langsmith_api_key_in_map(&project_vars);
+        let seed_project = lookup_env_file(API_KEY_ENV, &project_vars).is_none();
         apply_langsmith_api_key(&key, &project_env, staged_env_dir, seed_project)?;
         return Ok(());
     }
@@ -1515,7 +1425,7 @@ pub(crate) fn ensure_project_langsmith_api_key(
     if let Some(out_dir) = staged_env_dir {
         let staged_path = out_dir.join(".env");
         let staged_env = env_file::parse_env_file(&staged_path);
-        if let Some(key) = langsmith_api_key_from_map(&staged_env) {
+        if let Some(key) = lookup_env_file(API_KEY_ENV, &staged_env) {
             let is_session = is_cli_session_api_key(&key, &platform);
             let cache_live =
                 Login::for_api_url(&platform).cached_api_key().as_deref() == Some(key.as_str());
@@ -1529,7 +1439,9 @@ pub(crate) fn ensure_project_langsmith_api_key(
                     note_session_api_key(&key);
                 }
                 mirror_gateway_api_key(&staged_path, &key)?;
-                if !is_session && langsmith_api_key_in_map(&env_file::parse_env_file(&project_env))
+                if !is_session
+                    && lookup_env_file(API_KEY_ENV, &env_file::parse_env_file(&project_env))
+                        .is_some()
                 {
                     mirror_gateway_api_key(&project_env, &key)?;
                 }
@@ -1540,7 +1452,7 @@ pub(crate) fn ensure_project_langsmith_api_key(
         }
     }
 
-    if let Some(key) = langsmith_api_key_from_map(&env_file::parse_env_file(&project_env)) {
+    if let Some(key) = lookup_env_file(API_KEY_ENV, &env_file::parse_env_file(&project_env)) {
         if is_cli_session_api_key(&key, &platform) {
             // A prior restage wrote a session PAT into the project file. Strip it
             // (and a matching gateway alias) so cache/login can refresh.
@@ -1556,7 +1468,7 @@ pub(crate) fn ensure_project_langsmith_api_key(
 
     // Durable shell keys returned above; what is left in the process env is a
     // session PAT or a key this process exported from a `.env` it no longer has.
-    if let Some(key) = langsmith_api_key_from_process() {
+    if let Some(key) = lookup_env_or_process(API_KEY_ENV, &BTreeMap::new()) {
         // Only reuse a process-exported session PAT while the cache still
         // considers it live. An expired PAT left in the environment must
         // not short-circuit re-login or get written to the project `.env`.
@@ -1585,21 +1497,22 @@ pub(crate) fn ensure_project_langsmith_api_key(
         return Ok(());
     }
 
-    let credential = resolve_api_key(&env_vars, &project_env, &platform)?;
-    let Credential::ApiKey(key) = credential;
+    let api_key = resolve_api_key(&env_vars, &project_env, &platform)?;
+    let key = api_key.as_str();
     // `resolve_api_key` already wrote pasted keys to the project `.env`. Device
     // login only caches a short-lived PAT — stage it, do not make it durable.
-    let pasted_into_project = langsmith_api_key_in_map(&env_file::parse_env_file(&project_env));
+    let pasted_into_project =
+        lookup_env_file(API_KEY_ENV, &env_file::parse_env_file(&project_env)).is_some();
     if pasted_into_project {
-        mirror_gateway_api_key(&project_env, &key)?;
+        mirror_gateway_api_key(&project_env, key)?;
         if let Some(out_dir) = staged_env_dir {
             let staged = out_dir.join(".env");
-            env_file::set_env_key(&staged, API_KEY_ENV, &key)?;
-            mirror_gateway_api_key(&staged, &key)?;
+            env_file::set_env_key(&staged, API_KEY_ENV, key)?;
+            mirror_gateway_api_key(&staged, key)?;
         }
     } else {
-        note_session_api_key(&key);
-        apply_langsmith_api_key(&key, &project_env, staged_env_dir, false)?;
+        note_session_api_key(key);
+        apply_langsmith_api_key(key, &project_env, staged_env_dir, false)?;
     }
     Ok(())
 }
@@ -1642,7 +1555,7 @@ pub(crate) fn resolve_api_key(
     env_vars: &std::collections::BTreeMap<String, String>,
     env_path: &Path,
     platform_api_url: &str,
-) -> Result<Credential> {
+) -> Result<ApiKey> {
     if let Some(key) = resolve_preferred_env(
         API_KEY_ENV,
         REMOVED_API_KEY_ENVS,
@@ -1651,7 +1564,7 @@ pub(crate) fn resolve_api_key(
         |key| std::env::var(key).ok(),
         " instead (same value, renamed)",
     )? {
-        return Ok(Credential::ApiKey(key));
+        return Ok(ApiKey::new(key));
     }
 
     let login = Login::for_api_url(platform_api_url);
@@ -1659,7 +1572,7 @@ pub(crate) fn resolve_api_key(
         // So later steps and `mda dev` children inherit the session key.
         note_session_api_key(&key);
         std::env::set_var("LANGSMITH_API_KEY", &key);
-        return Ok(Credential::ApiKey(key));
+        return Ok(ApiKey::new(key));
     }
 
     if !std::io::stdin().is_terminal() {
@@ -1691,7 +1604,7 @@ pub(crate) fn resolve_api_key(
 ///
 /// OAuth access tokens (~5 minutes) are not enough for Fleet or `mda dev`; the
 /// CLI-minted `lsv2_pt_…` key (2 hours) is what those paths need.
-fn authorize_with_device_login(platform_api_url: &str) -> Result<Credential> {
+fn authorize_with_device_login(platform_api_url: &str) -> Result<ApiKey> {
     let http = crate::http::client_builder()
         .timeout(std::time::Duration::from_secs(30))
         .build()
@@ -1708,18 +1621,18 @@ fn authorize_with_device_login(platform_api_url: &str) -> Result<Credential> {
          expiry and paste it when prompted. If this isn't your machine, revoke the key \
          under Settings → API Keys when you're done.",
     )?;
-    Ok(Credential::ApiKey(key))
+    Ok(ApiKey::new(key))
 }
 
 /// Write a user-pasted `LANGSMITH_API_KEY` to `.env` and the process environment.
-fn persist_api_key(env_path: &Path, key: &str) -> Result<Credential> {
+fn persist_api_key(env_path: &Path, key: &str) -> Result<ApiKey> {
     env_file::set_env_key(env_path, "LANGSMITH_API_KEY", key)?;
     mirror_gateway_api_key(env_path, key)?;
     // So later resolve_api_key calls in this process see the key even when the
     // caller's in-memory env map was parsed before the write.
     export_langsmith_api_key(key);
     log::success(format!("Saved LANGSMITH_API_KEY to {}", env_path.display()))?;
-    Ok(Credential::ApiKey(key.to_string()))
+    Ok(ApiKey::new(key))
 }
 
 /// How the interactive API-key prompt was answered.
@@ -1967,7 +1880,7 @@ fn ensure_channel_requirements_secrets(
     let (required, optional_slack) = channel_secret_policy(channel_requirements);
     let mut slack_inactive = false;
     for key_env in optional_slack {
-        if !secret_is_available(&key_env, env_vars, secrets, client, workspace_keys)? {
+        if !secret_is_available(&key_env, env_vars, secrets, client, workspace_keys) {
             slack_inactive = true;
         }
     }
@@ -2039,7 +1952,7 @@ fn ensure_required_secret(
     workspace_keys: &mut WorkspaceSecretKeys,
     context: &str,
 ) -> Result<()> {
-    if claim_secret_from_local_sources(key_env, env_vars, secrets)? {
+    if claim_secret_from_local_sources(key_env, env_vars, secrets) {
         return Ok(());
     }
 
@@ -2051,15 +1964,6 @@ fn ensure_required_secret(
         WorkspaceSecretStatus::Present => {
             sp.stop(format!("{key_env} found in LangSmith workspace secrets"));
             Ok(())
-        }
-        WorkspaceSecretStatus::PlatformUnavailable => {
-            sp.error(format!("{key_env} is not configured"));
-            bail!(
-                "{context}. {key_env} is not set in {env}.\n\
-                 Add `{key_env}=...` to {env}, then deploy again. Values exported in your \
-                 shell are not read.",
-                env = env.display(),
-            );
         }
         WorkspaceSecretStatus::Absent => {
             sp.error(format!("{key_env} is not configured"));
@@ -2128,7 +2032,7 @@ fn ensure_model_api_key(
     let key_env = match requirement {
         dependencies::ModelApiKeyRequirement::NoPreflight => return Ok(()),
         dependencies::ModelApiKeyRequirement::DeploymentSecret(key_env) => {
-            if claim_secret_from_local_sources(key_env, env_vars, secrets)? {
+            if claim_secret_from_local_sources(key_env, env_vars, secrets) {
                 return Ok(());
             }
             bail!(
@@ -2162,14 +2066,6 @@ fn ensure_model_api_key(
                  Integrations > Provider Secrets in LangSmith ({dashboard}), then deploy again."
             );
         }
-        WorkspaceSecretStatus::PlatformUnavailable => {
-            sp.error("Could not check LangSmith workspace Provider Secrets");
-            bail!(
-                "The agent model '{model}' uses LangSmith Gateway and requires {key_env} in \
-                 LangSmith workspace Provider Secrets, but Provider Secrets are unavailable for \
-                 this host."
-            );
-        }
         WorkspaceSecretStatus::LookupFailed(err) => {
             sp.error("Could not check LangSmith workspace Provider Secrets");
             bail!(
@@ -2184,7 +2080,6 @@ fn ensure_model_api_key(
 /// Cached result of listing LangSmith workspace secret keys for one deploy.
 enum WorkspaceSecretKeys {
     Unloaded,
-    PlatformUnavailable,
     Keys(Vec<String>),
     LookupFailed(String),
 }
@@ -2193,8 +2088,6 @@ enum WorkspaceSecretKeys {
 enum WorkspaceSecretStatus {
     Present,
     Absent,
-    /// Host has no LangSmith platform API (custom/self-hosted).
-    PlatformUnavailable,
     LookupFailed(anyhow::Error),
 }
 
@@ -2204,15 +2097,9 @@ fn claim_secret_from_local_sources(
     key_env: &str,
     env_vars: &std::collections::BTreeMap<String, String>,
     secrets: &[langsmith::Secret],
-) -> Result<bool> {
-    if secrets.iter().any(|secret| secret.name == key_env) {
-        return Ok(true);
-    }
-    if env_vars.get(key_env).is_some_and(|value| !value.is_empty()) {
-        return Ok(true);
-    }
-
-    Ok(false)
+) -> bool {
+    secrets.iter().any(|secret| secret.name == key_env)
+        || env_vars.get(key_env).is_some_and(|value| !value.is_empty())
 }
 
 /// Look up `key_env` in LangSmith workspace secrets (no spinner / messaging).
@@ -2225,19 +2112,14 @@ fn verify_workspace_secret(
     workspace_keys: &mut WorkspaceSecretKeys,
 ) -> WorkspaceSecretStatus {
     if matches!(workspace_keys, WorkspaceSecretKeys::Unloaded) {
-        *workspace_keys = if !client.platform_api_available() {
-            WorkspaceSecretKeys::PlatformUnavailable
-        } else {
-            match client.workspace_secret_keys() {
-                Ok(keys) => WorkspaceSecretKeys::Keys(keys),
-                Err(err) => WorkspaceSecretKeys::LookupFailed(format!("{err:#}")),
-            }
+        *workspace_keys = match client.workspace_secret_keys() {
+            Ok(keys) => WorkspaceSecretKeys::Keys(keys),
+            Err(err) => WorkspaceSecretKeys::LookupFailed(format!("{err:#}")),
         };
     }
 
     match workspace_keys {
         WorkspaceSecretKeys::Unloaded => unreachable!("workspace keys loaded above"),
-        WorkspaceSecretKeys::PlatformUnavailable => WorkspaceSecretStatus::PlatformUnavailable,
         WorkspaceSecretKeys::Keys(keys) if keys.iter().any(|key| key == key_env) => {
             WorkspaceSecretStatus::Present
         }
@@ -2637,14 +2519,9 @@ fn delete_schedule_crons(
 }
 
 fn managed_cron_ids(response: &serde_json::Value, deploy_only: bool) -> Result<Vec<String>> {
-    let items = if let Some(items) = response.as_array() {
-        items
-    } else if let Some(items) = response.get("items").and_then(|value| value.as_array()) {
-        items
-    } else {
-        bail!(
-            "unexpected cron search response shape: expected a JSON array or an object with an \"items\" array"
-        );
+    // `CronApi::search_managed_crons` flattens every page into one array.
+    let Some(items) = response.as_array() else {
+        bail!("unexpected cron search response shape: expected a JSON array");
     };
 
     Ok(items
@@ -2736,13 +2613,7 @@ mod tests {
     }
 
     fn test_client() -> Client {
-        Client::new_with_platform(
-            "http://127.0.0.1:1",
-            Some("http://127.0.0.1:1"),
-            "test-langsmith-key",
-            None,
-        )
-        .unwrap()
+        Client::for_test("http://127.0.0.1:1")
     }
 
     #[test]
@@ -2810,7 +2681,11 @@ mod tests {
         env.insert("OPENAI_API_KEY".to_string(), "sk-from-dotenv".to_string());
         let secrets = Vec::new();
 
-        assert!(claim_secret_from_local_sources("OPENAI_API_KEY", &env, &secrets).unwrap());
+        assert!(claim_secret_from_local_sources(
+            "OPENAI_API_KEY",
+            &env,
+            &secrets
+        ));
         assert!(secrets.is_empty());
     }
 
@@ -2822,7 +2697,11 @@ mod tests {
             value: "sk-already-staged".to_string(),
         }];
 
-        assert!(claim_secret_from_local_sources("OPENAI_API_KEY", &env, &secrets).unwrap());
+        assert!(claim_secret_from_local_sources(
+            "OPENAI_API_KEY",
+            &env,
+            &secrets
+        ));
         assert_eq!(secrets.len(), 1);
     }
 
@@ -2831,7 +2710,11 @@ mod tests {
         let env = BTreeMap::new();
         let secrets = Vec::new();
 
-        assert!(!claim_secret_from_local_sources("OPENAI_API_KEY", &env, &secrets).unwrap());
+        assert!(!claim_secret_from_local_sources(
+            "OPENAI_API_KEY",
+            &env,
+            &secrets
+        ));
         assert!(secrets.is_empty());
     }
 
@@ -2845,7 +2728,7 @@ mod tests {
         let previous = std::env::var("OPENAI_API_KEY").ok();
         std::env::set_var("OPENAI_API_KEY", "sk-ambient-from-shell");
         let claimed = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-            claim_secret_from_local_sources("OPENAI_API_KEY", &env, &secrets).unwrap()
+            claim_secret_from_local_sources("OPENAI_API_KEY", &env, &secrets)
         }));
         match previous {
             Some(value) => std::env::set_var("OPENAI_API_KEY", value),
@@ -3039,7 +2922,6 @@ mod tests {
         let root = tempfile::tempdir().unwrap();
         let project = test_project(root.path().to_path_buf());
         for mut workspace_keys in [
-            WorkspaceSecretKeys::PlatformUnavailable,
             WorkspaceSecretKeys::LookupFailed("unavailable".into()),
             WorkspaceSecretKeys::Unloaded,
         ] {
@@ -3653,20 +3535,6 @@ mod tests {
             {"cron_id": "cron-2", "metadata": {"mda_managed": true, "mda_managed_by": "runtime"}},
             {"id": "not-a-cron-id"}
         ]);
-        assert_eq!(
-            managed_cron_ids(&response, false).unwrap(),
-            vec!["cron-1", "cron-2"]
-        );
-    }
-
-    #[test]
-    fn managed_cron_ids_reads_search_items_wrapper() {
-        let response = json!({
-            "items": [
-                {"cron_id": "cron-1", "metadata": {"mda_managed": true}},
-                {"cron_id": "cron-2", "metadata": {"mda_managed": true}},
-            ]
-        });
         assert_eq!(
             managed_cron_ids(&response, false).unwrap(),
             vec!["cron-1", "cron-2"]

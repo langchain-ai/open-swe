@@ -17,7 +17,7 @@ impl Client {
         deployment_id: &str,
     ) -> Result<Option<String>> {
         let Some(page) = self.request_optional(
-            self.platform_base()?,
+            self.platform_base(),
             Method::GET,
             "/api/v1/agents",
             &[
@@ -68,10 +68,7 @@ mod tests {
             write!(stream, "HTTP/1.1 {status}\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}", body.len()).unwrap();
             String::from_utf8_lossy(&request[..n]).into_owned()
         });
-        (
-            Client::new_with_platform(&url, Some(&url), "key", Some("tenant".into())).unwrap(),
-            handle,
-        )
+        (Client::for_test(&url), handle)
     }
 
     #[test]

@@ -439,7 +439,6 @@ pub fn delete_stale_recipe_snapshots(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::langsmith::Credential;
     use serde_json::json;
     use std::cell::RefCell;
     use std::io::{Read, Write};
@@ -483,16 +482,6 @@ mod tests {
         String::from_utf8_lossy(&data).to_string()
     }
 
-    fn client_for(platform: String) -> Client {
-        Client::with_credential_and_platform(
-            "http://unused.invalid",
-            Some(platform.as_str()),
-            Credential::ApiKey("key".into()),
-            Some("tenant".into()),
-        )
-        .unwrap()
-    }
-
     #[test]
     fn bake_skips_when_recipe_already_ready() {
         let recipe = recipe_snapshot_name("agent", &recipe_digest(b"", None, None, None, None));
@@ -504,7 +493,7 @@ mod tests {
         .to_string();
         let (url, _rx) = serve(vec![(200, list)]);
         let outcome = bake_recipe(
-            &client_for(url),
+            &Client::for_test(&url),
             "agent",
             &RecipeSpec::default(),
             &BTreeMap::new(),
@@ -530,7 +519,7 @@ mod tests {
         .to_string();
         let (url, _rx) = serve(vec![(200, list)]);
         let outcome = bake_recipe(
-            &client_for(url),
+            &Client::for_test(&url),
             "agent",
             &RecipeSpec {
                 docker_image: Some("acme/base:0.1.1".into()),
@@ -567,7 +556,7 @@ mod tests {
         let (url, rx) = serve(vec![(200, empty_list), (200, building), (200, ready)]);
         let phases = RefCell::new(Vec::new());
         let outcome = bake_recipe(
-            &client_for(url),
+            &Client::for_test(&url),
             "agent",
             &RecipeSpec {
                 docker_image: Some("python:3.12-slim".into()),
@@ -641,7 +630,7 @@ mod tests {
         let password = format!("{}-{}", "fixture", "credential");
         let env_vars = BTreeMap::from([("GHCR_TOKEN".into(), password.clone())]);
         let outcome = bake_recipe(
-            &client_for(url),
+            &Client::for_test(&url),
             "agent",
             &RecipeSpec {
                 docker_image: Some("ghcr.io/acme/base:1".into()),
@@ -671,7 +660,7 @@ mod tests {
         let empty_list = json!({ "snapshots": [] }).to_string();
         let (url, _rx) = serve(vec![(200, empty_list)]);
         let error = bake_recipe(
-            &client_for(url),
+            &Client::for_test(&url),
             "agent",
             &RecipeSpec {
                 docker_image: Some("ghcr.io/acme/base:1".into()),
@@ -710,7 +699,7 @@ mod tests {
         let (url, _rx) = serve(vec![(200, building), (200, ready)]);
         let mut intermediate = None;
         let (name, id) = resolve_builder_base(
-            &client_for(url),
+            &Client::for_test(&url),
             "agent",
             "abc",
             &RecipeSpec {
@@ -762,9 +751,12 @@ mod tests {
         .to_string();
         let (url, rx) = serve(vec![(200, snapshots), (204, String::new())]);
 
-        let cleanup =
-            delete_stale_recipe_snapshots(&client_for(url), "agent", Some("agent--setup-active"))
-                .unwrap();
+        let cleanup = delete_stale_recipe_snapshots(
+            &Client::for_test(&url),
+            "agent",
+            Some("agent--setup-active"),
+        )
+        .unwrap();
         assert!(cleanup.in_use.is_empty());
 
         let _ = rx.recv().unwrap();
@@ -787,7 +779,8 @@ mod tests {
             (500, r#"{"detail":"delete failed"}"#.to_string()),
         ]);
 
-        let err = delete_stale_recipe_snapshots(&client_for(url), "agent", None).unwrap_err();
+        let err =
+            delete_stale_recipe_snapshots(&Client::for_test(&url), "agent", None).unwrap_err();
         let _ = rx.recv().unwrap();
         let _ = rx.recv().unwrap();
 
@@ -811,7 +804,8 @@ mod tests {
         .to_string();
         let (url, rx) = serve(vec![(200, snapshots), (409, conflict)]);
 
-        let cleanup = delete_stale_recipe_snapshots(&client_for(url), "agent", None).unwrap();
+        let cleanup =
+            delete_stale_recipe_snapshots(&Client::for_test(&url), "agent", None).unwrap();
         let _ = rx.recv().unwrap();
         let _ = rx.recv().unwrap();
 
@@ -843,9 +837,12 @@ mod tests {
             (204, String::new()),
         ]);
 
-        let cleanup =
-            delete_stale_recipe_snapshots(&client_for(url), "agent", Some("agent--setup-active"))
-                .unwrap();
+        let cleanup = delete_stale_recipe_snapshots(
+            &Client::for_test(&url),
+            "agent",
+            Some("agent--setup-active"),
+        )
+        .unwrap();
         assert_eq!(cleanup, StaleRecipeCleanup::default());
 
         let list = rx.recv().unwrap();
@@ -881,7 +878,8 @@ mod tests {
             (409, conflict),
         ]);
 
-        let cleanup = delete_stale_recipe_snapshots(&client_for(url), "agent", None).unwrap();
+        let cleanup =
+            delete_stale_recipe_snapshots(&Client::for_test(&url), "agent", None).unwrap();
         let _ = rx.recv().unwrap();
         assert!(rx.recv().unwrap().contains("docker-id"));
         assert!(rx.recv().unwrap().contains("source-id"));

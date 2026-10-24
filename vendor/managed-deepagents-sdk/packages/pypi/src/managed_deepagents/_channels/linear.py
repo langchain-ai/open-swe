@@ -191,6 +191,7 @@ def linear_channel(
         provider_config=provider_config,
         multitask_strategy=multitask_strategy,
     )
+    channel.paused_notice = _notify_paused
     if app is not None and "icon" in app:
         # Served at /channels/{name}/icon; deploy points the app's icon at it.
         channel.icon = validate_channel_icon_path(app["icon"], "Linear app.icon")
@@ -741,8 +742,9 @@ async def _acknowledge_session(target: JsonValue, delivery: HttpDelivery) -> Non
 async def _notify_finished(target: JsonValue, delivery: HttpFinishedDelivery) -> None:
     """What the conversation hears once a delivery is done.
 
-    Besides the run's own answer and ``_report_error``: where to make a pending
-    decision, or, after Stop, the final word Linear waits for.
+    Besides the run's own answer, its own paused notice and ``_report_error``:
+    that a message found the thread waiting on a decision, or, after Stop, the
+    final word Linear waits for.
     """
     if delivery["type"] == "skipped" and delivery["reason"] == "cancel":
         await _confirm_stopped(target)
@@ -755,6 +757,11 @@ async def _notify_finished(target: JsonValue, delivery: HttpFinishedDelivery) ->
     pending = pending_decision(delivery)
     if pending is not None:
         await _notify_interrupted(target, delivery, pending)
+
+
+async def _notify_paused(target: JsonValue, delivery: HttpDelivery) -> None:
+    """A run stopped on interrupts, as it ended."""
+    await _notify_interrupted(target, delivery, "interrupted")
 
 
 def _is_stop(event: LinearEvent | None) -> bool:
