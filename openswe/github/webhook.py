@@ -44,6 +44,7 @@ from openswe.run_config import Repo
 from openswe.slack.client import GitHubPrRef
 from openswe.source_context import SourceContext
 from openswe.thread_ids import (
+    github_issue_thread_id,
     pr_comment_thread_id,
     reviewer_thread_id,
     thread_id_from_branch,
@@ -1780,6 +1781,31 @@ async def prepare_github_issue_run(
             },
         )
     return GitHubIssueRun(thread_id=thread_id, input=run_input, configurable=configurable)
+
+
+async def process_github_issue(payload: dict[str, Any], event_type: str) -> None:
+    """Start the run an issue mention asks for on the backend's own thread for the issue.
+
+    For environments where MDA's GitHub channel doesn't take issue mentions
+    (``openswe.mda_channels.takes_intake``).
+    """
+    issue_id = str(payload.get("issue", {}).get("id", ""))
+    if not issue_id:
+        common.logger.warning("Missing GitHub issue id, skipping")
+        return
+    thread_id = await index.live_thread_id(github_issue_thread_id(issue_id))
+    prepared = await prepare_github_issue_run(payload, event_type, thread_id)
+    if prepared is None:
+        return
+    await common.dispatch_agent_run(
+        thread_id,
+        None,
+        prepared.configurable,
+        source="github_issue",
+        thread_title=None,
+        input=prepared.input,
+        metadata=common.AGENT_VERSION_METADATA,
+    )
 
 
 class _PullRequestNumber(BaseModel):

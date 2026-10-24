@@ -6,6 +6,7 @@ from openswe.github import forwarding
 from openswe.github import webhook as service
 from openswe.github.repo_cache import forget_cached_repos
 from openswe.human_review.completed_reviews import CompletedReview
+from openswe.mda_channels import takes_intake
 from openswe.review_guide.launch import notify_pr_updated
 from openswe.schedules import store as schedules
 from openswe.ui_invalidations import Topic
@@ -17,15 +18,24 @@ router = APIRouter()
 
 
 def _start_issue_run(
-    request: common.Request, body: bytes, background_tasks: common.BackgroundTasks
+    request: common.Request,
+    body: bytes,
+    payload: dict[str, object],
+    event_type: str,
+    background_tasks: common.BackgroundTasks,
 ) -> None:
-    """Hand an issue mention to MDA's GitHub channel, which owns the issue's conversation.
+    """Start the run an issue mention asks for, where this environment takes it.
 
-    The channel asks ``/github/channel/events`` what to start.
+    With MDA's GitHub channel on, hand it the delivery: the channel owns the issue's
+    conversation and asks ``/github/channel/events`` what to start. Otherwise the
+    backend starts it on its own thread for the issue.
     """
-    background_tasks.add_task(
-        forwarding.forward_to_mda_channel, body, forwarding.forwarded_headers(request.headers)
-    )
+    if takes_intake("github"):
+        background_tasks.add_task(
+            forwarding.forward_to_mda_channel, body, forwarding.forwarded_headers(request.headers)
+        )
+    else:
+        background_tasks.add_task(service.process_github_issue, payload, event_type)
 
 
 async def _launch_automations(
@@ -225,7 +235,7 @@ async def github_webhook(
             return gate_rejection
 
         common.logger.info("Accepted GitHub issue webhook, scheduling background task")
-        _start_issue_run(request, body, background_tasks)
+        _start_issue_run(request, body, payload, event_type, background_tasks)
         return {"status": "accepted", "message": "Processing GitHub issue event"}
 
     action = payload.get("action", "")
@@ -297,7 +307,7 @@ async def github_webhook(
         return {"status": "accepted", "message": f"Processing {event_type} event"}
 
     if is_issue_comment:
-        _start_issue_run(request, body, background_tasks)
+        _start_issue_run(request, body, payload, event_type, background_tasks)
         return {"status": "accepted", "message": "Processing GitHub issue comment event"}
 
     common.logger.info("Ignoring unsupported GitHub payload shape for event=%s", event_type)

@@ -1,4 +1,4 @@
-"""``/webhooks/github`` hands issue mentions to MDA's GitHub channel when the flag says so."""
+"""``/webhooks/github`` hands issue mentions to MDA's GitHub channel where it is on."""
 
 import hashlib
 import hmac
@@ -60,8 +60,10 @@ def intake(monkeypatch: pytest.MonkeyPatch) -> dict[str, AsyncMock]:
     )
     monkeypatch.setattr(github_routes, "_launch_automations", AsyncMock())
     register_github_logins(monkeypatch, "ada")
-    mocks = {"pr_comment": AsyncMock(), "forward": AsyncMock()}
+    monkeypatch.setenv("OPEN_SWE_MDA_CHANNELS", "linear, github")
+    mocks = {"pr_comment": AsyncMock(), "issue": AsyncMock(), "forward": AsyncMock()}
     monkeypatch.setattr(github_webhooks, "process_github_pr_comment", mocks["pr_comment"])
+    monkeypatch.setattr(github_webhooks, "process_github_issue", mocks["issue"])
     monkeypatch.setattr(forwarding, "forward_to_mda_channel", mocks["forward"])
     return mocks
 
@@ -106,6 +108,19 @@ async def test_an_issue_mention_goes_to_mda_exactly_as_github_sent_it(
     if event_type == "issues":
         # The backend's own side effects of the delivery still run.
         github_routes._launch_automations.assert_awaited_once()  # type: ignore[attr-defined]
+
+
+async def test_an_issue_mention_stays_on_open_swe_where_the_channel_is_off(
+    intake: dict[str, AsyncMock], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("OPEN_SWE_MDA_CHANNELS", "linear")
+    payload = {"action": "opened", "issue": _issue(), "repository": REPO, "sender": {}}
+
+    response, _ = await _deliver("issues", payload)
+
+    assert response.json()["message"] == "Processing GitHub issue event"
+    intake["forward"].assert_not_awaited()
+    intake["issue"].assert_awaited_once_with(payload, "issues")
 
 
 async def test_pull_request_comments_stay_on_open_swe(intake: dict[str, AsyncMock]) -> None:

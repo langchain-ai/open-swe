@@ -53,6 +53,9 @@ The backend:
 | `MDA_RUNTIME_API_KEY` | LangSmith service key the backend calls this deployment with |
 | `REMOTE_RUNTIME_TOKEN_SECRET` | Signs run tokens; comma-separated for rotation |
 | `MDA_SERVICE_SECRET` | The same value as this deployment's; `/linear/channel/*` and `/github/channel/*` answer only calls signed with it |
+| `OPEN_SWE_MDA_CHANNELS` | The channels this environment turned on, e.g. `github,linear`: the same ones as its deployment's `MDA_CHANNELS_<ENV>`. Without `github`, the backend starts issue mentions' runs itself instead of forwarding them |
+
+Channels turn on one environment at a time. The repository variable `MDA_CHANNELS_<ENVIRONMENT>` (`MDA_CHANNELS_PREVIEW`, `_STAGING`, `_PROD`) names the ones its deployment ships: deploy removes every other file in `channels/` first, since it needs each channel's app. Turn a channel on in the deployment first (set the variable, then run its deploy by hand: a manual `deploy_mda.yml` run, or `build_preview_branch.yml` with `force`), then in the backend's `OPEN_SWE_MDA_CHANNELS`. Turn it off in the reverse order.
 
 ## Run locally
 

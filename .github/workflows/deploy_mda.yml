@@ -72,6 +72,9 @@ jobs:
           if [[ ! -f mda/agent.py ]]; then
             echo "mda/agent.py does not exist at this commit; nothing to deploy."
             echo "deploy=false" >>"$GITHUB_OUTPUT"
+          elif [[ "$GITHUB_EVENT_NAME" == workflow_dispatch ]]; then
+            # A manual run always deploys: it is how a change to MDA_CHANNELS_<ENV> reaches the deployment.
+            echo "deploy=true" >>"$GITHUB_OUTPUT"
           elif git rev-parse -q --verify "refs/tags/${DEPLOYED_TAG}" >/dev/null \
             && git diff --quiet "refs/tags/${DEPLOYED_TAG}" HEAD -- mda packages/runtime-api vendor/managed-deepagents-sdk .github/workflows/deploy_mda.yml; then
             echo "Nothing deployed changed since ${DEPLOYED_TAG}; nothing to deploy."
@@ -99,6 +102,14 @@ jobs:
             ${{ matrix.environment == 'prod' && secrets.MDA_SERVICE_SECRET_PROD
             || matrix.environment == 'staging' && secrets.MDA_SERVICE_SECRET_STAGING
             || matrix.environment == 'preview' && secrets.MDA_SERVICE_SECRET_PREVIEW
+            || '' }}
+          # The channels this environment turns on, from the repository variable MDA_CHANNELS_<ENV>
+          # (e.g. "github,linear"): only those deploy, since deploy needs each one's app. The
+          # environment's backend names the same ones in OPEN_SWE_MDA_CHANNELS.
+          MDA_CHANNELS: >-
+            ${{ matrix.environment == 'prod' && vars.MDA_CHANNELS_PROD
+            || matrix.environment == 'staging' && vars.MDA_CHANNELS_STAGING
+            || matrix.environment == 'preview' && vars.MDA_CHANNELS_PREVIEW
             || '' }}
           # The backend's gateway key. Without it, model calls fall back to the deployment's
           # own key and count against the workspace's gateway spend cap.
@@ -170,6 +181,11 @@ jobs:
             export MDA_GITHUB_WEBHOOK_SECRET="$GITHUB_APP_WEBHOOK_SECRET"
           fi
           unset GITHUB_APP_PRIVATE_KEY GITHUB_APP_WEBHOOK_SECRET
+          # Only the channels this environment turned on deploy.
+          shopt -s nullglob
+          for channel in mda/channels/*.py; do
+            [[ ",${MDA_CHANNELS// /}," == *",$(basename "$channel" .py),"* ]] || rm "$channel"
+          done
           uv run --project mda --locked --python 3.13 mda deploy mda \
             --name "open-swe-mda-$ENVIRONMENT" \
             --deployment-type prod \

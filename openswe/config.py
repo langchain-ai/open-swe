@@ -222,6 +222,12 @@ ENV.var(
     secret=True,
 )
 ENV.var(
+    "OPEN_SWE_MDA_CHANNELS",
+    "Comma-separated MDA channels (github, linear, slack) that take their provider's events in "
+    "this environment instead of the backend; the environment's MDA deployment must ship the same "
+    "ones (MDA_CHANNELS_<ENV> in deploy_mda.yml). Unset: the backend takes GitHub issue mentions.",
+)
+ENV.var(
     "REMOTE_RUNTIME_TOKEN_SECRET",
     "HMAC key(s) signing the run tokens MDA runs present to the agent API (/agent-api); "
     "comma-separated, the first signs and every one verifies. Required.",
