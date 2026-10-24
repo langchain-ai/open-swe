@@ -13,11 +13,14 @@ import { ElapsedSeconds } from "@/features/agents/components/messages/ElapsedSec
 export function TurnFoldRow({
   label,
   active,
+  since,
   expanded,
   onToggle,
 }: {
   label: string
   active: boolean
+  /** Server time the live work started, for its count-up timer. */
+  since?: string
   expanded: boolean
   onToggle: () => void
 }) {
@@ -40,7 +43,7 @@ export function TurnFoldRow({
         <span className={cn("min-w-0 truncate", active && "shimmer-text")}>
           {label}
         </span>
-        {active && <ElapsedSeconds />}
+        {active && <ElapsedSeconds since={since} />}
         <Caret size={12} weight="bold" aria-hidden className="shrink-0" />
       </button>
     </div>

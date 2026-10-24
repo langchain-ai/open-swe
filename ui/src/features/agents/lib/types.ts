@@ -106,7 +106,7 @@ export interface ToolExecutionChunk {
   kind: "tool-execution"
   toolCallId: string
   toolName?: string
-  /** Stable arrival time for the tool call, shown on hover. */
+  /** Server time the tool call was made, shown on hover. */
   timestamp?: string
   title: string
   toolKind: AcpToolKind

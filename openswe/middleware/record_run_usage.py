@@ -2,6 +2,7 @@
 
 import logging
 from collections.abc import Awaitable, Callable
+from datetime import UTC, datetime
 from typing import Any
 
 from langchain.agents.middleware import AgentState, ModelRequest, ModelResponse
@@ -33,7 +34,7 @@ def _tag_run_metadata(extra_metadata: dict[str, Any]) -> None:
 
 
 class RecordRunUsageMiddleware(OpenSWEMiddleware):
-    """Tag model responses with their invocation and persist usage on completion."""
+    """Tag model responses with their invocation and server time, and persist usage on completion."""
 
     async def awrap_model_call(
         self,
@@ -63,9 +64,11 @@ class RecordRunUsageMiddleware(OpenSWEMiddleware):
                 )
             raise
         invocation_id = RunConfig.from_runtime().invocation_id
+        created_at = datetime.now(UTC).isoformat()
         for message in response.result:
             if isinstance(message, AIMessage):
                 message.response_metadata = {
+                    "created_at": created_at,
                     **message.response_metadata,
                     **({"open_swe_model_route": model_route} if model_route else {}),
                     **(
