@@ -1237,13 +1237,12 @@ async def test_walkthrough_errors_end_only_a_scout_with_a_stale_head(
     from types import SimpleNamespace
     from unittest.mock import AsyncMock
 
-    from langgraph.runtime import Runtime
     from runtime_api.loop import RunCall
     from runtime_api.operations import RunOperation
 
     from openswe.agent_api.graph import RunSession
     from openswe.review_scout.graph import PrepareReviewScoutRunMiddleware
-    from openswe.sandboxes.tool_runtime import ToolSurface
+    from openswe.sandboxes.tool_runtime import ModelChoice, SurfaceModels, ToolSurface
     from openswe.tools import plan_walkthrough, review_walkthrough
     from openswe.walkthrough.plan import RangeError
     from openswe.walkthrough.record import PlanMovedError
@@ -1257,15 +1256,17 @@ async def test_walkthrough_errors_end_only_a_scout_with_a_stale_head(
     getattr(workspace, method).side_effect = error
     monkeypatch.setattr(plan_walkthrough, "_workspace", AsyncMock(return_value=workspace))
     monkeypatch.setattr(
-        review_walkthrough._State,
-        "load",
-        AsyncMock(return_value=SimpleNamespace(ctx=SimpleNamespace(workspace=workspace))),
+        review_walkthrough.GuideContext,
+        "current",
+        AsyncMock(return_value=SimpleNamespace(workspace=workspace)),
     )
     config = {"configurable": {"thread_id": "scout" if scout else "guide"}}
     middleware = PrepareReviewScoutRunMiddleware(thread_id="scout", config=config)
+    model = ModelChoice("anthropic:claude-sonnet-4-5", {})
     surface = ToolSurface(
         base_tools=[getattr(plan_walkthrough if scout else review_walkthrough, name)],
         middleware=[middleware] if scout else [],
+        models=SurfaceModels(main=model, subagent=model, use_gateway=False),
     )
     await surface.prepare()
     session = RunSession(surface, config, None, started_here=True)
@@ -1286,4 +1287,4 @@ async def test_walkthrough_errors_end_only_a_scout_with_a_stale_head(
         assert result.state == {}
         assert json.loads(str(result.content)) == {"success": False, "error": str(error)}
         if scout:
-            assert (await session.run_phase("before_model", dict(state), Runtime())).jump_to is None
+            assert (await session.before_model(RunCall(state=state))).jump_to is None
