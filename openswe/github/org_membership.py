@@ -1,5 +1,6 @@
 """GitHub organization membership checks for webhook gating."""
 
+import asyncio
 import logging
 from urllib.parse import quote
 
@@ -14,6 +15,7 @@ from openswe.github.app import (
 from openswe.github.http import GITHUB_API_BASE, github_client, github_request
 
 logger = logging.getLogger(__name__)
+_MEMBERSHIP_REQUEST_TIMEOUT = 5.0
 
 # The GitHub Apps Open SWE acts as; events they send are Open SWE's own.
 OPEN_SWE_GITHUB_LOGINS: frozenset[str] = frozenset(
@@ -55,19 +57,13 @@ async def is_user_active_org_member(username: str, org: str) -> bool:
         )
         return False
 
-    url = (
-        f"https://api.github.com/orgs/{quote(org, safe='')}/memberships/{quote(username, safe='')}"
-    )
+    url = f"{GITHUB_API_BASE}/orgs/{quote(org, safe='')}/memberships/{quote(username, safe='')}"
     try:
-        async with httpx2.AsyncClient(timeout=10.0) as client:
-            response = await client.get(
-                url,
-                headers={
-                    "Authorization": f"Bearer {token}",
-                    "Accept": "application/vnd.github+json",
-                    "X-GitHub-Api-Version": "2022-11-28",
-                },
-            )
+        async with (
+            asyncio.timeout(_MEMBERSHIP_REQUEST_TIMEOUT),
+            github_client(token=token, timeout=_MEMBERSHIP_REQUEST_TIMEOUT) as client,
+        ):
+            response = await github_request(client, "GET", url)
     except Exception:
         logger.exception("Error calling GitHub org membership API for %s/%s", org, username)
         return False

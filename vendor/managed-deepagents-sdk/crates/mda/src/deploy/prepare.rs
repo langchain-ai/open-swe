@@ -36,7 +36,7 @@ use super::{
     ensure_channel_requirements_secrets, ensure_connector_requirements_secrets,
     ensure_ingress_secret, ensure_model_api_key, ensure_project, ensure_workspace_connections,
     link_context_repo_to_agent, recipe_spec_from_project, schedule_cron_request, sync_context_hub,
-    trigger_channels, ContextStrategy, EmittedRequirements, WorkspaceSecretKeys,
+    trigger_channels, ChannelSetup, ContextStrategy, EmittedRequirements, WorkspaceSecretKeys,
 };
 use crate::agent_config;
 use crate::cli_output::{show_sequence, SequenceItem};
@@ -291,10 +291,12 @@ fn run_inner(
         &connector_requirements,
         &mcp_connections,
     )?;
-    let trigger_channel = trigger_channels::prepare(
+    // Validation only: setup needs the live deployment.
+    let channel_setup = ChannelSetup::prepare(
         &channel_requirements,
         true,
         &project.root,
+        &project.files,
         project.language,
         &assistant_id,
     )?;
@@ -323,7 +325,7 @@ fn run_inner(
         sandbox_recipe_snapshot.as_deref(),
         &bake_only_secrets,
         &summary.schedule_crons,
-        trigger_channel.as_ref(),
+        channel_setup.trigger(),
         !opts.is_preview,
     )?;
     client

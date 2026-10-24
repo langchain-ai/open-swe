@@ -1,6 +1,21 @@
 """Cross-links between a Slack thread and the breakout thread started from it."""
 
-from openswe.slack.client import add_slack_reaction, get_slack_permalink, post_slack_thread_reply
+from openswe.slack.blocks import Block, context, section
+from openswe.slack.client import (
+    add_slack_reaction,
+    format_slack_web_link_footer,
+    get_slack_permalink,
+    post_slack_thread_reply,
+)
+
+
+def breakout_root_blocks(text: str, dashboard_url: str | None) -> list[Block]:
+    blocks: list[Block] = [section(text)]
+    footer = format_slack_web_link_footer(dashboard_url)
+    if footer:
+        blocks.append(context(footer))
+    return blocks
+
 
 BREAKOUT_REACTION = "leftwards_arrow_with_hook"
 

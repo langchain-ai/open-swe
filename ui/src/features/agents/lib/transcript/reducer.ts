@@ -17,7 +17,6 @@
 
 import {
   INTERNAL_TOOLS,
-  mergeTextChunks,
   toolKind,
   toolTitle,
 } from "@/features/agents/lib/streamMessagesToUi"
@@ -854,6 +853,7 @@ function toolChunk(
   const chunk: ToolExecutionChunk = {
     kind: "tool-execution",
     toolCallId: call.toolCallId,
+    toolName: call.name,
     timestamp: call.startedAt,
     title: toolTitle(call.name, call.input),
     toolKind: kind,
@@ -1065,7 +1065,7 @@ function turnMessages(
       ...(agent.invocationIds.length
         ? { invocationIds: agent.invocationIds }
         : {}),
-      chunks: mergeTextChunks(agent.chunks),
+      chunks: agent.chunks,
     })
     agent = null
   }
@@ -1111,7 +1111,7 @@ function turnMessages(
       if (reasoning) chunks.push({ kind: "reasoning", text: reasoning })
       chunks.push(...imageChunks(state.threadId, row.attachments))
       const text = row.text.trim()
-      if (text) chunks.push({ kind: "text", text })
+      if (text) chunks.push({ kind: "text", text, timestamp: row.createdAt })
       append(row.messageId, row.createdAt, chunks, row.invocationId)
       continue
     }

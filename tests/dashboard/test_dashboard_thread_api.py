@@ -31,7 +31,7 @@ from openswe.threads import runs as thread_runs
 from openswe.threads.summary import TRANSCRIPT_VERSION
 from openswe.transcript.engine import AppendResult
 from openswe.transcript.turns import OpenTurn
-from openswe.users import User, UserPreferences
+from openswe.users import User
 from openswe.workspaces.store import WORKSPACES, WorkspaceCreate
 from tests.conftest import patch_thread_module
 
@@ -349,7 +349,11 @@ async def test_dashboard_run_stamps_sender_not_original_slack_user(
     second = uuid7()
 
     async def by_login(provider: str, login: str) -> SimpleNamespace | None:
-        return SimpleNamespace(id=second) if (provider, login) == ("github", "second-gh") else None
+        return (
+            SimpleNamespace(id=second, github_login=login)
+            if (provider, login) == ("github", "second-gh")
+            else None
+        )
 
     async def canonical(person: dict[str, str]) -> dict[str, str]:
         return person
@@ -363,8 +367,10 @@ async def test_dashboard_run_stamps_sender_not_original_slack_user(
         "method": "run.start",
         "params": {
             "input": {"messages": [{"type": "human", "content": "follow up"}]},
-            "metadata": {"user_id": str(first)},
-            "config": {"metadata": {"user_id": str(first)}},
+            "metadata": {"user_id": str(first), "ls_attribution_identifier": "first-gh"},
+            "config": {
+                "metadata": {"user_id": str(first), "ls_attribution_identifier": "first-gh"}
+            },
         },
     }
     enriched = await thread_runs._enrich_run_start_command(
@@ -378,6 +384,8 @@ async def test_dashboard_run_stamps_sender_not_original_slack_user(
     )
     assert enriched["params"]["metadata"]["user_id"] == str(second)
     assert enriched["params"]["config"]["metadata"]["user_id"] == str(second)
+    assert enriched["params"]["metadata"]["ls_attribution_identifier"] == "second-gh"
+    assert enriched["params"]["config"]["metadata"]["ls_attribution_identifier"] == "second-gh"
 
 
 @pytest.mark.parametrize("relayed", [False, True])
@@ -1049,16 +1057,6 @@ async def test_task_hierarchy_opt_in_visibility_and_idle_refresh(
     )
     monkeypatch.setattr(thread_listing, "langgraph_client", lambda: client)
     monkeypatch.setattr(thread_listing, "sidebar_memberships", membership_lookup)
-    preferences = AsyncMock(return_value=UserPreferences())
-    monkeypatch.setattr(User, "preferences_for_login", preferences)
-    disabled = await thread_listing.list_dashboard_threads_page("octocat", hierarchy=True, limit=2)
-    assert [item["id"] for item in disabled["items"]] == ["t0", "t1"]
-    assert all("taskWorkers" not in item for item in disabled["items"])
-    assert disabled["items"][0]["taskMembership"]["role"] == "worker"
-    flat_parent = {"id": "t3"}
-    await thread_listing.attach_task_workers(client, [flat_parent], "octocat", None)
-    assert "taskWorkers" not in flat_parent
-    preferences.return_value = UserPreferences(experimental_task_coordination=True)
     first = await thread_listing.list_dashboard_threads_page("octocat", hierarchy=True, limit=1)
     assert [item["id"] for item in first["items"]] == ["t3"]
     parent = first["items"][0]
@@ -1109,11 +1107,6 @@ async def test_task_hierarchy_opt_in_visibility_and_idle_refresh(
 async def test_task_hierarchy_stops_at_distinct_root_target_or_scan_cap(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    monkeypatch.setattr(
-        User,
-        "preferences_for_login",
-        AsyncMock(return_value=UserPreferences(experimental_task_coordination=True)),
-    )
     monkeypatch.setattr(thread_listing, "_THREADS_SEARCH_PAGE", 2)
     threads = _make_threads(12, resolved_before=0)
     for index, thread in enumerate(threads):

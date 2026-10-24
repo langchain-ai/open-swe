@@ -9,18 +9,17 @@ reader stands. Every model call gets the walkthrough's rules.
 """
 
 import logging
-from collections.abc import Awaitable, Callable
+from collections.abc import Mapping
 from typing import Annotated, Any, NotRequired
 
 from langchain.agents.middleware.types import (
     AgentState,
-    ModelRequest,
-    ModelResponse,
     OmitFromOutput,
 )
-from langchain_core.messages import HumanMessage, SystemMessage
+from langchain_core.messages import HumanMessage
 from langgraph.runtime import Runtime
 
+from openswe.middleware.model_call_shape import CallShape
 from openswe.middleware.trace import OpenSWEMiddleware
 from openswe.prompts import prompt
 from openswe.review_guide.advance import approve_click
@@ -193,14 +192,8 @@ class ReviewGuideMiddleware(OpenSWEMiddleware[ReviewGuideState]):
                 extra={"agent_thread_id": self._thread_id, **target.log_extra},
             )
 
-    async def awrap_model_call(
-        self,
-        request: ModelRequest,
-        handler: Callable[[ModelRequest], Awaitable[ModelResponse]],
-    ) -> ModelResponse:
-        rules = request.state.get("review_guide_rules")
-        if isinstance(rules, str) and rules:
-            existing = request.system_message.text if request.system_message is not None else ""
-            content = f"{existing}\n\n{rules}" if existing else rules
-            request = request.override(system_message=SystemMessage(content=content))
-        return await handler(request)
+    async def ashape_model_call(
+        self, call: CallShape, state: Mapping[str, object], runtime: Runtime
+    ) -> CallShape:
+        rules = state.get("review_guide_rules")
+        return call.appending(rules) if isinstance(rules, str) else call

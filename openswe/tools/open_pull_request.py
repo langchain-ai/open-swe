@@ -12,6 +12,7 @@ from langgraph.prebuilt import InjectedState
 from langgraph_sdk import get_client
 
 from openswe.act_as.gate import require_consent
+from openswe.agent_api.git_metadata import record_pr_target
 from openswe.analytics.usage import record_agent_pr_usage
 from openswe.audit_logs.tools import audit_tool
 from openswe.credential_scope import (
@@ -38,6 +39,7 @@ from openswe.slack.code_channels import (
 )
 from openswe.slack.dm import is_concierge_thread
 from openswe.threads.plan_store import get_plan_content
+from openswe.threads.summary import upsert_pull_request_record
 from openswe.transcript.mirror import mirror_thread_metadata
 from openswe.utils.authorship import PR_ATTRIBUTION_TEXT, add_pr_collaboration_note
 from openswe.utils.dashboard_links import dashboard_plan_url, dashboard_thread_url
@@ -525,23 +527,6 @@ async def _fetch_pr_details(
     return data if isinstance(data, dict) else {}
 
 
-def _upsert_pull_request(records: object, record: dict[str, Any]) -> list[dict[str, Any]]:
-    existing = records if isinstance(records, list) else []
-    repo = record.get("repo_full_name")
-    number = record.get("number")
-    url = record.get("url")
-    return [
-        item
-        for item in existing
-        if isinstance(item, dict)
-        and not (
-            item.get("repo_full_name") == repo
-            and item.get("number") == number
-            or item.get("url") == url
-        )
-    ] + [record]
-
-
 async def _thread_pull_requests(thread_id: str) -> list[dict[str, Any]]:
     try:
         thread = await get_client().threads.get(thread_id)
@@ -659,6 +644,9 @@ async def _record_pr_telemetry(
             )
     try:
         details = await _fetch_pr_details(client, token, owner, repo, pr_number)
+        pr_head = details.get("head") or pr.get("head")
+        if isinstance(pr_head, dict) and isinstance(pr_head.get("ref"), str):
+            record_pr_target(f"{owner}/{repo}", pr_head["ref"])
         config = get_config()
         cfg = RunConfig.from_config(config)
         thread_id = cfg.thread_id
@@ -757,7 +745,9 @@ async def _record_pr_telemetry(
                 "resolves_thread": resolves_thread,
             }
             run_id = config.get("run_id") or cfg.run_id
-            pull_requests = _upsert_pull_request(await _thread_pull_requests(thread_id), record)
+            pull_requests = upsert_pull_request_record(
+                await _thread_pull_requests(thread_id), record
+            )
             metadata: dict[str, Any] = {
                 "agent_kind": "agent",
                 "pr_url": pr_url if isinstance(pr_url, str) else "",

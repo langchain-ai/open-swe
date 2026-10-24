@@ -14,15 +14,15 @@ from deepagents.middleware.summarization import (
     SummarizationState,
     _DeepAgentsSummarizationMiddleware,
 )
-from langchain.agents.middleware.types import AgentState, ModelRequest, ModelResponse
-from langchain_core.language_models.fake_chat_models import FakeListChatModel
-from langchain_core.messages import AIMessage, HumanMessage, SystemMessage, ToolMessage
+from langchain.agents.middleware.types import AgentState
+from langchain_core.messages import AIMessage, HumanMessage, ToolMessage
 from langgraph.graph.message import add_messages
 from langgraph.runtime import Runtime
 from sqlalchemy import delete, func, select, text, update
 
 from openswe import completion
 from openswe.database import postgres
+from openswe.middleware.model_call_shape import CallShape
 from openswe.tasks import events, presentation, store
 from openswe.tasks import messages as task_messages
 from openswe.tasks.messages import TaskMessage
@@ -98,6 +98,10 @@ def worker_context(monkeypatch: pytest.MonkeyPatch) -> SimpleNamespace:
     )
     monkeypatch.setattr(events.EventSubscription, "deliver_to", AsyncMock())
     monkeypatch.setattr(TaskMessage, "deliver", AsyncMock())
+    # No run in these tests stopped for a person.
+    client = SimpleNamespace(threads=AsyncMock(), runs=AsyncMock())
+    client.threads.get_history.return_value = []
+    monkeypatch.setattr(events, "langgraph_client", lambda: client)
     return context
 
 
@@ -241,6 +245,35 @@ async def test_persistence_failure_fails_webhook_after_usage_and_transcript_sett
     settled.assert_awaited_once()
 
 
+async def test_a_worker_run_paused_for_a_person_is_not_reported_as_finished(
+    worker_context: SimpleNamespace,  # noqa: ARG001
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from openswe.tasks import service
+
+    paused = {"run-paused": True, "run-done": False}
+
+    async def history(
+        thread_id: str, *, limit: int, metadata: dict[str, str]
+    ) -> list[dict[str, object]]:
+        waiting = paused[metadata["run_id"]]
+        # LangGraph reports a pending interrupt on the checkpoint's task.
+        return [{"tasks": [{"interrupts": [{"value": "Approve the push?"}] if waiting else []}]}]
+
+    client = SimpleNamespace(threads=AsyncMock(), runs=AsyncMock())
+    client.threads.get_history.side_effect = history
+    monkeypatch.setattr(events, "langgraph_client", lambda: client)
+    notify = AsyncMock()
+    monkeypatch.setattr(service, "notify", notify)
+
+    # The server reports a run stopped on interrupt() as a success, like a finished one.
+    answered = {"values": {"messages": [{"type": "ai", "content": "Login passes"}]}}
+    assert await events.worker_finished(_WORKER, "run-paused", "success", answered)
+    notify.assert_not_awaited()
+    assert await events.worker_finished(_WORKER, "run-done", "success", answered)
+    assert notify.await_args.kwargs["task_event"].content == "Login passes"
+
+
 @pytest.mark.parametrize("status", ["interrupted", "error"])
 async def test_cancelled_worker_only_reports_interruption_without_restarting_owed_assignment(
     worker_context: SimpleNamespace, monkeypatch: pytest.MonkeyPatch, status: str
@@ -248,7 +281,9 @@ async def test_cancelled_worker_only_reports_interruption_without_restarting_owe
     from openswe.tasks import service
 
     monkeypatch.setattr(
-        store.TaskDelegation, "get", AsyncMock(return_value=SimpleNamespace(cancelled=True))
+        store.TaskDelegation,
+        "get",
+        AsyncMock(return_value=SimpleNamespace(cancelled=True, silenced=False)),
     )
     notify = AsyncMock()
     monkeypatch.setattr(service, "notify", notify)
@@ -283,6 +318,8 @@ async def test_duplicate_completion_delivers_one_durable_result_to_idle_or_busy_
     client = SimpleNamespace(threads=AsyncMock())
     client.threads.get.return_value = {"status": "busy" if busy else "idle"}
     client.threads.get_state.return_value = {"values": {"messages": []}}
+    client.threads.get_history.return_value = []
+    monkeypatch.setattr(events, "langgraph_client", lambda: client)
     dispatched: list[dict[str, object]] = []
     attempted_turns: list[object] = []
     inherited_turn = str(uuid4())
@@ -460,7 +497,7 @@ async def test_repaired_task_thread_checkpoints_owed_messages_once(
         async with postgres.session() as session:
             await message.record(session)
     context = await store.TaskMembership.context_for_thread(thread_id)
-    middleware = task_coordination.TaskCoordinationMiddleware(thread_id, "owner", True, context)
+    middleware = task_coordination.TaskCoordinationMiddleware(thread_id, True, context)
     monkeypatch.setattr(task_coordination, "maybe_refresh_proxy_token", AsyncMock())
 
     delivered = await middleware.abefore_model({"messages": []}, Runtime())
@@ -494,31 +531,25 @@ async def test_task_context_is_checkpointed_once_without_changing_request_prefix
     lookup = AsyncMock(return_value=None)
     monkeypatch.setattr(store.TaskMembership, "context_for_thread", lookup)
     monkeypatch.setattr(postgres, "configured", lambda: False)
-    middleware = task_coordination.TaskCoordinationMiddleware(_COORDINATOR, "owner", enabled, None)
+    middleware = task_coordination.TaskCoordinationMiddleware(_COORDINATOR, enabled, None)
     state: AgentState = {"messages": [HumanMessage(content="Repair login", id="request")]}
-    received: list[ModelRequest] = []
-
-    async def handler(request: ModelRequest) -> ModelResponse:
-        received.append(request)
-        return ModelResponse(result=[AIMessage(content="ok")])
+    received: list[CallShape] = []
 
     async def model_call() -> None:
-        await middleware.awrap_model_call(
-            ModelRequest(
-                model=FakeListChatModel(responses=["ok"]),
-                messages=list(state["messages"]),
-                system_message=SystemMessage(content="Existing instructions"),
-            ),
-            handler,
+        received.append(
+            await middleware.ashape_model_call(
+                CallShape(system_prompt="Existing instructions"), state, Runtime()
+            )
         )
-        assert received[-1].messages == state["messages"]
 
     assert await middleware.abefore_model(state, Runtime()) is None
     await model_call()
     state["messages"] = add_messages(
         state["messages"],
         [
-            AIMessage(content="", tool_calls=[{"name": "spawn_worker", "args": {}, "id": "spawn"}]),
+            AIMessage(
+                content="", tool_calls=[{"name": "start_async_task", "args": {}, "id": "spawn"}]
+            ),
             ToolMessage(content="Worker started", tool_call_id="spawn"),
         ],
     )
@@ -541,13 +572,11 @@ async def test_task_context_is_checkpointed_once_without_changing_request_prefix
         ],
     )
     assert await middleware.abefore_model(state, Runtime()) is None
-    middleware = task_coordination.TaskCoordinationMiddleware(_COORDINATOR, "owner", enabled, None)
+    middleware = task_coordination.TaskCoordinationMiddleware(_COORDINATOR, enabled, None)
     assert await middleware.abefore_model(state, Runtime()) is None
     await model_call()
-    for previous, current in zip(received, received[1:], strict=False):
-        assert previous.system_message == current.system_message
-        assert previous.messages == current.messages[: len(previous.messages)]
-    assert isinstance(received[-1].messages[-1], ToolMessage)
+    # The task's context arrives as a message, so the system prompt stays the same.
+    assert len({call.system_prompt for call in received}) == 1
 
 
 async def test_task_context_returns_after_summarization_without_replacing_history(
@@ -564,7 +593,7 @@ async def test_task_context_returns_after_summarization_without_replacing_histor
     )
     monkeypatch.setattr(postgres, "configured", lambda: False)
     state: SummarizationState = {"messages": [HumanMessage(content="Repair login")]}
-    middleware = task_coordination.TaskCoordinationMiddleware(_COORDINATOR, "owner", False, context)
+    middleware = task_coordination.TaskCoordinationMiddleware(_COORDINATOR, False, context)
     initial = await middleware.abefore_model(state, Runtime())
     assert initial is not None
     state["messages"] = add_messages(state["messages"], initial["messages"])
@@ -597,9 +626,7 @@ async def test_task_context_returns_after_summarization_without_replacing_histor
         assert visible[:-1] == visible_before
         assert visible[-1].content == original_context.content
         assert visible[-1].id != original_context.id
-        middleware = task_coordination.TaskCoordinationMiddleware(
-            _COORDINATOR, "owner", False, context
-        )
+        middleware = task_coordination.TaskCoordinationMiddleware(_COORDINATOR, False, context)
         assert await middleware.abefore_model(state, Runtime()) is None
 
 
@@ -689,7 +716,7 @@ async def test_subscription_delivery_waiting_on_worker_cancel_cannot_launch(
     monkeypatch.setattr(event_matches, "dispatch_client", dispatch_client)
     monkeypatch.setattr(event_matches, "create_durable_run", dispatch)
     monkeypatch.setattr(service, "owned_worker", AsyncMock(return_value=(task, delegation)))
-    monkeypatch.setattr(service, "live_worker_runs", live_runs)
+    monkeypatch.setattr(service, "live_runs", live_runs)
     monkeypatch.setattr(service, "worker_status", AsyncMock(return_value={}))
     monkeypatch.setattr(service, "interrupt_transcript_turns", AsyncMock())
     monkeypatch.setattr(service, "cancel_thread_wakeups", AsyncMock())

@@ -110,7 +110,7 @@ const TYPESCRIPT_MANAGED: &[Dependency] = &[
 const PYTHON_MANAGED: &[Dependency] = &[
     Dependency {
         name: "deepagents",
-        version: ">=0.7.13,<1",
+        version: ">=0.7.27,<1",
     },
     Dependency {
         name: "langchain[mcp]",

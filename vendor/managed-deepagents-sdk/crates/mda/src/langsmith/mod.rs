@@ -28,16 +28,21 @@ mod agents;
 mod context_hub;
 mod crons;
 mod deployments;
+pub(crate) mod github_app_setup;
+pub(crate) mod github_channel;
 pub(crate) mod login;
 mod logs;
 mod registries;
 mod sandboxes;
 mod secrets;
 mod snapshots;
+#[cfg(test)]
+pub(crate) mod test_support;
 mod trigger_server;
 mod workspaces;
 
 pub(crate) use agent_auth::redact_secret;
+pub(crate) use agent_auth::AgentGrant;
 pub(crate) use agent_auth::OAuthAuthorizationSession;
 pub use agent_auth::{ConnectionOwnerPolicy, ConnectionSummary, CreateOAuthConnection};
 pub use context_hub::ContextHubClient;
@@ -47,7 +52,7 @@ pub use sandboxes::{CreateSandboxBoxOptions, SandboxCommandResult, SandboxSummar
 pub use snapshots::{SnapshotDelete, SnapshotSummary, DEFAULT_SNAPSHOT_READY_TIMEOUT};
 pub(crate) use trigger_server::{
     ChannelSetupRequest, ChannelSetupResponse, ChannelSetupStatus, ChannelSetupTarget,
-    SlackChannelApp, SlackChannelOptions, SlackChannelSetup,
+    SlackChannelApp, SlackChannelOptions, SlackChannelSetup, SlackTriggerMode,
 };
 pub use workspaces::{DeployTarget, WorkspaceSummary};
 
@@ -55,7 +60,8 @@ pub(crate) use login::{
     is_cli_session_api_key, note_session_api_key, resolve_login_api_url, Credential, Login,
 };
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
+use std::sync::{Mutex, OnceLock};
 use std::time::Duration;
 
 use anyhow::{anyhow, bail, Context, Result};
@@ -82,7 +88,7 @@ pub const REMOVED_API_KEY_ENVS: &[&str] = &["LANGCHAIN_API_KEY"];
 /// projects should use `langsmith:` model strings or a provider key directly.
 pub const GATEWAY_API_KEY_ENV: &str = "LANGSMITH_GATEWAY_API_KEY";
 
-/// Resolve a preferred env var from CLI override, project `.env`, then process env.
+/// Resolve a preferred env var from CLI override, process env, then project `.env`.
 ///
 /// When the preferred name is unset but a removed alias is present, returns an
 /// error of the form `{alias} is no longer supported; set {preferred}{hint}`.
@@ -111,27 +117,84 @@ pub fn resolve_preferred_env(
     Ok(None)
 }
 
-/// Look up a non-empty trimmed env value from project `.env`, then process env.
+/// Where [`lookup_env_with_origin`] found a value.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum EnvOrigin {
+    Shell,
+    EnvFile,
+}
+
+/// Look up a non-empty trimmed env value from process env, then project `.env`.
 pub(crate) fn lookup_env(
     key: &str,
     env_file: &BTreeMap<String, String>,
     process_env: &mut impl FnMut(&str) -> Option<String>,
 ) -> Option<String> {
-    if let Some(value) = env_file
-        .get(key)
-        .map(|value| value.trim())
-        .filter(|value| !value.is_empty())
-    {
-        return Some(value.to_string());
-    }
-    process_env(key).and_then(|value| {
-        let trimmed = value.trim();
-        if trimmed.is_empty() {
-            None
-        } else {
-            Some(trimmed.to_string())
+    lookup_env_with_origin(key, env_file, process_env).map(|(value, _)| value)
+}
+
+/// Like [`lookup_env`], also reporting which source supplied the value.
+///
+/// The shell wins so a one-off `KEY=value mda …` or a CI-injected variable is
+/// not silently shadowed by a project file. When both are set and disagree,
+/// warn once per key so a stale shell export is not silently used either.
+pub(crate) fn lookup_env_with_origin(
+    key: &str,
+    env_file: &BTreeMap<String, String>,
+    process_env: &mut impl FnMut(&str) -> Option<String>,
+) -> Option<(String, EnvOrigin)> {
+    match process_env(key).and_then(|value| non_empty_trimmed(&value)) {
+        Some(from_shell) => {
+            warn_if_shell_shadows_env_file(key, &from_shell, env_file);
+            Some((from_shell, EnvOrigin::Shell))
         }
-    })
+        None => env_file
+            .get(key)
+            .and_then(|value| non_empty_trimmed(value))
+            .map(|value| (value, EnvOrigin::EnvFile)),
+    }
+}
+
+/// Warn once per key when a shell value shadows a different, non-empty value
+/// in the project `.env`. For callers that already chose the shell value
+/// without going through [`lookup_env_with_origin`]. Returns whether they
+/// differ; a trailing `/` alone does not count.
+pub(crate) fn warn_if_shell_shadows_env_file(
+    key: &str,
+    from_shell: &str,
+    env_file: &BTreeMap<String, String>,
+) -> bool {
+    let differs = env_file
+        .get(key)
+        .and_then(|value| non_empty_trimmed(value))
+        .is_some_and(|from_file| {
+            from_file.trim_end_matches('/') != from_shell.trim().trim_end_matches('/')
+        });
+    if differs {
+        warn_shell_shadows_env_file(key);
+    }
+    differs
+}
+
+fn non_empty_trimmed(value: &str) -> Option<String> {
+    let trimmed = value.trim();
+    (!trimmed.is_empty()).then(|| trimmed.to_string())
+}
+
+/// Names the key only: values are often credentials.
+fn warn_shell_shadows_env_file(key: &str) {
+    static WARNED: OnceLock<Mutex<BTreeSet<String>>> = OnceLock::new();
+    let first = WARNED
+        .get_or_init(Default::default)
+        .lock()
+        .map(|mut warned| warned.insert(key.to_string()))
+        .unwrap_or(false);
+    if first {
+        let _ = cliclack::log::warning(format!(
+            "{key} is set in both your shell and .env with different values; using the shell \
+             value. Unset it in your shell to use the .env value."
+        ));
+    }
 }
 
 /// Per-request timeout. Source uploads use their own client/timeout.
@@ -943,7 +1006,7 @@ mod tests {
     }
 
     #[test]
-    fn resolve_preferred_env_env_file_beats_process() {
+    fn resolve_preferred_env_process_beats_env_file() {
         let mut env_file = BTreeMap::new();
         env_file.insert(API_KEY_ENV.to_string(), "from-dotenv".to_string());
         let process = BTreeMap::from([(API_KEY_ENV.to_string(), "from-process".to_string())]);
@@ -957,7 +1020,55 @@ mod tests {
                 " instead",
             )
             .unwrap(),
-            Some("from-dotenv".to_string())
+            Some("from-process".to_string())
+        );
+    }
+
+    #[test]
+    fn shell_shadows_env_file_only_on_a_real_difference() {
+        let env_file = BTreeMap::from([
+            (
+                "LANGSMITH_ENDPOINT".to_string(),
+                "https://eu.example/".to_string(),
+            ),
+            ("LANGSMITH_PROJECT".to_string(), "  ".to_string()),
+        ]);
+        assert!(warn_if_shell_shadows_env_file(
+            "LANGSMITH_ENDPOINT",
+            "https://us.example",
+            &env_file
+        ));
+        assert!(!warn_if_shell_shadows_env_file(
+            "LANGSMITH_ENDPOINT",
+            " https://eu.example ",
+            &env_file
+        ));
+        // Blank or missing in `.env`: nothing is shadowed.
+        assert!(!warn_if_shell_shadows_env_file(
+            "LANGSMITH_PROJECT",
+            "from-shell",
+            &env_file
+        ));
+        assert!(!warn_if_shell_shadows_env_file(
+            "LANGSMITH_WORKSPACE_ID",
+            "from-shell",
+            &env_file
+        ));
+    }
+
+    #[test]
+    fn lookup_env_falls_back_to_env_file_when_process_blank() {
+        let env_file = BTreeMap::from([(API_KEY_ENV.to_string(), " from-dotenv ".to_string())]);
+        let process = BTreeMap::from([(API_KEY_ENV.to_string(), "   ".to_string())]);
+        assert_eq!(
+            lookup_env_with_origin(API_KEY_ENV, &env_file, &mut |key| process.get(key).cloned()),
+            Some(("from-dotenv".to_string(), EnvOrigin::EnvFile))
+        );
+        assert_eq!(
+            lookup_env_with_origin(API_KEY_ENV, &BTreeMap::new(), &mut |_| Some(
+                " from-shell ".to_string()
+            )),
+            Some(("from-shell".to_string(), EnvOrigin::Shell))
         );
     }
 

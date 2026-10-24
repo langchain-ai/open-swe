@@ -1,19 +1,17 @@
 import logging
-from collections.abc import Awaitable, Callable
+from collections.abc import Mapping
 from typing import Self
 from uuid import uuid4
 
 from langchain.agents.middleware import AgentState
-from langchain.agents.middleware.types import ModelRequest, ModelResponse
-from langchain_core.messages import SystemMessage
 from langgraph.runtime import Runtime
 
 from openswe.database import postgres
 from openswe.github.proxy import maybe_refresh_proxy_token
 from openswe.input_messages import RunMessage, dynamic_context_hash, visible_dynamic_context_hashes
+from openswe.middleware.model_call_shape import CallShape
 from openswe.middleware.trace import OpenSWEMiddleware
 from openswe.prompts import prompt
-from openswe.tasks.flags import task_coordination_enabled, task_coordination_supported
 from openswe.tasks.messages import TaskMessage
 from openswe.tasks.schemas import Thread
 from openswe.tasks.store import TaskContext, TaskDelegation, TaskMembership
@@ -23,29 +21,21 @@ logger = logging.getLogger(__name__)
 
 
 class TaskCoordinationMiddleware(OpenSWEMiddleware):
-    def __init__(
-        self, thread_id: str, owner_login: str, enabled: bool, context: TaskContext | None
-    ) -> None:
+    def __init__(self, thread_id: str, enabled: bool, context: TaskContext | None) -> None:
         self.thread_id = thread_id
-        self.owner_login = owner_login
         self.enabled = enabled
         self.context = context
         self.instructions = prompt(
             "tasks/role",
             role=context.membership.role if context else "coordinator",
-            delegation_enabled=enabled,
+            delegation_enabled=self.can_delegate,
         )
 
     @classmethod
     async def for_thread(cls, thread_id: str) -> Self | None:
-        thread = Thread.model_validate(await read_thread(thread_id))
-        metadata = thread.metadata
-        owner_login = metadata.owner_login if metadata.owner_type == "user" else None
-        enabled = task_coordination_supported(
-            metadata.json_metadata()
-        ) and await task_coordination_enabled(
-            owner_login or "", owner_user_id=metadata.owner_user_id
-        )
+        enabled = await Thread.model_validate(
+            await read_thread(thread_id)
+        ).metadata.delegation_supported()
         context = await TaskMembership.context_for_thread(thread_id)
         if context is not None and context.membership.role == "worker":
             delegation = await TaskDelegation.get(thread_id)
@@ -53,11 +43,15 @@ class TaskCoordinationMiddleware(OpenSWEMiddleware):
                 raise PermissionError(
                     "This worker was cancelled; create a new worker for further work"
                 )
-        return cls(thread_id, owner_login or "", enabled, context) if enabled or context else None
+        return cls(thread_id, enabled, context) if enabled or context else None
 
     @property
     def is_worker(self) -> bool:
         return self.context is not None and self.context.membership.role == "worker"
+
+    @property
+    def can_delegate(self) -> bool:
+        return self.enabled and not self.is_worker
 
     async def abefore_model(
         self, state: AgentState, runtime: Runtime
@@ -90,11 +84,7 @@ class TaskCoordinationMiddleware(OpenSWEMiddleware):
             messages.extend(TaskMessage.messages(owed))
         return {"messages": messages} if messages else None
 
-    async def awrap_model_call(
-        self,
-        request: ModelRequest,
-        handler: Callable[[ModelRequest], Awaitable[ModelResponse]],
-    ) -> ModelResponse:
-        blocks = list(request.system_message.content_blocks) if request.system_message else []
-        blocks.append({"type": "text", "text": self.instructions})
-        return await handler(request.override(system_message=SystemMessage(content_blocks=blocks)))
+    async def ashape_model_call(
+        self, call: CallShape, state: Mapping[str, object], runtime: Runtime
+    ) -> CallShape:
+        return call.appending(self.instructions)

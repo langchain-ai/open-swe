@@ -7,7 +7,6 @@ from langgraph_sdk.client import LangGraphClient
 
 from openswe.run_config import RunConfig
 from openswe.slack.breakout_destination import resolve_breakout_destination
-from openswe.slack.channels import SlackChannel
 from openswe.slack.client import get_active_slack_thread
 from openswe.slack.move import move_slack_thread, rebind_slack_thread
 from openswe.source_context import SlackThreadRef
@@ -98,12 +97,7 @@ async def slack_move_thread(
     target_channel = destination.channel_id
     if not _CHANNEL_ID_RE.fullmatch(target_channel):
         return {"success": False, "error": "channel_id must be a Slack channel ID"}
-    for candidate in dict.fromkeys((active_channel, target_channel)):
-        channel = await SlackChannel.load(candidate, use_cache=False)
-        if channel is None or not channel.public:
-            return {
-                "success": False,
-                "error": "Breakouts only work from and to public channels.",
-            }
+    if error := await destination.channel_error(active_channel):
+        return {"success": False, "error": error}
 
     return await move_slack_thread(client, thread_id, active, target_channel, clean_message)

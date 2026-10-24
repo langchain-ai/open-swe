@@ -110,14 +110,14 @@ export function pullRequestStanding(
       tone: "blocked",
       headline: `Conflicts with ${detail.pr.base_ref}.`,
       details,
-      next: { kind: "agent", action: "fix-conflicts" },
+      next: { kind: "agent", action: "fix" },
     }
   if (hasFailingChecks(status))
     return {
       tone: "blocked",
       headline: `${plural(status.failingChecks.length || 1, "check")} failing.`,
       details,
-      next: { kind: "agent", action: "fix-checks" },
+      next: { kind: "agent", action: "fix" },
     }
   if (status.reviewDecision === "changes_requested")
     return {
