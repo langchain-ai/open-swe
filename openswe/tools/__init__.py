@@ -62,6 +62,7 @@ _TOOL_MODULES = {
     "save_user_skill": ".user_skills",
     "delete_user_skill": ".user_skills",
     "schedule_thread_wakeup": ".schedule_thread_wakeup",
+    "search_human_text": ".search_human_text",
     "search_pull_requests": ".search_pull_requests",
     "send_announcement": ".send_announcement",
     "start_thread": ".threads",
@@ -145,6 +146,7 @@ __all__ = [
     "save_user_skill",
     "delete_user_skill",
     "schedule_thread_wakeup",
+    "search_human_text",
     "search_pull_requests",
     "send_announcement",
     "start_thread",
@@ -234,6 +236,7 @@ if TYPE_CHECKING:
     from openswe.tools.save_user_instructions import save_user_instructions
     from openswe.tools.save_user_settings import save_user_settings
     from openswe.tools.schedule_thread_wakeup import schedule_thread_wakeup
+    from openswe.tools.search_human_text import search_human_text
     from openswe.tools.search_pull_requests import search_pull_requests
     from openswe.tools.send_announcement import send_announcement
     from openswe.tools.submit_thread_feedback import submit_thread_feedback

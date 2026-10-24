@@ -19,6 +19,8 @@ from openswe.background_tasks import CRON_KIND as BACKGROUND_TASKS
 from openswe.background_tasks import monitor_background_tasks
 from openswe.human_review.standard import SCHEDULER_TASK as HUMAN_REVIEW_DEADLINE
 from openswe.human_review.standard import run_deadline
+from openswe.human_text.backfill import BACKFILL_JOB, run_backfill, schedule_backfill
+from openswe.human_text.embeddings import EMBED_JOB, EMBED_SCHEDULE, embed_pending
 from openswe.jobs import queue
 from openswe.jobs.cron_import import import_agent_server_crons
 from openswe.jobs.queue import Job
@@ -170,6 +172,19 @@ async def _thread_status_reconcile(_job: Job) -> object:
     return {"threads_settled": await reconcile_busy_threads()}
 
 
+@WORKER.register(EMBED_JOB)
+async def _human_text_embed(_job: Job) -> None:
+    await embed_pending()
+
+
+@WORKER.register(BACKFILL_JOB)
+async def _human_text_backfill(job: Job) -> None:
+    recorded = await run_backfill(job)
+    logger.info(
+        "Job ran", extra={"job_kind": job.kind, "job_id": str(job.id), "job_result": recorded}
+    )
+
+
 @WORKER.register(WAKE_THREAD_JOB)
 async def _wake_thread(job: Job) -> None:
     # Never retried: a run the server started before the client saw an error would start twice.
@@ -190,6 +205,8 @@ async def start_jobs() -> None:
         lambda: queue.schedule(
             THREAD_STATUS_RECONCILE, cron=RECONCILE_SCHEDULE, key=THREAD_STATUS_RECONCILE
         ),
+        lambda: queue.schedule(EMBED_JOB, cron=EMBED_SCHEDULE, key=EMBED_JOB),
+        schedule_backfill,
     ]
     for step in steps:
         try:

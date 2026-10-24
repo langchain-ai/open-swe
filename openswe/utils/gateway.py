@@ -10,6 +10,7 @@ opt-in via ``LANGSMITH_GATEWAY_ENABLED`` (deployment default) or the
 """
 
 import logging
+from dataclasses import dataclass
 
 from openswe.config import ENV
 
@@ -95,15 +96,22 @@ def _provider_of(model_id: str) -> str:
     return model_id.split(":", 1)[0]
 
 
-def gateway_overrides(model_id: str) -> dict[str, object] | None:
-    """``init_chat_model`` kwargs that route ``model_id`` through the gateway.
+@dataclass(frozen=True)
+class GatewayEndpoint:
+    """Where a provider's SDK reaches the gateway, and the key it authenticates with."""
+
+    base_url: str
+    api_key: str
+
+
+def gateway_endpoint(provider: str) -> GatewayEndpoint | None:
+    """The gateway endpoint for ``provider``.
 
     Returns ``None`` (so the caller keeps talking to the provider directly) when
     the provider isn't routable through the gateway or no LangSmith API key is
-    available — both cases are logged rather than raised, so a run never fails
+    available — both cases are logged rather than raised, so a call never fails
     just because gateway routing couldn't be applied.
     """
-    provider = _provider_of(model_id)
     path = _GATEWAY_PROVIDER_PATHS.get(provider)
     if path is None:
         logger.warning(
@@ -119,10 +127,17 @@ def gateway_overrides(model_id: str) -> dict[str, object] | None:
             "calling the provider directly"
         )
         return None
-    overrides: dict[str, object] = {
-        "base_url": f"{gateway_base_url()}{path}",
-        "api_key": api_key,
-    }
+    return GatewayEndpoint(base_url=f"{gateway_base_url()}{path}", api_key=api_key)
+
+
+def gateway_overrides(model_id: str) -> dict[str, object] | None:
+    """``init_chat_model`` kwargs that route ``model_id`` through the gateway, as
+    :func:`gateway_endpoint` resolves it."""
+    provider = _provider_of(model_id)
+    endpoint = gateway_endpoint(provider)
+    if endpoint is None:
+        return None
+    overrides: dict[str, object] = {"base_url": endpoint.base_url, "api_key": endpoint.api_key}
     if provider == "openai":
         # Use HTTPS Responses through the gateway by default; tool-calling OpenAI
         # reasoning models reject reasoning_effort on Chat Completions.

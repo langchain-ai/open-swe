@@ -109,6 +109,7 @@ class SlackEvent(SlackPayload):
     attachments: list[JsonObject] = Field(default_factory=list)
     message: SlackMessage | None = None
     previous_message: SlackMessage | None = None
+    deleted_ts: str = ""
     reaction: str = ""
     action: SlackItem | None = None
     key: str | None = None

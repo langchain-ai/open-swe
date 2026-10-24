@@ -44,6 +44,7 @@ _TOOL_MODULES: Final = (
     "openswe.tools.request_human_review",
     "openswe.tools.expedite_pr_approval",
     "openswe.tools.read_user_settings",
+    "openswe.tools.search_human_text",
     "openswe.tools.search_pull_requests",
     "openswe.tools.list_review_findings",
     "openswe.tools.repair_data",

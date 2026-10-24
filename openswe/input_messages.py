@@ -193,11 +193,32 @@ def _envelope_body(message: ElementTree.Element) -> str:
     return (message.text or "").strip() or (message.findtext("content") or "").strip()
 
 
+@dataclass(frozen=True, kw_only=True)
+class InputEnvelope:
+    """One serialized input message, read back: who sent it, from where, and what it said."""
+
+    sender: str
+    surface: str
+    kind: str
+    body: str
+
+
+def input_envelopes(content: object) -> list[InputEnvelope]:
+    """Every input message serialized in ``content``, in order."""
+    return [
+        InputEnvelope(
+            sender=message.get("sender", ""),
+            surface=message.get("surface", ""),
+            kind=message.get("kind", ""),
+            body=_envelope_body(message),
+        )
+        for message in _input_message_elements(content)
+    ]
+
+
 def input_message_text(content: object) -> str | None:
     """The authored text carried by a serialized input message, when present."""
-    texts = [
-        body for message in _input_message_elements(content) if (body := _envelope_body(message))
-    ]
+    texts = [envelope.body for envelope in input_envelopes(content) if envelope.body]
     return "\n\n".join(texts) or None
 
 

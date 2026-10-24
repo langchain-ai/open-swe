@@ -21,6 +21,7 @@ from sqlalchemy import ARRAY, Text, bindparam, text
 from sqlalchemy.ext.asyncio import AsyncConnection
 
 from openswe.database import postgres
+from openswe.human_text.sources import observe_transcript_event
 from openswe.transcript import attachments as attachment_store
 from openswe.transcript import listener, projections, tool_output
 from openswe.transcript.events import (
@@ -261,6 +262,7 @@ async def _write(
         run_id=run_id,
         occurred_at=occurred_at,
     )
+    await observe_transcript_event(conn, thread_id, event, occurred_at)
     await conn.execute(
         text(
             """

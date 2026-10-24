@@ -1,6 +1,6 @@
 services:
   postgres:
-    image: postgres:16
+    image: pgvector/pgvector:pg16
     container_name: open-swe-postgres
     environment:
       POSTGRES_PASSWORD: postgres

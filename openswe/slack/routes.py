@@ -13,6 +13,7 @@ from openswe.expedited_review import slack as expedited_review
 from openswe.human_review import offer as review_offer
 from openswe.human_review import slack as human_review
 from openswe.human_review.posted import watch_post
+from openswe.human_text.sources import observe_slack_event
 from openswe.review_guide.advance import advance
 from openswe.review_guide.buttons import NEXT_LABELS
 from openswe.review_guide.launch import close_guide_for_channel
@@ -502,6 +503,10 @@ async def slack_webhook(
                 channel_id,
             )
             return ignored("Slack channel is not eligible")
+
+    if event.type in {"message", "app_mention"} and channel_context is not None:
+        # Every person's message is searchable, whether or not it addresses Open SWE.
+        await observe_slack_event(event)
 
     if event.type == "message" and channel_id and channel_context is not None and watched:
         # Independent of the handling below: a watched channel's messages fire

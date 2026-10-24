@@ -8,7 +8,7 @@ all: help
 ######################
 
 # Local PostgreSQL. An explicit POSTGRES_URI (shell environment, or the gitignored .env
-# that langgraph dev loads) is left alone; without one, `dev` starts a postgres:16 container
+# that langgraph dev loads) is left alone; without one, `dev` starts a pgvector/pgvector:pg16 container
 # on loopback port 5433 with a named volume, so `docker rm` does not lose local data.
 ifeq ($(origin POSTGRES_URI),undefined)
 POSTGRES_URI := $(shell sh scripts/dotenv_value.sh .env POSTGRES_URI)
