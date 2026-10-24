@@ -17,6 +17,7 @@ import { GitPullRequestIcon } from "@phosphor-icons/react/dist/ssr/GitPullReques
 import { GithubLogoIcon } from "@phosphor-icons/react/dist/ssr/GithubLogo"
 import { KeyboardIcon } from "@phosphor-icons/react/dist/ssr/Keyboard"
 import { LinkIcon } from "@phosphor-icons/react/dist/ssr/Link"
+import { TreeStructureIcon } from "@phosphor-icons/react/dist/ssr/TreeStructure"
 import { TreeViewIcon } from "@phosphor-icons/react/dist/ssr/TreeView"
 import { useQuery } from "@tanstack/react-query"
 import { Link } from "@tanstack/react-router"
@@ -334,6 +335,14 @@ export function Header({
             />
           </DropdownMenuTrigger>
           <DropdownMenuContent align="end" className="w-56">
+            {detail?.trace_url && (
+              <DropdownMenuItem asChild>
+                <a href={detail.trace_url} target="_blank" rel="noreferrer">
+                  <TreeStructureIcon aria-hidden size={16} weight="regular" />
+                  Open reviewer trace
+                </a>
+              </DropdownMenuItem>
+            )}
             <DropdownMenuItem
               onSelect={() =>
                 window.open(githubUrl, "_blank", "noopener,noreferrer")
