@@ -26,7 +26,7 @@ to a release branch keeps main's newer changes), leaving conflict markers where 
 sides changed the same lines; carried pull requests the new commit contains drop out of
 that record. Carrying a pull request three-way merges its changes into the tree the same
 way (base: where it branched off its base branch, or the head carried before). Both
-relock mda/.
+relock mda/ and the backend, which both install the runtime from the tree.
 MDA_SDK_REPO overrides the upstream, e.g. a local checkout; pull requests are looked up
 on GitHub with `gh`.
 """
@@ -339,9 +339,10 @@ def _install(tree: Path, record: str, prs: CarriedPRs, conflicts: list[str], don
             f"{done}, but it collides with our changes; settle each of these in "
             "vendor/managed-deepagents-sdk:\n"
             + "\n".join(f"  {conflict}" for conflict in conflicts)
-            + "\nthen run `cd mda && uv lock`."
+            + "\nthen run `uv lock && (cd mda && uv lock)`."
         )
-    subprocess.run(["uv", "lock", "--quiet"], cwd=ROOT / "mda", check=True)
+    for project in (ROOT, ROOT / "mda"):
+        subprocess.run(["uv", "lock", "--quiet"], cwd=project, check=True)
     return done
 
 
@@ -463,9 +464,9 @@ def main() -> int:
                 note = f", carrying #{', #'.join(map(str, sorted(carried)))}" if carried else ""
                 print(f"{changed} file(s) differ from {recorded_sha()}{note}.", file=sys.stderr)
             elif args.pr is not None:
-                print(f"{carry(upstream, args.pr, scratch)}; relocked mda/.")
+                print(f"{carry(upstream, args.pr, scratch)}; relocked mda/ and the backend.")
             else:
-                print(f"{update(upstream, args.sha, scratch)}; relocked mda/.")
+                print(f"{update(upstream, args.sha, scratch)}; relocked mda/ and the backend.")
         except VendorError as exc:
             print(exc, file=sys.stderr)
             return 1
