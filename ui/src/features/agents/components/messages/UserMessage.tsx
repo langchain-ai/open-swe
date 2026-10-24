@@ -218,7 +218,7 @@ function StandardUserMessage({ message }: { message: Message }) {
         {message.deliveryStatus && (
           <div
             className={cn(
-              "mt-space-1 pr-space-1 text-right text-xxs",
+              "mt-space-1 pr-space-1 text-right text-xxs leading-4",
               message.deliveryStatus === "failed"
                 ? "text-error-secondary"
                 : "text-secondary"
