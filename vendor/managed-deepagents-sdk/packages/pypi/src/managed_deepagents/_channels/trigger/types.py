@@ -106,11 +106,37 @@ class TriggerChannelSlackUserPromptResponseEvent(
 TriggerChannelUserPromptResponseEvent: TypeAlias = TriggerChannelSlackUserPromptResponseEvent
 
 
-TriggerChannelEvent = (
+class TriggerChannelRunCancelInteraction(TypedDict):
+    type: Literal["run_cancel"]
+
+
+class TriggerChannelRunCancelEventRequired(TypedDict):
+    """A person in the source conversation asked to stop its runs (Slack Stop)."""
+
+    version: Literal["1"]
+    type: Literal["run_cancel"]
+    event_id: str
+    delivery_id: str
+    created_at: str
+    channel_id: str
+    source_thread_key: str
+    address: TriggerChannelAddress
+    interaction: TriggerChannelRunCancelInteraction
+
+
+class TriggerChannelRunCancelEvent(TriggerChannelRunCancelEventRequired, total=False):
+    identity_context: str | None
+    raw_event: TriggerChannelRawEvent | None
+
+
+#: Events that start or resume a run on the source thread.
+TriggerChannelRunEvent = (
     TriggerChannelMessageEvent
     | TriggerChannelInterruptResumeEvent
     | TriggerChannelUserPromptResponseEvent
 )
+
+TriggerChannelEvent = TriggerChannelRunEvent | TriggerChannelRunCancelEvent
 
 
 class TriggerChannelActionMessage(TypedDict):
@@ -165,6 +191,8 @@ TriggerChannelRuntimeEventType = Literal[
     "run.completed",
     "run.interrupted",
     "run.failed",
+    #: The run was cancelled (Slack Stop, Studio, or the API) before it finished.
+    "run.cancelled",
 ]
 
 
@@ -316,13 +344,39 @@ class _SlackUserPromptResponseEventModel(_WireModel):
         return _opaque_mapping(value, field="address")
 
 
+class _RunCancelInteractionModel(_WireModel):
+    type: Literal["run_cancel"]
+
+
+class _RunCancelEventModel(_WireModel):
+    version: Literal["1"]
+    type: Literal["run_cancel"]
+    event_id: _NonBlankString
+    delivery_id: _NonBlankString
+    created_at: _NonBlankString
+    channel_id: _UuidString
+    source_thread_key: _NonBlankString
+    address: SkipValidation[dict[str, object]]
+    interaction: _RunCancelInteractionModel
+    identity_context: str | None = None
+    raw_event: dict[str, object] | None = None
+
+    @field_validator("address", mode="before")
+    @classmethod
+    def _opaque_address(cls, value: object) -> object:
+        return _opaque_mapping(value, field="address")
+
+
 _USER_PROMPT_RESPONSE_EVENT = Annotated[
     _SlackUserPromptResponseEventModel, Field(discriminator="provider")
 ]
 
 _EVENT_ADAPTER = TypeAdapter(
     Annotated[
-        _MessageEventModel | _InterruptResumeEventModel | _USER_PROMPT_RESPONSE_EVENT,
+        _MessageEventModel
+        | _InterruptResumeEventModel
+        | _USER_PROMPT_RESPONSE_EVENT
+        | _RunCancelEventModel,
         Field(discriminator="type"),
     ]
 )
@@ -347,6 +401,8 @@ __all__ = [
     "TriggerChannelRawEvent",
     "TriggerChannelReactAction",
     "TriggerChannelResume",
+    "TriggerChannelRunCancelEvent",
+    "TriggerChannelRunEvent",
     "TriggerChannelRuntimeEventRequest",
     "TriggerChannelRuntimeEventResponse",
     "TriggerChannelRuntimeEventType",

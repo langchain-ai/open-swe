@@ -33,6 +33,7 @@ from managed_deepagents._channels.trigger.identity_context import (
     principal_id_from_identity_context,
 )
 from managed_deepagents._channels.trigger.ingress import (
+    cancel_ingress_thread_runs,
     ingress_resume_target,
     ingress_thread_interrupts,
     observe_ingress_agent,
@@ -47,6 +48,8 @@ from managed_deepagents._channels.trigger.types import (
     TriggerChannelInterrupt,
     TriggerChannelMessageEvent,
     TriggerChannelResume,
+    TriggerChannelRunCancelEvent,
+    TriggerChannelRunEvent,
     TriggerChannelRuntimeEventRequest,
     TriggerChannelRuntimeEventType,
     parse_trigger_channel_event,
@@ -127,6 +130,17 @@ class ResumeTargetFn(Protocol):
     ) -> ResumeTarget: ...
 
 
+class CancelThreadRunsFn(Protocol):
+    async def __call__(
+        self,
+        *,
+        thread_id: str,
+        source_provider: str,
+        source_thread_key: str,
+        user_id: str,
+    ) -> int: ...
+
+
 def _assert_never(_event: Never) -> NoReturn:
     """Reject an unsupported event at the provider boundary."""
     raise ValueError("unsupported channel event")
@@ -194,7 +208,7 @@ def _interrupt_correlation_id(value: object) -> str | None:
 
 async def _start_event_run(
     *,
-    event: TriggerChannelEvent,
+    event: TriggerChannelRunEvent,
     assistant_id: str,
     source_provider: str,
     channel_name: str,
@@ -278,7 +292,7 @@ async def _start_event_run(
     _assert_never(event)
 
 
-async def handle_trigger_channel_event_request(  # noqa: C901, PLR0911
+async def handle_trigger_channel_event_request(  # noqa: C901, PLR0911, PLR0912
     request: object,
     *,
     source_provider: str,
@@ -291,6 +305,7 @@ async def handle_trigger_channel_event_request(  # noqa: C901, PLR0911
     thread_interrupts: ThreadInterruptsFn | None = None,
     resume_target: ResumeTargetFn | None = None,
     observe_agent: ObserveAgentFn | None = None,
+    cancel_runs: CancelThreadRunsFn | None = None,
     trigger_client: TriggerClientLike | None = None,
     reactions: ReactionChoice = DEFAULT_REACTION_EMOJI,
     message_input: MessageInputFn | None = None,
@@ -340,6 +355,14 @@ async def handle_trigger_channel_event_request(  # noqa: C901, PLR0911
         logger.log_identifier(event["delivery_id"]),
         logger.log_identifier(event["channel_id"]),
     )
+
+    if event["type"] == "run_cancel":
+        return await _cancel_event_runs(
+            event,
+            source_provider=source_provider,
+            user_id=user_id,
+            cancel_runs=cancel_runs,
+        )
 
     try:
         client = (
@@ -419,6 +442,39 @@ async def handle_trigger_channel_event_request(  # noqa: C901, PLR0911
     return _accepted_response(event)
 
 
+async def _cancel_event_runs(
+    event: TriggerChannelRunCancelEvent,
+    *,
+    source_provider: str,
+    user_id: str,
+    cancel_runs: CancelThreadRunsFn | None,
+) -> object:
+    """Stop the source thread's runs; each run's observer reports ``run.cancelled``.
+
+    Runs are cancelled as the thread's channel principal, so the managed owner
+    filter confines the cancel to this source conversation.
+    """
+    try:
+        cancelled = await (cancel_runs or cancel_ingress_thread_runs)(
+            thread_id=_thread_id(event["source_thread_key"]),
+            source_provider=source_provider,
+            source_thread_key=event["source_thread_key"],
+            user_id=user_id,
+        )
+    except Exception as error:  # noqa: BLE001 - never expose Agent Server details in the response
+        logger.error(
+            "channel runs could not be cancelled (%s)",
+            logger.safe_error_label(error),
+        )
+        return _json_response({"error": "channel runs could not be cancelled"}, status_code=500)
+    logger.info(
+        "Channel runs cancelled (count=%s, delivery_id=%s)",
+        cancelled,
+        logger.log_identifier(event["delivery_id"]),
+    )
+    return _accepted_response(event)
+
+
 def _accepted_response(event: TriggerChannelEvent) -> object:
     return _json_response(
         {"status": "accepted", "delivery_id": event["delivery_id"]},
@@ -478,6 +534,10 @@ async def _observe_accepted_run(
             )
         except Exception as error:  # noqa: BLE001 - only known-safe details leave runtime
             await lifecycle("run.failed", message=_missing_connection_failure_message(error))
+            return
+
+        if _is_cancelled_run(observed):
+            await lifecycle("run.cancelled")
             return
 
         # The run itself posts its answer, or shows its interrupts, as it ends.
@@ -588,6 +648,12 @@ def _observation_kwargs(
     kwargs["source_provider"] = source_provider
     kwargs["source_thread_key"] = source_thread_key
     return kwargs
+
+
+def _is_cancelled_run(observed: ObservedIngressRun) -> bool:
+    # A cancelled run ends "interrupted" with nothing parked for a person to
+    # answer; reporting it as an interrupt would post an empty approval prompt.
+    return observed["status"] == "interrupted" and not _has_interrupt(observed["values"])
 
 
 def _is_interrupted_run(observed: ObservedIngressRun) -> bool:

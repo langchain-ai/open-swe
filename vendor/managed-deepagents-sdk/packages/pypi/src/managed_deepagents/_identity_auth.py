@@ -407,6 +407,18 @@ async def _scope_threads(ctx: AuthContext, value: ThreadsValue) -> FilterType | 
     studio = is_studio_user(user)
     if studio and ctx.action in {"read", "search"}:
         return None
+    if is_studio_user(user) and ctx.action == "update" and _is_single_thread_interrupt(value):
+        # Studio may stop a run on any thread, as it may resume one there, so a
+        # runaway channel run can be cancelled from the deployment UI. Only
+        # ``interrupt`` on one thread: ``rollback`` deletes checkpoints, and a
+        # bulk cancel by status would stop every run in the deployment.
+        logger.info(
+            "Studio run cancel (user=%s, thread_id=%s)",
+            logger.log_identifier(str(_field(user, "identity") or "")),
+            logger.log_identifier(str(value.get("thread_id"))),
+        )
+        _guard_unscoped_thread_record(value, user, ctx.action)
+        return None
     if studio and ctx.action == "create_run" and _studio_may_run(value):
         _guard_unscoped_thread_record(value, user, ctx.action)
         return None
@@ -416,6 +428,19 @@ async def _scope_threads(ctx: AuthContext, value: ThreadsValue) -> FilterType | 
         # whose upstream TypedDict does not declare ``metadata``.
         _stamp_thread_metadata(cast("JsonObject", value), user, key, ctx.action)
     return {"owner": key}
+
+
+def _is_single_thread_interrupt(value: object) -> bool:
+    """True for a run-cancel ``update`` that interrupts runs on one thread.
+
+    Run cancellation is the only thread update that carries ``action``; metadata
+    patches and state updates never set it.
+    """
+    return (
+        isinstance(value, Mapping)
+        and value.get("action") == "interrupt"
+        and value.get("thread_id") is not None
+    )
 
 
 def _guard_unscoped_thread_record(value: object, user: object, action: str) -> None:

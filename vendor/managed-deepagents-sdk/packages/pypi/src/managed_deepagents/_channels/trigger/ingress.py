@@ -21,6 +21,7 @@ from managed_deepagents._identity_auth import (
 )
 from managed_deepagents._ingress import build_ingress_run_context
 from managed_deepagents._ingress_runs import (
+    cancel_ingress_runs,
     lookup_status,
     observe_ingress_run,
     resume_ingress_run,
@@ -243,6 +244,20 @@ async def observe_ingress_agent(
     if not isinstance(status, str) or status not in {"error", "success", "timeout", "interrupted"}:
         raise ChannelError("channel_run_failed", "Agent Server returned an unknown run status")
     return {"values": observed["values"], "status": status}
+
+
+async def cancel_ingress_thread_runs(
+    *,
+    thread_id: str,
+    source_provider: str,
+    source_thread_key: str,
+    user_id: str,
+) -> int:
+    """Interrupt a Trigger thread's queued and active runs as its owning principal."""
+    client = _create_trigger_ingress_loopback_client(
+        {"provider": source_provider, "thread_key": source_thread_key, "user_id": user_id}
+    )
+    return len(await cancel_ingress_runs(client=client, thread_id=thread_id))
 
 
 def _create_trigger_ingress_loopback_client(
