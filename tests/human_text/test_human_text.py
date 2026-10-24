@@ -1,4 +1,4 @@
-"""Which writing becomes searchable, and who can find it.
+"""Which writing becomes searchable: what people wrote, and only in public.
 
 These run against a real migrated schema: ingestion, the embedding column and
 the fused ranking are all SQL.
@@ -14,7 +14,6 @@ from sqlalchemy import text
 from openswe.database import postgres
 from openswe.human_text import search
 from openswe.human_text.embeddings import DIMENSIONS, Embedder, embed_pending
-from openswe.human_text.search import Reader
 from openswe.human_text.sources import observe_slack_event
 from openswe.input_messages import build_input_messages
 from openswe.slack.channels import SlackChannel
@@ -129,6 +128,7 @@ async def test_only_what_people_wrote_outside_slack_is_recorded_from_threads(
 
 
 async def test_slack_edits_replace_the_text_and_deletes_remove_it(registry_db: None) -> None:
+    await SlackChannel.save_all(_PUBLIC_CHANNEL)
     message: JsonObject = {
         "type": "message",
         "channel": "CPUBLIC01",
@@ -161,36 +161,50 @@ async def test_slack_edits_replace_the_text_and_deletes_remove_it(registry_db: N
     assert await _bodies() == []
 
 
-async def test_readers_see_only_text_they_may_read(registry_db: None, no_embedder: None) -> None:
+async def test_only_public_text_is_stored_or_found(registry_db: None, no_embedder: None) -> None:
     await SlackChannel.save_all(_PUBLIC_CHANNEL, _PRIVATE_CHANNEL)
-    for channel, user, ts in (
-        ("CPUBLIC01", "U1", "1760000000.000100"),
-        ("CPRIVATE1", "U1", "1760000000.000200"),
-        ("CPRIVATE1", "U2", "1760000000.000300"),
-    ):
+    for channel, ts in (("CPUBLIC01", "1760000000.000100"), ("CPRIVATE1", "1760000000.000200")):
         await _slack(
             {
                 "type": "message",
                 "channel": channel,
-                "user": user,
+                "user": "U1",
                 "ts": ts,
-                "text": f"migration plan from {channel} by {user}",
+                "text": f"migration plan from {channel}",
             }
         )
+    await _slack(
+        {
+            "type": "message",
+            "channel": "DDIRECT01",
+            "channel_type": "im",
+            "user": "U1",
+            "ts": "1760000000.000300",
+            "text": "migration plan in a DM",
+        }
+    )
     await _request(await _thread("private"), _envelope("migration plan in a private thread"))
+    public_thread = await _thread()
+    await _request(public_thread, _envelope("migration plan in a public thread"))
 
-    async def found(reader: Reader) -> set[str]:
-        return {hit.text for hit in await search.search("migration plan", reader)}
+    assert sorted(await _bodies()) == [
+        "migration plan from CPUBLIC01",
+        "migration plan in a public thread",
+    ]
 
-    assert await found(Reader()) == {"migration plan from CPUBLIC01 by U1"}
-    assert await found(Reader(login="someone", slack_user_id="U1")) == {
-        "migration plan from CPUBLIC01 by U1",
-        "migration plan from CPRIVATE1 by U1",
-    }
-    assert await found(Reader(login="owner")) == {
-        "migration plan from CPUBLIC01 by U1",
-        "migration plan in a private thread",
-    }
+    async def found() -> set[str]:
+        return {hit.text for hit in await search.search("migration plan")}
+
+    assert await found() == {"migration plan from CPUBLIC01", "migration plan in a public thread"}
+    async with postgres.transaction() as conn:
+        await conn.execute(
+            text(
+                'UPDATE thread SET metadata = metadata || \'{"visibility": "private"}\' '
+                "WHERE thread_id = :thread_id"
+            ),
+            {"thread_id": public_thread},
+        )
+    assert await found() == {"migration plan from CPUBLIC01"}
 
 
 async def test_search_matches_by_meaning_once_embedded(
@@ -202,7 +216,7 @@ async def test_search_matches_by_meaning_once_embedded(
     await _request(thread_id, _envelope("we deploy every friday afternoon"))
     await _request(thread_id, _envelope("lunch is at noon"))
 
-    assert await search.search("when does it go out to production", Reader()) == []
+    assert await search.search("when does it go out to production") == []
     assert await embed_pending() == 2
-    [hit] = (await search.search("when do we ship", Reader()))[:1]
+    [hit] = (await search.search("when do we ship"))[:1]
     assert hit.text == "we deploy every friday afternoon"

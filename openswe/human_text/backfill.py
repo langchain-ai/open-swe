@@ -60,9 +60,9 @@ async def run_backfill(job: Job) -> dict[str, int]:
     recorded = {"thread_messages": 0, "slack_messages": 0}
     while not cursor.threads_done and time.monotonic() < deadline:
         recorded["thread_messages"] += await _thread_page(cursor)
-    channels: dict[str, bool] = {}
+    refreshed: set[str] = set()
     while cursor.threads_done and time.monotonic() < deadline:
-        recorded["slack_messages"] += await _slack_page(cursor, channels)
+        recorded["slack_messages"] += await _slack_page(cursor, refreshed)
         if cursor.slack_received_at is None:
             await event_claims.claim(_DONE_SCOPE, _DONE_KEY, ttl=_DONE_TTL)
             logger.info("Human text backfill finished")
@@ -102,8 +102,7 @@ async def _thread_page(cursor: _Cursor) -> int:
                 sent_at=row.created_at,
             )
             if message is not None:
-                await message.save(conn)
-                recorded += 1
+                recorded += await message.save(conn)
     if len(rows) < _PAGE:
         cursor.threads_done = True
     if rows:
@@ -111,7 +110,7 @@ async def _thread_page(cursor: _Cursor) -> int:
     return recorded
 
 
-async def _slack_page(cursor: _Cursor, channels: dict[str, bool]) -> int:
+async def _slack_page(cursor: _Cursor, refreshed: set[str]) -> int:
     """Record one page of logged Slack message events; clears the cursor after the last."""
     async with transaction() as conn:
         rows = (
@@ -140,12 +139,11 @@ async def _slack_page(cursor: _Cursor, channels: dict[str, bool]) -> int:
         message = SlackHumanText.from_event(event)
         if message is None:
             continue
-        # The webhook records only channels it may operate in; so does the backfill.
-        if message.channel_id not in channels:
-            channel = await SlackChannel.load(message.channel_id)
-            channels[message.channel_id] = channel is not None and channel.context.allows_operations
-        if channels[message.channel_id]:
-            await message.save()
-            recorded += 1
+        # The webhook refreshes a channel before recording into it; so does the backfill,
+        # once per channel, so a message is kept only if its channel is public now.
+        if message.channel_id not in refreshed:
+            await SlackChannel.load(message.channel_id, use_cache=False)
+            refreshed.add(message.channel_id)
+        recorded += await message.save()
     cursor.slack_received_at = rows[-1].received_at if len(rows) == _PAGE else None
     return recorded

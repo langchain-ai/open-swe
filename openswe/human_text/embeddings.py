@@ -8,15 +8,17 @@ import logging
 import time
 from collections.abc import Sequence
 from dataclasses import dataclass
-from typing import Final, Self
+from typing import TYPE_CHECKING, Final, Self
 from uuid import UUID
 
-from openai import AsyncOpenAI
 from sqlalchemy import text
 
 from openswe.config import ENV
 from openswe.database import postgres
 from openswe.utils.gateway import gateway_endpoint, gateway_env_default
+
+if TYPE_CHECKING:
+    from openai import AsyncOpenAI
 
 logger = logging.getLogger(__name__)
 
@@ -44,6 +46,9 @@ class Embedder:
     @classmethod
     def configured(cls) -> Self | None:
         """The embedder this deployment can reach, or ``None`` without OpenAI access."""
+        # Imported here: the webapp must start without the model SDKs.
+        from openai import AsyncOpenAI
+
         if gateway_env_default() and (endpoint := gateway_endpoint("openai")) is not None:
             return cls(AsyncOpenAI(base_url=endpoint.base_url, api_key=endpoint.api_key))
         api_key = ENV.OPENAI_API_KEY.optional()

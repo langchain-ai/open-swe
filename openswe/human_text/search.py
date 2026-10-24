@@ -1,16 +1,16 @@
-"""Searching ``human_text`` for one reader, by meaning and by words at once.
+"""Searching ``human_text`` by meaning and by words at once.
 
 Nearest-neighbour search over the embeddings finds paraphrases; full-text search
 finds the exact names, error codes and identifiers an embedding blurs. Each ranks
 its own candidates and reciprocal rank fusion merges them, so a row strong in
 either list rises without the two scores ever being compared.
 
-Visibility is decided per row when it is read, from the channel or thread as it
-is now: a channel made private, or a thread deleted, stops showing its text.
+Only public text is stored, and each row is checked again when it is read,
+against the channel or thread as it is now: one made private since stops showing
+its text, and a deleted thread takes its rows with it.
 """
 
 import logging
-from dataclasses import dataclass
 from datetime import datetime
 from typing import Final, Literal, Self
 
@@ -19,9 +19,8 @@ from sqlalchemy import Row, text
 
 from openswe.database.postgres import read_only_transaction
 from openswe.human_text.embeddings import Embedder, vector_literal
+from openswe.human_text.sources import public_thread
 from openswe.slack.payloads import SlackChannelPayload
-from openswe.threads.summary import thread_is_readable
-from openswe.users import User
 from openswe.utils.dashboard_links import dashboard_thread_url
 from openswe.utils.json_types import JsonObject
 
@@ -30,7 +29,7 @@ logger = logging.getLogger(__name__)
 type Source = Literal["slack", "open_swe"]
 
 MAX_LIMIT: Final = 50
-# Candidates each ranking contributes; a reader's filter can drop most of them.
+# Candidates each ranking contributes, before rows no longer public are dropped.
 _POOL: Final = 200
 # The usual reciprocal rank fusion constant: it damps the gap between the top few ranks.
 _RRF_K: Final = 60
@@ -42,33 +41,10 @@ _SOURCE_FILTERS: Final[dict[Source, str]] = {
 }
 
 
-@dataclass(frozen=True, kw_only=True)
-class Reader:
-    """Whoever sees the results, which decides the private text among them.
-
-    A reader with no ``login`` is an audience of more than one person, such as
-    everyone who can read a shared thread: it sees public channels and public
-    threads only.
-    """
-
-    login: str | None = None
-    email: str | None = None
-    slack_user_id: str = ""
-
-    @classmethod
-    async def person(cls, login: str, email: str | None) -> Self:
-        user = await User.for_login("github", login)
-        return cls(login=login, email=email, slack_user_id=user.slack_user_id if user else "")
-
-    def may_read(self, row: Row[tuple[object, ...]]) -> bool:
-        if row.slack_channel_id is not None:
-            # Slack never tells Open SWE who else is in a private channel or DM,
-            # so only the author is known to have seen it.
-            return SlackChannelPayload.of(row.channel_payload).is_public or (
-                bool(self.slack_user_id) and row.slack_user_id == self.slack_user_id
-            )
-        metadata = row.thread_metadata if isinstance(row.thread_metadata, dict) else {}
-        return thread_is_readable(metadata, self.login, self.email)
+def _still_public(row: Row[tuple[object, ...]]) -> bool:
+    if row.slack_channel_id is not None:
+        return SlackChannelPayload.of(row.channel_payload).is_public
+    return isinstance(row.thread_metadata, dict) and public_thread(row.thread_metadata)
 
 
 class HumanTextHit(BaseModel):
@@ -126,13 +102,12 @@ async def _query_embedding(query: str) -> str | None:
 
 async def search(
     query: str,
-    reader: Reader,
     *,
     limit: int = 20,
     source: Source | None = None,
     author: str | None = None,
 ) -> list[HumanTextHit]:
-    """The rows best matching ``query`` that ``reader`` may see, best first.
+    """The public rows best matching ``query``, best first.
 
     ``author`` narrows to one person's writing, by GitHub login.
     """
@@ -203,4 +178,4 @@ async def search(
         await conn.execute(text(f"SET LOCAL hnsw.ef_search = {_POOL}"))
         await conn.execute(text("SET LOCAL hnsw.iterative_scan = relaxed_order"))
         rows = (await conn.execute(text(statement), params)).all()
-    return [HumanTextHit.from_row(row) for row in rows if reader.may_read(row)][:limit]
+    return [HumanTextHit.from_row(row) for row in rows if _still_public(row)][:limit]

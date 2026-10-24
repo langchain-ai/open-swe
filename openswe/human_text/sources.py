@@ -6,12 +6,17 @@ Open SWE thread from anywhere else: the dashboard, the CLI, Claude Code, GitHub
 and Linear. A Slack message that reaches a thread is recorded from Slack alone,
 so each message is one row however many places carried it.
 
+Only public writing is kept: messages in public Slack channels and in public
+threads. Private channels, DMs and private threads never reach the table, so
+nothing searching it can leak them.
+
 A row is written without its embedding, which ``embeddings`` fills in later, so
 recording a message never waits on a model call.
 """
 
 import logging
 import uuid
+from collections.abc import Mapping
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from typing import Final, Self
@@ -23,7 +28,7 @@ from openswe.database import postgres
 from openswe.input_messages import input_envelopes
 from openswe.slack.channels import SlackChannel
 from openswe.slack.payloads import SlackEvent, SlackMessage
-from openswe.threads.summary import CLAUDE_CODE_SOURCE
+from openswe.threads.summary import CLAUDE_CODE_SOURCE, thread_is_readable
 from openswe.transcript.events import (
     MessageCompleted,
     MessageSender,
@@ -37,6 +42,12 @@ logger = logging.getLogger(__name__)
 _AUTHORED_SUBTYPES: Final = frozenset({"", "file_share", "thread_broadcast", "me_message"})
 # Thread sources whose prompts arrive as the person's bare text, with no envelope.
 _UNWRAPPED_SOURCES: Final = frozenset({CLAUDE_CODE_SOURCE})
+
+
+def public_thread(metadata: Mapping[str, object]) -> bool:
+    """Whether everyone may read the thread: marked public, not merely unmarked."""
+    return metadata.get("visibility") == "public" and thread_is_readable(metadata)
+
 
 _AUTHOR = """
     CASE
@@ -159,10 +170,16 @@ class SlackHumanText:
     def sent_at(self) -> datetime:
         return datetime.fromtimestamp(float(self.ts), UTC)
 
-    async def save(self) -> None:
-        """Record this message, or its new text when it was edited."""
+    async def save(self) -> bool:
+        """Record this message, or its new text when it was edited; whether its channel is public.
+
+        Reads the channel as last fetched from Slack, which the webhook refreshes
+        before every delivery it handles.
+        """
         async with postgres.session() as session:
-            await SlackChannel.ensure(session, self.channel_id)
+            channel = await session.get(SlackChannel, self.channel_id)
+            if channel is None or not channel.public:
+                return False
             await session.execute(
                 _SAVE_SLACK,
                 {
@@ -176,6 +193,7 @@ class SlackHumanText:
                     **Author(provider="slack", key=self.user_id).params(),
                 },
             )
+        return True
 
 
 @dataclass(frozen=True, kw_only=True)
@@ -285,7 +303,14 @@ class ThreadHumanText:
             case _:
                 return None
 
-    async def save(self, conn: AsyncConnection) -> None:
+    async def save(self, conn: AsyncConnection) -> bool:
+        """Record this message; whether its thread is public."""
+        metadata = await conn.scalar(
+            text("SELECT metadata FROM thread WHERE thread_id = :thread_id"),
+            {"thread_id": self.thread_id},
+        )
+        if not isinstance(metadata, dict) or not public_thread(metadata):
+            return False
         await conn.execute(
             _SAVE_THREAD,
             {
@@ -297,6 +322,7 @@ class ThreadHumanText:
                 **self.author.params(),
             },
         )
+        return True
 
 
 async def observe_transcript_event(

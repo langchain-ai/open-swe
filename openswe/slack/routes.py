@@ -505,7 +505,7 @@ async def slack_webhook(
             return ignored("Slack channel is not eligible")
 
     if event.type in {"message", "app_mention"} and channel_context is not None:
-        # Every person's message is searchable, whether or not it addresses Open SWE.
+        # Every person's message in a public channel is searchable, addressed to Open SWE or not.
         await observe_slack_event(event)
 
     if event.type == "message" and channel_id and channel_context is not None and watched:
