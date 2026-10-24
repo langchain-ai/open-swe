@@ -10,6 +10,7 @@ import { CopyIconButton } from "@langchain/macaw-components/CopyButton"
 
 import { DiffView } from "../../chat/DiffView"
 import { ChunkRenderer } from "../ChunkRenderer"
+import { ExpandableMessageChip } from "../ExpandableMessageChip"
 import { MessageTimestamp } from "../MessageTimestamp"
 import { WorkerLaunchMessage } from "../TaskEventMessage"
 import { ReasoningBlock } from "../ReasoningBlock"
@@ -22,12 +23,13 @@ import {
 import { WorkEntryRow } from "./WorkEntryRow"
 import { describeWorkEntry, latestDiff } from "./workEntry"
 import { TurnFoldRow, WorkGroupToggleRow } from "./foldRows"
-import { ShellEntryBody } from "./entryBodies"
+import { JsonInputEntryBody, ShellEntryBody, ToolCallBody } from "./entryBodies"
 import { ToolResultBody } from "./ToolResultBody"
 import type { ReactNode } from "react"
 import type { RenderItem, TurnSegment } from "../renderItems"
 import type { ApprovalCallbacks } from "../types"
 import type { Message, ToolExecutionChunk } from "@/features/agents/lib/types"
+import { CodeBlock } from "@/features/agents/components/chat/CodeBlock"
 import { OutputIframe } from "@/features/agents/components/chat/OutputIframe"
 import {
   ReplyCard,
@@ -58,19 +60,21 @@ function EditWorkEntry({
   repoPath?: string
 }) {
   const diff = latestDiff(chunk)
+  if (!diff) return <ToolWorkEntry chunk={chunk} repoPath={repoPath} />
   return (
     <WorkEntryRow
       entry={describeWorkEntry(chunk, repoPath)}
       timestamp={chunk.timestamp}
-      body={diff ? <DiffView diffData={diff} snippet /> : undefined}
+      body={<DiffView diffData={diff} snippet />}
       defaultExpanded={chunk.status === "pending"}
     />
   )
 }
 
 /**
- * A code-mode `eval` call, open on the tool calls its code made. Its own output
- * mostly repeats what those returned, so it shows only when the code failed.
+ * A code-mode `eval` call, open on the tool calls its code made, with its code
+ * folded above them. Its own output mostly repeats what those returned, so it
+ * shows only when the code failed or called nothing.
  */
 function CodeWorkEntry({
   chunk,
@@ -83,8 +87,23 @@ function CodeWorkEntry({
   repoPath?: string
 }) {
   const entry = describeWorkEntry(chunk, repoPath)
+  const code =
+    typeof chunk.input?.code === "string" ? chunk.input.code.trim() : ""
   if (calls == null) {
-    return <WorkEntryRow entry={entry} timestamp={chunk.timestamp} />
+    return (
+      <WorkEntryRow
+        entry={entry}
+        timestamp={chunk.timestamp}
+        body={({ loadedText, loadError }) => (
+          <ToolCallBody
+            chunk={chunk}
+            loadedText={loadedText}
+            loadError={loadError}
+            input={code && <CodeBlock text={code} language="javascript" />}
+          />
+        )}
+      />
+    )
   }
   const failed = chunk.status === "error"
   // Keyed apart from the plain row: calls arrive after the row first renders,
@@ -96,6 +115,11 @@ function CodeWorkEntry({
       timestamp={chunk.timestamp}
       body={({ loadedText, loadError }) => (
         <div className="space-y-space-2">
+          {code && (
+            <ExpandableMessageChip label="Code">
+              <CodeBlock text={code} language="javascript" />
+            </ExpandableMessageChip>
+          )}
           <div>{calls}</div>
           {failed && (
             <ToolResultBody
@@ -105,6 +129,31 @@ function CodeWorkEntry({
         </div>
       )}
       defaultExpanded
+    />
+  )
+}
+
+/** A tool call shown as its arguments and output. */
+function ToolWorkEntry({
+  chunk,
+  repoPath,
+}: {
+  chunk: ToolExecutionChunk
+  repoPath?: string
+}) {
+  const entry = describeWorkEntry(chunk, repoPath)
+  return (
+    <WorkEntryRow
+      entry={entry}
+      timestamp={chunk.timestamp}
+      body={({ loadedText, loadError }) => (
+        <JsonInputEntryBody
+          chunk={chunk}
+          loadedText={loadedText}
+          loadError={loadError}
+        />
+      )}
+      defaultExpanded={chunk.status === "pending"}
     />
   )
 }
@@ -139,10 +188,10 @@ function WorkGroup({
         />
       )}
       {visible.map((chunk, index) => (
-        <WorkEntryRow
+        <ToolWorkEntry
           key={chunk.toolCallId || `work-${index}`}
-          entry={describeWorkEntry(chunk, repoPath)}
-          timestamp={chunk.timestamp}
+          chunk={chunk}
+          repoPath={repoPath}
         />
       ))}
     </div>
@@ -336,10 +385,10 @@ export function AgentTurn({
 
       case "tool-item":
         return (
-          <WorkEntryRow
+          <ToolWorkEntry
             key={item.key}
-            entry={describeWorkEntry(item.chunk, repoPath)}
-            timestamp={item.chunk.timestamp}
+            chunk={item.chunk}
+            repoPath={repoPath}
           />
         )
 
@@ -466,9 +515,15 @@ function SqlResultItem({ chunk }: { chunk: ToolExecutionChunk }) {
     }
   }, [loadOutput])
 
+  const query =
+    typeof chunk.input?.query === "string" ? chunk.input.query.trim() : ""
+
   return (
-    <SqlResultTable
-      output={loaded && loaded.load === loadOutput ? loaded.text : output}
-    />
+    <div>
+      {query && <CodeBlock text={query} language="sql" />}
+      <SqlResultTable
+        output={loaded && loaded.load === loadOutput ? loaded.text : output}
+      />
+    </div>
   )
 }
