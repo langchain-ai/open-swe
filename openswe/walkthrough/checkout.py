@@ -13,7 +13,7 @@ from typing import Self
 
 from deepagents.backends.protocol import SandboxBackendProtocol
 
-from openswe.sandboxes.paths import resolve_sandbox_work_dir
+from openswe.sandboxes.paths import resolve_checkout_dir, resolve_sandbox_work_dir
 from openswe.sandboxes.repo_prep import BLOBLESS_CLONE_ARGS
 from openswe.walkthrough.diff import FileChange, parse
 from openswe.walkthrough.plan import LineRef
@@ -40,7 +40,8 @@ class PinnedCheckout:
     async def locate(cls, backend: SandboxBackendProtocol, repo: str) -> Self:
         if not _REPO_NAME_RE.fullmatch(repo):
             raise CheckoutError("walkthrough repository name is invalid")
-        return cls(backend, f"{await resolve_sandbox_work_dir(backend)}/{repo}")
+        work_dir = await resolve_sandbox_work_dir(backend)
+        return cls(backend, await resolve_checkout_dir(backend, work_dir, repo))
 
     async def _run(self, script: str, *, cwd: str = "") -> str:
         result = await self.backend.aexecute(
@@ -51,24 +52,29 @@ class PinnedCheckout:
             raise CheckoutError(result.output.strip()[-2000:])
         return result.output
 
-    async def pinned(self) -> tuple[str, str] | None:
+    async def pinned(self, *, allow_missing: bool = False) -> tuple[str, str] | None:
         """The ``(base, head)`` this checkout is pinned to, or ``None`` when there is none."""
         result = await self.backend.aexecute(
             f"cd {shlex.quote(self.repo_dir)} 2>/dev/null && "
+            f"test -e .git || exit 72\n"
             f"git rev-parse -q --verify {BASE_REF} && git rev-parse -q --verify {HEAD_REF}",
             timeout=GIT_TIMEOUT_SECONDS,
         )
+        if result.exit_code == 72:
+            if allow_missing:
+                return None
+            raise CheckoutError(
+                f"Repository not found at {self.repo_dir}; restore or prepare the repository "
+                "checkout in this sandbox before opening the walkthrough."
+            )
         lines = result.output.split()
         if result.exit_code not in (0, None) or len(lines) != 2:
             return None
         return lines[0], lines[1]
 
     async def pin(self, *, full_name: str, pr_number: int, base_sha: str, head_sha: str) -> bool:
-        """Fetch and pin the PR's base and head, cloning the repository if it is missing.
-
-        Returns whether anything changed; a checkout already pinned there is left alone.
-        """
-        if await self.pinned() == (base_sha, head_sha):
+        """Fetch and pin the PR, cloning if missing; return whether its pinned refs changed."""
+        if await self.pinned(allow_missing=True) == (base_sha, head_sha):
             return False
         work_dir, _, name = self.repo_dir.rpartition("/")
         base, head = shlex.quote(base_sha), shlex.quote(head_sha)
