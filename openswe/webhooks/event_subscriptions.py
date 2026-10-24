@@ -376,8 +376,6 @@ class EventSubscription(Base):
     @classmethod
     async def deliver_to(cls, thread_id: str, strategy: MultitaskStrategy) -> None:
         """Start a run for what ``thread_id`` is owed, when one is needed. Never raises."""
-        if not postgres.configured():
-            return
         try:
             await EventMatch.deliver(thread_id, strategy)
         except NotFoundError:

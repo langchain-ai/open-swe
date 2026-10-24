@@ -79,17 +79,11 @@ async def test_analytics_readiness_requires_admin(monkeypatch) -> None:
 
 
 @pytest.mark.parametrize("report", ["pr", "usage"])
-@pytest.mark.parametrize("failure", ["disabled", "invalid_uri", "uninitialized", "database_down"])
+@pytest.mark.parametrize("failure", ["uninitialized", "database_down"])
 async def test_pr_report_unavailability_is_distinct_from_empty_data(monkeypatch, failure, report):
     app = FastAPI()
     app.include_router(routes.router)
     app.dependency_overrides[oauth.require_session] = lambda: {"sub": "user"}
-    if failure == "disabled":
-        monkeypatch.delenv("POSTGRES_URI", raising=False)
-    else:
-        monkeypatch.setenv(
-            "POSTGRES_URI", "invalid" if failure == "invalid_uri" else "postgresql://localhost/test"
-        )
     error = (
         ConnectionError("database down")
         if failure == "database_down"

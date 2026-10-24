@@ -93,9 +93,6 @@ def publish(thread_id: str, version: int) -> None:
 
 
 async def start() -> None:
-    if not postgres.configured():
-        logger.info("Transcript listener disabled: PostgreSQL is not configured")
-        return
     await LISTENER.listen(CHANNEL, _on_notify, _on_connected)
 
 

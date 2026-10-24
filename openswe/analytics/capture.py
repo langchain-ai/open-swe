@@ -4,8 +4,6 @@ import logging
 from collections.abc import Awaitable, Callable
 from functools import wraps
 
-from openswe.database import configured
-
 logger = logging.getLogger(__name__)
 
 
@@ -13,8 +11,7 @@ def fail_soft[**P](operation: Callable[P, Awaitable[None]]) -> Callable[P, Await
     @wraps(operation)
     async def capture(*args: P.args, **kwargs: P.kwargs) -> None:
         try:
-            if configured():
-                await operation(*args, **kwargs)
+            await operation(*args, **kwargs)
         except Exception:  # noqa: BLE001
             logger.warning(
                 "Analytics capture failed",

@@ -18,7 +18,6 @@ from typing import cast
 from pydantic import JsonValue
 from pydantic_core import PydanticSerializationError, to_jsonable_python
 
-from openswe.database import postgres
 from openswe.transcript.engine import Command, ThreadNotTranscribed, append
 from openswe.transcript.events import JsonObject, ThreadMetaPatch, ThreadMetaUpdated
 
@@ -46,10 +45,8 @@ async def mirror_thread_metadata(thread_id: str, patch: Mapping[str, object]) ->
     """Mirror the authorization-relevant part of a LangGraph metadata update.
 
     A no-op when the update touches nothing the read path reads, when the
-    thread has no transcript, or when PostgreSQL is not configured.
+    thread has no transcript.
     """
-    if not postgres.configured():
-        return
     mirrored: JsonObject = {}
     for key, value in patch.items():
         if key not in MIRRORED_KEYS:

@@ -147,8 +147,6 @@ class Walkthrough(Base):
     @classmethod
     async def generated_since(cls, owner: str, repo: str, number: int, since: datetime) -> bool:
         """Whether the PR's plan, for any head, became complete at or after ``since``."""
-        if not postgres.configured():
-            return False
         async with postgres.session() as session:
             found = await session.scalar(
                 select(cls.pull_request_id)
@@ -282,8 +280,8 @@ class WalkthroughView(BaseModel):
 
     @classmethod
     async def for_head(cls, owner: str, repo: str, number: int, head_sha: str) -> Self | None:
-        """The walkthrough for the PR's current head, or ``None`` without one or a database."""
-        if not head_sha or not postgres.configured():
+        """The walkthrough for the PR's current head, or ``None`` without one."""
+        if not head_sha:
             return None
         walkthrough = await Walkthrough.for_head(owner, repo, number, head_sha)
         return cls.of(walkthrough) if walkthrough else None

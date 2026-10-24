@@ -23,7 +23,6 @@ from openswe.dashboard.oauth_credentials import (
     save_credential,
 )
 from openswe.dashboard.oauth_refresh import refresh_guard
-from openswe.database import postgres
 from openswe.encryption import decrypt_token, encrypt_token
 from openswe.users.records import UnknownUser, UserRecords
 from openswe.utils.time import now_iso
@@ -113,12 +112,8 @@ async def _metadata() -> dict[str, str]:
 
 
 def langsmith_oauth_configured() -> bool:
-    """Credentials live in PostgreSQL, so the connection needs it alongside the client."""
-    return (
-        ENV.LANGSMITH_OAUTH_CLIENT_ID.is_set()
-        and ENV.LANGSMITH_OAUTH_CLIENT_SECRET.is_set()
-        and postgres.configured()
-    )
+    """Whether the OAuth client credentials are set."""
+    return ENV.LANGSMITH_OAUTH_CLIENT_ID.is_set() and ENV.LANGSMITH_OAUTH_CLIENT_SECRET.is_set()
 
 
 def _client_id() -> str:

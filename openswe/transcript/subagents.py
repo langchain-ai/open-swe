@@ -62,7 +62,7 @@ async def attach_subagents(summaries: Sequence[dict[str, object]]) -> None:
     for summary in summaries:
         summary["subagents"] = []
     ids = [thread_id for summary in summaries if isinstance(thread_id := summary.get("id"), str)]
-    if not ids or not postgres.configured():
+    if not ids:
         return
     try:
         async with postgres.snapshot_transaction() as conn:

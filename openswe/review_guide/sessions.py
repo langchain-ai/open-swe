@@ -87,8 +87,6 @@ class ReviewGuideSession(Base):
 
     @classmethod
     async def for_channel(cls, channel_id: str) -> Self | None:
-        if not postgres.configured():
-            return None
         async with postgres.session() as session:
             return await session.scalar(
                 select(cls)
@@ -141,8 +139,6 @@ class ReviewGuideSession(Base):
 
     @classmethod
     async def get(cls, thread_id: str) -> Self | None:
-        if not postgres.configured():
-            return None
         async with postgres.session() as session:
             return await session.scalar(
                 select(cls)

@@ -38,12 +38,12 @@ MIGRATION_DIR = Path(__file__).with_name("migrations")
 MIGRATION_LOCK = 557314367248862439
 
 
-def uri() -> str | None:
+def uri() -> str:
     value = ENV.POSTGRES_URI.optional()
     if value is None and ENV.LANGSMITH_LANGGRAPH_API_VARIANT.get() == "local_dev":
         value = "postgresql://postgres:postgres@127.0.0.1:5433/postgres"
     if value is None:
-        return None
+        raise RuntimeError("POSTGRES_URI is required")
     if value.startswith("postgres://"):
         value = "postgresql://" + value.removeprefix("postgres://")
     if value.startswith("postgresql://"):
@@ -61,22 +61,9 @@ def uri() -> str | None:
     return url.render_as_string(hide_password=False)
 
 
-def configured() -> bool:
-    return uri() is not None
-
-
-def require_configured() -> None:
-    if not configured():
-        raise RuntimeError(
-            "POSTGRES_URI is required: pull request and repository records are stored in PostgreSQL"
-        )
-
-
 def engine() -> AsyncEngine:
     global _ENGINE, _ENGINE_URI
     database_uri = uri()
-    if database_uri is None:
-        raise RuntimeError("PostgreSQL is not configured")
     if _ENGINE is None or _ENGINE_URI != database_uri:
         _ENGINE = create_async_engine(
             database_uri,

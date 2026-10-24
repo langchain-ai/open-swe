@@ -159,8 +159,6 @@ async def delete_transcript(thread_id: str) -> bool:
     would deduplicate a thread recreated under the same id out of ever being
     created. Returns whether a transcript was deleted.
     """
-    if not postgres.configured():
-        return False
     async with postgres.transaction() as conn:
         await conn.execute(
             text("SELECT pg_advisory_xact_lock(hashtext(:thread_id))"),

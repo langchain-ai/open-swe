@@ -15,7 +15,6 @@ from typing import Literal, TypedDict
 from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel, JsonValue
 
-from openswe.database import configured
 from openswe.federation.github_oidc import GitHubActionsClaims, InvalidFederatedToken
 from openswe.federation.github_oidc import verify as verify_github_oidc
 from openswe.github.repositories import Repository
@@ -211,7 +210,7 @@ async def subscribe_merged_thread(
     rest.
     """
     merge_sha = sha.strip().lower()
-    if not _SHA_RE.fullmatch(merge_sha) or not configured():
+    if not _SHA_RE.fullmatch(merge_sha):
         return
     try:
         repository = await Repository.get(f"{owner}/{repo}")
@@ -280,6 +279,6 @@ async def rollout_webhook(request: Request) -> RolloutAccepted:
         delivery_id=_delivery_id(event.target, event.commits),
         refs=EventRefs(github_repository=claims.repository),
     )
-    if configured() and not stored:
+    if not stored:
         raise HTTPException(status_code=503, detail="Deployment event was not recorded")
     return await accept_rollout_deploy(event.target, event.commits)

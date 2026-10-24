@@ -7,7 +7,7 @@ from sqlalchemy import text
 from openswe.analytics.capture import fail_soft
 from openswe.analytics.identity import DisplayNameSource, opaque_id, opaque_person
 from openswe.config import ENV
-from openswe.database import configured, transaction
+from openswe.database import transaction
 from openswe.database.analytics import workspace_id
 
 _GITHUB_PRECEDES = (
@@ -154,8 +154,6 @@ async def resolve_person(
     team_key: str | None = None,
 ) -> UUID | None:
     """Resolve verified product identity, upgrading earlier login/email-only captures."""
-    if not configured():
-        return None
     login = github_login.strip().lower() if github_login else None
     email = email.strip().lower() if email else None
     immutable_id = opaque_person("github", immutable_person_key)

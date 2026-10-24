@@ -89,8 +89,6 @@ async def load_workspace() -> None:
 
 async def readiness() -> dict[str, Any]:
     try:
-        if not postgres.configured():
-            return {"configured": False, "ready": False, "reason": "not configured"}
         async with asyncio.timeout(ENV.ANALYTICS_HEALTH_TIMEOUT_SECONDS.get_int(3)):
             async with postgres.connection() as conn:
                 event_count = await conn.scalar(text("SELECT count(*) FROM events WHERE false"))

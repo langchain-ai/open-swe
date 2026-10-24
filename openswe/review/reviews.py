@@ -20,7 +20,6 @@ from fastapi import HTTPException, Response
 from langgraph_sdk.errors import NotFoundError
 from pydantic import BaseModel, TypeAdapter, ValidationError
 
-from openswe.database import postgres
 from openswe.github.app import get_github_app_installation_token
 from openswe.github.http import GitHubAppUnavailable, GitHubClient, or_none
 from openswe.github.pull_request_diff import (
@@ -1163,9 +1162,7 @@ class _ScoutPull(BaseModel):
 async def _scout_target(
     owner: str, repo: str, pr_number: int, pr_payload: object
 ) -> ReviewScoutTarget | None:
-    """The scout target for the PR's current head, or ``None`` without a database or head."""
-    if not postgres.configured():
-        return None
+    """The scout target for the PR's current head, or ``None`` without a head."""
     pull = _ScoutPull.model_validate(pr_payload if isinstance(pr_payload, dict) else {})
     if not pull.base.sha or not pull.head.sha:
         return None

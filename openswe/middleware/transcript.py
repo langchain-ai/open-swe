@@ -765,8 +765,6 @@ def _thread_created(metadata: Mapping[str, object], title: str) -> ThreadCreated
 
 async def _has_transcript(thread_id: str) -> bool:
     """Whether the thread is served by the event log rather than by LangGraph state."""
-    if not postgres.configured():
-        return False
     async with postgres.read_only_transaction() as conn:
         result = await conn.execute(
             sql("SELECT 1 FROM thread WHERE thread_id = :thread_id"),
@@ -828,11 +826,8 @@ class TranscriptMiddleware(OpenSWEMiddleware):
 
         messages = cast(Sequence[BaseMessage], state.get("messages") or [])
         transcribed = await _has_transcript(ids.thread_id)
-        # Without PostgreSQL there is nowhere to keep a transcript, so the run
-        # must not be stamped as one: the UI would switch to a read path that
-        # has no rows behind it.
-        untranscribable = not postgres.configured() or (
-            not transcribed and any(isinstance(message, AIMessage) for message in messages)
+        untranscribable = not transcribed and any(
+            isinstance(message, AIMessage) for message in messages
         )
         if untranscribable:
             # A thread that already has agent turns but no transcript row predates
@@ -958,7 +953,7 @@ class TranscriptMiddleware(OpenSWEMiddleware):
         ids = _run_ids()
         if ids is None or _namespace.get() or _run_key(ids.thread_id, ids.run_id) in _runs:
             return
-        owned = await run_turn(ids.thread_id, ids.run_id) if postgres.configured() else None
+        owned = await run_turn(ids.thread_id, ids.run_id)
         if owned is None:
             await self._start_run(state)
             return

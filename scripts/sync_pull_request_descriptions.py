@@ -18,7 +18,7 @@ logger = logging.getLogger(__name__)
 
 
 async def sync() -> int:
-    postgres.require_configured()
+    postgres.uri()
     failures = 0
     last_id: UUID | None = None
     try:

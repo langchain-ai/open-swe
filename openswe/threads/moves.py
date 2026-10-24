@@ -9,7 +9,6 @@ from fastapi import HTTPException
 
 from openswe.bridge.constants import HANDOFF_FROM_KEY
 from openswe.bridge.store import Bridge, BridgeStore, SandboxBridgeBinding
-from openswe.database import postgres
 from openswe.dispatch import thread_workspace
 from openswe.input_messages import SystemIdentity, build_input_messages
 from openswe.threads.summary import TRANSCRIPT_VERSION, thread_is_owner
@@ -126,7 +125,7 @@ class SandboxMove:
 
     async def _record(self) -> None:
         """Mark the move in the thread's transcript, as a turn no run answers."""
-        if not (self._transcribed and postgres.configured()):
+        if not self._transcribed:
             return
         destination = "the cloud" if self.to_cloud else f"{self._login}'s Mac"
         if self.carried:

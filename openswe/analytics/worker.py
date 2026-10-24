@@ -6,7 +6,6 @@ import logging
 from openswe.analytics.outbox import deliver_batch
 from openswe.analytics.retention import enforce_retention
 from openswe.analytics.summaries import recompute_dirty_partitions
-from openswe.database import configured
 
 logger = logging.getLogger(__name__)
 
@@ -37,7 +36,7 @@ async def run_worker() -> None:
 
 async def start_worker() -> None:
     global _WORKER
-    if not configured() or (_WORKER is not None and not _WORKER.done()):
+    if _WORKER is not None and not _WORKER.done():
         return
     _STOP.clear()
     _WORKER = asyncio.create_task(run_worker(), name="analytics-outbox-worker")

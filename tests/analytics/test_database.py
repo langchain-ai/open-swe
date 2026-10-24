@@ -95,3 +95,14 @@ async def test_connection_uri_rejects_ambiguous_ssl_modes(monkeypatch, query):
     monkeypatch.setenv("POSTGRES_URI", f"postgresql://localhost/analytics_test?{query}")
     with pytest.raises(ValueError, match="SSL|sslmode"):
         postgres.uri()
+
+
+@pytest.mark.parametrize("local_dev", [False, True])
+async def test_connection_uri_requires_postgres_outside_local_dev(monkeypatch, local_dev):
+    monkeypatch.delenv("POSTGRES_URI", raising=False)
+    monkeypatch.setenv("LANGSMITH_LANGGRAPH_API_VARIANT", "local_dev" if local_dev else "")
+    if local_dev:
+        assert postgres.uri() == "postgresql+asyncpg://postgres:postgres@127.0.0.1:5433/postgres"
+    else:
+        with pytest.raises(RuntimeError, match="POSTGRES_URI is required"):
+            postgres.engine()

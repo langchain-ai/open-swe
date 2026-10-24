@@ -248,7 +248,7 @@ class PullRequest(Base):
     ) -> dict[tuple[str, int], DiffStats]:
         """Stored line counts keyed by lowercased ``(repo_full_name, number)``."""
         keys = [(repo_full_name.lower(), number) for repo_full_name, number in prs]
-        if not keys or not postgres.configured():
+        if not keys:
             return {}
         async with postgres.session() as session:
             rows = await session.scalars(

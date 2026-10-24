@@ -66,11 +66,9 @@ def _install(
     *,
     transcribed: bool,
     turn_id: UUID | None = None,
-    postgres_configured: bool = True,
 ) -> FakeEngine:
     engine = FakeEngine()
     monkeypatch.setattr(mw, "append", engine.append)
-    monkeypatch.setattr(mw.postgres, "configured", lambda: postgres_configured)
 
     async def _has_transcript(thread_id: str) -> bool:
         return transcribed

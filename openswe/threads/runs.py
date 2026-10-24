@@ -30,7 +30,6 @@ from openswe.dashboard.user_preferences import get_user_preferences
 from openswe.dashboard.workspace_settings import (
     get_workspace_settings,
 )
-from openswe.database import postgres
 from openswe.dispatch import (
     FOLLOW_UP_PICKUP_KIND,
     TURN_ATTRIBUTION_FIELDS,
@@ -316,11 +315,7 @@ async def create_dashboard_thread_record(
     if extra_metadata:
         metadata.update(extra_metadata)
 
-    # A deployment without PostgreSQL has nowhere to keep a transcript, so the
-    # thread is not stamped as one and keeps reading LangGraph state.
-    transcribed = postgres.configured()
-    if transcribed:
-        metadata["transcript"] = TRANSCRIPT_VERSION
+    metadata["transcript"] = TRANSCRIPT_VERSION
 
     client = langgraph_client()
     await create_thread(
@@ -331,8 +326,6 @@ async def create_dashboard_thread_record(
         if_exists="raise",
     )
     thread = await client.threads.get(thread_id)
-    if not transcribed:
-        return as_thread_dict(thread)
     await append(
         thread_id,
         [
@@ -942,9 +935,7 @@ async def _enrich_run_start_command(
     )
     # The transcript keys a human message by the id the graph will carry, so the
     # id is minted here when the client did not send a usable one.
-    transcribed = (creating and postgres.configured()) or metadata.get(
-        "transcript"
-    ) == TRANSCRIPT_VERSION
+    transcribed = creating or metadata.get("transcript") == TRANSCRIPT_VERSION
     client_message_id = _command_message_id(params)
     message_id: str | None = None
     if client_message_id and client_message_id not in persisted_message_ids:

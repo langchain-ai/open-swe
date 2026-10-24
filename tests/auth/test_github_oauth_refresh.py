@@ -32,7 +32,7 @@ def test_token_expired_with_skew() -> None:
 
 
 @pytest.mark.asyncio
-async def test_get_valid_access_token_refreshes_when_near_expiry() -> None:
+async def test_get_valid_access_token_refreshes_when_near_expiry(registry_db) -> None:
     soon = (datetime.now(UTC) + timedelta(minutes=1)).isoformat()
     record = {
         "email": "u@example.com",
@@ -82,7 +82,7 @@ def test_is_unrecoverable_refresh_error() -> None:
 
 
 @pytest.mark.asyncio
-async def test_get_valid_access_token_drops_record_on_dead_refresh_token() -> None:
+async def test_get_valid_access_token_drops_record_on_dead_refresh_token(registry_db) -> None:
     soon = (datetime.now(UTC) + timedelta(minutes=1)).isoformat()
     record = {
         "email": "u@example.com",
@@ -117,7 +117,7 @@ async def test_get_valid_access_token_drops_record_on_dead_refresh_token() -> No
 
 
 @pytest.mark.asyncio
-async def test_get_valid_access_token_keeps_fresh_reauth_on_dead_refresh_token() -> None:
+async def test_get_valid_access_token_keeps_fresh_reauth_on_dead_refresh_token(registry_db) -> None:
     soon = (datetime.now(UTC) + timedelta(minutes=1)).isoformat()
     stale = {
         "email": "u@example.com",
@@ -161,7 +161,9 @@ async def test_get_valid_access_token_keeps_fresh_reauth_on_dead_refresh_token()
 
 
 @pytest.mark.asyncio
-async def test_get_valid_access_token_keeps_record_on_transient_refresh_failure() -> None:
+async def test_get_valid_access_token_keeps_record_on_transient_refresh_failure(
+    registry_db,
+) -> None:
     soon = (datetime.now(UTC) + timedelta(minutes=1)).isoformat()
     record = {
         "email": "u@example.com",

@@ -419,8 +419,6 @@ async def _finish_watch(watch: BabySitWatch, message: str) -> str:
 
 
 async def _has_expedited_card(watch: BabySitWatch) -> bool:
-    if not postgres.configured():
-        return False
     try:
         approval = await HumanReviewRequest.active_for(watch.owner, watch.repo, watch.pr_number)
     except Exception:

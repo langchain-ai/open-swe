@@ -21,7 +21,6 @@ import logging
 from collections.abc import AsyncIterator
 
 from openswe.bridge.constants import ALIVE_THRESHOLD_SECONDS, CHANNEL
-from openswe.database import postgres
 from openswe.database.notifications import LISTENER
 
 logger = logging.getLogger(__name__)
@@ -89,9 +88,6 @@ def publish(bridge_id: str, request_id: str, event: str) -> None:
 
 async def start() -> None:
     global _PRUNE_TASK
-    if not postgres.configured():
-        logger.info("Sandbox bridge listener disabled: PostgreSQL is not configured")
-        return
     _STOP.clear()
     await LISTENER.listen(CHANNEL, _on_notify)
     if _PRUNE_TASK is None or _PRUNE_TASK.done():
