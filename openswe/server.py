@@ -235,6 +235,7 @@ from openswe.tools import (
     write_database_rows,
 )
 from openswe.tools.access import permitted, resolve_access
+from openswe.tools.add_review_comment import add_review_comment
 from openswe.tools.admin_gate import (
     actor_has_admin_context,
     participant_is_admin,
@@ -242,6 +243,7 @@ from openswe.tools.admin_gate import (
 from openswe.tools.manage_feature_flags import manage_feature_flags
 from openswe.tools.manage_review_approval_mode import manage_review_approval_mode
 from openswe.tools.manage_review_repos import manage_review_repos
+from openswe.tools.note_on_diff import note_on_diff
 from openswe.tools.propose_pr_review import propose_pr_review
 from openswe.tools.propose_review_comment import propose_review_comment
 from openswe.tools.review_walkthrough import walkthrough_tools
@@ -595,6 +597,9 @@ def _is_subagent_excluded_tool(name: str) -> bool:
         "monitor",
         "submit_thread_feedback",
         "submit_review_assessment_feedback",
+        # The review page reads both from the parent's transcript.
+        "note_on_diff",
+        "add_review_comment",
         "get_thread",
         "code_channel_set_view",
         "manage_code_channel",
@@ -1671,6 +1676,8 @@ async def plan_agent(config: RunnableConfig, surface: ToolSurface) -> None:
         submit_review_assessment_feedback,
         propose_review_comment,
         propose_pr_review,
+        note_on_diff,
+        add_review_comment,
         *ADMIN_TOOLS,
         *((cli_result,) if cli_result_required else ()),
         *((worktree_handoff,) if bridge_client == "desktop" and not stop_summary_mode else ()),

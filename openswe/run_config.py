@@ -135,6 +135,8 @@ class RunConfig(BaseModel):
     # Pull request under review
     pr_number: Int | None = None
     pr_url: str | None = None
+    # The review page a dashboard message was sent from; unset for every other origin.
+    review_page_pr_url: str | None = None
     pr_title: str | None = None
     head_sha: str | None = None
     base_sha: str | None = None

@@ -5,7 +5,7 @@ description = "Open SWE's coding agent and pull request reviewer as one Managed 
 requires-python = ">=3.12"
 dependencies = [
     "managed-deepagents",
-    "deepagents==0.7.30",
+    "deepagents==0.7.32",
     "langchain[mcp]>=1.4.7",
     "langchain-anthropic>=1.7.6",
     # Fireworks models the dashboard offers, such as Kimi.

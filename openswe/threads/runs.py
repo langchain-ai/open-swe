@@ -1110,6 +1110,9 @@ async def _enrich_run_start_command(
         overrides["transcript_turn_id"] = str(turn_id)
 
     overrides["model_selection"] = model_selection
+    review_page_pr_url = client_configurable.get("review_chat_pr_url")
+    if isinstance(review_page_pr_url, str):
+        overrides["review_page_pr_url"] = review_page_pr_url
     overrides["model_selection_changed"] = (
         client_configurable.get("model_selection_changed") is True
     )

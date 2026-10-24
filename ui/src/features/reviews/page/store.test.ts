@@ -1,7 +1,8 @@
 import { beforeEach, describe, expect, it } from "vitest"
 
 import type { ReviewDiffFile, ReviewWalkthrough } from "@/lib/api"
-import { buildEntries } from "./diffEntries"
+import { buildEntries, findEntry } from "./diffEntries"
+import { findMatches, findTarget } from "./find"
 import { isCollapsed, isRead, useReviewPage } from "./store"
 
 // One file whose two edits the walkthrough splits between steps 1 and 2.
@@ -166,5 +167,20 @@ describe("the page's lifetimes", () => {
 
     expect(page().jump).toBe(jump)
     expect(isCollapsed(page(), second)).toBe(true)
+  })
+})
+
+describe("finding in the changes", () => {
+  it("finds a file by name and each changed line once, in the step that shows it", () => {
+    const seven = findMatches(entries, "SEVEN")
+    expect(seven).toEqual([
+      { kind: "line", path: split.path, line: 7, side: "LEFT" },
+      { kind: "line", path: split.path, line: 7, side: "RIGHT" },
+    ])
+    expect(findEntry(entries, findTarget(seven[0]!))).toBe(second)
+    expect(findMatches(entries, "TWO")[0]).toMatchObject({ line: 2 })
+    expect(
+      findMatches(buildEntries([split], walkthrough, "files"), "src/a")
+    ).toEqual([{ kind: "file", path: split.path }])
   })
 })
