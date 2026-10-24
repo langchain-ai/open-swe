@@ -121,7 +121,7 @@ async def _prepare_run(
         thread_metadata={},
     )
     run: EndpointAnswer = {
-        "input": cast(JsonValue, prepared.input),
+        "input": cast(dict[str, AnswerJson], prepared.input),
         "context": cast(dict[str, AnswerJson], rewritten["context"]),
         "metadata": cast(dict[str, AnswerJson], run_config["metadata"]),
     }

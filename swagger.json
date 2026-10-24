@@ -1959,7 +1959,18 @@
             "type": "object"
           },
           "input": {
-            "$ref": "#/components/schemas/managed_deepagents___channels__types__JsonValue"
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "additionalProperties": {
+                  "$ref": "#/components/schemas/managed_deepagents___channels__types__JsonValue"
+                },
+                "type": "object"
+              }
+            ],
+            "title": "Input"
           },
           "metadata": {
             "additionalProperties": {
@@ -2035,13 +2046,14 @@
         "description": "The conversation's thread an endpoint request is about.",
         "properties": {
           "channel": {
-            "$ref": "#/components/schemas/EndpointThreadChannel"
+            "$ref": "#/components/schemas/_EndpointThreadChannel"
           },
           "id": {
             "title": "Id",
             "type": "string"
           },
           "interrupted": {
+            "const": true,
             "title": "Interrupted",
             "type": "boolean"
           }
@@ -2051,19 +2063,6 @@
           "channel"
         ],
         "title": "EndpointThread",
-        "type": "object"
-      },
-      "EndpointThreadChannel": {
-        "properties": {
-          "name": {
-            "title": "Name",
-            "type": "string"
-          }
-        },
-        "required": [
-          "name"
-        ],
-        "title": "EndpointThreadChannel",
         "type": "object"
       },
       "EntryView": {
@@ -9392,6 +9391,19 @@
           }
         },
         "title": "WorkspaceUpdate",
+        "type": "object"
+      },
+      "_EndpointThreadChannel": {
+        "properties": {
+          "name": {
+            "title": "Name",
+            "type": "string"
+          }
+        },
+        "required": [
+          "name"
+        ],
+        "title": "_EndpointThreadChannel",
         "type": "object"
       },
       "managed_deepagents___channels__types__JsonValue": {

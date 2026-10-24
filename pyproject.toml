@@ -7,8 +7,9 @@ requires-python = ">=3.14"
 license = { text = "MIT" }
 dependencies = [
     "deepagents==0.7.32",
-    # The types of the event endpoint requests the MDA deployment's channels send (mda/).
-    "managed-deepagents==0.10.0.dev15",
+    # The types of the event endpoint requests the MDA deployment's channels send (mda/),
+    # from the vendored SDK the deployment runs (vendor/README.md).
+    "managed-deepagents",
     # Verifies the signature MDA puts on those requests (MDA_SERVICE_SECRET).
     "standardwebhooks>=1.1.0",
     "fastapi>=0.141.1",
@@ -75,6 +76,7 @@ sandbox-providers = [
 # Shared with mda/: the contract between the backend and its MDA runtime.
 [tool.uv.sources]
 open-swe-runtime-api = { path = "packages/runtime-api", editable = true }
+managed-deepagents = { path = "vendor/managed-deepagents-sdk/packages/pypi", editable = true }
 
 [tool.uv]
 # The externally maintained langchain-e2b integration still declares

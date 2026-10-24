@@ -267,7 +267,8 @@ class LinearSessionTurn:
         )
         prepared: EndpointAnswer = {
             "input": cast(
-                JsonValue, self._input(issue_prompt, repository, images, description_urls)
+                dict[str, AnswerJson],
+                self._input(issue_prompt, repository, images, description_urls),
             ),
             "context": cast(dict[str, AnswerJson], rewritten["context"]),
             "metadata": cast(dict[str, AnswerJson], run_config["metadata"]),
