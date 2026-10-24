@@ -30,9 +30,9 @@ class ManagedSandbox(BaseModel):
         """The box the thread's MDA run declares, or ``None`` when the backend keeps its own.
 
         New threads and MDA's own get MDA's box. A thread the backend gave a box keeps
-        it, and bridged threads run on the user's machine. A task worker shares its
-        coordinator's MDA box once the backend has attached it there, which checks
-        that it may.
+        it, and bridged threads run on the user's machine. A guest (a task worker or
+        a concierge background thread) shares its host's MDA box once the backend has
+        attached it there, which checks that it may.
         """
         if ENV.SANDBOX_TYPE.get() != "langsmith":
             return None
@@ -40,7 +40,7 @@ class ManagedSandbox(BaseModel):
         if metadata.sandbox_id is not None and Bridge.bridge_id_of(metadata.sandbox_id):
             return None
         owner: str | None = None
-        if metadata.task_id is not None:
+        if metadata.shares_sandbox:
             owner = metadata.sandbox_host_thread_id
             if owner is None or metadata.sandbox_id is None:
                 return None
