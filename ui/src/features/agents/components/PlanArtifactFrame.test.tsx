@@ -1,7 +1,12 @@
 /** @vitest-environment jsdom */
 
 import { cleanup, render, screen } from "@testing-library/react"
-import { afterEach, describe, expect, it } from "vitest"
+import { afterEach, describe, expect, it, vi } from "vitest"
+
+const recordClientError = vi.fn()
+vi.mock("@/lib/clientErrors", () => ({
+  recordClientError: (...args: unknown[]) => recordClientError(...args),
+}))
 
 import { PlanArtifactFrame } from "./PlanArtifactFrame"
 import { withArtifactShell } from "@/features/agents/lib/artifactShell"
@@ -38,6 +43,37 @@ describe("withArtifactShell", () => {
 })
 
 describe("PlanArtifactFrame", () => {
+  it("only accepts bounded error reports from its own iframe", () => {
+    render(<PlanArtifactFrame html="<h1>Plan</h1>" />)
+    const frame = screen.getByTitle("Artifact") as HTMLIFrameElement
+    const data = {
+      type: "openswe:client-error",
+      version: 1,
+      message: "Chart failed",
+    }
+    window.dispatchEvent(new MessageEvent("message", { source: window, data }))
+    window.dispatchEvent(
+      new MessageEvent("message", {
+        source: frame.contentWindow,
+        data: { ...data, message: "x".repeat(2001) },
+      })
+    )
+    expect(recordClientError).not.toHaveBeenCalled()
+    window.dispatchEvent(
+      new MessageEvent("message", { source: frame.contentWindow, data })
+    )
+    expect(recordClientError).toHaveBeenCalledWith({
+      title: "Embedded artifact error",
+      error: expect.objectContaining({ message: "Chart failed" }),
+    })
+    for (let i = 0; i < 110; i++)
+      window.dispatchEvent(
+        new MessageEvent("message", { source: frame.contentWindow, data })
+      )
+    expect(recordClientError).toHaveBeenCalledTimes(100)
+    recordClientError.mockClear()
+  })
+
   it("renders the artifact in a script-enabled sandbox", () => {
     render(<PlanArtifactFrame html="<h1>Plan</h1>" />)
 
