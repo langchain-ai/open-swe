@@ -140,7 +140,7 @@ When `LLM_MODEL_ID` is unset or blank, an Anthropic-only deployment—`ANTHROPIC
 
 Either variable can be set independently. When only the model is set, `medium` is used if supported, otherwise that model's catalog default effort is used. The model must be an allowed default in `openswe/dashboard/options.py`; unsupported models or incompatible efforts raise a configuration error when defaults are resolved.
 
-These defaults apply below explicit run, thread, profile, and team selections, including inherited reviewer and subagent defaults. Existing selections are not overwritten. Restart the backend after changing its environment.
+These defaults apply below explicit run, thread, workspace, and instance selections, including inherited reviewer and subagent defaults. Existing selections are not overwritten. Restart the backend after changing its environment.
 
 Forked tasks configured with the main model reuse its model instance and reasoning effort for prompt-cache compatibility. A different subagent model retains its own effort but cannot share the main model's cache.
 
@@ -184,7 +184,7 @@ surface.models = SurfaceModels(main=main, subagent=main, use_gateway=bool(use_ga
 
 Eligible Auto turns use Jev through `langchain-typesafe`'s `TypeSafeClassifier`. When `TYPESAFE_API_KEY` is available, routing calls `jev-1.13.0` directly through TypeSafe. Otherwise, a LangSmith gateway key (`LANGSMITH_GATEWAY_API_KEY`, falling back to `LANGSMITH_API_KEY`) calls `typesafe/jev-1.13.0` through the [Gateway System One API](https://docs.langchain.com/langsmith/llm-gateway-decision-models); that path requires a TypeSafe workspace provider secret and respects `LANGSMITH_GATEWAY_BASE_URL`. Routing is independent of the provider-proxy gateway toggle below. The classifier is tagged `nostream` to keep its run out of the user-facing transcript.
 
-Jev receives the latest human task text (up to 8,000 characters). Missing API credentials, API errors, a three-second classification deadline, malformed responses, or confidence below `0.6` use the resolved agent default (workspace, profile, or thread override), the same model used when routing is off. The confidence cutoff is an initial heuristic, not a calibrated correctness probability. Existing Auto eligibility, fast-mode control, and persisted routes are unchanged.
+Jev receives the latest human task text (up to 8,000 characters). Missing API credentials, API errors, a three-second classification deadline, malformed responses, or confidence below `0.6` use the resolved agent default (thread override or workspace default), the same model used when routing is off. The confidence cutoff is an initial heuristic, not a calibrated correctness probability. Existing Auto eligibility, fast-mode control, and persisted routes are unchanged.
 
 ### Choosing a model in the opening request
 

@@ -65,9 +65,9 @@ Settings resolve from the least to the most specific tier, each overriding the o
    changes something. `GET /dashboard/api/workspaces/{slug}/settings` returns the effective
    values and the overrides separately; `PUT` replaces the overrides, and a `null` field means
    "inherit".
-3. **User.** The existing profile fields (model and effort, subagent model, default repository,
-   adaptive routing, draft-PR review) override the workspace's effective settings for that user's
-   runs.
+3. **User.** Profile preferences such as default repository and draft-PR review apply to that
+   user's runs. Model, reasoning effort, subagent model, and adaptive-routing defaults come from
+   workspace settings, not personal profiles.
 4. **Thread.** A run's `configurable` (`agent_model_id`, `agent_effort`, `repo`) overrides all
    of the above for that thread.
 
