@@ -189,6 +189,7 @@ from openswe.server import (
     direct_and_from_code,
     fallback_model_choice,
 )
+from openswe.threads.access import agent_version_metadata
 from openswe.utils.model import provider_model_kwargs
 
 logger = logging.getLogger(__name__)
@@ -460,7 +461,10 @@ class RunSession:
         sandbox = await self.sandbox()
         return self.catalog().model_copy(
             update={
-                "trace_metadata": TurnGitMetadata(self.config).actor,
+                "trace_metadata": {
+                    **TurnGitMetadata(self.config).actor,
+                    **agent_version_metadata(),
+                },
                 "sandbox": None
                 if sandbox is None
                 else SandboxSpec.model_validate(sandbox.model_dump(mode="json")),

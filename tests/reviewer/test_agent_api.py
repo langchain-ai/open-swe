@@ -378,12 +378,15 @@ async def test_hook_failure_log_names_the_mda_run(monkeypatch: pytest.MonkeyPatc
     assert all(value in lines[0] for value in ("mda-run-1", "thread-1", "before_model"))
 
 
+@pytest.mark.parametrize("queued_metadata", [{}, {"LANGSMITH_AGENT_VERSION": "queued-sha"}])
 async def test_mda_catalog_leaves_integrations_and_code_mode_to_mda(
     monkeypatch: pytest.MonkeyPatch,
+    queued_metadata: dict[str, JsonValue],
 ) -> None:
     """Seldom-needed tools go to MDA's code mode, not the model's schemas; the graph's own stays here."""
     # A provider MDA declares no box for, so the catalog reads no thread metadata.
     monkeypatch.setenv("SANDBOX_TYPE", "local")
+    monkeypatch.setenv("LANGCHAIN_REVISION_ID", "current-backend-sha")
     from langchain.agents.middleware import ModelCallLimitMiddleware
     from langchain.agents.middleware.types import AgentMiddleware
     from langchain_core.tools import StructuredTool
@@ -444,9 +447,14 @@ async def test_mda_catalog_leaves_integrations_and_code_mode_to_mda(
         raise AssertionError("not asked for")
 
     graph = RemoteGraph("agent", build, start_models)
-    catalog = await graph.api(RUN, "catalog", {"run_id": "run-1"})
+    catalog = await graph.api(
+        RUN.model_copy(update={"metadata": queued_metadata}), "catalog", {"run_id": "run-1"}
+    )
 
     assert isinstance(catalog, dict)
+    metadata = catalog["trace_metadata"]
+    assert isinstance(metadata, dict)
+    assert metadata["LANGSMITH_AGENT_VERSION"] == "current-backend-sha"
     operations = catalog["operations"]
     assert isinstance(operations, list)
     names = {op["name"] for op in operations if isinstance(op, dict)}
