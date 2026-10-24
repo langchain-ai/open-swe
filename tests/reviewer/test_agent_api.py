@@ -244,11 +244,11 @@ async def test_mda_slack_runs_nudge_a_turn_that_ends_without_a_reply() -> None:
     from langchain_core.messages import AIMessage, HumanMessage
     from langgraph.runtime import Runtime
 
+    from openswe.agent_api.graph import RunSession
     from openswe.middleware.require_user_reply import (
         SLACK_REPLY_SURFACE,
         RequireUserReplyMiddleware,
     )
-    from openswe.agent_api.graph import RunSession
     from openswe.sandboxes.tool_runtime import ToolSurface
 
     session = RunSession(
