@@ -24,7 +24,15 @@ from langsmith.run_trees import RunTree
 from pydantic import BaseModel, JsonValue, TypeAdapter, ValidationError
 from runtime_api.catalog import CATALOG, Catalog
 from runtime_api.endpoint import Delivery, call
-from runtime_api.loop import TOOL_RESULT, TOOL_STARTED, RunCall, ToolCallReport, ToolResultReport
+from runtime_api.loop import (
+    INBOX_RECEIVED,
+    TOOL_RESULT,
+    TOOL_STARTED,
+    InboxReceipt,
+    RunCall,
+    ToolCallReport,
+    ToolResultReport,
+)
 from runtime_api.operations import RunRequest
 from runtime_api.workers import ADOPT, Adopt
 
@@ -178,7 +186,7 @@ class OpenSweBackend:
         self._worker_grant = worker_grant if run_token is None else None
         # The worker's own catalog, once it adopted a run token: what it may offer the model.
         self.adopted: Catalog | None = None
-        self.reports = ToolReports(self)
+        self.reports = Reports(self)
 
     @property
     def has_run(self) -> bool:
@@ -295,12 +303,14 @@ class OpenSweBackend:
         return (await call(self, TOOL_RESULT, finished, headers=trace)).update
 
 
-class ToolReports:
-    """Tell the backend's transcript about the tool calls this runtime runs, off their path.
+class Reports:
+    """Tell the backend what this runtime did, off the path of what it goes on to do.
 
-    Reports go out in the order they were made, one after another, while the calls
-    carry on. A report the backend could not take is logged and dropped: the call
-    it describes has run either way.
+    The transcript hears of the tool calls this runtime runs, and the inbox of what
+    a model call is about to answer. Reports go out in the order they were made, one
+    after another, while the run carries on. A report the backend could not take is
+    logged and dropped: what it describes has happened either way, and an inbox
+    that never heard is read again at the next model call.
     """
 
     def __init__(self, backend: OpenSweBackend) -> None:
@@ -316,6 +326,12 @@ class ToolReports:
         self._send(
             self._finished(report, result, TurnTrace.live_root(), TurnTrace.current_headers())
         )
+
+    def received(self, receipt: InboxReceipt) -> None:
+        self._send(self._receive(receipt))
+
+    async def _receive(self, receipt: InboxReceipt) -> None:
+        await call(self._backend, INBOX_RECEIVED, receipt)
 
     async def drain(self) -> None:
         """Wait for every report made so far, so the transcript has them before what follows."""
@@ -345,4 +361,4 @@ class ToolReports:
         try:
             await report
         except Exception:
-            logger.warning("The backend did not record a tool call", exc_info=True)
+            logger.warning("The backend did not take a report", exc_info=True)
