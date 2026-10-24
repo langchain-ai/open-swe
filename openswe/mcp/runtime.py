@@ -145,15 +145,21 @@ async def discover_tools(record: MCPConnection, namespace: tuple[str, ...]) -> l
         raise ValueError(_discovery_error(exc)) from None
 
 
-def _tool_name(connection_name: str, tool_name: str) -> str:
-    full_name = f"mcp_{connection_name}_{tool_name}"
-    safe = re.sub(r"[^a-zA-Z0-9_-]", "_", full_name)
-    suffix = hashlib.sha256(json.dumps((connection_name, tool_name)).encode()).hexdigest()[:10]
-    return f"{safe[:53]}_{suffix}"
+def _tool_names(pairs: list[tuple[str, str]]) -> dict[tuple[str, str], str]:
+    """Name each (connection, tool) pair, adding a hash only where the plain name is ambiguous."""
+    plain = {pair: re.sub(r"[^a-zA-Z0-9_-]", "_", "mcp_{}_{}".format(*pair)) for pair in pairs}
+    counts = Counter(plain.values())
+    return {
+        pair: name
+        if counts[name] == 1 and len(name) <= 64
+        else f"{name[:53]}_{hashlib.sha256(json.dumps(pair).encode()).hexdigest()[:10]}"
+        for pair, name in plain.items()
+    }
 
 
 def _wrap_tool(
-    name: str,
+    tool_name: str,
+    connection_name: str,
     url: str,
     transport: str,
     definition: Tool,
@@ -167,7 +173,7 @@ def _wrap_tool(
             for bound_source in sources:
                 if bound_source.namespace == namespace and bound_source.authorize is not None:
                     await bound_source.authorize()
-            resolved = await _resolve_connection(name, sources)
+            resolved = await _resolve_connection(connection_name, sources)
             if resolved is None:
                 raise ToolException("MCP is disabled or disconnected")
             source, record = resolved
@@ -191,14 +197,14 @@ def _wrap_tool(
             raise
         except Exception:
             is_error = True
-            logger.warning("MCP call failed", extra={"mcp_name": name})
+            logger.warning("MCP call failed", extra={"mcp_name": connection_name})
             raise ToolException("MCP call failed; check its connection and credentials") from None
         finally:
             await record_mcp_tool(definition.name, is_error)
 
     return _MCPTool.from_function(
         coroutine=invoke,
-        name=_tool_name(name, definition.name),
+        name=tool_name,
         description=definition.description or definition.name,
         args_schema=definition.input_schema,
         response_format="content_and_artifact",
@@ -247,32 +253,12 @@ async def refresh_mcp_catalog(source: MCPSource, name: str) -> None:
         await result.mutate()
 
 
-async def _load_tools(
-    source: MCPSource,
-    record: MCPConnection,
-    sources: tuple[MCPSource, ...],
-    overridden_scopes: list[MCPScope],
-) -> tuple[list[BaseTool], CatalogOutcome]:
+async def _allowed_definitions(
+    source: MCPSource, record: MCPConnection
+) -> tuple[list[Tool], CatalogOutcome]:
     try:
         definitions, outcome = await _cached_definitions(source, record)
-        tools = [
-            _wrap_tool(
-                record.name,
-                record.url,
-                record.transport,
-                definition,
-                source.namespace,
-                sources,
-                MCPToolProvenance(
-                    connection_name=record.name,
-                    scope=source.scope,
-                    overridden_scopes=overridden_scopes,
-                ),
-            )
-            for definition in definitions
-            if record.allows_tool(definition.name)
-        ]
-        return tools, outcome
+        return [tool for tool in definitions if record.allows_tool(tool.name)], outcome
     except Exception:
         logger.warning("MCP discovery failed", extra={"mcp_name": record.name})
         return [], "failed"
@@ -300,15 +286,7 @@ async def load_mcp_tools(*sources: MCPSource, connection_name: str | None = None
         and (connection_name is None or record.name == connection_name)
     ]
     groups = await asyncio.gather(
-        *(
-            _load_tools(
-                source,
-                record,
-                sources,
-                scopes[record.name][:-1],
-            )
-            for source, record in connections
-        )
+        *(_allowed_definitions(source, record) for source, record in connections)
     )
     outcomes = Counter(outcome for _, outcome in groups)
     logger.info(
@@ -318,4 +296,26 @@ async def load_mcp_tools(*sources: MCPSource, connection_name: str | None = None
             for outcome in get_args(CatalogOutcome.__value__)
         },
     )
-    return [tool for tools, _ in groups for tool in tools]
+    loaded = [
+        (source, record, definition)
+        for (source, record), (definitions, _) in zip(connections, groups, strict=True)
+        for definition in definitions
+    ]
+    names = _tool_names([(record.name, definition.name) for _, record, definition in loaded])
+    return [
+        _wrap_tool(
+            names[record.name, definition.name],
+            record.name,
+            record.url,
+            record.transport,
+            definition,
+            source.namespace,
+            sources,
+            MCPToolProvenance(
+                connection_name=record.name,
+                scope=source.scope,
+                overridden_scopes=scopes[record.name][:-1],
+            ),
+        )
+        for source, record, definition in loaded
+    ]
