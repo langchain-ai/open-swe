@@ -139,7 +139,8 @@ async def stage_files(runtime: ManagedDeepAgentRuntime) -> HumanMessage | None:
     status: list[str] = []
     token = None
     destination = get_slack_destination(runtime)
-    if binding["event"]["type"] == "message" and destination and backend is not None:
+    event = binding.get("event")
+    if event is not None and event["type"] == "message" and destination and backend is not None:
         try:
             token = await get_slack_bot_token()
             cursor = ""

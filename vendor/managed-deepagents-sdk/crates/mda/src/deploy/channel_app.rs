@@ -124,7 +124,7 @@ pub(crate) fn is_interactive() -> bool {
 /// other CLI settings. The deploy never uploads these as secrets (see
 /// `RESERVED_ENV_VARS`).
 pub(crate) fn override_value(key: &str, env_vars: &BTreeMap<String, String>) -> Option<String> {
-    langsmith::lookup_env(key, env_vars, &mut |key| std::env::var(key).ok())
+    langsmith::lookup_env_or_process(key, env_vars)
 }
 
 /// The client for Agent Auth calls, honoring the hidden overrides in the shell
@@ -149,7 +149,7 @@ pub(crate) fn agent_auth_client(
         format!("{AGENT_AUTH_URL_ENV} is set, so {AGENT_AUTH_API_KEY_ENV} must be set too")
     })?;
     let tenant = lookup(AGENT_AUTH_TENANT_ENV);
-    langsmith::Client::new_with_platform(&url, Some(&url), api_key, tenant)
+    langsmith::Client::new(&url, &url, langsmith::ApiKey::new(api_key), tenant)
 }
 
 /// Where Agent Auth's OAuth callback is, for an app that must list it before
@@ -366,7 +366,13 @@ mod tests {
             "MDA_AGENT_AUTH_URL".to_string(),
             "http://localhost:1980".to_string(),
         )]);
-        let client = langsmith::Client::new("http://localhost:1", "lsv2_deploy", None).unwrap();
+        let client = langsmith::Client::new(
+            "http://localhost:1",
+            "http://localhost:1",
+            langsmith::ApiKey::new("lsv2_deploy"),
+            None,
+        )
+        .unwrap();
         let Err(error) = agent_auth_client(&client, |key| missing_key.get(key).cloned()) else {
             panic!("an Agent Auth URL without an API key must be rejected");
         };
@@ -396,7 +402,13 @@ mod tests {
             return;
         }
         let client = |url: &str| {
-            let deploy = langsmith::Client::new("http://localhost:1", "lsv2_deploy", None).unwrap();
+            let deploy = langsmith::Client::new(
+                "http://localhost:1",
+                "http://localhost:1",
+                langsmith::ApiKey::new("lsv2_deploy"),
+                None,
+            )
+            .unwrap();
             agent_auth_client(&deploy, |key| match key {
                 AGENT_AUTH_URL_ENV => Some(url.to_string()),
                 AGENT_AUTH_API_KEY_ENV => Some("lsv2_local".to_string()),

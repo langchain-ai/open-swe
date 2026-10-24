@@ -9,7 +9,7 @@ build = "build.rs"
 
 [[bin]]
 name = "mda"
-path = "src/main.rs"
+path = "src/bin/mda.rs"
 
 [dependencies]
 anyhow = "1"

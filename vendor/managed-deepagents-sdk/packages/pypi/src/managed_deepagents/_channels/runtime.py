@@ -44,12 +44,12 @@ def json_copy(value: JsonValue) -> JsonValue:
 
 
 def channel_info(
-    *, name: str, provider: str, event: Mapping[str, object], raw_event: JsonValue = None
+    *, name: str, provider: str, event: Mapping[str, object] | None, raw_event: JsonValue = None
 ) -> ChannelInfo:
     return ChannelInfo(
         name,
         provider,
-        cast("ChannelEvent", immutable_copy(event)),
+        cast("ChannelEvent | None", immutable_copy(event)),
         cast("JsonValue", immutable_copy(raw_event)),
     )
 
@@ -63,7 +63,7 @@ def create_runtime_channel(
     *,
     name: str,
     provider: str,
-    event: Mapping[str, object],
+    event: Mapping[str, object] | None,
     target: JsonValue,
     transport: ChannelMessagingAdapter | None = None,
     raw_event: JsonValue = None,
@@ -74,17 +74,17 @@ def create_runtime_channel(
     if transport is None:
         return RuntimeChannel(facts.name, facts.provider, facts.event, facts.raw_event)
     bound_target = json_copy(target)
+    # Only a schedule event chooses a new provider thread.
+    schedule = (
+        facts.event if facts.event is not None and facts.event["type"] == "schedule" else None
+    )
 
     async def post(message: ChannelMessage) -> PostedChannelMessage:
         validate_message(message)
         result = transport.post(
             message=cast("ChannelMessage", json_copy(cast("JsonValue", message))),
             target=json_copy(bound_target),
-            **(
-                {"new_thread": bool(facts.event["new_thread"])}
-                if facts.event["type"] == "schedule"
-                else {}
-            ),
+            **({"new_thread": bool(schedule["new_thread"])} if schedule is not None else {}),
         )
         return cast("PostedChannelMessage", await result if inspect.isawaitable(result) else result)
 

@@ -106,7 +106,7 @@ impl Client {
             .redirect(redirect::Policy::none())
             .build()
             .context("Failed to initialize channel setup.")?;
-        let api_key = self.api_key()?;
+        let api_key = self.api_key().to_string();
         let mut request = http
             .post(url)
             .header("X-Api-Key", api_key.as_str())
@@ -186,7 +186,7 @@ mod tests {
     use serde_json::{json, Value};
 
     use super::*;
-    use crate::langsmith::{Client, Credential, REQUEST_TIMEOUT};
+    use crate::langsmith::{ApiKey, Client, REQUEST_TIMEOUT};
 
     fn client(tenant_id: Option<String>, platform_api_url: &Url) -> Client {
         Client {
@@ -194,10 +194,10 @@ mod tests {
                 .timeout(REQUEST_TIMEOUT)
                 .build()
                 .unwrap(),
-            credential: Credential::ApiKey("resolved-login-key".into()),
+            api_key: ApiKey::new("resolved-login-key"),
             tenant_id,
             host_backend_url: "https://host.invalid".into(),
-            platform_api_url: Some(platform_api_url.to_string()),
+            platform_api_url: platform_api_url.to_string(),
         }
     }
 
@@ -212,10 +212,10 @@ mod tests {
                 .timeout(REQUEST_TIMEOUT)
                 .build()
                 .unwrap(),
-            credential: Credential::ApiKey("resolved-login-key".into()),
+            api_key: ApiKey::new("resolved-login-key"),
             tenant_id: None,
             host_backend_url: host_backend_url.to_string(),
-            platform_api_url: Some(platform_api_url.to_string()),
+            platform_api_url: platform_api_url.to_string(),
         }
     }
 

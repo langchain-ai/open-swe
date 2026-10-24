@@ -94,12 +94,15 @@ class ChannelContext(TypedDict):
     transport: Literal["trigger_server", "direct"]
     target: JsonValue
     raw_event: NotRequired[Annotated[JsonValue, Field(alias="rawEvent")]]
-    event: Annotated[
-        ChannelMessageEvent
-        | ChannelInterruptResumeEvent
-        | ChannelPromptResponseEvent
-        | ChannelScheduleEvent,
-        Field(discriminator="type"),
+    #: Absent for the channel a thread record names: no message started the run.
+    event: NotRequired[
+        Annotated[
+            ChannelMessageEvent
+            | ChannelInterruptResumeEvent
+            | ChannelPromptResponseEvent
+            | ChannelScheduleEvent,
+            Field(discriminator="type"),
+        ]
     ]
 
 

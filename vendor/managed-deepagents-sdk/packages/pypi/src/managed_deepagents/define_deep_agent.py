@@ -9,7 +9,7 @@ from __future__ import annotations
 
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Any, ClassVar, Never, NotRequired, TypedDict
+from typing import TYPE_CHECKING, Any, ClassVar, Literal, Never, NotRequired, TypedDict
 
 from managed_deepagents._managed_composition import (
     OMITTED,
@@ -44,6 +44,9 @@ if TYPE_CHECKING:
 
     class ManagedAsyncSubAgent(SubAgent, _AsyncFlag):
         """A declarative subagent that MDA builds as its own graph."""
+
+        update_strategy: NotRequired[Literal["interrupt", "enqueue"]]
+        """Whether follow-ups interrupt the active run (default) or queue behind it."""
 
         webhook: NotRequired[str]
         """URL the Agent Server calls whenever a run of this subagent finishes."""
@@ -143,9 +146,12 @@ def define_deep_agent(
     graph. Unset ``model``, ``tools``, ``permissions``, and ``interrupt_on``
     inherit from this agent; middleware and memory do not. Like a sync subagent,
     it loads only the skill sources its ``skills`` names (``["/skills/"]`` for
-    this agent's skills). Its ``webhook``, if set, is a URL the Agent Server
-    calls when each of its runs finishes. Served agents also get a background
-    copy of the general-purpose subagent.
+    this agent's skills). Its ``update_strategy`` defaults to ``"interrupt"``;
+    set ``"enqueue"`` to queue follow-ups without stopping its active run.
+    Its ``webhook``, if set, is a URL the Agent Server calls when each of its
+    runs finishes. With ``"mode": "fork"`` (experimental) it starts with a copy
+    of this agent's conversation, not only the task. Served agents also get a
+    background copy of the general-purpose subagent.
 
     ``metadata`` is MDA-owned authoring config (not a ``create_deep_agent``
     kwarg): the runtime applies it via ``.with_config({"metadata": ...})`` so
@@ -204,7 +210,7 @@ def define_deep_agent(
     return DeepAgentDefinition(config)
 
 
-_ASYNC_SUBAGENT_UNSUPPORTED_KEYS = ("runnable", "graph_id", "url", "headers", "mode")
+_ASYNC_SUBAGENT_UNSUPPORTED_KEYS = ("runnable", "graph_id", "url", "headers")
 
 
 def _validate_async_subagents(subagents: Sequence[DeepAgentSubAgent]) -> None:
@@ -220,10 +226,7 @@ def _validate_async_subagents(subagents: Sequence[DeepAgentSubAgent]) -> None:
         skills = spec.get("skills")
         if skills is not None and not _is_path_list(skills):
             raise TypeError('subagent "skills" must be a list of skill source paths')
-        if "webhook" in spec and not isinstance(spec["webhook"], str):
-            raise TypeError('subagent "webhook" must be a URL string')
-        if "notify_parent" in spec and not isinstance(spec["notify_parent"], bool):
-            raise TypeError('subagent "notify_parent" must be True or False')
+        _validate_async_run_options(spec)
         unsupported = [key for key in _ASYNC_SUBAGENT_UNSUPPORTED_KEYS if key in spec]
         if unsupported:
             msg = (
@@ -231,6 +234,18 @@ def _validate_async_subagents(subagents: Sequence[DeepAgentSubAgent]) -> None:
                 "launches its graph itself"
             )
             raise TypeError(msg)
+
+
+def _validate_async_run_options(spec: Mapping[str, object]) -> None:
+    """Validate optional fields passed through to async subagent runs."""
+    if "update_strategy" in spec and spec["update_strategy"] not in ("interrupt", "enqueue"):
+        raise TypeError('subagent "update_strategy" must be "interrupt" or "enqueue"')
+    if "webhook" in spec and not isinstance(spec["webhook"], str):
+        raise TypeError('subagent "webhook" must be a URL string')
+    if "notify_parent" in spec and not isinstance(spec["notify_parent"], bool):
+        raise TypeError('subagent "notify_parent" must be True or False')
+    if spec.get("mode", "isolated") not in ("isolated", "fork"):
+        raise TypeError('subagent "mode" must be "isolated" or "fork"')
 
 
 def _is_path_list(value: object) -> bool:

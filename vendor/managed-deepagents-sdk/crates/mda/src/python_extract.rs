@@ -118,9 +118,7 @@ pub(crate) mod scripts {
     pub(crate) const IDENTITY_SUMMARY: &str = include_str!("python_extract/identity_summary.py");
     /// Root `memory` declaration scope extraction.
     pub(crate) const MEMORY_LAYERS: &str = include_str!("python_extract/memory_layers.py");
-    pub(crate) const CONNECTOR_INGRESS: &str = include_str!("python_extract/connector_ingress.py");
     pub(crate) const CHANNEL_INGRESS: &str = include_str!("python_extract/channel_ingress.py");
-    pub(crate) const CONNECTOR_FACTORY: &str = include_str!("python_extract/connector_factory.py");
 }
 
 #[cfg(test)]

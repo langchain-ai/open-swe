@@ -2,8 +2,9 @@ use std::time::Duration;
 
 use serde::Serialize;
 
-use crate::deploy::{env_file, helpers};
-use crate::langsmith::{self, Client, Credential, Login};
+use crate::deploy::env_file;
+use crate::deploy::langsmith_context::{resolve_workspace_id, LangSmithEndpoints};
+use crate::langsmith::{self, ApiKey, Client, Login};
 
 use super::command::CommandContext;
 
@@ -40,17 +41,11 @@ impl ReportableFacts {
     /// Best-effort; every failure leaves fields `None`.
     pub fn collect(context: CommandContext) -> Self {
         let env = env_file::parse_env_file(&context.env_path);
-        let (default_host, _) = helpers::resolve_langsmith_api_bases(&env);
-        let host = context
-            .host_url
-            .as_deref()
-            .filter(|value| !value.trim().is_empty())
-            .unwrap_or(&default_host);
-        let platform = helpers::resolve_platform_api_url(host, &env);
+        let endpoints = LangSmithEndpoints::resolve(&env, context.host_url.as_deref());
         let mut facts = Self {
             enabled: true,
             auth: AuthInfo {
-                langsmith_host_url: normalized_origin(&platform),
+                langsmith_host_url: normalized_origin(&endpoints.platform_api_url),
                 ..AuthInfo::default()
             },
             deployment: DeploymentInfo {
@@ -58,7 +53,7 @@ impl ReportableFacts {
                 deployment_name: context.deployment_name.clone(),
             },
         };
-        let Some(client) = client(&context, &env, host, &platform) else {
+        let Some(client) = client(&context, &env, endpoints) else {
             return facts;
         };
         // Run both lookups concurrently; the scope joins before dispatch.
@@ -104,8 +99,7 @@ fn lookup_deployment_id(client: &Client, context: &CommandContext) -> Option<Str
 fn client(
     context: &CommandContext,
     env: &std::collections::BTreeMap<String, String>,
-    host: &str,
-    platform: &str,
+    endpoints: LangSmithEndpoints,
 ) -> Option<Client> {
     let key = langsmith::resolve_preferred_env(
         langsmith::API_KEY_ENV,
@@ -116,17 +110,11 @@ fn client(
         "",
     )
     .ok()?
-    .or_else(|| Login::for_api_url(platform).cached_api_key())?;
-    let workspace = langsmith::resolve_preferred_env(
-        helpers::WORKSPACE_ID_ENV,
-        helpers::REMOVED_WORKSPACE_ID_ENVS,
-        context.workspace_id.as_deref(),
-        env,
-        |key| std::env::var(key).ok(),
-        "",
-    )
-    .ok()?;
-    Client::with_credential_and_platform(host, Some(platform), Credential::ApiKey(key), workspace)
+    .or_else(|| Login::for_api_url(&endpoints.platform_api_url).cached_api_key())?;
+    let workspace = resolve_workspace_id(env, context.workspace_id.as_deref(), "").ok()?;
+    endpoints
+        .with_auth(ApiKey::new(key), workspace)
+        .client()
         .and_then(|client| client.with_timeout(LOOKUP_TIMEOUT))
         .ok()
 }
@@ -153,7 +141,7 @@ mod tests {
         let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
         listener.set_nonblocking(true).unwrap();
         let base = format!("http://{}", listener.local_addr().unwrap());
-        let client = Client::new_with_platform(&base, Some(&base), "test-key", None).unwrap();
+        let client = Client::for_test(&base);
         let mut facts = ReportableFacts::default();
         facts.refresh_identity(&client);
         assert!(listener.accept().is_err());

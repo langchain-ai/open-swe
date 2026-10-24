@@ -57,10 +57,6 @@ pub(crate) struct AgentStaticConfig {
     pub model: Option<String>,
     /// Whether the exported `agent` is a per-run factory.
     pub is_factory: bool,
-    /// Whether the definition still sets the retired `disableMemory` /
-    /// `disable_memory` knob (any value). Memory moved to `memory.{ts,py}`, so
-    /// its presence is a migration error rather than an opt-out.
-    pub declares_disable_memory: bool,
     /// Subagents marked `"async": True`, each built as its own graph.
     pub async_subagents: Vec<AsyncSubagentGraph>,
     /// Subagent entries MDA cannot read statically (helper calls, spreads, imports).
@@ -133,7 +129,6 @@ pub(crate) fn read_agent_static_config(project: &Project) -> Result<AgentStaticC
         assistant_id,
         model: fields.model,
         is_factory: fields.is_factory,
-        declares_disable_memory: fields.declares_disable_memory,
         async_subagents,
         unreadable_subagents: fields.unreadable_subagents,
     })
@@ -1122,7 +1117,6 @@ mod tests {
             assistant_id: "lead".to_string(),
             model: None,
             is_factory: false,
-            declares_disable_memory: false,
             async_subagents,
             unreadable_subagents: 0,
         }
