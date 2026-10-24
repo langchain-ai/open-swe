@@ -5,7 +5,7 @@ import { useReviewPage } from "./store"
 const HIGHLIGHT = "review-find"
 
 /** How a hit looks inside a diff's shadow root, where the page's own CSS can't reach. */
-export const FIND_HIGHLIGHT_CSS = `::highlight(${HIGHLIGHT}){background-color:color-mix(in oklab,var(--icon-warning) 45%,transparent);color:inherit}`
+export const FIND_HIGHLIGHT_CSS = `::highlight(${HIGHLIGHT}){background-color:var(--icon-warning);color:#000}`
 
 /** The query's occurrences in one row's text, as ranges over its text nodes. */
 function rowRanges(row: Element, needle: string): Array<Range> {

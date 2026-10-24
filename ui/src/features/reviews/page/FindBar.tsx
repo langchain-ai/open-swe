@@ -7,6 +7,7 @@ import { IconButton } from "@langchain/macaw-components/IconButton"
 import { useEffect, useMemo, useRef } from "react"
 
 import { findEntry } from "./diffEntries"
+import { FILE_HEADER_HEIGHT } from "./FileHeader"
 import { findMatches, findTarget, type FindMatch } from "./find"
 import { useReviewPage } from "./store"
 
@@ -93,7 +94,9 @@ export function FindBar() {
     <div
       role="search"
       aria-label="Find in the changes"
-      className="absolute top-2 right-4 z-floating-bar flex items-center gap-space-1 rounded-lg border border-default bg-surface-level-1 py-space-1 pr-space-1 pl-space-3 shadow-md"
+      // Under the sticky file header, so its Viewed box stays reachable.
+      style={{ top: FILE_HEADER_HEIGHT + 8 }}
+      className="absolute right-4 z-floating-bar flex items-center gap-space-1 rounded-lg border border-default bg-surface-level-1 py-space-1 pr-space-1 pl-space-3 shadow-md"
     >
       <input
         id={FIND_INPUT_ID}
