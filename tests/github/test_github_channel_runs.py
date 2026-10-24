@@ -12,9 +12,9 @@ from pydantic import JsonValue
 from standardwebhooks import Webhook
 
 from openswe import dispatch
+from openswe.agent_api.tokens import RemoteRun, sign_runtime_token, verify_runtime_token
 from openswe.github import channel
 from openswe.github import webhook as github_webhooks
-from openswe.remote_runtime.tokens import RemoteRun, sign_runtime_token, verify_runtime_token
 from openswe.threads import runtimes
 from openswe.webhooks import common as webhook_common
 from tests.conftest import register_github_logins

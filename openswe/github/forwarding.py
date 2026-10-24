@@ -15,7 +15,7 @@ from typing import Final
 
 import httpx2
 
-from openswe.remote_runtime.client import mda_runtime_url
+from openswe.agent_api.client import mda_runtime_url
 from openswe.utils.http_pool import pooled_transport
 
 logger = logging.getLogger(__name__)
