@@ -107,6 +107,14 @@ from managed_deepagents._channels.slack.events import (
     SlackFile,
     SlackHandlers,
 )
+from managed_deepagents._channels.slack.status import (
+    SlackStatusChoice,
+    SlackStatusChooser,
+    SlackStatusContext,
+    SlackStatusStep,
+    SlackStatusStepStatus,
+    SlackStatusValue,
+)
 from managed_deepagents._channels.types import (
     ChannelContentMessage,
     ChannelEvent,
@@ -310,6 +318,12 @@ __all__ = [
     "SlackFile",
     "SlackHandlers",
     "SlackPromptResponse",
+    "SlackStatusChoice",
+    "SlackStatusChooser",
+    "SlackStatusContext",
+    "SlackStatusStep",
+    "SlackStatusStepStatus",
+    "SlackStatusValue",
     "SseMcpServerConfig",
     "SupportedEventKey",
     "ThreadOrigin",

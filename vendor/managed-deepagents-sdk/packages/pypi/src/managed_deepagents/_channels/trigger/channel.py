@@ -30,6 +30,7 @@ if TYPE_CHECKING:
         SlackEventCallback,
         SlackHandlers,
     )
+    from managed_deepagents._channels.slack.status import SlackStatusChoice
     from managed_deepagents._channels.trigger.http import (
         TriggerChannelThread,
         TriggerMessageDecision,
@@ -86,6 +87,7 @@ class TriggerSlackChannel(Channel):
         allow_bot_triggers: bool,
         trigger_mode: SlackTriggerMode | None = None,
         reactions: ReactionChoice = DEFAULT_REACTION_EMOJI,
+        status: SlackStatusChoice | None = None,
         on_event: Mapping[str, SlackEventCallback] | None = None,
         multitask_strategy: MultitaskStrategy = "enqueue",
         on_finish: EventFinished[SlackEvent, SlackChannelThread] | None = None,
@@ -94,6 +96,7 @@ class TriggerSlackChannel(Channel):
         self.trigger_mode = trigger_mode
         self.allow_bot_triggers = allow_bot_triggers
         self.reactions = reactions
+        self.status = status
         self.on_event = on_event
         self.multitask_strategy = multitask_strategy
         self.on_finish = on_finish
@@ -108,6 +111,7 @@ class TriggerSlackChannel(Channel):
         from managed_deepagents._channels.slack.message_content import (  # noqa: PLC0415
             with_slack_rich_content,
         )
+        from managed_deepagents._channels.slack.status import started_status  # noqa: PLC0415
         from managed_deepagents._channels.trigger.http import (  # noqa: PLC0415
             handle_trigger_channel_event_request,
         )
@@ -158,6 +162,7 @@ class TriggerSlackChannel(Channel):
             source_provider="slack",
             channel_name=name,
             reactions=self.reactions,
+            started_status=started_status(self.status),
             message_input=lambda event: with_slack_rich_content(
                 event["input"]["messages"], event.get("raw_event")
             ),
@@ -319,6 +324,7 @@ class _TriggerSlackArgs(BaseModel):
     trigger_on_all_messages: StrictBool | None = None
     allow_bot_triggers: StrictBool = False
     reactions: StrictBool | str | Callable[..., object] = DEFAULT_REACTION_EMOJI
+    status: object = None
 
     @field_validator("reactions")
     @classmethod
@@ -330,6 +336,20 @@ class _TriggerSlackArgs(BaseModel):
         if is_emoji_name(value):
             return value
         raise ValueError("must be a bool, a Slack emoji short name, or a callable returning one")
+
+    @field_validator("status")
+    @classmethod
+    def _validate_status(cls, value: object) -> object:
+        from managed_deepagents._channels.slack.status import (  # noqa: PLC0415
+            is_slack_status_value,
+        )
+
+        if value is None or callable(value) or is_slack_status_value(value):
+            return value
+        raise ValueError(
+            "must be a status line, a list of steps (titles or {'title', 'status'}), "
+            "or a callable returning one"
+        )
 
     @field_validator("name")
     @classmethod
@@ -375,6 +395,7 @@ def slack_channel(
     trigger_on_all_messages: bool | None = None,
     allow_bot_triggers: bool = False,
     reactions: ReactionChoice = DEFAULT_REACTION_EMOJI,
+    status: SlackStatusChoice | None = None,
     on_event: SlackHandlers | None = None,
     multitask_strategy: MultitaskStrategy = "enqueue",
     on_finish: EventFinished[SlackEvent, SlackChannelThread] | None = None,
@@ -402,6 +423,19 @@ def slack_channel(
             default, and ``True`` keeps it. Pass ``False`` for none, another
             Slack emoji short name, or a callable that picks one per message.
             Return ``None`` to skip a reaction.
+        status: What Slack shows while a run works, in place of its working
+            phrases ("is thinking it through...", ...): a line, or a list of
+            steps, each a title or ``{"title", "status"}`` (``pending`` by
+            default, ``in_progress``, ``complete`` or ``error``). Pass one to
+            show it for the whole run, or a callable of the agent's state,
+            called with ``{"state": ...}`` as the run starts, before and after
+            each model call, and every 4 s while a model or tool call runs.
+            Return ``None`` to leave what's shown. Apps with Slack's agent view
+            show it as a plan above the reply: the line is its title, and each
+            step one of its tasks. Other apps show the line, or the first step
+            not yet done, as the thread's status. A callable that raises, takes
+            longer than 1 s, or returns something else leaves the status as it
+            is.
         on_event: Handlers that decide what each kind of message starts, by
             key: ``"mention"`` (a channel message that @-mentions your agent),
             ``"directMessage"``, and ``"message"`` (any other channel message,
@@ -460,6 +494,7 @@ def slack_channel(
                 "trigger_on_all_messages": trigger_on_all_messages,
                 "allow_bot_triggers": allow_bot_triggers,
                 "reactions": reactions,
+                "status": status,
             }
         )
     except ValueError as error:
@@ -481,6 +516,7 @@ def slack_channel(
         trigger_mode=parsed.trigger_mode or ("all" if parsed.trigger_on_all_messages else None),
         allow_bot_triggers=parsed.allow_bot_triggers,
         reactions=cast("ReactionChoice", parsed.reactions),
+        status=cast("SlackStatusChoice | None", parsed.status),
         on_event=_resolve_handlers(on_event),
         multitask_strategy=multitask_strategy,
         on_finish=on_finish,

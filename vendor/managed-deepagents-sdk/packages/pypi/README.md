@@ -597,6 +597,55 @@ again because its run couldn't start. Like `channels.http`'s, it runs in the dep
 process, so a restart loses it: set the run's `webhook` for anything you
 can't miss.
 
+### The status a run shows
+
+While a run works, Slack shows Trigger Server's working phrases ("is thinking
+it through...", "reviewing your question..."). `status` shows yours instead,
+the way `reactions` picks the emoji: a value for every run, or a callable that
+picks one. A value is a line, or a list of steps, each a title or
+`{"title", "status"}` with `status` `pending` (the default), `in_progress`,
+`complete` or `error`:
+
+```python
+channels.slack(status="is consulting the crystal ball")
+channels.slack(status=["Read the question", "Search the docs", "Answer"])
+
+
+def todo_plan(context):
+    # The agent's to-do list, as Slack's plan.
+    todos = context["state"].get("todos")
+    if not todos:
+        return None
+    return [
+        {
+            "title": todo["content"],
+            "status": "complete" if todo["status"] == "completed" else todo["status"],
+        }
+        for todo in todos
+    ]
+
+
+channels.slack(status=todo_plan)
+```
+
+The callable gets the agent's state as it is now, as `{"state": ...}`, so it
+can say which tool is about to run (the last message's `tool_calls`) or
+what's left on the to-do list. It is called as the run starts, before and
+after each model call, and every 4 s while a model or tool call runs, one
+call at a time. `None`, or an empty list (as a to-do list is before the
+agent writes one), leaves what's shown. A callable that raises, takes
+longer than 1 s, or returns something else leaves it too, with one warning per
+run. The status is only posted when it changed, at most once a second, in the
+background, so it never slows the run; a failed post is logged. A sync
+callable runs in a thread, where the timeout cannot stop it, so bound any I/O
+it does.
+
+Apps with Slack's agent view show a custom status as a plan above the reply:
+the line is the plan's title and each step one of its tasks. A step that's
+no longer listed is marked complete, since Slack can't remove one, and the
+plan reads "Done" when the run ends. Other apps show the line, or the first
+step not yet done, as the thread's status. Without `status`, nothing changes.
+
 ## GitHub channels
 
 The GitHub channel is a thin HTTP adapter. Add a channel file with event handlers:

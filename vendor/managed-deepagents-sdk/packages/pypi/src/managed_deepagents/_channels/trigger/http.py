@@ -71,6 +71,7 @@ from managed_deepagents._channels.trigger.types import (
     TriggerChannelRunEvent,
     TriggerChannelRuntimeEventRequest,
     TriggerChannelRuntimeEventType,
+    TriggerChannelRuntimeStatus,
     parse_trigger_channel_event,
 )
 from managed_deepagents._ingress import ScheduleFn, schedule_ingress_work
@@ -466,6 +467,7 @@ async def handle_trigger_channel_event_request(  # noqa: C901, PLR0911, PLR0912,
     cancel_runs: CancelThreadRunsFn | None = None,
     trigger_client: TriggerClientLike | None = None,
     reactions: ReactionChoice = DEFAULT_REACTION_EMOJI,
+    started_status: TriggerChannelRuntimeStatus | None = None,
     message_input: MessageInputFn | None = None,
     only_continues_thread: OnlyContinuesThreadFn | None = None,
     decide_message: DecideMessageFn | None = None,
@@ -627,6 +629,7 @@ async def handle_trigger_channel_event_request(  # noqa: C901, PLR0911, PLR0912,
             source_thread_key=event["source_thread_key"],
             user_id=user_id,
             reactions=reactions,
+            started_status=started_status,
             multitask_strategy=multitask_strategy,
             newer_run=newer_run,
         )
@@ -794,6 +797,7 @@ async def _observe_accepted_run(
     source_thread_key: str | None = None,
     user_id: str,
     reactions: ReactionChoice = DEFAULT_REACTION_EMOJI,
+    started_status: TriggerChannelRuntimeStatus | None = None,
     multitask_strategy: MultitaskStrategy | None = None,
     newer_run: NewerRunFn | None = None,
 ) -> HttpFinish:
@@ -817,7 +821,9 @@ async def _observe_accepted_run(
     }
 
     async def lifecycle(
-        event_type: TriggerChannelRuntimeEventType, message: str | None = None
+        event_type: TriggerChannelRuntimeEventType,
+        message: str | None = None,
+        status: TriggerChannelRuntimeStatus | None = None,
     ) -> None:
         logger.info(
             "Channel outgoing event (type=%s, delivery_id=%s, channel_id=%s, run_id=%s)",
@@ -832,10 +838,11 @@ async def _observe_accepted_run(
             started,
             message=message,
             tracer_session_id=await tracer_session_id(),
+            status=status,
         )
         await _best_effort(client.post_runtime_event(event["channel_id"], request))
 
-    await lifecycle("run.started")
+    await lifecycle("run.started", status=started_status)
     # Not awaited here, so the reaction never delays the reply. The `finally`
     # settles it so it cannot outlive this work item.
     reaction = asyncio.create_task(
@@ -1099,6 +1106,7 @@ def _runtime_event(
     message: str | None = None,
     *,
     tracer_session_id: str | None = None,
+    status: TriggerChannelRuntimeStatus | None = None,
 ) -> TriggerChannelRuntimeEventRequest:
     request: TriggerChannelRuntimeEventRequest = {
         "id": str(uuid.uuid4()),
@@ -1115,6 +1123,14 @@ def _runtime_event(
         request["message"] = {"text": message}
     if interrupts:
         request["interrupts"] = interrupts
+    # The status a channel set, on `run.started`.
+    if status is not None:
+        if "message" in status:
+            request["message"] = status["message"]
+        if "steps" in status:
+            request["steps"] = status["steps"]
+        if "display" in status:
+            request["display"] = status["display"]
     return request
 
 

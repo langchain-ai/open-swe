@@ -193,7 +193,31 @@ TriggerChannelRuntimeEventType = Literal[
     "run.failed",
     #: The run was cancelled (Slack Stop, Studio, or the API) before it finished.
     "run.cancelled",
+    #: The run's status changed while it works; see `TriggerChannelRuntimeStatus`.
+    "run.thinking",
 ]
+
+
+class TriggerChannelStatusStep(TypedDict):
+    """One step of a run's status, as Slack's plan shows it."""
+
+    title: str
+    status: Literal["pending", "in_progress", "complete", "error"]
+
+
+class TriggerChannelRuntimeStatus(TypedDict, total=False):
+    """The status a channel set for a run, on `run.started` and `run.thinking`.
+
+    A line (``message.text``), steps, or both. An older Trigger Server ignores
+    ``steps`` and ``display``.
+    """
+
+    message: TriggerChannelActionMessage
+    #: At most 50, each title one line of at most 256 characters.
+    steps: list[TriggerChannelStatusStep]
+    #: How Slack shows the run's progress, fixed by the event that opens it:
+    #: ``plan`` groups it under the status line.
+    display: Literal["timeline", "plan"]
 
 
 #: One pending LangGraph interrupt, forwarded verbatim on `run.interrupted`.
@@ -217,6 +241,8 @@ class TriggerChannelRuntimeEventRequestRequired(TypedDict):
 class TriggerChannelRuntimeEventRequest(TriggerChannelRuntimeEventRequestRequired, total=False):
     # Safe, user-facing status text. Raw runtime exceptions must never be sent.
     message: TriggerChannelActionMessage
+    steps: list[TriggerChannelStatusStep]
+    display: Literal["timeline", "plan"]
     # Present on `run.interrupted`. The Trigger Server cannot read the
     # deployment's threads, so pending interrupts travel on the event itself.
     interrupts: list[TriggerChannelInterrupt]

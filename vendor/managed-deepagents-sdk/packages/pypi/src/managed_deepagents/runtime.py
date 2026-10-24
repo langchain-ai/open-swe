@@ -1659,15 +1659,22 @@ def _append_memory_instructions_middleware(
 def _prepend_slack_files_middleware(
     merged: dict[str, object], channels: list[Channel] | None
 ) -> None:
-    """Enable file transfers when the agent declares a Slack channel."""
+    """Enable file transfers, and status choosers, when the agent declares Slack."""
     if any(getattr(channel, "kind", None) == "slack" for channel in channels or []):
         from managed_deepagents._channels.slack.middleware import (  # noqa: PLC0415
             SlackFileTransferMiddleware,
         )
+        from managed_deepagents._channels.slack.status import (  # noqa: PLC0415
+            SlackStatusMiddleware,
+            slack_status_choosers,
+        )
 
+        choosers = slack_status_choosers(channels)
         authored_middleware = merged.get("middleware")
         merged["middleware"] = [
             SlackFileTransferMiddleware(),
+            # Show each Slack channel's status chooser while the run works.
+            *([SlackStatusMiddleware(choosers)] if choosers else []),
             *(cast("Iterable[object]", authored_middleware) if authored_middleware else []),
         ]
 
