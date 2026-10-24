@@ -54,6 +54,7 @@ import { Route as AgentsBotsIndexRouteImport } from './routes/agents/bots/index'
 import { Route as AgentsReviewsIndexRouteImport } from './routes/agents/reviews/index'
 import { Route as ReviewRepositoriesOwnerRouteImport } from './routes/review_.repositories.$owner'
 import { Route as OwnerRepoPullNumberRouteImport } from './routes/$owner.$repo.pull.$number'
+import { Route as AgentsThreadIdPreviewPortRouteImport } from './routes/agents/$threadId_.preview.$port'
 import { Route as AgentsReviewsOwnerRepoNumberRouteImport } from './routes/agents/reviews/$owner.$repo.$number'
 
 const IndexRoute = IndexRouteImport.update({
@@ -282,6 +283,12 @@ const OwnerRepoPullNumberRoute = OwnerRepoPullNumberRouteImport.update({
   path: '/$owner/$repo/pull/$number',
   getParentRoute: () => rootRouteImport,
 } as any)
+const AgentsThreadIdPreviewPortRoute =
+  AgentsThreadIdPreviewPortRouteImport.update({
+    id: '/$threadId_/preview/$port',
+    path: '/$threadId/preview/$port',
+    getParentRoute: () => AgentsRoute,
+  } as any)
 const AgentsReviewsOwnerRepoNumberRoute =
   AgentsReviewsOwnerRepoNumberRouteImport.update({
     id: '/reviews/$owner/$repo/$number',
@@ -335,6 +342,7 @@ export interface FileRoutesByFullPath {
   '/agents/bots/': typeof AgentsBotsIndexRoute
   '/agents/reviews/': typeof AgentsReviewsIndexRoute
   '/$owner/$repo/pull/$number': typeof OwnerRepoPullNumberRoute
+  '/agents/$threadId/preview/$port': typeof AgentsThreadIdPreviewPortRoute
   '/agents/reviews/$owner/$repo/$number': typeof AgentsReviewsOwnerRepoNumberRoute
 }
 export interface FileRoutesByTo {
@@ -380,6 +388,7 @@ export interface FileRoutesByTo {
   '/agents/bots': typeof AgentsBotsIndexRoute
   '/agents/reviews': typeof AgentsReviewsIndexRoute
   '/$owner/$repo/pull/$number': typeof OwnerRepoPullNumberRoute
+  '/agents/$threadId/preview/$port': typeof AgentsThreadIdPreviewPortRoute
   '/agents/reviews/$owner/$repo/$number': typeof AgentsReviewsOwnerRepoNumberRoute
 }
 export interface FileRoutesById {
@@ -429,6 +438,7 @@ export interface FileRoutesById {
   '/agents/bots/': typeof AgentsBotsIndexRoute
   '/agents/reviews/': typeof AgentsReviewsIndexRoute
   '/$owner/$repo/pull/$number': typeof OwnerRepoPullNumberRoute
+  '/agents/$threadId_/preview/$port': typeof AgentsThreadIdPreviewPortRoute
   '/agents/reviews/$owner/$repo/$number': typeof AgentsReviewsOwnerRepoNumberRoute
 }
 export interface FileRouteTypes {
@@ -479,6 +489,7 @@ export interface FileRouteTypes {
     | '/agents/bots/'
     | '/agents/reviews/'
     | '/$owner/$repo/pull/$number'
+    | '/agents/$threadId/preview/$port'
     | '/agents/reviews/$owner/$repo/$number'
   fileRoutesByTo: FileRoutesByTo
   to:
@@ -524,6 +535,7 @@ export interface FileRouteTypes {
     | '/agents/bots'
     | '/agents/reviews'
     | '/$owner/$repo/pull/$number'
+    | '/agents/$threadId/preview/$port'
     | '/agents/reviews/$owner/$repo/$number'
   id:
     | '__root__'
@@ -572,6 +584,7 @@ export interface FileRouteTypes {
     | '/agents/bots/'
     | '/agents/reviews/'
     | '/$owner/$repo/pull/$number'
+    | '/agents/$threadId_/preview/$port'
     | '/agents/reviews/$owner/$repo/$number'
   fileRoutesById: FileRoutesById
 }
@@ -927,6 +940,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof OwnerRepoPullNumberRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/agents/$threadId_/preview/$port': {
+      id: '/agents/$threadId_/preview/$port'
+      path: '/$threadId/preview/$port'
+      fullPath: '/agents/$threadId/preview/$port'
+      preLoaderRoute: typeof AgentsThreadIdPreviewPortRouteImport
+      parentRoute: typeof AgentsRoute
+    }
     '/agents/reviews/$owner/$repo/$number': {
       id: '/agents/reviews/$owner/$repo/$number'
       path: '/reviews/$owner/$repo/$number'
@@ -947,6 +967,7 @@ interface AgentsRouteChildren {
   AgentsAutomationsIndexRoute: typeof AgentsAutomationsIndexRoute
   AgentsBotsIndexRoute: typeof AgentsBotsIndexRoute
   AgentsReviewsIndexRoute: typeof AgentsReviewsIndexRoute
+  AgentsThreadIdPreviewPortRoute: typeof AgentsThreadIdPreviewPortRoute
   AgentsReviewsOwnerRepoNumberRoute: typeof AgentsReviewsOwnerRepoNumberRoute
 }
 
@@ -960,6 +981,7 @@ const AgentsRouteChildren: AgentsRouteChildren = {
   AgentsAutomationsIndexRoute: AgentsAutomationsIndexRoute,
   AgentsBotsIndexRoute: AgentsBotsIndexRoute,
   AgentsReviewsIndexRoute: AgentsReviewsIndexRoute,
+  AgentsThreadIdPreviewPortRoute: AgentsThreadIdPreviewPortRoute,
   AgentsReviewsOwnerRepoNumberRoute: AgentsReviewsOwnerRepoNumberRoute,
 }
 

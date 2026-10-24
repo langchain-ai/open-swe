@@ -20180,6 +20180,70 @@
         ]
       }
     },
+    "/dashboard/api/threads/{thread_id}/ports/{port}/service-url": {
+      "post": {
+        "operationId": "api_thread_port_service_url_dashboard_api_threads__thread_id__ports__port__service_url_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "thread_id",
+            "required": true,
+            "schema": {
+              "title": "Thread Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "port",
+            "required": true,
+            "schema": {
+              "maximum": 65535,
+              "minimum": 1,
+              "title": "Port",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": {
+                    "type": "string"
+                  },
+                  "title": "Response Api Thread Port Service Url Dashboard Api Threads  Thread Id  Ports  Port  Service Url Post",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "DashboardSession": []
+          }
+        ],
+        "summary": "Api Thread Port Service Url",
+        "tags": [
+          "dashboard",
+          "threads",
+          "threads"
+        ]
+      }
+    },
     "/dashboard/api/threads/{thread_id}/pr-diff": {
       "get": {
         "operationId": "api_get_thread_pr_diff_dashboard_api_threads__thread_id__pr_diff_get",

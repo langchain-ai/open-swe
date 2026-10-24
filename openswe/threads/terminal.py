@@ -14,7 +14,7 @@ from openswe.audit_logs.middleware import audit_endpoint
 from openswe.config import ENV
 from openswe.dashboard.deps import SESSION_DEP
 from openswe.dashboard.oauth import decode_terminal_ticket, issue_terminal_ticket
-from openswe.threads.handlers import get_dashboard_terminal_sandbox
+from openswe.threads.handlers import get_dashboard_live_sandbox
 from openswe.utils.thread_ops import langgraph_url
 
 logger = logging.getLogger(__name__)
@@ -59,7 +59,7 @@ async def api_thread_terminal_connection(
     response: Response,
     session: dict[str, Any] = SESSION_DEP,
 ) -> dict[str, str]:
-    await get_dashboard_terminal_sandbox(thread_id, session["sub"], email=session.get("email"))
+    await get_dashboard_live_sandbox(thread_id, session["sub"], email=session.get("email"))
     response.headers["Cache-Control"] = "no-store"
     return {
         "url": _cloud_terminal_websocket_url(thread_id),
@@ -75,7 +75,7 @@ async def _cloud_terminal(websocket: WebSocket, thread_id: str, session: dict[st
         await websocket.close(code=1008, reason="Cloud terminal requires a LangSmith sandbox")
         return
     try:
-        sandbox_id, repo_name = await get_dashboard_terminal_sandbox(
+        sandbox_id, repo_name = await get_dashboard_live_sandbox(
             thread_id, session["sub"], email=session.get("email")
         )
     except HTTPException as exc:

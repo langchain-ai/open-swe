@@ -550,4 +550,9 @@ export const agentsApi = {
       `/threads/${encodeURIComponent(threadId)}/browser`,
       { method: "POST" }
     ),
+  sharePort: (threadId: string, port: number) =>
+    agentsRequest<{ url: string }>(
+      `/threads/${encodeURIComponent(threadId)}/ports/${port}/service-url`,
+      { method: "POST" }
+    ),
 }
