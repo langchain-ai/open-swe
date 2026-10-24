@@ -1,5 +1,5 @@
+use std::collections::BTreeMap;
 use std::fs;
-use std::io::IsTerminal;
 use std::path::Path;
 
 use anyhow::{anyhow, bail, Context, Result};
@@ -9,12 +9,14 @@ use console::style;
 use reqwest::Url;
 use serde::Deserialize;
 
+use super::channel_app::is_interactive;
 use super::channel_icon::channel_icon_file;
+use super::slack_app::{self, SlackApp};
 use super::trigger_icon;
 use crate::compile::ChannelRequirements;
 use crate::langsmith::{
     self, ChannelSetupRequest, ChannelSetupResponse, ChannelSetupStatus, ChannelSetupTarget,
-    SlackChannelApp, SlackChannelOptions, SlackChannelSetup, SlackTriggerMode,
+    SlackAppInUse, SlackChannelApp, SlackChannelOptions, SlackChannelSetup, SlackTriggerMode,
 };
 use crate::project::Language;
 
@@ -408,6 +410,7 @@ fn slack_setup(prepared: &PreparedTriggerChannel) -> SlackChannelSetup {
             trigger_mode: prepared.trigger_mode,
             allow_bot_triggers: prepared.allow_bot_triggers,
         },
+        customer_app: None,
     }
 }
 
@@ -421,20 +424,158 @@ pub(crate) fn artifact(prepared: &PreparedTriggerChannel) -> serde_json::Value {
     })
 }
 
+/// Fail before uploading when registering the channel would need a question
+/// deploy cannot ask: a self-hosted LangSmith cannot create the Slack app, so
+/// a new channel needs the user's own app's credentials.
+pub(crate) fn preflight(
+    client: &langsmith::Client,
+    prepared: &PreparedTriggerChannel,
+    deployment_id: Option<&str>,
+    env_vars: &BTreeMap<String, String>,
+) -> Result<()> {
+    if is_interactive()
+        || !client.is_self_hosted()
+        || slack_app::credentials_env(env_vars)?.is_some()
+    {
+        return Ok(());
+    }
+    let Some(deployment_id) = deployment_id else {
+        bail!(slack_app::UNATTENDED_SELF_HOSTED)
+    };
+    require_registered(registration(client, deployment_id, &prepared.name))
+}
+
+/// Whether Trigger Server already has the deployment's channel, so deploy
+/// keeps its Slack app instead of asking for one; an error when it can't say.
+fn registration(
+    client: &langsmith::Client,
+    deployment_id: &str,
+    channel_name: &str,
+) -> Result<bool> {
+    Ok(client
+        .trigger_channels(deployment_id)?
+        .iter()
+        .any(|channel| channel.provider == "slack" && channel.channel_name == channel_name))
+}
+
+/// Go on without the user's own Slack app only for a channel Trigger Server
+/// already has. A failed lookup says so, not that the channel needs an app: it
+/// may well work already.
+fn require_registered(registered: Result<bool>) -> Result<()> {
+    match registered {
+        Ok(true) => Ok(()),
+        Ok(false) => bail!(slack_app::UNATTENDED_SELF_HOSTED),
+        Err(error) => bail!(
+            "Could not check whether this agent's Slack channel is already set up ({error:#}). Rerun `mda deploy` to try again, or set MDA_SLACK_BOT_TOKEN and MDA_SLACK_SIGNING_SECRET to your app's bot token and signing secret."
+        ),
+    }
+}
+
 pub(crate) fn register(
     client: &langsmith::Client,
     prepared: &PreparedTriggerChannel,
     agent_server_url: &str,
     deployment_id: &str,
     assistant_id: &str,
+    env_vars: &BTreeMap<String, String>,
 ) -> Result<()> {
-    let request = build_setup_request(prepared, agent_server_url, deployment_id, assistant_id)?;
-    let interactive = std::io::stdin().is_terminal() && std::io::stderr().is_terminal();
+    let mut request = build_setup_request(prepared, agent_server_url, deployment_id, assistant_id)?;
+    let interactive = is_interactive();
+    let registered = match registration(client, deployment_id, &prepared.name) {
+        Ok(registered) => registered,
+        // Without a terminal, a self-hosted deploy can't ask for an app instead.
+        Err(error)
+            if !interactive
+                && client.is_self_hosted()
+                && slack_app::credentials_env(env_vars)?.is_none() =>
+        {
+            return require_registered(Err(error));
+        }
+        Err(error) => {
+            // Asking again is harmless: Trigger Server keeps a registered app.
+            let _ = cliclack::log::warning(format!(
+                "Could not check whether the Slack channel is already set up: {error}"
+            ));
+            false
+        }
+    };
+    let customer_app = if registered {
+        // Trigger Server keeps the app's credentials; ones in the env must match.
+        slack_app::credentials_env(env_vars)?
+    } else {
+        let mut choice = slack_app::LiveChoice::new(client, &request.slack, env_vars, interactive);
+        match slack_app::choose_app(&mut choice)? {
+            SlackApp::Managed => None,
+            SlackApp::Customer(app) => Some(app),
+        }
+    };
+    if customer_app.is_some() {
+        request.slack.customer_app = customer_app;
+        return register_customer_app(
+            interactive,
+            |move_from| {
+                if let Some(app) = request.slack.customer_app.as_mut() {
+                    app.move_from_deployment = move_from.map(str::to_string);
+                }
+                client.setup_trigger_channel(&request)
+            },
+            confirm_slack_app_move,
+        );
+    }
     run_registration(
         interactive,
         || client.setup_trigger_channel(&request),
         wait_for_action,
     )
+}
+
+/// Register the user's own app, which Trigger Server activates at once. When
+/// another deployment in the workspace uses the app, offer to move it here.
+fn register_customer_app<S, C>(interactive: bool, mut setup: S, confirm_move: C) -> Result<()>
+where
+    S: FnMut(Option<&str>) -> Result<ChannelSetupResponse>,
+    C: FnOnce(&str) -> Result<bool>,
+{
+    let response = match setup(None) {
+        Err(error) => {
+            let Some(SlackAppInUse { deployment_id }) = error.downcast_ref::<SlackAppInUse>()
+            else {
+                return Err(error);
+            };
+            let deployment_id = deployment_id.clone();
+            if !interactive {
+                bail!(
+                    "Slack app is connected to deployment {deployment_id} and stays there. Rerun `mda deploy` in a terminal to move it to this deployment, or use another Slack app."
+                );
+            }
+            if !confirm_move(&deployment_id)? {
+                bail!(
+                    "Slack app stays connected to deployment {deployment_id}. Use another Slack app for this deployment."
+                );
+            }
+            let response = setup(Some(&deployment_id))?;
+            let _ = cliclack::log::info(format!(
+                "Moved the Slack app from deployment {deployment_id}."
+            ));
+            response
+        }
+        response => response?,
+    };
+    match classify_setup_response(response)? {
+        SetupState::Active => Ok(()),
+        SetupState::ActionRequired(_) => {
+            bail!("Slack channel setup did not finish with your Slack app. Check its bot token and signing secret, then rerun `mda deploy`.")
+        }
+    }
+}
+
+fn confirm_slack_app_move(deployment_id: &str) -> Result<bool> {
+    cliclack::confirm(format!(
+        "Slack app is connected to deployment {deployment_id}. Move it to this deployment? That deployment's Slack channel stops receiving events."
+    ))
+    .initial_value(true)
+    .interact()
+    .context("failed to confirm moving the Slack app")
 }
 
 // This URL must stay unwrapped and selectable inside the interactive flow.
@@ -661,6 +802,114 @@ mod tests {
             authorization_url: None,
             message: None,
         }
+    }
+
+    const HOLDER: &str = "b809e66e-0000-4000-8000-000000000002";
+
+    fn in_use() -> anyhow::Error {
+        SlackAppInUse {
+            deployment_id: HOLDER.into(),
+        }
+        .into()
+    }
+
+    #[test]
+    fn a_slack_app_another_deployment_uses_moves_once_confirmed() {
+        let mut moves = Vec::new();
+        let mut asked = None;
+
+        register_customer_app(
+            true,
+            |move_from| {
+                moves.push(move_from.map(str::to_string));
+                if move_from.is_none() {
+                    Err(in_use())
+                } else {
+                    Ok(active_setup_response())
+                }
+            },
+            |deployment_id| {
+                asked = Some(deployment_id.to_string());
+                Ok(true)
+            },
+        )
+        .unwrap();
+
+        assert_eq!(asked.as_deref(), Some(HOLDER));
+        assert_eq!(moves, vec![None, Some(HOLDER.to_string())]);
+    }
+
+    #[test]
+    fn a_declined_slack_app_move_leaves_it_where_it_is() {
+        let mut calls = 0;
+
+        let error = register_customer_app(
+            true,
+            |_| {
+                calls += 1;
+                Err(in_use())
+            },
+            |_| Ok(false),
+        )
+        .unwrap_err();
+
+        assert_eq!(calls, 1);
+        assert!(error
+            .to_string()
+            .contains(&format!("stays connected to deployment {HOLDER}")));
+    }
+
+    #[test]
+    fn unattended_deploys_never_move_a_slack_app() {
+        let mut calls = 0;
+
+        let error = register_customer_app(
+            false,
+            |_| {
+                calls += 1;
+                Err(in_use())
+            },
+            |_| -> Result<bool> { panic!("an unattended deploy must not ask") },
+        )
+        .unwrap_err();
+
+        assert_eq!(calls, 1);
+        assert!(error.to_string().contains(HOLDER));
+    }
+
+    #[test]
+    fn other_customer_app_setup_failures_are_not_offered_a_move() {
+        let error = register_customer_app(
+            true,
+            |_| {
+                Err(anyhow!(
+                    "Channel setup failed (HTTP 409): This Slack app is already in use."
+                ))
+            },
+            |_| -> Result<bool> { panic!("only an app another deployment uses is moved") },
+        )
+        .unwrap_err();
+
+        assert!(error.to_string().contains("already in use"));
+    }
+
+    #[test]
+    fn unattended_self_hosted_deploys_go_on_only_for_a_registered_channel() {
+        assert!(require_registered(Ok(true)).is_ok());
+        assert_eq!(
+            require_registered(Ok(false)).unwrap_err().to_string(),
+            slack_app::UNATTENDED_SELF_HOSTED
+        );
+        // A failed listing names itself, not a missing Slack app.
+        let error = require_registered(Err(anyhow::anyhow!("Channel listing failed (HTTP 503).")))
+            .unwrap_err()
+            .to_string();
+        assert!(
+            error.contains("Channel listing failed (HTTP 503)."),
+            "{error}"
+        );
+        assert!(error.contains("Could not check"), "{error}");
+        assert_ne!(error, slack_app::UNATTENDED_SELF_HOSTED);
     }
 
     #[test]

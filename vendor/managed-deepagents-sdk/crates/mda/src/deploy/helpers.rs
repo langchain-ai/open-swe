@@ -150,6 +150,10 @@ pub const RESERVED_ENV_VARS: &[&str] = &[
     "MDA_LINEAR_WORKSPACE",
     // CLI-only: a brought GitHub App's webhook URL that stays where it is.
     "MDA_GITHUB_WEBHOOK_ELSEWHERE",
+    // CLI-only: the user's own Slack app's credentials when deploy cannot ask.
+    // Trigger Server keeps them; the deployment never gets them as env vars.
+    "MDA_SLACK_BOT_TOKEN",
+    "MDA_SLACK_SIGNING_SECRET",
 ];
 
 /// Convert env vars into deployment secrets, dropping reserved and empty values.

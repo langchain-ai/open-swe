@@ -67,9 +67,19 @@ const PROMPTS: &[(&str, usize, &str)] = &[
          API key comes from LANGSMITH_API_KEY",
     ),
     (
+        "deploy/slack_app.rs",
+        3,
+        "choosing a new Slack channel's app and entering its credentials only happens in an \
+         interactive terminal; without one, MDA_SLACK_BOT_TOKEN and MDA_SLACK_SIGNING_SECRET \
+         supply the user's own app, hosted LangSmith otherwise creates a managed app as \
+         before, and a self-hosted deploy fails before uploading with that hint",
+    ),
+    (
         "deploy/trigger_channels.rs",
-        1,
-        "browser hand-off only shown in an interactive terminal",
+        2,
+        "browser hand-off only shown in an interactive terminal; moving a Slack app another \
+         deployment uses is only offered in one, and without a terminal deploy fails saying the \
+         app stays there",
     ),
     (
         "secret_input.rs",

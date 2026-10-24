@@ -52,7 +52,8 @@ pub use sandboxes::{CreateSandboxBoxOptions, SandboxCommandResult};
 pub use snapshots::{SnapshotDelete, DEFAULT_SNAPSHOT_READY_TIMEOUT};
 pub(crate) use trigger_server::{
     ChannelSetupRequest, ChannelSetupResponse, ChannelSetupStatus, ChannelSetupTarget,
-    SlackChannelApp, SlackChannelOptions, SlackChannelSetup, SlackTriggerMode,
+    SlackAppInUse, SlackChannelApp, SlackChannelOptions, SlackChannelSetup, SlackCustomerApp,
+    SlackManager, SlackTriggerMode,
 };
 pub use workspaces::DeployTarget;
 

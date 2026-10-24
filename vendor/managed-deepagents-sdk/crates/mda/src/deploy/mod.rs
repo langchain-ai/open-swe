@@ -37,6 +37,7 @@ mod image;
 pub(crate) mod langsmith_context;
 pub(crate) mod linear_channel;
 pub mod prepare;
+pub(crate) mod slack_app;
 mod trigger_channels;
 mod trigger_icon;
 mod upsell;

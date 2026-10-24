@@ -76,13 +76,16 @@ impl ChannelSetup {
         existing_deployment: impl FnOnce() -> Result<Option<Value>>,
         env_vars: &BTreeMap<String, String>,
     ) -> Result<()> {
-        if self.github.is_none() && self.linear.is_none() {
+        if self.github.is_none() && self.linear.is_none() && self.trigger.is_none() {
             return Ok(());
         }
         let existing = existing_deployment()?;
         let deployment_id = existing
             .as_ref()
             .and_then(|deployment| deployment.get("id")?.as_str());
+        if let Some(trigger) = &self.trigger {
+            trigger_channels::preflight(client, trigger, deployment_id, env_vars)?;
+        }
         if let Some(github) = &self.github {
             let runtime_url = existing.as_ref().and_then(deployment_runtime_url);
             github_channel::preflight(
@@ -118,6 +121,7 @@ impl ChannelSetup {
                 target.agent_server_url,
                 target.deployment_id,
                 target.assistant_id,
+                target.env_vars,
             )?;
         }
         if let Some(github) = &self.github {

@@ -744,6 +744,31 @@ while the thread waits on one, such a click starts nothing. Trigger Server
 forwards clicks on buttons without a URL and on Slack's `feedback_buttons`;
 selects and inputs aren't forwarded.
 
+### Setting up the Slack app
+
+The first `mda deploy` of a Slack channel asks which Slack app it uses, as the
+GitHub and Linear channels do:
+
+- **Create a new Slack app in _your workspace_**: LangSmith creates and manages
+  it, in the workspace you authorized LangSmith in. Deploy names the workspace.
+- **Let LangSmith create and manage a new Slack app**: the same, when you
+  haven't authorized LangSmith in Slack yet. Deploy prints the link to do that.
+- **Create a new Slack app yourself**: Slack opens with the app filled in from
+  a manifest. Install it, then paste its Bot User OAuth Token and Signing
+  Secret into the prompts.
+- **Use an existing Slack app**: deploy lists the request URLs, bot events and
+  scopes to set on the app, then asks for its token and signing secret. Slack
+  sends an app's events to one URL, so whatever received them before stops
+  receiving them.
+
+Self-hosted LangSmith can't create Slack apps, so it offers only your own.
+LangSmith keeps your app's credentials, and later deploys keep whichever app
+the channel has without asking. Without a terminal, set `MDA_SLACK_BOT_TOKEN`
+and `MDA_SLACK_SIGNING_SECRET` in `.env` or the shell to use your own app. They
+are never uploaded to the deployment, and you can remove them once it's set up.
+Otherwise hosted LangSmith creates a managed app, and a self-hosted deploy
+stops before uploading.
+
 ## GitHub channels
 
 The GitHub channel is a thin HTTP adapter. Add a channel file with event handlers:
