@@ -108,13 +108,13 @@ def _reading(spec: OperationSpec, state: Mapping[str, object]) -> RunOperation:
     )
 
 
-def _seconds(arguments: Mapping[str, JsonValue]) -> float:
+def _seconds(spec: OperationSpec, arguments: Mapping[str, JsonValue]) -> float:
     # A call with its own timeout, such as a long command, must be able to run it out
     # and answer that it did, rather than outlive this one.
     requested = arguments.get("timeout")
     if isinstance(requested, int | float) and not isinstance(requested, bool):
         return max(LONG_CALL_SECONDS, requested + TOOL_CALL_SLACK_SECONDS)
-    return LONG_CALL_SECONDS
+    return spec.seconds if spec.seconds is not None else LONG_CALL_SECONDS
 
 
 def _content(content: str | list[JsonValue]) -> str | list[str | dict]:
@@ -170,7 +170,7 @@ async def _operate(
         update={"run_id": run_id(), "arguments": dict(arguments), "request_id": tool_call_id}
     )
     try:
-        answer = await call(backend, OPERATION, request, timeout=_seconds(arguments))
+        answer = await call(backend, OPERATION, request, timeout=_seconds(spec, arguments))
     except BackendTimeoutError:
         logger.warning("The backend did not answer an operation", exc_info=True)
         return ToolMessage(content=_TIMED_OUT, tool_call_id=tool_call_id, status="error")

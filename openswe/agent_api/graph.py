@@ -408,6 +408,10 @@ class RunSession:
                     parameters=described.parameters,
                     reads=(injections := Injections.of(operations[described.name])).reads,
                     reads_all=injections.reads_all,
+                    seconds=120.0
+                    if described.name in {"get_thread", "list_threads", "search_tools"}
+                    or described.name.startswith(("slack_read_", "walkthrough_"))
+                    else None,
                 )
                 for described in self.surface.catalog()
                 if described.name in operations
