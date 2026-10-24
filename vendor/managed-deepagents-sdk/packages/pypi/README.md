@@ -426,7 +426,8 @@ MDA does not reuse the previous delivery's event.
 For a prompt that answers an interrupt, put a shared ID on the prompt and on the
 interrupt value under `INTERRUPT_CORRELATION_KEY`. MDA uses `correlation_id` to
 select that interrupt. Without a correlation ID, an answer can resume the only
-pending interrupt; multiple pending interrupts require a match. Existing resume
+pending interrupt that isn't a tool-call review; multiple pending interrupts
+require a match. Existing resume
 values are unchanged.
 
 The managed runtime fields are available to authored tools and middleware,
@@ -475,10 +476,10 @@ default every message that reaches the app starts a run with the message.
 
 ```python
 # channels/slack.py
-from managed_deepagents import SlackChannelThread, SlackEvent, channels
+from managed_deepagents import SlackChannelThread, SlackMessageEvent, channels
 
 
-def on_mention(event: SlackEvent, thread: SlackChannelThread):
+def on_mention(event: SlackMessageEvent, thread: SlackChannelThread):
     return (
         event.text,
         {
@@ -516,7 +517,7 @@ continues a thread the agent already ran on: when the handler declines a
 thread's mention, the thread's later replies start nothing until someone
 mentions the agent there again.
 
-A handler gets the `SlackEvent` (`text`, `user_id`, `channel_id`,
+A handler gets the `SlackMessageEvent` (`text`, `user_id`, `channel_id`,
 `message_ts`, `thread_ts`, `files`, Slack's own event as `payload`, and
 `actor`) and its `SlackChannelThread` (`id`, `source_thread_key`,
 `channel.name`). It
@@ -526,8 +527,9 @@ Linear handlers do. `None` starts no run, and the app neither reacts nor
 replies. A handler that raises, or returns input the channel can't start,
 starts no run either; the error is logged without its message. The message's
 blocks and attachments are added to the handler's messages, and its files
-still reach `/workspace/attachments/`. Interrupt resumes and prompt responses
-don't go through `on_event`.
+still reach `/workspace/attachments/`. Interrupt resumes don't go through
+`on_event`; a click on a button the agent posted does, as `"interaction"`: see
+[Buttons your agent posts](#buttons-your-agent-posts).
 
 A handler may also be an endpoint of your service, a URL or an
 `httpx.Request`: Trigger Server gets its answer first, then MDA asks the
@@ -564,7 +566,8 @@ Endpoints get it as `event["actor"]`, with camelCase keys. It is personal
 data: MDA doesn't log it or add it to a run's metadata; add what you need
 through `metadata` yourself.
 
-`on_finish` is called once when a message is done, with the `SlackEvent`, its
+`on_finish` is called once when a message or an `"interaction"` is done, with
+the `SlackEvent` (a `SlackMessageEvent` or `SlackInteractionEvent`), its
 `SlackChannelThread`, and how it finished, as Linear's `on_finish` is:
 
 - `run`: the message started a run, which ended with `run["status"]`
@@ -660,6 +663,86 @@ channels.slack(reply="none")
 Reactions, the status, Stop and `onFinish` work as before. `channels.linear`
 and `channels.http` take the same option. Deploying `reply="none"` needs an
 `mda` CLI from this release; an older one refuses it.
+
+### Buttons your agent posts
+
+`runtime.channel.post` only sends what every channel can. For anything
+Slack-specific, such as buttons, feedback buttons or a message the agent
+updates later, the agent posts with its own Slack client. The app's bot token
+is the agent connection `mda/slack-bot-token` (reading it as a user connection
+raises), and `runtime.channel.raw_event`, the Slack event the run came from,
+names the thread: a message's own event, or a click's interaction payload,
+whose `container` says where the button was.
+
+```python
+from langchain.tools import tool
+from managed_deepagents import ManagedToolRuntime, connections
+from slack_sdk.web.async_client import AsyncWebClient
+
+
+@tool
+async def offer_choices(question: str, choices: list[str], runtime: ManagedToolRuntime) -> str:
+    """Ask the user to pick one of a few answers in Slack."""
+    if runtime.channel is None or runtime.channel.provider != "slack":
+        return "Not in Slack."
+    raw = runtime.channel.raw_event or {}
+    where = raw.get("container") or raw
+    channel = where.get("channel_id") or where.get("channel")
+    thread_ts = where.get("thread_ts") or where.get("message_ts") or where.get("ts")
+    token = await connections.get("mda/slack-bot-token", {"type": "agent"})
+    await AsyncWebClient(token=token).chat_postMessage(
+        channel=channel,
+        thread_ts=thread_ts,
+        text=question,
+        blocks=[
+            {"type": "section", "text": {"type": "mrkdwn", "text": question}},
+            {
+                "type": "actions",
+                "elements": [
+                    {
+                        "type": "button",
+                        "action_id": "quick_reply",
+                        "text": {"type": "plain_text", "text": choice},
+                        "value": choice,
+                    }
+                    for choice in choices
+                ],
+            },
+        ],
+    )
+    return "Posted the choices."
+```
+
+Trigger Server forwards a click on such a button to the channel. `on_event`'s
+`"interaction"` decides what it starts, as the other keys do for messages:
+
+```python
+channels.slack(
+    on_event={
+        "interaction": lambda event, _thread: (
+            str(event.value) if event.action_id == "quick_reply" else None
+        ),
+    },
+)
+```
+
+The handler gets a `SlackInteractionEvent`: `action_id` (the button's
+`action_id`, or a modal's `callback_id`), `value` (the button's `value`, or
+the modal's `state.values`), `user_id`, `channel_id`, `message_ts` (the
+message holding the button; `None` for a modal), `thread_ts`, `actor`, and
+Slack's interaction payload as `payload`, with its `response_url` and without
+its verification `token`. The run it starts runs on the button's thread.
+Return `None` for a click that starts nothing, such as a `feedback_buttons`
+rating you record yourself. An endpoint works here too, as does `multitask_strategy`.
+
+Without `"interaction"`, a click starts a run with no new message, which reads
+the click from `runtime.channel.event` (`type` `"user_prompt_response"`, with
+`action` and `value`). A click that answers a decision the thread waits on
+resumes that run instead, and never reaches `"interaction"`. A click without a
+correlation ID never answers a tool-call review, which its own prompt answers:
+while the thread waits on one, such a click starts nothing. Trigger Server
+forwards clicks on buttons without a URL and on Slack's `feedback_buttons`;
+selects and inputs aren't forwarded.
 
 ## GitHub channels
 

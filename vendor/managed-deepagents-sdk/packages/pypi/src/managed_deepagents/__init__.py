@@ -106,6 +106,10 @@ from managed_deepagents._channels.slack.events import (
     SlackEventKey,
     SlackFile,
     SlackHandlers,
+    SlackInteractionCallback,
+    SlackInteractionEvent,
+    SlackMessageEvent,
+    SlackMessageKey,
 )
 from managed_deepagents._channels.slack.status import (
     SlackStatusChoice,
@@ -319,6 +323,10 @@ __all__ = [
     "SlackEventKey",
     "SlackFile",
     "SlackHandlers",
+    "SlackInteractionCallback",
+    "SlackInteractionEvent",
+    "SlackMessageEvent",
+    "SlackMessageKey",
     "SlackPromptResponse",
     "SlackStatusChoice",
     "SlackStatusChooser",

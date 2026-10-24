@@ -72,6 +72,7 @@ from managed_deepagents._channels.trigger.types import (
     TriggerChannelRuntimeEventRequest,
     TriggerChannelRuntimeEventType,
     TriggerChannelRuntimeStatus,
+    TriggerChannelUserPromptResponseEvent,
     parse_trigger_channel_event,
 )
 from managed_deepagents._ingress import ScheduleFn, schedule_ingress_work
@@ -154,7 +155,15 @@ DecideMessageFn = Callable[
     Awaitable[TriggerMessageRoute | None],
 ]
 """Decide what a message event starts, before its run; ``None`` starts it with
-``message_input``'s messages. Interrupt resumes and prompt responses never ask."""
+``message_input``'s messages. Interrupt resumes never ask."""
+
+DecideInteractionFn = Callable[
+    [TriggerChannelUserPromptResponseEvent, TriggerChannelThread, "ChannelActor | None"],
+    Awaitable[TriggerMessageRoute | None],
+]
+"""Decide what a prompt response that answers no interrupt starts, as
+``DecideMessageFn`` does a message; ``None`` starts a run with no new messages,
+which reads the response from ``runtime.channel.event``."""
 
 
 class StartAgentFn(Protocol):
@@ -300,11 +309,26 @@ async def _interrupt_answered_by(
             # Starting a turn here would abandon the parked checkpoints.
             raise _AmbiguousInterruptError("correlation id matched no pending interrupt")
         return None
-    if len(pending) > 1:
+    # A tool-call review is answered from its own prompt (``interrupt_resume``):
+    # a click on one of the agent's buttons, such as a rating, is no decision.
+    answerable = [
+        candidate for candidate in pending if not _is_tool_call_review(candidate.get("value"))
+    ]
+    if len(answerable) > 1:
         # Interrupt ids carry no ordering, so without a correlation id there is
         # nothing to choose by.
-        raise _AmbiguousInterruptError(f"{len(pending)} interrupts pending")
-    return pending[0]["id"] if pending else None
+        raise _AmbiguousInterruptError(f"{len(answerable)} interrupts pending")
+    if not answerable and pending:
+        # Starting a turn here would abandon the review.
+        raise _AmbiguousInterruptError(
+            "the thread waits on a tool-call review, which a click doesn't answer"
+        )
+    return answerable[0]["id"] if answerable else None
+
+
+def _is_tool_call_review(value: object) -> bool:
+    """Whether an interrupt is a tool-call review, as ``HumanInTheLoopMiddleware`` raises one."""
+    return isinstance(value, Mapping) and isinstance(value.get("action_requests"), list)
 
 
 def _interrupt_correlation_id(value: object) -> str | None:
@@ -353,24 +377,44 @@ async def _start_event_run(
     start_agent: StartAgentFn | None,
     resume_agent: ResumeAgentFn | None,
     user_id: str,
-    thread_interrupts: ThreadInterruptsFn | None = None,
     resume_target: ResumeTargetFn | None = None,
     message_input: MessageInputFn | None = None,
     decided: NormalizedRunInput | None = None,
     multitask_strategy: MultitaskStrategy | None = None,
+    answered_interrupt: str | None = None,
 ) -> StartedIngressRun:
+    """Start or resume the delivery's run.
+
+    A prompt response resumes ``answered_interrupt``, the interrupt it answers,
+    and otherwise starts a turn, as a message does.
+    """
     thread_id = _thread_id(event["source_thread_key"])
     context: dict[str, object] = {}
     binding = trigger_channel_binding(provider=source_provider, name=channel_name, event=event)
-    if event["type"] == "message":
+    if event["type"] == "user_prompt_response" and answered_interrupt is not None:
+        resume = resume_agent or resume_ingress_agent
+        return await resume(
+            thread_id=thread_id,
+            assistant_id=assistant_id,
+            resume={answered_interrupt: normalized_user_prompt_response(event)},
+            source_provider=source_provider,
+            source_thread_key=event["source_thread_key"],
+            user_id=user_id,
+            context=context,
+            binding=binding,
+        )
+    if event["type"] == "message" or event["type"] == "user_prompt_response":
         start = start_agent or start_ingress_agent
         options: dict[str, object] = {}
         if multitask_strategy is not None:
             options["multitask_strategy"] = multitask_strategy
         if decided is None:
-            messages = (
-                message_input(event) if message_input is not None else event["input"]["messages"]
-            )
+            if event["type"] == "user_prompt_response":
+                messages = []
+            elif message_input is not None:
+                messages = message_input(event)
+            else:
+                messages = event["input"]["messages"]
         else:
             # Its messages replace the delivery's in the binding, as the run's
             # own input; its context sits beside the binding.
@@ -413,39 +457,6 @@ async def _start_event_run(
             context=context,
             binding=binding,
         )
-    if event["type"] == "user_prompt_response":
-        normalized = normalized_user_prompt_response(event)
-        interrupt_id = await _interrupt_answered_by(
-            thread_id=thread_id,
-            source_provider=source_provider,
-            source_thread_key=event["source_thread_key"],
-            user_id=user_id,
-            correlation_id=normalized.get("correlation_id"),
-            thread_interrupts=thread_interrupts,
-        )
-        if interrupt_id is not None:
-            resume = resume_agent or resume_ingress_agent
-            return await resume(
-                thread_id=thread_id,
-                assistant_id=assistant_id,
-                resume={interrupt_id: normalized},
-                source_provider=source_provider,
-                source_thread_key=event["source_thread_key"],
-                user_id=user_id,
-                context=context,
-                binding=binding,
-            )
-        start = start_agent or start_ingress_agent
-        return await start(
-            thread_id=thread_id,
-            assistant_id=assistant_id,
-            messages=[],
-            source_provider=source_provider,
-            source_thread_key=event["source_thread_key"],
-            user_id=user_id,
-            context=context,
-            binding=binding,
-        )
     _assert_never(event)
 
 
@@ -471,6 +482,7 @@ async def handle_trigger_channel_event_request(  # noqa: C901, PLR0911, PLR0912,
     message_input: MessageInputFn | None = None,
     only_continues_thread: OnlyContinuesThreadFn | None = None,
     decide_message: DecideMessageFn | None = None,
+    decide_interaction: DecideInteractionFn | None = None,
     multitask_strategy: MultitaskStrategy | None = None,
     on_finish: HttpOnFinish | None = None,
     identity_context_key: IdentityContextKey | None = None,
@@ -559,6 +571,46 @@ async def handle_trigger_channel_event_request(  # noqa: C901, PLR0911, PLR0912,
         logger.error("%s is not configured", ASSISTANT_ID_ENV)
         return _json_response({"error": "channel runtime is not configured"}, status_code=500)
 
+    thread: TriggerChannelThread = {
+        "id": _thread_id(event["source_thread_key"]),
+        "source_thread_key": event["source_thread_key"],
+    }
+
+    # The interrupt a prompt response answers; one that answers none starts a
+    # turn, which the provider may decide.
+    answered_interrupt: str | None = None
+    if event["type"] == "user_prompt_response":
+        try:
+            answered_interrupt = await _interrupt_answered_by(
+                thread_id=thread["id"],
+                source_provider=source_provider,
+                source_thread_key=event["source_thread_key"],
+                user_id=user_id,
+                correlation_id=normalized_user_prompt_response(event).get("correlation_id"),
+                thread_interrupts=thread_interrupts,
+            )
+        except _AmbiguousInterruptError as ambiguous:
+            # Trigger Server never reads the body, so the log is the only place this surfaces.
+            logger.warning(
+                "channel user prompt response could not be matched to an interrupt "
+                "(%s, delivery_id=%s, event_id=%s)",
+                ambiguous.reason,
+                logger.log_identifier(event["delivery_id"]),
+                logger.log_identifier(event["event_id"]),
+            )
+            return _accepted_response(event)
+        except Exception as error:  # noqa: BLE001 - never expose Agent Server details in the response
+            logger.error(
+                "channel run could not be started (%s)",
+                logger.safe_error_label(error),
+            )
+            return _start_failed_response()
+    # Whether the delivery starts a turn of its own, which finishes: a message,
+    # or a prompt response that answers no interrupt. Resumes don't.
+    starts_turn = event["type"] == "message" or (
+        event["type"] == "user_prompt_response" and answered_interrupt is None
+    )
+
     async def start(decided: NormalizedRunInput | None) -> StartedIngressRun | None:
         """Start the delivery's run; ``None`` when ``reject`` left the thread to its run."""
         try:
@@ -569,34 +621,30 @@ async def handle_trigger_channel_event_request(  # noqa: C901, PLR0911, PLR0912,
                 channel_name=channel_name,
                 start_agent=start_agent,
                 resume_agent=resume_agent,
-                thread_interrupts=thread_interrupts,
                 resume_target=resume_target,
                 user_id=user_id,
                 message_input=message_input,
                 decided=decided,
                 multitask_strategy=multitask_strategy,
+                answered_interrupt=answered_interrupt,
             )
         except Exception as error:
-            if event["type"] == "message" and rejected_as_busy(multitask_strategy, error):
+            if starts_turn and rejected_as_busy(multitask_strategy, error):
                 # A run already active on the thread keeps it under `reject`.
                 logger.info(
-                    "channel message rejected: its thread is busy (delivery_id=%s)",
+                    "channel %s rejected: its thread is busy (delivery_id=%s)",
+                    event["type"],
                     logger.log_identifier(event["delivery_id"]),
                 )
                 return None
             raise
 
-    thread: TriggerChannelThread = {
-        "id": _thread_id(event["source_thread_key"]),
-        "source_thread_key": event["source_thread_key"],
-    }
-
     async def finish(finished: HttpFinish) -> None:
-        """Tell the provider a message is done, once, as ``http_channel``'s ``on_finish`` hears it.
+        """Tell the provider a turn is done, once, as ``http_channel``'s ``on_finish`` hears it.
 
         The delivery's ``raw_event`` is a ``TriggerFinishedEvent``; a failure is logged.
         """
-        if event["type"] != "message" or on_finish is None:
+        if not starts_turn or on_finish is None:
             return
         message = {key: value for key, value in event.items() if key != "identity_context"}
         raw: TriggerFinishedEvent = {"delivery": cast("JsonValue", message)}
@@ -651,6 +699,8 @@ async def handle_trigger_channel_event_request(  # noqa: C901, PLR0911, PLR0912,
     decision: TriggerMessageRoute | None = None
     if event["type"] == "message" and decide_message is not None:
         decision = await decide_message(event, thread, actor)
+    elif starts_turn and event["type"] == "user_prompt_response" and decide_interaction is not None:
+        decision = await decide_interaction(event, thread, actor)
     if isinstance(decision, TriggerMessageBackground):
         decide = decision.decide
 
@@ -673,9 +723,7 @@ async def handle_trigger_channel_event_request(  # noqa: C901, PLR0911, PLR0912,
 
         # Trigger Server only waits briefly, so it hears first; a failure from
         # here on is logged, and nothing redelivers the message.
-        schedule_ingress_work(
-            decide_then_start, label="Channel message decision", schedule=schedule
-        )
+        schedule_ingress_work(decide_then_start, label="Channel event decision", schedule=schedule)
         return _accepted_response(event)
     if decision is not None and decision.type == "skipped":
         _log_no_run(event, decision)
@@ -735,9 +783,10 @@ def _skipped(reason: HttpSkipReason) -> HttpFinish:
 
 
 def _log_no_run(event: TriggerChannelEvent, decision: TriggerMessageDecision) -> None:
-    """Log a message that started no run; a failed handler logged its own error."""
+    """Log an event that started no run; a failed handler logged its own error."""
     logger.info(
-        "channel message started no run (%sdelivery_id=%s)",
+        "channel %s started no run (%sdelivery_id=%s)",
+        event["type"],
         "its handler failed, " if decision.type == "failed" else "",
         logger.log_identifier(event["delivery_id"]),
     )

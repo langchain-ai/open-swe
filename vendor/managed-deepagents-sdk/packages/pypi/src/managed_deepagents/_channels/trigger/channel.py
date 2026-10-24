@@ -29,6 +29,7 @@ if TYPE_CHECKING:
         SlackEvent,
         SlackEventCallback,
         SlackHandlers,
+        SlackMessageEvent,
     )
     from managed_deepagents._channels.slack.status import SlackStatusChoice
     from managed_deepagents._channels.trigger.http import (
@@ -36,7 +37,10 @@ if TYPE_CHECKING:
         TriggerMessageDecision,
         TriggerMessageRoute,
     )
-    from managed_deepagents._channels.trigger.types import TriggerChannelMessageEvent
+    from managed_deepagents._channels.trigger.types import (
+        TriggerChannelMessageEvent,
+        TriggerChannelUserPromptResponseEvent,
+    )
     from managed_deepagents._channels.types import ChannelReply, JsonValue
     from managed_deepagents._ingress_runs import MultitaskStrategy
 
@@ -122,6 +126,7 @@ class TriggerSlackChannel(Channel):
         on_event = self.on_event
         name = context["name"]
         decided = self._decided_events()
+        remember = decided.remember if decided is not None else None
 
         async def decide_message(
             event: TriggerChannelMessageEvent,
@@ -129,14 +134,15 @@ class TriggerSlackChannel(Channel):
             actor: ChannelActor | None,
         ) -> TriggerMessageRoute | None:
             assert on_event is not None  # noqa: S101 - only passed with handlers
-            return await _decide_message(
-                on_event,
-                event,
-                thread,
-                name,
-                actor,
-                remember=decided.remember if decided is not None else None,
-            )
+            return await _decide_event(on_event, event, thread, name, actor, remember=remember)
+
+        async def decide_interaction(
+            event: TriggerChannelUserPromptResponseEvent,
+            thread: TriggerChannelThread,
+            actor: ChannelActor | None,
+        ) -> TriggerMessageRoute | None:
+            assert on_event is not None  # noqa: S101 - only passed with handlers
+            return await _decide_event(on_event, event, thread, name, actor, remember=remember)
 
         on_finish = None
         if self.on_finish is not None:
@@ -177,6 +183,9 @@ class TriggerSlackChannel(Channel):
                 else None
             ),
             decide_message=decide_message if on_event else None,
+            decide_interaction=(
+                decide_interaction if on_event and "interaction" in on_event else None
+            ),
             multitask_strategy=self.multitask_strategy,
             on_finish=on_finish,
         )
@@ -237,18 +246,18 @@ async def _is_plain_message(event: TriggerChannelMessageEvent) -> bool:
     return isinstance(raw_event, Mapping) and await is_plain_slack_message(raw_event)
 
 
-async def _decide_message(
+async def _decide_event(
     handlers: Mapping[str, SlackEventCallback],
-    delivery: TriggerChannelMessageEvent,
+    delivery: TriggerChannelMessageEvent | TriggerChannelUserPromptResponseEvent,
     thread: TriggerChannelThread,
     channel_name: str,
     actor: ChannelActor | None = None,
     *,
     remember: Callable[[str, SlackEvent], None] | None = None,
 ) -> TriggerMessageRoute | None:
-    """What a message starts, as its kind's handler decides.
+    """What a message or interaction starts, as its key's handler decides.
 
-    ``None``, so the message itself, without one. An endpoint is asked after
+    ``None``, so what it starts without one. An endpoint is asked after
     Trigger Server has its answer.
     """
     from managed_deepagents._channels.http.endpoint import is_endpoint_handler  # noqa: PLC0415
@@ -268,7 +277,10 @@ async def _decide_message(
         remember(delivery["delivery_id"], event)
 
     async def decide() -> TriggerMessageDecision:
-        return await _run_handler(event, lambda: handler(event, slack_thread(thread, channel_name)))
+        return await _run_handler(
+            event,
+            lambda: handler(cast("SlackMessageEvent", event), slack_thread(thread, channel_name)),
+        )
 
     if is_endpoint_handler(handler):
         return TriggerMessageBackground(decide)
@@ -281,7 +293,7 @@ async def _run_handler(
 ) -> TriggerMessageDecision:
     """Run a handler and normalize what it returned into run input.
 
-    The Slack message's blocks and attachments are added to the handler's
+    A Slack message's blocks and attachments are added to the handler's
     messages, as to a message's own.
     """
     from managed_deepagents._channels.http.provider import run_event_handler  # noqa: PLC0415
@@ -306,7 +318,7 @@ async def _run_handler(
         return TriggerMessageDecision("failed")
     if run_input is None:
         return TriggerMessageDecision("skipped")
-    if run_input["messages"]:
+    if event.key != "interaction" and run_input["messages"]:
         run_input["messages"] = cast(
             "list[dict[str, JsonValue]]",
             with_slack_rich_content(
@@ -444,13 +456,19 @@ def slack_channel(
             key: ``"mention"`` (a channel message that @-mentions your agent),
             ``"directMessage"``, and ``"message"`` (any other channel message,
             which only ``trigger_mode`` ``"thread"`` or ``"all"`` delivers). A
-            handler gets the ``SlackEvent`` and its ``SlackChannelThread``, and
+            handler gets the ``SlackMessageEvent`` and its ``SlackChannelThread``, and
             returns a prompt (string, message, or state), optionally with run
             options as ``(input, {"context", "metadata", "webhook"})``, or
             ``None`` to start no run: then the agent doesn't react or reply. A
             message kind without a handler starts a run with the message, as
             without ``on_event``. The message's blocks, attachments and files
-            still reach the run.
+            still reach the run. ``"interaction"`` decides what a click on a
+            button your agent posted with its own blocks starts, with a
+            ``SlackInteractionEvent``: the next prompt, say, or ``None`` after
+            recording it. Without one, such a click starts a run with no new
+            message, which reads the click from ``runtime.channel.event``. A
+            click that answers a decision the thread waits on resumes the run,
+            and never reaches it.
         multitask_strategy: What a message that starts a run does while its
             thread already runs: ``enqueue`` (the default) waits for the run
             and starts after it, ``interrupt`` cancels the run, keeping its
@@ -461,8 +479,9 @@ def slack_channel(
             agent, through ``runtime.channel.post`` or its own tools. The
             status, reactions and ``on_finish`` stay as they are. ``"none"``
             needs an ``mda`` CLI that deploys it.
-        on_finish: Called once when a message is done, with the ``SlackEvent``,
-            its ``SlackChannelThread``, and how it finished: ``run`` (its run
+        on_finish: Called once when a message or interaction is done, with the
+            ``SlackEvent`` (a ``SlackMessageEvent`` or ``SlackInteractionEvent``), its
+            ``SlackChannelThread``, and how it finished: ``run`` (its run
             ended with ``run["status"]``, and ``interrupts`` lists the
             decisions the thread waits on), ``skipped`` (no run started: the
             handler returned nothing or failed, ``ignored``, or the thread was

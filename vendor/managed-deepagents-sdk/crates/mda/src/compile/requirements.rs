@@ -157,7 +157,7 @@ pub(crate) fn required_env_from_connector_requirements(
 /// not workspace connections, so deploy neither checks for them nor creates
 /// them.
 /// Each with what the token is and what the agent acts as with it.
-const CHANNEL_RESERVED_AGENT_CONNECTIONS: [(&str, &str, &str); 2] = [
+const CHANNEL_RESERVED_AGENT_CONNECTIONS: [(&str, &str, &str); 3] = [
     (
         "mda/github-token",
         "the GitHub App's installation token",
@@ -167,6 +167,11 @@ const CHANNEL_RESERVED_AGENT_CONNECTIONS: [(&str, &str, &str); 2] = [
         "mda/linear-token",
         "the Linear app's token",
         "act in Linear as the app",
+    ),
+    (
+        "mda/slack-bot-token",
+        "the Slack app's bot token",
+        "act in Slack as the app",
     ),
 ];
 
@@ -1536,7 +1541,7 @@ build-backend = \"setuptools.build_meta\"
             "mcp".to_string(),
             serde_json::json!({
                 "userConnections": ["notion"],
-                "agentConnections": ["mda/github-token", "docs-token"],
+                "agentConnections": ["mda/github-token", "mda/slack-bot-token", "docs-token"],
             }),
         )]);
 
@@ -1566,6 +1571,8 @@ build-backend = \"setuptools.build_meta\"
         assert!(error.contains("{ type: \"agent\" }"), "{error}");
         let linear = reserved_user_connection_error("mda/linear-token").unwrap();
         assert!(linear.contains("the Linear app's token"), "{linear}");
+        let slack = reserved_user_connection_error("mda/slack-bot-token").unwrap();
+        assert!(slack.contains("the Slack app's bot token"), "{slack}");
         assert!(reserved_user_connection_error("notion").is_none());
     }
 
