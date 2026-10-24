@@ -1,7 +1,10 @@
 import json
+import shlex
+from pathlib import Path
 from typing import Any, cast
 
 import pytest
+from deepagents.backends import LocalShellBackend
 from deepagents.backends.protocol import SandboxBackendProtocol
 from langchain.agents.middleware.types import ToolCallRequest
 from langchain_core.messages import ToolMessage
@@ -128,7 +131,6 @@ def test_parse_git_push_supports_git_c_and_cd() -> None:
 @pytest.mark.parametrize(
     "options",
     [
-        "--force",
         "--force-with-lease=",
         "--force-with-lease=../feature",
         "--force-with-lease=feature:not-a-sha",
@@ -269,6 +271,9 @@ async def test_workflow_change_for_push_rejects_non_current_refspec() -> None:
         f"git -C /repo push --force-with-lease=refs/heads/feature:{'b' * 40} origin feature",
         "git -C /repo push --force-with-lease origin HEAD:refs/heads/feature",
         "git -C /repo push --force-with-lease origin refs/heads/feature:refs/heads/feature",
+        "git -C /repo push --force-with-lease --force-if-includes origin feature",
+        "git -C /repo push -f origin feature",
+        "git -C /repo push origin feature --force",
     ],
 )
 async def test_unapproved_workflow_push_blocks_and_posts_slack(
@@ -351,6 +356,9 @@ async def test_unapproved_workflow_push_blocks_and_posts_slack(
         "--force-with-lease=feature",
         "--force-with-lease=refs/heads/feature:",
         f"--force-with-lease=refs/heads/feature:{'b' * 40}",
+        "--force-with-lease --force-if-includes",
+        "-f",
+        "--force",
     ],
 )
 @pytest.mark.parametrize(
@@ -382,13 +390,22 @@ async def test_approved_workflow_push_runs_fixed_command(
 
     assert isinstance(result, ToolMessage)
     assert result.content == "pushed"
-    options = f"--set-upstream {lease} ".replace("  ", " ")
+    options = "--set-upstream "
+    if lease:
+        # The fake remote has no ``feature`` branch, so a forced push is leased to its absence.
+        options += "--force-with-lease=refs/heads/feature: "
+        if "--force-if-includes" in lease:
+            options += "--force-if-includes "
     assert pushed_command == (f"git -C /repo push {options}origin {'a' * 40}:refs/heads/feature")
 
 
 @pytest.mark.parametrize(
     "command",
-    ["git -C /repo push origin feature", "git -C /repo push --force-with-lease origin feature"],
+    [
+        "git -C /repo push origin feature",
+        "git -C /repo push --force-with-lease origin feature",
+        "git -C /repo push --force origin feature",
+    ],
 )
 async def test_non_workflow_push_runs_without_approval(
     monkeypatch: pytest.MonkeyPatch, command: str
@@ -447,10 +464,11 @@ async def test_uninspectable_lease_push_is_blocked(refspec: str, inspectable: bo
         "git -C /repo add -A && git -C /repo commit -qm 'Add CI' && "
         "git -C /repo push -u origin feature",
         "git commit -qam 'Add CI'&&git push",
+        "git commit -qam 'Add CI'&&git push --force-with-lease origin feature",
         "(cd /repo && git push)",
         "cd /repo; git push",
     ],
-    ids=["spaced", "unspaced", "subshell", "semicolon"],
+    ids=["spaced", "unspaced", "force-push", "subshell", "semicolon"],
 )
 @pytest.mark.parametrize(
     ("backend", "refused"),
@@ -488,3 +506,158 @@ async def test_chained_push_runs_only_without_workflow_changes(
     if refused:
         assert result.status == "error"
         assert json.loads(str(result.content))["error_type"] == "WorkflowPushMustStandAlone"
+
+
+@pytest.mark.parametrize(
+    "command",
+    [
+        "git -C /repo push --atomic origin feature",
+        "cd /repo && git push --force-with-lease --atomic origin feature",
+    ],
+)
+async def test_unsupported_standalone_push_is_not_reported_as_chained(command: str) -> None:
+    guard.SANDBOX_BACKENDS["thread-1"] = SandboxBackendProxy(
+        cast(SandboxBackendProtocol, _Backend()), thread_id="thread-1"
+    )
+
+    async def handler(_request: ToolCallRequest) -> ToolMessage:
+        raise AssertionError("unsupported push should not execute")
+
+    result = await guard.WorkflowPushGuardMiddleware().awrap_tool_call(
+        cast(ToolCallRequest, _Request(command)), handler
+    )
+
+    assert isinstance(result, ToolMessage)
+    assert result.status == "error"
+    assert json.loads(str(result.content))["error_type"] == "WorkflowPushUnsupportedFlags"
+
+
+async def test_rebased_force_push_previews_remote_tip_and_executes_after_approval(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    backend = LocalShellBackend(root_dir=str(repo), virtual_mode=False, inherit_env=True)
+    setup = await backend.aexecute("""
+        set -e
+        git init -q -b main
+        git config user.name Test
+        git config user.email test@example.com
+        mkdir -p .github/workflows
+        printf 'name: old\n' > .github/workflows/ci.yml
+        git add .github/workflows/ci.yml
+        git commit -qm base
+        git init -q --bare -b main ../origin.git
+        git remote add origin ../origin.git
+        git push -qu origin main
+        git remote set-head origin main
+        git checkout -qb feature
+        printf 'feature\n' > feature.txt
+        git add feature.txt
+        git commit -qm feature
+        git push -qu origin feature
+        git checkout -q main
+        printf 'name: new\n' > .github/workflows/ci.yml
+        git commit -qam workflow
+        git push -q origin main
+        git checkout -q feature
+        git rebase main
+    """)
+    assert setup.exit_code == 0, setup.output
+    guard.SANDBOX_BACKENDS["thread-1"] = SandboxBackendProxy(backend, thread_id="thread-1")
+    approved = False
+    pending: dict[str, object] = {}
+
+    async def fake_approved(thread_id: str, fingerprint: str) -> bool:
+        return approved
+
+    async def fake_pending(thread_id: str, **kwargs: object) -> tuple[dict[str, object], bool]:
+        pending.update(kwargs)
+        return {"status": "pending", "notified": True}, True
+
+    monkeypatch.setattr(guard, "workflow_push_approved", fake_approved)
+    monkeypatch.setattr(guard, "ensure_workflow_push_pending", fake_pending)
+
+    async def handler(request: ToolCallRequest) -> ToolMessage:
+        command = request.tool_call["args"]["command"]
+        assert isinstance(command, str)
+        pushed = await backend.aexecute(command)
+        assert pushed.exit_code == 0, pushed.output
+        return ToolMessage(content="pushed", tool_call_id="call-1")
+
+    request = cast(
+        ToolCallRequest,
+        _Request(f"git -C {shlex.quote(str(repo))} push --force-with-lease origin feature"),
+    )
+    middleware = guard.WorkflowPushGuardMiddleware()
+    result = await middleware.awrap_tool_call(request, handler)
+    assert isinstance(result, ToolMessage)
+    payload = json.loads(str(result.content))
+    assert payload["error_type"] == "WorkflowPushApprovalRequired"
+    remote_tip = await backend.aexecute("git rev-parse origin/feature")
+    assert payload["base_sha"] == remote_tip.output.strip()
+    assert pending["diff_stats"] == {"files": 1, "additions": 1, "deletions": 1}
+    assert "-name: old\n+name: new" in str(pending["diff_preview"])
+    approved = True
+    result = await middleware.awrap_tool_call(request, handler)
+    assert isinstance(result, ToolMessage)
+    assert result.content == "pushed"
+    remote_tip = await backend.aexecute("git rev-parse origin/feature")
+    assert remote_tip.output.strip() == payload["head_sha"]
+
+
+async def test_approved_force_push_is_leased_to_the_previewed_remote_tip(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    backend = LocalShellBackend(root_dir=str(repo), virtual_mode=False, inherit_env=True)
+    setup = await backend.aexecute("""
+        set -e
+        git init -q -b main
+        git config user.name Test
+        git config user.email test@example.com
+        mkdir -p .github/workflows
+        printf 'name: old\n' > .github/workflows/ci.yml
+        git add .github/workflows/ci.yml
+        git commit -qm base
+        git init -q --bare -b main ../origin.git
+        git remote add origin ../origin.git
+        git checkout -qb feature
+        git push -qu origin feature
+        git clone -q -b feature ../origin.git ../other
+        git -C ../other -c user.name=Other -c user.email=other@example.com \
+            commit -q --allow-empty -m 'unseen remote commit'
+        git -C ../other push -q origin feature
+        printf 'name: new\n' > .github/workflows/ci.yml
+        git commit -qam workflow
+    """)
+    assert setup.exit_code == 0, setup.output
+    guard.SANDBOX_BACKENDS["thread-1"] = SandboxBackendProxy(backend, thread_id="thread-1")
+
+    async def fake_approved(thread_id: str, fingerprint: str) -> bool:
+        return True
+
+    monkeypatch.setattr(guard, "workflow_push_approved", fake_approved)
+
+    async def handler(request: ToolCallRequest) -> ToolMessage:
+        command = request.tool_call["args"]["command"]
+        assert isinstance(command, str)
+        pushed = await backend.aexecute(command)
+        return ToolMessage(content=str(pushed.exit_code), tool_call_id="call-1")
+
+    stale_tip = (await backend.aexecute("git rev-parse origin/feature")).output.strip()
+    remote_tip = (await backend.aexecute("git ls-remote origin refs/heads/feature")).output
+    assert stale_tip not in remote_tip
+    result = await guard.WorkflowPushGuardMiddleware().awrap_tool_call(
+        cast(
+            ToolCallRequest,
+            _Request(f"git -C {shlex.quote(str(repo))} push --force origin feature"),
+        ),
+        handler,
+    )
+
+    assert isinstance(result, ToolMessage)
+    assert result.content != "0"
+    after = (await backend.aexecute("git ls-remote origin refs/heads/feature")).output
+    assert after == remote_tip
