@@ -133,11 +133,13 @@ function useChannelItems(
     setQuery,
     refresh: directory.refresh,
     isRefreshing: directory.isLoading || directory.isRefreshing,
-    emptyMessage: directory.isLoading
-      ? "Loading channels…"
-      : directory.isError
-        ? "Could not load channels from Slack. Paste a channel ID."
-        : "No channels match. Paste a channel ID to add one directly.",
+    emptyMessage:
+      directory.isLoading ||
+      (directory.isRefreshing && !directory.data?.channels.length)
+        ? "Loading channels…"
+        : directory.isError
+          ? "Could not load channels from Slack. Paste a channel ID."
+          : "No channels match. Paste a channel ID to add one directly.",
   }
 }
 

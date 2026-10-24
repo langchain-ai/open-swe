@@ -2,6 +2,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { toast } from "sonner"
 
 import { api, type SlackChannelDirectory } from "@/lib/api"
+import { invalidationTopic } from "@/lib/invalidations/topics"
 
 export const slackChannelDirectoryKey = ["slackChannels"] as const
 
@@ -10,11 +11,14 @@ export const SLACK_CHANNEL_ID_PATTERN = /^[CG][A-Z0-9]{8,}$/
 export const slackChannelHref = (id: string): string =>
   `https://slack.com/app_redirect?channel=${encodeURIComponent(id)}`
 
-/** The channels the bot can see; a directory to browse, refreshed on its own. */
+/**
+ * The channels the bot can see, as the backend last walked them from Slack.
+ * A refresh queues a walk; the directory reloads when the walk's invalidation arrives.
+ */
 export function useSlackChannelDirectory(enabled: boolean) {
   const queryClient = useQueryClient()
   const refresh = useMutation({
-    mutationFn: () => api.listSlackChannels(true),
+    mutationFn: () => api.refreshSlackChannels(),
     onSuccess: (data) =>
       queryClient.setQueryData(slackChannelDirectoryKey, data),
     onError: () =>
@@ -25,6 +29,7 @@ export function useSlackChannelDirectory(enabled: boolean) {
     queryFn: () => api.listSlackChannels(),
     enabled,
     staleTime: 60_000,
+    meta: { invalidatedBy: [invalidationTopic("slack-channels")] },
   })
   return {
     data: directory.data,
@@ -32,7 +37,7 @@ export function useSlackChannelDirectory(enabled: boolean) {
     isLoading: directory.isLoading,
     isError: directory.isError,
     refresh: refresh.mutate,
-    isRefreshing: refresh.isPending,
+    isRefreshing: refresh.isPending || directory.data?.refreshing === true,
   }
 }
 

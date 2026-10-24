@@ -87,7 +87,7 @@ describe("OwnershipPicker", () => {
       num_members: 10,
     }))
     const directory = {
-      data: { channels, partial: false },
+      data: { channels, refreshing: false },
       isLoading: false,
       isError: false,
       error: null,

@@ -194,8 +194,8 @@ export function SlackChannelPicker({
           : null
       }
       notice={
-        directory.data?.partial
-          ? "Slack is rate limiting the full directory, so only channels the bot is in are listed."
+        directory.data?.refreshing
+          ? "Refreshing channels from Slack. New ones appear when it finishes."
           : "Missing a channel? Invite Open SWE in Slack, then refresh this list."
       }
       disabled={disabled}

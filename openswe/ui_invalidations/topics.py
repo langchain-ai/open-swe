@@ -111,6 +111,9 @@ class Topic(BaseTopic):
     ANNOUNCEMENTS: ClassVar[Topic]
     """Admin announcements and their delivery progress; admins only."""
 
+    SLACK_CHANNELS: ClassVar[Topic]
+    """The Slack channel directory, after each walk over Slack."""
+
     async def invalidate(self, conn: Connection | None = None) -> None:
         """Mark this topic stale.
 
@@ -226,3 +229,4 @@ Topic.THREAD_BACKGROUND_WORK = KeyedTopic(
     "thread-background-work", authorize_keys=_readable_threads
 )
 Topic.ANNOUNCEMENTS = AdminTopic("announcements")
+Topic.SLACK_CHANNELS = Topic("slack-channels")
