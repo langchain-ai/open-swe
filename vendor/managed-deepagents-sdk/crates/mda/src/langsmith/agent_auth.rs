@@ -837,22 +837,9 @@ mod tests {
 
     use super::*;
     use crate::langsmith::test_support::serve_once;
-    use crate::langsmith::{Credential, REQUEST_TIMEOUT};
+    use crate::langsmith::ApiKey;
 
     const CONN: &str = "77777777-7777-7777-7777-777777777777";
-
-    fn client_for(platform_api_url: String) -> Client {
-        Client {
-            http: crate::http::client_builder()
-                .timeout(REQUEST_TIMEOUT)
-                .build()
-                .unwrap(),
-            credential: Credential::ApiKey("key".into()),
-            tenant_id: Some("tenant".into()),
-            host_backend_url: "http://unused.invalid".into(),
-            platform_api_url: Some(platform_api_url),
-        }
-    }
 
     fn self_hosted_client_for(platform_api_url: String, base_path: &str) -> Client {
         let base_path = base_path.trim_matches('/');
@@ -867,29 +854,16 @@ mod tests {
             format!("{platform_api_url}/{base_path}")
         };
         Client {
-            http: crate::http::client_builder()
-                .timeout(REQUEST_TIMEOUT)
-                .build()
-                .unwrap(),
-            credential: Credential::ApiKey("key".into()),
-            tenant_id: Some("tenant".into()),
             host_backend_url,
-            platform_api_url: Some(platform_api_url),
+            ..Client::for_test(&platform_api_url)
         }
     }
 
     fn developer_client_for(base_url: String) -> Client {
         Client {
-            http: crate::http::client_builder()
-                .timeout(REQUEST_TIMEOUT)
-                .build()
-                .unwrap(),
-            credential: Credential::ApiKey("personal-key".into()),
+            api_key: ApiKey::new("personal-key"),
             tenant_id: Some("workspace-1".into()),
-            // Auth introspection is a platform-API route; a request to the host
-            // backend should fail the test rather than reach the stub server.
-            host_backend_url: "http://unused.invalid".into(),
-            platform_api_url: Some(base_url),
+            ..Client::for_test(&base_url)
         }
     }
 
@@ -969,7 +943,7 @@ mod tests {
 
     #[test]
     fn saas_agent_auth_keeps_the_direct_platform_route() {
-        let client = client_for("https://api.smith.langchain.com".into());
+        let client = Client::for_test("https://api.smith.langchain.com");
 
         assert_eq!(
             client.oauth_redirect_uri().unwrap(),
@@ -1096,7 +1070,7 @@ mod tests {
             "201 Created",
             workspace_connection_json("my-tavily-key").to_string(),
         );
-        let client = client_for(url);
+        let client = Client::for_test(&url);
 
         let created = client
             .create_workspace_connection(
@@ -1132,7 +1106,7 @@ mod tests {
 
     #[test]
     fn create_agent_connection_requires_a_deployment_id() {
-        let client = client_for("http://unused.invalid".into());
+        let client = Client::for_test("http://unused.invalid");
 
         let error = client
             .create_workspace_connection(
@@ -1157,7 +1131,7 @@ mod tests {
             "201 Created",
             workspace_connection_json("tavily-user").to_string(),
         );
-        let client = client_for(url);
+        let client = Client::for_test(&url);
 
         let created = client
             .create_workspace_connection("tavily-user", ConnectionOwnerPolicy::User, None, None)
@@ -1181,7 +1155,7 @@ mod tests {
             "200 OK",
             json!({ "items": [], "next_cursor": null }).to_string(),
         );
-        let client = client_for(url);
+        let client = Client::for_test(&url);
 
         let found = client.list_workspace_connections().unwrap();
 
@@ -1199,7 +1173,7 @@ mod tests {
         let mut body = workspace_connection_json("my-tavily-key");
         body["credential"]["credential_id"] = json!(CONN);
         let (url, rx) = serve_once("200 OK", body.to_string());
-        let client = client_for(url);
+        let client = Client::for_test(&url);
 
         let owned = client
             .connection_has_agent_credential(CONN, "11111111-1111-4111-8111-111111111111")
@@ -1252,7 +1226,9 @@ mod tests {
             ("200 OK", metadata("active")),
         ]);
         assert_eq!(
-            client_for(url).agent_oauth_grant(CONN, AGENT).unwrap(),
+            Client::for_test(&url)
+                .agent_oauth_grant(CONN, AGENT)
+                .unwrap(),
             AgentGrant::Active
         );
         let owner = rx.recv().unwrap();
@@ -1269,7 +1245,9 @@ mod tests {
             ("200 OK", metadata("authorization_required")),
         ]);
         assert_eq!(
-            client_for(url).agent_oauth_grant(CONN, AGENT).unwrap(),
+            Client::for_test(&url)
+                .agent_oauth_grant(CONN, AGENT)
+                .unwrap(),
             AgentGrant::AuthorizationRequired
         );
         let (url, _rx) = serve_pages(vec![
@@ -1277,7 +1255,9 @@ mod tests {
             ("200 OK", metadata("revocation_pending")),
         ]);
         assert_eq!(
-            client_for(url).agent_oauth_grant(CONN, AGENT).unwrap(),
+            Client::for_test(&url)
+                .agent_oauth_grant(CONN, AGENT)
+                .unwrap(),
             AgentGrant::Revoked
         );
         // A status this CLI does not know is named, not taken as active.
@@ -1286,7 +1266,9 @@ mod tests {
             ("200 OK", metadata("suspended")),
         ]);
         assert_eq!(
-            client_for(url).agent_oauth_grant(CONN, AGENT).unwrap(),
+            Client::for_test(&url)
+                .agent_oauth_grant(CONN, AGENT)
+                .unwrap(),
             AgentGrant::Unknown("suspended".to_string())
         );
         // No credential for the agent at all.
@@ -1295,7 +1277,9 @@ mod tests {
             workspace_connection_json("mda/linear-app/x").to_string(),
         );
         assert_eq!(
-            client_for(url).agent_oauth_grant(CONN, AGENT).unwrap(),
+            Client::for_test(&url)
+                .agent_oauth_grant(CONN, AGENT)
+                .unwrap(),
             AgentGrant::Missing
         );
     }
@@ -1311,7 +1295,7 @@ mod tests {
             .to_string(),
         );
         assert_eq!(
-            client_for(url)
+            Client::for_test(&url)
                 .published_oauth_redirect_uri()
                 .unwrap()
                 .as_deref(),
@@ -1325,7 +1309,9 @@ mod tests {
         // Not published, e.g. for an http:// callback.
         let (url, _rx) = serve_once("404 Not Found", "{}".to_string());
         assert_eq!(
-            client_for(url).published_oauth_redirect_uri().unwrap(),
+            Client::for_test(&url)
+                .published_oauth_redirect_uri()
+                .unwrap(),
             None
         );
     }
@@ -1336,7 +1322,7 @@ mod tests {
             "200 OK",
             workspace_connection_json("another-projects-key").to_string(),
         );
-        let client = client_for(url);
+        let client = Client::for_test(&url);
 
         assert!(!client
             .connection_has_agent_credential(CONN, "11111111-1111-4111-8111-111111111111")
@@ -1349,7 +1335,7 @@ mod tests {
             "404 Not Found",
             json!({ "detail": "not found" }).to_string(),
         );
-        let client = client_for(url);
+        let client = Client::for_test(&url);
 
         assert!(!client
             .connection_has_agent_credential(CONN, "11111111-1111-4111-8111-111111111111")
@@ -1370,7 +1356,7 @@ mod tests {
             ("200 OK", page_one.to_string()),
             ("200 OK", page_two.to_string()),
         ]);
-        let client = client_for(url);
+        let client = Client::for_test(&url);
 
         let found = client.list_workspace_connections().unwrap();
 
@@ -1403,7 +1389,9 @@ mod tests {
             .to_string(),
         );
 
-        let ids = client_for(url).github_app_provider_ids("42").unwrap();
+        let ids = Client::for_test(&url)
+            .github_app_provider_ids("42")
+            .unwrap();
 
         assert_eq!(ids, ["p-1".to_string()].into_iter().collect());
     }
@@ -1418,7 +1406,7 @@ mod tests {
             )
             .to_string(),
         );
-        client_for(url)
+        Client::for_test(&url)
             .create_oauth_workspace_connection(CreateOAuthConnection {
                 slug: "mda/linear-app/dep-1",
                 owner_policy: ConnectionOwnerPolicy::Agent,
@@ -1455,7 +1443,7 @@ mod tests {
             "201 Created",
             oauth_connection_json("gtm-readonly", provider_id).to_string(),
         );
-        let client = client_for(url);
+        let client = Client::for_test(&url);
         let params: Map<String, Value> =
             serde_json::from_value(json!({ "access_type": "offline" })).unwrap();
         let headers: Map<String, Value> =
@@ -1525,7 +1513,7 @@ mod tests {
             "201 Created",
             oauth_connection_json("spotify", provider_id).to_string(),
         );
-        let client = client_for(url);
+        let client = Client::for_test(&url);
         let token_params: Map<String, Value> =
             serde_json::from_value(json!({ "audience": "music-api" })).unwrap();
         let headers: Map<String, Value> =
@@ -1610,7 +1598,7 @@ mod tests {
             "400 Bad Request",
             "{\"detail\": \"invalid header value: Bearer pk_live_secret\"}".to_string(),
         );
-        let client = client_for(url);
+        let client = Client::for_test(&url);
         let headers: Map<String, Value> =
             serde_json::from_value(json!({ "Authorization": "Bearer pk_live_secret" })).unwrap();
 
@@ -1647,7 +1635,7 @@ mod tests {
             "400 Bad Request",
             "{\"detail\": \"invalid token: sk_live_partial\"}".to_string(),
         );
-        let client = client_for(url);
+        let client = Client::for_test(&url);
         let headers: Map<String, Value> =
             serde_json::from_value(json!({ "Authorization": "Bearer sk_live_partial" })).unwrap();
 
@@ -1681,7 +1669,7 @@ mod tests {
     #[test]
     fn create_oauth_redacts_header_values_when_the_body_is_echoed_raw() {
         let (url, _rx) = serve_once("400 Bad Request", "Bearer sk_live_raw not even json".into());
-        let client = client_for(url);
+        let client = Client::for_test(&url);
         let headers: Map<String, Value> =
             serde_json::from_value(json!({ "X-Api-Key": "sk_live_raw" })).unwrap();
 
@@ -1804,7 +1792,7 @@ mod tests {
             })
             .to_string(),
         );
-        let client = client_for(url);
+        let client = Client::for_test(&url);
 
         let session = client
             .create_agent_oauth_authorization_session(CONN, "agent-id")
@@ -1836,7 +1824,7 @@ mod tests {
             })
             .to_string(),
         );
-        let client = client_for(url);
+        let client = Client::for_test(&url);
 
         let session = client
             .create_agent_oauth_authorization_session(CONN, "agent-id")
@@ -1856,7 +1844,7 @@ mod tests {
             })
             .to_string(),
         );
-        let client = client_for(url);
+        let client = Client::for_test(&url);
 
         let error = client
             .create_agent_oauth_authorization_session(CONN, "agent-id")
@@ -1877,7 +1865,7 @@ mod tests {
             })
             .to_string(),
         );
-        let client = client_for(url);
+        let client = Client::for_test(&url);
 
         let session = client
             .get_oauth_authorization_session("88888888-8888-8888-8888-888888888888", 25)
@@ -1895,7 +1883,7 @@ mod tests {
 
     #[test]
     fn create_oauth_without_client_id_fails_closed() {
-        let client = client_for("http://unused.invalid".into());
+        let client = Client::for_test("http://unused.invalid");
 
         let error = client
             .create_oauth_workspace_connection(CreateOAuthConnection {
@@ -1930,7 +1918,7 @@ mod tests {
 
     #[test]
     fn registering_without_known_endpoints_fails_closed() {
-        let client = client_for("http://unused.invalid".into());
+        let client = Client::for_test("http://unused.invalid");
 
         let error = client
             .create_oauth_workspace_connection(CreateOAuthConnection {
@@ -1966,7 +1954,7 @@ mod tests {
             "201 Created",
             oauth_connection_json("notion-mcp", provider_id).to_string(),
         );
-        let client = client_for(url);
+        let client = Client::for_test(&url);
 
         let created = client
             .create_oauth_workspace_connection(CreateOAuthConnection {
@@ -2028,7 +2016,7 @@ mod tests {
                 .to_string(),
             ),
         ]);
-        let client = client_for(url);
+        let client = Client::for_test(&url);
 
         let found = client.list_workspace_connections().unwrap();
 
@@ -2061,7 +2049,7 @@ mod tests {
         })
         .to_string();
         let (url, _rx) = serve_once("422 Unprocessable Entity", body);
-        let client = client_for(url);
+        let client = Client::for_test(&url);
 
         let error = client
             .create_workspace_connection(
@@ -2090,7 +2078,7 @@ mod tests {
         let secret = format!("{}-{}", "oauth-fixture", "value");
         let body = json!({ "detail": [{ "input": secret }] }).to_string();
         let (url, _rx) = serve_once("422 Unprocessable Entity", body);
-        let client = client_for(url);
+        let client = Client::for_test(&url);
 
         let error = client
             .create_oauth_workspace_connection(CreateOAuthConnection {

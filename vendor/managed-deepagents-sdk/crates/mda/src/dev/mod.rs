@@ -52,16 +52,16 @@ use crate::compile::{self, CompileSummary, IdentitySummary, MemoryDecision};
 use crate::dependencies;
 use crate::deploy::bake::bake_recipe;
 use crate::deploy::helpers::{
-    resolve_langsmith_api_bases, resolve_platform_api_url, sandbox_api_endpoint,
-    LANGSMITH_ENDPOINT_ENV, MDA_ASSISTANT_ID_ENV, MDA_DEPLOYMENT_NAME_ENV, MDA_PUBLIC_API_URL_ENV,
-    MDA_SANDBOX_API_ENDPOINT_ENV, MDA_SANDBOX_RECIPE_SNAPSHOT_ENV, RESERVED_ENV_VARS,
-    WORKSPACE_ID_ENV,
+    sandbox_api_endpoint, LANGSMITH_ENDPOINT_ENV, MDA_ASSISTANT_ID_ENV, MDA_DEPLOYMENT_NAME_ENV,
+    MDA_PUBLIC_API_URL_ENV, MDA_SANDBOX_API_ENDPOINT_ENV, MDA_SANDBOX_RECIPE_SNAPSHOT_ENV,
+    RESERVED_ENV_VARS, WORKSPACE_ID_ENV,
 };
+use crate::deploy::langsmith_context::{LangSmithContext, LangSmithEndpoints};
 use crate::deploy::{self, resolve_https_public_api_url, PublicApiUrl};
 use crate::error::{categorized, ErrorCategory};
 use crate::install::Installation;
 use crate::interrupt::Interrupt;
-use crate::langsmith::{Credential, API_KEY_ENV};
+use crate::langsmith::{lookup_env_file, lookup_env_or_process, ApiKey, API_KEY_ENV};
 use crate::project::{Language, Project};
 use crate::toolchain;
 use schedules::ScheduleSync;
@@ -1477,12 +1477,7 @@ fn stage_dev_env_file(
     let staged = crate::deploy::env_file::parse_env_file(&dst);
     let source_selects_tracing_project = [LANGSMITH_PROJECT_ENV, LANGCHAIN_PROJECT_ENV]
         .into_iter()
-        .any(|key| {
-            incoming
-                .get(key)
-                .map(|value| value.trim())
-                .is_some_and(|value| !value.is_empty())
-        });
+        .any(|key| lookup_env_file(key, &incoming).is_some());
     let preserve_generated_tracing_project = !source_selects_tracing_project
         && staged
             .get(LANGSMITH_PROJECT_ENV)
@@ -1613,10 +1608,17 @@ fn ensure_dev_langsmith_env(
 /// `.mda/dev/.env` or inherited from the `mda` process environment.
 fn dev_langsmith_api_key_available(out_dir: &Path) -> bool {
     let staged = crate::deploy::env_file::parse_env_file(&out_dir.join(".env"));
-    staged
-        .get(API_KEY_ENV)
-        .is_some_and(|value| !value.trim().is_empty())
+    lookup_env_file(API_KEY_ENV, &staged).is_some()
         || std::env::var(API_KEY_ENV).is_ok_and(|value| !value.trim().is_empty())
+}
+
+/// `LANGSMITH_API_KEY` from the staged `.env`, then the process env.
+///
+/// The staged key wins (unlike [`crate::langsmith::lookup_env`]): it is the one
+/// `ensure_project_langsmith_api_key` resolved for this run.
+fn staged_api_key(staged: &std::collections::BTreeMap<String, String>) -> Option<String> {
+    lookup_env_file(API_KEY_ENV, staged)
+        .or_else(|| lookup_env_or_process(API_KEY_ENV, &Default::default()))
 }
 
 /// Watch rebuilds cannot prompt for LangSmith login, so a project that newly
@@ -1639,53 +1641,32 @@ fn ensure_dev_workspace_connections(
     out_dir: &Path,
     connector_requirements: &compile::ConnectorRequirements,
 ) -> Result<()> {
-    use crate::deploy::helpers::{REMOVED_WORKSPACE_ID_ENVS, WORKSPACE_ID_ENV};
-    use crate::langsmith::resolve_preferred_env;
-
     if compile::referenced_connection_slugs(connector_requirements).is_empty() {
         return Ok(());
     }
 
     let env = crate::deploy::env_file::parse_env_file(&out_dir.join(".env"));
-    let api_key = env
-        .get(API_KEY_ENV)
-        .map(|value| value.trim())
-        .filter(|value| !value.is_empty())
-        .map(str::to_string)
-        .or_else(|| {
-            std::env::var(API_KEY_ENV)
-                .ok()
-                .map(|value| value.trim().to_string())
-                .filter(|value| !value.is_empty())
-        });
-    let Some(api_key) = api_key else {
-        bail!(
-            "This project declares connector connections, so `mda dev` needs {API_KEY_ENV} to \
-             verify they exist in the workspace. Add the key to .env (or export it), then run \
-             `mda dev` again."
-        );
-    };
-
-    let (host_url, _) = resolve_langsmith_api_bases(&env);
-    let platform = resolve_platform_api_url(&host_url, &env);
-    let workspace_id = resolve_preferred_env(
-        WORKSPACE_ID_ENV,
-        REMOVED_WORKSPACE_ID_ENVS,
-        None,
+    let ctx = LangSmithContext::resolve(
         &env,
-        |key| std::env::var(key).ok(),
+        None,
+        None,
         ". Set LANGSMITH_WORKSPACE_ID in .env (or export it)",
+        |_| {
+            let Some(api_key) = staged_api_key(&env) else {
+                bail!(
+                    "This project declares connector connections, so `mda dev` needs \
+                     {API_KEY_ENV} to verify they exist in the workspace. Add the key to .env \
+                     (or export it), then run `mda dev` again."
+                );
+            };
+            Ok(ApiKey::new(api_key))
+        },
     )?;
-    let client = crate::langsmith::Client::with_credential_and_platform(
-        &host_url,
-        Some(platform.as_str()),
-        Credential::ApiKey(api_key),
-        workspace_id.clone(),
-    )?;
+    let client = ctx.client()?;
 
     deploy::ensure_workspace_connections(
         &client,
-        workspace_id.as_deref(),
+        ctx.workspace_id.as_deref(),
         connector_requirements,
         &[],
     )
@@ -1708,26 +1689,15 @@ fn ensure_dev_developer_principal(out_dir: &Path, needed: bool) -> Result<()> {
 
     let staged = out_dir.join(".env");
     let env = crate::deploy::env_file::parse_env_file(&staged);
-    let api_key = env
-        .get(API_KEY_ENV)
-        .map(|value| value.trim())
-        .filter(|value| !value.is_empty())
-        .context(
-            "user-owned connections, managed tools, and user memory require LANGSMITH_API_KEY under `mda dev`",
-        )?;
-    let (host_url, _) = resolve_langsmith_api_bases(&env);
-    let platform = resolve_platform_api_url(&host_url, &env);
-    let workspace_id = env
-        .get(WORKSPACE_ID_ENV)
-        .map(|value| value.trim())
-        .filter(|value| !value.is_empty())
-        .map(str::to_string);
-    let client = crate::langsmith::Client::with_credential_and_platform(
-        &host_url,
-        Some(platform.as_str()),
-        Credential::ApiKey(api_key.to_string()),
-        workspace_id,
+    let api_key = lookup_env_file(API_KEY_ENV, &env).context(
+        "user-owned connections, managed tools, and user memory require LANGSMITH_API_KEY under `mda dev`",
     )?;
+    let client = LangSmithEndpoints::resolve(&env, None)
+        .with_auth(
+            ApiKey::new(api_key),
+            lookup_env_file(WORKSPACE_ID_ENV, &env),
+        )
+        .client()?;
     let developer = client.resolve_developer_principal()?;
     crate::deploy::env_file::set_env_key(&staged, WORKSPACE_ID_ENV, &developer.workspace_id)?;
     crate::deploy::env_file::set_env_key(
@@ -1743,11 +1713,7 @@ fn ensure_dev_tracing_project(out_dir: &Path, assistant_id: &str) -> Result<()> 
     let env = crate::deploy::env_file::parse_env_file(&staged);
     let project_is_set = [LANGSMITH_PROJECT_ENV, LANGCHAIN_PROJECT_ENV]
         .into_iter()
-        .any(|key| {
-            env.get(key)
-                .map(|value| value.trim())
-                .is_some_and(|value| !value.is_empty())
-        });
+        .any(|key| lookup_env_file(key, &env).is_some());
     if project_is_set {
         return Ok(());
     }
@@ -1773,7 +1739,7 @@ fn apply_staged_langsmith_env(server: &mut Command, out_dir: &Path) {
         if process_set && key != &MDA_AGENT_AUTH_PRINCIPAL_ID_ENV {
             continue;
         }
-        if let Some(value) = staged.get(*key).map(|v| v.trim()).filter(|v| !v.is_empty()) {
+        if let Some(value) = lookup_env_file(key, &staged) {
             server.env(*key, value);
         }
     }
@@ -1788,11 +1754,7 @@ fn apply_staged_public_api_url(server: &mut Command, out_dir: &Path) {
         return;
     }
     let staged = crate::deploy::env_file::parse_env_file(&out_dir.join(".env"));
-    if let Some(value) = staged
-        .get(MDA_PUBLIC_API_URL_ENV)
-        .map(|v| v.trim())
-        .filter(|v| !v.is_empty())
-    {
+    if let Some(value) = lookup_env_file(MDA_PUBLIC_API_URL_ENV, &staged) {
         server.env(MDA_PUBLIC_API_URL_ENV, value);
     }
 }
@@ -1868,10 +1830,7 @@ fn format_dev_http_origin(host: &str, port: u16) -> String {
 fn ensure_dev_public_api_url(out_dir: &Path, opts: &DevOptions) -> Result<bool> {
     let staged = out_dir.join(".env");
     let env = crate::deploy::env_file::parse_env_file(&staged);
-    let present = env
-        .get(MDA_PUBLIC_API_URL_ENV)
-        .map(|value| value.trim())
-        .is_some_and(|value| !value.is_empty())
+    let present = lookup_env_file(MDA_PUBLIC_API_URL_ENV, &env).is_some()
         || std::env::var(MDA_PUBLIC_API_URL_ENV)
             .ok()
             .is_some_and(|value| !value.trim().is_empty());
@@ -1911,10 +1870,9 @@ fn ensure_dev_sandbox_recipe(
     }
 
     let mut env = crate::deploy::env_file::parse_env_file(&staged);
-    let (host_url, _) = resolve_langsmith_api_bases(&env);
-    let platform = resolve_platform_api_url(&host_url, &env);
-    let sandbox_endpoint =
-        sandbox_api_endpoint(&platform).context("resolved LangSmith platform API URL is empty")?;
+    let endpoints = LangSmithEndpoints::resolve(&env, None);
+    let sandbox_endpoint = sandbox_api_endpoint(&endpoints.platform_api_url)
+        .context("resolved LangSmith platform API URL is empty")?;
     crate::deploy::env_file::set_env_key(&staged, MDA_SANDBOX_API_ENDPOINT_ENV, &sandbox_endpoint)?;
 
     let Some(spec) = spec else {
@@ -1922,17 +1880,7 @@ fn ensure_dev_sandbox_recipe(
         return Ok(());
     };
 
-    let mut api_key = env
-        .get(API_KEY_ENV)
-        .map(|v| v.trim())
-        .filter(|v| !v.is_empty())
-        .map(str::to_string)
-        .or_else(|| {
-            std::env::var(API_KEY_ENV)
-                .ok()
-                .map(|v| v.trim().to_string())
-                .filter(|v| !v.is_empty())
-        });
+    let mut api_key = staged_api_key(&env);
     if api_key.is_none() {
         // Recipe bake needs a key; offer the same login path as deploy before failing.
         deploy::ensure_project_langsmith_api_key(
@@ -1941,17 +1889,7 @@ fn ensure_dev_sandbox_recipe(
             dev_langsmith_login_is_interactive(true, prompt),
         )?;
         env = crate::deploy::env_file::parse_env_file(&staged);
-        api_key = env
-            .get(API_KEY_ENV)
-            .map(|v| v.trim())
-            .filter(|v| !v.is_empty())
-            .map(str::to_string)
-            .or_else(|| {
-                std::env::var(API_KEY_ENV)
-                    .ok()
-                    .map(|v| v.trim().to_string())
-                    .filter(|v| !v.is_empty())
-            });
+        api_key = staged_api_key(&env);
     }
     let Some(api_key) = api_key else {
         bail!(
@@ -1961,17 +1899,12 @@ fn ensure_dev_sandbox_recipe(
     };
 
     let deployment = dev_deployment_name(&api_key, project, assistant_id);
-    let workspace_id = env
-        .get("LANGSMITH_WORKSPACE_ID")
-        .map(|v| v.trim())
-        .filter(|v| !v.is_empty())
-        .map(str::to_string);
-    let client = crate::langsmith::Client::with_credential_and_platform(
-        &host_url,
-        Some(platform.as_str()),
-        Credential::ApiKey(api_key),
-        workspace_id,
-    )?;
+    let client = endpoints
+        .with_auth(
+            ApiKey::new(api_key),
+            lookup_env_file(WORKSPACE_ID_ENV, &env),
+        )
+        .client()?;
 
     let bake_env: std::collections::BTreeMap<String, String> = env
         .iter()
@@ -2078,10 +2011,7 @@ fn random_local_dev_secret() -> String {
 fn ensure_dev_handoff_secret(out_dir: &Path) -> Result<()> {
     let staged = out_dir.join(".env");
     let env = crate::deploy::env_file::parse_env_file(&staged);
-    let present = env
-        .get(crate::deploy::MDA_HANDOFF_SECRET_ENV)
-        .map(|value| value.trim())
-        .is_some_and(|value| !value.is_empty());
+    let present = lookup_env_file(crate::deploy::MDA_HANDOFF_SECRET_ENV, &env).is_some();
     if present {
         return Ok(());
     }

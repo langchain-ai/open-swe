@@ -146,7 +146,6 @@ impl Client {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::langsmith::{Credential, REQUEST_TIMEOUT};
     use std::io::{Read, Write};
     use std::net::TcpListener;
     use std::sync::mpsc::{self, Receiver};
@@ -174,14 +173,8 @@ mod tests {
 
     fn client_for_host(host_backend_url: String) -> Client {
         Client {
-            http: crate::http::client_builder()
-                .timeout(REQUEST_TIMEOUT)
-                .build()
-                .unwrap(),
-            credential: Credential::ApiKey("key".into()),
-            tenant_id: Some("tenant".into()),
             host_backend_url,
-            platform_api_url: None,
+            ..Client::for_test("http://unused.invalid")
         }
     }
 

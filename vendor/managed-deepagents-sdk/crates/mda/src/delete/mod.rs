@@ -42,19 +42,16 @@ use crate::command::CommandCompletion;
 use crate::deploy::channel_setup::{self, ChannelTeardown};
 use crate::deploy::helpers::{
     bake_snapshot_list_prefix, deployment_runtime_url, is_deployment_bake_snapshot,
-    is_deployment_sandbox, resolve_context_hub_base_url, resolve_langsmith_api_bases,
-    resolve_platform_api_url, sandbox_name_prefixes, sandbox_registry_name,
-    REMOVED_WORKSPACE_ID_ENVS, WORKSPACE_ID_ENV,
+    is_deployment_sandbox, sandbox_name_prefixes, sandbox_registry_name,
 };
+use crate::deploy::langsmith_context::{LangSmithContext, WORKSPACE_FLAG_HINT};
 use crate::deploy::{
     agent_target, delete_managed_crons, ensure_project, env_file, find_target_deployment,
     resolve_api_key, step,
 };
 use crate::error::{categorized, category_of, is_cancellation, ErrorCategory};
 use crate::install::Installation;
-use crate::langsmith::{
-    self, resolve_preferred_env, AgentEnvironment, ContextHubClient, DeploymentAgent,
-};
+use crate::langsmith::{self, AgentEnvironment, ContextHubClient, DeploymentAgent};
 use crate::naming::normalize_name;
 use crate::project;
 
@@ -178,22 +175,12 @@ fn run_session(
 ) -> Result<CommandCompletion> {
     let env_path = root.join(".env");
     let env_vars = env_file::parse_env_file(&env_path);
-    let (default_host, _) = resolve_langsmith_api_bases(&env_vars);
-    let host_url = opts
-        .host_url
-        .as_deref()
-        .map(str::trim)
-        .filter(|value| !value.is_empty())
-        .unwrap_or(default_host.as_str());
-    let platform_api_url = resolve_platform_api_url(host_url, &env_vars);
-    let credential = resolve_api_key(&env_vars, &env_path, &platform_api_url)?;
-    let workspace_id = resolve_preferred_env(
-        WORKSPACE_ID_ENV,
-        REMOVED_WORKSPACE_ID_ENVS,
-        opts.workspace_id.as_deref(),
+    let ctx = LangSmithContext::resolve(
         &env_vars,
-        |key| std::env::var(key).ok(),
-        " or pass --workspace-id instead",
+        opts.host_url.as_deref(),
+        opts.workspace_id.as_deref(),
+        WORKSPACE_FLAG_HINT,
+        |platform_api_url| resolve_api_key(&env_vars, &env_path, platform_api_url),
     )?;
 
     let base_name = match &opts.name {
@@ -202,18 +189,8 @@ fn run_session(
     };
     let (name, deployment_agent) = agent_target(base_name, opts.agent_environment)?;
 
-    let client = langsmith::Client::with_credential_and_platform(
-        host_url,
-        Some(platform_api_url.as_str()),
-        credential.clone(),
-        workspace_id.clone(),
-    )?;
-    let context_client = ContextHubClient::with_credential_and_host(
-        &resolve_context_hub_base_url(host_url, &platform_api_url),
-        host_url,
-        credential,
-        workspace_id,
-    )?;
+    let client = ctx.client()?;
+    let context_client = ctx.context_hub_client()?;
 
     let mut plan = resolve_plan(&client, &context_client, &name, deployment_agent.as_ref())?;
     if let Some(deployment_id) = plan.deployment_id.clone() {
