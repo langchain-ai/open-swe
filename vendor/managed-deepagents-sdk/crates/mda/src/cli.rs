@@ -1,32 +1,29 @@
-//! `mda` — the Managed Deep Agents CLI.
-//!
-//! Compiles a code-first Deep Agent repository into a managed LangGraph app
-//! that can be deployed to LangSmith.
+//! Command-line parsing and dispatch for the `mda` binary.
 
-use std::io::{IsTerminal, Read};
+use std::io::Read;
 use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 
-use anyhow::{Context, Result};
-use clap::{Arg, ArgAction, Args, CommandFactory, FromArgMatches, Parser, Subcommand};
-use mda::channel;
-use mda::chat::{self, ChatOptions};
-use mda::command::CommandCompletion;
-use mda::connection::{self, ConnectionTarget};
-use mda::delete::{self, DeleteOptions};
-use mda::deploy::{self, AgentEnvironment, ContextStrategy, DeployOptions, DeploymentType};
-use mda::dev::{self, DevOptions};
-use mda::error::{categorized, category_of, is_cancellation, ErrorCategory};
-use mda::eval::{self as eval_cmd, CompileOptions, InitOptions};
-use mda::install::{Installation, INSTALL_CHANNEL_ENV};
-use mda::langsmith::{self, LogLevel};
-use mda::logs::{self, LogsOptions};
-use mda::secret_input::ValueSource;
-use mda::telemetry::{
+use crate::channel;
+use crate::chat::{self, ChatOptions};
+use crate::command::CommandCompletion;
+use crate::connection::{self, ConnectionTarget};
+use crate::delete::{self, DeleteOptions};
+use crate::deploy::{self, AgentEnvironment, ContextStrategy, DeployOptions, DeploymentType};
+use crate::dev::{self, DevOptions};
+use crate::error::{categorized, category_of, is_cancellation, ErrorCategory};
+use crate::eval::{self as eval_cmd, CompileOptions, InitOptions};
+use crate::install::{Installation, INSTALL_CHANNEL_ENV};
+use crate::langsmith::{self, LogLevel};
+use crate::logs::{self, LogsOptions};
+use crate::secret_input::ValueSource;
+use crate::telemetry::{
     is_telemetry_disabled, posthog_transport, CommandContext, CommandInvocation, EventEnvelope,
     InvocationMetadata, ReportableFacts, TelemetryTransport,
 };
-use mda::{coding_agent, compile, init, styled_help_template, termination, version};
+use crate::{coding_agent, compile, init, styled_help_template, termination, version};
+use anyhow::{Context, Result};
+use clap::{Arg, ArgAction, Args, CommandFactory, FromArgMatches, Parser, Subcommand};
 
 /// Examples prepended to the language-specific docs in root `--help`.
 // Note: no `\` line continuation on the first line. That escape also eats the
@@ -96,11 +93,11 @@ const PYTHON_DOCS_AFTER_HELP: &str =
 const JAVASCRIPT_DOCS_AFTER_HELP: &str =
     "  https://docs.langchain.com/langsmith/javascript/managed-deep-agents-quickstart";
 
-/// Footer appended to subcommand `--help`.
 const OPAQUE_SECRET_HEADING: &str = "Opaque secret";
 const OAUTH_HEADING: &str = "General OAuth";
 const MCP_OAUTH_HEADING: &str = "MCP OAuth";
 
+/// Help footer when the install channel is unknown: both quickstarts.
 const DOCS_AFTER_HELP: &str =
     "  https://docs.langchain.com/langsmith/python/managed-deep-agents-quickstart
   https://docs.langchain.com/langsmith/javascript/managed-deep-agents-quickstart";
@@ -120,38 +117,32 @@ enum Command {
     /// Scaffold a new Deep Agent project.
     ///
     /// The install channel selects the project language: TypeScript (npm) or Python (PyPI).
-    #[command(after_help = DOCS_AFTER_HELP)]
     Init(InitArgs),
     /// Compile a Deep Agent project into a managed LangGraph app (no deploy).
-    #[command(after_help = DOCS_AFTER_HELP)]
     Build(BuildArgs),
     /// Compile a Deep Agent project and run it on the local LangGraph dev server.
-    #[command(after_help = DOCS_AFTER_HELP)]
     Dev(DevArgs),
     /// Chat with a Deep Agent from the terminal (starts a local dev server when none is up).
-    #[command(after_help = DOCS_AFTER_HELP)]
     Chat(ChatArgs),
     /// Build and deploy a Deep Agent project to LangSmith.
-    #[command(after_help = DOCS_AFTER_HELP)]
     Deploy(DeployArgs),
     /// Prepare a checked-out Deep Agent project for a LangSmith build job
     /// (Context Hub sync, compile, sandbox bake). Run by the build runner.
     #[command(hide = true)]
     Prepare(PrepareArgs),
     /// Manage workspace connections (opaque secrets and OAuth slots).
-    #[command(name = "connections", alias = "connection", after_help = DOCS_AFTER_HELP)]
+    #[command(name = "connections", alias = "connection")]
     Connection(ConnectionArgs),
     /// Initialize an external messaging channel in the current project.
-    #[command(name = "channels", alias = "channel", after_help = DOCS_AFTER_HELP)]
+    #[command(name = "channels", alias = "channel")]
     Channel(ChannelArgs),
     /// Tail the Agent Server logs of a deployed Deep Agent.
-    #[command(after_help = DOCS_AFTER_HELP)]
     Logs(LogsArgs),
     /// Delete a deployed Deep Agent and the LangSmith resources it created.
-    #[command(visible_alias = "destroy", after_help = DOCS_AFTER_HELP)]
+    #[command(visible_alias = "destroy")]
     Delete(DeleteArgs),
     /// Initialize evaluations for a Deep Agent project.
-    #[command(name = "evals", alias = "eval", after_help = DOCS_AFTER_HELP)]
+    #[command(name = "evals", alias = "eval")]
     Eval(EvalArgs),
 }
 
@@ -229,10 +220,6 @@ struct DevArgs {
     /// Prevent the dev server from opening Studio in a browser when it starts.
     #[arg(long)]
     no_browser: bool,
-
-    /// Open a browser when the dev server starts. This is the default.
-    #[arg(long, hide = true, conflicts_with = "no_browser")]
-    browser: bool,
 
     /// Disable the dev server's hot reload.
     #[arg(long)]
@@ -682,9 +669,6 @@ enum EvalCommand {
 
 #[derive(Args)]
 struct EvalInitArgs {
-    /// Deprecated task name (accepted for compatibility and ignored).
-    task_name: Option<String>,
-
     /// Offer a coding-agent handoff after initializing the eval workspace.
     #[arg(short = 'i', long = "interactive")]
     coding_agent: bool,
@@ -716,23 +700,18 @@ fn docs_after_help(install_channel: Option<&str>) -> &'static str {
 fn cli_command(install_channel: Option<&str>) -> clap::Command {
     let docs = docs_after_help(install_channel);
     Cli::command()
-        .after_help(None::<&str>)
         .help_template(styled_help_template(Some(ROOT_HELP_EXAMPLES), docs))
         .mut_subcommands(|command| {
             let examples =
                 (command.get_name() == "connections").then_some(CONNECTIONS_HELP_EXAMPLES);
-            let command = command
-                .after_help(None::<&str>)
-                .help_template(styled_help_template(examples, docs));
+            let command = command.help_template(styled_help_template(examples, docs));
             if command.get_name() == "connections" {
                 command.mut_subcommands(|subcommand| {
                     if subcommand.get_name() == "create" {
-                        subcommand
-                            .after_help(None::<&str>)
-                            .help_template(styled_help_template(
-                                Some(CONNECTION_CREATE_HELP_EXAMPLES),
-                                docs,
-                            ))
+                        subcommand.help_template(styled_help_template(
+                            Some(CONNECTION_CREATE_HELP_EXAMPLES),
+                            docs,
+                        ))
                     } else {
                         subcommand
                     }
@@ -744,7 +723,7 @@ fn cli_command(install_channel: Option<&str>) -> clap::Command {
 }
 
 #[expect(clippy::print_stderr, reason = "top-level command error boundary")]
-fn main() -> ExitCode {
+pub fn run() -> ExitCode {
     // Capture the runner-only credential while startup is still single-threaded.
     // Project code, package installers, and compiler subprocesses must not inherit it.
     let build_artifacts_token = std::env::var_os(langsmith::BUILD_ARTIFACTS_TOKEN_ENV);
@@ -755,7 +734,7 @@ fn main() -> ExitCode {
         eprintln!("warning: {err:#}");
     }
 
-    // Report the bundled runtime version (see `mda::version`) rather than the
+    // Report the bundled runtime version (see `crate::version`) rather than the
     // crate version clap would use by default. The version is resolved at
     // runtime, so it is set on the built command instead of via the derive
     // `version` attribute. Leaking is fine: it lives for the whole process and
@@ -839,14 +818,10 @@ fn run_init(args: InitArgs, _facts: &mut ReportableFacts) -> Result<CommandCompl
     if let Some(name) = args.name.as_deref() {
         init::validate_project_target(&cwd, name)?;
     }
-    let has_terminal = std::io::stdin().is_terminal() && std::io::stderr().is_terminal();
-    if coding_agent_handoff && !has_terminal {
-        return Err(categorized(
-            ErrorCategory::UserInput,
-            "coding-agent handoff requires a terminal; omit `-i` to disable it",
-        ));
+    if coding_agent_handoff {
+        coding_agent::require_terminal()?;
     }
-    if prompts_for_name && !has_terminal {
+    if prompts_for_name && !coding_agent::has_terminal() {
         return Err(categorized(
             ErrorCategory::UserInput,
             "project name is required without a terminal; run `mda init <name>` instead",
@@ -892,9 +867,7 @@ fn run_init(args: InitArgs, _facts: &mut ReportableFacts) -> Result<CommandCompl
 fn should_show_deploy_steps(outcome: init::HandoffOutcome) -> bool {
     matches!(
         outcome,
-        init::HandoffOutcome::PromptShown
-            | init::HandoffOutcome::NotInteractive
-            | init::HandoffOutcome::Cancelled
+        init::HandoffOutcome::PromptShown | init::HandoffOutcome::Cancelled
     )
 }
 
@@ -942,7 +915,7 @@ fn run_dev(args: DevArgs, _facts: &mut ReportableFacts) -> Result<CommandComplet
         path: args.path,
         port: args.port,
         hostname: args.hostname,
-        no_browser: args.no_browser && !args.browser,
+        no_browser: args.no_browser,
         no_reload: args.no_reload,
         tunnel: args.tunnel,
         no_schedules: args.no_schedules,
@@ -1103,16 +1076,9 @@ fn run_delete(args: DeleteArgs, _facts: &mut ReportableFacts) -> Result<CommandC
 
 fn run_eval(args: EvalArgs, _facts: &mut ReportableFacts) -> Result<CommandCompletion> {
     match args.command {
-        EvalCommand::Init(EvalInitArgs {
-            task_name: _,
-            coding_agent,
-        }) => {
-            if coding_agent && (!std::io::stdin().is_terminal() || !std::io::stderr().is_terminal())
-            {
-                return Err(categorized(
-                    ErrorCategory::UserInput,
-                    "coding-agent handoff requires a terminal; omit `-i` to disable it",
-                ));
+        EvalCommand::Init(EvalInitArgs { coding_agent }) => {
+            if coding_agent {
+                coding_agent::require_terminal()?;
             }
             let summary = eval_cmd::init(InitOptions {
                 path: std::env::current_dir()?,
@@ -1147,21 +1113,21 @@ mod tests {
 
     use super::*;
 
-    fn analytics_for(args: &[&str]) -> mda::telemetry::CommandInvocation {
+    fn analytics_for(args: &[&str]) -> crate::telemetry::CommandInvocation {
         let command = Cli::command();
         let matches = command.clone().try_get_matches_from(args).unwrap();
-        mda::telemetry::CommandInvocation::from_matches(&command, &matches).unwrap()
+        crate::telemetry::CommandInvocation::from_matches(&command, &matches).unwrap()
     }
 
     #[test]
     fn destroy_is_reported_as_delete() {
-        assert_eq!(analytics_for(&["mda", "destroy"]).command_path(), "delete");
+        assert_eq!(analytics_for(&["mda", "destroy"]).command_path, "delete");
     }
 
     #[test]
     fn eval_is_reported_as_evals() {
         assert_eq!(
-            analytics_for(&["mda", "eval", "init"]).command_path(),
+            analytics_for(&["mda", "eval", "init"]).command_path,
             "evals init"
         );
     }
@@ -1443,24 +1409,14 @@ mod tests {
         else {
             unreachable!();
         };
-        assert_eq!(args.task_name, None);
         assert!(!args.coding_agent);
 
         assert!(Cli::try_parse_from(["mda", "evals", "init", "--codex"]).is_err());
     }
 
     #[test]
-    fn eval_init_accepts_deprecated_task_name_for_compatibility() {
-        let cli = Cli::try_parse_from(["mda", "evals", "init", "smoke", "-i"]).unwrap();
-        let Command::Eval(EvalArgs {
-            command: EvalCommand::Init(args),
-        }) = cli.command
-        else {
-            unreachable!();
-        };
-
-        assert_eq!(args.task_name.as_deref(), Some("smoke"));
-        assert!(args.coding_agent);
+    fn eval_init_rejects_the_removed_task_name() {
+        assert!(Cli::try_parse_from(["mda", "evals", "init", "smoke"]).is_err());
     }
 
     #[test]
@@ -1503,7 +1459,7 @@ mod tests {
         assert_eq!(help.kind(), clap::error::ErrorKind::DisplayHelp);
         let rendered = help.to_string();
         assert!(
-            rendered.contains("Usage: mda evals init [OPTIONS] [TASK_NAME]"),
+            rendered.contains("Usage: mda evals init [OPTIONS]\n"),
             "unexpected help: {rendered}"
         );
         assert!(!rendered.contains("Usage: mda eval init [OPTIONS] [PATH]"));
@@ -1973,7 +1929,6 @@ mod tests {
             (coding_agent::HandoffOutcome::Started, false),
             (coding_agent::HandoffOutcome::InstalledNeedsRestart, false),
             (coding_agent::HandoffOutcome::PromptShown, true),
-            (coding_agent::HandoffOutcome::NotInteractive, true),
             (coding_agent::HandoffOutcome::Cancelled, true),
         ];
 
@@ -2329,13 +2284,8 @@ mod tests {
     }
 
     #[test]
-    fn dev_accepts_legacy_browser_flag() {
-        let cli = Cli::try_parse_from(["mda", "dev", ".", "--browser"]).unwrap();
-
-        match cli.command {
-            Command::Dev(args) => assert!(args.browser),
-            _ => unreachable!(),
-        }
+    fn dev_rejects_the_removed_browser_flag() {
+        assert!(Cli::try_parse_from(["mda", "dev", ".", "--browser"]).is_err());
     }
 
     #[test]

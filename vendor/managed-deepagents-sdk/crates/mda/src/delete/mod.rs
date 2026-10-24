@@ -251,7 +251,7 @@ fn run_session(
     // which stays reachable after the deployment is marked deleted but is no
     // longer discoverable, so there would be no way back to it afterwards.
     if let Some(deployment_url) = &plan.deployment_url {
-        delete_crons(&client, deployment_url)?;
+        delete_crons(&client, deployment_url);
     }
     // The connections are found through the deployment ID, so they go first:
     // a failure here leaves the deployment for a second run to find them by.
@@ -608,7 +608,7 @@ fn confirm_delete(name: &str, yes: bool) -> Result<bool> {
 /// Best-effort: an Agent Server that is already unreachable means the crons
 /// cannot fire either, and a deployment that failed to build may never have had
 /// any. Neither should block tearing down the resources that do exist.
-fn delete_crons(client: &langsmith::Client, deployment_url: &str) -> Result<()> {
+fn delete_crons(client: &langsmith::Client, deployment_url: &str) {
     let sp = spinner();
     sp.start("Deleting schedules");
     match delete_managed_crons(client, deployment_url) {
@@ -616,7 +616,6 @@ fn delete_crons(client: &langsmith::Client, deployment_url: &str) -> Result<()> 
         Ok(deleted) => sp.stop(format!("Deleted {deleted} schedule(s)")),
         Err(_) => sp.stop("Could not delete schedules; they stop when the deployment is torn down"),
     }
-    Ok(())
 }
 
 /// Drop the tracing project with a name-mode deployment: it is a separate

@@ -115,9 +115,6 @@ pub struct LogEntry {
 pub struct LogPage {
     #[serde(default)]
     pub logs: Vec<LogEntry>,
-    /// Opaque cursor for the next page, when the source supports pagination.
-    #[serde(default)]
-    pub next_offset: Option<String>,
 }
 
 impl Client {
@@ -247,7 +244,6 @@ mod tests {
         )
         .unwrap();
 
-        assert_eq!(page.next_offset.as_deref(), Some("cursor"));
         assert!(matches!(
             page.logs[0].timestamp,
             LogTimestamp::EpochMillis(1769472000000)

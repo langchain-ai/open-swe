@@ -446,9 +446,7 @@ fn run_session(
             Some(agent) => {
                 resolve_or_create_agent_deployment(client, agent, opts.deployment_type, &secrets)?
             }
-            None => {
-                resolve_or_create_deployment(client, &name, opts.deployment_type, &secrets, true)?
-            }
+            None => resolve_or_create_deployment(client, &name, opts.deployment_type, &secrets)?,
         };
         (deployment_id, None)
     };
@@ -588,14 +586,12 @@ fn secret_is_available(
     secrets: &[langsmith::Secret],
     client: &langsmith::Client,
     workspace_keys: &mut WorkspaceSecretKeys,
-) -> Result<bool> {
-    if claim_secret_from_local_sources(key, env_vars, secrets)? {
-        return Ok(true);
-    }
-    Ok(matches!(
-        verify_workspace_secret(key, client, workspace_keys),
-        WorkspaceSecretStatus::Present
-    ))
+) -> bool {
+    claim_secret_from_local_sources(key, env_vars, secrets)
+        || matches!(
+            verify_workspace_secret(key, client, workspace_keys),
+            WorkspaceSecretStatus::Present
+        )
 }
 
 /// Run a fallible step under an active spinner, switching the spinner to an
@@ -1071,21 +1067,12 @@ fn bake_env_vars(
 }
 
 /// Look up a LangSmith deployment by name, or create one when missing.
-///
-/// Shared by `mda deploy` and local Slack provisioning in `mda dev`.
-/// When `show_progress` is false (soft-skip paths in `mda dev`), failures are
-/// returned quietly without flashing spinner error lines.
-pub(crate) fn resolve_or_create_deployment(
+fn resolve_or_create_deployment(
     client: &langsmith::Client,
     name: &str,
     deployment_type: DeploymentType,
     secrets: &[langsmith::Secret],
-    show_progress: bool,
 ) -> Result<String> {
-    if !show_progress {
-        return resolve_or_create_deployment_quiet(client, name, deployment_type, secrets);
-    }
-
     let sp = spinner();
     sp.start(format!("Looking up deployment '{name}'"));
     let listed = step(
@@ -1137,31 +1124,6 @@ pub(crate) fn resolve_or_create_deployment(
                 }
             }
         }
-    }
-}
-
-/// Quiet variant used by `mda dev` Slack soft-skips (no spinner chrome).
-fn resolve_or_create_deployment_quiet(
-    client: &langsmith::Client,
-    name: &str,
-    deployment_type: DeploymentType,
-    secrets: &[langsmith::Secret],
-) -> Result<String> {
-    let listed = client.list_deployments(name)?;
-    if let Some(id) = find_deployment_id_by_name(&listed, name) {
-        return Ok(id);
-    }
-    match client.create_deployment(name, deployment_type, secrets) {
-        Ok(created) => require_str(&created, "id", "create deployment"),
-        Err(err) if is_request_timeout(&err) => {
-            let listed = client.list_deployments(name)?;
-            if let Some(id) = find_deployment_id_by_name(&listed, name) {
-                Ok(id)
-            } else {
-                Err(err)
-            }
-        }
-        Err(err) => Err(err),
     }
 }
 
@@ -1967,7 +1929,7 @@ fn ensure_channel_requirements_secrets(
     let (required, optional_slack) = channel_secret_policy(channel_requirements);
     let mut slack_inactive = false;
     for key_env in optional_slack {
-        if !secret_is_available(&key_env, env_vars, secrets, client, workspace_keys)? {
+        if !secret_is_available(&key_env, env_vars, secrets, client, workspace_keys) {
             slack_inactive = true;
         }
     }
@@ -2039,7 +2001,7 @@ fn ensure_required_secret(
     workspace_keys: &mut WorkspaceSecretKeys,
     context: &str,
 ) -> Result<()> {
-    if claim_secret_from_local_sources(key_env, env_vars, secrets)? {
+    if claim_secret_from_local_sources(key_env, env_vars, secrets) {
         return Ok(());
     }
 
@@ -2128,7 +2090,7 @@ fn ensure_model_api_key(
     let key_env = match requirement {
         dependencies::ModelApiKeyRequirement::NoPreflight => return Ok(()),
         dependencies::ModelApiKeyRequirement::DeploymentSecret(key_env) => {
-            if claim_secret_from_local_sources(key_env, env_vars, secrets)? {
+            if claim_secret_from_local_sources(key_env, env_vars, secrets) {
                 return Ok(());
             }
             bail!(
@@ -2204,15 +2166,9 @@ fn claim_secret_from_local_sources(
     key_env: &str,
     env_vars: &std::collections::BTreeMap<String, String>,
     secrets: &[langsmith::Secret],
-) -> Result<bool> {
-    if secrets.iter().any(|secret| secret.name == key_env) {
-        return Ok(true);
-    }
-    if env_vars.get(key_env).is_some_and(|value| !value.is_empty()) {
-        return Ok(true);
-    }
-
-    Ok(false)
+) -> bool {
+    secrets.iter().any(|secret| secret.name == key_env)
+        || env_vars.get(key_env).is_some_and(|value| !value.is_empty())
 }
 
 /// Look up `key_env` in LangSmith workspace secrets (no spinner / messaging).
@@ -2637,14 +2593,9 @@ fn delete_schedule_crons(
 }
 
 fn managed_cron_ids(response: &serde_json::Value, deploy_only: bool) -> Result<Vec<String>> {
-    let items = if let Some(items) = response.as_array() {
-        items
-    } else if let Some(items) = response.get("items").and_then(|value| value.as_array()) {
-        items
-    } else {
-        bail!(
-            "unexpected cron search response shape: expected a JSON array or an object with an \"items\" array"
-        );
+    // `CronApi::search_managed_crons` flattens every page into one array.
+    let Some(items) = response.as_array() else {
+        bail!("unexpected cron search response shape: expected a JSON array");
     };
 
     Ok(items
@@ -2810,7 +2761,11 @@ mod tests {
         env.insert("OPENAI_API_KEY".to_string(), "sk-from-dotenv".to_string());
         let secrets = Vec::new();
 
-        assert!(claim_secret_from_local_sources("OPENAI_API_KEY", &env, &secrets).unwrap());
+        assert!(claim_secret_from_local_sources(
+            "OPENAI_API_KEY",
+            &env,
+            &secrets
+        ));
         assert!(secrets.is_empty());
     }
 
@@ -2822,7 +2777,11 @@ mod tests {
             value: "sk-already-staged".to_string(),
         }];
 
-        assert!(claim_secret_from_local_sources("OPENAI_API_KEY", &env, &secrets).unwrap());
+        assert!(claim_secret_from_local_sources(
+            "OPENAI_API_KEY",
+            &env,
+            &secrets
+        ));
         assert_eq!(secrets.len(), 1);
     }
 
@@ -2831,7 +2790,11 @@ mod tests {
         let env = BTreeMap::new();
         let secrets = Vec::new();
 
-        assert!(!claim_secret_from_local_sources("OPENAI_API_KEY", &env, &secrets).unwrap());
+        assert!(!claim_secret_from_local_sources(
+            "OPENAI_API_KEY",
+            &env,
+            &secrets
+        ));
         assert!(secrets.is_empty());
     }
 
@@ -2845,7 +2808,7 @@ mod tests {
         let previous = std::env::var("OPENAI_API_KEY").ok();
         std::env::set_var("OPENAI_API_KEY", "sk-ambient-from-shell");
         let claimed = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-            claim_secret_from_local_sources("OPENAI_API_KEY", &env, &secrets).unwrap()
+            claim_secret_from_local_sources("OPENAI_API_KEY", &env, &secrets)
         }));
         match previous {
             Some(value) => std::env::set_var("OPENAI_API_KEY", value),
@@ -3653,20 +3616,6 @@ mod tests {
             {"cron_id": "cron-2", "metadata": {"mda_managed": true, "mda_managed_by": "runtime"}},
             {"id": "not-a-cron-id"}
         ]);
-        assert_eq!(
-            managed_cron_ids(&response, false).unwrap(),
-            vec!["cron-1", "cron-2"]
-        );
-    }
-
-    #[test]
-    fn managed_cron_ids_reads_search_items_wrapper() {
-        let response = json!({
-            "items": [
-                {"cron_id": "cron-1", "metadata": {"mda_managed": true}},
-                {"cron_id": "cron-2", "metadata": {"mda_managed": true}},
-            ]
-        });
         assert_eq!(
             managed_cron_ids(&response, false).unwrap(),
             vec!["cron-1", "cron-2"]

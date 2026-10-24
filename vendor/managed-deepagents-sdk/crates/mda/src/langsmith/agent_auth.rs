@@ -87,10 +87,6 @@ impl ConnectionSummary {
     pub fn is_secret(&self) -> bool {
         self.kind == KIND_SECRET
     }
-
-    pub fn is_user_owned(&self) -> bool {
-        self.owner_policy.as_deref() == Some(OWNER_POLICY_USER)
-    }
 }
 
 /// Fields for creating a workspace OAuth connection row.
@@ -486,15 +482,6 @@ impl Client {
             )?
             .is_some();
         Ok(deleted)
-    }
-
-    /// List every OAuth provider slug registered in the caller's workspace.
-    pub fn list_oauth_provider_slugs(&self) -> Result<BTreeSet<String>> {
-        Ok(self
-            .oauth_provider_index()?
-            .into_values()
-            .map(|provider| provider.slug)
-            .collect())
     }
 
     /// The OAuth providers that mint tokens for the GitHub App `app_id`. Agent
@@ -1399,36 +1386,6 @@ mod tests {
         assert_eq!(found[0].slug, "alpha");
         assert_eq!(found[1].slug, "beta");
         assert!(found[0].owner_policy.is_none());
-    }
-
-    #[test]
-    fn list_oauth_provider_slugs_reads_the_workspace_registry() {
-        let (url, rx) = serve_once(
-            "200 OK",
-            json!({
-                "items": [
-                    { "id": "11111111-1111-1111-1111-111111111111", "slug": "notion" },
-                    { "id": "22222222-2222-2222-2222-222222222222", "slug": "linear" }
-                ],
-                "next_cursor": null
-            })
-            .to_string(),
-        );
-        let client = client_for(url);
-
-        let slugs = client.list_oauth_provider_slugs().unwrap();
-
-        let request = rx.recv().unwrap();
-        assert!(
-            request.contains("GET /v1/agent-auth/oauth-providers?page_size=100"),
-            "unexpected request: {request}"
-        );
-        assert_eq!(
-            slugs,
-            ["linear".to_string(), "notion".to_string()]
-                .into_iter()
-                .collect()
-        );
     }
 
     #[test]

@@ -45,13 +45,17 @@ pub(crate) mod test_support;
 mod tests;
 
 pub(crate) use discovery::{find_sandbox_entry, read_setup_script};
+pub use identity::IdentitySummary;
 pub(crate) use identity::{
     identity_requires_ingress_secret, read_identity_summary, INGRESS_SECRET_ENV,
 };
-pub use identity::{IdentityAuthMode, IdentityScopeAxes, IdentitySummary};
+#[cfg(test)]
+pub(crate) use identity::{IdentityAuthMode, IdentityScopeAxes};
 pub(crate) use local_packages::{find_local_packages, is_vendored_path, vendored_manifests};
+pub use memory::MemoryDecision;
 pub(crate) use memory::{declare_memory_snippet, resolve_memory};
-pub use memory::{MemoryDecision, MemoryLayers, MemorySummary};
+#[cfg(test)]
+pub(crate) use memory::{MemoryLayers, MemorySummary};
 pub(crate) use model::read_agent_model;
 pub(crate) use requirements::{
     agent_connections_from_connector_requirements, connection_owner_policy_for_slug,
@@ -443,12 +447,8 @@ const RUNTIME_PACKAGE: &str = crate::dependencies::USER_RUNTIME_PACKAGE;
 #[derive(Debug)]
 pub struct CompileSummary {
     pub out_dir: PathBuf,
-    /// Generated managed entry module, relative to `out_dir`.
-    pub entry_file: PathBuf,
     /// User files carried into the build verbatim, relative to the root.
     pub copied: Vec<PathBuf>,
-    /// LangGraph graph export path (e.g. `./_mda_entry.ts:agent`).
-    pub langgraph_graph: String,
     /// LangGraph `graphs` key / assistant id from the authored name.
     pub assistant_id: String,
     /// Connector modules (the `tools/mcp.{ts,py}` declaration), relative to the root.
@@ -615,15 +615,6 @@ pub fn compile_for_deploy(
 /// Eval artifacts keep the authored definition intact but point `langgraph.json`
 /// at an eval-specific entry that suppresses nested sandbox provisioning and
 /// allows the runner to apply an explicit model override.
-pub fn compile_for_eval(
-    project: &Project,
-    out_dir: &Path,
-    runtime_source: &Path,
-) -> Result<CompileSummary> {
-    let api_version = resolved_langgraph_api_version()?;
-    compile_for_eval_with_api_version(project, out_dir, runtime_source, &api_version, None)
-}
-
 pub(crate) fn compile_for_eval_with_api_version(
     project: &Project,
     out_dir: &Path,
@@ -1142,9 +1133,7 @@ fn compile_inner(
 
     Ok(CompileSummary {
         out_dir: out_dir.to_path_buf(),
-        entry_file,
         copied,
-        langgraph_graph: graph,
         assistant_id,
         connectors: connector_entries,
         channels: channel_entries,

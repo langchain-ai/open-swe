@@ -14,7 +14,10 @@ use super::test_support::{
     compile_refresh, npm_available, python3_available, setup_mock_ts_runtime,
     with_live_npm_lockfile, with_py_runtime,
 };
-use super::{load_sandbox_recipe_manifest, DeployContext, BUILD_MARKER, LANGGRAPH_API_VERSION};
+use super::{
+    load_sandbox_recipe_manifest, DeployContext, MemoryDecision, BUILD_MARKER,
+    LANGGRAPH_API_VERSION,
+};
 use crate::project::{load, Language, Project};
 use crate::test_support::write_file;
 use crate::toolchain;
@@ -148,8 +151,6 @@ fn compile_copies_files_verbatim_and_generates_a_managed_entry() {
     let out_dir = root.path().join(".mda").join("build");
     let summary = compile(&project, &out_dir).unwrap();
 
-    assert_eq!(summary.entry_file, PathBuf::from("_mda_entry.ts"));
-    assert_eq!(summary.langgraph_graph, "./_mda_entry.ts:agent");
     assert_eq!(summary.assistant_id, "agent");
 
     // The user's agent file is carried over byte-for-byte: no transform.
@@ -219,7 +220,6 @@ fn compile_normalizes_static_name_as_assistant_id() {
     let summary = compile(&project, &out_dir).unwrap();
 
     assert_eq!(summary.assistant_id, "research-assistant");
-    assert_eq!(summary.langgraph_graph, "./_mda_entry.ts:agent");
 
     let manifest = fs::read_to_string(out_dir.join("langgraph.json")).unwrap();
     let value: serde_json::Value = serde_json::from_str(&manifest).unwrap();
@@ -1225,8 +1225,6 @@ fn compile_generates_a_python_entry() {
     let out_dir = root.path().join("build");
     let summary = with_py_runtime(root.path(), || compile(&project, &out_dir)).unwrap();
 
-    assert_eq!(summary.entry_file, PathBuf::from("_mda_entry.py"));
-    assert_eq!(summary.langgraph_graph, "./_mda_entry.py:agent");
     assert_eq!(summary.assistant_id, "agent");
 
     let agent_out = fs::read_to_string(out_dir.join("agent.py")).unwrap();
@@ -4238,10 +4236,10 @@ fn compile_wires_typescript_memory() {
 
     // Agent memory does not require identity.
     assert!(summary.memory.agent_enabled());
-    assert_eq!(
-        summary.memory.path().map(PathBuf::as_path),
-        Some(Path::new("memory.ts"))
-    );
+    assert!(matches!(
+        &summary.memory,
+        MemoryDecision::Declared(memory) if memory.path == Path::new("memory.ts")
+    ));
 
     let entry_out = fs::read_to_string(out_dir.join("_mda_entry.ts")).unwrap();
     assert!(entry_out.contains("import { memory } from \"./memory\";"));
@@ -4319,7 +4317,9 @@ fn compile_preserves_named_memory_policies() {
             fs::read_to_string(out_dir.join(memory_file)).unwrap(),
             memory_source
         );
-        let entry_out = fs::read_to_string(out_dir.join(summary.entry_file)).unwrap();
+        let entry_out =
+            fs::read_to_string(out_dir.join(format!("_mda_entry.{}", language.extension())))
+                .unwrap();
         assert!(entry_out.contains(language.ident(
             "import { memory } from \"./memory\";",
             "from memory import memory as _memory",
@@ -4508,7 +4508,7 @@ fn compile_omits_memory_when_the_project_declares_none() {
 
     assert!(!summary.memory.agent_enabled());
     assert!(!summary.memory.user_enabled());
-    assert_eq!(summary.memory.path(), None);
+    assert_eq!(summary.memory, MemoryDecision::None);
 
     let entry_out = fs::read_to_string(out_dir.join("_mda_entry.ts")).unwrap();
     assert!(!entry_out.contains("memory"), "{entry_out}");

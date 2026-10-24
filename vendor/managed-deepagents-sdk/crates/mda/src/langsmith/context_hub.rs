@@ -57,6 +57,10 @@ impl ContextHubClient {
     /// Create a new Context Hub client for `base_url` authenticated with a
     /// static API key. Prefer [`Self::with_credential`] when the caller may
     /// have signed in through the device authorization flow.
+    #[cfg_attr(
+        not(test),
+        expect(dead_code, reason = "test-only; removed in client-setup PR")
+    )]
     pub fn new(
         base_url: &str,
         api_key: impl Into<String>,
@@ -66,6 +70,10 @@ impl ContextHubClient {
     }
 
     /// Create a new Context Hub client for `base_url`.
+    #[cfg_attr(
+        not(test),
+        expect(dead_code, reason = "test-only; removed in client-setup PR")
+    )]
     pub(crate) fn with_credential(
         base_url: &str,
         credential: Credential,

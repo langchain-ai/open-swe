@@ -476,24 +476,6 @@ pub fn provider_dependency_for_model(model: &str, language: Language) -> Option<
     })
 }
 
-/// The OpenAI integration package, which also serves every OpenAI-compatible
-/// endpoint addressed through a `baseURL` / `base_url` override.
-///
-/// Inference is the normal route to a provider package, and it reads a static
-/// `provider:model` string. A project that constructs its own chat model has no
-/// such string to read, so the package it imports is written into its manifest
-/// at scaffold time instead.
-pub fn openai_compatible_dependency(language: Language) -> Dependency {
-    let provider = MODEL_PROVIDERS
-        .iter()
-        .find(|provider| provider.keys.contains(&"openai"))
-        .expect("the provider registry always carries OpenAI");
-    match language {
-        Language::TypeScript => provider.npm,
-        Language::Python => provider.pypi,
-    }
-}
-
 /// The environment variable that must carry an API key for `model`'s provider
 /// at runtime, or `None` when no key can be pre-flighted.
 ///
@@ -648,66 +630,27 @@ fn infer_provider_from_model_name(model: &str) -> Option<&'static str> {
     }
 }
 
-/// Render the user-facing TypeScript dependencies as `"name": "version"` JSON
-/// members, each indented by `indent` spaces and comma-joined (no trailing
-/// comma).
-///
-/// `extra` carries the packages a scaffolded project imports itself and that
-/// compile-time inference therefore cannot supply; entries are emitted in name
-/// order, the order a manifest is normally kept in.
-pub fn package_json_entries(indent: usize, extra: &[Dependency]) -> String {
-    package_json_entries_for_version(indent, &version::package_version(), extra)
+/// Render the user-facing TypeScript dependency (the runtime package every
+/// project gets) as a `"name": "version"` JSON member indented by `indent`
+/// spaces.
+pub fn package_json_entries(indent: usize) -> String {
+    package_json_entries_for_version(indent, &version::package_version())
 }
 
-/// Render the user-facing Python dependencies as quoted TOML array elements
-/// (e.g. `"deepagents>=0.7.3"`), each indented by `indent` spaces and
-/// comma-joined. `extra` is as in [`package_json_entries`].
-pub fn pyproject_entries(indent: usize, extra: &[Dependency]) -> String {
-    pyproject_entries_for_version(indent, &version::package_version(), extra)
+/// Render the user-facing Python dependency as a quoted TOML array element
+/// (e.g. `"managed-deepagents==0.7.3"`) indented by `indent` spaces.
+pub fn pyproject_entries(indent: usize) -> String {
+    pyproject_entries_for_version(indent, &version::package_version())
 }
 
-/// The user-facing dependencies in name order: the runtime package every
-/// project gets, plus whatever the scaffold decided it also imports.
-fn user_dependencies(package_version: &str, extra: &[Dependency]) -> Vec<(&'static str, String)> {
-    let mut entries = vec![(USER_RUNTIME_PACKAGE, package_version.to_string())];
-    entries.extend(extra.iter().map(|dep| (dep.name, dep.version.to_string())));
-    entries.sort_unstable_by_key(|(name, _)| *name);
-    entries
-}
-
-fn package_json_entries_for_version(
-    indent: usize,
-    package_version: &str,
-    extra: &[Dependency],
-) -> String {
+fn package_json_entries_for_version(indent: usize, package_version: &str) -> String {
     let pad = " ".repeat(indent);
-    user_dependencies(package_version, extra)
-        .into_iter()
-        .map(|(name, version)| format!("{pad}\"{name}\": \"{version}\""))
-        .collect::<Vec<_>>()
-        .join(",\n")
+    format!("{pad}\"{USER_RUNTIME_PACKAGE}\": \"{package_version}\"")
 }
 
-fn pyproject_entries_for_version(
-    indent: usize,
-    package_version: &str,
-    extra: &[Dependency],
-) -> String {
+fn pyproject_entries_for_version(indent: usize, package_version: &str) -> String {
     let pad = " ".repeat(indent);
-    user_dependencies(package_version, extra)
-        .into_iter()
-        .map(|(name, version)| {
-            // The runtime package is pinned; a registry version already carries
-            // its own operator (`>=1.4.1`), so only the pin adds one.
-            let requirement = if name == USER_RUNTIME_PACKAGE {
-                format!("{name}=={version}")
-            } else {
-                format!("{name}{version}")
-            };
-            format!("{pad}\"{requirement}\"")
-        })
-        .collect::<Vec<_>>()
-        .join(",\n")
+    format!("{pad}\"{USER_RUNTIME_PACKAGE}=={package_version}\"")
 }
 
 #[cfg(test)]
@@ -750,11 +693,11 @@ mod tests {
     #[test]
     fn user_manifest_only_lists_managed_deepagents() {
         assert_eq!(
-            package_json_entries_for_version(0, "1.2.3", &[]),
+            package_json_entries_for_version(0, "1.2.3"),
             "\"managed-deepagents\": \"1.2.3\""
         );
         assert_eq!(
-            pyproject_entries_for_version(0, "1.2.3", &[]),
+            pyproject_entries_for_version(0, "1.2.3"),
             "\"managed-deepagents==1.2.3\""
         );
     }
@@ -762,48 +705,12 @@ mod tests {
     #[test]
     fn user_managed_deepagents_is_pinned_to_the_runtime_package_version() {
         assert_eq!(
-            package_json_entries_for_version(4, "0.0.3-dev.22", &[]),
+            package_json_entries_for_version(4, "0.0.3-dev.22"),
             "    \"managed-deepagents\": \"0.0.3-dev.22\""
         );
         assert_eq!(
-            pyproject_entries_for_version(4, "0.0.3-dev.22", &[]),
+            pyproject_entries_for_version(4, "0.0.3-dev.22"),
             "    \"managed-deepagents==0.0.3-dev.22\""
-        );
-    }
-
-    #[test]
-    fn extra_user_dependencies_are_rendered_in_name_order() {
-        // The registry version carries its own operator, so a Python entry must
-        // not gain a second one — `langchain-openai>=1.4.1`, never `==>=`.
-        let ts = openai_compatible_dependency(Language::TypeScript);
-        assert_eq!(
-            package_json_entries_for_version(0, "1.2.3", &[ts]),
-            format!(
-                "\"{name}\": \"{version}\",\n\"managed-deepagents\": \"1.2.3\"",
-                name = ts.name,
-                version = ts.version
-            )
-        );
-        let py = openai_compatible_dependency(Language::Python);
-        assert_eq!(
-            pyproject_entries_for_version(0, "1.2.3", &[py]),
-            format!(
-                "\"{name}{version}\",\n\"managed-deepagents==1.2.3\"",
-                name = py.name,
-                version = py.version
-            )
-        );
-    }
-
-    #[test]
-    fn the_openai_compatible_dependency_is_the_openai_integration_package() {
-        assert_eq!(
-            openai_compatible_dependency(Language::TypeScript).name,
-            "@langchain/openai"
-        );
-        assert_eq!(
-            openai_compatible_dependency(Language::Python).name,
-            "langchain-openai"
         );
     }
 
@@ -869,7 +776,7 @@ mod tests {
 
     #[test]
     fn package_json_entries_are_indented() {
-        let rendered = package_json_entries(4, &[]);
+        let rendered = package_json_entries(4);
         assert_eq!(
             rendered,
             format!(
@@ -881,7 +788,7 @@ mod tests {
 
     #[test]
     fn pyproject_entries_are_indented() {
-        let rendered = pyproject_entries(4, &[]);
+        let rendered = pyproject_entries(4);
         assert_eq!(
             rendered,
             format!("    \"managed-deepagents=={}\"", version::package_version())
@@ -892,7 +799,7 @@ mod tests {
     fn package_json_entries_compose_into_valid_json() {
         let manifest = format!(
             "{{\n  \"dependencies\": {{\n{}\n  }}\n}}",
-            package_json_entries(4, &[])
+            package_json_entries(4)
         );
         let value: serde_json::Value = serde_json::from_str(&manifest).unwrap();
         assert_eq!(

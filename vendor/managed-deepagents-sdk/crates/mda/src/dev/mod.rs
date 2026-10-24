@@ -212,7 +212,7 @@ fn prepare_dev(
         DevLoginPrompt::Allowed,
     )?;
     ensure_dev_handoff_secret(out_dir)?;
-    let injected_ingress = ensure_dev_ingress_secret(project, out_dir)?;
+    let injected_ingress = ensure_dev_ingress_secret(out_dir)?;
     let injected_public_api = ensure_dev_public_api_url(out_dir, opts)?;
     ensure_dev_assistant_id(project, out_dir)?;
 
@@ -996,7 +996,7 @@ fn apply_watch_action(
                 DevLoginPrompt::Suppressed,
             )?;
             ensure_dev_handoff_secret(out_dir)?;
-            ensure_dev_ingress_secret(&project, out_dir)?;
+            ensure_dev_ingress_secret(out_dir)?;
             ensure_dev_public_api_url(out_dir, opts)?;
             ensure_dev_assistant_id(&project, out_dir)?;
             match project.language {
@@ -2098,7 +2098,7 @@ fn ensure_dev_handoff_secret(out_dir: &Path) -> Result<()> {
 /// When it is absent, inject the legacy ingress secret so backend auth and
 /// credential-free local projects remain compatible.
 /// Returns `true` when a fresh local secret was injected into the staged `.env`.
-fn ensure_dev_ingress_secret(_project: &crate::project::Project, out_dir: &Path) -> Result<bool> {
+fn ensure_dev_ingress_secret(out_dir: &Path) -> Result<bool> {
     let process_ingress_secret = std::env::var(compile::INGRESS_SECRET_ENV).ok();
     let process_api_key = std::env::var(crate::langsmith::API_KEY_ENV).ok();
     ensure_dev_ingress_secret_with_process_env(
@@ -3783,14 +3783,8 @@ mod tests {
         let out_dir = root.path().join(".mda").join("build");
         fs::create_dir_all(&out_dir).unwrap();
         fs::write(out_dir.join(".env"), "LANGSMITH_API_KEY=server-key\n").unwrap();
-        let project = crate::project::Project {
-            root: root.path().to_path_buf(),
-            language: Language::TypeScript,
-            agent_file: PathBuf::from("agent.ts"),
-            files: Vec::new(),
-        };
 
-        assert!(!ensure_dev_ingress_secret(&project, &out_dir).unwrap());
+        assert!(!ensure_dev_ingress_secret(&out_dir).unwrap());
 
         let env = crate::deploy::env_file::parse_env_file(&out_dir.join(".env"));
         assert!(!env.contains_key(compile::INGRESS_SECRET_ENV));
@@ -3858,9 +3852,7 @@ mod tests {
         ]);
         let summary = CompileSummary {
             out_dir: PathBuf::from("/tmp/demo/.mda/build"),
-            entry_file: PathBuf::from("_mda_entry.ts"),
             copied: vec![PathBuf::from("agent.ts")],
-            langgraph_graph: "./_mda_entry.ts:agent".into(),
             assistant_id: "demo".into(),
             connectors: vec![
                 PathBuf::from("connectors/gmail.ts"),

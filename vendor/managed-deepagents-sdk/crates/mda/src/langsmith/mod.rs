@@ -47,14 +47,14 @@ pub(crate) use agent_auth::OAuthAuthorizationSession;
 pub use agent_auth::{ConnectionOwnerPolicy, ConnectionSummary, CreateOAuthConnection};
 pub use context_hub::ContextHubClient;
 pub(crate) use context_hub::RepoOwnership;
-pub use logs::{LogEntry, LogLevel, LogOrder, LogPage, LogQuery, LogTimestamp};
-pub use sandboxes::{CreateSandboxBoxOptions, SandboxCommandResult, SandboxSummary};
-pub use snapshots::{SnapshotDelete, SnapshotSummary, DEFAULT_SNAPSHOT_READY_TIMEOUT};
+pub use logs::{LogEntry, LogLevel, LogOrder, LogQuery, LogTimestamp};
+pub use sandboxes::{CreateSandboxBoxOptions, SandboxCommandResult};
+pub use snapshots::{SnapshotDelete, DEFAULT_SNAPSHOT_READY_TIMEOUT};
 pub(crate) use trigger_server::{
     ChannelSetupRequest, ChannelSetupResponse, ChannelSetupStatus, ChannelSetupTarget,
     SlackChannelApp, SlackChannelOptions, SlackChannelSetup, SlackTriggerMode,
 };
-pub use workspaces::{DeployTarget, WorkspaceSummary};
+pub use workspaces::DeployTarget;
 
 pub(crate) use login::{
     is_cli_session_api_key, note_session_api_key, resolve_login_api_url, Credential, Login,
@@ -338,6 +338,10 @@ impl Client {
     /// Create a client for `host_backend_url` authenticated with a static API
     /// key. Prefer [`Self::with_credential`] when the caller may have signed in
     /// through the device authorization flow.
+    #[cfg_attr(
+        not(test),
+        expect(dead_code, reason = "test-only; removed in client-setup PR")
+    )]
     pub fn new(
         host_backend_url: &str,
         api_key: impl Into<String>,
@@ -373,6 +377,10 @@ impl Client {
     /// Create a client for `host_backend_url`, deriving the matching LangSmith
     /// platform API URL and sending `credential` (and optional `tenant_id`) on
     /// every request.
+    #[cfg_attr(
+        not(test),
+        expect(dead_code, reason = "test-only; removed in client-setup PR")
+    )]
     pub(crate) fn with_credential(
         host_backend_url: &str,
         credential: Credential,
