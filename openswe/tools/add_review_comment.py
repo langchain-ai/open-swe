@@ -17,6 +17,7 @@ class AddReviewCommentResult(BaseModel):
     range: DiffRange | None = None
     body: str | None = None
     review_id: int | None = None
+    login: str | None = None
     note: str | None = None
     error: str | None = None
 
@@ -93,6 +94,7 @@ async def _add(
         range=lines,
         body=text,
         review_id=review.id,
+        login=login,
         note=(
             f"In {login}'s pending GitHub review, which only they see until they submit it;"
             " every pending comment posts with the review."

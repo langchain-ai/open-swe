@@ -22,6 +22,8 @@ import type {
 } from "@/features/reviews/lib/chatDiffActions"
 import { useChatDrafts } from "@/features/reviews/lib/chatDrafts"
 import { usePendingReview } from "@/features/reviews/lib/usePendingReview"
+import { sameLogin } from "@/features/reviews/lib/logins"
+import { useSession } from "@/lib/session"
 import { AgentNoteCard } from "@/features/reviews/components/AgentNoteCard"
 import { ProposedCommentCard } from "@/features/reviews/components/ProposedCommentCard"
 import { ProposedReviewCard } from "@/features/reviews/components/ProposedReviewCard"
@@ -109,19 +111,22 @@ function ReviewChatActionList({
   review: ReviewChatActionsValue
   actions: Array<ChatDiffAction>
 }) {
-  // A comment the agent added sits in the pending review, which the page reads once.
+  // A comment the agent added for the viewer sits in their pending review, which the page reads once.
   const pending = usePendingReview(review.owner, review.repo, review.number)
+  const viewer = useSession().data?.login
   const invalidatePending = pending.invalidate
   const refreshedFor = useRef(new Set<string>())
   useEffect(() => {
     const added = actions.filter(
       (action) =>
-        action.kind === "added" && !refreshedFor.current.has(action.id)
+        action.kind === "added" &&
+        sameLogin(action.login, viewer) &&
+        !refreshedFor.current.has(action.id)
     )
     if (added.length === 0) return
     for (const action of added) refreshedFor.current.add(action.id)
     void invalidatePending()
-  }, [actions, invalidatePending])
+  }, [actions, viewer, invalidatePending])
   return actions.map((action) =>
     action.kind === "note" ? (
       <AgentNoteCard
@@ -131,7 +136,9 @@ function ReviewChatActionList({
       />
     ) : action.kind === "added" ? (
       <p key={action.id} className="text-xs text-secondary">
-        Added to your pending review on{" "}
+        Added to{" "}
+        {sameLogin(action.login, viewer) ? "your" : `@${action.login}'s`}{" "}
+        pending review on{" "}
         <button
           type="button"
           onClick={() => review.showInDiff(action.range)}

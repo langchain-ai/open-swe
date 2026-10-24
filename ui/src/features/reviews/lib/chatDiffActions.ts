@@ -31,11 +31,12 @@ export interface AgentNote {
   body: string
 }
 
-/** A comment the agent put in the viewer's pending GitHub review. */
+/** A comment the agent put in someone's pending GitHub review: whoever sent that message. */
 export interface AddedComment {
   kind: "added"
   id: string
   range: DiffRange
+  login: string
 }
 
 export type ChatDiffAction =
@@ -133,7 +134,9 @@ export function chatDiffAction(
         ? { kind: "note", id, range, body }
         : null
     case "add_review_comment":
-      return result.added === true ? { kind: "added", id, range } : null
+      return result.added === true && typeof result.login === "string"
+        ? { kind: "added", id, range, login: result.login }
+        : null
     default:
       return result.proposed === true && body !== null
         ? { kind: "comment", id, range, body }
