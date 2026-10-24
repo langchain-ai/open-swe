@@ -1,3 +1,6 @@
-from openswe.reviewer import get_reviewer_agent, traced_reviewer_agent
+from openswe.graphs.read_only import read_only_graph
 
-__all__ = ["get_reviewer_agent", "traced_reviewer_agent"]
+# langgraph.json entrypoint: reads of threads from before Managed Deep Agents.
+traced_reviewer_agent = read_only_graph
+
+__all__ = ["traced_reviewer_agent"]

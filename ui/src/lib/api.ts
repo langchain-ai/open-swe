@@ -97,6 +97,21 @@ export interface WorkspaceApiKey {
   status: "active" | "expired" | "revoked"
 }
 
+/** A token that lets one person's Claude Code hooks mirror their sessions. */
+export interface ClaudeCodeSyncToken {
+  id: string
+  name: string
+  token_suffix: string
+  created_at: string
+  last_used_at: string | null
+}
+
+/** A freshly minted token: the only time its secret and hooks settings are shown. */
+export interface MintedClaudeCodeSyncToken extends ClaudeCodeSyncToken {
+  secret: string
+  settings: Record<string, unknown>
+}
+
 const API_BASE = dashboardApiBase()
 
 const GITHUB_IMAGE_HOST_RE =
@@ -296,7 +311,6 @@ export interface OptionsPayload {
 }
 
 export interface Profile {
-  experimental_task_coordination?: boolean
   experimental_assistant_ui?: boolean | null
   experimental_background_callbacks?: boolean | null
   login?: string
@@ -320,7 +334,6 @@ export interface Profile {
 }
 
 export interface ProfileUpdate {
-  experimental_task_coordination?: boolean
   experimental_assistant_ui?: boolean | null
   experimental_background_callbacks?: boolean | null
   default_repo?: string | null
@@ -1571,6 +1584,17 @@ export const api = {
     ),
   deleteAgentInstructions: (full_name: string) =>
     request<void>(`/agent-instructions/${encodeURIComponent(full_name)}`, {
+      method: "DELETE",
+    }),
+  listClaudeCodeSyncTokens: () =>
+    request<ClaudeCodeSyncToken[]>("/claude-code/tokens"),
+  createClaudeCodeSyncToken: (name: string) =>
+    request<MintedClaudeCodeSyncToken>("/claude-code/tokens", {
+      method: "POST",
+      body: JSON.stringify({ name }),
+    }),
+  revokeClaudeCodeSyncToken: (id: string) =>
+    request<void>(`/claude-code/tokens/${encodeURIComponent(id)}`, {
       method: "DELETE",
     }),
   listWorkspaceApiKeys: (slug: string) =>

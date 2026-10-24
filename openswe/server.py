@@ -11,7 +11,7 @@ the agent itself is stateless.
 import hashlib
 import logging
 import warnings
-from collections.abc import Awaitable, Callable, Mapping, Sequence
+from collections.abc import Mapping, Sequence
 from pathlib import Path
 from typing import Any, cast
 from uuid import UUID
@@ -23,7 +23,6 @@ logger = logging.getLogger(__name__)
 _MODEL_ROUTING_SPLIT = 0.5
 
 from langgraph.graph.state import RunnableConfig
-from langgraph.pregel import Pregel
 from langgraph.runtime import Runtime
 from langgraph_sdk import get_client
 
@@ -35,33 +34,20 @@ from dataclasses import replace
 # Suppress Pydantic v1 compatibility warnings from langchain on Python 3.14+
 warnings.filterwarnings("ignore", message=".*Pydantic V1.*", category=UserWarning)
 
-from deepagents import create_deep_agent
 from deepagents.backends.composite import CompositeBackend
 from deepagents.backends.filesystem import FilesystemBackend
 from deepagents.backends.protocol import BackendProtocol, SandboxBackendProtocol
 from deepagents.backends.store import StoreBackend
-from deepagents.middleware.filesystem import FilesystemMiddleware
 from deepagents.middleware.skills import SkillsMiddleware
-from deepagents.middleware.subagents import GENERAL_PURPOSE_SUBAGENT, SubAgent
-from langchain.agents.middleware import ModelCallLimitMiddleware, ToolRetryMiddleware
-from langchain.agents.middleware.types import AgentMiddleware, ToolCallRequest
+from deepagents.middleware.subagents import GENERAL_PURPOSE_SUBAGENT
+from langchain.agents.middleware import ModelCallLimitMiddleware
+from langchain.agents.middleware.types import AgentMiddleware
 from langchain_anthropic.middleware import AnthropicPromptCachingMiddleware
 from langchain_core.language_models import BaseChatModel
-from langchain_core.messages import HumanMessage, ToolMessage
+from langchain_core.messages import HumanMessage
 from langchain_core.tools import BaseTool
 from langchain_quickjs._ptc import is_valid_ptc_tool_name, to_camel_case
-from langgraph.types import Command
 from langsmith.sandbox import SandboxRetryableConnectionError
-
-
-class _DisableInheritedMiddleware(AgentMiddleware):
-    def __init__(self, name: str) -> None:
-        self._name = name
-
-    @property
-    def name(self) -> str:
-        return self._name
-
 
 from openswe.analytics.usage import record_agent_invocation_usage
 from openswe.bridge.cli_result import cli_result
@@ -103,19 +89,11 @@ from openswe.middleware import (
     BasePrepareRunMiddleware,
     DynamicToolMiddleware,
     ExcludeToolsMiddleware,
-    ModelCallTimeoutMiddleware,
     ModelErrorMiddleware,
     ModelFallbackMiddleware,
     ModelSelectionMiddleware,
     PullRequestCreationGuardMiddleware,
     RequireUserReplyMiddleware,
-    SanitizeFireworksMessagesMiddleware,
-    SanitizeOpenAIResponsesMiddleware,
-    SanitizeThinkingBlocksMiddleware,
-    StableToolResultOrderMiddleware,
-    SubdirAgentsReadMiddleware,
-    ToolErrorMiddleware,
-    ValidateImageReadsMiddleware,
     WorkflowPushGuardMiddleware,
     WorkspaceSkillsMiddleware,
     check_message_queue_before_model,
@@ -123,12 +101,9 @@ from openswe.middleware import (
     notify_step_limit_reached,
     record_run_usage,
     refresh_github_proxy_before_model,
-    task_on_failure,
-    task_retry_on,
 )
 from openswe.middleware.client_tools import ClientToolsMiddleware
 from openswe.middleware.conversation_offloading import ConversationOffloadingMiddleware
-from openswe.middleware.image_model_fallback import ImageModelFallbackMiddleware
 from openswe.middleware.model_selection import ModelSelectionState, RoutingMode
 from openswe.middleware.prepare_run import PrepareRunState
 from openswe.middleware.require_cli_result import RequireCliResultMiddleware
@@ -148,19 +123,17 @@ from openswe.model_request import (
 )
 from openswe.openai_responses.client_tools import CLIENT_OWNED_SERVER_TOOLS
 from openswe.prompt import construct_system_prompt
-from openswe.prompts import apply_tool_descriptions, common_prompt, prompt, warm_tool_schemas
+from openswe.prompts import apply_tool_descriptions, prompt, warm_tool_schemas
 from openswe.review_guide.middleware import ReviewGuideMiddleware
 from openswe.review_guide.sessions import ReviewGuideSession
 from openswe.run_config import RunConfig
 from openswe.runtime.constants import (
     DEFAULT_LLM_MAX_TOKENS,
-    DEFAULT_RECURSION_LIMIT,
     MODEL_CALL_RECURSION_LIMIT,
 )
 from openswe.runtime.constants import (
     DEFAULT_LLM_MODEL_ID as DEFAULT_LLM_MODEL_ID,
 )
-from openswe.runtime.execution import bindable_config, graph_loaded_for_execution
 from openswe.sandboxes.lifecycle import (
     ensure_sandbox_for_thread,
     get_cached_sandbox_backend,
@@ -223,6 +196,7 @@ from openswe.tools import (
     monitor,
     open_pull_request,
     output_iframe,
+    publish_artifact,
     publish_workspace,
     read_only_sql,
     read_user_settings,
@@ -233,7 +207,6 @@ from openswe.tools import (
     request_pr_review,
     request_rollout_check,
     save_organization_skill,
-    save_plan,
     save_user_instructions,
     save_user_settings,
     save_user_skill,
@@ -277,7 +250,6 @@ from openswe.tools.submit_review_assessment_feedback import submit_review_assess
 from openswe.tools.task_threads import (
     control_worker,
     message_task_thread,
-    spawn_worker,
     task_status,
 )
 from openswe.users import User
@@ -302,7 +274,7 @@ from openswe.utils.model import (
 )
 from openswe.utils.startup_trace import aphase
 from openswe.utils.thread_participants import PARTICIPANT_LOGINS_KEY, participant_logins
-from openswe.utils.thread_reads import read_thread, shared_thread_reads
+from openswe.utils.thread_reads import read_thread
 from openswe.utils.thread_settings import (
     ThreadSettings,
     load_thread_settings,
@@ -378,20 +350,12 @@ def _tool_description_values() -> dict[str, dict[str, object]]:
 def warm_agent_build() -> None:
     """Pay a worker's one-time graph-building costs at startup instead of on its first run.
 
-    That is every exported tool's schemas, plus whatever the first deep agent a
-    process builds caches for the rest (deepagents scans installed packages once).
+    That is every exported tool's schemas.
     """
-    from langchain_core.language_models.fake_chat_models import FakeListChatModel
-
     import openswe.tools as tools
 
     functions = [getattr(tools, name) for name in tools.__all__]
     warm_tool_schemas(functions, _tool_description_values())
-    create_deep_agent(
-        model=FakeListChatModel(responses=[""]),
-        system_prompt="",
-        tools=apply_tool_descriptions(functions, _tool_description_values()),
-    )
 
 
 def _registered_tool_name(value: Any) -> str:
@@ -621,32 +585,6 @@ INCIDENT_AUTOMATIC_EXCLUDED_TOOLS: frozenset[str] = frozenset(
 DM_EXCLUDED_TOOLS: frozenset[str] = frozenset({"slack_add_reaction"})
 
 
-def _subagent_model_middleware() -> list[AgentMiddleware[Any, Any, Any]]:
-    """Provider guards for subagent model calls.
-
-    Subagents compile into their own graphs, so parent middleware never wraps them.
-    """
-    return cast(
-        list[AgentMiddleware[Any, Any, Any]],
-        [
-            SanitizeOpenAIResponsesMiddleware(),
-            ModelErrorMiddleware(),
-            ModelCallTimeoutMiddleware(),
-        ],
-    )
-
-
-def _subagent_middleware(
-    dynamic_tools: DynamicToolMiddleware | None,
-) -> list[AgentMiddleware[Any, Any, Any]]:
-    middleware: list[AgentMiddleware[Any, Any, Any]] = []
-    if dynamic_tools is not None:
-        middleware.append(dynamic_tools)
-    middleware.append(WorkflowPushGuardMiddleware())
-    middleware.extend(_subagent_model_middleware())
-    return middleware
-
-
 def _is_subagent_excluded_tool(name: str) -> bool:
     """Return whether a tool requires the parent agent."""
     if name in SOURCE_FREE_SLACK_TOOLS:
@@ -677,21 +615,6 @@ def _is_subagent_excluded_tool(name: str) -> bool:
     }
 
 
-class _SubagentToolGuard(AgentMiddleware):
-    async def awrap_tool_call(
-        self,
-        request: ToolCallRequest,
-        handler: Callable[[ToolCallRequest], Awaitable[ToolMessage | Command]],
-    ) -> ToolMessage | Command:
-        name = request.tool_call["name"]
-        if _is_subagent_excluded_tool(name):
-            return ToolMessage(
-                content=prompt("tools/subagent-unavailable"),
-                tool_call_id=request.tool_call["id"],
-            )
-        return await handler(request)
-
-
 def fallback_model_choice(primary_model_id: str) -> ModelChoice | None:
     """The cross-provider model a call on ``primary_model_id`` falls back to, if any."""
     fallback_model_id = ENV.LLM_FALLBACK_MODEL_ID.optional() or fallback_model_id_for(
@@ -710,43 +633,6 @@ def _general_purpose_description() -> str:
         f"{GENERAL_PURPOSE_SUBAGENT['description']} "
         f"{prompt('system/general-purpose-subagent-suffix')}"
     )
-
-
-def _general_purpose_subagent(
-    model: BaseChatModel,
-    tools: Sequence[BaseTool | Callable[..., object] | dict[str, object]],
-    dynamic_tools: DynamicToolMiddleware | None = None,
-    *,
-    offloading: ConversationOffloadingMiddleware | None = None,
-    skills_middleware: SkillsMiddleware | None = None,
-    incident_middleware: AgentMiddleware | None = None,
-    guard_middleware: Sequence[AgentMiddleware[Any, Any, Any]] = (),
-    inherited_middleware_exclusions: Sequence[str] = (),
-) -> SubAgent:
-    subagent: SubAgent = {
-        "name": GENERAL_PURPOSE_SUBAGENT["name"],
-        "description": _general_purpose_description(),
-        "mode": "fork",
-        "model": model,
-        "tools": list(tools),
-        "middleware": cast(
-            list[AgentMiddleware[Any, Any, Any]],
-            [
-                _DisableInheritedMiddleware(RequireUserReplyMiddleware.__name__),
-                *(_DisableInheritedMiddleware(name) for name in inherited_middleware_exclusions),
-                _SubagentToolGuard(),
-                AnthropicPromptCachingMiddleware(ttl="1h", unsupported_model_behavior="ignore"),
-                TranscriptMiddleware(),
-                ExcludeToolsMiddleware(excluded=SHELL_SEARCH_EXCLUDED_TOOLS),
-                *([incident_middleware] if incident_middleware else []),
-                *([skills_middleware] if skills_middleware else []),
-                *_subagent_middleware(dynamic_tools),
-                *guard_middleware,
-                *([offloading] if offloading else []),
-            ],
-        ),
-    }
-    return subagent
 
 
 # Workspace-admin tools; each declares where it may run with `@access`.
@@ -839,7 +725,6 @@ _NOT_FROM_CODE = (
             "switch_to_performance_model",
             "record_human_input",
             "load_integration_tools",
-            "spawn_worker",
             "control_worker",
             "message_task_thread",
         }
@@ -1438,27 +1323,13 @@ class PrepareAgentRunMiddleware(BasePrepareRunMiddleware):
         }
 
 
-async def _get_agent(config: RunnableConfig) -> Pregel:
-    return await build_agent(config)
-
-
-async def build_agent(config: RunnableConfig, *, tool_surface: ToolSurface | None = None) -> Pregel:
-    """Get or create an agent with a sandbox for the given thread."""
+async def plan_agent(config: RunnableConfig, surface: ToolSurface) -> None:
+    """Plan an agent run into ``surface``: the tools, middleware, models and subagents its MDA run plays."""
     configurable = config.get("configurable") or {}
     cfg = RunConfig.parse(configurable)
     thread_id = cfg.thread_id
-
-    config["recursion_limit"] = DEFAULT_RECURSION_LIMIT
-
-    if thread_id is None or not graph_loaded_for_execution(config):
-        logger.info("No thread_id or not for execution, returning agent without sandbox")
-        return create_deep_agent(
-            system_prompt="",
-            tools=[],
-            middleware=[
-                AnthropicPromptCachingMiddleware(ttl="1h", unsupported_model_behavior="ignore")
-            ],
-        ).with_config(bindable_config(config))
+    if thread_id is None:
+        raise ValueError("An agent run needs a thread")
 
     from openswe.incidents.runtime import IncidentMiddleware, IncidentSession, load_incident_session
 
@@ -1501,8 +1372,6 @@ async def build_agent(config: RunnableConfig, *, tool_surface: ToolSurface | Non
         )
 
     backend = get_cached_sandbox_backend(thread_id, reconnect=reconnect_backend)
-    if tool_surface is None:
-        backend.start()
 
     # `profile_login` is whoever sent the message that started this run; it drives
     # authorization. Personal integrations require verified private ownership.
@@ -1566,7 +1435,11 @@ async def build_agent(config: RunnableConfig, *, tool_surface: ToolSurface | Non
         thread_settings["requested_model"] = None
         thread_settings["model_handoff_complete"] = True
         settings_changed = True
-    elif cfg.source == "dashboard" and cfg.model_selection == "auto":
+    elif (
+        cfg.source == "dashboard"
+        and cfg.model_selection == "auto"
+        and (reset_model_selection or not isinstance(stored_model, str))
+    ):
         if reset_model_selection:
             thread_settings["requested_model"] = None
             thread_settings["model_handoff_complete"] = True
@@ -1740,7 +1613,7 @@ async def build_agent(config: RunnableConfig, *, tool_surface: ToolSurface | Non
         background_execute,
         background_task,
         *((monitor,) if monitors_enabled else ()),
-        save_plan,
+        publish_artifact,
         save_user_instructions,
         save_user_settings,
         save_user_skill,
@@ -1749,11 +1622,6 @@ async def build_agent(config: RunnableConfig, *, tool_surface: ToolSurface | Non
         search_pull_requests,
         get_thread,
         manage_thread,
-        *(
-            [spawn_worker]
-            if task_coordination and task_coordination.enabled and not task_coordination.is_worker
-            else []
-        ),
         *([task_status, message_task_thread, control_worker] if task_coordination else []),
         *((start_thread,) if _slack_concierge_run(cfg) else ()),
         manage_baby_sit,
@@ -1851,8 +1719,7 @@ async def build_agent(config: RunnableConfig, *, tool_surface: ToolSurface | Non
         ]
     if guide is not None:
         static_tools = [*static_tools, *walkthrough_tools(guide.mode)]
-    if tool_surface is not None:
-        static_tools = [*static_tools, search_tools_tool(tool_surface, code_name)]
+    static_tools = [*static_tools, search_tools_tool(surface, code_name)]
     static_tools = apply_tool_descriptions(static_tools, _tool_description_values())
     if stop_summary_mode:
         static_tools = apply_tool_descriptions([slack_read_thread_messages, slack_reply])
@@ -1916,7 +1783,9 @@ async def build_agent(config: RunnableConfig, *, tool_surface: ToolSurface | Non
         and not cfg.continued_from_thread_id
         else None
     )
-    image_fallback: ImageModelFallbackMiddleware | None = None
+    # The model a call to a text-only model goes to instead once the conversation
+    # holds an image; the MDA run makes the swap.
+    vision_model: ModelChoice | None = None
     if (
         not model_supports_images(model_id)
         or any(not option["supports_images"] for option in (requested_models or {}).values())
@@ -1927,21 +1796,19 @@ async def build_agent(config: RunnableConfig, *, tool_surface: ToolSurface | Non
             )
         )
     ):
-        vision_model = main_model
+        vision_model = ModelChoice(model_id, dict(model_kwargs))
         if not model_supports_images(model_id):
             vision_model_id, vision_effort = default_vision_model_pair()
-            vision_model = _make_model_or_defer(
+            vision_model = ModelChoice(
                 vision_model_id,
-                use_gateway=use_gateway,
-                **provider_model_kwargs(
-                    vision_model_id, vision_effort, max_tokens=DEFAULT_LLM_MAX_TOKENS
+                dict(
+                    provider_model_kwargs(
+                        vision_model_id, vision_effort, max_tokens=DEFAULT_LLM_MAX_TOKENS
+                    )
                 ),
             )
-        image_fallback = ImageModelFallbackMiddleware(vision_model)
-        if not model_supports_images(model_id):
-            image_fallback.add_text_only_model(main_model)
 
-    configurable["image_model_fallback_enabled"] = image_fallback is not None
+    configurable["image_model_fallback_enabled"] = vision_model is not None
 
     def requested_model_factory(
         requested_model: str, requested_effort: str | None
@@ -1956,8 +1823,6 @@ async def build_agent(config: RunnableConfig, *, tool_surface: ToolSurface | Non
                 max_tokens=DEFAULT_LLM_MAX_TOKENS,
             ),
         )
-        if image_fallback is not None and not option["supports_images"]:
-            image_fallback.add_text_only_model(model)
         fallback_middleware.register_fallback(model, make_fallback_model(requested_model))
         return model
 
@@ -1975,10 +1840,6 @@ async def build_agent(config: RunnableConfig, *, tool_surface: ToolSurface | Non
         for route, (routed_model_id, effort) in routing_defaults.items()
         if adaptive_model_routing
     }
-    if image_fallback is not None:
-        for route, model in routing_models.items():
-            if not model_supports_images(routing_defaults[route][0]):
-                image_fallback.add_text_only_model(model)
     model_selection = ModelSelectionMiddleware(
         routing_models,
         main_model,
@@ -1988,15 +1849,6 @@ async def build_agent(config: RunnableConfig, *, tool_surface: ToolSurface | Non
         },
         routing_mode=model_routing_mode,
         requested_model_factory=requested_model_factory,
-    )
-    subagent_model = (
-        main_model
-        if subagent_model_id == model_id
-        else _make_model_or_defer(
-            subagent_model_id,
-            use_gateway=use_gateway,
-            **subagent_model_kwargs,
-        )
     )
     title_model = _make_model_or_defer(
         title_model_id,
@@ -2038,7 +1890,6 @@ async def build_agent(config: RunnableConfig, *, tool_surface: ToolSurface | Non
     middleware = cast(
         list[AgentMiddleware[Any, Any, Any]],
         [
-            FilesystemMiddleware(backend=agent_backend, offload_binary_content=True),
             AnthropicPromptCachingMiddleware(ttl="1h", unsupported_model_behavior="ignore"),
             ConversationOffloadingMiddleware(
                 main_model, agent_backend, manual=cfg.offload_conversation is True
@@ -2053,26 +1904,13 @@ async def build_agent(config: RunnableConfig, *, tool_surface: ToolSurface | Non
             *([client_tools] if client_tools else []),
             *([IncidentMiddleware(incident_session)] if incident_session is not None else []),
             skills_middleware,
-            ValidateImageReadsMiddleware(),
             ModelCallLimitMiddleware(
                 run_limit=incident_session.policy.max_model_calls
                 if incident_session is not None
                 else MODEL_CALL_RECURSION_LIMIT,
                 exit_behavior="end",
             ),
-            ToolErrorMiddleware(),
             ExcludeToolsMiddleware(excluded=excluded_tools),
-            SubdirAgentsReadMiddleware(),
-            ToolRetryMiddleware(
-                max_retries=2,
-                tools=["task"],
-                retry_on=task_retry_on,
-                on_failure=task_on_failure,
-                initial_delay=1.0,
-                max_delay=10.0,
-            ),
-            PullRequestCreationGuardMiddleware(),
-            WorkflowPushGuardMiddleware(),
             *([task_coordination] if task_coordination else []),
             *(
                 []
@@ -2101,105 +1939,61 @@ async def build_agent(config: RunnableConfig, *, tool_surface: ToolSurface | Non
             record_run_usage,
             model_selection,
             fallback_middleware,
-            *([image_fallback] if image_fallback else []),
             *([dynamic_tool_middleware] if dynamic_tool_middleware else []),
-            SanitizeFireworksMessagesMiddleware(),
-            SanitizeOpenAIResponsesMiddleware(),
-            SanitizeThinkingBlocksMiddleware(),
-            StableToolResultOrderMiddleware(),
             ModelErrorMiddleware(),
-            # Innermost, so the deadline covers the provider call itself and a
-            # timeout escalates outward to the fallback model.
-            ModelCallTimeoutMiddleware(),
         ],
     )
-    async with aphase(thread_id, "factory.graph_assembly"):
-        graph = create_deep_agent(
-            model=main_model,
-            system_prompt=common_prompt(),
-            tools=main_tools,
-            subagents=[
-                _general_purpose_subagent(
-                    subagent_model,
-                    tools=main_tools,
-                    skills_middleware=skills_middleware,
-                    dynamic_tools=dynamic_tool_middleware,
-                    offloading=ConversationOffloadingMiddleware(subagent_model, agent_backend),
-                    incident_middleware=IncidentMiddleware(incident_session)
-                    if incident_session is not None
-                    else None,
-                    guard_middleware=[PullRequestCreationGuardMiddleware()],
-                    inherited_middleware_exclusions=(
-                        check_message_queue_before_model.name,
-                        deliver_event_matches_before_model.name,
-                        model_selection.name,
-                    ),
-                ),
-            ],
-            skills=skill_sources,
-            backend=agent_backend,
-            middleware=middleware,
-        ).with_config(bindable_config(config))
-    if tool_surface is not None:
-        tool_surface.graph = graph
-        tool_surface.middleware = middleware
-        tool_surface.models = SurfaceModels(
-            main=ModelChoice(model_id, dict(model_kwargs)),
-            subagent=ModelChoice(
-                subagent_model_id,
-                dict(model_kwargs if subagent_model_id == model_id else subagent_model_kwargs),
-            ),
-            use_gateway=bool(use_gateway),
-            routes={
-                route: ModelChoice(
-                    routed_model_id,
-                    dict(
-                        provider_model_kwargs(
-                            routed_model_id, effort, max_tokens=DEFAULT_LLM_MAX_TOKENS
-                        )
-                    ),
-                )
-                for route, (routed_model_id, effort) in routing_defaults.items()
-                if adaptive_model_routing
-            },
-        )
-        tool_surface.subagents = [
-            SurfaceSubagent(
-                name=GENERAL_PURPOSE_SUBAGENT["name"],
-                description=_general_purpose_description(),
-                system_prompt=GENERAL_PURPOSE_SUBAGENT["system_prompt"],
-                tools=(
-                    *FILESYSTEM_TOOL_NAMES,
-                    *(
-                        name
-                        for name in map(_registered_tool_name, subagent_tools)
-                        if not _is_subagent_excluded_tool(name)
-                    ),
+    surface.base_tools = main_tools
+    surface.middleware = middleware
+    surface.files = agent_backend
+    surface.artifacts_root = artifacts_root
+    surface.shell_guards = [PullRequestCreationGuardMiddleware(), WorkflowPushGuardMiddleware()]
+    surface.file_checks = ("image_reads", "agents_md")
+    surface.models = SurfaceModels(
+        main=ModelChoice(model_id, dict(model_kwargs)),
+        subagent=ModelChoice(
+            subagent_model_id,
+            dict(model_kwargs if subagent_model_id == model_id else subagent_model_kwargs),
+        ),
+        use_gateway=bool(use_gateway),
+        routes={
+            route: ModelChoice(
+                routed_model_id,
+                dict(
+                    provider_model_kwargs(
+                        routed_model_id, effort, max_tokens=DEFAULT_LLM_MAX_TOKENS
+                    )
                 ),
             )
-        ]
-        tool_surface.dynamic = dynamic_tool_middleware
-        tool_surface.code_mode = True
-        tool_surface.excluded = (
-            STOP_SUMMARY_EXCLUDED_TOOLS
-            if stop_summary_mode
-            else _slack_ask_excluded_tools(cfg)
-            if slack_ask_mode
-            else DEEP_AGENT_EXCLUDED_TOOLS | INCIDENT_AUTOMATIC_EXCLUDED_TOOLS
-            if incident_automatic
-            else DEEP_AGENT_EXCLUDED_TOOLS
+            for route, (routed_model_id, effort) in routing_defaults.items()
+            if adaptive_model_routing
+        },
+        vision=vision_model,
+    )
+    surface.subagents = [
+        SurfaceSubagent(
+            name=GENERAL_PURPOSE_SUBAGENT["name"],
+            description=_general_purpose_description(),
+            system_prompt=GENERAL_PURPOSE_SUBAGENT["system_prompt"],
+            tools=(
+                *FILESYSTEM_TOOL_NAMES,
+                *(
+                    name
+                    for name in map(_registered_tool_name, subagent_tools)
+                    if not _is_subagent_excluded_tool(name)
+                ),
+            ),
         )
-    return graph
-
-
-async def get_agent(config: RunnableConfig) -> Pregel:
-    configurable = (config or {}).get("configurable") or {}
-    thread_id = configurable.get("thread_id")
-    if not isinstance(thread_id, str):
-        return await _get_agent(config)
-    async with aphase(thread_id, "factory.total"), shared_thread_reads():
-        return await _get_agent(config)
-
-
-# langgraph.json entrypoint. Runs trace into LANGSMITH_PROJECT like everything else.
-traced_agent = get_agent
+    ]
+    surface.dynamic = dynamic_tool_middleware
+    surface.backend_paths = tuple(skill_routes)
+    surface.code_mode = True
+    surface.excluded = (
+        STOP_SUMMARY_EXCLUDED_TOOLS
+        if stop_summary_mode
+        else _slack_ask_excluded_tools(cfg)
+        if slack_ask_mode
+        else DEEP_AGENT_EXCLUDED_TOOLS | INCIDENT_AUTOMATIC_EXCLUDED_TOOLS
+        if incident_automatic
+        else DEEP_AGENT_EXCLUDED_TOOLS
+    )

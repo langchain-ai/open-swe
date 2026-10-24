@@ -7,9 +7,29 @@ use anyhow::Error;
 use serde_json::Value;
 
 use crate::langsmith::{
-    langsmith_api_base_url, langsmith_host_backend_url, parse_host_url, resolve_login_api_url,
-    self_hosted_host_backend_url, Secret,
+    langsmith_api_base_url, langsmith_host_backend_url, lookup_env, parse_host_url,
+    resolve_login_api_url, self_hosted_host_backend_url, Secret,
 };
+
+/// The Agent Server URL channel webhooks point at: absolute HTTPS without
+/// credentials, query, or fragment.
+pub(crate) fn validated_agent_server_url(raw: &str) -> anyhow::Result<reqwest::Url> {
+    use anyhow::Context;
+    let url = reqwest::Url::parse(raw).context("Agent Server URL is invalid")?;
+    if url.scheme() != "https"
+        || url.host_str().is_none()
+        || !url.username().is_empty()
+        || url.password().is_some()
+        || url.query().is_some()
+        || url.fragment().is_some()
+        || url.cannot_be_a_base()
+    {
+        anyhow::bail!(
+            "Agent Server URL must be absolute HTTPS without credentials, query, or fragment"
+        );
+    }
+    Ok(url)
+}
 
 /// Default host backend API URL.
 pub const DEFAULT_HOST_URL: &str = "https://api.host.langchain.com";
@@ -112,6 +132,24 @@ pub const RESERVED_ENV_VARS: &[&str] = &[
     // Deploy-owned: runtime sandbox calls must use the same platform API surface
     // as deploy preflight, rather than deriving one from the tracing endpoint.
     "MDA_SANDBOX_API_ENDPOINT",
+    // CLI-only: point channel app setup at another Agent Auth. The key belongs
+    // to that LangSmith, never to the deployment.
+    "MDA_AGENT_AUTH_URL",
+    "MDA_AGENT_AUTH_API_KEY",
+    "MDA_AGENT_AUTH_TENANT_ID",
+    // CLI-only: Agent Auth's OAuth callback, which a new Linear app lists, when
+    // the CLI cannot derive it (the local stack sets it).
+    "MDA_AGENT_AUTH_OAUTH_CALLBACK_URL",
+    // CLI-only: where a new GitHub App is created when deploy cannot ask.
+    "MDA_GITHUB_APP_OWNER",
+    // CLI-only: a Linear app's credentials when deploy cannot ask. Agent Auth
+    // keeps them; the deployment never gets them as env vars.
+    "MDA_LINEAR_CLIENT_ID",
+    "MDA_LINEAR_CLIENT_SECRET",
+    "MDA_LINEAR_WEBHOOK_SECRET",
+    "MDA_LINEAR_WORKSPACE",
+    // CLI-only: a brought GitHub App's webhook URL that stays where it is.
+    "MDA_GITHUB_WEBHOOK_ELSEWHERE",
 ];
 
 /// Convert env vars into deployment secrets, dropping reserved and empty values.
@@ -202,6 +240,9 @@ pub const RECIPE_DIGEST_LENGTH: usize = 16;
 /// ingress (Slack, GitHub) reads this so runs target the compiled graph instead
 /// of the hardcoded `"agent"` fallback.
 pub const MDA_ASSISTANT_ID_ENV: &str = "MDA_ASSISTANT_ID";
+/// The LangSmith UI of the environment the deployment runs in, for links that
+/// channels post into LangSmith Studio.
+pub const MDA_LANGSMITH_URL_ENV: &str = "MDA_LANGSMITH_URL";
 
 /// Separator between the deployment name and the identity digest in a managed
 /// sandbox name.
@@ -436,6 +477,22 @@ pub fn ensure_assistant_id_secret(secrets: &mut Vec<Secret>, assistant_id: &str)
     });
 }
 
+/// Inject [`MDA_LANGSMITH_URL_ENV`] so channels link to the deployment's own
+/// LangSmith environment, the same one deploy prints as the dashboard.
+///
+/// Same ownership rule as [`ensure_deployment_name_secret`]: deploy owns the
+/// value and overwrites a stale `.env` copy.
+pub fn ensure_langsmith_url_secret(secrets: &mut Vec<Secret>, url: &str) {
+    if url.is_empty() {
+        return;
+    }
+    secrets.retain(|secret| secret.name != MDA_LANGSMITH_URL_ENV);
+    secrets.push(Secret {
+        name: MDA_LANGSMITH_URL_ENV.to_string(),
+        value: url.to_string(),
+    });
+}
+
 /// Prefix shared by every managed sandbox a deployment creates.
 ///
 /// This is the stable primary-name prefix. Deployments whose full primary name
@@ -577,13 +634,10 @@ pub fn resolve_https_public_api_url(env_vars: &BTreeMap<String, String>) -> Publ
 /// Self-hosted LangSmith serves the platform API at the configured origin and
 /// the Deployment API below `/api-host` on that origin.
 pub fn resolve_langsmith_api_bases(env_vars: &BTreeMap<String, String>) -> (String, String) {
-    let endpoint = non_empty_env(env_vars, LANGSMITH_ENDPOINT_ENV).or_else(|| {
-        std::env::var(LANGSMITH_ENDPOINT_ENV)
-            .ok()
-            .map(|value| value.trim().to_string())
-            .filter(|value| !value.is_empty())
-            .map(|value| value.trim_end_matches('/').to_string())
-    });
+    let endpoint = lookup_env(LANGSMITH_ENDPOINT_ENV, env_vars, &mut |key| {
+        std::env::var(key).ok()
+    })
+    .map(|value| value.trim_end_matches('/').to_string());
 
     match endpoint.as_deref() {
         Some(endpoint) if is_local_langsmith_nginx(endpoint) => (
@@ -613,26 +667,21 @@ pub fn resolve_langsmith_api_bases(env_vars: &BTreeMap<String, String>) -> (Stri
 
 /// Platform API origin for device login and Fleet.
 ///
-/// Prefers project `.env` then process env for `LANGSMITH_ENDPOINT`, then
+/// Prefers process env then project `.env` for `LANGSMITH_ENDPOINT`, then
 /// derives from the host backend (`*.api.host.langchain.com` →
 /// `*.api.smith.langchain.com`).
 pub fn resolve_platform_api_url(host_url: &str, env_vars: &BTreeMap<String, String>) -> String {
-    resolve_login_api_url(host_url, |key| {
-        non_empty_env(env_vars, key).or_else(|| {
-            std::env::var(key)
-                .ok()
-                .map(|value| value.trim().to_string())
-                .filter(|value| !value.is_empty())
-        })
-    })
+    resolve_platform_api_url_with(host_url, env_vars, |key| std::env::var(key).ok())
 }
 
-fn non_empty_env(env_vars: &BTreeMap<String, String>, key: &str) -> Option<String> {
-    env_vars
-        .get(key)
-        .map(|value| value.trim())
-        .filter(|value| !value.is_empty())
-        .map(|value| value.trim_end_matches('/').to_string())
+fn resolve_platform_api_url_with(
+    host_url: &str,
+    env_vars: &BTreeMap<String, String>,
+    process_env: impl Fn(&str) -> Option<String>,
+) -> String {
+    resolve_login_api_url(host_url, |key| {
+        lookup_env(key, env_vars, &mut |key| process_env(key))
+    })
 }
 
 /// Local `poe run-auth` nginx that fronts Fleet but not `/v2/deployments`.
@@ -1060,6 +1109,21 @@ mod tests {
     }
 
     #[test]
+    fn ensure_langsmith_url_secret_injects_and_overwrites() {
+        let mut secrets = vec![Secret {
+            name: MDA_LANGSMITH_URL_ENV.to_string(),
+            value: "https://stale.example".to_string(),
+        }];
+        ensure_langsmith_url_secret(
+            &mut secrets,
+            &smith_dashboard_base_url("https://eu.api.host.langchain.com"),
+        );
+        assert_eq!(secrets.len(), 1);
+        assert_eq!(secrets[0].name, MDA_LANGSMITH_URL_ENV);
+        assert_eq!(secrets[0].value, "https://eu.smith.langchain.com");
+    }
+
+    #[test]
     fn langsmith_endpoint_is_not_forwarded_from_env() {
         // Host rejects LANGSMITH_ENDPOINT as a user secret (HTTP 400 reserved).
         let mut env = BTreeMap::new();
@@ -1442,41 +1506,33 @@ mod tests {
     }
 
     #[test]
-    fn platform_api_url_prefers_dotenv_over_process_env() {
-        // Process env is global to the test binary, so all three cases share one
-        // save/restore window.
-        let mut dotenv = BTreeMap::new();
-        dotenv.insert(
+    fn platform_api_url_prefers_process_env_over_dotenv() {
+        let dotenv = BTreeMap::from([(
             LANGSMITH_ENDPOINT_ENV.to_string(),
             "https://eu.api.smith.langchain.com".to_string(),
-        );
-        let mut blank_dotenv = BTreeMap::new();
-        blank_dotenv.insert(LANGSMITH_ENDPOINT_ENV.to_string(), "   ".to_string());
+        )]);
+        let blank_dotenv =
+            BTreeMap::from([(LANGSMITH_ENDPOINT_ENV.to_string(), "   ".to_string())]);
+        let process = |key: &str| {
+            (key == LANGSMITH_ENDPOINT_ENV)
+                .then(|| "https://from-process-env.example.com".to_string())
+        };
+        let no_process = |_: &str| None;
 
-        let previous = std::env::var(LANGSMITH_ENDPOINT_ENV).ok();
-        std::env::set_var(
-            LANGSMITH_ENDPOINT_ENV,
-            "https://from-process-env.example.com",
+        // The process env wins over `.env` for this CLI setting (unlike
+        // deployment secrets, which only ever come from `.env`).
+        assert_eq!(
+            resolve_platform_api_url_with(DEFAULT_HOST_URL, &dotenv, process),
+            "https://from-process-env.example.com"
         );
-        let outcome = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-            (
-                resolve_platform_api_url(DEFAULT_HOST_URL, &dotenv),
-                resolve_platform_api_url(DEFAULT_HOST_URL, &BTreeMap::new()),
-                resolve_platform_api_url(DEFAULT_HOST_URL, &blank_dotenv),
-            )
-        }));
-        match previous {
-            Some(value) => std::env::set_var(LANGSMITH_ENDPOINT_ENV, value),
-            None => std::env::remove_var(LANGSMITH_ENDPOINT_ENV),
-        }
-        let (from_dotenv, from_process, from_blank) =
-            outcome.expect("resolve_platform_api_url panicked");
-
-        // `.env` wins over the process env, which is still a valid source for
-        // this variable (unlike deployment secrets). A blank entry falls through.
-        assert_eq!(from_dotenv, "https://eu.api.smith.langchain.com");
-        assert_eq!(from_process, "https://from-process-env.example.com");
-        assert_eq!(from_blank, "https://from-process-env.example.com");
+        assert_eq!(
+            resolve_platform_api_url_with(DEFAULT_HOST_URL, &blank_dotenv, process),
+            "https://from-process-env.example.com"
+        );
+        assert_eq!(
+            resolve_platform_api_url_with(DEFAULT_HOST_URL, &dotenv, no_process),
+            "https://eu.api.smith.langchain.com"
+        );
     }
 
     #[test]
@@ -1711,6 +1767,18 @@ mod tests {
         assert_eq!(
             smith_dashboard_base_url("https://eu.api.host.langchain.com"),
             "https://eu.smith.langchain.com"
+        );
+    }
+
+    #[test]
+    fn dashboard_url_keeps_self_hosted_origin() {
+        assert_eq!(
+            smith_dashboard_base_url("https://langsmith.acme.internal/api-host/"),
+            "https://langsmith.acme.internal"
+        );
+        assert_eq!(
+            smith_dashboard_base_url("http://10.0.0.5:8080/api-host"),
+            "http://10.0.0.5:8080"
         );
     }
 

@@ -300,10 +300,7 @@ fn oauth_cancellation() -> anyhow::Error {
     io::Error::from(io::ErrorKind::Interrupted).into()
 }
 
-fn receive_oauth_status(
-    receiver: &Receiver<Result<String>>,
-    interrupt: &Interrupt,
-) -> Result<String> {
+fn receive_oauth_status<T>(receiver: &Receiver<Result<T>>, interrupt: &Interrupt) -> Result<T> {
     loop {
         if interrupt.is_requested() {
             return Err(oauth_cancellation());
@@ -318,11 +315,23 @@ fn receive_oauth_status(
     }
 }
 
-fn wait_for_oauth_status(
+/// The session's next status, long-polling Agent Auth on a thread so Ctrl-C
+/// stays responsive.
+pub(crate) fn wait_for_oauth_status(
     client: &langsmith::Client,
     session_id: &str,
     interrupt: &Interrupt,
 ) -> Result<String> {
+    wait_for_oauth_session(client, session_id, interrupt).map(|session| session.status)
+}
+
+/// The session once its status changes, e.g. with the `error_code` of a
+/// failed one, long-polling like [`wait_for_oauth_status`].
+pub(crate) fn wait_for_oauth_session(
+    client: &langsmith::Client,
+    session_id: &str,
+    interrupt: &Interrupt,
+) -> Result<langsmith::OAuthAuthorizationSession> {
     if interrupt.is_requested() {
         return Err(oauth_cancellation());
     }
@@ -333,25 +342,47 @@ fn wait_for_oauth_status(
     std::thread::spawn(move || {
         let result = client
             .get_oauth_authorization_session(&session_id, OAUTH_AUTHORIZATION_WAIT_SECONDS)
-            .map(|session| session.status)
-            .context("failed to check agent account sign-in");
+            .context("failed to check the OAuth authorization session");
         let _ = sender.send(result);
     });
     receive_oauth_status(&receiver, interrupt)
 }
 
+/// What a wait on an OAuth authorization session says when it ends badly.
+pub(crate) struct OAuthWaitMessages {
+    pub(crate) failed: &'static str,
+    pub(crate) expired: &'static str,
+    /// Followed by the status.
+    pub(crate) unexpected: &'static str,
+}
+
+const SIGN_IN_MESSAGES: OAuthWaitMessages = OAuthWaitMessages {
+    failed: "Agent account sign-in failed; try again.",
+    expired: "Agent account sign-in expired; run the command again.",
+    unexpected: "Agent account sign-in returned an unexpected status",
+};
+
 fn poll_oauth_authorization(
     initial_status: &str,
+    next_status: impl FnMut() -> Result<String>,
+) -> Result<()> {
+    poll_oauth_session(initial_status, next_status, &SIGN_IN_MESSAGES)
+}
+
+/// Follow a session from `initial_status` until it completes.
+pub(crate) fn poll_oauth_session(
+    initial_status: &str,
     mut next_status: impl FnMut() -> Result<String>,
+    messages: &OAuthWaitMessages,
 ) -> Result<()> {
     let mut status = initial_status.to_string();
     loop {
         match status.as_str() {
             "pending" => status = next_status()?,
             "completed" => return Ok(()),
-            "failed" => bail!("Agent account sign-in failed; try again."),
-            "expired" => bail!("Agent account sign-in expired; run the command again."),
-            other => bail!("Agent account sign-in returned an unexpected status: {other}."),
+            "failed" => bail!(messages.failed),
+            "expired" => bail!(messages.expired),
+            other => bail!("{}: {other}.", messages.unexpected),
         }
     }
 }
@@ -2056,6 +2087,7 @@ mod tests {
             id: "session-id".to_string(),
             status: "pending".to_string(),
             verification_url: "https://example.com/authorize".to_string(),
+            error_code: None,
         };
 
         let error = require_completed_client_credentials_session(&session)
@@ -2072,6 +2104,7 @@ mod tests {
             id: "session-id".to_string(),
             status: "failed".to_string(),
             verification_url: String::new(),
+            error_code: None,
         };
 
         let result = rollback_on_authorization_failure(

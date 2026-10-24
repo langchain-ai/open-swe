@@ -9,7 +9,7 @@ from __future__ import annotations
 
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Any, ClassVar, Never
+from typing import TYPE_CHECKING, Any, ClassVar, Never, NotRequired, TypedDict
 
 from managed_deepagents._managed_composition import (
     OMITTED,
@@ -39,8 +39,31 @@ if TYPE_CHECKING:
 
     #: Same tool union accepted by ``create_deep_agent`` / ``SubAgent``.
     DeepAgentTool = BaseTool | Callable[..., Any] | dict[str, Any]
-    #: Declarative, compiled, or async subagent specs from deepagents.
-    DeepAgentSubAgent = SubAgent | CompiledSubAgent | AsyncSubAgent
+    # `async` is a keyword, so the flag needs the functional TypedDict form.
+    _AsyncFlag = TypedDict("_AsyncFlag", {"async": bool})
+
+    class ManagedAsyncSubAgent(SubAgent, _AsyncFlag):
+        """A declarative subagent that MDA builds as its own graph."""
+
+        webhook: NotRequired[str]
+        """URL the Agent Server calls whenever a run of this subagent finishes."""
+
+        notify_parent: NotRequired[bool]
+        """Whether this subagent may wake this agent when it finishes while this agent is idle.
+
+        Defaults to `True`.
+
+        Set it to `False` when the application delivers results itself, for example
+        through `webhook`. This agent still sees the subagent's updates while it runs.
+
+        !!! warning "Beta"
+
+            `notify_parent` may change along with how subagents wake their parent.
+        """
+
+    #: Declarative, compiled, or async subagent specs from deepagents, plus
+    #: declarative specs marked `"async": True`.
+    DeepAgentSubAgent = SubAgent | ManagedAsyncSubAgent | CompiledSubAgent | AsyncSubAgent
     DeepAgentMiddleware = AgentMiddleware
     DeepAgentInterruptOn = bool | InterruptOnConfig
     DeepAgentResponseFormat = ResponseFormat[Any] | type[Any] | dict[str, Any]
@@ -95,6 +118,7 @@ def define_deep_agent(
     memory: MemoryDefinition | Omitted | None = OMITTED,
     disable_memory: bool | None = None,
     metadata: Mapping[str, object] | None = None,
+    replicate_traces: bool = True,
     **kwargs: Never,
 ) -> DeepAgentDefinition:
     """Define a Managed Deep Agent.
@@ -114,6 +138,14 @@ def define_deep_agent(
     Parameter types are the LangChain / deepagents types used by
     ``create_deep_agent`` (``BaseTool``, ``SubAgent``, ``AgentMiddleware``,
     ``FilesystemPermission``, …) so authoring stays aligned with the harness.
+
+    A subagent dict with ``"async": True`` runs as a background task in its own
+    graph. Unset ``model``, ``tools``, ``permissions``, and ``interrupt_on``
+    inherit from this agent; middleware and memory do not. Like a sync subagent,
+    it loads only the skill sources its ``skills`` names (``["/skills/"]`` for
+    this agent's skills). Its ``webhook``, if set, is a URL the Agent Server
+    calls when each of its runs finishes. Served agents also get a background
+    copy of the general-purpose subagent.
 
     ``metadata`` is MDA-owned authoring config (not a ``create_deep_agent``
     kwarg): the runtime applies it via ``.with_config({"metadata": ...})`` so
@@ -139,6 +171,7 @@ def define_deep_agent(
         )
     if metadata is not None and not isinstance(metadata, Mapping):
         raise TypeError("metadata must be a mapping")
+    _validate_async_subagents(subagents or ())
 
     config: dict[str, object] = {
         "name": name,
@@ -163,10 +196,49 @@ def define_deep_agent(
         config["debug"] = debug
     if metadata is not None:
         config["metadata"] = dict(metadata)
+    if not replicate_traces:
+        config["replicate_traces"] = False
 
     config.update(copy_managed_selections(instructions, mcp, sandbox, skills, memory))
 
     return DeepAgentDefinition(config)
+
+
+_ASYNC_SUBAGENT_UNSUPPORTED_KEYS = ("runnable", "graph_id", "url", "headers", "mode")
+
+
+def _validate_async_subagents(subagents: Sequence[DeepAgentSubAgent]) -> None:
+    for spec in subagents:
+        if not isinstance(spec, Mapping) or "async" not in spec:
+            continue
+        if not isinstance(spec["async"], bool):
+            raise TypeError('subagent "async" must be True or False')
+        if not spec["async"]:
+            continue
+        if not isinstance(spec.get("description"), str):
+            raise TypeError('subagent "async": True requires a `description`')
+        skills = spec.get("skills")
+        if skills is not None and not _is_path_list(skills):
+            raise TypeError('subagent "skills" must be a list of skill source paths')
+        if "webhook" in spec and not isinstance(spec["webhook"], str):
+            raise TypeError('subagent "webhook" must be a URL string')
+        if "notify_parent" in spec and not isinstance(spec["notify_parent"], bool):
+            raise TypeError('subagent "notify_parent" must be True or False')
+        unsupported = [key for key in _ASYNC_SUBAGENT_UNSUPPORTED_KEYS if key in spec]
+        if unsupported:
+            msg = (
+                f'subagent "async": True cannot set `{unsupported[0]}`: MDA builds and '
+                "launches its graph itself"
+            )
+            raise TypeError(msg)
+
+
+def _is_path_list(value: object) -> bool:
+    return (
+        isinstance(value, Sequence)
+        and not isinstance(value, str)
+        and all(isinstance(path, str) for path in value)
+    )
 
 
 __all__ = [

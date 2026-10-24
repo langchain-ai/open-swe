@@ -1,5 +1,6 @@
 import time
 from collections import deque
+from pathlib import Path
 from unittest.mock import AsyncMock
 
 import httpx
@@ -110,8 +111,15 @@ async def test_rejects_failed_or_wrong_commit(
 
 @pytest.mark.parametrize("status", [None, "BUILDING", "INTERRUPTED", "SKIPPED"])
 async def test_stops_when_preview_branch_is_superseded(
-    status: str | None, preview_branch: AsyncMock, capsys: pytest.CaptureFixture[str]
+    status: str | None,
+    preview_branch: AsyncMock,
+    capsys: pytest.CaptureFixture[str],
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
 ) -> None:
+    github_output = tmp_path / "github_output"
+    monkeypatch.setenv("GITHUB_OUTPUT", str(github_output))
+
     async def respond(request: httpx.Request) -> httpx.Response:
         assert request.method == "GET"
         assert request.url.path.endswith("/revisions")
@@ -136,6 +144,8 @@ async def test_stops_when_preview_branch_is_superseded(
     output = capsys.readouterr().out
     assert "::warning::preview branch moved from published to replacement" in output
     assert "replacement deployment not verified" in output
+    # The workflow skips the superseded tree's MDA deploy on this output.
+    assert github_output.read_text() == "superseded=true\n"
 
 
 async def test_branch_lookup_failure_is_not_treated_as_superseded(

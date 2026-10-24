@@ -98,7 +98,7 @@ interface SurfaceLauncher {
   label: string
   description: string
   icon: typeof TerminalWindowIcon
-  shortcut: string
+  shortcut?: string
   available: boolean
   /** Why it is unavailable, as the add menu's tooltip says it. */
   disabledReason: string
@@ -113,7 +113,6 @@ function surfaceLaunchers(props: SurfaceLauncherProps): Array<SurfaceLauncher> {
       label: "Terminal",
       description: "Start a shell in this workspace.",
       icon: TerminalWindowIcon,
-      shortcut: "T",
       available: props.terminalAvailable,
       disabledReason: "Terminals are only available from a running workspace.",
       unavailableHint: "Available once the workspace is running.",
@@ -123,7 +122,6 @@ function surfaceLaunchers(props: SurfaceLauncherProps): Array<SurfaceLauncher> {
       label: "Changes",
       description: "Review changes in this thread.",
       icon: GitDiffIcon,
-      shortcut: "D",
       available: props.diffAvailable,
       disabledReason:
         "Changes are only available for threads with a repository.",
@@ -144,13 +142,14 @@ function surfaceLaunchers(props: SurfaceLauncherProps): Array<SurfaceLauncher> {
       ? [
           {
             label: "Browser",
-            description: "Watch the agent's browser, or take it over.",
+            description:
+              "Browse alongside the agent, or take its browser over.",
             icon: GlobeIcon,
             shortcut: "B",
             available: props.browserAvailable ?? false,
             disabledReason:
-              "The browser is available once the agent opens one in this thread.",
-            unavailableHint: "Available once the agent opens one.",
+              "The browser is available once this thread's agent has started.",
+            unavailableHint: "Available once the thread starts.",
             onClick: props.onAddBrowser,
           },
         ]
@@ -164,7 +163,7 @@ type SurfaceShortcutEvent = Pick<
 >
 
 export function surfaceShortcutActionForKey<
-  const TAction extends { available: boolean; shortcut: string },
+  const TAction extends { available: boolean; shortcut?: string },
 >(
   actions: ReadonlyArray<TAction>,
   event: SurfaceShortcutEvent
@@ -175,7 +174,7 @@ export function surfaceShortcutActionForKey<
     actions.find(
       (action) =>
         action.available &&
-        action.shortcut.toLowerCase() === event.key.toLowerCase()
+        action.shortcut?.toLowerCase() === event.key.toLowerCase()
     ) ?? null
   )
 }
@@ -183,7 +182,7 @@ export function surfaceShortcutActionForKey<
 function SurfaceMenuItem(props: {
   available: boolean
   disabledReason?: string
-  shortcut: string
+  shortcut?: string
   onSelect: () => void
   children: ReactNode
 }) {
@@ -201,7 +200,7 @@ function SurfaceMenuItem(props: {
         size="sm"
       >
         {props.children}
-        <Kbd className="ml-auto">{props.shortcut}</Kbd>
+        {props.shortcut && <Kbd className="ml-auto">{props.shortcut}</Kbd>}
       </DropdownMenuItem>
     </Tooltip>
   )
@@ -362,7 +361,11 @@ function RightPanelEmptyState({
                   isHighlighted(action) && highlightedCardClass
                 )}
               >
-                <Kbd className="absolute top-3 right-3">{action.shortcut}</Kbd>
+                {action.shortcut && (
+                  <Kbd className="absolute top-3 right-3">
+                    {action.shortcut}
+                  </Kbd>
+                )}
                 <span className="flex items-center gap-space-2 pe-space-6">
                   {actionIcon(action)}
                   <span className="text-sm font-medium">{action.label}</span>
@@ -379,7 +382,11 @@ function RightPanelEmptyState({
                   cardShellClass
                 )}
               >
-                <Kbd className="absolute top-3 right-3">{action.shortcut}</Kbd>
+                {action.shortcut && (
+                  <Kbd className="absolute top-3 right-3">
+                    {action.shortcut}
+                  </Kbd>
+                )}
                 <span className="flex items-center gap-space-2 pe-space-6">
                   {actionIcon(action)}
                   <span className="text-sm font-medium">{action.label}</span>

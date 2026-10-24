@@ -1,8 +1,11 @@
+from datetime import UTC, datetime
 from typing import Literal, Self
 from uuid import UUID
 
 from pydantic import AliasChoices, BaseModel, ConfigDict, Field, JsonValue, TypeAdapter
 
+from openswe.bridge.constants import SANDBOX_ID_PREFIX
+from openswe.bridge.store import BridgeStore
 from openswe.invocation import resolve_invocation_id
 from openswe.users import User
 
@@ -50,6 +53,12 @@ class ThreadMetadata(BaseModel):
     def json_metadata(self) -> dict[str, JsonValue]:
         return _JSON_OBJECT.validate_python(self.model_dump(mode="json", exclude_unset=True))
 
+    async def delegation_supported(self) -> bool:
+        """Whether workers could share this thread's sandbox: a machine's only while it serves it."""
+        if self.sandbox_id and self.sandbox_id.startswith(SANDBOX_ID_PREFIX):
+            return await BridgeStore.is_connected(self.sandbox_id)
+        return True
+
     async def owner(self) -> User:
         if self.owner_type != "user":
             raise PermissionError("Task operations require a user-owned thread")
@@ -60,6 +69,13 @@ class ThreadMetadata(BaseModel):
         if user is None:
             raise PermissionError("The thread owner needs an Open SWE account")
         return user
+
+
+class LaunchedThread(BaseModel):
+    """What MDA records on an async subagent's thread when a run launches it."""
+
+    subagent_name: str | None = None
+    parent_thread_id: str | None = None
 
 
 class Thread(BaseModel):
@@ -133,8 +149,31 @@ class RunPayload(BaseModel):
 class Run(BaseModel):
     run_id: str
     status: str
+    updated_at: datetime | None = None
     metadata: RunMetadata = Field(default_factory=RunMetadata)
+
+    @property
+    def live(self) -> bool:
+        return self.status in {"pending", "running"}
+
+    @property
+    def ended_at(self) -> datetime | None:
+        """When the run, once finished, ended: its last update, in UTC."""
+        if self.live or self.updated_at is None:
+            return None
+        return self.updated_at if self.updated_at.tzinfo else self.updated_at.replace(tzinfo=UTC)
+
+
+class _PendingTask(BaseModel):
+    interrupts: list[JsonValue] = []
 
 
 class StateSnapshot(BaseModel):
     values: ThreadState = Field(default_factory=ThreadState)
+    interrupts: list[JsonValue] = []
+    tasks: list[_PendingTask] = []
+
+    @property
+    def waiting(self) -> bool:
+        """Paused on ``interrupt()``: its run ends as ``success``, only the checkpoint shows the pause."""
+        return bool(self.interrupts) or any(task.interrupts for task in self.tasks)

@@ -1,6 +1,12 @@
-import { ApiError, ProtocolError } from "./api.ts"
+import {
+  ApiError,
+  ProtocolError,
+  type CoordinatorThread,
+  type TaskActivity,
+} from "./api.ts"
 import { CredentialError } from "./credentials.ts"
 import {
+  booleanAt,
   errorMessage,
   isRecord,
   numberAt,
@@ -71,6 +77,8 @@ export type RunStatus = "completed" | "failed" | "interrupted" | "closed"
 export interface CliResult {
   stdout: string
   exitCode: number
+  /** The run had nothing new: the terminal keeps the answer it already has. */
+  unchanged: boolean
 }
 
 export interface RunOutcome {
@@ -101,6 +109,15 @@ export function lifecycleRunId(eventId: string | null): string | null {
   return runId && (parts[2] ?? "").startsWith("lc|") ? runId : null
 }
 
+/** The result the terminal should end with once `next` is reported after `previous`. */
+export function laterResult(
+  previous: CliResult | null,
+  next: CliResult | null
+): CliResult | null {
+  if (next === null) return previous
+  return next.unchanged && previous !== null ? previous : next
+}
+
 export function parseCliResult(input: unknown): CliResult | null {
   const record = isRecord(input) ? input : null
   const stdout = stringAt(record, "stdout")
@@ -108,7 +125,11 @@ export function parseCliResult(input: unknown): CliResult | null {
   if (stdout === null || exitCode === null) return null
   if (!Number.isInteger(exitCode) || exitCode < 0 || exitCode > MAX_EXIT_CODE)
     return null
-  return { stdout, exitCode }
+  return {
+    stdout,
+    exitCode,
+    unchanged: booleanAt(record, "unchanged") ?? false,
+  }
 }
 
 /**
@@ -158,7 +179,7 @@ export class RunCollector {
       phase === "tool-started" &&
       stringAt(data, "tool_name") === RESULT_TOOL
     ) {
-      this.result = parseCliResult(data["input"]) ?? this.result
+      this.result = laterResult(this.result, parseCliResult(data["input"]))
     }
     return null
   }
@@ -226,6 +247,10 @@ export interface FollowOptions {
   now?: () => number
 }
 
+function wait(ms: number): Promise<void> {
+  return new Promise<void>((done) => setTimeout(done, ms))
+}
+
 function reconnectable(cause: unknown): boolean {
   if (cause instanceof ApiError) return retryableStatus(cause.status)
   return !(cause instanceof ProtocolError || cause instanceof CredentialError)
@@ -241,9 +266,7 @@ export async function followRun(
   runId: string | null,
   options: FollowOptions = {}
 ): Promise<RunOutcome> {
-  const sleep =
-    options.sleep ??
-    ((ms: number) => new Promise<void>((done) => setTimeout(done, ms)))
+  const sleep = options.sleep ?? wait
   const now = options.now ?? Date.now
   let attempts = 0
   let backoff = MIN_RECONNECT_MS
@@ -267,4 +290,57 @@ export async function followRun(
     await sleep(backoff)
     backoff = Math.min(backoff * 2, MAX_RECONNECT_MS)
   }
+}
+
+const ACTIVITY_POLL_MS = 5_000
+
+export interface TaskFollowOptions extends FollowOptions {
+  onActivity?: (activity: TaskActivity) => void
+  pollMs?: number
+}
+
+/**
+ * Follows the coordinator from the run the CLI started until its thread
+ * settles. Workers share the thread's sandbox, this machine, and each one's
+ * report wakes the coordinator in a run of its own, so a result reported while
+ * anything is left to run is not final: the last answer reported is. Every run
+ * the coordinator starts is followed in turn, even one that ended between polls.
+ */
+export async function followTask(
+  thread: CoordinatorThread,
+  runId: string | null,
+  options: TaskFollowOptions = {}
+): Promise<RunOutcome> {
+  const sleep = options.sleep ?? wait
+  const pollMs = options.pollMs ?? ACTIVITY_POLL_MS
+  const events = () => thread.events()
+  let outcome = await followRun(events, runId, options)
+  let result = outcome.result
+  let followed = runId
+  let failures = 0
+  while (outcome.status !== "closed") {
+    let activity: TaskActivity | null
+    try {
+      activity = await thread.activity(followed)
+      failures = 0
+    } catch (cause) {
+      failures += 1
+      if (!reconnectable(cause) || failures > MAX_RECONNECTS) throw cause
+      options.onReconnect?.(failures, errorMessage(cause))
+      await sleep(pollMs)
+      continue
+    }
+    if (activity === null) break
+    options.onActivity?.(activity)
+    const next = activity.runs[0]
+    if (next !== undefined) {
+      followed = next
+      outcome = await followRun(events, followed, options)
+      result = laterResult(result, outcome.result)
+      continue
+    }
+    if (activity.settled) break
+    await sleep(pollMs)
+  }
+  return { ...outcome, result }
 }
