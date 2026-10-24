@@ -2,14 +2,14 @@
 
 import json
 import logging
-from collections.abc import Awaitable, Callable, Mapping
+from collections.abc import Mapping
 from typing import Any
 
 import langgraph_sdk
-from langchain.agents.middleware.types import ModelRequest, ModelResponse
-from langchain_core.messages import HumanMessage, SystemMessage, ToolMessage
+from langchain_core.messages import HumanMessage, ToolMessage
 from langchain_core.tools import BaseTool, StructuredTool
 from langgraph.config import get_config
+from langgraph.runtime import Runtime
 
 from openswe.incidents import documents, service
 from openswe.incidents.evidence_tools import EvidenceCollector, source_url
@@ -23,6 +23,7 @@ from openswe.incidents.report import (
     finalize_report,
 )
 from openswe.incidents.turns import SESSION_TS
+from openswe.middleware.model_call_shape import CallShape
 from openswe.middleware.trace import OpenSWEMiddleware
 from openswe.prompts import prompt
 from openswe.run_config import RunConfig
@@ -241,24 +242,15 @@ class IncidentMiddleware(OpenSWEMiddleware):
     def __init__(self, session: IncidentSession) -> None:
         self.session = session
 
-    async def awrap_model_call(
-        self,
-        request: ModelRequest,
-        handler: Callable[[ModelRequest], Awaitable[ModelResponse]],
-    ) -> ModelResponse:
+    async def ashape_model_call(
+        self, call: CallShape, state: Mapping[str, object], runtime: Runtime
+    ) -> CallShape:
         await self.session.check()
-        for message in request.messages:
+        messages = state.get("messages")
+        for message in messages if isinstance(messages, list) else []:
             if isinstance(message, HumanMessage):
                 context_evidence(message.text, self.session.collector)
-        existing = request.system_message.text if request.system_message else ""
-        prompt = self.session.prompt
-        return await handler(
-            request.override(
-                system_message=SystemMessage(
-                    content=f"{existing}\n\n{prompt}" if existing else prompt
-                )
-            )
-        )
+        return call.appending(self.session.prompt)
 
     def observe(self, message: ToolMessage, call: Mapping[str, Any]) -> ToolMessage:
         """``message``, the result of ``call``, recorded as evidence the report can cite."""

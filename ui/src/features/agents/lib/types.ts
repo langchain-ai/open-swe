@@ -492,8 +492,8 @@ export interface AgentPullRequestStatusResponse {
   pullRequests: Array<AgentPullRequestHealth>
 }
 
-/** One kind of PR problem a thread-view fix prompt covers, and nothing else. */
-export type ThreadFixScope = "conflicts" | "checks" | "comments"
+/** What a thread-view fix prompt covers: conflicts and checks together, or comments. */
+export type ThreadFixScope = "repair" | "comments"
 
 export interface AgentPullRequestContextResponse {
   context: {

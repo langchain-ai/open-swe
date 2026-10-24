@@ -421,7 +421,7 @@ function ChecksRow({
             <PullRequestThreadAction
               pr={status}
               login={login}
-              actions={["fix-checks"]}
+              actions={["fix"]}
             />
           ) : null
         }
@@ -433,7 +433,7 @@ function ChecksRow({
           {sorted.map(({ check, state }) => (
             <li
               key={check.name}
-              className="group flex h-7 items-center gap-space-2 text-xs"
+              className="group flex h-7 items-center gap-space-2 rounded-md text-xs focus-within:bg-surface-level-1-hover hover:bg-surface-level-1-hover"
             >
               {state === "fail" ? (
                 <XCircleIcon
@@ -596,7 +596,7 @@ function BranchRow({
             <PullRequestThreadAction
               pr={status}
               login={login}
-              actions={["fix-conflicts"]}
+              actions={["fix"]}
             />
           }
         >

@@ -201,6 +201,7 @@ async def test_web_breakout_does_not_post_or_bind_slack(
     ("explicit", "target", "model", "effort", "expected_model", "expected_effort"),
     [
         (None, "C1", None, None, "anthropic:claude-sonnet-4-5", "high"),
+        ("C1", "C1", None, None, "anthropic:claude-sonnet-4-5", "high"),
         ("C3", "C3", None, None, "anthropic:claude-sonnet-4-5", "high"),
         (None, "C1", "anthropic:claude-opus-5-5", "max", "anthropic:claude-opus-5-5", "max"),
         (
@@ -224,6 +225,9 @@ async def test_slack_breakout_thread_success(
     expected_model: str,
     expected_effort: str,
 ) -> None:
+    monkeypatch.setattr(
+        SlackChannel, "load", AsyncMock(return_value=_channel(private=target == "C1"))
+    )
     permalink = None
     captured: dict[str, Any] = {"stored_mappings": []}
     new_ts = "1700000000.111111"

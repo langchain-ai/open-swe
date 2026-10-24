@@ -9,9 +9,9 @@ served as the typed API both sides import (``runtime_api``):
 - ``prepare`` runs every ``before_agent`` hook: run preparation (the thread's
   sandbox, checkout and prompt), the transcript turn, skills, reply bookkeeping
 - ``before_model`` runs every ``before_model`` hook (follow-up queue, event matches,
-  proxy refresh, task coordination, model routing), then runs the graph's own
-  model-call middleware for the system prompt and the tools it hides from this
-  call, and names the model to call
+  proxy refresh, task coordination, model routing), then asks the graph's
+  middleware what it adds to the call (``ShapesModelCalls``: sections of the system
+  prompt, tools it keeps from the call), and names the model to call
 - ``model_result`` lets the transcript and usage middleware observe each response
 - ``after_model`` runs ``after_model`` hooks, such as the reply nudges, which can
   send the loop back to the model
@@ -44,12 +44,12 @@ import time
 from collections.abc import Awaitable, Callable, Mapping, Sequence
 from dataclasses import asdict
 from functools import partial
+from pathlib import PurePosixPath
 from typing import Final, Literal, Protocol, cast, get_args, runtime_checkable
 from uuid import uuid4
 
 from deepagents.backends.composite import CompositeBackend
 from deepagents.backends.protocol import BackendProtocol, SandboxBackendProtocol
-from deepagents.middleware.filesystem import FilesystemMiddleware
 from langchain.agents.middleware import ModelCallLimitMiddleware
 from langchain.agents.middleware.types import (
     AgentMiddleware,
@@ -57,7 +57,6 @@ from langchain.agents.middleware.types import (
     ModelRequest,
     ModelResponse,
 )
-from langchain_anthropic.middleware import AnthropicPromptCachingMiddleware
 from langchain_core.language_models.fake_chat_models import FakeListChatModel
 from langchain_core.messages import (
     AIMessage,
@@ -147,6 +146,7 @@ from runtime_api.operations import (
     ShellVerdict,
     ToolEvidence,
 )
+from runtime_api.skills import SKILLS, RunSkills, SkillFile
 
 from openswe.agent_api.failures import OperationFailure
 from openswe.agent_api.git_metadata import (
@@ -165,6 +165,7 @@ from openswe.github.sandbox_access import READ_ONLY_REVIEW_PERMISSIONS
 from openswe.incidents.runtime import IncidentMiddleware
 from openswe.middleware.client_tools import ClientToolsMiddleware
 from openswe.middleware.conversation_offloading import ConversationOffloadingMiddleware
+from openswe.middleware.model_call_shape import CallShape, ShapesModelCalls
 from openswe.middleware.model_selection import PersistedRoute, normalize_route
 from openswe.middleware.prepare_run import BasePrepareRunMiddleware
 from openswe.middleware.record_run_usage import RecordRunUsageMiddleware
@@ -211,15 +212,6 @@ _ASYNC_TASK_TOOLS: Final = frozenset(
 )
 # Tools the model labels each call of, for the dashboard to show in place of a bare name.
 _DESCRIBED_TOOLS: Final = ("eval",)
-# Model-call middleware that is MDA's own, or that observes rather than shapes a call.
-_NOT_PROMPT_SHAPING: Final = (
-    FilesystemMiddleware,
-    CodeInterpreterMiddleware,
-    AnthropicPromptCachingMiddleware,
-    ConversationOffloadingMiddleware,
-    TranscriptMiddleware,
-    RecordRunUsageMiddleware,
-)
 _MODEL_OBSERVERS: Final = (TranscriptMiddleware, RecordRunUsageMiddleware)
 # Loop bookkeeping and code mode MDA's own middleware already does.
 _MDA_PHASES: Final = (ModelCallLimitMiddleware, CodeInterpreterMiddleware)
@@ -230,6 +222,7 @@ MESSAGE_KEY: Final = "__lc_message__"
 # PersistedRoute is a union of literals: its arguments are the literals, not the names.
 _ROUTES: Final = frozenset(name for route in get_args(PersistedRoute) for name in get_args(route))
 _SESSION_TTL_SECONDS: Final = 6 * 60 * 60
+_SKILL_FILE: Final = "SKILL.md"
 _SESSION_LIMIT: Final = 512
 
 _json = TypeAdapter(JsonValue)
@@ -453,6 +446,7 @@ class RunSession:
             ),
             incident_evidence=self._incident is not None,
             worker_webhook=COMPLETION_WEBHOOK_URL if self._delegates else None,
+            skill_sources=list(self.surface.skill_sources),
             model_call_limit=next(
                 (
                     m.run_limit
@@ -474,6 +468,26 @@ class RunSession:
                 else SandboxSpec.model_validate(sandbox.model_dump(mode="json")),
             }
         )
+
+    async def skills(self, _request: RunRequest) -> RunSkills:
+        """Every skill the run may load: each source's skill folders and their ``SKILL.md``."""
+
+        async def listed() -> RunSkills:
+            folders: list[str] = []
+            for source in self.surface.skill_sources:
+                listing = await self.files.als(source)
+                folders += [entry["path"] for entry in listing.entries or [] if entry.get("is_dir")]
+            paths = [str(PurePosixPath(folder) / _SKILL_FILE) for folder in folders]
+            downloaded = await self.files.adownload_files(paths) if paths else []
+            return RunSkills(
+                files=[
+                    SkillFile(path=file.path, content=file.content.decode())
+                    for file in downloaded
+                    if file.content is not None
+                ]
+            )
+
+        return await self.in_run("skills", listed)
 
     async def sandbox(self) -> ManagedSandbox | None:
         """The thread's box as MDA creates it, when MDA owns it."""
@@ -814,48 +828,27 @@ class RunSession:
     def _offered(self) -> list[BaseTool]:
         return [tool for name, tool in self.surface.tools.items() if name not in _MDA_TOOLS]
 
-    def _request(
-        self,
-        state: Mapping[str, object],
-        runtime: Runtime,
-        tools: Sequence[BaseTool] = (),
-    ) -> ModelRequest:
+    def _request(self, state: Mapping[str, object], runtime: Runtime) -> ModelRequest:
+        """The call MDA made, as the observers of its response read it."""
         return ModelRequest(
             model=FakeListChatModel(responses=[""]),
             messages=_as_list(state.get("messages")),
             state=cast(AgentState, dict(state)),
             runtime=runtime,
-            tools=list(tools),
+            tools=[],
             model_settings={},
         )
 
     async def model_call(self, state: Mapping[str, object], runtime: Runtime) -> ModelCall:
-        """The system prompt and tool list the graph's own model-call middleware would send."""
-        shape = ModelCall(system_prompt=common_prompt())
-        captured: list[ModelRequest] = []
-
-        async def capture(request: ModelRequest) -> ModelResponse:
-            captured.append(request)
-            return ModelResponse(result=[AIMessage(content="")])
-
-        shaping = [
-            m
-            for m in self.surface.middleware
-            if _overrides(m, "awrap_model_call") and not isinstance(m, _NOT_PROMPT_SHAPING)
-        ]
-        offered = self._offered()
-        await _chain(shaping, capture)(self._request(state, runtime, offered))
-        if not captured:
-            return shape
-        request = captured[0]
-        kept = {getattr(tool, "name", None) for tool in request.tools}
-        return shape.model_copy(
-            update={
-                "system_prompt": common_prompt(
-                    request.system_message.text if request.system_message else ""
-                ),
-                "hidden_tools": sorted(tool.name for tool in offered if tool.name not in kept),
-            }
+        """The system prompt and tool list the graph's own middleware gives the next call."""
+        call = CallShape()
+        for middleware in self.surface.middleware:
+            if isinstance(middleware, ShapesModelCalls):
+                call = await middleware.ashape_model_call(call, state, runtime)
+        offered = {tool.name for tool in self._offered()}
+        return ModelCall(
+            system_prompt=common_prompt(call.system_prompt),
+            hidden_tools=sorted(call.hidden_tools & offered),
         )
 
     def model_for(self, state: Mapping[str, object]) -> ModelChoice:
@@ -1183,6 +1176,7 @@ API.serve(TOOL_STARTED, RunSession.tool_started)
 API.serve(TOOL_RESULT, RunSession.tool_result)
 API.serve(SANDBOX_REPLACED, RunSession.sandbox_replaced)
 API.serve(SANDBOX_UNREACHABLE, RunSession.sandbox_unreachable)
+API.serve(SKILLS, RunSession.skills)
 API.serve(OPERATION, RunSession.operation)
 API.serve(CHECK_SHELL, RunSession.check_shell)
 API.serve(RECORD_EVIDENCE, RunSession.record_evidence)

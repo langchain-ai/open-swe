@@ -1,18 +1,16 @@
 import hashlib
 import json
 import logging
-from collections.abc import Awaitable, Callable, Mapping
+from collections.abc import Mapping
 from typing import Annotated, Any, NotRequired, cast
 
 from langchain.agents.middleware.types import (
     AgentState,
-    ModelRequest,
-    ModelResponse,
     OmitFromOutput,
 )
-from langchain_core.messages import SystemMessage
 from langgraph.runtime import Runtime
 
+from openswe.middleware.model_call_shape import CallShape
 from openswe.middleware.trace import OpenSWEMiddleware
 from openswe.utils.startup_trace import aphase, flush_phases
 from openswe.utils.thread_reads import shared_thread_reads
@@ -127,14 +125,8 @@ class BasePrepareRunMiddleware(OpenSWEMiddleware):
     async def _rejoin(self, state: PrepareRunState, runtime: Runtime) -> None:
         del state, runtime
 
-    async def awrap_model_call(
-        self,
-        request: ModelRequest,
-        handler: Callable[[ModelRequest], Awaitable[ModelResponse]],
-    ) -> ModelResponse:
-        rendered = request.state.get("rendered_system_prompt")
-        if isinstance(rendered, str) and rendered:
-            existing = request.system_message.text if request.system_message is not None else ""
-            content = f"{rendered}\n\n{existing}" if existing else rendered
-            request = request.override(system_message=SystemMessage(content=content))
-        return await handler(request)
+    async def ashape_model_call(
+        self, call: CallShape, state: Mapping[str, object], runtime: Runtime
+    ) -> CallShape:
+        rendered = state.get("rendered_system_prompt")
+        return call.prepending(rendered) if isinstance(rendered, str) else call
