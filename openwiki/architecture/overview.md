@@ -1,145 +1,161 @@
 ---
-type: architecture overview
-title: Runtime and Product Architecture
-description: LangGraph deployment, graph entrypoints, FastAPI ingress, durable dispatch, sandbox ownership, and the dashboard and desktop product surfaces.
-tags: [architecture, langgraph, fastapi, dashboard, runtime]
+type: system architecture
+title: System Architecture and Deployment Boundaries
+description: Open SWE separates its FastAPI and PostgreSQL control plane from Managed Deep Agents execution. This page describes public ingress, Agent Server-compatible thread routing, typed runtime callbacks, and dashboard, desktop, and CLI clients.
+tags: [architecture, managed-runtime, fastapi, postgresql, agent-server, clients]
 verified:
   - by: openwiki/0.4.2
-    at: 2026-09-08T08:15:30.533Z
+    at: 2026-10-24T08:12:50.219Z
 sources:
-  - id: openwiki-source-63ebc853556c1b852ed80aff
-    resource: repo://agent/analyzer.py
-  - id: openwiki-source-328bde9e94017848bb09ba23
-    resource: repo://agent/api/app.py
-  - id: openwiki-source-921ec88ab63280d28b3dddb5
-    resource: repo://agent/chat.py
-  - id: openwiki-source-412c2c84023da365b8201b9f
-    resource: repo://agent/dashboard/__init__.py
-  - id: openwiki-source-61ace7d4952db9ddb8316aeb
-    resource: repo://agent/dashboard/routes.py
-  - id: openwiki-source-8c60a9544ea26006748dd7a3
-    resource: repo://agent/desktop.py
-  - id: openwiki-source-c48b309c5ca416cf623f0866
-    resource: repo://agent/dispatch.py
-  - id: openwiki-source-ba064e884edcde6097165df2
-    resource: repo://agent/github/webhook.py
-  - id: openwiki-source-f8665996049065d2172f68e2
-    resource: repo://agent/graphs/agent.py
-  - id: openwiki-source-73db7609f2a24f4a0ff5c32c
-    resource: repo://agent/graphs/reviewer.py
-  - id: openwiki-source-1116ea2d477f08cf0f5b2ef0
-    resource: repo://agent/graphs/scheduler.py
-  - id: openwiki-source-2d78b3dc0a340eaacb9e53e2
-    resource: repo://agent/linear/webhook.py
-  - id: openwiki-source-276ab38291eb5741b4c2141c
-    resource: repo://agent/reviewer.py
-  - id: openwiki-source-6fd11c8bb15f5eb94b765440
-    resource: repo://agent/sandboxes/lifecycle.py
-  - id: openwiki-source-3e15117ace082a39e1f130d8
-    resource: repo://agent/scheduler.py
-  - id: openwiki-source-856ade03ef31ac38e1347f7c
-    resource: repo://agent/server.py
-  - id: openwiki-source-e0785b4f2497c26e024d92fc
-    resource: repo://agent/slack/routes.py
-  - id: openwiki-source-3096620cfd0eb1bae6d9e78c
-    resource: repo://agent/webapp.py
-  - id: openwiki-source-b76f79b6cfae139d1784a43a
-    resource: repo://langgraph.desktop.json
+  - id: openwiki-source-028a73a9403baf378c521fdb
+    resource: repo://cli/README.md
+  - id: openwiki-source-2f66613e587b7c57d9be522e
+    resource: repo://desktop/README.md
   - id: openwiki-source-5bbba7b2a8ea8360ff233d63
     resource: repo://langgraph.json
-  - id: openwiki-source-4eb06f8c7641cb7107e39ca8
-    resource: repo://ui/src/router.tsx
-  - id: openwiki-source-c7a3ad58e4b4017484c1e326
-    resource: repo://ui/src/routes/agents.tsx
-  - id: openwiki-source-767ef8a0f66938a5c0710041
-    resource: repo://ui/src/routeTree.gen.ts
-generated: { by: "openwiki/0.4.2", at: "2026-09-08T08:15:30.533Z" }
+  - id: openwiki-source-c21327bb3d1c04a09b7f03fc
+    resource: repo://mda/agent.py
+  - id: openwiki-source-e5b7abf11bb2daa504eef827
+    resource: repo://mda/README.md
+  - id: openwiki-source-15d75fcce83b1cece4ea13b8
+    resource: repo://openswe/agent_api/client.py
+  - id: openwiki-source-bf4fba8fdb5561cfce67256c
+    resource: repo://openswe/agent_api/server.py
+  - id: openwiki-source-35238fa18658241cc3f4f643
+    resource: repo://openswe/agent_api/tokens.py
+  - id: openwiki-source-f01f6fab1cd3b23d20383d03
+    resource: repo://openswe/api/agent_server_auth.py
+  - id: openwiki-source-4b1279a0a1e5ec2d55a4558a
+    resource: repo://openswe/api/app.py
+  - id: openwiki-source-932730a18e85495ceba5df6d
+    resource: repo://openswe/threads/router.py
+  - id: openwiki-source-3bd49e1c2bb74350a7519268
+    resource: repo://openswe/webapp.py
+  - id: openwiki-source-d4619029747141b3c4aba1c6
+    resource: repo://packages/runtime-api/src/runtime_api/catalog.py
+  - id: openwiki-source-4ad451750f0f22094ea59351
+    resource: repo://packages/runtime-api/src/runtime_api/endpoint.py
+  - id: openwiki-source-24a0167a0bf20c7becd50da8
+    resource: repo://packages/runtime-api/src/runtime_api/loop.py
+  - id: openwiki-source-0f9dcd38dc9bbd11c65674fe
+    resource: repo://packages/runtime-api/src/runtime_api/operations.py
+  - id: openwiki-source-116b7d62bb6736fdf6ffff94
+    resource: repo://tests/threads/test_thread_router.py
+generated: { by: "openwiki/0.4.2", at: "2026-10-24T08:12:50.219Z" }
 ---
 
-# Runtime and Product Architecture
+# System Architecture and Deployment Boundaries
 
-Open SWE is a LangGraph deployment with a custom FastAPI application. The HTTP layer accepts browser and integration traffic, while durable LangGraph runs execute coding or review work against thread-scoped state and—except for PR chat—a backend. Five registered graph entrypoints separate the primary agent, reviewer, review-style analyzer, read-only PR chat, and time-triggered work.
+Open SWE is a distributed system with two runtime domains. The Open SWE backend is the FastAPI, PostgreSQL, integration, authorization, and planning control plane. Managed Deep Agents (MDA), deployed from `mda/` as the single `open-swe` graph, is the execution plane for every new `agent`, `reviewer`, and `review-scout` thread. This is the active execution architecture: the backend does **not** run an in-process graph, model loop, or tools node for those threads.
 
-## Runtime map
-
-`langgraph.json` is the cloud deployment manifest. It registers thin `agent/graphs/` re-export modules as stable dotted entrypoints, mounts `agent.webapp:app`, configures checkpointer retention, loads `.env`, and builds the dashboard into the deployment image.
-
-| Graph | Registered entrypoint | Responsibility |
-|---|---|---|
-| `agent` | `agent.graphs.agent:traced_agent` | Per-run coding-agent factory: backend, models, tools, skills, and middleware. |
-| `reviewer` | `agent.graphs.reviewer:traced_reviewer_agent` | PR review and findings publication workflow. |
-| `analyzer` | `agent.graphs.analyzer:traced_analyzer` | Repository-specific review-style learning. |
-| `chat` | `agent.graphs.chat:traced_chat_agent` | Read-only discussion of one PR, without a sandbox. |
-| `scheduler` | `agent.graphs.scheduler:get_scheduler` | A cron-tick dispatcher for maintenance and scheduled work. |
+## System context and ownership
 
 ```mermaid
-flowchart TD
-  Slack["Slack"] --> Webhooks["Webhook routers"]
-  Linear["Linear"] --> Webhooks
-  GitHub["GitHub"] --> Webhooks
-  Browser["Web dashboard"] --> Dashboard["Dashboard router"]
-  Cron["Cron tick"] --> Scheduler["scheduler graph"]
-
-  subgraph App["FastAPI app"]
-    Webhooks
-    Dashboard
+flowchart LR
+  subgraph Clients["User and integration boundary"]
+    Web["Web dashboard"]
+    Desk["Electron desktop"]
+    Cli["oswe CLI"]
+    Ext["GitHub Slack Linear"]
   end
 
-  Webhooks --> Dispatch["dispatch_agent_run"]
-  Dashboard --> Dispatch
-  Scheduler --> Dispatch
-  Dispatch --> Agent["agent graph"]
-  Dispatch --> Reviewer["reviewer graph"]
-  Agent --> Backend["Thread sandbox or desktop backend"]
-  Reviewer --> Backend
-  Analyzer["analyzer graph"] --> Backend
-  Browser --> Chat["chat graph"]
+  subgraph Backend["Open SWE backend ownership"]
+    Api["FastAPI application"]
+    Router["Agent Server compatible ThreadRouter"]
+    Pg["PostgreSQL thread index and product state"]
+    Typed["Typed agent API"]
+    Bridge["Sandbox bridge service"]
+  end
+
+  subgraph Runtime["Managed Deep Agents ownership"]
+    Mda["open-swe execution graph"]
+    Loop["Model loop checkpoints and tool calls"]
+    Box["Thread sandbox and browser"]
+  end
+
+  Web --> Api
+  Desk --> Api
+  Cli --> Api
+  Ext --> Api
+  Api --> Router
+  Router <--> Pg
+  Router --> Mda
+  Mda --> Loop
+  Loop --> Box
+  Loop --> Typed
+  Typed --> Api
+  Desk <--> Bridge
+  Cli <--> Bridge
+  Bridge <--> Api
 ```
 
-This shows the principal paths. `dispatch_agent_run` is the shared creation boundary for `agent` and `reviewer` runs; chat, analysis, and scheduler invocations use their own graph entrypoints.
+This diagram distinguishes control-plane ownership from execution-plane ownership. The backend owns externally visible product behavior and policy; MDA owns execution mechanics. The typed agent API is the deliberate crossing point from an MDA run back to backend-owned behavior.
 
-## Graph and execution boundaries
+| Concern | Owner | Boundary and implication |
+|---|---|---|
+| Public HTTP, dashboard APIs, webhooks, OAuth, application lifecycle | Open SWE FastAPI | `openswe.webapp:app` is the deployment entrypoint and re-exports the application built in `openswe.api.app`. |
+| Product and thread index state | PostgreSQL through the backend | Thread reads, search, counts, metadata, and status are served from the index; runtime copies exist so runs and traces can see them. |
+| Agent Server `/threads` and `/runs` compatibility | `ThreadRouter` in the backend | Existing dashboard, CLI, and backend Agent Server clients use the usual API while the router decides where the thread executes. |
+| Agent/reviewer/review-scout model loop, checkpoints, tool-call lifecycle | MDA deployment | The backend plans the run and observes phases but does not compile or execute an active in-process graph. |
+| Sandboxes and MDA browser | MDA for MDA-owned boxes | MDA creates, adopts, restarts, and replaces its per-thread sandbox. The backend binds and reconnects to it, but never creates or replaces an MDA-owned box. |
+| Credentials and policy decisions | Backend and its integrations | The MDA deployment holds no GitHub, Slack, or database credentials; run identity and configuration come from a signed token. |
 
-`agent.server:get_agent` produces a fresh deep-agent graph for an executable thread. It uses the thread ID to acquire a cached or reconnected backend (or a desktop `LocalShellBackend`), starts it, resolves thread/team/profile model settings, persists normalized thread settings when needed, and assembles a composite backend, tools, skills, subagents, and middleware. If no thread ID is supplied or the graph is being loaded rather than executed, it returns a deliberately empty deep agent without provisioning a backend. This is important for graph discovery and other non-execution loads. See [Agent Graph & get_agent Factory](./agent-graph.md) and [Middleware Stack](./middleware-stack.md) for its detailed composition.
+## Startup composition and public ingress
 
-The reviewer follows the sandbox lifecycle but deliberately has a review-only toolset: `add_finding`, `update_finding`, `list_findings`, and `publish_review`; it does not receive commit, push, or PR-opening tools. Its preparation computes an in-diff line set so finding validation occurs when a finding is created, rather than failing only during GitHub publication. The analyzer uses the reviewer-style sandbox and authenticated `gh` access to mine historical human review feedback and finding outcomes, then saves a per-repository prompt through `save_review_style_prompt`. See [Reviewer & Review-Style Analyzer Graphs](./reviewer-and-analyzer.md).
+`langgraph.json` registers the compatibility graphs `agent`, `reviewer`, and `review-scout`, mounts `openswe.webapp:app`, and configures Agent Server authentication and checkpoint retention. These registrations are compatibility and deployment entrypoints; new execution is routed to MDA's one `open-swe` graph rather than to a legacy in-process graph.
 
-The chat graph is intentionally sandbox-less and read-only. The dashboard review-chat proxy seeds the PR diff, findings, and overview as virtual `/pr/` files in the graph's `files` state channel. Filesystem tools can read that context, while `execute`, writes, edits, and deletion are excluded; GitHub-backed tools use a repository-scoped GitHub App token rather than a user credential.
+`create_app()` establishes the FastAPI composition. Before background workers are built, it pins a single event loop. Its lifespan validates GitHub-login, sandbox, local-development LLM, MDA, and database configuration; migrates the database; starts best-effort analytics, transcript, bridge, and UI-invalidation listeners; starts jobs; and closes services and the HTTP pool during shutdown. An MDA configuration failure is intentionally fatal: `MDA_RUNTIME_URL` must be an absolute permitted URL and `REMOTE_RUNTIME_TOKEN_SECRET` must be set.
 
-The scheduler is a compiled, single-node `StateGraph`. Its `task` selects stale-run reconciliation, watch evaluation, background-task monitoring, session-cost or agent-cost refresh, or `launch_scheduled_agent_run`. Missing a watch key, thread ID, or schedule ID yields a structured status instead of launching ambiguous work. Scheduled agent runs ultimately use durable dispatch.
+The app enables credentialed CORS only for configured dashboard origins plus `open-swe://app`; it rejects `*` with credentials. It layers audit logging, the thread router, compression, tracing, request IDs, and GitHub error handling, then mounts dashboard, plan, workflow-approval, Linear, Slack, health, GitHub, rollout, sandbox, evaluation-report, agent API, and optional MCP routes. Static dashboard files are mounted last. The dashboard router remains lazily imported until the web application actually mounts it.
 
-## HTTP composition and ingress
+The web dashboard, Slack, GitHub, and Linear are normal public ingress surfaces. The Electron app proxies its dashboard API calls to its selected backend and uses the same signed dashboard session as the web UI. It does not expose a LangSmith API key or directly call raw LangGraph APIs.
 
-`agent/webapp.py` is a compatibility re-export of the application assembled by `agent/api/app.py:create_app`. At import time the API pins one event loop before queue workers are built. The app factory configures credentialed CORS from `DASHBOARD_ALLOWED_ORIGINS` and rejects `*`, then mounts dashboard, plan, workflow-approval, Linear, Slack, GitHub, and health routers plus the bundled dashboard UI. Its lifespan repeats event-loop pinning, validates sandbox and local-development LLM configuration at startup, and closes cached models on shutdown.
+## Thread routing: Agent Server API without execution ownership
 
-The dashboard router is rooted at `/dashboard/api` and applies a same-origin dependency to mutations. It is the browser-facing boundary for OAuth, profiles, team defaults, administration, repository and review-style configuration, and thread APIs. Importing `agent.dashboard` does not eagerly load this large surface: a PEP 562 `__getattr__` imports and caches `routes.router` only when the web application mounts it.
+`ThreadRouter` sits ahead of the core Agent Server `/threads` and `/runs` routes. For backend-authorized requests it provides an Agent Server-compatible facade backed by PostgreSQL:
 
-Slack, Linear, and GitHub webhook routes validate and normalize external events before scheduling their service work. They derive or resolve stable thread identities—for example, Linear uses the issue ID and reviewer runs use repository and PR coordinates—so later activity can recover the corresponding thread state rather than starting an unrelated session. GitHub rejects invalid webhook signatures; Slack rejects conflicting mapping rather than guessing an agent thread.
+1. A new thread is indexed with `runtime: "mda"`, copied to the local Agent Server and MDA, and uses MDA's `open-swe` graph ID in MDA metadata.
+2. Reads, searches, counts, and thread metadata changes are answered from the index. Metadata updates are copied to the runtime copies; a failure to copy does not make indexed reads unavailable.
+3. A run, stream, state/history request, cancellation, or command is forwarded to that thread's runtime. When a run is successfully started on MDA, the index is marked `busy`; completion handling and reconciliation settle that state.
+4. An unknown historical thread is first read from the local Agent Server and indexed. Threads made before MDA remain `local`, are logged when used, and are read-only for new runs, crons, posting commands, and copying; these actions return `410` rather than silently continuing on the retired execution path.
 
-## Durable dispatch and state ownership
+This preserves client compatibility without treating the backend Agent Server as the normal executor. Raw Agent Server authorization is also distinct from dashboard authorization: the backend may mutate threads, while a signed-in user has read access limited to their own threads and must use dashboard APIs for changes.
 
-`dispatch_agent_run` is the common run-creation contract used by Slack, Linear, GitHub, dashboard, and scheduled agent/reviewer triggers. `assistant_id` selects `agent` or `reviewer`; `source` determines input identity and is retained for metadata/logging, not graph selection. The dispatcher also rejects ambiguous combinations of a prebuilt input with content or identity arguments.
+## Managed execution and the typed runtime API
 
-The durable defaults are intentional: `multitask_strategy="interrupt"` interrupts an active run so the follow-up resumes with prior history; `durability="sync"` checkpoints before steps; streams are resumable and include subgraphs; and a private event-streaming v2 configurable marker and compatible stream modes make externally initiated runs observable in the dashboard. Background follow-ups may explicitly choose another multitask strategy such as `enqueue`.
+The backend translates the requested assistant identity (`agent`, `reviewer`, or `review-scout`) into an MDA run context. It signs a token containing the thread ID, assistant ID, configurable values, and metadata; it also supplies selected models. MDA receives the context and calls the backend with the token as a bearer credential. The backend verifies it once per `/agent-api/{endpoint}` request and derives configuration from verified claims, never from model-controlled request data. Tokens are HS256, audience- and issuer-checked, and valid for 48 hours; a comma-separated secret supports signing-key rotation.
 
-Completion notification is best effort. The dispatcher attaches a webhook only when `RUN_COMPLETE_WEBHOOK_SECRET` is configured and `COMPLETION_WEBHOOK_URL` is absolute and non-loopback. Otherwise it logs the condition and creates the run without a webhook, avoiding a configuration error that would poison all run creation.
+`packages/runtime-api` is the shared Python contract, imported by both deployment domains. Each `Endpoint` declares Pydantic request and response models, timeout, and delivery semantics, so adding a backend callback means defining an endpoint rather than accepting an untyped JSON body. The contract includes:
 
-A graph factory is ephemeral, but thread execution context is durable: LangGraph checkpointing retains graph state, while LangGraph thread metadata holds the sandbox ID and related thread settings. The sandbox cache is in process and keyed by thread ID; another worker reconnects using the persisted ID. A deleted sandbox is replaced, but an existing unreachable coding sandbox raises by default because silent replacement can discard uncommitted work. Reviewer callers can allow replacement because their checkout is re-derived. The sandbox is published to the cache only after initialization and metadata binding succeed. See [Sandbox Lifecycle](./sandbox-lifecycle.md) and [Invocation](../workflows/invocation.md).
+- `catalog`, which tells MDA the run's operations, subagents, models, exposed or code-only tools, skills, files policy, and sandbox specification;
+- loop-phase calls (`prepare`, `before_model`, `model_result`, `after_model`, and `after_agent`) through which the backend prepares the thread, queues follow-ups, selects models, shapes prompts/tool visibility, and records transcript and usage;
+- operation, file, shell-guard, evidence, sandbox, browser, and worker calls needed by tools and execution reporting.
 
-## Cloud and desktop product surfaces
+MDA constructs a deep agent from that catalog and runs its own model calls, retries, fallback behavior, summarization, call limits, checkpoints, tool calls, file/shell tools, subagents, and browser integration. Backend middleware participates through phase responses and observations. Tool work that needs backend policy or product state is executed through a typed operation; the backend does not run a tool node or tool-call middleware for an MDA run. Shell guards can refuse or rewrite guarded commands before they run, and a sandbox that becomes unreachable ends the run after the backend is notified.
 
-The cloud manifest currently pins Python 3.14 and LangGraph API version 0.13.3. Its checkpointer TTL uses `delete`, sweeps every 60 minutes, and defaults to 43,200 minutes. The Dockerfile instructions attempt to build and install the dashboard static assets but allow a backend-only deployment if that build fails.
+A worker grant is narrower than a run token: an asynchronous subagent may read its coordinator catalog and exchange the grant for its own run identity, but cannot invoke arbitrary backend endpoints before adoption.
 
-`langgraph.desktop.json` intentionally registers only the main agent graph, uses `agent.local_auth:auth` with Studio authentication disabled, and disables the bundled UI. A desktop run is identified by `configurable.source == "desktop"`. Its requested `local_project_path` must resolve to an existing directory that is either in `OPEN_SWE_LOCAL_PROJECTS_FILE` or beneath `OPEN_SWE_LOCAL_WORKTREES_DIR`; otherwise it is rejected. The local backend inherits only a small shell environment allowlist. Desktop scratch routes put large tool results and conversation history outside the project so they are not swept into `git add -A`.
+## Sandbox and local-machine boundary
 
-The `ui/` application is a TanStack Router React client with routes for agent sessions and threads, local sessions, plans, automations, skills, reviews and styles, administration, integrations, usage, settings, environments, instructions, and sandbox views. The `/agents` layout requires a session except for enabled desktop-local routes and selects `cloud` or `local` streaming transport from the active route. Router `basepath` follows Vite's build base, allowing the bundle to run below a configured mount prefix.
+For a standard cloud thread, MDA owns the per-thread LangSmith sandbox lifecycle and can replace an MDA-owned box under the same name. The backend receives lifecycle reports to bind the thread, reconnect through its proxy and git identity, and notify the user if the sandbox is unreachable. A refreshed workspace snapshot therefore affects creation choices without forcing a replacement that loses ongoing work.
 
-## Operations and safe changes
+Desktop and CLI execution use the same cloud thread, transcript, models, settings, skills, and MDA agent, but substitute a local-machine sandbox bridge for a hosted box. The bridge long-polls the backend for shell and file-transfer requests, performs them on the selected project, and posts results back. This is not sandbox isolation: local commands run as the person who started the client. The desktop bridge lasts only while its app is open; the CLI keeps its bridge open until the coordinating run and its workers have completed.
 
-- Add a deployable graph by exporting a stable factory through `agent/graphs/` and registering it in the appropriate manifest. Do not assume it becomes eligible for `dispatch_agent_run`; that contract selects only `agent` and `reviewer`.
-- Add browser APIs through `create_app`, preserving session and mutation-origin protections rather than bypassing the dashboard boundary.
-- Treat a coding sandbox that is unreachable as a recovery decision, not a cache miss. Replacing it changes the thread working tree.
-- When changing dispatch defaults or stream fields, test durable run creation and cross-surface event attachment: dashboard observability relies on replayable v2-compatible streams for runs created outside the browser.
-- When changing desktop path handling, retain real-path validation, the allowlist/worktree boundary, and artifact routing; each prevents a distinct local safety or repository-hygiene failure.
+## Client surfaces
 
-Related pages: [Agent Graph & get_agent Factory](./agent-graph.md), [Reviewer & Review-Style Analyzer Graphs](./reviewer-and-analyzer.md), [Sandbox Lifecycle](./sandbox-lifecycle.md), [Dashboard UI](../integrations/dashboard-ui.md), and [Invocation](../workflows/invocation.md).
+- **Dashboard:** The recommended browser UI consumes backend dashboard APIs and the compatible thread/run surface. It is the principal interactive view of transcripts, streams, configuration, and runtime status.
+- **Desktop:** Electron packages the web UI at the `open-swe://app` origin. A user selects a compatible backend, authenticates through the dashboard GitHub flow, and can select **This Mac** for a local-project thread. Current-checkout and new-worktree modes prevent concurrent agents from sharing one working tree; deleting a local-worktree thread removes its worktree.
+- **CLI:** `oswe run` registers a bridge for the current directory, creates a remote cloud thread, and follows it through the dashboard-compatible service. The remote MDA agent's shell, upload, and download requests execute locally through that bridge. CLI authentication can use a workspace API key, GitHub Actions OIDC, or a person session; machine credentials create system threads, while personal threads are private because a prompt can execute local commands.
+
+## Operations, extension points, and focused verification
+
+Deploy the backend and MDA together. The backend requires `MDA_RUNTIME_URL`, `MDA_RUNTIME_API_KEY` or a LangSmith key for MDA calls, and `REMOTE_RUNTIME_TOKEN_SECRET`; the MDA project requires the backend URL and model/tracing credentials. MDA is deployed separately from `mda/`; local development starts the backend and `mda dev` independently. The MDA project does not import `openswe`, which keeps the deployment boundary real.
+
+When extending the system:
+
+- Add execution behavior through the backend's run plan, middleware phases, or typed operations. Put a tool-time file or shell check in `mda/rt` when MDA owns the action; put it behind an agent API endpoint when it needs backend state or policy.
+- Define new cross-boundary calls as `runtime_api.Endpoint` models and implement both sides. Preserve endpoint retry semantics, because a request may be retried after connection or gateway failure while a timed-out backend operation may still be executing.
+- Do not add new backend uses of `langgraph_client` or LangGraph Store for this path. Persist product state in PostgreSQL and send agent/reviewer/review-scout runs to MDA.
+- Exercise `tests/threads/test_thread_router.py` for indexing, forwarding, busy state, and historical-thread refusal. Exercise `mda/tests/test_backend_calls.py` in the MDA environment for typed callback, tool, model, and runtime failure behavior.
+
+Related pages: [Managed Runtime](./managed-runtime.md), [State and Async Services](./state-and-async-services.md), [User Surfaces](../integrations/user-surfaces.md), [Local Development and Deployment](../operations/local-development-and-deployment.md), and [Invocation and Thread Routing](../workflows/invocation-and-thread-routing.md).
