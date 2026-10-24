@@ -46,6 +46,7 @@ from openswe.threads.workflow_approval import (
 )
 from openswe.tools.mcp_exposure import expose_mcp
 from openswe.users import User
+from openswe.utils.dashboard_handoff import RELAYED_FROM_KEY
 from openswe.utils.dashboard_links import (
     dashboard_plan_url,
     dashboard_thread_id,
@@ -660,7 +661,12 @@ async def _private_thread_context(actor: _Actor) -> bool:
 
 
 async def _authorized_locator(
-    locator: str, actor: _Actor, *, admin_override: bool = False
+    locator: str,
+    actor: _Actor,
+    *,
+    admin_override: bool = False,
+    action: ThreadAction | None = None,
+    relayed_from: object = None,
 ) -> tuple[str, Mapping[str, Any]] | dict[str, Any]:
     langsmith_locator = parse_langsmith_locator(locator)
     slack_locator = parse_slack_thread_url(locator)
@@ -707,7 +713,15 @@ async def _authorized_locator(
         and not admin_override
         and not await _private_thread_context(actor)
     ):
-        raise HTTPException(404, "thread not found")
+        if not (
+            action == "send_message"
+            and thread_id == relayed_from
+            and thread_is_owner({"owner_login": summary.get("ownerLogin")}, actor.login)
+        ):
+            return _failure(
+                "this private thread can only be reached from its owner's private conversation",
+                status_code=403,
+            )
     return thread_id, summary
 
 
@@ -1028,10 +1042,23 @@ async def manage_thread(
         model_id, effort = validated
 
     try:
-        # Private threads are only reachable from the owner's private context.
-        # admin_cancel is the exception, so its response must not leak details.
         admin_override = action == "admin_cancel" and actor.admin
-        resolved = await _authorized_locator(thread_id, actor, admin_override=admin_override)
+        configurable = as_json_object(_config().get("configurable"))
+        relayed_from = configurable.get(RELAYED_FROM_KEY)
+        # Queued provenance is checkpointed, so only this run may use it.
+        if (
+            state
+            and configurable.get("run_id")
+            and (state.get("relay_run_id") == configurable["run_id"])
+        ):
+            relayed_from = state.get(RELAYED_FROM_KEY)
+        resolved = await _authorized_locator(
+            thread_id,
+            actor,
+            admin_override=admin_override,
+            action=action,
+            relayed_from=relayed_from,
+        )
         if isinstance(resolved, dict):
             return resolved
         thread_id, summary = resolved
