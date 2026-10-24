@@ -1210,6 +1210,7 @@ export interface ReviewDetail extends Omit<
   "thread_id" | "status"
 > {
   thread_id: string | null
+  trace_url?: string | null
   status: ReviewSummary["status"] | "none"
   assessment?: PublishedReviewAssessment | null
   pr: ReviewPrDetails
