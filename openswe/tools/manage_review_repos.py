@@ -11,7 +11,7 @@ from openswe.tools.admin_gate import configurable
 from openswe.tools.mcp_exposure import expose_mcp
 
 _READ = Policy(trusted="admin_surface", actor="admin")
-_WRITE = Policy(trusted="admin_surface", actor="admin", sole=ack("repository", "enabled"))
+_WRITE = Policy(trusted="admin_surface", actor="admin", shared=ack("repository", "enabled"))
 
 
 @expose_mcp(access="admin")

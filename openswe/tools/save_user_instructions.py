@@ -17,7 +17,7 @@ logger = logging.getLogger(__name__)
 
 @expose_mcp()
 @audit_tool()
-@access(Policy(trusted="private", actor="owner", sole=unchanged))
+@access(Policy(trusted="private", actor="owner", shared=unchanged))
 async def save_user_instructions(instructions: str) -> dict[str, Any]:
     """Implement the `save_user_instructions` tool."""
     login = await resolve_github_login(as_json_object(get_config()))

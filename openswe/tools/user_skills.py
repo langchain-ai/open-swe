@@ -18,7 +18,7 @@ from openswe.tools.access import Policy, access, unchanged
 from openswe.tools.mcp_exposure import expose_mcp
 from openswe.utils.json_types import as_json_object
 
-_OWN = Policy(trusted="private", actor="owner", sole=unchanged)
+_OWN = Policy(trusted="private", actor="owner", shared=unchanged)
 
 
 async def _login() -> str | None:

@@ -865,6 +865,7 @@ class PrepareAgentRunMiddleware(BasePrepareRunMiddleware):
         draft_prs: bool,
         admin_workspaces: bool,
         sole_writer: bool = False,
+        admin_writers: bool = False,
         model_selection: ModelSelectionMiddleware | None = None,
         routing_defaults: Mapping[str, tuple[str, str | None]] | None = None,
         credential_login: str | None = None,
@@ -890,6 +891,7 @@ class PrepareAgentRunMiddleware(BasePrepareRunMiddleware):
         self._draft_prs = draft_prs
         self._admin_workspaces = admin_workspaces
         self._sole_writer = sole_writer
+        self._admin_writers = admin_writers
         self._model_selection = model_selection
         self._routing_defaults = dict(routing_defaults or {})
 
@@ -1302,6 +1304,7 @@ class PrepareAgentRunMiddleware(BasePrepareRunMiddleware):
                 workspace_repos=workspace.repos if workspace else None,
                 admin_workspaces=self._admin_workspaces,
                 sole_writer=self._sole_writer,
+                admin_writers=self._admin_writers,
                 source="background_task" if cfg.background_task_completion else self._source,
                 slack_context=_slack_tools_enabled(cfg),
                 slack_ask=_slack_ask_mode(cfg),
@@ -1869,6 +1872,7 @@ async def plan_agent(config: RunnableConfig, surface: ToolSurface) -> None:
         draft_prs=sender_draft_prs,
         admin_workspaces=admin_thread,
         sole_writer=tool_access.sole,
+        admin_writers=tool_access.admins and not tool_access.sole,
         model_selection=model_selection,
         routing_defaults=routing_defaults,
         requested_models=requested_models,
