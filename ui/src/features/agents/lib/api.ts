@@ -166,6 +166,8 @@ export interface ThreadsPageParams {
   repo?: string
   ownerless?: boolean
   owned?: boolean
+  /** Thread sources to leave out, such as `claude_code`. */
+  excludeSources?: Array<string>
   sortBy?: ThreadSortBy
 }
 
@@ -322,6 +324,8 @@ function buildThreadsPageQuery(params: ThreadsPageParams): string {
   if (params.ownerless != null)
     search.set("ownerless", String(params.ownerless))
   if (params.owned) search.set("owned", "true")
+  for (const source of params.excludeSources ?? [])
+    search.append("exclude_source", source)
   if (params.sortBy) search.set("sort_by", params.sortBy)
   const query = search.toString()
   return query ? `?${query}` : ""
@@ -331,6 +335,7 @@ function buildReposQuery(params: {
   includeResolved?: boolean
   includeAutomations?: boolean
   owned?: boolean
+  excludeSources?: Array<string>
 }): string {
   const search = new URLSearchParams()
   if (params.includeResolved != null)
@@ -339,6 +344,8 @@ function buildReposQuery(params: {
     search.set("include_automations", String(params.includeAutomations))
   }
   if (params.owned) search.set("owned", "true")
+  for (const source of params.excludeSources ?? [])
+    search.append("exclude_source", source)
   const query = search.toString()
   return query ? `?${query}` : ""
 }
@@ -364,6 +371,7 @@ export const agentsApi = {
       includeResolved?: boolean
       includeAutomations?: boolean
       owned?: boolean
+      excludeSources?: Array<string>
     } = {}
   ) =>
     agentsRequest<Array<SidebarRepo>>(

@@ -23,6 +23,7 @@ from openswe.jobs import queue
 from openswe.jobs.cron_import import import_agent_server_crons
 from openswe.jobs.queue import Job
 from openswe.jobs.worker import WORKER
+from openswe.merge_queue.controller import start_queue
 from openswe.merge_queue.runtime import JOB_KIND as MERGE_QUEUE_RECONCILE
 from openswe.merge_queue.runtime import reconcile_queue
 from openswe.monitors.delivery import POLL_JOB_KIND as MONITOR_POLL
@@ -114,7 +115,9 @@ async def _baby_sit(job: Job) -> str | None:
 @_sandbox_work(WORKSPACE_REFRESH)
 async def _workspace_refresh(job: Job) -> object:
     kind = "update" if job.payload.get("refresh_kind") == "update" else "full"
-    return await run_workspace_refresh_tick(_text(job, "workspace_slug"), kind)
+    # A cron's id outlives each of its runs, so only a one-shot job names one refresh.
+    run_id = None if job.cron else str(job.id)
+    return await run_workspace_refresh_tick(_text(job, "workspace_slug"), kind, run_id=run_id)
 
 
 @WORKER.register(AGENT_SCHEDULE_JOB_KIND)
@@ -183,6 +186,7 @@ async def start_jobs() -> None:
     steps: list[Callable[[], Awaitable[object]]] = [
         import_agent_server_crons,
         import_agent_server_threads,
+        start_queue,
         lambda: queue.schedule(
             THREAD_STATUS_RECONCILE, cron=RECONCILE_SCHEDULE, key=THREAD_STATUS_RECONCILE
         ),

@@ -93,15 +93,59 @@ jobs:
           ENVIRONMENT: ${{ matrix.environment }}
           # Reserved by `mda deploy`: it authenticates the deploy and is never forwarded as a deployment secret.
           LANGSMITH_API_KEY: ${{ secrets.PREVIEW_DEPLOY_API_KEY || secrets.LANGSMITH_API_KEY }}
+          # Shared with this environment's backend: MDA signs each call its channels make to it.
+          # Each secret is named statically, so the runner gets only these, not every secret.
+          MDA_SERVICE_SECRET: >-
+            ${{ matrix.environment == 'prod' && secrets.MDA_SERVICE_SECRET_PROD
+            || matrix.environment == 'staging' && secrets.MDA_SERVICE_SECRET_STAGING
+            || matrix.environment == 'preview' && secrets.MDA_SERVICE_SECRET_PREVIEW
+            || '' }}
           # The backend's gateway key. Without it, model calls fall back to the deployment's
           # own key and count against the workspace's gateway spend cap.
           # Each secret is named, so the runner gets only the one this deployment uses.
           LANGSMITH_GATEWAY_API_KEY: ${{ matrix.environment == 'prod' && secrets.LANGSMITH_GATEWAY_API_KEY_PROD || matrix.environment == 'staging' && secrets.LANGSMITH_GATEWAY_API_KEY_STAGING || '' }}
+          # This deployment's Linear app, which deploy cannot ask for without a terminal. Deploy
+          # hands it to Agent Auth and never to the deployment.
+          MDA_LINEAR_CLIENT_ID: >-
+            ${{ matrix.environment == 'prod' && secrets.MDA_LINEAR_CLIENT_ID_PROD
+            || matrix.environment == 'staging' && secrets.MDA_LINEAR_CLIENT_ID_STAGING
+            || matrix.environment == 'preview' && secrets.MDA_LINEAR_CLIENT_ID_PREVIEW
+            || '' }}
+          MDA_LINEAR_CLIENT_SECRET: >-
+            ${{ matrix.environment == 'prod' && secrets.MDA_LINEAR_CLIENT_SECRET_PROD
+            || matrix.environment == 'staging' && secrets.MDA_LINEAR_CLIENT_SECRET_STAGING
+            || matrix.environment == 'preview' && secrets.MDA_LINEAR_CLIENT_SECRET_PREVIEW
+            || '' }}
+          MDA_LINEAR_WEBHOOK_SECRET: >-
+            ${{ matrix.environment == 'prod' && secrets.MDA_LINEAR_WEBHOOK_SECRET_PROD
+            || matrix.environment == 'staging' && secrets.MDA_LINEAR_WEBHOOK_SECRET_STAGING
+            || matrix.environment == 'preview' && secrets.MDA_LINEAR_WEBHOOK_SECRET_PREVIEW
+            || '' }}
+          # This environment's own Open SWE GitHub App, which deploy brings into Agent Auth when the
+          # deployment has none yet; it cannot ask for it without a terminal. A deployment that
+          # already has the App keeps it, and these never reach the deployment.
+          GITHUB_APP_PRIVATE_KEY: >-
+            ${{ matrix.environment == 'prod' && secrets.MDA_GITHUB_APP_PRIVATE_KEY_PROD
+            || matrix.environment == 'staging' && secrets.MDA_GITHUB_APP_PRIVATE_KEY_STAGING
+            || matrix.environment == 'preview' && secrets.MDA_GITHUB_APP_PRIVATE_KEY_PREVIEW
+            || '' }}
+          GITHUB_APP_WEBHOOK_SECRET: >-
+            ${{ matrix.environment == 'prod' && secrets.MDA_GITHUB_WEBHOOK_SECRET_PROD
+            || matrix.environment == 'staging' && secrets.MDA_GITHUB_WEBHOOK_SECRET_STAGING
+            || matrix.environment == 'preview' && secrets.MDA_GITHUB_WEBHOOK_SECRET_PREVIEW
+            || '' }}
         run: |
+          # The App and installation are the ones this environment's backend uses.
           case "$ENVIRONMENT" in
-            preview) backend="https://open-swe-preview-cc53e8fbe667565d843d0843f84ee92c.us.langgraph.app" ;;
-            staging) backend="https://open-swe-staging-v2-9b910587972955589372b6a585abcfa3.us.langgraph.app" ;;
-            prod) backend="https://open-swe-v3-f2834ffc0df05a46a10262a9690e8490.us.langgraph.app" ;;
+            preview)
+              backend="https://open-swe-preview-cc53e8fbe667565d843d0843f84ee92c.us.langgraph.app"
+              github_app_id=4572371 github_installation_id=153276461 ;;
+            staging)
+              backend="https://open-swe-staging-v2-9b910587972955589372b6a585abcfa3.us.langgraph.app"
+              github_app_id=4842171 github_installation_id=159324628 ;;
+            prod)
+              backend="https://open-swe-v3-f2834ffc0df05a46a10262a9690e8490.us.langgraph.app"
+              github_app_id=1395372 github_installation_id=70905168 ;;
             *) echo "::error::Unknown environment $ENVIRONMENT"; exit 1 ;;
           esac
           if [[ -z "$LANGSMITH_GATEWAY_API_KEY" ]]; then
@@ -109,8 +153,23 @@ jobs:
             exit 1
           fi
           # The project .env is forwarded as the deployment's secrets: the backend it calls back,
-          # and the gateway key it calls models with.
-          printf 'OPEN_SWE_BACKEND_URL=%s\nLANGSMITH_GATEWAY_API_KEY=%s\n' "$backend" "$LANGSMITH_GATEWAY_API_KEY" >mda/.env
+          # the gateway key it calls models with, and the secret it signs its calls to the backend with.
+          printf 'OPEN_SWE_BACKEND_URL=%s\nLANGSMITH_GATEWAY_API_KEY=%s\nMDA_SERVICE_SECRET=%s\n' "$backend" "$LANGSMITH_GATEWAY_API_KEY" "$MDA_SERVICE_SECRET" >mda/.env
+          # The GitHub channel's App is Open SWE's own, whose webhook stays at the backend,
+          # which forwards issue mentions to the channel.
+          export MDA_GITHUB_WEBHOOK_ELSEWHERE="$backend/webhooks/github"
+          # Deploy reads the App's key from a file. Set all of the App's values or none: an App ID
+          # without its key fails the deploy.
+          if [[ -n "$GITHUB_APP_PRIVATE_KEY" ]]; then
+            key_file="$(mktemp "$RUNNER_TEMP/github-app-key.XXXXXX")"
+            trap 'rm -f "$key_file"' EXIT
+            printf '%s\n' "$GITHUB_APP_PRIVATE_KEY" >"$key_file"
+            export MDA_GITHUB_APP_ID="$github_app_id"
+            export MDA_GITHUB_APP_INSTALLATION_ID="$github_installation_id"
+            export MDA_GITHUB_APP_PRIVATE_KEY_FILE="$key_file"
+            export MDA_GITHUB_WEBHOOK_SECRET="$GITHUB_APP_WEBHOOK_SECRET"
+          fi
+          unset GITHUB_APP_PRIVATE_KEY GITHUB_APP_WEBHOOK_SECRET
           uv run --project mda --locked --python 3.13 mda deploy mda \
             --name "open-swe-mda-$ENVIRONMENT" \
             --deployment-type prod \

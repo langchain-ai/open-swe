@@ -40,7 +40,7 @@ from openswe.transcript.turns import TurnOutcome, settle_run_turn
 from openswe.ui_invalidations import Topic
 from openswe.utils.errors import code_for_error_type
 from openswe.utils.json_types import thread_metadata
-from openswe.utils.langsmith import get_langsmith_trace_url
+from openswe.utils.langsmith import get_langsmith_error_url
 from openswe.utils.thread_ops import langgraph_client
 from openswe.utils.user_messages import warning
 from openswe.webhooks.event_matches import EVENT_MATCH_KIND
@@ -249,6 +249,9 @@ async def _post_failure_reply(
     metadata: dict[str, Any],
     status: str,
     reason: _FailureReason = _UNKNOWN_REASON,
+    *,
+    invocation_id: str | None = None,
+    terminal_error: str | None = None,
 ) -> bool:
     """Post a failure reply to the run's originating channel. Best-effort."""
     source = metadata.get("source")
@@ -257,7 +260,7 @@ async def _post_failure_reply(
     if source == "slack" or ctx.slack_thread is not None:
         location = ctx.slack_location
         if location is not None:
-            trace_url = await get_langsmith_trace_url(thread_id)
+            trace_url = await get_langsmith_error_url(thread_id, invocation_id, terminal_error)
             slack_text = reason.text(status, trace_url)
             return await post_slack_thread_reply(
                 location[0],
@@ -676,7 +679,15 @@ async def handle_run_completion(payload: dict[str, Any]) -> dict[str, str]:
         return {"status": "ignored", "reason": "repeated failures"}
 
     reason = _FailureReason.of(error, metadata, run_id)
-    posted = await _post_failure_reply(thread_id, metadata, status, reason)
+    error_message = error.get("message") if isinstance(error, dict) else error
+    posted = await _post_failure_reply(
+        thread_id,
+        metadata,
+        status,
+        reason,
+        invocation_id=_invocation_id(payload),
+        terminal_error=error_message if isinstance(error_message, str) else None,
+    )
     if not posted:
         return {"status": "ignored", "reason": "no reply posted"}
 

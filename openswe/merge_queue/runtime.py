@@ -12,6 +12,7 @@ from pydantic import BaseModel, ConfigDict
 from openswe.github.http import RepoClient
 from openswe.jobs.queue import Job
 from openswe.merge_queue.admission import QueuePolicy
+from openswe.merge_queue.dispatch import DispatchGateway
 from openswe.merge_queue.scheduler import BatchScheduler
 from openswe.merge_queue.store import LeaseLost, MergeQueue
 from openswe.merge_queue.validation import CandidateValidation
@@ -31,6 +32,7 @@ class QueueRuntime:
         self,
         policies: Mapping[UUID, QueuePolicy],
         open_repo: Callable[[MergeQueue], AbstractAsyncContextManager[RepoClient]],
+        dispatcher: DispatchGateway,
         *,
         retention_days: int = 90,
     ):
@@ -38,6 +40,7 @@ class QueueRuntime:
             raise ValueError("Retention must be between 7 and 365 days")
         self.policies, self.open_repo = dict(policies), open_repo
         self.retention_days = retention_days
+        self.dispatcher = dispatcher
 
     async def reconcile(self, payload: QueueJob) -> None:
         policy = self.policies.get(payload.queue_id)
@@ -62,7 +65,9 @@ class QueueRuntime:
                         await scheduler.reconcile(lease, seconds=180)
                         await queue.renew(lease, timedelta(seconds=60))
                         async with asyncio.timeout(45):
-                            await CandidateValidation(queue, repo, policy).reconcile(lease)
+                            await CandidateValidation(
+                                queue, repo, policy, self.dispatcher
+                            ).reconcile(lease)
                 except asyncio.CancelledError:
                     cancelled = True
                     raise
