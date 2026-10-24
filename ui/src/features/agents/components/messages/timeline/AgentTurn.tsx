@@ -22,7 +22,7 @@ import {
 import { WorkEntryRow } from "./WorkEntryRow"
 import { describeWorkEntry, latestDiff } from "./workEntry"
 import { TurnFoldRow, WorkGroupToggleRow } from "./foldRows"
-import { ShellEntryBody } from "./entryBodies"
+import { ImageEntryBody, ShellEntryBody } from "./entryBodies"
 import { ToolResultBody } from "./ToolResultBody"
 import type { ReactNode } from "react"
 import type { RenderItem, TurnSegment } from "../renderItems"
@@ -330,6 +330,24 @@ export function AgentTurn({
         return item.chunk.display ? (
           <OutputIframe key={item.key} display={item.chunk.display} />
         ) : null
+
+      case "image-item": {
+        const entry = describeWorkEntry(item.chunk, repoPath)
+        return (
+          <WorkEntryRow
+            key={item.key}
+            entry={entry}
+            timestamp={item.chunk.timestamp}
+            body={({ loadedText, loadError }) => (
+              <ImageEntryBody
+                images={item.images}
+                text={loadError ?? loadedText ?? entry.expandedText}
+              />
+            )}
+            defaultExpanded
+          />
+        )
+      }
 
       case "sql-item":
         return <SqlResultItem key={item.key} chunk={item.chunk} />
