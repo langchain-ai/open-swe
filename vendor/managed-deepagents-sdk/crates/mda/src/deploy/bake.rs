@@ -1,9 +1,12 @@
-//! Bake a deployment's sandbox recipe snapshot from `setup.sh` + bake bases.
+//! Bake a deployment's sandbox recipe snapshot from `setup.sh`, a deploy-time
+//! `prepare` callback, and bake bases.
 //!
-//! Fail closed: non-zero setup exit or a snapshot that never becomes `ready`
-//! aborts deploy/dev before the recipe pointer is persisted.
+//! Fail closed: non-zero setup exit, a failing `prepare`, or a snapshot that
+//! never becomes `ready` aborts deploy/dev before the recipe pointer is persisted.
 
 use std::collections::BTreeMap;
+use std::path::{Path, PathBuf};
+use std::process::Command;
 use std::time::Duration;
 
 use anyhow::{bail, Context, Result};
@@ -17,8 +20,9 @@ use crate::langsmith::{
 
 use super::helpers::{
     bake_snapshot_list_prefix, intermediate_snapshot_name, is_deployment_intermediate_snapshot,
-    is_deployment_recipe_snapshot, recipe_digest, recipe_snapshot_name, recipe_snapshot_reference,
-    sandbox_registry_name, HOST_SANDBOX_NAME_LIMIT, SANDBOX_NAME_SEPARATOR,
+    is_deployment_recipe_snapshot, recipe_digest_with_prepare, recipe_snapshot_name,
+    recipe_snapshot_reference, sandbox_registry_name, HOST_SANDBOX_NAME_LIMIT,
+    SANDBOX_NAME_SEPARATOR,
 };
 
 /// 1 GiB filesystem capacity when building a snapshot from a Docker image.
@@ -36,6 +40,12 @@ const BUILDER_IDLE_TTL_SECS: u64 = 900;
 /// Setup execute timeout.
 const SETUP_TIMEOUT_SECS: u64 = 600;
 
+/// Bound for the deploy-machine `prepare` callback, uploads included.
+const PREPARE_TIMEOUT: Duration = Duration::from_secs(900);
+
+/// Interpreter override the Python launcher exports as its own `sys.executable`.
+const PYTHON_ENV: &str = "MDA_PYTHON";
+
 /// Inputs that identify and provision a recipe snapshot.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct RecipeSpec {
@@ -49,6 +59,94 @@ pub struct RecipeSpec {
     pub docker_image: Option<String>,
     /// Secret-safe private registry declaration.
     pub registry: Option<SandboxRegistryManifest>,
+    /// Deploy-time `prepare` callback declared on the sandbox.
+    pub prepare: Option<SandboxPrepare>,
+}
+
+impl RecipeSpec {
+    /// Deterministic identity of the snapshot these inputs bake.
+    pub fn digest(&self) -> String {
+        let registry = self
+            .registry
+            .as_ref()
+            .map(SandboxRegistryManifest::digest_input);
+        recipe_digest_with_prepare(
+            self.setup_script.as_bytes(),
+            self.snapshot_name.as_deref(),
+            self.snapshot_id.as_deref(),
+            self.docker_image.as_deref(),
+            registry.as_deref(),
+            self.prepare
+                .as_ref()
+                .map(|prepare| prepare.inputs_digest.as_str()),
+        )
+    }
+}
+
+/// A Python `define_sandbox(prepare=...)` callback, run on the deploy machine
+/// against the bake builder so it can copy local files and run commands before
+/// the builder is captured.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SandboxPrepare {
+    /// Project root, the callback's working directory and import root.
+    pub project_root: PathBuf,
+    /// Dotted module exporting `sandbox` (`sandbox` for `sandbox/__init__.py`).
+    pub module: String,
+    /// Digest of the files under `sandbox/`, so editing the callback or the
+    /// files it ships bakes a new snapshot.
+    pub inputs_digest: String,
+}
+
+impl SandboxPrepare {
+    fn run(&self, client: &Client, builder: &str) -> Result<()> {
+        let mut command = Command::new(self.python());
+        command
+            .args(["-m", "managed_deepagents._sandbox_prepare"])
+            .current_dir(&self.project_root)
+            .env("MDA_PREPARE_PROJECT_ROOT", &self.project_root)
+            .env("MDA_PREPARE_MODULE", &self.module)
+            .env("MDA_PREPARE_BUILDER", builder)
+            .envs(client.sandbox_sdk_env()?);
+        let output = crate::toolchain::output_with_timeout(&mut command, PREPARE_TIMEOUT)
+            .context("sandbox prepare did not finish")?;
+        if !output.status.success() {
+            let stderr = String::from_utf8_lossy(&output.stderr);
+            let stdout = String::from_utf8_lossy(&output.stdout);
+            let detail = if stderr.trim().is_empty() {
+                stdout.trim()
+            } else {
+                stderr.trim()
+            };
+            bail!(
+                "sandbox prepare failed ({}){}",
+                output.status,
+                if detail.is_empty() {
+                    String::new()
+                } else {
+                    format!("\n{}", truncate_for_error(detail))
+                }
+            );
+        }
+        Ok(())
+    }
+
+    /// The project's virtualenv, which has its dependencies and the runtime,
+    /// before the launcher's interpreter and a bare `python3`.
+    fn python(&self) -> PathBuf {
+        let venv = if cfg!(windows) {
+            Path::new(".venv").join("Scripts").join("python.exe")
+        } else {
+            Path::new(".venv").join("bin").join("python")
+        };
+        let venv = self.project_root.join(venv);
+        if venv.is_file() {
+            return venv;
+        }
+        std::env::var_os(PYTHON_ENV)
+            .filter(|python| !python.is_empty())
+            .map(PathBuf::from)
+            .unwrap_or_else(|| PathBuf::from(crate::toolchain::python3_program()))
+    }
 }
 
 /// Coarse stages of a bake, reported so a multi-minute cold bake shows which
@@ -65,6 +163,8 @@ pub enum BakePhase {
     StartingBuilder,
     /// Executing `setup.sh` on the builder.
     RunningSetup,
+    /// Running the `prepare` callback against the builder.
+    RunningPrepare,
     /// Capturing the builder filesystem as the recipe snapshot.
     CapturingSnapshot,
     /// Tearing down temporary bake resources.
@@ -80,6 +180,7 @@ impl BakePhase {
             Self::BuildingFromImage => "building snapshot from Docker image",
             Self::StartingBuilder => "starting builder sandbox",
             Self::RunningSetup => "running setup.sh",
+            Self::RunningPrepare => "running sandbox prepare",
             Self::CapturingSnapshot => "capturing recipe snapshot",
             Self::CleaningUp => "cleaning up",
         }
@@ -115,17 +216,7 @@ pub fn bake_recipe(
     env_vars: &BTreeMap<String, String>,
     progress: &dyn Fn(BakePhase),
 ) -> Result<BakeOutcome> {
-    let registry_digest = spec
-        .registry
-        .as_ref()
-        .map(SandboxRegistryManifest::digest_input);
-    let digest = recipe_digest(
-        spec.setup_script.as_bytes(),
-        spec.snapshot_name.as_deref(),
-        spec.snapshot_id.as_deref(),
-        spec.docker_image.as_deref(),
-        registry_digest.as_deref(),
-    );
+    let digest = spec.digest();
     let recipe_name = recipe_snapshot_name(deployment, &digest);
 
     progress(BakePhase::CheckingRecipe);
@@ -140,9 +231,10 @@ pub fn bake_recipe(
 
     let registry_id = resolve_registry_id(client, deployment, spec, env_vars, progress)?;
 
-    // Docker image with an empty setup: the docker-built snapshot *is* the recipe.
+    // Docker image with nothing to run: the docker-built snapshot *is* the recipe.
     if let Some(image) = spec.docker_image.as_deref().filter(|_| {
         spec.setup_script.trim().is_empty()
+            && spec.prepare.is_none()
             && spec.snapshot_name.is_none()
             && spec.snapshot_id.is_none()
     }) {
@@ -199,6 +291,10 @@ pub fn bake_recipe(
                 .context("bake builder is missing dataplane_url")?;
             progress(BakePhase::RunningSetup);
             run_setup_script(client, dataplane, &spec.setup_script)?;
+        }
+        if let Some(prepare) = &spec.prepare {
+            progress(BakePhase::RunningPrepare);
+            prepare.run(client, &builder_name)?;
         }
         progress(BakePhase::CapturingSnapshot);
         let captured =
@@ -439,6 +535,7 @@ pub fn delete_stale_recipe_snapshots(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::deploy::helpers::recipe_digest;
     use crate::langsmith::Credential;
     use serde_json::json;
     use std::cell::RefCell;
@@ -491,6 +588,62 @@ mod tests {
             Some("tenant".into()),
         )
         .unwrap()
+    }
+
+    #[cfg(unix)]
+    fn prepare_with_python(script: &str) -> (tempfile::TempDir, SandboxPrepare) {
+        use std::os::unix::fs::PermissionsExt;
+
+        let root = tempfile::tempdir().unwrap();
+        let python = root.path().join(".venv/bin/python");
+        std::fs::create_dir_all(python.parent().unwrap()).unwrap();
+        std::fs::write(&python, format!("#!/bin/sh\n{script}\n")).unwrap();
+        std::fs::set_permissions(&python, std::fs::Permissions::from_mode(0o755)).unwrap();
+        let prepare = SandboxPrepare {
+            project_root: root.path().to_path_buf(),
+            module: "sandbox".into(),
+            inputs_digest: "inputs".into(),
+        };
+        (root, prepare)
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn prepare_runs_the_project_python_against_the_builder() {
+        let (root, prepare) = prepare_with_python(
+            "printf '%s|' \"$*\" \"$PWD\" \"$MDA_PREPARE_PROJECT_ROOT\" \"$MDA_PREPARE_MODULE\" \
+             \"$MDA_PREPARE_BUILDER\" \"$LANGSMITH_API_KEY\" \"$MDA_SANDBOX_API_ENDPOINT\" \
+             \"$LANGSMITH_WORKSPACE_ID\" > \"$MDA_PREPARE_PROJECT_ROOT/ran\"",
+        );
+
+        prepare
+            .run(
+                &client_for("https://platform.example".into()),
+                "agent--bake-1",
+            )
+            .unwrap();
+
+        let root_path = root.path().display();
+        assert_eq!(
+            std::fs::read_to_string(root.path().join("ran")).unwrap(),
+            format!(
+                "-m managed_deepagents._sandbox_prepare|{root_path}|{root_path}|sandbox|agent--bake-1|key|https://platform.example/v2/sandboxes|tenant|"
+            )
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn failing_prepare_reports_its_error() {
+        let (_root, prepare) = prepare_with_python("echo 'ValueError: no chrome' >&2; exit 1");
+
+        let error = prepare
+            .run(&client_for("https://platform.example".into()), "builder")
+            .unwrap_err()
+            .to_string();
+
+        assert!(error.contains("sandbox prepare failed"), "{error}");
+        assert!(error.contains("ValueError: no chrome"), "{error}");
     }
 
     #[test]

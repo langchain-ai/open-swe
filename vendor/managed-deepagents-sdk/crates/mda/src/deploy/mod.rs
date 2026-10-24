@@ -1050,13 +1050,7 @@ pub(crate) fn recipe_spec_from_project(
         return Ok(None);
     };
     let setup = compile::read_setup_script(project)?.unwrap_or_default();
-    Ok(Some(RecipeSpec {
-        setup_script: setup,
-        snapshot_name: manifest.snapshot_name,
-        snapshot_id: manifest.snapshot_id,
-        docker_image: manifest.docker_image,
-        registry: manifest.registry,
-    }))
+    Ok(Some(manifest.recipe_spec(&project.root, setup)))
 }
 
 /// Non-reserved env vars forwarded onto the bake builder box.

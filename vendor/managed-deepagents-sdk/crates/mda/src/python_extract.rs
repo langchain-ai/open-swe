@@ -121,6 +121,8 @@ pub(crate) mod scripts {
     pub(crate) const CONNECTOR_INGRESS: &str = include_str!("python_extract/connector_ingress.py");
     pub(crate) const CHANNEL_INGRESS: &str = include_str!("python_extract/channel_ingress.py");
     pub(crate) const CONNECTOR_FACTORY: &str = include_str!("python_extract/connector_factory.py");
+    /// Whether the root `sandbox` declaration passes a deploy-time `prepare` callback.
+    pub(crate) const SANDBOX_PREPARE: &str = include_str!("python_extract/sandbox_prepare.py");
 }
 
 #[cfg(test)]

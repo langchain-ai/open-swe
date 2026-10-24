@@ -40,6 +40,8 @@ def main() -> int:
         os.environ["MDA_RUNTIME_VERSION"] = runtime_version
     os.environ["MDA_INSTALL_CHANNEL"] = "pypi"
     os.environ["MDA_BUNDLED_RUNTIME_PATH"] = str(Path(__file__).parent)
+    # Lets bake run a sandbox ``prepare`` callback with this environment's packages.
+    os.environ["MDA_PYTHON"] = sys.executable
 
     argv = [str(binary), *sys.argv[1:]]
 
