@@ -21,6 +21,7 @@ import { useApproval } from "@/features/plugins/lib/approval"
 import type {
   AgentToolOffer,
   ChatTarget,
+  SharedContext,
   ToolRunner,
 } from "@/features/plugins/lib/bridge"
 import { PluginIcon } from "@/features/plugins/lib/icons"
@@ -288,7 +289,7 @@ function useAgentDock(plugin: InstalledPlugin, onScreen: () => boolean) {
   })
   const [draft, setDraft] = useState<{ key: number; text: string }>()
   const [tools, setTools] = useState<ProvidedTools | null>(null)
-  const [context, setContext] = useState<string | null>(null)
+  const [context, setContext] = useState<SharedContext | null>(null)
   const [threadId, setThreadId] = useState<string | null>(null)
   const latest = useRef<symbol | null>(null)
   return {

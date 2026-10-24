@@ -828,12 +828,18 @@ async def _attributed_run_messages(
 
 
 MAX_PLUGIN_CONTEXT = 8_000
+PLUGIN_CONTEXT_MIME = "application/vnd.open-swe.plugin-context"
+"""A message's attachment that marks the plugin context sent with it; its name is the label shown."""
 
 
 def _plugin_context(
     metadata: Mapping[str, Any], client_configurable: Mapping[str, Any]
-) -> list[dict[str, str]]:
-    """What the plugin beside a chat had open when the person wrote from its dock, ahead of their message."""
+) -> tuple[list[dict[str, str]], list[MessageAttachment]]:
+    """What the plugin beside a chat had open when the person wrote from its dock.
+
+    The agent reads it in a message ahead of theirs; their message carries an
+    attachment naming it, which the thread shows in place of the context.
+    """
     context = client_configurable.get("plugin_context")
     if (
         not metadata.get(PLUGIN_CHAT_KEY)
@@ -841,14 +847,19 @@ def _plugin_context(
         or not isinstance(context, str)
         or not context.strip()
     ):
-        return []
-    return [
-        {
-            "role": "user",
-            "id": f"plugin-context:{uuid.uuid7()}",
-            "content": prompt("plugins/context", context=context[:MAX_PLUGIN_CONTEXT]),
-        }
-    ]
+        return [], []
+    label = client_configurable.get("plugin_context_label")
+    label = label.strip()[:120] if isinstance(label, str) and label.strip() else "Plugin context"
+    return (
+        [
+            {
+                "role": "user",
+                "id": f"plugin-context:{uuid.uuid7()}",
+                "content": prompt("plugins/context", context=context[:MAX_PLUGIN_CONTEXT]),
+            }
+        ],
+        [MessageAttachment(mime_type=PLUGIN_CONTEXT_MIME, file_name=label)],
+    )
 
 
 async def _enrich_run_start_command(
@@ -921,7 +932,8 @@ async def _enrich_run_start_command(
         if metadata.get(PLUGIN_CHAT_KEY) and not offloading
         else []
     )
-    held_results.extend(_plugin_context(metadata, client_configurable))
+    context_messages, context_attachments = _plugin_context(metadata, client_configurable)
+    held_results.extend(context_messages)
     if offloading and creating:
         raise HTTPException(400, "offloading requires an existing conversation")
     command_images = _dashboard_images_from_content(content)
@@ -1069,6 +1081,7 @@ async def _enrich_run_start_command(
             # recorded the first time rather than one nothing was written under.
             command_id = f"message:{message_id}:requested"
             attachments, pending = _transcript_attachments(command_images, message_id)
+            attachments.extend(context_attachments)
             appended = await append(
                 thread_id,
                 [

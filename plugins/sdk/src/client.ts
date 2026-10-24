@@ -247,10 +247,13 @@ export class PluginHost {
     /**
      * Tells the agent what the person has open: the page, their selection,
      * anything it should know without asking. Each message the person sends
-     * from the dock carries the latest, so share again as it changes.
+     * from the dock carries the latest, so share again as it changes; the
+     * thread shows `label`, such as the page's name, under the message.
      */
-    share: (context: JsonValue) =>
-      settle(this.api.shareContext(JSON.stringify(context))),
+    share: (context: JsonValue, options: { label?: string } = {}) =>
+      settle(
+        this.api.shareContext(JSON.stringify(context), options.label ?? null)
+      ),
     /** Opens the dock on the chosen chat, with `draft` in its composer for the person to send. */
     open: (options: { draft?: string } = {}) =>
       settle(this.api.openChat(options.draft ?? null)),

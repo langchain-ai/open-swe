@@ -26,6 +26,7 @@ import type {
   BridgeHost,
   ChatTarget,
   RepositoryPick,
+  SharedContext,
   ToolRunner,
 } from "@/features/plugins/lib/bridge"
 import {
@@ -94,7 +95,7 @@ export function PluginFrame({
   provideTools: (offer: AgentToolOffer, run: ToolRunner) => () => void
   chooseChat: (chat: ChatTarget) => void
   openChat: (draft: string | null) => void
-  shareContext: (json: string) => void
+  shareContext: (context: SharedContext) => void
 }) {
   const session = useSession()
   const isInBaseOrg = useIsInBaseOrg()

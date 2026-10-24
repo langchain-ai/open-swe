@@ -369,9 +369,10 @@ export interface HostApi extends RpcTarget {
   chooseChat(scope: ChatScope): Promise<void>
   /**
    * What the person has open, as JSON text of at most 8,000 characters; the
-   * agent gets the latest with each message they send from the dock.
+   * agent gets the latest with each message they send from the dock, which
+   * shows `label` (at most 120 characters) beside it.
    */
-  shareContext(json: string): Promise<void>
+  shareContext(json: string, label: string | null): Promise<void>
   /** Opens the dock on the chosen chat, with `draft` in its composer for the person to send. */
   openChat(draft: string | null): Promise<void>
   /** Joins a live room, scoped like documents; dispose the room to leave it. */

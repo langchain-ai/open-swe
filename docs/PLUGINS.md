@@ -344,14 +344,26 @@ const withdraw = host.agent.provide(
   "Use read_page before changing anything." // instructions for the agent, optional
 )
 
-// What the person has open; each message they send from the dock carries the latest.
-await host.agent.share({ page: "docs/intro.md", selection: "the selected passage" })
+// What the person has open; each message they send from the dock carries the latest,
+// and the thread shows the label under the message.
+await host.agent.share(
+  {
+    page: "docs/intro.md",
+    selection: {
+      text: "the selected passage",
+      before: "…the text just before it, ",
+      after: ", and just after it…",
+      note: "before and after only place the selection; they are not selected",
+    },
+  },
+  { label: "intro · 3 words selected" }
+)
 
 await host.agent.open({ draft: "> the passage the person selected\n\n" }) // the person presses Send
 ```
 
 - **Chats** are yours to scope. `use` picks the chat without opening the dock; each name, with or without a repository the person shared, is one thread per person that picks up where it left off.
-- **Context** is what you `share`: JSON of at most 8,000 characters, such as the open page and the selection. It goes to the agent just before each message the person sends from the dock, so the agent knows where it is without calling a tool. Share again whenever it changes.
+- **Context** is what you `share`: JSON of at most 8,000 characters, such as the open page and the selection. It goes to the agent just before each message the person sends from the dock, so the agent knows where it is without calling a tool, and the message shows your `label` in small type instead of the context itself. Share again whenever it changes. Send a selection with the text around it, marked as only placing it, so the agent can tell which occurrence the person means.
 - **Tools** reach the agent as `<plugin>__<name>`, so they never stand in for its own. Names are a lowercase letter, then letters, digits or `_`; at most 32 tools, with descriptions up to 2,000 characters and instructions up to 4,000. `parameters` is a JSON Schema of type `object`.
 - **Calls** run while your plugin is open. The run waits at each call, the dock runs it in your frame, and the thread carries on with what `run` returned, as JSON, or a string as is (up to 200,000 characters). What `run` throws, the agent reads as an error. Open in two tabs, your plugin runs each call once. Only messages sent from the dock get your tools, so the same chat opened as a full thread works without them; closing the dock withdraws them. After 20 runs your results started since the person last wrote, the agent waits for them, and their next message brings it what you returned.
 - **Results are data.** The agent treats them as your plugin's, not as instructions from the person, so a document can't steer it.

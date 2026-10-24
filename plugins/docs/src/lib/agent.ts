@@ -167,12 +167,13 @@ export function useOpenPageTools(tools: PageTools) {
 
 /**
  * Tells the agent what the person has open, so each message they send from
- * the dock carries it; `context` is shared again whenever it changes.
+ * the dock carries it, labelled `label` in the thread; it is shared again
+ * whenever it changes.
  */
-export function useSharedContext(context: JsonObject) {
+export function useSharedContext(context: JsonObject, label: string) {
   const host = usePluginHost()
   const json = JSON.stringify(context)
   useEffect(() => {
-    void host.agent.share(JSON.parse(json) as JsonObject)
-  }, [host, json])
+    void host.agent.share(JSON.parse(json) as JsonObject, { label })
+  }, [host, json, label])
 }

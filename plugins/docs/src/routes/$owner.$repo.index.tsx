@@ -17,11 +17,14 @@ function SpaceHome() {
   const repository = `${owner}/${repo}`.toLowerCase()
   const label = useRepositoryLabel(repository)
   useTabTitle(label)
-  useSharedContext({
-    plugin: "Docs, an editor for the Markdown pages of a GitHub repository",
-    repository,
-    page: null,
-  })
+  useSharedContext(
+    {
+      plugin: "Docs, an editor for the Markdown pages of a GitHub repository",
+      repository,
+      page: null,
+    },
+    label
+  )
   const space = useSpace(repository).data
   const drafts = [...(useDrafts(repository).data ?? new Map()).entries()]
   const pages = (space?.pages ?? []).filter((path) => !isHidden(path))

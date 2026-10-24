@@ -77,6 +77,12 @@ export interface AgentToolOffer {
 /** Runs one call in the plugin's frame; resolves to its result's text, or rejects with the plugin's error. */
 export type ToolRunner = (tool: string, args: JsonObject) => Promise<string>
 
+/** What a plugin says the person has open: JSON for the agent, and a label the thread shows. */
+export interface SharedContext {
+  json: string
+  label: string | null
+}
+
 /** The chat the dock shows: the person's chat under `name`, about `repository` if any. */
 export interface ChatTarget {
   name: string
@@ -113,7 +119,7 @@ export interface BridgeHost {
   /** Opens the dock, with `draft` in its composer. */
   openChat: (draft: string | null) => void
   /** What the person has open, as the plugin describes it, for the agent's next messages. */
-  shareContext: (json: string) => void
+  shareContext: (context: SharedContext) => void
   /** Calls `onChange` whenever anyone writes to `target`; returns the unsubscribe. */
   watchDocuments: (target: DocumentTarget, onChange: () => void) => () => void
   /** Streams one live room to `onEvent` from after `after`; returns the leave. */
@@ -749,7 +755,7 @@ export class PluginHostApi extends RpcTarget implements HostApi {
     })
   }
 
-  shareContext(json: string): Promise<void> {
+  shareContext(json: string, label: string | null): Promise<void> {
     return this.#budget.run(() => {
       this.#require("agent")
       if (typeof json !== "string" || json.length > MAX_CONTEXT)
@@ -759,7 +765,10 @@ export class PluginHostApi extends RpcTarget implements HostApi {
       } catch {
         invalid("context must be JSON")
       }
-      this.#host().shareContext(json)
+      this.#host().shareContext({
+        json,
+        label: optionalText(label, "label", 120) ?? null,
+      })
     })
   }
 

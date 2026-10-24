@@ -11,6 +11,7 @@ import { pluginsApi } from "@/features/plugins/lib/api"
 import type {
   AgentToolOffer,
   ChatTarget,
+  SharedContext,
   ToolRunner,
 } from "@/features/plugins/lib/bridge"
 import { invalidationTopic } from "@/lib/invalidations/topics"
@@ -43,8 +44,8 @@ export function PluginAgentDock({
   draft: { key: number; text: string } | undefined
   /** `null` until the plugin's frame offers any. */
   tools: ProvidedTools | null
-  /** What the plugin last said the person has open, as JSON; each message carries it. */
-  context: string | null
+  /** What the plugin last said the person has open; each message carries it. */
+  context: SharedContext | null
   /** Whether the plugin's tab is on screen; a hidden one keeps its thread but stops streaming. */
   active: boolean
   /** Hears the chat's thread once it is open, for the bar above to link to. */
@@ -69,7 +70,8 @@ export function PluginAgentDock({
       // and puts what the plugin has open ahead of each message.
       runConfigurable: {
         plugin_dock: true,
-        ...(context ? { plugin_context: context } : {}),
+        ...(context ? { plugin_context: context.json } : {}),
+        ...(context?.label ? { plugin_context_label: context.label } : {}),
       } satisfies Record<string, string | boolean>,
       emptyState: (
         <p className="max-w-xs text-center text-xs text-tertiary">

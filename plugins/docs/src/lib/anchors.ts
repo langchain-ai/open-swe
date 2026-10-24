@@ -37,7 +37,8 @@ function textIndex(doc: ProseMirrorNode): TextIndex {
 export function anchorFor(
   doc: ProseMirrorNode,
   from: number,
-  to: number
+  to: number,
+  context = CONTEXT
 ): Anchor | null {
   const { text, positions } = textIndex(doc)
   const start = positions.findIndex((pos) => pos >= from)
@@ -50,9 +51,22 @@ export function anchorFor(
   if (start < 0 || end <= start) return null
   return {
     quote: text.slice(start, end),
-    prefix: text.slice(Math.max(0, start - CONTEXT), start),
-    suffix: text.slice(end, end + CONTEXT),
+    prefix: text.slice(Math.max(0, start - context), start),
+    suffix: text.slice(end, end + context),
   }
+}
+
+/** The text of the last heading before `pos`, the section a passage sits in. */
+export function headingBefore(
+  doc: ProseMirrorNode,
+  pos: number
+): string | null {
+  let heading: string | null = null
+  doc.nodesBetween(0, pos, (node) => {
+    if (node.type.name === "heading") heading = node.textContent
+    return !node.isBlock || node.type.name === "doc"
+  })
+  return heading
 }
 
 function sharedSuffix(a: string, b: string): number {

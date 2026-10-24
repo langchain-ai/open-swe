@@ -29,7 +29,12 @@ import {
 import { PageEditor } from "@/components/Editor"
 import { useOpenPageTools, useSharedContext } from "@/lib/agent"
 import type { ImageFile } from "@/lib/images"
-import { anchorFor, resolveAnchor, type Highlight } from "@/lib/anchors"
+import {
+  anchorFor,
+  headingBefore,
+  resolveAnchor,
+  type Highlight,
+} from "@/lib/anchors"
 import { errorMessage } from "@/lib/host"
 import { asLiveMarkdown, useLiveDoc, usePresence } from "@/lib/live"
 import { preserveFormatting } from "@/lib/preserve"
@@ -61,6 +66,15 @@ import {
 } from "@/lib/queries"
 
 type Tab = "comments" | "activity"
+
+/** A passage the person selected, and the text around it that places it on the page. */
+// A type, not an interface, so it is the JSON the agent's tools return.
+type Selected = {
+  text: string
+  before: string
+  after: string
+  heading: string | null
+}
 
 export function PageView({
   repository,
@@ -366,22 +380,41 @@ export function PageView({
     throw new Error("The draft didn't open in time; try again.")
   }
 
-  const selectedText = (): string | null => {
+  /** What the person selected on the page, with the text around it that places it. */
+  const selectedPassage = (): Selected | null => {
     const view = mounted()?.view
     const selection = document.getSelection()
     if (!view || !selection || selection.isCollapsed) return null
     const range = selection.getRangeAt(0)
     if (!view.dom.contains(range.commonAncestorContainer)) return null
-    return selection.toString() || null
+    try {
+      const from = view.posAtDOM(range.startContainer, range.startOffset)
+      const to = view.posAtDOM(range.endContainer, range.endOffset)
+      const anchor = anchorFor(
+        view.state.doc,
+        Math.min(from, to),
+        Math.max(from, to),
+        240
+      )
+      if (!anchor?.quote.trim()) return null
+      return {
+        text: anchor.quote.slice(0, 2_000),
+        before: anchor.prefix,
+        after: anchor.suffix,
+        heading: headingBefore(view.state.doc, Math.min(from, to)),
+      }
+    } catch {
+      return null
+    }
   }
 
   // What the person selected, kept current so each message to the agent carries it.
-  const [selection, setSelection] = useState<string | null>(null)
+  const [selection, setSelection] = useState<Selected | null>(null)
   useEffect(() => {
     let timer: ReturnType<typeof setTimeout> | undefined
     const changed = () => {
       clearTimeout(timer)
-      timer = setTimeout(() => setSelection(selectedText()), 250)
+      timer = setTimeout(() => setSelection(selectedPassage()), 250)
     }
     document.addEventListener("selectionchange", changed)
     return () => {
@@ -390,14 +423,23 @@ export function PageView({
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps -- reads the editor mounted when it fires.
   }, [])
-  useSharedContext({
-    plugin: "Docs, an editor for the Markdown pages of a GitHub repository",
-    repository,
-    page: path,
-    title: pageTitle(path),
-    draft: draft ? { branch: draft.branch, startedBy: draft.startedBy } : null,
-    selection: selection?.slice(0, 2_000) ?? null,
-  })
+  const words = selection ? selection.text.trim().split(/\s+/).length : 0
+  useSharedContext(
+    {
+      plugin: "Docs, an editor for the Markdown pages of a GitHub repository",
+      repository,
+      page: path,
+      title: pageTitle(path),
+      draft: draft
+        ? { branch: draft.branch, startedBy: draft.startedBy }
+        : null,
+      selection: selection && {
+        ...selection,
+        note: "`text` is what the person selected. `before` and `after` are the text right around it, only to show where it is; they are not selected.",
+      },
+    },
+    `${pageTitle(path)}${words ? ` · ${words} word${words === 1 ? "" : "s"} selected` : ""}`
+  )
 
   useOpenPageTools({
     read: () => ({
@@ -407,7 +449,7 @@ export function PageView({
         ? { branch: draft.branch, startedBy: draft.startedBy }
         : null,
       markdown: mounted()?.getMarkdown() ?? split.body,
-      selection: selectedText(),
+      selection: selectedPassage(),
       openComments: openComments.map(({ id, comment }) => ({
         id,
         quote: comment.quote,
