@@ -464,6 +464,91 @@
         "title": "ApiKeyView",
         "type": "object"
       },
+      "AppModel": {
+        "properties": {
+          "id": {
+            "format": "uuid",
+            "title": "Id",
+            "type": "string"
+          },
+          "latest": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/AppVersionModel"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "listed": {
+            "title": "Listed",
+            "type": "boolean"
+          },
+          "mine": {
+            "title": "Mine",
+            "type": "boolean"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "name",
+          "mine",
+          "listed",
+          "latest"
+        ],
+        "title": "AppModel",
+        "type": "object"
+      },
+      "AppVersionModel": {
+        "properties": {
+          "created_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Created At"
+          },
+          "id": {
+            "format": "uuid",
+            "title": "Id",
+            "type": "string"
+          },
+          "manifest": {
+            "$ref": "#/components/schemas/PluginManifest"
+          },
+          "number": {
+            "title": "Number",
+            "type": "integer"
+          },
+          "origin": {
+            "$ref": "#/components/schemas/openswe__utils__json_types__JsonObject"
+          },
+          "preview": {
+            "title": "Preview",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "id",
+          "number",
+          "manifest",
+          "origin",
+          "preview",
+          "created_at"
+        ],
+        "title": "AppVersionModel",
+        "type": "object"
+      },
       "ApprovalsFileStatus": {
         "properties": {
           "found": {
@@ -1169,22 +1254,6 @@
           "html"
         ],
         "title": "BundleResponse",
-        "type": "object"
-      },
-      "CatalogItem": {
-        "properties": {
-          "manifest": {
-            "$ref": "#/components/schemas/PluginManifest"
-          },
-          "source": {
-            "$ref": "#/components/schemas/PluginSourceModel"
-          }
-        },
-        "required": [
-          "manifest",
-          "source"
-        ],
-        "title": "CatalogItem",
         "type": "object"
       },
       "ChallengeResponse": {
@@ -3132,15 +3201,6 @@
       },
       "InstallBody": {
         "properties": {
-          "name": {
-            "title": "Name",
-            "type": "string"
-          },
-          "path": {
-            "default": "",
-            "title": "Path",
-            "type": "string"
-          },
           "permissions": {
             "items": {
               "$ref": "#/components/schemas/PluginPermission"
@@ -3148,34 +3208,14 @@
             "title": "Permissions",
             "type": "array"
           },
-          "ref": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Ref"
-          },
-          "repository": {
-            "title": "Repository",
-            "type": "string"
-          },
-          "scope": {
-            "default": "user",
-            "enum": [
-              "user",
-              "organization"
-            ],
-            "title": "Scope",
+          "version": {
+            "format": "uuid",
+            "title": "Version",
             "type": "string"
           }
         },
         "required": [
-          "repository",
-          "name",
+          "version",
           "permissions"
         ],
         "title": "InstallBody",
@@ -3334,6 +3374,19 @@
           "events"
         ],
         "title": "LinearTrigger",
+        "type": "object"
+      },
+      "ListedBody": {
+        "properties": {
+          "listed": {
+            "title": "Listed",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "listed"
+        ],
+        "title": "ListedBody",
         "type": "object"
       },
       "MCPConnectionPublic": {
@@ -5001,10 +5054,6 @@
             "title": "Displayname",
             "type": "string"
           },
-          "entry": {
-            "title": "Entry",
-            "type": "string"
-          },
           "name": {
             "pattern": "^[a-z0-9](?:[a-z0-9-]{0,46}[a-z0-9])?$",
             "title": "Name",
@@ -5032,14 +5081,13 @@
           "name",
           "displayName",
           "version",
-          "entry",
           "sidebar"
         ],
         "title": "PluginManifest",
         "type": "object"
       },
       "PluginPermission": {
-        "description": "What a plugin may ask the dashboard to do for the person using it.",
+        "description": "What a plugin may ask the web UI to do for the person using it.",
         "enum": [
           "storage",
           "github:read",
@@ -5050,42 +5098,8 @@
         "title": "PluginPermission",
         "type": "string"
       },
-      "PluginSourceModel": {
-        "properties": {
-          "path": {
-            "title": "Path",
-            "type": "string"
-          },
-          "ref": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Ref"
-          },
-          "repository": {
-            "title": "Repository",
-            "type": "string"
-          }
-        },
-        "required": [
-          "repository",
-          "path",
-          "ref"
-        ],
-        "title": "PluginSourceModel",
-        "type": "object"
-      },
       "PluginSummary": {
         "properties": {
-          "commit_sha": {
-            "title": "Commit Sha",
-            "type": "string"
-          },
           "id": {
             "format": "uuid",
             "title": "Id",
@@ -5106,6 +5120,10 @@
           "manifest": {
             "$ref": "#/components/schemas/PluginManifest"
           },
+          "mine": {
+            "title": "Mine",
+            "type": "boolean"
+          },
           "name": {
             "title": "Name",
             "type": "string"
@@ -5122,16 +5140,8 @@
             "title": "Repositories",
             "type": "array"
           },
-          "scope": {
-            "enum": [
-              "user",
-              "organization"
-            ],
-            "title": "Scope",
-            "type": "string"
-          },
-          "source": {
-            "$ref": "#/components/schemas/PluginSourceModel"
+          "version": {
+            "$ref": "#/components/schemas/AppVersionModel"
           }
         },
         "required": [
@@ -5139,9 +5149,8 @@
           "plugin_id",
           "name",
           "manifest",
-          "source",
-          "commit_sha",
-          "scope",
+          "version",
+          "mine",
           "repositories",
           "installed_at"
         ],
@@ -5232,6 +5241,36 @@
           "deletions"
         ],
         "title": "PreviewFile",
+        "type": "object"
+      },
+      "PreviewModel": {
+        "properties": {
+          "running": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/PluginSummary"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "waiting": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/AppVersionModel"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "required": [
+          "running",
+          "waiting"
+        ],
+        "title": "PreviewModel",
         "type": "object"
       },
       "PreviewReply": {
@@ -8982,22 +9021,6 @@
           "sha"
         ],
         "title": "UpdateBranchAction",
-        "type": "object"
-      },
-      "UpgradeBody": {
-        "properties": {
-          "permissions": {
-            "items": {
-              "$ref": "#/components/schemas/PluginPermission"
-            },
-            "title": "Permissions",
-            "type": "array"
-          }
-        },
-        "required": [
-          "permissions"
-        ],
-        "title": "UpgradeBody",
         "type": "object"
       },
       "Usage": {
@@ -14861,6 +14884,7 @@
         ]
       },
       "post": {
+        "description": "Add a version of an app to the viewer's web UI.",
         "operationId": "api_install_plugin_dashboard_api_plugins_post",
         "requestBody": {
           "content": {
@@ -14906,30 +14930,56 @@
         ]
       }
     },
-    "/dashboard/api/plugins/catalog": {
+    "/dashboard/api/plugins/apps": {
       "get": {
-        "operationId": "api_plugin_catalog_dashboard_api_plugins_catalog_get",
+        "description": "The apps the viewer may add: their own, and the ones others listed.",
+        "operationId": "api_list_apps_dashboard_api_plugins_apps_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/AppModel"
+                  },
+                  "title": "Response Api List Apps Dashboard Api Plugins Apps Get",
+                  "type": "array"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "security": [
+          {
+            "DashboardSession": []
+          }
+        ],
+        "summary": "Api List Apps",
+        "tags": [
+          "dashboard",
+          "plugins"
+        ]
+      },
+      "post": {
+        "description": "Release a version of one of the viewer's apps from its bundle, the request's HTML body.\n\n``repository``, ``ref`` and ``commit`` say where it was built, only to show.",
+        "operationId": "api_publish_app_dashboard_api_plugins_apps_post",
         "parameters": [
           {
             "in": "query",
             "name": "repository",
-            "required": true,
-            "schema": {
-              "maxLength": 200,
-              "minLength": 3,
-              "title": "Repository",
-              "type": "string"
-            }
-          },
-          {
-            "in": "query",
-            "name": "path",
             "required": false,
             "schema": {
-              "default": "",
-              "maxLength": 200,
-              "title": "Path",
-              "type": "string"
+              "anyOf": [
+                {
+                  "maxLength": 200,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Repository"
             }
           },
           {
@@ -14948,18 +14998,31 @@
               ],
               "title": "Ref"
             }
+          },
+          {
+            "in": "query",
+            "name": "commit",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "maxLength": 64,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Commit"
+            }
           }
         ],
         "responses": {
-          "200": {
+          "201": {
             "content": {
               "application/json": {
                 "schema": {
-                  "items": {
-                    "$ref": "#/components/schemas/CatalogItem"
-                  },
-                  "title": "Response Api Plugin Catalog Dashboard Api Plugins Catalog Get",
-                  "type": "array"
+                  "$ref": "#/components/schemas/AppVersionModel"
                 }
               }
             },
@@ -14981,7 +15044,215 @@
             "DashboardSession": []
           }
         ],
-        "summary": "Api Plugin Catalog",
+        "summary": "Api Publish App",
+        "tags": [
+          "dashboard",
+          "plugins"
+        ]
+      }
+    },
+    "/dashboard/api/plugins/apps/{app_id}": {
+      "patch": {
+        "description": "List the app for anyone to add, or keep it to the viewer, who publishes it.",
+        "operationId": "api_list_app_dashboard_api_plugins_apps__app_id__patch",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "app_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "App Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ListedBody"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "204": {
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "DashboardSession": []
+          }
+        ],
+        "summary": "Api List App",
+        "tags": [
+          "dashboard",
+          "plugins"
+        ]
+      }
+    },
+    "/dashboard/api/plugins/previews/{thread_id}": {
+      "get": {
+        "description": "The app the viewer's agent builds in ``thread_id``, as it runs beside the thread.",
+        "operationId": "api_app_preview_dashboard_api_plugins_previews__thread_id__get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "thread_id",
+            "required": true,
+            "schema": {
+              "title": "Thread Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PreviewModel"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "DashboardSession": []
+          }
+        ],
+        "summary": "Api App Preview",
+        "tags": [
+          "dashboard",
+          "plugins"
+        ]
+      },
+      "post": {
+        "description": "Run the thread's newest build, with the permissions it asks for approved.",
+        "operationId": "api_approve_app_preview_dashboard_api_plugins_previews__thread_id__post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "thread_id",
+            "required": true,
+            "schema": {
+              "title": "Thread Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/InstallBody"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PreviewModel"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "DashboardSession": []
+          }
+        ],
+        "summary": "Api Approve App Preview",
+        "tags": [
+          "dashboard",
+          "plugins"
+        ]
+      }
+    },
+    "/dashboard/api/plugins/previews/{thread_id}/release": {
+      "post": {
+        "description": "Keep the build running beside the thread: release it, in the viewer's sidebar.",
+        "operationId": "api_release_app_preview_dashboard_api_plugins_previews__thread_id__release_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "thread_id",
+            "required": true,
+            "schema": {
+              "title": "Thread Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PluginSummary"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "DashboardSession": []
+          }
+        ],
+        "summary": "Api Release App Preview",
         "tags": [
           "dashboard",
           "plugins"
@@ -16667,7 +16938,7 @@
     },
     "/dashboard/api/plugins/{installation_id}/repositories": {
       "post": {
-        "description": "Share repositories with the plugin, for the viewer only: what they picked when it asked.",
+        "description": "Share repositories with the app, for the viewer only: what they picked when it asked.",
         "operationId": "api_share_plugin_repositories_dashboard_api_plugins__installation_id__repositories_post",
         "parameters": [
           {
@@ -17052,7 +17323,7 @@
     },
     "/dashboard/api/plugins/{installation_id}/upgrade": {
       "post": {
-        "description": "Move the install to the commit its ref names now.",
+        "description": "Move the install to another version of its app.",
         "operationId": "api_upgrade_plugin_dashboard_api_plugins__installation_id__upgrade_post",
         "parameters": [
           {
@@ -17070,7 +17341,7 @@
           "content": {
             "application/json": {
               "schema": {
-                "$ref": "#/components/schemas/UpgradeBody"
+                "$ref": "#/components/schemas/InstallBody"
               }
             }
           },
