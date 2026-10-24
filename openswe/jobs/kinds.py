@@ -40,6 +40,8 @@ from openswe.sandboxes.retry import (
 )
 from openswe.schedules.store import AGENT_SCHEDULE_JOB_KIND, launch_scheduled_agent_run
 from openswe.session_cost import run_session_cost_refresh
+from openswe.slack.channel_options import DIRECTORY_JOB as SLACK_CHANNEL_DIRECTORY
+from openswe.slack.channel_options import ensure_directory_sync, sync_directory
 from openswe.threads.index_import import import_agent_server_threads
 from openswe.threads.status import RECONCILE_JOB as THREAD_STATUS_RECONCILE
 from openswe.threads.status import RECONCILE_SCHEDULE, reconcile_busy_threads
@@ -185,6 +187,11 @@ async def _human_text_backfill(job: Job) -> None:
     )
 
 
+@WORKER.register(SLACK_CHANNEL_DIRECTORY)
+async def _slack_channel_directory(_job: Job) -> None:
+    await sync_directory()
+
+
 @WORKER.register(WAKE_THREAD_JOB)
 async def _wake_thread(job: Job) -> None:
     # Never retried: a run the server started before the client saw an error would start twice.
@@ -202,6 +209,7 @@ async def start_jobs() -> None:
         import_agent_server_crons,
         import_agent_server_threads,
         start_queue,
+        ensure_directory_sync,
         lambda: queue.schedule(
             THREAD_STATUS_RECONCILE, cron=RECONCILE_SCHEDULE, key=THREAD_STATUS_RECONCILE
         ),

@@ -28,6 +28,7 @@ from openswe.mcp.models import MCPToolProvenance
 from openswe.middleware.dynamic_tools import DynamicToolMiddleware
 from openswe.prompts import prompt
 from openswe.sandboxes.tool_models import ToolDescription
+from openswe.threads.inbox import ThreadInbox
 
 _json = TypeAdapter(JsonValue)
 # Every surface lists the integration tools themselves, so none offers their loader.
@@ -171,6 +172,8 @@ class ToolSurface:
     file_checks: tuple[FileCheck, ...] = ()
     # Whether the graph's core tools it seldom needs belong in a runtime's code mode.
     code_mode: bool = False
+    # What is sent to the thread while it runs, which the run takes before each model call.
+    inbox: ThreadInbox | None = None
 
     async def prepare(self) -> None:
         planned = [

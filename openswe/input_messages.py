@@ -4,7 +4,7 @@ import hashlib
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from html import escape
-from typing import Any, Literal, NotRequired, TypedDict
+from typing import Any, Final, Literal, NotRequired, TypedDict
 from xml.etree import ElementTree
 
 from langchain_core.messages import BaseMessage
@@ -229,6 +229,11 @@ def input_message_timestamps(content: object) -> set[str]:
         for message in _input_message_elements(content)
         if (timestamp := message.get("timestamp"))
     }
+
+
+# Starts the id of every message that carries an event sent to the thread, such as
+# monitor output or a task report.
+EVENT_MESSAGE_PREFIX: Final = "event-match:"
 
 
 def delivered_event_match_ids(messages: Sequence[object]) -> set[str]:

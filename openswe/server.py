@@ -94,8 +94,6 @@ from openswe.middleware import (
     PullRequestCreationGuardMiddleware,
     RequireUserReplyMiddleware,
     WorkflowPushGuardMiddleware,
-    check_message_queue_before_model,
-    deliver_event_matches_before_model,
     notify_step_limit_reached,
     record_run_usage,
     refresh_github_proxy_before_model,
@@ -157,6 +155,7 @@ from openswe.skill_store.backend import skills_backend
 from openswe.slack.dm import is_concierge_thread, is_dm_channel
 from openswe.thread_title import TITLE_GENERATION_MAX_TOKENS, schedule_thread_title_generation
 from openswe.threads.blobs import ThreadBlobs, blob_namespace
+from openswe.threads.inbox import ThreadInbox
 from openswe.threads.recent_context import RecentContextAudience, recent_thread_context_section
 from openswe.threads.summary import DASHBOARD_SOURCE
 from openswe.tools import (
@@ -234,6 +233,7 @@ from openswe.tools import (
     write_database_rows,
 )
 from openswe.tools.access import permitted, resolve_access
+from openswe.tools.add_review_comment import add_review_comment
 from openswe.tools.admin_gate import (
     actor_has_admin_context,
     participant_is_admin,
@@ -241,6 +241,7 @@ from openswe.tools.admin_gate import (
 from openswe.tools.manage_feature_flags import manage_feature_flags
 from openswe.tools.manage_review_approval_mode import manage_review_approval_mode
 from openswe.tools.manage_review_repos import manage_review_repos
+from openswe.tools.note_on_diff import note_on_diff
 from openswe.tools.propose_pr_review import propose_pr_review
 from openswe.tools.propose_review_comment import propose_review_comment
 from openswe.tools.review_walkthrough import walkthrough_tools
@@ -594,6 +595,9 @@ def _is_subagent_excluded_tool(name: str) -> bool:
         "monitor",
         "submit_thread_feedback",
         "submit_review_assessment_feedback",
+        # The review page reads both from the parent's transcript.
+        "note_on_diff",
+        "add_review_comment",
         "get_thread",
         "code_channel_set_view",
         "manage_code_channel",
@@ -1669,6 +1673,8 @@ async def plan_agent(config: RunnableConfig, surface: ToolSurface) -> None:
         submit_review_assessment_feedback,
         propose_review_comment,
         propose_pr_review,
+        note_on_diff,
+        add_review_comment,
         *ADMIN_TOOLS,
         *((cli_result,) if cli_result_required else ()),
         *((worktree_handoff,) if bridge_client == "desktop" and not stop_summary_mode else ()),
@@ -1882,6 +1888,7 @@ async def plan_agent(config: RunnableConfig, surface: ToolSurface) -> None:
         for tool in static_tools
         if _registered_tool_name(tool) != _registered_tool_name(save_user_settings)
     ]
+    initial_surface = _initial_reply_surface(cfg) if reply_tool_offered else WEB_REPLY_SURFACE
     middleware = cast(
         list[AgentMiddleware[Any, Any, Any]],
         [
@@ -1911,17 +1918,10 @@ async def plan_agent(config: RunnableConfig, surface: ToolSurface) -> None:
                 if task_coordination and task_coordination.is_worker
                 else [refresh_github_proxy_before_model]
             ),
-            *(
-                []
-                if stop_summary_mode
-                else [check_message_queue_before_model, deliver_event_matches_before_model]
-            ),
             RequireUserReplyMiddleware(
                 _registered_tool_name(slack_reply),
                 _registered_tool_name(slack_no_reply_needed),
-                initial_surface=(
-                    _initial_reply_surface(cfg) if reply_tool_offered else WEB_REPLY_SURFACE
-                ),
+                initial_surface=initial_surface,
                 replies=GUIDE_REPLY_TOOLS if guide is not None else frozenset(),
             ),
             *(
@@ -1939,6 +1939,9 @@ async def plan_agent(config: RunnableConfig, surface: ToolSurface) -> None:
     )
     surface.base_tools = main_tools
     surface.middleware = middleware
+    surface.inbox = (
+        None if stop_summary_mode else ThreadInbox(thread_id, events=True, surface=initial_surface)
+    )
     surface.files = agent_backend
     surface.artifacts_root = artifacts_root
     surface.shell_guards = [PullRequestCreationGuardMiddleware(), WorkflowPushGuardMiddleware()]
