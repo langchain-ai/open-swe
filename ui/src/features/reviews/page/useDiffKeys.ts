@@ -8,6 +8,8 @@ import {
   writeStoredDiffOverflow,
 } from "@/features/agents/utils/diffUtils"
 import { entryShows } from "./diffEntries"
+import { findMatches } from "./find"
+import { focusFindInput, stepFind } from "./FindBar"
 import {
   findingTarget,
   isOpenAnchored,
@@ -43,6 +45,15 @@ export function useDiffKeys(askAboutSelection: () => void) {
       const next =
         entryOrder[Math.min(entryOrder.length - 1, Math.max(0, index + delta))]
       if (next) jumpTo({ kind: "entry", id: next.id })
+    }
+    const openFind = () => {
+      page().setFindOpen(true)
+      requestAnimationFrame(focusFindInput)
+    }
+    const moveFind = (delta: 1 | -1) => {
+      const { findOpen, findQuery, entryOrder } = page()
+      if (!findOpen) return openFind()
+      stepFind(findMatches(entryOrder, findQuery), delta)
     }
     // Findings and open threads in reading order: one queue of things that want attention.
     const stops = (): Array<Stop> => {
@@ -173,6 +184,24 @@ export function useDiffKeys(askAboutSelection: () => void) {
           const { diffStyle, setDiffStyle } = page()
           setDiffStyle(diffStyle === "split" ? "unified" : "split")
         },
+      },
+      {
+        id: "review-find",
+        label: "Find in files and changes",
+        shortcuts: ["mod+f"],
+        run: openFind,
+      },
+      {
+        id: "review-find-next",
+        label: "Next find match",
+        shortcuts: ["mod+g"],
+        run: () => moveFind(1),
+      },
+      {
+        id: "review-find-previous",
+        label: "Previous find match",
+        shortcuts: ["mod+shift+g"],
+        run: () => moveFind(-1),
       },
       {
         id: "review-top",

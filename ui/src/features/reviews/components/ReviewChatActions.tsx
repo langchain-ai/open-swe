@@ -1,17 +1,32 @@
 import { XIcon } from "@langchain/macaw-components/icons"
 import { IconButton } from "@langchain/macaw-components/IconButton"
-import { createContext, useContext, useEffect, useMemo, useState } from "react"
+import {
+  createContext,
+  useContext,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react"
 import type { ReactNode } from "react"
 import { FileCodeIcon } from "@phosphor-icons/react/dist/ssr/FileCode"
 import type { Message } from "@/features/agents/lib/types"
 import type { CodeExcerpt } from "@/features/agents/utils/codeExcerpt"
-import { chatDiffAction } from "@/features/reviews/lib/chatDiffActions"
-import type { DiffRange } from "@/features/reviews/lib/chatDiffActions"
+import {
+  chatDiffAction,
+  rangeLabel,
+} from "@/features/reviews/lib/chatDiffActions"
+import type {
+  ChatDiffAction,
+  DiffRange,
+} from "@/features/reviews/lib/chatDiffActions"
 import { useChatDrafts } from "@/features/reviews/lib/chatDrafts"
+import { usePendingReview } from "@/features/reviews/lib/usePendingReview"
+import { AgentNoteCard } from "@/features/reviews/components/AgentNoteCard"
 import { ProposedCommentCard } from "@/features/reviews/components/ProposedCommentCard"
 import { ProposedReviewCard } from "@/features/reviews/components/ProposedReviewCard"
 
-export const ReviewChatActionsContext = createContext<{
+interface ReviewChatActionsValue {
   owner: string
   repo: string
   number: number
@@ -25,7 +40,10 @@ export const ReviewChatActionsContext = createContext<{
   /** A question to send as soon as the chat can. */
   question?: string
   clearQuestion?: () => void
-} | null>(null)
+}
+
+export const ReviewChatActionsContext =
+  createContext<ReviewChatActionsValue | null>(null)
 
 export function ReviewChatActions({ messages }: { messages: Array<Message> }) {
   const review = useContext(ReviewChatActionsContext)
@@ -76,11 +94,53 @@ export function ReviewChatActions({ messages }: { messages: Array<Message> }) {
     [messages, review, outputs]
   )
   useEffect(() => {
-    for (const action of actions) register?.(action)
+    for (const action of actions)
+      if (action.kind !== "added") register?.(action)
   }, [actions, register])
-  if (!review) return null
+  return review ? (
+    <ReviewChatActionList review={review} actions={actions} />
+  ) : null
+}
+
+function ReviewChatActionList({
+  review,
+  actions,
+}: {
+  review: ReviewChatActionsValue
+  actions: Array<ChatDiffAction>
+}) {
+  // A comment the agent added sits in the pending review, which the page reads once.
+  const pending = usePendingReview(review.owner, review.repo, review.number)
+  const invalidatePending = pending.invalidate
+  const refreshedFor = useRef(new Set<string>())
+  useEffect(() => {
+    const added = actions.filter(
+      (action) =>
+        action.kind === "added" && !refreshedFor.current.has(action.id)
+    )
+    if (added.length === 0) return
+    for (const action of added) refreshedFor.current.add(action.id)
+    void invalidatePending()
+  }, [actions, invalidatePending])
   return actions.map((action) =>
-    action.kind === "comment" ? (
+    action.kind === "note" ? (
+      <AgentNoteCard
+        key={action.id}
+        id={action.id}
+        onShow={() => review.showInDiff(action.range)}
+      />
+    ) : action.kind === "added" ? (
+      <p key={action.id} className="text-xs text-secondary">
+        Added to your pending review on{" "}
+        <button
+          type="button"
+          onClick={() => review.showInDiff(action.range)}
+          className="font-mono underline-offset-2 hover:underline"
+        >
+          {action.range.file}:{rangeLabel(action.range)}
+        </button>
+      </p>
+    ) : action.kind === "comment" ? (
       <ProposedCommentCard
         key={action.id}
         owner={review.owner}
