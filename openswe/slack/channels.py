@@ -50,8 +50,13 @@ _PAGE_SIZE: Final = 1000
 _MAX_RATE_LIMITS: Final = 20
 _MAX_RATE_LIMIT_WAIT: Final = timedelta(minutes=2)
 # Channel events that change what the directory says about one channel.
-REFETCH_EVENTS: Final = frozenset({"channel_created", "channel_rename", "channel_unarchive"})
-UNLIST_EVENTS: Final = frozenset({"channel_archive", "channel_deleted"})
+# Private channels send the group_* forms.
+REFETCH_EVENTS: Final = frozenset(
+    {"channel_created", "channel_rename", "channel_unarchive", "group_rename", "group_unarchive"}
+)
+UNLIST_EVENTS: Final = frozenset(
+    {"channel_archive", "channel_deleted", "group_archive", "group_deleted"}
+)
 DIRECTORY_EVENTS: Final = REFETCH_EVENTS | UNLIST_EVENTS
 
 type _PageFetch = Callable[[str | None], Awaitable[AsyncSlackResponse]]
