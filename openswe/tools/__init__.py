@@ -42,6 +42,7 @@ _TOOL_MODULES = {
     "preview_port": ".expose_port",
     "publish_review": ".publish_review",
     "write_database_rows": ".repair_data",
+    "run_sql": ".repair_data",
     "read_only_sql": ".read_only_sql",
     "read_user_settings": ".read_user_settings",
     "record_human_input": ".record_human_input",
@@ -126,6 +127,7 @@ __all__ = [
     "preview_port",
     "publish_review",
     "write_database_rows",
+    "run_sql",
     "read_only_sql",
     "read_user_settings",
     "record_human_input",
@@ -221,7 +223,7 @@ if TYPE_CHECKING:
     from openswe.tools.read_user_settings import read_user_settings
     from openswe.tools.record_human_input import record_human_input
     from openswe.tools.recreate_sandbox import recreate_sandbox
-    from openswe.tools.repair_data import write_database_rows
+    from openswe.tools.repair_data import run_sql, write_database_rows
     from openswe.tools.reply_to_finding_thread import reply_to_finding_thread
     from openswe.tools.report_platform_issue import report_platform_issue
     from openswe.tools.request_human_review import (
