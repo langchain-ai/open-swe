@@ -11,6 +11,7 @@ from urllib.parse import unquote, urlsplit
 
 from langsmith import AsyncClient as AsyncLangSmithClient
 from langsmith import Client as LangSmithClient
+from langsmith.address import EnvAddressError, resolve_destination
 from langsmith.utils import LangSmithNotFoundError, get_host_url
 
 from openswe.config import ENV
@@ -159,6 +160,45 @@ async def _resolve_project_id_by_name(project_name: str) -> str | None:
     return resolved or None
 
 
+async def _resolve_tracing_project_id() -> str | None:
+    """Project id runs trace into: the configured agent environment's, else the project's."""
+    try:
+        _, address = resolve_destination()
+    except EnvAddressError:
+        # The SDK leaves runs untraced then, so no project holds them.
+        logger.warning("The tracing environment variables cannot address a run", exc_info=True)
+        return None
+    if address is None:
+        return await _resolve_project_id_by_name(tracing_project())
+    cache_key = (_workspace_key(), f"{address['id']}:{address['environment']}")
+    if cache_key in _PROJECT_ID_CACHE:
+        return _PROJECT_ID_CACHE[cache_key] or None
+    api_key = ENV.LANGSMITH_API_KEY.optional()
+    if not api_key:
+        return None
+    client = sync_langsmith_client(api_key, ENV.LANGSMITH_ENDPOINT.get())
+    try:
+        resolved = str((await client.sessions.resolve(**address)).session_id)
+    except Exception:  # noqa: BLE001
+        logger.debug("Could not resolve the LangSmith agent environment", exc_info=True)
+        return None
+    _PROJECT_ID_CACHE[cache_key] = resolved
+    return resolved
+
+
+async def agent_project_name() -> str | None:
+    """Name of the project the configured agent environment traces into, once it exists."""
+    project_id = await _resolve_tracing_project_id()
+    client = _build_langsmith_client()
+    if not project_id or client is None:
+        return None
+    try:
+        return (await client.read_project(project_id=project_id)).name
+    except Exception:  # noqa: BLE001
+        logger.debug("Could not read the agent environment's project", exc_info=True)
+        return None
+
+
 async def _project_lookup_start(project_id: str) -> datetime:
     cached = _PROJECT_START_CACHE.get(_project_cache_key(project_id))
     if cached is not None:
@@ -183,7 +223,9 @@ async def _compose_langsmith_project_url(project_name: str | None = None) -> str
     tenant_id = await resolve_tenant_id()
     if not tenant_id:
         return None
-    project_id = await _resolve_project_id_by_name(project_name or tracing_project())
+    project_id = await (
+        _resolve_project_id_by_name(project_name) if project_name else _resolve_tracing_project_id()
+    )
     if not project_id:
         return None
     return f"{langsmith_host_url()}/o/{tenant_id}/projects/p/{project_id}"
@@ -372,7 +414,7 @@ async def get_langsmith_thread_cost(
     client = _build_langsmith_client()
     if client is None:
         raise LangSmithCostUnavailable("LangSmith credentials are not configured")
-    project_id = await _resolve_project_id_by_name(tracing_project())
+    project_id = await _resolve_tracing_project_id()
     if not project_id:
         raise LangSmithCostUnavailable("LangSmith tracing project is unavailable")
     try:
@@ -490,7 +532,7 @@ async def create_langsmith_thread_feedback(
     if client is None:
         logger.warning("No LangSmith API key configured, skipping thread feedback")
         return False
-    project_id = await _resolve_project_id_by_name(tracing_project())
+    project_id = await _resolve_tracing_project_id()
     if not project_id:
         logger.warning("LangSmith tracing project is unavailable, skipping thread feedback")
         return False
