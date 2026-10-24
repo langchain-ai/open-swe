@@ -20,6 +20,7 @@ from openswe.tasks.schemas import ThreadMetadata
 from openswe.threads import access, handlers
 from openswe.users import User
 from openswe.users.models import UserIdentity
+from openswe.utils.thread_participants import PARTICIPANT_IDENTITY_PREFIX, PARTICIPANT_LOGINS_KEY
 from openswe.webhooks import event_matches
 from openswe.webhooks.event_matches import EventMatch
 from openswe.webhooks.event_subscriptions import EventSubscription
@@ -185,13 +186,35 @@ def client(monkeypatch: pytest.MonkeyPatch) -> MagicMock:
     client.threads.update = AsyncMock(side_effect=update)
     owner = User(identities=[UserIdentity(provider="github", external_id="1", login=OWNER)])
     client.owner = owner
+    participant = User(
+        identities=[UserIdentity(provider="github", external_id="2", login="participant")],
+    )
+    client.participant = participant
     monkeypatch.setattr(
         User,
         "for_login",
-        AsyncMock(side_effect=lambda provider, login: owner if login == OWNER else None),
+        AsyncMock(
+            side_effect=lambda provider, login: (
+                owner if login == OWNER else participant if login == "participant" else None
+            )
+        ),
     )
-    monkeypatch.setattr(User, "for_identity", AsyncMock(return_value=owner))
-    monkeypatch.setattr(User, "get", AsyncMock(return_value=owner))
+    monkeypatch.setattr(
+        User,
+        "for_identity",
+        AsyncMock(
+            side_effect=lambda provider, external_id: {"1": owner, "2": participant}.get(
+                external_id
+            )
+        ),
+    )
+    monkeypatch.setattr(
+        User,
+        "get",
+        AsyncMock(
+            side_effect=lambda user_id: {owner.id: owner, participant.id: participant}.get(user_id)
+        ),
+    )
     client.threads.get_state = AsyncMock(return_value={"values": {"messages": []}})
     client.runs.create = AsyncMock(side_effect=run_create)
     client.runs.list = AsyncMock(side_effect=list_runs)
@@ -263,6 +286,63 @@ async def test_cli_bridge_delegates_only_while_it_is_served(
 async def test_public_thread_does_not_allow_using_owners_credentials(client: MagicMock) -> None:
     with pytest.raises(PermissionError, match="thread owner"):
         await service.authorized_metadata(service.Actor(COORDINATOR, "other-user"))
+
+
+@pytest.mark.parametrize("operation", ["message", "status", "cancel"])
+@pytest.mark.parametrize("restriction", ["unverified", "private", "admin"])
+async def test_task_participants_require_verified_identity_and_thread_access(
+    client: MagicMock, operation: str, restriction: str
+) -> None:
+    metadata = client.metadata[COORDINATOR]
+    metadata[PARTICIPANT_LOGINS_KEY] = {"participant": True}
+    if restriction != "unverified":
+        metadata[PARTICIPANT_IDENTITY_PREFIX + "github:participant"] = (
+            f"user:{client.participant.id}"
+        )
+    if restriction == "private":
+        metadata["visibility"] = "private"
+    elif restriction == "admin":
+        metadata["admin_thread"] = True
+    actor = service.Actor(COORDINATOR, "participant")
+    with pytest.raises(PermissionError if restriction == "unverified" else HTTPException):
+        if operation == "message":
+            await service.message_task_thread(
+                actor, message="Change scope", worker_thread_id="worker", request_id="scope"
+            )
+        elif operation == "status":
+            await service.task_status(actor)
+        else:
+            await service.control_worker(actor, worker_thread_id="worker", action="cancel")
+    assert not client.created_runs
+    client.runs.cancel_many.assert_not_awaited()
+
+
+async def test_verified_participant_cannot_launch_workers(
+    client: MagicMock, launch: Launch
+) -> None:
+    client.metadata[COORDINATOR][PARTICIPANT_IDENTITY_PREFIX + "github:participant"] = (
+        f"user:{client.participant.id}"
+    )
+    with pytest.raises(PermissionError, match="thread owner"):
+        await launch(service.Actor(COORDINATOR, "participant"), "spawn", "Work")
+    assert not client.created_runs
+
+
+async def test_verified_participant_cannot_steer_from_a_worker_thread(
+    client: MagicMock, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    client.metadata[COORDINATOR][PARTICIPANT_IDENTITY_PREFIX + "github:participant"] = (
+        f"user:{client.participant.id}"
+    )
+    current_task = task()
+    current_task.coordinator_thread_id = str(uuid4())
+    context = store.TaskContext(
+        current_task,
+        store.TaskMembership(thread_id=COORDINATOR, task_id=current_task.id, role="worker"),
+    )
+    monkeypatch.setattr(store.TaskMembership, "context_for_thread", AsyncMock(return_value=context))
+    with pytest.raises(PermissionError, match="thread owner"):
+        await service.task_status(service.Actor(COORDINATOR, "participant"))
 
 
 async def test_task_owner_id_survives_rename_and_rejects_reassigned_login(
@@ -422,9 +502,14 @@ async def test_worker_cannot_spawn_siblings(
     assert not client.created_runs
 
 
+@pytest.mark.parametrize("as_participant", [False, True])
+@pytest.mark.parametrize("operation", ["message", "cancel"])
 async def test_control_rejects_worker_from_another_task(
-    client: MagicMock, monkeypatch: pytest.MonkeyPatch
+    client: MagicMock, monkeypatch: pytest.MonkeyPatch, as_participant: bool, operation: str
 ) -> None:
+    client.metadata[COORDINATOR][PARTICIPANT_IDENTITY_PREFIX + "github:participant"] = (
+        f"user:{client.participant.id}"
+    )
     current_task = task()
     context = store.TaskContext(
         current_task,
@@ -446,9 +531,13 @@ async def test_control_rejects_worker_from_another_task(
         ),
     )
     with pytest.raises(PermissionError, match="belonging to this task"):
-        await service.control_worker(
-            service.Actor(COORDINATOR, OWNER), worker_thread_id="other-worker", action="cancel"
-        )
+        actor = service.Actor(COORDINATOR, "participant" if as_participant else OWNER)
+        if operation == "message":
+            await service.message_task_thread(
+                actor, message="Change scope", worker_thread_id="other-worker", request_id="scope"
+            )
+        else:
+            await service.control_worker(actor, worker_thread_id="other-worker", action="cancel")
     client.runs.cancel_many.assert_not_awaited()
 
 
@@ -527,14 +616,20 @@ async def test_cancel_discards_owed_events_without_reviving_worker(
 
 
 @pytest.mark.usefixtures("registry_db")
+@pytest.mark.parametrize("as_participant", [False, True])
 async def test_finished_worker_can_receive_follow_up_and_gain_a_sibling(
-    client: MagicMock, monkeypatch: pytest.MonkeyPatch, launch: Launch
+    client: MagicMock, monkeypatch: pytest.MonkeyPatch, launch: Launch, as_participant: bool
 ) -> None:
     actor = service.Actor(COORDINATOR, OWNER)
     monkeypatch.setattr(service, "model_choice", AsyncMock(return_value=(MODEL, "low")))
     first = await launch(actor, "first", "Implement login fix")
     worker_id = str(first["worker_thread_id"])
     client.statuses[worker_id] = "idle"
+    if as_participant:
+        client.metadata[COORDINATOR][PARTICIPANT_IDENTITY_PREFIX + "github:participant"] = (
+            f"user:{client.participant.id}"
+        )
+        actor = service.Actor(COORDINATOR, "participant")
 
     status = await service.task_status(actor)
     workers = status["workers"]
@@ -560,9 +655,21 @@ async def test_finished_worker_can_receive_follow_up_and_gain_a_sibling(
     assert follow_up_display.content == "Check logout too"
     assert follow_up_display.kind == "message"
     assert follow_up_display.status is None
+    if as_participant:
+        assert follow_up_display.sender_label == "participant"
+    assert follow_up.run_config["github_login"] == OWNER
+    assert client.metadata[worker_id]["owner_user_id"] == str(client.owner.id)
     (follow_up_run,) = client.created_runs
     assert follow_up_run["thread_id"] == worker_id
     assert follow_up_run["status"] == "pending"
+    assert follow_up_run["config"]["configurable"]["github_login"] == OWNER
+
+    worker_status = await service.control_worker(actor, worker_thread_id=worker_id, action="status")
+    assert worker_status["worker_thread_id"] == worker_id
+    cancelled = await service.control_worker(actor, worker_thread_id=worker_id, action="cancel")
+    assert cancelled["cancellation_requested"] is True
+    assert client.created_runs[-1]["status"] == "interrupted"
+    actor = service.Actor(COORDINATOR, OWNER)
 
     sibling = await launch(actor, "sibling", "Review login fix")
     assert sibling["success"] is True
