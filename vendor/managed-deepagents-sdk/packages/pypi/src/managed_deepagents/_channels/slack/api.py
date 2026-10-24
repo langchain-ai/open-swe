@@ -15,6 +15,15 @@ import httpx
 from managed_deepagents._channels.types import ChannelError
 
 SLACK_API = "https://slack.com/api"
+
+
+async def slack_bot_token() -> str:
+    """The Slack app's bot token, an agent connection ``mda deploy`` sets up."""
+    from managed_deepagents._connections import connections  # noqa: PLC0415
+
+    return await connections.get("mda/slack-bot-token", {"type": "agent"})
+
+
 FetchFn = Callable[[str, Mapping[str, str], bytes], Mapping[str, object]]
 
 

@@ -466,6 +466,74 @@ fields and your declared context type.
 `ManagedDeepAgentRuntime` is an alias for the tool type. MDA adds `server_info`,
 `channel`, `backend`, and `schedules`; channel and backend are optional.
 
+## Slack channels
+
+`channels.slack(...)` receives Slack messages through Trigger Server. Each
+Slack thread is one conversation, and the run's reply is posted in it. By
+default every message that reaches the app starts a run with the message.
+`on_event` decides what each kind of message starts instead:
+
+```python
+# channels/slack.py
+from managed_deepagents import SlackChannelThread, SlackEvent, channels
+
+
+def on_mention(event: SlackEvent, thread: SlackChannelThread):
+    return (
+        event.text,
+        {
+            "context": {"ticket": thread.id},
+            "metadata": {"slack_channel": event.channel_id},
+        },
+    )
+
+
+channel = channels.slack(
+    name="Support Bot",
+    trigger_mode="thread",
+    on_event={
+        "mention": on_mention,
+        "directMessage": lambda event, _thread: event.text,
+        # Replies in a followed thread that don't mention the app start nothing.
+        "message": lambda _event, _thread: None,
+    },
+    multitask_strategy="enqueue",
+)
+```
+
+The keys are `"mention"`, a channel message that @-mentions the app;
+`"directMessage"`; and `"message"`, any other channel message, which only
+`trigger_mode` `"thread"` or `"all"` delivers. They're the same strings in the
+TypeScript runtime. Under those modes Slack sends a mention as a plain
+message, so the channel asks Slack once for the app's bot user, with the
+app's bot token, to tell a mention from a message. An unknown key raises. A
+message kind without a handler starts a run with the message, as without
+`on_event`. With `trigger_mode="mention"`, a `"message"` handler is never
+called, and defining the channel warns.
+
+With a `"mention"` handler under `trigger_mode` `"thread"`, a reply only
+continues a thread the agent already ran on: when the handler declines a
+thread's mention, the thread's later replies start nothing until someone
+mentions the agent there again.
+
+A handler gets the `SlackEvent` (`text`, `user_id`, `channel_id`,
+`message_ts`, `thread_ts`, `files`, and Slack's own event as `payload`) and
+its `SlackChannelThread` (`id`, `source_thread_key`, `channel.name`). It
+returns the run's input, as `agent.invoke` takes it, optionally with
+`context`, `metadata` and `webhook` as `(input, options)`, as the GitHub and
+Linear handlers do. `None` starts no run, and the app neither reacts nor
+replies. A handler that raises, or returns input the channel can't start,
+starts no run either; the error is logged without its message. The message's
+blocks and attachments are added to the handler's messages, and its files
+still reach `/workspace/attachments/`. Interrupt resumes and prompt responses
+don't go through `on_event`.
+
+`multitask_strategy` is what a message that starts a run does while its
+thread already runs: `enqueue` (the default) waits for the run and starts
+after it, `interrupt` cancels the run, keeping its progress, and starts at
+once, `rollback` cancels it and discards its progress, and `reject` starts
+nothing.
+
 ## GitHub channels
 
 The GitHub channel is a thin HTTP adapter. Add a channel file with event handlers:

@@ -39,6 +39,7 @@ from managed_deepagents._channels.http.provider import (
     EventFinished,
     EventReceived,
     channel_name,
+    check_event_keys,
     defined_fields,
     event_snapshot,
     finish_events,
@@ -125,8 +126,7 @@ def github_channel(
         cast("Mapping[str, GitHubEventCallback | EventEndpoint]", on_event or {}),
         _endpoint_fields,
     )
-    if set(handlers) - SUPPORTED_EVENT_KEYS:
-        raise ValueError("unsupported GitHub event key")
+    check_event_keys("GitHub", handlers, SUPPORTED_EVENT_KEYS)
     repositories = _repositories(app)
     provider_config: dict[str, JsonValue] = {"events": handled_event_keys(handlers)}
     if app is not None:

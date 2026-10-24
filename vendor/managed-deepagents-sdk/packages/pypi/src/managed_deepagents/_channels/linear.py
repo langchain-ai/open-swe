@@ -23,6 +23,7 @@ from managed_deepagents._channels.http.provider import (
     EventFinished,
     EventHandlerOutcome,
     channel_name,
+    check_event_keys,
     defined_fields,
     event_snapshot,
     finish_events,
@@ -154,8 +155,7 @@ def linear_channel(
         # By key; the channel calls each only with its own key's events.
         cast("Mapping[str, LinearEventCallback | EventEndpoint]", on_event or {}),
     )
-    if set(handlers) - SUPPORTED_EVENT_KEYS:
-        raise ValueError("unsupported Linear event key")
+    check_event_keys("Linear", handlers, SUPPORTED_EVENT_KEYS)
     filters = _Filters(teams=_teams(app), ignore_bots=ignore_bots, sessions=sessions)
     events = handled_event_keys(handlers) + (sorted(SESSION_EVENT_KEYS) if sessions else [])
     provider_config: dict[str, JsonValue] = {"events": sorted(set(events))}

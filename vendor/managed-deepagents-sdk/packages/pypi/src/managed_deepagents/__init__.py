@@ -96,6 +96,14 @@ from managed_deepagents._channels.run_input import (
     ChannelRunResult,
 )
 from managed_deepagents._channels.runtime import RuntimeChannel
+from managed_deepagents._channels.slack.events import (
+    SlackChannelThread,
+    SlackEvent,
+    SlackEventCallback,
+    SlackEventKey,
+    SlackFile,
+    SlackHandlers,
+)
 from managed_deepagents._channels.types import (
     ChannelContentMessage,
     ChannelEvent,
@@ -288,6 +296,12 @@ __all__ = [
     "SchedulePatch",
     "ScheduleRecord",
     "SkillSelection",
+    "SlackChannelThread",
+    "SlackEvent",
+    "SlackEventCallback",
+    "SlackEventKey",
+    "SlackFile",
+    "SlackHandlers",
     "SlackPromptResponse",
     "SseMcpServerConfig",
     "SupportedEventKey",

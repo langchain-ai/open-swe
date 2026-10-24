@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from collections.abc import Callable, Mapping
+from collections.abc import Callable, Mapping, Sequence
 from contextvars import ContextVar
 from typing import TYPE_CHECKING, Literal, NotRequired, TypedDict, cast
 
@@ -41,6 +41,19 @@ class ChannelBinding(TypedDict):
     #: Absent for a binding read from the thread record: no message started the run.
     event: NotRequired[ChannelEvent]
     raw_event: NotRequired[JsonValue]
+
+
+def binding_with_messages(
+    binding: ChannelBinding, messages: Sequence[Mapping[str, JsonValue]]
+) -> ChannelBinding:
+    """The binding whose message event holds a run's own input.
+
+    It replaces the delivery's messages, such as with a handler's.
+    """
+    return cast(
+        "ChannelBinding",
+        {**binding, "event": {"type": "message", "messages": [dict(m) for m in messages]}},
+    )
 
 
 _current_channel: ContextVar[ChannelBinding | None] = ContextVar("mda_channel", default=None)

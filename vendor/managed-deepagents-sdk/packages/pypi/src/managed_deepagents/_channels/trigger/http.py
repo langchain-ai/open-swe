@@ -3,14 +3,18 @@
 from __future__ import annotations
 
 import asyncio
+import functools
 import json
 import os
 import uuid
 from collections.abc import Awaitable, Callable, Mapping
+from dataclasses import dataclass
+from http import HTTPStatus
 from importlib import import_module
-from typing import TYPE_CHECKING, Never, NoReturn, Protocol, TypedDict, TypeVar
+from typing import TYPE_CHECKING, Literal, Never, NoReturn, Protocol, TypedDict, TypeVar, cast
 
 from managed_deepagents._agent_auth_http import missing_workspace_connection_slug
+from managed_deepagents._channels.binding import binding_with_messages
 from managed_deepagents._channels.context import (
     normalized_user_prompt_response,
     trigger_channel_binding,
@@ -20,6 +24,7 @@ from managed_deepagents._channels.reactions import (
     ReactionChoice,
     resolve_reaction_emoji,
 )
+from managed_deepagents._channels.run_input import run_start_options
 from managed_deepagents._channels.trigger.client import (
     LANGSMITH_MDA_TRIGGER_SERVER_URL_ENV,
     TriggerClientError,
@@ -35,7 +40,9 @@ from managed_deepagents._channels.trigger.identity_context import (
 from managed_deepagents._channels.trigger.ingress import (
     cancel_ingress_thread_runs,
     ingress_resume_target,
+    ingress_thread_exists,
     ingress_thread_interrupts,
+    newer_ingress_run,
     observe_ingress_agent,
     resume_ingress_agent,
     start_ingress_agent,
@@ -55,17 +62,19 @@ from managed_deepagents._channels.trigger.types import (
     parse_trigger_channel_event,
 )
 from managed_deepagents._ingress import ScheduleFn, schedule_ingress_work
+from managed_deepagents._ingress_runs import lookup_status, rejected_as_busy
 from managed_deepagents._log import logger
 from managed_deepagents.run_context import INTERRUPT_CORRELATION_KEY
 
 if TYPE_CHECKING:
     from managed_deepagents._channels.binding import ChannelBinding
+    from managed_deepagents._channels.run_input import NormalizedRunInput
     from managed_deepagents._channels.trigger.ingress import (
         ObservedIngressRun,
         PendingInterrupt,
         ResumeTarget,
     )
-    from managed_deepagents._ingress_runs import StartedIngressRun
+    from managed_deepagents._ingress_runs import MultitaskStrategy, StartedIngressRun
 
 ASSISTANT_ID_ENV = "MDA_ASSISTANT_ID"
 
@@ -74,6 +83,33 @@ ObserveAgentFn = Callable[..., Awaitable["ObservedIngressRun"]]
 MessageInputFn = Callable[[TriggerChannelMessageEvent], list[dict[str, object]]]
 
 _T = TypeVar("_T")
+
+
+class TriggerChannelThread(TypedDict):
+    """The thread a message event belongs to, before any run exists."""
+
+    id: str
+    source_thread_key: str
+
+
+@dataclass(frozen=True)
+class TriggerMessageDecision:
+    """What a message event starts.
+
+    The run input a provider's handler returned (``input``), no run
+    (``skipped``), or nothing because the handler failed (``failed``).
+    """
+
+    type: Literal["input", "skipped", "failed"]
+    input: NormalizedRunInput | None = None
+
+
+DecideMessageFn = Callable[
+    [TriggerChannelMessageEvent, TriggerChannelThread],
+    Awaitable[TriggerMessageDecision | None],
+]
+"""Decide what a message event starts, before its run; ``None`` starts it with
+``message_input``'s messages. Interrupt resumes and prompt responses never ask."""
 
 
 class StartAgentFn(Protocol):
@@ -115,6 +151,35 @@ class ThreadInterruptsFn(Protocol):
         source_thread_key: str,
         user_id: str,
     ) -> list[PendingInterrupt]: ...
+
+
+class ThreadExistsFn(Protocol):
+    async def __call__(
+        self,
+        *,
+        thread_id: str,
+        source_provider: str,
+        source_thread_key: str,
+        user_id: str,
+    ) -> bool: ...
+
+
+class NewerRunFn(Protocol):
+    async def __call__(
+        self,
+        *,
+        thread_id: str,
+        run_id: str,
+        source_provider: str,
+        source_thread_key: str,
+        user_id: str,
+    ) -> bool: ...
+
+
+OnlyContinuesThreadFn = Callable[[TriggerChannelMessageEvent], Awaitable[bool]]
+"""Whether a message may only continue a thread the agent already ran on: then,
+on a thread no run ever started on, it starts nothing, and ``decide_message``
+isn't asked."""
 
 
 class ResumeTargetFn(Protocol):
@@ -206,6 +271,34 @@ def _interrupt_correlation_id(value: object) -> str | None:
     return None
 
 
+async def _may_start_in(
+    event: TriggerChannelMessageEvent,
+    *,
+    user_id: str,
+    source_provider: str,
+    only_continues_thread: OnlyContinuesThreadFn | None,
+    thread_exists: ThreadExistsFn | None,
+) -> bool:
+    """Whether a message may start a run on its thread: always, unless it may
+    only continue a thread the agent already ran on and none ran there. A
+    failed lookup is logged and lets it start, as before the check."""
+    if only_continues_thread is None or not await only_continues_thread(event):
+        return True
+    try:
+        return await (thread_exists or ingress_thread_exists)(
+            thread_id=_thread_id(event["source_thread_key"]),
+            source_provider=source_provider,
+            source_thread_key=event["source_thread_key"],
+            user_id=user_id,
+        )
+    except Exception as error:  # noqa: BLE001 - a failed lookup lets the message start, as before
+        logger.warning(
+            "channel thread lookup failed; the message starts as before (%s)",
+            logger.safe_error_label(error),
+        )
+        return True
+
+
 async def _start_event_run(
     *,
     event: TriggerChannelRunEvent,
@@ -218,23 +311,42 @@ async def _start_event_run(
     thread_interrupts: ThreadInterruptsFn | None = None,
     resume_target: ResumeTargetFn | None = None,
     message_input: MessageInputFn | None = None,
+    decided: NormalizedRunInput | None = None,
+    multitask_strategy: MultitaskStrategy | None = None,
 ) -> StartedIngressRun:
     thread_id = _thread_id(event["source_thread_key"])
     context: dict[str, object] = {}
     binding = trigger_channel_binding(provider=source_provider, name=channel_name, event=event)
     if event["type"] == "message":
         start = start_agent or start_ingress_agent
+        options: dict[str, object] = {}
+        if multitask_strategy is not None:
+            options["multitask_strategy"] = multitask_strategy
+        if decided is None:
+            messages = (
+                message_input(event) if message_input is not None else event["input"]["messages"]
+            )
+        else:
+            # Its messages replace the delivery's in the binding, as the run's
+            # own input; its context sits beside the binding.
+            messages = cast("list[dict[str, object]]", decided["messages"])
+            options.update(
+                (key, value)
+                for key, value in run_start_options(decided).items()
+                if key != "messages"
+            )
+            binding = binding_with_messages(binding, decided["messages"])
+            context = dict(decided.get("context", {}))
         return await start(
             thread_id=thread_id,
             assistant_id=assistant_id,
-            messages=(
-                message_input(event) if message_input is not None else event["input"]["messages"]
-            ),
+            messages=messages,
             source_provider=source_provider,
             source_thread_key=event["source_thread_key"],
             user_id=user_id,
             context=context,
             binding=binding,
+            **options,
         )
     if event["type"] == "interrupt_resume":
         target = await (resume_target or ingress_resume_target)(
@@ -303,12 +415,17 @@ async def handle_trigger_channel_event_request(  # noqa: C901, PLR0911, PLR0912
     start_agent: StartAgentFn | None = None,
     resume_agent: ResumeAgentFn | None = None,
     thread_interrupts: ThreadInterruptsFn | None = None,
+    thread_exists: ThreadExistsFn | None = None,
+    newer_run: NewerRunFn | None = None,
     resume_target: ResumeTargetFn | None = None,
     observe_agent: ObserveAgentFn | None = None,
     cancel_runs: CancelThreadRunsFn | None = None,
     trigger_client: TriggerClientLike | None = None,
     reactions: ReactionChoice = DEFAULT_REACTION_EMOJI,
     message_input: MessageInputFn | None = None,
+    only_continues_thread: OnlyContinuesThreadFn | None = None,
+    decide_message: DecideMessageFn | None = None,
+    multitask_strategy: MultitaskStrategy | None = None,
     identity_context_key: IdentityContextKey | None = None,
     identity_context_issuer: str | None = None,
 ) -> object:
@@ -392,6 +509,37 @@ async def handle_trigger_channel_event_request(  # noqa: C901, PLR0911, PLR0912
         logger.error("%s is not configured", ASSISTANT_ID_ENV)
         return _json_response({"error": "channel runtime is not configured"}, status_code=500)
 
+    if event["type"] == "message" and not await _may_start_in(
+        event,
+        user_id=user_id,
+        source_provider=source_provider,
+        only_continues_thread=only_continues_thread,
+        thread_exists=thread_exists,
+    ):
+        logger.info(
+            "channel message started no run: the agent never ran on its thread (delivery_id=%s)",
+            logger.log_identifier(event["delivery_id"]),
+        )
+        return _accepted_response(event)
+
+    decision: TriggerMessageDecision | None = None
+    if event["type"] == "message" and decide_message is not None:
+        decision = await decide_message(
+            event,
+            {
+                "id": _thread_id(event["source_thread_key"]),
+                "source_thread_key": event["source_thread_key"],
+            },
+        )
+        if decision is not None and decision.type == "skipped":
+            logger.info(
+                "channel message started no run (delivery_id=%s)",
+                logger.log_identifier(event["delivery_id"]),
+            )
+            return _accepted_response(event)
+        if decision is not None and decision.type == "failed":
+            return _start_failed_response()
+
     try:
         started = await _start_event_run(
             event=event,
@@ -404,6 +552,8 @@ async def handle_trigger_channel_event_request(  # noqa: C901, PLR0911, PLR0912
             resume_target=resume_target,
             user_id=user_id,
             message_input=message_input,
+            decided=decision.input if decision is not None else None,
+            multitask_strategy=multitask_strategy,
         )
     except _AmbiguousInterruptError as ambiguous:
         # Trigger Server never reads the body, so the log is the only place this surfaces.
@@ -416,11 +566,18 @@ async def handle_trigger_channel_event_request(  # noqa: C901, PLR0911, PLR0912
         )
         return _accepted_response(event)
     except Exception as error:  # noqa: BLE001 - never expose Agent Server details in the response
+        if event["type"] == "message" and rejected_as_busy(multitask_strategy, error):
+            # A run already active on the thread keeps it under `reject`.
+            logger.info(
+                "channel message rejected: its thread is busy (delivery_id=%s)",
+                logger.log_identifier(event["delivery_id"]),
+            )
+            return _accepted_response(event)
         logger.error(
             "channel run could not be started (%s)",
             logger.safe_error_label(error),
         )
-        return _json_response({"error": "channel run could not be started"}, status_code=500)
+        return _start_failed_response()
 
     async def observe() -> None:
         await _observe_accepted_run(
@@ -432,6 +589,8 @@ async def handle_trigger_channel_event_request(  # noqa: C901, PLR0911, PLR0912
             source_thread_key=event["source_thread_key"],
             user_id=user_id,
             reactions=reactions,
+            multitask_strategy=multitask_strategy,
+            newer_run=newer_run,
         )
 
     schedule_ingress_work(
@@ -440,6 +599,10 @@ async def handle_trigger_channel_event_request(  # noqa: C901, PLR0911, PLR0912
         schedule=schedule,
     )
     return _accepted_response(event)
+
+
+def _start_failed_response() -> object:
+    return _json_response({"error": "channel run could not be started"}, status_code=500)
 
 
 async def _cancel_event_runs(
@@ -492,7 +655,20 @@ async def _observe_accepted_run(
     source_thread_key: str | None = None,
     user_id: str,
     reactions: ReactionChoice = DEFAULT_REACTION_EMOJI,
+    multitask_strategy: MultitaskStrategy | None = None,
+    newer_run: NewerRunFn | None = None,
 ) -> None:
+    was_replaced = functools.partial(
+        _replaced_by_newer_message,
+        event,
+        started,
+        multitask_strategy=multitask_strategy,
+        source_provider=source_provider,
+        source_thread_key=source_thread_key,
+        user_id=user_id,
+        newer_run=newer_run,
+    )
+
     async def lifecycle(
         event_type: TriggerChannelRuntimeEventType, message: str | None = None
     ) -> None:
@@ -533,11 +709,13 @@ async def _observe_accepted_run(
                 user_id=user_id,
             )
         except Exception as error:  # noqa: BLE001 - only known-safe details leave runtime
-            await lifecycle("run.failed", message=_missing_connection_failure_message(error))
+            if not await was_replaced(error):
+                await lifecycle("run.failed", message=_missing_connection_failure_message(error))
             return
 
         if _is_cancelled_run(observed):
-            await lifecycle("run.cancelled")
+            if not await was_replaced(None):
+                await lifecycle("run.cancelled")
             return
 
         # The run itself posts its answer, or shows its interrupts, as it ends.
@@ -648,6 +826,52 @@ def _observation_kwargs(
     kwargs["source_provider"] = source_provider
     kwargs["source_thread_key"] = source_thread_key
     return kwargs
+
+
+async def _replaced_by_newer_message(
+    event: TriggerChannelEvent,
+    started: StartedIngressRun,
+    error: Exception | None,
+    *,
+    multitask_strategy: MultitaskStrategy | None,
+    source_provider: str | None,
+    source_thread_key: str | None,
+    user_id: str,
+    newer_run: NewerRunFn | None,
+) -> bool:
+    """Whether a newer message's run took the thread over from a cancelled or
+    vanished run. It reports to Slack, so this run says nothing that would stop
+    or fail the thread's status."""
+    # Only these strategies let a newer message cancel a run.
+    if multitask_strategy not in ("interrupt", "rollback"):
+        return False
+    if error is not None:
+        # ``rollback`` cancels, then deletes, the run a newer message replaced.
+        replaced = lookup_status(error) == HTTPStatus.NOT_FOUND
+    elif source_provider is None or source_thread_key is None:
+        replaced = False
+    else:
+        try:
+            replaced = await (newer_run or newer_ingress_run)(
+                thread_id=started["thread_id"],
+                run_id=started["run_id"],
+                source_provider=source_provider,
+                source_thread_key=source_thread_key,
+                user_id=user_id,
+            )
+        except Exception as lookup_error:  # noqa: BLE001 - never log Agent Server details
+            logger.warning(
+                "channel run lookup failed; the run counts as stopped (%s)",
+                logger.safe_error_label(lookup_error),
+            )
+            replaced = False
+    if replaced:
+        logger.info(
+            "channel run was replaced by a newer message (delivery_id=%s, run_id=%s)",
+            logger.log_identifier(event["delivery_id"]),
+            logger.log_identifier(started["run_id"]),
+        )
+    return replaced
 
 
 def _is_cancelled_run(observed: ObservedIngressRun) -> bool:
@@ -811,5 +1035,11 @@ async def _best_effort(value: Awaitable[_T]) -> _T | None:
 __all__ = [
     "ASSISTANT_ID_ENV",
     "TRIGGER_SERVICE_KEY_HEADER",
+    "DecideMessageFn",
+    "NewerRunFn",
+    "OnlyContinuesThreadFn",
+    "ThreadExistsFn",
+    "TriggerChannelThread",
+    "TriggerMessageDecision",
     "handle_trigger_channel_event_request",
 ]

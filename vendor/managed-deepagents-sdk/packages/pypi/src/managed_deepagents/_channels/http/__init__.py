@@ -29,6 +29,7 @@ from managed_deepagents._channels.http.types import (
     ParseHttpRequest,
     VerifyHttpRequest,
 )
+from managed_deepagents._ingress_runs import MULTITASK_STRATEGIES
 
 if TYPE_CHECKING:
     from starlette.responses import Response
@@ -54,7 +55,7 @@ class HttpChannel(Channel):
         on_received: HttpOnReceived | None = None,
         on_finish: HttpOnFinish | None = None,
     ) -> None:
-        if multitask_strategy not in _MULTITASK_STRATEGIES:
+        if multitask_strategy not in MULTITASK_STRATEGIES:
             raise TypeError(
                 "channel multitask_strategy must be enqueue, interrupt, rollback or reject"
             )
@@ -168,9 +169,6 @@ def http_channel(
         on_received=on_received,
         on_finish=on_finish,
     )
-
-
-_MULTITASK_STRATEGIES = frozenset({"enqueue", "interrupt", "rollback", "reject"})
 
 
 def _nonblank(value: str, label: str) -> str:

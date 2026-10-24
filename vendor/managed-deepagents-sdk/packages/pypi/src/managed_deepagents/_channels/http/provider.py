@@ -13,6 +13,7 @@ import json
 import os
 import time
 from collections.abc import Awaitable, Callable, Mapping
+from collections.abc import Set as AbstractSet
 from dataclasses import asdict, dataclass
 from typing import TYPE_CHECKING, Generic, Literal, TypeVar
 
@@ -101,6 +102,19 @@ class _Entry(Generic[_T]):
 def channel_name(channel: HttpChannel) -> str:
     """The channel's name in the project, or its provider before it has one."""
     return channel.name or channel.kind
+
+
+def check_event_keys(
+    provider: str, handlers: Mapping[str, object], supported: AbstractSet[str]
+) -> None:
+    """Check a channel's ``on_event`` keys.
+
+    The types limit them, but an untyped caller gets no error, and a key
+    nothing dispatches never runs.
+    """
+    unknown = sorted(set(handlers) - supported)
+    if unknown:
+        raise ValueError(f"unsupported {provider} event key {', '.join(unknown)}")
 
 
 def handled_event_keys(handlers: Mapping[_Key, object]) -> list[str]:

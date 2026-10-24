@@ -9,7 +9,7 @@ from __future__ import annotations
 import asyncio
 from collections.abc import Mapping, Sequence
 from http import HTTPStatus
-from typing import TYPE_CHECKING, Any, Literal, NotRequired, TypedDict, cast
+from typing import TYPE_CHECKING, Any, Literal, NotRequired, TypedDict, cast, get_args
 
 from langgraph_sdk.schema import (
     Command,
@@ -227,6 +227,18 @@ async def _cancel_run(client: LangGraphClient, thread_id: str, run_id: str) -> b
             return False
         raise
     return True
+
+
+MULTITASK_STRATEGIES: frozenset[str] = frozenset(get_args(MultitaskStrategy))
+"""Every LangGraph ``MultitaskStrategy``, for channels that check one."""
+
+
+def rejected_as_busy(multitask_strategy: str | None, error: Exception) -> bool:
+    """Whether a run didn't start because a run started on its thread meanwhile.
+
+    ``reject`` then leaves the thread to that run.
+    """
+    return multitask_strategy == "reject" and lookup_status(error) == HTTPStatus.CONFLICT
 
 
 def lookup_status(error: Exception) -> int | None:
