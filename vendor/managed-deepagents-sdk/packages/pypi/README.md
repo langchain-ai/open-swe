@@ -1149,9 +1149,10 @@ it installs the app.
 [Setting up the Linear app](#setting-up-the-linear-app).
 
 The channel reads the webhook signing secret from Agent Auth, or from
-`LINEAR_WEBHOOK_SECRET` when set. It acts as the app through the agent OAuth
-connection `mda/linear-app/<deployment-id>`, installed with `actor=app`; read
-its token with `await connections.get("mda/linear-token", {"type": "agent"})` to call Linear's API from tools.
+`LINEAR_WEBHOOK_SECRET` when set. It acts as the app through the deployment's
+Agent Auth app, whose OAuth connection is `mda/linear-app/<deployment-id>`,
+installed with `actor=app`; read its token with
+`await connections.get("mda/linear-token", {"type": "agent"})` to call Linear's API from tools.
 
 `reply="none"` leaves the run's answer to the agent: the channel doesn't post
 it as a comment or in the session. Session acknowledgements, Stop and error
@@ -1205,6 +1206,8 @@ or to continue without the Linear channel. Without a terminal the failure ends
 the deploy, once the other channels are set up. An agent with a Linear channel
 can't be deployed with `--no-wait`, because setup needs the live deployment.
 `mda delete` removes the credentials; delete the app itself in Linear.
+Deployments set up by an earlier `mda` keep the app as workspace connections,
+which only a LangSmith workspace admin can delete.
 
 ## HTTP channels
 

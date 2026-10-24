@@ -4,19 +4,25 @@
 //! workspace, its webhook pointed at the deployment. Linear has no public API
 //! to create apps, so a workspace admin creates it from a page deploy fills
 //! in, and pastes back its client ID, client secret and webhook signing
-//! secret. Agent Auth then keeps them:
+//! secret. Deploy brings them into Agent Auth as an app the deployment owns,
+//! which keeps:
 //!
-//! - an agent-owned OAuth connection, `mda/linear-app/{deployment}`, whose
-//!   token the runtime reads as `mda/linear-token` and Agent Auth renews;
-//! - the signing secret as the secret connection next to it, which the runtime
-//!   verifies deliveries with.
+//! - the app's OAuth connection, `mda/linear-app/{deployment}`, whose token
+//!   the runtime reads as `mda/linear-token` and Agent Auth renews;
+//! - the signing secret next to it, at `{slug}/webhook-secret`, which the
+//!   runtime verifies deliveries with.
+//!
+//! Deleting the app takes both with it, and needs only the right to update
+//! the deployment. Deployments set up by an earlier mda hold the same two
+//! slugs as plain workspace connections, which only a workspace admin can
+//! delete: setup keeps using them, and says so when they have to go.
 //!
 //! The CLI never reads the app's token. It goes by what Agent Auth records
 //! about the agent's grant: none, active, or lapsed and waiting for consent
 //! again, which only needs the admin to approve the install once more.
 //!
 //! Setup runs once the deployment is live, because the app's webhook points at
-//! the Agent Server URL. `mda delete` removes both connections (see
+//! the Agent Server URL. `mda delete` removes the Agent Auth app (see
 //! [`teardown`]); the app itself stays in Linear.
 
 mod manifest;
@@ -28,7 +34,8 @@ use std::collections::BTreeMap;
 
 use anyhow::{anyhow, bail, Context, Result};
 use cliclack::log;
-use serde_json::{json, Map, Value};
+use reqwest::StatusCode;
+use serde_json::{json, Value};
 
 use crate::connection::{poll_oauth_session, wait_for_oauth_status, OAuthWaitMessages};
 use crate::deploy::channel_app::{
@@ -36,14 +43,16 @@ use crate::deploy::channel_app::{
     SetupUi,
 };
 use crate::interrupt::Interrupt;
+use crate::langsmith::linear_app::ExistingLinearApp;
 use crate::langsmith::{
-    self, AgentGrant, ConnectionOwnerPolicy, CreateOAuthConnection, OAuthAuthorizationSession,
+    self, AgentGrant, ApiError, ConnectionOwnerPolicy, OAuthAuthorizationSession,
 };
 
 pub(crate) use crate::deploy::channel_app::WEBHOOK_SECRET_SUFFIX;
 pub(crate) use manifest::{prepare, LinearChannel, PROVIDER};
 
-const AUTHORIZE_URL: &str = "https://linear.app/oauth/authorize";
+/// Linear's token endpoint, which deploy asks whether a client ID and secret
+/// belong together. Agent Auth builds the app's OAuth provider itself.
 const TOKEN_URL: &str = "https://api.linear.app/oauth/token";
 /// Where Linear's apps are created, scoped to a workspace when deploy knows it.
 const CREATE_APP_PATH: &str = "settings/api/applications/new";
@@ -60,8 +69,9 @@ pub(crate) const WORKSPACE_ENV: &str = "MDA_LINEAR_WORKSPACE";
 /// Linear's webhook signing secrets start with this.
 const SIGNING_SECRET_PREFIX: &str = "lin_wh_";
 
-/// The agent-owned OAuth connection that holds a deployment's app, and the
-/// signing secret stored next to it ([`WEBHOOK_SECRET_SUFFIX`]).
+/// The slug of a deployment's Agent Auth app, which names its OAuth
+/// connection, and of the signing secret stored next to it
+/// ([`WEBHOOK_SECRET_SUFFIX`]).
 pub(crate) const SLUGS: AppSlugs = AppSlugs::new("mda/linear-app/");
 
 const INSTALL_MESSAGES: OAuthWaitMessages = OAuthWaitMessages {
@@ -71,7 +81,7 @@ const INSTALL_MESSAGES: OAuthWaitMessages = OAuthWaitMessages {
 };
 
 const CONSENT_MESSAGES: OAuthWaitMessages = OAuthWaitMessages {
-    failed: "Approving the Linear app again did not complete. Check that a Linear workspace admin approved it, then run `mda deploy` again. If the app was deleted in Linear, delete this deployment's mda/linear-app connections with `mda connections delete` and deploy again to set up a new app.",
+    failed: "Approving the Linear app again did not complete. Check that a Linear workspace admin approved it, then run `mda deploy` again. If the app was deleted in Linear, `mda delete` removes the deployment with its Linear app in Agent Auth; deploy again to set up a new app.",
     expired: "The Linear app was not approved again in time; run `mda deploy` again.",
     unexpected: "Approving the Linear app again returned an unexpected status",
 };
@@ -94,15 +104,50 @@ const MISSING_SECRET: &str = "The Linear app is installed, but its webhook signi
 
 const SKIPPED_SETUP: &str = "Continuing without the Linear channel. The deployment is live, but it receives no Linear events until you run `mda deploy` again and finish setting up the Linear app.";
 
+/// Why the plain workspace connections an earlier mda set up must go, and who
+/// can delete them.
+fn legacy_connections_message(deployment_id: &str) -> String {
+    let connection = SLUGS.connection(deployment_id);
+    let secret = SLUGS.secret(deployment_id, WEBHOOK_SECRET_SUFFIX);
+    format!(
+        "An earlier version of mda stored this deployment's Linear app as the workspace connections {connection} and {secret}, and setting the app up again means deleting them first, which only a LangSmith workspace admin can do. Ask one to run `mda connections delete {secret}` and `mda connections delete {connection}`, or `mda deploy` once themselves, then run `mda deploy` again."
+    )
+}
+
 /// The deployment's Linear app in Agent Auth.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct AppConnection {
+    /// The app's OAuth connection, which the agent's grant is on.
     pub(crate) connection_id: String,
-    /// The webhook secret's connection, when stored.
-    pub(crate) webhook_secret_id: Option<String>,
+    pub(crate) store: AppStore,
     /// The agent's grant on it: whether the app is installed, and whether
     /// it needs consent again.
     pub(crate) grant: AgentGrant,
+}
+
+/// How Agent Auth holds the deployment's Linear app.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) enum AppStore {
+    /// An Agent Auth app the deployment owns. It keeps the signing secret
+    /// next to its connection, and deleting it takes both.
+    App { id: String },
+    /// Plain workspace connections, as an earlier mda set them up. Only a
+    /// workspace admin can delete them.
+    Connections {
+        /// The webhook secret's connection, when stored.
+        webhook_secret_id: Option<String>,
+    },
+}
+
+impl AppConnection {
+    /// Whether Agent Auth has the app's webhook signing secret. An app always
+    /// has it: deploy stores the app with it.
+    pub(crate) fn has_webhook_secret(&self) -> bool {
+        match &self.store {
+            AppStore::App { .. } => true,
+            AppStore::Connections { webhook_secret_id } => webhook_secret_id.is_some(),
+        }
+    }
 }
 
 /// Where the Linear app comes from when the deployment has none.
@@ -155,13 +200,14 @@ pub(crate) trait SetupEnv: SetupUi {
     fn ask_credentials(&mut self) -> Result<AppCredentials>;
     /// Ask for the app's webhook signing secret alone.
     fn ask_webhook_secret(&mut self) -> Result<String>;
-    /// Register the app with Agent Auth as the deployment's connection.
-    fn create_connection(
+    /// Bring the app into Agent Auth as one the deployment owns, with its
+    /// signing secret. Returns it with its connection.
+    fn create_app(
         &mut self,
         channel: &LinearChannel,
         credentials: &AppCredentials,
-    ) -> Result<String>;
-    /// Store the signing secret next to the app's connection.
+    ) -> Result<AppConnection>;
+    /// Store the signing secret next to an earlier mda's app connection.
     fn store_webhook_secret(&mut self, secret: &str) -> Result<()>;
     /// Start the install, or the consent again, that a workspace admin
     /// approves.
@@ -174,8 +220,12 @@ pub(crate) trait SetupEnv: SetupUi {
     fn open_install_page(&mut self, url: &str) -> Result<()>;
     /// Wait for the install to change and return its status.
     fn next_install_status(&mut self, session_id: &str) -> Result<String>;
-    /// Remove what a setup that did not finish left in Agent Auth.
+    /// Remove the deployment's Agent Auth app with everything it holds.
+    fn delete_app(&mut self, app_id: &str) -> Result<()>;
+    /// Remove one of an earlier mda's workspace connections.
     fn delete_connection(&mut self, connection_id: &str) -> Result<()>;
+    /// The deployment the app belongs to.
+    fn deployment_id(&self) -> &str;
     /// Where this deployment receives the app's events.
     fn webhook_url(&self) -> &str;
     /// Agent Auth's OAuth callback, which a new app lists as its redirect URI.
@@ -244,7 +294,7 @@ pub(crate) fn preflight(
         if let Some(connection) =
             connection.filter(|connection| connection.grant != AgentGrant::Missing)
         {
-            if connection.webhook_secret_id.is_none() && webhook_secret_env(env_vars)?.is_none() {
+            if !connection.has_webhook_secret() && webhook_secret_env(env_vars)?.is_none() {
                 bail!(MISSING_SECRET);
             }
             return Ok(());
@@ -390,11 +440,7 @@ fn set_up_app(
         // An install that did not finish: start again with fresh credentials.
         AgentGrant::Missing => {
             env.info("A previous Linear app setup did not finish; starting it again.")?;
-            remove(
-                env,
-                &connection.connection_id,
-                connection.webhook_secret_id.as_deref(),
-            )?;
+            remove(env, &connection)?;
             install_new_app(env, channel)?;
             return Ok(false);
         }
@@ -403,9 +449,9 @@ fn set_up_app(
 }
 
 /// The signing secret of an installed app, when an earlier setup did not store
-/// it.
+/// it. Only an earlier mda's connections can lack it.
 fn store_missing_secret(env: &mut dyn SetupEnv, connection: &AppConnection) -> Result<()> {
-    if connection.webhook_secret_id.is_some() {
+    if connection.has_webhook_secret() {
         return Ok(());
     }
     let secret = match env.webhook_secret_from_env()? {
@@ -446,21 +492,14 @@ fn install_new_app(env: &mut dyn SetupEnv, channel: &LinearChannel) -> Result<()
             env.ask_credentials()?
         }
     };
-    let connection_id = env.create_connection(channel, &credentials)?;
-    let result = env
-        .store_webhook_secret(&credentials.webhook_secret)
-        .and_then(|()| approve(env, &connection_id, &INSTALL_MESSAGES));
+    let app = env.create_app(channel, &credentials)?;
+    let result = approve(env, &app.connection_id, &INSTALL_MESSAGES);
     if result.is_err() {
         // The next attempt asks for the credentials again, so leave nothing
         // behind that could hold wrong ones.
-        let secret_id = env
-            .app_connection()
-            .ok()
-            .flatten()
-            .and_then(|connection| connection.webhook_secret_id);
-        if let Err(cleanup) = remove(env, &connection_id, secret_id.as_deref()) {
+        if let Err(cleanup) = remove(env, &app) {
             env.warning(&format!(
-                "Could not remove the Linear app's unfinished connection ({cleanup:#})."
+                "Could not remove the Linear app's unfinished setup from Agent Auth ({cleanup:#})."
             ))?;
         }
     }
@@ -534,11 +573,30 @@ fn confirm_redirect_uri(env: &mut dyn SetupEnv, actual: &str) -> Result<()> {
     Ok(())
 }
 
-fn remove(env: &mut dyn SetupEnv, connection_id: &str, secret_id: Option<&str>) -> Result<()> {
-    if let Some(secret_id) = secret_id {
-        env.delete_connection(secret_id)?;
-    }
-    env.delete_connection(connection_id)
+/// Delete the deployment's app from Agent Auth. An earlier mda's connections
+/// need a workspace admin, so a refusal says who can delete them.
+fn remove(env: &mut dyn SetupEnv, connection: &AppConnection) -> Result<()> {
+    let webhook_secret_id = match &connection.store {
+        AppStore::App { id } => return env.delete_app(id),
+        AppStore::Connections { webhook_secret_id } => webhook_secret_id.as_deref(),
+    };
+    let result = webhook_secret_id
+        .map_or(Ok(()), |secret_id| env.delete_connection(secret_id))
+        .and_then(|()| env.delete_connection(&connection.connection_id));
+    result.map_err(|error| {
+        if is_forbidden(&error) {
+            anyhow!(legacy_connections_message(env.deployment_id()))
+        } else {
+            error
+        }
+    })
+}
+
+fn is_forbidden(error: &anyhow::Error) -> bool {
+    error
+        .chain()
+        .filter_map(|cause| cause.downcast_ref::<ApiError>())
+        .any(|api| api.status == StatusCode::FORBIDDEN)
 }
 
 /// The redirect URI an authorize URL sends Linear's answer to.
@@ -712,24 +770,43 @@ fn configured_workspace_key(env_vars: &BTreeMap<String, String>) -> Option<Strin
     override_value(WORKSPACE_ENV, env_vars).and_then(|key| workspace_key(&key).ok())
 }
 
-/// The deployment's app connection, the agent's grant on it, and the secret
-/// stored next to it.
+/// The deployment's Linear app and the agent's grant on it: its Agent Auth
+/// app, or else the workspace connections an earlier mda set up.
 fn lookup_app_connection(
     agent_auth: &langsmith::Client,
     deployment_id: &str,
 ) -> Result<Option<AppConnection>> {
-    let listed = agent_auth.list_connections_raw()?;
-    let Some(connection) = find_connection(&listed, &SLUGS.connection(deployment_id)) else {
-        return Ok(None);
+    let app = agent_auth
+        .agent_apps_if_supported(deployment_id)?
+        .unwrap_or_default()
+        .into_iter()
+        .find(|app| app.provider == PROVIDER);
+    let (connection_id, store) = match app {
+        Some(app) => (
+            app.connection_id.context(
+                "Agent Auth returned the deployment's Linear app without its connection",
+            )?,
+            AppStore::App { id: app.id },
+        ),
+        None => {
+            let listed = agent_auth.list_connections_raw()?;
+            let Some(connection) = find_connection(&listed, &SLUGS.connection(deployment_id))
+            else {
+                return Ok(None);
+            };
+            let webhook_secret_id =
+                find_connection(&listed, &SLUGS.secret(deployment_id, WEBHOOK_SECRET_SUFFIX))
+                    .map(|secret| secret.connection_id.clone());
+            (
+                connection.connection_id.clone(),
+                AppStore::Connections { webhook_secret_id },
+            )
+        }
     };
-    let grant = agent_auth.agent_oauth_grant(&connection.connection_id, deployment_id)?;
+    let grant = agent_auth.agent_oauth_grant(&connection_id, deployment_id)?;
     Ok(Some(AppConnection {
-        connection_id: connection.connection_id.clone(),
-        webhook_secret_id: find_connection(
-            &listed,
-            &SLUGS.secret(deployment_id, WEBHOOK_SECRET_SUFFIX),
-        )
-        .map(|secret| secret.connection_id.clone()),
+        connection_id,
+        store,
         grant,
     }))
 }
@@ -888,38 +965,32 @@ impl SetupEnv for LiveSetup<'_> {
         Ok(secret.trim().to_string())
     }
 
-    fn create_connection(
+    fn create_app(
         &mut self,
         channel: &LinearChannel,
         credentials: &AppCredentials,
-    ) -> Result<String> {
-        let mut authorization_params = Map::new();
-        authorization_params.insert("actor".into(), Value::from("app"));
-        authorization_params.insert("prompt".into(), Value::from("consent"));
-        let slug = SLUGS.connection(self.deployment_id);
-        let connection = self
+    ) -> Result<AppConnection> {
+        let app = self
             .agent_auth
-            .create_oauth_workspace_connection(CreateOAuthConnection {
-                slug: &slug,
-                owner_policy: ConnectionOwnerPolicy::Agent,
-                service: None,
-                client_id: Some(&credentials.client_id),
-                client_secret: Some(&credentials.client_secret),
-                display_name: "Linear",
-                scopes: &channel.scopes,
-                allowed_scopes: &channel.allowed_scopes,
-                authorize_url: Some(AUTHORIZE_URL),
-                token_url: Some(TOKEN_URL),
-                token_endpoint_auth_method: "client_secret_post",
-                authorization_params: &authorization_params,
-                grant_type: "authorization_code",
-                token_params: &Map::new(),
-                token_request_headers: &Map::new(),
-                client_registration_url: None,
-                mcp_server_url: None,
-            })
+            .bring_linear_app(
+                self.deployment_id,
+                &SLUGS.connection(self.deployment_id),
+                &ExistingLinearApp {
+                    client_id: &credentials.client_id,
+                    client_secret: &credentials.client_secret,
+                    webhook_secret: &credentials.webhook_secret,
+                    scopes: &channel.scopes,
+                    allowed_scopes: &channel.allowed_scopes,
+                },
+            )
             .context("failed to register the Linear app with Agent Auth")?;
-        Ok(connection.connection_id)
+        Ok(AppConnection {
+            connection_id: app
+                .connection_id
+                .context("Agent Auth returned the Linear app without its connection")?,
+            store: AppStore::App { id: app.id },
+            grant: AgentGrant::Missing,
+        })
     }
 
     fn store_webhook_secret(&mut self, secret: &str) -> Result<()> {
@@ -974,8 +1045,19 @@ impl SetupEnv for LiveSetup<'_> {
         wait_for_oauth_status(&self.agent_auth, session_id, &Interrupt::install()?)
     }
 
+    fn delete_app(&mut self, app_id: &str) -> Result<()> {
+        self.agent_auth
+            .delete_agent_app(app_id)
+            .map(|_| ())
+            .context("failed to delete the deployment's Linear app from Agent Auth")
+    }
+
     fn delete_connection(&mut self, connection_id: &str) -> Result<()> {
         self.agent_auth.delete_connection(connection_id).map(|_| ())
+    }
+
+    fn deployment_id(&self) -> &str {
+        self.deployment_id
     }
 
     fn webhook_url(&self) -> &str {

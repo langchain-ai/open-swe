@@ -30,6 +30,7 @@ mod crons;
 mod deployments;
 pub(crate) mod github_app_setup;
 pub(crate) mod github_channel;
+pub(crate) mod linear_app;
 pub(crate) mod login;
 mod logs;
 mod registries;
