@@ -9,20 +9,12 @@ from openswe.utils.thread_ops import queue_message_for_thread
 logger = logging.getLogger(__name__)
 
 
-def _running_thread_id() -> str:
-    """The thread of the agent run this code runs inside, or "" outside one."""
-    try:
-        return RunConfig.from_runtime().thread_id or ""
-    except RuntimeError:
-        return ""
-
-
 async def note_for_thread_owner(channel_id: str, thread_ts: str, note: str) -> None:
     """Queue ``note`` for the thread's owning agent, if it has one, without starting a run."""
     thread_id = await lookup_slack_thread_id(channel_id, thread_ts)
     # The thread's own run caused this and already knows; queued after its last model
     # call, the note would start a follow-up run.
-    if thread_id is None or thread_id == _running_thread_id():
+    if thread_id is None or thread_id == RunConfig.running_thread_id():
         return
     if not await queue_message_for_thread(thread_id, [{"type": "text", "text": note}]):
         logger.warning(

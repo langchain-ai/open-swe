@@ -365,6 +365,16 @@ def _slack_bot_identity(bot: AllowedSlackBot) -> SystemIdentity:
     return _slack_bot_system_identity(bot.bot_id, bot.name.strip() or "Bot")
 
 
+def _open_swe_posts_identity() -> SystemIdentity:
+    return {
+        "id": "system:open-swe-posts",
+        "display_name": "Open SWE",
+        "platform": "slack",
+        "sender_type": "bot",
+        "content": prompt("slack/open-swe-posts"),
+    }
+
+
 def _slack_sender(
     message: dict[str, Any],
     user_names_by_id: dict[str, str],
@@ -454,7 +464,15 @@ def _slack_context_input(
     trigger_system: SystemIdentity | None = None,
     explicit_mention: bool = False,
     web_only: bool = False,
+    thread_id: str = "",
+    reply_root_ts: str = "",
 ) -> RunInput:
+    """The run's input messages.
+
+    ``reply_root_ts`` is the Slack thread the message was sent in when the
+    conversation is one flat transcript, like a code channel or concierge DM, so
+    each message says what it replies to.
+    """
     channel_entity_id = channel["id"]
     channel_names = channel_names_by_id or {}
     already_dispatched = dispatched_timestamps or set()
@@ -494,16 +512,29 @@ def _slack_context_input(
     # The run describes the trigger sender and every other person it knows, so
     # dispatch introduces only a replayed author nobody else will account for.
     described: set[str] = {trigger_person["id"], *(run_described_person_ids or ())}
+
+    def reply_data(timestamp: str) -> dict[str, str]:
+        return (
+            {"in_reply_to": reply_root_ts} if reply_root_ts and timestamp != reply_root_ts else {}
+        )
+
     for message in messages:
         timestamp = str(message.get("ts", ""))
-        # The model wrote its own replies and already has them, and it has every
-        # message an earlier dispatch handed it.
+        # The model has every message an earlier dispatch handed it.
         if timestamp == str(event_ts) or timestamp in already_dispatched:
             continue
-        if not web_only and slack_utils.is_own_slack_message(message, bot_user_id):
+        own = slack_utils.is_own_slack_message(message, bot_user_id)
+        # It also wrote this thread's own replies. Anything else of ours, a card or a DM
+        # posted for another thread, is news to it; posts made before they recorded
+        # their author stay hidden rather than replaying the model's words.
+        posted_by = slack_utils.slack_post_author_thread(message) if own else None
+        unseen_post = own and posted_by not in (None, thread_id)
+        if own and not unseen_post and not web_only:
             continue
-        sender_id, identity, kind = _slack_sender(
-            message, user_names_by_id, logins_by_user_id, person_ids_by_user_id
+        sender_id, identity, kind = (
+            ("system:open-swe-posts", _open_swe_posts_identity(), "system")
+            if unseen_post
+            else _slack_sender(message, user_names_by_id, logins_by_user_id, person_ids_by_user_id)
         )
         if sender_id not in described:
             described.add(sender_id)
@@ -522,9 +553,21 @@ def _slack_context_input(
                 "explicit_bot_mention": str(
                     _mentions_open_swe(message.get("text"), bot_user_id)
                 ).lower(),
+                **reply_data(timestamp),
+                **(
+                    {"posted_by_thread": common.dashboard_thread_url(posted_by) or posted_by}
+                    if unseen_post and posted_by
+                    else {}
+                ),
             },
         }
-        text = _slack_message_text(message, bot_user_id, user_names_by_id, channel_names)
+        text = (
+            _label_slack_mentions(
+                slack_utils.slack_post_text(message), user_names_by_id, channel_names
+            )
+            if unseen_post
+            else _slack_message_text(message, bot_user_id, user_names_by_id, channel_names)
+        )
         run_messages.append(
             human_input(text, message_context)
             if kind == "human"
@@ -604,6 +647,7 @@ def _slack_context_input(
                 "data": {
                     "timestamp": event_ts,
                     "explicit_bot_mention": str(explicit_mention).lower(),
+                    **reply_data(event_ts),
                 },
             },
         )
@@ -1418,6 +1462,8 @@ async def _process_slack_mention_impl(
         if allowed_bot is not None
         else request.trigger_system,
         explicit_mention=request.explicit_mention or _mentions_open_swe(text, bot_user_id),
+        thread_id=thread_id,
+        reply_root_ts=reply_thread_ts if code_channel or concierge_mode else "",
     )
     if code_channel:
         await common.set_session_status(channel_id, "processing")
