@@ -1,4 +1,5 @@
 import { LogoMark } from "@/components/Branding"
+import { recordClientError } from "@/lib/clientErrors"
 import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { useQuery, useQueryClient } from "@tanstack/react-query"
 import { useNavigate, useRouterState } from "@tanstack/react-router"
@@ -315,6 +316,7 @@ export function AgentsHome({
         })
         setLocalRepoBranch(branch)
       } catch (error) {
+        recordClientError({ title: "Local repository action failed", error })
         setLocalError(
           error instanceof Error ? error.message : "Could not checkout branch"
         )
@@ -403,6 +405,7 @@ export function AgentsHome({
       if (!(await removeProject(cwd))) return
       if (localRepoPath === cwd) setLocalRepoPath(null)
     } catch (error) {
+      recordClientError({ title: "Local repository action failed", error })
       setLocalError(
         error instanceof Error ? error.message : "Could not remove repository"
       )
@@ -532,6 +535,7 @@ export function AgentsHome({
         // A run that never started has nothing left to cancel, and the page
         // already went back to the empty composer when Stop was pressed.
         if (!pending.stopRequested) {
+          recordClientError({ title: "Could not start thread", error })
           resetPendingSubmit()
           setLocalError(
             error instanceof Error

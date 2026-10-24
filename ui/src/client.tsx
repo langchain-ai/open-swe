@@ -2,6 +2,10 @@ import { StartClient } from "@tanstack/react-start/client"
 import { createRoot, hydrateRoot } from "react-dom/client"
 
 import { initializeDatadogRum } from "./lib/datadog"
+import {
+  installClientErrorReporting,
+  recordClientError,
+} from "./lib/clientErrors"
 import { installDatadogPerfSink } from "./lib/perf/datadogSink"
 import { exposePerfGlobal } from "./lib/perf/trace"
 
@@ -11,10 +15,22 @@ window.__OPEN_SWE_BUNDLE__ = {
   built_at: __OPEN_SWE_BUNDLE_BUILT_AT__,
 }
 
+installClientErrorReporting()
 exposePerfGlobal()
 installDatadogPerfSink()
 void initializeDatadogRum()
 
 const app = <StartClient />
-if (window.openSweDesktop) createRoot(document).render(app)
-else hydrateRoot(document, app)
+const errorOptions = {
+  onCaughtError: (error: unknown) => {
+    recordClientError({ title: "React render failed", error })
+  },
+  onUncaughtError: (error: unknown) => {
+    recordClientError({ title: "React render failed", error })
+  },
+  onRecoverableError: (error: unknown) => {
+    recordClientError({ title: "React recovered from an error", error })
+  },
+}
+if (window.openSweDesktop) createRoot(document, errorOptions).render(app)
+else hydrateRoot(document, app, errorOptions)
