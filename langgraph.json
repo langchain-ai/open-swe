@@ -32,6 +32,8 @@
     "RUN apt-get update && apt-get install -y --no-install-recommends build-essential && rm -rf /var/lib/apt/lists/*",
     "COPY package.json pnpm-lock.yaml pnpm-workspace.yaml turbo.json langgraph.json /tmp/dashboard-src/",
     "COPY ui /tmp/dashboard-src/ui",
+    "# The dashboard's plugin host imports the plugin SDK from the workspace.",
+    "COPY plugins/sdk /tmp/dashboard-src/plugins/sdk",
     "# pnpm hashes every patchedDependencies file on install, even ones outside the filtered packages.",
     "COPY desktop/patches /tmp/dashboard-src/desktop/patches",
     "# The dashboard build bakes SOURCE_COMMIT into the bundle's compile-time constants and its sidecar; the backend stamps its own sidecar from the same value.",

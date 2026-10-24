@@ -10,6 +10,8 @@ type SandboxedHtmlFrameProps = (
   title: string
   sandbox?: string
   allow?: string
+  /** A policy the browser requires of every document the frame loads (Chromium). */
+  csp?: string
   className?: string
   style?: CSSProperties
   testId?: string
@@ -20,11 +22,25 @@ export const SandboxedHtmlFrame = forwardRef<
   HTMLIFrameElement,
   SandboxedHtmlFrameProps
 >(function SandboxedHtmlFrame(
-  { html, src, title, sandbox = "", allow, className, style, testId, onLoad },
+  {
+    html,
+    src,
+    title,
+    sandbox = "",
+    allow,
+    csp,
+    className,
+    style,
+    testId,
+    onLoad,
+  },
   ref
 ) {
+  // React's types lack `csp`, which React still renders as an attribute.
+  const required: Record<string, string> = csp ? { csp } : {}
   return (
     <iframe
+      {...required}
       ref={ref}
       data-testid={testId}
       onLoad={onLoad}

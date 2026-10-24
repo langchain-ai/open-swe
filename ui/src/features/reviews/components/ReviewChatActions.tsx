@@ -1,7 +1,6 @@
 import { XIcon } from "@langchain/macaw-components/icons"
 import { IconButton } from "@langchain/macaw-components/IconButton"
 import { createContext, useContext, useEffect, useMemo, useState } from "react"
-import type { ReactNode } from "react"
 import { FileCodeIcon } from "@phosphor-icons/react/dist/ssr/FileCode"
 import type { Message } from "@/features/agents/lib/types"
 import type { CodeExcerpt } from "@/features/agents/utils/codeExcerpt"
@@ -16,8 +15,6 @@ export const ReviewChatActionsContext = createContext<{
   repo: string
   number: number
   showInDiff: (range: DiffRange) => void
-  /** What an empty chat shows: ways in, specific to this pull request. */
-  emptyState?: ReactNode
   /** Code the reviewer attached to their next message. */
   excerpts?: ReadonlyArray<CodeExcerpt>
   removeExcerpt?: (index: number) => void

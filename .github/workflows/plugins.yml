@@ -1,0 +1,28 @@
+name: Plugins
+
+# Builds the plugins this repository's marketplace lists (`.openswe-plugin/marketplace.json`)
+# and publishes them for installs; see openswe-plugin.yml.
+
+on:
+  push:
+    branches: ["**"]
+    paths:
+      - "plugins/**"
+      - ".openswe-plugin/**"
+      - "ui/vendor/macaw/**"
+      - "pnpm-lock.yaml"
+      - "pnpm-workspace.yaml"
+      - ".github/workflows/plugins.yml"
+      - ".github/workflows/openswe-plugin.yml"
+  workflow_dispatch:
+  delete:
+
+permissions:
+  contents: write
+
+jobs:
+  plugins:
+    uses: ./.github/workflows/openswe-plugin.yml
+    with:
+      install: pnpm install --frozen-lockfile --filter "{./plugins/**}..."
+      build: pnpm run build

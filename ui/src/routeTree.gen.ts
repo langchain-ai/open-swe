@@ -44,6 +44,7 @@ import { Route as MySettingsConnectionsRouteImport } from './routes/my-settings_
 import { Route as MySettingsExperimentsRouteImport } from './routes/my-settings_.experiments'
 import { Route as MySettingsGitRouteImport } from './routes/my-settings_.git'
 import { Route as MySettingsInstructionsRouteImport } from './routes/my-settings_.instructions'
+import { Route as MySettingsPluginsRouteImport } from './routes/my-settings_.plugins'
 import { Route as ReviewStylesRouteImport } from './routes/review_.styles'
 import { Route as WorkspacesSlugRouteImport } from './routes/workspaces_.$slug'
 import { Route as AgentsThreadIdPlanRouteImport } from './routes/agents/$threadId_.plan'
@@ -54,6 +55,7 @@ import { Route as AgentsBotsIndexRouteImport } from './routes/agents/bots/index'
 import { Route as AgentsReviewsIndexRouteImport } from './routes/agents/reviews/index'
 import { Route as ReviewRepositoriesOwnerRouteImport } from './routes/review_.repositories.$owner'
 import { Route as OwnerRepoPullNumberRouteImport } from './routes/$owner.$repo.pull.$number'
+import { Route as AgentsPluginsNameSplatRouteImport } from './routes/agents/plugins/$name.$'
 import { Route as AgentsReviewsOwnerRepoNumberRouteImport } from './routes/agents/reviews/$owner.$repo.$number'
 
 const IndexRoute = IndexRouteImport.update({
@@ -231,6 +233,11 @@ const MySettingsInstructionsRoute = MySettingsInstructionsRouteImport.update({
   path: '/my-settings/instructions',
   getParentRoute: () => rootRouteImport,
 } as any)
+const MySettingsPluginsRoute = MySettingsPluginsRouteImport.update({
+  id: '/my-settings_/plugins',
+  path: '/my-settings/plugins',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const ReviewStylesRoute = ReviewStylesRouteImport.update({
   id: '/review_/styles',
   path: '/review/styles',
@@ -282,6 +289,11 @@ const OwnerRepoPullNumberRoute = OwnerRepoPullNumberRouteImport.update({
   path: '/$owner/$repo/pull/$number',
   getParentRoute: () => rootRouteImport,
 } as any)
+const AgentsPluginsNameSplatRoute = AgentsPluginsNameSplatRouteImport.update({
+  id: '/plugins/$name/$',
+  path: '/plugins/$name/$',
+  getParentRoute: () => AgentsRoute,
+} as any)
 const AgentsReviewsOwnerRepoNumberRoute =
   AgentsReviewsOwnerRepoNumberRouteImport.update({
     id: '/reviews/$owner/$repo/$number',
@@ -322,6 +334,7 @@ export interface FileRoutesByFullPath {
   '/my-settings/experiments': typeof MySettingsExperimentsRoute
   '/my-settings/git': typeof MySettingsGitRoute
   '/my-settings/instructions': typeof MySettingsInstructionsRoute
+  '/my-settings/plugins': typeof MySettingsPluginsRoute
   '/review/styles': typeof ReviewStylesRoute
   '/workspaces/$slug': typeof WorkspacesSlugRoute
   '/agents/': typeof AgentsIndexRoute
@@ -335,6 +348,7 @@ export interface FileRoutesByFullPath {
   '/agents/bots/': typeof AgentsBotsIndexRoute
   '/agents/reviews/': typeof AgentsReviewsIndexRoute
   '/$owner/$repo/pull/$number': typeof OwnerRepoPullNumberRoute
+  '/agents/plugins/$name/$': typeof AgentsPluginsNameSplatRoute
   '/agents/reviews/$owner/$repo/$number': typeof AgentsReviewsOwnerRepoNumberRoute
 }
 export interface FileRoutesByTo {
@@ -367,6 +381,7 @@ export interface FileRoutesByTo {
   '/my-settings/experiments': typeof MySettingsExperimentsRoute
   '/my-settings/git': typeof MySettingsGitRoute
   '/my-settings/instructions': typeof MySettingsInstructionsRoute
+  '/my-settings/plugins': typeof MySettingsPluginsRoute
   '/review/styles': typeof ReviewStylesRoute
   '/workspaces/$slug': typeof WorkspacesSlugRoute
   '/agents': typeof AgentsIndexRoute
@@ -380,6 +395,7 @@ export interface FileRoutesByTo {
   '/agents/bots': typeof AgentsBotsIndexRoute
   '/agents/reviews': typeof AgentsReviewsIndexRoute
   '/$owner/$repo/pull/$number': typeof OwnerRepoPullNumberRoute
+  '/agents/plugins/$name/$': typeof AgentsPluginsNameSplatRoute
   '/agents/reviews/$owner/$repo/$number': typeof AgentsReviewsOwnerRepoNumberRoute
 }
 export interface FileRoutesById {
@@ -416,6 +432,7 @@ export interface FileRoutesById {
   '/my-settings_/experiments': typeof MySettingsExperimentsRoute
   '/my-settings_/git': typeof MySettingsGitRoute
   '/my-settings_/instructions': typeof MySettingsInstructionsRoute
+  '/my-settings_/plugins': typeof MySettingsPluginsRoute
   '/review_/styles': typeof ReviewStylesRoute
   '/workspaces_/$slug': typeof WorkspacesSlugRoute
   '/agents/': typeof AgentsIndexRoute
@@ -429,6 +446,7 @@ export interface FileRoutesById {
   '/agents/bots/': typeof AgentsBotsIndexRoute
   '/agents/reviews/': typeof AgentsReviewsIndexRoute
   '/$owner/$repo/pull/$number': typeof OwnerRepoPullNumberRoute
+  '/agents/plugins/$name/$': typeof AgentsPluginsNameSplatRoute
   '/agents/reviews/$owner/$repo/$number': typeof AgentsReviewsOwnerRepoNumberRoute
 }
 export interface FileRouteTypes {
@@ -466,6 +484,7 @@ export interface FileRouteTypes {
     | '/my-settings/experiments'
     | '/my-settings/git'
     | '/my-settings/instructions'
+    | '/my-settings/plugins'
     | '/review/styles'
     | '/workspaces/$slug'
     | '/agents/'
@@ -479,6 +498,7 @@ export interface FileRouteTypes {
     | '/agents/bots/'
     | '/agents/reviews/'
     | '/$owner/$repo/pull/$number'
+    | '/agents/plugins/$name/$'
     | '/agents/reviews/$owner/$repo/$number'
   fileRoutesByTo: FileRoutesByTo
   to:
@@ -511,6 +531,7 @@ export interface FileRouteTypes {
     | '/my-settings/experiments'
     | '/my-settings/git'
     | '/my-settings/instructions'
+    | '/my-settings/plugins'
     | '/review/styles'
     | '/workspaces/$slug'
     | '/agents'
@@ -524,6 +545,7 @@ export interface FileRouteTypes {
     | '/agents/bots'
     | '/agents/reviews'
     | '/$owner/$repo/pull/$number'
+    | '/agents/plugins/$name/$'
     | '/agents/reviews/$owner/$repo/$number'
   id:
     | '__root__'
@@ -559,6 +581,7 @@ export interface FileRouteTypes {
     | '/my-settings_/experiments'
     | '/my-settings_/git'
     | '/my-settings_/instructions'
+    | '/my-settings_/plugins'
     | '/review_/styles'
     | '/workspaces_/$slug'
     | '/agents/'
@@ -572,6 +595,7 @@ export interface FileRouteTypes {
     | '/agents/bots/'
     | '/agents/reviews/'
     | '/$owner/$repo/pull/$number'
+    | '/agents/plugins/$name/$'
     | '/agents/reviews/$owner/$repo/$number'
   fileRoutesById: FileRoutesById
 }
@@ -604,6 +628,7 @@ export interface RootRouteChildren {
   MySettingsExperimentsRoute: typeof MySettingsExperimentsRoute
   MySettingsGitRoute: typeof MySettingsGitRoute
   MySettingsInstructionsRoute: typeof MySettingsInstructionsRoute
+  MySettingsPluginsRoute: typeof MySettingsPluginsRoute
   ReviewStylesRoute: typeof ReviewStylesRoute
   WorkspacesSlugRoute: typeof WorkspacesSlugRoute
   ReviewRepositoriesOwnerRoute: typeof ReviewRepositoriesOwnerRoute
@@ -857,6 +882,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof MySettingsInstructionsRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/my-settings_/plugins': {
+      id: '/my-settings_/plugins'
+      path: '/my-settings/plugins'
+      fullPath: '/my-settings/plugins'
+      preLoaderRoute: typeof MySettingsPluginsRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/review_/styles': {
       id: '/review_/styles'
       path: '/review/styles'
@@ -927,6 +959,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof OwnerRepoPullNumberRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/agents/plugins/$name/$': {
+      id: '/agents/plugins/$name/$'
+      path: '/plugins/$name/$'
+      fullPath: '/agents/plugins/$name/$'
+      preLoaderRoute: typeof AgentsPluginsNameSplatRouteImport
+      parentRoute: typeof AgentsRoute
+    }
     '/agents/reviews/$owner/$repo/$number': {
       id: '/agents/reviews/$owner/$repo/$number'
       path: '/reviews/$owner/$repo/$number'
@@ -947,6 +986,7 @@ interface AgentsRouteChildren {
   AgentsAutomationsIndexRoute: typeof AgentsAutomationsIndexRoute
   AgentsBotsIndexRoute: typeof AgentsBotsIndexRoute
   AgentsReviewsIndexRoute: typeof AgentsReviewsIndexRoute
+  AgentsPluginsNameSplatRoute: typeof AgentsPluginsNameSplatRoute
   AgentsReviewsOwnerRepoNumberRoute: typeof AgentsReviewsOwnerRepoNumberRoute
 }
 
@@ -960,6 +1000,7 @@ const AgentsRouteChildren: AgentsRouteChildren = {
   AgentsAutomationsIndexRoute: AgentsAutomationsIndexRoute,
   AgentsBotsIndexRoute: AgentsBotsIndexRoute,
   AgentsReviewsIndexRoute: AgentsReviewsIndexRoute,
+  AgentsPluginsNameSplatRoute: AgentsPluginsNameSplatRoute,
   AgentsReviewsOwnerRepoNumberRoute: AgentsReviewsOwnerRepoNumberRoute,
 }
 
@@ -1023,6 +1064,7 @@ const rootRouteChildren: RootRouteChildren = {
   MySettingsExperimentsRoute: MySettingsExperimentsRoute,
   MySettingsGitRoute: MySettingsGitRoute,
   MySettingsInstructionsRoute: MySettingsInstructionsRoute,
+  MySettingsPluginsRoute: MySettingsPluginsRoute,
   ReviewStylesRoute: ReviewStylesRoute,
   WorkspacesSlugRoute: WorkspacesSlugRoute,
   ReviewRepositoriesOwnerRoute: ReviewRepositoriesOwnerRoute,
