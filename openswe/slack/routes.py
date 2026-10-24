@@ -29,6 +29,7 @@ from openswe.slack.ask import (
     process_slack_ask,
 )
 from openswe.slack.breakout import BreakoutCommand, process_slack_breakout, process_slack_web
+from openswe.slack.channels import DIRECTORY_EVENTS, SlackChannel
 from openswe.slack.dm import CONCIERGE_TS, is_dm_channel
 from openswe.slack.failures import (
     SlackRequestError,
@@ -382,6 +383,8 @@ async def slack_webhook(
         return ignored("Invalid Slack event")
 
     new_pr_links = await SlackPullRequestLink.record(envelope)
+    if event.type in DIRECTORY_EVENTS and (listed_channel := event.resolve_channel_id()):
+        background_tasks.add_task(SlackChannel.observe, event.type, listed_channel)
 
     from openswe.incidents import channels as incidents
 

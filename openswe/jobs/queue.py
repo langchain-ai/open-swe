@@ -67,6 +67,11 @@ class Job(BaseModel):
     def from_row(cls, row: RowMapping) -> Self:
         return cls.model_validate(dict(row))
 
+    @property
+    def underway(self) -> bool:
+        """Whether a worker holds this job or it is due for one now."""
+        return self.claim_token is not None or self.due_at <= datetime.now(UTC)
+
     def next_fire_after(self, moment: datetime) -> datetime:
         if self.cron is None:
             raise ValueError("A one-shot job has no next fire time")
@@ -240,6 +245,19 @@ async def get(key: str) -> Job | None:
             .first()
         )
     return None if row is None else Job.from_row(row)
+
+
+async def run_now(key: str, *, by: uuid.UUID | None = None) -> None:
+    """Make the job queued under ``key`` due now; one a worker holds is already running."""
+    async with transaction() as conn:
+        await conn.execute(
+            text(
+                "UPDATE job SET due_at = least(due_at, clock_timestamp()), "
+                "updated_at = clock_timestamp(), updated_by = :by "
+                "WHERE key = :key AND claim_token IS NULL"
+            ),
+            {"key": key, "by": by},
+        )
 
 
 async def cancel(job_id: uuid.UUID) -> bool:
