@@ -281,6 +281,10 @@ async def api_publish_app(
 
     ``repository``, ``ref`` and ``commit`` say where it was built, only to show.
     """
+    # Not a type a cross-site form can send, so a browser preflights it first.
+    content_type = request.headers.get("content-type", "").split(";")[0].strip().lower()
+    if content_type != "text/html":
+        raise HTTPException(415, "send the bundle as text/html")
     length = request.headers.get("content-length")
     if length is not None and length.isdigit() and int(length) > MAX_BUNDLE_BYTES:
         raise HTTPException(413, f"an app is at most {MAX_BUNDLE_BYTES} bytes")
