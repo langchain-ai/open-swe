@@ -600,7 +600,7 @@ class RunSession:
                 content=f"{request.name} is not one of this run's operations", status="error"
             )
         unexpected = set(request.arguments) - set(_properties(tool))
-        if unexpected:
+        if unexpected and not _accepts_extra(tool):
             return OperationResult(
                 content=f"Unexpected arguments for {request.name}: {', '.join(sorted(unexpected))}",
                 status="error",
@@ -1061,6 +1061,12 @@ def _json_or_text(value: object) -> JsonValue:
         return _json.validate_python(value)
     except ValidationError:
         return str(value)
+
+
+def _accepts_extra(tool: BaseTool) -> bool:
+    parameters = tool_parameters(tool)
+    additional = parameters.get("additionalProperties")
+    return additional is True or ("properties" not in parameters and additional is not False)
 
 
 def _properties(tool: BaseTool) -> Mapping[str, object]:

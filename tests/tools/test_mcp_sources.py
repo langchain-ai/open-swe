@@ -200,3 +200,46 @@ async def test_failed_lookup_blocks_loaded_tool_without_falling_back(remote, cap
     tool = (await runtime.load_mcp_tools(workspace, user))[0]
     assert "MCP call failed" in await tool.ainvoke({})
     assert "private store details" not in caplog.text
+
+
+async def test_open_schema_operation_forwards_arguments_to_mcp_server(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from pydantic import JsonValue
+    from runtime_api.operations import RunOperation
+
+    from openswe.agent_api.graph import RunSession
+    from tests.mcp_helpers import Transport
+
+    async def discover(record: MCPConnection, namespace: tuple[str, ...]) -> list[Tool]:
+        return [
+            Tool(
+                name="search",
+                description="Search tests.",
+                input_schema={"type": "object", "additionalProperties": True},
+            )
+        ]
+
+    received: list[dict[str, JsonValue]] = []
+
+    async def call(
+        transport: Transport, name: str, arguments: dict[str, JsonValue]
+    ) -> CallToolResult:
+        received.append(arguments)
+        return CallToolResult(content=[TextContent(type="text", text="found")])
+
+    monkeypatch.setattr(runtime, "_discover_tools", discover)
+    fake_mcp_server(monkeypatch, call=call)
+    tools = await runtime.load_mcp_tools(
+        source(("instance_mcps",), {"homebase": record("homebase")})
+    )
+    surface = ToolSurface(tools={tool.name: tool for tool in tools})
+    session = RunSession(surface, {"configurable": {}}, None, started_here=True)
+    arguments: dict[str, JsonValue] = {"test_identity_id": "x"}
+
+    result = await session.operation(
+        RunOperation(name=tools[0].name, arguments=arguments, request_id="call-1")
+    )
+
+    assert result.status == "success"
+    assert received == [arguments]

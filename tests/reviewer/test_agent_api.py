@@ -530,6 +530,70 @@ async def test_an_operation_gets_the_state_it_reads_and_answers_the_state_it_cha
     assert result.state == {"requested_model": "after-fast"}
 
 
+@pytest.mark.parametrize(
+    ("schema", "accepts_extra"),
+    [
+        ({"type": "object"}, True),
+        (
+            {
+                "type": "object",
+                "properties": {"known": {"type": "string"}},
+                "additionalProperties": True,
+            },
+            True,
+        ),
+        ({"type": "object", "additionalProperties": False}, False),
+        (
+            {
+                "type": "object",
+                "properties": {"known": {"type": "string"}},
+                "additionalProperties": False,
+            },
+            False,
+        ),
+        ({"type": "object", "properties": {"known": {"type": "string"}}}, False),
+    ],
+)
+async def test_operation_respects_open_and_closed_argument_schemas(
+    schema: dict[str, JsonValue], accepts_extra: bool
+) -> None:
+    from langchain_core.tools import StructuredTool
+    from runtime_api.operations import RunOperation
+
+    from openswe.agent_api.graph import RunSession
+    from openswe.sandboxes.tool_runtime import ToolSurface
+
+    received: list[dict[str, JsonValue]] = []
+
+    async def snooze(**arguments: JsonValue) -> str:
+        received.append(arguments)
+        return "snoozed"
+
+    tool = StructuredTool(
+        name="flaky_tests_snooze",
+        description="Snooze a flaky test.",
+        args_schema=schema,
+        coroutine=snooze,
+    )
+    session = RunSession(
+        ToolSurface(tools={tool.name: tool}), {"configurable": {}}, None, started_here=True
+    )
+    arguments: dict[str, JsonValue] = {"test_identity_id": "x"}
+
+    result = await session.operation(
+        RunOperation(name=tool.name, arguments=arguments, request_id="call-1")
+    )
+
+    if accepts_extra:
+        assert result.status == "success"
+        assert result.content == "snoozed"
+        assert received == [arguments]
+    else:
+        assert result.status == "error"
+        assert result.content == "Unexpected arguments for flaky_tests_snooze: test_identity_id"
+        assert received == []
+
+
 async def test_the_files_api_reaches_the_threads_files_as_the_run() -> None:
     """A bridge checks who the run is for, which it reads from the run's own config."""
     from deepagents.backends.protocol import ExecuteResponse, SandboxBackendProtocol
