@@ -54,6 +54,7 @@ from managed_deepagents.runtime import compile_managed_agent_async
 from pydantic import BaseModel, JsonValue
 from rt.backend import (
     BackendCallError,
+    BackendTimeoutError,
     BackendUnavailableError,
     OpenSweBackend,
     Run,
@@ -289,6 +290,82 @@ async def test_a_tool_call_the_backend_never_answered(
     assert result_message.status == ("success" if failures == 10 else "error")
     assert "secret-token" not in result_message.content
     assert client.post.await_count == attempts
+
+
+@pytest.mark.parametrize(
+    ("seconds", "arguments", "elapsed", "succeeds"),
+    [
+        (120.0, {}, 121.0, False),
+        (120.0, {"timeout": True}, 121.0, False),
+        (120.0, {"timeout": 1200}, 1500.0, True),
+        (120.0, {"timeout": 1800}, 2100.0, True),
+        (None, {}, 1800.0, True),
+    ],
+)
+async def test_operation_deadlines_preserve_user_bounded_work(
+    monkeypatch: pytest.MonkeyPatch,
+    seconds: float | None,
+    arguments: dict[str, JsonValue],
+    elapsed: float,
+    succeeds: bool,
+) -> None:
+    monkeypatch.setenv("OPEN_SWE_BACKEND_URL", "https://backend.invalid")
+    monkeypatch.setattr("rt.tools.run_id", lambda: "run-1")
+    request = httpx2.Request("POST", "https://backend.invalid")
+
+    async def post(*args: object, timeout: float, **kwargs: object) -> httpx2.Response:
+        if elapsed > timeout:
+            raise httpx2.ReadTimeout("stalled backend")
+        return httpx2.Response(200, request=request, json={"content": "done"})
+
+    client = MagicMock(is_closed=False)
+    client.post = post
+    monkeypatch.setattr("rt.backend.httpx2.AsyncClient", lambda **kwargs: client)
+    served = operation_tool(
+        OperationSpec(
+            name="execute" if arguments.get("timeout") else "get_thread",
+            description="Operation",
+            parameters={"type": "object"},
+            seconds=seconds,
+        ),
+        _run_backend(),
+    )
+    runtime = ToolRuntime(
+        state={"messages": []},
+        context=None,
+        config={},
+        stream_writer=lambda event: None,
+        tool_call_id="call-1",
+        store=None,
+    )
+    assert served.coroutine is not None
+    result = await served.coroutine(runtime=runtime, **arguments)
+    assert isinstance(result, ToolMessage)
+    assert result.status == ("success" if succeeds else "error")
+    assert result.content == "done" if succeeds else "did not answer" in result.content
+
+
+@pytest.mark.parametrize(("elapsed", "succeeds"), [(600.0, True), (901.0, False)])
+async def test_prepare_deadline_allows_the_scout_wait_but_bounds_a_stall(
+    monkeypatch: pytest.MonkeyPatch, elapsed: float, succeeds: bool
+) -> None:
+    monkeypatch.setenv("OPEN_SWE_BACKEND_URL", "https://backend.invalid")
+    request = httpx2.Request("POST", "https://backend.invalid")
+
+    async def post(*args: object, timeout: float, **kwargs: object) -> httpx2.Response:
+        if elapsed > timeout:
+            raise httpx2.ReadTimeout("stalled backend")
+        return httpx2.Response(200, request=request, json={"update": {"prepared": True}})
+
+    client = MagicMock(is_closed=False)
+    client.post = post
+    monkeypatch.setattr("rt.backend.httpx2.AsyncClient", lambda **kwargs: client)
+    pending = call(_run_backend(), PREPARE, Prepare())
+    if succeeds:
+        assert (await pending).update == {"prepared": True}
+    else:
+        with pytest.raises(BackendTimeoutError, match="prepare failed"):
+            await pending
 
 
 @pytest.mark.parametrize(
