@@ -236,39 +236,51 @@ async def test_github_webhook_routes_review_comment_reply_without_tag(
 
 
 def _untagged_pr_event(
-    event_type: str, sender: dict[str, str], *, action: str = "", number: int = 1244
+    event_type: str,
+    sender: dict[str, str],
+    *,
+    action: str = "",
+    number: int = 1244,
+    body: str | None = None,
 ) -> dict[object, object]:
     repository = {"owner": {"login": "langchain-ai"}, "name": "open-swe"}
     if event_type == "issue_comment":
         return {
             "action": action or "created",
             "issue": {"number": number, "state": "open", "pull_request": {"url": "u"}},
-            "comment": {"id": 5, "body": "CI is failing on lint"},
+            "comment": {"id": 5, "body": body if body is not None else "CI is failing on lint"},
             "repository": repository,
             "sender": sender,
         }
     return {
         "action": action or "submitted",
         "pull_request": {"number": number, "state": "open", "head": {"ref": "feature"}},
-        "review": {"id": 6, "body": "", "state": "changes_requested"},
+        "review": {"id": 6, "body": body or "", "state": "changes_requested"},
         "repository": repository,
         "sender": sender,
     }
 
 
 @pytest.mark.parametrize(
-    ("event_type", "action", "sender", "accepted"),
+    ("event_type", "action", "sender", "body", "accepted"),
     [
-        ("issue_comment", "", {"login": "octocat"}, True),
-        ("issue_comment", "edited", {"login": "octocat"}, True),
-        ("issue_comment", "deleted", {"login": "octocat"}, False),
-        ("issue_comment", "", {"login": "vercel[bot]"}, False),
-        ("issue_comment", "", {"login": "open-swe[bot]"}, False),
-        ("issue_comment", "", {"login": "stranger"}, False),
-        ("pull_request_review", "", {"login": "octocat"}, True),
-        ("pull_request_review", "edited", {"login": "octocat"}, True),
-        ("pull_request_review", "", {"login": "devin-ai-integration[bot]"}, False),
-        ("pull_request_review", "", {"login": "stranger"}, False),
+        ("issue_comment", "", {"login": "octocat"}, None, True),
+        ("issue_comment", "edited", {"login": "octocat"}, None, True),
+        ("issue_comment", "deleted", {"login": "octocat"}, None, False),
+        ("issue_comment", "", {"login": "vercel[bot]"}, None, False),
+        ("issue_comment", "", {"login": "open-swe[bot]"}, None, False),
+        ("issue_comment", "", {"login": "stranger"}, None, False),
+        ("issue_comment", "", {"login": "octocat"}, "!keep-open", False),
+        ("issue_comment", "edited", {"login": "octocat"}, "!keep-open", False),
+        ("issue_comment", "", {"login": "octocat"}, "\n \n\t!keep-open\nStill needed", False),
+        ("issue_comment", "", {"login": "octocat"}, " !other-command", False),
+        ("issue_comment", "", {"login": "octocat"}, "Please fix CI\n!keep-open", True),
+        ("issue_comment", "", {"login": "octocat"}, "@open-swe !keep-open", True),
+        ("pull_request_review", "", {"login": "octocat"}, None, True),
+        ("pull_request_review", "edited", {"login": "octocat"}, None, True),
+        ("pull_request_review", "", {"login": "octocat"}, "!keep-open", True),
+        ("pull_request_review", "", {"login": "devin-ai-integration[bot]"}, None, False),
+        ("pull_request_review", "", {"login": "stranger"}, None, False),
     ],
 )
 async def test_github_webhook_wakes_agent_on_untagged_activity_on_its_pr(
@@ -277,6 +289,7 @@ async def test_github_webhook_wakes_agent_on_untagged_activity_on_its_pr(
     event_type: str,
     action: str,
     sender: dict[str, str],
+    body: str | None,
     accepted: bool,
 ) -> None:
     called: dict[str, object] = {}
@@ -304,12 +317,15 @@ async def test_github_webhook_wakes_agent_on_untagged_activity_on_its_pr(
     ).save()
 
     response = await _post_github_webhook(
-        event_type, _untagged_pr_event(event_type, sender, action=action)
+        event_type, _untagged_pr_event(event_type, sender, action=action, body=body)
     )
 
     assert response.status_code == 200
     assert (response.json()["status"] == "accepted") is accepted
-    assert called == ({"agent_thread_id": "agent-thread"} if accepted else {})
+    expected_thread_id = None if webhook_common.mentions_open_swe(body) else "agent-thread"
+    assert called == ({"agent_thread_id": expected_thread_id} if accepted else {})
+    if body is not None and not accepted and action != "deleted":
+        assert response.json() == {"status": "ignored", "reason": "Untagged workflow command"}
 
 
 @pytest.mark.parametrize(
