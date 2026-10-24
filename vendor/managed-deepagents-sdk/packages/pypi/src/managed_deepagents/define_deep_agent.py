@@ -149,7 +149,9 @@ def define_deep_agent(
     this agent's skills). Its ``update_strategy`` defaults to ``"interrupt"``;
     set ``"enqueue"`` to queue follow-ups without stopping its active run.
     Its ``webhook``, if set, is a URL the Agent Server calls when each of its
-    runs finishes. Served agents also get a background copy of the general-purpose subagent.
+    runs finishes. With ``"mode": "fork"`` (experimental) it starts with a copy
+    of this agent's conversation, not only the task. Served agents also get a
+    background copy of the general-purpose subagent.
 
     ``metadata`` is MDA-owned authoring config (not a ``create_deep_agent``
     kwarg): the runtime applies it via ``.with_config({"metadata": ...})`` so
@@ -208,7 +210,7 @@ def define_deep_agent(
     return DeepAgentDefinition(config)
 
 
-_ASYNC_SUBAGENT_UNSUPPORTED_KEYS = ("runnable", "graph_id", "url", "headers", "mode")
+_ASYNC_SUBAGENT_UNSUPPORTED_KEYS = ("runnable", "graph_id", "url", "headers")
 
 
 def _validate_async_subagents(subagents: Sequence[DeepAgentSubAgent]) -> None:
@@ -242,6 +244,8 @@ def _validate_async_run_options(spec: Mapping[str, object]) -> None:
         raise TypeError('subagent "webhook" must be a URL string')
     if "notify_parent" in spec and not isinstance(spec["notify_parent"], bool):
         raise TypeError('subagent "notify_parent" must be True or False')
+    if spec.get("mode", "isolated") not in ("isolated", "fork"):
+        raise TypeError('subagent "mode" must be "isolated" or "fork"')
 
 
 def _is_path_list(value: object) -> bool:
