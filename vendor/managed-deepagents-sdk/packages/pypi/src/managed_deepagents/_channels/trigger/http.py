@@ -104,9 +104,22 @@ class TriggerMessageDecision:
     input: NormalizedRunInput | None = None
 
 
+@dataclass(frozen=True)
+class TriggerMessageBackground:
+    """A decision that may take longer than Trigger Server waits, such as an event endpoint's.
+
+    Trigger Server then gets its answer first, and a failure is only logged.
+    """
+
+    decide: Callable[[], Awaitable[TriggerMessageDecision]]
+
+
+TriggerMessageRoute = TriggerMessageDecision | TriggerMessageBackground
+"""What a provider decides a message starts: at once, or in the background."""
+
 DecideMessageFn = Callable[
     [TriggerChannelMessageEvent, TriggerChannelThread],
-    Awaitable[TriggerMessageDecision | None],
+    Awaitable[TriggerMessageRoute | None],
 ]
 """Decide what a message event starts, before its run; ``None`` starts it with
 ``message_input``'s messages. Interrupt resumes and prompt responses never ask."""
@@ -404,7 +417,7 @@ async def _start_event_run(
     _assert_never(event)
 
 
-async def handle_trigger_channel_event_request(  # noqa: C901, PLR0911, PLR0912
+async def handle_trigger_channel_event_request(  # noqa: C901, PLR0911, PLR0912, PLR0915
     request: object,
     *,
     source_provider: str,
@@ -509,77 +522,34 @@ async def handle_trigger_channel_event_request(  # noqa: C901, PLR0911, PLR0912
         logger.error("%s is not configured", ASSISTANT_ID_ENV)
         return _json_response({"error": "channel runtime is not configured"}, status_code=500)
 
-    if event["type"] == "message" and not await _may_start_in(
-        event,
-        user_id=user_id,
-        source_provider=source_provider,
-        only_continues_thread=only_continues_thread,
-        thread_exists=thread_exists,
-    ):
-        logger.info(
-            "channel message started no run: the agent never ran on its thread (delivery_id=%s)",
-            logger.log_identifier(event["delivery_id"]),
-        )
-        return _accepted_response(event)
-
-    decision: TriggerMessageDecision | None = None
-    if event["type"] == "message" and decide_message is not None:
-        decision = await decide_message(
-            event,
-            {
-                "id": _thread_id(event["source_thread_key"]),
-                "source_thread_key": event["source_thread_key"],
-            },
-        )
-        if decision is not None and decision.type == "skipped":
-            logger.info(
-                "channel message started no run (delivery_id=%s)",
-                logger.log_identifier(event["delivery_id"]),
+    async def start(decided: NormalizedRunInput | None) -> StartedIngressRun | None:
+        """Start the delivery's run; ``None`` when ``reject`` left the thread to its run."""
+        try:
+            return await _start_event_run(
+                event=event,
+                assistant_id=resolved_assistant_id,
+                source_provider=source_provider,
+                channel_name=channel_name,
+                start_agent=start_agent,
+                resume_agent=resume_agent,
+                thread_interrupts=thread_interrupts,
+                resume_target=resume_target,
+                user_id=user_id,
+                message_input=message_input,
+                decided=decided,
+                multitask_strategy=multitask_strategy,
             )
-            return _accepted_response(event)
-        if decision is not None and decision.type == "failed":
-            return _start_failed_response()
+        except Exception as error:
+            if event["type"] == "message" and rejected_as_busy(multitask_strategy, error):
+                # A run already active on the thread keeps it under `reject`.
+                logger.info(
+                    "channel message rejected: its thread is busy (delivery_id=%s)",
+                    logger.log_identifier(event["delivery_id"]),
+                )
+                return None
+            raise
 
-    try:
-        started = await _start_event_run(
-            event=event,
-            assistant_id=resolved_assistant_id,
-            source_provider=source_provider,
-            channel_name=channel_name,
-            start_agent=start_agent,
-            resume_agent=resume_agent,
-            thread_interrupts=thread_interrupts,
-            resume_target=resume_target,
-            user_id=user_id,
-            message_input=message_input,
-            decided=decision.input if decision is not None else None,
-            multitask_strategy=multitask_strategy,
-        )
-    except _AmbiguousInterruptError as ambiguous:
-        # Trigger Server never reads the body, so the log is the only place this surfaces.
-        logger.warning(
-            "channel user prompt response could not be matched to an interrupt "
-            "(%s, delivery_id=%s, event_id=%s)",
-            ambiguous.reason,
-            logger.log_identifier(event["delivery_id"]),
-            logger.log_identifier(event["event_id"]),
-        )
-        return _accepted_response(event)
-    except Exception as error:  # noqa: BLE001 - never expose Agent Server details in the response
-        if event["type"] == "message" and rejected_as_busy(multitask_strategy, error):
-            # A run already active on the thread keeps it under `reject`.
-            logger.info(
-                "channel message rejected: its thread is busy (delivery_id=%s)",
-                logger.log_identifier(event["delivery_id"]),
-            )
-            return _accepted_response(event)
-        logger.error(
-            "channel run could not be started (%s)",
-            logger.safe_error_label(error),
-        )
-        return _start_failed_response()
-
-    async def observe() -> None:
+    async def observe(started: StartedIngressRun) -> None:
         await _observe_accepted_run(
             event=event,
             started=started,
@@ -593,12 +563,95 @@ async def handle_trigger_channel_event_request(  # noqa: C901, PLR0911, PLR0912
             newer_run=newer_run,
         )
 
+    if event["type"] == "message" and not await _may_start_in(
+        event,
+        user_id=user_id,
+        source_provider=source_provider,
+        only_continues_thread=only_continues_thread,
+        thread_exists=thread_exists,
+    ):
+        logger.info(
+            "channel message started no run: the agent never ran on its thread (delivery_id=%s)",
+            logger.log_identifier(event["delivery_id"]),
+        )
+        return _accepted_response(event)
+
+    decision: TriggerMessageRoute | None = None
+    if event["type"] == "message" and decide_message is not None:
+        decision = await decide_message(
+            event,
+            {
+                "id": _thread_id(event["source_thread_key"]),
+                "source_thread_key": event["source_thread_key"],
+            },
+        )
+    if isinstance(decision, TriggerMessageBackground):
+        decide = decision.decide
+
+        async def decide_then_start() -> None:
+            decided = await decide()
+            if decided.type != "input":
+                _log_no_run(event, decided)
+                return
+            try:
+                started = await start(decided.input)
+            except Exception as error:  # noqa: BLE001 - never log Agent Server details
+                logger.error(
+                    "channel run could not be started (%s)",
+                    logger.safe_error_label(error),
+                )
+                return
+            if started is not None:
+                await observe(started)
+
+        # Trigger Server only waits briefly, so it hears first; a failure from
+        # here on is logged, and nothing redelivers the message.
+        schedule_ingress_work(
+            decide_then_start, label="Channel message decision", schedule=schedule
+        )
+        return _accepted_response(event)
+    if decision is not None and decision.type == "skipped":
+        _log_no_run(event, decision)
+        return _accepted_response(event)
+    if decision is not None and decision.type == "failed":
+        return _start_failed_response()
+
+    try:
+        started = await start(decision.input if decision is not None else None)
+    except _AmbiguousInterruptError as ambiguous:
+        # Trigger Server never reads the body, so the log is the only place this surfaces.
+        logger.warning(
+            "channel user prompt response could not be matched to an interrupt "
+            "(%s, delivery_id=%s, event_id=%s)",
+            ambiguous.reason,
+            logger.log_identifier(event["delivery_id"]),
+            logger.log_identifier(event["event_id"]),
+        )
+        return _accepted_response(event)
+    except Exception as error:  # noqa: BLE001 - never expose Agent Server details in the response
+        logger.error(
+            "channel run could not be started (%s)",
+            logger.safe_error_label(error),
+        )
+        return _start_failed_response()
+    if started is None:
+        return _accepted_response(event)
+
     schedule_ingress_work(
-        observe,
+        lambda: observe(started),
         label="Channel run observation",
         schedule=schedule,
     )
     return _accepted_response(event)
+
+
+def _log_no_run(event: TriggerChannelEvent, decision: TriggerMessageDecision) -> None:
+    """Log a message that started no run; a failed handler logged its own error."""
+    logger.info(
+        "channel message started no run (%sdelivery_id=%s)",
+        "its handler failed, " if decision.type == "failed" else "",
+        logger.log_identifier(event["delivery_id"]),
+    )
 
 
 def _start_failed_response() -> object:
@@ -1040,6 +1093,8 @@ __all__ = [
     "OnlyContinuesThreadFn",
     "ThreadExistsFn",
     "TriggerChannelThread",
+    "TriggerMessageBackground",
     "TriggerMessageDecision",
+    "TriggerMessageRoute",
     "handle_trigger_channel_event_request",
 ]

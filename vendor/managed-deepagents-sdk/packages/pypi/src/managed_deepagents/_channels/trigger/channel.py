@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import re
 import warnings
-from collections.abc import Callable, Mapping
+from collections.abc import Awaitable, Callable, Mapping
 from typing import TYPE_CHECKING, Literal, TypedDict, cast
 
 from pydantic import BaseModel, ConfigDict, Field, StrictBool, field_validator, model_validator
@@ -17,11 +17,18 @@ from managed_deepagents._channels.reactions import (
 )
 
 if TYPE_CHECKING:
+    from managed_deepagents._channels.http.endpoint import EventEndpoint
     from managed_deepagents._channels.manifest import ChannelManifest, JsonObject
-    from managed_deepagents._channels.slack.events import SlackEventCallback, SlackHandlers
+    from managed_deepagents._channels.run_input import ChannelRunResult
+    from managed_deepagents._channels.slack.events import (
+        SlackEvent,
+        SlackEventCallback,
+        SlackHandlers,
+    )
     from managed_deepagents._channels.trigger.http import (
         TriggerChannelThread,
         TriggerMessageDecision,
+        TriggerMessageRoute,
     )
     from managed_deepagents._channels.trigger.types import TriggerChannelMessageEvent
     from managed_deepagents._channels.types import JsonValue
@@ -74,7 +81,7 @@ class TriggerSlackChannel(Channel):
         allow_bot_triggers: bool,
         trigger_mode: SlackTriggerMode | None = None,
         reactions: ReactionChoice = DEFAULT_REACTION_EMOJI,
-        on_event: SlackHandlers | None = None,
+        on_event: Mapping[str, SlackEventCallback] | None = None,
         multitask_strategy: MultitaskStrategy = "enqueue",
     ) -> None:
         self.app = app
@@ -103,7 +110,7 @@ class TriggerSlackChannel(Channel):
 
         async def decide_message(
             event: TriggerChannelMessageEvent, thread: TriggerChannelThread
-        ) -> TriggerMessageDecision | None:
+        ) -> TriggerMessageRoute | None:
             assert on_event is not None  # noqa: S101 - only passed with handlers
             return await _decide_message(on_event, event, thread, name)
 
@@ -170,22 +177,49 @@ async def _is_plain_message(event: TriggerChannelMessageEvent) -> bool:
 
 
 async def _decide_message(
-    on_event: SlackHandlers,
+    handlers: Mapping[str, SlackEventCallback],
     delivery: TriggerChannelMessageEvent,
     thread: TriggerChannelThread,
     channel_name: str,
-) -> TriggerMessageDecision | None:
+) -> TriggerMessageRoute | None:
     """What a message starts, as its kind's handler decides.
 
-    ``None``, so the message itself, without one. The Slack message's blocks
-    and attachments are added to the handler's messages, as to a message's own.
+    ``None``, so the message itself, without one. An endpoint is asked after
+    Trigger Server has its answer.
     """
-    from managed_deepagents._channels.http.provider import run_event_handler  # noqa: PLC0415
-    from managed_deepagents._channels.run_input import normalize_run_input  # noqa: PLC0415
+    from managed_deepagents._channels.http.endpoint import is_endpoint_handler  # noqa: PLC0415
     from managed_deepagents._channels.slack.events import (  # noqa: PLC0415
         read_slack_event,
         slack_thread,
     )
+    from managed_deepagents._channels.trigger.http import (  # noqa: PLC0415
+        TriggerMessageBackground,
+    )
+
+    event = await read_slack_event(delivery)
+    handler = handlers.get(event.key) if event is not None else None
+    if event is None or handler is None:
+        return None
+
+    async def decide() -> TriggerMessageDecision:
+        return await _run_handler(event, lambda: handler(event, slack_thread(thread, channel_name)))
+
+    if is_endpoint_handler(handler):
+        return TriggerMessageBackground(decide)
+    return await decide()
+
+
+async def _run_handler(
+    event: SlackEvent,
+    call: Callable[[], ChannelRunResult | Awaitable[ChannelRunResult | None] | None],
+) -> TriggerMessageDecision:
+    """Run a handler and normalize what it returned into run input.
+
+    The Slack message's blocks and attachments are added to the handler's
+    messages, as to a message's own.
+    """
+    from managed_deepagents._channels.http.provider import run_event_handler  # noqa: PLC0415
+    from managed_deepagents._channels.run_input import normalize_run_input  # noqa: PLC0415
     from managed_deepagents._channels.slack.message_content import (  # noqa: PLC0415
         with_slack_rich_content,
     )
@@ -194,16 +228,7 @@ async def _decide_message(
     )
     from managed_deepagents._log import logger  # noqa: PLC0415
 
-    event = await read_slack_event(delivery)
-    handler = cast("SlackEventCallback | None", on_event.get(event.key)) if event else None
-    if event is None or handler is None:
-        return None
-    outcome = await run_event_handler(
-        "Slack",
-        event.key,
-        event.delivery_id,
-        lambda: handler(event, slack_thread(thread, channel_name)),
-    )
+    outcome = await run_event_handler("Slack", event.key, event.delivery_id, call)
     if outcome.type != "input":
         return TriggerMessageDecision(outcome.type)
     try:
@@ -223,21 +248,6 @@ async def _decide_message(
             ),
         )
     return TriggerMessageDecision("input", run_input)
-
-
-def _check_on_event(on_event: Mapping[str, object] | None) -> None:
-    """Check ``on_event``'s keys and handlers; a key nothing dispatches never runs."""
-    if on_event is None:
-        return
-    if not isinstance(on_event, Mapping):
-        raise TypeError("channels.slack(...) on_event must be a mapping of handlers")
-    from managed_deepagents._channels.http.provider import check_event_keys  # noqa: PLC0415
-    from managed_deepagents._channels.slack.events import SLACK_EVENT_KEYS  # noqa: PLC0415
-
-    check_event_keys("Slack", on_event, SLACK_EVENT_KEYS)
-    for key, handler in on_event.items():
-        if handler is not None and not callable(handler):
-            raise TypeError(f'channels.slack(...) on_event["{key}"] must be callable')
 
 
 class _TriggerSlackArgs(BaseModel):
@@ -360,7 +370,6 @@ def slack_channel(
             },
         )
     """
-    _check_on_event(on_event)
     from managed_deepagents._ingress_runs import MULTITASK_STRATEGIES  # noqa: PLC0415
 
     if multitask_strategy not in MULTITASK_STRATEGIES:
@@ -399,8 +408,36 @@ def slack_channel(
         trigger_mode=parsed.trigger_mode or ("all" if parsed.trigger_on_all_messages else None),
         allow_bot_triggers=parsed.allow_bot_triggers,
         reactions=cast("ReactionChoice", parsed.reactions),
-        on_event=on_event,
+        on_event=_resolve_handlers(on_event),
         multitask_strategy=multitask_strategy,
+    )
+
+
+def _resolve_handlers(on_event: SlackHandlers | None) -> dict[str, SlackEventCallback] | None:
+    """Each endpoint replaced by the handler that asks it; a bad one raises here."""
+    if on_event is None:
+        return None
+    if not isinstance(on_event, Mapping):
+        raise TypeError("channels.slack(...) on_event must be a mapping of handlers")
+    from managed_deepagents._channels.http.provider import (  # noqa: PLC0415
+        check_event_keys,
+        resolve_endpoints,
+    )
+    from managed_deepagents._channels.slack.events import (  # noqa: PLC0415
+        SLACK_EVENT_KEYS,
+        endpoint_fields,
+    )
+
+    # Every key, a ``None`` handler's too, as TypeScript checks them.
+    check_event_keys("Slack", on_event, SLACK_EVENT_KEYS)
+    # By key; the channel calls each only with its own key's events.
+    return resolve_endpoints(
+        "Slack",
+        cast(
+            "Mapping[str, SlackEventCallback | EventEndpoint]",
+            {key: handler for key, handler in on_event.items() if handler is not None},
+        ),
+        endpoint_fields,
     )
 
 

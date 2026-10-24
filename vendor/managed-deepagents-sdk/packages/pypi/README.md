@@ -528,6 +528,19 @@ blocks and attachments are added to the handler's messages, and its files
 still reach `/workspace/attachments/`. Interrupt resumes and prompt responses
 don't go through `on_event`.
 
+A handler may also be an endpoint of your service, a URL or an
+`httpx.Request`: Trigger Server gets its answer first, then MDA asks the
+service what the message starts. See [Asking your service what to
+start](#asking-your-service-what-to-start).
+
+```python
+backend = httpx.Request(
+    "POST", f"{BACKEND_URL}/slack/runs", headers={"x-api-key": os.environ["BACKEND_KEY"]}
+)
+
+channel = channels.slack(on_event={"mention": backend, "directMessage": backend})
+```
+
 `multitask_strategy` is what a message that starts a run does while its
 thread already runs: `enqueue` (the default) waits for the run and starts
 after it, `interrupt` cancels the run, keeping its progress, and starts at
@@ -1006,7 +1019,10 @@ starts the run the service answers with: `{"input", "context"?, "metadata"?,
 A GitHub event also carries what a handler gets beside the payload: its
 `"action"`, `"repository"`, `"sender"` and `"mentions"`, so a service checks them
 as a handler does. These are optional in `GitHubEndpointRequest`, so a receiver
-takes requests from older deployments: read `event.get("mentions", [])`.
+takes requests from older deployments: read `event.get("mentions", [])`. A
+Slack message carries its `"text"`, `"userId"`, `"channelId"`, `"messageTs"`,
+`"threadTs"` and `"files"` the same way, with Slack's own event as `"payload"`;
+`SlackEndpointRequest` types it.
 
 ```python
 backend = httpx.Request(
@@ -1023,8 +1039,8 @@ channel = channels.linear(
 )
 ```
 
-GitHub or Linear gets its answer first, and MDA asks the service in the
-background, so a slow service doesn't time out the delivery. A network error
+GitHub, Linear or Trigger Server gets its answer first, and MDA asks the
+service in the background, so a slow service doesn't time out the delivery. A network error
 before the answer, HTTP 429 or a 5xx is tried again, up to three attempts with
 the same `webhook-id`. Another error status, a redirect, an answer cut off or
 that isn't one of these, more than 10 MB, or no answer within 60 seconds fails the handler, as a
@@ -1053,8 +1069,8 @@ from standardwebhooks import Webhook
 event = Webhook(os.environ["ENDPOINT_SECRET"]).verify(await request.body(), request.headers)
 ```
 
-On the service's side, `LinearEndpointRequest` and `GitHubEndpointRequest`
-type what the channel sends, `{"event": {"key", "deliveryId", "payload"},
+On the service's side, `LinearEndpointRequest`, `GitHubEndpointRequest` and
+`SlackEndpointRequest` type what the channel sends, `{"event": {"key", "deliveryId", "payload"},
 "thread"}`, with the payload typed by the event key, and `EndpointAnswer` types
 an answer, all JSON; answer `None` to start nothing. They are TypedDicts, so
 pydantic validates a request against them, after you verify its signature, or the

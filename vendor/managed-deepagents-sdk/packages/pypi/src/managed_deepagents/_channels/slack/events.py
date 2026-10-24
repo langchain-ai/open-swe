@@ -8,9 +8,19 @@ from __future__ import annotations
 import copy
 from collections.abc import Awaitable, Callable, Mapping
 from dataclasses import dataclass, field
-from typing import TYPE_CHECKING, Literal, TypedDict, cast
+from typing import TYPE_CHECKING, Literal, NotRequired, cast
 
+from typing_extensions import TypedDict
+
+from managed_deepagents._channels.http.endpoint import (
+    EndpointEvent,
+    EndpointRequest,
+    EventEndpoint,
+)
 from managed_deepagents._channels.http.provider import CachedRead
+from managed_deepagents._channels.types import (
+    JsonValue,
+)
 from managed_deepagents._log import logger
 
 if TYPE_CHECKING:
@@ -18,7 +28,6 @@ if TYPE_CHECKING:
     from managed_deepagents._channels.run_input import ChannelRunResult
     from managed_deepagents._channels.trigger.http import TriggerChannelThread
     from managed_deepagents._channels.trigger.types import TriggerChannelMessageEvent
-    from managed_deepagents._channels.types import JsonValue
 
 SlackEventKey = Literal["mention", "directMessage", "message"]
 """Which kind of Slack message reached the agent.
@@ -95,11 +104,78 @@ to start nothing."""
 
 
 class SlackHandlers(TypedDict, total=False):
-    """Handlers that decide what each kind of message starts, by its key."""
+    """Handlers that decide what each kind of message starts, by its key.
 
-    mention: SlackEventCallback
-    directMessage: SlackEventCallback
-    message: SlackEventCallback
+    A handler may also be an endpoint, a URL or an ``httpx.Request`` carrying
+    headers: MDA answers Trigger Server, then POSTs it the message and its
+    thread, and starts the run it answers with.
+    """
+
+    mention: SlackEventCallback | EventEndpoint
+    directMessage: SlackEventCallback | EventEndpoint
+    message: SlackEventCallback | EventEndpoint
+
+
+class SlackEndpointFile(TypedDict):
+    """A ``SlackFile`` as an endpoint is sent it."""
+
+    id: str
+    name: NotRequired[str]
+    mimetype: NotRequired[str]
+    size: NotRequired[int]
+
+
+class SlackEndpointFields(TypedDict, total=False):
+    """A Slack event's fields its endpoints are sent beside its key, delivery ID
+    and payload, as a handler gets them on ``SlackEvent``.
+
+    Each is optional, so a receiver takes requests from deployments that send
+    fewer. ``userId`` is absent for some bot messages.
+    """
+
+    text: str
+    userId: str
+    channelId: str
+    messageTs: str
+    threadTs: str
+    files: list[SlackEndpointFile]
+
+
+class SlackEndpointEvent(EndpointEvent[SlackEventKey, dict[str, JsonValue]], SlackEndpointFields):
+    """The event a Slack channel sends its endpoint: its key, delivery ID and
+    Slack's own event as ``payload``, with the fields of ``SlackEndpointFields``."""
+
+
+SlackEndpointRequest = EndpointRequest[SlackEndpointEvent]
+"""What a Slack channel POSTs an endpoint; validate it with
+``TypeAdapter(SlackEndpointRequest)``."""
+
+
+def endpoint_fields(event: SlackEvent) -> SlackEndpointFields:
+    """The fields of a Slack event its endpoints are sent beside key, delivery ID
+    and payload: the one place they're listed, as TypeScript's
+    ``SLACK_ENDPOINT_EVENT_FIELDS``."""
+    fields: SlackEndpointFields = {
+        "text": event.text,
+        "channelId": event.channel_id,
+        "messageTs": event.message_ts,
+        "threadTs": event.thread_ts,
+        "files": [_endpoint_file(file) for file in event.files],
+    }
+    if event.user_id is not None:
+        fields["userId"] = event.user_id
+    return fields
+
+
+def _endpoint_file(file: SlackFile) -> SlackEndpointFile:
+    sent: SlackEndpointFile = {"id": file.id}
+    if file.name is not None:
+        sent["name"] = file.name
+    if file.mimetype is not None:
+        sent["mimetype"] = file.mimetype
+    if file.size is not None:
+        sent["size"] = file.size
+    return sent
 
 
 def _text(value: object) -> str | None:
@@ -251,11 +327,16 @@ def _slack_file(item: object) -> SlackFile | None:
 __all__ = [
     "SLACK_EVENT_KEYS",
     "SlackChannelThread",
+    "SlackEndpointEvent",
+    "SlackEndpointFields",
+    "SlackEndpointFile",
+    "SlackEndpointRequest",
     "SlackEvent",
     "SlackEventCallback",
     "SlackEventKey",
     "SlackFile",
     "SlackHandlers",
+    "endpoint_fields",
     "read_slack_event",
     "reset_slack_bot_user",
     "slack_event",

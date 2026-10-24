@@ -98,6 +98,7 @@ from managed_deepagents._channels.run_input import (
 from managed_deepagents._channels.runtime import RuntimeChannel
 from managed_deepagents._channels.slack.events import (
     SlackChannelThread,
+    SlackEndpointRequest,
     SlackEvent,
     SlackEventCallback,
     SlackEventKey,
@@ -297,6 +298,7 @@ __all__ = [
     "ScheduleRecord",
     "SkillSelection",
     "SlackChannelThread",
+    "SlackEndpointRequest",
     "SlackEvent",
     "SlackEventCallback",
     "SlackEventKey",

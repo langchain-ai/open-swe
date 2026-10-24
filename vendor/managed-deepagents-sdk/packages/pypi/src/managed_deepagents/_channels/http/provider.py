@@ -136,7 +136,8 @@ def resolve_endpoints(
     """A channel's ``on_event`` with each endpoint replaced by the handler it stands for.
 
     An endpoint is a URL or an ``httpx.Request``; the channel then calls handlers
-    alone. A bad endpoint raises when the channel is declared. The endpoint's
+    alone. A bad endpoint, or a value that is neither a handler nor an endpoint,
+    raises when the channel is declared. The endpoint's
     handler is typed as the channel's own: ``_Event`` and ``_Thread`` carry what it sends,
     and ``fields`` are the channel's own fields of an event it sends beside key,
     delivery ID and payload.
@@ -148,11 +149,14 @@ def resolve_endpoints(
 
     resolved: dict[str, EventCallback[_Event, _Thread]] = {}
     for key, value in handlers.items():
-        resolved[key] = (
-            endpoint_handler(value, f'{provider} on_event["{key}"]', fields)
-            if is_event_endpoint(value)
-            else value
-        )
+        label = f'{provider} on_event["{key}"]'
+        if is_event_endpoint(value):
+            resolved[key] = endpoint_handler(value, label, fields)
+        elif value is None or callable(value):
+            # A ``None`` handler handles nothing, as an absent one.
+            resolved[key] = value
+        else:
+            raise TypeError(f"{label} must be callable, a URL or an httpx.Request")
     return resolved
 
 
