@@ -6,7 +6,7 @@ import { ArrowClockwiseIcon } from "@phosphor-icons/react/dist/ssr/ArrowClockwis
 import { ClockCounterClockwiseIcon } from "@phosphor-icons/react/dist/ssr/ClockCounterClockwise"
 import { HashIcon } from "@phosphor-icons/react/dist/ssr/Hash"
 import { LockSimpleIcon } from "@phosphor-icons/react/dist/ssr/LockSimple"
-import { useMemo, useState } from "react"
+import { useState } from "react"
 
 import type { SlackChannelOption } from "@/lib/api"
 import {
@@ -99,33 +99,23 @@ function useChannelItems(
 ): ChannelItems {
   const directory = useSlackChannelDirectory(true)
   const recentIds = useRecentSlackChannels()
-  const recent = useMemo(() => new Set(recentIds), [recentIds])
+  const recent = new Set(recentIds)
   const [query, setQuery] = useState("")
-  const byId = useMemo(
-    () =>
-      new Map(
-        (directory.data?.channels ?? []).map((channel) => [channel.id, channel])
-      ),
-    [directory.data]
-  )
+  const channels = directory.data?.channels ?? []
+  const byId = new Map(channels.map((channel) => [channel.id, channel]))
   const pasted = normalizeSlackChannelId(query)
-  const items = useMemo(() => {
-    const ids = rankSlackChannels(
-      (directory.data?.channels ?? []).filter(
-        (channel) => !eligible || eligible(channel)
-      ),
-      "",
-      recentIds
-    ).map((channel) => channel.id)
-    const known = new Set(ids)
-    for (const id of [...selected, ...(pasted ? [pasted] : [])]) {
-      if (!known.has(id)) {
-        known.add(id)
-        ids.push(id)
-      }
+  const items = rankSlackChannels(
+    channels.filter((channel) => !eligible || eligible(channel)),
+    "",
+    recentIds
+  ).map((channel) => channel.id)
+  const known = new Set(items)
+  for (const id of [...selected, ...(pasted ? [pasted] : [])]) {
+    if (!known.has(id)) {
+      known.add(id)
+      items.push(id)
     }
-    return ids
-  }, [directory.data, eligible, selected, pasted, recentIds])
+  }
   const label = (id: string) => {
     const channel = byId.get(id)
     return channel ? `#${channel.name}` : id

@@ -1,4 +1,3 @@
-import { useMemo } from "react"
 import { FolderIcon } from "@phosphor-icons/react/dist/ssr/Folder"
 import { LockSimpleIcon } from "@phosphor-icons/react/dist/ssr/LockSimple"
 
@@ -55,32 +54,22 @@ export function RepositoryPicker({
   disabled,
 }: BindingPickerProps) {
   const repos = useRepos()
-  const reposByName = useMemo(
-    () =>
-      new Map(
-        (repos.data?.repositories ?? []).map((repo) => [repo.full_name, repo])
-      ),
-    [repos.data]
+  const repositories = repos.data?.repositories ?? []
+  const reposByName = new Map(
+    repositories.map((repo) => [repo.full_name, repo])
   )
-  const owners = useMemo(
-    () => ownersOf(workspaces, (workspace) => workspace.repos),
-    [workspaces]
-  )
-  const items = useMemo<Array<PickerItem>>(
-    () =>
-      (repos.data?.repositories ?? []).map((repo) => ({
-        id: repo.full_name,
-        label: repo.full_name,
-        meta: `${repo.private ? "Private" : "Public"}${repo.archived ? " archive" : ""}`,
-        icon: repo.private ? (
-          <LockSimpleIcon size={14} weight="regular" />
-        ) : (
-          <FolderIcon size={14} weight="regular" />
-        ),
-        owner: owners.get(repo.full_name.toLowerCase()) ?? null,
-      })),
-    [repos.data, owners]
-  )
+  const owners = ownersOf(workspaces, (workspace) => workspace.repos)
+  const items: Array<PickerItem> = repositories.map((repo) => ({
+    id: repo.full_name,
+    label: repo.full_name,
+    meta: `${repo.private ? "Private" : "Public"}${repo.archived ? " archive" : ""}`,
+    icon: repo.private ? (
+      <LockSimpleIcon size={14} weight="regular" />
+    ) : (
+      <FolderIcon size={14} weight="regular" />
+    ),
+    owner: owners.get(repo.full_name.toLowerCase()) ?? null,
+  }))
   return (
     <OwnershipPicker
       triggerLabel="Choose repositories"
@@ -136,39 +125,35 @@ export function SlackChannelPicker({
 }: BindingPickerProps) {
   const directory = useSlackChannelDirectory(true)
   const recent = useRecentSlackChannels()
-  const owners = useMemo(
-    () => ownersOf(workspaces, (workspace) => workspace.slack_channel_ids),
-    [workspaces]
+  const owners = ownersOf(
+    workspaces,
+    (workspace) => workspace.slack_channel_ids
   )
-  const items = useMemo<Array<PickerItem>>(
-    () =>
-      rankSlackChannels(directory.data?.channels ?? [], "", recent).map(
-        (channel) => ({
-          id: channel.id,
-          label: `#${channel.name}`,
-          meta: [
-            channel.is_private
-              ? "private"
-              : channel.is_ext_shared
-                ? "shared"
-                : "public",
-            channel.num_members === null
-              ? null
-              : `${channel.num_members} members`,
-            recent.includes(channel.id) ? "recently used" : null,
-          ]
-            .filter((part): part is string => part !== null)
-            .join(" · "),
-          icon: <SlackChannelIcon channel={channel} />,
-          owner: owners.get(channel.id.toLowerCase()) ?? null,
-          disabled: !channel.is_member,
-          warning: channel.is_member
-            ? undefined
-            : "Invite Open SWE to this channel, then refresh to select it.",
-        })
-      ),
-    [directory.data, owners, recent]
-  )
+  const items: Array<PickerItem> = rankSlackChannels(
+    directory.data?.channels ?? [],
+    "",
+    recent
+  ).map((channel) => ({
+    id: channel.id,
+    label: `#${channel.name}`,
+    meta: [
+      channel.is_private
+        ? "private"
+        : channel.is_ext_shared
+          ? "shared"
+          : "public",
+      channel.num_members === null ? null : `${channel.num_members} members`,
+      recent.includes(channel.id) ? "recently used" : null,
+    ]
+      .filter((part): part is string => part !== null)
+      .join(" · "),
+    icon: <SlackChannelIcon channel={channel} />,
+    owner: owners.get(channel.id.toLowerCase()) ?? null,
+    disabled: !channel.is_member,
+    warning: channel.is_member
+      ? undefined
+      : "Invite Open SWE to this channel, then refresh to select it.",
+  }))
   return (
     <OwnershipPicker
       triggerLabel="Choose channels"

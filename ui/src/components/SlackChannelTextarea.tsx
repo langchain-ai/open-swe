@@ -1,5 +1,5 @@
 import { Textarea } from "@langchain/macaw-components/Textarea"
-import { useMemo, useRef, useState, type ComponentProps } from "react"
+import { useRef, useState, type ComponentProps } from "react"
 
 import { SlackChannelRow } from "@/components/SlackChannelCombobox"
 import {
@@ -42,17 +42,13 @@ export function SlackChannelTextarea({
     cursor === null ? null : detectSlackChannelTrigger(value, cursor)
   const directory = useSlackChannelDirectory(trigger !== null)
   const recent = useRecentSlackChannels()
-  const matches = useMemo(
-    () =>
-      trigger
-        ? rankSlackChannels(
-            directory.data?.channels ?? [],
-            trigger.query,
-            recent
-          ).slice(0, MAX_SUGGESTIONS)
-        : [],
-    [directory.data, trigger, recent]
-  )
+  const matches = trigger
+    ? rankSlackChannels(
+        directory.data?.channels ?? [],
+        trigger.query,
+        recent
+      ).slice(0, MAX_SUGGESTIONS)
+    : []
   const open =
     trigger !== null && matches.length > 0 && dismissedAt !== trigger.rangeStart
   const active = matches[Math.min(activeIndex, matches.length - 1)]
