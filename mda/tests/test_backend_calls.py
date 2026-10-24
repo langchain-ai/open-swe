@@ -880,6 +880,97 @@ async def test_an_operation_code_mode_calls_is_reported_and_cited_under_its_eval
     assert recorded.content == result.content
 
 
+@pytest.mark.parametrize(
+    "name",
+    [
+        "slack_list_channel_members",
+        "list_threads",
+        "get_thread",
+        "slack_add_reaction",
+        "expedite_pr_approval",
+        "schedule_thread_wakeup",
+        "save_plan",
+        "mcp_homebase_releases_active_0123456789",
+        "mcp_corridor_analyze_plan_0123456789",
+        "mcp_linear_get_issue_0123456789",
+    ],
+)
+async def test_code_mode_exposes_frequent_schemas_and_calls_them_without_search(
+    monkeypatch: pytest.MonkeyPatch, name: str
+) -> None:
+    from agent import _code_mode
+    from langchain.agents.middleware.types import ModelRequest, ModelResponse
+    from langchain_core.tools import StructuredTool
+    from langchain_quickjs import CodeInterpreterMiddleware
+    from langchain_quickjs._prompt import to_camel_case
+    from langchain_quickjs.middleware import REPLState
+
+    monkeypatch.setenv("OPEN_SWE_BACKEND_URL", "https://backend.invalid")
+    backend = OpenSweBackend("secret-token")
+    monkeypatch.setattr("rt.tools.run_id", lambda: "run-1")
+    arguments: list[dict[str, JsonValue]] = []
+
+    async def answer(endpoint: str, body: dict[str, JsonValue]) -> BaseModel:
+        assert endpoint == "operation"
+        arguments.append(body)
+        return OperationResult(content="found it")
+
+    _answering(monkeypatch, backend, answer)
+    parameters: dict[str, JsonValue] = {
+        "type": "object",
+        "properties": {
+            "channel": {"type": "string", "description": "A long parameter explanation."},
+            "limit": {"type": "integer"},
+            "tags": {"type": "array", "items": {"type": "string"}},
+        },
+        "required": ["channel"],
+    }
+    selected = operation_tool(
+        OperationSpec(name=name, description="Find members", parameters=parameters), backend
+    )
+    long_tail = operation_tool(
+        OperationSpec(name="rare_lookup", description="Rare lookup", parameters=parameters), backend
+    )
+    [interpreter] = _code_mode("agent", [selected, long_tail], {}, MagicMock())
+    assert isinstance(interpreter, CodeInterpreterMiddleware)
+    state: REPLState = {"messages": [], "_quickjs_slot_id": "schema-test"}
+    request = ModelRequest(model=FakeListChatModel(responses=["done"]), messages=[], state=state)
+    handler = AsyncMock(return_value=ModelResponse(result=[AIMessage(content="done")]))
+    try:
+        await interpreter.awrap_model_call(request, handler)
+        [rendered] = handler.call_args.args
+        reference = str(rendered.system_message.content)
+        assert f"tools.{to_camel_case(name)}(input: {{" in reference
+        assert "channel: string;" in reference
+        assert "limit?: number;" in reference
+        assert "tags?: string[];" in reference
+        assert "A long parameter explanation." not in reference
+        assert "tools.rareLookup(input: Record<string, unknown>)" in reference
+        assert selected.args_schema == long_tail.args_schema == parameters
+
+        runtime = ToolRuntime(
+            state=state,
+            context=None,
+            config={},
+            stream_writer=lambda event: None,
+            tool_call_id="eval-1",
+            store=None,
+        )
+        [evaluate] = interpreter.tools
+        assert isinstance(evaluate, StructuredTool)
+        assert evaluate.coroutine is not None
+        result = await evaluate.coroutine(
+            runtime=runtime,
+            code=f'console.log(await tools.{to_camel_case(name)}({{channel: "C1", limit: 2}}));',
+        )
+        assert "found it" in str(result.content)
+        assert len(arguments) == 1
+        assert arguments[0]["name"] == name
+        assert arguments[0]["arguments"] == {"channel": "C1", "limit": 2}
+    finally:
+        await interpreter.aafter_agent(state, MagicMock())
+
+
 async def test_a_command_the_guards_refuse_is_recorded_with_their_reason(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
