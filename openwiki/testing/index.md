@@ -1,3 +1,3 @@
 # Files
 
-- [Focused Validation Strategy](overview.md) - Select the narrowest Python, frontend, or Playwright validation that owns an Open SWE change. This guide explains shared fakes, production-boundary coverage, and focused commands.
+- [Testing and Change Validation Strategy](strategy.md) - Choose the narrowest high-signal validation for Open SWE backend, Managed Deep Agents runtime, dashboard, desktop, and end-to-end changes. Covers isolation fixtures, database migrations, endpoint contracts, sandboxes, and real-path E2E boundaries.
