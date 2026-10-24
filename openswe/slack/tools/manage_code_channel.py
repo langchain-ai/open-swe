@@ -108,6 +108,11 @@ async def manage_code_channel(
             try:
                 metadata = thread_metadata(await client.threads.get(thread_id))
             except Exception:
+                logger.warning(
+                    "Could not load the thread to verify its credential scope",
+                    extra={"thread_id": thread_id},
+                    exc_info=True,
+                )
                 return {"success": False, "error": "Cannot verify thread credential scope"}
             if thread_is_private(metadata):
                 return {
@@ -236,6 +241,11 @@ async def _code_channel_title(client: Any, thread_id: str, fallback: str) -> str
     try:
         thread = await client.threads.get(thread_id=thread_id)
     except Exception:  # noqa: BLE001
+        logger.warning(
+            "Could not load the thread title for a code channel",
+            extra={"thread_id": thread_id},
+            exc_info=True,
+        )
         return fallback
     # Only trust metadata written by title generation: a missing title_seed key
     # (e.g. legacy title-only metadata) has no proof of a generated title.
