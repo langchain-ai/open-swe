@@ -38,6 +38,7 @@ from openswe.review.findings import (
     ReviewerSlackThread,
     reviewer_thread_title,
 )
+from openswe.review_scout.launch import ReviewScoutTarget
 from openswe.run_config import Repo
 from openswe.slack.client import GitHubPrRef
 from openswe.source_context import SourceContext
@@ -554,6 +555,28 @@ async def process_github_pr_ready(payload: dict[str, Any]) -> None:
                 "Skipping auto-review of draft PR by %s: review_draft_prs is disabled",
                 author_login or "<unknown>",
             )
+            base_sha = pull_request.get("base", {}).get("sha", "")
+            head_sha = pull_request.get("head", {}).get("sha", "")
+            pr_number = pull_request.get("number")
+            if postgres.configured() and isinstance(pr_number, int) and base_sha and head_sha:
+                target = ReviewScoutTarget(
+                    owner=draft_repo_config["owner"],
+                    repo=draft_repo_config["name"],
+                    pr_number=pr_number,
+                    pr_title=pull_request.get("title", ""),
+                    base_sha=base_sha,
+                    head_sha=head_sha,
+                    workspace_slug=await common.workspace_for_repo_config(draft_repo_config),
+                )
+                try:
+                    if await target.walkthrough() is None:
+                        await target.start()
+                except Exception:
+                    common.logger.warning(
+                        "Could not start draft PR walkthrough",
+                        exc_info=True,
+                        extra=target.log_extra,
+                    )
             return
     # Use source="github" so the reviewer resolver can use the GitHub App token;
     # "github_auto" would fall through to the email-based path, which has no
