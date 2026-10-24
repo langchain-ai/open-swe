@@ -1,8 +1,6 @@
 import { toast } from "sonner"
 
-import { api } from "@/lib/api"
-import { DashboardRequestError } from "@/lib/dashboard-fetch"
-import { getDatadogRum } from "@/lib/datadog"
+import { recordClientError } from "@/lib/clientErrors"
 
 export interface ErrorReport {
   title: string
@@ -10,20 +8,6 @@ export interface ErrorReport {
   mutation?: string
   /** False when the caller already shows the failure inline. */
   showToast?: boolean
-}
-
-/** Field caps enforced by `ClientErrorReport` in openswe/dashboard/client_errors.py. */
-const REPORT_LIMITS = {
-  title: 200,
-  error_message: 2000,
-  mutation: 500,
-  path: 500,
-} as const
-
-function errorId(error: unknown): string {
-  if (error instanceof DashboardRequestError && error.requestId)
-    return error.requestId
-  return `err_${crypto.randomUUID()}`
 }
 
 function errorMessage(error: unknown): string {
@@ -71,9 +55,8 @@ export function reportError({
   mutation,
   showToast = true,
 }: ErrorReport): string {
-  const id = errorId(error)
+  const id = recordClientError({ title, error, mutation })
   const message = errorMessage(error)
-  const status = error instanceof DashboardRequestError ? error.status : null
 
   if (showToast)
     toast.error(title, {
@@ -92,27 +75,5 @@ export function reportError({
       },
     })
 
-  getDatadogRum()?.addError?.(error, {
-    error_id: id,
-    error_title: title,
-    mutation: mutation ?? null,
-    status,
-  })
-
-  api
-    .reportClientError({
-      error_id: id,
-      title: title.slice(0, REPORT_LIMITS.title),
-      error_message: message.slice(0, REPORT_LIMITS.error_message),
-      status,
-      mutation: mutation?.slice(0, REPORT_LIMITS.mutation) ?? null,
-      path: (typeof window === "undefined"
-        ? ""
-        : window.location.pathname
-      ).slice(0, REPORT_LIMITS.path),
-    })
-    .catch((reportFailure: unknown) => {
-      console.warn("Could not report client error", reportFailure)
-    })
   return id
 }
