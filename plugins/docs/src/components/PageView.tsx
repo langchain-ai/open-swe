@@ -28,6 +28,7 @@ import {
 } from "@/components/Comments"
 import { PageEditor } from "@/components/Editor"
 import { useOpenPageTools, useSharedContext } from "@/lib/agent"
+import type { ImageFile } from "@/lib/images"
 import { anchorFor, resolveAnchor, type Highlight } from "@/lib/anchors"
 import { errorMessage } from "@/lib/host"
 import { asLiveMarkdown, useLiveDoc, usePresence } from "@/lib/live"
@@ -463,14 +464,17 @@ export function PageView({
       loaded.clear()
     }
   }, [ref])
-  const loadImage = (imagePath: string) => {
-    let url = images.current.get(imagePath)
+  const loadImage = (image: ImageFile) => {
+    const key = JSON.stringify(image)
+    let url = images.current.get(key)
     if (!url) {
-      url = github
-        .image(imagePath, ref)
+      // Another repository's file loads only if the person shared it too.
+      url = host
+        .github(image.repository ?? repository)
+        .image(image.path, image.ref ?? ref)
         .then((blob) => (blob ? URL.createObjectURL(blob) : null))
         .catch(() => null)
-      images.current.set(imagePath, url)
+      images.current.set(key, url)
     }
     return url
   }

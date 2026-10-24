@@ -41,7 +41,7 @@ describe("pluginShell", () => {
   it("allows the pictures, fonts and media the plugin's policy allows, which its srcdoc inherits", () => {
     const shell = pluginShell("<p></p>", "light", "nonce-1")
     for (const directive of [
-      "img-src data: blob: https://github.com https://*.githubusercontent.com",
+      "img-src data: blob:",
       "font-src data:",
       "media-src data: blob:",
     ]) {
