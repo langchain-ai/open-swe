@@ -454,8 +454,13 @@ test.describe("review page", () => {
       .getByTestId("pending-review-comment")
       .filter({ hasText: edited });
     await expect(pendingCard).toContainText("Pending");
-    const reviewButton = page.getByRole("button", { name: /Review changes/ });
-    await expect(reviewButton).toContainText("1");
+    // Approving is one click; the rest of the review form is behind its caret.
+    await expect(
+      page.getByRole("button", { name: "Approve, 1 pending comment" }),
+    ).toContainText("1");
+    const reviewButton = page.getByRole("button", {
+      name: "Comment or request changes",
+    });
 
     await chatCard(toDiscard).getByRole("button", { name: "Discard" }).click();
     await expect(chatCard(toDiscard)).toContainText("Comment discarded");
@@ -533,12 +538,17 @@ test.describe("review page", () => {
     });
     await card.getByRole("button", { name: "Add to review" }).click();
     await expect(card).toContainText("Added to your review");
-    const reviewButton = page.getByRole("button", { name: /Review changes/ });
-    await expect(reviewButton).toContainText("1");
+    await expect(
+      page.getByRole("button", { name: "Approve, 1 pending comment" }),
+    ).toContainText("1");
 
-    await reviewButton.click();
+    await page
+      .getByRole("button", { name: "Comment or request changes" })
+      .click();
     await page.getByRole("button", { name: "Discard review" }).click();
-    await expect(reviewButton).not.toContainText("1");
+    await expect(
+      page.getByRole("button", { name: "Approve", exact: true }),
+    ).toBeVisible();
     await expect(
       diffColumn(page).getByTestId("pending-review-comment"),
     ).toHaveCount(0);
@@ -566,7 +576,9 @@ test.describe("review page", () => {
       .click();
     await expect(conversation.getByText(comment)).toBeVisible();
 
-    await page.getByRole("button", { name: /Review changes/ }).click();
+    await page
+      .getByRole("button", { name: "Comment or request changes" })
+      .click();
     const verdict = "Approving the constant modules.";
     await page.getByLabel("Review summary").fill(verdict);
     await page.getByRole("radio", { name: /Approve/ }).check();
@@ -576,7 +588,9 @@ test.describe("review page", () => {
     await expect(page.getByLabel("Review summary")).toBeVisible();
     expect((await fakePull(page, pr)).reviews).toHaveLength(0);
     await page.getByRole("button", { name: "Cancel", exact: true }).click();
-    await page.getByRole("button", { name: /Review changes/ }).click();
+    await page
+      .getByRole("button", { name: "Comment or request changes" })
+      .click();
     await page.getByRole("radio", { name: /Approve/ }).check();
     await page.getByRole("radio", { name: /Approve/ }).press("Meta+Enter");
     await expect(conversation.getByText(verdict)).toBeVisible();
