@@ -6,6 +6,7 @@ import pytest
 from deepagents.backends.protocol import ExecuteResponse
 
 from openswe import background_tasks
+from openswe.concierge.records import ConciergeBackground
 from openswe.sandboxes import lifecycle
 from openswe.sandboxes.providers.registry import SandboxGoneError
 from openswe.sandboxes.state import SANDBOX_BACKENDS, SANDBOX_CONNECTIONS, SandboxUnreachableError
@@ -238,3 +239,29 @@ async def test_worker_cannot_attach_to_a_host_outside_its_permissions(
 
     connect.assert_not_awaited()
     assert "worker" not in SANDBOX_BACKENDS
+
+
+@pytest.mark.parametrize("guest", ["paired", "unpaired", "review_guide_copy"])
+async def test_only_a_paired_concierge_background_shares_its_dm_threads_sandbox(
+    shared_sandbox: dict[str, dict[str, object]],
+    monkeypatch: pytest.MonkeyPatch,
+    guest: str,
+) -> None:
+    del shared_sandbox["worker"]["task_id"]
+    if guest != "review_guide_copy":
+        shared_sandbox["worker"]["concierge_background"] = True
+    monkeypatch.setattr(
+        ConciergeBackground, "shares_sandbox", AsyncMock(return_value=guest == "paired")
+    )
+    monkeypatch.setattr(lifecycle, "create_sandbox", AsyncMock(return_value=MagicMock(id="sb-old")))
+    monkeypatch.setattr(lifecycle, "_refresh_github_proxy", AsyncMock())
+
+    if guest == "unpaired":
+        with pytest.raises(PermissionError):
+            await lifecycle.ensure_sandbox_for_thread("worker", workspace_slug="default")
+        assert "worker" not in SANDBOX_BACKENDS
+        return
+    attached = await lifecycle.ensure_sandbox_for_thread("worker", workspace_slug="default")
+    assert attached.id == "sb-old"
+    # A review-guide copy reconnects to its own sandbox id instead of attaching as a guest.
+    assert ("coordinator" in SANDBOX_BACKENDS) == (guest == "paired")
