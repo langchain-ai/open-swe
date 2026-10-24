@@ -169,6 +169,28 @@ pub const PYTHON_BROWSER: Dependency = Dependency {
     version: "==4.3.0",
 };
 
+/// PyPI package behind that browser's `run`, `snapshot` and `screenshot`
+/// tools: Stagehand's facade. Pinned like the package's typing group: it is a
+/// first release, and `browser.py` is written against how it closes and saves.
+pub const PYTHON_BROWSER_TOOLS: Dependency = Dependency {
+    name: "stagehand-middleware",
+    version: "==0.1.0",
+};
+
+/// PyPI packages behind the browser's `record` tool: PyAV encodes the
+/// screencast as H.264 (its wheels bundle FFmpeg and libx264, so deployments
+/// need no system ffmpeg), and Pillow decodes frames and draws clicks.
+pub const PYTHON_BROWSER_RECORDING: [Dependency; 2] = [
+    Dependency {
+        name: "av",
+        version: ">=15,<20",
+    },
+    Dependency {
+        name: "pillow",
+        version: ">=11",
+    },
+];
+
 /// npm package that provides the local LangGraph in-memory dev server.
 ///
 /// The caret range keeps local development on compatible LangGraph CLI updates;
@@ -723,6 +745,32 @@ mod tests {
             .and_then(|rest| rest.strip_suffix('"'))
             .unwrap();
         assert_eq!(PYTHON_BROWSER.version, format!("=={version}"));
+    }
+
+    #[test]
+    fn browser_tools_dependency_matches_the_packages_typing_pin() {
+        // The package's tests and type checks run against the release deployments get.
+        let pyproject = include_str!("../../../packages/pypi/pyproject.toml");
+        let pin = format!(
+            "\"{}{}\"",
+            PYTHON_BROWSER_TOOLS.name, PYTHON_BROWSER_TOOLS.version
+        );
+        assert!(
+            pyproject.contains(&pin),
+            "pyproject.toml does not pin {pin}"
+        );
+    }
+
+    #[test]
+    fn browser_recording_dependencies_match_the_packages_typing_pins() {
+        let pyproject = include_str!("../../../packages/pypi/pyproject.toml");
+        for dep in PYTHON_BROWSER_RECORDING {
+            let pin = format!("\"{}{}\"", dep.name, dep.version);
+            assert!(
+                pyproject.contains(&pin),
+                "pyproject.toml does not pin {pin}"
+            );
+        }
     }
 
     #[test]

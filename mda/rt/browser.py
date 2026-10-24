@@ -15,8 +15,9 @@ from langchain.agents.middleware import AgentState
 from langgraph.runtime import Runtime
 from managed_deepagents import ManagedToolRuntime
 from managed_deepagents.browser import BrowserMiddleware
+from pydantic import JsonValue, TypeAdapter
 from runtime_api.endpoint import call
-from runtime_api.loop import BROWSER, BrowserReport
+from runtime_api.loop import BROWSER, WAKE, BrowserReport, Wake
 
 from rt.backend import OpenSweBackend, run_call
 from rt.tools import run_id
@@ -34,13 +35,29 @@ class ReportedBrowserMiddleware(BrowserMiddleware):
         self._reported: set[tuple[str, bool]] = set()
         self._reporting: dict[tuple[str, bool], asyncio.Task[None]] = {}
 
-    async def abefore_agent(self, state: AgentState, runtime: Runtime) -> None:
+    async def abefore_agent(self, state: AgentState, runtime: Runtime) -> dict[str, object] | None:
+        # MDA's own: a run its handoff notification started ends the handoff.
+        update = await super().abefore_agent(state, runtime)  # ty: ignore[invalid-argument-type]
         with contextlib.suppress(RuntimeError):  # no thread, so no browser
             name = self.browser_name(runtime)
             # Sharing the thread deletes its browser, so each run reports the
             # agent's first browse again; a repeat changes nothing.
             self._reported.discard((name, True))
             self._report_later(name, state, opened=False)
+        return update
+
+    async def _wake(self, runtime: ManagedToolRuntime, message: object) -> None:
+        # Open SWE runs only what its backend signs, so the backend starts the run that
+        # notifies the thread, as it delivers a worker's result. ``_wake`` is MDA's
+        # private method, like ``_share``: it may change with MDA.
+        notification = TypeAdapter(dict[str, JsonValue]).validate_python(message)
+        request = Wake(
+            text=TypeAdapter(str).validate_python(notification["content"]),
+            notification=TypeAdapter(dict[str, JsonValue]).validate_python(
+                notification["mda_notification"]
+            ),
+        )
+        await call(self._backend, WAKE, request)
 
     async def _share(
         self, session: object, name: str, key: str, runtime: ManagedToolRuntime

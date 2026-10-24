@@ -1,2 +1,4 @@
-897 1aa4e62bd39050f986343c68d0beb69805828363 feat(browser): browser use via define_browser
-959 89bfff3ea118ec80da1044da9099e469759ff032 feat(browser): share the thread's sandbox's localhost with its browser
+967 4e89e139cf92d91c10a172a1e09f6e837324bfbd feat(browser): browser use on Stagehand's facade tools, with simple sessions
+985 9aa1755f7e7e43f7c5bd2d5cf99513ab817f1713 feat(browser): share a thread's sandbox localhost with its browser
+1010 c975861836efd446ff9e795b2ec6aa9749896965 feat(browser): record the browser tab as a video
+1016 24789d5fd6b5fac825956ee84b799e66040d9537 feat(browser): browser_handoff hands the browser to the user and notifies the thread when it's back

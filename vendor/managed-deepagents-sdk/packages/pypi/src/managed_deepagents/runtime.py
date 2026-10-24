@@ -103,6 +103,7 @@ from managed_deepagents._identity_runtime import (
 )
 from managed_deepagents._managed_composition import (
     assert_dynamic_memory_selection,
+    snapshot_browser_selection,
     snapshot_managed_composition,
     snapshot_mcp_selection,
     snapshot_memory_selection,
@@ -854,6 +855,10 @@ async def _compile_resolved_managed_agent_async(
     )
     if run_sandbox is not None and sandbox_selection_fingerprint and is_run and sandbox_setup:
         run_sandbox = _inherit_setup_recipe(run_sandbox, sandbox)
+    # Eval builds ship no browser, like no nested sandbox.
+    run_browser = (
+        None if trial_root_dir is not None else _select_run_browser(definition.config, browser)
+    )
     register_channel_messaging(channels or [])
     memory_selected_by_dynamic_resolver = "memory" in definition.config
     run_memory = (
@@ -876,7 +881,7 @@ async def _compile_resolved_managed_agent_async(
         "channels": channels,
         "identity": identity,
         "memory": run_memory,
-        "browser": browser,
+        "browser": run_browser,
         "trial_root_dir": trial_root_dir,
     }
     context_schema = definition.config.get("context_schema")
@@ -966,6 +971,23 @@ def _select_run_sandbox(
     return snapshot_sandbox_selection(config["sandbox"])
 
 
+def _select_run_browser(
+    config: Mapping[str, object],
+    declared: BrowserDefinition | None,
+) -> BrowserDefinition | None:
+    """Keep, disable, or replace ``browser.py``'s browser for this run."""
+    if "browser" not in config:
+        return declared
+    selected = snapshot_browser_selection(config["browser"])
+    if selected is not None and declared is None:
+        msg = (
+            "The agent factory selected a browser, but the project has no browser.py. "
+            "Declare `browser = define_browser()` there so the deployment installs Stagehand."
+        )
+        raise ValueError(msg)
+    return selected
+
+
 def _compile_managed_agent(
     definition: DeepAgentDefinition,
     config: ManagedRunConfig | None = None,
@@ -1004,6 +1026,7 @@ def _compile_managed_agent(
     merged.pop("mcp", None)
     merged.pop("sandbox", None)
     merged.pop("replicate_traces", None)
+    merged.pop("browser", None)
     merged["context_schema"] = context_schema
 
     sandbox_backend = (

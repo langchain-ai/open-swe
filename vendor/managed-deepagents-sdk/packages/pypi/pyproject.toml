@@ -149,6 +149,10 @@ typing = [
     "mcp>=2.2.0,<3",
     # Injected into deployments that use the browser; matches browser.STAGEHAND_VERSION.
     "stagehand==4.3.0",
+    "stagehand-middleware==0.1.0",
+    # Injected alongside them for the browser's `record` tool.
+    "av>=15,<20",
+    "pillow>=11",
 ]
 
 # Dead-code pass. ``ruff`` (F841/F401) catches unused variables and imports and

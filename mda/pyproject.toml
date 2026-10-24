@@ -17,6 +17,11 @@ dependencies = [
     # The vendored SDK's browser installs its extension from this package, so this
     # matches managed_deepagents.browser.STAGEHAND_VERSION.
     "stagehand==4.3.0",
+    # The browser's tools; matches the pin `mda` injects into browser builds.
+    "stagehand-middleware==0.1.0",
+    # The browser's `browser_record` tool encodes with these; matches the pins `mda` injects.
+    "av>=15,<20",
+    "pillow>=11",
     "mcp>=2.2.0",
     "pydantic>=2.11",
     "open-swe-runtime-api",
