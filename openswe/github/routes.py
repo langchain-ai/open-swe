@@ -103,10 +103,19 @@ async def github_webhook(
             )
             return {"status": "ignored", "reason": "repository is not assigned to a workspace"}
 
-    if event_type in {"merge_group", "push", "pull_request", "pull_request_review"}:
+    if event_type == "merge_group":
         queued = await wake_native_queue(payload)
-        if event_type == "merge_group":
-            return {"status": "accepted" if queued else "ignored"}
+        return {"status": "accepted" if queued else "ignored"}
+
+    if event_type in {"push", "pull_request", "pull_request_review"}:
+        try:
+            await wake_native_queue(payload)
+        except Exception:
+            # The minute job recovers missed wakeups without blocking other handlers.
+            common.logger.exception(
+                "Failed to wake native merge queue",
+                extra={"github_delivery": delivery_id, "github_event": event_type},
+            )
 
     issue = payload.get("issue", {})
     is_pull_request_comment = bool(event_type == "issue_comment" and issue.get("pull_request"))
