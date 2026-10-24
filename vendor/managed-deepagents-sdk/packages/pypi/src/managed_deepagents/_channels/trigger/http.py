@@ -309,7 +309,7 @@ async def handle_trigger_channel_event_request(  # noqa: C901, PLR0911
         return _json_response({"error": "invalid channel event"}, status_code=400)
 
     try:
-        user_id = _principal_for_event(
+        user_id = await _principal_for_event(
             event,
             identity_context_key=identity_context_key,
             identity_context_issuer=identity_context_issuer,
@@ -672,7 +672,7 @@ class _MissingIdentityContextError(ValueError):
     """A message event arrived without a Trigger identity_context token."""
 
 
-def _principal_for_event(
+async def _principal_for_event(
     event: TriggerChannelEvent,
     *,
     identity_context_key: IdentityContextKey | None,
@@ -682,7 +682,10 @@ def _principal_for_event(
     raw_identity_context = event.get("identity_context")
     if not isinstance(raw_identity_context, str) or not raw_identity_context.strip():
         raise _MissingIdentityContextError
-    return principal_id_from_identity_context(
+    # PyJWKClient fetches the LangSmith JWKS with blocking urllib; run the
+    # verification off the event loop.
+    return await asyncio.to_thread(
+        principal_id_from_identity_context,
         raw_identity_context,
         key=identity_context_key,
         issuer=identity_context_issuer,
