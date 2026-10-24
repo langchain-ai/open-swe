@@ -166,7 +166,7 @@ def test_connection_tool_pairs_cannot_collide():
         ("example", "a" * 128),
         ("example", "search"),
     ]
-    names = runtime._tool_names(pairs)
-    assert len(set(names.values())) == len(pairs)
-    assert all(len(name) <= 64 for name in names.values())
-    assert names["example", "search"] == "mcp_example_search"
+    names = [runtime._tool_name(*pair) for pair in pairs]
+    assert len(set(names)) == len(pairs)
+    assert all(len(name) <= 64 for name in names)
+    assert names[-1] == "mcp_example_search"
