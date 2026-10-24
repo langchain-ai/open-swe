@@ -4,7 +4,8 @@ request this conversation is about, as the user.
 The comment is on GitHub at once, but only the user sees it until they submit
 their review, which posts every pending comment together; they can edit or
 delete it before then. Use it when the user asks you to add, leave or post a
-review comment. Write the body as the user would, in the first person, without
+review comment. It works only when the user wrote from the pull request's
+review page; anywhere else, draft the comment with `propose_review_comment`. Write the body as the user would, in the first person, without
 mentioning that you wrote it. To point something out to the user alone, use
 `note_on_diff`; to let them vet a comment before it reaches GitHub, use
 `propose_review_comment`.

@@ -48,6 +48,18 @@ async def _add(
         return AddReviewCommentResult(
             added=False, error="only a conversation about a pull request can comment on it"
         )
+    # Only a message the person sent from this PR's review page, where the
+    # comment appears on its line at once; runs from anywhere else could be
+    # steered into it unseen. They can still be drafted with `propose_review_comment`.
+    page = f"https://github.com/{cfg.repo.full_name}/pull/{cfg.pr_number}"
+    if (cfg.review_page_pr_url or "").rstrip("/").lower() != page.lower():
+        return AddReviewCommentResult(
+            added=False,
+            error=(
+                "only works on a message sent from this pull request's review page;"
+                " use propose_review_comment instead"
+            ),
+        )
     try:
         login = await pr_author_login()
     except RuntimeError as exc:
