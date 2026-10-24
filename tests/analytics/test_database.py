@@ -87,6 +87,29 @@ async def test_preview_forgets_revision_whose_script_left_the_tree(deployment_db
         assert set(versions) == set(heads)
 
 
+async def test_preview_reruns_a_branch_it_forgot_over_the_tables_it_left(
+    deployment_db, monkeypatch
+):
+    # While a branch is out of the preview tree, the preview forgets its stamps but keeps
+    # its tables; when the branch returns, its migrations run again over them.
+    monkeypatch.setenv("OPENSWE_ENV", "preview")
+    await postgres.migrate()
+    merge = postgres.load_migrations().get_revision("64588d50fce1")
+    assert merge is not None and isinstance(merge.down_revision, tuple)
+    main_side = merge.down_revision[0]
+    async with postgres.engine().begin() as conn:
+        await conn.execute(
+            text(
+                "UPDATE open_swe.alembic_version SET version_num = :main WHERE version_num = :merge"
+            ),
+            {"main": main_side, "merge": merge.revision},
+        )
+    await postgres.migrate()
+    async with postgres.connection() as conn:
+        versions = set(await conn.scalars(text("SELECT version_num FROM open_swe.alembic_version")))
+        assert merge.revision in versions and main_side not in versions
+
+
 @pytest.mark.parametrize(
     "query",
     ["ssl=require&sslmode=require", "sslmode=require&sslmode=disable"],

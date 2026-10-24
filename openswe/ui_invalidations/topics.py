@@ -111,6 +111,13 @@ class Topic(BaseTopic):
     ANNOUNCEMENTS: ClassVar[Topic]
     """Admin announcements and their delivery progress; admins only."""
 
+    PLUGIN_CHAT_CALLS: ClassVar[KeyedTopic[str]]
+    """Keyed by thread id: the calls that thread's agent made to the tools of the plugin it chats beside."""
+
+    PLUGIN_DOCUMENTS: ClassVar[KeyedTopic[str]]
+    """Keyed: one plugin's documents in one scope, ``<plugin id>/<owner>/<repo>`` for
+    those shared through a repository and ``<plugin id>/user/<user id>`` for one person's."""
+
     async def invalidate(self, conn: Connection | None = None) -> None:
         """Mark this topic stale.
 
@@ -190,6 +197,31 @@ async def _readable_pull_requests(session: Session, keys: set[str]) -> set[str]:
     }
 
 
+async def _readable_plugin_documents(session: Session, keys: set[str]) -> set[str]:
+    # Imported on use: most of the app imports this module, which stays light.
+    from openswe.dashboard.oauth import session_user_id
+    from openswe.plugins.installed import can_read_repository
+    from openswe.users.models import User
+
+    # A key is "<plugin>/<collection>/<scope>"; the scope is "user/<id>" or "owner/repo".
+    scopes = {key: parts[2] for key in keys if len(parts := key.split("/", 2)) == 3}
+    readable: set[str] = set()
+    if any(scope.startswith("user/") for scope in scopes.values()):
+        user = await User.for_session(session_user_id(session), session["sub"])
+        own = f"user/{user.id}" if user is not None else None
+        readable |= {key for key, scope in scopes.items() if scope == own}
+    repositories = sorted({s for s in scopes.values() if not s.startswith("user/")})
+    try:
+        allowed = await asyncio.gather(
+            *(can_read_repository(session["sub"], repo) for repo in repositories)
+        )
+    except Exception:
+        logger.warning("Could not check repositories for plugin invalidations", exc_info=True)
+        return readable
+    visible = {repo for repo, ok in zip(repositories, allowed, strict=True) if ok}
+    return readable | {key for key, scope in scopes.items() if scope in visible}
+
+
 async def _readable_threads(session: Session, thread_ids: set[str]) -> set[str]:
     # Thread summaries import this module.
     from openswe.threads.summary import thread_is_readable
@@ -226,3 +258,5 @@ Topic.THREAD_BACKGROUND_WORK = KeyedTopic(
     "thread-background-work", authorize_keys=_readable_threads
 )
 Topic.ANNOUNCEMENTS = AdminTopic("announcements")
+Topic.PLUGIN_DOCUMENTS = KeyedTopic("plugin-documents", authorize_keys=_readable_plugin_documents)
+Topic.PLUGIN_CHAT_CALLS = KeyedTopic("plugin-chat-calls", authorize_keys=_readable_threads)

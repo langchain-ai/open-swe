@@ -36,7 +36,9 @@ does not know rides in the MDA run's state and comes back with every call.
 """
 
 import base64
+import hashlib
 import inspect
+import json
 import logging
 import time
 from collections.abc import Awaitable, Callable, Mapping, Sequence
@@ -589,7 +591,9 @@ class RunSession:
             )
         client = self._client_tools
         if client is not None and (
-            pending := client.pending_result(request.name, request.request_id)
+            pending := await client.pending_result(
+                request.name, request.request_id, request.arguments
+            )
         ):
             return _operation_result(pending, request.request_id)
         events: list[object] = []
@@ -969,10 +973,20 @@ class RemoteGraph:
             configurable["run_id"] = run_id
         return {**config, "configurable": configurable}
 
+    @staticmethod
+    def _key(run: RemoteRun, run_id: str | None) -> tuple[str, str | None]:
+        # Hooks that name no run, such as the catalog, serve all of a thread's runs,
+        # except that a plugin chat's tools can change from one run to the next.
+        chat = run.configurable.get("plugin_chat")
+        if run_id or chat is None:
+            return (run.thread_id, run_id)
+        tools = hashlib.sha256(json.dumps(chat, sort_keys=True).encode()).hexdigest()
+        return (run.thread_id, f"plugin-tools:{tools[:16]}")
+
     async def session(
         self, run: RemoteRun, run_id: str | None, *, fresh: bool = False
     ) -> RunSession:
-        key = (run.thread_id, run_id)
+        key = self._key(run, run_id)
         cached = self._sessions.get(key)
         if not fresh and cached is not None and time.monotonic() < cached.expires_at:
             return cached
@@ -994,7 +1008,7 @@ class RemoteGraph:
         return session
 
     def end(self, run: RemoteRun, run_id: str | None) -> None:
-        self._sessions.pop((run.thread_id, run_id), None)
+        self._sessions.pop(self._key(run, run_id), None)
 
     async def api(self, run: RemoteRun, endpoint: str, raw: JsonValue) -> JsonValue:
         """Answer one call the MDA run makes (``runtime_api``), as the session of its run."""
