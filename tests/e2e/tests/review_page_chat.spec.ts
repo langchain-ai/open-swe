@@ -138,7 +138,10 @@ test("links to the reviewer trace only when one is available", async ({
   });
 
   await openReview(page, pr);
-  await page.getByRole("button", { name: "More", exact: true }).click();
+  await page
+    .locator("header")
+    .getByRole("button", { name: "More", exact: true })
+    .click();
   const link = page.getByRole("menuitem", { name: "Open reviewer trace" });
   await expect(link).toHaveAttribute("href", traceUrl);
   await expect(link).toHaveAttribute("target", "_blank");
@@ -146,7 +149,10 @@ test("links to the reviewer trace only when one is available", async ({
 
   trace = null;
   await page.reload();
-  await page.getByRole("button", { name: "More", exact: true }).click();
+  await page
+    .locator("header")
+    .getByRole("button", { name: "More", exact: true })
+    .click();
   await expect(link).toHaveCount(0);
   await expect(
     page.getByRole("menuitem", { name: "Open on GitHub" }),
