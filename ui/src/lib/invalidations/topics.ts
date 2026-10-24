@@ -15,6 +15,7 @@ type KeyedTopic =
   | "thread-background-work"
   | "plugin-documents"
   | "plugin-chat-calls"
+  | "app-previews"
 
 export type InvalidationTopic = string
 

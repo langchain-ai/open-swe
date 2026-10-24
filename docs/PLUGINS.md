@@ -1,6 +1,8 @@
-# Building Web Plugins
+# Building Web Apps
 
-A plugin is a web app that people install from a GitHub repository. It gets an entry in the web UI's sidebar and opens full screen there. It runs in a sandboxed frame with no network access and reaches Open SWE only through the web UI's plugin API, acting as the person using it and never beyond what they allowed. A plugin ships no backend code.
+An app (a plugin) is one self-contained HTML file published to Open SWE. People add it to their own web UI, where it gets an entry in the sidebar and opens full screen. It runs in a sandboxed frame with no network access and reaches Open SWE only through the web UI's plugin API, acting as the person using it and never beyond what they allowed. An app ships no backend code.
+
+Most apps are built by an agent, for one person and one purpose, in a thread's sandbox: the agent previews each build beside the thread, the person uses it and asks for changes there, and either of them keeps it once it's right. Nothing has to be committed anywhere.
 
 [`plugins/docs`](../plugins/docs) is a complete plugin: Markdown pages in a repository, edited together live and published as pull requests. Read it alongside this guide.
 
@@ -18,81 +20,47 @@ The web UI hands your document one end of a `MessageChannel` and talks to it ove
 
 Each scoped thing you open, such as a collection, a repository or a live room, is its own capability on the web UI's side. The SDK reuses one per collection or repository, and leaving a room releases it. Everything is released when the frame goes away. Each frame has an allowance: 16 requests running at once with up to 256 waiting, 3,000 requests a minute, 256 capabilities held at once, and 512 undelivered events per listener (a listener that far behind is dropped). Past it, requests fail with status 429.
 
-## Repository layout
+## Apps, versions and installs
 
-```text
-my-plugin/
-├── .openswe-plugin/
-│   └── plugin.json     # the manifest
-├── .github/workflows/
-│   └── plugin.yml      # builds and publishes the plugin
-├── src/
-└── package.json        # `build` writes the manifest's entry, e.g. bundle/index.html
-```
+- **An app** belongs to whoever published it, under its manifest's `name`. Publishing a bundle with the same name makes the app's next version. It is the owner's alone until they list it, in **Settings → Apps**, for anyone in this Open SWE to add.
+- **A version** is one immutable build: the bundle and the manifest inside it. Where it was built, such as a repository and commit or a thread, is kept only to show. Open SWE keeps every version someone runs, the newest five releases besides, and each thread's newest preview.
+- **An install** is one person adding an app to their sidebar, pinned to a version. It moves only when they press **Update**, and a version asking for more permissions waits for them to approve them. Nobody installs for anyone else.
+- **A preview** is the build an agent runs beside its thread. Each preview replaces the one before; it never reaches the sidebar until someone keeps it.
 
-The built UI is never committed, and nothing is built on Open SWE's servers. A GitHub Actions workflow builds the plugin on each push and publishes the build as a release asset; installs read it from there:
+## Publishing
 
-```yaml
-# .github/workflows/plugin.yml
-name: Plugin
-on:
-  push:
-  workflow_dispatch:
-  delete:
-permissions:
-  contents: write
-jobs:
-  plugin:
-    uses: langchain-ai/open-swe/.github/workflows/openswe-plugin.yml@main
-    with:
-      install: npm ci          # once, at the repository root
-      build: npm run build     # in each plugin's directory
-```
+An agent in a thread builds the bundle in its sandbox and calls:
 
-The newest build of each branch or tag is the asset `<name>-<commit>.html` on a release tagged `openswe-plugin/<name>/<ref>`, a pre-release for branches. Each build replaces the last, and deleting a branch deletes its releases. An install takes the newest build of the ref it follows and pins the commit that build came from, reading the manifest at that commit too. Anyone who can push to the repository can publish a build, the same people who could change its code.
+- `preview_app(bundle_path)` to run the build beside the thread, in the thread's **App** panel. The first build, and any build asking for new permissions, waits for the person to approve them there.
+- `publish_app(bundle_path)` to release it as the app's next version. It lands in the person's sidebar when it asks for nothing they haven't approved for this app.
 
-One repository can offer several plugins with `.openswe-plugin/marketplace.json` (the same layout as Claude Code plugin marketplaces):
+From the **App** panel the person chats with the agent in the same thread. Their messages carry the app's tools and the context it shares, as in the [agent dock](#agent), and **Add to sidebar** releases the running build.
 
-```json
-{
-  "name": "acme-plugins",
-  "owner": { "name": "Acme" },
-  "plugins": [
-    { "name": "docs", "source": "./plugins/docs" },
-    { "name": "board", "source": { "source": "github", "repo": "acme/board", "ref": "v2" } },
-    {
-      "name": "notes",
-      "source": { "source": "git-subdir", "url": "acme/tools", "path": "notes", "sha": "4f2c…" }
-    }
-  ]
-}
-```
-
-A source is a directory in the same repository, another repository (`github`, with an optional `ref` or `sha`), or a directory of another repository (`git-subdir`).
+Outside a thread, upload the built `.html` file in **Settings → Apps**, or post it as the body of `POST /dashboard/api/plugins/apps` with a session, optionally with `repository`, `ref` and `commit` query parameters to show where it came from.
 
 ## The manifest
 
-`.openswe-plugin/plugin.json`:
+The manifest is a JSON script inside the bundle, read when a version is published:
 
-```json
+```html
+<script type="application/openswe-plugin+json">
 {
   "name": "docs",
   "displayName": "Docs",
   "version": "0.3.0",
   "description": "Pages over the Markdown in your repositories.",
-  "entry": "bundle/index.html",
   "sidebar": { "label": "Docs", "icon": "file-text" },
   "permissions": ["storage", "realtime", "github:read", "github:write", "agent"]
 }
+</script>
 ```
 
 | Field | Rules |
 | --- | --- |
-| `name` | Lowercase letters, digits and `-`, at most 48 characters. It sets the plugin's URL, `/agents/plugins/<name>`, and must be unique for each person. |
+| `name` | Lowercase letters, digits and `-`, at most 48 characters. It names the app among its owner's, sets its URL, `/agents/plugins/<name>`, and must be unique in each person's sidebar. |
 | `displayName` | At most 48 characters. |
 | `version` | Free text, at most 32 characters. It is shown to people, not compared. |
 | `description` | Optional, at most 280 characters. |
-| `entry` | Where the build writes the UI, relative to the plugin directory. The plugin workflow publishes that file. |
 | `sidebar.label` | At most 24 characters. |
 | `sidebar.icon` | One of `puzzle-piece`, `notebook`, `file-text`, `book-open`, `kanban`, `chart-bar`, `chat-circle`, `calendar`, `lightbulb`. |
 | `permissions` | What the plugin may ask for; see below. |
@@ -108,11 +76,11 @@ A source is a directory in the same repository, another repository (`github`, wi
 | `github:write` | create branches, commit files and open pull requests (also allows reads) |
 | `agent` | an agent the person chats with in a dock beside the plugin, with tools the plugin provides |
 
-The person approves these permissions when they install. **Update** re-reads the plugin's ref. If the new commit asks for more permissions, nothing changes until the person approves them. A call outside the approved set fails with status 403.
+The person approves these permissions when they add the app. If a newer version asks for more, the install stays where it is until they approve them. A call outside the approved set fails with status 403.
 
 ### Repositories
 
-A plugin reaches no repository until the person shares one with it, and grants are per person. When an admin installs a plugin for everyone, each person still picks their own repositories.
+A plugin reaches no repository until the person shares one with it, and each install has its own grants.
 
 Ask for one with the picker the web UI draws:
 
@@ -128,11 +96,11 @@ const shared = await host.repositories.list()                   // everything sh
 await host.repositories.pick({ suggested: ["acme/app"] })
 ```
 
-A call naming a repository the person hasn't shared, or can no longer read, fails with status 403. People can stop sharing a repository in **Settings → Plugins** at any time, so treat a 403 as a cue to ask again rather than as a crash.
+A call naming a repository the person hasn't shared, or can no longer read, fails with status 403. People can stop sharing a repository in **Settings → Apps** at any time, so treat a 403 as a cue to ask again rather than as a crash.
 
 ## The SDK
 
-`@openswe/plugin-sdk` lives in [`plugins/sdk`](../plugins/sdk) and is not published to npm yet. Inside this repository, depend on it as `"@openswe/plugin-sdk": "workspace:*"`.
+`@openswe/plugin-sdk` lives in [`plugins/sdk`](../plugins/sdk) and is not published to npm yet. Inside this repository, depend on it as `"@openswe/plugin-sdk": "workspace:*"`; elsewhere, check out `plugins/sdk` and depend on it by path.
 
 ### Connecting
 
@@ -266,7 +234,7 @@ stop() // when you no longer show them
 - **Keys:** up to 200 of `A–Z a–z 0–9 . _ : @ / -`, with no empty, `.` or `..` path segment.
 - **Size:** a document is at most 256 KB as JSON.
 
-Data belongs to the plugin's source, its repository and directory. Updating keeps it. A plugin with the same name installed from another source never sees it.
+Data belongs to the app, across its versions and everyone's installs of it. Another owner's app of the same name never sees it.
 
 ### GitHub
 
@@ -385,7 +353,7 @@ A failed request rejects with `HostError`, which carries `message` and an HTTP-l
 
 ## Building the bundle
 
-The build must write the manifest's `entry` as one self-contained HTML file: every script, stylesheet and font inline. It must be at most 64 MB and contain no NUL characters (escape them as `\u0000`). Any build that emits a single file works. Docs builds a TanStack Start SPA with Vite, then [`scripts/inline-bundle.mjs`](../plugins/docs/scripts/inline-bundle.mjs) folds the output into `bundle/index.html`, keeping only the Latin font subsets:
+The bundle is one self-contained HTML file: every script, stylesheet and font inline, with the manifest script inside. It must be at most 64 MB and contain no NUL characters (escape them as `\u0000`). Any build that emits a single file works, such as Vite with `vite-plugin-singlefile`. Docs builds a TanStack Start SPA with Vite, then [`scripts/inline-bundle.mjs`](../plugins/docs/scripts/inline-bundle.mjs) folds the output into `bundle/index.html`, keeping only the Latin font subsets, and embeds [`manifest.json`](../plugins/docs/manifest.json):
 
 ```bash
 pnpm --filter openswe-plugin-docs run build
@@ -393,15 +361,6 @@ pnpm --filter openswe-plugin-docs run build
 
 ## Trying it
 
-Your plugin only runs inside the web UI: outside the frame, `connect()` waits forever. To try a change:
+Your app only runs inside the web UI: outside the frame, `connect()` waits forever. In a thread, have the agent call `preview_app` after each build. Elsewhere, upload each build in **Settings → Apps** and press **Update** on your install. A local web UI works the same way; [local development](DEVELOPMENT.md) covers running one.
 
-1. Push your change to a branch and wait for the plugin workflow to publish its build, usually a minute or two. Run the workflow by hand for a branch it hasn't built yet.
-2. In **Settings → Plugins**, enter your repository, its plugin directory if it has one, and the branch, then press **Find plugins** and **Install**.
-3. Open the plugin from the sidebar.
-4. After the next build, press **Update** to move the install to it.
-
-A local web UI works the same way; [local development](DEVELOPMENT.md) covers running one. Installing reads the build from GitHub either way.
-
-## Shipping it
-
-People install from the repository's default branch, or from a branch or tag they name, so the workflow must have built that ref. A marketplace that points at another repository names a branch or tag there, not a commit. An install stays on its build until someone presses **Update**. Anyone can install a plugin for themselves; admins can also install one for everyone. Bump `version` with each release so people can tell what they run.
+Bump `version` with each release so people can tell what they run.

@@ -1,28 +1,29 @@
 name: Plugins
 
-# Builds the plugins this repository's marketplace lists (`.openswe-plugin/marketplace.json`)
-# and publishes them for installs; see openswe-plugin.yml.
+# Checks the apps in plugins/ and builds each into the one HTML file published to Open SWE.
 
 on:
-  push:
-    branches: ["**"]
+  pull_request:
     paths:
       - "plugins/**"
-      - ".openswe-plugin/**"
       - "ui/vendor/macaw/**"
       - "pnpm-lock.yaml"
       - "pnpm-workspace.yaml"
       - ".github/workflows/plugins.yml"
-      - ".github/workflows/openswe-plugin.yml"
-  workflow_dispatch:
-  delete:
 
 permissions:
-  contents: write
+  contents: read
 
 jobs:
-  plugins:
-    uses: ./.github/workflows/openswe-plugin.yml
-    with:
-      install: pnpm install --frozen-lockfile --filter "{./plugins/**}..."
-      build: pnpm run build
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7.0.1
+      - uses: actions/setup-node@v7.0.0
+        with:
+          node-version: 24
+      - run: corepack enable
+      - run: pnpm install --frozen-lockfile --filter "{./plugins/**}..."
+      - run: pnpm --filter "./plugins/**" run --if-present typecheck
+      - run: pnpm --filter "./plugins/**" run --if-present test
+      - run: pnpm --filter "./plugins/**" run --if-present build

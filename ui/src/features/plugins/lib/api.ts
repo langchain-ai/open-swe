@@ -36,46 +36,58 @@ export interface PluginManifest {
   displayName: string
   version: string
   description: string
-  entry: string
   sidebar: { label: string; icon: SidebarIcon }
   permissions: Array<PluginPermission>
 }
 
-export interface PluginSource {
-  repository: string
-  path: string
-  ref: string | null
+/** One immutable build of an app. */
+export interface AppVersion {
+  id: string
+  number: number
+  manifest: PluginManifest
+  /** Where it was built (repository, commit, thread), as its publisher said. */
+  origin: Record<string, string>
+  preview: boolean
+  created_at: string | null
+}
+
+/** An app the viewer may add: their own, or one someone listed. */
+export interface App {
+  id: string
+  name: string
+  mine: boolean
+  listed: boolean
+  /** Its newest release; none while it has only previews. */
+  latest: AppVersion | null
 }
 
 export interface InstalledPlugin {
   id: string
-  /** Shared by every install of the same source; keys its documents' topics. */
+  /** The app's id, shared by every install of it; keys its documents' topics. */
   plugin_id: string
   name: string
   manifest: PluginManifest
-  source: PluginSource
-  commit_sha: string
-  scope: "user" | "organization"
+  version: AppVersion
+  /** Whether the viewer publishes the app. */
+  mine: boolean
   /** The repositories the viewer shared with it. */
   repositories: Array<string>
   installed_at: string | null
 }
 
-export interface CatalogItem {
-  manifest: PluginManifest
-  source: PluginSource
+/** The app an agent builds in a thread, as it runs beside it. */
+export interface AppPreview {
+  running: InstalledPlugin | null
+  /** A newer build asking for permissions the viewer has not approved. */
+  waiting: AppVersion | null
 }
 
 export interface InstallRequest {
-  repository: string
-  path: string
-  ref: string | null
-  scope: "user" | "organization"
-  name: string
+  version: string
   permissions: Array<PluginPermission>
 }
 
-/** The permissions a newer commit asks for beyond the approved ones, from a 409. */
+/** The permissions a version asks for beyond the approved ones, from a 409. */
 export function unapprovedPermissions(
   error: unknown
 ): Array<PluginPermission> | null {
@@ -232,19 +244,39 @@ export function roomsStreamUrl(
 
 export const pluginsApi = {
   list: () => agentsRequest<Array<InstalledPlugin>>("/plugins"),
-  catalog: (source: PluginSource) =>
-    agentsRequest<Array<CatalogItem>>(
-      `/plugins/catalog${query({ ...source })}`
-    ),
+  apps: () => agentsRequest<Array<App>>("/plugins/apps"),
+  publish: (html: string) =>
+    agentsRequest<AppVersion>("/plugins/apps", {
+      method: "POST",
+      headers: { "Content-Type": "text/html" },
+      body: html,
+    }),
+  setListed: (appId: string, listed: boolean) =>
+    agentsRequest<void>(`/plugins/apps/${segment(appId)}`, {
+      method: "PATCH",
+      ...json({ listed }),
+    }),
   install: (body: InstallRequest) =>
     agentsRequest<InstalledPlugin>("/plugins", {
       method: "POST",
       ...json(body),
     }),
-  upgrade: (id: string, permissions: Array<PluginPermission>) =>
+  upgrade: (id: string, body: InstallRequest) =>
     agentsRequest<InstalledPlugin>(`${plugin(id)}/upgrade`, {
       method: "POST",
-      ...json({ permissions }),
+      ...json(body),
+    }),
+  preview: (threadId: string) =>
+    agentsRequest<AppPreview>(`/plugins/previews/${segment(threadId)}`),
+  releasePreview: (threadId: string) =>
+    agentsRequest<InstalledPlugin>(
+      `/plugins/previews/${segment(threadId)}/release`,
+      { method: "POST" }
+    ),
+  approvePreview: (threadId: string, body: InstallRequest) =>
+    agentsRequest<AppPreview>(`/plugins/previews/${segment(threadId)}`, {
+      method: "POST",
+      ...json(body),
     }),
   share: (id: string, repositories: Array<string>) =>
     agentsRequest<InstalledPlugin>(`${plugin(id)}/repositories`, {

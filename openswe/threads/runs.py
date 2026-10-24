@@ -64,11 +64,11 @@ from openswe.threads.moves import SANDBOX_HANDOFF_SYSTEM, SANDBOX_MOVED_KEY, San
 from openswe.threads.principals import STARTED_BY_ID, STARTED_BY_NAME, Principal, ThreadType
 from openswe.threads.summary import (
     DASHBOARD_SOURCE,
-    PLUGIN_CHAT_KEY,
     TRANSCRIPT_VERSION,
     _is_thread_resolved,
     _now_ms,
     _parse_repo,
+    chats_beside_plugin,
     repo_config_from_metadata,
     thread_source,
 )
@@ -415,7 +415,7 @@ async def _build_dashboard_configurable(
         # that still read it from the run config keep working.
         configurable["workspace"] = workspace
         configurable["environment"] = workspace
-    if plugin_tools and metadata.get(PLUGIN_CHAT_KEY):
+    if plugin_tools and chats_beside_plugin(metadata):
         chat = await PluginChat.run_config(thread_id)
         if chat is not None:
             configurable["plugin_chat"] = chat.model_dump(mode="json")
@@ -842,7 +842,7 @@ def _plugin_context(
     """
     context = client_configurable.get("plugin_context")
     if (
-        not metadata.get(PLUGIN_CHAT_KEY)
+        not chats_beside_plugin(metadata)
         or client_configurable.get("plugin_dock") is not True
         or not isinstance(context, str)
         or not context.strip()
@@ -929,7 +929,7 @@ async def _enrich_run_start_command(
     # that waited for them reach the agent with their message.
     held_results: list[dict[str, str]] = (
         await PluginChat.person_wrote(thread_id)
-        if metadata.get(PLUGIN_CHAT_KEY) and not offloading
+        if chats_beside_plugin(metadata) and not offloading
         else []
     )
     context_messages, context_attachments = _plugin_context(metadata, client_configurable)

@@ -13,12 +13,25 @@ Plugins no longer start threads of their own, so ``plugin_thread`` and the
 ``threads`` permission go.
 """
 
+import sqlalchemy as sa
 from alembic import op
 
 revision = "85c030d23f89"
 down_revision = "90b7fdb855a7"
 branch_labels = None
 depends_on = None
+
+
+def _has_column(table: str, column: str) -> bool:
+    return bool(
+        op.get_bind().scalar(
+            sa.text(
+                "SELECT EXISTS (SELECT 1 FROM information_schema.columns"
+                " WHERE table_schema = current_schema() AND table_name = :t AND column_name = :c)"
+            ),
+            {"t": table, "c": column},
+        )
+    )
 
 
 def upgrade() -> None:
@@ -65,11 +78,14 @@ def upgrade() -> None:
     op.execute("DROP TABLE IF EXISTS plugin_thread")
     # ``agent`` reaches further than approving each thread did, so an install
     # that had ``threads`` loses it and asks for ``agent`` on its next update.
-    op.execute("""
-        UPDATE plugin_installation
-        SET manifest = jsonb_set(manifest, '{permissions}', (manifest -> 'permissions') - 'threads')
-        WHERE manifest -> 'permissions' ? 'threads'
-    """)
+    if _has_column("plugin_installation", "manifest"):
+        op.execute("""
+            UPDATE plugin_installation
+            SET manifest = jsonb_set(
+                manifest, '{permissions}', (manifest -> 'permissions') - 'threads'
+            )
+            WHERE manifest -> 'permissions' ? 'threads'
+        """)
 
 
 def downgrade() -> None:

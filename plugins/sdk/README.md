@@ -2,34 +2,31 @@
 
 Build web plugins for [Open SWE](https://github.com/langchain-ai/open-swe).
 
-A plugin is a web app in a GitHub repository. Open SWE runs it full screen from
-its sidebar, in a sandboxed frame whose policy blocks its own requests:
-everything it does goes through the dashboard, as the person using it, within the permissions they
-approved when they installed it.
+An app (a plugin) is one self-contained HTML file published to Open SWE, most
+often by an agent that built it in a thread. People add it to their own
+sidebar, where it runs full screen in a sandboxed frame whose policy blocks its
+own requests: everything it does goes through the dashboard, as the person
+using it, within the permissions they approved when they added it.
 
-## Layout
+## The bundle
 
-```
-my-plugin/
-  .openswe-plugin/plugin.json   # the manifest
-  package.json                  # `build` writes the entry: one self-contained HTML file
-```
+Build everything into one HTML file, scripts, styles and fonts inlined, and
+embed the manifest in it:
 
-A repository can list several plugins in `.openswe-plugin/marketplace.json`.
-Never commit the build: the Open SWE plugin workflow
-(`langchain-ai/open-swe/.github/workflows/openswe-plugin.yml`) builds each push
-and publishes it as a release asset, which installs read.
-
-```json
+```html
+<script type="application/openswe-plugin+json">
 {
   "name": "docs",
   "displayName": "Docs",
   "version": "0.1.0",
-  "entry": "bundle/index.html",
   "sidebar": { "label": "Docs", "icon": "file-text" },
   "permissions": ["storage", "realtime", "github:read", "github:write", "agent"]
 }
+</script>
 ```
+
+An agent previews a build beside its thread with `preview_app` and releases it
+with `publish_app`; anyone can upload one in **Settings → Apps**.
 
 | Permission | Lets the plugin |
 | --- | --- |

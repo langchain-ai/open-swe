@@ -1,26 +1,26 @@
-"""PostgreSQL regressions for what keeps plugins inside the access they were given."""
+"""PostgreSQL regressions for what keeps apps inside the access they were given."""
 
-from dataclasses import replace
+import json
 from datetime import timedelta
-from typing import cast
 from uuid import UUID
 
 import pytest
 from sqlalchemy import text
 
 from openswe.database import postgres
-from openswe.github.http import GitHubClient, Release, ReleaseAsset
-from openswe.github.repo_names import RepoFullName
 from openswe.openai_responses.client_tools import ClientToolSpec
 from openswe.plugins import installed as installed_module
 from openswe.plugins import records as records_module
 from openswe.plugins.installed import InstalledPlugin, PluginPermissionDenied, RepositoryNotGranted
-from openswe.plugins.manifest import PluginManifest, PluginPermission
+from openswe.plugins.manifest import PluginPermission
 from openswe.plugins.records import (
+    AppNotFound,
     Cursor,
     DocumentQuery,
     DocumentScope,
     Installation,
+    InstallationNotFound,
+    PluginApps,
     PluginChat,
     PluginChats,
     PluginDocuments,
@@ -28,7 +28,6 @@ from openswe.plugins.records import (
     PluginNameTaken,
 )
 from openswe.plugins.rooms import Room
-from openswe.plugins.source import PluginPackage, PluginSource, PluginSourceError
 from openswe.ui_invalidations.topics import _readable_plugin_documents
 from openswe.users import User
 
@@ -41,26 +40,23 @@ def _authorized_logins(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("ALLOWED_GITHUB_ORGS", "")
 
 
-def _package(
-    repository: str, name: str = "docs", permissions: list[str] | None = None
-) -> PluginPackage:
-    manifest = PluginManifest.model_validate(
-        {
-            "name": name,
-            "displayName": "Docs",
-            "version": "1.0.0",
-            "entry": "bundle/index.html",
-            "sidebar": {"label": "Docs"},
-            "permissions": permissions if permissions is not None else ["storage"],
-        }
-    )
-    return PluginPackage(
-        source=PluginSource(RepoFullName(repository)),
-        ref="main",
-        commit_sha="a" * 40,
-        manifest=manifest,
-        html="<p>docs</p>",
-    )
+def _bundle(
+    name: str = "docs", permissions: list[str] | None = None, body: str = "<p>docs</p>"
+) -> str:
+    manifest = {
+        "name": name,
+        "displayName": "Docs",
+        "version": "1.0.0",
+        "sidebar": {"label": "Docs"},
+        "permissions": permissions if permissions is not None else ["storage"],
+    }
+    return f'<script type="application/openswe-plugin+json">{json.dumps(manifest)}</script>{body}'
+
+
+async def _install(owner: UUID, html: str | None = None) -> UUID:
+    """Publish ``html`` as ``owner``'s app and add it to their web UI."""
+    version = await PluginApps.publish(owner, html or _bundle(), origin={})
+    return await PluginInstallations.install(version, user_id=owner)
 
 
 async def _person(login: str, external_id: str) -> UUID:
@@ -69,9 +65,9 @@ async def _person(login: str, external_id: str) -> UUID:
 
 async def test_documents_stay_in_their_plugin_and_scope() -> None:
     ada, bob = await _person("ada", "1"), await _person("bob", "2")
-    first = await PluginInstallations.install(_package("acme/docs"), user_id=ada, by=ada)
-    # The same name from another repository is another plugin with its own data.
-    impostor = await PluginInstallations.install(_package("evil/docs"), user_id=bob, by=bob)
+    first = await _install(ada)
+    # The same name published by someone else is another app with its own data.
+    impostor = await _install(bob)
     docs = PluginDocuments((await PluginInstallations.get(first, ada)).plugin)
     other = PluginDocuments((await PluginInstallations.get(impostor, bob)).plugin)
     shared = DocumentScope(repository="acme/app")
@@ -89,7 +85,7 @@ async def test_documents_stay_in_their_plugin_and_scope() -> None:
 
 async def test_documents_come_back_ordered_and_bounded() -> None:
     ada = await _person("ada", "1")
-    installation = await PluginInstallations.install(_package("acme/docs"), user_id=ada, by=ada)
+    installation = await _install(ada)
     docs = PluginDocuments((await PluginInstallations.get(installation, ada)).plugin)
     mine = DocumentScope(user_id=ada)
     for key, document in {
@@ -131,9 +127,7 @@ async def test_documents_come_back_ordered_and_bounded() -> None:
 
 async def test_a_chat_is_its_persons_and_each_call_is_answered_once() -> None:
     ada, bob = await _person("ada", "1"), await _person("bob", "2")
-    installation = await PluginInstallations.install(
-        _package("acme/docs", permissions=["agent"]), user_id=None, by=ada
-    )
+    installation = await _install(ada, _bundle(permissions=["agent"]))
     mine, theirs = PluginChats(installation, ada), PluginChats(installation, bob)
     chat = await mine.record("repo", "acme/app", "thread-1")
     read_page = ClientToolSpec(
@@ -169,34 +163,62 @@ async def test_a_chat_is_its_persons_and_each_call_is_answered_once() -> None:
     assert await chat.calls.spend_resume(2)
 
 
-async def test_an_update_forgets_the_bundle_no_install_runs_any_more(
+async def test_a_new_preview_forgets_the_build_it_replaced(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    # No grace: every bundle counts as old enough that no install is about to use it.
+    # No grace: every bundle counts as old enough that no version is about to use it.
     monkeypatch.setattr(records_module, "BUNDLE_GRACE", timedelta(0))
     ada = await _person("ada", "1")
-    installation = await PluginInstallations.install(_package("acme/docs"), user_id=ada, by=ada)
-    newer = replace(_package("acme/docs"), html="<p>docs, newer</p>")
-
-    await PluginInstallations.upgrade(installation, newer, by=ada)
+    for body in ("<p>first</p>", "<p>second</p>"):
+        version = await PluginApps.publish(
+            ada, _bundle(permissions=[], body=body), origin={}, preview_of="thread-1"
+        )
+        assert await PluginInstallations.preview("thread-1", version, user_id=ada)
 
     async with postgres.session() as session:
         stored = list(await session.scalars(text("SELECT html FROM plugin_bundle")))
-    assert stored == ["<p>docs, newer</p>"]
-    assert await PluginInstallations.bundle(installation) == "<p>docs, newer</p>"
+    assert [html.endswith("<p>second</p>") for html in stored] == [True]
+    running = await PluginInstallations.previewing("thread-1", ada)
+    assert running is not None
+    assert (await PluginInstallations.bundle(running.id)).endswith("<p>second</p>")
+    # A preview runs beside its thread, not in the sidebar.
+    assert await PluginInstallations.visible_to(ada) == []
 
 
-async def test_a_name_installed_for_everyone_wins_and_cannot_be_installed_twice() -> None:
+async def test_a_preview_asking_for_more_waits_for_the_person() -> None:
     ada = await _person("ada", "1")
-    own = await PluginInstallations.install(_package("acme/docs"), user_id=ada, by=ada)
+    first = await PluginApps.publish(ada, _bundle(permissions=[]), origin={}, preview_of="t")
+    assert await PluginInstallations.preview("t", first, user_id=ada)
+    wider = await PluginApps.publish(
+        ada, _bundle(permissions=["github:write"]), origin={}, preview_of="t"
+    )
+
+    assert not await PluginInstallations.preview("t", wider, user_id=ada)
+    running = await PluginInstallations.previewing("t", ada)
+    assert running is not None and running.version.id == first.id
+    assert await PluginApps.newest_preview("t", ada) == wider
+
+    assert await PluginInstallations.preview(
+        "t", wider, user_id=ada, approved=[PluginPermission.GITHUB_WRITE]
+    )
+    running = await PluginInstallations.previewing("t", ada)
+    assert running is not None and running.version.id == wider.id
+
+
+async def test_only_listed_apps_reach_other_people_and_a_name_is_added_once() -> None:
+    ada, bob = await _person("ada", "1"), await _person("bob", "2")
+    version = await PluginApps.publish(ada, _bundle(), origin={})
+
+    with pytest.raises(AppNotFound):
+        await PluginApps.version(version.id, bob)
+    with pytest.raises(AppNotFound):
+        await PluginApps.set_listed(version.app, bob, True)
+    await PluginApps.set_listed(version.app, ada, True)
+    await PluginInstallations.install(await PluginApps.version(version.id, bob), user_id=bob)
+
+    assert [app.name for app in await PluginApps.available_to(bob)] == ["docs"]
     with pytest.raises(PluginNameTaken):
-        await PluginInstallations.install(_package("other/docs"), user_id=ada, by=ada)
-    everyone = await PluginInstallations.install(_package("acme/docs"), user_id=None, by=ada)
-
-    visible = await PluginInstallations.visible_to(ada)
-
-    assert [i.id for i in visible] == [everyone]
-    assert own != everyone
+        await _install(bob)
 
 
 def _installed(installation: Installation, user_id: UUID) -> InstalledPlugin:
@@ -207,13 +229,12 @@ async def test_plugin_reaches_only_repositories_the_person_shared_and_can_read(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     ada, bob = await _person("ada", "1"), await _person("bob", "2")
-    installation_id = await PluginInstallations.install(
-        _package("acme/docs", permissions=["storage", "github:read"]), user_id=None, by=ada
-    )
+    installation_id = await _install(ada, _bundle(permissions=["storage", "github:read"]))
     await PluginInstallations.share(installation_id, ada, ["acme/app", "acme/secret"])
     plugin = _installed(await PluginInstallations.get(installation_id, ada), ada)
-    # Ada's picks are hers: the same install reaches nothing for Bob until he picks.
-    for_bob = _installed(await PluginInstallations.get(installation_id, bob), bob)
+    # Ada's install is hers alone.
+    with pytest.raises(InstallationNotFound):
+        await PluginInstallations.get(installation_id, bob)
 
     async def readable(_login: str, repository: str) -> bool:
         return repository != "acme/secret"
@@ -221,8 +242,6 @@ async def test_plugin_reaches_only_repositories_the_person_shared_and_can_read(
     monkeypatch.setattr(installed_module, "can_read_repository", readable)
 
     assert await plugin.repository("Acme/App") == "acme/app"
-    with pytest.raises(RepositoryNotGranted):
-        await for_bob.repository("acme/app")
     with pytest.raises(RepositoryNotGranted):
         await plugin.repository("acme/web")
     with pytest.raises(RepositoryNotGranted):
@@ -235,8 +254,7 @@ async def test_plugin_reaches_only_repositories_the_person_shared_and_can_read(
 
 async def test_compacting_a_room_keeps_what_came_after() -> None:
     ada = await _person("ada", "1")
-    installation_id = await PluginInstallations.install(_package("acme/docs"), user_id=ada, by=ada)
-    plugin = (await PluginInstallations.get(installation_id, ada)).plugin
+    plugin = (await PluginInstallations.get(await _install(ada), ada)).plugin
     room = Room(plugin, DocumentScope(repository="acme/app"), "draft/page.md")
     other = Room(plugin, DocumentScope(repository="acme/web"), "draft/page.md")
     first = await room.append(b"one", by=ada)
@@ -254,11 +272,7 @@ async def test_document_changes_reach_only_people_who_can_read_their_scope(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     ada, bob = await _person("ada", "1"), await _person("bob", "2")
-    plugin = (
-        await PluginInstallations.get(
-            await PluginInstallations.install(_package("acme/docs"), user_id=ada, by=ada), ada
-        )
-    ).plugin
+    plugin = (await PluginInstallations.get(await _install(ada), ada)).plugin
 
     async def readable(_login: str, repository: str) -> bool:
         return repository == "acme/app"
@@ -277,58 +291,3 @@ async def test_document_changes_reach_only_people_who_can_read_their_scope(
         DocumentScope(repository="acme/app").topic_key(plugin, "comments"),
         DocumentScope(user_id=ada).topic_key(plugin, "notes"),
     }
-
-
-class _PluginRepo:
-    """A plugin repository whose head moved past its newest build."""
-
-    head = "b" * 40
-
-    def __init__(self, release: Release | None) -> None:
-        self._release = release
-        self.tags: list[str] = []
-
-    async def info(self) -> dict[str, str]:
-        return {"default_branch": "main"}
-
-    async def commit_sha(self, ref: str) -> str:
-        return self.head
-
-    async def read_file(self, path: str, ref: str, *, max_chars: int, strict: bool) -> str:
-        return _package("acme/docs").manifest.model_dump_json(by_alias=True)
-
-    async def release(self, tag: str) -> Release | None:
-        self.tags.append(tag)
-        return self._release
-
-    async def download_asset(self, asset: ReleaseAsset) -> bytes:
-        return f"<p>{asset.name}</p>".encode()
-
-
-async def test_an_install_takes_the_newest_build_and_pins_its_commit(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    older, newer = "1" * 40, "2" * 40
-    release = Release(
-        tag_name="openswe-plugin/docs/main",
-        assets=[
-            ReleaseAsset(
-                id=1, name=f"docs-{older}.html", size=9, updated_at="2026-10-20T00:00:00Z"
-            ),
-            ReleaseAsset(
-                id=2, name=f"docs-{newer}.html", size=9, updated_at="2026-10-21T00:00:00Z"
-            ),
-            ReleaseAsset(id=3, name="other-plugin.html", size=9, updated_at="2026-10-22T00:00:00Z"),
-        ],
-    )
-    repo = _PluginRepo(release)
-    monkeypatch.setattr(PluginSource, "repo", lambda _self, _github: repo)
-
-    package = await PluginSource(RepoFullName("acme/docs")).fetch(cast(GitHubClient, None))
-
-    assert repo.tags == ["openswe-plugin/docs/main"]
-    assert (package.commit_sha, package.html) == (newer, f"<p>docs-{newer}.html</p>")
-
-    monkeypatch.setattr(PluginSource, "repo", lambda _self, _github: _PluginRepo(None))
-    with pytest.raises(PluginSourceError, match="no build of docs on main"):
-        await PluginSource(RepoFullName("acme/docs")).fetch(cast(GitHubClient, None))

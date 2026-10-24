@@ -8,112 +8,141 @@ import {
   DialogTitle,
 } from "@langchain/macaw-components/Dialog"
 import { IconButton } from "@langchain/macaw-components/IconButton"
-import { Input } from "@langchain/macaw-components/Input"
 import { Skeleton } from "@langchain/macaw-components/Skeleton"
+import { Switch } from "@langchain/macaw-components/Switch"
 import { ArrowsClockwiseIcon } from "@phosphor-icons/react/dist/ssr/ArrowsClockwise"
-import { MagnifyingGlassIcon } from "@phosphor-icons/react/dist/ssr/MagnifyingGlass"
 import { TrashIcon } from "@phosphor-icons/react/dist/ssr/Trash"
+import { UploadSimpleIcon } from "@phosphor-icons/react/dist/ssr/UploadSimple"
 import { XIcon } from "@phosphor-icons/react/dist/ssr/X"
 import { Link } from "@tanstack/react-router"
-import { useState } from "react"
+import { useRef, useState } from "react"
 import { toast } from "sonner"
 
 import { SettingsSection } from "@/components/AppShell"
 import type {
-  CatalogItem,
+  App,
+  AppVersion,
   InstalledPlugin,
-  PluginSource,
 } from "@/features/plugins/lib/api"
-import { unapprovedPermissions } from "@/features/plugins/lib/api"
 import { PluginIcon, pluginRoot } from "@/features/plugins/lib/icons"
 import { describePermission } from "@/features/plugins/lib/permissions"
 import {
+  useApps,
   useInstallPlugin,
-  usePluginCatalog,
   usePlugins,
+  usePublishApp,
+  useSetAppListed,
   useUninstallPlugin,
   useUnsharePluginRepository,
   useUpgradePlugin,
 } from "@/features/plugins/lib/queries"
-import { useSession } from "@/lib/session"
 
 const ROW = "flex flex-col gap-space-3 p-space-4"
 
 export function PluginsSettings() {
+  const plugins = usePlugins()
+  const apps = useApps()
+  const [adding, setAdding] = useState<AppVersion | null>(null)
+  const installedApps = new Map(
+    (plugins.data ?? []).map((plugin) => [plugin.plugin_id, plugin])
+  )
   return (
     <div className="flex flex-col gap-space-8">
-      <InstalledPlugins />
-      <InstallFromGitHub />
+      <SettingsSection
+        title="In your sidebar"
+        description="Each app opens from the sidebar and runs in a sandbox that blocks its own requests. It acts as you only through the permissions listed here, in the repositories you shared with it."
+      >
+        {plugins.isPending ? (
+          <div className={ROW}>
+            <Skeleton className="h-12 w-full" />
+          </div>
+        ) : installedApps.size === 0 ? (
+          <p className={`${ROW} text-sm text-secondary`}>
+            No apps yet. Ask an agent to build one, or add one below.
+          </p>
+        ) : (
+          plugins.data?.map((plugin) => (
+            <InstalledAppRow
+              key={plugin.id}
+              plugin={plugin}
+              latest={
+                apps.data?.find((app) => app.id === plugin.plugin_id)?.latest ??
+                null
+              }
+            />
+          ))
+        )}
+      </SettingsSection>
+      <SettingsSection
+        title="Apps"
+        description="Yours, and the ones others listed for anyone to add. An agent publishes one with publish_app, or upload a built app's .html file."
+        action={<UploadApp onPublished={setAdding} />}
+      >
+        {apps.isPending ? (
+          <div className={ROW}>
+            <Skeleton className="h-12 w-full" />
+          </div>
+        ) : (apps.data ?? []).length === 0 ? (
+          <p className={`${ROW} text-sm text-secondary`}>No apps yet.</p>
+        ) : (
+          apps.data?.map((app) => (
+            <AppRow
+              key={app.id}
+              app={app}
+              installed={installedApps.has(app.id)}
+              onAdd={setAdding}
+            />
+          ))
+        )}
+      </SettingsSection>
+      {adding && <AddDialog version={adding} onClose={() => setAdding(null)} />}
     </div>
   )
 }
 
-function canManage(plugin: InstalledPlugin, admin: boolean): boolean {
-  return plugin.scope === "user" || admin
+function origin(version: AppVersion): string {
+  const { repository, ref, commit, thread } = version.origin
+  if (repository)
+    return [repository, ref, commit?.slice(0, 7)].filter(Boolean).join(" · ")
+  return thread ? "Built in a thread" : "Uploaded"
 }
 
-function InstalledPlugins() {
-  const plugins = usePlugins()
-  const admin = useSession().data?.is_admin === true
-  return (
-    <SettingsSection
-      title="Installed"
-      description="Each plugin opens from the sidebar and runs in a sandbox that blocks its own requests. It acts as you only through the permissions listed here, in the repositories you shared with it."
-    >
-      {plugins.isPending ? (
-        <div className={ROW}>
-          <Skeleton className="h-12 w-full" />
-        </div>
-      ) : (plugins.data ?? []).length === 0 ? (
-        <p className={`${ROW} text-sm text-secondary`}>
-          No plugins yet. Install one from a GitHub repository below.
-        </p>
-      ) : (
-        plugins.data?.map((plugin) => (
-          <InstalledPluginRow
-            key={plugin.id}
-            plugin={plugin}
-            editable={canManage(plugin, admin)}
-          />
-        ))
-      )}
-    </SettingsSection>
-  )
-}
-
-function InstalledPluginRow({
+function InstalledAppRow({
   plugin,
-  editable,
+  latest,
 }: {
   plugin: InstalledPlugin
-  editable: boolean
+  latest: AppVersion | null
 }) {
   const unshare = useUnsharePluginRepository()
   const uninstall = useUninstallPlugin()
   const upgrade = useUpgradePlugin()
-  const [newPermissions, setNewPermissions] =
-    useState<Array<PluginPermission> | null>(null)
+  const [reviewing, setReviewing] = useState(false)
+  const newer = latest && latest.number > plugin.version.number ? latest : null
+  const asksMore = newer
+    ? newer.manifest.permissions.filter(
+        (p) => !plugin.manifest.permissions.includes(p)
+      )
+    : []
 
-  const update = (permissions: Array<PluginPermission>) =>
+  const update = (version: AppVersion) =>
     upgrade.mutate(
-      { id: plugin.id, permissions },
       {
-        onSuccess: (updated) => {
-          setNewPermissions(null)
+        id: plugin.id,
+        version: version.id,
+        permissions: version.manifest.permissions,
+      },
+      {
+        onSuccess: () => {
+          setReviewing(false)
           toast.success(
-            updated.commit_sha === plugin.commit_sha
-              ? `${plugin.manifest.displayName} is up to date`
-              : `Updated ${plugin.manifest.displayName} to ${updated.commit_sha.slice(0, 7)}`
+            `Updated ${plugin.manifest.displayName} to #${version.number}`
           )
         },
-        onError: (error) => {
-          const unapproved = unapprovedPermissions(error)
-          if (unapproved) setNewPermissions(unapproved)
-          else
-            toast.error(`Couldn't update ${plugin.manifest.displayName}`, {
-              description: error.message,
-            })
-        },
+        onError: (error) =>
+          toast.error(`Couldn't update ${plugin.manifest.displayName}`, {
+            description: error.message,
+          }),
       }
     )
 
@@ -135,18 +164,16 @@ function InstalledPluginRow({
               {plugin.manifest.displayName}
             </Link>
             <span className="text-xs text-secondary">
-              v{plugin.manifest.version}
+              v{plugin.manifest.version} · #{plugin.version.number}
             </span>
-            <Badge size="xxs" color="secondary">
-              {plugin.scope === "organization" ? "Everyone" : "Just you"}
-            </Badge>
+            {!plugin.mine && (
+              <Badge size="xxs" color="secondary">
+                Listed by someone else
+              </Badge>
+            )}
           </div>
           <span className="truncate text-xs text-secondary">
-            {[plugin.source.repository, plugin.source.path]
-              .filter(Boolean)
-              .join("/")}
-            {plugin.source.ref ? ` · ${plugin.source.ref}` : ""} @
-            {plugin.commit_sha.slice(0, 7)}
+            {origin(plugin.version)}
           </span>
           {plugin.manifest.description && (
             <p className="text-xs text-secondary">
@@ -154,25 +181,27 @@ function InstalledPluginRow({
             </p>
           )}
         </div>
-        {editable && (
-          <div className="flex shrink-0 gap-space-1">
+        <div className="flex shrink-0 gap-space-1">
+          {newer && (
             <Button
               size="xs"
               variant="outlined"
               leftDecorator={ArrowsClockwiseIcon}
               loading={upgrade.isPending}
-              onClick={() => update(plugin.manifest.permissions)}
+              onClick={() =>
+                asksMore.length ? setReviewing(true) : update(newer)
+              }
             >
-              Update
+              Update to #{newer.number}
             </Button>
-            <IconButton
-              icon={TrashIcon}
-              label={`Uninstall ${plugin.manifest.displayName}`}
-              size="xs"
-              onClick={() => uninstall.mutate(plugin.id)}
-            />
-          </div>
-        )}
+          )}
+          <IconButton
+            icon={TrashIcon}
+            label={`Remove ${plugin.manifest.displayName}`}
+            size="xs"
+            onClick={() => uninstall.mutate(plugin.id)}
+          />
+        </div>
       </div>
       <PermissionList permissions={plugin.manifest.permissions} />
       <SharedRepositories
@@ -182,8 +211,8 @@ function InstalledPluginRow({
         }
       />
       <Dialog
-        open={newPermissions !== null}
-        onOpenChange={(open) => !open && setNewPermissions(null)}
+        open={reviewing}
+        onOpenChange={(open) => !open && setReviewing(false)}
       >
         <DialogContent
           childrenClassName="gap-space-4 p-space-6"
@@ -191,27 +220,22 @@ function InstalledPluginRow({
         >
           <DialogTitle>Approve new permissions?</DialogTitle>
           <DialogDescription>
-            The latest {plugin.manifest.displayName} asks for more than you
-            approved.
+            #{newer?.number} of {plugin.manifest.displayName} asks for more than
+            you approved.
           </DialogDescription>
-          <PermissionList permissions={newPermissions ?? []} />
+          <PermissionList permissions={asksMore} />
           <div className="flex justify-end gap-space-2">
             <Button
               size="sm"
               variant="outlined"
-              onClick={() => setNewPermissions(null)}
+              onClick={() => setReviewing(false)}
             >
-              Keep current version
+              Keep #{plugin.version.number}
             </Button>
             <Button
               size="sm"
               loading={upgrade.isPending}
-              onClick={() =>
-                update([
-                  ...plugin.manifest.permissions,
-                  ...(newPermissions ?? []),
-                ])
-              }
+              onClick={() => newer && update(newer)}
             >
               Approve and update
             </Button>
@@ -222,7 +246,168 @@ function InstalledPluginRow({
   )
 }
 
-function PermissionList({
+function AppRow({
+  app,
+  installed,
+  onAdd,
+}: {
+  app: App
+  installed: boolean
+  onAdd: (version: AppVersion) => void
+}) {
+  const setListed = useSetAppListed()
+  const manifest = app.latest?.manifest
+  return (
+    <div className={`${ROW} sm:flex-row sm:items-start`}>
+      <PluginIcon
+        icon={manifest?.sidebar.icon ?? "puzzle-piece"}
+        size={20}
+        className="mt-0.5 shrink-0 text-icon-secondary"
+      />
+      <div className="flex min-w-0 flex-1 flex-col gap-space-1">
+        <span className="text-sm font-medium text-primary">
+          {manifest?.displayName ?? app.name}{" "}
+          {app.latest && (
+            <span className="text-xs font-normal text-secondary">
+              #{app.latest.number}
+            </span>
+          )}
+        </span>
+        {manifest?.description && (
+          <p className="text-xs text-secondary">{manifest.description}</p>
+        )}
+        <span className="text-xs text-secondary">
+          {app.latest ? origin(app.latest) : "Only previews so far"}
+        </span>
+      </div>
+      <div className="flex shrink-0 items-center gap-space-3">
+        {app.mine && (
+          <label className="flex items-center gap-space-2 text-xs text-secondary">
+            Anyone can add it
+            <Switch
+              aria-label={`Let anyone add ${manifest?.displayName ?? app.name}`}
+              checked={app.listed}
+              onChange={(listed) => setListed.mutate({ id: app.id, listed })}
+            />
+          </label>
+        )}
+        <Button
+          size="sm"
+          variant={installed ? "outlined" : "normal"}
+          disabled={installed || !app.latest}
+          onClick={() => app.latest && onAdd(app.latest)}
+        >
+          {installed ? "Added" : "Add"}
+        </Button>
+      </div>
+    </div>
+  )
+}
+
+function UploadApp({
+  onPublished,
+}: {
+  onPublished: (version: AppVersion) => void
+}) {
+  const input = useRef<HTMLInputElement>(null)
+  const publish = usePublishApp()
+  const plugins = usePlugins()
+  return (
+    <>
+      <input
+        ref={input}
+        type="file"
+        accept=".html,text/html"
+        className="hidden"
+        onChange={(event) => {
+          const file = event.target.files?.[0]
+          event.target.value = ""
+          if (!file) return
+          void file.text().then((html) =>
+            publish.mutate(html, {
+              onSuccess: (version) => {
+                toast.success(
+                  `Published ${version.manifest.displayName} #${version.number}`
+                )
+                if (
+                  !plugins.data?.some(
+                    (plugin) => plugin.name === version.manifest.name
+                  )
+                )
+                  onPublished(version)
+              },
+            })
+          )
+        }}
+      />
+      <Button
+        size="xs"
+        variant="outlined"
+        leftDecorator={UploadSimpleIcon}
+        loading={publish.isPending}
+        onClick={() => input.current?.click()}
+      >
+        Upload app
+      </Button>
+    </>
+  )
+}
+
+function AddDialog({
+  version,
+  onClose,
+}: {
+  version: AppVersion
+  onClose: () => void
+}) {
+  const install = useInstallPlugin()
+  const { manifest } = version
+  return (
+    <Dialog open onOpenChange={(open) => !open && onClose()}>
+      <DialogContent
+        childrenClassName="gap-space-4 p-space-6"
+        showClose={false}
+      >
+        <DialogTitle>Add {manifest.displayName}?</DialogTitle>
+        <DialogDescription>
+          It runs in a sandbox that blocks its own requests, and acts as you
+          only through what you allow here. It reaches no repository until you
+          pick one when it asks.
+        </DialogDescription>
+        <div className="flex flex-col gap-space-2">
+          <span className="text-xs font-medium text-primary">It can</span>
+          <PermissionList permissions={manifest.permissions} />
+        </div>
+        <div className="flex justify-end gap-space-2">
+          <Button size="sm" variant="outlined" onClick={onClose}>
+            Cancel
+          </Button>
+          <Button
+            size="sm"
+            loading={install.isPending}
+            onClick={() =>
+              install.mutate(
+                { version: version.id, permissions: manifest.permissions },
+                {
+                  onSuccess: (installed) => {
+                    toast.success(`Added ${installed.manifest.displayName}`, {
+                      description: `Open it from the sidebar, at ${pluginRoot(installed.name)}.`,
+                    })
+                    onClose()
+                  },
+                }
+              )
+            }
+          >
+            Add to sidebar
+          </Button>
+        </div>
+      </DialogContent>
+    </Dialog>
+  )
+}
+
+export function PermissionList({
   permissions,
 }: {
   permissions: ReadonlyArray<PluginPermission>
@@ -244,7 +429,7 @@ function PermissionList({
   )
 }
 
-/** What the viewer shared with the plugin when it asked; each person has their own. */
+/** What the viewer shared with the app when it asked. */
 function SharedRepositories({
   repositories,
   onUnshare,
@@ -278,211 +463,5 @@ function SharedRepositories({
         </Badge>
       ))}
     </div>
-  )
-}
-
-function InstallFromGitHub() {
-  const [repository, setRepository] = useState("")
-  const [path, setPath] = useState("")
-  const [ref, setRef] = useState("")
-  const [source, setSource] = useState<PluginSource | null>(null)
-  const catalog = usePluginCatalog(source)
-  const [reviewing, setReviewing] = useState<CatalogItem | null>(null)
-
-  return (
-    <SettingsSection
-      title="Install from GitHub"
-      description="A plugin is a directory with .openswe-plugin/plugin.json; a marketplace repository lists several in .openswe-plugin/marketplace.json. Try langchain-ai/open-swe."
-    >
-      <form
-        className={`${ROW} sm:flex-row sm:items-end`}
-        onSubmit={(event) => {
-          event.preventDefault()
-          if (repository.trim())
-            setSource({
-              repository: repository.trim(),
-              path: path.trim(),
-              ref: ref.trim() || null,
-            })
-        }}
-      >
-        <Input
-          className="flex-1"
-          label="Repository"
-          placeholder="owner/repo"
-          value={repository}
-          onChange={setRepository}
-          debounceMs={0}
-        />
-        <Input
-          className="sm:w-48"
-          label="Directory"
-          placeholder="optional"
-          value={path}
-          onChange={setPath}
-          debounceMs={0}
-        />
-        <Input
-          className="sm:w-36"
-          label="Branch or tag"
-          placeholder="default branch"
-          value={ref}
-          onChange={setRef}
-          debounceMs={0}
-        />
-        <Button
-          type="submit"
-          size="md"
-          leftDecorator={MagnifyingGlassIcon}
-          loading={catalog.isFetching}
-          disabled={!repository.trim()}
-        >
-          Find plugins
-        </Button>
-      </form>
-      {catalog.error && (
-        <p className={`${ROW} text-error text-sm`}>{catalog.error.message}</p>
-      )}
-      {catalog.data?.length === 0 && (
-        <p className={`${ROW} text-sm text-secondary`}>
-          That marketplace lists no plugins this account can read.
-        </p>
-      )}
-      {catalog.data?.map((item) => (
-        <CatalogRow
-          key={`${item.source.repository}/${item.source.path}`}
-          item={item}
-          onInstall={() => setReviewing(item)}
-        />
-      ))}
-      {reviewing && (
-        <InstallDialog item={reviewing} onClose={() => setReviewing(null)} />
-      )}
-    </SettingsSection>
-  )
-}
-
-function CatalogRow({
-  item,
-  onInstall,
-}: {
-  item: CatalogItem
-  onInstall: () => void
-}) {
-  const plugins = usePlugins()
-  const installed = plugins.data?.some(
-    (plugin) => plugin.name === item.manifest.name
-  )
-  return (
-    <div className={`${ROW} sm:flex-row sm:items-start`}>
-      <PluginIcon
-        icon={item.manifest.sidebar.icon}
-        size={20}
-        className="mt-0.5 shrink-0 text-icon-secondary"
-      />
-      <div className="flex min-w-0 flex-1 flex-col gap-space-1">
-        <span className="text-sm font-medium text-primary">
-          {item.manifest.displayName}{" "}
-          <span className="text-xs font-normal text-secondary">
-            v{item.manifest.version}
-          </span>
-        </span>
-        {item.manifest.description && (
-          <p className="text-xs text-secondary">{item.manifest.description}</p>
-        )}
-        <span className="text-xs text-secondary">
-          {[item.source.repository, item.source.path].filter(Boolean).join("/")}
-        </span>
-      </div>
-      <Button
-        size="sm"
-        variant={installed ? "outlined" : "normal"}
-        disabled={installed}
-        onClick={onInstall}
-      >
-        {installed ? "Installed" : "Install"}
-      </Button>
-    </div>
-  )
-}
-
-function InstallDialog({
-  item,
-  onClose,
-}: {
-  item: CatalogItem
-  onClose: () => void
-}) {
-  const admin = useSession().data?.is_admin === true
-  const install = useInstallPlugin()
-  const [scope, setScope] = useState<"user" | "organization">("user")
-
-  return (
-    <Dialog open onOpenChange={(open) => !open && onClose()}>
-      <DialogContent
-        childrenClassName="gap-space-4 p-space-6"
-        showClose={false}
-      >
-        <DialogTitle>Install {item.manifest.displayName}?</DialogTitle>
-        <DialogDescription>
-          From{" "}
-          {[item.source.repository, item.source.path].filter(Boolean).join("/")}
-          . It runs in a sandbox that blocks its own requests, and acts as you
-          only through what you allow here. It reaches no repository until you
-          pick one when it asks.
-        </DialogDescription>
-        <div className="flex flex-col gap-space-2">
-          <span className="text-xs font-medium text-primary">It can</span>
-          <PermissionList permissions={item.manifest.permissions} />
-        </div>
-        {admin && (
-          <label className="flex items-center gap-space-2 text-xs text-primary">
-            <input
-              type="checkbox"
-              checked={scope === "organization"}
-              onChange={(event) =>
-                setScope(event.target.checked ? "organization" : "user")
-              }
-            />
-            Install for everyone in this Open SWE; each person picks their own
-            repositories
-          </label>
-        )}
-        <div className="flex justify-end gap-space-2">
-          <Button size="sm" variant="outlined" onClick={onClose}>
-            Cancel
-          </Button>
-          <Button
-            size="sm"
-            loading={install.isPending}
-            onClick={() =>
-              install.mutate(
-                {
-                  repository: item.source.repository,
-                  path: item.source.path,
-                  ref: item.source.ref,
-                  scope,
-                  name: item.manifest.name,
-                  permissions: item.manifest.permissions,
-                },
-                {
-                  onSuccess: (installed) => {
-                    toast.success(
-                      `Installed ${installed.manifest.displayName}`,
-                      {
-                        description: `Open it from the sidebar, at ${pluginRoot(installed.name)}.`,
-                      }
-                    )
-                    onClose()
-                  },
-                }
-              )
-            }
-          >
-            Install
-          </Button>
-        </div>
-      </DialogContent>
-    </Dialog>
   )
 }

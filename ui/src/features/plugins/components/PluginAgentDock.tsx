@@ -51,15 +51,7 @@ export function PluginAgentDock({
   /** Hears the chat's thread once it is open, for the bar above to link to. */
   onThread: (threadId: string) => void
 }) {
-  const opened = useQuery({
-    queryKey: ["plugin-chat", plugin.id, chat],
-    queryFn: () => pluginsApi.openChat(plugin.id, chat),
-    staleTime: Infinity,
-  })
-  const chatId = opened.data?.chat_id
-  const threadId = opened.data?.thread_id
-  useToolOffer(plugin, chatId, tools?.offer ?? NO_TOOLS)
-  const answering = useAnsweredCalls(plugin, chatId, threadId, tools)
+  const { opened, threadId, answering } = usePluginChat(plugin, chat, tools)
   const reportThread = useEffectEvent((id: string) => onThread(id))
   useEffect(() => {
     if (threadId) reportThread(threadId)
@@ -123,6 +115,28 @@ export function PluginAgentDock({
       )}
     </section>
   )
+}
+
+/**
+ * The person's chat under ``chat`` beside the plugin, with the tools its frame
+ * offers: the agent's calls to them run in the frame and the thread resumes
+ * with what they returned.
+ */
+export function usePluginChat(
+  plugin: InstalledPlugin,
+  chat: ChatTarget,
+  tools: ProvidedTools | null
+) {
+  const opened = useQuery({
+    queryKey: ["plugin-chat", plugin.id, chat],
+    queryFn: () => pluginsApi.openChat(plugin.id, chat),
+    staleTime: Infinity,
+  })
+  const chatId = opened.data?.chat_id
+  const threadId = opened.data?.thread_id
+  useToolOffer(plugin, chatId, tools?.offer ?? NO_TOOLS)
+  const answering = useAnsweredCalls(plugin, chatId, threadId, tools)
+  return { opened, threadId, answering }
 }
 
 // Offers to one chat go out in order, so withdrawing on close never lands after a reopen's offer.

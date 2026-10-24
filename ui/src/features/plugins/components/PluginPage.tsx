@@ -14,10 +14,8 @@ import { RightPanelShell } from "@/features/agents/components/panel/RightPanelSh
 import { RIGHT_PANEL_SHEET_CLASS_NAME } from "@/features/agents/components/panel/rightPanelLayout"
 import { PluginAgentDock } from "@/features/plugins/components/PluginAgentDock"
 import type { ProvidedTools } from "@/features/plugins/components/PluginAgentDock"
-import { PluginFrame } from "@/features/plugins/components/PluginFrame"
-import { ApprovalDialog } from "@/features/plugins/components/ApprovalDialog"
+import { PluginView } from "@/features/plugins/components/PluginView"
 import type { InstalledPlugin } from "@/features/plugins/lib/api"
-import { useApproval } from "@/features/plugins/lib/approval"
 import type {
   AgentToolOffer,
   ChatTarget,
@@ -27,11 +25,7 @@ import type {
 import { PluginIcon } from "@/features/plugins/lib/icons"
 import { pageTitle } from "@/lib/pageTitle"
 import { useMediaQuery } from "@/lib/useIsMobile"
-import {
-  usePlugin,
-  usePluginBundle,
-  useSharePluginRepositories,
-} from "@/features/plugins/lib/queries"
+import { usePlugin } from "@/features/plugins/lib/queries"
 
 /**
  * One installed plugin's page. `active` is whether it is the page on screen: a
@@ -61,7 +55,7 @@ export function PluginPage({
     return (
       <main className="flex min-w-0 flex-1 items-center justify-center p-space-5">
         <ErrorState
-          title="Couldn't load plugins"
+          title="Couldn't load apps"
           message={error.message}
           action={null}
         />
@@ -72,15 +66,15 @@ export function PluginPage({
       <main className="flex min-w-0 flex-1 items-center justify-center p-space-5">
         <EmptyState
           icon={PuzzlePieceIcon}
-          title="Plugin not installed"
-          description={`No plugin named "${name}" is installed for you.`}
+          title="App not in your sidebar"
+          description={`You haven't added an app named "${name}".`}
           action={
             <Button
               size="sm"
               variant="outlined"
               as={<Link to="/my-settings/plugins" />}
             >
-              Manage plugins
+              Manage apps
             </Button>
           }
         />
@@ -119,9 +113,6 @@ function InstalledPluginPage({
       if (document.title === documentTitle) document.title = pageTitle("Plugin")
     }
   }, [active, title, plugin.manifest.displayName])
-  const bundle = usePluginBundle(plugin)
-  const approval = useApproval()
-  const share = useSharePluginRepositories()
   const agent = useAgentDock(plugin, onScreen)
   const wide = useMediaQuery("(min-width: 1100px)")
   const dock = agent.enabled && agent.open && (
@@ -150,9 +141,7 @@ function InstalledPluginPage({
         {title && <span className="truncate text-secondary">{title}</span>}
         <span className="ml-auto flex shrink-0 items-center gap-space-1 text-secondary max-sm:hidden">
           <ShieldCheckIcon size={14} />
-          {plugin.scope === "organization"
-            ? "Installed for everyone"
-            : "Installed by you"}
+          Sandboxed · #{plugin.version.number}
         </span>
         <Link
           to="/my-settings/plugins"
@@ -185,64 +174,22 @@ function InstalledPluginPage({
       </header>
       <div className="flex min-h-0 flex-1">
         <div className="flex min-w-0 flex-1 flex-col">
-          {bundle.data !== undefined ? (
-            <PluginFrame
-              plugin={plugin}
-              html={bundle.data}
-              path={path}
-              navigate={(next, replace) => {
-                onPath(next)
-                if (onScreen())
-                  void navigate({
-                    to: "/agents/plugins/$name/$",
-                    params: { name: plugin.name, _splat: next.slice(1) },
-                    replace,
-                  })
-              }}
-              openThread={(threadId) => {
-                if (onScreen())
-                  void navigate({
-                    to: "/agents/$threadId",
-                    params: { threadId },
-                  })
-              }}
-              setTitle={setTitle}
-              visible={onScreen}
-              confirmLink={async (url) =>
-                onScreen() &&
-                (await approval.ask({ kind: "link", url })) !== null
-              }
-              pickRepositories={async (pick) => {
-                if (!onScreen()) return []
-                const chosen = await approval.ask({
-                  kind: "repositories",
-                  pick,
+          <PluginView
+            plugin={plugin}
+            path={path}
+            active={active}
+            onPath={(next, replace) => {
+              onPath(next)
+              if (onScreen())
+                void navigate({
+                  to: "/agents/plugins/$name/$",
+                  params: { name: plugin.name, _splat: next.slice(1) },
+                  replace,
                 })
-                if (!Array.isArray(chosen) || chosen.length === 0) return []
-                const updated = await share.mutateAsync({
-                  id: plugin.id,
-                  repositories: [...chosen],
-                })
-                return chosen.filter((repo) =>
-                  updated.repositories.includes(repo)
-                )
-              }}
-              provideTools={agent.provideTools}
-              chooseChat={agent.chooseChat}
-              openChat={agent.openChat}
-              shareContext={agent.shareContext}
-            />
-          ) : bundle.error ? (
-            <div className="flex flex-1 items-center justify-center p-space-5">
-              <ErrorState
-                title={`Couldn't load ${plugin.manifest.displayName}`}
-                message={bundle.error.message}
-                action={null}
-              />
-            </div>
-          ) : (
-            <Skeleton className="m-space-5 flex-1" />
-          )}
+            }}
+            setTitle={setTitle}
+            agent={agent}
+          />
         </div>
         {dock && wide && (
           <RightPanelShell
@@ -265,12 +212,6 @@ function InstalledPluginPage({
           {dock}
         </SideSheet>
       )}
-      <ApprovalDialog
-        plugin={plugin}
-        approval={approval.shown}
-        armed={approval.armed}
-        onAnswer={approval.answer}
-      />
     </main>
   )
 }

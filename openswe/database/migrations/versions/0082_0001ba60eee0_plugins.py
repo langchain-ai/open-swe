@@ -16,12 +16,25 @@ broadcast (a CRDT's, for collaborative editing), in ``seq`` order, scoped like
 documents. A member may replace the log up to some ``seq`` with one snapshot.
 """
 
+import sqlalchemy as sa
 from alembic import op
 
 revision = "0001ba60eee0"
 down_revision = "a7c12a7f1462"
 branch_labels = None
 depends_on = None
+
+
+def _has_column(table: str, column: str) -> bool:
+    return bool(
+        op.get_bind().scalar(
+            sa.text(
+                "SELECT EXISTS (SELECT 1 FROM information_schema.columns"
+                " WHERE table_schema = current_schema() AND table_name = :t AND column_name = :c)"
+            ),
+            {"t": table, "c": column},
+        )
+    )
 
 
 def upgrade() -> None:
@@ -38,7 +51,9 @@ def upgrade() -> None:
             updated_by uuid REFERENCES users (id) ON DELETE SET NULL
         )
     """)
-    op.execute("CREATE UNIQUE INDEX IF NOT EXISTS plugin_source ON plugin (repository, path)")
+    # A later migration drops the columns these indexes cover.
+    if _has_column("plugin", "repository"):
+        op.execute("CREATE UNIQUE INDEX IF NOT EXISTS plugin_source ON plugin (repository, path)")
     op.execute("""
         CREATE TABLE IF NOT EXISTS plugin_bundle (
             id uuid PRIMARY KEY,
@@ -67,10 +82,11 @@ def upgrade() -> None:
             updated_by uuid REFERENCES users (id) ON DELETE SET NULL
         )
     """)
-    op.execute("""
-        CREATE UNIQUE INDEX IF NOT EXISTS plugin_installation_name
-            ON plugin_installation (user_id, (manifest ->> 'name')) NULLS NOT DISTINCT
-    """)
+    if _has_column("plugin_installation", "manifest"):
+        op.execute("""
+            CREATE UNIQUE INDEX IF NOT EXISTS plugin_installation_name
+                ON plugin_installation (user_id, (manifest ->> 'name')) NULLS NOT DISTINCT
+        """)
     op.execute("""
         CREATE TABLE IF NOT EXISTS plugin_document (
             id uuid PRIMARY KEY,

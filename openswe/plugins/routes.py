@@ -1,6 +1,7 @@
-"""Dashboard API for installing plugins and for the calls their frames relay.
+"""Dashboard API for publishing and adding apps, and for the calls their frames relay.
 
-``/plugins`` installs and manages plugins. ``/plugins/{installation_id}/...`` is
+``/plugins`` publishes apps' versions and adds them to a person's web UI;
+``/plugins/previews/{thread_id}`` is the one an agent builds in a thread. ``/plugins/{installation_id}/...`` is
 everything a running plugin may ask for: its documents, its repositories on
 GitHub, and agent threads. The dashboard relays those from the plugin's
 sandboxed frame, which cannot reach the network itself.
@@ -19,7 +20,7 @@ from urllib.parse import quote
 from uuid import UUID
 
 import httpx2
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from fastapi.responses import Response, StreamingResponse
 from pydantic import (
     BaseModel,
@@ -35,7 +36,7 @@ from pydantic import (
 from openswe.audit_logs.middleware import audit_endpoint
 from openswe.dashboard.deps import SESSION_DEP, session_is_admin
 from openswe.dashboard.oauth import session_user_id
-from openswe.github.http import GitHubClient, GitHubError, GitHubSignInRequired, GraphQLError
+from openswe.github.http import GitHubError, GitHubSignInRequired, GraphQLError
 from openswe.github.repo_names import normalize_repo_full_name
 from openswe.plugins.installed import (
     InstalledPlugin,
@@ -44,12 +45,15 @@ from openswe.plugins.installed import (
     RepositoryNotGranted,
     can_read_repository,
 )
-from openswe.plugins.manifest import PluginManifest, PluginPermission
+from openswe.plugins.manifest import MAX_BUNDLE_BYTES, BundleError, PluginManifest, PluginPermission
 from openswe.plugins.records import (
+    AppNotFound,
+    AppVersion,
     Cursor,
     DocumentQuery,
     Installation,
     InstallationNotFound,
+    PluginApps,
     PluginChatCall,
     PluginDocument,
     PluginInstallations,
@@ -57,7 +61,6 @@ from openswe.plugins.records import (
     tool_prefix,
 )
 from openswe.plugins.rooms import MAX_PRESENCE_BYTES, Room, listen
-from openswe.plugins.source import PluginSource, PluginSourceError, catalog
 from openswe.users.models import User
 from openswe.utils.json_types import JsonObject
 
@@ -87,8 +90,10 @@ def _as_http() -> Iterator[None]:
         raise HTTPException(404, str(exc)) from exc
     except PluginNameTaken as exc:
         raise HTTPException(409, str(exc)) from exc
-    except PluginSourceError as exc:
+    except BundleError as exc:
         raise HTTPException(422, str(exc)) from exc
+    except AppNotFound as exc:
+        raise HTTPException(404, str(exc)) from exc
     except GitHubSignInRequired as exc:
         raise HTTPException(401, "github token unavailable, re-login required") from exc
     except GitHubError as exc:
@@ -134,40 +139,48 @@ async def _installed(installation_id: UUID, viewer: ViewerDep) -> InstalledPlugi
 PluginDep = Annotated[InstalledPlugin, Depends(_installed)]
 
 
-async def _managed(installation_id: UUID, viewer: ViewerDep) -> Installation:
-    """An install ``viewer`` may change: their own, or everyone's when they are an admin."""
-    with _as_http():
-        installation = await PluginInstallations.get(installation_id, viewer.user_id)
-    if installation.user_id is None and not viewer.admin:
-        raise HTTPException(403, "Only admins manage plugins installed for everyone")
-    return installation
+# ---- Apps and installs -----------------------------------------------------------
 
 
-ManagedDep = Annotated[Installation, Depends(_managed)]
-
-
-# ---- Installing ------------------------------------------------------------------
-
-
-class PluginSourceModel(BaseModel):
-    repository: str
-    path: str
-    ref: str | None
+class AppVersionModel(BaseModel):
+    id: UUID
+    number: int
+    manifest: PluginManifest
+    origin: JsonObject
+    """Where it was built, as its publisher said; only to show."""
+    preview: bool
+    created_at: datetime | None
 
     @classmethod
-    def of(cls, source: PluginSource) -> PluginSourceModel:
-        return cls(repository=source.repository, path=source.path, ref=source.ref)
+    def of(cls, version: AppVersion) -> AppVersionModel:
+        return cls(
+            id=version.id,
+            number=version.number,
+            manifest=version.manifest,
+            origin=version.origin,
+            preview=version.preview_of is not None,
+            created_at=version.created_at,
+        )
+
+
+class AppModel(BaseModel):
+    id: UUID
+    name: str
+    mine: bool
+    listed: bool
+    latest: AppVersionModel | None
+    """Its newest release; none while it has only previews."""
 
 
 class PluginSummary(BaseModel):
     id: UUID
     plugin_id: UUID
-    """The plugin source's id, shared by every install of it; it keys its documents' topics."""
+    """The app's id, shared by every install of it; it keys its documents' topics."""
     name: str
     manifest: PluginManifest
-    source: PluginSourceModel
-    commit_sha: str
-    scope: Literal["user", "organization"]
+    version: AppVersionModel
+    mine: bool
+    """Whether the viewer publishes the app."""
     repositories: list[str]
     """The repositories the viewer shared with it."""
     installed_at: datetime | None
@@ -179,32 +192,28 @@ class PluginSummary(BaseModel):
             plugin_id=installation.plugin,
             name=installation.manifest.name,
             manifest=installation.manifest,
-            source=PluginSourceModel.of(installation.source),
-            commit_sha=installation.commit_sha,
-            scope=installation.scope,
+            version=AppVersionModel.of(installation.version),
+            mine=installation.owner == installation.user_id,
             repositories=list(installation.repositories),
             installed_at=installation.created_at,
         )
 
 
-class CatalogItem(BaseModel):
-    manifest: PluginManifest
-    source: PluginSourceModel
+class PreviewModel(BaseModel):
+    running: PluginSummary | None
+    """The build running beside the thread."""
+    waiting: AppVersionModel | None
+    """A newer build that asks for permissions the viewer has not approved yet."""
 
 
 class InstallBody(BaseModel):
-    repository: str
-    path: str = ""
-    ref: str | None = None
-    scope: Literal["user", "organization"] = "user"
-    name: str
-    """The plugin the installer reviewed; the install fails if the source now holds another."""
+    version: UUID
     permissions: list[PluginPermission]
-    """The permissions the installer approved; the install fails if the plugin asks for more."""
+    """The permissions the person approved; it fails if the version asks for more."""
 
 
-class UpgradeBody(BaseModel):
-    permissions: list[PluginPermission]
+class ListedBody(BaseModel):
+    listed: bool
 
 
 class RepositoriesBody(BaseModel):
@@ -228,10 +237,15 @@ def _check_permissions(manifest: PluginManifest, approved: list[PluginPermission
         raise HTTPException(
             409,
             {
-                "message": "The plugin asks for permissions you have not approved",
+                "message": "The app asks for permissions you have not approved",
                 "permissions": unapproved,
             },
         )
+
+
+async def _summary(installation_id: UUID, viewer: _Viewer) -> PluginSummary:
+    with _as_http():
+        return PluginSummary.of(await PluginInstallations.get(installation_id, viewer.user_id))
 
 
 @router.get("")
@@ -239,58 +253,137 @@ async def api_list_plugins(viewer: ViewerDep) -> list[PluginSummary]:
     return [PluginSummary.of(i) for i in await PluginInstallations.visible_to(viewer.user_id)]
 
 
-@router.get("/catalog")
-async def api_plugin_catalog(
-    viewer: ViewerDep,
-    repository: str = Query(min_length=3, max_length=200),
-    path: str = Query("", max_length=200),
-    ref: str | None = Query(None, max_length=200),
-) -> list[CatalogItem]:
-    with _as_http():
-        source = PluginSource.parse(repository, path, ref)
-        async with GitHubClient.as_user(viewer.login) as github:
-            entries = await catalog(github, source)
+@router.get("/apps")
+async def api_list_apps(viewer: ViewerDep) -> list[AppModel]:
+    """The apps the viewer may add: their own, and the ones others listed."""
     return [
-        CatalogItem(manifest=entry.manifest, source=PluginSourceModel.of(entry.source))
-        for entry in entries
+        AppModel(
+            id=app.id,
+            name=app.name,
+            mine=app.owner == viewer.user_id,
+            listed=app.listed,
+            latest=AppVersionModel.of(app.latest) if app.latest else None,
+        )
+        for app in await PluginApps.available_to(viewer.user_id)
     ]
+
+
+@router.post("/apps", status_code=201)
+@audit_endpoint
+async def api_publish_app(
+    request: Request,
+    viewer: ViewerDep,
+    repository: str | None = Query(None, max_length=200),
+    ref: str | None = Query(None, max_length=200),
+    commit: str | None = Query(None, max_length=64),
+) -> AppVersionModel:
+    """Release a version of one of the viewer's apps from its bundle, the request's HTML body.
+
+    ``repository``, ``ref`` and ``commit`` say where it was built, only to show.
+    """
+    length = request.headers.get("content-length")
+    if length is not None and length.isdigit() and int(length) > MAX_BUNDLE_BYTES:
+        raise HTTPException(413, f"an app is at most {MAX_BUNDLE_BYTES} bytes")
+    try:
+        html = (await request.body()).decode()
+    except UnicodeDecodeError as exc:
+        raise HTTPException(422, "the bundle must be UTF-8 HTML") from exc
+    origin: JsonObject = {
+        key: value
+        for key, value in {"repository": repository, "ref": ref, "commit": commit}.items()
+        if value
+    }
+    with _as_http():
+        return AppVersionModel.of(await PluginApps.publish(viewer.user_id, html, origin=origin))
+
+
+@router.patch("/apps/{app_id}", status_code=204)
+@audit_endpoint
+async def api_list_app(app_id: UUID, body: ListedBody, viewer: ViewerDep) -> Response:
+    """List the app for anyone to add, or keep it to the viewer, who publishes it."""
+    with _as_http():
+        await PluginApps.set_listed(app_id, viewer.user_id, body.listed)
+    return Response(status_code=204)
 
 
 @router.post("", status_code=201)
 @audit_endpoint
 async def api_install_plugin(body: InstallBody, viewer: ViewerDep) -> PluginSummary:
-    if body.scope == "organization" and not viewer.admin:
-        raise HTTPException(403, "Only admins install plugins for everyone")
+    """Add a version of an app to the viewer's web UI."""
     with _as_http():
-        source = PluginSource.parse(body.repository, body.path, body.ref)
-        async with GitHubClient.as_user(viewer.login) as github:
-            package = await source.fetch(github)
-        if package.manifest.name != body.name:
-            raise HTTPException(409, f"{source.repository} now holds {package.manifest.name!r}")
-        _check_permissions(package.manifest, body.permissions)
-        owner = None if body.scope == "organization" else viewer.user_id
-        if owner is not None and await PluginInstallations.named(body.name, None) is not None:
-            raise PluginNameTaken(body.name)
-        installation_id = await PluginInstallations.install(
-            package, user_id=owner, by=viewer.user_id
+        version = await PluginApps.version(body.version, viewer.user_id)
+        _check_permissions(version.manifest, body.permissions)
+        installation_id = await PluginInstallations.install(version, user_id=viewer.user_id)
+    return await _summary(installation_id, viewer)
+
+
+@router.get("/previews/{thread_id}")
+async def api_app_preview(thread_id: str, viewer: ViewerDep) -> PreviewModel:
+    """The app the viewer's agent builds in ``thread_id``, as it runs beside the thread."""
+    running = await PluginInstallations.previewing(thread_id, viewer.user_id)
+    newest = await PluginApps.newest_preview(thread_id, viewer.user_id)
+    return PreviewModel(
+        running=PluginSummary.of(running) if running else None,
+        waiting=AppVersionModel.of(newest)
+        if newest and (running is None or running.version.id != newest.id)
+        else None,
+    )
+
+
+@router.post("/previews/{thread_id}")
+@audit_endpoint
+async def api_approve_app_preview(
+    thread_id: str, body: InstallBody, viewer: ViewerDep
+) -> PreviewModel:
+    """Run the thread's newest build, with the permissions it asks for approved."""
+    newest = await PluginApps.newest_preview(thread_id, viewer.user_id)
+    if newest is None or newest.id != body.version:
+        raise HTTPException(409, "The agent has built a newer preview since")
+    _check_permissions(newest.manifest, body.permissions)
+    await PluginInstallations.preview(
+        thread_id, newest, user_id=viewer.user_id, approved=body.permissions
+    )
+    return await api_app_preview(thread_id, viewer)
+
+
+@router.post("/previews/{thread_id}/release", status_code=201)
+@audit_endpoint
+async def api_release_app_preview(thread_id: str, viewer: ViewerDep) -> PluginSummary:
+    """Keep the build running beside the thread: release it, in the viewer's sidebar."""
+    running = await PluginInstallations.previewing(thread_id, viewer.user_id)
+    if running is None or running.owner != viewer.user_id:
+        raise HTTPException(404, "No preview runs beside this thread")
+    with _as_http():
+        version = await PluginApps.release(running.version, by=viewer.user_id)
+        installed = next(
+            (
+                installation
+                for installation in await PluginInstallations.visible_to(viewer.user_id)
+                if installation.plugin == version.app
+            ),
+            None,
         )
-        return PluginSummary.of(await PluginInstallations.get(installation_id, viewer.user_id))
+        if installed is None:
+            installation_id = await PluginInstallations.install(version, user_id=viewer.user_id)
+        else:
+            installation_id = installed.id
+            await PluginInstallations.upgrade(installed.id, version, by=viewer.user_id)
+    return await _summary(installation_id, viewer)
 
 
 @router.post("/{installation_id}/upgrade")
 @audit_endpoint
 async def api_upgrade_plugin(
-    body: UpgradeBody, installation: ManagedDep, viewer: ViewerDep
+    body: InstallBody, plugin: PluginDep, viewer: ViewerDep
 ) -> PluginSummary:
-    """Move the install to the commit its ref names now."""
+    """Move the install to another version of its app."""
     with _as_http():
-        async with GitHubClient.as_user(viewer.login) as github:
-            package = await installation.source.fetch(github)
-        if package.manifest.name != installation.manifest.name:
-            raise HTTPException(409, f"The source now holds {package.manifest.name!r}")
-        _check_permissions(package.manifest, body.permissions)
-        await PluginInstallations.upgrade(installation.id, package, by=viewer.user_id)
-        return PluginSummary.of(await PluginInstallations.get(installation.id, viewer.user_id))
+        version = await PluginApps.version(body.version, viewer.user_id)
+        if version.app != plugin.installation.plugin or version.preview_of is not None:
+            raise HTTPException(409, "That is not a release of this app")
+        _check_permissions(version.manifest, body.permissions)
+        await PluginInstallations.upgrade(plugin.installation.id, version, by=viewer.user_id)
+    return await _summary(plugin.installation.id, viewer)
 
 
 @router.post("/{installation_id}/repositories")
@@ -298,13 +391,10 @@ async def api_upgrade_plugin(
 async def api_share_plugin_repositories(
     body: RepositoriesBody, plugin: PluginDep, viewer: ViewerDep
 ) -> PluginSummary:
-    """Share repositories with the plugin, for the viewer only: what they picked when it asked."""
+    """Share repositories with the app, for the viewer only: what they picked when it asked."""
     repositories = await _shareable(viewer.login, body.repositories)
     await PluginInstallations.share(plugin.installation.id, viewer.user_id, repositories)
-    with _as_http():
-        return PluginSummary.of(
-            await PluginInstallations.get(plugin.installation.id, viewer.user_id)
-        )
+    return await _summary(plugin.installation.id, viewer)
 
 
 @router.delete("/{installation_id}/repositories/{owner}/{repo}")
@@ -315,16 +405,13 @@ async def api_unshare_plugin_repository(
     await PluginInstallations.unshare(
         plugin.installation.id, viewer.user_id, f"{owner}/{repo}".lower()
     )
-    with _as_http():
-        return PluginSummary.of(
-            await PluginInstallations.get(plugin.installation.id, viewer.user_id)
-        )
+    return await _summary(plugin.installation.id, viewer)
 
 
 @router.delete("/{installation_id}", status_code=204)
 @audit_endpoint
-async def api_uninstall_plugin(installation: ManagedDep) -> Response:
-    await PluginInstallations.remove(installation.id)
+async def api_uninstall_plugin(plugin: PluginDep, viewer: ViewerDep) -> Response:
+    await PluginInstallations.remove(plugin.installation.id, viewer.user_id)
     return Response(status_code=204)
 
 

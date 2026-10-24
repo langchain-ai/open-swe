@@ -1,5 +1,6 @@
 import { useContext } from "react"
 import { EmbeddedThreadContext } from "@/features/agents/lib/embeddedThread"
+import { useThreadRunConfig } from "@/features/agents/lib/threadRunConfig"
 import { ReviewChatActionsContext } from "@/features/reviews/components/ReviewChatActions"
 import { useMutation, useQueryClient } from "@tanstack/react-query"
 
@@ -111,6 +112,7 @@ export function useSubmitAgentMessage(threadId: string) {
           configurable: {
             ...configurable,
             ...embedded?.runConfigurable,
+            ...useThreadRunConfig.getState().byThread[threadId],
             ...(review
               ? {
                   review_chat_pr_url: `https://github.com/${review.owner}/${review.repo}/pull/${review.number}`,

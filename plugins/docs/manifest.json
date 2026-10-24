@@ -3,7 +3,6 @@
   "displayName": "Docs",
   "version": "0.3.0",
   "description": "Pages over the Markdown in your repositories: edit together live, comment and suggest, and publish each version as a pull request.",
-  "entry": "bundle/index.html",
   "sidebar": {
     "label": "Docs",
     "icon": "file-text"

@@ -138,6 +138,12 @@ class InstalledPlugin:
         """The person's chat under ``name``, made with its agent thread the first time."""
         self.require(PluginPermission.AGENT)
         scope = None if repository is None else await self.repository(repository)
+        if self.installation.preview_of is not None:
+            # A preview chats in the thread building it, whatever the chat's name.
+            thread = self.installation.preview_of
+            return await self.chats.on_thread(thread) or await self.chats.record(
+                name, scope, thread
+            )
         found = await self.chats.get(name, scope)
         if found is not None:
             return found

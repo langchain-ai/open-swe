@@ -1,26 +1,32 @@
-"""The files a plugin repository carries.
+"""What an app says about itself, inside its own bundle.
 
-A plugin is a directory with ``.openswe-plugin/plugin.json``. A marketplace is a
-repository with ``.openswe-plugin/marketplace.json`` listing plugins and where
-each one lives. The manifest's ``entry`` is where the plugin's build writes its
-UI, one self-contained HTML file, which the plugin workflow publishes and the
-web UI runs in a sandboxed frame; the plugin never runs on the backend.
+An app is one self-contained HTML file, built anywhere: in a thread's sandbox,
+in CI, on a laptop. Its manifest is a JSON script in that file,
+``<script type="application/openswe-plugin+json">``, read when a version is
+published. The web UI runs the file in a sandboxed frame; none of it runs on
+the backend.
 """
 
+import json
+import re
 from enum import StrEnum
-from pathlib import PurePosixPath
 from typing import Annotated, Literal
 
-from pydantic import AfterValidator, BaseModel, ConfigDict, Field, StringConstraints
+from pydantic import BaseModel, ConfigDict, Field, StringConstraints, ValidationError
 
-MANIFEST_PATH = ".openswe-plugin/plugin.json"
-MARKETPLACE_PATH = ".openswe-plugin/marketplace.json"
+MANIFEST_TYPE = "application/openswe-plugin+json"
+MAX_BUNDLE_BYTES = 64_000_000
 
 PluginName = Annotated[str, StringConstraints(pattern=r"^[a-z0-9](?:[a-z0-9-]{0,46}[a-z0-9])?$")]
 
+_MANIFEST_SCRIPT = re.compile(
+    r"<script\b[^>]*\btype=[\"']" + re.escape(MANIFEST_TYPE) + r"[\"'][^>]*>(.*?)</script>",
+    re.IGNORECASE | re.DOTALL,
+)
+
 
 class PluginPermission(StrEnum):
-    """What a plugin may ask the dashboard to do for the person using it."""
+    """What a plugin may ask the web UI to do for the person using it."""
 
     STORAGE = "storage"
     """Keep documents: private to that person, or shared per GitHub repository."""
@@ -33,15 +39,6 @@ class PluginPermission(StrEnum):
     REALTIME = "realtime"
     """Join live rooms: broadcast updates and presence to others with the same access."""
 
-
-def _relative_path(value: str) -> str:
-    path = PurePosixPath(value)
-    if path.is_absolute() or ".." in path.parts or not path.parts:
-        raise ValueError("must be a relative path inside the plugin")
-    return str(path)
-
-
-RelativePath = Annotated[str, AfterValidator(_relative_path)]
 
 SidebarIcon = Literal[
     "puzzle-piece",
@@ -68,38 +65,24 @@ class PluginManifest(BaseModel):
     display_name: str = Field(alias="displayName", min_length=1, max_length=48)
     version: str = Field(min_length=1, max_length=32)
     description: str = Field(default="", max_length=280)
-    entry: RelativePath
     sidebar: SidebarEntry
     permissions: list[PluginPermission] = []
 
 
-class GitHubSource(BaseModel):
-    source: Literal["github"]
-    repo: str
-    ref: str | None = None
-    sha: str | None = None
+class BundleError(ValueError):
+    """A file that is not an app Open SWE can run."""
 
 
-class GitSubdirSource(BaseModel):
-    source: Literal["git-subdir"]
-    url: str
-    path: RelativePath
-    ref: str | None = None
-    sha: str | None = None
-
-
-class MarketplaceEntry(BaseModel):
-    name: PluginName
-    source: RelativePath | GitHubSource | GitSubdirSource = Field(union_mode="left_to_right")
-    description: str = ""
-
-
-class MarketplaceOwner(BaseModel):
-    name: str
-
-
-class MarketplaceManifest(BaseModel):
-    name: str
-    owner: MarketplaceOwner
-    description: str = ""
-    plugins: list[MarketplaceEntry]
+def read_bundle(html: str) -> PluginManifest:
+    """The manifest inside ``html``, once the file is one Open SWE can store and run."""
+    if len(html.encode()) > MAX_BUNDLE_BYTES:
+        raise BundleError(f"an app is at most {MAX_BUNDLE_BYTES} bytes")
+    if "\x00" in html:
+        raise BundleError("the file contains NUL characters; escape them as \\u0000")
+    found = _MANIFEST_SCRIPT.search(html)
+    if found is None:
+        raise BundleError(f'the file has no <script type="{MANIFEST_TYPE}"> manifest')
+    try:
+        return PluginManifest.model_validate(json.loads(found.group(1)))
+    except (ValueError, ValidationError) as exc:
+        raise BundleError(f"the manifest is not valid: {exc}") from exc

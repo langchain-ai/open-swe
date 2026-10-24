@@ -68,7 +68,7 @@ const NAV: Array<NavGroup> = [
       },
       {
         to: "/my-settings/plugins",
-        label: "Plugins",
+        label: "Apps",
         icon: PuzzlePieceIcon,
       },
       {

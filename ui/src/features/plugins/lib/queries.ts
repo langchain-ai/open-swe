@@ -1,20 +1,22 @@
-import type { PluginPermission } from "@openswe/plugin-sdk"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 
 import type {
+  App,
+  AppPreview,
   InstallRequest,
   InstalledPlugin,
-  PluginSource,
 } from "@/features/plugins/lib/api"
 import { pluginsApi } from "@/features/plugins/lib/api"
+import { invalidationTopic } from "@/lib/invalidations/topics"
 import { optimisticUpdate } from "@/lib/optimistic"
 import { useSession } from "@/lib/session"
 
 export const pluginKeys = {
   all: ["plugins"] as const,
-  catalog: (source: PluginSource) => ["plugins", "catalog", source] as const,
-  bundle: (id: string, commit: string) =>
-    ["plugins", "bundle", id, commit] as const,
+  apps: ["plugins", "apps"] as const,
+  preview: (threadId: string) => ["plugins", "preview", threadId] as const,
+  bundle: (id: string, version: string) =>
+    ["plugins", "bundle", id, version] as const,
 }
 
 export function usePlugins() {
@@ -40,20 +42,88 @@ export function usePlugin(name: string): {
   }
 }
 
-export function usePluginCatalog(source: PluginSource | null) {
+export function useApps(enabled = true) {
   return useQuery({
-    queryKey: pluginKeys.catalog(
-      source ?? { repository: "", path: "", ref: null }
-    ),
-    queryFn: () => pluginsApi.catalog(source!),
-    enabled: source !== null,
-    retry: false,
+    queryKey: pluginKeys.apps,
+    queryFn: pluginsApi.apps,
+    enabled,
+  })
+}
+
+/** The app the agent builds in ``threadId``, reloaded whenever it previews another build. */
+export function useAppPreview(threadId: string) {
+  return useQuery({
+    queryKey: pluginKeys.preview(threadId),
+    queryFn: () => pluginsApi.preview(threadId),
+    meta: { invalidatedBy: [invalidationTopic("app-previews", threadId)] },
+  })
+}
+
+export function useApprovePreview(threadId: string) {
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: (body: InstallRequest) =>
+      pluginsApi.approvePreview(threadId, body),
+    meta: { errorTitle: "Couldn't run the preview" },
+    onSuccess: (preview) =>
+      queryClient.setQueryData<AppPreview>(
+        pluginKeys.preview(threadId),
+        preview
+      ),
+  })
+}
+
+export function useReleasePreview(threadId: string) {
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: () => pluginsApi.releasePreview(threadId),
+    meta: { errorTitle: "Couldn't add the app to your sidebar" },
+    onSuccess: (installed) => {
+      queryClient.setQueryData<Array<InstalledPlugin>>(
+        pluginKeys.all,
+        (prev) => [
+          ...(prev ?? []).filter((plugin) => plugin.id !== installed.id),
+          installed,
+        ]
+      )
+      void queryClient.invalidateQueries({ queryKey: pluginKeys.apps })
+    },
+  })
+}
+
+export function usePublishApp() {
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: (html: string) => pluginsApi.publish(html),
+    meta: { errorTitle: "Couldn't publish the app" },
+    onSettled: () =>
+      queryClient.invalidateQueries({ queryKey: pluginKeys.apps }),
+  })
+}
+
+export function useSetAppListed() {
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: (vars: { id: string; listed: boolean }) =>
+      pluginsApi.setListed(vars.id, vars.listed),
+    meta: { errorTitle: "Couldn't change who can add the app" },
+    onMutate: async (vars) => ({
+      undo: await optimisticUpdate<Array<App>>(
+        queryClient,
+        pluginKeys.apps,
+        (prev) =>
+          prev.map((app) =>
+            app.id === vars.id ? { ...app, listed: vars.listed } : app
+          )
+      ),
+    }),
+    onError: (_error, _vars, context) => context?.undo(),
   })
 }
 
 export function usePluginBundle(plugin: InstalledPlugin) {
   return useQuery({
-    queryKey: pluginKeys.bundle(plugin.id, plugin.commit_sha),
+    queryKey: pluginKeys.bundle(plugin.id, plugin.version.id),
     queryFn: () => pluginsApi.bundle(plugin.id),
     staleTime: Infinity,
   })
@@ -80,8 +150,11 @@ export function useInstallPlugin() {
 export function useUpgradePlugin() {
   const queryClient = useQueryClient()
   return useMutation({
-    mutationFn: (vars: { id: string; permissions: Array<PluginPermission> }) =>
-      pluginsApi.upgrade(vars.id, vars.permissions),
+    mutationFn: (vars: { id: string } & InstallRequest) =>
+      pluginsApi.upgrade(vars.id, {
+        version: vars.version,
+        permissions: vars.permissions,
+      }),
     // A request for new permissions is answered with a review, not a toast.
     meta: { silent: true },
     onSuccess: () =>

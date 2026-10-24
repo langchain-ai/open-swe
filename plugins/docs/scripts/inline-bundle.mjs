@@ -1,6 +1,7 @@
-// Folds Start's SPA build into the one self-contained HTML file a plugin ships
-// (bundle/index.html). The dashboard runs it with no network, so every script,
-// stylesheet and font must be inside it. Fonts keep their Latin subsets only.
+// Folds Start's SPA build into the one self-contained HTML file an app ships
+// (bundle/index.html), with manifest.json inside it. The dashboard runs it with
+// no network, so every script, stylesheet and font must be inside it. Fonts
+// keep their Latin subsets only.
 import { readFileSync, readdirSync, mkdirSync, writeFileSync } from "node:fs"
 import { dirname, join } from "node:path"
 import { fileURLToPath } from "node:url"
@@ -33,6 +34,13 @@ html = html.replace(
     `<style>${inlineFonts(readFileSync(asset(href), "utf8"))}</style>`
 )
 html = html.replace(/<link rel="modulepreload" href="[^"]+"\/?>/g, "")
+const manifest = readFileSync(join(root, "manifest.json"), "utf8")
+html = html.replace(
+  "</head>",
+  `<script type="application/openswe-plugin+json">${JSON.stringify(
+    JSON.parse(manifest)
+  ).replaceAll("<", "\\u003c")}</script></head>`
+)
 html = html.replace(
   /<script type="module" async="" src="([^"]+)"><\/script>/g,
   (_, src) =>
