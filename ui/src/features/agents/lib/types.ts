@@ -58,6 +58,8 @@ export type AcpToolKind =
   | "move"
   | "search"
   | "execute"
+  /** Code-mode `eval`: JavaScript run in the agent's interpreter. */
+  | "code"
   | "think"
   | "fetch"
   | "slack"
