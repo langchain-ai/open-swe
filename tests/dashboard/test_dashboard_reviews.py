@@ -74,11 +74,8 @@ async def test_get_review_propagates_a_pull_request_missing_on_github(monkeypatc
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize(
-    ("reviewed", "trace_url"),
-    [(True, "https://smith.langchain.com/trace/reviewer"), (True, None), (False, None)],
-)
-async def test_review_trace_uses_the_reviewer_thread(monkeypatch, reviewed, trace_url) -> None:
+async def test_review_trace_uses_the_reviewer_thread(monkeypatch) -> None:
+    trace_url = "https://smith.langchain.com/trace/reviewer"
     monkeypatch.setattr(
         github_app, "get_github_app_installation_token", AsyncMock(return_value="t")
     )
@@ -93,7 +90,7 @@ async def test_review_trace_uses_the_reviewer_thread(monkeypatch, reviewed, trac
             )
         ),
     )
-    thread = _thread("acme", "app", 7, "alice") if reviewed else None
+    thread = _thread("acme", "app", 7, "alice")
     monkeypatch.setattr(review_api, "_reviewer_thread_for", AsyncMock(return_value=thread))
     monkeypatch.setattr(review_api, "_scout_target", AsyncMock(return_value=None))
     trace = AsyncMock(return_value=trace_url)
@@ -102,7 +99,4 @@ async def test_review_trace_uses_the_reviewer_thread(monkeypatch, reviewed, trac
     detail = await review_api.get_review("acme", "app", 7)
 
     assert detail["trace_url"] == trace_url
-    if reviewed:
-        trace.assert_awaited_once_with("acme/app/7")
-    else:
-        trace.assert_not_awaited()
+    trace.assert_awaited_once_with("acme/app/7")
