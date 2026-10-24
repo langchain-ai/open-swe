@@ -112,38 +112,72 @@ impl ChannelSetup {
         self.trigger.as_ref()
     }
 
-    /// Set the channels up for the live deployment.
+    /// Set the channels up for the live deployment. Each channel is set up
+    /// even when another's setup fails; the failures end the deploy together
+    /// once every channel had its turn.
     pub(crate) fn set_up(&self, target: &SetupTarget<'_>) -> Result<()> {
+        let mut failures = Vec::new();
         if let Some(trigger) = &self.trigger {
-            trigger_channels::register(
+            let result = trigger_channels::register(
                 target.client,
                 trigger,
                 target.agent_server_url,
                 target.deployment_id,
                 target.assistant_id,
                 target.env_vars,
-            )?;
+            );
+            collect_failure(&mut failures, "Slack", result);
         }
         if let Some(github) = &self.github {
-            github_channel::setup(
+            let result = github_channel::setup(
                 target.client,
                 github,
                 target.agent_server_url,
                 target.deployment_id,
                 target.project_root,
                 target.env_vars,
-            )?;
+            );
+            collect_failure(&mut failures, "GitHub", result);
         }
         if let Some(linear) = &self.linear {
-            linear_channel::setup(
+            let result = linear_channel::setup(
                 target.client,
                 linear,
                 target.agent_server_url,
                 target.deployment_id,
                 target.env_vars,
-            )?;
+            );
+            collect_failure(&mut failures, "Linear", result);
         }
-        Ok(())
+        combine_failures(failures)
+    }
+}
+
+fn collect_failure(
+    failures: &mut Vec<(&'static str, anyhow::Error)>,
+    channel: &'static str,
+    result: Result<()>,
+) {
+    if let Err(error) = result {
+        failures.push((channel, error));
+    }
+}
+
+/// One channel's failure as it is; several, each under its channel's name.
+fn combine_failures(mut failures: Vec<(&'static str, anyhow::Error)>) -> Result<()> {
+    match failures.len() {
+        0 => Ok(()),
+        1 => Err(failures.remove(0).1),
+        _ => {
+            let lines: Vec<String> = failures
+                .iter()
+                .map(|(channel, error)| format!("{channel}: {error:#}"))
+                .collect();
+            anyhow::bail!(
+                "The deployment is live, but these channels did not finish setting up:\n{}",
+                lines.join("\n")
+            )
+        }
     }
 }
 
@@ -158,7 +192,7 @@ pub(crate) fn dev_notes(providers: &BTreeSet<String>) -> Vec<String> {
     }
     if providers.contains(linear_channel::PROVIDER) {
         notes.push(
-            "Linear         not available in dev; deploy to receive Linear events".to_string(),
+            "Linear         not available in dev · deploy to receive Linear events".to_string(),
         );
     }
     notes
@@ -212,4 +246,28 @@ pub(crate) fn lists_events_url(manifest: &Value) -> bool {
     field("transport") != Some("trigger_server")
         && field("provider") != Some(github_channel::PROVIDER)
         && field("provider") != Some(linear_channel::PROVIDER)
+}
+
+#[cfg(test)]
+mod tests {
+    use anyhow::anyhow;
+
+    use super::*;
+
+    #[test]
+    fn every_channels_failure_is_reported() {
+        assert!(combine_failures(Vec::new()).is_ok());
+
+        let one = combine_failures(vec![("Slack", anyhow!("no app"))]).unwrap_err();
+        assert_eq!(one.to_string(), "no app");
+
+        let mut failures = Vec::new();
+        collect_failure(&mut failures, "Slack", Err(anyhow!("no app")));
+        collect_failure(&mut failures, "GitHub", Ok(()));
+        collect_failure(&mut failures, "Linear", Err(anyhow!("no secret")));
+        let both = combine_failures(failures).unwrap_err().to_string();
+        assert!(both.contains("Slack: no app"), "{both}");
+        assert!(both.contains("Linear: no secret"), "{both}");
+        assert!(!both.contains("GitHub"), "{both}");
+    }
 }

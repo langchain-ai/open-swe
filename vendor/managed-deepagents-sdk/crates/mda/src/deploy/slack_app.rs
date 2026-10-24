@@ -7,8 +7,9 @@
 //! - one the user already has, pointed at Trigger Server.
 //!
 //! The user's own app's bot token and signing secret go to Trigger Server, which
-//! keeps them in Agent Auth, so a redeploy asks nothing. Without a terminal,
-//! `MDA_SLACK_BOT_TOKEN` and `MDA_SLACK_SIGNING_SECRET` supply them.
+//! keeps them in Agent Auth, so a redeploy asks nothing. `MDA_SLACK_BOT_TOKEN`
+//! and `MDA_SLACK_SIGNING_SECRET` supply them instead of the prompts, with or
+//! without a terminal.
 
 use std::collections::BTreeMap;
 
@@ -17,7 +18,7 @@ use cliclack::log;
 use reqwest::Url;
 use serde_json::Value;
 
-use super::channel_app::override_value;
+use super::channel_app::{env_app_notice, override_value};
 use crate::langsmith::{self, SlackChannelSetup, SlackCustomerApp, SlackManager};
 
 /// CLI-only: a Slack app's bot token and signing secret when deploy cannot ask.
@@ -26,7 +27,34 @@ pub(crate) const SIGNING_SECRET_ENV: &str = "MDA_SLACK_SIGNING_SECRET";
 
 const BOT_TOKEN_PREFIX: &str = "xoxb-";
 
-pub(crate) const UNATTENDED_SELF_HOSTED: &str = "This agent's Slack channel needs a Slack app. Set MDA_SLACK_BOT_TOKEN and MDA_SLACK_SIGNING_SECRET to your app's bot token and signing secret, or rerun `mda deploy` in a terminal to set one up.";
+/// Why a new Slack channel cannot get an app without a terminal: LangSmith
+/// cannot create one here (`self_hosted`, or not offered), or would first need
+/// the user to authorize it in Slack.
+pub(crate) fn unattended_message(self_hosted: bool) -> String {
+    let managed = if self_hosted {
+        ""
+    } else {
+        " To have LangSmith create and manage the app instead, run `mda deploy` in a terminal once."
+    };
+    format!(
+        "This agent's Slack channel needs a Slack app, and without a terminal deploy cannot ask for it. Create one, or use one you have, then set {BOT_TOKEN_ENV} and {SIGNING_SECRET_ENV} in the shell or .env to its bot token and signing secret and run `mda deploy` again.{managed}"
+    )
+}
+
+/// Whether a new Slack channel can get an app without a terminal and without
+/// the env credentials: only one LangSmith creates in a workspace the user
+/// already authorized it in. An unknown `manager` is tried.
+pub(crate) fn unattended_problem(
+    self_hosted: bool,
+    manager: Option<&SlackManager>,
+) -> Option<String> {
+    match manager {
+        _ if self_hosted => Some(unattended_message(true)),
+        Some(SlackManager::Unavailable) => Some(unattended_message(true)),
+        Some(SlackManager::NotAuthorized) => Some(unattended_message(false)),
+        Some(SlackManager::Authorized { .. }) | None => None,
+    }
+}
 
 /// The Slack app a channel is registered with.
 #[derive(Debug)]
@@ -60,6 +88,7 @@ pub(crate) trait ChoiceEnv {
     /// Whether LangSmith can create the app, and where; `None` when unknown.
     fn manager(&mut self) -> Option<SlackManager>;
     fn choose(&mut self, options: &[AppOption]) -> Result<AppSource>;
+    fn info(&mut self, message: &str) -> Result<()>;
     fn manifest(&mut self) -> Result<Value>;
     fn show_create_page(&mut self, link: &Url) -> Result<()>;
     fn show_existing_settings(&mut self, settings: &str) -> Result<()>;
@@ -72,14 +101,20 @@ pub(crate) fn choose_app(env: &mut impl ChoiceEnv) -> Result<SlackApp> {
         return Ok(SlackApp::Customer(credentials));
     }
     let self_hosted = env.self_hosted();
+    let manager = if self_hosted { None } else { env.manager() };
     if !env.interactive() {
-        if self_hosted {
-            bail!(UNATTENDED_SELF_HOSTED);
+        if let Some(problem) = unattended_problem(self_hosted, manager.as_ref()) {
+            bail!(problem);
         }
-        // As before: LangSmith creates the app, or prints its authorization link.
+        let workspace = match &manager {
+            Some(SlackManager::Authorized { team_name }) => format!(" in {team_name}"),
+            _ => String::new(),
+        };
+        env.info(&format!(
+            "Without a terminal, LangSmith creates and manages this agent's Slack app{workspace}. To use your own app instead, set {BOT_TOKEN_ENV} and {SIGNING_SECRET_ENV}."
+        ))?;
         return Ok(SlackApp::Managed);
     }
-    let manager = if self_hosted { None } else { env.manager() };
     let options = app_options(self_hosted, manager.as_ref());
     match env.choose(&options)? {
         AppSource::Managed => Ok(SlackApp::Managed),
@@ -350,8 +385,10 @@ impl ChoiceEnv for LiveChoice<'_> {
     fn credentials_from_env(&mut self) -> Result<Option<SlackCustomerApp>> {
         let credentials = credentials_env(self.env_vars)?;
         if credentials.is_some() {
-            log::info(format!(
-                "Using the Slack app from {BOT_TOKEN_ENV}. LangSmith stores its credentials, so you can remove {BOT_TOKEN_ENV} and {SIGNING_SECRET_ENV} afterwards."
+            log::info(env_app_notice(
+                "Slack app",
+                "LangSmith",
+                &[BOT_TOKEN_ENV, SIGNING_SECRET_ENV],
             ))?;
         }
         Ok(credentials)
@@ -373,6 +410,10 @@ impl ChoiceEnv for LiveChoice<'_> {
             prompt = prompt.item(option.source, &option.label, option.hint);
         }
         prompt.interact().context("failed to choose a Slack app")
+    }
+
+    fn info(&mut self, message: &str) -> Result<()> {
+        Ok(log::info(message)?)
     }
 
     fn manifest(&mut self) -> Result<Value> {
@@ -431,6 +472,7 @@ mod tests {
         existing_settings: Option<String>,
         asked_credentials: bool,
         asked_manager: bool,
+        notes: Vec<String>,
     }
 
     fn credentials() -> SlackCustomerApp {
@@ -481,6 +523,11 @@ mod tests {
             self.answer.ok_or_else(|| anyhow!("no answer"))
         }
 
+        fn info(&mut self, message: &str) -> Result<()> {
+            self.notes.push(message.to_string());
+            Ok(())
+        }
+
         fn manifest(&mut self) -> Result<Value> {
             Ok(manifest())
         }
@@ -521,11 +568,48 @@ mod tests {
     }
 
     #[test]
-    fn unattended_hosted_deploy_keeps_creating_a_managed_app() {
-        let mut env = FakeChoice::default();
+    fn unattended_hosted_deploy_creates_a_managed_app_in_an_authorized_workspace() {
+        for manager in [
+            Some(SlackManager::Authorized {
+                team_name: "Acme".to_string(),
+            }),
+            None,
+        ] {
+            let mut env = FakeChoice {
+                manager,
+                ..FakeChoice::default()
+            };
 
-        assert!(matches!(choose_app(&mut env).unwrap(), SlackApp::Managed));
-        assert!(!env.asked_manager);
+            assert!(matches!(choose_app(&mut env).unwrap(), SlackApp::Managed));
+            assert!(env.asked_manager);
+            // Not silently: it says so, and how to use your own app.
+            assert_eq!(env.notes.len(), 1);
+            assert!(env.notes[0].contains(BOT_TOKEN_ENV), "{:?}", env.notes);
+        }
+    }
+
+    #[test]
+    fn unattended_hosted_deploy_that_needs_authorization_fails_with_the_env_hint() {
+        for manager in [SlackManager::NotAuthorized, SlackManager::Unavailable] {
+            let mut env = FakeChoice {
+                manager: Some(manager),
+                ..FakeChoice::default()
+            };
+
+            let error = choose_app(&mut env).unwrap_err().to_string();
+
+            assert!(error.contains(BOT_TOKEN_ENV), "{error}");
+            assert!(error.contains("in the shell or .env"), "{error}");
+            assert!(error.contains("run `mda deploy` again"), "{error}");
+        }
+        assert!(
+            unattended_problem(false, Some(&SlackManager::NotAuthorized))
+                .unwrap()
+                .contains("in a terminal once")
+        );
+        assert!(!unattended_problem(false, Some(&SlackManager::Unavailable))
+            .unwrap()
+            .contains("in a terminal once"));
     }
 
     #[test]

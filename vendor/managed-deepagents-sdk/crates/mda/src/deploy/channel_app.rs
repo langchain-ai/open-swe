@@ -1,6 +1,7 @@
-//! What the channels that keep an app in Agent Auth share during `mda
-//! deploy`: GitHub ([`super::github_channel`]) and Linear
-//! ([`super::linear_channel`]).
+//! What the channels that set up an app during `mda deploy` share: GitHub
+//! ([`super::github_channel`]) and Linear ([`super::linear_channel`]), which
+//! keep theirs in Agent Auth, and Slack ([`super::trigger_channels`]), which
+//! Trigger Server keeps.
 //!
 //! - the Agent Auth client, with the hidden overrides that point only its
 //!   calls at another LangSmith;
@@ -120,7 +121,7 @@ pub(crate) fn is_interactive() -> bool {
     std::io::stdin().is_terminal() && std::io::stderr().is_terminal()
 }
 
-/// A hidden override from the project's `.env`, else from the shell, like
+/// A CLI-only setting from the shell, else from the project's `.env`, like
 /// other CLI settings. The deploy never uploads these as secrets (see
 /// `RESERVED_ENV_VARS`).
 pub(crate) fn override_value(key: &str, env_vars: &BTreeMap<String, String>) -> Option<String> {
@@ -188,6 +189,24 @@ fn configured_oauth_callback(configured: Option<String>) -> Result<Option<String
         anyhow::bail!("{OAUTH_CALLBACK_ENV} must be an http(s) URL");
     }
     Ok(Some(url))
+}
+
+/// `a`, `a and b`, `a, b and c`.
+pub(crate) fn join_names(names: &[&str]) -> String {
+    match names {
+        [] => String::new(),
+        [only] => (*only).to_string(),
+        [rest @ .., last] => format!("{} and {last}", rest.join(", ")),
+    }
+}
+
+/// What deploy says when a channel's app comes from CLI-only env vars: which
+/// ones, and that every one of them can go once `store` keeps the app.
+pub(crate) fn env_app_notice(app: &str, store: &str, vars: &[&str]) -> String {
+    let names = join_names(vars);
+    format!(
+        "Using the {app} from {names}. {store} keeps its credentials, so you can remove {names} afterwards."
+    )
 }
 
 /// Validated `https://` Agent Server URL plus the channel's events path.
@@ -448,6 +467,17 @@ mod tests {
                 "{status}: {error:#}"
             );
         }
+    }
+
+    #[test]
+    fn env_notices_name_every_variable_they_used() {
+        assert_eq!(join_names(&["A"]), "A");
+        assert_eq!(join_names(&["A", "B"]), "A and B");
+        assert_eq!(join_names(&["A", "B", "C"]), "A, B and C");
+        assert_eq!(
+            env_app_notice("Slack app", "LangSmith", &["X", "Y"]),
+            "Using the Slack app from X and Y. LangSmith keeps its credentials, so you can remove X and Y afterwards."
+        );
     }
 
     #[test]

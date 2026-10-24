@@ -66,6 +66,10 @@ struct Fake {
     app_source: AppSource,
     asked_app_source: bool,
     existing_settings: Option<String>,
+    /// Answers to "added the redirect URI?"; Yes once they run out.
+    redirect_answers: VecDeque<bool>,
+    /// Answers to "set the app's settings?"; Yes once they run out.
+    settings_answers: VecDeque<bool>,
     calls: Vec<String>,
 }
 
@@ -84,6 +88,8 @@ impl Fake {
             app_source: AppSource::New,
             asked_app_source: false,
             existing_settings: None,
+            redirect_answers: VecDeque::new(),
+            settings_answers: VecDeque::new(),
             calls: Vec::new(),
         }
     }
@@ -177,9 +183,13 @@ impl SetupEnv for Fake {
         self.calls.push(format!("start_install {connection_id}"));
         Ok(self.install.clone())
     }
-    fn confirm_redirect_uri(&mut self, actual: &str) -> Result<()> {
+    fn confirm_redirect_uri(&mut self, actual: &str) -> Result<bool> {
         self.calls.push(format!("confirm_redirect_uri {actual}"));
-        Ok(())
+        Ok(self.redirect_answers.pop_front().unwrap_or(true))
+    }
+    fn confirm_app_settings(&mut self) -> Result<bool> {
+        self.calls.push("confirm_app_settings".into());
+        Ok(self.settings_answers.pop_front().unwrap_or(true))
     }
     fn open_install_page(&mut self, _url: &str) -> Result<()> {
         self.calls.push("open_install_page".into());
@@ -258,15 +268,15 @@ fn creates_and_installs_a_new_app_from_a_filled_in_page() {
     );
     assert_eq!(
         env.calls[6],
-        format!("success Linear channel ready: the Linear app sends its events to {WEBHOOK}")
+        format!("success Linear channel ready · the Linear app sends its events to {WEBHOOK}")
     );
     assert!(env.called("delete_connection").is_empty());
     assert!(env.asked_app_source);
-    // A new app gets what the channel says; only a kept one needs the note.
-    assert!(!env
-        .calls
-        .iter()
-        .any(|call| call.contains("keeps its Linear app")));
+    // Said once, on the deploy that installs the app.
+    assert_eq!(
+        env.called("info Linear has no API to change an app").len(),
+        1
+    );
 }
 
 #[test]
@@ -339,6 +349,73 @@ fn uses_credentials_from_the_env_without_a_page() {
 }
 
 #[test]
+fn lists_an_env_apps_settings_and_waits_for_them_in_a_terminal() {
+    let mut env = Fake::new();
+    env.env_credentials = Some(credentials());
+    env.settings_answers = VecDeque::from([false]);
+    run_setup(&mut env, &sessions()).unwrap();
+
+    let warning = env.called("warning Point your Linear app")[0].clone();
+    assert!(warning.contains(&format!("Redirect URIs: add {REDIRECT}")));
+    assert!(warning.contains(&format!("URL {WEBHOOK}")));
+    assert!(warning.contains("Linear can't tell deploy what the app has set"));
+    assert!(!warning.contains("prompts below"));
+    // "No" asks again; the install page opens only after "Yes".
+    assert_eq!(env.called("confirm_app_settings").len(), 2);
+    assert_eq!(env.called("info Linear refuses the install").len(), 1);
+    let confirmed = env
+        .calls
+        .iter()
+        .rposition(|call| call == "confirm_app_settings")
+        .unwrap();
+    let open = env
+        .calls
+        .iter()
+        .position(|call| call == "open_install_page")
+        .unwrap();
+    assert!(confirmed < open);
+
+    // Without a terminal the settings come before the install link, unasked.
+    let mut unattended = Fake::new();
+    unattended.interactive = false;
+    unattended.env_credentials = Some(credentials());
+    run_setup(&mut unattended, &sessions()).unwrap();
+    assert!(unattended.called("confirm_app_settings").is_empty());
+    let listed = unattended
+        .calls
+        .iter()
+        .position(|call| call.starts_with("warning Point your Linear app"))
+        .unwrap();
+    let open = unattended
+        .calls
+        .iter()
+        .position(|call| call == "open_install_page")
+        .unwrap();
+    assert!(listed < open);
+
+    // A new app from deploy's page is filled in, so nothing is listed.
+    let mut created = Fake::new();
+    run_setup(&mut created, &sessions()).unwrap();
+    assert!(created.called("warning Point your Linear app").is_empty());
+    assert!(created.called("confirm_app_settings").is_empty());
+}
+
+#[test]
+fn tells_a_wrong_client_id_or_secret_from_an_answer_that_says_nothing() {
+    let invalid = |error: &str| format!(r#"{{"error":"{error}","error_description":"x"}}"#);
+    let secret = credentials_verdict(400, &invalid("invalid_secret")).unwrap_err();
+    assert!(secret.to_string().contains(CLIENT_SECRET_ENV), "{secret}");
+    let client = credentials_verdict(400, &invalid("invalid_client")).unwrap_err();
+    assert!(client.to_string().contains(CLIENT_ID_ENV), "{client}");
+    // Right credentials: Linear only refuses the made-up code.
+    assert!(credentials_verdict(400, &invalid("invalid_grant")).is_ok());
+    // Anything else can't tell, so deploy goes on.
+    assert!(credentials_verdict(500, &invalid("invalid_client")).is_ok());
+    assert!(credentials_verdict(400, "not json").is_ok());
+    assert!(credentials_verdict(200, "{}").is_ok());
+}
+
+#[test]
 fn says_when_agent_auth_redirects_elsewhere() {
     let mut env = Fake::new();
     env.install = session(
@@ -365,6 +442,42 @@ fn says_when_agent_auth_redirects_elsewhere() {
     let mut listed = Fake::new();
     run_setup(&mut listed, &sessions()).unwrap();
     assert!(listed.called("confirm_redirect_uri").is_empty());
+}
+
+#[test]
+fn a_no_to_the_redirect_uri_asks_again_before_the_install_page_opens() {
+    let tunnel = "https://tunnel.trycloudflare.com/v1/agent-auth/oauth/callback";
+    let mut env = Fake::new();
+    env.install = session("pending", tunnel);
+    env.redirect_answers = VecDeque::from([false, false]);
+    run_setup(&mut env, &sessions()).unwrap();
+    assert_eq!(env.called("confirm_redirect_uri").len(), 3);
+    assert_eq!(env.called("info Linear refuses the install").len(), 2);
+    let last_confirm = env
+        .calls
+        .iter()
+        .rposition(|call| call.starts_with("confirm_redirect_uri"))
+        .unwrap();
+    let open = env
+        .calls
+        .iter()
+        .position(|call| call == "open_install_page")
+        .unwrap();
+    assert!(last_confirm < open);
+
+    // Without a terminal nobody is asked: deploy prints the URI and goes on.
+    let mut unattended = Fake::new();
+    unattended.interactive = false;
+    unattended.env_credentials = Some(credentials());
+    unattended.install = session("pending", tunnel);
+    run_setup(&mut unattended, &sessions()).unwrap();
+    assert!(unattended.called("confirm_redirect_uri").is_empty());
+    assert_eq!(
+        unattended
+            .called("warning Agent Auth expects Linear to redirect")
+            .len(),
+        1
+    );
 }
 
 #[test]
@@ -423,32 +536,39 @@ fn finishes_what_an_earlier_setup_left() {
     let mut ready = Fake::new();
     ready.connections = VecDeque::from([app("conn-1", Some("secret-1"), AgentGrant::Active)]);
     run_setup(&mut ready, &sessions()).unwrap();
-    assert!(ready.calls[0].starts_with("success Linear channel ready: "));
+    assert!(ready.calls[0].starts_with("success Linear channel ready · "));
     assert!(ready.called("start_install").is_empty());
     assert!(ready.called("delete_connection").is_empty());
 }
 
 #[test]
-fn says_where_a_kept_apps_name_and_description_change() {
+fn says_where_the_app_changes_once_when_it_is_installed() {
     let mut env = Fake::new();
-    env.connections = VecDeque::from([app("conn-1", Some("secret-1"), AgentGrant::Active)]);
     run_setup(&mut env, &sessions()).unwrap();
-    assert_eq!(
-        env.called("info This deployment keeps its Linear app")
-            .len(),
-        1,
-        "{:?}",
-        env.calls
-    );
-    assert!(env.calls[1].contains("only apply when deploy creates it"));
-    assert!(env.calls[1].contains("https://linear.app/acme/settings/api"));
+    let notes = env.called("info Linear has no API to change an app");
+    assert_eq!(notes.len(), 1, "{:?}", env.calls);
+    assert!(notes[0].contains("app name, description or icon"));
+    assert!(notes[0].contains("https://linear.app/acme/settings/api"));
 
     // Without a workspace key, it names where the page is.
     let mut unscoped = Fake::new();
     unscoped.workspace = None;
-    unscoped.connections = VecDeque::from([app("conn-1", Some("secret-1"), AgentGrant::Active)]);
     run_setup(&mut unscoped, &sessions()).unwrap();
-    assert!(unscoped.calls[1].contains("Settings → Administration → API"));
+    assert!(
+        unscoped.called("info Linear has no API to change an app")[0]
+            .contains("Settings → Administration → API")
+    );
+
+    // A redeploy that keeps the app only says it is ready.
+    let mut kept = Fake::new();
+    kept.connections = VecDeque::from([app("conn-1", Some("secret-1"), AgentGrant::Active)]);
+    run_setup(&mut kept, &sessions()).unwrap();
+    assert_eq!(
+        kept.calls,
+        [format!(
+            "success Linear channel ready · the Linear app sends its events to {WEBHOOK}"
+        )]
+    );
 }
 
 #[test]
@@ -646,6 +766,10 @@ fn reads_the_signing_secret_alone_from_the_env() {
     assert!(!error.to_string().contains("not-a-secret"), "{error}");
     // The other two are not needed for it, while a new app still needs all three.
     assert!(credentials_env(&vars(&[(WEBHOOK_SECRET_ENV, "lin_wh_abc")])).is_err());
+    // In a terminal, the signing secret alone repairs an installed app.
+    assert!(interactive_credentials_env(&vars(&[(WEBHOOK_SECRET_ENV, "lin_wh_abc")])).is_ok());
+    assert!(interactive_credentials_env(&vars(&[])).is_ok());
+    assert!(interactive_credentials_env(&vars(&[(CLIENT_ID_ENV, "id")])).is_err());
 }
 
 #[test]

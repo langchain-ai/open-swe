@@ -9,7 +9,7 @@ use console::style;
 use reqwest::Url;
 use serde::Deserialize;
 
-use super::channel_app::is_interactive;
+use super::channel_app::{self, is_interactive, SetupUi};
 use super::channel_icon::channel_icon_file;
 use super::slack_app::{self, SlackApp};
 use super::trigger_icon;
@@ -311,7 +311,7 @@ pub(crate) fn prepare(
         );
     }
     if !wait {
-        bail!("An agent with channels cannot be deployed with --no-wait.");
+        bail!("An agent with a Slack channel cannot be deployed with --no-wait.");
     }
     let trigger_on_all_messages = match provider_config.trigger_mode {
         Some(mode)
@@ -424,25 +424,36 @@ pub(crate) fn artifact(prepared: &PreparedTriggerChannel) -> serde_json::Value {
     })
 }
 
-/// Fail before uploading when registering the channel would need a question
-/// deploy cannot ask: a self-hosted LangSmith cannot create the Slack app, so
-/// a new channel needs the user's own app's credentials.
+const SKIPPED_SETUP: &str = "Continuing without the Slack channel. The deployment is live, but it receives no Slack events until you run `mda deploy` again and finish setting up the Slack app.";
+
+/// Fail before uploading when registering the channel could not finish. The
+/// env credentials are checked always. Without a terminal, a new channel
+/// needs them unless LangSmith can create the Slack app on its own: it
+/// cannot on a self-hosted LangSmith, and first needs the user to authorize
+/// it in Slack when they have not yet.
 pub(crate) fn preflight(
     client: &langsmith::Client,
     prepared: &PreparedTriggerChannel,
     deployment_id: Option<&str>,
     env_vars: &BTreeMap<String, String>,
 ) -> Result<()> {
-    if is_interactive()
-        || !client.is_self_hosted()
-        || slack_app::credentials_env(env_vars)?.is_some()
-    {
+    if slack_app::credentials_env(env_vars)?.is_some() || is_interactive() {
         return Ok(());
     }
-    let Some(deployment_id) = deployment_id else {
-        bail!(slack_app::UNATTENDED_SELF_HOSTED)
+    let registered = deployment_id.map(|id| registration(client, id, &prepared.name));
+    unattended_outcome(registered, || unattended_problem(client))
+}
+
+/// Why LangSmith can't create the Slack app without a terminal, if it can't.
+fn unattended_problem(client: &langsmith::Client) -> Option<String> {
+    let self_hosted = client.is_self_hosted();
+    // Not knowing whether LangSmith can create the app leaves it to setup.
+    let manager = if self_hosted {
+        None
+    } else {
+        client.slack_manager().ok().flatten()
     };
-    require_registered(registration(client, deployment_id, &prepared.name))
+    slack_app::unattended_problem(self_hosted, manager.as_ref())
 }
 
 /// Whether Trigger Server already has the deployment's channel, so deploy
@@ -458,19 +469,34 @@ fn registration(
         .any(|channel| channel.provider == "slack" && channel.channel_name == channel_name))
 }
 
-/// Go on without the user's own Slack app only for a channel Trigger Server
-/// already has. A failed lookup says so, not that the channel needs an app: it
-/// may well work already.
-fn require_registered(registered: Result<bool>) -> Result<()> {
-    match registered {
-        Ok(true) => Ok(()),
-        Ok(false) => bail!(slack_app::UNATTENDED_SELF_HOSTED),
-        Err(error) => bail!(
-            "Could not check whether this agent's Slack channel is already set up ({error:#}). Rerun `mda deploy` to try again, or set MDA_SLACK_BOT_TOKEN and MDA_SLACK_SIGNING_SECRET to your app's bot token and signing secret."
-        ),
+/// Whether a deploy without a terminal or the user's own Slack app can set up
+/// the channel: one Trigger Server already has keeps its app, and otherwise
+/// LangSmith has to be able to create one (`problem` says why it can't). A
+/// failed lookup then says so, not that the channel needs an app: it may well
+/// work already.
+fn unattended_outcome(
+    registered: Option<Result<bool>>,
+    problem: impl FnOnce() -> Option<String>,
+) -> Result<()> {
+    if matches!(registered, Some(Ok(true))) {
+        return Ok(());
+    }
+    match (problem(), registered) {
+        (None, _) => Ok(()),
+        (Some(_), Some(Err(error))) => Err(lookup_failed(&error)),
+        (Some(problem), _) => bail!(problem),
     }
 }
 
+fn lookup_failed(error: &anyhow::Error) -> anyhow::Error {
+    anyhow!(
+        "Could not check whether this agent's Slack channel is already set up ({error:#}). Rerun `mda deploy` to try again, or set MDA_SLACK_BOT_TOKEN and MDA_SLACK_SIGNING_SECRET to your app's bot token and signing secret."
+    )
+}
+
+/// Register the channel with Trigger Server for the live deployment. As for
+/// the GitHub and Linear channels, a failed attempt offers to try again or to
+/// continue without the channel; without a terminal the error ends setup.
 pub(crate) fn register(
     client: &langsmith::Client,
     prepared: &PreparedTriggerChannel,
@@ -479,17 +505,83 @@ pub(crate) fn register(
     assistant_id: &str,
     env_vars: &BTreeMap<String, String>,
 ) -> Result<()> {
+    let mut ui = LiveUi {
+        interactive: is_interactive(),
+    };
+    let registered = channel_app::retry_or_skip(
+        &mut ui,
+        (),
+        SKIPPED_SETUP,
+        |ui, ()| {
+            register_once(
+                client,
+                prepared,
+                agent_server_url,
+                deployment_id,
+                assistant_id,
+                env_vars,
+                ui.interactive,
+            )
+        },
+        |_| Ok(()),
+    )?;
+    if registered.is_some() {
+        ui.success(READY)?;
+    }
+    Ok(())
+}
+
+const READY: &str =
+    "Slack channel ready · the Slack app sends its events to this deployment through LangSmith";
+
+/// What Slack setup shows in a terminal.
+struct LiveUi {
+    interactive: bool,
+}
+
+impl SetupUi for LiveUi {
+    fn interactive(&self) -> bool {
+        self.interactive
+    }
+
+    fn retry_or_skip(&mut self, error: &anyhow::Error) -> Result<bool> {
+        channel_app::ask_retry_or_skip("Slack channel setup", "Slack", error)
+    }
+
+    fn success(&mut self, message: &str) -> Result<()> {
+        channel_app::show_success(message)
+    }
+
+    fn info(&mut self, message: &str) -> Result<()> {
+        channel_app::show_info(message)
+    }
+
+    fn warning(&mut self, message: &str) -> Result<()> {
+        channel_app::show_warning(message)
+    }
+}
+
+/// One attempt at registering the channel, choosing its app when Trigger
+/// Server has none for it yet.
+fn register_once(
+    client: &langsmith::Client,
+    prepared: &PreparedTriggerChannel,
+    agent_server_url: &str,
+    deployment_id: &str,
+    assistant_id: &str,
+    env_vars: &BTreeMap<String, String>,
+    interactive: bool,
+) -> Result<()> {
     let mut request = build_setup_request(prepared, agent_server_url, deployment_id, assistant_id)?;
-    let interactive = is_interactive();
     let registered = match registration(client, deployment_id, &prepared.name) {
         Ok(registered) => registered,
-        // Without a terminal, a self-hosted deploy can't ask for an app instead.
+        // Without a terminal, deploy can't ask for an app instead.
         Err(error)
             if !interactive
-                && client.is_self_hosted()
-                && slack_app::credentials_env(env_vars)?.is_none() =>
+                && slack_app::credentials_env(env_vars)?.is_none()
+                && unattended_problem(client).is_some() =>
         {
-            return require_registered(Err(error));
+            return Err(lookup_failed(&error));
         }
         Err(error) => {
             // Asking again is harmless: Trigger Server keeps a registered app.
@@ -894,14 +986,22 @@ mod tests {
     }
 
     #[test]
-    fn unattended_self_hosted_deploys_go_on_only_for_a_registered_channel() {
-        assert!(require_registered(Ok(true)).is_ok());
+    fn unattended_deploys_without_an_app_go_on_only_for_a_registered_channel() {
+        let no_app = || Some(slack_app::unattended_message(true));
+        let failed = || Some(Err(anyhow!("Channel listing failed (HTTP 503).")));
+        assert!(unattended_outcome(Some(Ok(true)), no_app).is_ok());
         assert_eq!(
-            require_registered(Ok(false)).unwrap_err().to_string(),
-            slack_app::UNATTENDED_SELF_HOSTED
+            unattended_outcome(Some(Ok(false)), no_app)
+                .unwrap_err()
+                .to_string(),
+            slack_app::unattended_message(true)
+        );
+        assert_eq!(
+            unattended_outcome(None, no_app).unwrap_err().to_string(),
+            slack_app::unattended_message(true)
         );
         // A failed listing names itself, not a missing Slack app.
-        let error = require_registered(Err(anyhow::anyhow!("Channel listing failed (HTTP 503).")))
+        let error = unattended_outcome(failed(), no_app)
             .unwrap_err()
             .to_string();
         assert!(
@@ -909,7 +1009,9 @@ mod tests {
             "{error}"
         );
         assert!(error.contains("Could not check"), "{error}");
-        assert_ne!(error, slack_app::UNATTENDED_SELF_HOSTED);
+        // LangSmith can create the app, so nothing stops the deploy.
+        assert!(unattended_outcome(failed(), || None).is_ok());
+        assert!(unattended_outcome(Some(Ok(false)), || None).is_ok());
     }
 
     #[test]
@@ -1251,7 +1353,7 @@ mod tests {
 
         assert_eq!(
             error.to_string(),
-            "An agent with channels cannot be deployed with --no-wait."
+            "An agent with a Slack channel cannot be deployed with --no-wait."
         );
     }
 

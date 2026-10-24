@@ -32,7 +32,8 @@ use serde_json::{json, Map, Value};
 
 use crate::connection::{poll_oauth_session, wait_for_oauth_status, OAuthWaitMessages};
 use crate::deploy::channel_app::{
-    self, agent_auth, find_connection, is_interactive, override_value, AppSlugs, SetupUi,
+    self, agent_auth, env_app_notice, find_connection, is_interactive, override_value, AppSlugs,
+    SetupUi,
 };
 use crate::interrupt::Interrupt;
 use crate::langsmith::{
@@ -49,7 +50,8 @@ const CREATE_APP_PATH: &str = "settings/api/applications/new";
 /// Where a workspace's apps are listed, each with its settings page.
 const APPS_PATH: &str = "settings/api";
 
-/// CLI-only overrides for setup without a terminal; never uploaded.
+/// CLI-only settings that replace setup's prompts, with or without a
+/// terminal; never uploaded.
 pub(crate) const CLIENT_ID_ENV: &str = "MDA_LINEAR_CLIENT_ID";
 pub(crate) const CLIENT_SECRET_ENV: &str = "MDA_LINEAR_CLIENT_SECRET";
 pub(crate) const WEBHOOK_SECRET_ENV: &str = "MDA_LINEAR_WEBHOOK_SECRET";
@@ -164,9 +166,10 @@ pub(crate) trait SetupEnv: SetupUi {
     /// Start the install, or the consent again, that a workspace admin
     /// approves.
     fn start_install(&mut self, connection_id: &str) -> Result<OAuthAuthorizationSession>;
-    /// Agent Auth sends Linear a redirect URI the new app may not list: say so,
-    /// and in a terminal wait until it is added.
-    fn confirm_redirect_uri(&mut self, actual: &str) -> Result<()>;
+    /// Ask whether the app lists the redirect URI Agent Auth sends Linear.
+    fn confirm_redirect_uri(&mut self, actual: &str) -> Result<bool>;
+    /// Ask whether an app from the env is set as deploy listed.
+    fn confirm_app_settings(&mut self) -> Result<bool>;
     /// Show and open the consent page.
     fn open_install_page(&mut self, url: &str) -> Result<()>;
     /// Wait for the install to change and return its status.
@@ -201,19 +204,33 @@ pub(crate) fn setup(
     run_setup(&mut env, channel)
 }
 
-/// Check, before anything is deployed, that setup will be able to finish:
-/// without a terminal, a new app's credentials must come from the env.
+/// Check, before anything is deployed, that setup will be able to finish.
+/// Malformed or incomplete CLI-only env vars always fail here. Without a
+/// terminal, a new app's credentials must come from the env.
 pub(crate) fn preflight(
     client: &langsmith::Client,
     channel: &LinearChannel,
     deployment_id: Option<&str>,
     env_vars: &BTreeMap<String, String>,
 ) -> Result<()> {
-    if is_interactive() || !channel_needs_app(channel) {
+    if !channel_needs_app(channel) {
         return Ok(());
     }
-    // A new app's credentials cover every case. A partial set is checked
-    // below, once it is known whether a new app is needed.
+    if let Some(key) = override_value(WORKSPACE_ENV, env_vars) {
+        workspace_key(&key).with_context(|| format!("{WORKSPACE_ENV} is not valid"))?;
+    }
+    webhook_secret_env(env_vars)?;
+    // A wrong client ID or secret fails here, before anything is uploaded or
+    // stored in Agent Auth.
+    if let Ok(Some(credentials)) = credentials_env(env_vars) {
+        check_credentials(&credentials)?;
+    }
+    // A new app's credentials cover every case. Without a terminal, a
+    // partial set fails below only once it is known that a new app is needed:
+    // the signing secret alone repairs an installed app.
+    if is_interactive() {
+        return interactive_credentials_env(env_vars);
+    }
     let credentials = credentials_env(env_vars);
     if matches!(credentials, Ok(Some(_))) {
         return Ok(());
@@ -236,6 +253,54 @@ pub(crate) fn preflight(
     credentials?;
     let workspace_known = override_value(WORKSPACE_ENV, env_vars).is_some();
     bail!(unattended_setup_message(None, workspace_known))
+}
+
+/// How long the credential check may take before deploy goes on without it.
+const CREDENTIALS_CHECK_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(10);
+
+/// Whether Linear knows the app's client ID and secret. Linear has no API for
+/// that, but its token endpoint checks the client before the code, so a code
+/// that cannot exist gets an answer naming a wrong client or secret. Only
+/// such an answer fails: anything else, such as a network error or an answer
+/// Linear may change, says nothing, and deploy goes on.
+fn check_credentials(credentials: &AppCredentials) -> Result<()> {
+    let response = reqwest::blocking::Client::builder()
+        .timeout(CREDENTIALS_CHECK_TIMEOUT)
+        .build()
+        .and_then(|http| {
+            http.post(TOKEN_URL)
+                .form(&[
+                    ("grant_type", "authorization_code"),
+                    ("code", "mda-deploy-credentials-check"),
+                    ("client_id", credentials.client_id.as_str()),
+                    ("client_secret", credentials.client_secret.as_str()),
+                ])
+                .send()
+        });
+    let Ok(response) = response else {
+        return Ok(());
+    };
+    let status = response.status().as_u16();
+    credentials_verdict(status, &response.text().unwrap_or_default())
+}
+
+/// What Linear's token endpoint says about a client ID and secret.
+fn credentials_verdict(status: u16, body: &str) -> Result<()> {
+    if status != 400 && status != 401 {
+        return Ok(());
+    }
+    let error = serde_json::from_str::<Value>(body)
+        .ok()
+        .and_then(|body| body.get("error")?.as_str().map(str::to_string));
+    match error.as_deref() {
+        Some("invalid_secret") => bail!(
+            "Linear refused {CLIENT_SECRET_ENV}: it is not the client secret of the app {CLIENT_ID_ENV} names. Copy it from the app's settings page and run `mda deploy` again."
+        ),
+        Some("invalid_client") => bail!(
+            "Linear knows no app with {CLIENT_ID_ENV} and {CLIENT_SECRET_ENV}. Copy both from the app's settings page and run `mda deploy` again."
+        ),
+        _ => Ok(()),
+    }
 }
 
 fn channel_needs_app(channel: &LinearChannel) -> bool {
@@ -272,21 +337,20 @@ pub(crate) fn run_setup(env: &mut dyn SetupEnv, channel: &LinearChannel) -> Resu
         return Ok(());
     };
     env.success(&format!(
-        "Linear channel ready: the Linear app sends its events to {}",
+        "Linear channel ready · the Linear app sends its events to {}",
         env.webhook_url()
     ))?;
     if kept {
-        let page = env.configured_workspace_key().map_or_else(
-            || "Settings → Administration → API in Linear".to_string(),
-            |key| format!("https://linear.app/{key}/{APPS_PATH}"),
-        );
-        env.info(&format!(
-            "This deployment keeps its Linear app. The app's name, description and icon only apply when deploy creates it, and Linear has no API to change them, so change them on the app's settings page ({page})."
-        ))?;
+        return Ok(());
     }
-    env.info(
-        "Linear has no API to change an app's webhook URL. If this deployment moves to another URL, update it on the app's settings page in Linear.",
-    )
+    // Said once, when the app is installed, rather than on every deploy.
+    let page = env.configured_workspace_key().map_or_else(
+        || "Settings → Administration → API in Linear".to_string(),
+        |key| format!("https://linear.app/{key}/{APPS_PATH}"),
+    );
+    env.info(&format!(
+        "Linear has no API to change an app, so later deploys keep it as it is now. If the channel's app name, description or icon change, or this deployment moves to another URL, change them on the app's settings page ({page})."
+    ))
 }
 
 /// Install the app, or finish what an earlier setup left undone. Returns
@@ -354,7 +418,10 @@ fn store_missing_secret(env: &mut dyn SetupEnv, connection: &AppConnection) -> R
 
 fn install_new_app(env: &mut dyn SetupEnv, channel: &LinearChannel) -> Result<()> {
     let credentials = match env.credentials_from_env()? {
-        Some(credentials) => credentials,
+        Some(credentials) => {
+            confirm_app_settings(env, channel)?;
+            credentials
+        }
         None if env.interactive() && env.choose_app_source()? == AppSource::Existing => {
             env.show_existing_app_settings(&existing_app_settings(
                 channel,
@@ -411,7 +478,7 @@ fn approve(
     if session.status != "completed" {
         if let Some(actual) = redirect_uri_of(&session.verification_url) {
             if actual != env.redirect_uri() {
-                env.confirm_redirect_uri(&actual)?;
+                confirm_redirect_uri(env, &actual)?;
             }
         }
         env.open_install_page(&session.verification_url)?;
@@ -421,6 +488,50 @@ fn approve(
         || env.next_install_status(&session.id),
         messages,
     )
+}
+
+/// An app from the env was made outside deploy, so it may not point at this
+/// deployment, and Linear has no API that says what it has set: list the
+/// settings, and in a terminal wait until they are set. "No" asks again, since
+/// Linear refuses the install without the redirect URI; Escape stops setting
+/// up the channel.
+fn confirm_app_settings(env: &mut dyn SetupEnv, channel: &LinearChannel) -> Result<()> {
+    let settings = app_settings(
+        channel,
+        env.webhook_url(),
+        env.redirect_uri(),
+        env.configured_workspace_key().as_deref(),
+    );
+    env.warning(&format!(
+        "{settings} Linear can't tell deploy what the app has set, so check these before the install is approved."
+    ))?;
+    if !env.interactive() {
+        return Ok(());
+    }
+    while !env.confirm_app_settings()? {
+        env.info(
+            "Linear refuses the install until the app lists the redirect URI above. Set it, then answer Yes, or press Esc to stop setting up the Linear channel.",
+        )?;
+    }
+    Ok(())
+}
+
+/// Agent Auth sends Linear a redirect URI the new app may not list: say so,
+/// and in a terminal wait until it is added. "No" asks again, since Linear
+/// refuses the install until then; Escape stops setting up the channel.
+fn confirm_redirect_uri(env: &mut dyn SetupEnv, actual: &str) -> Result<()> {
+    env.warning(&format!(
+        "Agent Auth expects Linear to redirect to {actual}. Add it under Redirect URIs on the Linear app's settings page before approving the install, or Linear answers \"Invalid redirect_uri\"."
+    ))?;
+    if !env.interactive() {
+        return Ok(());
+    }
+    while !env.confirm_redirect_uri(actual)? {
+        env.info(&format!(
+            "Linear refuses the install until the app lists {actual} under Redirect URIs. Add it, then answer Yes, or press Esc to stop setting up the Linear channel."
+        ))?;
+    }
+    Ok(())
 }
 
 fn remove(env: &mut dyn SetupEnv, connection_id: &str, secret_id: Option<&str>) -> Result<()> {
@@ -494,6 +605,20 @@ pub(crate) fn existing_app_settings(
     redirect_uri: &str,
     workspace: Option<&str>,
 ) -> String {
+    format!(
+        "{} Then copy its client ID, client secret and webhook signing secret into the prompts below.",
+        app_settings(channel, webhook_url, redirect_uri, workspace)
+    )
+}
+
+/// The settings an app must have for this deployment, and what changing its
+/// webhook does.
+fn app_settings(
+    channel: &LinearChannel,
+    webhook_url: &str,
+    redirect_uri: &str,
+    workspace: Option<&str>,
+) -> String {
     let page = workspace.map_or_else(
         || "Settings → Administration → API in Linear".to_string(),
         |key| format!("https://linear.app/{key}/{APPS_PATH}"),
@@ -504,8 +629,7 @@ pub(crate) fn existing_app_settings(
          \x20 Webhooks: turn on, URL {webhook_url}\n\
          \x20   events: {}\n\
          \nLinear sends an app's webhooks to one URL, so whatever received this app's \
-         events stops receiving them. Then copy its client ID, client secret and webhook \
-         signing secret into the prompts below.",
+         events stops receiving them.",
         channel.resource_types.join(", ")
     )
 }
@@ -550,6 +674,19 @@ fn credentials_env(env_vars: &BTreeMap<String, String>) -> Result<Option<AppCred
             "Set all of {CLIENT_ID_ENV}, {CLIENT_SECRET_ENV} and {WEBHOOK_SECRET_ENV}, or none of them."
         ),
     }
+}
+
+/// In a terminal, a partial set of a new app's credentials fails, but the
+/// signing secret alone doesn't: it repairs an installed app, and a new app's
+/// other credentials are asked for.
+fn interactive_credentials_env(env_vars: &BTreeMap<String, String>) -> Result<()> {
+    let new_app = [CLIENT_ID_ENV, CLIENT_SECRET_ENV]
+        .into_iter()
+        .any(|key| override_value(key, env_vars).is_some());
+    if new_app {
+        credentials_env(env_vars)?;
+    }
+    Ok(())
 }
 
 /// The signing secret alone, for an installed app that is missing only that.
@@ -637,15 +774,23 @@ impl SetupEnv for LiveSetup<'_> {
     fn credentials_from_env(&mut self) -> Result<Option<AppCredentials>> {
         let credentials = credentials_env(self.env_vars)?;
         if credentials.is_some() {
-            log::info(format!(
-                "Using the Linear app from {CLIENT_ID_ENV}. Agent Auth stores it, so you can remove the {CLIENT_SECRET_ENV} and {WEBHOOK_SECRET_ENV} values afterwards."
+            log::info(env_app_notice(
+                "Linear app",
+                "Agent Auth",
+                &[CLIENT_ID_ENV, CLIENT_SECRET_ENV, WEBHOOK_SECRET_ENV],
             ))?;
         }
         Ok(credentials)
     }
 
     fn webhook_secret_from_env(&mut self) -> Result<Option<String>> {
-        webhook_secret_env(self.env_vars)
+        let secret = webhook_secret_env(self.env_vars)?;
+        if secret.is_some() {
+            log::info(format!(
+                "Using the Linear app's webhook signing secret from {WEBHOOK_SECRET_ENV}. Agent Auth keeps it, so you can remove {WEBHOOK_SECRET_ENV} afterwards."
+            ))?;
+        }
+        Ok(secret)
     }
 
     fn workspace_key(&mut self) -> Result<Option<String>> {
@@ -795,18 +940,18 @@ impl SetupEnv for LiveSetup<'_> {
             .context("failed to start the Linear app install")
     }
 
-    fn confirm_redirect_uri(&mut self, actual: &str) -> Result<()> {
-        let warning = format!(
-            "Agent Auth expects Linear to redirect to {actual}. Add it under Redirect URIs on the Linear app's settings page before approving the install, or Linear answers \"Invalid redirect_uri\"."
-        );
-        log::warning(&warning)?;
-        if !self.interactive {
-            return Ok(());
-        }
+    fn confirm_redirect_uri(&mut self, _actual: &str) -> Result<bool> {
         cliclack::confirm("Added it? Deploy opens the install page next.")
             .initial_value(true)
-            .interact()?;
-        Ok(())
+            .interact()
+            .context("failed to confirm the Linear app's redirect URI")
+    }
+
+    fn confirm_app_settings(&mut self) -> Result<bool> {
+        cliclack::confirm("Set them? Deploy opens the install page next.")
+            .initial_value(true)
+            .interact()
+            .context("failed to confirm the Linear app's settings")
     }
 
     fn open_install_page(&mut self, url: &str) -> Result<()> {

@@ -768,12 +768,23 @@ GitHub and Linear channels do:
   receiving them.
 
 Self-hosted LangSmith can't create Slack apps, so it offers only your own.
-LangSmith keeps your app's credentials, and later deploys keep whichever app
-the channel has without asking. Without a terminal, set `MDA_SLACK_BOT_TOKEN`
-and `MDA_SLACK_SIGNING_SECRET` in `.env` or the shell to use your own app. They
-are never uploaded to the deployment, and you can remove them once it's set up.
-Otherwise hosted LangSmith creates a managed app, and a self-hosted deploy
-stops before uploading.
+LangSmith keeps the app's credentials, and later deploys keep whichever app
+the channel has without asking. The agent reads the app's bot token as the
+agent connection `mda/slack-bot-token`, so nothing goes into `.env`.
+
+To skip the question, with or without a terminal, set `MDA_SLACK_BOT_TOKEN`
+and `MDA_SLACK_SIGNING_SECRET` in the shell or `.env` to your own app's bot
+token and signing secret. Deploy checks them before uploading. Only the CLI
+reads them: they are never uploaded to the deployment, and you can remove both
+once the channel is set up. Without a terminal and without them, hosted
+LangSmith creates a managed app in the workspace you already authorized it in,
+and says so. When you haven't authorized it yet, or on self-hosted LangSmith,
+deploy stops before uploading and says what to set.
+
+If a setup step fails once the deployment is live, deploy offers to try again
+or to continue without the Slack channel. Without a terminal the failure ends
+the deploy, once the other channels are set up. An agent with a Slack channel
+can't be deployed with `--no-wait`, because setup needs the live deployment.
 
 ## GitHub channels
 
@@ -817,26 +828,8 @@ Supabase or another provider. So MCP servers and tools that act on a user's
 behalf or need a user connection are left out of those runs, with a warning,
 and the run goes on without them. An issue or pull request is a shared
 conversation, so the sender gets user memory only where the user memory
-layer's `allow` opts in.
-The first deploy asks which GitHub account should own the App. Without a
-terminal, for example when a coding agent deploys, set `MDA_GITHUB_APP_OWNER` in
-the shell or `.env` to that organization, or to `@me` for the personal account
-of whoever creates the App. Deploy checks this before creating the deployment
-and fails without it. During setup it prints the link for a person to open and
-waits up to an hour for them to finish.
-To use an existing App instead, choose it on the first deploy and enter its App
-ID, private key file, installation ID and webhook secret. Agent Auth keeps them
-like a created App's, and deploy looks up the bot ID, so nothing goes into
-`.env`. `GH_WEBHOOK_SECRET` and `GH_APP_BOT_ID` (the App bot account's numeric
-user ID) still override the stored values. An App has one webhook URL: if the
-existing App's webhook points somewhere else, deploy asks before moving it to
-the deployment, and fails without a terminal. Answer "No" to keep it there, for
-example when another service receives the App's events and forwards the ones
-for this agent to `<deployment-url>/channels/github/events` with the body and
-GitHub's headers unchanged. Deploy remembers that URL and doesn't ask again, with
-or without a terminal, until the App's webhook moves. Without a terminal, set
-`MDA_GITHUB_WEBHOOK_ELSEWHERE` to the URL instead. If the App's installation
-lacks a permission the channel needs, deploy names it.
+layer's `allow` opts in. See [Setting up the GitHub App](#setting-up-the-github-app)
+for what the first deploy asks.
 
 Pass `app` to narrow what the agent can reach. Deploy applies changes to it on
 every run:
@@ -865,8 +858,6 @@ manifest only when the App is created, so the App's owner grants added
 permissions, and removes dropped or lowered ones, in the App's settings. Deploy
 names both and links there. `mda delete` removes the App's connections
 from Agent Auth and links the App on GitHub, where its owner can delete it.
-A new App is named after the agent, and the first deploy asks which account to
-create it in.
 The `GH_*` overrides are read at request time; the webhook secret and bot ID read
 from Agent Auth are cached for up to 5 minutes. A matched event fails closed if
 the bot ID is missing or invalid. Calling `channels.github()` without handlers preserves
@@ -1031,6 +1022,57 @@ message-list results and automatic GitHub replies are not supported. To act on
 GitHub from a run (comment, label, open pull requests), give the agent a GitHub
 MCP server in `tools/mcp.py`.
 
+### Setting up the GitHub App
+
+The first `mda deploy` of a GitHub channel asks which GitHub App it uses, as
+the Slack and Linear channels do:
+
+- **Create a new GitHub App**: deploy asks which account should own it, an
+  organization or your personal account, then opens GitHub with the App filled
+  in and named after the agent. Create it, then install it on the repositories
+  the agent may reach.
+- **Use an existing GitHub App**: enter its App ID, private key file and
+  webhook secret. Deploy records the installation GitHub reports. It asks you
+  to pick one when the App is installed in several accounts, opens the install
+  page when it's installed nowhere, and asks for the installation ID only when
+  GitHub can't be checked.
+
+Agent Auth keeps the App's key, webhook secret and bot ID, so nothing goes into
+`.env`, and later deploys keep the App without asking. An App has one webhook
+URL: if an existing App's webhook points somewhere else, deploy asks before
+moving it to the deployment. Answer "No" to keep it there, for example when
+another service receives the App's events and forwards the ones for this agent
+to `<deployment-url>/channels/github/events` with the body and GitHub's headers
+unchanged. Deploy remembers that URL and doesn't ask again, with or without a
+terminal, until the App's webhook moves. If the App's installation lacks a
+permission the channel needs, deploy names it.
+
+To skip the questions, with or without a terminal, set these in the shell or
+`.env`:
+
+- `MDA_GITHUB_APP_OWNER`: create a new App owned by this organization, or by
+  `@me`, the personal account of whoever creates it.
+- `MDA_GITHUB_APP_ID`, `MDA_GITHUB_APP_PRIVATE_KEY_FILE` (the path to its
+  `.pem` file) and `MDA_GITHUB_WEBHOOK_SECRET`: use this existing App instead.
+  Add `MDA_GITHUB_APP_INSTALLATION_ID` when it's installed in several accounts.
+- `MDA_GITHUB_WEBHOOK_SECRET` alone: the webhook secret of an existing App
+  whose secret Agent Auth doesn't have yet.
+- `MDA_GITHUB_WEBHOOK_ELSEWHERE`: the URL an existing App's webhook keeps.
+  Without a terminal, deploy otherwise stops when the webhook points elsewhere.
+
+Deploy checks them before uploading. Only the CLI reads them: they are never
+uploaded to the deployment, and you can remove them once the channel is set
+up. Without a terminal and without an owner or an existing App, deploy stops
+before uploading and says what to set. During setup it prints the link for a
+person to open and waits up to an hour for them to finish. `GH_WEBHOOK_SECRET`
+and `GH_APP_BOT_ID` (the App bot account's numeric user ID) are different: the
+deployment reads them, and they override what Agent Auth stores.
+
+If a setup step fails once the deployment is live, deploy offers to try again
+or to continue without the GitHub channel. Without a terminal the failure ends
+the deploy, once the other channels are set up. An agent with a GitHub channel
+can't be deployed with `--no-wait`, because setup needs the live deployment.
+
 ## Linear channels
 
 The Linear channel receives a Linear app's webhooks. Each issue is one
@@ -1094,31 +1136,10 @@ Slack channel's, such as `assets/icon.png` (at least 256×256 pixels, at most
 the app's icon there. They apply only when deploy creates the app: Linear has
 no API to change an app, so later changes to them do nothing. Change an
 existing app on its settings page in Linear; deploy reminds you of this when
-it keeps an existing app.
+it installs the app.
 
-`mda deploy` sets up the Linear app, which takes a Linear workspace admin.
-Linear has no public API to create apps, so deploy opens Linear's new-app page
-filled in with the app's name, redirect URI, webhook URL
-(`<deployment-url>/channels/linear/events`) and events. The admin creates the
-app and pastes its client ID, client secret and webhook signing secret into
-deploy's prompts. Deploy asks for the workspace's URL key (as in
-`https://linear.app/<key>/`) first, so the page opens in that workspace. To use
-an app the workspace already has, choose "Use an existing Linear app" instead:
-deploy lists the redirect URI, webhook URL and events to set on the app's
-settings page, then asks for the same three values. Linear sends an app's
-webhooks to one URL, so whatever received them before stops receiving them.
-Deploy then opens the install page, where the admin approves the app for the
-workspace. Agent Auth keeps the credentials, and the agent's token, so nothing
-goes into `.env`. Without a terminal, for example when a coding agent deploys,
-set `MDA_LINEAR_CLIENT_ID`, `MDA_LINEAR_CLIENT_SECRET` and
-`MDA_LINEAR_WEBHOOK_SECRET` instead, and `MDA_LINEAR_WORKSPACE` to the
-workspace's URL key so the links deploy prints open in that workspace; deploy
-prints the install link. These four are read by the CLI only and never
-uploaded to the deployment. If Linear later stops renewing the app's access,
-the next deploy keeps the app and only asks an admin to approve it again.
-Linear has no API to change an app's webhook URL either, so if the deployment
-moves, update it on the app's page. `mda delete` removes the credentials;
-delete the app itself in Linear.
+`mda deploy` sets up the Linear app, which takes a Linear workspace admin; see
+[Setting up the Linear app](#setting-up-the-linear-app).
 
 The channel reads the webhook signing secret from Agent Auth, or from
 `LINEAR_WEBHOOK_SECRET` when set. It acts as the app through the agent OAuth
@@ -1128,6 +1149,55 @@ its token with `await connections.get("mda/linear-token", {"type": "agent"})` to
 `reply="none"` leaves the run's answer to the agent: the channel doesn't post
 it as a comment or in the session. Session acknowledgements, Stop and error
 notices still post.
+
+### Setting up the Linear app
+
+The first `mda deploy` of a Linear channel asks which Linear app it uses, as
+the Slack and GitHub channels do. Setting it up takes a Linear workspace admin:
+
+- **Create a new Linear app**: Linear has no public API to create apps, so
+  deploy asks for the workspace's URL key (as in `https://linear.app/<key>/`)
+  and opens Linear's new-app page in that workspace, filled in with the app's
+  name, redirect URI, webhook URL (`<deployment-url>/channels/linear/events`)
+  and events. The admin creates the app and pastes its client ID, client
+  secret and webhook signing secret into deploy's prompts.
+- **Use an existing Linear app**: deploy lists the redirect URI, webhook URL
+  and events to set on the app's settings page, then asks for the same three
+  values. Linear sends an app's webhooks to one URL, so whatever received them
+  before stops receiving them.
+
+Deploy then opens the install page, where the admin approves the app for the
+workspace. Agent Auth keeps the credentials and the agent's token, so nothing
+goes into `.env`, and later deploys keep the app without asking. If Linear
+stops renewing the app's access, the next deploy keeps the app and only asks
+an admin to approve it again. Linear has no API to change an app, so when the
+channel's `app` settings change or the deployment moves to another URL, update
+the app on its settings page.
+
+To skip the questions, with or without a terminal, set
+`MDA_LINEAR_CLIENT_ID`, `MDA_LINEAR_CLIENT_SECRET` and
+`MDA_LINEAR_WEBHOOK_SECRET` in the shell or `.env`, and `MDA_LINEAR_WORKSPACE`
+to the workspace's URL key so the links deploy prints open in that workspace.
+`MDA_LINEAR_WEBHOOK_SECRET` alone supplies the signing secret of an installed
+app whose secret Agent Auth doesn't have yet. Deploy checks them before
+uploading, and asks Linear whether the client ID and secret belong together.
+Only the CLI reads them: they are never uploaded to the deployment, and you can
+remove them once the channel is set up. Without a terminal and without them,
+deploy stops before uploading with the link to create the app.
+
+An app from these variables wasn't made from deploy's filled-in page, and
+Linear has no API that says what it has set. So before the install link,
+deploy lists the redirect URI, webhook URL and events the app needs, the same
+as for an existing app. In a terminal it waits until you say they're set;
+without one it prints them before the install link for an admin to open.
+Without the redirect URI, Linear answers the install with "Invalid
+redirect_uri".
+
+If a setup step fails once the deployment is live, deploy offers to try again
+or to continue without the Linear channel. Without a terminal the failure ends
+the deploy, once the other channels are set up. An agent with a Linear channel
+can't be deployed with `--no-wait`, because setup needs the live deployment.
+`mda delete` removes the credentials; delete the app itself in Linear.
 
 ## HTTP channels
 
