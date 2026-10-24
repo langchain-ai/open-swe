@@ -111,6 +111,9 @@ class Topic(BaseTopic):
     ANNOUNCEMENTS: ClassVar[Topic]
     """Admin announcements and their delivery progress; admins only."""
 
+    SLACK_CHANNELS: ClassVar[Topic]
+    """The Slack channel directory, after each walk over Slack."""
+
     PLUGIN_CHAT_CALLS: ClassVar[KeyedTopic[str]]
     """Keyed by thread id: the calls that thread's agent made to the tools of the plugin it chats beside."""
 
@@ -261,6 +264,7 @@ Topic.THREAD_BACKGROUND_WORK = KeyedTopic(
     "thread-background-work", authorize_keys=_readable_threads
 )
 Topic.ANNOUNCEMENTS = AdminTopic("announcements")
+Topic.SLACK_CHANNELS = Topic("slack-channels")
 Topic.PLUGIN_DOCUMENTS = KeyedTopic("plugin-documents", authorize_keys=_readable_plugin_documents)
 Topic.APP_PREVIEWS = KeyedTopic("app-previews", authorize_keys=_readable_threads)
 Topic.PLUGIN_CHAT_CALLS = KeyedTopic("plugin-chat-calls", authorize_keys=_readable_threads)

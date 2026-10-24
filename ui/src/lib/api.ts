@@ -847,10 +847,10 @@ export interface SlackChannelOption {
   num_members: number | null
 }
 
-/** The channel directory; partial when Slack rate limited the walk over public channels. */
+/** The stored channel directory; refreshing while a walk over Slack is due or running. */
 export interface SlackChannelDirectory {
   channels: Array<SlackChannelOption>
-  partial: boolean
+  refreshing: boolean
 }
 
 export interface WorkspaceOptionList {
@@ -1673,10 +1673,11 @@ export const api = {
       `/slack/users/${encodeURIComponent(userId)}/name`
     ),
   listSlackBots: () => request<SlackBotOption[]>("/slack/bots"),
-  listSlackChannels: (refresh = false) =>
-    request<SlackChannelDirectory>(
-      `/slack/channels${refresh ? "?refresh=true" : ""}`
-    ),
+  listSlackChannels: () => request<SlackChannelDirectory>("/slack/channels"),
+  refreshSlackChannels: () =>
+    request<SlackChannelDirectory>("/slack/channels/refresh", {
+      method: "POST",
+    }),
   listAllowedSlackBots: () => request<AllowedSlackBot[]>("/slack/allowed-bots"),
   listAllowedSlackBotDirectory: () =>
     request<AllowedSlackBotEntry[]>("/slack/allowed-bots/directory"),

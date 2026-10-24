@@ -8,10 +8,13 @@ served as the typed API both sides import (``runtime_api``):
   subagents, models and sandbox, and the checks around its file and shell tools
 - ``prepare`` runs every ``before_agent`` hook: run preparation (the thread's
   sandbox, checkout and prompt), the transcript turn, skills, reply bookkeeping
-- ``before_model`` runs every ``before_model`` hook (follow-up queue, event matches,
-  proxy refresh, task coordination, model routing), then asks the graph's
-  middleware what it adds to the call (``ShapesModelCalls``: sections of the system
-  prompt, tools it keeps from the call), and names the model to call
+- ``inbox`` hands the run what was sent to its thread since the last model call:
+  queued follow-ups and notes, event matches and task messages (``ThreadInbox``);
+  ``inbox_received`` takes the follow-ups off the queue once the call goes ahead
+- ``before_model`` runs every ``before_model`` hook (proxy refresh, task
+  coordination, model routing), then asks the graph's middleware what it adds to
+  the call (``ShapesModelCalls``: sections of the system prompt, tools it keeps
+  from the call), and names the model to call
 - ``model_result`` lets the transcript and usage middleware observe each response
 - ``after_model`` runs ``after_model`` hooks, such as the reply nudges, which can
   send the loop back to the model
@@ -46,7 +49,7 @@ from dataclasses import asdict
 from functools import partial
 from pathlib import PurePosixPath
 from typing import Final, Literal, Protocol, cast, get_args, runtime_checkable
-from uuid import uuid4
+from uuid import UUID, uuid4
 
 from deepagents.backends.composite import CompositeBackend
 from deepagents.backends.protocol import BackendProtocol, SandboxBackendProtocol
@@ -75,7 +78,7 @@ from langgraph.config import get_config
 from langgraph.errors import NodeCancelledError
 from langgraph.runtime import Runtime
 from langgraph.types import Command
-from pydantic import JsonValue, TypeAdapter, ValidationError
+from pydantic import BaseModel, JsonValue, TypeAdapter, ValidationError
 from runtime_api import files as file_api
 from runtime_api.catalog import (
     CATALOG,
@@ -113,6 +116,8 @@ from runtime_api.loop import (
     AFTER_MODEL,
     BEFORE_MODEL,
     BROWSER,
+    INBOX,
+    INBOX_RECEIVED,
     MODEL_RESULT,
     PREPARE,
     SANDBOX_REPLACED,
@@ -123,6 +128,9 @@ from runtime_api.loop import (
     BeforeModel,
     BrowserReport,
     Done,
+    Inbox,
+    InboxItems,
+    InboxReceipt,
     ModelCall,
     ModelResult,
     ObservedResponse,
@@ -289,6 +297,19 @@ def _model_spec(choice: ModelChoice) -> ModelSpec:
     return ModelSpec(
         model_id=choice.model_id, kwargs=_json_object.validate_python(dict(choice.kwargs))
     )
+
+
+class _CarriedEvents(BaseModel):
+    event_match_ids: list[UUID] = []
+
+
+def _carried_events(config: RunnableConfig) -> list[UUID]:
+    """The event matches and task messages the run was started with as its input."""
+    try:
+        return _CarriedEvents.model_validate(config.get("metadata") or {}).event_match_ids
+    except ValidationError:
+        logger.warning("Ignoring a run's malformed event ids", exc_info=True)
+        return []
 
 
 def _overrides(middleware: AgentMiddleware, hook: str) -> bool:
@@ -725,6 +746,9 @@ class RunSession:
     async def prepare(self, request: Prepare) -> PhaseResult:
         # MDA opened the box before preparing; preparation connects to it as to any other.
         await self.bind_sandbox(request.sandbox_id)
+        if self.surface.inbox is not None:
+            # The events this run was started to carry are its input: it holds them now.
+            await self.surface.inbox.receive(events=_carried_events(self.config))
 
         async def begun(
             result: PhaseResult, _state: dict[str, object], _runtime: Runtime
@@ -754,6 +778,28 @@ class RunSession:
             return BeforeModel(**result.model_dump(), call=call)
 
         return await self._answer_phase("before_model", request, planned)
+
+    async def inbox(self, request: RunRequest) -> Inbox:
+        inbox = self.surface.inbox
+        if inbox is None:
+            return Inbox()
+
+        async def read() -> Inbox:
+            taken = await inbox.read(request.run_id or str(uuid4()))
+            return Inbox(
+                messages=dump_messages(_as_messages(taken.messages)),
+                update={}
+                if taken.reply_surface is None
+                else {"reply_surface": taken.reply_surface},
+                items=InboxItems(queued=taken.queued, events=taken.events),
+            )
+
+        return await self.in_run("inbox", read)
+
+    async def inbox_received(self, request: InboxReceipt) -> Done:
+        if self.surface.inbox is not None:
+            await self.surface.inbox.receive(request.items.queued, request.items.events)
+        return Done()
 
     async def after_model(self, request: RunCall) -> PhaseResult:
         return await self._answer_phase("after_model", request, _as_is)
@@ -1168,6 +1214,8 @@ RUN_CALLS.serve(BROWSER, _browser)
 API: Final = Handlers[RunSession]()
 API.serve(CATALOG, RunSession.plan)
 API.serve(PREPARE, RunSession.prepare)
+API.serve(INBOX, RunSession.inbox)
+API.serve(INBOX_RECEIVED, RunSession.inbox_received)
 API.serve(BEFORE_MODEL, RunSession.before_model)
 API.serve(MODEL_RESULT, RunSession.model_result)
 API.serve(AFTER_MODEL, RunSession.after_model)

@@ -765,10 +765,6 @@ async def test_queued_images_reach_vision_fallback_for_text_only_main_model(
 
     from openswe.agent_api.graph import RunSession
     from openswe.message_queue import QueuedMessage
-    from openswe.middleware.check_message_queue import (
-        LinearNotifyState,
-        check_message_queue_before_model,
-    )
 
     config = _base_config()
     planned = await _plan_agent(
@@ -778,21 +774,19 @@ async def test_queued_images_reach_vision_fallback_for_text_only_main_model(
     url = "https://example.com/image.png"
     image = {"type": "image_url", "image_url": {"url": url}}
     await QueuedMessage.put("thread-ctx", {"text": "Explain this", "image_urls": [url]})
+    surface = cast(ToolSurface, planned["surface"])
+    assert surface.inbox is not None
     with (
-        patch("openswe.middleware.check_message_queue.get_config", return_value=config),
-        patch("openswe.middleware.check_message_queue.fetch_image_block", return_value=image),
+        patch("openswe.threads.inbox.get_config", return_value=config),
+        patch("openswe.threads.inbox.fetch_image_block", return_value=image),
     ):
-        update = await check_message_queue_before_model.abefore_model(
-            cast(LinearNotifyState, {"messages": []}), MagicMock()
-        )
-    assert update is not None
-    messages = convert_to_messages(update["messages"])
+        taken = await surface.inbox.read("run-1")
+    messages = convert_to_messages(taken.messages)
     content = messages[-1].content
     assert isinstance(content, list) and image in content
-    session = RunSession(cast(ToolSurface, planned["surface"]), {}, None, started_here=True)
+    session = RunSession(surface, {}, None, started_here=True)
     vision = session.vision_for(session.models.main)
     assert vision is not None and vision.model_id != session.models.main.model_id
-    assert await QueuedMessage.for_thread("thread-ctx") == []
 
 
 @pytest.mark.asyncio

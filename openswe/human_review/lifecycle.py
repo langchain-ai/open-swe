@@ -104,7 +104,15 @@ class ReviewCard:
         pr = self.request.pull_request
         try:
             async with PullRequestClient.as_app(pr.owner, pr.repo, pr.number) as pull:
-                return await ChangedFile.of_pull(pull)
+                standard = self.request.kind == "standard"
+                files = await ChangedFile.of_pull(
+                    pull,
+                    max_pages=30 if standard else 1,
+                    count=pr.changed_files if standard else None,
+                )
+                if standard and files is not None and pr.changed_files != len(files):
+                    return None
+                return files
         except GitHubAppUnavailable:
             logger.warning(
                 "No GitHub App token to read the changed files",
@@ -322,6 +330,7 @@ class ReviewCard:
             author=author,
             requester=standard_card.mention(requester) if requester is not None else None,
             review_states=states,
+            files=await self._files(),
         )
 
     async def render(

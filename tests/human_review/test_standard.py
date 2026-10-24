@@ -9,6 +9,7 @@ from zoneinfo import ZoneInfo
 import httpx2
 import pytest
 
+from openswe.expedited_review.eligibility import ChangedFile
 from openswe.expedited_review.readiness import PullRequestSnapshot
 from openswe.github.http import GitHubClient, GitHubError, RepoClient
 from openswe.github.pull_requests import PullRequest
@@ -535,6 +536,50 @@ async def test_merged_card_names_only_actual_approvers(
         else:
             assert "approved by" not in message
         assert "linus" not in message
+
+
+@pytest.mark.parametrize("available", [True, False])
+async def test_open_card_counts_only_non_test_files(available: bool) -> None:
+    pr = PullRequest(
+        owner="o",
+        repo="r",
+        number=1,
+        title="Fix",
+        author="ada",
+        additions=110,
+        deletions=55,
+        changed_files=2,
+    )
+    request = HumanReviewRequest(pull_request_id=pr.id, head_sha="abc", kind="standard")
+    request.pull_request = pr
+    request.requested_by = None
+    files = [
+        ChangedFile(filename="openswe/example.py", additions=10, deletions=5),
+        ChangedFile(filename="tests/test_example.py", additions=100, deletions=50),
+    ]
+    with (
+        patch.object(ReviewCard, "_files", AsyncMock(return_value=files if available else None)),
+        patch.object(ReviewCard, "_review_states", AsyncMock(return_value={})),
+        patch.object(HumanReviewRequest, "author_mention", AsyncMock(return_value="@ada")),
+    ):
+        _, blocks = await ReviewCard(request)._render_standard(None)
+    rendered = str(block_payload(blocks))
+    assert ("+10 −5 in 1 non-test file" in rendered) is available
+    assert "+110" not in rendered
+    assert "−55" not in rendered
+
+
+@pytest.mark.parametrize("count", [101, 102])
+async def test_standard_card_requires_complete_file_counts(
+    count: int, github_app: AsyncMock
+) -> None:
+    pr = PullRequest(owner="o", repo="r", number=1, changed_files=count)
+    request = HumanReviewRequest(pull_request_id=pr.id, head_sha="abc", kind="standard")
+    request.pull_request = pr
+    files = [ChangedFile(filename=f"openswe/file_{i}.py") for i in range(101)]
+    with patch.object(ChangedFile, "of_pull", AsyncMock(return_value=files)):
+        result = await ReviewCard(request)._files()
+    assert result == (files if count == 101 else None)
 
 
 def test_a_short_description_is_shown_whole_without_its_template_comments() -> None:

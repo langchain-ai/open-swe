@@ -94,8 +94,6 @@ from openswe.middleware import (
     PullRequestCreationGuardMiddleware,
     RequireUserReplyMiddleware,
     WorkflowPushGuardMiddleware,
-    check_message_queue_before_model,
-    deliver_event_matches_before_model,
     notify_step_limit_reached,
     record_run_usage,
     refresh_github_proxy_before_model,
@@ -158,6 +156,7 @@ from openswe.skill_store.backend import skills_backend
 from openswe.slack.dm import is_concierge_thread, is_dm_channel
 from openswe.thread_title import TITLE_GENERATION_MAX_TOKENS, schedule_thread_title_generation
 from openswe.threads.blobs import ThreadBlobs, blob_namespace
+from openswe.threads.inbox import ThreadInbox
 from openswe.threads.recent_context import RecentContextAudience, recent_thread_context_section
 from openswe.threads.summary import DASHBOARD_SOURCE
 from openswe.tools import (
@@ -1890,6 +1889,7 @@ async def plan_agent(config: RunnableConfig, surface: ToolSurface) -> None:
         for tool in static_tools
         if _registered_tool_name(tool) != _registered_tool_name(save_user_settings)
     ]
+    initial_surface = _initial_reply_surface(cfg) if reply_tool_offered else WEB_REPLY_SURFACE
     middleware = cast(
         list[AgentMiddleware[Any, Any, Any]],
         [
@@ -1919,17 +1919,10 @@ async def plan_agent(config: RunnableConfig, surface: ToolSurface) -> None:
                 if task_coordination and task_coordination.is_worker
                 else [refresh_github_proxy_before_model]
             ),
-            *(
-                []
-                if stop_summary_mode
-                else [check_message_queue_before_model, deliver_event_matches_before_model]
-            ),
             RequireUserReplyMiddleware(
                 _registered_tool_name(slack_reply),
                 _registered_tool_name(slack_no_reply_needed),
-                initial_surface=(
-                    _initial_reply_surface(cfg) if reply_tool_offered else WEB_REPLY_SURFACE
-                ),
+                initial_surface=initial_surface,
                 replies=GUIDE_REPLY_TOOLS if guide is not None else frozenset(),
             ),
             *(
@@ -1947,6 +1940,9 @@ async def plan_agent(config: RunnableConfig, surface: ToolSurface) -> None:
     )
     surface.base_tools = main_tools
     surface.middleware = middleware
+    surface.inbox = (
+        None if stop_summary_mode else ThreadInbox(thread_id, events=True, surface=initial_surface)
+    )
     surface.files = agent_backend
     surface.artifacts_root = artifacts_root
     surface.shell_guards = [PullRequestCreationGuardMiddleware(), WorkflowPushGuardMiddleware()]

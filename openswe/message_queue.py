@@ -5,7 +5,7 @@ rows it consumed, so no update can overwrite another.
 """
 
 import logging
-from collections.abc import Sequence
+from collections.abc import Collection
 from datetime import datetime
 from typing import Self
 
@@ -85,15 +85,15 @@ class QueuedMessage(Base):
             )
 
     @classmethod
-    async def remove(cls, messages: Sequence[Self]) -> None:
-        if not messages:
+    async def remove(cls, thread_id: str, seqs: Collection[int]) -> None:
+        """Take the ``seqs`` queued for ``thread_id`` off its queue."""
+        if not seqs:
             return
         async with postgres.session() as session:
             await session.execute(
-                delete(cls).where(cls.seq.in_([message.seq for message in messages]))
+                delete(cls).where(cls.thread_id == thread_id, cls.seq.in_(list(seqs)))
             )
-            for thread_id in {message.thread_id for message in messages}:
-                await Topic.THREAD_QUEUES.invalidate(session, key=thread_id)
+            await Topic.THREAD_QUEUES.invalidate(session, key=thread_id)
 
     @classmethod
     async def clear(cls, thread_id: str) -> None:

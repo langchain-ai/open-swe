@@ -22,6 +22,7 @@ Every `agent`, `reviewer` and `review-scout` thread runs on Managed Deep Agents,
 - Keep comments minimal and only explain non-obvious reasons.
 - Slack: prefer @mentions with plain-language requests and buttons for explicit actions. Typed and slash commands are optional shortcuts, never the only way.
 - User-initiated UI mutations are optimistic: update immediately, roll back on failure, show an error toast. Skip this only when an immediate update would be unsafe or misleading. Slack Block Kit counts: update the clicked message before slow GitHub or Slack calls.
+- The dashboard (`ui/`) builds with the React Compiler, which memoizes components, values and callbacks itself. Write derived values and handlers as plain expressions; keep `useMemo`/`useCallback` only where a hook's dependency list needs a stable identity.
 - Create database migrations with `make migration m="Short description"`.
 - Don't add new uses of `langgraph_client` in the backend. Everything must be on MDA now; use MDA for runs and PostgreSQL for thread state. Existing uses are legacy, not a pattern to copy.
 - Don't use the LangGraph Store (`client.store`) for state; keep it in PostgreSQL tables.
