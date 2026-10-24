@@ -39,6 +39,7 @@ from openswe.review_guide.sessions import ReviewGuideSession
 from openswe.run_config import Repo
 from openswe.slack import client as slack_utils
 from openswe.slack.allowed_bots import AllowedSlackBot, resolve_allowed_slack_bot
+from openswe.slack.blocks import context
 from openswe.slack.channels import SlackChannel
 from openswe.slack.dm import DmOrigin, dm_thread_title, is_concierge_thread, is_dm_channel
 from openswe.slack.failures import report_slack_failure
@@ -1453,11 +1454,14 @@ async def _process_slack_mention_impl(
     )
     if performance_command and thread_model_choice:
         selected_model = image_model_override or thread_model_choice
-        await slack_utils.post_slack_ephemeral_message(
+        confirmation = (
+            f"Switched to {selected_model[0]} (reasoning effort: {selected_model[1] or 'default'})."
+        )
+        await slack_utils.post_slack_thread_reply_with_ts(
             channel_id,
-            user_id,
-            f"Switched to {selected_model[0]} (reasoning effort: {selected_model[1] or 'default'}).",
-            thread_ts=reply_thread_ts or thread_ts,
+            reply_thread_ts or thread_ts,
+            confirmation,
+            blocks=[context(confirmation)],
         )
     run_id = run.get("run_id")
     if performance_command and thread_model_choice and isinstance(run_id, str) and run_id:
