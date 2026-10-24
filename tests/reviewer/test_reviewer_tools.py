@@ -6,6 +6,9 @@ from unittest.mock import AsyncMock, patch
 
 import pytest
 
+from openswe.prompts import apply_tool_descriptions
+from openswe.review.findings import AppendFindingResult, Finding
+from openswe.review.publish import render_inline_comment_body
 from openswe.tools.add_finding import add_finding
 from openswe.tools.resolve_finding_thread import resolve_finding_thread
 from openswe.tools.update_finding import update_finding
@@ -119,6 +122,94 @@ async def test_add_finding_uses_resolved_head_sha_for_provenance() -> None:
     assert result["success"] is True
     assert captured[0]["first_seen_sha"] == "freshhead"
     assert captured[0]["last_confirmed_sha"] == "freshhead"
+
+
+@pytest.mark.parametrize(
+    ("title", "description", "expected_title", "expected_description"),
+    [
+        (
+            'Headline</title>\n<parameter name="description">Body text',
+            None,
+            "Headline",
+            "Body text",
+        ),
+        (
+            ' Headline </title>\n<parameter name="description"> Body text </parameter>\n',
+            None,
+            "Headline",
+            "Body text",
+        ),
+        (" Ordinary\n headline ", "Explicit body", "Ordinary headline", "Explicit body"),
+        (
+            'Headline</title>\n<parameter name="description">Leaked body',
+            "Explicit body",
+            "Headline",
+            "Explicit body",
+        ),
+        ("Use <code>value</code>", "Body text", "Use <code>value</code>", "Body text"),
+        (
+            '<parameter name="description">Body text',
+            "Explicit body",
+            '<parameter name="description">Body text',
+            "Explicit body",
+        ),
+        ("Headline</title>", "Explicit body", "Headline", "Explicit body"),
+    ],
+)
+async def test_add_finding_repairs_leaked_title_at_tool_boundary(
+    title: str, description: str | None, expected_title: str, expected_description: str
+) -> None:
+    captured: list[Finding] = []
+
+    async def fake_append(thread_id: str, finding: Finding) -> AppendFindingResult:
+        captured.append(finding)
+        return {"finding": finding, "created": True}
+
+    args: dict[str, object] = {
+        "severity": "medium",
+        "confidence": "high",
+        "category": "correctness",
+        "file": "foo.py",
+        "title": title,
+        "start_line": 11,
+    }
+    if description is not None:
+        args["description"] = description
+    finding_tool = apply_tool_descriptions([add_finding])[0]
+    with (
+        patch("openswe.run_config.get_config", return_value=_config()),
+        patch("openswe.tools.add_finding.get_thread_id_from_runtime", return_value="tid-1"),
+        patch("openswe.tools.add_finding.append_finding", side_effect=fake_append),
+    ):
+        result = await finding_tool.ainvoke(args)
+
+    assert result["success"] is True
+    assert len(captured) == 1
+    assert captured[0]["title"] == expected_title
+    assert captured[0]["description"] == expected_description
+    body = render_inline_comment_body(captured[0])
+    assert f"**{expected_title}**" in body
+    assert expected_description in body
+
+
+@pytest.mark.parametrize(
+    "title", ["", "Headline", '</title>\n<parameter name="description"> </parameter>']
+)
+async def test_add_finding_requires_description_after_repair(title: str) -> None:
+    finding_tool = apply_tool_descriptions([add_finding])[0]
+    result = await finding_tool.ainvoke(
+        {
+            "severity": "medium",
+            "confidence": "high",
+            "category": "correctness",
+            "file": "foo.py",
+            "title": title,
+        }
+    )
+    assert result == {
+        "success": False,
+        "error": "description is required; pass title and description as separate arguments",
+    }
 
 
 async def test_resolve_finding_thread_resolves_all_known_threads() -> None:
