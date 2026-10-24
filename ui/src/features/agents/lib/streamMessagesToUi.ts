@@ -1,6 +1,5 @@
 import { maybeDiffFromArgs, outputIframeDisplay } from "./toolDisplay"
 import { AIMessage, HumanMessage, ToolMessage } from "@langchain/core/messages"
-import { messageArrivalTimestamp } from "./messageTimestamps"
 import {
   collectStructuredEntities,
   isSilentSender,
@@ -385,7 +384,7 @@ export function streamMessagesToUi(
           kind: "tool-execution",
           toolCallId,
           toolName: name,
-          timestamp: messageArrivalTimestamp(toolCallId),
+          ...(timestampIsFallback ? {} : { timestamp }),
           title: toolTitle(name, args),
           toolKind: toolKind(name),
           input: args,

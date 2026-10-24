@@ -6,10 +6,13 @@ export function ThinkingSpinner({
   isActive,
   settingUpSandbox = false,
   label,
+  since,
 }: {
   isActive: boolean
   settingUpSandbox?: boolean
   label?: string
+  /** Server time the wait started, for its count-up timer. */
+  since?: string
 }) {
   if (!isActive) return null
 
@@ -26,7 +29,7 @@ export function ThinkingSpinner({
           ? "Agent is setting up the environment…"
           : (label ?? "Working…")}
       </span>
-      <ElapsedSeconds />
+      <ElapsedSeconds since={since} />
     </div>
   )
 }

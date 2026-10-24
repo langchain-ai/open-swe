@@ -1,3 +1,4 @@
+from datetime import datetime
 from typing import Any, cast
 from unittest.mock import AsyncMock, MagicMock, patch
 
@@ -116,6 +117,7 @@ async def test_tags_model_responses_with_run_id() -> None:
 
     assert result.result[0].response_metadata["open_swe_invocation_id"] == "run-1"
     assert result.result[0].response_metadata["open_swe_run_id"] == "run-1"
+    assert datetime.fromisoformat(result.result[0].response_metadata["created_at"]).tzinfo
 
 
 @pytest.mark.asyncio

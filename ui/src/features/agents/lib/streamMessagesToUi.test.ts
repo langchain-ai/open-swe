@@ -185,6 +185,31 @@ describe("streamMessagesToUi", () => {
     })
   })
 
+  it("times tool calls by their message's server time, never the browser's", () => {
+    const call = {
+      id: "call-1",
+      name: "execute",
+      args: { command: "ls" },
+      type: "tool_call" as const,
+    }
+    const [stamped] = streamMessagesToUi([
+      new AIMessage({
+        id: "ai-1",
+        content: "",
+        tool_calls: [call],
+        response_metadata: { created_at: "2026-01-02T03:04:05+00:00" },
+      }),
+    ])
+    const [unstamped] = streamMessagesToUi([
+      new AIMessage({ id: "ai-2", content: "", tool_calls: [call] }),
+    ])
+
+    expect(stamped?.chunks[0]).toMatchObject({
+      timestamp: "2026-01-02T03:04:05+00:00",
+    })
+    expect(unstamped?.chunks[0]).not.toHaveProperty("timestamp")
+  })
+
   it("identifies read-only SQL calls for table rendering", () => {
     const messages = streamMessagesToUi([
       new AIMessage({
