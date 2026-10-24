@@ -14,6 +14,21 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  no-new-langgraph-client:
+    name: No new backend langgraph_client uses
+    if: ${{ github.event_name == 'pull_request' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v7.0.1
+        with:
+          fetch-depth: 0
+      - name: Require MDA for new backend code
+        shell: bash
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+        run: git diff --no-ext-diff --no-color --unified=0 "$BASE_SHA...HEAD" -- 'openswe/**/*.py' | python3 scripts/check_langgraph_client.py
+
   lint:
     name: Agent lint
     runs-on: ubuntu-latest

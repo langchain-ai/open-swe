@@ -3,8 +3,6 @@ from types import ModuleType
 from typing import TYPE_CHECKING, Any
 
 _MIDDLEWARE_MODULES = {
-    "check_message_queue_before_model": ".check_message_queue",
-    "deliver_event_matches_before_model": ".deliver_event_matches",
     "DynamicToolMiddleware": ".dynamic_tools",
     "IntegrationGroup": ".dynamic_tools",
     "ExcludeToolsMiddleware": ".exclude_tools",
@@ -21,8 +19,6 @@ _MIDDLEWARE_MODULES = {
     "RequireUserReplyMiddleware": ".require_user_reply",
     "settle_review_check_on_exit": ".settle_review_check",
     "WorkflowPushGuardMiddleware": ".workflow_push_guard",
-    "RunSkillsMiddleware": ".workspace_skills",
-    "WorkspaceSkillsMiddleware": ".workspace_skills",
 }
 
 __all__ = [
@@ -37,11 +33,7 @@ __all__ = [
     "PullRequestCreationGuardMiddleware",
     "RepairOrphanedToolCallsMiddleware",
     "RequireUserReplyMiddleware",
-    "RunSkillsMiddleware",
     "WorkflowPushGuardMiddleware",
-    "WorkspaceSkillsMiddleware",
-    "check_message_queue_before_model",
-    "deliver_event_matches_before_model",
     "notify_step_limit_reached",
     "record_run_usage",
     "refresh_github_proxy_before_model",
@@ -49,8 +41,6 @@ __all__ = [
 ]
 
 if TYPE_CHECKING:
-    from openswe.middleware.check_message_queue import check_message_queue_before_model
-    from openswe.middleware.deliver_event_matches import deliver_event_matches_before_model
     from openswe.middleware.dynamic_tools import DynamicToolMiddleware, IntegrationGroup
     from openswe.middleware.exclude_tools import ExcludeToolsMiddleware
     from openswe.middleware.model_errors import ModelErrorMiddleware
@@ -65,7 +55,6 @@ if TYPE_CHECKING:
     from openswe.middleware.require_user_reply import RequireUserReplyMiddleware
     from openswe.middleware.settle_review_check import settle_review_check_on_exit
     from openswe.middleware.workflow_push_guard import WorkflowPushGuardMiddleware
-    from openswe.middleware.workspace_skills import RunSkillsMiddleware, WorkspaceSkillsMiddleware
 
 
 def _load_export(name: str) -> Any:

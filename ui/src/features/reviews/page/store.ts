@@ -101,6 +101,11 @@ interface VisitState {
   entryOrder: ReadonlyArray<DiffEntry>
   /** Narrows the diff, the file tree and the walkthrough to matching paths. */
   fileFilter: string
+  /** Whether the find bar is up; its query stays for the visit, so reopening it picks up where it was. */
+  findOpen: boolean
+  findQuery: string
+  /** The hit the find bar is on, in reading order. */
+  findIndex: number
   /** Whether the status card is on screen; when it isn't, the header carries its sentence. */
   standingInView: boolean
   /** The finding or thread n/p last landed on, so they move on from it even after the list changes. */
@@ -155,6 +160,9 @@ interface ReviewPageActions {
   toggleActiveCollapsed: () => void
   setEntryOrder: (entries: ReadonlyArray<DiffEntry>) => void
   setFileFilter: (filter: string) => void
+  setFindOpen: (open: boolean) => void
+  setFindQuery: (query: string) => void
+  setFindIndex: (index: number) => void
   setStandingInView: (inView: boolean) => void
   /** Marks an entry viewed (or not); from the file being read, moves on to the next unread one. */
   markViewed: (id: string) => void
@@ -294,6 +302,9 @@ function freshVisit(): VisitState {
     events: new Set(),
     entryOrder: [],
     fileFilter: "",
+    findOpen: false,
+    findQuery: "",
+    findIndex: 0,
     standingInView: true,
     lastStop: null,
   }
@@ -513,6 +524,9 @@ export const useReviewPage = create<ReviewPageState & ReviewPageActions>()((
     clearChatExcerpts: () => set({ chatExcerpts: [] }),
     setEntryOrder: (entryOrder) => set({ entryOrder }),
     setFileFilter: (fileFilter) => set({ fileFilter }),
+    setFindOpen: (findOpen) => set({ findOpen }),
+    setFindQuery: (findQuery) => set({ findQuery, findIndex: 0 }),
+    setFindIndex: (findIndex) => set({ findIndex }),
     setStandingInView: (standingInView) => {
       if (get().standingInView !== standingInView) set({ standingInView })
     },

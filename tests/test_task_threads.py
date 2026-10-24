@@ -2,7 +2,7 @@ import asyncio
 from collections.abc import Awaitable, Callable, Mapping
 from datetime import UTC, datetime, timedelta
 from unittest.mock import AsyncMock, MagicMock
-from uuid import NAMESPACE_URL, uuid4, uuid5
+from uuid import NAMESPACE_URL, UUID, uuid4, uuid5
 
 import pytest
 from fastapi import HTTPException
@@ -512,7 +512,7 @@ async def test_cancel_discards_owed_events_without_reviving_worker(
         await event.record(session)
     cancelled = await service.control_worker(actor, worker_thread_id=worker_id, action="cancel")
     assert cancelled["cancellation_requested"] is True
-    assert await EventMatch.owed(worker_id, []) == []
+    assert await EventMatch.owed(worker_id) == []
     assert await EventSubscription.for_thread(worker_id) == []
     assert await EventMatch.deliver(worker_id, "enqueue") is False
     assert await TaskMessage.deliver(worker_id, "interrupt") is False
@@ -552,7 +552,7 @@ async def test_finished_worker_can_receive_follow_up_and_gain_a_sibling(
     )
     assert sent["success"] is True
     assert sent["recipient_thread_id"] == worker_id
-    (follow_up,) = await TaskMessage.owed(worker_id, [])
+    (follow_up,) = await TaskMessage.owed(worker_id)
     assert "Check logout too" in follow_up.content
     follow_up_display = TaskEventMetadata.model_validate(follow_up.task_event)
     assert follow_up_display.sender_role == "coordinator"
@@ -585,7 +585,7 @@ async def test_finished_worker_can_receive_follow_up_and_gain_a_sibling(
             request_id="report",
         )
     assert len(client.created_runs) == 1
-    owed = await TaskMessage.owed(COORDINATOR, [])
+    owed = await TaskMessage.owed(COORDINATOR)
     displays = [TaskEventMetadata.model_validate(event.task_event) for event in owed]
     assert [str(display.sender_thread_id) for display in displays] == senders
     assert [display.content for display in displays] == reports
@@ -638,7 +638,9 @@ async def test_coordinator_settles_once_every_worker_report_has_reached_it(
 
     wake["status"] = "success"
     assert not (await activity.CoordinatorActivity.of(COORDINATOR)).settled
-    client.threads.get_state.return_value = {"values": {"messages": wake["input"]["messages"]}}
+    # The wake run, once prepared, holds the reports it was started to carry.
+    carried = [UUID(message_id) for message_id in wake["metadata"]["event_match_ids"]]
+    await TaskMessage.received(COORDINATOR, carried)
     assert (await activity.CoordinatorActivity.of(COORDINATOR)).settled
 
     stuck = str((await launch(actor, "stuck", "Review"))["worker_thread_id"])
@@ -731,7 +733,7 @@ async def test_cancelling_a_coordinators_workers_spares_finished_ones(
     client.statuses[COORDINATOR] = "idle"
     await worker_finished(running, running_run, "interrupted", {})
 
-    owed = await TaskMessage.owed(COORDINATOR, [])
+    owed = await TaskMessage.owed(COORDINATOR)
     assert [message.delivery_id for message in owed] == [
         finished_delivery_id(finished, finished_run)
     ]
@@ -794,7 +796,7 @@ async def test_async_subagent_becomes_one_ordinary_worker_of_its_coordinators_ta
     assert metadata[MDA_GRAPH_METADATA_KEY] == MDA_WORKER_GRAPH_ID
     # MDA started the assignment; Open SWE queued nothing to start it again.
     assert client.created_runs == []
-    assert await TaskMessage.owed(worker, []) == []
+    assert await TaskMessage.owed(worker) == []
 
     # A worker launches no workers of its own.
     with pytest.raises(PermissionError, match="coordinator"):
@@ -805,7 +807,7 @@ async def test_async_subagent_becomes_one_ordinary_worker_of_its_coordinators_ta
     assert await worker_finished(worker, "run-1", "success", payload)
     # Settled twice (two replicas, or a retried settle): reported once.
     assert await worker_finished(worker, "run-1", "success", payload)
-    (report,) = await TaskMessage.owed(COORDINATOR, [])
+    (report,) = await TaskMessage.owed(COORDINATOR)
     assert "Fixed login." in report.content
     # A busy coordinator picks the report up before its next model call; an idle one wakes.
     assert not [run for run in client.created_runs if run["thread_id"] == COORDINATOR]

@@ -28,6 +28,7 @@ from openswe.mcp.models import MCPToolProvenance
 from openswe.middleware.dynamic_tools import DynamicToolMiddleware
 from openswe.prompts import prompt
 from openswe.sandboxes.tool_models import ToolDescription
+from openswe.threads.inbox import ThreadInbox
 
 _json = TypeAdapter(JsonValue)
 # Every surface lists the integration tools themselves, so none offers their loader.
@@ -158,8 +159,11 @@ class ToolSurface:
     subagents: Sequence[SurfaceSubagent] = ()
     # The thread's files: its sandbox, with the paths this deployment serves routed in.
     files: BackendProtocol | None = None
-    # Paths under ``files`` this deployment serves rather than the sandbox, such as skills.
+    # Paths under ``files`` this deployment serves rather than the sandbox.
     backend_paths: tuple[str, ...] = ()
+    # Where the run's skills are under ``files``, a later source's skill taking the
+    # place of an earlier one's of the same name.
+    skill_sources: tuple[str, ...] = ()
     # Where large tool results and binary reads are offloaded.
     artifacts_root: str = "/"
     # The guards on the shell commands the run's tools run, as tool-call middleware.
@@ -168,6 +172,8 @@ class ToolSurface:
     file_checks: tuple[FileCheck, ...] = ()
     # Whether the graph's core tools it seldom needs belong in a runtime's code mode.
     code_mode: bool = False
+    # What is sent to the thread while it runs, which the run takes before each model call.
+    inbox: ThreadInbox | None = None
 
     async def prepare(self) -> None:
         planned = [

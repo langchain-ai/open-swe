@@ -37,6 +37,7 @@ import {
   reviewerRows,
 } from "@/features/reviews/components/ReviewerList"
 import { UpdatePullRequestBranch } from "@/features/reviews/components/UpdatePullRequestBranch"
+import { useIsPullRequestAuthor } from "@/features/reviews/lib/useIsPullRequestAuthor"
 import {
   canAttemptMerge,
   canUpdateBranch,
@@ -224,7 +225,7 @@ export function StandingPanel({ pr }: { pr: PullRequestRef }) {
   )
 }
 
-/** The one thing to do next, carried in the header; its own Review button covers a review. */
+/** The one thing to do next, carried in the header; its Review button covers a review, and the author's way out of draft. */
 export function NextStepAction({
   pr,
   standing,
@@ -237,6 +238,7 @@ export function NextStepAction({
   login: string
 }) {
   const refresh = useRefreshPullRequest(pr)
+  const isAuthor = useIsPullRequestAuthor(pr.owner, pr.repo, pr.number)
   const next = standing.next
   if (!next) return null
   switch (next.kind) {
@@ -251,7 +253,9 @@ export function NextStepAction({
         />
       )
     case "mark-ready":
-      return <MarkPullRequestReady pr={status} onReady={refresh.status} />
+      return isAuthor ? null : (
+        <MarkPullRequestReady pr={status} onReady={refresh.status} />
+      )
     case "request-review":
       return <RequestHumanReview pr={status} />
     case "update-branch":
@@ -433,7 +437,7 @@ function ChecksRow({
           {sorted.map(({ check, state }) => (
             <li
               key={check.name}
-              className="group flex h-7 items-center gap-space-2 text-xs"
+              className="group flex h-7 items-center gap-space-2 rounded-md text-xs focus-within:bg-surface-level-1-hover hover:bg-surface-level-1-hover"
             >
               {state === "fail" ? (
                 <XCircleIcon

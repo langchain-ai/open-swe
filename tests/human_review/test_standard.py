@@ -9,6 +9,7 @@ from zoneinfo import ZoneInfo
 import httpx2
 import pytest
 
+from openswe.expedited_review.eligibility import ChangedFile
 from openswe.expedited_review.readiness import PullRequestSnapshot
 from openswe.github.http import GitHubClient, GitHubError, RepoClient
 from openswe.github.pull_requests import PullRequest
@@ -537,6 +538,50 @@ async def test_merged_card_names_only_actual_approvers(
         assert "linus" not in message
 
 
+@pytest.mark.parametrize("available", [True, False])
+async def test_open_card_counts_only_non_test_files(available: bool) -> None:
+    pr = PullRequest(
+        owner="o",
+        repo="r",
+        number=1,
+        title="Fix",
+        author="ada",
+        additions=110,
+        deletions=55,
+        changed_files=2,
+    )
+    request = HumanReviewRequest(pull_request_id=pr.id, head_sha="abc", kind="standard")
+    request.pull_request = pr
+    request.requested_by = None
+    files = [
+        ChangedFile(filename="openswe/example.py", additions=10, deletions=5),
+        ChangedFile(filename="tests/test_example.py", additions=100, deletions=50),
+    ]
+    with (
+        patch.object(ReviewCard, "_files", AsyncMock(return_value=files if available else None)),
+        patch.object(ReviewCard, "_review_states", AsyncMock(return_value={})),
+        patch.object(HumanReviewRequest, "author_mention", AsyncMock(return_value="@ada")),
+    ):
+        _, blocks = await ReviewCard(request)._render_standard(None)
+    rendered = str(block_payload(blocks))
+    assert ("+10 −5 in 1 non-test file" in rendered) is available
+    assert "+110" not in rendered
+    assert "−55" not in rendered
+
+
+@pytest.mark.parametrize("count", [101, 102])
+async def test_standard_card_requires_complete_file_counts(
+    count: int, github_app: AsyncMock
+) -> None:
+    pr = PullRequest(owner="o", repo="r", number=1, changed_files=count)
+    request = HumanReviewRequest(pull_request_id=pr.id, head_sha="abc", kind="standard")
+    request.pull_request = pr
+    files = [ChangedFile(filename=f"openswe/file_{i}.py") for i in range(101)]
+    with patch.object(ChangedFile, "of_pull", AsyncMock(return_value=files)):
+        result = await ReviewCard(request)._files()
+    assert result == (files if count == 101 else None)
+
+
 def test_a_short_description_is_shown_whole_without_its_template_comments() -> None:
     assert summary_line("<!-- template -->\nFixes the\nretry loop.\n") == "Fixes the retry loop."
 
@@ -596,6 +641,60 @@ async def test_approved_card_collapses_without_closing_the_request(
         assert "linus" in str(block_payload(blocks))
         assert "awaiting manual merge" not in text
     assert request.state == "open"
+
+
+@pytest.mark.parametrize("in_thread", [False, True])
+@pytest.mark.parametrize("outcome", [None, "merged"])
+@pytest.mark.parametrize("source", ["unavailable", "moved", "detached"])
+async def test_review_card_keeps_its_originating_slack_thread(
+    in_thread: bool, outcome: str | None, source: str, github_app: AsyncMock
+) -> None:
+    pr = PullRequest(owner="lc", repo="repo", number=7, author="ada")
+    request = HumanReviewRequest(
+        pull_request_id=pr.id,
+        head_sha="abc",
+        kind="standard",
+        thread_id="origin-thread",
+        slack_channel_id="C_REVIEW",
+        slack_thread_ts="123.456" if in_thread else "",
+        run_config={"slack_thread": {"channel_id": "C_SOURCE", "thread_ts": "123.456"}},
+    )
+    request.pull_request = pr
+    request.requested_by = None
+    channel = "C_MOVED" if source == "moved" else "C_SOURCE"
+    source_url = f"https://langchain.slack.com/archives/{channel}/p123456"
+    client = MagicMock()
+    client.threads.get = AsyncMock(
+        return_value={
+            "metadata": {
+                "source_context": {
+                    "slack_thread": {"channel_id": "C_MOVED", "thread_ts": "123.456"}
+                }
+            }
+            if source == "moved"
+            else {"slack_thread_detached_at": "2026-10-23T00:00:00Z"}
+        },
+        side_effect=RuntimeError("Metadata unavailable") if source == "unavailable" else None,
+    )
+    with (
+        patch.object(ReviewCard, "_review_states", AsyncMock(return_value={})),
+        patch.object(ReviewCard, "_warn_target", side_effect=lambda card: card),
+        patch("openswe.slack.cards.get_client", return_value=client),
+        patch(
+            "openswe.slack.cards.get_slack_permalink",
+            AsyncMock(
+                side_effect=lambda target, ts: (
+                    source_url if (target, ts) == (channel, "123.456") else None
+                )
+            ),
+        ),
+    ):
+        _, blocks = await ReviewCard(request).render(outcome)
+    rendered = str(block_payload(blocks))
+    if source == "detached":
+        assert "|Slack thread>" not in rendered
+    else:
+        assert f"<{source_url}|Slack thread>" in rendered
 
 
 def _response(status: int, text: str = "") -> httpx2.Response:
