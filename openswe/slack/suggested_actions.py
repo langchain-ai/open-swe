@@ -165,6 +165,7 @@ async def handle_button(
             channel_context=channel_context,
             thread_ts=thread_ts,
             event_ts=action_ts or interaction.message_ts or thread_ts,
+            original_message_ts=thread_ts,
             user_id=user_id,
             text=action.request.format(subject=value.subject),
             bot_user_id=common.SLACK_BOT_USER_ID,
