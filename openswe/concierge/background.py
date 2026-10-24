@@ -27,7 +27,7 @@ from openswe.threads import index
 from openswe.threads.runs import create_system_thread, run_on_system_message
 from openswe.users import User
 from openswe.utils.json_types import thread_metadata
-from openswe.utils.thread_ops import langgraph_client
+from openswe.utils.thread_reads import read_thread
 
 logger = logging.getLogger(__name__)
 
@@ -101,9 +101,7 @@ class Concierge:
             await note_for_thread_owner(self.dm_channel_id, CONCIERGE_TS, event)
 
     async def _start_background_thread(self, login: str, check_in: str) -> None:
-        host = ThreadMetadata.model_validate(
-            thread_metadata(await langgraph_client().threads.get(self.dm_thread_id))
-        )
+        host = ThreadMetadata.model_validate(thread_metadata(await read_thread(self.dm_thread_id)))
         thread_id = await create_system_thread(
             login,
             self.user.email or None,
