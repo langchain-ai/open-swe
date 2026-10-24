@@ -366,7 +366,7 @@ class ReviewCard:
             diff_image_id=diff_image_id,
         )
 
-    async def refresh_author_dm(self, outcome: str | None) -> bool:
+    async def refresh_author_dm(self, outcome: str | None, *, force: bool = False) -> bool:
         request = self.request
         if not request.slack_dm_channel_id or not request.slack_dm_message_ts:
             return False
@@ -398,7 +398,7 @@ class ReviewCard:
                 current.slack_dm_channel_id,
                 current.slack_dm_message_ts,
             ]
-            if current.run_config.get("author_dm_status") == status_key:
+            if not force and current.run_config.get("author_dm_status") == status_key:
                 request.run_config = current.run_config
                 return True
             origin_url = (
