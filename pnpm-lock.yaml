@@ -120,16 +120,16 @@ importers:
         version: 0.15.22(@types/react-dom@19.2.5(@types/react@19.2.18))(@types/react@19.2.18)(react-dom@19.2.8(react@19.2.8))(react@19.2.8)(use-sync-external-store@1.6.0(react@19.2.8))
       '@assistant-ui/react-langchain':
         specifier: 0.0.33
-        version: 0.0.33(@assistant-ui/tap@0.9.19(@types/react@19.2.18)(react@19.2.8))(@langchain/core@1.2.9(ws@8.21.3))(@langchain/langgraph-sdk@1.12.0(@langchain/core@1.2.9(ws@8.21.3))(react-dom@19.2.8(react@19.2.8))(react@19.2.8))(@langchain/react@1.2.0(@langchain/core@1.2.9(ws@8.21.3))(react-dom@19.2.8(react@19.2.8))(react@19.2.8))(@types/react@19.2.18)(react@19.2.8)
+        version: 0.0.33(@assistant-ui/tap@0.9.19(@types/react@19.2.18)(react@19.2.8))(@langchain/core@1.3.0(ws@8.21.3))(@langchain/langgraph-sdk@1.12.7(@langchain/core@1.3.0(ws@8.21.3))(react-dom@19.2.8(react@19.2.8))(react@19.2.8))(@langchain/react@1.2.7(@langchain/core@1.3.0(ws@8.21.3))(react-dom@19.2.8(react@19.2.8))(react@19.2.8))(@types/react@19.2.18)(react@19.2.8)
       '@datadog/browser-rum':
         specifier: 7.15.0
         version: 7.15.0
       '@langchain/core':
-        specifier: ^1.2.9
-        version: 1.2.9(ws@8.21.3)
+        specifier: ^1.3.0
+        version: 1.3.0(ws@8.21.3)
       '@langchain/langgraph-sdk':
-        specifier: 1.12.0
-        version: 1.12.0(@langchain/core@1.2.9(ws@8.21.3))(react-dom@19.2.8(react@19.2.8))(react@19.2.8)
+        specifier: 1.12.7
+        version: 1.12.7(@langchain/core@1.3.0(ws@8.21.3))(react-dom@19.2.8(react@19.2.8))(react@19.2.8)
       '@langchain/macaw-components':
         specifier: file:vendor/macaw/langchain-macaw-components-2.0.0-alpha.0.tgz
         version: file:ui/vendor/macaw/langchain-macaw-components-2.0.0-alpha.0.tgz(@babel/runtime@7.29.7)(@codemirror/autocomplete@6.20.3)(@codemirror/search@6.7.2)(@codemirror/theme-one-dark@6.1.3)(@types/react-dom@19.2.5(@types/react@19.2.18))(@types/react@19.2.18)(codemirror@6.0.2)(react-dom@19.2.8(react@19.2.8))(react@19.2.8)(tailwindcss@4.3.3)
@@ -137,8 +137,8 @@ importers:
         specifier: file:vendor/macaw/langchain-macaw-tokens-2.0.0-alpha.0.tgz
         version: file:ui/vendor/macaw/langchain-macaw-tokens-2.0.0-alpha.0.tgz
       '@langchain/react':
-        specifier: 1.2.0
-        version: 1.2.0(@langchain/core@1.2.9(ws@8.21.3))(react-dom@19.2.8(react@19.2.8))(react@19.2.8)
+        specifier: 1.2.7
+        version: 1.2.7(@langchain/core@1.3.0(ws@8.21.3))(react-dom@19.2.8(react@19.2.8))(react@19.2.8)
       '@lexical/react':
         specifier: ^0.49.0
         version: 0.49.0(react-dom@19.2.8(react@19.2.8))(react@19.2.8)(typescript@5.9.3)(yjs@13.6.32)
@@ -887,12 +887,12 @@ packages:
   '@jridgewell/trace-mapping@0.3.31':
     resolution: {integrity: sha512-zzNR+SdQSDJzc8joaeP8QQoCQr8NuYx2dIIytl1QeBEZHJ9uW6hebsrYgbz8hJwUQao3TWCMtmfV8Nu1twOLAw==}
 
-  '@langchain/core@1.2.9':
-    resolution: {integrity: sha512-conzSEj9Zu1AyXJLXsSbgrtxtxinmI1yGqQ5CIJZSoV5rvv+yvQE/vgBnoySpBQ/bl3YPgj2FL/gbDjWykLSfg==}
+  '@langchain/core@1.3.0':
+    resolution: {integrity: sha512-ZiS8USsHdO8ZVFh0m8Rs6v2BvqBEvfFicG66zxdF4rGgXSJjk0d0sLnnFZCx3RXPUvP8ybTJgPlNfkJGs1J7BA==}
     engines: {node: '>=20'}
 
-  '@langchain/langgraph-sdk@1.12.0':
-    resolution: {integrity: sha512-F3AOZjKZRUGmE3FzY+RaVZI6WzXOkwnuF7jqgto6rDPSnO9OdVdYGvwGDi3jjRGf5xLoDtX2dpsR9z5KptU+5A==}
+  '@langchain/langgraph-sdk@1.12.7':
+    resolution: {integrity: sha512-+tIY6oVDDt9e3LnDKs4Qqe3nFJSY7amDUofro7me0kZ8QbaJhFViQL0LaX30SQhIaHuCLZYMRIluhuFSOPjF8g==}
     peerDependencies:
       '@langchain/core': ^1.1.48
       react: ^18 || ^19
@@ -920,11 +920,11 @@ packages:
     version: 2.0.0-alpha.0
     engines: {node: '>=26'}
 
-  '@langchain/protocol@0.0.19':
-    resolution: {integrity: sha512-9hKcRrH7cBX6gfutdfXPoft1OCchHe4FEpALoDJMl5Qu+n/YG5ynZmyu8+8cxORlPwHBoKTxggvXz+76M1yX1Q==}
+  '@langchain/protocol@0.0.20':
+    resolution: {integrity: sha512-sxlkDG2/HGyjDFLTJ8B/o3oglRjOv8iLCFgrV0550/Vym3V6RZ0SUjAQFe8jrLQw8ZXjERy3swJp5OODBSrUYA==}
 
-  '@langchain/react@1.2.0':
-    resolution: {integrity: sha512-/+aPvDQByW2U82Mw5OXpWJl3gHXGQvV9/zecEU6wHHZAffkb8uD4UE7ilbx3ma/stFH4yhugrVfxsTAjifLnLw==}
+  '@langchain/react@1.2.7':
+    resolution: {integrity: sha512-GDf+6mjNc2+0b45cpe31beYQteH7X8KNvj/zq/3gEKB75cXGcb9Do/obROZVNCE+YeQrls3BHGyDKLbq7gfO/A==}
     peerDependencies:
       '@langchain/core': ^1.1.48
       react: ^18 || ^19
@@ -5075,8 +5075,8 @@ packages:
   khroma@2.1.0:
     resolution: {integrity: sha512-Ls993zuzfayK269Svk9hzpeGUKob/sIgZzyHYdjQoAdQetRKpOLj+k/QQQ/6Qi0Yz65mlROrfd+Ev+1+7dz9Kw==}
 
-  langsmith@0.8.9:
-    resolution: {integrity: sha512-6ikTB5SO+3SlBQ/+oH8K/JzhglxB8AM4RAe5bHzgWSEIHTgTe+b71bSjf1fDvlYuEXoiPn6uP10BbczrbznUnA==}
+  langsmith@0.11.0:
+    resolution: {integrity: sha512-NMyaEhfHKAVPdXR8jqP1in4BAr2RhJTmBsH+ZzhvBDTxWUsuaprnJxkRe/3NY5d2+wCaPtzbDK2Myhh6vg2q7w==}
     peerDependencies:
       '@opentelemetry/api': '*'
       '@opentelemetry/exporter-trace-otlp-proto': '*'
@@ -6814,7 +6814,7 @@ snapshots:
       - ioredis
       - redis
 
-  '@assistant-ui/react-langchain@0.0.33(@assistant-ui/tap@0.9.19(@types/react@19.2.18)(react@19.2.8))(@langchain/core@1.2.9(ws@8.21.3))(@langchain/langgraph-sdk@1.12.0(@langchain/core@1.2.9(ws@8.21.3))(react-dom@19.2.8(react@19.2.8))(react@19.2.8))(@langchain/react@1.2.0(@langchain/core@1.2.9(ws@8.21.3))(react-dom@19.2.8(react@19.2.8))(react@19.2.8))(@types/react@19.2.18)(react@19.2.8)':
+  '@assistant-ui/react-langchain@0.0.33(@assistant-ui/tap@0.9.19(@types/react@19.2.18)(react@19.2.8))(@langchain/core@1.3.0(ws@8.21.3))(@langchain/langgraph-sdk@1.12.7(@langchain/core@1.3.0(ws@8.21.3))(react-dom@19.2.8(react@19.2.8))(react@19.2.8))(@langchain/react@1.2.7(@langchain/core@1.3.0(ws@8.21.3))(react-dom@19.2.8(react@19.2.8))(react@19.2.8))(@types/react@19.2.18)(react@19.2.8)':
     dependencies:
       '@assistant-ui/core': 0.3.21(@assistant-ui/store@0.3.15(@assistant-ui/tap@0.9.19(@types/react@19.2.18)(react@19.2.8))(@types/react@19.2.18)(react@19.2.8))(@assistant-ui/tap@0.9.19(@types/react@19.2.18)(react@19.2.8))(@types/react@19.2.18)(assistant-cloud@0.2.3)(react@19.2.8)
       '@assistant-ui/store': 0.3.15(@assistant-ui/tap@0.9.19(@types/react@19.2.18)(react@19.2.8))(@types/react@19.2.18)(react@19.2.8)
@@ -6822,9 +6822,9 @@ snapshots:
       assistant-stream: 0.3.45
       react: 19.2.8
     optionalDependencies:
-      '@langchain/core': 1.2.9(ws@8.21.3)
-      '@langchain/langgraph-sdk': 1.12.0(@langchain/core@1.2.9(ws@8.21.3))(react-dom@19.2.8(react@19.2.8))(react@19.2.8)
-      '@langchain/react': 1.2.0(@langchain/core@1.2.9(ws@8.21.3))(react-dom@19.2.8(react@19.2.8))(react@19.2.8)
+      '@langchain/core': 1.3.0(ws@8.21.3)
+      '@langchain/langgraph-sdk': 1.12.7(@langchain/core@1.3.0(ws@8.21.3))(react-dom@19.2.8(react@19.2.8))(react@19.2.8)
+      '@langchain/react': 1.2.7(@langchain/core@1.3.0(ws@8.21.3))(react-dom@19.2.8(react@19.2.8))(react@19.2.8)
       '@types/react': 19.2.18
     transitivePeerDependencies:
       - '@assistant-ui/tap'
@@ -7489,12 +7489,12 @@ snapshots:
       '@jridgewell/resolve-uri': 3.1.2
       '@jridgewell/sourcemap-codec': 1.5.5
 
-  '@langchain/core@1.2.9(ws@8.21.3)':
+  '@langchain/core@1.3.0(ws@8.21.3)':
     dependencies:
       '@cfworker/json-schema': 4.1.1
       '@standard-schema/spec': 1.1.0
       js-tiktoken: 1.0.21
-      langsmith: 0.8.9(ws@8.21.3)
+      langsmith: 0.11.0(ws@8.21.3)
       mustache: 4.2.0
       p-queue: 6.6.2
       zod: 4.6.6
@@ -7505,10 +7505,10 @@ snapshots:
       - openai
       - ws
 
-  '@langchain/langgraph-sdk@1.12.0(@langchain/core@1.2.9(ws@8.21.3))(react-dom@19.2.8(react@19.2.8))(react@19.2.8)':
+  '@langchain/langgraph-sdk@1.12.7(@langchain/core@1.3.0(ws@8.21.3))(react-dom@19.2.8(react@19.2.8))(react@19.2.8)':
     dependencies:
-      '@langchain/core': 1.2.9(ws@8.21.3)
-      '@langchain/protocol': 0.0.19
+      '@langchain/core': 1.3.0(ws@8.21.3)
+      '@langchain/protocol': 0.0.20
       '@types/json-schema': 7.0.15
       p-queue: 9.3.3
       p-retry: 7.1.1
@@ -7589,12 +7589,12 @@ snapshots:
 
   '@langchain/macaw-tokens@file:ui/vendor/macaw/langchain-macaw-tokens-2.0.0-alpha.0.tgz': {}
 
-  '@langchain/protocol@0.0.19': {}
+  '@langchain/protocol@0.0.20': {}
 
-  '@langchain/react@1.2.0(@langchain/core@1.2.9(ws@8.21.3))(react-dom@19.2.8(react@19.2.8))(react@19.2.8)':
+  '@langchain/react@1.2.7(@langchain/core@1.3.0(ws@8.21.3))(react-dom@19.2.8(react@19.2.8))(react@19.2.8)':
     dependencies:
-      '@langchain/core': 1.2.9(ws@8.21.3)
-      '@langchain/langgraph-sdk': 1.12.0(@langchain/core@1.2.9(ws@8.21.3))(react-dom@19.2.8(react@19.2.8))(react@19.2.8)
+      '@langchain/core': 1.3.0(ws@8.21.3)
+      '@langchain/langgraph-sdk': 1.12.7(@langchain/core@1.3.0(ws@8.21.3))(react-dom@19.2.8(react@19.2.8))(react@19.2.8)
       react: 19.2.8
     transitivePeerDependencies:
       - react-dom
@@ -11755,7 +11755,7 @@ snapshots:
 
   khroma@2.1.0: {}
 
-  langsmith@0.8.9(ws@8.21.3):
+  langsmith@0.11.0(ws@8.21.3):
     dependencies:
       p-queue: 6.6.2
     optionalDependencies:
