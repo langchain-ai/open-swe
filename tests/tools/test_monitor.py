@@ -3,11 +3,13 @@ import time
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import AsyncMock
+from xml.etree import ElementTree
 
 import pytest
 from deepagents.backends.protocol import ExecuteResponse
 
 from openswe.database import postgres
+from openswe.input_messages import delivered_event_match_ids, visible_dynamic_context_hashes
 from openswe.monitors import budget, delivery, sandbox
 from openswe.monitors.delivery import ThreadMonitorDelivery
 from openswe.monitors.sandbox import MonitorEnd, MonitorEvent, PendingMonitor, SandboxMonitors
@@ -189,7 +191,7 @@ async def test_spent_wake_budget_holds_monitor_output_on_every_delivery_path(
 
 @pytest.mark.usefixtures("registry_db")
 async def test_monitor_output_is_owed_once_however_often_it_is_read() -> None:
-    event = MonitorEvent(seq=1, at_raw_line=2, lines=["ERROR one"])
+    event = MonitorEvent(seq=1, at_raw_line=2, lines=["\x1b[0mERROR one\x00"])
     ended = PendingMonitor(
         monitor_id="mon-1",
         description="errors",
@@ -208,6 +210,9 @@ async def test_monitor_output_is_owed_once_however_often_it_is_read() -> None:
     assert [match.delivery_id for match in owed] == ["mon-1:1", "mon-1:end"]
     assert "ERROR one" in owed[0].content
     assert "the command failed" in owed[1].content
+    messages = EventMatch.messages(owed)
+    assert delivered_event_match_ids(messages) == {str(match.id) for match in owed}
+    assert await EventMatch.owed("thread-1", messages) == []
 
 
 async def test_dashboard_never_wakes_the_sandbox_of_a_thread_with_nothing_running(
@@ -315,3 +320,47 @@ async def test_events_past_the_allowance_stop_the_monitors(
     assert len(owed) == budget.MAX_EVENTS
     assert acked == [60]
     assert stopped == {"mon-noisy": budget.EVENTS_SPENT_REASON}
+
+
+def test_monitor_deliveries_are_parseable_and_share_visible_identity() -> None:
+    output = "\x1b[?25l\x1b[38:2:255:0:0mERROR\x1b[0m\x1b]0;title\x07\x1b(B one\x00\ud800\ufffe"
+    event = MonitorEvent(seq=1, at_raw_line=2, lines=[output])
+    monitor = PendingMonitor(
+        monitor_id="mon-1",
+        status="failed",
+        end=MonitorEnd(tail=[(2, output)], filter_errors=output),
+    )
+    matches = [
+        EventMatch(
+            thread_id="thread-1",
+            source="sandbox",
+            delivery_id=f"mon-1:{index}",
+            content=content,
+            run_config={},
+        )
+        for index, content in enumerate(
+            [delivery._event_content(monitor, event), delivery._end_content(monitor)]
+        )
+    ]
+    for match in matches:
+        assert "\x00" not in match.content
+        assert "\ud800" not in match.content
+        assert "\ufffe" not in match.content
+        assert "\x1b" not in match.content
+        assert "ERROR one" in match.content
+    first = EventMatch.messages(matches[:1])
+    second = EventMatch.messages(
+        matches[1:],
+        injected_dynamic_context_hashes=visible_dynamic_context_hashes({"messages": first}),
+    )
+
+    assert len(first) == 2
+    assert len(second) == 1
+    for message in [first[-1], second[-1]]:
+        assert isinstance(message["content"], str)
+        root = ElementTree.fromstring(message["content"])
+        assert root.tag == "input-message"
+        assert "ERROR one" in (root.text or "")
+        assert "[0m" not in (root.text or "")
+        assert "title" not in (root.text or "")
+    assert delivered_event_match_ids([*first, *second]) == {str(match.id) for match in matches}
