@@ -95,6 +95,7 @@ from managed_deepagents._channels.run_input import (
     ChannelRunOptions,
     ChannelRunResult,
 )
+from managed_deepagents._channels.runtime import RuntimeChannel
 from managed_deepagents._channels.types import (
     ChannelContentMessage,
     ChannelEvent,
@@ -113,6 +114,7 @@ from managed_deepagents._connections import (
     InvalidAgentAuthEndpointError,
     connections,
 )
+from managed_deepagents._managed_thread import ManagedThread, ThreadOrigin, ThreadParticipant
 from managed_deepagents._managed_tools import (
     ManagedDeepAgentRuntime,
     ManagedRuntime,
@@ -263,6 +265,7 @@ __all__ = [
     "ManagedRuntime",
     "ManagedServerInfo",
     "ManagedServerRuntime",
+    "ManagedThread",
     "ManagedToolRuntime",
     "McpSelection",
     "McpServersConfig",
@@ -275,6 +278,7 @@ __all__ = [
     "PostedChannelMessage",
     "PromptResponse",
     "RemoteMcpServerConfig",
+    "RuntimeChannel",
     "RuntimeSchedules",
     "SandboxDefinition",
     "SandboxReplacement",
@@ -287,6 +291,8 @@ __all__ = [
     "SlackPromptResponse",
     "SseMcpServerConfig",
     "SupportedEventKey",
+    "ThreadOrigin",
+    "ThreadParticipant",
     "auth",
     "basic",
     "bearer",

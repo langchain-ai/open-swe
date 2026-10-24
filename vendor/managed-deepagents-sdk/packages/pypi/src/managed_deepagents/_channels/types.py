@@ -112,7 +112,10 @@ ChannelEvent: TypeAlias = (
 class ChannelInfo:
     name: str
     provider: str
-    event: ChannelEvent
+    #: The event of the message that started this run, or the schedule event of a
+    #: scheduled run; ``None`` for a channel read from the thread record.
+    event: ChannelEvent | None
+    #: The provider's payload, in the run its message started only.
     raw_event: JsonValue = None
 
 
