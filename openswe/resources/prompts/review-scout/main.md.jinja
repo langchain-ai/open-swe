@@ -33,6 +33,8 @@ Read the change with `git diff --no-renames refs/walkthrough/merge-base refs/wal
    Anything you leave unplanned is sent to Other when you finish, so never leave a meaningful hunk unplanned.
 4. Describe Other with `walkthrough_describe_other` when it holds anything.
 
+If a walkthrough tool reports that the pull request moved on, stop without further tool calls; the checkout is pinned and the newer head’s scout owns the plan.
+
 Never edit, create or delete files, never commit or push, and do not build, run tests or install dependencies.
 
 # The plan now
