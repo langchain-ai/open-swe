@@ -19,6 +19,8 @@ from openswe.database import configured
 from openswe.federation.github_oidc import GitHubActionsClaims, InvalidFederatedToken
 from openswe.federation.github_oidc import verify as verify_github_oidc
 from openswe.github.repositories import Repository
+from openswe.prompts import prompt
+from openswe.run_config import RunConfig
 from openswe.source_context import SourceContext
 from openswe.webhooks.event_log import EventLog, EventRefs
 from openswe.webhooks.event_subscriptions import EventSubscription
@@ -38,6 +40,7 @@ class RolloutAccepted(TypedDict):
 
 _AUDIENCE = "openswe-rollout"
 ROLLOUT_CHECK_REQUESTED = "rollout_check"
+ROLLOUT_CHECK_CONTEXT = "rollout_check_context"
 _DEPLOYED = "deployed"
 _MAX_COMMITS = 5000
 _MAX_SUBSCRIPTIONS = 5
@@ -112,16 +115,6 @@ def _delivery_id(target: str, commits: list[str]) -> str:
     return hashlib.sha256(canonical.encode()).hexdigest()
 
 
-def _instructions(sha: str) -> str:
-    return (
-        f"This deployment includes merge commit {sha}. "
-        "The event names the target that finished syncing. "
-        "Confirm the fix and look for regressions on that target. "
-        "Cancel this subscription with listen_events after every target "
-        "expected for this change has included the commit."
-    )
-
-
 def _copy_config(config: dict[str, JsonValue], values: dict[str, object]) -> None:
     for key, value in values.items():
         if isinstance(value, (str, int, float, bool, dict, list)):
@@ -142,6 +135,9 @@ def _run_config(
     email = metadata.get("triggering_user_email")
     if not isinstance(config.get("user_email"), str) and isinstance(email, str) and email:
         config["user_email"] = email
+    requested = RunConfig.parse(metadata.get(ROLLOUT_CHECK_CONTEXT))
+    if requested.source == "slack" and requested.slack_thread and requested.slack_thread.location:
+        config["slack_thread"] = requested.slack_thread.dump()
     config["thread_id"] = thread_id
     config["source"] = config.get("source") if isinstance(config.get("source"), str) else "github"
     config["repo"] = {"owner": owner, "name": repo}
@@ -204,12 +200,7 @@ async def subscribe_merged_thread(
     sha: str,
     metadata: dict[str, object],
 ) -> None:
-    """Listen for deploys that include this pull request's merge commit.
-
-    Best-effort: a failure here leaves the merged thread state as it was.
-    ``one_shot`` stays off so the first production region does not cancel the
-    rest.
-    """
+    """Listen for deploys that include this pull request's merge commit."""
     merge_sha = sha.strip().lower()
     if not _SHA_RE.fullmatch(merge_sha) or not configured():
         return
@@ -238,6 +229,8 @@ async def subscribe_merged_thread(
                 extra={"agent_thread_id": thread_id},
             )
             return
+        requested = RunConfig.parse(metadata.get(ROLLOUT_CHECK_CONTEXT))
+        slack_thread = requested.slack_thread if requested.source == "slack" else None
         await EventSubscription(
             thread_id=thread_id,
             workspace_id=workspace_id,
@@ -248,7 +241,11 @@ async def subscribe_merged_thread(
             payload_match={"commits": [merge_sha]},
             multitask_strategy="enqueue",
             one_shot=False,
-            instructions=_instructions(merge_sha),
+            instructions=prompt(
+                "runs/rollout-check",
+                sha=merge_sha,
+                slack_thread=slack_thread if slack_thread and slack_thread.location else None,
+            ),
             run_config=_run_config(thread_id, owner, repo, number, workspace, metadata),
             expires_at=datetime.now(UTC) + timedelta(days=_LISTEN_DAYS),
         ).create()
