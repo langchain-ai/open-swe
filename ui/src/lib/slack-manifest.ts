@@ -33,8 +33,6 @@ const BASE_BOT_EVENTS = [
 
 const BACKEND_URL_PLACEHOLDER = "https://<your-backend-url>"
 
-export const ASK_COMMAND = "/oswe"
-
 export interface SlackManifestConfig {
   backendUrl?: string | null
 }
@@ -65,15 +63,6 @@ export function slackAppManifest(
         type: "message",
         callback_id: "open_swe_explain",
         description: "Ask Open SWE to explain this message",
-      },
-    ],
-    slash_commands: [
-      {
-        command: ASK_COMMAND,
-        url: `${backendUrl}/webhooks/slack/commands`,
-        description: "Ask Open SWE",
-        usage_hint: "[your request or question]",
-        should_escape: false,
       },
     ],
   }
