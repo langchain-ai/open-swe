@@ -1292,7 +1292,7 @@ export function useDeleteAgentThread() {
             })
           )
       const path = window.location.pathname
-      const chat = chatRoutes(path)
+      const chat = chatRoutes()
       if (path === `${chat.home}/${threadId}`) {
         navigate({ to: chat.home })
       }
