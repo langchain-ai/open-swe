@@ -10,10 +10,11 @@ the agent itself is stateless.
 # ruff: noqa: E402, PLC2701
 import hashlib
 import logging
+import time
 import warnings
 from collections.abc import Mapping, Sequence
-from pathlib import Path
-from typing import Any, cast
+from functools import cache, partial
+from typing import Any, Final, Self, cast
 from uuid import UUID
 
 from openswe.config import ENV
@@ -25,6 +26,14 @@ _MODEL_ROUTING_SPLIT = 0.5
 from langgraph.graph.state import RunnableConfig
 from langgraph.runtime import Runtime
 from langgraph_sdk import get_client
+from runtime_api.catalog import (
+    SEARCH_TOOLS,
+    CliResultRules,
+    InboxSpec,
+    LoopRules,
+    ReplyRules,
+    RoutingRules,
+)
 
 warnings.filterwarnings("ignore", module="langchain_core._api.deprecation")
 
@@ -35,7 +44,6 @@ from dataclasses import replace
 warnings.filterwarnings("ignore", message=".*Pydantic V1.*", category=UserWarning)
 
 from deepagents.backends.composite import CompositeBackend
-from deepagents.backends.filesystem import FilesystemBackend
 from deepagents.backends.protocol import BackendProtocol, SandboxBackendProtocol
 from deepagents.backends.store import StoreBackend
 from deepagents.middleware.subagents import GENERAL_PURPOSE_SUBAGENT
@@ -45,6 +53,7 @@ from langchain_anthropic.middleware import AnthropicPromptCachingMiddleware
 from langchain_core.language_models import BaseChatModel
 from langchain_core.messages import HumanMessage
 from langchain_core.tools import BaseTool
+from langchain_core.tools import tool as as_tool
 from langchain_quickjs._ptc import is_valid_ptc_tool_name, to_camel_case
 from langsmith.sandbox import SandboxRetryableConnectionError
 
@@ -102,11 +111,14 @@ from openswe.middleware.client_tools import ClientToolsMiddleware
 from openswe.middleware.conversation_offloading import ConversationOffloadingMiddleware
 from openswe.middleware.model_selection import ModelSelectionState, RoutingMode
 from openswe.middleware.prepare_run import PrepareRunState
-from openswe.middleware.require_cli_result import RequireCliResultMiddleware
+from openswe.middleware.require_cli_result import RequireCliResultMiddleware, cli_result_nudge
 from openswe.middleware.require_user_reply import (
+    CARD_TOOLS,
+    REPLY_GUARD,
     SLACK_REPLY_SURFACE,
     WEB_REPLY_SURFACE,
     ReplySurface,
+    reply_nudge,
 )
 from openswe.middleware.sandbox_circuit_breaker import post_sandbox_unreachable_notification
 from openswe.middleware.stale_workspace import warn_stale_workspace
@@ -137,7 +149,6 @@ from openswe.sandboxes.lifecycle import (
 )
 from openswe.sandboxes.paths import resolve_sandbox_work_dir
 from openswe.sandboxes.providers.langsmith import service_identity_jwks_url
-from openswe.sandboxes.read_only_backend import ReadOnlyBackend
 from openswe.sandboxes.retry import SANDBOX_ATTACH_MAX_ELAPSED, retry_transient_sandbox_errors
 from openswe.sandboxes.state import (
     SandboxUnreachableError,
@@ -151,11 +162,10 @@ from openswe.sandboxes.tool_runtime import (
     ToolSurface,
 )
 from openswe.search_policy import SHELL_SEARCH_EXCLUDED_TOOLS
-from openswe.skill_store.backend import skills_backend
+from openswe.skill_store.run_skills import RunSkillStores
 from openswe.slack.dm import is_concierge_thread, is_dm_channel
 from openswe.thread_title import TITLE_GENERATION_MAX_TOKENS, schedule_thread_title_generation
 from openswe.threads.blobs import ThreadBlobs, blob_namespace
-from openswe.threads.inbox import ThreadInbox
 from openswe.threads.recent_context import RecentContextAudience, recent_thread_context_section
 from openswe.threads.summary import DASHBOARD_SOURCE
 from openswe.tools import (
@@ -244,7 +254,6 @@ from openswe.tools.note_on_diff import note_on_diff
 from openswe.tools.propose_pr_review import propose_pr_review
 from openswe.tools.propose_review_comment import propose_review_comment
 from openswe.tools.review_walkthrough import walkthrough_tools
-from openswe.tools.search_tools import SEARCH_TOOLS_NAME, search_tools_tool
 from openswe.tools.submit_review_assessment_feedback import submit_review_assessment_feedback
 from openswe.tools.task_threads import (
     control_worker,
@@ -287,10 +296,6 @@ from openswe.workspaces.store import (
 
 client = get_client()
 
-USER_SKILLS_ROUTE = "/skills/"
-ORGANIZATION_SKILLS_ROUTE = "/organization-skills/"
-BUNDLED_SKILLS_ROUTE = "/bundled-skills/"
-BUNDLED_SKILLS_DIR = Path(__file__).resolve().parent / "bundled_skills"
 DEEP_AGENT_TOOL_NAMES = {
     "delete",
     "edit_file",
@@ -656,6 +661,84 @@ ADMIN_TOOLS = (
 )
 
 
+# Every tool the agent may offer; each run's plan offers those it keeps (``plan_agent``),
+# and a call answered without the plan finds its tool here by name.
+AGENT_TOOLS: Final = (
+    http_request,
+    fetch_url,
+    web_search,
+    background_execute,
+    background_task,
+    monitor,
+    publish_artifact,
+    save_user_instructions,
+    save_user_settings,
+    save_user_skill,
+    delete_user_skill,
+    list_threads,
+    search_pull_requests,
+    get_thread,
+    manage_thread,
+    task_status,
+    message_task_thread,
+    control_worker,
+    start_thread,
+    manage_baby_sit,
+    switch_to_performance_model,
+    expedite_pr_approval,
+    merge_expedited_pr,
+    request_human_review,
+    assign_human_reviewer,
+    auto_assign_human_reviewer,
+    dismiss_human_review_request,
+    get_human_review_status,
+    open_pull_request,
+    link_pull_request,
+    output_iframe,
+    create_sandbox_file_download_url,
+    expose_port,
+    read_user_settings,
+    request_pr_review,
+    connect_managed_tools,
+    recreate_sandbox,
+    report_platform_issue,
+    schedule_thread_wakeup,
+    request_rollout_check,
+    listen_events,
+    list_event_types,
+    manage_code_channel,
+    code_channel_set_view,
+    manage_incident,
+    slack_add_reaction,
+    slack_attach_html,
+    slack_list_channel_members,
+    slack_list_channels,
+    slack_move_thread,
+    slack_no_reply_needed,
+    slack_post_message,
+    slack_read_channel_messages,
+    slack_read_thread_messages,
+    slack_reply,
+    slack_breakout_thread,
+    slack_start_review_channel,
+    submit_thread_feedback,
+    suggest_task,
+    submit_review_assessment_feedback,
+    propose_review_comment,
+    propose_pr_review,
+    note_on_diff,
+    add_review_comment,
+    *ADMIN_TOOLS,
+    cli_result,
+    worktree_handoff,
+    read_only_sql,
+    write_database_rows,
+    manage_feature_flags,
+    manage_review_approval_mode,
+    manage_review_repos,
+)
+
+
 def workspace_slug(cfg: RunConfig) -> str | None:
     """The workspace this thread selected, if any."""
     return cfg.workspace_slug
@@ -664,6 +747,114 @@ def workspace_slug(cfg: RunConfig) -> str | None:
 async def _admin_thread(config: RunnableConfig, profile_login: str | None) -> bool:
     """Whether this run may manage workspaces and organization skills."""
     return await actor_has_admin_context(RunConfig.from_config(config), login=profile_login)
+
+
+def _writes_database_rows() -> bool:
+    """Whether this deployment's runs may repair data, which only preview and staging allow."""
+    return ENV.OPENSWE_ENV.optional() in {"preview", "staging"}
+
+
+@cache
+def agent_tools_by_name() -> Mapping[str, BaseTool]:
+    """Every tool this deployment's agent may offer, a review walkthrough's of either mode included.
+
+    Each tool checks who may call it as it runs; what this deployment withholds from
+    every run stays out of reach here too.
+    """
+    tools = [
+        *(
+            tool
+            for tool in AGENT_TOOLS
+            if _writes_database_rows() or tool is not write_database_rows
+        ),
+        *walkthrough_tools("reviewer"),
+        *walkthrough_tools("author"),
+    ]
+    built = (tool if isinstance(tool, BaseTool) else as_tool(tool) for tool in tools)
+    return {tool.name: tool for tool in built}
+
+
+# How long a process keeps the MCP tools it loaded for a person in a workspace, and
+# for how many at once.
+_INTEGRATIONS_TTL_SECONDS: Final = 300.0
+_INTEGRATIONS_LIMIT: Final = 128
+_integrations: dict[tuple[str | None, str], tuple[float, dict[str, BaseTool]]] = {}
+
+
+def _keep_integrations(key: tuple[str | None, str], tools: dict[str, BaseTool]) -> None:
+    """Keep ``tools`` for a while, dropping what expired and then the oldest past the limit."""
+    now = time.monotonic()
+    for stale in [k for k, (expires, _tools) in _integrations.items() if expires <= now]:
+        del _integrations[stale]
+    _integrations.pop(key, None)
+    while len(_integrations) >= _INTEGRATIONS_LIMIT:
+        del _integrations[next(iter(_integrations))]
+    _integrations[key] = (now + _INTEGRATIONS_TTL_SECONDS, tools)
+
+
+async def integration_tools(config: RunnableConfig) -> Mapping[str, BaseTool]:
+    """The MCP tools the run may call, by name, loaded as its plan loads them."""
+    cfg = RunConfig.from_config(config)
+    try:
+        login = await private_credential_login(config)
+    except Exception:
+        logger.exception("Cannot resolve thread credential scope; omitting MCP tools")
+        return {}
+    workspace = workspace_slug(cfg) or DEFAULT_WORKSPACE_SLUG
+    loaded = _integrations.get((login, workspace))
+    if loaded is not None and loaded[0] > time.monotonic():
+        return loaded[1]
+    _gateway, tools = await _run_mcp_tools(cfg.thread_id or "", login, workspace)
+    by_name: dict[str, BaseTool] = {tool.name: tool for tool in tools if isinstance(tool, BaseTool)}
+    _keep_integrations((login, workspace), by_name)
+    return by_name
+
+
+async def _reconnect_agent_box(thread_id: str, workspace: str | None) -> SandboxBackendProtocol:
+    return await ensure_sandbox_for_thread(
+        thread_id, workspace_slug=workspace, record_stale_boot=True
+    )
+
+
+class ThreadFiles:
+    """The thread's files as the agent's tools reach them: its box, with the paths this
+    deployment serves routed in.
+
+    Those are the run's skill stores, and the images it offloaded, which PostgreSQL
+    keeps so they can be read without the box.
+    """
+
+    def __init__(
+        self, thread_id: str, cfg: RunConfig, *, skills: RunSkillStores, bridged: bool
+    ) -> None:
+        # A bridged machine's run keeps its artifacts apart from the person's own files.
+        self.artifacts_root = f"{LOCAL_ARTIFACTS_DIR}/{thread_id}/" if bridged else "/"
+        self.routes: dict[str, BackendProtocol] = {
+            **skills.routes,
+            f"{self.artifacts_root}blobs/": StoreBackend(
+                store=ThreadBlobs(thread_id),
+                namespace=lambda _runtime: blob_namespace(thread_id),
+            ),
+        }
+        box = get_cached_sandbox_backend(
+            thread_id, reconnect=partial(_reconnect_agent_box, thread_id, workspace_slug(cfg))
+        )
+        self.backend = CompositeBackend(
+            default=box, routes=self.routes, artifacts_root=self.artifacts_root
+        )
+
+    @classmethod
+    async def for_run(cls, config: RunnableConfig) -> Self:
+        """The thread's files for a call answered without the run's plan."""
+        cfg = RunConfig.from_config(config)
+        if cfg.thread_id is None:
+            raise ValueError("An agent run needs a thread")
+        return cls(
+            cfg.thread_id,
+            cfg,
+            skills=await RunSkillStores.for_run(config),
+            bridged=await _bridge_client(cfg.thread_id) is not None,
+        )
 
 
 async def _bridge_client(thread_id: str | None) -> BridgeClient | None:
@@ -735,7 +926,7 @@ _NOT_FROM_CODE = (
 )
 # Everyday tools code mode still offers the model directly.
 _DIRECT_IN_CODE_MODE = SANDBOX_TOOL_NAMES | {
-    SEARCH_TOOLS_NAME,
+    SEARCH_TOOLS,
     "monitor",
     "open_pull_request",
     "web_search",
@@ -1111,12 +1302,7 @@ class PrepareAgentRunMiddleware(BasePrepareRunMiddleware):
                 option = self._requested_models[requested_model]
                 requested_effort = settings.get("effort") or option["default_effort"]
                 decision.requested_effort = requested_effort
-                try:
-                    self._model_selection.use_requested_model(requested_model, requested_effort)
-                except Exception:
-                    decision.outcome = "selection_failure"
-                    decision.reason = "model_initialization_failed"
-                    raise
+                self._model_selection.use_requested_model(requested_model)
                 if decision.outcome != "reused_saved_choice":
                     decision.outcome = "accepted_request"
                     decision.reason = "validated_and_persisted"
@@ -1364,18 +1550,6 @@ async def plan_agent(config: RunnableConfig, surface: ToolSurface) -> None:
     )
     task_coordination = await TaskCoordinationMiddleware.for_thread(thread_id)
 
-    async def reconnect_backend(
-        _thread_id: str = thread_id,
-        _cfg: RunConfig = cfg,
-    ) -> SandboxBackendProtocol:
-        return await ensure_sandbox_for_thread(
-            _thread_id,
-            workspace_slug=workspace_slug(_cfg),
-            record_stale_boot=True,
-        )
-
-    backend = get_cached_sandbox_backend(thread_id, reconnect=reconnect_backend)
-
     # `profile_login` is whoever sent the message that started this run; it drives
     # authorization. Personal integrations require verified private ownership.
     # Everything else comes from the thread's own settings, seeded from the first
@@ -1609,80 +1783,21 @@ async def plan_agent(config: RunnableConfig, surface: ToolSurface) -> None:
         slack_breakout_thread,
         slack_start_review_channel,
     ]
-    static_tools = [
-        http_request,
-        fetch_url,
-        web_search,
-        background_execute,
-        background_task,
-        *((monitor,) if monitors_enabled else ()),
-        publish_artifact,
-        save_user_instructions,
-        save_user_settings,
-        save_user_skill,
-        delete_user_skill,
-        list_threads,
-        search_pull_requests,
-        get_thread,
-        manage_thread,
-        *([task_status, message_task_thread, control_worker] if task_coordination else []),
-        *(() if task_coordination and task_coordination.is_worker else (start_thread,)),
-        manage_baby_sit,
-        switch_to_performance_model,
-        expedite_pr_approval,
-        merge_expedited_pr,
-        request_human_review,
-        assign_human_reviewer,
-        auto_assign_human_reviewer,
-        dismiss_human_review_request,
-        get_human_review_status,
-        open_pull_request,
-        link_pull_request,
+    withheld = [
+        *(() if monitors_enabled else (monitor,)),
+        *(() if task_coordination else (task_status, message_task_thread, control_worker)),
+        *((start_thread,) if task_coordination and task_coordination.is_worker else ()),
+        *(() if managed_gateway else (connect_managed_tools,)),
         *(
-            (output_iframe, create_sandbox_file_download_url, expose_port)
+            ()
             if sandbox_file_downloads
-            else ()
+            else (output_iframe, create_sandbox_file_download_url, expose_port)
         ),
-        read_user_settings,
-        request_pr_review,
-        *((connect_managed_tools,) if managed_gateway else ()),
-        recreate_sandbox,
-        report_platform_issue,
-        schedule_thread_wakeup,
-        request_rollout_check,
-        listen_events,
-        list_event_types,
-        manage_code_channel,
-        code_channel_set_view,
-        manage_incident,
-        slack_add_reaction,
-        slack_attach_html,
-        slack_list_channel_members,
-        slack_list_channels,
-        slack_move_thread,
-        slack_no_reply_needed,
-        slack_post_message,
-        slack_read_channel_messages,
-        slack_read_thread_messages,
-        slack_reply,
-        slack_breakout_thread,
-        slack_start_review_channel,
-        submit_thread_feedback,
-        suggest_task,
-        submit_review_assessment_feedback,
-        propose_review_comment,
-        propose_pr_review,
-        note_on_diff,
-        add_review_comment,
-        *ADMIN_TOOLS,
-        *((cli_result,) if cli_result_required else ()),
-        *((worktree_handoff,) if bridge_client == "desktop" and not stop_summary_mode else ()),
-        read_only_sql,
-        *((write_database_rows,) if ENV.OPENSWE_ENV.optional() in {"preview", "staging"} else ()),
-        manage_feature_flags,
-        manage_review_approval_mode,
-        manage_review_repos,
+        *(() if cli_result_required else (cli_result,)),
+        *(() if bridge_client == "desktop" and not stop_summary_mode else (worktree_handoff,)),
+        *(() if _writes_database_rows() else (write_database_rows,)),
     ]
+    static_tools = [tool for tool in AGENT_TOOLS if not any(tool is w for w in withheld)]
     static_tools = permitted(static_tools, tool_access)
     if not _slack_tools_enabled(cfg):
         # An automation run has no Slack thread, but its prompt may ask it to
@@ -1724,7 +1839,6 @@ async def plan_agent(config: RunnableConfig, surface: ToolSurface) -> None:
         ]
     if guide is not None:
         static_tools = [*static_tools, *walkthrough_tools(guide.mode)]
-    static_tools = [*static_tools, search_tools_tool(surface, code_name)]
     static_tools = apply_tool_descriptions(static_tools, _tool_description_values())
     if stop_summary_mode:
         static_tools = apply_tool_descriptions([slack_read_thread_messages, slack_reply])
@@ -1756,26 +1870,8 @@ async def plan_agent(config: RunnableConfig, surface: ToolSurface) -> None:
     )
 
     logger.info("Returning agent with sandbox for thread %s", thread_id)
-    agent_backend: BackendProtocol = backend
-    skill_routes: dict[str, BackendProtocol] = {
-        BUNDLED_SKILLS_ROUTE: ReadOnlyBackend(
-            FilesystemBackend(root_dir=BUNDLED_SKILLS_DIR, virtual_mode=True)
-        ),
-    }
-    skill_routes[ORGANIZATION_SKILLS_ROUTE] = skills_backend(None)
-    skill_sources = [ORGANIZATION_SKILLS_ROUTE, BUNDLED_SKILLS_ROUTE]
-    if credential_login:
-        skill_routes[USER_SKILLS_ROUTE] = skills_backend(credential_login)
-        skill_sources.insert(0, USER_SKILLS_ROUTE)
-    artifacts_root = "/" if bridge_client is None else f"{LOCAL_ARTIFACTS_DIR}/{thread_id}/"
-    # Offloaded images live in PostgreSQL so they can be read without the sandbox.
-    skill_routes[f"{artifacts_root}blobs/"] = StoreBackend(
-        store=ThreadBlobs(thread_id),
-        namespace=lambda _runtime, thread_id=thread_id: blob_namespace(thread_id),
-    )
-    agent_backend = CompositeBackend(
-        default=backend, routes=skill_routes, artifacts_root=artifacts_root
-    )
+    skill_stores = RunSkillStores(credential_login)
+    files = ThreadFiles(thread_id, cfg, skills=skill_stores, bridged=bridge_client is not None)
     main_model = _make_model_or_defer(model_id, use_gateway=use_gateway, **model_kwargs)
     requested_models = (
         available_requested_models(fable_enabled=fable_enabled)
@@ -1815,46 +1911,11 @@ async def plan_agent(config: RunnableConfig, surface: ToolSurface) -> None:
 
     configurable["image_model_fallback_enabled"] = vision_model is not None
 
-    def requested_model_factory(
-        requested_model: str, requested_effort: str | None
-    ) -> BaseChatModel:
-        option = available_requested_models(fable_enabled=fable_enabled)[requested_model]
-        model = _make_model_or_defer(
-            requested_model,
-            use_gateway=use_gateway,
-            **provider_model_kwargs(
-                requested_model,
-                requested_effort or option["default_effort"],
-                max_tokens=DEFAULT_LLM_MAX_TOKENS,
-            ),
-        )
-        fallback_middleware.register_fallback(model, make_fallback_model(requested_model))
-        return model
-
-    # Keep checkpointed routing tasks resumable after a handoff disables routing.
-    routing_models = {
-        route: _make_model_or_defer(
-            routed_model_id,
-            use_gateway=use_gateway,
-            **provider_model_kwargs(
-                routed_model_id,
-                effort,
-                max_tokens=DEFAULT_LLM_MAX_TOKENS,
-            ),
-        )
-        for route, (routed_model_id, effort) in routing_defaults.items()
-        if adaptive_model_routing
+    route_model_ids = {
+        **{route: routed_model_id for route, (routed_model_id, _) in routing_defaults.items()},
+        "default": model_id,
     }
-    model_selection = ModelSelectionMiddleware(
-        routing_models,
-        main_model,
-        route_model_ids={
-            **{route: routed_model_id for route, (routed_model_id, _) in routing_defaults.items()},
-            "default": model_id,
-        },
-        routing_mode=model_routing_mode,
-        requested_model_factory=requested_model_factory,
-    )
+    model_selection = ModelSelectionMiddleware(route_model_ids, routing_mode=model_routing_mode)
     title_model = _make_model_or_defer(
         title_model_id,
         use_gateway=use_gateway,
@@ -1893,7 +1954,7 @@ async def plan_agent(config: RunnableConfig, surface: ToolSurface) -> None:
         [
             AnthropicPromptCachingMiddleware(ttl="1h", unsupported_model_behavior="ignore"),
             ConversationOffloadingMiddleware(
-                main_model, agent_backend, manual=cfg.offload_conversation is True
+                main_model, files.backend, manual=cfg.offload_conversation is True
             ),
             run_preparation,
             *(
@@ -1938,11 +1999,45 @@ async def plan_agent(config: RunnableConfig, surface: ToolSurface) -> None:
     )
     surface.base_tools = main_tools
     surface.middleware = middleware
-    surface.inbox = (
-        None if stop_summary_mode else ThreadInbox(thread_id, events=True, surface=initial_surface)
+    reply_tool = _registered_tool_name(slack_reply)
+    no_reply_tool = _registered_tool_name(slack_no_reply_needed)
+    cli_result_tool = _registered_tool_name(cli_result)
+    # A requested offload and an incident run keep their loop on the backend: the offload
+    # needs the conversation's model, and the incident the evidence its plan collects.
+    surface.loop = (
+        None
+        if incident_session is not None or cfg.offload_conversation
+        else LoopRules(
+            hidden_tools=sorted(excluded_tools),
+            routing=RoutingRules(mode=model_routing_mode, route_model_ids=route_model_ids),
+            reply=ReplyRules(
+                tool=reply_tool,
+                no_reply_tool=no_reply_tool,
+                replies=sorted({*CARD_TOOLS, *(GUIDE_REPLY_TOOLS if guide is not None else ())}),
+                nudge=reply_nudge(reply_tool, no_reply_tool),
+                nudge_sender=REPLY_GUARD["id"],
+            ),
+            cli_result=CliResultRules(tool=cli_result_tool, nudge=cli_result_nudge(cli_result_tool))
+            if cli_result_required
+            else None,
+            review_guide=guide is not None,
+            task_coordination=task_coordination is not None,
+            client_tools=client_tools is not None,
+            refresh_github_proxy=not (task_coordination and task_coordination.is_worker),
+        )
     )
-    surface.files = agent_backend
-    surface.artifacts_root = artifacts_root
+    surface.inbox = (
+        None
+        if stop_summary_mode
+        else InboxSpec(
+            events=True,
+            surface=initial_surface,
+            model_id=model_id,
+            image_fallback=vision_model is not None,
+        )
+    )
+    surface.files = files.backend
+    surface.artifacts_root = files.artifacts_root
     surface.shell_guards = [PullRequestCreationGuardMiddleware(), WorkflowPushGuardMiddleware()]
     surface.file_checks = ("image_reads", "agents_md")
     surface.models = SurfaceModels(
@@ -1983,8 +2078,10 @@ async def plan_agent(config: RunnableConfig, surface: ToolSurface) -> None:
     ]
     surface.dynamic = dynamic_tool_middleware
     # The runtime lists the skills and answers reads of them itself (``runtime_api.skills``).
-    surface.skill_sources = tuple(skill_sources)
-    surface.backend_paths = tuple(route for route in skill_routes if route not in skill_sources)
+    surface.skill_sources = skill_stores.sources
+    surface.backend_paths = tuple(
+        route for route in files.routes if route not in skill_stores.sources
+    )
     surface.code_mode = True
     surface.excluded = (
         STOP_SUMMARY_EXCLUDED_TOOLS

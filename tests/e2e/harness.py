@@ -214,6 +214,12 @@ async def control_state() -> JSONResponse:
     )
 
 
+@app.get("/control/plans")
+async def control_plans(thread_id: str) -> JSONResponse:
+    """Each time the backend planned the thread's runs, by the call that needed the plan."""
+    return JSONResponse([plan["call"] for plan in fakes.PLANS if plan["thread_id"] == thread_id])
+
+
 @app.get("/control/snapshots")
 async def control_snapshots() -> JSONResponse:
     """Snapshot captures/deletes the workspace tools asked the platform for."""

@@ -578,7 +578,8 @@ async def test_record_pr_telemetry_retitles_only_new_prs_when_enabled(
             },
         },
     )
-    monkeypatch.setattr(opr, "record_agent_pr_usage", AsyncMock())
+    record_usage = AsyncMock()
+    monkeypatch.setattr(opr, "record_agent_pr_usage", record_usage)
     monkeypatch.setattr(opr, "get_active_slack_thread", AsyncMock(return_value=None))
     langgraph = MagicMock()
     langgraph.threads.get = AsyncMock(return_value={"metadata": {}})
@@ -609,8 +610,12 @@ async def test_record_pr_telemetry_retitles_only_new_prs_when_enabled(
             pr=details,
             retitle_thread=retitle_thread,
             record_opening=record_opening,
+            # The model the run's preparation routed it to, not the one it started with.
+            run_state={"selected_model_id": "anthropic:claude-opus-5-5"},
         )
     assert targets == [GitTarget(repo="langchain-ai/open-swe", branch="Actual/PR-head")]
+    assert record_usage.await_args is not None
+    assert record_usage.await_args.kwargs["model_id"] == "anthropic:claude-opus-5-5"
 
     if concierge:
         langgraph.threads.update.assert_not_awaited()

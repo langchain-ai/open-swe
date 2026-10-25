@@ -6,6 +6,7 @@ which also runs the graphs Managed Deep Agents does not host.
 """
 
 import logging
+import time
 from collections.abc import Mapping
 from typing import Final
 
@@ -24,6 +25,7 @@ from openswe.agent_api.client import (
     remote_run_context,
 )
 from openswe.source_context import SourceContext
+from openswe.threads import index
 from openswe.threads.index import INDEXED_FIELDS, IndexedThread, Runtime, ThreadStatus
 
 logger = logging.getLogger(__name__)
@@ -39,6 +41,10 @@ _V3_RUN_STREAM_MODES: Final = ["values", "updates", "messages", "custom", "tasks
 _HOOK_METADATA_KEYS: Final = ("event_match_ids", "ls_attribution_identifier")
 
 _object = TypeAdapter(dict[str, JsonValue])
+
+
+def now_ms() -> int:
+    return int(time.time() * 1000)
 
 
 class _RunError(BaseModel):
@@ -128,6 +134,31 @@ class MdaRuntime:
         await self.sdk().threads.create(thread_id=thread_id, if_exists="do_nothing")
         self._mda_threads.add(thread_id)
 
+    async def interrupt_if_stopped(self, thread_id: str, run_id: str, *, starting_ms: int) -> None:
+        """Interrupt a run whose thread was stopped while it was starting, at ``starting_ms``.
+
+        Until MDA has the run, which takes as long as working out its catalog, a stop
+        finds nothing to cancel.
+        """
+        thread = await index.get(thread_id)
+        if thread is None or not thread.stopped_since(starting_ms):
+            return
+        extra = {"thread_id": thread_id, "run_id": run_id}
+        logger.info("Interrupting a run its thread was stopped while it started", extra=extra)
+        try:
+            response = await self.http.post(
+                f"/threads/{thread_id}/runs/{run_id}/cancel", params={"action": "interrupt"}
+            )
+        except httpx.HTTPError:
+            logger.warning("Could not interrupt a stopped run", extra=extra, exc_info=True)
+            return
+        if response.is_error:
+            # A stop that came once MDA had the run may have cancelled it already.
+            logger.warning(
+                "Could not interrupt a stopped run",
+                extra={**extra, "status_code": response.status_code},
+            )
+
     async def run_payload(
         self,
         thread_id: str,
@@ -194,6 +225,7 @@ class MdaRuntime:
 
         MDA's own ``run.start`` would drop the context, which is what carries the run token.
         """
+        starting_ms = now_ms()
         config = params.get("config")
         configurable = config.get("configurable") if isinstance(config, dict) else None
         run_config: dict[str, JsonValue] = {
@@ -238,10 +270,12 @@ class MdaRuntime:
                 "message": response.text[:500],
             }
         run = _object.validate_python(response.json())
+        run_id = str(run.get("run_id") or "")
+        await self.interrupt_if_stopped(thread_id, run_id, starting_ms=starting_ms)
         return {
             "type": "success",
             "id": command.get("id", 0),
-            "result": {"run_id": str(run.get("run_id") or "")},
+            "result": {"run_id": run_id},
         }
 
 

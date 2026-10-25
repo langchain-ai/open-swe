@@ -93,16 +93,20 @@ async def _answer(principal: RemoteRun | WorkerGrant, endpoint: str, body: JsonV
             return await async_workers.GRANT_API.dispatch(endpoint, principal, body)
         if endpoint != CATALOG.name:
             raise RefusedCallError("A worker grant only adopts a run token")
-        # Its tools, models and schemas only: the worker reads them before it has an identity.
-        run = principal.coordinator
-    else:
-        run = principal
-        if async_workers.RUN_API.serves(endpoint):
-            return await async_workers.RUN_API.dispatch(endpoint, run, body)
+        # Its tools, models and schemas only: the worker reads them before it has an
+        # identity, and never its coordinator's token.
+        catalog = await _graph(principal.coordinator)(principal.coordinator, endpoint, body)
+        return {**catalog, "run_token": None} if isinstance(catalog, dict) else catalog
+    if async_workers.RUN_API.serves(endpoint):
+        return await async_workers.RUN_API.dispatch(endpoint, principal, body)
+    return await _graph(principal)(principal, endpoint, body)
+
+
+def _graph(run: RemoteRun) -> Api:
     graph = _graphs().get(run.assistant_id)
     if graph is None:
         raise RefusedCallError(f"This backend serves no {run.assistant_id} graph")
-    return await graph(run, endpoint, body)
+    return graph
 
 
 async def api_endpoint(scope: Scope, receive: Receive, send: Send) -> None:

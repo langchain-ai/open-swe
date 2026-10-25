@@ -3,11 +3,13 @@
 Open SWE dispatch names the graph a run plays (``agent``, ``reviewer`` or
 ``review-scout``) in its context. The model loop, its checkpoints and every tool call
 run here. The Open SWE backend holds every credential and plans the run: this factory
-takes the graph's operations, subagents and models from the backend's catalog for the
-run, makes a tool of each operation (``rt.tools``), and ``BackendRunMiddleware`` hands
-each phase of the loop to the graph's own middleware there. The file and shell tools
-are this runtime's own, in the thread's box or against its files on the backend
-(``rt.file_tools``). The run token in the context authenticates every call.
+takes the graph's operations, subagents and models from the catalog the backend
+worked out as it started the run, in the run's context, and makes a tool of each
+operation (``rt.tools``). This runtime's own middleware runs the loop around each
+model call as the catalog's rules say (``rt.loop``), asking the backend only for
+what needs its data or credentials. The file and shell tools are this runtime's own, in the
+thread's box or against its files on the backend (``rt.file_tools``). The run token in
+the context authenticates every call.
 
 The same agent runs as the async ``general-purpose`` subagent, the graph
 ``open-swe--general-purpose``, for the task workers a coordinator launches with
@@ -37,6 +39,7 @@ from rt.backend import OpenSweBackend
 from rt.browser import ReportedBrowserMiddleware
 from rt.factory_timing import FactoryTiming
 from rt.file_tools import FileToolsMiddleware
+from rt.loop import RunLoop
 from rt.managed_sandbox import (
     EXECUTE_TIMEOUT_SECONDS,
     ReplaceSandboxMiddleware,
@@ -55,10 +58,11 @@ from rt.middleware import (
 from rt.model_calls import model_call_guards
 from rt.models import build_model
 from rt.remote_files import FILE_TOOLS, RemoteFiles, remote_file_tools
+from rt.search_tools import search_tools_tool
 from rt.skills import RunSkillsMiddleware, SkillFiles
 from rt.task_retry import task_retry
 from rt.tools import operation_tool, run_id
-from runtime_api.catalog import Catalog, RunModels
+from runtime_api.catalog import Catalog
 
 if TYPE_CHECKING:
     from managed_deepagents.define_deep_agent import ManagedAsyncSubAgent
@@ -104,8 +108,16 @@ class OpenSweRunContext(BaseModel):
     # A launched task worker's first run: traded for its own run token before anything else.
     worker_grant: str | None = Field(default=None, alias="__worker_grant")
     invocation_id: str | None = None
-    # JSON, not RunModels: the gRPC runtime serializes only the context's top level.
-    models: dict[str, JsonValue] | None = None
+    # JSON, not Catalog: the gRPC runtime serializes only the context's top level.
+    catalog: dict[str, JsonValue] | None = Field(default=None, alias="__catalog")
+
+
+async def _catalog(context: OpenSweRunContext, backend: OpenSweBackend) -> Catalog:
+    """What the backend planned for the run; a run started without it asks for it."""
+    if context.catalog is not None:
+        return Catalog.model_validate(context.catalog)
+    # Runs without a context (state reads, assistant reads) never call a model or a tool.
+    return await backend.catalog(None) if backend.has_run else Catalog()
 
 
 def _backend_reports(backend: OpenSweBackend, catalog: Catalog) -> list[AgentMiddleware]:
@@ -156,13 +168,12 @@ async def agent(runtime: ManagedServerRuntime) -> DeepAgentDefinition:
     context = OpenSweRunContext.model_validate(
         execution.context if execution is not None and execution.context is not None else {}
     )
-    backend = OpenSweBackend(context.run_token, worker_grant=context.worker_grant)
-    # Runs without a context (state reads, assistant reads) never call a model or a tool.
-    catalog = await backend.catalog(None) if backend.has_run else Catalog()
-    timing.lap("catalog")
-    models = catalog.models or (
-        RunModels.model_validate(context.models) if context.models is not None else None
+    backend = OpenSweBackend(
+        context.run_token, worker_grant=context.worker_grant, invocation_id=context.invocation_id
     )
+    catalog = await _catalog(context, backend)
+    timing.lap("catalog")
+    models = catalog.models
     model = (
         build_model(models.model, use_gateway=models.use_gateway)
         if models is not None
@@ -175,8 +186,15 @@ async def agent(runtime: ManagedServerRuntime) -> DeepAgentDefinition:
     )
     timing.lap("models")
     tools = [
-        operation_tool(spec, backend, cites_evidence=catalog.incident_evidence)
-        for spec in catalog.operations
+        *(
+            operation_tool(spec, backend, cites_evidence=catalog.incident_evidence)
+            for spec in catalog.operations
+        ),
+        *(
+            [search_tools_tool(catalog.operations, catalog.search_tools_description)]
+            if catalog.search_tools
+            else []
+        ),
     ]
     timing.lap("operation_tools")
     remote = RemoteFiles(backend, run_id)
@@ -255,6 +273,10 @@ async def agent(runtime: ManagedServerRuntime) -> DeepAgentDefinition:
                 context.invocation_id,
                 opened_sandbox if catalog.sandbox is not None else None,
                 trace_metadata=catalog.trace_metadata,
+                inbox=catalog.inbox,
+                loop=RunLoop(backend, catalog.loop, models)
+                if catalog.loop is not None and models is not None
+                else None,
             ),
             *replace_sandbox,
             *_backend_reports(backend, catalog),
@@ -313,5 +335,5 @@ async def agent(runtime: ManagedServerRuntime) -> DeepAgentDefinition:
         ),
         # `mda build` reads `worker`'s literal name to build its graph.
         subagents=[*sync_subagents, worker],
-        middleware=[*agent_middleware, AsyncWorkerLaunchMiddleware(backend)],
+        middleware=[*agent_middleware, AsyncWorkerLaunchMiddleware(backend, catalog)],
     )
