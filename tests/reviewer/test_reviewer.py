@@ -346,7 +346,7 @@ async def test_re_review_context_appends_after_history_without_changing_system_p
 ) -> None:
     from langchain_core.messages import AIMessage, HumanMessage, messages_from_dict
 
-    from openswe.agent_api.graph import RunSession
+    from openswe.agent_api.loop import run_hooks
     from openswe.walkthrough.record import WalkthroughStepView, WalkthroughView
 
     config: RunnableConfig = {
@@ -421,9 +421,8 @@ async def test_re_review_context_appends_after_history_without_changing_system_p
         middleware = reviewer.PrepareReviewerRunMiddleware(
             thread_id="reviewer-cache-thread", config=config, use_gateway=False
         )
-        session = RunSession(ToolSurface(middleware=[middleware]), config, None, started_here=True)
         previous = list(state["messages"])
-        result = await session.run_phase("before_agent", state, Runtime())
+        result = await run_hooks([middleware], "before_agent", state, Runtime())
         [context] = messages_from_dict(result.messages)
         assert f"previous reviewed SHA: {last_reviewed}" in context.text
         assert f"new HEAD SHA: {head}" in context.text
@@ -437,6 +436,5 @@ async def test_re_review_context_appends_after_history_without_changing_system_p
         if not repo_ready:
             assert f"git checkout --force {head}" in context.text
         assert state["messages"] == [*previous, context]
-        system_prompts.append((await session.model_call(state, Runtime())).system_prompt)
-        state.update(result.update)
+        system_prompts.append(rendered)
     assert system_prompts[0] == system_prompts[1]

@@ -1803,7 +1803,6 @@ async def test_prepared_context_is_checkpointed_once_and_appends_on_later_runs(
 ) -> None:
     monkeypatch.setenv("OPEN_SWE_BACKEND_URL", "https://backend.invalid")
     monkeypatch.setattr("rt.middleware.run_id", lambda: "run-1")
-    backend = OpenSweBackend("secret-token")
     prepared: list[str] = []
     seen: list[list[BaseMessage]] = []
 
@@ -1820,14 +1819,15 @@ async def test_prepared_context_is_checkpointed_once_and_appends_on_later_runs(
             return PhaseResult(jump_to="model")
         return PhaseResult()
 
-    _answering(monkeypatch, backend, phase)
     checkpoint = InMemorySaver()
     config: RunnableConfig = {"configurable": {"thread_id": "same-pr"}}
     prefix: list[BaseMessage] = []
     for invocation in ("first", "second"):
+        backend = _run_backend(invocation_id=invocation)
+        _answering(monkeypatch, backend, phase)
         graph = create_agent(
             model=FakeListChatModel(responses=["continue", "done"]),
-            middleware=[BackendRunMiddleware(backend, invocation)],
+            middleware=[BackendRunMiddleware(backend)],
             checkpointer=checkpoint,
             interrupt_after=["BackendRunMiddleware.before_agent"],
         )

@@ -56,10 +56,9 @@ async def test_scout_run_context_preserves_history_and_system_prefix(
     from langchain_core.messages import AIMessage, HumanMessage, messages_from_dict
     from langgraph.runtime import Runtime
 
-    from openswe.agent_api.graph import RunSession
+    from openswe.agent_api.loop import run_hooks
     from openswe.review.author_guidance import HumanTurn, SteeringHistory
     from openswe.review_scout import graph
-    from openswe.sandboxes.tool_runtime import ToolSurface
     from openswe.walkthrough.checkout import PinnedCheckout
     from openswe.walkthrough.plan import PlanStatus
 
@@ -105,9 +104,8 @@ async def test_scout_run_context_preserves_history_and_system_prefix(
             }
         }
         middleware = graph.PrepareReviewScoutRunMiddleware(thread_id="scout-thread", config=config)
-        session = RunSession(ToolSurface(middleware=[middleware]), config, None, started_here=True)
         previous = list(state["messages"])
-        result = await session.run_phase("before_agent", state, Runtime())
+        result = await run_hooks([middleware], "before_agent", state, Runtime())
         [context] = messages_from_dict(result.messages)
         assert state["messages"] == [*previous, context]
         assert repo_dir in context.text
@@ -116,6 +114,5 @@ async def test_scout_run_context_preserves_history_and_system_prefix(
         assert f"Request {label}" in context.text
         assert ("carried over" in context.text) is carried
         assert result.update["has_human_input"] is True
-        state.update(result.update)
-        prompts.append((await session.model_call(state, Runtime())).system_prompt)
+        prompts.append(result.update["rendered_system_prompt"])
     assert prompts[0] == prompts[1]

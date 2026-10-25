@@ -909,22 +909,25 @@ async def prepare_reviewer_run(
         scoped_agents_md=scoped_agents_md,
         api_standards_skill=api_standards_skill,
     )
-    run_context = "\n\n".join(
-        block
-        for block in (
-            _repo_checkout_note(
-                repo_ready=repo_ready,
-                working_dir=f"{work_dir}/{repo_name}" if repo_name else work_dir,
-                repo_owner=repo_owner,
-                repo_name=repo_name,
-                pr_number=pr_number if isinstance(pr_number, int) else "",
-                head_sha=head_sha,
-            ),
-            review_context,
-            _format_walkthrough(walkthrough),
-            _format_human_input(walkthrough),
-        )
-        if block
+    run_context = prompt(
+        "reviewer/run-context",
+        blocks=[
+            block
+            for block in (
+                _repo_checkout_note(
+                    repo_ready=repo_ready,
+                    working_dir=f"{work_dir}/{repo_name}" if repo_name else work_dir,
+                    repo_owner=repo_owner,
+                    repo_name=repo_name,
+                    pr_number=pr_number if isinstance(pr_number, int) else "",
+                    head_sha=head_sha,
+                ),
+                review_context,
+                _format_walkthrough(walkthrough),
+                _format_human_input(walkthrough),
+            )
+            if block
+        ],
     )
     if checkout.skills_prompt:
         system_prompt = f"{system_prompt}\n\n{checkout.skills_prompt}"
