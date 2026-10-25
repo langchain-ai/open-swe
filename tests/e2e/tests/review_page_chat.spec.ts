@@ -680,3 +680,52 @@ test.describe("review page", () => {
     await expect(sheet).toBeVisible();
   });
 });
+
+test("opens the review thread beside the diff for completed and running reviews", async ({
+  page,
+}) => {
+  await loginAs(page, SAME_USER);
+  const pull = await seedOpenPullRequest(page, {
+    repo: `${OWNER}/${REPO}`,
+    title: "Review thread navigation",
+    author: "bob",
+    files: { "example.py": "VALUE = 1\n" },
+  });
+  let status = "idle";
+  const threadId = "a7268788-5e41-5107-983b-fc6c0ee31311";
+  await page.route(`**${reviewApi(pull)}`, async (route) => {
+    const response = await route.fetch();
+    await route.fulfill({
+      response,
+      json: { ...(await response.json()), thread_id: threadId, status },
+    });
+  });
+  await openReview(page, pull);
+  await expect(page.getByRole("heading", { level: 1 })).toHaveCSS(
+    "font-family",
+    /Inter/,
+  );
+  await expect(page.getByRole("tab", { name: "Review Threads" })).toHaveCSS(
+    "font-family",
+    /Inter/,
+  );
+  const url = page.url();
+  await page.getByRole("button", { name: "See how it reviewed" }).click();
+  await expect(
+    page.getByRole("tab", { name: "Review Threads" }),
+  ).toHaveAttribute("aria-selected", "true");
+  await expect(
+    page.getByRole("link", { name: "Open full thread" }),
+  ).toHaveAttribute("href", `/agents/${threadId}`);
+  await expect(page).toHaveURL(url);
+
+  status = "running";
+  await page.setViewportSize({ width: 900, height: 800 });
+  await page.reload();
+  await page.getByRole("button", { name: "Watch in progress" }).click();
+  await expect(page.getByRole("tab", { name: "Review Threads" })).toBeVisible();
+  await expect(
+    page.getByRole("tab", { name: "Review Threads" }),
+  ).toHaveAttribute("aria-selected", "true");
+  await expect(page).toHaveURL(url);
+});

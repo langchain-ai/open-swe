@@ -31,7 +31,7 @@ import {
 import { useReviewPage, type RailTab } from "./store"
 import { ASK_SELECTION_SHORTCUT } from "./useDiffKeys"
 
-const TABS: ReadonlyArray<RailTab> = ["chat", "discussion"]
+const TABS: ReadonlyArray<RailTab> = ["chat", "discussion", "review"]
 
 /** The right column: the agent you can talk to about this PR, and the people who already did. */
 export function Rail({
@@ -44,6 +44,13 @@ export function Rail({
   const tab = useReviewPage((state) => state.railTab)
   const setRailTab = useReviewPage((state) => state.setRailTab)
   const chat = useReviewChat(pr).data
+  const review = useQuery(reviewQueries.detail(pr))
+  const threadId =
+    tab === "chat"
+      ? chat?.thread_id
+      : tab === "review"
+        ? review.data?.thread_id
+        : null
   const open = useOpenConversations(pr)?.threads.length ?? 0
 
   return (
@@ -52,11 +59,11 @@ export function Rail({
       selectedIndex={TABS.indexOf(tab)}
       onChange={(index: number) => setRailTab(TABS[index] ?? "chat")}
       data-review-rail
-      aria-label="Chat and discussion"
+      aria-label="Chat, discussion, and review threads"
       className="flex h-full min-h-0 flex-col bg-surface-level-1"
     >
       <div className="flex h-11 shrink-0 items-center gap-space-2 border-b border-default px-space-3">
-        <TabList className="self-stretch border-0">
+        <TabList className="min-w-0 self-stretch overflow-x-auto border-0">
           <TabLabel label="Chat" icon={AgentMark} className="pb-0" />
           <TabLabel
             label="Discussion"
@@ -67,23 +74,19 @@ export function Rail({
                 : undefined
             }
           />
+          <TabLabel label="Review Threads" className="pb-0" />
         </TabList>
         <span className="flex-1" />
-        {tab === "chat" && chat?.thread_id && (
+        {threadId && (
           <Button
             size="xs"
             color="secondary"
             variant="plain"
-            rightDecorator={ArrowSquareOutIcon}
-            title="Open this conversation as a full thread"
-            as={
-              <Link
-                to="/agents/$threadId"
-                params={{ threadId: chat.thread_id }}
-              />
-            }
+            aria-label="Open full thread"
+            className="shrink-0 px-space-1"
+            as={<Link to="/agents/$threadId" params={{ threadId }} />}
           >
-            Full thread
+            <ArrowSquareOutIcon size={16} weight="regular" />
           </Button>
         )}
         {onClose && (
@@ -104,6 +107,25 @@ export function Rail({
         </TabPanel>
         <TabPanel unmount={false} className="min-h-0 flex-1">
           <Discussion pr={pr} />
+        </TabPanel>
+        <TabPanel unmount={false} className="min-h-0 flex-1">
+          {review.data?.thread_id ? (
+            <div className="flex h-full min-h-0 flex-col [&>*]:min-h-0 [&>*]:flex-1">
+              <AgentThreadPage
+                threadId={review.data.thread_id}
+                active={tab === "review"}
+                ownsTitle={false}
+              />
+            </div>
+          ) : (
+            <p className="p-space-4 text-xs text-secondary">
+              {review.isPending
+                ? "Loading review thread…"
+                : review.isError
+                  ? "Review threads are unavailable right now. Reload the page to try again."
+                  : "No review thread yet. Start an Open SWE review to see its work here."}
+            </p>
+          )}
         </TabPanel>
       </TabPanels>
     </TabGroup>
