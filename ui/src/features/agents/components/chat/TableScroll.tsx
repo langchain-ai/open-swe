@@ -46,7 +46,7 @@ export function TableScroll({
         aria-label="Scrollable table"
         tabIndex={edges.left || edges.right ? 0 : undefined}
         className={cn(
-          "focus-visible:outline-border-focus [scrollbar-width:thin] overflow-auto rounded-[inherit] focus-visible:outline focus-visible:outline-2",
+          "[scrollbar-width:thin] overflow-auto rounded-[inherit] focus-visible:ring-2 focus-visible:ring-focus focus-visible:outline-none focus-visible:ring-inset",
           viewportClassName
         )}
       >
