@@ -108,10 +108,28 @@ to `desktop/dist/`.
 prerelease nightly from the promoted commit with a UTC timestamp, such as
 `desktop-v0.2.3-nightly.20260902080000`. Nightly releases never publish the stable version.
 
-Stable releases use a deliberate bump, test, release process: bump `desktop/package.json` in a normal
-pull request, merge it to `main`, test the resulting code as needed, then run **Release Desktop**
-manually. The workflow publishes the exact package version and fails if that stable release is
-already complete. A partial stable release remains manually retryable.
+Stable releases use **Desktop release PR**, powered by release-please. Releasable conventional
+commits on `main` create or refresh one draft PR with the version bump and `desktop/CHANGELOG.md`.
+Review the notes, mark the PR ready, and merge it to automatically run **Release Desktop** at that
+exact merge commit. No separate bump PR or manual release dispatch is needed. Ordinary features
+and fixes bump the patch version while the app is pre-1.0; breaking changes bump the minor version.
+
+The release covers the bundled UI, CLI, and bridge as well as `desktop/`. Backend source directories
+are excluded; changes to shared root-level tooling can still qualify. The root-scoped `simple`
+strategy updates the JSON version through `extra-files`; its optional `version.txt` is deliberately
+absent. `.release-please-manifest.json` records the last stable version, so nightlies are not used as
+the baseline. Release PR creation uses the existing `LANGCHAIN_ACTIONS_PR_BOT_PRIVATE_KEY` GitHub App,
+restricted to this repository with Contents and Pull requests write access, so its updates run CI.
+
+A merged release PR keeps `autorelease: pending` until its public stable release has all expected
+assets and its tag matches the merge SHA, then switches to `autorelease: tagged`. Reconciliation and
+PR refresh share one serialized job so publishing cannot unblock stale release calculations. A pending
+release blocks the next release PR. If publishing or reconciliation fails, rerun the failed **Desktop
+release PR** jobs: partial releases retry from the original tag, and complete releases skip rebuilding
+while retrying Homebrew notification. A failed Homebrew notification does not invalidate already
+published assets. An existing tag must match the requested merge SHA. **Release Desktop** remains
+manually dispatchable; dispatch **Desktop release PR** afterward to reconcile a manual recovery and
+refresh the queue. Never clear a pending label to bypass an incomplete publish.
 
 Both paths compile the current `ui/` bundle, sign and notarize the Electron app, verify the resulting
 app and DMG, create the tag, and publish the DMG, macOS zip, and app zip. Desktop-prefixed tags keep

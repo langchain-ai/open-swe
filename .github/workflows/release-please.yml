@@ -1,0 +1,80 @@
+name: Desktop release PR
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  detect-release:
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: read
+    outputs:
+      publish: ${{ steps.release.outputs.publish }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+      - name: Check release routing
+        run: node --test .github/scripts/desktop-release.test.cjs
+      - id: release
+        uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3
+        with:
+          script: |
+            const { DesktopRelease, pendingLabel } = require('./.github/scripts/desktop-release.cjs');
+            const pull = context.eventName === 'push'
+              ? await new DesktopRelease(github, context.repo).findReleasePullRequest(context.sha)
+              : undefined;
+            core.setOutput('publish', Boolean(pull?.labels.some(label => label.name === pendingLabel)));
+
+  publish:
+    needs: detect-release
+    if: needs.detect-release.outputs.publish == 'true'
+    permissions:
+      contents: write
+    uses: ./.github/workflows/desktop-release.yml
+    with:
+      release_ref: ${{ github.sha }}
+    secrets: inherit
+
+  release-please:
+    needs: [detect-release, publish]
+    if: >-
+      !cancelled() &&
+      needs.detect-release.result == 'success' &&
+      (needs.publish.result == 'success' || needs.publish.result == 'skipped')
+    runs-on: ubuntu-latest
+    concurrency:
+      group: desktop-release-pr
+      cancel-in-progress: false
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+      - uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1
+        id: token
+        with:
+          client-id: "Iv23liMFOFBcPTKFWi3S"
+          private-key: ${{ secrets.LANGCHAIN_ACTIONS_PR_BOT_PRIVATE_KEY }}
+          owner: ${{ github.repository_owner }}
+          repositories: ${{ github.event.repository.name }}
+          permission-contents: write
+          permission-pull-requests: write
+      - name: Reconcile published releases
+        id: ready
+        uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3
+        with:
+          github-token: ${{ steps.token.outputs.token }}
+          script: |
+            const { DesktopRelease } = require('./.github/scripts/desktop-release.cjs');
+            const ready = await new DesktopRelease(github, context.repo).prepareReleasePullRequests();
+            core.setOutput('ready', ready);
+            if (!ready) core.notice('A desktop release is still pending; release PR maintenance waits for complete published assets.');
+      - uses: googleapis/release-please-action@8b8fd2cc23b2e18957157a9d923d75aa0c6f6ad5
+        if: steps.ready.outputs.ready == 'true'
+        with:
+          token: ${{ steps.token.outputs.token }}
+          config-file: release-please-config.json
+          manifest-file: .release-please-manifest.json
