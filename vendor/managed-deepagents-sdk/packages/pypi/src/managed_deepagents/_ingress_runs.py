@@ -21,6 +21,11 @@ from langgraph_sdk.schema import (
 )
 
 from managed_deepagents._channels.types import ChannelError
+from managed_deepagents._telemetry.otel import (
+    TRACE_ID_METADATA_KEY,
+    current_log_context,
+    set_log_attributes,
+)
 
 if TYPE_CHECKING:
     from langgraph_sdk.client import LangGraphClient
@@ -42,7 +47,7 @@ class _RunOptions(TypedDict, total=False):
 
     context: Context
     config: Config
-    metadata: Mapping[str, Any]
+    metadata: dict[str, Any]
 
 
 def _run_options(
@@ -56,7 +61,13 @@ def _run_options(
     if config is not None:
         options["config"] = config
     if metadata is not None:
-        options["metadata"] = metadata
+        options["metadata"] = dict(metadata)
+    log_context = current_log_context()
+    if log_context is not None:
+        options["metadata"] = {
+            **options.get("metadata", {}),
+            TRACE_ID_METADATA_KEY: log_context.trace_id,
+        }
     return options
 
 
@@ -285,6 +296,7 @@ def _started_run(thread_id: str, run: Mapping[str, object]) -> StartedIngressRun
     run_id = run.get("run_id") if isinstance(run, Mapping) else None
     if not isinstance(run_id, str) or not run_id.strip():
         raise ChannelError("channel_run_failed", "Agent Server did not return run_id")
+    set_log_attributes({"thread_id": thread_id, "run_id": run_id})
     return {"thread_id": thread_id, "run_id": run_id}
 
 
@@ -295,4 +307,6 @@ async def observe_ingress_run(
     values = await client.runs.join(thread_id, run_id)
     run = await client.runs.get(thread_id, run_id)
     status = run.get("status") if isinstance(run, Mapping) else None
+    if isinstance(status, str):
+        set_log_attributes({"run_status": status})
     return {"values": values, "status": status}

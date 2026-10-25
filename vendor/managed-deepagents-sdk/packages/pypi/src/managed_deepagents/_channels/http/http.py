@@ -5,7 +5,6 @@ import copy
 import functools
 import inspect
 import json
-import logging
 import os
 import re
 import uuid
@@ -50,7 +49,6 @@ if TYPE_CHECKING:
     _Finish = Callable[["HttpFinish", "str | None"], Awaitable[None]]
     """Tell the channel the message is done, with the thread's assistant when known."""
 
-_LOG = logging.getLogger("mda")
 _T = TypeVar("_T")
 
 
@@ -101,7 +99,9 @@ async def _verified_parse(
     try:
         verified = await _resolve(channel.verify(_adapter_request(request)))
     except Exception as error:  # noqa: BLE001
-        _LOG.error("channel verification failed (%s)", type(error).__name__)
+        logger.error(
+            "channel verification failed (%s)", logger.safe_error_label(error), error=error
+        )
         return _error(500, "channel verification failed")
     if not verified:
         return _error(401, "invalid channel signature")
@@ -109,7 +109,7 @@ async def _verified_parse(
     try:
         result = await _resolve(channel.parse(_adapter_request(request)))
     except Exception as error:  # noqa: BLE001
-        _LOG.warning("channel payload rejected (%s)", type(error).__name__)
+        logger.warning("channel payload rejected (%s)", logger.safe_error_label(error))
         return _error(400, "invalid channel payload")
     if (
         not isinstance(result, Mapping)
@@ -276,7 +276,7 @@ def _follow_up(
         started = cast("StartedIngressRun", outcome)
         _ingress.schedule_ingress_work(lambda: deliver(started), label=label)
         return
-    _LOG.info("channel run skipped %s", json.dumps({"threadId": thread_id, "reason": skipped}))
+    logger.info("channel run skipped %s", json.dumps({"threadId": thread_id, "reason": skipped}))
     _schedule_skipped(cast("SkippedIngressRun", outcome), start_when_idle, finish, label)
 
 
@@ -343,7 +343,9 @@ def _schedule_received(
         try:
             await on_received(target, delivery)
         except Exception as error:  # noqa: BLE001
-            _LOG.error("channel received notice failed (%s)", type(error).__name__)
+            logger.error(
+                "channel received notice failed (%s)", logger.safe_error_label(error), error=error
+            )
         finally:
             received.set()
 
@@ -370,7 +372,9 @@ async def _finish(
     try:
         await on_finish(json_copy(target), delivery)
     except Exception as error:  # noqa: BLE001
-        _LOG.error("channel finish notice failed (%s)", type(error).__name__)
+        logger.error(
+            "channel finish notice failed (%s)", logger.safe_error_label(error), error=error
+        )
 
 
 def _finished(delivery: HttpDelivery, done: HttpFinish) -> HttpFinishedDelivery:
@@ -432,9 +436,11 @@ async def _cancel_runs(
             )
         )
     except Exception as error:  # noqa: BLE001
-        _LOG.error("channel run could not be cancelled (%s)", type(error).__name__)
+        logger.error(
+            "channel run could not be cancelled (%s)", logger.safe_error_label(error), error=error
+        )
         return _error(500, "channel run could not be cancelled")
-    _LOG.info(
+    logger.info(
         "channel runs cancelled %s",
         json.dumps({"threadId": thread_id, "cancelled": cancelled}),
     )
@@ -454,7 +460,11 @@ async def _cancel_runs(
                     thread_id=thread_id,
                 )
             except Exception as error:  # noqa: BLE001
-                _LOG.error("channel thread could not be read (%s)", type(error).__name__)
+                logger.error(
+                    "channel thread could not be read (%s)",
+                    logger.safe_error_label(error),
+                    error=error,
+                )
             finished: HttpDelivery = {**delivery}
             if "assistant_id" in waits_on:
                 finished["assistant_id"] = waits_on["assistant_id"]
@@ -466,7 +476,9 @@ async def _cancel_runs(
             try:
                 await on_finish(target, _finished(finished, done))
             except Exception as error:  # noqa: BLE001
-                _LOG.error("channel finish notice failed (%s)", type(error).__name__)
+                logger.error(
+                    "channel finish notice failed (%s)", logger.safe_error_label(error), error=error
+                )
 
         _ingress.schedule_ingress_work(notify, label=f'channel "{name}" finish notice')
     return response or JSONResponse(
@@ -530,7 +542,9 @@ async def _start_first(
         outcome = await start()
     except Exception as error:  # noqa: BLE001
         _leave_thread_waiters(thread_id, waiter)
-        _LOG.error("channel run could not be started (%s)", type(error).__name__)
+        logger.error(
+            "channel run could not be started (%s)", logger.safe_error_label(error), error=error
+        )
         return None
     if _skipped(outcome) != "busy":
         _leave_thread_waiters(thread_id, waiter)
@@ -569,10 +583,10 @@ async def _start_when_idle(
     outcome: StartedIngressRun | SkippedIngressRun = {"skipped": "busy"}
     try:
         while (skipped := _skipped(outcome)) == "busy":
-            _LOG.info("channel run waits %s", json.dumps({"threadId": thread_id}))
+            logger.info("channel run waits %s", json.dumps({"threadId": thread_id}))
             await wait()
             if waiter.cancelled:
-                _LOG.info(
+                logger.info(
                     "channel run dropped: its thread was cancelled while it waited %s",
                     json.dumps({"threadId": thread_id}),
                 )
@@ -580,7 +594,9 @@ async def _start_when_idle(
                 return
             outcome = await start()
     except Exception as error:  # noqa: BLE001
-        _LOG.error("channel run could not be started (%s)", type(error).__name__)
+        logger.error(
+            "channel run could not be started (%s)", logger.safe_error_label(error), error=error
+        )
         await finish({"type": "failed", "reason": "start", "interrupts": []}, None)
         return
     finally:
@@ -588,7 +604,7 @@ async def _start_when_idle(
     if skipped is None:
         await deliver(cast("StartedIngressRun", outcome))
         return
-    _LOG.info("channel run skipped %s", json.dumps({"threadId": thread_id, "reason": skipped}))
+    logger.info("channel run skipped %s", json.dumps({"threadId": thread_id, "reason": skipped}))
     await _finish_skipped(cast("SkippedIngressRun", outcome), finish=finish, waiter=waiter)
 
 
@@ -620,11 +636,11 @@ async def _prepare(
         )
         prepared = normalize_run_input(result)
     except Exception as error:  # noqa: BLE001
-        _LOG.error("channel input failed (%s)", type(error).__name__)
+        logger.error("channel input failed (%s)", logger.safe_error_label(error), error=error)
         return None
     # A slow input, such as an endpoint's, may outlast a cancel.
     if prepared is not None and waiter.cancelled:
-        _LOG.info(
+        logger.info(
             "channel run dropped: its thread was cancelled while its input was decided %s",
             json.dumps({"threadId": message["thread_id"].lower()}),
         )
@@ -643,7 +659,7 @@ async def _deliver_reply(
     finish: _Finish | None = None,
 ) -> None:
     run_id = started["run_id"]
-    _LOG.info(
+    logger.info(
         "channel run started %s",
         json.dumps({"threadId": started["thread_id"], "runId": logger.log_identifier(run_id)}),
     )
@@ -658,7 +674,9 @@ async def _deliver_reply(
             run_id=run_id,
         )
     except Exception as error:  # noqa: BLE001
-        _LOG.error("channel run could not be observed (%s)", type(error).__name__)
+        logger.error(
+            "channel run could not be observed (%s)", logger.safe_error_label(error), error=error
+        )
         outcome = None
     # The run may have answered already, or may still, so no error is reported;
     # how it ended is unknown.
@@ -667,7 +685,7 @@ async def _deliver_reply(
             await finish({"type": "failed", "reason": "observe", "interrupts": []}, None)
         return
     if outcome["status"] in ("error", "timeout"):
-        _LOG.error("channel run failed %s", json.dumps({"threadId": started["thread_id"]}))
+        logger.error("channel run failed %s", json.dumps({"threadId": started["thread_id"]}))
         await _notify_failed(
             ChannelError("channel_run_failed", "channel run failed"), binding, post, on_error
         )
@@ -698,7 +716,12 @@ async def _notify_failed(
             )
     except Exception as reply_error:  # noqa: BLE001
         action = "callback" if on_error is not None else "reply"
-        _LOG.error("channel error %s failed (%s)", action, type(reply_error).__name__)
+        logger.error(
+            "channel error %s failed (%s)",
+            action,
+            logger.safe_error_label(reply_error),
+            error=reply_error,
+        )
 
 
 _CANCEL_MESSAGE_KEYS = frozenset({"user_id", "thread_id", "target"})
