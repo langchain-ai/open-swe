@@ -83,3 +83,31 @@ CI and manual deploys run the CLI from this project's locked environment. `manag
 Nothing here is generated from the backend: operations, subagents and models come from each run's `catalog`, typed by `runtime_api`.
 
 Locally, each fresh `mda dev` start rebuilds `.mda/build` and starts with empty checkpoints. MDA's dev server also refuses loopback webhooks, so the completion webhook (`COMPLETION_WEBHOOK_URL`) needs the backend at a non-loopback URL.
+
+## Observability
+
+Each deployment's runtime logs (its API and queue replicas) are in LangSmith: the deployment's **Logs** tab, or the LangSmith MCP tools `list_deployments` (find the deployment by name) and `get_deployment_logs`, which filter by `run_id`, a text `query` such as a thread id, time range and level (`sort_order: asc` reads a run in order). The `langsmith` CLI has no command for them yet. Filtering by `run_id` gives the run's own lines; a thread's `/state` and `/stream/events` requests carry no run id, so search for the thread id.
+
+The lines worth knowing, each with its attributes (`run_id`, `thread_id`, `request_id`, `langgraph_node`, …):
+
+- `Created run` (API replica): the backend's `POST /threads/{id}/runs` arrived.
+- `Dequeued run for background worker`, then `Starting background run` with `run_queue_ms` (queue replica): a worker picked it up.
+- `Defined the graph` (logger `rt.factory_timing`): the factory in `agent.py` returned, with each phase's milliseconds (`catalog_ms`, `models_ms`, `operation_tools_ms`, `file_tools_ms`, `subagents_ms`, `code_mode_ms`, `middleware_ms`, `factory_ms`), `graph_name`, `access_context` (`threads.create_run` for a run), `has_run`, and the counts of `tools`, `subagents` and `middleware`. Logged on every graph access, state reads included.
+- `Slow graph load. Accessing graph 'open-swe' took …ms` (logger `langgraph_api.graph`, over 100ms): the whole graph access, the factory and MDA's compile of its definition. Its time minus `factory_ms` is MDA's share.
+- `HTTP Request: POST …/agent-api/<endpoint>` (logger `httpx2`): each call to the backend, with the middleware hook that made it in `langgraph_node`.
+
+A prod agent run, before `Defined the graph` existed (times UTC):
+
+```text
+00:56:12.687  Created run
+00:56:12.706  Dequeued run for background worker
+00:56:12.709  Starting background run            run_queue_ms=62
+00:56:13.092  POST /agent-api/catalog            factory: catalog fetched
+00:56:16.421  Slow graph load … took 3710ms      graph access began at 00:56:12.711
+00:56:26.130  POST /agent-api/prepare            BackendRunMiddleware.before_agent; nothing logged in between
+00:56:27.114  POST /agent-api/skills
+00:56:27.327  POST /agent-api/inbox
+00:56:27.644  POST /agent-api/before_model
+00:56:28.808  POST /agent-api/browser            mda-browser.before_agent
+00:56:29.527  POST gateway …/responses           first model call
+```
