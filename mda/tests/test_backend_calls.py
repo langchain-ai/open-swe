@@ -464,7 +464,7 @@ async def test_reports_the_backend_never_took_go_out_first_from_the_runs_checkpo
                 "list[AgentMiddleware]",
                 [
                     BackendRunMiddleware(backend, "invocation-1"),
-                    ReportRepliesMiddleware(backend, "invocation-1"),
+                    ReportRepliesMiddleware(backend),
                     RuntimeToolsMiddleware(backend, ()),
                 ],
             ),
