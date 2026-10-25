@@ -20,12 +20,14 @@ served as the typed API both sides import (``runtime_api``):
   coordination, model routing), then asks the graph's middleware what it adds to
   the call (``ShapesModelCalls``: sections of the system prompt, tools it keeps
   from the call), and names the model to call
-- ``model_result`` lets the transcript and usage middleware observe each response
+- ``model_result`` lets the transcript and usage middleware observe each response,
+  with no plan: the graph names its reporters, which keep each run's state by its ids
 - ``after_model`` runs ``after_model`` hooks, such as the reply nudges, which can
   send the loop back to the model
 - ``after_agent`` runs ``after_agent`` hooks: usage, transcript, step-limit notice,
   review-check settle
-- ``tool_started`` and ``tool_result`` let the transcript record every tool call
+- ``tool_started`` and ``tool_result`` let the transcript record every tool call,
+  with no plan either
 - ``sandbox_replaced`` connects to the box MDA put in place of the thread's, and
   ``sandbox_unreachable`` tells the person a tool MDA ran found the box gone
 
@@ -391,17 +393,6 @@ class RunSession:
         for middleware in self._carried():
             await middleware.aflush_run(runtime)
 
-    def _tool_recorders(self) -> list[RecordsRemoteTools]:
-        return [m for m in self.surface.middleware if isinstance(m, RecordsRemoteTools)]
-
-    async def _record_started(self, tool_call: ToolCall, messages: Sequence[BaseMessage]) -> None:
-        for middleware in self._tool_recorders():
-            await middleware.atool_started(tool_call, messages)
-
-    async def _record_finished(self, result: ToolMessage) -> None:
-        for middleware in self._tool_recorders():
-            await middleware.atool_finished(result)
-
     @property
     def models(self) -> SurfaceModels:
         if self.surface.models is None:
@@ -409,13 +400,7 @@ class RunSession:
         return self.surface.models
 
     def state(self, call: RunCall) -> dict[str, object]:
-        state: dict[str, object] = {
-            **{key: decode_state(value) for key, value in call.state.items()},
-            "messages": messages_from_dict(call.messages),
-        }
-        if self._restore is not None:
-            self._restore(state)
-        return state
+        return call_state(call, self._restore)
 
     def catalog(self) -> Catalog:
         operations = {
@@ -779,55 +764,6 @@ class RunSession:
 
         return await self._answer_phase("after_agent", request, reconciled)
 
-    async def model_result(self, request: ModelResult) -> ObservedResponse:
-        state = self.state(request)
-        response = messages_from_dict(request.response)
-
-        async def observed(runtime: Runtime) -> list[BaseMessage]:
-            await self.join(state, runtime)
-            with within_namespace(request.namespace):
-                seen = await self.observe(state, response, runtime)
-            await self.flush(runtime)
-            return seen
-
-        seen = await in_graph_context({**self.config, "run_name": "model_result"}, observed)
-        return ObservedResponse(response=dump_messages(seen))
-
-    async def tool_started(self, request: ToolCallReport) -> Done:
-        state = self.state(request)
-        tool_call = ToolCall(
-            name=request.name, args=dict(request.arguments), id=request.tool_call_id
-        )
-
-        async def record(runtime: Runtime) -> None:
-            await self.join(state, runtime)
-            with within_namespace(request.namespace):
-                await self._record_started(tool_call, messages_from_dict(request.messages))
-            await self.flush(runtime)
-
-        await in_graph_context({**self.config, "run_name": "tool_started"}, record)
-        return Done()
-
-    async def tool_result(self, request: ToolResultReport) -> ToolResultReply:
-        state = self.state(request)
-        [result] = messages_from_dict([request.result])
-        if not isinstance(result, ToolMessage):
-            raise ValueError("A tool result must be a tool message")
-
-        async def record(runtime: Runtime) -> dict[str, JsonValue]:
-            await self.join(state, runtime)
-            with within_namespace(request.namespace):
-                await self._record_finished(result)
-            await self.flush(runtime)
-            # A file or shell tool may have started the turn's work; the snapshot is taken
-            # now, off the call's path, as the run, which a bridged machine checks.
-            git = TurnGitMetadata(self.config)
-            before = git.work_baseline(state) if request.name in OBSERVED_TOOLS else None
-            return await git.work_evidence(before, request.tool_call_id, time.time_ns())
-
-        update = await in_graph_context({**self.config, "run_name": "tool_result"}, record)
-        return ToolResultReply(update=update)
-
     async def sandbox_unreachable(self, request: SandboxGone) -> Done:
         """A tool MDA ran in the box found it gone; the run ends once the person knows."""
         await post_sandbox_unreachable_notification(self.config, sandbox_id=request.sandbox_id)
@@ -835,17 +771,6 @@ class RunSession:
 
     def _offered(self) -> list[BaseTool]:
         return [tool for name, tool in self.surface.tools.items() if name not in _MDA_TOOLS]
-
-    def _request(self, state: Mapping[str, object], runtime: Runtime) -> ModelRequest:
-        """The call MDA made, as the observers of its response read it."""
-        return ModelRequest(
-            model=FakeListChatModel(responses=[""]),
-            messages=_as_list(state.get("messages")),
-            state=cast(AgentState, dict(state)),
-            runtime=runtime,
-            tools=[],
-            model_settings={},
-        )
 
     async def model_call(self, state: Mapping[str, object], runtime: Runtime) -> ModelCall:
         """The system prompt and tool list the graph's own middleware gives the next call."""
@@ -893,17 +818,28 @@ class RunSession:
             ),
         )
 
-    async def observe(
-        self, state: Mapping[str, object], response: list[BaseMessage], runtime: Runtime
-    ) -> list[BaseMessage]:
-        """Let the transcript and usage middleware see the response MDA's model gave."""
 
-        async def respond(_request: ModelRequest) -> ModelResponse:
-            return ModelResponse(result=response)
+def call_state(call: RunCall, restore: StateRestorer | None) -> dict[str, object]:
+    """The graph state a call from the loop carries, as the graph's hooks read it."""
+    state: dict[str, object] = {
+        **{key: decode_state(value) for key, value in call.state.items()},
+        "messages": messages_from_dict(call.messages),
+    }
+    if restore is not None:
+        restore(state)
+    return state
 
-        observers = [m for m in self.surface.middleware if isinstance(m, _MODEL_OBSERVERS)]
-        result = await _chain(observers, respond)(self._request(state, runtime))
-        return result.result
+
+def _observed_request(state: Mapping[str, object], runtime: Runtime) -> ModelRequest:
+    """The call MDA made, as the observers of its response read it."""
+    return ModelRequest(
+        model=FakeListChatModel(responses=[""]),
+        messages=_as_list(state.get("messages")),
+        state=cast(AgentState, dict(state)),
+        runtime=runtime,
+        tools=[],
+        model_settings={},
+    )
 
 
 async def _call_hook(
@@ -963,11 +899,15 @@ class RemoteGraph:
         *,
         restore_state: StateRestorer | None = None,
         skills: SkillStores | None = None,
+        reporters: Sequence[AgentMiddleware] = (),
     ) -> None:
         self.assistant_id = assistant_id
         self._plan = plan
         self._restore_state = restore_state
         self._skills = skills
+        # The graph's middleware that records what MDA runs: its replies and tool calls.
+        # Each keeps its run's state by the run's ids, never by the plan.
+        self._reporters = tuple(reporters)
         self._sessions: dict[tuple[str, str | None], RunSession] = {}
         # Calls answered from the run's token and request alone, never its plan.
         self._calls = Handlers[RemoteRun]()
@@ -975,6 +915,9 @@ class RemoteGraph:
         self._calls.serve(SKILLS, self.skills)
         self._calls.serve(INBOX, self.inbox)
         self._calls.serve(INBOX_RECEIVED, self.inbox_received)
+        self._calls.serve(MODEL_RESULT, self.model_result)
+        self._calls.serve(TOOL_STARTED, self.tool_started)
+        self._calls.serve(TOOL_RESULT, self.tool_result)
 
     def _config(self, run: RemoteRun, run_id: str | None) -> RunnableConfig:
         config = run_config(run)
@@ -1043,6 +986,82 @@ class RemoteGraph:
     async def inbox_received(self, run: RemoteRun, request: InboxReceipt) -> Done:
         await ThreadInbox(run.thread_id).receive(request.items.queued, request.items.events)
         return Done()
+
+    async def _reporting[T](
+        self,
+        run: RemoteRun,
+        call: RunCall,
+        name: str,
+        report: Callable[[dict[str, object], Runtime], Awaitable[T]],
+    ) -> T:
+        """``report`` as the run, inside the calling subagent, with the run's turn rejoined.
+
+        What a reporter queued is written before the call answers, so the next call
+        may reach another process.
+        """
+        state = call_state(call, self._restore_state)
+        carried = [m for m in self._reporters if isinstance(m, CarriedAcrossProcesses)]
+
+        async def reported(runtime: Runtime) -> T:
+            for middleware in carried:
+                await middleware.aresume_run(cast(AgentState, dict(state)), runtime)
+            with within_namespace(call.namespace):
+                result = await report(state, runtime)
+            for middleware in carried:
+                await middleware.aflush_run(runtime)
+            return result
+
+        config = self._config(run, call.run_id)
+        return await in_graph_context({**config, "run_name": name}, reported)
+
+    async def model_result(self, run: RemoteRun, request: ModelResult) -> ObservedResponse:
+        """Let the transcript and usage see the response MDA's model gave."""
+        response = messages_from_dict(request.response)
+        observers = [m for m in self._reporters if isinstance(m, _MODEL_OBSERVERS)]
+
+        async def respond(_request: ModelRequest) -> ModelResponse:
+            return ModelResponse(result=response)
+
+        async def observe(state: dict[str, object], runtime: Runtime) -> list[BaseMessage]:
+            observed = await _chain(observers, respond)(_observed_request(state, runtime))
+            return observed.result
+
+        seen = await self._reporting(run, request, "model_result", observe)
+        return ObservedResponse(response=dump_messages(seen))
+
+    def _tool_recorders(self) -> list[RecordsRemoteTools]:
+        return [m for m in self._reporters if isinstance(m, RecordsRemoteTools)]
+
+    async def tool_started(self, run: RemoteRun, request: ToolCallReport) -> Done:
+        tool_call = ToolCall(
+            name=request.name, args=dict(request.arguments), id=request.tool_call_id
+        )
+        messages = messages_from_dict(request.messages)
+
+        async def record(_state: dict[str, object], _runtime: Runtime) -> None:
+            for recorder in self._tool_recorders():
+                await recorder.atool_started(tool_call, messages)
+
+        await self._reporting(run, request, "tool_started", record)
+        return Done()
+
+    async def tool_result(self, run: RemoteRun, request: ToolResultReport) -> ToolResultReply:
+        [result] = messages_from_dict([request.result])
+        if not isinstance(result, ToolMessage):
+            raise ValueError("A tool result must be a tool message")
+        config = self._config(run, request.run_id)
+
+        async def record(state: dict[str, object], _runtime: Runtime) -> dict[str, JsonValue]:
+            for recorder in self._tool_recorders():
+                await recorder.atool_finished(result)
+            # A file or shell tool may have started the turn's work; the snapshot is taken
+            # now, off the call's path, as the run, which a bridged machine checks.
+            git = TurnGitMetadata(config)
+            before = git.work_baseline(state) if request.name in OBSERVED_TOOLS else None
+            return await git.work_evidence(before, request.tool_call_id, time.time_ns())
+
+        update = await self._reporting(run, request, "tool_result", record)
+        return ToolResultReply(update=update)
 
     async def api(self, run: RemoteRun, endpoint: str, raw: JsonValue) -> JsonValue:
         """Answer one call the MDA run makes (``runtime_api``), as the session of its run."""
@@ -1208,11 +1227,8 @@ API: Final = Handlers[RunSession]()
 API.serve(CATALOG, _catalog)
 API.serve(PREPARE, RunSession.prepare)
 API.serve(BEFORE_MODEL, RunSession.before_model)
-API.serve(MODEL_RESULT, RunSession.model_result)
 API.serve(AFTER_MODEL, RunSession.after_model)
 API.serve(AFTER_AGENT, RunSession.after_agent)
-API.serve(TOOL_STARTED, RunSession.tool_started)
-API.serve(TOOL_RESULT, RunSession.tool_result)
 API.serve(SANDBOX_REPLACED, RunSession.sandbox_replaced)
 API.serve(SANDBOX_UNREACHABLE, RunSession.sandbox_unreachable)
 API.serve(OPERATION, RunSession.operation)
