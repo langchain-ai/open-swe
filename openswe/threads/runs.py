@@ -61,6 +61,7 @@ from openswe.threads.access import (
 from openswe.threads.creation import create_thread
 from openswe.threads.moves import SANDBOX_HANDOFF_SYSTEM, SANDBOX_MOVED_KEY, SandboxMove
 from openswe.threads.principals import STARTED_BY_ID, STARTED_BY_NAME, Principal, ThreadType
+from openswe.threads.runtimes import in_process_client
 from openswe.threads.summary import (
     DASHBOARD_SOURCE,
     TRANSCRIPT_VERSION,
@@ -90,11 +91,7 @@ from openswe.utils.dashboard_handoff import (
     dashboard_input_context,
 )
 from openswe.utils.json_types import JsonObject, as_thread_dict, thread_metadata
-from openswe.utils.thread_ops import (
-    in_process_client,
-    langgraph_client,
-    queue_message_for_thread,
-)
+from openswe.utils.thread_ops import langgraph_client, queue_message_for_thread
 from openswe.utils.thread_participants import participant_metadata
 from openswe.utils.thread_pr_state import agent_thread_pr_state_lock
 from openswe.utils.thread_settings import thread_model_choice

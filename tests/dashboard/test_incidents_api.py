@@ -160,7 +160,8 @@ def test_generic_thread_routes_reject_incidents_even_for_admin_owners(
         ),
         update=AsyncMock(),
     )
-    patch_thread_module(monkeypatch, "langgraph_client", lambda: SimpleNamespace(threads=threads))
+    for name in ("langgraph_client", "in_process_client"):
+        patch_thread_module(monkeypatch, name, lambda: SimpleNamespace(threads=threads))
 
     response = client.request(
         method,

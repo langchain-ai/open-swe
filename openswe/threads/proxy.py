@@ -32,6 +32,7 @@ from openswe.threads.runs import (
     queue_follow_up_run,
     steer_running_thread,
 )
+from openswe.threads.runtimes import in_process_client
 from openswe.threads.summary import (
     TRANSCRIPT_VERSION,
     _assert_thread_postable,
@@ -43,7 +44,7 @@ from openswe.utils.dashboard_handoff import RELAYED_FROM_KEY
 from openswe.utils.http_pool import pooled_transport
 from openswe.utils.json_types import thread_metadata
 from openswe.utils.streaming import TERMINAL_LIFECYCLE_EVENTS, root_lifecycle
-from openswe.utils.thread_ops import in_process_client, langgraph_client, langgraph_url
+from openswe.utils.thread_ops import langgraph_client, langgraph_url
 
 logger = logging.getLogger(__name__)
 
