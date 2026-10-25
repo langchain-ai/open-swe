@@ -419,12 +419,18 @@ export function AgentThreadView({
   const addReply = (reply: PassageReply) =>
     setAddedReply((previous) => ({ key: (previous?.key ?? 0) + 1, reply }))
   const restoreQueuedToComposer = useCallback(
-    (texts: ReadonlyArray<string>, images: Array<ImageChunk>) => {
-      if (texts.length === 0 && images.length === 0) return
+    (
+      texts: ReadonlyArray<string>,
+      images: Array<ImageChunk>,
+      replies: Array<PassageReply>
+    ) => {
+      if (!texts.some(Boolean) && images.length === 0 && replies.length === 0)
+        return
       setRestoreDraft((previous) => ({
         key: (previous?.key ?? 0) + 1,
         text: texts.filter(Boolean).join("\n\n"),
         images,
+        replies,
       }))
     },
     []
@@ -469,7 +475,11 @@ export function AgentThreadView({
         const images = await materializeQueuedImages(entry)
         if (images === null) return
         await withdrawQueued(entry)
-        restoreQueuedToComposer([queuedText(entry)], images)
+        restoreQueuedToComposer(
+          [queuedText(entry)],
+          images,
+          entry.message.replies ?? []
+        )
       })().catch((error: unknown) =>
         reportError({ title: "Couldn't cancel the queued message", error })
       )
@@ -521,7 +531,11 @@ export function AgentThreadView({
         ...pending.map(queuedText),
         ...unacknowledged.map((message) => message.content),
       ],
-      images
+      images,
+      [
+        ...pending.flatMap((entry) => entry.message.replies ?? []),
+        ...unacknowledged.flatMap((message) => message.replies ?? []),
+      ]
     )
     if (failed > 0) {
       toast.error(

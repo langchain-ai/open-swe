@@ -4,7 +4,7 @@ import { IconButton } from "@langchain/macaw-components/IconButton"
 import type { PassageReply } from "@/features/agents/utils/passageReply"
 
 export interface PendingReply {
-  id: number
+  id: string
   reply: PassageReply
 }
 
@@ -14,7 +14,7 @@ export function ComposerReplyCards({
   onRemove,
 }: {
   replies: ReadonlyArray<PendingReply>
-  onRemove: (id: number) => void
+  onRemove: (id: string) => void
 }) {
   if (replies.length === 0) return null
   return (

@@ -7,6 +7,7 @@ import {
   selectedRangeFromDiff,
 } from "@/features/agents/utils/diffSelection"
 import {
+  SELECTION_LIMIT,
   normalizeSelection,
   passageAround,
 } from "@/features/agents/utils/passageReply"
@@ -350,6 +351,7 @@ export function SelectionReply({
           ref={inputRef}
           aria-label="Your reply"
           placeholder="Reply to Open SWE"
+          maxLength={SELECTION_LIMIT}
           value={comment}
           onChange={(event) => setComment(event.target.value)}
           className="min-w-0 flex-1 bg-transparent px-space-1 text-sm text-primary outline-none placeholder:text-tertiary"

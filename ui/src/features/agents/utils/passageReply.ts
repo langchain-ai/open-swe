@@ -17,12 +17,18 @@ export interface PassageReply {
   comment: string
 }
 
+// Under the server's limits (PassageReply in openswe/utils/dashboard_handoff.py),
+// so an oversized passage is trimmed here rather than rejecting the whole send.
+const CONTEXT_LIMIT = 1_000
+export const SELECTION_LIMIT = 20_000
+
 /** Selected text, with the runs of blank lines a selection drags in collapsed. */
 export function normalizeSelection(selected: string): string {
   return selected
     .replaceAll("\r\n", "\n")
     .replace(/\n{3,}/g, "\n\n")
     .trim()
+    .slice(0, SELECTION_LIMIT)
 }
 
 /**
@@ -44,9 +50,13 @@ export function passageAround(
   const before = lineStart > 0 ? text.lastIndexOf("\n", lineStart - 2) + 1 : 0
   const lineEnd = text.indexOf("\n", to)
   const nextEnd = lineEnd === -1 ? -1 : text.indexOf("\n", lineEnd + 1)
+  // Context is best effort: keep the part nearest the selection.
   return {
-    before: text.slice(before, from),
+    before: text.slice(Math.max(before, from - CONTEXT_LIMIT), from),
     selection: normalizeSelection(text.slice(from, to)),
-    after: text.slice(to, nextEnd === -1 ? text.length : nextEnd),
+    after: text.slice(
+      to,
+      Math.min(nextEnd === -1 ? text.length : nextEnd, to + CONTEXT_LIMIT)
+    ),
   }
 }

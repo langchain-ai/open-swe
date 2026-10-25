@@ -28,4 +28,14 @@ describe("passageAround", () => {
       after: "",
     })
   })
+
+  it("trims long context to the part nearest the selection", () => {
+    const long = `${"a".repeat(5_000)}\nmid\n${"b".repeat(5_000)}`
+    const start = long.indexOf("mid")
+
+    const passage = passageAround(long, start, start + 3)
+    expect(passage.selection).toBe("mid")
+    expect(passage.before).toBe(`${"a".repeat(999)}\n`)
+    expect(passage.after).toBe(`\n${"b".repeat(999)}`)
+  })
 })

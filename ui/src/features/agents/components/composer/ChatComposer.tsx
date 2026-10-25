@@ -119,6 +119,7 @@ export interface RestoredDraft {
   key: number
   text: string
   images: Array<ImageChunk>
+  replies?: Array<PassageReply>
   /** Replace the previous suggested prompt if it is still exactly as suggested, instead of stacking on it. */
   replacesSuggestion?: boolean
 }
@@ -330,7 +331,7 @@ export const ChatComposer = memo(function ChatComposer({
     if (addedReply)
       setPendingReplies((prev) => [
         ...prev,
-        { id: addedReply.key, reply: addedReply.reply },
+        { id: `added:${addedReply.key}`, reply: addedReply.reply },
       ])
   }
   const [dragKind, setDragKind] = useState<"files" | "path" | null>(null)
@@ -481,6 +482,16 @@ export const ChatComposer = memo(function ChatComposer({
     if (restoreDraft.images.length > 0) {
       // oxlint-disable-next-line react/set-state-in-effect
       setPendingImages((prev) => [...restoreDraft.images, ...prev])
+    }
+    const restoredReplies = restoreDraft.replies ?? []
+    if (restoredReplies.length > 0) {
+      setPendingReplies((prev) => [
+        ...restoredReplies.map((reply, index) => ({
+          id: `restored:${restoreDraft.key}:${index}`,
+          reply,
+        })),
+        ...prev,
+      ])
     }
     editorRef.current?.focusAtEnd()
   }, [applyPrompt, restoreDraft, value])
