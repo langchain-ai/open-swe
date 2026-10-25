@@ -1,4 +1,4 @@
-"""Requests to act as a thread participant, one per thread and person, in thread metadata.
+"""Requests to act as a thread participant, one per PR and person, in thread metadata.
 
 Each request and each decision is its own top-level metadata key: thread metadata
 updates merge per key, so a stale request write can never erase a decision, and
@@ -6,6 +6,7 @@ two people's requests never overwrite each other.
 """
 
 import hashlib
+import json
 import logging
 from collections.abc import Mapping
 from typing import Literal, Self
@@ -15,7 +16,6 @@ from pydantic import BaseModel, ConfigDict, ValidationError
 
 from openswe.slack.events import claim_slack_event
 from openswe.users import User, UserPreferencesPatch
-from openswe.utils.thread_participants import participant_ids
 from openswe.utils.time import now_iso
 
 logger = logging.getLogger(__name__)
@@ -27,7 +27,7 @@ Decision = Literal["approved", "denied"]
 
 
 class ActAsRequest(BaseModel):
-    """Open SWE asking one person to let it open PRs as them in one thread."""
+    """Open SWE asking one person to let it open a specific PR as them."""
 
     model_config = ConfigDict(extra="ignore")
 
@@ -43,8 +43,11 @@ class ActAsRequest(BaseModel):
     wake_on_answer: bool = False
 
     @staticmethod
-    def fingerprint_for(thread_id: str, login: str) -> str:
-        return hashlib.sha256(f"{thread_id}|{login.lower()}".encode()).hexdigest()[:16]
+    def fingerprint_for(
+        thread_id: str, login: str, *, owner: str, repo: str, head: str, base: str
+    ) -> str:
+        scope = ["pr-v1", thread_id, login.lower(), owner.lower(), repo.lower(), head, base]
+        return hashlib.sha256(json.dumps(scope).encode()).hexdigest()[:16]
 
 
 class ActAsDecision(BaseModel):
@@ -55,19 +58,19 @@ class ActAsDecision(BaseModel):
 
 
 class ThreadActAs:
-    """The act-as requests, decisions and participants of one thread."""
+    """The act-as requests, decisions and visibility of one thread."""
 
     def __init__(
         self,
         thread_id: str,
         requests: dict[str, ActAsRequest],
         decisions: dict[str, ActAsDecision],
-        participants: set[str],
+        is_public: bool,
     ) -> None:
         self.thread_id = thread_id
         self.requests = requests
         self.decisions = decisions
-        self._participants = participants
+        self.is_public = is_public
 
     @classmethod
     async def load(cls, thread_id: str) -> Self:
@@ -75,27 +78,26 @@ class ThreadActAs:
         metadata = thread["metadata"] or {}
         requests = _parse(thread_id, metadata, _REQUEST_PREFIX, ActAsRequest)
         decisions = _parse(thread_id, metadata, _DECISION_PREFIX, ActAsDecision)
-        return cls(thread_id, requests, decisions, participant_ids(metadata))
+        return cls(
+            thread_id, requests, decisions, metadata.get("visibility", "public") != "private"
+        )
 
-    def is_shared(self) -> bool:
-        return len(self._participants) > 1
-
-    def for_login(self, login: str) -> ActAsRequest | None:
-        return self.requests.get(ActAsRequest.fingerprint_for(self.thread_id, login))
-
-    def decision_for(self, login: str) -> Decision | None:
-        decision = self.decisions.get(ActAsRequest.fingerprint_for(self.thread_id, login))
+    def decision_for(self, request: ActAsRequest) -> Decision | None:
+        decision = self.decisions.get(request.fingerprint)
         return decision.decision if decision is not None else None
 
     async def request(
         self, login: str, *, owner: str, repo: str, head: str, base: str, title: str
     ) -> ActAsRequest:
-        """The open request for ``login``, created on first ask."""
-        existing = self.for_login(login)
+        """The request for this person's specific PR, created on first ask."""
+        fingerprint = ActAsRequest.fingerprint_for(
+            self.thread_id, login, owner=owner, repo=repo, head=head, base=base
+        )
+        existing = self.requests.get(fingerprint)
         if existing is not None:
             return existing
         request = ActAsRequest(
-            fingerprint=ActAsRequest.fingerprint_for(self.thread_id, login),
+            fingerprint=fingerprint,
             login=login,
             owner=owner,
             repo=repo,

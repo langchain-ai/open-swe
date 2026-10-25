@@ -119,7 +119,7 @@ async def handle_button(
         await post_slack_ephemeral_message(
             source_channel,
             user_id,
-            f"`{request.login}` {verdict} Open SWE opening PRs as them in this thread.",
+            f"`{request.login}` {verdict} Open SWE opening this PR as them.",
             thread_ts=source_ts,
         )
     current = (await ThreadActAs.load(button.thread_id)).requests.get(button.fingerprint)

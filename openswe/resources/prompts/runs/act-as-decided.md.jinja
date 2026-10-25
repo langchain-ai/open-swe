@@ -1,6 +1,6 @@
-{{ login }} {{ "approved" if approved else "denied" }} Open SWE opening PRs as them in this thread, after `open_pull_request` stopped waiting for their answer.
+{{ login }} {{ "approved" if approved else "denied" }} Open SWE opening the specific PR on their approval card as them, after `open_pull_request` stopped waiting for their answer.
 {% if approved %}
-Call `open_pull_request` again now to open the pull request it was blocked on.
+Call `open_pull_request` again now to open only the pull request it was blocked on. Other PRs need their own approval.
 {% else %}
 Do not open the pull request as them. Tell the thread it was denied; re-attribute only through the approval flow `open_pull_request` describes.
 {% endif %}
