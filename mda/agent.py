@@ -35,6 +35,7 @@ from managed_deepagents import (
 from pydantic import BaseModel, ConfigDict, Field, JsonValue
 from rt.backend import OpenSweBackend
 from rt.browser import ReportedBrowserMiddleware
+from rt.factory_timing import FactoryTiming
 from rt.file_tools import FileToolsMiddleware
 from rt.managed_sandbox import (
     EXECUTE_TIMEOUT_SECONDS,
@@ -150,6 +151,7 @@ def _browser(graph: Graph, backend: OpenSweBackend) -> list[AgentMiddleware]:
 # `mda build` reads the agent's name without running this factory, so its body
 # stays assignments and one `return define_deep_agent(...)`.
 async def agent(runtime: ManagedServerRuntime) -> DeepAgentDefinition:
+    timing = FactoryTiming()
     execution = runtime.execution_runtime
     context = OpenSweRunContext.model_validate(
         execution.context if execution is not None and execution.context is not None else {}
@@ -157,6 +159,7 @@ async def agent(runtime: ManagedServerRuntime) -> DeepAgentDefinition:
     backend = OpenSweBackend(context.run_token, worker_grant=context.worker_grant)
     # Runs without a context (state reads, assistant reads) never call a model or a tool.
     catalog = await backend.catalog(None) if backend.has_run else Catalog()
+    timing.lap("catalog")
     models = catalog.models or (
         RunModels.model_validate(context.models) if context.models is not None else None
     )
@@ -170,10 +173,12 @@ async def agent(runtime: ManagedServerRuntime) -> DeepAgentDefinition:
         if models is not None
         else _DEFAULT_MODEL
     )
+    timing.lap("models")
     tools = [
         operation_tool(spec, backend, cites_evidence=catalog.incident_evidence)
         for spec in catalog.operations
     ]
+    timing.lap("operation_tools")
     remote = RemoteFiles(backend, run_id)
     remote_tools = remote_file_tools(remote, catalog.files.artifacts_root)
     # The run's skills, listed for the agent and its subagents and read from here.
@@ -184,25 +189,6 @@ async def agent(runtime: ManagedServerRuntime) -> DeepAgentDefinition:
         else []
     )
     in_box = catalog.sandbox is not None
-    # Without a box of MDA's, deepagents' own file and shell tools act on the thread's
-    # files on the backend, in place of MDA's own of the same name.
-    registered = [*tools, *(() if in_box else remote_tools.values())]
-    by_name = {tool.name: tool for tool in registered}
-    excluded = frozenset(catalog.excluded)
-    # Every schema offered costs each call its context, and OpenAI answers some requests
-    # carrying hundreds with nothing; the tools the model seldom needs are called from code.
-    code_only = frozenset(catalog.code_only)
-    in_code = [tool for tool in tools if tool.name in code_only]
-    offered = [tool for tool in registered if tool.name not in code_only]
-    subagent_tools = {
-        subagent.name: offered
-        if subagent.tools is None
-        else [by_name[name] for name in subagent.tools if name in by_name]
-        for subagent in catalog.subagents
-    }
-    replace_sandbox = (
-        [ReplaceSandboxMiddleware(backend, catalog.sandbox)] if catalog.sandbox is not None else []
-    )
     file_tools = FileToolsMiddleware(
         backend,
         catalog.files,
@@ -213,11 +199,31 @@ async def agent(runtime: ManagedServerRuntime) -> DeepAgentDefinition:
         skills={tool.name: tool for tool in FilesystemMiddleware(backend=skill_files).tools},
         skill_sources=catalog.skill_sources,
     )
+    timing.lap("file_tools")
+    # Without a box of MDA's, deepagents' own file and shell tools act on the thread's
+    # files on the backend, in place of MDA's own of the same name.
+    registered = [*tools, *(() if in_box else remote_tools.values())]
+    by_name = {tool.name: tool for tool in registered}
+    excluded = frozenset(catalog.excluded)
+    # Every schema offered costs each call its context, and OpenAI answers some requests
+    # carrying hundreds with nothing; the tools the model seldom needs are called from code.
+    code_only = frozenset(catalog.code_only)
+    in_code = [tool for tool in tools if tool.name in code_only]
+    offered = [tool for tool in registered if tool.name not in code_only]
     from_code = [
         *in_code,
         *(tool for tool in tools if tool.name in catalog.also_from_code and tool not in in_code),
         *file_tools.code_tools(catalog.also_from_code),
     ]
+    subagent_tools = {
+        subagent.name: offered
+        if subagent.tools is None
+        else [by_name[name] for name in subagent.tools if name in by_name]
+        for subagent in catalog.subagents
+    }
+    replace_sandbox = (
+        [ReplaceSandboxMiddleware(backend, catalog.sandbox)] if catalog.sandbox is not None else []
+    )
     sync_subagents: list[SubAgent] = [
         {
             "name": subagent.name,
@@ -236,6 +242,9 @@ async def agent(runtime: ManagedServerRuntime) -> DeepAgentDefinition:
         }
         for subagent in catalog.subagents
     ]
+    timing.lap("subagents")
+    code_mode = _code_mode(context.graph, from_code, catalog.described, file_tools)
+    timing.lap("code_mode")
     # This agent's own, as the agent a worker is; deepagents passes no middleware down.
     # Middleware types are invariant in the state they extend; the agent merges them all.
     agent_middleware = cast(
@@ -253,7 +262,7 @@ async def agent(runtime: ManagedServerRuntime) -> DeepAgentDefinition:
             file_tools,
             task_retry(),
             ServedToolsMiddleware(offered, excluded | code_only, backend),
-            *_code_mode(context.graph, from_code, catalog.described, file_tools),
+            *code_mode,
             *_browser(context.graph, backend),
             ModelCallLimitMiddleware(
                 run_limit=_MODEL_CALL_LIMIT
@@ -276,6 +285,15 @@ async def agent(runtime: ManagedServerRuntime) -> DeepAgentDefinition:
         # itself, so deepagents must not wake it as well.
         "notify_parent": False,
     }
+    timing.lap("middleware")
+    timing.log(
+        graph=context.graph,
+        access_context=runtime.access_context,
+        has_run=backend.has_run,
+        tools=len(registered),
+        subagents=len(sync_subagents) + 1,
+        middleware=len(agent_middleware),
+    )
     return define_deep_agent(
         name="open-swe",
         replicate_traces=False,
