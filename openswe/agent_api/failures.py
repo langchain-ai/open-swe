@@ -1,12 +1,11 @@
 """What an operation that raised answers, so the model can see the failure and act on it.
 
 A sandbox that stopped answering is the one failure nothing the model does next
-can get past: the person is told, and the MDA run ends.
+can get past: the run tells the person, and the MDA run ends.
 """
 
 import json
 import logging
-from collections.abc import Mapping
 from dataclasses import dataclass
 
 from langsmith.sandbox import (
@@ -15,10 +14,7 @@ from langsmith.sandbox import (
     SandboxServerReloadError,
 )
 
-from openswe.middleware.sandbox_circuit_breaker import (
-    extract_sandbox_id,
-    post_sandbox_unreachable_notification,
-)
+from openswe.middleware.sandbox_circuit_breaker import extract_sandbox_id
 from openswe.sandboxes.retry import is_transient_sandbox_error
 
 logger = logging.getLogger(__name__)
@@ -32,11 +28,10 @@ class OperationFailure:
 
     content: str
     sandbox_unreachable: bool = False
+    sandbox_id: str | None = None
 
     @classmethod
-    async def of(
-        cls, exc: Exception, *, operation: str, config: Mapping[str, object]
-    ) -> OperationFailure:
+    def of(cls, exc: Exception, *, operation: str) -> OperationFailure:
         if is_transient_sandbox_error(exc):
             # The command never started, so nothing is known to be wrong with the
             # sandbox: ending the run here would turn a gateway blip into an abandoned one.
@@ -65,13 +60,9 @@ class OperationFailure:
             logger.warning("Operation failed", extra={"operation": operation}, exc_info=True)
             return cls(json.dumps(payload))
         logger.error("The sandbox did not answer", extra={"operation": operation}, exc_info=True)
-        try:
-            await post_sandbox_unreachable_notification(
-                config, sandbox_id=extract_sandbox_id(str(exc))
-            )
-        except Exception:
-            logger.exception("Could not tell the person their sandbox is gone")
-        return cls(json.dumps(payload), sandbox_unreachable=True)
+        return cls(
+            json.dumps(payload), sandbox_unreachable=True, sandbox_id=extract_sandbox_id(str(exc))
+        )
 
 
 def _sandbox_unreachable(exc: Exception) -> bool:

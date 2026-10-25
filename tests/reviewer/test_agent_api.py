@@ -583,6 +583,48 @@ async def test_a_cancelled_operation_ends_the_call_rather_than_answering() -> No
         await session.operation(RunOperation(name="wait", request_id="call-1"))
 
 
+async def test_an_unreachable_sandbox_is_reported_once_for_the_run(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Parallel calls that meet the dead box each end their call, but notify only once."""
+    import asyncio
+    from unittest.mock import AsyncMock
+
+    from langchain_core.tools import tool
+    from langsmith.sandbox import SandboxConnectionError
+    from runtime_api.loop import SandboxGone
+    from runtime_api.operations import RunOperation
+
+    from openswe.agent_api.graph import RunSession
+    from openswe.sandboxes.tool_runtime import ToolSurface
+
+    @tool
+    async def execute(command: str) -> str:
+        """Run a command."""
+        raise SandboxConnectionError("WebSocket upgrade to sb-dead failed")
+
+    notify = AsyncMock()
+    monkeypatch.setattr("openswe.agent_api.graph.post_sandbox_unreachable_notification", notify)
+    surface = ToolSurface(base_tools=[execute])
+    await surface.prepare()
+    session = RunSession(surface, {"configurable": {}}, None, started_here=True)
+
+    results = await asyncio.gather(
+        *(
+            session.operation(
+                RunOperation(name="execute", arguments={"command": "ls"}, request_id=call_id)
+            )
+            for call_id in ("call-1", "call-2")
+        )
+    )
+    await session.sandbox_unreachable(SandboxGone(sandbox_id="sb-dead"))
+
+    assert all(result.sandbox_unreachable for result in results)
+    notify.assert_awaited_once()
+    assert notify.await_args is not None
+    assert notify.await_args.kwargs == {"sandbox_id": "sb-dead"}
+
+
 async def test_an_operation_that_runs_a_command_is_put_to_the_shell_guards_first() -> None:
     from langchain_core.tools import tool
     from runtime_api.operations import RunOperation

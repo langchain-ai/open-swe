@@ -355,6 +355,7 @@ class RunSession:
         self._restore = restore
         self._joined = self._prepared = started_here
         self._shell_guards = ShellGuards(surface.shell_guards)
+        self._told_sandbox_unreachable = False
         self.expires_at = time.monotonic() + _SESSION_TTL_SECONDS
 
     def _carried(self) -> list[CarriedAcrossProcesses]:
@@ -627,9 +628,9 @@ class RunSession:
                     # The run is being cancelled: that ends the call, not just its result.
                     raise
                 except Exception as exc:
-                    failure = await OperationFailure.of(
-                        exc, operation=request.name, config=self.config
-                    )
+                    failure = OperationFailure.of(exc, operation=request.name)
+                    if failure.sandbox_unreachable:
+                        await self.tell_sandbox_unreachable(failure.sandbox_id)
                     return OperationResult(
                         content=failure.content,
                         status="error",
@@ -864,8 +865,22 @@ class RunSession:
 
     async def sandbox_unreachable(self, request: SandboxGone) -> Done:
         """A tool MDA ran in the box found it gone; the run ends once the person knows."""
-        await post_sandbox_unreachable_notification(self.config, sandbox_id=request.sandbox_id)
+        await self.tell_sandbox_unreachable(request.sandbox_id)
         return Done()
+
+    async def tell_sandbox_unreachable(self, sandbox_id: str | None) -> None:
+        """Tell the person their sandbox stopped answering, once for the run.
+
+        Parallel tool calls all meet the same dead box before the run ends, whether
+        MDA or this backend ran them.
+        """
+        if self._told_sandbox_unreachable:
+            return
+        self._told_sandbox_unreachable = True
+        try:
+            await post_sandbox_unreachable_notification(self.config, sandbox_id=sandbox_id)
+        except Exception:
+            logger.exception("Could not tell the person their sandbox is gone")
 
     def _offered(self) -> list[BaseTool]:
         return [tool for name, tool in self.surface.tools.items() if name not in _MDA_TOOLS]
