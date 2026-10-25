@@ -18,6 +18,7 @@ from langchain.agents.middleware.types import AgentState
 from langchain_core.messages import AIMessage, HumanMessage, ToolMessage
 from langgraph.graph.message import add_messages
 from langgraph.runtime import Runtime
+from runtime_api.catalog import InboxSpec
 from sqlalchemy import delete, func, select, text, update
 
 from openswe import completion
@@ -493,13 +494,14 @@ async def test_repaired_task_thread_checkpoints_owed_messages_once(
     if missing_task_message:
         async with postgres.session() as session:
             await message.record(session)
-    inbox = ThreadInbox(thread_id, events=True, surface="web")
+    inbox = ThreadInbox(thread_id)
+    spec = InboxSpec(events=True)
 
-    taken = await inbox.read("run-1")
+    taken = await inbox.read("run-1", spec)
     assert taken.messages[-1]["id"] == f"event-match:{message.id}"
     assert "Check logout too" in taken.messages[-1]["content"]
     await inbox.receive(events=taken.events)
-    assert (await inbox.read("run-1")).messages == []
+    assert (await inbox.read("run-1", spec)).messages == []
     async with postgres.session() as session:
         saved = await session.get_one(TaskMessage, message.id)
         assert saved.delivered_at is not None

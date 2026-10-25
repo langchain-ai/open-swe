@@ -2,6 +2,7 @@ from typing import Any
 from unittest.mock import AsyncMock, patch
 
 import pytest
+from runtime_api.catalog import InboxSpec
 
 from openswe.input_messages import RunMessage
 from openswe.message_queue import QueuedMessage
@@ -18,11 +19,7 @@ def _envelope(message: RunMessage) -> str:
 
 
 async def _read(surface: ReplySurface = "web") -> Taken:
-    with patch(
-        "openswe.threads.inbox.get_config",
-        return_value={"configurable": {"thread_id": "thread-1"}},
-    ):
-        return await ThreadInbox("thread-1", events=False, surface=surface).read("run-1")
+    return await ThreadInbox("thread-1").read("run-1", InboxSpec(surface=surface))
 
 
 @pytest.mark.asyncio
@@ -93,7 +90,7 @@ async def test_inbox_receives_only_the_follow_ups_it_read(
         taken = await _read()
 
     assert "first" in _envelope(taken.messages[-1])
-    await ThreadInbox("thread-1", events=False, surface="web").receive(taken.queued)
+    await ThreadInbox("thread-1").receive(taken.queued)
     assert [message.content for message in await QueuedMessage.for_thread("thread-1")] == [
         {"text": "queued during the image fetch"}
     ]
@@ -119,7 +116,7 @@ async def test_a_run_holds_the_events_it_was_started_with_once_prepared(
     async with postgres.session() as session:
         await carried.record(session)
         await pending.record(session)
-    surface = ToolSurface(inbox=ThreadInbox("thread-1", events=True, surface="web"))
+    surface = ToolSurface(inbox=InboxSpec(events=True))
     config = {
         "configurable": {"thread_id": "thread-1"},
         "metadata": {"event_match_ids": [str(carried.id)]},

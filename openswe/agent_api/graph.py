@@ -12,7 +12,10 @@ served as the typed API both sides import (``runtime_api``):
   sandbox, checkout and prompt), the transcript turn, skills, reply bookkeeping
 - ``inbox`` hands the run what was sent to its thread since the last model call:
   queued follow-ups and notes, event matches and task messages (``ThreadInbox``);
-  ``inbox_received`` takes the follow-ups off the queue once the call goes ahead
+  ``inbox_received`` takes the follow-ups off the queue once the call goes ahead.
+  Neither needs the run's plan: the catalog's ``InboxSpec`` comes with the read
+- ``skills`` lists the skills the run may load, from the stores its token's
+  identity may read, with no plan either
 - ``before_model`` runs every ``before_model`` hook (proxy refresh, task
   coordination, model routing), then asks the graph's middleware what it adds to
   the call (``ShapesModelCalls``: sections of the system prompt, tools it keeps
@@ -47,7 +50,6 @@ import time
 from collections.abc import Awaitable, Callable, Mapping, Sequence
 from dataclasses import asdict
 from functools import partial
-from pathlib import PurePosixPath
 from typing import Final, Literal, Protocol, cast, get_args, runtime_checkable
 from uuid import UUID, uuid4
 
@@ -130,6 +132,7 @@ from runtime_api.loop import (
     Done,
     Inbox,
     InboxItems,
+    InboxRead,
     InboxReceipt,
     ModelCall,
     ModelResult,
@@ -154,7 +157,7 @@ from runtime_api.operations import (
     ShellVerdict,
     ToolEvidence,
 )
-from runtime_api.skills import SKILLS, RunSkills, SkillFile
+from runtime_api.skills import SKILLS, RunSkills
 
 from openswe.agent_api.failures import OperationFailure
 from openswe.agent_api.git_metadata import (
@@ -199,6 +202,8 @@ from openswe.server import (
     direct_and_from_code,
     fallback_model_choice,
 )
+from openswe.skill_store.run_skills import RunSkillStores
+from openswe.threads.inbox import ThreadInbox
 from openswe.utils.model import provider_model_kwargs
 
 logger = logging.getLogger(__name__)
@@ -230,7 +235,6 @@ MESSAGE_KEY: Final = "__lc_message__"
 # PersistedRoute is a union of literals: its arguments are the literals, not the names.
 _ROUTES: Final = frozenset(name for route in get_args(PersistedRoute) for name in get_args(route))
 _SESSION_TTL_SECONDS: Final = 6 * 60 * 60
-_SKILL_FILE: Final = "SKILL.md"
 _SESSION_LIMIT: Final = 512
 
 _json = TypeAdapter(JsonValue)
@@ -241,6 +245,7 @@ _json_dicts = TypeAdapter(list[dict[str, JsonValue]])
 Phase = Literal["before_agent", "before_model", "after_model", "after_agent"]
 type PhaseAnswer[R: PhaseResult] = Callable[[PhaseResult, dict[str, object], Runtime], Awaitable[R]]
 RunPlanner = Callable[[RunnableConfig, ToolSurface], Awaitable[None]]
+SkillStores = Callable[[RunnableConfig], Awaitable[RunSkillStores]]
 StateRestorer = Callable[[dict[str, object]], None]
 
 
@@ -467,6 +472,7 @@ class RunSession:
             incident_evidence=self._incident is not None,
             worker_webhook=COMPLETION_WEBHOOK_URL if self._delegates else None,
             skill_sources=list(self.surface.skill_sources),
+            inbox=self.surface.inbox,
             model_call_limit=next(
                 (
                     m.run_limit
@@ -488,26 +494,6 @@ class RunSession:
                 else SandboxSpec.model_validate(sandbox.model_dump(mode="json")),
             }
         )
-
-    async def skills(self, _request: RunRequest) -> RunSkills:
-        """Every skill the run may load: each source's skill folders and their ``SKILL.md``."""
-
-        async def listed() -> RunSkills:
-            folders: list[str] = []
-            for source in self.surface.skill_sources:
-                listing = await self.files.als(source)
-                folders += [entry["path"] for entry in listing.entries or [] if entry.get("is_dir")]
-            paths = [str(PurePosixPath(folder) / _SKILL_FILE) for folder in folders]
-            downloaded = await self.files.adownload_files(paths) if paths else []
-            return RunSkills(
-                files=[
-                    SkillFile(path=file.path, content=file.content.decode())
-                    for file in downloaded
-                    if file.content is not None
-                ]
-            )
-
-        return await self.in_run("skills", listed)
 
     async def sandbox(self) -> ManagedSandbox | None:
         """The thread's box as MDA creates it, when MDA owns it."""
@@ -743,9 +729,10 @@ class RunSession:
     async def prepare(self, request: Prepare) -> PhaseResult:
         # MDA opened the box before preparing; preparation connects to it as to any other.
         await self.bind_sandbox(request.sandbox_id)
-        if self.surface.inbox is not None:
+        cfg = RunConfig.from_config(self.config)
+        if self.surface.inbox is not None and cfg.thread_id is not None:
             # The events this run was started to carry are its input: it holds them now.
-            await self.surface.inbox.receive(events=_carried_events(self.config))
+            await ThreadInbox(cfg.thread_id).receive(events=_carried_events(self.config))
 
         async def begun(
             result: PhaseResult, _state: dict[str, object], _runtime: Runtime
@@ -775,28 +762,6 @@ class RunSession:
             return BeforeModel(**result.model_dump(), call=call)
 
         return await self._answer_phase("before_model", request, planned)
-
-    async def inbox(self, request: RunRequest) -> Inbox:
-        inbox = self.surface.inbox
-        if inbox is None:
-            return Inbox()
-
-        async def read() -> Inbox:
-            taken = await inbox.read(request.run_id or str(uuid4()))
-            return Inbox(
-                messages=dump_messages(_as_messages(taken.messages)),
-                update={}
-                if taken.reply_surface is None
-                else {"reply_surface": taken.reply_surface},
-                items=InboxItems(queued=taken.queued, events=taken.events),
-            )
-
-        return await self.in_run("inbox", read)
-
-    async def inbox_received(self, request: InboxReceipt) -> Done:
-        if self.surface.inbox is not None:
-            await self.surface.inbox.receive(request.items.queued, request.items.events)
-        return Done()
 
     async def after_model(self, request: RunCall) -> PhaseResult:
         return await self._answer_phase("after_model", request, _as_is)
@@ -997,11 +962,19 @@ class RemoteGraph:
         plan: RunPlanner,
         *,
         restore_state: StateRestorer | None = None,
+        skills: SkillStores | None = None,
     ) -> None:
         self.assistant_id = assistant_id
         self._plan = plan
         self._restore_state = restore_state
+        self._skills = skills
         self._sessions: dict[tuple[str, str | None], RunSession] = {}
+        # Calls answered from the run's token and request alone, never its plan.
+        self._calls = Handlers[RemoteRun]()
+        self._calls.serve(BROWSER, _browser)
+        self._calls.serve(SKILLS, self.skills)
+        self._calls.serve(INBOX, self.inbox)
+        self._calls.serve(INBOX_RECEIVED, self.inbox_received)
 
     def _config(self, run: RemoteRun, run_id: str | None) -> RunnableConfig:
         config = run_config(run)
@@ -1045,10 +1018,36 @@ class RemoteGraph:
     def end(self, run: RemoteRun, run_id: str | None) -> None:
         self._sessions.pop((run.thread_id, run_id), None)
 
+    async def skills(self, run: RemoteRun, _request: RunRequest) -> RunSkills:
+        """Every skill the run may load: each store's skill folders and their ``SKILL.md``."""
+        if self._skills is None:
+            return RunSkills()
+        config = run_config(run)
+        stores = self._skills
+
+        async def listed(_runtime: Runtime) -> RunSkills:
+            return await (await stores(config)).listed()
+
+        return await in_graph_context({**config, "run_name": "skills"}, listed)
+
+    async def inbox(self, run: RemoteRun, request: InboxRead) -> Inbox:
+        if request.spec is None:
+            return Inbox()
+        taken = await ThreadInbox(run.thread_id).read(request.run_id or str(uuid4()), request.spec)
+        return Inbox(
+            messages=dump_messages(_as_messages(taken.messages)),
+            update={} if taken.reply_surface is None else {"reply_surface": taken.reply_surface},
+            items=InboxItems(queued=taken.queued, events=taken.events),
+        )
+
+    async def inbox_received(self, run: RemoteRun, request: InboxReceipt) -> Done:
+        await ThreadInbox(run.thread_id).receive(request.items.queued, request.items.events)
+        return Done()
+
     async def api(self, run: RemoteRun, endpoint: str, raw: JsonValue) -> JsonValue:
         """Answer one call the MDA run makes (``runtime_api``), as the session of its run."""
-        if RUN_CALLS.serves(endpoint):
-            return await RUN_CALLS.dispatch(endpoint, run, raw)
+        if self._calls.serves(endpoint):
+            return await self._calls.dispatch(endpoint, run, raw)
         if not API.serves(endpoint):
             raise UnknownEndpointError(endpoint)
         raw_id = raw.get("run_id") if isinstance(raw, Mapping) else None
@@ -1203,16 +1202,11 @@ async def _browser(run: RemoteRun, request: BrowserReport) -> Done:
     return Done()
 
 
-# Calls about the run's thread that need none of its plan.
-RUN_CALLS: Final = Handlers[RemoteRun]()
-RUN_CALLS.serve(BROWSER, _browser)
 # The typed API every graph's MDA runs call (``runtime_api``), as the session of their run.
 API: Final = Handlers[RunSession]()
 # Only for runs started without their catalog in the context.
 API.serve(CATALOG, _catalog)
 API.serve(PREPARE, RunSession.prepare)
-API.serve(INBOX, RunSession.inbox)
-API.serve(INBOX_RECEIVED, RunSession.inbox_received)
 API.serve(BEFORE_MODEL, RunSession.before_model)
 API.serve(MODEL_RESULT, RunSession.model_result)
 API.serve(AFTER_MODEL, RunSession.after_model)
@@ -1221,7 +1215,6 @@ API.serve(TOOL_STARTED, RunSession.tool_started)
 API.serve(TOOL_RESULT, RunSession.tool_result)
 API.serve(SANDBOX_REPLACED, RunSession.sandbox_replaced)
 API.serve(SANDBOX_UNREACHABLE, RunSession.sandbox_unreachable)
-API.serve(SKILLS, RunSession.skills)
 API.serve(OPERATION, RunSession.operation)
 API.serve(CHECK_SHELL, RunSession.check_shell)
 API.serve(RECORD_EVIDENCE, RunSession.record_evidence)

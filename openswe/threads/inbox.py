@@ -6,8 +6,8 @@ event matches and task messages. A run reads all of them before each model call,
 so the agent sees them without waiting for the run to end, and only they travel:
 the conversation stays with the run.
 
-Reading takes nothing, and asks the run for nothing but who it is: the backend
-keeps what each thread is owed. All of it stays owed until the run says the model
+Reading takes nothing, and asks the run for nothing but who it is and how its plan
+reads the inbox (``InboxSpec``): the backend keeps what each thread is owed. All of it stays owed until the run says the model
 call it read it for goes ahead (``receive``), so a run that ends first leaves it
 for the next. A run started to carry events receives them as it is prepared.
 """
@@ -19,8 +19,8 @@ from typing import Any, cast
 from uuid import UUID
 
 import httpx2
-from langgraph.config import get_config
 from langgraph_sdk import get_client
+from runtime_api.catalog import InboxSpec
 
 from openswe.dashboard.options import model_supports_images
 from openswe.database import postgres
@@ -162,21 +162,19 @@ class Taken:
 
 
 class ThreadInbox:
-    """One thread's inbox; ``events`` takes event matches and task messages besides follow-ups.
+    """One thread's inbox, read as each run's ``InboxSpec`` says.
 
-    ``surface`` is where the run starts answering: a run that starts on Slack is
-    told when a person's dashboard follow-up moves its answers to the web.
+    The spec's ``surface`` is where the run starts answering: a run that starts on
+    Slack is told when a person's dashboard follow-up moves its answers to the web.
     """
 
-    def __init__(self, thread_id: str, *, events: bool, surface: ReplySurface) -> None:
+    def __init__(self, thread_id: str) -> None:
         self.thread_id = thread_id
-        self.events = events
-        self.surface = surface
 
-    async def read(self, run_id: str) -> Taken:
+    async def read(self, run_id: str, spec: InboxSpec) -> Taken:
         """Everything the thread is owed, for ``run_id``'s next model call."""
         taken = Taken()
-        if self.events and postgres.configured():
+        if spec.events and postgres.configured():
             try:
                 owed = await TaskMessage.owed(self.thread_id)
             except Exception:
@@ -189,12 +187,12 @@ class ThreadInbox:
                 taken.messages.extend(TaskMessage.messages(owed))
                 taken.events.extend(message.id for message in owed)
         try:
-            await self._read_follow_ups(taken, run_id)
+            await self._read_follow_ups(taken, run_id, spec)
         except Exception:
             logger.exception(
                 "Reading queued follow-ups failed", extra={"agent_thread_id": self.thread_id}
             )
-        if self.events and postgres.configured():
+        if spec.events and postgres.configured():
             try:
                 matches = await EventMatch.owed(self.thread_id)
             except Exception:
@@ -215,9 +213,11 @@ class ThreadInbox:
             await TaskMessage.received(self.thread_id, events)
             await EventMatch.received(self.thread_id, events)
 
-    async def _read_follow_ups(self, taken: Taken, run_id: str) -> None:  # noqa: C901, PLR0912
+    async def _read_follow_ups(  # noqa: C901, PLR0912
+        self, taken: Taken, run_id: str, spec: InboxSpec
+    ) -> None:
         """Follow-ups queued for the thread, oldest first."""
-        surface = self.surface
+        surface: ReplySurface = spec.surface
         queued_updates: list[dict[str, Any]] = []
         moved: ReplySurface | None = None
         content_blocks: list[dict[str, Any]] = []
@@ -240,18 +240,10 @@ class ThreadInbox:
             for content in contents
         )
         resolved_model_id: str | None = None
-        configurable = get_config().get("configurable", {}) if has_images else {}
-        if has_images and not configurable.get("image_model_fallback_enabled"):
+        if has_images and not spec.image_fallback:
             # This run's own model first: thread metadata already names the
             # model of any follow-up queued behind it.
-            run_model = configurable.get("resolved_agent_model_id") or configurable.get(
-                "agent_model_id"
-            )
-            resolved_model_id = (
-                run_model
-                if isinstance(run_model, str) and run_model
-                else await _resolve_thread_model_id(self.thread_id)
-            )
+            resolved_model_id = spec.model_id or await _resolve_thread_model_id(self.thread_id)
 
         for content in contents:
             if _is_dashboard_queued_message(content):

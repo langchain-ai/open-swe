@@ -15,6 +15,7 @@ from openswe.dashboard.workspace_settings import WorkspaceSettings
 from openswe.sandboxes.state import SANDBOX_BACKENDS
 from openswe.sandboxes.tool_runtime import ToolSurface
 from openswe.server import _registered_tool_name, plan_agent
+from openswe.threads.inbox import ThreadInbox
 
 _MODEL_DEFAULTS = {
     "default_agent_model": "openai:gpt-6.1-sol",
@@ -64,7 +65,8 @@ async def test_public_agent_excludes_personal_skills_and_tools(saved_thread_scop
 async def test_remote_agent_lists_personal_skills(monkeypatch: pytest.MonkeyPatch) -> None:
     from runtime_api.operations import RunRequest
 
-    from openswe.agent_api.graph import RunSession
+    from openswe.agent_api.agent import AGENT
+    from openswe.agent_api.tokens import RemoteRun
     from openswe.skill_store.store import _record
 
     monkeypatch.setattr(
@@ -77,9 +79,11 @@ async def test_remote_agent_lists_personal_skills(monkeypatch: pytest.MonkeyPatc
     )
     captured = await _plan_agent()
     surface = cast(ToolSurface, captured["surface"])
-    session = RunSession(surface, _base_config(), None, started_here=True)
+    configurable = dict(_base_config()["configurable"])
+    run = RemoteRun(thread_id="thread-ctx", assistant_id="agent", configurable=configurable)
 
-    listed = await session.skills(RunRequest())
+    # Listed from the run's token alone: no plan of the run is made for it.
+    listed = await AGENT.skills(run, RunRequest())
 
     personal = next(f for f in listed.files if f.path == "/skills/personal-workflow/SKILL.md")
     assert "Do it." in personal.content
@@ -776,11 +780,8 @@ async def test_queued_images_reach_vision_fallback_for_text_only_main_model(
     await QueuedMessage.put("thread-ctx", {"text": "Explain this", "image_urls": [url]})
     surface = cast(ToolSurface, planned["surface"])
     assert surface.inbox is not None
-    with (
-        patch("openswe.threads.inbox.get_config", return_value=config),
-        patch("openswe.threads.inbox.fetch_image_block", return_value=image),
-    ):
-        taken = await surface.inbox.read("run-1")
+    with patch("openswe.threads.inbox.fetch_image_block", return_value=image):
+        taken = await ThreadInbox("thread-ctx").read("run-1", surface.inbox)
     messages = convert_to_messages(taken.messages)
     content = messages[-1].content
     assert isinstance(content, list) and image in content

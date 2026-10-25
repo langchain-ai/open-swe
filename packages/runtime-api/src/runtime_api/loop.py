@@ -7,15 +7,16 @@ state those hooks write that the runtime does not know comes back in ``update``,
 and goes back with every later call in ``state``.
 
 Before each model call the runtime also reads the thread's inbox: what was sent
-to the thread while its run worked, and only that. The request names nothing but
-the run; the backend keeps what each thread is owed until a run receives it.
+to the thread while its run worked, and only that. The request names the run and
+how its catalog says to read the inbox; the backend keeps what each thread is owed
+until a run receives it.
 """
 
 from uuid import UUID
 
 from pydantic import BaseModel, JsonValue
 
-from runtime_api.catalog import ModelSpec
+from runtime_api.catalog import InboxSpec, ModelSpec
 from runtime_api.endpoint import LOOP_CALL_SECONDS, Endpoint
 from runtime_api.operations import RunRequest
 
@@ -116,6 +117,11 @@ class InboxItems(BaseModel):
     events: list[UUID] = []
 
 
+class InboxRead(RunRequest):
+    # The catalog's ``inbox``; None reads nothing.
+    spec: InboxSpec | None = None
+
+
 class Inbox(BaseModel):
     """What was sent to the thread since the last model call, oldest first."""
 
@@ -142,7 +148,7 @@ BEFORE_MODEL = Endpoint(
     "before_model", RunCall, BeforeModel, seconds=LOOP_CALL_SECONDS, delivery="unprocessed"
 )
 # Only reads, so it is safe to send again.
-INBOX = Endpoint("inbox", RunRequest, Inbox, seconds=LOOP_CALL_SECONDS, delivery="idempotent")
+INBOX = Endpoint("inbox", InboxRead, Inbox, seconds=LOOP_CALL_SECONDS, delivery="idempotent")
 # What a model call will answer is owed no more; receiving it twice is a no-op.
 INBOX_RECEIVED = Endpoint(
     "inbox_received", InboxReceipt, Done, seconds=LOOP_CALL_SECONDS, delivery="idempotent"

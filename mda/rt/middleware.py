@@ -59,7 +59,7 @@ from langgraph.runtime import Runtime
 from langgraph.types import Command
 from langgraph_sdk.errors import APIConnectionError, APIStatusError
 from pydantic import BaseModel, JsonValue, TypeAdapter
-from runtime_api.catalog import Catalog
+from runtime_api.catalog import Catalog, InboxSpec
 from runtime_api.endpoint import Endpoint, call
 from runtime_api.loop import (
     AFTER_AGENT,
@@ -69,6 +69,7 @@ from runtime_api.loop import (
     MODEL_RESULT,
     PREPARE,
     Inbox,
+    InboxRead,
     InboxReceipt,
     ModelCall,
     ModelResult,
@@ -76,7 +77,6 @@ from runtime_api.loop import (
     Prepare,
     RunCall,
 )
-from runtime_api.operations import RunRequest
 from runtime_api.workers import LAUNCH_WORKER, WORKER_LAUNCHED, Launch, Launched
 
 from rt.backend import (
@@ -327,10 +327,13 @@ class BackendRunMiddleware(AgentMiddleware[RunState]):
         open_sandbox: Callable[[Runtime], Awaitable[str | None]] | None = None,
         *,
         trace_metadata: Mapping[str, JsonValue] | None = None,
+        inbox: InboxSpec | None = None,
     ) -> None:
         self._backend = backend
         self._invocation_id = invocation_id
         self._trace_metadata = trace_metadata or {}
+        # How the catalog says to read the thread's inbox; None reads nothing.
+        self._inbox = inbox
         self._trace = TurnTrace()
         # Opens the thread's box before preparing, so the backend binds the thread to it.
         self._open_sandbox = open_sandbox
@@ -389,9 +392,11 @@ class BackendRunMiddleware(AgentMiddleware[RunState]):
         return update
 
     async def _read_inbox(self) -> Inbox:
+        if self._inbox is None:
+            return Inbox()
         # After the last call's receipt, so nothing it received comes again.
         await self._backend.reports.drain()
-        return await call(self._backend, INBOX, RunRequest(run_id=run_id()))
+        return await call(self._backend, INBOX, InboxRead(run_id=run_id(), spec=self._inbox))
 
     async def _phase[Call: RunCall, Result: PhaseResult](
         self, endpoint: Endpoint[Call, Result], request: Call

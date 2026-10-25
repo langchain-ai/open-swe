@@ -85,6 +85,20 @@ class FilesSpec(BaseModel):
     checks: list[FileCheck] = []
 
 
+class InboxSpec(BaseModel):
+    """How the run reads its thread's inbox (``runtime_api.loop.INBOX``)."""
+
+    # Event matches and task messages besides queued follow-ups.
+    events: bool = False
+    # Where the run starts answering: a dashboard follow-up moves a Slack run's answers to the web.
+    surface: Literal["slack", "web"] = "web"
+    # The model queued images are prepared for; None prepares them for the thread's.
+    model_id: str | None = None
+    # Whether a vision model takes the call once the conversation holds an image, so
+    # images are kept whatever the model reads.
+    image_fallback: bool = False
+
+
 class Catalog(BaseModel):
     """The operations, subagents and models of the graph this run plays."""
 
@@ -112,6 +126,8 @@ class Catalog(BaseModel):
     # Where the run's skills are (``runtime_api.skills``), a later source's skill
     # taking the place of an earlier one's of the same name.
     skill_sources: list[str] = []
+    # How the run reads what is sent to its thread while it works; None reads nothing.
+    inbox: InboxSpec | None = None
 
 
 # Only reads the plan, so it is safe to send again.

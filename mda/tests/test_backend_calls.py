@@ -60,7 +60,7 @@ from rt.middleware import BackendRunMiddleware, RunState, RuntimeToolsMiddleware
 from rt.model_calls import model_call_guards
 from rt.tools import operation_tool
 from rt.tracing import TurnTrace
-from runtime_api.catalog import Catalog, FilesSpec, ModelSpec, OperationSpec
+from runtime_api.catalog import Catalog, FilesSpec, InboxSpec, ModelSpec, OperationSpec
 from runtime_api.endpoint import Delivery, Endpoint, call
 from runtime_api.loop import (
     AFTER_AGENT,
@@ -327,6 +327,9 @@ async def test_an_unreachable_backend_fails_the_run(
         await graph.ainvoke({"messages": [("user", "hello")]})
 
 
+_INBOX = InboxSpec(events=True, surface="slack")
+
+
 async def test_the_inbox_names_only_the_run_and_hands_back_what_the_model_answers(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -364,12 +367,13 @@ async def test_the_inbox_names_only_the_run_and_hands_back_what_the_model_answer
     _answering(monkeypatch, backend, phase)
     graph = create_agent(
         model=FakeListChatModel(responses=["first", "second"]),
-        middleware=[BackendRunMiddleware(backend, "invocation-1")],
+        middleware=[BackendRunMiddleware(backend, "invocation-1", inbox=_INBOX)],
     )
 
     result = await graph.ainvoke({"messages": [("user", "hello")]})
 
-    assert reads == [{"run_id": "run-1"}, {"run_id": "run-1"}]
+    # The run and how its catalog reads the inbox; never its conversation or state.
+    assert reads == [{"run_id": "run-1", "spec": _INBOX.model_dump(mode="json")}] * 2
     assert messages_from_dict(planned[0].messages)[-1].id == "event-match:report-1"
     assert planned[0].state["reply_surface"] == "web"
     assert [message.id for message in result["messages"]].count("event-match:report-1") == 1
@@ -401,7 +405,7 @@ async def test_a_run_the_phase_ends_leaves_the_inbox_queued(
     _answering(monkeypatch, backend, phase)
     graph = create_agent(
         model=FakeListChatModel(responses=["unused"]),
-        middleware=[BackendRunMiddleware(backend, "invocation-1")],
+        middleware=[BackendRunMiddleware(backend, "invocation-1", inbox=_INBOX)],
     )
 
     result = await graph.ainvoke({"messages": [("user", "hello")]})

@@ -12,7 +12,6 @@ import hashlib
 import logging
 import warnings
 from collections.abc import Mapping, Sequence
-from pathlib import Path
 from typing import Any, cast
 from uuid import UUID
 
@@ -25,6 +24,7 @@ _MODEL_ROUTING_SPLIT = 0.5
 from langgraph.graph.state import RunnableConfig
 from langgraph.runtime import Runtime
 from langgraph_sdk import get_client
+from runtime_api.catalog import InboxSpec
 
 warnings.filterwarnings("ignore", module="langchain_core._api.deprecation")
 
@@ -35,7 +35,6 @@ from dataclasses import replace
 warnings.filterwarnings("ignore", message=".*Pydantic V1.*", category=UserWarning)
 
 from deepagents.backends.composite import CompositeBackend
-from deepagents.backends.filesystem import FilesystemBackend
 from deepagents.backends.protocol import BackendProtocol, SandboxBackendProtocol
 from deepagents.backends.store import StoreBackend
 from deepagents.middleware.subagents import GENERAL_PURPOSE_SUBAGENT
@@ -137,7 +136,6 @@ from openswe.sandboxes.lifecycle import (
 )
 from openswe.sandboxes.paths import resolve_sandbox_work_dir
 from openswe.sandboxes.providers.langsmith import service_identity_jwks_url
-from openswe.sandboxes.read_only_backend import ReadOnlyBackend
 from openswe.sandboxes.retry import SANDBOX_ATTACH_MAX_ELAPSED, retry_transient_sandbox_errors
 from openswe.sandboxes.state import (
     SandboxUnreachableError,
@@ -151,11 +149,10 @@ from openswe.sandboxes.tool_runtime import (
     ToolSurface,
 )
 from openswe.search_policy import SHELL_SEARCH_EXCLUDED_TOOLS
-from openswe.skill_store.backend import skills_backend
+from openswe.skill_store.run_skills import RunSkillStores
 from openswe.slack.dm import is_concierge_thread, is_dm_channel
 from openswe.thread_title import TITLE_GENERATION_MAX_TOKENS, schedule_thread_title_generation
 from openswe.threads.blobs import ThreadBlobs, blob_namespace
-from openswe.threads.inbox import ThreadInbox
 from openswe.threads.recent_context import RecentContextAudience, recent_thread_context_section
 from openswe.threads.summary import DASHBOARD_SOURCE
 from openswe.tools import (
@@ -287,10 +284,6 @@ from openswe.workspaces.store import (
 
 client = get_client()
 
-USER_SKILLS_ROUTE = "/skills/"
-ORGANIZATION_SKILLS_ROUTE = "/organization-skills/"
-BUNDLED_SKILLS_ROUTE = "/bundled-skills/"
-BUNDLED_SKILLS_DIR = Path(__file__).resolve().parent / "bundled_skills"
 DEEP_AGENT_TOOL_NAMES = {
     "delete",
     "edit_file",
@@ -1756,16 +1749,8 @@ async def plan_agent(config: RunnableConfig, surface: ToolSurface) -> None:
 
     logger.info("Returning agent with sandbox for thread %s", thread_id)
     agent_backend: BackendProtocol = backend
-    skill_routes: dict[str, BackendProtocol] = {
-        BUNDLED_SKILLS_ROUTE: ReadOnlyBackend(
-            FilesystemBackend(root_dir=BUNDLED_SKILLS_DIR, virtual_mode=True)
-        ),
-    }
-    skill_routes[ORGANIZATION_SKILLS_ROUTE] = skills_backend(None)
-    skill_sources = [ORGANIZATION_SKILLS_ROUTE, BUNDLED_SKILLS_ROUTE]
-    if credential_login:
-        skill_routes[USER_SKILLS_ROUTE] = skills_backend(credential_login)
-        skill_sources.insert(0, USER_SKILLS_ROUTE)
+    skill_stores = RunSkillStores(credential_login)
+    skill_routes = dict(skill_stores.routes)
     artifacts_root = "/" if bridge_client is None else f"{LOCAL_ARTIFACTS_DIR}/{thread_id}/"
     # Offloaded images live in PostgreSQL so they can be read without the sandbox.
     skill_routes[f"{artifacts_root}blobs/"] = StoreBackend(
@@ -1938,7 +1923,14 @@ async def plan_agent(config: RunnableConfig, surface: ToolSurface) -> None:
     surface.base_tools = main_tools
     surface.middleware = middleware
     surface.inbox = (
-        None if stop_summary_mode else ThreadInbox(thread_id, events=True, surface=initial_surface)
+        None
+        if stop_summary_mode
+        else InboxSpec(
+            events=True,
+            surface=initial_surface,
+            model_id=model_id,
+            image_fallback=vision_model is not None,
+        )
     )
     surface.files = agent_backend
     surface.artifacts_root = artifacts_root
@@ -1982,8 +1974,10 @@ async def plan_agent(config: RunnableConfig, surface: ToolSurface) -> None:
     ]
     surface.dynamic = dynamic_tool_middleware
     # The runtime lists the skills and answers reads of them itself (``runtime_api.skills``).
-    surface.skill_sources = tuple(skill_sources)
-    surface.backend_paths = tuple(route for route in skill_routes if route not in skill_sources)
+    surface.skill_sources = skill_stores.sources
+    surface.backend_paths = tuple(
+        route for route in skill_routes if route not in skill_stores.sources
+    )
     surface.code_mode = True
     surface.excluded = (
         STOP_SUMMARY_EXCLUDED_TOOLS

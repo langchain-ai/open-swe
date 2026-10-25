@@ -26,6 +26,7 @@ logger = logging.getLogger(__name__)
 
 from langgraph.graph.state import RunnableConfig
 from langgraph.runtime import Runtime
+from runtime_api.catalog import InboxSpec
 
 warnings.filterwarnings("ignore", module="langchain_core._api.deprecation")
 warnings.filterwarnings("ignore", message=".*Pydantic V1.*", category=UserWarning)
@@ -83,7 +84,6 @@ from openswe.sandboxes.repo_prep import materialize_trusted_skills, prepare_revi
 from openswe.sandboxes.state import SandboxUnreachableError
 from openswe.sandboxes.tool_runtime import ModelChoice, SurfaceModels, SurfaceSubagent, ToolSurface
 from openswe.search_policy import SHELL_SEARCH_EXCLUDED_TOOLS
-from openswe.threads.inbox import ThreadInbox
 from openswe.tools import (
     add_finding,
     fetch_review_diff,
@@ -1068,7 +1068,7 @@ async def plan_reviewer(config: RunnableConfig, surface: ToolSurface) -> None:
     )
     surface.base_tools = reviewer_tools()
     surface.middleware = middleware
-    surface.inbox = ThreadInbox(thread_id, events=False, surface=WEB_REPLY_SURFACE)
+    surface.inbox = InboxSpec(surface=WEB_REPLY_SURFACE, model_id=cfg.agent_model_id)
     surface.files = backend
     surface.excluded = SHELL_SEARCH_EXCLUDED_TOOLS
     surface.models = SurfaceModels(
