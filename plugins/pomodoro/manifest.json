@@ -1,0 +1,8 @@
+{
+  "name": "pomodoro",
+  "displayName": "Pomodoro",
+  "version": "0.1.0",
+  "description": "A focused Pomodoro timer with 25, 50, and 5 minute sessions",
+  "sidebar": { "label": "Pomodoro", "icon": "calendar" },
+  "permissions": []
+}
