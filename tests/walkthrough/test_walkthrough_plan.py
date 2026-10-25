@@ -1,3 +1,4 @@
+import shlex
 import shutil
 import subprocess
 from collections import Counter
@@ -10,6 +11,7 @@ import pytest
 from deepagents.backends.protocol import ExecuteResponse, SandboxBackendProtocol
 
 from openswe.review_guide.walk import Reader, Walk
+from openswe.sandboxes.state import SandboxBackendProxy
 from openswe.walkthrough.checkout import HEAD_REF, PinnedCheckout
 from openswe.walkthrough.diff import FileChange, parse
 from openswe.walkthrough.plan import (
@@ -330,12 +332,33 @@ async def test_replacing_chunks_merges_steps_and_releases_omitted_hunks(
 
 
 class _ShellBackend:
+    id = "walkthrough-sandbox"
+
+    def __init__(self, repo: Path) -> None:
+        self.repo = repo
+
+    def get_work_dir(self) -> str:
+        return "/workspace"
+
     async def aexecute(self, command: str, timeout: int | None = None) -> ExecuteResponse:  # noqa: ARG002
+        if command == "pwd":
+            return ExecuteResponse(output="/root\n", exit_code=0)
+        command = command.replace("/workspace", shlex.quote(str(self.repo.parent)))
         result = subprocess.run(["bash", "-c", command], capture_output=True, text=True)
         return ExecuteResponse(output=result.stdout + result.stderr, exit_code=result.returncode)
 
 
-async def test_head_files_read_together_keep_each_files_lines(repo: Path) -> None:
+async def test_head_files_read_together_keep_each_files_lines(
+    repo: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr("openswe.sandboxes.state.SANDBOX_BACKENDS", {})
+    monkeypatch.setattr("openswe.sandboxes.state.SANDBOX_CONNECTIONS", {})
+
+    async def reconnect() -> SandboxBackendProtocol:
+        return cast(SandboxBackendProtocol, _ShellBackend(repo))
+
+    backend = SandboxBackendProxy(thread_id="walkthrough-thread", reconnect=reconnect)
+    assert not backend.has_backend
     files = {
         "plain.py": "a\nb\n",
         "no_newline.txt": "last",
@@ -344,8 +367,9 @@ async def test_head_files_read_together_keep_each_files_lines(repo: Path) -> Non
     }
     head = _commit(repo, files, "files")
     _git(repo, "update-ref", HEAD_REF, head)
-    checkout = PinnedCheckout(cast(SandboxBackendProtocol, _ShellBackend()), str(repo))
+    checkout = await PinnedCheckout.locate(backend, "repo")
 
+    assert checkout.repo_dir == "/workspace/repo"
     assert await checkout.head_files(list(files)) == {
         path: content.splitlines() for path, content in files.items()
     }
