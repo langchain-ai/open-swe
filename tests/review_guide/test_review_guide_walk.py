@@ -1,8 +1,8 @@
 from collections import Counter
 
 from openswe.review_guide.walk import Reader, Walk
-from openswe.walkthrough.diff import FileChange, line_key, parse
-from openswe.walkthrough.plan import LineRef, Plan, PlanChunk
+from openswe.walkthrough.diff import FileChange, LineRef, line_key, parse
+from openswe.walkthrough.plan import Plan, PlanChunk
 
 
 def _new_file(path: str, *lines: str) -> str:
@@ -21,7 +21,7 @@ def _binary(path: str, blob: str) -> str:
 
 
 def _refs(changes: list[FileChange], *linenos: int) -> list[LineRef]:
-    return [LineRef.of(line) for c in changes for line in c.lines if line.lineno in linenos]
+    return [line.ref for c in changes for line in c.lines if line.lineno in linenos]
 
 
 def _plan(changes: list[FileChange]) -> Plan:

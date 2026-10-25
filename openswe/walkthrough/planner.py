@@ -9,6 +9,7 @@ carry it; one pinned before a push raises ``PlanMovedError``.
 
 from collections.abc import Callable
 from dataclasses import dataclass
+from functools import cached_property
 from typing import Self
 
 from deepagents.backends.protocol import SandboxBackendProtocol
@@ -17,7 +18,7 @@ from openswe.github.http import GitHubAppUnavailable
 from openswe.github.pull_request_status import PullRequestClient
 from openswe.github.pull_requests import PullRequest
 from openswe.walkthrough.checkout import PinnedCheckout
-from openswe.walkthrough.diff import FileChange
+from openswe.walkthrough.diff import FileChange, LineRef
 from openswe.walkthrough.plan import (
     MAX_EXPLANATION_CHARS,
     MAX_OTHER_SUMMARY_CHARS,
@@ -25,15 +26,18 @@ from openswe.walkthrough.plan import (
     FileHunks,
     FileSplits,
     Hunks,
-    LineRef,
     Plan,
     PlanChunk,
+    PlannedChunk,
     PlanStatus,
     RangeError,
+    by_name,
     find_line,
     line_name,
 )
 from openswe.walkthrough.record import PlanMovedError, Walkthrough
+
+_MAX_UNPLANNED_FILES = 200
 
 
 class PlannerUnavailableError(RuntimeError):
@@ -111,16 +115,36 @@ class PlanWorkspace:
             raise PlanMovedError("another reader moved the plan to a different head")
         return moved.plan
 
-    @property
+    # Each is computed once per plan: ``_edit`` drops them when it replaces the plan.
+    @cached_property
     def hunks(self) -> Hunks:
         return self.plan.hunks(self.changes)
 
+    @cached_property
+    def unplanned(self) -> list[LineRef]:
+        return self.plan.unplanned(self.changes)
+
     @property
     def complete(self) -> bool:
-        return not self.plan.unplanned(self.changes)
+        return not self.unplanned
 
     def status(self) -> PlanStatus:
-        return self.plan.status(self.changes)
+        hunks, unplanned = self.hunks, self.unplanned
+        spans = hunks.spans(unplanned)
+        return PlanStatus(
+            chunks=[
+                PlannedChunk(
+                    number=i,
+                    title=c.title,
+                    hunks=hunks.spans(c.lines),
+                )
+                for i, c in enumerate(self.plan.chunks, start=1)
+            ],
+            other_lines=len(self.plan.other),
+            unplanned=hunks.summary(unplanned) if unplanned else "nothing",
+            unplanned_hunks=spans[:_MAX_UNPLANNED_FILES],
+            more_files_unplanned=max(0, len(spans) - _MAX_UNPLANNED_FILES),
+        )
 
     async def _edit(self, change: Callable[[Plan], object]) -> None:
         def apply(plan: Plan) -> Plan:
@@ -130,6 +154,8 @@ class PlanWorkspace:
         self.plan = await Walkthrough.edit(
             self.pull_request.id, head_sha=self.head_sha, changes=self.changes, change=apply
         )
+        for derived in ("hunks", "unplanned"):
+            self.__dict__.pop(derived, None)
 
     async def plan_chunk(
         self,
@@ -156,15 +182,12 @@ class PlanWorkspace:
         released = {ref for chunk in replaced.values() for ref in chunk.lines}
         planned = self.plan.planned() - released
         unplanned = [
-            line
-            for change in self.changes
-            for line in change.lines
-            if LineRef.of(line) not in planned
+            line.ref for change in self.changes for line in change.lines if line.ref not in planned
         ]
         hunks = self.hunks
         to_other = hunks.claim(other, unplanned) if other else []
         taken = set(to_other)
-        lines = hunks.claim(show, [line for line in unplanned if LineRef.of(line) not in taken])
+        lines = hunks.claim(show, [ref for ref in unplanned if ref not in taken])
         chunk = PlanChunk(
             title=trimmed,
             explanation=explanation.strip()[:MAX_EXPLANATION_CHARS],
@@ -193,11 +216,11 @@ class PlanWorkspace:
     async def move_to_other(self, files: list[FileHunks], *, restore: bool = False) -> None:
         if restore:
             other = set(self.plan.other)
-            pool = [line for c in self.changes for line in c.lines if LineRef.of(line) in other]
+            pool = [line.ref for c in self.changes for line in c.lines if line.ref in other]
             refs = self.hunks.claim(files, pool)
             await self._edit(lambda plan: plan.restore_other(refs))
             return
-        refs = self.hunks.claim(files, self.plan.unplanned(self.changes))
+        refs = self.hunks.claim(files, self.unplanned)
 
         def send(plan: Plan) -> None:
             planned = plan.planned()
@@ -209,19 +232,22 @@ class PlanWorkspace:
 
     async def split(self, files: list[FileSplits]) -> None:
         """Start a new hunk at each named unplanned line, splitting the hunk it sits in."""
-        unplanned = self.plan.unplanned(self.changes)
+        paths = {split.path for split in files}
+        # Only the named files' hunks can change.
+        touched = [ref for ref in self.unplanned if ref.path in paths]
+        named = by_name(touched)
         hunks = self.hunks
         refs: list[LineRef] = []
         for split in files:
             for name in split.at:
-                line = find_line(split.path, name, unplanned)
-                if hunks.key(line) == (line.path, line_name(line)):
-                    raise RangeError(f"`{line.path}` {name} already starts a hunk")
-                refs.append(LineRef.of(line))
+                ref = find_line(split.path, name, named)
+                if hunks.key(ref) == (ref.path, line_name(ref)):
+                    raise RangeError(f"`{ref.path}` {name} already starts a hunk")
+                refs.append(ref)
         if not refs:
             raise RangeError("no lines are named to split at")
         split_hunks = Hunks.of(self.changes, [*self.plan.splits, *refs])
-        if fragments := split_hunks.fragments(hunks, unplanned):
+        if fragments := split_hunks.fragments(hunks, touched):
             raise RangeError(
                 "these splits leave hunks of only braces, punctuation or blank lines: "
                 + ", ".join(f"`{path}` {name}" for path, name in fragments)
@@ -238,7 +264,7 @@ class PlanWorkspace:
 
     async def settle(self) -> int:
         """Send every line still unplanned to Other, completing the plan; how many there were."""
-        refs = [LineRef.of(line) for line in self.plan.unplanned(self.changes)]
+        refs = self.unplanned
         if refs:
             await self._edit(lambda plan: plan.add_other(refs))
         return len(refs)

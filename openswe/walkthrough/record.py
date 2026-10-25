@@ -22,8 +22,8 @@ from openswe.database.orm import NOW, Base
 from openswe.github.pull_requests import PullRequest
 from openswe.github.repositories import Repository
 from openswe.utils.json_types import JsonObject
-from openswe.walkthrough.diff import FileChange
-from openswe.walkthrough.plan import LineRange, LineRef, Plan
+from openswe.walkthrough.diff import FileChange, LineRange, LineRef
+from openswe.walkthrough.plan import Plan
 
 logger = logging.getLogger(__name__)
 
@@ -82,7 +82,7 @@ class Walkthrough(Base):
 
         ``False`` when another reader of the PR moved it first.
         """
-        complete = not plan.unplanned(changes)
+        complete = plan.complete(changes)
         values = {
             "head_sha": plan.head_sha,
             "merge_base_sha": merge_base_sha,
@@ -128,7 +128,7 @@ class Walkthrough(Base):
                 raise PlanMovedError("the pull request moved on; start from its new head")
             plan = row.plan
             result = change(plan)
-            complete = not plan.unplanned(changes)
+            complete = plan.complete(changes)
             if complete and not row.complete:
                 row.generated_at = func.clock_timestamp()
             row.plan_json = plan.model_dump(mode="json")

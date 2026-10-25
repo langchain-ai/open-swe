@@ -10,7 +10,7 @@ from openswe.review_guide import advance as advance_module
 from openswe.review_guide.github import PullRequestHead
 from openswe.review_guide.walk import Reader, Walk
 from openswe.walkthrough.diff import parse
-from openswe.walkthrough.plan import LineRef, Plan, PlanChunk
+from openswe.walkthrough.plan import Plan, PlanChunk
 from openswe.walkthrough.record import Walkthrough
 
 DIFF = (
@@ -23,7 +23,7 @@ def _plan(chunks: int) -> Plan:
     changes = parse(DIFF)
     plan = Plan.start("head-1", changes)
     for line in changes[0].lines[:chunks]:
-        plan.add_chunk(PlanChunk(title=line.text, lines=[LineRef.of(line)], code="CODE"))
+        plan.add_chunk(PlanChunk(title=line.text, lines=[line.ref], code="CODE"))
     return plan
 
 

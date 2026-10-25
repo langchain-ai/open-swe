@@ -15,8 +15,7 @@ from deepagents.backends.protocol import SandboxBackendProtocol
 
 from openswe.sandboxes.paths import resolve_sandbox_work_dir
 from openswe.sandboxes.repo_prep import BLOBLESS_CLONE_ARGS
-from openswe.walkthrough.diff import FileChange, parse
-from openswe.walkthrough.plan import LineRef
+from openswe.walkthrough.diff import FileChange, LineRef, parse
 from openswe.walkthrough.render import render_chunk
 
 GIT_TIMEOUT_SECONDS = 300
@@ -130,7 +129,7 @@ class PinnedCheckout:
         self, chunks: list[list[LineRef]], changes: list[FileChange]
     ) -> list[str]:
         """Each chunk's lines rendered as by ``render``, reading the head once for all of them."""
-        index = {LineRef.of(line): line for change in changes for line in change.lines}
+        index = {line.ref: line for change in changes for line in change.lines}
         chunk_lines = [[index[ref] for ref in refs if ref in index] for refs in chunks]
         paths = {line.path for lines in chunk_lines for line in lines}
         head = await self.head_files(

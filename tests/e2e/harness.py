@@ -356,7 +356,7 @@ async def control_seed_walkthrough(request: Request) -> JSONResponse:
     """Store a one-chunk plan for a fake pull request's current head, as a scout would."""
     from openswe.github.pull_requests import PullRequest
     from openswe.walkthrough.diff import parse
-    from openswe.walkthrough.plan import LineRef, Plan, PlanChunk
+    from openswe.walkthrough.plan import Plan, PlanChunk
     from openswe.walkthrough.record import Walkthrough
 
     body = await request.json()
@@ -373,7 +373,7 @@ async def control_seed_walkthrough(request: Request) -> JSONResponse:
         chunks=[
             PlanChunk(
                 title=str(body.get("title") or "Seeded chunk"),
-                lines=[LineRef.of(line) for change in changes for line in change.lines],
+                lines=[line.ref for change in changes for line in change.lines],
             )
         ],
     )

@@ -32,7 +32,6 @@ from openswe.walkthrough.plan import (
     FileHunks,
     FileRanges,
     FileSplits,
-    LineRef,
     claim,
 )
 
@@ -64,7 +63,10 @@ class _State:
 
     @classmethod
     async def load(cls) -> Self:
-        ctx = await GuideContext.current()
+        return await cls.of(await GuideContext.current())
+
+    @classmethod
+    async def of(cls, ctx: GuideContext) -> Self:
         walk = ctx.walk()
         return cls(ctx=ctx, walk=walk, reader=await ctx.reader(walk))
 
@@ -82,7 +84,7 @@ class _State:
             "success": True,
             **result,
             "walkthrough": self.reader.status(
-                self.ctx.unplanned_lines, self.ctx.workspace.hunks
+                self.ctx.unplanned, self.ctx.workspace.hunks
             ).model_dump(),
         }
 
@@ -145,10 +147,10 @@ async def walkthrough_show_lines(
         state = await _State.load()
         left = set(state.reader.remaining(state.reader.unseen))
         candidates = [
-            line
+            line.ref
             for change in state.ctx.workspace.changes
             for line in change.lines
-            if LineRef.of(line) in left
+            if line.ref in left
         ]
         lines = claim(show, candidates)
         code = await state.ctx.workspace.checkout.render(lines, state.ctx.workspace.changes)
@@ -229,11 +231,11 @@ async def _plan(
     change: Callable[[GuideContext], Awaitable[object]],
 ) -> dict[str, Any]:
     try:
-        state = await _State.load()
-        result = await change(state.ctx)
+        ctx = await GuideContext.current()
+        result = await change(ctx)
     except (GuideUnavailableError, *PLANNING_ERRORS) as exc:
         return {"success": False, "error": str(exc)}
-    await state.reload()
+    state = await _State.of(ctx)
     return state.report(
         **({"chunk": result} if isinstance(result, int) else {}),
         plan=state.ctx.workspace.status().model_dump(),

@@ -1,5 +1,6 @@
 import shutil
 import subprocess
+import time
 from collections import Counter
 from collections.abc import Callable
 from pathlib import Path
@@ -15,14 +16,15 @@ from openswe.walkthrough.diff import FileChange, parse
 from openswe.walkthrough.plan import (
     FileHunks,
     FileRanges,
+    FileSplits,
     Hunks,
-    LineRef,
     Plan,
     PlanChunk,
     RangeError,
     claim,
 )
 from openswe.walkthrough.planner import PlanWorkspace
+from openswe.walkthrough.record import Walkthrough
 from openswe.walkthrough.render import render_chunk
 
 pytestmark = pytest.mark.skipif(shutil.which("git") is None, reason="git is required")
@@ -105,7 +107,7 @@ def test_a_cut_of_a_new_file_renders_its_class_as_source(repo: Path) -> None:
         title="Session",
         lines=claim([FileRanges(path="sessions.py", added=[(1, 10)])], plan.unplanned(changes)),
     )
-    index = {LineRef.of(line): line for c in changes for line in c.lines}
+    index = {line.ref: line for c in changes for line in c.lines}
     rendered = render_chunk(
         [index[ref] for ref in chunk.lines], _head(repo, head, changes), _added(changes)
     )
@@ -234,7 +236,7 @@ def test_a_split_hunk_goes_to_two_chunks_and_each_part_keeps_its_new_lines_after
     head = _commit(repo, {"jobs.py": jobs}, "jobs")
     changes = _changes(repo, base, head)
     plan = Plan.start(head, changes)
-    plan.split([LineRef.of(line) for line in changes[0].lines if line.text == "def two():"])
+    plan.split([line.ref for line in changes[0].lines if line.text == "def two():"])
 
     _place(plan, changes, "One", FileHunks(path="jobs.py", hunks=["+1"]))
     _place(plan, changes, "Two", FileHunks(path="jobs.py", hunks=["+5"]))
@@ -261,7 +263,7 @@ def test_a_push_keeps_repeated_lines_with_their_own_chunk(repo: Path) -> None:
     head = _commit(repo, {"jobs.py": jobs}, "jobs")
     changes = _changes(repo, base, head)
     plan = Plan.start(head, changes)
-    plan.split([LineRef.of(line) for line in changes[0].lines if line.text == "def two():"])
+    plan.split([line.ref for line in changes[0].lines if line.text == "def two():"])
     _place(plan, changes, "Two", FileHunks(path="jobs.py", hunks=["+6"]))
     _place(plan, changes, "One", FileHunks(path="jobs.py", hunks=["+1"]))
 
@@ -280,9 +282,9 @@ def test_a_split_that_leaves_only_closing_braces_is_a_fragment(repo: Path) -> No
     _git(repo, "checkout", "-qb", "feature")
     head = _commit(repo, {"link.go": "func a() {\n\tif ok {\n\t\treturn\n\t}\n}\n"}, "go")
     changes = _changes(repo, base, head)
-    lines = changes[0].lines
+    lines = [line.ref for line in changes[0].lines]
     plan = Plan.start(head, changes)
-    at = {line.text: LineRef.of(line) for line in lines}
+    at = {line.text: line for line in lines}
 
     assert Hunks.of(changes, [at["\t}"]]).fragments(plan.hunks(changes), lines) == [
         ("link.go", "+4")
@@ -327,6 +329,37 @@ async def test_replacing_chunks_merges_steps_and_releases_omitted_hunks(
     with pytest.raises(RangeError, match="another planner changed"):
         await workspace.plan_chunk(title="Stale", show=hunks[:2], explanation="Old", replace=[1])
     assert plan.chunks[0].title == "Merged"
+
+
+@pytest.mark.asyncio
+async def test_planning_a_large_pull_request_takes_linear_time(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # Planning runs on the event loop, so work quadratic in lines would freeze the server here.
+    diff = "".join(
+        f"diff --git a/f{i}.py b/f{i}.py\n--- a/f{i}.py\n+++ b/f{i}.py\n@@ -0,0 +1,200 @@\n"
+        + "".join(f"+line {i} {j}\n" for j in range(200))
+        for i in range(200)
+    )
+    changes = parse(diff)
+    plan = Plan.start("head", changes)
+    plan.add_other(plan.unplanned(changes)[:20_000])
+
+    async def edit(_: object, *, change: Callable[[Plan], object], **__: object) -> Plan:
+        change(plan)
+        return plan
+
+    monkeypatch.setattr(Walkthrough, "edit", edit)
+    workspace = PlanWorkspace(AsyncMock(), AsyncMock(), "head", changes, plan)
+    started = time.perf_counter()
+    await workspace.split([FileSplits(path=f"f{i}.py", at=["+100"]) for i in range(100, 200)])
+    await workspace.move_to_other(
+        [FileHunks(path=f"f{i}.py", hunks=["+1", "+100"]) for i in range(100, 200)]
+    )
+    status = workspace.status()
+
+    assert time.perf_counter() - started < 5
+    assert (status.other_lines, status.unplanned) == (40_000, "nothing")
 
 
 class _ShellBackend:

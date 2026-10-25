@@ -14,8 +14,8 @@ from typing import Self
 
 from pydantic import BaseModel
 
-from openswe.walkthrough.diff import ChangedLine, FileChange, line_key
-from openswe.walkthrough.plan import Hunks, LineRef, Plan, PlanChunk
+from openswe.walkthrough.diff import FileChange, LineRef, line_key
+from openswe.walkthrough.plan import Hunks, Plan, PlanChunk
 from openswe.walkthrough.render import fenced
 
 OTHER = "other"
@@ -274,7 +274,7 @@ class Reader:
             reasons.append("Other has not been approved or skipped")
         return reasons
 
-    def status(self, unplanned: list[ChangedLine], hunks: Hunks) -> WalkStatus:
+    def status(self, unplanned: list[LineRef], hunks: Hunks) -> WalkStatus:
         current = self.walk.on_screen
         upcoming = self.next_chunk()
         chunks: list[ReaderChunk] = []
@@ -301,8 +301,7 @@ class Reader:
             if self.other_pending
             else "done"
         )
-        left = set(self.remaining(LineRef.of(line) for line in unplanned))
-        open_lines = [line for line in unplanned if LineRef.of(line) in left]
+        open_lines = self.remaining(unplanned)
         spans = hunks.spans(open_lines)
         return WalkStatus(
             on_screen=current.title if current else None,
@@ -335,17 +334,16 @@ def _unseen(refs: list[LineRef], seen: Counter[str], walk: Walk) -> set[LineRef]
     """
     remaining = Counter(seen)
     approved = {ref for a in walk.approvals for ref in a.lines}
+    keys = [line_key(ref.path, ref.sign, ref.text) for ref in refs]
     settled: set[LineRef] = set()
-    for ref in refs:
-        key = line_key(ref.path, ref.sign, ref.text)
+    for ref, key in zip(refs, keys, strict=True):
         if ref in approved and remaining[key] > 0:
             remaining[key] -= 1
             settled.add(ref)
     out: set[LineRef] = set()
-    for ref in refs:
+    for ref, key in zip(refs, keys, strict=True):
         if ref in settled:
             continue
-        key = line_key(ref.path, ref.sign, ref.text)
         if remaining[key] > 0:
             remaining[key] -= 1
         else:
