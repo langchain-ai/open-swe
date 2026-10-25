@@ -4667,18 +4667,6 @@
             ],
             "title": "Experimental Act As Approval"
           },
-          "experimental_assistant_ui": {
-            "agent_feature_flag": true,
-            "anyOf": [
-              {
-                "type": "boolean"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Experimental Assistant Ui"
-          },
           "experimental_background_callbacks": {
             "agent_feature_flag": true,
             "anyOf": [
