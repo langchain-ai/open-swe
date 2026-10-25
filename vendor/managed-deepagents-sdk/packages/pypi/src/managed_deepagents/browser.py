@@ -116,6 +116,14 @@ LOCALHOST_NOTE = (
     " Servers running in your sandbox are reachable at http://localhost:<port> "
     "(any port but 80 and 443)."
 )
+STAGEHAND_PAGE_NOTE = (
+    " The supplied page is a Stagehand page, not a full Playwright Page. "
+    "page.setViewportSize(width, height) takes two numbers. Unavailable APIs: "
+    "page.getByRole, page.getByText, page.route, page.request, and locator methods "
+    "filter, evaluateAll, allTextContents, scrollIntoViewIfNeeded. "
+    "Use page.locator('<css or xpath>') with click/fill/type, "
+    "page.evaluate(() => ...) for DOM queries and text, or snapshot followed by actions IDs."
+)
 
 # `experimental_batch` hands the callback a worker-local batch context; the
 # async IIFE makes a top-level `return` legal in model code. The code gets lines
@@ -710,7 +718,11 @@ class BrowserMiddleware(AgentMiddleware):
 
             return await middleware._call(runtime, go)
 
-        @tool(description=RUN_DESCRIPTION + (LOCALHOST_NOTE if self.scope == "thread" else ""))
+        @tool(
+            description=RUN_DESCRIPTION
+            + STAGEHAND_PAGE_NOTE
+            + (LOCALHOST_NOTE if self.scope == "thread" else "")
+        )
         async def run(
             runtime: ManagedToolRuntime,
             code: str | None = None,
