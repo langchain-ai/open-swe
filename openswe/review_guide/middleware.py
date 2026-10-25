@@ -185,11 +185,10 @@ class ReviewGuideMiddleware(OpenSWEMiddleware[ReviewGuideState]):
         seen = await session.seen()
         if seen is None or seen.head_sha == workspace.head_sha:
             return
+        # An earlier head that can no longer be read leaves nothing to carry; starting
+        # over at this head keeps every later turn from fetching it again.
         carry = await checkout.carry(seen.head_sha, seen.merge_base_sha, workspace.index)
-        if carry is not None:
-            await session.carry_seen(
-                workspace.head_sha, workspace.merge_base_sha, carry, seen.head_sha
-            )
+        await session.carry_seen(workspace.head_sha, workspace.merge_base_sha, carry, seen.head_sha)
 
     async def _plan_in_background(self, session: ReviewGuideSession, head: PullRequestHead) -> None:
         """Have the review scout place what the plan is missing, while the guide talks."""

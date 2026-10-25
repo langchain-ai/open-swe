@@ -276,13 +276,16 @@ class ReviewGuideSession(Base):
         await self._update_seen(head_sha, merge_base_sha, add, by=self.user_id)
 
     async def carry_seen(
-        self, head_sha: str, merge_base_sha: str, carry: Carry, from_sha: str
+        self, head_sha: str, merge_base_sha: str, carry: Carry | None, from_sha: str
     ) -> None:
-        """Carry what this person approved at ``from_sha`` to ``head_sha``, if it is still there."""
+        """Carry what this person approved at ``from_sha`` to ``head_sha``, if it is still there.
+
+        With no ``carry``, because ``from_sha`` can no longer be read, nothing carries over.
+        """
 
         def moved(row: ReviewGuideSeen | None) -> LineSet | None:
             if row is None or row.head_sha != from_sha:
                 return None
-            return carry.lines(row.lines)
+            return carry.lines(row.lines) if carry is not None else LineSet()
 
         await self._update_seen(head_sha, merge_base_sha, moved, by=None)

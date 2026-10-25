@@ -110,7 +110,9 @@ class PinnedCheckout:
     @cached_property
     def _script(self) -> SandboxScript:
         return SandboxScript(
-            "walkthrough.py", f"{self.repo_dir.rpartition('/')[0]}/.open-swe/scripts"
+            "walkthrough.py",
+            f"{self.repo_dir.rpartition('/')[0]}/.open-swe/scripts",
+            reads_request_files=True,
         )
 
     async def _ask(self, request: dict[str, JsonValue]) -> dict[str, JsonValue]:

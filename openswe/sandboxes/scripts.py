@@ -41,14 +41,18 @@ class SandboxScript:
     Each call runs it with a base64 JSON request and reads back the one JSON
     line it prints. The copy is written only when that version is missing, so
     the common case is one exec, and a sandbox always runs the script this
-    backend ships. A request too long for a command line is written to a file
-    instead, and the script gets ``@<path>`` to read it from.
+    backend ships. A script made with ``reads_request_files`` may get a request
+    too long for a command line: it is written to a file instead, and the script
+    gets ``@<path>`` to read it from. Other scripts refuse such a request.
     """
 
-    def __init__(self, name: str, root: str, *, text: str | None = None) -> None:
+    def __init__(
+        self, name: str, root: str, *, text: str | None = None, reads_request_files: bool = False
+    ) -> None:
         self.name = name
         self.root = root
         self._text = text
+        self._reads_request_files = reads_request_files
 
     @cached_property
     def text(self) -> str:
@@ -89,6 +93,8 @@ class SandboxScript:
         missing = f"open-swe-script-missing-{secrets.token_hex(16)}"
         argument = encoded(json.dumps(request))
         if len(argument) > _MAX_ARGUMENT_BYTES:
+            if not self._reads_request_files:
+                raise RuntimeError(f"the request is too long for {self.name}'s command line")
             argument = f"@{await self._write_request(backend, argument, timeout=timeout)}"
         run = (
             "command -v python3 >/dev/null || "
