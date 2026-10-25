@@ -235,6 +235,78 @@ it.each(["loading", "error", "blocked", "approved"])(
   }
 )
 
+it("recovers channel selection after availability fails", async () => {
+  const availability = vi
+    .spyOn(api, "humanReviewAvailability")
+    .mockRejectedValueOnce(new Error("Unavailable"))
+    .mockResolvedValue({
+      available: false,
+      active: false,
+      permalink: "",
+      blockers: [],
+    })
+  const request = vi.spyOn(api, "requestHumanReview").mockResolvedValue({
+    success: true,
+    reused: false,
+    permalink: "",
+    error: "",
+    request_id: "request",
+    channel: "C0123456789",
+  })
+  render(
+    <QueryClientProvider
+      client={
+        new QueryClient({ defaultOptions: { queries: { retry: false } } })
+      }
+    >
+      <TooltipProvider>
+        <RequestHumanReview pr={pr} />
+      </TooltipProvider>
+    </QueryClientProvider>
+  )
+  const retry = await screen.findByRole("button", {
+    name: "Retry review status",
+  })
+  fireEvent.click(screen.getByRole("button", { name: "Choose channel" }))
+  fireEvent.click(retry)
+  await waitFor(() => expect(availability).toHaveBeenCalledTimes(2))
+  await waitFor(() =>
+    expect(
+      screen.queryByRole("button", { name: "Retry review status" })
+    ).toBeNull()
+  )
+  fireEvent.click(
+    screen.getByRole("button", { name: "Request review in Slack" })
+  )
+  await screen.findByRole("button", { name: "Review requested" })
+  expect(request).toHaveBeenCalledWith(pr, "C0123456789")
+})
+
+it("can request a selected channel without recovering availability", async () => {
+  vi.spyOn(api, "humanReviewAvailability").mockRejectedValue(
+    new Error("Unavailable")
+  )
+  const request = vi
+    .spyOn(api, "requestHumanReview")
+    .mockReturnValue(new Promise(() => {}))
+  render(
+    <QueryClientProvider
+      client={
+        new QueryClient({ defaultOptions: { queries: { retry: false } } })
+      }
+    >
+      <TooltipProvider>
+        <RequestHumanReview pr={pr} />
+      </TooltipProvider>
+    </QueryClientProvider>
+  )
+  fireEvent.click(await screen.findByRole("button", { name: "Choose channel" }))
+  fireEvent.click(
+    screen.getByRole("button", { name: "Request review in Slack" })
+  )
+  await waitFor(() => expect(request).toHaveBeenCalledWith(pr, "C0123456789"))
+})
+
 it("does not offer a review request for a draft", () => {
   vi.spyOn(api, "humanReviewAvailability").mockReturnValue(
     new Promise(() => {})

@@ -30,8 +30,7 @@ export function RequestHumanReview({ pr }: { pr: OpenPullRequest }) {
   const needsChannel =
     availability.isSuccess && !availability.data.available && !active
   const requestReview = useMutation({
-    mutationFn: () =>
-      api.requestHumanReview(pr, needsChannel ? (channel ?? "") : ""),
+    mutationFn: () => api.requestHumanReview(pr, channel ?? ""),
     meta: {
       errorTitle: `Could not request a review of ${pullRequestKey(pr)}`,
     },
@@ -83,16 +82,17 @@ export function RequestHumanReview({ pr }: { pr: OpenPullRequest }) {
       onClick={(event) => event.stopPropagation()}
       title={channelHint ?? undefined}
     >
-      {needsChannel && !requestReview.isSuccess && (
-        <SlackChannelCombobox
-          value={channel}
-          onValueChange={setChannel}
-          placeholder="Choose a review channel"
-          aria-label="Review channel"
-          eligible={(option) => option.is_member}
-          disabled={requestReview.isPending}
-        />
-      )}
+      {(needsChannel || (availability.isError && !active)) &&
+        !requestReview.isSuccess && (
+          <SlackChannelCombobox
+            value={channel}
+            onValueChange={setChannel}
+            placeholder="Choose a review channel"
+            aria-label="Review channel"
+            eligible={(option) => option.is_member}
+            disabled={requestReview.isPending}
+          />
+        )}
       <PullRequestActionButton
         label={label}
         loading={requestReview.isPending}
@@ -108,6 +108,14 @@ export function RequestHumanReview({ pr }: { pr: OpenPullRequest }) {
           }
         }}
       />
+      {availability.isError && (
+        <PullRequestActionButton
+          label="Retry review status"
+          loading={availability.isFetching}
+          disabled={availability.isFetching}
+          onClick={() => void availability.refetch()}
+        />
+      )}
       {channelHint && (
         <Popover>
           <PopoverTrigger asChild>
