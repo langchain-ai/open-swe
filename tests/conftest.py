@@ -29,6 +29,8 @@ from tests.support.postgres import MigratedTemplate, isolated_database
 # What `langgraph dev` sets for its in-memory runtime; langgraph_api.config reads them on import.
 os.environ.setdefault("REDIS_URI", "fake")
 os.environ.setdefault("DATABASE_URI", ":memory:")
+# A test that wants the stall watchdog turns it back on.
+os.environ.setdefault("EVENT_LOOP_STALL_MS", "0")
 
 _THREAD_MODULES: tuple[ModuleType, ...] = (access, diffs, handlers, listing, proxy, runs, summary)
 _MAX_PARAM_ID_CHARS = 40
