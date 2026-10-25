@@ -455,6 +455,9 @@ class PullRequestClient:
             raise ValueError("GitHub answered the pull request without an object")
         return payload
 
+    async def update_description(self, body: str) -> None:
+        await self.repo.patch(f"pulls/{self.number}", {"body": body})
+
     async def head_sha(self) -> str:
         head = (await self.pull()).get("head")
         sha = head.get("sha") if isinstance(head, dict) else None

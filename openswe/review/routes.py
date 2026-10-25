@@ -14,7 +14,7 @@ from openswe.dashboard.deps import ADMIN_DEP, SESSION_DEP, filter_repo_models_fo
 from openswe.dashboard.oauth import session_user_id
 from openswe.dashboard.options import model_supports_effort
 from openswe.dashboard.repo_access import require_repo_access_for_user
-from openswe.github.http import GitHubClient, RepoClient
+from openswe.github.http import GitHubClient, GitHubError, RepoClient
 from openswe.github.pull_request_status import pull_request_identity
 from openswe.github.repo_names import normalize_repo_full_name
 from openswe.github.repos import accessible_repo_full_names
@@ -251,6 +251,29 @@ async def api_get_pull_request_preview(
 ) -> PullRequestPreview:
     async with _as_viewer(session, owner, repo) as repository:
         return await get_pull_request_preview(repository.pull_request(pr_number))
+
+
+class PullRequestDescriptionUpdate(BaseModel):
+    body: str = Field(max_length=65_536)
+
+
+@router.patch("/reviews/{owner}/{repo}/{pr_number}/description", status_code=204)
+@audit_endpoint
+async def api_update_pull_request_description(
+    owner: str,
+    repo: str,
+    pr_number: int,
+    update: PullRequestDescriptionUpdate,
+    session: dict[str, str] = SESSION_DEP,
+) -> None:
+    async with _as_viewer(session, owner, repo) as repository:
+        try:
+            await repository.pull_request(pr_number).update_description(update.body)
+        except GitHubError as exc:
+            raise HTTPException(
+                exc.response.status_code,
+                "Could not update description; check your GitHub permissions",
+            ) from exc
 
 
 @router.get("/reviews/{owner}/{repo}/{pr_number}/labels")

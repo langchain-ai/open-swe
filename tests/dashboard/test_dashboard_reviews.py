@@ -1,17 +1,58 @@
 from types import SimpleNamespace
 from typing import Any
-from unittest.mock import AsyncMock
+from unittest.mock import AsyncMock, MagicMock
 
 import httpx2
 import pytest
+from fastapi import FastAPI, HTTPException
+from httpx import ASGITransport, AsyncClient
 
+from openswe.dashboard.oauth import require_session
 from openswe.github import app as github_app
 from openswe.github import http as github_http
 from openswe.github.http import GitHubError
 from openswe.review import reviews as review_api
+from openswe.review import routes as review_routes
 from openswe.review.findings import REVIEWER_THREAD_KIND
 
 pytestmark = pytest.mark.usefixtures("findings_from_metadata")
+
+
+@pytest.mark.parametrize("denied", [False, True])
+async def test_description_update_uses_viewer_permissions(monkeypatch, denied: bool) -> None:
+    app = FastAPI()
+    app.include_router(review_routes.router)
+    app.dependency_overrides[require_session] = lambda: {"sub": "alice"}
+    access = AsyncMock(side_effect=HTTPException(403, "No repository access") if denied else None)
+    monkeypatch.setattr(review_routes, "require_repo_access_for_user", access)
+    request = AsyncMock(
+        return_value=httpx2.Response(
+            200,
+            json={"body": "Updated description"},
+            request=httpx2.Request("PATCH", "https://api.github.com"),
+        )
+    )
+    monkeypatch.setattr(github_http, "github_request", request)
+    github = github_http.GitHubClient(MagicMock())
+    viewer = MagicMock()
+    viewer.return_value.__aenter__ = AsyncMock(return_value=github)
+    viewer.return_value.__aexit__ = AsyncMock(return_value=False)
+    monkeypatch.setattr(review_routes.GitHubClient, "as_user", viewer)
+    async with AsyncClient(transport=ASGITransport(app), base_url="http://test") as client:
+        response = await client.patch(
+            "/reviews/acme/app/7/description", json={"body": "Updated description"}
+        )
+    assert response.status_code == (403 if denied else 204)
+    if denied:
+        viewer.assert_not_called()
+        request.assert_not_awaited()
+    else:
+        viewer.assert_called_once_with("alice")
+        assert request.await_args.args[1:] == (
+            "PATCH",
+            "https://api.github.com/repos/acme/app/pulls/7",
+        )
+        assert request.await_args.kwargs["json"] == {"body": "Updated description"}
 
 
 def _thread(owner: str, name: str, number: int, author: str) -> dict[str, Any]:
