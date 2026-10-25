@@ -61,6 +61,7 @@ from openswe.threads.access import (
 from openswe.threads.creation import create_thread
 from openswe.threads.moves import SANDBOX_HANDOFF_SYSTEM, SANDBOX_MOVED_KEY, SandboxMove
 from openswe.threads.principals import STARTED_BY_ID, STARTED_BY_NAME, Principal, ThreadType
+from openswe.threads.store import THREADS
 from openswe.threads.summary import (
     DASHBOARD_SOURCE,
     TRANSCRIPT_VERSION,
@@ -690,7 +691,7 @@ async def _bind_thread_to_bridge(
     thread_id: str, bridge: Bridge, metadata: dict[str, Any]
 ) -> dict[str, Any]:
     binding = SandboxBridgeBinding.of(bridge).dump()
-    await langgraph_client().threads.update(thread_id=thread_id, metadata=binding)
+    await THREADS.update(thread_id, binding)
     logger.info(
         "Bound a thread to a sandbox bridge",
         extra={"bridge_id": bridge.bridge_id, "bridge_thread": thread_id},
@@ -740,7 +741,6 @@ async def _attributed_run_messages(
     content: Any,
     creating: bool,
     email: str | None,
-    client: Any,
     review_chat_pr_url: str | None = None,
     relayed_from: str | None = None,
     replies: Sequence[PassageReply] = (),
@@ -758,9 +758,9 @@ async def _attributed_run_messages(
     history_read = False
     if not creating:
         try:
-            prior_state = await client.threads.get_state(thread_id)
-            history_read = True
-            values = prior_state.get("values") if isinstance(prior_state, dict) else None
+            prior_state = await THREADS.state(thread_id)
+            history_read = prior_state is not None
+            values = prior_state.get("values") if prior_state is not None else None
             if isinstance(values, dict):
                 messages = values.get("messages")
                 if isinstance(messages, list):
@@ -834,7 +834,6 @@ async def _enrich_run_start_command(
     if command.get("method") != "run.start":
         return command
 
-    client = langgraph_client()
     params = command.get("params")
     if not isinstance(params, dict):
         params = {}
@@ -954,7 +953,6 @@ async def _enrich_run_start_command(
         content=content,
         creating=creating,
         email=email,
-        client=client,
         review_chat_pr_url=client_configurable.get("review_chat_pr_url"),
         relayed_from=relayed_from,
         replies=replies,
@@ -1003,8 +1001,8 @@ async def _enrich_run_start_command(
     pr_linked = any(metadata.get(key) for key in ("pr_url", "pr_urls", "pull_requests"))
     if not creating and (pr_linked or metadata.get("auto_resolved_by_prs") is True):
         async with agent_thread_pr_state_lock(thread_id):
-            current = await client.threads.get(thread_id)
-            metadata = thread_metadata(current)
+            current = await THREADS.get(thread_id)
+            metadata = dict(current.metadata) if current is not None else metadata
             if _is_thread_resolved(metadata):
                 metadata_update["resolved"] = False
                 metadata_update["resolved_at_ms"] = None
@@ -1013,7 +1011,7 @@ async def _enrich_run_start_command(
             if metadata.get("attention_reason"):
                 metadata_update["attention_reason"] = None
             metadata = {**metadata, **metadata_update}
-            await client.threads.update(thread_id=thread_id, metadata=metadata_update)
+            await THREADS.update(thread_id, metadata_update)
     else:
         if _is_thread_resolved(metadata):
             metadata_update["resolved"] = False
@@ -1021,7 +1019,7 @@ async def _enrich_run_start_command(
         if metadata.get("attention_reason"):
             metadata_update["attention_reason"] = None
         metadata = {**metadata, **metadata_update}
-        await client.threads.update(thread_id=thread_id, metadata=metadata_update)
+        await THREADS.update(thread_id, metadata_update)
 
     # Offloading starts a run with no human message, so it has no turn to
     # request; the middleware's ``turn.started`` opens that turn instead.
@@ -1186,7 +1184,6 @@ async def steer_running_thread(
         content=content,
         creating=False,
         email=email,
-        client=client,
         relayed_from=relayed_from,
         replies=replies,
     )
