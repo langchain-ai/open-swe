@@ -36,30 +36,36 @@ Embed it in the HTML as a JSON script:
   `github:write` (branches, commits, pull requests), `agent` (a chat dock with
   tools the app provides).
 
-## The SDK
+## Start from the starter
 
-The SDK is `plugins/sdk` in `langchain-ai/open-swe`; it is not on npm. Copy it in:
+`plugins/starter` in `langchain-ai/open-swe` is an app ready to change: React,
+the Macaw design system (Open SWE's own components, which follow the web UI's
+light and dark theme), Tailwind, the plugin SDK, and a Vite build that writes
+the one self-contained file with `manifest.json` inside it. Neither Macaw 2 nor
+the SDK is on npm, so take them from the repository:
 
 ```bash
-git clone --depth 1 --filter=blob:none --sparse https://github.com/langchain-ai/open-swe /tmp/open-swe
-git -C /tmp/open-swe sparse-checkout set plugins/sdk
+git clone --depth 1 --filter=blob:none --sparse https://github.com/langchain-ai/open-swe /workspace/open-swe
+git -C /workspace/open-swe sparse-checkout set plugins/sdk plugins/starter ui/vendor/macaw
+cp -r /workspace/open-swe/plugins/starter /workspace/open-swe/plugins/<name>
+cd /workspace/open-swe/plugins/<name> && npm install && npm run build
 ```
 
-Then depend on it by path (`"@openswe/plugin-sdk": "file:/tmp/open-swe/plugins/sdk"`)
-and read its `README.md` and `src/client.ts`. Call `connect()` while the module
-loads. Never bundle `capnweb`: the frame provides it.
+Keep the app beside `plugins/sdk` and `ui/vendor/macaw`, where its
+`package.json` finds them. Edit `manifest.json` and `src/App.tsx`; `npm run
+build` writes `bundle/index.html`, the file to preview. Build the UI from
+Macaw's components (`@langchain/macaw-components/<Component>`: Button, Card,
+Input, Select, Tabs, Dialog, Text and the rest) and its tokens (`p-space-4`,
+`text-secondary`, `bg-surface-level-2`) rather than your own styles, so the app
+looks like the web UI around it. The SDK's `README.md` and `src/client.ts`
+document the host API.
 
-## Building
-
-Bundle everything into the one file: scripts, styles, fonts and images inlined.
-With Vite, `vite-plugin-singlefile` does it; add the manifest script to
-`index.html`. The frame's policy blocks every request, so a CDN script, a
-`fetch` or a font URL fails. Follow the person's light or dark theme with
-`useDashboardTheme` or `prefers-color-scheme`.
+The frame's policy blocks every request, so a CDN script, a `fetch` or a font
+URL fails; the starter's build inlines everything.
 
 ## Iterating
 
-1. Build, then call `preview_app` with the built file. The person sees it
+1. Build, then call `preview_app` with `bundle/index.html`. The person sees it
    beside the thread and can chat with you from it.
 2. Change it, rebuild, call `preview_app` again. Each call replaces the build
    they see.
