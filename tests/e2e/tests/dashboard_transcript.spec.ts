@@ -302,9 +302,7 @@ test.describe("transcript rendering", () => {
       "Thanks!\\n<reply>\\nsource: conversation\\nbefore:",
     );
     const state = await threadState(page, threadId);
-    expect(state).toContain(
-      "selection: Opening a pull request.\\nafter:\\n",
-    );
+    expect(state).toContain("selection: Opening a pull request.\\nafter:\\n");
     expect(state).toContain("comment: Which branch?\\n</reply>");
     const sent = page
       .getByTestId("user-message")
