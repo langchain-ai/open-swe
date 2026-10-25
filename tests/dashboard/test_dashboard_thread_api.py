@@ -744,6 +744,41 @@ async def test_proxy_commands_preserves_thread_lookup_failure(
     assert exc_info.value is error
 
 
+async def test_proxy_commands_closes_the_turn_of_a_start_that_could_not_be_delivered(
+    monkeypatch,
+) -> None:
+    turn_id = uuid7()
+
+    class UndeliverableThreads(ThreadStoreOverClient):
+        async def command(self, thread_id: str, body: bytes) -> thread_proxy.CommandReply:
+            raise httpx.ConnectError("MDA unreachable")
+
+    class IdleThreads:
+        async def get(self, thread_id: str) -> dict[str, object]:
+            return {"thread_id": thread_id, "status": "idle", "metadata": {"owner_login": "ada"}}
+
+    async def enrich(thread_id: str, login: str, command: dict[str, object], **kwargs) -> dict:
+        return {
+            "method": "run.start",
+            "params": {"config": {"configurable": {"transcript_turn_id": str(turn_id)}}},
+        }
+
+    failed = AsyncMock()
+    patch_thread_module(
+        monkeypatch, "langgraph_client", lambda: SimpleNamespace(threads=IdleThreads())
+    )
+    patch_thread_module(monkeypatch, "THREADS", UndeliverableThreads())
+    monkeypatch.setattr(thread_proxy, "_enrich_run_start_command", enrich)
+    monkeypatch.setattr(thread_proxy, "fail_unstarted_turn", failed)
+
+    status, _, _ = await thread_proxy.proxy_dashboard_thread_commands(
+        "tid", "ada", b'{"method": "run.start", "params": {}}'
+    )
+
+    assert status == 500
+    failed.assert_awaited_once_with("tid", turn_id, error="the message could not be started")
+
+
 async def test_proxy_commands_rejects_non_admin_on_admin_thread(monkeypatch) -> None:
     class AdminThreads:
         async def get(self, thread_id: str) -> dict[str, object]:

@@ -31,7 +31,7 @@ from openswe.threads.runs import (
     queue_follow_up_run,
     steer_running_thread,
 )
-from openswe.threads.store import POSTING_COMMANDS, THREADS
+from openswe.threads.store import POSTING_COMMANDS, THREADS, CommandReply
 from openswe.threads.summary import (
     TRANSCRIPT_VERSION,
     _assert_thread_postable,
@@ -278,7 +278,16 @@ async def proxy_dashboard_thread_commands(
             run_metadata["dashboard_ttft_started_at_ms"] = received_at_ms
             outgoing = json.dumps(enriched).encode()
 
-    reply = await THREADS.command(thread_id, outgoing)
+    try:
+        reply = await THREADS.command(thread_id, outgoing)
+    except Exception:
+        # Answered like the runtime's own failure, so a refused start still closes its turn.
+        logger.exception("Delivering a thread command failed", extra={"thread_id": thread_id})
+        reply = CommandReply(
+            500,
+            json.dumps({"detail": "the command could not be delivered"}).encode(),
+            "application/json",
+        )
 
     try:
         response_payload = json.loads(reply.content) if reply.content else None

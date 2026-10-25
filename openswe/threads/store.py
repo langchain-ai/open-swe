@@ -177,7 +177,15 @@ class ThreadStore:
                 graph_id=mda_graph_for(thread.metadata),
             )
             if reply.get("type") == "success":
-                await index.set_status(thread_id, "busy")
+                try:
+                    await index.set_status(thread_id, "busy")
+                except Exception:
+                    # The run exists; its completion webhook and the reconcile job settle the status.
+                    logger.warning(
+                        "Marking a thread busy after starting its run failed",
+                        extra={"thread_id": thread_id},
+                        exc_info=True,
+                    )
             return _json_reply(200, reply)
         if thread is not None and thread.runtime == "mda":
             mda = RUNTIMES.mda_runtime
