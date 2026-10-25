@@ -90,7 +90,11 @@ from openswe.utils.dashboard_handoff import (
     dashboard_input_context,
 )
 from openswe.utils.json_types import JsonObject, as_thread_dict, thread_metadata
-from openswe.utils.thread_ops import langgraph_client, queue_message_for_thread
+from openswe.utils.thread_ops import (
+    in_process_client,
+    langgraph_client,
+    queue_message_for_thread,
+)
 from openswe.utils.thread_participants import participant_metadata
 from openswe.utils.thread_pr_state import agent_thread_pr_state_lock
 from openswe.utils.thread_settings import thread_model_choice
@@ -817,7 +821,7 @@ async def _enrich_run_start_command(
     if command.get("method") != "run.start":
         return command
 
-    client = langgraph_client()
+    client = in_process_client()
     params = command.get("params")
     if not isinstance(params, dict):
         params = {}

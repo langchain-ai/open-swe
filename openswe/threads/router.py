@@ -5,8 +5,8 @@ every client (the dashboard, the CLI and the backend's own ``client.threads``)
 keeps working unchanged:
 
 - Creating, reading, updating, deleting, searching and counting threads is
-  answered from the index; each change is copied to the runtimes that keep the
-  thread, so its runs and traces see it.
+  answered from the index; each change is copied, in the background, to the
+  runtimes that keep the thread, so its runs and traces see it.
 - A new thread is created on Managed Deep Agents (``mda``). A thread's runs,
   state, history, commands and streams go to its runtime: MDA, or for ``local``
   threads made before that, this deployment's Agent Server, which logs a
@@ -17,6 +17,7 @@ keeps working unchanged:
   and served from then on.
 """
 
+import asyncio
 import json
 import logging
 import re
@@ -129,6 +130,50 @@ async def _not_found(send: Send, thread_id: str) -> None:
     await send_json(send, 404, {"detail": f"Thread {thread_id} not found"})
 
 
+class _MetadataCopies:
+    """Copies of thread metadata to the runtimes that keep each thread, made in the background.
+
+    Reads come from the index and a runtime's copy only feeds its traces, so a write
+    answers without waiting on the runtimes; one thread's copies still land in order.
+    """
+
+    def __init__(self) -> None:
+        self._latest: dict[str, asyncio.Task[None]] = {}
+
+    def start(self, thread: IndexedThread, patch: Mapping[str, JsonValue]) -> None:
+        thread_id = thread.thread_id
+        task = asyncio.create_task(self._copy(self._latest.get(thread_id), thread, patch))
+        self._latest[thread_id] = task
+        task.add_done_callback(lambda done: self._forget(thread_id, done))
+
+    async def settled(self, thread_id: str) -> None:
+        """Wait for the copies started so far of the thread's metadata."""
+        if (latest := self._latest.get(thread_id)) is not None:
+            await asyncio.wait([latest])
+
+    def _forget(self, thread_id: str, task: asyncio.Task[None]) -> None:
+        if self._latest.get(thread_id) is task:
+            del self._latest[thread_id]
+
+    @staticmethod
+    async def _copy(
+        after: asyncio.Task[None] | None, thread: IndexedThread, patch: Mapping[str, JsonValue]
+    ) -> None:
+        if after is not None:
+            await asyncio.wait([after])
+        for runtime in RUNTIMES.copies(thread.runtime):
+            try:
+                await runtime.update(
+                    thread.thread_id, _for_mda(patch) if runtime is not RUNTIMES.local else patch
+                )
+            except Exception:
+                logger.warning(
+                    "Copying thread metadata to its runtime failed",
+                    extra={"thread_id": thread.thread_id},
+                    exc_info=True,
+                )
+
+
 class ThreadRouter:
     """ASGI middleware answering thread calls from the index and routing runs by runtime."""
 
@@ -136,6 +181,7 @@ class ThreadRouter:
         from langgraph_api.auth.middleware import auth_middleware
 
         self.app = app
+        self.copies = _MetadataCopies()
         # The Agent Server authenticates at its own routes, behind app middleware
         # like this one, so requests handled here pass the same check first.
         self._authenticated: ASGIApp = auth_middleware.cls(
@@ -254,9 +300,11 @@ class ThreadRouter:
             if updated is None:
                 await _not_found(send, thread_id)
                 return
-            await self._copy_metadata(updated, metadata if isinstance(metadata, dict) else {})
+            if isinstance(metadata, dict) and metadata:
+                self.copies.start(updated, metadata)
             await send_json(send, 200, updated.as_langgraph())
         elif method == "DELETE":
+            await self.copies.settled(thread_id)
             for runtime in reversed(RUNTIMES.copies(thread.runtime)):
                 await runtime.delete(thread_id)
             await index.delete(thread_id)
@@ -264,22 +312,6 @@ class ThreadRouter:
             await send({"type": "http.response.body", "body": b""})
         else:
             await self.app(scope, receive, send)
-
-    async def _copy_metadata(self, thread: IndexedThread, patch: Mapping[str, JsonValue]) -> None:
-        if not patch:
-            return
-        for runtime in RUNTIMES.copies(thread.runtime):
-            try:
-                await runtime.update(
-                    thread.thread_id, _for_mda(patch) if runtime is not RUNTIMES.local else patch
-                )
-            except Exception:
-                # Reads come from the index; a runtime's copy only feeds its traces.
-                logger.warning(
-                    "Copying thread metadata to its runtime failed",
-                    extra={"thread_id": thread.thread_id},
-                    exc_info=True,
-                )
 
     async def _search(self, scope: Scope, send: Send, body: bytes, *, count: bool) -> None:
         # The SDK sends only the Agent Server's fields in the body, so ``text`` rides the URL.

@@ -43,7 +43,7 @@ from openswe.utils.dashboard_handoff import RELAYED_FROM_KEY
 from openswe.utils.http_pool import pooled_transport
 from openswe.utils.json_types import thread_metadata
 from openswe.utils.streaming import TERMINAL_LIFECYCLE_EVENTS, root_lifecycle
-from openswe.utils.thread_ops import langgraph_client, langgraph_url
+from openswe.utils.thread_ops import in_process_client, langgraph_client, langgraph_url
 
 logger = logging.getLogger(__name__)
 
@@ -191,7 +191,7 @@ async def proxy_dashboard_thread_commands(
     # commands such as ``input.respond`` owner-only.
     method = parsed.get("method")
     try:
-        thread = await langgraph_client().threads.get(thread_id)
+        thread = await in_process_client().threads.get(thread_id)
     except NotFoundError:
         thread = None
 
@@ -253,9 +253,6 @@ async def proxy_dashboard_thread_commands(
         else None
     )
 
-    url = f"{langgraph_url().rstrip('/')}/threads/{thread_id}/commands"
-    headers = langgraph_proxy_headers(content_type=content_type)
-
     if principal.machine:
         enriched = await _enrich_system_run_start_command(
             thread_id,
@@ -285,10 +282,12 @@ async def proxy_dashboard_thread_commands(
             run_metadata["dashboard_ttft_started_at_ms"] = received_at_ms
             outgoing = json.dumps(enriched).encode()
 
-    async with httpx2.AsyncClient(
-        transport=pooled_transport(), timeout=_PROXY_REQUEST_TIMEOUT
-    ) as client:
-        response = await client.post(url, content=outgoing, headers=headers)
+    # Through the thread router in process: the run starts without a trip out and back in.
+    response = await in_process_client().http.client.post(
+        f"/threads/{thread_id}/commands",
+        content=outgoing,
+        headers={"Content-Type": content_type},
+    )
 
     try:
         response_payload = json.loads(response.content) if response.content else None
@@ -327,7 +326,7 @@ async def proxy_dashboard_thread_commands(
         _TTFT_OBSERVER_TASKS.add(task)
         task.add_done_callback(_TTFT_OBSERVER_TASKS.discard)
         try:
-            await langgraph_client().threads.update(
+            await in_process_client().threads.update(
                 thread_id=thread_id,
                 metadata={
                     "latest_run_id": run_id,
@@ -355,7 +354,7 @@ async def _queue_if_thread_turned_busy(
     ending, so a start sent right after can find the thread taken.
     """
     try:
-        thread = await langgraph_client().threads.get(thread_id)
+        thread = await in_process_client().threads.get(thread_id)
     except Exception:
         logger.warning(
             "Could not re-read a thread after a refused start",

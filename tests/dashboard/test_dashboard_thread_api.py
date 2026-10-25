@@ -47,6 +47,12 @@ async def _unlocked(*args, **kwargs):
 
 
 @pytest.fixture(autouse=True)
+def _in_process_calls_use_the_patched_client(monkeypatch) -> None:
+    """The commands path calls this deployment in process; the tests fake one client for both."""
+    patch_thread_module(monkeypatch, "in_process_client", lambda: thread_proxy.langgraph_client())
+
+
+@pytest.fixture(autouse=True)
 def _empty_thread_pins(monkeypatch) -> None:
     async def empty_pins(login: str) -> list[str]:
         return []
@@ -778,9 +784,6 @@ async def test_proxy_commands_preserves_admin_writes_and_owner_reads(monkeypatch
                 },
             }
 
-    class AdminClient:
-        threads = AdminThreads()
-
     class FakeResponse:
         status_code = 200
         content = b"{}"
@@ -788,23 +791,17 @@ async def test_proxy_commands_preserves_admin_writes_and_owner_reads(monkeypatch
 
     posted: list[bytes] = []
 
-    class FakeAsyncClient:
-        def __init__(self, *args: object, **kwargs: object) -> None:
-            pass
-
-        async def __aenter__(self) -> FakeAsyncClient:
-            return self
-
-        async def __aexit__(self, *args: object) -> None:
-            pass
-
+    class FakeHttpClient:
         async def post(self, url: str, *, content: bytes, headers: dict[str, str]) -> FakeResponse:
             posted.append(content)
             return FakeResponse()
 
+    class AdminClient:
+        threads = AdminThreads()
+        http = SimpleNamespace(client=FakeHttpClient())
+
     monkeypatch.setenv("CONFIGURED_ADMINS", "workspace-admin,another-admin")
     patch_thread_module(monkeypatch, "langgraph_client", lambda: AdminClient())
-    monkeypatch.setattr(thread_proxy.httpx2, "AsyncClient", FakeAsyncClient)
 
     status_code, _, _ = await thread_proxy.proxy_dashboard_thread_commands(
         "tid", "another-admin", b'{"method": "input.respond"}'

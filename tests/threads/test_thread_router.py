@@ -196,6 +196,7 @@ async def test_threads_are_served_from_the_index_and_copied_to_their_runtime(
     assert isinstance(matched, list) and [thread["thread_id"] for thread in matched] == [THREAD]
     assert missed == 0
     assert counted == 1
+    await harness.router.copies.settled(THREAD)
     assert harness.runtimes.local.threads[THREAD]["metadata"] == read["metadata"]
     assert harness.runtimes.mda.threads[THREAD]["metadata"] == read["metadata"]
     assert harness.reached_here == []

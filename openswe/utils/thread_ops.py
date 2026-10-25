@@ -10,6 +10,7 @@ follow-up into a run that's already in flight" path.
 import logging
 
 from langgraph_sdk import get_client
+from langgraph_sdk.client import LangGraphClient
 
 from openswe.config import ENV
 from openswe.message_queue import QueuedContent, QueuedMessage
@@ -23,6 +24,15 @@ def langgraph_url() -> str:
 
 def langgraph_client():
     return get_client(url=langgraph_url())
+
+
+def in_process_client() -> LangGraphClient:
+    """This deployment's own Agent Server, called in process rather than over its public URL.
+
+    Only for code running in the deployment. Calls still pass the thread router, as
+    the backend's own, without the round trip through the load balancer.
+    """
+    return get_client()
 
 
 async def queue_message_for_thread(thread_id: str, message_content: QueuedContent) -> bool:
