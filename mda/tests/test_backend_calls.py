@@ -1796,3 +1796,48 @@ async def test_backend_calls_carry_the_running_spans_trace_without_its_metadata(
     tools = [run for run in created if run["run_type"] == "tool" and run["name"] == "look"]
     assert models and tools
     assert all(run["inputs"] for run in [*models, *tools])
+
+
+async def test_prepared_context_is_checkpointed_once_and_appends_on_later_runs(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("OPEN_SWE_BACKEND_URL", "https://backend.invalid")
+    monkeypatch.setattr("rt.middleware.run_id", lambda: "run-1")
+    backend = OpenSweBackend("secret-token")
+    prepared: list[str] = []
+    seen: list[list[BaseMessage]] = []
+
+    async def phase(name: str, body: dict[str, JsonValue]) -> BaseModel:
+        if name == "prepare":
+            context = f"Context {len(prepared) + 1}"
+            prepared.append(context)
+            return PhaseResult.model_validate(
+                {"messages": messages_to_dict([HumanMessage(content=context)])}
+            )
+        if name == "before_model":
+            seen.append(messages_from_dict(RunCall.model_validate(body).messages))
+        if name == "after_model" and len(seen) % 2:
+            return PhaseResult(jump_to="model")
+        return PhaseResult()
+
+    _answering(monkeypatch, backend, phase)
+    checkpoint = InMemorySaver()
+    config: RunnableConfig = {"configurable": {"thread_id": "same-pr"}}
+    prefix: list[BaseMessage] = []
+    for invocation in ("first", "second"):
+        graph = create_agent(
+            model=FakeListChatModel(responses=["continue", "done"]),
+            middleware=[BackendRunMiddleware(backend, invocation)],
+            checkpointer=checkpoint,
+            interrupt_after=["BackendRunMiddleware.before_agent"],
+        )
+        paused = await graph.ainvoke({"messages": [("user", invocation)]}, config)
+        assert paused["messages"][: len(prefix)] == prefix
+        assert paused["messages"][-1].text == prepared[-1]
+        result = await graph.ainvoke(None, config)
+        prefix = result["messages"]
+        assert sum(m.text == prepared[-1] for m in prefix) == 1
+    assert prepared == ["Context 1", "Context 2"]
+    assert len(seen) == 4
+    assert all(any(m.text == "Context 1" for m in history) for history in seen)
+    assert all(any(m.text == "Context 2" for m in history) for history in seen[2:])

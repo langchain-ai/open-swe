@@ -13,7 +13,6 @@ from openswe.sandboxes.tool_runtime import ToolSurface
 
 def test_reviewer_system_prompt_org_guidelines_precede_repo_style() -> None:
     prompt = reviewer._reviewer_system_prompt(
-        "/workspace/repo",
         repo_owner="acme",
         repo_name="repo",
         pr_number=42,
@@ -263,11 +262,11 @@ async def test_reviewer_continues_when_thread_fetch_raises() -> None:
     ):
         prepare = await _planned_prepare(config)
         updates = await _run_prepare(prepare)
-        captured["system_prompt"] = cast(str, updates["rendered_system_prompt"])
+        captured["run_context"] = updates["messages"][0].text
 
     # The reviewer must still produce a usable prompt even if the thread
     # fetch fails; the first-review user-message context should still appear.
-    assert "https://github.com/acme/repo/pull/42" in captured["system_prompt"]
+    assert "https://github.com/acme/repo/pull/42" in captured["run_context"]
 
 
 @pytest.mark.asyncio
@@ -339,3 +338,103 @@ async def test_reviewer_populates_diff_line_set_from_github_api() -> None:
     )
     assert updates["diff_text"] == pr_diff
     assert updates["diff_line_set"] == {"in_diff.py": {"RIGHT": {10}, "LEFT": {1}}}
+
+
+@pytest.mark.parametrize("repo_ready", [True, False])
+async def test_re_review_context_appends_after_history_without_changing_system_prompt(
+    monkeypatch: pytest.MonkeyPatch, repo_ready: bool
+) -> None:
+    from langchain_core.messages import AIMessage, HumanMessage, messages_from_dict
+
+    from openswe.agent_api.graph import RunSession
+    from openswe.walkthrough.record import WalkthroughStepView, WalkthroughView
+
+    config: RunnableConfig = {
+        "configurable": {
+            "thread_id": "reviewer-cache-thread",
+            "repo": {"owner": "acme", "name": "repo"},
+            "pr_number": 42,
+            "base_sha": "base",
+            "last_reviewed_sha": "previous-head",
+            "re_review": True,
+        }
+    }
+    for name, value in {
+        "ensure_reviewer_github_token": "token",
+        "ensure_reviewer_sandbox_for_thread": MagicMock(),
+        "resolve_sandbox_work_dir": "/workspace",
+        "prepare_review_repo": repo_ready,
+        "materialize_trusted_skills": [],
+        "fetch_pr_diff": None,
+        "fetch_pr_metadata": ("Title", "Body"),
+        "fetch_pr_review_threads": [],
+        "fetch_agents_md": "Stable conventions",
+        "fetch_scoped_agents_md": {},
+        "_cached_org_guidelines": None,
+        "_cached_api_standards_skill": None,
+        "approval_policy_for_review": None,
+    }.items():
+        monkeypatch.setattr(reviewer, name, AsyncMock(return_value=value))
+    monkeypatch.setattr(
+        "openswe.review.styles.get_repo_custom_prompt", AsyncMock(return_value=None)
+    )
+    walkthrough = AsyncMock()
+    monkeypatch.setattr(reviewer.ReviewScoutTarget, "await_walkthrough", walkthrough)
+    findings = AsyncMock(return_value=[])
+    monkeypatch.setattr(reviewer, "list_findings_async", findings)
+    history = [HumanMessage(content="Review this PR"), AIMessage(content="Previous review")]
+    state: dict[str, object] = {"messages": history.copy()}
+    system_prompts: list[str] = []
+    for head in ("first-head", "second-head"):
+        config["configurable"]["head_sha"] = head
+        config["configurable"]["invocation_id"] = head
+        monkeypatch.setattr(
+            reviewer, "resolve_sandbox_work_dir", AsyncMock(return_value=f"/{head}")
+        )
+        walkthrough.return_value = WalkthroughView(
+            head_sha=head,
+            human_input=f"Requirements at {head}",
+            steps=[
+                WalkthroughStepView(
+                    index=1,
+                    title=f"Walkthrough at {head}",
+                    summary="Summary",
+                    other=False,
+                    files=[],
+                )
+            ],
+        )
+        findings.return_value = [
+            {
+                "id": "finding-id",
+                "title": f"Finding at {head}",
+                "status": "open",
+                "file": "app.py",
+                "start_line": 1,
+                "end_line": 1,
+                "severity": "high",
+                "category": "bug",
+                "description": "Changed finding",
+            }
+        ]
+        middleware = reviewer.PrepareReviewerRunMiddleware(
+            thread_id="reviewer-cache-thread", config=config, use_gateway=False
+        )
+        session = RunSession(ToolSurface(middleware=[middleware]), config, None, started_here=True)
+        previous = list(state["messages"])
+        result = await session.run_phase("before_agent", state, Runtime())
+        [context] = messages_from_dict(result.messages)
+        assert head in context.text
+        assert f"Finding at {head}" in context.text
+        assert f"Walkthrough at {head}" in context.text
+        assert f"Requirements at {head}" in context.text
+        assert f"/{head}/repo" in context.text
+        rendered = result.update["rendered_system_prompt"]
+        assert isinstance(rendered, str)
+        assert head not in rendered
+        if not repo_ready:
+            assert f"git checkout --force {head}" in context.text
+        assert state["messages"] == [*previous, context]
+        system_prompts.append((await session.model_call(state, Runtime())).system_prompt)
+        state.update(result.update)
+    assert system_prompts[0] == system_prompts[1]
