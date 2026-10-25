@@ -5,6 +5,7 @@ import { useEffect, useRef, useState } from "react"
 import { SkillPromptText } from "../SkillBadge"
 import { CodeBlock } from "@/features/agents/components/chat/CodeBlock"
 import { parseExcerpts } from "@/features/agents/utils/codeExcerpt"
+import { parseQuotes } from "@/features/agents/utils/transcriptQuote"
 import { MessageImage } from "./MessageImage"
 import { MessageTimestamp } from "./MessageTimestamp"
 import { ExpandableMessageChip } from "./ExpandableMessageChip"
@@ -31,15 +32,20 @@ export function UserMessage({ message }: { message: Message }) {
 function StandardUserMessage({ message }: { message: Message }) {
   const isSystem = message.structuredSenderKind === "system"
   const isSlack = message.structuredSurface === "slack"
-  const { excerpts, text } = parseExcerpts(
+  const { excerpts, text: prose } = parseExcerpts(
     message.chunks
       .filter((c) => c.kind === "text")
       .map((c) => c.text)
       .join("")
   )
+  const { quotes, text } = parseQuotes(prose)
 
   const images = message.chunks.filter((c) => c.kind === "image")
-  const hasBody = Boolean(text) || images.length > 0 || excerpts.length > 0
+  const hasBody =
+    Boolean(text) ||
+    images.length > 0 ||
+    excerpts.length > 0 ||
+    quotes.length > 0
   const [expanded, setExpanded] = useState(false)
   const [isTruncated, setIsTruncated] = useState(false)
   const textRef = useRef<HTMLDivElement>(null)
@@ -73,6 +79,15 @@ function StandardUserMessage({ message }: { message: Message }) {
               language={excerpt.language}
               text={excerpt.code}
             />
+          ))}
+          {quotes.map((quote, i) => (
+            <blockquote
+              key={i}
+              className="mb-space-2 line-clamp-5 border-l-2 border-default pl-space-3 text-sm leading-[1.6] [overflow-wrap:anywhere] whitespace-pre-wrap text-secondary"
+              title={quote}
+            >
+              {quote}
+            </blockquote>
           ))}
           {images.length > 0 && (
             <div className="mb-space-2 grid max-w-[420px] grid-cols-2 gap-space-2">

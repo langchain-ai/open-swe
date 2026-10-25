@@ -265,6 +265,45 @@ test.describe("transcript rendering", () => {
     ).toHaveCount(1);
   });
 
+  test("quotes selected transcript text into the next message", async ({
+    page,
+  }) => {
+    await loginAs(page, SAME_USER);
+    await openThreadViaSlackLink(page);
+    const threadId = threadIdFromUrl(page);
+    await waitForThreadIdle(page, threadId);
+    await waitForThreadNotBusy(page, threadId);
+
+    const reply = page
+      .getByText("Opening a pull request.", { exact: true })
+      .first();
+    const box = await reply.boundingBox();
+    if (!box) throw new Error("The agent's reply has no layout box");
+    await page.mouse.move(box.x + 1, box.y + box.height / 2);
+    await page.mouse.down();
+    await page.mouse.move(box.x + box.width - 1, box.y + box.height / 2, {
+      steps: 10,
+    });
+    await page.mouse.up();
+    await page.getByRole("button", { name: "Quote", exact: true }).click();
+    await expect(
+      page.getByRole("list", { name: "Quoted in your next message" }),
+    ).toContainText("Opening a pull request.");
+
+    await typeIntoComposer(page, "Which branch?");
+    await waitForStateToContain(
+      page,
+      threadId,
+      "Opening a pull request.\\n\\nWhich branch?",
+    );
+    const sent = page
+      .getByTestId("user-message")
+      .filter({ hasText: "Which branch?" });
+    await expect(sent.locator("blockquote")).toHaveText(
+      "Opening a pull request.",
+    );
+  });
+
   test("keeps a web model override on the next Slack turn", async ({
     page,
   }) => {

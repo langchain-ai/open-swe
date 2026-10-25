@@ -38,6 +38,8 @@ export interface MessagesProps extends ApprovalCallbacks {
   queuedMessages?: Array<QueuedThreadMessage>
   /** Drop a queued message and hand it back to the composer. */
   onRemoveQueuedMessage?: (id: string) => void
+  /** Offers a Quote button on selected transcript text, attaching it to the next message. */
+  onQuoteSelection?: (text: string) => void
   isStreaming: boolean
   /** Live run signal from `useStream().isLoading` — drives Streamdown token animation. */
   streamIsLoading?: boolean

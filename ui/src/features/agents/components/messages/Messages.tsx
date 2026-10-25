@@ -9,6 +9,7 @@ import { SkillPromptText } from "../SkillBadge"
 import { AgentTurn } from "./timeline/AgentTurn"
 import { liveActivityLabel } from "./timeline/workEntry"
 import { ThinkingSpinner } from "./ThinkingSpinner"
+import { TranscriptQuoteButton } from "./TranscriptQuoteButton"
 import { UserMessage } from "./UserMessage"
 import { useTranscriptScroll } from "./useTranscriptScroll"
 import { turnCosts } from "@/features/agents/lib/contextUsage"
@@ -103,6 +104,7 @@ export const Messages = memo(function MessagesComponent({
   pollWorkflowApprovalsWhileActive = false,
   queuedMessages = [],
   onRemoveQueuedMessage,
+  onQuoteSelection,
   isStreaming,
   streamIsLoading,
   isThinking,
@@ -265,6 +267,13 @@ export const Messages = memo(function MessagesComponent({
           </div>
           <div ref={reserveRef} aria-hidden />
         </div>
+
+        {onQuoteSelection && (
+          <TranscriptQuoteButton
+            containerRef={scrollRef}
+            onQuote={onQuoteSelection}
+          />
+        )}
 
         {scrollButtonSlot === "internal" && showScrollToBottom && (
           <IconButton

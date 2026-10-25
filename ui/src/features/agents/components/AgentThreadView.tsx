@@ -406,6 +406,15 @@ export function AgentThreadView({
     key: number
     files: Array<File>
   } | null>(null)
+  const [quotedSelection, setQuotedSelection] = useState<{
+    key: number
+    text: string
+  } | null>(null)
+  const quoteSelection = (text: string) =>
+    setQuotedSelection((previous) => ({
+      key: (previous?.key ?? 0) + 1,
+      text,
+    }))
   const restoreQueuedToComposer = useCallback(
     (texts: ReadonlyArray<string>, images: Array<ImageChunk>) => {
       if (texts.length === 0 && images.length === 0) return
@@ -900,6 +909,7 @@ export function AgentThreadView({
                     onRemoveQueuedMessage={
                       canPost ? removeQueuedMessage : undefined
                     }
+                    onQuoteSelection={canPost ? quoteSelection : undefined}
                     isStreaming={isStreaming}
                     streamIsLoading={source.isRunning}
                     scrollControlRef={scrollControlRef}
@@ -962,6 +972,7 @@ export function AgentThreadView({
                 followUpBehavior={followUpBehavior}
                 restoreDraft={restoreDraft}
                 droppedFiles={droppedFiles}
+                quotedSelection={quotedSelection}
                 models={models}
                 routed={routed}
                 selection={activeSelection}
