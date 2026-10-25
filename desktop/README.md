@@ -3,8 +3,10 @@
 > [!IMPORTANT]
 > This desktop client is experimental. The web UI is the recommended way to use Open SWE.
 
-The Electron package ships the compiled Open SWE web UI. Users configure only the URL of a
-compatible Open SWE backend; they do not need a separately hosted dashboard.
+The Electron app loads the current web UI from the configured Open SWE backend when online.
+It also ships a compiled UI as a fallback when the backend is unreachable or does not serve a
+compatible dashboard. Users configure only their backend URL; UI updates arrive on reload without
+reinstalling the desktop app.
 
 Desktop users can choose **This Mac** in the new-task composer to run an agent over a selected local project. The thread is an ordinary cloud thread on the connected backend — same transcript, models, settings, MCPs and skills — whose sandbox is the project on this Mac instead of a hosted box. The app serves it through a sandbox bridge: it long-polls the backend for the agent's `execute`, `upload_files` and `download_files` requests, runs them in the checkout, and posts the results back. This is the same bridge `oswe run` uses, from the shared `bridge-client` package.
 
@@ -19,10 +21,16 @@ The **Terminal** and file browser open in the same checkout, on this Mac.
 
 ## How it connects
 
-The bundled UI runs at an internal `open-swe://app` origin. Electron proxies its
-`/dashboard/api/*` requests to the selected backend, so the browser never receives a LangSmith API
-key and never calls the raw LangGraph API directly. GitHub login creates the same signed dashboard
-session used by the web UI.
+The UI runs at the internal `open-swe://app` origin, whether loaded from the server or the
+bundled fallback. Electron fetches the backend's client-only shell and assets without sending
+session credentials or following redirects, while keeping native IPC available for local projects,
+threads, worktrees, terminals and files. Shell loading falls back after ten seconds; assets always
+come from the same source as their shell so UI versions are never mixed. Reload retries the server.
+The fallback keeps the app loadable offline, but running agents still requires the backend.
+
+Electron proxies `/dashboard/api/*` requests to the selected backend, so the browser never receives
+a LangSmith API key and never calls the raw LangGraph API directly. GitHub login creates the same
+signed dashboard session used by the web UI.
 
 Packaged builds ask for the organization's backend URL on first launch and store it in the app's
 local user data. They have no maintainer-hosted default. Use **Open SWE → Backend URL…** to switch

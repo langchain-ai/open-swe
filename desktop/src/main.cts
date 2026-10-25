@@ -27,6 +27,7 @@ const {
   normalizeConsoleMessage,
 } = require("./diagnostics.cjs");
 const { LocalBridges } = require("./local-bridges.cjs");
+const { DesktopUi } = require("./desktop-ui.cjs");
 const { LocalThreadStore } = require("./local-thread-store.cjs");
 const {
   addWorktree,
@@ -124,6 +125,7 @@ protocol.registerSchemesAsPrivileged([
 ]);
 
 let backendUrl = null;
+let desktopUi: InstanceType<typeof DesktopUi> | null = null;
 let mainWindow = null;
 
 // Installed builds have no terminal; "Save Diagnostics Report…" exports these.
@@ -1204,7 +1206,7 @@ async function clearBackendCookies(url) {
   }
 }
 
-async function serveBundledUi(request) {
+async function serveDesktopUi(request: Request) {
   if (!backendUrl)
     return new Response("Backend is not configured", { status: 503 });
   const url = new URL(request.url);
@@ -1213,7 +1215,14 @@ async function serveBundledUi(request) {
   if (!["GET", "HEAD"].includes(request.method)) {
     return new Response("Method not allowed", { status: 405 });
   }
+  if (desktopUi?.backendUrl !== backendUrl) {
+    desktopUi = new DesktopUi(backendUrl, fetch, serveBundledUi);
+  }
+  return desktopUi.serve(request);
+}
 
+async function serveBundledUi(request: Request) {
+  const url = new URL(request.url);
   const root = bundledUiPath();
   let filePath = staticFilePath(root, request.url);
   if (
@@ -1834,7 +1843,7 @@ if (!hasSingleInstanceLock) {
           ? console.warn(message)
           : console.warn(message, error),
     });
-    protocol.handle("open-swe", serveBundledUi);
+    protocol.handle("open-swe", serveDesktopUi);
     configurePermissions();
     configureDesktopIpc();
     createMenu();
