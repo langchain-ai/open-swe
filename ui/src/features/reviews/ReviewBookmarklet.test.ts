@@ -11,6 +11,20 @@ it("provides a draggable bookmarklet link", () => {
     reviewBookmarkletUrl(window.location.origin)
   )
   expect(link.getAttribute("draggable")).toBe("true")
+  expect(screen.getByText("Drag to your bookmarks bar")).toBeTruthy()
+})
+
+it("omits the bookmarklet and hint in the desktop app", () => {
+  Object.defineProperty(window, "openSweDesktop", {
+    configurable: true,
+    value: { isDesktop: true },
+  })
+  try {
+    const { container } = render(createElement(ReviewBookmarklet))
+    expect(container.childElementCount).toBe(0)
+  } finally {
+    delete window.openSweDesktop
+  }
 })
 
 function run(href: string) {

@@ -16,29 +16,35 @@ export function ReviewBookmarklet() {
   const setBookmarkletHref = useCallback((node: HTMLElement | null) => {
     node?.setAttribute("href", reviewBookmarkletUrl(window.location.origin))
   }, [])
+  if (typeof window !== "undefined" && window.openSweDesktop) return null
   return (
-    <Button
-      ref={setBookmarkletHref}
-      as={
-        <a
-          draggable
-          title="Drag to your bookmarks bar, then click it on any GitHub pull request"
-        />
-      }
-      color="secondary"
-      variant="outlined"
-      size="xs"
-      className="cursor-grab active:cursor-grabbing"
-      onClick={(event) => {
-        event.preventDefault()
-        toast.info("Drag this button to your bookmarks bar", {
-          description:
-            "Then click the bookmark on any GitHub pull request to open its review here.",
-        })
-      }}
-    >
-      {/* Browsers keep no favicon for a `javascript:` bookmark; the emoji in its name stands in. */}
-      👀 Open in Open SWE
-    </Button>
+    <>
+      <Button
+        ref={setBookmarkletHref}
+        as={
+          <a
+            draggable
+            title="Drag to your bookmarks bar, then click it on any GitHub pull request"
+          />
+        }
+        color="secondary"
+        variant="outlined"
+        size="xs"
+        className="cursor-grab active:cursor-grabbing"
+        onClick={(event) => {
+          event.preventDefault()
+          toast.info("Drag this button to your bookmarks bar", {
+            description:
+              "Then click the bookmark on any GitHub pull request to open its review here.",
+          })
+        }}
+      >
+        {/* Browsers keep no favicon for a `javascript:` bookmark; the emoji in its name stands in. */}
+        👀 Open in Open SWE
+      </Button>
+      <span className="hidden text-xs text-secondary lg:inline">
+        Drag to your bookmarks bar
+      </span>
+    </>
   )
 }

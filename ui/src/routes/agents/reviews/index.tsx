@@ -122,9 +122,6 @@ function ReviewsPage() {
             </div>
             <OpenPullRequestInput />
             <ReviewBookmarklet />
-            <span className="hidden text-xs text-secondary lg:inline">
-              Drag to your bookmarks bar
-            </span>
           </div>
 
           {session.data &&
