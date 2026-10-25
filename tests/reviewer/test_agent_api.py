@@ -12,6 +12,7 @@ from openswe.agent_api import server
 from openswe.agent_api.server import RunTokenMiddleware
 from openswe.agent_api.tokens import (
     RemoteRun,
+    RunSettings,
     RuntimeTokenError,
     WorkerGrant,
     sign_runtime_token,
@@ -103,70 +104,55 @@ def test_remote_model_switch_overrides_cached_route_and_effort(requested: str) -
     assert choice.kwargs == provider_model_kwargs(requested, "medium", max_tokens=64_000)
 
 
-async def test_the_calls_around_a_model_call_never_plan_the_run(
+async def test_the_named_calls_around_a_model_call_never_plan_the_run(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     from unittest.mock import AsyncMock
 
-    from langchain_core.messages import AIMessage, HumanMessage, messages_to_dict
-    from runtime_api.catalog import LoopRules, ModelSpec, ReplyRules, RoutingRules, RunModels
+    from langchain_core.messages import HumanMessage, messages_to_dict
 
     from openswe.agent_api import agent
+    from openswe.agent_api import graph as graph_module
     from openswe.agent_api.graph import RemoteGraph
+    from openswe.middleware.task_coordination import TaskCoordinationMiddleware
     from openswe.sandboxes.tool_runtime import ToolSurface
-
-    monkeypatch.setattr(
-        "openswe.middleware.refresh_github_proxy.maybe_refresh_proxy_token", AsyncMock()
-    )
+    from openswe.utils.model import provider_model_kwargs
 
     async def never_planned(config: object, surface: ToolSurface) -> None:
         raise AssertionError("A call around a model call never plans the run")
 
+    classify = AsyncMock(return_value="fast")
+    refresh = AsyncMock(return_value=False)
+    monkeypatch.setattr("openswe.middleware.model_selection._select_jev_route", classify)
+    monkeypatch.setattr(graph_module, "maybe_refresh_proxy_token", refresh)
+    monkeypatch.setattr(TaskCoordinationMiddleware, "for_thread", AsyncMock(return_value=None))
     graph = RemoteGraph("agent", never_planned, agent.AgentParts())
-    main = ModelSpec(model_id="openai:gpt-6.1-sol", kwargs={})
-    fast = ModelSpec(model_id="openai:gpt-6-luna", kwargs={})
-    # What the catalog planned, as MDA sends it with each call.
-    rules = {
-        "models": RunModels(
-            model=main, subagent_model=main, use_gateway=False, routes={"fast": fast}
-        ).model_dump(mode="json"),
-        "loop": LoopRules(
-            hidden_tools=["grep"],
-            routing=RoutingRules(mode="fast", route_model_ids={"fast": fast.model_id}),
-            reply=ReplyRules(tool="slack_reply", no_reply_tool="slack_no_reply_needed"),
-        ).model_dump(mode="json"),
-    }
-    asked = HumanMessage(content="Fix the login", id="human-1")
-    state = {"rendered_system_prompt": "You are Open SWE.", "reply_surface": "slack"}
+    run = RUN.model_copy(update={"assistant_id": "agent"})
+    asked = messages_to_dict([HumanMessage(content="Fix the login", id="human-1")])
 
-    planned = await graph.api(
-        RUN,
-        "before_model",
-        {"run_id": "run-1", "messages": messages_to_dict([asked]), "state": state, **rules},
+    route = await graph.api(run, "route_model", {"run_id": "run-1", "messages": asked})
+    chosen = await graph.api(
+        run,
+        "model_choice",
+        {"run_id": "run-1", "model_id": "anthropic:claude-opus-5-5", "effort": "high"},
     )
-    answered = await graph.api(
-        RUN,
-        "after_model",
-        {
-            "run_id": "run-1",
-            "messages": messages_to_dict([asked, AIMessage(content="Fixed it", id="ai-1")]),
-            "state": state,
-            **rules,
-        },
+    context = await graph.api(run, "task_context", {"run_id": "run-1"})
+    refreshed = await graph.api(run, "refresh_github_proxy", {"run_id": "run-1"})
+
+    assert route == {"route": "fast"}
+    classify.assert_awaited_once_with("Fix the login")
+    assert isinstance(chosen, dict)
+    assert chosen["model_id"] == "anthropic:claude-opus-5-5"
+    assert chosen["kwargs"] == provider_model_kwargs(
+        "anthropic:claude-opus-5-5", "high", max_tokens=64_000
     )
-
-    assert isinstance(planned, dict) and isinstance(planned["call"], dict)
-    assert planned["update"] == {"model_route": "fast"}
-    assert planned["call"]["model"] == fast.model_dump(mode="json")
-    assert planned["call"]["hidden_tools"] == ["grep"]
-    assert "You are Open SWE." in str(planned["call"]["system_prompt"])
-    # The answer never went through the reply tool, so the model is asked again.
-    assert isinstance(answered, dict)
-    assert answered["jump_to"] == "model"
-    assert answered["update"] == {"reply_nudges": 1}
+    # A thread in no task gets no task context.
+    assert context == {"instructions": "", "message": None}
+    assert refreshed == {}
+    refresh.assert_awaited_once_with(run.thread_id)
 
 
-async def test_a_runs_tool_and_shell_calls_never_plan_it_and_read_what_its_plan_added(
+async def test_a_runs_tool_and_shell_calls_never_plan_it_and_read_its_settings(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     from unittest.mock import AsyncMock
@@ -191,10 +177,8 @@ async def test_a_runs_tool_and_shell_calls_never_plan_it_and_read_what_its_plan_
     )
     monkeypatch.setattr(agent, "resolve_github_token", AsyncMock())
     graph = RemoteGraph("agent", never_planned, agent.AgentParts())
-    # What planning added as the run started, signed into its token.
-    run = RUN.model_copy(
-        update={"assistant_id": "agent", "planned_configurable": {"draft_prs": False}}
-    )
+    # The settings decided as the run started, signed into its token.
+    run = RUN.model_copy(update={"assistant_id": "agent", "settings": RunSettings(draft_prs=False)})
 
     result = await graph.api(
         run,
@@ -919,7 +903,7 @@ async def test_an_adopted_worker_acts_as_its_own_thread_never_its_coordinator(
     from runtime_api.workers import Adopt
 
     from openswe.agent_api import async_workers, hosted
-    from openswe.agent_api.graph import RunPlan
+    from openswe.agent_api.graph import RunStart
     from openswe.prompts import prompt
 
     coordinator = RemoteRun(
@@ -935,8 +919,8 @@ async def test_an_adopted_worker_acts_as_its_own_thread_never_its_coordinator(
     )
     monkeypatch.setattr(async_workers.service.Actor, "resolve", AsyncMock(return_value="actor"))
     planned = Catalog(skill_sources=["/skills/worker/"])
-    plan = RunPlan(catalog=planned, configurable={"draft_prs": True}, metadata={})
-    graph = MagicMock(plan_run=AsyncMock(return_value=plan))
+    started = RunStart(catalog=planned, settings=RunSettings(draft_prs=True))
+    graph = MagicMock(start_run=AsyncMock(return_value=started))
     monkeypatch.setattr(hosted, "hosted_graphs", lambda: {"agent": graph})
 
     # The worker's first message: the assignment its launch rendered.
@@ -952,9 +936,9 @@ async def test_an_adopted_worker_acts_as_its_own_thread_never_its_coordinator(
     assert adopted.configurable["thread_id"] == "worker"
     # Planned as the worker's own run, so its first run never asks for a catalog.
     assert reply.catalog == planned
-    assert graph.plan_run.await_args.args[0].thread_id == "worker"
-    # What planning added to the config rides in the token, for calls made without the plan.
-    assert adopted.planned_configurable == {"draft_prs": True}
+    assert graph.start_run.await_args.args[0].thread_id == "worker"
+    # The settings the worker's run starts with ride in its token.
+    assert adopted.settings == RunSettings(draft_prs=True)
     register.assert_awaited_once_with("actor", "call-1", "worker", "Fix it")
 
 

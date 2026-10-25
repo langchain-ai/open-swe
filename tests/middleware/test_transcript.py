@@ -667,9 +667,6 @@ async def test_an_mda_subagent_is_recorded_under_its_task_call(
     class Reporting(RunParts):
         reporters = (mw.TranscriptMiddleware(),)
 
-        def end_hooks(self, config: object) -> tuple[mw.TranscriptMiddleware]:
-            return (mw.TranscriptMiddleware(),)
-
     elsewhere = RemoteGraph("agent", never_planned, Reporting())
     run = RemoteRun(thread_id=THREAD_ID, assistant_id="agent", configurable={})
     asked = HumanMessage(content="do the thing", id="human-1")
@@ -705,7 +702,7 @@ async def test_an_mda_subagent_is_recorded_under_its_task_call(
         "tool_result",
         {"run_id": RUN_ID, "messages": root, **task, "result": messages_to_dict([result])[0]},
     )
-    await elsewhere.api(run, "after_agent", {"run_id": RUN_ID, "messages": root})
+    await elsewhere.api(run, "run_ended", {"run_id": RUN_ID, "messages": root})
 
     assert engine.types[-1] == "turn.completed"
     recorded = [

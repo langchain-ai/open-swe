@@ -64,10 +64,8 @@ from runtime_api.catalog import (
     Catalog,
     FilesSpec,
     InboxSpec,
-    LoopRules,
     ModelSpec,
     OperationSpec,
-    RunModels,
 )
 from runtime_api.endpoint import Delivery, Endpoint, call
 from runtime_api.loop import (
@@ -420,35 +418,6 @@ async def test_a_run_the_phase_ends_leaves_the_inbox_queued(
 
     assert "inbox_received" not in called
     assert "queued-1" not in [message.id for message in result["messages"]]
-
-
-async def test_the_calls_around_a_model_call_carry_the_catalogs_rules(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """The backend builds its hooks from the rules, and no hook looks at an answer here."""
-    monkeypatch.setenv("OPEN_SWE_BACKEND_URL", "https://backend.invalid")
-    monkeypatch.setattr("rt.middleware.run_id", lambda: "run-1")
-    backend = OpenSweBackend("secret-token")
-    spec = ModelSpec(model_id="openai:gpt-6.1-sol", kwargs={})
-    models = RunModels(model=spec, subagent_model=spec, use_gateway=False)
-    loop = LoopRules(hidden_tools=["grep"])
-    bodies: dict[str, dict[str, JsonValue]] = {}
-
-    async def phase(name: str, body: dict[str, JsonValue]) -> BaseModel:
-        bodies[name] = body
-        return PhaseResult()
-
-    _answering(monkeypatch, backend, phase)
-    graph = create_agent(
-        model=FakeListChatModel(responses=["done"]),
-        middleware=[BackendRunMiddleware(backend, "invocation-1", models=models, loop=loop)],
-    )
-
-    await graph.ainvoke({"messages": [("user", "hello")]})
-
-    assert bodies["before_model"]["models"] == models.model_dump(mode="json")
-    assert bodies["before_model"]["loop"] == loop.model_dump(mode="json")
-    assert "after_model" not in bodies
 
 
 class _RecordingAnthropic(ChatAnthropic):

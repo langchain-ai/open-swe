@@ -1,36 +1,32 @@
 """One Open SWE graph, played by a run on Managed Deep Agents.
 
-MDA keeps the model loop, its checkpoints and every tool call. The backend answers
-the rest as the typed API both sides import (``runtime_api``):
+MDA keeps the model loop, its checkpoints, every tool call, and the middleware
+around them. The backend answers the calls MDA makes, as the typed API both sides
+import (``runtime_api``):
 
 - the catalog names the run's operations (each the work of one of its tools), its
   subagents, models and sandbox, the checks around its file and shell tools, and
-  the rules its hooks around each model call are built from. It is planned once as
-  the run starts and rides in the run's context (``RemoteGraph.plan_run``); what
-  planning added to the run's config is signed into its token
-- ``prepare`` runs every ``before_agent`` hook from the run's plan: run preparation
-  (the thread's sandbox, checkout and prompt), the transcript turn, skills, reply
-  bookkeeping. It is the one call that plans the run again
-- every other call is a ``TokenRun``: answered from the token and the request,
-  with the pieces the graph's ``RunParts`` build for it. ``inbox`` and
-  ``inbox_received`` read and settle what was sent to the thread (``ThreadInbox``);
-  ``skills`` lists what the token's identity may load; ``before_model`` and
-  ``after_model`` run the hooks around a model call (``openswe.agent_api.loop``);
-  ``model_result``, ``tool_started`` and ``tool_result`` report to the transcript
-  and usage; ``operation``, ``check_shell`` and the ``files`` calls do the work of
-  the run's tools; ``after_agent`` runs the end-of-run hooks; ``sandbox_replaced``
-  and ``sandbox_unreachable`` follow the box MDA keeps
-- a run whose calls need more than that (``RunParts.needs_plan``), and
-  ``record_evidence`` for an incident, are answered from the run's plan (``RunSession``)
+  the rules of its middleware around each model call. It is worked out once as the
+  run starts and rides in the run's context (``RemoteGraph.start_run``); the
+  settings later calls read are signed into the run's token (``RunSettings``)
+- ``prepare`` readies the run from its plan: the thread's sandbox, checkout and
+  prompt, the transcript turn, skills, reply bookkeeping. It is the one call that
+  plans the run again
+- every other call is a ``TokenRun``, answered from the token and the request with
+  the pieces the graph's ``RunParts`` build for it: the inbox and skills, the
+  named calls MDA's middleware makes around a model call (``route_model``,
+  ``model_choice``, ``task_context``, ``refresh_github_proxy``,
+  ``reply_on_behalf``) and at the run's end (``run_ended``,
+  ``step_limit_reached``, ``settle_review_check``, ``finish_scout_plan``), the
+  reports of each reply and tool call, the work of the run's tools (``operation``,
+  ``check_shell``, the ``files`` calls), and the box MDA keeps
+- a run still served from its plan (``RunParts.legacy``: a requested offload, an
+  incident) has its phases (``before_model``, ``after_model``, ``after_agent``) and
+  tool calls answered by ``RunSession``, as is ``record_evidence``
 
 None of the run's tool calls is a tool call here: no tools node, no tool-call
 middleware. A call made from inside a subagent names the namespace of its ``task``
 calls, so its tool calls and replies land under the subagent.
-
-The graph's model-call shaping (caching, retries, fallback, summarization, call
-limits, provider history fixes, the call deadline, and the swap to a vision model
-this graph names) is MDA's own. Graph state the hooks write that MDA does not know
-rides in the MDA run's state and comes back with every call.
 """
 
 import base64
@@ -103,29 +99,41 @@ from runtime_api.loop import (
     AFTER_MODEL,
     BEFORE_MODEL,
     BROWSER,
+    FINISH_SCOUT_PLAN,
     INBOX,
     INBOX_RECEIVED,
+    MODEL_CHOICE,
     MODEL_RESULT,
     PREPARE,
+    REFRESH_GITHUB_PROXY,
+    REPLY_ON_BEHALF,
+    ROUTE_MODEL,
+    RUN_ENDED,
     SANDBOX_REPLACED,
     SANDBOX_UNREACHABLE,
+    SETTLE_REVIEW_CHECK,
+    STEP_LIMIT_REACHED,
+    TASK_CONTEXT,
     TOOL_RESULT,
     TOOL_STARTED,
     AfterAgent,
     BeforeModel,
     BrowserReport,
+    ChosenModel,
     Done,
     Inbox,
     InboxItems,
     InboxRead,
     InboxReceipt,
-    LoopCall,
     ModelResult,
     ObservedResponse,
     PhaseResult,
     Prepare,
+    ReplyOnBehalf,
+    Route,
     RunCall,
     SandboxGone,
+    TaskContext,
     ToolCallReport,
     ToolResultReply,
     ToolResultReport,
@@ -158,26 +166,33 @@ from openswe.agent_api.loop import (
     as_list,
     as_messages,
     call_state,
+    chosen_model,
     decode_state,
     dump_messages,
     json_state,
+    model_spec,
     run_hooks,
 )
 from openswe.agent_api.operations import Injections, invoke
 from openswe.agent_api.run_parts import RunParts
 from openswe.agent_api.runs import in_graph_context, run_config
 from openswe.agent_api.shell_guards import ShellGuards
-from openswe.agent_api.tokens import RemoteRun
+from openswe.agent_api.tokens import RemoteRun, RunSettings
 from openswe.dispatch import COMPLETION_WEBHOOK_URL
+from openswe.github.proxy import maybe_refresh_proxy_token
 from openswe.github.sandbox_access import READ_ONLY_REVIEW_PERMISSIONS
 from openswe.incidents.runtime import IncidentMiddleware
 from openswe.middleware.client_tools import ClientToolsMiddleware
+from openswe.middleware.model_selection import classify_route
+from openswe.middleware.notify_step_limit import notify_step_limit
 from openswe.middleware.prepare_run import BasePrepareRunMiddleware
 from openswe.middleware.record_run_usage import RecordRunUsageMiddleware
 from openswe.middleware.sandbox_circuit_breaker import post_sandbox_unreachable_notification
+from openswe.middleware.settle_review_check import settle_review_check
 from openswe.middleware.task_coordination import TaskCoordinationMiddleware
 from openswe.middleware.transcript import TranscriptMiddleware, within_namespace
 from openswe.prompts import common_prompt, prompt
+from openswe.review_scout.graph import finish_scout_plan
 from openswe.run_config import RunConfig
 from openswe.sandboxes.browsers import ThreadBrowser
 from openswe.sandboxes.lifecycle import bind_mda_sandbox, reconnect_replaced_sandbox
@@ -195,6 +210,7 @@ from openswe.server import (
     code_only,
     direct_and_from_code,
 )
+from openswe.slack.tools.reply import send_slack_reply
 from openswe.threads.inbox import ThreadInbox
 
 logger = logging.getLogger(__name__)
@@ -389,7 +405,9 @@ class RunSession:
             worker_webhook=COMPLETION_WEBHOOK_URL if self._delegates else None,
             skill_sources=list(self.surface.skill_sources),
             inbox=self.surface.inbox,
-            loop=self.surface.loop,
+            loop=None
+            if self.surface.loop is None
+            else self.surface.loop.model_copy(update={"deployment_prompt": common_prompt()}),
             search_tools=self.surface.code_mode,
             model_call_limit=next(
                 (
@@ -446,12 +464,15 @@ class RunSession:
         return _ASYNC_TASK_TOOLS
 
     def start_models(self) -> RunModels:
+        def spec(choice: ModelChoice) -> ModelSpec:
+            return model_spec(choice.model_id, choice.kwargs)
+
         return RunModels(
-            model=_model_spec(self.models.main),
-            subagent_model=_model_spec(self.models.subagent),
+            model=spec(self.models.main),
+            subagent_model=spec(self.models.subagent),
             use_gateway=self.models.use_gateway,
-            routes={route: _model_spec(choice) for route, choice in self.models.routes.items()},
-            vision=None if self.models.vision is None else _model_spec(self.models.vision),
+            routes={route: spec(choice) for route, choice in self.models.routes.items()},
+            vision=None if self.models.vision is None else spec(self.models.vision),
         )
 
     @property
@@ -713,17 +734,11 @@ async def reconnect_sandbox(config: RunnableConfig, assistant_id: str | None) ->
 
 
 @dataclass(frozen=True)
-class RunPlan:
-    """A run as its graph factory planned it as the run starts."""
+class RunStart:
+    """What the backend works out for a run as it starts it."""
 
     catalog: Catalog
-    # What planning added to the run's config, which the calls answered without a plan read.
-    configurable: dict[str, JsonValue]
-    metadata: dict[str, JsonValue]
-
-
-def _added(before: Mapping[str, object], after: Mapping[str, object]) -> dict[str, JsonValue]:
-    return json_state({key: value for key, value in after.items() if before.get(key) != value})
+    settings: RunSettings
 
 
 class TokenRun:
@@ -742,8 +757,8 @@ class TokenRun:
         self._files: BackendProtocol | None = None
 
     @property
-    def needs_plan(self) -> bool:
-        return self.parts.needs_plan(RunConfig.from_config(self.config))
+    def legacy(self) -> bool:
+        return self.parts.legacy(RunConfig.from_config(self.config))
 
     async def _ready(self, _runtime: Runtime) -> None:
         await self.parts.credentials(self.config)
@@ -794,34 +809,6 @@ class TokenRun:
     async def inbox_received(self, request: InboxReceipt) -> Done:
         await ThreadInbox(self.run.thread_id).receive(request.items.queued, request.items.events)
         return Done()
-
-    async def _looping[R: PhaseResult](self, call: RunCall, phase: Phase, work: PhaseWork[R]) -> R:
-        state = call_state(call, self.parts.restore)
-        events: list[object] = []
-        answered = await in_graph_context(
-            {**self.config, "run_name": phase},
-            lambda runtime: work(state, runtime),
-            events=events,
-        )
-        return answered.model_copy(update={"events": [_json_or_text(e) for e in events]})
-
-    async def _loop(self, call: LoopCall) -> RunLoop | None:
-        """The graph's hooks around a model call, from the rules the call carries."""
-        if call.loop is None or call.models is None:
-            return None
-        return await self.parts.loop(self.config, call.loop, call.models)
-
-    async def before_model(self, request: LoopCall) -> BeforeModel:
-        loop = await self._loop(request)
-        if loop is None:
-            return await (await self._session()).before_model(request)
-        return await self._looping(request, "before_model", loop.before_model)
-
-    async def after_model(self, request: LoopCall) -> PhaseResult:
-        loop = await self._loop(request)
-        if loop is None:
-            return await (await self._session()).after_model(request)
-        return await self._looping(request, "after_model", loop.after_model)
 
     async def _reporting[T](
         self,
@@ -900,24 +887,6 @@ class TokenRun:
         update = await self._reporting(request, "tool_result", record)
         return ToolResultReply(update=update)
 
-    async def after_agent(self, request: RunCall) -> AfterAgent:
-        """The graph's end-of-run hooks, and the turn's git metadata reconciled."""
-        hooks = self.parts.end_hooks(self.config)
-
-        async def ended(state: dict[str, object], runtime: Runtime) -> AfterAgent:
-            result = await run_hooks(hooks, "after_agent", state, runtime)
-            trace_metadata = await TurnGitMetadata(self.config).reconcile(state)
-            return AfterAgent(
-                **result.model_dump(exclude={"update"}),
-                update={**result.update, BASELINE: None},
-                trace_metadata=trace_metadata,
-            )
-
-        try:
-            return await self._reporting(request, "after_agent", ended, hooks=hooks)
-        finally:
-            self.graph.end(self.run, self.run_id)
-
     async def operation(self, request: RunOperation) -> OperationResult:
         """Do the work of one of the run's tools: its arguments in, its result out."""
         cfg = RunConfig.from_config(self.config)
@@ -949,6 +918,82 @@ class TokenRun:
         await post_sandbox_unreachable_notification(self.config, sandbox_id=request.sandbox_id)
         return Done()
 
+    async def route_model(self, request: RunCall) -> Route:
+        """The route the person's latest request takes."""
+        return Route(route=await classify_route(messages_from_dict(request.messages)))
+
+    async def model_choice(self, request: ChosenModel) -> ModelSpec:
+        return chosen_model(request.model_id, request.effort)
+
+    async def task_context(self, _request: RunRequest) -> TaskContext:
+        """The task the thread belongs to, as each model call tells the model."""
+
+        async def read() -> TaskContext:
+            coordination = await TaskCoordinationMiddleware.for_thread(self.run.thread_id)
+            if coordination is None:
+                return TaskContext()
+            return TaskContext(
+                instructions=coordination.instructions,
+                message=await coordination.context_message(),
+            )
+
+        return await self.in_run("task_context", read)
+
+    async def refresh_github_proxy(self, _request: RunRequest) -> Done:
+        await maybe_refresh_proxy_token(self.run.thread_id)
+        return Done()
+
+    async def reply_on_behalf(self, request: ReplyOnBehalf) -> Done:
+        """Post the model's final answer for it, after it ignored the reply tool."""
+        state = call_state(request, self.parts.restore)
+
+        async def post() -> None:
+            result = await send_slack_reply(request.text, "final", state=state)
+            logger.warning(
+                "Posted the model's final message on its behalf after it ignored the reply tool",
+                extra={"reply_fallback_result": result},
+            )
+
+        await self.in_run("reply_on_behalf", post)
+        return Done()
+
+    async def run_ended(self, request: RunCall) -> AfterAgent:
+        """Record the run's end: its transcript turn and usage, and its git work reconciled."""
+        reporters = self.parts.reporters
+
+        async def ended(state: dict[str, object], runtime: Runtime) -> AfterAgent:
+            result = await run_hooks(reporters, "after_agent", state, runtime)
+            trace_metadata = await TurnGitMetadata(self.config).reconcile(state)
+            return AfterAgent(
+                **result.model_dump(exclude={"update"}),
+                update={**result.update, BASELINE: None},
+                trace_metadata=trace_metadata,
+            )
+
+        try:
+            return await self._reporting(request, "run_ended", ended)
+        finally:
+            self.graph.end(self.run, self.run_id)
+
+    async def step_limit_reached(self, _request: RunRequest) -> Done:
+        await self.in_run("step_limit_reached", notify_step_limit)
+        return Done()
+
+    async def settle_review_check(self, _request: RunRequest) -> Done:
+        await self.in_run("settle_review_check", settle_review_check)
+        return Done()
+
+    async def finish_scout_plan(self, request: RunCall) -> Done:
+        summary = call_state(request, self.parts.restore).get("human_input_summary")
+
+        async def finish() -> None:
+            await finish_scout_plan(
+                self.run.thread_id, self.config, summary if isinstance(summary, str) else ""
+            )
+
+        await self.in_run("finish_scout_plan", finish)
+        return Done()
+
     async def browser(self, request: BrowserReport) -> Done:
         await ThreadBrowser(browser=request.browser, opened=request.opened).report(
             self.run.thread_id
@@ -966,9 +1011,9 @@ class RemoteGraph:
         self._sessions: dict[tuple[str, str | None], RunSession] = {}
 
     def config_for(
-        self, run: RemoteRun, run_id: str | None, *, planned: bool = True
+        self, run: RemoteRun, run_id: str | None, *, settled: bool = True
     ) -> RunnableConfig:
-        config = run_config(run, planned=planned)
+        config = run_config(run, settled=settled)
         configurable = dict(config.get("configurable") or {})
         if run_id:
             # The transcript keys a run's turn by it; never the tracer's run id.
@@ -976,8 +1021,8 @@ class RemoteGraph:
         return {**config, "configurable": configurable}
 
     async def _planned(self, run: RemoteRun, run_id: str | None, *, fresh: bool) -> RunSession:
-        # Planning starts from the run as dispatch stamped it, never from its own additions.
-        config = self.config_for(run, run_id, planned=False)
+        # Planning starts from the run as dispatch stamped it, never from the settings it decides.
+        config = self.config_for(run, run_id, settled=False)
         surface = ToolSurface()
         await self._plan(config, surface)
         await surface.prepare()
@@ -989,16 +1034,18 @@ class RemoteGraph:
             assistant_id=self.assistant_id,
         )
 
-    async def plan_run(self, run: RemoteRun) -> RunPlan:
-        """What ``run``'s MDA graph is built from, planned as the run starts."""
+    async def start_run(self, run: RemoteRun) -> RunStart:
+        """What ``run``'s MDA graph is built from, and the settings its calls read."""
         session = await self._planned(run, None, fresh=False)
-        before = self.config_for(run, None, planned=False)
-        return RunPlan(
+        cfg = RunConfig.from_config(session.config)
+        return RunStart(
             catalog=await session.plan(),
-            configurable=_added(
-                before.get("configurable") or {}, session.config.get("configurable") or {}
+            settings=RunSettings(
+                source=cfg.source,
+                draft_prs=cfg.draft_prs,
+                model_id=cfg.resolved_agent_model_id,
+                effort=cfg.resolved_agent_effort,
             ),
-            metadata=_added(before.get("metadata") or {}, session.config.get("metadata") or {}),
         )
 
     async def session(
@@ -1024,10 +1071,10 @@ class RemoteGraph:
         run_id = raw_id if isinstance(raw_id, str) else None
         if RUN_CALLS.serves(endpoint):
             return await RUN_CALLS.dispatch(endpoint, TokenRun(self, run, run_id), raw)
-        if PLAN_FREE_CALLS.serves(endpoint):
+        if TOOL_CALLS.serves(endpoint):
             call = TokenRun(self, run, run_id)
-            if not call.needs_plan:
-                return await PLAN_FREE_CALLS.dispatch(endpoint, call, raw)
+            if not call.legacy:
+                return await TOOL_CALLS.dispatch(endpoint, call, raw)
         if not API.serves(endpoint):
             raise UnknownEndpointError(endpoint)
         # Preparation starts the run's session; the end of the run closes it.
@@ -1197,17 +1244,24 @@ RUN_CALLS.serve(INBOX_RECEIVED, TokenRun.inbox_received)
 RUN_CALLS.serve(MODEL_RESULT, TokenRun.model_result)
 RUN_CALLS.serve(TOOL_STARTED, TokenRun.tool_started)
 RUN_CALLS.serve(TOOL_RESULT, TokenRun.tool_result)
-# Calls a run answers from its token too, unless its calls need its plan (``RunParts``).
-PLAN_FREE_CALLS: Final = Handlers[TokenRun]()
-PLAN_FREE_CALLS.serve(BEFORE_MODEL, TokenRun.before_model)
-PLAN_FREE_CALLS.serve(AFTER_MODEL, TokenRun.after_model)
-PLAN_FREE_CALLS.serve(AFTER_AGENT, TokenRun.after_agent)
-PLAN_FREE_CALLS.serve(OPERATION, TokenRun.operation)
-PLAN_FREE_CALLS.serve(CHECK_SHELL, TokenRun.check_shell)
-PLAN_FREE_CALLS.serve(SANDBOX_REPLACED, TokenRun.sandbox_replaced)
-PLAN_FREE_CALLS.serve(SANDBOX_UNREACHABLE, TokenRun.sandbox_unreachable)
-# The calls answered from the run's plan: its preparation, and every call of a run
-# whose calls need it.
+RUN_CALLS.serve(ROUTE_MODEL, TokenRun.route_model)
+RUN_CALLS.serve(MODEL_CHOICE, TokenRun.model_choice)
+RUN_CALLS.serve(TASK_CONTEXT, TokenRun.task_context)
+RUN_CALLS.serve(REFRESH_GITHUB_PROXY, TokenRun.refresh_github_proxy)
+RUN_CALLS.serve(REPLY_ON_BEHALF, TokenRun.reply_on_behalf)
+RUN_CALLS.serve(RUN_ENDED, TokenRun.run_ended)
+RUN_CALLS.serve(STEP_LIMIT_REACHED, TokenRun.step_limit_reached)
+RUN_CALLS.serve(SETTLE_REVIEW_CHECK, TokenRun.settle_review_check)
+RUN_CALLS.serve(FINISH_SCOUT_PLAN, TokenRun.finish_scout_plan)
+# The work of a run's tools, answered from its token unless the run is still served
+# from its plan (``RunParts.legacy``).
+TOOL_CALLS: Final = Handlers[TokenRun]()
+TOOL_CALLS.serve(OPERATION, TokenRun.operation)
+TOOL_CALLS.serve(CHECK_SHELL, TokenRun.check_shell)
+TOOL_CALLS.serve(SANDBOX_REPLACED, TokenRun.sandbox_replaced)
+TOOL_CALLS.serve(SANDBOX_UNREACHABLE, TokenRun.sandbox_unreachable)
+# The calls answered from the run's plan: its preparation, and every phase and tool
+# call of a run still served from it.
 API: Final = Handlers[RunSession]()
 # Only for runs started without their catalog in the context.
 API.serve(CATALOG, _catalog)
@@ -1220,23 +1274,23 @@ API.serve(SANDBOX_UNREACHABLE, RunSession.sandbox_unreachable)
 API.serve(OPERATION, RunSession.operation)
 API.serve(CHECK_SHELL, RunSession.check_shell)
 API.serve(RECORD_EVIDENCE, RunSession.record_evidence)
-PLAN_FREE_CALLS.serve(file_api.LS, _ls)
+TOOL_CALLS.serve(file_api.LS, _ls)
 API.serve(file_api.LS, _ls)
-PLAN_FREE_CALLS.serve(file_api.READ, _read)
+TOOL_CALLS.serve(file_api.READ, _read)
 API.serve(file_api.READ, _read)
-PLAN_FREE_CALLS.serve(file_api.WRITE, _write)
+TOOL_CALLS.serve(file_api.WRITE, _write)
 API.serve(file_api.WRITE, _write)
-PLAN_FREE_CALLS.serve(file_api.EDIT, _edit)
+TOOL_CALLS.serve(file_api.EDIT, _edit)
 API.serve(file_api.EDIT, _edit)
-PLAN_FREE_CALLS.serve(file_api.DELETE, _delete)
+TOOL_CALLS.serve(file_api.DELETE, _delete)
 API.serve(file_api.DELETE, _delete)
-PLAN_FREE_CALLS.serve(file_api.GLOB, _glob)
+TOOL_CALLS.serve(file_api.GLOB, _glob)
 API.serve(file_api.GLOB, _glob)
-PLAN_FREE_CALLS.serve(file_api.GREP, _grep)
+TOOL_CALLS.serve(file_api.GREP, _grep)
 API.serve(file_api.GREP, _grep)
-PLAN_FREE_CALLS.serve(file_api.EXECUTE, _execute)
+TOOL_CALLS.serve(file_api.EXECUTE, _execute)
 API.serve(file_api.EXECUTE, _execute)
-PLAN_FREE_CALLS.serve(file_api.UPLOAD, _upload)
+TOOL_CALLS.serve(file_api.UPLOAD, _upload)
 API.serve(file_api.UPLOAD, _upload)
-PLAN_FREE_CALLS.serve(file_api.DOWNLOAD, _download)
+TOOL_CALLS.serve(file_api.DOWNLOAD, _download)
 API.serve(file_api.DOWNLOAD, _download)

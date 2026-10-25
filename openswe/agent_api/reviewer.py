@@ -1,23 +1,15 @@
 """The pull request reviewer, as Managed Deep Agents runs play it."""
 
-from collections.abc import Sequence
 from functools import cache
 from typing import Final
 
 from deepagents.backends.protocol import BackendProtocol
-from langchain.agents.middleware.types import AgentMiddleware
 from langchain_core.runnables import RunnableConfig
 from langchain_core.tools import BaseTool
-from runtime_api.catalog import LoopRules, RunModels
 
 from openswe.agent_api.graph import RemoteGraph
-from openswe.agent_api.loop import RunLoop
 from openswe.agent_api.run_parts import RunParts
 from openswe.github.thread_token import get_github_token
-from openswe.middleware.exclude_tools import ExcludeToolsMiddleware
-from openswe.middleware.prepare_run import RenderedSystemPromptMiddleware
-from openswe.middleware.refresh_github_proxy import refresh_github_proxy_before_model
-from openswe.middleware.settle_review_check import settle_review_check_on_exit
 from openswe.review.diff import compute_diff_line_set
 from openswe.reviewer import (
     ensure_reviewer_github_token,
@@ -55,25 +47,6 @@ class ReviewerParts(RunParts):
 
     async def tool(self, config: RunnableConfig, name: str) -> BaseTool | None:  # noqa: ARG002
         return _tools_by_name().get(name)
-
-    async def loop(
-        self,
-        config: RunnableConfig,  # noqa: ARG002
-        rules: LoopRules,
-        models: RunModels,
-    ) -> RunLoop:
-        """The reviewer's hooks around each model call, in the order its plan has them."""
-        return RunLoop(
-            [
-                RenderedSystemPromptMiddleware(),
-                ExcludeToolsMiddleware(excluded=frozenset(rules.hidden_tools)),
-                refresh_github_proxy_before_model,
-            ],
-            models,
-        )
-
-    def end_hooks(self, config: RunnableConfig) -> Sequence[AgentMiddleware]:  # noqa: ARG002
-        return (settle_review_check_on_exit,)
 
 
 REVIEWER: Final = RemoteGraph(ASSISTANT_ID, plan_reviewer, ReviewerParts())

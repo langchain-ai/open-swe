@@ -63,6 +63,11 @@ async def _select_jev_route(task: str) -> SelectedRoute:
     )
 
 
+async def classify_route(messages: Sequence[object]) -> SelectedRoute:
+    """The route the person's latest request takes, as the classifier reads it."""
+    return await _select_jev_route(_latest_human_task(messages)[-8_000:])
+
+
 class ModelSelectionState(AgentState):
     model_route: NotRequired[PersistedRoute]
     requested_model: NotRequired[Annotated[str | None, OmitFromOutput]]
@@ -119,9 +124,7 @@ class ModelSelectionMiddleware(OpenSWEMiddleware[ModelSelectionState]):
             return normalize_route(model_route)
         if self._routing_mode == "fast":
             return "fast"
-        messages = state.get("messages", [])
-        task = _latest_human_task(messages)[-8_000:]
-        return await _select_jev_route(task)
+        return await classify_route(state.get("messages", []))
 
     async def abefore_model(
         self,

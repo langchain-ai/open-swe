@@ -1,10 +1,15 @@
-"""The calls the runtime's model loop makes on the backend, phase by phase.
+"""The calls the runtime's model loop makes on the backend.
 
-The backend runs the graph's own middleware for each phase: preparation before
-the run, routing and the system prompt before each model call, the transcript
-and usage after it, reply nudges after the model, and the end-of-run work. Graph
-state those hooks write that the runtime does not know comes back in ``update``,
-and goes back with every later call in ``state``.
+The runtime's middleware runs the loop: it nudges, routes, assembles each call
+and ends the run as the catalog's ``LoopRules`` say. It asks the backend only for
+what needs the backend's data or credentials, one named call each: the route a
+task takes, a model's settings, the task a thread belongs to, a fresh GitHub proxy
+token, a reply posted on the model's behalf, and what the end of the run records.
+The transcript and usage hear of each reply and tool call.
+
+Preparation, and every phase of a run still answered from its plan, are phase
+calls: the backend runs the graph's own middleware for the phase, and graph state
+it writes comes back in ``update`` and goes back with every later call in ``state``.
 
 Before each model call the runtime also reads the thread's inbox: what was sent
 to the thread while its run worked, and only that. The request names the run and
@@ -16,7 +21,7 @@ from uuid import UUID
 
 from pydantic import BaseModel, JsonValue
 
-from runtime_api.catalog import InboxSpec, LoopRules, ModelSpec, RunModels
+from runtime_api.catalog import InboxSpec, ModelSpec
 from runtime_api.endpoint import LOOP_CALL_SECONDS, Endpoint
 from runtime_api.operations import RunRequest
 
@@ -28,16 +33,6 @@ class RunCall(RunRequest):
     state: dict[str, JsonValue] = {}
     # The ``task`` calls the calling subagent is nested in; empty for the agent itself.
     namespace: list[str] = []
-
-
-class LoopCall(RunCall):
-    """A call around a model call, with the catalog's rules for the hooks it runs.
-
-    Without them the backend plans the run to find its hooks.
-    """
-
-    models: RunModels | None = None
-    loop: LoopRules | None = None
 
 
 class Prepare(RunCall):
@@ -151,11 +146,38 @@ class Done(BaseModel):
     """The backend did what it was asked; there is nothing more to say."""
 
 
+class Route(BaseModel):
+    # One of the routes ``RoutingRules.route_model_ids`` names, or ``default``.
+    route: str
+
+
+class ChosenModel(RunRequest):
+    """A model the run calls by id, such as one a person asked for, at an effort."""
+
+    model_id: str
+    effort: str | None = None
+
+
+class TaskContext(BaseModel):
+    """The task the thread belongs to, as each model call tells the model."""
+
+    # Added to each call's system prompt: the thread's role in the task.
+    instructions: str = ""
+    # The task's context, added to the conversation where the model no longer sees it.
+    message: str | None = None
+
+
+class ReplyOnBehalf(RunCall):
+    """The model's final answer, posted for it after it ignored the reply tool."""
+
+    text: str
+
+
 # Preparation the runtime makes again on a restarted run anyway.
 PREPARE = Endpoint("prepare", Prepare, PhaseResult, delivery="idempotent")
 # Builds the next call, so it is sent again to a backend that never took it.
 BEFORE_MODEL = Endpoint(
-    "before_model", LoopCall, BeforeModel, seconds=LOOP_CALL_SECONDS, delivery="unprocessed"
+    "before_model", RunCall, BeforeModel, seconds=LOOP_CALL_SECONDS, delivery="unprocessed"
 )
 # Only reads, so it is safe to send again.
 INBOX = Endpoint("inbox", InboxRead, Inbox, seconds=LOOP_CALL_SECONDS, delivery="idempotent")
@@ -164,7 +186,7 @@ INBOX_RECEIVED = Endpoint(
     "inbox_received", InboxReceipt, Done, seconds=LOOP_CALL_SECONDS, delivery="idempotent"
 )
 MODEL_RESULT = Endpoint("model_result", ModelResult, ObservedResponse, seconds=LOOP_CALL_SECONDS)
-AFTER_MODEL = Endpoint("after_model", LoopCall, PhaseResult, seconds=LOOP_CALL_SECONDS)
+AFTER_MODEL = Endpoint("after_model", RunCall, PhaseResult, seconds=LOOP_CALL_SECONDS)
 AFTER_AGENT = Endpoint("after_agent", RunCall, AfterAgent, seconds=LOOP_CALL_SECONDS)
 TOOL_STARTED = Endpoint("tool_started", ToolCallReport, Done, seconds=LOOP_CALL_SECONDS)
 TOOL_RESULT = Endpoint("tool_result", ToolResultReport, ToolResultReply, seconds=LOOP_CALL_SECONDS)
@@ -174,3 +196,27 @@ SANDBOX_REPLACED = Endpoint("sandbox_replaced", RunCall, Done, seconds=LOOP_CALL
 SANDBOX_UNREACHABLE = Endpoint("sandbox_unreachable", SandboxGone, Done, seconds=LOOP_CALL_SECONDS)
 # For the dashboard to show the thread's browser.
 BROWSER = Endpoint("browser", BrowserReport, Done, seconds=LOOP_CALL_SECONDS)
+# Classifies the task the conversation asks for; only reads, so it is safe to send again.
+ROUTE_MODEL = Endpoint(
+    "route_model", RunCall, Route, seconds=LOOP_CALL_SECONDS, delivery="idempotent"
+)
+MODEL_CHOICE = Endpoint(
+    "model_choice", ChosenModel, ModelSpec, seconds=LOOP_CALL_SECONDS, delivery="idempotent"
+)
+TASK_CONTEXT = Endpoint(
+    "task_context", RunRequest, TaskContext, seconds=LOOP_CALL_SECONDS, delivery="idempotent"
+)
+# Refreshes only a token near its expiry, so it is safe to send again.
+REFRESH_GITHUB_PROXY = Endpoint(
+    "refresh_github_proxy", RunRequest, Done, seconds=LOOP_CALL_SECONDS, delivery="idempotent"
+)
+REPLY_ON_BEHALF = Endpoint("reply_on_behalf", ReplyOnBehalf, Done, seconds=LOOP_CALL_SECONDS)
+# The run ended: the transcript closes its turn, usage is finalized and the turn's git
+# work reconciled.
+RUN_ENDED = Endpoint("run_ended", RunCall, AfterAgent, seconds=LOOP_CALL_SECONDS)
+# The run ended at its model-call limit: the person is told.
+STEP_LIMIT_REACHED = Endpoint("step_limit_reached", RunRequest, Done, seconds=LOOP_CALL_SECONDS)
+# A review run ended: its check run on the pull request is settled if it was not.
+SETTLE_REVIEW_CHECK = Endpoint("settle_review_check", RunRequest, Done, seconds=LOOP_CALL_SECONDS)
+# A scout run ended: what it left unplanned goes to Other.
+FINISH_SCOUT_PLAN = Endpoint("finish_scout_plan", RunCall, Done, seconds=LOOP_CALL_SECONDS)

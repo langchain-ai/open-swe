@@ -4,9 +4,10 @@ Open SWE dispatch names the graph a run plays (``agent``, ``reviewer`` or
 ``review-scout``) in its context. The model loop, its checkpoints and every tool call
 run here. The Open SWE backend holds every credential and plans the run: this factory
 takes the graph's operations, subagents and models from the catalog the backend
-planned as it started the run, in the run's context, makes a tool of each operation
-(``rt.tools``), and ``BackendRunMiddleware`` hands each phase of the loop to the
-graph's own middleware there. The file and shell tools are this runtime's own, in the
+worked out as it started the run, in the run's context, and makes a tool of each
+operation (``rt.tools``). This runtime's own middleware runs the loop around each
+model call as the catalog's rules say (``rt.loop``), asking the backend only for
+what needs its data or credentials. The file and shell tools are this runtime's own, in the
 thread's box or against its files on the backend (``rt.file_tools``). The run token in
 the context authenticates every call.
 
@@ -37,6 +38,7 @@ from pydantic import BaseModel, ConfigDict, Field, JsonValue
 from rt.backend import OpenSweBackend
 from rt.browser import ReportedBrowserMiddleware
 from rt.file_tools import FileToolsMiddleware
+from rt.loop import RunLoop
 from rt.managed_sandbox import (
     EXECUTE_TIMEOUT_SECONDS,
     ReplaceSandboxMiddleware,
@@ -257,8 +259,9 @@ async def agent(runtime: ManagedServerRuntime) -> DeepAgentDefinition:
                 opened_sandbox if catalog.sandbox is not None else None,
                 trace_metadata=catalog.trace_metadata,
                 inbox=catalog.inbox,
-                models=catalog.models,
-                loop=catalog.loop,
+                loop=RunLoop(backend, catalog.loop, models)
+                if catalog.loop is not None and models is not None
+                else None,
             ),
             *replace_sandbox,
             *_backend_reports(backend, catalog),

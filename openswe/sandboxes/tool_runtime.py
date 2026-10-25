@@ -133,7 +133,7 @@ class ToolSurface:
     # How the run reads what is sent to its thread while it runs, before each model call.
     inbox: InboxSpec | None = None
     # What the hooks around each model call are built from, without the rest of the plan.
-    loop: LoopRules = field(default_factory=LoopRules)
+    loop: LoopRules | None = None
 
     async def prepare(self) -> None:
         planned = [

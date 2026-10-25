@@ -34,6 +34,30 @@ class RuntimeTokenError(Exception):
     """A token was refused; the message names the failed check, never the token."""
 
 
+class RunSettings(BaseModel):
+    """What the backend decided for a run as it started it, which every later call reads."""
+
+    model_config = ConfigDict(frozen=True)
+
+    # Where the run was asked from, once a default is applied.
+    source: str | None = None
+    # Whether pull requests the run opens start as drafts, by the sender's preference.
+    draft_prs: bool | None = None
+    # The model and effort the run calls, once settings and overrides are applied.
+    model_id: str | None = None
+    effort: str | None = None
+
+    def configurable(self) -> dict[str, JsonValue]:
+        """The run config keys these settings fill."""
+        values: dict[str, JsonValue] = {
+            "source": self.source,
+            "draft_prs": self.draft_prs,
+            "resolved_agent_model_id": self.model_id,
+            "resolved_agent_effort": self.effort,
+        }
+        return {key: value for key, value in values.items() if value is not None}
+
+
 class RemoteRun(BaseModel):
     """The run a token was signed for, exactly as dispatch stamped it."""
 
@@ -43,10 +67,7 @@ class RemoteRun(BaseModel):
     assistant_id: str
     configurable: dict[str, JsonValue]
     metadata: dict[str, JsonValue] = {}
-    # What planning the run added to its config, such as the sender's draft preference:
-    # the calls answered without a plan read it, while planning again starts without it.
-    planned_configurable: dict[str, JsonValue] = {}
-    planned_metadata: dict[str, JsonValue] = {}
+    settings: RunSettings = RunSettings()
 
 
 def _signing_keys() -> list[str]:
@@ -72,8 +93,7 @@ def _sign(audience: str, run: RemoteRun, extra: dict[str, JsonValue], now: int |
         "assistant_id": run.assistant_id,
         "cfg": run.configurable,
         "md": run.metadata,
-        **({"pcfg": run.planned_configurable} if run.planned_configurable else {}),
-        **({"pmd": run.planned_metadata} if run.planned_metadata else {}),
+        **({"set": settings} if (settings := run.settings.model_dump(exclude_none=True)) else {}),
         **extra,
     }
     return jwt.encode(claims, keys[0], algorithm=_ALGORITHM)
@@ -108,8 +128,7 @@ def _run(claims: Mapping[str, object]) -> RemoteRun:
             "assistant_id": claims.get("assistant_id"),
             "configurable": claims.get("cfg"),
             "metadata": claims.get("md", {}),
-            "planned_configurable": claims.get("pcfg", {}),
-            "planned_metadata": claims.get("pmd", {}),
+            "settings": claims.get("set", {}),
         }
     )
 

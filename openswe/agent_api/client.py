@@ -1,8 +1,8 @@
 """The Managed Deep Agents deployment that hosts every Open SWE graph.
 
 ``mda`` serves them as one graph; a run's context names the graph it
-plays. Dispatch stamps a signed run token and the run's catalog, planned once, into
-that context, and the deployment calls back with the token for the graph's tools
+plays. Dispatch stamps a signed run token and the run's catalog, worked out once as
+the run starts, into that context, and the deployment calls back with the token for the graph's tools
 and run hooks.
 """
 
@@ -92,12 +92,12 @@ def mda_runtime_api_key() -> str | None:
 
 
 @dataclass(frozen=True)
-class PlannedRun:
+class StartedRun:
     """An MDA run as the backend starts it: who it is, and what its graph is built from."""
 
     graph: HostedGraph
     token: str
-    # None when planning failed here: the run then asks for its catalog itself.
+    # None when working it out failed here: the run then asks for its catalog itself.
     catalog: Catalog | None
     invocation_id: str | None = None
 
@@ -112,14 +112,14 @@ class PlannedRun:
         return context
 
 
-async def plan_remote_run(
+async def start_remote_run(
     configurable: dict[str, JsonValue],
     *,
     metadata: dict[str, JsonValue],
     thread_id: str,
     assistant_id: str,
-) -> PlannedRun:
-    """Sign the run's token and plan its catalog, once, before MDA starts it.
+) -> StartedRun:
+    """Work out the run's catalog and settings, once, and sign its token, before MDA starts it.
 
     The configurable and metadata ride inside the signed token; the deployment calls
     back with the token rather than reading it.
@@ -138,19 +138,17 @@ async def plan_remote_run(
 
     catalog: Catalog | None = None
     try:
-        plan = await hosted_graphs()[graph].plan_run(run)
+        started = await hosted_graphs()[graph].start_run(run)
     except Exception:
-        # The run still starts, and fails on its own catalog call if planning keeps failing.
+        # The run still starts, and fails on its own catalog call if this keeps failing.
         logger.exception(
-            "Planning an MDA run failed", extra={"thread_id": thread_id, "graph": graph}
+            "Starting an MDA run failed", extra={"thread_id": thread_id, "graph": graph}
         )
     else:
-        catalog = plan.catalog
-        # Signed, so the calls answered without a plan read the config the plan ran with.
-        run = run.model_copy(
-            update={"planned_configurable": plan.configurable, "planned_metadata": plan.metadata}
-        )
-    return PlannedRun(
+        catalog = started.catalog
+        # Signed, so every later call reads the settings the run started with.
+        run = run.model_copy(update={"settings": started.settings})
+    return StartedRun(
         graph=graph,
         token=sign_runtime_token(run),
         catalog=catalog,
@@ -166,7 +164,7 @@ async def remote_run_context(
     assistant_id: str,
 ) -> RemoteRunContext:
     """Everything an MDA run needs, since a run takes either context or configurable."""
-    planned = await plan_remote_run(
+    started = await start_remote_run(
         configurable, metadata=metadata, thread_id=thread_id, assistant_id=assistant_id
     )
-    return planned.context()
+    return started.context()

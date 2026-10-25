@@ -1,10 +1,10 @@
-"""The run hooks that hand each phase of this model loop to the Open SWE backend.
+"""The run's middleware around Open SWE's model loop.
 
-The backend holds the in-process graph and its own middleware, and
-runs that middleware for every phase here: preparation before the run, routing
-and the system prompt before each model call, the transcript and usage after it,
-reply nudges after the model, and the end-of-run work. Graph state those hooks
-write rides in ``open_swe_state`` and goes back with every call.
+Preparation is the backend's: it readies the run and writes the graph state the
+loop reads, which rides in ``open_swe_state`` and goes back with every call. Around
+each model call ``RunLoop`` (``rt.loop``) does what the catalog's rules say, and the
+transcript and usage hear of each reply. A run whose catalog names no rules hands
+each phase to the backend instead.
 
 Before each model call the run also takes its thread's inbox: what was sent to
 the thread while the run worked, such as a person's follow-up or a task report.
@@ -60,7 +60,7 @@ from langgraph.runtime import Runtime
 from langgraph.types import Command
 from langgraph_sdk.errors import APIConnectionError, APIStatusError
 from pydantic import BaseModel, JsonValue, TypeAdapter
-from runtime_api.catalog import Catalog, InboxSpec, LoopRules, RunModels
+from runtime_api.catalog import Catalog, InboxSpec
 from runtime_api.endpoint import Endpoint, call
 from runtime_api.loop import (
     AFTER_AGENT,
@@ -72,7 +72,6 @@ from runtime_api.loop import (
     Inbox,
     InboxRead,
     InboxReceipt,
-    LoopCall,
     ModelCall,
     ModelResult,
     PhaseResult,
@@ -88,6 +87,7 @@ from rt.backend import (
     run_call,
     subagent_of,
 )
+from rt.loop import RunLoop
 from rt.models import build_model
 from rt.remote_files import FILE_TOOLS
 from rt.tools import STATE_KEY, cited, run_id, tool_report
@@ -318,7 +318,7 @@ class DescribedToolsMiddleware(AgentMiddleware):
 
 
 class BackendRunMiddleware(AgentMiddleware[RunState]):
-    """Run the Open SWE graph's own middleware on the backend, phase by phase."""
+    """Prepare the run on the backend, read its inbox, and run its loop around each model call."""
 
     state_schema = RunState
 
@@ -330,22 +330,16 @@ class BackendRunMiddleware(AgentMiddleware[RunState]):
         *,
         trace_metadata: Mapping[str, JsonValue] | None = None,
         inbox: InboxSpec | None = None,
-        models: RunModels | None = None,
-        loop: LoopRules | None = None,
+        loop: RunLoop | None = None,
     ) -> None:
         self._backend = backend
         self._invocation_id = invocation_id
         self._trace_metadata = trace_metadata or {}
         # How the catalog says to read the thread's inbox; None reads nothing.
         self._inbox = inbox
-        # What the backend builds its hooks around each model call from, without
-        # planning the run again; None leaves it to plan them.
-        self._loop = (
-            {"models": models.model_dump(mode="json"), "loop": loop.model_dump(mode="json")}
-            if models is not None and loop is not None
-            else {}
-        )
-        self._after_model = loop is None or loop.after_model
+        # What happens around each model call; None hands each phase to the backend, for
+        # the runs it still answers from their plan.
+        self._loop = loop
         self._trace = TurnTrace()
         # Opens the thread's box before preparing, so the backend binds the thread to it.
         self._open_sandbox = open_sandbox
@@ -384,8 +378,10 @@ class BackendRunMiddleware(AgentMiddleware[RunState]):
             "messages": [*state["messages"], *messages_from_dict(inbox.messages)],
             STATE_KEY: {**state.get(STATE_KEY, {}), **inbox.update},
         }
-        planned = await self._phase(
-            BEFORE_MODEL, run_call(LoopCall, run_id(), with_inbox, **self._loop)
+        planned = (
+            await self._loop.before_model(with_inbox)
+            if self._loop is not None
+            else await self._phase(BEFORE_MODEL, run_call(RunCall, run_id(), with_inbox))
         )
         if planned.jump_to is not None:
             # No model call answers the inbox now: it stays for the run that comes next.
@@ -452,21 +448,25 @@ class BackendRunMiddleware(AgentMiddleware[RunState]):
 
     @hook_config(can_jump_to=["model", "end"])
     async def aafter_model(self, state: RunState, runtime: Runtime) -> dict[str, object] | None:  # noqa: ARG002
+        if self._loop is None:
+            return _apply(await self._phase(AFTER_MODEL, run_call(RunCall, run_id(), state)))
         last = state["messages"][-1] if state["messages"] else None
-        # The hooks after a model call look only at an answer that calls no tool.
-        if not self._after_model or (isinstance(last, AIMessage) and last.tool_calls):
+        # Only an answer that calls no tool may owe a reply or a CLI result.
+        if not self._loop.looks_at_answers or (isinstance(last, AIMessage) and last.tool_calls):
             return None
-        return _apply(
-            await self._phase(AFTER_MODEL, run_call(LoopCall, run_id(), state, **self._loop))
-        )
+        return _apply(await self._loop.after_model(state))
 
     async def aafter_agent(self, state: RunState, runtime: Runtime) -> dict[str, object] | None:  # noqa: ARG002
         metadata = dict(self._trace_metadata)
         try:
             request = run_call(RunCall, run_id(), state)
-            ended = await self._phase(
-                AFTER_AGENT,
-                request.model_copy(update={"state": {**request.state, **self._trace.evidence}}),
+            request = request.model_copy(
+                update={"state": {**request.state, **self._trace.evidence}}
+            )
+            ended = (
+                await self._loop.after_agent(state, request)
+                if self._loop is not None
+                else await self._phase(AFTER_AGENT, request)
             )
             metadata.update(ended.trace_metadata)
             return _apply(ended)

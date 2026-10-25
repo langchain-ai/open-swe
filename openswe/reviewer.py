@@ -1077,7 +1077,11 @@ async def plan_reviewer(config: RunnableConfig, surface: ToolSurface) -> None:
     surface.inbox = InboxSpec(surface=WEB_REPLY_SURFACE, model_id=cfg.agent_model_id)
     surface.files = backend
     surface.excluded = SHELL_SEARCH_EXCLUDED_TOOLS
-    surface.loop = LoopRules(hidden_tools=sorted(SHELL_SEARCH_EXCLUDED_TOOLS))
+    surface.loop = LoopRules(
+        hidden_tools=sorted(SHELL_SEARCH_EXCLUDED_TOOLS),
+        refresh_github_proxy=True,
+        at_end=["settle_review_check"],
+    )
     surface.models = SurfaceModels(
         main=ModelChoice(models.main.model_id, dict(models.main.kwargs)),
         subagent=ModelChoice(models.subagent.model_id, dict(models.subagent.kwargs)),

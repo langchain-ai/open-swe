@@ -26,7 +26,14 @@ _MODEL_ROUTING_SPLIT = 0.5
 from langgraph.graph.state import RunnableConfig
 from langgraph.runtime import Runtime
 from langgraph_sdk import get_client
-from runtime_api.catalog import SEARCH_TOOLS, InboxSpec, LoopRules, ReplyRules, RoutingRules
+from runtime_api.catalog import (
+    SEARCH_TOOLS,
+    CliResultRules,
+    InboxSpec,
+    LoopRules,
+    ReplyRules,
+    RoutingRules,
+)
 
 warnings.filterwarnings("ignore", module="langchain_core._api.deprecation")
 
@@ -104,11 +111,14 @@ from openswe.middleware.client_tools import ClientToolsMiddleware
 from openswe.middleware.conversation_offloading import ConversationOffloadingMiddleware
 from openswe.middleware.model_selection import ModelSelectionState, RoutingMode
 from openswe.middleware.prepare_run import PrepareRunState
-from openswe.middleware.require_cli_result import RequireCliResultMiddleware
+from openswe.middleware.require_cli_result import RequireCliResultMiddleware, cli_result_nudge
 from openswe.middleware.require_user_reply import (
+    CARD_TOOLS,
+    REPLY_GUARD,
     SLACK_REPLY_SURFACE,
     WEB_REPLY_SURFACE,
     ReplySurface,
+    reply_nudge,
 )
 from openswe.middleware.sandbox_circuit_breaker import post_sandbox_unreachable_notification
 from openswe.middleware.stale_workspace import warn_stale_workspace
@@ -1958,17 +1968,32 @@ async def plan_agent(config: RunnableConfig, surface: ToolSurface) -> None:
     )
     surface.base_tools = main_tools
     surface.middleware = middleware
-    surface.loop = LoopRules(
-        hidden_tools=sorted(excluded_tools),
-        routing=RoutingRules(mode=model_routing_mode, route_model_ids=route_model_ids),
-        reply=ReplyRules(
-            tool=_registered_tool_name(slack_reply),
-            no_reply_tool=_registered_tool_name(slack_no_reply_needed),
-            replies=sorted(GUIDE_REPLY_TOOLS) if guide is not None else [],
-        ),
-        cli_result_tool=_registered_tool_name(cli_result) if cli_result_required else None,
-        review_guide=guide is not None,
-        task_coordination=task_coordination is not None,
+    reply_tool = _registered_tool_name(slack_reply)
+    no_reply_tool = _registered_tool_name(slack_no_reply_needed)
+    cli_result_tool = _registered_tool_name(cli_result)
+    # A requested offload and an incident run keep their loop on the backend: the offload
+    # needs the conversation's model, and the incident the evidence its plan collects.
+    surface.loop = (
+        None
+        if incident_session is not None or cfg.offload_conversation
+        else LoopRules(
+            hidden_tools=sorted(excluded_tools),
+            routing=RoutingRules(mode=model_routing_mode, route_model_ids=route_model_ids),
+            reply=ReplyRules(
+                tool=reply_tool,
+                no_reply_tool=no_reply_tool,
+                replies=sorted({*CARD_TOOLS, *(GUIDE_REPLY_TOOLS if guide is not None else ())}),
+                nudge=reply_nudge(reply_tool, no_reply_tool),
+                nudge_sender=REPLY_GUARD["id"],
+            ),
+            cli_result=CliResultRules(tool=cli_result_tool, nudge=cli_result_nudge(cli_result_tool))
+            if cli_result_required
+            else None,
+            review_guide=guide is not None,
+            task_coordination=task_coordination is not None,
+            client_tools=client_tools is not None,
+            refresh_github_proxy=not (task_coordination and task_coordination.is_worker),
+        )
     )
     surface.inbox = (
         None

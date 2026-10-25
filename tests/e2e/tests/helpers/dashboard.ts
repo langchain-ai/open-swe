@@ -314,6 +314,27 @@ export async function openMultiRepoPrThreadViaSlackLink(page: Page) {
   await expect(page).toHaveURL(/\/agents\//);
 }
 
+// Every call the backend planned the thread's runs for, once its runs are done. The
+// harness answers each call as a replica that never served the run (patches.py).
+export async function plannedCalls(page: Page, threadId: string) {
+  await expect
+    .poll(
+      async () => {
+        const res = await page.request.get(
+          `${BASE_URL}/control/thread-idle?thread_id=${threadId}`,
+        );
+        return ((await res.json()) as { idle: boolean }).idle;
+      },
+      { timeout: 30_000, intervals: [500] },
+    )
+    .toBe(true);
+  const res = await page.request.get(
+    `${BASE_URL}/control/plans?thread_id=${threadId}`,
+  );
+  expect(res.ok()).toBeTruthy();
+  return (await res.json()) as string[];
+}
+
 export function threadIdFromUrl(page: Page): string {
   const id = new URL(page.url()).pathname.split("/").pop() ?? "";
   expect(id).not.toBe("");

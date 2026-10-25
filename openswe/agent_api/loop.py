@@ -1,10 +1,10 @@
-"""The graph's hooks around each model call its MDA run makes.
+"""The graph's middleware around each model call, for runs still served from their plan.
 
-``RunLoop`` runs a graph's ``before_model`` and ``after_model`` hooks on the state a
-call carries, folds what its middleware adds to the call (``ShapesModelCalls``),
-and names the model to call. Each graph builds its loop from the run's
-``LoopRules`` and ``RunModels``, which the catalog planned and the runtime sends
-with each call (``RunParts.loop``), so these calls need no plan of the run.
+MDA's own middleware runs the loop of every other run (``mda/rt/loop.py``). For a run
+still served from its plan, ``RunLoop`` runs the graph's ``before_model`` and
+``after_model`` hooks on the state a call carries, folds what its middleware adds
+to the call (``ShapesModelCalls``), and names the model to call. The model
+settings helpers serve both: ``chosen_model`` answers ``model_choice``.
 """
 
 import inspect
@@ -173,11 +173,29 @@ async def run_hooks(
     return PhaseResult(update=json_state(update), messages=dump_messages(added), jump_to=jump_to)
 
 
-def _explicit(model_id: str, effort: object) -> ModelSpec:
+def model_spec(model_id: str, kwargs: Mapping[str, object]) -> ModelSpec:
+    """``model_id`` as the runtime calls it: whether it reads images, and its fallback."""
+    fallback = fallback_model_choice(model_id)
+    return ModelSpec(
+        model_id=model_id,
+        kwargs=_json_object.validate_python(dict(kwargs)),
+        reads_images=model_supports_images(model_id),
+        fallback=None
+        if fallback is None
+        else ModelSpec(
+            model_id=fallback.model_id,
+            kwargs=_json_object.validate_python(dict(fallback.kwargs)),
+            reads_images=model_supports_images(fallback.model_id),
+        ),
+    )
+
+
+def chosen_model(model_id: str, effort: object) -> ModelSpec:
+    """A model the run calls by id, such as one a person asked for, at ``effort``."""
     kwargs = provider_model_kwargs(
         model_id, effort if isinstance(effort, str) else None, max_tokens=DEFAULT_LLM_MAX_TOKENS
     )
-    return ModelSpec(model_id=model_id, kwargs=_json_object.validate_python(dict(kwargs)))
+    return model_spec(model_id, kwargs)
 
 
 class ModelChoices:
@@ -190,7 +208,7 @@ class ModelChoices:
         """The model the graph's model selection would call next."""
         requested = state.get("requested_model")
         if isinstance(requested, str) and requested:
-            return _explicit(requested, state.get("requested_effort"))
+            return chosen_model(requested, state.get("requested_effort"))
         route = state.get("model_route")
         if route in _ROUTES and route is not None:
             selected_route = normalize_route(cast(PersistedRoute, route))
@@ -199,7 +217,7 @@ class ModelChoices:
                 return routed
         selected = state.get("selected_model_id")
         if isinstance(selected, str) and selected and selected != self.models.model.model_id:
-            return _explicit(selected, state.get("selected_effort"))
+            return chosen_model(selected, state.get("selected_effort"))
         return self.models.model
 
     def vision_for(self, model: ModelSpec) -> ModelSpec | None:
