@@ -105,7 +105,6 @@ import {
 } from "@/lib/appCommands"
 import { useShortcutLabel } from "@/lib/hotkeys"
 import { cn } from "@/lib/utils"
-import { useChatRoutes } from "@/lib/chatRoutes"
 import { usePendingVariables } from "@/lib/optimistic"
 
 interface AgentsSidebarProps {
@@ -185,7 +184,6 @@ export function AgentsSidebar({
 }: AgentsSidebarProps) {
   const navigate = useNavigate()
   const newThreadShortcut = useShortcutLabel("mod+n")
-  const chat = useChatRoutes()
   const profile = useProfile()
   const concierge = useQuery({
     queryKey: ["concierge", user?.login],
@@ -206,9 +204,9 @@ export function AgentsSidebar({
         agentThreadKeys.detail(threadId)
       )?.reviewPage
       if (review) void navigate(reviewPageRoute(review))
-      else void navigate({ to: chat.thread, params: { threadId } })
+      else void navigate({ to: "/agents/$threadId", params: { threadId } })
     },
-    [navigate, chat.thread, queryClient]
+    [navigate, queryClient]
   )
   const {
     prefs,
@@ -599,7 +597,7 @@ export function AgentsSidebar({
       hydrate={hydrateRepoThreads}
       onToggleCollapsed={() => toggleRepoCollapsed(group.key)}
       onExpand={() => expandRepo(group.key)}
-      composeTo={group.localRepoPath ? "/agents" : chat.home}
+      composeTo="/agents"
       onCompose={layout.closeOnMobile}
       onTogglePin={() => toggleRepoPin(group.key)}
       onLoadMore={
@@ -669,7 +667,7 @@ export function AgentsSidebar({
 
       <div className="flex flex-col gap-0.5 px-space-2 pb-space-1">
         <Link
-          to={chat.home}
+          to="/agents"
           onClick={layout.closeOnMobile}
           className={cn(
             NAV_ROW_CLASS,
@@ -689,7 +687,7 @@ export function AgentsSidebar({
           <a
             href={
               concierge.data?.thread_id
-                ? `${chat.home}/${concierge.data.thread_id}`
+                ? `/agents/${concierge.data.thread_id}`
                 : concierge.data?.channel_id
                   ? `slack://channel?id=${concierge.data.channel_id}`
                   : undefined
@@ -864,7 +862,7 @@ export function AgentsSidebar({
                     icon={PlusIcon}
                     onClick={() => {
                       layout.closeOnMobile()
-                      void navigate({ to: chat.home })
+                      void navigate({ to: "/agents" })
                     }}
                   />
                 }
