@@ -1,4 +1,6 @@
-Start a separate Open SWE thread that works on a task in the background, owned by the person you are talking to.
+Start a separate, top-level Open SWE thread that works on a task in the background, owned by the person you are talking to. It is its own session in their thread list, not a worker under this conversation.
+
+When the person asks for a "new session", "new thread", "new chat" or "separate task", this is the tool, not `start_async_task`: a worker is part of this conversation's task and reports back here. If you cannot tell whether they want a separate top-level thread or a worker that reports back here, ask them before starting either.
 
 For PR implementation or fixes, first follow the Task Execution existing-thread lookup and reuse rule. Start a new task only when no suitable accessible thread is found or the user explicitly requests a separate task; a busy owner is not a reason to create a competing worker. Dedicated review requests use the review tools instead.
 

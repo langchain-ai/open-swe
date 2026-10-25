@@ -494,7 +494,7 @@ fn poll_for_token(http: &HttpClient, api_url: &str, device: &DeviceCode) -> Resu
     let deadline = Instant::now() + budget;
 
     loop {
-        std::thread::sleep(interval);
+        crate::interrupt::pause(interval)?;
         if Instant::now() >= deadline {
             bail!("timed out waiting for LangSmith sign-in; try again");
         }
@@ -570,6 +570,10 @@ fn oauth_error(response: Response) -> String {
 /// Send the developer to `url`, ignoring failure: the URL is printed either way,
 /// and a machine without a browser is not an error.
 pub(crate) fn open_browser(url: &str) {
+    let _ = try_open_browser(url);
+}
+
+pub(crate) fn try_open_browser(url: &str) -> bool {
     let (program, args): (&str, [&str; 2]) = if cfg!(target_os = "macos") {
         ("open", [url, ""])
     } else if cfg!(target_os = "windows") {
@@ -577,11 +581,12 @@ pub(crate) fn open_browser(url: &str) {
     } else {
         ("xdg-open", [url, ""])
     };
-    let _ = Command::new(program)
+    Command::new(program)
         .args(args.iter().filter(|arg| !arg.is_empty()))
         .stdout(Stdio::null())
         .stderr(Stdio::null())
-        .status();
+        .status()
+        .is_ok_and(|status| status.success())
 }
 
 fn unix_now() -> u64 {

@@ -955,14 +955,18 @@ def _assert_store_access(user: BaseUser, value: Mapping[str, object]) -> None:
     user_id = _field(user, "mda_user_id")
     raw = value.get("namespace") if isinstance(value, Mapping) else None
     namespace = [str(segment) for segment in raw] if isinstance(raw, (list, tuple)) else []
-    # Managed account-link / legacy GitHub-credential tables are deployment-wide.
-    # Only the trusted identity-links service principal may read/write them.
-    if namespace and namespace[0] in {
-        IDENTITY_LINKS_STORE_PREFIX,
-        GITHUB_CREDENTIALS_STORE_PREFIX,
-    }:
-        if user_id == IDENTITY_LINKS_SERVICE_USER:
-            return
+    if user_id == IDENTITY_LINKS_SERVICE_USER:
+        return
+    if (
+        not namespace
+        or not namespace[0]
+        or namespace[0]
+        in {
+            "*",
+            IDENTITY_LINKS_STORE_PREFIX,
+            GITHUB_CREDENTIALS_STORE_PREFIX,
+        }
+    ):
         raise ManagedAuthError(403, "store namespace is outside the caller's identity boundary")
 
 

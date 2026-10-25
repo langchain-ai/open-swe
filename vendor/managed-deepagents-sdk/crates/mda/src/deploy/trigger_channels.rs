@@ -8,13 +8,14 @@ use base64::Engine;
 use console::style;
 use reqwest::Url;
 use serde::Deserialize;
+use serde_json::Value;
 
 use super::channel_icon::channel_icon_file;
 use super::trigger_icon;
 use crate::compile::ChannelRequirements;
 use crate::langsmith::{
     self, ChannelSetupRequest, ChannelSetupResponse, ChannelSetupStatus, ChannelSetupTarget,
-    SlackChannelApp, SlackChannelOptions, SlackChannelSetup, SlackTriggerMode,
+    SlackChannelApp, SlackChannelOptions, SlackChannelSetup, SlackCustomerApp, SlackTriggerMode,
 };
 use crate::project::Language;
 
@@ -412,6 +413,7 @@ fn slack_setup(prepared: &PreparedTriggerChannel) -> SlackChannelSetup {
             trigger_mode: prepared.trigger_mode,
             allow_bot_triggers: prepared.allow_bot_triggers,
         },
+        customer_app: None,
     }
 }
 
@@ -428,17 +430,141 @@ pub(crate) fn artifact(prepared: &PreparedTriggerChannel) -> serde_json::Value {
 pub(crate) fn register(
     client: &langsmith::Client,
     prepared: &PreparedTriggerChannel,
+    customer_app: Option<&SlackCustomerApp>,
     agent_server_url: &str,
     deployment_id: &str,
     assistant_id: &str,
 ) -> Result<()> {
-    let request = build_setup_request(prepared, agent_server_url, deployment_id, assistant_id)?;
+    let mut request = build_setup_request(prepared, agent_server_url, deployment_id, assistant_id)?;
     let interactive = std::io::stdin().is_terminal() && std::io::stderr().is_terminal();
+    if client.is_self_hosted() {
+        let customer_app = customer_app
+            .ok_or_else(|| anyhow!("Self-hosted Slack app credentials are unavailable."))?;
+        return register_customer_app(client, &mut request, customer_app);
+    }
     run_registration(
         interactive,
         || client.setup_trigger_channel(&request),
         wait_for_action,
     )
+}
+
+const SLACK_BOT_TOKEN_ENV: &str = "SLACK_BOT_TOKEN";
+const SLACK_SIGNING_SECRET_ENV: &str = "SLACK_SIGNING_SECRET";
+
+fn customer_credentials(project_root: &Path) -> Result<Option<SlackCustomerApp>> {
+    let env = super::env_file::parse_env_file(&project_root.join(".env"));
+    let bot_token = env
+        .get(SLACK_BOT_TOKEN_ENV)
+        .map(|value| value.trim())
+        .filter(|value| !value.is_empty());
+    let signing_secret = env
+        .get(SLACK_SIGNING_SECRET_ENV)
+        .map(|value| value.trim())
+        .filter(|value| !value.is_empty());
+    match (bot_token, signing_secret) {
+        (None, None) => Ok(None),
+        (Some(bot_token), Some(signing_secret)) => Ok(Some(SlackCustomerApp {
+            bot_token: bot_token.to_string(),
+            signing_secret: signing_secret.to_string(),
+        })),
+        _ => bail!(
+            "Add both {SLACK_BOT_TOKEN_ENV} and {SLACK_SIGNING_SECRET_ENV} to .env, then retry `mda deploy`."
+        ),
+    }
+}
+
+fn slack_manifest_link(manifest: &Value) -> Result<Url> {
+    let mut url = Url::parse("https://api.slack.com/apps")?;
+    url.query_pairs_mut()
+        .append_pair("new_app", "1")
+        .append_pair(
+            "manifest_json",
+            &serde_json::to_string(manifest).context("Failed to serialize Slack manifest.")?,
+        );
+    Ok(url)
+}
+
+pub(crate) fn prepare_customer_app(
+    client: &langsmith::Client,
+    prepared: &PreparedTriggerChannel,
+    project_root: &Path,
+    interactive: bool,
+) -> Result<SlackCustomerApp> {
+    if let Some(credentials) = customer_credentials(project_root)? {
+        return Ok(credentials);
+    }
+    if !interactive {
+        bail!(
+            "Add {SLACK_BOT_TOKEN_ENV} and {SLACK_SIGNING_SECRET_ENV} to .env, or rerun `mda deploy` interactively to set up the Slack app."
+        );
+    }
+    let manifest = client.slack_app_manifest(
+        &prepared.app.name,
+        &prepared.app.description,
+        &prepared.app.background_color,
+        prepared.trigger_on_all_messages,
+    )?;
+    wait_for_customer_app(&project_root.join(".env"), &slack_manifest_link(&manifest)?)?;
+    customer_credentials(project_root)?.ok_or_else(|| {
+        anyhow!(
+            "Add {SLACK_BOT_TOKEN_ENV} and {SLACK_SIGNING_SECRET_ENV} to .env, then rerun `mda deploy`."
+        )
+    })
+}
+
+fn register_customer_app(
+    client: &langsmith::Client,
+    request: &mut ChannelSetupRequest,
+    credentials: &SlackCustomerApp,
+) -> Result<()> {
+    request.slack.customer_app = Some(SlackCustomerApp {
+        bot_token: credentials.bot_token.clone(),
+        signing_secret: credentials.signing_secret.clone(),
+    });
+    let response = client.setup_trigger_channel(request)?;
+    if matches!(response.status, ChannelSetupStatus::Active) && response.channel_id.is_some() {
+        return Ok(());
+    }
+    bail!("Slack app setup did not complete. Check .env and rerun `mda deploy`.")
+}
+
+fn customer_app_instructions(env_path: &Path, link: &Url, browser_opened: bool) -> String {
+    let setup_link = if browser_opened {
+        terminal_hyperlink("Open Slack app setup", link.as_str())
+    } else {
+        link.as_str().to_owned()
+    };
+    format!(
+        concat!(
+            "Set up your Slack app\n\n",
+            "  1. Create the app in Slack: {}\n",
+            "  2. Install the app in your workspace.\n",
+            "  3. Add SLACK_BOT_TOKEN=... to {}.\n",
+            "  4. Add SLACK_SIGNING_SECRET=... to {}.",
+        ),
+        setup_link,
+        env_path.display(),
+        env_path.display()
+    )
+}
+
+fn terminal_hyperlink(label: &str, destination: &str) -> String {
+    if destination.chars().any(char::is_control) {
+        return label.to_owned();
+    }
+    format!("\x1b]8;;{destination}\x1b\\{label}\x1b]8;;\x1b\\")
+}
+
+fn wait_for_customer_app(env_path: &Path, link: &Url) -> Result<()> {
+    let browser_opened = langsmith::login::try_open_browser(link.as_str());
+    cliclack::log::step(customer_app_instructions(env_path, link, browser_opened))?;
+    cliclack::set_theme(ContinueTheme);
+    let _reset_theme = ResetTheme;
+    let _: () = cliclack::select("")
+        .item((), "Press Enter once .env is updated", "")
+        .interact()?;
+    Ok(())
 }
 
 // This URL must stay unwrapped and selectable inside the interactive flow.
@@ -665,6 +791,82 @@ mod tests {
             authorization_url: None,
             message: None,
         }
+    }
+
+    #[test]
+    fn customer_credentials_require_both_values_in_dotenv() {
+        let root = tempfile::tempdir().unwrap();
+        fs::write(root.path().join(".env"), "SLACK_BOT_TOKEN=test-bot-token\n").unwrap();
+
+        let error = customer_credentials(root.path()).err().unwrap().to_string();
+
+        assert!(error.contains("SLACK_SIGNING_SECRET"));
+        assert!(!error.contains("test-bot-token"));
+    }
+
+    #[test]
+    fn customer_credentials_are_reloaded_from_dotenv() {
+        let root = tempfile::tempdir().unwrap();
+        assert!(customer_credentials(root.path()).unwrap().is_none());
+        fs::write(
+            root.path().join(".env"),
+            "SLACK_BOT_TOKEN=test-bot-token\nSLACK_SIGNING_SECRET=signing-test\n",
+        )
+        .unwrap();
+
+        let credentials = customer_credentials(root.path()).unwrap().unwrap();
+
+        assert_eq!(credentials.bot_token, "test-bot-token");
+        assert_eq!(credentials.signing_secret, "signing-test");
+    }
+
+    #[test]
+    fn slack_manifest_link_encodes_the_manifest() {
+        let manifest = json!({"display_information": {"name": "Support & Help"}});
+
+        let link = slack_manifest_link(&manifest).unwrap();
+        let query: std::collections::HashMap<_, _> = link.query_pairs().into_owned().collect();
+
+        assert_eq!(link.host_str(), Some("api.slack.com"));
+        assert_eq!(query.get("new_app").map(String::as_str), Some("1"));
+        assert_eq!(
+            serde_json::from_str::<Value>(query.get("manifest_json").unwrap()).unwrap(),
+            manifest
+        );
+    }
+
+    #[test]
+    fn customer_app_instructions_identify_setup_link_and_dotenv() {
+        let env_path = Path::new("project/.env");
+
+        let link = slack_manifest_link(&json!({"name": "Test"})).unwrap();
+        let instructions = customer_app_instructions(env_path, &link, true);
+
+        assert!(instructions.contains(&format!(
+            "  1. Create the app in Slack: \x1b]8;;{}\x1b\\Open Slack app setup\x1b]8;;\x1b\\",
+            link.as_str()
+        )));
+        assert!(instructions.contains("  2. Install the app in your workspace."));
+        assert!(instructions.contains("  3. Add SLACK_BOT_TOKEN=... to project/.env."));
+        assert!(instructions.contains("  4. Add SLACK_SIGNING_SECRET=... to project/.env."));
+    }
+
+    #[test]
+    fn customer_app_instructions_print_url_when_browser_does_not_open() {
+        let link = slack_manifest_link(&json!({"name": "Test"})).unwrap();
+
+        let instructions = customer_app_instructions(Path::new("project/.env"), &link, false);
+
+        assert!(instructions.contains(&format!("  1. Create the app in Slack: {link}")));
+        assert!(!instructions.contains("\x1b]8;;"));
+    }
+
+    #[test]
+    fn terminal_hyperlink_omits_unsafe_destination() {
+        assert_eq!(
+            terminal_hyperlink("Open Slack app setup", "https://api.slack.com/apps\x1b"),
+            "Open Slack app setup"
+        );
     }
 
     #[test]
