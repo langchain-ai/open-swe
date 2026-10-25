@@ -71,7 +71,8 @@ export function TranscriptQuoteButton({
       selecting = true
       setSelected(null)
     }
-    const onPointerUp = (event: PointerEvent) => {
+    // Touch selection often ends in pointercancel (a long-press or a scroll takes over), not pointerup.
+    const onPointerEnd = (event: PointerEvent) => {
       if (ownsEvent(event)) return
       selecting = false
       // A click that collapses the selection settles after pointerup.
@@ -89,7 +90,8 @@ export function TranscriptQuoteButton({
       frame = requestAnimationFrame(follow)
     }
     document.addEventListener("pointerdown", onPointerDown)
-    document.addEventListener("pointerup", onPointerUp)
+    document.addEventListener("pointerup", onPointerEnd)
+    document.addEventListener("pointercancel", onPointerEnd)
     document.addEventListener("selectionchange", onSelectionChange)
     document.addEventListener("keydown", onKeyDown)
     window.addEventListener("scroll", onLayout, {
@@ -100,7 +102,8 @@ export function TranscriptQuoteButton({
     return () => {
       cancelAnimationFrame(frame)
       document.removeEventListener("pointerdown", onPointerDown)
-      document.removeEventListener("pointerup", onPointerUp)
+      document.removeEventListener("pointerup", onPointerEnd)
+      document.removeEventListener("pointercancel", onPointerEnd)
       document.removeEventListener("selectionchange", onSelectionChange)
       document.removeEventListener("keydown", onKeyDown)
       window.removeEventListener("scroll", onLayout, { capture: true })
