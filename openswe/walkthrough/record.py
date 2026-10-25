@@ -15,15 +15,16 @@ from uuid import UUID
 from pydantic import BaseModel
 from sqlalchemy import ForeignKey, delete, func, select, update
 from sqlalchemy.dialects.postgresql import JSONB, insert
-from sqlalchemy.orm import Mapped, mapped_column
+from sqlalchemy.orm import Mapped, mapped_column, undefer
 
 from openswe.database import postgres
 from openswe.database.orm import NOW, Base
 from openswe.github.pull_requests import PullRequest
 from openswe.github.repositories import Repository
 from openswe.utils.json_types import JsonObject
-from openswe.walkthrough.diff import FileChange
-from openswe.walkthrough.plan import LineRange, LineRef, Plan
+from openswe.walkthrough.diff import DiffIndex
+from openswe.walkthrough.lines import LineRange, LineSet
+from openswe.walkthrough.plan import Plan
 
 logger = logging.getLogger(__name__)
 
@@ -43,6 +44,10 @@ class Walkthrough(Base):
     head_sha: Mapped[str]
     merge_base_sha: Mapped[str]
     plan_json: Mapped[JsonObject] = mapped_column("plan", JSONB)
+    # The diff's hunks at ``head_sha``; planners load it, readers of the plan alone do not.
+    diff_index_json: Mapped[JsonObject | None] = mapped_column(
+        "diff_index", JSONB, deferred=True, default=None
+    )
     # Every changed line at ``head_sha`` is in a chunk or in Other.
     complete: Mapped[bool] = mapped_column(server_default="false", default=False)
     human_input_summary: Mapped[str] = mapped_column(server_default="", default="")
@@ -53,10 +58,28 @@ class Walkthrough(Base):
     def plan(self) -> Plan:
         return Plan.model_validate(self.plan_json)
 
+    @property
+    def diff_index(self) -> DiffIndex | None:
+        """The index stored with the plan; ``None`` for plans stored before there was one."""
+        return DiffIndex.model_validate(self.diff_index_json) if self.diff_index_json else None
+
     @classmethod
-    async def get(cls, pull_request_id: UUID) -> Self | None:
+    async def get(cls, pull_request_id: UUID, *, with_index: bool = False) -> Self | None:
         async with postgres.session() as session:
-            return await session.get(cls, pull_request_id)
+            return await session.get(
+                cls, pull_request_id, options=[undefer(cls.diff_index_json)] if with_index else []
+            )
+
+    @classmethod
+    async def save_index(cls, pull_request_id: UUID, head_sha: str, index: DiffIndex) -> None:
+        """Store the index of a plan stored without one, if the plan is still at ``head_sha``."""
+        async with postgres.session() as session:
+            await session.execute(
+                update(cls)
+                .where(cls.pull_request_id == pull_request_id, cls.head_sha == head_sha)
+                .values(diff_index_json=index.model_dump(mode="json"))
+            )
+            await session.commit()
 
     @classmethod
     async def for_pull_request(cls, owner: str, repo: str, number: int) -> Self | None:
@@ -75,18 +98,19 @@ class Walkthrough(Base):
         plan: Plan,
         *,
         merge_base_sha: str,
-        changes: list[FileChange],
+        index: DiffIndex,
         replacing: str | None,
     ) -> bool:
         """Store ``plan`` if the stored one is still at ``replacing`` (``None``: there is none).
 
         ``False`` when another reader of the PR moved it first.
         """
-        complete = not plan.unplanned(changes)
+        complete = plan.complete(index)
         values = {
             "head_sha": plan.head_sha,
             "merge_base_sha": merge_base_sha,
             "plan_json": plan.model_dump(mode="json"),
+            "diff_index_json": index.model_dump(mode="json"),
             "complete": complete,
         }
         async with postgres.session() as session:
@@ -116,7 +140,7 @@ class Walkthrough(Base):
         pull_request_id: UUID,
         *,
         head_sha: str,
-        changes: list[FileChange],
+        index: DiffIndex,
         change: Callable[[Plan], T],
     ) -> T:
         """Apply ``change`` to the stored plan under a row lock; it must still be at ``head_sha``."""
@@ -128,7 +152,7 @@ class Walkthrough(Base):
                 raise PlanMovedError("the pull request moved on; start from its new head")
             plan = row.plan
             result = change(plan)
-            complete = not plan.unplanned(changes)
+            complete = plan.complete(index)
             if complete and not row.complete:
                 row.generated_at = func.clock_timestamp()
             row.plan_json = plan.model_dump(mode="json")
@@ -243,10 +267,10 @@ class WalkthroughView(BaseModel):
     steps: list[WalkthroughStepView]
 
     @staticmethod
-    def _files(refs: list[LineRef], textless: Sequence[str] = ()) -> list[WalkthroughFileView]:
+    def _files(lines: LineSet, textless: Sequence[str] = ()) -> list[WalkthroughFileView]:
         files = [
             WalkthroughFileView(path=path, added=added, deleted=deleted)
-            for path, (added, deleted) in LineRef.ranges(refs).items()
+            for path, added, deleted in lines.files()
         ]
         files += [WalkthroughFileView(path=path, added=[], deleted=[]) for path in textless]
         return sorted(files, key=lambda file: file.path)
