@@ -123,6 +123,18 @@ jobs:
             || matrix.environment == 'staging' && secrets.MDA_LINEAR_WEBHOOK_SECRET_STAGING
             || matrix.environment == 'preview' && secrets.MDA_LINEAR_WEBHOOK_SECRET_PREVIEW
             || '' }}
+          # This environment's own Open SWE Slack app, which deploy registers with Trigger Server for
+          # the Slack channel; its URLs stay at the backend. Deploy never forwards these.
+          MDA_SLACK_BOT_TOKEN: >-
+            ${{ matrix.environment == 'prod' && secrets.MDA_SLACK_BOT_TOKEN_PROD
+            || matrix.environment == 'staging' && secrets.MDA_SLACK_BOT_TOKEN_STAGING
+            || matrix.environment == 'preview' && secrets.MDA_SLACK_BOT_TOKEN_PREVIEW
+            || '' }}
+          MDA_SLACK_SIGNING_SECRET: >-
+            ${{ matrix.environment == 'prod' && secrets.MDA_SLACK_SIGNING_SECRET_PROD
+            || matrix.environment == 'staging' && secrets.MDA_SLACK_SIGNING_SECRET_STAGING
+            || matrix.environment == 'preview' && secrets.MDA_SLACK_SIGNING_SECRET_PREVIEW
+            || '' }}
           # This environment's own Open SWE GitHub App, which deploy brings into Agent Auth when the
           # deployment has none yet; it cannot ask for it without a terminal. A deployment that
           # already has the App keeps it, and these never reach the deployment.

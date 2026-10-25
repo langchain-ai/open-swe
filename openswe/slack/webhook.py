@@ -737,6 +737,34 @@ async def process_slack_web_mention(
     )
 
 
+@dataclass
+class SlackChannelRun:
+    """The run a Slack message starts, prepared for MDA's Slack channel to start it."""
+
+    input: RunInput
+    configurable: dict[str, Any]
+    trigger_ts: str
+
+
+@dataclass
+class _ChannelRunCapture:
+    run: SlackChannelRun | None = None
+
+
+async def prepare_slack_channel_run(
+    request: SlackRequest, repo: common.SlackRepoResolution | None
+) -> SlackChannelRun | None:
+    """The run a message in an MDA-owned Slack conversation starts, without starting it.
+
+    Everything else happens as for the backend's own Slack runs (the gates, the
+    account-link prompt, the thread's metadata, files staged in the sandbox);
+    MDA's Slack channel starts the run and shows its status (``openswe.slack.channel``).
+    """
+    capture = _ChannelRunCapture()
+    await _process_slack_mention_impl(request, repo, channel_run=capture)
+    return capture.run
+
+
 async def _process_slack_mention_impl(
     request: SlackRequest,
     repo_resolution: common.SlackRepoResolution | None,
@@ -744,6 +772,7 @@ async def _process_slack_mention_impl(
     inherited_workspace: str | None = None,
     model_choice: tuple[str, str | None] | None = None,
     status_shown: asyncio.Future[bool] | None = None,
+    channel_run: _ChannelRunCapture | None = None,
 ) -> bool:
     resolution = repo_resolution or common.SlackRepoResolution()
     repo = resolution.repo
@@ -1344,6 +1373,13 @@ async def _process_slack_mention_impl(
                 ),
             )
             await common.set_commands(channel_id, common.DEFAULT_CODE_CHANNEL_COMMANDS)
+    if channel_run is not None:
+        channel_run.run = SlackChannelRun(
+            input=run_input,
+            configurable=configurable,
+            trigger_ts=event_ts,
+        )
+        return True
     if status_shown is not None:
         await asyncio.wait({status_shown})
     try:

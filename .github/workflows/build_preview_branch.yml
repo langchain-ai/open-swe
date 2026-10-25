@@ -150,6 +150,10 @@ jobs:
           MDA_LINEAR_CLIENT_ID: ${{ secrets.MDA_LINEAR_CLIENT_ID_PREVIEW }}
           MDA_LINEAR_CLIENT_SECRET: ${{ secrets.MDA_LINEAR_CLIENT_SECRET_PREVIEW }}
           MDA_LINEAR_WEBHOOK_SECRET: ${{ secrets.MDA_LINEAR_WEBHOOK_SECRET_PREVIEW }}
+          # The preview Slack app, which deploy registers with Trigger Server for the Slack channel;
+          # its URLs stay at the preview backend. Deploy never forwards these.
+          MDA_SLACK_BOT_TOKEN: ${{ secrets.MDA_SLACK_BOT_TOKEN_PREVIEW }}
+          MDA_SLACK_SIGNING_SECRET: ${{ secrets.MDA_SLACK_SIGNING_SECRET_PREVIEW }}
           # No GitHub App key: this deploy runs labeled PRs' code, and the App is installed on every
           # repository. open-swe-mda-preview already has the App in Agent Auth, and keeps it.
           TREE_SHA: ${{ needs.build.outputs.sha }}
