@@ -6,7 +6,8 @@ point a call elsewhere. Every call, the loop's and the tools', is one endpoint o
 the typed API both sides import (``runtime_api``), under ``/agent-api/``.
 
 A task worker launched as an async subagent starts with a worker grant instead:
-enough to read its coordinator's catalog, then ``adopt`` a run token of its own.
+enough to read its coordinator's catalog, then ``adopt`` a run token and catalog of
+its own.
 """
 
 import asyncio
@@ -203,7 +204,7 @@ class OpenSweBackend:
             self, ADOPT, Adopt(thread_id=thread_id, run_id=run_id, instructions=instructions)
         )
         self._run_token, self._worker_grant = adopted.run_token, None
-        self.adopted = await self.catalog(run_id)
+        self.adopted = adopted.catalog or await self.catalog(run_id)
 
     async def post(
         self,

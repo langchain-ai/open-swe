@@ -657,10 +657,7 @@ async def test_an_mda_subagent_is_recorded_under_its_task_call(
     async def build(config: Any, surface: ToolSurface) -> None:
         surface.middleware = [mw.TranscriptMiddleware()]
 
-    async def start_models(cfg: Any) -> Any:
-        raise AssertionError("not asked for")
-
-    graph = RemoteGraph("agent", build, start_models)
+    graph = RemoteGraph("agent", build)
     run = RemoteRun(thread_id=THREAD_ID, assistant_id="agent", configurable={})
     asked = HumanMessage(content="do the thing", id="human-1")
     delegated = AIMessage(

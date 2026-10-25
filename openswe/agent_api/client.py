@@ -1,19 +1,25 @@
 """The Managed Deep Agents deployment that hosts every Open SWE graph.
 
 ``mda`` serves them as one graph; a run's context names the graph it
-plays. Dispatch stamps a signed run token into that context, and the deployment
-calls back with it for the graph's tools and run hooks.
+plays. Dispatch stamps a signed run token and the run's catalog, planned once, into
+that context, and the deployment calls back with the token for the graph's tools
+and run hooks.
 """
 
+import logging
 from collections.abc import Mapping
+from dataclasses import dataclass
 from typing import Final, Literal, NotRequired, TypedDict, get_args
 from urllib.parse import urlsplit
 
 from pydantic import JsonValue, TypeAdapter
+from runtime_api.catalog import Catalog
 
 from openswe.agent_api.tokens import RemoteRun, runtime_tokens_configured, sign_runtime_token
 from openswe.config import ENV
 from openswe.run_config import RunConfig
+
+logger = logging.getLogger(__name__)
 
 # The graph id `mda build` derives from the project's agent name.
 MDA_GRAPH_ID: Final = "open-swe"
@@ -33,15 +39,17 @@ _json_object = TypeAdapter(dict[str, JsonValue])
 _hosted_graph = TypeAdapter(HostedGraph)
 
 
-# The run context the MDA deployment builds its graph from. The token's key is a
-# dunder so it stays out of the trace metadata the Agent Server mirrors context into.
+# The run context the MDA deployment builds its graph from. The token's and the
+# catalog's keys are dunders so they stay out of the trace metadata the Agent Server
+# mirrors context into. The catalog is JSON: the gRPC runtime serializes only the
+# context's top level.
 RemoteRunContext = TypedDict(
     "RemoteRunContext",
     {
         "graph": HostedGraph,
         "__run_token": str,
+        "__catalog": NotRequired[dict[str, JsonValue]],
         "invocation_id": NotRequired[str],
-        "models": NotRequired[dict[str, JsonValue]],
     },
 )
 
@@ -83,14 +91,35 @@ def mda_runtime_api_key() -> str | None:
     return ENV.MDA_RUNTIME_API_KEY.optional() or ENV.LANGSMITH_API_KEY.optional()
 
 
-async def remote_run_context(
+@dataclass(frozen=True)
+class PlannedRun:
+    """An MDA run as the backend starts it: who it is, and what its graph is built from."""
+
+    graph: HostedGraph
+    token: str
+    # None when planning failed here: the run then asks for its catalog itself.
+    catalog: Catalog | None
+    invocation_id: str | None = None
+
+    def context(self) -> RemoteRunContext:
+        context: RemoteRunContext = {"graph": self.graph, "__run_token": self.token}
+        if self.catalog is not None:
+            context["__catalog"] = _json_object.validate_python(
+                self.catalog.model_dump(mode="json")
+            )
+        if self.invocation_id:
+            context["invocation_id"] = self.invocation_id
+        return context
+
+
+async def plan_remote_run(
     configurable: dict[str, JsonValue],
     *,
     metadata: dict[str, JsonValue],
     thread_id: str,
     assistant_id: str,
-) -> RemoteRunContext:
-    """Everything an MDA run needs, since a run takes either context or configurable.
+) -> PlannedRun:
+    """Sign the run's token and plan its catalog, once, before MDA starts it.
 
     The configurable and metadata ride inside the signed token; the deployment calls
     back with the token rather than reading it.
@@ -98,24 +127,40 @@ async def remote_run_context(
     if assistant_id not in HOSTED_GRAPHS:
         raise RemoteRuntimeConfigurationError(f"Managed Deep Agents does not host {assistant_id}")
     graph = _hosted_graph.validate_python(assistant_id)
-    token = sign_runtime_token(
-        RemoteRun(
-            thread_id=thread_id,
-            assistant_id=assistant_id,
-            configurable=_json_object.validate_python(configurable),
-            metadata=_json_object.validate_python(metadata),
-        )
+    run = RemoteRun(
+        thread_id=thread_id,
+        assistant_id=assistant_id,
+        configurable=_json_object.validate_python(configurable),
+        metadata=_json_object.validate_python(metadata),
     )
     # The webapp must not import the agent stack at startup.
     from openswe.agent_api.hosted import hosted_graphs
 
-    cfg = RunConfig.parse(configurable)
-    models = await hosted_graphs()[graph].start_models(cfg)
-    context: RemoteRunContext = {
-        "graph": graph,
-        "__run_token": token,
-        "models": models.model_dump(mode="json"),
-    }
-    if cfg.invocation_id:
-        context["invocation_id"] = cfg.invocation_id
-    return context
+    catalog: Catalog | None = None
+    try:
+        catalog = await hosted_graphs()[graph].catalog(run)
+    except Exception:
+        # The run still starts, and fails on its own catalog call if planning keeps failing.
+        logger.exception(
+            "Planning an MDA run failed", extra={"thread_id": thread_id, "graph": graph}
+        )
+    return PlannedRun(
+        graph=graph,
+        token=sign_runtime_token(run),
+        catalog=catalog,
+        invocation_id=RunConfig.parse(configurable).invocation_id,
+    )
+
+
+async def remote_run_context(
+    configurable: dict[str, JsonValue],
+    *,
+    metadata: dict[str, JsonValue],
+    thread_id: str,
+    assistant_id: str,
+) -> RemoteRunContext:
+    """Everything an MDA run needs, since a run takes either context or configurable."""
+    planned = await plan_remote_run(
+        configurable, metadata=metadata, thread_id=thread_id, assistant_id=assistant_id
+    )
+    return planned.context()

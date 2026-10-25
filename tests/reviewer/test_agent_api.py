@@ -440,10 +440,7 @@ async def test_mda_catalog_leaves_integrations_and_code_mode_to_mda(
         choice = ModelChoice("openai:gpt-6.1-sol", {})
         surface.models = SurfaceModels(main=choice, subagent=choice, use_gateway=False)
 
-    async def start_models(cfg: object) -> object:
-        raise AssertionError("not asked for")
-
-    graph = RemoteGraph("agent", build, start_models)
+    graph = RemoteGraph("agent", build)
     catalog = await graph.api(RUN, "catalog", {"run_id": "run-1"})
 
     assert isinstance(catalog, dict)
@@ -809,7 +806,7 @@ async def test_an_adopted_worker_acts_as_its_own_thread_never_its_coordinator(
 ) -> None:
     from unittest.mock import AsyncMock, MagicMock
 
-    from runtime_api.catalog import ModelSpec, RunModels
+    from runtime_api.catalog import Catalog
     from runtime_api.workers import Adopt
 
     from openswe.agent_api import async_workers, hosted
@@ -827,12 +824,8 @@ async def test_an_adopted_worker_acts_as_its_own_thread_never_its_coordinator(
         AsyncMock(return_value={"thread_id": "worker", "github_login": "owner"}),
     )
     monkeypatch.setattr(async_workers.service.Actor, "resolve", AsyncMock(return_value="actor"))
-    spec = ModelSpec(model_id="openai:gpt-6.1-sol", kwargs={})
-    graph = MagicMock(
-        start_models=AsyncMock(
-            return_value=RunModels(model=spec, subagent_model=spec, use_gateway=False)
-        )
-    )
+    planned = Catalog(skill_sources=["/skills/worker/"])
+    graph = MagicMock(catalog=AsyncMock(return_value=planned))
     monkeypatch.setattr(hosted, "hosted_graphs", lambda: {"agent": graph})
 
     # The worker's first message: the assignment its launch rendered.
@@ -846,6 +839,9 @@ async def test_an_adopted_worker_acts_as_its_own_thread_never_its_coordinator(
     adopted = verify_runtime_token(reply.run_token)
     assert adopted.thread_id == "worker"
     assert adopted.configurable["thread_id"] == "worker"
+    # Planned as the worker's own run, so its first run never asks for a catalog.
+    assert reply.catalog == planned
+    assert graph.catalog.await_args.args[0].thread_id == "worker"
     register.assert_awaited_once_with("actor", "call-1", "worker", "Fix it")
 
 

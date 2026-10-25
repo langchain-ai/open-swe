@@ -4,8 +4,10 @@ MDA keeps the model loop, its checkpoints and every tool call. Everything else i
 the run as its graph factory plans it (``ToolSurface``), with no graph compiled,
 served as the typed API both sides import (``runtime_api``):
 
-- ``catalog`` names the run's operations (each the work of one of its tools), its
-  subagents, models and sandbox, and the checks around its file and shell tools
+- the catalog names the run's operations (each the work of one of its tools), its
+  subagents, models and sandbox, and the checks around its file and shell tools;
+  it is planned once as the run starts and rides in the run's context
+  (``RemoteGraph.catalog``); ``catalog`` serves it to a run started without one
 - ``prepare`` runs every ``before_agent`` hook: run preparation (the thread's
   sandbox, checkout and prompt), the transcript turn, skills, reply bookkeeping
 - ``inbox`` hands the run what was sent to its thread since the last model call:
@@ -239,7 +241,6 @@ _json_dicts = TypeAdapter(list[dict[str, JsonValue]])
 Phase = Literal["before_agent", "before_model", "after_model", "after_agent"]
 type PhaseAnswer[R: PhaseResult] = Callable[[PhaseResult, dict[str, object], Runtime], Awaitable[R]]
 RunPlanner = Callable[[RunnableConfig, ToolSurface], Awaitable[None]]
-StartModels = Callable[[RunConfig], Awaitable[RunModels]]
 StateRestorer = Callable[[dict[str, object]], None]
 
 
@@ -476,7 +477,7 @@ class RunSession:
             ),
         )
 
-    async def plan(self, _request: RunRequest) -> Catalog:
+    async def plan(self) -> Catalog:
         """The catalog, with who the run acts for and the box MDA creates for it."""
         sandbox = await self.sandbox()
         return self.catalog().model_copy(
@@ -994,13 +995,11 @@ class RemoteGraph:
         self,
         assistant_id: str,
         plan: RunPlanner,
-        start_models: StartModels,
         *,
         restore_state: StateRestorer | None = None,
     ) -> None:
         self.assistant_id = assistant_id
         self._plan = plan
-        self.start_models = start_models
         self._restore_state = restore_state
         self._sessions: dict[tuple[str, str | None], RunSession] = {}
 
@@ -1012,6 +1011,23 @@ class RemoteGraph:
             configurable["run_id"] = run_id
         return {**config, "configurable": configurable}
 
+    async def _planned(self, run: RemoteRun, run_id: str | None, *, fresh: bool) -> RunSession:
+        config = self._config(run, run_id)
+        surface = ToolSurface()
+        await self._plan(config, surface)
+        await surface.prepare()
+        return RunSession(
+            surface,
+            config,
+            self._restore_state,
+            started_here=fresh,
+            assistant_id=self.assistant_id,
+        )
+
+    async def catalog(self, run: RemoteRun) -> Catalog:
+        """What ``run``'s MDA graph is built from, planned as the run starts."""
+        return await (await self._planned(run, None, fresh=False)).plan()
+
     async def session(
         self, run: RemoteRun, run_id: str | None, *, fresh: bool = False
     ) -> RunSession:
@@ -1019,17 +1035,7 @@ class RemoteGraph:
         cached = self._sessions.get(key)
         if not fresh and cached is not None and time.monotonic() < cached.expires_at:
             return cached
-        config = self._config(run, run_id)
-        surface = ToolSurface()
-        await self._plan(config, surface)
-        await surface.prepare()
-        session = RunSession(
-            surface,
-            config,
-            self._restore_state,
-            started_here=fresh,
-            assistant_id=self.assistant_id,
-        )
+        session = await self._planned(run, run_id, fresh=fresh)
         if len(self._sessions) >= _SESSION_LIMIT:
             now = time.monotonic()
             self._sessions = {k: s for k, s in self._sessions.items() if s.expires_at > now}
@@ -1099,6 +1105,10 @@ def _message_content(content: str | list[JsonValue]) -> str | list[str | dict]:
     if isinstance(content, str):
         return content
     return [block for block in content if isinstance(block, str | dict)]
+
+
+async def _catalog(session: RunSession, _request: RunRequest) -> Catalog:
+    return await session.plan()
 
 
 def _b64(data: bytes | None) -> str | None:
@@ -1198,7 +1208,8 @@ RUN_CALLS: Final = Handlers[RemoteRun]()
 RUN_CALLS.serve(BROWSER, _browser)
 # The typed API every graph's MDA runs call (``runtime_api``), as the session of their run.
 API: Final = Handlers[RunSession]()
-API.serve(CATALOG, RunSession.plan)
+# Only for runs started without their catalog in the context.
+API.serve(CATALOG, _catalog)
 API.serve(PREPARE, RunSession.prepare)
 API.serve(INBOX, RunSession.inbox)
 API.serve(INBOX_RECEIVED, RunSession.inbox_received)
