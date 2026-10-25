@@ -153,6 +153,60 @@ async def test_the_named_calls_around_a_model_call_never_plan_the_run(
     refresh.assert_awaited_once_with(run.thread_id)
 
 
+@pytest.mark.usefixtures("registry_db")
+async def test_a_report_is_recorded_once_however_often_it_arrives(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A batch stops at the first report that fails, which its next delivery records,
+    and one delivered again after its answer was lost is not recorded twice."""
+    from unittest.mock import AsyncMock
+
+    from runtime_api.loop import SETTLE_REVIEW_CHECK, STEP_LIMIT_REACHED
+    from runtime_api.operations import RunRequest
+    from runtime_api.reports import Reports, ReportsTaken, item
+
+    from openswe.agent_api import agent
+    from openswe.agent_api import graph as graph_module
+    from openswe.agent_api.graph import RemoteGraph
+    from openswe.sandboxes.tool_runtime import ToolSurface
+
+    async def never_planned(config: object, surface: ToolSurface) -> None:
+        raise AssertionError("A report never plans the run")
+
+    told = AsyncMock(side_effect=[RuntimeError("Slack is down"), None])
+    settled = AsyncMock()
+    monkeypatch.setattr(graph_module, "notify_step_limit", told)
+    monkeypatch.setattr(graph_module, "settle_review_check", settled)
+    graph = RemoteGraph("agent", never_planned, agent.AgentParts())
+    run = RUN.model_copy(update={"assistant_id": "agent"})
+    batch = Reports(
+        items=[
+            item(endpoint, RunRequest(run_id="run-1"), key=f"run-1:{endpoint.name}", trace={})
+            for endpoint in (STEP_LIMIT_REACHED, SETTLE_REVIEW_CHECK)
+        ]
+    ).model_dump(mode="json")
+
+    async def deliver() -> ReportsTaken:
+        return ReportsTaken.model_validate(await graph.api(run, "reports", batch))
+
+    first = await deliver()
+    assert first.taken == []
+    assert first.refused is not None and first.refused.key == "run-1:step_limit_reached"
+    # Nothing after a report that failed is tried, so none lands before it.
+    settled.assert_not_awaited()
+
+    second = await deliver()
+    lost_answer = await deliver()
+
+    assert [taken.key for taken in second.taken] == [
+        "run-1:step_limit_reached",
+        "run-1:settle_review_check",
+    ]
+    assert lost_answer == second
+    assert told.await_count == 2
+    settled.assert_awaited_once()
+
+
 async def test_a_runs_tool_and_shell_calls_never_plan_it_and_read_its_settings(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

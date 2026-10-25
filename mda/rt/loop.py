@@ -219,7 +219,7 @@ class RunLoop:
         if any(held.get(key) for key in self.rules.stop_when) or self._awaits_client(state):
             return BeforeModel(jump_to="end")
         if self.rules.refresh_github_proxy:
-            self._backend.reports.notify(REFRESH_GITHUB_PROXY, RunRequest(run_id=run_id()))
+            self._backend.outbox.notify(REFRESH_GITHUB_PROXY, RunRequest(run_id=run_id()))
         context = await self._task_context()
         added: list[BaseMessage] = []
         if context.message is not None and not any(
@@ -442,28 +442,29 @@ class RunLoop:
     async def after_agent(
         self, state: Mapping[str, object], evidence: Mapping[str, JsonValue]
     ) -> AfterAgent:
-        """Start the graph's own end-of-run work, then report the run's end.
+        """Ask for the graph's own end-of-run work, then report the run's end.
 
-        The run waits for none of the work, and the work waits for no report: a report
-        that fails takes none of it with it.
+        The work goes out behind the run's reports, and one the backend cannot do takes
+        none of the rest with it.
         """
         messages = _messages(state)
         current = run_id()
-        reports = self._backend.reports
+        outbox = self._backend.outbox
         if messages and _LIMIT_MARKER in content_text(messages[-1].content):
-            reports.notify(STEP_LIMIT_REACHED, RunRequest(run_id=current))
+            outbox.notify(STEP_LIMIT_REACHED, RunRequest(run_id=current))
         for work in self.rules.at_end:
             if work == "settle_review_check":
-                reports.notify(SETTLE_REVIEW_CHECK, RunRequest(run_id=current))
+                outbox.notify(SETTLE_REVIEW_CHECK, RunRequest(run_id=current))
             else:
                 summary = _held(state).get("human_input_summary")
                 finished = ScoutPlanEnd(
                     run_id=current,
                     human_input_summary=summary if isinstance(summary, str) else "",
                 )
-                reports.notify(FINISH_SCOUT_PLAN, finished)
-        # The transcript has every reply and tool call before the run's end.
-        await reports.drain()
+                outbox.notify(FINISH_SCOUT_PLAN, finished)
+        # The transcript has every reply and tool call, and the backend the work, before
+        # the run's end.
+        await outbox.drain()
         replies = [
             # Usage reads only each reply's id, model and token counts.
             AIMessage(

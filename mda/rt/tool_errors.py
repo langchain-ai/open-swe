@@ -87,7 +87,7 @@ class ToolErrorMiddleware(AgentMiddleware):
     def _report_unreachable(self, request: ToolCallRequest, exc: Exception) -> None:
         sandbox_id = _SANDBOX_ID.search(str(exc))
         gone = SandboxGone(run_id=run_id(), sandbox_id=sandbox_id.group(0) if sandbox_id else None)
-        self._backend.reports.notify(SANDBOX_UNREACHABLE, gone)
+        self._backend.outbox.notify(SANDBOX_UNREACHABLE, gone)
 
 
 def _sandbox_unreachable(exc: Exception) -> bool:

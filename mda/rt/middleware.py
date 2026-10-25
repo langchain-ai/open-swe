@@ -39,6 +39,7 @@ from deepagents.middleware import async_subagents
 from langchain.agents.middleware.types import (
     AgentMiddleware,
     AgentState,
+    ExtendedModelResponse,
     ModelRequest,
     ModelResponse,
     OmitFromOutput,
@@ -90,6 +91,7 @@ from rt.backend import (
 )
 from rt.loop import RunLoop
 from rt.models import build_model
+from rt.outbox import OUTBOX_KEY, carry
 from rt.remote_files import FILE_TOOLS
 from rt.tools import STATE_KEY, cited, run_id, tool_report
 from rt.tracing import TurnTrace
@@ -157,6 +159,7 @@ def _tool_pairing_error(exc: Exception) -> bool:
 
 class RunState(AgentState):
     open_swe_state: NotRequired[Annotated[dict[str, JsonValue], OmitFromOutput, _merge]]
+    open_swe_outbox: NotRequired[Annotated[dict[str, JsonValue], OmitFromOutput, carry]]
     open_swe_call: NotRequired[Annotated[dict[str, JsonValue], OmitFromOutput]]
     open_swe_prepared_for: NotRequired[Annotated[str, OmitFromOutput]]
 
@@ -351,8 +354,18 @@ class BackendRunMiddleware(AgentMiddleware[RunState]):
             return self._invocation_id
         return _RunConfigurable.model_validate(get_config().get("configurable", {})).thread_id
 
+    def _carrying(
+        self, state: Mapping[str, object], update: dict[str, object] | None
+    ) -> dict[str, object] | None:
+        """``update``, with what the run's state carries of the outbox from here."""
+        carried = self._backend.outbox.carried(state)
+        return update if carried is None else {**(update or {}), OUTBOX_KEY: carried}
+
     @hook_config(can_jump_to=["end"])
     async def abefore_agent(self, state: RunState, runtime: Runtime) -> dict[str, object] | None:
+        return self._carrying(state, await self._before_agent(state, runtime))
+
+    async def _before_agent(self, state: RunState, runtime: Runtime) -> dict[str, object] | None:
         self._trace.start(self._trace_metadata)
         if self._backend.awaiting_adoption:
             # A worker never acts on its grant: it has no identity until it adopts one.
@@ -361,6 +374,8 @@ class BackendRunMiddleware(AgentMiddleware[RunState]):
                 (m.text for m in state["messages"] if isinstance(m, HumanMessage)), ""
             )
             await self._backend.adopt(thread_id.thread_id, run_id(), assignment)
+        # What an earlier run left unsent goes out before anything this one does.
+        self._backend.outbox.adopt(state)
         invocation = self._invocation()
         if state.get("open_swe_prepared_for") == invocation:
             self._trace.record_evidence(state.get(STATE_KEY, {}))
@@ -373,6 +388,10 @@ class BackendRunMiddleware(AgentMiddleware[RunState]):
 
     @hook_config(can_jump_to=["end"])
     async def abefore_model(self, state: RunState, runtime: Runtime) -> dict[str, object] | None:  # noqa: ARG002
+        self._backend.outbox.adopt(state)
+        return self._carrying(state, await self._before_model(state))
+
+    async def _before_model(self, state: RunState) -> dict[str, object] | None:
         inbox = await self._read_inbox()
         # The phase sees what the inbox brought, as the model will.
         with_inbox = {
@@ -390,7 +409,7 @@ class BackendRunMiddleware(AgentMiddleware[RunState]):
             return _apply(planned)
         if inbox.items.queued or inbox.items.events:
             # Alongside the call it is answered by, as the transcript's reports go.
-            self._backend.reports.received(InboxReceipt(run_id=run_id(), items=inbox.items))
+            self._backend.outbox.received(InboxReceipt(run_id=run_id(), items=inbox.items))
         update = _apply(
             planned.model_copy(
                 update={
@@ -407,18 +426,48 @@ class BackendRunMiddleware(AgentMiddleware[RunState]):
         if self._inbox is None:
             return Inbox()
         # After the last call's receipt, so nothing it received comes again.
-        await self._backend.reports.receipts()
+        await self._backend.outbox.receipts()
         return await call(self._backend, INBOX, InboxRead(run_id=run_id(), spec=self._inbox))
 
     async def _phase[Call: RunCall, Result: PhaseResult](
         self, endpoint: Endpoint[Call, Result], request: Call
     ) -> Result:
-        await self._backend.reports.drain()
+        await self._backend.outbox.drain()
         # A backend it cannot reach fails the run, as any failure there does, so every
         # surface reports it and the person can send the message again.
         return await call(self._backend, endpoint, request)
 
     async def awrap_model_call(
+        self,
+        request: ModelRequest,
+        handler: Callable[[ModelRequest], Awaitable[ModelResponse]],
+    ) -> ModelResponse | ExtendedModelResponse:
+        response = await self._call_model(request, handler)
+        # The reply's report rides with the reply into the run's checkpoint.
+        carried = self._backend.outbox.carried(request.state)
+        if carried is None:
+            return response
+        return ExtendedModelResponse(
+            model_response=response, command=Command(update={OUTBOX_KEY: carried})
+        )
+
+    async def awrap_tool_call(
+        self,
+        request: ToolCallRequest,
+        handler: Callable[[ToolCallRequest], Awaitable[ToolMessage | Command]],
+    ) -> ToolMessage | Command:
+        result = await handler(request)
+        # The call's reports, and its subagent's, ride with its result into the checkpoint.
+        carried = self._backend.outbox.carried(request.state)
+        if carried is None:
+            return result
+        if isinstance(result, ToolMessage):
+            return Command(update={"messages": [result], OUTBOX_KEY: carried})
+        if isinstance(result.update, dict):
+            return dataclasses.replace(result, update={**result.update, OUTBOX_KEY: carried})
+        return result
+
+    async def _call_model(
         self,
         request: ModelRequest,
         handler: Callable[[ModelRequest], Awaitable[ModelResponse]],
@@ -450,6 +499,10 @@ class BackendRunMiddleware(AgentMiddleware[RunState]):
 
     @hook_config(can_jump_to=["model", "end"])
     async def aafter_model(self, state: RunState, runtime: Runtime) -> dict[str, object] | None:  # noqa: ARG002
+        self._backend.outbox.adopt(state)
+        return self._carrying(state, await self._after_model(state))
+
+    async def _after_model(self, state: RunState) -> dict[str, object] | None:
         if self._loop is None:
             return _apply(await self._phase(AFTER_MODEL, run_call(RunCall, run_id(), state)))
         last = state["messages"][-1] if state["messages"] else None
@@ -459,6 +512,11 @@ class BackendRunMiddleware(AgentMiddleware[RunState]):
         return _apply(await self._loop.after_model(state))
 
     async def aafter_agent(self, state: RunState, runtime: Runtime) -> dict[str, object] | None:  # noqa: ARG002
+        self._backend.outbox.adopt(state)
+        # What the backend has not taken by now waits in the thread's state for its next run.
+        return self._carrying(state, await self._after_agent(state))
+
+    async def _after_agent(self, state: RunState) -> dict[str, object] | None:
         metadata = dict(self._trace_metadata)
         try:
             if self._loop is not None:
@@ -516,7 +574,7 @@ class ReportRepliesMiddleware(AgentMiddleware):
                 }
         offloading = held.get("conversation_offloading")
         inside = namespace()
-        self._backend.reports.replied(
+        self._backend.outbox.replied(
             ModelResult(
                 run_id=run_id(),
                 namespace=inside,
@@ -559,7 +617,7 @@ async def reported(
         arguments=request.tool_call["args"],
         tool_call_id=tool_call_id,
     )
-    backend.reports.started(report)
+    backend.outbox.started(report)
     try:
         with subagent_of(tool_call_id), reporting(tool_call_id):
             result = await handler(request)
@@ -570,9 +628,9 @@ async def reported(
         failure = ToolMessage(
             content=f"{type(exc).__name__}: {exc}", tool_call_id=tool_call_id, status="error"
         )
-        backend.reports.finished(report, failure)
+        backend.outbox.finished(report, failure)
         raise
-    backend.reports.finished(report, _tool_message(result, tool_call_id))
+    backend.outbox.finished(report, _tool_message(result, tool_call_id))
     return result
 
 
