@@ -61,6 +61,23 @@ function cached(threadId: string): TranscriptState | null {
   return cache.get(threadId)?.state ?? null
 }
 
+const snapshots = new Map<string, Promise<TranscriptState>>()
+
+/**
+ * One snapshot fetch per thread at a time: a view remounted while its first
+ * fetch is in flight joins it rather than starting another.
+ */
+function loadSnapshot(threadId: string): Promise<TranscriptState> {
+  let pending = snapshots.get(threadId)
+  if (!pending) {
+    pending = fetchTranscript(threadId)
+      .then(fromSnapshot)
+      .finally(() => snapshots.delete(threadId))
+    snapshots.set(threadId, pending)
+  }
+  return pending
+}
+
 /** The thread was deleted while this client was reading it. */
 export class ThreadDeletedError extends Error {
   constructor() {
@@ -223,9 +240,9 @@ export function useThreadTranscript(
     const start = async () => {
       try {
         if (!stateRef.current) {
-          const snapshot = await fetchTranscript(threadId)
+          const loaded = await loadSnapshot(threadId)
           if (disposed) return
-          publish(fromSnapshot(snapshot))
+          publish(loaded)
         }
         threadHydrated(threadId)
         hydration.resolve()
