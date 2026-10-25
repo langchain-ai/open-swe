@@ -68,7 +68,7 @@ function actionToolCalls(messages: Array<Message>): Array<ToolExecutionChunk> {
 
 /**
  * The full results of the action tools whose transcript holds only a preview.
- * Each is fetched once: the transcript changes on every streamed event.
+ * Each is fetched once, not on every streamed event; a failed fetch is retried.
  */
 function useActionToolOutputs(
   calls: Array<ToolExecutionChunk>
@@ -82,7 +82,10 @@ function useActionToolOutputs(
       void loadOutput().then(
         (output) =>
           setOutputs((previous) => ({ ...previous, [toolCallId]: output })),
-        (error: unknown) => console.error("Could not load review draft", error)
+        (error: unknown) => {
+          requested.current.delete(toolCallId)
+          console.error("Could not load review draft", error)
+        }
       )
     }
   }, [calls])
