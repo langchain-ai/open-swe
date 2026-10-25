@@ -32,6 +32,8 @@ class ThreadMetadata(BaseModel):
     task_id: UUID | None = None
     sandbox_host_thread_id: str | None = None
     sandbox_id: str | None = None
+    # The LangSmith API root the box lives at; None for one bound before this was recorded.
+    sandbox_api: str | None = None
     # "mda": Managed Deep Agents names, creates and replaces the box; the backend binds to it.
     sandbox_owner: Literal["mda"] | None = None
     sandbox_bridge_client: str | None = None

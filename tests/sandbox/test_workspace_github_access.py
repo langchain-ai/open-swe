@@ -17,7 +17,9 @@ from openswe.agent_api.tokens import RemoteRun
 from openswe.github import app, proxy, sandbox_access
 from openswe.github.repositories import Repository
 from openswe.sandboxes import lifecycle
-from openswe.sandboxes.providers.langsmith import LangSmithProvider
+from openswe.sandboxes.providers.langsmith import LangSmithProvider, TimeoutLangSmithSandbox
+from openswe.sandboxes.providers.langsmith_api import SandboxAPI
+from openswe.sandboxes.ref import SandboxRef
 from openswe.workspaces.refresh import _create_builder_sandbox
 from openswe.workspaces.store import WORKSPACES, Workspace
 from tests.support.github_sdk import mock_github_sdk
@@ -96,7 +98,7 @@ def github(
     monkeypatch.setattr(
         lifecycle,
         "create_sandbox",
-        AsyncMock(return_value=MagicMock(id="sandbox", aexecute=AsyncMock())),
+        AsyncMock(side_effect=lambda *_args, **_kwargs: _box()),
     )
     monkeypatch.setattr(lifecycle, "maybe_start_update", AsyncMock())
     monkeypatch.setattr(lifecycle, "get_sandbox_metadata", AsyncMock(return_value={}))
@@ -106,6 +108,14 @@ def github(
     yield payloads
     app.clear_app_token_cache()
     proxy.clear_proxy_token_expiry("thread")
+
+
+def _box() -> TimeoutLangSmithSandbox:
+    """A LangSmith box in the new sandbox region, as the provider hands one back."""
+    box = MagicMock(spec=TimeoutLangSmithSandbox, id="sandbox", aexecute=AsyncMock())
+    box.api = SandboxAPI.new_sandbox_region()
+    box.ref = SandboxRef(box.id, box.api.api_root)
+    return box
 
 
 def injected_auth(payloads: list[dict[str, object]]) -> list[str]:
@@ -282,7 +292,6 @@ async def test_explicit_review_recreation_preserves_github_scope(
     github: list[dict[str, object]],
     kind: str,
 ) -> None:
-    from openswe.sandboxes.providers import langsmith
 
     monkeypatch.setattr(lifecycle, "thread_token_repositories", AsyncMock(return_value=None))
     monkeypatch.setattr(
@@ -298,7 +307,7 @@ async def test_explicit_review_recreation_preserves_github_scope(
     )
     sandbox_client = MagicMock()
     sandbox_client.return_value.__aenter__ = AsyncMock(return_value=AsyncMock())
-    monkeypatch.setattr(langsmith, "get_async_sandbox_client", sandbox_client)
+    monkeypatch.setattr(SandboxAPI, "client", sandbox_client)
     monkeypatch.setattr(lifecycle.client.threads, "update", AsyncMock())
     monkeypatch.setattr(lifecycle, "configure_git_identity", AsyncMock())
 
@@ -364,7 +373,7 @@ async def test_reconnect_gives_an_existing_sandbox_the_installation_token(
     cached: bool,
 ) -> None:
     monkeypatch.setattr(WORKSPACES, "slug_exists", AsyncMock(return_value=True))
-    backend = MagicMock(id="sandbox", aexecute=AsyncMock())
+    backend = _box()
     monkeypatch.setattr(
         lifecycle,
         "get_sandbox_metadata",
@@ -420,7 +429,7 @@ async def test_workspace_builder_gets_the_installation_token(
     monkeypatch.setattr(
         LangSmithProvider,
         "get_or_create",
-        AsyncMock(return_value=MagicMock(id="sandbox", aexecute=AsyncMock())),
+        AsyncMock(side_effect=lambda *_args, **_kwargs: _box()),
     )
 
     await _create_builder_sandbox(Workspace(slug="workspace", repos=repos), None)
@@ -724,7 +733,7 @@ async def test_reconnect_restricted_to_one_repository_mints_from_stored_ids(
     await lifecycle._connect_existing_sandbox(
         "thread",
         cached=backend,
-        sandbox_id=backend.id,
+        sandbox=backend.ref,
         github_proxy_repositories=["acme/api"],
         workspace_slug="workspace",
     )

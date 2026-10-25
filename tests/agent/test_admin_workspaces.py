@@ -9,12 +9,15 @@ from langgraph.graph.state import RunnableConfig
 
 from openswe import server
 from openswe.sandboxes import lifecycle
+from openswe.sandboxes.providers.langsmith import TimeoutLangSmithSandbox
+from openswe.sandboxes.ref import SandboxRef
 from openswe.tools import workspaces as env_tools
 from openswe.users import User
 from openswe.utils.authorship import CollaboratorIdentity
 from openswe.workspaces.store import Workspace
 
 _READY = Workspace(slug="base", name="Base", snapshot_status="ready", snapshot_id="env-snap")
+_SOURCE = SandboxRef("sb-thread", "https://api.smith.langchain.com")
 
 
 def _config(**configurable: object) -> RunnableConfig:
@@ -120,8 +123,9 @@ class _Publish:
         return self.publish.await_args.args[1]
 
     def __enter__(self) -> _Publish:
-        backend = MagicMock()
+        backend = MagicMock(spec=TimeoutLangSmithSandbox)
         backend.id = "sb-thread"
+        backend.ref = _SOURCE
         for target in (
             patch(
                 "openswe.run_config.get_config",
@@ -172,6 +176,25 @@ async def test_a_failed_capture_writes_nothing(monkeypatch: pytest.MonkeyPatch) 
 
 
 @pytest.mark.asyncio
+async def test_a_sandbox_outside_the_new_sandbox_region_is_never_published(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """New boxes could not boot its snapshot, and it would retire the one they can."""
+    monkeypatch.setenv("CONFIGURED_ADMINS", "ramonn")
+    monkeypatch.setenv("LANGSMITH_ENDPOINT", "https://api.smith.langchain.com")
+    monkeypatch.setenv("NEW_SANDBOX_REGION_ENDPOINT", "https://aws.api.smith.langchain.com")
+    monkeypatch.setenv("NEW_SANDBOX_REGION_API_KEY", "lsv2-new-region-key")
+    with _Publish(existing=None, saved=_saved()) as seams:
+        result = await env_tools.publish_workspace("base", "prompt")
+
+    assert result["ok"] is False
+    assert "new sandbox region" in result["error"]
+    seams.capture.assert_not_awaited()
+    seams.publish.assert_not_awaited()
+    seams.retire.assert_not_awaited()
+
+
+@pytest.mark.asyncio
 async def test_a_failed_record_write_discards_the_orphaned_image(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -184,7 +207,7 @@ async def test_a_failed_record_write_discards_the_orphaned_image(
 
     assert result["ok"] is False
     assert "store unavailable" in result["error"]
-    seams.discard.assert_awaited_once_with("base", "snap-new")
+    seams.discard.assert_awaited_once_with("base", "snap-new", _SOURCE)
     seams.retire.assert_not_awaited()
 
 
@@ -217,7 +240,7 @@ async def test_publishing_over_an_existing_workspace_retires_its_old_image(
     assert seams.calls == ["capture", "write"]
     assert isinstance(seams.definition, env_tools.store.WorkspaceUpdate)
     # The old image goes only after the record points at the new one.
-    seams.retire.assert_awaited_once_with("base", "snap-old", "snap-new")
+    seams.retire.assert_awaited_once_with("base", existing, "snap-new")
     assert result["created"] is False
 
 

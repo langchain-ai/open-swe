@@ -12,6 +12,7 @@ from langchain_core.tools import StructuredTool
 
 from openswe.middleware.dynamic_tools import DynamicToolMiddleware
 from openswe.sandboxes import tool_access
+from openswe.sandboxes.providers.langsmith_api import SandboxAPI
 from openswe.sandboxes.tool_runtime import ToolSurface
 
 TEST_SIGNING_KEY = "test-tools-signing-key-" * 3
@@ -138,8 +139,11 @@ async def test_proxy_refresh_preserves_tools_and_custom_rules(
     client.threads.get = AsyncMock(return_value={"metadata": {"sandbox_id": "sandbox-a"}})
     monkeypatch.setattr(tool_access, "get_client", lambda: client)
     custom = {"name": "custom", "match_hosts": ["custom.example.test"]}
+    box = MagicMock(spec=langsmith.TimeoutLangSmithSandbox)
+    box.id = "sandbox-a"
+    box.api = SandboxAPI.new_sandbox_region()
     await langsmith.configure_sandbox_proxy(
-        "sandbox-a",
+        box,
         "test-github-token",
         thread_id="thread-a",
         base_proxy_config={"enabled": True, "rules": [custom]},
@@ -161,7 +165,7 @@ async def test_proxy_refresh_preserves_tools_and_custom_rules(
     assert "thread-a" not in str(rule) and "sandbox-a" not in str(rule)
     first_token = rule["headers"][0]["value"]
     await langsmith.configure_sandbox_proxy(
-        "sandbox-a",
+        box,
         "new-test-github-token",
         thread_id="thread-a",
         base_proxy_config={"enabled": True, "rules": [custom]},

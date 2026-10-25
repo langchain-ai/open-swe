@@ -5,7 +5,7 @@ from typing import Any, Literal
 
 from openswe.run_config import RunConfig
 from openswe.sandboxes.paths import resolve_sandbox_work_dir
-from openswe.sandboxes.providers.langsmith import get_async_sandbox_client
+from openswe.sandboxes.providers.langsmith import langsmith_box
 from openswe.sandboxes.state import get_sandbox_backend, unwrap_sandbox_backend
 
 logger = logging.getLogger(__name__)
@@ -56,8 +56,8 @@ async def create_sandbox_file_download_url(
     except ValueError as exc:
         logger.warning("Sandbox download request rejected", extra={"error": str(exc)})
         return {"error": str(exc)}
-    backend = unwrap_sandbox_backend(backend_proxy)
-    async with get_async_sandbox_client() as client:
+    backend = langsmith_box(unwrap_sandbox_backend(backend_proxy))
+    async with backend.api.client() as client:
         download = await client.generate_download_url(
             backend.id,
             path,

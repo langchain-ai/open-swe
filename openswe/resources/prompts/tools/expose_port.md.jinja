@@ -28,8 +28,8 @@ stripped first, so a client cannot forge them:
   only when there is a strong reason to, such as code that must also work outside this sandbox.
   Claims are `sub` (the LangSmith user id),
   `email`, `name`, `iss` (the LangSmith app URL) and `aud` (a one-element array holding the service
-  host). Verify it with a JWT library against `{{ jwks_url }}` — the keys live on the LangSmith API
-  host, not on the app URL the token names as its issuer.
+  host). Verify it with a JWT library against the `jwks_url` this tool returns — the keys live on
+  the LangSmith API host, not on the app URL the token names as its issuer.
 
 The credential that authenticated the request never reaches the service.
 

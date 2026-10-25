@@ -20,6 +20,7 @@ from openswe.github.thread_token import invalidate_cached_github_token
 from openswe.message_queue import QueuedMessage, QueuedPreview
 from openswe.review.session import ReviewSession, ReviewSessionMetadata
 from openswe.sandboxes.browsers import ThreadBrowser
+from openswe.sandboxes.ref import SandboxRef
 from openswe.slack.client import parse_github_pr_url
 from openswe.threads.access import _authorized_thread, _readable_thread_metadata
 from openswe.threads.blobs import copy_thread_blobs, referenced_blob_digests
@@ -128,19 +129,15 @@ async def get_promptable_thread_metadata(thread_id: str, login: str) -> Mapping[
 
 async def get_dashboard_terminal_sandbox(
     thread_id: str, login: str, *, email: str | None = None
-) -> tuple[str, str | None]:
+) -> tuple[SandboxRef, str | None]:
     metadata = await get_promptable_thread_metadata(thread_id, login)
-    sandbox_id = metadata.get("sandbox_id")
-    if (
-        not isinstance(sandbox_id, str)
-        or not sandbox_id
-        or sandbox_id == _SANDBOX_CREATING_SENTINEL
-    ):
+    sandbox = SandboxRef.of(metadata)
+    if sandbox is None or sandbox.id == _SANDBOX_CREATING_SENTINEL:
         raise HTTPException(404, "thread sandbox is not ready")
     repo_name = metadata.get("repo_name")
     if not isinstance(repo_name, str) or posixpath.basename(repo_name) != repo_name:
         repo_name = None
-    return sandbox_id, repo_name
+    return sandbox, repo_name
 
 
 async def get_dashboard_thread(

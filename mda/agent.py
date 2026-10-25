@@ -328,11 +328,7 @@ async def agent(runtime: ManagedServerRuntime) -> DeepAgentDefinition:
         # of it, such as the browser's screenshots; the backend's operations work in the
         # same box. A worker's catalog is its coordinator's, so the worker shares the
         # coordinator's box.
-        sandbox=(
-            definition(catalog.sandbox.create, catalog.sandbox.thread_id)
-            if catalog.sandbox is not None
-            else None
-        ),
+        sandbox=(definition(catalog.sandbox) if catalog.sandbox is not None else None),
         # `mda build` reads `worker`'s literal name to build its graph.
         subagents=[*sync_subagents, worker],
         middleware=[*agent_middleware, AsyncWorkerLaunchMiddleware(backend, catalog)],

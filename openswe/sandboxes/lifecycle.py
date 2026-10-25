@@ -30,10 +30,14 @@ from openswe.sandboxes.handoff import complete_handoff
 from openswe.sandboxes.paths import declared_work_dir, remember_work_dir
 from openswe.sandboxes.providers.langsmith import (
     LangSmithCreateOptions,
+    TimeoutLangSmithSandbox,
     configure_sandbox_proxy,
     get_sandbox_proxy_config,
+    langsmith_box,
 )
+from openswe.sandboxes.providers.langsmith_api import SandboxAPI
 from openswe.sandboxes.providers.registry import SandboxGoneError, create_sandbox
+from openswe.sandboxes.ref import SandboxRef
 from openswe.sandboxes.state import (
     SANDBOX_BACKENDS,
     SANDBOX_CONNECTIONS,
@@ -81,7 +85,9 @@ class SandboxCreateConfig:
         workspace_slug: str | None = None,
         *,
         source: SandboxSource = "workspace",
+        api: SandboxAPI | None = None,
     ) -> SandboxCreateConfig:
+        """What a box created at ``api``, by default the new sandbox region, boots from."""
         workspace = None if source == "base" else await load_workspace(workspace_slug)
         if workspace is not None and workspace.inherit_default_sandbox:
             workspace = await load_workspace(None)
@@ -90,7 +96,7 @@ class SandboxCreateConfig:
         if workspace is None:
             return cls(snapshot_id=None, create_params=create_params)
         return cls(
-            snapshot_id=workspace.ready_snapshot_id,
+            snapshot_id=workspace.snapshot_at(api or SandboxAPI.new_sandbox_region()),
             resources=workspace.sandbox_resources(),
             create_params=create_params,
             workspace=workspace,
@@ -170,12 +176,7 @@ async def _create_sandbox_with_proxy(
             access = await token
             proxy_config = config.proxy_config
             async with aphase(thread_id, "sandbox.proxy_configure"):
-                await _configure_proxy(
-                    sandbox_backend.id,
-                    access,
-                    proxy_config,
-                    thread_id=thread_id,
-                )
+                await _configure_proxy(sandbox_backend, access, proxy_config, thread_id=thread_id)
             record_proxy_token_expiry(
                 thread_id,
                 access.expires_at,
@@ -220,7 +221,7 @@ _BACKGROUND: set[asyncio.Task[Any]] = set()
 
 
 async def _configure_proxy(
-    sandbox_id: str,
+    sandbox_backend: SandboxBackendProtocol,
     access: SandboxGitHubAccess,
     base_proxy_config: dict[str, Any] | None,
     *,
@@ -231,7 +232,22 @@ async def _configure_proxy(
         kwargs["base_proxy_config"] = base_proxy_config
     if thread_id is not None:
         kwargs["thread_id"] = thread_id
-    await configure_sandbox_proxy(sandbox_id, access.token, **kwargs)
+    await configure_sandbox_proxy(langsmith_box(sandbox_backend), access.token, **kwargs)
+
+
+def _ref_of(sandbox_backend: SandboxBackendProtocol) -> SandboxRef:
+    """The box a thread is bound to, with the LangSmith it lives in when it is a LangSmith box."""
+    backend = unwrap_sandbox_backend(sandbox_backend)
+    if isinstance(backend, TimeoutLangSmithSandbox):
+        return backend.ref
+    return SandboxRef(backend.id)
+
+
+def mda_box_api(metadata: ThreadMetadata) -> SandboxAPI:
+    """Where the thread's MDA box lives: its recorded LangSmith once bound, else the new sandbox region."""
+    if metadata.sandbox_owner == "mda" and metadata.sandbox_id is not None:
+        return SandboxAPI.at(metadata.sandbox_api)
+    return SandboxAPI.new_sandbox_region()
 
 
 async def _refresh_github_proxy(
@@ -253,12 +269,7 @@ async def _refresh_github_proxy(
 
     current_backend = unwrap_sandbox_backend(sandbox_backend)
     async with aphase(thread_id, "sandbox.proxy_refresh"):
-        await _configure_proxy(
-            current_backend.id,
-            access,
-            base_proxy_config,
-            thread_id=thread_id,
-        )
+        await _configure_proxy(current_backend, access, base_proxy_config, thread_id=thread_id)
     record_proxy_token_expiry(
         thread_id,
         access.expires_at,
@@ -355,7 +366,7 @@ async def _connect_existing_sandbox(
     thread_id: str,
     *,
     cached: SandboxBackendProtocol | None,
-    sandbox_id: str | None,
+    sandbox: SandboxRef,
     github_proxy_repositories: Sequence[str] | None = None,
     github_proxy_permissions: PermissionMap | None = None,
     base_proxy_config: dict[str, Any] | None = None,
@@ -371,15 +382,15 @@ async def _connect_existing_sandbox(
         logger.info("Using cached sandbox backend for thread %s", thread_id)
         sandbox_backend = cached
     else:
-        logger.info("Connecting to existing sandbox %s", sandbox_id)
+        logger.info("Connecting to existing sandbox %s", sandbox.id)
         try:
-            async with aphase(thread_id, "sandbox.reconnect", sandbox_id=sandbox_id):
-                sandbox_backend = await create_sandbox(str(sandbox_id))
+            async with aphase(thread_id, "sandbox.reconnect", sandbox_id=sandbox.id):
+                sandbox_backend = await create_sandbox(sandbox)
         except SandboxGoneError:
             raise
         except Exception as exc:
-            logger.warning("Failed to connect to existing sandbox %s", sandbox_id)
-            raise SandboxUnreachableError(thread_id, sandbox_id, str(exc)) from exc
+            logger.warning("Failed to connect to existing sandbox %s", sandbox.id)
+            raise SandboxUnreachableError(thread_id, sandbox.id, str(exc)) from exc
     async with git_identity(thread_id, sandbox_backend):
         refreshed = await _refresh_github_proxy_or_fail(
             sandbox_backend,
@@ -459,7 +470,7 @@ async def _attach_task_worker_sandbox(
     await client.threads.update(
         thread_id=thread_id,
         metadata={
-            "sandbox_id": backend.id,
+            **_ref_of(backend).metadata(),
             SANDBOX_PROXY_CONFIG_METADATA_KEY: current_host.sandbox_base_proxy_config,
         },
     )
@@ -554,8 +565,8 @@ async def ensure_sandbox_for_thread(
             github_proxy_repositories=github_proxy_repositories,
             workspace_slug=workspace_slug,
         )
-    raw_sandbox_id = sandbox_metadata.get("sandbox_id")
-    sandbox_id = raw_sandbox_id if isinstance(raw_sandbox_id, str) else None
+    bound = SandboxRef.of(sandbox_metadata)
+    sandbox_id = bound.id if bound is not None else None
     # MDA names, creates and replaces this thread's box; only it may give the thread another.
     owned_by_mda = sandbox_metadata.get("sandbox_owner") == "mda"
     if owned_by_mda and sandbox_id is None:
@@ -588,7 +599,7 @@ async def ensure_sandbox_for_thread(
         thread_id, sandbox_metadata, github_proxy_repositories, github_proxy_permissions
     )
 
-    if sandbox_id is None:
+    if bound is None:
         logger.info("Creating new sandbox for thread %s", thread_id)
         sandbox_backend = await _create_sandbox_with_proxy(
             thread_id=thread_id,
@@ -604,8 +615,8 @@ async def ensure_sandbox_for_thread(
         try:
             sandbox_backend = await _connect_existing_sandbox(
                 thread_id,
-                cached=SANDBOX_CONNECTIONS.get(sandbox_id),
-                sandbox_id=sandbox_id,
+                cached=SANDBOX_CONNECTIONS.get(bound.id),
+                sandbox=bound,
                 github_proxy_repositories=github_proxy_repositories,
                 github_proxy_permissions=github_proxy_permissions,
                 base_proxy_config=base_proxy_config,
@@ -658,7 +669,7 @@ async def ensure_sandbox_for_thread(
     # that dies earlier leaves no id to reconnect to, so the next run creates
     # rather than adopting a half-built box.
     if created:
-        bind_metadata: dict[str, Any] = {"sandbox_id": sandbox_backend.id}
+        bind_metadata: dict[str, Any] = _ref_of(sandbox_backend).metadata()
         if created_proxy_config is not None:
             bind_metadata[SANDBOX_PROXY_CONFIG_METADATA_KEY] = created_proxy_config
         async with aphase(thread_id, "sandbox.bind_thread"):
@@ -700,9 +711,11 @@ async def bind_mda_sandbox(
     if metadata.sandbox_owner == "mda" and sandbox_id in (None, metadata.sandbox_id):
         return
     bind_metadata: dict[str, Any] = {"sandbox_owner": "mda"}
-    config = await SandboxCreateConfig.resolve(workspace_slug)
+    # MDA opened the box where ``ManagedSandbox.for_thread`` told it to.
+    api = mda_box_api(metadata)
+    config = await SandboxCreateConfig.resolve(workspace_slug, api=api)
     if sandbox_id is not None and sandbox_id != metadata.sandbox_id:
-        bind_metadata["sandbox_id"] = sandbox_id
+        bind_metadata.update(SandboxRef(sandbox_id, api.api_root).metadata())
         if config.proxy_config is not None:
             bind_metadata[SANDBOX_PROXY_CONFIG_METADATA_KEY] = config.proxy_config
         if metadata.sandbox_id is not None:
@@ -725,7 +738,11 @@ async def request_mda_replacement(
 
     The reconnect takes the proxy config from this record, never from anything MDA sends.
     """
-    config = await SandboxCreateConfig.resolve(workspace_slug, source=source)
+    # MDA replaces the box under its name in the LangSmith it lives in.
+    metadata = ThreadMetadata.model_validate(await get_sandbox_metadata(thread_id))
+    config = await SandboxCreateConfig.resolve(
+        workspace_slug, source=source, api=mda_box_api(metadata)
+    )
     await client.threads.update(
         thread_id=thread_id,
         metadata={_REPLACEMENT_METADATA_KEY: {"workspace": workspace_slug, "source": source}},
@@ -790,17 +807,14 @@ async def recreate_sandbox_for_thread(
         raise PermissionError(
             "Task workers cannot recreate the shared sandbox; the coordinator must recover it"
         )
-    raw_sandbox_id = metadata.get("sandbox_id")
-    metadata_sandbox_id = raw_sandbox_id if isinstance(raw_sandbox_id, str) else None
-    old_sandbox_id = cached.id if cached is not None and cached.has_backend else metadata_sandbox_id
-    if not old_sandbox_id:
+    old = _ref_of(cached) if cached is not None and cached.has_backend else SandboxRef.of(metadata)
+    if old is None:
         raise ValueError(f"Thread {thread_id} has no sandbox to recreate")
+    old_sandbox_id = old.id
     if Bridge.bridge_id_of(old_sandbox_id) is not None:
         raise ValueError("A thread bridged to a local machine cannot be given a cloud sandbox")
     if metadata.get("sandbox_owner") == "mda":
         raise ValueError("Managed Deep Agents owns this thread's sandbox; only it may replace it")
-
-    from openswe.sandboxes.providers.langsmith import get_async_sandbox_client
 
     stop_error = None
     try:
@@ -812,7 +826,7 @@ async def recreate_sandbox_for_thread(
                     extra={"sandbox_id": old_sandbox_id, "thread_id": thread_id},
                 )
             else:
-                async with get_async_sandbox_client() as sandbox_client:
+                async with SandboxAPI.at(old.api).client() as sandbox_client:
                     await sandbox_client.stop_sandbox(old_sandbox_id)
     except Exception as exc:
         stop_error = (
@@ -843,7 +857,7 @@ async def recreate_sandbox_for_thread(
         raise RuntimeError("Sandbox provider did not create a distinct sandbox")
 
     await configure_git_identity(new_sandbox)
-    sandbox_metadata: dict[str, Any] = {"sandbox_id": new_sandbox.id}
+    sandbox_metadata: dict[str, Any] = _ref_of(new_sandbox).metadata()
     base_proxy_config = get_recorded_proxy_base_config(thread_id)
     if base_proxy_config is not None:
         sandbox_metadata[SANDBOX_PROXY_CONFIG_METADATA_KEY] = base_proxy_config

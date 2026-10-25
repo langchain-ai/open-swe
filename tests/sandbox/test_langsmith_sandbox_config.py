@@ -11,6 +11,7 @@ from langsmith.sandbox import AsyncSandboxClient, ResourceNotFoundError
 
 from openswe.sandboxes.providers import langsmith as langsmith_provider
 from openswe.sandboxes.providers.langsmith import (
+    TimeoutLangSmithSandbox,
     _create_sandbox_with_retry,
     _install_create_extra_fields,
     _reuse_existing_sandbox,
@@ -18,6 +19,7 @@ from openswe.sandboxes.providers.langsmith import (
     create_langsmith_sandbox,
     create_workspace_service_url,
 )
+from openswe.sandboxes.providers.langsmith_api import SandboxAPI
 from openswe.sandboxes.providers.registry import SandboxGoneError
 
 
@@ -178,8 +180,22 @@ def _serve(
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("sandbox_env", "api", "key"),
+    [
+        ({}, "https://api.smith.langchain.com", "lsv2-key"),
+        (
+            {
+                "NEW_SANDBOX_REGION_ENDPOINT": "https://aws.api.example",
+                "NEW_SANDBOX_REGION_API_KEY": "lsv2-aws-key",
+            },
+            "https://aws.api.example",
+            "lsv2-aws-key",
+        ),
+    ],
+)
 async def test_service_url_asks_for_a_workspace_grant(
-    monkeypatch: pytest.MonkeyPatch,
+    monkeypatch: pytest.MonkeyPatch, sandbox_env: dict[str, str], api: str, key: str
 ) -> None:
     requests: list[httpx2.Request] = []
 
@@ -197,14 +213,50 @@ async def test_service_url_asks_for_a_workspace_grant(
 
     monkeypatch.setenv("LANGSMITH_ENDPOINT", "https://api.smith.langchain.com")
     monkeypatch.setenv("LANGSMITH_API_KEY", "lsv2-key")
+    for name, value in sandbox_env.items():
+        monkeypatch.setenv(name, value)
     _serve(monkeypatch, handler)
 
-    service_url = await create_workspace_service_url("sandbox-1", 3000)
+    box = MagicMock(spec=TimeoutLangSmithSandbox)
+    box.id = "sandbox-1"
+    box.api = SandboxAPI.new_sandbox_region()
+    service_url = await create_workspace_service_url(box, 3000)
 
     assert service_url == "https://l-abc.sandbox.example/"
     request = requests[0]
-    assert str(request.url) == (
-        "https://api.smith.langchain.com/v2/sandboxes/boxes/sandbox-1/service-url"
-    )
-    assert request.headers["X-API-Key"] == "lsv2-key"
+    assert str(request.url) == f"{api}/v2/sandboxes/boxes/sandbox-1/service-url"
+    assert request.headers["X-API-Key"] == key
     assert json.loads(request.content) == {"port": 3000, "access": "workspace"}
+
+
+@pytest.mark.parametrize(
+    "half", ["NEW_SANDBOX_REGION_ENDPOINT", "NEW_SANDBOX_REGION_API_KEY"], ids=["endpoint", "key"]
+)
+def test_a_half_configured_new_sandbox_region_fails_at_startup(
+    monkeypatch: pytest.MonkeyPatch, half: str
+) -> None:
+    """Either alone would pair one LangSmith's key with another's API."""
+    from openswe.sandboxes.providers.registry import validate_sandbox_startup_config
+
+    monkeypatch.setenv("SANDBOX_TYPE", "langsmith")
+    monkeypatch.delenv("NEW_SANDBOX_REGION_ENDPOINT", raising=False)
+    monkeypatch.delenv("NEW_SANDBOX_REGION_API_KEY", raising=False)
+    monkeypatch.setenv(half, "https://aws.api.smith.example")
+
+    with pytest.raises(ValueError, match="or neither"):
+        validate_sandbox_startup_config()
+
+
+def test_a_new_sandbox_region_on_the_deployments_own_langsmith_fails_at_startup(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Boxes are told apart by API root, so another workspace there would pass for the deployment."""
+    from openswe.sandboxes.providers.registry import validate_sandbox_startup_config
+
+    monkeypatch.setenv("SANDBOX_TYPE", "langsmith")
+    monkeypatch.setenv("LANGSMITH_ENDPOINT", "https://api.smith.example")
+    monkeypatch.setenv("NEW_SANDBOX_REGION_ENDPOINT", "https://api.smith.example/v2/sandboxes")
+    monkeypatch.setenv("NEW_SANDBOX_REGION_API_KEY", "lsv2-other-workspace-key")
+
+    with pytest.raises(ValueError, match="another LangSmith"):
+        validate_sandbox_startup_config()

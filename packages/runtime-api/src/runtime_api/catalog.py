@@ -84,6 +84,8 @@ class SandboxSpec(BaseModel):
     create: SandboxCreate
     # The thread whose box this one works in, a task worker's coordinator; None for its own.
     thread_id: str | None = None
+    # The LangSmith API root the box lives at; None for the MDA deployment's own.
+    api: str | None = None
 
 
 ShellGuard = Literal["shell_commands"]

@@ -127,6 +127,8 @@ def normalize_sandbox_options(options: dict[str, object]) -> dict[str, object]:
 
     _validate_thread_id(normalized.get("_openswe_thread_id"))
     _validate_create_fields(normalized.get("_openswe_create_fields"))
+    if normalized.get("api_endpoint") is not None and not normalized.get("api_key"):
+        raise TypeError("api_endpoint needs that LangSmith's api_key.")
     if normalized.get("_openswe_no_manage_proxy") and normalized.get("proxy_config") is not None:
         raise TypeError(
             "proxy_config needs MDA to manage the proxy. Remove _openswe_no_manage_proxy."

@@ -14,6 +14,7 @@ from openswe.database import postgres
 from openswe.openai_responses.client_tools import ClientToolSpec
 from openswe.openai_responses.ids import OpenSweId
 from openswe.openai_responses.models import CreateResponseRequest, InputItem
+from openswe.sandboxes.ref import SANDBOX_API_METADATA_KEY
 from openswe.sandboxes.tool_access import (
     OPENAI_API_KEY_PLACEHOLDER,
     SANDBOX_HOST_THREAD_KEY,
@@ -136,6 +137,7 @@ class SandboxCaller:
             extra_metadata={
                 SANDBOX_HOST_THREAD_KEY: self.host_thread_id,
                 "sandbox_id": self.sandbox_id,
+                SANDBOX_API_METADATA_KEY: self.host_metadata.get(SANDBOX_API_METADATA_KEY),
                 SANDBOX_PROXY_CONFIG_METADATA_KEY: self.host_metadata.get(
                     SANDBOX_PROXY_CONFIG_METADATA_KEY
                 ),

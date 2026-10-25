@@ -851,7 +851,6 @@ class RepoClient:
         from openswe.sandboxes.providers.langsmith import (
             configure_sandbox_proxy,
             create_langsmith_sandbox,
-            get_async_sandbox_client,
         )
 
         repository = normalize_repo_full_name(self.full_name)
@@ -869,7 +868,7 @@ class RepoClient:
             create_params={"idle_ttl_seconds": 600, "delete_after_stop_seconds": 60},
         )
         try:
-            await configure_sandbox_proxy(sandbox.id, authorization.removeprefix("Bearer "))
+            await configure_sandbox_proxy(sandbox, authorization.removeprefix("Bearer "))
             git = CandidateGit(
                 sandbox,
                 PurePosixPath("/tmp/merge-queue.git"),
@@ -879,7 +878,7 @@ class RepoClient:
             yield git
         finally:
             try:
-                async with asyncio.timeout(30), get_async_sandbox_client() as client:
+                async with asyncio.timeout(30), sandbox.api.client() as client:
                     await client.stop_sandbox(sandbox.id)
             except Exception:
                 logger.warning(

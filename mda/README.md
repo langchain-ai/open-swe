@@ -42,6 +42,7 @@ The deployment's `.env`, forwarded as deployment secrets by `mda deploy`:
 | `LANGSMITH_API_KEY` | Authenticates the LLM Gateway and tracing |
 | `ANTHROPIC_API_KEY`, `OPENAI_API_KEY`, … | Model keys for direct (non-gateway) model calls and deepagents' summarization |
 | `LANGSMITH_GATEWAY_API_KEY` | Gateway key, the backend's; falls back to `LANGSMITH_API_KEY` |
+| `NEW_SANDBOX_REGION_ENDPOINT`, `NEW_SANDBOX_REGION_API_KEY` | Optional, both or neither, and the backend's values: the new sandbox region, where new boxes go, when it is not this deployment's LangSmith. The catalog says where each thread's box lives (`api`, none for this deployment's own), so older boxes stay where they are. Browsers stay in this deployment's LangSmith |
 
 The backend:
 

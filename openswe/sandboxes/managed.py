@@ -6,13 +6,16 @@ it. Before preparing, the run opens the box and reports its name, and the backen
 binds the thread to it and connects as to any reused box: proxy credentials, git
 identity, tool channel. MDA leaves the box's proxy config to the backend. The
 backend never creates or replaces an MDA-owned box itself.
+
+A box stays in the LangSmith it was created in. MDA creates a thread's first box in
+the new sandbox region, and keeps adopting and replacing a box in the LangSmith it lives in.
 """
 
 from pydantic import BaseModel
 
 from openswe.bridge.store import Bridge
 from openswe.config import ENV
-from openswe.sandboxes.lifecycle import SandboxCreateConfig
+from openswe.sandboxes.lifecycle import SandboxCreateConfig, mda_box_api
 from openswe.sandboxes.providers.langsmith import LangSmithCreateOptions
 from openswe.sandboxes.state import get_sandbox_metadata
 from openswe.tasks.schemas import ThreadMetadata
@@ -24,6 +27,8 @@ class ManagedSandbox(BaseModel):
     create: LangSmithCreateOptions
     # The thread whose box this one works in, a task worker's coordinator; None for its own.
     thread_id: str | None = None
+    # The LangSmith API root the box lives at; None for MDA's own, the deployment's.
+    api: str | None = None
 
     @classmethod
     async def for_thread(cls, thread_id: str, workspace_slug: str | None) -> ManagedSandbox | None:
@@ -40,14 +45,20 @@ class ManagedSandbox(BaseModel):
         if metadata.sandbox_id is not None and Bridge.bridge_id_of(metadata.sandbox_id):
             return None
         owner: str | None = None
+        box = metadata
         if metadata.task_id is not None:
             owner = metadata.sandbox_host_thread_id
             if owner is None or metadata.sandbox_id is None:
                 return None
-            host = ThreadMetadata.model_validate(await get_sandbox_metadata(owner))
-            if host.sandbox_owner != "mda" or host.sandbox_id != metadata.sandbox_id:
+            box = ThreadMetadata.model_validate(await get_sandbox_metadata(owner))
+            if box.sandbox_owner != "mda" or box.sandbox_id != metadata.sandbox_id:
                 return None
         elif metadata.sandbox_id is not None and metadata.sandbox_owner != "mda":
             return None
-        config = await SandboxCreateConfig.resolve(workspace_slug)
-        return cls(create=config.langsmith_options(), thread_id=owner)
+        api = mda_box_api(box)
+        config = await SandboxCreateConfig.resolve(workspace_slug, api=api)
+        return cls(
+            create=config.langsmith_options(),
+            thread_id=owner,
+            api=None if api.is_deployment else api.api_root,
+        )

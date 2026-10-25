@@ -304,7 +304,7 @@ async def test_candidate_sandbox_keeps_credentials_in_proxy_and_stops_on_exit(
     client.__aenter__.return_value = client
     monkeypatch.setattr(langsmith, "create_langsmith_sandbox", AsyncMock(return_value=sandbox))
     monkeypatch.setattr(langsmith, "configure_sandbox_proxy", configure)
-    monkeypatch.setattr(langsmith, "get_async_sandbox_client", Mock(return_value=client))
+    sandbox.api = Mock(client=Mock(return_value=client))
 
     async def use_candidate() -> None:
         async with httpx2.AsyncClient(
@@ -320,7 +320,7 @@ async def test_candidate_sandbox_keeps_credentials_in_proxy_and_stops_on_exit(
     else:
         with pytest.raises(RuntimeError if outcome == "proxy_failure" else asyncio.CancelledError):
             await use_candidate()
-    configure.assert_awaited_once_with("candidate-sandbox", "test-controller-token")
+    configure.assert_awaited_once_with(sandbox, "test-controller-token")
     client.stop_sandbox.assert_awaited_once_with("candidate-sandbox")
     assert all(
         "test-controller-token" not in call.args[0] for call in sandbox.aexecute.await_args_list
