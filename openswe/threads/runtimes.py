@@ -245,15 +245,6 @@ class MdaRuntime:
         }
 
 
-def in_process_client() -> LangGraphClient:
-    """This deployment's Agent Server, called in process rather than over its public URL.
-
-    Only for code running in the deployment. Unlike ``Runtimes.local``, calls still
-    pass the thread router, as the backend's own.
-    """
-    return get_client()
-
-
 class Runtimes:
     """This deployment's Agent Server, and the MDA deployment."""
 

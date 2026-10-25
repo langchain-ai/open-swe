@@ -11,7 +11,7 @@ from fastapi.testclient import TestClient
 from openswe import incidents
 from openswe.dashboard import oauth, routes
 from openswe.threads import handlers, listing, proxy
-from tests.conftest import patch_thread_module
+from tests.conftest import ThreadStoreOverClient, patch_thread_module
 
 
 @pytest.fixture
@@ -160,8 +160,8 @@ def test_generic_thread_routes_reject_incidents_even_for_admin_owners(
         ),
         update=AsyncMock(),
     )
-    for name in ("langgraph_client", "in_process_client"):
-        patch_thread_module(monkeypatch, name, lambda: SimpleNamespace(threads=threads))
+    patch_thread_module(monkeypatch, "langgraph_client", lambda: SimpleNamespace(threads=threads))
+    patch_thread_module(monkeypatch, "THREADS", ThreadStoreOverClient())
 
     response = client.request(
         method,

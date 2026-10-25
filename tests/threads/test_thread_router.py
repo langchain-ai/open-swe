@@ -9,7 +9,7 @@ from starlette.types import Message, Receive, Scope, Send
 
 from openswe.agent_api.runs import run_config
 from openswe.agent_api.tokens import RemoteRun, sign_runtime_token, verify_runtime_token
-from openswe.threads import index, router, runtimes
+from openswe.threads import index, router, runtimes, store
 from openswe.threads.index import Runtime, ThreadStatus
 
 pytestmark = pytest.mark.usefixtures("registry_db")
@@ -108,6 +108,7 @@ class _Harness:
         mda_runtime._mda_threads.add(THREAD)
         self.runtimes = _Runtimes(mda_runtime)
         monkeypatch.setattr(router, "RUNTIMES", self.runtimes)
+        monkeypatch.setattr(store, "RUNTIMES", self.runtimes)
 
         async def context(
             configurable: dict[str, JsonValue],
@@ -196,7 +197,7 @@ async def test_threads_are_served_from_the_index_and_copied_to_their_runtime(
     assert isinstance(matched, list) and [thread["thread_id"] for thread in matched] == [THREAD]
     assert missed == 0
     assert counted == 1
-    await harness.router.copies.settled(THREAD)
+    await store.THREADS.copies.settled(THREAD)
     assert harness.runtimes.local.threads[THREAD]["metadata"] == read["metadata"]
     assert harness.runtimes.mda.threads[THREAD]["metadata"] == read["metadata"]
     assert harness.reached_here == []

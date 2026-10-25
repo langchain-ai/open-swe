@@ -33,7 +33,7 @@ from openswe.transcript.engine import AppendResult
 from openswe.transcript.turns import OpenTurn
 from openswe.users import User
 from openswe.workspaces.store import WORKSPACES, WorkspaceCreate
-from tests.conftest import patch_thread_module
+from tests.conftest import ThreadStoreOverClient, patch_thread_module
 
 _TEXT_ONLY_MODEL = "fireworks:accounts/fireworks/models/kimi-k3"
 _VISION_MODEL = "openai:gpt-6.1-sol"
@@ -47,9 +47,8 @@ async def _unlocked(*args, **kwargs):
 
 
 @pytest.fixture(autouse=True)
-def _in_process_calls_use_the_patched_client(monkeypatch) -> None:
-    """The commands path calls this deployment in process; the tests fake one client for both."""
-    patch_thread_module(monkeypatch, "in_process_client", lambda: thread_proxy.langgraph_client())
+def _threads_kept_by_the_fake_client(monkeypatch) -> None:
+    patch_thread_module(monkeypatch, "THREADS", ThreadStoreOverClient())
 
 
 @pytest.fixture(autouse=True)
@@ -651,6 +650,7 @@ async def test_dashboard_context_hashes_replace_stale_metadata(
     if not history_available:
         get_state.side_effect = RuntimeError("History unavailable")
     client = SimpleNamespace(threads=SimpleNamespace(get_state=get_state))
+    patch_thread_module(monkeypatch, "langgraph_client", lambda: client)
     monkeypatch.setattr(User, "canonical_person", AsyncMock(return_value={"id": person_id}))
 
     _, injected, _ = await thread_runs._attributed_run_messages(
@@ -660,7 +660,6 @@ async def test_dashboard_context_hashes_replace_stale_metadata(
         content="Continue",
         creating=False,
         email=None,
-        client=client,
     )
 
     assert injected == ({unlinked_hash} if history_available else {linked_hash, unlinked_hash})
