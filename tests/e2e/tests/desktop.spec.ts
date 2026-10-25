@@ -254,12 +254,19 @@ test("Desktop links supersede startup loading", async () => {
         "NSUserActivityTypeBrowsingWeb",
         {},
         {
-          webpageURL: "https://desktop.test/agents/reviews/a/b/1",
+          webpageURL:
+            "https://desktop.test/agents/reviews/a/b/1?tab=changes#file-1",
         },
       );
     });
     await expect(page.getByText("Ready", { exact: true })).toBeVisible();
-    await expect(page).toHaveURL("open-swe://app/agents/reviews/a/b/1");
+    await expect(page).toHaveURL(
+      "open-swe://app/agents/reviews/a/b/1?tab=changes#file-1",
+    );
+    await page.evaluate(() => window.openSweDesktop!.copyPageLink());
+    expect(
+      await electronApp.evaluate(({ clipboard }) => clipboard.readText()),
+    ).toBe("https://desktop.test/agents/reviews/a/b/1?tab=changes#file-1");
     await page.goto("data:text/html,Non-app page");
     await electronApp.evaluate(({ Menu }) => {
       Menu.getApplicationMenu()
