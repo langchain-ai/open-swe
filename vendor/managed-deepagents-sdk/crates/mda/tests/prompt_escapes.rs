@@ -68,8 +68,8 @@ const PROMPTS: &[(&str, usize, &str)] = &[
     ),
     (
         "deploy/trigger_channels.rs",
-        1,
-        "browser hand-off only shown in an interactive terminal",
+        2,
+        "browser hand-off is interactive-only; unattended self-hosted Slack deploys require .env credentials or fail with an interactive-setup hint",
     ),
     (
         "secret_input.rs",

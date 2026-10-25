@@ -1,4 +1,5 @@
 import type { TaskEventMetadata } from "./structuredInputMessages"
+import type { PassageReply } from "@/features/agents/utils/passageReply"
 
 export type Author = "user" | "agent" | "system" | "tool"
 
@@ -224,9 +225,13 @@ export interface Message {
   structuredSenderId?: string
   structuredSenderKind?: "person" | "system"
   structuredSenderName?: string
+  /** GitHub login of a dashboard sender, so a pending message can borrow their label. */
+  structuredSenderLogin?: string
   structuredSenderNote?: string
   structuredSenderIsBot?: boolean
   structuredSurface?: string
+  /** Passages the sender selected and replied to, carried in the message's envelope. */
+  replies?: Array<PassageReply>
   taskEvent?: TaskEventMetadata
   /** Id of the user message that opened this agent run and keys its diff artifact. */
   turnKey?: string
@@ -397,6 +402,7 @@ export interface PendingThreadMessage extends Omit<
   "images" | "pending" | "mine"
 > {
   images?: Array<ImageChunk>
+  replies?: Array<PassageReply>
   status: "sending" | "failed"
   /** Sent to queue behind the live run, so it renders as a queued row. */
   queued?: boolean
@@ -487,8 +493,8 @@ export interface AgentPullRequestStatusResponse {
   pullRequests: Array<AgentPullRequestHealth>
 }
 
-/** One kind of PR problem a thread-view fix prompt covers, and nothing else. */
-export type ThreadFixScope = "conflicts" | "checks" | "comments"
+/** What a thread-view fix prompt covers: conflicts and checks together, or comments. */
+export type ThreadFixScope = "repair" | "comments"
 
 export interface AgentPullRequestContextResponse {
   context: {

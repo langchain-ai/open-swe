@@ -24,9 +24,10 @@ from managed_deepagents.sandbox import SandboxDefinition, open_sandbox, replace_
 from pydantic import JsonValue, TypeAdapter, ValidationError
 from runtime_api.catalog import SandboxCreate, SandboxSpec
 from runtime_api.endpoint import call
-from runtime_api.loop import SANDBOX_REPLACED, RunCall
+from runtime_api.loop import SANDBOX_REPLACED
+from runtime_api.operations import RunRequest
 
-from rt.backend import OpenSweBackend, run_call
+from rt.backend import OpenSweBackend
 from rt.tools import run_id
 
 logger = logging.getLogger(__name__)
@@ -120,7 +121,7 @@ class ReplaceSandboxMiddleware(AgentMiddleware):
             replacement = await replace_sandbox(
                 getattr(request.runtime, "backend", None), definition(self._spec, create)
             )
-            await call(self._backend, SANDBOX_REPLACED, run_call(RunCall, run_id(), request.state))
+            await call(self._backend, SANDBOX_REPLACED, RunRequest(run_id=run_id()))
         except Exception as exc:
             logger.warning("Could not replace the thread's sandbox", exc_info=True)
             answer: dict[str, JsonValue] = {"success": False, "error": str(exc)}

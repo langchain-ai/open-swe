@@ -6,6 +6,7 @@ from copy import deepcopy
 from datetime import UTC, datetime, timedelta
 from typing import Literal, Self, cast
 from unittest.mock import AsyncMock, MagicMock
+from uuid import UUID
 
 import anthropic
 import httpx
@@ -28,6 +29,8 @@ from langchain_core.messages import (
     HumanMessage,
     ToolCall,
     ToolMessage,
+    messages_from_dict,
+    messages_to_dict,
 )
 from langchain_core.outputs import ChatGeneration, ChatResult
 from langchain_core.runnables import RunnableConfig, RunnableLambda
@@ -57,7 +60,13 @@ from rt.middleware import BackendRunMiddleware, RunState, RuntimeToolsMiddleware
 from rt.model_calls import model_call_guards
 from rt.tools import operation_tool
 from rt.tracing import TurnTrace
-from runtime_api.catalog import FilesSpec, ModelSpec, OperationSpec
+from runtime_api.catalog import (
+    Catalog,
+    FilesSpec,
+    InboxSpec,
+    ModelSpec,
+    OperationSpec,
+)
 from runtime_api.endpoint import Delivery, Endpoint, call
 from runtime_api.loop import (
     AFTER_AGENT,
@@ -66,9 +75,13 @@ from runtime_api.loop import (
     PREPARE,
     AfterAgent,
     BeforeModel,
+    Inbox,
+    InboxItems,
+    InboxReceipt,
     ModelCall,
     PhaseResult,
     Prepare,
+    RunCall,
     ToolCallReport,
 )
 from runtime_api.operations import OperationResult, ShellVerdict
@@ -318,6 +331,93 @@ async def test_an_unreachable_backend_fails_the_run(
 
     with pytest.raises(BackendUnavailableError):
         await graph.ainvoke({"messages": [("user", "hello")]})
+
+
+_INBOX = InboxSpec(events=True, surface="slack")
+
+
+async def test_the_inbox_names_only_the_run_and_hands_back_what_the_model_answers(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("OPEN_SWE_BACKEND_URL", "https://backend.invalid")
+    monkeypatch.setattr("rt.middleware.run_id", lambda: "run-1")
+    backend = OpenSweBackend("secret-token")
+    report = HumanMessage(content="The worker finished", id="event-match:report-1")
+    items = InboxItems(queued=[7], events=[UUID("0199a1b2-0000-7000-8000-000000000001")])
+    called: list[str] = []
+    reads: list[dict[str, JsonValue]] = []
+    received: list[InboxReceipt] = []
+    planned: list[RunCall] = []
+
+    async def phase(name: str, body: dict[str, JsonValue]) -> BaseModel:
+        called.append(name)
+        if name == "inbox":
+            reads.append(body)
+            if received:
+                return Inbox()
+            return Inbox.model_validate(
+                {
+                    "messages": messages_to_dict([report]),
+                    "update": {"reply_surface": "web"},
+                    "items": items.model_dump(mode="json"),
+                }
+            )
+        if name == "inbox_received":
+            received.append(InboxReceipt.model_validate(body))
+        if name == "before_model":
+            planned.append(RunCall.model_validate(body))
+        if name == "after_model" and len(planned) == 1:
+            return PhaseResult(jump_to="model")
+        return PhaseResult()
+
+    _answering(monkeypatch, backend, phase)
+    graph = create_agent(
+        model=FakeListChatModel(responses=["first", "second"]),
+        middleware=[BackendRunMiddleware(backend, "invocation-1", inbox=_INBOX)],
+    )
+
+    result = await graph.ainvoke({"messages": [("user", "hello")]})
+
+    # The run and how its catalog reads the inbox; never its conversation or state.
+    assert reads == [{"run_id": "run-1", "spec": _INBOX.model_dump(mode="json")}] * 2
+    assert messages_from_dict(planned[0].messages)[-1].id == "event-match:report-1"
+    assert planned[0].state["reply_surface"] == "web"
+    assert [message.id for message in result["messages"]].count("event-match:report-1") == 1
+    assert [receipt.items for receipt in received] == [items]
+    # The next read waits for the receipt, so it cannot hand the same items back.
+    assert called.index("inbox_received") < len(called) - called[::-1].index("inbox") - 1
+
+
+async def test_a_run_the_phase_ends_leaves_the_inbox_queued(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A model-call limit ends the run before any call answers the follow-up: it stays queued."""
+    monkeypatch.setenv("OPEN_SWE_BACKEND_URL", "https://backend.invalid")
+    monkeypatch.setattr("rt.middleware.run_id", lambda: "run-1")
+    backend = OpenSweBackend("secret-token")
+    follow_up = HumanMessage(content="One more thing", id="queued-1")
+    called: list[str] = []
+
+    async def phase(name: str, body: dict[str, JsonValue]) -> BaseModel:
+        called.append(name)
+        if name == "inbox":
+            return Inbox.model_validate(
+                {"messages": messages_to_dict([follow_up]), "items": {"queued": [7]}}
+            )
+        if name == "before_model":
+            return BeforeModel(jump_to="end")
+        return PhaseResult()
+
+    _answering(monkeypatch, backend, phase)
+    graph = create_agent(
+        model=FakeListChatModel(responses=["unused"]),
+        middleware=[BackendRunMiddleware(backend, "invocation-1", inbox=_INBOX)],
+    )
+
+    result = await graph.ainvoke({"messages": [("user", "hello")]})
+
+    assert "inbox_received" not in called
+    assert "queued-1" not in [message.id for message in result["messages"]]
 
 
 class _RecordingAnthropic(ChatAnthropic):
@@ -1038,9 +1138,98 @@ async def test_a_read_file_the_backend_serves_gets_the_read_checks(
     assert "not a valid image" in message.content
 
 
+async def test_each_run_lists_only_the_skills_it_may_see_and_reads_them_here(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from deepagents.middleware.filesystem import FilesystemMiddleware
+    from deepagents.middleware.skills import SkillsState
+    from rt.skills import RunSkillsMiddleware, SkillFiles
+    from runtime_api.loop import ToolResultReply
+    from runtime_api.skills import RunSkills, SkillFile
+
+    monkeypatch.setenv("OPEN_SWE_BACKEND_URL", "https://backend.invalid")
+    for module in ("rt.middleware", "rt.tools", "rt.file_tools"):
+        monkeypatch.setattr(f"{module}.run_id", lambda: "run-1")
+    backend = OpenSweBackend("secret-token")
+    asked: list[str] = []
+
+    async def answer(name: str, body: dict[str, JsonValue]) -> BaseModel:
+        asked.append(name)
+        if name != "skills":
+            return ToolResultReply()
+        deploy = "---\nname: deploy\ndescription: Ship it\n---\n\nRun make deploy.\n"
+        return RunSkills(
+            files=[SkillFile(path="/organization-skills/deploy/SKILL.md", content=deploy)]
+        )
+
+    _answering(monkeypatch, backend, answer)
+    sources = ["/skills/", "/organization-skills/"]
+    skill_files = SkillFiles(backend, lambda: "run-1")
+    # A run that acted for someone listed their skill; this thread's checkpoint kept it.
+    kept = cast(
+        SkillsState,
+        {
+            "messages": [],
+            "skills_metadata": [
+                {"name": "personal", "description": "private", "path": "/skills/personal/SKILL.md"}
+            ],
+        },
+    )
+
+    listed = await RunSkillsMiddleware(backend=skill_files, sources=sources).abefore_agent(
+        kept, MagicMock(), {}
+    )
+
+    assert listed is not None
+    assert [skill["name"] for skill in listed["skills_metadata"]] == ["deploy"]
+    files = FileToolsMiddleware(
+        backend,
+        FilesSpec(),
+        300,
+        remote={},
+        remote_files=MagicMock(),
+        in_box=True,
+        skills={tool.name: tool for tool in FilesystemMiddleware(backend=skill_files).tools},
+        skill_sources=sources,
+    )
+    runtime = ToolRuntime(
+        state={"messages": []},
+        context=None,
+        config={},
+        stream_writer=lambda event: None,
+        tool_call_id="call-1",
+        store=None,
+    )
+    in_box = AsyncMock()
+    read = await files.awrap_tool_call(
+        ToolCallRequest(
+            tool_call={
+                "name": "read_file",
+                "args": {"file_path": "/organization-skills/deploy/SKILL.md"},
+                "id": "call-1",
+                "type": "tool_call",
+            },
+            tool=None,
+            state={"messages": []},
+            runtime=runtime,
+        ),
+        in_box,
+    )
+    await backend.reports.drain()
+
+    assert isinstance(read, ToolMessage) and "Run make deploy." in read.text
+    in_box.assert_not_awaited()
+    # Listed once for the run, and no file was read through the backend's files.
+    assert asked.count("skills") == 1
+    assert not [name for name in asked if name.startswith("files.")]
+
+
 class _ToolCallingModel(GenericFakeChatModel):
     def bind_tools(self, tools: object, **kwargs: object) -> Self:
         return self
+
+
+COORDINATOR_CATALOG = Catalog(skill_sources=["/skills/coordinator/"])
 
 
 async def _launch_worker(
@@ -1091,7 +1280,9 @@ async def _launch_worker(
     model = _ToolCallingModel(
         messages=iter([AIMessage("", tool_calls=[launch, *also]), AIMessage("Launched.")])
     )
-    graph = create_agent(model, middleware=[AsyncWorkerLaunchMiddleware(backend), launches])
+    graph = create_agent(
+        model, middleware=[AsyncWorkerLaunchMiddleware(backend, COORDINATOR_CATALOG), launches]
+    )
     values = await graph.ainvoke(
         {"messages": [("user", "fix login in the background")]},
         {
@@ -1129,7 +1320,12 @@ async def test_a_launched_worker_carries_a_grant_never_its_coordinators_run_toke
 
     assert client.runs.create.await_args is not None
     launch = client.runs.create.await_args.kwargs
-    assert launch["context"] == {"graph": "agent", "__worker_grant": "worker-grant"}
+    # The coordinator's catalog, which the worker's graph is built from until it adopts its own.
+    assert launch["context"] == {
+        "graph": "agent",
+        "__worker_grant": "worker-grant",
+        "__catalog": COORDINATOR_CATALOG.model_dump(mode="json"),
+    }
     assert launch["input"] == {
         "messages": [{"role": "user", "content": "Your assignment: Fix login"}]
     }
@@ -1205,6 +1401,39 @@ async def test_a_worker_launch_mda_failed_to_start_is_made_again_while_it_may_pa
         assert "worker_launched" not in [hook for hook, _ in calls]
 
 
+async def test_a_run_started_without_its_catalog_calls_with_the_token_it_came_back_with(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("OPEN_SWE_BACKEND_URL", "https://backend.invalid")
+    request = httpx2.Request("POST", "https://backend.invalid")
+    bearers: list[str] = []
+
+    async def post(
+        url: str, *, headers: dict[str, str], json: dict[str, object], **kwargs: object
+    ) -> httpx2.Response:
+        bearers.append(headers["Authorization"])
+        if url.endswith("/catalog"):
+            catalog = Catalog(
+                operations=[
+                    OperationSpec(name="web_search", description="", parameters={}, grant="g1")
+                ],
+                run_token="settled-token",
+            )
+            return httpx2.Response(200, request=request, json=catalog.model_dump(mode="json"))
+        return httpx2.Response(200, request=request, json={})
+
+    client = MagicMock(is_closed=False)
+    client.post = AsyncMock(side_effect=post)
+    monkeypatch.setattr("rt.backend.httpx2.AsyncClient", lambda **kwargs: client)
+    backend = OpenSweBackend("started-token")
+
+    catalog = await backend.catalog(None)
+    await backend.tool_started(ToolCallReport(name="web_search", tool_call_id="call-1"))
+
+    assert bearers == ["Bearer started-token", "Bearer settled-token"]
+    assert backend.grant(catalog.operations[0]) == "g1"
+
+
 async def test_a_launched_worker_adopts_its_own_run_token_before_anything_runs(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -1224,7 +1453,12 @@ async def test_a_launched_worker_adopts_its_own_run_token_before_anything_runs(
                 "run_id": "worker-run",
                 "instructions": "Fix login",
             }
-            return httpx2.Response(200, request=request, json={"run_token": "worker-token"})
+            adopted = {
+                "run_token": "worker-token",
+                "catalog": {"excluded": ["slack_reply"]},
+                "invocation_id": "worker-invocation",
+            }
+            return httpx2.Response(200, request=request, json=adopted)
         return httpx2.Response(200, request=request, json={})
 
     client = MagicMock(is_closed=False)
@@ -1241,8 +1475,13 @@ async def test_a_launched_worker_adopts_its_own_run_token_before_anything_runs(
     )
 
     assert seen[0] == ("adopt", "Bearer worker-grant")
-    assert [hook for hook, _ in seen[1:3]] == ["catalog", "prepare"]
+    # Its own catalog came with its run token: it is never asked for again.
+    assert seen[1][0] == "prepare"
+    assert "catalog" not in [hook for hook, _ in seen]
+    assert backend.adopted is not None and backend.adopted.excluded == ["slack_reply"]
     assert all(bearer == "Bearer worker-token" for _, bearer in seen[1:])
+    # Its replies are stamped with its own invocation, which its usage counts them by.
+    assert backend.invocation_id == "worker-invocation"
 
 
 @pytest.mark.parametrize(

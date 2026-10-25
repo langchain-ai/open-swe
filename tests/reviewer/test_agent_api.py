@@ -1,13 +1,18 @@
 import json
+import logging
 import time
+from collections.abc import Mapping
 
 import jwt
 import pytest
+from pydantic import JsonValue
 from starlette.types import Message, Receive, Scope, Send
 
+from openswe.agent_api import server
 from openswe.agent_api.server import RunTokenMiddleware
 from openswe.agent_api.tokens import (
     RemoteRun,
+    RunSettings,
     RuntimeTokenError,
     WorkerGrant,
     sign_runtime_token,
@@ -20,6 +25,7 @@ RUN = RemoteRun(
     thread_id="thread-1",
     assistant_id="reviewer",
     configurable={"repo": {"owner": "acme", "name": "widgets"}, "pr_number": 7},
+    expires_at=int(time.time()) + 3600,
 )
 
 
@@ -80,18 +86,14 @@ async def test_backend_operation_traces_keep_runtime_events_and_errors(fails: bo
 
 @pytest.mark.parametrize("requested", ["anthropic:claude-opus-5-5", "openai:gpt-6.1-sol"])
 def test_remote_model_switch_overrides_cached_route_and_effort(requested: str) -> None:
-    from openswe.agent_api.graph import RunSession
-    from openswe.sandboxes.tool_runtime import ModelChoice, SurfaceModels, ToolSurface
+    from runtime_api.catalog import ModelSpec, RunModels
+
+    from openswe.agent_api.loop import ModelChoices
     from openswe.utils.model import provider_model_kwargs
 
-    main = ModelChoice("openai:gpt-6.1-sol", {})
-    session = RunSession(
-        ToolSurface(models=SurfaceModels(main=main, subagent=main, use_gateway=False)),
-        {},
-        None,
-        started_here=True,
-    )
-    choice = session.model_for(
+    main = ModelSpec(model_id="openai:gpt-6.1-sol", kwargs={})
+    choices = ModelChoices(RunModels(model=main, subagent_model=main, use_gateway=False))
+    choice = choices.model_for(
         {
             "model_route": "default",
             "requested_model": requested,
@@ -103,14 +105,126 @@ def test_remote_model_switch_overrides_cached_route_and_effort(requested: str) -
     assert choice.kwargs == provider_model_kwargs(requested, "medium", max_tokens=64_000)
 
 
-async def test_mda_calls_hide_the_tools_the_graph_middleware_hides_from_each_call() -> None:
-    from collections.abc import Awaitable, Callable
+async def test_the_named_calls_around_a_model_call_never_plan_the_run(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from unittest.mock import AsyncMock
 
-    from langchain.agents.middleware.types import AgentMiddleware, ModelRequest, ModelResponse
-    from langchain_core.tools import tool
+    from langchain_core.messages import HumanMessage, messages_to_dict
 
-    from openswe.agent_api.graph import RunSession
+    from openswe.agent_api import agent
+    from openswe.agent_api import graph as graph_module
+    from openswe.agent_api.graph import RemoteGraph
+    from openswe.middleware.task_coordination import TaskCoordinationMiddleware
     from openswe.sandboxes.tool_runtime import ToolSurface
+    from openswe.utils.model import provider_model_kwargs
+
+    async def never_planned(config: object, surface: ToolSurface) -> None:
+        raise AssertionError("A call around a model call never plans the run")
+
+    classify = AsyncMock(return_value="fast")
+    refresh = AsyncMock(return_value=False)
+    monkeypatch.setattr("openswe.middleware.model_selection._select_jev_route", classify)
+    monkeypatch.setattr(graph_module, "maybe_refresh_proxy_token", refresh)
+    monkeypatch.setattr(TaskCoordinationMiddleware, "for_thread", AsyncMock(return_value=None))
+    graph = RemoteGraph("agent", never_planned, agent.AgentParts())
+    run = RUN.model_copy(update={"assistant_id": "agent"})
+    asked = messages_to_dict([HumanMessage(content="Fix the login", id="human-1")])
+
+    route = await graph.api(run, "route_model", {"run_id": "run-1", "humans": asked})
+    chosen = await graph.api(
+        run,
+        "model_choice",
+        {"run_id": "run-1", "model_id": "anthropic:claude-opus-5-5", "effort": "high"},
+    )
+    context = await graph.api(run, "task_context", {"run_id": "run-1"})
+    refreshed = await graph.api(run, "refresh_github_proxy", {"run_id": "run-1"})
+
+    assert route == {"route": "fast"}
+    classify.assert_awaited_once_with("Fix the login")
+    assert isinstance(chosen, dict)
+    assert chosen["model_id"] == "anthropic:claude-opus-5-5"
+    assert chosen["kwargs"] == provider_model_kwargs(
+        "anthropic:claude-opus-5-5", "high", max_tokens=64_000
+    )
+    # A thread in no task gets no task context.
+    assert context == {"instructions": "", "message": None}
+    assert refreshed == {}
+    refresh.assert_awaited_once_with(run.thread_id)
+
+
+async def test_a_runs_tool_and_shell_calls_never_plan_it_and_read_its_settings(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from unittest.mock import AsyncMock
+
+    from langchain_core.tools import tool
+    from langgraph.config import get_config
+
+    from openswe.agent_api import agent
+    from openswe.agent_api.graph import RemoteGraph
+    from openswe.sandboxes.tool_runtime import ToolSurface
+
+    @tool
+    def draft_preference(note: str) -> str:
+        """Say whether this run opens pull requests as drafts."""
+        return f"{note}: {get_config()['configurable'].get('draft_prs')}"
+
+    async def never_planned(config: object, surface: ToolSurface) -> None:
+        raise AssertionError("A tool or shell call never plans the run")
+
+    monkeypatch.setattr(
+        agent, "agent_tools_by_name", lambda: {draft_preference.name: draft_preference}
+    )
+    monkeypatch.setattr(agent, "resolve_github_token", AsyncMock())
+    graph = RemoteGraph("agent", never_planned, agent.AgentParts())
+    # The settings decided as the run started, signed into its token.
+    run = RUN.model_copy(
+        update={"assistant_id": "agent", "settings": RunSettings(draft_prs=False)}
+    ).granting()
+    call = {
+        "run_id": "run-1",
+        "name": "draft_preference",
+        "arguments": {"note": "drafts"},
+        "request_id": "call-1",
+    }
+
+    result = await graph.api(run, "operation", {**call, "grant": run.grant("draft_preference")})
+    # Only an operation the run's catalog granted it runs, however the call names it.
+    ungranted = await graph.api(run, "operation", call)
+    regranted = await graph.api(
+        run, "operation", {**call, "grant": run.granting().grant("draft_preference")}
+    )
+    verdict = await graph.api(
+        run, "check_shell", {"run_id": "run-1", "tool": "execute", "command": "ls"}
+    )
+
+    assert isinstance(result, dict) and result["content"] == "drafts: False"
+    assert verdict == {"allowed": True, "command": None, "refusal": None}
+    for refused in (ungranted, regranted):
+        assert isinstance(refused, dict) and refused["status"] == "error"
+        assert "not one of this run's operations" in str(refused["content"])
+
+    # A token from before operations were granted reaches only the tools its plan offers.
+    async def offers_nothing(config: object, surface: ToolSurface) -> None:
+        return None
+
+    planned = RemoteGraph("agent", offers_nothing, agent.AgentParts())
+    unplanned = await planned.api(
+        RUN.model_copy(update={"assistant_id": "agent"}), "operation", call
+    )
+    assert isinstance(unplanned, dict) and unplanned["status"] == "error"
+    assert "drafts" not in str(unplanned["content"])
+
+
+async def test_mda_calls_hide_the_tools_the_graph_middleware_hides_from_each_call() -> None:
+    from langchain.agents.middleware.types import AgentMiddleware
+    from langchain_core.tools import tool
+    from langgraph.runtime import Runtime
+    from runtime_api.catalog import ModelSpec, RunModels
+
+    from openswe.agent_api.loop import RunLoop
+    from openswe.middleware.model_call_shape import CallShape
 
     @tool
     def plan(step: str) -> str:
@@ -123,24 +237,20 @@ async def test_mda_calls_hide_the_tools_the_graph_middleware_hides_from_each_cal
         return summary
 
     class HideRecordUntilAsked(AgentMiddleware):
-        async def awrap_model_call(
-            self,
-            request: ModelRequest,
-            handler: Callable[[ModelRequest], Awaitable[ModelResponse]],
-        ) -> ModelResponse:
-            if not request.state.get("asked"):
-                request = request.override(tools=[t for t in request.tools if t.name != "record"])
-            return await handler(request)
+        async def ashape_model_call(
+            self, call: CallShape, state: Mapping[str, object], runtime: Runtime
+        ) -> CallShape:
+            return call if state.get("asked") else call.hiding(["record"])
 
-    session = RunSession(
-        ToolSurface(tools={"plan": plan, "record": record}, middleware=[HideRecordUntilAsked()]),
-        {},
-        None,
-        started_here=True,
+    model = ModelSpec(model_id="openai:gpt-6.1-sol", kwargs={})
+    loop = RunLoop(
+        [HideRecordUntilAsked()],
+        RunModels(model=model, subagent_model=model, use_gateway=False),
+        offered={plan.name, record.name},
     )
 
-    assert (await session.model_call({"messages": []}, None)).hidden_tools == ["record"]
-    assert (await session.model_call({"messages": [], "asked": True}, None)).hidden_tools == []
+    assert (await loop.model_call({"messages": []}, Runtime())).hidden_tools == ["record"]
+    assert (await loop.model_call({"messages": [], "asked": True}, Runtime())).hidden_tools == []
 
 
 @pytest.mark.parametrize("environment", ["preview", "staging", "production"])
@@ -171,7 +281,7 @@ async def test_remote_prompts_include_deployment_context(
         started_here=True,
     )
     main_prompt = (
-        await session.model_call({"rendered_system_prompt": "main instructions"}, Runtime())
+        await session.loop.model_call({"rendered_system_prompt": "main instructions"}, Runtime())
     ).system_prompt
     subagent_prompt = session.catalog().subagents[0].system_prompt
 
@@ -338,6 +448,46 @@ async def test_tool_server_hands_the_verified_run_to_its_handlers() -> None:
     assert await _status(f"Bearer {sign_runtime_token(RUN)}") == (200, RUN)
 
 
+async def test_hook_failure_log_names_the_mda_run(monkeypatch: pytest.MonkeyPatch) -> None:
+    from langgraph_api.logging import Formatter
+
+    async def failing_hook(run: RemoteRun, hook: str, body: Mapping[str, JsonValue]) -> JsonValue:
+        raise RuntimeError("connection pool exhausted")
+
+    monkeypatch.setattr(server, "_graphs", lambda: {RUN.assistant_id: failing_hook})
+    formatter = Formatter(None, None, "%")
+    lines: list[str] = []
+
+    class Capture(logging.Handler):
+        def emit(self, record: logging.LogRecord) -> None:
+            lines.append(formatter.format(record))
+
+    scope: Scope = {
+        "type": "http",
+        "method": "POST",
+        "path": "/agent-api/before_model",
+        "headers": [],
+        "path_params": {"endpoint": "before_model"},
+        "state": {"remote_run": RUN},
+    }
+
+    async def receive() -> Message:
+        return {"type": "http.request", "body": json.dumps({"run_id": "mda-run-1"}).encode()}
+
+    async def send(message: Message) -> None:
+        pass
+
+    handler = Capture()
+    server.logger.addHandler(handler)
+    try:
+        await server.api_endpoint(scope, receive, send)
+    finally:
+        server.logger.removeHandler(handler)
+
+    assert len(lines) == 1
+    assert all(value in lines[0] for value in ("mda-run-1", "thread-1", "before_model"))
+
+
 async def test_mda_catalog_leaves_integrations_and_code_mode_to_mda(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -346,6 +496,7 @@ async def test_mda_catalog_leaves_integrations_and_code_mode_to_mda(
     monkeypatch.setenv("SANDBOX_TYPE", "local")
     from langchain.agents.middleware import ModelCallLimitMiddleware
     from langchain.agents.middleware.types import AgentMiddleware
+    from langchain_core.runnables import RunnableConfig
     from langchain_core.tools import StructuredTool
     from langchain_quickjs import CodeInterpreterMiddleware
 
@@ -366,7 +517,9 @@ async def test_mda_catalog_leaves_integrations_and_code_mode_to_mda(
 
         return StructuredTool.from_function(coroutine=run, name=name, description=name)
 
-    async def build(config: object, surface: ToolSurface) -> None:
+    async def build(config: RunnableConfig, surface: ToolSurface) -> None:
+        # What the planner decides for the run, such as the sender's draft preference.
+        config["configurable"]["draft_prs"] = False
         search = integration("mcp_search")
         search.metadata = {
             "mcp_provenance": MCPToolProvenance(
@@ -400,10 +553,7 @@ async def test_mda_catalog_leaves_integrations_and_code_mode_to_mda(
         choice = ModelChoice("openai:gpt-6.1-sol", {})
         surface.models = SurfaceModels(main=choice, subagent=choice, use_gateway=False)
 
-    async def start_models(cfg: object) -> object:
-        raise AssertionError("not asked for")
-
-    graph = RemoteGraph("agent", build, start_models)
+    graph = RemoteGraph("agent", build)
     catalog = await graph.api(RUN, "catalog", {"run_id": "run-1"})
 
     assert isinstance(catalog, dict)
@@ -443,9 +593,27 @@ async def test_mda_catalog_leaves_integrations_and_code_mode_to_mda(
         "execute",
         "ls",
         "read_file",
+        "search_tools",
         "web_search",
         "write_file",
     ]
+    assert catalog["search_tools"] is True
+    # MDA's search_tools reads as the backend describes it, with how to call what it finds.
+    from openswe.prompts import prompt
+
+    assert catalog["search_tools_description"] == prompt("tools/search_tools")
+    # A run started without its catalog gets a token that carries what was decided for
+    # it here, and grants its operations under it, but lives no longer than the one it had.
+    token = catalog["run_token"]
+    assert isinstance(token, str)
+    resigned = verify_runtime_token(token)
+    assert resigned.thread_id == RUN.thread_id and resigned.grant_id is not None
+    assert resigned.expires_at == RUN.expires_at
+    assert resigned.settings.draft_prs is False
+    assert all(
+        isinstance(op, dict) and resigned.granted(str(op["name"]), str(op["grant"]))
+        for op in operations
+    )
 
 
 async def test_an_operation_gets_the_state_it_reads_and_answers_the_state_it_changed() -> None:
@@ -716,7 +884,7 @@ async def test_a_worker_grant_reads_its_coordinators_catalog_and_adopts_nothing_
 async def test_only_a_body_unlike_its_request_is_refused_and_a_failure_inside_is_logged(
     monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
 ) -> None:
-    from pydantic import BaseModel, JsonValue
+    from pydantic import BaseModel
     from runtime_api.endpoint import Handlers
     from runtime_api.loop import PREPARE, PhaseResult, Prepare
 
@@ -769,10 +937,11 @@ async def test_an_adopted_worker_acts_as_its_own_thread_never_its_coordinator(
 ) -> None:
     from unittest.mock import AsyncMock, MagicMock
 
-    from runtime_api.catalog import ModelSpec, RunModels
+    from runtime_api.catalog import Catalog
     from runtime_api.workers import Adopt
 
     from openswe.agent_api import async_workers, hosted
+    from openswe.agent_api.graph import RunStart
     from openswe.prompts import prompt
 
     coordinator = RemoteRun(
@@ -787,12 +956,9 @@ async def test_an_adopted_worker_acts_as_its_own_thread_never_its_coordinator(
         AsyncMock(return_value={"thread_id": "worker", "github_login": "owner"}),
     )
     monkeypatch.setattr(async_workers.service.Actor, "resolve", AsyncMock(return_value="actor"))
-    spec = ModelSpec(model_id="openai:gpt-6.1-sol", kwargs={})
-    graph = MagicMock(
-        start_models=AsyncMock(
-            return_value=RunModels(model=spec, subagent_model=spec, use_gateway=False)
-        )
-    )
+    planned = Catalog(skill_sources=["/skills/worker/"])
+    started = RunStart(catalog=planned, settings=RunSettings(draft_prs=True))
+    graph = MagicMock(start_run=AsyncMock(return_value=started))
     monkeypatch.setattr(hosted, "hosted_graphs", lambda: {"agent": graph})
 
     # The worker's first message: the assignment its launch rendered.
@@ -806,6 +972,11 @@ async def test_an_adopted_worker_acts_as_its_own_thread_never_its_coordinator(
     adopted = verify_runtime_token(reply.run_token)
     assert adopted.thread_id == "worker"
     assert adopted.configurable["thread_id"] == "worker"
+    # Planned as the worker's own run, so its first run never asks for a catalog.
+    assert reply.catalog == planned
+    assert graph.start_run.await_args.args[0].thread_id == "worker"
+    # The settings the worker's run starts with ride in its token.
+    assert adopted.settings == RunSettings(draft_prs=True)
     register.assert_awaited_once_with("actor", "call-1", "worker", "Fix it")
 
 

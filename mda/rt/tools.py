@@ -36,9 +36,11 @@ from rt.backend import (
     BackendTimeoutError,
     BackendUnavailableError,
     OpenSweBackend,
+    git_trace,
     held_state,
+    issuing_message_id,
+    namespace,
     reported_call,
-    run_call,
 )
 from rt.tracing import TurnTrace
 
@@ -79,15 +81,15 @@ def tool_report(
     tool_call_id: str,
 ) -> ToolCallReport:
     """A tool call as the backend's transcript takes it, with the turn's git evidence."""
-    report = run_call(
-        ToolCallReport,
-        run_id(),
-        state,
+    return ToolCallReport(
+        run_id=run_id(),
+        namespace=namespace(),
+        git={**git_trace(state), **TurnTrace.current_evidence()},
         name=name,
         arguments=dict(arguments),
         tool_call_id=tool_call_id,
+        message_id=issuing_message_id(state, tool_call_id),
     )
-    return report.model_copy(update={"state": {**report.state, **TurnTrace.current_evidence()}})
 
 
 def _reading(spec: OperationSpec, state: Mapping[str, object]) -> RunOperation:
@@ -167,7 +169,12 @@ async def _operate(
     tool_call_id: str,
 ) -> ToolMessage | Command:
     request = _reading(spec, runtime.state).model_copy(
-        update={"run_id": run_id(), "arguments": dict(arguments), "request_id": tool_call_id}
+        update={
+            "run_id": run_id(),
+            "arguments": dict(arguments),
+            "request_id": tool_call_id,
+            "grant": backend.grant(spec),
+        }
     )
     try:
         answer = await call(backend, OPERATION, request, timeout=_seconds(arguments))

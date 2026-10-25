@@ -17,6 +17,7 @@ import socket
 import sys
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
+from contextvars import ContextVar
 from urllib.parse import urlparse
 
 import e2e_env  # noqa: F401  (sets env before any agent import)
@@ -342,10 +343,67 @@ def apply() -> None:
     # which is the state the review page polls through.
     review_scout_graph.__dict__["_ensure_scout_sandbox"] = _unavailable_scout_sandbox
 
+    _answer_every_call_on_a_fresh_replica()
+
     _applied = True
 
 
 SCOUT_SANDBOX_ERROR = "E2E has no sandbox provider for the review scout"
+
+
+_calling: ContextVar[str] = ContextVar("e2e_calling", default="")
+
+
+def _answer_every_call_on_a_fresh_replica() -> None:
+    """Answer each MDA call as a backend replica that never served the run would.
+
+    Production runs three replicas, and a run's calls land on any of them; here one
+    process answers them all, so it forgets the plans it cached between calls. Each
+    time it plans a run is recorded, by the call that needed the plan, which
+    ``/control/plans`` reports.
+    """
+    import fakes
+    from pydantic import JsonValue
+
+    from openswe.agent_api.graph import RemoteGraph, RunSession, RunStart
+    from openswe.agent_api.tokens import RemoteRun
+
+    answer = RemoteGraph.api
+    plan = RemoteGraph._planned
+    session = RemoteGraph.session
+    start = RemoteGraph.start_run
+
+    async def api(self: RemoteGraph, run: RemoteRun, endpoint: str, raw: JsonValue) -> JsonValue:
+        calling = _calling.set(endpoint)
+        try:
+            return await answer(self, run, endpoint, raw)
+        finally:
+            _calling.reset(calling)
+
+    async def start_run(self: RemoteGraph, run: RemoteRun) -> RunStart:
+        # A dispatch can run in the context of a call it was made from, such as an operation.
+        calling = _calling.set("start")
+        try:
+            return await start(self, run)
+        finally:
+            _calling.reset(calling)
+
+    async def planned(
+        self: RemoteGraph, run: RemoteRun, run_id: str | None, *, fresh: bool
+    ) -> RunSession:
+        fakes.PLANS.append({"thread_id": run.thread_id, "call": _calling.get()})
+        return await plan(self, run, run_id, fresh=fresh)
+
+    async def forgetful_session(
+        self: RemoteGraph, run: RemoteRun, run_id: str | None, *, fresh: bool = False
+    ) -> RunSession:
+        self._sessions.clear()
+        return await session(self, run, run_id, fresh=fresh)
+
+    RemoteGraph.api = api
+    RemoteGraph.start_run = start_run
+    RemoteGraph._planned = planned
+    RemoteGraph.session = forgetful_session
 
 
 async def _unavailable_scout_sandbox(_thread_id: str, _cfg: object) -> object:

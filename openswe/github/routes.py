@@ -5,6 +5,7 @@ from fastapi import APIRouter, Response
 from openswe.github import webhook as service
 from openswe.github.repo_cache import forget_cached_repos
 from openswe.human_review.completed_reviews import CompletedReview
+from openswe.merge_queue.controller import wake_native_queue
 from openswe.review_guide.launch import notify_pr_updated
 from openswe.schedules import store as schedules
 from openswe.ui_invalidations import Topic
@@ -63,7 +64,7 @@ async def github_webhook(
         },
     )
 
-    if event_type not in common.SUPPORTED_GH_EVENTS:
+    if event_type not in common.SUPPORTED_GH_EVENTS and event_type != "merge_group":
         common.logger.info("Ignoring unsupported GitHub event type: %s", event_type)
         return {"status": "ignored", "reason": f"Unsupported event type: {event_type}"}
 
@@ -101,6 +102,20 @@ async def github_webhook(
                 extra={"repository": repository},
             )
             return {"status": "ignored", "reason": "repository is not assigned to a workspace"}
+
+    if event_type == "merge_group":
+        queued = await wake_native_queue(payload)
+        return {"status": "accepted" if queued else "ignored"}
+
+    if event_type in {"push", "pull_request", "pull_request_review"}:
+        try:
+            await wake_native_queue(payload)
+        except Exception:
+            # The minute job recovers missed wakeups without blocking other handlers.
+            common.logger.exception(
+                "Failed to wake native merge queue",
+                extra={"github_delivery": delivery_id, "github_event": event_type},
+            )
 
     issue = payload.get("issue", {})
     is_pull_request_comment = bool(event_type == "issue_comment" and issue.get("pull_request"))

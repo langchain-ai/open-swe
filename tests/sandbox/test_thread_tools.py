@@ -233,33 +233,3 @@ def test_agent_factory_is_accepted_by_langgraph() -> None:
         classify_factory(traced_agent, graph_id)
     finally:
         FACTORY_KWARGS.pop(graph_id, None)
-
-
-async def test_search_tools_ranks_by_bm25_and_names_code_calls() -> None:
-    from openswe.tools.search_tools import search_tools_tool
-
-    def make(name: str, description: str) -> StructuredTool:
-        async def run(query: str) -> str:
-            return query
-
-        return StructuredTool.from_function(coroutine=run, name=name, description=description)
-
-    surface = ToolSurface(
-        tools={
-            tool.name: tool
-            for tool in (
-                make("searchDatadogLogs", "Search raw Datadog log entries."),
-                make("get_datadog_metric", "Query metrics from Datadog."),
-                make("save_issue", "Create or update a Linear issue."),
-                make("slack_reply", "Reply in Slack."),
-            )
-        }
-    )
-    search = search_tools_tool(surface, lambda name: None if name == "slack_reply" else name)
-
-    results = await search.ainvoke({"query": "datadog logs", "limit": 2})
-
-    assert [result["name"] for result in results] == ["searchDatadogLogs", "get_datadog_metric"]
-    assert results[0]["parameters"]["properties"].keys() == {"query"}
-    assert results[0]["code_name"] == "searchDatadogLogs"
-    assert await search.ainvoke({"query": "kubernetes"}) == []

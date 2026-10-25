@@ -1,18 +1,23 @@
 """The Slack channel directory: one row per channel, keyed by its id.
 
-Rows are both the lookup cache for channel details and the name-to-id map, so a
-channel named in a tool call resolves without paging Slack. ``fresh`` bounds how
-long a stored payload is trusted before Slack is asked again.
+Rows are the lookup cache for channel details, the name-to-id map, so a channel
+named in a tool call resolves without paging Slack, and the list the dashboard
+offers. ``fresh`` bounds how long a stored payload is trusted before Slack is
+asked again; ``listed`` marks the live channels the bot can see, kept current by
+``sync_directory`` and by Slack's channel events.
 """
 
+import asyncio
 import logging
 import re
+from collections.abc import AsyncIterator, Awaitable, Callable
 from datetime import UTC, datetime, timedelta
-from typing import Any, Self
+from typing import Any, Final, Self
 
 import aiohttp
 from slack_sdk.errors import SlackApiError
-from sqlalchemy import func, select
+from slack_sdk.web.async_slack_response import AsyncSlackResponse
+from sqlalchemy import func, select, update
 from sqlalchemy.dialects.postgresql import JSONB, insert
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import Mapped, mapped_column
@@ -37,6 +42,24 @@ SLACK_BOT_TOKEN = ENV.SLACK_BOT_TOKEN.get()
 PAYLOAD_TTL = timedelta(seconds=300)
 _NEVER_FETCHED = datetime.fromtimestamp(0, UTC)
 HISTORY_MAX_MESSAGES = 100
+
+_CHANNEL_TYPES: Final = "public_channel,private_channel"
+_PAGE_SIZE: Final = 1000
+# conversations.list allows about 20 pages a minute, so a large workspace's walk
+# waits out several rate limits; it runs in the background, where that is fine.
+_MAX_RATE_LIMITS: Final = 20
+_MAX_RATE_LIMIT_WAIT: Final = timedelta(minutes=2)
+# Channel events that change what the directory says about one channel.
+# Private channels send the group_* forms.
+REFETCH_EVENTS: Final = frozenset(
+    {"channel_created", "channel_rename", "channel_unarchive", "group_rename", "group_unarchive"}
+)
+UNLIST_EVENTS: Final = frozenset(
+    {"channel_archive", "channel_deleted", "group_archive", "group_deleted"}
+)
+DIRECTORY_EVENTS: Final = REFETCH_EVENTS | UNLIST_EVENTS
+
+type _PageFetch = Callable[[str | None], Awaitable[AsyncSlackResponse]]
 
 _MENTION = re.compile(r"^<#([A-Z0-9]+)(?:\|[^>]*)?>$")
 _ID_SHAPE = re.compile(r"^[CGD][A-Z0-9]{8,}$")
@@ -67,12 +90,22 @@ class ChannelLookupUnavailable(RuntimeError):
         return cls(max(1, delay))
 
 
+def _rate_limit_wait(exc: SlackApiError) -> float | None:
+    """Seconds Slack asks a rate-limited call to wait, or ``None`` when it was not one."""
+    if not slack_error(exc).startswith("rate_limited"):
+        return None
+    raw = slack_retry_after(exc) or ""
+    delay = float(raw) if re.fullmatch(r"[0-9]{1,6}(\.[0-9]+)?", raw) else 1.0
+    return min(delay, _MAX_RATE_LIMIT_WAIT.total_seconds())
+
+
 class SlackChannel(Base):
     __tablename__ = "slack_channel"
 
     id: Mapped[str] = mapped_column(primary_key=True)
     name: Mapped[str] = mapped_column(server_default="", default="")
     payload: Mapped[JsonObject] = mapped_column(JSONB, default_factory=dict)
+    listed: Mapped[bool] = mapped_column(default=False)
     fetched_at: Mapped[datetime | None] = mapped_column(server_default=NOW, init=False)
 
     @property
@@ -107,7 +140,10 @@ class SlackChannel(Base):
             return None
         name = payload.get("name")
         return cls(
-            id=channel_id, name=name.lower() if isinstance(name, str) else "", payload=payload
+            id=channel_id,
+            name=name.lower() if isinstance(name, str) else "",
+            payload=payload,
+            listed=SlackChannelPayload.of(payload).listed,
         )
 
     @classmethod
@@ -117,7 +153,10 @@ class SlackChannel(Base):
         if not rows or not postgres.configured():
             return
         upsert = insert(cls).values(
-            [{"id": row.id, "name": row.name, "payload": row.payload} for row in rows]
+            [
+                {"id": row.id, "name": row.name, "payload": row.payload, "listed": row.listed}
+                for row in rows
+            ]
         )
         async with postgres.session() as session:
             await session.execute(
@@ -126,10 +165,99 @@ class SlackChannel(Base):
                     set_={
                         "name": upsert.excluded.name,
                         "payload": upsert.excluded.payload,
+                        "listed": upsert.excluded.listed,
                         "fetched_at": func.clock_timestamp(),
                     },
                 )
             )
+
+    @classmethod
+    async def listed_channels(cls) -> list[Self]:
+        """The directory: every listed channel, by name."""
+        if not postgres.configured():
+            return []
+        async with postgres.session() as session:
+            rows = await session.scalars(select(cls).where(cls.listed).order_by(cls.name, cls.id))
+            return list(rows)
+
+    @classmethod
+    async def sync_directory(cls) -> int:
+        """Walk every channel the bot can see into the directory; how many channels Slack sent.
+
+        Public channels come from ``conversations.list``; the bot's own channels,
+        which are all private ones it can see, from ``users.conversations``, which
+        is also the only reliable word on membership. Once the walk completes, a
+        listed channel it did not pass is gone or out of the bot's sight.
+        """
+        async with postgres.session() as session:
+            started = await session.scalar(select(func.clock_timestamp()))
+        seen = 0
+        async with SlackClient.bot() as client:
+            async for page in cls._pages(
+                lambda cursor: client.conversations_list(
+                    types=_CHANNEL_TYPES, exclude_archived=True, limit=_PAGE_SIZE, cursor=cursor
+                ),
+                patient=True,
+            ):
+                await cls.save_all(*page)
+                seen += len(page)
+            async for page in cls._pages(
+                lambda cursor: client.users_conversations(
+                    types=_CHANNEL_TYPES, exclude_archived=True, limit=_PAGE_SIZE, cursor=cursor
+                ),
+                patient=True,
+            ):
+                await cls.save_all(*({**item, "is_member": True} for item in page))
+                seen += len(page)
+        async with postgres.session() as session:
+            await session.execute(
+                update(cls).where(cls.listed, cls.fetched_at < started).values(listed=False)
+            )
+        return seen
+
+    @classmethod
+    async def observe(cls, event_type: str, channel_id: str) -> None:
+        """Bring one channel's row up to date after a Slack channel event about it."""
+        if event_type in UNLIST_EVENTS:
+            if postgres.configured():
+                async with postgres.session() as session:
+                    await session.execute(
+                        update(cls).where(cls.id == channel_id).values(listed=False)
+                    )
+        elif event_type in REFETCH_EVENTS:
+            await cls.load(channel_id, use_cache=False)
+
+    @staticmethod
+    async def _pages(
+        fetch: _PageFetch, *, patient: bool = False
+    ) -> AsyncIterator[list[JsonObject]]:
+        """Each page of channels ``fetch`` returns; ``patient`` waits out rate limits."""
+        cursor: str | None = None
+        seen_cursors: set[str] = set()
+        rate_limits = 0
+        while True:
+            try:
+                data = await fetch(cursor)
+            except SlackApiError as exc:
+                wait = _rate_limit_wait(exc)
+                if not patient or wait is None or rate_limits >= _MAX_RATE_LIMITS:
+                    raise
+                rate_limits += 1
+                logger.info(
+                    "Slack rate limited a channel walk; waiting",
+                    extra={"retry_after_seconds": wait},
+                )
+                await asyncio.sleep(wait)
+                continue
+            listed = data.get("channels")
+            yield [item for item in listed if isinstance(item, dict)] if listed else []
+            metadata = data.get("response_metadata")
+            cursor = metadata.get("next_cursor") if isinstance(metadata, dict) else None
+            if not cursor:
+                return
+            if not isinstance(cursor, str) or cursor in seen_cursors:
+                raise ValueError("Slack repeated a pagination cursor")
+            seen_cursors.add(cursor)
 
     @classmethod
     async def ensure(cls, session: AsyncSession, *channel_ids: str) -> None:
@@ -207,26 +335,21 @@ class SlackChannel(Base):
     @classmethod
     async def _search(cls, name: str) -> Self | None:
         """Page ``conversations.list`` for ``name``, saving every channel it walks past."""
-        cursor: str | None = None
         try:
             async with SlackClient.bot() as client:
-                while True:
-                    data = await client.conversations_list(
-                        types="public_channel,private_channel",
+                async for page in cls._pages(
+                    lambda cursor: client.conversations_list(
+                        types=_CHANNEL_TYPES,
                         exclude_archived=True,
-                        limit=1000,
+                        limit=_PAGE_SIZE,
                         cursor=cursor,
                     )
-                    listed = data.get("channels")
-                    page = [item for item in listed if isinstance(item, dict)] if listed else []
+                ):
                     await cls.save_all(*page)
                     for item in page:
                         if item.get("name") == name and (row := cls.from_payload(item)):
                             return row
-                    metadata = data.get("response_metadata")
-                    cursor = metadata.get("next_cursor") if isinstance(metadata, dict) else None
-                    if not cursor:
-                        return None
+            return None
         except SLACK_REQUEST_ERRORS as exc:
             logger.warning("Slack channel list failed", extra={"slack_error": slack_error(exc)})
             return None

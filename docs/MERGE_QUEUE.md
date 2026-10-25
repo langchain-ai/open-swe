@@ -1,10 +1,64 @@
 # Merge queue runtime
 
-The queue currently forms candidates and records smoke validation. It does **not**
-promote them to the target branch. A successful smoke attempt is not a full-suite
-pass or permission to merge.
+The runtime supports native GitHub queue observation and the earlier custom
+candidate/smoke-validation mode. Native observation never builds commits,
+dispatches tests, posts checks, or merges PRs. Native validation and shared-result
+publication are separate integration steps. A custom smoke pass is not permission
+to merge either.
+
+## Native observation
+
+Configure the owning workspace's `merge_queue_config` with:
+
+```json
+{
+  "mode": "native",
+  "repository": "example/queue-canary",
+  "repository_id": 123,
+  "operator_emails": ["operator@example.com"]
+}
+```
+
+The existing App needs only Contents, Metadata, and Pull requests read for this
+observer. No dispatch URL, signing secret, workflow digest, or check-write access
+is used. The repository must already be assigned to this workspace. Configure
+the App's `merge_group` subscription in addition to PR/review/push events. Signed
+webhooks schedule coalesced durable wakeups; the recurring minute job recovers
+missed deliveries. Event payloads never supply candidate state: every wakeup
+reads the current GitHub queue through the configured App.
+
+The observer atomically replaces `merge_queue.native_snapshot`, including an
+observation timestamp, target SHA, queue entries, PR heads/review decisions, and
+candidate parents. Membership is reconstructed from a continuous chain of merge
+commits rooted at the observed target, with each second parent matching its PR
+head. `baseCommit` can be a preceding candidate, not main. Inconsistent prefixes
+remain observations but produce no usable successor candidate until reconciled.
+Candidates are keyed by SHA; an empty queue removes them from the current view.
+Transport, permission, and incomplete-response errors preserve the last snapshot
+and its timestamp for the next reconciliation; a snapshot is never test evidence.
+Observation currently supports merge-commit queues and at most 100 entries;
+larger queues are rejected rather than silently truncated.
+Queue configuration is not read: GitHub restricts that field separately from
+entries. Before enabling validation, verify merge method, limits, and deadlines
+through an authorized operator or backend relay.
+
+Before switching modes, stop **all** previous custom controllers, including any
+external owner, and drain their work. The persisted transition requires a paused
+queue without a live lease, active requests/attempts/batches, or uncleaned custom
+refs. Switching back to custom mode is rejected. Updated custom workers also
+reject native queues; this does not fence an older binary that predates the mode
+field, so stopping those replicas is required. Observation continues while paused.
+The old dashboard controls return 409 in native mode; use GitHub for queue controls
+until the native UI integration is available.
+
+Before enabling native validation, independently verify enqueue/dequeue and
+trusted check-reporting authority under the intended App or relay. Read access
+and webhook receipt do not prove write permissions. The eventual gate issuer
+must be isolated from general agent credentials and candidate workflow code.
 
 ## Configuration
+
+The following settings describe **custom mode** (`mode` defaults to `custom`).
 
 Configuration lives in PostgreSQL, in the nullable `workspace.merge_queue_config`
 JSONB column. All workspaces default to NULL, which disables both the API and controller.
@@ -119,5 +173,6 @@ and worker paths on every replica. Retain repository access needed by the restri
 gateway, while ensuring no legacy controller can resume. Configuration removal alone
 is not an immediate fence for running replicas. Never run two queue owners concurrently.
 Keep deployment identifiers, credentials, rulesets and live evidence in private
-infrastructure tooling. Promotion requires a separate restricted executor and is
-not enabled by this runtime; never grant the agent-accessible App queue bypass.
+infrastructure tooling. Native mode delegates eventual merging to GitHub and must
+not enable a custom promotion executor. Neither mode grants the agent-accessible
+App queue bypass.

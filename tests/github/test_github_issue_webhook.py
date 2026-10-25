@@ -68,8 +68,9 @@ def _sign_slack_body(body: bytes, timestamp: str = "1700000000") -> str:
     return f"v0={sig}"
 
 
+@pytest.mark.parametrize("wakeup_fails", [False, True])
 async def test_github_webhook_skips_automatic_review_when_disabled(
-    monkeypatch, registry_db
+    monkeypatch, registry_db, wakeup_fails: bool
 ) -> None:
     called = False
 
@@ -83,6 +84,12 @@ async def test_github_webhook_skips_automatic_review_when_disabled(
     monkeypatch.setattr(webhook_common, "is_repo_auto_review_enabled", fake_auto_review_enabled)
     monkeypatch.setattr(github_webhooks, "process_github_pr_ready", fake_process_github_pr_ready)
     monkeypatch.setattr(webhook_common, "GITHUB_WEBHOOK_SECRET", _TEST_WEBHOOK_SECRET)
+    if wakeup_fails:
+        monkeypatch.setattr(
+            github_routes,
+            "wake_native_queue",
+            AsyncMock(side_effect=RuntimeError("DB unavailable")),
+        )
 
     response = await _post_github_webhook(
         "pull_request",

@@ -2158,19 +2158,10 @@
             "const": "fix",
             "title": "Intent",
             "type": "string"
-          },
-          "scope": {
-            "enum": [
-              "conflicts",
-              "checks"
-            ],
-            "title": "Scope",
-            "type": "string"
           }
         },
         "required": [
-          "intent",
-          "scope"
+          "intent"
         ],
         "title": "FixIntent",
         "type": "object"
@@ -4676,18 +4667,6 @@
             ],
             "title": "Experimental Act As Approval"
           },
-          "experimental_assistant_ui": {
-            "agent_feature_flag": true,
-            "anyOf": [
-              {
-                "type": "boolean"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Experimental Assistant Ui"
-          },
           "experimental_background_callbacks": {
             "agent_feature_flag": true,
             "anyOf": [
@@ -7162,9 +7141,9 @@
             "title": "Channels",
             "type": "array"
           },
-          "partial": {
+          "refreshing": {
             "default": false,
-            "title": "Partial",
+            "title": "Refreshing",
             "type": "boolean"
           }
         },
@@ -18506,18 +18485,6 @@
       "get": {
         "description": "Slack channels for the workspace channel picker and ``#`` autocomplete in agent inputs.\n\nPrivate channels are listed for admins only.",
         "operationId": "api_list_slack_channels_dashboard_api_slack_channels_get",
-        "parameters": [
-          {
-            "in": "query",
-            "name": "refresh",
-            "required": false,
-            "schema": {
-              "default": false,
-              "title": "Refresh",
-              "type": "boolean"
-            }
-          }
-        ],
         "responses": {
           "200": {
             "content": {
@@ -18528,16 +18495,6 @@
               }
             },
             "description": "Successful Response"
-          },
-          "422": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            },
-            "description": "Validation Error"
           }
         },
         "security": [
@@ -18546,6 +18503,34 @@
           }
         ],
         "summary": "Api List Slack Channels",
+        "tags": [
+          "dashboard",
+          "slack"
+        ]
+      }
+    },
+    "/dashboard/api/slack/channels/refresh": {
+      "post": {
+        "description": "Walk Slack's channels again now; the directory reloads when the walk ends.",
+        "operationId": "api_refresh_slack_channels_dashboard_api_slack_channels_refresh_post",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SlackChannelDirectory"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "security": [
+          {
+            "DashboardSession": []
+          }
+        ],
+        "summary": "Api Refresh Slack Channels",
         "tags": [
           "dashboard",
           "slack"
@@ -20298,8 +20283,7 @@
             "required": true,
             "schema": {
               "enum": [
-                "conflicts",
-                "checks",
+                "repair",
                 "comments"
               ],
               "title": "Scope",

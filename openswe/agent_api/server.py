@@ -93,19 +93,25 @@ async def _answer(principal: RemoteRun | WorkerGrant, endpoint: str, body: JsonV
             return await async_workers.GRANT_API.dispatch(endpoint, principal, body)
         if endpoint != CATALOG.name:
             raise RefusedCallError("A worker grant only adopts a run token")
-        # Its tools, models and schemas only: the worker reads them before it has an identity.
-        run = principal.coordinator
-    else:
-        run = principal
-        if async_workers.RUN_API.serves(endpoint):
-            return await async_workers.RUN_API.dispatch(endpoint, run, body)
+        # Its tools, models and schemas only: the worker reads them before it has an
+        # identity, and never its coordinator's token.
+        catalog = await _graph(principal.coordinator)(principal.coordinator, endpoint, body)
+        return {**catalog, "run_token": None} if isinstance(catalog, dict) else catalog
+    if async_workers.RUN_API.serves(endpoint):
+        return await async_workers.RUN_API.dispatch(endpoint, principal, body)
+    return await _graph(principal)(principal, endpoint, body)
+
+
+def _graph(run: RemoteRun) -> Api:
     graph = _graphs().get(run.assistant_id)
     if graph is None:
         raise RefusedCallError(f"This backend serves no {run.assistant_id} graph")
-    return await graph(run, endpoint, body)
+    return graph
 
 
 async def api_endpoint(scope: Scope, receive: Receive, send: Send) -> None:
+    from langgraph_api.logging import set_logging_context
+
     principal = _scope_principal(scope)
     endpoint = scope["path_params"]["endpoint"]
     raw = await Request(scope, receive).body()
@@ -116,6 +122,11 @@ async def api_endpoint(scope: Scope, receive: Receive, send: Send) -> None:
             scope, receive, send
         )
         return
+    run = principal.coordinator if isinstance(principal, WorkerGrant) else principal
+    context = {"thread_id": run.thread_id, "endpoint": endpoint}
+    if isinstance(run_id := body.get("run_id"), str):
+        context["run_id"] = run_id
+    set_logging_context(context)
     try:
         with _traced_under_caller(scope):
             result = await _answer(principal, endpoint, body)
@@ -131,10 +142,7 @@ async def api_endpoint(scope: Scope, receive: Receive, send: Send) -> None:
         await JSONResponse({"detail": str(exc)}, status_code=422)(scope, receive, send)
         return
     except Exception as exc:
-        run = principal.coordinator if isinstance(principal, WorkerGrant) else principal
-        logger.exception(
-            "Agent API call failed", extra={"endpoint": endpoint, "thread_id": run.thread_id}
-        )
+        logger.exception("Agent API call failed")
         # The run fails with what failed here, as it would have in-process.
         failure = {"error": type(exc).__name__, "message": str(exc)}
         await JSONResponse(failure, status_code=500)(scope, receive, send)
