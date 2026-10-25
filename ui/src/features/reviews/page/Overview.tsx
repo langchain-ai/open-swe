@@ -159,6 +159,7 @@ function Description({
     (src: string) => reviewImageProxyUrl(owner, repo, number, src),
     [owner, repo, number]
   )
+  const editing = draft !== null
   const [overflows, setOverflows] = useState(false)
   const [expanded, setExpanded] = useState(false)
   useLayoutEffect(() => {
@@ -169,7 +170,7 @@ function Description({
     const observer = new ResizeObserver(measure)
     observer.observe(node)
     return () => observer.disconnect()
-  }, [body, draft !== null])
+  }, [body, editing])
   const clamped = overflows && !expanded
   return (
     <article aria-label="Description" className="group/description">
