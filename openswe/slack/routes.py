@@ -120,7 +120,7 @@ def _hand_to_mda(
     background_tasks: common.BackgroundTasks, body: bytes, headers: dict[str, str], message: str
 ) -> WebhookResponse:
     """Forward Slack's request to MDA's Slack channel, through Trigger Server, after answering Slack."""
-    url = mda_forwarding.Canary.from_env().events_url
+    url = mda_forwarding.events_url()
     if not url:
         common.logger.error("An MDA-owned Slack conversation has no Trigger Server URL to go to")
         return ignored("MDA's Slack channel isn't configured here")
@@ -816,21 +816,28 @@ async def slack_webhook(
             )
             return accepted("Slack by-the-way question queued")
 
-        # A conversation MDA owns, or a new one the canary hands it, goes to MDA's Slack channel.
+        # A conversation MDA owns, or a new one MDA's Slack channel can start, goes there.
         mda_thread_id = await mda_forwarding.conversation_thread(
             app_id=envelope.api_app_id,
             team_id=team_id or "",
             channel_id=channel_id,
             root_ts=reply_thread_ts or original_message_ts,
-            user_id=user_id,
-            direct_message=in_dm_channel,
-            eligible=not (
-                in_code_channel
-                or in_concierge_mode
-                or allowed_bot is not None
-                or message.action in {SlackAction.BREAKOUT, SlackAction.BREAKOUT_WEB}
+            can_start=mda_forwarding.mda_can_start(
+                subtype=event.subtype,
+                from_bot=allowed_bot is not None,
+                code_channel=in_code_channel,
+                concierge_dm=in_concierge_mode,
+                kitchen_channel=in_kitchen_channel,
+                breakout=message.action in {SlackAction.BREAKOUT, SlackAction.BREAKOUT_WEB},
             ),
         )
+        if mda_thread_id is not None and not mda_forwarding.trigger_server_takes(event.subtype):
+            # Trigger Server would drop it, and the thread is MDA's, so nothing can run it.
+            common.logger.info(
+                "Slack message in an MDA conversation that MDA's channel doesn't take",
+                extra={"agent_thread_id": mda_thread_id, "slack_subtype": event.subtype},
+            )
+            return ignored("MDA's Slack channel doesn't take this kind of message")
         try:
             thread_id = mda_thread_id or await common.resolve_slack_thread_id(
                 get_langgraph_client(), channel_id, thread_ts

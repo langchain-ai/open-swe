@@ -110,6 +110,7 @@ async def test_a_conversation_for_mda_goes_to_trigger_server_exactly_as_slack_se
 
     assert response["status"] == "accepted"
     assert conversation.await_args.kwargs["root_ts"] == "1786573369.551099"
+    assert conversation.await_args.kwargs["can_start"] is True
     [(task, (url, body, headers))] = tasks.tasks
     assert task is mda_forwarding.forward_to_trigger_server
     assert url == _EVENTS_URL
@@ -141,34 +142,69 @@ async def test_every_other_conversation_stays_on_the_backend(
     assert request.thread_id == "backend-thread"
 
 
-@pytest.mark.parametrize(
-    ("scope", "user", "direct_message", "takes"),
-    [
-        ("off", "U-team", True, False),
-        ("users", "U-team", False, True),
-        ("users", "U-other", True, False),
-        ("dms", "U-other", True, True),
-        ("dms", "U-other", False, False),
-        ("all", "U-other", False, True),
-        ("bogus", "U-team", True, False),
-    ],
-)
-def test_the_canary_takes_only_what_its_scope_names(
-    monkeypatch: pytest.MonkeyPatch, scope: str, user: str, direct_message: bool, takes: bool
+async def test_a_message_in_mdas_conversation_trigger_server_would_drop_runs_nowhere(
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    monkeypatch.setenv("OPEN_SWE_SLACK_MDA_SCOPE", scope)
-    monkeypatch.setenv("OPEN_SWE_SLACK_MDA_USERS", "U-team, U-two")
+    monkeypatch.setattr(mda_forwarding, "conversation_thread", AsyncMock(return_value=_MDA_THREAD))
+    reply = _mention()
+    reply["event"] |= {
+        "type": "message",
+        "subtype": "thread_broadcast",
+        "thread_ts": "1786573300.000001",
+    }
+    tasks = _FakeBackgroundTasks()
 
-    assert (
-        mda_forwarding.Canary.from_env().takes(user_id=user, direct_message=direct_message) is takes
+    response = await slack_routes.slack_webhook(
+        cast(Request, _FakeRequest(reply, dict(_SLACK_HEADERS))), cast(BackgroundTasks, tasks)
     )
 
+    assert response == {
+        "status": "ignored",
+        "reason": "MDA's Slack channel doesn't take this kind of message",
+    }
+    assert tasks.tasks == []
 
-def test_without_a_trigger_server_url_nothing_goes_to_mda(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setenv("OPEN_SWE_SLACK_MDA_SCOPE", "all")
+
+_PLAIN: dict[str, Any] = {
+    "subtype": "",
+    "from_bot": False,
+    "code_channel": False,
+    "concierge_dm": False,
+    "kitchen_channel": False,
+    "breakout": False,
+}
+
+
+@pytest.mark.parametrize(
+    ("message", "starts"),
+    [
+        ({}, True),
+        ({"subtype": "file_share"}, True),
+        ({"subtype": "thread_broadcast"}, False),
+        ({"from_bot": True}, False),
+        ({"code_channel": True}, False),
+        ({"concierge_dm": True}, False),
+        ({"kitchen_channel": True}, False),
+        ({"breakout": True}, False),
+    ],
+)
+def test_mda_starts_only_conversations_its_slack_channel_can_run(
+    message: dict[str, Any], starts: bool
+) -> None:
+    assert mda_forwarding.mda_can_start(**(_PLAIN | message)) is starts
+
+
+async def test_without_a_trigger_server_url_nothing_goes_to_mda(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     monkeypatch.delenv("OPEN_SWE_SLACK_TRIGGER_EVENTS_URL")
 
-    assert mda_forwarding.Canary.from_env().takes(user_id="U1", direct_message=True) is False
+    assert (
+        await mda_forwarding.conversation_thread(
+            app_id="A1", team_id="T1", channel_id="C1", root_ts="1.2", can_start=True
+        )
+        is None
+    )
 
 
 def test_mda_thread_ids_match_trigger_servers_thread_key() -> None:
