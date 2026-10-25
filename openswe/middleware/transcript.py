@@ -202,9 +202,10 @@ class RunState:
         self,
         tool_call: ToolCall,
         tool_call_id: str,
-        messages: object,
+        message_id: str | None,
         namespace: list[str],
     ) -> None:
+        """Record ``tool_call`` started, under the reply ``message_id`` that made it."""
         name = tool_call.get("name") or "tool"
         try:
             self.enqueue(
@@ -214,7 +215,9 @@ class RunState:
                         type="tool.started",
                         turn_id=self.turn_id,
                         tool_call_id=tool_call_id,
-                        message_id=_issuing_message_id(self, messages, tool_call_id),
+                        message_id=None
+                        if message_id is None
+                        else self.message_alias.get(message_id, message_id),
                         name=name,
                         input=_json_object(tool_call.get("args")),
                         namespace=namespace,
@@ -1160,7 +1163,9 @@ class TranscriptMiddleware(OpenSWEMiddleware):
 
         namespace = current_namespace()
         messages = request.state.get("messages") if isinstance(request.state, Mapping) else None
-        state.start_tool(tool_call, tool_call_id, messages, namespace)
+        state.start_tool(
+            tool_call, tool_call_id, _issuing_message_id(messages, tool_call_id), namespace
+        )
         token = _namespace.set((*_namespace.get(), tool_call_id))
         try:
             result = await handler(
@@ -1190,12 +1195,13 @@ class TranscriptMiddleware(OpenSWEMiddleware):
         state.complete_tool(tool_call_id, namespace, *_result_output(result, tool_call_id))
         return result
 
-    async def atool_started(self, tool_call: ToolCall, messages: Sequence[BaseMessage]) -> None:
-        """Record a tool call that another process runs, such as MDA's ``task``."""
+    async def atool_started(self, tool_call: ToolCall, message_id: str | None) -> None:
+        """Record a tool call that another process runs, such as MDA's ``task``, under the
+        reply ``message_id`` that made it."""
         state = _lookup_state()
         tool_call_id = tool_call.get("id")
         if state.enabled and tool_call_id:
-            state.start_tool(tool_call, tool_call_id, messages, current_namespace())
+            state.start_tool(tool_call, tool_call_id, message_id, current_namespace())
 
     async def atool_finished(self, result: ToolMessage) -> None:
         """Record how a tool call ``atool_started`` recorded ended."""
@@ -1332,18 +1338,16 @@ def _turn_requested(
     )
 
 
-def _issuing_message_id(state: RunState, candidates: object, tool_call_id: str) -> str | None:
+def _issuing_message_id(candidates: object, tool_call_id: str) -> str | None:
+    """The reply among ``candidates`` that made the tool call ``tool_call_id``."""
     if not isinstance(candidates, Sequence):
         return None
     for message in reversed(candidates):
         if not isinstance(message, AIMessage):
             continue
         for call in message.tool_calls or ():
-            if call.get("id") != tool_call_id:
-                continue
-            if not isinstance(message.id, str):
-                return None
-            return state.message_alias.get(message.id, message.id)
+            if call.get("id") == tool_call_id:
+                return message.id if isinstance(message.id, str) else None
     return None
 
 

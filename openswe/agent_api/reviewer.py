@@ -1,44 +1,60 @@
 """The pull request reviewer, as Managed Deep Agents runs play it."""
 
+import logging
+from functools import cache
 from typing import Final
 
+from deepagents.backends.protocol import BackendProtocol
 from langchain_core.runnables import RunnableConfig
-from pydantic import JsonValue, TypeAdapter
-from runtime_api.catalog import ModelSpec, RunModels
+from langchain_core.tools import BaseTool
 
 from openswe.agent_api.graph import RemoteGraph
+from openswe.agent_api.run_parts import RunParts
+from openswe.github.thread_token import get_github_token
 from openswe.review.diff import compute_diff_line_set
-from openswe.reviewer import ReviewerModelChoice, plan_reviewer, resolve_reviewer_models
+from openswe.reviewer import (
+    ensure_reviewer_github_token,
+    plan_reviewer,
+    reviewer_box,
+    reviewer_tools,
+)
 from openswe.run_config import RunConfig
-from openswe.sandboxes.tool_runtime import ToolSurface
+
+logger = logging.getLogger(__name__)
 
 ASSISTANT_ID: Final = "reviewer"
 
-_json = TypeAdapter(JsonValue)
+
+@cache
+def _tools_by_name() -> dict[str, BaseTool]:
+    return {tool.name: tool for tool in reviewer_tools()}
 
 
-async def _plan(config: RunnableConfig, surface: ToolSurface) -> None:
-    await plan_reviewer(config, surface)
+class ReviewerParts(RunParts):
+    """The reviewer's pieces, as its plan builds them, for a call answered without it."""
+
+    def restore(self, state: dict[str, object]) -> None:
+        # Sets do not cross to MDA and back; the diff they index does.
+        diff_text = state.get("diff_text")
+        if isinstance(diff_text, str) and diff_text and "diff_line_set" not in state:
+            state["diff_line_set"] = compute_diff_line_set(diff_text)
+
+    async def credentials(self, config: RunnableConfig) -> None:
+        cfg = RunConfig.from_config(config)
+        if cfg.thread_id is None or get_github_token(config) is not None:
+            return
+        try:
+            await ensure_reviewer_github_token(cfg.thread_id, cfg)
+        except Exception:
+            # A tool that needs the token says so itself; settling the check must still run.
+            logger.warning("Minting the reviewer's GitHub token failed", exc_info=True)
+
+    async def files(self, config: RunnableConfig) -> BackendProtocol | None:
+        cfg = RunConfig.from_config(config)
+        return None if cfg.thread_id is None else reviewer_box(cfg.thread_id, cfg)
+
+    async def tool(self, config: RunnableConfig, name: str) -> BaseTool | None:  # noqa: ARG002
+        return _tools_by_name().get(name)
 
 
-def _restore(state: dict[str, object]) -> None:
-    # Sets do not cross to MDA and back; the diff they index does.
-    diff_text = state.get("diff_text")
-    if isinstance(diff_text, str) and diff_text and "diff_line_set" not in state:
-        state["diff_line_set"] = compute_diff_line_set(diff_text)
-
-
-def _model_spec(choice: ReviewerModelChoice) -> ModelSpec:
-    return ModelSpec(model_id=choice.model_id, kwargs=_json.validate_python(dict(choice.kwargs)))
-
-
-async def run_models(cfg: RunConfig) -> RunModels:
-    models = await resolve_reviewer_models(cfg)
-    return RunModels(
-        model=_model_spec(models.main),
-        subagent_model=_model_spec(models.subagent),
-        use_gateway=models.use_gateway,
-    )
-
-
-REVIEWER: Final = RemoteGraph(ASSISTANT_ID, _plan, run_models, restore_state=_restore)
+REVIEWER: Final = RemoteGraph(ASSISTANT_ID, plan_reviewer, ReviewerParts())

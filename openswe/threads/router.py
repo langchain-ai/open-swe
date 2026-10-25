@@ -45,7 +45,7 @@ from openswe.agent_api.client import (
 from openswe.api.agent_server_auth import backend_call
 from openswe.threads import index
 from openswe.threads.index import IndexedThread, ThreadExistsError, ThreadSearch
-from openswe.threads.runtimes import LOCAL_HEADER, RUNTIMES
+from openswe.threads.runtimes import LOCAL_HEADER, RUNTIMES, now_ms
 from openswe.threads.store import READ_ONLY, THREADS, for_mda
 
 logger = logging.getLogger(__name__)
@@ -75,11 +75,18 @@ def _routed(scope: Scope) -> bool:
     )
 
 
-def _marks_busy(thread_id: str) -> Callable[[], Awaitable[None]]:
-    async def mark() -> None:
-        await index.set_status(thread_id, "busy")
+def _started(thread_id: str, starting_ms: int) -> Callable[[Headers], Awaitable[None]]:
+    """Mark the thread busy once MDA has its run, and stop the run if the thread was meanwhile."""
 
-    return mark
+    async def started(headers: Headers) -> None:
+        await index.set_status(thread_id, "busy")
+        # MDA names the run it made as ``/threads/{thread_id}/runs/{run_id}``.
+        if location := headers.get("content-location"):
+            await RUNTIMES.mda_runtime.interrupt_if_stopped(
+                thread_id, location.rsplit("/", 1)[-1], starting_ms=starting_ms
+            )
+
+    return started
 
 
 def _warn_local(scope: Scope, thread: IndexedThread) -> None:
@@ -254,6 +261,7 @@ class ThreadRouter:
         *,
         cron: bool,
     ) -> None:
+        starting_ms = now_ms()
         payload = json_body(body)
         if payload is None:
             await send_json(send, 422, {"detail": "The body must be a JSON object"})
@@ -269,7 +277,9 @@ class ThreadRouter:
             return
         # Busy before the answer reaches the caller, so a run that ends at once
         # is not marked busy after its run-complete webhook settled it.
-        recorder = StatusRecorder(send, on_success=None if cron else _marks_busy(thread_id))
+        recorder = StatusRecorder(
+            send, on_success=None if cron else _started(thread_id, starting_ms)
+        )
         mda = RUNTIMES.mda_runtime
         await mda.ensure_remote_thread(thread_id)
         rewritten = await mda.run_payload(
