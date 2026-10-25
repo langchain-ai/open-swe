@@ -385,7 +385,8 @@ async def test_re_review_context_appends_after_history_without_changing_system_p
     history = [HumanMessage(content="Review this PR"), AIMessage(content="Previous review")]
     state: dict[str, object] = {"messages": history.copy()}
     system_prompts: list[str] = []
-    for head in ("first-head", "second-head"):
+    for last_reviewed, head in (("previous-head", "first-head"), ("first-head", "second-head")):
+        config["configurable"]["last_reviewed_sha"] = last_reviewed
         config["configurable"]["head_sha"] = head
         config["configurable"]["invocation_id"] = head
         monkeypatch.setattr(
@@ -424,7 +425,8 @@ async def test_re_review_context_appends_after_history_without_changing_system_p
         previous = list(state["messages"])
         result = await session.run_phase("before_agent", state, Runtime())
         [context] = messages_from_dict(result.messages)
-        assert head in context.text
+        assert f"previous reviewed SHA: {last_reviewed}" in context.text
+        assert f"new HEAD SHA: {head}" in context.text
         assert f"Finding at {head}" in context.text
         assert f"Walkthrough at {head}" in context.text
         assert f"Requirements at {head}" in context.text
