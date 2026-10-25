@@ -95,12 +95,6 @@ class ModelResult(Report):
     offloading: dict[str, JsonValue] | None = None
 
 
-class ObservedResponse(BaseModel):
-    """The response as the transcript and usage middleware left it."""
-
-    response: list[dict[str, JsonValue]] = []
-
-
 class ToolCallReport(Report):
     """A tool call the runtime runs, for the transcript to record."""
 
@@ -218,7 +212,7 @@ INBOX = Endpoint("inbox", InboxRead, Inbox, seconds=LOOP_CALL_SECONDS, delivery=
 INBOX_RECEIVED = Endpoint(
     "inbox_received", InboxReceipt, Done, seconds=LOOP_CALL_SECONDS, delivery="idempotent"
 )
-MODEL_RESULT = Endpoint("model_result", ModelResult, ObservedResponse, seconds=LOOP_CALL_SECONDS)
+MODEL_RESULT = Endpoint("model_result", ModelResult, Done, seconds=LOOP_CALL_SECONDS)
 AFTER_MODEL = Endpoint("after_model", RunCall, PhaseResult, seconds=LOOP_CALL_SECONDS)
 AFTER_AGENT = Endpoint("after_agent", RunCall, AfterAgent, seconds=LOOP_CALL_SECONDS)
 TOOL_STARTED = Endpoint("tool_started", ToolCallReport, Done, seconds=LOOP_CALL_SECONDS)

@@ -67,7 +67,6 @@ from runtime_api.loop import (
     AFTER_MODEL,
     BEFORE_MODEL,
     INBOX,
-    MODEL_RESULT,
     PREPARE,
     Inbox,
     InboxRead,
@@ -408,7 +407,7 @@ class BackendRunMiddleware(AgentMiddleware[RunState]):
         if self._inbox is None:
             return Inbox()
         # After the last call's receipt, so nothing it received comes again.
-        await self._backend.reports.drain()
+        await self._backend.reports.receipts()
         return await call(self._backend, INBOX, InboxRead(run_id=run_id(), spec=self._inbox))
 
     async def _phase[Call: RunCall, Result: PhaseResult](
@@ -480,10 +479,15 @@ class BackendRunMiddleware(AgentMiddleware[RunState]):
 
 
 class ReportRepliesMiddleware(AgentMiddleware):
-    """Hand each reply to the backend, where the graph's transcript and usage middleware see it."""
+    """Hand each reply to the backend, where the graph's transcript and usage middleware see it.
 
-    def __init__(self, backend: OpenSweBackend) -> None:
+    The run never waits for it: each reply is stamped here with what the run's usage
+    counts it by, and the report goes out in line behind the tool calls it follows.
+    """
+
+    def __init__(self, backend: OpenSweBackend, invocation_id: str | None) -> None:
         self._backend = backend
+        self._invocation_id = invocation_id
 
     async def awrap_model_call(
         self,
@@ -491,34 +495,40 @@ class ReportRepliesMiddleware(AgentMiddleware):
         handler: Callable[[ModelRequest], Awaitable[ModelResponse]],
     ) -> ModelResponse:
         response = await handler(request)
-        # The transcript records the calls this reply follows before the reply itself.
-        await self._backend.reports.drain()
         held = request.state.get(STATE_KEY)
         held = held if isinstance(held, Mapping) else {}
         route = held.get("model_route")
+        route = route if isinstance(route, str) and route else None
+        for message in response.result:
+            if isinstance(message, AIMessage):
+                message.response_metadata = {
+                    **message.response_metadata,
+                    **({"open_swe_model_route": route} if route else {}),
+                    **(
+                        {
+                            "open_swe_invocation_id": self._invocation_id,
+                            "open_swe_run_id": self._invocation_id,
+                        }
+                        if self._invocation_id
+                        else {}
+                    ),
+                }
         offloading = held.get("conversation_offloading")
         inside = namespace()
-        observed = await call(
-            self._backend,
-            MODEL_RESULT,
+        self._backend.reports.replied(
             ModelResult(
                 run_id=run_id(),
                 namespace=inside,
                 response=_json_dicts.validate_python(messages_to_dict(response.result)),
                 # A subagent's own messages are its task, never something a person said.
                 humans=[] if inside else human_messages(_since_last_reply(request.messages)),
-                model_route=route if isinstance(route, str) else None,
+                model_route=route,
                 offloading=_json_object.validate_python(offloading)
                 if isinstance(offloading, Mapping)
                 else None,
-            ),
+            )
         )
-        if not observed.response:
-            return response
-        return ModelResponse(
-            result=messages_from_dict(observed.response),
-            structured_response=response.structured_response,
-        )
+        return response
 
 
 def _since_last_reply(messages: Sequence[object]) -> Sequence[object]:

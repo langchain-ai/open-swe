@@ -119,10 +119,12 @@ async def _catalog(context: OpenSweRunContext, backend: OpenSweBackend) -> Catal
     return await backend.catalog(None) if backend.has_run else Catalog()
 
 
-def _backend_reports(backend: OpenSweBackend, catalog: Catalog) -> list[AgentMiddleware]:
+def _backend_reports(
+    backend: OpenSweBackend, catalog: Catalog, invocation_id: str | None
+) -> list[AgentMiddleware]:
     """The backend's transcript and usage see every reply and every tool call."""
     return [
-        ReportRepliesMiddleware(backend),
+        ReportRepliesMiddleware(backend, invocation_id),
         RuntimeToolsMiddleware(backend, FILE_TOOLS),
         *([IncidentEvidenceMiddleware(backend)] if catalog.incident_evidence else []),
     ]
@@ -238,7 +240,7 @@ async def agent(runtime: ManagedServerRuntime) -> DeepAgentDefinition:
             "model": subagent_model,
             "tools": subagent_tools[subagent.name],
             "middleware": [
-                *_backend_reports(backend, catalog),
+                *_backend_reports(backend, catalog, context.invocation_id),
                 *skills,
                 file_tools,
                 *replace_sandbox,
@@ -264,7 +266,7 @@ async def agent(runtime: ManagedServerRuntime) -> DeepAgentDefinition:
                 else None,
             ),
             *replace_sandbox,
-            *_backend_reports(backend, catalog),
+            *_backend_reports(backend, catalog, context.invocation_id),
             *skills,
             file_tools,
             task_retry(),

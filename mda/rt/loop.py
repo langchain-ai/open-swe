@@ -11,7 +11,6 @@ The backend answers only what needs its data or credentials, one named call each
 state (``open_swe_state``), which preparation fills.
 """
 
-import asyncio
 import json
 import logging
 import uuid
@@ -61,7 +60,7 @@ from runtime_api.loop import (
 )
 from runtime_api.operations import RunRequest
 
-from rt.backend import BackendCallError, OpenSweBackend, git_trace, human_messages, run_call
+from rt.backend import OpenSweBackend, git_trace, human_messages, run_call
 from rt.tools import STATE_KEY, run_id
 
 logger = logging.getLogger(__name__)
@@ -219,7 +218,9 @@ class RunLoop:
         held = _held(state)
         if any(held.get(key) for key in self.rules.stop_when) or self._awaits_client(state):
             return BeforeModel(jump_to="end")
-        context, _refreshed = await asyncio.gather(self._task_context(), self._refresh_proxy())
+        if self.rules.refresh_github_proxy:
+            self._backend.reports.notify(REFRESH_GITHUB_PROXY, RunRequest(run_id=run_id()))
+        context = await self._task_context()
         added: list[BaseMessage] = []
         if context.message is not None and not any(
             content_text(message.content) == context.message for message in _visible(state)
@@ -260,10 +261,6 @@ class RunLoop:
         if not self.rules.task_coordination:
             return TaskContext()
         return await call(self._backend, TASK_CONTEXT, RunRequest(run_id=run_id()))
-
-    async def _refresh_proxy(self) -> None:
-        if self.rules.refresh_github_proxy:
-            await call(self._backend, REFRESH_GITHUB_PROXY, RunRequest(run_id=run_id()))
 
     async def _route(
         self, held: Mapping[str, object], messages: Sequence[BaseMessage]
@@ -445,31 +442,28 @@ class RunLoop:
     async def after_agent(
         self, state: Mapping[str, object], evidence: Mapping[str, JsonValue]
     ) -> AfterAgent:
-        """Do the graph's own end-of-run work, then report the run's end.
+        """Start the graph's own end-of-run work, then report the run's end.
 
-        The work comes first, as the safety net it is: a report that fails takes none of
-        it with it.
+        The run waits for none of the work, and the work waits for no report: a report
+        that fails takes none of it with it.
         """
-        await self._backend.reports.drain()
         messages = _messages(state)
         current = run_id()
-        limited = bool(messages) and _LIMIT_MARKER in content_text(messages[-1].content)
-        # Each is its own work: one that fails leaves the others, and the run's end, recorded.
-        for work in [*(["step_limit_reached"] if limited else []), *self.rules.at_end]:
-            try:
-                if work == "step_limit_reached":
-                    await call(self._backend, STEP_LIMIT_REACHED, RunRequest(run_id=current))
-                elif work == "settle_review_check":
-                    await call(self._backend, SETTLE_REVIEW_CHECK, RunRequest(run_id=current))
-                else:
-                    summary = _held(state).get("human_input_summary")
-                    finished = ScoutPlanEnd(
-                        run_id=current,
-                        human_input_summary=summary if isinstance(summary, str) else "",
-                    )
-                    await call(self._backend, FINISH_SCOUT_PLAN, finished)
-            except BackendCallError:
-                logger.warning("End-of-run work failed", extra={"work": work}, exc_info=True)
+        reports = self._backend.reports
+        if messages and _LIMIT_MARKER in content_text(messages[-1].content):
+            reports.notify(STEP_LIMIT_REACHED, RunRequest(run_id=current))
+        for work in self.rules.at_end:
+            if work == "settle_review_check":
+                reports.notify(SETTLE_REVIEW_CHECK, RunRequest(run_id=current))
+            else:
+                summary = _held(state).get("human_input_summary")
+                finished = ScoutPlanEnd(
+                    run_id=current,
+                    human_input_summary=summary if isinstance(summary, str) else "",
+                )
+                reports.notify(FINISH_SCOUT_PLAN, finished)
+        # The transcript has every reply and tool call before the run's end.
+        await reports.drain()
         replies = [
             # Usage reads only each reply's id, model and token counts.
             AIMessage(

@@ -341,7 +341,7 @@ def apply() -> None:
 SCOUT_SANDBOX_ERROR = "E2E has no sandbox provider for the review scout"
 
 
-_calling: ContextVar[str] = ContextVar("e2e_calling", default="start")
+_calling: ContextVar[str] = ContextVar("e2e_calling", default="")
 
 
 def _answer_every_call_on_a_fresh_replica() -> None:
@@ -355,17 +355,26 @@ def _answer_every_call_on_a_fresh_replica() -> None:
     import fakes
     from pydantic import JsonValue
 
-    from openswe.agent_api.graph import RemoteGraph, RunSession
+    from openswe.agent_api.graph import RemoteGraph, RunSession, RunStart
     from openswe.agent_api.tokens import RemoteRun
 
     answer = RemoteGraph.api
     plan = RemoteGraph._planned
     session = RemoteGraph.session
+    start = RemoteGraph.start_run
 
     async def api(self: RemoteGraph, run: RemoteRun, endpoint: str, raw: JsonValue) -> JsonValue:
         calling = _calling.set(endpoint)
         try:
             return await answer(self, run, endpoint, raw)
+        finally:
+            _calling.reset(calling)
+
+    async def start_run(self: RemoteGraph, run: RemoteRun) -> RunStart:
+        # A dispatch can run in the context of a call it was made from, such as an operation.
+        calling = _calling.set("start")
+        try:
+            return await start(self, run)
         finally:
             _calling.reset(calling)
 
@@ -382,6 +391,7 @@ def _answer_every_call_on_a_fresh_replica() -> None:
         return await session(self, run, run_id, fresh=fresh)
 
     RemoteGraph.api = api
+    RemoteGraph.start_run = start_run
     RemoteGraph._planned = planned
     RemoteGraph.session = forgetful_session
 

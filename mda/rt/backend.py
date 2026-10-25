@@ -30,12 +30,14 @@ from langchain_core.messages import (
 from langsmith.run_trees import RunTree
 from pydantic import BaseModel, JsonValue, TypeAdapter, ValidationError
 from runtime_api.catalog import CATALOG, Catalog, OperationSpec
-from runtime_api.endpoint import Delivery, call
+from runtime_api.endpoint import Delivery, Endpoint, call
 from runtime_api.loop import (
     INBOX_RECEIVED,
+    MODEL_RESULT,
     TOOL_RESULT,
     TOOL_STARTED,
     InboxReceipt,
+    ModelResult,
     RunCall,
     ToolCallReport,
     ToolResultReport,
@@ -356,16 +358,23 @@ class OpenSweBackend:
 class Reports:
     """Tell the backend what this runtime did, off the path of what it goes on to do.
 
-    The transcript hears of the tool calls this runtime runs, and the inbox of what
-    a model call is about to answer. Reports go out in the order they were made, one
-    after another, while the run carries on. A report the backend could not take is
-    logged and dropped: what it describes has happened either way, and an inbox
-    that never heard is read again at the next model call.
+    Nothing the run does next waits on a report. The transcript and usage hear of each
+    reply and tool call, and the inbox of what a model call is about to answer, in the
+    order they were made, one after another. Work the backend does for the run whose
+    answer the run never reads (a notice, a proxy refresh) goes out at once. A report
+    the backend could not take is logged and dropped: what it describes has happened
+    either way, and an inbox that never heard is read again at the next model call.
     """
 
     def __init__(self, backend: OpenSweBackend) -> None:
         self._backend = backend
         self._last: asyncio.Task[None] | None = None
+        self._receipt: asyncio.Task[None] | None = None
+        # Held so a pending one is not collected before it is sent.
+        self._loose: set[asyncio.Task[None]] = set()
+
+    def replied(self, result: ModelResult) -> None:
+        self._send(self._call(MODEL_RESULT, result, TurnTrace.current_headers()))
 
     def started(self, report: ToolCallReport) -> None:
         self._send(self._backend.tool_started(report, trace=TurnTrace.current_headers()))
@@ -378,15 +387,39 @@ class Reports:
         )
 
     def received(self, receipt: InboxReceipt) -> None:
-        self._send(self._receive(receipt))
+        self._send(self._call(INBOX_RECEIVED, receipt, TurnTrace.current_headers()))
+        self._receipt = self._last
 
-    async def _receive(self, receipt: InboxReceipt) -> None:
-        await call(self._backend, INBOX_RECEIVED, receipt)
+    def notify[Request: BaseModel, Response: BaseModel](
+        self, endpoint: Endpoint[Request, Response], request: Request
+    ) -> None:
+        """Have the backend do ``request``'s work for the run, without waiting for it."""
+        sent = asyncio.ensure_future(
+            _logged(self._call(endpoint, request, TurnTrace.current_headers()))
+        )
+        self._loose.add(sent)
+        sent.add_done_callback(self._loose.discard)
 
     async def drain(self) -> None:
         """Wait for every report made so far, so the transcript has them before what follows."""
         if self._last is not None:
             await asyncio.shield(self._last)
+
+    async def settled(self) -> None:
+        """Wait for every report and every piece of work asked for so far."""
+        await self.drain()
+        if self._loose:
+            await asyncio.gather(*self._loose)
+
+    async def receipts(self) -> None:
+        """Wait until the backend has every inbox receipt made so far."""
+        if self._receipt is not None:
+            await asyncio.shield(self._receipt)
+
+    async def _call[Request: BaseModel, Response: BaseModel](
+        self, endpoint: Endpoint[Request, Response], request: Request, trace: Mapping[str, str]
+    ) -> None:
+        await call(self._backend, endpoint, request, headers=trace)
 
     async def _finished(
         self,
@@ -408,7 +441,11 @@ class Reports:
     ) -> None:
         if previous is not None:
             await previous
-        try:
-            await report
-        except Exception:
-            logger.warning("The backend did not take a report", exc_info=True)
+        await _logged(report)
+
+
+async def _logged(report: Coroutine[object, object, None]) -> None:
+    try:
+        await report
+    except Exception:
+        logger.warning("The backend did not take a report", exc_info=True)

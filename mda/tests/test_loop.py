@@ -109,6 +109,7 @@ async def test_each_model_call_is_assembled_here_from_the_rules_and_named_calls(
     )
 
     planned = await loop.before_model(state)
+    await backend.reports.settled()
 
     assert planned.call is not None
     assert planned.call.system_prompt == (
@@ -273,13 +274,15 @@ async def test_the_end_of_a_run_is_reported_and_its_graph_work_done_by_name(
     )
 
     await graph.ainvoke({"messages": [("user", "Review it")]})
+    await backend.reports.settled()
 
-    # Only preparation is a phase call: the loop and the end of the run are named calls.
-    assert [name for name, _ in calls] == [
-        "prepare",
-        "step_limit_reached",
-        "settle_review_check",
+    # Only preparation is a phase call: the loop and the end of the run are named calls,
+    # and the graph's own work goes out whether or not the run's end is recorded.
+    assert calls[0][0] == "prepare"
+    assert sorted(name for name, _ in calls[1:]) == [
         "run_ended",
+        "settle_review_check",
+        "step_limit_reached",
     ]
 
 
@@ -290,12 +293,12 @@ async def test_reports_carry_what_they_report_never_the_conversation(
     from langchain_core.messages import ToolCall
     from langchain_core.tools import tool
     from rt.middleware import ReportRepliesMiddleware, RuntimeToolsMiddleware
-    from runtime_api.loop import ModelResult, ObservedResponse, ToolResultReply
+    from runtime_api.loop import ModelResult, ToolResultReply
 
     backend, calls = _backend(
         monkeypatch,
         {
-            "model_result": ObservedResponse(),
+            "model_result": Done(),
             "tool_started": Done(),
             "tool_result": ToolResultReply(),
         },
@@ -313,14 +316,24 @@ async def test_reports_carry_what_they_report_never_the_conversation(
     graph = create_agent(
         model=GenericFakeChatModel(messages=iter([called, AIMessage(content="done", id="ai-2")])),
         tools=[look],
-        middleware=[ReportRepliesMiddleware(backend), RuntimeToolsMiddleware(backend, ())],
+        middleware=[
+            ReportRepliesMiddleware(backend, "invocation-1"),
+            RuntimeToolsMiddleware(backend, ()),
+        ],
     )
 
-    await graph.ainvoke(
+    result = await graph.ainvoke(
         {"messages": [HumanMessage(content="hello", id="human-1")]},
         {"configurable": {"thread_id": "thread-1"}},
     )
-    await backend.reports.drain()
+    await backend.reports.settled()
+
+    # The run's usage counts its own replies by the invocation stamped on them here.
+    assert [
+        message.response_metadata.get("open_swe_invocation_id")
+        for message in result["messages"]
+        if isinstance(message, AIMessage)
+    ] == ["invocation-1", "invocation-1"]
 
     assert all("messages" not in body and "state" not in body for _, body in calls)
     replies = [ModelResult.model_validate(body) for name, body in calls if name == "model_result"]

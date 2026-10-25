@@ -126,7 +126,6 @@ from runtime_api.loop import (
     InboxRead,
     InboxReceipt,
     ModelResult,
-    ObservedResponse,
     PhaseResult,
     Prepare,
     ReplyOnBehalf,
@@ -867,7 +866,7 @@ class TokenRun:
 
         return await in_graph_context({**self.config, "run_name": name}, reported)
 
-    async def model_result(self, request: ModelResult) -> ObservedResponse:
+    async def model_result(self, request: ModelResult) -> Done:
         """Let the transcript and usage see the response MDA's model gave."""
         response = messages_from_dict(request.response)
         observers = [m for m in self.parts.reporters if isinstance(m, _MODEL_OBSERVERS)]
@@ -879,7 +878,7 @@ class TokenRun:
             observed = await _chain(observers, respond)(_observed_request(state, runtime))
             return observed.result
 
-        seen = await self._reporting(
+        await self._reporting(
             request,
             "model_result",
             observe,
@@ -887,7 +886,7 @@ class TokenRun:
             model_route=request.model_route,
             conversation_offloading=request.offloading,
         )
-        return ObservedResponse(response=dump_messages(seen))
+        return Done()
 
     def _tool_recorders(self) -> list[RecordsRemoteTools]:
         return [m for m in self.parts.reporters if isinstance(m, RecordsRemoteTools)]
