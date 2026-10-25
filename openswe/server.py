@@ -748,10 +748,27 @@ async def _admin_thread(config: RunnableConfig, profile_login: str | None) -> bo
     return await actor_has_admin_context(RunConfig.from_config(config), login=profile_login)
 
 
+def _writes_database_rows() -> bool:
+    """Whether this deployment's runs may repair data, which only preview and staging allow."""
+    return ENV.OPENSWE_ENV.optional() in {"preview", "staging"}
+
+
 @cache
 def agent_tools_by_name() -> Mapping[str, BaseTool]:
-    """Every tool the agent may offer, a review walkthrough's of either mode included."""
-    tools = [*AGENT_TOOLS, *walkthrough_tools("reviewer"), *walkthrough_tools("author")]
+    """Every tool this deployment's agent may offer, a review walkthrough's of either mode included.
+
+    Each tool checks who may call it as it runs; what this deployment withholds from
+    every run stays out of reach here too.
+    """
+    tools = [
+        *(
+            tool
+            for tool in AGENT_TOOLS
+            if _writes_database_rows() or tool is not write_database_rows
+        ),
+        *walkthrough_tools("reviewer"),
+        *walkthrough_tools("author"),
+    ]
     built = (tool if isinstance(tool, BaseTool) else as_tool(tool) for tool in tools)
     return {tool.name: tool for tool in built}
 
@@ -1764,7 +1781,7 @@ async def plan_agent(config: RunnableConfig, surface: ToolSurface) -> None:
         ),
         *(() if cli_result_required else (cli_result,)),
         *(() if bridge_client == "desktop" and not stop_summary_mode else (worktree_handoff,)),
-        *(() if ENV.OPENSWE_ENV.optional() in {"preview", "staging"} else (write_database_rows,)),
+        *(() if _writes_database_rows() else (write_database_rows,)),
     ]
     static_tools = [tool for tool in AGENT_TOOLS if not any(tool is w for w in withheld)]
     static_tools = permitted(static_tools, tool_access)

@@ -59,7 +59,7 @@ from runtime_api.loop import (
 )
 from runtime_api.operations import RunRequest
 
-from rt.backend import OpenSweBackend, run_call
+from rt.backend import BackendCallError, OpenSweBackend, run_call
 from rt.tools import STATE_KEY, run_id
 
 logger = logging.getLogger(__name__)
@@ -189,10 +189,25 @@ class RunLoop:
 
     def __init__(self, backend: OpenSweBackend, rules: LoopRules, models: RunModels) -> None:
         self._backend = backend
-        self.rules = rules
-        self._models = models
+        self._rules = rules
+        self._run_models = models
         # Models the run calls by id, such as one a person asked for, as the backend sets them.
         self._chosen: dict[tuple[str, str | None], ModelSpec] = {}
+
+    @property
+    def rules(self) -> LoopRules:
+        """The run's rules; a launched worker's own once it adopted its run, not its coordinator's."""
+        adopted = self._backend.adopted
+        return adopted.loop if adopted is not None and adopted.loop is not None else self._rules
+
+    @property
+    def _models(self) -> RunModels:
+        adopted = self._backend.adopted
+        return (
+            adopted.models
+            if adopted is not None and adopted.models is not None
+            else self._run_models
+        )
 
     @property
     def looks_at_answers(self) -> bool:
@@ -430,13 +445,20 @@ class RunLoop:
         await self._backend.reports.drain()
         ended = await call(self._backend, RUN_ENDED, request)
         messages = _messages(state)
-        if messages and _LIMIT_MARKER in content_text(messages[-1].content):
-            await call(self._backend, STEP_LIMIT_REACHED, RunRequest(run_id=request.run_id))
-        for work in self.rules.at_end:
-            if work == "settle_review_check":
-                await call(self._backend, SETTLE_REVIEW_CHECK, RunRequest(run_id=request.run_id))
-            else:
-                await call(self._backend, FINISH_SCOUT_PLAN, request)
+        limited = bool(messages) and _LIMIT_MARKER in content_text(messages[-1].content)
+        # Each is its own work: one that fails leaves the others, and the run's end, recorded.
+        for work in [*(["step_limit_reached"] if limited else []), *self.rules.at_end]:
+            try:
+                if work == "step_limit_reached":
+                    await call(self._backend, STEP_LIMIT_REACHED, RunRequest(run_id=request.run_id))
+                elif work == "settle_review_check":
+                    await call(
+                        self._backend, SETTLE_REVIEW_CHECK, RunRequest(run_id=request.run_id)
+                    )
+                else:
+                    await call(self._backend, FINISH_SCOUT_PLAN, request)
+            except BackendCallError:
+                logger.warning("End-of-run work failed", extra={"work": work}, exc_info=True)
         return ended
 
 

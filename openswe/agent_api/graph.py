@@ -940,7 +940,15 @@ class TokenRun:
         return await self.in_run("task_context", read)
 
     async def refresh_github_proxy(self, _request: RunRequest) -> Done:
-        await maybe_refresh_proxy_token(self.run.thread_id)
+        try:
+            await maybe_refresh_proxy_token(self.run.thread_id)
+        except Exception:
+            # The box's next GitHub call says so if the token went stale; the run goes on.
+            logger.warning(
+                "Failed to refresh GitHub proxy token",
+                extra={"agent_thread_id": self.run.thread_id},
+                exc_info=True,
+            )
         return Done()
 
     async def reply_on_behalf(self, request: ReplyOnBehalf) -> Done:

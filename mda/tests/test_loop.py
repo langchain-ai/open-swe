@@ -11,7 +11,7 @@ from langchain_core.messages import (
     messages_from_dict,
 )
 from pydantic import BaseModel, JsonValue
-from rt.backend import OpenSweBackend
+from rt.backend import BackendCallError, OpenSweBackend
 from rt.loop import RunLoop
 from rt.middleware import BackendRunMiddleware
 from rt.tools import STATE_KEY
@@ -49,9 +49,9 @@ type Calls = list[tuple[str, dict[str, JsonValue]]]
 
 
 def _backend(
-    monkeypatch: pytest.MonkeyPatch, answers: Mapping[str, BaseModel]
+    monkeypatch: pytest.MonkeyPatch, answers: Mapping[str, BaseModel | BackendCallError]
 ) -> tuple[OpenSweBackend, Calls]:
-    """A backend answering each named call with ``answers``, and the calls it was asked."""
+    """A backend answering each named call with ``answers``, or failing it, and the calls it was asked."""
     monkeypatch.setenv("OPEN_SWE_BACKEND_URL", "https://backend.invalid")
     monkeypatch.setattr("rt.loop.run_id", lambda: "run-1")
     monkeypatch.setattr("rt.middleware.run_id", lambda: "run-1")
@@ -68,7 +68,10 @@ def _backend(
     ) -> JsonValue:
         name = path.rsplit("/", 1)[-1]
         calls.append((name, body))
-        return answers[name].model_dump(mode="json")
+        answer = answers[name]
+        if isinstance(answer, BackendCallError):
+            raise answer
+        return answer.model_dump(mode="json")
 
     monkeypatch.setattr(backend, "post", post)
     return backend, calls
@@ -254,7 +257,8 @@ async def test_the_end_of_a_run_is_reported_and_its_graph_work_done_by_name(
         {
             "prepare": PhaseResult(update={"rendered_system_prompt": "You review."}),
             "run_ended": AfterAgent(trace_metadata={"git": "reconciled"}),
-            "step_limit_reached": Done(),
+            # A notice that fails leaves the rest of the end of the run to happen.
+            "step_limit_reached": BackendCallError("step_limit_reached failed: Slack is down"),
             "settle_review_check": Done(),
         },
     )
