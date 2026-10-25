@@ -17,7 +17,7 @@ from openswe.review_guide.advance import advance
 from openswe.review_guide.buttons import NEXT_LABELS
 from openswe.review_guide.launch import close_guide_for_channel
 from openswe.review_guide.sessions import ReviewGuideSession
-from openswe.slack import suggested_actions
+from openswe.slack import mda_forwarding, suggested_actions
 from openswe.slack import webhook as service
 from openswe.slack.allowed_bots import resolve_allowed_slack_bot
 from openswe.slack.ask import (
@@ -114,6 +114,18 @@ def _verify_signature(request: common.Request, body: bytes, what: str) -> None:
     ):
         common.logger.warning("Invalid Slack signature", extra={"slack_endpoint": what})
         raise common.HTTPException(status_code=401, detail="Invalid signature")
+
+
+def _hand_to_mda(
+    background_tasks: common.BackgroundTasks, body: bytes, headers: dict[str, str], message: str
+) -> WebhookResponse:
+    """Forward Slack's request to MDA's Slack channel, through Trigger Server, after answering Slack."""
+    url = mda_forwarding.Canary.from_env().events_url
+    if not url:
+        common.logger.error("An MDA-owned Slack conversation has no Trigger Server URL to go to")
+        return ignored("MDA's Slack channel isn't configured here")
+    background_tasks.add_task(mda_forwarding.forward_to_trigger_server, url, body, headers)
+    return accepted(message)
 
 
 async def _queue_code_channel_turn(
@@ -354,6 +366,8 @@ async def slack_webhook(
     """Handle Slack Event API webhooks for app mentions."""
     body = await request.body()
     _verify_signature(request, body, "events")
+    # Taken now: `dispatch` below rebinds `request` to the Slack request it gates.
+    slack_headers = mda_forwarding.forwarded_headers(request.headers)
 
     payload = parse_json_object(body)
     envelope = SlackEventEnvelope.parse(payload) if payload is not None else None
@@ -556,6 +570,13 @@ async def slack_webhook(
         return ignored("Reaction not tracked for feedback")
 
     if event.type == "agent_session_stopped":
+        stopped_ts = raw_event.get("thread_ts")
+        if (
+            channel_id
+            and isinstance(stopped_ts, str)
+            and await mda_forwarding.owned_thread(channel_id, stopped_ts)
+        ):
+            return _hand_to_mda(background_tasks, body, slack_headers, "Session stop handed to MDA")
         background_tasks.add_task(
             common.process_agent_session_stopped, raw_event, event_id, team_id
         )
@@ -795,8 +816,23 @@ async def slack_webhook(
             )
             return accepted("Slack by-the-way question queued")
 
+        # A conversation MDA owns, or a new one the canary hands it, goes to MDA's Slack channel.
+        mda_thread_id = await mda_forwarding.conversation_thread(
+            app_id=envelope.api_app_id,
+            team_id=team_id or "",
+            channel_id=channel_id,
+            root_ts=reply_thread_ts or original_message_ts,
+            user_id=user_id,
+            direct_message=in_dm_channel,
+            eligible=not (
+                in_code_channel
+                or in_concierge_mode
+                or allowed_bot is not None
+                or message.action in {SlackAction.BREAKOUT, SlackAction.BREAKOUT_WEB}
+            ),
+        )
         try:
-            thread_id = await common.resolve_slack_thread_id(
+            thread_id = mda_thread_id or await common.resolve_slack_thread_id(
                 get_langgraph_client(), channel_id, thread_ts
             )
         except common.SlackThreadMappingError as exc:
@@ -837,6 +873,11 @@ async def slack_webhook(
                 triggering_bot_id=allowed_bot.bot_id if allowed_bot else "",
                 triggering_bot_app_id=updated_message.app_id if allowed_bot else "",
             )
+            if mda_thread_id is not None:
+                await mda_forwarding.remember(request, repo, original_message_ts)
+                return _hand_to_mda(
+                    background_tasks, body, slack_headers, "Slack message handed to MDA"
+                )
             if (
                 message.action is SlackAction.BREAKOUT_WEB
                 and not in_dm_channel

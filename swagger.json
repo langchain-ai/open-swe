@@ -7350,6 +7350,25 @@
         "title": "SlackBotOption",
         "type": "object"
       },
+      "SlackChannelCall": {
+        "description": "What MDA's Slack channel POSTs: the event (MDA's ``SlackEndpointEvent``) and its thread.\n\nThe event stays a plain object here: its fields are read one by one below.",
+        "properties": {
+          "event": {
+            "additionalProperties": true,
+            "title": "Event",
+            "type": "object"
+          },
+          "thread": {
+            "$ref": "#/components/schemas/EndpointThread"
+          }
+        },
+        "required": [
+          "event",
+          "thread"
+        ],
+        "title": "SlackChannelCall",
+        "type": "object"
+      },
       "SlackChannelDirectory": {
         "properties": {
           "channels": {
@@ -23068,6 +23087,53 @@
           }
         },
         "summary": "Linear Channel Event"
+      }
+    },
+    "/slack/channel/events": {
+      "post": {
+        "description": "The run a forwarded Slack message starts on the channel's thread, or ``None``.\n\n``None`` when the message wasn't one the backend handed over (the backend\ngates every message before it forwards one), or when gating posted the reply\nitself, such as the prompt to connect an account.",
+        "operationId": "slack_channel_event_slack_channel_events_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SlackChannelCall"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "anyOf": [
+                    {
+                      "$ref": "#/components/schemas/EndpointAnswer"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ],
+                  "title": "Response Slack Channel Event Slack Channel Events Post"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Slack Channel Event"
       }
     },
     "/webhooks/github": {
