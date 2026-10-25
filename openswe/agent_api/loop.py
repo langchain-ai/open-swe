@@ -4,7 +4,7 @@
 call carries, folds what its middleware adds to the call (``ShapesModelCalls``),
 and names the model to call. Each graph builds its loop from the run's
 ``LoopRules`` and ``RunModels``, which the catalog planned and the runtime sends
-with each call, so these calls need no plan of the run.
+with each call (``RunParts.loop``), so these calls need no plan of the run.
 """
 
 import inspect
@@ -22,12 +22,11 @@ from langchain_core.messages import (
     messages_from_dict,
     messages_to_dict,
 )
-from langchain_core.runnables import RunnableConfig
 from langchain_quickjs import CodeInterpreterMiddleware
 from langgraph.config import get_config
 from langgraph.runtime import Runtime
 from pydantic import JsonValue, TypeAdapter, ValidationError
-from runtime_api.catalog import LoopRules, ModelSpec, RunModels
+from runtime_api.catalog import ModelSpec, RunModels
 from runtime_api.loop import BeforeModel, ModelCall, PhaseResult, RunCall
 
 from openswe.dashboard.options import model_supports_images
@@ -54,9 +53,6 @@ _json_dicts = TypeAdapter(list[dict[str, JsonValue]])
 
 Phase = Literal["before_agent", "before_model", "after_model", "after_agent"]
 StateRestorer = Callable[[dict[str, object]], None]
-# A graph's loop, built from the rules its catalog planned; None when the run's hooks
-# need its plan, such as a requested conversation offload.
-LoopBuilder = Callable[[RunnableConfig, LoopRules, RunModels], Awaitable["RunLoop | None"]]
 
 
 def dump_messages(messages: Sequence[BaseMessage]) -> list[dict[str, JsonValue]]:

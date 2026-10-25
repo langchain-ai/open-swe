@@ -43,6 +43,10 @@ class RemoteRun(BaseModel):
     assistant_id: str
     configurable: dict[str, JsonValue]
     metadata: dict[str, JsonValue] = {}
+    # What planning the run added to its config, such as the sender's draft preference:
+    # the calls answered without a plan read it, while planning again starts without it.
+    planned_configurable: dict[str, JsonValue] = {}
+    planned_metadata: dict[str, JsonValue] = {}
 
 
 def _signing_keys() -> list[str]:
@@ -68,6 +72,8 @@ def _sign(audience: str, run: RemoteRun, extra: dict[str, JsonValue], now: int |
         "assistant_id": run.assistant_id,
         "cfg": run.configurable,
         "md": run.metadata,
+        **({"pcfg": run.planned_configurable} if run.planned_configurable else {}),
+        **({"pmd": run.planned_metadata} if run.planned_metadata else {}),
         **extra,
     }
     return jwt.encode(claims, keys[0], algorithm=_ALGORITHM)
@@ -102,6 +108,8 @@ def _run(claims: Mapping[str, object]) -> RemoteRun:
             "assistant_id": claims.get("assistant_id"),
             "configurable": claims.get("cfg"),
             "metadata": claims.get("md", {}),
+            "planned_configurable": claims.get("pcfg", {}),
+            "planned_metadata": claims.get("pmd", {}),
         }
     )
 

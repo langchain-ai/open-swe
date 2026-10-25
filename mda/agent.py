@@ -55,6 +55,7 @@ from rt.middleware import (
 from rt.model_calls import model_call_guards
 from rt.models import build_model
 from rt.remote_files import FILE_TOOLS, RemoteFiles, remote_file_tools
+from rt.search_tools import search_tools_tool
 from rt.skills import RunSkillsMiddleware, SkillFiles
 from rt.task_retry import task_retry
 from rt.tools import operation_tool, run_id
@@ -177,8 +178,11 @@ async def agent(runtime: ManagedServerRuntime) -> DeepAgentDefinition:
         else _DEFAULT_MODEL
     )
     tools = [
-        operation_tool(spec, backend, cites_evidence=catalog.incident_evidence)
-        for spec in catalog.operations
+        *(
+            operation_tool(spec, backend, cites_evidence=catalog.incident_evidence)
+            for spec in catalog.operations
+        ),
+        *([search_tools_tool(catalog.operations)] if catalog.search_tools else []),
     ]
     remote = RemoteFiles(backend, run_id)
     remote_tools = remote_file_tools(remote, catalog.files.artifacts_root)

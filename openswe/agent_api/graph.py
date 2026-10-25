@@ -1,56 +1,43 @@
 """One Open SWE graph, played by a run on Managed Deep Agents.
 
-MDA keeps the model loop, its checkpoints and every tool call. Everything else is
-the run as its graph factory plans it (``ToolSurface``), with no graph compiled,
-served as the typed API both sides import (``runtime_api``):
+MDA keeps the model loop, its checkpoints and every tool call. The backend answers
+the rest as the typed API both sides import (``runtime_api``):
 
 - the catalog names the run's operations (each the work of one of its tools), its
-  subagents, models and sandbox, and the checks around its file and shell tools;
-  it is planned once as the run starts and rides in the run's context
-  (``RemoteGraph.catalog``); ``catalog`` serves it to a run started without one
-- ``prepare`` runs every ``before_agent`` hook: run preparation (the thread's
-  sandbox, checkout and prompt), the transcript turn, skills, reply bookkeeping
-- ``inbox`` hands the run what was sent to its thread since the last model call:
-  queued follow-ups and notes, event matches and task messages (``ThreadInbox``);
-  ``inbox_received`` takes the follow-ups off the queue once the call goes ahead.
-  Neither needs the run's plan: the catalog's ``InboxSpec`` comes with the read
-- ``skills`` lists the skills the run may load, from the stores its token's
-  identity may read, with no plan either
-- ``before_model`` runs every ``before_model`` hook (proxy refresh, task
-  coordination, model routing), then asks the graph's middleware what it adds to
-  the call (``ShapesModelCalls``: sections of the system prompt, tools it keeps
-  from the call), and names the model to call. The graph builds those hooks from
-  the catalog's ``LoopRules``, sent with the call (``openswe.agent_api.loop``)
-- ``model_result`` lets the transcript and usage middleware observe each response,
-  with no plan: the graph names its reporters, which keep each run's state by its ids
-- ``after_model`` runs ``after_model`` hooks, such as the reply nudges, which can
-  send the loop back to the model, from the same rules
-- ``after_agent`` runs ``after_agent`` hooks: usage, transcript, step-limit notice,
-  review-check settle
-- ``tool_started`` and ``tool_result`` let the transcript record every tool call,
-  with no plan either
-- ``sandbox_replaced`` connects to the box MDA put in place of the thread's, and
-  ``sandbox_unreachable`` tells the person a tool MDA ran found the box gone
+  subagents, models and sandbox, the checks around its file and shell tools, and
+  the rules its hooks around each model call are built from. It is planned once as
+  the run starts and rides in the run's context (``RemoteGraph.plan_run``); what
+  planning added to the run's config is signed into its token
+- ``prepare`` runs every ``before_agent`` hook from the run's plan: run preparation
+  (the thread's sandbox, checkout and prompt), the transcript turn, skills, reply
+  bookkeeping. It is the one call that plans the run again
+- every other call is a ``TokenRun``: answered from the token and the request,
+  with the pieces the graph's ``RunParts`` build for it. ``inbox`` and
+  ``inbox_received`` read and settle what was sent to the thread (``ThreadInbox``);
+  ``skills`` lists what the token's identity may load; ``before_model`` and
+  ``after_model`` run the hooks around a model call (``openswe.agent_api.loop``);
+  ``model_result``, ``tool_started`` and ``tool_result`` report to the transcript
+  and usage; ``operation``, ``check_shell`` and the ``files`` calls do the work of
+  the run's tools; ``after_agent`` runs the end-of-run hooks; ``sandbox_replaced``
+  and ``sandbox_unreachable`` follow the box MDA keeps
+- a run whose calls need more than that (``RunParts.needs_plan``), and
+  ``record_evidence`` for an incident, are answered from the run's plan (``RunSession``)
 
-The run's tools call the same API for their work: an operation by name, the
-thread's files where the box is not MDA's or the path is this deployment's, the
-push and pull request guards on a shell command, and incident evidence. None of
-them is a tool call here: no tools node, no tool-call middleware.
-
-A call made from inside a subagent names the namespace of its ``task`` calls, so
-its tool calls and replies land under the subagent, as they do in-process.
+None of the run's tool calls is a tool call here: no tools node, no tool-call
+middleware. A call made from inside a subagent names the namespace of its ``task``
+calls, so its tool calls and replies land under the subagent.
 
 The graph's model-call shaping (caching, retries, fallback, summarization, call
 limits, provider history fixes, the call deadline, and the swap to a vision model
-this graph names) is MDA's own. Graph state the hooks write that MDA
-does not know rides in the MDA run's state and comes back with every call.
+this graph names) is MDA's own. Graph state the hooks write that MDA does not know
+rides in the MDA run's state and comes back with every call.
 """
 
 import base64
 import logging
 import time
 from collections.abc import Awaitable, Callable, Mapping, Sequence
-from dataclasses import asdict
+from dataclasses import asdict, dataclass
 from functools import partial
 from typing import Final, Protocol, cast, runtime_checkable
 from uuid import UUID, uuid4
@@ -81,6 +68,7 @@ from pydantic import BaseModel, JsonValue, TypeAdapter, ValidationError
 from runtime_api import files as file_api
 from runtime_api.catalog import (
     CATALOG,
+    SEARCH_TOOLS,
     Catalog,
     FilesSpec,
     ModelSpec,
@@ -164,7 +152,6 @@ from openswe.agent_api.git_metadata import (
     collect_pr_targets,
 )
 from openswe.agent_api.loop import (
-    LoopBuilder,
     Phase,
     RunLoop,
     StateRestorer,
@@ -177,6 +164,7 @@ from openswe.agent_api.loop import (
     run_hooks,
 )
 from openswe.agent_api.operations import Injections, invoke
+from openswe.agent_api.run_parts import RunParts
 from openswe.agent_api.runs import in_graph_context, run_config
 from openswe.agent_api.shell_guards import ShellGuards
 from openswe.agent_api.tokens import RemoteRun
@@ -203,10 +191,10 @@ from openswe.sandboxes.tool_runtime import (
 )
 from openswe.server import (
     DEEP_AGENT_TOOL_NAMES,
+    code_name,
     code_only,
     direct_and_from_code,
 )
-from openswe.skill_store.run_skills import RunSkillStores
 from openswe.threads.inbox import ThreadInbox
 
 logger = logging.getLogger(__name__)
@@ -241,7 +229,6 @@ _json_dicts = TypeAdapter(list[dict[str, JsonValue]])
 
 type PhaseWork[R: PhaseResult] = Callable[[dict[str, object], Runtime], Awaitable[R]]
 RunPlanner = Callable[[RunnableConfig, ToolSurface], Awaitable[None]]
-SkillStores = Callable[[RunnableConfig], Awaitable[RunSkillStores]]
 
 
 def _model_spec(choice: ModelChoice) -> ModelSpec:
@@ -347,7 +334,9 @@ class RunSession:
         operations = {
             name: tool for name, tool in self.surface.tools.items() if name not in _MDA_TOOLS
         }
-        offered = operations.keys() | _FILE_TOOLS
+        # Code mode finds the run's tools with the runtime's own search.
+        searched = {SEARCH_TOOLS} if self.surface.code_mode else set()
+        offered = operations.keys() | _FILE_TOOLS | searched
         excluded = ((self.surface.excluded | EXCLUDED_TOOLS) - _MDA_TOOLS) | (
             self._unoffered_delegation_tools()
         )
@@ -361,6 +350,7 @@ class RunSession:
                     parameters=described.parameters,
                     reads=(injections := Injections.of(operations[described.name])).reads,
                     reads_all=injections.reads_all,
+                    code_name=code_name(described.name),
                 )
                 for described in self.surface.catalog()
                 if described.name in operations
@@ -400,6 +390,7 @@ class RunSession:
             skill_sources=list(self.surface.skill_sources),
             inbox=self.surface.inbox,
             loop=self.surface.loop,
+            search_tools=self.surface.code_mode,
             model_call_limit=next(
                 (
                     m.run_limit
@@ -437,23 +428,8 @@ class RunSession:
 
     async def sandbox_replaced(self, _request: RunCall) -> Done:
         """Connect again to the thread's box, which MDA replaced with a fresh one."""
-        await in_graph_context(
-            {**self.config, "run_name": "sandbox"}, lambda _runtime: self._reconnect_sandbox()
-        )
+        await reconnect_sandbox(self.config, self.assistant_id)
         return Done()
-
-    async def _reconnect_sandbox(self) -> None:
-        cfg = RunConfig.from_config(self.config)
-        if cfg.thread_id is None:
-            raise ValueError("This run has no thread")
-        reviewing = self.assistant_id in {"reviewer", "review-scout"}
-        repositories = [cfg.repo.full_name] if cfg.repo else []
-        await reconnect_replaced_sandbox(
-            cfg.thread_id,
-            workspace_slug=cfg.workspace_slug,
-            github_proxy_repositories=repositories if reviewing else None,
-            github_proxy_permissions=READ_ONLY_REVIEW_PERMISSIONS if reviewing else None,
-        )
 
     @property
     def _delegates(self) -> bool:
@@ -507,86 +483,21 @@ class RunSession:
 
         return await in_graph_context({**self.config, "run_name": name}, run)
 
-    def _operation_state(self, request: RunOperation) -> dict[str, object]:
-        state: dict[str, object] = {
-            key: decode_state(value) for key, value in request.state.items()
-        }
-        if request.messages is not None:
-            state["messages"] = messages_from_dict(request.messages)
-        if self._restore is not None:
-            self._restore(state)
-        return state
-
     async def operation(self, request: RunOperation) -> OperationResult:
         """Do the work of one of the run's tools: its arguments in, its result out."""
-        tool = self.surface.tools.get(request.name)
-        if tool is None or request.name in _MDA_TOOLS:
-            return OperationResult(
-                content=f"{request.name} is not one of this run's operations", status="error"
-            )
-        unexpected = set(request.arguments) - set(_properties(tool))
-        if unexpected:
-            return OperationResult(
-                content=f"Unexpected arguments for {request.name}: {', '.join(sorted(unexpected))}",
-                status="error",
-            )
-        client = self._client_tools
-        if client is not None and (
-            pending := client.pending_result(request.name, request.request_id)
-        ):
-            return _operation_result(pending, request.request_id)
-        events: list[object] = []
-
-        async def run(runtime: Runtime) -> OperationResult:
-            await self.rejoin_preparation(runtime)
-            decision = await self._shell_guards.decide(request.name, request.arguments)
-            if decision.arguments is None:
-                return OperationResult(content=decision.refusal or "", status="error")
-            observed_at = time.time_ns()
-            with collect_pr_targets() as pr_targets:
-                try:
-                    outcome = await invoke(
-                        tool, decision.arguments, self._operation_state(request), request.request_id
-                    )
-                except NodeCancelledError:
-                    # The run is being cancelled: that ends the call, not just its result.
-                    raise
-                except Exception as exc:
-                    failure = await OperationFailure.of(
-                        exc, operation=request.name, config=self.config
-                    )
-                    return OperationResult(
-                        content=failure.content,
-                        status="error",
-                        sandbox_unreachable=failure.sandbox_unreachable,
-                    )
-            result = _operation_result(outcome, request.request_id)
-            evidence = TurnGitMetadata(self.config).evidence(
-                pr_targets, request.request_id, pr=True, observed_at=observed_at
-            )
-            return result.model_copy(update={"evidence": evidence})
-
-        result = await in_graph_context(
-            {**self.config, "run_name": request.name}, run, events=events
+        return await run_operation(
+            self.surface.tools.get(request.name),
+            request,
+            config=self.config,
+            state=operation_state(request, self._restore),
+            guards=self._shell_guards,
+            client=self._client_tools,
+            ready=self.rejoin_preparation,
         )
-        return result.model_copy(update={"events": [_json_or_text(e) for e in events]})
 
     async def check_shell(self, request: ShellCheck) -> ShellVerdict:
         """Whether the push and pull request guards let ``request``'s command run as it is."""
-
-        async def decide() -> ShellVerdict:
-            decision = await self._shell_guards.decide(request.tool, {"command": request.command})
-            if decision.arguments is None:
-                return ShellVerdict(allowed=False, refusal=decision.refusal)
-            command = decision.arguments.get("command")
-            return ShellVerdict(
-                allowed=True,
-                command=command
-                if isinstance(command, str) and command != request.command
-                else None,
-            )
-
-        return await self.in_run("check_shell", decide)
+        return await self.in_run("check_shell", lambda: check_shell(self._shell_guards, request))
 
     async def record_evidence(self, request: ToolEvidence) -> EvidenceReply:
         """An incident run's tool result, recorded as evidence the result then cites."""
@@ -603,8 +514,7 @@ class RunSession:
         observed = incident.observe(result, {"name": request.tool, "args": request.arguments})
         return EvidenceReply(content=observed.content)
 
-    @property
-    def files(self) -> BackendProtocol:
+    async def thread_files(self) -> BackendProtocol:
         if self.surface.files is None:
             raise RuntimeError("This run has no files on the backend")
         return self.surface.files
@@ -707,42 +617,358 @@ async def _wrap(
     raise TypeError(f"{type(middleware).__name__} returned no model response")
 
 
+def operation_state(request: RunOperation, restore: StateRestorer | None) -> dict[str, object]:
+    """The graph state an operation reads, as the call carries it."""
+    state: dict[str, object] = {key: decode_state(value) for key, value in request.state.items()}
+    if request.messages is not None:
+        state["messages"] = messages_from_dict(request.messages)
+    if restore is not None:
+        restore(state)
+    return state
+
+
+async def run_operation(
+    tool: BaseTool | None,
+    request: RunOperation,
+    *,
+    config: RunnableConfig,
+    state: dict[str, object],
+    guards: ShellGuards,
+    client: ClientToolsMiddleware | None,
+    ready: Callable[[Runtime], Awaitable[None]],
+) -> OperationResult:
+    """Do the work of ``tool`` for ``request``, as the run ``config`` names, once ``ready``."""
+    if tool is None or request.name in _MDA_TOOLS:
+        return OperationResult(
+            content=f"{request.name} is not one of this run's operations", status="error"
+        )
+    unexpected = set(request.arguments) - set(_properties(tool))
+    if unexpected:
+        return OperationResult(
+            content=f"Unexpected arguments for {request.name}: {', '.join(sorted(unexpected))}",
+            status="error",
+        )
+    if client is not None and (pending := client.pending_result(request.name, request.request_id)):
+        return _operation_result(pending, request.request_id)
+    events: list[object] = []
+
+    async def run(runtime: Runtime) -> OperationResult:
+        await ready(runtime)
+        decision = await guards.decide(request.name, request.arguments)
+        if decision.arguments is None:
+            return OperationResult(content=decision.refusal or "", status="error")
+        observed_at = time.time_ns()
+        with collect_pr_targets() as pr_targets:
+            try:
+                outcome = await invoke(tool, decision.arguments, state, request.request_id)
+            except NodeCancelledError:
+                # The run is being cancelled: that ends the call, not just its result.
+                raise
+            except Exception as exc:
+                failure = await OperationFailure.of(exc, operation=request.name, config=config)
+                return OperationResult(
+                    content=failure.content,
+                    status="error",
+                    sandbox_unreachable=failure.sandbox_unreachable,
+                )
+        result = _operation_result(outcome, request.request_id)
+        evidence = TurnGitMetadata(config).evidence(
+            pr_targets, request.request_id, pr=True, observed_at=observed_at
+        )
+        return result.model_copy(update={"evidence": evidence})
+
+    result = await in_graph_context({**config, "run_name": request.name}, run, events=events)
+    return result.model_copy(update={"events": [_json_or_text(e) for e in events]})
+
+
+async def check_shell(guards: ShellGuards, request: ShellCheck) -> ShellVerdict:
+    """Whether ``guards`` let ``request``'s command run as it is, inside the run's context."""
+    decision = await guards.decide(request.tool, {"command": request.command})
+    if decision.arguments is None:
+        return ShellVerdict(allowed=False, refusal=decision.refusal)
+    command = decision.arguments.get("command")
+    return ShellVerdict(
+        allowed=True,
+        command=command if isinstance(command, str) and command != request.command else None,
+    )
+
+
+async def reconnect_sandbox(config: RunnableConfig, assistant_id: str | None) -> None:
+    """Connect again to the thread's box, which MDA replaced with a fresh one."""
+
+    async def reconnect(_runtime: Runtime) -> None:
+        cfg = RunConfig.from_config(config)
+        if cfg.thread_id is None:
+            raise ValueError("This run has no thread")
+        reviewing = assistant_id in {"reviewer", "review-scout"}
+        repositories = [cfg.repo.full_name] if cfg.repo else []
+        await reconnect_replaced_sandbox(
+            cfg.thread_id,
+            workspace_slug=cfg.workspace_slug,
+            github_proxy_repositories=repositories if reviewing else None,
+            github_proxy_permissions=READ_ONLY_REVIEW_PERMISSIONS if reviewing else None,
+        )
+
+    await in_graph_context({**config, "run_name": "sandbox"}, reconnect)
+
+
+@dataclass(frozen=True)
+class RunPlan:
+    """A run as its graph factory planned it as the run starts."""
+
+    catalog: Catalog
+    # What planning added to the run's config, which the calls answered without a plan read.
+    configurable: dict[str, JsonValue]
+    metadata: dict[str, JsonValue]
+
+
+def _added(before: Mapping[str, object], after: Mapping[str, object]) -> dict[str, JsonValue]:
+    return json_state({key: value for key, value in after.items() if before.get(key) != value})
+
+
+class TokenRun:
+    """One call of an MDA run, answered from its token and request, never from its plan.
+
+    The graph's ``RunParts`` build what the call needs; a loop call without the
+    catalog's rules is answered from the run's plan.
+    """
+
+    def __init__(self, graph: RemoteGraph, run: RemoteRun, run_id: str | None) -> None:
+        self.graph = graph
+        self.run = run
+        self.run_id = run_id
+        self.parts = graph.parts
+        self.config = graph.config_for(run, run_id)
+        self._files: BackendProtocol | None = None
+
+    @property
+    def needs_plan(self) -> bool:
+        return self.parts.needs_plan(RunConfig.from_config(self.config))
+
+    async def _ready(self, _runtime: Runtime) -> None:
+        await self.parts.credentials(self.config)
+
+    async def in_run[T](self, name: str, work: Callable[[], Awaitable[T]]) -> T:
+        """``work`` as this run, with its credentials ready in this process."""
+
+        async def run(runtime: Runtime) -> T:
+            await self._ready(runtime)
+            return await work()
+
+        return await in_graph_context({**self.config, "run_name": name}, run)
+
+    async def thread_files(self) -> BackendProtocol:
+        if self._files is None:
+            files = await self.parts.files(self.config)
+            if files is None:
+                raise RuntimeError("This run has no files on the backend")
+            self._files = files
+        return self._files
+
+    async def _session(self) -> RunSession:
+        return await self.graph.session(self.run, self.run_id)
+
+    async def skills(self, _request: RunRequest) -> RunSkills:
+        """Every skill the run may load: each store's skill folders and their ``SKILL.md``."""
+
+        async def listed() -> RunSkills:
+            stores = await self.parts.skills(self.config)
+            return RunSkills() if stores is None else await stores.listed()
+
+        return await in_graph_context(
+            {**self.config, "run_name": "skills"}, lambda _runtime: listed()
+        )
+
+    async def inbox(self, request: InboxRead) -> Inbox:
+        if request.spec is None:
+            return Inbox()
+        taken = await ThreadInbox(self.run.thread_id).read(
+            request.run_id or str(uuid4()), request.spec
+        )
+        return Inbox(
+            messages=dump_messages(as_messages(taken.messages)),
+            update={} if taken.reply_surface is None else {"reply_surface": taken.reply_surface},
+            items=InboxItems(queued=taken.queued, events=taken.events),
+        )
+
+    async def inbox_received(self, request: InboxReceipt) -> Done:
+        await ThreadInbox(self.run.thread_id).receive(request.items.queued, request.items.events)
+        return Done()
+
+    async def _looping[R: PhaseResult](self, call: RunCall, phase: Phase, work: PhaseWork[R]) -> R:
+        state = call_state(call, self.parts.restore)
+        events: list[object] = []
+        answered = await in_graph_context(
+            {**self.config, "run_name": phase},
+            lambda runtime: work(state, runtime),
+            events=events,
+        )
+        return answered.model_copy(update={"events": [_json_or_text(e) for e in events]})
+
+    async def _loop(self, call: LoopCall) -> RunLoop | None:
+        """The graph's hooks around a model call, from the rules the call carries."""
+        if call.loop is None or call.models is None:
+            return None
+        return await self.parts.loop(self.config, call.loop, call.models)
+
+    async def before_model(self, request: LoopCall) -> BeforeModel:
+        loop = await self._loop(request)
+        if loop is None:
+            return await (await self._session()).before_model(request)
+        return await self._looping(request, "before_model", loop.before_model)
+
+    async def after_model(self, request: LoopCall) -> PhaseResult:
+        loop = await self._loop(request)
+        if loop is None:
+            return await (await self._session()).after_model(request)
+        return await self._looping(request, "after_model", loop.after_model)
+
+    async def _reporting[T](
+        self,
+        call: RunCall,
+        name: str,
+        report: Callable[[dict[str, object], Runtime], Awaitable[T]],
+        *,
+        hooks: Sequence[AgentMiddleware] = (),
+    ) -> T:
+        """``report`` as the run, inside the calling subagent, with the run's turn rejoined.
+
+        What a reporter queued is written before the call answers, so the next call
+        may reach another process.
+        """
+        state = call_state(call, self.parts.restore)
+        carried = [
+            m for m in (*self.parts.reporters, *hooks) if isinstance(m, CarriedAcrossProcesses)
+        ]
+
+        async def reported(runtime: Runtime) -> T:
+            for middleware in carried:
+                await middleware.aresume_run(cast(AgentState, dict(state)), runtime)
+            with within_namespace(call.namespace):
+                result = await report(state, runtime)
+            for middleware in carried:
+                await middleware.aflush_run(runtime)
+            return result
+
+        return await in_graph_context({**self.config, "run_name": name}, reported)
+
+    async def model_result(self, request: ModelResult) -> ObservedResponse:
+        """Let the transcript and usage see the response MDA's model gave."""
+        response = messages_from_dict(request.response)
+        observers = [m for m in self.parts.reporters if isinstance(m, _MODEL_OBSERVERS)]
+
+        async def respond(_request: ModelRequest) -> ModelResponse:
+            return ModelResponse(result=response)
+
+        async def observe(state: dict[str, object], runtime: Runtime) -> list[BaseMessage]:
+            observed = await _chain(observers, respond)(_observed_request(state, runtime))
+            return observed.result
+
+        seen = await self._reporting(request, "model_result", observe)
+        return ObservedResponse(response=dump_messages(seen))
+
+    def _tool_recorders(self) -> list[RecordsRemoteTools]:
+        return [m for m in self.parts.reporters if isinstance(m, RecordsRemoteTools)]
+
+    async def tool_started(self, request: ToolCallReport) -> Done:
+        tool_call = ToolCall(
+            name=request.name, args=dict(request.arguments), id=request.tool_call_id
+        )
+        messages = messages_from_dict(request.messages)
+
+        async def record(_state: dict[str, object], _runtime: Runtime) -> None:
+            for recorder in self._tool_recorders():
+                await recorder.atool_started(tool_call, messages)
+
+        await self._reporting(request, "tool_started", record)
+        return Done()
+
+    async def tool_result(self, request: ToolResultReport) -> ToolResultReply:
+        [result] = messages_from_dict([request.result])
+        if not isinstance(result, ToolMessage):
+            raise ValueError("A tool result must be a tool message")
+
+        async def record(state: dict[str, object], _runtime: Runtime) -> dict[str, JsonValue]:
+            for recorder in self._tool_recorders():
+                await recorder.atool_finished(result)
+            # A file or shell tool may have started the turn's work; the snapshot is taken
+            # now, off the call's path, as the run, which a bridged machine checks.
+            git = TurnGitMetadata(self.config)
+            before = git.work_baseline(state) if request.name in OBSERVED_TOOLS else None
+            return await git.work_evidence(before, request.tool_call_id, time.time_ns())
+
+        update = await self._reporting(request, "tool_result", record)
+        return ToolResultReply(update=update)
+
+    async def after_agent(self, request: RunCall) -> AfterAgent:
+        """The graph's end-of-run hooks, and the turn's git metadata reconciled."""
+        hooks = self.parts.end_hooks(self.config)
+
+        async def ended(state: dict[str, object], runtime: Runtime) -> AfterAgent:
+            result = await run_hooks(hooks, "after_agent", state, runtime)
+            trace_metadata = await TurnGitMetadata(self.config).reconcile(state)
+            return AfterAgent(
+                **result.model_dump(exclude={"update"}),
+                update={**result.update, BASELINE: None},
+                trace_metadata=trace_metadata,
+            )
+
+        try:
+            return await self._reporting(request, "after_agent", ended, hooks=hooks)
+        finally:
+            self.graph.end(self.run, self.run_id)
+
+    async def operation(self, request: RunOperation) -> OperationResult:
+        """Do the work of one of the run's tools: its arguments in, its result out."""
+        cfg = RunConfig.from_config(self.config)
+        client = ClientToolsMiddleware(cfg.client_tools) if cfg.client_tools else None
+        offered = (
+            next((t for t in client.tools if t.name == request.name), None) if client else None
+        )
+        return await run_operation(
+            offered or await self.parts.tool(self.config, request.name),
+            request,
+            config=self.config,
+            state=operation_state(request, self.parts.restore),
+            guards=ShellGuards(self.parts.shell_guards),
+            client=client,
+            ready=self._ready,
+        )
+
+    async def check_shell(self, request: ShellCheck) -> ShellVerdict:
+        """Whether the push and pull request guards let ``request``'s command run as it is."""
+        guards = ShellGuards(self.parts.shell_guards)
+        return await self.in_run("check_shell", lambda: check_shell(guards, request))
+
+    async def sandbox_replaced(self, _request: RunCall) -> Done:
+        await reconnect_sandbox(self.config, self.graph.assistant_id)
+        return Done()
+
+    async def sandbox_unreachable(self, request: SandboxGone) -> Done:
+        """A tool MDA ran in the box found it gone; the run ends once the person knows."""
+        await post_sandbox_unreachable_notification(self.config, sandbox_id=request.sandbox_id)
+        return Done()
+
+    async def browser(self, request: BrowserReport) -> Done:
+        await ThreadBrowser(browser=request.browser, opened=request.opened).report(
+            self.run.thread_id
+        )
+        return Done()
+
+
 class RemoteGraph:
     """An Open SWE graph's catalog for the MDA runs that play it."""
 
-    def __init__(
-        self,
-        assistant_id: str,
-        plan: RunPlanner,
-        *,
-        restore_state: StateRestorer | None = None,
-        skills: SkillStores | None = None,
-        reporters: Sequence[AgentMiddleware] = (),
-        loop: LoopBuilder | None = None,
-    ) -> None:
+    def __init__(self, assistant_id: str, plan: RunPlanner, parts: RunParts | None = None) -> None:
         self.assistant_id = assistant_id
         self._plan = plan
-        self._restore_state = restore_state
-        self._skills = skills
-        self._loop = loop
-        # The graph's middleware that records what MDA runs: its replies and tool calls.
-        # Each keeps its run's state by the run's ids, never by the plan.
-        self._reporters = tuple(reporters)
+        self.parts = parts or RunParts()
         self._sessions: dict[tuple[str, str | None], RunSession] = {}
-        # Calls answered from the run's token and request alone, never its plan.
-        self._calls = Handlers[RemoteRun]()
-        self._calls.serve(BROWSER, _browser)
-        self._calls.serve(SKILLS, self.skills)
-        self._calls.serve(INBOX, self.inbox)
-        self._calls.serve(INBOX_RECEIVED, self.inbox_received)
-        self._calls.serve(MODEL_RESULT, self.model_result)
-        self._calls.serve(TOOL_STARTED, self.tool_started)
-        self._calls.serve(TOOL_RESULT, self.tool_result)
-        self._calls.serve(BEFORE_MODEL, self.before_model)
-        self._calls.serve(AFTER_MODEL, self.after_model)
 
-    def _config(self, run: RemoteRun, run_id: str | None) -> RunnableConfig:
-        config = run_config(run)
+    def config_for(
+        self, run: RemoteRun, run_id: str | None, *, planned: bool = True
+    ) -> RunnableConfig:
+        config = run_config(run, planned=planned)
         configurable = dict(config.get("configurable") or {})
         if run_id:
             # The transcript keys a run's turn by it; never the tracer's run id.
@@ -750,21 +976,30 @@ class RemoteGraph:
         return {**config, "configurable": configurable}
 
     async def _planned(self, run: RemoteRun, run_id: str | None, *, fresh: bool) -> RunSession:
-        config = self._config(run, run_id)
+        # Planning starts from the run as dispatch stamped it, never from its own additions.
+        config = self.config_for(run, run_id, planned=False)
         surface = ToolSurface()
         await self._plan(config, surface)
         await surface.prepare()
         return RunSession(
             surface,
             config,
-            self._restore_state,
+            self.parts.restore,
             started_here=fresh,
             assistant_id=self.assistant_id,
         )
 
-    async def catalog(self, run: RemoteRun) -> Catalog:
+    async def plan_run(self, run: RemoteRun) -> RunPlan:
         """What ``run``'s MDA graph is built from, planned as the run starts."""
-        return await (await self._planned(run, None, fresh=False)).plan()
+        session = await self._planned(run, None, fresh=False)
+        before = self.config_for(run, None, planned=False)
+        return RunPlan(
+            catalog=await session.plan(),
+            configurable=_added(
+                before.get("configurable") or {}, session.config.get("configurable") or {}
+            ),
+            metadata=_added(before.get("metadata") or {}, session.config.get("metadata") or {}),
+        )
 
     async def session(
         self, run: RemoteRun, run_id: str | None, *, fresh: bool = False
@@ -783,147 +1018,18 @@ class RemoteGraph:
     def end(self, run: RemoteRun, run_id: str | None) -> None:
         self._sessions.pop((run.thread_id, run_id), None)
 
-    async def skills(self, run: RemoteRun, _request: RunRequest) -> RunSkills:
-        """Every skill the run may load: each store's skill folders and their ``SKILL.md``."""
-        if self._skills is None:
-            return RunSkills()
-        config = run_config(run)
-        stores = self._skills
-
-        async def listed(_runtime: Runtime) -> RunSkills:
-            return await (await stores(config)).listed()
-
-        return await in_graph_context({**config, "run_name": "skills"}, listed)
-
-    async def inbox(self, run: RemoteRun, request: InboxRead) -> Inbox:
-        if request.spec is None:
-            return Inbox()
-        taken = await ThreadInbox(run.thread_id).read(request.run_id or str(uuid4()), request.spec)
-        return Inbox(
-            messages=dump_messages(as_messages(taken.messages)),
-            update={} if taken.reply_surface is None else {"reply_surface": taken.reply_surface},
-            items=InboxItems(queued=taken.queued, events=taken.events),
-        )
-
-    async def inbox_received(self, run: RemoteRun, request: InboxReceipt) -> Done:
-        await ThreadInbox(run.thread_id).receive(request.items.queued, request.items.events)
-        return Done()
-
-    async def _built_loop(self, run: RemoteRun, call: LoopCall) -> RunLoop | None:
-        """The graph's hooks around a model call, from the rules the call carries."""
-        if self._loop is None or call.loop is None or call.models is None:
-            return None
-        return await self._loop(self._config(run, call.run_id), call.loop, call.models)
-
-    async def _looping[R: PhaseResult](
-        self, run: RemoteRun, call: LoopCall, phase: Phase, work: PhaseWork[R]
-    ) -> R:
-        state = call_state(call, self._restore_state)
-        events: list[object] = []
-        config = self._config(run, call.run_id)
-        answered = await in_graph_context(
-            {**config, "run_name": phase},
-            lambda runtime: work(state, runtime),
-            events=events,
-        )
-        return answered.model_copy(update={"events": [_json_or_text(e) for e in events]})
-
-    async def before_model(self, run: RemoteRun, request: LoopCall) -> BeforeModel:
-        loop = await self._built_loop(run, request)
-        if loop is None:
-            return await (await self.session(run, request.run_id)).before_model(request)
-        return await self._looping(run, request, "before_model", loop.before_model)
-
-    async def after_model(self, run: RemoteRun, request: LoopCall) -> PhaseResult:
-        loop = await self._built_loop(run, request)
-        if loop is None:
-            return await (await self.session(run, request.run_id)).after_model(request)
-        return await self._looping(run, request, "after_model", loop.after_model)
-
-    async def _reporting[T](
-        self,
-        run: RemoteRun,
-        call: RunCall,
-        name: str,
-        report: Callable[[dict[str, object], Runtime], Awaitable[T]],
-    ) -> T:
-        """``report`` as the run, inside the calling subagent, with the run's turn rejoined.
-
-        What a reporter queued is written before the call answers, so the next call
-        may reach another process.
-        """
-        state = call_state(call, self._restore_state)
-        carried = [m for m in self._reporters if isinstance(m, CarriedAcrossProcesses)]
-
-        async def reported(runtime: Runtime) -> T:
-            for middleware in carried:
-                await middleware.aresume_run(cast(AgentState, dict(state)), runtime)
-            with within_namespace(call.namespace):
-                result = await report(state, runtime)
-            for middleware in carried:
-                await middleware.aflush_run(runtime)
-            return result
-
-        config = self._config(run, call.run_id)
-        return await in_graph_context({**config, "run_name": name}, reported)
-
-    async def model_result(self, run: RemoteRun, request: ModelResult) -> ObservedResponse:
-        """Let the transcript and usage see the response MDA's model gave."""
-        response = messages_from_dict(request.response)
-        observers = [m for m in self._reporters if isinstance(m, _MODEL_OBSERVERS)]
-
-        async def respond(_request: ModelRequest) -> ModelResponse:
-            return ModelResponse(result=response)
-
-        async def observe(state: dict[str, object], runtime: Runtime) -> list[BaseMessage]:
-            observed = await _chain(observers, respond)(_observed_request(state, runtime))
-            return observed.result
-
-        seen = await self._reporting(run, request, "model_result", observe)
-        return ObservedResponse(response=dump_messages(seen))
-
-    def _tool_recorders(self) -> list[RecordsRemoteTools]:
-        return [m for m in self._reporters if isinstance(m, RecordsRemoteTools)]
-
-    async def tool_started(self, run: RemoteRun, request: ToolCallReport) -> Done:
-        tool_call = ToolCall(
-            name=request.name, args=dict(request.arguments), id=request.tool_call_id
-        )
-        messages = messages_from_dict(request.messages)
-
-        async def record(_state: dict[str, object], _runtime: Runtime) -> None:
-            for recorder in self._tool_recorders():
-                await recorder.atool_started(tool_call, messages)
-
-        await self._reporting(run, request, "tool_started", record)
-        return Done()
-
-    async def tool_result(self, run: RemoteRun, request: ToolResultReport) -> ToolResultReply:
-        [result] = messages_from_dict([request.result])
-        if not isinstance(result, ToolMessage):
-            raise ValueError("A tool result must be a tool message")
-        config = self._config(run, request.run_id)
-
-        async def record(state: dict[str, object], _runtime: Runtime) -> dict[str, JsonValue]:
-            for recorder in self._tool_recorders():
-                await recorder.atool_finished(result)
-            # A file or shell tool may have started the turn's work; the snapshot is taken
-            # now, off the call's path, as the run, which a bridged machine checks.
-            git = TurnGitMetadata(config)
-            before = git.work_baseline(state) if request.name in OBSERVED_TOOLS else None
-            return await git.work_evidence(before, request.tool_call_id, time.time_ns())
-
-        update = await self._reporting(run, request, "tool_result", record)
-        return ToolResultReply(update=update)
-
     async def api(self, run: RemoteRun, endpoint: str, raw: JsonValue) -> JsonValue:
-        """Answer one call the MDA run makes (``runtime_api``), as the session of its run."""
-        if self._calls.serves(endpoint):
-            return await self._calls.dispatch(endpoint, run, raw)
-        if not API.serves(endpoint):
-            raise UnknownEndpointError(endpoint)
+        """Answer one call the MDA run makes (``runtime_api``), without its plan when it can."""
         raw_id = raw.get("run_id") if isinstance(raw, Mapping) else None
         run_id = raw_id if isinstance(raw_id, str) else None
+        if RUN_CALLS.serves(endpoint):
+            return await RUN_CALLS.dispatch(endpoint, TokenRun(self, run, run_id), raw)
+        if PLAN_FREE_CALLS.serves(endpoint):
+            call = TokenRun(self, run, run_id)
+            if not call.needs_plan:
+                return await PLAN_FREE_CALLS.dispatch(endpoint, call, raw)
+        if not API.serves(endpoint):
+            raise UnknownEndpointError(endpoint)
         # Preparation starts the run's session; the end of the run closes it.
         session = await self.session(run, run_id, fresh=endpoint == PREPARE.name)
         try:
@@ -986,62 +1092,75 @@ def _b64(data: bytes | None) -> str | None:
     return None if data is None else base64.b64encode(data).decode()
 
 
-async def _ls(session: RunSession, request: PathRequest) -> LsReply:
-    result = await session.in_run("files.ls", lambda: session.files.als(request.path))
+class ReachesFiles(Protocol):
+    """A run whose calls reach the thread's files: from its plan, or its token."""
+
+    async def thread_files(self) -> BackendProtocol: ...
+
+    async def in_run[T](self, name: str, work: Callable[[], Awaitable[T]]) -> T: ...
+
+
+async def _ls(run: ReachesFiles, request: PathRequest) -> LsReply:
+    files = await run.thread_files()
+    result = await run.in_run("files.ls", lambda: files.als(request.path))
     return LsReply.model_validate(asdict(result))
 
 
-async def _read(session: RunSession, request: ReadRequest) -> ReadReply:
-    result = await session.in_run(
-        "files.read", lambda: session.files.aread(request.file_path, request.offset, request.limit)
+async def _read(run: ReachesFiles, request: ReadRequest) -> ReadReply:
+    files = await run.thread_files()
+    result = await run.in_run(
+        "files.read", lambda: files.aread(request.file_path, request.offset, request.limit)
     )
     return ReadReply.model_validate(asdict(result))
 
 
-async def _write(session: RunSession, request: WriteRequest) -> FileReply:
-    result = await session.in_run(
-        "files.write", lambda: session.files.awrite(request.file_path, request.content)
+async def _write(run: ReachesFiles, request: WriteRequest) -> FileReply:
+    files = await run.thread_files()
+    result = await run.in_run(
+        "files.write", lambda: files.awrite(request.file_path, request.content)
     )
     return FileReply.model_validate(asdict(result))
 
 
-async def _edit(session: RunSession, request: EditRequest) -> FileReply:
-    result = await session.in_run(
+async def _edit(run: ReachesFiles, request: EditRequest) -> FileReply:
+    files = await run.thread_files()
+    result = await run.in_run(
         "files.edit",
-        lambda: session.files.aedit(
+        lambda: files.aedit(
             request.file_path, request.old_string, request.new_string, request.replace_all
         ),
     )
     return FileReply.model_validate(asdict(result))
 
 
-async def _delete(session: RunSession, request: DeleteRequest) -> FileReply:
-    result = await session.in_run("files.delete", lambda: session.files.adelete(request.file_path))
+async def _delete(run: ReachesFiles, request: DeleteRequest) -> FileReply:
+    files = await run.thread_files()
+    result = await run.in_run("files.delete", lambda: files.adelete(request.file_path))
     return FileReply.model_validate(asdict(result))
 
 
-async def _glob(session: RunSession, request: GlobRequest) -> GlobReply:
-    result = await session.in_run(
-        "files.glob", lambda: session.files.aglob(request.pattern, request.path)
-    )
+async def _glob(run: ReachesFiles, request: GlobRequest) -> GlobReply:
+    files = await run.thread_files()
+    result = await run.in_run("files.glob", lambda: files.aglob(request.pattern, request.path))
     return GlobReply.model_validate(asdict(result))
 
 
-async def _grep(session: RunSession, request: GrepRequest) -> GrepReply:
-    result = await session.in_run(
+async def _grep(run: ReachesFiles, request: GrepRequest) -> GrepReply:
+    files = await run.thread_files()
+    result = await run.in_run(
         "files.grep",
-        lambda: session.files.agrep(
+        lambda: files.agrep(
             request.pattern, request.path, request.glob, max_count=request.max_count
         ),
     )
     return GrepReply.model_validate(asdict(result))
 
 
-async def _execute(session: RunSession, request: ExecuteRequest) -> ExecuteReply:
-    files = session.files
+async def _execute(run: ReachesFiles, request: ExecuteRequest) -> ExecuteReply:
+    files = await run.thread_files()
     if not isinstance(files, SandboxBackendProtocol | CompositeBackend):
         return ExecuteReply(output="Error: this thread's files cannot run commands", exit_code=1)
-    result = await session.in_run(
+    result = await run.in_run(
         "files.execute", lambda: files.aexecute(request.command, timeout=request.timeout)
     )
     return ExecuteReply(
@@ -1049,18 +1168,18 @@ async def _execute(session: RunSession, request: ExecuteRequest) -> ExecuteReply
     )
 
 
-async def _upload(session: RunSession, request: UploadRequest) -> TransferReplies:
+async def _upload(run: ReachesFiles, request: UploadRequest) -> TransferReplies:
+    files = await run.thread_files()
     uploads = [(file.path, base64.b64decode(file.content_base64)) for file in request.files]
-    uploaded = await session.in_run("files.upload", lambda: session.files.aupload_files(uploads))
+    uploaded = await run.in_run("files.upload", lambda: files.aupload_files(uploads))
     return TransferReplies(
         files=[TransferReply(path=reply.path, error=reply.error) for reply in uploaded]
     )
 
 
-async def _download(session: RunSession, request: DownloadRequest) -> TransferReplies:
-    downloaded = await session.in_run(
-        "files.download", lambda: session.files.adownload_files(request.paths)
-    )
+async def _download(run: ReachesFiles, request: DownloadRequest) -> TransferReplies:
+    files = await run.thread_files()
+    downloaded = await run.in_run("files.download", lambda: files.adownload_files(request.paths))
     return TransferReplies(
         files=[
             TransferReply(path=reply.path, error=reply.error, content_base64=_b64(reply.content))
@@ -1069,29 +1188,55 @@ async def _download(session: RunSession, request: DownloadRequest) -> TransferRe
     )
 
 
-async def _browser(run: RemoteRun, request: BrowserReport) -> Done:
-    await ThreadBrowser(browser=request.browser, opened=request.opened).report(run.thread_id)
-    return Done()
-
-
-# The typed API every graph's MDA runs call (``runtime_api``), as the session of their run.
+# Calls any run answers from its token and request: what it reads and what it reports.
+RUN_CALLS: Final = Handlers[TokenRun]()
+RUN_CALLS.serve(BROWSER, TokenRun.browser)
+RUN_CALLS.serve(SKILLS, TokenRun.skills)
+RUN_CALLS.serve(INBOX, TokenRun.inbox)
+RUN_CALLS.serve(INBOX_RECEIVED, TokenRun.inbox_received)
+RUN_CALLS.serve(MODEL_RESULT, TokenRun.model_result)
+RUN_CALLS.serve(TOOL_STARTED, TokenRun.tool_started)
+RUN_CALLS.serve(TOOL_RESULT, TokenRun.tool_result)
+# Calls a run answers from its token too, unless its calls need its plan (``RunParts``).
+PLAN_FREE_CALLS: Final = Handlers[TokenRun]()
+PLAN_FREE_CALLS.serve(BEFORE_MODEL, TokenRun.before_model)
+PLAN_FREE_CALLS.serve(AFTER_MODEL, TokenRun.after_model)
+PLAN_FREE_CALLS.serve(AFTER_AGENT, TokenRun.after_agent)
+PLAN_FREE_CALLS.serve(OPERATION, TokenRun.operation)
+PLAN_FREE_CALLS.serve(CHECK_SHELL, TokenRun.check_shell)
+PLAN_FREE_CALLS.serve(SANDBOX_REPLACED, TokenRun.sandbox_replaced)
+PLAN_FREE_CALLS.serve(SANDBOX_UNREACHABLE, TokenRun.sandbox_unreachable)
+# The calls answered from the run's plan: its preparation, and every call of a run
+# whose calls need it.
 API: Final = Handlers[RunSession]()
 # Only for runs started without their catalog in the context.
 API.serve(CATALOG, _catalog)
 API.serve(PREPARE, RunSession.prepare)
+API.serve(BEFORE_MODEL, RunSession.before_model)
+API.serve(AFTER_MODEL, RunSession.after_model)
 API.serve(AFTER_AGENT, RunSession.after_agent)
 API.serve(SANDBOX_REPLACED, RunSession.sandbox_replaced)
 API.serve(SANDBOX_UNREACHABLE, RunSession.sandbox_unreachable)
 API.serve(OPERATION, RunSession.operation)
 API.serve(CHECK_SHELL, RunSession.check_shell)
 API.serve(RECORD_EVIDENCE, RunSession.record_evidence)
+PLAN_FREE_CALLS.serve(file_api.LS, _ls)
 API.serve(file_api.LS, _ls)
+PLAN_FREE_CALLS.serve(file_api.READ, _read)
 API.serve(file_api.READ, _read)
+PLAN_FREE_CALLS.serve(file_api.WRITE, _write)
 API.serve(file_api.WRITE, _write)
+PLAN_FREE_CALLS.serve(file_api.EDIT, _edit)
 API.serve(file_api.EDIT, _edit)
+PLAN_FREE_CALLS.serve(file_api.DELETE, _delete)
 API.serve(file_api.DELETE, _delete)
+PLAN_FREE_CALLS.serve(file_api.GLOB, _glob)
 API.serve(file_api.GLOB, _glob)
+PLAN_FREE_CALLS.serve(file_api.GREP, _grep)
 API.serve(file_api.GREP, _grep)
+PLAN_FREE_CALLS.serve(file_api.EXECUTE, _execute)
 API.serve(file_api.EXECUTE, _execute)
+PLAN_FREE_CALLS.serve(file_api.UPLOAD, _upload)
 API.serve(file_api.UPLOAD, _upload)
+PLAN_FREE_CALLS.serve(file_api.DOWNLOAD, _download)
 API.serve(file_api.DOWNLOAD, _download)

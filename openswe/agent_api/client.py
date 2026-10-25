@@ -138,11 +138,17 @@ async def plan_remote_run(
 
     catalog: Catalog | None = None
     try:
-        catalog = await hosted_graphs()[graph].catalog(run)
+        plan = await hosted_graphs()[graph].plan_run(run)
     except Exception:
         # The run still starts, and fails on its own catalog call if planning keeps failing.
         logger.exception(
             "Planning an MDA run failed", extra={"thread_id": thread_id, "graph": graph}
+        )
+    else:
+        catalog = plan.catalog
+        # Signed, so the calls answered without a plan read the config the plan ran with.
+        run = run.model_copy(
+            update={"planned_configurable": plan.configurable, "planned_metadata": plan.metadata}
         )
     return PlannedRun(
         graph=graph,

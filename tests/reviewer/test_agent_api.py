@@ -122,7 +122,7 @@ async def test_the_calls_around_a_model_call_never_plan_the_run(
     async def never_planned(config: object, surface: ToolSurface) -> None:
         raise AssertionError("A call around a model call never plans the run")
 
-    graph = RemoteGraph("agent", never_planned, loop=agent._loop)
+    graph = RemoteGraph("agent", never_planned, agent.AgentParts())
     main = ModelSpec(model_id="openai:gpt-6.1-sol", kwargs={})
     fast = ModelSpec(model_id="openai:gpt-6-luna", kwargs={})
     # What the catalog planned, as MDA sends it with each call.
@@ -164,6 +164,54 @@ async def test_the_calls_around_a_model_call_never_plan_the_run(
     assert isinstance(answered, dict)
     assert answered["jump_to"] == "model"
     assert answered["update"] == {"reply_nudges": 1}
+
+
+async def test_a_runs_tool_and_shell_calls_never_plan_it_and_read_what_its_plan_added(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from unittest.mock import AsyncMock
+
+    from langchain_core.tools import tool
+    from langgraph.config import get_config
+
+    from openswe.agent_api import agent
+    from openswe.agent_api.graph import RemoteGraph
+    from openswe.sandboxes.tool_runtime import ToolSurface
+
+    @tool
+    def draft_preference(note: str) -> str:
+        """Say whether this run opens pull requests as drafts."""
+        return f"{note}: {get_config()['configurable'].get('draft_prs')}"
+
+    async def never_planned(config: object, surface: ToolSurface) -> None:
+        raise AssertionError("A tool or shell call never plans the run")
+
+    monkeypatch.setattr(
+        agent, "agent_tools_by_name", lambda: {draft_preference.name: draft_preference}
+    )
+    monkeypatch.setattr(agent, "resolve_github_token", AsyncMock())
+    graph = RemoteGraph("agent", never_planned, agent.AgentParts())
+    # What planning added as the run started, signed into its token.
+    run = RUN.model_copy(
+        update={"assistant_id": "agent", "planned_configurable": {"draft_prs": False}}
+    )
+
+    result = await graph.api(
+        run,
+        "operation",
+        {
+            "run_id": "run-1",
+            "name": "draft_preference",
+            "arguments": {"note": "drafts"},
+            "request_id": "call-1",
+        },
+    )
+    verdict = await graph.api(
+        run, "check_shell", {"run_id": "run-1", "tool": "execute", "command": "ls"}
+    )
+
+    assert isinstance(result, dict) and result["content"] == "drafts: False"
+    assert verdict == {"allowed": True, "command": None, "refusal": None}
 
 
 async def test_mda_calls_hide_the_tools_the_graph_middleware_hides_from_each_call() -> None:
@@ -539,9 +587,11 @@ async def test_mda_catalog_leaves_integrations_and_code_mode_to_mda(
         "execute",
         "ls",
         "read_file",
+        "search_tools",
         "web_search",
         "write_file",
     ]
+    assert catalog["search_tools"] is True
 
 
 async def test_an_operation_gets_the_state_it_reads_and_answers_the_state_it_changed() -> None:
@@ -869,6 +919,7 @@ async def test_an_adopted_worker_acts_as_its_own_thread_never_its_coordinator(
     from runtime_api.workers import Adopt
 
     from openswe.agent_api import async_workers, hosted
+    from openswe.agent_api.graph import RunPlan
     from openswe.prompts import prompt
 
     coordinator = RemoteRun(
@@ -884,7 +935,8 @@ async def test_an_adopted_worker_acts_as_its_own_thread_never_its_coordinator(
     )
     monkeypatch.setattr(async_workers.service.Actor, "resolve", AsyncMock(return_value="actor"))
     planned = Catalog(skill_sources=["/skills/worker/"])
-    graph = MagicMock(catalog=AsyncMock(return_value=planned))
+    plan = RunPlan(catalog=planned, configurable={"draft_prs": True}, metadata={})
+    graph = MagicMock(plan_run=AsyncMock(return_value=plan))
     monkeypatch.setattr(hosted, "hosted_graphs", lambda: {"agent": graph})
 
     # The worker's first message: the assignment its launch rendered.
@@ -900,7 +952,9 @@ async def test_an_adopted_worker_acts_as_its_own_thread_never_its_coordinator(
     assert adopted.configurable["thread_id"] == "worker"
     # Planned as the worker's own run, so its first run never asks for a catalog.
     assert reply.catalog == planned
-    assert graph.catalog.await_args.args[0].thread_id == "worker"
+    assert graph.plan_run.await_args.args[0].thread_id == "worker"
+    # What planning added to the config rides in the token, for calls made without the plan.
+    assert adopted.planned_configurable == {"draft_prs": True}
     register.assert_awaited_once_with("actor", "call-1", "worker", "Fix it")
 
 

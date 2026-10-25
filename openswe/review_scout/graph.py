@@ -10,9 +10,10 @@ none it finishes without a model call.
 import logging
 import re
 from collections.abc import Mapping
+from functools import partial
 from typing import Any, NotRequired, cast
 
-from deepagents.backends.protocol import SandboxBackendProtocol
+from deepagents.backends.protocol import BackendProtocol, SandboxBackendProtocol
 from deepagents.middleware.subagents import GENERAL_PURPOSE_SUBAGENT
 from langchain.agents.middleware import ModelCallLimitMiddleware, ModelRetryMiddleware
 from langchain.agents.middleware.types import (
@@ -21,6 +22,7 @@ from langchain.agents.middleware.types import (
 )
 from langchain_anthropic.middleware import AnthropicPromptCachingMiddleware
 from langchain_core.language_models.chat_models import BaseChatModel
+from langchain_core.tools import BaseTool
 from langgraph.graph.state import RunnableConfig
 from langgraph.runtime import Runtime
 from runtime_api.catalog import LoopRules
@@ -277,6 +279,26 @@ async def scout_models(cfg: RunConfig) -> SurfaceModels:
     )
 
 
+def scout_tools() -> list[BaseTool]:
+    """The scout's tools, wherever the graph that calls them runs."""
+    return apply_tool_descriptions(
+        [
+            walkthrough_plan_chunk,
+            walkthrough_split_hunks,
+            walkthrough_move_to_other,
+            walkthrough_describe_other,
+            record_human_input,
+        ]
+    )
+
+
+def scout_box(thread_id: str, cfg: RunConfig) -> BackendProtocol:
+    """The scout thread's box, connected again whenever it is gone."""
+    return get_cached_sandbox_backend(
+        thread_id, reconnect=partial(_ensure_scout_sandbox, thread_id, cfg)
+    )
+
+
 async def plan_review_scout(config: RunnableConfig, surface: ToolSurface) -> None:
     """Plan a scout run into ``surface``: the tools, middleware, models and subagents its MDA run plays."""
     config = config.copy()
@@ -288,11 +310,6 @@ async def plan_review_scout(config: RunnableConfig, surface: ToolSurface) -> Non
         raise ValueError("A scout run needs a thread")
 
     models = await scout_models(cfg)
-
-    async def reconnect_backend(
-        _thread_id: str = thread_id, _cfg: RunConfig = cfg
-    ) -> SandboxBackendProtocol:
-        return await _ensure_scout_sandbox(_thread_id, _cfg)
 
     middleware = cast(
         list[AgentMiddleware[Any, Any, Any]],
@@ -307,18 +324,10 @@ async def plan_review_scout(config: RunnableConfig, surface: ToolSurface) -> Non
             FinishPlanMiddleware(thread_id=thread_id, config=config),
         ],
     )
-    surface.base_tools = apply_tool_descriptions(
-        [
-            walkthrough_plan_chunk,
-            walkthrough_split_hunks,
-            walkthrough_move_to_other,
-            walkthrough_describe_other,
-            record_human_input,
-        ]
-    )
+    surface.base_tools = scout_tools()
     surface.middleware = middleware
     surface.loop = LoopRules(hidden_tools=sorted(SHELL_SEARCH_EXCLUDED_TOOLS))
-    surface.files = get_cached_sandbox_backend(thread_id, reconnect=reconnect_backend)
+    surface.files = scout_box(thread_id, cfg)
     surface.models = models
     surface.subagents = [
         SurfaceSubagent(

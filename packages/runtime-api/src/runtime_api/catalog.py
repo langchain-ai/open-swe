@@ -12,6 +12,9 @@ from pydantic import BaseModel, JsonValue
 from runtime_api.endpoint import LOOP_CALL_SECONDS, Endpoint
 from runtime_api.operations import RunRequest
 
+# The runtime's own tool that finds the run's operations by what they do.
+SEARCH_TOOLS = "search_tools"
+
 
 class ModelSpec(BaseModel):
     model_id: str
@@ -42,6 +45,8 @@ class OperationSpec(BaseModel):
     reads: list[str] = []
     # Whether it reads all of the run state, the conversation included.
     reads_all: bool = False
+    # What code mode calls it, as ``tools.<code_name>``; None when code cannot call it.
+    code_name: str | None = None
 
 
 class SubagentSpec(BaseModel):
@@ -177,6 +182,8 @@ class Catalog(BaseModel):
     inbox: InboxSpec | None = None
     # What the backend builds the hooks around each model call from.
     loop: LoopRules | None = None
+    # Whether the run offers ``search_tools`` over its operations.
+    search_tools: bool = False
 
 
 # Only reads the plan, so it is safe to send again.

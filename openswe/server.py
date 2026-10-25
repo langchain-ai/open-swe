@@ -10,9 +10,11 @@ the agent itself is stateless.
 # ruff: noqa: E402, PLC2701
 import hashlib
 import logging
+import time
 import warnings
 from collections.abc import Mapping, Sequence
-from typing import Any, cast
+from functools import cache, partial
+from typing import Any, Final, Self, cast
 from uuid import UUID
 
 from openswe.config import ENV
@@ -24,7 +26,7 @@ _MODEL_ROUTING_SPLIT = 0.5
 from langgraph.graph.state import RunnableConfig
 from langgraph.runtime import Runtime
 from langgraph_sdk import get_client
-from runtime_api.catalog import InboxSpec, LoopRules, ReplyRules, RoutingRules
+from runtime_api.catalog import SEARCH_TOOLS, InboxSpec, LoopRules, ReplyRules, RoutingRules
 
 warnings.filterwarnings("ignore", module="langchain_core._api.deprecation")
 
@@ -44,6 +46,7 @@ from langchain_anthropic.middleware import AnthropicPromptCachingMiddleware
 from langchain_core.language_models import BaseChatModel
 from langchain_core.messages import HumanMessage
 from langchain_core.tools import BaseTool
+from langchain_core.tools import tool as as_tool
 from langchain_quickjs._ptc import is_valid_ptc_tool_name, to_camel_case
 from langsmith.sandbox import SandboxRetryableConnectionError
 
@@ -241,7 +244,6 @@ from openswe.tools.note_on_diff import note_on_diff
 from openswe.tools.propose_pr_review import propose_pr_review
 from openswe.tools.propose_review_comment import propose_review_comment
 from openswe.tools.review_walkthrough import walkthrough_tools
-from openswe.tools.search_tools import SEARCH_TOOLS_NAME, search_tools_tool
 from openswe.tools.submit_review_assessment_feedback import submit_review_assessment_feedback
 from openswe.tools.task_threads import (
     control_worker,
@@ -648,6 +650,84 @@ ADMIN_TOOLS = (
 )
 
 
+# Every tool the agent may offer; each run's plan offers those it keeps (``plan_agent``),
+# and a call answered without the plan finds its tool here by name.
+AGENT_TOOLS: Final = (
+    http_request,
+    fetch_url,
+    web_search,
+    background_execute,
+    background_task,
+    monitor,
+    publish_artifact,
+    save_user_instructions,
+    save_user_settings,
+    save_user_skill,
+    delete_user_skill,
+    list_threads,
+    search_pull_requests,
+    get_thread,
+    manage_thread,
+    task_status,
+    message_task_thread,
+    control_worker,
+    start_thread,
+    manage_baby_sit,
+    switch_to_performance_model,
+    expedite_pr_approval,
+    merge_expedited_pr,
+    request_human_review,
+    assign_human_reviewer,
+    auto_assign_human_reviewer,
+    dismiss_human_review_request,
+    get_human_review_status,
+    open_pull_request,
+    link_pull_request,
+    output_iframe,
+    create_sandbox_file_download_url,
+    expose_port,
+    read_user_settings,
+    request_pr_review,
+    connect_managed_tools,
+    recreate_sandbox,
+    report_platform_issue,
+    schedule_thread_wakeup,
+    request_rollout_check,
+    listen_events,
+    list_event_types,
+    manage_code_channel,
+    code_channel_set_view,
+    manage_incident,
+    slack_add_reaction,
+    slack_attach_html,
+    slack_list_channel_members,
+    slack_list_channels,
+    slack_move_thread,
+    slack_no_reply_needed,
+    slack_post_message,
+    slack_read_channel_messages,
+    slack_read_thread_messages,
+    slack_reply,
+    slack_breakout_thread,
+    slack_start_review_channel,
+    submit_thread_feedback,
+    suggest_task,
+    submit_review_assessment_feedback,
+    propose_review_comment,
+    propose_pr_review,
+    note_on_diff,
+    add_review_comment,
+    *ADMIN_TOOLS,
+    cli_result,
+    worktree_handoff,
+    read_only_sql,
+    write_database_rows,
+    manage_feature_flags,
+    manage_review_approval_mode,
+    manage_review_repos,
+)
+
+
 def workspace_slug(cfg: RunConfig) -> str | None:
     """The workspace this thread selected, if any."""
     return cfg.workspace_slug
@@ -656,6 +736,84 @@ def workspace_slug(cfg: RunConfig) -> str | None:
 async def _admin_thread(config: RunnableConfig, profile_login: str | None) -> bool:
     """Whether this run may manage workspaces and organization skills."""
     return await actor_has_admin_context(RunConfig.from_config(config), login=profile_login)
+
+
+@cache
+def agent_tools_by_name() -> Mapping[str, BaseTool]:
+    """Every tool the agent may offer, a review walkthrough's of either mode included."""
+    tools = [*AGENT_TOOLS, *walkthrough_tools("reviewer"), *walkthrough_tools("author")]
+    built = (tool if isinstance(tool, BaseTool) else as_tool(tool) for tool in tools)
+    return {tool.name: tool for tool in built}
+
+
+# How long a process keeps the MCP tools it loaded for a person in a workspace.
+_INTEGRATIONS_TTL_SECONDS: Final = 300.0
+_integrations: dict[tuple[str | None, str], tuple[float, dict[str, BaseTool]]] = {}
+
+
+async def integration_tools(config: RunnableConfig) -> Mapping[str, BaseTool]:
+    """The MCP tools the run may call, by name, loaded as its plan loads them."""
+    cfg = RunConfig.from_config(config)
+    try:
+        login = await private_credential_login(config)
+    except Exception:
+        logger.exception("Cannot resolve thread credential scope; omitting MCP tools")
+        return {}
+    workspace = workspace_slug(cfg) or DEFAULT_WORKSPACE_SLUG
+    loaded = _integrations.get((login, workspace))
+    if loaded is not None and loaded[0] > time.monotonic():
+        return loaded[1]
+    _gateway, tools = await _run_mcp_tools(cfg.thread_id or "", login, workspace)
+    by_name: dict[str, BaseTool] = {tool.name: tool for tool in tools if isinstance(tool, BaseTool)}
+    _integrations[(login, workspace)] = (time.monotonic() + _INTEGRATIONS_TTL_SECONDS, by_name)
+    return by_name
+
+
+async def _reconnect_agent_box(thread_id: str, workspace: str | None) -> SandboxBackendProtocol:
+    return await ensure_sandbox_for_thread(
+        thread_id, workspace_slug=workspace, record_stale_boot=True
+    )
+
+
+class ThreadFiles:
+    """The thread's files as the agent's tools reach them: its box, with the paths this
+    deployment serves routed in.
+
+    Those are the run's skill stores, and the images it offloaded, which PostgreSQL
+    keeps so they can be read without the box.
+    """
+
+    def __init__(
+        self, thread_id: str, cfg: RunConfig, *, skills: RunSkillStores, bridged: bool
+    ) -> None:
+        # A bridged machine's run keeps its artifacts apart from the person's own files.
+        self.artifacts_root = f"{LOCAL_ARTIFACTS_DIR}/{thread_id}/" if bridged else "/"
+        self.routes: dict[str, BackendProtocol] = {
+            **skills.routes,
+            f"{self.artifacts_root}blobs/": StoreBackend(
+                store=ThreadBlobs(thread_id),
+                namespace=lambda _runtime: blob_namespace(thread_id),
+            ),
+        }
+        box = get_cached_sandbox_backend(
+            thread_id, reconnect=partial(_reconnect_agent_box, thread_id, workspace_slug(cfg))
+        )
+        self.backend = CompositeBackend(
+            default=box, routes=self.routes, artifacts_root=self.artifacts_root
+        )
+
+    @classmethod
+    async def for_run(cls, config: RunnableConfig) -> Self:
+        """The thread's files for a call answered without the run's plan."""
+        cfg = RunConfig.from_config(config)
+        if cfg.thread_id is None:
+            raise ValueError("An agent run needs a thread")
+        return cls(
+            cfg.thread_id,
+            cfg,
+            skills=await RunSkillStores.for_run(config),
+            bridged=await _bridge_client(cfg.thread_id) is not None,
+        )
 
 
 async def _bridge_client(thread_id: str | None) -> BridgeClient | None:
@@ -727,7 +885,7 @@ _NOT_FROM_CODE = (
 )
 # Everyday tools code mode still offers the model directly.
 _DIRECT_IN_CODE_MODE = SANDBOX_TOOL_NAMES | {
-    SEARCH_TOOLS_NAME,
+    SEARCH_TOOLS,
     "monitor",
     "open_pull_request",
     "web_search",
@@ -1351,18 +1509,6 @@ async def plan_agent(config: RunnableConfig, surface: ToolSurface) -> None:
     )
     task_coordination = await TaskCoordinationMiddleware.for_thread(thread_id)
 
-    async def reconnect_backend(
-        _thread_id: str = thread_id,
-        _cfg: RunConfig = cfg,
-    ) -> SandboxBackendProtocol:
-        return await ensure_sandbox_for_thread(
-            _thread_id,
-            workspace_slug=workspace_slug(_cfg),
-            record_stale_boot=True,
-        )
-
-    backend = get_cached_sandbox_backend(thread_id, reconnect=reconnect_backend)
-
     # `profile_login` is whoever sent the message that started this run; it drives
     # authorization. Personal integrations require verified private ownership.
     # Everything else comes from the thread's own settings, seeded from the first
@@ -1596,80 +1742,21 @@ async def plan_agent(config: RunnableConfig, surface: ToolSurface) -> None:
         slack_breakout_thread,
         slack_start_review_channel,
     ]
-    static_tools = [
-        http_request,
-        fetch_url,
-        web_search,
-        background_execute,
-        background_task,
-        *((monitor,) if monitors_enabled else ()),
-        publish_artifact,
-        save_user_instructions,
-        save_user_settings,
-        save_user_skill,
-        delete_user_skill,
-        list_threads,
-        search_pull_requests,
-        get_thread,
-        manage_thread,
-        *([task_status, message_task_thread, control_worker] if task_coordination else []),
-        *((start_thread,) if _slack_concierge_run(cfg) else ()),
-        manage_baby_sit,
-        switch_to_performance_model,
-        expedite_pr_approval,
-        merge_expedited_pr,
-        request_human_review,
-        assign_human_reviewer,
-        auto_assign_human_reviewer,
-        dismiss_human_review_request,
-        get_human_review_status,
-        open_pull_request,
-        link_pull_request,
+    withheld = [
+        *(() if monitors_enabled else (monitor,)),
+        *(() if task_coordination else (task_status, message_task_thread, control_worker)),
+        *(() if _slack_concierge_run(cfg) else (start_thread,)),
+        *(() if managed_gateway else (connect_managed_tools,)),
         *(
-            (output_iframe, create_sandbox_file_download_url, expose_port)
+            ()
             if sandbox_file_downloads
-            else ()
+            else (output_iframe, create_sandbox_file_download_url, expose_port)
         ),
-        read_user_settings,
-        request_pr_review,
-        *((connect_managed_tools,) if managed_gateway else ()),
-        recreate_sandbox,
-        report_platform_issue,
-        schedule_thread_wakeup,
-        request_rollout_check,
-        listen_events,
-        list_event_types,
-        manage_code_channel,
-        code_channel_set_view,
-        manage_incident,
-        slack_add_reaction,
-        slack_attach_html,
-        slack_list_channel_members,
-        slack_list_channels,
-        slack_move_thread,
-        slack_no_reply_needed,
-        slack_post_message,
-        slack_read_channel_messages,
-        slack_read_thread_messages,
-        slack_reply,
-        slack_breakout_thread,
-        slack_start_review_channel,
-        submit_thread_feedback,
-        suggest_task,
-        submit_review_assessment_feedback,
-        propose_review_comment,
-        propose_pr_review,
-        note_on_diff,
-        add_review_comment,
-        *ADMIN_TOOLS,
-        *((cli_result,) if cli_result_required else ()),
-        *((worktree_handoff,) if bridge_client == "desktop" and not stop_summary_mode else ()),
-        read_only_sql,
-        *((write_database_rows,) if ENV.OPENSWE_ENV.optional() in {"preview", "staging"} else ()),
-        manage_feature_flags,
-        manage_review_approval_mode,
-        manage_review_repos,
+        *(() if cli_result_required else (cli_result,)),
+        *(() if bridge_client == "desktop" and not stop_summary_mode else (worktree_handoff,)),
+        *(() if ENV.OPENSWE_ENV.optional() in {"preview", "staging"} else (write_database_rows,)),
     ]
+    static_tools = [tool for tool in AGENT_TOOLS if not any(tool is w for w in withheld)]
     static_tools = permitted(static_tools, tool_access)
     if not _slack_tools_enabled(cfg):
         # An automation run has no Slack thread, but its prompt may ask it to
@@ -1711,7 +1798,6 @@ async def plan_agent(config: RunnableConfig, surface: ToolSurface) -> None:
         ]
     if guide is not None:
         static_tools = [*static_tools, *walkthrough_tools(guide.mode)]
-    static_tools = [*static_tools, search_tools_tool(surface, code_name)]
     static_tools = apply_tool_descriptions(static_tools, _tool_description_values())
     if stop_summary_mode:
         static_tools = apply_tool_descriptions([slack_read_thread_messages, slack_reply])
@@ -1743,18 +1829,8 @@ async def plan_agent(config: RunnableConfig, surface: ToolSurface) -> None:
     )
 
     logger.info("Returning agent with sandbox for thread %s", thread_id)
-    agent_backend: BackendProtocol = backend
     skill_stores = RunSkillStores(credential_login)
-    skill_routes = dict(skill_stores.routes)
-    artifacts_root = "/" if bridge_client is None else f"{LOCAL_ARTIFACTS_DIR}/{thread_id}/"
-    # Offloaded images live in PostgreSQL so they can be read without the sandbox.
-    skill_routes[f"{artifacts_root}blobs/"] = StoreBackend(
-        store=ThreadBlobs(thread_id),
-        namespace=lambda _runtime, thread_id=thread_id: blob_namespace(thread_id),
-    )
-    agent_backend = CompositeBackend(
-        default=backend, routes=skill_routes, artifacts_root=artifacts_root
-    )
+    files = ThreadFiles(thread_id, cfg, skills=skill_stores, bridged=bridge_client is not None)
     main_model = _make_model_or_defer(model_id, use_gateway=use_gateway, **model_kwargs)
     requested_models = (
         available_requested_models(fable_enabled=fable_enabled)
@@ -1837,7 +1913,7 @@ async def plan_agent(config: RunnableConfig, surface: ToolSurface) -> None:
         [
             AnthropicPromptCachingMiddleware(ttl="1h", unsupported_model_behavior="ignore"),
             ConversationOffloadingMiddleware(
-                main_model, agent_backend, manual=cfg.offload_conversation is True
+                main_model, files.backend, manual=cfg.offload_conversation is True
             ),
             run_preparation,
             *(
@@ -1904,8 +1980,8 @@ async def plan_agent(config: RunnableConfig, surface: ToolSurface) -> None:
             image_fallback=vision_model is not None,
         )
     )
-    surface.files = agent_backend
-    surface.artifacts_root = artifacts_root
+    surface.files = files.backend
+    surface.artifacts_root = files.artifacts_root
     surface.shell_guards = [PullRequestCreationGuardMiddleware(), WorkflowPushGuardMiddleware()]
     surface.file_checks = ("image_reads", "agents_md")
     surface.models = SurfaceModels(
@@ -1948,7 +2024,7 @@ async def plan_agent(config: RunnableConfig, surface: ToolSurface) -> None:
     # The runtime lists the skills and answers reads of them itself (``runtime_api.skills``).
     surface.skill_sources = skill_stores.sources
     surface.backend_paths = tuple(
-        route for route in skill_routes if route not in skill_stores.sources
+        route for route in files.routes if route not in skill_stores.sources
     )
     surface.code_mode = True
     surface.excluded = (

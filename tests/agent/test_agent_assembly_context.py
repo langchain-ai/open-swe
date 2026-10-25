@@ -65,6 +65,7 @@ async def test_public_agent_excludes_personal_skills_and_tools(saved_thread_scop
 
 async def test_remote_agent_lists_personal_skills(monkeypatch: pytest.MonkeyPatch) -> None:
     from runtime_api.operations import RunRequest
+    from runtime_api.skills import RunSkills
 
     from openswe.agent_api.agent import AGENT
     from openswe.agent_api.tokens import RemoteRun
@@ -84,7 +85,7 @@ async def test_remote_agent_lists_personal_skills(monkeypatch: pytest.MonkeyPatc
     run = RemoteRun(thread_id="thread-ctx", assistant_id="agent", configurable=configurable)
 
     # Listed from the run's token alone: no plan of the run is made for it.
-    listed = await AGENT.skills(run, RunRequest())
+    listed = RunSkills.model_validate(await AGENT.api(run, "skills", RunRequest().model_dump()))
 
     personal = next(f for f in listed.files if f.path == "/skills/personal-workflow/SKILL.md")
     assert "Do it." in personal.content

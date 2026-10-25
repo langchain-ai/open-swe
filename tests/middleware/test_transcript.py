@@ -649,6 +649,7 @@ async def test_an_mda_subagent_is_recorded_under_its_task_call(
     from langchain_core.messages import messages_to_dict
 
     from openswe.agent_api.graph import RemoteGraph
+    from openswe.agent_api.run_parts import RunParts
     from openswe.agent_api.tokens import RemoteRun
     from openswe.sandboxes.tool_runtime import ToolSurface
 
@@ -661,8 +662,15 @@ async def test_an_mda_subagent_is_recorded_under_its_task_call(
         raise AssertionError("Reporting a run never plans it")
 
     graph = RemoteGraph("agent", build)
+
     # Another replica: it reports the run's calls without planning the run.
-    elsewhere = RemoteGraph("agent", never_planned, reporters=(mw.TranscriptMiddleware(),))
+    class Reporting(RunParts):
+        reporters = (mw.TranscriptMiddleware(),)
+
+        def end_hooks(self, config: object) -> tuple[mw.TranscriptMiddleware]:
+            return (mw.TranscriptMiddleware(),)
+
+    elsewhere = RemoteGraph("agent", never_planned, Reporting())
     run = RemoteRun(thread_id=THREAD_ID, assistant_id="agent", configurable={})
     asked = HumanMessage(content="do the thing", id="human-1")
     delegated = AIMessage(
@@ -697,7 +705,9 @@ async def test_an_mda_subagent_is_recorded_under_its_task_call(
         "tool_result",
         {"run_id": RUN_ID, "messages": root, **task, "result": messages_to_dict([result])[0]},
     )
+    await elsewhere.api(run, "after_agent", {"run_id": RUN_ID, "messages": root})
 
+    assert engine.types[-1] == "turn.completed"
     recorded = [
         (
             c.event.type,
