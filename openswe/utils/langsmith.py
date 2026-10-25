@@ -7,7 +7,7 @@ import uuid
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from typing import Any, Literal
-from urllib.parse import unquote, urlsplit
+from urllib.parse import quote, unquote, urlsplit
 
 from langsmith import AsyncClient as AsyncLangSmithClient
 from langsmith import Client as LangSmithClient
@@ -24,6 +24,7 @@ logger = logging.getLogger(__name__)
 _PROJECT_ID_CACHE: dict[tuple[tuple[str, str], str], str] = {}
 _PROJECT_START_CACHE: dict[tuple[tuple[str, str], str], datetime] = {}
 _TENANT_ID_CACHE: dict[tuple[str, str], str] = {}
+_AGENT_ID_CACHE: dict[tuple[tuple[str, str], str], str] = {}
 
 
 def _project_cache_key(project_id: str) -> tuple[tuple[str, str], str]:
@@ -173,6 +174,35 @@ async def _project_lookup_start(project_id: str) -> datetime:
     return start
 
 
+async def _resolve_project_agent_id(project_id: str) -> str | None:
+    """Resolve the agent bound to a tracing project without guessing its name."""
+    cache_key = _project_cache_key(project_id)
+    if cached := _AGENT_ID_CACHE.get(cache_key):
+        return cached
+    client = _build_langsmith_client()
+    if client is None:
+        return None
+    try:
+        async with asyncio.timeout(5):
+            agents = []
+            async for agent in client.agents.list(
+                page_size=2, extra_query={"tracer_session_id": project_id}
+            ):
+                agents.append(agent)
+                if len(agents) == 2:
+                    return None
+            if len(agents) == 1:
+                _AGENT_ID_CACHE[cache_key] = agents[0].id
+                return agents[0].id
+    except Exception:
+        logger.debug(
+            "Could not resolve the LangSmith project's agent",
+            extra={"project_id": project_id},
+            exc_info=True,
+        )
+    return None
+
+
 async def _compose_langsmith_project_url(project_name: str | None = None) -> str | None:
     """URL base of a LangSmith project, or None when tracing isn't configured.
 
@@ -186,14 +216,16 @@ async def _compose_langsmith_project_url(project_name: str | None = None) -> str
     project_id = await _resolve_project_id_by_name(project_name or tracing_project())
     if not project_id:
         return None
-    return f"{langsmith_host_url()}/o/{tenant_id}/projects/p/{project_id}"
+    agent_id = await _resolve_project_agent_id(project_id)
+    agent_path = f"/a/{quote(agent_id, safe='')}" if agent_id else ""
+    return f"{langsmith_host_url()}/o/{tenant_id}{agent_path}/projects/p/{project_id}"
 
 
 async def get_langsmith_trace_url(thread_id: str, project_name: str | None = None) -> str | None:
     """Build the LangSmith thread URL for a given thread ID, or None if tracing
     isn't configured. This is a best-effort convenience link, not an error path."""
     project_url = await _compose_langsmith_project_url(project_name)
-    return f"{project_url}/t/{thread_id}" if project_url else None
+    return f"{project_url}/t/{thread_id}?conversationTab=trace" if project_url else None
 
 
 async def get_langsmith_error_url(
