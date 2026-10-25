@@ -18,7 +18,7 @@ from managed_deepagents.browser import BrowserMiddleware
 from runtime_api.endpoint import call
 from runtime_api.loop import BROWSER, BrowserReport
 
-from rt.backend import OpenSweBackend, run_call
+from rt.backend import OpenSweBackend
 from rt.tools import run_id
 
 logger = logging.getLogger(__name__)
@@ -62,7 +62,7 @@ class ReportedBrowserMiddleware(BrowserMiddleware):
             await call(
                 self._backend,
                 BROWSER,
-                run_call(BrowserReport, run_id(), state, browser=name, opened=opened),
+                BrowserReport(run_id=run_id(), browser=name, opened=opened),
             )
         except Exception:
             # Tried again on the next run or browser call; until then the panel cannot show it.

@@ -20,7 +20,13 @@ from typing import Final
 from weakref import WeakKeyDictionary
 
 import httpx2
-from langchain_core.messages import BaseMessage, ToolMessage, messages_to_dict
+from langchain_core.messages import (
+    AIMessage,
+    BaseMessage,
+    HumanMessage,
+    ToolMessage,
+    messages_to_dict,
+)
 from langsmith.run_trees import RunTree
 from pydantic import BaseModel, JsonValue, TypeAdapter, ValidationError
 from runtime_api.catalog import CATALOG, Catalog, OperationSpec
@@ -116,6 +122,37 @@ def held_state(state: Mapping[str, object]) -> dict[str, JsonValue]:
     held = state.get("open_swe_state")
     forwarded = {key: state[key] for key in _FORWARDED_STATE_KEYS if key in state}
     return _json_object.validate_python({**(held if isinstance(held, dict) else {}), **forwarded})
+
+
+_GIT_TRACE_PREFIX: Final = "git_trace_"
+
+
+def git_trace(state: Mapping[str, object]) -> dict[str, JsonValue]:
+    """The turn's git trace the backend keeps in the run's state: its baseline and evidence."""
+    return {
+        key: value for key, value in held_state(state).items() if key.startswith(_GIT_TRACE_PREFIX)
+    }
+
+
+def namespace() -> list[str]:
+    """The ``task`` calls the running subagent is nested in; empty for the agent itself."""
+    return list(_namespace.get())
+
+
+def human_messages(messages: Sequence[object]) -> list[dict[str, JsonValue]]:
+    return _json_dicts.validate_python(
+        messages_to_dict([message for message in messages if isinstance(message, HumanMessage)])
+    )
+
+
+def issuing_message_id(state: Mapping[str, object], tool_call_id: str) -> str | None:
+    """The reply in the run's conversation that made the tool call ``tool_call_id``."""
+    for message in reversed(_messages(state.get("messages"))):
+        if isinstance(message, AIMessage) and any(
+            call.get("id") == tool_call_id for call in message.tool_calls
+        ):
+            return message.id
+    return None
 
 
 def run_call[Call: RunCall](

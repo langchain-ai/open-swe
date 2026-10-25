@@ -75,8 +75,24 @@ class AfterAgent(PhaseResult):
     trace_metadata: dict[str, JsonValue] = {}
 
 
-class ModelResult(RunCall):
+class Report(RunRequest):
+    """What the runtime tells the backend happened: only what the report is about, never
+    the conversation or the run's state."""
+
+    # The ``task`` calls the reporting subagent is nested in; empty for the agent itself.
+    namespace: list[str] = []
+    # The turn's git trace (``git_trace_*``): its baseline and what each call changed.
+    git: dict[str, JsonValue] = {}
+
+
+class ModelResult(Report):
     response: list[dict[str, JsonValue]]
+    # The human messages added since the model last answered, which the transcript records.
+    humans: list[dict[str, JsonValue]] = []
+    # The route the call took, which usage tags the reply with.
+    model_route: str | None = None
+    # A conversation offload's status, which the transcript notes once.
+    offloading: dict[str, JsonValue] | None = None
 
 
 class ObservedResponse(BaseModel):
@@ -85,12 +101,14 @@ class ObservedResponse(BaseModel):
     response: list[dict[str, JsonValue]] = []
 
 
-class ToolCallReport(RunCall):
+class ToolCallReport(Report):
     """A tool call the runtime runs, for the transcript to record."""
 
     name: str
     arguments: dict[str, JsonValue] = {}
     tool_call_id: str
+    # The reply that made the call; None for a call code mode made.
+    message_id: str | None = None
 
 
 class ToolResultReport(ToolCallReport):
@@ -103,12 +121,27 @@ class ToolResultReply(BaseModel):
     update: dict[str, JsonValue] = {}
 
 
-class SandboxGone(RunCall):
+class RunEnded(Report):
+    # The run's replies without their content: their ids, usage and model, for usage.
+    replies: list[dict[str, JsonValue]] = []
+
+
+class Routed(RunRequest):
+    # The run's human messages, the latest of which the route is for.
+    humans: list[dict[str, JsonValue]] = []
+
+
+class ScoutPlanEnd(RunRequest):
+    # What the people who asked for the pull request said, as the scout summarized it.
+    human_input_summary: str = ""
+
+
+class SandboxGone(RunRequest):
     # The box a tool found gone, when its error named it.
     sandbox_id: str | None = None
 
 
-class BrowserReport(RunCall):
+class BrowserReport(RunRequest):
     """The LangSmith browser the runtime opened, or closed, for the thread's agent."""
 
     browser: str
@@ -191,14 +224,14 @@ AFTER_AGENT = Endpoint("after_agent", RunCall, AfterAgent, seconds=LOOP_CALL_SEC
 TOOL_STARTED = Endpoint("tool_started", ToolCallReport, Done, seconds=LOOP_CALL_SECONDS)
 TOOL_RESULT = Endpoint("tool_result", ToolResultReport, ToolResultReply, seconds=LOOP_CALL_SECONDS)
 # The runtime replaced the thread's box: the backend connects to the fresh one.
-SANDBOX_REPLACED = Endpoint("sandbox_replaced", RunCall, Done, seconds=LOOP_CALL_SECONDS)
+SANDBOX_REPLACED = Endpoint("sandbox_replaced", RunRequest, Done, seconds=LOOP_CALL_SECONDS)
 # A tool the runtime ran found the box gone: the backend tells the person.
 SANDBOX_UNREACHABLE = Endpoint("sandbox_unreachable", SandboxGone, Done, seconds=LOOP_CALL_SECONDS)
 # For the dashboard to show the thread's browser.
 BROWSER = Endpoint("browser", BrowserReport, Done, seconds=LOOP_CALL_SECONDS)
 # Classifies the task the conversation asks for; only reads, so it is safe to send again.
 ROUTE_MODEL = Endpoint(
-    "route_model", RunCall, Route, seconds=LOOP_CALL_SECONDS, delivery="idempotent"
+    "route_model", Routed, Route, seconds=LOOP_CALL_SECONDS, delivery="idempotent"
 )
 MODEL_CHOICE = Endpoint(
     "model_choice", ChosenModel, ModelSpec, seconds=LOOP_CALL_SECONDS, delivery="idempotent"
@@ -213,10 +246,10 @@ REFRESH_GITHUB_PROXY = Endpoint(
 REPLY_ON_BEHALF = Endpoint("reply_on_behalf", ReplyOnBehalf, Done, seconds=LOOP_CALL_SECONDS)
 # The run ended: the transcript closes its turn, usage is finalized and the turn's git
 # work reconciled.
-RUN_ENDED = Endpoint("run_ended", RunCall, AfterAgent, seconds=LOOP_CALL_SECONDS)
+RUN_ENDED = Endpoint("run_ended", RunEnded, AfterAgent, seconds=LOOP_CALL_SECONDS)
 # The run ended at its model-call limit: the person is told.
 STEP_LIMIT_REACHED = Endpoint("step_limit_reached", RunRequest, Done, seconds=LOOP_CALL_SECONDS)
 # A review run ended: its check run on the pull request is settled if it was not.
 SETTLE_REVIEW_CHECK = Endpoint("settle_review_check", RunRequest, Done, seconds=LOOP_CALL_SECONDS)
 # A scout run ended: what it left unplanned goes to Other.
-FINISH_SCOUT_PLAN = Endpoint("finish_scout_plan", RunCall, Done, seconds=LOOP_CALL_SECONDS)
+FINISH_SCOUT_PLAN = Endpoint("finish_scout_plan", ScoutPlanEnd, Done, seconds=LOOP_CALL_SECONDS)

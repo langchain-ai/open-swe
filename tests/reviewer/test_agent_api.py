@@ -130,7 +130,7 @@ async def test_the_named_calls_around_a_model_call_never_plan_the_run(
     run = RUN.model_copy(update={"assistant_id": "agent"})
     asked = messages_to_dict([HumanMessage(content="Fix the login", id="human-1")])
 
-    route = await graph.api(run, "route_model", {"run_id": "run-1", "messages": asked})
+    route = await graph.api(run, "route_model", {"run_id": "run-1", "humans": asked})
     chosen = await graph.api(
         run,
         "model_choice",

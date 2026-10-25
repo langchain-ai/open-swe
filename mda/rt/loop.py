@@ -54,12 +54,14 @@ from runtime_api.loop import (
     ModelCall,
     PhaseResult,
     ReplyOnBehalf,
-    RunCall,
+    Routed,
+    RunEnded,
+    ScoutPlanEnd,
     TaskContext,
 )
 from runtime_api.operations import RunRequest
 
-from rt.backend import BackendCallError, OpenSweBackend, run_call
+from rt.backend import BackendCallError, OpenSweBackend, git_trace, human_messages, run_call
 from rt.tools import STATE_KEY, run_id
 
 logger = logging.getLogger(__name__)
@@ -280,7 +282,7 @@ class RunLoop:
         elif rules.mode == "fast":
             route = "fast"
         else:
-            asked = run_call(RunCall, run_id(), {"messages": list(messages)})
+            asked = Routed(run_id=run_id(), humans=human_messages(messages))
             route = (await call(self._backend, ROUTE_MODEL, asked)).route
         if rules.mode == "auto" or requested:
             model_id = requested if requested else rules.route_model_ids.get(route)
@@ -440,11 +442,29 @@ class RunLoop:
         }
         return turn.succeeded(call_ids)
 
-    async def after_agent(self, state: Mapping[str, object], request: RunCall) -> AfterAgent:
+    async def after_agent(
+        self, state: Mapping[str, object], evidence: Mapping[str, JsonValue]
+    ) -> AfterAgent:
         """Report the run's end, then do the graph's own end-of-run work."""
         await self._backend.reports.drain()
-        ended = await call(self._backend, RUN_ENDED, request)
         messages = _messages(state)
+        replies = [
+            # Usage reads only each reply's id, model and token counts.
+            AIMessage(
+                content="",
+                id=message.id,
+                usage_metadata=message.usage_metadata,
+                response_metadata=message.response_metadata,
+            )
+            for message in messages
+            if isinstance(message, AIMessage) and message.usage_metadata
+        ]
+        request = RunEnded(
+            run_id=run_id(),
+            git={**git_trace(state), **evidence},
+            replies=_json_dicts.validate_python(messages_to_dict(replies)),
+        )
+        ended = await call(self._backend, RUN_ENDED, request)
         limited = bool(messages) and _LIMIT_MARKER in content_text(messages[-1].content)
         # Each is its own work: one that fails leaves the others, and the run's end, recorded.
         for work in [*(["step_limit_reached"] if limited else []), *self.rules.at_end]:
@@ -456,7 +476,12 @@ class RunLoop:
                         self._backend, SETTLE_REVIEW_CHECK, RunRequest(run_id=request.run_id)
                     )
                 else:
-                    await call(self._backend, FINISH_SCOUT_PLAN, request)
+                    summary = _held(state).get("human_input_summary")
+                    finished = ScoutPlanEnd(
+                        run_id=request.run_id,
+                        human_input_summary=summary if isinstance(summary, str) else "",
+                    )
+                    await call(self._backend, FINISH_SCOUT_PLAN, finished)
             except BackendCallError:
                 logger.warning("End-of-run work failed", extra={"work": work}, exc_info=True)
         return ended

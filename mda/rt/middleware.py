@@ -83,6 +83,8 @@ from runtime_api.workers import LAUNCH_WORKER, WORKER_LAUNCHED, Launch, Launched
 from rt.backend import (
     BackendCallError,
     OpenSweBackend,
+    human_messages,
+    namespace,
     reporting,
     run_call,
     subagent_of,
@@ -97,6 +99,7 @@ logger = logging.getLogger(__name__)
 
 _json = TypeAdapter(JsonValue)
 _json_object = TypeAdapter(dict[str, JsonValue])
+_json_dicts = TypeAdapter(list[dict[str, JsonValue]])
 _json_content = TypeAdapter(str | list[JsonValue])
 
 # Graph state MDA's own middleware reads: a requested offload's summarization
@@ -459,15 +462,14 @@ class BackendRunMiddleware(AgentMiddleware[RunState]):
     async def aafter_agent(self, state: RunState, runtime: Runtime) -> dict[str, object] | None:  # noqa: ARG002
         metadata = dict(self._trace_metadata)
         try:
-            request = run_call(RunCall, run_id(), state)
-            request = request.model_copy(
-                update={"state": {**request.state, **self._trace.evidence}}
-            )
-            ended = (
-                await self._loop.after_agent(state, request)
-                if self._loop is not None
-                else await self._phase(AFTER_AGENT, request)
-            )
+            if self._loop is not None:
+                ended = await self._loop.after_agent(state, self._trace.evidence)
+            else:
+                request = run_call(RunCall, run_id(), state)
+                ended = await self._phase(
+                    AFTER_AGENT,
+                    request.model_copy(update={"state": {**request.state, **self._trace.evidence}}),
+                )
             metadata.update(ended.trace_metadata)
             return _apply(ended)
         except BackendCallError:
@@ -491,14 +493,24 @@ class ReportRepliesMiddleware(AgentMiddleware):
         response = await handler(request)
         # The transcript records the calls this reply follows before the reply itself.
         await self._backend.reports.drain()
+        held = request.state.get(STATE_KEY)
+        held = held if isinstance(held, Mapping) else {}
+        route = held.get("model_route")
+        offloading = held.get("conversation_offloading")
+        inside = namespace()
         observed = await call(
             self._backend,
             MODEL_RESULT,
-            run_call(
-                ModelResult,
-                run_id(),
-                request.state,
-                response=_json.validate_python(messages_to_dict(response.result)),
+            ModelResult(
+                run_id=run_id(),
+                namespace=inside,
+                response=_json_dicts.validate_python(messages_to_dict(response.result)),
+                # A subagent's own messages are its task, never something a person said.
+                humans=[] if inside else human_messages(_since_last_reply(request.messages)),
+                model_route=route if isinstance(route, str) else None,
+                offloading=_json_object.validate_python(offloading)
+                if isinstance(offloading, Mapping)
+                else None,
             ),
         )
         if not observed.response:
@@ -507,6 +519,14 @@ class ReportRepliesMiddleware(AgentMiddleware):
             result=messages_from_dict(observed.response),
             structured_response=response.structured_response,
         )
+
+
+def _since_last_reply(messages: Sequence[object]) -> Sequence[object]:
+    """What the model is handed that it has not answered yet."""
+    for index in range(len(messages) - 1, -1, -1):
+        if isinstance(messages[index], AIMessage):
+            return messages[index + 1 :]
+    return messages
 
 
 async def reported(

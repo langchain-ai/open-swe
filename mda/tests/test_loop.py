@@ -281,3 +281,53 @@ async def test_the_end_of_a_run_is_reported_and_its_graph_work_done_by_name(
         "step_limit_reached",
         "settle_review_check",
     ]
+
+
+async def test_reports_carry_what_they_report_never_the_conversation(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from langchain_core.language_models.fake_chat_models import GenericFakeChatModel
+    from langchain_core.messages import ToolCall
+    from langchain_core.tools import tool
+    from rt.middleware import ReportRepliesMiddleware, RuntimeToolsMiddleware
+    from runtime_api.loop import ModelResult, ObservedResponse, ToolResultReply
+
+    backend, calls = _backend(
+        monkeypatch,
+        {
+            "model_result": ObservedResponse(),
+            "tool_started": Done(),
+            "tool_result": ToolResultReply(),
+        },
+    )
+    monkeypatch.setattr(GenericFakeChatModel, "bind_tools", lambda self, *args, **kwargs: self)
+
+    @tool
+    async def look() -> str:
+        """Look around."""
+        return "seen"
+
+    called = AIMessage(
+        content="", id="ai-1", tool_calls=[ToolCall(name="look", args={}, id="call-1")]
+    )
+    graph = create_agent(
+        model=GenericFakeChatModel(messages=iter([called, AIMessage(content="done", id="ai-2")])),
+        tools=[look],
+        middleware=[ReportRepliesMiddleware(backend), RuntimeToolsMiddleware(backend, ())],
+    )
+
+    await graph.ainvoke(
+        {"messages": [HumanMessage(content="hello", id="human-1")]},
+        {"configurable": {"thread_id": "thread-1"}},
+    )
+    await backend.reports.drain()
+
+    assert all("messages" not in body and "state" not in body for _, body in calls)
+    replies = [ModelResult.model_validate(body) for name, body in calls if name == "model_result"]
+    # Only what the model had not answered yet: the person's message, then nothing new.
+    assert [[human.id for human in messages_from_dict(r.humans)] for r in replies] == [
+        ["human-1"],
+        [],
+    ]
+    [started] = [body for name, body in calls if name == "tool_started"]
+    assert started["message_id"] == "ai-1"

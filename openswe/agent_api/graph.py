@@ -130,9 +130,13 @@ from runtime_api.loop import (
     PhaseResult,
     Prepare,
     ReplyOnBehalf,
+    Report,
     Route,
+    Routed,
     RunCall,
+    RunEnded,
     SandboxGone,
+    ScoutPlanEnd,
     TaskContext,
     ToolCallReport,
     ToolResultReply,
@@ -283,7 +287,7 @@ class CarriedAcrossProcesses(Protocol):
 class RecordsRemoteTools(Protocol):
     """Middleware that records the tool calls MDA runs itself, which never reach the tools node."""
 
-    async def atool_started(self, tool_call: ToolCall, messages: Sequence[BaseMessage]) -> None: ...
+    async def atool_started(self, tool_call: ToolCall, message_id: str | None) -> None: ...
 
     async def atool_finished(self, result: ToolMessage) -> None: ...
 
@@ -466,7 +470,7 @@ class RunSession:
         if cfg.thread_id is not None and await self.sandbox() is not None:
             await bind_mda_sandbox(cfg.thread_id, sandbox_id, workspace_slug=cfg.workspace_slug)
 
-    async def sandbox_replaced(self, _request: RunCall) -> Done:
+    async def sandbox_replaced(self, _request: RunRequest) -> Done:
         """Connect again to the thread's box, which MDA replaced with a fresh one."""
         await reconnect_sandbox(self.config, self.assistant_id)
         return Done()
@@ -834,27 +838,28 @@ class TokenRun:
 
     async def _reporting[T](
         self,
-        call: RunCall,
+        report: Report,
         name: str,
-        report: Callable[[dict[str, object], Runtime], Awaitable[T]],
+        record: Callable[[dict[str, object], Runtime], Awaitable[T]],
         *,
-        hooks: Sequence[AgentMiddleware] = (),
+        messages: Sequence[BaseMessage] = (),
+        **held: object,
     ) -> T:
-        """``report`` as the run, inside the calling subagent, with the run's turn rejoined.
+        """``record`` the report as the run, inside the calling subagent, with its turn rejoined.
 
-        What a reporter queued is written before the call answers, so the next call
-        may reach another process.
+        A report carries only what it is about: the ``messages`` it adds and the run
+        state (``held``, and the turn's git trace) its recorders read. What a recorder
+        queued is written before the call answers, so the next call may reach another
+        process.
         """
-        state = call_state(call, self.parts.restore)
-        carried = [
-            m for m in (*self.parts.reporters, *hooks) if isinstance(m, CarriedAcrossProcesses)
-        ]
+        state: dict[str, object] = {**report.git, **held, "messages": list(messages)}
+        carried = [m for m in self.parts.reporters if isinstance(m, CarriedAcrossProcesses)]
 
         async def reported(runtime: Runtime) -> T:
             for middleware in carried:
                 await middleware.aresume_run(cast(AgentState, dict(state)), runtime)
-            with within_namespace(call.namespace):
-                result = await report(state, runtime)
+            with within_namespace(report.namespace):
+                result = await record(state, runtime)
             for middleware in carried:
                 await middleware.aflush_run(runtime)
             return result
@@ -873,7 +878,14 @@ class TokenRun:
             observed = await _chain(observers, respond)(_observed_request(state, runtime))
             return observed.result
 
-        seen = await self._reporting(request, "model_result", observe)
+        seen = await self._reporting(
+            request,
+            "model_result",
+            observe,
+            messages=messages_from_dict(request.humans),
+            model_route=request.model_route,
+            conversation_offloading=request.offloading,
+        )
         return ObservedResponse(response=dump_messages(seen))
 
     def _tool_recorders(self) -> list[RecordsRemoteTools]:
@@ -883,11 +895,10 @@ class TokenRun:
         tool_call = ToolCall(
             name=request.name, args=dict(request.arguments), id=request.tool_call_id
         )
-        messages = messages_from_dict(request.messages)
 
         async def record(_state: dict[str, object], _runtime: Runtime) -> None:
             for recorder in self._tool_recorders():
-                await recorder.atool_started(tool_call, messages)
+                await recorder.atool_started(tool_call, request.message_id)
 
         await self._reporting(request, "tool_started", record)
         return Done()
@@ -935,7 +946,7 @@ class TokenRun:
         guards = ShellGuards(self.parts.shell_guards)
         return await self.in_run("check_shell", lambda: check_shell(guards, request))
 
-    async def sandbox_replaced(self, _request: RunCall) -> Done:
+    async def sandbox_replaced(self, _request: RunRequest) -> Done:
         await reconnect_sandbox(self.config, self.graph.assistant_id)
         return Done()
 
@@ -944,9 +955,9 @@ class TokenRun:
         await post_sandbox_unreachable_notification(self.config, sandbox_id=request.sandbox_id)
         return Done()
 
-    async def route_model(self, request: RunCall) -> Route:
+    async def route_model(self, request: Routed) -> Route:
         """The route the person's latest request takes."""
-        return Route(route=await classify_route(messages_from_dict(request.messages)))
+        return Route(route=await classify_route(messages_from_dict(request.humans)))
 
     async def model_choice(self, request: ChosenModel) -> ModelSpec:
         return chosen_model(request.model_id, request.effort)
@@ -991,7 +1002,7 @@ class TokenRun:
         await self.in_run("reply_on_behalf", post)
         return Done()
 
-    async def run_ended(self, request: RunCall) -> AfterAgent:
+    async def run_ended(self, request: RunEnded) -> AfterAgent:
         """Record the run's end: its transcript turn and usage, and its git work reconciled."""
         reporters = self.parts.reporters
 
@@ -1005,7 +1016,9 @@ class TokenRun:
             )
 
         try:
-            return await self._reporting(request, "run_ended", ended)
+            return await self._reporting(
+                request, "run_ended", ended, messages=messages_from_dict(request.replies)
+            )
         finally:
             self.graph.end(self.run, self.run_id)
 
@@ -1017,13 +1030,9 @@ class TokenRun:
         await self.in_run("settle_review_check", settle_review_check)
         return Done()
 
-    async def finish_scout_plan(self, request: RunCall) -> Done:
-        summary = call_state(request, self.parts.restore).get("human_input_summary")
-
+    async def finish_scout_plan(self, request: ScoutPlanEnd) -> Done:
         async def finish() -> None:
-            await finish_scout_plan(
-                self.run.thread_id, self.config, summary if isinstance(summary, str) else ""
-            )
+            await finish_scout_plan(self.run.thread_id, self.config, request.human_input_summary)
 
         await self.in_run("finish_scout_plan", finish)
         return Done()
