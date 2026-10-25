@@ -97,6 +97,7 @@ export function ChangesToolbar({ pr }: { pr: PullRequestRef }) {
         )}
         <GroupedTabs
           size="xs"
+          className="max-md:h-12"
           value={diffStyle}
           onChange={setDiffStyle}
           options={[
@@ -105,12 +106,14 @@ export function ChangesToolbar({ pr }: { pr: PullRequestRef }) {
               icon: RowsIcon,
               tooltip: "Unified",
               "aria-label": "Unified",
+              className: "max-md:min-w-11",
             },
             {
               value: "split",
               icon: ColumnsIcon,
               tooltip: "Split",
               "aria-label": "Split",
+              className: "max-md:min-w-11",
             },
           ]}
         />

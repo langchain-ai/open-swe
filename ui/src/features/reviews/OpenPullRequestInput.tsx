@@ -26,7 +26,7 @@ export function OpenPullRequestInput() {
 
   return (
     <form
-      className="w-72"
+      className="w-72 max-w-full max-md:w-full"
       onSubmit={(event) => {
         event.preventDefault()
         open(value)

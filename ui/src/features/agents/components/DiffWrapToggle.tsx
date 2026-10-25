@@ -16,7 +16,11 @@ export function DiffWrapToggle({ className }: { className?: string }) {
       variant="plain"
       onClick={() => setWrap(!wrap)}
       aria-pressed={wrap}
-      className={cn(wrap && "bg-selected text-primary", className)}
+      className={cn(
+        "max-md:min-h-11 max-md:min-w-11",
+        wrap && "bg-selected text-primary",
+        className
+      )}
     />
   )
 }

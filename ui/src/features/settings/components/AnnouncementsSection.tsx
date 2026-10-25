@@ -70,13 +70,13 @@ export function AnnouncementsSection() {
             setError(null)
           }}
         />
-        <div className="flex items-center justify-between gap-space-2">
+        <div className="flex flex-wrap items-center justify-between gap-space-2">
           <span className="text-xs text-secondary">
             {announcements.isLoading
               ? "Counting recipients…"
               : `${pluralize(recipients)} with Slack connected`}
           </span>
-          <div className="flex gap-space-2">
+          <div className="flex flex-wrap gap-space-2">
             <Button
               size="sm"
               color="secondary"

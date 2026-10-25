@@ -63,6 +63,7 @@ export function PersonalInstructionsSection() {
             )}
             <Button
               size="xs"
+              className="max-md:min-h-11"
               color="secondary"
               variant="outlined"
               disabled={mutating || (!saved && !dirty)}
@@ -72,6 +73,7 @@ export function PersonalInstructionsSection() {
             </Button>
             <Button
               size="xs"
+              className="max-md:min-h-11"
               color="primary"
               disabled={!dirty || mutating}
               onClick={() => save.mutate(value)}
@@ -92,6 +94,7 @@ export function PersonalInstructionsSection() {
             action={
               <Button
                 size="xs"
+                className="max-md:min-h-11"
                 color="secondary"
                 variant="outlined"
                 onClick={() => void instructions.refetch()}

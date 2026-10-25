@@ -296,7 +296,7 @@ function Row({
     </>
   )
   return (
-    <div className="flex min-h-10 items-center gap-space-3 px-space-4 py-space-1">
+    <div className="flex min-h-10 items-center gap-space-3 px-space-4 py-space-1 max-sm:flex-wrap">
       {expandable ? (
         <button
           type="button"
@@ -312,7 +312,7 @@ function Row({
         </div>
       )}
       {action && (
-        <div className="flex shrink-0 items-center gap-space-2 empty:hidden">
+        <div className="flex min-w-0 shrink-0 flex-wrap items-center gap-space-2 empty:hidden max-sm:w-full max-sm:pb-space-1 max-sm:pl-space-7">
           {action}
         </div>
       )}

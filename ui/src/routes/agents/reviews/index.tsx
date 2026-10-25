@@ -92,13 +92,19 @@ function ReviewsPage() {
         >
           <div
             className={cn(
-              "flex items-center gap-space-3",
+              "flex flex-wrap items-center gap-space-3 max-md:pt-space-6",
               clearTrafficLights && "relative -top-4",
               clearTrafficLights &&
                 (selection ? "pl-28" : "pl-[clamp(0px,708px-50vw,112px)]")
             )}
           >
-            <Text as="h1" variant="h3" weight="medium" color="primary">
+            <Text
+              as="h1"
+              variant="h3"
+              weight="medium"
+              color="primary"
+              className="max-md:w-full"
+            >
               Pull Requests
             </Text>
             <div className="flex items-center gap-space-1">
