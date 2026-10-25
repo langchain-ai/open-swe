@@ -12,6 +12,36 @@ vi.mock("@/lib/profile", () => ({
 
 afterEach(cleanup)
 
+it("distinguishes an unset selection from an explicit no-repository choice", async () => {
+  const onRepoChange = vi.fn()
+  const props = {
+    repos: [{ full_name: "org/active" }],
+    onRepoChange,
+    placeholder: "Pick a repository…",
+    emptySelectionLabel: "No default repository",
+  }
+  const { rerender } = render(<RepoSelector {...props} />, {
+    wrapper: TooltipProvider,
+  })
+  fireEvent.click(screen.getByRole("button", { name: props.placeholder }))
+  expect(screen.queryByLabelText("Selected")).toBeNull()
+  fireEvent.click(await screen.findByRole("button", { name: "org/active" }))
+  expect(onRepoChange).toHaveBeenLastCalledWith("org/active")
+
+  rerender(<RepoSelector {...props} selectedRepo="org/active" />)
+  fireEvent.click(screen.getByRole("button", { name: "org/active" }))
+  fireEvent.click(
+    await screen.findByRole("button", { name: props.emptySelectionLabel })
+  )
+  expect(onRepoChange).toHaveBeenLastCalledWith(null)
+
+  rerender(<RepoSelector {...props} selectedRepo={null} />)
+  fireEvent.click(
+    screen.getByRole("button", { name: props.emptySelectionLabel })
+  )
+  expect(await screen.findByLabelText("Selected")).toBeTruthy()
+})
+
 it("never offers archived choices or an archive toggle by default", async () => {
   render(
     <RepoSelector

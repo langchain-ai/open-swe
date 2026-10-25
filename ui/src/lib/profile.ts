@@ -142,9 +142,6 @@ export function usePatchProfile() {
     },
     onSuccess: (saved, write) => {
       qc.setQueryData(profileQueryKey(write.login), saved)
-      if (write.patch.experimental_task_coordination !== undefined) {
-        void qc.invalidateQueries({ queryKey: ["agent-threads"] })
-      }
     },
     onSettled: async (_saved, _error, write) => {
       if (
@@ -176,11 +173,8 @@ export function buildProfileUpdate(
     branch_prefix: current?.branch_prefix ?? null,
     auto_fix_ci: current?.auto_fix_ci ?? true,
     auto_human_review_enabled: current?.auto_human_review_enabled ?? true,
-    recent_thread_context_enabled:
-      current?.recent_thread_context_enabled ?? false,
     draft_prs: current?.draft_prs ?? true,
     review_draft_prs: current?.review_draft_prs ?? null,
-    experimental_assistant_ui: current?.experimental_assistant_ui ?? null,
     experimental_background_callbacks:
       current?.experimental_background_callbacks ?? null,
     ...patch,
@@ -210,12 +204,4 @@ export function useDismissSlackOnboarding() {
     },
     onSettled: () => qc.invalidateQueries({ queryKey }),
   })
-}
-
-export function useExperimentalAssistantUi(): boolean {
-  const profile = useProfile()
-  return (
-    profile.data?.experimental_assistant_ui ??
-    import.meta.env.VITE_EXPERIMENTAL_ASSISTANT_UI === "true"
-  )
 }

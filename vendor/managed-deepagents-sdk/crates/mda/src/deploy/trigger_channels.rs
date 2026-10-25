@@ -1,6 +1,6 @@
 use std::fs;
 use std::io::IsTerminal;
-use std::path::{Component, Path};
+use std::path::Path;
 
 use anyhow::{anyhow, bail, Context, Result};
 use base64::engine::general_purpose::STANDARD as BASE64;
@@ -8,12 +8,14 @@ use base64::Engine;
 use console::style;
 use reqwest::Url;
 use serde::Deserialize;
+use serde_json::Value;
 
+use super::channel_icon::channel_icon_file;
 use super::trigger_icon;
 use crate::compile::ChannelRequirements;
 use crate::langsmith::{
     self, ChannelSetupRequest, ChannelSetupResponse, ChannelSetupStatus, ChannelSetupTarget,
-    SlackChannelApp, SlackChannelOptions, SlackChannelSetup,
+    SlackChannelApp, SlackChannelOptions, SlackChannelSetup, SlackCustomerApp, SlackTriggerMode,
 };
 use crate::project::Language;
 
@@ -77,62 +79,12 @@ fn resolve_slack_icon(
 }
 
 fn read_slack_icon(project_root: &Path, icon: &str) -> Result<Vec<u8>> {
-    let relative = Path::new(icon);
-    if icon.is_empty()
-        || relative.is_absolute()
-        || relative.components().any(|component| {
-            matches!(
-                component,
-                Component::ParentDir | Component::RootDir | Component::Prefix(_)
-            )
-        })
-    {
-        bail!("Slack channel icon must be a path relative to channels/");
-    }
-
-    let root = project_root
-        .canonicalize()
-        .context("failed to resolve project root for Slack channel icon")?;
-    let channels_path = root.join("channels");
-    let channels_metadata = fs::symlink_metadata(&channels_path)
-        .with_context(|| format!("failed to inspect {}", channels_path.display()))?;
-    if channels_metadata.file_type().is_symlink() || !channels_metadata.is_dir() {
-        bail!("Slack channel icon directory must be a regular channels/ directory");
-    }
-    let channels = channels_path
-        .canonicalize()
-        .context("failed to resolve channels/ for Slack channel icon")?;
-
-    let mut candidate = channels.clone();
-    for component in relative.components() {
-        match component {
-            Component::CurDir => continue,
-            Component::Normal(part) => candidate.push(part),
-            Component::ParentDir | Component::RootDir | Component::Prefix(_) => {
-                bail!("Slack channel icon must be a path relative to channels/")
-            }
-        }
-        let metadata = fs::symlink_metadata(&candidate)
-            .with_context(|| format!("failed to inspect Slack channel icon {}", icon))?;
-        if metadata.file_type().is_symlink() {
-            bail!("Slack channel icon path must not contain symlinks");
-        }
-    }
-
-    let resolved = candidate
-        .canonicalize()
-        .with_context(|| format!("failed to resolve Slack channel icon {}", icon))?;
-    if !resolved.starts_with(&channels) {
-        bail!("Slack channel icon must remain within channels/");
-    }
-    let metadata = fs::metadata(&resolved)
-        .with_context(|| format!("failed to inspect Slack channel icon {}", icon))?;
-    if !metadata.is_file() {
-        bail!("Slack channel icon must be a regular file");
-    }
-    if metadata.len() > SLACK_ICON_IMAGE_MAX_BYTES as u64 {
-        bail!("Slack channel icon must be at most 1 MB");
-    }
+    let resolved = channel_icon_file(
+        project_root,
+        icon,
+        "Slack channel icon",
+        SLACK_ICON_IMAGE_MAX_BYTES as u64,
+    )?;
     let image =
         fs::read(&resolved).with_context(|| format!("failed to read Slack channel icon {icon}"))?;
     validate_slack_icon(&image)?;
@@ -164,6 +116,9 @@ struct SlackManifest {
 struct SlackProviderConfig {
     app: SlackProviderAppConfig,
     trigger_on_all_messages: bool,
+    // SDKs only emit this for modes older CLIs cannot express.
+    #[serde(default)]
+    trigger_mode: Option<SlackTriggerMode>,
     allow_bot_triggers: bool,
 }
 
@@ -189,6 +144,7 @@ pub(crate) struct PreparedTriggerChannel {
     name: String,
     app: PreparedSlackApp,
     trigger_on_all_messages: bool,
+    trigger_mode: Option<SlackTriggerMode>,
     allow_bot_triggers: bool,
 }
 
@@ -360,6 +316,20 @@ pub(crate) fn prepare(
     if !wait {
         bail!("An agent with channels cannot be deployed with --no-wait.");
     }
+    let trigger_on_all_messages = match provider_config.trigger_mode {
+        Some(mode)
+            if provider_config.trigger_on_all_messages != (mode == SlackTriggerMode::All) =>
+        {
+            bail!(
+                "Slack channel configuration has a {} that conflicts with {}; set only {}.",
+                language.ident("triggerOnAllMessages", "trigger_on_all_messages"),
+                language.ident("triggerMode", "trigger_mode"),
+                language.ident("triggerMode", "trigger_mode")
+            );
+        }
+        Some(mode) => mode == SlackTriggerMode::All,
+        None => provider_config.trigger_on_all_messages,
+    };
     let SlackProviderAppConfig {
         name: authored_app_name,
         description,
@@ -382,7 +352,11 @@ pub(crate) fn prepare(
             icon: resolved_icon.image,
             background_color: resolved_icon.background_color,
         },
-        trigger_on_all_messages: provider_config.trigger_on_all_messages,
+        trigger_on_all_messages,
+        // "all" travels as the legacy flag so older Trigger Servers read it.
+        trigger_mode: provider_config
+            .trigger_mode
+            .filter(|mode| *mode != SlackTriggerMode::All),
         allow_bot_triggers: provider_config.allow_bot_triggers,
     }))
 }
@@ -397,17 +371,7 @@ fn default_slack_app_name(assistant_id: &str) -> String {
 }
 
 fn endpoint_url(agent_server_url: &str, channel_name: &str) -> Result<Url> {
-    let mut url = Url::parse(agent_server_url).context("Agent Server URL is invalid")?;
-    if url.scheme() != "https"
-        || url.host_str().is_none()
-        || !url.username().is_empty()
-        || url.password().is_some()
-        || url.query().is_some()
-        || url.fragment().is_some()
-        || url.cannot_be_a_base()
-    {
-        bail!("Agent Server URL must be absolute HTTPS without credentials, query, or fragment");
-    }
+    let mut url = super::helpers::validated_agent_server_url(agent_server_url)?;
     url.path_segments_mut()
         .map_err(|_| anyhow!("Agent Server URL cannot be a base URL"))?
         .pop_if_empty()
@@ -446,8 +410,10 @@ fn slack_setup(prepared: &PreparedTriggerChannel) -> SlackChannelSetup {
         },
         options: SlackChannelOptions {
             trigger_on_all_messages: prepared.trigger_on_all_messages,
+            trigger_mode: prepared.trigger_mode,
             allow_bot_triggers: prepared.allow_bot_triggers,
         },
+        customer_app: None,
     }
 }
 
@@ -464,17 +430,141 @@ pub(crate) fn artifact(prepared: &PreparedTriggerChannel) -> serde_json::Value {
 pub(crate) fn register(
     client: &langsmith::Client,
     prepared: &PreparedTriggerChannel,
+    customer_app: Option<&SlackCustomerApp>,
     agent_server_url: &str,
     deployment_id: &str,
     assistant_id: &str,
 ) -> Result<()> {
-    let request = build_setup_request(prepared, agent_server_url, deployment_id, assistant_id)?;
+    let mut request = build_setup_request(prepared, agent_server_url, deployment_id, assistant_id)?;
     let interactive = std::io::stdin().is_terminal() && std::io::stderr().is_terminal();
+    if client.is_self_hosted() {
+        let customer_app = customer_app
+            .ok_or_else(|| anyhow!("Self-hosted Slack app credentials are unavailable."))?;
+        return register_customer_app(client, &mut request, customer_app);
+    }
     run_registration(
         interactive,
         || client.setup_trigger_channel(&request),
         wait_for_action,
     )
+}
+
+const SLACK_BOT_TOKEN_ENV: &str = "SLACK_BOT_TOKEN";
+const SLACK_SIGNING_SECRET_ENV: &str = "SLACK_SIGNING_SECRET";
+
+fn customer_credentials(project_root: &Path) -> Result<Option<SlackCustomerApp>> {
+    let env = super::env_file::parse_env_file(&project_root.join(".env"));
+    let bot_token = env
+        .get(SLACK_BOT_TOKEN_ENV)
+        .map(|value| value.trim())
+        .filter(|value| !value.is_empty());
+    let signing_secret = env
+        .get(SLACK_SIGNING_SECRET_ENV)
+        .map(|value| value.trim())
+        .filter(|value| !value.is_empty());
+    match (bot_token, signing_secret) {
+        (None, None) => Ok(None),
+        (Some(bot_token), Some(signing_secret)) => Ok(Some(SlackCustomerApp {
+            bot_token: bot_token.to_string(),
+            signing_secret: signing_secret.to_string(),
+        })),
+        _ => bail!(
+            "Add both {SLACK_BOT_TOKEN_ENV} and {SLACK_SIGNING_SECRET_ENV} to .env, then retry `mda deploy`."
+        ),
+    }
+}
+
+fn slack_manifest_link(manifest: &Value) -> Result<Url> {
+    let mut url = Url::parse("https://api.slack.com/apps")?;
+    url.query_pairs_mut()
+        .append_pair("new_app", "1")
+        .append_pair(
+            "manifest_json",
+            &serde_json::to_string(manifest).context("Failed to serialize Slack manifest.")?,
+        );
+    Ok(url)
+}
+
+pub(crate) fn prepare_customer_app(
+    client: &langsmith::Client,
+    prepared: &PreparedTriggerChannel,
+    project_root: &Path,
+    interactive: bool,
+) -> Result<SlackCustomerApp> {
+    if let Some(credentials) = customer_credentials(project_root)? {
+        return Ok(credentials);
+    }
+    if !interactive {
+        bail!(
+            "Add {SLACK_BOT_TOKEN_ENV} and {SLACK_SIGNING_SECRET_ENV} to .env, or rerun `mda deploy` interactively to set up the Slack app."
+        );
+    }
+    let manifest = client.slack_app_manifest(
+        &prepared.app.name,
+        &prepared.app.description,
+        &prepared.app.background_color,
+        prepared.trigger_on_all_messages,
+    )?;
+    wait_for_customer_app(&project_root.join(".env"), &slack_manifest_link(&manifest)?)?;
+    customer_credentials(project_root)?.ok_or_else(|| {
+        anyhow!(
+            "Add {SLACK_BOT_TOKEN_ENV} and {SLACK_SIGNING_SECRET_ENV} to .env, then rerun `mda deploy`."
+        )
+    })
+}
+
+fn register_customer_app(
+    client: &langsmith::Client,
+    request: &mut ChannelSetupRequest,
+    credentials: &SlackCustomerApp,
+) -> Result<()> {
+    request.slack.customer_app = Some(SlackCustomerApp {
+        bot_token: credentials.bot_token.clone(),
+        signing_secret: credentials.signing_secret.clone(),
+    });
+    let response = client.setup_trigger_channel(request)?;
+    if matches!(response.status, ChannelSetupStatus::Active) && response.channel_id.is_some() {
+        return Ok(());
+    }
+    bail!("Slack app setup did not complete. Check .env and rerun `mda deploy`.")
+}
+
+fn customer_app_instructions(env_path: &Path, link: &Url, browser_opened: bool) -> String {
+    let setup_link = if browser_opened {
+        terminal_hyperlink("Open Slack app setup", link.as_str())
+    } else {
+        link.as_str().to_owned()
+    };
+    format!(
+        concat!(
+            "Set up your Slack app\n\n",
+            "  1. Create the app in Slack: {}\n",
+            "  2. Install the app in your workspace.\n",
+            "  3. Add SLACK_BOT_TOKEN=... to {}.\n",
+            "  4. Add SLACK_SIGNING_SECRET=... to {}.",
+        ),
+        setup_link,
+        env_path.display(),
+        env_path.display()
+    )
+}
+
+fn terminal_hyperlink(label: &str, destination: &str) -> String {
+    if destination.chars().any(char::is_control) {
+        return label.to_owned();
+    }
+    format!("\x1b]8;;{destination}\x1b\\{label}\x1b]8;;\x1b\\")
+}
+
+fn wait_for_customer_app(env_path: &Path, link: &Url) -> Result<()> {
+    let browser_opened = langsmith::login::try_open_browser(link.as_str());
+    cliclack::log::step(customer_app_instructions(env_path, link, browser_opened))?;
+    cliclack::set_theme(ContinueTheme);
+    let _reset_theme = ResetTheme;
+    let _: () = cliclack::select("")
+        .item((), "Press Enter once .env is updated", "")
+        .interact()?;
+    Ok(())
 }
 
 // This URL must stay unwrapped and selectable inside the interactive flow.
@@ -704,12 +794,156 @@ mod tests {
     }
 
     #[test]
+    fn customer_credentials_require_both_values_in_dotenv() {
+        let root = tempfile::tempdir().unwrap();
+        fs::write(root.path().join(".env"), "SLACK_BOT_TOKEN=test-bot-token\n").unwrap();
+
+        let error = customer_credentials(root.path()).err().unwrap().to_string();
+
+        assert!(error.contains("SLACK_SIGNING_SECRET"));
+        assert!(!error.contains("test-bot-token"));
+    }
+
+    #[test]
+    fn customer_credentials_are_reloaded_from_dotenv() {
+        let root = tempfile::tempdir().unwrap();
+        assert!(customer_credentials(root.path()).unwrap().is_none());
+        fs::write(
+            root.path().join(".env"),
+            "SLACK_BOT_TOKEN=test-bot-token\nSLACK_SIGNING_SECRET=signing-test\n",
+        )
+        .unwrap();
+
+        let credentials = customer_credentials(root.path()).unwrap().unwrap();
+
+        assert_eq!(credentials.bot_token, "test-bot-token");
+        assert_eq!(credentials.signing_secret, "signing-test");
+    }
+
+    #[test]
+    fn slack_manifest_link_encodes_the_manifest() {
+        let manifest = json!({"display_information": {"name": "Support & Help"}});
+
+        let link = slack_manifest_link(&manifest).unwrap();
+        let query: std::collections::HashMap<_, _> = link.query_pairs().into_owned().collect();
+
+        assert_eq!(link.host_str(), Some("api.slack.com"));
+        assert_eq!(query.get("new_app").map(String::as_str), Some("1"));
+        assert_eq!(
+            serde_json::from_str::<Value>(query.get("manifest_json").unwrap()).unwrap(),
+            manifest
+        );
+    }
+
+    #[test]
+    fn customer_app_instructions_identify_setup_link_and_dotenv() {
+        let env_path = Path::new("project/.env");
+
+        let link = slack_manifest_link(&json!({"name": "Test"})).unwrap();
+        let instructions = customer_app_instructions(env_path, &link, true);
+
+        assert!(instructions.contains(&format!(
+            "  1. Create the app in Slack: \x1b]8;;{}\x1b\\Open Slack app setup\x1b]8;;\x1b\\",
+            link.as_str()
+        )));
+        assert!(instructions.contains("  2. Install the app in your workspace."));
+        assert!(instructions.contains("  3. Add SLACK_BOT_TOKEN=... to project/.env."));
+        assert!(instructions.contains("  4. Add SLACK_SIGNING_SECRET=... to project/.env."));
+    }
+
+    #[test]
+    fn customer_app_instructions_print_url_when_browser_does_not_open() {
+        let link = slack_manifest_link(&json!({"name": "Test"})).unwrap();
+
+        let instructions = customer_app_instructions(Path::new("project/.env"), &link, false);
+
+        assert!(instructions.contains(&format!("  1. Create the app in Slack: {link}")));
+        assert!(!instructions.contains("\x1b]8;;"));
+    }
+
+    #[test]
+    fn terminal_hyperlink_omits_unsafe_destination() {
+        assert_eq!(
+            terminal_hyperlink("Open Slack app setup", "https://api.slack.com/apps\x1b"),
+            "Open Slack app setup"
+        );
+    }
+
+    #[test]
     fn prepare_accepts_the_trigger_slack_manifest() {
         let prepared = prepare(&requirements(), true).unwrap().unwrap();
 
         assert_eq!(prepared.name, "slack");
         assert!(!prepared.trigger_on_all_messages);
+        assert_eq!(prepared.trigger_mode, None);
         assert!(!prepared.allow_bot_triggers);
+    }
+
+    #[test]
+    fn prepare_sends_trigger_mode_only_when_it_is_set() {
+        for (provider_config, options) in [
+            (
+                json!({"triggerOnAllMessages": false}),
+                json!({"triggerOnAllMessages": false, "allowBotTriggers": false}),
+            ),
+            (
+                json!({"triggerOnAllMessages": true}),
+                json!({"triggerOnAllMessages": true, "allowBotTriggers": false}),
+            ),
+            (
+                json!({"triggerOnAllMessages": false, "triggerMode": "thread"}),
+                json!({
+                    "triggerOnAllMessages": false,
+                    "triggerMode": "thread",
+                    "allowBotTriggers": false
+                }),
+            ),
+            (
+                json!({"triggerOnAllMessages": false, "triggerMode": "mention"}),
+                json!({
+                    "triggerOnAllMessages": false,
+                    "triggerMode": "mention",
+                    "allowBotTriggers": false
+                }),
+            ),
+            (
+                json!({"triggerOnAllMessages": true, "triggerMode": "all"}),
+                json!({"triggerOnAllMessages": true, "allowBotTriggers": false}),
+            ),
+        ] {
+            let mut requirements = requirements();
+            let config = requirements.get_mut("slack").unwrap()["providerConfig"]
+                .as_object_mut()
+                .unwrap();
+            for (key, value) in provider_config.as_object().unwrap() {
+                config.insert(key.clone(), value.clone());
+            }
+            let prepared = prepare(&requirements, true).unwrap().unwrap();
+
+            assert_eq!(
+                serde_json::to_value(slack_setup(&prepared).options).unwrap(),
+                options
+            );
+        }
+    }
+
+    #[test]
+    fn prepare_rejects_a_legacy_flag_that_conflicts_with_trigger_mode() {
+        let mut requirements = requirements();
+        let config = &mut requirements.get_mut("slack").unwrap()["providerConfig"];
+        config["triggerOnAllMessages"] = json!(true);
+        config["triggerMode"] = json!("thread");
+
+        let error = prepare(&requirements, true).unwrap_err().to_string();
+        assert!(error.contains("conflicts with triggerMode"), "{error}");
+
+        let mut requirements = self::requirements();
+        requirements.get_mut("slack").unwrap()["providerConfig"]["triggerMode"] = json!("all");
+        assert!(prepare(&requirements, true).is_err());
+
+        let mut requirements = self::requirements();
+        requirements.get_mut("slack").unwrap()["providerConfig"]["triggerMode"] = json!("channel");
+        assert!(prepare(&requirements, true).is_err());
     }
 
     #[test]
@@ -812,6 +1046,19 @@ mod tests {
         let error = read_slack_icon(root.path(), icon.path().to_str().unwrap()).unwrap_err();
 
         assert!(error.to_string().contains("relative to channels/"));
+    }
+
+    #[test]
+    fn read_slack_icon_takes_any_relative_path_inside_channels() {
+        let root = tempfile::tempdir().unwrap();
+        fs::create_dir_all(root.path().join("channels/assets")).unwrap();
+        let png = png_icon(512, 512);
+        fs::write(root.path().join("channels/assets/icon.png"), &png).unwrap();
+
+        // Paths Slack's icon has always accepted, unlike Linear's plain paths.
+        for icon in ["./assets/icon.png", "assets/./icon.png", "assets//icon.png"] {
+            assert_eq!(read_slack_icon(root.path(), icon).unwrap(), png, "{icon}");
+        }
     }
 
     #[test]

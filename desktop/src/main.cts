@@ -609,6 +609,16 @@ function configureDesktopIpc() {
     requireTrustedDesktopIpc(event);
     if (typeof value === "string") clipboard.writeText(value);
   });
+  ipcMain.handle("desktop:copy-page-link", (event) => {
+    requireTrustedDesktopIpc(event);
+    if (!backendUrl) throw new Error("Open SWE is not connected to a backend");
+    const source = new URL(event.sender.getURL());
+    const target = new URL(backendUrl);
+    target.pathname = source.pathname;
+    target.search = source.search;
+    target.hash = source.hash;
+    clipboard.writeText(target.toString());
+  });
   ipcMain.handle("desktop:version", (event) => {
     requireTrustedDesktopIpc(event);
     return app.getVersion();
@@ -1233,12 +1243,32 @@ async function serveBundledUi(request) {
   return net.fetch(pathToFileURL(filePath).toString());
 }
 
-async function loadApp(window) {
+const appNavigations = new WeakMap<Electron.BrowserWindow, { url: string }>();
+const failedAppUrls = new WeakMap<Electron.BrowserWindow, string>();
+
+async function loadApp(window: Electron.BrowserWindow, url = APP_URL) {
   if (!backendUrl) return;
+  failedAppUrls.delete(window);
+  const navigation = { url };
+  appNavigations.set(window, navigation);
   try {
-    await window.loadURL(APP_URL);
+    await window.loadURL(url);
   } catch (error) {
-    if (!window.isDestroyed()) await window.loadURL(errorPage(error));
+    console.warn("Desktop navigation failed", error);
+    if (
+      window.isDestroyed() ||
+      appNavigations.get(window) !== navigation ||
+      (error instanceof Error &&
+        "code" in error &&
+        error.code === "ERR_ABORTED")
+    )
+      return;
+    failedAppUrls.set(window, url);
+    await window
+      .loadURL(errorPage(error))
+      .catch((pageError) =>
+        console.warn("Could not show desktop navigation error", pageError),
+      );
   }
 }
 
@@ -1330,7 +1360,11 @@ function createMenu() {
             if (!mainWindow || mainWindow.isDestroyed()) return;
             if (isAppUrl(mainWindow.webContents.getURL()))
               mainWindow.webContents.reload();
-            else void loadApp(mainWindow);
+            else
+              void loadApp(
+                mainWindow,
+                failedAppUrls.get(mainWindow) ?? APP_URL,
+              );
           },
         },
         // Installed builds too: the renderer is sandboxed with no Node access.
@@ -1537,7 +1571,7 @@ function handleNavigation(window, event, url) {
   }
 }
 
-function createWindow() {
+function createWindow(initialUrl = APP_URL) {
   if (!backendUrl) return createSetupWindow();
   const window = new BrowserWindow({
     title: appRuntime.name,
@@ -1598,7 +1632,7 @@ function createWindow() {
     rendererConsole.push(normalizeConsoleMessage(details)),
   );
   mainWindow = window;
-  void loadApp(window);
+  void loadApp(window, initialUrl);
   return window;
 }
 
@@ -1692,10 +1726,11 @@ function createSetupWindow() {
         await clearBackendCookies(previousUrl);
         await session.defaultSession.clearStorageData({ origin: APP_URL });
       }
-      if (mainWindow && !mainWindow.isDestroyed()) await loadApp(mainWindow);
-      else createWindow();
       if (pendingDeepLink && openDesktopLink(pendingDeepLink))
         pendingDeepLink = null;
+      else if (mainWindow && !mainWindow.isDestroyed())
+        await loadApp(mainWindow);
+      else createWindow();
       window.close();
     } catch (error) {
       dialog.showErrorBox(
@@ -1734,18 +1769,17 @@ function openDesktopLink(url) {
   if (!target) return false;
   const existingWindow =
     mainWindow && !mainWindow.isDestroyed() ? mainWindow : null;
-  const window = existingWindow || createWindow();
+  const window = existingWindow || createWindow(target);
   if (window.isMinimized()) window.restore();
   window.show();
   window.focus();
-  if (existingWindow) void window.loadURL(target);
-  else
-    window.webContents.once(
-      "did-finish-load",
-      () => void window.loadURL(target),
-    );
+  if (existingWindow) void loadApp(window, target);
   return true;
 }
+
+app.on("will-continue-activity", (event, type) => {
+  if (type === "NSUserActivityTypeBrowsingWeb") event.preventDefault();
+});
 
 app.on("continue-activity", (event, type, _userInfo, details) => {
   if (type !== "NSUserActivityTypeBrowsingWeb" || !details.webpageURL) return;
@@ -1814,9 +1848,9 @@ if (!hasSingleInstanceLock) {
     configurePermissions();
     configureDesktopIpc();
     createMenu();
-    createWindow();
     if (pendingDeepLink && openDesktopLink(pendingDeepLink))
       pendingDeepLink = null;
+    else createWindow();
     configureAutoUpdater();
     configureTerminalIpc({
       ipcMain,

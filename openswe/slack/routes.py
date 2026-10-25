@@ -29,6 +29,7 @@ from openswe.slack.ask import (
     process_slack_ask,
 )
 from openswe.slack.breakout import BreakoutCommand, process_slack_breakout, process_slack_web
+from openswe.slack.channels import DIRECTORY_EVENTS, SlackChannel
 from openswe.slack.dm import CONCIERGE_TS, is_dm_channel
 from openswe.slack.failures import (
     SlackRequestError,
@@ -382,6 +383,8 @@ async def slack_webhook(
         return ignored("Invalid Slack event")
 
     new_pr_links = await SlackPullRequestLink.record(envelope)
+    if event.type in DIRECTORY_EVENTS and (listed_channel := event.resolve_channel_id()):
+        background_tasks.add_task(SlackChannel.observe, event.type, listed_channel)
 
     from openswe.incidents import channels as incidents
 
@@ -641,7 +644,7 @@ async def slack_webhook(
         person_post
         and event.subtype in {"", "file_share"}
         and not reply_thread_ts
-        and "/pull/" in text
+        and ("/pull/" in text or "/agents/reviews/" in text)
     ):
         background_tasks.add_task(watch_post, channel_id, original_message_ts, user_id, text)
     reviewable_link = (
@@ -994,6 +997,33 @@ async def slack_interactivity(
 
     if interaction is None:
         return ignored("Invalid Slack interaction")
+    if interaction.type == "message_action" and interaction.callback_id == "open_swe_explain":
+        if not (
+            interaction.channel_id
+            and interaction.user.id
+            and interaction.message_ts
+            and interaction.message.text.strip()
+            and interaction.response_url
+            and interaction.trigger_id
+        ):
+            return ignored("Missing Explain This message context")
+        background_tasks.add_task(
+            process_slack_ask,
+            SlackAskRequest(
+                channel_id=interaction.channel_id,
+                user_id=interaction.user.id,
+                question="Explain this Slack message",
+                command="Explain This",
+                thread_id=ask_thread_id(
+                    interaction.channel_id, interaction.user.id, interaction.trigger_id
+                ),
+                team_id=interaction.team.id,
+                response_url=interaction.response_url,
+                selected_message=interaction.message.text,
+                message_ts=interaction.message_ts,
+            ),
+        )
+        return {}
     if (
         interaction.type == "view_submission"
         and interaction.view.callback_id == expedited_review.CHANNEL_MODAL
@@ -1178,6 +1208,15 @@ async def slack_interactivity(
 
         if button.type != "open_swe_option":
             return ignored("Unknown action type")
+
+        if button.user_id is not None and button.user_id != user_id:
+            await common.post_slack_ephemeral_message(
+                channel_id,
+                user_id,
+                "This choice is for someone else. No action was taken.",
+                thread_ts=reply_ts or None,
+            )
+            return ignored("Only the choice recipient can select an option")
 
         response = button.response.strip()
         if not response:

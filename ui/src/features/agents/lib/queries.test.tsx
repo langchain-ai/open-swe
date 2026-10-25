@@ -14,6 +14,7 @@ import {
   setAgentThreadStatus,
   setAgentThreadResolved,
   useAgentThread,
+  useAgentThreadBrowser,
   useAgentThreadWorkingTreeDiff,
   usePinAgentThread,
   useRenameAgentThread,
@@ -28,7 +29,12 @@ import {
   useWorkflowApprovalDecision,
 } from "./queries"
 import type { InfiniteData } from "@tanstack/react-query"
-import type { ThreadTurnDiff, ThreadsPage, ThreadsPageParams } from "./api"
+import type {
+  ThreadBrowser,
+  ThreadTurnDiff,
+  ThreadsPage,
+  ThreadsPageParams,
+} from "./api"
 import type {
   AgentSchedule,
   AgentThread,
@@ -50,13 +56,7 @@ const page: ThreadsPage = {
 }
 
 const clients: Array<QueryClient> = []
-const profile = vi.hoisted(() => ({
-  data: { experimental_task_coordination: false },
-}))
-vi.mock("@/lib/profile", () => ({ useProfile: () => profile }))
-
 afterEach(() => {
-  profile.data.experimental_task_coordination = false
   vi.useRealTimers()
   for (const client of clients) client.clear()
   clients.length = 0
@@ -70,6 +70,70 @@ function testClient() {
   clients.push(client)
   return client
 }
+
+describe("useAgentThreadBrowser", () => {
+  const hour = 60 * 60_000
+  function browser(
+    window: string,
+    token: string,
+    expiresIn: number,
+    title = "current"
+  ): ThreadBrowser {
+    return {
+      tabs: [{ id: "t1", title, url: "https://example.com" }],
+      act_url: `https://${window}.browsers.test/auth?token=${token}`,
+      expires_at: new Date(Date.now() + expiresIn).toISOString(),
+    }
+  }
+
+  async function refetchedLink(current: ThreadBrowser, fetched: ThreadBrowser) {
+    const client = testClient()
+    const getThreadBrowser = vi
+      .spyOn(agentsApi, "getThreadBrowser")
+      .mockResolvedValueOnce(current)
+      .mockResolvedValue(fetched)
+    const { result } = renderHook(
+      () => useAgentThreadBrowser("thread-1", true),
+      {
+        wrapper: ({ children }) => (
+          <QueryClientProvider client={client}>{children}</QueryClientProvider>
+        ),
+      }
+    )
+    await waitFor(() => expect(result.current.data).toBeDefined())
+    await act(() =>
+      client.invalidateQueries({
+        queryKey: agentThreadKeys.browser("thread-1"),
+      })
+    )
+    await waitFor(() =>
+      expect(result.current.data?.tabs[0]?.title).toBe("next")
+    )
+    getThreadBrowser.mockRestore()
+    return result.current.data
+  }
+
+  it("keeps the framed link when an invalidation mints a new one", async () => {
+    const current = browser("b-window", "first", 24 * hour)
+    const data = await refetchedLink(
+      current,
+      browser("b-window", "second", 24 * hour, "next")
+    )
+    expect(data?.act_url).toBe(current.act_url)
+    expect(data?.expires_at).toBe(current.expires_at)
+  })
+
+  it("takes the new link for another window or near expiry", async () => {
+    const otherWindow = browser("b-other", "second", 24 * hour, "next")
+    expect(
+      await refetchedLink(browser("b-window", "first", 24 * hour), otherWindow)
+    ).toEqual(otherWindow)
+    const fresh = browser("b-window", "second", 24 * hour, "next")
+    expect(
+      await refetchedLink(browser("b-window", "first", 60_000), fresh)
+    ).toEqual(fresh)
+  })
+})
 
 describe("useAgentThreadWorkingTreeDiff", () => {
   const diff: ThreadTurnDiff = {
@@ -391,7 +455,7 @@ describe("sidebar queries", () => {
     await waitFor(() =>
       expect(listThreads).toHaveBeenCalledWith({
         limit: SIDEBAR_PAGE_SIZE,
-        hierarchy: false,
+        hierarchy: true,
         offset: 0,
         resolved: false,
         scope: "interactive",
@@ -405,7 +469,7 @@ describe("sidebar queries", () => {
     await waitFor(() =>
       expect(listThreads).toHaveBeenCalledWith({
         limit: SIDEBAR_PAGE_SIZE,
-        hierarchy: false,
+        hierarchy: true,
         offset: 0,
         resolved: false,
         scope: "interactive",
@@ -511,14 +575,8 @@ describe("sidebar queries", () => {
     }
   )
 
-  it("refetches detail after sidebar rerenders and normalizes its hierarchy", async () => {
-    const worker = { id: "worker", status: "idle" } as AgentThread
-    const opened = {
-      id: "opened-thread",
-      status: "idle",
-      taskWorkers: [worker],
-      taskMembership: { role: "coordinator" },
-    } as AgentThread
+  it("refetches detail after sidebar rerenders", async () => {
+    const opened = { id: "opened-thread", status: "idle" } as AgentThread
     const updated = { ...opened, title: "Refreshed title" }
     vi.spyOn(agentsApi, "getThread")
       .mockResolvedValueOnce(opened)
@@ -537,8 +595,6 @@ describe("sidebar queries", () => {
       { wrapper }
     )
     await waitFor(() => expect(result.current?.id).toBe(opened.id))
-    expect(result.current?.taskWorkers).toBeUndefined()
-    expect(result.current?.taskMembership).toBeUndefined()
     rerender()
     await act(() =>
       client.invalidateQueries({ queryKey: agentThreadKeys.detail(opened.id) })
@@ -547,9 +603,73 @@ describe("sidebar queries", () => {
     expect(
       client.getQueryState(agentThreadKeys.detail(opened.id))?.status
     ).toBe("success")
-    profile.data.experimental_task_coordination = true
-    rerender()
-    expect(result.current?.taskWorkers).toEqual([worker])
+  })
+
+  it("refreshes an active coordinator's workers from sidebar pages without opening them", () => {
+    const worker = { id: "worker-thread", status: "running" } as AgentThread
+    const coordinator = {
+      id: "coordinator-thread",
+      title: "Onscreen coordinator",
+      status: "finished",
+      taskMembership: { role: "coordinator" },
+      taskWorkers: [worker],
+    } as AgentThread
+    const client = testClient()
+    client.setQueryData(agentThreadKeys.detail(coordinator.id), coordinator)
+    const { result, rerender } = renderHook(
+      ({ loaded }: { loaded: AgentThread }) =>
+        useSidebarActiveThread({
+          activeThreadId: coordinator.id,
+          loadedThreads: [loaded],
+        }),
+      {
+        initialProps: { loaded: coordinator },
+        wrapper: ({ children }) => (
+          <QueryClientProvider client={client}>{children}</QueryClientProvider>
+        ),
+      }
+    )
+
+    expect(result.current?.taskWorkers?.[0]?.status).toBe("running")
+    rerender({
+      loaded: {
+        ...coordinator,
+        title: "Older sidebar title",
+        taskWorkers: [{ ...worker, status: "finished" }],
+      },
+    })
+
+    expect(result.current?.taskWorkers?.[0]?.status).toBe("finished")
+    expect(result.current?.title).toBe(coordinator.title)
+    expect(
+      client.getQueryData(agentThreadKeys.detail(worker.id))
+    ).toBeUndefined()
+  })
+
+  it("returns the loaded coordinator when the active thread is one of its workers", () => {
+    const worker = { id: "worker-thread", title: "Worker" } as AgentThread
+    const coordinator = {
+      id: "coordinator-thread",
+      title: "Coordinator",
+      taskMembership: { role: "coordinator" },
+      taskWorkers: [worker],
+    } as AgentThread
+    const client = testClient()
+    client.setQueryData(agentThreadKeys.detail(worker.id), worker)
+    const { result } = renderHook(
+      () =>
+        useSidebarActiveThread({
+          activeThreadId: worker.id,
+          loadedThreads: [coordinator],
+        }),
+      {
+        wrapper: ({ children }) => (
+          <QueryClientProvider client={client}>{children}</QueryClientProvider>
+        ),
+      }
+    )
+
+    expect(result.current).toBe(coordinator)
   })
 
   it("keeps the deep-linked active thread available as cached pages catch up", async () => {
@@ -911,52 +1031,6 @@ describe("sidebar task families", () => {
     taskWorkers: [worker],
   } as AgentThread
 
-  it("switches list modes and hides cached workers without discovery polling after opt-out", async () => {
-    vi.useFakeTimers()
-    const list = vi.spyOn(agentsApi, "listThreadsPage").mockResolvedValue({
-      ...page,
-      items: [coordinator],
-    })
-    vi.spyOn(agentsApi, "listPinnedThreads").mockResolvedValue([coordinator])
-    const client = testClient()
-    const { result, rerender } = renderHook(
-      () => ({
-        recents: useSidebarRecents({ repoMode: false }),
-        pins: useSidebarPinnedThreads(),
-      }),
-      { wrapper: wrapperFor(client) }
-    )
-    await vi.waitFor(() => expect(result.current.recents.items).toHaveLength(1))
-    expect(list).toHaveBeenLastCalledWith(
-      expect.objectContaining({ hierarchy: false })
-    )
-    expect(result.current.recents.items[0]?.taskWorkers).toBeUndefined()
-    expect(result.current.pins.data?.[0]?.taskWorkers).toBeUndefined()
-
-    profile.data.experimental_task_coordination = true
-    rerender()
-    await vi.waitFor(() =>
-      expect(result.current.recents.items[0]?.taskWorkers).toHaveLength(1)
-    )
-    expect(list).toHaveBeenLastCalledWith(
-      expect.objectContaining({ hierarchy: true })
-    )
-    expect(result.current.pins.data?.[0]?.taskWorkers).toHaveLength(1)
-
-    profile.data.experimental_task_coordination = false
-    rerender()
-    await vi.waitFor(() =>
-      expect(list).toHaveBeenLastCalledWith(
-        expect.objectContaining({ hierarchy: false })
-      )
-    )
-    expect(result.current.recents.items[0]?.taskWorkers).toBeUndefined()
-    expect(result.current.pins.data?.[0]?.taskWorkers).toBeUndefined()
-    const calls = list.mock.calls.length
-    await act(() => vi.advanceTimersByTimeAsync(31_000))
-    expect(list).toHaveBeenCalledTimes(calls)
-  })
-
   it("updates nested worker caches for navigation and optimistic edits", () => {
     const client = testClient()
     const key = agentThreadKeys.page({ hierarchy: true, resolved: false })
@@ -973,7 +1047,6 @@ describe("sidebar task families", () => {
   })
 
   it("keeps the existing page poll alive for idle coordinators and discovers new workers", async () => {
-    profile.data.experimental_task_coordination = true
     vi.useFakeTimers()
     let workers: Array<AgentThread> = [{ ...worker, status: "finished" }]
     vi.spyOn(agentsApi, "listThreadsPage").mockImplementation(async () => ({

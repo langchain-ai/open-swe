@@ -10,6 +10,8 @@ from openswe.github import webhook as github_webhooks
 from openswe.webhooks import common as webhook_common
 from openswe.workspaces.store import WORKSPACES, WorkspaceCreate
 
+pytestmark = pytest.mark.usefixtures("no_local_threads")
+
 
 def _pr_payload(
     *,

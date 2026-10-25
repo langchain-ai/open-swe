@@ -8,7 +8,7 @@ use super::{humanize_error_body, Client, REQUEST_TIMEOUT, TENANT_HEADER};
 
 const SETUP_ERROR_FIELD_MAX_CHARS: usize = 512;
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub(crate) struct ChannelSetupRequest {
     pub(crate) provider: String,
@@ -25,11 +25,20 @@ pub(crate) struct ChannelSetupTarget {
     pub(crate) agent_id: String,
 }
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub(crate) struct SlackChannelSetup {
     pub(crate) app: SlackChannelApp,
     pub(crate) options: SlackChannelOptions,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub(crate) customer_app: Option<SlackCustomerApp>,
+}
+
+#[derive(Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub(crate) struct SlackCustomerApp {
+    pub(crate) bot_token: String,
+    pub(crate) signing_secret: String,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -44,8 +53,28 @@ pub(crate) struct SlackChannelApp {
 #[derive(Debug, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub(crate) struct SlackChannelOptions {
+    /// Deprecated in favor of `trigger_mode`; still sent for Trigger Servers
+    /// that only read this flag.
     pub(crate) trigger_on_all_messages: bool,
+    /// Only sent when the channel sets it, so default payloads stay identical
+    /// for consumers that predate the option. Unset lets Trigger Server keep an
+    /// existing app's mode or default a new one to `thread`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(crate) trigger_mode: Option<SlackTriggerMode>,
     pub(crate) allow_bot_triggers: bool,
+}
+
+/// Which channel messages start a run; DMs always do.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub(crate) enum SlackTriggerMode {
+    /// Only messages that mention the agent.
+    Mention,
+    /// Mentions, and later replies in threads the agent was mentioned in.
+    Thread,
+    /// Every message in the agent's channels. Sent to Trigger Server as the
+    /// legacy `triggerOnAllMessages` flag, which every version understands.
+    All,
 }
 
 #[derive(Debug, Deserialize)]
@@ -71,6 +100,56 @@ pub(crate) enum ChannelSetupStatus {
 }
 
 impl Client {
+    pub(crate) fn slack_app_manifest(
+        &self,
+        name: &str,
+        description: &str,
+        background_color: &str,
+        trigger_on_all_messages: bool,
+    ) -> Result<Value> {
+        let mut url = Url::parse(&self.public_platform_base()?)
+            .context("LangSmith platform API URL is invalid")?;
+        url.path_segments_mut()
+            .map_err(|_| anyhow!("Slack manifest URL is invalid."))?
+            .pop_if_empty()
+            .extend(["v1", "triggers", "slack-custom-app", "manifest"]);
+        url.query_pairs_mut()
+            .append_pair("name", name)
+            .append_pair("description", description)
+            .append_pair("background_color", background_color)
+            .append_pair(
+                "trigger_on_all_messages",
+                if trigger_on_all_messages {
+                    "true"
+                } else {
+                    "false"
+                },
+            );
+        let http = HttpClient::builder()
+            .timeout(REQUEST_TIMEOUT)
+            .redirect(redirect::Policy::none())
+            .build()
+            .context("Failed to initialize Slack manifest request.")?;
+        let api_key = self.api_key()?;
+        let mut request = http
+            .get(url)
+            .header("X-Api-Key", api_key.as_str())
+            .header("Accept", "application/json");
+        if let Some(tenant_id) = &self.tenant_id {
+            request = request.header(TENANT_HEADER, tenant_id);
+        }
+        let response = request.send().context("Slack manifest request failed.")?;
+        if !response.status().is_success() {
+            bail!(
+                "Slack manifest request failed (HTTP {}).",
+                response.status().as_u16()
+            );
+        }
+        response
+            .json::<Value>()
+            .map_err(|_| anyhow!("Slack manifest request returned invalid JSON."))
+    }
+
     pub(crate) fn setup_trigger_channel(
         &self,
         payload: &ChannelSetupRequest,
@@ -98,6 +177,23 @@ impl Client {
         let response = request.send().context("Channel setup request failed.")?;
         let status = response.status();
         if !status.is_success() {
+            if payload.slack.customer_app.is_some() {
+                if status == StatusCode::CONFLICT {
+                    bail!(
+                        "Slack channel setup conflicts with the existing registration. Check the app setup, or delete and recreate the channel."
+                    );
+                }
+                if matches!(
+                    status,
+                    StatusCode::BAD_REQUEST | StatusCode::UNPROCESSABLE_ENTITY
+                ) {
+                    bail!(
+                        "Channel setup failed (HTTP {}). Check the Slack credentials in .env.",
+                        status.as_u16()
+                    );
+                }
+                bail!("Channel setup failed (HTTP {}).", status.as_u16());
+            }
             let text = response.text().unwrap_or_default();
             bail!("{}", setup_failure_message(status, &text, api_key.as_str()));
         }
@@ -106,6 +202,11 @@ impl Client {
             .context("Failed to read channel setup response.")?;
         let mut response: ChannelSetupResponse = serde_json::from_str(&text)
             .map_err(|_| anyhow!("Channel setup returned an invalid response."))?;
+        if payload.slack.customer_app.is_some() {
+            response.message = None;
+            response.authorization_url = None;
+            return Ok(response);
+        }
         if let Some(message) = &mut response.message {
             *message = message.replace(api_key.as_str(), "[REDACTED]");
         }
@@ -292,6 +393,53 @@ mod tests {
     }
 
     #[test]
+    fn slack_manifest_requests_the_server_manifest_with_auth() {
+        let manifest = json!({"display_information": {"name": "Support Bot"}});
+        let (origin, receiver) = serve_once("200 OK", &[], &manifest.to_string());
+
+        let result = client(Some("tenant-id".into()), &origin)
+            .slack_app_manifest("Support Bot", "Helpful & safe", "#09090f", true)
+            .unwrap();
+        let raw = receiver.recv_timeout(Duration::from_secs(1)).unwrap();
+        let path = raw
+            .lines()
+            .next()
+            .unwrap()
+            .split_whitespace()
+            .nth(1)
+            .unwrap();
+        let url = Url::parse(&format!("https://example.test{path}")).unwrap();
+        let query: std::collections::HashMap<_, _> = url.query_pairs().into_owned().collect();
+
+        assert_eq!(result, manifest);
+        assert_eq!(url.path(), "/v1/triggers/slack-custom-app/manifest");
+        assert_eq!(
+            query.get("description").map(String::as_str),
+            Some("Helpful & safe")
+        );
+        assert_eq!(
+            query.get("trigger_on_all_messages").map(String::as_str),
+            Some("true")
+        );
+        assert!(raw
+            .to_ascii_lowercase()
+            .contains("x-api-key: resolved-login-key"));
+        assert!(raw.to_ascii_lowercase().contains("x-tenant-id: tenant-id"));
+    }
+
+    #[test]
+    fn slack_manifest_does_not_echo_an_error_body() {
+        let (origin, _) = serve_once("500 Internal Server Error", &[], "private response");
+
+        let error = client(None, &origin)
+            .slack_app_manifest("Support Bot", "", "#09090f", false)
+            .unwrap_err()
+            .to_string();
+
+        assert_eq!(error, "Slack manifest request failed (HTTP 500).");
+    }
+
+    #[test]
     fn setup_channel_posts_exact_path_body_and_auth_headers() {
         let response = json!({
             "status": "active",
@@ -428,6 +576,77 @@ mod tests {
             .to_string();
 
         assert_eq!(rendered, "Channel setup failed (HTTP 401).");
+    }
+
+    #[test]
+    fn customer_setup_never_echoes_response_text_or_credentials() {
+        let (origin, _) = serve_once(
+            "400 Bad Request",
+            &[],
+            r#"{"detail":"test-bot-token signing-private"}"#,
+        );
+        let mut payload = request();
+        payload.slack.customer_app = Some(SlackCustomerApp {
+            bot_token: "test-bot-token".to_string(),
+            signing_secret: "signing-private".to_string(),
+        });
+
+        let error = client(None, &origin)
+            .setup_trigger_channel(&payload)
+            .err()
+            .unwrap()
+            .to_string();
+
+        assert_eq!(
+            error,
+            "Channel setup failed (HTTP 400). Check the Slack credentials in .env."
+        );
+    }
+
+    #[test]
+    fn customer_setup_outage_does_not_blame_credentials() {
+        let (origin, _) = serve_once(
+            "503 Service Unavailable",
+            &[],
+            r#"{"detail":"test-bot-token signing-private"}"#,
+        );
+        let mut payload = request();
+        payload.slack.customer_app = Some(SlackCustomerApp {
+            bot_token: "test-bot-token".to_string(),
+            signing_secret: "signing-private".to_string(),
+        });
+
+        let error = client(None, &origin)
+            .setup_trigger_channel(&payload)
+            .unwrap_err()
+            .to_string();
+
+        assert_eq!(error, "Channel setup failed (HTTP 503).");
+    }
+
+    #[test]
+    fn customer_setup_conflict_does_not_echo_secrets() {
+        let (origin, _) = serve_once(
+            "409 Conflict",
+            &[],
+            r#"{"detail":"test-bot-token signing-private"}"#,
+        );
+        let mut payload = request();
+        payload.slack.customer_app = Some(SlackCustomerApp {
+            bot_token: "test-bot-token".to_string(),
+            signing_secret: "signing-private".to_string(),
+        });
+
+        let error = client(None, &origin)
+            .setup_trigger_channel(&payload)
+            .err()
+            .unwrap()
+            .to_string();
+
+        assert_eq!(
+            error,
+            "Slack channel setup conflicts with the existing registration. Check the app setup, or delete and recreate the channel."
+        );
     }
 
     fn setup_error(status: &str, body: &Value) -> String {

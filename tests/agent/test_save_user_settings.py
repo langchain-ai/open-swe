@@ -64,6 +64,7 @@ async def test_private_requester_partial_update_preserves_other_settings_and_use
         "default_subagent_model": "anthropic:claude-haiku-4-5",
         "subagent_reasoning_effort": "none",
         "model_routing_enabled": True,
+        "recent_thread_context_enabled": False,
     }
     profile = {
         "default_repo": "org/private",
@@ -71,7 +72,6 @@ async def test_private_requester_partial_update_preserves_other_settings_and_use
         "base_branch": "develop",
         "draft_prs": False,
         "review_draft_prs": True,
-        "recent_thread_context_enabled": True,
         "email": "alice@example.com",
     }
     prefs = {
@@ -183,6 +183,7 @@ async def test_unavailable_thread_scope_fails_closed(
         {"default_subagent_model": "openai:gpt-6.1-sol"},
         {"subagent_reasoning_effort": "low"},
         {"model_routing_enabled": True},
+        {"recent_thread_context_enabled": False, "auto_fix_ci": False},
         {"default_model": "unknown-model"},
         {"default_model": "openai:gpt-5.5"},
         {"default_model": "anthropic:claude-fable-5-1"},
@@ -309,7 +310,6 @@ async def test_private_read_exposes_all_ordinary_settings_only_for_requester(
                 "concierge_mode": False,
                 "pr_review_links": False,
                 "pr_failure_reactions": False,
-                "experimental_task_coordination": False,
             },
             "preferences": {
                 "default_workspace": "mine",

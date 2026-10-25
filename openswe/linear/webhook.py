@@ -20,6 +20,7 @@ from openswe.input_messages import (
 from openswe.prompts import prompt
 from openswe.source_context import SourceContext
 from openswe.thread_ids import linear_issue_thread_id
+from openswe.threads import index
 from openswe.users import User
 from openswe.utils.http_pool import pooled_transport
 from openswe.webhooks import common
@@ -52,7 +53,7 @@ async def process_linear_issue(  # noqa: PLR0912, PLR0915
         repo_config.get("name"),
     )
 
-    thread_id = linear_issue_thread_id(issue_id)
+    thread_id = await index.live_thread_id(linear_issue_thread_id(issue_id))
 
     full_issue = issue_data
 

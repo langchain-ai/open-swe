@@ -114,6 +114,7 @@ async def test_recreate_sandbox_hands_off_after_metadata_persists(
     create.assert_awaited_once_with(
         thread_id=thread_id,
         github_proxy_repositories=None,
+        github_proxy_permissions=None,
         workspace_slug=None,
         source="workspace",
     )
@@ -155,6 +156,7 @@ async def test_recreate_sandbox_base_source_skips_workspace_snapshot() -> None:
     create.assert_awaited_once_with(
         thread_id=thread_id,
         github_proxy_repositories=None,
+        github_proxy_permissions=None,
         workspace_slug="langchainplus",
         source="base",
     )

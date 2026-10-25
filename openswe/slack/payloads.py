@@ -254,7 +254,9 @@ class SlackInteraction(SlackPayload):
 
     type: str = ""
     trigger_id: str = ""
+    callback_id: str = ""
     response_url: str = ""
+    team: SlackRef = Field(default_factory=SlackRef)
     action_id: str = ""
     value: str = ""
     container: SlackInteractionContainer = Field(default_factory=SlackInteractionContainer)
@@ -298,6 +300,7 @@ class SlackButtonValue(SlackPayload):
     thread_id: str = ""
     thread_ts: str = ""
     response: str = ""
+    user_id: str | None = None
     kind: str = ""
     subject: str = ""
 
@@ -400,6 +403,7 @@ class SlackChannelPayload(SlackPayload):
     is_mpim: bool | None = None
     is_ext_shared: bool | None = None
     is_pending_ext_shared: bool | None = None
+    is_archived: bool | None = None
 
     @classmethod
     def of(cls, raw: object) -> Self:
@@ -424,11 +428,22 @@ class SlackChannelPayload(SlackPayload):
         "is_mpim",
         "is_ext_shared",
         "is_pending_ext_shared",
+        "is_archived",
         mode="before",
     )
     @classmethod
     def _only_boolean(cls, raw: object) -> bool | None:
         return raw if isinstance(raw, bool) else None
+
+    @property
+    def listed(self) -> bool:
+        """Whether the channel belongs in the directory: a live, named channel, not a DM."""
+        return (
+            bool(self.name)
+            and self.is_archived is not True
+            and self.is_im is not True
+            and self.is_mpim is not True
+        )
 
     @property
     def publishes_events(self) -> bool:

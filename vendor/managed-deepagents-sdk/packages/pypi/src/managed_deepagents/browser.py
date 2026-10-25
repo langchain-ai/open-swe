@@ -23,14 +23,18 @@ import contextlib
 import hashlib
 import itertools
 import json
+import logging
 import os
 import posixpath
 import re
 import shlex
+import uuid
+import weakref
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Annotated, Literal, Required, TypedDict, TypeVar, cast
 
 import httpx
+from deepagents.backends import CompositeBackend
 from deepagents.backends.protocol import SandboxBackendProtocol
 from langchain.agents.middleware import AgentMiddleware
 from langchain.tools import BaseTool, tool
@@ -63,11 +67,14 @@ _EXTENSION_DIR = f"{_EXTENSIONS_DIR}/stagehand-{STAGEHAND_VERSION}"
 #: browserd's windows, each with the port it serves inside the browser sandbox.
 _WINDOWS_FILE = "/var/lib/browserd/attachments.json"
 _WINDOW_NAME = "mda"
+#: The window that shares the thread's sandbox's localhost with every window.
+_LOCALHOST_WINDOW = "mda-localhost"
 #: The extension's manifest name, which tells its service worker from other extensions'.
 _STAGEHAND_EXTENSION = "Stagehand Runtime"
 _CDP_TIMEOUT_S = 30
 _HTTP_TIMEOUT = httpx.Timeout(90.0)  # creating a browser waits for Chrome
 _SETUP_TIMEOUT_S = 300
+_LOG = logging.getLogger("mda.browser")
 
 _EXTENSION_ZIP = "/tmp/mda-stagehand-extension.zip"  # noqa: S108 - in the browser sandbox, not here
 
@@ -103,6 +110,11 @@ SNAPSHOT_DESCRIPTION = (
 SCREENSHOT_DESCRIPTION = (
     "Capture a screenshot of the active page. For size-constrained MCP clients, prefer "
     'a viewport JPEG: {"type":"jpeg","quality":40,"fullPage":false}.'
+)
+# Ours, after `run`'s contract text: a thread's browser shares its sandbox's localhost.
+LOCALHOST_NOTE = (
+    " Servers running in your sandbox are reachable at http://localhost:<port> "
+    "(any port but 80 and 443)."
 )
 
 # `experimental_batch` hands the callback a worker-local batch context; the
@@ -181,11 +193,21 @@ class _Session:
 
     browser: StagehandBrowser
     stagehand: Stagehand
-    ids: dict[str, str] = field(default_factory=dict)  # from the latest snapshot
+    ids: dict[str, dict[str, str]] = field(default_factory=dict)  # each tab's latest snapshot
+    shared: str | None = None  # the sandbox whose localhost the browser shares
 
-    async def page(self) -> Page:
-        pages = await self.browser.context.pages()
-        return pages[-1] if pages else await self.browser.context.new_page()
+    async def page(self, thread: str | None = None) -> Page:
+        """The newest tab, or ``thread``'s own tab of a browser threads share."""
+        context = self.browser.context
+        pages = await context.pages()
+        if thread is None:
+            return pages[-1] if pages else await context.new_page()
+        tab = next((p for p in pages if p.page_id == _TABS.get(thread)), None)
+        if tab is None:  # its first call, or its tab is gone
+            tab = await context.new_page()
+            await _close_stalest(pages, _TABS_PER_BROWSER - 1)
+        _remember_tab(thread, tab.page_id)
+        return tab
 
     async def close(self) -> None:
         # Never `browser.close()`: on a browser we attached to it sends
@@ -193,6 +215,30 @@ class _Session:
         with contextlib.suppress(Exception):  # best effort
             await asyncio.wait_for(self.stagehand.close(), 3)
         await _drop(self.browser)
+
+
+#: Each thread's tab in a browser threads share, by Stagehand page ID: the tab's
+#: CDP target ID, which outlives our connection. Kept to the most recent threads.
+_TABS: dict[str, str] = {}
+_MAX_TABS = 1024
+#: Tabs a shared browser keeps open; a thread whose tab was closed gets a new one.
+_TABS_PER_BROWSER = 10
+
+
+def _remember_tab(thread: str, page_id: str) -> None:
+    _TABS.pop(thread, None)  # most recent last, so the cap drops the stalest
+    _TABS[thread] = page_id
+    if len(_TABS) > _MAX_TABS:
+        del _TABS[next(iter(_TABS))]
+
+
+async def _close_stalest(pages: list[Page], keep: int) -> None:
+    """Close all but ``keep`` of ``pages``: tabs no thread here uses, then the least recent."""
+    recency = {page_id: i for i, page_id in enumerate(_TABS.values())}
+    stalest = sorted(pages, key=lambda page: recency.get(page.page_id, -1))
+    for page in stalest[: max(len(pages) - keep, 0)]:
+        with contextlib.suppress(Exception):  # best effort: it may be gone already
+            await page.close()
 
 
 async def _drop(browser: StagehandBrowser) -> None:
@@ -207,7 +253,11 @@ async def _drop(browser: StagehandBrowser) -> None:
 
 
 def _browser_key(runtime: ManagedToolRuntime | Runtime, scope: Scope) -> str:
-    """Whose browser this run uses: its thread's, or its signed-in user's."""
+    """Whose browser this run uses: its thread's, or its signed-in person's.
+
+    A service principal, such as a schedule's, is shared by all of its runs, so
+    under user scope each of those runs gets its thread's browser instead.
+    """
     if scope == "thread":
         return f"thread:{_thread_id(runtime)}"
     info = runtime.server_info
@@ -215,6 +265,8 @@ def _browser_key(runtime: ManagedToolRuntime | Runtime, scope: Scope) -> str:
     if principal is None:
         msg = 'browser scope "user" needs a signed-in user'
         raise RuntimeError(msg)
+    if principal.kind != "person":
+        return f"thread:{_thread_id(runtime)}"
     return f"user:{principal.id}"
 
 
@@ -260,12 +312,17 @@ def _credentials() -> dict[str, str]:
     return credentials
 
 
-def _browsers_url() -> str:
-    """The LangSmith browsers API (beta), at the endpoint the SDK's sandbox client uses."""
+def _sandboxes_url() -> str:
+    """The LangSmith sandboxes API, at the endpoint the SDK's sandbox client uses."""
     from langsmith.utils import get_env_var  # noqa: PLC0415
 
     endpoint = get_env_var("ENDPOINT") or "https://api.smith.langchain.com"
-    return f"{endpoint.rstrip('/')}/v2/sandboxes/browsers"
+    return f"{endpoint.rstrip('/')}/v2/sandboxes"
+
+
+def _browsers_url() -> str:
+    """The LangSmith browsers API (beta)."""
+    return f"{_sandboxes_url()}/browsers"
 
 
 def _check(resp: httpx.Response, action: str) -> httpx.Response:
@@ -278,7 +335,7 @@ def _check(resp: httpx.Response, action: str) -> httpx.Response:
     return resp
 
 
-async def _open(name: str, idle_ttl_seconds: int) -> _Session:
+async def _open(name: str, idle_ttl_seconds: int, *, hidpi: bool) -> _Session:
     """Attach Stagehand to the window of browser ``name``, creating either as needed."""
     from langsmith.sandbox import AsyncSandboxClient  # noqa: PLC0415
 
@@ -292,7 +349,8 @@ async def _open(name: str, idle_ttl_seconds: int) -> _Session:
     )
     async with api, sandboxes:
         made = await api.post(
-            _browsers_url(), json={"name": name, "idle_ttl_seconds": idle_ttl_seconds}
+            _browsers_url(),
+            json={"name": name, "idle_ttl_seconds": idle_ttl_seconds, "hidpi": hidpi},
         )
         if made.status_code != httpx.codes.CONFLICT:  # conflict: it already exists
             _check(made, "create the browser")
@@ -318,6 +376,57 @@ async def _open(name: str, idle_ttl_seconds: int) -> _Session:
 
         local_url = f"ws://127.0.0.1:{port}/devtools/browser/{window['id']}"
         return await _attach(ws_url, local_url, headers)
+
+
+def _thread_sandbox(runtime: ManagedToolRuntime) -> str | None:
+    """The run's sandbox once MDA has opened it; the browser never opens one.
+
+    Tools see the sandbox behind a CompositeBackend, through a lazy handle made fresh
+    for each run, so the handle asks the process whether the box is open.
+    """
+    from managed_deepagents.runtime import _LazyManagedSandboxBackend  # noqa: PLC0415
+
+    backend: object = runtime.backend
+    while isinstance(backend, CompositeBackend):
+        backend = backend.default
+    if isinstance(backend, _LazyManagedSandboxBackend):
+        backend = backend.opened()
+    if not isinstance(backend, SandboxBackendProtocol) or backend.id.startswith("pending:"):
+        return None
+    return backend.id
+
+
+def _localhost_alias(sandbox_id: str) -> str:
+    """The browser's host for a sandbox's localhost: ``sb-`` and its id in lowercase base32."""
+    label = base64.b32encode(uuid.UUID(sandbox_id).bytes).decode().rstrip("=").lower()
+    return f"sb-{label}.localhost"
+
+
+async def _share_localhost(name: str, sandbox: str) -> None:
+    """Let browser ``name`` open ``sandbox``'s servers at ``http://localhost:<port>``.
+
+    One window attached with ``share_localhost`` serves every window of the
+    browser, so this adds one beside the agent's instead of reopening it. A
+    sandbox replaced under the same name keeps the window's ``sandbox`` but not
+    its id, so the window is checked by the id its ``localhost_alias`` names.
+    """
+    credentials = _credentials()
+    tenant = {"X-Tenant-Id": credentials["tenant_id"]} if "tenant_id" in credentials else {}
+    headers = {"X-Api-Key": credentials["api_key"], **tenant}
+    base = f"{_browsers_url()}/{name}"
+    async with httpx.AsyncClient(headers=headers, timeout=_HTTP_TIMEOUT) as api:
+        found = _check(await api.get(base), "look up the browser").json().get("attachments")
+        window = next((w for w in found or [] if w.get("name") == _LOCALHOST_WINDOW), None)
+        if window is not None:
+            box = _check(
+                await api.get(f"{_sandboxes_url()}/boxes/{sandbox}"), "look up the sandbox"
+            )
+            if window.get("localhost_alias") == _localhost_alias(box.json()["id"]):
+                return
+            stale = f"{base}/attachments/{window['id']}"
+            _check(await api.delete(stale), "drop the stale localhost window")
+        body = {"name": _LOCALHOST_WINDOW, "sandbox": sandbox, "share_localhost": True}
+        _check(await api.post(f"{base}/attachments", json=body), "share the sandbox's localhost")
 
 
 async def _install_extension(box: AsyncSandbox) -> None:
@@ -466,9 +575,17 @@ async def _window_port(box: AsyncSandbox, window_id: str) -> int:
     raise RuntimeError(msg)
 
 
-#: Each browser's Stagehand client, and the lock its calls take turns on.
+#: Release a browser's client after this long without a call. A run that raises
+#: or pauses on an interrupt never reaches `aafter_agent`, and an open client
+#: holds its browser in use, so the browser would never idle out.
+_RELEASE_AFTER_S = 60.0
+
+#: Each browser's Stagehand client, and the lock its calls take turns on. A lock
+#: lasts only while a call holds or awaits it.
 _SESSIONS: dict[str, _Session] = {}
-_LOCKS: dict[str, asyncio.Lock] = {}
+_LOCKS: weakref.WeakValueDictionary[str, asyncio.Lock] = weakref.WeakValueDictionary()
+#: Each browser's pending idle release.
+_RELEASES: dict[str, asyncio.Task[None]] = {}
 
 
 class BrowserMiddleware(AgentMiddleware):
@@ -476,23 +593,39 @@ class BrowserMiddleware(AgentMiddleware):
 
     name = "mda-browser"
 
-    def __init__(self, *, scope: Scope = "thread", idle_ttl_seconds: int = 600) -> None:
+    def __init__(
+        self, *, scope: Scope = "thread", idle_ttl_seconds: int = 600, hidpi: bool = False
+    ) -> None:
         """Build the browser tools.
 
         Args:
             scope: ``"thread"`` gives each thread its own browser; ``"user"``
                 shares one per signed-in user across their threads, logins
-                included. A user's threads take turns on it.
+                included. Each of their threads drives its own tab, and their
+                calls take turns.
             idle_ttl_seconds: Stop a browser after this long idle.
+            hidpi: Create browsers that render pages at twice the resolution,
+                so their live view is sharp on HiDPI screens. It applies only
+                to browsers this creates: LangSmith fixes it at creation.
         """
         super().__init__()
         self.scope: Scope = scope
         self.idle_ttl_seconds = idle_ttl_seconds
+        self.hidpi = hidpi
         # Process-wide: MDA builds this middleware for every run, and a user's
         # concurrent threads must share their browser's one client.
         self._sessions = _SESSIONS
         self._locks = _LOCKS
+        self._releases = _RELEASES
         self.tools = self._build_tools()
+
+    def browser_name(self, runtime: ManagedToolRuntime | Runtime) -> str:
+        """The LangSmith browser this run's browser tools use, whether or not it exists yet.
+
+        Raises:
+            RuntimeError: the run has no thread, or user scope has no signed-in user.
+        """
+        return _browser_name(_browser_key(runtime, self.scope))
 
     async def _call(
         self, runtime: ManagedToolRuntime, fn: Callable[[_Session, Page], Awaitable[T]]
@@ -505,27 +638,67 @@ class BrowserMiddleware(AgentMiddleware):
         """
         try:
             key = _browser_key(runtime, self.scope)
+            # A user's threads share the browser, so each drives its own tab.
+            thread = _thread_id(runtime) if key.startswith("user:") else None
         except RuntimeError as err:
             return f"error: {err}"
         # Stagehand serves one client per browser: calls on a browser take turns.
         async with self._locks.setdefault(key, asyncio.Lock()):
-            for attempt in (1, 2):
-                try:
-                    if key not in self._sessions:
+            try:
+                for attempt in (1, 2):
+                    try:
                         name = _browser_name(key)
-                        self._sessions[key] = await _open(name, self.idle_ttl_seconds)
-                    session = self._sessions[key]
-                    return await fn(session, await session.page())
-                except Exception as err:  # noqa: BLE001 - recover or report
-                    if _dead_session(err) and attempt == 1:
-                        await self._release(key)
-                        continue
-                    return f"error: {type(err).__name__}: {err}"
+                        if key not in self._sessions:
+                            self._sessions[key] = await _open(
+                                name, self.idle_ttl_seconds, hidpi=self.hidpi
+                            )
+                        session = self._sessions[key]
+                        await self._share(session, name, key, runtime)
+                        return await fn(session, await session.page(thread))
+                    except Exception as err:  # noqa: BLE001 - recover or report
+                        if _dead_session(err) and attempt == 1:
+                            await self._release(key)
+                            continue
+                        return f"error: {type(err).__name__}: {err}"
+            finally:
+                self._release_later(key)
         return "error: browser unavailable"
+
+    async def _share(
+        self, session: _Session, name: str, key: str, runtime: ManagedToolRuntime
+    ) -> None:
+        """Share the thread's sandbox's localhost with its browser, once that sandbox exists.
+
+        Only a thread's browser: a user's serves several threads, and their
+        sandboxes cannot all be ``localhost``. Browsing goes on without it.
+        """
+        sandbox = _thread_sandbox(runtime) if key.startswith("thread:") else None
+        if sandbox is None or session.shared == sandbox:
+            return
+        try:
+            await _share_localhost(name, sandbox)
+        except Exception as err:  # noqa: BLE001 - tried again on the next call
+            _LOG.warning("could not share sandbox %s's localhost with %s: %s", sandbox, name, err)
+            return
+        session.shared = sandbox
 
     async def _release(self, key: str) -> None:
         if (session := self._sessions.pop(key, None)) is not None:
             await session.close()
+
+    def _release_later(self, key: str) -> None:
+        """Restart ``key``'s idle countdown, which releases its client when it runs out."""
+        if (pending := self._releases.pop(key, None)) is not None:
+            pending.cancel()
+        self._releases[key] = asyncio.create_task(self._release_when_idle(key))
+
+    async def _release_when_idle(self, key: str) -> None:
+        await asyncio.sleep(_RELEASE_AFTER_S)
+        # A call holding the lock restarts the countdown before it lets go,
+        # cancelling this one.
+        async with self._locks.setdefault(key, asyncio.Lock()):
+            self._releases.pop(key, None)
+            await self._release(key)
 
     async def aafter_agent(self, state: AgentState, runtime: Runtime) -> None:  # noqa: ARG002
         """Release the client between runs, so it never idles out holding the extension."""
@@ -541,12 +714,12 @@ class BrowserMiddleware(AgentMiddleware):
         async def snapshot(runtime: ManagedToolRuntime, *, includeIframes: bool = True) -> str:  # noqa: N803 - contract name
             async def go(session: _Session, page: Page) -> str:
                 result = await page.snapshot(include_iframes=includeIframes)
-                session.ids = dict(result.xpath_map)
+                session.ids[page.page_id] = dict(result.xpath_map)
                 return str(result.formatted_tree)
 
             return await middleware._call(runtime, go)
 
-        @tool(description=RUN_DESCRIPTION)
+        @tool(description=RUN_DESCRIPTION + (LOCALHOST_NOTE if self.scope == "thread" else ""))
         async def run(
             runtime: ManagedToolRuntime,
             code: str | None = None,
@@ -560,7 +733,7 @@ class BrowserMiddleware(AgentMiddleware):
                 if code is not None:
                     source = _RUN_SOURCE % code
                 else:
-                    steps = _hydrate(session.ids, actions or [])
+                    steps = _hydrate(session.ids.get(page.page_id, {}), actions or [])
                     if isinstance(steps, str):
                         return steps
                     source, payload = _ACTIONS_SOURCE, {"steps": steps}
