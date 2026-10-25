@@ -119,12 +119,10 @@ async def _catalog(context: OpenSweRunContext, backend: OpenSweBackend) -> Catal
     return await backend.catalog(None) if backend.has_run else Catalog()
 
 
-def _backend_reports(
-    backend: OpenSweBackend, catalog: Catalog, invocation_id: str | None
-) -> list[AgentMiddleware]:
+def _backend_reports(backend: OpenSweBackend, catalog: Catalog) -> list[AgentMiddleware]:
     """The backend's transcript and usage see every reply and every tool call."""
     return [
-        ReportRepliesMiddleware(backend, invocation_id),
+        ReportRepliesMiddleware(backend),
         RuntimeToolsMiddleware(backend, FILE_TOOLS),
         *([IncidentEvidenceMiddleware(backend)] if catalog.incident_evidence else []),
     ]
@@ -168,7 +166,9 @@ async def agent(runtime: ManagedServerRuntime) -> DeepAgentDefinition:
     context = OpenSweRunContext.model_validate(
         execution.context if execution is not None and execution.context is not None else {}
     )
-    backend = OpenSweBackend(context.run_token, worker_grant=context.worker_grant)
+    backend = OpenSweBackend(
+        context.run_token, worker_grant=context.worker_grant, invocation_id=context.invocation_id
+    )
     catalog = await _catalog(context, backend)
     models = catalog.models
     model = (
@@ -240,7 +240,7 @@ async def agent(runtime: ManagedServerRuntime) -> DeepAgentDefinition:
             "model": subagent_model,
             "tools": subagent_tools[subagent.name],
             "middleware": [
-                *_backend_reports(backend, catalog, context.invocation_id),
+                *_backend_reports(backend, catalog),
                 *skills,
                 file_tools,
                 *replace_sandbox,
@@ -266,7 +266,7 @@ async def agent(runtime: ManagedServerRuntime) -> DeepAgentDefinition:
                 else None,
             ),
             *replace_sandbox,
-            *_backend_reports(backend, catalog, context.invocation_id),
+            *_backend_reports(backend, catalog),
             *skills,
             file_tools,
             task_retry(),

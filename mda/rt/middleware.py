@@ -485,9 +485,8 @@ class ReportRepliesMiddleware(AgentMiddleware):
     counts it by, and the report goes out in line behind the tool calls it follows.
     """
 
-    def __init__(self, backend: OpenSweBackend, invocation_id: str | None) -> None:
+    def __init__(self, backend: OpenSweBackend) -> None:
         self._backend = backend
-        self._invocation_id = invocation_id
 
     async def awrap_model_call(
         self,
@@ -499,6 +498,8 @@ class ReportRepliesMiddleware(AgentMiddleware):
         held = held if isinstance(held, Mapping) else {}
         route = held.get("model_route")
         route = route if isinstance(route, str) and route else None
+        # Read per call: a worker learns its invocation only once it adopts its run.
+        invocation_id = self._backend.invocation_id
         for message in response.result:
             if isinstance(message, AIMessage):
                 message.response_metadata = {
@@ -506,10 +507,10 @@ class ReportRepliesMiddleware(AgentMiddleware):
                     **({"open_swe_model_route": route} if route else {}),
                     **(
                         {
-                            "open_swe_invocation_id": self._invocation_id,
-                            "open_swe_run_id": self._invocation_id,
+                            "open_swe_invocation_id": invocation_id,
+                            "open_swe_run_id": invocation_id,
                         }
-                        if self._invocation_id
+                        if invocation_id
                         else {}
                     ),
                 }

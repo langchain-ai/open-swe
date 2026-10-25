@@ -49,6 +49,8 @@ class Adopted(BaseModel):
     run_token: str
     # The worker's own catalog; None when the backend could not plan it.
     catalog: Catalog | None = None
+    # The worker run's invocation, which its usage counts its replies by.
+    invocation_id: str | None = None
 
 
 # Only authorizes a launch, or returns the worker it already made.

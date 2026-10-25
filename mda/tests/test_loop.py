@@ -304,6 +304,7 @@ async def test_reports_carry_what_they_report_never_the_conversation(
         },
     )
     monkeypatch.setattr(GenericFakeChatModel, "bind_tools", lambda self, *args, **kwargs: self)
+    backend.invocation_id = "invocation-1"
 
     @tool
     async def look() -> str:
@@ -317,7 +318,7 @@ async def test_reports_carry_what_they_report_never_the_conversation(
         model=GenericFakeChatModel(messages=iter([called, AIMessage(content="done", id="ai-2")])),
         tools=[look],
         middleware=[
-            ReportRepliesMiddleware(backend, "invocation-1"),
+            ReportRepliesMiddleware(backend),
             RuntimeToolsMiddleware(backend, ()),
         ],
     )

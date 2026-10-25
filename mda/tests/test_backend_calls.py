@@ -1453,7 +1453,11 @@ async def test_a_launched_worker_adopts_its_own_run_token_before_anything_runs(
                 "run_id": "worker-run",
                 "instructions": "Fix login",
             }
-            adopted = {"run_token": "worker-token", "catalog": {"excluded": ["slack_reply"]}}
+            adopted = {
+                "run_token": "worker-token",
+                "catalog": {"excluded": ["slack_reply"]},
+                "invocation_id": "worker-invocation",
+            }
             return httpx2.Response(200, request=request, json=adopted)
         return httpx2.Response(200, request=request, json={})
 
@@ -1476,6 +1480,8 @@ async def test_a_launched_worker_adopts_its_own_run_token_before_anything_runs(
     assert "catalog" not in [hook for hook, _ in seen]
     assert backend.adopted is not None and backend.adopted.excluded == ["slack_reply"]
     assert all(bearer == "Bearer worker-token" for _, bearer in seen[1:])
+    # Its replies are stamped with its own invocation, which its usage counts them by.
+    assert backend.invocation_id == "worker-invocation"
 
 
 @pytest.mark.parametrize(

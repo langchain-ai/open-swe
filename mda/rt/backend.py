@@ -217,7 +217,13 @@ def _call_failure(response: httpx2.Response) -> CallFailure | None:
 class OpenSweBackend:
     """The Open SWE backend, called with one run's token, or the grant a launched worker adopts it with."""
 
-    def __init__(self, run_token: str | None, *, worker_grant: str | None = None) -> None:
+    def __init__(
+        self,
+        run_token: str | None,
+        *,
+        worker_grant: str | None = None,
+        invocation_id: str | None = None,
+    ) -> None:
         base = os.environ.get(BACKEND_URL_ENV, "").strip().rstrip("/")
         if not base:
             raise BackendCallError(f"{BACKEND_URL_ENV} is not configured")
@@ -226,6 +232,9 @@ class OpenSweBackend:
         self._worker_grant = worker_grant if run_token is None else None
         # The worker's own catalog, once it adopted a run token: what it may offer the model.
         self.adopted: Catalog | None = None
+        # The run's invocation, which its usage counts its replies by; a worker learns
+        # its own when it adopts a run token.
+        self.invocation_id = invocation_id
         self.reports = Reports(self)
 
     @property
@@ -243,6 +252,7 @@ class OpenSweBackend:
             self, ADOPT, Adopt(thread_id=thread_id, run_id=run_id, instructions=instructions)
         )
         self._run_token, self._worker_grant = adopted.run_token, None
+        self.invocation_id = adopted.invocation_id
         self.adopted = adopted.catalog or await self.catalog(run_id)
 
     async def post(

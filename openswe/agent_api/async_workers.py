@@ -146,7 +146,9 @@ async def adopt(grant: WorkerGrant, body: Adopt) -> Adopted:
         thread_id=body.thread_id,
         assistant_id=grant.coordinator.assistant_id,
     )
-    return Adopted(run_token=started.token, catalog=started.catalog)
+    return Adopted(
+        run_token=started.token, catalog=started.catalog, invocation_id=started.invocation_id
+    )
 
 
 @dataclass(frozen=True)
