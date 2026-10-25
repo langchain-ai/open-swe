@@ -10,7 +10,7 @@ from typing import Any, Literal, cast
 
 from fastapi import HTTPException
 from langchain_core.messages.content import ImageContentBlock, create_image_block
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
 from openswe.bridge.store import Bridge, BridgeStore, SandboxBridgeBinding
 from openswe.dashboard.admin import is_admin
@@ -87,7 +87,10 @@ from openswe.users.repository_defaults import RepositoryDefaults
 from openswe.utils.dashboard_handoff import (
     DASHBOARD_HANDOFF_BODY,
     RELAYED_FROM_KEY,
+    REPLIES_KEY,
+    PassageReply,
     dashboard_input_context,
+    passage_replies,
 )
 from openswe.utils.json_types import JsonObject, as_thread_dict, thread_metadata
 from openswe.utils.thread_ops import langgraph_client, queue_message_for_thread
@@ -566,6 +569,19 @@ def _command_message_id(params: dict[str, Any]) -> str | None:
     return message_id if isinstance(message_id, str) and message_id else None
 
 
+def _command_message_replies(params: dict[str, Any]) -> list[PassageReply]:
+    """The passages a ``run.start`` command's newest user message replies to."""
+    run_input = params.get("input")
+    messages = run_input.get("messages") if isinstance(run_input, dict) else None
+    last = messages[-1] if isinstance(messages, list) and messages else None
+    kwargs = last.get("additional_kwargs") if isinstance(last, dict) else None
+    raw = kwargs.get(REPLIES_KEY) if isinstance(kwargs, dict) else None
+    try:
+        return passage_replies(raw)
+    except ValidationError as exc:
+        raise HTTPException(422, f"invalid replies: {exc.errors()[0]['msg']}") from exc
+
+
 def _relayed_from(params: dict[str, Any]) -> str | None:
     """Take the relaying thread's id off a ``run.start`` command's params."""
     relayed_from = params.pop(RELAYED_FROM_KEY, None)
@@ -727,6 +743,7 @@ async def _attributed_run_messages(
     client: Any,
     review_chat_pr_url: str | None = None,
     relayed_from: str | None = None,
+    replies: Sequence[PassageReply] = (),
 ) -> tuple[list[RunMessage], set[str], set[str]]:
     """The human message a dashboard command carries, attributed to its sender.
 
@@ -789,7 +806,7 @@ async def _attributed_run_messages(
         )
     structured = build_input_messages(
         content,
-        dashboard_input_context(sender_id, relayed_from),
+        dashboard_input_context(sender_id, relayed_from, replies),
         systems=[system for system, _ in notices] or None,
         injected_dynamic_context_hashes=injected,
     )
@@ -867,6 +884,7 @@ async def _enrich_run_start_command(
             raise HTTPException(502, f"could not move this thread: {exc}") from exc
         metadata = {**metadata, **move.update}
     content = _command_message_content(params)
+    replies = _command_message_replies(params)
     relayed_from = _relayed_from(params)
     if offloading and creating:
         raise HTTPException(400, "offloading requires an existing conversation")
@@ -939,6 +957,7 @@ async def _enrich_run_start_command(
         client=client,
         review_chat_pr_url=client_configurable.get("review_chat_pr_url"),
         relayed_from=relayed_from,
+        replies=replies,
     )
     # The transcript keys a human message by the id the graph will carry, so the
     # id is minted here when the client did not send a usable one.
@@ -1140,9 +1159,10 @@ async def steer_running_thread(
     if not isinstance(params, dict):
         params = {}
     content = _command_message_content(params)
+    replies = _command_message_replies(params)
     relayed_from = _relayed_from(params)
     command_images = _dashboard_images_from_content(content)
-    if not _command_prompt_text(content) and not command_images:
+    if not _command_prompt_text(content) and not command_images and not replies:
         raise HTTPException(422, "a follow-up needs a message")
 
     client = langgraph_client()
@@ -1168,6 +1188,7 @@ async def steer_running_thread(
         email=email,
         client=client,
         relayed_from=relayed_from,
+        replies=replies,
     )
     client_message_id = _command_message_id(params)
     message_id = (
@@ -1211,6 +1232,7 @@ async def steer_running_thread(
             **({"email": email} if email else {}),
         },
         "queue_id": message_id,
+        REPLIES_KEY: [reply.model_dump() for reply in replies],
         "surface": "automation" if relayed_from else "web",
         "created_at_ms": _now_ms(),
     }

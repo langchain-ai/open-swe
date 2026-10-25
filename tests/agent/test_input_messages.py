@@ -8,6 +8,7 @@ from openswe.input_messages import (
     person_introduction,
     visible_dynamic_context_hashes,
 )
+from openswe.utils.dashboard_handoff import PassageReply, dashboard_input_context
 
 
 def _parse(content: str) -> ElementTree.Element:
@@ -46,6 +47,37 @@ def test_multimodal_input_preserves_non_text_blocks_and_order() -> None:
     assert isinstance(message["content"], list)
     assert message["content"][0] is image
     assert (_parse(message["content"][1]["text"]).text or "").strip() == "describe <this>"
+
+
+def test_replies_ride_as_escaped_elements_even_without_text() -> None:
+    image = {"type": "image", "base64": "abc", "mime_type": "image/png"}
+    replies = [
+        PassageReply(
+            source="file",
+            file="greet.py",
+            lines="6",
+            before="def greet():\n    ",
+            selection='return "</reply>"',
+            after="\n",
+            comment="Use a <constant>",
+        ),
+        PassageReply(source="conversation", selection="Opening a PR.", comment="Draft?"),
+    ]
+    message = human_input([image], dashboard_input_context("github:octocat", None, replies))
+
+    assert isinstance(message["content"], list)
+    root = _parse(message["content"][1]["text"])
+    assert (root.text or "").strip() == ""
+    first, second = root.findall("reply")
+    assert 'selection: return "</reply>"' in (first.text or "")
+    assert "comment: Use a <constant>" in (first.text or "")
+    assert "before:\n  def greet():\n      \n" in (first.text or "")
+    assert (second.text or "").split("\n")[1:] == [
+        "source: conversation",
+        "selection: Opening a PR.",
+        "comment: Draft?",
+        "",
+    ]
 
 
 def _person_intro_message(entity_id: str) -> HumanMessage:

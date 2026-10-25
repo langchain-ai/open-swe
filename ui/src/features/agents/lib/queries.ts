@@ -31,6 +31,7 @@ import type {
   WorkflowPushApprovalsResponse,
 } from "./types"
 import { CLAUDE_CODE_SOURCE } from "./sidebarFilter"
+import type { PassageReply } from "@/features/agents/utils/passageReply"
 import { useSidebarPrefsHydrated } from "./sidebarPrefs"
 import type { ChatSort } from "./sidebarPrefs"
 import type { Skill, SkillInput } from "@/lib/api"
@@ -1255,6 +1256,8 @@ export function optimisticThread(
 export interface SendAgentMessageVariables {
   content: string
   images?: Array<ImageChunk>
+  /** Passages the person replied to, each with its context and their comment. */
+  replies?: Array<PassageReply>
   model_id?: string | null
   effort?: string | null
   model_selection_changed?: boolean

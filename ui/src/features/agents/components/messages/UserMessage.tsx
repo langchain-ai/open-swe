@@ -11,6 +11,7 @@ import { ExpandableMessageChip } from "./ExpandableMessageChip"
 import { TaskEventMessage } from "./TaskEventMessage"
 import { SlackMrkdwn } from "./SlackMrkdwn"
 import type { Message } from "@/features/agents/lib/types"
+import type { PassageReply } from "@/features/agents/utils/passageReply"
 import { cn } from "@/lib/utils"
 
 const COLLAPSED_MAX_HEIGHT_PX = 250
@@ -28,6 +29,30 @@ export function UserMessage({ message }: { message: Message }) {
   return <StandardUserMessage message={message} />
 }
 
+/** A passage the sender replied to, shown as they selected it, then their comment. */
+function SentReply({ reply }: { reply: PassageReply }) {
+  return (
+    <div className="mb-space-2 flex flex-col gap-space-1 text-sm leading-[1.6]">
+      {reply.file ? (
+        <CodeBlock
+          title={`${reply.file}:${reply.lines ?? ""}`}
+          language={reply.file.split(".").pop() ?? ""}
+          text={reply.selection}
+        />
+      ) : (
+        <blockquote className="border-l-2 border-default pl-space-3 [overflow-wrap:anywhere] whitespace-pre-wrap text-secondary">
+          {reply.selection}
+        </blockquote>
+      )}
+      {reply.comment && (
+        <p className="[overflow-wrap:anywhere] whitespace-pre-wrap text-primary">
+          {reply.comment}
+        </p>
+      )}
+    </div>
+  )
+}
+
 function StandardUserMessage({ message }: { message: Message }) {
   const isSystem = message.structuredSenderKind === "system"
   const isSlack = message.structuredSurface === "slack"
@@ -39,7 +64,12 @@ function StandardUserMessage({ message }: { message: Message }) {
   )
 
   const images = message.chunks.filter((c) => c.kind === "image")
-  const hasBody = Boolean(text) || images.length > 0 || excerpts.length > 0
+  const replies = message.replies ?? []
+  const hasBody =
+    Boolean(text) ||
+    images.length > 0 ||
+    excerpts.length > 0 ||
+    replies.length > 0
   const [expanded, setExpanded] = useState(false)
   const [isTruncated, setIsTruncated] = useState(false)
   const textRef = useRef<HTMLDivElement>(null)
@@ -73,6 +103,9 @@ function StandardUserMessage({ message }: { message: Message }) {
               language={excerpt.language}
               text={excerpt.code}
             />
+          ))}
+          {replies.map((reply, i) => (
+            <SentReply key={i} reply={reply} />
           ))}
           {images.length > 0 && (
             <div className="mb-space-2 grid max-w-[420px] grid-cols-2 gap-space-2">
