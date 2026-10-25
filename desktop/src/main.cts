@@ -1216,7 +1216,12 @@ async function serveDesktopUi(request: Request) {
     return new Response("Method not allowed", { status: 405 });
   }
   if (desktopUi?.backendUrl !== backendUrl) {
-    desktopUi = new DesktopUi(backendUrl, fetch, serveBundledUi);
+    desktopUi = new DesktopUi(
+      backendUrl,
+      fetch,
+      serveBundledUi,
+      path.join(app.getPath("userData"), "ui-cache"),
+    );
   }
   return desktopUi.serve(request);
 }

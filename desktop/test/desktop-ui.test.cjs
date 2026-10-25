@@ -1,104 +1,148 @@
 const test = require("node:test");
 const assert = require("node:assert/strict");
+const { mkdtemp, rm } = require("node:fs/promises");
+const { tmpdir } = require("node:os");
+const path = require("node:path");
+const { createHash } = require("node:crypto");
 const { DesktopUi } = require("../build/desktop-ui.cjs");
 
 const page = () =>
   new Request("open-swe://app/agents/local-thread", {
     headers: { accept: "text/html" },
   });
-const asset = () => new Request("open-swe://app/assets/dashboard.js");
-const shell = () =>
-  new Response("hosted shell", { headers: { "content-type": "text/html" } });
+const asset = () => new Request("open-swe://app/assets/lazy.js");
+const bundled = async () => new Response("bundled");
 
-test("loads the deployed shell and assets without sending renderer credentials", async () => {
-  const calls = [];
-  const ui = new DesktopUi(
-    "https://backend.example",
-    async (url, init) => {
-      calls.push({ url, init });
-      return url.endsWith("_shell.html")
-        ? shell()
-        : new Response("hosted asset");
-    },
-    () => {
-      throw new Error("Bundled UI should not be used");
-    },
-  );
-  assert.equal(await (await ui.serve(page())).text(), "hosted shell");
-  assert.equal(await (await ui.serve(asset())).text(), "hosted asset");
-  assert.deepEqual(
-    calls.map(({ url }) => url),
-    [
-      "https://backend.example/_shell.html",
-      "https://backend.example/assets/dashboard.js",
-    ],
-  );
-  for (const { init } of calls) {
+async function fixture(t) {
+  const root = await mkdtemp(path.join(tmpdir(), "desktop-ui-"));
+  t.after(() => rm(root, { recursive: true, force: true }));
+  return root;
+}
+
+function server(version, failedAsset) {
+  const bodies = {
+    "/_shell.html": `shell ${version}`,
+    "/assets/lazy.js": `lazy ${version}`,
+  };
+  return async (url, init) => {
     assert.equal(init.credentials, "omit");
     assert.equal(init.redirect, "error");
     assert.equal(init.headers, undefined);
-  }
+    const pathname = new URL(url).pathname;
+    if (pathname === "/desktop-ui-manifest.json")
+      return Response.json({
+        files: Object.entries(bodies).map(([assetPath, body]) => ({
+          path: assetPath,
+          sha256: createHash("sha256").update(body).digest("hex"),
+        })),
+      });
+    if (pathname === failedAsset) throw new Error("interrupted download");
+    return new Response(bodies[pathname], {
+      headers: { "set-cookie": "untrusted=value", "content-encoding": "gzip" },
+    });
+  };
+}
+
+const offline = async () => {
+  throw new Error("offline");
+};
+
+test("persists a complete server UI across restarts, including unopened lazy routes", async (t) => {
+  const root = await fixture(t);
+  const ui = new DesktopUi(
+    "https://backend.example",
+    server("v1"),
+    bundled,
+    root,
+  );
+  const response = await ui.serve(page());
+  assert.equal(await response.text(), "shell v1");
+  assert.equal(response.headers.get("set-cookie"), null);
+  assert.equal(response.headers.get("content-encoding"), null);
+  const restarted = new DesktopUi(
+    "https://backend.example",
+    offline,
+    bundled,
+    root,
+  );
+  assert.equal(await (await restarted.serve(page())).text(), "shell v1");
+  assert.equal(await (await restarted.serve(asset())).text(), "lazy v1");
+  assert.equal(
+    await (
+      await new DesktopUi(
+        "https://other.example",
+        offline,
+        bundled,
+        root,
+      ).serve(page())
+    ).text(),
+    "bundled",
+  );
 });
 
-test("offline or incompatible backends use a consistent bundled UI until the next navigation", async () => {
-  for (const failure of [
-    new Error("offline"),
-    new Response("Not found", { status: 404 }),
-    new Response("{}", { headers: { "content-type": "application/json" } }),
+test("interrupted or corrupt updates never replace the last complete version", async (t) => {
+  const root = await fixture(t);
+  await new DesktopUi(
+    "https://backend.example",
+    server("v1"),
+    bundled,
+    root,
+  ).serve(page());
+  for (const fetchUi of [
+    server("v2", "/assets/lazy.js"),
+    async (url, init) => {
+      const response = await server("v3")(url, init);
+      return url.endsWith("lazy.js") ? new Response("wrong hash") : response;
+    },
   ]) {
-    let online = false;
-    const urls = [];
-    const ui = new DesktopUi(
-      "https://backend.example",
-      async (url) => {
-        urls.push(url);
-        if (online) return shell();
-        if (failure instanceof Error) throw failure;
-        return failure;
-      },
-      async () => new Response("bundled"),
+    const ui = new DesktopUi("https://backend.example", fetchUi, bundled, root);
+    assert.equal(await (await ui.serve(page())).text(), "shell v1");
+    await assert.rejects(
+      ui.refresh(),
+      /interrupted download|changed during download/,
     );
-    assert.equal(await (await ui.serve(page())).text(), "bundled");
-    online = true;
-    assert.equal(await (await ui.serve(asset())).text(), "bundled");
-    assert.equal(urls.length, 1);
-    assert.equal(await (await ui.serve(page())).text(), "hosted shell");
+    const restarted = new DesktopUi(
+      "https://backend.example",
+      offline,
+      bundled,
+      root,
+    );
+    assert.equal(await (await restarted.serve(page())).text(), "shell v1");
   }
 });
 
-test("strips upstream transport and cookie headers from decoded UI responses", async () => {
+test("promotes complete updates on next navigation without changing active page assets", async (t) => {
+  const root = await fixture(t);
+  await new DesktopUi(
+    "https://backend.example",
+    server("v1"),
+    bundled,
+    root,
+  ).serve(page());
+  const ui = new DesktopUi(
+    "https://backend.example",
+    server("v2"),
+    bundled,
+    root,
+  );
+  assert.equal(await (await ui.serve(page())).text(), "shell v1");
+  await ui.refresh();
+  assert.equal(await (await ui.serve(asset())).text(), "lazy v1");
+  assert.equal(await (await ui.serve(page())).text(), "shell v2");
+  await ui.refresh();
+  assert.equal(await (await ui.serve(asset())).text(), "lazy v2");
+});
+
+test("rejects manifest paths that could fetch APIs or escape the cache", async (t) => {
+  const root = await fixture(t);
   const ui = new DesktopUi(
     "https://backend.example",
     async () =>
-      new Response("decoded shell", {
-        headers: {
-          "content-type": "text/html",
-          "content-encoding": "gzip",
-          "content-length": "123",
-          "set-cookie": "osw_session=untrusted",
-        },
+      Response.json({
+        files: [{ path: "/dashboard/api/session", sha256: "a".repeat(64) }],
       }),
-    () => {
-      throw new Error("Bundled UI should not be used");
-    },
+    bundled,
+    root,
   );
-  const response = await ui.serve(page());
-  assert.equal(await response.text(), "decoded shell");
-  for (const name of ["content-encoding", "content-length", "set-cookie"])
-    assert.equal(response.headers.has(name), false);
-});
-
-test("never substitutes bundled assets after loading the hosted shell", async () => {
-  const ui = new DesktopUi(
-    "https://backend.example",
-    async (url) => {
-      if (url.endsWith("_shell.html")) return shell();
-      throw new Error("connection lost");
-    },
-    () => {
-      throw new Error("Must not mix UI versions");
-    },
-  );
-  await ui.serve(page());
-  await assert.rejects(ui.serve(asset()), /connection lost/);
+  assert.equal(await (await ui.serve(page())).text(), "bundled");
 });
