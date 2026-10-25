@@ -40,6 +40,8 @@ export interface AgentRightPanelProps {
   /** Rendered for the Browser surface, which only cloud threads offer. */
   renderBrowser?: () => ReactNode
   browserAvailable?: boolean
+  /** Rendered for the App surface, once the thread's agent previews an app. */
+  renderApp?: () => ReactNode
   collapsed: boolean
   onCollapsedChange: (next: boolean) => void
   onTerminalOpenFile?: (path: string) => void
@@ -143,6 +145,10 @@ export function AgentRightPanel(props: AgentRightPanelProps) {
 
   const handleAddBrowser = useCallback(() => {
     openSurface(threadRef, "preview")
+  }, [openSurface, threadRef])
+
+  const handleAddApp = useCallback(() => {
+    openSurface(threadRef, "app")
   }, [openSurface, threadRef])
 
   const handleActivate = useCallback(
@@ -299,6 +305,18 @@ export function AgentRightPanel(props: AgentRightPanelProps) {
       {activeSurface?.kind === "preview" && props.renderBrowser
         ? props.renderBrowser()
         : null}
+      {/* The app stays mounted while hidden, like a terminal, so it keeps its
+          state and goes on answering the agent's calls to its tools. */}
+      {props.renderApp && surfaces.some((surface) => surface.kind === "app") ? (
+        <div
+          className={cn(
+            "flex min-h-0 flex-1 flex-col",
+            activeSurface?.kind !== "app" && "hidden"
+          )}
+        >
+          {props.renderApp()}
+        </div>
+      ) : null}
       {activeSurface?.kind === "files" || activeSurface?.kind === "file" ? (
         <FilesPanel
           key={workspaceTargetKey(terminalTarget)}
@@ -371,6 +389,7 @@ export function AgentRightPanel(props: AgentRightPanelProps) {
             browserAvailable: props.browserAvailable ?? false,
           }
         : {})}
+      {...(props.renderApp ? { onAddApp: handleAddApp } : {})}
       terminalAvailable={terminalAvailable}
       diffAvailable={diffAvailable}
       layoutControls={layoutControls}

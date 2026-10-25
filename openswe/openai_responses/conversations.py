@@ -21,7 +21,7 @@ from openswe.sandboxes.tool_access import (
     TOOLS_HEADER,
     authenticate_tool_access,
 )
-from openswe.threads.runs import create_dashboard_thread_record, start_sandbox_guest_run
+from openswe.threads.runs import create_dashboard_thread_record, start_run_with_tool_results
 from openswe.threads.summary import repo_config_from_metadata
 from openswe.utils.json_types import JsonObject, thread_metadata
 from openswe.utils.thread_ops import langgraph_client
@@ -159,7 +159,7 @@ class SandboxCaller:
             overrides.update(
                 agent_model_id=model[0], agent_effort=model[1], model_selection="explicit"
             )
-        return await start_sandbox_guest_run(
+        return await start_run_with_tool_results(
             thread_id,
             self.owner_login,
             prompt=prompt,
