@@ -3,29 +3,28 @@
 Planners place whole hunks, so a chunk can gather related hunks across files and
 no hunk is shared between chunks. A planner may first split a git hunk into
 smaller hunks at changed lines it names. Every changed line is in one chunk, in Other,
-or not yet planned. Lines and splits are followed by content, in order within their
-file, so the plan carries over to a new head: chunks and Other keep the lines that
-survive, a new line joins the chunk that holds the rest of its hunk, and the
-remaining new or edited lines come back unplanned for a planner to place.
+or not yet planned. Chunks and Other are line sets, carried to a new head by
+how git moved each line: they keep the lines that survive, a new line joins the
+chunk that holds the rest of its hunk, and the remaining new or edited lines
+come back unplanned for a planner to place.
 """
 
-import re
-from collections import Counter
+from bisect import bisect_right
 from collections.abc import Iterable
 from dataclasses import dataclass
+from functools import cached_property
 from typing import Self
 from uuid import uuid7
 
 from pydantic import BaseModel, Field
 
-from openswe.walkthrough.diff import FileChange, LineRange, LineRef, Sign
+from openswe.walkthrough.diff import Block, Carry, DiffIndex, Segment, segments
+from openswe.walkthrough.lines import SIGNS, LinePoint, LineRange, LineSet, Ranges, Sign
 
 MAX_TITLE_CHARS = 120
 MAX_EXPLANATION_CHARS = 1_200
 MAX_OTHER_SUMMARY_CHARS = 1_200
 _MAX_ERRORS = 20
-_LINE_NAME_RE = re.compile(r"[+-]\d+")
-_WORD_RE = re.compile(r"\w")
 
 
 class RangeError(ValueError):
@@ -54,121 +53,165 @@ class FileHunks(BaseModel):
     hunks: list[str]
 
 
-def line_name(line: LineRef) -> str:
-    return f"{line.sign}{line.lineno}"
-
-
-def by_name(refs: Iterable[LineRef]) -> dict[tuple[str, str], LineRef]:
-    """``refs`` keyed by path and name, for ``find_line``."""
-    return {(ref.path, line_name(ref)): ref for ref in refs}
-
-
-def find_line(path: str, name: str, candidates: dict[tuple[str, str], LineRef]) -> LineRef:
-    """The changed line ``name`` (``+12`` or ``-40``) names in ``path``."""
-    if not _LINE_NAME_RE.fullmatch(name):
+def find_line(path: str, name: str, candidates: LineSet) -> LinePoint:
+    """The changed line ``name`` (``+12`` or ``-40``) names in ``path``, among ``candidates``."""
+    point = LinePoint.named(path, name)
+    if point is None:
         raise RangeError(f"`{name}` is not a changed line; write it as `+12` or `-40`")
-    found = candidates.get((path, name))
-    if found is None:
+    if point not in candidates:
         raise RangeError(f"`{path}` has no available changed line {name}")
-    return found
+    return point
 
 
 @dataclass(frozen=True)
+class Hunk:
+    path: str
+    # Its first changed line in diff order, such as ``+12``.
+    name: str
+    # Its changed lines in diff order.
+    segments: list[Segment]
+
+    @cached_property
+    def lines(self) -> LineSet:
+        # A sign's segments in one hunk are in order and never touch, so they are ranges as they are.
+        return LineSet(
+            {
+                self.path: {
+                    sign: Ranges(
+                        tuple((start, end) for s, start, end in self.segments if s == sign)
+                    )
+                    for sign in SIGNS
+                }
+            }
+        )
+
+    @classmethod
+    def starting(cls, path: str, segments: list[Segment]) -> Self:
+        sign, lineno, _ = segments[0]
+        return cls(path, f"{sign}{lineno}", segments)
+
+
+def _pieces(path: str, blocks: list[Block], cuts: set[tuple[Sign, int]]) -> list[Hunk]:
+    """One git hunk, cut into smaller hunks before each of its lines in ``cuts``."""
+    if not cuts:
+        return [Hunk.starting(path, segments(blocks))]
+    pieces: list[list[Segment]] = [[]]
+    for sign, start, end in segments(blocks):
+        if pieces[-1] and (sign, start) in cuts:
+            pieces.append([])
+        for cut_sign, lineno in sorted(cuts):
+            if cut_sign == sign and start < lineno <= end:
+                pieces[-1].append((sign, start, lineno - 1))
+                pieces.append([])
+                start = lineno
+        pieces[-1].append((sign, start, end))
+    return [Hunk.starting(path, piece) for piece in pieces]
+
+
 class Hunks:
     """The diff's hunks as the plan splits them, each named by its first changed line."""
 
-    names: dict[LineRef, str]
+    def __init__(self, index: DiffIndex, by_path: dict[str, list[Hunk]]) -> None:
+        self._index = index
+        self._by_path = by_path
+        self._named = {(h.path, h.name): h for hunks in by_path.values() for h in hunks}
+        # Each file's segments per sign, by first line, with the hunk each belongs to.
+        self._segments: dict[tuple[str, Sign], tuple[list[int], list[tuple[int, int, int]]]] = {}
+        for path, hunks in by_path.items():
+            # Hunks are in diff order, so each sign's segments come out sorted.
+            for sign in SIGNS:
+                found = [
+                    (start, end, at)
+                    for at, hunk in enumerate(hunks)
+                    for s, start, end in hunk.segments
+                    if s == sign
+                ]
+                if found:
+                    self._segments[path, sign] = ([start for start, _, _ in found], found)
 
     @classmethod
-    def of(cls, changes: list[FileChange], splits: Iterable[LineRef]) -> Self:
+    def of(cls, index: DiffIndex, splits: Iterable[LinePoint]) -> Self:
         """Git's hunks, with a new hunk starting at every line in ``splits``."""
-        starts = set(splits)
-        split_paths = {ref.path for ref in starts}
-        names: dict[LineRef, str] = {}
-        for change in changes:
-            split = change.path in split_paths
-            name, hunk = "", None
-            for line in change.lines:
-                ref = line.ref
-                if line.hunk != hunk or (split and ref in starts):
-                    name, hunk = line_name(ref), line.hunk
-                names[ref] = name
-        return cls(names)
+        cuts: dict[str, set[tuple[Sign, int]]] = {}
+        for point in splits:
+            cuts.setdefault(point.path, set()).add((point.sign, point.lineno))
+        return cls(
+            index,
+            {
+                file.path: [
+                    hunk
+                    for blocks in file.hunks
+                    for hunk in _pieces(file.path, blocks, cuts.get(file.path, set()))
+                ]
+                for file in index.files
+            },
+        )
 
-    def key(self, ref: LineRef) -> tuple[str, str]:
-        return ref.path, self.names.get(ref) or line_name(ref)
+    def get(self, path: str, name: str) -> Hunk | None:
+        return self._named.get((path, name))
 
-    def groups(self, refs: Iterable[LineRef]) -> dict[tuple[str, str], list[LineRef]]:
-        grouped: dict[tuple[str, str], list[LineRef]] = {}
-        for ref in refs:
-            grouped.setdefault(self.key(ref), []).append(ref)
-        return grouped
+    def holding(self, point: LinePoint) -> Hunk | None:
+        parts = self.within(LineSet.point(point))
+        return parts[0][0] if parts else None
 
-    def fragments(self, before: Self, refs: list[LineRef]) -> list[tuple[str, str]]:
-        """Hunks new since ``before`` that hold only braces, punctuation or blank lines."""
-        existing = {frozenset(hunk) for hunk in before.groups(refs).values()}
-        return [
-            key
-            for key, hunk in self.groups(refs).items()
-            if frozenset(hunk) not in existing
-            and not any(_WORD_RE.search(ref.text) for ref in hunk)
-        ]
+    def within(self, lines: LineSet) -> list[tuple[Hunk, LineSet]]:
+        """Each hunk holding some of ``lines``, with those lines, in diff order."""
+        parts: list[tuple[Hunk, LineSet]] = []
+        for path in self._index.in_order(lines.paths):
+            found: dict[int, dict[Sign, list[LineRange]]] = {}
+            for sign in SIGNS:
+                starts, segments_ = self._segments.get((path, sign), ([], []))
+                for start, end in lines.side(path, sign):
+                    at = max(bisect_right(starts, start) - 1, 0)
+                    while at < len(segments_) and segments_[at][0] <= end:
+                        low, high, hunk = segments_[at]
+                        if max(low, start) <= min(high, end):
+                            found.setdefault(hunk, {}).setdefault(sign, []).append(
+                                (max(low, start), min(high, end))
+                            )
+                        at += 1
+            hunks = self._by_path[path] if found else []
+            for at in sorted(found):
+                # Found in line order, and two pieces of one hunk never touch.
+                sides = {sign: Ranges(tuple(spans)) for sign, spans in found[at].items()}
+                parts.append((hunks[at], LineSet({path: sides})))
+        return parts
 
-    def summary(self, refs: list[LineRef]) -> str:
-        files = {ref.path for ref in refs}
-        hunks = {self.key(ref) for ref in refs}
+    def summary(self, lines: LineSet) -> str:
+        parts = self.within(lines)
+        files = {hunk.path for hunk, _ in parts}
+        count = sum(len(part) for _, part in parts)
         return (
-            f"{len(hunks)} hunk{'s' if len(hunks) != 1 else ''} ({len(refs)} changed lines) "
+            f"{len(parts)} hunk{'s' if len(parts) != 1 else ''} ({count} changed lines) "
             f"in {len(files)} file{'s' if len(files) != 1 else ''}"
         )
 
-    def spans(self, refs: Iterable[LineRef]) -> list[str]:
+    def spans(self, lines: LineSet) -> list[str]:
         """One entry per file naming its hunks and their size, such as ``a.py +12 (+3/-1), -40 (-5)``.
 
         Lines no longer in the diff are left out.
         """
-        counts: Counter[tuple[str, str, Sign]] = Counter()
-        for ref in refs:
-            if name := self.names.get(ref):
-                counts[ref.path, name, ref.sign] += 1
-        files: dict[str, dict[str, None]] = {}
-        for path, name, _ in counts:
-            files.setdefault(path, {})[name] = None
-        return [
-            f"{path} "
-            + ", ".join(
-                f"{name} ("
-                + "/".join(
-                    f"{sign}{counts[path, name, sign]}"
-                    for sign in ("+", "-")
-                    if counts[path, name, sign]
-                )
-                + ")"
-                for name in names
-            )
-            for path, names in files.items()
-        ]
+        by_path: dict[str, list[str]] = {}
+        for hunk, part in self.within(lines):
+            size = "/".join(f"{sign}{n}" for sign in SIGNS if (n := part.count(sign)))
+            by_path.setdefault(hunk.path, []).append(f"{hunk.name} ({size})")
+        return [f"{path} " + ", ".join(entries) for path, entries in by_path.items()]
 
-    def claim(self, files: list[FileHunks], candidates: list[LineRef]) -> list[LineRef]:
-        """Every one of the ``candidates`` in the named hunks, in diff order."""
+    def claim(self, files: list[FileHunks], candidates: LineSet) -> LineSet:
+        """Every one of the ``candidates`` in the named hunks."""
         errors: list[str] = []
-        named: set[tuple[str, str]] = set()
-        available = {self.key(ref) for ref in candidates}
+        named: list[LineSet] = []
         for hunks in files:
             for name in hunks.hunks:
-                if (hunks.path, name) in available:
-                    named.add((hunks.path, name))
+                hunk = self.get(hunks.path, name)
+                if hunk is not None and (part := hunk.lines & candidates):
+                    named.append(part)
                 else:
                     errors.append(f"`{hunks.path}` has no available hunk {name}")
         if not named and not errors:
             errors.append("no hunks are named")
         _raise(errors)
-        return [ref for ref in candidates if self.key(ref) in named]
-
-
-def _new(refs: list[LineRef], existing: list[LineRef]) -> list[LineRef]:
-    have = set(existing)
-    return [ref for ref in refs if ref not in have]
+        return LineSet.union(named)
 
 
 def _raise(errors: list[str]) -> None:
@@ -179,38 +222,38 @@ def _raise(errors: list[str]) -> None:
         )
 
 
-def claim(files: list[FileRanges], candidates: list[LineRef]) -> list[LineRef]:
-    """The ``candidates`` the ranges name, in diff order; every range must name at least one."""
-    order = {ref: i for i, ref in enumerate(candidates)}
-    sides: dict[tuple[str, str], list[LineRef]] = {}
-    for ref in order:
-        sides.setdefault((ref.path, ref.sign), []).append(ref)
-    paths = {ref.path for ref in candidates}
+def claim(files: list[FileRanges], candidates: LineSet) -> LineSet:
+    """The ``candidates`` the ranges name; every range must name at least one."""
+    paths = set(candidates.paths)
     errors: list[str] = []
-    refs: set[LineRef] = set()
+    picked: list[LineSet] = []
     for ranges in files:
         if ranges.path not in paths:
             errors.append(f"`{ranges.path}` has no changed lines available here")
             continue
-        for sign, spans in (("+", ranges.added), ("-", ranges.deleted)):
-            side = sides.get((ranges.path, sign), [])
+        sides: tuple[tuple[Sign, list[LineRange]], ...] = (
+            ("+", ranges.added),
+            ("-", ranges.deleted),
+        )
+        for sign, spans in sides:
             for start, end in spans:
-                hits = [ref for ref in side if start <= ref.lineno <= end]
-                if not hits:
+                hit = LineSet.of(ranges.path, sign, [(start, end)]) & candidates
+                if not hit:
                     kind = "added" if sign == "+" else "deleted"
                     errors.append(f"`{ranges.path}` {kind} {start}-{end} holds no available line")
-                refs.update(hits)
-    if not refs and not errors:
+                picked.append(hit)
+    lines = LineSet.union(picked)
+    if not lines and not errors:
         errors.append("the ranges name no lines")
     _raise(errors)
-    return sorted(refs, key=order.__getitem__)
+    return lines
 
 
 class PlanChunk(BaseModel):
     id: str = Field(default_factory=lambda: uuid7().hex)
     title: str
     explanation: str = ""
-    lines: list[LineRef]
+    lines: LineSet
     # The chunk's code as a reader sees it, rendered at the plan's head.
     code: str = ""
 
@@ -234,72 +277,54 @@ class PlanStatus(BaseModel):
 class Plan(BaseModel):
     head_sha: str
     chunks: list[PlanChunk] = []
-    other: list[LineRef] = []
+    other: LineSet = LineSet()
     # Binary, mode-only and empty-file changes: nothing to show, so always Other.
     other_files: list[str] = []
     # Their diff fingerprints, so a reader who approved Other sees a changed one again.
     other_file_fingerprints: list[str] = []
     other_summary: str = ""
     # Changed lines a planner chose to start a new hunk at, splitting git's hunk in two.
-    splits: list[LineRef] = []
+    splits: list[LinePoint] = []
 
     @classmethod
-    def start(cls, head_sha: str, changes: list[FileChange]) -> Self:
-        textless = [c for c in changes if c.textless]
+    def start(cls, head_sha: str, index: DiffIndex) -> Self:
         return cls(
             head_sha=head_sha,
-            other_files=[c.path for c in textless],
-            other_file_fingerprints=[c.fingerprint for c in textless],
+            other_files=[file.path for file in index.textless],
+            other_file_fingerprints=[file.fingerprint for file in index.textless],
         )
 
-    def carried_to(self, head_sha: str, changes: list[FileChange]) -> Self:
-        """This plan on a new head, keeping every line that survives by content."""
-
-        followed = LineRef.follow([*self.planned(), *self.splits], changes)
-
-        def take(refs: list[LineRef]) -> list[LineRef]:
-            return [followed[ref] for ref in refs if ref in followed]
-
-        moved = type(self).start(head_sha, changes)
+    def carried_to(self, head_sha: str, index: DiffIndex, carry: Carry) -> Self:
+        """This plan on a new head, keeping every line git kept."""
+        moved = type(self).start(head_sha, index)
         for chunk in self.chunks:
-            if lines := take(chunk.lines):
+            if lines := carry.lines(chunk.lines):
                 moved.chunks.append(chunk.model_copy(update={"lines": lines, "code": ""}))
-        moved.other = take(self.other)
+        moved.other = carry.lines(self.other)
         moved.other_summary = self.other_summary
-        moved.splits = take(self.splits)
-        moved.gather_hunks(changes)
+        moved.splits = [point for s in self.splits if (point := carry.point(s)) is not None]
+        moved.gather_hunks(index)
         return moved
 
-    def hunks(self, changes: list[FileChange]) -> Hunks:
-        return Hunks.of(changes, self.splits)
+    def hunks(self, index: DiffIndex) -> Hunks:
+        return Hunks.of(index, self.splits)
 
-    def gather_hunks(self, changes: list[FileChange]) -> None:
+    def gather_hunks(self, index: DiffIndex) -> None:
         """Move each unplanned line into the chunk that holds the rest of its hunk."""
-        hunks = self.hunks(changes)
-        owner: dict[tuple[str, str], PlanChunk] = {}
-        for chunk in self.chunks:
-            for ref in chunk.lines:
-                if ref in hunks.names:
-                    owner.setdefault(hunks.key(ref), chunk)
-        for ref in self.unplanned(changes):
-            if chunk := owner.get(hunks.key(ref)):
-                chunk.lines.append(ref)
-        order = {ref: i for i, ref in enumerate(hunks.names)}
-        for chunk in self.chunks:
-            chunk.lines.sort(key=order.__getitem__)
+        for hunk, part in self.hunks(index).within(self.unplanned(index)):
+            owner = next((c for c in self.chunks if c.lines & hunk.lines), None)
+            if owner is not None:
+                owner.lines = owner.lines | part
 
-    def planned(self) -> set[LineRef]:
-        return {ref for chunk in self.chunks for ref in chunk.lines} | set(self.other)
+    def planned(self) -> LineSet:
+        return LineSet.union([*(chunk.lines for chunk in self.chunks), self.other])
 
-    def unplanned(self, changes: list[FileChange]) -> list[LineRef]:
-        """The changed lines in no chunk and not in Other, in diff order."""
-        planned = self.planned()
-        return [line.ref for change in changes for line in change.lines if line.ref not in planned]
+    def unplanned(self, index: DiffIndex) -> LineSet:
+        """The changed lines in no chunk and not in Other."""
+        return index.lines - self.planned()
 
-    def complete(self, changes: list[FileChange]) -> bool:
-        """Whether every changed line is planned, stopping at the first that is not."""
-        planned = self.planned()
-        return all(line.ref in planned for change in changes for line in change.lines)
+    def complete(self, index: DiffIndex) -> bool:
+        return not self.unplanned(index)
 
     def number_of(self, chunk_id: str) -> int | None:
         return next((i for i, c in enumerate(self.chunks, start=1) if c.id == chunk_id), None)
@@ -313,12 +338,12 @@ class Plan(BaseModel):
         self.chunks.insert(position, chunk)
         return position + 1
 
-    def add_other(self, refs: list[LineRef]) -> None:
-        self.other += _new(refs, self.other)
+    def add_other(self, lines: LineSet) -> None:
+        self.other = self.other | lines
 
-    def restore_other(self, refs: list[LineRef]) -> None:
-        taken = set(refs)
-        self.other = [ref for ref in self.other if ref not in taken]
+    def restore_other(self, lines: LineSet) -> None:
+        self.other = self.other - lines
 
-    def split(self, refs: list[LineRef]) -> None:
-        self.splits += _new(refs, self.splits)
+    def split(self, points: list[LinePoint]) -> None:
+        have = set(self.splits)
+        self.splits += [point for point in points if point not in have]

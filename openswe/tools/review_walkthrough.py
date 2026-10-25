@@ -26,6 +26,7 @@ from openswe.tools.approve_pull_request import approve_pull_request
 from openswe.tools.mark_pull_request_ready import mark_pull_request_ready
 from openswe.tools.plan_walkthrough import PLANNING_ERRORS
 from openswe.tools.record_author_feedback import record_author_feedback
+from openswe.walkthrough.lines import LineSet
 from openswe.walkthrough.plan import (
     MAX_EXPLANATION_CHARS,
     MAX_TITLE_CHARS,
@@ -145,15 +146,8 @@ async def walkthrough_show_lines(
     """Implement the `walkthrough_show_lines` tool."""
     try:
         state = await _State.load()
-        left = set(state.reader.remaining(state.reader.unseen))
-        candidates = [
-            line.ref
-            for change in state.ctx.workspace.changes
-            for line in change.lines
-            if line.ref in left
-        ]
-        lines = claim(show, candidates)
-        code = await state.ctx.workspace.checkout.render(lines, state.ctx.workspace.changes)
+        lines = claim(show, state.reader.remaining(state.reader.unseen))
+        code = await state.ctx.workspace.checkout.render(lines)
     except (GuideUnavailableError, *PLANNING_ERRORS) as exc:
         return {"success": False, "error": str(exc)}
     if state.shown_this_turn():
@@ -212,8 +206,8 @@ async def walkthrough_skip_changes(
         if bad:
             return {"success": False, "error": f"no such chunks: {bad}"}
         picked = [chunk for n in chunks if (chunk := state.reader.chunk(n)) is not None]
-        extra = []
-    lines = [ref for chunk in picked for ref in state.reader.remaining(chunk.lines)] + extra
+        extra = LineSet()
+    lines = LineSet.union([*(state.reader.remaining(chunk.lines) for chunk in picked), extra])
     current = state.walk.on_screen
     replaced = (
         state.walk.withdraw()

@@ -355,27 +355,22 @@ def _seeded_pull(body: dict[str, Any]) -> dict[str, Any]:
 async def control_seed_walkthrough(request: Request) -> JSONResponse:
     """Store a one-chunk plan for a fake pull request's current head, as a scout would."""
     from openswe.github.pull_requests import PullRequest
-    from openswe.walkthrough.diff import parse
+    from openswe.sandbox_scripts.walkthrough import parse_index
+    from openswe.walkthrough.diff import DiffIndex
     from openswe.walkthrough.plan import Plan, PlanChunk
     from openswe.walkthrough.record import Walkthrough
 
     body = await request.json()
     pull = _seeded_pull(body)
-    changes = parse(
-        "\n".join(
-            f"diff --git a/{file['filename']} b/{file['filename']}\n"
-            f"+++ b/{file['filename']}\n{file.get('patch') or ''}"
-            for file in pull["files"]
-        )
+    diff = "\n".join(
+        f"diff --git a/{file['filename']} b/{file['filename']}\n"
+        f"+++ b/{file['filename']}\n{file.get('patch') or ''}"
+        for file in pull["files"]
     )
+    index = DiffIndex.model_validate({"files": parse_index(diff.splitlines())})
     plan = Plan(
         head_sha=pull["head_sha"],
-        chunks=[
-            PlanChunk(
-                title=str(body.get("title") or "Seeded chunk"),
-                lines=[line.ref for change in changes for line in change.lines],
-            )
-        ],
+        chunks=[PlanChunk(title=str(body.get("title") or "Seeded chunk"), lines=index.lines)],
     )
     pull_request = await PullRequest(
         owner=pull["owner"], repo=pull["repo"], number=pull["number"]
@@ -385,7 +380,7 @@ async def control_seed_walkthrough(request: Request) -> JSONResponse:
         pull_request.id,
         plan,
         merge_base_sha=fakes.base_sha(pull),
-        changes=changes,
+        index=index,
         replacing=None,
     )
     await Walkthrough.set_human_input(pull_request.id, str(body.get("human_input") or ""))

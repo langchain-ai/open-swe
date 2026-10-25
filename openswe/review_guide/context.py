@@ -7,7 +7,7 @@ from openswe.run_config import RunConfig
 from openswe.runtime import get_cached_sandbox_backend
 from openswe.users import User
 from openswe.walkthrough.checkout import CheckoutError, PinnedCheckout
-from openswe.walkthrough.diff import LineRef
+from openswe.walkthrough.lines import LineSet
 from openswe.walkthrough.planner import PlannerUnavailableError, PlanWorkspace
 from openswe.walkthrough.record import PlanMovedError
 
@@ -55,7 +55,7 @@ class GuideContext:
         return self.workspace.head_sha
 
     @property
-    def unplanned(self) -> list[LineRef]:
+    def unplanned(self) -> LineSet:
         return self.workspace.unplanned
 
     def walk(self) -> Walk:
@@ -68,4 +68,6 @@ class GuideContext:
         )
 
     async def reader(self, walk: Walk) -> Reader:
-        return Reader.of(walk, self.workspace.plan, await self.session.seen_lines(), self.unplanned)
+        return Reader.of(
+            walk, self.workspace.plan, await self.session.seen_at(walk.head_sha), self.unplanned
+        )

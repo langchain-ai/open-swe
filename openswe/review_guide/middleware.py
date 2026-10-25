@@ -124,10 +124,16 @@ class ReviewGuideMiddleware(OpenSWEMiddleware[ReviewGuideState]):
             }
         if not workspace.complete:
             await self._plan_in_background(session, head)
+        await self._carry_seen(session, checkout, workspace)
         walk = session.walk
         moved = walk is not None and walk.head_sha != head.head.sha
         if walk is not None and moved:
-            walk, gone = walk.moved_to(head.head.sha, workspace.changes)
+            carry = await checkout.carry(walk.head_sha, "", workspace.index)
+            walk, gone = (
+                walk.moved_to(head.head.sha, carry)
+                if carry is not None
+                else (Walk(head_sha=head.head.sha), walk.on_screen)
+            )
             await session.save_walk(walk)
             if gone is not None:
                 await retire(
@@ -150,7 +156,9 @@ class ReviewGuideMiddleware(OpenSWEMiddleware[ReviewGuideState]):
         approved = (
             await approve_click(session, walk, self._approve_ts) if self._approve_ts else None
         )
-        reader = Reader.of(walk, workspace.plan, await session.seen_lines(), workspace.unplanned)
+        reader = Reader.of(
+            walk, workspace.plan, await session.seen_at(walk.head_sha), workspace.unplanned
+        )
         return {
             "review_guide_rules": rules,
             "messages": [
@@ -166,6 +174,17 @@ class ReviewGuideMiddleware(OpenSWEMiddleware[ReviewGuideState]):
                 )
             ],
         }
+
+    async def _carry_seen(
+        self, session: ReviewGuideSession, checkout: PinnedCheckout, workspace: PlanWorkspace
+    ) -> None:
+        """Carry what the reader approved to the workspace's head, when it is numbered at another."""
+        seen = await session.seen()
+        if seen is None or seen.head_sha == workspace.head_sha:
+            return
+        carry = await checkout.carry(seen.head_sha, "", workspace.index)
+        if carry is not None:
+            await session.carry_seen(workspace.head_sha, carry, seen.head_sha)
 
     async def _plan_in_background(self, session: ReviewGuideSession, head: PullRequestHead) -> None:
         """Have the review scout place what the plan is missing, while the guide talks."""

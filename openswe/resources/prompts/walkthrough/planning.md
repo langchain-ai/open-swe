@@ -27,4 +27,4 @@ A hunk that mixes noise with a real change goes in a chunk, unless you split the
 - `walkthrough_move_to_other` sends hunks to Other without placing a chunk, or with `restore: true` takes them out again.
 - `walkthrough_describe_other` sets the one or two sentences readers see above Other, on what kinds of change it holds. Update it when Other changes in kind.
 
-When the pull request moved since the plan was made, chunks kept every line that survived by content, and a new line in a hunk a chunk already holds joined that chunk. Only hunks no chunk holds are unplanned. Place those with `after` so each lands next to the chunk it belongs with, rather than at the end.
+When the pull request moved since the plan was made, chunks kept every line git left unchanged, and a new line in a hunk a chunk already holds joined that chunk. Only hunks no chunk holds are unplanned. Place those with `after` so each lands next to the chunk it belongs with, rather than at the end.
