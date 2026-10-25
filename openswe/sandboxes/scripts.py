@@ -41,8 +41,8 @@ class SandboxScript:
     Each call runs it with a base64 JSON request and reads back the one JSON
     line it prints. The copy is written only when that version is missing, so
     the common case is one exec, and a sandbox always runs the script this
-    backend ships. A request too long for a command line is uploaded instead,
-    and the script gets ``@<path>`` to read it from.
+    backend ships. A request too long for a command line is written to a file
+    instead, and the script gets ``@<path>`` to read it from.
     """
 
     def __init__(self, name: str, root: str, *, text: str | None = None) -> None:
@@ -60,6 +60,22 @@ class SandboxScript:
         digest = hashlib.sha256(self.text.encode()).hexdigest()[:16]
         return f"{self.root}/{stem}-{digest}.py"
 
+    async def _write_request(
+        self, backend: SandboxBackendProtocol, argument: str, *, timeout: int
+    ) -> str:
+        """Write ``argument`` to a file through the shell, in pieces that each fit a command line.
+
+        Not ``upload_files``: a local sandbox maps an uploaded path under its own root,
+        where the shell running the script would not find it.
+        """
+        path = shlex.quote(f"/tmp/open-swe-request-{secrets.token_hex(16)}")
+        for at in range(0, len(argument), _MAX_ARGUMENT_BYTES):
+            piece = shlex.quote(argument[at : at + _MAX_ARGUMENT_BYTES])
+            written = await backend.aexecute(f"printf %s {piece} >> {path}", timeout=timeout)
+            if written.exit_code not in (0, None):
+                raise RuntimeError(f"could not write a request for {self.name}")
+        return path.strip("'")
+
     async def run(
         self,
         backend: SandboxBackendProtocol,
@@ -73,11 +89,7 @@ class SandboxScript:
         missing = f"open-swe-script-missing-{secrets.token_hex(16)}"
         argument = encoded(json.dumps(request))
         if len(argument) > _MAX_ARGUMENT_BYTES:
-            path = f"/tmp/open-swe-request-{secrets.token_hex(16)}"
-            uploaded = await backend.aupload_files([(path, argument.encode())])
-            if any(result.error for result in uploaded):
-                raise RuntimeError(f"could not upload a request for {self.name}")
-            argument = f"@{path}"
+            argument = f"@{await self._write_request(backend, argument, timeout=timeout)}"
         run = (
             "command -v python3 >/dev/null || "
             '{ echo \'{"error": "this needs python3 in the sandbox"}\'; exit 0; }; '

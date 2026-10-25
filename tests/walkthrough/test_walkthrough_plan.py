@@ -172,6 +172,22 @@ async def test_context_separated_deletion_and_addition_render_separately(
     )
 
 
+async def test_a_chunk_too_large_for_a_command_line_still_renders(
+    repo: Path, checkout: PinnedCheckout
+) -> None:
+    base = _git(repo, "rev-parse", "HEAD").strip()
+    _git(repo, "checkout", "-qb", "feature")
+    head = _commit(repo, {"lines.txt": "".join(f"line {n}\n" for n in range(1, 30_001))}, "lines")
+    await _pin(checkout, base, head)
+    # Every other line is its own range, so the request is far past one argument's limit.
+    scattered = _added("lines.txt", *((n, n) for n in range(1, 30_001, 2)))
+
+    code = await checkout.render(scattered)
+
+    assert code.count("`lines.txt` L") == 15_000
+    assert code.startswith("`lines.txt` L1\n```txt\nline 1\n```")
+
+
 async def test_a_chunk_takes_whole_hunks_across_files_and_a_hunk_is_placed_once(
     repo: Path, checkout: PinnedCheckout
 ) -> None:
