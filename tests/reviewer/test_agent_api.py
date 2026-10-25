@@ -178,17 +178,21 @@ async def test_a_runs_tool_and_shell_calls_never_plan_it_and_read_its_settings(
     monkeypatch.setattr(agent, "resolve_github_token", AsyncMock())
     graph = RemoteGraph("agent", never_planned, agent.AgentParts())
     # The settings decided as the run started, signed into its token.
-    run = RUN.model_copy(update={"assistant_id": "agent", "settings": RunSettings(draft_prs=False)})
+    run = RUN.model_copy(
+        update={"assistant_id": "agent", "settings": RunSettings(draft_prs=False)}
+    ).granting()
+    call = {
+        "run_id": "run-1",
+        "name": "draft_preference",
+        "arguments": {"note": "drafts"},
+        "request_id": "call-1",
+    }
 
-    result = await graph.api(
-        run,
-        "operation",
-        {
-            "run_id": "run-1",
-            "name": "draft_preference",
-            "arguments": {"note": "drafts"},
-            "request_id": "call-1",
-        },
+    result = await graph.api(run, "operation", {**call, "grant": run.grant("draft_preference")})
+    # Only an operation the run's catalog granted it runs, however the call names it.
+    ungranted = await graph.api(run, "operation", call)
+    regranted = await graph.api(
+        run, "operation", {**call, "grant": run.granting().grant("draft_preference")}
     )
     verdict = await graph.api(
         run, "check_shell", {"run_id": "run-1", "tool": "execute", "command": "ls"}
@@ -196,6 +200,9 @@ async def test_a_runs_tool_and_shell_calls_never_plan_it_and_read_its_settings(
 
     assert isinstance(result, dict) and result["content"] == "drafts: False"
     assert verdict == {"allowed": True, "command": None, "refusal": None}
+    for refused in (ungranted, regranted):
+        assert isinstance(refused, dict) and refused["status"] == "error"
+        assert "not one of this run's operations" in str(refused["content"])
 
 
 async def test_mda_calls_hide_the_tools_the_graph_middleware_hides_from_each_call() -> None:
@@ -477,6 +484,7 @@ async def test_mda_catalog_leaves_integrations_and_code_mode_to_mda(
     monkeypatch.setenv("SANDBOX_TYPE", "local")
     from langchain.agents.middleware import ModelCallLimitMiddleware
     from langchain.agents.middleware.types import AgentMiddleware
+    from langchain_core.runnables import RunnableConfig
     from langchain_core.tools import StructuredTool
     from langchain_quickjs import CodeInterpreterMiddleware
 
@@ -497,7 +505,9 @@ async def test_mda_catalog_leaves_integrations_and_code_mode_to_mda(
 
         return StructuredTool.from_function(coroutine=run, name=name, description=name)
 
-    async def build(config: object, surface: ToolSurface) -> None:
+    async def build(config: RunnableConfig, surface: ToolSurface) -> None:
+        # What the planner decides for the run, such as the sender's draft preference.
+        config["configurable"]["draft_prs"] = False
         search = integration("mcp_search")
         search.metadata = {
             "mcp_provenance": MCPToolProvenance(
@@ -576,6 +586,17 @@ async def test_mda_catalog_leaves_integrations_and_code_mode_to_mda(
         "write_file",
     ]
     assert catalog["search_tools"] is True
+    # A run started without its catalog gets a token that carries what was decided for
+    # it here, and grants its operations under it.
+    token = catalog["run_token"]
+    assert isinstance(token, str)
+    resigned = verify_runtime_token(token)
+    assert resigned.thread_id == RUN.thread_id and resigned.grant_id is not None
+    assert resigned.settings.draft_prs is False
+    assert all(
+        isinstance(op, dict) and resigned.granted(str(op["name"]), str(op["grant"]))
+        for op in operations
+    )
 
 
 async def test_an_operation_gets_the_state_it_reads_and_answers_the_state_it_changed() -> None:

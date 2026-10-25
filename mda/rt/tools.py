@@ -167,7 +167,12 @@ async def _operate(
     tool_call_id: str,
 ) -> ToolMessage | Command:
     request = _reading(spec, runtime.state).model_copy(
-        update={"run_id": run_id(), "arguments": dict(arguments), "request_id": tool_call_id}
+        update={
+            "run_id": run_id(),
+            "arguments": dict(arguments),
+            "request_id": tool_call_id,
+            "grant": backend.grant(spec),
+        }
     )
     try:
         answer = await call(backend, OPERATION, request, timeout=_seconds(arguments))

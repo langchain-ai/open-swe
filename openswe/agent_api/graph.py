@@ -177,7 +177,7 @@ from openswe.agent_api.operations import Injections, invoke
 from openswe.agent_api.run_parts import RunParts
 from openswe.agent_api.runs import in_graph_context, run_config
 from openswe.agent_api.shell_guards import ShellGuards
-from openswe.agent_api.tokens import RemoteRun, RunSettings
+from openswe.agent_api.tokens import RemoteRun, RunSettings, sign_runtime_token
 from openswe.dispatch import COMPLETION_WEBHOOK_URL
 from openswe.github.proxy import maybe_refresh_proxy_token
 from openswe.github.sandbox_access import READ_ONLY_REVIEW_PERMISSIONS
@@ -299,9 +299,12 @@ class RunSession:
         *,
         started_here: bool,
         assistant_id: str | None = None,
+        run: RemoteRun | None = None,
     ) -> None:
         self.surface = surface
         self.config = config
+        # The run as its token names it, whose catalog grants it its operations.
+        self.run = run
         # The graph the run plays, which decides what a replaced box may reach.
         self.assistant_id = assistant_id
         self._restore = restore
@@ -420,15 +423,34 @@ class RunSession:
         )
 
     async def plan(self) -> Catalog:
-        """The catalog, with who the run acts for and the box MDA creates for it."""
+        """The catalog, with who the run acts for, the box MDA creates for it, and the grant
+        of each operation to the run."""
         sandbox = await self.sandbox()
-        return self.catalog().model_copy(
+        catalog = self.catalog()
+        run = self.run
+        return catalog.model_copy(
             update={
                 "trace_metadata": TurnGitMetadata(self.config).actor,
                 "sandbox": None
                 if sandbox is None
                 else SandboxSpec.model_validate(sandbox.model_dump(mode="json")),
+                "operations": catalog.operations
+                if run is None
+                else [
+                    operation.model_copy(update={"grant": run.grant(operation.name)})
+                    for operation in catalog.operations
+                ],
             }
+        )
+
+    def settings(self) -> RunSettings:
+        """What planning decided for the run, which its later calls read from its token."""
+        cfg = RunConfig.from_config(self.config)
+        return RunSettings(
+            source=cfg.source,
+            draft_prs=cfg.draft_prs,
+            model_id=cfg.resolved_agent_model_id,
+            effort=cfg.resolved_agent_effort,
         )
 
     async def sandbox(self) -> ManagedSandbox | None:
@@ -889,6 +911,10 @@ class TokenRun:
 
     async def operation(self, request: RunOperation) -> OperationResult:
         """Do the work of one of the run's tools: its arguments in, its result out."""
+        if not self.run.granted(request.name, request.grant):
+            return OperationResult(
+                content=f"{request.name} is not one of this run's operations", status="error"
+            )
         cfg = RunConfig.from_config(self.config)
         client = ClientToolsMiddleware(cfg.client_tools) if cfg.client_tools else None
         offered = (
@@ -1040,21 +1066,13 @@ class RemoteGraph:
             self.parts.restore,
             started_here=fresh,
             assistant_id=self.assistant_id,
+            run=run,
         )
 
     async def start_run(self, run: RemoteRun) -> RunStart:
         """What ``run``'s MDA graph is built from, and the settings its calls read."""
         session = await self._planned(run, None, fresh=False)
-        cfg = RunConfig.from_config(session.config)
-        return RunStart(
-            catalog=await session.plan(),
-            settings=RunSettings(
-                source=cfg.source,
-                draft_prs=cfg.draft_prs,
-                model_id=cfg.resolved_agent_model_id,
-                effort=cfg.resolved_agent_effort,
-            ),
-        )
+        return RunStart(catalog=await session.plan(), settings=session.settings())
 
     async def session(
         self, run: RemoteRun, run_id: str | None, *, fresh: bool = False
@@ -1140,7 +1158,12 @@ def _message_content(content: str | list[JsonValue]) -> str | list[str | dict]:
 
 
 async def _catalog(session: RunSession, _request: RunRequest) -> Catalog:
-    return await session.plan()
+    """The catalog of a run started without it, and a token that carries what was decided."""
+    if session.run is None:
+        return await session.plan()
+    session.run = session.run.model_copy(update={"settings": session.settings()}).granting()
+    catalog = await session.plan()
+    return catalog.model_copy(update={"run_token": sign_runtime_token(session.run)})
 
 
 def _b64(data: bytes | None) -> str | None:

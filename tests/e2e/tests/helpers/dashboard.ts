@@ -30,14 +30,23 @@ export async function loginAs(
   expect(res.ok()).toBeTruthy();
 }
 
-export async function optIntoQueue(page: Page) {
+// What a message sent while a run is live does. It is the person's saved
+// preference, so a spec that depends on it sets it rather than inherit another's.
+export async function setFollowUpBehavior(
+  page: Page,
+  behavior: "queue" | "steer",
+) {
   const saved = await page.request.get("/dashboard/api/me/preferences");
   expect(saved.ok()).toBeTruthy();
   const res = await page.request.put("/dashboard/api/me/preferences", {
-    data: { ...(await saved.json()), follow_up_behavior: "queue" },
+    data: { ...(await saved.json()), follow_up_behavior: behavior },
     headers: SAME_ORIGIN_HEADERS,
   });
   expect(res.ok()).toBeTruthy();
+}
+
+export async function optIntoQueue(page: Page) {
+  await setFollowUpBehavior(page, "queue");
 }
 
 // `monitor` is off by default; the sender opts in on their profile.

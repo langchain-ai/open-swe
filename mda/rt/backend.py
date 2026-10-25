@@ -23,7 +23,7 @@ import httpx2
 from langchain_core.messages import BaseMessage, ToolMessage, messages_to_dict
 from langsmith.run_trees import RunTree
 from pydantic import BaseModel, JsonValue, TypeAdapter, ValidationError
-from runtime_api.catalog import CATALOG, Catalog
+from runtime_api.catalog import CATALOG, Catalog, OperationSpec
 from runtime_api.endpoint import Delivery, call
 from runtime_api.loop import (
     INBOX_RECEIVED,
@@ -285,7 +285,19 @@ class OpenSweBackend:
         return _json.validate_python(response.json())
 
     async def catalog(self, run_id: str | None) -> Catalog:
-        return await call(self, CATALOG, RunRequest(run_id=run_id))
+        """The run's catalog, for a run started without it; every later call carries the token
+        the backend signed with it."""
+        catalog = await call(self, CATALOG, RunRequest(run_id=run_id))
+        if catalog.run_token is not None and self._run_token is not None:
+            self._run_token = catalog.run_token
+        return catalog
+
+    def grant(self, spec: OperationSpec) -> str | None:
+        """The grant to call ``spec``'s operation with: an adopted worker's own, not its coordinator's."""
+        if self.adopted is None:
+            return spec.grant
+        own = next((op for op in self.adopted.operations if op.name == spec.name), None)
+        return None if own is None else own.grant
 
     async def tool_started(
         self, report: ToolCallReport, *, trace: Mapping[str, str] | None = None

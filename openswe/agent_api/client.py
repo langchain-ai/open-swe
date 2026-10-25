@@ -132,7 +132,7 @@ async def start_remote_run(
         assistant_id=assistant_id,
         configurable=_json_object.validate_python(configurable),
         metadata=_json_object.validate_python(metadata),
-    )
+    ).granting()
     # The webapp must not import the agent stack at startup.
     from openswe.agent_api.hosted import hosted_graphs
 

@@ -55,6 +55,8 @@ class OperationSpec(BaseModel):
     reads_all: bool = False
     # What code mode calls it, as ``tools.<code_name>``; None when code cannot call it.
     code_name: str | None = None
+    # The backend's grant of this operation to this run, sent with each call of it.
+    grant: str | None = None
 
 
 class SubagentSpec(BaseModel):
@@ -210,6 +212,9 @@ class Catalog(BaseModel):
     loop: LoopRules | None = None
     # Whether the run offers ``search_tools`` over its operations.
     search_tools: bool = False
+    # The run's token, signed again with what the backend decided as it planned the
+    # run here; only for a run started without its catalog.
+    run_token: str | None = None
 
 
 # Only reads the plan, so it is safe to send again.

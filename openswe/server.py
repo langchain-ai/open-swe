@@ -773,9 +773,22 @@ def agent_tools_by_name() -> Mapping[str, BaseTool]:
     return {tool.name: tool for tool in built}
 
 
-# How long a process keeps the MCP tools it loaded for a person in a workspace.
+# How long a process keeps the MCP tools it loaded for a person in a workspace, and
+# for how many at once.
 _INTEGRATIONS_TTL_SECONDS: Final = 300.0
+_INTEGRATIONS_LIMIT: Final = 128
 _integrations: dict[tuple[str | None, str], tuple[float, dict[str, BaseTool]]] = {}
+
+
+def _keep_integrations(key: tuple[str | None, str], tools: dict[str, BaseTool]) -> None:
+    """Keep ``tools`` for a while, dropping what expired and then the oldest past the limit."""
+    now = time.monotonic()
+    for stale in [k for k, (expires, _tools) in _integrations.items() if expires <= now]:
+        del _integrations[stale]
+    _integrations.pop(key, None)
+    while len(_integrations) >= _INTEGRATIONS_LIMIT:
+        del _integrations[next(iter(_integrations))]
+    _integrations[key] = (now + _INTEGRATIONS_TTL_SECONDS, tools)
 
 
 async def integration_tools(config: RunnableConfig) -> Mapping[str, BaseTool]:
@@ -792,7 +805,7 @@ async def integration_tools(config: RunnableConfig) -> Mapping[str, BaseTool]:
         return loaded[1]
     _gateway, tools = await _run_mcp_tools(cfg.thread_id or "", login, workspace)
     by_name: dict[str, BaseTool] = {tool.name: tool for tool in tools if isinstance(tool, BaseTool)}
-    _integrations[(login, workspace)] = (time.monotonic() + _INTEGRATIONS_TTL_SECONDS, by_name)
+    _keep_integrations((login, workspace), by_name)
     return by_name
 
 
