@@ -91,11 +91,12 @@ class LineMaps(BaseModel):
     """How lines moved from an earlier head and merge base to the current ones, per file.
 
     Each file's blocks are those of ``git diff -U0`` between the two commits;
-    a file missing from both is unchanged between them.
+    a file missing from both is unchanged between them. ``deleted`` is ``None``
+    when the earlier merge base is unknown, so deleted lines cannot be carried.
     """
 
     added: dict[str, list[Block]] = {}
-    deleted: dict[str, list[Block]] = {}
+    deleted: dict[str, list[Block]] | None = {}
 
 
 class Carry:
@@ -110,9 +111,12 @@ class Carry:
         self._kept = {
             sign: {path: _kept(blocks) for path, blocks in by_path.items()}
             for sign, by_path in (("+", maps.added), ("-", maps.deleted))
+            if by_path is not None
         }
 
     def _map(self, path: str, sign: Sign, ranges: Ranges) -> Ranges:
+        if sign not in self._kept:
+            return Ranges()
         found = self._kept[sign].get(path)
         if found is None:
             return ranges

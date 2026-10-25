@@ -128,11 +128,14 @@ class ReviewGuideMiddleware(OpenSWEMiddleware[ReviewGuideState]):
         walk = session.walk
         moved = walk is not None and walk.head_sha != head.head.sha
         if walk is not None and moved:
-            carry = await checkout.carry(walk.head_sha, "", workspace.index)
+            carry = await checkout.carry(walk.head_sha, walk.merge_base_sha, workspace.index)
             walk, gone = (
-                walk.moved_to(head.head.sha, carry)
+                walk.moved_to(head.head.sha, workspace.merge_base_sha, carry)
                 if carry is not None
-                else (Walk(head_sha=head.head.sha), walk.on_screen)
+                else (
+                    Walk(head_sha=head.head.sha, merge_base_sha=workspace.merge_base_sha),
+                    walk.on_screen,
+                )
             )
             await session.save_walk(walk)
             if gone is not None:
@@ -151,7 +154,7 @@ class ReviewGuideMiddleware(OpenSWEMiddleware[ReviewGuideState]):
                 },
             )
         if walk is None:
-            walk = Walk(head_sha=head.head.sha)
+            walk = Walk(head_sha=head.head.sha, merge_base_sha=workspace.merge_base_sha)
             await session.save_walk(walk)
         approved = (
             await approve_click(session, walk, self._approve_ts) if self._approve_ts else None
@@ -182,9 +185,11 @@ class ReviewGuideMiddleware(OpenSWEMiddleware[ReviewGuideState]):
         seen = await session.seen()
         if seen is None or seen.head_sha == workspace.head_sha:
             return
-        carry = await checkout.carry(seen.head_sha, "", workspace.index)
+        carry = await checkout.carry(seen.head_sha, seen.merge_base_sha, workspace.index)
         if carry is not None:
-            await session.carry_seen(workspace.head_sha, carry, seen.head_sha)
+            await session.carry_seen(
+                workspace.head_sha, workspace.merge_base_sha, carry, seen.head_sha
+            )
 
     async def _plan_in_background(self, session: ReviewGuideSession, head: PullRequestHead) -> None:
         """Have the review scout place what the plan is missing, while the guide talks."""

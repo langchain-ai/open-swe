@@ -100,11 +100,13 @@ def test_a_push_keeps_an_unchanged_chunk_on_screen_and_takes_down_a_changed_one(
 
     shifted = _index(_new_file("a.py", "import os", "", "def one():", "def two():"))
     # A blank line inserted after line 1.
-    kept, gone = walk.moved_to("head-2", Carry(LineMaps(added={"a.py": [(1, 0, 2, 1)]}), shifted))
+    kept, gone = walk.moved_to(
+        "head-2", "base", Carry(LineMaps(added={"a.py": [(1, 0, 2, 1)]}), shifted)
+    )
     edited = _index(_new_file("a.py", "import os", "def one(x):", "def two():"))
     # Line 2 rewritten.
     dropped, taken_down = walk.moved_to(
-        "head-3", Carry(LineMaps(added={"a.py": [(2, 1, 2, 1)]}), edited)
+        "head-3", "base", Carry(LineMaps(added={"a.py": [(2, 1, 2, 1)]}), edited)
     )
 
     assert gone is None

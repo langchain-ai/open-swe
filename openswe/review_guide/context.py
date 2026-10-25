@@ -64,7 +64,7 @@ class GuideContext:
         return (
             walk
             if walk is not None and walk.head_sha == self.head_sha
-            else Walk(head_sha=self.head_sha)
+            else Walk(head_sha=self.head_sha, merge_base_sha=self.workspace.merge_base_sha)
         )
 
     async def reader(self, walk: Walk) -> Reader:

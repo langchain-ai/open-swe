@@ -35,8 +35,9 @@ class ReviewGuideSeen(Base):
 
     user_id: Mapped[UUID] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"))
     pull_request_id: Mapped[UUID] = mapped_column(ForeignKey("pull_request.id", ondelete="CASCADE"))
-    # The head ``lines`` are numbered at; reading them at another head carries them there first.
+    # The head and merge base ``lines`` are numbered at; another head carries them there first.
     head_sha: Mapped[str]
+    merge_base_sha: Mapped[str]
     lines_json: Mapped[JsonObject] = mapped_column("lines", JSONB)
     id: Mapped[UUID] = mapped_column(primary_key=True, default_factory=uuid7)
     created_at: Mapped[datetime] = mapped_column(server_default=NOW, init=False)
@@ -225,6 +226,7 @@ class ReviewGuideSession(Base):
     async def _update_seen(
         self,
         head_sha: str,
+        merge_base_sha: str,
         change: Callable[[ReviewGuideSeen | None], LineSet | None],
         *,
         by: UUID | None,
@@ -237,6 +239,7 @@ class ReviewGuideSession(Base):
                     user_id=self.user_id,
                     pull_request_id=self.pull_request_id,
                     head_sha=head_sha,
+                    merge_base_sha=merge_base_sha,
                     lines_json={},
                     created_by=by,
                     updated_by=by,
@@ -256,12 +259,13 @@ class ReviewGuideSession(Base):
             lines = change(row)
             if row is not None and lines is not None:
                 row.head_sha = head_sha
+                row.merge_base_sha = merge_base_sha
                 row.lines_json = lines.dump()
                 row.updated_by = by
             await session.commit()
 
-    async def mark_seen(self, head_sha: str, lines: LineSet) -> None:
-        """Add ``lines``, numbered at ``head_sha``, to what this person has approved."""
+    async def mark_seen(self, head_sha: str, merge_base_sha: str, lines: LineSet) -> None:
+        """Add ``lines``, numbered at ``head_sha`` and ``merge_base_sha``, to what this person approved."""
         if not lines:
             return
 
@@ -269,9 +273,11 @@ class ReviewGuideSession(Base):
             kept = row.lines if row is not None and row.head_sha == head_sha else LineSet()
             return kept | lines
 
-        await self._update_seen(head_sha, add, by=self.user_id)
+        await self._update_seen(head_sha, merge_base_sha, add, by=self.user_id)
 
-    async def carry_seen(self, head_sha: str, carry: Carry, from_sha: str) -> None:
+    async def carry_seen(
+        self, head_sha: str, merge_base_sha: str, carry: Carry, from_sha: str
+    ) -> None:
         """Carry what this person approved at ``from_sha`` to ``head_sha``, if it is still there."""
 
         def moved(row: ReviewGuideSeen | None) -> LineSet | None:
@@ -279,4 +285,4 @@ class ReviewGuideSession(Base):
                 return None
             return carry.lines(row.lines)
 
-        await self._update_seen(head_sha, moved, by=None)
+        await self._update_seen(head_sha, merge_base_sha, moved, by=None)

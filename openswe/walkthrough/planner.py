@@ -65,6 +65,7 @@ class PlanWorkspace:
     pull_request: PullRequest
     checkout: PinnedCheckout
     head_sha: str
+    merge_base_sha: str
     index: DiffIndex
     plan: Plan
     _hunks: dict[tuple[LinePoint, ...], Hunks] = field(default_factory=dict, repr=False)
@@ -81,16 +82,17 @@ class PlanWorkspace:
             if index is None:
                 index = await checkout.index()
                 await Walkthrough.save_index(pull_request.id, head_sha, index)
-            return cls(pull_request, checkout, head_sha, index, stored.plan)
+            return cls(pull_request, checkout, head_sha, stored.merge_base_sha, index, stored.plan)
         # A checkout pinned before a push must not carry a newer plan back to its old head.
         if stored is not None and await _current_head(pull_request) != head_sha:
             raise PlanMovedError("the pull request moved on; start from its new head")
         index = await checkout.index()
+        merge_base_sha = await checkout.merge_base()
         plan = await cls._carry(stored, checkout, head_sha, index)
         if not await Walkthrough.install(
             pull_request.id,
             plan,
-            merge_base_sha=await checkout.merge_base(),
+            merge_base_sha=merge_base_sha,
             index=index,
             replacing=stored.head_sha if stored is not None else None,
         ):
@@ -98,7 +100,7 @@ class PlanWorkspace:
             if moved is None or moved.head_sha != head_sha:
                 raise PlanMovedError("another reader moved the plan to a different head")
             plan = moved.plan
-        return cls(pull_request, checkout, head_sha, index, plan)
+        return cls(pull_request, checkout, head_sha, merge_base_sha, index, plan)
 
     @classmethod
     async def locate(

@@ -39,7 +39,7 @@ async def approve_click(
     approval = walk.approve(message_ts)
     if approval is None or shown is None:
         return None
-    await session.mark_seen(walk.head_sha, approval.lines)
+    await session.mark_seen(walk.head_sha, walk.merge_base_sha, approval.lines)
     await session.save_walk(walk)
     await retire(session.slack_channel_id, shown.message_ts, shown.message_text, "✓ Seen")
     return approval

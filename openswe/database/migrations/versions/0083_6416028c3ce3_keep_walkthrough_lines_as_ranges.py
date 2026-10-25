@@ -34,6 +34,7 @@ def upgrade() -> None:
             user_id uuid NOT NULL REFERENCES users(id) ON DELETE CASCADE,
             pull_request_id uuid NOT NULL REFERENCES pull_request(id) ON DELETE CASCADE,
             head_sha text NOT NULL,
+            merge_base_sha text NOT NULL,
             lines jsonb NOT NULL
         )
     """)
@@ -46,8 +47,8 @@ def upgrade() -> None:
         "pull request, as line ranges at one head, carried to each new head.'"
     )
     op.execute(
-        "COMMENT ON COLUMN review_guide_seen.lines IS 'Per path, added (+, head numbering) and "
-        "deleted (-, merge-base numbering) line ranges.'"
+        "COMMENT ON COLUMN review_guide_seen.lines IS 'Per path, added (+, numbered at head_sha) "
+        "and deleted (-, numbered at merge_base_sha) line ranges.'"
     )
     op.execute("DROP TABLE review_guide_seen_line")
 

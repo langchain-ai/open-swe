@@ -80,8 +80,9 @@ async def _pin(checkout: PinnedCheckout, base: str, head: str) -> DiffIndex:
 async def _carry(
     checkout: PinnedCheckout, old_head: str, base: str, head: str
 ) -> tuple[DiffIndex, Carry]:
+    old_merge_base = _git(Path(checkout.repo_dir), "rev-parse", MERGE_BASE_REF).strip()
     index = await _pin(checkout, base, head)
-    carry = await checkout.carry(old_head, "", index)
+    carry = await checkout.carry(old_head, old_merge_base, index)
     assert carry is not None
     return index, carry
 
@@ -270,6 +271,10 @@ async def test_approved_lines_stay_approved_after_a_rebase(
 
     assert [c.title for c in plan.chunks if reader.remaining(c.lines)] == ["CLI"]
     assert reader.next_chunk() is plan.chunks[1]
+    # Deleted lines are numbered at the old merge base, so without it they are dropped, not guessed.
+    blind = await checkout.carry(head, "", new_index)
+    assert blind is not None
+    assert blind.lines(seen) == seen.only(["core.py"]) - _deleted("core.py", (4, 4))
 
 
 async def test_a_split_hunk_goes_to_two_chunks_and_each_part_keeps_its_new_lines_after_a_push(
@@ -333,7 +338,7 @@ async def test_a_split_that_leaves_only_closing_braces_is_a_fragment(
     index = await _pin(checkout, base, head)
     plan = Plan.start(head, index)
     _stored_as(monkeypatch, plan)
-    workspace = PlanWorkspace(AsyncMock(), checkout, head, index, plan)
+    workspace = PlanWorkspace(AsyncMock(), checkout, head, base, index, plan)
 
     with pytest.raises(RangeError, match="`link.go` \\+4"):
         await workspace.split([FileSplits(path="link.go", at=["+4"])])
@@ -354,7 +359,7 @@ async def test_replacing_chunks_merges_steps_and_releases_omitted_hunks(
     _place(plan, index, "Second", hunks[1])
     rendering = AsyncMock()
     rendering.render.return_value = "merged code"
-    workspace = PlanWorkspace(AsyncMock(), rendering, head, index, plan)
+    workspace = PlanWorkspace(AsyncMock(), rendering, head, base, index, plan)
 
     async def edit(change: Callable[[Plan], object]) -> None:
         change(plan)
@@ -395,7 +400,7 @@ async def test_planning_a_huge_pull_request_costs_its_hunks_not_its_lines(
     plan = Plan.start("head", index)
     plan.add_other(index.lines.only(f"f{i}.json" for i in range(files // 2)))
     _stored_as(monkeypatch, plan)
-    workspace = PlanWorkspace(AsyncMock(), AsyncMock(), "head", index, plan)
+    workspace = PlanWorkspace(AsyncMock(), AsyncMock(), "head", "base", index, plan)
     workspace.checkout.wordless.side_effect = lambda sets: [False] * len(sets)
 
     started = time.perf_counter()

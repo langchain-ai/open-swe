@@ -174,15 +174,15 @@ def maps(request):
     if not ensure_commit(old_head):
         return {"missing": old_head}
     old_base = request.get("old_merge_base") or ""
-    if not old_base or not ensure_commit(old_base):
-        old_base = git_text([*GIT, "merge-base", old_head, BASE_REF]).strip()
+    # Deleted lines are numbered at the old merge base; without it they cannot be carried.
+    known = bool(old_base) and ensure_commit(old_base)
     new_base = git_text([*GIT, "rev-parse", MERGE_BASE_REF]).strip()
     names = [*GIT, "diff", "--name-only", "--no-renames"]
     paths = set(git_text([*names, new_base, HEAD_REF]).splitlines())
-    paths |= set(git_text([*names, old_base, old_head]).splitlines())
+    paths |= set(git_text([*names, old_base if known else new_base, old_head]).splitlines())
     return {
         "added": line_map(old_head, git_text([*GIT, "rev-parse", HEAD_REF]).strip(), paths),
-        "deleted": line_map(old_base, new_base, paths),
+        "deleted": line_map(old_base, new_base, paths) if known else None,
     }
 
 

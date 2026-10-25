@@ -46,6 +46,8 @@ class Skip(BaseModel):
 
 class Walk(BaseModel):
     head_sha: str
+    # Deleted lines are numbered at this merge base; empty for walks saved before it was kept.
+    merge_base_sha: str = ""
     on_screen: OnScreen | None = None
     approvals: list[Approval] = []
     skips: list[Skip] = []
@@ -57,7 +59,9 @@ class Walk(BaseModel):
     # The run that last put something on screen: one per turn, then the reader.
     shown_by_run: str = ""
 
-    def moved_to(self, head_sha: str, carry: Carry) -> tuple[Self, OnScreen | None]:
+    def moved_to(
+        self, head_sha: str, merge_base_sha: str, carry: Carry
+    ) -> tuple[Self, OnScreen | None]:
         """This walk on a new head, keeping every line git kept.
 
         What is on screen stays only if all of its lines are still there.
@@ -68,6 +72,7 @@ class Walk(BaseModel):
         moved = self.model_copy(
             update={
                 "head_sha": head_sha,
+                "merge_base_sha": merge_base_sha,
                 "on_screen": None,
                 "approvals": [
                     a.model_copy(update={"lines": lines})

@@ -45,7 +45,7 @@ class _Session:
     async def save_walk(self, walk: Walk) -> None:
         self.walk = walk
 
-    async def mark_seen(self, head_sha: str, lines: LineSet) -> None:  # noqa: ARG002
+    async def mark_seen(self, head_sha: str, merge_base_sha: str, lines: LineSet) -> None:  # noqa: ARG002
         self.seen = self.seen | lines
 
     async def seen_at(self, head_sha: str) -> LineSet:  # noqa: ARG002
