@@ -417,20 +417,27 @@ def test_a_ready_pull_request_can_be_put_up_for_review() -> None:
     assert request_blockers(_snapshot()) == []
 
 
-def test_pending_checks_and_unresolved_threads_do_not_block_the_request() -> None:
-    assert request_blockers(_snapshot(check_state="pending", unresolved_threads=3)) == []
+@pytest.mark.parametrize("check_state", ["pending", "failure", "blocked"])
+def test_checks_conflicts_and_unresolved_threads_do_not_block_the_request(check_state: str) -> None:
+    assert (
+        request_blockers(
+            _snapshot(
+                check_state=check_state,
+                mergeable=False,
+                mergeable_state="dirty",
+                failing_checks=["lint"],
+                unresolved_threads=3,
+            )
+        )
+        == []
+    )
 
 
 @pytest.mark.parametrize(
     ("overrides", "blocker"),
     [
         ({"draft": True}, "draft"),
-        ({"mergeable": False, "mergeable_state": "dirty"}, "merge conflicts"),
         ({"state": "closed"}, "closed"),
-        (
-            {"check_state": "failure", "mergeable_state": "blocked", "failing_checks": ["lint"]},
-            "required checks are failing: lint",
-        ),
     ],
 )
 def test_requests_are_refused_while_the_pull_request_is_not_reviewable(
