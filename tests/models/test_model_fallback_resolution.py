@@ -127,7 +127,8 @@ def test_models_with_profile_context_windows_enriches_copies() -> None:
         assert by_id[gpt_model_id] == 272_000
     assert by_id[SUPPORTED_KIMI] == 1_048_576
     # 本地 Ollama 模型没有 profile 上下文窗口，不能被凭空补上数值。
-    assert all(by_id[model_id] is None for model_id in LOCAL_MODEL_IDS)
+    # 评测专用本地模型可以不在 dashboard 的 SUPPORTED_MODELS 里。
+    assert all(by_id.get(model_id) is None for model_id in LOCAL_MODEL_IDS)
 
 
 @pytest.mark.parametrize("model_id", ["unknown:model", "no-colon", "", None, 123])

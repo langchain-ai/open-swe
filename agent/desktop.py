@@ -5,7 +5,17 @@ import re
 import tempfile
 from pathlib import Path
 
+from deepagents.backends.composite import CompositeBackend
 from deepagents.backends.filesystem import FilesystemBackend
+from deepagents.backends.protocol import (
+    BackendProtocol,
+    EditResult,
+    GlobResult,
+    GrepResult,
+    LsResult,
+    ReadResult,
+    WriteResult,
+)
 
 from agent.config import ENV
 from agent.run_config import RunConfig
@@ -74,11 +84,149 @@ def resolve_desktop_project(cfg: RunConfig) -> str:
 
 
 def create_desktop_backend(cfg: RunConfig) -> AsyncLocalShellBackend:
+    # Real paths, so file tools and shell commands name the same directory and
+    # a model can hand a path it read back to `execute`. Virtual paths only
+    # rewrite file tools; the shell still starts in the real project, which
+    # left the model comparing two different views of one working tree.
     return AsyncLocalShellBackend(
         root_dir=resolve_desktop_project(cfg),
         virtual_mode=False,
         env={key: value for key in SHELL_ENV_KEYS if (value := os.environ.get(key))},
     )
+
+
+class DesktopCompositeBackend(CompositeBackend):
+    """Composite over the project plus the agent's scratch routes.
+
+    ``CompositeBackend`` routes by leading path segment and returns the key it
+    sent to that backend, falling back to the default backend when no prefix
+    matches. A desktop run's default backend speaks real Windows paths, so a
+    prefix-less ``read_file`` such as ``/agent/...`` reached it as a virtual
+    path and failed, and an ``ls`` route could return the previous tool's output.
+    Here the project's real paths pass through untouched, whatever the routes:
+    each routed call gets the argument the caller already named.
+    """
+
+    def __init__(
+        self,
+        *,
+        default: BackendProtocol,
+        routes: dict[str, BackendProtocol],
+        project_dir: str,
+    ) -> None:
+        super().__init__(default=default, routes=routes)
+        self._project_dir = os.path.normcase(os.path.abspath(project_dir))
+
+    def _in_project(self, path: str) -> bool:
+        normalized = os.path.normcase(os.path.abspath(path))
+        return normalized == self._project_dir or normalized.startswith(self._project_dir + os.sep)
+
+    def _route(self, path: str) -> tuple[BackendProtocol, str, str | None]:
+        if self._in_project(path):
+            return self.default, path, None
+        for prefix, backend in self.sorted_routes:
+            bare = prefix.rstrip("/")
+            if path == bare:
+                return backend, "/", prefix
+            if path.startswith(f"{bare}/"):
+                return backend, path[len(bare) :], prefix
+        return self.default, path, None
+
+    # Every file operation routes through _route and hands the backend the
+    # caller's own argument, so a project file keeps the real path the shell
+    # uses and a routed file is addressed by the path the model already knows.
+    def _get_backend_and_key(self, key: str) -> tuple[BackendProtocol, str]:
+        backend, routed, _prefix = self._route(key)
+        return backend, routed
+
+    def read(self, file_path: str, offset: int = 0, limit: int = 2000) -> ReadResult:
+        backend, path = self._get_backend_and_key(file_path)
+        return backend.read(path, offset=offset, limit=limit)
+
+    async def aread(self, file_path: str, offset: int = 0, limit: int = 2000) -> ReadResult:
+        backend, path = self._get_backend_and_key(file_path)
+        return await backend.aread(path, offset=offset, limit=limit)
+
+    def write(self, file_path: str, content: str) -> WriteResult:
+        backend, path = self._get_backend_and_key(file_path)
+        return backend.write(path, content)
+
+    async def awrite(self, file_path: str, content: str) -> WriteResult:
+        backend, path = self._get_backend_and_key(file_path)
+        return await backend.awrite(path, content)
+
+    def edit(
+        self,
+        file_path: str,
+        old_string: str,
+        new_string: str,
+        replace_all: bool = False,
+    ) -> EditResult:
+        backend, path = self._get_backend_and_key(file_path)
+        return backend.edit(path, old_string, new_string, replace_all=replace_all)
+
+    async def aedit(
+        self,
+        file_path: str,
+        old_string: str,
+        new_string: str,
+        replace_all: bool = False,
+    ) -> EditResult:
+        backend, path = self._get_backend_and_key(file_path)
+        return await backend.aedit(path, old_string, new_string, replace_all=replace_all)
+
+    def ls(self, path: str) -> LsResult:
+        backend, routed = self._get_backend_and_key(path)
+        return self._coerce_ls_result(backend.ls(routed))
+
+    async def als(self, path: str) -> LsResult:
+        backend, routed = self._get_backend_and_key(path)
+        return self._coerce_ls_result(await backend.als(routed))
+
+    def glob(self, pattern: str, path: str | None = None) -> GlobResult:
+        backend, routed_pattern, routed_path = self._route_glob(pattern, path)
+        return backend.glob(routed_pattern, routed_path)
+
+    async def aglob(self, pattern: str, path: str | None = None) -> GlobResult:
+        backend, routed_pattern, routed_path = self._route_glob(pattern, path)
+        return await backend.aglob(routed_pattern, routed_path)
+
+    def grep(
+        self,
+        pattern: str,
+        path: str | None = None,
+        glob: str | None = None,
+        *,
+        max_count: int | None = None,
+    ) -> GrepResult:
+        backend, routed = self._route_optional(path)
+        return backend.grep(pattern, routed, glob, max_count=max_count)
+
+    async def agrep(
+        self,
+        pattern: str,
+        path: str | None = None,
+        glob: str | None = None,
+        *,
+        max_count: int | None = None,
+    ) -> GrepResult:
+        backend, routed = self._route_optional(path)
+        return await backend.agrep(pattern, routed, glob, max_count=max_count)
+
+    def _route_optional(self, path: str | None) -> tuple[BackendProtocol, str | None]:
+        if path is None:
+            return self.default, None
+        return self._get_backend_and_key(path)
+
+    def _route_glob(
+        self, pattern: str, path: str | None
+    ) -> tuple[BackendProtocol, str, str | None]:
+        # Without a path the pattern is resolved from the project root, which
+        # is a real directory: leave the pattern alone.
+        if path is None:
+            return self.default, pattern, None
+        backend, routed_path = self._get_backend_and_key(path)
+        return backend, pattern, routed_path
 
 
 def _artifacts_root() -> Path:

@@ -121,7 +121,12 @@ async def run_local(
 
 
 async def main() -> None:
-    load_dotenv()
+    # AGENT_EVAL_ENV_FILE lets an experiment load its own env file instead of
+    # the developer's .env, which may point at a different model endpoint.
+    env_file = os.environ.get("AGENT_EVAL_ENV_FILE")
+    load_dotenv(env_file if env_file else None)
+    if env_file:
+        logger.info("Loaded evaluation environment from %s", env_file)
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--instances", required=True, type=Path)
     parser.add_argument("--output-dir", required=True, type=Path)

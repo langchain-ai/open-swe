@@ -6,14 +6,17 @@ from pathlib import Path
 
 import pytest
 from blockbuster import BlockBuster
+from deepagents.backends.filesystem import FilesystemBackend
 
 from agent.desktop import (
+    DesktopCompositeBackend,
     _artifacts_root,
     create_desktop_backend,
     desktop_artifact_routes,
     resolve_desktop_project,
 )
 from agent.run_config import RunConfig
+from agent.sandboxes.read_only_backend import ReadOnlyBackend
 
 
 @contextmanager
@@ -43,7 +46,9 @@ def test_desktop_backend_allows_a_thread_worktree_without_provider_secrets(
     backend = create_desktop_backend(RunConfig(local_project_path=str(project)))
     assert backend._env.get("PATH") == "/bin"
     assert "OPENAI_API_KEY" not in backend._env
+    # Real paths, so a path the shell prints is a path the file tools accept.
     assert backend.read(str(marker)).file_data == {"content": "marker", "encoding": "utf-8"}
+    assert backend.read("marker.txt").file_data == {"content": "marker", "encoding": "utf-8"}
 
 
 def test_desktop_backend_allows_an_allowlisted_project_checkout(
@@ -107,3 +112,59 @@ def test_artifacts_root_defaults_to_a_per_user_temp_dir(monkeypatch: pytest.Monk
 
     assert root.parent == Path(tempfile.gettempdir())
     assert root.name.startswith("open-swe-artifacts-")
+
+
+def test_desktop_backend_reads_the_file_its_real_path_names(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    project = tmp_path / "project"
+    (project / "src" / "pkg").mkdir(parents=True)
+    (project / "src" / "pkg" / "__init__.py").write_text("def value():\n    return 1\n")
+    (project / "src" / "pkg" / "_native.py").write_text("def helper():\n    return 2\n")
+    allowlist = tmp_path / "projects.json"
+    allowlist.write_text(json.dumps([{"cwd": str(project)}]))
+    monkeypatch.setenv("OPEN_SWE_LOCAL_PROJECTS_FILE", str(allowlist))
+    monkeypatch.setenv("OPEN_SWE_LOCAL_WORKTREES_DIR", str(tmp_path / "worktrees"))
+    cfg = RunConfig(local_project_path=str(project))
+
+    composite = DesktopCompositeBackend(
+        default=create_desktop_backend(cfg),
+        routes={
+            "/bundled_skills/": ReadOnlyBackend(FilesystemBackend(root_dir=tmp_path / "skills"))
+        },
+        project_dir=resolve_desktop_project(cfg),
+    )
+
+    target = str(project / "src" / "pkg" / "__init__.py")
+    assert composite.read(target).file_data is not None
+    assert "return 1" in composite.read(target).file_data["content"]
+    listing = composite.ls(str(project / "src" / "pkg"))
+    assert {Path(str(entry["path"])).name for entry in listing.entries} == {
+        "__init__.py",
+        "_native.py",
+    }
+    assert composite.glob("**/*.py", str(project / "src")).matches
+
+
+def test_desktop_backend_still_routes_scratch_prefixes(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    project = tmp_path / "project"
+    project.mkdir()
+    scratch = tmp_path / "scratch"
+    scratch.mkdir()
+    (scratch / "history.md").write_text("earlier turns")
+    allowlist = tmp_path / "projects.json"
+    allowlist.write_text(json.dumps([{"cwd": str(project)}]))
+    monkeypatch.setenv("OPEN_SWE_LOCAL_PROJECTS_FILE", str(allowlist))
+    monkeypatch.setenv("OPEN_SWE_LOCAL_WORKTREES_DIR", str(tmp_path / "worktrees"))
+    cfg = RunConfig(local_project_path=str(project))
+
+    composite = DesktopCompositeBackend(
+        default=create_desktop_backend(cfg),
+        routes={"/conversation_history/": FilesystemBackend(root_dir=scratch)},
+        project_dir=resolve_desktop_project(cfg),
+    )
+
+    read = composite.read("/conversation_history/history.md")
+    assert read.file_data == {"content": "earlier turns", "encoding": "utf-8"}

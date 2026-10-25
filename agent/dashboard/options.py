@@ -18,9 +18,19 @@ class ModelOption(TypedDict):
     context_window: NotRequired[int | None]
 
 
-# 本地自托管模型：复用 ``openai:`` 前缀只为走 OpenAI 兼容协议，实际跑在本机
-# Ollama 上。它们不参与跨 provider 降级，也不会被选为云端模型的替代。
-LOCAL_MODEL_IDS: frozenset[str] = frozenset({"openai:qwen3:8b", "openai:qwen3.5:9b"})
+# 本地/自建 OpenAI 兼容端点上的模型：复用 ``openai:`` 前缀只为走
+# Chat Completions，实际由 OPENAI_BASE_URL 指向本机 Ollama 或评测用代理。
+# 它们不参与跨 provider 降级，也不会被选为云端模型的替代。
+LOCAL_MODEL_IDS: frozenset[str] = frozenset(
+    {
+        "openai:qwen3:8b",
+        "openai:qwen3.5:9b",
+        "openai:glm-4.7-flash:latest",
+        # 评测专用：经 OPENAI_BASE_URL 指向的代理访问云端模型。前缀之后的部分
+        # 就是代理要求的模型名，因此带上了它的路由分组前缀。
+        "openai:group/auto-deepseek-v4-1-flash",
+    }
+)
 
 
 SUPPORTED_MODELS: list[ModelOption] = [
@@ -383,6 +393,10 @@ def default_model_pair() -> tuple[str, str]:
             if effort not in model["efforts"]:
                 raise ValueError(f"Unsupported LLM_REASONING_EFFORT {effort!r} for {model_id!r}")
             return model_id, effort
+    if model_id in LOCAL_MODEL_IDS:
+        # Endpoint-served models carry no effort list of their own: the router
+        # passes the id through and the endpoint decides what it honors.
+        return model_id, effort or DEFAULT_MODEL_EFFORT
     raise ValueError(f"Unsupported default LLM_MODEL_ID: {model_id!r}")
 
 
