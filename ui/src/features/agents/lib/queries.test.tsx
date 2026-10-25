@@ -14,6 +14,7 @@ import {
   setAgentThreadStatus,
   setAgentThreadResolved,
   useAgentThread,
+  useAgentThreadBrowser,
   useAgentThreadWorkingTreeDiff,
   usePinAgentThread,
   useRenameAgentThread,
@@ -28,7 +29,12 @@ import {
   useWorkflowApprovalDecision,
 } from "./queries"
 import type { InfiniteData } from "@tanstack/react-query"
-import type { ThreadTurnDiff, ThreadsPage, ThreadsPageParams } from "./api"
+import type {
+  ThreadBrowser,
+  ThreadTurnDiff,
+  ThreadsPage,
+  ThreadsPageParams,
+} from "./api"
 import type {
   AgentSchedule,
   AgentThread,
@@ -64,6 +70,70 @@ function testClient() {
   clients.push(client)
   return client
 }
+
+describe("useAgentThreadBrowser", () => {
+  const hour = 60 * 60_000
+  function browser(
+    window: string,
+    token: string,
+    expiresIn: number,
+    title = "current"
+  ): ThreadBrowser {
+    return {
+      tabs: [{ id: "t1", title, url: "https://example.com" }],
+      act_url: `https://${window}.browsers.test/auth?token=${token}`,
+      expires_at: new Date(Date.now() + expiresIn).toISOString(),
+    }
+  }
+
+  async function refetchedLink(current: ThreadBrowser, fetched: ThreadBrowser) {
+    const client = testClient()
+    const getThreadBrowser = vi
+      .spyOn(agentsApi, "getThreadBrowser")
+      .mockResolvedValueOnce(current)
+      .mockResolvedValue(fetched)
+    const { result } = renderHook(
+      () => useAgentThreadBrowser("thread-1", true),
+      {
+        wrapper: ({ children }) => (
+          <QueryClientProvider client={client}>{children}</QueryClientProvider>
+        ),
+      }
+    )
+    await waitFor(() => expect(result.current.data).toBeDefined())
+    await act(() =>
+      client.invalidateQueries({
+        queryKey: agentThreadKeys.browser("thread-1"),
+      })
+    )
+    await waitFor(() =>
+      expect(result.current.data?.tabs[0]?.title).toBe("next")
+    )
+    getThreadBrowser.mockRestore()
+    return result.current.data
+  }
+
+  it("keeps the framed link when an invalidation mints a new one", async () => {
+    const current = browser("b-window", "first", 24 * hour)
+    const data = await refetchedLink(
+      current,
+      browser("b-window", "second", 24 * hour, "next")
+    )
+    expect(data?.act_url).toBe(current.act_url)
+    expect(data?.expires_at).toBe(current.expires_at)
+  })
+
+  it("takes the new link for another window or near expiry", async () => {
+    const otherWindow = browser("b-other", "second", 24 * hour, "next")
+    expect(
+      await refetchedLink(browser("b-window", "first", 24 * hour), otherWindow)
+    ).toEqual(otherWindow)
+    const fresh = browser("b-window", "second", 24 * hour, "next")
+    expect(
+      await refetchedLink(browser("b-window", "first", 60_000), fresh)
+    ).toEqual(fresh)
+  })
+})
 
 describe("useAgentThreadWorkingTreeDiff", () => {
   const diff: ThreadTurnDiff = {
