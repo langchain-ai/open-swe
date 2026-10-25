@@ -92,7 +92,7 @@ The lines worth knowing, each with its attributes (`run_id`, `thread_id`, `reque
 
 - `Created run` (API replica): the backend's `POST /threads/{id}/runs` arrived.
 - `Dequeued run for background worker`, then `Starting background run` with `run_queue_ms` (queue replica): a worker picked it up.
-- `Defined the graph` (logger `rt.factory_timing`): the factory in `agent.py` returned, with each phase's milliseconds (`catalog_ms`, `models_ms`, `operation_tools_ms`, `file_tools_ms`, `subagents_ms`, `code_mode_ms`, `middleware_ms`, `factory_ms`), `graph`, `access_context` (`threads.create_run` for a run), `has_run`, and the counts of `tools`, `subagents` and `middleware`. Logged on every graph access, state reads included.
+- `Defined the graph` (logger `rt.factory_timing`): the factory in `agent.py` returned, with each phase's milliseconds (`catalog_ms`, `models_ms`, `operation_tools_ms`, `file_tools_ms`, `subagents_ms`, `code_mode_ms`, `middleware_ms`, `factory_ms`), `graph_name`, `access_context` (`threads.create_run` for a run), `has_run`, and the counts of `tools`, `subagents` and `middleware`. Logged on every graph access, state reads included.
 - `Slow graph load. Accessing graph 'open-swe' took …ms` (logger `langgraph_api.graph`, over 100ms): the whole graph access, the factory and MDA's compile of its definition. Its time minus `factory_ms` is MDA's share.
 - `HTTP Request: POST …/agent-api/<endpoint>` (logger `httpx2`): each call to the backend, with the middleware hook that made it in `langgraph_node`.
 

@@ -287,7 +287,7 @@ async def agent(runtime: ManagedServerRuntime) -> DeepAgentDefinition:
     }
     timing.lap("middleware")
     timing.log(
-        graph=context.graph,
+        graph_name=context.graph,
         access_context=runtime.access_context,
         has_run=backend.has_run,
         tools=len(registered),
