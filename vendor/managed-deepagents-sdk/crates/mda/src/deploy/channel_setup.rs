@@ -34,6 +34,7 @@ pub(crate) struct SetupTarget<'a> {
     pub(crate) assistant_id: &'a str,
     pub(crate) project_root: &'a Path,
     pub(crate) env_vars: &'a BTreeMap<String, String>,
+    pub(crate) customer_slack_app: Option<&'a langsmith::SlackCustomerApp>,
 }
 
 impl ChannelSetup {
@@ -115,6 +116,7 @@ impl ChannelSetup {
             trigger_channels::register(
                 target.client,
                 trigger,
+                target.customer_slack_app,
                 target.agent_server_url,
                 target.deployment_id,
                 target.assistant_id,

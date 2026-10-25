@@ -371,7 +371,9 @@ mod tests {
 
         let error = init_channel(root.path(), ChannelKind::Slack).unwrap_err();
 
-        assert!(error.to_string().contains("no agent entry file found"));
+        assert!(error
+            .to_string()
+            .contains("is not a Managed Deep Agent project"));
     }
 
     #[test]

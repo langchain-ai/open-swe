@@ -28,6 +28,13 @@ from managed_deepagents._channels.schedule_delivery import (
 )
 from managed_deepagents._identity_runtime import _field
 from managed_deepagents._memory.async_util import await_if_needed
+from managed_deepagents._telemetry.otel import (
+    LogContext,
+    current_log_context,
+    enter_log_context,
+    exit_log_context,
+    trace_id_from_metadata,
+)
 from managed_deepagents.run_context import is_managed_key
 
 #: Run ``configurable`` key deepagents uses to name the agent that started an async subagent.
@@ -92,6 +99,7 @@ class ManagedCompiledAgent(CompiledStateGraph[Any, Any, Any, Any]):
             notifying = binding is not None
         elif binding is None and (lead := _lead_thread_id(self.config, config)):
             reports_to = self._saved_channel(_thread_config(lead), config)
+        log = run_log_context(self.config, config)
         config = execution_config(self.config, config)
         iterator = super().stream(input, config, context=context, **kwargs)
         try:
@@ -100,6 +108,7 @@ class ManagedCompiledAgent(CompiledStateGraph[Any, Any, Any, Any]):
                 lead_token = _lead_channel.set(None if binding is not None else reports_to)
                 notify_token = _delivering_notification.set(notifying)
                 routing_token = _current_routing.set(routing)
+                log_token = enter_log_context(log)
                 try:
                     with self._tracing(config):
                         item = next(iterator)
@@ -110,13 +119,18 @@ class ManagedCompiledAgent(CompiledStateGraph[Any, Any, Any, Any]):
                     return
                 finally:
                     _delivering_notification.reset(notify_token)
+                    exit_log_context(log_token)
                     _current_routing.reset(routing_token)
                     _lead_channel.reset(lead_token)
                     _current_channel.reset(token)
                 yield item
         finally:
-            with self._tracing(config):
-                iterator.close()
+            log_token = enter_log_context(log)
+            try:
+                with self._tracing(config):
+                    iterator.close()
+            finally:
+                exit_log_context(log_token)
 
     async def astream(
         self,
@@ -134,6 +148,7 @@ class ManagedCompiledAgent(CompiledStateGraph[Any, Any, Any, Any]):
             notifying = binding is not None
         elif binding is None and (lead := _lead_thread_id(self.config, config)):
             reports_to = await self._asaved_channel(_thread_config(lead), config)
+        log = run_log_context(self.config, config)
         config = execution_config(self.config, config)
         iterator = super().astream(input, config, context=context, **kwargs)
         try:
@@ -142,6 +157,7 @@ class ManagedCompiledAgent(CompiledStateGraph[Any, Any, Any, Any]):
                 lead_token = _lead_channel.set(None if binding is not None else reports_to)
                 notify_token = _delivering_notification.set(notifying)
                 routing_token = _current_routing.set(routing)
+                log_token = enter_log_context(log)
                 try:
                     with self._tracing(config):
                         item = await anext(iterator)
@@ -153,13 +169,18 @@ class ManagedCompiledAgent(CompiledStateGraph[Any, Any, Any, Any]):
                     return
                 finally:
                     _delivering_notification.reset(notify_token)
+                    exit_log_context(log_token)
                     _current_routing.reset(routing_token)
                     _lead_channel.reset(lead_token)
                     _current_channel.reset(token)
                 yield item
         finally:
-            with self._tracing(config):
-                await iterator.aclose()
+            log_token = enter_log_context(log)
+            try:
+                with self._tracing(config):
+                    await iterator.aclose()
+            finally:
+                exit_log_context(log_token)
 
     def _saved_channel(
         self, thread_config: RunnableConfig, config: RunnableConfig | None
@@ -209,6 +230,26 @@ def _lead_thread_id(
 
 def _thread_config(thread_id: str) -> RunnableConfig:
     return {"configurable": {"thread_id": thread_id}}
+
+
+def run_log_context(defaults: RunnableConfig | None, config: RunnableConfig | None) -> LogContext:
+    """One log context per run, under the trace id ingress handed over.
+
+    A nested managed graph reuses its parent's context.
+    """
+    parent = current_log_context()
+    if parent is not None:
+        return parent
+    merged = ensure_config(defaults, config)
+    metadata: Mapping[str, object] = merged.get("metadata") or {}
+    log = LogContext(trace_id=trace_id_from_metadata(metadata))
+    for key, value in (
+        ("run_id", metadata.get("run_id")),
+        ("thread_id", merged["configurable"].get("thread_id")),
+    ):
+        if isinstance(value, str) and value:
+            log.attributes[key] = value
+    return log
 
 
 def execution_context(

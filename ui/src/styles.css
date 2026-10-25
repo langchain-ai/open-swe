@@ -18,6 +18,13 @@
 
 @custom-variant dark (&:where(.dark, .dark *));
 
+/* A passage being replied to keeps its selection look after focus moves to the
+   reply field (SelectionReply). */
+::highlight(selection-reply) {
+    background-color: Highlight;
+    color: HighlightText;
+}
+
 /* A class, not `body:has(.version-mismatch-banner)`: Chrome restyles the whole
    document for a `:has()` on `body` after every DOM change. */
 body.version-mismatch {

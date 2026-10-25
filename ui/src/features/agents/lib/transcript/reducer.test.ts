@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from "vitest"
 
+import { fetchToolOutput } from "./api"
 import {
   applyEvent,
   applySnapshot,
@@ -27,8 +28,8 @@ import type {
   TranscriptTurnRow,
 } from "./types"
 
-// The reducer only reaches the network to lazily load a tool's full output,
-// which no test here expands; attachment URLs are built, never fetched.
+// The reducer only reaches the network to lazily load a tool's full output;
+// attachment URLs are built, never fetched.
 vi.mock(import("./api"), async (importOriginal) => ({
   ...(await importOriginal()),
   fetchToolOutput: vi.fn(),
@@ -796,6 +797,33 @@ describe("tool output", () => {
     )
 
     expect(readChunk(settled)?.loadOutput).toBeTypeOf("function")
+  })
+
+  it("fetches a call's output once while its turn keeps changing", async () => {
+    vi.mocked(fetchToolOutput).mockResolvedValue({ output: "full" })
+    const settled = applyEvent(
+      fromSnapshot(twoTurnSnapshot()),
+      toolCompleted(11, { output_preview: "x".repeat(2000) })
+    )
+    const streamed = applyEvent(settled, {
+      version: 12,
+      occurred_at: "2026-01-01T00:02:00Z",
+      event_type: "message.appended",
+      payload: {
+        turn_id: "turn-1",
+        message_id: "ai-1",
+        namespace: [],
+        text: " more",
+        reasoning: null,
+      },
+    })
+
+    expect(toMessages(streamed)).not.toBe(toMessages(settled))
+    const before = readChunk(settled)?.loadOutput
+    const after = readChunk(streamed)?.loadOutput
+    expect(after).toBe(before)
+    expect(await Promise.all([before?.(), after?.()])).toEqual(["full", "full"])
+    expect(fetchToolOutput).toHaveBeenCalledTimes(1)
   })
 })
 

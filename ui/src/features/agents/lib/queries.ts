@@ -14,6 +14,7 @@ import { localThreadKeys } from "./desktopLocal"
 import type { InfiniteData, QueryClient, QueryKey } from "@tanstack/react-query"
 import type {
   ScheduleUpdateRequest,
+  ThreadBrowser,
   ThreadMoveDestination,
   ThreadsPage,
   ThreadsPageParams,
@@ -30,6 +31,7 @@ import type {
   WorkflowPushApprovalsResponse,
 } from "./types"
 import { CLAUDE_CODE_SOURCE } from "./sidebarFilter"
+import type { PassageReply } from "@/features/agents/utils/passageReply"
 import { useSidebarPrefsHydrated } from "./sidebarPrefs"
 import type { ChatSort } from "./sidebarPrefs"
 import type { Skill, SkillInput } from "@/lib/api"
@@ -917,25 +919,50 @@ export function useAgentThreadQueuedMessages(threadId: string) {
   })
 }
 
-// Each read mints a new act link and reloads the framed page, so a link is kept
-// until shortly before it expires rather than refetched on every focus.
+// Each read mints a new act link, and a new link reloads the framed page. The
+// thread's runs invalidate the browser as they start and first browse, so a
+// read keeps the link it has for the same window until shortly before it
+// expires, and that is also when a stale link is refetched.
 const BROWSER_LINK_REFRESH_MARGIN_MS = 5 * 60_000
+
+function linkExpiresIn(browser: ThreadBrowser) {
+  return Date.parse(browser.expires_at) - Date.now()
+}
+
+function keepActLink(
+  current: ThreadBrowser | undefined,
+  fetched: ThreadBrowser
+): ThreadBrowser {
+  if (
+    !current ||
+    new URL(current.act_url).origin !== new URL(fetched.act_url).origin ||
+    linkExpiresIn(current) <= BROWSER_LINK_REFRESH_MARGIN_MS
+  )
+    return fetched
+  return {
+    ...fetched,
+    act_url: current.act_url,
+    expires_at: current.expires_at,
+  }
+}
 
 export function useAgentThreadBrowser(threadId: string, enabled: boolean) {
   return useQuery({
     queryKey: agentThreadKeys.browser(threadId),
-    queryFn: () => agentsApi.getThreadBrowser(threadId),
+    queryFn: async ({ client, queryKey }) =>
+      keepActLink(
+        client.getQueryData<ThreadBrowser>(queryKey),
+        await agentsApi.getThreadBrowser(threadId)
+      ),
     enabled: enabled && Boolean(threadId),
     retry: false,
-    staleTime: (query) => {
-      const expiresAt = query.state.data?.expires_at
-      return expiresAt
+    staleTime: (query) =>
+      query.state.data
         ? Math.max(
-            Date.parse(expiresAt) - Date.now() - BROWSER_LINK_REFRESH_MARGIN_MS,
+            linkExpiresIn(query.state.data) - BROWSER_LINK_REFRESH_MARGIN_MS,
             0
           )
-        : 0
-    },
+        : 0,
     meta: { invalidatedBy: [invalidationTopic("thread-browsers", threadId)] },
   })
 }
@@ -1229,6 +1256,8 @@ export function optimisticThread(
 export interface SendAgentMessageVariables {
   content: string
   images?: Array<ImageChunk>
+  /** Passages the person replied to, each with its context and their comment. */
+  replies?: Array<PassageReply>
   model_id?: string | null
   effort?: string | null
   model_selection_changed?: boolean

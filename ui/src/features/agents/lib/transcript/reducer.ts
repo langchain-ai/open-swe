@@ -853,6 +853,38 @@ export function subagentToolCalls(
   return calls
 }
 
+const outputLoaders = new WeakMap<
+  TranscriptToolCallState,
+  () => Promise<string>
+>()
+
+/**
+ * One loader per settled call, sharing one fetch: a call's turn is rebuilt on
+ * every event while it streams, and consumers keyed on the loader's identity
+ * would otherwise fetch the output again each time. A failed fetch is retried
+ * on the next load.
+ */
+function outputLoader(
+  threadId: string,
+  call: TranscriptToolCallState
+): () => Promise<string> {
+  const existing = outputLoaders.get(call)
+  if (existing) return existing
+  let output: Promise<string> | null = null
+  const load = () => {
+    output ??= fetchToolOutput(threadId, call.toolCallId).then(
+      (response) => response.output,
+      (error: unknown) => {
+        output = null
+        throw error
+      }
+    )
+    return output
+  }
+  outputLoaders.set(call, load)
+  return load
+}
+
 function toolChunk(
   threadId: string,
   call: TranscriptToolCallState
@@ -870,10 +902,8 @@ function toolChunk(
   }
   const output = call.output?.trim()
   if (output) chunk.output = output
-  if (call.hasOutput && !call.outputComplete) {
-    chunk.loadOutput = async () =>
-      (await fetchToolOutput(threadId, call.toolCallId)).output
-  }
+  if (call.hasOutput && !call.outputComplete)
+    chunk.loadOutput = outputLoader(threadId, call)
   const diffData = maybeDiffFromArgs(call.input)
   if (diffData) chunk.diffData = diffData
   // A `task` call owns the namespace of the subagent it spawned, which is what
@@ -973,9 +1003,10 @@ function buildHumanMessage(
   if (entity?.senderType === "self") return null
   const taskEvent = parsed.type === "message" ? parsed.taskEvent : undefined
   const text = taskEvent?.content ?? parsed.content
+  const replies = parsed.type === "message" ? parsed.replies : undefined
   const chunks: Array<Chunk> = imageChunks(threadId, row.attachments)
   if (text.trim()) chunks.push({ kind: "text", text })
-  if (!chunks.length && !taskEvent) return null
+  if (!chunks.length && !taskEvent && !replies) return null
   return {
     id: row.messageId,
     ...(taskEvent ? { taskEvent } : {}),
@@ -990,6 +1021,7 @@ function buildHumanMessage(
           structuredSenderId: parsed.sender,
           structuredSenderKind: parsed.senderKind,
           structuredSurface: parsed.surface,
+          ...(replies ? { replies } : {}),
           structuredSenderName:
             entity?.displayName ??
             (entity?.handle ? `@${entity.handle}` : undefined) ??

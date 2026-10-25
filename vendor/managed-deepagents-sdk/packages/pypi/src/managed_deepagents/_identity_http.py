@@ -37,6 +37,7 @@ from managed_deepagents._identity_auth import (
     ManagedAuthError,
     resolve_request_identity,
 )
+from managed_deepagents._ingress import with_ingress_log_context
 from managed_deepagents._log import logger
 from managed_deepagents.identity import (
     IdentityConfig,
@@ -210,6 +211,16 @@ def _channel_events_route(
     )
 
     async def events_handler(request: HttpRequestLike) -> object:
+        headers = getattr(request, "headers", None)
+        traceparent = headers.get("traceparent") if headers is not None else None
+        transport = getattr(channel, "transport", None) or "http"
+        return await with_ingress_log_context(
+            traceparent,
+            {"channel": name, "transport": transport},
+            lambda: _handle_channel_events(request),
+        )
+
+    async def _handle_channel_events(request: HttpRequestLike) -> object:
         responses = import_module("starlette.responses")
         events = getattr(channel, "events", None)
         if not callable(events):
@@ -230,7 +241,7 @@ def _channel_events_route(
                 result = await result
             return result
         except Exception as error:  # noqa: BLE001 - log a safe label, keep the HTTP body opaque
-            logger.error("POST %s failed (%s)", path, logger.safe_error_label(error))
+            logger.error("POST %s failed (%s)", path, logger.safe_error_label(error), error=error)
             return responses.JSONResponse({"error": "internal error"}, status_code=500)
 
     return cast("StarletteRoute", routing.Route(path, events_handler, methods=["POST"]))
@@ -328,7 +339,7 @@ def _connector_events_route(
                 result = await result
             return result
         except Exception as error:  # noqa: BLE001 - log a safe label, keep the HTTP body opaque
-            logger.error("POST %s failed (%s)", path, logger.safe_error_label(error))
+            logger.error("POST %s failed (%s)", path, logger.safe_error_label(error), error=error)
             return responses.JSONResponse({"error": "internal error"}, status_code=500)
 
     return cast("StarletteRoute", routing.Route(path, events_handler, methods=["POST"]))

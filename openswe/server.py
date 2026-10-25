@@ -562,6 +562,7 @@ INCIDENT_AUTOMATIC_EXCLUDED_TOOLS: frozenset[str] = frozenset(
         "listen_events",
         "request_rollout_check",
         "manage_thread",
+        "start_thread",
         "link_pull_request",
         "open_pull_request",
         "recreate_sandbox",
@@ -1785,7 +1786,7 @@ async def plan_agent(config: RunnableConfig, surface: ToolSurface) -> None:
     withheld = [
         *(() if monitors_enabled else (monitor,)),
         *(() if task_coordination else (task_status, message_task_thread, control_worker)),
-        *(() if _slack_concierge_run(cfg) else (start_thread,)),
+        *((start_thread,) if task_coordination and task_coordination.is_worker else ()),
         *(() if managed_gateway else (connect_managed_tools,)),
         *(
             ()

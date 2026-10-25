@@ -3,6 +3,7 @@ import type {
   LocalRepo,
   QueuedThreadMessage,
 } from "@/features/agents/lib/types"
+import type { PassageReply } from "@/features/agents/utils/passageReply"
 
 export interface ApprovalCallbacks {
   onApprove?: (approvalRequestId: string) => void
@@ -38,6 +39,8 @@ export interface MessagesProps extends ApprovalCallbacks {
   queuedMessages?: Array<QueuedThreadMessage>
   /** Drop a queued message and hand it back to the composer. */
   onRemoveQueuedMessage?: (id: string) => void
+  /** Offers Reply on selected transcript text, attaching the reply to the next message. */
+  onReply?: (reply: PassageReply) => void
   isStreaming: boolean
   /** Live run signal from `useStream().isLoading` — drives Streamdown token animation. */
   streamIsLoading?: boolean
