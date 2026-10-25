@@ -105,6 +105,17 @@ class ThreadStore:
         local = await RUNTIMES.local.indexed(thread_id)
         if local is None:
             return None
+        logger.warning(
+            "Indexed a thread only the Agent Server knew",
+            extra={
+                "thread_id": thread_id,
+                "thread_runtime": local.runtime,
+                "thread_status": local.status,
+                "thread_created_at": local.created_at.isoformat(),
+                "thread_updated_at": local.updated_at.isoformat(),
+                "graph_id": local.metadata.get("graph_id"),
+            },
+        )
         return await index.create(
             thread_id,
             runtime=local.runtime,
