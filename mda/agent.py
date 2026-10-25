@@ -190,7 +190,11 @@ async def agent(runtime: ManagedServerRuntime) -> DeepAgentDefinition:
             operation_tool(spec, backend, cites_evidence=catalog.incident_evidence)
             for spec in catalog.operations
         ),
-        *([search_tools_tool(catalog.operations)] if catalog.search_tools else []),
+        *(
+            [search_tools_tool(catalog.operations, catalog.search_tools_description)]
+            if catalog.search_tools
+            else []
+        ),
     ]
     timing.lap("operation_tools")
     remote = RemoteFiles(backend, run_id)

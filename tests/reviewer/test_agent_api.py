@@ -598,6 +598,10 @@ async def test_mda_catalog_leaves_integrations_and_code_mode_to_mda(
         "write_file",
     ]
     assert catalog["search_tools"] is True
+    # MDA's search_tools reads as the backend describes it, with how to call what it finds.
+    from openswe.prompts import prompt
+
+    assert catalog["search_tools_description"] == prompt("tools/search_tools")
     # A run started without its catalog gets a token that carries what was decided for
     # it here, and grants its operations under it, but lives no longer than the one it had.
     token = catalog["run_token"]

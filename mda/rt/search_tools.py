@@ -58,7 +58,9 @@ def bm25(
     return scores
 
 
-def search_tools_tool(operations: Sequence[OperationSpec]) -> BaseTool:
+def search_tools_tool(
+    operations: Sequence[OperationSpec], description: str | None = None
+) -> BaseTool:
     """``search_tools`` over ``operations``, ranked by BM25 over name, description and parameters."""
     ranked = sorted(operations, key=lambda operation: operation.name)
     documents = [_operation_tokens(operation) for operation in ranked]
@@ -83,5 +85,6 @@ def search_tools_tool(operations: Sequence[OperationSpec]) -> BaseTool:
     return StructuredTool.from_function(
         coroutine=search_tools,
         name=SEARCH_TOOLS,
-        description="Search the tools available in this run.",
+        # The backend's description, which says how to call what it finds.
+        description=description or "Search the tools available in this run.",
     )

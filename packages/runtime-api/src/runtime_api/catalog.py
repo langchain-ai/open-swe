@@ -210,8 +210,9 @@ class Catalog(BaseModel):
     # What the runtime's middleware does around each model call; None leaves it to the
     # backend's phase calls, for the runs still answered from their plan.
     loop: LoopRules | None = None
-    # Whether the run offers ``search_tools`` over its operations.
+    # Whether the run offers ``search_tools`` over its operations, and how the model reads it.
     search_tools: bool = False
+    search_tools_description: str | None = None
     # The run's token, signed again with what the backend decided as it planned the
     # run here; only for a run started without its catalog.
     run_token: str | None = None

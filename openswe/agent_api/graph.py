@@ -415,6 +415,9 @@ class RunSession:
             if self.surface.loop is None
             else self.surface.loop.model_copy(update={"deployment_prompt": common_prompt()}),
             search_tools=self.surface.code_mode,
+            search_tools_description=prompt(f"tools/{SEARCH_TOOLS}")
+            if self.surface.code_mode
+            else None,
             model_call_limit=next(
                 (
                     m.run_limit
