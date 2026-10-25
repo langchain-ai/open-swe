@@ -1,5 +1,5 @@
 import json
-from collections.abc import Mapping
+from collections.abc import Awaitable, Callable, Mapping
 from datetime import UTC, datetime
 
 import httpx
@@ -96,10 +96,15 @@ class _Harness:
         self.forwarded: list[tuple[str, dict[str, JsonValue]]] = []
         self.reached_here: list[str] = []
         self.local_status = 200
+        self.while_starting: Callable[[], Awaitable[object]] | None = None
 
         def mda(request: httpx.Request) -> httpx.Response:
             self.forwarded.append((request.url.path, json.loads(request.content or b"{}")))
-            return httpx.Response(200, json={"run_id": "remote-run"})
+            return httpx.Response(
+                200,
+                json={"run_id": "remote-run"},
+                headers={"content-location": f"/threads/{THREAD}/runs/remote-run"},
+            )
 
         mda_runtime = runtimes.MdaRuntime("http://mda.test")
         mda_runtime._http = httpx.AsyncClient(
@@ -116,6 +121,8 @@ class _Harness:
             assistant_id: str,
             metadata: dict[str, JsonValue] | None = None,
         ) -> dict[str, JsonValue]:
+            if self.while_starting is not None:
+                await self.while_starting()
             run = RemoteRun(
                 thread_id=thread_id,
                 assistant_id=assistant_id,
@@ -226,7 +233,9 @@ async def test_a_run_goes_to_mda_and_marks_the_thread_busy(
     monkeypatch: pytest.MonkeyPatch, secret: None
 ) -> None:
     harness = _Harness(monkeypatch)
-    await index.create(THREAD, runtime="mda", metadata={"owner_login": "ada"})
+    # A stop before this run asked to start leaves it be.
+    stopped = {index.STOPPED_AT_KEY: runtimes.now_ms() - 1000}
+    await index.create(THREAD, runtime="mda", metadata={"owner_login": "ada", **stopped})
     run = {
         "assistant_id": "agent",
         "input": {},
@@ -241,6 +250,30 @@ async def test_a_run_goes_to_mda_and_marks_the_thread_busy(
     assert harness.reached_here == []
     [(path, sent)] = harness.forwarded
     assert path == f"/threads/{THREAD}/runs" and sent["assistant_id"] == "open-swe"
+
+
+@pytest.mark.parametrize(
+    ("path", "body"),
+    [
+        ("/runs", {"assistant_id": "agent"}),
+        ("/commands", {"id": 1, "method": "run.start", "params": {"assistant_id": "agent"}}),
+    ],
+)
+async def test_a_stop_while_a_run_starts_interrupts_it_once_mda_has_it(
+    monkeypatch: pytest.MonkeyPatch, secret: None, path: str, body: dict[str, JsonValue]
+) -> None:
+    # Working out the run takes a while, and a stop meanwhile finds no run to cancel.
+    harness = _Harness(monkeypatch)
+    await index.create(THREAD, runtime="mda", metadata={"owner_login": "ada"})
+    harness.while_starting = lambda: index.update(THREAD, {index.STOPPED_AT_KEY: runtimes.now_ms()})
+
+    status, _ = await harness.request("POST", f"/threads/{THREAD}{path}", body)
+
+    assert status == 200
+    assert [path for path, _ in harness.forwarded] == [
+        f"/threads/{THREAD}/runs",
+        f"/threads/{THREAD}/runs/remote-run/cancel",
+    ]
 
 
 @pytest.mark.parametrize(

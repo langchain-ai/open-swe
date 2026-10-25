@@ -113,7 +113,7 @@ async def forward(
 
 
 class StatusRecorder:
-    """A ``send`` that remembers the response status, and acts on a success before its body.
+    """A ``send`` that remembers the response status, and acts on a success's headers before its body.
 
     With ``keep_body`` it keeps the body too, for a short JSON answer read afterwards.
     """
@@ -121,7 +121,7 @@ class StatusRecorder:
     def __init__(
         self,
         send: Send,
-        on_success: Callable[[], Awaitable[None]] | None = None,
+        on_success: Callable[[Headers], Awaitable[None]] | None = None,
         *,
         keep_body: bool = False,
     ) -> None:
@@ -135,7 +135,7 @@ class StatusRecorder:
         if message["type"] == "http.response.start":
             self.status = int(message["status"])
             if self.succeeded and self._on_success is not None:
-                await self._on_success()
+                await self._on_success(Headers(raw=message["headers"]))
         elif message["type"] == "http.response.body" and self._keep_body:
             self._body.extend(message.get("body", b""))
         await self._send(message)

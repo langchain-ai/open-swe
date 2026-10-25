@@ -24,6 +24,7 @@ from openswe.slack.client import parse_github_pr_url
 from openswe.threads.access import _authorized_thread, _readable_thread_metadata
 from openswe.threads.blobs import copy_thread_blobs, referenced_blob_digests
 from openswe.threads.creation import TITLE_LOCKED_KEY, create_thread
+from openswe.threads.index import STOPPED_AT_KEY
 from openswe.threads.listing import (
     attach_task_workers,
     list_unresolved_dashboard_threads,
@@ -245,6 +246,12 @@ async def _cancel_active_thread_runs(
     return cancelled, kept
 
 
+def _stopped_metadata() -> dict[str, Any]:
+    """What a stop records: its run reads as interrupted, and a run still starting sees it."""
+    now = _now_ms()
+    return {"latest_run_status": "interrupted", STOPPED_AT_KEY: now, "updated_at_ms": now}
+
+
 async def interrupt_transcript_turns(thread_id: str, run_ids: Sequence[str]) -> None:
     """Close the transcript turn of each cancelled run.
 
@@ -303,10 +310,7 @@ async def cancel_dashboard_thread(
         await on_interrupted()
     await interrupt_transcript_turns(thread_id, cancelled_run_ids)
 
-    metadata_update: dict[str, Any] = {
-        "latest_run_status": "interrupted",
-        "updated_at_ms": _now_ms(),
-    }
+    metadata_update: dict[str, Any] = _stopped_metadata()
     await client.threads.update(thread_id=thread_id, metadata=metadata_update)
     # A follow-up left queued picks the leftovers up with its first model call.
     try:
@@ -343,7 +347,7 @@ async def cancel_machine_thread(thread_id: str, principal: Principal) -> JsonObj
     await interrupt_transcript_turns(thread_id, cancelled_run_ids)
     await client.threads.update(
         thread_id=thread_id,
-        metadata={"latest_run_status": "interrupted", "updated_at_ms": _now_ms()},
+        metadata=_stopped_metadata(),
     )
     return await machine_thread(thread_id, principal)
 
@@ -372,7 +376,7 @@ async def admin_cancel_dashboard_thread(
 
     await client.threads.update(
         thread_id=thread_id,
-        metadata={"latest_run_status": "interrupted", "updated_at_ms": _now_ms()},
+        metadata=_stopped_metadata(),
     )
     updated_thread = await client.threads.get(thread_id)
     return await _thread_summary(updated_thread)
