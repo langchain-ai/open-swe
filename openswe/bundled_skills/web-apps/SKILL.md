@@ -45,14 +45,16 @@ the one self-contained file with `manifest.json` inside it. Neither Macaw 2 nor
 the SDK is on npm, so take them from the repository:
 
 ```bash
-git clone --depth 1 --filter=blob:none --sparse https://github.com/langchain-ai/open-swe /workspace/open-swe
-git -C /workspace/open-swe sparse-checkout set plugins/sdk plugins/starter ui/vendor/macaw
-cp -r /workspace/open-swe/plugins/starter /workspace/open-swe/plugins/<name>
-cd /workspace/open-swe/plugins/<name> && npm install && npm run build
+APPS=/workspace/.openswe-apps/open-swe
+git clone --depth 1 --filter=blob:none --sparse https://github.com/langchain-ai/open-swe "$APPS"
+git -C "$APPS" sparse-checkout set plugins/sdk plugins/starter ui/vendor/macaw
+cp -r "$APPS/plugins/starter" "$APPS/plugins/<name>"
+cd "$APPS/plugins/<name>" && npm install && npm run build
 ```
 
-Keep the app beside `plugins/sdk` and `ui/vendor/macaw`, where its
-`package.json` finds them. Edit `manifest.json` and `src/App.tsx`; `npm run
+Clone it there, never over a checkout of the thread's own repository, and keep
+the app beside `plugins/sdk` and `ui/vendor/macaw`, where its `package.json`
+finds them. Edit `manifest.json` and `src/App.tsx`; `npm run
 build` writes `bundle/index.html`, the file to preview. Build the UI from
 Macaw's components (`@langchain/macaw-components/<Component>`: Button, Card,
 Input, Select, Tabs, Dialog, Text and the rest) and its tokens (`p-space-4`,
