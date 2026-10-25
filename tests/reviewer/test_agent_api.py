@@ -84,18 +84,14 @@ async def test_backend_operation_traces_keep_runtime_events_and_errors(fails: bo
 
 @pytest.mark.parametrize("requested", ["anthropic:claude-opus-5-5", "openai:gpt-6.1-sol"])
 def test_remote_model_switch_overrides_cached_route_and_effort(requested: str) -> None:
-    from openswe.agent_api.graph import RunSession
-    from openswe.sandboxes.tool_runtime import ModelChoice, SurfaceModels, ToolSurface
+    from runtime_api.catalog import ModelSpec, RunModels
+
+    from openswe.agent_api.loop import ModelChoices
     from openswe.utils.model import provider_model_kwargs
 
-    main = ModelChoice("openai:gpt-6.1-sol", {})
-    session = RunSession(
-        ToolSurface(models=SurfaceModels(main=main, subagent=main, use_gateway=False)),
-        {},
-        None,
-        started_here=True,
-    )
-    choice = session.model_for(
+    main = ModelSpec(model_id="openai:gpt-6.1-sol", kwargs={})
+    choices = ModelChoices(RunModels(model=main, subagent_model=main, use_gateway=False))
+    choice = choices.model_for(
         {
             "model_route": "default",
             "requested_model": requested,
@@ -107,14 +103,77 @@ def test_remote_model_switch_overrides_cached_route_and_effort(requested: str) -
     assert choice.kwargs == provider_model_kwargs(requested, "medium", max_tokens=64_000)
 
 
+async def test_the_calls_around_a_model_call_never_plan_the_run(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from unittest.mock import AsyncMock
+
+    from langchain_core.messages import AIMessage, HumanMessage, messages_to_dict
+    from runtime_api.catalog import LoopRules, ModelSpec, ReplyRules, RoutingRules, RunModels
+
+    from openswe.agent_api import agent
+    from openswe.agent_api.graph import RemoteGraph
+    from openswe.sandboxes.tool_runtime import ToolSurface
+
+    monkeypatch.setattr(
+        "openswe.middleware.refresh_github_proxy.maybe_refresh_proxy_token", AsyncMock()
+    )
+
+    async def never_planned(config: object, surface: ToolSurface) -> None:
+        raise AssertionError("A call around a model call never plans the run")
+
+    graph = RemoteGraph("agent", never_planned, loop=agent._loop)
+    main = ModelSpec(model_id="openai:gpt-6.1-sol", kwargs={})
+    fast = ModelSpec(model_id="openai:gpt-6-luna", kwargs={})
+    # What the catalog planned, as MDA sends it with each call.
+    rules = {
+        "models": RunModels(
+            model=main, subagent_model=main, use_gateway=False, routes={"fast": fast}
+        ).model_dump(mode="json"),
+        "loop": LoopRules(
+            hidden_tools=["grep"],
+            routing=RoutingRules(mode="fast", route_model_ids={"fast": fast.model_id}),
+            reply=ReplyRules(tool="slack_reply", no_reply_tool="slack_no_reply_needed"),
+        ).model_dump(mode="json"),
+    }
+    asked = HumanMessage(content="Fix the login", id="human-1")
+    state = {"rendered_system_prompt": "You are Open SWE.", "reply_surface": "slack"}
+
+    planned = await graph.api(
+        RUN,
+        "before_model",
+        {"run_id": "run-1", "messages": messages_to_dict([asked]), "state": state, **rules},
+    )
+    answered = await graph.api(
+        RUN,
+        "after_model",
+        {
+            "run_id": "run-1",
+            "messages": messages_to_dict([asked, AIMessage(content="Fixed it", id="ai-1")]),
+            "state": state,
+            **rules,
+        },
+    )
+
+    assert isinstance(planned, dict) and isinstance(planned["call"], dict)
+    assert planned["update"] == {"model_route": "fast"}
+    assert planned["call"]["model"] == fast.model_dump(mode="json")
+    assert planned["call"]["hidden_tools"] == ["grep"]
+    assert "You are Open SWE." in str(planned["call"]["system_prompt"])
+    # The answer never went through the reply tool, so the model is asked again.
+    assert isinstance(answered, dict)
+    assert answered["jump_to"] == "model"
+    assert answered["update"] == {"reply_nudges": 1}
+
+
 async def test_mda_calls_hide_the_tools_the_graph_middleware_hides_from_each_call() -> None:
     from langchain.agents.middleware.types import AgentMiddleware
     from langchain_core.tools import tool
     from langgraph.runtime import Runtime
+    from runtime_api.catalog import ModelSpec, RunModels
 
-    from openswe.agent_api.graph import RunSession
+    from openswe.agent_api.loop import RunLoop
     from openswe.middleware.model_call_shape import CallShape
-    from openswe.sandboxes.tool_runtime import ToolSurface
 
     @tool
     def plan(step: str) -> str:
@@ -132,15 +191,15 @@ async def test_mda_calls_hide_the_tools_the_graph_middleware_hides_from_each_cal
         ) -> CallShape:
             return call if state.get("asked") else call.hiding(["record"])
 
-    session = RunSession(
-        ToolSurface(tools={"plan": plan, "record": record}, middleware=[HideRecordUntilAsked()]),
-        {},
-        None,
-        started_here=True,
+    model = ModelSpec(model_id="openai:gpt-6.1-sol", kwargs={})
+    loop = RunLoop(
+        [HideRecordUntilAsked()],
+        RunModels(model=model, subagent_model=model, use_gateway=False),
+        offered={plan.name, record.name},
     )
 
-    assert (await session.model_call({"messages": []}, None)).hidden_tools == ["record"]
-    assert (await session.model_call({"messages": [], "asked": True}, None)).hidden_tools == []
+    assert (await loop.model_call({"messages": []}, Runtime())).hidden_tools == ["record"]
+    assert (await loop.model_call({"messages": [], "asked": True}, Runtime())).hidden_tools == []
 
 
 @pytest.mark.parametrize("environment", ["preview", "staging", "production"])
@@ -171,7 +230,7 @@ async def test_remote_prompts_include_deployment_context(
         started_here=True,
     )
     main_prompt = (
-        await session.model_call({"rendered_system_prompt": "main instructions"}, Runtime())
+        await session.loop.model_call({"rendered_system_prompt": "main instructions"}, Runtime())
     ).system_prompt
     subagent_prompt = session.catalog().subagents[0].system_prompt
 

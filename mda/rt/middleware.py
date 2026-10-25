@@ -45,6 +45,7 @@ from langchain.agents.middleware.types import (
     hook_config,
 )
 from langchain_core.messages import (
+    AIMessage,
     HumanMessage,
     SystemMessage,
     ToolCall,
@@ -59,7 +60,7 @@ from langgraph.runtime import Runtime
 from langgraph.types import Command
 from langgraph_sdk.errors import APIConnectionError, APIStatusError
 from pydantic import BaseModel, JsonValue, TypeAdapter
-from runtime_api.catalog import Catalog, InboxSpec
+from runtime_api.catalog import Catalog, InboxSpec, LoopRules, RunModels
 from runtime_api.endpoint import Endpoint, call
 from runtime_api.loop import (
     AFTER_AGENT,
@@ -71,6 +72,7 @@ from runtime_api.loop import (
     Inbox,
     InboxRead,
     InboxReceipt,
+    LoopCall,
     ModelCall,
     ModelResult,
     PhaseResult,
@@ -328,12 +330,22 @@ class BackendRunMiddleware(AgentMiddleware[RunState]):
         *,
         trace_metadata: Mapping[str, JsonValue] | None = None,
         inbox: InboxSpec | None = None,
+        models: RunModels | None = None,
+        loop: LoopRules | None = None,
     ) -> None:
         self._backend = backend
         self._invocation_id = invocation_id
         self._trace_metadata = trace_metadata or {}
         # How the catalog says to read the thread's inbox; None reads nothing.
         self._inbox = inbox
+        # What the backend builds its hooks around each model call from, without
+        # planning the run again; None leaves it to plan them.
+        self._loop = (
+            {"models": models.model_dump(mode="json"), "loop": loop.model_dump(mode="json")}
+            if models is not None and loop is not None
+            else {}
+        )
+        self._after_model = loop is None or loop.after_model
         self._trace = TurnTrace()
         # Opens the thread's box before preparing, so the backend binds the thread to it.
         self._open_sandbox = open_sandbox
@@ -372,7 +384,9 @@ class BackendRunMiddleware(AgentMiddleware[RunState]):
             "messages": [*state["messages"], *messages_from_dict(inbox.messages)],
             STATE_KEY: {**state.get(STATE_KEY, {}), **inbox.update},
         }
-        planned = await self._phase(BEFORE_MODEL, run_call(RunCall, run_id(), with_inbox))
+        planned = await self._phase(
+            BEFORE_MODEL, run_call(LoopCall, run_id(), with_inbox, **self._loop)
+        )
         if planned.jump_to is not None:
             # No model call answers the inbox now: it stays for the run that comes next.
             return _apply(planned)
@@ -438,7 +452,13 @@ class BackendRunMiddleware(AgentMiddleware[RunState]):
 
     @hook_config(can_jump_to=["model", "end"])
     async def aafter_model(self, state: RunState, runtime: Runtime) -> dict[str, object] | None:  # noqa: ARG002
-        return _apply(await self._phase(AFTER_MODEL, run_call(RunCall, run_id(), state)))
+        last = state["messages"][-1] if state["messages"] else None
+        # The hooks after a model call look only at an answer that calls no tool.
+        if not self._after_model or (isinstance(last, AIMessage) and last.tool_calls):
+            return None
+        return _apply(
+            await self._phase(AFTER_MODEL, run_call(LoopCall, run_id(), state, **self._loop))
+        )
 
     async def aafter_agent(self, state: RunState, runtime: Runtime) -> dict[str, object] | None:  # noqa: ARG002
         metadata = dict(self._trace_metadata)

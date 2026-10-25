@@ -11,6 +11,7 @@ import pytest
 from langchain_core.language_models import BaseChatModel
 from langgraph.graph.state import RunnableConfig
 
+from openswe.agent_api.loop import ModelChoices
 from openswe.dashboard.workspace_settings import WorkspaceSettings
 from openswe.sandboxes.state import SANDBOX_BACKENDS
 from openswe.sandboxes.tool_runtime import ToolSurface
@@ -185,7 +186,6 @@ async def _plan_agent(
     make_model: Callable[..., BaseChatModel] | None = None,
 ) -> dict[str, object]:
     """The run ``config`` plans, with the parts tests read pulled out of its middleware."""
-    from openswe.middleware.model_selection import ModelSelectionMiddleware
 
     surface = ToolSurface()
     make_model_calls: list[tuple[str, dict[str, object]]] = []
@@ -244,7 +244,6 @@ async def _plan_agent(
 
     SANDBOX_BACKENDS.pop(thread_id, None)
     middleware = list(surface.middleware)
-    selection = next(m for m in middleware if isinstance(m, ModelSelectionMiddleware))
     return {
         "surface": surface,
         "tools": list(surface.base_tools),
@@ -252,7 +251,6 @@ async def _plan_agent(
         "subagents": list(surface.subagents),
         "backend": surface.files,
         "skills": list(surface.skill_sources),
-        "model": selection._models["default"],
         "make_model_calls": make_model_calls,
     }
 
@@ -297,7 +295,6 @@ async def test_router_failure_uses_fast_tier_not_profile_default() -> None:
     route = await model_selection.select_route({"messages": []})
 
     assert route == "default"
-    assert model_selection._models[route] is agent["model"]
     assert agent["make_model_calls"][0][0] == "google_genai:gemini-3.8-flash"
 
 
@@ -664,13 +661,14 @@ async def test_text_only_adaptive_route_names_a_vision_model_after_handoff(
         },
     )
     session = RunSession(cast(ToolSurface, planned["surface"]), {}, None, started_here=True)
+    choices = ModelChoices(session.start_models())
 
-    routed = session.model_for({"model_route": route})
-    vision = session.vision_for(routed)
+    routed = choices.model_for({"model_route": route})
+    vision = choices.vision_for(routed)
 
     assert routed.model_id == model_id
     assert vision is not None and vision.model_id == "openai:gpt-6.1-sol"
-    assert session.vision_for(vision) is None
+    assert choices.vision_for(vision) is None
 
 
 @pytest.mark.asyncio
@@ -695,7 +693,7 @@ async def test_explicit_auto_selection_clears_pin_and_keeps_routing_on_followups
     from openswe.middleware.model_selection import ModelSelectionMiddleware
     from openswe.server import PrepareAgentRunMiddleware
 
-    monkeypatch.setattr("openswe.server._model_routing_mode", lambda _: "jev")
+    monkeypatch.setattr("openswe.server._model_routing_mode", lambda _: "auto")
     monkeypatch.setattr(
         "openswe.middleware.model_selection._select_jev_route", AsyncMock(return_value="default")
     )
@@ -721,7 +719,6 @@ async def test_explicit_auto_selection_clears_pin_and_keeps_routing_on_followups
         middleware = cast(list[object], agent["middleware"])
         selection = next(item for item in middleware if isinstance(item, ModelSelectionMiddleware))
         assert await selection.select_route({"messages": []}) == "default"
-        assert selection._models["default"] is agent["model"]
         assert agent["make_model_calls"][0][0] == expected_model
         prepare = next(item for item in middleware if isinstance(item, PrepareAgentRunMiddleware))
         assert prepare._requested_models is None
@@ -785,9 +782,9 @@ async def test_queued_images_reach_vision_fallback_for_text_only_main_model(
     messages = convert_to_messages(taken.messages)
     content = messages[-1].content
     assert isinstance(content, list) and image in content
-    session = RunSession(surface, {}, None, started_here=True)
-    vision = session.vision_for(session.models.main)
-    assert vision is not None and vision.model_id != session.models.main.model_id
+    models = RunSession(surface, {}, None, started_here=True).start_models()
+    vision = ModelChoices(models).vision_for(models.model)
+    assert vision is not None and vision.model_id != models.model.model_id
 
 
 @pytest.mark.asyncio

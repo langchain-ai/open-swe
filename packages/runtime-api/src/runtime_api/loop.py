@@ -16,7 +16,7 @@ from uuid import UUID
 
 from pydantic import BaseModel, JsonValue
 
-from runtime_api.catalog import InboxSpec, ModelSpec
+from runtime_api.catalog import InboxSpec, LoopRules, ModelSpec, RunModels
 from runtime_api.endpoint import LOOP_CALL_SECONDS, Endpoint
 from runtime_api.operations import RunRequest
 
@@ -28,6 +28,16 @@ class RunCall(RunRequest):
     state: dict[str, JsonValue] = {}
     # The ``task`` calls the calling subagent is nested in; empty for the agent itself.
     namespace: list[str] = []
+
+
+class LoopCall(RunCall):
+    """A call around a model call, with the catalog's rules for the hooks it runs.
+
+    Without them the backend plans the run to find its hooks.
+    """
+
+    models: RunModels | None = None
+    loop: LoopRules | None = None
 
 
 class Prepare(RunCall):
@@ -145,7 +155,7 @@ class Done(BaseModel):
 PREPARE = Endpoint("prepare", Prepare, PhaseResult, delivery="idempotent")
 # Builds the next call, so it is sent again to a backend that never took it.
 BEFORE_MODEL = Endpoint(
-    "before_model", RunCall, BeforeModel, seconds=LOOP_CALL_SECONDS, delivery="unprocessed"
+    "before_model", LoopCall, BeforeModel, seconds=LOOP_CALL_SECONDS, delivery="unprocessed"
 )
 # Only reads, so it is safe to send again.
 INBOX = Endpoint("inbox", InboxRead, Inbox, seconds=LOOP_CALL_SECONDS, delivery="idempotent")
@@ -154,7 +164,7 @@ INBOX_RECEIVED = Endpoint(
     "inbox_received", InboxReceipt, Done, seconds=LOOP_CALL_SECONDS, delivery="idempotent"
 )
 MODEL_RESULT = Endpoint("model_result", ModelResult, ObservedResponse, seconds=LOOP_CALL_SECONDS)
-AFTER_MODEL = Endpoint("after_model", RunCall, PhaseResult, seconds=LOOP_CALL_SECONDS)
+AFTER_MODEL = Endpoint("after_model", LoopCall, PhaseResult, seconds=LOOP_CALL_SECONDS)
 AFTER_AGENT = Endpoint("after_agent", RunCall, AfterAgent, seconds=LOOP_CALL_SECONDS)
 TOOL_STARTED = Endpoint("tool_started", ToolCallReport, Done, seconds=LOOP_CALL_SECONDS)
 TOOL_RESULT = Endpoint("tool_result", ToolResultReport, ToolResultReply, seconds=LOOP_CALL_SECONDS)

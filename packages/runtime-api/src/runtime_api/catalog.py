@@ -19,11 +19,15 @@ class ModelSpec(BaseModel):
 
 
 class RunModels(BaseModel):
-    """The models an MDA run builds its agent with."""
+    """The models an MDA run builds its agent with, and those the backend picks between for a call."""
 
     model: ModelSpec
     subagent_model: ModelSpec
     use_gateway: bool
+    # The models the graph's model routing picks between, by route name.
+    routes: dict[str, ModelSpec] = {}
+    # What a text-only model's call goes to once the conversation holds an image.
+    vision: ModelSpec | None = None
 
 
 class OperationSpec(BaseModel):
@@ -99,6 +103,49 @@ class InboxSpec(BaseModel):
     image_fallback: bool = False
 
 
+class ReplyRules(BaseModel):
+    """The run owes the person an answer through ``tool``, or says it has none with ``no_reply_tool``."""
+
+    tool: str
+    no_reply_tool: str
+    # Other tools whose successful call answers the person.
+    replies: list[str] = []
+
+
+class RoutingRules(BaseModel):
+    """How the graph's model selection picks the route of each call."""
+
+    # None keeps the default route; "fast" never asks the classifier.
+    mode: Literal["auto", "fast"] | None = None
+    # The model each route stands for, which the dashboard shows.
+    route_model_ids: dict[str, str] = {}
+
+
+class LoopRules(BaseModel):
+    """What the graph's hooks around each model call are built from, planned with the run.
+
+    The runtime sends them with each ``before_model`` and ``after_model`` call, so the
+    backend answers those without planning the run again.
+    """
+
+    # Tools the graph keeps from every model call.
+    hidden_tools: list[str] = []
+    # How the graph picks each call's route; None: it picks none.
+    routing: RoutingRules | None = None
+    reply: ReplyRules | None = None
+    # A bridged CLI's result tool, which the run must call before it ends.
+    cli_result_tool: str | None = None
+    # Whether the thread's review walkthrough adds its rules to each call.
+    review_guide: bool = False
+    # Whether the thread belongs to a task, as its coordinator or a worker.
+    task_coordination: bool = False
+
+    @property
+    def after_model(self) -> bool:
+        """Whether any hook looks at the model's answer."""
+        return self.reply is not None or self.cli_result_tool is not None
+
+
 class Catalog(BaseModel):
     """The operations, subagents and models of the graph this run plays."""
 
@@ -128,6 +175,8 @@ class Catalog(BaseModel):
     skill_sources: list[str] = []
     # How the run reads what is sent to its thread while it works; None reads nothing.
     inbox: InboxSpec | None = None
+    # What the backend builds the hooks around each model call from.
+    loop: LoopRules | None = None
 
 
 # Only reads the plan, so it is safe to send again.

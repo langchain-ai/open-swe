@@ -22,7 +22,7 @@ from langgraph.graph import END, START, StateGraph
 from langgraph.prebuilt import ToolNode
 from langgraph.typing import StateT
 from pydantic import BaseModel, JsonValue, TypeAdapter
-from runtime_api.catalog import FileCheck, InboxSpec
+from runtime_api.catalog import FileCheck, InboxSpec, LoopRules
 
 from openswe.mcp.models import MCPToolProvenance
 from openswe.middleware.dynamic_tools import DynamicToolMiddleware
@@ -173,6 +173,8 @@ class ToolSurface:
     code_mode: bool = False
     # How the run reads what is sent to its thread while it runs, before each model call.
     inbox: InboxSpec | None = None
+    # What the hooks around each model call are built from, without the rest of the plan.
+    loop: LoopRules = field(default_factory=LoopRules)
 
     async def prepare(self) -> None:
         planned = [

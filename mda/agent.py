@@ -253,6 +253,8 @@ async def agent(runtime: ManagedServerRuntime) -> DeepAgentDefinition:
                 opened_sandbox if catalog.sandbox is not None else None,
                 trace_metadata=catalog.trace_metadata,
                 inbox=catalog.inbox,
+                models=catalog.models,
+                loop=catalog.loop,
             ),
             *replace_sandbox,
             *_backend_reports(backend, catalog),

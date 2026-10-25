@@ -23,6 +23,7 @@ from langchain_anthropic.middleware import AnthropicPromptCachingMiddleware
 from langchain_core.language_models.chat_models import BaseChatModel
 from langgraph.graph.state import RunnableConfig
 from langgraph.runtime import Runtime
+from runtime_api.catalog import LoopRules
 
 from openswe.dashboard.options import gate_fable_model
 from openswe.dashboard.workspace_settings_cache import cached_workspace_settings
@@ -316,6 +317,7 @@ async def plan_review_scout(config: RunnableConfig, surface: ToolSurface) -> Non
         ]
     )
     surface.middleware = middleware
+    surface.loop = LoopRules(hidden_tools=sorted(SHELL_SEARCH_EXCLUDED_TOOLS))
     surface.files = get_cached_sandbox_backend(thread_id, reconnect=reconnect_backend)
     surface.models = models
     surface.subagents = [

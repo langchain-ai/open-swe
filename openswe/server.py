@@ -24,7 +24,7 @@ _MODEL_ROUTING_SPLIT = 0.5
 from langgraph.graph.state import RunnableConfig
 from langgraph.runtime import Runtime
 from langgraph_sdk import get_client
-from runtime_api.catalog import InboxSpec
+from runtime_api.catalog import InboxSpec, LoopRules, ReplyRules, RoutingRules
 
 warnings.filterwarnings("ignore", module="langchain_core._api.deprecation")
 
@@ -1103,12 +1103,7 @@ class PrepareAgentRunMiddleware(BasePrepareRunMiddleware):
                 option = self._requested_models[requested_model]
                 requested_effort = settings.get("effort") or option["default_effort"]
                 decision.requested_effort = requested_effort
-                try:
-                    self._model_selection.use_requested_model(requested_model, requested_effort)
-                except Exception:
-                    decision.outcome = "selection_failure"
-                    decision.reason = "model_initialization_failed"
-                    raise
+                self._model_selection.use_requested_model(requested_model)
                 if decision.outcome != "reused_saved_choice":
                     decision.outcome = "accepted_request"
                     decision.reason = "validated_and_persisted"
@@ -1799,46 +1794,11 @@ async def plan_agent(config: RunnableConfig, surface: ToolSurface) -> None:
 
     configurable["image_model_fallback_enabled"] = vision_model is not None
 
-    def requested_model_factory(
-        requested_model: str, requested_effort: str | None
-    ) -> BaseChatModel:
-        option = available_requested_models(fable_enabled=fable_enabled)[requested_model]
-        model = _make_model_or_defer(
-            requested_model,
-            use_gateway=use_gateway,
-            **provider_model_kwargs(
-                requested_model,
-                requested_effort or option["default_effort"],
-                max_tokens=DEFAULT_LLM_MAX_TOKENS,
-            ),
-        )
-        fallback_middleware.register_fallback(model, make_fallback_model(requested_model))
-        return model
-
-    # Keep checkpointed routing tasks resumable after a handoff disables routing.
-    routing_models = {
-        route: _make_model_or_defer(
-            routed_model_id,
-            use_gateway=use_gateway,
-            **provider_model_kwargs(
-                routed_model_id,
-                effort,
-                max_tokens=DEFAULT_LLM_MAX_TOKENS,
-            ),
-        )
-        for route, (routed_model_id, effort) in routing_defaults.items()
-        if adaptive_model_routing
+    route_model_ids = {
+        **{route: routed_model_id for route, (routed_model_id, _) in routing_defaults.items()},
+        "default": model_id,
     }
-    model_selection = ModelSelectionMiddleware(
-        routing_models,
-        main_model,
-        route_model_ids={
-            **{route: routed_model_id for route, (routed_model_id, _) in routing_defaults.items()},
-            "default": model_id,
-        },
-        routing_mode=model_routing_mode,
-        requested_model_factory=requested_model_factory,
-    )
+    model_selection = ModelSelectionMiddleware(route_model_ids, routing_mode=model_routing_mode)
     title_model = _make_model_or_defer(
         title_model_id,
         use_gateway=use_gateway,
@@ -1922,6 +1882,18 @@ async def plan_agent(config: RunnableConfig, surface: ToolSurface) -> None:
     )
     surface.base_tools = main_tools
     surface.middleware = middleware
+    surface.loop = LoopRules(
+        hidden_tools=sorted(excluded_tools),
+        routing=RoutingRules(mode=model_routing_mode, route_model_ids=route_model_ids),
+        reply=ReplyRules(
+            tool=_registered_tool_name(slack_reply),
+            no_reply_tool=_registered_tool_name(slack_no_reply_needed),
+            replies=sorted(GUIDE_REPLY_TOOLS) if guide is not None else [],
+        ),
+        cli_result_tool=_registered_tool_name(cli_result) if cli_result_required else None,
+        review_guide=guide is not None,
+        task_coordination=task_coordination is not None,
+    )
     surface.inbox = (
         None
         if stop_summary_mode
