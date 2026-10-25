@@ -9,11 +9,11 @@ import { SkillPromptText } from "../SkillBadge"
 import { AgentTurn } from "./timeline/AgentTurn"
 import { liveActivityLabel } from "./timeline/workEntry"
 import { ThinkingSpinner } from "./ThinkingSpinner"
-import { TranscriptQuoteButton } from "./TranscriptQuoteButton"
 import { UserMessage } from "./UserMessage"
 import { useTranscriptScroll } from "./useTranscriptScroll"
 import { turnCosts } from "@/features/agents/lib/contextUsage"
 import type { MessagesProps } from "./types"
+import { SelectionReply } from "@/features/agents/components/SelectionReply"
 import { InlinePlanArtifact } from "@/features/agents/components/InlinePlanArtifact"
 import { WorkflowApprovalCard } from "@/features/agents/components/WorkflowApprovalCard"
 import { useLiveMarkdownMessageId } from "@/features/agents/lib/provider/useLiveMarkdownMessageId"
@@ -104,7 +104,7 @@ export const Messages = memo(function MessagesComponent({
   pollWorkflowApprovalsWhileActive = false,
   queuedMessages = [],
   onRemoveQueuedMessage,
-  onQuoteSelection,
+  onReply,
   isStreaming,
   streamIsLoading,
   isThinking,
@@ -268,11 +268,8 @@ export const Messages = memo(function MessagesComponent({
           <div ref={reserveRef} aria-hidden />
         </div>
 
-        {onQuoteSelection && (
-          <TranscriptQuoteButton
-            containerRef={scrollRef}
-            onQuote={onQuoteSelection}
-          />
+        {onReply && (
+          <SelectionReply containerRef={scrollRef} onReply={onReply} />
         )}
 
         {scrollButtonSlot === "internal" && showScrollToBottom && (

@@ -8,9 +8,10 @@ import {
 } from "@langchain/macaw-components/DropdownMenu"
 import { IconButton } from "@langchain/macaw-components/IconButton"
 import { ImageSquareIcon } from "@phosphor-icons/react/dist/ssr/ImageSquare"
-import { QuotesIcon } from "@phosphor-icons/react/dist/ssr/Quotes"
 
 import { ComposerCommandMenu } from "./ComposerCommandMenu"
+import { ComposerReplyCards } from "./ComposerReplyCards"
+import type { PendingReply } from "./ComposerReplyCards"
 import { ComposerPrimaryActions } from "./ComposerPrimaryActions"
 import {
   ComposerPromptEditor,
@@ -53,7 +54,8 @@ import type {
   WorkspaceOption,
 } from "@/lib/api"
 import type { ImageChunk } from "@/features/agents/lib/types"
-import { serializeQuotes } from "@/features/agents/utils/transcriptQuote"
+import { serializeReplies } from "@/features/agents/utils/quoteReply"
+import type { QuoteReply } from "@/features/agents/utils/quoteReply"
 import type { ModelSelection } from "@/features/agents/lib/provider/useModelOptions"
 import { ModelPicker } from "@/features/agents/components/ModelPicker"
 import { RepoSelector } from "@/features/settings/components/RepoSelector"
@@ -137,8 +139,8 @@ export interface ChatComposerProps {
   /** Content to put back in front of whatever is being typed. */
   restoreDraft?: RestoredDraft | null
   droppedFiles?: { key: number; files: Array<File> } | null
-  /** Transcript text the user quoted; it rides ahead of their next message. */
-  quotedSelection?: { key: number; text: string } | null
+  /** A reply to a passage the user selected; it rides ahead of their next message. */
+  addedReply?: { key: number; reply: QuoteReply } | null
   models?: Array<ModelOption>
   selection?: ModelSelection | null
   onSelectionChange?: (next: ModelSelection | null) => void
@@ -283,7 +285,7 @@ export const ChatComposer = memo(function ChatComposer({
   followUpBehavior = "steer",
   restoreDraft = null,
   droppedFiles = null,
-  quotedSelection = null,
+  addedReply = null,
   models = [],
   selection = null,
   onSelectionChange,
@@ -316,16 +318,15 @@ export const ChatComposer = memo(function ChatComposer({
   const [value, setValue] = useState("")
   const [cursor, setCursor] = useState(0)
   const [pendingImages, setPendingImages] = useState<Array<ImageChunk>>([])
-  const [pendingQuotes, setPendingQuotes] = useState<Array<string>>([])
-  const [appliedQuote, setAppliedQuote] = useState<typeof quotedSelection>(null)
-  if (quotedSelection !== appliedQuote) {
-    setAppliedQuote(quotedSelection)
-    if (quotedSelection)
-      setPendingQuotes((prev) =>
-        prev.includes(quotedSelection.text)
-          ? prev
-          : [...prev, quotedSelection.text]
-      )
+  const [pendingReplies, setPendingReplies] = useState<Array<PendingReply>>([])
+  const [appliedReply, setAppliedReply] = useState<typeof addedReply>(null)
+  if (addedReply !== appliedReply) {
+    setAppliedReply(addedReply)
+    if (addedReply)
+      setPendingReplies((prev) => [
+        ...prev,
+        { id: addedReply.key, reply: addedReply.reply },
+      ])
   }
   const [dragKind, setDragKind] = useState<"files" | "path" | null>(null)
   const [isSubmitting, setIsSubmitting] = useState(false)
@@ -385,8 +386,8 @@ export const ChatComposer = memo(function ChatComposer({
   }, [autoFocus])
 
   useEffect(() => {
-    if (quotedSelection) editorRef.current?.focusAtEnd()
-  }, [quotedSelection])
+    if (addedReply) editorRef.current?.focusAtEnd()
+  }, [addedReply])
 
   // Synchronous double-submit guard: blocks a same-tick second send (Enter +
   // click, or two rapid Enters) before React re-renders. Scoped to the send
@@ -446,7 +447,7 @@ export const ChatComposer = memo(function ChatComposer({
   const composerEmpty =
     value.trim().length === 0 &&
     pendingImages.length === 0 &&
-    pendingQuotes.length === 0
+    pendingReplies.length === 0
   const canSubmit =
     !disabled && !isSubmitting && selectedModelSupportsImages && !composerEmpty
 
@@ -486,7 +487,7 @@ export const ChatComposer = memo(function ChatComposer({
       // has not yet round-tripped through state would otherwise be dropped.
       const snapshot = editorRef.current?.readSnapshot()
       const trimmed = (snapshot?.value ?? value).trim()
-      const attached = pendingImages.length + pendingQuotes.length
+      const attached = pendingImages.length + pendingReplies.length
       if (trimmed.length === 0 && attached === 0) return
 
       if (trimmed === "/offload" && (!canOffload || attached)) {
@@ -499,12 +500,15 @@ export const ChatComposer = memo(function ChatComposer({
       }
 
       const images = pendingImages
-      const content = serializeQuotes(trimmed, pendingQuotes)
+      const content = serializeReplies(
+        trimmed,
+        pendingReplies.map((pending) => pending.reply)
+      )
       submittingRef.current = true
       setIsSubmitting(true)
       applyPrompt("", 0)
       setPendingImages([])
-      setPendingQuotes([])
+      setPendingReplies([])
       setComposerError(null)
       try {
         await onSubmit?.(content, images, options)
@@ -520,7 +524,7 @@ export const ChatComposer = memo(function ChatComposer({
       disabled,
       onSubmit,
       pendingImages,
-      pendingQuotes,
+      pendingReplies,
       value,
       canOffload,
     ]
@@ -865,39 +869,14 @@ export const ChatComposer = memo(function ChatComposer({
           type="file"
         />
 
-        {pendingQuotes.length > 0 && (
-          <ul
-            aria-label="Quoted in your next message"
-            className="mb-space-2 flex flex-col gap-space-1"
-          >
-            {pendingQuotes.map((quote) => (
-              <li
-                className="flex min-w-0 items-start gap-space-2 border-l-2 border-default py-0.5 pl-space-2 text-xs text-secondary"
-                key={quote}
-                title={quote}
-              >
-                <QuotesIcon
-                  className="mt-0.5 size-3.5 shrink-0 text-icon-secondary"
-                  weight="regular"
-                />
-                <span className="line-clamp-2 min-w-0 flex-1 [overflow-wrap:anywhere] whitespace-pre-wrap">
-                  {quote}
-                </span>
-                <IconButton
-                  className="shrink-0"
-                  color="secondary"
-                  icon={XIcon}
-                  label="Remove quote"
-                  onClick={() =>
-                    setPendingQuotes((prev) => prev.filter((q) => q !== quote))
-                  }
-                  size="xs"
-                  variant="plain"
-                />
-              </li>
-            ))}
-          </ul>
-        )}
+        <ComposerReplyCards
+          replies={pendingReplies}
+          onRemove={(id) =>
+            setPendingReplies((prev) =>
+              prev.filter((pending) => pending.id !== id)
+            )
+          }
+        />
 
         {pendingImages.length > 0 && (
           <div className="mb-space-2 flex flex-wrap gap-space-2">

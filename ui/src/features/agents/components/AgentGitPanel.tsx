@@ -27,9 +27,13 @@ import {
   useLocalThreadPrDiff,
 } from "@/features/agents/lib/desktopLocal"
 import type { TerminalTarget } from "@/features/agents/lib/terminalSession"
+import { normalizeQuote } from "@/features/agents/utils/quoteReply"
+import type { QuoteReply } from "@/features/agents/utils/quoteReply"
 
 interface AgentGitPanelProps {
   onComment?: (content: string) => Promise<void>
+  /** Takes replies to text selected in the panel's files and terminals. */
+  onReply?: (reply: QuoteReply) => void
   thread: AgentThread
   revealFilePath?: string | null
   revealChangesKey?: number
@@ -40,6 +44,7 @@ interface AgentGitPanelProps {
 export function AgentGitPanel({
   thread,
   onComment,
+  onReply,
   revealFilePath,
   revealChangesKey = 0,
   collapsed,
@@ -215,6 +220,11 @@ export function AgentGitPanel({
       )}
       collapsed={collapsed}
       onCollapsedChange={onCollapsedChange}
+      onReply={onReply}
+      {...(onReply && {
+        onTerminalAddToChat: (text: string) =>
+          onReply({ kind: "text", quote: normalizeQuote(text), comment: "" }),
+      })}
       renderDiff={({ fullScreen }) => (
         <ChangesPanel
           files={files}

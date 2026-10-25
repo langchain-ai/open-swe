@@ -3,6 +3,7 @@ import type {
   LocalRepo,
   QueuedThreadMessage,
 } from "@/features/agents/lib/types"
+import type { QuoteReply } from "@/features/agents/utils/quoteReply"
 
 export interface ApprovalCallbacks {
   onApprove?: (approvalRequestId: string) => void
@@ -38,8 +39,8 @@ export interface MessagesProps extends ApprovalCallbacks {
   queuedMessages?: Array<QueuedThreadMessage>
   /** Drop a queued message and hand it back to the composer. */
   onRemoveQueuedMessage?: (id: string) => void
-  /** Offers a Quote button on selected transcript text, attaching it to the next message. */
-  onQuoteSelection?: (text: string) => void
+  /** Offers Reply on selected transcript text, attaching the reply to the next message. */
+  onReply?: (reply: QuoteReply) => void
   isStreaming: boolean
   /** Live run signal from `useStream().isLoading` — drives Streamdown token animation. */
   streamIsLoading?: boolean

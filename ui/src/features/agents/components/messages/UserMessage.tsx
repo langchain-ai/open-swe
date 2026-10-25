@@ -4,8 +4,7 @@ import { useEffect, useRef, useState } from "react"
 
 import { SkillPromptText } from "../SkillBadge"
 import { CodeBlock } from "@/features/agents/components/chat/CodeBlock"
-import { parseExcerpts } from "@/features/agents/utils/codeExcerpt"
-import { parseQuotes } from "@/features/agents/utils/transcriptQuote"
+import { parseMessageSegments } from "@/features/agents/utils/quoteReply"
 import { MessageImage } from "./MessageImage"
 import { MessageTimestamp } from "./MessageTimestamp"
 import { ExpandableMessageChip } from "./ExpandableMessageChip"
@@ -32,20 +31,14 @@ export function UserMessage({ message }: { message: Message }) {
 function StandardUserMessage({ message }: { message: Message }) {
   const isSystem = message.structuredSenderKind === "system"
   const isSlack = message.structuredSurface === "slack"
-  const { excerpts, text: prose } = parseExcerpts(
-    message.chunks
-      .filter((c) => c.kind === "text")
-      .map((c) => c.text)
-      .join("")
-  )
-  const { quotes, text } = parseQuotes(prose)
+  const content = message.chunks
+    .filter((c) => c.kind === "text")
+    .map((c) => c.text)
+    .join("")
+  const segments = parseMessageSegments(content)
 
   const images = message.chunks.filter((c) => c.kind === "image")
-  const hasBody =
-    Boolean(text) ||
-    images.length > 0 ||
-    excerpts.length > 0 ||
-    quotes.length > 0
+  const hasBody = segments.length > 0 || images.length > 0
   const [expanded, setExpanded] = useState(false)
   const [isTruncated, setIsTruncated] = useState(false)
   const textRef = useRef<HTMLDivElement>(null)
@@ -59,7 +52,7 @@ function StandardUserMessage({ message }: { message: Message }) {
     const observer = new ResizeObserver(measure)
     observer.observe(el)
     return () => observer.disconnect()
-  }, [text])
+  }, [content])
 
   const body = (
     <>
@@ -72,23 +65,6 @@ function StandardUserMessage({ message }: { message: Message }) {
               : "bg-surface-level-2"
           )}
         >
-          {excerpts.map((excerpt, i) => (
-            <CodeBlock
-              key={i}
-              title={excerpt.location}
-              language={excerpt.language}
-              text={excerpt.code}
-            />
-          ))}
-          {quotes.map((quote, i) => (
-            <blockquote
-              key={i}
-              className="mb-space-2 line-clamp-5 border-l-2 border-default pl-space-3 text-sm leading-[1.6] [overflow-wrap:anywhere] whitespace-pre-wrap text-secondary"
-              title={quote}
-            >
-              {quote}
-            </blockquote>
-          ))}
           {images.length > 0 && (
             <div className="mb-space-2 grid max-w-[420px] grid-cols-2 gap-space-2">
               {images.map((img, i) => (
@@ -104,11 +80,11 @@ function StandardUserMessage({ message }: { message: Message }) {
               ))}
             </div>
           )}
-          {text && (
+          {segments.length > 0 && (
             <div
               ref={textRef}
               className={cn(
-                "text-sm leading-[1.6] [overflow-wrap:anywhere] whitespace-pre-wrap text-primary",
+                "flex flex-col gap-space-2 text-sm leading-[1.6] [overflow-wrap:anywhere] text-primary",
                 !isSystem && !expanded && "overflow-hidden"
               )}
               style={
@@ -117,10 +93,30 @@ function StandardUserMessage({ message }: { message: Message }) {
                   : undefined
               }
             >
-              {isSlack ? (
-                <SlackMrkdwn text={text} />
-              ) : (
-                <SkillPromptText text={text} />
+              {segments.map((segment, i) =>
+                segment.kind === "code" ? (
+                  <CodeBlock
+                    key={i}
+                    title={segment.excerpt.location}
+                    language={segment.excerpt.language}
+                    text={segment.excerpt.code}
+                  />
+                ) : segment.kind === "quote" ? (
+                  <blockquote
+                    key={i}
+                    className="border-l-2 border-default pl-space-3 whitespace-pre-wrap text-secondary"
+                  >
+                    {segment.text}
+                  </blockquote>
+                ) : (
+                  <div key={i} className="whitespace-pre-wrap">
+                    {isSlack ? (
+                      <SlackMrkdwn text={segment.text} />
+                    ) : (
+                      <SkillPromptText text={segment.text} />
+                    )}
+                  </div>
+                )
               )}
             </div>
           )}

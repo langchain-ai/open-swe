@@ -265,7 +265,7 @@ test.describe("transcript rendering", () => {
     ).toHaveCount(1);
   });
 
-  test("quotes selected transcript text into the next message", async ({
+  test("replies to selected transcript text in the next message", async ({
     page,
   }) => {
     await loginAs(page, SAME_USER);
@@ -274,10 +274,10 @@ test.describe("transcript rendering", () => {
     await waitForThreadIdle(page, threadId);
     await waitForThreadNotBusy(page, threadId);
 
-    const reply = page
+    const passage = page
       .getByText("Opening a pull request.", { exact: true })
       .first();
-    const box = await reply.boundingBox();
+    const box = await passage.boundingBox();
     if (!box) throw new Error("The agent's reply has no layout box");
     await page.mouse.move(box.x + 1, box.y + box.height / 2);
     await page.mouse.down();
@@ -285,16 +285,19 @@ test.describe("transcript rendering", () => {
       steps: 10,
     });
     await page.mouse.up();
-    await page.getByRole("button", { name: "Quote", exact: true }).click();
+    await page.getByRole("button", { name: "Reply", exact: true }).click();
+    const field = page.getByRole("textbox", { name: "Your reply" });
+    await field.fill("Which branch?");
+    await field.press("Enter");
     await expect(
-      page.getByRole("list", { name: "Quoted in your next message" }),
-    ).toContainText("Opening a pull request.");
+      page.getByRole("list", { name: "Replies in your next message" }),
+    ).toContainText("Which branch?");
 
-    await typeIntoComposer(page, "Which branch?");
+    await typeIntoComposer(page, "Thanks!");
     await waitForStateToContain(
       page,
       threadId,
-      "Opening a pull request.\\n\\nWhich branch?",
+      "Opening a pull request.\\n\\nWhich branch?\\n\\nThanks!",
     );
     const sent = page
       .getByTestId("user-message")
