@@ -30,6 +30,7 @@ ISOLATED_LOOPS_ENV = "BG_JOB_ISOLATED_LOOPS"
 
 # Short enough that a stall just past the threshold is still caught.
 _PING_INTERVAL_SECONDS: Final = 0.1
+_UNRECOVERED_REPORT_FACTOR: Final = 10
 _LOG_RECORD_FIELDS: Final = frozenset(vars(logging.makeLogRecord({})))
 
 
@@ -75,11 +76,12 @@ class _Stall:
     task: str | None
     serving: Mapping[str, str | int]
 
-    def log(self, seconds: float) -> None:
+    def log(self, seconds: float, *, recovered: bool) -> None:
         logger.warning(
             "Event loop stalled",
             extra={
                 "stall_ms": round(seconds * 1000),
+                "stall_recovered": recovered,
                 "loop_stack": self.stack,
                 "loop_task": self.task,
                 **self.serving,
@@ -88,7 +90,9 @@ class _Stall:
 
 
 class StallWatchdog:
-    """Pings the loop from a thread of its own and logs each stall once, when it ends.
+    """Pings the loop from a thread of its own and logs each stall when it ends.
+
+    A stall that outlasts ten thresholds is also logged while it is still going on.
 
     Construct it on the loop's thread: that is the thread whose stack it samples.
     """
@@ -117,14 +121,21 @@ class StallWatchdog:
             except RuntimeError:
                 logger.debug("Event loop closed; stall watchdog exiting", exc_info=True)
                 return
-            if answered.wait(self._threshold):
+            # A ping left waiting by `stop()` itself is shutdown, not a stall.
+            if answered.wait(self._threshold) or self._stopped.is_set():
                 continue
             # Sampled while the loop is still stuck, so the stack shows what holds it.
             stall = self._sample()
+            reported = False
             while not answered.wait(self._threshold):
                 if self._stopped.is_set():
                     return
-            stall.log(time.monotonic() - sent)
+                stalled = time.monotonic() - sent
+                # The pod may be restarted before a stall this long ends, if it ever does.
+                if not reported and stalled >= self._threshold * _UNRECOVERED_REPORT_FACTOR:
+                    stall.log(stalled, recovered=False)
+                    reported = True
+            stall.log(time.monotonic() - sent, recovered=True)
 
     def _sample(self) -> _Stall:
         frame = sys._current_frames().get(self._loop_thread)  # noqa: SLF001
