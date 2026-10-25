@@ -46,7 +46,7 @@ Classes used below:
 | `files` (composite: sandbox, skill routes, blob store) | `files.*`, `skills` | Sandbox: (b). Skill and blob routes: (c), routed by the token's identity. |
 | `backend_paths`, `artifacts_root`, `skill_sources`, `file_checks` | `catalog` | (a) |
 | `shell_guards` | `check_shell`, `operation` | (b) as rules, (c) for any check that needs GitHub |
-| `inbox` (`ThreadInbox`) | `prepare`, `inbox`, `inbox_received` | (c) PostgreSQL by thread id; its flags (events, initial reply surface) are (a) |
+| `inbox` | `prepare`, `inbox`, `inbox_received` | Now an `InboxSpec` (a); `ThreadInbox` reads PostgreSQL by thread id (c) |
 
 ### `RunSession` / `RemoteGraph` (`openswe/agent_api/graph.py`)
 
@@ -76,13 +76,13 @@ and `tests/tools/test_mcp_sources.py`.
 | --- | --- | --- |
 | `catalog` | whole plan, `ManagedSandbox.for_thread`, `TurnGitMetadata.actor` | (a) — slice 1; endpoint kept only for runs started before it |
 | `prepare` | `bind_sandbox`, `inbox.receive(carried events)`, every `before_agent` hook, `TurnGitMetadata.begin` (`git_trace.py` in the box) | Sandbox, checkout, git baseline: (b). Rendered prompt, repo instructions: (a). Turn start, event receipt: (c). Title generation, model handoff classifier: (c). |
-| `skills` | `skill_sources`, `files` | (c) by the token's identity (user skills by credential login) |
-| `inbox`, `inbox_received` | `surface.inbox`, `rejoin_preparation` | (c) |
+| `skills` | `skill_sources`, `files` | (c) by the token's identity (user skills by credential login) — done |
+| `inbox`, `inbox_received` | `surface.inbox`, `rejoin_preparation` | (c), the catalog's `InboxSpec` sent with each read — done |
 | `before_model` | `before_model` hooks (task coordination, GitHub proxy refresh, model routing, client tools), `ShapesModelCalls`, models | Proxy refresh: (b). Routing and requested model: (b) with (a) data, classifier as (c). Coordination messages: (c) through the inbox. Client-tools stop: (b). |
-| `model_result` | `TranscriptMiddleware`, `RecordRunUsageMiddleware` | (c) fire-and-forget appends |
+| `model_result` | `TranscriptMiddleware`, `RecordRunUsageMiddleware` | (c) on the graph's named reporters — done; fire-and-forget appends still to come |
 | `after_model` | `RequireUserReplyMiddleware`, `RequireCliResultMiddleware` | (b), their tool names and retry limits in (a) |
 | `after_agent` | usage, transcript end, step-limit notice, review-check settle, `TurnGitMetadata.reconcile` | (c) appends; git reconcile evidence collected by MDA (b) |
-| `tool_started`, `tool_result` | transcript, `TurnGitMetadata.work_evidence` | (c) appends; evidence collected by MDA (b) |
+| `tool_started`, `tool_result` | transcript, `TurnGitMetadata.work_evidence` | (c) on the graph's named reporters — done; evidence collected by MDA (b) still to come |
 | `sandbox_replaced` | `reconnect_replaced_sandbox` | (b); the backend records the new box id (c) |
 | `sandbox_unreachable` | config only | (c) |
 | `operation` | `surface.tools`, client tools, shell guards, `OperationFailure`, PR-target evidence, `rejoin_preparation` | (c) |
@@ -105,26 +105,37 @@ and `tests/tools/test_mcp_sources.py`.
 
 ## Migration order
 
-Each slice ships alone; MDA and the backend deploy in either order.
+Each slice ships alone; MDA and the backend deploy in either order, except where
+noted for the brief window of one deploy.
 
-1. **Catalog in the run context** (this PR). `remote_run_context` plans the run and
-   sends the catalog as `__catalog`; `adopt` returns the worker's own; a worker
-   launch carries its coordinator's. MDA builds from it and calls `catalog` only
-   for runs started before the backend sent one. `RemoteGraph.start_models` and the
-   `models` context key are gone.
-2. **Stateless reporting.** `model_result`, `tool_started`, `tool_result`,
-   `after_agent` reporting become appends keyed by run id, not waited on; the
-   transcript and usage stop keeping `_runs` in memory.
-3. **Inbox and skills without a plan.** Served from the token (PostgreSQL and the
-   identity's skill stores), with no `RunSession`.
-4. **Loop phases as data in MDA.** Reply and CLI-result nudges, hidden tools, model
-   routing and vision swap run in `mda/rt` from (a) data; the rendered system prompt
-   and repo instructions move into the run context; `before_model`/`after_model`
-   calls go away.
+Done:
+
+1. **Catalog in the run context.** `plan_remote_run` plans the run and sends the
+   catalog as `__catalog`; `adopt` returns the worker's own; a worker launch carries
+   its coordinator's. MDA builds from it and calls `catalog` only for runs started
+   without one. `RemoteGraph.start_models` and the `models` context key are gone.
+2. **Inbox and skills without a plan.** The catalog carries an `InboxSpec` that MDA
+   sends with each read; `ThreadInbox` belongs to the thread alone. `RunSkillStores`
+   resolves a run's skill stores from its token. While an older MDA runs against
+   this backend, its inbox reads come back empty and follow-ups wait for the next run.
+3. **Reporting without a plan.** `model_result`, `tool_started` and `tool_result`
+   run on the graph's named reporters (`RemoteGraph(reporters=…)`), whose state is
+   keyed by run ids.
+
+To do. A call that lands on another pod still plans the run until every call it
+makes per model call and per tool call stops needing the plan:
+
+4. **Loop phases as data.** `after_model` (reply and CLI-result nudges) and
+   `before_model` (client-tool stop, task coordination, model routing, proxy
+   refresh, call shaping, model choice) run from rules in the catalog. Open point:
+   an incident run's Slack thread comes from its incident session, not the token, so
+   the reply fallback needs it as run data.
 5. **Sandbox to MDA.** Reconnect, proxy refresh, git identity, checkout and git
    evidence (`git_trace.py`) run in MDA; `prepare` stops touching the box;
    `sandbox_replaced` only records.
 6. **Operations by name.** `operation`, `check_shell`, `record_evidence` and
    `files.*` resolve from a per-process registry and the token's identity.
-7. **Delete.** `catalog` endpoint, `RunSession`, `RemoteGraph.session`,
+7. **Preparation and the end of the run.** `prepare` and `after_agent` run from
+   run data; incident evidence moves to PostgreSQL.
+8. **Delete.** `catalog` endpoint, `RunSession`, `RemoteGraph.session`,
    `ToolSurface`, `CarriedAcrossProcesses`; the planners return the run context.
