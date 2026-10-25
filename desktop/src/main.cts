@@ -609,6 +609,16 @@ function configureDesktopIpc() {
     requireTrustedDesktopIpc(event);
     if (typeof value === "string") clipboard.writeText(value);
   });
+  ipcMain.handle("desktop:copy-page-link", (event) => {
+    requireTrustedDesktopIpc(event);
+    if (!backendUrl) throw new Error("Open SWE is not connected to a backend");
+    const source = new URL(event.sender.getURL());
+    const target = new URL(backendUrl);
+    target.pathname = source.pathname;
+    target.search = source.search;
+    target.hash = source.hash;
+    clipboard.writeText(target.toString());
+  });
   ipcMain.handle("desktop:version", (event) => {
     requireTrustedDesktopIpc(event);
     return app.getVersion();
