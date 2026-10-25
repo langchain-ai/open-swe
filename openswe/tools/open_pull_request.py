@@ -2,6 +2,7 @@
 
 import asyncio
 import logging
+from collections.abc import Mapping
 from datetime import UTC, datetime
 from typing import Annotated, Any
 from urllib.parse import quote
@@ -595,6 +596,17 @@ async def _record_pr_opened_feedback(thread_id: str, *, pr_url: str) -> None:
     )
 
 
+def _run_model(
+    cfg: RunConfig, run_state: Mapping[str, object] | None
+) -> tuple[str | None, str | None]:
+    """The model and effort this run calls: the one its preparation chose, else its start's."""
+    selected = (run_state or {}).get("selected_model_id")
+    if isinstance(selected, str) and selected:
+        effort = (run_state or {}).get("selected_effort")
+        return selected, effort if isinstance(effort, str) else None
+    return cfg.resolved_agent_model_id, cfg.resolved_agent_effort
+
+
 async def _record_pr_telemetry(
     *,
     client: httpx2.AsyncClient,
@@ -608,6 +620,7 @@ async def _record_pr_telemetry(
     retitle_thread: bool = True,
     record_opening: bool = True,
     creation_response: dict[str, Any] | None = None,
+    run_state: Mapping[str, object] | None = None,
 ) -> None:
     pr_number = pr.get("number")
     if not isinstance(pr_number, int):
@@ -649,6 +662,7 @@ async def _record_pr_telemetry(
             record_pr_target(f"{owner}/{repo}", pr_head["ref"])
         config = get_config()
         cfg = RunConfig.from_config(config)
+        model_id, effort = _run_model(cfg, run_state)
         thread_id = cfg.thread_id
         github_login = cfg.github_login
         if not (github_login or "").strip():
@@ -683,7 +697,7 @@ async def _record_pr_telemetry(
             created_at=details.get("created_at") or pr.get("created_at"),
             merged_at=details.get("merged_at") or pr.get("merged_at"),
             invocation_id=cfg.invocation_id,
-            model_id=cfg.resolved_agent_model_id,
+            model_id=model_id,
             source=cfg.source,
             repository_private=(
                 details.get("base", {}).get("repo", {}).get("private")
@@ -798,10 +812,8 @@ async def _record_pr_telemetry(
                         if record_opening and isinstance(opening_head_sha, str)
                         else ""
                     ),
-                    opening_model_id=(
-                        (cfg.resolved_agent_model_id or "") if record_opening else ""
-                    ),
-                    opening_effort=(cfg.resolved_agent_effort or "") if record_opening else "",
+                    opening_model_id=(model_id or "") if record_opening else "",
+                    opening_effort=(effort or "") if record_opening else "",
                     langsmith_run_id=str(run_id) if record_opening and run_id else "",
                     slack_team_id=origin.team_id if origin else "",
                     slack_channel_id=origin.channel_id if origin else "",
@@ -1122,6 +1134,7 @@ async def _open_pull_request(
                     resolves_thread=resolves_thread,
                     retitle_thread=retitle_thread,
                     creation_response=pr,
+                    run_state=state,
                 )
             return {
                 "success": True,
@@ -1148,6 +1161,7 @@ async def _open_pull_request(
                     resolves_thread=resolves_thread,
                     retitle_thread=retitle_thread,
                     record_opening=False,
+                    run_state=state,
                 )
                 return {
                     "success": True,

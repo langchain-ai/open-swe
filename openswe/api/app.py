@@ -31,7 +31,7 @@ from openswe.threads.router import ThreadRouter
 from openswe.threads.workflow_approval_api import workflow_approval_router
 from openswe.users.records import UnknownUser
 from openswe.utils.dashboard_ui import mount_dashboard_ui
-from openswe.utils.event_loop import pin_single_event_loop
+from openswe.utils.event_loop import pin_single_event_loop, watch_for_stalls
 from openswe.utils.http_pool import close_pool as close_http_pool
 
 logger = logging.getLogger(__name__)
@@ -111,6 +111,7 @@ async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
         logger.warning("Warming the agent build failed", exc_info=True)
     try:
         async with AsyncExitStack() as stack:
+            stack.enter_context(watch_for_stalls())
             if AGENT_MCP is not None:
                 await stack.enter_async_context(AGENT_MCP.app.lifespan(AGENT_MCP.app))
             yield

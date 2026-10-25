@@ -13,7 +13,6 @@ import contextlib
 import hashlib
 import inspect
 import json
-import logging
 import math
 import os
 import posixpath
@@ -101,6 +100,7 @@ from managed_deepagents._identity_runtime import (
     build_runtime_identity,
     resolve_runtime_configurable,
 )
+from managed_deepagents._log import logger
 from managed_deepagents._managed_composition import (
     assert_dynamic_memory_selection,
     snapshot_managed_composition,
@@ -115,6 +115,9 @@ from managed_deepagents._managed_tools import (
     _ManagedReadRuntime,
     adapt_server_runtime,
     wrap_tools_with_managed_runtime,
+)
+from managed_deepagents._memory import (
+    ManagedCompositeBackend as _ManagedCompositeBackend,
 )
 from managed_deepagents._memory import (
     managed_context_backend as _managed_context_backend,
@@ -157,8 +160,6 @@ from managed_deepagents._telemetry.run import (
 from managed_deepagents._telemetry.run_wrapper import observe_run
 from managed_deepagents.define_deep_agent import DeepAgentDefinition
 from managed_deepagents.run_context import ManagedChannelContext, ManagedRunContext
-
-_LOG = logging.getLogger("mda.sandbox")
 
 
 class _Omitted:
@@ -701,7 +702,7 @@ def _launching_parent(configurable: Mapping[str, object]) -> RunTree | None:
     try:
         return RunTree.from_headers({"langsmith-trace": trace, "baggage": baggage})
     except ValueError:
-        _LOG.warning("Ignoring a malformed langsmith-trace; the run keeps its own trace")
+        logger.warning("Ignoring a malformed langsmith-trace; the run keeps its own trace")
         return None
 
 
@@ -719,11 +720,11 @@ async def _accessible_lead_thread(config: Mapping[str, object]) -> str | None:
     try:
         thread = await get_client().threads.get(lead_thread)
     except Exception:  # noqa: BLE001 — missing or not allowed: keep this run's own sandbox
-        _LOG.warning("[mda] lead thread not accessible to this run; using its own sandbox")
+        logger.warning("lead thread not accessible to this run; using its own sandbox")
         return None
     owner = (thread.get("metadata") or {}).get("owner")
     if owner is not None and owner != _caller_owner_key(config):
-        _LOG.warning("[mda] lead thread belongs to another caller; using this run's own sandbox")
+        logger.warning("lead thread belongs to another caller; using this run's own sandbox")
         return None
     return lead_thread
 
@@ -1170,13 +1171,13 @@ def _platform_run_id(config: Mapping[str, object] | None) -> str | None:
     """
     metadata = config.get("metadata") if config else None
     value = metadata.get("run_id") if isinstance(metadata, Mapping) else None
-    return value.strip() if isinstance(value, str) and value.strip() else None
+    return _string_option(value)
 
 
 def _thread_id_of(config: Mapping[str, object] | None) -> str | None:
     configurable = config.get("configurable") if config else None
     value = configurable.get("thread_id") if isinstance(configurable, Mapping) else None
-    return value.strip() if isinstance(value, str) and value.strip() else None
+    return _string_option(value)
 
 
 def _policy_run_context(run_context: object, config: RunnableConfig | None) -> object:
@@ -1239,13 +1240,17 @@ def _detect_run_channel(config: Mapping[str, object] | None) -> RunChannel:
     An unrecognized provider reports ``unknown`` rather than widening the
     dimension.
     """
+    from managed_deepagents._run_input import is_scheduled_execution  # noqa: PLC0415
+
     configurable = config.get("configurable") if config else None
     if not isinstance(configurable, Mapping):
         return "unknown"
-    if _field(configurable.get("langgraph_auth_user"), "mda_scheduled_run") is True:
+    if is_scheduled_execution(configurable):
         return "schedule"
     provider = resolve_channel_provider(configurable)
-    return cast("RunChannel", provider) if provider in {"slack", "http"} else "unknown"
+    if provider in {"slack", "http"}:
+        return provider
+    return "unknown"
 
 
 class _OpenedContextBackend:
@@ -1370,7 +1375,7 @@ def _apply_managed_context(
     merged["backend"] = _managed_context_backend(
         context_backend,
         sandbox_backend,
-        CompositeBackend,
+        _ManagedCompositeBackend,
         StateBackend,
         mount_agent_memory=has_agent_memory_layer(memory_layers),
         user_memory_backend=user_memory_backend,
@@ -1536,7 +1541,7 @@ def _configurable_model(config: Mapping[str, object] | None) -> str | None:
     if not isinstance(configurable, Mapping):
         return None
     value = configurable.get("model")
-    return value.strip() if isinstance(value, str) and value.strip() else None
+    return _string_option(value)
 
 
 def _eval_app_dir(config: Mapping[str, object] | None) -> str:
@@ -2897,8 +2902,8 @@ def _create_langsmith_sandbox(
             client, create_kwargs, sandbox_name, fallback_name, lookup_names[1:]
         )
     host_name = _sandbox_handle_name(langsmith_sandbox) or sandbox_name
-    _LOG.info(
-        "[mda] sandbox resolve: %s name=%r id=%r scope=%r",
+    logger.info(
+        "sandbox resolve: %s name=%r id=%r scope=%r",
         "adopted" if adopted else "created",
         host_name,
         _sandbox_handle_id(langsmith_sandbox),

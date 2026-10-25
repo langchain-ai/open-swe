@@ -14,11 +14,16 @@ class _NodeState(BaseModel):
     done: bool = False
 
 
-def run_config(run: RemoteRun) -> RunnableConfig:
-    """The config the in-process graph would have run with."""
+def run_config(run: RemoteRun, *, settled: bool = True) -> RunnableConfig:
+    """The config the in-process graph would have run with.
+
+    ``settled`` adds the settings decided as the run started; working them out again
+    starts without them.
+    """
     return {
         "configurable": {
             **run.configurable,
+            **(run.settings.configurable() if settled else {}),
             "thread_id": run.thread_id,
             "__is_for_execution__": True,
         },

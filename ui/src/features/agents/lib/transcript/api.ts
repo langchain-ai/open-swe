@@ -23,6 +23,7 @@ import type {
   TranscriptSnapshot,
   TranscriptTurnPage,
 } from "./types"
+import type { PassageReply } from "@/features/agents/utils/passageReply"
 
 const timedFetch = withRequestTiming((input, init) => fetch(input, init))
 
@@ -178,6 +179,7 @@ export interface RunStartMessage {
   id: string
   text: string
   images?: ReadonlyArray<ImageChunk>
+  replies?: ReadonlyArray<PassageReply>
 }
 
 export interface RunStartCommand {
@@ -221,7 +223,7 @@ export function runStartCommand({
         ? {
             messages: [
               {
-                ...promptMessage(message.text, message.images),
+                ...promptMessage(message.text, message.images, message.replies),
                 id: message.id,
               },
             ],

@@ -5,7 +5,9 @@ use std::process::{Command, Output};
 
 use anyhow::{bail, Context, Result};
 
+use crate::child;
 use crate::dependencies;
+use crate::error::child_failed;
 use crate::langsmith::is_self_hosted_host_backend_url;
 use crate::project::Language;
 use crate::toolchain;
@@ -197,14 +199,10 @@ fn run(spec: CommandSpec, cwd: &Path, action: &str) -> Result<Output> {
         "uv" => toolchain::uv(),
         program => Command::new(program),
     };
-    let output = command
-        .args(&spec.args)
-        .current_dir(cwd)
-        .output()
+    let output = child::output(command.args(&spec.args).current_dir(cwd))
         .with_context(|| format!("failed to {action}: could not run {}", spec.program))?;
     if !output.status.success() {
-        let stderr = String::from_utf8_lossy(&output.stderr);
-        bail!("failed to {action}: {}", stderr.trim());
+        return Err(child_failed(&output, format!("failed to {action}")));
     }
     Ok(output)
 }
