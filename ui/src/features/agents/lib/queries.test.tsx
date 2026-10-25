@@ -106,7 +106,9 @@ describe("useAgentThreadBrowser", () => {
         queryKey: agentThreadKeys.browser("thread-1"),
       })
     )
-    await waitFor(() => expect(result.current.data?.tabs[0]?.title).toBe("next"))
+    await waitFor(() =>
+      expect(result.current.data?.tabs[0]?.title).toBe("next")
+    )
     getThreadBrowser.mockRestore()
     return result.current.data
   }

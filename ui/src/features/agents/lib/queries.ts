@@ -938,7 +938,11 @@ function keepActLink(
     linkExpiresIn(current) <= BROWSER_LINK_REFRESH_MARGIN_MS
   )
     return fetched
-  return { ...fetched, act_url: current.act_url, expires_at: current.expires_at }
+  return {
+    ...fetched,
+    act_url: current.act_url,
+    expires_at: current.expires_at,
+  }
 }
 
 export function useAgentThreadBrowser(threadId: string, enabled: boolean) {
