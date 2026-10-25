@@ -19,6 +19,7 @@ import "streamdown/styles.css"
 import { PreviewablePullRequestLink } from "@/features/agents/components/PullRequestPreview"
 import { CodeBlock } from "./CodeBlock"
 import { MermaidDiagram } from "./MermaidDiagram"
+import { TableScroll } from "./TableScroll"
 import {
   orderedListGutterStyle,
   remarkGithubAlerts,
@@ -223,9 +224,9 @@ const COMPONENTS: Components = {
     children,
     ...props
   }: ExtraProps & ComponentProps<"table">) => (
-    <div className="chat-markdown-table">
+    <TableScroll className="chat-markdown-table">
       <table {...props}>{children}</table>
-    </div>
+    </TableScroll>
   ),
   inlineCode: ({
     node: _node,
