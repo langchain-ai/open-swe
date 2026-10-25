@@ -6,6 +6,7 @@ import {
   openRunningThreadViaSlackLink,
   openThreadViaSlackLink,
   threadIdFromUrl,
+  threadState,
   typeIntoComposer,
   waitForStateToContain,
   waitForThreadIdle,
@@ -294,11 +295,17 @@ test.describe("transcript rendering", () => {
     ).toContainText("Which branch?");
 
     await typeIntoComposer(page, "Thanks!");
+    // The agent gets the selection with a line of context on each side.
     await waitForStateToContain(
       page,
       threadId,
-      "Opening a pull request.\\n\\nWhich branch?\\n\\nThanks!",
+      "Thanks!\\n<reply>\\nsource: conversation\\nbefore:",
     );
+    const state = await threadState(page, threadId);
+    expect(state).toContain(
+      "selection: Opening a pull request.\\nafter:\\n",
+    );
+    expect(state).toContain("comment: Which branch?\\n</reply>");
     const sent = page
       .getByTestId("user-message")
       .filter({ hasText: "Which branch?" });

@@ -24,7 +24,7 @@ import {
   SelectionReply,
   codePassage,
 } from "@/features/agents/components/SelectionReply"
-import type { QuoteReply } from "@/features/agents/utils/quoteReply"
+import type { PassageReply } from "@/features/agents/utils/passageReply"
 import { useResolvedTheme } from "@/lib/theme"
 import { cn } from "@/lib/utils"
 
@@ -35,7 +35,7 @@ interface FilesPanelProps {
   revealRequestId: number
   onOpenFile: (relativePath: string) => void
   /** Offers Reply on text selected in the open file. */
-  onReply?: (reply: QuoteReply) => void
+  onReply?: (reply: PassageReply) => void
 }
 
 function PreviewMessage(props: { children: string; error?: boolean }) {
@@ -54,7 +54,7 @@ function PreviewMessage(props: { children: string; error?: boolean }) {
 function SourcePreview(props: {
   name: string
   contents: string
-  onReply?: (reply: QuoteReply) => void
+  onReply?: (reply: PassageReply) => void
 }) {
   const themeType = useResolvedTheme()
   const paneRef = useRef<HTMLDivElement>(null)
@@ -103,7 +103,7 @@ function SourcePreview(props: {
 function FilePreview(props: {
   file: ReturnType<typeof useWorkspaceFile>
   relativePath: string
-  onReply?: (reply: QuoteReply) => void
+  onReply?: (reply: PassageReply) => void
 }) {
   const { data, error } = props.file
   if (error) return <PreviewMessage error>{error.message}</PreviewMessage>

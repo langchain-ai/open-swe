@@ -2,41 +2,132 @@ import { ArrowBendUpLeftIcon } from "@phosphor-icons/react/dist/ssr/ArrowBendUpL
 import { useEffect, useEffectEvent, useReducer, useRef, useState } from "react"
 import type { RefObject } from "react"
 
-import { selectionExcerpts } from "@/features/agents/utils/codeExcerpt"
 import {
   readDiffSelection,
   selectedRangeFromDiff,
 } from "@/features/agents/utils/diffSelection"
-import { normalizeQuote } from "@/features/agents/utils/quoteReply"
-import type { QuoteReply } from "@/features/agents/utils/quoteReply"
+import {
+  normalizeSelection,
+  passageAround,
+} from "@/features/agents/utils/passageReply"
+import type {
+  PassageReply,
+  PassageSource,
+} from "@/features/agents/utils/passageReply"
 
 const BUTTON = { width: 76, height: 30 }
 const POPOVER = { width: 320, height: 96 }
 const GAP = 6
 /** Keeps the passage marked once focus moves to the reply field and the selection goes. */
 const HIGHLIGHT = "selection-reply"
+const CHROME = 'button, [role="button"], [aria-hidden="true"]'
+/** How far up from the selection to look for a line of context on each side. */
+const CONTEXT_ANCESTORS = 6
 
 /** A passage the reader selected, and how to turn a comment on it into a reply. */
 export interface Passage {
   range: Range
   preview: string
-  reply: (comment: string) => QuoteReply
+  reply: (comment: string) => PassageReply
 }
 
-/** The reader's selection, when it holds text and sits wholly inside `container`. */
-export function textPassage(container: HTMLElement): Passage | null {
-  const selection = window.getSelection()
-  if (!selection || selection.isCollapsed || selection.rangeCount === 0)
-    return null
-  const range = selection.getRangeAt(0)
-  if (!container.contains(range.commonAncestorContainer)) return null
-  const quote = normalizeQuote(selection.toString())
-  if (!quote) return null
-  return {
-    range: range.cloneRange(),
-    preview: quote,
-    reply: (comment) => ({ kind: "text", quote, comment }),
+function isBlock(element: Element): boolean {
+  return !getComputedStyle(element).display.startsWith("inline")
+}
+
+/** `root`'s text as it reads on screen, a line per block, and where `range` falls in it. */
+function renderedText(
+  root: Element,
+  range: Range
+): { text: string; start: number; end: number } {
+  let text = ""
+  let start = -1
+  let end = -1
+  // Controls such as timestamps and fold toggles are interface, not what was said.
+  const walker = document.createTreeWalker(
+    root,
+    NodeFilter.SHOW_ELEMENT | NodeFilter.SHOW_TEXT,
+    (node) =>
+      node instanceof Element &&
+      node.matches(CHROME) &&
+      !node.contains(range.startContainer) &&
+      !node.contains(range.endContainer)
+        ? NodeFilter.FILTER_REJECT
+        : NodeFilter.FILTER_ACCEPT
+  )
+  for (let node = walker.nextNode(); node; node = walker.nextNode()) {
+    if (node instanceof Element) {
+      if (isBlock(node) && text && !text.endsWith("\n")) text += "\n"
+      continue
+    }
+    if (start === -1)
+      if (node === range.startContainer) start = text.length + range.startOffset
+      else if (range.comparePoint(node, 0) >= 0) start = text.length
+    if (end === -1)
+      if (node === range.endContainer) end = text.length + range.endOffset
+      else if (range.comparePoint(node, 0) > 0) end = text.length
+    text += node.textContent ?? ""
   }
+  return {
+    text,
+    start: Math.max(0, start),
+    end: end === -1 ? text.length : end,
+  }
+}
+
+/** The selection with a line of its surroundings on each side, climbing until there is one. */
+function textAround(
+  range: Range,
+  container: HTMLElement
+): Pick<PassageReply, "before" | "selection" | "after"> {
+  const common = range.commonAncestorContainer
+  let root =
+    common instanceof Element ? common : (common.parentElement ?? container)
+  for (let level = 0; ; level++) {
+    const { text, start, end } = renderedText(root, range)
+    const passage = passageAround(text, start, end)
+    const framed = passage.before.includes("\n") && passage.after.includes("\n")
+    if (
+      framed ||
+      level === CONTEXT_ANCESTORS ||
+      root === container ||
+      !root.parentElement
+    )
+      return passage
+    root = root.parentElement
+  }
+}
+
+/** A text selection inside `container`, such as the transcript or a terminal. */
+export function textPassage(
+  source: PassageSource = "conversation"
+): (container: HTMLElement) => Passage | null {
+  return (container) => {
+    const selection = window.getSelection()
+    if (!selection || selection.isCollapsed || selection.rangeCount === 0)
+      return null
+    const range = selection.getRangeAt(0)
+    if (!container.contains(range.commonAncestorContainer)) return null
+    const preview = normalizeSelection(selection.toString())
+    if (!preview) return null
+    const around = textAround(range, container)
+    return {
+      range: range.cloneRange(),
+      preview,
+      reply: (comment) => ({ source, ...around, comment }),
+    }
+  }
+}
+
+/** Offset of the start of 1-based `line` in `text`, or its length past the end. */
+function lineOffset(text: string, line: number): number {
+  let offset = 0
+  for (let n = 1; n < line; n++) {
+    const next = text.indexOf("\n", offset)
+    if (next === -1) return text.length
+    offset = next + 1
+  }
+  return offset
 }
 
 /** Selected lines of a file a code view renders, which draws them in a shadow root. */
@@ -53,22 +144,28 @@ export function codePassage(
       if (range.commonAncestorContainer.getRootNode() !== host.shadowRoot)
         continue
       const lines = selectedRangeFromDiff(host)
-      const preview = normalizeQuote(selection.toString())
+      const preview = normalizeSelection(selection.toString())
       if (!lines || !preview) continue
-      const [excerpt] = selectionExcerpts(
-        path,
-        { originalContent: null, modifiedContent: contents },
-        lines
-      )
-      if (!excerpt) continue
-      // A file has one side, so its lines need no diff side marker.
-      const lineLabel = excerpt.lineLabel.replace(/^R/, "")
+      const first = Math.min(lines.start, lines.end)
+      const last = Math.max(lines.start, lines.end)
+      const from = lineOffset(contents, first)
+      const firstEnd = lineOffset(contents, first + 1)
+      // Pin the selection inside its lines; fall back to the whole lines when
+      // the rendered text doesn't match the file's verbatim.
+      const at = contents.indexOf(preview, from)
+      const [start, end] =
+        at !== -1 && at < firstEnd
+          ? [at, at + preview.length]
+          : [from, lineOffset(contents, last + 1)]
+      const around = passageAround(contents, start, end)
       return {
         range: range.cloneRange(),
         preview,
         reply: (comment) => ({
-          kind: "code",
-          excerpt: { ...excerpt, lineLabel },
+          source: "file",
+          file: path,
+          lines: first === last ? `${first}` : `${first}-${last}`,
+          ...around,
           comment,
         }),
       }
@@ -76,6 +173,8 @@ export function codePassage(
     return null
   }
 }
+
+const conversationPassage = textPassage("conversation")
 
 interface Offer {
   passage: Passage
@@ -112,16 +211,16 @@ function markPassage(range: Range | null) {
 
 /**
  * Offers Reply on whatever the reader highlights inside `containerRef`, then a
- * field for what they want to say about it, handed back as a QuoteReply.
+ * field for what they want to say about it, handed back as a PassageReply.
  */
 export function SelectionReply({
   containerRef,
-  readPassage = textPassage,
+  readPassage = conversationPassage,
   onReply,
 }: {
   containerRef: RefObject<HTMLElement | null>
   readPassage?: (container: HTMLElement) => Passage | null
-  onReply: (reply: QuoteReply) => void
+  onReply: (reply: PassageReply) => void
 }) {
   const [offer, setOffer] = useState<Offer | null>(null)
   const [editing, setEditing] = useState(false)

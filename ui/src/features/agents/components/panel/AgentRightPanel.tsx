@@ -27,7 +27,7 @@ import { terminalTabTitle } from "@/features/agents/lib/terminalTabTitle"
 import { workspaceTargetKey } from "@/features/agents/lib/workspaceFiles"
 import { useRegisterAppCommands } from "@/lib/appCommands"
 import { cn } from "@/lib/utils"
-import type { QuoteReply } from "@/features/agents/utils/quoteReply"
+import type { PassageReply } from "@/features/agents/utils/passageReply"
 
 export interface AgentRightPanelProps {
   threadRef: PanelThreadRef
@@ -46,7 +46,7 @@ export interface AgentRightPanelProps {
   onTerminalOpenFile?: (path: string) => void
   onTerminalAddToChat?: (text: string) => void
   /** Offers Reply on text selected in an open file. */
-  onReply?: (reply: QuoteReply) => void
+  onReply?: (reply: PassageReply) => void
 }
 
 function useIsNarrowLayout(): boolean {

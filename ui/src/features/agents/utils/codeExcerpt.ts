@@ -76,8 +76,8 @@ export function selectionExcerpts(
   ]
 }
 
-// Excerpts sit before the prose about them as fenced blocks, so the model gets
-// the context while the UI parses them back out and shows only the selection.
+// Excerpts lead the prose as fenced blocks, so the model gets the context while
+// the UI parses them back out and shows only the selection.
 export function serializeExcerpts(
   text: string,
   excerpts: ReadonlyArray<CodeExcerpt>
@@ -107,18 +107,21 @@ function selectedLines(snippet: string): string {
     : snippet
 }
 
-/** The excerpt `content` opens with, and how much of it the excerpt spans. */
-export function readExcerpt(
-  content: string
-): { excerpt: ParsedCodeExcerpt; length: number } | null {
-  const match = EXCERPT_PATTERN.exec(content)
-  if (!match) return null
-  return {
-    excerpt: {
+export function parseExcerpts(content: string): {
+  excerpts: Array<ParsedCodeExcerpt>
+  text: string
+} {
+  const excerpts: Array<ParsedCodeExcerpt> = []
+  let rest = content
+  let match = EXCERPT_PATTERN.exec(rest)
+  while (match) {
+    excerpts.push({
       location: match[1] ?? "",
       language: match[3] ?? "",
       code: selectedLines(match[4] ?? ""),
-    },
-    length: match[0].length,
+    })
+    rest = rest.slice(match[0].length)
+    match = EXCERPT_PATTERN.exec(rest)
   }
+  return { excerpts, text: rest.trim() }
 }

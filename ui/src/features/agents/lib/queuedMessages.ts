@@ -58,6 +58,7 @@ export function visiblePendingMessages(
       deliveryStatus: message.status,
       deliveryError: message.error,
       optimistic: true,
+      ...(message.replies ? { replies: message.replies } : {}),
       chunks: [
         ...(message.images ?? []),
         ...(message.content

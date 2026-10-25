@@ -27,13 +27,13 @@ import {
   useLocalThreadPrDiff,
 } from "@/features/agents/lib/desktopLocal"
 import type { TerminalTarget } from "@/features/agents/lib/terminalSession"
-import { normalizeQuote } from "@/features/agents/utils/quoteReply"
-import type { QuoteReply } from "@/features/agents/utils/quoteReply"
+import { normalizeSelection } from "@/features/agents/utils/passageReply"
+import type { PassageReply } from "@/features/agents/utils/passageReply"
 
 interface AgentGitPanelProps {
   onComment?: (content: string) => Promise<void>
   /** Takes replies to text selected in the panel's files and terminals. */
-  onReply?: (reply: QuoteReply) => void
+  onReply?: (reply: PassageReply) => void
   thread: AgentThread
   revealFilePath?: string | null
   revealChangesKey?: number
@@ -222,8 +222,15 @@ export function AgentGitPanel({
       onCollapsedChange={onCollapsedChange}
       onReply={onReply}
       {...(onReply && {
+        // The terminal hands over only the selected text, so there is no context to add.
         onTerminalAddToChat: (text: string) =>
-          onReply({ kind: "text", quote: normalizeQuote(text), comment: "" }),
+          onReply({
+            source: "terminal",
+            before: "",
+            selection: normalizeSelection(text),
+            after: "",
+            comment: "",
+          }),
       })}
       renderDiff={({ fullScreen }) => (
         <ChangesPanel

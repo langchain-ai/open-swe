@@ -4,13 +4,14 @@ import { useEffect, useRef, useState } from "react"
 
 import { SkillPromptText } from "../SkillBadge"
 import { CodeBlock } from "@/features/agents/components/chat/CodeBlock"
-import { parseMessageSegments } from "@/features/agents/utils/quoteReply"
+import { parseExcerpts } from "@/features/agents/utils/codeExcerpt"
 import { MessageImage } from "./MessageImage"
 import { MessageTimestamp } from "./MessageTimestamp"
 import { ExpandableMessageChip } from "./ExpandableMessageChip"
 import { TaskEventMessage } from "./TaskEventMessage"
 import { SlackMrkdwn } from "./SlackMrkdwn"
 import type { Message } from "@/features/agents/lib/types"
+import type { PassageReply } from "@/features/agents/utils/passageReply"
 import { cn } from "@/lib/utils"
 
 const COLLAPSED_MAX_HEIGHT_PX = 250
@@ -28,17 +29,47 @@ export function UserMessage({ message }: { message: Message }) {
   return <StandardUserMessage message={message} />
 }
 
+/** A passage the sender replied to, shown as they selected it, then their comment. */
+function SentReply({ reply }: { reply: PassageReply }) {
+  return (
+    <div className="mb-space-2 flex flex-col gap-space-1 text-sm leading-[1.6]">
+      {reply.file ? (
+        <CodeBlock
+          title={`${reply.file}:${reply.lines ?? ""}`}
+          language={reply.file.split(".").pop() ?? ""}
+          text={reply.selection}
+        />
+      ) : (
+        <blockquote className="border-l-2 border-default pl-space-3 [overflow-wrap:anywhere] whitespace-pre-wrap text-secondary">
+          {reply.selection}
+        </blockquote>
+      )}
+      {reply.comment && (
+        <p className="[overflow-wrap:anywhere] whitespace-pre-wrap text-primary">
+          {reply.comment}
+        </p>
+      )}
+    </div>
+  )
+}
+
 function StandardUserMessage({ message }: { message: Message }) {
   const isSystem = message.structuredSenderKind === "system"
   const isSlack = message.structuredSurface === "slack"
-  const content = message.chunks
-    .filter((c) => c.kind === "text")
-    .map((c) => c.text)
-    .join("")
-  const segments = parseMessageSegments(content)
+  const { excerpts, text } = parseExcerpts(
+    message.chunks
+      .filter((c) => c.kind === "text")
+      .map((c) => c.text)
+      .join("")
+  )
 
   const images = message.chunks.filter((c) => c.kind === "image")
-  const hasBody = segments.length > 0 || images.length > 0
+  const replies = message.replies ?? []
+  const hasBody =
+    Boolean(text) ||
+    images.length > 0 ||
+    excerpts.length > 0 ||
+    replies.length > 0
   const [expanded, setExpanded] = useState(false)
   const [isTruncated, setIsTruncated] = useState(false)
   const textRef = useRef<HTMLDivElement>(null)
@@ -52,7 +83,7 @@ function StandardUserMessage({ message }: { message: Message }) {
     const observer = new ResizeObserver(measure)
     observer.observe(el)
     return () => observer.disconnect()
-  }, [content])
+  }, [text])
 
   const body = (
     <>
@@ -65,6 +96,17 @@ function StandardUserMessage({ message }: { message: Message }) {
               : "bg-surface-level-2"
           )}
         >
+          {excerpts.map((excerpt, i) => (
+            <CodeBlock
+              key={i}
+              title={excerpt.location}
+              language={excerpt.language}
+              text={excerpt.code}
+            />
+          ))}
+          {replies.map((reply, i) => (
+            <SentReply key={i} reply={reply} />
+          ))}
           {images.length > 0 && (
             <div className="mb-space-2 grid max-w-[420px] grid-cols-2 gap-space-2">
               {images.map((img, i) => (
@@ -80,11 +122,11 @@ function StandardUserMessage({ message }: { message: Message }) {
               ))}
             </div>
           )}
-          {segments.length > 0 && (
+          {text && (
             <div
               ref={textRef}
               className={cn(
-                "flex flex-col gap-space-2 text-sm leading-[1.6] [overflow-wrap:anywhere] text-primary",
+                "text-sm leading-[1.6] [overflow-wrap:anywhere] whitespace-pre-wrap text-primary",
                 !isSystem && !expanded && "overflow-hidden"
               )}
               style={
@@ -93,30 +135,10 @@ function StandardUserMessage({ message }: { message: Message }) {
                   : undefined
               }
             >
-              {segments.map((segment, i) =>
-                segment.kind === "code" ? (
-                  <CodeBlock
-                    key={i}
-                    title={segment.excerpt.location}
-                    language={segment.excerpt.language}
-                    text={segment.excerpt.code}
-                  />
-                ) : segment.kind === "quote" ? (
-                  <blockquote
-                    key={i}
-                    className="border-l-2 border-default pl-space-3 whitespace-pre-wrap text-secondary"
-                  >
-                    {segment.text}
-                  </blockquote>
-                ) : (
-                  <div key={i} className="whitespace-pre-wrap">
-                    {isSlack ? (
-                      <SlackMrkdwn text={segment.text} />
-                    ) : (
-                      <SkillPromptText text={segment.text} />
-                    )}
-                  </div>
-                )
+              {isSlack ? (
+                <SlackMrkdwn text={text} />
+              ) : (
+                <SkillPromptText text={text} />
               )}
             </div>
           )}

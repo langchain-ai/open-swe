@@ -1,4 +1,5 @@
 import type { TaskEventMetadata } from "./structuredInputMessages"
+import type { PassageReply } from "@/features/agents/utils/passageReply"
 
 export type Author = "user" | "agent" | "system" | "tool"
 
@@ -229,6 +230,8 @@ export interface Message {
   structuredSenderNote?: string
   structuredSenderIsBot?: boolean
   structuredSurface?: string
+  /** Passages the sender selected and replied to, carried in the message's envelope. */
+  replies?: Array<PassageReply>
   taskEvent?: TaskEventMetadata
   /** Id of the user message that opened this agent run and keys its diff artifact. */
   turnKey?: string
@@ -399,6 +402,7 @@ export interface PendingThreadMessage extends Omit<
   "images" | "pending" | "mine"
 > {
   images?: Array<ImageChunk>
+  replies?: Array<PassageReply>
   status: "sending" | "failed"
   /** Sent to queue behind the live run, so it renders as a queued row. */
   queued?: boolean

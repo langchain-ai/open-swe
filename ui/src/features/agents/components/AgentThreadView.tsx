@@ -5,7 +5,7 @@ import {
   ReviewExcerptChips,
 } from "@/features/reviews/components/ReviewChatActions"
 import { serializeExcerpts } from "@/features/agents/utils/codeExcerpt"
-import type { QuoteReply } from "@/features/agents/utils/quoteReply"
+import type { PassageReply } from "@/features/agents/utils/passageReply"
 import {
   Profiler,
   useCallback,
@@ -70,6 +70,7 @@ import {
 } from "@/features/agents/lib/queuedMessages"
 import type { QueuedTurn } from "@/features/agents/lib/transcript/reducer"
 import type {
+  ComposerSubmission,
   RestoredDraft,
   SubmitOptions,
 } from "@/features/agents/components/composer/ChatComposer"
@@ -101,6 +102,10 @@ interface AgentThreadViewProps {
 }
 
 /** Paths the agent has edited this thread, newest last, for `@file` mentions. */
+function plainSubmission(text: string): ComposerSubmission {
+  return { text, images: [], replies: [] }
+}
+
 function editedPaths(messages: Array<Message>): Array<string> {
   const paths = new Set<string>()
   for (const message of messages) {
@@ -288,8 +293,7 @@ export function AgentThreadView({
   const followUpBehavior = session.data?.follow_up_behavior ?? "steer"
   const submitMessage = useCallback(
     async (
-      content: string,
-      images: Array<ImageChunk>,
+      { text: content, images, replies }: ComposerSubmission,
       options?: SubmitOptions
     ) => {
       // While a run is live the message either waits for it as a queued run of
@@ -315,6 +319,7 @@ export function AgentThreadView({
         await sendMessage.mutateAsync({
           content,
           images,
+          replies,
           client_message_id: messageId,
           model_id: activeSelection?.modelId ?? null,
           effort: activeSelection?.effort ?? null,
@@ -341,15 +346,15 @@ export function AgentThreadView({
 
   // Code attached on the review page rides along as fenced excerpts the transcript renders as blocks.
   const submitWithExcerpts = useCallback(
-    async (
-      content: string,
-      images: Array<ImageChunk>,
-      options?: SubmitOptions
-    ) => {
+    async (submission: ComposerSubmission, options?: SubmitOptions) => {
       const excerpts = reviewChat?.excerpts ?? []
       await submitMessage(
-        excerpts.length ? serializeExcerpts(content, excerpts) : content,
-        images,
+        excerpts.length
+          ? {
+              ...submission,
+              text: serializeExcerpts(submission.text, excerpts),
+            }
+          : submission,
         options
       )
       if (excerpts.length) reviewChat?.clearExcerpts?.()
@@ -358,7 +363,7 @@ export function AgentThreadView({
   )
 
   const submitText = useCallback(
-    (content: string) => submitMessage(content, []),
+    (content: string) => submitMessage(plainSubmission(content)),
     [submitMessage]
   )
 
@@ -393,7 +398,7 @@ export function AgentThreadView({
     if (!question || !canPost) return
     clearQuestion?.()
     // oxlint-disable-next-line react/set-state-in-effect
-    submitWithExcerpts(question, []).catch((error: unknown) => {
+    submitWithExcerpts(plainSubmission(question)).catch((error: unknown) => {
       console.error("Could not send the review question", error)
       setRestoreDraft((previous) => ({
         key: (previous?.key ?? 0) + 1,
@@ -409,9 +414,9 @@ export function AgentThreadView({
   } | null>(null)
   const [addedReply, setAddedReply] = useState<{
     key: number
-    reply: QuoteReply
+    reply: PassageReply
   } | null>(null)
-  const addReply = (reply: QuoteReply) =>
+  const addReply = (reply: PassageReply) =>
     setAddedReply((previous) => ({ key: (previous?.key ?? 0) + 1, reply }))
   const restoreQueuedToComposer = useCallback(
     (texts: ReadonlyArray<string>, images: Array<ImageChunk>) => {
@@ -543,7 +548,7 @@ export function AgentThreadView({
         pullRequest.number,
         scope
       )
-      await submitMessage(result.prompt, [])
+      await submitMessage(plainSubmission(result.prompt))
     },
     [submitMessage, thread.id]
   )

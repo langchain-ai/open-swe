@@ -1,17 +1,11 @@
 import { XIcon } from "@langchain/macaw-components/icons"
 import { IconButton } from "@langchain/macaw-components/IconButton"
 
-import type { QuoteReply } from "@/features/agents/utils/quoteReply"
+import type { PassageReply } from "@/features/agents/utils/passageReply"
 
 export interface PendingReply {
   id: number
-  reply: QuoteReply
-}
-
-function passageOf(reply: QuoteReply): string {
-  return reply.kind === "code"
-    ? `${reply.excerpt.path}:${reply.excerpt.lineLabel}\n${reply.excerpt.snippet}`
-    : reply.quote
+  reply: PassageReply
 }
 
 /** The replies riding on the next message, one card each, removable before sending. */
@@ -31,18 +25,17 @@ export function ComposerReplyCards({
       {replies.map(({ id, reply }) => (
         <li
           key={id}
-          title={passageOf(reply)}
+          title={reply.selection}
           className="group relative flex h-24 w-36 flex-col justify-between rounded-lg border border-default bg-surface-level-2 p-space-2"
         >
           <div className="flex min-h-0 flex-col gap-0.5 border-l-2 border-default pl-space-2">
-            {reply.kind === "code" && (
+            {reply.file && (
               <span className="truncate font-mono text-xxs text-tertiary">
-                {reply.excerpt.path.split("/").pop()}:{reply.excerpt.lineLabel}
+                {reply.file.split("/").pop()}:{reply.lines}
               </span>
             )}
             <p className="line-clamp-3 text-xs [overflow-wrap:anywhere] whitespace-pre-wrap text-secondary">
-              {reply.comment ||
-                (reply.kind === "code" ? reply.excerpt.path : reply.quote)}
+              {reply.comment || reply.selection}
             </p>
           </div>
           <span className="self-start rounded-full border border-default px-space-2 text-xxs text-secondary">

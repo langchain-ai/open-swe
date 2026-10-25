@@ -973,9 +973,10 @@ function buildHumanMessage(
   if (entity?.senderType === "self") return null
   const taskEvent = parsed.type === "message" ? parsed.taskEvent : undefined
   const text = taskEvent?.content ?? parsed.content
+  const replies = parsed.type === "message" ? parsed.replies : undefined
   const chunks: Array<Chunk> = imageChunks(threadId, row.attachments)
   if (text.trim()) chunks.push({ kind: "text", text })
-  if (!chunks.length && !taskEvent) return null
+  if (!chunks.length && !taskEvent && !replies) return null
   return {
     id: row.messageId,
     ...(taskEvent ? { taskEvent } : {}),
@@ -990,6 +991,7 @@ function buildHumanMessage(
           structuredSenderId: parsed.sender,
           structuredSenderKind: parsed.senderKind,
           structuredSurface: parsed.surface,
+          ...(replies ? { replies } : {}),
           structuredSenderName:
             entity?.displayName ??
             (entity?.handle ? `@${entity.handle}` : undefined) ??

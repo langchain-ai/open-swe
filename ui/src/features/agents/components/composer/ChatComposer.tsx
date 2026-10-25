@@ -54,8 +54,7 @@ import type {
   WorkspaceOption,
 } from "@/lib/api"
 import type { ImageChunk } from "@/features/agents/lib/types"
-import { serializeReplies } from "@/features/agents/utils/quoteReply"
-import type { QuoteReply } from "@/features/agents/utils/quoteReply"
+import type { PassageReply } from "@/features/agents/utils/passageReply"
 import type { ModelSelection } from "@/features/agents/lib/provider/useModelOptions"
 import { ModelPicker } from "@/features/agents/components/ModelPicker"
 import { RepoSelector } from "@/features/settings/components/RepoSelector"
@@ -107,6 +106,13 @@ export interface SubmitOptions {
   alternate: boolean
 }
 
+/** What the person sends: their text, and what rides along with it. */
+export interface ComposerSubmission {
+  text: string
+  images: Array<ImageChunk>
+  replies: Array<PassageReply>
+}
+
 /** Text and attachments handed back to the composer, e.g. a cancelled queued message. */
 export interface RestoredDraft {
   /** Changes on every restore so the same content can come back twice. */
@@ -130,8 +136,7 @@ export interface ChatComposerProps {
   /** False when this viewer may not stop the live run. */
   stoppable?: boolean
   onSubmit?: (
-    value: string,
-    images: Array<ImageChunk>,
+    submission: ComposerSubmission,
     options?: SubmitOptions
   ) => void | Promise<void>
   /** What a message sent while a run is live does; drives copy only. */
@@ -140,7 +145,7 @@ export interface ChatComposerProps {
   restoreDraft?: RestoredDraft | null
   droppedFiles?: { key: number; files: Array<File> } | null
   /** A reply to a passage the user selected; it rides ahead of their next message. */
-  addedReply?: { key: number; reply: QuoteReply } | null
+  addedReply?: { key: number; reply: PassageReply } | null
   models?: Array<ModelOption>
   selection?: ModelSelection | null
   onSelectionChange?: (next: ModelSelection | null) => void
@@ -499,11 +504,11 @@ export const ChatComposer = memo(function ChatComposer({
         return
       }
 
-      const images = pendingImages
-      const content = serializeReplies(
-        trimmed,
-        pendingReplies.map((pending) => pending.reply)
-      )
+      const submission = {
+        text: trimmed,
+        images: pendingImages,
+        replies: pendingReplies.map((pending) => pending.reply),
+      }
       submittingRef.current = true
       setIsSubmitting(true)
       applyPrompt("", 0)
@@ -511,7 +516,7 @@ export const ChatComposer = memo(function ChatComposer({
       setPendingReplies([])
       setComposerError(null)
       try {
-        await onSubmit?.(content, images, options)
+        await onSubmit?.(submission, options)
       } catch {
         // Caller surfaces send errors (e.g. via react-query mutation state).
       } finally {
