@@ -1,10 +1,10 @@
 """Hand the Slack conversations that belong to MDA to MDA's Slack channel.
 
 Open SWE's Slack app keeps its URLs at the backend's ``/webhooks/slack``. A
-conversation belongs to MDA when its first message qualifies for the canary
-(:class:`Canary`): the backend binds the Slack thread to the thread MDA's channel
-will use, indexes that thread as the channel's, remembers the request it gated,
-and forwards Slack's request to LangSmith Trigger Server exactly as Slack sent it.
+conversation belongs to MDA when MDA's Slack channel can start it
+(:func:`mda_can_start`): the backend binds the Slack thread to the thread MDA's
+channel will use, indexes that thread as the channel's, remembers the request it
+gated, and forwards Slack's request to LangSmith Trigger Server exactly as Slack sent it.
 Trigger Server verifies Slack's signature as if Slack had called it and hands the
 message to the deployment's Slack channel, which asks ``/slack/channel/events``
 what to start (:mod:`openswe.slack.channel`). Later messages in that Slack thread,
@@ -16,8 +16,7 @@ import logging
 import time
 import uuid
 from collections.abc import Mapping
-from dataclasses import dataclass
-from typing import Final, Literal, cast, get_args
+from typing import Final
 
 import httpx2
 from pydantic import JsonValue
@@ -51,41 +50,47 @@ _FIRST_BACKOFF_SECONDS: Final = 1.0
 PENDING_KEY: Final = "mda_slack_requests"
 _PENDING_TTL_SECONDS: Final = 600
 
-Scope = Literal["off", "users", "dms", "all"]
+#: The Slack message subtypes Trigger Server starts runs for: plain messages and uploads.
+#: It ignores every other (``thread_broadcast``, edits, joins), so none of those is forwarded.
+FORWARDED_SUBTYPES: Final = frozenset({"", "file_share"})
 
 
-@dataclass(frozen=True)
-class Canary:
-    """Which new Slack conversations go to MDA, from the environment's settings.
+def events_url() -> str:
+    """Trigger Server's events URL for this environment's Slack app; empty where MDA isn't set up."""
+    return ENV.OPEN_SWE_SLACK_TRIGGER_EVENTS_URL.get().strip()
 
-    ``off`` sends none (the rollback); ``users`` sends those started by the Slack
-    users in ``OPEN_SWE_SLACK_MDA_USERS``; ``dms`` adds every DM; ``all`` sends
-    every conversation that qualifies at all. A conversation keeps whichever side
-    its first message went to.
+
+def trigger_server_takes(subtype: str) -> bool:
+    """Whether Trigger Server hands a Slack message of this subtype to MDA's channel."""
+    return subtype in FORWARDED_SUBTYPES
+
+
+def mda_can_start(
+    *,
+    subtype: str,
+    from_bot: bool,
+    code_channel: bool,
+    concierge_dm: bool,
+    kitchen_channel: bool,
+    breakout: bool,
+) -> bool:
+    """Whether MDA's Slack channel can start a new conversation with this message.
+
+    It can for a person's mention of Open SWE in a channel and for a message in their
+    DM with it: Trigger Server delivers those as ``mention`` and ``directMessage``, and
+    the backend's endpoint builds the run it would have started itself. The rest
+    needs the backend:
+
+    - A code channel is one session for the whole channel, and a concierge DM one for
+      the whole DM; MDA keys a conversation by its Slack thread.
+    - A kitchen channel starts work from untagged messages, routed to its workspace.
+    - Bots' messages carry the triggering bot through the backend's own intake.
+    - Breakouts open flows of their own.
+    - Trigger Server ignores subtypes outside :data:`FORWARDED_SUBTYPES`.
     """
-
-    scope: Scope
-    users: frozenset[str]
-    events_url: str
-
-    @classmethod
-    def from_env(cls) -> Canary:
-        raw = ENV.OPEN_SWE_SLACK_MDA_SCOPE.get().strip().lower()
-        scope = cast(Scope, raw) if raw in get_args(Scope) else "off"
-        users = frozenset(
-            u.strip() for u in ENV.OPEN_SWE_SLACK_MDA_USERS.get().split(",") if u.strip()
-        )
-        return cls(
-            scope=scope, users=users, events_url=ENV.OPEN_SWE_SLACK_TRIGGER_EVENTS_URL.get().strip()
-        )
-
-    def takes(self, *, user_id: str, direct_message: bool) -> bool:
-        """Whether a new conversation started by ``user_id`` goes to MDA."""
-        if self.scope == "off" or not self.events_url:
-            return False
-        if user_id in self.users:
-            return True
-        return self.scope == "all" or (self.scope == "dms" and direct_message)
+    return trigger_server_takes(subtype) and not (
+        from_bot or code_channel or concierge_dm or kitchen_channel or breakout
+    )
 
 
 def mda_thread_id(app_id: str, team_id: str, channel_id: str, root_ts: str) -> str:
@@ -97,7 +102,7 @@ def mda_thread_id(app_id: str, team_id: str, channel_id: str, root_ts: str) -> s
 
 async def owned_thread(channel_id: str, root_ts: str) -> str | None:
     """The MDA channel's thread for a Slack thread, or ``None`` when the backend owns it."""
-    if not Canary.from_env().events_url:
+    if not events_url():
         return None
     thread_id = await lookup_slack_thread_id(channel_id, root_ts)
     if thread_id is None:
@@ -127,24 +132,20 @@ async def conversation_thread(
     team_id: str,
     channel_id: str,
     root_ts: str,
-    user_id: str,
-    direct_message: bool,
-    eligible: bool,
+    can_start: bool,
 ) -> str | None:
     """MDA's thread for a Slack message addressed to Open SWE, or ``None`` to keep it on the backend.
 
-    A Slack thread MDA already owns stays MDA's. A new conversation goes to MDA when it is
-    ``eligible`` (not a code channel, concierge DM, bot or breakout) and the canary takes it;
-    one the backend already holds never moves.
+    A Slack thread MDA already owns stays MDA's. A new conversation goes to MDA when MDA's
+    channel ``can_start`` it (:func:`mda_can_start`); one the backend already holds never moves.
     """
-    canary = Canary.from_env()
-    if not canary.events_url:
+    if not events_url():
         # Nothing can be forwarded here, so nothing is MDA's: no lookups either.
         return None
     owned = await owned_thread(channel_id, root_ts)
     if owned is not None:
         return owned
-    if not eligible or not canary.takes(user_id=user_id, direct_message=direct_message):
+    if not can_start:
         return None
     if await lookup_slack_thread_id(channel_id, root_ts) is not None:
         return None
