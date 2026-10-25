@@ -6,6 +6,7 @@ import math
 import uuid
 from dataclasses import dataclass
 from datetime import UTC, datetime
+from time import monotonic
 from typing import Any, Literal
 from urllib.parse import quote, unquote, urlsplit
 
@@ -24,7 +25,7 @@ logger = logging.getLogger(__name__)
 _PROJECT_ID_CACHE: dict[tuple[tuple[str, str], str], str] = {}
 _PROJECT_START_CACHE: dict[tuple[tuple[str, str], str], datetime] = {}
 _TENANT_ID_CACHE: dict[tuple[str, str], str] = {}
-_AGENT_ID_CACHE: dict[tuple[tuple[str, str], str], str] = {}
+_AGENT_ID_CACHE: dict[tuple[tuple[str, str], str], tuple[str | None, float]] = {}
 
 
 def _project_cache_key(project_id: str) -> tuple[tuple[str, str], str]:
@@ -177,30 +178,31 @@ async def _project_lookup_start(project_id: str) -> datetime:
 async def _resolve_project_agent_id(project_id: str) -> str | None:
     """Resolve the agent bound to a tracing project without guessing its name."""
     cache_key = _project_cache_key(project_id)
-    if cached := _AGENT_ID_CACHE.get(cache_key):
-        return cached
+    cached = _AGENT_ID_CACHE.get(cache_key)
+    if cached is not None and monotonic() < cached[1]:
+        return cached[0]
     client = _build_langsmith_client()
     if client is None:
         return None
+    agent_id: str | None = None
     try:
         async with asyncio.timeout(5):
-            agents = []
-            async for agent in client.agents.list(
-                page_size=2, extra_query={"tracer_session_id": project_id}
-            ):
-                agents.append(agent)
-                if len(agents) == 2:
-                    return None
-            if len(agents) == 1:
-                _AGENT_ID_CACHE[cache_key] = agents[0].id
-                return agents[0].id
+            async for agent in client.agents.list(page_size=100):
+                if not any(env.tracer_session_id == project_id for env in agent.environments):
+                    continue
+                if agent_id is not None and agent.id != agent_id:
+                    agent_id = None
+                    break
+                agent_id = agent.id
     except Exception:
+        agent_id = None
         logger.debug(
             "Could not resolve the LangSmith project's agent",
             extra={"project_id": project_id},
             exc_info=True,
         )
-    return None
+    _AGENT_ID_CACHE[cache_key] = (agent_id, math.inf if agent_id else monotonic() + 60)
+    return agent_id
 
 
 async def _compose_langsmith_project_url(project_name: str | None = None) -> str | None:

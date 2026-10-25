@@ -216,8 +216,19 @@ async def test_trace_url_uses_project_agent(
 
     async def list_agents(**kwargs: object) -> AsyncIterator[SimpleNamespace]:
         requests.append(kwargs)
+        for index in range(101):
+            yield SimpleNamespace(
+                id=f"unrelated-{index}",
+                environments=[SimpleNamespace(tracer_session_id="other-project")],
+            )
         for agent_id in agent_ids:
-            yield SimpleNamespace(id=agent_id)
+            yield SimpleNamespace(
+                id=agent_id,
+                environments=[
+                    SimpleNamespace(tracer_session_id="other-project"),
+                    SimpleNamespace(tracer_session_id="pid"),
+                ],
+            )
 
     monkeypatch.setattr(
         ls_utils,
@@ -238,9 +249,7 @@ async def test_trace_url_uses_project_agent(
     )
     assert await ls_utils.get_langsmith_trace_url("thread", "project") == expected
     assert await ls_utils.get_langsmith_trace_url("thread", "project") == expected
-    assert requests == [{"page_size": 2, "extra_query": {"tracer_session_id": "pid"}}] * (
-        1 if len(agent_ids) == 1 else 2
-    )
+    assert requests == [{"page_size": 100}]
 
     monkeypatch.setenv("LANGSMITH_API_KEY", "key-b")
     agent_ids[:] = ["other-workspace"]
@@ -249,20 +258,33 @@ async def test_trace_url_uses_project_agent(
     )
 
 
-async def test_trace_url_retries_agent_lookup_after_failure(
-    monkeypatch: pytest.MonkeyPatch,
+@pytest.mark.parametrize("failure", ["error", "partial-error", "missing", "ambiguous"])
+async def test_trace_url_retries_agent_lookup_after_negative_cache_expires(
+    monkeypatch: pytest.MonkeyPatch, failure: str
 ) -> None:
     monkeypatch.setenv("LANGSMITH_ENDPOINT", "https://smith.example/api")
     monkeypatch.setattr(ls_utils, "_discover_tenant_id", lambda: "tenant")
     monkeypatch.setattr(ls_utils, "_resolve_project_id_by_name", _resolver({}, default="pid"))
     calls = 0
+    now = 0.0
+    monkeypatch.setattr(ls_utils, "monotonic", lambda: now)
 
     async def list_agents(**kwargs: object) -> AsyncIterator[SimpleNamespace]:
         nonlocal calls
         calls += 1
         if calls == 1:
-            raise RuntimeError("Agents API unavailable")
-        yield SimpleNamespace(id="open-swe-v3")
+            if failure == "error":
+                raise RuntimeError("Agents API unavailable")
+            if failure == "missing":
+                return
+            yield SimpleNamespace(
+                id="other-agent", environments=[SimpleNamespace(tracer_session_id="pid")]
+            )
+            if failure == "partial-error":
+                raise RuntimeError("Next Agents page unavailable")
+        yield SimpleNamespace(
+            id="open-swe-v3", environments=[SimpleNamespace(tracer_session_id="pid")]
+        )
 
     monkeypatch.setattr(
         ls_utils,
@@ -270,9 +292,12 @@ async def test_trace_url_retries_agent_lookup_after_failure(
         lambda: SimpleNamespace(agents=SimpleNamespace(list=list_agents)),
     )
 
-    assert await ls_utils.get_langsmith_trace_url("thread") == (
-        "https://smith.example/o/tenant/projects/p/pid/t/thread?conversationTab=trace"
-    )
+    fallback = "https://smith.example/o/tenant/projects/p/pid/t/thread?conversationTab=trace"
+    assert await ls_utils.get_langsmith_trace_url("thread") == fallback
+    now = 59.0
+    assert await ls_utils.get_langsmith_trace_url("thread") == fallback
+    assert calls == 1
+    now = 60.0
     assert await ls_utils.get_langsmith_trace_url("thread") == (
         "https://smith.example/o/tenant/a/open-swe-v3/projects/p/pid/t/thread?conversationTab=trace"
     )
