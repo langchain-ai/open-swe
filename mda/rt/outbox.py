@@ -3,7 +3,8 @@
 Nothing the run does next waits on a report. Each reply and tool call, each inbox
 receipt and each notice (work the backend does for the run whose answer the run
 never reads) joins the outbox in the order it was made, and goes out with whatever
-else is waiting in one ``reports`` call, at once when none is on its way. An item
+else is waiting in one ``reports`` call, after a moment's gathering unless a phase
+waits on it. An item
 leaves the outbox only once an answer names it taken; until then it is sent again,
 for as long as the backend takes to come back. Its key, unique in the thread, has
 the backend record it once however often it arrives.
@@ -21,6 +22,7 @@ import logging
 import time
 import uuid
 from collections.abc import Iterator, Mapping
+from contextlib import suppress
 from dataclasses import dataclass, field
 from typing import Final
 
@@ -49,6 +51,9 @@ logger = logging.getLogger(__name__)
 # The graph state key the items still waiting ride in.
 OUTBOX_KEY: Final = "open_swe_outbox"
 _BATCH_ITEMS: Final = 64
+# How long a batch waits for more before it goes, so a reply and the tool call it makes
+# travel together.
+_GATHER_SECONDS: Final = 0.05
 _BATCH_BYTES: Final = 4 * 1024 * 1024
 # Waits before sending again what the backend did not take, capped at the last.
 _RETRY_SECONDS: Final = (1.0, 2.0, 4.0, 8.0, 15.0, 30.0)
@@ -131,6 +136,9 @@ class Outbox:
         self._last = 0
         self._receipt: _Waiting | None = None
         self._sending: asyncio.Task[None] | None = None
+        # Set while a phase waits on the outbox, so what waits goes out at once.
+        self._hurry = asyncio.Event()
+        self._waiters = 0
 
     def replied(self, result: ModelResult) -> None:
         self._add(MODEL_RESULT, result, uuid.uuid4().hex)
@@ -234,7 +242,14 @@ class Outbox:
         pending = [w.done for w in waiting if not w.done.done()]
         if not pending:
             return
-        _, late = await asyncio.wait(pending, timeout=DRAIN_SECONDS)
+        self._waiters += 1
+        self._hurry.set()
+        try:
+            _, late = await asyncio.wait(pending, timeout=DRAIN_SECONDS)
+        finally:
+            self._waiters -= 1
+            if not self._waiters:
+                self._hurry.clear()
         if late:
             logger.warning(
                 "Going on before the backend took the run's reports",
@@ -254,6 +269,10 @@ class Outbox:
     async def _send(self) -> None:
         backoff = _Backoff()
         while self._waiting:
+            if not self._hurry.is_set():
+                # What the run makes next joins this batch, unless a phase waits on it.
+                with suppress(TimeoutError):
+                    await asyncio.wait_for(self._hurry.wait(), _GATHER_SECONDS)
             batch = self._batch()
             try:
                 answer = await call(
@@ -286,27 +305,22 @@ class Outbox:
 
     def _settle(self, batch: list[_Waiting], answer: ReportsTaken) -> bool:
         """Let go of what ``answer`` took; whether anything moved."""
-        sent = {waiting.item.key: waiting for waiting in batch}
-        moved = False
-        for taken in answer.taken:
-            waiting = sent.get(taken.key)
-            if waiting is None:
-                continue
+        for waiting, reply in zip(batch, answer.replies, strict=False):
             if waiting.item.endpoint == TOOL_RESULT.name and waiting.turn is not None:
                 # What the call changed in the thread's checkouts, for the turn's git metadata.
-                update = ToolResultReply.model_validate(taken.reply).update
+                update = ToolResultReply.model_validate(reply).update
                 TurnTrace.record_evidence(update, waiting.turn)
             self._let_go(waiting)
-            moved = True
-        refused = answer.refused
-        if refused is not None and (waiting := sent.get(refused.key)) is not None:
+        moved = bool(answer.replies)
+        if answer.refused is not None and len(answer.replies) < len(batch):
+            waiting = batch[len(answer.replies)]
             waiting.refusals += 1
             logger.warning(
                 "The backend could not record a report",
                 extra={
                     "endpoint": waiting.item.endpoint,
                     "refusals": waiting.refusals,
-                    "refusal": refused.error,
+                    "refusal": answer.refused,
                 },
             )
             if waiting.refusals >= _MAX_REFUSALS:

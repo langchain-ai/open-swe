@@ -155,7 +155,7 @@ from runtime_api.operations import (
     ShellVerdict,
     ToolEvidence,
 )
-from runtime_api.reports import REPORTED, REPORTS, Refused, Reports, ReportsTaken, Taken
+from runtime_api.reports import REPORTED, REPORTS, Reports, ReportsTaken
 from runtime_api.skills import SKILLS, RunSkills
 
 from openswe.agent_api.caller_trace import traced_under
@@ -1058,7 +1058,7 @@ class TokenRun:
         before it: one that failed, or one another delivery is still recording.
         """
         receipts = ReportReceipts(self.run.thread_id)
-        taken: list[Taken] = []
+        replies: list[dict[str, JsonValue]] = []
         for item in request.items:
             claim = (
                 await receipts.claim(item.key) if REPORTED[item.endpoint] != "idempotent" else None
@@ -1066,7 +1066,7 @@ class TokenRun:
             if isinstance(claim, Recording):
                 break
             if isinstance(claim, Recorded):
-                taken.append(Taken(key=item.key, reply=claim.reply))
+                replies.append(claim.reply)
                 continue
             try:
                 with traced_under(item.trace):
@@ -1082,15 +1082,12 @@ class TokenRun:
                     "An MDA report was not recorded",
                     extra={"endpoint": item.endpoint, "report_key": item.key},
                 )
-                return ReportsTaken(
-                    taken=taken,
-                    refused=Refused(key=item.key, error=f"{type(exc).__name__}: {exc}"),
-                )
+                return ReportsTaken(replies=replies, refused=f"{type(exc).__name__}: {exc}")
             reply = _json_object.validate_python(answered)
             if claim is not None:
                 await receipts.record(claim, reply)
-            taken.append(Taken(key=item.key, reply=reply))
-        return ReportsTaken(taken=taken)
+            replies.append(reply)
+        return ReportsTaken(replies=replies)
 
 
 class RemoteGraph:

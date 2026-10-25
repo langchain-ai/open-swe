@@ -9,7 +9,7 @@ nothing twice. An item stays the runtime's until an answer names it taken.
 
 The backend takes items in order and stops at the first it cannot take now: one
 whose recording failed, or one another delivery of the same key is still
-recording. What it did not take is sent again, so the transcript never sees a
+recording. It answers with a reply for each item it took. What it did not take is sent again, so the transcript never sees a
 report before the ones made before it.
 """
 
@@ -125,23 +125,15 @@ class Reports(BaseModel):
     items: list[Item]
 
 
-class Taken(BaseModel):
-    key: str
-    # What the item's endpoint answered, such as a tool result's git evidence.
-    reply: dict[str, JsonValue] = {}
-
-
-class Refused(BaseModel):
-    """An item the backend tried and could not record; nothing after it was tried."""
-
-    key: str
-    error: str
-
-
 class ReportsTaken(BaseModel):
-    # The items taken, a prefix of those sent; the rest are the runtime's to send again.
-    taken: list[Taken] = []
-    refused: Refused | None = None
+    """What the backend took: the first items sent, one reply each, in order. The rest
+    are the runtime's to send again."""
+
+    # What each taken item's endpoint answered, such as a tool result's git evidence.
+    replies: list[dict[str, JsonValue]] = []
+    # Why the backend could not record the first item it did not take, when it tried
+    # it and failed; nothing after it was tried.
+    refused: str | None = None
 
 
 # Every item is recorded once by its key, so a batch is safe to send again.

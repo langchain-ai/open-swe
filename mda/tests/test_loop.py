@@ -25,7 +25,7 @@ from runtime_api.catalog import (
 )
 from runtime_api.endpoint import Delivery
 from runtime_api.loop import Done, PhaseResult, Route, TaskContext
-from runtime_api.reports import REPORTS, Refused, Reports, ReportsTaken, Taken
+from runtime_api.reports import REPORTS, Reports, ReportsTaken
 
 _MAIN = ModelSpec(model_id="anthropic:claude-opus-5-5", kwargs={})
 _FALLBACK = ModelSpec(model_id="openai:gpt-6.1-sol", kwargs={})
@@ -78,14 +78,14 @@ def _backend(
 
     async def _taking(body: dict[str, JsonValue]) -> ReportsTaken:
         """Each item of a batch, answered as the call it stands for."""
-        taken: list[Taken] = []
+        replies: list[dict[str, JsonValue]] = []
         for item in Reports.model_validate(body).items:
             calls.append((item.endpoint, item.request.model_dump(mode="json")))
             answer = answers[item.endpoint]
             if isinstance(answer, BackendCallError):
-                return ReportsTaken(taken=taken, refused=Refused(key=item.key, error=str(answer)))
-            taken.append(Taken(key=item.key, reply=answer.model_dump(mode="json")))
-        return ReportsTaken(taken=taken)
+                return ReportsTaken(replies=replies, refused=str(answer))
+            replies.append(answer.model_dump(mode="json"))
+        return ReportsTaken(replies=replies)
 
     monkeypatch.setattr(backend, "post", post)
     return backend, calls

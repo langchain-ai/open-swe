@@ -87,7 +87,7 @@ from runtime_api.loop import (
     ToolResultReply,
 )
 from runtime_api.operations import OperationResult, RunRequest, ShellVerdict
-from runtime_api.reports import REPORTS, Reports, ReportsTaken, Taken
+from runtime_api.reports import REPORTS, Reports, ReportsTaken
 from runtime_api.workers import LAUNCH_WORKER
 
 
@@ -116,16 +116,13 @@ def _answering(monkeypatch: pytest.MonkeyPatch, backend: OpenSweBackend, answer:
         if name != REPORTS.name:
             return (await answer(name, body)).model_dump(mode="json")
         # Each item of a batch, answered as the call it stands for.
-        taken = [
-            Taken(
-                key=item.key,
-                reply=(
-                    await answer(item.endpoint, item.request.model_dump(mode="json"))
-                ).model_dump(mode="json"),
+        replies = [
+            (await answer(item.endpoint, item.request.model_dump(mode="json"))).model_dump(
+                mode="json"
             )
             for item in Reports.model_validate(body).items
         ]
-        return ReportsTaken(taken=taken).model_dump(mode="json")
+        return ReportsTaken(replies=replies).model_dump(mode="json")
 
     monkeypatch.setattr(backend, "post", post)
 
@@ -496,7 +493,7 @@ async def test_reports_the_backend_never_took_go_out_first_from_the_runs_checkpo
             return PhaseResult().model_dump(mode="json")
         items = Reports.model_validate(body).items
         sent.extend((item.endpoint, item.key) for item in items)
-        return ReportsTaken(taken=[Taken(key=item.key) for item in items]).model_dump(mode="json")
+        return ReportsTaken(replies=[{} for _ in items]).model_dump(mode="json")
 
     monkeypatch.setattr(up, "post", taking)
     left_over = await checkpointer.aget_tuple(config)
@@ -1654,7 +1651,7 @@ async def test_backend_calls_carry_the_running_spans_trace_without_its_metadata(
         items = Reports.model_validate(json).items
         for item in items:
             sent[item.endpoint] = {"Authorization": headers["Authorization"], **item.trace}
-        taken = ReportsTaken(taken=[Taken(key=item.key) for item in items])
+        taken = ReportsTaken(replies=[{} for _ in items])
         return httpx2.Response(200, request=request, json=taken.model_dump(mode="json"))
 
     client = MagicMock(is_closed=False)

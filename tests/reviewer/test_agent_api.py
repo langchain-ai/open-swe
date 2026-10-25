@@ -190,19 +190,15 @@ async def test_a_report_is_recorded_once_however_often_it_arrives(
         return ReportsTaken.model_validate(await graph.api(run, "reports", batch))
 
     first = await deliver()
-    assert first.taken == []
-    assert first.refused is not None and first.refused.key == "run-1:step_limit_reached"
+    assert first.replies == []
+    assert first.refused == "RuntimeError: Slack is down"
     # Nothing after a report that failed is tried, so none lands before it.
     settled.assert_not_awaited()
 
     second = await deliver()
     lost_answer = await deliver()
 
-    assert [taken.key for taken in second.taken] == [
-        "run-1:step_limit_reached",
-        "run-1:settle_review_check",
-    ]
-    assert lost_answer == second
+    assert second == lost_answer == ReportsTaken(replies=[{}, {}])
     assert told.await_count == 2
     settled.assert_awaited_once()
 
