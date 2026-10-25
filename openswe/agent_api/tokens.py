@@ -72,8 +72,11 @@ class RemoteRun(BaseModel):
     metadata: dict[str, JsonValue] = {}
     settings: RunSettings = RunSettings()
     # What the run's operation grants are signed under; None on a run started before
-    # operations were granted, which may call any.
+    # operations were granted, whose tools its plan bounds instead.
     grant_id: str | None = None
+    # When the run's token expires, in epoch seconds; a token signed again for the run
+    # keeps it, so holding one never extends it.
+    expires_at: int | None = None
 
     def granting(self) -> Self:
         """This run, with a grant id of its own for the operations its catalog grants."""
@@ -86,10 +89,12 @@ class RemoteRun(BaseModel):
 
     def granted(self, operation: str, grant: str | None) -> bool:
         """Whether this run may call ``operation``: its catalog granted it, under any live key."""
-        if self.grant_id is None:
-            return True
-        return grant is not None and any(
-            hmac.compare_digest(_grant(key, self, operation), grant) for key in _signing_keys()
+        return (
+            self.grant_id is not None
+            and grant is not None
+            and any(
+                hmac.compare_digest(_grant(key, self, operation), grant) for key in _signing_keys()
+            )
         )
 
 
@@ -116,7 +121,7 @@ def _sign(audience: str, run: RemoteRun, extra: dict[str, JsonValue], now: int |
         "iss": _ISSUER,
         "aud": audience,
         "iat": issued_at,
-        "exp": issued_at + _TTL_SECONDS,
+        "exp": run.expires_at or issued_at + _TTL_SECONDS,
         "sub": run.thread_id,
         "assistant_id": run.assistant_id,
         "cfg": run.configurable,
@@ -159,6 +164,7 @@ def _run(claims: Mapping[str, object]) -> RemoteRun:
             "metadata": claims.get("md", {}),
             "settings": claims.get("set", {}),
             "grant_id": claims.get("gid"),
+            "expires_at": claims.get("exp"),
         }
     )
 

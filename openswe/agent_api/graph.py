@@ -21,7 +21,7 @@ import (``runtime_api``):
   reports of each reply and tool call, the work of the run's tools (``operation``,
   ``check_shell``, the ``files`` calls), and the box MDA keeps
 - a run still served from its plan (``RunParts.legacy``: a requested offload, an
-  incident) has its phases (``before_model``, ``after_model``, ``after_agent``) and
+  incident; or a token from before operations were granted) has its phases (``before_model``, ``after_model``, ``after_agent``) and
   tool calls answered by ``RunSession``, as is ``record_evidence``
 
 None of the run's tool calls is a tool call here: no tools node, no tool-call
@@ -426,12 +426,12 @@ class RunSession:
             ),
         )
 
-    async def plan(self) -> Catalog:
+    async def plan(self, run: RemoteRun | None = None) -> Catalog:
         """The catalog, with who the run acts for, the box MDA creates for it, and the grant
-        of each operation to the run."""
+        of each operation to the run (``run``, or the one this session serves)."""
         sandbox = await self.sandbox()
         catalog = self.catalog()
-        run = self.run
+        run = run or self.run
         return catalog.model_copy(
             update={
                 "trace_metadata": TurnGitMetadata(self.config).actor,
@@ -784,7 +784,8 @@ class TokenRun:
 
     @property
     def legacy(self) -> bool:
-        return self.parts.legacy(RunConfig.from_config(self.config))
+        # A token that grants no operations reaches only the tools its run's plan offers.
+        return self.run.grant_id is None or self.parts.legacy(RunConfig.from_config(self.config))
 
     async def _ready(self, _runtime: Runtime) -> None:
         await self.parts.credentials(self.config)
@@ -1170,9 +1171,11 @@ async def _catalog(session: RunSession, _request: RunRequest) -> Catalog:
     """The catalog of a run started without it, and a token that carries what was decided."""
     if session.run is None:
         return await session.plan()
-    session.run = session.run.model_copy(update={"settings": session.settings()}).granting()
-    catalog = await session.plan()
-    return catalog.model_copy(update={"run_token": sign_runtime_token(session.run)})
+    run = session.run.model_copy(update={"settings": session.settings()})
+    if run.grant_id is None:
+        run = run.granting()
+    catalog = await session.plan(run)
+    return catalog.model_copy(update={"run_token": sign_runtime_token(run)})
 
 
 def _b64(data: bytes | None) -> str | None:
@@ -1294,7 +1297,7 @@ RUN_CALLS.serve(STEP_LIMIT_REACHED, TokenRun.step_limit_reached)
 RUN_CALLS.serve(SETTLE_REVIEW_CHECK, TokenRun.settle_review_check)
 RUN_CALLS.serve(FINISH_SCOUT_PLAN, TokenRun.finish_scout_plan)
 # The work of a run's tools, answered from its token unless the run is still served
-# from its plan (``RunParts.legacy``).
+# from its plan (``RunParts.legacy``, or a token without grants).
 TOOL_CALLS: Final = Handlers[TokenRun]()
 TOOL_CALLS.serve(OPERATION, TokenRun.operation)
 TOOL_CALLS.serve(CHECK_SHELL, TokenRun.check_shell)

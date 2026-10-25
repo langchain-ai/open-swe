@@ -24,7 +24,7 @@ from runtime_api.catalog import (
     RunModels,
 )
 from runtime_api.endpoint import Delivery
-from runtime_api.loop import AfterAgent, Done, PhaseResult, Route, TaskContext
+from runtime_api.loop import Done, PhaseResult, Route, TaskContext
 
 _MAIN = ModelSpec(model_id="anthropic:claude-opus-5-5", kwargs={})
 _FALLBACK = ModelSpec(model_id="openai:gpt-6.1-sol", kwargs={})
@@ -256,8 +256,8 @@ async def test_the_end_of_a_run_is_reported_and_its_graph_work_done_by_name(
         monkeypatch,
         {
             "prepare": PhaseResult(update={"rendered_system_prompt": "You review."}),
-            "run_ended": AfterAgent(trace_metadata={"git": "reconciled"}),
-            # A notice that fails leaves the rest of the end of the run to happen.
+            # Neither a report nor a notice that fails takes the review check's settling with it.
+            "run_ended": BackendCallError("run_ended failed: timed out"),
             "step_limit_reached": BackendCallError("step_limit_reached failed: Slack is down"),
             "settle_review_check": Done(),
         },
@@ -277,9 +277,9 @@ async def test_the_end_of_a_run_is_reported_and_its_graph_work_done_by_name(
     # Only preparation is a phase call: the loop and the end of the run are named calls.
     assert [name for name, _ in calls] == [
         "prepare",
-        "run_ended",
         "step_limit_reached",
         "settle_review_check",
+        "run_ended",
     ]
 
 

@@ -445,9 +445,31 @@ class RunLoop:
     async def after_agent(
         self, state: Mapping[str, object], evidence: Mapping[str, JsonValue]
     ) -> AfterAgent:
-        """Report the run's end, then do the graph's own end-of-run work."""
+        """Do the graph's own end-of-run work, then report the run's end.
+
+        The work comes first, as the safety net it is: a report that fails takes none of
+        it with it.
+        """
         await self._backend.reports.drain()
         messages = _messages(state)
+        current = run_id()
+        limited = bool(messages) and _LIMIT_MARKER in content_text(messages[-1].content)
+        # Each is its own work: one that fails leaves the others, and the run's end, recorded.
+        for work in [*(["step_limit_reached"] if limited else []), *self.rules.at_end]:
+            try:
+                if work == "step_limit_reached":
+                    await call(self._backend, STEP_LIMIT_REACHED, RunRequest(run_id=current))
+                elif work == "settle_review_check":
+                    await call(self._backend, SETTLE_REVIEW_CHECK, RunRequest(run_id=current))
+                else:
+                    summary = _held(state).get("human_input_summary")
+                    finished = ScoutPlanEnd(
+                        run_id=current,
+                        human_input_summary=summary if isinstance(summary, str) else "",
+                    )
+                    await call(self._backend, FINISH_SCOUT_PLAN, finished)
+            except BackendCallError:
+                logger.warning("End-of-run work failed", extra={"work": work}, exc_info=True)
         replies = [
             # Usage reads only each reply's id, model and token counts.
             AIMessage(
@@ -460,31 +482,11 @@ class RunLoop:
             if isinstance(message, AIMessage) and message.usage_metadata
         ]
         request = RunEnded(
-            run_id=run_id(),
+            run_id=current,
             git={**git_trace(state), **evidence},
             replies=_json_dicts.validate_python(messages_to_dict(replies)),
         )
-        ended = await call(self._backend, RUN_ENDED, request)
-        limited = bool(messages) and _LIMIT_MARKER in content_text(messages[-1].content)
-        # Each is its own work: one that fails leaves the others, and the run's end, recorded.
-        for work in [*(["step_limit_reached"] if limited else []), *self.rules.at_end]:
-            try:
-                if work == "step_limit_reached":
-                    await call(self._backend, STEP_LIMIT_REACHED, RunRequest(run_id=request.run_id))
-                elif work == "settle_review_check":
-                    await call(
-                        self._backend, SETTLE_REVIEW_CHECK, RunRequest(run_id=request.run_id)
-                    )
-                else:
-                    summary = _held(state).get("human_input_summary")
-                    finished = ScoutPlanEnd(
-                        run_id=request.run_id,
-                        human_input_summary=summary if isinstance(summary, str) else "",
-                    )
-                    await call(self._backend, FINISH_SCOUT_PLAN, finished)
-            except BackendCallError:
-                logger.warning("End-of-run work failed", extra={"work": work}, exc_info=True)
-        return ended
+        return await call(self._backend, RUN_ENDED, request)
 
 
 def _messages(state: Mapping[str, object]) -> list[AnyMessage]:

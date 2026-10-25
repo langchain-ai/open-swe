@@ -25,6 +25,7 @@ RUN = RemoteRun(
     thread_id="thread-1",
     assistant_id="reviewer",
     configurable={"repo": {"owner": "acme", "name": "widgets"}, "pr_number": 7},
+    expires_at=int(time.time()) + 3600,
 )
 
 
@@ -203,6 +204,17 @@ async def test_a_runs_tool_and_shell_calls_never_plan_it_and_read_its_settings(
     for refused in (ungranted, regranted):
         assert isinstance(refused, dict) and refused["status"] == "error"
         assert "not one of this run's operations" in str(refused["content"])
+
+    # A token from before operations were granted reaches only the tools its plan offers.
+    async def offers_nothing(config: object, surface: ToolSurface) -> None:
+        return None
+
+    planned = RemoteGraph("agent", offers_nothing, agent.AgentParts())
+    unplanned = await planned.api(
+        RUN.model_copy(update={"assistant_id": "agent"}), "operation", call
+    )
+    assert isinstance(unplanned, dict) and unplanned["status"] == "error"
+    assert "drafts" not in str(unplanned["content"])
 
 
 async def test_mda_calls_hide_the_tools_the_graph_middleware_hides_from_each_call() -> None:
@@ -587,11 +599,12 @@ async def test_mda_catalog_leaves_integrations_and_code_mode_to_mda(
     ]
     assert catalog["search_tools"] is True
     # A run started without its catalog gets a token that carries what was decided for
-    # it here, and grants its operations under it.
+    # it here, and grants its operations under it, but lives no longer than the one it had.
     token = catalog["run_token"]
     assert isinstance(token, str)
     resigned = verify_runtime_token(token)
     assert resigned.thread_id == RUN.thread_id and resigned.grant_id is not None
+    assert resigned.expires_at == RUN.expires_at
     assert resigned.settings.draft_prs is False
     assert all(
         isinstance(op, dict) and resigned.granted(str(op["name"]), str(op["grant"]))
