@@ -36,6 +36,7 @@ from openswe.github.queue import (
     Artifact,
     CommitComparison,
     GitReference,
+    NativeQueueSnapshot,
     ValidationArtifacts,
     ValidationJob,
     ValidationJobs,
@@ -606,6 +607,37 @@ class RepoClient:
         if not isinstance(payload, dict):
             raise ValueError("GitHub answered the repository without an object")
         return payload
+
+    async def native_queue(self, branch: str) -> NativeQueueSnapshot:
+        """Read a bounded, complete queue view; candidate ancestry determines membership."""
+        data = await self.graphql(
+            """query($owner:String!,$repo:String!,$branch:String!,$ref:String!) {
+              repository(owner:$owner,name:$repo) {
+                databaseId nameWithOwner
+                ref(qualifiedName:$ref) { name target { oid } }
+                mergeQueue(branch:$branch) {
+                  id
+                  entries(first:100) {
+                    totalCount pageInfo { hasNextPage }
+                    nodes {
+                      id position state enqueuedAt
+                      baseCommit { oid }
+                      headCommit { oid parents(first:2) { totalCount nodes { oid } } }
+                      pullRequest {
+                        number headRefOid state reviewDecision isDraft baseRefName
+                        headRepository { nameWithOwner }
+                      }
+                    }
+                  }
+                }
+              }
+            }""",
+            {"branch": branch, "ref": f"refs/heads/{branch}"},
+        )
+        snapshot = NativeQueueSnapshot.model_validate(data.get("repository"))
+        if snapshot.repository.lower() != self.full_name.lower() or snapshot.branch != branch:
+            raise ValueError("Native queue repository or target changed")
+        return snapshot
 
     async def labels(self) -> list[dict[str, Any]]:
         return await self.pages("labels")

@@ -751,19 +751,17 @@ class ReviewCard:
                     row.slack_message_ts = ""
 
     async def _react(self, emoji: str, fallback: str | None = None) -> None:
-        """React to the thread root, or to the message itself; ``fallback`` if the workspace lacks ``emoji``."""
+        """React to a separate thread root, or a watched post; never to our own status card."""
         if skip_on_preview("pr_reaction"):
             return
         request = self.request
         if request.kind == "posted":
             await self.update_post_reactions()
             return
-        location = request.slack_location or (
-            (request.slack_channel_id, request.slack_message_ts)
-            if request.slack_channel_id and request.slack_message_ts
-            else None
-        )
-        if location is None or await add_slack_reaction(location[0], location[1], emoji):
+        location = request.slack_location
+        if location is None or location == (request.slack_channel_id, request.slack_message_ts):
+            return
+        if await add_slack_reaction(location[0], location[1], emoji):
             return
         if fallback is not None:
             await add_slack_reaction(location[0], location[1], fallback)

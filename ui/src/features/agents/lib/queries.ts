@@ -35,7 +35,6 @@ import type { ChatSort } from "./sidebarPrefs"
 import type { Skill, SkillInput } from "@/lib/api"
 import { invalidationTopic } from "@/lib/invalidations/topics"
 import { api } from "@/lib/api"
-import { chatRoutes } from "@/lib/chatRoutes"
 import { optimisticUpdate } from "@/lib/optimistic"
 import { reportError } from "@/lib/errorReporting"
 
@@ -1292,9 +1291,8 @@ export function useDeleteAgentThread() {
             })
           )
       const path = window.location.pathname
-      const chat = chatRoutes(path)
-      if (path === `${chat.home}/${threadId}`) {
-        navigate({ to: chat.home })
+      if (path === `/agents/${threadId}`) {
+        navigate({ to: "/agents" })
       }
     },
   })

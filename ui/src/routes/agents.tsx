@@ -2,7 +2,6 @@ import { useEffect } from "react"
 import { useQuery } from "@tanstack/react-query"
 import {
   Outlet,
-  Navigate,
   createFileRoute,
   useMatch,
   useRouterState,
@@ -12,12 +11,9 @@ import { AgentsShell } from "@/features/agents/components/AgentsSidebar"
 import { PluginTabs } from "@/features/plugins/components/PluginTabs"
 import { reviewChatQuery } from "@/features/agents/lib/queries"
 import { Skeleton } from "@langchain/macaw-components/Skeleton"
-import { useExperimentalAssistantUi, useProfile } from "@/lib/profile"
 import { RequireLogin } from "@/lib/auth-redirect"
 import { useSession } from "@/lib/session"
 import { rememberAppLocation } from "@/lib/appLocation"
-import { useDesktopThreadSource } from "@/features/agents/lib/desktopThreadSource"
-import { useLocalThreads } from "@/features/agents/lib/desktopLocal"
 import { pageTitle } from "@/lib/pageTitle"
 
 export const Route = createFileRoute("/agents")({
@@ -27,8 +23,6 @@ export const Route = createFileRoute("/agents")({
 
 function AgentsLayout() {
   const session = useSession()
-  const profile = useProfile()
-  const experimentalAssistantUi = useExperimentalAssistantUi()
   const threadMatch = useMatch({
     from: "/agents/$threadId",
     shouldThrow: false,
@@ -51,35 +45,9 @@ function AgentsLayout() {
   const activeReviewThreadId = reviewMatch
     ? reviewChat.data?.thread_id
     : undefined
-  const homeMatch = useMatch({ from: "/agents/", shouldThrow: false })
-  const [desktopSource] = useDesktopThreadSource()
-  const localHome =
-    Boolean(homeMatch) &&
-    (Boolean(homeMatch?.search.localRepo) ||
-      (typeof window !== "undefined" &&
-        Boolean(window.openSweDesktop) &&
-        desktopSource === "local" &&
-        !homeMatch?.search.repo &&
-        !homeMatch?.search.noRepo))
-  // A "This Mac" thread needs this app's bridge and git controls, which only
-  // the agents view has.
-  const localThreads = useLocalThreads()
-  const thisMacThread = Boolean(
-    activeThreadId &&
-    localThreads.data?.some((thread) => thread.id === activeThreadId)
-  )
-  // Only a thread route has to wait for the profile: mounting the runtime the
-  // profile does not select hydrates that thread's transcript a second time.
   const location = useRouterState({
     select: (state) => state.location,
   })
-  const pathname = location.pathname
-  const awaitingRuntimeChoice =
-    Boolean(session.data) &&
-    (profile.isPending || localThreads.isLoading) &&
-    (activeThreadId !== undefined ||
-      pathname === "/agents" ||
-      pathname === "/agents/")
   useEffect(() => {
     rememberAppLocation(location.href)
   }, [location.href])
@@ -93,40 +61,13 @@ function AgentsLayout() {
   }
 
   if (!session.data) return <RequireLogin />
-  if (!awaitingRuntimeChoice && experimentalAssistantUi && !localHome) {
-    if (activeThreadId && !thisMacThread)
-      return (
-        <Navigate
-          to="/assistant/$threadId"
-          params={{ threadId: activeThreadId }}
-          replace
-        />
-      )
-    if (pathname === "/agents" || pathname === "/agents/")
-      return (
-        <Navigate
-          to="/assistant"
-          search={{
-            repo: homeMatch?.search.repo,
-            noRepo: homeMatch?.search.noRepo,
-          }}
-          replace
-        />
-      )
-  }
 
   return (
     <AgentsShell
       user={session.data}
       activeThreadId={activeThreadId ?? activeReviewThreadId}
     >
-      {awaitingRuntimeChoice ? (
-        <main className="flex min-w-0 flex-1 items-center justify-center p-space-5">
-          <Skeleton className="h-40 w-full max-w-md" />
-        </main>
-      ) : (
-        <Outlet />
-      )}
+      <Outlet />
       <PluginTabs />
     </AgentsShell>
   )

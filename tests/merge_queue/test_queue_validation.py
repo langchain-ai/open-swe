@@ -50,7 +50,7 @@ def validation() -> tuple[CandidateValidation, ValidationWork, Lease]:
         ),
         request=request,
     )
-    queue = Mock(spec=MergeQueue)
+    queue = Mock(spec=MergeQueue, mode="custom")
     queue.repository_name = AsyncMock(return_value=request.repository)
     queue.advance_validation = AsyncMock(return_value=work)
     queue.bind_validation_run = AsyncMock()

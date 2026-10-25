@@ -10,8 +10,6 @@
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
-    "@assistant-ui/react": "^0.15.22",
-    "@assistant-ui/react-langchain": "0.0.33",
     "@datadog/browser-rum": "7.15.0",
     "@langchain/core": "^1.2.9",
     "@langchain/langgraph-sdk": "1.12.0",

@@ -313,7 +313,6 @@ export interface OptionsPayload {
 }
 
 export interface Profile {
-  experimental_assistant_ui?: boolean | null
   experimental_background_callbacks?: boolean | null
   login?: string
   email?: string
@@ -336,7 +335,6 @@ export interface Profile {
 }
 
 export interface ProfileUpdate {
-  experimental_assistant_ui?: boolean | null
   experimental_background_callbacks?: boolean | null
   default_repo?: string | null
   workspace_default_repos?: Record<string, string>
