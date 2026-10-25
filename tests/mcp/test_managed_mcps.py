@@ -97,6 +97,11 @@ async def test_gateway_status_reads_missing_services_under_either_policy(monkeyp
     assert partial.missing_for(["Notion"]) == []
     assert (await managed.connect_link("alice", GATEWAY_ID, "linear")).auth_id == "linear-auth"
     assert await managed.connect_link("alice", GATEWAY_ID, "notion") is None
+    inventory = await managed.gateway_inventory("alice", GATEWAY_ID)
+    assert [tool.name for tool in inventory.tools] == ["notion_search"]
+    assert [item.slug for item in inventory.missing] == ["linear"]
+    assert "verification_url" not in inventory.model_dump_json()
+    assert "linear-auth" not in inventory.model_dump_json()
 
     listing[0] = managed._credentials_required(
         {"credentials": [linear, {"kind": "oauth", "slug": "notion", "display_name": "Notion"}]}
@@ -104,6 +109,50 @@ async def test_gateway_status_reads_missing_services_under_either_policy(monkeyp
     required = await managed.gateway_status("alice", GATEWAY_ID)
     assert required.all_required
     assert [item.slug for item in required.missing_for(["Linear"])] == ["linear", "notion"]
+    inventory = await managed.gateway_inventory("alice", GATEWAY_ID)
+    assert inventory.all_required
+    assert inventory.tools == []
+    assert [item.slug for item in inventory.missing] == ["linear", "notion"]
+    assert "linear-auth" not in inventory.model_dump_json()
+
+
+async def test_inventory_includes_later_pages_and_their_missing_connections(monkeypatch):
+    client = managed._gateway_client({}, GATEWAY_ID)
+    pages = [
+        ListToolsResult.model_validate(
+            {
+                "tools": [{"name": "notion_search", "inputSchema": {}}],
+                "nextCursor": "next",
+                "_meta": {
+                    "com.langchain.langsmith/missingCredentials": [
+                        {"slug": "linear", "display_name": "Linear"}
+                    ]
+                },
+            }
+        ),
+        ListToolsResult.model_validate(
+            {
+                "tools": [{"name": "calendar_list", "inputSchema": {}}],
+                "_meta": {
+                    "com.langchain.langsmith/missingCredentials": [
+                        {"slug": "linear", "display_name": "Linear"}
+                    ]
+                },
+            }
+        ),
+    ]
+    monkeypatch.setattr(client, "list_tools_mcp", AsyncMock(side_effect=pages))
+
+    async def with_session(login, gateway, use):
+        return await use(client)
+
+    monkeypatch.setattr(managed, "_with_session", with_session)
+    monkeypatch.setattr(
+        managed, "_gateway_detail", AsyncMock(return_value={"id": GATEWAY_ID, "name": "Eng"})
+    )
+    inventory = await managed.gateway_inventory("alice", GATEWAY_ID)
+    assert [tool.name for tool in inventory.tools] == ["notion_search", "calendar_list"]
+    assert [item.slug for item in inventory.missing] == ["linear"]
 
 
 async def test_gateway_status_names_the_services_already_connected(monkeypatch):
@@ -265,6 +314,76 @@ async def test_gateway_tools_load_only_for_the_private_owner(monkeypatch):
     metadata["visibility"] = "public"
     assert "MCP call failed" in await tools[0].ainvoke({})
     assert await runtime.load_mcp_tools(managed.managed_mcp_source("bob", GATEWAY_ID)) == []
+
+
+@pytest.mark.parametrize("scope", ["public", "system", "other_owner", "other_actor"])
+async def test_discovery_denies_shared_and_foreign_credentials(monkeypatch, scope):
+    tool = importlib.import_module("openswe.tools.discover_managed_tools")
+    metadata = private_thread(monkeypatch, "alice")
+    if scope == "public":
+        metadata["visibility"] = "public"
+    elif scope == "system":
+        metadata["owner_type"] = "system"
+    elif scope == "other_owner":
+        metadata["owner_login"] = "bob"
+    else:
+        monkeypatch.setattr(
+            "openswe.run_config.get_config",
+            lambda: {"configurable": {"thread_id": "t", "github_login": "bob"}},
+        )
+    gateway = AsyncMock(return_value=GATEWAY_ID)
+    inventory = AsyncMock()
+    monkeypatch.setattr(tool, "instance_gateway", gateway)
+    monkeypatch.setattr(tool, "gateway_inventory", inventory)
+
+    assert (await tool.discover_managed_tools("calendar"))["success"] is False
+    gateway.assert_not_awaited()
+    inventory.assert_not_awaited()
+
+
+async def test_discovery_searches_only_the_private_owners_configured_kit(monkeypatch):
+    tool = importlib.import_module("openswe.tools.discover_managed_tools")
+    private_thread(monkeypatch, "alice")
+    monkeypatch.setattr(tool, "instance_gateway", AsyncMock(return_value=GATEWAY_ID))
+    monkeypatch.setattr(
+        managed,
+        "_gateway_detail",
+        AsyncMock(return_value={"id": GATEWAY_ID, "name": "Eng", "tool_count": 2}),
+    )
+
+    async def listing(login, gateway, use):
+        assert login == "alice"
+        assert gateway == GATEWAY_ID
+        assert (await managed._headers(login))["Authorization"] == "Bearer alice-langsmith-token"
+        return ListToolsResult.model_validate(
+            {
+                "tools": [
+                    {"name": "gcal_list", "description": "List calendar events", "inputSchema": {}},
+                    {"name": "notion_search", "inputSchema": {}},
+                ],
+                "_meta": {
+                    "com.langchain.langsmith/missingCredentials": [
+                        {
+                            "slug": "linear",
+                            "display_name": "Linear",
+                            "verification_url": "https://smith.langchain.com/private-consent",
+                            "auth_id": "private-auth",
+                        }
+                    ]
+                },
+            }
+        )
+
+    monkeypatch.setattr(managed, "_with_session", listing)
+    result = await tool.discover_managed_tools(" CALENDAR ")
+    assert result["success"] is True
+    assert result["tools"] == [{"name": "gcal_list", "description": "List calendar events"}]
+    assert result["total_available_tools"] == 2
+    assert result["missing"] == [{"slug": "linear", "display_name": "Linear", "kind": "oauth"}]
+    assert "private-consent" not in str(result)
+    assert "private-auth" not in str(result)
+    assert "alice-langsmith-token" not in str(result)
+    assert len((await tool.discover_managed_tools())["tools"]) == 2
 
 
 async def test_langsmith_outage_drops_only_the_gateway(monkeypatch):
