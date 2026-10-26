@@ -16,7 +16,6 @@ for (const entry of await readdir(root, {
   const body = await readFile(`${root}${path}`)
   files.push({
     path,
-    sha256: createHash("sha256").update(body).digest("hex"),
     body: body.toString("base64"),
   })
 }

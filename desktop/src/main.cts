@@ -2,6 +2,7 @@ const { randomBytes } = require("node:crypto");
 const fs = require("node:fs");
 const { createHash } = require("node:crypto");
 const path = require("node:path");
+const { pathToFileURL } = require("node:url");
 const {
   app,
   autoUpdater: nativeAutoUpdater,
@@ -11,6 +12,7 @@ const {
   Menu,
   dialog,
   nativeTheme,
+  net,
   protocol,
   powerMonitor,
   session,
@@ -1211,6 +1213,7 @@ async function serveDesktopUi(request: Request) {
       backendUrl,
       fetch,
       path.join(app.getPath("userData"), "ui-cache"),
+      (filename: string) => net.fetch(pathToFileURL(filename).toString()),
     );
   }
   return desktopUi.serve(request);

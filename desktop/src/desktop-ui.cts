@@ -1,46 +1,29 @@
 const { backendRequestUrl, APP_URL } = require("./config.cjs");
 const { createHash } = require("node:crypto");
-const { mkdir, readFile, rename, writeFile } = require("node:fs/promises");
+const {
+  mkdir,
+  mkdtemp,
+  readFile,
+  rename,
+  rm,
+  writeFile,
+} = require("node:fs/promises");
 const path = require("node:path");
 const { gunzipSync } = require("node:zlib");
 
 type UiFetch = (url: string, init: RequestInit) => Promise<Response>;
-type UiFile = { path: string; sha256: string };
-type UiSnapshot = { files: UiFile[] };
+type UiSnapshot = { version: string; files: string[] };
 
 function digest(body: Uint8Array | string): string {
   return createHash("sha256").update(body).digest("hex");
 }
 
-function parseSnapshot(value: unknown): UiSnapshot {
-  if (
-    !value ||
-    typeof value !== "object" ||
-    !("files" in value) ||
-    !Array.isArray(value.files)
-  )
-    throw new Error("Invalid desktop UI manifest");
-  const files: UiFile[] = value.files.map((file: unknown) => {
-    if (
-      !file ||
-      typeof file !== "object" ||
-      !("path" in file) ||
-      !("sha256" in file) ||
-      typeof file.path !== "string" ||
-      typeof file.sha256 !== "string" ||
-      !/^\/(?:assets\/)?[a-zA-Z0-9_.-]+(?:\/[a-zA-Z0-9_.-]+)*$/.test(
-        file.path,
-      ) ||
-      (!file.path.startsWith("/assets/") && file.path.slice(1).includes("/")) ||
-      file.path.includes("..") ||
-      !/^[a-f0-9]{64}$/.test(file.sha256)
-    )
-      throw new Error("Invalid desktop UI asset");
-    return { path: file.path, sha256: file.sha256 };
-  });
-  if (!files.some((file) => file.path === "/_shell.html"))
-    throw new Error("Desktop UI manifest has no shell");
-  return { files };
+function validAsset(pathname: string): boolean {
+  return (
+    /^\/(?:assets\/)?[a-zA-Z0-9_.-]+(?:\/[a-zA-Z0-9_.-]+)*$/.test(pathname) &&
+    (pathname.startsWith("/assets/") || !pathname.slice(1).includes("/")) &&
+    !pathname.includes("..")
+  );
 }
 
 class DesktopUi {
@@ -52,6 +35,7 @@ class DesktopUi {
     readonly backendUrl: string,
     private readonly fetchUi: UiFetch,
     cacheRoot: string,
+    private readonly serveFile: (filename: string) => Promise<Response>,
   ) {
     this.directory = path.join(cacheRoot, digest(backendUrl));
   }
@@ -88,54 +72,33 @@ class DesktopUi {
     const pathname = navigation
       ? "/_shell.html"
       : new URL(request.url).pathname;
-    const file = this.snapshot.files.find((entry) => entry.path === pathname);
-    if (!file) return new Response("Not found", { status: 404 });
-    const body = await this.readAsset(file);
-    return new Response(
-      request.method === "HEAD" ? null : new Uint8Array(body),
-      {
-        headers: {
-          "content-type": this.contentType(pathname),
-          "cache-control": "no-store",
-        },
-      },
+    if (!this.snapshot.files.includes(pathname))
+      return new Response("Not found", { status: 404 });
+    return this.serveFile(
+      path.join(this.directory, this.snapshot.version, pathname.slice(1)),
     );
-  }
-
-  private contentType(pathname: string): string {
-    const types: Record<string, string> = {
-      ".html": "text/html; charset=utf-8",
-      ".js": "text/javascript; charset=utf-8",
-      ".css": "text/css; charset=utf-8",
-      ".json": "application/json",
-      ".webmanifest": "application/manifest+json",
-      ".svg": "image/svg+xml",
-      ".png": "image/png",
-      ".ico": "image/x-icon",
-      ".woff2": "font/woff2",
-      ".woff": "font/woff",
-      ".ttf": "font/ttf",
-      ".wasm": "application/wasm",
-    };
-    return types[path.extname(pathname)] ?? "application/octet-stream";
-  }
-
-  private async readAsset(file: UiFile): Promise<Buffer> {
-    const body: Buffer = await readFile(path.join(this.directory, file.sha256));
-    if (digest(body) !== file.sha256)
-      throw new Error(`Corrupt cached UI asset: ${file.path}`);
-    return body;
   }
 
   private async readSnapshot(): Promise<UiSnapshot | null> {
     try {
-      const snapshot = parseSnapshot(
-        JSON.parse(
-          await readFile(path.join(this.directory, "current.json"), "utf8"),
-        ),
+      const value: unknown = JSON.parse(
+        await readFile(path.join(this.directory, "current.json"), "utf8"),
       );
-      await Promise.all(snapshot.files.map((file) => this.readAsset(file)));
-      return snapshot;
+      if (
+        !value ||
+        typeof value !== "object" ||
+        !("version" in value) ||
+        typeof value.version !== "string" ||
+        !/^[a-f0-9]{64}$/.test(value.version) ||
+        !("files" in value) ||
+        !Array.isArray(value.files) ||
+        !value.files.every(
+          (file: unknown) => typeof file === "string" && validAsset(file),
+        ) ||
+        !value.files.includes("/_shell.html")
+      )
+        throw new Error("Invalid cached UI snapshot");
+      return { version: value.version, files: value.files };
     } catch (error) {
       if (
         !(error instanceof Error && "code" in error && error.code === "ENOENT")
@@ -170,6 +133,8 @@ class DesktopUi {
       )
     )
       throw new Error("Incompatible desktop UI descriptor");
+    const current = await this.readSnapshot();
+    if (current?.version === descriptor.sha256) return current;
     const archiveResponse = await this.fetchPublic(descriptor.url);
     const archive = new Uint8Array(await archiveResponse.arrayBuffer());
     if (archive.length > 100_000_000 || digest(archive) !== descriptor.sha256)
@@ -177,7 +142,6 @@ class DesktopUi {
     const value: unknown = JSON.parse(
       gunzipSync(archive, { maxOutputLength: 300_000_000 }).toString("utf8"),
     );
-    const snapshot = parseSnapshot(value);
     if (
       !value ||
       typeof value !== "object" ||
@@ -185,23 +149,52 @@ class DesktopUi {
       !Array.isArray(value.files)
     )
       throw new Error("Invalid desktop UI archive");
-    await mkdir(this.directory, { recursive: true });
-    for (let index = 0; index < snapshot.files.length; index++) {
-      const file = snapshot.files[index];
-      const entry: unknown = value.files[index];
+    const files = value.files.map((entry: unknown) => {
       if (
         !entry ||
         typeof entry !== "object" ||
+        !("path" in entry) ||
+        typeof entry.path !== "string" ||
+        !validAsset(entry.path) ||
         !("body" in entry) ||
         typeof entry.body !== "string"
       )
-        throw new Error("Missing desktop UI asset");
-      const body = Buffer.from(entry.body, "base64");
-      if (digest(body) !== file.sha256)
-        throw new Error(`UI asset checksum mismatch: ${file.path}`);
-      const target = path.join(this.directory, file.sha256);
-      await writeFile(`${target}.tmp`, body);
-      await rename(`${target}.tmp`, target);
+        throw new Error("Invalid desktop UI asset");
+      return { path: entry.path, body: entry.body };
+    });
+    if (
+      !files.some((file) => file.path === "/_shell.html") ||
+      new Set(files.map((file) => file.path)).size !== files.length
+    )
+      throw new Error("Missing shell or duplicate desktop UI assets");
+    const snapshot: UiSnapshot = {
+      version: descriptor.sha256,
+      files: files.map((file) => file.path),
+    };
+    await mkdir(this.directory, { recursive: true });
+    const staging: string = await mkdtemp(
+      path.join(this.directory, "staging-"),
+    );
+    try {
+      for (const file of files) {
+        const target = path.join(staging, file.path.slice(1));
+        await mkdir(path.dirname(target), { recursive: true });
+        await writeFile(target, Buffer.from(file.body, "base64"));
+      }
+      try {
+        await rename(staging, path.join(this.directory, snapshot.version));
+      } catch (error) {
+        if (
+          !(
+            error instanceof Error &&
+            "code" in error &&
+            ["EEXIST", "ENOTEMPTY"].includes(String(error.code))
+          )
+        )
+          throw error;
+      }
+    } finally {
+      await rm(staging, { recursive: true, force: true });
     }
     const target = path.join(this.directory, "current.json");
     await writeFile(`${target}.tmp`, JSON.stringify(snapshot));

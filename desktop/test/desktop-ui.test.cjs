@@ -1,6 +1,6 @@
 const test = require("node:test");
 const assert = require("node:assert/strict");
-const { mkdtemp, rm } = require("node:fs/promises");
+const { mkdtemp, readFile, rm } = require("node:fs/promises");
 const { tmpdir } = require("node:os");
 const path = require("node:path");
 const { createHash } = require("node:crypto");
@@ -11,6 +11,7 @@ const page = () =>
     headers: { accept: "text/html" },
   });
 const asset = () => new Request("open-swe://app/assets/lazy.js");
+const serveFile = async (filename) => new Response(await readFile(filename));
 const { gzipSync } = require("node:zlib");
 
 async function fixture(t) {
@@ -19,16 +20,18 @@ async function fixture(t) {
   return root;
 }
 
-function server(version, failure) {
-  const bodies = {
+function server(
+  version,
+  failure,
+  bodies = {
     "/_shell.html": `shell ${version}`,
     "/assets/lazy.js": `lazy ${version}`,
-  };
+  },
+) {
   const archive = gzipSync(
     JSON.stringify({
       files: Object.entries(bodies).map(([assetPath, body]) => ({
         path: assetPath,
-        sha256: createHash("sha256").update(body).digest("hex"),
         body: Buffer.from(body).toString("base64"),
       })),
     }),
@@ -56,46 +59,79 @@ const offline = async () => {
 
 test("persists a complete server UI across restarts, including unopened lazy routes", async (t) => {
   const root = await fixture(t);
-  const ui = new DesktopUi("https://backend.example", server("v1"), root);
+  const ui = new DesktopUi(
+    "https://backend.example",
+    server("v1"),
+    root,
+    serveFile,
+  );
   const response = await ui.serve(page());
   assert.equal(await response.text(), "shell v1");
   assert.equal(response.headers.get("set-cookie"), null);
   assert.equal(response.headers.get("content-encoding"), null);
-  const restarted = new DesktopUi("https://backend.example", offline, root);
+  const restarted = new DesktopUi(
+    "https://backend.example",
+    offline,
+    root,
+    serveFile,
+  );
   assert.equal(await (await restarted.serve(page())).text(), "shell v1");
   assert.equal(await (await restarted.serve(asset())).text(), "lazy v1");
   await assert.rejects(
-    new DesktopUi("https://other.example", offline, root).serve(page()),
+    new DesktopUi("https://other.example", offline, root, serveFile).serve(
+      page(),
+    ),
     /Connect to the internet/,
   );
 });
 
 test("interrupted or corrupt updates never replace the last complete version", async (t) => {
   const root = await fixture(t);
-  await new DesktopUi("https://backend.example", server("v1"), root).serve(
-    page(),
-  );
+  await new DesktopUi(
+    "https://backend.example",
+    server("v1"),
+    root,
+    serveFile,
+  ).serve(page());
   for (const fetchUi of [
     server("v2", "interrupted"),
     server("v3", "corrupt"),
   ]) {
-    const ui = new DesktopUi("https://backend.example", fetchUi, root);
+    const ui = new DesktopUi(
+      "https://backend.example",
+      fetchUi,
+      root,
+      serveFile,
+    );
     assert.equal(await (await ui.serve(page())).text(), "shell v1");
     await assert.rejects(
       ui.refresh(),
       /interrupted download|checksum mismatch/,
     );
-    const restarted = new DesktopUi("https://backend.example", offline, root);
+    const restarted = new DesktopUi(
+      "https://backend.example",
+      offline,
+      root,
+      serveFile,
+    );
     assert.equal(await (await restarted.serve(page())).text(), "shell v1");
   }
 });
 
 test("promotes complete updates on next navigation without changing active page assets", async (t) => {
   const root = await fixture(t);
-  await new DesktopUi("https://backend.example", server("v1"), root).serve(
-    page(),
+  await new DesktopUi(
+    "https://backend.example",
+    server("v1"),
+    root,
+    serveFile,
+  ).serve(page());
+  const ui = new DesktopUi(
+    "https://backend.example",
+    server("v2"),
+    root,
+    serveFile,
   );
-  const ui = new DesktopUi("https://backend.example", server("v2"), root);
   assert.equal(await (await ui.serve(page())).text(), "shell v1");
   await ui.refresh();
   assert.equal(await (await ui.serve(asset())).text(), "lazy v1");
@@ -122,7 +158,23 @@ test("rejects untrusted archive URLs and incompatible bridges", async (t) => {
       "https://backend.example",
       async () => Response.json(descriptor),
       root,
+      serveFile,
     );
     await assert.rejects(ui.serve(page()), /Connect to the internet/);
   }
+});
+
+test("rejects archive traversal before extracting a checksum-valid download", async (t) => {
+  const root = await fixture(t);
+  const ui = new DesktopUi(
+    "https://backend.example",
+    server("bad", undefined, {
+      "/_shell.html": "shell",
+      "/assets/../../outside": "escape",
+    }),
+    root,
+    serveFile,
+  );
+  await assert.rejects(ui.serve(page()), /Connect to the internet/);
+  assert.deepEqual(await require("node:fs/promises").readdir(root), []);
 });
