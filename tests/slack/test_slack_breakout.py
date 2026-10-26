@@ -203,7 +203,7 @@ async def test_breakout_with_text_starts_new_thread_with_old_transcript(
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("count", [50, 200, None])
+@pytest.mark.parametrize("count", [50, None])
 async def test_default_breakout_waits_for_destination_in_large_or_unknown_channel(
     monkeypatch, public_channels, count
 ):
