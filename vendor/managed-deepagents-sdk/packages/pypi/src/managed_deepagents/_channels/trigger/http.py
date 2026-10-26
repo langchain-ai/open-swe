@@ -11,7 +11,7 @@ from importlib import import_module
 from typing import TYPE_CHECKING, Never, NoReturn, Protocol, TypeVar, cast
 
 from managed_deepagents._agent_auth_http import missing_workspace_connection_slug
-from managed_deepagents._channels.assistant_text import extract_assistant_text
+from managed_deepagents._channels.assistant_text import extract_reply_text, run_start_id
 from managed_deepagents._channels.context import (
     normalized_user_prompt_response,
     trigger_channel_binding,
@@ -34,6 +34,7 @@ from managed_deepagents._channels.trigger.identity_context import (
     principal_id_from_identity_context,
 )
 from managed_deepagents._channels.trigger.ingress import (
+    ingress_resume_target,
     ingress_thread_interrupts,
     observe_ingress_agent,
     resume_ingress_agent,
@@ -53,11 +54,16 @@ from managed_deepagents._channels.trigger.types import (
 )
 from managed_deepagents._ingress import ScheduleFn, schedule_ingress_work
 from managed_deepagents._log import logger
+from managed_deepagents._telemetry.otel import set_log_attributes
 from managed_deepagents.run_context import INTERRUPT_CORRELATION_KEY
 
 if TYPE_CHECKING:
     from managed_deepagents._channels.binding import ChannelBinding
-    from managed_deepagents._channels.trigger.ingress import ObservedIngressRun, PendingInterrupt
+    from managed_deepagents._channels.trigger.ingress import (
+        ObservedIngressRun,
+        PendingInterrupt,
+        ResumeTarget,
+    )
     from managed_deepagents._channels.types import JsonValue
     from managed_deepagents._ingress_runs import StartedIngressRun
 
@@ -109,6 +115,19 @@ class ThreadInterruptsFn(Protocol):
         source_thread_key: str,
         user_id: str,
     ) -> list[PendingInterrupt]: ...
+
+
+class ResumeTargetFn(Protocol):
+    async def __call__(
+        self,
+        *,
+        thread_id: str,
+        assistant_id: str,
+        interrupt_ids: list[str],
+        source_provider: str,
+        source_thread_key: str,
+        user_id: str,
+    ) -> ResumeTarget: ...
 
 
 def _assert_never(_event: Never) -> NoReturn:
@@ -186,6 +205,7 @@ async def _start_event_run(
     resume_agent: ResumeAgentFn | None,
     user_id: str,
     thread_interrupts: ThreadInterruptsFn | None = None,
+    resume_target: ResumeTargetFn | None = None,
     message_input: MessageInputFn | None = None,
 ) -> StartedIngressRun:
     thread_id = _thread_id(event["source_thread_key"])
@@ -206,10 +226,18 @@ async def _start_event_run(
             binding=binding,
         )
     if event["type"] == "interrupt_resume":
-        resume = resume_agent or resume_ingress_agent
-        return await resume(
+        target = await (resume_target or ingress_resume_target)(
             thread_id=thread_id,
             assistant_id=assistant_id,
+            interrupt_ids=list(event["interaction"]["resume"]),
+            source_provider=source_provider,
+            source_thread_key=event["source_thread_key"],
+            user_id=user_id,
+        )
+        resume = resume_agent or resume_ingress_agent
+        return await resume(
+            thread_id=target["thread_id"],
+            assistant_id=target["assistant_id"],
             resume=event["interaction"]["resume"],
             source_provider=source_provider,
             source_thread_key=event["source_thread_key"],
@@ -264,6 +292,7 @@ async def handle_trigger_channel_event_request(  # noqa: C901, PLR0911
     start_agent: StartAgentFn | None = None,
     resume_agent: ResumeAgentFn | None = None,
     thread_interrupts: ThreadInterruptsFn | None = None,
+    resume_target: ResumeTargetFn | None = None,
     observe_agent: ObserveAgentFn | None = None,
     trigger_client: TriggerClientLike | None = None,
     reactions: ReactionChoice = DEFAULT_REACTION_EMOJI,
@@ -295,6 +324,7 @@ async def handle_trigger_channel_event_request(  # noqa: C901, PLR0911
         logger.error(
             "channel identity_context unavailable (%s)",
             logger.safe_error_label(error),
+            error=error,
         )
         return _json_response(
             {"error": "identity_context verification unavailable"},
@@ -307,6 +337,14 @@ async def handle_trigger_channel_event_request(  # noqa: C901, PLR0911
         )
         return _json_response({"error": "invalid channel identity_context"}, status_code=400)
 
+    set_log_attributes(
+        {
+            "event_type": event["type"],
+            "event_id": event["event_id"],
+            "delivery_id": event["delivery_id"],
+            "channel_id": event["channel_id"],
+        }
+    )
     logger.info(
         "Channel incoming event (type=%s, event_id=%s, delivery_id=%s, channel_id=%s)",
         event["type"],
@@ -325,6 +363,7 @@ async def handle_trigger_channel_event_request(  # noqa: C901, PLR0911
         logger.error(
             "channel transport is not configured (%s)",
             logger.safe_error_label(error),
+            error=error,
         )
         client = None
     else:
@@ -352,6 +391,7 @@ async def handle_trigger_channel_event_request(  # noqa: C901, PLR0911
             start_agent=start_agent,
             resume_agent=resume_agent,
             thread_interrupts=thread_interrupts,
+            resume_target=resume_target,
             user_id=user_id,
             message_input=message_input,
         )
@@ -369,6 +409,7 @@ async def handle_trigger_channel_event_request(  # noqa: C901, PLR0911
         logger.error(
             "channel run could not be started (%s)",
             logger.safe_error_label(error),
+            error=error,
         )
         return _json_response({"error": "channel run could not be started"}, status_code=500)
 
@@ -464,7 +505,7 @@ async def _observe_accepted_run(
             await lifecycle("run.failed")
             return
 
-        text = extract_assistant_text(observed["values"])
+        text = extract_reply_text(observed["values"], start_id=run_start_id(observed["values"]))
         if text:
             logger.info(
                 "Channel outgoing action (type=post, delivery_id=%s, channel_id=%s, run_id=%s)",

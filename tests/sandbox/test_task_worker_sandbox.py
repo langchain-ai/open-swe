@@ -76,10 +76,18 @@ def shared_sandbox(monkeypatch: pytest.MonkeyPatch) -> dict[str, dict[str, objec
     return metadata
 
 
+@pytest.mark.parametrize("owner_type", ["user", "system"])
 async def test_worker_attaches_to_replaced_host_without_guest_proxy_identity(
     shared_sandbox: dict[str, dict[str, object]],
     monkeypatch: pytest.MonkeyPatch,
+    owner_type: str,
 ) -> None:
+    if owner_type == "system":
+        for metadata in shared_sandbox.values():
+            metadata["owner_type"] = "system"
+            metadata.pop("owner_login")
+        for method in ("get", "for_login", "for_identity"):
+            monkeypatch.setattr(User, method, AsyncMock(side_effect=AssertionError("User lookup")))
     host_sandbox_id = "sb-replacement"
     shared_sandbox["coordinator"]["sandbox_id"] = host_sandbox_id
     backend = MagicMock(id=host_sandbox_id)
@@ -95,6 +103,13 @@ async def test_worker_attaches_to_replaced_host_without_guest_proxy_identity(
     assert shared_sandbox["worker"]["sandbox_id"] == host_sandbox_id
     connect.assert_awaited_once_with(host_sandbox_id)
     assert refresh.await_args.kwargs["thread_id"] == "coordinator"
+    if owner_type == "system":
+        assert all("owner_user_id" not in metadata for metadata in shared_sandbox.values())
+    else:
+        assert (
+            shared_sandbox["worker"]["owner_user_id"]
+            == shared_sandbox["coordinator"]["owner_user_id"]
+        )
 
 
 async def test_worker_refreshes_binding_during_concurrent_host_reconnect(
@@ -183,21 +198,36 @@ async def test_worker_does_not_replace_a_deleted_host_sandbox(
     assert shared_sandbox["worker"]["sandbox_id"] == "sb-old"
 
 
+@pytest.mark.parametrize("owner_type", ["user", "system"])
 @pytest.mark.parametrize(
-    "invalid_binding", ["membership", "repository_scope", "workspace", "owner"]
+    "invalid_binding",
+    ["membership", "repository_scope", "workspace", "owner", "owner_type", "admin", "visibility"],
 )
 async def test_worker_cannot_attach_to_a_host_outside_its_permissions(
     shared_sandbox: dict[str, dict[str, object]],
     monkeypatch: pytest.MonkeyPatch,
     invalid_binding: str,
+    owner_type: str,
 ) -> None:
-    if invalid_binding == "membership":
+    for metadata in shared_sandbox.values():
+        metadata["owner_type"] = owner_type
+    if invalid_binding == "owner_type":
+        shared_sandbox["coordinator"]["owner_type"] = "system" if owner_type == "user" else "user"
+    elif invalid_binding == "admin":
+        shared_sandbox["worker"]["admin_thread"] = True
+    elif invalid_binding == "visibility":
+        shared_sandbox["worker"]["visibility"] = "private"
+    elif invalid_binding == "membership":
         shared_sandbox["worker"]["sandbox_host_thread_id"] = "another-coordinator"
     elif invalid_binding == "workspace":
         shared_sandbox["worker"]["workspace"] = "another-workspace"
     elif invalid_binding == "owner":
-        shared_sandbox["worker"]["owner_user_id"] = str(uuid4())
-        monkeypatch.setattr(User, "get", AsyncMock(return_value=User()))
+        if owner_type == "system":
+            for metadata in shared_sandbox.values():
+                metadata["visibility"] = "private"
+        else:
+            shared_sandbox["worker"]["owner_user_id"] = str(uuid4())
+            monkeypatch.setattr(User, "get", AsyncMock(return_value=User()))
     else:
         shared_sandbox["worker"]["github_token_repositories"] = []
     connect = AsyncMock()

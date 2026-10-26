@@ -36,7 +36,7 @@ use super::{
     ensure_channel_requirements_secrets, ensure_connector_requirements_secrets,
     ensure_ingress_secret, ensure_model_api_key, ensure_project, ensure_workspace_connections,
     link_context_repo_to_agent, recipe_spec_from_project, schedule_cron_request, sync_context_hub,
-    trigger_channels, ContextStrategy, EmittedRequirements, WorkspaceSecretKeys,
+    trigger_channels, ChannelSetup, ContextStrategy, EmittedRequirements, WorkspaceSecretKeys,
 };
 use crate::agent_config;
 use crate::cli_output::{show_sequence, SequenceItem};
@@ -47,6 +47,7 @@ use crate::langsmith::{
     self, require_str, resolve_preferred_env, ContextHubClient, Credential, RepoOwnership,
     API_KEY_ENV, REMOVED_API_KEY_ENVS,
 };
+use crate::telemetry::{otel_logger, update_facts};
 use crate::{compile, project};
 
 /// Context Hub repo tag marking a deployment whose context is owned by a Git
@@ -87,6 +88,7 @@ struct Prepared {
 
 /// Run `mda prepare` end-to-end.
 pub fn run(opts: PrepareOptions) -> Result<CommandCompletion> {
+    update_facts(|facts| facts.deployment.deployment_id = Some(opts.deployment_id.clone()));
     // Fail before compilation or Context Hub writes if the runner is incompatible.
     let build_token = build_artifacts_token(opts.build_artifacts_token.as_deref())?;
     ensure_project(&opts.path)?;
@@ -99,6 +101,7 @@ pub fn run(opts: PrepareOptions) -> Result<CommandCompletion> {
             Ok(CommandCompletion::Succeeded)
         }
         Err(err) => {
+            otel_logger::error(&err);
             show_sequence(&failed_items(&project, &err))?;
             Ok(CommandCompletion::Failed(category_of(&err)))
         }
@@ -195,6 +198,7 @@ fn run_inner(
         credential.clone(),
         workspace_id.clone(),
     )?;
+    let dashboard_url = client.dashboard_url().ok();
 
     let deployment = client
         .get_deployment(&opts.deployment_id)
@@ -206,6 +210,7 @@ fn run_inner(
         );
     }
     let name = require_str(&deployment, "name", "deployment")?;
+    update_facts(|facts| facts.deployment.deployment_name = Some(name.to_string()));
 
     let agent = agent_config::read_agent_static_config(project)?;
     let assistant_id = agent.assistant_id.clone();
@@ -221,7 +226,7 @@ fn run_inner(
         &env_vars,
         &secrets,
         &client,
-        host_url,
+        dashboard_url.as_deref(),
         &mut workspace_keys,
     )?;
     ensure_ingress_secret(
@@ -229,7 +234,7 @@ fn run_inner(
         &env_vars,
         &secrets,
         &client,
-        host_url,
+        dashboard_url.as_deref(),
         &mut workspace_keys,
     )?;
     if compile::project_uses_sandbox(project)? {
@@ -291,10 +296,12 @@ fn run_inner(
         &connector_requirements,
         &mcp_connections,
     )?;
-    let trigger_channel = trigger_channels::prepare(
+    // Validation only: setup needs the live deployment.
+    let channel_setup = ChannelSetup::prepare(
         &channel_requirements,
         true,
         &project.root,
+        &project.files,
         project.language,
         &assistant_id,
     )?;
@@ -303,7 +310,7 @@ fn run_inner(
         &env_vars,
         &secrets,
         &client,
-        host_url,
+        dashboard_url.as_deref(),
         &connector_requirements,
         &mut workspace_keys,
     )?;
@@ -312,7 +319,7 @@ fn run_inner(
         &env_vars,
         &secrets,
         &client,
-        host_url,
+        dashboard_url.as_deref(),
         &channel_requirements,
         &mut workspace_keys,
     )?;
@@ -323,7 +330,7 @@ fn run_inner(
         sandbox_recipe_snapshot.as_deref(),
         &bake_only_secrets,
         &summary.schedule_crons,
-        trigger_channel.as_ref(),
+        channel_setup.trigger(),
         !opts.is_preview,
     )?;
     client

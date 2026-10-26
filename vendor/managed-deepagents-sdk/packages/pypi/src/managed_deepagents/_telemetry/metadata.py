@@ -13,10 +13,6 @@ from typing import TYPE_CHECKING, TypedDict
 import httpx
 
 from managed_deepagents._agent_auth_http import agent_auth_headers, request_agent_auth_json
-from managed_deepagents._connections import (
-    InvalidAgentAuthEndpointError,
-    resolve_agent_auth_base_url,
-)
 from managed_deepagents._telemetry.gates import is_telemetry_disabled
 from managed_deepagents._telemetry.run import RunIdentity
 
@@ -46,6 +42,11 @@ def detect_run_identity(
     caller: RuntimeIdentity | None = None,
     is_run: bool = True,
 ) -> RunIdentity:
+    from managed_deepagents._connections import (  # noqa: PLC0415
+        InvalidAgentAuthEndpointError,
+        resolve_agent_auth_base_url,
+    )
+
     global _auth_metadata, _auth_resolved  # noqa: PLW0603 - one lookup per process
     resolved = os.environ if env is None else env
     workspace = _nonempty(resolved.get("LANGSMITH_TENANT_ID")) or _nonempty(

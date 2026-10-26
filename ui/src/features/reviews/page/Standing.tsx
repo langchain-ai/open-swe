@@ -37,6 +37,7 @@ import {
   reviewerRows,
 } from "@/features/reviews/components/ReviewerList"
 import { UpdatePullRequestBranch } from "@/features/reviews/components/UpdatePullRequestBranch"
+import { useIsPullRequestAuthor } from "@/features/reviews/lib/useIsPullRequestAuthor"
 import {
   canAttemptMerge,
   canUpdateBranch,
@@ -70,7 +71,7 @@ import {
   type Standing,
   type StandingTone,
 } from "./pullRequestStanding"
-import { useReviewPage } from "./store"
+import { usePageEvent, useReviewPage } from "./store"
 import { plural } from "./text"
 
 const toneColor: Record<StandingTone, string> = {
@@ -224,7 +225,7 @@ export function StandingPanel({ pr }: { pr: PullRequestRef }) {
   )
 }
 
-/** The one thing to do next, carried in the header; its own Review button covers a review. */
+/** The one thing to do next, carried in the header; its Review button covers a review, and the author's way out of draft. */
 export function NextStepAction({
   pr,
   standing,
@@ -237,6 +238,7 @@ export function NextStepAction({
   login: string
 }) {
   const refresh = useRefreshPullRequest(pr)
+  const isAuthor = useIsPullRequestAuthor(pr.owner, pr.repo, pr.number)
   const next = standing.next
   if (!next) return null
   switch (next.kind) {
@@ -251,7 +253,9 @@ export function NextStepAction({
         />
       )
     case "mark-ready":
-      return <MarkPullRequestReady pr={status} onReady={refresh.status} />
+      return isAuthor ? null : (
+        <MarkPullRequestReady pr={status} onReady={refresh.status} />
+      )
     case "request-review":
       return <RequestHumanReview pr={status} />
     case "update-branch":
@@ -421,7 +425,7 @@ function ChecksRow({
             <PullRequestThreadAction
               pr={status}
               login={login}
-              actions={["fix-checks"]}
+              actions={["fix"]}
             />
           ) : null
         }
@@ -433,7 +437,7 @@ function ChecksRow({
           {sorted.map(({ check, state }) => (
             <li
               key={check.name}
-              className="group flex h-7 items-center gap-space-2 text-xs"
+              className="group flex h-7 items-center gap-space-2 rounded-md text-xs focus-within:bg-surface-level-1-hover hover:bg-surface-level-1-hover"
             >
               {state === "fail" ? (
                 <XCircleIcon
@@ -596,7 +600,7 @@ function BranchRow({
             <PullRequestThreadAction
               pr={status}
               login={login}
-              actions={["fix-conflicts"]}
+              actions={["fix"]}
             />
           }
         >
@@ -674,17 +678,14 @@ function OpenSweRow({
   const queryClient = useQueryClient()
   const { bugs, flags } = openFindingCounts(detail.findings)
   // Open while there is something to look at, until the person folds it; a
-  // link elsewhere that names the findings opens it again.
-  const findingsKey = useReviewPage((state) => state.findingsKey)
-  const [folded, setFolded] = useState<{ value: boolean; key: number } | null>(
-    null
-  )
-  const expanded =
-    folded === null || folded.key !== findingsKey
-      ? bugs + flags > 0 || findingsKey > 0
-      : !folded.value
-  const setExpanded = (change: (value: boolean) => boolean) =>
-    setFolded({ value: !change(expanded), key: findingsKey })
+  // link elsewhere that names the findings opens it again, with a flash.
+  const [chosen, setChosen] = useState<boolean | null>(null)
+  const [flashes, setFlashes] = useState(0)
+  usePageEvent("showFindings", () => {
+    setChosen(true)
+    setFlashes((count) => count + 1)
+  })
+  const expanded = chosen ?? bugs + flags > 0
   const reReview = useMutation({
     mutationFn: () => api.reReview(pr.owner, pr.repo, pr.number),
     meta: { errorTitle: "Couldn't start the Open SWE review" },
@@ -735,7 +736,7 @@ function OpenSweRow({
         label="Open SWE"
         expandable={canExpand}
         expanded={expanded}
-        onToggle={() => setExpanded((value) => !value)}
+        onToggle={() => setChosen(!expanded)}
         action={
           <>
             {detail.thread_id && (
@@ -767,10 +768,10 @@ function OpenSweRow({
       {expanded && canExpand && (
         <div
           // Remounting replays the flash each time something asks for the findings.
-          key={findingsKey}
+          key={flashes}
           className={cn(
             "pr-space-4 pb-space-3 pl-space-7",
-            findingsKey > 0 && "motion-safe:animate-attention-flash"
+            flashes > 0 && "motion-safe:animate-attention-flash"
           )}
         >
           {detail.findings.length > 0 && (
@@ -822,12 +823,23 @@ function FindingQueue({ findings }: { findings: Array<ReviewFinding> }) {
                 type="button"
                 aria-expanded={open}
                 onClick={() => setOpenId(open ? null : finding.id)}
-                className={cn(
-                  "min-w-[16ch] flex-1 text-left leading-5 text-primary hover:underline",
-                  settled && "line-through decoration-text-tertiary"
-                )}
+                className="flex min-w-[16ch] flex-1 items-start gap-space-1 text-left leading-5 text-primary hover:underline"
               >
-                <InlineCode text={finding.title} />
+                <CaretRightIcon
+                  aria-hidden
+                  className={cn(
+                    "mt-space-1 size-3 shrink-0 text-icon-secondary motion-safe:transition-transform",
+                    open && "rotate-90"
+                  )}
+                />
+                <span
+                  className={cn(
+                    "min-w-0",
+                    settled && "line-through decoration-text-tertiary"
+                  )}
+                >
+                  <InlineCode text={finding.title} />
+                </span>
               </button>
               <span className="ml-auto flex shrink-0 items-baseline gap-space-1 text-xxs text-secondary">
                 <button

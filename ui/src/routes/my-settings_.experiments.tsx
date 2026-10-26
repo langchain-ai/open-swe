@@ -1,7 +1,7 @@
 import { createFileRoute } from "@tanstack/react-router"
 
 import { SettingsPage, SettingsSection } from "@/components/AppShell"
-import { AssistantUiPreference } from "@/features/settings/components/AssistantUiPreference"
+import { StreamPreference } from "@/features/settings/components/StreamPreference"
 import { ProfileSwitchRow } from "@/features/settings/components/ProfileSwitchRow"
 import { useProfile } from "@/lib/profile"
 import { pageTitle } from "@/lib/pageTitle"
@@ -19,7 +19,7 @@ function ExperimentsPage() {
       description="Features under test. They may change or go away."
     >
       <SettingsSection title="Interface">
-        <AssistantUiPreference />
+        <StreamPreference />
       </SettingsSection>
       <SettingsSection title="Slack">
         <ProfileSwitchRow
@@ -39,11 +39,6 @@ function ExperimentsPage() {
         />
       </SettingsSection>
       <SettingsSection title="Agent">
-        <ProfileSwitchRow
-          field="experimental_task_coordination"
-          label="Asynchronous task coordination"
-          description="Let your agent delegate to workers that run independently. Turning this off prevents new workers; existing workers can finish and remain available to message or cancel."
-        />
         <ProfileSwitchRow
           field="experimental_background_callbacks"
           label="Background command callbacks"

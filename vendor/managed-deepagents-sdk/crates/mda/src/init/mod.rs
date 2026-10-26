@@ -82,11 +82,7 @@ impl Blueprint {
 }
 
 /// A messaging channel `mda init --channel` can scaffold into a new project.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, ValueEnum)]
-pub enum InitChannel {
-    /// Slack, written as `channels/slack.{ts,py}`.
-    Slack,
-}
+pub use crate::channel::ChannelKind as InitChannel;
 
 /// The durable memory a scaffolded `memory.ts` / `memory.py` declares.
 ///
@@ -261,12 +257,8 @@ fn add_requested_channels(summary: &mut InitSummary, blueprint: &Blueprint) -> R
         if added.contains(channel) {
             continue;
         }
-        match channel {
-            InitChannel::Slack => {
-                let relative = crate::channel::init_slack(&summary.root)?;
-                summary.files.push(summary.root.join(&relative));
-            }
-        }
+        let relative = crate::channel::init_channel(&summary.root, *channel)?;
+        summary.files.push(summary.root.join(&relative));
         added.push(*channel);
     }
     Ok(())
@@ -547,8 +539,9 @@ mod tests {
         let env = fs::read_to_string(dir.join(".env")).unwrap();
         // Required key present but left empty when none is supplied.
         assert!(env.contains("LANGSMITH_API_KEY=\n"));
-        // Provider keys are documented but commented out.
-        assert!(env.contains("# OPENAI_API_KEY="));
+        // The default model's key is the one line left to fill in.
+        assert!(env.contains("\nOPENAI_API_KEY=\n"));
+        assert!(!env.contains("# OPENAI_API_KEY="));
         assert!(env.contains("# ANTHROPIC_API_KEY="));
     }
 
@@ -570,14 +563,31 @@ mod tests {
 
     #[test]
     fn env_file_leaves_langsmith_blank_without_key() {
-        let contents = env_file(None);
+        let contents = env_file(None, "openai:gpt-5.6-terra");
         assert!(contents.contains("LANGSMITH_API_KEY=\n"));
         assert!(!contents.contains("LANGSMITH_API_KEY=ls-"));
     }
 
     #[test]
-    fn env_file_keeps_provider_keys_commented() {
-        let contents = env_file(Some("ls-key"));
+    fn env_file_uncomments_only_the_models_provider_key() {
+        let contents = env_file(Some("ls-key"), "anthropic:claude-sonnet-5-5");
+        let uncommented: Vec<_> = super::env::PROVIDER_API_KEYS
+            .iter()
+            .filter(|(key, _)| contents.contains(&format!("\n{key}=\n")))
+            .map(|(key, _)| *key)
+            .collect();
+        assert_eq!(uncommented, ["ANTHROPIC_API_KEY"]);
+    }
+
+    #[test]
+    fn env_file_writes_a_key_outside_the_documented_providers() {
+        let contents = env_file(None, "together:meta-llama/Llama-3-70b");
+        assert!(contents.contains("\nTOGETHER_AI_API_KEY=\n"));
+    }
+
+    #[test]
+    fn env_file_keeps_provider_keys_commented_for_gateway_models() {
+        let contents = env_file(Some("ls-key"), "langsmith:openai/gpt-5.5");
         for (key, _) in super::env::PROVIDER_API_KEYS {
             assert!(contents.contains(&format!("# {key}=")));
         }
@@ -903,6 +913,26 @@ mod tests {
         let contents = fs::read_to_string(summary.root.join("channels/slack.ts")).unwrap();
 
         assert!(contents.contains("export const channel = channels.slack({});"));
+    }
+
+    #[test]
+    fn init_with_github_channel_writes_the_channel_file_and_readme_entry() {
+        let root = tempfile::tempdir().unwrap();
+        let requested = Blueprint {
+            channels: vec![InitChannel::GitHub],
+            ..blueprint(Language::TypeScript)
+        };
+
+        let summary = init(root.path(), &requested).unwrap();
+        let contents = fs::read_to_string(summary.root.join("channels/github.ts")).unwrap();
+        let readme = fs::read_to_string(summary.root.join("README.md")).unwrap();
+
+        assert!(contents.contains("export const channel = channels.github({"));
+        assert!(summary
+            .files
+            .iter()
+            .any(|file| file.ends_with("channels/github.ts")));
+        assert!(readme.contains("channels/github.ts"), "{readme}");
     }
 
     #[test]

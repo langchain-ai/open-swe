@@ -10,7 +10,9 @@ use std::time::Duration;
 use anyhow::{anyhow, bail, Context, Result};
 use serde_json::json;
 
+use crate::child;
 use crate::dependencies::{self, Dependency};
+use crate::error::child_failed;
 use crate::project::{Language, Project};
 use crate::toolchain;
 
@@ -915,12 +917,11 @@ fn materialize_npm_lockfile(out_dir: &Path, pkg: &[u8]) -> Result<()> {
     let command = format!("{} {}", toolchain::npm_program(), NPM_LOCK_ARGS.join(" "));
     let mut npm = toolchain::npm();
     npm.args(NPM_LOCK_ARGS).current_dir(out_dir);
-    let output = toolchain::output_with_timeout(&mut npm, NPM_LOCKFILE_TIMEOUT)
+    let output = child::output_with_timeout(&mut npm, NPM_LOCKFILE_TIMEOUT)
         .with_context(|| format!("failed to run {command}"))?;
 
     if !output.status.success() {
-        let stderr = String::from_utf8_lossy(&output.stderr);
-        bail!("{command} failed:\n{stderr}");
+        return Err(child_failed(&output, format!("{command} failed")));
     }
     let marker = out_dir.join(LOCK_INPUT_MARKER);
     fs::write(&marker, pkg).with_context(|| format!("failed to write {}", marker.display()))?;

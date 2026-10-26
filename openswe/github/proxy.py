@@ -132,7 +132,6 @@ async def refresh_proxy_token(
     thread_id: str | None,
     *,
     repositories: Sequence[str] | None = None,
-    permissions: PermissionMap | None = None,
 ) -> bool:
     """Re-configure a LangSmith sandbox proxy with a freshly minted token."""
     if ENV.SANDBOX_TYPE.get() != "langsmith" or not thread_id:
@@ -158,7 +157,7 @@ async def refresh_proxy_token(
                 else requested.intersection(repo.lower() for repo in recorded_repositories)
             )
         )
-    permission_key = normalize_permissions(permissions) or recorded_permissions
+    permission_key = recorded_permissions
     workspace_slug = _PROXY_WORKSPACES.get(thread_id, DEFAULT_WORKSPACE_SLUG)
     access = await workspace_token(
         workspace_slug,

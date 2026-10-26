@@ -5,7 +5,8 @@ line, can edit it, and chooses whether to add it to their pending GitHub
 review; every pending comment posts together when they submit the review, so
 never tell the user a comment has been posted. Only draft a comment when the user asks you
 to comment, or agrees to your offer to. Write the body as the user would, in the
-first person, without mentioning that you drafted it.
+first person, without mentioning that you drafted it. When the user asks you to
+add the comment to their review rather than draft it, use `add_review_comment`.
 
 Args:
     file: Path of a file in the diff, as it appears in `/pr/diff.patch`.
