@@ -47,6 +47,14 @@ _CLONE_TARGET = re.compile(r"""\bgit\b[^|;&\n]*?\bclone\b""", re.IGNORECASE)
 
 _STATEMENT = re.compile(r"&&|\|\||[;|\n]")
 
+# `cd ..` / `cd /d "path"`: the shell's working directory moves, and every
+# relative path after it is judged from where it moved to.
+_CHANGE_DIRECTORY = re.compile(
+    r"""(?:^|\b)(?:cd|chdir|pushd)\b(?:\s+/d)?\s+("[^"]*"|'[^']*'|[^\s"']+)""", re.IGNORECASE
+)
+# A token that climbs out of its directory, as `..` or a path containing it.
+_STEP_UP = re.compile(r"(?:^|[\\/])\.\.(?:$|[\\/])")
+
 
 def _network_escape(command: str) -> str | None:
     """The part of a command that would reach the network, if any.
@@ -83,27 +91,59 @@ def _resolve(path: str | Path) -> str:
     return os.path.normcase(os.path.realpath(os.path.abspath(path)))
 
 
+def _within(path: str, roots: Sequence[str]) -> bool:
+    return any(path == root or path.startswith(root + os.sep) for root in roots)
+
+
 def _outside_sandbox(command: str, roots: Sequence[Path]) -> str | None:
-    """The first absolute path in the command that is outside every root.
+    """The first path in the command that leaves every root.
 
     A shell cannot be confined by inspecting its command: the same tree is
     reachable through an interpreter, a variable, or a glob. This only catches
-    the plain absolute paths a model writes when it wanders out of the project
-    (`type D:\\work\\open-swe\\artifacts\\...`), which is what left eval runs
-    reading their own expected patches. Containment is therefore a guardrail
-    against drift, not a security boundary.
+    the plain paths a model writes when it wanders out of the project, which is
+    what left eval runs reading their own expected patches. Containment is
+    therefore a guardrail against drift, not a security boundary.
+
+    Absolute paths are checked as written. Relative ones are checked against
+    the directory the command will run in, because `dir ..` reaches the parent
+    just as surely as the full path does, and the workspace a checkout is cloned
+    into keeps its siblings one `..` away.
     """
     normalized_roots = [_resolve(root) for root in roots]
-    for match in _ABSOLUTE_PATH.finditer(_SCHEME.sub(" ", command)):
+    cleaned = _SCHEME.sub(" ", command)
+    for match in _ABSOLUTE_PATH.finditer(cleaned):
         candidate = match.group(1).rstrip()
         if not candidate:
             continue
-        normalized = _resolve(candidate)
-        if not any(
-            normalized == root or normalized.startswith(root + os.sep) for root in normalized_roots
-        ):
+        if not _within(_resolve(candidate), normalized_roots):
             return candidate
+    base = Path(roots[0])
+    for statement in _STATEMENT.split(cleaned):
+        stripped = statement.strip()
+        change = _CHANGE_DIRECTORY.match(stripped)
+        if change is not None:
+            target = next((group for group in change.groups() if group), None)
+            if target:
+                target = target.strip("\"'")
+                resolved = _resolve(Path(base) / target)
+                if not _within(resolved, normalized_roots):
+                    return target
+                base = Path(resolved)
+                stripped = stripped[change.end() :]
+        for path in _relative_paths(stripped):
+            if not _within(_resolve(Path(base) / path), normalized_roots):
+                return path
     return None
+
+
+def _relative_paths(statement: str) -> list[str]:
+    """Relative path tokens in a statement that step up out of their directory."""
+    paths: list[str] = []
+    for token in re.findall(r""""[^"]*"|'[^']*'|[^\s"']+""", statement):
+        value = token.strip("\"'")
+        if value and _STEP_UP.search(value):
+            paths.append(value)
+    return paths
 
 
 async def _read_output(stream: asyncio.StreamReader, limit: int) -> tuple[bytes, bool]:

@@ -117,6 +117,23 @@ def test_a_url_is_not_read_as_an_absolute_path(tmp_path: Path) -> None:
     assert _outside_sandbox(r"type \\server\share\file", [project]) is not None
 
 
+def test_a_relative_path_that_climbs_out_is_not_run(tmp_path: Path) -> None:
+    """`..` reaches the parent just as surely as its absolute path does.
+
+    The eval workspace keeps the task set with its expected patches one level
+    above the checkout, so a run that lists the parent can read the answer.
+    """
+    project = tmp_path / "work" / "project"
+    project.mkdir(parents=True)
+    (tmp_path / "work" / "tasks.jsonl").write_text("gold patch", encoding="utf-8")
+
+    assert _outside_sandbox(f'cd "{project}" && dir ..', [project]) == ".."
+    assert _outside_sandbox(f'cd "{project}" && cd .. && type tasks.jsonl', [project]) == ".."
+    assert _outside_sandbox("dir ../..", [project]) == "../.."
+    # A path that stays inside the project is still ordinary work.
+    assert _outside_sandbox(f'cd "{project}" && dir src && cd src && dir', [project]) is None
+
+
 def test_an_evaluation_run_may_clone_once_and_nothing_more() -> None:
     clone = "git clone https://ghfast.top/https://github.com/pallets/markupsafe.git eval-x"
     assert _network_escape(clone) is None
