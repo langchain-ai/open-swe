@@ -23,6 +23,8 @@ if TYPE_CHECKING:
 # An absolute Windows path, optionally quoted, as a model writes one in a shell
 # command. Drive-relative forms ("D:foo") are not matched: `os.path` reads those
 # as "on drive D, relative to its current directory", not as a real location.
+# A URL's "//" is not an UNC path, and a clone URL is on nearly every command.
+_SCHEME = re.compile(r"[A-Za-z][A-Za-z0-9+.-]*://\S*")
 _ABSOLUTE_PATH = re.compile(r"""(?<![A-Za-z0-9_])([A-Za-z]:[\\/][^"'|<>;&]*|[\\/]{2}[^"'|<>;&]+)""")
 
 
@@ -47,7 +49,7 @@ def _outside_sandbox(command: str, roots: Sequence[Path]) -> str | None:
     against drift, not a security boundary.
     """
     normalized_roots = [_resolve(root) for root in roots]
-    for match in _ABSOLUTE_PATH.finditer(command):
+    for match in _ABSOLUTE_PATH.finditer(_SCHEME.sub(" ", command)):
         candidate = match.group(1).rstrip()
         if not candidate:
             continue

@@ -103,6 +103,16 @@ def test_a_path_that_does_not_exist_yet_is_judged_by_its_parent(tmp_path: Path) 
     assert _outside_sandbox(f'cd "{tmp_path}" && ls', [project]) is not None
 
 
+def test_a_url_is_not_read_as_an_absolute_path(tmp_path: Path) -> None:
+    project = tmp_path / "project"
+    project.mkdir()
+
+    assert _outside_sandbox("git clone https://example.com/repo.git x", [project]) is None
+    assert _outside_sandbox('git clone "https://example.com/repo.git" x', [project]) is None
+    # A real UNC path is still outside a local project.
+    assert _outside_sandbox(r"type \\server\share\file", [project]) is not None
+
+
 async def test_command_naming_an_allowed_root_runs(tmp_path: Path) -> None:
     project = tmp_path / "project"
     project.mkdir()
