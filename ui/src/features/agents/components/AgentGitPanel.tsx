@@ -13,6 +13,10 @@ import { toPanelFiles } from "@/features/agents/components/DiffFilesView"
 import { AgentRightPanel } from "@/features/agents/components/panel/AgentRightPanel"
 import { BrowserPanel } from "@/features/agents/components/BrowserPanel"
 import {
+  BackgroundWorkPanel,
+  useHasBackgroundWork,
+} from "@/features/agents/components/BackgroundWorkPanel"
+import {
   selectThreadDiffScope,
   useDiffPanelStore,
 } from "@/features/agents/lib/diffPanelStore"
@@ -91,6 +95,8 @@ export function AgentGitPanel({
     openSurface(threadRef, "preview")
     onCollapsedChange(false)
   }, [browserOpened, onCollapsedChange, openSurface, threadRef])
+
+  const backgroundWorkAvailable = useHasBackgroundWork(thread.id)
 
   const isRunning = thread.status === "running"
   const diffVisible = !collapsed && activeSurfaceId === "diff"
@@ -218,6 +224,8 @@ export function AgentGitPanel({
       renderBrowser={() => (
         <BrowserPanel threadId={thread.id} opened={browserOpened} />
       )}
+      backgroundWorkAvailable={backgroundWorkAvailable}
+      renderBackgroundWork={() => <BackgroundWorkPanel threadId={thread.id} />}
       collapsed={collapsed}
       onCollapsedChange={onCollapsedChange}
       onReply={onReply}

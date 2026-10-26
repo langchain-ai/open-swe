@@ -41,6 +41,9 @@ export interface AgentRightPanelProps {
   /** Rendered for the Browser surface, which only cloud threads offer. */
   renderBrowser?: () => ReactNode
   browserAvailable?: boolean
+  /** Rendered for the Background work surface, which only cloud threads offer. */
+  renderBackgroundWork?: () => ReactNode
+  backgroundWorkAvailable?: boolean
   collapsed: boolean
   onCollapsedChange: (next: boolean) => void
   onTerminalOpenFile?: (path: string) => void
@@ -146,6 +149,10 @@ export function AgentRightPanel(props: AgentRightPanelProps) {
 
   const handleAddBrowser = useCallback(() => {
     openSurface(threadRef, "preview")
+  }, [openSurface, threadRef])
+
+  const handleAddBackgroundWork = useCallback(() => {
+    openSurface(threadRef, "background")
   }, [openSurface, threadRef])
 
   const handleActivate = useCallback(
@@ -302,6 +309,9 @@ export function AgentRightPanel(props: AgentRightPanelProps) {
       {activeSurface?.kind === "preview" && props.renderBrowser
         ? props.renderBrowser()
         : null}
+      {activeSurface?.kind === "background" && props.renderBackgroundWork
+        ? props.renderBackgroundWork()
+        : null}
       {activeSurface?.kind === "files" || activeSurface?.kind === "file" ? (
         <FilesPanel
           key={workspaceTargetKey(terminalTarget)}
@@ -373,6 +383,12 @@ export function AgentRightPanel(props: AgentRightPanelProps) {
         ? {
             onAddBrowser: handleAddBrowser,
             browserAvailable: props.browserAvailable ?? false,
+          }
+        : {})}
+      {...(props.renderBackgroundWork
+        ? {
+            onAddBackgroundWork: handleAddBackgroundWork,
+            backgroundWorkAvailable: props.backgroundWorkAvailable ?? false,
           }
         : {})}
       terminalAvailable={terminalAvailable}
