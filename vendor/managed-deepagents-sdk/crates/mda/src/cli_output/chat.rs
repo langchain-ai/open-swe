@@ -129,6 +129,25 @@ pub(crate) fn show_notice(message: &str) -> io::Result<()> {
     )
 }
 
+/// Report a failed run without ending the session.
+pub(crate) fn show_run_failure(message: &str, hint: Option<&str>) -> io::Result<()> {
+    write!(
+        io::stderr(),
+        "{}",
+        run_failure_text(message, hint, console::colors_enabled_stderr())
+    )
+}
+
+fn run_failure_text(message: &str, hint: Option<&str>, colors: bool) -> String {
+    let label = console::Style::new().red().force_styling(colors);
+    let mut out = format!("{} {message}\n", label.apply_to("Run failed:"));
+    if let Some(hint) = hint {
+        out.push_str(&format!("{}\n", supporting_style(colors).apply_to(hint)));
+    }
+    out.push('\n');
+    out
+}
+
 /// Copyable, unindented streamed text. Callers supply sanitized content.
 /// Use the prompt stream without holding its lock while the spinner runs.
 struct ChatTranscript<W: Write> {
@@ -263,6 +282,18 @@ fn preview(text: &str, limit: usize) -> String {
 mod tests {
     use super::*;
     use crate::langsmith::agent_server::ToolCall;
+
+    #[test]
+    fn run_failure_shows_the_message_then_the_fix() {
+        assert_eq!(
+            run_failure_text(
+                "Missing credentials.",
+                Some("Add `OPENAI_API_KEY=...`"),
+                false
+            ),
+            "Run failed: Missing credentials.\nAdd `OPENAI_API_KEY=...`\n\n"
+        );
+    }
 
     #[test]
     fn chat_prompt_is_inline_with_a_blank_line_after_it() {

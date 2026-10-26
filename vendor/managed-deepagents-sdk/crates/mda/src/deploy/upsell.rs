@@ -107,7 +107,8 @@ pub(crate) fn plan_gate(err: &Error) -> Option<PlanGate> {
 /// Best-effort plans-and-billing link for the organization this deploy targets.
 pub(crate) fn upgrade_url(client: &langsmith::Client) -> Option<String> {
     let workspace_id = client.workspace_id_for_links()?;
-    plan_upgrade_url(client.host_backend_url(), &workspace_id)
+    let dashboard_url = client.dashboard_url().ok()?;
+    plan_upgrade_url(&dashboard_url, &workspace_id)
 }
 
 /// Render the upsell and close the session, in place of the plain error footer.

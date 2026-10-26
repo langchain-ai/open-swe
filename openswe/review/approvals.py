@@ -20,7 +20,7 @@ from openswe.review.styles import (
 logger = logging.getLogger(__name__)
 
 APPROVALS_PATH = ".open-swe/APPROVALS.md"
-APPROVALS_MAX_CHARS = 10_000
+APPROVALS_MAX_CHARS = 15_000
 
 
 async def fetch_approvals_md(

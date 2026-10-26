@@ -131,7 +131,7 @@ function mockApis(record: WorkspaceRecord = RECORD) {
         num_members: 3,
       },
     ],
-    partial: false,
+    refreshing: false,
   })
   vi.spyOn(api, "getWorkspaceMCPs").mockResolvedValue([])
   vi.spyOn(api, "listWorkspaceApiKeys").mockResolvedValue([])
@@ -774,7 +774,7 @@ describe("WorkspaceSettingsPanel", () => {
 
     // The selector stays disabled until the workspace's settings have loaded.
     const trigger = await screen.findByRole("button", {
-      name: /Pick a repository/,
+      name: "No default repository",
     })
     await waitFor(() => expect(trigger.hasAttribute("disabled")).toBe(false))
     fireEvent.click(trigger)

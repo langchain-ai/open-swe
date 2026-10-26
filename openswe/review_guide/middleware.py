@@ -9,18 +9,17 @@ reader stands. Every model call gets the walkthrough's rules.
 """
 
 import logging
-from collections.abc import Awaitable, Callable
+from collections.abc import Mapping
 from typing import Annotated, Any, NotRequired
 
 from langchain.agents.middleware.types import (
     AgentState,
-    ModelRequest,
-    ModelResponse,
     OmitFromOutput,
 )
-from langchain_core.messages import HumanMessage, SystemMessage
+from langchain_core.messages import HumanMessage
 from langgraph.runtime import Runtime
 
+from openswe.middleware.model_call_shape import CallShape
 from openswe.middleware.trace import OpenSWEMiddleware
 from openswe.prompts import prompt
 from openswe.review_guide.advance import approve_click
@@ -34,7 +33,6 @@ from openswe.slack.code_channels import repo_context_bar_items, set_context_bar,
 from openswe.slack.http import SlackRequestError
 from openswe.utils.dashboard_links import dashboard_thread_url
 from openswe.walkthrough.checkout import PinnedCheckout
-from openswe.walkthrough.plan import LineRef
 from openswe.walkthrough.planner import PlanWorkspace
 from openswe.walkthrough.record import PlanMovedError, Walkthrough
 
@@ -126,10 +124,19 @@ class ReviewGuideMiddleware(OpenSWEMiddleware[ReviewGuideState]):
             }
         if not workspace.complete:
             await self._plan_in_background(session, head)
+        await self._carry_seen(session, checkout, workspace)
         walk = session.walk
         moved = walk is not None and walk.head_sha != head.head.sha
         if walk is not None and moved:
-            walk, gone = walk.moved_to(head.head.sha, workspace.changes)
+            carry = await checkout.carry(walk.head_sha, walk.merge_base_sha, workspace.index)
+            walk, gone = (
+                walk.moved_to(head.head.sha, workspace.merge_base_sha, carry)
+                if carry is not None
+                else (
+                    Walk(head_sha=head.head.sha, merge_base_sha=workspace.merge_base_sha),
+                    walk.on_screen,
+                )
+            )
             await session.save_walk(walk)
             if gone is not None:
                 await retire(
@@ -147,14 +154,13 @@ class ReviewGuideMiddleware(OpenSWEMiddleware[ReviewGuideState]):
                 },
             )
         if walk is None:
-            walk = Walk(head_sha=head.head.sha)
+            walk = Walk(head_sha=head.head.sha, merge_base_sha=workspace.merge_base_sha)
             await session.save_walk(walk)
         approved = (
             await approve_click(session, walk, self._approve_ts) if self._approve_ts else None
         )
-        unplanned = workspace.plan.unplanned(workspace.changes)
         reader = Reader.of(
-            walk, workspace.plan, await session.seen_lines(), map(LineRef.of, unplanned)
+            walk, workspace.plan, await session.seen_at(walk.head_sha), workspace.unplanned
         )
         return {
             "review_guide_rules": rules,
@@ -166,11 +172,23 @@ class ReviewGuideMiddleware(OpenSWEMiddleware[ReviewGuideState]):
                         head_sha=head.head.sha,
                         clicked=bool(self._approve_ts),
                         approved=approved.title if approved else "",
-                        status=reader.status(unplanned, workspace.hunks).model_dump(),
+                        status=reader.status(workspace.unplanned, workspace.hunks).model_dump(),
                     )
                 )
             ],
         }
+
+    async def _carry_seen(
+        self, session: ReviewGuideSession, checkout: PinnedCheckout, workspace: PlanWorkspace
+    ) -> None:
+        """Carry what the reader approved to the workspace's head, when it is numbered at another."""
+        seen = await session.seen()
+        if seen is None or seen.head_sha == workspace.head_sha:
+            return
+        # An earlier head that can no longer be read leaves nothing to carry; starting
+        # over at this head keeps every later turn from fetching it again.
+        carry = await checkout.carry(seen.head_sha, seen.merge_base_sha, workspace.index)
+        await session.carry_seen(workspace.head_sha, workspace.merge_base_sha, carry, seen.head_sha)
 
     async def _plan_in_background(self, session: ReviewGuideSession, head: PullRequestHead) -> None:
         """Have the review scout place what the plan is missing, while the guide talks."""
@@ -193,14 +211,8 @@ class ReviewGuideMiddleware(OpenSWEMiddleware[ReviewGuideState]):
                 extra={"agent_thread_id": self._thread_id, **target.log_extra},
             )
 
-    async def awrap_model_call(
-        self,
-        request: ModelRequest,
-        handler: Callable[[ModelRequest], Awaitable[ModelResponse]],
-    ) -> ModelResponse:
-        rules = request.state.get("review_guide_rules")
-        if isinstance(rules, str) and rules:
-            existing = request.system_message.text if request.system_message is not None else ""
-            content = f"{existing}\n\n{rules}" if existing else rules
-            request = request.override(system_message=SystemMessage(content=content))
-        return await handler(request)
+    async def ashape_model_call(
+        self, call: CallShape, state: Mapping[str, object], runtime: Runtime
+    ) -> CallShape:
+        rules = state.get("review_guide_rules")
+        return call.appending(rules) if isinstance(rules, str) else call

@@ -43,6 +43,7 @@ from openswe.slack.channels import SlackChannel
 from openswe.slack.client import SlackThreadMappingError, normalize_slack_location
 from openswe.source_context import SlackThreadRef, SourceContext
 from openswe.thread_ids import slack_thread_id
+from openswe.threads import index
 from openswe.utils.json_types import JsonObject
 
 logger = logging.getLogger(__name__)
@@ -452,8 +453,13 @@ async def lookup_slack_thread_id(channel_id: str, thread_ts: str) -> str | None:
         )
 
 
-async def bind_slack_thread_id(channel_id: str, thread_ts: str, thread_id: str) -> str:
-    """Bind a Slack location to an Open SWE thread unless another thread holds it."""
+async def bind_slack_thread_id(
+    channel_id: str, thread_ts: str, thread_id: str, *, replacing: str | None = None
+) -> str:
+    """Bind a Slack location to an Open SWE thread unless another thread holds it.
+
+    ``replacing`` names the one other thread the location may move from.
+    """
     channel, timestamp = normalize_slack_location(channel_id, thread_ts)
     normalized_thread_id = thread_id.strip() if isinstance(thread_id, str) else ""
     if not normalized_thread_id:
@@ -461,6 +467,9 @@ async def bind_slack_thread_id(channel_id: str, thread_ts: str, thread_id: str) 
     upsert = insert(SlackThread).values(
         id=uuid7(), channel_id=channel, thread_ts=timestamp, thread_id=normalized_thread_id
     )
+    movable = SlackThread.thread_id.is_(None) | (SlackThread.thread_id == upsert.excluded.thread_id)
+    if replacing:
+        movable |= SlackThread.thread_id == replacing
     async with postgres.session() as session:
         await SlackChannel.ensure(session, channel)
         bound = await session.scalar(
@@ -471,8 +480,7 @@ async def bind_slack_thread_id(channel_id: str, thread_ts: str, thread_id: str) 
                     "detach_nonce": None,
                     "updated_at": func.clock_timestamp(),
                 },
-                where=SlackThread.thread_id.is_(None)
-                | (SlackThread.thread_id == upsert.excluded.thread_id),
+                where=movable,
             ).returning(SlackThread.thread_id)
         )
     if bound is None:
@@ -496,7 +504,10 @@ def _thread_metadata_slack_location(thread: Mapping[str, object]) -> tuple[str, 
 async def resolve_slack_thread_id(
     langgraph_client: LangGraphClient, channel_id: str, thread_ts: str
 ) -> str:
-    """The Open SWE thread bound to a Slack location, binding one first if none is."""
+    """The Open SWE thread bound to a Slack location, binding one first if none is.
+
+    A location bound to a thread that takes no new activity moves to its successor.
+    """
     channel, timestamp = normalize_slack_location(channel_id, thread_ts)
     async with postgres.session() as session:
         mapping = (
@@ -507,7 +518,10 @@ async def resolve_slack_thread_id(
             )
         ).first()
     if mapping is not None and mapping.thread_id:
-        return mapping.thread_id
+        live = await index.live_thread_id(mapping.thread_id)
+        if live == mapping.thread_id:
+            return live
+        return await bind_slack_thread_id(channel, timestamp, live, replacing=mapping.thread_id)
 
     matches = await langgraph_client.threads.search(
         metadata={
@@ -532,7 +546,7 @@ async def resolve_slack_thread_id(
         iter(matching_ids),
         slack_thread_id(channel, timestamp, None if mapping is None else mapping.detach_nonce),
     )
-    return await bind_slack_thread_id(channel, timestamp, candidate)
+    return await bind_slack_thread_id(channel, timestamp, await index.live_thread_id(candidate))
 
 
 async def delete_slack_thread_associations(

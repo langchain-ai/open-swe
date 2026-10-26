@@ -335,7 +335,7 @@ def _check(resp: httpx.Response, action: str) -> httpx.Response:
     return resp
 
 
-async def _open(name: str, idle_ttl_seconds: int) -> _Session:
+async def _open(name: str, idle_ttl_seconds: int, *, hidpi: bool) -> _Session:
     """Attach Stagehand to the window of browser ``name``, creating either as needed."""
     from langsmith.sandbox import AsyncSandboxClient  # noqa: PLC0415
 
@@ -349,7 +349,8 @@ async def _open(name: str, idle_ttl_seconds: int) -> _Session:
     )
     async with api, sandboxes:
         made = await api.post(
-            _browsers_url(), json={"name": name, "idle_ttl_seconds": idle_ttl_seconds}
+            _browsers_url(),
+            json={"name": name, "idle_ttl_seconds": idle_ttl_seconds, "hidpi": hidpi},
         )
         if made.status_code != httpx.codes.CONFLICT:  # conflict: it already exists
             _check(made, "create the browser")
@@ -592,7 +593,9 @@ class BrowserMiddleware(AgentMiddleware):
 
     name = "mda-browser"
 
-    def __init__(self, *, scope: Scope = "thread", idle_ttl_seconds: int = 600) -> None:
+    def __init__(
+        self, *, scope: Scope = "thread", idle_ttl_seconds: int = 600, hidpi: bool = False
+    ) -> None:
         """Build the browser tools.
 
         Args:
@@ -601,16 +604,28 @@ class BrowserMiddleware(AgentMiddleware):
                 included. Each of their threads drives its own tab, and their
                 calls take turns.
             idle_ttl_seconds: Stop a browser after this long idle.
+            hidpi: Create browsers that render pages at twice the resolution,
+                so their live view is sharp on HiDPI screens. It applies only
+                to browsers this creates: LangSmith fixes it at creation.
         """
         super().__init__()
         self.scope: Scope = scope
         self.idle_ttl_seconds = idle_ttl_seconds
+        self.hidpi = hidpi
         # Process-wide: MDA builds this middleware for every run, and a user's
         # concurrent threads must share their browser's one client.
         self._sessions = _SESSIONS
         self._locks = _LOCKS
         self._releases = _RELEASES
         self.tools = self._build_tools()
+
+    def browser_name(self, runtime: ManagedToolRuntime | Runtime) -> str:
+        """The LangSmith browser this run's browser tools use, whether or not it exists yet.
+
+        Raises:
+            RuntimeError: the run has no thread, or user scope has no signed-in user.
+        """
+        return _browser_name(_browser_key(runtime, self.scope))
 
     async def _call(
         self, runtime: ManagedToolRuntime, fn: Callable[[_Session, Page], Awaitable[T]]
@@ -634,7 +649,9 @@ class BrowserMiddleware(AgentMiddleware):
                     try:
                         name = _browser_name(key)
                         if key not in self._sessions:
-                            self._sessions[key] = await _open(name, self.idle_ttl_seconds)
+                            self._sessions[key] = await _open(
+                                name, self.idle_ttl_seconds, hidpi=self.hidpi
+                            )
                         session = self._sessions[key]
                         await self._share(session, name, key, runtime)
                         return await fn(session, await session.page(thread))

@@ -23,6 +23,7 @@ record for the dashboard. A failed refresh of either kind leaves the previous
 snapshot in place: runs keep booting from the last image that worked.
 """
 
+import asyncio
 import hashlib
 import logging
 import shlex
@@ -32,9 +33,11 @@ from typing import Any
 
 from openswe.config import ENV, EnvVar
 from openswe.jobs import queue
+from openswe.utils.time import parse_iso
 from openswe.workspaces.store import (
     WORKSPACES,
     RefreshKind,
+    RefreshStep,
     Workspace,
     capture_workspace_snapshot,
     require_capture_support,
@@ -54,9 +57,6 @@ DEFAULT_CAPTURE_TIMEOUT_SECONDS = 30 * 60
 # How stale a snapshot may get, while in use, before the next sandbox creation
 # kicks off an update on a builder.
 UPDATE_INTERVAL_SECONDS = 60 * 60
-# A refresh that has been "refreshing" for longer than this lost its worker
-# (redeploy, crash) and must not block the next attempt forever.
-STALE_REFRESH_SECONDS = 3 * 60 * 60
 # The builder is stopped as soon as its capture lands and nobody reconnects to it.
 BUILDER_DELETE_AFTER_STOP_SECONDS = 10 * 60
 
@@ -69,26 +69,6 @@ def _seconds(var: EnvVar, default: int) -> int:
 
 def capture_timeout() -> int:
     return _seconds(ENV.WORKSPACE_CAPTURE_TIMEOUT_SECONDS, DEFAULT_CAPTURE_TIMEOUT_SECONDS)
-
-
-def _parse_iso(value: str | None) -> datetime | None:
-    if not value or not value.strip():
-        return None
-    try:
-        parsed = datetime.fromisoformat(value)
-    except ValueError:
-        return None
-    return parsed if parsed.tzinfo else parsed.replace(tzinfo=UTC)
-
-
-def is_refresh_in_flight(record: Workspace) -> bool:
-    """Whether another refresh of this workspace is still plausibly running."""
-    if record.refresh_status != "refreshing":
-        return False
-    started_at = _parse_iso(record.refresh_started_at)
-    if started_at is None:
-        return False
-    return (datetime.now(UTC) - started_at).total_seconds() < STALE_REFRESH_SECONDS
 
 
 def daily_schedule(slug: str) -> str:
@@ -228,7 +208,7 @@ def is_snapshot_stale(
     """
     if not record.update_script or record.ready_snapshot_id is None:
         return False
-    captured = _parse_iso(record.last_captured_at)
+    captured = parse_iso(record.last_captured_at)
     if captured is None:
         return True
     return (datetime.now(UTC) - captured).total_seconds() >= interval_seconds
@@ -243,9 +223,9 @@ def is_update_due(record: Workspace) -> bool:
     """
     if not is_snapshot_stale(record):
         return False
-    if is_refresh_in_flight(record):
+    if record.refresh_in_flight():
         return False
-    finished = _parse_iso(record.refresh_finished_at)
+    finished = parse_iso(record.refresh_finished_at)
     if finished is None:
         return True
     return (datetime.now(UTC) - finished).total_seconds() >= UPDATE_INTERVAL_SECONDS
@@ -256,20 +236,35 @@ async def maybe_start_update(record: Workspace | None) -> str | None:
     if record is None or not is_update_due(record):
         return None
     try:
-        return await start_refresh_run(record.slug, kind="update")
+        run_id = await start_refresh_run(record.slug, kind="update")
     except Exception:
         logger.warning(
             "Could not start workspace update", extra={"workspace": record.slug}, exc_info=True
         )
         return None
+    logger.info(
+        "Queued workspace update",
+        extra={
+            "workspace": record.slug,
+            "refresh_run_id": run_id,
+            "last_captured_at": record.last_captured_at,
+        },
+    )
+    return run_id
 
 
-async def refresh_workspace(slug: str, kind: RefreshKind = "full") -> dict[str, Any]:
+async def refresh_workspace(
+    slug: str, kind: RefreshKind = "full", *, run_id: str | None = None
+) -> dict[str, Any]:
     """Refresh ``slug``'s snapshot on a throwaway builder.
 
     ``full`` boots from the base snapshot and runs setup then update; ``update``
     boots from the current snapshot and runs only the update script. Either way
     the capture happens only if every script exited 0.
+
+    ``run_id`` is the job this runs in. A retry of a job cut short mid-refresh
+    finds its own marker on the record and starts the refresh over, rather than
+    waiting out ``STALE_REFRESH_SECONDS`` behind itself.
 
     Returns a status dict rather than raising, carrying the combined log: this is
     awaited by an admin thread iterating on a script, by a cron tick, and by a
@@ -287,38 +282,68 @@ async def refresh_workspace(slug: str, kind: RefreshKind = "full") -> dict[str, 
         return {"status": "no_update_script", "slug": slug}
     if kind == "update" and record.ready_snapshot_id is None:
         return {"status": "no_snapshot_to_update", "slug": slug}
-    if is_refresh_in_flight(record):
-        return {"status": "already_refreshing", "slug": slug}
     try:
         require_capture_support()
     except RuntimeError as exc:
         return {"status": "unsupported", "slug": slug, "error": str(exc)}
 
     base = record.ready_snapshot_id if kind == "update" else record.base_snapshot_id
-    await WORKSPACES.mark_refreshing(slug, kind)
+    # This job's own marker: its earlier claim wrote it, or queueing it did over a
+    # refresh that had already gone stale. Either way the builder it names is lost.
+    interrupted = (
+        run_id is not None
+        and record.refresh_status == "refreshing"
+        and record.refresh_run_id == run_id
+    )
+    context = {"workspace": slug, "refresh_kind": kind, "refresh_run_id": run_id}
+    attempt = await WORKSPACES.mark_refreshing(slug, kind, run_id=run_id)
+    if attempt is None:
+        logger.info(
+            "Refresh already running elsewhere",
+            extra={
+                **context,
+                "holder_run_id": record.refresh_run_id,
+                "holder_started_at": record.refresh_started_at,
+            },
+        )
+        return {"status": "already_refreshing", "slug": slug}
+    if interrupted:
+        lost_step = _running_step(record)
+        logger.warning(
+            "Restarting an interrupted refresh",
+            extra={
+                **context,
+                "interrupted_started_at": record.refresh_started_at,
+                "interrupted_step": lost_step.label if lost_step else None,
+                "sandbox_id": record.refresh_sandbox_id,
+            },
+        )
+        if record.refresh_sandbox_id:
+            await _release_builder_sandbox(record.refresh_sandbox_id)
+    logger.info("Refresh started", extra={**context, "base_snapshot_id": base})
     started = datetime.now(UTC)
     sandbox_id: str | None = None
     log = ""
+    step = "boot"
     try:
-        await WORKSPACES.start_refresh_step(slug, "boot")
+        await attempt.start_step("boot")
         backend = await _create_builder_sandbox(record, base)
         sandbox_id = str(backend.id)
-        await WORKSPACES.finish_refresh_step(slug, "boot", "success")
+        await attempt.finish_step("boot", "success")
         # Published before the first script so a poll can tail the trace while it
         # runs; cleared when the refresh settles and the builder is released.
-        await WORKSPACES.mark_refresh_builder(slug, sandbox_id)
+        await attempt.publish_builder(sandbox_id)
         # Every script runs before the capture, so a snapshot only ships once the
         # whole of what produced it worked.
         for label, command, timeout in _scripts_to_run(record, kind):
-            await WORKSPACES.start_refresh_step(slug, label, log_path=script_log_path(label))
+            step = label
+            await attempt.start_step(label, log_path=script_log_path(label))
             result = await backend.aexecute(command, timeout=timeout)
             log = f"{log}\n--- {label} script ---\n{result.output or ''}".strip()
             if result.exit_code != 0:
-                await WORKSPACES.finish_refresh_step(
-                    slug, label, "failed", exit_code=result.exit_code
-                )
+                await attempt.finish_step(label, "failed", exit_code=result.exit_code)
                 error = f"{label} script exited {result.exit_code}"
-                await WORKSPACES.mark_refresh_settled(slug, "failed", log=log, error=error)
+                await attempt.settle("failed", log=log, error=error)
                 return {
                     "status": "failed",
                     "slug": slug,
@@ -327,23 +352,34 @@ async def refresh_workspace(slug: str, kind: RefreshKind = "full") -> dict[str, 
                     "error": error,
                     "log": log,
                 }
-            await WORKSPACES.finish_refresh_step(slug, label, "success", exit_code=0)
-        await WORKSPACES.start_refresh_step(slug, "capture")
+            await attempt.finish_step(label, "success", exit_code=0)
+        step = "capture"
+        await attempt.start_step("capture")
         await capture_workspace_snapshot(slug, sandbox_id, timeout=capture_timeout())
-        await WORKSPACES.finish_refresh_step(slug, "capture", "success")
+        await attempt.finish_step("capture", "success")
+    except asyncio.CancelledError:
+        # A shutdown cancels the job mid-refresh, past ``except Exception``. Settled here
+        # so the record stops claiming a refresh nobody runs; a hard kill skips this,
+        # and the job's retry takes its own marker over instead.
+        logger.warning(
+            "Refresh interrupted",
+            extra={**context, "step": step, "sandbox_id": sandbox_id},
+        )
+        await attempt.settle("failed", log=log, error="interrupted")
+        raise
     except Exception as exc:
-        logger.warning("Refresh failed", extra={"workspace": slug}, exc_info=True)
-        await WORKSPACES.mark_refresh_settled(slug, "failed", log=log, error=str(exc))
+        logger.warning("Refresh failed", extra={**context, "step": step}, exc_info=True)
+        await attempt.settle("failed", log=log, error=str(exc))
         return {"status": "failed", "slug": slug, "error": str(exc), "log": log}
     finally:
         if sandbox_id:
             await _release_builder_sandbox(sandbox_id)
 
     elapsed = int((datetime.now(UTC) - started).total_seconds())
-    await WORKSPACES.mark_refresh_settled(slug, "success", log=log)
+    await attempt.settle("success", log=log)
     logger.info(
         "Refreshed workspace",
-        extra={"workspace": slug, "refresh_kind": kind, "elapsed_seconds": elapsed},
+        extra={**context, "elapsed_seconds": elapsed},
     )
     return {"status": "success", "slug": slug, "kind": kind, "seconds": elapsed, "log": log}
 
@@ -434,7 +470,7 @@ async def _read_builder_log(sandbox_id: str, path: str) -> str | None:
     return (result.output or "").strip() or None
 
 
-def _running_step(record: Workspace) -> Any:
+def _running_step(record: Workspace) -> RefreshStep | None:
     return next((step for step in record.refresh_steps if step.status == "running"), None)
 
 
@@ -514,13 +550,13 @@ async def task_stop(task_id: str) -> dict[str, Any]:
 
 
 async def run_workspace_refresh_tick(
-    slug: str | None, kind: RefreshKind = "full"
+    slug: str | None, kind: RefreshKind = "full", *, run_id: str | None = None
 ) -> dict[str, Any]:
     """Scheduler entrypoint: refresh one workspace, or every scripted one."""
     if slug:
-        return await refresh_workspace(slug, kind)
+        return await refresh_workspace(slug, kind, run_id=run_id)
     results = [
-        await refresh_workspace(record.slug, kind)
+        await refresh_workspace(record.slug, kind, run_id=run_id)
         for record in await WORKSPACES.list_all()
         if record.setup_script
     ]

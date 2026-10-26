@@ -11,7 +11,7 @@
 //! module that fails to parse is reported, never quietly skipped, or a typo'd
 //! brace would drop a connector from the deployment without a word.
 
-use std::collections::HashMap;
+use std::collections::{BTreeSet, HashMap};
 use std::fs;
 use std::path::{Path, PathBuf};
 
@@ -48,6 +48,33 @@ pub(super) struct ConnectorScan {
     pub requires_identity: bool,
 }
 
+/// First-party channel factories that mount Events ingress.
+const INGRESS_CHANNEL_PROVIDERS: [&str; 3] = ["slack", "github", "linear"];
+
+/// What the exported `channel` binding resolves to, as far as compile can tell.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum ChannelIngress {
+    /// Not a first-party ingress factory.
+    None,
+    /// A binding compile cannot resolve; treated as ingress, provider unknown.
+    Unresolved,
+    /// A first-party `channels.<provider>(...)` call.
+    Provider(&'static str),
+}
+
+impl ChannelIngress {
+    fn is_ingress(self) -> bool {
+        self != Self::None
+    }
+
+    /// Whether local delivery needs a public HTTPS URL. GitHub and Linear
+    /// channels do not run under `mda dev`, so only Slack (or an unknown
+    /// factory) counts.
+    fn needs_public_url(self) -> bool {
+        matches!(self, Self::Unresolved | Self::Provider("slack"))
+    }
+}
+
 /// Result of scanning `channels/` once for exports and ingress.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(super) struct ChannelScan {
@@ -55,6 +82,10 @@ pub(super) struct ChannelScan {
     pub entries: Vec<PathBuf>,
     /// Whether any exported module declares Events ingress.
     pub requires_identity: bool,
+    /// Whether any exported module needs a public Events URL under `mda dev`.
+    pub needs_public_url: bool,
+    /// First-party ingress providers declared by exported modules.
+    pub providers: BTreeSet<String>,
 }
 
 /// Scan connector modules once: export gate + ingress heuristic per file.
@@ -119,10 +150,12 @@ fn typescript_has_named_mcp_export(source: &str, file_name: &str) -> Result<bool
     Ok(program_has_named_export(&parsed.program.body, "mcp"))
 }
 
-/// Scan channel modules once: export gate + Slack ingress heuristic per file.
+/// Scan channel modules once: export gate + ingress heuristic per file.
 pub(super) fn scan_exported_channels(project: &Project) -> Result<ChannelScan> {
     let mut entries = Vec::new();
     let mut requires_identity = false;
+    let mut needs_public_url = false;
+    let mut providers = BTreeSet::new();
     for rel in find_channel_entries(project) {
         let path = project.root.join(&rel);
         let source = fs::read_to_string(&path)
@@ -133,21 +166,27 @@ pub(super) fn scan_exported_channels(project: &Project) -> Result<ChannelScan> {
             Language::Python => {
                 let exported = python_has_module_binding(&source, &file_label, "channel")?;
                 let ingress = if exported {
-                    python_declares_channel_ingress(&source, &file_label)?
+                    python_channel_ingress(&source, &file_label)?
                 } else {
-                    false
+                    ChannelIngress::None
                 };
                 (exported, ingress)
             }
         };
         if exported {
             entries.push(rel);
-            requires_identity |= ingress;
+            requires_identity |= ingress.is_ingress();
+            needs_public_url |= ingress.needs_public_url();
+            if let ChannelIngress::Provider(provider) = ingress {
+                providers.insert(provider.to_string());
+            }
         }
     }
     Ok(ChannelScan {
         entries,
         requires_identity,
+        needs_public_url,
+        providers,
     })
 }
 
@@ -176,11 +215,11 @@ pub(super) fn find_exported_connector_entries(project: &Project) -> Result<Vec<P
 /// argument cannot be proven non-ingress (unresolved reference, spread, …),
 /// identity is required. A third-party connector that attaches `events` some
 /// other way is not caught by this heuristic and must declare identity itself.
-/// Whether any connector declares Events ingress that needs a public HTTPS URL
-/// (Slack `on:`) for local delivery.
+/// Whether any connector or channel declares Events ingress that needs a public
+/// HTTPS URL (Slack `on:`) for local delivery.
 pub(crate) fn project_needs_events_public_url(project: &Project) -> Result<bool> {
     Ok(scan_exported_connectors(project)?.requires_identity
-        || scan_exported_channels(project)?.requires_identity)
+        || scan_exported_channels(project)?.needs_public_url)
 }
 
 #[cfg(test)]
@@ -195,7 +234,7 @@ fn typescript_has_connector_export(source: &str, file_name: &str) -> Result<bool
 
 #[cfg(test)]
 fn typescript_declares_channel_ingress(source: &str, file_name: &str) -> Result<bool> {
-    Ok(scan_typescript_channel(source, file_name)?.1)
+    Ok(scan_typescript_channel(source, file_name)?.1.is_ingress())
 }
 
 /// One TypeScript parse: named `connector` export + ingress heuristic.
@@ -222,8 +261,8 @@ fn scan_typescript_connector(source: &str, file_name: &str) -> Result<(bool, boo
     Ok((true, ingress))
 }
 
-/// One TypeScript parse: named `channel` export + Slack ingress heuristic.
-fn scan_typescript_channel(source: &str, file_name: &str) -> Result<(bool, bool)> {
+/// One TypeScript parse: named `channel` export + ingress heuristic.
+fn scan_typescript_channel(source: &str, file_name: &str) -> Result<(bool, ChannelIngress)> {
     let allocator = Allocator::default();
     let parsed = parse_typescript(&allocator, source, file_name)?;
     if !program_has_named_export(&parsed.program.body, "channel") {
@@ -234,14 +273,14 @@ fn scan_typescript_channel(source: &str, file_name: &str) -> Result<(bool, bool)
                  `export const channel = channels.<provider>(...)`."
             );
         }
-        return Ok((false, false));
+        return Ok((false, ChannelIngress::None));
     }
     let ns = collect_managed_export_bindings(&parsed.program.body, CHANNELS_NS);
     let expressions = collect_top_level_expression_bindings(&parsed.program.body);
     let Some(init) = find_initializer(&parsed.program.body, &expressions, "channel") else {
-        return Ok((true, false));
+        return Ok((true, ChannelIngress::None));
     };
-    let ingress = expression_declares_channel_ingress(init, &ns, &expressions, 0);
+    let ingress = expression_channel_ingress(init, &ns, &expressions, 0);
     Ok((true, ingress))
 }
 
@@ -571,40 +610,39 @@ fn python_declares_connector_ingress(source: &str, file_label: &str) -> Result<b
     Ok(output.as_deref() == Some("INGRESS"))
 }
 
-fn expression_declares_channel_ingress<'a>(
+fn expression_channel_ingress<'a>(
     expression: &'a Expression<'a>,
     ns: &ManagedExportBindings,
     expressions: &HashMap<String, &'a Expression<'a>>,
     depth: usize,
-) -> bool {
+) -> ChannelIngress {
     if depth > 8 {
-        return true;
+        return ChannelIngress::Unresolved;
     }
     match peel_expression(expression) {
-        Expression::CallExpression(call) => {
-            // Slack Event Subscriptions are provisioned for every
-            // `channels.slack(...)` declaration, so each call mounts Events ingress.
-            channel_provider_name(&call.callee, ns) == Some("slack")
-        }
+        // Every `channels.slack(...)` / `channels.github(...)` declaration mounts
+        // Events ingress.
+        Expression::CallExpression(call) => channel_provider_name(&call.callee, ns)
+            .map_or(ChannelIngress::None, ChannelIngress::Provider),
         Expression::Identifier(id) => match expressions.get(id.name.as_str()) {
-            Some(inner) => expression_declares_channel_ingress(inner, ns, expressions, depth + 1),
-            None => true,
+            Some(inner) => expression_channel_ingress(inner, ns, expressions, depth + 1),
+            None => ChannelIngress::Unresolved,
         },
-        _ => false,
+        _ => ChannelIngress::None,
     }
 }
 
-fn channel_provider_name<'a>(
-    callee: &'a Expression<'a>,
+fn channel_provider_name(
+    callee: &Expression<'_>,
     bindings: &ManagedExportBindings,
-) -> Option<&'a str> {
+) -> Option<&'static str> {
     let Expression::StaticMemberExpression(member) = callee else {
         return None;
     };
-    let provider = member.property.name.as_str();
-    if provider != "slack" {
-        return None;
-    }
+    let name = member.property.name.as_str();
+    let provider = INGRESS_CHANNEL_PROVIDERS
+        .into_iter()
+        .find(|provider| *provider == name)?;
     match &member.object {
         Expression::Identifier(id) if bindings.aliases.contains(id.name.as_str()) => Some(provider),
         Expression::StaticMemberExpression(inner)
@@ -621,14 +659,31 @@ fn channel_provider_name<'a>(
     }
 }
 
-fn python_declares_channel_ingress(source: &str, file_label: &str) -> Result<bool> {
+fn python_channel_ingress(source: &str, file_label: &str) -> Result<ChannelIngress> {
     let output = run_python_extractor(
         scripts::CHANNEL_INGRESS,
         source,
         file_label,
         "channel ingress",
     )?;
-    Ok(output.as_deref() == Some("INGRESS"))
+    Ok(parse_python_channel_ingress(output.as_deref()))
+}
+
+/// Parse the extractor's `INGRESS [<provider>]` line.
+fn parse_python_channel_ingress(output: Option<&str>) -> ChannelIngress {
+    let Some(rest) = output.and_then(|line| line.strip_prefix("INGRESS")) else {
+        return ChannelIngress::None;
+    };
+    let provider = rest.trim();
+    INGRESS_CHANNEL_PROVIDERS
+        .into_iter()
+        .find(|known| *known == provider)
+        .map_or(ChannelIngress::Unresolved, ChannelIngress::Provider)
+}
+
+#[cfg(test)]
+fn python_declares_channel_ingress(source: &str, file_label: &str) -> Result<bool> {
+    Ok(python_channel_ingress(source, file_label)?.is_ingress())
 }
 
 /// True when the module exposes a runtime `default` binding — either
@@ -955,6 +1010,102 @@ mod tests {
         assert!(!py_ingress(
             "connector = connectors.slack(include_tools=[\"chat_postMessage\"])\n"
         ));
+    }
+
+    #[test]
+    fn typescript_detects_github_channel_provider() {
+        let (exported, ingress) = scan_typescript_channel(
+            "import { channels } from \"managed-deepagents\";\n\
+             export const channel = channels.github({ onEvent: {} });\n",
+            "channels/github.ts",
+        )
+        .unwrap();
+        assert!(exported);
+        assert_eq!(ingress, ChannelIngress::Provider("github"));
+        assert!(ingress.is_ingress());
+        assert!(!ingress.needs_public_url());
+    }
+
+    #[test]
+    fn detects_linear_channel_provider() {
+        let (exported, ingress) = scan_typescript_channel(
+            "import { channels } from \"managed-deepagents\";\n\
+             export const channel = channels.linear({ onEvent: {} });\n",
+            "channels/linear.ts",
+        )
+        .unwrap();
+        assert!(exported);
+        assert_eq!(ingress, ChannelIngress::Provider("linear"));
+        assert!(!ingress.needs_public_url());
+        assert_eq!(
+            parse_python_channel_ingress(Some("INGRESS linear")),
+            ChannelIngress::Provider("linear")
+        );
+    }
+
+    #[test]
+    fn typescript_resolves_github_channel_through_namespace_and_binding() {
+        let (_, ingress) = scan_typescript_channel(
+            "import * as mda from \"managed-deepagents\";\n\
+             const github = mda.channels.github({ onEvent: {} });\n\
+             export const channel = github;\n",
+            "channels/github.ts",
+        )
+        .unwrap();
+        assert_eq!(ingress, ChannelIngress::Provider("github"));
+    }
+
+    #[test]
+    fn typescript_unknown_channel_factory_is_not_ingress() {
+        let (_, ingress) = scan_typescript_channel(
+            "export const channel = channels.http(adapter);\n",
+            "channels/webhook.ts",
+        )
+        .unwrap();
+        assert_eq!(ingress, ChannelIngress::None);
+    }
+
+    #[test]
+    fn python_detects_github_channel_provider() {
+        assert_eq!(
+            python_channel_ingress(
+                "from managed_deepagents import channels\n\
+                 channel = channels.github(on_event={})\n",
+                "channels/github.py",
+            )
+            .unwrap(),
+            ChannelIngress::Provider("github")
+        );
+        assert_eq!(
+            python_channel_ingress(
+                "import managed_deepagents as mda\n\
+                 channel = mda.channels.github(on_event={})\n",
+                "channels/github.py",
+            )
+            .unwrap(),
+            ChannelIngress::Provider("github")
+        );
+    }
+
+    #[test]
+    fn python_channel_ingress_output_parsing() {
+        assert_eq!(parse_python_channel_ingress(None), ChannelIngress::None);
+        assert_eq!(
+            parse_python_channel_ingress(Some("INGRESS")),
+            ChannelIngress::Unresolved
+        );
+        assert_eq!(
+            parse_python_channel_ingress(Some("INGRESS slack")),
+            ChannelIngress::Provider("slack")
+        );
+        assert_eq!(
+            parse_python_channel_ingress(Some("INGRESS github")),
+            ChannelIngress::Provider("github")
+        );
+        assert_eq!(
+            parse_python_channel_ingress(Some("INGRESS unknown")),
+            ChannelIngress::Unresolved
+        );
     }
 
     #[test]

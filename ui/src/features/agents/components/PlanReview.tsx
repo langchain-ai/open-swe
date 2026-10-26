@@ -1,10 +1,10 @@
 import { Button } from "@langchain/macaw-components/Button"
 import { Text } from "@langchain/macaw-components/Text"
-import { Kbd } from "@langchain/macaw-components/Kbd"
 import { Textarea } from "@langchain/macaw-components/Textarea"
 import { useCallback, useEffect, useRef, useState } from "react"
 import type { KeyboardEvent } from "react"
 
+import { SubmitShortcut } from "@/components/SubmitShortcut"
 import type { PlanComment, PlanData, PlanTextAnchor } from "@/lib/plan"
 import {
   addPlanComment,
@@ -264,11 +264,7 @@ export function PlanReview({ plan }: { plan: PlanData }) {
           onClick={() => void submitComment()}
         >
           {posting ? "Posting…" : replyTo ? "Reply" : "Comment"}
-          {!posting && (
-            <Kbd variant="inherit" aria-hidden="true" className="opacity-80">
-              ⌘ ↵
-            </Kbd>
-          )}
+          {!posting && <SubmitShortcut />}
         </Button>
       </div>
     </div>

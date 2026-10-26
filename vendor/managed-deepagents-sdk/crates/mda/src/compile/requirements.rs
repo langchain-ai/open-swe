@@ -13,7 +13,7 @@
 use std::collections::{BTreeMap, BTreeSet, HashSet};
 use std::fs;
 use std::path::{Path, PathBuf};
-use std::process::Command;
+use std::process::{Command, Output};
 
 use anyhow::{bail, Context, Result};
 use serde::{Deserialize, Serialize};
@@ -22,6 +22,8 @@ use serde_json::Value;
 use super::discovery::entry_stem_name;
 #[cfg(test)]
 use super::exports::find_exported_connector_entries;
+use crate::child;
+use crate::error::child_failed;
 use crate::langsmith::ConnectionOwnerPolicy;
 use crate::project::{Language, Project};
 use crate::toolchain;
@@ -156,6 +158,47 @@ pub(crate) fn required_env_from_connector_requirements(
     out
 }
 
+/// Agent connection names a channel reserves for what its setup provides,
+/// such as `mda/github-token`, the GitHub App's installation token. They are
+/// not workspace connections, so deploy neither checks for them nor creates
+/// them.
+/// Each with what the token is and what the agent acts as with it.
+const CHANNEL_RESERVED_AGENT_CONNECTIONS: [(&str, &str, &str); 2] = [
+    (
+        "mda/github-token",
+        "the GitHub App's installation token",
+        "act on GitHub as the App",
+    ),
+    (
+        "mda/linear-token",
+        "the Linear app's token",
+        "act in Linear as the app",
+    ),
+];
+
+/// Whether `slug` is a channel's reserved agent connection.
+fn is_channel_reserved_agent_connection(slug: &str) -> bool {
+    CHANNEL_RESERVED_AGENT_CONNECTIONS
+        .iter()
+        .any(|(reserved, _, _)| *reserved == slug)
+}
+
+/// Why a project cannot declare `slug` as a user connection, for a channel's
+/// reserved agent connection: reading an app's token as the person running
+/// the agent is not supported yet.
+pub(crate) fn reserved_user_connection_error(slug: &str) -> Option<String> {
+    CHANNEL_RESERVED_AGENT_CONNECTIONS
+        .iter()
+        .find(|(reserved, _, _)| *reserved == slug)
+        .map(|(_, token, acts_as)| {
+            format!(
+                "'{slug}' is not supported as a user connection yet: it is {token}, an \
+                 agent connection. Use connections.get(\"{slug}\", {{ type: \"agent\" }}) \
+                 to {acts_as}."
+            )
+        })
+}
+
 /// Collect unique user-owned connection slugs from compiled connector requirements.
 pub(crate) fn user_connections_from_connector_requirements(
     requirements: &ConnectorRequirements,
@@ -184,7 +227,9 @@ pub(crate) fn agent_connections_from_connector_requirements(
         if let Some(entries) = manifest.get("agentConnections").and_then(Value::as_array) {
             for entry in entries {
                 if let Some(slug) = entry.as_str() {
-                    slugs.insert(slug.to_string());
+                    if !is_channel_reserved_agent_connection(slug) {
+                        slugs.insert(slug.to_string());
+                    }
                 }
             }
         }
@@ -418,14 +463,17 @@ writeFileSync(
     fs::write(&script_path, script)
         .with_context(|| format!("failed to write {}", script_path.display()))?;
 
-    let status = run_tsx(out_dir, script_name)?;
-    if !status.success() {
-        bail!(
-            "failed to emit connector requirements via Node/tsx (exit {}). \
-             Ensure `connectors/*` exports branded Connector objects and that \
-             project dependencies are installed.",
-            status.code().unwrap_or(-1)
-        );
+    let output = run_tsx(out_dir, script_name)?;
+    if !output.status.success() {
+        return Err(child_failed(
+            &output,
+            format!(
+                "failed to emit connector requirements via Node/tsx (exit {}). \
+                 Ensure `connectors/*` exports branded Connector objects and that \
+                 project dependencies are installed.",
+                output.status.code().unwrap_or(-1)
+            ),
+        ));
     }
     Ok(())
 }
@@ -439,14 +487,17 @@ fn emit_typescript_mcp_connection_entries(out_dir: &Path) -> Result<()> {
     fs::write(&script_path, TYPESCRIPT_MCP_CONNECTIONS_SCRIPT)
         .with_context(|| format!("failed to write {}", script_path.display()))?;
 
-    let status = run_tsx(out_dir, script_name)?;
-    if !status.success() {
-        bail!(
-            "failed to emit MCP connection entries via Node/tsx (exit {}). \
-             Ensure `connectors/*` exports branded Connector objects and that \
-             project dependencies are installed.",
-            status.code().unwrap_or(-1)
-        );
+    let output = run_tsx(out_dir, script_name)?;
+    if !output.status.success() {
+        return Err(child_failed(
+            &output,
+            format!(
+                "failed to emit MCP connection entries via Node/tsx (exit {}). \
+                 Ensure `connectors/*` exports branded Connector objects and that \
+                 project dependencies are installed.",
+                output.status.code().unwrap_or(-1)
+            ),
+        ));
     }
     Ok(())
 }
@@ -469,14 +520,17 @@ writeFileSync(
 "#;
     fs::write(&script_path, script)
         .with_context(|| format!("failed to write {}", script_path.display()))?;
-    let status = run_tsx(out_dir, script_name)?;
-    if !status.success() {
-        bail!(
-            "failed to emit channel requirements via Node/tsx (exit {}). \
-             Ensure `channels/*` exports branded Channel objects and that \
-             project dependencies are installed.",
-            status.code().unwrap_or(-1)
-        );
+    let output = run_tsx(out_dir, script_name)?;
+    if !output.status.success() {
+        return Err(child_failed(
+            &output,
+            format!(
+                "failed to emit channel requirements via Node/tsx (exit {}). \
+                 Ensure `channels/*` exports branded Channel objects and that \
+                 project dependencies are installed.",
+                output.status.code().unwrap_or(-1)
+            ),
+        ));
     }
     Ok(())
 }
@@ -517,14 +571,13 @@ fn install_typescript_build_deps(out_dir: &Path) -> Result<()> {
         toolchain::npm_program(),
         NPM_INSTALL_ARGS.join(" ")
     );
-    let output = toolchain::npm()
-        .args(NPM_INSTALL_ARGS)
-        .current_dir(out_dir)
-        .output()
+    let output = child::output(toolchain::npm().args(NPM_INSTALL_ARGS).current_dir(out_dir))
         .with_context(|| format!("failed to run {command} for connector requirements emit"))?;
     if !output.status.success() {
-        let stderr = String::from_utf8_lossy(&output.stderr);
-        bail!("{command} failed (needed to resolve connector imports):\n{stderr}");
+        return Err(child_failed(
+            &output,
+            format!("{command} failed (needed to resolve connector imports)"),
+        ));
     }
     // Fingerprint after the install: npm may normalize the lockfile it read.
     write_stamp(&stamp, &typescript_emit_fingerprint(out_dir)?)
@@ -685,7 +738,7 @@ fn symlink_relative_runtime(link: &Path) -> Result<()> {
     }
 }
 
-fn run_tsx(out_dir: &Path, script_name: &str) -> Result<std::process::ExitStatus> {
+fn run_tsx(out_dir: &Path, script_name: &str) -> Result<Output> {
     // Run tsx via `node` with a path relative to `out_dir`. npm `.bin/tsx` is
     // often a symlink to `cli.mjs`; execing that shim while `current_dir` is
     // `out_dir` breaks when the shim path is absolute or repo-relative
@@ -694,18 +747,19 @@ fn run_tsx(out_dir: &Path, script_name: &str) -> Result<std::process::ExitStatus
     if tsx_cli.is_file() {
         let tsx_cli = fs::canonicalize(&tsx_cli)
             .with_context(|| format!("failed to resolve {}", tsx_cli.display()))?;
-        return toolchain::node()
-            .arg(&tsx_cli)
-            .arg(script_name)
-            .current_dir(out_dir)
-            .status()
-            .with_context(|| {
-                format!(
-                    "failed to run {} via {}",
-                    tsx_cli.display(),
-                    toolchain::node_program()
-                )
-            });
+        return child::output(
+            toolchain::node()
+                .arg(&tsx_cli)
+                .arg(script_name)
+                .current_dir(out_dir),
+        )
+        .with_context(|| {
+            format!(
+                "failed to run {} via {}",
+                tsx_cli.display(),
+                toolchain::node_program()
+            )
+        });
     }
     let bin_dir = out_dir.join("node_modules").join(".bin");
     if let Some(local_tsx) = toolchain::npm_bin(&bin_dir, "tsx") {
@@ -715,23 +769,25 @@ fn run_tsx(out_dir: &Path, script_name: &str) -> Result<std::process::ExitStatus
             .map(|name| name.to_string_lossy().into_owned())
             .unwrap_or_else(|| "tsx".to_string());
         let tsx_shim = Path::new("node_modules").join(".bin").join(shim_name);
-        return Command::new(&tsx_shim)
-            .arg(script_name)
-            .current_dir(out_dir)
-            .status()
-            .with_context(|| format!("failed to run {}", tsx_shim.display()));
+        return child::output(
+            Command::new(&tsx_shim)
+                .arg(script_name)
+                .current_dir(out_dir),
+        )
+        .with_context(|| format!("failed to run {}", tsx_shim.display()));
     }
-    let npx = toolchain::npx()
-        .args(["--yes", "tsx", script_name])
-        .current_dir(out_dir)
-        .status()
-        .with_context(|| {
-            format!(
-                "failed to run {} tsx for connector requirements emit",
-                toolchain::npx_program()
-            )
-        })?;
-    Ok(npx)
+    let output = child::output(
+        toolchain::npx()
+            .args(["--yes", "tsx", script_name])
+            .current_dir(out_dir),
+    )
+    .with_context(|| {
+        format!(
+            "failed to run {} tsx for connector requirements emit",
+            toolchain::npx_program()
+        )
+    })?;
+    Ok(output)
 }
 
 fn emit_python_connector_requirements(project: &Project, out_dir: &Path) -> Result<()> {
@@ -762,28 +818,32 @@ Path(__file__).resolve().parent.joinpath("connector-manifests.json").write_text(
     fs::write(&script_path, script)
         .with_context(|| format!("failed to write {}", script_path.display()))?;
 
-    let status = Command::new(&python)
-        .arg(script_name)
-        .current_dir(out_dir)
-        .env(
-            "PYTHONPATH",
-            pythonpath_with(out_dir, std::env::var_os("PYTHONPATH")),
+    let output = child::output(
+        Command::new(&python)
+            .arg(script_name)
+            .current_dir(out_dir)
+            .env(
+                "PYTHONPATH",
+                pythonpath_with(out_dir, std::env::var_os("PYTHONPATH")),
+            ),
+    )
+    .with_context(|| {
+        format!(
+            "failed to run {} for connector requirements emit",
+            python.display()
         )
-        .status()
-        .with_context(|| {
+    })?;
+    if !output.status.success() {
+        return Err(child_failed(
+            &output,
             format!(
-                "failed to run {} for connector requirements emit",
-                python.display()
-            )
-        })?;
-    if !status.success() {
-        bail!(
-            "failed to emit connector requirements via {} (exit {}). \
-             Install project deps (`uv sync`) and ensure `connectors/*` exports branded \
-             Connector objects.",
-            python.display(),
-            status.code().unwrap_or(-1)
-        );
+                "failed to emit connector requirements via {} (exit {}). \
+                 Install project deps (`uv sync`) and ensure `connectors/*` exports branded \
+                 Connector objects.",
+                python.display(),
+                output.status.code().unwrap_or(-1)
+            ),
+        ));
     }
     Ok(())
 }
@@ -797,28 +857,32 @@ fn emit_python_mcp_connection_entries(project: &Project, out_dir: &Path) -> Resu
     fs::write(&script_path, PYTHON_MCP_CONNECTIONS_SCRIPT)
         .with_context(|| format!("failed to write {}", script_path.display()))?;
 
-    let status = Command::new(&python)
-        .arg(script_name)
-        .current_dir(out_dir)
-        .env(
-            "PYTHONPATH",
-            pythonpath_with(out_dir, std::env::var_os("PYTHONPATH")),
+    let output = child::output(
+        Command::new(&python)
+            .arg(script_name)
+            .current_dir(out_dir)
+            .env(
+                "PYTHONPATH",
+                pythonpath_with(out_dir, std::env::var_os("PYTHONPATH")),
+            ),
+    )
+    .with_context(|| {
+        format!(
+            "failed to run {} for MCP connection entry emit",
+            python.display()
         )
-        .status()
-        .with_context(|| {
+    })?;
+    if !output.status.success() {
+        return Err(child_failed(
+            &output,
             format!(
-                "failed to run {} for MCP connection entry emit",
-                python.display()
-            )
-        })?;
-    if !status.success() {
-        bail!(
-            "failed to emit MCP connection entries via {} (exit {}). \
-             Ensure `connectors/*` exports branded Connector objects and that \
-             project dependencies are installed.",
-            python.display(),
-            status.code().unwrap_or(-1)
-        );
+                "failed to emit MCP connection entries via {} (exit {}). \
+                 Ensure `connectors/*` exports branded Connector objects and that \
+                 project dependencies are installed.",
+                python.display(),
+                output.status.code().unwrap_or(-1)
+            ),
+        ));
     }
     Ok(())
 }
@@ -845,27 +909,31 @@ Path(__file__).resolve().parent.joinpath("channel-manifests.json").write_text(
 "#;
     fs::write(&script_path, script)
         .with_context(|| format!("failed to write {}", script_path.display()))?;
-    let status = Command::new(&python)
-        .arg(script_name)
-        .current_dir(out_dir)
-        .env(
-            "PYTHONPATH",
-            pythonpath_with(out_dir, std::env::var_os("PYTHONPATH")),
+    let output = child::output(
+        Command::new(&python)
+            .arg(script_name)
+            .current_dir(out_dir)
+            .env(
+                "PYTHONPATH",
+                pythonpath_with(out_dir, std::env::var_os("PYTHONPATH")),
+            ),
+    )
+    .with_context(|| {
+        format!(
+            "failed to run {} for channel requirements emit",
+            python.display()
         )
-        .status()
-        .with_context(|| {
+    })?;
+    if !output.status.success() {
+        return Err(child_failed(
+            &output,
             format!(
-                "failed to run {} for channel requirements emit",
-                python.display()
-            )
-        })?;
-    if !status.success() {
-        bail!(
-            "failed to emit channel requirements via {} (exit {}). \
-             Install project deps (`uv sync`) and ensure `channels/*` exports branded Channel objects.",
-            python.display(),
-            status.code().unwrap_or(-1)
-        );
+                "failed to emit channel requirements via {} (exit {}). \
+                 Install project deps (`uv sync`) and ensure `channels/*` exports branded Channel objects.",
+                python.display(),
+                output.status.code().unwrap_or(-1)
+            ),
+        ));
     }
     Ok(())
 }
@@ -910,17 +978,19 @@ fn install_python_emit_deps(out_dir: &Path, python: &Path) -> Result<()> {
         toolchain::uv_available(),
     );
     let installer = python_emit_installer_label(use_uv, python);
-    let output = python_emit_install_command(&site, use_uv, python)
-        .current_dir(out_dir)
-        .output()
-        .with_context(|| format!("failed to run {installer} for connector requirements emit"))?;
+    let output =
+        child::output(python_emit_install_command(&site, use_uv, python).current_dir(out_dir))
+            .with_context(|| {
+                format!("failed to run {installer} for connector requirements emit")
+            })?;
     if !output.status.success() {
-        let stderr = String::from_utf8_lossy(&output.stderr);
-        bail!(
-            "{installer} --target {} ./__runtime__ failed \
-             (needed to resolve connector imports):\n{stderr}",
-            PYTHON_EMIT_SITE_DIR
-        );
+        return Err(child_failed(
+            &output,
+            format!(
+                "{installer} --target {PYTHON_EMIT_SITE_DIR} ./__runtime__ failed \
+                 (needed to resolve connector imports)"
+            ),
+        ));
     }
     write_stamp(&stamp, &fingerprint)
 }
@@ -1552,6 +1622,47 @@ build-backend = \"setuptools.build_meta\"
             user_connections_from_connector_requirements(&requirements),
             vec!["notion".to_string(), "tavily".to_string()]
         );
+    }
+
+    #[test]
+    fn channel_reserved_agent_connections_are_not_workspace_connections() {
+        // The GitHub channel's setup provides the App's installation token,
+        // so deploy neither checks for it nor creates it.
+        let requirements = BTreeMap::from([(
+            "mcp".to_string(),
+            serde_json::json!({
+                "userConnections": ["notion"],
+                "agentConnections": ["mda/github-token", "docs-token"],
+            }),
+        )]);
+
+        assert_eq!(
+            referenced_connection_slugs(&requirements),
+            vec!["docs-token".to_string(), "notion".to_string()]
+        );
+    }
+
+    #[test]
+    fn a_channel_reserved_connection_is_not_supported_as_a_user_connection() {
+        let requirements = BTreeMap::from([(
+            "mcp".to_string(),
+            serde_json::json!({ "userConnections": ["mda/github-token"] }),
+        )]);
+
+        // It stays listed, so deploy can refuse it.
+        assert_eq!(
+            user_connections_from_connector_requirements(&requirements),
+            vec!["mda/github-token".to_string()]
+        );
+        let error = reserved_user_connection_error("mda/github-token").unwrap();
+        assert!(
+            error.contains("not supported as a user connection yet"),
+            "{error}"
+        );
+        assert!(error.contains("{ type: \"agent\" }"), "{error}");
+        let linear = reserved_user_connection_error("mda/linear-token").unwrap();
+        assert!(linear.contains("the Linear app's token"), "{linear}");
+        assert!(reserved_user_connection_error("notion").is_none());
     }
 
     #[test]

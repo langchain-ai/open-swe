@@ -60,7 +60,11 @@ function parseCombo(combo: string): ParsedCombo {
   return parsed
 }
 
-/** Browser navigation the app must never take over, even where a page could intercept it. */
+/**
+ * Browser navigation the app must never take over, even where a page could
+ * intercept it. Find (⌘F, ⌘G) is left to pages with their own, such as a
+ * virtualized diff the browser's find can't see into.
+ */
 const BROWSER_SHORTCUTS = [
   "mod+l",
   "alt+d",
@@ -68,8 +72,6 @@ const BROWSER_SHORTCUTS = [
   "mod+w",
   "mod+r",
   "mod+shift+r",
-  "mod+f",
-  "mod+g",
   "mod+p",
   "mod+[",
   "mod+]",
