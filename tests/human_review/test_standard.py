@@ -818,20 +818,31 @@ async def test_assignment_inbox_is_personal_and_hides_completed_or_inaccessible_
     assert [row.number for row in result.pull_requests] == [1]
 
 
-@pytest.mark.parametrize(("user", "blocked"), [(User(), False), (None, True)])
-async def test_review_blockers_refuse_authors_without_an_open_swe_account(
-    user: User | None, blocked: bool
+@pytest.mark.parametrize(
+    ("author", "user", "draft", "expected"),
+    [
+        ("ada", User(), False, []),
+        ("ada", None, False, ["its author is not an Open SWE user"]),
+        ("open-swe[bot]", None, False, []),
+        ("open-swe-preview[bot]", None, False, []),
+        ("openswe-dev[bot]", None, False, []),
+        ("another[bot]", None, False, ["its author is not an Open SWE user"]),
+        ("open-swe[bot]", None, True, ["it is a draft"]),
+    ],
+)
+async def test_review_blockers_require_an_account_or_an_open_swe_bot(
+    author: str, user: User | None, draft: bool, expected: list[str]
 ) -> None:
     from openswe.expedited_review.readiness import Readiness
     from openswe.human_review.standard import review_blockers
 
-    readiness = Readiness(snapshot=_snapshot(), blockers=[])
+    readiness = Readiness(snapshot=_snapshot(author=author, draft=draft), blockers=[])
     with (
         patch.object(Readiness, "assess", AsyncMock(return_value=readiness)),
         patch.object(User, "for_login", AsyncMock(return_value=user)),
     ):
         blockers = await review_blockers(MagicMock())
-    assert blockers == (["its author is not an Open SWE user"] if blocked else [])
+    assert blockers == expected
 
 
 @pytest.mark.usefixtures("registry_db")
