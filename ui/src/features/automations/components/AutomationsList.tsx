@@ -1,6 +1,6 @@
 import { PlusIcon, StackRegularIcon } from "@langchain/macaw-components/icons"
 import { Text } from "@langchain/macaw-components/Text"
-import { Link } from "@tanstack/react-router"
+import { Link, useNavigate } from "@tanstack/react-router"
 import { Banner } from "@langchain/macaw-components/Banner"
 import { Button } from "@langchain/macaw-components/Button"
 import { Card } from "@langchain/macaw-components/Card"
@@ -22,6 +22,7 @@ import { describeTriggers } from "@/features/automations/lib/triggers"
 import {
   agentMutationKeys,
   useAgentSchedules,
+  useTriggerAgentSchedule,
   useUpdateAgentSchedule,
   useWorkspaceOptions,
 } from "@/features/agents/lib/queries"
@@ -191,7 +192,9 @@ function AutomationRow({
   schedule: AgentSchedule
   canManage: boolean
 }) {
+  const navigate = useNavigate()
   const updateSchedule = useUpdateAgentSchedule()
+  const triggerSchedule = useTriggerAgentSchedule()
   const workspaces = useWorkspaceOptions().data?.workspaces ?? []
   const workspaceName =
     workspaces.find((option) => option.slug === schedule.workspace)?.name ??
@@ -199,10 +202,27 @@ function AutomationRow({
   const isToggling = usePendingVariables<{ scheduleId: string }>(
     agentMutationKeys.updateSchedule
   ).some((vars) => vars.scheduleId === schedule.id)
+  const isTesting =
+    triggerSchedule.isPending && triggerSchedule.variables === schedule.id
+
+  const onTest = (e: React.MouseEvent) => {
+    e.preventDefault()
+    e.stopPropagation()
+    if (isTesting || isToggling) return
+    triggerSchedule.mutate(schedule.id, {
+      onSuccess: (result) => {
+        void navigate({
+          to: "/agents/$threadId",
+          params: { threadId: result.thread_id },
+        })
+      },
+    })
+  }
+
   const onToggle = (e: React.MouseEvent) => {
     e.preventDefault()
     e.stopPropagation()
-    if (isToggling) return
+    if (isTesting || isToggling) return
     updateSchedule.mutate({
       scheduleId: schedule.id,
       body: { enabled: !schedule.enabled },
@@ -277,16 +297,29 @@ function AutomationRow({
         </IconButton>
       )}
       {canManage && (
-        <IconButton
-          icon={schedule.enabled ? PauseIcon : PlayIcon}
-          label={schedule.enabled ? "Pause automation" : "Resume automation"}
-          color="secondary"
-          variant="plain"
-          size="md"
-          onClick={onToggle}
-          disabled={isToggling}
-          className="shrink-0"
-        />
+        <>
+          <Button
+            color="secondary"
+            variant="outlined"
+            leftDecorator={LightningIcon}
+            onClick={onTest}
+            disabled={isTesting || isToggling}
+            aria-label="Test automation"
+            className="shrink-0"
+          >
+            {isTesting ? "Starting…" : "Test"}
+          </Button>
+          <IconButton
+            icon={schedule.enabled ? PauseIcon : PlayIcon}
+            label={schedule.enabled ? "Pause automation" : "Resume automation"}
+            color="secondary"
+            variant="plain"
+            size="md"
+            onClick={onToggle}
+            disabled={isTesting || isToggling}
+            className="shrink-0"
+          />
+        </>
       )}
     </div>
   )
