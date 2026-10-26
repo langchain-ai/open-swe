@@ -19,19 +19,22 @@ for (const entry of await readdir(root, {
     body: body.toString("base64"),
   })
 }
-const { commit } = JSON.parse(
-  await readFile(`${root}/open-swe-build-info.json`, "utf8")
-)
-if (!/^[a-f0-9]{40}$/.test(commit))
-  throw new Error("Desktop UI release requires a commit SHA")
 const archive = gzipSync(JSON.stringify({ files }))
 await mkdir(output, { recursive: true })
 await writeFile(`${output}/ui.json.gz`, archive)
-await writeFile(
-  `${output}/descriptor.json`,
-  JSON.stringify({
-    bridge_version: 1,
-    url: `https://github.com/langchain-ai/open-swe/releases/download/desktop-ui-${commit}/ui.json.gz`,
-    sha256: createHash("sha256").update(archive).digest("hex"),
-  })
+
+// Images build without a git checkout or SOURCE_COMMIT; only a release needs
+// the descriptor, so a missing commit must not fail the dashboard build.
+const { commit } = JSON.parse(
+  await readFile(`${root}/open-swe-build-info.json`, "utf8")
 )
+if (/^[a-f0-9]{40}$/.test(commit ?? "")) {
+  await writeFile(
+    `${output}/descriptor.json`,
+    JSON.stringify({
+      bridge_version: 1,
+      url: `https://github.com/langchain-ai/open-swe/releases/download/desktop-ui-${commit}/ui.json.gz`,
+      sha256: createHash("sha256").update(archive).digest("hex"),
+    })
+  )
+}

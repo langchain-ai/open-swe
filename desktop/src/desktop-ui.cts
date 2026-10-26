@@ -3,6 +3,7 @@ const { createHash } = require("node:crypto");
 const {
   mkdir,
   mkdtemp,
+  readdir,
   readFile,
   rename,
   rm,
@@ -217,7 +218,20 @@ class DesktopUi {
     const target = path.join(this.directory, "current.json");
     await writeFile(`${target}.tmp`, JSON.stringify(snapshot));
     await rename(`${target}.tmp`, target);
+    await this.prune(snapshot.version);
     return snapshot;
+  }
+
+  // The version being served keeps its directory so its lazy chunks still load.
+  private async prune(current: string): Promise<void> {
+    const keep = new Set([current, this.snapshot?.version, "current.json"]);
+    for (const entry of await readdir(this.directory)) {
+      if (keep.has(entry)) continue;
+      await rm(path.join(this.directory, entry), {
+        recursive: true,
+        force: true,
+      });
+    }
   }
 
   private async fetchPublic(url: string, redirects = 0): Promise<Response> {

@@ -1,6 +1,13 @@
 import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
-import { mkdtemp, readdir, readFile, rm, writeFile } from "node:fs/promises";
+import {
+  mkdir,
+  mkdtemp,
+  readdir,
+  readFile,
+  rm,
+  writeFile,
+} from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import test from "node:test";
@@ -201,4 +208,33 @@ test("installs a local archive on every load instead of contacting the backend",
   assert.equal(await (await ui.serve(page())).text(), "local v1");
   await writeFile(archive, archiveOf({ "/_shell.html": "local v2" }));
   assert.equal(await (await ui.serve(page())).text(), "local v2");
+});
+
+test("prunes superseded versions and crashed installs, keeping the one being served", async (t) => {
+  const root = await fixture(t);
+  const cache = path.join(root, "cache");
+  const backend = path.join(
+    cache,
+    createHash("sha256").update("https://backend.example").digest("hex"),
+  );
+  for (const version of ["v1", "v2", "v3"]) {
+    const ui = new DesktopUi(
+      "https://backend.example",
+      server(version),
+      cache,
+      serveFile,
+    );
+    await ui.serve(page()).catch(() => {});
+    await ui.refresh();
+    await mkdir(path.join(backend, "staging-crashed"), { recursive: true });
+  }
+  const entries = await readdir(backend);
+  assert.equal(
+    entries.filter((entry) => entry.startsWith("staging-")).length,
+    1,
+  );
+  assert.equal(
+    entries.filter((entry) => /^[a-f0-9]{64}$/.test(entry)).length,
+    2,
+  );
 });
