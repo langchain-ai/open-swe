@@ -23,7 +23,6 @@ import re
 from collections.abc import Awaitable, Callable, Iterable, Mapping
 from functools import partial
 from typing import Final
-from weakref import WeakKeyDictionary
 
 from langchain.agents.middleware import AgentMiddleware
 from langchain.agents.middleware.types import ModelRequest, ModelResponse
@@ -39,7 +38,7 @@ from runtime_api.catalog import FilesSpec
 from runtime_api.endpoint import call
 from runtime_api.operations import CHECK_SHELL, ShellCheck
 
-from rt.backend import OpenSweBackend, Run
+from rt.backend import OpenSweBackend, RunLocal
 from rt.middleware import reported
 from rt.remote_files import FILE_TOOLS, RemoteFiles, remote_file_tools
 from rt.subdir_agents import SubdirAgentsReadMiddleware
@@ -95,7 +94,11 @@ class FileToolsMiddleware(AgentMiddleware):
         self._remote_files = remote_files
         # Each run's view of the backend's files as deepagents' own tools, with large
         # results under the run's artifacts root, which a bridged thread has its own of.
-        self._remote_by_run: WeakKeyDictionary[Run, dict[str, BaseTool]] = WeakKeyDictionary()
+        self._remote_by_run = RunLocal(
+            lambda: remote_file_tools(
+                self._remote_files, self._backend.run.catalog.files.artifacts_root
+            )
+        )
         # The run's skills, which this runtime keeps itself (``rt.skills``).
         self._skills = dict(skills or {})
         # The box's own tools, as the model is offered them; code mode runs them from here.
@@ -117,12 +120,7 @@ class FileToolsMiddleware(AgentMiddleware):
 
     @property
     def _remote(self) -> dict[str, BaseTool]:
-        run = self._backend.run
-        if run not in self._remote_by_run:
-            self._remote_by_run[run] = remote_file_tools(
-                self._remote_files, run.catalog.files.artifacts_root
-            )
-        return self._remote_by_run[run]
+        return self._remote_by_run.get(self._backend.run)
 
     def code_tools(self, names: Iterable[str]) -> list[StructuredTool]:
         """The file and shell tools among ``names``, for code mode, each call checked."""

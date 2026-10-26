@@ -1,3 +1,6 @@
+import asyncio
+import gc
+import weakref
 from collections import OrderedDict
 from collections.abc import Iterator
 from unittest.mock import AsyncMock, MagicMock
@@ -8,7 +11,9 @@ import pytest
 from deepagents.backends import StateBackend
 from deepagents.backends.protocol import ExecuteResponse
 from langchain_core.language_models.fake_chat_models import GenericFakeChatModel
-from langchain_core.messages import AIMessage, ToolCall
+from langchain_core.messages import AIMessage, BaseMessage, SystemMessage, ToolCall, ToolMessage
+from langchain_core.outputs import ChatGeneration, ChatResult
+from langchain_core.tools import BaseTool
 from langgraph.graph.state import CompiledStateGraph
 from langgraph.store.memory import InMemoryStore
 from langgraph_sdk.runtime import _ExecutionRuntime, _ReadRuntime
@@ -16,10 +21,14 @@ from managed_deepagents import runtime as mda_runtime
 from managed_deepagents.runtime import ManagedRunConfig, compile_managed_agent_async
 from managed_deepagents.sandbox import SandboxDefinition
 from pydantic import JsonValue
+from rt.backend import Run, current_run
+from rt.run_tools import RunCodeInterpreter
 from runtime_api.catalog import (
     Catalog,
     LoopRules,
+    ModelSpec,
     OperationSpec,
+    RunModels,
     SandboxCreate,
     SandboxSpec,
     SubagentSpec,
@@ -206,3 +215,253 @@ async def test_each_run_on_the_shared_graph_works_in_its_own_threads_box(
 
     assert second.nodes["model"] is first.nodes["model"]
     assert opened == {("thread-1", "a"), ("thread-2", "b")}
+
+
+@pytest.mark.parametrize("code_mode", [False, True])
+async def test_finished_runs_release_their_tools_and_interpreters(
+    monkeypatch: pytest.MonkeyPatch, backend_calls: BackendCalls, code_mode: bool
+) -> None:
+    runs: list[weakref.ReferenceType[Run]] = []
+
+    def bind(
+        model: GenericFakeChatModel, tools: list[BaseTool], **kwargs: object
+    ) -> GenericFakeChatModel:
+        runs.append(weakref.ref(current_run()))
+        return model
+
+    monkeypatch.setattr(GenericFakeChatModel, "bind_tools", bind)
+    call = ToolCall(
+        name="eval" if code_mode else "lookup",
+        args={"code": "await tools.lookup({})"}
+        if code_mode
+        else {"display_description": "Look up"},
+        id="lookup",
+    )
+    monkeypatch.setattr(agent, "_DEFAULT_MODEL", _calling(*[call for _ in range(5)]))
+    catalog = _catalog("lookup", "grant").model_copy(
+        update={
+            "described": {"lookup": "What this does"},
+            "code_only": ["lookup"] if code_mode else [],
+        }
+    )
+    store = InMemoryStore()
+    for index in range(5):
+        await _run(store, f"gc-{index}", _context("agent", f"token-{index}", catalog))
+    await asyncio.sleep(0)
+    gc.collect()
+
+    assert runs and all(run() is None for run in runs)
+    assert len([operation for _, _, operation in backend_calls if operation]) == 5
+    interpreter = next(
+        middleware
+        for middleware in agent._parts(agent.GraphInputs()).middleware
+        if isinstance(middleware, RunCodeInterpreter)
+    )
+    assert not interpreter._registry._slots
+    assert not interpreter._ptc_tools_by_slot
+
+
+async def test_concurrent_runs_offer_and_call_only_their_own_operations(
+    monkeypatch: pytest.MonkeyPatch, backend_calls: BackendCalls
+) -> None:
+    offered: dict[str, set[str]] = {}
+    together = asyncio.Event()
+
+    def bind(
+        model: GenericFakeChatModel, tools: list[BaseTool], **kwargs: object
+    ) -> GenericFakeChatModel:
+        run = current_run()
+        offered[run.bearer or ""] = {tool.name for tool in tools}
+        return model
+
+    async def generate(
+        model: GenericFakeChatModel, messages: list[BaseMessage], **kwargs: object
+    ) -> ChatResult:
+        run = current_run()
+        if not any(isinstance(message, ToolMessage) for message in messages):
+            if len(offered) == 2:
+                together.set()
+            await asyncio.wait_for(together.wait(), timeout=10)
+            reply = AIMessage(
+                content="",
+                tool_calls=[
+                    ToolCall(name=run.catalog.operations[0].name, args={}, id="own-operation")
+                ],
+            )
+        else:
+            reply = AIMessage(content="done")
+        return ChatResult(generations=[ChatGeneration(message=reply)])
+
+    monkeypatch.setattr(GenericFakeChatModel, "bind_tools", bind)
+    monkeypatch.setattr(GenericFakeChatModel, "_agenerate", generate)
+    monkeypatch.setattr(agent, "_DEFAULT_MODEL", _calling())
+    store = InMemoryStore()
+    await asyncio.gather(
+        *(
+            _run(
+                store,
+                f"concurrent-{i}",
+                _context("agent", f"token-{i}", _catalog(f"operation_{i}", f"grant-{i}")),
+            )
+            for i in range(2)
+        )
+    )
+
+    assert "operation_0" in offered["token-0"] - offered["token-1"]
+    assert "operation_1" in offered["token-1"] - offered["token-0"]
+    assert sorted((bearer, operation) for _, bearer, operation in backend_calls if operation) == [
+        ("Bearer token-0", "operation_0:grant-0"),
+        ("Bearer token-1", "operation_1:grant-1"),
+    ]
+
+
+async def test_failed_code_run_releases_its_interpreter(
+    monkeypatch: pytest.MonkeyPatch, backend_calls: BackendCalls
+) -> None:
+    def replies() -> Iterator[AIMessage]:
+        yield AIMessage(
+            content="",
+            tool_calls=[ToolCall(name="eval", args={"code": "await tools.lookup({})"}, id="eval")],
+        )
+        raise RuntimeError("model failed after eval")
+
+    monkeypatch.setattr(agent, "_DEFAULT_MODEL", GenericFakeChatModel(messages=replies()))
+    catalog = _catalog("lookup", "grant").model_copy(update={"code_only": ["lookup"]})
+    with pytest.raises(RuntimeError, match="model failed after eval"):
+        await _run(InMemoryStore(), "failed", _context("agent", "token", catalog))
+    await asyncio.sleep(0)
+    gc.collect()
+
+    interpreter = next(
+        middleware
+        for middleware in agent._parts(agent.GraphInputs()).middleware
+        if isinstance(middleware, RunCodeInterpreter)
+    )
+    assert any(operation == "lookup:grant" for _, _, operation in backend_calls)
+    assert not interpreter._registry._slots
+    assert not interpreter._ptc_tools_by_slot
+
+
+async def test_code_prompt_uses_each_runs_schema_even_when_names_match(
+    monkeypatch: pytest.MonkeyPatch, backend_calls: BackendCalls
+) -> None:
+    prompts: list[str] = []
+
+    async def generate(
+        model: GenericFakeChatModel, messages: list[BaseMessage], **kwargs: object
+    ) -> ChatResult:
+        prompts.append(
+            "\n".join(message.text for message in messages if isinstance(message, SystemMessage))
+        )
+        return ChatResult(generations=[ChatGeneration(message=AIMessage(content="done"))])
+
+    monkeypatch.setattr(GenericFakeChatModel, "_agenerate", generate)
+    monkeypatch.setattr(agent, "_DEFAULT_MODEL", _calling())
+    store = InMemoryStore()
+    for parameter in ("first_parameter", "second_parameter"):
+        catalog = _catalog("lookup", "grant").model_copy(
+            update={
+                "operations": [
+                    OperationSpec(
+                        name="lookup",
+                        description=f"Uses {parameter}",
+                        parameters={
+                            "type": "object",
+                            "properties": {parameter: {"type": "string"}},
+                            "required": [parameter],
+                        },
+                        grant="grant",
+                    )
+                ],
+                "code_only": ["lookup"],
+            }
+        )
+        await _run(store, parameter, _context("agent", parameter, catalog))
+
+    assert "first_parameter" in prompts[0] and "second_parameter" not in prompts[0]
+    assert "second_parameter" in prompts[1] and "first_parameter" not in prompts[1]
+
+
+async def test_sync_subagent_uses_its_runs_prompt_model_and_tools(
+    monkeypatch: pytest.MonkeyPatch, backend_calls: BackendCalls
+) -> None:
+    observed: list[tuple[str, str, set[str]]] = []
+
+    def bind(
+        model: GenericFakeChatModel, tools: list[BaseTool], **kwargs: object
+    ) -> GenericFakeChatModel:
+        if model.name and model.name.startswith("child-"):
+            observed.append((current_run().bearer or "", model.name, {tool.name for tool in tools}))
+        return model
+
+    async def generate(
+        model: GenericFakeChatModel, messages: list[BaseMessage], **kwargs: object
+    ) -> ChatResult:
+        if model.name and model.name.startswith("child-"):
+            assert any(
+                f"Prompt for {model.name}" in message.text
+                for message in messages
+                if isinstance(message, SystemMessage)
+            )
+        if any(isinstance(message, ToolMessage) for message in messages):
+            reply = AIMessage(content="done")
+        elif model.name and model.name.startswith("child-"):
+            reply = AIMessage(
+                content="",
+                tool_calls=[ToolCall(name=f"operation_{model.name[-1]}", args={}, id="child-call")],
+            )
+        else:
+            reply = AIMessage(
+                content="",
+                tool_calls=[
+                    ToolCall(
+                        name="task",
+                        args={"subagent_type": "general-purpose", "description": "Do the task"},
+                        id="task-call",
+                    )
+                ],
+            )
+        return ChatResult(generations=[ChatGeneration(message=reply)])
+
+    def build(spec: ModelSpec, **kwargs: object) -> GenericFakeChatModel:
+        name = spec.model_id
+        model = _calling()
+        model.name = name
+        return model
+
+    monkeypatch.setattr(GenericFakeChatModel, "bind_tools", bind)
+    monkeypatch.setattr(GenericFakeChatModel, "_agenerate", generate)
+    monkeypatch.setattr("rt.middleware.build_model", build)
+    monkeypatch.setattr("rt.run_tools.build_model", build)
+    monkeypatch.setattr(agent, "_DEFAULT_MODEL", _calling())
+    store = InMemoryStore()
+    for index in range(2):
+        catalog = _catalog(f"operation_{index}", f"grant-{index}").model_copy(
+            update={
+                "models": RunModels(
+                    model=ModelSpec(model_id=f"parent-{index}", kwargs={}),
+                    subagent_model=ModelSpec(model_id=f"child-{index}", kwargs={}),
+                    use_gateway=False,
+                ),
+                "subagents": [
+                    SubagentSpec(
+                        name="general-purpose",
+                        description="Run the task",
+                        system_prompt=f"Prompt for child-{index}",
+                        tools=[f"operation_{index}"],
+                    )
+                ],
+            }
+        )
+        await _run(store, f"subagent-{index}", _context("agent", f"token-{index}", catalog))
+
+    for token, model, tools in observed:
+        index = token[-1]
+        assert model == f"child-{index}"
+        assert f"operation_{index}" in tools
+        assert f"operation_{1 - int(index)}" not in tools
+    assert {model for _, model, _ in observed} == {"child-0", "child-1"}
+    assert [(bearer, operation) for _, bearer, operation in backend_calls if operation] == [
+        ("Bearer token-0", "operation_0:grant-0"),
+        ("Bearer token-1", "operation_1:grant-1"),
+    ]

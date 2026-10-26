@@ -7,9 +7,9 @@ call names; code mode reaches the same tools (``RunCodeInterpreter``). A subagen
 prompt and model, and the run's limit on model calls, are the run's too.
 """
 
-from collections.abc import Awaitable, Callable, Sequence
+from collections.abc import Awaitable, Callable, Mapping, Sequence
 from typing import Final
-from weakref import WeakKeyDictionary
+from weakref import finalize
 
 from langchain.agents.middleware import AgentMiddleware, ModelCallLimitMiddleware
 from langchain.agents.middleware.types import ModelRequest, ModelResponse
@@ -24,7 +24,7 @@ from langgraph.types import Command
 from runtime_api.catalog import Catalog, SubagentSpec
 from runtime_api.loop import ModelCall
 
-from rt.backend import BackendCallError, OpenSweBackend, Run
+from rt.backend import BackendCallError, OpenSweBackend, Run, RunLocal, current_run
 from rt.file_tools import FileToolsMiddleware
 from rt.models import build_model
 from rt.search_tools import search_tools_tool
@@ -98,14 +98,14 @@ class RunToolsets:
     def __init__(self, backend: OpenSweBackend, files: FileToolsMiddleware) -> None:
         self._backend = backend
         self._files = files
-        self._runs: WeakKeyDictionary[Run, RunTools] = WeakKeyDictionary()
+        self._runs = RunLocal[list[RunTools]](list)
 
     def get(self, run: Run | None = None) -> RunTools:
         run = run if run is not None else self._backend.run
-        tools = self._runs.get(run)
-        if tools is None or tools.catalog is not run.catalog:
-            tools = self._runs[run] = RunTools(run.catalog, run.backend, self._files)
-        return tools
+        held = self._runs.get(run)
+        if not held or held[0].catalog is not run.catalog:
+            held[:] = [RunTools(run.catalog, self._backend, self._files)]
+        return held[0]
 
 
 class RunToolsMiddleware(AgentMiddleware):
@@ -122,7 +122,7 @@ class RunToolsMiddleware(AgentMiddleware):
         self._toolsets = toolsets
         self._subagent = subagent
         # The ``task`` tool as each run describes its subagents, by the description.
-        self._task_tools: dict[tuple[int, str], BaseTool] = {}
+        self._task_tools = RunLocal[dict[tuple[int, str], BaseTool]](dict)
 
     async def awrap_model_call(self, request: ModelRequest, handler: ModelHandler) -> ModelResponse:
         tools = self._toolsets.get()
@@ -155,9 +155,10 @@ class RunToolsMiddleware(AgentMiddleware):
         for spec in tools.subagents.values():
             description = description.replace(subagent_description(spec.name), spec.description)
         key = (id(task), description)
-        if key not in self._task_tools:
-            self._task_tools[key] = task.model_copy(update={"description": description})
-        return self._task_tools[key]
+        task_tools = self._task_tools.get(current_run())
+        if key not in task_tools:
+            task_tools[key] = task.model_copy(update={"description": description})
+        return task_tools[key]
 
     async def awrap_tool_call(
         self, request: ToolCallRequest, handler: ToolHandler
@@ -208,7 +209,31 @@ class RunCodeInterpreter(CodeInterpreterMiddleware):
         self._toolsets = toolsets
         self._named = list(named)
         self._active = active
+        self._prompts = RunLocal[list[tuple[frozenset[str], str] | None]](lambda: [None])
+        self._slots = RunLocal[set[str]](set)
         super().__init__(ptc=[], subagents=subagents, mode=mode)
+
+    @property
+    def _ptc_prompt_cache(self) -> tuple[frozenset[str], str] | None:
+        return self._prompts.get(current_run())[0]
+
+    @_ptc_prompt_cache.setter
+    def _ptc_prompt_cache(self, value: tuple[frozenset[str], str] | None) -> None:
+        if value is not None:
+            self._prompts.get(current_run())[0] = value
+
+    def _slot_id(self, state: Mapping[str, object]) -> str:
+        slot_id = super()._slot_id(state)
+        run = current_run()
+        slots = self._slots.get(run)
+        if slot_id not in slots:
+            slots.add(slot_id)
+            finalize(run, self._evict, slot_id)
+        return slot_id
+
+    def _evict(self, slot_id: str) -> None:
+        self._ptc_tools_by_slot.pop(slot_id, None)
+        self._registry.evict(slot_id)
 
     @property
     def _ptc(self) -> list[str | BaseTool]:
@@ -229,7 +254,11 @@ class RunCodeInterpreter(CodeInterpreterMiddleware):
     async def abefore_agent(self, state: REPLState, runtime: Runtime) -> dict[str, object] | None:
         if not self._runs_code():
             return None
-        return await super().abefore_agent(state, runtime)
+        update = self._slot_update_for_runtime()
+        prepared: REPLState = {**state, "_quickjs_slot_id": update["_quickjs_slot_id"]}
+        self._slot_id(prepared)
+        restored = await super().abefore_agent(prepared, runtime)
+        return {**update, **(restored or {})} or None
 
     async def awrap_model_call(self, request: ModelRequest, handler: ModelHandler) -> ModelResponse:
         if not self._runs_code():

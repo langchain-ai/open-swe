@@ -33,7 +33,6 @@ from collections.abc import (
 from contextlib import contextmanager
 from contextvars import ContextVar
 from typing import Annotated, Final, NotRequired
-from weakref import WeakKeyDictionary
 
 import httpx
 from deepagents.middleware import async_subagents
@@ -84,7 +83,6 @@ from runtime_api.workers import LAUNCH_WORKER, WORKER_LAUNCHED, Launch, Launched
 from rt.backend import (
     BackendCallError,
     OpenSweBackend,
-    Run,
     RunLocal,
     human_messages,
     namespace,
@@ -207,7 +205,7 @@ class DescribedToolsMiddleware(AgentMiddleware):
 
     def __init__(self, backend: OpenSweBackend) -> None:
         self._backend = backend
-        self._offered: dict[tuple[int, str], tuple[BaseTool, BaseTool]] = {}
+        self._offered = RunLocal[dict[tuple[int, str], tuple[BaseTool, BaseTool]]](dict)
 
     @property
     def _described(self) -> Mapping[str, str]:
@@ -215,7 +213,8 @@ class DescribedToolsMiddleware(AgentMiddleware):
 
     def _offered_as(self, tool: BaseTool) -> BaseTool:
         label = self._described[tool.name]
-        cached = self._offered.get((id(tool), label))
+        offered_cache = self._offered.get(self._backend.run)
+        cached = offered_cache.get((id(tool), label))
         if cached is not None and cached[0] is tool:
             return cached[1]
         schema = tool.tool_call_schema
@@ -228,7 +227,7 @@ class DescribedToolsMiddleware(AgentMiddleware):
         )
         properties = parameters.get("properties")
         if isinstance(properties, dict) and DISPLAY_DESCRIPTION in properties:
-            self._offered[(id(tool), label)] = (tool, tool)
+            offered_cache[(id(tool), label)] = (tool, tool)
             return tool
         required = parameters.get("required")
         offered = tool.model_copy(
@@ -250,7 +249,7 @@ class DescribedToolsMiddleware(AgentMiddleware):
                 }
             }
         )
-        self._offered[(id(tool), label)] = (tool, offered)
+        offered_cache[(id(tool), label)] = (tool, offered)
         return offered
 
     async def awrap_model_call(
@@ -295,7 +294,7 @@ class BackendRunMiddleware(AgentMiddleware[RunState]):
         self._backend = backend
         self._run_loop = RunLoop(backend)
         # Each run's own model, built from its catalog.
-        self._models: WeakKeyDictionary[Run, BaseChatModel] = WeakKeyDictionary()
+        self._models = RunLocal(self._build_model)
         self._traces = RunLocal(TurnTrace)
         # Opens the thread's box before preparing, so the backend binds the thread to it.
         self._open_sandbox = open_sandbox
@@ -321,9 +320,13 @@ class BackendRunMiddleware(AgentMiddleware[RunState]):
         models = run.catalog.models
         if models is None:
             return None
-        if run not in self._models:
-            self._models[run] = build_model(models.model, use_gateway=models.use_gateway)
-        return self._models[run]
+        return self._models.get(run)
+
+    def _build_model(self) -> BaseChatModel:
+        models = self._backend.run.catalog.models
+        if models is None:
+            raise BackendCallError("The run has no model configuration")
+        return build_model(models.model, use_gateway=models.use_gateway)
 
     def _trace_metadata(self) -> dict[str, JsonValue]:
         """Who the run acts for."""

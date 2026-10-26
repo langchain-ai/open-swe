@@ -21,7 +21,7 @@ from collections import OrderedDict
 from collections.abc import Callable, Coroutine, Iterator, Mapping, Sequence
 from contextlib import contextmanager
 from contextvars import ContextVar
-from typing import ClassVar, Final, Literal
+from typing import ClassVar, Final, Literal, cast
 from weakref import WeakKeyDictionary
 
 import httpx2
@@ -259,6 +259,13 @@ class Run:
         self.adopted: Catalog | None = None
         self.backend = OpenSweBackend(self)
         self.reports = Reports(self.backend)
+        self._locals: dict[object, object] = {}
+
+    def local[T](self, key: object, make: Callable[[], T]) -> T:
+        """Keep a lazily created value for this run alone."""
+        if key not in self._locals:
+            self._locals[key] = make()
+        return cast(T, self._locals[key])
 
     @property
     def bearer(self) -> str | None:
@@ -347,17 +354,13 @@ def current_run() -> Run:
 
 
 class RunLocal[T]:
-    """A value each run keeps of its own, made at its first use: what a ``ContextVar`` is to
-    a context, for the objects a graph shares between its runs."""
+    """A lazily created value owned by the run, never retained by the shared graph."""
 
     def __init__(self, make: Callable[[], T]) -> None:
         self._make = make
-        self._values: WeakKeyDictionary[Run, T] = WeakKeyDictionary()
 
     def get(self, run: Run) -> T:
-        if run not in self._values:
-            self._values[run] = self._make()
-        return self._values[run]
+        return run.local(self, self._make)
 
 
 class RunContext(BaseModel):
