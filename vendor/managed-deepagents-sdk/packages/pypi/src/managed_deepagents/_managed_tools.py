@@ -106,19 +106,27 @@ class ManagedToolRuntime(ToolRuntime[_ContextT, _StateT], Generic[_ContextT, _St
 class _ManagedExecutionRuntime(_ExecutionRuntime[_AppContextT | None], Generic[_AppContextT]):
     channel: RuntimeChannel | None = None
     backend: BackendProtocol | None = None
+    # Only a read has them: see ``_ManagedReadRuntime``.
+    graph_inputs: Mapping[str, object] | None = None
 
 
 @dataclass(frozen=True, slots=True, kw_only=True)
 class _ManagedReadRuntime(_ReadRuntime[_AppContextT | None], Generic[_AppContextT]):
     channel: RuntimeChannel | None = None
     backend: BackendProtocol | None = None
+    # A read of a thread that ran: the ``graph_inputs`` its last run's graph was built
+    # from, for the factory to build the same graph from. None before any run.
+    graph_inputs: Mapping[str, object] | None = None
 
 
 ManagedServerRuntime = _ManagedExecutionRuntime[_AppContextT] | _ManagedReadRuntime[_AppContextT]
 
 
 def adapt_server_runtime(
-    runtime: ServerRuntime[Any], context: object, channel: RuntimeChannel | None
+    runtime: ServerRuntime[Any],
+    context: object,
+    channel: RuntimeChannel | None,
+    graph_inputs: Mapping[str, object] | None = None,
 ) -> ManagedServerRuntime[Any]:
     runtime_type = (
         _ManagedExecutionRuntime if isinstance(runtime, _ExecutionRuntime) else _ManagedReadRuntime
@@ -127,6 +135,8 @@ def adapt_server_runtime(
     if isinstance(runtime, _ExecutionRuntime):
         values["context"] = context
     values["channel"] = channel
+    if not isinstance(runtime, _ExecutionRuntime):
+        values["graph_inputs"] = graph_inputs
     return runtime_type(**values)
 
 

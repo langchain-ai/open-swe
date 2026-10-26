@@ -60,7 +60,7 @@ from runtime_api.loop import (
 )
 from runtime_api.operations import RunRequest
 
-from rt.backend import OpenSweBackend, git_trace, human_messages, run_call
+from rt.backend import OpenSweBackend, RunLocal, git_trace, human_messages, run_call
 from rt.tools import STATE_KEY, run_id
 
 logger = logging.getLogger(__name__)
@@ -192,8 +192,8 @@ class RunLoop:
         self._backend = backend
         self._rules = rules
         self._run_models = models
-        # Models the run calls by id, such as one a person asked for, as the backend sets them.
-        self._chosen: dict[tuple[str, str | None], ModelSpec] = {}
+        # Models each run calls by id, such as one a person asked for, as the backend sets them.
+        self._chosen: RunLocal[dict[tuple[str, str | None], ModelSpec]] = RunLocal(dict)
 
     @property
     def rules(self) -> LoopRules:
@@ -289,10 +289,11 @@ class RunLoop:
 
     async def _chosen_model(self, model_id: str, effort: object) -> ModelSpec:
         key = (model_id, effort if isinstance(effort, str) else None)
-        if key not in self._chosen:
+        chosen = self._chosen.get(self._backend.run)
+        if key not in chosen:
             choice = ChosenModel(run_id=run_id(), model_id=key[0], effort=key[1])
-            self._chosen[key] = await call(self._backend, MODEL_CHOICE, choice)
-        return self._chosen[key]
+            chosen[key] = await call(self._backend, MODEL_CHOICE, choice)
+        return chosen[key]
 
     async def _model_for(self, held: Mapping[str, object]) -> ModelSpec:
         """The run's own model, a route's, or the one a person asked for."""

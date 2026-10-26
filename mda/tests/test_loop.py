@@ -11,7 +11,7 @@ from langchain_core.messages import (
     messages_from_dict,
 )
 from pydantic import BaseModel, JsonValue
-from rt.backend import BackendCallError, OpenSweBackend
+from rt.backend import BackendCallError, OpenSweBackend, Run, RunContext
 from rt.loop import RunLoop
 from rt.middleware import BackendRunMiddleware
 from rt.tools import STATE_KEY
@@ -55,7 +55,7 @@ def _backend(
     monkeypatch.setenv("OPEN_SWE_BACKEND_URL", "https://backend.invalid")
     monkeypatch.setattr("rt.loop.run_id", lambda: "run-1")
     monkeypatch.setattr("rt.middleware.run_id", lambda: "run-1")
-    backend = OpenSweBackend("token")
+    backend = Run(RunContext.model_validate({"__run_token": "token"})).backend
     calls: Calls = []
 
     async def post(
@@ -267,10 +267,11 @@ async def test_the_end_of_a_run_is_reported_and_its_graph_work_done_by_name(
         "rt.middleware.build_model",
         lambda spec, use_gateway: FakeListChatModel(responses=["Model call limits exceeded"]),
     )
+    backend.run.invocation_id = "turn"
     rules = LoopRules(at_end=["settle_review_check"])
     graph = create_agent(
         model=FakeListChatModel(responses=["unused"]),
-        middleware=[BackendRunMiddleware(backend, "turn", loop=RunLoop(backend, rules, _MODELS))],
+        middleware=[BackendRunMiddleware(backend, loop=RunLoop(backend, rules, _MODELS))],
     )
 
     await graph.ainvoke({"messages": [("user", "Review it")]})
@@ -304,7 +305,7 @@ async def test_reports_carry_what_they_report_never_the_conversation(
         },
     )
     monkeypatch.setattr(GenericFakeChatModel, "bind_tools", lambda self, *args, **kwargs: self)
-    backend.invocation_id = "invocation-1"
+    backend.run.invocation_id = "invocation-1"
 
     @tool
     async def look() -> str:

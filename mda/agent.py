@@ -11,6 +11,10 @@ what needs its data or credentials. The file and shell tools are this runtime's 
 thread's box or against its files on the backend (``rt.file_tools``). The run token in
 the context authenticates every call.
 
+MDA builds a thread's graph once for its runs and its reads (``GraphInputs``), so
+nothing built here belongs to one run: the tools and middleware find the run in
+progress, its token and grants, per call (``rt.backend.current_run``).
+
 The same agent runs as the async ``general-purpose`` subagent, the graph
 ``open-swe--general-purpose``, for the task workers a coordinator launches with
 ``start_async_task``. A worker is an Open SWE thread of its own: it starts with a
@@ -19,7 +23,7 @@ worker grant, adopts its own run token, and runs this agent's middleware as it.
 
 from collections.abc import Mapping, Sequence
 from pathlib import Path
-from typing import TYPE_CHECKING, Final, Literal, cast
+from typing import TYPE_CHECKING, Final, cast
 
 from deepagents.middleware.filesystem import FilesystemMiddleware
 from deepagents.middleware.subagents import SubAgent
@@ -34,8 +38,8 @@ from managed_deepagents import (
     ManagedServerRuntime,
     define_deep_agent,
 )
-from pydantic import BaseModel, ConfigDict, Field, JsonValue
-from rt.backend import OpenSweBackend
+from pydantic import BaseModel
+from rt.backend import Graph, OpenSweBackend, RunContext
 from rt.browser import ReportedBrowserMiddleware
 from rt.factory_timing import FactoryTiming
 from rt.file_tools import FileToolsMiddleware
@@ -67,7 +71,6 @@ from runtime_api.catalog import Catalog
 if TYPE_CHECKING:
     from managed_deepagents.define_deep_agent import ManagedAsyncSubAgent
 
-Graph = Literal["agent", "reviewer", "review-scout"]
 _DEFAULT_MODEL: Final = "anthropic:claude-opus-5-5"
 # The in-process graphs' cap on model calls per run, for a catalog that sets none.
 _MODEL_CALL_LIMIT: Final = 5_000
@@ -94,30 +97,26 @@ _REVIEWER_PTC_TOOLS: Final = (
 )
 
 
-class OpenSweRunContext(BaseModel):
-    """What Open SWE dispatch passes as the run context."""
+class GraphInputs(BaseModel):
+    """What the graph is built from: the graph a run plays and its catalog, less what the
+    backend granted that run alone.
 
-    model_config = ConfigDict(populate_by_name=True)
+    MDA keeps a thread's inputs from its last run and builds the thread's graph once
+    per inputs, for its runs and for reads of its state alike.
+    """
 
     graph: Graph = "agent"
-    # The Agent Server keeps only context keys this schema names, and reads the
-    # protocol v2 stream marker from the context it mirrors into configurable.
-    event_streaming_v2: bool = Field(default=False, alias="__event_streaming_v2")
-    # Dunder keys stay out of the trace metadata the context is mirrored into.
-    run_token: str | None = Field(default=None, alias="__run_token")
-    # A launched task worker's first run: traded for its own run token before anything else.
-    worker_grant: str | None = Field(default=None, alias="__worker_grant")
-    invocation_id: str | None = None
-    # JSON, not Catalog: the gRPC runtime serializes only the context's top level.
-    catalog: dict[str, JsonValue] | None = Field(default=None, alias="__catalog")
+    catalog: Catalog = Catalog()
 
 
-async def _catalog(context: OpenSweRunContext, backend: OpenSweBackend) -> Catalog:
-    """What the backend planned for the run; a run started without it asks for it."""
-    if context.catalog is not None:
-        return Catalog.model_validate(context.catalog)
-    # Runs without a context (state reads, assistant reads) never call a model or a tool.
-    return await backend.catalog(None) if backend.has_run else Catalog()
+async def _inputs(runtime: ManagedServerRuntime) -> GraphInputs:
+    execution = runtime.execution_runtime
+    if execution is None:
+        # A read: the thread's graph as its runs built it, or a bare one before any did.
+        return GraphInputs.model_validate(runtime.graph_inputs or {})
+    context = RunContext.model_validate(execution.context or {})
+    carried = Catalog.model_validate(context.catalog) if context.catalog is not None else None
+    return GraphInputs(graph=context.graph, catalog=await context.run().plan(carried))
 
 
 def _backend_reports(backend: OpenSweBackend, catalog: Catalog) -> list[AgentMiddleware]:
@@ -164,15 +163,11 @@ def _browser(graph: Graph, backend: OpenSweBackend) -> list[AgentMiddleware]:
 # stays assignments and one `return define_deep_agent(...)`.
 async def agent(runtime: ManagedServerRuntime) -> DeepAgentDefinition:
     timing = FactoryTiming()
-    execution = runtime.execution_runtime
-    context = OpenSweRunContext.model_validate(
-        execution.context if execution is not None and execution.context is not None else {}
-    )
-    backend = OpenSweBackend(
-        context.run_token, worker_grant=context.worker_grant, invocation_id=context.invocation_id
-    )
-    catalog = await _catalog(context, backend)
+    inputs = await _inputs(runtime)
+    catalog = inputs.catalog
     timing.lap("catalog")
+    # Called as the run in progress: the graph is built once for every run of the thread.
+    backend = OpenSweBackend()
     models = catalog.models
     model = (
         build_model(models.model, use_gateway=models.use_gateway)
@@ -261,7 +256,7 @@ async def agent(runtime: ManagedServerRuntime) -> DeepAgentDefinition:
         for subagent in catalog.subagents
     ]
     timing.lap("subagents")
-    code_mode = _code_mode(context.graph, from_code, catalog.described, file_tools)
+    code_mode = _code_mode(inputs.graph, from_code, catalog.described, file_tools)
     timing.lap("code_mode")
     # This agent's own, as the agent a worker is; deepagents passes no middleware down.
     # Middleware types are invariant in the state they extend; the agent merges them all.
@@ -270,9 +265,7 @@ async def agent(runtime: ManagedServerRuntime) -> DeepAgentDefinition:
         [
             BackendRunMiddleware(
                 backend,
-                context.invocation_id,
                 opened_sandbox if catalog.sandbox is not None else None,
-                trace_metadata=catalog.trace_metadata,
                 inbox=catalog.inbox,
                 loop=RunLoop(backend, catalog.loop, models)
                 if catalog.loop is not None and models is not None
@@ -285,7 +278,7 @@ async def agent(runtime: ManagedServerRuntime) -> DeepAgentDefinition:
             task_retry(),
             ServedToolsMiddleware(offered, excluded | code_only, backend),
             *code_mode,
-            *_browser(context.graph, backend),
+            *_browser(inputs.graph, backend),
             ModelCallLimitMiddleware(
                 run_limit=_MODEL_CALL_LIMIT
                 if catalog.model_call_limit is None
@@ -309,9 +302,9 @@ async def agent(runtime: ManagedServerRuntime) -> DeepAgentDefinition:
     }
     timing.lap("middleware")
     timing.log(
-        graph_name=context.graph,
+        graph_name=inputs.graph,
         access_context=runtime.access_context,
-        has_run=backend.has_run,
+        has_run=runtime.execution_runtime is not None,
         tools=len(registered),
         subagents=len(sync_subagents) + 1,
         middleware=len(agent_middleware),
@@ -320,7 +313,8 @@ async def agent(runtime: ManagedServerRuntime) -> DeepAgentDefinition:
         name="open-swe",
         replicate_traces=False,
         model=model,
-        context_schema=OpenSweRunContext,
+        context_schema=RunContext,
+        graph_inputs=inputs.model_dump(mode="json"),
         # Code-only tools stay callable by name, as in-process, though no request
         # offers them.
         tools=registered,

@@ -29,9 +29,11 @@ from deepagents.backends.utils import create_file_data
 from deepagents.middleware.skills import SkillsMiddleware, SkillsState, SkillsStateUpdate
 from langchain_core.runnables import RunnableConfig
 from langgraph.runtime import Runtime
-from runtime_api.endpoint import Transport, call
+from runtime_api.endpoint import call
 from runtime_api.operations import RunRequest
 from runtime_api.skills import SKILLS
+
+from rt.backend import OpenSweBackend, RunLocal
 
 _SYNC: Final = "The run's skills are read asynchronously"
 _READ_ONLY: Final = "Skills are read-only here"
@@ -48,27 +50,35 @@ class _Listed(StateBackend):
         return dict(self._listed)
 
 
+class _Listing:
+    """One run's skills, listed once."""
+
+    def __init__(self) -> None:
+        self.files: _Listed | None = None
+        self.lock = asyncio.Lock()
+
+
 class SkillFiles(BackendProtocol):
     """The run's skills as files: a folder per skill under each source, with its ``SKILL.md``.
 
-    The backend lists them on the run's first read of any; every read after that is
-    answered here.
+    The backend lists them on each run's first read of any; every read after that in
+    the run is answered here.
     """
 
-    def __init__(self, transport: Transport, run_id: Callable[[], str | None]) -> None:
-        self._transport = transport
+    def __init__(self, backend: OpenSweBackend, run_id: Callable[[], str | None]) -> None:
+        self._backend = backend
         self._run_id = run_id
-        self._files: _Listed | None = None
-        self._listing = asyncio.Lock()
+        self._listings = RunLocal(_Listing)
 
     async def _listed(self) -> _Listed:
-        async with self._listing:
-            if self._files is None:
-                listed = await call(self._transport, SKILLS, RunRequest(run_id=self._run_id()))
-                self._files = _Listed(
+        listing = self._listings.get(self._backend.run)
+        async with listing.lock:
+            if listing.files is None:
+                listed = await call(self._backend, SKILLS, RunRequest(run_id=self._run_id()))
+                listing.files = _Listed(
                     {skill.path: create_file_data(skill.content) for skill in listed.files}
                 )
-        return self._files
+        return listing.files
 
     async def als(self, path: str) -> LsResult:
         return (await self._listed()).ls(path)

@@ -82,6 +82,7 @@ from runtime_api.workers import LAUNCH_WORKER, WORKER_LAUNCHED, Launch, Launched
 from rt.backend import (
     BackendCallError,
     OpenSweBackend,
+    RunLocal,
     human_messages,
     namespace,
     reporting,
@@ -327,33 +328,34 @@ class BackendRunMiddleware(AgentMiddleware[RunState]):
     def __init__(
         self,
         backend: OpenSweBackend,
-        invocation_id: str | None,
         open_sandbox: Callable[[Runtime], Awaitable[str | None]] | None = None,
         *,
-        trace_metadata: Mapping[str, JsonValue] | None = None,
         inbox: InboxSpec | None = None,
         loop: RunLoop | None = None,
     ) -> None:
         self._backend = backend
-        self._invocation_id = invocation_id
-        self._trace_metadata = trace_metadata or {}
         # How the catalog says to read the thread's inbox; None reads nothing.
         self._inbox = inbox
         # What happens around each model call; None hands each phase to the backend, for
         # the runs it still answers from their plan.
         self._loop = loop
-        self._trace = TurnTrace()
+        self._traces = RunLocal(TurnTrace)
         # Opens the thread's box before preparing, so the backend binds the thread to it.
         self._open_sandbox = open_sandbox
 
     def _invocation(self) -> str:
-        if self._invocation_id is not None:
-            return self._invocation_id
+        if (invocation_id := self._backend.invocation_id) is not None:
+            return invocation_id
         return _RunConfigurable.model_validate(get_config().get("configurable", {})).thread_id
+
+    def _trace_metadata(self) -> dict[str, JsonValue]:
+        """Who the run acts for, as the backend granted it."""
+        return {**self._backend.run.granted.trace_metadata}
 
     @hook_config(can_jump_to=["end"])
     async def abefore_agent(self, state: RunState, runtime: Runtime) -> dict[str, object] | None:
-        self._trace.start(self._trace_metadata)
+        trace = self._traces.get(self._backend.run)
+        trace.start(self._trace_metadata())
         if self._backend.awaiting_adoption:
             # A worker never acts on its grant: it has no identity until it adopts one.
             thread_id = _RunConfigurable.model_validate(get_config().get("configurable", {}))
@@ -363,7 +365,7 @@ class BackendRunMiddleware(AgentMiddleware[RunState]):
             await self._backend.adopt(thread_id.thread_id, run_id(), assignment)
         invocation = self._invocation()
         if state.get("open_swe_prepared_for") == invocation:
-            self._trace.record_evidence(state.get(STATE_KEY, {}))
+            trace.record_evidence(state.get(STATE_KEY, {}))
             return None
         sandbox_id = await self._open_sandbox(runtime) if self._open_sandbox is not None else None
         prepared = await self._phase(
@@ -459,15 +461,16 @@ class BackendRunMiddleware(AgentMiddleware[RunState]):
         return _apply(await self._loop.after_model(state))
 
     async def aafter_agent(self, state: RunState, runtime: Runtime) -> dict[str, object] | None:  # noqa: ARG002
-        metadata = dict(self._trace_metadata)
+        metadata = self._trace_metadata()
+        trace = self._traces.get(self._backend.run)
         try:
             if self._loop is not None:
-                ended = await self._loop.after_agent(state, self._trace.evidence)
+                ended = await self._loop.after_agent(state, trace.evidence)
             else:
                 request = run_call(RunCall, run_id(), state)
                 ended = await self._phase(
                     AFTER_AGENT,
-                    request.model_copy(update={"state": {**request.state, **self._trace.evidence}}),
+                    request.model_copy(update={"state": {**request.state, **trace.evidence}}),
                 )
             metadata.update(ended.trace_metadata)
             return _apply(ended)
@@ -475,7 +478,7 @@ class BackendRunMiddleware(AgentMiddleware[RunState]):
             logger.warning("The backend's end-of-run hooks failed", exc_info=True)
             return None
         finally:
-            await self._trace.reconcile(metadata)
+            await trace.reconcile(metadata)
 
 
 class ReportRepliesMiddleware(AgentMiddleware):

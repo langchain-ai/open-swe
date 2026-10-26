@@ -21,6 +21,7 @@ import secrets
 import socket
 import threading
 import time
+from collections import OrderedDict
 from collections.abc import (
     AsyncIterator,
     Awaitable,
@@ -32,10 +33,11 @@ from collections.abc import (
 )
 from contextlib import asynccontextmanager, contextmanager, suppress
 from contextvars import ContextVar
+from dataclasses import dataclass, replace
 from functools import partial
 from http import HTTPStatus
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, Literal, TypedDict, TypeVar, cast
+from typing import TYPE_CHECKING, Any, ClassVar, Literal, TypedDict, TypeVar, cast
 from urllib.parse import quote, urlsplit
 
 from deepagents import FilesystemPermission, create_deep_agent
@@ -169,10 +171,12 @@ class _Omitted:
 _OMITTED = _Omitted()
 
 _ResultT = TypeVar("_ResultT")
+_KeyT = TypeVar("_KeyT")
 
 if TYPE_CHECKING:
     from deepagents import SubAgent
     from langchain.agents.middleware import AgentMiddleware
+    from langgraph.store.base import BaseStore
     from langgraph_sdk.runtime import ServerRuntime
     from langsmith.sandbox import Sandbox
     from langsmith.sandbox import SandboxClient as LangSmithSandboxClient
@@ -789,7 +793,36 @@ async def compile_managed_agent_async(
     )
     factory_entry = callable(entry)
     factory_inspection = factory_entry and not is_run
-    definition = await resolve_agent_definition(entry, factory_runtime)
+    thread_graph = (
+        _ThreadGraph.of(async_subagent, config, factory_runtime.store) if factory_entry else None
+    )
+    # A read of a thread that ran is built as its runs were, from their inputs.
+    read_digest = (
+        await thread_graph.last_digest() if thread_graph is not None and not is_run else None
+    )
+    definition: DeepAgentDefinition | None = None
+    if thread_graph is not None and read_digest is not None:
+        built = thread_graph.built(read_digest)
+        if built is not None:
+            return _for_call(
+                built,
+                config,
+                run_context=run_context,
+                is_run=is_run,
+                report_telemetry=report_telemetry,
+            )
+        inputs = await thread_graph.inputs(read_digest)
+        try:
+            definition = (
+                await resolve_agent_definition(entry, replace(factory_runtime, graph_inputs=inputs))
+                if inputs is not None
+                else None
+            )
+        except (RuntimeError, TypeError, ValueError):
+            logger.warning("agent factory refused a thread's saved graph inputs; read without them")
+    if definition is None:
+        read_digest = None
+        definition = await resolve_agent_definition(entry, factory_runtime)
     if GENERAL_PURPOSE in (async_subagent_graphs or {}) or async_subagent == GENERAL_PURPOSE:
         definition = with_async_general_purpose(definition)
     if async_subagent is not None:
@@ -816,6 +849,8 @@ async def compile_managed_agent_async(
         report_telemetry=report_telemetry,
         skip_factory_inspection_tools=factory_inspection,
         factory_entry=factory_entry,
+        thread_graph=thread_graph if is_run or read_digest is not None else None,
+        read_digest=read_digest,
     )
 
 
@@ -840,9 +875,16 @@ async def _compile_resolved_managed_agent_async(
     report_telemetry: bool = True,
     skip_factory_inspection_tools: bool = False,
     factory_entry: bool = False,
+    thread_graph: _ThreadGraph | None = None,
+    read_digest: str | None = None,
 ) -> CompiledAgent:
-    """Select native context schema and memory access for a resolved definition."""
-    from managed_deepagents._run_input import graph_default_config  # noqa: PLC0415
+    """Select native context schema and memory access for a resolved definition.
+
+    With a ``thread_graph`` and the ``graph_inputs`` the factory declared, the
+    thread's graph is built once per inputs and kept, and a run saves its inputs for
+    the thread's reads.
+    """
+    started_monotonic_ms = time.monotonic() * 1000
 
     run_connectors = _select_run_connectors(definition.config, connectors)
     run_sandbox = (
@@ -885,7 +927,6 @@ async def _compile_resolved_managed_agent_async(
     from managed_deepagents._run_input import (  # noqa: PLC0415
         ManagedCompiledAgent,
         SingleProjectManagedAgent,
-        execution_context,
         is_channel_execution,
     )
 
@@ -912,26 +953,102 @@ async def _compile_resolved_managed_agent_async(
             policy_schema,
             selected_by_dynamic_resolver=memory_selected_by_dynamic_resolver,
         )
-    agent = await asyncio.to_thread(
-        _compile_managed_agent,
-        definition,
-        config,
-        **options,
-        allow_agent=allow_agent,
-        user_access=user_access,
-        declared_memory_layers=declared_memory_layers,
-        inspection=not is_run,
-        skip_factory_inspection_tools=skip_factory_inspection_tools,
-        context_schema=context_schema,
-        report_telemetry=report_telemetry,
+    inputs = definition.config.get("graph_inputs")
+    # A read keeps its graph under the inputs it was given, however the factory
+    # declares them again.
+    digest = (
+        read_digest
+        if read_digest is not None
+        else _graph_inputs_digest(inputs)
+        if isinstance(inputs, Mapping)
+        else None
     )
+    policy = (allow_agent, user_access.user_id, user_access.denied_reason) if is_run else None
+    reused = (
+        thread_graph.built(digest, policy)
+        if thread_graph is not None and digest is not None
+        else None
+    )
+    if reused is not None:
+        built = reused
+    else:
+        agent, configuration = await asyncio.to_thread(
+            _compile_managed_agent,
+            definition,
+            config,
+            **options,
+            allow_agent=allow_agent,
+            user_access=user_access,
+            declared_memory_layers=declared_memory_layers,
+            inspection=not is_run,
+            skip_factory_inspection_tools=skip_factory_inspection_tools,
+            context_schema=context_schema,
+        )
+        if isinstance(agent, CompiledAgent):
+            agent.__class__ = (
+                SingleProjectManagedAgent
+                if definition.config.get("replicate_traces") is False
+                else ManagedCompiledAgent
+            )
+        built = _BuiltGraph(
+            digest=digest,
+            policy=policy,
+            agent=agent,
+            configuration=configuration,
+        )
+        if thread_graph is not None and digest is not None:
+            thread_graph.keep(built)
+    if is_run and thread_graph is not None and digest is not None and isinstance(inputs, Mapping):
+        await thread_graph.save(digest, inputs)
+    return _for_call(
+        built,
+        config,
+        run_context=run_context,
+        is_run=is_run,
+        report_telemetry=report_telemetry,
+        started_monotonic_ms=started_monotonic_ms,
+    )
+
+
+def _for_call(
+    built: _BuiltGraph,
+    config: ManagedRunConfig | None,
+    *,
+    run_context: object,
+    is_run: bool,
+    report_telemetry: bool,
+    started_monotonic_ms: float | None = None,
+) -> CompiledAgent:
+    """``built`` as this call runs it: its telemetry and this run's config defaults.
+
+    Applied per call, never to the graph a thread keeps, which other runs share.
+    """
+    from managed_deepagents._run_input import (  # noqa: PLC0415
+        execution_context,
+        graph_default_config,
+    )
+
+    agent = built.agent
     if not isinstance(agent, CompiledAgent):
         return agent
-    agent.__class__ = (
-        SingleProjectManagedAgent
-        if definition.config.get("replicate_traces") is False
-        else ManagedCompiledAgent
-    )
+    if report_telemetry:
+        agent = observe_run(
+            agent,
+            start_run(
+                detect_run_identity(
+                    caller=build_runtime_identity(resolve_runtime_configurable(config)),
+                    is_run=is_run,
+                ),
+                replace(built.configuration, channel=_detect_run_channel(config)),
+                run_id=_platform_run_id(config),
+                thread_id=_thread_id_of(config),
+                started_monotonic_ms=(
+                    time.monotonic() * 1000
+                    if started_monotonic_ms is None
+                    else started_monotonic_ms
+                ),
+            ),
+        )
     defaults = graph_default_config(config)
     if is_run:
         _, _, routing = execution_context(run_context, config, None)
@@ -940,6 +1057,112 @@ async def _compile_resolved_managed_agent_async(
             # this factory returns. Retain managed routing for graph execution.
             defaults["configurable"] = {**defaults.get("configurable", {}), **routing}
     return agent.with_config(defaults)
+
+
+@dataclass(frozen=True)
+class _BuiltGraph:
+    """A compiled graph and what its runs report, before any one call's config."""
+
+    digest: str | None
+    # Who a run's graph was built for (its memory access); None for a read's.
+    policy: tuple[bool, str | None, str | None] | None
+    agent: CompiledAgent
+    configuration: RunConfiguration
+
+
+def _graph_inputs_digest(inputs: Mapping[str, object]) -> str:
+    canonical = json.dumps(inputs, sort_keys=True, separators=(",", ":"), ensure_ascii=False)
+    return hashlib.sha256(canonical.encode()).hexdigest()
+
+
+#: Threads whose graph a process keeps built.
+_THREAD_GRAPHS_KEPT = 128
+#: Store namespaces: each declared ``graph_inputs`` by digest, and the digest of each
+#: thread's last run, per graph.
+_GRAPH_INPUTS_NAMESPACE = ("mda", "graph_inputs")
+_THREAD_GRAPHS_NAMESPACE = ("mda", "thread_graphs")
+
+
+class _ThreadGraph:
+    """One thread's graph, built from the ``graph_inputs`` its factory declared.
+
+    A run saves its inputs in the store under the thread, so a read on any replica
+    builds the graph the thread's runs use. Each process keeps the compiled graph of
+    its most recent threads and rebuilds it only when the inputs change, or for a
+    run, when the caller's memory access does.
+    """
+
+    _built: ClassVar[OrderedDict[tuple[str, str], _BuiltGraph]] = OrderedDict()
+    # The digest this process last saved for each thread.
+    _saved: ClassVar[OrderedDict[tuple[str, str], str]] = OrderedDict()
+
+    def __init__(self, graph: str, thread_id: str, store: BaseStore) -> None:
+        self._key = (graph, thread_id)
+        self._store = store
+
+    @classmethod
+    def of(
+        cls, async_subagent: str | None, config: ManagedRunConfig | None, store: object
+    ) -> _ThreadGraph | None:
+        from langgraph.store.base import BaseStore  # noqa: PLC0415 - runtime dependency
+
+        thread_id = _thread_id_of(config)
+        if thread_id is None or not isinstance(store, BaseStore):
+            return None
+        return cls(async_subagent or "lead", thread_id, store)
+
+    def built(
+        self, digest: str, policy: tuple[bool, str | None, str | None] | None = None
+    ) -> _BuiltGraph | None:
+        """The graph kept for ``digest``: any for a read; for a run, one built for a run like it."""
+        built = self._built.get(self._key)
+        if built is None or built.digest != digest:
+            return None
+        if policy is not None and built.policy != policy:
+            return None
+        self._built.move_to_end(self._key)
+        return built
+
+    def keep(self, built: _BuiltGraph) -> None:
+        kept = self._built.get(self._key)
+        # A read's build never displaces the graph a run built from the same inputs.
+        if built.policy is None and kept is not None and kept.digest == built.digest:
+            return
+        _remember(self._built, self._key, built)
+
+    async def last_digest(self) -> str | None:
+        """The digest of the inputs of the thread's last run, if it declared any."""
+        graph, thread_id = self._key
+        pointer = await self._store.aget((*_THREAD_GRAPHS_NAMESPACE, graph), thread_id)
+        digest = pointer.value.get("digest") if pointer is not None else None
+        return digest if isinstance(digest, str) else None
+
+    async def inputs(self, digest: str) -> Mapping[str, object] | None:
+        item = await self._store.aget(_GRAPH_INPUTS_NAMESPACE, digest)
+        inputs = item.value.get("inputs") if item is not None else None
+        return inputs if isinstance(inputs, Mapping) else None
+
+    async def save(self, digest: str, inputs: Mapping[str, object]) -> None:
+        """Keep ``inputs`` as the thread's, for its reads."""
+        if self._saved.get(self._key) == digest:
+            return
+        if await self._store.aget(_GRAPH_INPUTS_NAMESPACE, digest) is None:
+            await self._store.aput(
+                _GRAPH_INPUTS_NAMESPACE, digest, {"inputs": dict(inputs)}, index=False
+            )
+        graph, thread_id = self._key
+        await self._store.aput(
+            (*_THREAD_GRAPHS_NAMESPACE, graph), thread_id, {"digest": digest}, index=False
+        )
+        _remember(self._saved, self._key, digest)
+
+
+def _remember(kept: OrderedDict[_KeyT, _ResultT], key: _KeyT, value: _ResultT) -> None:
+    """Keep ``value`` as the most recent of at most ``_THREAD_GRAPHS_KEPT``."""
+    kept[key] = value
+    kept.move_to_end(key)
+    while len(kept) > _THREAD_GRAPHS_KEPT:
+        kept.popitem(last=False)
 
 
 def _select_run_connectors(
@@ -989,9 +1212,8 @@ def _compile_managed_agent(
     inspection: bool = False,
     skip_factory_inspection_tools: bool = False,
     context_schema: object = None,
-    report_telemetry: bool = True,
-) -> CompiledAgent:
-    started_monotonic_ms = time.monotonic() * 1000
+) -> tuple[CompiledAgent, RunConfiguration]:
+    """Compile the definition; ``_for_call`` adds each call's telemetry and config."""
     allowed_user_id = user_access.user_id
     # Resolution + thread/store scope run in the generated custom-auth handler
     # (``build_managed_auth``). When identity is declared, the seam also surfaces
@@ -1005,6 +1227,7 @@ def _compile_managed_agent(
     merged.pop("mcp", None)
     merged.pop("sandbox", None)
     merged.pop("replicate_traces", None)
+    merged.pop("graph_inputs", None)
     merged["context_schema"] = context_schema
 
     sandbox_backend = (
@@ -1132,34 +1355,20 @@ def _compile_managed_agent(
         if isinstance(metadata, Mapping) and metadata
         else agent
     )
-    if not report_telemetry:
-        return compiled
-    run_id = _platform_run_id(config)
-    return observe_run(
-        compiled,
-        start_run(
-            detect_run_identity(
-                caller=build_runtime_identity(resolve_runtime_configurable(config)),
-                is_run=not inspection,
-            ),
-            RunConfiguration(
-                channel=_detect_run_channel(config),
-                sandbox_declared=sandbox is not None,
-                identity_declared=identity is not None,
-                skills_declared=effective_has_skills,
-                backend_kind="sandbox" if sandbox_backend is not None else "state",
-                context_source=(
-                    "none" if context is None else ("local" if context.filesystem_root else "hub")
-                ),
-                memory=MemoryObservations(
-                    layers_declared=[layer["type"] for layer in _declared_memory_layers(memory)],
-                    layers_mounted=[layer["type"] for layer in mounted_memory],
-                    user_denied_reason=user_access.denied_reason,
-                ),
-            ),
-            run_id=run_id,
-            thread_id=_thread_id_of(config),
-            started_monotonic_ms=started_monotonic_ms,
+    return compiled, RunConfiguration(
+        # Each call's own, set as it runs.
+        channel=_detect_run_channel(config),
+        sandbox_declared=sandbox is not None,
+        identity_declared=identity is not None,
+        skills_declared=effective_has_skills,
+        backend_kind="sandbox" if sandbox_backend is not None else "state",
+        context_source=(
+            "none" if context is None else ("local" if context.filesystem_root else "hub")
+        ),
+        memory=MemoryObservations(
+            layers_declared=[layer["type"] for layer in _declared_memory_layers(memory)],
+            layers_mounted=[layer["type"] for layer in mounted_memory],
+            user_denied_reason=user_access.denied_reason,
         ),
     )
 

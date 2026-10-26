@@ -53,7 +53,10 @@ from pydantic import BaseModel, JsonValue
 from rt.backend import (
     BackendCallError,
     BackendUnavailableError,
+    Granted,
     OpenSweBackend,
+    Run,
+    RunContext,
 )
 from rt.file_tools import FileToolsMiddleware
 from rt.middleware import BackendRunMiddleware, RunState, RuntimeToolsMiddleware
@@ -96,6 +99,19 @@ def _run_metadata(patch: Mapping[str, object]) -> Mapping[str, object]:
 
 
 type Answer = Callable[[str, dict[str, JsonValue]], Awaitable[BaseModel]]
+
+
+def _run_backend(
+    token: str | None = "secret-token",
+    *,
+    worker_grant: str | None = None,
+    invocation_id: str | None = None,
+) -> OpenSweBackend:
+    """The backend as a run of its own, outside any graph's run."""
+    context = RunContext.model_validate(
+        {"__run_token": token, "__worker_grant": worker_grant, "invocation_id": invocation_id}
+    )
+    return Run(context).backend
 
 
 def _answering(monkeypatch: pytest.MonkeyPatch, backend: OpenSweBackend, answer: Answer) -> None:
@@ -226,7 +242,7 @@ async def test_a_tool_call_the_backend_never_answered(
         OperationSpec(
             name="background_execute", description="Execute", parameters={"type": "object"}
         ),
-        OpenSweBackend("secret-token"),
+        _run_backend(),
     )
     runtime = ToolRuntime(
         state={"messages": []},
@@ -270,7 +286,7 @@ async def test_phase_gateway_failure_is_not_replayed(
     monkeypatch.setattr("rt.backend.httpx2.AsyncClient", lambda **kwargs: client)
 
     with pytest.raises(BackendUnavailableError):
-        await call(OpenSweBackend("secret-token"), endpoint, endpoint.request())
+        await call(_run_backend(), endpoint, endpoint.request())
 
     assert client.post.await_count == 1
     sleep.assert_not_awaited()
@@ -295,7 +311,7 @@ async def test_a_run_waits_out_a_backend_rollout(
         + [httpx2.Response(200, request=request, json={"update": {"prepared": True}})]
     )
     monkeypatch.setattr("rt.backend.httpx2.AsyncClient", lambda **kwargs: client)
-    backend = OpenSweBackend("secret-token")
+    backend = _run_backend()
 
     def send() -> Awaitable[JsonValue]:
         return backend.post(endpoint.path, {}, timeout=1.0, delivery=endpoint.delivery)
@@ -315,7 +331,7 @@ async def test_an_unreachable_backend_fails_the_run(
 ) -> None:
     monkeypatch.setenv("OPEN_SWE_BACKEND_URL", "https://backend.invalid")
     monkeypatch.setattr("rt.middleware.run_id", lambda: "run-1")
-    backend = OpenSweBackend("secret-token")
+    backend = _run_backend(invocation_id="invocation-1")
 
     async def phase(name: str, body: dict[str, JsonValue]) -> BaseModel:
         if name == hook:
@@ -326,7 +342,7 @@ async def test_an_unreachable_backend_fails_the_run(
     _answering(monkeypatch, backend, phase)
     graph = create_agent(
         model=FakeListChatModel(responses=["done"]),
-        middleware=[BackendRunMiddleware(backend, "invocation-1")],
+        middleware=[BackendRunMiddleware(backend)],
     )
 
     with pytest.raises(BackendUnavailableError):
@@ -341,7 +357,7 @@ async def test_the_inbox_names_only_the_run_and_hands_back_what_the_model_answer
 ) -> None:
     monkeypatch.setenv("OPEN_SWE_BACKEND_URL", "https://backend.invalid")
     monkeypatch.setattr("rt.middleware.run_id", lambda: "run-1")
-    backend = OpenSweBackend("secret-token")
+    backend = _run_backend(invocation_id="invocation-1")
     report = HumanMessage(content="The worker finished", id="event-match:report-1")
     items = InboxItems(queued=[7], events=[UUID("0199a1b2-0000-7000-8000-000000000001")])
     called: list[str] = []
@@ -373,7 +389,7 @@ async def test_the_inbox_names_only_the_run_and_hands_back_what_the_model_answer
     _answering(monkeypatch, backend, phase)
     graph = create_agent(
         model=FakeListChatModel(responses=["first", "second"]),
-        middleware=[BackendRunMiddleware(backend, "invocation-1", inbox=_INBOX)],
+        middleware=[BackendRunMiddleware(backend, inbox=_INBOX)],
     )
 
     result = await graph.ainvoke({"messages": [("user", "hello")]})
@@ -394,7 +410,7 @@ async def test_a_run_the_phase_ends_leaves_the_inbox_queued(
     """A model-call limit ends the run before any call answers the follow-up: it stays queued."""
     monkeypatch.setenv("OPEN_SWE_BACKEND_URL", "https://backend.invalid")
     monkeypatch.setattr("rt.middleware.run_id", lambda: "run-1")
-    backend = OpenSweBackend("secret-token")
+    backend = _run_backend(invocation_id="invocation-1")
     follow_up = HumanMessage(content="One more thing", id="queued-1")
     called: list[str] = []
 
@@ -411,7 +427,7 @@ async def test_a_run_the_phase_ends_leaves_the_inbox_queued(
     _answering(monkeypatch, backend, phase)
     graph = create_agent(
         model=FakeListChatModel(responses=["unused"]),
-        middleware=[BackendRunMiddleware(backend, "invocation-1", inbox=_INBOX)],
+        middleware=[BackendRunMiddleware(backend, inbox=_INBOX)],
     )
 
     result = await graph.ainvoke({"messages": [("user", "hello")]})
@@ -441,7 +457,7 @@ async def test_the_model_the_backend_names_gets_a_replayable_history(
     monkeypatch.setattr("rt.middleware.run_id", lambda: "run-1")
     named = _RecordingAnthropic(model_name="claude-opus-5-5", api_key="test-key", sent=[])
     monkeypatch.setattr("rt.middleware.build_model", lambda spec, use_gateway: named)
-    backend = OpenSweBackend("secret-token")
+    backend = _run_backend(invocation_id="invocation-1")
 
     async def phase(name: str, body: dict[str, JsonValue]) -> BaseModel:
         if name != "before_model":
@@ -457,7 +473,7 @@ async def test_the_model_the_backend_names_gets_a_replayable_history(
     # As the agent orders them: the guards inside the middleware that names the model.
     middleware = cast(
         list[AgentMiddleware],
-        [BackendRunMiddleware(backend, "invocation-1"), *model_call_guards()],
+        [BackendRunMiddleware(backend), *model_call_guards()],
     )
     graph = create_agent(model=FakeListChatModel(responses=["unused"]), middleware=middleware)
     reply = AIMessage(
@@ -495,7 +511,7 @@ async def test_the_anthropic_model_the_backend_names_caches_for_an_hour(
     monkeypatch.setattr("rt.middleware.run_id", lambda: "run-1")
     named = _PayloadAnthropic(model_name="claude-opus-5-5", api_key="test-key", payloads=[])
     monkeypatch.setattr("rt.middleware.build_model", lambda spec, use_gateway: named)
-    backend = OpenSweBackend("secret-token")
+    backend = _run_backend(invocation_id="invocation-1")
 
     async def phase(name: str, body: dict[str, JsonValue]) -> BaseModel:
         if name != "before_model":
@@ -511,7 +527,7 @@ async def test_the_anthropic_model_the_backend_names_caches_for_an_hour(
     # deepagents installs its own 5m cache; the guards' must take its place.
     middleware = cast(
         list[AgentMiddleware],
-        [BackendRunMiddleware(backend, "invocation-1"), *model_call_guards()],
+        [BackendRunMiddleware(backend), *model_call_guards()],
     )
     graph = create_deep_agent(model=FakeListChatModel(responses=["unused"]), middleware=middleware)
 
@@ -550,7 +566,7 @@ async def test_a_stalled_model_call_goes_to_the_fallback_model(
         "anthropic:claude-sonnet-5-5": fallback,
     }
     monkeypatch.setattr("rt.middleware.build_model", lambda spec, use_gateway: built[spec.model_id])
-    backend = OpenSweBackend("secret-token")
+    backend = _run_backend(invocation_id="invocation-1")
 
     async def phase(name: str, body: dict[str, JsonValue]) -> BaseModel:
         if name != "before_model":
@@ -567,7 +583,7 @@ async def test_a_stalled_model_call_goes_to_the_fallback_model(
     middleware = cast(
         list[AgentMiddleware],
         [
-            BackendRunMiddleware(backend, "invocation-1"),
+            BackendRunMiddleware(backend),
             *model_call_guards(timeout_seconds=0.05),
         ],
     )
@@ -605,7 +621,7 @@ async def test_a_failing_backend_hook_fails_the_run_with_what_it_raised(
     monkeypatch.setattr("rt.backend.httpx2.AsyncClient", lambda **kwargs: client)
 
     with pytest.raises(BackendCallError, match="prepare failed: RuntimeError: no sandbox provider"):
-        await call(OpenSweBackend("secret-token"), PREPARE, Prepare())
+        await call(_run_backend(), PREPARE, Prepare())
 
 
 @pytest.mark.parametrize(
@@ -638,7 +654,7 @@ async def test_box_tools_ask_the_guards_and_reach_the_backends_paths(
     monkeypatch.setenv("OPEN_SWE_BACKEND_URL", "https://backend.invalid")
     for module in ("rt.middleware", "rt.tools", "rt.file_tools"):
         monkeypatch.setattr(f"{module}.run_id", lambda: "run-1")
-    backend = OpenSweBackend("secret-token")
+    backend = _run_backend()
     checks = AsyncMock(return_value=ShellVerdict(allowed=True).model_dump(mode="json"))
     monkeypatch.setattr(backend, "post", checks)
     monkeypatch.setattr(backend, "tool_started", AsyncMock())
@@ -686,7 +702,8 @@ async def test_turn_reconciliation_reaches_runtime_root_llm_and_nested_calls(
     monkeypatch.setattr("rt.middleware.run_id", lambda: "run-1")
     actor = {"ls_repo_provider": "github", "ls_attribution_identifier": "trigger"}
     final = {**actor, "ls_git_repo": "org/actual", "ls_git_branch": "Exact/PR-head"}
-    backend = OpenSweBackend("secret-token")
+    backend = _run_backend(invocation_id="turn")
+    backend.run.granted = Granted(trace_metadata=actor)
 
     @tool
     async def nested_call(text: str) -> str:
@@ -737,7 +754,7 @@ async def test_turn_reconciliation_reaches_runtime_root_llm_and_nested_calls(
     monkeypatch.setattr(FakeListChatModel, "bind_tools", lambda self, *args, **kwargs: self)
     graph = create_deep_agent(
         model=FakeListChatModel(responses=["done"]),
-        middleware=[BackendRunMiddleware(backend, "turn", trace_metadata=actor)],
+        middleware=[BackendRunMiddleware(backend)],
         checkpointer=InMemorySaver(),
     )
     config: RunnableConfig = {
@@ -856,7 +873,7 @@ async def test_optional_trace_failures_do_not_change_successful_turn_output(
 ) -> None:
     monkeypatch.setenv("OPEN_SWE_BACKEND_URL", "https://backend.invalid")
     monkeypatch.setattr("rt.middleware.run_id", lambda: "run-1")
-    backend = OpenSweBackend("secret-token")
+    backend = _run_backend(invocation_id="turn")
 
     def unavailable_trace() -> None:
         raise RuntimeError("trace lookup unavailable")
@@ -892,7 +909,7 @@ async def test_optional_trace_failures_do_not_change_successful_turn_output(
     client.update_run.side_effect = update
     graph = create_agent(
         model=FakeListChatModel(responses=["done"]),
-        middleware=[BackendRunMiddleware(backend, "turn")],
+        middleware=[BackendRunMiddleware(backend)],
     )
     with tracing_context(enabled=True):
         result = await graph.ainvoke(
@@ -915,7 +932,7 @@ async def test_box_call_git_evidence_reaches_the_turn_after_its_run_closed(
     turn = RunTree(name="turn", run_type="chain", extra={"metadata": {"open_swe_git_evidence": {}}})
     roots: list[RunTree | None] = [turn]
     monkeypatch.setattr(TurnTrace, "current_root", staticmethod(lambda: roots[0]))
-    backend = OpenSweBackend("secret-token")
+    backend = _run_backend()
     monkeypatch.setattr(backend, "tool_result", AsyncMock(return_value=evidence))
 
     backend.reports.finished(
@@ -937,7 +954,7 @@ async def test_an_operation_code_mode_calls_is_reported_and_cited_under_its_eval
 
     monkeypatch.setenv("OPEN_SWE_BACKEND_URL", "https://backend.invalid")
     monkeypatch.setattr("rt.tools.run_id", lambda: "run-1")
-    backend = OpenSweBackend("secret-token")
+    backend = _run_backend()
     answers = {
         "/agent-api/operation": OperationResult(content="found it"),
         "/agent-api/record_evidence": EvidenceReply(content="found it\n\nIncident evidence: ev-1"),
@@ -986,7 +1003,7 @@ async def test_a_command_the_guards_refuse_is_recorded_with_their_reason(
     monkeypatch.setenv("OPEN_SWE_BACKEND_URL", "https://backend.invalid")
     for module in ("rt.middleware", "rt.tools", "rt.file_tools"):
         monkeypatch.setattr(f"{module}.run_id", lambda: "run-1")
-    backend = OpenSweBackend("secret-token")
+    backend = _run_backend()
     refusal = ShellVerdict(allowed=False, refusal="pr_creation_fallback_blocked")
     monkeypatch.setattr(backend, "post", AsyncMock(return_value=refusal.model_dump(mode="json")))
     started = AsyncMock()
@@ -1042,7 +1059,7 @@ async def test_a_command_code_mode_runs_is_put_to_the_guards_too(
     monkeypatch.setenv("OPEN_SWE_BACKEND_URL", "https://backend.invalid")
     for module in ("rt.middleware", "rt.tools", "rt.file_tools"):
         monkeypatch.setattr(f"{module}.run_id", lambda: "run-1")
-    backend = OpenSweBackend("secret-token")
+    backend = _run_backend()
     refusal = ShellVerdict(allowed=False, refusal="pr_creation_fallback_blocked")
     monkeypatch.setattr(backend, "post", AsyncMock(return_value=refusal.model_dump(mode="json")))
     monkeypatch.setattr(backend, "tool_started", AsyncMock())
@@ -1090,7 +1107,7 @@ async def test_a_read_file_the_backend_serves_gets_the_read_checks(
     monkeypatch.setenv("OPEN_SWE_BACKEND_URL", "https://backend.invalid")
     for module in ("rt.middleware", "rt.tools"):
         monkeypatch.setattr(f"{module}.run_id", lambda: "run-1")
-    backend = OpenSweBackend("secret-token")
+    backend = _run_backend()
     monkeypatch.setattr(backend, "tool_started", AsyncMock())
     monkeypatch.setattr(backend, "tool_result", AsyncMock(return_value={}))
     fake = ToolMessage(
@@ -1150,7 +1167,7 @@ async def test_each_run_lists_only_the_skills_it_may_see_and_reads_them_here(
     monkeypatch.setenv("OPEN_SWE_BACKEND_URL", "https://backend.invalid")
     for module in ("rt.middleware", "rt.tools", "rt.file_tools"):
         monkeypatch.setattr(f"{module}.run_id", lambda: "run-1")
-    backend = OpenSweBackend("secret-token")
+    backend = _run_backend()
     asked: list[str] = []
 
     async def answer(name: str, body: dict[str, JsonValue]) -> BaseModel:
@@ -1240,7 +1257,7 @@ async def _launch_worker(
     from rt.middleware import AsyncWorkerLaunchMiddleware
 
     monkeypatch.setenv("OPEN_SWE_BACKEND_URL", "https://backend.invalid")
-    backend = OpenSweBackend("coordinator-token")
+    backend = _run_backend("coordinator-token")
     calls: list[tuple[str, dict[str, object]]] = []
 
     async def post(
@@ -1425,9 +1442,9 @@ async def test_a_run_started_without_its_catalog_calls_with_the_token_it_came_ba
     client = MagicMock(is_closed=False)
     client.post = AsyncMock(side_effect=post)
     monkeypatch.setattr("rt.backend.httpx2.AsyncClient", lambda **kwargs: client)
-    backend = OpenSweBackend("started-token")
+    backend = _run_backend("started-token")
 
-    catalog = await backend.catalog(None)
+    catalog = await backend.run.plan(None)
     await backend.tool_started(ToolCallReport(name="web_search", tool_call_id="call-1"))
 
     assert bearers == ["Bearer started-token", "Bearer settled-token"]
@@ -1464,10 +1481,10 @@ async def test_a_launched_worker_adopts_its_own_run_token_before_anything_runs(
     client = MagicMock(is_closed=False)
     client.post = AsyncMock(side_effect=post)
     monkeypatch.setattr("rt.backend.httpx2.AsyncClient", lambda **kwargs: client)
-    backend = OpenSweBackend(None, worker_grant="worker-grant")
+    backend = _run_backend(None, worker_grant="worker-grant")
     graph = create_agent(
         model=FakeListChatModel(responses=["done"]),
-        middleware=[BackendRunMiddleware(backend, None)],
+        middleware=[BackendRunMiddleware(backend)],
     )
 
     await graph.ainvoke(
@@ -1520,7 +1537,7 @@ async def test_mda_does_not_retry_tool_pairing_errors(
         ).model_dump(mode="json"),
     }
     request = ModelRequest(model=model, messages=[], state=state)
-    middleware = BackendRunMiddleware(OpenSweBackend("token"), "run")
+    middleware = BackendRunMiddleware(_run_backend("token", invocation_id="run"))
     if retries:
         response = await middleware.awrap_model_call(request, handler)
         assert response.result[0].content == "fallback"
@@ -1548,7 +1565,7 @@ async def test_backend_calls_carry_the_running_spans_trace_without_its_metadata(
     client.post = post
     monkeypatch.setattr("rt.backend.httpx2.AsyncClient", lambda **kwargs: client)
     monkeypatch.setattr(GenericFakeChatModel, "bind_tools", lambda self, *args, **kwargs: self)
-    backend = OpenSweBackend("secret-token")
+    backend = _run_backend(invocation_id="turn")
 
     @tool
     async def look() -> str:
@@ -1559,7 +1576,7 @@ async def test_backend_calls_carry_the_running_spans_trace_without_its_metadata(
     middleware = cast(
         "list[AgentMiddleware]",
         [
-            BackendRunMiddleware(backend, "turn"),
+            BackendRunMiddleware(backend),
             RuntimeToolsMiddleware(backend, reported_elsewhere=()),
         ],
     )
