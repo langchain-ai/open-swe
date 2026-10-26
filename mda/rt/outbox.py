@@ -27,7 +27,6 @@ from dataclasses import dataclass, field
 from typing import Final
 
 from langchain_core.messages import ToolMessage, messages_to_dict
-from langsmith.run_trees import RunTree
 from pydantic import BaseModel, JsonValue, TypeAdapter, ValidationError
 from runtime_api.endpoint import Endpoint, Transport, call
 from runtime_api.loop import (
@@ -38,7 +37,6 @@ from runtime_api.loop import (
     InboxReceipt,
     ModelResult,
     ToolCallReport,
-    ToolResultReply,
     ToolResultReport,
 )
 from runtime_api.operations import RunRequest
@@ -83,8 +81,6 @@ class _Waiting:
     order: int
     size: int
     done: asyncio.Future[None]
-    # The turn a tool result's git evidence goes to; unknown for one carried over.
-    turn: RunTree | None = None
     refusals: int = 0
 
     def resolve(self) -> None:
@@ -149,14 +145,7 @@ class Outbox:
     def finished(self, report: ToolCallReport, result: ToolMessage) -> None:
         [message] = _json_dicts.validate_python(messages_to_dict([result]))
         finished = ToolResultReport.model_validate({**report.model_dump(), "result": message})
-        # The call's run closes before the backend answers, and with it the way to the
-        # turn's trace, so the turn its git evidence goes to is found now.
-        self._add(
-            TOOL_RESULT,
-            finished,
-            _key(report, report.tool_call_id, "finished"),
-            turn=TurnTrace.live_root(),
-        )
+        self._add(TOOL_RESULT, finished, _key(report, report.tool_call_id, "finished"))
 
     def received(self, receipt: InboxReceipt) -> None:
         self._receipt = self._add(INBOX_RECEIVED, receipt, uuid.uuid4().hex)
@@ -214,14 +203,12 @@ class Outbox:
         endpoint: Endpoint[Request, Response],
         request: Request,
         key: str,
-        *,
-        turn: RunTree | None = None,
     ) -> _Waiting:
         made = item(endpoint, request, key=key, trace=TurnTrace.current_headers())
         self._last = max(time.time_ns(), self._last + 1)
-        return self._hold(made, self._last, turn=turn)
+        return self._hold(made, self._last)
 
-    def _hold(self, held: Item, order: int, *, turn: RunTree | None = None) -> _Waiting:
+    def _hold(self, held: Item, order: int) -> _Waiting:
         self._known.add(held.key)
         waiting = self._waiting.get(held.key)
         if waiting is None:
@@ -230,7 +217,6 @@ class Outbox:
                 order=order,
                 size=len(held.model_dump_json()),
                 done=asyncio.get_running_loop().create_future(),
-                turn=turn,
             )
             self._waiting[held.key] = waiting
             self._last = max(self._last, order)
@@ -305,11 +291,7 @@ class Outbox:
 
     def _settle(self, batch: list[_Waiting], answer: ReportsTaken) -> bool:
         """Let go of what ``answer`` took; whether anything moved."""
-        for waiting, reply in zip(batch, answer.replies, strict=False):
-            if waiting.item.endpoint == TOOL_RESULT.name and waiting.turn is not None:
-                # What the call changed in the thread's checkouts, for the turn's git metadata.
-                update = ToolResultReply.model_validate(reply).update
-                TurnTrace.record_evidence(update, waiting.turn)
+        for waiting in batch[: len(answer.replies)]:
             self._let_go(waiting)
         moved = bool(answer.replies)
         if answer.refused is not None and len(answer.replies) < len(batch):

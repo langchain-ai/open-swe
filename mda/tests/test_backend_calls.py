@@ -56,9 +56,10 @@ from rt.backend import (
     OpenSweBackend,
 )
 from rt.file_tools import FileToolsMiddleware
+from rt.git_evidence import TurnGit
 from rt.middleware import BackendRunMiddleware, RunState, RuntimeToolsMiddleware
 from rt.model_calls import model_call_guards
-from rt.tools import operation_tool
+from rt.tools import Operations
 from rt.tracing import TurnTrace
 from runtime_api.catalog import (
     Catalog,
@@ -74,7 +75,6 @@ from runtime_api.loop import (
     BEFORE_MODEL,
     PREPARE,
     TASK_CONTEXT,
-    AfterAgent,
     BeforeModel,
     Inbox,
     InboxItems,
@@ -83,10 +83,13 @@ from runtime_api.loop import (
     PhaseResult,
     Prepare,
     RunCall,
-    ToolCallReport,
-    ToolResultReply,
 )
-from runtime_api.operations import OperationResult, RunRequest, ShellVerdict
+from runtime_api.operations import (
+    OperationResult,
+    PullRequestHead,
+    RunRequest,
+    ShellVerdict,
+)
 from runtime_api.reports import REPORTS, Reports, ReportsTaken
 from runtime_api.workers import LAUNCH_WORKER
 
@@ -125,19 +128,6 @@ def _answering(monkeypatch: pytest.MonkeyPatch, backend: OpenSweBackend, answer:
         return ReportsTaken(replies=replies).model_dump(mode="json")
 
     monkeypatch.setattr(backend, "post", post)
-
-
-def _evidence(
-    kind: Literal["work", "pr"], key: str, repo: str, branch: str, observed_at: int
-) -> dict[str, JsonValue]:
-    """Git evidence as the backend's hooks record it for the turn ``turn``."""
-    return {
-        f"git_trace_{kind}:{key}": {
-            "invocation": "turn",
-            "observed_at": observed_at,
-            "targets": [{"repo": repo, "branch": branch}],
-        }
-    }
 
 
 @pytest.mark.parametrize(
@@ -235,11 +225,10 @@ async def test_a_tool_call_the_backend_never_answered(
     client = MagicMock(is_closed=False)
     client.post = AsyncMock(side_effect=[failure_result] * failures + [response])
     monkeypatch.setattr("rt.backend.httpx2.AsyncClient", lambda **kwargs: client)
-    served = operation_tool(
+    served = Operations(OpenSweBackend("secret-token"), TurnGit()).tool(
         OperationSpec(
             name="background_execute", description="Execute", parameters={"type": "object"}
-        ),
-        OpenSweBackend("secret-token"),
+        )
     )
     runtime = ToolRuntime(
         state={"messages": []},
@@ -782,42 +771,22 @@ async def test_turn_reconciliation_reaches_runtime_root_llm_and_nested_calls(
     actor = {"ls_repo_provider": "github", "ls_attribution_identifier": "trigger"}
     final = {**actor, "ls_git_repo": "org/actual", "ls_git_branch": "Exact/PR-head"}
     backend = OpenSweBackend("secret-token")
+    git = TurnGit()
 
     @tool
     async def nested_call(text: str) -> str:
         """Call a nested runnable."""
-        TurnTrace.record_evidence(
-            {
-                **_evidence("work", "work", "org/actual", "local", 1),
-                **_evidence("pr", "pr-later", "org/later", "later/head", 2),
-                **_evidence("pr", "pr-first", "org/actual", final["ls_git_branch"], 3),
-            }
+        # As the run's operations report the pull requests they open, earliest first.
+        git.found_pull_requests([PullRequestHead(repo="org/later", branch="later/head")], 2)
+        git.found_pull_requests(
+            [PullRequestHead(repo="org/actual", branch=final["ls_git_branch"])], 1
         )
         return await RunnableLambda(lambda value: value).ainvoke(text)
 
     async def phase(name: str, body: dict[str, JsonValue]) -> BaseModel:
-        if name == "prepare":
-            return PhaseResult(
-                update={"git_trace_baseline": {"invocation": "turn", "snapshot": None}}
-            )
         if name == "before_model":
-            assert isinstance(state := body["state"], dict)
-            assert "git_trace_work:previous" not in state
             await nested_call.ainvoke({"text": "nested"})
-            return BeforeModel(update=_evidence("work", "work", "org/actual", "local", 1))
-        if name == "after_agent":
-            # What the backend reconciles from that evidence: the earliest PR target first.
-            return AfterAgent(
-                trace_metadata={
-                    **final,
-                    "open_swe_git_targets": [
-                        {"repo": "org/actual", "branch": final["ls_git_branch"]},
-                        {"repo": "org/later", "branch": "later/head"},
-                    ],
-                },
-                update={"git_trace_baseline": None},
-            )
-        return PhaseResult()
+        return BeforeModel() if name == "before_model" else PhaseResult()
 
     _answering(monkeypatch, backend, phase)
     client = MagicMock(spec=Client)
@@ -832,7 +801,7 @@ async def test_turn_reconciliation_reaches_runtime_root_llm_and_nested_calls(
     monkeypatch.setattr(FakeListChatModel, "bind_tools", lambda self, *args, **kwargs: self)
     graph = create_deep_agent(
         model=FakeListChatModel(responses=["done"]),
-        middleware=[BackendRunMiddleware(backend, "turn", trace_metadata=actor)],
+        middleware=[BackendRunMiddleware(backend, "turn", trace_metadata=actor, git=git)],
         checkpointer=InMemorySaver(),
     )
     config: RunnableConfig = {
@@ -842,17 +811,10 @@ async def test_turn_reconciliation_reaches_runtime_root_llm_and_nested_calls(
     }
     with tracing_context(enabled=True, parent=parent):
         await graph.ainvoke(
-            {
-                "messages": [("user", "hello")],
-                "open_swe_state": {
-                    "kept": True,
-                    "git_trace_work:previous": {"invocation": "previous", "targets": []},
-                },
-            },
-            config,
+            {"messages": [("user", "hello")], "open_swe_state": {"kept": True}}, config
         )
     saved = await graph.aget_state(config)
-    assert saved.values["open_swe_state"] == {"kept": True, "git_trace_baseline": None}
+    assert saved.values["open_swe_state"] == {"kept": True}
     assert "ls_git_repo" not in parent.metadata
     created = {call.kwargs["id"]: call.kwargs for call in client.create_run.call_args_list}
     assert any(run["run_type"] == "llm" for run in created.values())
@@ -945,7 +907,7 @@ async def test_backfill_preserves_destination_timing_and_outputs(
     assert root.metadata["ls_git_repo"] == child.metadata["ls_git_repo"] == "org/repo"
 
 
-@pytest.mark.parametrize("failure", ["lookup", "evidence", "export"])
+@pytest.mark.parametrize("failure", ["lookup", "export"])
 async def test_optional_trace_failures_do_not_change_successful_turn_output(
     monkeypatch: pytest.MonkeyPatch, failure: str
 ) -> None:
@@ -959,14 +921,12 @@ async def test_optional_trace_failures_do_not_change_successful_turn_output(
     if failure == "lookup":
         monkeypatch.setattr(TurnTrace, "current_root", staticmethod(unavailable_trace))
 
+    git = TurnGit()
+
     async def phase(name: str, body: dict[str, JsonValue]) -> BaseModel:
         if name == "before_model":
-            TurnTrace.record_evidence({"git_trace_pr:call": {"invocation": "turn", "targets": []}})
-        if failure == "evidence" and name == "after_model":
-            root = TurnTrace.current_root()
-            assert root is not None
-            root.metadata["open_swe_git_evidence"] = "invalid"
-        return AfterAgent(trace_metadata={"ls_git_repo": "org/actual"})
+            git.found_pull_requests([PullRequestHead(repo="org/actual", branch="main")], 1)
+        return BeforeModel() if name == "before_model" else PhaseResult()
 
     export_failed = False
 
@@ -987,7 +947,7 @@ async def test_optional_trace_failures_do_not_change_successful_turn_output(
     client.update_run.side_effect = update
     graph = create_agent(
         model=FakeListChatModel(responses=["done"]),
-        middleware=[BackendRunMiddleware(backend, "turn")],
+        middleware=[BackendRunMiddleware(backend, "turn", git=git)],
     )
     with tracing_context(enabled=True):
         result = await graph.ainvoke(
@@ -999,32 +959,6 @@ async def test_optional_trace_failures_do_not_change_successful_turn_output(
         )
     assert result["messages"][-1].content == "done"
     assert export_failed == (failure == "export")
-
-
-async def test_box_call_git_evidence_reaches_the_turn_after_its_run_closed(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """The backend answers a box call's report after the call's run closed; its evidence still counts."""
-    monkeypatch.setenv("OPEN_SWE_BACKEND_URL", "https://backend.invalid")
-    evidence = _evidence("work", "call-1", "org/actual", "work", 1)
-    turn = RunTree(name="turn", run_type="chain", extra={"metadata": {"open_swe_git_evidence": {}}})
-    roots: list[RunTree | None] = [turn]
-    monkeypatch.setattr(TurnTrace, "current_root", staticmethod(lambda: roots[0]))
-    backend = OpenSweBackend("secret-token")
-
-    async def answer(name: str, body: dict[str, JsonValue]) -> BaseModel:
-        return ToolResultReply(update=evidence)
-
-    _answering(monkeypatch, backend, answer)
-
-    backend.outbox.finished(
-        ToolCallReport(name="execute", tool_call_id="call-1"),
-        ToolMessage(content="ran", tool_call_id="call-1"),
-    )
-    roots[0] = None  # The call's run has closed: the turn is no longer found from here.
-    await backend.outbox.drain()
-
-    assert turn.metadata["open_swe_git_evidence"] == evidence
 
 
 async def test_an_operation_code_mode_calls_is_reported_and_cited_under_its_eval_call(
@@ -1050,10 +984,8 @@ async def test_an_operation_code_mode_calls_is_reported_and_cited_under_its_eval
     finished = MagicMock()
     monkeypatch.setattr(backend.outbox, "started", started)
     monkeypatch.setattr(backend.outbox, "finished", finished)
-    search = operation_tool(
-        OperationSpec(name="search_incidents", description="Search", parameters={"type": "object"}),
-        backend,
-        cites_evidence=True,
+    search = Operations(backend, TurnGit(), cites_evidence=True).tool(
+        OperationSpec(name="search_incidents", description="Search", parameters={"type": "object"})
     )
     runtime = ToolRuntime(
         state={"messages": []},
@@ -1243,7 +1175,7 @@ async def test_each_run_lists_only_the_skills_it_may_see_and_reads_them_here(
     from deepagents.middleware.filesystem import FilesystemMiddleware
     from deepagents.middleware.skills import SkillsState
     from rt.skills import RunSkillsMiddleware, SkillFiles
-    from runtime_api.loop import ToolResultReply
+    from runtime_api.loop import Done
     from runtime_api.skills import RunSkills, SkillFile
 
     monkeypatch.setenv("OPEN_SWE_BACKEND_URL", "https://backend.invalid")
@@ -1255,7 +1187,7 @@ async def test_each_run_lists_only_the_skills_it_may_see_and_reads_them_here(
     async def answer(name: str, body: dict[str, JsonValue]) -> BaseModel:
         asked.append(name)
         if name != "skills":
-            return ToolResultReply()
+            return Done()
         deploy = "---\nname: deploy\ndescription: Ship it\n---\n\nRun make deploy.\n"
         return RunSkills(
             files=[SkillFile(path="/organization-skills/deploy/SKILL.md", content=deploy)]

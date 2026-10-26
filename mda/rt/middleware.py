@@ -4,7 +4,8 @@ Preparation is the backend's: it readies the run and writes the graph state the
 loop reads, which rides in ``open_swe_state`` and goes back with every call. Around
 each model call ``RunLoop`` (``rt.loop``) does what the catalog's rules say, and the
 transcript and usage hear of each reply. A run whose catalog names no rules hands
-each phase to the backend instead.
+each phase to the backend instead. The turn's git evidence (``rt.git_evidence``)
+starts once the run is prepared and ends up in the turn's trace.
 
 Before each model call the run also takes its thread's inbox: what was sent to
 the thread while the run worked, such as a person's follow-up or a task report.
@@ -89,6 +90,7 @@ from rt.backend import (
     run_call,
     subagent_of,
 )
+from rt.git_evidence import TurnGit
 from rt.loop import RunLoop
 from rt.models import build_model
 from rt.outbox import OUTBOX_KEY, carry
@@ -123,10 +125,7 @@ _LAUNCH_RETRY_SECONDS: Final = (4.0, 12.0)
 def _merge(
     left: dict[str, JsonValue] | None, right: dict[str, JsonValue] | None
 ) -> dict[str, JsonValue]:
-    held = left or {}
-    if right is not None and "git_trace_baseline" in right:
-        held = {key: value for key, value in held.items() if not key.startswith("git_trace_")}
-    return {**held, **(right or {})}
+    return {**(left or {}), **(right or {})}
 
 
 _TOOL_PAIRING_ERRORS: Final = (
@@ -179,8 +178,12 @@ def _decode(value: object) -> object:
     return value
 
 
+def _held(update: Mapping[str, object] | None) -> Mapping[str, object]:
+    held = (update or {}).get(STATE_KEY)
+    return held if isinstance(held, Mapping) else {}
+
+
 def _apply(reply: PhaseResult) -> dict[str, object]:
-    TurnTrace.record_evidence(reply.update)
     for event in reply.events:
         get_stream_writer()(event)
     update: dict[str, object] = {}
@@ -336,6 +339,7 @@ class BackendRunMiddleware(AgentMiddleware[RunState]):
         trace_metadata: Mapping[str, JsonValue] | None = None,
         inbox: InboxSpec | None = None,
         loop: RunLoop | None = None,
+        git: TurnGit | None = None,
     ) -> None:
         self._backend = backend
         self._invocation_id = invocation_id
@@ -346,6 +350,7 @@ class BackendRunMiddleware(AgentMiddleware[RunState]):
         # the runs it still answers from their plan.
         self._loop = loop
         self._trace = TurnTrace()
+        self._git = git or TurnGit()
         # Opens the thread's box before preparing, so the backend binds the thread to it.
         self._open_sandbox = open_sandbox
 
@@ -363,7 +368,10 @@ class BackendRunMiddleware(AgentMiddleware[RunState]):
 
     @hook_config(can_jump_to=["end"])
     async def abefore_agent(self, state: RunState, runtime: Runtime) -> dict[str, object] | None:
-        return self._carrying(state, await self._before_agent(state, runtime))
+        update = await self._before_agent(state, runtime)
+        held = {**state.get(STATE_KEY, {}), **_held(update)}
+        self._git.start(getattr(runtime, "backend", None), held.get("work_dir"))
+        return self._carrying(state, update)
 
     async def _before_agent(self, state: RunState, runtime: Runtime) -> dict[str, object] | None:
         self._trace.start(self._trace_metadata)
@@ -378,11 +386,11 @@ class BackendRunMiddleware(AgentMiddleware[RunState]):
         self._backend.outbox.adopt(state)
         invocation = self._invocation()
         if state.get("open_swe_prepared_for") == invocation:
-            self._trace.record_evidence(state.get(STATE_KEY, {}))
             return None
         sandbox_id = await self._open_sandbox(runtime) if self._open_sandbox is not None else None
-        prepared = await self._phase(
-            PREPARE, run_call(Prepare, run_id(), state, sandbox_id=sandbox_id)
+        # Not behind the outbox: what an earlier run left unsent changes nothing here.
+        prepared = await call(
+            self._backend, PREPARE, run_call(Prepare, run_id(), state, sandbox_id=sandbox_id)
         )
         return {**_apply(prepared), "open_swe_prepared_for": invocation}
 
@@ -517,23 +525,17 @@ class BackendRunMiddleware(AgentMiddleware[RunState]):
         return self._carrying(state, await self._after_agent(state))
 
     async def _after_agent(self, state: RunState) -> dict[str, object] | None:
-        metadata = dict(self._trace_metadata)
         try:
             if self._loop is not None:
-                ended = await self._loop.after_agent(state, self._trace.evidence)
-            else:
-                request = run_call(RunCall, run_id(), state)
-                ended = await self._phase(
-                    AFTER_AGENT,
-                    request.model_copy(update={"state": {**request.state, **self._trace.evidence}}),
-                )
-            metadata.update(ended.trace_metadata)
-            return _apply(ended)
+                # Reported, not waited on: the run ends as soon as its trace is reconciled.
+                self._loop.after_agent(state)
+                return None
+            return _apply(await self._phase(AFTER_AGENT, run_call(RunCall, run_id(), state)))
         except BackendCallError:
             logger.warning("The backend's end-of-run hooks failed", exc_info=True)
             return None
         finally:
-            await self._trace.reconcile(metadata)
+            await self._trace.reconcile({**self._trace_metadata, **await self._git.metadata()})
 
 
 class ReportRepliesMiddleware(AgentMiddleware):

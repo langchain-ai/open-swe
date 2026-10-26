@@ -39,6 +39,7 @@ from rt.backend import OpenSweBackend
 from rt.browser import ReportedBrowserMiddleware
 from rt.factory_timing import FactoryTiming
 from rt.file_tools import FileToolsMiddleware
+from rt.git_evidence import TurnGit
 from rt.loop import RunLoop
 from rt.managed_sandbox import (
     EXECUTE_TIMEOUT_SECONDS,
@@ -61,7 +62,7 @@ from rt.remote_files import FILE_TOOLS, RemoteFiles, remote_file_tools
 from rt.search_tools import search_tools_tool
 from rt.skills import RunSkillsMiddleware, SkillFiles
 from rt.task_retry import task_retry
-from rt.tools import operation_tool, run_id
+from rt.tools import Operations, run_id
 from runtime_api.catalog import Catalog
 
 if TYPE_CHECKING:
@@ -185,11 +186,13 @@ async def agent(runtime: ManagedServerRuntime) -> DeepAgentDefinition:
         else _DEFAULT_MODEL
     )
     timing.lap("models")
+    remote = RemoteFiles(backend, run_id)
+    in_box = catalog.sandbox is not None
+    # The turn's git evidence, from the box or, without one of MDA's, the thread's files.
+    git = TurnGit(None if in_box else remote)
+    operations = Operations(backend, git, cites_evidence=catalog.incident_evidence)
     tools = [
-        *(
-            operation_tool(spec, backend, cites_evidence=catalog.incident_evidence)
-            for spec in catalog.operations
-        ),
+        *(operations.tool(spec) for spec in catalog.operations),
         *(
             [search_tools_tool(catalog.operations, catalog.search_tools_description)]
             if catalog.search_tools
@@ -197,7 +200,6 @@ async def agent(runtime: ManagedServerRuntime) -> DeepAgentDefinition:
         ),
     ]
     timing.lap("operation_tools")
-    remote = RemoteFiles(backend, run_id)
     remote_tools = remote_file_tools(remote, catalog.files.artifacts_root)
     # The run's skills, listed for the agent and its subagents and read from here.
     skill_files = SkillFiles(backend, run_id)
@@ -206,7 +208,6 @@ async def agent(runtime: ManagedServerRuntime) -> DeepAgentDefinition:
         if catalog.skill_sources
         else []
     )
-    in_box = catalog.sandbox is not None
     file_tools = FileToolsMiddleware(
         backend,
         catalog.files,
@@ -214,6 +215,7 @@ async def agent(runtime: ManagedServerRuntime) -> DeepAgentDefinition:
         remote=remote_tools,
         remote_files=remote,
         in_box=in_box,
+        git=git,
         skills={tool.name: tool for tool in FilesystemMiddleware(backend=skill_files).tools},
         skill_sources=catalog.skill_sources,
     )
@@ -277,6 +279,7 @@ async def agent(runtime: ManagedServerRuntime) -> DeepAgentDefinition:
                 loop=RunLoop(backend, catalog.loop, models)
                 if catalog.loop is not None and models is not None
                 else None,
+                git=git,
             ),
             *replace_sandbox,
             *_backend_reports(backend, catalog),

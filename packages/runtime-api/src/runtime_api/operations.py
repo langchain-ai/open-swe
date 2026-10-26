@@ -30,6 +30,13 @@ class RunOperation(RunRequest):
     grant: str | None = None
 
 
+class PullRequestHead(BaseModel):
+    """A pull request by its repository and head branch."""
+
+    repo: str
+    branch: str
+
+
 class OperationResult(BaseModel):
     # What the model reads, as a tool result's content.
     content: str | list[JsonValue]
@@ -40,8 +47,8 @@ class OperationResult(BaseModel):
     message_id: str | None = None
     # Run state the operation changed.
     state: dict[str, JsonValue] = {}
-    # What the operation changed in the thread's checkouts, for the turn's git metadata.
-    evidence: dict[str, JsonValue] = {}
+    # The pull requests the operation opened or found, for the turn's git metadata.
+    pull_requests: list[PullRequestHead] = []
     # Custom stream events the operation emitted, for the run to emit.
     events: list[JsonValue] = []
     # The thread's box did not answer; the backend has told the person, and the run ends.

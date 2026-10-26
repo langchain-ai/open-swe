@@ -118,7 +118,6 @@ from runtime_api.loop import (
     TASK_CONTEXT,
     TOOL_RESULT,
     TOOL_STARTED,
-    AfterAgent,
     BeforeModel,
     BrowserReport,
     ChosenModel,
@@ -140,7 +139,6 @@ from runtime_api.loop import (
     ScoutPlanEnd,
     TaskContext,
     ToolCallReport,
-    ToolResultReply,
     ToolResultReport,
 )
 from runtime_api.operations import (
@@ -160,12 +158,7 @@ from runtime_api.skills import SKILLS, RunSkills
 
 from openswe.agent_api.caller_trace import traced_under
 from openswe.agent_api.failures import OperationFailure
-from openswe.agent_api.git_metadata import (
-    BASELINE,
-    OBSERVED_TOOLS,
-    TurnGitMetadata,
-    collect_pr_targets,
-)
+from openswe.agent_api.git_metadata import collect_pr_targets, trace_actor
 from openswe.agent_api.loop import (
     Phase,
     RunLoop,
@@ -441,7 +434,7 @@ class RunSession:
         run = run or self.run
         return catalog.model_copy(
             update={
-                "trace_metadata": TurnGitMetadata(self.config).actor,
+                "trace_metadata": trace_actor(self.config),
                 "sandbox": None
                 if sandbox is None
                 else SandboxSpec.model_validate(sandbox.model_dump(mode="json")),
@@ -598,9 +591,7 @@ class RunSession:
             await ThreadInbox(cfg.thread_id).receive(events=_carried_events(self.config))
 
         async def begun(state: dict[str, object], runtime: Runtime) -> PhaseResult:
-            result = await run_hooks(self.surface.middleware, "before_agent", state, runtime)
-            begin = await TurnGitMetadata(self.config).begin()
-            return result.model_copy(update={"update": {**result.update, **begin}})
+            return await run_hooks(self.surface.middleware, "before_agent", state, runtime)
 
         return await self._answer_phase("before_agent", request, begun)
 
@@ -610,17 +601,11 @@ class RunSession:
     async def after_model(self, request: RunCall) -> PhaseResult:
         return await self._answer_phase("after_model", request, self.loop.after_model)
 
-    async def after_agent(self, request: RunCall) -> AfterAgent:
-        async def reconciled(state: dict[str, object], runtime: Runtime) -> AfterAgent:
-            result = await run_hooks(self.surface.middleware, "after_agent", state, runtime)
-            trace_metadata = await TurnGitMetadata(self.config).reconcile(state)
-            return AfterAgent(
-                **result.model_dump(exclude={"update"}),
-                update={**result.update, BASELINE: None},
-                trace_metadata=trace_metadata,
-            )
+    async def after_agent(self, request: RunCall) -> PhaseResult:
+        async def ended(state: dict[str, object], runtime: Runtime) -> PhaseResult:
+            return await run_hooks(self.surface.middleware, "after_agent", state, runtime)
 
-        return await self._answer_phase("after_agent", request, reconciled)
+        return await self._answer_phase("after_agent", request, ended)
 
     async def sandbox_unreachable(self, request: SandboxGone) -> Done:
         """A tool MDA ran in the box found it gone; the run ends once the person knows."""
@@ -711,8 +696,7 @@ async def run_operation(
         decision = await guards.decide(request.name, request.arguments)
         if decision.arguments is None:
             return OperationResult(content=decision.refusal or "", status="error")
-        observed_at = time.time_ns()
-        with collect_pr_targets() as pr_targets:
+        with collect_pr_targets() as pull_requests:
             try:
                 outcome = await invoke(tool, decision.arguments, state, request.request_id)
             except NodeCancelledError:
@@ -726,10 +710,7 @@ async def run_operation(
                     sandbox_unreachable=failure.sandbox_unreachable,
                 )
         result = _operation_result(outcome, request.request_id)
-        evidence = TurnGitMetadata(config).evidence(
-            pr_targets, request.request_id, pr=True, observed_at=observed_at
-        )
-        return result.model_copy(update={"evidence": evidence})
+        return result.model_copy(update={"pull_requests": pull_requests})
 
     result = await in_graph_context({**config, "run_name": request.name}, run, events=events)
     return result.model_copy(update={"events": [_json_or_text(e) for e in events]})
@@ -856,11 +837,10 @@ class TokenRun:
         """``record`` the report as the run, inside the calling subagent, with its turn rejoined.
 
         A report carries only what it is about: the ``messages`` it adds and the run
-        state (``held``, and the turn's git trace) its recorders read. What a recorder
-        queued is written before the call answers, so the next call may reach another
-        process.
+        state (``held``) its recorders read. What a recorder queued is written before the
+        call answers, so the next call may reach another process.
         """
-        state: dict[str, object] = {**report.git, **held, "messages": list(messages)}
+        state: dict[str, object] = {**held, "messages": list(messages)}
         carried = [m for m in self.parts.reporters if isinstance(m, CarriedAcrossProcesses)]
 
         async def reported(runtime: Runtime) -> T:
@@ -911,22 +891,17 @@ class TokenRun:
         await self._reporting(request, "tool_started", record)
         return Done()
 
-    async def tool_result(self, request: ToolResultReport) -> ToolResultReply:
+    async def tool_result(self, request: ToolResultReport) -> Done:
         [result] = messages_from_dict([request.result])
         if not isinstance(result, ToolMessage):
             raise ValueError("A tool result must be a tool message")
 
-        async def record(state: dict[str, object], _runtime: Runtime) -> dict[str, JsonValue]:
+        async def record(_state: dict[str, object], _runtime: Runtime) -> None:
             for recorder in self._tool_recorders():
                 await recorder.atool_finished(result)
-            # A file or shell tool may have started the turn's work; the snapshot is taken
-            # now, off the call's path, as the run, which a bridged machine checks.
-            git = TurnGitMetadata(self.config)
-            before = git.work_baseline(state) if request.name in OBSERVED_TOOLS else None
-            return await git.work_evidence(before, request.tool_call_id, time.time_ns())
 
-        update = await self._reporting(request, "tool_result", record)
-        return ToolResultReply(update=update)
+        await self._reporting(request, "tool_result", record)
+        return Done()
 
     async def operation(self, request: RunOperation) -> OperationResult:
         """Do the work of one of the run's tools: its arguments in, its result out."""
@@ -1010,25 +985,20 @@ class TokenRun:
         await self.in_run("reply_on_behalf", post)
         return Done()
 
-    async def run_ended(self, request: RunEnded) -> AfterAgent:
-        """Record the run's end: its transcript turn and usage, and its git work reconciled."""
+    async def run_ended(self, request: RunEnded) -> Done:
+        """Record the run's end: its transcript turn and its usage."""
         reporters = self.parts.reporters
 
-        async def ended(state: dict[str, object], runtime: Runtime) -> AfterAgent:
-            result = await run_hooks(reporters, "after_agent", state, runtime)
-            trace_metadata = await TurnGitMetadata(self.config).reconcile(state)
-            return AfterAgent(
-                **result.model_dump(exclude={"update"}),
-                update={**result.update, BASELINE: None},
-                trace_metadata=trace_metadata,
-            )
+        async def ended(state: dict[str, object], runtime: Runtime) -> None:
+            await run_hooks(reporters, "after_agent", state, runtime)
 
         try:
-            return await self._reporting(
+            await self._reporting(
                 request, "run_ended", ended, messages=messages_from_dict(request.replies)
             )
         finally:
             self.graph.end(self.run, self.run_id)
+        return Done()
 
     async def step_limit_reached(self, _request: RunRequest) -> Done:
         await self.in_run("step_limit_reached", notify_step_limit)

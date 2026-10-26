@@ -3,8 +3,9 @@
 Before each call it ends the run where a rule says to, adds the thread's task
 context, keeps the box's GitHub proxy fresh, picks the call's route and model, and
 assembles its system prompt and tool list. After an answer that calls no tool, it
-asks again for the reply or CLI result the run owes. When the run ends, it reports
-the end and does the graph's own end-of-run work.
+asks again for the reply or CLI result the run owes. When the run ends, it asks
+for the graph's own end-of-run work and reports the end, neither of which the run
+waits for.
 
 The backend answers only what needs its data or credentials, one named call each
 (``runtime_api.loop``). Graph state the loop reads or writes is the backend's held
@@ -47,7 +48,6 @@ from runtime_api.loop import (
     SETTLE_REVIEW_CHECK,
     STEP_LIMIT_REACHED,
     TASK_CONTEXT,
-    AfterAgent,
     BeforeModel,
     ChosenModel,
     ModelCall,
@@ -60,7 +60,7 @@ from runtime_api.loop import (
 )
 from runtime_api.operations import RunRequest
 
-from rt.backend import OpenSweBackend, git_trace, human_messages, run_call
+from rt.backend import OpenSweBackend, human_messages, run_call
 from rt.tools import STATE_KEY, run_id
 
 logger = logging.getLogger(__name__)
@@ -439,13 +439,11 @@ class RunLoop:
         }
         return turn.succeeded(call_ids)
 
-    async def after_agent(
-        self, state: Mapping[str, object], evidence: Mapping[str, JsonValue]
-    ) -> AfterAgent:
+    def after_agent(self, state: Mapping[str, object]) -> None:
         """Ask for the graph's own end-of-run work, then report the run's end.
 
-        The work goes out behind the run's reports, and one the backend cannot do takes
-        none of the rest with it.
+        Both go out behind the run's reports, so the transcript has every reply and tool
+        call before the end; one the backend cannot do takes none of the rest with it.
         """
         messages = _messages(state)
         current = run_id()
@@ -462,9 +460,6 @@ class RunLoop:
                     human_input_summary=summary if isinstance(summary, str) else "",
                 )
                 outbox.notify(FINISH_SCOUT_PLAN, finished)
-        # The transcript has every reply and tool call, and the backend the work, before
-        # the run's end.
-        await outbox.drain()
         replies = [
             # Usage reads only each reply's id, model and token counts.
             AIMessage(
@@ -476,12 +471,10 @@ class RunLoop:
             for message in messages
             if isinstance(message, AIMessage) and message.usage_metadata
         ]
-        request = RunEnded(
-            run_id=current,
-            git={**git_trace(state), **evidence},
-            replies=_json_dicts.validate_python(messages_to_dict(replies)),
+        ended = RunEnded(
+            run_id=current, replies=_json_dicts.validate_python(messages_to_dict(replies))
         )
-        return await call(self._backend, RUN_ENDED, request)
+        outbox.notify(RUN_ENDED, ended)
 
 
 def _messages(state: Mapping[str, object]) -> list[AnyMessage]:

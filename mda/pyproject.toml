@@ -44,6 +44,8 @@ python-version = "3.13"
 # import of the backend (`openswe`) or a database driver fails to resolve.
 [tool.ty.src]
 include = ["agent.py", "identity.py", "rt", "tests"]
+# Run in the box on its own python3; `make typecheck` checks them at 3.8.
+exclude = ["rt/sandbox_scripts"]
 
 [tool.pytest.ini_options]
 asyncio_mode = "auto"

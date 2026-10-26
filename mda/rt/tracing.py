@@ -9,7 +9,7 @@ from langchain_core.callbacks import AsyncCallbackManager, CallbackManager
 from langchain_core.runnables.config import ensure_config
 from langchain_core.tracers.langchain import LangChainTracer
 from langsmith.run_trees import RunTree
-from pydantic import JsonValue, TypeAdapter
+from pydantic import JsonValue
 
 logger = logging.getLogger(__name__)
 
@@ -57,7 +57,6 @@ class TurnTrace:
             self.root = self.current_root()
             if self.root is not None:
                 self.root.metadata.update(metadata)
-                self.root.metadata["open_swe_git_evidence"] = {}
         except Exception:
             logger.warning("Could not tag the turn trace", exc_info=True)
 
@@ -89,58 +88,6 @@ class TurnTrace:
         except Exception:
             logger.warning("Could not read the running span's trace headers", exc_info=True)
         return {}
-
-    @staticmethod
-    def live_root() -> RunTree | None:
-        """The turn's tree as seen from the running call, while that call's run is open."""
-        try:
-            return TurnTrace.current_root()
-        except Exception:
-            logger.warning("Could not find the turn trace", exc_info=True)
-            return None
-
-    @staticmethod
-    def record_evidence(update: Mapping[str, JsonValue], root: RunTree | None = None) -> None:
-        """Hold ``update``'s git evidence on ``root``, by default the running call's turn."""
-        evidence = {
-            key: value
-            for key, value in update.items()
-            if key == "git_trace_baseline" or key.startswith(("git_trace_pr:", "git_trace_work:"))
-        }
-        try:
-            if evidence and (root := root or TurnTrace.current_root()) is not None:
-                held = root.metadata.setdefault("open_swe_git_evidence", {})
-                if isinstance(held, dict):
-                    if "git_trace_baseline" in evidence:
-                        held.clear()
-                    held.update(evidence)
-        except Exception:
-            logger.warning("Could not record turn git evidence", exc_info=True)
-
-    @staticmethod
-    def _evidence(root: RunTree | None) -> dict[str, JsonValue]:
-        if root is None:
-            return {}
-        return TypeAdapter(dict[str, JsonValue]).validate_python(
-            root.metadata.get("open_swe_git_evidence", {})
-        )
-
-    @staticmethod
-    def current_evidence() -> dict[str, JsonValue]:
-        """Share the parent's observation budget with subagents that have their own state."""
-        try:
-            return TurnTrace._evidence(TurnTrace.current_root())
-        except Exception:
-            logger.warning("Could not read current turn git evidence", exc_info=True)
-            return {}
-
-    @property
-    def evidence(self) -> dict[str, JsonValue]:
-        try:
-            return self._evidence(self.root)
-        except Exception:
-            logger.warning("Ignoring invalid turn git evidence", exc_info=True)
-            return {}
 
     async def reconcile(self, metadata: Mapping[str, JsonValue]) -> None:
         if self.root is None:

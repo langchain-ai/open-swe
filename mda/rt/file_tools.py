@@ -10,8 +10,9 @@ the backend's guards, which inspect the push and may need a person's approval, s
 the match here is wider than what they block. Tool errors become results the model
 can act on. Where the catalog lists the checks, a file posing as an image is not
 attached and reading a file loads the ``AGENTS.md`` files above it. The transcript
-hears of each call alongside it. Code mode calls them through ``code_tools``, so
-its calls meet the same checks.
+hears of each call alongside it, and a call that may change a checkout counts
+toward the turn's git evidence (``rt.git_evidence``). Code mode calls them through
+``code_tools``, so its calls meet the same checks.
 """
 
 import asyncio
@@ -20,6 +21,7 @@ import logging
 import posixpath
 import random
 import re
+import time
 from collections.abc import Awaitable, Callable, Iterable, Mapping
 from functools import partial
 from typing import Final
@@ -40,6 +42,7 @@ from runtime_api.endpoint import call
 from runtime_api.operations import CHECK_SHELL, ShellCheck
 
 from rt.backend import OpenSweBackend
+from rt.git_evidence import OBSERVED_TOOLS, TurnGit
 from rt.middleware import reported
 from rt.remote_files import FILE_TOOLS
 from rt.subdir_agents import SubdirAgentsReadMiddleware
@@ -88,10 +91,12 @@ class FileToolsMiddleware(AgentMiddleware):
         remote: Mapping[str, BaseTool],
         remote_files: BackendProtocol,
         in_box: bool,
+        git: TurnGit | None = None,
         skills: Mapping[str, BaseTool] | None = None,
         skill_sources: Iterable[str] = (),
     ) -> None:
         self._backend = backend
+        self._git = git or TurnGit()
         self._remote = dict(remote)
         self._in_box = in_box
         # The run's skills, which this runtime keeps itself (``rt.skills``).
@@ -142,6 +147,8 @@ class FileToolsMiddleware(AgentMiddleware):
                 for tool in request.tools
                 if isinstance(tool, BaseTool) and tool.name in FILE_TOOLS
             )
+        # What the last calls changed is fingerprinted while the model works.
+        self._git.settle()
         return await handler(request)
 
     async def awrap_tool_call(
@@ -155,7 +162,10 @@ class FileToolsMiddleware(AgentMiddleware):
         elif self._in_box and _under(self._backend_paths, call_["name"], call_["args"]):
             run = self._run_remote
         else:
-            run = partial(_retried, handler=partial(self._within_deadline, handler=handler))
+            run = partial(
+                self._observed,
+                handler=partial(_retried, handler=partial(self._within_deadline, handler=handler)),
+            )
         # The transcript records a call the guards refuse, with their reason, as any other.
         return await reported(
             self._backend,
@@ -195,6 +205,17 @@ class FileToolsMiddleware(AgentMiddleware):
             return request
         arguments = {**request.tool_call["args"], "command": verdict.command}
         return request.override(tool_call={**request.tool_call, "args": arguments})
+
+    async def _observed(self, request: ToolCallRequest, handler: Handler) -> ToolMessage | Command:
+        """``handler``, after the turn's starting fingerprint when the call may change a checkout."""
+        if request.tool_call["name"] not in OBSERVED_TOOLS:
+            return await handler(request)
+        await self._git.changing()
+        started = time.time_ns()
+        try:
+            return await handler(request)
+        finally:
+            self._git.changed(started)
 
     async def _run_remote(self, request: ToolCallRequest) -> ToolMessage | Command:
         """The call against the backend's files, as the box's own tool would run it."""

@@ -5,7 +5,7 @@ and ends the run as the catalog's ``LoopRules`` say. It asks the backend only fo
 what needs the backend's data or credentials, one named call each: the route a
 task takes, a model's settings, the task a thread belongs to, a fresh GitHub proxy
 token, a reply posted on the model's behalf, and what the end of the run records.
-The transcript and usage hear of each reply and tool call.
+The transcript and usage hear of each reply and tool call, and of the run's end.
 
 Preparation, and every phase of a run still answered from its plan, are phase
 calls: the backend runs the graph's own middleware for the phase, and graph state
@@ -70,19 +70,12 @@ class BeforeModel(PhaseResult):
     call: ModelCall | None = None
 
 
-class AfterAgent(PhaseResult):
-    # What the turn's trace records about the run's git work.
-    trace_metadata: dict[str, JsonValue] = {}
-
-
 class Report(RunRequest):
     """What the runtime tells the backend happened: only what the report is about, never
     the conversation or the run's state."""
 
     # The ``task`` calls the reporting subagent is nested in; empty for the agent itself.
     namespace: list[str] = []
-    # The turn's git trace (``git_trace_*``): its baseline and what each call changed.
-    git: dict[str, JsonValue] = {}
 
 
 class ModelResult(Report):
@@ -108,11 +101,6 @@ class ToolCallReport(Report):
 class ToolResultReport(ToolCallReport):
     # The call's result, as a tool message.
     result: dict[str, JsonValue]
-
-
-class ToolResultReply(BaseModel):
-    # What the call changed in the thread's checkouts, for the turn's git metadata.
-    update: dict[str, JsonValue] = {}
 
 
 class RunEnded(Report):
@@ -214,9 +202,9 @@ INBOX_RECEIVED = Endpoint(
 )
 MODEL_RESULT = Endpoint("model_result", ModelResult, Done, seconds=LOOP_CALL_SECONDS)
 AFTER_MODEL = Endpoint("after_model", RunCall, PhaseResult, seconds=LOOP_CALL_SECONDS)
-AFTER_AGENT = Endpoint("after_agent", RunCall, AfterAgent, seconds=LOOP_CALL_SECONDS)
+AFTER_AGENT = Endpoint("after_agent", RunCall, PhaseResult, seconds=LOOP_CALL_SECONDS)
 TOOL_STARTED = Endpoint("tool_started", ToolCallReport, Done, seconds=LOOP_CALL_SECONDS)
-TOOL_RESULT = Endpoint("tool_result", ToolResultReport, ToolResultReply, seconds=LOOP_CALL_SECONDS)
+TOOL_RESULT = Endpoint("tool_result", ToolResultReport, Done, seconds=LOOP_CALL_SECONDS)
 # The runtime replaced the thread's box: the backend connects to the fresh one.
 SANDBOX_REPLACED = Endpoint("sandbox_replaced", RunRequest, Done, seconds=LOOP_CALL_SECONDS)
 # A tool the runtime ran found the box gone: the backend tells the person.
@@ -238,9 +226,8 @@ REFRESH_GITHUB_PROXY = Endpoint(
     "refresh_github_proxy", RunRequest, Done, seconds=LOOP_CALL_SECONDS, delivery="idempotent"
 )
 REPLY_ON_BEHALF = Endpoint("reply_on_behalf", ReplyOnBehalf, Done, seconds=LOOP_CALL_SECONDS)
-# The run ended: the transcript closes its turn, usage is finalized and the turn's git
-# work reconciled.
-RUN_ENDED = Endpoint("run_ended", RunEnded, AfterAgent, seconds=LOOP_CALL_SECONDS)
+# The run ended: the transcript closes its turn and usage is finalized.
+RUN_ENDED = Endpoint("run_ended", RunEnded, Done, seconds=LOOP_CALL_SECONDS)
 # The run ended at its model-call limit: the person is told.
 STEP_LIMIT_REACHED = Endpoint("step_limit_reached", RunRequest, Done, seconds=LOOP_CALL_SECONDS)
 # A review run ended: its check run on the pull request is settled if it was not.

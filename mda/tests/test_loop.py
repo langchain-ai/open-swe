@@ -293,13 +293,15 @@ async def test_the_end_of_a_run_is_reported_and_its_graph_work_done_by_name(
 
     # Only preparation is a phase call: the loop and the end of the run are named calls.
     # The graph's own work goes out before the run's end, in the order asked for, and
-    # work the backend keeps failing is tried again, then let go of for the rest.
+    # what the backend keeps failing is tried again, then let go of for the rest.
     assert [name for name, _ in calls] == [
         "prepare",
         "step_limit_reached",
         "step_limit_reached",
         "step_limit_reached",
         "settle_review_check",
+        "run_ended",
+        "run_ended",
         "run_ended",
     ]
 
@@ -311,14 +313,14 @@ async def test_reports_carry_what_they_report_never_the_conversation(
     from langchain_core.messages import ToolCall
     from langchain_core.tools import tool
     from rt.middleware import ReportRepliesMiddleware, RuntimeToolsMiddleware
-    from runtime_api.loop import ModelResult, ToolResultReply
+    from runtime_api.loop import ModelResult
 
     backend, calls = _backend(
         monkeypatch,
         {
             "model_result": Done(),
             "tool_started": Done(),
-            "tool_result": ToolResultReply(),
+            "tool_result": Done(),
         },
     )
     monkeypatch.setattr(GenericFakeChatModel, "bind_tools", lambda self, *args, **kwargs: self)
