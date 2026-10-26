@@ -46,6 +46,7 @@ from rt.managed_sandbox import (
     definition,
     opened_sandbox,
 )
+from rt.mcp import CodeOnlyToolsMiddleware, mcp_servers, mcp_tool_names
 from rt.middleware import (
     AsyncWorkerLaunchMiddleware,
     BackendRunMiddleware,
@@ -58,7 +59,7 @@ from rt.middleware import (
 from rt.model_calls import model_call_guards
 from rt.models import build_model
 from rt.remote_files import FILE_TOOLS, RemoteFiles, remote_file_tools
-from rt.search_tools import search_tools_tool
+from rt.search_tools import SearchableTools, search_tools_tool
 from rt.skills import RunSkillsMiddleware, SkillFiles
 from rt.task_retry import task_retry
 from rt.tools import operation_tool, run_id
@@ -130,8 +131,11 @@ def _code_mode(
     from_code: Sequence[BaseTool],
     described: Mapping[str, str],
     file_tools: FileToolsMiddleware,
+    mcp_tools: Sequence[str],
+    searchable: SearchableTools,
 ) -> list[AgentMiddleware | CodeInterpreterMiddleware]:
-    """The graph's code mode, with every tool the catalog offers from code callable from it."""
+    """The graph's code mode, with every tool the catalog offers from code callable from
+    it, and the MCP tools MDA loads for the run, by name."""
     if graph == "reviewer":
         interpreter = CodeInterpreterMiddleware(
             ptc=[
@@ -140,12 +144,18 @@ def _code_mode(
                 *from_code,
             ]
         )
-    elif from_code:
+    elif from_code or mcp_tools:
         # As the in-process agent's code mode: state per turn, subagents through `task`.
-        interpreter = CodeInterpreterMiddleware(ptc=list(from_code), subagents=False, mode="turn")
+        interpreter = CodeInterpreterMiddleware(
+            ptc=[*from_code, *mcp_tools], subagents=False, mode="turn"
+        )
     else:
         return []
-    return [interpreter, *([DescribedToolsMiddleware(described)] if described else [])]
+    return [
+        interpreter,
+        *([DescribedToolsMiddleware(described)] if described else []),
+        *([CodeOnlyToolsMiddleware(mcp_tools, searchable)] if mcp_tools else []),
+    ]
 
 
 def _browser(graph: Graph, backend: OpenSweBackend) -> list[AgentMiddleware]:
@@ -181,18 +191,22 @@ async def agent(runtime: ManagedServerRuntime) -> DeepAgentDefinition:
         else _DEFAULT_MODEL
     )
     timing.lap("models")
+    searchable = SearchableTools(catalog.operations)
     tools = [
         *(
             operation_tool(spec, backend, cites_evidence=catalog.incident_evidence)
             for spec in catalog.operations
         ),
         *(
-            [search_tools_tool(catalog.operations, catalog.search_tools_description)]
+            [search_tools_tool(searchable, catalog.search_tools_description)]
             if catalog.search_tools
             else []
         ),
     ]
     timing.lap("operation_tools")
+    mcp = await mcp_servers(backend, catalog.mcp_servers)
+    mcp_tools = mcp_tool_names(catalog.mcp_servers) if mcp else []
+    timing.lap("mcp")
     remote = RemoteFiles(backend, run_id)
     remote_tools = remote_file_tools(remote, catalog.files.artifacts_root)
     # The run's skills, listed for the agent and its subagents and read from here.
@@ -257,7 +271,9 @@ async def agent(runtime: ManagedServerRuntime) -> DeepAgentDefinition:
         for subagent in catalog.subagents
     ]
     timing.lap("subagents")
-    code_mode = _code_mode(context.graph, from_code, catalog.described, file_tools)
+    code_mode = _code_mode(
+        context.graph, from_code, catalog.described, file_tools, mcp_tools, searchable
+    )
     timing.lap("code_mode")
     # This agent's own, as the agent a worker is; deepagents passes no middleware down.
     # Middleware types are invariant in the state they extend; the agent merges them all.
@@ -331,5 +347,7 @@ async def agent(runtime: ManagedServerRuntime) -> DeepAgentDefinition:
         ),
         # `mda build` reads `worker`'s literal name to build its graph.
         subagents=[*sync_subagents, worker],
+        # The MCP servers the run calls itself, which code mode calls by name.
+        mcp=mcp,
         middleware=[*agent_middleware, AsyncWorkerLaunchMiddleware(backend)],
     )

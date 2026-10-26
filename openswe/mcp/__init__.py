@@ -7,7 +7,14 @@ from openswe.mcp.models import (
     MCPToolDescription,
     prepare_connection,
 )
-from openswe.mcp.runtime import MCPSource, discover_tools, load_mcp_tools
+from openswe.mcp.runtime import (
+    MCPSource,
+    ResolvedConnection,
+    discover_tools,
+    load_mcp_tools,
+    load_run_mcp_tools,
+    resolve_connections,
+)
 
 __all__ = [
     "MCPConnection",
@@ -15,7 +22,10 @@ __all__ = [
     "MCPConnectionUpdate",
     "MCPSource",
     "MCPToolDescription",
+    "ResolvedConnection",
     "discover_tools",
     "load_mcp_tools",
+    "load_run_mcp_tools",
     "prepare_connection",
+    "resolve_connections",
 ]

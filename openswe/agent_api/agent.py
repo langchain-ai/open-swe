@@ -11,12 +11,19 @@ from openswe.agent_api.graph import RemoteGraph
 from openswe.agent_api.run_parts import RunParts
 from openswe.github.thread_token import get_github_token
 from openswe.github.token import resolve_github_token
+from openswe.mcp import ResolvedConnection
 from openswe.middleware.pr_creation_guard import PullRequestCreationGuardMiddleware
 from openswe.middleware.record_run_usage import record_run_usage
 from openswe.middleware.transcript import TranscriptMiddleware
 from openswe.middleware.workflow_push_guard import WorkflowPushGuardMiddleware
 from openswe.run_config import RunConfig
-from openswe.server import ThreadFiles, agent_tools_by_name, integration_tools, plan_agent
+from openswe.server import (
+    ThreadFiles,
+    agent_tools_by_name,
+    direct_mcp_connections,
+    integration_tools,
+    plan_agent,
+)
 from openswe.skill_store.run_skills import RunSkillStores
 
 logger = logging.getLogger(__name__)
@@ -55,6 +62,9 @@ class AgentParts(RunParts):
     async def tool(self, config: RunnableConfig, name: str) -> BaseTool | None:
         static = agent_tools_by_name().get(name)
         return static if static is not None else (await integration_tools(config)).get(name)
+
+    async def mcp_connections(self, config: RunnableConfig) -> list[ResolvedConnection]:
+        return await direct_mcp_connections(config)
 
 
 AGENT: Final = RemoteGraph(ASSISTANT_ID, plan_agent, AgentParts())

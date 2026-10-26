@@ -88,7 +88,7 @@ from openswe.input_messages import (
     person_introduction,
     visible_dynamic_context_hashes,
 )
-from openswe.mcp import load_mcp_tools
+from openswe.mcp import MCPSource, ResolvedConnection, load_run_mcp_tools, resolve_connections
 from openswe.mcp.instance import instance_mcp_source
 from openswe.mcp.managed import instance_gateway, managed_mcp_source
 from openswe.mcp.user import user_mcp_source
@@ -878,10 +878,10 @@ async def _bridge_client(thread_id: str | None) -> BridgeClient | None:
     return "desktop" if metadata.get("sandbox_bridge_client") == "desktop" else "cli"
 
 
-async def _mcp_tools_for(
+def _mcp_sources(
     credential_login: str | None, workspace: str, managed_gateway: str | None
-) -> list[Any]:
-    """Load the run's MCPs by tier: instance, then workspace, then the user's own.
+) -> list[MCPSource]:
+    """The run's MCP tiers: instance, then workspace, then the user's own.
 
     A later tier's connection replaces a same-named one from the tier before. The
     instance's LangSmith Managed Tools gateway comes last, used as the private owner.
@@ -891,7 +891,27 @@ async def _mcp_tools_for(
         sources.append(user_mcp_source(credential_login))
         if managed_gateway:
             sources.append(managed_mcp_source(credential_login, managed_gateway))
-    return await load_mcp_tools(*sources)
+    return sources
+
+
+async def _mcp_tools_for(
+    credential_login: str | None, workspace: str, managed_gateway: str | None
+) -> list[Any]:
+    """The MCP tools the run calls through the backend."""
+    return await load_run_mcp_tools(*_mcp_sources(credential_login, workspace, managed_gateway))
+
+
+async def direct_mcp_connections(config: RunnableConfig) -> list[ResolvedConnection]:
+    """The MCP connections the run's MDA graph calls itself, by the tiers its plan reads."""
+    cfg = RunConfig.from_config(config)
+    try:
+        login = await private_credential_login(config)
+    except Exception:
+        logger.exception("Cannot resolve thread credential scope; omitting MCP tools")
+        return []
+    workspace = workspace_slug(cfg) or DEFAULT_WORKSPACE_SLUG
+    connections = await resolve_connections(*_mcp_sources(login, workspace, None))
+    return [connection for connection in connections if connection.reached_directly]
 
 
 async def _run_mcp_tools(

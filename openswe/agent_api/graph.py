@@ -6,9 +6,10 @@ import (``runtime_api``):
 
 - the catalog names the run's operations (each the work of one of its tools), its
   subagents, models and sandbox, the checks around its file and shell tools, and
-  the rules of its middleware around each model call. It is worked out once as the
-  run starts and rides in the run's context (``RemoteGraph.start_run``); the
-  settings later calls read are signed into the run's token (``RunSettings``)
+  the rules of its middleware around each model call, and the MCP servers the run
+  calls itself. It is worked out once as the run starts and kept by digest, which
+  the run's token names (``RemoteGraph.start_run``, ``catalogs``); the settings later
+  calls read are signed into the token too (``RunSettings``)
 - ``prepare`` readies the run from its plan: the thread's sandbox, checkout and
   prompt, the transcript turn, skills, reply bookkeeping. It is the one call that
   plans the run again
@@ -29,6 +30,7 @@ middleware. A call made from inside a subagent names the namespace of its ``task
 calls, so its tool calls and replies land under the subagent.
 """
 
+import asyncio
 import base64
 import logging
 import time
@@ -141,6 +143,7 @@ from runtime_api.loop import (
     ToolResultReply,
     ToolResultReport,
 )
+from runtime_api.mcp import MCP_HEADERS, McpHeaders
 from runtime_api.operations import (
     CHECK_SHELL,
     OPERATION,
@@ -808,8 +811,15 @@ class TokenRun:
     async def catalog(self, _request: RunRequest) -> Catalog:
         """The catalog the run started with, granted to it."""
         if self.run.catalog_digest is None:
-            return await _planned_catalog(await self._session())
+            return await _planned_catalog(self.graph, await self._session())
         return self.run.grant_operations(await catalogs.kept(self.run.catalog_digest))
+
+    async def mcp_headers(self, _request: RunRequest) -> McpHeaders:
+        """The headers of the MCP servers the run calls itself, never kept in its catalog."""
+        connections = await self.parts.mcp_connections(self.config)
+        return McpHeaders(
+            servers={c.record.name: c.record.connection_headers() for c in connections}
+        )
 
     async def skills(self, _request: RunRequest) -> RunSkills:
         """Every skill the run may load: each store's skill folders and their ``SKILL.md``."""
@@ -1083,7 +1093,16 @@ class RemoteGraph:
     async def start_run(self, run: RemoteRun) -> RunStart:
         """What ``run``'s MDA graph is built from, and the settings its calls read."""
         session = await self._planned(run, None, fresh=False)
-        return RunStart(catalog=await session.plan(), settings=session.settings())
+        return RunStart(catalog=await self.catalog(session), settings=session.settings())
+
+    async def catalog(self, session: RunSession) -> Catalog:
+        """The run's plan as its MDA graph is built from it, with the MCP servers it calls
+        itself rather than through operations."""
+        connections = await self.parts.mcp_connections(session.config)
+        specs = await asyncio.gather(*(connection.server_spec() for connection in connections))
+        return (await session.plan()).model_copy(
+            update={"mcp_servers": [spec for spec in specs if spec is not None]}
+        )
 
     async def session(
         self, run: RemoteRun, run_id: str | None, *, fresh: bool = False
@@ -1168,10 +1187,10 @@ def _message_content(content: str | list[JsonValue]) -> str | list[str | dict]:
     return [block for block in content if isinstance(block, str | dict)]
 
 
-async def _planned_catalog(session: RunSession) -> Catalog:
+async def _planned_catalog(graph: RemoteGraph, session: RunSession) -> Catalog:
     """The catalog of a run started without it, and a token that names it and carries what
     was decided."""
-    planned = await session.plan()
+    planned = await graph.catalog(session)
     if session.run is None:
         return planned
     run = session.run.model_copy(
@@ -1285,6 +1304,7 @@ async def _download(run: ReachesFiles, request: DownloadRequest) -> TransferRepl
 # Calls any run answers from its token and request: what it reads and what it reports.
 RUN_CALLS: Final = Handlers[TokenRun]()
 RUN_CALLS.serve(CATALOG, TokenRun.catalog)
+RUN_CALLS.serve(MCP_HEADERS, TokenRun.mcp_headers)
 RUN_CALLS.serve(BROWSER, TokenRun.browser)
 RUN_CALLS.serve(SKILLS, TokenRun.skills)
 RUN_CALLS.serve(INBOX, TokenRun.inbox)
