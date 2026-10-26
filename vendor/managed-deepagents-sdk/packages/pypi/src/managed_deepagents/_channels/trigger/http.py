@@ -78,6 +78,7 @@ from managed_deepagents._channels.trigger.types import (
 from managed_deepagents._ingress import ScheduleFn, schedule_ingress_work
 from managed_deepagents._ingress_runs import lookup_status, rejected_as_busy
 from managed_deepagents._log import logger
+from managed_deepagents._telemetry.otel import set_log_attributes
 from managed_deepagents.run_context import INTERRUPT_CORRELATION_KEY
 
 if TYPE_CHECKING:
@@ -512,6 +513,7 @@ async def handle_trigger_channel_event_request(  # noqa: C901, PLR0911, PLR0912,
         logger.error(
             "channel identity_context unavailable (%s)",
             logger.safe_error_label(error),
+            error=error,
         )
         return _json_response(
             {"error": "identity_context verification unavailable"},
@@ -527,6 +529,14 @@ async def handle_trigger_channel_event_request(  # noqa: C901, PLR0911, PLR0912,
     # Only as trusted as the service key, which is checked for presence alone.
     actor = trigger_event_actor(event)
 
+    set_log_attributes(
+        {
+            "event_type": event["type"],
+            "event_id": event["event_id"],
+            "delivery_id": event["delivery_id"],
+            "channel_id": event["channel_id"],
+        }
+    )
     logger.info(
         "Channel incoming event (type=%s, event_id=%s, delivery_id=%s, channel_id=%s)",
         event["type"],
@@ -553,6 +563,7 @@ async def handle_trigger_channel_event_request(  # noqa: C901, PLR0911, PLR0912,
         logger.error(
             "channel transport is not configured (%s)",
             logger.safe_error_label(error),
+            error=error,
         )
         client = None
     else:
@@ -749,6 +760,7 @@ async def handle_trigger_channel_event_request(  # noqa: C901, PLR0911, PLR0912,
         logger.error(
             "channel run could not be started (%s)",
             logger.safe_error_label(error),
+            error=error,
         )
         return _start_failed_response()
     if started is None:

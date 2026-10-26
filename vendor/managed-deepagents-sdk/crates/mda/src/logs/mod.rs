@@ -26,6 +26,7 @@ use crate::install::Installation;
 use crate::interrupt::Interrupt;
 use crate::langsmith::{LogEntry, LogLevel, LogOrder, LogQuery, LogTimestamp};
 use crate::naming::normalize_name;
+use crate::telemetry::update_facts;
 
 /// Delay between polls while following.
 const FOLLOW_INTERVAL: Duration = Duration::from_secs(3);
@@ -64,6 +65,7 @@ pub fn run(opts: LogsOptions) -> Result<CommandCompletion> {
     let env_path = opts.path.join(".env");
     let env_vars = env_file::parse_env_file(&env_path);
     let name = resolve_deployment_name(&opts)?;
+    update_facts(|facts| facts.deployment.deployment_name = Some(name.clone()));
     let ctx = LangSmithContext::resolve(
         &env_vars,
         opts.host_url.as_deref(),
@@ -71,9 +73,9 @@ pub fn run(opts: LogsOptions) -> Result<CommandCompletion> {
         WORKSPACE_FLAG_HINT,
         |platform_api_url| resolve_api_key(&env_vars, &env_path, platform_api_url),
     )?;
-    let host_url = ctx.host_url();
     let client = ctx.client()?;
-    let deployment_id = resolve_deployment_id(&client, &name, host_url)?;
+    let deployment_id = resolve_deployment_id(&client, &name)?;
+    update_facts(|facts| facts.deployment.deployment_id = Some(deployment_id.clone()));
 
     let recent = client
         .deployment_logs(

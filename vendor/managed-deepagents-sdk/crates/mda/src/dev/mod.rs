@@ -33,6 +33,7 @@ mod schedules;
 mod watch;
 
 use std::collections::hash_map::DefaultHasher;
+use std::collections::BTreeMap;
 use std::fs;
 use std::hash::{Hash, Hasher};
 use std::io::Read;
@@ -40,12 +41,12 @@ use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 use std::time::{Duration, Instant};
 
-use anyhow::{bail, Context, Result};
+use anyhow::{anyhow, bail, Context, Result};
 use cliclack::{log, outro, spinner};
 use std::io::IsTerminal;
 
 use crate::agent_config;
-use crate::child::{Outcome, OwnedChild};
+use crate::child::{Outcome, OwnedChild, StderrTail};
 use crate::cli_output::show_wordmark_intro;
 use crate::command::CommandCompletion;
 use crate::compile::{self, CompileSummary, IdentitySummary, MemoryDecision};
@@ -58,11 +59,15 @@ use crate::deploy::helpers::{
 };
 use crate::deploy::langsmith_context::{LangSmithContext, LangSmithEndpoints};
 use crate::deploy::{self, resolve_https_public_api_url, PublicApiUrl};
-use crate::error::{categorized, ErrorCategory};
+use crate::error::{
+    categorize_unclassified, categorized, stderr_failed, with_category, ErrorCategory,
+};
 use crate::install::Installation;
 use crate::interrupt::Interrupt;
 use crate::langsmith::{lookup_env_file, lookup_env_or_process, ApiKey, API_KEY_ENV};
 use crate::project::{Language, Project};
+use crate::telemetry::stage::Stage;
+use crate::telemetry::{self, otel_logger};
 use crate::toolchain;
 use schedules::ScheduleSync;
 use watch::{
@@ -155,6 +160,7 @@ fn prepare_dev(
     narration: Narration,
     reuse: BuildReuse,
 ) -> Result<Prepared> {
+    telemetry::stage::enter(Stage::Compile);
     let sp = narration.is_full().then(spinner);
     if let Some(sp) = &sp {
         sp.start("Compiling project");
@@ -186,12 +192,14 @@ fn prepare_dev(
         report_compile_warnings(&summary);
     }
 
+    telemetry::stage::enter(Stage::EnvSetup);
     stage_dev_env_file(
         &project.root,
         out_dir,
         &summary.assistant_id,
         &local_dev_public_api_url(opts),
-    )?;
+    )
+    .map_err(|err| categorize_unclassified(ErrorCategory::Project, err))?;
     let connector_requirements =
         compile::emit_connector_requirements_for_entries(project, out_dir, &summary.connectors)?;
     let needs_developer_principal = connectors_need_developer_principal(&connector_requirements)
@@ -204,17 +212,19 @@ fn prepare_dev(
     )?;
     ensure_dev_developer_principal(out_dir, needs_developer_principal)?;
     ensure_dev_workspace_connections(out_dir, &connector_requirements)?;
-    ensure_dev_tracing_project(out_dir, &summary.assistant_id)?;
+    ensure_dev_tracing_project(out_dir, &summary.assistant_id, true)?;
     ensure_dev_sandbox_recipe(
         project,
         out_dir,
         &summary.assistant_id,
         DevLoginPrompt::Allowed,
     )?;
-    ensure_dev_handoff_secret(out_dir)?;
-    let injected_ingress = ensure_dev_ingress_secret(out_dir)?;
-    let injected_public_api = ensure_dev_public_api_url(out_dir, opts)?;
-    ensure_dev_assistant_id(project, out_dir)?;
+    // Local files only: what fails here is the project's `.env` or `.mda`.
+    let as_project = |err| categorize_unclassified(ErrorCategory::Project, err);
+    ensure_dev_handoff_secret(out_dir).map_err(as_project)?;
+    let injected_ingress = ensure_dev_ingress_secret(out_dir).map_err(as_project)?;
+    let injected_public_api = ensure_dev_public_api_url(out_dir, opts).map_err(as_project)?;
+    ensure_dev_assistant_id(project, out_dir).map_err(as_project)?;
 
     if narration.is_full() {
         report_project_features(project, &summary, !opts.no_schedules)?;
@@ -242,10 +252,12 @@ fn prepare_dev(
     // resolve imports without requiring authors to mirror the managed stack.
     // Python also stamps here so the first watch rebuild can skip a no-op
     // `uv sync` (startup `uv run` would sync again, but without a stamp).
+    telemetry::stage::enter(Stage::DepsInstall);
     let deps_install = match project.language {
-        Language::TypeScript => install_typescript_build_deps(out_dir)?,
-        Language::Python => install_python_build_deps(out_dir)?,
-    };
+        Language::TypeScript => install_typescript_build_deps(out_dir),
+        Language::Python => install_python_build_deps(out_dir),
+    }
+    .map_err(|err| categorize_unclassified(ErrorCategory::Toolchain, err))?;
     match deps_install {
         DepsInstall::SkippedNoPackage | DepsInstall::Installed => {}
         DepsInstall::UpToDate => {
@@ -294,6 +306,18 @@ pub fn run(opts: DevOptions) -> Result<CommandCompletion> {
         BuildReuse::Clear,
     )?;
 
+    let pickup = if opts.no_reload {
+        "then restart `mda dev`. Runs fail until then."
+    } else {
+        ENV_RELOAD_PICKUP
+    };
+    let staged = crate::deploy::env_file::parse_env_file(&out_dir.join(".env"));
+    telemetry::stage::enter(Stage::ServerStart);
+    if let Some(warning) = missing_model_api_key_warning(&project, &staged, pickup) {
+        otel_logger::warn("model API key missing", &anyhow!(warning.clone()));
+        log::warning(warning)?;
+    }
+
     let command = dev_command(project.language, &opts)?;
     if opts.no_reload {
         outro(format!(
@@ -312,7 +336,8 @@ pub fn run(opts: DevOptions) -> Result<CommandCompletion> {
     }
 
     let interrupt = Interrupt::install()?;
-    let mut child = spawn_langgraph_dev(&command, &project, &out_dir)?;
+    let mut server = spawn_langgraph_dev(&command, &project, &out_dir)?;
+    telemetry::stage::enter(Stage::Serving);
     let mut schedules = (!opts.no_schedules).then(|| {
         ScheduleSync::new(
             &command.local_api_url,
@@ -324,20 +349,21 @@ pub fn run(opts: DevOptions) -> Result<CommandCompletion> {
     if opts.no_reload {
         // Nothing rebuilds, so schedules only need provisioning once.
         while let Some(sync) = schedules.as_mut().filter(|sync| sync.is_pending()) {
-            if let Some(outcome) = child
+            if let Some(outcome) = server
+                .child
                 .poll(&interrupt)
                 .context("failed to poll langgraph dev process")?
             {
-                return classify_langgraph_outcome(outcome);
+                return classify_langgraph_outcome(outcome, server.stderr);
             }
             sync.tick()?;
             interrupt.sleep_until_interrupted(DEV_PROBE_INTERVAL);
         }
-        return classify_langgraph_outcome(
-            child
-                .wait(&interrupt)
-                .context("failed while waiting for langgraph dev")?,
-        );
+        let outcome = server
+            .child
+            .wait(&interrupt)
+            .context("failed while waiting for langgraph dev")?;
+        return classify_langgraph_outcome(outcome, server.stderr);
     }
 
     let mut watched_local_roots = local_package_roots(&project)?;
@@ -352,11 +378,12 @@ pub fn run(opts: DevOptions) -> Result<CommandCompletion> {
     let mut hub_fingerprint = hub_inputs_fingerprint(&project.root, &classify_ctx);
 
     loop {
-        if let Some(outcome) = child
+        if let Some(outcome) = server
+            .child
             .poll(&interrupt)
             .context("failed to poll langgraph dev process")?
         {
-            return classify_langgraph_outcome(outcome);
+            return classify_langgraph_outcome(outcome, server.stderr);
         }
         if let Some(sync) = schedules.as_mut() {
             sync.tick()?;
@@ -398,6 +425,7 @@ pub fn run(opts: DevOptions) -> Result<CommandCompletion> {
                         }
                         Err(err) => {
                             // Keep serving the previous successful build.
+                            otel_logger::warn("dev rebuild failed", &err);
                             let _ = log::error(format!(
                                 "{err:#}\nCompile/sync failed — server still running previous build"
                             ));
@@ -418,6 +446,7 @@ pub fn run(opts: DevOptions) -> Result<CommandCompletion> {
                     ) {
                         Ok(()) => restaged_env = true,
                         Err(err) => {
+                            otel_logger::warn("dev env restage failed", &err);
                             let _ = log::error(format!(
                                 "{err:#}\nEnv restage failed — server still running previous build"
                             ));
@@ -433,13 +462,13 @@ pub fn run(opts: DevOptions) -> Result<CommandCompletion> {
                     // Node's dotenv loader preserves that value across worker
                     // reloads, so an env restage must replace the parent too.
                     let _ = log::info("Restarting LangGraph server for updated .env");
-                    restart_langgraph_dev(&mut child, &command, &project, &out_dir)?;
+                    restart_langgraph_dev(&mut server, &command, &project, &out_dir)?;
                     if let Some(sync) = schedules.as_mut() {
                         sync.restarted();
                     }
                 } else if graphs_changed {
                     let _ = log::info("Restarting LangGraph server for updated graphs");
-                    restart_langgraph_dev(&mut child, &command, &project, &out_dir)?;
+                    restart_langgraph_dev(&mut server, &command, &project, &out_dir)?;
                     if let Some(sync) = schedules.as_mut() {
                         sync.restarted();
                     }
@@ -449,7 +478,7 @@ pub fn run(opts: DevOptions) -> Result<CommandCompletion> {
     }
 
     // Ctrl-C or watcher disconnect: stop the child tree if it is still running.
-    let _ = child.stop();
+    let _ = server.child.stop();
     Ok(CommandCompletion::Succeeded)
 }
 
@@ -729,17 +758,27 @@ fn log_tail(log_path: &Path, lines: usize) -> String {
     tail.into_iter().rev().collect::<Vec<_>>().join("\n")
 }
 
-/// Spawn the language-matching LangGraph CLI against `.mda/dev`.
+/// The foreground LangGraph dev server and its stderr.
+struct LangGraphDev {
+    child: OwnedChild,
+    stderr: StderrTail,
+}
+
+/// Spawn the language-matching LangGraph CLI against `.mda/dev`. Its stderr
+/// still reaches the terminal, and its end is kept in case it crashes.
 fn spawn_langgraph_dev(
     command: &DevCommand,
     project: &Project,
     out_dir: &Path,
-) -> Result<OwnedChild> {
+) -> Result<LangGraphDev> {
     let mut server = langgraph_dev_process(command, project, out_dir)?;
+    server.stderr(Stdio::piped());
     // Its own process group also isolates the supervisors and workers a reloading
     // server spawns, so a restart cannot leave one serving stale env.
-    OwnedChild::spawn(&mut server)
-        .map_err(|err| dev_spawn_error(project.language, &command.program, err))
+    let mut child = OwnedChild::spawn(&mut server)
+        .map_err(|err| dev_spawn_error(project.language, &command.program, err))?;
+    let stderr = StderrTail::tee(&mut child, telemetry::MAX_STACKTRACE_BYTES);
+    Ok(LangGraphDev { child, stderr })
 }
 
 fn langgraph_dev_process(
@@ -802,20 +841,24 @@ fn dev_jobs_per_worker(
 }
 
 fn restart_langgraph_dev(
-    child: &mut OwnedChild,
+    server: &mut LangGraphDev,
     command: &DevCommand,
     project: &Project,
     out_dir: &Path,
 ) -> Result<()> {
     // The respawn is the response either way, so its parting status is moot.
-    let _ = child.stop().context("failed to stop langgraph dev")?;
-    *child = spawn_langgraph_dev(command, project, out_dir)?;
+    let _ = server
+        .child
+        .stop()
+        .context("failed to stop langgraph dev")?;
+    *server = spawn_langgraph_dev(command, project, out_dir)?;
     Ok(())
 }
 
 /// A stop we sent is the user's Ctrl-C. Any status that arrives instead is the
-/// server's own verdict, reported as it stands.
-fn classify_langgraph_outcome(outcome: Outcome) -> Result<CommandCompletion> {
+/// server's own verdict, reported as it stands, caused by the end of its
+/// stderr.
+fn classify_langgraph_outcome(outcome: Outcome, stderr: StderrTail) -> Result<CommandCompletion> {
     let status = match outcome {
         Outcome::Stopped => return Ok(CommandCompletion::Succeeded),
         Outcome::Exited(status) => status,
@@ -827,7 +870,10 @@ fn classify_langgraph_outcome(outcome: Outcome) -> Result<CommandCompletion> {
         Some(code) => format!("langgraph dev exited with status {code}"),
         None => "langgraph dev was terminated by a signal".to_string(),
     };
-    Err(categorized(ErrorCategory::Toolchain, reason))
+    Err(with_category(
+        ErrorCategory::Toolchain,
+        stderr_failed(&stderr.finish(), reason),
+    ))
 }
 
 /// Apply a classified watch action. Compile failures propagate so the caller
@@ -884,8 +930,15 @@ fn apply_watch_action(
                 DevLoginPrompt::Suppressed,
             )?;
             warn_if_dev_langsmith_api_key_missing(out_dir, needs_api_key)?;
+            if let Some(warning) = missing_model_api_key_warning(
+                &project,
+                &crate::deploy::env_file::parse_env_file(&out_dir.join(".env")),
+                ENV_RELOAD_PICKUP,
+            ) {
+                log::warning(warning)?;
+            }
             ensure_dev_developer_principal(out_dir, features.needs_developer_principal)?;
-            ensure_dev_tracing_project(out_dir, &assistant_id)?;
+            ensure_dev_tracing_project(out_dir, &assistant_id, false)?;
             ensure_dev_sandbox_recipe(
                 &project,
                 out_dir,
@@ -988,7 +1041,7 @@ fn apply_watch_action(
             warn_if_dev_langsmith_api_key_missing(out_dir, needs_api_key)?;
             ensure_dev_developer_principal(out_dir, features.needs_developer_principal)?;
             ensure_dev_workspace_connections(out_dir, &connector_requirements)?;
-            ensure_dev_tracing_project(out_dir, &summary.assistant_id)?;
+            ensure_dev_tracing_project(out_dir, &summary.assistant_id, false)?;
             ensure_dev_sandbox_recipe(
                 &project,
                 out_dir,
@@ -1463,6 +1516,10 @@ fn stage_dev_env_file(
         .as_deref()
         .map(crate::deploy::env_file::parse_env_file)
         .unwrap_or_default();
+    let shadowing = blank_keys_shadowing_shell(&incoming, |key| std::env::var(key).ok());
+    for key in &shadowing {
+        incoming.remove(key);
+    }
     // Resolve from source settings before merging. A removed override must not
     // be recovered from the previous build, and an unchanged URL must not be
     // removed and re-added while LangGraph watches the staged env file.
@@ -1472,6 +1529,9 @@ fn stage_dev_env_file(
     if let Some(src) = src.as_ref().filter(|_| !dst.is_file()) {
         fs::copy(src, &dst)
             .with_context(|| format!("failed to copy {} to {}", src.display(), dst.display()))?;
+        for key in &shadowing {
+            crate::deploy::env_file::remove_env_key(&dst, key)?;
+        }
         return crate::deploy::env_file::set_env_key(&dst, MDA_CHANNEL_API_URL_ENV, &loopback_url);
     }
     let staged = crate::deploy::env_file::parse_env_file(&dst);
@@ -1481,8 +1541,7 @@ fn stage_dev_env_file(
     let preserve_generated_tracing_project = !source_selects_tracing_project
         && staged
             .get(LANGSMITH_PROJECT_ENV)
-            .map(|value| value.trim())
-            .is_some_and(|value| value == format!("{assistant_id}-local"));
+            .is_some_and(|value| is_generated_tracing_project(&staged, assistant_id, value));
     for (key, value) in &staged {
         // Keep injected values while a source env exists. If it disappears,
         // remove all old settings except the newly resolved loopback URL.
@@ -1520,6 +1579,7 @@ fn stage_dev_env_file(
 
 const LANGSMITH_PROJECT_ENV: &str = "LANGSMITH_PROJECT";
 const LANGCHAIN_PROJECT_ENV: &str = "LANGCHAIN_PROJECT";
+const MDA_DEV_TRACING_PROJECT_ENV: &str = "MDA_DEV_TRACING_PROJECT";
 const MDA_AGENT_AUTH_PRINCIPAL_ID_ENV: &str = "MDA_AGENT_AUTH_PRINCIPAL_ID";
 
 /// Keys mirrored from the process environment into the staged `.env`.
@@ -1621,6 +1681,66 @@ fn staged_api_key(staged: &std::collections::BTreeMap<String, String>) -> Option
         .or_else(|| lookup_env_or_process(API_KEY_ENV, &Default::default()))
 }
 
+/// How a reloading `mda dev` picks up a key added to `.env`, ending the
+/// sentence [`missing_model_api_key_warning`] starts.
+pub(crate) const ENV_RELOAD_PICKUP: &str =
+    "and `mda dev` reloads it on save. Runs fail until then.";
+
+/// Deploy's model-key preflight as a warning: the server still starts, and
+/// runs fail until the key is added. `pickup` says how the key takes effect.
+/// An agent file whose model cannot be read statically has nothing to check.
+pub(crate) fn missing_model_api_key_warning(
+    project: &Project,
+    env: &BTreeMap<String, String>,
+    pickup: &str,
+) -> Option<String> {
+    let model = agent_config::read_agent_static_config(project)
+        .ok()?
+        .model?;
+    model_api_key_warning(
+        &model,
+        env,
+        |key| std::env::var(key).ok(),
+        &project.root.join(".env"),
+        pickup,
+    )
+}
+
+fn model_api_key_warning(
+    model: &str,
+    staged: &BTreeMap<String, String>,
+    process_env: impl Fn(&str) -> Option<String>,
+    env_path: &Path,
+    pickup: &str,
+) -> Option<String> {
+    let key = deploy::missing_local_model_api_key(model, staged, process_env)?;
+    Some(deploy::missing_model_api_key_message(
+        model, key, env_path, pickup,
+    ))
+}
+
+/// Blank provider keys in `incoming` that a value exported in the shell would
+/// otherwise be shadowed by.
+///
+/// `mda init` writes the model's key as an empty `OPENAI_API_KEY=` line to fill
+/// in. LangGraph loads the staged file over the environment it inherits, so
+/// staging that placeholder would hide a key the developer already exports.
+fn blank_keys_shadowing_shell(
+    incoming: &BTreeMap<String, String>,
+    process_env: impl Fn(&str) -> Option<String>,
+) -> Vec<String> {
+    let provider_keys = dependencies::provider_api_key_envs();
+    incoming
+        .iter()
+        .filter(|(key, value)| {
+            value.trim().is_empty()
+                && provider_keys.contains(&key.as_str())
+                && process_env(key).is_some_and(|value| !value.trim().is_empty())
+        })
+        .map(|(key, _)| key.clone())
+        .collect()
+}
+
 /// Watch rebuilds cannot prompt for LangSmith login, so a project that newly
 /// needs a key (for example a just-added sandbox) would otherwise reload into
 /// a server whose sandbox calls hang without credentials. Say so instead.
@@ -1707,22 +1827,83 @@ fn ensure_dev_developer_principal(out_dir: &Path, needed: bool) -> Result<()> {
     )
 }
 
-/// Keep local traces separate from the deployment's same-name tracing project.
-fn ensure_dev_tracing_project(out_dir: &Path, assistant_id: &str) -> Result<()> {
+/// Trace local runs to the agent's LOCAL environment project in Agent platform
+/// workspaces, else to `<agent>-local`. Only startup (`recheck`) revisits a
+/// generated project.
+fn ensure_dev_tracing_project(out_dir: &Path, assistant_id: &str, recheck: bool) -> Result<()> {
+    ensure_dev_tracing_destination(
+        out_dir,
+        assistant_id,
+        recheck,
+        dev_local_environment_project,
+    )
+}
+
+fn ensure_dev_tracing_destination(
+    out_dir: &Path,
+    assistant_id: &str,
+    recheck: bool,
+    local_environment_project: impl FnOnce(&BTreeMap<String, String>, &str) -> Option<String>,
+) -> Result<()> {
     let staged = out_dir.join(".env");
     let env = crate::deploy::env_file::parse_env_file(&staged);
-    let project_is_set = [LANGSMITH_PROJECT_ENV, LANGCHAIN_PROJECT_ENV]
-        .into_iter()
-        .any(|key| lookup_env_file(key, &env).is_some());
-    if project_is_set {
+    let value = |key: &str| {
+        env.get(key)
+            .map(|value| value.trim())
+            .filter(|value| !value.is_empty())
+    };
+    let current = value(LANGSMITH_PROJECT_ENV);
+    if value(LANGCHAIN_PROJECT_ENV).is_some()
+        || current.is_some_and(|project| {
+            !recheck || !is_generated_tracing_project(&env, assistant_id, project)
+        })
+    {
         return Ok(());
     }
+    let project = local_environment_project(&env, assistant_id)
+        .or_else(|| current.map(str::to_string))
+        .unwrap_or_else(|| format!("{assistant_id}-local"));
+    if current == Some(project.as_str()) {
+        return Ok(());
+    }
+    crate::deploy::env_file::set_env_key(&staged, MDA_DEV_TRACING_PROJECT_ENV, &project)?;
+    crate::deploy::env_file::set_env_key(&staged, LANGSMITH_PROJECT_ENV, &project)
+}
 
-    crate::deploy::env_file::set_env_key(
-        &staged,
-        LANGSMITH_PROJECT_ENV,
-        &format!("{assistant_id}-local"),
-    )
+/// Whether `project` is one `mda dev` picked rather than the developer.
+fn is_generated_tracing_project(
+    env: &BTreeMap<String, String>,
+    assistant_id: &str,
+    project: &str,
+) -> bool {
+    let project = project.trim();
+    project == format!("{assistant_id}-local")
+        || env
+            .get(MDA_DEV_TRACING_PROJECT_ENV)
+            .is_some_and(|picked| picked.trim() == project)
+}
+
+fn dev_local_environment_project(
+    env: &BTreeMap<String, String>,
+    assistant_id: &str,
+) -> Option<String> {
+    crate::naming::validate_agent_id(assistant_id).ok()?;
+    let non_empty = |value: &str| Some(value.trim().to_string()).filter(|v| !v.is_empty());
+    let api_key = env
+        .get(API_KEY_ENV)
+        .and_then(|value| non_empty(value))
+        .or_else(|| non_empty(&std::env::var(API_KEY_ENV).ok()?))?;
+    let client = crate::deploy::langsmith_context::LangSmithEndpoints::resolve(env, None)
+        .with_auth(
+            crate::langsmith::ApiKey::new(api_key),
+            env.get(WORKSPACE_ID_ENV).and_then(|value| non_empty(value)),
+        )
+        .client()
+        .ok()?;
+    if !client.agent_platform_ready() {
+        return None;
+    }
+    client.local_environment_project(assistant_id).ok()
 }
 
 /// Inject the staged LangSmith API key and endpoint into `langgraph dev` when
@@ -1892,10 +2073,13 @@ fn ensure_dev_sandbox_recipe(
         api_key = staged_api_key(&env);
     }
     let Some(api_key) = api_key else {
-        bail!(
-            "This project declares a sandbox recipe, so `mda dev` needs {API_KEY_ENV} to bake \
-             it. Add the key to .env (or export it), then run `mda dev` again."
-        );
+        return Err(categorized(
+            ErrorCategory::Authentication,
+            format!(
+                "This project declares a sandbox recipe, so `mda dev` needs {API_KEY_ENV} to bake \
+                 it. Add the key to .env (or export it), then run `mda dev` again."
+            ),
+        ));
     };
 
     let deployment = dev_deployment_name(&api_key, project, assistant_id);
@@ -2191,9 +2375,12 @@ fn dev_spawn_error(language: Language, program: &str, err: std::io::Error) -> an
                 "could not find `uv`. Install uv to let `mda dev` resolve the Python LangGraph dev server (`langgraph-cli[inmem]`) from the compiled build"
             }
         };
-        return anyhow::anyhow!("{hint}");
+        return categorized(ErrorCategory::Toolchain, hint);
     }
-    anyhow::Error::new(err).context(format!("failed to launch `{program}`"))
+    with_category(
+        ErrorCategory::Toolchain,
+        anyhow::Error::new(err).context(format!("failed to launch `{program}`")),
+    )
 }
 
 #[cfg(test)]
@@ -2218,6 +2405,58 @@ mod tests {
     }
 
     const TEST_ASSISTANT_ID: &str = "test-agent";
+
+    #[test]
+    fn missing_model_key_warning_names_the_env_file_and_reload() {
+        let warning = model_api_key_warning(
+            "openai:gpt-5.6-terra",
+            &BTreeMap::new(),
+            |_| None,
+            Path::new("/work/my-agent/.env"),
+            ENV_RELOAD_PICKUP,
+        )
+        .unwrap();
+
+        assert_eq!(
+            warning,
+            "The agent model 'openai:gpt-5.6-terra' requires OPENAI_API_KEY in \
+             /work/my-agent/.env. Add `OPENAI_API_KEY=...` to /work/my-agent/.env, and \
+             `mda dev` reloads it on save. Runs fail until then."
+        );
+    }
+
+    #[test]
+    fn model_key_in_staged_env_needs_no_warning() {
+        let staged = BTreeMap::from([("OPENAI_API_KEY".to_string(), "sk-test".to_string())]);
+
+        assert_eq!(
+            model_api_key_warning(
+                "openai:gpt-5.6-terra",
+                &staged,
+                |_| None,
+                Path::new(".env"),
+                ENV_RELOAD_PICKUP
+            ),
+            None
+        );
+    }
+
+    #[test]
+    fn blank_provider_placeholder_yields_to_a_shell_export() {
+        let incoming = BTreeMap::from([
+            ("OPENAI_API_KEY".to_string(), String::new()),
+            ("ANTHROPIC_API_KEY".to_string(), String::new()),
+            ("CUSTOM_SETTING".to_string(), String::new()),
+        ]);
+        let shell = |key: &str| {
+            matches!(key, "OPENAI_API_KEY" | "CUSTOM_SETTING").then(|| "set".to_string())
+        };
+
+        assert_eq!(
+            blank_keys_shadowing_shell(&incoming, shell),
+            ["OPENAI_API_KEY"]
+        );
+    }
 
     /// The whole log is too much for an error message, and the blank lines a
     /// server log is padded with would crowd out the part that explains it.
@@ -2363,7 +2602,8 @@ mod tests {
     #[cfg(unix)]
     #[test]
     fn a_clean_exit_succeeds() {
-        let outcome = classify_langgraph_outcome(Outcome::Exited(exited(0))).unwrap();
+        let outcome =
+            classify_langgraph_outcome(Outcome::Exited(exited(0)), StderrTail::default()).unwrap();
 
         assert_eq!(outcome, CommandCompletion::Succeeded);
     }
@@ -2371,7 +2611,7 @@ mod tests {
     #[test]
     fn a_stop_we_sent_succeeds() {
         assert_eq!(
-            classify_langgraph_outcome(Outcome::Stopped).unwrap(),
+            classify_langgraph_outcome(Outcome::Stopped, StderrTail::default()).unwrap(),
             CommandCompletion::Succeeded
         );
     }
@@ -2380,7 +2620,7 @@ mod tests {
     #[test]
     fn a_server_error_is_a_failure() {
         for outcome in [Outcome::Exited(exited(1)), Outcome::Exited(signalled(9))] {
-            let err = classify_langgraph_outcome(outcome).unwrap_err();
+            let err = classify_langgraph_outcome(outcome, StderrTail::default()).unwrap_err();
 
             assert_eq!(category_of(&err), ErrorCategory::Toolchain);
         }
@@ -2393,8 +2633,11 @@ mod tests {
             .expect("failed to spawn the test server");
         let started = Instant::now();
 
-        let outcome =
-            classify_langgraph_outcome(child.wait(&Interrupt::requested()).unwrap()).unwrap();
+        let outcome = classify_langgraph_outcome(
+            child.wait(&Interrupt::requested()).unwrap(),
+            StderrTail::default(),
+        )
+        .unwrap();
 
         assert_eq!(outcome, CommandCompletion::Succeeded);
         assert!(started.elapsed() < Duration::from_secs(5));
@@ -2407,9 +2650,35 @@ mod tests {
         let mut child = OwnedChild::spawn(Command::new("sh").args(["-c", "exit 1"]))
             .expect("failed to spawn the test server");
 
-        let classified = classify_langgraph_outcome(child.wait(&Interrupt::pending()).unwrap());
+        let classified = classify_langgraph_outcome(
+            child.wait(&Interrupt::pending()).unwrap(),
+            StderrTail::default(),
+        );
 
         assert!(classified.is_err());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_crash_reports_the_end_of_the_servers_stderr() {
+        let mut command = Command::new("sh");
+        command
+            .args([
+                "-c",
+                "echo 'ImportError: no module named agent' >&2; exit 1",
+            ])
+            .stderr(Stdio::piped());
+        let mut child = OwnedChild::spawn(&mut command).unwrap();
+        let stderr = StderrTail::tee(&mut child, telemetry::MAX_STACKTRACE_BYTES);
+
+        let err = classify_langgraph_outcome(child.wait(&Interrupt::pending()).unwrap(), stderr)
+            .unwrap_err();
+
+        assert_eq!(category_of(&err), ErrorCategory::Toolchain);
+        assert_eq!(
+            format!("{err:#}"),
+            "langgraph dev exited with status 1: ImportError: no module named agent"
+        );
     }
 
     fn opts() -> DevOptions {
@@ -2760,7 +3029,7 @@ mod tests {
         let deployment = dev_deployment_name("test-key", &project, TEST_ASSISTANT_ID);
         let current = recipe_snapshot_name(
             &deployment,
-            &recipe_digest(setup.as_bytes(), None, None, None, None),
+            &recipe_digest(setup.as_bytes(), None, None, None, None, None),
         );
         (root, out_dir, deployment, current)
     }
@@ -3247,42 +3516,48 @@ mod tests {
     }
 
     #[test]
-    fn ensure_dev_tracing_project_only_defaults_when_project_is_unset() {
+    fn ensure_dev_tracing_destination_prefers_the_local_environment_project() {
+        let generated = "LANGSMITH_PROJECT=research-local\n";
+        let picked = "LANGSMITH_PROJECT=research-env\nMDA_DEV_TRACING_PROJECT=research-env\n";
         let cases = [
-            ("OPENAI_API_KEY=test\n", Some("research-agent-local"), None),
+            (picked, true, None, Some("research-env")),
+            (picked, false, None, Some("research-env")),
+            ("", true, None, Some("research-local")),
+            ("", false, Some("research-env"), Some("research-env")),
+            (generated, true, Some("research-env"), Some("research-env")),
             (
-                "LANGSMITH_PROJECT=custom-project\n",
-                Some("custom-project"),
-                None,
+                generated,
+                false,
+                Some("research-env"),
+                Some("research-local"),
             ),
             (
-                "LANGCHAIN_PROJECT=legacy-project\n",
+                "LANGSMITH_PROJECT=custom\n",
+                true,
+                Some("research-env"),
+                Some("custom"),
+            ),
+            (
+                "LANGCHAIN_PROJECT=legacy\n",
+                true,
+                Some("research-env"),
                 None,
-                Some("legacy-project"),
             ),
         ];
-
-        for (source_env, expected_langsmith, expected_langchain) in cases {
+        for (staged_env, recheck, local, expected) in cases {
             let root = tempfile::tempdir().unwrap();
-            let out_dir = root.path().join(".mda").join("build");
-            fs::create_dir_all(&out_dir).unwrap();
-            fs::write(root.path().join(".env"), source_env).unwrap();
-            fs::write(out_dir.join(".env"), source_env).unwrap();
+            fs::write(root.path().join(".env"), staged_env).unwrap();
 
-            ensure_dev_tracing_project(&out_dir, "research-agent").unwrap();
+            ensure_dev_tracing_destination(root.path(), "research", recheck, |_, _| {
+                local.map(str::to_string)
+            })
+            .unwrap();
 
-            let staged = crate::deploy::env_file::parse_env_file(&out_dir.join(".env"));
+            let staged = crate::deploy::env_file::parse_env_file(&root.path().join(".env"));
             assert_eq!(
                 staged.get(LANGSMITH_PROJECT_ENV).map(String::as_str),
-                expected_langsmith
-            );
-            assert_eq!(
-                staged.get(LANGCHAIN_PROJECT_ENV).map(String::as_str),
-                expected_langchain
-            );
-            assert_eq!(
-                fs::read_to_string(root.path().join(".env")).unwrap(),
-                source_env
+                expected,
+                "{staged_env:?} recheck={recheck}"
             );
         }
     }

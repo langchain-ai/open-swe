@@ -10,16 +10,14 @@ import {
 } from "react"
 import type { ReactNode } from "react"
 import { FileCodeIcon } from "@phosphor-icons/react/dist/ssr/FileCode"
-import type { Message } from "@/features/agents/lib/types"
+import type { Message, ToolExecutionChunk } from "@/features/agents/lib/types"
 import type { CodeExcerpt } from "@/features/agents/utils/codeExcerpt"
 import {
   chatDiffAction,
+  isChatDiffActionTool,
   rangeLabel,
 } from "@/features/reviews/lib/chatDiffActions"
-import type {
-  ChatDiffAction,
-  DiffRange,
-} from "@/features/reviews/lib/chatDiffActions"
+import type { DiffRange } from "@/features/reviews/lib/chatDiffActions"
 import { useChatDrafts } from "@/features/reviews/lib/chatDrafts"
 import { usePendingReview } from "@/features/reviews/lib/usePendingReview"
 import { sameLogin } from "@/features/reviews/lib/logins"
@@ -49,68 +47,81 @@ export const ReviewChatActionsContext =
 
 export function ReviewChatActions({ messages }: { messages: Array<Message> }) {
   const review = useContext(ReviewChatActionsContext)
+  return review ? (
+    <ReviewChatActionList review={review} messages={messages} />
+  ) : null
+}
+
+function chatToolName(chunk: ToolExecutionChunk): string {
+  return chunk.title.toLowerCase().replaceAll(" ", "_")
+}
+
+function actionToolCalls(messages: Array<Message>): Array<ToolExecutionChunk> {
+  return messages.flatMap((message) =>
+    message.chunks.filter(
+      (chunk): chunk is ToolExecutionChunk =>
+        chunk.kind === "tool-execution" &&
+        isChatDiffActionTool(chatToolName(chunk))
+    )
+  )
+}
+
+/**
+ * The full results of the action tools whose transcript holds only a preview.
+ * Each is fetched once, not on every streamed event; a failed fetch is retried.
+ */
+function useActionToolOutputs(
+  calls: Array<ToolExecutionChunk>
+): Record<string, string> {
+  const [outputs, setOutputs] = useState<Record<string, string>>({})
+  const requested = useRef(new Set<string>())
+  useEffect(() => {
+    for (const { toolCallId, loadOutput } of calls) {
+      if (!loadOutput || requested.current.has(toolCallId)) continue
+      requested.current.add(toolCallId)
+      void loadOutput().then(
+        (output) =>
+          setOutputs((previous) => ({ ...previous, [toolCallId]: output })),
+        (error: unknown) => {
+          requested.current.delete(toolCallId)
+          console.error("Could not load review draft", error)
+        }
+      )
+    }
+  }, [calls])
+  return outputs
+}
+
+function ReviewChatActionList({
+  review,
+  messages,
+}: {
+  review: ReviewChatActionsValue
+  messages: Array<Message>
+}) {
   const drafts = useChatDrafts()
   const register = drafts?.register
-  const [outputs, setOutputs] = useState<Record<string, string>>({})
-  useEffect(() => {
-    let cancelled = false
-    for (const message of messages) {
-      for (const chunk of message.chunks) {
-        if (chunk.kind !== "tool-execution" || !chunk.loadOutput) continue
-        void chunk
-          .loadOutput()
-          .then((output) => {
-            if (!cancelled)
-              setOutputs((previous) => ({
-                ...previous,
-                [chunk.toolCallId]: output,
-              }))
-          })
-          .catch((error: unknown) =>
-            console.error("Could not load review draft", error)
-          )
-      }
-    }
-    return () => {
-      cancelled = true
-    }
-  }, [messages])
+  const calls = useMemo(() => actionToolCalls(messages), [messages])
+  const outputs = useActionToolOutputs(calls)
   const actions = useMemo(
     () =>
-      review
-        ? messages.flatMap((message) =>
-            message.chunks.flatMap((chunk) => {
-              if (chunk.kind !== "tool-execution") return []
-              const action = chatDiffAction({
-                type: "tool",
-                name: chunk.title.toLowerCase().replaceAll(" ", "_"),
-                tool_call_id: chunk.toolCallId,
-                content:
-                  outputs[chunk.toolCallId] ??
-                  (chunk.loadOutput ? undefined : chunk.output),
-              })
-              return action ? [action] : []
-            })
-          )
-        : [],
-    [messages, review, outputs]
+      calls.flatMap((chunk) => {
+        const action = chatDiffAction({
+          type: "tool",
+          name: chatToolName(chunk),
+          tool_call_id: chunk.toolCallId,
+          content:
+            outputs[chunk.toolCallId] ??
+            (chunk.loadOutput ? undefined : chunk.output),
+        })
+        return action ? [action] : []
+      }),
+    [calls, outputs]
   )
   useEffect(() => {
     for (const action of actions)
       if (action.kind !== "added") register?.(action)
   }, [actions, register])
-  return review ? (
-    <ReviewChatActionList review={review} actions={actions} />
-  ) : null
-}
-
-function ReviewChatActionList({
-  review,
-  actions,
-}: {
-  review: ReviewChatActionsValue
-  actions: Array<ChatDiffAction>
-}) {
   // A comment the agent added for the viewer sits in their pending review, which the page reads once.
   const pending = usePendingReview(review.owner, review.repo, review.number)
   const viewer = useSession().data?.login

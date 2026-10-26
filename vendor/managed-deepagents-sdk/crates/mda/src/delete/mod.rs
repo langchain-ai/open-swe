@@ -54,6 +54,7 @@ use crate::install::Installation;
 use crate::langsmith::{self, AgentEnvironment, ContextHubClient, DeploymentAgent};
 use crate::naming::normalize_name;
 use crate::project;
+use crate::telemetry::{otel_logger, update_facts};
 
 /// Docs page explaining managed sandbox lifetime and retention.
 const SANDBOX_DOCS_URL: &str = "https://docs.langchain.com/langsmith/sandboxes";
@@ -161,6 +162,7 @@ pub fn run(opts: DeleteOptions) -> Result<CommandCompletion> {
         }
         Err(err) => {
             let category = category_of(&err);
+            otel_logger::error(&err);
             outro_cancel(format!("{err:#}"))?;
             Ok(CommandCompletion::Failed(category))
         }
@@ -188,6 +190,7 @@ fn run_session(
         None => agent_config::agent_assistant_id(project)?,
     };
     let (name, deployment_agent) = agent_target(base_name, opts.agent_environment)?;
+    update_facts(|facts| facts.deployment.deployment_name = Some(name.clone()));
 
     let client = ctx.client()?;
     let context_client = ctx.context_hub_client()?;
@@ -196,6 +199,7 @@ fn run_session(
     if let Some(deployment_id) = plan.deployment_id.clone() {
         resolve_channel_connections(&mut plan, &client, &env_vars, &deployment_id);
     }
+    update_facts(|facts| facts.deployment.deployment_id = plan.deployment_id.clone());
     if plan.is_empty() {
         // Everything else is gone, but an unreadable sandbox list means we
         // cannot claim teardown is complete — sandboxes may still be running.

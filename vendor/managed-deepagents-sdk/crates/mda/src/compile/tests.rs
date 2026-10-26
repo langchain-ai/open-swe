@@ -3730,7 +3730,8 @@ fn compile_materializes_a_registry_npm_lockfile_for_typescript_builds() {
         npm.args(["install", "--ignore-scripts"])
             .current_dir(&out_dir);
         let output =
-            toolchain::output_with_timeout(&mut npm, std::time::Duration::from_secs(90)).unwrap();
+            crate::child::output_with_timeout(&mut npm, std::time::Duration::from_secs(90))
+                .unwrap();
         assert!(
             output.status.success(),
             "npm install failed against the materialized lockfile: {}",
@@ -3801,7 +3802,7 @@ fn compile_resolves_authored_langchain_and_mcp_tool_dependencies() {
         deps["@langchain/mcp-adapters"],
         managed_mcp_adapter_version()
     );
-    assert_eq!(deps["deepagents"], "^1.12.1");
+    assert_eq!(deps["deepagents"], "^1.15.1");
     assert!(out_dir.join("package-lock.json").is_file());
 }
 
@@ -4449,7 +4450,7 @@ fn compile_wires_python_browser_and_adds_stagehand() {
     assert!(entry_out.contains("from browser import browser as _browser"));
     assert!(entry_out.contains(
         "await compile_managed_agent_async(_definition, config, context_root=_context_root, \
-         has_skills=_has_skills, browser=_browser, runtime=runtime)"
+         has_skills=_has_skills, browser=_browser, async_subagent_graphs=_async_subagent_graphs, runtime=runtime)"
     ));
     let pyproject = fs::read_to_string(out_dir.join("pyproject.toml")).unwrap();
     assert!(pyproject.contains("stagehand==4.3.0"));
@@ -5449,4 +5450,32 @@ fn compile_for_deploy_rejects_a_marker_on_a_python_local_package() {
     .unwrap_err();
     let error = format!("{error:#}");
     assert!(error.contains("sys_platform == 'linux'"), "{error}");
+}
+
+#[test]
+fn a_compile_cancellation_stays_a_cancellation() {
+    let interrupted = anyhow::Error::new(std::io::Error::from(std::io::ErrorKind::Interrupted))
+        .context("failed to run npm install");
+
+    let err = super::compilation(interrupted);
+
+    assert!(crate::error::is_cancellation(&err), "{err:#}");
+}
+
+#[test]
+fn a_compile_failure_keeps_the_childs_stderr() {
+    let child = anyhow::Error::new(std::io::Error::other("ImportError: x"))
+        .context("failed to emit connector requirements");
+
+    let err = super::compilation(child);
+
+    assert_eq!(
+        crate::error::category_of(&err),
+        crate::error::ErrorCategory::Compilation
+    );
+    assert_eq!(
+        format!("{err:#}"),
+        "failed to emit connector requirements: ImportError: x"
+    );
+    assert_eq!(err.chain().count(), 2);
 }

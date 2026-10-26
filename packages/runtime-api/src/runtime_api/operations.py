@@ -26,6 +26,8 @@ class RunOperation(RunRequest):
     state: dict[str, JsonValue] = {}
     # The conversation so far, for an operation whose spec says it reads it.
     messages: list[dict[str, JsonValue]] | None = None
+    # The catalog's grant for this operation, which the backend checks against the run.
+    grant: str | None = None
 
 
 class OperationResult(BaseModel):

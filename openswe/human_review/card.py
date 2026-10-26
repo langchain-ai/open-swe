@@ -54,20 +54,23 @@ def _reviewers(request: HumanReviewRequest, states: dict[str, str]) -> list[Bloc
     return blocks
 
 
-def _heading(request: HumanReviewRequest, states: dict[str, str]) -> str:
+async def _heading(request: HumanReviewRequest, states: dict[str, str]) -> str:
     link = f"<{request.pull_request.url}|{_label(request)}>"
     if "CHANGES_REQUESTED" in states.values() or "APPROVED" not in states.values():
         return f":mag: *Review requested*  {link}"
-    return f":white_check_mark: *Approved by {_approvers(request, states)}*  {link}"
+    return f":white_check_mark: *Approved by {await _approvers(request, states)}*  {link}"
 
 
-def _approvers(request: HumanReviewRequest, states: dict[str, str]) -> str:
+async def _approvers(request: HumanReviewRequest, states: dict[str, str]) -> str:
     mentions = {r.github_login.lower(): r.slack_mention for r in request.reviewers}
-    return ", ".join(
-        mentions.get(login.lower(), f"@{login}")
-        for login, state in states.items()
-        if state == "APPROVED"
-    )
+    approvers: list[str] = []
+    for login, state in states.items():
+        if state != "APPROVED":
+            continue
+        if login.lower() not in mentions:
+            mentions[login.lower()] = slack_mention(await User.for_login("github", login), login)
+        approvers.append(mentions[login.lower()])
+    return ", ".join(approvers)
 
 
 def _stats(
@@ -145,7 +148,7 @@ def _buttons(request: HumanReviewRequest) -> list[ButtonElement]:
     ]
 
 
-def open_card(
+async def open_card(
     request: HumanReviewRequest,
     *,
     title: str,
@@ -159,7 +162,7 @@ def open_card(
     ``author`` and ``requester`` are Slack mentions; ``review_states`` maps each
     GitHub login to its latest review state.
     """
-    blocks: list[Block] = [section(f"{_heading(request, review_states)}\n*{escape(title)}*")]
+    blocks: list[Block] = [section(f"{await _heading(request, review_states)}\n*{escape(title)}*")]
     if request.tldr:
         blocks.append(section("\n".join(f">{line}" for line in escape(request.tldr).splitlines())))
     blocks.append(context(_stats(request, author, requester, files)))
@@ -173,7 +176,7 @@ def open_card(
     return f"Review requested for {_label(request)}: {title}", blocks
 
 
-def closed_card(
+async def closed_card(
     request: HumanReviewRequest,
     *,
     title: str,
@@ -183,7 +186,7 @@ def closed_card(
 ) -> tuple[str, list[Block]]:
     """A finished or approved request collapses to one line; ``outcome`` is our own mrkdwn."""
     pull = f"<{request.pull_request.url}|{_label(request)}> {escape(title)} — authored by {author}"
-    approvers = _approvers(request, review_states)
+    approvers = await _approvers(request, review_states)
     if outcome in ("approved", "merged"):
         line = f":{'merged' if outcome == 'merged' else 'white_check_mark'}: {pull}"
         if approvers:

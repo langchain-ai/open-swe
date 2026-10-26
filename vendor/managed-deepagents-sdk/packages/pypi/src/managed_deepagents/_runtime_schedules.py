@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import asyncio
 import json
-import os
 from collections.abc import Mapping
 from dataclasses import dataclass
 from datetime import UTC, datetime
@@ -25,7 +24,10 @@ from pydantic import (
 )
 from typing_extensions import TypedDict
 
-from managed_deepagents._channels.schedule_delivery import read_schedule_deliver_to
+from managed_deepagents._channels.schedule_delivery import (
+    get_deployment_id,
+    read_schedule_deliver_to,
+)
 from managed_deepagents._connections import (
     CredentialStoreError,
     resolve_agent_auth_context,
@@ -213,10 +215,7 @@ async def _context(owner: ScheduleOwner, configurable: Mapping[str, object]) -> 
     identity = build_runtime_identity(configurable)
     assistant = str(configurable.get("assistant_id", ""))
     UUID(assistant)
-    deployment = (
-        os.environ.get("LANGSMITH_HOST_PROJECT_ID", "").strip()
-        or os.environ.get("LANGGRAPH_CLOUD_ID", "").strip()
-    )
+    deployment = get_deployment_id()
     if not deployment:
         raise ValueError("Schedules require a deployment ID")
     if identity is None:

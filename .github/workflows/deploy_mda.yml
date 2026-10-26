@@ -88,6 +88,8 @@ jobs:
         # From the vendored SDK, into the runtime mda/ installs.
         run: make mda-cli
       - name: Deploy
+        id: deploy
+        shell: bash
         if: steps.changed.outputs.deploy == 'true'
         env:
           ENVIRONMENT: ${{ matrix.environment }}
@@ -170,12 +172,52 @@ jobs:
             export MDA_GITHUB_WEBHOOK_SECRET="$GITHUB_APP_WEBHOOK_SECRET"
           fi
           unset GITHUB_APP_PRIVATE_KEY GITHUB_APP_WEBHOOK_SECRET
-          uv run --project mda --locked --python 3.13 mda deploy mda \
+          uv run --project mda --locked mda deploy mda \
             --name "open-swe-mda-$ENVIRONMENT" \
             --deployment-type prod \
             --workspace-id ebbaf2eb-769b-4505-aca2-d11de10372a4 \
             --context-strategy overwrite \
-            --yes
+            --yes 2>&1 | tee "$RUNNER_TEMP/mda-deploy.log"
+      - name: Summarize deployment
+        if: always()
+        env:
+          ENVIRONMENT: ${{ matrix.environment }}
+          DEPLOY_OUTCOME: ${{ steps.deploy.outcome }}
+          DEPLOY_NEEDED: ${{ steps.changed.outputs.deploy }}
+        run: |
+          export CANDIDATE_SHA="$(git rev-parse HEAD)"
+          python3 - <<'PY'
+          import os
+          import re
+          from pathlib import Path
+          from urllib.parse import urlsplit
+
+          log = Path(os.environ["RUNNER_TEMP"]) / "mda-deploy.log"
+          text = re.sub(r"\x1b\[[0-?]*[ -/]*[@-~]", "", log.read_text() if log.exists() else "")
+          outcome = os.environ["DEPLOY_OUTCOME"]
+          if os.environ["DEPLOY_NEEDED"] == "false":
+              outcome = "Skipped — no runtime changes to deploy"
+          lines = [f"## Managed Deep Agents · {os.environ['ENVIRONMENT']}", "", f"- Deploy step: {outcome}"]
+          for label, host in [("Agent Server", "langgraph.app"), ("Dashboard", "smith.langchain.com")]:
+              prefix = rf"{label}\s+" if label == "Agent Server" else r"(?:Dashboard\s+)?"
+              matches = re.findall(rf"^\s*{prefix}(https://\S+)\s*$", text, re.MULTILINE)
+              for url in reversed(matches):
+                  parsed = urlsplit(url)
+                  if parsed.scheme == "https" and parsed.hostname and (parsed.hostname == host or parsed.hostname.endswith(f".{host}")) and not parsed.username and not parsed.password:
+                      lines.append(f"- [{label}]({url})")
+                      break
+          ids = re.findall(r"^Deployment ID: ([0-9a-f-]{36})\s*$", text, re.MULTILINE)
+          statuses = re.findall(r"^Deployment status: ([A-Z_]+)\s*$", text, re.MULTILINE)
+          if ids:
+              lines.append(f"- Deployment ID: `{ids[-1]}`")
+          if statuses:
+              lines.append(f"- Last reported deployment status: `{statuses[-1]}`")
+          sha = os.environ["CANDIDATE_SHA"]
+          repo_url = f"{os.environ['GITHUB_SERVER_URL']}/{os.environ['GITHUB_REPOSITORY']}"
+          lines.append(f"- Candidate commit: [{sha[:12]}]({repo_url}/commit/{sha})")
+          with open(os.environ["GITHUB_STEP_SUMMARY"], "a", encoding="utf-8") as summary:
+              summary.write("\n".join(lines) + "\n")
+          PY
       - name: Record what the deployment runs
         if: steps.changed.outputs.deploy == 'true'
         env:

@@ -18,7 +18,7 @@ use walkdir::WalkDir;
 
 use crate::agent_config;
 use crate::cli_output::{show_sequence, SequenceItem};
-use crate::error::{categorized, category_of, ErrorCategory};
+use crate::error::{categorize_unclassified, ErrorCategory};
 use crate::path_util::to_unix_path;
 use crate::project::{Language, Project};
 use crate::text_module;
@@ -434,7 +434,7 @@ pub(crate) fn has_current_build_marker(out_dir: &Path) -> Result<bool> {
 }
 
 pub(crate) fn eval_graph_export(language: Language) -> String {
-    format!("./{EVAL_ENTRY_STEM}.{}:agent", entry_extension(language))
+    format!("./{EVAL_ENTRY_STEM}.{}:agent", language.extension())
 }
 
 /// Subdirectory of the build that holds the vendored runtime.
@@ -534,11 +534,11 @@ pub fn compile(project: &Project, out_dir: &Path, runtime_source: &Path) -> Resu
     compile_local(project, out_dir, runtime_source, CompileMode::Full)
 }
 
+/// Report an unclassified compile failure as `compilation`, keeping its causes
+/// so a child's stderr still reaches the error record. A cancellation passes
+/// through unchanged.
 pub fn compilation(err: anyhow::Error) -> anyhow::Error {
-    if category_of(&err) != ErrorCategory::Unclassified {
-        return err;
-    }
-    categorized(ErrorCategory::Compilation, format!("{err:#}"))
+    categorize_unclassified(ErrorCategory::Compilation, err)
 }
 
 /// Like [`compile`], but keeps `node_modules`, staged env, and LangGraph state
@@ -748,10 +748,7 @@ fn compile_inner(
     } else {
         ENTRY_STEM
     };
-    let entry_file = PathBuf::from(format!(
-        "{entry_stem}.{}",
-        entry_extension(project.language)
-    ));
+    let entry_file = PathBuf::from(format!("{entry_stem}.{}", project.language.extension()));
     let agent_import = agent_import_specifier(&project.agent_file, project.language);
     let sandbox_entry = find_sandbox_entry(project);
     let sandbox_import = sandbox_entry
@@ -770,7 +767,7 @@ fn compile_inner(
     } else {
         let connectors_file = PathBuf::from(format!(
             "{CONNECTORS_STEM}.{}",
-            entry_extension(project.language)
+            project.language.extension()
         ));
         let modules: Vec<(String, String)> = connector_entries
             .iter()
@@ -825,10 +822,8 @@ fn compile_inner(
     let channels_import = if channel_entries.is_empty() {
         None
     } else {
-        let channels_file = PathBuf::from(format!(
-            "{CHANNELS_STEM}.{}",
-            entry_extension(project.language)
-        ));
+        let channels_file =
+            PathBuf::from(format!("{CHANNELS_STEM}.{}", project.language.extension()));
         let modules: Vec<(String, String)> = channel_entries
             .iter()
             .map(|entry| {
@@ -922,7 +917,7 @@ fn compile_inner(
     // and point `langgraph.json` at it. Identity is opt-in: with no
     // `identity.{ts,py}` there is no auth block and behavior is unchanged.
     let auth_path = if let Some(identity_import) = identity_import.as_deref() {
-        let auth_file = PathBuf::from(format!("{AUTH_STEM}.{}", entry_extension(project.language)));
+        let auth_file = PathBuf::from(format!("{AUTH_STEM}.{}", project.language.extension()));
         let auth_source = generate_auth_module(
             project.language,
             identity_import,
@@ -944,7 +939,7 @@ fn compile_inner(
         if identity_import.is_some() || connectors_import.is_some() || channels_import.is_some() {
             let http_file = PathBuf::from(format!(
                 "{MANAGED_HTTP_STEM}.{}",
-                entry_extension(project.language)
+                project.language.extension()
             ));
             let http_source = generate_managed_http_module(
                 project.language,
@@ -1455,7 +1450,7 @@ fn record_python_lock_input(project: &Project, out_dir: &Path) -> Result<()> {
 /// after a hub-only update (e.g. `instructions.md`) that does not rewrite the
 /// entry contents.
 pub fn poke_dev_reload_signal(out_dir: &Path, language: Language) -> Result<()> {
-    let entry = out_dir.join(format!("{ENTRY_STEM}.{}", entry_extension(language)));
+    let entry = out_dir.join(format!("{ENTRY_STEM}.{}", language.extension()));
     if !entry.is_file() {
         bail!(
             "cannot poke reload signal: missing managed entry {}",
@@ -1482,13 +1477,6 @@ fn is_typescript_source(rel: &Path) -> bool {
         rel.extension().and_then(|ext| ext.to_str()),
         Some("ts" | "tsx" | "mts" | "cts")
     )
-}
-
-fn entry_extension(language: Language) -> &'static str {
-    match language {
-        Language::TypeScript => "ts",
-        Language::Python => "py",
-    }
 }
 
 #[cfg(test)]

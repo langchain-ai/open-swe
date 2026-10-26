@@ -67,7 +67,7 @@ const TYPESCRIPT_MANAGED: &[Dependency] = &[
     },
     Dependency {
         name: "deepagents",
-        version: "^1.12.1",
+        version: "^1.15.1",
     },
     // Serves MDA managed HTTP routes (channels / connectors) from the
     // generated `_mda_http.ts` module.

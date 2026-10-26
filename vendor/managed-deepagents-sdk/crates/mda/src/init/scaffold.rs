@@ -8,7 +8,7 @@ use crate::agent_config;
 use crate::project::Language;
 
 use super::env::env_file;
-use super::manifests::{manifest_contents, manifest_name};
+use super::manifests::manifest_contents;
 use super::readme::readme;
 use super::{Blueprint, InitSummary};
 
@@ -133,7 +133,7 @@ pub(super) fn scaffold(
             "instructions.md",
             instructions(blueprint.instructions.as_deref()),
         ),
-        (manifest_name(language), manifest_contents(name, language)),
+        (language.manifest_name(), manifest_contents(name, language)),
     ];
     if language == Language::TypeScript {
         files.push(("tsconfig.json", TSCONFIG_JSON.to_string()));
@@ -160,7 +160,7 @@ pub(super) fn scaffold(
     }
     files.extend([
         ("README.md", readme(name, blueprint)),
-        (".env", env_file(langsmith_key)),
+        (".env", env_file(langsmith_key, model)),
         (".gitignore", GITIGNORE.to_string()),
     ]);
 

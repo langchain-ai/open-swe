@@ -157,6 +157,7 @@ declare global {
     openSweDesktop?: {
       isDesktop: true
       writeClipboard: (value: string) => Promise<void>
+      copyPageLink: () => Promise<void>
       onCommand: (callback: (commandId: DesktopCommandId) => void) => () => void
       listProjects: () => Promise<Array<DesktopProject>>
       getProjectBranches: (cwd: string) => Promise<{

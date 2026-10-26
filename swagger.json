@@ -875,6 +875,20 @@
         "title": "BackgroundCommand",
         "type": "object"
       },
+      "BackgroundOutput": {
+        "description": "The last lines a command or monitor wrote.",
+        "properties": {
+          "output": {
+            "title": "Output",
+            "type": "string"
+          }
+        },
+        "required": [
+          "output"
+        ],
+        "title": "BackgroundOutput",
+        "type": "object"
+      },
       "BackgroundWork": {
         "properties": {
           "commands": {
@@ -884,16 +898,6 @@
             },
             "title": "Commands",
             "type": "array"
-          },
-          "monitor_budget": {
-            "anyOf": [
-              {
-                "$ref": "#/components/schemas/MonitorBudgetUse"
-              },
-              {
-                "type": "null"
-              }
-            ]
           },
           "monitors": {
             "default": [],
@@ -1438,6 +1442,15 @@
       "ConnectedService": {
         "description": "A service in the gateway this person has connected.",
         "properties": {
+          "disconnectable": {
+            "default": false,
+            "title": "Disconnectable",
+            "type": "boolean"
+          },
+          "id": {
+            "title": "Id",
+            "type": "string"
+          },
           "name": {
             "title": "Name",
             "type": "string"
@@ -1448,6 +1461,7 @@
           }
         },
         "required": [
+          "id",
           "name",
           "tool_count"
         ],
@@ -3614,40 +3628,6 @@
         "title": "ModelObject",
         "type": "object"
       },
-      "MonitorBudgetUse": {
-        "description": "What the thread's monitors used of the allowance the last human message opened.",
-        "properties": {
-          "events": {
-            "title": "Events",
-            "type": "integer"
-          },
-          "max_events": {
-            "title": "Max Events",
-            "type": "integer"
-          },
-          "max_starts": {
-            "title": "Max Starts",
-            "type": "integer"
-          },
-          "starts": {
-            "title": "Starts",
-            "type": "integer"
-          },
-          "window_ends_at": {
-            "title": "Window Ends At",
-            "type": "number"
-          }
-        },
-        "required": [
-          "events",
-          "max_events",
-          "starts",
-          "max_starts",
-          "window_ends_at"
-        ],
-        "title": "MonitorBudgetUse",
-        "type": "object"
-      },
       "MonitorState": {
         "properties": {
           "callback": {
@@ -4666,18 +4646,6 @@
               }
             ],
             "title": "Experimental Act As Approval"
-          },
-          "experimental_assistant_ui": {
-            "agent_feature_flag": true,
-            "anyOf": [
-              {
-                "type": "boolean"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Experimental Assistant Ui"
           },
           "experimental_background_callbacks": {
             "agent_feature_flag": true,
@@ -12886,6 +12854,56 @@
         ]
       }
     },
+    "/dashboard/api/my-managed-tools/{gateway}/services/{service}": {
+      "delete": {
+        "description": "Remove the caller's own LangSmith connection to one service in the tool kit.",
+        "operationId": "api_disconnect_managed_tool_dashboard_api_my_managed_tools__gateway__services__service__delete",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "gateway",
+            "required": true,
+            "schema": {
+              "title": "Gateway",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "service",
+            "required": true,
+            "schema": {
+              "title": "Service",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "DashboardSession": []
+          }
+        ],
+        "summary": "Api Disconnect Managed Tool",
+        "tags": [
+          "dashboard"
+        ]
+      }
+    },
     "/dashboard/api/my-mcps": {
       "get": {
         "operationId": "api_list_my_mcps_dashboard_api_my_mcps_get",
@@ -19589,6 +19607,63 @@
           }
         ],
         "summary": "Api Get Thread Background Work",
+        "tags": [
+          "dashboard",
+          "threads"
+        ]
+      }
+    },
+    "/dashboard/api/threads/{thread_id}/background-work/{task_id}/output": {
+      "get": {
+        "operationId": "api_get_thread_background_output_dashboard_api_threads__thread_id__background_work__task_id__output_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "thread_id",
+            "required": true,
+            "schema": {
+              "title": "Thread Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "task_id",
+            "required": true,
+            "schema": {
+              "title": "Task Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BackgroundOutput"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "DashboardSession": []
+          }
+        ],
+        "summary": "Api Get Thread Background Output",
         "tags": [
           "dashboard",
           "threads"

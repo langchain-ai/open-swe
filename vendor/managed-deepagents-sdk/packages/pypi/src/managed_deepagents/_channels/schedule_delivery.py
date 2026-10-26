@@ -86,8 +86,9 @@ def read_schedule_deliver_to(  # noqa: PLR0911 - validation short-circuits
     conversation_id = to_raw.get("conversation_id", to_raw.get("conversationId"))
     if not isinstance(conversation_id, str) or not conversation_id.strip():
         return None
+    normalized_to: ChannelDestinationProviderConversation | ChannelDestinationProviderThread
     if dest_type == "provider_conversation":
-        normalized_to: ChannelDestinationProviderConversation | ChannelDestinationProviderThread = {
+        normalized_to = {
             "type": "provider_conversation",
             "conversation_id": conversation_id.strip(),
         }
@@ -95,14 +96,11 @@ def read_schedule_deliver_to(  # noqa: PLR0911 - validation short-circuits
         thread_id = to_raw.get("thread_id", to_raw.get("threadId"))
         if not isinstance(thread_id, str) or not thread_id.strip():
             return None
-        normalized_to = cast(
-            "ChannelDestinationProviderThread",
-            {
-                "type": "provider_thread",
-                "conversation_id": conversation_id.strip(),
-                "thread_id": thread_id.strip(),
-            },
-        )
+        normalized_to = {
+            "type": "provider_thread",
+            "conversation_id": conversation_id.strip(),
+            "thread_id": thread_id.strip(),
+        }
     else:
         return None
     auto_post_raw = raw.get("auto_post", raw.get("autoPost"))
@@ -160,6 +158,7 @@ async def deliver_schedule_result(  # noqa: C901, PLR0911 - delivery outcomes
             logger.error(
                 "schedule Slack delivery failed (%s)",
                 logger.safe_error_label(error),
+                error=error,
             )
             return "failed"
 
@@ -186,6 +185,7 @@ async def deliver_schedule_result(  # noqa: C901, PLR0911 - delivery outcomes
             logger.error(
                 "schedule Trigger channel delivery failed (%s)",
                 logger.safe_error_label(error),
+                error=error,
             )
             return "failed"
 
@@ -205,17 +205,16 @@ async def deliver_schedule_result(  # noqa: C901, PLR0911 - delivery outcomes
         )
 
         transport = create_slack_web_api_transport(bot_token=token)
-        posted = transport.post(
+        await transport.post(
             message={"type": "content", "content": text},
             target=cast("JsonValue", dict(address)),
         )
-        if hasattr(posted, "__await__"):
-            await cast("Awaitable[object]", posted)
         return "posted"
     except Exception as error:  # noqa: BLE001 - return a failed delivery outcome
         logger.error(
             "schedule Slack delivery failed (%s)",
             logger.safe_error_label(error),
+            error=error,
         )
         return "failed"
 
@@ -247,7 +246,7 @@ def _resolve_schedule_metadata() -> Mapping[str, object] | None:
     if isinstance(config, Mapping):
         metadata = config.get("metadata")
         if isinstance(metadata, Mapping):
-            return cast("Mapping[str, object]", metadata)
+            return metadata
     return None
 
 

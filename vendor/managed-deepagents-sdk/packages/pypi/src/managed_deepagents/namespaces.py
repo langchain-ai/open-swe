@@ -14,6 +14,8 @@ contribute its own — :mod:`managed_deepagents._extension` stays internal.
 
 from __future__ import annotations
 
+from collections.abc import Callable
+
 from pydantic import BaseModel, ConfigDict, field_validator
 
 from managed_deepagents._channels.github import github_channel
@@ -100,6 +102,7 @@ def define_sandbox(
     _openswe_thread_id: str | None = None,
     _openswe_create_fields: dict[str, object] | None = None,
     _openswe_no_manage_proxy: bool = False,
+    _openswe_select: Callable[[object], SandboxDefinition | None] | None = None,
     idle_ttl_seconds: int | None = None,
     api_key: str | None = None,
     default_timeout: int | None = None,
@@ -133,6 +136,7 @@ def define_sandbox(
                 "_openswe_thread_id": _openswe_thread_id,
                 "_openswe_create_fields": _openswe_create_fields,
                 "_openswe_no_manage_proxy": _openswe_no_manage_proxy or None,
+                "_openswe_select": _openswe_select,
             }.items()
             if value is not None
         }

@@ -105,6 +105,11 @@ const ACTION_TOOLS = new Set([
   "add_review_comment",
 ])
 
+/** Whether a tool's result can carry a page action. */
+export function isChatDiffActionTool(name: string): boolean {
+  return ACTION_TOOLS.has(name)
+}
+
 /** The page action a successful chat tool result carries. */
 export function chatDiffAction(
   message: ToolMessageLike

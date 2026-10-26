@@ -3,7 +3,6 @@
 //! Used by deploy bake (`capture` / `get` / wait) and `mda delete` (list +
 //! delete recipe snapshots named `{deployment}--setup-{digest}`).
 
-use std::thread;
 use std::time::{Duration, Instant};
 
 use anyhow::{bail, Context, Result};
@@ -194,7 +193,7 @@ impl Client {
                         timeout.as_secs()
                     );
                 }
-                _ => thread::sleep(READY_POLL_INTERVAL),
+                _ => crate::interrupt::pause(READY_POLL_INTERVAL)?,
             }
         }
     }

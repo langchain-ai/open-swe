@@ -26,8 +26,9 @@ export function TurnFoldRow({
   return (
     <div
       className={cn(
-        "pt-space-1 pb-space-2",
-        !active && "border-b border-subtle"
+        // The border is there while live too, so settling doesn't nudge what follows.
+        "border-b pt-space-1 pb-space-2",
+        active ? "border-transparent" : "border-subtle"
       )}
     >
       <button

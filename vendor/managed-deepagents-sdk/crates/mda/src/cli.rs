@@ -18,8 +18,8 @@ use crate::langsmith::{self, LogLevel};
 use crate::logs::{self, LogsOptions};
 use crate::secret_input::ValueSource;
 use crate::telemetry::{
-    is_telemetry_disabled, posthog_transport, CommandContext, CommandInvocation, EventEnvelope,
-    InvocationMetadata, ReportableFacts, TelemetryTransport,
+    deliver_at_exit, hold_for_exit, init_facts, is_telemetry_disabled, otel_logger,
+    posthog_transport, report_panics, OtelLogger, ReportableFacts,
 };
 use crate::{coding_agent, compile, init, styled_help_template, termination, version};
 use anyhow::{Context, Result};
@@ -85,7 +85,10 @@ const CONNECTION_CREATE_HELP_EXAMPLES: &str = "  # Opaque secret
   mda connections create my-notion --authorize
 
   # MCP OAuth from an explicit server URL
-  mda connections create my-notion --mcp https://mcp.notion.com/mcp --authorize";
+  mda connections create my-notion --mcp https://mcp.notion.com/mcp --authorize
+
+  # Authorize a deployed agent without a local project
+  mda connections create my-notion --mcp https://mcp.notion.com/mcp --authorize --workspace-id WORKSPACE_ID --deployment-id DEPLOYMENT_ID";
 
 const PYTHON_DOCS_AFTER_HELP: &str =
     "  https://docs.langchain.com/langsmith/python/managed-deep-agents-quickstart";
@@ -500,6 +503,10 @@ struct ConnectionCreateArgs {
     #[arg(long, help_heading = OAUTH_HEADING)]
     authorize: bool,
 
+    /// Deployment ID for agent-owned secrets or OAuth grants, without a local project.
+    #[arg(long, value_name = "ID")]
+    deployment_id: Option<String>,
+
     /// MCP server URL. Discovers OAuth and registers a client automatically.
     #[arg(
         long,
@@ -761,26 +768,30 @@ pub fn run() -> ExitCode {
         Err(err) => err.exit(),
     };
 
-    let transport = (!is_telemetry_disabled(|key| std::env::var(key).ok()))
-        .then(posthog_transport)
-        .flatten();
-    let mut facts = if transport.is_some() {
-        ReportableFacts::collect(CommandContext::capture(&matches))
-    } else {
-        ReportableFacts::default()
-    };
+    let telemetry_enabled = !is_telemetry_disabled(|key| std::env::var(key).ok());
+    let posthog = telemetry_enabled.then(posthog_transport).flatten();
+    let otel_logger = telemetry_enabled.then(OtelLogger::install).flatten();
+    if telemetry_enabled {
+        hold_for_exit(otel_logger, posthog);
+        report_panics();
+        let (facts, client) = ReportableFacts::detect(&command, &matches);
+        init_facts(facts);
+        if let Some(client) = &client {
+            otel_logger::authenticate(client);
+        }
+    }
     let result = match cli.command {
-        Command::Init(args) => run_init(args, &mut facts),
-        Command::Build(args) => run_build(args, &mut facts),
-        Command::Dev(args) => run_dev(args, &mut facts),
-        Command::Chat(args) => run_chat(args, &mut facts),
-        Command::Deploy(args) => run_deploy(args, &mut facts),
-        Command::Prepare(args) => run_prepare(args, build_artifacts_token, &mut facts),
-        Command::Connection(args) => run_connection(args, &mut facts),
-        Command::Channel(args) => run_channel(args, &mut facts),
-        Command::Logs(args) => run_logs(args, &mut facts),
-        Command::Delete(args) => run_delete(args, &mut facts),
-        Command::Eval(args) => run_eval(args, &mut facts),
+        Command::Init(args) => run_init(args),
+        Command::Build(args) => run_build(args),
+        Command::Dev(args) => run_dev(args),
+        Command::Chat(args) => run_chat(args),
+        Command::Deploy(args) => run_deploy(args),
+        Command::Prepare(args) => run_prepare(args, build_artifacts_token),
+        Command::Connection(args) => run_connection(args),
+        Command::Channel(args) => run_channel(args),
+        Command::Logs(args) => run_logs(args),
+        Command::Delete(args) => run_delete(args),
+        Command::Eval(args) => run_eval(args),
     };
     termination::hand_over_if_terminating();
     let completion = match result {
@@ -790,26 +801,18 @@ pub fn run() -> ExitCode {
         // reports `unclassified` unless the cause is one every command shares.
         Err(err) => {
             eprintln!("error: {err:#}");
+            otel_logger::error(&err);
             CommandCompletion::Failed(category_of(&err))
         }
     };
-    if let Some(transport) = transport {
-        if let (Some(invocation), Some(metadata)) = (
-            CommandInvocation::from_matches(&command, &matches),
-            InvocationMetadata::detect(),
-        ) {
-            transport.record(&EventEnvelope::command_completed(
-                &metadata, facts, invocation, completion,
-            ));
-        }
-    }
+    deliver_at_exit(completion);
     match completion {
         CommandCompletion::Failed(_) => ExitCode::FAILURE,
         CommandCompletion::Succeeded | CommandCompletion::Cancelled => ExitCode::SUCCESS,
     }
 }
 
-fn run_init(args: InitArgs, _facts: &mut ReportableFacts) -> Result<CommandCompletion> {
+fn run_init(args: InitArgs) -> Result<CommandCompletion> {
     let installation = Installation::from_env()?;
     let cwd = std::env::current_dir()?;
     let language = installation.language();
@@ -896,7 +899,7 @@ fn instructions(text: Option<String>, file: Option<&Path>) -> Result<Option<Stri
         .with_context(|| format!("failed to read instructions from {}", file.display()))
 }
 
-fn run_build(args: BuildArgs, _facts: &mut ReportableFacts) -> Result<CommandCompletion> {
+fn run_build(args: BuildArgs) -> Result<CommandCompletion> {
     let installation = Installation::from_env()?;
     let project = installation.load_project(&args.path)?;
     let out_dir = args
@@ -910,7 +913,7 @@ fn run_build(args: BuildArgs, _facts: &mut ReportableFacts) -> Result<CommandCom
     Ok(CommandCompletion::Succeeded)
 }
 
-fn run_dev(args: DevArgs, _facts: &mut ReportableFacts) -> Result<CommandCompletion> {
+fn run_dev(args: DevArgs) -> Result<CommandCompletion> {
     dev::run(DevOptions {
         path: args.path,
         port: args.port,
@@ -922,7 +925,7 @@ fn run_dev(args: DevArgs, _facts: &mut ReportableFacts) -> Result<CommandComplet
     })
 }
 
-fn run_chat(args: ChatArgs, _facts: &mut ReportableFacts) -> Result<CommandCompletion> {
+fn run_chat(args: ChatArgs) -> Result<CommandCompletion> {
     chat::run(ChatOptions {
         path: args.path,
         url: args.url,
@@ -931,29 +934,25 @@ fn run_chat(args: ChatArgs, _facts: &mut ReportableFacts) -> Result<CommandCompl
     })
 }
 
-fn run_deploy(args: DeployArgs, facts: &mut ReportableFacts) -> Result<CommandCompletion> {
-    deploy::run(
-        DeployOptions {
-            path: args.path,
-            name: args.name,
-            agent_environment: args.agent_environment,
-            deployment_type: args.deployment_type,
-            workspace_id: args.workspace_id,
-            host_url: args.host_url,
-            push_to: args.push_to,
-            wait: !args.no_wait,
-            context_strategy: args.context_strategy,
-            yes: args.yes,
-            wait_timeout: std::time::Duration::from_secs(args.wait_timeout_seconds),
-        },
-        facts,
-    )
+fn run_deploy(args: DeployArgs) -> Result<CommandCompletion> {
+    deploy::run(DeployOptions {
+        path: args.path,
+        name: args.name,
+        agent_environment: args.agent_environment,
+        deployment_type: args.deployment_type,
+        workspace_id: args.workspace_id,
+        host_url: args.host_url,
+        push_to: args.push_to,
+        wait: !args.no_wait,
+        context_strategy: args.context_strategy,
+        yes: args.yes,
+        wait_timeout: std::time::Duration::from_secs(args.wait_timeout_seconds),
+    })
 }
 
 fn run_prepare(
     args: PrepareArgs,
     build_artifacts_token: Option<std::ffi::OsString>,
-    _facts: &mut ReportableFacts,
 ) -> Result<CommandCompletion> {
     deploy::prepare::run(deploy::prepare::PrepareOptions {
         build_artifacts_token,
@@ -988,13 +987,14 @@ impl ConnectionValueArgs {
     }
 }
 
-fn run_connection(args: ConnectionArgs, _facts: &mut ReportableFacts) -> Result<CommandCompletion> {
+fn run_connection(args: ConnectionArgs) -> Result<CommandCompletion> {
     match args.command {
         ConnectionCommand::Create(args) => connection::create(connection::CreateOptions {
             target: args.common.into(),
             slug: args.slug,
             value: args.value.source(),
             authorize: args.authorize,
+            deployment_id: args.deployment_id,
             mcp: args.mcp,
             oauth: connection::oauth_create_options(connection::OAuthCreateOptions {
                 service: args.oauth.oauth,
@@ -1030,7 +1030,7 @@ fn run_connection(args: ConnectionArgs, _facts: &mut ReportableFacts) -> Result<
     }
 }
 
-fn run_channel(args: ChannelArgs, _facts: &mut ReportableFacts) -> Result<CommandCompletion> {
+fn run_channel(args: ChannelArgs) -> Result<CommandCompletion> {
     match args.command {
         ChannelCommand::Init(ChannelInitArgs { channel }) => {
             let kind = match channel {
@@ -1045,7 +1045,7 @@ fn run_channel(args: ChannelArgs, _facts: &mut ReportableFacts) -> Result<Comman
     Ok(CommandCompletion::Succeeded)
 }
 
-fn run_logs(args: LogsArgs, _facts: &mut ReportableFacts) -> Result<CommandCompletion> {
+fn run_logs(args: LogsArgs) -> Result<CommandCompletion> {
     // Neither flag: follow only when a human is watching (see `logs::run`).
     let follow = match (args.follow, args.no_follow) {
         (true, _) => Some(true),
@@ -1063,7 +1063,7 @@ fn run_logs(args: LogsArgs, _facts: &mut ReportableFacts) -> Result<CommandCompl
     })
 }
 
-fn run_delete(args: DeleteArgs, _facts: &mut ReportableFacts) -> Result<CommandCompletion> {
+fn run_delete(args: DeleteArgs) -> Result<CommandCompletion> {
     delete::run(DeleteOptions {
         path: args.path,
         name: args.name,
@@ -1074,7 +1074,7 @@ fn run_delete(args: DeleteArgs, _facts: &mut ReportableFacts) -> Result<CommandC
     })
 }
 
-fn run_eval(args: EvalArgs, _facts: &mut ReportableFacts) -> Result<CommandCompletion> {
+fn run_eval(args: EvalArgs) -> Result<CommandCompletion> {
     match args.command {
         EvalCommand::Init(EvalInitArgs { coding_agent }) => {
             if coding_agent {
@@ -1526,6 +1526,34 @@ mod tests {
     }
 
     #[test]
+    fn connection_create_accepts_explicit_deployment_without_project() {
+        let ConnectionCommand::Create(args) = connection_command(&[
+            "mda",
+            "connections",
+            "create",
+            "doordash",
+            "--client-id",
+            "client",
+            "--auth-method",
+            "none",
+            "--authorize-url",
+            "https://auth.example.com/authorize",
+            "--token-url",
+            "https://auth.example.com/token",
+            "--authorize",
+            "--workspace-id",
+            "workspace",
+            "--deployment-id",
+            "deployment",
+        ]) else {
+            unreachable!("expected create");
+        };
+        assert!(args.authorize);
+        assert_eq!(args.deployment_id.as_deref(), Some("deployment"));
+        assert_eq!(args.common.workspace_id.as_deref(), Some("workspace"));
+    }
+
+    #[test]
     fn connection_create_accepts_mcp_with_authorize() {
         let ConnectionCommand::Create(args) = connection_command(&[
             "mda",
@@ -1824,6 +1852,10 @@ mod tests {
         assert!(help.contains("--token-param <KEY=VALUE>"), "{help}");
         assert!(
             help.contains("--token-request-header <KEY=VALUE>"),
+            "{help}"
+        );
+        assert!(
+            !help.contains("skips project ownership inference"),
             "{help}"
         );
         assert!(!help.contains("--owner"), "{help}");

@@ -1,7 +1,6 @@
 """Standard human review: ask a repository's review channel to review a pull request.
 
-A request is refused while the pull request is closed, a draft, conflicted, or
-failing a required check. People sign up from the card; after
+A request is refused while the pull request is closed or a draft. People sign up from the card; after
 the workspace auto-assignment timeout with nobody signed up Open SWE picks someone (see
 ``openswe.human_review.picking``), waking an agent to pick when nobody qualifies. The
 pull request, when auto-merge is enabled, merges once every reviewer approves on
@@ -195,11 +194,6 @@ def request_blockers(snapshot: PullRequestSnapshot) -> list[str]:
         blockers.append("it is closed")
     if snapshot.draft:
         blockers.append("it is a draft")
-    if snapshot.mergeable is False or snapshot.mergeable_state == "dirty":
-        blockers.append("it has merge conflicts")
-    if snapshot.check_state in {"failure", "blocked"} and snapshot.failures_are_required:
-        names = ", ".join(snapshot.failing_checks) or "a required check"
-        blockers.append(f"required checks are failing: {names}")
     return blockers
 
 

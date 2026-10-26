@@ -417,20 +417,27 @@ def test_a_ready_pull_request_can_be_put_up_for_review() -> None:
     assert request_blockers(_snapshot()) == []
 
 
-def test_pending_checks_and_unresolved_threads_do_not_block_the_request() -> None:
-    assert request_blockers(_snapshot(check_state="pending", unresolved_threads=3)) == []
+@pytest.mark.parametrize("check_state", ["pending", "failure", "blocked"])
+def test_checks_conflicts_and_unresolved_threads_do_not_block_the_request(check_state: str) -> None:
+    assert (
+        request_blockers(
+            _snapshot(
+                check_state=check_state,
+                mergeable=False,
+                mergeable_state="dirty",
+                failing_checks=["lint"],
+                unresolved_threads=3,
+            )
+        )
+        == []
+    )
 
 
 @pytest.mark.parametrize(
     ("overrides", "blocker"),
     [
         ({"draft": True}, "draft"),
-        ({"mergeable": False, "mergeable_state": "dirty"}, "merge conflicts"),
         ({"state": "closed"}, "closed"),
-        (
-            {"check_state": "failure", "mergeable_state": "blocked", "failing_checks": ["lint"]},
-            "required checks are failing: lint",
-        ),
     ],
 )
 def test_requests_are_refused_while_the_pull_request_is_not_reviewable(
@@ -503,7 +510,11 @@ def test_an_approval_from_someone_who_did_not_sign_up_counts() -> None:
 
 
 @pytest.mark.parametrize(
-    "states", [{"Grace": "APPROVED", "hopper": "APPROVED", "linus": "DISMISSED"}, None]
+    "states",
+    [
+        {"Grace": "APPROVED", "hopper": "APPROVED", "unknown": "APPROVED", "linus": "DISMISSED"},
+        None,
+    ],
 )
 async def test_merged_card_names_only_actual_approvers(
     states: dict[str, str] | None, github_app: AsyncMock
@@ -521,8 +532,16 @@ async def test_merged_card_names_only_actual_approvers(
         participant = HumanReviewParticipant(user_id=user.id, decision="review")
         participant.user = user
         request.participants.append(participant)
-    with patch(
-        "openswe.human_review.lifecycle.latest_review_states", AsyncMock(return_value=states)
+    hopper = User(identities=[UserIdentity(provider="slack", external_id="U_hopper")])
+    with (
+        patch(
+            "openswe.human_review.lifecycle.latest_review_states", AsyncMock(return_value=states)
+        ),
+        patch.object(
+            User,
+            "for_login",
+            AsyncMock(side_effect=lambda provider, login: hopper if login == "hopper" else None),
+        ),
     ):
         text, blocks = await ReviewCard(request).render("merged")
     payload = block_payload(blocks)
@@ -532,7 +551,7 @@ async def test_merged_card_names_only_actual_approvers(
         assert "merged" in message
         assert "by @ada" in message
         if states:
-            assert "approved by <@U_grace>, @hopper" in message
+            assert "approved by <@U_grace>, <@U_hopper>, @unknown" in message
         else:
             assert "approved by" not in message
         assert "linus" not in message

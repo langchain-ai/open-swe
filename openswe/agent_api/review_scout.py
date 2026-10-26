@@ -1,36 +1,44 @@
 """The review scout, as Managed Deep Agents runs play it."""
 
+from functools import cache
 from typing import Final
 
+from deepagents.backends.protocol import BackendProtocol
 from langchain_core.runnables import RunnableConfig
-from pydantic import JsonValue, TypeAdapter
-from runtime_api.catalog import ModelSpec, RunModels
+from langchain_core.tools import BaseTool
 
 from openswe.agent_api.graph import RemoteGraph
-from openswe.review_scout.graph import plan_review_scout, scout_models
+from openswe.agent_api.run_parts import RunParts
+from openswe.review_scout.graph import (
+    plan_review_scout,
+    scout_box,
+    scout_tools,
+)
 from openswe.run_config import RunConfig
-from openswe.sandboxes.tool_runtime import ModelChoice, ToolSurface
 
 ASSISTANT_ID: Final = "review-scout"
 
-_json = TypeAdapter(dict[str, JsonValue])
+
+@cache
+def _tools_by_name() -> dict[str, BaseTool]:
+    return {tool.name: tool for tool in scout_tools()}
 
 
-async def _plan(config: RunnableConfig, surface: ToolSurface) -> None:
-    await plan_review_scout(config, surface)
+def _thread_id(config: RunnableConfig) -> str:
+    thread_id = RunConfig.from_config(config).thread_id
+    if thread_id is None:
+        raise ValueError("A scout run needs a thread")
+    return thread_id
 
 
-def _model_spec(choice: ModelChoice) -> ModelSpec:
-    return ModelSpec(model_id=choice.model_id, kwargs=_json.validate_python(dict(choice.kwargs)))
+class ReviewScoutParts(RunParts):
+    """The scout's pieces, as its plan builds them, for a call answered without it."""
+
+    async def files(self, config: RunnableConfig) -> BackendProtocol:
+        return scout_box(_thread_id(config), RunConfig.from_config(config))
+
+    async def tool(self, config: RunnableConfig, name: str) -> BaseTool | None:  # noqa: ARG002
+        return _tools_by_name().get(name)
 
 
-async def run_models(cfg: RunConfig) -> RunModels:
-    models = await scout_models(cfg)
-    return RunModels(
-        model=_model_spec(models.main),
-        subagent_model=_model_spec(models.subagent),
-        use_gateway=models.use_gateway,
-    )
-
-
-REVIEW_SCOUT: Final = RemoteGraph(ASSISTANT_ID, _plan, run_models)
+REVIEW_SCOUT: Final = RemoteGraph(ASSISTANT_ID, plan_review_scout, ReviewScoutParts())

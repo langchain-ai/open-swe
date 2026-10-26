@@ -20,17 +20,19 @@ import logging
 import posixpath
 import re
 import warnings
+from functools import partial
 from typing import Any, NamedTuple, NotRequired, cast
 
 logger = logging.getLogger(__name__)
 
 from langgraph.graph.state import RunnableConfig
 from langgraph.runtime import Runtime
+from runtime_api.catalog import InboxSpec, LoopRules
 
 warnings.filterwarnings("ignore", module="langchain_core._api.deprecation")
 warnings.filterwarnings("ignore", message=".*Pydantic V1.*", category=UserWarning)
 
-from deepagents.backends.protocol import SandboxBackendProtocol
+from deepagents.backends.protocol import BackendProtocol, SandboxBackendProtocol
 from deepagents.middleware.skills import SkillsMiddleware, SkillsState
 from langchain.agents.middleware import ModelCallLimitMiddleware, ModelRetryMiddleware
 from langchain.agents.middleware.types import AgentMiddleware
@@ -83,7 +85,6 @@ from openswe.sandboxes.repo_prep import materialize_trusted_skills, prepare_revi
 from openswe.sandboxes.state import SandboxUnreachableError
 from openswe.sandboxes.tool_runtime import ModelChoice, SurfaceModels, SurfaceSubagent, ToolSurface
 from openswe.search_policy import SHELL_SEARCH_EXCLUDED_TOOLS
-from openswe.threads.inbox import ThreadInbox
 from openswe.tools import (
     add_finding,
     fetch_review_diff,
@@ -1026,6 +1027,18 @@ def reviewer_tools() -> list[BaseTool]:
     )
 
 
+async def _reconnect_reviewer_box(thread_id: str, cfg: RunConfig) -> SandboxBackendProtocol:
+    await ensure_reviewer_github_token(thread_id, cfg)
+    return await ensure_reviewer_sandbox_for_thread(thread_id, cfg)
+
+
+def reviewer_box(thread_id: str, cfg: RunConfig) -> BackendProtocol:
+    """The review thread's box, connected again with a fresh token whenever it is gone."""
+    return get_cached_sandbox_backend(
+        thread_id, reconnect=partial(_reconnect_reviewer_box, thread_id, cfg)
+    )
+
+
 async def plan_reviewer(config: RunnableConfig, surface: ToolSurface) -> None:
     """Plan a review run into ``surface``: the tools, middleware, models and subagents its MDA run plays."""
     config = config.copy()
@@ -1039,14 +1052,7 @@ async def plan_reviewer(config: RunnableConfig, surface: ToolSurface) -> None:
     models = await resolve_reviewer_models(cfg)
     use_gateway = models.use_gateway
 
-    async def reconnect_backend(
-        _thread_id: str = thread_id,
-        _cfg: RunConfig = cfg,
-    ) -> SandboxBackendProtocol:
-        await ensure_reviewer_github_token(_thread_id, _cfg)
-        return await ensure_reviewer_sandbox_for_thread(_thread_id, _cfg)
-
-    backend = get_cached_sandbox_backend(thread_id, reconnect=reconnect_backend)
+    backend = reviewer_box(thread_id, cfg)
 
     middleware = cast(
         list[AgentMiddleware[Any, Any, Any]],
@@ -1068,9 +1074,14 @@ async def plan_reviewer(config: RunnableConfig, surface: ToolSurface) -> None:
     )
     surface.base_tools = reviewer_tools()
     surface.middleware = middleware
-    surface.inbox = ThreadInbox(thread_id, events=False, surface=WEB_REPLY_SURFACE)
+    surface.inbox = InboxSpec(surface=WEB_REPLY_SURFACE, model_id=cfg.agent_model_id)
     surface.files = backend
     surface.excluded = SHELL_SEARCH_EXCLUDED_TOOLS
+    surface.loop = LoopRules(
+        hidden_tools=sorted(SHELL_SEARCH_EXCLUDED_TOOLS),
+        refresh_github_proxy=True,
+        at_end=["settle_review_check"],
+    )
     surface.models = SurfaceModels(
         main=ModelChoice(models.main.model_id, dict(models.main.kwargs)),
         subagent=ModelChoice(models.subagent.model_id, dict(models.subagent.kwargs)),

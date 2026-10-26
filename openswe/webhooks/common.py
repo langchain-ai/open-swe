@@ -83,9 +83,19 @@ from openswe.review.findings import (
 from openswe.review.findings import (
     list_findings as list_reviewer_findings,  # noqa: F401
 )
-from openswe.review.publish import fetch_pr_review_threads, post_review_started_comment  # noqa: F401
+from openswe.review.publish import (  # noqa: F401
+    fetch_pr_review_threads,
+    post_review_started_comment,
+)
 from openswe.review.reconcile import reconcile_findings_with_review_threads  # noqa: F401
-from openswe.rollout_events import ROLLOUT_CHECK_REQUESTED, subscribe_merged_thread
+from openswe.rollout_events import (
+    MERGE_COMMIT_PR_URL,
+    MERGE_COMMIT_SHA,
+    ROLLOUT_CHECK_REQUESTED,
+    ask_to_monitor_rollout,
+    remembered_merge_sha,
+    subscribe_merged_thread,
+)
 from openswe.run_config import Repo
 from openswe.slack.channels import SlackChannel
 from openswe.slack.client import (
@@ -1544,6 +1554,21 @@ async def update_agent_thread_pr_state(payload: dict[str, Any]) -> None:
                         metadata_update["auto_resolved_by_prs"] = False
                     if needs_attention:
                         metadata_update["attention_reason"] = None
+                if newly_merged:
+                    merge_sha = remembered_merge_sha(event.pull_request.merge_commit_sha or "")
+                    if merge_sha and any(
+                        record.get("url") == pr_url for record in updated_pull_requests
+                    ):
+                        updated_pull_requests = [
+                            {**record, MERGE_COMMIT_SHA: merge_sha}
+                            if record.get("url") == pr_url
+                            else record
+                            for record in updated_pull_requests
+                        ]
+                        metadata_update["pull_requests"] = updated_pull_requests
+                    if merge_sha and metadata.get("pr_url") == pr_url:
+                        metadata_update[MERGE_COMMIT_SHA] = merge_sha
+                        metadata_update[MERGE_COMMIT_PR_URL] = pr_url
                 if metadata_update:
                     await langgraph_client.threads.update(
                         thread_id=thread_id, metadata=metadata_update
@@ -1560,21 +1585,26 @@ async def update_agent_thread_pr_state(payload: dict[str, Any]) -> None:
             from openswe.analytics.emitter import task_rework
 
             await task_rework(thread_id, source="github", scope="major", reason="pr_reopened")
-        if (
-            newly_merged
-            and event.identity is not None
-            and isinstance(metadata, dict)
-            and metadata.get(ROLLOUT_CHECK_REQUESTED) is True
-        ):
+        if newly_merged and event.identity is not None and isinstance(metadata, dict):
             owner, repo, number = event.identity
-            await subscribe_merged_thread(
-                thread_id,
-                owner=owner,
-                repo=repo,
-                number=number,
-                sha=event.pull_request.merge_commit_sha or "",
-                metadata=metadata if isinstance(metadata, dict) else {},
-            )
+            if metadata.get(ROLLOUT_CHECK_REQUESTED) is True:
+                await subscribe_merged_thread(
+                    thread_id,
+                    owner=owner,
+                    repo=repo,
+                    number=number,
+                    sha=event.pull_request.merge_commit_sha or "",
+                    metadata=metadata,
+                )
+            else:
+                await ask_to_monitor_rollout(
+                    thread_id,
+                    owner=owner,
+                    repo=repo,
+                    number=number,
+                    metadata=metadata,
+                    sha=event.pull_request.merge_commit_sha or "",
+                )
 
 
 async def refresh_thread_github_token_after_401(thread_id: str, email: str) -> str | None:
