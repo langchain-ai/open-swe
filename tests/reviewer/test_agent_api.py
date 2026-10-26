@@ -203,6 +203,51 @@ async def test_a_report_is_recorded_once_however_often_it_arrives(
     settled.assert_awaited_once()
 
 
+@pytest.mark.usefixtures("registry_db")
+async def test_a_report_whose_reply_was_not_kept_holds_up_nothing_behind_it(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The report is answered and its key given up, so a later delivery records it
+    rather than waiting out another delivery's claim."""
+    from unittest.mock import AsyncMock
+
+    from runtime_api.loop import SETTLE_REVIEW_CHECK
+    from runtime_api.operations import RunRequest
+    from runtime_api.reports import Reports, ReportsTaken, item
+
+    from openswe.agent_api import agent
+    from openswe.agent_api import graph as graph_module
+    from openswe.agent_api.graph import RemoteGraph
+    from openswe.agent_api.report_receipts import ReportReceipts
+    from openswe.sandboxes.tool_runtime import ToolSurface
+
+    async def never_planned(config: object, surface: ToolSurface) -> None:
+        raise AssertionError("A report never plans the run")
+
+    settled = AsyncMock()
+    monkeypatch.setattr(graph_module, "settle_review_check", settled)
+    kept = ReportReceipts.record
+    monkeypatch.setattr(
+        ReportReceipts, "record", AsyncMock(side_effect=[RuntimeError("database went away")])
+    )
+    graph = RemoteGraph("agent", never_planned, agent.AgentParts())
+    run = RUN.model_copy(update={"assistant_id": "agent"})
+    batch = Reports(
+        items=[item(SETTLE_REVIEW_CHECK, RunRequest(run_id="run-1"), key="run-1:settle", trace={})]
+    ).model_dump(mode="json")
+
+    async def deliver() -> ReportsTaken:
+        return ReportsTaken.model_validate(await graph.api(run, "reports", batch))
+
+    assert await deliver() == ReportsTaken(replies=[{}])
+    monkeypatch.setattr(ReportReceipts, "record", kept)
+    assert await deliver() == ReportsTaken(replies=[{}])
+    assert await deliver() == ReportsTaken(replies=[{}])
+
+    # Done again only by the delivery after the reply was lost, then never again.
+    assert settled.await_count == 2
+
+
 async def test_a_runs_tool_and_shell_calls_never_plan_it_and_read_its_settings(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

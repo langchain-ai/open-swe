@@ -1085,7 +1085,7 @@ class TokenRun:
                 return ReportsTaken(replies=replies, refused=f"{type(exc).__name__}: {exc}")
             reply = _json_object.validate_python(answered)
             if claim is not None:
-                await receipts.record(claim, reply)
+                await receipts.keep(claim, item.key, reply)
             replies.append(reply)
         return ReportsTaken(replies=replies)
 
