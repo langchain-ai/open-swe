@@ -1,1 +1,2 @@
 967 0a0aa1f2a225b86f3554ed6847d39375e679ba8c feat(browser): browser use on Stagehand's facade tools, with simple sessions
+1016 7ae171adb484fea7f9137b08abc7f9f957ecaa4f feat(browser): browser_handoff hands the browser to the user and notifies the thread when it's back, in Python and TypeScript
