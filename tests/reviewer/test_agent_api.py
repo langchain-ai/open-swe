@@ -293,6 +293,51 @@ async def test_a_report_is_recorded_once_however_often_it_arrives(
     settled.assert_awaited_once()
 
 
+@pytest.mark.usefixtures("registry_db")
+async def test_a_report_whose_reply_was_not_kept_holds_up_nothing_behind_it(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The report is answered and its key given up, so a later delivery records it
+    rather than waiting out another delivery's claim."""
+    from unittest.mock import AsyncMock
+
+    from runtime_api.loop import SETTLE_REVIEW_CHECK
+    from runtime_api.operations import RunRequest
+    from runtime_api.reports import Reports, ReportsTaken, item
+
+    from openswe.agent_api import agent
+    from openswe.agent_api import graph as graph_module
+    from openswe.agent_api.graph import RemoteGraph
+    from openswe.agent_api.report_receipts import ReportReceipts
+    from openswe.sandboxes.tool_runtime import ToolSurface
+
+    async def never_planned(config: object, surface: ToolSurface) -> None:
+        raise AssertionError("A report never plans the run")
+
+    settled = AsyncMock()
+    monkeypatch.setattr(graph_module, "settle_review_check", settled)
+    kept = ReportReceipts.record
+    monkeypatch.setattr(
+        ReportReceipts, "record", AsyncMock(side_effect=[RuntimeError("database went away")])
+    )
+    graph = RemoteGraph("agent", never_planned, agent.AgentParts())
+    run = RUN.model_copy(update={"assistant_id": "agent"})
+    batch = Reports(
+        items=[item(SETTLE_REVIEW_CHECK, RunRequest(run_id="run-1"), key="run-1:settle", trace={})]
+    ).model_dump(mode="json")
+
+    async def deliver() -> ReportsTaken:
+        return ReportsTaken.model_validate(await graph.api(run, "reports", batch))
+
+    assert await deliver() == ReportsTaken(replies=[{}])
+    monkeypatch.setattr(ReportReceipts, "record", kept)
+    assert await deliver() == ReportsTaken(replies=[{}])
+    assert await deliver() == ReportsTaken(replies=[{}])
+
+    # Done again only by the delivery after the reply was lost, then never again.
+    assert settled.await_count == 2
+
+
 async def test_a_runs_tool_and_shell_calls_never_plan_it_and_read_its_settings(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -488,6 +533,40 @@ async def test_reviewer_tools_get_a_github_token_on_a_replica_that_did_not_prepa
         await session.rejoin_preparation(None)
 
     assert await resolve_thread_github_token(config) == "ghs_reviewer"
+
+
+@pytest.mark.parametrize("additional", [True, {"type": "string"}, False, None])
+async def test_operation_respects_open_tool_argument_schemas(additional: JsonValue) -> None:
+    from langchain_core.tools import StructuredTool
+    from runtime_api.operations import RunOperation
+
+    from openswe.agent_api.graph import RunSession
+    from openswe.sandboxes.tool_runtime import ToolSurface
+
+    schema: dict[str, JsonValue] = {"type": "object", "properties": {}}
+    if additional is not None:
+        schema["additionalProperties"] = additional
+
+    async def homebase(**arguments: JsonValue) -> str:
+        return json.dumps(arguments)
+
+    tool = StructuredTool.from_function(
+        coroutine=homebase, name="homebase", description="Homebase tool", args_schema=schema
+    )
+    session = RunSession(ToolSurface(tools={tool.name: tool}), {}, None, started_here=True)
+    arguments: dict[str, JsonValue] = {"commit": "abc123"}
+
+    result = await session.operation(
+        RunOperation(name=tool.name, arguments=arguments, request_id="call-1")
+    )
+
+    if additional is True or isinstance(additional, dict):
+        assert result.status == "success"
+        assert isinstance(result.content, str)
+        assert json.loads(result.content) == arguments
+    else:
+        assert result.status == "error"
+        assert result.content == "Unexpected arguments for homebase: commit"
 
 
 def test_run_token_round_trips_the_signed_run() -> None:

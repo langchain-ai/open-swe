@@ -232,6 +232,8 @@ async function loadPrDetails(
 
 export interface SessionUser {
   login: string
+  /** How the server labels this user's messages; empty until they have a name. */
+  display_name?: string
   email: string | null
   avatar_url: string | null
   user_id?: string | null

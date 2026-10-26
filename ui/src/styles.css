@@ -36,6 +36,13 @@ body.version-mismatch {
     }
 }
 
+/* Macaw's stack plus `system-ui`. On Linux without any named family, generic
+   `sans-serif` can resolve to nothing, leaving Noto Color Emoji as the first
+   installed font, which then draws every space and digit. */
+@theme {
+    --font-sans: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", "Noto Sans", Arial, system-ui, sans-serif, "Apple Color Emoji", "Segoe UI Emoji", "Segoe UI Symbol", "Noto Color Emoji";
+}
+
 @theme inline {
     --font-heading: var(--font-sans);
     /* Duty-cycled indicator animation: long holds with stepped ramps, so the

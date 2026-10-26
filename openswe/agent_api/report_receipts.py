@@ -7,6 +7,8 @@ once it has, so a later delivery of the key answers with that reply instead. A
 claim whose delivery died is taken over once it is older than any delivery runs.
 """
 
+import asyncio
+import logging
 from dataclasses import dataclass
 from datetime import datetime, timedelta
 from typing import Final
@@ -20,6 +22,8 @@ from sqlalchemy.orm import Mapped, mapped_column
 from openswe.database import postgres
 from openswe.database.orm import NOW, Base
 from openswe.users.models import User
+
+logger = logging.getLogger(__name__)
 
 # A delivery answers within its call's timeout, or the run sends it again.
 _CLAIM_LEASE: Final = timedelta(minutes=10)
@@ -104,6 +108,24 @@ class ReportReceipts:
         async with postgres.session() as session:
             await session.execute(
                 update(ReportReceipt).where(ReportReceipt.id == claim.id).values(reply=reply)
+            )
+
+    async def keep(self, claim: Claimed, key: str, reply: dict[str, JsonValue]) -> None:
+        """Keep ``reply`` as what ``key`` answered, or else give the key up.
+
+        The report is recorded either way. A key left claimed would hold every report
+        behind it until the lease runs out, and then be recorded again anyway; given
+        up, only a delivery sent again after this one's answer was lost records it again.
+        """
+        try:
+            await self.record(claim, reply)
+        except BaseException as exc:
+            await asyncio.shield(self.release(claim))
+            if not isinstance(exc, Exception):
+                raise
+            logger.exception(
+                "An MDA report's reply was not kept; its key was given up",
+                extra={"agent_thread_id": self.thread_id, "report_key": key},
             )
 
     async def release(self, claim: Claimed) -> None:

@@ -23,6 +23,7 @@ from deepagents.backends.protocol import SandboxBackendProtocol
 from pydantic import BaseModel, ConfigDict, JsonValue
 from runtime_api.operations import PullRequestHead
 
+from rt.backend import Run, RunLocal
 from rt.box_script import BoxScript
 
 logger = logging.getLogger(__name__)
@@ -62,11 +63,10 @@ class _Observed:
 
 
 class TurnGit:
-    """One turn's git evidence, gathered off the path of the run's calls."""
+    """One turn's git evidence, gathered off the path of the run's calls; each run has its
+    own (``turn_git``)."""
 
-    def __init__(self, files: SandboxBackendProtocol | None = None) -> None:
-        # The thread's files when they are not in the run's box, such as a bridged machine's.
-        self._files = files
+    def __init__(self) -> None:
         self._script: BoxScript | None = None
         self._box: SandboxBackendProtocol | None = None
         self._root = ""
@@ -76,9 +76,9 @@ class TurnGit:
         self._changed_at: int | None = None
         self._observed: list[_Observed] = []
 
-    def start(self, box: object, root: object) -> None:
-        """Fingerprint the checkouts under ``root`` as the turn starts, in the background."""
-        files = self._files or box
+    def start(self, files: object, root: object) -> None:
+        """Fingerprint the checkouts under ``root`` in the thread's ``files`` as the turn
+        starts, in the background."""
         self._observed = []
         self._changed_at = None
         if not isinstance(files, SandboxBackendProtocol) or not isinstance(root, str) or not root:
@@ -157,3 +157,11 @@ class TurnGit:
         except Exception:
             logger.warning("Could not fingerprint the turn's checkouts", exc_info=True)
             return None
+
+
+_TURNS: Final = RunLocal(TurnGit)
+
+
+def turn_git(run: Run) -> TurnGit:
+    """The git evidence of the turn ``run`` is playing."""
+    return _TURNS.get(run)

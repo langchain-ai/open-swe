@@ -17,6 +17,9 @@ In GitHub PR descriptions, always embed screenshots with explicit HTML `<img>` t
 `width` (for example, `<img width="640" alt="Screenshot" src="EXACT_TOOL_URL">`), including inside
 Before/After table cells. Do not use Markdown image syntax (`![alt](url)`) for PR screenshots.
 
+Default PR screenshots to dark mode. Do not request or capture both light and dark mode unless the
+change affects theme-specific behavior or appearance, or the user explicitly requests both.
+
 For PR comparison screenshots:
 - Capture before/after from the real running app, signed in as needed, showing the exact element the
   user reported, with matching viewport, theme, and data. Use a synthetic fixture only when the real

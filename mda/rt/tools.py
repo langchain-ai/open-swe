@@ -42,7 +42,7 @@ from rt.backend import (
     namespace,
     reported_call,
 )
-from rt.git_evidence import TurnGit
+from rt.git_evidence import turn_git
 
 logger = logging.getLogger(__name__)
 
@@ -124,6 +124,20 @@ def _content(content: str | list[JsonValue]) -> str | list[str | dict]:
     return [block for block in content if isinstance(block, str | dict)]
 
 
+def _result(answer: OperationResult, tool_call_id: str, name: str) -> ToolMessage | Command:
+    message = ToolMessage(
+        content=_content(answer.content),
+        status=answer.status,
+        artifact=answer.artifact,
+        tool_call_id=tool_call_id,
+        name=name,
+        id=answer.message_id,
+    )
+    if not answer.state:
+        return message
+    return Command(update={"messages": [message], STATE_KEY: answer.state})
+
+
 async def cited(
     backend: OpenSweBackend, name: str, arguments: Mapping[str, object], result: ToolMessage
 ) -> ToolMessage:
@@ -144,108 +158,75 @@ async def cited(
     return result.model_copy(update={"content": _content(reply.content)})
 
 
-class Operations:
-    """The run's operations as its tools: each call sends its arguments to the backend
-    and turns the answer into the tool's result and state updates.
-
-    An incident run's calls also cite each result as evidence (``cites_evidence``).
-    The pull requests an operation opens or finds count toward the turn's git evidence.
-    """
-
-    def __init__(self, backend: OpenSweBackend, git: TurnGit, *, cites_evidence: bool = False):
-        self._backend = backend
-        self._git = git
-        self._cites_evidence = cites_evidence
-
-    def tool(self, spec: OperationSpec) -> StructuredTool:
-        async def operate(runtime: ToolRuntime, **arguments: JsonValue) -> ToolMessage | Command:
-            return await self.run(spec, arguments, runtime)
-
-        return StructuredTool.from_function(
-            coroutine=operate,
-            name=spec.name,
-            description=spec.description,
-            args_schema=spec.parameters,
-        )
-
-    async def run(
-        self, spec: OperationSpec, arguments: Mapping[str, JsonValue], runtime: ToolRuntime
-    ) -> ToolMessage | Command:
-        """Call ``spec``'s operation with ``arguments``, for one tool call.
-
-        Code mode calls tools directly, past the agent's tool-call chain that reports each
-        call and cites it as incident evidence, so a call it makes does both itself, under
-        the code mode call that ran it.
-        """
-        outer = reported_call()
-        if outer is None or outer == runtime.tool_call_id:
-            return await self._operate(spec, arguments, runtime, runtime.tool_call_id or "")
-        tool_call_id = f"{outer}:{spec.name}:{uuid4().hex[:8]}"
-        report = tool_report(
-            runtime.state, name=spec.name, arguments=arguments, tool_call_id=tool_call_id
-        )
-        outbox = self._backend.outbox
-        outbox.started(report)
-        try:
-            result = await self._operate(spec, arguments, runtime, tool_call_id)
-        except Exception as exc:
-            failure = ToolMessage(
-                content=f"{type(exc).__name__}: {exc}", tool_call_id=tool_call_id, status="error"
-            )
-            outbox.finished(report, failure)
-            raise
-        message = result if isinstance(result, ToolMessage) else _answer(result, tool_call_id)
-        if self._cites_evidence:
-            message = await cited(self._backend, spec.name, arguments, message)
-        outbox.finished(report, message)
-        if isinstance(result, ToolMessage):
-            return message
-        return Command(update={**_update(result), "messages": [message]})
-
-    async def _operate(
-        self,
-        spec: OperationSpec,
-        arguments: Mapping[str, JsonValue],
-        runtime: ToolRuntime,
-        tool_call_id: str,
-    ) -> ToolMessage | Command:
-        request = _reading(spec, runtime.state).model_copy(
-            update={
-                "run_id": run_id(),
-                "arguments": dict(arguments),
-                "request_id": tool_call_id,
-                "grant": self._backend.grant(spec),
-            }
-        )
-        started = time.time_ns()
-        try:
-            answer = await call(self._backend, OPERATION, request, timeout=_seconds(arguments))
-        except BackendTimeoutError:
-            logger.warning("The backend did not answer an operation", exc_info=True)
-            return ToolMessage(content=_TIMED_OUT, tool_call_id=tool_call_id, status="error")
-        except BackendUnavailableError:
-            logger.warning("The backend could not complete an operation")
-            return ToolMessage(content=_UNREACHABLE, tool_call_id=tool_call_id, status="error")
-        if answer.sandbox_unreachable:
-            raise SandboxGoneError(f"The thread's sandbox did not answer {spec.name}")
-        for event in answer.events:
-            runtime.stream_writer(event)
-        self._git.found_pull_requests(answer.pull_requests, started)
-        return _result(answer, tool_call_id, spec.name)
-
-
-def _result(answer: OperationResult, tool_call_id: str, name: str) -> ToolMessage | Command:
-    message = ToolMessage(
-        content=_content(answer.content),
-        status=answer.status,
-        artifact=answer.artifact,
-        tool_call_id=tool_call_id,
-        name=name,
-        id=answer.message_id,
+async def _operate(
+    backend: OpenSweBackend,
+    spec: OperationSpec,
+    arguments: Mapping[str, JsonValue],
+    runtime: ToolRuntime,
+    tool_call_id: str,
+) -> ToolMessage | Command:
+    request = _reading(spec, runtime.state).model_copy(
+        update={
+            "run_id": run_id(),
+            "arguments": dict(arguments),
+            "request_id": tool_call_id,
+            "grant": backend.grant(spec),
+        }
     )
-    if not answer.state:
+    started = time.time_ns()
+    try:
+        answer = await call(backend, OPERATION, request, timeout=_seconds(arguments))
+    except BackendTimeoutError:
+        logger.warning("The backend did not answer an operation", exc_info=True)
+        return ToolMessage(content=_TIMED_OUT, tool_call_id=tool_call_id, status="error")
+    except BackendUnavailableError:
+        logger.warning("The backend could not complete an operation")
+        return ToolMessage(content=_UNREACHABLE, tool_call_id=tool_call_id, status="error")
+    if answer.sandbox_unreachable:
+        raise SandboxGoneError(f"The thread's sandbox did not answer {spec.name}")
+    for event in answer.events:
+        runtime.stream_writer(event)
+    turn_git(backend.run).found_pull_requests(answer.pull_requests, started)
+    return _result(answer, tool_call_id, spec.name)
+
+
+async def run_operation(
+    backend: OpenSweBackend,
+    spec: OperationSpec,
+    arguments: Mapping[str, JsonValue],
+    runtime: ToolRuntime,
+    *,
+    cites_evidence: bool = False,
+) -> ToolMessage | Command:
+    """Call ``spec``'s operation with ``arguments``, for one tool call.
+
+    Code mode calls tools directly, past the agent's tool-call chain that reports each
+    call and cites it as incident evidence, so a call it makes does both itself, under
+    the code mode call that ran it.
+    """
+    outer = reported_call()
+    if outer is None or outer == runtime.tool_call_id:
+        return await _operate(backend, spec, arguments, runtime, runtime.tool_call_id or "")
+    tool_call_id = f"{outer}:{spec.name}:{uuid4().hex[:8]}"
+    report = tool_report(
+        runtime.state, name=spec.name, arguments=arguments, tool_call_id=tool_call_id
+    )
+    backend.outbox.started(report)
+    try:
+        result = await _operate(backend, spec, arguments, runtime, tool_call_id)
+    except Exception as exc:
+        failure = ToolMessage(
+            content=f"{type(exc).__name__}: {exc}", tool_call_id=tool_call_id, status="error"
+        )
+        backend.outbox.finished(report, failure)
+        raise
+    message = result if isinstance(result, ToolMessage) else _answer(result, tool_call_id)
+    if cites_evidence:
+        message = await cited(backend, spec.name, arguments, message)
+    backend.outbox.finished(report, message)
+    if isinstance(result, ToolMessage):
         return message
-    return Command(update={"messages": [message], STATE_KEY: answer.state})
+    return Command(update={**_update(result), "messages": [message]})
 
 
 def _answer(result: Command, tool_call_id: str) -> ToolMessage:
@@ -262,3 +243,17 @@ def _answer(result: Command, tool_call_id: str) -> ToolMessage:
 
 def _update(result: Command) -> dict[str, object]:
     return dict(result.update) if isinstance(result.update, Mapping) else {}
+
+
+def operation_tool(
+    spec: OperationSpec, backend: OpenSweBackend, *, cites_evidence: bool = False
+) -> StructuredTool:
+    async def operate(runtime: ToolRuntime, **arguments: JsonValue) -> ToolMessage | Command:
+        return await run_operation(backend, spec, arguments, runtime, cites_evidence=cites_evidence)
+
+    return StructuredTool.from_function(
+        coroutine=operate,
+        name=spec.name,
+        description=spec.description,
+        args_schema=spec.parameters,
+    )
