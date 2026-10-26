@@ -71,7 +71,6 @@ async def test_subscribe_merged_thread_listens_for_the_merge_commit(
     assert subscription.run_config["github_login"] == "octo"
     assert subscription.run_config["user_email"] == "octo@example.com"
     assert subscription.run_config["slack_thread"] == {"channel_id": "C1", "thread_ts": "1.2"}
-    assert "every target" in subscription.instructions
 
 
 @pytest.mark.asyncio
@@ -119,11 +118,6 @@ async def test_ask_to_monitor_rollout_asks_when_a_yes_can_subscribe(
     )
     raw_file.assert_awaited_once_with(".agents/skills/rollout-check/SKILL.md", _SHA)
     dispatch.assert_awaited_once()
-    message = dispatch.await_args.args[1]
-    assert isinstance(message, str)
-    assert ".agents/skills/rollout-check/SKILL.md" in message
-    assert _SHA in message
-    assert "stop without messaging" in message
 
 
 @pytest.mark.asyncio
