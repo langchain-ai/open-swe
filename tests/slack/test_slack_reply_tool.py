@@ -20,6 +20,7 @@ def _patch_slack_side_effects(monkeypatch: pytest.MonkeyPatch) -> None:
 
     monkeypatch.setattr(slack_reply_tool, "slack_thread_mutation_lock", mutation_lock)
     monkeypatch.setattr(slack_reply_tool, "restore_slack_thinking_status", AsyncMock())
+    monkeypatch.setattr(slack_reply_tool, "remove_earlier_feedback", AsyncMock())
 
 
 class _Threads:
@@ -372,6 +373,7 @@ async def test_only_final_reply_has_feedback_for_its_run(
             "run_id": "run-1",
             "rating": "down",
         }
+    slack_reply_tool.remove_earlier_feedback.assert_awaited_once_with("C1", "1.0", "2.0")
     assert blocks[0] == {"type": "markdown", "text": "Answer"}
     if options:
         assert blocks[1]["type"] == "actions"
