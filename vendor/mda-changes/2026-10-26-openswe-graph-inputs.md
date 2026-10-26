@@ -19,7 +19,7 @@ Open SWE's inputs are the graph a run plays and where its workers report, so a p
 
 ## Why
 
-MDA ran the factory and `create_deep_agent` on every graph access. In Open SWE's production deployment that took about 2.1s per run and 100–500ms per `/threads/{id}/state` read, dozens per second.
+MDA ran the factory and `create_deep_agent` on every graph access: about 2.1s per run in Open SWE's production deployment. `/threads/{id}/state` reads, dozens per second, took only 100–500ms because they built the wrong graph; built correctly, each would have cost a run's compile.
 
 Reads had no run context, so the factory built them a different graph from the run's. It lacked code mode's state, the run's skills, subagents and tools, so LangGraph read each checkpoint through a graph with other channels than the one that wrote it.
 
