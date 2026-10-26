@@ -442,6 +442,35 @@ UI                         Coordinator               Backend
 指标：`resume.armed`、`resume.succeeded`、`resume.rejected`、`resume.timed_out`、
 `resume.wait_ms`（直方图）、`proxy.aborted_on_exit`。
 
+### 重复实测
+
+套件每个场景每次只写一份指标文件，重复跑会互相覆盖。聚合成成功率 / 分位说明用的三个脚本放在
+`artifacts/network-recovery-p95/`（`artifacts/` 不入库，只在本地保留）：
+
+- `run-round.ps1`：跑单个场景的一轮，把该轮 `backend-killed.json` / `renderer-offline.json` /
+  `backend-frozen.json` 与 `summary.json` 拷到 `<Scenario>/round-N/`；跑之前先清空
+  `artifacts/network-recovery-e2e/`，**没有指标的轮次会记成失败**，不会被旧数据顶替；
+- `run-all.ps1`：按场景顺序批量跑（kill → offline → frozen）；
+- `aggregate.cjs`：按场景读各轮结果，输出 `aggregate.json`（成功率 + mean/p50/p95/min/max，
+  最近秩分位）。
+
+复现 kill 20 轮：
+
+```powershell
+$round = "D:\agent\open-swe\artifacts\network-recovery-p95\run-round.ps1"
+6..20 | % { & $round -Scenario kill -Round $_ -Grep "killed backend" }
+node D:\agent\open-swe\artifacts\network-recovery-p95\aggregate.cjs
+```
+
+（前 5 轮已存在，上面从 6 开始续跑；完整重跑则 `1..20`。）
+
+注意分位方法的边界：样本数 < 20 时 nearest-rank 的 p95 等于最大值，不要把它当成
+「95% 的请求都在此以内」。
+
+补充一条与耗时无关的可观测性缺口：kill 第 16 次暴露的「chain 残留」在日志里只有一个
+**缺失**的信号（没有 `released`），没有正向告警。修复后 chain 在 `inflight` 超时会以
+`inflight-timeout` 释放，`complete()` 的 `no-chain` 也会单独记录（见 §9「inflight 链的回收」）。
+
 ## 11. 灰度与回滚
 
 - 开关：`OPEN_SWE_NETWORK_RESUME=0|1`（默认 0），桌面端读进程环境；
@@ -590,6 +619,103 @@ stub 后端 `/ok` 先 503 再 200，断言 chain 从 `waiting` 走到 `dispatchi
 | 渲染层离线（CDP） | 离线提示 8ms、恢复提示 31ms；本地 run 不受影响；0 条恢复链 |
 | 后端 kill（run 中途 `os._exit`） | 断链后 **58ms** 建链；**3.1s** 后端重启并派发续跑；**3.9s** 续跑 run 启动；**9.7s** 续跑输出可见；**9.2s** chain 以 `completed` 释放；2 个 run（1 个 resume）、1 条用户消息、隐藏续跑不可见 |
 | 后端冻结 64s（`NtSuspendProcess`） | 静默 63.9s 后看门狗建链（60s 静默 + 5s 轮询），解冻后约 0.5s 以 `taken-over` 释放；1 个 run、0 个重复 run；run 正常完成 |
+
+上表每格是一次样本。2026-10-26 在同一套件上重复跑出成功率与分位耗时
+（脚本见 §10「重复实测」）。
+
+### 重复实测：成功率与分位耗时（2026-10-26）
+
+Windows 11，同一套 Playwright 套件（真实 Electron + toy 后端），逐轮独立进程：
+
+- **kill 20 轮**（脚本第 1–5 轮 + 追加的 6–20 轮）；
+- **renderer-offline 5 轮**；
+- **frozen 5 轮**。
+
+判定口径比「Playwright 通过」更严，一轮算作恢复成功需同时满足：套件通过、`releaseOutcome`
+符合该场景预期、续跑 run 恰好 1 个、隐藏续跑不可见、转录里只有 1 条用户消息。
+分位用最近秩法（`ceil(p × n)`）。耗时均为从**崩溃 / 冻结发生时刻**起算。
+
+| 场景 | 成功 | 成功率 |
+|---|---|---|
+| 后端 kill（run 中途） | 19 / 20 | **95%** |
+| 渲染层离线 | 5 / 5 | 100% |
+| 后端冻结 64s | 5 / 5 | 100% |
+
+**后端 kill 的耗时（n=19，ms）**
+
+| 指标 | mean | p50 | p95 | min | max |
+|---|---|---|---|---|---|
+| 检测到断链 | 100.4 | 84.9 | 387.8 | 72.9 | 387.8 |
+| 后端重启并派发续跑 | 3221.4 | 3124.8 | 3544.5 | 3081.9 | 3544.5 |
+| 续跑 run 启动 | 4097.2 | 4051.9 | 4539.9 | 3807.6 | 4539.9 |
+| **续跑输出可见** | **9767.3** | **9788.9** | **10184.1** | 9413.1 | 10184.1 |
+| chain 以 `completed` 释放 | 9438.5 | 9396.1 | 9908.4 | 9145 | 9908.4 |
+
+**其余场景（ms）**
+
+| 场景 | 指标 | mean | p50 | p95 | min | max |
+|---|---|---|---|---|---|---|
+| renderer-offline（n=5） | 离线提示出现 | 9.8 | 10 | 11 | 8 | 11 |
+| renderer-offline（n=5） | 恢复提示出现 | 42.8 | 40 | 51 | 37 | 51 |
+| frozen（n=5） | 看门狗建链（冻结→`waiting`） | 63866.4 | 63804 | 64123 | 63655 | 64123 |
+
+读法：
+
+- kill 路径的耗时几乎全部来自**固定节奏**——探针失败判定 + `uv run langgraph dev`
+  冷启动（`probeToDispatchMs` 稳定在 3.0–3.5s）。p50 与 p95 只差 0.4s，说明它不是随机抖动。
+  user 感知的「恢复多久」应看 `continuationVisibleMs`：**p50 9.8s、p95 10.2s**。
+- frozen 的 63.9s ≈ `STALL_QUIET_MS`(60s) + 检查轮询(5s)，5 次全落在 63.7–64.1s，方差可忽略。
+- 检测时延的 p95（387.8ms）明显高于 p50（84.9ms）：异常那一次是进程退出通知被系统调度推迟，
+  不影响后续派发（该轮 `restartedAndDispatchedMs` 仍在 3.1s 量级）。
+- 只有 5 个样本的场景，nearest-rank 的 p95 就等于 max，仅作「最坏观测」看待。
+
+**kill 第 16 次的失败——恢复本身完成了，但状态机没有收敛**：
+
+- 现象：断链 58ms 级检测正常，3.1s 派发 `outcome: 'dispatched'`，chain 进入 `inflight`，
+  渲染层拿到 `Continuation done` 并正常显示续跑输出；但主进程始终没有
+  `network resume released` 日志，chain 停在 `inflight`，套件在断言 `chain-removed` 事件时失败。
+- 判断依据：`grep "network resume released"` 在该轮主进程日志中为 0；相邻 19 轮均恰好 1 次。
+  因此不是测试竞态——是 `complete()` 未被调用或未命中该 chain。
+- `complete()` 唯一入口是渲染层 `useStream.onCompleted`（`AgentStreamProvider.tsx`），
+  它用 `pool().entries.find(...)?.threadId` 取线程 id 再调 IPC；`null` 时静默跳过。
+  这一失败模式是**恢复完成但 chain 残留**：用户看到答案是正常的，但该线程的
+  `networkStatus` 状态、队列 hold 与后续 `arm` 去重都依赖 chain 被移除，残留会让
+  同一线程的后续恢复行为变得不可预测。
+- 已修复（2026-10-26，见下节「inflight 链的回收」）。修复前 1/20 = 5% 的残留率，
+  修复后重跑 3 轮均为 `completed`。
+
+### inflight 链的回收
+
+根因是 `complete()` 只有一个调用点，渲染层 `useStream.onCompleted`：
+
+```ts
+const threadId = pool().entries.find((e) => e.id === entry.id)?.threadId
+if (threadId) void networkResume?.complete({ threadId }).catch(() => {})
+```
+
+`threadId` 为 `null` 时**整段静默跳过**——主进程收不到 `complete`，chain 永远停在
+`inflight`。而 `arm()` 对已存在的 chain 直接返回，所以该线程后续任何恢复都会被这条死链挡住；
+`net` 状态与队列 hold 也一直挂在这个线程上。
+
+三层修复：
+
+1. **主进程兜底超时**（`network-resume.cjs`）：新增 `inflightTimeoutMs`（默认 2 分钟）。
+   `notifyWorking` 把 `dispatching → inflight` 时记 `chain.dispatchedAt`，`expireInflight()`
+   在下一次 tick 把超时的链以 `inflight-timeout` 释放。`ensureMonitor()` 现在在
+   「有 waiting 链**或** inflight 链」时都继续运行；tick 只有在存在 waiting 链时才做网络探测
+   （inflight 链不需要 `/ok`，白探只会制造无关日志）。
+   续跑 run 本身不受影响——释放的只是协调器的记账。
+2. **渲染层不再静默丢弃**（`AgentStreamProvider.tsx`）：`threadId` 优先取 pool 中绑定的条目，
+   取不到再回退 `stream.threadId`（`useStream` 的返回值，rekey 还没落地时仍可用）；
+   两条路径都失败时记一条 `console.warn`，而不是 `.catch(() => {})`。
+3. **可观测**：`complete()` 在找不到 chain 时记 `network resume complete { outcome: "no-chain" }`，
+   区分「迟到的重复完成」和「压根没收到完成」。
+
+参数化：`inflightTimeoutMs` 可在测试里覆盖；默认 2 分钟对 toy 后端
+（续跑约 10s）与真实本地 run 都留足余量，且远小于 `waitingTimeoutMs`（10 分钟）。
+
+单测覆盖：inflight 链在窗口内不会被释放、超时后以 `inflight-timeout` 释放且不重发续跑、
+不影响其它线程的链。
 
 修复前的 kill 场景在 120.6s 内 `revision=0`、0 条链、0 次续跑。根因是渲染层 arm 的唯一
 触发是 `stream.error`，而 SDK 的 SSE transport（`maxReconnectAttempts=12`，1s→300s）在断链后

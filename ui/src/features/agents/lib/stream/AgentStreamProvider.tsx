@@ -118,8 +118,22 @@ function PooledStream({ entry }: { entry: StreamPoolEntry }) {
     onCompleted: (info) => {
       runTracker.completed(info.reason)
       setIsOffloading(false)
-      const threadId = pool().entries.find((e) => e.id === entry.id)?.threadId
-      if (threadId) void networkResume?.complete({ threadId }).catch(() => {})
+      // Prefer the bound entry, but a rekey that has not landed yet still
+      // knows the thread from the hook it was created with: without this the
+      // chain is never released and the thread keeps its queue held.
+      const threadId =
+        pool().entries.find((e) => e.id === entry.id)?.threadId ??
+        stream.threadId ??
+        null
+      if (threadId) {
+        void networkResume?.complete({ threadId }).catch((error: unknown) => {
+          console.warn("Could not release the network-resume chain", error)
+        })
+      } else {
+        console.warn(
+          "Completed run has no thread id; the network-resume chain, if any, will be released by its timeout"
+        )
+      }
       if (!cloud) return
       if (threadId) {
         void queryClient.invalidateQueries({

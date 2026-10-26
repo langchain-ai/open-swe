@@ -13,6 +13,14 @@ const DEFAULT_PROBE_INTERVAL_MS = 2_000;
 const DEFAULT_PROBE_TIMEOUT_MS = 1_000;
 const DEFAULT_WAITING_TIMEOUT_MS = 10 * 60 * 1_000;
 const DEFAULT_REJECTED_RETRY_MS = 60_000;
+/**
+ * How long a chain may stay `inflight` after its continuation was accepted.
+ * The normal release is the renderer's `complete()` on `onCompleted`; this
+ * bounds the chain when that call never arrives (the renderer could not
+ * resolve the thread id), so the thread is never left with a stale chain that
+ * blocks the next arm and keeps the queue held.
+ */
+const DEFAULT_INFLIGHT_TIMEOUT_MS = 2 * 60 * 1_000;
 /** A single slow /ok response under load must not look like a dead backend. */
 const PROBE_FAILURES_BEFORE_DOWN = 2;
 
@@ -137,6 +145,7 @@ function createNetworkResumeCoordinator(options) {
     probeTimeoutMs = DEFAULT_PROBE_TIMEOUT_MS,
     waitingTimeoutMs = DEFAULT_WAITING_TIMEOUT_MS,
     rejectedRetryMs = DEFAULT_REJECTED_RETRY_MS,
+    inflightTimeoutMs = DEFAULT_INFLIGHT_TIMEOUT_MS,
     schedule = (callback, milliseconds) => {
       const timer = setTimeout(callback, milliseconds);
       timer.unref?.();
@@ -203,6 +212,14 @@ function createNetworkResumeCoordinator(options) {
     return false;
   }
 
+  /** An inflight chain still needs ticks so `expireInflight` can bound it. */
+  function hasInflight() {
+    for (const chain of chains.values()) {
+      if (chain.phase === "inflight") return true;
+    }
+    return false;
+  }
+
   function stopMonitor() {
     if (timer === null) return;
     cancel(timer);
@@ -210,7 +227,7 @@ function createNetworkResumeCoordinator(options) {
   }
 
   function ensureMonitor() {
-    if (!hasWaiting()) {
+    if (!hasWaiting() && !hasInflight()) {
       stopMonitor();
       return;
     }
@@ -226,9 +243,14 @@ function createNetworkResumeCoordinator(options) {
     }
     running = true;
     try {
-      await sampleNetwork();
-      await dispatchWaiting();
-      expireWaiting();
+      // Probing only matters for chains that have yet to dispatch; an inflight
+      // chain just needs its timeout checked.
+      if (hasWaiting()) {
+        await sampleNetwork();
+        await dispatchWaiting();
+        expireWaiting();
+      }
+      expireInflight();
     } catch (error) {
       log("network resume tick failed", { error: String(error) });
     } finally {
@@ -281,6 +303,25 @@ function createNetworkResumeCoordinator(options) {
     }
   }
 
+  /**
+   * The renderer releases an `inflight` chain on `onCompleted`. If that call
+   * never arrives the chain would sit here forever, blocking the next arm for
+   * this thread and keeping the queue held, so bound it. The continuation run
+   * itself keeps running; only the coordinator's bookkeeping is released.
+   */
+  function expireInflight() {
+    const cutoff = now();
+    for (const chain of [...chains.values()]) {
+      if (
+        chain.phase === "inflight" &&
+        chain.dispatchedAt !== null &&
+        cutoff - chain.dispatchedAt >= inflightTimeoutMs
+      ) {
+        remove(chain, "inflight-timeout");
+      }
+    }
+  }
+
   function isStale(chain, ticket) {
     return chain.sendTicket !== ticket || chains.get(chain.threadId) !== chain;
   }
@@ -297,6 +338,7 @@ function createNetworkResumeCoordinator(options) {
       outcome: "pending",
     });
     let result;
+    const dispatchStartedAt = now();
     try {
       result = await resumeRun({
         threadId: chain.threadId,
@@ -350,6 +392,9 @@ function createNetworkResumeCoordinator(options) {
       sendTicket: ticket,
       generation: chain.generation,
       outcome: "dispatched",
+      // Splits "reachable" from "continuation accepted": the coordinator polls
+      // every 2s, so this is what the probe cadence costs on top of the call.
+      elapsedMs: now() - dispatchStartedAt,
     });
     emit({ kind: "chain-updated", threadId: chain.threadId });
   }
@@ -405,6 +450,8 @@ function createNetworkResumeCoordinator(options) {
       firstWaitingAt: now(),
       nextDispatchAt: 0,
       dispatched: false,
+      /** Set when the renderer reports the continuation streaming (`inflight`). */
+      dispatchedAt: null,
     };
     chains.set(threadId, chain);
     log("network resume armed", { threadId, reason, generation: 0 });
@@ -432,14 +479,23 @@ function createNetworkResumeCoordinator(options) {
     if (!chain) return false;
     if (chain.phase === "dispatching") {
       chain.phase = "inflight";
+      chain.dispatchedAt = now();
       emit({ kind: "chain-updated", threadId });
+      // The monitor stops when no chain is waiting; restart it so the inflight
+      // timeout is enforced even if the renderer never reports completion.
+      ensureMonitor();
     }
     return true;
   }
 
   function complete({ threadId } = {}) {
     const chain = chains.get(threadId);
-    if (!chain) return false;
+    if (!chain) {
+      // A late or duplicated completion after the timeout released the chain:
+      // expected, but worth seeing when a turn looks like it never finished.
+      log("network resume complete", { threadId, outcome: "no-chain" });
+      return false;
+    }
     remove(chain, "completed");
     return true;
   }

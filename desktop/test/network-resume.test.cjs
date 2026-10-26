@@ -35,6 +35,7 @@ function harness(options = {}) {
     cancel: (id) => timers.delete(id),
     waitingTimeoutMs: options.waitingTimeoutMs ?? 600_000,
     rejectedRetryMs: options.rejectedRetryMs ?? 60_000,
+    inflightTimeoutMs: options.inflightTimeoutMs ?? 120_000,
   });
   coordinator.onChange((snapshot, change) => changes.push({ snapshot, change }));
   return {
@@ -263,6 +264,45 @@ test("moving to inflight keeps the chain alive", async () => {
   h.coordinator.complete({ threadId: "thread-1" });
   assert.equal(h.chain(), undefined);
   assert.equal(h.changes.at(-1).change.outcome, "completed");
+});
+
+test("an inflight chain the renderer never completed is released by its timeout", async () => {
+  const h = harness({
+    reachable: true,
+    inflightTimeoutMs: 30_000,
+  });
+  h.coordinator.arm({ threadId: "thread-1", reason: "backend-down" });
+  await h.tick();
+  h.coordinator.notifyWorking({ threadId: "thread-1" });
+  assert.equal(h.chain().phase, "inflight");
+
+  // Still inside the window: the continuation is running and must not be
+  // dropped just because no completion arrived yet.
+  h.advance(20_000);
+  await h.tick();
+  assert.equal(h.chain()?.phase, "inflight");
+
+  h.advance(15_000);
+  await h.tick();
+  assert.equal(h.chain(), undefined);
+  assert.equal(h.changes.at(-1).change.outcome, "inflight-timeout");
+  assert.equal(h.resumeCalls.length, 1, "no second continuation was sent");
+});
+
+test("the inflight timeout leaves other threads' chains alone", async () => {
+  const h = harness({ reachable: true, inflightTimeoutMs: 10_000 });
+  h.coordinator.arm({ threadId: "thread-1", reason: "backend-down" });
+  h.coordinator.arm({ threadId: "thread-2", reason: "backend-down" });
+  await h.tick();
+  h.coordinator.notifyWorking({ threadId: "thread-1" });
+
+  h.advance(15_000);
+  await h.tick();
+
+  assert.equal(h.chain("thread-1"), undefined);
+  // Dispatching, not inflight: the inflight deadline is measured from the
+  // renderer reporting the stream back, so another thread's chain is untouched.
+  assert.equal(h.chain("thread-2")?.phase, "dispatching");
 });
 
 test("releases a held turn once the wait window is spent", async () => {
