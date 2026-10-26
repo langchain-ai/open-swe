@@ -6,6 +6,9 @@ timing is ours. Markers in the last human message control the run:
 
     TOY_STREAM_MS=<n>  how long the answer takes to stream (default 12000)
     TOY_CRASH_MS=<n>   kill the process this many ms into the answer
+    TOY_TOOL_MS=<n>    run the toy tool this many ms into the answer; the tool
+                       appends one line to $TOY_TOOL_LOG, so a replayed step
+                       leaves a second line behind
 
 The continuation the desktop's recovery coordinator sends is recognised by its
 envelope sender, so the answer a resumed turn produces is distinguishable from
@@ -35,6 +38,7 @@ from langchain_core.messages import (
     AIMessageChunk,
     BaseMessage,
     HumanMessage,
+    ToolMessage,
 )
 from langchain_core.outputs import (
     ChatGeneration,
@@ -91,6 +95,7 @@ class ToyChatModel(BaseChatModel):
     stream_ms: int = DEFAULT_STREAM_MS
     crash_ms: int | None = None
     resume: bool = False
+    call_tool: bool = False
 
     @property
     def _llm_type(self) -> str:
@@ -117,6 +122,19 @@ class ToyChatModel(BaseChatModel):
         for index, chunk in enumerate(_chunks(self.reply)):
             yield chunk, self._delay(index)
 
+    def _tool_call(self) -> AIMessageChunk:
+        return AIMessageChunk(
+            content="",
+            tool_call_chunks=[
+                {
+                    "name": TOOL_NAME,
+                    "args": "{}",
+                    "id": f"call-{int(time.time() * 1000)}",
+                    "index": 0,
+                }
+            ],
+        )
+
     def _stream(
         self,
         messages: list[BaseMessage],
@@ -142,6 +160,8 @@ class ToyChatModel(BaseChatModel):
             await asyncio.sleep(delay)
             self._tick(index, started)
             yield ChatGenerationChunk(message=AIMessageChunk(content=chunk))
+        if self.call_tool:
+            yield ChatGenerationChunk(message=self._tool_call())
 
     def _generate(
         self,
@@ -156,13 +176,67 @@ class ToyChatModel(BaseChatModel):
             time.sleep(delay)
             self._tick(index, started)
             parts.append(chunk)
-        return ChatResult(
-            generations=[ChatGeneration(message=AIMessage(content="".join(parts)))]
-        )
+        message = AIMessage(content="".join(parts))
+        if self.call_tool:
+            message = AIMessage(
+                content="".join(parts),
+                tool_calls=[
+                    {"name": TOOL_NAME, "args": {}, "id": f"call-{int(time.time() * 1000)}"}
+                ],
+            )
+        return ChatResult(generations=[ChatGeneration(message=message)])
 
 
 class ToyState(TypedDict):
     messages: Annotated[list[BaseMessage], add_messages]
+
+
+TOOL_NAME = "toy_apply_change"
+
+
+def _tool_log() -> str | None:
+    return os.environ.get("TOY_TOOL_LOG")
+
+
+def _apply_change_once() -> str:
+    """The toy's one side effect: append a line, so a replay is countable.
+
+    The line is written *before* the tool returns, so a process that dies
+    between the write and the checkpoint still shows the effect it had. That is
+    the case a continuation has to avoid repeating.
+    """
+    path = _tool_log()
+    if path is None:
+        return "no-op"
+    with open(path, "a", encoding="utf-8") as handle:
+        handle.write(json.dumps({"ts": time.time(), "pid": os.getpid()}) + "\n")
+        handle.flush()
+        os.fsync(handle.fileno())
+    return "applied"
+
+
+async def apply_change(state: ToyState, config: RunnableConfig) -> dict[str, list[BaseMessage]]:
+    last = state["messages"][-1]
+    call = last.tool_calls[0] if isinstance(last, AIMessage) and last.tool_calls else None
+    if call is None:
+        return {}
+    result = _apply_change_once()
+    configurable = config.get("configurable") or {}
+    _log(
+        "tool_start",
+        thread_id=str(configurable.get("thread_id")),
+        tool=call["name"],
+        result=result,
+    )
+    configurable_delay = _marker(_text_of(last), "TOY_TOOL_HOLD_MS") or 0
+    if configurable_delay:
+        await asyncio.sleep(configurable_delay / 1000)
+    _log("tool_end", thread_id=str(configurable.get("thread_id")), tool=call["name"])
+    return {
+        "messages": [
+            ToolMessage(content=result, tool_call_id=str(call["id"])),
+        ]
+    }
 
 
 def _visible(text: str) -> str:
@@ -177,6 +251,7 @@ def _reply_for(text: str) -> tuple[ToyChatModel, str]:
     resume = RESUME_MARKER in text
     stream_ms = _marker(text, "TOY_STREAM_MS")
     crash_ms = _marker(text, "TOY_CRASH_MS")
+    call_tool = _marker(text, "TOY_TOOL_MS") is not None
     if resume:
         task = text.split("<content>", 1)[-1].split("</content>", 1)[0]
         reply = f"Continuation done. Previous task: {_visible(task)[:80]}{TAIL}"
@@ -185,13 +260,33 @@ def _reply_for(text: str) -> tuple[ToyChatModel, str]:
         reply = f"Toy answer for: {_visible(text)[:120]}{TAIL}"
         duration = stream_ms if stream_ms is not None else DEFAULT_STREAM_MS
     return (
-        ToyChatModel(reply=reply, stream_ms=duration, crash_ms=crash_ms, resume=resume),
+        ToyChatModel(
+            reply=reply,
+            stream_ms=duration,
+            crash_ms=crash_ms,
+            resume=resume,
+            call_tool=call_tool,
+        ),
         reply,
     )
 
 
 async def respond(state: ToyState, config: RunnableConfig) -> dict[str, list[BaseMessage]]:
     last = state["messages"][-1]
+    # The turn after a tool result is the model answering, not asking again:
+    # re-issuing the call would loop forever, and answering is what gives a
+    # crash-after-the-side-effect somewhere to happen.
+    if isinstance(last, ToolMessage):
+        # Answered with the same streaming model so a crash can be placed here,
+        # after the side effect, where a replayed step would repeat it.
+        original = _text_of(state["messages"][0])
+        follow_up = ToyChatModel(
+            reply=f"Applied: {last.content}{TAIL}",
+            stream_ms=_marker(original, "TOY_AFTER_MS") or DEFAULT_RESUME_MS,
+            crash_ms=_marker(original, "TOY_AFTER_CRASH_MS"),
+        )
+        answer = await follow_up.ainvoke([*state["messages"], HumanMessage(content="")])
+        return {"messages": [answer]}
     text = _text_of(last)
     model, _ = _reply_for(text)
     configurable = config.get("configurable") or {}
@@ -213,5 +308,21 @@ builder.add_node("agent", respond)
 builder.add_edge(START, "agent")
 builder.add_edge("agent", END)
 graph = builder.compile()
+
+
+def _after_agent(state: ToyState) -> str:
+    last = state["messages"][-1]
+    return "tools" if isinstance(last, AIMessage) and last.tool_calls else END
+
+
+tooled = StateGraph(ToyState)
+tooled.add_node("agent", respond)
+tooled.add_node("tools", apply_change)
+tooled.add_edge(START, "agent")
+# The tool result feeds back into the model, the same loop a real agent runs,
+# so a continuation that replays a step is visible as a second tool call.
+tooled.add_conditional_edges("agent", _after_agent, ["tools", END])
+tooled.add_edge("tools", "agent")
+graph_with_tools = tooled.compile()
 
 _log("imported")

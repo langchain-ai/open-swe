@@ -92,6 +92,8 @@ interface Harness {
   page: Page
   stateRoot: string
   toyLog: string
+  /** One line per toy tool execution: how a replayed step is detected. */
+  toolLog: string
   close: () => Promise<void>
 }
 
@@ -108,6 +110,15 @@ function firstEvent(
   predicate: (event: ToyEvent) => boolean
 ): ToyEvent | undefined {
   return readToyLog(file).find(predicate)
+}
+
+/** One entry per toy tool execution; two entries mean the step was replayed. */
+function readToolLog(file: string): Array<{ ts: number; pid: number }> {
+  if (!existsSync(file)) return []
+  return readFileSync(file, "utf8")
+    .split(/\r?\n/)
+    .filter(Boolean)
+    .map((line) => JSON.parse(line) as { ts: number; pid: number })
 }
 
 function repoOf(stateRoot: string): { home: string; project: string; gitConfig: string } {
@@ -187,11 +198,15 @@ async function startDashboardStub(): Promise<{
   }
 }
 
-async function launch(projectName: string): Promise<Harness> {
+async function launch(
+  projectName: string,
+  { graphConfig = "langgraph.toy.json" } = {}
+): Promise<Harness> {
   const stateRoot = mkdtempSync(join(tmpdir(), `open-swe-nr-${projectName}-`))
   const { home, project, gitConfig } = repoOf(stateRoot)
   const stub = await startDashboardStub()
   const toyLog = join(stateRoot, "toy.jsonl")
+  const toolLog = join(stateRoot, "tool.jsonl")
   const appData = join(home, "AppData", "Roaming")
   const localAppData = join(home, "AppData", "Local")
   const xdg = join(stateRoot, "xdg")
@@ -213,11 +228,12 @@ async function launch(projectName: string): Promise<Harness> {
       GIT_AUTHOR_EMAIL: "e2e@example.com",
       GIT_COMMITTER_NAME: "E2E",
       GIT_COMMITTER_EMAIL: "e2e@example.com",
-      OPEN_SWE_LOCAL_BACKEND_CONFIG: join(fixtures, "langgraph.toy.json"),
+      OPEN_SWE_LOCAL_BACKEND_CONFIG: join(fixtures, graphConfig),
       OPEN_SWE_NETWORK_RESUME: "1",
       OPENAI_API_KEY: "e2e-fake-key",
       PYTHONPATH: [fixtures, process.env.PYTHONPATH].filter(Boolean).join(delimiter),
       TOY_GRAPH_LOG: toyLog,
+      TOY_TOOL_LOG: toolLog,
       UV_CACHE_DIR: join(e2eRoot, ".e2e-tmp", "uv-cache"),
     },
   })
@@ -257,6 +273,7 @@ async function launch(projectName: string): Promise<Harness> {
     page,
     stateRoot,
     toyLog,
+    toolLog,
     close: async () => {
       await quitApplication(app)
       await stub.close()
@@ -384,7 +401,9 @@ async function quitApplication(app: ElectronApplication): Promise<void> {
           "-NoProfile",
           "-NonInteractive",
           "-Command",
-          "Get-CimInstance Win32_Process | Where-Object { $_.CommandLine -match 'langgraph\\.toy\\.json' } | ForEach-Object { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue }",
+          // Any toy config: a backend started from the tools config would
+          // otherwise outlive the app and hang the worker's teardown.
+          "Get-CimInstance Win32_Process | Where-Object { $_.CommandLine -match 'langgraph\\.toy[-.][a-z-]*\\.json' } | ForEach-Object { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue }",
         ],
         { stdio: "pipe" }
       )
@@ -494,10 +513,10 @@ test("a long real outage leaves the local run and its backend alone", async () =
     await watchResume(page)
     // Long enough to still be streaming after the outage; no TOY_CRASH_MS, so
     // the backend has no reason to die on its own.
-    await submitLocalTask(page, "outage probe TOY_STREAM_MS=30000")
+    await submitLocalTask(page, "finish probe TOY_STREAM_MS=25000")
     const threadId = await threadIdFromUrl(page)
     const runStart = await waitForRunStart(toyLog)
-    await expect(page.getByText(/Toy answer for: outage probe/)).toBeVisible({
+    await expect(page.getByText(/Toy answer for: finish probe/)).toBeVisible({
       timeout: 30_000,
     })
 
@@ -512,7 +531,7 @@ test("a long real outage leaves the local run and its backend alone", async () =
     })
     // Long enough to span several backoff steps (1, 2, 4, 8, 16s) while the
     // SDK is still retrying; the run is sized to finish inside this window.
-    await page.waitForTimeout(30_000)
+    await page.waitForTimeout(60_000)
     await cdp.send("Network.emulateNetworkConditions", {
       offline: false,
       latency: 0,
@@ -528,9 +547,12 @@ test("a long real outage leaves the local run and its backend alone", async () =
       })
       .toBeTruthy()
     const runEnd = firstEvent(toyLog, (event) => event.event === "run_end")
-    await expect(page.getByText(/Toy answer for: outage probe/)).toBeVisible({
+    await expect(page.getByText(/Toy answer for: finish probe/)).toBeVisible({
       timeout: 60_000,
     })
+
+    const rendered = await page.evaluate(() => document.body.innerText)
+    console.log("[rendered]", JSON.stringify({ tailCount: (rendered.match(/used by the recovery test./g) ?? []).length, hasHeadline: /Toy answer for: finish probe/.test(rendered) }))
 
     const events = readToyLog(toyLog)
     const runStarts = events.filter(
@@ -556,7 +578,7 @@ test("a long real outage leaves the local run and its backend alone", async () =
     expect(chains).toEqual([])
     await expect(page.getByTestId("user-message")).toHaveCount(1)
 
-    writeMetrics("renderer-outage", {
+    writeMetrics("renderer-outage-finish", {
       offlineAt,
       offlineDurationMs: onlineAt - offlineAt,
       recoveryChainsArmed: chains.length,
@@ -569,6 +591,98 @@ test("a long real outage leaves the local run and its backend alone", async () =
     })
   } finally {
     stopLogging()
+    await harness.close()
+  }
+})
+
+test("a continuation does not run a completed tool a second time", async () => {
+  // The gap the text-only toy leaves: a real run has tools, and a tool that
+  // already ran has a side effect. A continuation that replays the step would
+  // apply it twice, which the previous scenarios could never observe.
+  test.setTimeout(300_000)
+  const harness = await launch("tool-replay", {
+    graphConfig: "langgraph.toy-tools.json",
+  })
+  const { page, toyLog, toolLog } = harness
+  try {
+    await watchResume(page)
+    // The tool applies, then the follow-up answer dies partway through: the
+    // side effect is already on disk but the run never reaches its end, which
+    // is the state a continuation has to handle without applying it again.
+    await submitLocalTask(
+      page,
+      "tool probe TOY_STREAM_MS=1000 TOY_TOOL_MS=1 TOY_AFTER_MS=20000 TOY_AFTER_CRASH_MS=2000"
+    )
+    const threadId = await threadIdFromUrl(page)
+    const firstRunStart = await waitForRunStart(toyLog)
+
+    await expect
+      .poll(() => firstEvent(toyLog, (event) => event.event === "crash"), {
+        timeout: 60_000,
+      })
+      .toBeTruthy()
+    // A restarted process is a new run on the same thread: the continuation.
+    await expect
+      .poll(
+        () =>
+          readToyLog(toyLog).filter(
+            (event) =>
+              event.event === "run_start" &&
+              event.thread_id === threadId &&
+              event.resume === true &&
+              event.pid !== firstRunStart.pid
+          ).length,
+        { timeout: 120_000 }
+      )
+      .toBeGreaterThanOrEqual(1)
+    await expect
+      .poll(
+        () =>
+          firstEvent(
+            toyLog,
+            (event) =>
+              event.event === "run_end" &&
+              event.resume === true &&
+              event.pid !== firstRunStart.pid
+          ),
+        { timeout: 120_000 }
+      )
+      .toBeTruthy()
+    await expect
+      .poll(() => page.evaluate(() => window.openSweDesktop?.networkResume?.snapshot()), {
+        timeout: 60_000,
+      })
+      .toMatchObject({ chains: [] })
+
+    const effects = readToolLog(toolLog)
+    const runStarts = readToyLog(toyLog).filter(
+      (event) => event.event === "run_start" && event.thread_id === threadId
+    )
+    expect(runStarts).toHaveLength(2)
+    // Two runs and no more: the first died, the continuation replaced it. A
+    // third would mean a replayed step.
+    const resumed = runStarts.filter(
+      (event) => event.resume === true && event.pid !== firstRunStart.pid
+    )
+    const released = (await resumeEvents(page)).find(
+      (event) => event.change?.kind === "chain-removed"
+    )
+    writeMetrics("tool-replay", {
+      crashPid: firstRunStart.pid,
+      runs: runStarts.length,
+      resumedRuns: resumed.length,
+      resumedStreamMs: resumed.map((event) => event.stream_ms ?? null),
+      toolExecutions: effects.length,
+      releaseOutcome: released?.change?.outcome ?? null,
+    })
+    // Without the restart this assertion would pass trivially, so the count
+    // above has to hold too: the crash happened, the process came back, and
+    // the step that already ran was not applied a second time.
+    expect(resumed.length).toBeGreaterThanOrEqual(1)
+    expect(effects).toHaveLength(1)
+    expect(effects[0]?.pid).toBe(firstRunStart.pid)
+    expect(released?.change?.outcome).toBe("completed")
+  } finally {
     await harness.close()
   }
 })

@@ -478,6 +478,13 @@ UI                         Coordinator               Backend
 2. `NtSuspendProcess` 冻结后端 20s：解冻后 `phase` 从 `waiting` 回到 `inflight`，不补发；
 3. kill 后端：新进程起来后应补发一次，历史里只有一条提问、一条连续回答。
 
+**带副作用的续跑（`langgraph.toy-tools.json`）**：纯文本的 toy 只能说明「话没丢」，说明不了
+「事没重做」。tool 场景的玩具图多一个 `tools` 节点，工具 `toy_apply_change` 把一行 JSON
+追加到 `$TOY_TOOL_LOG`（`flush` + `fsync` 后才返回，所以进程在写完之后崩掉时这一行已经在盘上）。
+流程：工具生效 → 后续回答流到 2s 时进程被 kill → 续跑。断言续跑确实落在**新 PID** 上
+（否则「只执行一次」这条断言会因为压根没重启而空过）、`TOY_TOOL_LOG` 恰好一行、
+且该行来自被杀的那个进程。
+
 脚本形态与上一轮一致（PowerShell + CDP over `--remote-debugging-port=9222`），
 断言点从「页面文本」改成「`network-resume-snapshot` + 消息数组」。
 
@@ -552,6 +559,12 @@ node D:\agent\open-swe\artifacts\network-recovery-p95\aggregate.cjs
   的情形（`taken-over`），拦不住「已执行完」。这条没有验收测试；修法是 arm 之前先查
   `GET /threads/<id>/state`，`next` 为空就走 `resync` 而不是 `arm`（与 `classifyStall`
   已有的判断一致）。
+
+  **这里说的「重复执行」到底指什么**：续跑是一次新的 run，只带续跑指令、不带原 prompt，
+  重放的是**模型回答**，不是已完成的节点。工具步骤在 LangGraph 检查点里，续跑从检查点
+  往下走，不会重跑已经落盘的工具——`langgraph.toy-tools.json` 那条端到端就是验证这一点
+  （工具副作用恰好一次，见 §9）。真正会浪费的是模型 token 与时间：任务已经做完，却又答了
+  一遍。所以优先级是体验与成本问题，不是数据正确性问题。
 
 ## 13. 分阶段
 
