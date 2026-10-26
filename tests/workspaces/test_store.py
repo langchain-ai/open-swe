@@ -72,6 +72,33 @@ _AWS_RULE: dict[str, JsonValue] = {
         {"tag_value_ids": [_TAG], "proxy_config": {"rules": [{**_AWS_RULE, "enabled": False}]}},
         {"tag_value_ids": [_TAG], "proxy_config": {"rules": [{**_AWS_RULE, "name": "github"}]}},
         {
+            "tag_value_ids": [_TAG],
+            "proxy_config": {
+                "rules": [
+                    {
+                        **_AWS_RULE,
+                        "aws": {
+                            "role_arn": "arn:aws:iam::123456789012:role/ReadOnly",
+                            "subject_scope": "workspace",
+                        },
+                    }
+                ]
+            },
+        },
+        {
+            "proxy_config": {
+                "rules": [
+                    {**_AWS_RULE, "aws": {"role_arn": "arn:aws:iam::123456789012:role/ReadOnly"}}
+                ]
+            }
+        },
+        {
+            "mount_config": {
+                "auth": {"aws": {"role_arn": "arn:aws:iam::123456789012:role/ReadOnly"}},
+                "mounts": [],
+            }
+        },
+        {
             "proxy_config": {
                 "rules": [
                     {
@@ -101,7 +128,8 @@ def test_cloud_authority_round_trips_without_changing_federated_rules() -> None:
                     "name": "gcp",
                     "type": "gcp",
                     "gcp": {
-                        "workload_identity_provider": "//iam.googleapis.com/projects/123/locations/global/workloadIdentityPools/pool/providers/provider"
+                        "workload_identity_provider": "//iam.googleapis.com/projects/123/locations/global/workloadIdentityPools/pool/providers/provider",
+                        "subject_scope": f"tag:{_TAG}",
                     },
                 },
                 {
@@ -111,6 +139,7 @@ def test_cloud_authority_round_trips_without_changing_federated_rules() -> None:
                         "tenant_id": _TAG,
                         "client_id": _TAG,
                         "resources": ["https://storage.azure.com"],
+                        "subject_scope": f"tag:{_TAG}",
                     },
                 },
             ]

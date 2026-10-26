@@ -139,15 +139,11 @@ Only one rule per cloud is allowed, and federated rules must remain enabled.
 The JSON editor and the admin workspace API/tools edit the same configuration; no cloud keys or client secrets are accepted.
 Existing non-federated cloud rules keep their JSON contract, subject to the existing secret restrictions; federation-only validation does not require those rules to be enabled.
 
-Before enabling a profile, configure cloud trust for the LangSmith deployment's OIDC issuer and the exact subject:
-
-- `workspace`: `ws:<LangSmith workspace UUID>:sandbox`.
-- `tag:<tag value UUID>`: `ws:<LangSmith workspace UUID>:sandbox:tag:<tag value UUID>`.
-
-The LangSmith workspace UUID is **not** the Open SWE workspace UUID or slug.
-A workspace subject authorizes any sandbox in that LangSmith workspace with a matching rule, not just one Open SWE workspace.
-Prefer governed tag scopes when several Open SWE workspaces share a LangSmith workspace.
+Every federated rule, and any federated mount auth, must use a governed tag scope, `tag:<tag value UUID>`.
+Every Open SWE workspace creates sandboxes in the same LangSmith workspace, so a `workspace` scope would let all of them use the role; Open SWE rejects it.
 Add the existing tag value UUID to **Governed Tag Value IDs** and use the same UUID in the rule's subject scope.
+Before enabling a profile, configure cloud trust for the LangSmith deployment's OIDC issuer and the exact subject `ws:<LangSmith workspace UUID>:sandbox:tag:<tag value UUID>`.
+The LangSmith workspace UUID is **not** the Open SWE workspace UUID or slug.
 Open SWE validates UUIDs and scope membership; LangSmith validates tag ownership and the deployment API key's assignment permissions when creating the sandbox, and rechecks tag scope on credential refresh.
 Saving a profile does not verify that the cloud will accept it; invalid cloud trust fails sandbox creation.
 

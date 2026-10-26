@@ -206,10 +206,10 @@ test.describe("Workspaces", () => {
         ["Governed Tag Value IDs", tag],
       ])
         await proxy.getByLabel(label, { exact: true }).fill(value);
-      await proxy
+      for (const scope of await proxy
         .getByLabel("Subject Scope", { exact: true })
-        .first()
-        .fill(`tag:${tag}`);
+        .all())
+        await scope.fill(`tag:${tag}`);
       await proxy.getByRole("tab", { name: "JSON", exact: true }).click();
       await expect
         .poll(async () => {

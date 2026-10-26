@@ -2,24 +2,18 @@
 
 import re
 from typing import Literal
-from uuid import UUID
 
-from pydantic import BaseModel, ConfigDict, Field, JsonValue, field_validator
+from pydantic import BaseModel, ConfigDict, Field, JsonValue
+
+_GUID = r"[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}"
 
 
 class CloudIdentity(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
-    subject_scope: str = "workspace"
-
-    @field_validator("subject_scope")
-    @classmethod
-    def validate_scope(cls, value: str) -> str:
-        if value != "workspace":
-            if not value.startswith("tag:"):
-                raise ValueError("subject_scope must be workspace or tag:<tag value UUID>")
-            UUID(value.removeprefix("tag:"))
-        return value
+    # Every Open SWE workspace shares one LangSmith workspace, so a `workspace` subject
+    # would let any of them assume the role; only a governed tag separates them.
+    subject_scope: str = Field(pattern=rf"^tag:{_GUID}$")
 
 
 class AWSIdentity(CloudIdentity):
@@ -37,8 +31,8 @@ class GCPIdentity(CloudIdentity):
 
 
 class AzureIdentity(CloudIdentity):
-    tenant_id: UUID
-    client_id: UUID
+    tenant_id: str = Field(pattern=rf"^{_GUID}$")
+    client_id: str = Field(pattern=rf"^{_GUID}$")
     resources: (
         list[
             Literal[
@@ -53,6 +47,11 @@ class AzureIdentity(CloudIdentity):
 
 
 _CLOUDS = {"aws": AWSIdentity, "gcp": GCPIdentity, "azure": AzureIdentity}
+_FEDERATION_FIELDS = {
+    "aws": {"role_arn"},
+    "gcp": {"workload_identity_provider"},
+    "azure": {"tenant_id", "client_id"},
+}
 _MANAGED_NAMES = {
     "github",
     "github-api",
@@ -63,11 +62,28 @@ _MANAGED_NAMES = {
 }
 
 
+def _validate_federated(cloud: str, settings: object, tag_ids: set[str]) -> bool:
+    """Validate ``settings`` when they federate; whether they do."""
+    if not isinstance(settings, dict) or not _FEDERATION_FIELDS[cloud] & settings.keys():
+        return False
+    identity = _CLOUDS[cloud].model_validate(settings)
+    if identity.subject_scope.removeprefix("tag:").lower() not in tag_ids:
+        raise ValueError("a tag-scoped cloud identity must be included in tag_value_ids")
+    return True
+
+
 def validate_cloud_identity(params: dict[str, JsonValue]) -> None:
     tags = params.get("tag_value_ids", [])
-    if not isinstance(tags, list) or not all(isinstance(tag, str) for tag in tags):
+    if not isinstance(tags, list) or not all(
+        isinstance(tag, str) and re.fullmatch(_GUID, tag) for tag in tags
+    ):
         raise ValueError("tag_value_ids must be an array of governed LangSmith tag value UUIDs")
-    tag_ids = {str(UUID(str(tag))) for tag in tags}
+    tag_ids = {str(tag).lower() for tag in tags}
+    mounts = params.get("mount_config")
+    auth = mounts.get("auth") if isinstance(mounts, dict) else None
+    if isinstance(auth, dict):
+        for cloud in _CLOUDS:
+            _validate_federated(cloud, auth.get(cloud), tag_ids)
     proxy = params.get("proxy_config")
     if not isinstance(proxy, dict):
         return
@@ -84,13 +100,7 @@ def validate_cloud_identity(params: dict[str, JsonValue]) -> None:
         if cloud in seen:
             raise ValueError(f"at most one {cloud} rule is allowed per sandbox")
         seen.add(cloud)
-        settings = rule.get(cloud)
-        federation_field = {
-            "aws": "role_arn",
-            "gcp": "workload_identity_provider",
-            "azure": "tenant_id",
-        }[cloud]
-        if not isinstance(settings, dict) or federation_field not in settings:
+        if not _validate_federated(cloud, rule.get(cloud), tag_ids):
             continue
         if rule.get("enabled", True) is not True or proxy.get("enabled", True) is not True:
             raise ValueError("cloud identity rules must stay enabled")
@@ -101,8 +111,3 @@ def validate_cloud_identity(params: dict[str, JsonValue]) -> None:
             or name in _MANAGED_NAMES
         ):
             raise ValueError("cloud identity rules need a valid, non-managed rule name")
-        identity = _CLOUDS[cloud].model_validate(rule.get(cloud))
-        if identity.subject_scope.startswith("tag:"):
-            scope_tag = str(UUID(identity.subject_scope.removeprefix("tag:")))
-            if scope_tag not in tag_ids:
-                raise ValueError("a tag-scoped cloud identity must be included in tag_value_ids")

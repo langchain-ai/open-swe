@@ -515,7 +515,7 @@ export function WorkspaceProxySection({
                           name: cloud,
                           type: cloud,
                           enabled: true,
-                          [cloud]: { subject_scope: "workspace" },
+                          [cloud]: {},
                         },
                       ])
                     }
