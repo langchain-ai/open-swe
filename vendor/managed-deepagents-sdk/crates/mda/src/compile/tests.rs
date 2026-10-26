@@ -4455,7 +4455,8 @@ fn compile_wires_python_browser_and_adds_stagehand() {
     assert!(entry_out.contains("from browser import browser as _browser"));
     assert!(entry_out.contains(
         "await compile_managed_agent_async(_definition, config, context_root=_context_root, \
-         has_skills=_has_skills, browser=_browser, async_subagent_graphs=_async_subagent_graphs, runtime=runtime)"
+         has_skills=_has_skills, browser=_browser, async_subagent_graphs=_async_subagent_graphs, \
+         runtime=runtime)"
     ));
     let pyproject = fs::read_to_string(out_dir.join("pyproject.toml")).unwrap();
     assert!(pyproject.contains("stagehand==4.3.0"));
@@ -4466,6 +4467,59 @@ fn compile_wires_python_browser_and_adds_stagehand() {
     with_py_runtime(root.path(), || compile_for_eval(&project, &eval_dir)).unwrap();
     let eval_pyproject = fs::read_to_string(eval_dir.join("pyproject.toml")).unwrap();
     assert!(!eval_pyproject.contains("stagehand"));
+}
+
+#[test]
+fn compile_wires_typescript_browser_and_adds_stagehand() {
+    let root = tempfile::tempdir().unwrap();
+    setup_mock_ts_runtime(root.path());
+    write_file(
+        root.path(),
+        "agent.ts",
+        "export const agent = defineDeepAgent({ name: \"agent\", model: \"openai:gpt-5\" });\n",
+    );
+    write_file(
+        root.path(),
+        "browser.ts",
+        "export const browser = defineBrowser({ scope: \"user\" });\n",
+    );
+    write_file(
+        root.path(),
+        "package.json",
+        "{\n  \"name\": \"example\",\n  \"dependencies\": {}\n}\n",
+    );
+
+    let project = Project {
+        root: root.path().to_path_buf(),
+        language: Language::TypeScript,
+        agent_file: PathBuf::from("agent.ts"),
+        files: vec![
+            PathBuf::from("agent.ts"),
+            PathBuf::from("browser.ts"),
+            PathBuf::from("package.json"),
+        ],
+    };
+
+    let out_dir = root.path().join(".mda").join("build");
+    compile(&project, &out_dir).unwrap();
+
+    let entry_out = fs::read_to_string(out_dir.join("_mda_entry.ts")).unwrap();
+    assert!(entry_out.contains("import { browser } from \"./browser\";"));
+    assert!(entry_out.contains(
+        "compileManagedAgent(definition, config, { contextRoot, hasSkills, browser }, runtime)"
+    ));
+    let package: serde_json::Value =
+        serde_json::from_str(&fs::read_to_string(out_dir.join("package.json")).unwrap()).unwrap();
+    assert_eq!(package["dependencies"]["@browserbasehq/stagehand"], "4.3.0");
+    assert_eq!(package["dependencies"]["stagehand-middleware"], "0.1.1");
+
+    // Eval trials never get a browser, so they never install Stagehand.
+    let eval_dir = root.path().join("eval");
+    compile_for_eval(&project, &eval_dir).unwrap();
+    let eval_entry = fs::read_to_string(eval_dir.join("_mda_eval_entry.ts")).unwrap();
+    assert!(!eval_entry.contains("browser"), "{eval_entry}");
+    let eval_package = fs::read_to_string(eval_dir.join("package.json")).unwrap();
+    assert!(!eval_package.contains("stagehand"), "{eval_package}");
 }
 
 #[test]

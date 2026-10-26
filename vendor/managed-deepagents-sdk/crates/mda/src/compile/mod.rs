@@ -882,7 +882,7 @@ fn compile_inner(
         }
     };
 
-    // Browser use is opt-in (Python only). Eval trials never get a browser.
+    // Browser use is opt-in. Eval trials never get a browser.
     let browser_import = match context {
         RuntimeContext::Eval { .. } => None,
         RuntimeContext::Local { .. } | RuntimeContext::ContextHub { .. } => {

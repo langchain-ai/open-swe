@@ -61,8 +61,8 @@ pub(super) struct EntryInputs<'a> {
     /// Module specifier for the root `memory` declaration, if the project opts
     /// into durable memory. Absent means the runtime mounts nothing.
     pub(super) memory_import: Option<&'a str>,
-    /// Module specifier for the root `browser` declaration (Python only), if
-    /// the project opts into browser use.
+    /// Module specifier for the root `browser` declaration, if the project
+    /// opts into browser use.
     pub(super) browser_import: Option<&'a str>,
     /// Async subagents that get their own graph factory (served Python only).
     pub(super) async_subagents: &'a [AsyncSubagentGraph],
@@ -159,6 +159,11 @@ fn generate_typescript_entry(inputs: &EntryInputs<'_>) -> String {
             "import {{ {MEMORY_EXPORT} }} from \"{memory_import}\";\n"
         ));
     }
+    if let Some(browser_import) = inputs.browser_import {
+        out.push_str(&format!(
+            "import {{ {BROWSER_EXPORT} }} from \"{browser_import}\";\n"
+        ));
+    }
     out.push('\n');
 
     // Managed options handed to the runtime, in shorthand object form.
@@ -229,6 +234,9 @@ fn generate_typescript_entry(inputs: &EntryInputs<'_>) -> String {
     }
     if inputs.memory_import.is_some() {
         option_keys.push("memory");
+    }
+    if inputs.browser_import.is_some() {
+        option_keys.push("browser");
     }
     if !option_keys.is_empty() {
         out.push('\n');

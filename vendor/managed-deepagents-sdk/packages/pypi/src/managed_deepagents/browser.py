@@ -34,7 +34,7 @@ from deepagents.backends import CompositeBackend
 from deepagents.backends.protocol import SandboxBackendProtocol
 from langchain.agents.middleware import AgentMiddleware
 from langchain.tools import BaseTool, tool
-from langchain_core.messages import SystemMessage
+from langchain_core.messages import SystemMessage, ToolMessage
 from langchain_core.messages.content import create_text_block
 from langsmith.sandbox import AsyncSandbox, AsyncSandboxClient
 from langsmith.utils import get_env_var
@@ -61,8 +61,14 @@ from managed_deepagents.runtime import (
 if TYPE_CHECKING:
     from collections.abc import Awaitable, Callable
 
-    from langchain.agents.middleware.types import AgentState, ModelRequest, ModelResponse
+    from langchain.agents.middleware.types import (
+        AgentState,
+        ModelRequest,
+        ModelResponse,
+        ToolCallRequest,
+    )
     from langgraph.runtime import Runtime
+    from langgraph.types import Command
 
 T = TypeVar("T")
 Scope = Literal["thread", "user"]
@@ -148,6 +154,7 @@ class BrowserMiddleware(AgentMiddleware):
         self.scope: Scope = scope
         self.idle_ttl_seconds = idle_ttl_seconds
         self.tools = self._tools()
+        self._arguments = {tool.name: set(tool.args) for tool in self.tools}
         self._instructions = f"{facade_instructions()}\n\n{_INSTRUCTIONS}"
         if scope == "thread":
             self._instructions += f" {_LOCALHOST_NOTE}"
@@ -228,12 +235,25 @@ class BrowserMiddleware(AgentMiddleware):
         ]
         return await handler(request.override(system_message=SystemMessage(content_blocks=blocks)))
 
-    def _tools(self) -> list[BaseTool]:  # noqa: C901 - three flat tool closures
-        """The facade's tools as its hosts advertise them, names prefixed ``browser_``.
+    async def awrap_tool_call(
+        self,
+        request: ToolCallRequest,
+        handler: Callable[[ToolCallRequest], Awaitable[ToolMessage | Command[Any]]],
+    ) -> ToolMessage | Command[Any]:
+        """Turn away argument names a browser tool lacks, such as snake_case ones.
 
-        JSON-schema tools take their arguments unchecked, so each turns away names it
-        lacks, such as the Python methods' snake_case ones.
+        JSON-schema tools take their arguments unchecked, so an unknown name would reach
+        the tool's function and fail the run.
         """
+        call = request.tool_call
+        accepted = self._arguments.get(call["name"])
+        extra = [arg for arg in call["args"] if accepted is not None and arg not in accepted]
+        if not extra:
+            return await handler(request)
+        return ToolMessage(_unexpected(extra), tool_call_id=call["id"], name=call["name"])
+
+    def _tools(self) -> list[BaseTool]:
+        """The facade's tools as its hosts advertise them, names prefixed ``browser_``."""
         facade = {entry["name"]: entry for entry in facade_tools()}
         path = {"type": "string", "description": _SCREENSHOT_PATH}
         facade["screenshot"]["inputSchema"]["properties"]["path"] = path
@@ -251,11 +271,7 @@ class BrowserMiddleware(AgentMiddleware):
             runtime: ManagedToolRuntime,
             code: str | None = None,
             actions: list[dict[str, Any]] | None = None,
-            **unexpected: object,
         ) -> str:
-            if unexpected:
-                return _unexpected(unexpected)
-
             async def go(session: _Session) -> str:
                 try:
                     value = await session.tools.run(code=code, actions=actions)
@@ -269,10 +285,7 @@ class BrowserMiddleware(AgentMiddleware):
         async def snapshot(
             runtime: ManagedToolRuntime,
             includeIframes: bool = True,  # noqa: N803 - the facade's name
-            **unexpected: object,
         ) -> str:
-            if unexpected:
-                return _unexpected(unexpected)
             return await self._call(
                 runtime, lambda s: s.tools.snapshot(include_iframes=includeIframes)
             )
@@ -284,10 +297,7 @@ class BrowserMiddleware(AgentMiddleware):
             type: Literal["png", "jpeg"] = "png",
             quality: float | None = None,
             path: str | None = None,
-            **unexpected: object,
         ) -> list[dict[str, str]] | str:
-            if unexpected:
-                return _unexpected(unexpected)
             shot = await self._call(
                 runtime,
                 lambda s: s.tools.screenshot(full_page=fullPage, type=type, quality=quality),
@@ -303,7 +313,7 @@ class BrowserMiddleware(AgentMiddleware):
         return [run, snapshot, screenshot]
 
 
-def _unexpected(arguments: dict[str, object]) -> str:
+def _unexpected(arguments: list[str]) -> str:
     names = ", ".join(repr(name) for name in arguments)
     return f"error: unexpected argument{'s' if len(arguments) > 1 else ''} {names}."
 

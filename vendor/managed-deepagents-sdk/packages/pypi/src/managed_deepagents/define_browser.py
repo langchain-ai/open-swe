@@ -1,4 +1,4 @@
-""":func:`define_browser` — browser use for an agent's threads (Python only).
+""":func:`define_browser` — browser use for an agent's threads.
 
 The CLI discovers a root ``browser`` export in ``browser.py``; MDA then gives
 the agent a LangSmith browser and Stagehand's tools, as ``browser_run``,
