@@ -65,6 +65,7 @@ const {
   readWorkspacePath,
 } = require("./workspace-files.cjs");
 const { isDesktopCommandId } = require("./commands.cjs");
+const { DesktopLinks } = require("./desktop-links.cjs");
 const {
   APP_ORIGIN,
   APP_URL,
@@ -75,7 +76,6 @@ const {
   connectExchangeUrl,
   connectLoginUrl,
   desktopLoginUrl,
-  desktopDeepLinkUrl,
   isAppLoginUrl,
   isAppUrl,
   isConnectProvider,
@@ -1726,10 +1726,7 @@ function createSetupWindow() {
         await clearBackendCookies(previousUrl);
         await session.defaultSession.clearStorageData({ origin: APP_URL });
       }
-      if (pendingDeepLink && openDesktopLink(pendingDeepLink))
-        pendingDeepLink = null;
-      else if (mainWindow && !mainWindow.isDestroyed())
-        await loadApp(mainWindow);
+      if (mainWindow && !mainWindow.isDestroyed()) await loadApp(mainWindow);
       else createWindow();
       window.close();
     } catch (error) {
@@ -1762,11 +1759,13 @@ function configurePermissions() {
   );
 }
 
-let pendingDeepLink = null;
+const desktopLinks = new DesktopLinks({
+  backendUrl: () => backendUrl,
+  openApp: openDesktopLink,
+  openExternal: (url: string) => shell.openExternal(url),
+});
 
-function openDesktopLink(url) {
-  const target = backendUrl && desktopDeepLinkUrl(url, backendUrl);
-  if (!target) return false;
+function openDesktopLink(target: string) {
   const existingWindow =
     mainWindow && !mainWindow.isDestroyed() ? mainWindow : null;
   const window = existingWindow || createWindow(target);
@@ -1783,10 +1782,8 @@ app.on("will-continue-activity", (event, type) => {
 
 app.on("continue-activity", (event, type, _userInfo, details) => {
   if (type !== "NSUserActivityTypeBrowsingWeb" || !details.webpageURL) return;
-  if (!backendUrl) pendingDeepLink = details.webpageURL;
-  else if (!desktopDeepLinkUrl(details.webpageURL, backendUrl)) return;
   event.preventDefault();
-  if (backendUrl) openDesktopLink(details.webpageURL);
+  desktopLinks.receive(details.webpageURL);
 });
 
 const hasSingleInstanceLock = app.requestSingleInstanceLock();
@@ -1848,9 +1845,7 @@ if (!hasSingleInstanceLock) {
     configurePermissions();
     configureDesktopIpc();
     createMenu();
-    if (pendingDeepLink && openDesktopLink(pendingDeepLink))
-      pendingDeepLink = null;
-    else createWindow();
+    if (!desktopLinks.ready()) createWindow();
     configureAutoUpdater();
     configureTerminalIpc({
       ipcMain,
