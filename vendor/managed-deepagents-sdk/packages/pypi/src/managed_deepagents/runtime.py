@@ -21,6 +21,7 @@ import secrets
 import socket
 import threading
 import time
+from collections import OrderedDict
 from collections.abc import (
     AsyncIterator,
     Awaitable,
@@ -32,10 +33,11 @@ from collections.abc import (
 )
 from contextlib import asynccontextmanager, contextmanager, suppress
 from contextvars import ContextVar
+from dataclasses import dataclass, replace
 from functools import partial
 from http import HTTPStatus
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, Literal, TypedDict, TypeVar, cast
+from typing import TYPE_CHECKING, Any, ClassVar, Literal, TypedDict, TypeVar, cast
 from urllib.parse import quote, urlsplit
 
 from deepagents import FilesystemPermission, create_deep_agent
@@ -816,6 +818,7 @@ async def compile_managed_agent_async(
         report_telemetry=report_telemetry,
         skip_factory_inspection_tools=factory_inspection,
         factory_entry=factory_entry,
+        shared_graph=async_subagent or "lead",
     )
 
 
@@ -840,9 +843,15 @@ async def _compile_resolved_managed_agent_async(
     report_telemetry: bool = True,
     skip_factory_inspection_tools: bool = False,
     factory_entry: bool = False,
+    shared_graph: str | None = None,
 ) -> CompiledAgent:
-    """Select native context schema and memory access for a resolved definition."""
-    from managed_deepagents._run_input import graph_default_config  # noqa: PLC0415
+    """Select native context schema and memory access for a resolved definition.
+
+    A definition that declares ``_openswe_graph_inputs`` is compiled once per process
+    for those inputs and shared by every run and read of ``shared_graph`` (the lead's
+    graph, or an async subagent's), whichever thread or caller it serves.
+    """
+    started_monotonic_ms = time.monotonic() * 1000
 
     run_connectors = _select_run_connectors(definition.config, connectors)
     run_sandbox = (
@@ -885,7 +894,6 @@ async def _compile_resolved_managed_agent_async(
     from managed_deepagents._run_input import (  # noqa: PLC0415
         ManagedCompiledAgent,
         SingleProjectManagedAgent,
-        execution_context,
         is_channel_execution,
     )
 
@@ -912,26 +920,83 @@ async def _compile_resolved_managed_agent_async(
             policy_schema,
             selected_by_dynamic_resolver=memory_selected_by_dynamic_resolver,
         )
-    agent = await asyncio.to_thread(
-        _compile_managed_agent,
-        definition,
-        config,
-        **options,
-        allow_agent=allow_agent,
-        user_access=user_access,
-        declared_memory_layers=declared_memory_layers,
-        inspection=not is_run,
-        skip_factory_inspection_tools=skip_factory_inspection_tools,
-        context_schema=context_schema,
-        report_telemetry=report_telemetry,
+    inputs = definition.config.get("_openswe_graph_inputs")
+    key = (
+        _SharedGraphs.key(shared_graph, inputs)
+        if shared_graph is not None and isinstance(inputs, Mapping)
+        else None
     )
+    policy = (allow_agent, user_access.user_id, user_access.denied_reason) if is_run else None
+    built = _SharedGraphs.built(key, policy) if key is not None else None
+    if built is None:
+        agent, configuration = await asyncio.to_thread(
+            _compile_managed_agent,
+            definition,
+            # A shared graph closes over no run's config: what a call needs of its
+            # run, such as the thread its box belongs to, it reads from the run.
+            None if key is not None else config,
+            **options,
+            allow_agent=allow_agent,
+            user_access=user_access,
+            declared_memory_layers=declared_memory_layers,
+            inspection=not is_run,
+            skip_factory_inspection_tools=skip_factory_inspection_tools,
+            context_schema=context_schema,
+        )
+        if isinstance(agent, CompiledAgent):
+            agent.__class__ = (
+                SingleProjectManagedAgent
+                if definition.config.get("replicate_traces") is False
+                else ManagedCompiledAgent
+            )
+        built = _BuiltGraph(policy=policy, agent=agent, configuration=configuration)
+        if key is not None:
+            _SharedGraphs.keep(key, built)
+    return _for_call(
+        built,
+        config,
+        run_context=run_context,
+        is_run=is_run,
+        report_telemetry=report_telemetry,
+        started_monotonic_ms=started_monotonic_ms,
+    )
+
+
+def _for_call(
+    built: _BuiltGraph,
+    config: ManagedRunConfig | None,
+    *,
+    run_context: object,
+    is_run: bool,
+    report_telemetry: bool,
+    started_monotonic_ms: float,
+) -> CompiledAgent:
+    """``built`` as this call runs it: its telemetry and this run's config defaults.
+
+    Applied per call, never to a shared graph.
+    """
+    from managed_deepagents._run_input import (  # noqa: PLC0415
+        execution_context,
+        graph_default_config,
+    )
+
+    agent = built.agent
     if not isinstance(agent, CompiledAgent):
         return agent
-    agent.__class__ = (
-        SingleProjectManagedAgent
-        if definition.config.get("replicate_traces") is False
-        else ManagedCompiledAgent
-    )
+    if report_telemetry:
+        agent = observe_run(
+            agent,
+            start_run(
+                detect_run_identity(
+                    caller=build_runtime_identity(resolve_runtime_configurable(config)),
+                    is_run=is_run,
+                ),
+                replace(built.configuration, channel=_detect_run_channel(config)),
+                run_id=_platform_run_id(config),
+                thread_id=_thread_id_of(config),
+                started_monotonic_ms=started_monotonic_ms,
+            ),
+        )
     defaults = graph_default_config(config)
     if is_run:
         _, _, routing = execution_context(run_context, config, None)
@@ -940,6 +1005,57 @@ async def _compile_resolved_managed_agent_async(
             # this factory returns. Retain managed routing for graph execution.
             defaults["configurable"] = {**defaults.get("configurable", {}), **routing}
     return agent.with_config(defaults)
+
+
+@dataclass(frozen=True)
+class _BuiltGraph:
+    """A compiled graph and what its runs report, before any one call's config."""
+
+    # Who a run's graph was built for (its memory access); None for a read's.
+    policy: tuple[bool, str | None, str | None] | None
+    agent: CompiledAgent
+    configuration: RunConfiguration
+
+
+#: Graphs a process keeps compiled, one per graph and declared inputs.
+_SHARED_GRAPHS_KEPT = 32
+
+
+class _SharedGraphs:
+    """Compiled graphs shared by every run and read, by graph and declared inputs.
+
+    Only a definition that declares ``_openswe_graph_inputs`` is kept: it promises
+    that nothing it builds belongs to one run, thread or caller.
+    """
+
+    _built: ClassVar[OrderedDict[tuple[str, str], _BuiltGraph]] = OrderedDict()
+
+    @staticmethod
+    def key(graph: str, inputs: Mapping[str, object]) -> tuple[str, str]:
+        canonical = json.dumps(inputs, sort_keys=True, separators=(",", ":"), ensure_ascii=False)
+        return graph, hashlib.sha256(canonical.encode()).hexdigest()
+
+    @classmethod
+    def built(
+        cls, key: tuple[str, str], policy: tuple[bool, str | None, str | None] | None
+    ) -> _BuiltGraph | None:
+        """The graph kept for ``key``: any for a read; for a run, one built for a run like it."""
+        built = cls._built.get(key)
+        if built is None or (policy is not None and built.policy != policy):
+            return None
+        cls._built.move_to_end(key)
+        return built
+
+    @classmethod
+    def keep(cls, key: tuple[str, str], built: _BuiltGraph) -> None:
+        kept = cls._built.get(key)
+        # A read's build never displaces the graph a run built.
+        if built.policy is None and kept is not None:
+            return
+        cls._built[key] = built
+        cls._built.move_to_end(key)
+        while len(cls._built) > _SHARED_GRAPHS_KEPT:
+            cls._built.popitem(last=False)
 
 
 def _select_run_connectors(
@@ -989,9 +1105,8 @@ def _compile_managed_agent(
     inspection: bool = False,
     skip_factory_inspection_tools: bool = False,
     context_schema: object = None,
-    report_telemetry: bool = True,
-) -> CompiledAgent:
-    started_monotonic_ms = time.monotonic() * 1000
+) -> tuple[CompiledAgent, RunConfiguration]:
+    """Compile the definition; ``_for_call`` adds each call's telemetry and config."""
     allowed_user_id = user_access.user_id
     # Resolution + thread/store scope run in the generated custom-auth handler
     # (``build_managed_auth``). When identity is declared, the seam also surfaces
@@ -1005,6 +1120,7 @@ def _compile_managed_agent(
     merged.pop("mcp", None)
     merged.pop("sandbox", None)
     merged.pop("replicate_traces", None)
+    merged.pop("_openswe_graph_inputs", None)
     merged["context_schema"] = context_schema
 
     sandbox_backend = (
@@ -1132,34 +1248,20 @@ def _compile_managed_agent(
         if isinstance(metadata, Mapping) and metadata
         else agent
     )
-    if not report_telemetry:
-        return compiled
-    run_id = _platform_run_id(config)
-    return observe_run(
-        compiled,
-        start_run(
-            detect_run_identity(
-                caller=build_runtime_identity(resolve_runtime_configurable(config)),
-                is_run=not inspection,
-            ),
-            RunConfiguration(
-                channel=_detect_run_channel(config),
-                sandbox_declared=sandbox is not None,
-                identity_declared=identity is not None,
-                skills_declared=effective_has_skills,
-                backend_kind="sandbox" if sandbox_backend is not None else "state",
-                context_source=(
-                    "none" if context is None else ("local" if context.filesystem_root else "hub")
-                ),
-                memory=MemoryObservations(
-                    layers_declared=[layer["type"] for layer in _declared_memory_layers(memory)],
-                    layers_mounted=[layer["type"] for layer in mounted_memory],
-                    user_denied_reason=user_access.denied_reason,
-                ),
-            ),
-            run_id=run_id,
-            thread_id=_thread_id_of(config),
-            started_monotonic_ms=started_monotonic_ms,
+    return compiled, RunConfiguration(
+        # Each call's own, set as it runs.
+        channel=_detect_run_channel(config),
+        sandbox_declared=sandbox is not None,
+        identity_declared=identity is not None,
+        skills_declared=effective_has_skills,
+        backend_kind="sandbox" if sandbox_backend is not None else "state",
+        context_source=(
+            "none" if context is None else ("local" if context.filesystem_root else "hub")
+        ),
+        memory=MemoryObservations(
+            layers_declared=[layer["type"] for layer in _declared_memory_layers(memory)],
+            layers_mounted=[layer["type"] for layer in mounted_memory],
+            user_denied_reason=user_access.denied_reason,
         ),
     )
 
@@ -1803,6 +1905,17 @@ class _LazySandboxSource:
         self.proxy_config_sync = proxy_config_sync
 
 
+def _ambient_runtime() -> object:
+    """The LangGraph runtime of the run in progress, if any."""
+    from langgraph.config import get_config  # noqa: PLC0415
+
+    try:
+        configurable = get_config().get("configurable") or {}
+    except RuntimeError:
+        return None
+    return configurable.get("__pregel_runtime")
+
+
 class _LazyManagedSandboxBackend(SandboxBackendProtocol):
     """Lazy sandbox backend with frozen per-instance ``configurable``.
 
@@ -1813,15 +1926,44 @@ class _LazyManagedSandboxBackend(SandboxBackendProtocol):
     """
 
     def __init__(
-        self, source: _LazySandboxSource, bound_configurable: Mapping[str, object] | None
+        self,
+        source: _LazySandboxSource,
+        bound_configurable: Mapping[str, object] | None,
+        runtime: object = None,
     ) -> None:
         self._source = source
         self._bound_configurable = bound_configurable
+        # The bound run's runtime, which picks its box (``_openswe_select``).
+        self._runtime = runtime
+        self._selected: SandboxDefinition | None = None
         self._resolved_backend: SandboxBackendProtocol | None = None
+        # A graph shared by every run closes over no run's config: unbound, this backend
+        # finds the run in progress per call and keeps no box of its own.
+        self._shared = bound_configurable is None and source.run_config is None
 
     def bind_runtime(self, runtime: object) -> _LazyManagedSandboxBackend:
         """Capture this run's configuration without resolving the sandbox."""
-        return _LazyManagedSandboxBackend(self._source, resolve_runtime_configurable(runtime))
+        return _LazyManagedSandboxBackend(
+            self._source, resolve_runtime_configurable(runtime), runtime
+        )
+
+    def _sandbox(self) -> SandboxDefinition:
+        """The box of the run this backend acts for, as ``_openswe_select`` picks it."""
+        from managed_deepagents.sandbox import selected_for  # noqa: PLC0415
+
+        if self._selected is not None:
+            return self._selected
+        runtime = self._runtime if self._runtime is not None else _ambient_runtime()
+        selected = selected_for(self._source.sandbox, runtime)
+        if selected is None:
+            raise RuntimeError("This run has no sandbox")
+        if not self._shared:
+            self._selected = selected
+        return selected
+
+    def _keep(self, backend: SandboxBackendProtocol) -> None:
+        if not self._shared:
+            self._resolved_backend = backend
 
     @property
     def id(self) -> str:
@@ -1835,7 +1977,7 @@ class _LazyManagedSandboxBackend(SandboxBackendProtocol):
             return str(resolved)
         try:
             scope = _sandbox_scope_key(
-                self._source.sandbox, self._config(), self._source.selection_fingerprint
+                self._sandbox(), self._config(), self._source.selection_fingerprint
             )
             return f"pending:{scope}"
         except Exception:  # noqa: BLE001 — match TS pending:sandbox fallback
@@ -1847,7 +1989,7 @@ class _LazyManagedSandboxBackend(SandboxBackendProtocol):
             return self._resolved_backend
         try:
             key = _sandbox_scope_key(
-                self._source.sandbox, self._config(), self._source.selection_fingerprint
+                self._sandbox(), self._config(), self._source.selection_fingerprint
             )
         except Exception:  # noqa: BLE001 — no thread, so no sandbox, as in ``id``
             return None
@@ -1987,17 +2129,18 @@ class _LazyManagedSandboxBackend(SandboxBackendProtocol):
         """Replace this run's box with a fresh one under its name, from ``sandbox``'s options."""
         source = self._source
         await self._abackend()
+        current = self._sandbox()
         backend, replacement = await asyncio.to_thread(
             _replace_managed_sandbox,
-            source.sandbox,
-            sandbox if sandbox is not None else source.sandbox,
+            current,
+            sandbox if sandbox is not None else current,
             self._config(),
             source.connectors,
             source.identity,
             source.selection_fingerprint,
         )
         source.proxy_config_sync.invalidate(replacement.new_name)
-        self._resolved_backend = backend
+        self._keep(backend)
         return replacement
 
     def _config(self) -> ManagedRunConfig | None:
@@ -2008,12 +2151,13 @@ class _LazyManagedSandboxBackend(SandboxBackendProtocol):
     async def _sync_sandbox_proxy_config(self) -> None:
         from managed_deepagents.sandbox import manages_proxy  # noqa: PLC0415
 
-        if not manages_proxy(self._source.sandbox.options):
+        sandbox = self._sandbox()
+        if not manages_proxy(sandbox.options):
             return
         config = self._config()
-        key = _sandbox_scope_key(self._source.sandbox, config, self._source.selection_fingerprint)
+        key = _sandbox_scope_key(sandbox, config, self._source.selection_fingerprint)
         await self._source.proxy_config_sync.sync(
-            self._source.sandbox,
+            sandbox,
             _peek_managed_host_name(key),
             config,
         )
@@ -2023,13 +2167,13 @@ class _LazyManagedSandboxBackend(SandboxBackendProtocol):
             return self._resolved_backend
         source = self._source
         backend = _resolve_managed_sandbox(
-            source.sandbox,
+            self._sandbox(),
             self._config(),
             connectors=source.connectors,
             identity=source.identity,
             selection_fingerprint=source.selection_fingerprint,
         )
-        self._resolved_backend = backend
+        self._keep(backend)
         return backend
 
     async def _abackend(self) -> SandboxBackendProtocol:
@@ -2038,13 +2182,13 @@ class _LazyManagedSandboxBackend(SandboxBackendProtocol):
         source = self._source
         backend = await asyncio.to_thread(
             _resolve_managed_sandbox,
-            source.sandbox,
+            self._sandbox(),
             self._config(),
             source.connectors,
             source.identity,
             source.selection_fingerprint,
         )
-        self._resolved_backend = backend
+        self._keep(backend)
         return backend
 
     def _recover(self, backend: SandboxBackendProtocol, error: Exception) -> None:
@@ -2055,12 +2199,13 @@ class _LazyManagedSandboxBackend(SandboxBackendProtocol):
         if _parent_sandbox_scope(config, source.selection_fingerprint) is not None:
             # The lead recovers its own sandbox; helpers must not recreate it.
             return
+        sandbox = self._sandbox()
         previous_name = _peek_managed_host_name(
-            _sandbox_scope_key(source.sandbox, config, source.selection_fingerprint)
+            _sandbox_scope_key(sandbox, config, source.selection_fingerprint)
         )
         try:
             recovered = _recover_managed_sandbox(
-                source.sandbox,
+                sandbox,
                 config,
                 backend,
                 source.connectors,
@@ -2072,7 +2217,7 @@ class _LazyManagedSandboxBackend(SandboxBackendProtocol):
         if recovered is not backend:
             source.proxy_config_sync.invalidate(previous_name)
         if self._resolved_backend is backend:
-            self._resolved_backend = recovered
+            self._keep(recovered)
 
     def _call(
         self,
