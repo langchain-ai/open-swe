@@ -155,14 +155,9 @@ test("promotes complete updates on next navigation without changing active page 
   assert.equal(await (await ui.serve(asset())).text(), "lazy v2");
 });
 
-test("rejects untrusted archive URLs and incompatible bridges", async (t) => {
+test("rejects untrusted archive URLs", async (t) => {
   const root = await fixture(t);
   for (const descriptor of [
-    {
-      bridge_version: 2,
-      url: "https://github.com/example",
-      sha256: "a".repeat(64),
-    },
     {
       bridge_version: 1,
       url: "https://evil.example/ui.json.gz",
@@ -177,6 +172,43 @@ test("rejects untrusted archive URLs and incompatible bridges", async (t) => {
     );
     await assert.rejects(ui.serve(page()), /Could not load the Open SWE UI/);
   }
+});
+
+test("reports a bridge mismatch as a desktop update, on first install and over a cached UI", async (t) => {
+  const root = await fixture(t);
+  const incompatible: Fetch = async () =>
+    Response.json({ bridge_version: 2, url: "", sha256: "" });
+  await assert.rejects(
+    new DesktopUi(
+      "https://backend.example",
+      incompatible,
+      root,
+      serveFile,
+    ).serve(page()),
+    /Update the Open SWE desktop app/,
+  );
+  await new DesktopUi(
+    "https://backend.example",
+    server("v1"),
+    root,
+    serveFile,
+  ).serve(page());
+  const warned = new Promise<Error>((resolve) => {
+    const ui = new DesktopUi(
+      "https://backend.example",
+      incompatible,
+      root,
+      serveFile,
+      null,
+      resolve,
+    );
+    void ui
+      .serve(page())
+      .then(async (response) =>
+        assert.equal(await response.text(), "shell v1"),
+      );
+  });
+  assert.match((await warned).message, /bridge version 2/);
 });
 
 test("rejects archive traversal before extracting a checksum-valid download", async (t) => {

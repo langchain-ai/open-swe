@@ -1215,6 +1215,13 @@ async function serveDesktopUi(request: Request) {
       path.join(app.getPath("userData"), "ui-cache"),
       (filename: string) => net.fetch(pathToFileURL(filename).toString()),
       process.env.OPEN_SWE_DESKTOP_UI_ARCHIVE ?? null,
+      () =>
+        void dialog.showMessageBox({
+          type: "warning",
+          message: "Open SWE needs an update",
+          detail:
+            "Your backend has a newer UI than this version of Open SWE can run. You are still on the previous UI; update the desktop app to get the new one.",
+        }),
     );
   }
   return desktopUi.serve(request);

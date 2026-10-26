@@ -30,7 +30,11 @@ function validAsset(pathname: string): boolean {
 // fetch rejects with a TypeError, or a Timeout/Abort DOMException, when the
 // host is unreachable; every other failure is the backend or release answering
 // with something this app cannot use.
+class IncompatibleUiError extends Error {}
+
 function firstLoadFailure(error: unknown): string {
+  if (error instanceof IncompatibleUiError)
+    return "This version of Open SWE cannot run the UI your backend selected. Update the Open SWE desktop app, then use View → Reload.";
   const unreachable =
     error instanceof TypeError ||
     (error instanceof Error &&
@@ -53,6 +57,7 @@ class DesktopUi {
     cacheRoot: string,
     private readonly serveFile: (filename: string) => Promise<Response>,
     private readonly localArchive: string | null = null,
+    private readonly onIncompatible: (error: Error) => void = () => {},
   ) {
     this.directory = path.join(cacheRoot, digest(backendUrl));
   }
@@ -74,12 +79,13 @@ class DesktopUi {
           throw new Error(firstLoadFailure(error), { cause: error });
         }
       } else {
-        void update.catch((error: unknown) =>
+        void update.catch((error: unknown) => {
+          if (error instanceof IncompatibleUiError) this.onIncompatible(error);
           console.warn(
             "Could not update desktop UI; keeping cached version",
             error,
-          ),
-        );
+          );
+        });
       }
     }
     if (!this.snapshot)
@@ -138,10 +144,18 @@ class DesktopUi {
     const response = await this.fetchHosted("/desktop-ui.json");
     const descriptor: unknown = await response.json();
     if (
+      descriptor &&
+      typeof descriptor === "object" &&
+      "bridge_version" in descriptor &&
+      descriptor.bridge_version !== 1
+    )
+      throw new IncompatibleUiError(
+        `Unsupported desktop UI bridge version ${String(descriptor.bridge_version)}`,
+      );
+    if (
       !descriptor ||
       typeof descriptor !== "object" ||
       !("bridge_version" in descriptor) ||
-      descriptor.bridge_version !== 1 ||
       !("url" in descriptor) ||
       typeof descriptor.url !== "string" ||
       !("sha256" in descriptor) ||
@@ -151,7 +165,7 @@ class DesktopUi {
         descriptor.url,
       )
     )
-      throw new Error("Incompatible desktop UI descriptor");
+      throw new Error("Invalid desktop UI descriptor");
     const current = await this.readSnapshot();
     if (current?.version === descriptor.sha256) return current;
     const archiveResponse = await this.fetchPublic(descriptor.url);
