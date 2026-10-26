@@ -379,6 +379,35 @@ async def test_an_unreachable_backend_fails_the_run(
         await graph.ainvoke({"messages": [("user", "hello")]})
 
 
+@pytest.mark.parametrize("status", [400, 403])
+async def test_a_refused_operation_fails_the_run_even_when_its_error_was_caught(
+    monkeypatch: pytest.MonkeyPatch, status: int
+) -> None:
+    monkeypatch.setenv("OPEN_SWE_BACKEND_URL", "https://backend.invalid")
+    monkeypatch.setattr("rt.middleware.run_id", lambda: "run-1")
+    request = httpx2.Request("POST", "https://backend.invalid/agent-api/operation")
+    client = MagicMock(is_closed=False)
+    client.post = AsyncMock(
+        side_effect=[
+            httpx2.Response(status, request=request, json={"detail": "not offered"}),
+            httpx2.Response(200, request=request, json={}),
+        ]
+    )
+    monkeypatch.setattr("rt.backend.httpx2.AsyncClient", lambda **kwargs: client)
+    backend = _run_backend(invocation_id="invocation-1")
+
+    # A code interpreter catches the operation's failure and carries on.
+    with pytest.raises(BackendCallError):
+        await backend.post("/agent-api/operation", {}, timeout=1.0, delivery="once")
+
+    ending = BackendRunMiddleware(backend).aafter_agent({"messages": []}, MagicMock())
+    if status == 403:
+        with pytest.raises(BackendCallError):
+            await ending
+    else:
+        await ending
+
+
 _INBOX = InboxSpec(events=True, surface="slack")
 
 

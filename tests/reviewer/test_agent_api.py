@@ -286,36 +286,30 @@ async def test_a_runs_tool_and_shell_calls_never_plan_it_and_read_its_settings(
 
     result = await graph.api(run, "operation", {**call, "grant": run.grant("draft_preference")})
     # Only an operation the run's catalog granted it runs, however the call names it.
-    ungranted = await graph.api(run, "operation", call)
-    regranted = await graph.api(
-        run, "operation", {**call, "grant": run.granting().grant("draft_preference")}
-    )
+    for grant in (None, run.granting().grant("draft_preference")):
+        with pytest.raises(server.RefusedCallError, match="not one of this run's operations"):
+            await graph.api(run, "operation", {**call, "grant": grant})
     verdict = await graph.api(
         run, "check_shell", {"run_id": "run-1", "tool": "execute", "command": "ls"}
     )
 
     assert isinstance(result, dict) and result["content"] == "drafts: False"
     assert verdict == {"allowed": True, "command": None, "refusal": None}
-    for refused in (ungranted, regranted):
-        assert isinstance(refused, dict) and refused["status"] == "error"
-        assert "not one of this run's operations" in str(refused["content"])
 
     # A token from before operations were granted reaches only the tools its plan offers.
     async def offers_nothing(config: object, surface: ToolSurface) -> None:
         return None
 
     planned = RemoteGraph("agent", offers_nothing, agent.AgentParts())
-    unplanned = await planned.api(
-        RUN.model_copy(update={"assistant_id": "agent"}), "operation", call
-    )
-    assert isinstance(unplanned, dict) and unplanned["status"] == "error"
-    assert "drafts" not in str(unplanned["content"])
+    with pytest.raises(server.RefusedCallError, match="not one of this run's operations"):
+        await planned.api(RUN.model_copy(update={"assistant_id": "agent"}), "operation", call)
 
 
 @pytest.mark.parametrize("fallback", [False, True])
 @pytest.mark.parametrize("capable", [False, True])
+@pytest.mark.parametrize("predates_grants", [False, True])
 async def test_split_deploy_operations_keep_the_runs_authorization(
-    monkeypatch: pytest.MonkeyPatch, fallback: bool, capable: bool
+    monkeypatch: pytest.MonkeyPatch, fallback: bool, capable: bool, predates_grants: bool
 ) -> None:
     from unittest.mock import AsyncMock
 
@@ -370,8 +364,12 @@ async def test_split_deploy_operations_keep_the_runs_authorization(
     run = verify_runtime_token(started.token)
     assert run.grant_id is not None and not run.operation_grants
     catalog = started.catalog
+    token = started.token
+    if predates_grants:
+        run = run.model_copy(update={"grant_id": None})
+        token = sign_runtime_token(run)
     app = Starlette(routes=[Route("/agent-api/{endpoint}", server.API, methods=["POST"])])
-    headers = {"Authorization": f"Bearer {started.token}"}
+    headers = {"Authorization": f"Bearer {token}"}
     if capable:
         headers["X-Open-Swe-Operation-Grants"] = "1"
     async with httpx.AsyncClient(
@@ -384,7 +382,7 @@ async def test_split_deploy_operations_keep_the_runs_authorization(
                 json={"tool": "execute", "command": "ls"},
             )
             assert reply.status_code == 200
-        if fallback:
+        if fallback or predates_grants:
             reply = await client.post("/agent-api/catalog", headers=headers, json={})
             assert reply.status_code == 200
             catalog = Catalog.model_validate(reply.json())
@@ -415,12 +413,12 @@ async def test_split_deploy_operations_keep_the_runs_authorization(
                 refused = await client.post(
                     "/agent-api/operation", headers=headers, json={**body, "grant": grant}
                 )
-                assert refused.json()["status"] == "error"
+                assert refused.status_code == 403
         refused = await client.post(
             "/agent-api/operation", headers=headers, json={**body, "name": "unoffered"}
         )
-        assert refused.json()["status"] == "error"
-        assert "unauthorized" not in refused.json()["content"]
+        assert refused.status_code == 403
+        assert "unauthorized" not in refused.json()["detail"]
 
 
 async def test_mda_calls_hide_the_tools_the_graph_middleware_hides_from_each_call() -> None:

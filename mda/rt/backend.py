@@ -242,6 +242,8 @@ class Run:
         # What the run tells the backend happened, until the backend takes it.
         self.outbox = Outbox(self.backend)
         self._locals: dict[object, object] = {}
+        # The backend's refusal of one of the run's operations, which fails the run.
+        self.operation_refusal: BackendCallError | None = None
 
     def local[T](self, key: object, make: Callable[[], T]) -> T:
         """Keep a lazily created value for this run alone."""
@@ -290,6 +292,11 @@ class Run:
         self._token, self._worker_grant = adopted.run_token, None
         self.invocation_id = adopted.invocation_id
         self.adopted = adopted.catalog
+
+    def ensure_operations_authorized(self) -> None:
+        """Fail the run even if a code interpreter caught its operation's refusal."""
+        if self.operation_refusal is not None:
+            raise self.operation_refusal
 
     def refresh_token(self, token: str) -> None:
         """Call with ``token`` from now on: the backend signed it again for this run."""
@@ -462,7 +469,10 @@ class OpenSweBackend:
                     if isinstance(exc, httpx2.TransportError) or status in _GATEWAY_STATUSES
                     else BackendCallError
                 )
-                raise error(f"{label} failed ({type(exc).__name__})") from exc
+                failure = error(f"{label} failed ({type(exc).__name__})")
+                if label == "operation" and status in {401, 403}:
+                    self.run.operation_refusal = failure
+                raise failure from exc
         return _json.validate_python(response.json())
 
     def grant(self, spec: OperationSpec) -> str | None:

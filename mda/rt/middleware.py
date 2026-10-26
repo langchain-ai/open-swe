@@ -535,6 +535,7 @@ class BackendRunMiddleware(AgentMiddleware[RunState]):
         return _apply(await self._loop.after_model(state))
 
     async def aafter_agent(self, state: RunState, runtime: Runtime) -> dict[str, object] | None:  # noqa: ARG002
+        self._backend.run.ensure_operations_authorized()
         self._backend.outbox.adopt(state)
         # What the backend has not taken by now waits in the thread's state for its next run.
         return self._carrying(state, await self._after_agent(state))

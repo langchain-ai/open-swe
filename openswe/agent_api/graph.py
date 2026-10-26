@@ -184,6 +184,7 @@ from openswe.agent_api.operations import Injections, invoke
 from openswe.agent_api.report_receipts import Recorded, Recording, ReportReceipts
 from openswe.agent_api.run_parts import RunParts
 from openswe.agent_api.runs import in_graph_context, run_config
+from openswe.agent_api.server import RefusedCallError
 from openswe.agent_api.shell_guards import ShellGuards
 from openswe.agent_api.tokens import RemoteRun, RunSettings
 from openswe.dispatch import COMPLETION_WEBHOOK_URL
@@ -710,9 +711,7 @@ async def run_operation(
 ) -> OperationResult:
     """Do the work of ``tool`` for ``request``, as the run ``config`` names, once ``ready``."""
     if tool is None or request.name in _MDA_TOOLS:
-        return OperationResult(
-            content=f"{request.name} is not one of this run's operations", status="error"
-        )
+        raise RefusedCallError(f"{request.name} is not one of this run's operations")
     unexpected = _unexpected_arguments(tool, request.arguments)
     if unexpected:
         return OperationResult(
@@ -950,9 +949,7 @@ class TokenRun:
     async def operation(self, request: RunOperation) -> OperationResult:
         """Do the work of one of the run's tools: its arguments in, its result out."""
         if self.run.operation_grants and not self.run.granted(request.name, request.grant):
-            return OperationResult(
-                content=f"{request.name} is not one of this run's operations", status="error"
-            )
+            raise RefusedCallError(f"{request.name} is not one of this run's operations")
         if self.legacy:
             session = await self.graph.session(self.run, self.run_id)
             return await session.operation(request)
