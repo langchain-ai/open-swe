@@ -1,11 +1,12 @@
 import asyncio
 import time
+from unittest.mock import AsyncMock
 
 import pytest
 
 from openswe.slack import mda_forwarding
 from openswe.slack.request import SlackRequest
-from openswe.threads import index
+from openswe.threads import index, router
 
 pytestmark = pytest.mark.usefixtures("registry_db")
 
@@ -53,3 +54,75 @@ async def test_expired_requests_are_dropped(monkeypatch: pytest.MonkeyPatch) -> 
     assert thread is not None
     assert list(thread.metadata[mda_forwarding.PENDING_KEY]) == ["2.1"]
     assert await mda_forwarding.recall(THREAD, "1.1") is None
+
+
+@pytest.fixture
+def replies(monkeypatch: pytest.MonkeyPatch) -> AsyncMock:
+    """The error reply the Slack thread gets, as a stand-in."""
+    notify = AsyncMock()
+    monkeypatch.setattr(mda_forwarding, "notify_slack_processing_error", notify)
+    return notify
+
+
+async def test_a_lost_message_is_reported_once_and_never_runs(replies: AsyncMock) -> None:
+    await index.create(THREAD, runtime="mda", metadata={})
+    await mda_forwarding.remember(_request("A"), None, "1.1")
+
+    reported = await asyncio.gather(
+        *(mda_forwarding.report_lost(THREAD, "1.1", "lost") for _ in range(3))
+    )
+
+    assert reported.count(True) == 1
+    [(request, repo, error)] = [call.args for call in replies.await_args_list]
+    assert (request.text, repo) == ("A", None)
+    assert isinstance(error, mda_forwarding.MdaHandoffLost)
+    # The channel asking afterwards starts nothing: the person already heard.
+    assert await mda_forwarding.recall(THREAD, "1.1") is None
+
+
+async def test_a_message_the_channel_took_is_not_reported(replies: AsyncMock) -> None:
+    await index.create(THREAD, runtime="mda", metadata={})
+    await mda_forwarding.remember(_request("A"), None, "1.1")
+    assert await mda_forwarding.recall(THREAD, "1.1") is not None
+
+    assert await mda_forwarding.report_lost(THREAD, "1.1", "lost") is False
+    replies.assert_not_awaited()
+
+
+async def test_the_sweep_reports_messages_the_channel_never_asked_about(
+    monkeypatch: pytest.MonkeyPatch, replies: AsyncMock
+) -> None:
+    await index.create(THREAD, runtime="mda", metadata={})
+    now = time.time()
+    monkeypatch.setattr(time, "time", lambda: now - 120)
+    await mda_forwarding.remember(_request("lost"), None, "1.1")
+    monkeypatch.setattr(time, "time", lambda: now)
+    await mda_forwarding.remember(_request("fresh"), None, "2.1")
+
+    assert await mda_forwarding.sweep_lost_requests() == 1
+    assert await mda_forwarding.sweep_lost_requests() == 0
+
+    [(request, _repo, _error)] = [call.args for call in replies.await_args_list]
+    assert request.text == "lost"
+    thread = await index.get(THREAD)
+    assert thread is not None
+    assert list(thread.metadata[mda_forwarding.PENDING_KEY]) == ["2.1"]
+
+
+async def test_a_claimed_conversation_is_private_until_its_run_says_otherwise(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    local = AsyncMock()
+    # The Agent Server's own copy of the thread, as a stand-in.
+    monkeypatch.setattr(type(router.RUNTIMES), "local", property(lambda _self: local))
+    thread_id = await mda_forwarding.claim_conversation("A1", "T1", "C9", "9.1")
+
+    assert thread_id == mda_forwarding.mda_thread_id("A1", "T1", "C9", "9.1")
+    thread = await index.get(thread_id)
+    assert thread is not None
+    assert thread.metadata["visibility"] == "private"
+    assert thread.metadata["source"] == "slack"
+    assert thread.metadata["channel"] == "slack"
+    local.create.assert_awaited_once_with(thread_id, thread.metadata)
+    # Another app's conversation can't take the Slack thread now.
+    assert await mda_forwarding.claim_conversation("A2", "T1", "C9", "9.1") is None

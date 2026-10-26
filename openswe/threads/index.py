@@ -7,7 +7,7 @@ to the thread's runtimes. Runs, checkpoints and streams stay with the runtime.
 
 import json
 from collections.abc import Awaitable, Callable, Mapping, Sequence
-from datetime import datetime, timedelta
+from datetime import UTC, datetime, timedelta
 from typing import Final, Literal, Self, get_args
 from uuid import uuid7
 
@@ -446,6 +446,34 @@ async def take_entry(thread_id: str, key: str, entry: str) -> JsonValue | None:
         return None
     value = row[0]
     return json.loads(value) if isinstance(value, str) else value
+
+
+async def entries_between(
+    key: str, *, after: float, before: float, limit: int = 200
+) -> list[tuple[str, str]]:
+    """``(thread_id, entry)`` for each ``metadata[key][entry]`` whose ``at`` falls between
+    ``after`` and ``before``, oldest first; only threads updated since ``after`` hold one."""
+    async with transaction() as conn:
+        rows = await conn.execute(
+            text(
+                "SELECT thread_index.thread_id, entry.key FROM thread_index "
+                "CROSS JOIN LATERAL jsonb_each(CASE WHEN jsonb_typeof("
+                "thread_index.metadata -> CAST(:key AS text)) = 'object' "
+                "THEN thread_index.metadata -> CAST(:key AS text) ELSE '{}'::jsonb END) AS entry "
+                "WHERE thread_index.updated_at >= :since "
+                "AND jsonb_typeof(entry.value -> 'at') = 'number' "
+                "AND CAST(entry.value ->> 'at' AS double precision) BETWEEN :after AND :before "
+                "ORDER BY CAST(entry.value ->> 'at' AS double precision) LIMIT :limit"
+            ),
+            {
+                "key": key,
+                "since": datetime.fromtimestamp(after, UTC),
+                "after": after,
+                "before": before,
+                "limit": limit,
+            },
+        )
+        return [(str(thread_id), str(entry)) for thread_id, entry in rows]
 
 
 async def set_status(thread_id: str, status: ThreadStatus) -> None:

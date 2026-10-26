@@ -191,14 +191,19 @@ async def test_events_open_swe_would_not_act_on_start_nothing(
 
 
 async def test_an_unregistered_commenter_starts_nothing(
-    monkeypatch: pytest.MonkeyPatch, prepared: AsyncMock
+    monkeypatch: pytest.MonkeyPatch, prepared: AsyncMock, caplog: pytest.LogCaptureFixture
 ) -> None:
     register_github_logins(monkeypatch)
 
-    response = await _post(_event("issue_comment.created", _comment_payload()))
+    with caplog.at_level("INFO"):
+        response = await _post(_event("issue_comment.created", _comment_payload()))
 
     assert response.json() is None
     prepared.assert_not_awaited()
+    # One line says why the channel was told nothing starts.
+    [record] = [r for r in caplog.records if hasattr(r, "no_run_reason")]
+    assert record.no_run_reason == "Sender is not a registered Open SWE user"
+    assert record.endpoint == "github"
 
 
 async def test_the_public_repository_gate_applies(

@@ -23,6 +23,7 @@ from openswe.dispatch import CHANNEL_METADATA_KEY, COMPLETION_WEBHOOK_URL, prepa
 from openswe.mda_channels.auth import require_mda_channel
 from openswe.slack import mda_forwarding
 from openswe.slack import webhook as service
+from openswe.slack.request import SlackRequest
 from openswe.threads import index
 from openswe.threads.router import channel_run_starting
 from openswe.threads.runtimes import RUNTIMES
@@ -45,22 +46,28 @@ class SlackChannelCall(TypedDict):
     thread: EndpointThread
 
 
+def _no_run(reason: str, **fields: str) -> None:
+    """Answer the channel that the event starts nothing, with one log line saying why."""
+    logger.info(
+        "MDA's Slack channel endpoint answers no run",
+        extra={"endpoint": "slack", "no_run_reason": reason, **fields},
+    )
+
+
 @router.post("/events")
 async def slack_channel_event(call: SlackChannelCall) -> EndpointAnswer | None:
     """The run a forwarded Slack message starts on the channel's thread, or ``None``.
 
     ``None`` when the message wasn't one the backend handed over (the backend
-    gates every message before it forwards one), or when gating posted the reply
-    itself, such as the prompt to connect an account.
+    gates every message before it forwards one), when gating posted the reply
+    itself, such as the prompt to connect an account, or when building the run
+    failed, which the Slack thread hears about.
     """
     event, thread = call["event"], call["thread"]
     key = event.get("key")
     if key not in _MESSAGE_KEYS:
         # Button clicks in MDA-owned threads aren't forwarded yet.
-        logger.info(
-            "MDA's Slack channel event starts no run", extra={"slack_channel_event": str(key)}
-        )
-        return None
+        return _no_run("not a message", slack_channel_event=str(key))
     try:
         thread_id = str(UUID(thread["id"]))
     except (KeyError, ValueError) as error:
@@ -68,15 +75,30 @@ async def slack_channel_event(call: SlackChannelCall) -> EndpointAnswer | None:
     message_ts = event.get("messageTs")
     if not isinstance(message_ts, str) or not message_ts:
         raise HTTPException(status_code=422, detail="The event names no message")
+    fields = {"agent_thread_id": thread_id, "slack_message_ts": message_ts}
 
     remembered = await mda_forwarding.recall(thread_id, message_ts)
     if remembered is None:
         logger.warning(
             "MDA's Slack channel asked about a message the backend didn't hand over",
-            extra={"agent_thread_id": thread_id},
+            extra=fields,
         )
-        return None
+        return _no_run("not handed over", **fields)
     request, repo = remembered
+    try:
+        answer = await _prepare_run(thread_id, request, repo)
+    except Exception as exc:  # noqa: BLE001 - the person hears about it instead
+        # The request was taken: nothing else will tell the Slack thread.
+        await service.notify_slack_processing_error(request, repo.repo if repo else None, exc)
+        return _no_run("building the run failed", **fields)
+    if answer is None:
+        return _no_run("no run prepared", **fields)
+    return answer
+
+
+async def _prepare_run(
+    thread_id: str, request: SlackRequest, repo: common.SlackRepoResolution | None
+) -> EndpointAnswer | None:
     prepared = await service.prepare_slack_channel_run(request, repo)
     if prepared is None:
         return None
