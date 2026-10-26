@@ -1052,21 +1052,30 @@ export function useAgentThreadWorkingTreeDiff(
 
 export function useWorkflowApprovals(
   threadId: string,
-  options: { pollWhileActive?: boolean } = {}
+  { pollWhileActive = false }: { pollWhileActive?: boolean } = {}
 ) {
-  return useQuery({
+  const query = useQuery({
     queryKey: agentThreadKeys.workflowApprovals(threadId),
     queryFn: () => agentsApi.listWorkflowApprovals(threadId),
     enabled: Boolean(threadId),
-    refetchInterval: (query) =>
-      options.pollWhileActive ||
-      query.state.data?.approvals.some(
+    refetchInterval: (current) =>
+      pollWhileActive ||
+      current.state.data?.approvals.some(
         (approval) => approval.status === "pending"
       )
         ? 3000
         : false,
     retry: false,
   })
+  const previous = useRef({ threadId, pollWhileActive })
+  const refetch = query.refetch
+  useEffect(() => {
+    const was = previous.current
+    previous.current = { threadId, pollWhileActive }
+    if (was.threadId === threadId && was.pollWhileActive && !pollWhileActive)
+      void refetch()
+  }, [threadId, pollWhileActive, refetch])
+  return query
 }
 
 export function useWorkflowApprovalDecision(threadId: string) {
