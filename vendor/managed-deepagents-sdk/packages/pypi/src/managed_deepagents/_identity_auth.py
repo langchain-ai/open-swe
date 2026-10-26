@@ -67,6 +67,12 @@ from managed_deepagents._thread_record import (
     parse_thread_record,
     strip_thread_record_keys,
 )
+from managed_deepagents.service_token import (
+    SERVICE_TOKEN_HEADER,
+    SERVICE_USER,
+    ServiceTokenError,
+    verify_service_token,
+)
 
 #: Value shapes the ``auth.on.threads`` / ``auth.on.crons`` handlers receive.
 ThreadsValue = (
@@ -113,6 +119,10 @@ class ManagedUser(ManagedUserRequired, total=False):
     mda_identity_subject: str
     #: Agent Auth principal UUID when Trigger ``identity_context`` already resolved one.
     mda_agent_auth_principal_id: str
+    #: The one thread a service token lets its caller act on.
+    mda_service_thread_id: str
+    #: The channel conversation that owns that thread (its ``owner`` metadata).
+    mda_service_owner: str
 
 
 if TYPE_CHECKING:
@@ -392,6 +402,12 @@ def build_managed_auth(identity: IdentityDefinitionLike) -> Auth:
 
 
 async def _scope_threads(ctx: AuthContext, value: ThreadsValue) -> FilterType | None:
+    if _field(ctx.user, "mda_service_thread_id"):
+        return _scope_service_thread(ctx.action, value, ctx.user)
+    return _scope_caller_threads(ctx, value)
+
+
+def _scope_caller_threads(ctx: AuthContext, value: ThreadsValue) -> FilterType | None:
     # Let Studio inspect every deployment thread so channel-triggered runs
     # and their interrupts are visible there, and answer interrupts on any
     # thread, which channels link to. Keep other mutations owner-scoped:
@@ -428,6 +444,65 @@ async def _scope_threads(ctx: AuthContext, value: ThreadsValue) -> FilterType | 
         # whose upstream TypedDict does not declare ``metadata``.
         _stamp_thread_metadata(cast("JsonObject", value), user, key, ctx.action)
     return {"owner": key}
+
+
+def _resolve_service_token_user(headers: Mapping[str, object]) -> ManagedUser | None:
+    """The caller a service token names, or ``None`` without one.
+
+    A present token decides alone: one MDA can't trust is refused, never passed on
+    to another scheme, and it may not carry the reserved identity headers.
+    """
+    token = str(headers.get(SERVICE_TOKEN_HEADER) or "").strip()
+    if not token:
+        return None
+    if _has_handoff_headers(headers) or headers.get(INGRESS_SECRET_HEADER):
+        raise ManagedAuthError(401, "a service token can't carry reserved MDA identity headers")
+    try:
+        grant = verify_service_token(token)
+    except ServiceTokenError as error:
+        # The reason is a fixed label; the token itself is never logged.
+        logger.info("service token refused (%s)", logger.log_identifier(str(error)))
+        raise ManagedAuthError(401, "invalid service token") from None
+    except TypeError:
+        logger.error("service token refused: MDA_SERVICE_SECRET is malformed")
+        raise ManagedAuthError(401, "invalid service token") from None
+    return {
+        "identity": SERVICE_USER,
+        "permissions": [],
+        "mda_user_id": SERVICE_USER,
+        "mda_user_kind": "service",
+        "mda_service_thread_id": grant.thread_id,
+        "mda_service_owner": grant.owner,
+    }
+
+
+def _scope_service_thread(action: str, value: object, user: object) -> FilterType:
+    """A service token's caller: read, run on and stop its one thread, as its owner sees it.
+
+    The filter matches only a thread its channel conversation owns, and the
+    thread keeps that owner. The caller is not the conversation, so it can't
+    write the thread's record.
+    """
+    thread_id = str(_field(user, "mda_service_thread_id") or "")
+    owner = str(_field(user, "mda_service_owner") or "")
+    allowed = action in {"read", "create_run"} or (
+        action == "update" and _is_single_thread_interrupt(value)
+    )
+    if not allowed or not thread_id or not owner or not isinstance(value, dict):
+        raise _http_exception(
+            ManagedAuthError(403, "a service token only reads, runs on and stops its thread")
+        )
+    if _canonical_uuid(value.get("thread_id")) != thread_id:
+        raise _http_exception(ManagedAuthError(403, "the service token names another thread"))
+    _stamp_thread_metadata(cast("JsonObject", value), user, owner, action)
+    return {"owner": owner}
+
+
+def _canonical_uuid(value: object) -> str | None:
+    try:
+        return str(UUID(str(value))) if value is not None else None
+    except ValueError:
+        return None
 
 
 def _is_single_thread_interrupt(value: object) -> bool:
@@ -536,7 +611,10 @@ async def _authenticate(
             raise ManagedAuthError(403, "Schedule access is not permitted") from err
         if schedule_user is not None:
             return schedule_user
-        managed_handoff = _resolve_managed_handoff_user(normalized)
+        # A service token decides alone; without one, the internal handoff may.
+        managed_handoff = _resolve_service_token_user(normalized) or _resolve_managed_handoff_user(
+            normalized
+        )
         if managed_handoff is not None:
             return managed_handoff
         if http == "backend" or _has_valid_ingress_secret(normalized):

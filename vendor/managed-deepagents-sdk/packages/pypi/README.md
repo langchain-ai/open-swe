@@ -1411,6 +1411,33 @@ async def linear_runs(request: Request) -> EndpointAnswer | None:
     return {"input": f"Plan {issue['title'] if issue else 'the issue'}"}
 ```
 
+### What `MDA_SERVICE_SECRET` does
+
+The secret your deployment shares with the services its endpoints call does two things, and nothing else:
+
+| Direction | What it proves |
+|---|---|
+| Your deployment → your service | Each endpoint call is MDA's and unchanged: MDA signs it (above) |
+| Your service → your deployment | A service token: the service may act on one channel conversation's thread (below) |
+
+MDA accepts it on no other request, and it makes no one a user. Rotate it by listing the new secret first, comma-separated, while the old one is still in use.
+
+### Start a run from your service
+
+A service that answers a channel's endpoint already decides what every run in that conversation gets. With a service token, it can also start one there itself, through the Agent Server's own API, for example when a person follows up outside the channel. The token names one thread and the conversation that owns it: the thread's `owner` metadata, `mda:source-thread:<provider>:<key>`. It lasts at most five minutes and lets its holder read that thread, start runs on it and cancel them, as `mda:service`; nothing else. The thread keeps its owner, so the conversation's later messages still reach it, and the service can't change the thread's record.
+
+The token is signed with a key derived from `MDA_SERVICE_SECRET` for this purpose only, so an endpoint call's signature never stands in for one. Send it in `x-mda-service-token`, with no `x-auth-scheme` header and none of the reserved `x-mda-*` identity headers; a token MDA can't verify is refused with 401, and anything outside its thread with 403.
+
+```python
+from langgraph_sdk import get_client
+from managed_deepagents.service_token import SERVICE_TOKEN_HEADER, mint_service_token
+
+thread = await client.threads.get(thread_id)
+token = mint_service_token(thread_id=thread_id, owner=thread["metadata"]["owner"])
+runs = get_client(url=deployment_url, headers={SERVICE_TOKEN_HEADER: token})
+await runs.runs.create(thread_id, "agent", input={"messages": [{"role": "user", "content": "Also update the docs"}]})
+```
+
 ## Project Shape
 
 ```text
