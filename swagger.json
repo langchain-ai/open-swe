@@ -22647,23 +22647,6 @@
         "summary": "Slack Code Channel Command"
       }
     },
-    "/webhooks/slack/commands": {
-      "post": {
-        "description": "Answer a single `/oswe` question, ephemerally and without a Slack thread.",
-        "operationId": "slack_command_webhooks_slack_commands_post",
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {}
-              }
-            },
-            "description": "Successful Response"
-          }
-        },
-        "summary": "Slack Command"
-      }
-    },
     "/webhooks/slack/interactivity": {
       "post": {
         "description": "Handle Slack Block Kit interactions.",

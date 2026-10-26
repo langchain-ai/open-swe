@@ -6,7 +6,7 @@ import re
 from time import time_ns
 from typing import Literal, TypedDict, cast
 
-from fastapi import APIRouter, HTTPException, Response
+from fastapi import APIRouter, HTTPException
 
 from openswe.act_as import slack as act_as
 from openswe.expedited_review import slack as expedited_review
@@ -21,9 +21,7 @@ from openswe.slack import suggested_actions
 from openswe.slack import webhook as service
 from openswe.slack.allowed_bots import resolve_allowed_slack_bot
 from openswe.slack.ask import (
-    ASK_COMMAND,
     BY_THE_WAY_COMMAND,
-    MAX_QUESTION_CHARS,
     SlackAskRequest,
     ask_thread_id,
     process_slack_ask,
@@ -865,61 +863,6 @@ async def slack_webhook(
         return ignored("Duplicate Slack event delivery")
 
     return await answer_slack_request(target, dispatch)
-
-
-@router.post("/webhooks/slack/commands", response_model=None)
-async def slack_command(
-    request: common.Request, background_tasks: common.BackgroundTasks
-) -> SlashCommandResponse | Response:
-    """Answer a single `/oswe` question, ephemerally and without a Slack thread."""
-    body = await request.body()
-    _verify_signature(request, body, "commands")
-
-    form = common.parse_qs(body.decode("utf-8"))
-    value = lambda key: str((form.get(key) or [""])[0]).strip()  # noqa: E731
-    await EventLog.record(
-        request,
-        body,
-        "slack",
-        event_type=value("command"),
-        delivery_id=value("trigger_id"),
-        refs=EventRefs(slack_user_id=value("user_id"), slack_channel_id=value("channel_id")),
-    )
-    channel_id = value("channel_id")
-    user_id = value("user_id")
-    command = value("command")
-    question = value("text")
-    if not (channel_id and user_id):
-        return ephemeral("That command was invalid.")
-    if not question:
-        return ephemeral(
-            f"Ask a question: `{command or ASK_COMMAND} how does thread routing work?`"
-        )
-    if len(question) > MAX_QUESTION_CHARS:
-        return ephemeral(
-            f"That question is too long for `{command or ASK_COMMAND}`. "
-            "Tag Open SWE in a message instead."
-        )
-
-    invocation = value("trigger_id") or hashlib.sha256(body).hexdigest()
-    if not await common.claim_slack_event(f"slack-ask:{invocation}"):
-        return ephemeral("Open SWE is already working on that question.")
-    thread_id = ask_thread_id(channel_id, user_id, invocation)
-    background_tasks.add_task(
-        process_slack_ask,
-        SlackAskRequest(
-            channel_id=channel_id,
-            user_id=user_id,
-            question=question,
-            thread_id=thread_id,
-            command=command or ASK_COMMAND,
-            team_id=value("team_id"),
-            response_url=value("response_url"),
-        ),
-    )
-    # Empty, deliberately: the acknowledgement goes out through `response_url`
-    # instead, which is the only message a later reply can replace.
-    return Response(status_code=200)
 
 
 @router.post("/webhooks/slack/code-channel-commands")

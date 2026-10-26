@@ -162,16 +162,7 @@ Open SWE answers `@`-mentions in Slack and posts its progress there, and Slack i
         "bot_user": {
             "display_name": "Open SWE",
             "always_online": true
-        },
-        "slash_commands": [
-            {
-                "command": "/oswe",
-                "url": "https://<your-url>/webhooks/slack/commands",
-                "description": "Ask Open SWE",
-                "usage_hint": "[your request or question]",
-                "should_escape": false
-            }
-        ]
+        }
     },
     "oauth_config": {
         "redirect_urls": [
@@ -233,6 +224,8 @@ Open SWE answers `@`-mentions in Slack and posts its progress there, and Slack i
 
 </details>
 
+Existing apps that registered `/oswe` must remove it under **Slash Commands** in the Slack app settings; updating Open SWE alone does not unregister it in Slack.
+
 2. Install the app to your workspace.
 3. Add to the environment (step 6):
 
@@ -243,8 +236,6 @@ SLACK_APP_ID=""           # Basic Information → App ID (A...); Incidents accep
 SLACK_BOT_USER_ID=""      # the bot's member id (open the bot's profile in Slack → ⋮ → Copy member ID)
 SLACK_BOT_USERNAME=""     # the bot's handle, e.g. open-swe
 ```
-
-`/oswe <request or question>` answers or carries out a request without starting a Slack thread: replies are ephemeral, visible only to whoever asked, and the immediate acknowledgement links to the thread in the web dashboard. Each person's commands in a channel share one private scratch thread, kept out of everyone's thread list; continuing it on the web makes it an ordinary thread. Substantial work belongs in a thread of its own, which Open SWE starts in the channel.
 
 Both Slack URLs must point at the Open SWE deployment, and Block Kit buttons only work with Interactivity enabled and pointed at `/webhooks/slack/interactivity`. Slack messages are routed to the thread's repository, a `repo:owner/name` token in the message, or the team default repository. Open SWE refuses Slack Connect channels (`is_ext_shared`) and fails closed when it cannot verify a channel.
 
