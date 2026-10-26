@@ -111,9 +111,9 @@ class FixIntent(_PullRequestIntentBase):
             url=url,
             scope="repair",
             conflicts=context is None
-            or context.mergeable is False
-            or context.merge_state == "dirty",
-            failing_ci=context is None or context.ci == "failing",
+            or context.mergeable is not True
+            or context.merge_state in {"dirty", "unknown", ""},
+            failing_ci=context is None or context.ci in {"failing", "unknown", "pending"},
         )
         if self.context is None:
             return text
