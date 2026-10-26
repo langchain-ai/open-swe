@@ -13,7 +13,7 @@ import logging
 import time
 import warnings
 from collections.abc import Mapping, Sequence
-from functools import cache, partial
+from functools import cache, cached_property, partial
 from typing import Any, Final, Self, cast
 from uuid import UUID
 
@@ -26,6 +26,7 @@ _MODEL_ROUTING_SPLIT = 0.5
 from langgraph.graph.state import RunnableConfig
 from langgraph.runtime import Runtime
 from langgraph_sdk import get_client
+from runtime_api import box
 from runtime_api.catalog import (
     SEARCH_TOOLS,
     CliResultRules,
@@ -57,6 +58,7 @@ from langchain_core.tools import tool as as_tool
 from langchain_quickjs._ptc import is_valid_ptc_tool_name, to_camel_case
 from langsmith.sandbox import SandboxRetryableConnectionError
 
+from openswe.agent_api.tokens import AGENT_TURN_KEY, AgentTurnSettings
 from openswe.analytics.usage import record_agent_invocation_usage
 from openswe.bridge.cli_result import cli_result
 from openswe.bridge.constants import LOCAL_ARTIFACTS_DIR, BridgeClient
@@ -71,7 +73,6 @@ from openswe.dashboard.agent_overrides import (
 )
 from openswe.dashboard.options import (
     SUPPORTED_MODEL_IDS,
-    ModelOption,
     available_requested_models,
     default_vision_model_pair,
     gate_fable_model,
@@ -1044,50 +1045,63 @@ def _make_model_or_defer(
 
 
 class PrepareAgentRunMiddleware(BasePrepareRunMiddleware):
+    """Ready an agent run's turn: its prompt, model and route, and who it speaks with.
+
+    Built from what starting the run decided (``AgentTurnSettings``), so preparing a turn
+    plans nothing. A thread whose box MDA keeps (``box``, its name) is not reached here:
+    its work dir is the box's own, and MDA readied the box as it opened it.
+    """
+
     def __init__(
         self,
-        *,
-        thread_id: str,
         config: RunnableConfig,
-        profile_login: str | None,
+        turn: AgentTurnSettings,
+        *,
         repo_instructions: str | None,
-        model_id: str,
-        effort: str | None,
-        title_model: BaseChatModel,
-        source: str,
-        user_email: str,
-        linear_project_id: str,
-        linear_issue_number: str,
-        draft_prs: bool,
-        admin_workspaces: bool,
-        sole_writer: bool = False,
-        model_selection: ModelSelectionMiddleware | None = None,
-        routing_defaults: Mapping[str, tuple[str, str | None]] | None = None,
-        credential_login: str | None = None,
-        requested_models: Mapping[str, ModelOption] | None = None,
-        saved_requested_model: str | None = None,
-        bridge_client: BridgeClient | None = None,
+        box: str | None = None,
     ) -> None:
-        self._bridge_client = bridge_client
-        self._saved_requested_model = saved_requested_model
-        self._requested_models = requested_models
-        self._thread_id = thread_id
+        cfg = RunConfig.from_config(config)
+        if cfg.thread_id is None:
+            raise ValueError("An agent run needs a thread")
+        linear_issue = as_json_object(cfg.linear_issue.model_dump() if cfg.linear_issue else None)
         self._config = config
-        self._profile_login = profile_login
-        self._credential_login = credential_login
+        self._turn = turn
+        self._thread_id = cfg.thread_id
+        self._box = box
+        self._bridge_client = turn.bridge_client
+        self._saved_requested_model = turn.saved_requested_model
+        self._requested_models = (
+            available_requested_models(fable_enabled=turn.fable_enabled)
+            if turn.offers_requested_models
+            else None
+        )
+        self._profile_login = turn.profile_login
+        self._credential_login = turn.credential_login
         self._repo_instructions = repo_instructions
-        self._model_id = model_id
-        self._effort = effort
-        self._title_model = title_model
-        self._source = source
-        self._user_email = user_email
-        self._linear_project_id = linear_project_id
-        self._linear_issue_number = linear_issue_number
-        self._draft_prs = draft_prs
-        self._admin_workspaces = admin_workspaces
-        self._sole_writer = sole_writer
-        self._model_selection = model_selection
-        self._routing_defaults = dict(routing_defaults or {})
+        self._model_id = cfg.resolved_agent_model_id or ""
+        self._effort = cfg.resolved_agent_effort
+        self._source = cfg.source or "dashboard"
+        self._user_email = cfg.user_email or ""
+        self._linear_project_id = linear_issue.get("linear_project_id", "")
+        self._linear_issue_number = linear_issue.get("linear_issue_number", "")
+        self._draft_prs = cfg.draft_prs is True
+        self._admin_workspaces = turn.admin_workspaces
+        self._sole_writer = turn.sole_writer
+        self._model_selection = ModelSelectionMiddleware(
+            turn.routing.route_model_ids, routing_mode=turn.routing.mode
+        )
+        self._routing_defaults = dict(turn.route_models)
+
+    @cached_property
+    def _title_model(self) -> BaseChatModel:
+        turn = self._turn
+        return _make_model_or_defer(
+            turn.title_model_id,
+            use_gateway=turn.use_gateway,
+            **provider_model_kwargs(
+                turn.title_model_id, turn.title_effort, max_tokens=TITLE_GENERATION_MAX_TOKENS
+            ),
+        )
 
     def _recent_context_audience(self, cfg: RunConfig) -> RecentContextAudience | None:
         if (
@@ -1194,6 +1208,30 @@ class PrepareAgentRunMiddleware(BasePrepareRunMiddleware):
 
     async def _rejoin(self, state: PrepareRunState, runtime: Runtime) -> None:  # noqa: ARG002
         await resolve_github_token(self._config, self._thread_id)
+
+    async def _attach_sandbox(
+        self, identity: asyncio.Task[CollaboratorIdentity | None]
+    ) -> tuple[CollaboratorIdentity | None, SandboxBackendProtocol]:
+        """Connect to a box the backend keeps, such as a bridged machine, alongside ``identity``."""
+        sandbox_proxy = get_or_create_sandbox_backend_proxy(self._thread_id)
+        sandbox_task = asyncio.create_task(
+            retry_transient_sandbox_errors(
+                sandbox_proxy.ready,
+                description="Sandbox attach",
+                max_elapsed=SANDBOX_ATTACH_MAX_ELAPSED,
+            )
+        )
+        try:
+            async with aphase(self._thread_id, "prepare.await_sandbox"):
+                return await asyncio.gather(identity, sandbox_task)
+        except (SandboxUnreachableError, SandboxRetryableConnectionError) as exc:
+            # The run is about to die with no sandbox; make sure the user hears
+            # why rather than getting silence.
+            await post_sandbox_unreachable_notification(
+                self._config or {},
+                sandbox_id=exc.sandbox_id if isinstance(exc, SandboxUnreachableError) else None,
+            )
+            raise
 
     async def _prepare_with_decision(
         self, state: PrepareRunState, runtime: Runtime, decision: ModelSelectionDecision
@@ -1318,41 +1356,26 @@ class PrepareAgentRunMiddleware(BasePrepareRunMiddleware):
         triggering_user_identity_task = asyncio.create_task(
             resolve_triggering_user_identity(as_json_object(self._config), github_token)
         )
-        sandbox_proxy = get_or_create_sandbox_backend_proxy(self._thread_id)
-        sandbox_task = asyncio.create_task(
-            retry_transient_sandbox_errors(
-                sandbox_proxy.ready,
-                description="Sandbox attach",
-                max_elapsed=SANDBOX_ATTACH_MAX_ELAPSED,
+        if self._box is not None:
+            triggering_user_identity = await triggering_user_identity_task
+            work_dir, bridged = box.WORK_DIR, False
+        else:
+            triggering_user_identity, sandbox_backend = await self._attach_sandbox(
+                triggering_user_identity_task
             )
-        )
-        try:
-            async with aphase(self._thread_id, "prepare.await_sandbox"):
-                triggering_user_identity, sandbox_backend = await asyncio.gather(
-                    triggering_user_identity_task,
-                    sandbox_task,
+            async with aphase(self._thread_id, "prepare.work_dir"):
+                work_dir = await resolve_sandbox_work_dir(sandbox_backend)
+            bridged = Bridge.bridge_id_of(sandbox_backend.id) is not None
+            if bridged and self._bridge_client == "desktop":
+                schedule_worktree_branch_rename(
+                    thread_id=self._thread_id,
+                    backend=sandbox_backend,
+                    messages=state.get("messages") or [],
+                    model=self._title_model,
                 )
-        except (SandboxUnreachableError, SandboxRetryableConnectionError) as exc:
-            # The run is about to die with no sandbox; make sure the user hears
-            # why rather than getting silence.
-            await post_sandbox_unreachable_notification(
-                self._config or {},
-                sandbox_id=exc.sandbox_id if isinstance(exc, SandboxUnreachableError) else None,
-            )
-            raise
         del github_token
         if stale_workspace := take_stale_boot(self._thread_id):
             await warn_stale_workspace(self._config or {}, self._thread_id, stale_workspace)
-        async with aphase(self._thread_id, "prepare.work_dir"):
-            work_dir = await resolve_sandbox_work_dir(sandbox_backend)
-        bridged = Bridge.bridge_id_of(sandbox_backend.id) is not None
-        if bridged and self._bridge_client == "desktop":
-            schedule_worktree_branch_rename(
-                thread_id=self._thread_id,
-                backend=sandbox_backend,
-                messages=state.get("messages") or [],
-                model=self._title_model,
-            )
         async with aphase(self._thread_id, "prepare.workspace"):
             workspace = await load_workspace(workspace_slug(cfg))
         async with aphase(self._thread_id, "prepare.participants"):
@@ -1423,55 +1446,6 @@ class PrepareAgentRunMiddleware(BasePrepareRunMiddleware):
                 )
                 sender_messages = self._participants_messages(state, participants)
         recent_thread_context = await recent_context_task if recent_context_task is not None else ""
-        try:
-            async with aphase(self._thread_id, "prepare.record_run"):
-                await client.threads.update(
-                    thread_id=self._thread_id,
-                    metadata={
-                        "agent_kind": "agent",
-                        "model": attribution_model_id,
-                        "effort": attribution_effort,
-                        "source": self._source,
-                        **(
-                            {"model_route": attribution_route}
-                            if attribution_route is not None
-                            else {}
-                        ),
-                    },
-                )
-                if cfg.invocation_id:
-                    await record_agent_invocation_usage(
-                        invocation_id=cfg.invocation_id,
-                        thread_id=self._thread_id,
-                        github_login=self._profile_login,
-                        github_user_id=(
-                            triggering_user_identity.github_user_id
-                            if triggering_user_identity
-                            and triggering_user_identity.github_user_id is not None
-                            else cfg.github_user_id
-                        ),
-                        user_email=self._user_email,
-                        display_name=(
-                            triggering_user_identity.analytics_display_name
-                            if triggering_user_identity
-                            and triggering_user_identity.analytics_display_name
-                            else None
-                        ),
-                        display_name_source=(
-                            triggering_user_identity.display_name_source
-                            if triggering_user_identity
-                            else None
-                        ),
-                        model_id=attribution_model_id,
-                        effort=attribution_effort,
-                        source=self._source,
-                        repository=cfg.repo_full_name or None,
-                    )
-        except Exception:
-            logger.debug(
-                "Failed to record agent usage for thread %s", self._thread_id, exc_info=True
-            )
-
         return {
             "work_dir": work_dir,
             "requested_model": requested_model,
@@ -1510,6 +1484,56 @@ class PrepareAgentRunMiddleware(BasePrepareRunMiddleware):
                 recent_thread_context=recent_thread_context,
             ),
         }
+
+
+async def record_agent_run(
+    config: RunnableConfig,
+    turn: AgentTurnSettings,
+    *,
+    model_id: str | None,
+    effort: str | None,
+    route: str | None,
+) -> None:
+    """Record what an agent run's turn runs as: on the thread, and in usage."""
+    cfg = RunConfig.from_config(config)
+    thread_id = cfg.thread_id
+    if thread_id is None:
+        return
+    model_id = model_id or cfg.resolved_agent_model_id
+    effort = effort or cfg.resolved_agent_effort
+    source = cfg.source or "dashboard"
+    async with aphase(thread_id, "run_started.record_run"):
+        await client.threads.update(
+            thread_id=thread_id,
+            metadata={
+                "agent_kind": "agent",
+                "model": model_id,
+                "effort": effort,
+                "source": source,
+                **({"model_route": route} if route is not None else {}),
+            },
+        )
+        if not cfg.invocation_id or model_id is None:
+            return
+        github_token, _expires_at = await resolve_github_token(config, thread_id)
+        identity = await resolve_triggering_user_identity(as_json_object(config), github_token)
+        await record_agent_invocation_usage(
+            invocation_id=cfg.invocation_id,
+            thread_id=thread_id,
+            github_login=turn.profile_login,
+            github_user_id=identity.github_user_id
+            if identity is not None and identity.github_user_id is not None
+            else cfg.github_user_id,
+            user_email=cfg.user_email or "",
+            display_name=identity.analytics_display_name
+            if identity is not None and identity.analytics_display_name
+            else None,
+            display_name_source=identity.display_name_source if identity is not None else None,
+            model_id=model_id,
+            effort=effort,
+            source=source,
+            repository=cfg.repo_full_name or None,
+        )
 
 
 async def plan_agent(config: RunnableConfig, surface: ToolSurface) -> None:
@@ -1586,9 +1610,6 @@ async def plan_agent(config: RunnableConfig, surface: ToolSurface) -> None:
         fable_enabled = settings.fable_enabled
 
     slack_ask_mode = _slack_ask_mode(cfg)
-    linear_issue = as_json_object(cfg.linear_issue.model_dump() if cfg.linear_issue else None)
-    linear_project_id = linear_issue.get("linear_project_id", "")
-    linear_issue_number = linear_issue.get("linear_issue_number", "")
 
     (model_id, profile_effort), (subagent_model_id, subagent_effort) = model_defaults
     for route, stored_route in thread_settings.get("routing_models", {}).items():
@@ -1732,11 +1753,6 @@ async def plan_agent(config: RunnableConfig, surface: ToolSurface) -> None:
         subagent_effort,
         max_tokens=DEFAULT_LLM_MAX_TOKENS,
     )
-    title_model_kwargs = provider_model_kwargs(
-        title_model_id,
-        title_effort,
-        max_tokens=TITLE_GENERATION_MAX_TOKENS,
-    )
 
     def make_fallback_model(primary_model_id: str) -> BaseChatModel | None:
         fallback = fallback_model_choice(primary_model_id)
@@ -1754,7 +1770,6 @@ async def plan_agent(config: RunnableConfig, surface: ToolSurface) -> None:
     configurable["source"] = source
     configurable["resolved_agent_model_id"] = model_id
     configurable["resolved_agent_effort"] = profile_effort
-    user_email = cfg.user_email or ""
 
     async with aphase(thread_id, "factory.admin_thread"):
         admin_thread = await _admin_thread(config, profile_login)
@@ -1916,33 +1931,26 @@ async def plan_agent(config: RunnableConfig, surface: ToolSurface) -> None:
         "default": model_id,
     }
     model_selection = ModelSelectionMiddleware(route_model_ids, routing_mode=model_routing_mode)
-    title_model = _make_model_or_defer(
-        title_model_id,
-        use_gateway=use_gateway,
-        **title_model_kwargs,
-    )
-    run_preparation = PrepareAgentRunMiddleware(
-        credential_login=credential_login,
-        thread_id=thread_id,
-        config=config,
+    # What preparing each turn reads, signed into the run's token (``RunSettings.agent``).
+    turn = AgentTurnSettings(
         profile_login=profile_login,
-        repo_instructions=repo_instructions,
-        model_id=model_id,
-        effort=profile_effort,
-        title_model=title_model,
-        source=source,
-        user_email=user_email,
-        linear_project_id=linear_project_id,
-        linear_issue_number=linear_issue_number,
-        draft_prs=sender_draft_prs,
+        credential_login=credential_login,
         admin_workspaces=admin_thread,
         sole_writer=tool_access.sole,
-        model_selection=model_selection,
-        routing_defaults=routing_defaults,
-        requested_models=requested_models,
+        title_model_id=title_model_id,
+        title_effort=title_effort,
+        use_gateway=bool(use_gateway),
+        routing=RoutingRules(mode=model_routing_mode, route_model_ids=route_model_ids),
+        route_models=routing_defaults,
+        offers_requested_models=requested_models is not None,
+        fable_enabled=fable_enabled,
         saved_requested_model=thread_settings.get("requested_model"),
         bridge_client=bridge_client,
+        review_guide=guide is not None,
+        task_worker=task_coordination is not None and task_coordination.is_worker,
     )
+    configurable[AGENT_TURN_KEY] = turn.model_dump(mode="json")
+    run_preparation = PrepareAgentRunMiddleware(config, turn, repo_instructions=repo_instructions)
     subagent_tools = [
         tool
         for tool in static_tools
@@ -2013,6 +2021,7 @@ async def plan_agent(config: RunnableConfig, surface: ToolSurface) -> None:
             reply=ReplyRules(
                 tool=reply_tool,
                 no_reply_tool=no_reply_tool,
+                surface=initial_surface,
                 replies=sorted({*CARD_TOOLS, *(GUIDE_REPLY_TOOLS if guide is not None else ())}),
                 nudge=reply_nudge(reply_tool, no_reply_tool),
                 nudge_sender=REPLY_GUARD["id"],

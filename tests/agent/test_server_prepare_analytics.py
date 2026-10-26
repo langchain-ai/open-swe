@@ -1,8 +1,8 @@
-"""Analytics wiring in ``PrepareAgentRunMiddleware._prepare``.
+"""Analytics wiring in ``record_agent_run``, which records an agent turn's start.
 
-Covers the identity data the middleware hands to ``record_agent_invocation_usage``
-across public and private thread scopes, including the public GitHub profile
-lookup hit / null-name / failure / cache paths.
+Covers the identity data it hands to ``record_agent_invocation_usage`` across public
+and private thread scopes, including the public GitHub profile lookup hit / null-name /
+failure / cache paths.
 """
 
 import json
@@ -10,10 +10,9 @@ from typing import Any, cast
 from unittest.mock import MagicMock
 
 import pytest
-from langgraph.runtime import Runtime
 
 import openswe.server as server
-from openswe.middleware.prepare_run import PrepareRunState
+from openswe.agent_api.tokens import AgentTurnSettings
 from openswe.utils import ttl_cache
 
 _INSTALLATION_TOKEN = "installation-token"
@@ -46,11 +45,6 @@ class _FakeGitHubClient:
         return self._responses.pop(0)
 
 
-class _ReadyProxy:
-    async def ready(self) -> Any:
-        return MagicMock()
-
-
 @pytest.fixture(autouse=True)
 def _clear_public_profile_cache() -> None:
     ttl_cache.clear()
@@ -65,22 +59,11 @@ def github_client(monkeypatch: pytest.MonkeyPatch) -> _FakeGitHubClient:
     return client
 
 
-def _middleware(config: dict[str, Any], *, credential_login: str | None = None) -> Any:
-    return server.PrepareAgentRunMiddleware(
-        thread_id="thread-1",
-        config=cast(Any, config),
+def _turn(config: dict[str, Any], *, credential_login: str | None = None) -> AgentTurnSettings:
+    return AgentTurnSettings(
         profile_login=config["configurable"].get("github_login"),
-        repo_instructions=None,
-        model_id="openai:gpt-5",
-        effort=None,
-        title_model=MagicMock(),
-        source=config["configurable"]["source"],
-        user_email="",
-        linear_project_id="",
-        linear_issue_number="",
-        draft_prs=False,
-        admin_workspaces=False,
         credential_login=credential_login,
+        title_model_id="openai:gpt-5",
     )
 
 
@@ -99,21 +82,6 @@ def prepare_harness(monkeypatch: pytest.MonkeyPatch) -> dict[str, Any]:
         harness["recorded"] = kwargs
 
     monkeypatch.setattr(server, "record_agent_invocation_usage", fake_record_agent_invocation_usage)
-    monkeypatch.setattr(server, "schedule_thread_title_generation", lambda **kwargs: None)
-
-    monkeypatch.setattr(
-        server, "get_or_create_sandbox_backend_proxy", lambda thread_id: _ReadyProxy()
-    )
-
-    async def fake_work_dir(backend: Any) -> str:
-        return "/workspace"
-
-    monkeypatch.setattr(server, "resolve_sandbox_work_dir", fake_work_dir)
-    monkeypatch.setattr(server, "load_workspace", _async_none)
-    monkeypatch.setattr(server, "_resolve_prompt_default_repo", _async_none)
-    monkeypatch.setattr(server, "_resolve_user_custom_instructions", _async_none)
-    monkeypatch.setattr(server, "_thread_participant_identities", _async_list)
-    monkeypatch.setattr(server, "construct_system_prompt", lambda *args, **kwargs: "system prompt")
 
     class _Threads:
         async def get(self, thread_id: str) -> dict[str, Any]:
@@ -124,14 +92,6 @@ def prepare_harness(monkeypatch: pytest.MonkeyPatch) -> dict[str, Any]:
 
     monkeypatch.setattr(server, "client", MagicMock(threads=_Threads()))
     return harness
-
-
-async def _async_none(*args: Any, **kwargs: Any) -> None:
-    return None
-
-
-async def _async_list(*args: Any, **kwargs: Any) -> list[Any]:
-    return []
 
 
 def _slack_config(**extra: Any) -> dict[str, Any]:
@@ -151,9 +111,9 @@ def _slack_config(**extra: Any) -> dict[str, Any]:
     return {"configurable": configurable}
 
 
-async def _prepare(middleware: Any) -> dict[str, Any]:
-    return await middleware._prepare(
-        cast(PrepareRunState, {"messages": []}), cast(Runtime[Any], MagicMock())
+async def _record(config: dict[str, Any], turn: AgentTurnSettings) -> None:
+    await server.record_agent_run(
+        cast(Any, config), turn, model_id="openai:gpt-5", effort=None, route=None
     )
 
 
@@ -168,8 +128,8 @@ async def test_private_scope_uses_oauth_identity_and_skips_public_lookup(
         )
     )
 
-    middleware = _middleware(_slack_config(), credential_login="mason-gh")
-    await _prepare(middleware)
+    config = _slack_config()
+    await _record(config, _turn(config, credential_login="mason-gh"))
 
     assert github_client.requests == ["https://api.github.com/user"]
     recorded = prepare_harness["recorded"]
@@ -194,8 +154,8 @@ async def test_public_scope_resolves_profile_via_installation_token(
         ]
     )
 
-    middleware = _middleware(_slack_config())
-    await _prepare(middleware)
+    config = _slack_config()
+    await _record(config, _turn(config))
 
     assert github_client.requests == [
         "https://api.github.com/user",
@@ -207,10 +167,9 @@ async def test_public_scope_resolves_profile_via_installation_token(
     assert recorded["display_name_source"] == "github"
 
     # A second run on another thread reuses the cached profile lookup.
-    middleware = _middleware(_slack_config(thread_id="thread-2", invocation_id="inv-2"))
-    middleware._thread_id = "thread-2"
+    config = _slack_config(thread_id="thread-2", invocation_id="inv-2")
     github_client._responses.append(_FakeResponse(401, {"message": "Bad credentials"}))
-    await _prepare(middleware)
+    await _record(config, _turn(config))
     assert github_client.requests == [
         "https://api.github.com/user",
         "https://api.github.com/users/mason-gh",

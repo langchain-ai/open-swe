@@ -492,13 +492,14 @@ async def test_reports_the_backend_never_took_go_out_first_from_the_runs_checkpo
 
     # The first run's reports, in the order it made them, then the second's.
     assert [endpoint for endpoint, _ in sent] == [
+        "run_started",
         "model_result",
         "tool_started",
         "tool_result",
         "model_result",
         "model_result",
     ]
-    assert {key for _, key in sent[:4]} == set(carried)
+    assert {key for _, key in sent[:5]} == set(carried)
     after = await checkpointer.aget_tuple(config)
     assert after is not None
     assert not after.checkpoint["channel_values"].get(OUTBOX_KEY)
@@ -1490,6 +1491,9 @@ async def test_a_launched_worker_adopts_its_own_run_token_before_anything_runs(
                 "invocation_id": "worker-invocation",
             }
             return httpx2.Response(200, request=request, json=adopted)
+        if hook == REPORTS.name:
+            taken = ReportsTaken(replies=[{} for _ in Reports.model_validate(json).items])
+            return httpx2.Response(200, request=request, json=taken.model_dump(mode="json"))
         return httpx2.Response(200, request=request, json={})
 
     client = MagicMock(is_closed=False)

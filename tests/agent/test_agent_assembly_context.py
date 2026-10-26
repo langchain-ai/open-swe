@@ -12,6 +12,7 @@ from langchain_core.language_models import BaseChatModel
 from langgraph.graph.state import RunnableConfig
 
 from openswe.agent_api.loop import ModelChoices
+from openswe.agent_api.tokens import AGENT_TURN_KEY, AgentTurnSettings
 from openswe.dashboard.workspace_settings import WorkspaceSettings
 from openswe.sandboxes.state import SANDBOX_BACKENDS
 from openswe.sandboxes.tool_runtime import ToolSurface
@@ -253,6 +254,7 @@ async def _plan_agent(
         "backend": surface.files,
         "skills": list(surface.skill_sources),
         "make_model_calls": make_model_calls,
+        "turn": AgentTurnSettings.model_validate(config["configurable"][AGENT_TURN_KEY]),
     }
 
 
@@ -339,8 +341,10 @@ async def test_admin_model_changes_only_affect_new_threads(legacy_thread: bool) 
     original_calls = cast(list[tuple[str, dict[str, object]]], original["make_model_calls"])
     existing_calls = cast(list[tuple[str, dict[str, object]]], existing["make_model_calls"])
     fresh_calls = cast(list[tuple[str, dict[str, object]]], fresh["make_model_calls"])
-    assert existing_calls[:-1] == original_calls[:-1]
-    assert existing_calls[-1] == fresh_calls[-1] != original_calls[-1]
+    titles = [cast(AgentTurnSettings, agent["turn"]) for agent in (original, existing, fresh)]
+    assert existing_calls == original_calls
+    # The title model is no thread setting: it follows the workspace's default.
+    assert titles[1].title_model_id == titles[2].title_model_id != titles[0].title_model_id
     assert fresh_calls != original_calls
     assert {model for model, _ in fresh_calls} == {"google_genai:gemini-3.8-flash"}
 

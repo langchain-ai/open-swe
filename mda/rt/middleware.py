@@ -70,6 +70,7 @@ from runtime_api.loop import (
     BEFORE_MODEL,
     INBOX,
     PREPARE,
+    RUN_STARTED,
     Inbox,
     InboxRead,
     InboxReceipt,
@@ -78,6 +79,7 @@ from runtime_api.loop import (
     PhaseResult,
     Prepare,
     RunCall,
+    RunStarted,
 )
 from runtime_api.workers import LAUNCH_WORKER, WORKER_LAUNCHED, Launch, Launched
 
@@ -387,12 +389,36 @@ class BackendRunMiddleware(AgentMiddleware[RunState]):
         invocation = self._invocation()
         if state.get("open_swe_prepared_for") == invocation:
             return None
+        in_box = self._open_sandbox is not None
         sandbox_id = await self._open_sandbox(runtime) if self._open_sandbox is not None else None
         # Not behind the outbox: what an earlier run left unsent changes nothing here.
         prepared = await call(
-            self._backend, PREPARE, run_call(Prepare, run_id(), state, sandbox_id=sandbox_id)
+            self._backend,
+            PREPARE,
+            run_call(Prepare, run_id(), state, in_box=in_box, sandbox_id=sandbox_id),
         )
-        return {**_apply(prepared), "open_swe_prepared_for": invocation}
+        # What the backend's preparation writes wins over where a turn starts from.
+        starting = self._loop.starting() if self._loop is not None else {}
+        update = _apply(prepared.model_copy(update={"update": {**starting, **prepared.update}}))
+        self._backend.outbox.notify(RUN_STARTED, self._started(state, prepared.update))
+        return {**update, "open_swe_prepared_for": invocation}
+
+    @staticmethod
+    def _started(state: RunState, prepared: Mapping[str, JsonValue]) -> RunStarted:
+        """The run's start, for the transcript to open its turn and the thread to record it."""
+        held = {**state.get(STATE_KEY, {}), **prepared}
+
+        def chosen(key: str) -> str | None:
+            value = held.get(key)
+            return value if isinstance(value, str) else None
+
+        return RunStarted(
+            run_id=run_id(),
+            humans=human_messages(_since_last_reply(state["messages"])),
+            model_id=chosen("selected_model_id"),
+            effort=chosen("selected_effort"),
+            model_route=chosen("model_route"),
+        )
 
     @hook_config(can_jump_to=["end"])
     async def abefore_model(self, state: RunState, runtime: Runtime) -> dict[str, object] | None:  # noqa: ARG002

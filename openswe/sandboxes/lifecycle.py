@@ -714,6 +714,34 @@ async def bind_mda_sandbox(
         await client.threads.update(thread_id=thread_id, metadata=bind_metadata)
 
 
+async def refresh_mda_box_proxy(thread_id: str, *, workspace_slug: str | None = None) -> None:
+    """Give the GitHub proxy of the box MDA keeps for ``thread_id`` a fresh token.
+
+    MDA leaves its boxes' proxy config to the backend, which holds the credentials. Only
+    the box's proxy settings change: nothing connects to the box.
+    """
+    if ENV.SANDBOX_TYPE.get() != "langsmith":
+        return
+    metadata = await get_sandbox_metadata(thread_id)
+    sandbox_id = metadata.get("sandbox_id")
+    if metadata.get("sandbox_owner") != "mda" or not isinstance(sandbox_id, str):
+        return
+    configured = metadata.get(SANDBOX_PROXY_CONFIG_METADATA_KEY)
+    base_proxy_config = configured if isinstance(configured, dict) else None
+    repositories, permissions = await _thread_proxy_scope(thread_id, metadata)
+    access = await _proxy_token(thread_id, workspace_slug, repositories, permissions)
+    async with aphase(thread_id, "sandbox.proxy_refresh"):
+        await _configure_proxy(sandbox_id, access, base_proxy_config, thread_id=thread_id)
+    record_proxy_token_expiry(
+        thread_id,
+        access.expires_at,
+        repositories=repositories,
+        permissions=permissions,
+        workspace_slug=workspace_slug,
+        base_proxy_config=base_proxy_config,
+    )
+
+
 # The replacement ``recreate_sandbox`` authorized for an MDA box: its workspace and source.
 _REPLACEMENT_METADATA_KEY = "sandbox_replacement"
 

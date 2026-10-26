@@ -5,7 +5,8 @@ and ends the run as the catalog's ``LoopRules`` say. It asks the backend only fo
 what needs the backend's data or credentials, one named call each: the route a
 task takes, a model's settings, the task a thread belongs to, a fresh GitHub proxy
 token, a reply posted on the model's behalf, and what the end of the run records.
-The transcript and usage hear of each reply and tool call, and of the run's end.
+The transcript and usage hear of the run's start, each reply and tool call, and the
+run's end.
 
 Preparation, and every phase of a run still answered from its plan, are phase
 calls: the backend runs the graph's own middleware for the phase, and graph state
@@ -36,7 +37,9 @@ class RunCall(RunRequest):
 
 
 class Prepare(RunCall):
-    # The thread's box, which the runtime opened before preparing; None when it could not.
+    # Whether the runtime keeps the thread's box, and the box it opened before preparing;
+    # None when it could not.
+    in_box: bool = False
     sandbox_id: str | None = None
 
 
@@ -101,6 +104,17 @@ class ToolCallReport(Report):
 class ToolResultReport(ToolCallReport):
     # The call's result, as a tool message.
     result: dict[str, JsonValue]
+
+
+class RunStarted(Report):
+    """The run's turn began: what asked for it, and what preparation chose for it."""
+
+    # The human messages since the conversation's last reply; the latest asked for the turn.
+    humans: list[dict[str, JsonValue]] = []
+    # The model, effort and route preparation chose.
+    model_id: str | None = None
+    effort: str | None = None
+    model_route: str | None = None
 
 
 class RunEnded(Report):
@@ -226,6 +240,9 @@ REFRESH_GITHUB_PROXY = Endpoint(
     "refresh_github_proxy", RunRequest, Done, seconds=LOOP_CALL_SECONDS, delivery="idempotent"
 )
 REPLY_ON_BEHALF = Endpoint("reply_on_behalf", ReplyOnBehalf, Done, seconds=LOOP_CALL_SECONDS)
+# The run's turn began: the transcript opens it, the thread and usage record what it
+# runs as, and the box's GitHub proxy gets a fresh token.
+RUN_STARTED = Endpoint("run_started", RunStarted, Done, seconds=LOOP_CALL_SECONDS)
 # The run ended: the transcript closes its turn and usage is finalized.
 RUN_ENDED = Endpoint("run_ended", RunEnded, Done, seconds=LOOP_CALL_SECONDS)
 # The run ended at its model-call limit: the person is told.

@@ -153,6 +153,96 @@ async def test_the_named_calls_around_a_model_call_never_plan_the_run(
     refresh.assert_awaited_once_with(run.thread_id)
 
 
+async def test_an_agent_turn_is_prepared_from_its_token_and_its_start_recorded_off_its_path(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Preparing a turn plans nothing, reaches no box MDA keeps and records nothing:
+    what the turn's start records waits for its ``run_started`` report."""
+    from unittest.mock import AsyncMock, MagicMock
+
+    from langchain_core.messages import HumanMessage, messages_to_dict
+    from runtime_api.catalog import RoutingRules
+
+    from openswe import server
+    from openswe.agent_api import agent
+    from openswe.agent_api import graph as graph_module
+    from openswe.agent_api.graph import RemoteGraph
+    from openswe.agent_api.tokens import AgentTurnSettings, RunSettings
+    from openswe.sandboxes.tool_runtime import ToolSurface
+
+    async def never_planned(config: object, surface: ToolSurface) -> None:
+        raise AssertionError("Preparing a turn never plans the run")
+
+    def never_reached(thread_id: str) -> object:
+        raise AssertionError("Preparing a turn never reaches the box MDA keeps")
+
+    bound = AsyncMock()
+    updated = AsyncMock()
+    proxied = AsyncMock()
+    usage = AsyncMock()
+    prompts: list[dict[str, object]] = []
+    monkeypatch.setattr(graph_module, "bind_mda_sandbox", bound)
+    monkeypatch.setattr(agent, "refresh_mda_box_proxy", proxied)
+    monkeypatch.setattr(agent, "load_thread_settings", AsyncMock(return_value={}))
+    monkeypatch.setattr(server, "get_or_create_sandbox_backend_proxy", never_reached)
+    monkeypatch.setattr(server, "client", MagicMock(threads=MagicMock(update=updated)))
+    monkeypatch.setattr(server, "record_agent_invocation_usage", usage)
+    monkeypatch.setattr(server, "resolve_github_token", AsyncMock(return_value=("token", None)))
+    monkeypatch.setattr(server, "schedule_thread_title_generation", lambda **kwargs: None)
+    monkeypatch.setattr(server, "construct_system_prompt", lambda **kwargs: prompts.append(kwargs))
+    for name in (
+        "resolve_triggering_user_identity",
+        "load_workspace",
+        "_resolve_prompt_default_repo",
+    ):
+        monkeypatch.setattr(server, name, AsyncMock(return_value=None))
+    graph = RemoteGraph("agent", never_planned, agent.AgentParts())
+    turn = AgentTurnSettings(
+        title_model_id="openai:gpt-6-luna",
+        routing=RoutingRules(route_model_ids={"default": "openai:gpt-6.1-sol"}),
+    )
+    run = RUN.model_copy(
+        update={
+            "assistant_id": "agent",
+            "configurable": {"source": "dashboard", "invocation_id": "invocation-1"},
+            "settings": RunSettings(model_id="openai:gpt-6.1-sol", effort="high", agent=turn),
+        }
+    )
+    asked = messages_to_dict([HumanMessage(content="Fix the login", id="human-1")])
+
+    prepared = await graph.api(
+        run,
+        "prepare",
+        {"run_id": "run-1", "messages": asked, "in_box": True, "sandbox_id": "box-1"},
+    )
+
+    assert isinstance(prepared, dict) and isinstance(update := prepared["update"], dict)
+    assert update["work_dir"] == "/workspace"
+    assert update["selected_model_id"] == "openai:gpt-6.1-sol"
+    assert [prompt["working_dir"] for prompt in prompts] == ["/workspace"]
+    bound.assert_awaited_once_with("thread-1", "box-1", workspace_slug=None)
+    updated.assert_not_awaited()
+    usage.assert_not_awaited()
+
+    await graph.api(
+        run,
+        "run_started",
+        {
+            "run_id": "run-1",
+            "humans": asked,
+            "model_id": "openai:gpt-6.1-sol",
+            "effort": "high",
+            "model_route": "default",
+        },
+    )
+
+    [metadata] = [call.kwargs["metadata"] for call in updated.await_args_list]
+    assert metadata["model"] == "openai:gpt-6.1-sol"
+    assert metadata["model_route"] == "default"
+    assert usage.await_args.kwargs["model_id"] == "openai:gpt-6.1-sol"
+    proxied.assert_awaited_once_with("thread-1", workspace_slug=None)
+
+
 @pytest.mark.usefixtures("registry_db")
 async def test_a_report_is_recorded_once_however_often_it_arrives(
     monkeypatch: pytest.MonkeyPatch,

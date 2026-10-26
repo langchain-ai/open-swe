@@ -210,6 +210,16 @@ class RunLoop:
             else self._run_models
         )
 
+    def starting(self) -> dict[str, JsonValue]:
+        """The held state a turn starts from: nothing asked again yet, and answers going
+        where the turn was asked from."""
+        update: dict[str, JsonValue] = {}
+        if self.rules.reply is not None:
+            update.update(reply_surface=self.rules.reply.surface, reply_nudges=0)
+        if self.rules.cli_result is not None:
+            update["cli_result_nudges"] = 0
+        return update
+
     @property
     def looks_at_answers(self) -> bool:
         return self.rules.reply is not None or self.rules.cli_result is not None

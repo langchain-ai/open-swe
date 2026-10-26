@@ -106,6 +106,7 @@ from managed_deepagents._channels.types import (
     OutboundMessage,
     PostedChannelMessage,
 )
+from managed_deepagents._connector import Connector, SandboxContext, SandboxMode
 from managed_deepagents._connections import (
     ConnectionNotFoundError,
     CredentialAuthorizationRequiredError,
@@ -188,6 +189,7 @@ __all__ = [
     "ChannelRunOptions",
     "ChannelRunResult",
     "ConnectionNotFoundError",
+    "Connector",
     "CredentialAuthorizationRequiredError",
     "CredentialStoreError",
     "DeepAgentDefinition",
@@ -277,7 +279,9 @@ __all__ = [
     "PromptResponse",
     "RemoteMcpServerConfig",
     "RuntimeSchedules",
+    "SandboxContext",
     "SandboxDefinition",
+    "SandboxMode",
     "SandboxReplacement",
     "ScheduleNotFoundError",
     "ScheduleOwner",

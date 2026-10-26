@@ -125,6 +125,8 @@ class ReplyRules(BaseModel):
 
     tool: str
     no_reply_tool: str
+    # Where each turn starts answering: Slack for a run asked from there, else the web.
+    surface: Literal["slack", "web"] = "web"
     # Other tools whose successful call answers the person.
     replies: list[str] = []
     # The messages that ask again, in the run's input envelope, sent as ``nudge_sender``.

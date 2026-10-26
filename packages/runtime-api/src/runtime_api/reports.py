@@ -1,7 +1,7 @@
 """What the runtime tells the backend happened, sent in batches the backend acknowledges.
 
-The runtime gathers its reports (each reply and tool call, each inbox receipt,
-the run's end) and its notices (work the backend does for the run whose answer the run never
+The runtime gathers its reports (the run's start, each reply and tool call, each
+inbox receipt, the run's end) and its notices (work the backend does for the run whose answer the run never
 reads) and sends them in the order it made them, as many as are waiting in one
 ``reports`` call. Each item carries a key unique in its thread, and the backend
 records a key once, so a batch sent again after its answer was lost records
@@ -25,6 +25,7 @@ from runtime_api.loop import (
     MODEL_RESULT,
     REFRESH_GITHUB_PROXY,
     RUN_ENDED,
+    RUN_STARTED,
     SANDBOX_UNREACHABLE,
     SETTLE_REVIEW_CHECK,
     STEP_LIMIT_REACHED,
@@ -33,6 +34,7 @@ from runtime_api.loop import (
     InboxReceipt,
     ModelResult,
     RunEnded,
+    RunStarted,
     SandboxGone,
     ScoutPlanEnd,
     ToolCallReport,
@@ -85,6 +87,11 @@ class ScoutPlanNoticed(Sent):
     request: ScoutPlanEnd
 
 
+class Started(Sent):
+    endpoint: Literal["run_started"]
+    request: RunStarted
+
+
 class Ended(Sent):
     endpoint: Literal["run_ended"]
     request: RunEnded
@@ -98,6 +105,7 @@ type Item = Annotated[
     | Noticed
     | SandboxNoticed
     | ScoutPlanNoticed
+    | Started
     | Ended,
     Field(discriminator="endpoint"),
 ]
@@ -117,6 +125,7 @@ REPORTED: Final[Mapping[str, Delivery]] = {
         STEP_LIMIT_REACHED,
         SETTLE_REVIEW_CHECK,
         FINISH_SCOUT_PLAN,
+        RUN_STARTED,
         RUN_ENDED,
     )
 }

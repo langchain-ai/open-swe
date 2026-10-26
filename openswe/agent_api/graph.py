@@ -9,9 +9,12 @@ import (``runtime_api``):
   the rules of its middleware around each model call. It is worked out once as the
   run starts and rides in the run's context (``RemoteGraph.start_run``); the
   settings later calls read are signed into the run's token (``RunSettings``)
-- ``prepare`` readies the run from its plan: the thread's sandbox, checkout and
-  prompt, the transcript turn, skills, reply bookkeeping. It is the one call that
-  plans the run again
+- ``prepare`` readies the run's turn: its prompt, model and route, from what the
+  token says starting the run decided (``RunSettings.agent``), without reaching the
+  box MDA keeps. The reviewer and the scout still prepare from their plan, the one
+  call that plans the run again. What the turn's start records (its transcript turn,
+  the thread's model and usage, the box's GitHub proxy) is the ``run_started``
+  report, off the run's path
 - every other call is a ``TokenRun``, answered from the token and the request with
   the pieces the graph's ``RunParts`` build for it: the inbox and skills, the
   named calls MDA's middleware makes around a model call (``route_model``,
@@ -111,6 +114,7 @@ from runtime_api.loop import (
     REPLY_ON_BEHALF,
     ROUTE_MODEL,
     RUN_ENDED,
+    RUN_STARTED,
     SANDBOX_REPLACED,
     SANDBOX_UNREACHABLE,
     SETTLE_REVIEW_CHECK,
@@ -135,6 +139,7 @@ from runtime_api.loop import (
     Routed,
     RunCall,
     RunEnded,
+    RunStarted,
     SandboxGone,
     ScoutPlanEnd,
     TaskContext,
@@ -178,7 +183,13 @@ from openswe.agent_api.report_receipts import Recorded, Recording, ReportReceipt
 from openswe.agent_api.run_parts import RunParts
 from openswe.agent_api.runs import in_graph_context, run_config
 from openswe.agent_api.shell_guards import ShellGuards
-from openswe.agent_api.tokens import RemoteRun, RunSettings, sign_runtime_token
+from openswe.agent_api.tokens import (
+    AGENT_TURN_KEY,
+    AgentTurnSettings,
+    RemoteRun,
+    RunSettings,
+    sign_runtime_token,
+)
 from openswe.dispatch import COMPLETION_WEBHOOK_URL
 from openswe.github.proxy import maybe_refresh_proxy_token
 from openswe.github.sandbox_access import READ_ONLY_REVIEW_PERMISSIONS
@@ -450,11 +461,13 @@ class RunSession:
     def settings(self) -> RunSettings:
         """What planning decided for the run, which its later calls read from its token."""
         cfg = RunConfig.from_config(self.config)
+        turn = (self.config.get("configurable") or {}).get(AGENT_TURN_KEY)
         return RunSettings(
             source=cfg.source,
             draft_prs=cfg.draft_prs,
             model_id=cfg.resolved_agent_model_id,
             effort=cfg.resolved_agent_effort,
+            agent=None if turn is None else AgentTurnSettings.model_validate(turn),
         )
 
     async def sandbox(self) -> ManagedSandbox | None:
@@ -876,6 +889,50 @@ class TokenRun:
         )
         return Done()
 
+    async def prepare(self, request: Prepare) -> PhaseResult | None:
+        """Ready the run's turn from its token and the conversation; None where the graph
+        still prepares from its plan.
+
+        Nothing here waits on the box MDA keeps: MDA readied it as it opened it, and the
+        backend gives its proxy a fresh token once the run has started (``run_started``).
+        """
+        preparation = await self.parts.preparation(
+            self.config, self.run.settings, box=request.sandbox_id
+        )
+        if preparation is None:
+            return None
+        if request.in_box:
+            # MDA opened the box before preparing; the thread is bound to it from here on.
+            await bind_mda_sandbox(
+                self.run.thread_id,
+                request.sandbox_id,
+                workspace_slug=RunConfig.from_config(self.config).workspace_slug,
+            )
+        if events := _carried_events(self.config):
+            # The events this run was started to carry are its input: it holds them now.
+            await ThreadInbox(self.run.thread_id).receive(events=events)
+        state = call_state(request, self.parts.restore)
+
+        async def prepared(runtime: Runtime) -> PhaseResult:
+            return await run_hooks(preparation, "before_agent", state, runtime)
+
+        emitted: list[object] = []
+        result = await in_graph_context(
+            {**self.config, "run_name": "before_agent"}, prepared, events=emitted
+        )
+        return result.model_copy(update={"events": [_json_or_text(e) for e in emitted]})
+
+    async def run_started(self, request: RunStarted) -> Done:
+        """Record the run's start: its transcript turn, what it runs as, and the box's proxy."""
+
+        async def record(_state: dict[str, object], _runtime: Runtime) -> None:
+            await self.parts.started(self.config, self.run.settings, request)
+
+        await self._reporting(
+            request, "run_started", record, messages=messages_from_dict(request.humans)
+        )
+        return Done()
+
     def _tool_recorders(self) -> list[RecordsRemoteTools]:
         return [m for m in self.parts.reporters if isinstance(m, RecordsRemoteTools)]
 
@@ -1126,9 +1183,14 @@ class RemoteGraph:
             call = TokenRun(self, run, run_id)
             if not call.legacy:
                 return await TOOL_CALLS.dispatch(endpoint, call, raw)
+        if endpoint == PREPARE.name:
+            prepared = await TokenRun(self, run, run_id).prepare(Prepare.model_validate(raw))
+            if prepared is not None:
+                return prepared.model_dump(mode="json")
         if not API.serves(endpoint):
             raise UnknownEndpointError(endpoint)
-        # Preparation starts the run's session; the end of the run closes it.
+        # The reviewer's and the scout's preparation start the run's session; the end of
+        # the run closes it.
         session = await self.session(run, run_id, fresh=endpoint == PREPARE.name)
         try:
             return await API.dispatch(endpoint, session, raw)
@@ -1307,6 +1369,7 @@ RUN_CALLS.serve(MODEL_CHOICE, TokenRun.model_choice)
 RUN_CALLS.serve(TASK_CONTEXT, TokenRun.task_context)
 RUN_CALLS.serve(REFRESH_GITHUB_PROXY, TokenRun.refresh_github_proxy)
 RUN_CALLS.serve(REPLY_ON_BEHALF, TokenRun.reply_on_behalf)
+RUN_CALLS.serve(RUN_STARTED, TokenRun.run_started)
 RUN_CALLS.serve(RUN_ENDED, TokenRun.run_ended)
 RUN_CALLS.serve(STEP_LIMIT_REACHED, TokenRun.step_limit_reached)
 RUN_CALLS.serve(SETTLE_REVIEW_CHECK, TokenRun.settle_review_check)
