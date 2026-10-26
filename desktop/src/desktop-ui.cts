@@ -49,6 +49,7 @@ function firstLoadFailure(error: unknown): string {
 class DesktopUi {
   private snapshot: UiSnapshot | null = null;
   private update: Promise<UiSnapshot> | null = null;
+  private warnedIncompatible = false;
   private readonly directory: string;
 
   constructor(
@@ -80,7 +81,13 @@ class DesktopUi {
         }
       } else {
         void update.catch((error: unknown) => {
-          if (error instanceof IncompatibleUiError) this.onIncompatible(error);
+          if (
+            error instanceof IncompatibleUiError &&
+            !this.warnedIncompatible
+          ) {
+            this.warnedIncompatible = true;
+            this.onIncompatible(error);
+          }
           console.warn(
             "Could not update desktop UI; keeping cached version",
             error,

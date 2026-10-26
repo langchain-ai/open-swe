@@ -193,22 +193,21 @@ test("reports a bridge mismatch as a desktop update, on first install and over a
     root,
     serveFile,
   ).serve(page());
-  const warned = new Promise<Error>((resolve) => {
-    const ui = new DesktopUi(
-      "https://backend.example",
-      incompatible,
-      root,
-      serveFile,
-      null,
-      resolve,
-    );
-    void ui
-      .serve(page())
-      .then(async (response) =>
-        assert.equal(await response.text(), "shell v1"),
-      );
-  });
-  assert.match((await warned).message, /bridge version 2/);
+  const warnings: Error[] = [];
+  const ui = new DesktopUi(
+    "https://backend.example",
+    incompatible,
+    root,
+    serveFile,
+    null,
+    (error) => warnings.push(error),
+  );
+  for (let load = 0; load < 2; load++) {
+    assert.equal(await (await ui.serve(page())).text(), "shell v1");
+    await ui.refresh().catch(() => {});
+  }
+  assert.equal(warnings.length, 1);
+  assert.match(warnings[0].message, /bridge version 2/);
 });
 
 test("rejects archive traversal before extracting a checksum-valid download", async (t) => {
