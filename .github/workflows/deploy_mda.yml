@@ -170,7 +170,7 @@ jobs:
             export MDA_GITHUB_WEBHOOK_SECRET="$GITHUB_APP_WEBHOOK_SECRET"
           fi
           unset GITHUB_APP_PRIVATE_KEY GITHUB_APP_WEBHOOK_SECRET
-          uv run --project mda --locked --python 3.13 mda deploy mda \
+          uv run --project mda --locked mda deploy mda \
             --name "open-swe-mda-$ENVIRONMENT" \
             --deployment-type prod \
             --workspace-id ebbaf2eb-769b-4505-aca2-d11de10372a4 \

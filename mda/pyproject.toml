@@ -2,7 +2,7 @@
 name = "open-swe-runtime"
 version = "0.0.0"
 description = "Open SWE's coding agent and pull request reviewer as one Managed Deep Agent; the Open SWE backend serves their tools."
-requires-python = ">=3.12"
+requires-python = ">=3.14"
 dependencies = [
     "managed-deepagents",
     "deepagents==0.7.32",
@@ -35,10 +35,6 @@ test = [
 managed-deepagents = { path = "../vendor/managed-deepagents-sdk/packages/pypi", editable = true }
 # Shared with the backend; `mda build` bundles it as a local package.
 open-swe-runtime-api = { path = "../packages/runtime-api", editable = true }
-
-[tool.mda]
-# bsdiff4 (via langchain-quickjs) has no 3.14 wheels and MDA build images have no compiler: langchain-ai/deepagents#6878.
-python-version = "3.13"
 
 # Its own type-check root: checked against this project's environment alone, an
 # import of the backend (`openswe`) or a database driver fails to resolve.
