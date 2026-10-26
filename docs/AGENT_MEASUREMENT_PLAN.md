@@ -147,6 +147,14 @@ uv run python -m evals.agent.compare \
 
 阶段 2 的实现与实验说明见 [evals/agent/LONG_CONTEXT_TASKS.md](../evals/agent/LONG_CONTEXT_TASKS.md)：任务集指纹、reference/empty 自检结果、arm 环境变量与正式运行命令都记录在那里。任务集自检只能证明题目可评分，不能作为模型效果或压缩收益证据。
 
+### 3.1 正式实验前的评测链路门槛
+
+以下三条来自 2026-10-26 的冒烟与 reference 自检，任何一条不满足都会让整组数据作废，正式跑臂前必须先过：
+
+1. **判分侧的 install 与任务无关**：`reference` 模式必须让任务集里每一题都 resolved。某一题在 `install` 阶段失败（本机是 markupsafe：无 MSVC 时 `setup.py` 二次调用 `setup()`，editable 构建找不到 egg-info 目录）属于环境缺陷，不是模型能力，必须换题或改安装方式，不能带着它开跑。
+2. **判分题之间互不污染**：editable 安装会把包留在共享的 judge 解释器里，下一个任务会 import 到上一个任务的代码。判分后必须卸载；`_evaluate_instance` 在 `finally` 里用 judge 自身的解释器（绝对路径）执行卸载。
+3. **沙箱内可用的工具链是显式的**：desktop 沙箱只允许项目目录与显式声明的工具链根（项目 `.venv`、解释器目录、系统目录、用户级工具目录）。模型探测不到 `python` 时会用大量步数找工具，步数与墙钟因此不再是压缩策略的干净信号。
+
 ## 8. 实现位置索引
 
 | 能力 | 位置 |

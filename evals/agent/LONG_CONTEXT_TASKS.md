@@ -44,6 +44,8 @@ uv run python -m evals.agent.run_local \
 ```
 
 - Reference mode: **10/10 resolved**, `fail_to_pass_rate = pass_to_pass_rate = 1.0`.
+  (Re-checked 2026-10-26 on the Windows desktop host: **9/10**, the markupsafe
+  task failing at `install`; see Known limitations.)
 - Empty mode: **10/10 `no_patch`**, with `pass_to_pass_rate = 1.0`.
 - Task-set fingerprint: `b8cf636f6a98eb0d040d8f75027e1349d3d5f358ae07cbac007215705e4fd499`.
 - Raw evidence: `artifacts/task-validation/reference/` and
@@ -155,4 +157,17 @@ runs, and never compare runs with different task-set fingerprints.
 - The runner's judge venv is shared across tasks and installs each package
   editable before applying the agent patch. Do not add tasks whose package is a
   dependency of pytest itself (`packaging`, `pluggy`, ...): once the checkout is
-  deleted, the dangling editable install can break later pytest invocations.
+  deleted, a dangling install can break later pytest invocations. The judge now
+  uninstalls the graded package after each task, so a package the host cannot
+  build no longer breaks the tasks that follow it.
+- **The markupsafe task is ungradable on a host without MSVC** (2026-10-26).
+  `pallets/markupsafe` builds a C speedups extension in `setup.py` and retries a
+  plain-Python build in the same process when the first build fails. Under
+  setuptools ≥ 77 the retry cannot find the temporary `.egg-info` directory and
+  the editable install aborts, so the judge stops at `install` whatever the
+  model did. `reference` mode therefore scores 9/10 on this host
+  (fingerprint `b8cf636f...`, raw evidence `artifacts/agent-eval/ref-check-2/`).
+  The task stays in the set so the fingerprint and denominator do not change;
+  arms run by `artifacts/run-compaction-arms.sh` report it as `ungradable`
+  instead of failing the arm. With MSVC Build Tools installed, re-run reference
+  mode before treating a 10/10 as the validation result.

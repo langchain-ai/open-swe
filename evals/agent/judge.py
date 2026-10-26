@@ -221,7 +221,6 @@ def _install_env() -> dict[str, str]:
 
 
 _EDITABLE_INSTALL = re.compile(r"-e\s+|--editable[\s=]")
-_PRUNE_ENV = "AGENT_EVAL_PRUNE_EDITABLE_INSTALLS"
 
 
 async def _install_repo(package: str, workdir: Path, timeout: int) -> tuple[int, str, bool]:
@@ -233,7 +232,6 @@ async def _install_repo(package: str, workdir: Path, timeout: int) -> tuple[int,
     invisible in the score, so the editable install is taken back once graded.
     """
     env = _install_env()
-    env[_PRUNE_ENV] = "1"
     env["PIP_UNINSTALL_NO_INPUT"] = "1"
     installed = await _run_shell(package, workdir, timeout, env=env)
     return installed["returncode"], installed["output"], bool(_EDITABLE_INSTALL.search(package))
