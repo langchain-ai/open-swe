@@ -23,6 +23,7 @@ from openswe.federation.github_oidc import GitHubActionsClaims, InvalidFederated
 from openswe.federation.github_oidc import verify as verify_github_oidc
 from openswe.github.http import GitHubAppUnavailable, GitHubClient
 from openswe.github.repositories import Repository
+from openswe.prompts import prompt
 from openswe.source_context import SourceContext
 from openswe.webhooks.event_log import EventLog, EventRefs
 from openswe.webhooks.event_subscriptions import EventSubscription
@@ -121,22 +122,7 @@ def _delivery_id(target: str, commits: list[str]) -> str:
 
 def _ask_to_monitor(sha: str) -> str:
     """Tell the run to offer monitoring only when the repo skill says this change qualifies."""
-    merge_sha = remembered_merge_sha(sha)
-    commit = (
-        f"merge commit {merge_sha}"
-        if merge_sha
-        else "the merge commit recorded for this pull request"
-    )
-    return (
-        "This pull request just merged. Read `.agents/skills/rollout-check/SKILL.md` "
-        f"at {commit}, not from a stale checkout. Look at what merged. Ask the person, "
-        "on this thread's existing channel, whether to monitor its rollout only when that "
-        "skill says this change qualifies. Ask once. If the skill file is missing, or it "
-        "does not say to offer monitoring for this change, stop without messaging them. "
-        "If they decline, stop. If they agree, follow that skill's accepted-offer steps. "
-        "Do not call request_rollout_check until those steps say to. "
-        "Do not call listen_events yourself."
-    )
+    return prompt("runs/rollout-ask-to-monitor", merge_sha=remembered_merge_sha(sha))
 
 
 _PR_URL_RE = re.compile(r"https://github\.com/([^/]+)/([^/]+)/pull/(\d+)")
@@ -176,13 +162,7 @@ def merged_pull_request(metadata: dict[str, object]) -> tuple[str, str, int, str
 
 
 def _instructions(sha: str) -> str:
-    return (
-        f"This deployment includes merge commit {sha}. "
-        "The event names the target that finished syncing. "
-        "Confirm the fix and look for regressions on that target. "
-        "Cancel this subscription with listen_events after every target "
-        "expected for this change has included the commit."
-    )
+    return prompt("runs/rollout-deployed", merge_sha=sha)
 
 
 def _copy_config(config: dict[str, JsonValue], values: dict[str, object]) -> None:
