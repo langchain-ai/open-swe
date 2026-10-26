@@ -22,6 +22,16 @@ def test_parse_langsmith_locator_rejects_invalid_trace_urls(locator: str) -> Non
     assert parse_langsmith_locator(locator) is None
 
 
+@pytest.mark.parametrize("agent_path", ["", "/a/open-swe-v3"])
+@pytest.mark.parametrize("kind", ["t", "r"])
+def test_parse_langsmith_locator_accepts_agent_scoped_links(agent_path: str, kind: str) -> None:
+    locator = parse_langsmith_locator(
+        f"https://smith.langchain.com/o/org{agent_path}/projects/p/project/{kind}/id-1"
+        "?start_time=2026-10-25T14%3A44%3A45Z&run_id=run-1&conversationTab=trace"
+    )
+    assert locator == langsmith.LangSmithLocator(kind="thread" if kind == "t" else "run", id="id-1")
+
+
 async def test_get_open_swe_thread_id_from_langsmith_resolves_run_uuid(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
