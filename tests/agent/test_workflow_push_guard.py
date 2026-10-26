@@ -1,13 +1,24 @@
 import json
+import shlex
+import time
+from pathlib import Path
 from typing import Any, cast
+from unittest.mock import AsyncMock
 
 import pytest
+from deepagents.backends import LocalShellBackend
 from deepagents.backends.protocol import SandboxBackendProtocol
 from langchain.agents.middleware.types import ToolCallRequest
 from langchain_core.messages import ToolMessage
+from runtime_api.operations import ShellVerdict
 
+from openswe.agent_api.graph import RemoteGraph
+from openswe.agent_api.run_parts import RunParts
+from openswe.agent_api.tokens import RemoteRun
 from openswe.middleware import workflow_push_guard as guard
+from openswe.sandboxes import connect, state
 from openswe.sandboxes.state import SandboxBackendProxy
+from openswe.sandboxes.tool_runtime import ToolSurface
 
 
 class _Response:
@@ -502,6 +513,7 @@ async def test_chained_push_runs_only_without_workflow_changes(
         (False, "registered", True, True, "", None),
         (False, "reconnect", True, True, "", None),
         (False, "missing", True, False, "", "WorkflowPushInspectionError"),
+        (False, "missing", True, False, "--force-with-lease ", "WorkflowPushInspectionError"),
         (False, "registered", False, False, "", "WorkflowPushInspectionError"),
         (False, "registered", False, False, "--force-with-lease ", "WorkflowPushInspectionError"),
     ],
@@ -515,16 +527,11 @@ async def test_check_shell_inspects_workflow_pushes_in_the_threads_sandbox(
     lease: str,
     error: str | None,
 ) -> None:
-    import time
-    from unittest.mock import AsyncMock
-
-    from openswe.agent_api.graph import RemoteGraph
-    from openswe.agent_api.run_parts import RunParts
-    from openswe.agent_api.tokens import RemoteRun
-    from openswe.sandboxes import connect, state
-    from openswe.sandboxes.tool_runtime import ToolSurface
-
-    backend = _Backend(inspectable=inspectable, pending_workflows=chained)
+    backend = _Backend(
+        inspectable=inspectable,
+        pending_workflows=chained,
+        workflow_files="" if chained else ".github/workflows/ci.yml",
+    )
     if connection == "registered":
         state.set_sandbox_backend("thread-1", cast(SandboxBackendProtocol, backend))
 
@@ -549,6 +556,26 @@ async def test_check_shell_inspects_workflow_pushes_in_the_threads_sandbox(
     )
     monkeypatch.setattr(guard, "_post_slack_approval_if_needed", AsyncMock())
 
+    command = f"git -C /repo push {lease}origin feature"
+    if chained:
+        command = (
+            "git -C /repo add .github/workflows/x.yml && git -C /repo commit -m m && " + command
+        )
+    verdict = await _check_shell(command)
+
+    assert verdict.allowed is (error is None)
+    if error is None:
+        assert verdict.command == f"git -C /repo push origin {backend.head}:refs/heads/feature"
+    else:
+        assert json.loads(str(verdict.refusal))["error_type"] == error
+    if connection != "missing":
+        assert backend.commands
+        assert all(
+            " push " not in command and " commit " not in command for command in backend.commands
+        )
+
+
+async def _check_shell(command: str) -> ShellVerdict:
     class Parts(RunParts):
         shell_guards = (guard.WorkflowPushGuardMiddleware(),)
 
@@ -561,23 +588,82 @@ async def test_check_shell_inspects_workflow_pushes_in_the_threads_sandbox(
         configurable={},
         expires_at=int(time.time()) + 3600,
     ).granting()
-    command = f"git -C /repo push {lease}origin feature"
-    if chained:
-        command = (
-            "git -C /repo add .github/workflows/x.yml && git -C /repo commit -m m && " + command
-        )
     verdict = await RemoteGraph("agent", never_plan, Parts()).api(
         run, "check_shell", {"run_id": "run-1", "tool": "execute", "command": command}
     )
+    return ShellVerdict.model_validate(verdict)
 
-    assert isinstance(verdict, dict)
-    assert verdict["allowed"] is (error is None)
-    if error is None:
-        assert verdict["command"] == f"git -C /repo push origin {backend.head}:refs/heads/feature"
-    else:
-        assert json.loads(str(verdict["refusal"]))["error_type"] == error
-    if connection != "missing":
-        assert backend.commands
-        assert all(
-            " push " not in command and " commit " not in command for command in backend.commands
-        )
+
+async def test_check_shell_gates_real_workflow_push(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    backend = LocalShellBackend(root_dir=tmp_path)
+
+    async def execute(command: str) -> str:
+        result = await backend.aexecute(command)
+        assert result.exit_code == 0, result.output
+        return "" if result.output.strip() == "<no output>" else result.output.strip()
+
+    await execute(
+        "git init --bare remote.git && git init -b main repo && "
+        "git -C repo config user.name Test && git -C repo config user.email test@example.com && "
+        "git -C repo commit --allow-empty -m initial && "
+        "git -C repo remote add origin ../remote.git && git -C repo push -u origin main && "
+        "git -C repo remote set-head origin main && git -C repo switch -c feature"
+    )
+    initial = await execute("git -C repo rev-parse HEAD")
+    workflow = tmp_path / "repo/.github/workflows/x.yml"
+    workflow.parent.mkdir(parents=True)
+    workflow.write_text("name: test\non: push\njobs: {}\n")
+
+    monkeypatch.setattr(state, "get_sandbox_id_from_metadata", AsyncMock(return_value=backend.id))
+
+    async def connect_box(
+        sandbox_id: str, *, thread_id: str | None = None
+    ) -> SandboxBackendProtocol:
+        assert sandbox_id == backend.id
+        assert thread_id == "thread-1"
+        return backend
+
+    monkeypatch.setattr(connect, "connect_sandbox", connect_box)
+    approved = AsyncMock(return_value=False)
+    monkeypatch.setattr(guard, "workflow_push_approved", approved)
+    monkeypatch.setattr(
+        guard, "ensure_workflow_push_pending", AsyncMock(return_value=({"status": "pending"}, True))
+    )
+    monkeypatch.setattr(guard, "_post_slack_approval_if_needed", AsyncMock())
+
+    async def screened(command: str) -> ShellVerdict:
+        verdict = await _check_shell(command)
+        if verdict.allowed:
+            await execute(verdict.command or command)
+        return verdict
+
+    chained = (
+        "git -C repo add .github/workflows/x.yml && git -C repo commit -m workflow && "
+        "git -C repo push origin feature"
+    )
+    verdict = await screened(chained)
+    assert not verdict.allowed
+    assert json.loads(str(verdict.refusal))["error_type"] == "WorkflowPushMustStandAlone"
+    assert await execute("git -C repo rev-parse HEAD") == initial
+    assert await execute("git -C repo diff --cached --name-only") == ""
+    assert await execute("git --git-dir=remote.git for-each-ref refs/heads/feature") == ""
+
+    await execute("git -C repo add .github/workflows/x.yml && git -C repo commit -m workflow")
+    head = await execute("git -C repo rev-parse HEAD")
+    state.SANDBOX_BACKENDS.clear()
+    verdict = await screened("git -C repo push origin feature")
+    assert not verdict.allowed
+    assert json.loads(str(verdict.refusal))["error_type"] == "WorkflowPushApprovalRequired"
+    assert await execute("git --git-dir=remote.git for-each-ref refs/heads/feature") == ""
+    fingerprint = approved.call_args.args[1]
+
+    state.SANDBOX_BACKENDS.clear()
+    approved.return_value = True
+    verdict = await screened("git -C repo push origin feature")
+    assert verdict.allowed
+    root = shlex.quote(str(tmp_path / "repo"))
+    assert verdict.command == f"git -C {root} push origin {head}:refs/heads/feature"
+    assert approved.call_args.args == ("thread-1", fingerprint)
+    assert await execute("git --git-dir=remote.git rev-parse refs/heads/feature") == head
