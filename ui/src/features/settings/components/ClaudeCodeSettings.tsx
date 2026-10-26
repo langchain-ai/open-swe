@@ -96,13 +96,14 @@ export function ClaudeCodeSetupSection() {
   return (
     <SettingsSection
       title="Connect a machine"
-      description="Do this once on each computer you use Claude Code on."
+      description="Do this once on each computer you use Claude Code on. With Open SWE’s MCP server connected, you can instead ask Claude Code to “connect this machine to Open SWE” and it does all three steps."
     >
       <ol className="divide-y divide-default">
         <Step number={1} title="Name this machine">
           <p>
             Pick a name you’ll recognize later, then choose Connect Claude Code.
-            This creates the machine’s token.
+            This creates the machine’s token. Reusing a name replaces that
+            machine’s token.
           </p>
           <form
             className="flex flex-wrap items-end gap-space-3"
