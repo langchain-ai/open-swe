@@ -3,7 +3,7 @@
 MDA's ``browser_handoff`` gives the person the thread's browser window and returns at
 once. When they hand it back, or their link runs out, MDA enqueues a run on the
 thread with a notification. Only dispatch signs a run token, so MDA hands that
-run to the ``wake`` hook, as the backend delivers a background task's completion.
+run to the ``wake`` call, as the backend delivers a background task's completion.
 """
 
 from typing import Any, cast

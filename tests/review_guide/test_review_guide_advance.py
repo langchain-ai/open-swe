@@ -1,4 +1,3 @@
-from collections import Counter
 from dataclasses import dataclass, field
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock
@@ -9,8 +8,10 @@ import pytest
 from openswe.review_guide import advance as advance_module
 from openswe.review_guide.github import PullRequestHead
 from openswe.review_guide.walk import Reader, Walk
-from openswe.walkthrough.diff import parse
-from openswe.walkthrough.plan import LineRef, Plan, PlanChunk
+from openswe.sandbox_scripts.walkthrough import parse_index
+from openswe.walkthrough.diff import DiffIndex
+from openswe.walkthrough.lines import LineSet
+from openswe.walkthrough.plan import Plan, PlanChunk
 from openswe.walkthrough.record import Walkthrough
 
 DIFF = (
@@ -20,10 +21,12 @@ DIFF = (
 
 
 def _plan(chunks: int) -> Plan:
-    changes = parse(DIFF)
-    plan = Plan.start("head-1", changes)
-    for line in changes[0].lines[:chunks]:
-        plan.add_chunk(PlanChunk(title=line.text, lines=[LineRef.of(line)], code="CODE"))
+    plan = Plan.start("head-1", DiffIndex.model_validate({"files": parse_index(DIFF.splitlines())}))
+    titles = ["def one():", "def two():", "def three():"]
+    for lineno, title in enumerate(titles[:chunks], start=1):
+        plan.add_chunk(
+            PlanChunk(title=title, lines=LineSet.of("a.py", "+", [(lineno, lineno)]), code="CODE")
+        )
     return plan
 
 
@@ -34,7 +37,7 @@ class _Session:
     slack_channel_id: str = "C1"
     closed: bool = False
     paused_message_ts: str = ""
-    seen: Counter[str] = field(default_factory=Counter)
+    seen: LineSet = field(default_factory=LineSet)
     pull_request: SimpleNamespace = field(
         default_factory=lambda: SimpleNamespace(id=uuid7(), owner="o", repo="r", number=1)
     )
@@ -42,11 +45,11 @@ class _Session:
     async def save_walk(self, walk: Walk) -> None:
         self.walk = walk
 
-    async def mark_seen(self, lines: Counter[str]) -> None:
-        self.seen.update(lines)
+    async def mark_seen(self, head_sha: str, merge_base_sha: str, lines: LineSet) -> None:  # noqa: ARG002
+        self.seen = self.seen | lines
 
-    async def seen_lines(self) -> Counter[str]:
-        return Counter(self.seen)
+    async def seen_at(self, head_sha: str) -> LineSet:  # noqa: ARG002
+        return self.seen
 
 
 def _client(*active_runs: str) -> MagicMock:
@@ -61,7 +64,7 @@ def _client(*active_runs: str) -> MagicMock:
 
 def _session(monkeypatch: pytest.MonkeyPatch, plan: Plan, *, complete: bool) -> _Session:
     walk = Walk(head_sha="head-1")
-    walk.on_screen = Reader.of(walk, plan, Counter()).show(plan.chunks[0])
+    walk.on_screen = Reader.of(walk, plan, LineSet()).show(plan.chunks[0])
     walk.on_screen.message_ts = "1.0"
     session = _Session(walk=walk)
     stored = Walkthrough(
@@ -97,7 +100,7 @@ async def test_looks_good_approves_and_posts_the_next_planned_chunk_without_a_tu
     assert post.await_args.args[1].startswith("*2/2 · def two():*")
     assert session.walk.on_screen is not None and session.walk.on_screen.message_ts == "2.0"
     assert [a.title for a in session.walk.approvals] == ["def one():"]
-    assert sum(session.seen.values()) == 1
+    assert len(session.seen) == 1
     assert isinstance(advance_module.dispatch_guide_run, AsyncMock)
     advance_module.dispatch_guide_run.assert_not_awaited()
 
@@ -110,7 +113,7 @@ async def test_looks_good_ahead_of_the_planner_approves_then_hands_the_guide_a_t
     await advance_module.advance("C1", "1.0")
 
     assert session.walk.on_screen is None
-    assert sum(session.seen.values()) == 1
+    assert len(session.seen) == 1
     dispatch = advance_module.dispatch_guide_run
     assert isinstance(dispatch, AsyncMock) and dispatch.await_args is not None
     assert dispatch.await_args.kwargs["approve_ts"] == ""
@@ -125,7 +128,7 @@ async def test_looks_good_during_a_turn_is_recorded_when_its_own_turn_starts(
     await advance_module.advance("C1", "1.0")
 
     assert session.walk.on_screen is not None and session.walk.on_screen.message_ts == "1.0"
-    assert sum(session.seen.values()) == 0
+    assert len(session.seen) == 0
     dispatch = advance_module.dispatch_guide_run
     assert isinstance(dispatch, AsyncMock) and dispatch.await_args is not None
     assert dispatch.await_args.kwargs["approve_ts"] == "1.0"

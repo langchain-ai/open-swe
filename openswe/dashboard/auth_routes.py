@@ -268,6 +268,7 @@ async def me(response: Response, session: dict[str, Any] = SESSION_DEP) -> dict[
     preferences = await get_user_preferences(session["sub"])
     return {
         "login": session["sub"],
+        "display_name": user.display_name if user else "",
         "email": session.get("email") or (user.email or None if user else None),
         "avatar_url": session.get("avatar_url"),
         "user_id": str(user.id) if user else session.get("user_id"),

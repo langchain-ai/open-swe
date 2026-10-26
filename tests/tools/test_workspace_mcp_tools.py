@@ -42,7 +42,7 @@ async def test_generic_tools_are_namespaced_filtered_and_refresh_credentials(
     ]
     monkeypatch.setattr(runtime, "_discover_tools", AsyncMock(return_value=definitions))
     tools = await loader.load_workspace_mcp_tools("default")
-    assert [tool.name for tool in tools] == ["mcp_example_search_8245e54055"]
+    assert [tool.name for tool in tools] == ["mcp_example_search"]
     calls = []
 
     async def call(transport, name, arguments):
@@ -104,7 +104,7 @@ async def test_duplicate_catalog_is_isolated_from_other_connections(registry_db,
     tools = await loader.load_workspace_mcp_tools("default")
     middleware = DynamicToolMiddleware({"Workspace MCPs": tools})
     assert middleware.has_groups
-    assert [tool.name for tool in tools] == ["mcp_working_search_0ebe441dc6"]
+    assert [tool.name for tool in tools] == ["mcp_working_search"]
     with pytest.raises(ValueError):
         await loader.discover_workspace_mcp("default", "broken")
 
@@ -164,7 +164,10 @@ def test_connection_tool_pairs_cannot_collide():
         ("example", "a/b"),
         ("example", "a_b"),
         ("example", "a" * 128),
+        ("example", runtime._tool_name("example", "a/b").removeprefix("mcp_example_")),
+        ("example", "search"),
     ]
     names = [runtime._tool_name(*pair) for pair in pairs]
     assert len(set(names)) == len(pairs)
     assert all(len(name) <= 64 for name in names)
+    assert names[-1] == "mcp_example_search"

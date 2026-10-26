@@ -105,10 +105,7 @@ def handoff(monkeypatch: pytest.MonkeyPatch) -> Handoff:
     )
     middleware._requested_models = available_requested_models(fable_enabled=False)
     middleware._model_selection = ModelSelectionMiddleware(
-        {"fast": MagicMock()},
-        MagicMock(),
-        routing_mode="fast",
-        requested_model_factory=lambda _model, _effort: MagicMock(),
+        {"fast": "openai:gpt-6-luna"}, routing_mode="fast"
     )
     middleware._routing_defaults = {"fast": ("openai:gpt-6-luna", "low")}
     return Handoff(middleware, settings, store, record)

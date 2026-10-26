@@ -43,14 +43,6 @@ python-version = "3.14"
     )
 }
 
-/// Manifest file name for `language`.
-pub(super) fn manifest_name(language: Language) -> &'static str {
-    match language {
-        Language::TypeScript => "package.json",
-        Language::Python => "pyproject.toml",
-    }
-}
-
 /// Manifest contents for `language`.
 pub(super) fn manifest_contents(name: &str, language: Language) -> String {
     match language {

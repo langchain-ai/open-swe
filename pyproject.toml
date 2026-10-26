@@ -6,30 +6,30 @@ readme = "README.md"
 requires-python = ">=3.14"
 license = { text = "MIT" }
 dependencies = [
-    "deepagents==0.7.29",
+    "deepagents==0.7.32",
     "fastapi>=0.141.1",
     "uvicorn>=0.52.4",
-    "httpx2>=2.12.0,<3.0.0",
+    "httpx2>=2.12.0",
     "PyJWT>=2.13.0",
     "cryptography>=50.0.0",
-    "langgraph-sdk>=0.4.8",
-    "langchain[mcp]>=1.4.6",
-    "langgraph>=1.2.16",
+    "langgraph-sdk>=0.4.9",
+    "langchain[mcp]>=1.4.7",
+    "langgraph>=1.2.17",
     "markdownify>=1.2.3",
     "markdown-it-py==4.2.0",
     "langchain-anthropic>=1.7.6",
-    "langgraph-cli[inmem]>=0.4.37",
-    "langsmith>=0.14.11",
+    "langgraph-cli[inmem]>=0.4.40",
+    "langsmith>=0.14.12",
     "langchain-openai>=1.7.2,<2.0.0",
-    "openai>=3.10.0,<4.0.0",
+    "openai>=3.10.0",
     "langchain-fireworks>=1.7.1",
     # langchain-fireworks 1.4.2 pins a pre-release fireworks-ai; opt in explicitly so uv resolves it.
     "fireworks-ai>=1.2.9",
     "exa-py>=2.18.1",
     "langchain-google-genai>=4.4.2",
     "websockets>=16.1.1",
-    "slack-sdk>=3.44.1,<4.0.0",
-    "aiohttp>=3.14.3,<4.0.0",
+    "slack-sdk>=3.44.1",
+    "aiohttp>=3.14.3",
     "alembic==1.20.0",
     "croniter>=6.0.0",
     "sqlalchemy[asyncio]==2.1.1",
@@ -41,6 +41,7 @@ dependencies = [
     "jinja2>=3.1.6",
     "langchain-typesafe==0.0.1a3",
     "langchain-quickjs==0.3.9",
+    "open-swe-runtime-api",
 ]
 
 [project.optional-dependencies]
@@ -54,30 +55,34 @@ dev = [
 # Third-party sandbox providers. The registry imports each provider lazily, so
 # these are only needed when SANDBOX_TYPE selects one; `uv sync` alone gives you
 # the langsmith (default) and local providers.
-sandbox-daytona = ["langchain-daytona>=0.0.8"]
-sandbox-modal = ["langchain-modal>=0.0.6"]
+sandbox-daytona = ["langchain-daytona>=0.0.9"]
+sandbox-modal = ["langchain-modal>=0.0.7"]
 sandbox-runloop = ["langchain-runloop>=0.0.7"]
 # langchain-e2b is pinned: it still declares `deepagents<0.7.0` and caps
 # `wcmatch<11.0`, overridden below until it publishes compatible metadata.
 sandbox-e2b = ["langchain-e2b==0.0.6"]
 sandbox-providers = [
-    "langchain-daytona>=0.0.8",
-    "langchain-modal>=0.0.6",
+    "langchain-daytona>=0.0.9",
+    "langchain-modal>=0.0.7",
     "langchain-runloop>=0.0.7",
     "langchain-e2b==0.0.6",
 ]
 
+# Shared with mda/: the contract between the backend and its MDA runtime.
+[tool.uv.sources]
+open-swe-runtime-api = { path = "packages/runtime-api", editable = true }
+
 [tool.uv]
 # The externally maintained langchain-e2b integration still declares
-# `deepagents<0.7.0`, but 0.7.29 keeps the sandbox API backward compatible. Its e2b
+# `deepagents<0.7.0`, but 0.7.32 keeps the sandbox API backward compatible. Its e2b
 # dependency also caps wcmatch<11.0 while deepagents requires wcmatch>=11.0, so
 # override both transitive bounds until langchain-e2b publishes compatible metadata.
 # Override-dependencies only apply when langchain-e2b is installed (the sandbox-e2b
 # or sandbox-providers extra).
-override-dependencies = ["deepagents==0.7.29", "wcmatch>=11.0"]
+override-dependencies = ["deepagents==0.7.32", "wcmatch>=11.0"]
 constraint-dependencies = [
-    "langgraph-api>=0.16.2,<0.17",
-    "langgraph-runtime-inmem>=0.36.2,<0.37",
+    "langgraph-api==0.18.0.dev12",
+    "langgraph-runtime-inmem==0.38.0.dev12",
 ]
 
 [build-system]
@@ -120,6 +125,7 @@ ignore = [
 
 [tool.ruff.lint.per-file-ignores]
 "tests/**" = ["SLF001", "PLC2701"]
+"mda/tests/**" = ["SLF001", "PLC2701"]
 # Siblings of one package sharing package-internal helpers. PLC2701 cannot tell
 # an intra-package import from a cross-package one; names these modules expose
 # to the rest of the codebase are public.
@@ -133,13 +139,10 @@ asyncio_mode = "auto"
 testpaths = ["tests"]
 
 [tool.ty.src]
-include = ["openswe", "tests"]
+include = ["openswe", "packages", "tests"]
 # Runs in the mda/ project's environment, against the graph `mda build` compiles.
 # Sandbox scripts run on an older python3; `make typecheck` checks them at 3.8.
 exclude = ["tests/e2e/mda_entrypoint.py", "openswe/sandbox_scripts/*.py"]
-
-[tool.ty.environment]
-extra-paths = ["mda"]
 
 [tool.ty.analysis]
 allowed-unresolved-imports = [

@@ -9,6 +9,7 @@ from zoneinfo import ZoneInfo
 import httpx2
 import pytest
 
+from openswe.expedited_review.eligibility import ChangedFile
 from openswe.expedited_review.readiness import PullRequestSnapshot
 from openswe.github.http import GitHubClient, GitHubError, RepoClient
 from openswe.github.pull_requests import PullRequest
@@ -270,6 +271,76 @@ async def test_opted_out_reviewer_requires_a_verified_person_naming_them(
             assert "opted out" in result["error"]
 
 
+@pytest.mark.parametrize(
+    ("local_time", "out_of_office", "named", "allowed"),
+    [
+        ("2026-10-22T03:00:00", False, False, False),
+        ("2026-10-22T09:00:00", False, False, True),
+        ("2026-10-22T12:00:00", True, False, False),
+        ("2026-10-22T03:00:00", False, True, True),
+    ],
+)
+async def test_assignment_enforces_availability_before_contacting_reviewer(
+    local_time: str, out_of_office: bool, named: bool, allowed: bool
+) -> None:
+    from openswe.human_review import standard
+    from openswe.human_review.people import Participant
+    from openswe.human_review.picking import Coverage, ReviewerAvailability
+
+    zone = ZoneInfo("America/New_York")
+    now = datetime.fromisoformat(local_time).replace(tzinfo=zone).astimezone(UTC)
+    user = User(
+        identities=[
+            UserIdentity(provider="github", external_id="grace", login="grace"),
+            UserIdentity(provider="slack", external_id="U_GRACE", login="grace"),
+        ]
+    )
+    pr = PullRequest(owner="lc", repo="repo", number=7, author="ada")
+    request = HumanReviewRequest(pull_request_id=pr.id, head_sha="abc", kind="standard")
+    request.pull_request = pr
+
+    @asynccontextmanager
+    async def locked(*_: object) -> AsyncIterator[tuple[None, HumanReviewRequest]]:
+        yield None, request
+
+    with (
+        patch.object(standard, "datetime", wraps=datetime) as clock,
+        patch.object(standard, "_github_approvers", AsyncMock(return_value=[])),
+        patch.object(Coverage, "load", AsyncMock(return_value=None)),
+        patch.object(User, "for_login", AsyncMock(return_value=user)),
+        patch.object(standard.PROFILES, "allows_auto_human_review", AsyncMock(return_value=True)),
+        patch.object(
+            ReviewerAvailability,
+            "for_user",
+            AsyncMock(return_value=ReviewerAvailability(zone, out_of_office)),
+        ),
+        patch.object(
+            standard, "resolve_writer", AsyncMock(return_value=Participant(user, "grace"))
+        ),
+        patch.object(HumanReviewRequest, "locked", locked),
+        patch.object(HumanReviewRequest, "get", AsyncMock(return_value=request)),
+        patch.object(ReviewCard, "refresh", AsyncMock()),
+        patch.object(standard, "_request_github_review", AsyncMock()) as github_review,
+        patch.object(standard, "send_dm_with_location", AsyncMock(return_value=None)) as dm,
+        patch.object(standard, "_schedule", AsyncMock(return_value=True)) as schedule,
+        patch.object(standard, "_assignment_minutes", AsyncMock(return_value=120)),
+        patch.object(standard, "_permalink", AsyncMock(return_value="")),
+    ):
+        clock.now.return_value = now
+        result = await standard.assign(request, "grace", "nearby reviewer", replace=named)
+
+    assert result.success is allowed
+    assert bool(request.participants) is allowed
+    if allowed:
+        github_review.assert_awaited_once()
+        dm.assert_awaited_once()
+    else:
+        assert ("out of office" if out_of_office else "outside working hours") in result.error
+        github_review.assert_not_awaited()
+        dm.assert_not_awaited()
+        schedule.assert_not_awaited()
+
+
 @pytest.mark.parametrize("status", [200, 503])
 async def test_reviewer_removal_sends_delete_body_without_aborting(
     status: int, github_app: AsyncMock
@@ -432,7 +503,11 @@ def test_an_approval_from_someone_who_did_not_sign_up_counts() -> None:
 
 
 @pytest.mark.parametrize(
-    "states", [{"Grace": "APPROVED", "hopper": "APPROVED", "linus": "DISMISSED"}, None]
+    "states",
+    [
+        {"Grace": "APPROVED", "hopper": "APPROVED", "unknown": "APPROVED", "linus": "DISMISSED"},
+        None,
+    ],
 )
 async def test_merged_card_names_only_actual_approvers(
     states: dict[str, str] | None, github_app: AsyncMock
@@ -450,8 +525,16 @@ async def test_merged_card_names_only_actual_approvers(
         participant = HumanReviewParticipant(user_id=user.id, decision="review")
         participant.user = user
         request.participants.append(participant)
-    with patch(
-        "openswe.human_review.lifecycle.latest_review_states", AsyncMock(return_value=states)
+    hopper = User(identities=[UserIdentity(provider="slack", external_id="U_hopper")])
+    with (
+        patch(
+            "openswe.human_review.lifecycle.latest_review_states", AsyncMock(return_value=states)
+        ),
+        patch.object(
+            User,
+            "for_login",
+            AsyncMock(side_effect=lambda provider, login: hopper if login == "hopper" else None),
+        ),
     ):
         text, blocks = await ReviewCard(request).render("merged")
     payload = block_payload(blocks)
@@ -461,10 +544,54 @@ async def test_merged_card_names_only_actual_approvers(
         assert "merged" in message
         assert "by @ada" in message
         if states:
-            assert "approved by <@U_grace>, @hopper" in message
+            assert "approved by <@U_grace>, <@U_hopper>, @unknown" in message
         else:
             assert "approved by" not in message
         assert "linus" not in message
+
+
+@pytest.mark.parametrize("available", [True, False])
+async def test_open_card_counts_only_non_test_files(available: bool) -> None:
+    pr = PullRequest(
+        owner="o",
+        repo="r",
+        number=1,
+        title="Fix",
+        author="ada",
+        additions=110,
+        deletions=55,
+        changed_files=2,
+    )
+    request = HumanReviewRequest(pull_request_id=pr.id, head_sha="abc", kind="standard")
+    request.pull_request = pr
+    request.requested_by = None
+    files = [
+        ChangedFile(filename="openswe/example.py", additions=10, deletions=5),
+        ChangedFile(filename="tests/test_example.py", additions=100, deletions=50),
+    ]
+    with (
+        patch.object(ReviewCard, "_files", AsyncMock(return_value=files if available else None)),
+        patch.object(ReviewCard, "_review_states", AsyncMock(return_value={})),
+        patch.object(HumanReviewRequest, "author_mention", AsyncMock(return_value="@ada")),
+    ):
+        _, blocks = await ReviewCard(request)._render_standard(None)
+    rendered = str(block_payload(blocks))
+    assert ("+10 −5 in 1 non-test file" in rendered) is available
+    assert "+110" not in rendered
+    assert "−55" not in rendered
+
+
+@pytest.mark.parametrize("count", [101, 102])
+async def test_standard_card_requires_complete_file_counts(
+    count: int, github_app: AsyncMock
+) -> None:
+    pr = PullRequest(owner="o", repo="r", number=1, changed_files=count)
+    request = HumanReviewRequest(pull_request_id=pr.id, head_sha="abc", kind="standard")
+    request.pull_request = pr
+    files = [ChangedFile(filename=f"openswe/file_{i}.py") for i in range(101)]
+    with patch.object(ChangedFile, "of_pull", AsyncMock(return_value=files)):
+        result = await ReviewCard(request)._files()
+    assert result == (files if count == 101 else None)
 
 
 def test_a_short_description_is_shown_whole_without_its_template_comments() -> None:
@@ -516,15 +643,70 @@ async def test_approved_card_collapses_without_closing_the_request(
         patch.object(HumanReviewRequest, "author_mention", AsyncMock(return_value="<@U_ada>")),
     ):
         text, blocks = await ReviewCard(request).render(None)
-    assert ("Review request: approved" in text) is collapsed
+    assert text.startswith(":white_check_mark: ") is collapsed
     assert (len(blocks) == 1) is collapsed
     assert "<@U_ada>" in str(block_payload(blocks))
     if collapsed:
-        assert "by <@U_ada>" in text
+        assert "\n" not in text
+        assert "authored by <@U_ada> — approved by @grace" in text
     if pending and not auto_merge:
         assert "linus" in str(block_payload(blocks))
         assert "awaiting manual merge" not in text
     assert request.state == "open"
+
+
+@pytest.mark.parametrize("in_thread", [False, True])
+@pytest.mark.parametrize("outcome", [None, "merged"])
+@pytest.mark.parametrize("source", ["unavailable", "moved", "detached"])
+async def test_review_card_keeps_its_originating_slack_thread(
+    in_thread: bool, outcome: str | None, source: str, github_app: AsyncMock
+) -> None:
+    pr = PullRequest(owner="lc", repo="repo", number=7, author="ada")
+    request = HumanReviewRequest(
+        pull_request_id=pr.id,
+        head_sha="abc",
+        kind="standard",
+        thread_id="origin-thread",
+        slack_channel_id="C_REVIEW",
+        slack_thread_ts="123.456" if in_thread else "",
+        run_config={"slack_thread": {"channel_id": "C_SOURCE", "thread_ts": "123.456"}},
+    )
+    request.pull_request = pr
+    request.requested_by = None
+    channel = "C_MOVED" if source == "moved" else "C_SOURCE"
+    source_url = f"https://langchain.slack.com/archives/{channel}/p123456"
+    client = MagicMock()
+    client.threads.get = AsyncMock(
+        return_value={
+            "metadata": {
+                "source_context": {
+                    "slack_thread": {"channel_id": "C_MOVED", "thread_ts": "123.456"}
+                }
+            }
+            if source == "moved"
+            else {"slack_thread_detached_at": "2026-10-23T00:00:00Z"}
+        },
+        side_effect=RuntimeError("Metadata unavailable") if source == "unavailable" else None,
+    )
+    with (
+        patch.object(ReviewCard, "_review_states", AsyncMock(return_value={})),
+        patch.object(ReviewCard, "_warn_target", side_effect=lambda card: card),
+        patch("openswe.slack.cards.get_client", return_value=client),
+        patch(
+            "openswe.slack.cards.get_slack_permalink",
+            AsyncMock(
+                side_effect=lambda target, ts: (
+                    source_url if (target, ts) == (channel, "123.456") else None
+                )
+            ),
+        ),
+    ):
+        _, blocks = await ReviewCard(request).render(outcome)
+    rendered = str(block_payload(blocks))
+    if source == "detached":
+        assert "|Slack thread>" not in rendered
+    else:
+        assert f"<{source_url}|Slack thread>" in rendered
 
 
 def _response(status: int, text: str = "") -> httpx2.Response:

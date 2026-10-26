@@ -1,13 +1,5 @@
-"""Assembly contract for the main agent's context-management + middleware wiring.
+"""What the main agent's planner hands an MDA run: its tools, middleware, models and subagents."""
 
-Locks in that `get_agent` hands a sandbox `backend` to `create_deep_agent` (which
-is what makes deepagents auto-wire `FilesystemMiddleware` tool-result eviction and
-`SummarizationMiddleware` history offloading), and that the redundant custom
-`RepairOrphanedToolCallsMiddleware` is no longer added explicitly — the built-in
-`PatchToolCallsMiddleware` that `create_deep_agent` adds covers it.
-"""
-
-import asyncio
 import json
 from collections.abc import Callable
 from types import SimpleNamespace
@@ -16,14 +8,15 @@ from unittest.mock import ANY, AsyncMock, MagicMock, patch
 
 import langgraph_sdk
 import pytest
-from langchain.agents.middleware.types import AgentMiddleware, ModelRequest, ModelResponse
 from langchain_core.language_models import BaseChatModel
-from langchain_core.messages import AIMessage, HumanMessage, ToolMessage
 from langgraph.graph.state import RunnableConfig
 
+from openswe.agent_api.loop import ModelChoices
 from openswe.dashboard.workspace_settings import WorkspaceSettings
 from openswe.sandboxes.state import SANDBOX_BACKENDS
-from openswe.server import _registered_tool_name, get_agent
+from openswe.sandboxes.tool_runtime import ToolSurface
+from openswe.server import _registered_tool_name, plan_agent
+from openswe.threads.inbox import ThreadInbox
 
 _MODEL_DEFAULTS = {
     "default_agent_model": "openai:gpt-6.1-sol",
@@ -52,7 +45,7 @@ async def test_public_agent_excludes_personal_skills_and_tools(saved_thread_scop
     config = _base_config()
     config["configurable"]["source"] = "dashboard"
     with patch("openswe.server._mcp_tools_for", new_callable=AsyncMock, return_value=[]) as mcps:
-        captured = await _capture_create_deep_agent_kwargs(config)
+        captured = await _plan_agent(config)
     assert captured["skills"] == ["/organization-skills/", "/bundled-skills/"]
     assert "/skills/" not in captured["backend"].routes
     tools = captured["tools"]
@@ -68,20 +61,14 @@ async def test_public_agent_excludes_personal_skills_and_tools(saved_thread_scop
         }
     )
     mcps.assert_awaited_once_with(None, ANY, None)
-    from openswe.middleware import WorkspaceSkillsMiddleware
-
-    middleware = cast(list[object], captured["middleware"])
-    assert any(isinstance(item, WorkspaceSkillsMiddleware) for item in middleware)
-    subagents = cast(list[dict], captured["subagents"])
-    assert any(isinstance(item, WorkspaceSkillsMiddleware) for item in subagents[0]["middleware"])
 
 
-async def test_remote_agent_discovers_personal_skills(monkeypatch: pytest.MonkeyPatch) -> None:
-    from deepagents.middleware.skills import SkillsMiddleware
-    from langgraph.runtime import Runtime
+async def test_remote_agent_lists_personal_skills(monkeypatch: pytest.MonkeyPatch) -> None:
+    from runtime_api.operations import RunRequest
+    from runtime_api.skills import RunSkills
 
-    from openswe.remote_runtime.graph import RunSession
-    from openswe.sandboxes.tool_runtime import ToolSurface
+    from openswe.agent_api.agent import AGENT
+    from openswe.agent_api.tokens import RemoteRun
     from openswe.skill_store.store import _record
 
     monkeypatch.setattr(
@@ -92,101 +79,81 @@ async def test_remote_agent_discovers_personal_skills(monkeypatch: pytest.Monkey
             )
         ),
     )
-    captured = await _capture_create_deep_agent_kwargs()
-    middleware = [
-        item
-        for item in cast(list[object], captured["middleware"])
-        if isinstance(item, SkillsMiddleware)
-    ]
-    session = RunSession(
-        ToolSurface(middleware=cast(list[AgentMiddleware], middleware)), {}, None, started_here=True
-    )
-    state: dict[str, object] = {"messages": []}
-    with patch("openswe.remote_runtime.graph.get_config", return_value=_base_config()):
-        prepared = await session.run_phase("before_agent", state, Runtime())
-    shaped = await session.model_call({**state, **prepared.update}, Runtime())
+    captured = await _plan_agent()
+    surface = cast(ToolSurface, captured["surface"])
+    configurable = dict(_base_config()["configurable"])
+    run = RemoteRun(thread_id="thread-ctx", assistant_id="agent", configurable=configurable)
 
-    assert "personal-workflow" in shaped.system_prompt
+    # Listed from the run's token alone: no plan of the run is made for it.
+    listed = RunSkills.model_validate(await AGENT.api(run, "skills", RunRequest().model_dump()))
+
+    personal = next(f for f in listed.files if f.path == "/skills/personal-workflow/SKILL.md")
+    assert "Do it." in personal.content
+    # The runtime answers reads of skills itself; the files API serves none of them.
+    assert not set(surface.skill_sources) & set(surface.backend_paths)
 
 
-@pytest.mark.asyncio
-async def test_binary_content_is_offloaded_to_a_thread_scoped_store():
+async def test_offloaded_images_are_served_from_a_thread_scoped_store() -> None:
     from deepagents.backends.store import StoreBackend
-    from deepagents.middleware.filesystem import FilesystemMiddleware
 
-    captured = await _capture_create_deep_agent_kwargs()
+    captured = await _plan_agent()
     blobs = captured["backend"].routes["/blobs/"]
     assert isinstance(blobs, StoreBackend)
     assert blobs._namespace(MagicMock()) == ("thread_blobs", "thread-ctx")
-    filesystem = next(
-        item
-        for item in cast(list[object], captured["middleware"])
-        if isinstance(item, FilesystemMiddleware)
-    )
-    assert filesystem.backend is captured["backend"]
-    assert filesystem._offload_binary_content
+    surface = cast(ToolSurface, captured["surface"])
+    assert "/blobs/" in surface.backend_paths
 
 
 @pytest.mark.parametrize(
-    ("enabled", "binding", "available"),
+    ("binding", "connected", "available"),
     [
-        (False, {}, False),
-        (True, {}, True),
-        (True, {"sandbox_id": "bridge:desktop", "sandbox_bridge_client": "desktop"}, True),
-        (True, {"sandbox_id": "bridge:cli", "sandbox_bridge_client": "cli"}, False),
-        (True, {"sandbox_id": "bridge:legacy-cli"}, False),
+        ({}, False, True),
+        ({"sandbox_id": "bridge:desktop", "sandbox_bridge_client": "desktop"}, True, True),
+        ({"sandbox_id": "bridge:cli", "sandbox_bridge_client": "cli"}, True, True),
+        ({"sandbox_id": "bridge:cli", "sandbox_bridge_client": "cli"}, False, False),
     ],
 )
-async def test_task_tools_require_owner_opt_in_and_supported_sandbox(
+async def test_task_tools_require_a_served_sandbox(
     saved_thread_scope: dict[str, object],
-    enabled: bool,
     binding: dict[str, str],
+    connected: bool,
     available: bool,
 ) -> None:
-    from openswe.users import User, UserPreferences
-
     saved_thread_scope.update(owner_type="user", owner_login="owner")
     saved_thread_scope.update(binding)
 
-    async def preferences(login: str) -> UserPreferences:
-        return UserPreferences(experimental_task_coordination=enabled if login == "owner" else True)
-
-    with patch.object(User, "preferences_for_login", side_effect=preferences):
-        captured = await _capture_create_deep_agent_kwargs()
+    with patch("openswe.tasks.schemas.BridgeStore.is_connected", return_value=connected):
+        captured = await _plan_agent()
     tools = captured["tools"]
     assert isinstance(tools, list)
     names = {_registered_tool_name(tool) for tool in tools}
-    assert ("spawn_worker" in names) is available
     assert ("control_worker" in names) is available
 
 
 @pytest.mark.parametrize("role", ["coordinator", "worker"])
-async def test_existing_task_keeps_controls_after_opt_out(
+async def test_existing_task_keeps_controls_without_delegation(
     saved_thread_scope, role: Literal["coordinator", "worker"]
 ):
     from openswe.tasks.store import Task, TaskContext, TaskMembership
-    from openswe.users import User, UserPreferences
     from openswe.workspaces.rows import WorkspaceRow
 
-    saved_thread_scope.update(owner_type="user", owner_login="owner")
+    saved_thread_scope.update(
+        owner_type="user", owner_login="owner", sandbox_id="bridge:cli", sandbox_bridge_client="cli"
+    )
     workspace = WorkspaceRow(slug="default", name="Default")
     task = Task(
         coordinator_thread_id="coordinator", title="Existing task", workspace_id=workspace.id
     )
     task.workspace = workspace
     context = TaskContext(task, TaskMembership(thread_id="thread-ctx", task_id=task.id, role=role))
-    with (
-        patch.object(User, "preferences_for_login", return_value=UserPreferences()),
-        patch(
-            "openswe.middleware.task_coordination.TaskMembership.context_for_thread",
-            return_value=context,
-        ),
+    with patch(
+        "openswe.middleware.task_coordination.TaskMembership.context_for_thread",
+        return_value=context,
     ):
-        captured = await _capture_create_deep_agent_kwargs()
+        captured = await _plan_agent()
     tools = captured["tools"]
     assert isinstance(tools, list)
     names = {_registered_tool_name(tool) for tool in tools}
-    assert "spawn_worker" not in names
     assert {"control_worker", "message_task_thread", "task_status"} <= names
 
 
@@ -196,14 +163,8 @@ async def test_unknown_scope_omits_workspace_and_personal_mcps():
         patch("openswe.server.private_credential_login", side_effect=TimeoutError),
         patch("openswe.server._mcp_tools_for", new_callable=AsyncMock) as mcps,
     ):
-        await _capture_create_deep_agent_kwargs()
+        await _plan_agent()
     mcps.assert_not_awaited()
-
-
-class _DummyAgent:
-    def with_config(self, config: RunnableConfig) -> _DummyAgent:
-        self.config = config
-        return self
 
 
 def _base_config() -> RunnableConfig:
@@ -217,7 +178,7 @@ def _base_config() -> RunnableConfig:
     }
 
 
-async def _capture_create_deep_agent_kwargs(
+async def _plan_agent(
     config: RunnableConfig | None = None,
     *,
     profile: dict[str, object] | None = None,
@@ -225,14 +186,12 @@ async def _capture_create_deep_agent_kwargs(
     workspace_settings: WorkspaceSettings | None = None,
     make_model: Callable[..., BaseChatModel] | None = None,
 ) -> dict[str, object]:
-    captured: dict[str, object] = {}
+    """The run ``config`` plans, with the parts tests read pulled out of its middleware."""
+
+    surface = ToolSurface()
     make_model_calls: list[tuple[str, dict[str, object]]] = []
     config = config or _base_config()
     thread_id = str((config.get("configurable") or {}).get("thread_id"))
-
-    def fake_create_deep_agent(**kwargs: object) -> _DummyAgent:
-        captured.update(kwargs)
-        return _DummyAgent()
 
     def fake_make_model(model_id: str, **kwargs: object) -> MagicMock | BaseChatModel:
         make_model_calls.append((model_id, kwargs))
@@ -281,13 +240,20 @@ async def _capture_create_deep_agent_kwargs(
         patch("openswe.server.fallback_model_id_for", return_value=None),
         patch("openswe.server.make_model", side_effect=fake_make_model),
         patch("openswe.server.construct_system_prompt", return_value="prompt"),
-        patch("openswe.server.create_deep_agent", side_effect=fake_create_deep_agent),
     ):
-        await get_agent(config)
+        await plan_agent(config, surface)
 
     SANDBOX_BACKENDS.pop(thread_id, None)
-    captured["make_model_calls"] = make_model_calls
-    return captured
+    middleware = list(surface.middleware)
+    return {
+        "surface": surface,
+        "tools": list(surface.base_tools),
+        "middleware": middleware,
+        "subagents": list(surface.subagents),
+        "backend": surface.files,
+        "skills": list(surface.skill_sources),
+        "make_model_calls": make_model_calls,
+    }
 
 
 @pytest.mark.asyncio
@@ -300,7 +266,7 @@ async def test_existing_thread_reloads_sender_draft_preference_into_run_config(
     assert isinstance(configurable, dict)
     configurable["github_login"] = "draft-preference-owner"
 
-    await _capture_create_deep_agent_kwargs(
+    await _plan_agent(
         config,
         profile={"draft_prs": False},
         thread_settings={
@@ -313,53 +279,6 @@ async def test_existing_thread_reloads_sender_draft_preference_into_run_config(
 
 
 @pytest.mark.asyncio
-async def test_agent_starts_sandbox_while_loading_settings() -> None:
-    started = asyncio.Event()
-    release = asyncio.Event()
-
-    async def ensure_sandbox(*args: object, **kwargs: object) -> MagicMock:
-        del args, kwargs
-        started.set()
-        await release.wait()
-        return MagicMock()
-
-    async def load_defaults(*args: object) -> WorkspaceSettings:
-        del args
-        await started.wait()
-        return WorkspaceSettings(
-            {
-                **_MODEL_DEFAULTS,
-                "default_agent_routing_fast_model": "openai:gpt-6.1-sol",
-                "default_agent_routing_fast_reasoning_effort": "low",
-                "default_agent_routing_balanced_model": "openai:gpt-6.1-sol",
-                "default_agent_routing_balanced_reasoning_effort": "medium",
-                "default_agent_routing_performance_model": "openai:gpt-6.1-sol",
-                "default_agent_routing_performance_reasoning_effort": "high",
-                "gateway_enabled": False,
-                "fable_enabled": True,
-            }
-        )
-
-    SANDBOX_BACKENDS.pop("thread-ctx", None)
-    with (
-        patch("openswe.server.ensure_sandbox_for_thread", side_effect=ensure_sandbox),
-        patch("openswe.server.cached_workspace_settings", side_effect=load_defaults),
-        patch("openswe.server._cached_profile", new_callable=AsyncMock, return_value=None),
-        patch("openswe.server._mcp_tools_for", new_callable=AsyncMock, return_value=[]),
-        patch("openswe.server.make_model", return_value=MagicMock()),
-        patch("openswe.server.fallback_model_id_for", return_value=None),
-        patch("openswe.server.create_deep_agent", return_value=_DummyAgent()),
-    ):
-        agent_task = asyncio.create_task(get_agent(_base_config()))
-        await asyncio.wait_for(started.wait(), timeout=1)
-        assert not agent_task.done()
-        release.set()
-        await agent_task
-
-    SANDBOX_BACKENDS.pop("thread-ctx", None)
-
-
-@pytest.mark.asyncio
 async def test_router_failure_uses_fast_tier_not_profile_default() -> None:
     config = _base_config()
     config["configurable"].update(thread_id="thread-1", source="dashboard", model_selection="auto")
@@ -368,7 +287,7 @@ async def test_router_failure_uses_fast_tier_not_profile_default() -> None:
         "reasoning_effort": "high",
         "model_routing_enabled": True,
     }
-    agent = await _capture_create_deep_agent_kwargs(config, profile=profile)
+    agent = await _plan_agent(config, profile=profile)
     model_selection = next(
         item
         for item in cast(list[object], agent["middleware"])
@@ -377,7 +296,6 @@ async def test_router_failure_uses_fast_tier_not_profile_default() -> None:
     route = await model_selection.select_route({"messages": []})
 
     assert route == "default"
-    assert model_selection._models[route] is agent["model"]
     assert agent["make_model_calls"][0][0] == "google_genai:gemini-3.8-flash"
 
 
@@ -390,7 +308,7 @@ async def test_admin_model_changes_only_affect_new_threads(legacy_thread: bool) 
         else {}
     )
     with patch("openswe.server.store_thread_settings", new_callable=AsyncMock) as store:
-        original = await _capture_create_deep_agent_kwargs(
+        original = await _plan_agent(
             profile={"model_routing_enabled": True}, thread_settings=initial_settings
         )
     snapshot = json.loads(json.dumps(store.call_args.args[2]))
@@ -413,14 +331,10 @@ async def test_admin_model_changes_only_affect_new_threads(legacy_thread: bool) 
             },
         }
     )
-    existing = await _capture_create_deep_agent_kwargs(
-        thread_settings=snapshot, workspace_settings=changed_defaults
-    )
+    existing = await _plan_agent(thread_settings=snapshot, workspace_settings=changed_defaults)
     fresh_config = _base_config()
     fresh_config["configurable"]["thread_id"] = "new-thread"
-    fresh = await _capture_create_deep_agent_kwargs(
-        fresh_config, workspace_settings=changed_defaults
-    )
+    fresh = await _plan_agent(fresh_config, workspace_settings=changed_defaults)
 
     original_calls = cast(list[tuple[str, dict[str, object]]], original["make_model_calls"])
     existing_calls = cast(list[tuple[str, dict[str, object]]], existing["make_model_calls"])
@@ -445,7 +359,7 @@ async def test_personal_settings_tool_not_exposed_to_unauthorized_runs(
 ) -> None:
     config = _base_config()
     config["configurable"].update({"source": "dashboard", **config_patch})
-    captured = await _capture_create_deep_agent_kwargs(config)
+    captured = await _plan_agent(config)
     tools = captured["tools"]
     assert isinstance(tools, list)
     assert "save_user_settings" not in {_registered_tool_name(tool) for tool in tools}
@@ -464,7 +378,7 @@ async def test_agent_includes_sql_only_on_private_admin_surfaces(
     from openswe.tools import read_only_sql
     from openswe.tools.manage_feature_flags import manage_feature_flags
 
-    captured = await _capture_create_deep_agent_kwargs()
+    captured = await _plan_agent()
     tools = _tool_names(captured["tools"])
     assert read_only_sql.__name__ not in tools
     assert manage_feature_flags.__name__ not in tools
@@ -474,15 +388,17 @@ async def test_agent_includes_sql_only_on_private_admin_surfaces(
     configurable = config.get("configurable")
     assert isinstance(configurable, dict)
     configurable["admin_thread"] = True
-    captured = await _capture_create_deep_agent_kwargs(config)
+    captured = await _plan_agent(config)
     tools = _tool_names(captured["tools"])
     assert read_only_sql.__name__ in tools
     assert manage_feature_flags.__name__ in tools
     subagents = captured["subagents"]
     assert isinstance(subagents, list)
-    general_purpose = next(item for item in subagents if item["name"] == "general-purpose")
-    assert read_only_sql.__name__ in _tool_names(general_purpose["tools"])
-    assert manage_feature_flags.__name__ in _tool_names(general_purpose["tools"])
+    general_purpose = next(item for item in subagents if item.name == "general-purpose")
+    assert general_purpose.tools is not None
+    # SQL needs the parent; the subagent keeps the rest.
+    assert read_only_sql.__name__ not in general_purpose.tools
+    assert manage_feature_flags.__name__ in general_purpose.tools
 
     configurable["source"] = "slack"
     configurable["slack_thread"] = {
@@ -491,7 +407,7 @@ async def test_agent_includes_sql_only_on_private_admin_surfaces(
         "triggering_user_id": "U123",
         "channel_context": {"is_im": True},
     }
-    captured = await _capture_create_deep_agent_kwargs(config)
+    captured = await _plan_agent(config)
     tools = _tool_names(captured["tools"])
     assert read_only_sql.__name__ in tools
     assert manage_feature_flags.__name__ in tools
@@ -499,7 +415,7 @@ async def test_agent_includes_sql_only_on_private_admin_surfaces(
     assert all(tool.__name__ in tools for tool in ADMIN_TOOLS)
 
     configurable["github_login"] = "not-an-admin"
-    captured = await _capture_create_deep_agent_kwargs(config)
+    captured = await _plan_agent(config)
     tools = _tool_names(captured["tools"])
     assert read_only_sql.__name__ not in tools
     assert manage_feature_flags.__name__ not in tools
@@ -507,7 +423,7 @@ async def test_agent_includes_sql_only_on_private_admin_surfaces(
 
     configurable["github_login"] = "octocat"
     configurable["source"] = "schedule"
-    captured = await _capture_create_deep_agent_kwargs(config)
+    captured = await _plan_agent(config)
     tools = _tool_names(captured["tools"])
     assert read_only_sql.__name__ not in tools
     assert manage_feature_flags.__name__ not in tools
@@ -540,7 +456,7 @@ async def test_a_web_turn_on_a_slack_thread_keeps_the_slack_tools() -> None:
         }
     )
 
-    captured = await _capture_create_deep_agent_kwargs(config)
+    captured = await _plan_agent(config)
     tools = captured["tools"]
     assert isinstance(tools, list)
 
@@ -551,7 +467,8 @@ async def test_a_web_turn_on_a_slack_thread_keeps_the_slack_tools() -> None:
     require_reply = next(
         item for item in middleware if type(item).__name__ == "RequireUserReplyMiddleware"
     )
-    assert require_reply.before_agent({}, MagicMock())["reply_surface"] == "web"
+    prepared = await require_reply.abefore_agent({}, MagicMock())
+    assert prepared["reply_surface"] == "web"
 
 
 @pytest.mark.asyncio
@@ -561,7 +478,7 @@ async def test_an_automation_run_can_post_to_a_channel_without_a_slack_thread() 
     assert isinstance(configurable, dict)
     configurable.update({"source": "schedule", "slack_thread": None})
 
-    captured = await _capture_create_deep_agent_kwargs(config)
+    captured = await _plan_agent(config)
     tools = captured["tools"]
     assert isinstance(tools, list)
 
@@ -572,7 +489,6 @@ async def test_an_automation_run_can_post_to_a_channel_without_a_slack_thread() 
 
 @pytest.mark.asyncio
 async def test_general_purpose_subagent_cannot_use_slack_tools() -> None:
-    from openswe.prompt import prompt
 
     config = _base_config()
     configurable = config.get("configurable")
@@ -583,16 +499,17 @@ async def test_general_purpose_subagent_cannot_use_slack_tools() -> None:
             "slack_thread": {"channel_id": "C123", "thread_ts": "1700000000.000100"},
         }
     )
-    captured = await _capture_create_deep_agent_kwargs(config)
+    captured = await _plan_agent(config)
     parent_tools = captured["tools"]
     subagents = captured["subagents"]
     assert isinstance(parent_tools, list)
     assert isinstance(subagents, list)
 
-    gp = next(s for s in subagents if s["name"] == "general-purpose")
-    assert "cannot access Slack tools" in gp["description"]
+    gp = next(item for item in subagents if item.name == "general-purpose")
+    assert "cannot access Slack tools" in gp.description
+    assert gp.tools is not None
     parent_names = {_registered_tool_name(tool) for tool in parent_tools}
-    subagent_names = {_registered_tool_name(tool) for tool in gp["tools"]}
+    subagent_names = set(gp.tools)
     slack_names = {
         "manage_code_channel",
         "manage_incident",
@@ -620,30 +537,7 @@ async def test_general_purpose_subagent_cannot_use_slack_tools() -> None:
         "submit_review_assessment_feedback",
     }
     assert parent_only_names <= parent_names
-    assert subagent_names == parent_names
-    assert gp["tools"] == parent_tools
-
-    from langchain.agents.middleware.types import ToolCallRequest
-
-    guard = next(item for item in gp["middleware"] if item.name == "_SubagentToolGuard")
-    handler = AsyncMock(return_value=ToolMessage(content="executed", tool_call_id="allowed"))
-    for name in parent_only_names | {
-        "read_only_sql",
-        "read_incident",
-        "search_incidents",
-        "record_incident_report",
-        "task",
-    }:
-        request = MagicMock(spec=ToolCallRequest)
-        request.tool_call = {"name": name, "args": {}, "id": name, "type": "tool_call"}
-        result = await guard.awrap_tool_call(request, handler)
-        assert isinstance(result, ToolMessage)
-        assert result.tool_call_id == name
-        assert result.content == prompt("tools/subagent-unavailable")
-    handler.assert_not_awaited()
-    request.tool_call = {"name": "execute", "args": {}, "id": "allowed", "type": "tool_call"}
-    assert (await guard.awrap_tool_call(request, handler)).content == "executed"
-    handler.assert_awaited_once_with(request)
+    assert not subagent_names & parent_only_names
 
 
 @pytest.mark.asyncio
@@ -662,7 +556,7 @@ async def test_channel_reads_need_a_private_thread(
         }
     )
 
-    captured = await _capture_create_deep_agent_kwargs(config)
+    captured = await _plan_agent(config)
     tools = captured["tools"]
     subagents = captured["subagents"]
     assert isinstance(tools, list)
@@ -673,9 +567,8 @@ async def test_channel_reads_need_a_private_thread(
     # A thread-bound Slack read is unaffected either way.
     assert "slack_read_thread_messages" in tool_names
 
-    gp = next(item for item in subagents if item["name"] == "general-purpose")
-    subagent_names = {_registered_tool_name(tool) for tool in gp["tools"]}
-    assert ("slack_read_channel_messages" in subagent_names) is private_thread
+    gp = next(item for item in subagents if item.name == "general-purpose")
+    assert ("slack_read_channel_messages" in (gp.tools or ())) is private_thread
 
 
 @pytest.fixture
@@ -689,7 +582,10 @@ def pinned_settings() -> dict[str, object]:
     }
 
 
-async def test_explicit_breakout_model_survives_startup_and_followup() -> None:
+@pytest.mark.parametrize("followup_source", ["slack", "dashboard"])
+async def test_explicit_breakout_model_survives_startup_and_followup(
+    followup_source: str,
+) -> None:
     from openswe.server import PrepareAgentRunMiddleware
 
     config = _base_config()
@@ -701,11 +597,13 @@ async def test_explicit_breakout_model_survives_startup_and_followup() -> None:
         agent_effort="max",
     )
     with patch("openswe.server.store_thread_settings", new_callable=AsyncMock) as store:
-        initial = await _capture_create_deep_agent_kwargs(config)
+        initial = await _plan_agent(config)
     snapshot = cast(dict[str, object], store.call_args.args[2])
     assert snapshot["model_handoff_complete"] is True
     assert snapshot["model_routing_enabled"] is False
-    followup = await _capture_create_deep_agent_kwargs(_base_config(), thread_settings=snapshot)
+    followup_config = _base_config()
+    followup_config["configurable"].update(source=followup_source, model_selection="auto")
+    followup = await _plan_agent(followup_config, thread_settings=snapshot)
     for agent in (initial, followup):
         calls = cast(list[tuple[str, dict[str, object]]], agent["make_model_calls"])
         assert calls[0][0] == "anthropic:claude-opus-5-5"
@@ -732,28 +630,25 @@ async def test_requested_model_survives_auto_followups_but_explicit_selection_wi
         agent_model_id="openai:gpt-6.1-sol",
         agent_effort="low",
     )
-    await _capture_create_deep_agent_kwargs(config, thread_settings=pinned_settings)
+    await _plan_agent(config, thread_settings=pinned_settings)
     assert configurable["resolved_agent_model_id"] == "anthropic:claude-opus-5-5"
     configurable.update(
         model_selection="explicit", agent_model_id="openai:gpt-6.1-sol", agent_effort="low"
     )
-    await _capture_create_deep_agent_kwargs(config, thread_settings=pinned_settings)
+    await _plan_agent(config, thread_settings=pinned_settings)
     assert configurable["resolved_agent_model_id"] == "openai:gpt-6.1-sol"
 
 
-@pytest.mark.parametrize("image_source", ["initial", "retained", "tool"])
 @pytest.mark.parametrize("route", ["fast", "balanced", "performance"])
-async def test_text_only_adaptive_route_uses_vision_fallback_after_handoff(
-    image_source: Literal["initial", "retained", "tool"],
+async def test_text_only_adaptive_route_names_a_vision_model_after_handoff(
     route: Literal["fast", "balanced", "performance"],
 ) -> None:
-    from openswe.middleware.image_model_fallback import ImageModelFallbackMiddleware
-    from openswe.middleware.model_selection import ModelSelectionMiddleware, ModelSelectionState
+    from openswe.agent_api.graph import RunSession
 
     model_id = "fireworks:accounts/fireworks/models/kimi-k3"
     config = _base_config()
     config["configurable"].update(source="dashboard", model_selection="auto")
-    captured = await _capture_create_deep_agent_kwargs(
+    planned = await _plan_agent(
         config,
         thread_settings={
             "model_id": "openai:gpt-6.1-sol",
@@ -765,41 +660,16 @@ async def test_text_only_adaptive_route_uses_vision_fallback_after_handoff(
                 route: {"model_id": model_id, "effort": "high"},
             },
         },
-        make_model=lambda model_id, **_: MagicMock(model_id=model_id),
     )
-    middleware = cast(list[object], captured["middleware"])
-    selection = next(item for item in middleware if isinstance(item, ModelSelectionMiddleware))
-    fallback = next(
-        (item for item in middleware if isinstance(item, ImageModelFallbackMiddleware)), None
-    )
-    image = [{"type": "image_url", "image_url": {"url": "https://example.com/image.png"}}]
-    state: ModelSelectionState = {
-        "messages": [
-            ToolMessage(content=image, tool_call_id="screenshot")
-            if image_source == "tool"
-            else HumanMessage(content=image)
-        ],
-        "model_route": route,
-    }
-    if image_source == "retained":
-        state["messages"].append(HumanMessage(content="Explain the screenshot"))
-    handler = AsyncMock(return_value=ModelResponse(result=[AIMessage(content="Done")]))
+    session = RunSession(cast(ToolSurface, planned["surface"]), {}, None, started_here=True)
+    choices = ModelChoices(session.start_models())
 
-    async def handle_selected(request: ModelRequest) -> ModelResponse:
-        if fallback is not None:
-            return await fallback.awrap_model_call(request, handler)
-        return await handler(request)
+    routed = choices.model_for({"model_route": route})
+    vision = choices.vision_for(routed)
 
-    for with_image in (True, False):
-        request = ModelRequest(
-            model=cast(BaseChatModel, captured["model"]),
-            messages=state["messages"] if with_image else [HumanMessage(content="Continue")],
-            state=state,
-        )
-        await selection.awrap_model_call(request, handle_selected)
-        actual = handler.call_args.args[0]
-        assert actual.model.model_id == ("openai:gpt-6.1-sol" if with_image else model_id)
-        assert actual.messages == request.messages
+    assert routed.model_id == model_id
+    assert vision is not None and vision.model_id == "openai:gpt-6.1-sol"
+    assert choices.vision_for(vision) is None
 
 
 @pytest.mark.asyncio
@@ -824,7 +694,7 @@ async def test_explicit_auto_selection_clears_pin_and_keeps_routing_on_followups
     from openswe.middleware.model_selection import ModelSelectionMiddleware
     from openswe.server import PrepareAgentRunMiddleware
 
-    monkeypatch.setattr("openswe.server._model_routing_mode", lambda _: "jev")
+    monkeypatch.setattr("openswe.server._model_routing_mode", lambda _: "auto")
     monkeypatch.setattr(
         "openswe.middleware.model_selection._select_jev_route", AsyncMock(return_value="default")
     )
@@ -833,9 +703,7 @@ async def test_explicit_auto_selection_clears_pin_and_keeps_routing_on_followups
         source="dashboard", model_selection="auto", model_selection_changed=True
     )
     with patch("openswe.server.store_thread_settings", new_callable=AsyncMock) as store:
-        captured = await _capture_create_deep_agent_kwargs(
-            config, thread_settings=pinned_settings, profile=profile
-        )
+        captured = await _plan_agent(config, thread_settings=pinned_settings, profile=profile)
     snapshot = cast(dict[str, object], store.call_args.args[2])
     assert snapshot["requested_model"] is None
     assert snapshot["model_routing_enabled"] is True
@@ -847,12 +715,11 @@ async def test_explicit_auto_selection_clears_pin_and_keeps_routing_on_followups
 
     followup = _base_config()
     followup["configurable"].update(source="dashboard", model_selection="auto")
-    followup_agent = await _capture_create_deep_agent_kwargs(followup, thread_settings=snapshot)
+    followup_agent = await _plan_agent(followup, thread_settings=snapshot)
     for agent in (captured, followup_agent):
         middleware = cast(list[object], agent["middleware"])
         selection = next(item for item in middleware if isinstance(item, ModelSelectionMiddleware))
         assert await selection.select_route({"messages": []}) == "default"
-        assert selection._models["default"] is agent["model"]
         assert agent["make_model_calls"][0][0] == expected_model
         prepare = next(item for item in middleware if isinstance(item, PrepareAgentRunMiddleware))
         assert prepare._requested_models is None
@@ -882,9 +749,7 @@ async def test_slack_question_allows_auto_routing_after_dashboard_handoff(
                 profile={},
             )
         )
-        captured = await _capture_create_deep_agent_kwargs(
-            config, profile={"model_routing_enabled": True}
-        )
+        captured = await _plan_agent(config, profile={"model_routing_enabled": True})
         selection = next(
             item
             for item in cast(list[object], captured["middleware"])
@@ -900,50 +765,32 @@ async def test_queued_images_reach_vision_fallback_for_text_only_main_model(
 ) -> None:
     from langchain_core.messages import convert_to_messages
 
+    from openswe.agent_api.graph import RunSession
     from openswe.message_queue import QueuedMessage
-    from openswe.middleware.check_message_queue import (
-        LinearNotifyState,
-        check_message_queue_before_model,
-    )
-    from openswe.middleware.image_model_fallback import ImageModelFallbackMiddleware
 
     config = _base_config()
-    captured = await _capture_create_deep_agent_kwargs(
+    planned = await _plan_agent(
         config,
         thread_settings={"model_id": "fireworks:accounts/fireworks/models/kimi-k3"},
-        make_model=lambda model_id, **_: MagicMock(model_id=model_id),
     )
     url = "https://example.com/image.png"
     image = {"type": "image_url", "image_url": {"url": url}}
     await QueuedMessage.put("thread-ctx", {"text": "Explain this", "image_urls": [url]})
-    with (
-        patch("openswe.middleware.check_message_queue.get_config", return_value=config),
-        patch("openswe.middleware.check_message_queue.fetch_image_block", return_value=image),
-    ):
-        update = await check_message_queue_before_model.abefore_model(
-            cast(LinearNotifyState, {"messages": []}), MagicMock()
-        )
-    assert update is not None
-    messages = convert_to_messages(update["messages"])
+    surface = cast(ToolSurface, planned["surface"])
+    assert surface.inbox is not None
+    with patch("openswe.threads.inbox.fetch_image_block", return_value=image):
+        taken = await ThreadInbox("thread-ctx").read("run-1", surface.inbox)
+    messages = convert_to_messages(taken.messages)
     content = messages[-1].content
     assert isinstance(content, list) and image in content
-    fallback = next(
-        item
-        for item in cast(list[object], captured["middleware"])
-        if isinstance(item, ImageModelFallbackMiddleware)
-    )
-    handler = AsyncMock(return_value=ModelResponse(result=[AIMessage(content="Done")]))
-    await fallback.awrap_model_call(
-        ModelRequest(model=cast(BaseChatModel, captured["model"]), messages=messages), handler
-    )
-    assert handler.call_args.args[0].model is not captured["model"]
-    assert handler.call_args.args[0].messages == messages
-    assert await QueuedMessage.for_thread("thread-ctx") == []
+    models = RunSession(surface, {}, None, started_here=True).start_models()
+    vision = ModelChoices(models).vision_for(models.model)
+    assert vision is not None and vision.model_id != models.model.model_id
 
 
 @pytest.mark.asyncio
 async def test_historical_personal_models_and_routing_do_not_override_workspace() -> None:
-    captured = await _capture_create_deep_agent_kwargs(
+    captured = await _plan_agent(
         profile={
             "default_model": "anthropic:claude-opus-5-5",
             "reasoning_effort": "high",

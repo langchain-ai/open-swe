@@ -7,15 +7,18 @@ use crate::command::CommandCompletion;
 use crate::error::ErrorCategory;
 use crate::logs::rfc3339_from_epoch_millis;
 
-use super::command::CommandInvocation;
 use super::facts::ReportableFacts;
-use super::metadata::{InstallChannel, InvocationMetadata, InvokerDetectionMethod};
+#[cfg(test)]
+use super::{
+    command::CommandInvocation,
+    metadata::{InstallChannel, InvocationMetadata, InvokerDetectionMethod},
+};
 
 const SCHEMA_VERSION: &str = "2026-08-20";
 
 #[derive(Serialize)]
 #[serde(rename_all = "snake_case")]
-enum CommandOutcome {
+pub(super) enum CommandOutcome {
     Success,
     Failure,
     Cancelled,
@@ -23,7 +26,7 @@ enum CommandOutcome {
 
 #[derive(Serialize)]
 #[serde(rename_all = "snake_case")]
-enum ErrorCode {
+pub(super) enum ErrorCode {
     Unclassified,
 }
 
@@ -45,62 +48,19 @@ impl Serialize for EventType {
     }
 }
 
+/// How the command ended, as reported by `command_completed` and the
+/// completion log record.
 #[derive(Serialize)]
 pub(super) struct CommandCompleted {
-    #[serde(flatten)]
-    command: CommandInvocation,
-    outcome: CommandOutcome,
+    pub(super) outcome: CommandOutcome,
     #[serde(skip_serializing_if = "Option::is_none")]
-    error_code: Option<ErrorCode>,
+    pub(super) error_code: Option<ErrorCode>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    error_category: Option<ErrorCategory>,
+    pub(super) error_category: Option<ErrorCategory>,
 }
 
-/// A serialized analytics event with its shared invocation values.
-#[derive(Serialize)]
-pub struct EventEnvelope {
-    pub(super) event_id: String,
-    pub(super) install_id: String,
-    pub(super) invocation_id: String,
-    pub(super) event_type: EventType,
-    pub(super) schema_version: &'static str,
-    pub(super) created_at: String,
-    pub(super) cli_version: String,
-    pub(super) os: &'static str,
-    pub(super) install_channel: InstallChannel,
-    pub(super) invoker_detection_method: InvokerDetectionMethod,
-    #[serde(flatten)]
-    pub(super) command_completed: CommandCompleted,
-    #[serde(flatten)]
-    facts: ReportableFacts,
-}
-
-impl EventEnvelope {
-    /// Build a completion event without retaining command errors or their messages.
-    pub fn command_completed(
-        metadata: &InvocationMetadata,
-        facts: ReportableFacts,
-        command: CommandInvocation,
-        completion: CommandCompletion,
-    ) -> Self {
-        Self::command_completed_at(
-            metadata,
-            facts,
-            command,
-            completion,
-            Uuid::new_v4().to_string(),
-            SystemTime::now(),
-        )
-    }
-
-    fn command_completed_at(
-        metadata: &InvocationMetadata,
-        facts: ReportableFacts,
-        command: CommandInvocation,
-        completion: CommandCompletion,
-        event_id: String,
-        created_at: SystemTime,
-    ) -> Self {
+impl From<CommandCompletion> for CommandCompleted {
+    fn from(completion: CommandCompletion) -> Self {
         let (outcome, error_code, error_category) = match completion {
             CommandCompletion::Succeeded => (CommandOutcome::Success, None, None),
             CommandCompletion::Cancelled => (CommandOutcome::Cancelled, None, None),
@@ -110,46 +70,80 @@ impl EventEnvelope {
                 Some(category),
             ),
         };
-
         Self {
-            event_id,
-            facts,
-            install_id: metadata.install_id.clone(),
-            invocation_id: metadata.invocation_id.clone(),
-            event_type: EventType::CommandCompleted,
-            schema_version: SCHEMA_VERSION,
-            created_at: format_timestamp(created_at),
-            cli_version: metadata.cli_version.clone(),
-            os: metadata.os,
-            install_channel: metadata.install_channel,
-            invoker_detection_method: metadata.invoker_detection_method,
-            command_completed: CommandCompleted {
-                command,
-                outcome,
-                error_code,
-                error_category,
-            },
+            outcome,
+            error_code,
+            error_category,
         }
     }
 }
 
-#[cfg(test)]
-pub(super) fn fixture_metadata() -> InvocationMetadata {
-    InvocationMetadata {
-        install_id: "33333333-3333-4333-8333-333333333333".to_string(),
-        invocation_id: "11111111-1111-4111-8111-111111111111".to_string(),
-        cli_version: "0.5.3".to_string(),
-        os: "linux",
-        install_channel: InstallChannel::Npm,
-        invoker_detection_method: InvokerDetectionMethod::InteractiveTerminal,
+/// A serialized analytics event: its own identity, how the command ended, and
+/// the invocation's facts.
+#[derive(Serialize)]
+pub struct EventEnvelope {
+    pub(super) event_id: String,
+    pub(super) event_type: EventType,
+    pub(super) schema_version: &'static str,
+    pub(super) created_at: String,
+    #[serde(flatten)]
+    pub(super) command_completed: CommandCompleted,
+    #[serde(flatten)]
+    facts: ReportableFacts,
+    /// Copied out of `facts` because an event cannot exist without one.
+    #[serde(skip)]
+    pub(super) install_id: String,
+}
+
+impl EventEnvelope {
+    /// Build a completion event without retaining command errors or their
+    /// messages. `None` when there is no installation id to attribute it to.
+    pub fn command_completed(
+        facts: ReportableFacts,
+        completion: CommandCompletion,
+    ) -> Option<Self> {
+        Self::command_completed_at(
+            facts,
+            completion,
+            Uuid::new_v4().to_string(),
+            SystemTime::now(),
+        )
+    }
+
+    fn command_completed_at(
+        facts: ReportableFacts,
+        completion: CommandCompletion,
+        event_id: String,
+        created_at: SystemTime,
+    ) -> Option<Self> {
+        Some(Self {
+            install_id: facts.run.install_id.clone()?,
+            event_id,
+            event_type: EventType::CommandCompleted,
+            schema_version: SCHEMA_VERSION,
+            created_at: format_timestamp(created_at),
+            command_completed: completion.into(),
+            facts,
+        })
     }
 }
 
 #[cfg(test)]
-pub(super) fn fixture_command() -> CommandInvocation {
-    CommandInvocation {
-        command_path: "channel init slack".to_string(),
-        flags_present: vec!["name".to_string()],
+pub(super) fn fixture_facts() -> ReportableFacts {
+    ReportableFacts {
+        run: InvocationMetadata {
+            install_id: Some("33333333-3333-4333-8333-333333333333".to_string()),
+            invocation_id: "11111111-1111-4111-8111-111111111111".to_string(),
+            cli_version: "0.5.3".to_string(),
+            os: "linux",
+            install_channel: InstallChannel::Npm,
+            invoker_detection_method: InvokerDetectionMethod::InteractiveTerminal,
+        },
+        command: CommandInvocation {
+            command_path: "channel init slack".to_string(),
+            flags_present: vec!["name".to_string()],
+        },
+        ..ReportableFacts::default()
     }
 }
 
@@ -157,13 +151,12 @@ pub(super) fn fixture_command() -> CommandInvocation {
 #[cfg(test)]
 pub(super) fn fixture_event() -> EventEnvelope {
     EventEnvelope::command_completed_at(
-        &fixture_metadata(),
-        ReportableFacts::default(),
-        fixture_command(),
+        fixture_facts(),
         CommandCompletion::Succeeded,
         "22222222-2222-4222-8222-222222222222".to_string(),
         UNIX_EPOCH + std::time::Duration::from_millis(1234),
     )
+    .unwrap()
 }
 
 fn format_timestamp(time: SystemTime) -> String {
@@ -184,16 +177,13 @@ mod tests {
 
     #[test]
     fn successful_command_has_the_expected_json() {
-        let metadata = fixture_metadata();
-        let command = fixture_command();
         let event = EventEnvelope::command_completed_at(
-            &metadata,
-            ReportableFacts::default(),
-            command,
+            fixture_facts(),
             CommandCompletion::Succeeded,
             "22222222-2222-4222-8222-222222222222".to_string(),
             UNIX_EPOCH + Duration::from_millis(1234),
-        );
+        )
+        .unwrap();
 
         assert_eq!(
             serde_json::to_value(event).unwrap(),
@@ -219,22 +209,17 @@ mod tests {
 
     #[test]
     fn cancelled_command_has_no_error() {
-        let metadata = fixture_metadata();
-        let command = fixture_command();
         let event = EventEnvelope::command_completed_at(
-            &metadata,
-            ReportableFacts::default(),
-            command,
+            fixture_facts(),
             CommandCompletion::Cancelled,
             "22222222-2222-4222-8222-222222222222".to_string(),
             UNIX_EPOCH,
-        );
+        )
+        .unwrap();
 
         assert_eq!(
             serde_json::to_value(event.command_completed).unwrap(),
             json!({
-                "command_path": "channel init slack",
-                "flags_present": ["name"],
                 "outcome": "cancelled"
             })
         );
@@ -242,22 +227,17 @@ mod tests {
 
     #[test]
     fn a_failure_reports_its_category() {
-        let metadata = fixture_metadata();
-        let command = fixture_command();
         let event = EventEnvelope::command_completed_at(
-            &metadata,
-            ReportableFacts::default(),
-            command,
+            fixture_facts(),
             CommandCompletion::Failed(ErrorCategory::Deployment),
             "22222222-2222-4222-8222-222222222222".to_string(),
             UNIX_EPOCH,
-        );
+        )
+        .unwrap();
 
         assert_eq!(
             serde_json::to_value(event.command_completed).unwrap(),
             json!({
-                "command_path": "channel init slack",
-                "flags_present": ["name"],
                 "outcome": "failure",
                 "error_code": "unclassified",
                 "error_category": "deployment"
@@ -267,26 +247,44 @@ mod tests {
 
     #[test]
     fn an_unrecognized_failure_reports_unclassified() {
-        let metadata = fixture_metadata();
-        let command = fixture_command();
         let event = EventEnvelope::command_completed_at(
-            &metadata,
-            ReportableFacts::default(),
-            command,
+            fixture_facts(),
             CommandCompletion::Failed(ErrorCategory::Unclassified),
             "22222222-2222-4222-8222-222222222222".to_string(),
             UNIX_EPOCH,
-        );
+        )
+        .unwrap();
 
         assert_eq!(
             serde_json::to_value(event.command_completed).unwrap(),
             json!({
-                "command_path": "channel init slack",
-                "flags_present": ["name"],
                 "outcome": "failure",
                 "error_code": "unclassified",
                 "error_category": "unclassified"
             })
         );
+    }
+
+    #[test]
+    fn the_current_stage_is_not_reported() {
+        use crate::telemetry::stage::{CurrentStage, Stage};
+
+        let mut facts = fixture_facts();
+        facts.stage = Some(CurrentStage {
+            stage: Stage::Compile,
+            started: std::time::Instant::now(),
+        });
+
+        let event = EventEnvelope::command_completed(facts, CommandCompletion::Succeeded).unwrap();
+
+        assert!(serde_json::to_value(event).unwrap().get("stage").is_none());
+    }
+
+    #[test]
+    fn an_invocation_without_an_installation_id_reports_nothing() {
+        let mut facts = fixture_facts();
+        facts.run.install_id = None;
+
+        assert!(EventEnvelope::command_completed(facts, CommandCompletion::Succeeded).is_none());
     }
 }

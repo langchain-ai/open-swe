@@ -163,6 +163,7 @@ my-agent/
   middleware/               # optional middleware
   skills/                   # optional skills synced to Context Hub
   sandbox/                  # LangSmith sandbox (`mda init` includes this; delete to opt out)
+  browser.ts | browser.py   # optional LangSmith browser for the agent
 ```
 
 The CLI copies your project files into the managed build and generates the small
@@ -331,6 +332,33 @@ plus binary upload and download methods. Python also has async methods such as
 `delete` is optional and depends on the installed backend. The backend accesses
 the current sandbox, with no Context Hub routes for skills or memory. Without a
 sandbox, TypeScript sets `backend` to `undefined` and Python sets it to `None`.
+
+## Browser
+
+Add `browser.ts` or `browser.py` at the project root to give the agent a
+LangSmith browser, which it drives with Stagehand's `browser_run`,
+`browser_snapshot` and `browser_screenshot` tools.
+
+```ts
+import { defineBrowser } from "managed-deepagents";
+
+export const browser = defineBrowser({ scope: "user" });
+```
+
+```python
+from managed_deepagents import define_browser
+
+browser = define_browser(scope="user")
+```
+
+- `scope`: `"thread"` (default) gives each thread its own browser; `"user"`
+  shares one per signed-in person across their threads, logins included, with a
+  window per thread.
+- `idleTtlSeconds` / `idle_ttl_seconds`: stop an idle browser after this long
+  (60–86,400; default 600).
+- A thread's browser reaches servers in its sandbox at `http://localhost:<port>`.
+- Agent factories can replace it, or pass `browser: null` / `browser=None` to
+  turn it off for a run.
 
 ## MCP Servers
 
@@ -649,8 +677,9 @@ mda delete
 
 `mda delete` (alias `mda destroy`) removes the LangSmith deployment, the tracing
 project created alongside it, the deployment's Context Hub repo (plus any legacy
-per-user or org child memory repos left from older runtimes), and the managed
-sandboxes the deployment created. It asks for confirmation first; pass `--yes`
+per-user or org child memory repos left from older runtimes), the managed
+sandboxes the deployment created, and the Agent Auth connections its channels
+set up. It asks for confirmation first; pass `--yes`
 to skip the prompt in scripts. Agent memory and thread history are not
 recoverable afterwards.
 

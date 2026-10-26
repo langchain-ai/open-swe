@@ -190,9 +190,26 @@ class AgentAuth:
         return principal_id
 
     def find_workspace_connection(self, slug: str) -> WorkspaceConnection | None:
-        """List workspace connections and return the row for ``slug``, if any."""
+        """Look up the workspace connection row for ``slug``, if any."""
         if not (self.context.workspace_id or "").strip():
             raise ConnectionsNotConfiguredError(WORKSPACE_SETTING)
+        status, body = self._request(
+            "GET",
+            f"/v1/agent-auth/connections?{urllib.parse.urlencode({'slug': slug})}",
+        )
+        if status >= _HTTP_BAD_REQUEST:
+            raise CredentialStoreError("Agent Auth list connections failed", status, body)
+        items = _connection_items(body)
+        for item in items:
+            if item.get("slug") == slug:
+                return _workspace_connection_row(item)
+        # Older Agent Auth ignores ``slug`` and returns the first page of all rows.
+        if items:
+            return self._page_workspace_connection(slug)
+        return None
+
+    def _page_workspace_connection(self, slug: str) -> WorkspaceConnection | None:
+        """Page through all workspace connections for the row matching ``slug``."""
         cursor: str | None = None
         for _ in range(AGENT_AUTH_MAX_PROVIDER_PAGES):
             query: dict[str, str] = {
@@ -206,25 +223,9 @@ class AgentAuth:
             )
             if status >= _HTTP_BAD_REQUEST:
                 raise CredentialStoreError("Agent Auth list connections failed", status, body)
-            raw_items = body.get("items")
-            items = raw_items if isinstance(raw_items, list) else []
-            for item in items:
-                if not isinstance(item, Mapping) or item.get("slug") != slug:
-                    continue
-                connection_id = (
-                    item.get("id") or item.get("connection_id") or item.get("credential_id")
-                )
-                kind = _connection_credential_kind(item)
-                owner_policy = item.get("owner_policy")
-                if not isinstance(connection_id, str) or not connection_id:
-                    raise CredentialStoreError("Agent Auth connection row missing id or kind")
-                if not isinstance(kind, str) or not kind:
-                    raise CredentialStoreError("Agent Auth connection row missing id or kind")
-                return WorkspaceConnection(
-                    connection_id=connection_id,
-                    kind=kind,
-                    owner_policy=str(owner_policy) if isinstance(owner_policy, str) else "",
-                )
+            for item in _connection_items(body):
+                if item.get("slug") == slug:
+                    return _workspace_connection_row(item)
             next_cursor = body.get("next_cursor")
             if not isinstance(next_cursor, str) or not next_cursor or next_cursor == cursor:
                 return None
@@ -494,6 +495,27 @@ class AgentAuth:
 
 def _path_segment(value: str) -> str:
     return urllib.parse.quote(value, safe="")
+
+
+def _connection_items(body: Mapping[str, object]) -> list[Mapping[str, object]]:
+    """Object rows of a connection list response."""
+    raw_items = body.get("items")
+    if not isinstance(raw_items, list):
+        return []
+    return [item for item in raw_items if isinstance(item, Mapping)]
+
+
+def _workspace_connection_row(item: Mapping[str, object]) -> WorkspaceConnection:
+    connection_id = item.get("id") or item.get("connection_id") or item.get("credential_id")
+    kind = _connection_credential_kind(item)
+    owner_policy = item.get("owner_policy")
+    if not isinstance(connection_id, str) or not connection_id or not kind:
+        raise CredentialStoreError("Agent Auth connection row missing id or kind")
+    return WorkspaceConnection(
+        connection_id=connection_id,
+        kind=kind,
+        owner_policy=owner_policy if isinstance(owner_policy, str) else "",
+    )
 
 
 def _connection_credential_kind(item: Mapping[str, object]) -> str:

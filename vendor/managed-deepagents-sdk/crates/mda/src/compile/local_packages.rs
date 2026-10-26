@@ -103,7 +103,7 @@ pub(crate) fn find_local_packages(project: &Project) -> Result<Vec<LocalPackage>
         {
             bail!("local package name `{name}` is not a valid package name");
         }
-        let manifest = manifest_name(project.language);
+        let manifest = project.language.manifest_name();
         if !source.join(manifest).is_file() {
             bail!("local package `{name}` at `{path}` has no {manifest}");
         }
@@ -168,7 +168,7 @@ pub(super) fn vendor_local_packages(
 ) -> Result<()> {
     for package in packages {
         let build_dir = PathBuf::from(package.build_dir());
-        let manifest = Path::new(manifest_name(language));
+        let manifest = Path::new(language.manifest_name());
         for entry in WalkDir::new(&package.source)
             .into_iter()
             .filter_entry(|entry| entry.depth() == 0 || !is_skipped_dir(entry.path()))
@@ -295,16 +295,9 @@ fn is_skipped_dir(path: &Path) -> bool {
         .is_some_and(|name| SKIPPED_DIRS.contains(&name))
 }
 
-fn manifest_name(language: Language) -> &'static str {
-    match language {
-        Language::TypeScript => "package.json",
-        Language::Python => "pyproject.toml",
-    }
-}
-
 /// The name a package gives itself in its manifest.
 fn manifest_package_name(language: Language, dir: &Path) -> Result<String> {
-    let path = dir.join(manifest_name(language));
+    let path = dir.join(language.manifest_name());
     let contents =
         fs::read_to_string(&path).with_context(|| format!("failed to read {}", path.display()))?;
     let name = match language {
@@ -325,7 +318,7 @@ fn manifest_package_name(language: Language, dir: &Path) -> Result<String> {
 }
 
 fn declared_local_paths(language: Language, dir: &Path) -> Result<Vec<(String, String)>> {
-    let path = dir.join(manifest_name(language));
+    let path = dir.join(language.manifest_name());
     if !path.is_file() {
         return Ok(Vec::new());
     }

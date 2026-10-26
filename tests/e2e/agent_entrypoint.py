@@ -14,6 +14,6 @@ import patches  # noqa: E402
 
 patches.apply()
 
-from openswe.server import traced_agent  # noqa: E402
+from openswe.graphs.agent import traced_agent  # noqa: E402
 
 __all__ = ["traced_agent"]

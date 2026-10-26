@@ -20,21 +20,20 @@ import logging
 import posixpath
 import re
 import warnings
+from functools import partial
 from typing import Any, NamedTuple, NotRequired, cast
 
 logger = logging.getLogger(__name__)
 
 from langgraph.graph.state import RunnableConfig
-from langgraph.pregel import Pregel
 from langgraph.runtime import Runtime
+from runtime_api.catalog import InboxSpec, LoopRules
 
 warnings.filterwarnings("ignore", module="langchain_core._api.deprecation")
 warnings.filterwarnings("ignore", message=".*Pydantic V1.*", category=UserWarning)
 
-from deepagents import create_deep_agent
-from deepagents.backends.protocol import SandboxBackendProtocol
+from deepagents.backends.protocol import BackendProtocol, SandboxBackendProtocol
 from deepagents.middleware.skills import SkillsMiddleware, SkillsState
-from deepagents.middleware.subagents import GENERAL_PURPOSE_SUBAGENT, SubAgent
 from langchain.agents.middleware import ModelCallLimitMiddleware, ModelRetryMiddleware
 from langchain.agents.middleware.types import AgentMiddleware
 from langchain_anthropic.middleware import AnthropicPromptCachingMiddleware
@@ -44,25 +43,20 @@ from langchain_core.tools import BaseTool
 from openswe.dashboard.options import gate_fable_model
 from openswe.dashboard.workspace_settings_cache import cached_workspace_settings
 from openswe.github.app import get_github_app_installation_token_with_expiry
+from openswe.github.sandbox_access import READ_ONLY_REVIEW_PERMISSIONS
 from openswe.github.thread_token import cache_github_token_for_thread
 from openswe.middleware import (
     BasePrepareRunMiddleware,
     ExcludeToolsMiddleware,
-    ModelCallTimeoutMiddleware,
     ModelErrorMiddleware,
     RepairOrphanedToolCallsMiddleware,
-    SanitizeFireworksMessagesMiddleware,
-    SanitizeOpenAIResponsesMiddleware,
-    SanitizeThinkingBlocksMiddleware,
-    StableToolResultOrderMiddleware,
-    ToolErrorMiddleware,
-    check_message_queue_before_model,
     refresh_github_proxy_before_model,
     settle_review_check_on_exit,
 )
 from openswe.middleware.prepare_run import PrepareRunState
+from openswe.middleware.require_user_reply import WEB_REPLY_SURFACE
 from openswe.middleware.sandbox_circuit_breaker import post_sandbox_unreachable_notification
-from openswe.prompts import apply_tool_descriptions, common_prompt, prompt
+from openswe.prompts import apply_tool_descriptions, prompt
 from openswe.review.approvals import approval_policy_for_review
 from openswe.review.diff import (
     changed_files,
@@ -82,12 +76,9 @@ from openswe.review_scout.launch import ReviewScoutTarget
 from openswe.run_config import RunConfig
 from openswe.runtime import (
     DEFAULT_LLM_MAX_TOKENS,
-    DEFAULT_RECURSION_LIMIT,
     MODEL_CALL_RECURSION_LIMIT,
-    bindable_config,
     ensure_sandbox_for_thread,
     get_cached_sandbox_backend,
-    graph_loaded_for_execution,
 )
 from openswe.sandboxes.paths import resolve_sandbox_work_dir
 from openswe.sandboxes.repo_prep import materialize_trusted_skills, prepare_review_repo
@@ -120,28 +111,6 @@ from openswe.utils.startup_trace import aphase
 from openswe.walkthrough.record import WalkthroughView
 
 REVIEWER_SUBAGENT_SYSTEM_PROMPT = prompt("reviewer/subagent")
-
-
-def _reviewer_subagent(model: BaseChatModel) -> SubAgent:
-    return {
-        "name": "reviewer",
-        "description": prompt("reviewer/subagent-description"),
-        "system_prompt": common_prompt(REVIEWER_SUBAGENT_SYSTEM_PROMPT),
-        "model": model,
-        # Subagents compile into their own graphs, so the reviewer's own
-        # middleware never wraps their model calls.
-        "middleware": cast(
-            list[AgentMiddleware[Any, Any, Any]],
-            [
-                AnthropicPromptCachingMiddleware(ttl="1h", unsupported_model_behavior="ignore"),
-                ExcludeToolsMiddleware(excluded=SHELL_SEARCH_EXCLUDED_TOOLS),
-                SanitizeOpenAIResponsesMiddleware(),
-                ModelRetryMiddleware(retry_on=(TimeoutError,)),
-                ModelErrorMiddleware(),
-                ModelCallTimeoutMiddleware(),
-            ],
-        ),
-    }
 
 
 def _repo_checkout_note(
@@ -559,6 +528,7 @@ async def ensure_reviewer_sandbox_for_thread(
         thread_id,
         workspace_slug=cfg.workspace_slug,
         github_proxy_repositories=[cfg.repo.full_name] if cfg.repo else [],
+        github_proxy_permissions=READ_ONLY_REVIEW_PERMISSIONS,
         # A reviewer sandbox holds nothing but a checkout `prepare_review_repo`
         # re-derives every run, and reviewer threads outlive their sandbox: one
         # thread per PR, re-triggered on every push. Refusing to replace an
@@ -1057,49 +1027,32 @@ def reviewer_tools() -> list[BaseTool]:
     )
 
 
-async def get_reviewer_agent(config: RunnableConfig) -> Pregel:
-    """Get or create a reviewer agent with checkpointed run prep."""
-    return await build_reviewer_agent(config)
+async def _reconnect_reviewer_box(thread_id: str, cfg: RunConfig) -> SandboxBackendProtocol:
+    await ensure_reviewer_github_token(thread_id, cfg)
+    return await ensure_reviewer_sandbox_for_thread(thread_id, cfg)
 
 
-async def build_reviewer_agent(
-    config: RunnableConfig, *, tool_surface: ToolSurface | None = None
-) -> Pregel:
-    """The reviewer graph; ``tool_surface`` also receives what a remote model loop needs."""
+def reviewer_box(thread_id: str, cfg: RunConfig) -> BackendProtocol:
+    """The review thread's box, connected again with a fresh token whenever it is gone."""
+    return get_cached_sandbox_backend(
+        thread_id, reconnect=partial(_reconnect_reviewer_box, thread_id, cfg)
+    )
+
+
+async def plan_reviewer(config: RunnableConfig, surface: ToolSurface) -> None:
+    """Plan a review run into ``surface``: the tools, middleware, models and subagents its MDA run plays."""
     config = config.copy()
     configurable = dict(config.get("configurable") or {})
     config["configurable"] = configurable
-    config.setdefault("recursion_limit", DEFAULT_RECURSION_LIMIT)
     cfg = RunConfig.parse(configurable)
     thread_id = cfg.thread_id
-
-    if thread_id is None or not graph_loaded_for_execution(config):
-        logger.info("No thread_id or not for execution, returning reviewer agent without sandbox")
-        return create_deep_agent(
-            system_prompt="",
-            tools=[],
-            middleware=[
-                AnthropicPromptCachingMiddleware(ttl="1h", unsupported_model_behavior="ignore")
-            ],
-        ).with_config(bindable_config(config))
+    if thread_id is None:
+        raise ValueError("A review run needs a thread")
 
     models = await resolve_reviewer_models(cfg)
     use_gateway = models.use_gateway
-    reviewer_model = _make_model_or_defer(
-        models.main.model_id, use_gateway=use_gateway, **models.main.kwargs
-    )
-    reviewer_subagent_model = _make_model_or_defer(
-        models.subagent.model_id, use_gateway=use_gateway, **models.subagent.kwargs
-    )
 
-    async def reconnect_backend(
-        _thread_id: str = thread_id,
-        _cfg: RunConfig = cfg,
-    ) -> SandboxBackendProtocol:
-        await ensure_reviewer_github_token(_thread_id, _cfg)
-        return await ensure_reviewer_sandbox_for_thread(_thread_id, _cfg)
-
-    backend = get_cached_sandbox_backend(thread_id, reconnect=reconnect_backend)
+    backend = reviewer_box(thread_id, cfg)
 
     middleware = cast(
         list[AgentMiddleware[Any, Any, Any]],
@@ -1111,53 +1064,33 @@ async def build_reviewer_agent(
             ),
             AnthropicPromptCachingMiddleware(ttl="1h", unsupported_model_behavior="ignore"),
             ModelCallLimitMiddleware(run_limit=MODEL_CALL_RECURSION_LIMIT, exit_behavior="end"),
-            ToolErrorMiddleware(),
             ExcludeToolsMiddleware(excluded=SHELL_SEARCH_EXCLUDED_TOOLS),
             refresh_github_proxy_before_model,
-            check_message_queue_before_model,
-            SanitizeFireworksMessagesMiddleware(),
-            SanitizeOpenAIResponsesMiddleware(),
-            SanitizeThinkingBlocksMiddleware(),
             RepairOrphanedToolCallsMiddleware(),
-            StableToolResultOrderMiddleware(),
             ModelRetryMiddleware(retry_on=(TimeoutError,)),
             ModelErrorMiddleware(),
-            ModelCallTimeoutMiddleware(),
             settle_review_check_on_exit,
         ],
     )
-    graph = create_deep_agent(
-        model=reviewer_model,
-        system_prompt=common_prompt(),
-        tools=reviewer_tools(),
-        subagents=[
-            {
-                **GENERAL_PURPOSE_SUBAGENT,
-                "system_prompt": common_prompt(GENERAL_PURPOSE_SUBAGENT["system_prompt"]),
-            },
-            _reviewer_subagent(reviewer_subagent_model),
-        ],
-        backend=backend,
-        middleware=middleware,
-    ).with_config(bindable_config(config))
-    if tool_surface is not None:
-        tool_surface.graph = graph
-        tool_surface.middleware = middleware
-        tool_surface.excluded = SHELL_SEARCH_EXCLUDED_TOOLS
-        tool_surface.models = SurfaceModels(
-            main=ModelChoice(models.main.model_id, dict(models.main.kwargs)),
-            subagent=ModelChoice(models.subagent.model_id, dict(models.subagent.kwargs)),
-            use_gateway=use_gateway,
+    surface.base_tools = reviewer_tools()
+    surface.middleware = middleware
+    surface.inbox = InboxSpec(surface=WEB_REPLY_SURFACE, model_id=cfg.agent_model_id)
+    surface.files = backend
+    surface.excluded = SHELL_SEARCH_EXCLUDED_TOOLS
+    surface.loop = LoopRules(
+        hidden_tools=sorted(SHELL_SEARCH_EXCLUDED_TOOLS),
+        refresh_github_proxy=True,
+        at_end=["settle_review_check"],
+    )
+    surface.models = SurfaceModels(
+        main=ModelChoice(models.main.model_id, dict(models.main.kwargs)),
+        subagent=ModelChoice(models.subagent.model_id, dict(models.subagent.kwargs)),
+        use_gateway=use_gateway,
+    )
+    surface.subagents = [
+        SurfaceSubagent(
+            name="reviewer",
+            description=prompt("reviewer/subagent-description"),
+            system_prompt=REVIEWER_SUBAGENT_SYSTEM_PROMPT,
         )
-        tool_surface.subagents = [
-            SurfaceSubagent(
-                name="reviewer",
-                description=prompt("reviewer/subagent-description"),
-                system_prompt=REVIEWER_SUBAGENT_SYSTEM_PROMPT,
-            )
-        ]
-    return graph
-
-
-# langgraph.json entrypoint. Runs trace into LANGSMITH_PROJECT like everything else.
-traced_reviewer_agent = get_reviewer_agent
+    ]

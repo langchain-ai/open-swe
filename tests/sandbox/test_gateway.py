@@ -9,7 +9,7 @@ import httpx2
 import pytest
 from aiohttp import web
 from fireworks import AsyncFireworks
-from langchain_core.messages import AIMessage, HumanMessage
+from langchain_core.messages import HumanMessage
 from langchain_openai import ChatOpenAI
 from pydantic import SecretStr
 
@@ -137,67 +137,6 @@ async def test_fireworks_sdk_uses_allowlisted_gateway_path() -> None:
             await client.close()
 
     assert paths == ["/fireworks/v1/chat/completions"]
-
-
-async def test_fireworks_gateway_strips_legacy_function_call() -> None:
-    """The serializer must not emit ``function_call`` after sanitization.
-
-    Reproduces the production 400 — ``Extra inputs are not permitted, field:
-    'messages[N].function_call'`` — by routing an ``AIMessage`` that carries the
-    legacy ``function_call`` (alongside modern ``tool_calls``) through the
-    Fireworks serializer toward the gateway. Without the sanitizer middleware
-    the request body contains ``function_call``; with it, only ``tool_calls``
-    survives.
-    """
-    from langchain_fireworks.chat_models import ChatFireworks
-
-    from openswe.middleware.sanitize_fireworks_messages import _sanitize_messages
-
-    captured_bodies: list[dict] = []
-
-    async def handler(request: web.Request) -> web.Response:
-        captured_bodies.append(await request.json())
-        return web.json_response(
-            {
-                "id": "chatcmpl-test",
-                "object": "chat.completion",
-                "created": 0,
-                "model": "accounts/fireworks/models/glm-5p2",
-                "choices": [
-                    {
-                        "index": 0,
-                        "message": {"role": "assistant", "content": "ok"},
-                        "finish_reason": "stop",
-                    }
-                ],
-                "usage": {"prompt_tokens": 1, "completion_tokens": 1, "total_tokens": 2},
-            }
-        )
-
-    async with _http_server(handler) as base_url:
-        chat_model = ChatFireworks(
-            model="accounts/fireworks/models/glm-5p2",
-            api_key=SecretStr("dummy"),
-            base_url=f"{base_url}/fireworks",
-            max_retries=0,
-        )
-        ai_message = AIMessage(
-            content="",
-            tool_calls=[{"name": "read_file", "args": {"file_path": "/x"}, "id": "tc1"}],
-            additional_kwargs={"function_call": {"name": "read_file", "arguments": "{}"}},
-        )
-        messages = [HumanMessage(content="hi"), ai_message]
-        _sanitize_messages(messages)
-        await chat_model.ainvoke(messages)
-        await chat_model._async_sdk_client.close()
-
-    assert len(captured_bodies) == 1
-    body = captured_bodies[0]
-    for msg in body["messages"]:
-        assert "function_call" not in msg, msg
-    # The assistant message still carries tool_calls.
-    assistant_msgs = [m for m in body["messages"] if m["role"] == "assistant"]
-    assert assistant_msgs and "tool_calls" in assistant_msgs[0]
 
 
 # --- resolve_gateway_enabled --------------------------------------------------

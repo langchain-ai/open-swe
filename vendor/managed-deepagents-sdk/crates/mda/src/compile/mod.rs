@@ -9,7 +9,7 @@
 //! `langgraph.json` points at that generated entry.
 
 use anyhow::{bail, Context, Result};
-use std::collections::HashSet;
+use std::collections::{BTreeSet, HashSet};
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::str::FromStr;
@@ -18,7 +18,7 @@ use walkdir::WalkDir;
 
 use crate::agent_config;
 use crate::cli_output::{show_sequence, SequenceItem};
-use crate::error::{categorized, category_of, ErrorCategory};
+use crate::error::{categorize_unclassified, ErrorCategory};
 use crate::path_util::to_unix_path;
 use crate::project::{Language, Project};
 use crate::text_module;
@@ -57,8 +57,9 @@ pub(crate) use requirements::{
     agent_connections_from_connector_requirements, connection_owner_policy_for_slug,
     emit_channel_requirements_for_entries, emit_connector_requirements_for_entries,
     emit_mcp_connection_entries_for_entries, referenced_connection_slugs,
-    required_env_from_connector_requirements, user_connections_from_connector_requirements,
-    ChannelRequirements, ConnectorRequirements, McpConnectionEntry,
+    required_env_from_connector_requirements, reserved_user_connection_error,
+    user_connections_from_connector_requirements, ChannelRequirements, ConnectorRequirements,
+    McpConnectionEntry,
 };
 pub(crate) use sandbox_recipe::{
     load_sandbox_recipe_manifest, project_uses_sandbox, SandboxRegistryManifest,
@@ -120,12 +121,12 @@ pub(crate) const LANGGRAPH_API_VERSION_ENV: &str = "MDA_LANGGRAPH_API_VERSION";
 
 /// Default langgraph-api version stem forced into compiled `langgraph.json`
 /// image pins. Override with [`LANGGRAPH_API_VERSION_ENV`].
-pub(crate) const LANGGRAPH_API_VERSION: &str = "0.16.0rc5";
+pub(crate) const LANGGRAPH_API_VERSION: &str = "0.18.0.dev9";
 
 /// In-memory runtime `mda dev` pairs with [`LANGGRAPH_API_VERSION`]. A pre-release
 /// Agent Server pulls a pre-release runtime, which uv only accepts when pinned
 /// explicitly, so this moves together with the version above.
-pub(crate) const LANGGRAPH_RUNTIME_INMEM_VERSION: &str = "0.36.0rc9";
+pub(crate) const LANGGRAPH_RUNTIME_INMEM_VERSION: &str = "0.38.0.dev9";
 
 /// Resolve the langgraph-api version stem for `_INTERNAL_docker_tag`.
 ///
@@ -429,7 +430,7 @@ pub(crate) fn has_current_build_marker(out_dir: &Path) -> Result<bool> {
 }
 
 pub(crate) fn eval_graph_export(language: Language) -> String {
-    format!("./{EVAL_ENTRY_STEM}.{}:agent", entry_extension(language))
+    format!("./{EVAL_ENTRY_STEM}.{}:agent", language.extension())
 }
 
 /// Subdirectory of the build that holds the vendored runtime.
@@ -455,6 +456,8 @@ pub struct CompileSummary {
     pub connectors: Vec<PathBuf>,
     /// Channel modules discovered under `channels/`, relative to the root.
     pub channels: Vec<PathBuf>,
+    /// First-party ingress channel providers (`slack`, `github`) those modules declare.
+    pub channel_providers: BTreeSet<String>,
     /// Root `identity.{ts,py}` declaration, when present (with static scope when known).
     pub identity: Option<IdentitySummary>,
     /// What durable memory this project declares. Reports scope and file only —
@@ -531,11 +534,11 @@ pub fn compile(project: &Project, out_dir: &Path, runtime_source: &Path) -> Resu
     compile_local(project, out_dir, runtime_source, CompileMode::Full)
 }
 
+/// Report an unclassified compile failure as `compilation`, keeping its causes
+/// so a child's stderr still reaches the error record. A cancellation passes
+/// through unchanged.
 pub fn compilation(err: anyhow::Error) -> anyhow::Error {
-    if category_of(&err) != ErrorCategory::Unclassified {
-        return err;
-    }
-    categorized(ErrorCategory::Compilation, format!("{err:#}"))
+    categorize_unclassified(ErrorCategory::Compilation, err)
 }
 
 /// Like [`compile`], but keeps `node_modules`, staged env, and LangGraph state
@@ -682,6 +685,20 @@ fn compile_inner(
 ) -> Result<CompileSummary> {
     // Validate first: prepare_out_dir clears existing files during a full build.
     let agent = agent_config::read_agent_static_config(project)?;
+    if matches!(context, RuntimeContext::Eval { .. }) && !agent.async_subagents.is_empty() {
+        bail!(
+            "async subagents are not supported in eval: there is no Agent Server to launch them on"
+        );
+    }
+    // Served Python agents also get an async general-purpose subagent; eval has no
+    // Agent Server to launch it on, and TypeScript doesn't build async subagents.
+    let async_subagents = if project.language == Language::Python
+        && !matches!(context, RuntimeContext::Eval { .. })
+    {
+        agent.served_async_subagents()
+    } else {
+        agent.async_subagents.clone()
+    };
     let local_packages = find_local_packages(project)?;
     prepare_out_dir(&project.root, out_dir, mode)?;
 
@@ -740,10 +757,7 @@ fn compile_inner(
     } else {
         ENTRY_STEM
     };
-    let entry_file = PathBuf::from(format!(
-        "{entry_stem}.{}",
-        entry_extension(project.language)
-    ));
+    let entry_file = PathBuf::from(format!("{entry_stem}.{}", project.language.extension()));
     let agent_import = agent_import_specifier(&project.agent_file, project.language);
     let sandbox_entry = find_sandbox_entry(project);
     let sandbox_import = sandbox_entry
@@ -763,7 +777,7 @@ fn compile_inner(
     } else {
         let connectors_file = PathBuf::from(format!(
             "{CONNECTORS_STEM}.{}",
-            entry_extension(project.language)
+            project.language.extension()
         ));
         let modules: Vec<(String, String)> = connector_entries
             .iter()
@@ -807,16 +821,30 @@ fn compile_inner(
     if let Some(warning) = sandbox_recipe::legacy_thread_scope_warning(project)? {
         warnings.push(warning);
     }
+    if agent.unreadable_subagents > 0 {
+        warnings.push(format!(
+            "{} subagent entr{} in {} could not be read without running it. An async \
+             subagent (`\"async\": True`) must be a dict literal, or a name bound to one, \
+             in `subagents=[...]`. Annotate a name spread there that holds only sync \
+             subagents as `list[SubAgent]`.",
+            agent.unreadable_subagents,
+            if agent.unreadable_subagents == 1 {
+                "y"
+            } else {
+                "ies"
+            },
+            project.agent_file.display()
+        ));
+    }
 
     let channel_scan = scan_exported_channels(project)?;
     let channel_entries = channel_scan.entries;
+    let channel_providers = channel_scan.providers;
     let channels_import = if channel_entries.is_empty() {
         None
     } else {
-        let channels_file = PathBuf::from(format!(
-            "{CHANNELS_STEM}.{}",
-            entry_extension(project.language)
-        ));
+        let channels_file =
+            PathBuf::from(format!("{CHANNELS_STEM}.{}", project.language.extension()));
         let modules: Vec<(String, String)> = channel_entries
             .iter()
             .map(|entry| {
@@ -854,7 +882,7 @@ fn compile_inner(
         }
     };
 
-    // Browser use is opt-in (Python only). Eval trials never get a browser.
+    // Browser use is opt-in. Eval trials never get a browser.
     let browser_import = match context {
         RuntimeContext::Eval { .. } => None,
         RuntimeContext::Local { .. } | RuntimeContext::ContextHub { .. } => {
@@ -863,13 +891,14 @@ fn compile_inner(
         }
     };
 
-    // Ingress channels (Slack `on:`) and connectors (GitHub `events:`) cannot fall back to a
-    // deployment service principal: require a root identity declaration.
+    // Ingress channels (`channels.slack(...)`, `channels.github(...)`) and connectors with
+    // Events ingress cannot fall back to a deployment service principal: require a root
+    // identity declaration.
     if identity_import.is_none()
         && (connector_scan.requires_identity || channel_scan.requires_identity)
     {
         anyhow::bail!(
-            "channels/ or connectors/ with an ingress trigger (e.g. Slack `on:`/GitHub `events:`) \
+            "channels/ or connectors/ with an ingress trigger (e.g. Slack or GitHub channels) \
              require a root identity.{{ts,py}} declaration; ingress triggers cannot \
              fall back to a deployment service principal"
         );
@@ -901,6 +930,7 @@ fn compile_inner(
             identity_import: identity_import.as_deref(),
             memory_import: memory_import.as_deref(),
             browser_import: browser_import.as_deref(),
+            async_subagents: &async_subagents,
         },
     );
     write_if_changed(&out_dir.join(&entry_file), entry_source.as_bytes())
@@ -911,7 +941,7 @@ fn compile_inner(
     // and point `langgraph.json` at it. Identity is opt-in: with no
     // `identity.{ts,py}` there is no auth block and behavior is unchanged.
     let auth_path = if let Some(identity_import) = identity_import.as_deref() {
-        let auth_file = PathBuf::from(format!("{AUTH_STEM}.{}", entry_extension(project.language)));
+        let auth_file = PathBuf::from(format!("{AUTH_STEM}.{}", project.language.extension()));
         let auth_source = generate_auth_module(
             project.language,
             identity_import,
@@ -933,7 +963,7 @@ fn compile_inner(
         if identity_import.is_some() || connectors_import.is_some() || channels_import.is_some() {
             let http_file = PathBuf::from(format!(
                 "{MANAGED_HTTP_STEM}.{}",
-                entry_extension(project.language)
+                project.language.extension()
             ));
             let http_source = generate_managed_http_module(
                 project.language,
@@ -950,6 +980,16 @@ fn compile_inner(
         };
 
     let graph = format!("./{}:agent", to_unix_path(&entry_file));
+    let extra_graphs: Vec<(String, String)> = async_subagents
+        .iter()
+        .map(|subagent| {
+            let export = &subagent.export;
+            (
+                subagent.graph_id.clone(),
+                format!("./{}:{export}", to_unix_path(&entry_file)),
+            )
+        })
+        .collect();
     let schedule_crons = read_schedule_crons(
         project,
         ScheduleReadContext {
@@ -1005,6 +1045,7 @@ fn compile_inner(
             context,
             RuntimeContext::Local { .. } | RuntimeContext::Eval { .. }
         ),
+        extra_graphs: &extra_graphs,
     })?;
     // Avoid bumping mtime when the manifest is unchanged so `mda dev` watch
     // does not restart LangGraph on every source-only refresh.
@@ -1117,6 +1158,7 @@ fn compile_inner(
         assistant_id,
         connectors: connector_entries,
         channels: channel_entries,
+        channel_providers,
         identity,
         memory,
         sandbox: sandbox_entry.is_some() || recipe.is_some(),
@@ -1434,7 +1476,7 @@ fn record_python_lock_input(project: &Project, out_dir: &Path) -> Result<()> {
 /// after a hub-only update (e.g. `instructions.md`) that does not rewrite the
 /// entry contents.
 pub fn poke_dev_reload_signal(out_dir: &Path, language: Language) -> Result<()> {
-    let entry = out_dir.join(format!("{ENTRY_STEM}.{}", entry_extension(language)));
+    let entry = out_dir.join(format!("{ENTRY_STEM}.{}", language.extension()));
     if !entry.is_file() {
         bail!(
             "cannot poke reload signal: missing managed entry {}",
@@ -1463,21 +1505,9 @@ fn is_typescript_source(rel: &Path) -> bool {
     )
 }
 
-fn entry_extension(language: Language) -> &'static str {
-    match language {
-        Language::TypeScript => "ts",
-        Language::Python => "py",
-    }
-}
-
 #[cfg(test)]
 mod api_version_tests {
     use super::*;
-
-    #[test]
-    fn default_is_0_16_0_rc5() {
-        assert_eq!(LANGGRAPH_API_VERSION, "0.16.0rc5");
-    }
 
     #[test]
     fn resolve_falls_back_to_default_when_unset() {

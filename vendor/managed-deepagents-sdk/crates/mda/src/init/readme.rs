@@ -80,6 +80,12 @@ pub(super) fn readme(name: &str, blueprint: &Blueprint) -> String {
             "Slack messaging channel".to_string(),
         ));
     }
+    if blueprint.channels.contains(&InitChannel::GitHub) {
+        entries.push((
+            format!("channels/github.{ext}"),
+            "GitHub channel (GitHub App set up on deploy)".to_string(),
+        ));
+    }
     entries.extend(
         [
             ("tools/", "optional custom tools"),

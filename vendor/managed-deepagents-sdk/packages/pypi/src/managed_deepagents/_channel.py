@@ -62,6 +62,11 @@ class Channel:
     #: File-stem instance name, stamped by :func:`collect_channels`.
     name: str | None = None
 
+    #: A PNG or JPEG image in the project (e.g. ``assets/icon.png``) served
+    #: publicly at ``/channels/{name}/icon``, for providers that load an app's
+    #: icon from a URL.
+    icon: str | None = None
+
 
 class ChannelEventsContext(TypedDict, total=False):
     """Context handed to channel ``events`` for ``/channels/{name}/events``."""

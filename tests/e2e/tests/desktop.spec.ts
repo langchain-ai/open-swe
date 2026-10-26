@@ -11,6 +11,7 @@ import {
   writeFileSync,
 } from "node:fs";
 import { join, resolve } from "node:path";
+import { tmpdir } from "node:os";
 import { _electron as electron } from "playwright";
 
 const repoRoot = resolve(__dirname, "..", "..", "..");
@@ -19,6 +20,7 @@ const e2eRoot = join(repoRoot, "tests", "e2e");
 const baseURL = `http://127.0.0.1:${process.env.E2E_PORT ?? "2024"}`;
 const e2eTmp = resolve(process.env.E2E_TMP ?? join(e2eRoot, ".e2e-tmp"));
 const fakeRemote = join(e2eTmp, "github", "fakeorg__demo.git");
+const uiArchive = join(repoRoot, "ui", ".output", "desktop", "ui.json.gz");
 const electronPath = createRequire(join(desktopRoot, "package.json"))(
   "electron",
 ) as string;
@@ -79,6 +81,7 @@ test("Desktop runs a This Mac thread on the cloud agent through its bridge", asy
       XDG_CONFIG_HOME: join(stateRoot, "xdg-config"),
       APPDATA: join(stateRoot, "app-data"),
       OPEN_SWE_BACKEND_URL: baseURL,
+      OPEN_SWE_DESKTOP_UI_ARCHIVE: uiArchive,
       // The bridge runs the agent's commands with this environment, so the
       // fake model's script pushes with this git config rather than yours.
       GIT_CONFIG_GLOBAL: gitConfig,
@@ -215,5 +218,69 @@ test("Desktop runs a This Mac thread on the cloud agent through its bridge", asy
     await electronApp.close().catch(() => {});
     if (!process.env.E2E_KEEP_TMP)
       rmSync(stateRoot, { recursive: true, force: true });
+  }
+});
+
+test("Desktop links supersede startup loading", async () => {
+  const stateRoot = mkdtempSync(join(tmpdir(), "desktop-links-"));
+  const electronApp = await electron.launch({
+    executablePath: electronPath,
+    args: [
+      ...(process.platform === "linux" ? ["--no-sandbox"] : []),
+      desktopRoot,
+      "--backend-url=https://desktop.test",
+    ],
+    env: {
+      ...process.env,
+      HOME: stateRoot,
+      XDG_CONFIG_HOME: stateRoot,
+      APPDATA: stateRoot,
+      OPEN_SWE_DESKTOP_UI_ARCHIVE: uiArchive,
+    },
+  });
+  try {
+    const page = await electronApp.firstWindow();
+    await page.waitForURL("open-swe://app/**", { waitUntil: "load" });
+    await electronApp.evaluate(({ protocol }) => {
+      protocol.unhandle("open-swe");
+      protocol.handle("open-swe", () => new Response("Ready"));
+    });
+    await page.goto("data:text/html,Reload fixture");
+    await electronApp.evaluate(({ app, Menu }) => {
+      Menu.getApplicationMenu()
+        ?.items.find((item) => item.label === "View")
+        ?.submenu?.items.find((item) => item.label === "Reload")
+        ?.click();
+      app.emit(
+        "continue-activity",
+        { preventDefault() {} },
+        "NSUserActivityTypeBrowsingWeb",
+        {},
+        {
+          webpageURL:
+            "https://desktop.test/agents/reviews/a/b/1?tab=changes#file-1",
+        },
+      );
+    });
+    await expect(page.getByText("Ready", { exact: true })).toBeVisible();
+    await expect(page).toHaveURL(
+      "open-swe://app/agents/reviews/a/b/1?tab=changes#file-1",
+    );
+    await page.evaluate(() => window.openSweDesktop!.copyPageLink());
+    expect(
+      await electronApp.evaluate(({ clipboard }) => clipboard.readText()),
+    ).toBe("https://desktop.test/agents/reviews/a/b/1?tab=changes#file-1");
+    await page.goto("data:text/html,Non-app page");
+    await electronApp.evaluate(({ Menu }) => {
+      Menu.getApplicationMenu()
+        ?.items.find((item) => item.label === "View")
+        ?.submenu?.items.find((item) => item.label === "Reload")
+        ?.click();
+    });
+    await expect(page.getByText("Ready", { exact: true })).toBeVisible();
+    await expect(page).toHaveURL("open-swe://app/");
+  } finally {
+    await electronApp.close();
+    rmSync(stateRoot, { recursive: true, force: true });
   }
 });
