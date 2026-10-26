@@ -120,7 +120,7 @@ def define_deep_agent(
     disable_memory: bool | None = None,
     metadata: Mapping[str, object] | None = None,
     replicate_traces: bool = True,
-    graph_inputs: Mapping[str, object] | None = None,
+    _openswe_graph_inputs: Mapping[str, object] | None = None,
     **kwargs: Never,
 ) -> DeepAgentDefinition:
     """Define a Managed Deep Agent.
@@ -153,14 +153,16 @@ def define_deep_agent(
     kwarg): the runtime applies it via ``.with_config({"metadata": ...})`` so
     keys such as prompt provenance land on the **root** LangSmith run.
 
-    ``graph_inputs``, from a factory entry, is a JSON object naming everything the
-    factory built this definition from. The factory then promises that the same
-    inputs build the same agent for every run, with nothing that belongs to one run
-    (a token, a request id) in the tools or middleware it returns: those read it
-    from the run's context per call. MDA keeps a thread's inputs from its last run,
-    builds the thread's graph once per inputs and reuses it for the thread's runs,
-    and reads the thread through the same graph by calling the factory again with
-    them (``runtime.graph_inputs``) instead of with a run.
+    ``_openswe_graph_inputs`` is Open SWE's, not MDA's API (see Open SWE's
+    ``vendor/mda-changes``). From a factory entry, it is a JSON object naming
+    everything the factory built this definition from. The factory then promises
+    that the same inputs build the same agent for every run, with nothing that
+    belongs to one run (a token, a request id) in the tools or middleware it
+    returns: those read it from the run's context per call. MDA keeps a thread's
+    inputs from its last run, builds the thread's graph once per inputs and reuses
+    it for the thread's runs, and reads the thread through the same graph by calling
+    the factory again with them (``runtime._openswe_graph_inputs``) instead of with
+    a run.
     """
     if not isinstance(name, str) or not name.strip():
         raise TypeError(
@@ -197,7 +199,7 @@ def define_deep_agent(
                 ("response_format", response_format),
                 ("context_schema", context_schema),
                 ("cache", cache),
-                ("graph_inputs", _snapshot_graph_inputs(graph_inputs)),
+                ("_openswe_graph_inputs", _snapshot_graph_inputs(_openswe_graph_inputs)),
             )
             if value is not None
         },
@@ -221,11 +223,11 @@ def _snapshot_graph_inputs(graph_inputs: Mapping[str, object] | None) -> dict[st
     if graph_inputs is None:
         return None
     if not isinstance(graph_inputs, Mapping):
-        raise TypeError("graph_inputs must be a mapping")
+        raise TypeError("_openswe_graph_inputs must be a mapping")
     try:
         return json.loads(json.dumps(graph_inputs))
     except (TypeError, ValueError):
-        raise TypeError("graph_inputs must be JSON") from None
+        raise TypeError("_openswe_graph_inputs must be JSON") from None
 
 
 _ASYNC_SUBAGENT_UNSUPPORTED_KEYS = ("runnable", "graph_id", "url", "headers", "mode")

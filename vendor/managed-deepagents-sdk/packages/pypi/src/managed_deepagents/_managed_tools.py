@@ -107,16 +107,16 @@ class _ManagedExecutionRuntime(_ExecutionRuntime[_AppContextT | None], Generic[_
     channel: RuntimeChannel | None = None
     backend: BackendProtocol | None = None
     # Only a read has them: see ``_ManagedReadRuntime``.
-    graph_inputs: Mapping[str, object] | None = None
+    _openswe_graph_inputs: Mapping[str, object] | None = None
 
 
 @dataclass(frozen=True, slots=True, kw_only=True)
 class _ManagedReadRuntime(_ReadRuntime[_AppContextT | None], Generic[_AppContextT]):
     channel: RuntimeChannel | None = None
     backend: BackendProtocol | None = None
-    # A read of a thread that ran: the ``graph_inputs`` its last run's graph was built
-    # from, for the factory to build the same graph from. None before any run.
-    graph_inputs: Mapping[str, object] | None = None
+    # A read of a thread that ran: the ``_openswe_graph_inputs`` its last run's graph was
+    # built from, for the factory to build the same graph from. None before any run.
+    _openswe_graph_inputs: Mapping[str, object] | None = None
 
 
 ManagedServerRuntime = _ManagedExecutionRuntime[_AppContextT] | _ManagedReadRuntime[_AppContextT]
@@ -136,7 +136,7 @@ def adapt_server_runtime(
         values["context"] = context
     values["channel"] = channel
     if not isinstance(runtime, _ExecutionRuntime):
-        values["graph_inputs"] = graph_inputs
+        values["_openswe_graph_inputs"] = graph_inputs
     return runtime_type(**values)
 
 

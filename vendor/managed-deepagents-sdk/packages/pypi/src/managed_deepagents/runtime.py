@@ -814,7 +814,9 @@ async def compile_managed_agent_async(
         inputs = await thread_graph.inputs(read_digest)
         try:
             definition = (
-                await resolve_agent_definition(entry, replace(factory_runtime, graph_inputs=inputs))
+                await resolve_agent_definition(
+                    entry, replace(factory_runtime, _openswe_graph_inputs=inputs)
+                )
                 if inputs is not None
                 else None
             )
@@ -880,7 +882,7 @@ async def _compile_resolved_managed_agent_async(
 ) -> CompiledAgent:
     """Select native context schema and memory access for a resolved definition.
 
-    With a ``thread_graph`` and the ``graph_inputs`` the factory declared, the
+    With a ``thread_graph`` and the ``_openswe_graph_inputs`` the factory declared, the
     thread's graph is built once per inputs and kept, and a run saves its inputs for
     the thread's reads.
     """
@@ -953,7 +955,7 @@ async def _compile_resolved_managed_agent_async(
             policy_schema,
             selected_by_dynamic_resolver=memory_selected_by_dynamic_resolver,
         )
-    inputs = definition.config.get("graph_inputs")
+    inputs = definition.config.get("_openswe_graph_inputs")
     # A read keeps its graph under the inputs it was given, however the factory
     # declares them again.
     digest = (
@@ -1077,14 +1079,14 @@ def _graph_inputs_digest(inputs: Mapping[str, object]) -> str:
 
 #: Threads whose graph a process keeps built.
 _THREAD_GRAPHS_KEPT = 128
-#: Store namespaces: each declared ``graph_inputs`` by digest, and the digest of each
+#: Store namespaces: each declared ``_openswe_graph_inputs`` by digest, and the digest of each
 #: thread's last run, per graph.
-_GRAPH_INPUTS_NAMESPACE = ("mda", "graph_inputs")
-_THREAD_GRAPHS_NAMESPACE = ("mda", "thread_graphs")
+_GRAPH_INPUTS_NAMESPACE = ("openswe", "graph_inputs")
+_THREAD_GRAPHS_NAMESPACE = ("openswe", "thread_graphs")
 
 
 class _ThreadGraph:
-    """One thread's graph, built from the ``graph_inputs`` its factory declared.
+    """One thread's graph, built from the ``_openswe_graph_inputs`` its factory declared.
 
     A run saves its inputs in the store under the thread, so a read on any replica
     builds the graph the thread's runs use. Each process keeps the compiled graph of
@@ -1227,7 +1229,7 @@ def _compile_managed_agent(
     merged.pop("mcp", None)
     merged.pop("sandbox", None)
     merged.pop("replicate_traces", None)
-    merged.pop("graph_inputs", None)
+    merged.pop("_openswe_graph_inputs", None)
     merged["context_schema"] = context_schema
 
     sandbox_backend = (

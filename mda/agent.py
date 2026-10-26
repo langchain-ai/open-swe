@@ -113,7 +113,9 @@ async def _inputs(runtime: ManagedServerRuntime) -> GraphInputs:
     execution = runtime.execution_runtime
     if execution is None:
         # A read: the thread's graph as its runs built it, or a bare one before any did.
-        return GraphInputs.model_validate(runtime.graph_inputs or {})
+        # Our own vendored seam until MDA caches graphs itself (vendor/mda-changes).
+        saved = runtime._openswe_graph_inputs  # noqa: SLF001
+        return GraphInputs.model_validate(saved or {})
     context = RunContext.model_validate(execution.context or {})
     carried = Catalog.model_validate(context.catalog) if context.catalog is not None else None
     return GraphInputs(graph=context.graph, catalog=await context.run().plan(carried))
@@ -314,7 +316,7 @@ async def agent(runtime: ManagedServerRuntime) -> DeepAgentDefinition:
         replicate_traces=False,
         model=model,
         context_schema=RunContext,
-        graph_inputs=inputs.model_dump(mode="json"),
+        _openswe_graph_inputs=inputs.model_dump(mode="json"),
         # Code-only tools stay callable by name, as in-process, though no request
         # offers them.
         tools=registered,
