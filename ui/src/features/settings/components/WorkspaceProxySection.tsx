@@ -111,16 +111,17 @@ export function WorkspaceProxySection({
       if ("rules" in parsed && !Array.isArray(parsed.rules)) {
         throw new Error("Proxy rules must be a JSON array.")
       }
-      return api.updateWorkspace(record.slug, {
-        create_params: {
-          ...record.create_params,
-          proxy_config: parsed,
-          tag_value_ids: tags
-            .split(",")
-            .map((tag) => tag.trim())
-            .filter(Boolean),
-        },
-      })
+      const createParams: Record<string, JsonValue> = {
+        ...record.create_params,
+        proxy_config: parsed,
+      }
+      const tagValueIds = tags
+        .split(",")
+        .map((tag) => tag.trim())
+        .filter(Boolean)
+      if (tagValueIds.length > 0) createParams.tag_value_ids = tagValueIds
+      else delete createParams.tag_value_ids
+      return api.updateWorkspace(record.slug, { create_params: createParams })
     },
     onSuccess: onSaved,
   })
