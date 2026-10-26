@@ -445,6 +445,40 @@ async def test_reviewer_tools_get_a_github_token_on_a_replica_that_did_not_prepa
     assert await resolve_thread_github_token(config) == "ghs_reviewer"
 
 
+@pytest.mark.parametrize("additional", [True, {"type": "string"}, False, None])
+async def test_operation_respects_open_tool_argument_schemas(additional: JsonValue) -> None:
+    from langchain_core.tools import StructuredTool
+    from runtime_api.operations import RunOperation
+
+    from openswe.agent_api.graph import RunSession
+    from openswe.sandboxes.tool_runtime import ToolSurface
+
+    schema: dict[str, JsonValue] = {"type": "object", "properties": {}}
+    if additional is not None:
+        schema["additionalProperties"] = additional
+
+    async def homebase(**arguments: JsonValue) -> str:
+        return json.dumps(arguments)
+
+    tool = StructuredTool.from_function(
+        coroutine=homebase, name="homebase", description="Homebase tool", args_schema=schema
+    )
+    session = RunSession(ToolSurface(tools={tool.name: tool}), {}, None, started_here=True)
+    arguments: dict[str, JsonValue] = {"commit": "abc123"}
+
+    result = await session.operation(
+        RunOperation(name=tool.name, arguments=arguments, request_id="call-1")
+    )
+
+    if additional is True or isinstance(additional, dict):
+        assert result.status == "success"
+        assert isinstance(result.content, str)
+        assert json.loads(result.content) == arguments
+    else:
+        assert result.status == "error"
+        assert result.content == "Unexpected arguments for homebase: commit"
+
+
 def test_run_token_round_trips_the_signed_run() -> None:
     assert verify_runtime_token(sign_runtime_token(RUN)) == RUN
 

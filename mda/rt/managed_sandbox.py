@@ -1,7 +1,9 @@
 """The thread's box as MDA's own sandbox: declared, opened before the run, replaced on request.
 
-MDA keeps one box per thread whatever the backend's options become, which apply
-only when MDA creates it, and leaves its proxy config to the backend. Before the
+The graph declares one box (``BOX``) for every run; each run's catalog says which
+box it uses and the options MDA creates it with (``SandboxSpec``), or that it has
+none. MDA keeps one box per thread whatever the backend's options become, which
+apply only when MDA creates it, and leaves its proxy config to the backend. Before the
 run prepares, the box is opened and its name reported, so the backend binds the
 thread to it. ``recreate_sandbox`` on such a box comes back from the backend as
 what to replace it with; MDA replaces it, the backend reconnects, and the call
@@ -21,12 +23,12 @@ from langgraph.types import Command
 from managed_deepagents import define_sandbox
 from managed_deepagents.sandbox import SandboxDefinition, open_sandbox, replace_sandbox
 from pydantic import JsonValue, TypeAdapter, ValidationError
-from runtime_api.catalog import SandboxCreate, SandboxSpec
+from runtime_api.catalog import SandboxCreate
 from runtime_api.endpoint import call
 from runtime_api.loop import SANDBOX_REPLACED
 from runtime_api.operations import RunRequest
 
-from rt.backend import OpenSweBackend
+from rt.backend import BackendCallError, OpenSweBackend, RunContext
 from rt.tools import run_id
 
 logger = logging.getLogger(__name__)
@@ -34,6 +36,19 @@ logger = logging.getLogger(__name__)
 _json_object = TypeAdapter(dict[str, JsonValue])
 # As the backend's sandbox: a command without a timeout of its own gets five minutes.
 EXECUTE_TIMEOUT_SECONDS: Final = 300
+
+
+def _selected(runtime: object) -> SandboxDefinition | None:
+    """The box the run in ``runtime`` uses, as its catalog says; None without one of MDA's."""
+    context = getattr(runtime, "context", None)
+    if not isinstance(context, RunContext):
+        return None
+    try:
+        spec = context.run().planned.sandbox
+    except BackendCallError:
+        # Not started yet, so nothing may open a box for it.
+        return None
+    return None if spec is None else definition(spec.create, spec.thread_id)
 
 
 def definition(create: SandboxCreate, thread_id: str | None) -> SandboxDefinition:
@@ -53,6 +68,14 @@ def definition(create: SandboxCreate, thread_id: str | None) -> SandboxDefinitio
     )
 
 
+BOX: Final = define_sandbox(
+    _openswe_per_thread=True,
+    _openswe_no_manage_proxy=True,
+    _openswe_select=_selected,
+    default_timeout=EXECUTE_TIMEOUT_SECONDS,
+)
+
+
 async def opened_sandbox(runtime: Runtime) -> str | None:
     """Adopt or create the thread's box now; its name, or None when MDA could not open it.
 
@@ -68,9 +91,8 @@ async def opened_sandbox(runtime: Runtime) -> str | None:
 class ReplaceSandboxMiddleware(AgentMiddleware):
     """Carry out ``recreate_sandbox`` for the box MDA owns."""
 
-    def __init__(self, backend: OpenSweBackend, spec: SandboxSpec) -> None:
+    def __init__(self, backend: OpenSweBackend) -> None:
         self._backend = backend
-        self._spec = spec
 
     async def awrap_tool_call(
         self,
@@ -80,6 +102,9 @@ class ReplaceSandboxMiddleware(AgentMiddleware):
         result = await handler(request)
         if request.tool_call["name"] != "recreate_sandbox" or not isinstance(result, ToolMessage):
             return result
+        spec = self._backend.run.planned.sandbox
+        if spec is None:
+            return result
         try:
             reply = _json_object.validate_json(result.text)
             create = SandboxCreate.model_validate(reply.get("replace"))
@@ -87,7 +112,7 @@ class ReplaceSandboxMiddleware(AgentMiddleware):
             return result
         try:
             replacement = await replace_sandbox(
-                getattr(request.runtime, "backend", None), definition(create, self._spec.thread_id)
+                getattr(request.runtime, "backend", None), definition(create, spec.thread_id)
             )
             await call(self._backend, SANDBOX_REPLACED, RunRequest(run_id=run_id()))
         except Exception as exc:
