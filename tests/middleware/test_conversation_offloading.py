@@ -7,7 +7,7 @@ from langchain.agents.middleware import wrap_model_call
 from langchain.agents.middleware.types import ModelRequest, ModelResponse
 from langchain_core.exceptions import ContextOverflowError
 from langchain_core.language_models.fake_chat_models import FakeListChatModel
-from langchain_core.messages import AIMessage, HumanMessage
+from langchain_core.messages import AIMessage, HumanMessage, ToolMessage
 from langgraph.checkpoint.memory import InMemorySaver
 
 from agent.middleware import conversation_offloading as module
@@ -302,3 +302,37 @@ async def test_context_overflow_escape_is_recorded(tmp_path, monkeypatch):
     [event] = recorded
     assert event["trigger"] == "overflow"
     assert event["status"] == "completed"
+
+
+async def test_summary_keeps_a_tool_only_tail(tmp_path):
+    """A coding trajectory has one human turn followed by ai/tool messages only.
+
+    Trimming that tail with `start_on="human"` yields no messages at all, and the
+    upstream middleware then replaces the whole history with the placeholder
+    "Previous conversation was too long to summarize." instead of summarizing.
+    """
+    model = FakeListChatModel(responses=["KEPT SUMMARY"])
+    middleware = ConversationOffloadingMiddleware(
+        model, FilesystemBackend(root_dir=str(tmp_path), virtual_mode=True)
+    )
+    messages = [HumanMessage(content="Fix the issue.")]
+    for index in range(120):
+        messages.append(
+            AIMessage(
+                content=f"step {index}",
+                tool_calls=[
+                    {
+                        "name": "execute",
+                        "id": f"call-{index}",
+                        "args": {"command": "x" * 200},
+                    }
+                ],
+            )
+        )
+        messages.append(ToolMessage(content=f"output {index}", tool_call_id=f"call-{index}"))
+
+    trimmed = middleware._lc_helper._trim_messages_for_summary(messages)
+
+    assert trimmed
+    assert not isinstance(trimmed[0], ToolMessage)
+    assert await middleware._lc_helper._acreate_summary(messages) == "KEPT SUMMARY"

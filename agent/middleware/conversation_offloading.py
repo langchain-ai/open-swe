@@ -5,7 +5,7 @@ import time
 from collections.abc import Awaitable, Callable
 from contextvars import ContextVar
 from dataclasses import dataclass
-from typing import Any, Literal, NotRequired, TypedDict
+from typing import Any, Literal, NotRequired, TypedDict, cast
 
 from deepagents.middleware.summarization import (
     DEEPAGENTS_DEFAULT_SUMMARY_PROMPT,
@@ -13,6 +13,9 @@ from deepagents.middleware.summarization import (
     SummarizationMiddleware,
     SummarizationState,
     compute_summarization_defaults,
+)
+from langchain.agents.middleware.summarization import (
+    SummarizationMiddleware as LangChainSummarizationMiddleware,
 )
 from langchain.agents.middleware.types import (
     AgentState,
@@ -22,7 +25,8 @@ from langchain.agents.middleware.types import (
     hook_config,
 )
 from langchain_core.exceptions import ContextOverflowError
-from langchain_core.messages import AIMessage, AnyMessage
+from langchain_core.messages import AIMessage, AnyMessage, ToolMessage
+from langchain_core.messages.utils import count_tokens_approximately, trim_messages
 from langgraph.config import get_stream_writer
 from langgraph.runtime import Runtime
 
@@ -34,6 +38,47 @@ _manual = ContextVar("manual_offloading", default=False)
 _overflow_cause = ContextVar("offloading_overflow_cause", default=False)
 
 OffloadTrigger = Literal["manual", "automatic", "overflow"]
+
+
+class _CodingSummarizationMiddleware(LangChainSummarizationMiddleware):
+    """Summarization that keeps the trailing tool exchange when trimming.
+
+    The upstream helper trims the slice to `trim_tokens_to_summarize` tokens
+    with `start_on="human"`. A coding trajectory has one human turn at the
+    start and then nothing but ai/tool messages, so the trailing window it
+    keeps contains no human at all and `trim_messages` returns an empty list.
+    `_acreate_summary` then reports "Previous conversation was too long to
+    summarize." instead of a summary, and every compaction silently discards
+    the entire history.
+
+    Starting the kept window on an ai/tool message is what this trajectory
+    needs: the first retained message must only not be an orphaned tool result,
+    because a tool message without its call is not a valid conversation.
+    """
+
+    def _trim_messages_for_summary(self, messages: list[AnyMessage]) -> list[AnyMessage]:
+        if self.trim_tokens_to_summarize is None:
+            return messages
+        trimmed = cast(
+            "list[AnyMessage]",
+            trim_messages(
+                messages,
+                max_tokens=self.trim_tokens_to_summarize,
+                token_counter=self.token_counter,
+                start_on=("human", "ai"),
+                strategy="last",
+                allow_partial=True,
+                include_system=True,
+            ),
+        )
+        if trimmed or not messages:
+            return trimmed
+        # `allow_partial` can still leave only a tool message when the tail is a
+        # single oversized result; drop it so the model sees no orphaned call.
+        trailing: list[AnyMessage] = [
+            message for message in messages if not isinstance(message, ToolMessage)
+        ]
+        return trailing[-1:] if trailing else messages[-1:]
 
 
 @dataclass(frozen=True)
@@ -163,21 +208,32 @@ class ConversationOffloadingMiddleware(SummarizationMiddleware):
             update={"tags": [*(model.tags or []), "nostream", "langsmith:hidden"]}
         )
         defaults = compute_summarization_defaults(model)
+        trigger = (
+            settings.trigger(defaults["trigger"]) if settings is not None else defaults["trigger"]
+        )
+        prompt = (
+            settings.summary_prompt
+            if settings is not None and settings.summary_prompt is not None
+            else DEEPAGENTS_DEFAULT_SUMMARY_PROMPT
+        )
         super().__init__(
             model=summary_model,
             backend=backend,
-            trigger=(
-                settings.trigger(defaults["trigger"])
-                if settings is not None
-                else defaults["trigger"]
-            ),
+            trigger=trigger,
             keep=defaults["keep"],
             truncate_args_settings=defaults["truncate_args_settings"],
-            summary_prompt=(
-                settings.summary_prompt
-                if settings is not None and settings.summary_prompt is not None
-                else DEEPAGENTS_DEFAULT_SUMMARY_PROMPT
-            ),
+            summary_prompt=prompt,
+        )
+        # Deep Agents builds its own summarization helper in `__init__` and
+        # delegates the summary steps to it, so replacing the helper is the only
+        # way to change trimming without forking the rest of that class. The
+        # remaining arguments mirror the ones the base constructor passes.
+        self._lc_helper = _CodingSummarizationMiddleware(
+            model=summary_model,
+            trigger=trigger,
+            keep=defaults["keep"],
+            token_counter=count_tokens_approximately,
+            summary_prompt=prompt,
         )
         self.manual = manual
         # Keyed by summary text: `awrap_model_call` generates summaries inside
