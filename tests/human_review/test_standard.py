@@ -167,16 +167,19 @@ async def test_snoozed_pick_does_not_expire_before_its_new_deadline() -> None:
         assert pick.decision == "picked"
 
 
-async def test_losing_auto_assignment_does_not_wake_another_picker() -> None:
+@pytest.mark.parametrize("author", ["ada", "open-swe[bot]"])
+async def test_losing_auto_assignment_does_not_wake_another_picker(author: str) -> None:
     from openswe.human_review.picking import Pick
     from openswe.human_review.standard import RequestResult, _auto_assign
 
-    pr = PullRequest(owner="lc", repo="repo", number=7, author="ada")
+    pr = PullRequest(owner="lc", repo="repo", number=7, author=author)
     request = HumanReviewRequest(pull_request_id=pr.id, head_sha="abc", kind="standard")
     request.pull_request = pr
     with (
         patch.object(HumanReviewRequest, "get", AsyncMock(return_value=request)),
-        patch.object(User, "for_login", AsyncMock(return_value=User())),
+        patch.object(
+            User, "for_login", AsyncMock(return_value=User() if author == "ada" else None)
+        ),
         patch(
             "openswe.human_review.standard.choose_reviewer",
             AsyncMock(return_value=Pick("grace", "owner")),
@@ -818,20 +821,31 @@ async def test_assignment_inbox_is_personal_and_hides_completed_or_inaccessible_
     assert [row.number for row in result.pull_requests] == [1]
 
 
-@pytest.mark.parametrize(("user", "blocked"), [(User(), False), (None, True)])
-async def test_review_blockers_refuse_authors_without_an_open_swe_account(
-    user: User | None, blocked: bool
+@pytest.mark.parametrize(
+    ("author", "user", "draft", "expected"),
+    [
+        ("ada", User(), False, []),
+        ("ada", None, False, ["its author is not an Open SWE user"]),
+        ("open-swe[bot]", None, False, []),
+        ("open-swe-preview[bot]", None, False, []),
+        ("openswe-dev[bot]", None, False, []),
+        ("another[bot]", None, False, ["its author is not an Open SWE user"]),
+        ("open-swe[bot]", None, True, ["it is a draft"]),
+    ],
+)
+async def test_review_blockers_require_an_account_or_an_open_swe_bot(
+    author: str, user: User | None, draft: bool, expected: list[str]
 ) -> None:
     from openswe.expedited_review.readiness import Readiness
     from openswe.human_review.standard import review_blockers
 
-    readiness = Readiness(snapshot=_snapshot(), blockers=[])
+    readiness = Readiness(snapshot=_snapshot(author=author, draft=draft), blockers=[])
     with (
         patch.object(Readiness, "assess", AsyncMock(return_value=readiness)),
         patch.object(User, "for_login", AsyncMock(return_value=user)),
     ):
         blockers = await review_blockers(MagicMock())
-    assert blockers == (["its author is not an Open SWE user"] if blocked else [])
+    assert blockers == expected
 
 
 @pytest.mark.usefixtures("registry_db")
@@ -890,7 +904,9 @@ async def test_review_request_snapshots_merge_mode_and_preserves_it_on_reuse(
 @pytest.mark.parametrize("trigger", ["event", "deadline"])
 @pytest.mark.parametrize("pending", [False, True])
 @pytest.mark.parametrize("auto_merge", [False, True])
+@pytest.mark.parametrize("author", ["ada", "open-swe[bot]"])
 async def test_only_auto_merge_requests_merge_when_approved(
+    author: str,
     trigger: str,
     auto_merge: bool,
     pending: bool,
@@ -901,7 +917,7 @@ async def test_only_auto_merge_requests_merge_when_approved(
     from openswe.human_review.merging import MergeResult
     from openswe.human_review.picking import Coverage
 
-    pr = PullRequest(owner="lc", repo="repo", number=7, author="ada")
+    pr = PullRequest(owner="lc", repo="repo", number=7, author=author)
     request = HumanReviewRequest(
         pull_request_id=pr.id, head_sha="abc", kind="standard", auto_merge=auto_merge
     )
@@ -926,9 +942,11 @@ async def test_only_auto_merge_requests_merge_when_approved(
         patch.object(
             Readiness,
             "assess",
-            AsyncMock(return_value=Readiness(snapshot=_snapshot(), blockers=[])),
+            AsyncMock(return_value=Readiness(snapshot=_snapshot(author=author), blockers=[])),
         ),
-        patch.object(User, "for_login", AsyncMock(return_value=User())),
+        patch.object(
+            User, "for_login", AsyncMock(return_value=User() if author == "ada" else None)
+        ),
         patch.object(
             standard, "latest_review_states", AsyncMock(return_value={"grace": "APPROVED"})
         ),

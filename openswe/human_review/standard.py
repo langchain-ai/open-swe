@@ -41,6 +41,7 @@ from openswe.github.http import (
     RepoClient,
     or_none,
 )
+from openswe.github.org_membership import OPEN_SWE_GITHUB_LOGINS
 from openswe.github.pull_request_status import PullRequestClient
 from openswe.github.pull_requests import PullRequest, PullRequestPayload
 from openswe.github.repo_files import RepoFileUnreadableError, RepoSettings
@@ -197,13 +198,20 @@ def request_blockers(snapshot: PullRequestSnapshot) -> list[str]:
     return blockers
 
 
+async def _review_author_allowed(author: str) -> bool:
+    return (
+        author.lower() in OPEN_SWE_GITHUB_LOGINS
+        or await User.for_login("github", author) is not None
+    )
+
+
 async def review_blockers(pull: PullRequestClient) -> list[str] | None:
     """Why ``pull`` may not be put up for review now; ``None`` when GitHub was unavailable."""
     readiness = await Readiness.assess(pull)
     if readiness is None:
         return None
     blockers = request_blockers(readiness.snapshot)
-    if await User.for_login("github", readiness.snapshot.author) is None:
+    if not await _review_author_allowed(readiness.snapshot.author):
         blockers.append("its author is not an Open SWE user")
     return blockers
 
@@ -994,7 +1002,7 @@ async def _settle(request: HumanReviewRequest, pull: PullRequestClient) -> bool:
     if readiness is None:
         return False
     snapshot = readiness.snapshot
-    if await User.for_login("github", snapshot.author) is None:
+    if not await _review_author_allowed(snapshot.author):
         await ReviewCard(request).retire("cancelled", "PR author has no Open SWE account")
         return True
     if snapshot.merged:
@@ -1143,7 +1151,7 @@ async def _auto_assign(
     replacing = trigger is not None and trigger.kind in ("declined", "expired")
     if not replacing and (request.reviewers or request.picks):
         return AutoAssignResult("claimed")
-    if await User.for_login("github", request.pull_request.author) is None:
+    if not await _review_author_allowed(request.pull_request.author):
         await ReviewCard(request).retire("cancelled", "PR author has no Open SWE account")
         return AutoAssignResult("disabled")
     choice = await choose_reviewer(request)
