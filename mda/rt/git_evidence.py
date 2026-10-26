@@ -17,7 +17,7 @@ import asyncio
 import logging
 from collections.abc import Sequence
 from dataclasses import dataclass
-from typing import Final
+from typing import Final, Self
 
 from deepagents.backends.protocol import SandboxBackendProtocol
 from pydantic import BaseModel, ConfigDict, JsonValue
@@ -46,7 +46,7 @@ class GitCheckout(GitTarget):
 class GitSnapshot(BaseModel):
     repos: dict[str, GitCheckout] = {}
 
-    def changes_since(self, before: GitSnapshot) -> list[GitTarget]:
+    def changes_since(self, before: Self) -> list[GitTarget]:
         return [
             GitTarget(repo=checkout.repo, branch=checkout.branch)
             for path, checkout in self.repos.items()

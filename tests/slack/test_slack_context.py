@@ -1,4 +1,5 @@
 import asyncio
+from types import SimpleNamespace
 from typing import Any, cast
 from unittest.mock import AsyncMock
 from xml.etree import ElementTree
@@ -455,6 +456,12 @@ async def slack_file_mention(monkeypatch, registry_db):
     backends = {}
     monkeypatch.setattr(lifecycle, "client", client)
     monkeypatch.setattr(state, "get_client", lambda: client)
+
+    async def indexed(thread_id: str) -> SimpleNamespace | None:
+        metadata = client.threads.metadata
+        return None if metadata is None else SimpleNamespace(metadata=dict(metadata))
+
+    monkeypatch.setattr(state.THREADS, "get", indexed)
     monkeypatch.setattr(lifecycle, "SANDBOX_BACKENDS", backends)
     monkeypatch.setattr(state, "SANDBOX_BACKENDS", backends)
     monkeypatch.setattr(lifecycle, "_create_sandbox_with_proxy", provision)
