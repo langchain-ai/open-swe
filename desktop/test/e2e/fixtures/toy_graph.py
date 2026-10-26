@@ -9,6 +9,10 @@ timing is ours. Markers in the last human message control the run:
     TOY_TOOL_MS=<n>    run the toy tool this many ms into the answer; the tool
                        appends one line to $TOY_TOOL_LOG, so a replayed step
                        leaves a second line behind
+    TOY_TOOL_CRASH_MS=<n>
+                       kill the process this many ms into the tool itself,
+                       after the line was written: the side effect is on disk
+                       but no ToolMessage ever reached the checkpoint
 
 The continuation the desktop's recovery coordinator sends is recognised by its
 envelope sender, so the answer a resumed turn produces is distinguishable from
@@ -198,6 +202,28 @@ def _tool_log() -> str | None:
     return os.environ.get("TOY_TOOL_LOG")
 
 
+def _crash_sentinel() -> str | None:
+    path = _tool_log()
+    return f"{path}.crashed" if path else None
+
+
+def _take_crash_turn() -> bool:
+    """True for the first execution only.
+
+    The crash marker lives in the human message, which a replayed step still
+    sees; without this the toy would die on every attempt and never let the
+    scenario reach its point.
+    """
+    path = _crash_sentinel()
+    if path is None:
+        return False
+    if os.path.exists(path):
+        return False
+    with open(path, "w", encoding="utf-8") as handle:
+        handle.write("1\n")
+    return True
+
+
 def _apply_change_once() -> str:
     """The toy's one side effect: append a line, so a replay is countable.
 
@@ -231,6 +257,17 @@ async def apply_change(state: ToyState, config: RunnableConfig) -> dict[str, lis
     configurable_delay = _marker(_text_of(last), "TOY_TOOL_HOLD_MS") or 0
     if configurable_delay:
         await asyncio.sleep(configurable_delay / 1000)
+    # Dying here leaves the side effect on disk but no ToolMessage in the
+    # checkpoint: the node never returned, so the graph has no record that the
+    # work was done. The scenario checks that the continuation does not run it
+    # again anyway -- its new input starts a fresh run at START rather than
+    # resuming the interrupted step.
+    original = _text_of(state["messages"][0])
+    tool_crash_ms = _marker(original, "TOY_TOOL_CRASH_MS")
+    if tool_crash_ms is not None and _take_crash_turn():
+        await asyncio.sleep(tool_crash_ms / 1000)
+        _log("tool_crash", thread_id=str(configurable.get("thread_id")), tool=call["name"])
+        os._exit(17)
     _log("tool_end", thread_id=str(configurable.get("thread_id")), tool=call["name"])
     return {
         "messages": [

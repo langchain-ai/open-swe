@@ -36,7 +36,7 @@ const artifactsDir = join(repoRoot, "artifacts", "network-recovery-e2e")
 
 interface ToyEvent {
   ts: number
-  event: "imported" | "run_start" | "run_end" | "crash"
+  event: "imported" | "run_start" | "run_end" | "crash" | "tool_start" | "tool_end" | "tool_crash"
   pid: number
   thread_id?: string
   resume?: boolean
@@ -403,7 +403,7 @@ async function quitApplication(app: ElectronApplication): Promise<void> {
           "-Command",
           // Any toy config: a backend started from the tools config would
           // otherwise outlive the app and hang the worker's teardown.
-          "Get-CimInstance Win32_Process | Where-Object { $_.CommandLine -match 'langgraph\\.toy[-.][a-z-]*\\.json' } | ForEach-Object { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue }",
+          "Get-CimInstance Win32_Process | Where-Object { $_.CommandLine -match 'langgraph\\.toy([-.]\\w+)?\\.json\\b' } | ForEach-Object { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue }",
         ],
         { stdio: "pipe" }
       )
@@ -682,6 +682,112 @@ test("a continuation does not run a completed tool a second time", async () => {
     expect(effects).toHaveLength(1)
     expect(effects[0]?.pid).toBe(firstRunStart.pid)
     expect(released?.change?.outcome).toBe("completed")
+  } finally {
+    await harness.close()
+  }
+})
+
+test("a tool killed mid-execution is not re-run by the continuation or a later turn", async () => {
+  // The harder half of the same question. The previous scenario dies after the
+  // tool returned, so its ToolMessage is in the checkpoint and the graph knows
+  // the step is done. This one dies *inside* the tool, after the line was
+  // written and before any ToolMessage exists, so the checkpoint has no record
+  // that the work happened. Two things then matter:
+  //
+  //   1. the continuation must not run it again, and
+  //   2. the dangling `tools` step must not be picked up by the *next* user
+  //      message either, which is what a checkpoint-level replay would produce
+  //      (the tool would fire once more, long after the crash).
+  test.setTimeout(300_000)
+  const harness = await launch("tool-crash", {
+    graphConfig: "langgraph.toy-tools.json",
+  })
+  const { page, toyLog, toolLog } = harness
+  try {
+    await watchResume(page)
+    await submitLocalTask(
+      page,
+      "tool crash probe TOY_STREAM_MS=1000 TOY_TOOL_MS=1 TOY_TOOL_CRASH_MS=1500 TOY_AFTER_MS=3000"
+    )
+    const threadId = await threadIdFromUrl(page)
+    const firstRunStart = await waitForRunStart(toyLog)
+
+    await expect
+      .poll(() => firstEvent(toyLog, (event) => event.event === "tool_crash"), {
+        timeout: 60_000,
+      })
+      .toBeTruthy()
+    await expect
+      .poll(
+        () =>
+          readToyLog(toyLog).filter(
+            (event) =>
+              event.event === "run_end" &&
+              event.resume === true &&
+              event.pid !== firstRunStart.pid
+          ).length,
+        { timeout: 120_000 }
+      )
+      .toBeGreaterThanOrEqual(1)
+    await expect
+      .poll(() => page.evaluate(() => window.openSweDesktop?.networkResume?.snapshot()), {
+        timeout: 60_000,
+      })
+      .toMatchObject({ chains: [] })
+    const effectsAfterResume = readToolLog(toolLog).length
+
+    // A second turn on the same thread: if the interrupted step were left
+    // pending in the checkpoint, this is where it would finally run.
+    await submitLocalTask(page, "follow-up TOY_STREAM_MS=1000")
+    // The point is a second turn on the *same* thread; a new thread would make
+    // the assertion below vacuous.
+    expect(await threadIdFromUrl(page)).toBe(threadId)
+    await expect
+      .poll(
+        () =>
+          readToyLog(toyLog).filter(
+            (event) =>
+              event.event === "run_start" &&
+              event.thread_id === threadId &&
+              event.input?.includes("follow-up") === true
+          ).length,
+        { timeout: 120_000 }
+      )
+      .toBeGreaterThanOrEqual(1)
+
+    const effects = readToolLog(toolLog)
+    const events = readToyLog(toyLog).filter((event) => event.thread_id === threadId)
+    const runStarts = events.filter((event) => event.event === "run_start")
+    const toolStarts = events.filter((event) => event.event === "tool_start")
+    const toolEnds = events.filter((event) => event.event === "tool_end")
+    const released = (await resumeEvents(page)).find(
+      (event) => event.change?.kind === "chain-removed"
+    )
+    writeMetrics("tool-killed", {
+      crashPid: firstRunStart.pid,
+      runs: runStarts.length,
+      resumedRuns: runStarts.filter((event) => event.resume === true).length,
+      toolStarts: toolStarts.length,
+      toolEnds: toolEnds.length,
+      toolExecutions: effects.length,
+      effectsAfterResume,
+      effectPids: effects.map((entry) => entry.pid),
+      releaseOutcome: released?.change?.outcome ?? null,
+    })
+
+    // The turn came back and the coordinator released the chain.
+    expect(runStarts.filter((event) => event.resume === true)).toHaveLength(1)
+    expect(released?.change?.outcome).toBe("completed")
+    // The continuation starts a new run from START with its own input, so the
+    // interrupted step is never resumed -- not right away and not when the
+    // next message arrives. Exactly one execution, from the process that died.
+    expect(effectsAfterResume).toBe(1)
+    expect(effects).toHaveLength(1)
+    expect(effects[0]?.pid).toBe(firstRunStart.pid)
+    expect(toolStarts).toHaveLength(1)
+    // The node never returned: nothing recorded the tool as finished, which is
+    // why the lost result is invisible in the transcript.
+    expect(toolEnds).toHaveLength(0)
   } finally {
     await harness.close()
   }
