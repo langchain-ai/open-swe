@@ -21,13 +21,14 @@ from runtime_api.endpoint import API_PATH as _API_PATH
 from runtime_api.endpoint import InvalidRequestError, UnknownEndpointError
 from starlette.requests import Request
 from starlette.responses import JSONResponse
-from starlette.types import ASGIApp, Receive, Scope, Send
+from starlette.types import ASGIApp, Message, Receive, Scope, Send
 
 from openswe.agent_api.caller_trace import traced_under
 from openswe.agent_api.tokens import (
     RemoteRun,
     RuntimeTokenError,
     WorkerGrant,
+    sign_runtime_token,
     verify_runtime_token,
     verify_worker_grant,
 )
@@ -153,8 +154,28 @@ class RunTokenMiddleware:
                 'Bearer error="invalid_token"',
             )
             return
+        refreshed: str | None = None
+        if (
+            isinstance(principal, RemoteRun)
+            and not principal.operation_grants
+            and Request(scope).headers.get("x-open-swe-operation-grants") == "1"
+        ):
+            principal = (
+                principal.model_copy(update={"operation_grants": True})
+                if principal.grant_id is not None
+                else principal.granting()
+            )
+            refreshed = sign_runtime_token(principal)
         scope.setdefault("state", {})[_RUN_STATE_KEY] = principal
-        await self.app(scope, receive, send)
+
+        async def reply(message: Message) -> None:
+            if refreshed is not None and message["type"] == "http.response.start":
+                message.setdefault("headers", []).append(
+                    (b"x-open-swe-run-token", refreshed.encode())
+                )
+            await send(message)
+
+        await self.app(scope, receive, reply)
 
 
 def _verify(token: str) -> RemoteRun | WorkerGrant:

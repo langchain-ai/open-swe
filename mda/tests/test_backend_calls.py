@@ -1602,6 +1602,32 @@ async def test_a_worker_launch_mda_failed_to_start_is_made_again_while_it_may_pa
         assert "worker_launched" not in [hook for hook, _ in calls]
 
 
+async def test_a_run_calls_with_the_token_the_backend_signed_again_for_it(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("OPEN_SWE_BACKEND_URL", "https://backend.invalid")
+    request = httpx2.Request("POST", "https://backend.invalid")
+    bearers: list[str] = []
+
+    async def post(
+        url: str, *, headers: dict[str, str], json: dict[str, object], **kwargs: object
+    ) -> httpx2.Response:
+        bearers.append(headers["Authorization"])
+        assert headers["X-Open-Swe-Operation-Grants"] == "1"
+        refreshed = {} if len(bearers) > 1 else {"X-Open-Swe-Run-Token": "capable-token"}
+        return httpx2.Response(200, request=request, json={}, headers=refreshed)
+
+    client = MagicMock(is_closed=False)
+    client.post = AsyncMock(side_effect=post)
+    monkeypatch.setattr("rt.backend.httpx2.AsyncClient", lambda **kwargs: client)
+    backend = _run_backend("started-token")
+
+    await backend.post("/agent-api/before_model", {}, timeout=1.0, delivery="once")
+    await backend.post("/agent-api/before_model", {}, timeout=1.0, delivery="once")
+
+    assert bearers == ["Bearer started-token", "Bearer capable-token"]
+
+
 async def test_a_launched_worker_adopts_its_own_run_token_before_anything_runs(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

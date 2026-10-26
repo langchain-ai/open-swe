@@ -22,7 +22,7 @@ import (``runtime_api``):
   batches (``reports``) and are recorded once per key, the work of the run's tools (``operation``,
   ``check_shell``, the ``files`` calls), and the box MDA keeps
 - a run still served from its plan (``RunParts.legacy``: a requested offload, an
-  incident; or a token from before operations were granted) has its phases (``before_model``, ``after_model``, ``after_agent``) and
+  incident; or a runtime without operation-grant support) has its phases (``before_model``, ``after_model``, ``after_agent``) and
   tool calls answered by ``RunSession``, as is ``record_evidence``
 
 None of the run's tool calls is a tool call here: no tools node, no tool-call
@@ -808,8 +808,10 @@ class TokenRun:
 
     @property
     def legacy(self) -> bool:
-        # A token that grants no operations reaches only the tools its run's plan offers.
-        return self.run.grant_id is None or self.parts.legacy(RunConfig.from_config(self.config))
+        # A runtime without grant support reaches only the tools its run's plan offers.
+        return not self.run.operation_grants or self.parts.legacy(
+            RunConfig.from_config(self.config)
+        )
 
     async def _ready(self, _runtime: Runtime) -> None:
         await self.parts.credentials(self.config)
@@ -947,10 +949,13 @@ class TokenRun:
 
     async def operation(self, request: RunOperation) -> OperationResult:
         """Do the work of one of the run's tools: its arguments in, its result out."""
-        if not self.run.granted(request.name, request.grant):
+        if self.run.operation_grants and not self.run.granted(request.name, request.grant):
             return OperationResult(
                 content=f"{request.name} is not one of this run's operations", status="error"
             )
+        if self.legacy:
+            session = await self.graph.session(self.run, self.run_id)
+            return await session.operation(request)
         cfg = RunConfig.from_config(self.config)
         client = ClientToolsMiddleware(cfg.client_tools) if cfg.client_tools else None
         offered = (
@@ -1166,7 +1171,7 @@ class RemoteGraph:
             return await RUN_CALLS.dispatch(endpoint, TokenRun(self, run, run_id), raw)
         if TOOL_CALLS.serves(endpoint):
             call = TokenRun(self, run, run_id)
-            if not call.legacy:
+            if endpoint == OPERATION.name or not call.legacy:
                 return await TOOL_CALLS.dispatch(endpoint, call, raw)
         if not API.serves(endpoint):
             raise UnknownEndpointError(endpoint)
@@ -1348,7 +1353,7 @@ RUN_CALLS.serve(SETTLE_REVIEW_CHECK, TokenRun.settle_review_check)
 RUN_CALLS.serve(FINISH_SCOUT_PLAN, TokenRun.finish_scout_plan)
 RUN_CALLS.serve(REPORTS, TokenRun.reports)
 # The work of a run's tools, answered from its token unless the run is still served
-# from its plan (``RunParts.legacy``, or a token without grants).
+# from its plan (``RunParts.legacy``, or a runtime without operation-grant support).
 TOOL_CALLS: Final = Handlers[TokenRun]()
 TOOL_CALLS.serve(OPERATION, TokenRun.operation)
 TOOL_CALLS.serve(CHECK_SHELL, TokenRun.check_shell)

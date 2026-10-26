@@ -312,6 +312,117 @@ async def test_a_runs_tool_and_shell_calls_never_plan_it_and_read_its_settings(
     assert "drafts" not in str(unplanned["content"])
 
 
+@pytest.mark.parametrize("fallback", [False, True])
+@pytest.mark.parametrize("capable", [False, True])
+async def test_split_deploy_operations_keep_the_runs_authorization(
+    monkeypatch: pytest.MonkeyPatch, fallback: bool, capable: bool
+) -> None:
+    from unittest.mock import AsyncMock
+
+    import httpx
+    from langchain_core.runnables import RunnableConfig
+    from langchain_core.tools import tool
+    from runtime_api.catalog import Catalog
+    from starlette.applications import Starlette
+    from starlette.routing import Route
+
+    from openswe.agent_api import agent, hosted
+    from openswe.agent_api.client import start_remote_run
+    from openswe.agent_api.graph import RemoteGraph
+    from openswe.sandboxes.tool_runtime import ModelChoice, SurfaceModels, ToolSurface
+
+    monkeypatch.setenv("SANDBOX_TYPE", "local")
+
+    @tool
+    async def offered() -> str:
+        """Answer the request."""
+        return "answered"
+
+    @tool
+    async def unoffered() -> str:
+        """An operation belonging to a different run."""
+        return "unauthorized"
+
+    fail_dispatch = fallback
+
+    async def plan(config: RunnableConfig, surface: ToolSurface) -> None:
+        nonlocal fail_dispatch
+        if fail_dispatch:
+            fail_dispatch = False
+            raise RuntimeError("Catalog unavailable at dispatch")
+        surface.base_tools = [offered]
+        choice = ModelChoice("openai:gpt-6.1-sol", {})
+        surface.models = SurfaceModels(main=choice, subagent=choice, use_gateway=False)
+
+    monkeypatch.setattr(
+        agent,
+        "agent_tools_by_name",
+        lambda: {
+            "offered": offered,
+            "unoffered": unoffered,
+        },
+    )
+    monkeypatch.setattr(agent, "resolve_github_token", AsyncMock())
+    graph = RemoteGraph("agent", plan, agent.AgentParts())
+    monkeypatch.setattr(hosted, "hosted_graphs", lambda: {"agent": graph})
+    monkeypatch.setattr(server, "_graphs", lambda: {"agent": graph.api})
+    started = await start_remote_run({}, metadata={}, thread_id=RUN.thread_id, assistant_id="agent")
+    run = verify_runtime_token(started.token)
+    assert run.grant_id is not None and not run.operation_grants
+    catalog = started.catalog
+    app = Starlette(routes=[Route("/agent-api/{endpoint}", server.API, methods=["POST"])])
+    headers = {"Authorization": f"Bearer {started.token}"}
+    if capable:
+        headers["X-Open-Swe-Operation-Grants"] = "1"
+    async with httpx.AsyncClient(
+        transport=httpx.ASGITransport(app), base_url="http://backend"
+    ) as client:
+        if capable:
+            reply = await client.post(
+                "/agent-api/check_shell",
+                headers={"Authorization": f"Bearer {started.token}"},
+                json={"tool": "execute", "command": "ls"},
+            )
+            assert reply.status_code == 200
+        if fallback:
+            reply = await client.post("/agent-api/catalog", headers=headers, json={})
+            assert reply.status_code == 200
+            catalog = Catalog.model_validate(reply.json())
+            assert catalog.run_token is not None
+            headers["Authorization"] = f"Bearer {catalog.run_token}"
+            assert verify_runtime_token(catalog.run_token).operation_grants == capable
+        assert catalog is not None
+        spec = next(op for op in catalog.operations if op.name == "offered")
+        body = {"name": "offered", "request_id": "call-1"}
+        reply = await client.post(
+            "/agent-api/operation",
+            headers=headers,
+            json={**body, **({"grant": spec.grant} if capable else {})},
+        )
+        assert reply.status_code == 200
+        assert reply.json()["content"] == "answered"
+        if capable:
+            if token := reply.headers.get("x-open-swe-run-token"):
+                headers["Authorization"] = f"Bearer {token}"
+            headers.pop("X-Open-Swe-Operation-Grants")
+            reply = await client.post("/agent-api/catalog", headers=headers, json={})
+            assert reply.status_code == 200
+            settled = Catalog.model_validate(reply.json())
+            assert settled.run_token is not None
+            assert verify_runtime_token(settled.run_token).operation_grants
+            headers["Authorization"] = f"Bearer {settled.run_token}"
+            for grant in (None, "invalid", run.granting().grant("offered")):
+                refused = await client.post(
+                    "/agent-api/operation", headers=headers, json={**body, "grant": grant}
+                )
+                assert refused.json()["status"] == "error"
+        refused = await client.post(
+            "/agent-api/operation", headers=headers, json={**body, "name": "unoffered"}
+        )
+        assert refused.json()["status"] == "error"
+        assert "unauthorized" not in refused.json()["content"]
+
+
 async def test_mda_calls_hide_the_tools_the_graph_middleware_hides_from_each_call() -> None:
     from langchain.agents.middleware.types import AgentMiddleware
     from langchain_core.tools import tool

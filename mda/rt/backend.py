@@ -291,6 +291,11 @@ class Run:
         self.invocation_id = adopted.invocation_id
         self.adopted = adopted.catalog
 
+    def refresh_token(self, token: str) -> None:
+        """Call with ``token`` from now on: the backend signed it again for this run."""
+        if self._token is not None:
+            self._token = token
+
     def grant(self, name: str) -> str | None:
         """The grant to call operation ``name`` with: an adopted worker's own, not its coordinator's."""
         own = next((op for op in self.catalog.operations if op.name == name), None)
@@ -414,6 +419,7 @@ class OpenSweBackend:
         headers = {
             **(TurnTrace.current_headers() if trace is None else trace),
             "Authorization": f"Bearer {bearer}",
+            "X-Open-Swe-Operation-Grants": "1",
         }
         waits = iter(_RETRY_SECONDS)
         while True:
@@ -424,6 +430,8 @@ class OpenSweBackend:
                     json=dict(body),
                     timeout=seconds,
                 )
+                if token := response.headers.get("x-open-swe-run-token"):
+                    self.run.refresh_token(token)
                 response.raise_for_status()
                 break
             except httpx2.TimeoutException as exc:

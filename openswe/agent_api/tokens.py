@@ -74,13 +74,17 @@ class RemoteRun(BaseModel):
     # What the run's operation grants are signed under; None on a run started before
     # operations were granted, whose tools its plan bounds instead.
     grant_id: str | None = None
+    # Negotiated by the runtime; a grant id alone also reaches older runtimes.
+    operation_grants: bool = False
     # When the run's token expires, in epoch seconds; a token signed again for the run
     # keeps it, so holding one never extends it.
     expires_at: int | None = None
 
-    def granting(self) -> Self:
+    def granting(self, *, capable: bool = True) -> Self:
         """This run, with a grant id of its own for the operations its catalog grants."""
-        return self.model_copy(update={"grant_id": secrets.token_urlsafe(16)})
+        return self.model_copy(
+            update={"grant_id": secrets.token_urlsafe(16), "operation_grants": capable}
+        )
 
     def grant(self, operation: str) -> str | None:
         """The grant of ``operation`` to this run, which its calls of it must carry."""
@@ -128,6 +132,7 @@ def _sign(audience: str, run: RemoteRun, extra: dict[str, JsonValue], now: int |
         "md": run.metadata,
         **({"set": settings} if (settings := run.settings.model_dump(exclude_none=True)) else {}),
         **({"gid": run.grant_id} if run.grant_id else {}),
+        **({"ogr": True} if run.operation_grants else {}),
         **extra,
     }
     return jwt.encode(claims, keys[0], algorithm=_ALGORITHM)
@@ -164,6 +169,7 @@ def _run(claims: Mapping[str, object]) -> RemoteRun:
             "metadata": claims.get("md", {}),
             "settings": claims.get("set", {}),
             "grant_id": claims.get("gid"),
+            "operation_grants": claims.get("ogr", False),
             "expires_at": claims.get("exp"),
         }
     )
