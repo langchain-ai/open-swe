@@ -12,11 +12,10 @@ import logging
 from collections.abc import Awaitable, Callable, Mapping
 from typing import Any
 
-from langchain.agents.middleware import AgentState
 from langchain.agents.middleware.types import ModelRequest, ModelResponse
 from langgraph.runtime import Runtime
 from managed_deepagents import ManagedToolRuntime
-from managed_deepagents.browser import BrowserMiddleware
+from managed_deepagents.browser import BrowserHandoffWake, BrowserMiddleware, BrowserState
 from runtime_api.endpoint import call
 from runtime_api.loop import BROWSER, WAKE, BrowserReport, Wake
 
@@ -41,7 +40,7 @@ class ReportedBrowserMiddleware(BrowserMiddleware):
         self._reported: set[tuple[str, bool]] = set()
         self._reporting: dict[tuple[str, bool], asyncio.Task[None]] = {}
 
-    async def abefore_agent(self, state: AgentState, runtime: Runtime) -> dict[str, Any] | None:
+    async def abefore_agent(self, state: BrowserState, runtime: Runtime) -> dict[str, Any] | None:
         if not self._enabled:
             return None
         with contextlib.suppress(RuntimeError):  # no thread, so no browser
@@ -53,7 +52,7 @@ class ReportedBrowserMiddleware(BrowserMiddleware):
         # MDA's own: the run a handoff's notification starts ends the handoff.
         return await super().abefore_agent(state, runtime)
 
-    async def aafter_agent(self, state: AgentState, runtime: Runtime) -> None:
+    async def aafter_agent(self, state: BrowserState, runtime: Runtime) -> None:
         if self._enabled:
             await super().aafter_agent(state, runtime)
 
@@ -74,12 +73,14 @@ class ReportedBrowserMiddleware(BrowserMiddleware):
         await super()._share(session, name, key, runtime)  # ty: ignore[invalid-argument-type]
         self._report_later(name, runtime.state, opened=True)
 
-    async def _wake(self, runtime: ManagedToolRuntime, message: dict[str, Any]) -> None:
+    async def _wake(self, runtime: ManagedToolRuntime, message: BrowserHandoffWake) -> None:
         # Open SWE runs only what its backend signs, so the backend starts the run that
         # notifies the thread, as it delivers a worker's result. ``_wake`` is MDA's
         # private method, like ``_share``: it may change with MDA.
         # The watcher calls this once the run has ended, so there is no run id.
-        wake = Wake(text=message["content"], notification=message["mda_notification"])
+        wake = Wake.model_validate(
+            {"text": message["content"], "notification": message["mda_notification"]}
+        )
         await call(self._backend, WAKE, wake)
 
     def _report_later(self, name: str, state: Mapping[str, object], *, opened: bool) -> None:
