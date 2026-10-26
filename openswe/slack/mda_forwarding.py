@@ -158,28 +158,33 @@ async def remember(
     """Keep the request the backend gated, until the channel asks what the message starts."""
     if request.thread_id is None:
         return
-    thread = await index.get(request.thread_id)
-    pending = _pending(thread.metadata if thread else {})
-    pending[message_ts] = {
+    entry: dict[str, JsonValue] = {
         "request": request.model_dump(mode="json"),
         "repo": None
         if repo is None or repo.repo is None
         else {**repo.repo.model_dump(mode="json"), "explicit": repo.explicit},
         "at": time.time(),
     }
-    await index.update(request.thread_id, {PENDING_KEY: pending})
+    # One statement, so a message remembered while another is recalled keeps both.
+    await index.put_entry(
+        request.thread_id,
+        PENDING_KEY,
+        message_ts,
+        entry,
+        expired_before=time.time() - _PENDING_TTL_SECONDS,
+    )
 
 
 async def recall(
     thread_id: str, message_ts: str
 ) -> tuple[SlackRequest, SlackRepoResolution | None] | None:
     """The request remembered for ``message_ts`` in ``thread_id``, taken out of the thread."""
-    thread = await index.get(thread_id)
-    pending = _pending(thread.metadata if thread else {})
-    entry = pending.pop(message_ts, None)
+    entry = await index.take_entry(thread_id, PENDING_KEY, message_ts)
     if not isinstance(entry, dict):
         return None
-    await index.update(thread_id, {PENDING_KEY: pending})
+    at = entry.get("at")
+    if not isinstance(at, int | float) or at < time.time() - _PENDING_TTL_SECONDS:
+        return None
     request = SlackRequest.model_validate(entry.get("request"))
     raw_repo = entry.get("repo")
     repo = None
@@ -187,18 +192,6 @@ async def recall(
         explicit = bool(raw_repo.pop("explicit", False))
         repo = SlackRepoResolution(repo=Repo.model_validate(raw_repo), explicit=explicit)
     return request, repo
-
-
-def _pending(metadata: Mapping[str, JsonValue]) -> dict[str, JsonValue]:
-    """The thread's remembered requests that are still recent enough to be asked for."""
-    raw = metadata.get(PENDING_KEY)
-    cutoff = time.time() - _PENDING_TTL_SECONDS
-    pending: dict[str, JsonValue] = {}
-    for ts, entry in raw.items() if isinstance(raw, dict) else ():
-        at = entry.get("at") if isinstance(entry, dict) else None
-        if isinstance(at, int | float) and at >= cutoff:
-            pending[ts] = entry
-    return pending
 
 
 def forwarded_headers(headers: Mapping[str, str]) -> dict[str, str]:
