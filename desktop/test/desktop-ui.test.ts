@@ -15,7 +15,8 @@ const page = () =>
     headers: { accept: "text/html" },
   });
 const asset = () => new Request("open-swe://app/assets/lazy.js");
-const serveFile = async (filename: string) => new Response(await readFile(filename));
+const serveFile = async (filename: string) =>
+  new Response(await readFile(filename));
 
 async function fixture(t: test.TestContext) {
   const root = await mkdtemp(path.join(tmpdir(), "desktop-ui-"));
