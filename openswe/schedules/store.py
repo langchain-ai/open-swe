@@ -1080,7 +1080,6 @@ async def _launch_agent_schedule_record(
         thread_title=None,
         config=run_config,
         client=client,
-        stream_resumable=True,
     )
     run_id = run.get("run_id") if isinstance(run, dict) else getattr(run, "run_id", None)
     # The run is durable now; bookkeeping failures must not release delivery claims.

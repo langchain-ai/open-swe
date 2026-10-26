@@ -1,17 +1,16 @@
 """The channel directory behind the workspace Slack picker."""
 
-import asyncio
 from contextlib import asynccontextmanager
 from types import SimpleNamespace
 from typing import Any
 from unittest.mock import AsyncMock
 
 import pytest
-from fastapi import HTTPException
 from slack_sdk.errors import SlackApiError
 
-from openswe.slack import channel_options, dashboard_routes
-from openswe.utils import ttl_cache
+from openswe.jobs import queue
+from openswe.slack import channel_options, channels, dashboard_routes
+from openswe.slack.channels import SlackChannel
 
 
 def _rate_limited(retry_after: str) -> SlackApiError:
@@ -34,6 +33,7 @@ class _FakeClient:
             "users_conversations": [],
             "conversations_list": [],
         }
+        self.info: dict[str, dict[str, Any]] = {}
 
     async def _page(self, method: str, kwargs: dict[str, Any]) -> dict[str, Any]:
         self.calls[method].append(kwargs)
@@ -48,24 +48,23 @@ class _FakeClient:
     async def conversations_list(self, **kwargs: Any) -> dict[str, Any]:
         return await self._page("conversations_list", kwargs)
 
+    async def conversations_info(self, *, channel: str) -> dict[str, Any]:
+        return {"channel": self.info[channel]}
+
 
 def _install(monkeypatch: pytest.MonkeyPatch, client: _FakeClient) -> list[float]:
     @asynccontextmanager
     async def fake_slack_client(**_kwargs: Any):
         yield client
 
-    monkeypatch.setattr(channel_options.SlackClient, "bot", fake_slack_client)
+    monkeypatch.setattr(channels.SlackClient, "bot", fake_slack_client)
+    monkeypatch.setattr(channels, "SLACK_BOT_TOKEN", "xoxb-test")
     slept: list[float] = []
-    real_sleep = asyncio.sleep
 
     async def fake_sleep(seconds: float) -> None:
-        # Record the wait but still yield once: the module patches the asyncio
-        # module itself, and tests rely on a zero sleep to let deferred
-        # callbacks run.
         slept.append(seconds)
-        await real_sleep(0)
 
-    monkeypatch.setattr(channel_options.asyncio, "sleep", fake_sleep)
+    monkeypatch.setattr(channels.asyncio, "sleep", fake_sleep)
     return slept
 
 
@@ -77,9 +76,11 @@ _MEMBER_PAGE = {
 }
 
 
-async def test_merges_the_bots_channels_with_the_public_directory_and_caches(
+@pytest.mark.usefixtures("registry_db")
+async def test_a_walk_lists_what_slack_shows_and_unlists_what_it_no_longer_does(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    await SlackChannel.save_all({"id": "C0GONE", "name": "deleted-since", "is_member": True})
     client = _FakeClient(
         [_MEMBER_PAGE],
         [
@@ -92,88 +93,87 @@ async def test_merges_the_bots_channels_with_the_public_directory_and_caches(
                 ],
                 "response_metadata": {"next_cursor": "page-2"},
             },
+            _rate_limited("30"),
             {
                 "channels": [
-                    {"id": "C3", "name": "community", "is_member": False, "num_members": True},
+                    {"id": "C3", "name": "Community", "is_member": False, "num_members": True},
                 ],
                 "response_metadata": {"next_cursor": ""},
             },
         ],
     )
-    _install(monkeypatch, client)
+    slept = _install(monkeypatch, client)
+
+    await channel_options.sync_directory()
 
     directory = await channel_options.list_slack_channels()
-
-    assert directory.partial is False
     assert [option.id for option in directory.channels] == ["C3", "C2", "G1"]
+    assert slept == [30.0]
+    assert client.calls["conversations_list"][2]["cursor"] == "page-2"
     # users.conversations does not say is_member; membership is what it lists.
     assert directory.channels[2].is_member is True and directory.channels[2].is_private is True
     assert directory.channels[1].num_members == 2310
-    # A boolean where Slack promised a count is not a count.
+    # Slack's own spelling is shown; a boolean where Slack promised a count is not a count.
+    assert directory.channels[0].name == "Community"
     assert directory.channels[0].num_members is None and directory.channels[0].is_member is False
-    assert client.calls["conversations_list"][0]["limit"] == 1000
-    assert client.calls["conversations_list"][0]["exclude_archived"] is True
-    assert client.calls["conversations_list"][1]["cursor"] == "page-2"
+    # The gone channel keeps its row for the records that reference it.
+    assert (await SlackChannel._row("C0GONE")) is not None
 
-    # A second browse within the TTL is served from cache.
-    assert await channel_options.list_slack_channels() == directory
-    assert len(client.calls["conversations_list"]) == 2
-    assert len(client.calls["users_conversations"]) == 1
 
-    client.pages["users_conversations"].append(_MEMBER_PAGE)
-    client.pages["conversations_list"].append(
-        {"channels": [{"id": "C4", "name": "new-channel", "is_member": False}]}
+@pytest.mark.usefixtures("registry_db")
+async def test_a_walk_cut_short_unlists_nothing(monkeypatch: pytest.MonkeyPatch) -> None:
+    await SlackChannel.save_all({"id": "C1", "name": "kept"})
+    _install(
+        monkeypatch,
+        _FakeClient(
+            [],
+            [
+                SlackApiError(
+                    "boom",
+                    SimpleNamespace(
+                        status_code=200, data={"ok": False, "error": "internal_error"}, headers={}
+                    ),
+                )
+            ],
+        ),
     )
-    refreshed = await channel_options.list_slack_channels(refresh=True)
-    assert [option.id for option in refreshed.channels] == ["C4", "G1"]
-    assert await channel_options.list_slack_channels() == refreshed
-    assert len(client.calls["conversations_list"]) == 3
+
+    with pytest.raises(SlackApiError):
+        await channel_options.sync_directory()
+
+    assert [option.id for option in (await channel_options.list_slack_channels()).channels] == [
+        "C1"
+    ]
 
 
-async def test_a_partial_directory_is_retried_on_schedule_however_often_it_is_read(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    clock = {"now": 1000.0}
-    monkeypatch.setattr(ttl_cache, "_now", lambda: clock["now"])
-    client = _FakeClient(
-        [_MEMBER_PAGE, _MEMBER_PAGE],
-        [
-            _rate_limited("30"),
-            {
-                "channels": [{"id": "C2", "name": "oss-help", "is_member": False}],
-                "response_metadata": {"next_cursor": ""},
-            },
-        ],
-    )
+@pytest.mark.usefixtures("registry_db")
+async def test_channel_events_keep_the_directory_current(monkeypatch: pytest.MonkeyPatch) -> None:
+    client = _FakeClient([], [])
     _install(monkeypatch, client)
+    await SlackChannel.save_all({"id": "C1", "name": "old-name"}, {"id": "C2", "name": "doomed"})
 
-    assert (await channel_options.list_slack_channels()).partial is True
-    await asyncio.sleep(0)  # the shorter expiry lands on the next loop iteration
+    client.info["C1"] = {"id": "C1", "name": "new-name", "is_member": True}
+    await SlackChannel.observe("channel_rename", "C1")
+    await SlackChannel.observe("channel_archive", "C2")
 
-    clock["now"] += 30
-    assert (await channel_options.list_slack_channels()).partial is True
-    assert len(client.calls["conversations_list"]) == 1
-
-    # Past the short expiry the stale directory is served once more while a
-    # refresh runs in the background; the next read has the full list.
-    clock["now"] += 40
-    assert (await channel_options.list_slack_channels()).partial is True
-    await asyncio.gather(*ttl_cache._REFRESH_TASKS.values())
-    assert len(client.calls["conversations_list"]) == 2
     directory = await channel_options.list_slack_channels()
+    assert [(option.id, option.name) for option in directory.channels] == [("C1", "new-name")]
+    assert (await SlackChannel.resolve("#new-name")) is not None
 
-    assert [option.id for option in directory.channels] == ["C2", "G1"]
-    assert directory.partial is False
 
+@pytest.mark.usefixtures("registry_db")
+async def test_refreshing_brings_the_next_walk_forward(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("SLACK_BOT_TOKEN", "xoxb-test")
+    await channel_options.ensure_directory_sync()
+    assert (await channel_options.list_slack_channels()).refreshing is True
 
-async def test_a_repeating_cursor_is_refused(monkeypatch: pytest.MonkeyPatch) -> None:
-    page = {"channels": [], "response_metadata": {"next_cursor": "loop"}}
-    _install(monkeypatch, _FakeClient([page, page, page], []))
+    [walk] = await queue.claim_due(1)
+    await walk.finish()
+    assert (await channel_options.list_slack_channels()).refreshing is False
 
-    with pytest.raises(HTTPException) as excinfo:
-        await channel_options.list_slack_channels()
-
-    assert excinfo.value.status_code == 502
+    await channel_options.refresh_directory(by=None)
+    assert (await channel_options.list_slack_channels()).refreshing is True
+    assert [job.id for job in await queue.claim_due(1)] == [walk.id]
 
 
 @pytest.mark.parametrize("admin", [True, False])

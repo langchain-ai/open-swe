@@ -59,7 +59,11 @@ export function useAgentStreamSource(threadId: string): StreamThreadSource {
             ? {
                 messages: [
                   {
-                    ...promptMessage(message.text, message.images),
+                    ...promptMessage(
+                      message.text,
+                      message.images,
+                      message.replies
+                    ),
                     id: message.id,
                   },
                 ],

@@ -2,11 +2,12 @@
 
 Dispatch signs a run token into each run's context. The backend reads the thread,
 repository and run configuration from that token, so nothing the model writes can
-point a call elsewhere. The loop's calls are ``POST /remote-runtime/hooks/{hook}``;
-the tools' are the typed API (``runtime_api``) under ``/remote-runtime/api/``.
+point a call elsewhere. Every call, the loop's and the tools', is one endpoint of
+the typed API both sides import (``runtime_api``), under ``/agent-api/``.
 
 A task worker launched as an async subagent starts with a worker grant instead:
-enough to read its coordinator's catalog, then ``adopt`` a run token of its own.
+enough to read its coordinator's catalog, then ``adopt`` a run token and catalog of
+its own.
 """
 
 import asyncio
@@ -15,14 +16,34 @@ import os
 from collections.abc import Coroutine, Iterator, Mapping, Sequence
 from contextlib import contextmanager
 from contextvars import ContextVar
-from typing import Final, Literal
+from typing import Final
 from weakref import WeakKeyDictionary
 
 import httpx2
-from langchain_core.messages import BaseMessage, ToolMessage, messages_to_dict
+from langchain_core.messages import (
+    AIMessage,
+    BaseMessage,
+    HumanMessage,
+    ToolMessage,
+    messages_to_dict,
+)
 from langsmith.run_trees import RunTree
 from pydantic import BaseModel, JsonValue, TypeAdapter, ValidationError
-from runtime_api.catalog import Catalog, ModelSpec
+from runtime_api.catalog import CATALOG, Catalog, OperationSpec
+from runtime_api.endpoint import Delivery, Endpoint, call
+from runtime_api.loop import (
+    INBOX_RECEIVED,
+    MODEL_RESULT,
+    TOOL_RESULT,
+    TOOL_STARTED,
+    InboxReceipt,
+    ModelResult,
+    RunCall,
+    ToolCallReport,
+    ToolResultReport,
+)
+from runtime_api.operations import RunRequest
+from runtime_api.workers import ADOPT, Adopt
 
 from rt.tracing import TurnTrace
 
@@ -31,49 +52,17 @@ logger = logging.getLogger(__name__)
 BACKEND_URL_ENV: Final = "OPEN_SWE_BACKEND_URL"
 # Graph state the backend's hooks read that MDA's own middleware keeps.
 _FORWARDED_STATE_KEYS: Final = ("run_model_call_count", "thread_model_call_count")
-# Preparation waits on the review scout's walkthrough for up to ten minutes; a tool
-# call can run a long command.
-LONG_CALL_SECONDS: Final = 1800.0
-_HOOK_SECONDS: Final = 300.0
 # What a call takes past its own ``timeout`` before it answers that it ran out: the
 # sandbox's grace for an overrunning command, and killing it.
 TOOL_CALL_SLACK_SECONDS: Final = 300.0
-
-Hook = Literal[
-    "catalog",
-    "prepare",
-    "before_model",
-    "model_result",
-    "after_model",
-    "after_agent",
-    "tool_started",
-    "tool_result",
-    # The thread's box was replaced: the backend connects to the fresh one.
-    "sandbox",
-    # A tool this runtime ran in the box found it gone: the backend tells the person.
-    "sandbox_unreachable",
-    # The LangSmith browser MDA gave the thread's agent, for the dashboard to show.
-    "browser",
-    "launch_worker",
-    "worker_launched",
-    "adopt",
-]
-# Waits before resending a call, for as long as a backend rollout takes. A refused
-# connection never reached the backend, so every hook is resent after one. A gateway
-# 502 or 503 usually means no backend was ready, but can also follow a backend that
-# took the call and died, so only calls that are safe to repeat are resent after
-# one: ``catalog`` only reads, ``prepare`` a restarted run makes again anyway, and
-# ``launch_worker`` only authorizes a launch or returns the worker it already made.
-# ``before_model`` only builds the next model call, so it is also resent after a 503,
-# the answer a rollout gives it. A tool call is never resent: it may have run. Nor is
-# anything after a 504: the backend may still be running the call.
+# Waits before sending again a call that got no usable answer, for as long as a
+# backend rollout takes; which calls are sent again is each endpoint's ``delivery``.
 _RETRY_SECONDS: Final = (1.0, 2.0, 4.0, 8.0, 15.0, 30.0, 30.0, 30.0, 30.0, 30.0)
-_REPEATABLE_HOOKS: Final[frozenset[Hook]] = frozenset({"catalog", "prepare", "launch_worker"})
-_RESENT_AFTER_503: Final[frozenset[Hook]] = frozenset({*_REPEATABLE_HOOKS, "before_model"})
 _GATEWAY_STATUSES: Final = frozenset({502, 503, 504})
 _json = TypeAdapter(JsonValue)
 _json_object = TypeAdapter(dict[str, JsonValue])
 _json_list = TypeAdapter(list[JsonValue])
+_json_dicts = TypeAdapter(list[dict[str, JsonValue]])
 
 # The ``task`` calls whose subagent is running right now; empty for the agent itself.
 _namespace: ContextVar[tuple[str, ...]] = ContextVar("open_swe_namespace", default=())
@@ -116,8 +105,8 @@ class BackendTimeoutError(BackendCallError):
     """The backend did not answer in time; what the call started may still be running."""
 
 
-class HookFailure(BaseModel):
-    """The exception a backend hook raised, as the backend reports it."""
+class CallFailure(BaseModel):
+    """The exception the backend raised answering a call, as it reports it."""
 
     error: str
     message: str = ""
@@ -130,37 +119,55 @@ class BackendUnavailableError(BackendCallError):
     """A transport or gateway failure left the call without a usable response."""
 
 
-class AdoptReply(BaseModel):
-    run_token: str
-
-
-class PhaseReply(BaseModel):
-    update: dict[str, JsonValue] = {}
-    messages: list[dict[str, JsonValue]] = []
-    jump_to: str | None = None
-    events: list[JsonValue] = []
-    # Set by before_model: what to send the model this time.
-    system_prompt: str | None = None
-    hidden_tools: list[str] = []
-    model: ModelSpec | None = None
-    vision: ModelSpec | None = None
-    fallback: ModelSpec | None = None
-    use_gateway: bool = False
-    trace_metadata: dict[str, JsonValue] = {}
-
-
-def run_body(
-    run_id: str | None, state: Mapping[str, object], **extra: JsonValue
-) -> dict[str, JsonValue]:
-    """The run's identity, the graph state the backend's hooks read, and the subagent calling."""
-    messages = state.get("messages")
+def held_state(state: Mapping[str, object]) -> dict[str, JsonValue]:
+    """The graph state the backend's hooks keep, which goes back with every call."""
     held = state.get("open_swe_state")
     forwarded = {key: state[key] for key in _FORWARDED_STATE_KEYS if key in state}
-    return _json_object.validate_python(
+    return _json_object.validate_python({**(held if isinstance(held, dict) else {}), **forwarded})
+
+
+_GIT_TRACE_PREFIX: Final = "git_trace_"
+
+
+def git_trace(state: Mapping[str, object]) -> dict[str, JsonValue]:
+    """The turn's git trace the backend keeps in the run's state: its baseline and evidence."""
+    return {
+        key: value for key, value in held_state(state).items() if key.startswith(_GIT_TRACE_PREFIX)
+    }
+
+
+def namespace() -> list[str]:
+    """The ``task`` calls the running subagent is nested in; empty for the agent itself."""
+    return list(_namespace.get())
+
+
+def human_messages(messages: Sequence[object]) -> list[dict[str, JsonValue]]:
+    return _json_dicts.validate_python(
+        messages_to_dict([message for message in messages if isinstance(message, HumanMessage)])
+    )
+
+
+def issuing_message_id(state: Mapping[str, object], tool_call_id: str) -> str | None:
+    """The reply in the run's conversation that made the tool call ``tool_call_id``."""
+    for message in reversed(_messages(state.get("messages"))):
+        if isinstance(message, AIMessage) and any(
+            call.get("id") == tool_call_id for call in message.tool_calls
+        ):
+            return message.id
+    return None
+
+
+def run_call[Call: RunCall](
+    request: type[Call], run_id: str | None, state: Mapping[str, object], **extra: JsonValue
+) -> Call:
+    """A call of the loop: the run's identity, its conversation and held state, and the subagent calling."""
+    return request.model_validate(
         {
             "run_id": run_id,
-            "messages": messages_to_dict(_messages(messages)),
-            "state": {**(held if isinstance(held, dict) else {}), **forwarded},
+            "messages": _json_dicts.validate_python(
+                messages_to_dict(_messages(state.get("messages")))
+            ),
+            "state": held_state(state),
             "namespace": list(_namespace.get()),
             **extra,
         }
@@ -174,7 +181,7 @@ def _messages(value: object) -> list[BaseMessage]:
 
 
 class _Connections:
-    """One client per event loop, so hook calls reuse their connections to the backend.
+    """One client per event loop, so calls reuse their connections to the backend.
 
     The Agent Server runs graphs on more than one loop, and a client belongs to the
     loop it was opened on.
@@ -197,12 +204,12 @@ class _Connections:
 _CONNECTIONS: Final = _Connections()
 
 
-def _hook_failure(response: httpx2.Response) -> HookFailure | None:
-    """The hook's own exception from a backend error response, if it reported one."""
+def _call_failure(response: httpx2.Response) -> CallFailure | None:
+    """The backend's own exception from an error response, if it reported one."""
     if response.status_code != 500:
         return None
     try:
-        return HookFailure.model_validate_json(response.content)
+        return CallFailure.model_validate_json(response.content)
     except ValidationError:
         return None
 
@@ -210,7 +217,13 @@ def _hook_failure(response: httpx2.Response) -> HookFailure | None:
 class OpenSweBackend:
     """The Open SWE backend, called with one run's token, or the grant a launched worker adopts it with."""
 
-    def __init__(self, run_token: str | None, *, worker_grant: str | None = None) -> None:
+    def __init__(
+        self,
+        run_token: str | None,
+        *,
+        worker_grant: str | None = None,
+        invocation_id: str | None = None,
+    ) -> None:
         base = os.environ.get(BACKEND_URL_ENV, "").strip().rstrip("/")
         if not base:
             raise BackendCallError(f"{BACKEND_URL_ENV} is not configured")
@@ -219,7 +232,10 @@ class OpenSweBackend:
         self._worker_grant = worker_grant if run_token is None else None
         # The worker's own catalog, once it adopted a run token: what it may offer the model.
         self.adopted: Catalog | None = None
-        self.reports = ToolReports(self)
+        # The run's invocation, which its usage counts its replies by; a worker learns
+        # its own when it adopts a run token.
+        self.invocation_id = invocation_id
+        self.reports = Reports(self)
 
     @property
     def has_run(self) -> bool:
@@ -232,73 +248,56 @@ class OpenSweBackend:
 
     async def adopt(self, thread_id: str, run_id: str | None, instructions: str) -> None:
         """Become this worker thread's run: every later call, tools included, acts as it."""
-        body: dict[str, JsonValue] = {
-            "thread_id": thread_id,
-            "run_id": run_id,
-            "instructions": instructions,
-        }
-        reply = AdoptReply.model_validate(await self.call("adopt", body))
-        self._run_token, self._worker_grant = reply.run_token, None
-        self.adopted = await self.catalog(run_id)
-
-    async def call(
-        self,
-        hook: Hook,
-        body: Mapping[str, JsonValue] | None = None,
-        *,
-        seconds: float | None = None,
-    ) -> dict[str, JsonValue]:
-        if seconds is None:
-            seconds = LONG_CALL_SECONDS if hook == "prepare" else _HOOK_SECONDS
-        reply = await self._post(
-            f"/remote-runtime/hooks/{hook}",
-            hook,
-            body,
-            seconds=seconds,
-            repeatable=hook in _REPEATABLE_HOOKS,
-            resent_after_503=hook in _RESENT_AFTER_503,
+        adopted = await call(
+            self, ADOPT, Adopt(thread_id=thread_id, run_id=run_id, instructions=instructions)
         )
-        return _json_object.validate_python(reply)
+        self._run_token, self._worker_grant = adopted.run_token, None
+        self.invocation_id = adopted.invocation_id
+        self.adopted = adopted.catalog or await self.catalog(run_id)
 
     async def post(
-        self, path: str, body: dict[str, JsonValue], *, timeout: float | None = None
+        self,
+        path: str,
+        body: dict[str, JsonValue],
+        *,
+        timeout: float,
+        delivery: Delivery,
+        headers: Mapping[str, str] | None = None,
     ) -> JsonValue:
         """One call of the typed API, as this run: ``runtime_api``'s transport.
 
-        It may have done its work before failing, so it is resent only when it never
-        reached the backend.
+        ``headers`` is the trace position to nest the call's spans under, by default
+        the running call's span.
         """
-        return await self._post(
-            path,
-            path.rsplit("/", 1)[-1],
-            body,
-            seconds=timeout if timeout is not None else LONG_CALL_SECONDS,
-            repeatable=False,
-            resent_after_503=False,
-        )
+        return await self._post(path, body, seconds=timeout, delivery=delivery, trace=headers)
 
     async def _post(
         self,
         path: str,
-        label: str,
-        body: Mapping[str, JsonValue] | None,
+        body: Mapping[str, JsonValue],
         *,
         seconds: float,
-        repeatable: bool,
-        resent_after_503: bool,
+        delivery: Delivery,
+        trace: Mapping[str, str] | None = None,
     ) -> JsonValue:
+        """POST as this run, its spans nested under ``trace``, by default the running call's span."""
+        label = path.rsplit("/", 1)[-1]
         bearer = self._run_token or self._worker_grant
         if bearer is None:
             raise BackendCallError(
                 "This run carries no Open SWE run token; start it through Open SWE"
             )
+        headers = {
+            **(TurnTrace.current_headers() if trace is None else trace),
+            "Authorization": f"Bearer {bearer}",
+        }
         waits = iter(_RETRY_SECONDS)
         while True:
             try:
                 response = await _CONNECTIONS.client().post(
                     f"{self._base}{path}",
-                    headers={"Authorization": f"Bearer {bearer}"},
-                    json=dict(body or {}),
+                    headers=headers,
+                    json=dict(body),
                     timeout=seconds,
                 )
                 response.raise_for_status()
@@ -310,19 +309,19 @@ class OpenSweBackend:
                     exc.response.status_code if isinstance(exc, httpx2.HTTPStatusError) else None
                 )
                 if isinstance(exc, httpx2.HTTPStatusError) and (
-                    failure := _hook_failure(exc.response)
+                    failure := _call_failure(exc.response)
                 ):
                     # What the backend itself raised, so the run fails with the cause, as in-process.
                     raise BackendCallError(f"{label} failed: {failure.describe()}") from exc
                 unreached = (
                     isinstance(exc, httpx2.ConnectError)
-                    or (status == 503 and resent_after_503)
-                    or (status == 502 and repeatable)
+                    or (status == 503 and delivery != "once")
+                    or (status == 502 and delivery == "idempotent")
                 )
                 if unreached and (wait := next(waits, None)) is not None:
                     logger.warning(
                         "Backend unavailable; retrying",
-                        extra={"hook": label, "status_code": status, "wait_seconds": wait},
+                        extra={"endpoint": label, "status_code": status, "wait_seconds": wait},
                     )
                     await asyncio.sleep(wait)
                     continue
@@ -335,63 +334,113 @@ class OpenSweBackend:
         return _json.validate_python(response.json())
 
     async def catalog(self, run_id: str | None) -> Catalog:
-        return Catalog.model_validate(await self.call("catalog", {"run_id": run_id}))
+        """The run's catalog, for a run started without it; every later call carries the token
+        the backend signed with it."""
+        catalog = await call(self, CATALOG, RunRequest(run_id=run_id))
+        if catalog.run_token is not None and self._run_token is not None:
+            self._run_token = catalog.run_token
+        return catalog
 
-    async def phase(self, hook: Hook, body: Mapping[str, JsonValue]) -> PhaseReply:
-        return PhaseReply.model_validate(await self.call(hook, body))
+    def grant(self, spec: OperationSpec) -> str | None:
+        """The grant to call ``spec``'s operation with: an adopted worker's own, not its coordinator's."""
+        if self.adopted is None:
+            return spec.grant
+        own = next((op for op in self.adopted.operations if op.name == spec.name), None)
+        return None if own is None else own.grant
 
-    async def model_result(
-        self, body: Mapping[str, JsonValue], response: Sequence[BaseMessage]
-    ) -> list[dict[str, JsonValue]]:
-        reply = await self.call(
-            "model_result",
-            {**body, "response": _json_list.validate_python(messages_to_dict(list(response)))},
-        )
-        observed = reply.get("response")
-        return [m for m in observed if isinstance(m, dict)] if isinstance(observed, list) else []
-
-    async def tool_started(self, body: Mapping[str, JsonValue]) -> None:
-        await self.call("tool_started", body)
+    async def tool_started(
+        self, report: ToolCallReport, *, trace: Mapping[str, str] | None = None
+    ) -> None:
+        await call(self, TOOL_STARTED, report, headers=trace)
 
     async def tool_result(
-        self, body: Mapping[str, JsonValue], result: ToolMessage
+        self,
+        report: ToolCallReport,
+        result: ToolMessage,
+        *,
+        trace: Mapping[str, str] | None = None,
     ) -> dict[str, JsonValue]:
-        [message] = _json_list.validate_python(messages_to_dict([result]))
-        reply = await self.call("tool_result", {**body, "result": message})
-        update = reply.get("update")
-        return _json_object.validate_python(update) if isinstance(update, dict) else {}
+        [message] = _json_dicts.validate_python(messages_to_dict([result]))
+        finished = ToolResultReport.model_validate({**report.model_dump(), "result": message})
+        return (await call(self, TOOL_RESULT, finished, headers=trace)).update
 
 
-class ToolReports:
-    """Tell the backend's transcript about the tool calls this runtime runs, off their path.
+class Reports:
+    """Tell the backend what this runtime did, off the path of what it goes on to do.
 
-    Reports go out in the order they were made, one after another, while the calls
-    carry on. A report the backend could not take is logged and dropped: the call
-    it describes has run either way.
+    Nothing the run does next waits on a report. The transcript and usage hear of each
+    reply and tool call, and the inbox of what a model call is about to answer, in the
+    order they were made, one after another. Work the backend does for the run whose
+    answer the run never reads (a notice, a proxy refresh) goes out at once. A report
+    the backend could not take is logged and dropped: what it describes has happened
+    either way, and an inbox that never heard is read again at the next model call.
     """
 
     def __init__(self, backend: OpenSweBackend) -> None:
         self._backend = backend
         self._last: asyncio.Task[None] | None = None
+        self._receipt: asyncio.Task[None] | None = None
+        # Held so a pending one is not collected before it is sent.
+        self._loose: set[asyncio.Task[None]] = set()
 
-    def started(self, body: Mapping[str, JsonValue]) -> None:
-        self._send(self._backend.tool_started(body))
+    def replied(self, result: ModelResult) -> None:
+        self._send(self._call(MODEL_RESULT, result, TurnTrace.current_headers()))
 
-    def finished(self, body: Mapping[str, JsonValue], result: ToolMessage) -> None:
+    def started(self, report: ToolCallReport) -> None:
+        self._send(self._backend.tool_started(report, trace=TurnTrace.current_headers()))
+
+    def finished(self, report: ToolCallReport, result: ToolMessage) -> None:
         # The call's run closes before the report is answered, and with it the way to
-        # the turn's trace, so the trace is found now.
-        self._send(self._finished(body, result, TurnTrace.live_root()))
+        # the turn's trace and the call's span, so both are found now.
+        self._send(
+            self._finished(report, result, TurnTrace.live_root(), TurnTrace.current_headers())
+        )
+
+    def received(self, receipt: InboxReceipt) -> None:
+        self._send(self._call(INBOX_RECEIVED, receipt, TurnTrace.current_headers()))
+        self._receipt = self._last
+
+    def notify[Request: BaseModel, Response: BaseModel](
+        self, endpoint: Endpoint[Request, Response], request: Request
+    ) -> None:
+        """Have the backend do ``request``'s work for the run, without waiting for it."""
+        sent = asyncio.ensure_future(
+            _logged(self._call(endpoint, request, TurnTrace.current_headers()))
+        )
+        self._loose.add(sent)
+        sent.add_done_callback(self._loose.discard)
 
     async def drain(self) -> None:
         """Wait for every report made so far, so the transcript has them before what follows."""
         if self._last is not None:
             await asyncio.shield(self._last)
 
+    async def settled(self) -> None:
+        """Wait for every report and every piece of work asked for so far."""
+        await self.drain()
+        if self._loose:
+            await asyncio.gather(*self._loose)
+
+    async def receipts(self) -> None:
+        """Wait until the backend has every inbox receipt made so far."""
+        if self._receipt is not None:
+            await asyncio.shield(self._receipt)
+
+    async def _call[Request: BaseModel, Response: BaseModel](
+        self, endpoint: Endpoint[Request, Response], request: Request, trace: Mapping[str, str]
+    ) -> None:
+        await call(self._backend, endpoint, request, headers=trace)
+
     async def _finished(
-        self, body: Mapping[str, JsonValue], result: ToolMessage, turn: RunTree | None
+        self,
+        report: ToolCallReport,
+        result: ToolMessage,
+        turn: RunTree | None,
+        trace: Mapping[str, str],
     ) -> None:
         # What the call changed in the thread's checkouts, for the turn's git metadata.
-        TurnTrace.record_evidence(await self._backend.tool_result(body, result), turn)
+        update = await self._backend.tool_result(report, result, trace=trace)
+        TurnTrace.record_evidence(update, turn)
 
     def _send(self, report: Coroutine[object, object, None]) -> None:
         self._last = asyncio.ensure_future(self._after(self._last, report))
@@ -402,7 +451,11 @@ class ToolReports:
     ) -> None:
         if previous is not None:
             await previous
-        try:
-            await report
-        except Exception:
-            logger.warning("The backend did not record a tool call", exc_info=True)
+        await _logged(report)
+
+
+async def _logged(report: Coroutine[object, object, None]) -> None:
+    try:
+        await report
+    except Exception:
+        logger.warning("The backend did not take a report", exc_info=True)

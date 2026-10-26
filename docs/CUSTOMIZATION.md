@@ -653,17 +653,16 @@ Drop an `AGENTS.md` file in the root of any repository to add repo-specific inst
 
 ## 6. Middleware
 
-Middleware hooks run around the agent loop. Open SWE includes:
+Middleware hooks run around the agent loop. Follow-ups and events that arrive mid-run are not middleware: the MDA run takes them from the thread's inbox (`openswe/threads/inbox.py`) before each model call. Open SWE includes:
 
 | Middleware | Type | Purpose |
 |---|---|---|
 | `ToolErrorMiddleware` | Tool error handler | Catches and formats tool errors |
-| `check_message_queue_before_model` | Before model | Injects follow-up messages that arrived mid-run |
 | `notify_step_limit_reached` | After agent | Posts a Slack reply when the agent hits the model-call limit |
 
 There is intentionally no after-agent middleware that opens a PR for the agent. The agent is responsible for committing, pushing, opening/updating the draft PR, and replying in the source channel. If you want a deterministic backstop for your fork, add an `@after_agent` hook here.
 
-Add custom middleware by appending to the middleware list in `plan_agent()`. The MDA run hands each phase of its loop to it (`openswe/remote_runtime/graph.py`), so `before_agent`, `before_model`, `after_model` and `after_agent` hooks run on the backend as they would in a graph. Tool calls are the MDA run's: a check around them goes in `mda/rt` (`rt/file_tools.py` for the file and shell tools), or behind an endpoint of the typed API in `packages/runtime-api` where it needs the backend, as the shell-command guards do. See the [LangChain middleware docs](https://python.langchain.com/docs/concepts/agents/#middleware) for the `@before_model` and `@after_agent` decorators.
+Add custom middleware by appending to the middleware list in `plan_agent()`. The MDA run hands each phase of its loop to it (`openswe/agent_api/graph.py`), so `before_agent`, `before_model`, `after_model` and `after_agent` hooks run on the backend as they would in a graph. Tool calls are the MDA run's: a check around them goes in `mda/rt` (`rt/file_tools.py` for the file and shell tools), or behind an endpoint of the typed API in `packages/runtime-api` where it needs the backend, as the shell-command guards do. See the [LangChain middleware docs](https://python.langchain.com/docs/concepts/agents/#middleware) for the `@before_model` and `@after_agent` decorators.
 
 **Example — adding a CI check after agent completion:**
 
@@ -684,7 +683,6 @@ Then add it to the middleware list:
 ```python
 middleware = [
     ToolErrorMiddleware(),
-    check_message_queue_before_model,
     notify_step_limit_reached,
     run_ci_check,  # new middleware
 ]

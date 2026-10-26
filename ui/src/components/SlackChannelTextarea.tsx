@@ -1,13 +1,13 @@
 import { Textarea } from "@langchain/macaw-components/Textarea"
-import { useMemo, useRef, useState, type ComponentProps } from "react"
+import { useRef, useState, type ComponentProps } from "react"
 
-import {
-  SlackChannelRow,
-  slackChannelMatches,
-} from "@/components/SlackChannelCombobox"
+import { SlackChannelRow } from "@/components/SlackChannelCombobox"
 import {
   detectSlackChannelTrigger,
+  rankSlackChannels,
+  rememberSlackChannels,
   slackChannelReference,
+  useRecentSlackChannels,
   useSlackChannelDirectory,
 } from "@/lib/slack-channels"
 import { cn } from "@/lib/utils"
@@ -41,18 +41,14 @@ export function SlackChannelTextarea({
   const trigger =
     cursor === null ? null : detectSlackChannelTrigger(value, cursor)
   const directory = useSlackChannelDirectory(trigger !== null)
-  const matches = useMemo(
-    () =>
-      trigger
-        ? (directory.data?.channels ?? [])
-            .filter((channel) => slackChannelMatches(channel, trigger.query))
-            .sort(
-              (left, right) => Number(right.is_member) - Number(left.is_member)
-            )
-            .slice(0, MAX_SUGGESTIONS)
-        : [],
-    [directory.data, trigger]
-  )
+  const recent = useRecentSlackChannels()
+  const matches = trigger
+    ? rankSlackChannels(
+        directory.data?.channels ?? [],
+        trigger.query,
+        recent
+      ).slice(0, MAX_SUGGESTIONS)
+    : []
   const open =
     trigger !== null && matches.length > 0 && dismissedAt !== trigger.rangeStart
   const active = matches[Math.min(activeIndex, matches.length - 1)]
@@ -65,6 +61,7 @@ export function SlackChannelTextarea({
 
   const insert = (id: string, name: string) => {
     if (!trigger) return
+    rememberSlackChannels([id])
     const replacement = `${slackChannelReference(id, name)} `
     const next = `${value.slice(0, trigger.rangeStart)}${replacement}${value.slice(trigger.rangeEnd)}`
     const caret = trigger.rangeStart + replacement.length
@@ -164,7 +161,11 @@ export function SlackChannelTextarea({
               }
               onClick={() => insert(channel.id, channel.name)}
             >
-              <SlackChannelRow channel={channel} id={channel.id} />
+              <SlackChannelRow
+                channel={channel}
+                id={channel.id}
+                recent={recent.includes(channel.id)}
+              />
             </button>
           ))}
         </div>

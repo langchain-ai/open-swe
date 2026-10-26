@@ -130,8 +130,10 @@ order and browser sign-in.
 ## Telemetry
 
 The CLI sends one `command_completed` event per command, so we can see
-which commands and flags people use and where they fail. It is on by default.
-Opt out by exporting either variable in your shell:
+which commands and flags people use and where they fail. When you are signed in
+to LangSmith, it also sends OTel log records for each run to LangSmith (see
+[Logs](#logs)). Both are on by default. Opt out by exporting either
+variable in your shell:
 
 ```bash
 export MDA_TELEMETRY_DISABLED=1
@@ -189,10 +191,12 @@ failed send change a command's output, exit code, or side effects.
 Attribution fields are always present and null when unknown. `user_id` is the
 verified LangSmith PAT owner, not proof of who operated the CLI; service keys do
 not identify a human. `org_id` and `workspace_id` describe the authenticated target.
-The CLI captures deployment names before execution (so deletion retains the name)
-and looks up auth/deployment IDs afterward. Expired credentials and unavailable or
-deleted deployments can leave IDs null. Lookups have one-second request timeouts,
-never prompt for authentication, and are skipped on telemetry opt-out.
+The CLI looks up auth IDs before running the command; `deploy`, `delete`, `logs`
+and `prepare` record the deployment name and ID once they resolve it. Expired
+credentials and unavailable or deleted deployments can leave IDs null. The auth
+lookup has a one-second request timeout, never prompts for authentication, and is
+skipped on telemetry opt-out or when the key would be sent over plain `http` to a
+host other than `localhost`.
 
 Runtime `run_completed` includes organization/workspace, API origin, and a canonical
 Agent Auth `principal_id` from the current caller when known. Its optional auth
@@ -204,6 +208,23 @@ fragment. It enables production filtering downstream; the SDK retains all events
 Internal origins can differ from CLI origins. `environment=local/deployed` describes
 execution location, not the LangSmith environment. `deploy --no-wait` success means
 build submission, not deployment readiness.
+
+### Logs
+
+When a LangSmith key is available, from `.env`, the environment, the cached
+sign-in, or a sign-in during `mda deploy`, the CLI sends log records for the
+run to `<LangSmith API>/v1/platform/mda/otel/v1/logs` as OTLP/HTTP JSON, authenticated with
+that key. Records are held in memory and sent together when the command exits;
+without a key they are discarded. Every run sends a completion record at info
+level with the `command_completed` outcome fields (`outcome` is `success`,
+`failure` or `cancelled`). A failed run also sends an error record with the full
+error chain (`exception.message`), which can include local paths and LangSmith
+response text.
+
+Each record carries the attribution fields above, and its OTel trace id is
+the run's `invocation_id`. The CLI sends the key over
+plain `http` only to `localhost`; any other non-HTTPS LangSmith URL disables log
+export. Delivery at exit waits at most one second.
 
 ### Failure categories
 

@@ -135,11 +135,7 @@ class ChannelError(Exception):
 
 def normalize_channel_destination(
     destination: ChannelDestination | Mapping[str, object],
-) -> (
-    ChannelDestinationCurrentThread
-    | ChannelDestinationProviderThread
-    | ChannelDestinationProviderConversation
-):
+) -> ChannelDestination:
     """Narrow a destination to its discriminant + required address fields."""
     dest_type = destination.get("type")
     if dest_type == "current_thread":

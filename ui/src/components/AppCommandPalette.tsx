@@ -28,7 +28,6 @@ import type { AgentThread } from "@/features/agents/lib/types"
 import { useInfiniteThreadsPages } from "@/features/agents/lib/queries"
 import { reviewPageRoute } from "@/features/reviews/lib/reviewEntry"
 import { useShortcutLabel } from "@/lib/hotkeys"
-import { useChatRoutes } from "@/lib/chatRoutes"
 
 interface CommandResult {
   id: string
@@ -124,7 +123,6 @@ export function AppCommandPalette({
   onOpenChange: (open: boolean) => void
 }) {
   const navigate = useNavigate()
-  const chat = useChatRoutes()
   const [query, setQuery] = useState("")
   const [debouncedQuery, setDebouncedQuery] = useState("")
 
@@ -193,7 +191,7 @@ export function AppCommandPalette({
       void navigate(reviewPageRoute(result.thread.reviewPage))
     } else if (result.kind === "cloud-thread") {
       void navigate({
-        to: chat.thread,
+        to: "/agents/$threadId",
         params: { threadId: result.thread.id },
       })
     } else {

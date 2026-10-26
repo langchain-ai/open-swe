@@ -32,6 +32,18 @@ class CliResultState(AgentState):
     cli_result_nudges: NotRequired[Annotated[int, OmitFromOutput]]
 
 
+def cli_result_nudge(tool_name: str, introduced: set[str] | None = None) -> list[str]:
+    """What asks the model again for the CLI result it owes, introducing the guard unless ``introduced``."""
+    instruction = prompt("runs/missing-cli-result", result_tool=tool_name)
+    built = build_input_messages(
+        instruction,
+        {"sender_id": CLI_RESULT_GUARD["id"], "surface": "automation", "kind": "system"},
+        systems=[CLI_RESULT_GUARD],
+        injected_dynamic_context_hashes=set(introduced or ()),
+    )
+    return [content_to_text(message["content"]) for message in built]
+
+
 class RequireCliResultMiddleware(OpenSWEMiddleware):
     """Re-invoke the model when a run ends without calling the result tool.
 
@@ -66,16 +78,8 @@ class RequireCliResultMiddleware(OpenSWEMiddleware):
         )
 
     def _nudge(self, state: Mapping[str, Any]) -> list[HumanMessage]:
-        instruction = prompt("runs/missing-cli-result", result_tool=self._tool_name)
-        built = build_input_messages(
-            instruction,
-            {"sender_id": CLI_RESULT_GUARD["id"], "surface": "automation", "kind": "system"},
-            systems=[CLI_RESULT_GUARD],
-            injected_dynamic_context_hashes=visible_dynamic_context_hashes(state),
-        )
-        return [
-            HumanMessage(content=content_to_text(m["content"]), id=str(uuid.uuid7())) for m in built
-        ]
+        built = cli_result_nudge(self._tool_name, visible_dynamic_context_hashes(state))
+        return [HumanMessage(content=text, id=str(uuid.uuid7())) for text in built]
 
     @hook_config(can_jump_to=["model"])
     async def aafter_model(self, state: AgentState, runtime: Runtime) -> dict[str, Any] | None:  # noqa: ARG002

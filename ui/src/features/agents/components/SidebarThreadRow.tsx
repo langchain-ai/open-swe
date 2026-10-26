@@ -60,7 +60,6 @@ import {
 } from "@/features/reviews/lib/reviewEntry"
 import { useQueryClient } from "@tanstack/react-query"
 import { cn } from "@/lib/utils"
-import { useChatRoutes } from "@/lib/chatRoutes"
 
 /** Phosphor has no Linear mark; this is Linear's own logo. */
 function LinearLogoIcon({
@@ -333,7 +332,6 @@ export function SidebarThreadRow({
   onTogglePin: () => void
   onToggleArchived: () => void
 }) {
-  const chat = useChatRoutes()
   const queryClient = useQueryClient()
   const deleteThread = useDeleteAgentThread()
   const worktreeThread = useLocalThread(item.id)
@@ -568,7 +566,7 @@ export function SidebarThreadRow({
     </Link>
   ) : (
     <Link
-      to={chat.thread}
+      to="/agents/$threadId"
       params={{ threadId: item.id }}
       onClick={handleNavigate}
       onKeyDown={openContextMenuFromKeyboard}

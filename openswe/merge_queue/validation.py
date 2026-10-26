@@ -22,6 +22,8 @@ class CandidateValidation:
     def __init__(
         self, queue: MergeQueue, repo: RepoClient, policy: QueuePolicy, dispatcher: DispatchGateway
     ):
+        if queue.mode != "custom":
+            raise ValueError("Custom validation is disabled for native queues")
         self.queue, self.repo, self.policy = queue, repo, policy
         self.dispatcher = dispatcher
 

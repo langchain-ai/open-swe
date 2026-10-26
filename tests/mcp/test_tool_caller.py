@@ -117,7 +117,7 @@ async def test_remote_mcp_tools_use_scoped_sources_and_recheck_allowed_tools(
     fake_mcp_server(monkeypatch, call=call)
     alice = ToolCaller(login="alice", email=None)
     bob = ToolCaller(login="bob", email=None)
-    name = next(name for name in await alice.tools() if name.startswith("mcp_linear_search_"))
+    name = next(name for name in await alice.tools() if name == "mcp_linear_search")
     assert tool_parameters((await alice.tools())[name][0])["type"] == "object"
     assert name in await bob.tools()
     assert "alice.example" in str((await alice.invoke(name, {})).content)

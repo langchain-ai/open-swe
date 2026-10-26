@@ -95,6 +95,14 @@ impl Language {
         }
     }
 
+    /// Package manifest file name for projects in this language.
+    pub(crate) fn manifest_name(self) -> &'static str {
+        match self {
+            Language::TypeScript => "package.json",
+            Language::Python => "pyproject.toml",
+        }
+    }
+
     /// The spelling an author uses for an API name in this language.
     ///
     /// CLI messages quote authored code, so a Python project must never be told
@@ -131,12 +139,7 @@ pub struct Project {
 
 /// Load and validate the project rooted at `root`.
 pub fn load(root: &Path) -> Result<Project> {
-    if !root.is_dir() {
-        return Err(categorized(
-            ErrorCategory::Project,
-            format!("project root {} is not a directory", root.display()),
-        ));
-    }
+    ensure_project_dir(root)?;
     let root = root.canonicalize().map_err(|err| {
         categorized(
             ErrorCategory::Project,
@@ -179,20 +182,7 @@ pub fn load(root: &Path) -> Result<Project> {
         .iter()
         .map(|(name, lang)| (PathBuf::from(name), *lang))
         .find(|(candidate, _)| files.contains(candidate))
-        .ok_or_else(|| {
-            let expected = AGENT_ENTRYPOINTS
-                .iter()
-                .map(|(name, _)| *name)
-                .collect::<Vec<_>>()
-                .join(", ");
-            categorized(
-                ErrorCategory::Project,
-                format!(
-                    "no agent entry file found in {} (expected one of: {expected})",
-                    root.display()
-                ),
-            )
-        })?;
+        .ok_or_else(|| not_a_project(&root))?;
 
     Ok(Project {
         root,
@@ -200,6 +190,143 @@ pub fn load(root: &Path) -> Result<Project> {
         agent_file,
         files,
     })
+}
+
+/// Reject `path` unless it is a directory holding an agent entry file.
+///
+/// Every project command runs this before any other work, so a wrong working
+/// directory gets the same message, with the likeliest fix, from all of them.
+pub(crate) fn ensure_project_dir(path: &Path) -> Result<()> {
+    if !path.is_dir() {
+        return Err(categorized(
+            ErrorCategory::Project,
+            format!("project root {} is not a directory", path.display()),
+        ));
+    }
+    if !has_agent_entry(path) {
+        return Err(not_a_project(path));
+    }
+    Ok(())
+}
+
+/// Whether `dir` directly holds an agent entry file.
+fn has_agent_entry(dir: &Path) -> bool {
+    AGENT_ENTRYPOINTS
+        .iter()
+        .any(|(name, _)| dir.join(name).is_file())
+}
+
+/// The error for a directory without an agent entry.
+fn not_a_project(dir: &Path) -> anyhow::Error {
+    let dir = dir.canonicalize().unwrap_or_else(|_| dir.to_path_buf());
+    let cwd = std::env::current_dir()
+        .and_then(|cwd| cwd.canonicalize())
+        .ok();
+    categorized(
+        ErrorCategory::Project,
+        not_a_project_message(&dir, cwd.as_deref()),
+    )
+}
+
+/// Explain that `dir` is not a project and name the likeliest way to reach one.
+///
+/// `cwd` decides how the suggested `cd` is spelled: relative when `dir` is the
+/// working directory, absolute otherwise.
+fn not_a_project_message(dir: &Path, cwd: Option<&Path>) -> String {
+    let expected = match AGENT_ENTRYPOINTS {
+        [init @ .., (last, _)] => {
+            let init = init.iter().map(|(name, _)| *name).collect::<Vec<_>>();
+            format!("{}, or {last}", init.join(", "))
+        }
+        [] => String::new(),
+    };
+    let in_cwd = cwd == Some(dir);
+    let hint = match nearby_project(dir) {
+        Some(NearbyProject::Child(child)) => {
+            let target = if in_cwd {
+                child.file_name().map(PathBuf::from).unwrap_or(child)
+            } else {
+                child
+            };
+            format!(
+                "Found a project in {}. Run `cd {}` first.",
+                target.display(),
+                shell_word(&target)
+            )
+        }
+        Some(NearbyProject::Ancestor { root, depth }) => {
+            let target = if in_cwd {
+                std::iter::repeat_n("..", depth).collect::<PathBuf>()
+            } else {
+                root.clone()
+            };
+            format!(
+                "This directory is inside the project at {}. Run `cd {}` first.",
+                root.display(),
+                shell_word(&target)
+            )
+        }
+        None => {
+            "Run `mda init <name>` to create one, or `cd` into an existing project.".to_string()
+        }
+    };
+    format!(
+        "{} is not a Managed Deep Agent project (no {expected} found).\n{hint}",
+        dir.display()
+    )
+}
+
+/// A project next to the directory a command was pointed at.
+#[derive(Debug, PartialEq, Eq)]
+enum NearbyProject {
+    /// The only immediate subdirectory holding an agent entry: the usual
+    /// result of forgetting to `cd` after `mda init`.
+    Child(PathBuf),
+    /// The closest enclosing project, `depth` levels up (for example when
+    /// working in its `tools/` directory).
+    Ancestor { root: PathBuf, depth: usize },
+}
+
+fn nearby_project(dir: &Path) -> Option<NearbyProject> {
+    let mut children = std::fs::read_dir(dir)
+        .into_iter()
+        .flatten()
+        .filter_map(|entry| entry.ok().map(|entry| entry.path()))
+        .filter(|path| {
+            path.is_dir()
+                && !is_ignored_dir(path)
+                && !path
+                    .file_name()
+                    .and_then(|name| name.to_str())
+                    .is_some_and(|name| name.starts_with('.'))
+                && has_agent_entry(path)
+        });
+    if let (Some(child), None) = (children.next(), children.next()) {
+        return Some(NearbyProject::Child(child));
+    }
+    dir.ancestors()
+        .enumerate()
+        .skip(1)
+        .find(|(_, ancestor)| has_agent_entry(ancestor))
+        .map(|(depth, root)| NearbyProject::Ancestor {
+            root: root.to_path_buf(),
+            depth,
+        })
+}
+
+/// `path` as a single shell word, quoted only when it needs to be.
+fn shell_word(path: &Path) -> String {
+    let text = path.to_string_lossy();
+    if text
+        .chars()
+        .all(|c| c.is_ascii_alphanumeric() || matches!(c, '/' | '.' | '_' | '-'))
+    {
+        text.into_owned()
+    } else if cfg!(windows) {
+        format!("'{}'", text.replace('\'', "''"))
+    } else {
+        format!("'{}'", text.replace('\'', "'\\''"))
+    }
 }
 
 /// Reject an exact Authoring Package version that differs from the bundled runtime.
@@ -593,9 +720,100 @@ mod tests {
 
         let err = load(root.path()).unwrap_err();
         assert!(
-            err.to_string().contains("no agent entry file found"),
+            err.to_string().contains(
+                "is not a Managed Deep Agent project (no agent.ts, agent.tsx, or agent.py found)"
+            ),
             "unexpected error: {err}"
         );
+    }
+
+    /// A canonical temp root, so expected paths match what the message prints.
+    fn canonical_tempdir() -> (tempfile::TempDir, PathBuf) {
+        let root = tempfile::tempdir().unwrap();
+        let path = root.path().canonicalize().unwrap();
+        (root, path)
+    }
+
+    #[test]
+    fn missing_project_suggests_cd_into_the_only_child_project() {
+        let (_root, dir) = canonical_tempdir();
+        write_stub_file(&dir, "my-agent/agent.ts");
+        write_stub_file(&dir, "notes/readme.md");
+
+        let message = not_a_project_message(&dir, Some(&dir));
+
+        assert!(
+            message.ends_with("\nFound a project in my-agent. Run `cd my-agent` first."),
+            "{message}"
+        );
+    }
+
+    #[test]
+    fn missing_project_spells_the_child_absolutely_outside_the_working_directory() {
+        let (_root, dir) = canonical_tempdir();
+        write_stub_file(&dir, "my-agent/agent.py");
+
+        let message = not_a_project_message(&dir, None);
+
+        let child = dir.join("my-agent");
+        assert!(
+            message.contains(&format!("Run `cd {}` first.", shell_word(&child))),
+            "{message}"
+        );
+    }
+
+    #[test]
+    fn missing_project_does_not_guess_between_several_child_projects() {
+        let (_root, dir) = canonical_tempdir();
+        write_stub_file(&dir, "first/agent.ts");
+        write_stub_file(&dir, "second/agent.py");
+
+        let message = not_a_project_message(&dir, Some(&dir));
+
+        assert!(
+            message.ends_with(
+                "\nRun `mda init <name>` to create one, or `cd` into an existing project."
+            ),
+            "{message}"
+        );
+    }
+
+    #[test]
+    fn missing_project_ignores_entries_under_dependency_and_hidden_dirs() {
+        let (_root, dir) = canonical_tempdir();
+        write_stub_file(&dir, "node_modules/pkg/agent.ts");
+        write_stub_file(&dir, ".cache/agent.py");
+
+        assert_eq!(nearby_project(&dir), None);
+    }
+
+    #[test]
+    fn missing_project_points_back_up_to_the_enclosing_project() {
+        let (_root, root) = canonical_tempdir();
+        write_stub_file(&root, "agent.ts");
+        write_stub_file(&root, "tools/search/index.ts");
+        let dir = root.join("tools").join("search");
+
+        let message = not_a_project_message(&dir, Some(&dir));
+
+        assert!(
+            message.ends_with(&format!(
+                "\nThis directory is inside the project at {}. Run `cd ../..` first.",
+                root.display()
+            )),
+            "{message}"
+        );
+    }
+
+    #[test]
+    fn deploy_and_load_report_a_missing_project_identically() {
+        let (_root, dir) = canonical_tempdir();
+        write_stub_file(&dir, "my-agent/agent.ts");
+
+        let from_load = load(&dir).unwrap_err();
+        let from_deploy = crate::deploy::ensure_project(&dir).unwrap_err();
+
+        assert_eq!(format!("{from_load:#}"), format!("{from_deploy:#}"));
     }
 
     #[test]

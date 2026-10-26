@@ -136,6 +136,63 @@ async def test_kickoff_delete_failure_does_not_interrupt_update(
     assert thread is not None and thread.kickoff_recorded and thread.kickoff_ts is None
 
 
+@pytest.mark.parametrize("recipient", [None, "U2", "W123ABC"])
+async def test_slack_reply_preserves_option_recipient(
+    monkeypatch: pytest.MonkeyPatch, recipient: str | None
+) -> None:
+    monkeypatch.setattr(slack_reply_tool, "get_config", _config)
+    post = AsyncMock(return_value="2.0")
+    monkeypatch.setattr(slack_reply_tool, "_post_and_store_mapping", post)
+
+    result = await slack_reply_tool.slack_reply(
+        "<@U2>, choose", "final", options=["Keep fallback"], option_user_id=recipient
+    )
+
+    assert result["success"] is True
+    blocks = post.await_args.kwargs["blocks"]
+    actions = next(block for block in blocks if block["type"] == "actions")
+    value = json.loads(actions["elements"][0]["value"])
+    assert value == {
+        "type": "open_swe_option",
+        "response": "Keep fallback",
+        **({"user_id": recipient} if recipient is not None else {}),
+    }
+
+
+@pytest.mark.parametrize(
+    ("recipient", "options", "blocks"),
+    [
+        (recipient, ["Yes"], None)
+        for recipient in (
+            "",
+            " ",
+            "Ramon",
+            "<@U123ABC>",
+            " U123ABC",
+            "U123ABC ",
+            "u123abc",
+            "C123ABC",
+        )
+    ]
+    + [("U2", None, None), ("U2", ["Yes"], [])],
+)
+async def test_scoped_options_reject_inputs_that_cannot_carry_the_recipient(
+    monkeypatch: pytest.MonkeyPatch,
+    recipient: str,
+    options: list[str] | None,
+    blocks: list[dict[str, object]] | None,
+) -> None:
+    post = AsyncMock()
+    monkeypatch.setattr(slack_reply_tool, "_post_and_store_mapping", post)
+
+    result = await slack_reply_tool.slack_reply(
+        "Choose", "final", options=options, blocks=blocks, option_user_id=recipient
+    )
+
+    assert result["success"] is False
+    post.assert_not_awaited()
+
+
 async def test_slack_reply_holds_mutation_lock_while_posting(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

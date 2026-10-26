@@ -23,7 +23,9 @@ function run(href: string, links: string[] = []) {
   for (const linkedUrl of links) {
     const link = document.createElement("a")
     link.href = linkedUrl
-    link.setAttribute("data-thread-pull-request", "")
+      .replace("https://github.com/", "https://swe.example/agents/reviews/")
+      .replace("/pull/", "/")
+    link.setAttribute("data-thread-pull-request", linkedUrl)
     page.append(link)
   }
   new Function("location", "window", "alert", "document", script)(

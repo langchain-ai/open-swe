@@ -14,16 +14,22 @@
 //! installing a real signal handler.
 
 use std::collections::BTreeSet;
-use std::io;
-use std::process::{Child, Command, ExitStatus, Stdio};
+use std::io::{self, Read, Write};
+use std::process::{Child, Command, ExitStatus, Output, Stdio};
 use std::sync::{Mutex, MutexGuard, PoisonError};
-use std::thread::sleep;
+use std::thread::{self, sleep, JoinHandle};
 use std::time::{Duration, Instant};
+
+use anyhow::{bail, Result};
 
 use crate::interrupt::Interrupt;
 
 /// How often a running child is polled.
 const POLL_INTERVAL: Duration = Duration::from_millis(100);
+
+/// How often a captured child is polled. Short, because most of these finish
+/// in milliseconds and some run once per source file.
+const CAPTURE_POLL_INTERVAL: Duration = Duration::from_millis(10);
 
 /// How long a child gets to act on the forwarded interrupt before we escalate to
 /// a kill.
@@ -199,6 +205,120 @@ impl OwnedChild {
         self.child.wait()?;
         Ok(exited)
     }
+}
+
+/// Run `command` to completion as an owned child and collect what it wrote.
+///
+/// Ctrl-C stops its group and returns an `Interrupted` error, which the command
+/// reports as a cancellation.
+pub(crate) fn output(command: &mut Command) -> Result<Output> {
+    capture(command, None, None, &Interrupt::install()?)
+}
+
+/// [`output`], writing `stdin` to the child first.
+pub(crate) fn output_with_stdin(command: &mut Command, stdin: &[u8]) -> Result<Output> {
+    capture(command, Some(stdin), None, &Interrupt::install()?)
+}
+
+/// [`output`], stopping the child's group if it runs past `timeout`.
+pub(crate) fn output_with_timeout(command: &mut Command, timeout: Duration) -> Result<Output> {
+    capture(command, None, Some(timeout), &Interrupt::install()?)
+}
+
+fn capture(
+    command: &mut Command,
+    stdin: Option<&[u8]>,
+    timeout: Option<Duration>,
+    interrupt: &Interrupt,
+) -> Result<Output> {
+    command
+        .stdin(if stdin.is_some() {
+            Stdio::piped()
+        } else {
+            Stdio::null()
+        })
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped());
+    let mut owned = OwnedChild::spawn(command)?;
+    // On its own thread so a child that writes before it reads cannot
+    // deadlock against us. A failed write is not reported: the child's status
+    // and stderr say why it stopped reading.
+    if let (Some(mut pipe), Some(bytes)) = (owned.child.stdin.take(), stdin.map(<[u8]>::to_vec)) {
+        thread::spawn(move || {
+            let _ = pipe.write_all(&bytes);
+        });
+    }
+    // Read while the child runs: a full pipe would otherwise block it. Both
+    // ends close once its group is down, which every outcome below ensures.
+    let stdout = read_to_end(owned.child.stdout.take());
+    let stderr = read_to_end(owned.child.stderr.take());
+    let deadline = timeout.map(|timeout| Instant::now() + timeout);
+    let outcome = loop {
+        if let Some(outcome) = owned.poll(interrupt)? {
+            break Some(outcome);
+        }
+        if deadline.is_some_and(|deadline| Instant::now() >= deadline) {
+            owned.stop()?;
+            break None;
+        }
+        interrupt.sleep_until_interrupted(CAPTURE_POLL_INTERVAL);
+    };
+    let stdout = stdout.join().unwrap_or_default();
+    let stderr = stderr.join().unwrap_or_default();
+    match outcome {
+        Some(Outcome::Exited(status)) => Ok(Output {
+            status,
+            stdout,
+            stderr,
+        }),
+        Some(Outcome::Stopped) => Err(io::Error::from(io::ErrorKind::Interrupted).into()),
+        None => bail!(
+            "subprocess timed out after {}s",
+            timeout.unwrap_or_default().as_secs()
+        ),
+    }
+}
+
+/// A child's stderr, passed through to ours as it arrives, with its last part
+/// kept for the error if the child fails.
+#[derive(Default)]
+pub(crate) struct StderrTail(Option<JoinHandle<Vec<u8>>>);
+
+impl StderrTail {
+    /// Take `owned`'s piped stderr, keeping its last `keep` bytes.
+    pub(crate) fn tee(owned: &mut OwnedChild, keep: usize) -> Self {
+        Self(owned.child.stderr.take().map(|mut pipe| {
+            thread::spawn(move || {
+                let mut tail = std::collections::VecDeque::with_capacity(keep);
+                let mut chunk = [0; 8 << 10];
+                while let Ok(read @ 1..) = pipe.read(&mut chunk) {
+                    let _ = io::stderr().write_all(&chunk[..read]);
+                    tail.extend(&chunk[..read]);
+                    tail.drain(..tail.len().saturating_sub(keep));
+                }
+                tail.into()
+            })
+        }))
+    }
+
+    /// The kept bytes. Call once the child's group is down, so the pipe has
+    /// closed.
+    pub(crate) fn finish(self) -> Vec<u8> {
+        self.0
+            .and_then(|reader| reader.join().ok())
+            .unwrap_or_default()
+    }
+}
+
+fn read_to_end(pipe: Option<impl Read + Send + 'static>) -> JoinHandle<Vec<u8>> {
+    thread::spawn(move || {
+        let mut buf = Vec::new();
+        if let Some(mut pipe) = pipe {
+            // A read error ends the capture early; what was read still helps.
+            let _ = pipe.read_to_end(&mut buf);
+        }
+        buf
+    })
 }
 
 /// Ask the child's whole group to stop, then insist.
@@ -495,5 +615,76 @@ mod tests {
             Some(Outcome::Exited(status)) => assert_eq!(status.code(), Some(3)),
             _ => panic!("expected the child's own status"),
         }
+    }
+
+    /// A leader that ignores SIGINT and keeps a grandchild alive — the shape of
+    /// a hung `npm` wrapper. Killing only the leader would leave the grandchild
+    /// holding stdout/stderr and hang the pipe-reader joins.
+    #[cfg(unix)]
+    #[test]
+    fn a_capture_timeout_kills_a_tree_that_holds_pipes() {
+        let mut command = Command::new("sh");
+        command.args(["-c", r#"trap "" INT; sleep 30 & wait"#]);
+        let started = Instant::now();
+        let err = capture(
+            &mut command,
+            None,
+            Some(Duration::from_secs(1)),
+            &Interrupt::pending(),
+        )
+        .unwrap_err();
+        assert!(
+            err.to_string().contains("timed out"),
+            "unexpected error: {err:#}"
+        );
+        assert!(
+            started.elapsed() < Duration::from_secs(5),
+            "timeout path hung joining pipe readers ({:?})",
+            started.elapsed()
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_capture_returns_what_the_child_wrote_and_read() {
+        let mut command = Command::new("sh");
+        command.args(["-c", "cat; echo oops >&2; exit 3"]);
+
+        let output = capture(&mut command, Some(b"in"), None, &Interrupt::pending()).unwrap();
+
+        assert_eq!(output.status.code(), Some(3));
+        assert_eq!(output.stdout, b"in");
+        assert_eq!(output.stderr, b"oops\n");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_stderr_tail_keeps_the_end() {
+        let mut command = Command::new("sh");
+        command
+            .args([
+                "-c",
+                "{ printf start; printf '%0100d' 0; printf end; } >&2; exit 1",
+            ])
+            .stderr(Stdio::piped());
+        let mut owned = OwnedChild::spawn(&mut command).unwrap();
+        let tail = StderrTail::tee(&mut owned, 10);
+
+        owned.wait(&Interrupt::pending()).unwrap();
+
+        assert_eq!(tail.finish(), b"0000000end");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn an_interrupted_capture_is_a_cancellation() {
+        let mut command = Command::new("sleep");
+        command.arg("30");
+        let started = Instant::now();
+
+        let err = capture(&mut command, None, None, &Interrupt::requested()).unwrap_err();
+
+        assert!(crate::error::is_cancellation(&err), "{err:#}");
+        assert!(started.elapsed() < Duration::from_secs(5));
     }
 }

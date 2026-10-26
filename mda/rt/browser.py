@@ -15,8 +15,10 @@ from langchain.agents.middleware import AgentState
 from langgraph.runtime import Runtime
 from managed_deepagents import ManagedToolRuntime
 from managed_deepagents.browser import BrowserMiddleware
+from runtime_api.endpoint import call
+from runtime_api.loop import BROWSER, BrowserReport
 
-from rt.backend import OpenSweBackend, run_body
+from rt.backend import OpenSweBackend
 from rt.tools import run_id
 
 logger = logging.getLogger(__name__)
@@ -26,7 +28,8 @@ class ReportedBrowserMiddleware(BrowserMiddleware):
     """MDA's browser per thread: the backend hears its name once per process, its use once per run."""
 
     def __init__(self, backend: OpenSweBackend) -> None:
-        super().__init__()
+        # As the backend creates it when a person opens the browser first.
+        super().__init__(hidpi=True)
         self._backend = backend
         # (browser name, whether it is opened) already reported, or being reported.
         self._reported: set[tuple[str, bool]] = set()
@@ -57,8 +60,10 @@ class ReportedBrowserMiddleware(BrowserMiddleware):
     async def _report(self, report: tuple[str, bool], state: Mapping[str, object]) -> None:
         name, opened = report
         try:
-            await self._backend.call(
-                "browser", run_body(run_id(), state, browser=name, opened=opened)
+            await call(
+                self._backend,
+                BROWSER,
+                BrowserReport(run_id=run_id(), browser=name, opened=opened),
             )
         except Exception:
             # Tried again on the next run or browser call; until then the panel cannot show it.

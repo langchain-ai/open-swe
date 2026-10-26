@@ -30,14 +30,34 @@ export async function loginAs(
   expect(res.ok()).toBeTruthy();
 }
 
-export async function optIntoQueue(page: Page) {
+// What a message sent while a run is live does. It is the person's saved
+// preference, so a spec that depends on it sets it rather than inherit another's.
+export async function setFollowUpBehavior(
+  page: Page,
+  behavior: "queue" | "steer",
+) {
   const saved = await page.request.get("/dashboard/api/me/preferences");
   expect(saved.ok()).toBeTruthy();
   const res = await page.request.put("/dashboard/api/me/preferences", {
-    data: { ...(await saved.json()), follow_up_behavior: "queue" },
+    data: { ...(await saved.json()), follow_up_behavior: behavior },
     headers: SAME_ORIGIN_HEADERS,
   });
   expect(res.ok()).toBeTruthy();
+}
+
+export async function optIntoQueue(page: Page) {
+  await setFollowUpBehavior(page, "queue");
+}
+
+// `monitor` is off by default; the sender opts in on their profile.
+export async function enableMonitors(page: Page) {
+  const saved = await page.request.get("/dashboard/api/profile");
+  expect(saved.ok()).toBeTruthy();
+  const response = await page.request.put("/dashboard/api/profile", {
+    headers: { origin: new URL(saved.url()).origin },
+    data: { ...(await saved.json()), experimental_monitor: true },
+  });
+  expect(response.ok(), await response.text()).toBeTruthy();
 }
 
 // The composer is a rich-text editor, not a <textarea>: it carries the prompt
@@ -301,6 +321,27 @@ export async function openMultiRepoPrThreadViaSlackLink(page: Page) {
   await expect(webLink).toBeVisible();
   await webLink.click();
   await expect(page).toHaveURL(/\/agents\//);
+}
+
+// Every call the backend planned the thread's runs for, once its runs are done. The
+// harness answers each call as a replica that never served the run (patches.py).
+export async function plannedCalls(page: Page, threadId: string) {
+  await expect
+    .poll(
+      async () => {
+        const res = await page.request.get(
+          `${BASE_URL}/control/thread-idle?thread_id=${threadId}`,
+        );
+        return ((await res.json()) as { idle: boolean }).idle;
+      },
+      { timeout: 30_000, intervals: [500] },
+    )
+    .toBe(true);
+  const res = await page.request.get(
+    `${BASE_URL}/control/plans?thread_id=${threadId}`,
+  );
+  expect(res.ok()).toBeTruthy();
+  return (await res.json()) as string[];
 }
 
 export function threadIdFromUrl(page: Page): string {

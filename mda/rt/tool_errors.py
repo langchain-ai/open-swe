@@ -23,8 +23,9 @@ from langsmith.sandbox import (
     SandboxRetryableConnectionError,
     SandboxServerReloadError,
 )
+from runtime_api.loop import SANDBOX_UNREACHABLE, SandboxGone
 
-from rt.backend import BackendCallError, OpenSweBackend, run_body
+from rt.backend import OpenSweBackend
 from rt.tools import run_id
 
 logger = logging.getLogger(__name__)
@@ -69,7 +70,7 @@ class ToolErrorMiddleware(AgentMiddleware):
             # Every later call would meet the same dead box, so the run ends here once
             # the person knows.
             logger.exception("The thread's sandbox stopped answering")
-            await self._report_unreachable(request, exc)
+            self._report_unreachable(request, exc)
             raise
         finally:
             seconds = monotonic() - started
@@ -83,15 +84,10 @@ class ToolErrorMiddleware(AgentMiddleware):
                     },
                 )
 
-    async def _report_unreachable(self, request: ToolCallRequest, exc: Exception) -> None:
+    def _report_unreachable(self, request: ToolCallRequest, exc: Exception) -> None:
         sandbox_id = _SANDBOX_ID.search(str(exc))
-        body = run_body(
-            run_id(), request.state, sandbox_id=sandbox_id.group(0) if sandbox_id else None
-        )
-        try:
-            await self._backend.call("sandbox_unreachable", body)
-        except BackendCallError:
-            logger.warning("Could not tell the person the sandbox stopped answering", exc_info=True)
+        gone = SandboxGone(run_id=run_id(), sandbox_id=sandbox_id.group(0) if sandbox_id else None)
+        self._backend.reports.notify(SANDBOX_UNREACHABLE, gone)
 
 
 def _sandbox_unreachable(exc: Exception) -> bool:
