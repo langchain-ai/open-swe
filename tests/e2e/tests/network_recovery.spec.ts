@@ -480,6 +480,99 @@ test("renderer offline shows the notice and the local run is untouched", async (
   }
 })
 
+test("a long real outage leaves the local run and its backend alone", async () => {
+  // The offline test above lasts 3s and only checks the notice. This one stays
+  // dark for 30s, through several SDK reconnect attempts, and pins the fact a
+  // loopback backend relies on: losing the network cannot reach it, so the run
+  // keeps executing and nothing re-arms. The SDK's budget is far longer than
+  // this (12 attempts reach ~23min), so this covers an outage mid-retry, not
+  // one that exhausted it.
+  const harness = await launch("outage")
+  const { page, toyLog } = harness
+  const stopLogging = logResumeEvents(page)
+  try {
+    await watchResume(page)
+    // Long enough to still be streaming after the outage; no TOY_CRASH_MS, so
+    // the backend has no reason to die on its own.
+    await submitLocalTask(page, "outage probe TOY_STREAM_MS=30000")
+    const threadId = await threadIdFromUrl(page)
+    const runStart = await waitForRunStart(toyLog)
+    await expect(page.getByText(/Toy answer for: outage probe/)).toBeVisible({
+      timeout: 30_000,
+    })
+
+    const cdp = await page.context().newCDPSession(page)
+    await cdp.send("Network.enable")
+    const offlineAt = Date.now()
+    await cdp.send("Network.emulateNetworkConditions", {
+      offline: true,
+      latency: 0,
+      downloadThroughput: 0,
+      uploadThroughput: 0,
+    })
+    // Long enough to span several backoff steps (1, 2, 4, 8, 16s) while the
+    // SDK is still retrying; the run is sized to finish inside this window.
+    await page.waitForTimeout(30_000)
+    await cdp.send("Network.emulateNetworkConditions", {
+      offline: false,
+      latency: 0,
+      downloadThroughput: -1,
+      uploadThroughput: -1,
+    })
+    await cdp.detach()
+    const onlineAt = Date.now()
+
+    await expect
+      .poll(() => firstEvent(toyLog, (event) => event.event === "run_end"), {
+        timeout: 120_000,
+      })
+      .toBeTruthy()
+    const runEnd = firstEvent(toyLog, (event) => event.event === "run_end")
+    await expect(page.getByText(/Toy answer for: outage probe/)).toBeVisible({
+      timeout: 60_000,
+    })
+
+    const events = readToyLog(toyLog)
+    const runStarts = events.filter(
+      (event) => event.event === "run_start" && event.thread_id === threadId
+    )
+    // One run on one backend process: nothing restarted, nothing re-armed.
+    expect(runStarts).toHaveLength(1)
+    expect(runStarts[0]?.pid).toBe(runStart.pid)
+    expect(
+      events.filter((event) => event.event === "imported")
+    ).toHaveLength(1)
+    expect(events.filter((event) => event.event === "crash")).toHaveLength(0)
+    if (!runEnd) throw new Error("run_end missing")
+    // The run should land inside the outage window -- that is the whole claim
+    // of a loopback backend. Recorded rather than asserted: on a loaded
+    // machine the run can overrun by a second, and a timing miss would fail
+    // the test without anything being wrong.
+    const runEndedMsAfterOffline = runEnd.ts * 1000 - offlineAt
+
+    const chains = (await resumeEvents(page)).filter(
+      (event) => event.snapshot.chains.length > 0
+    )
+    expect(chains).toEqual([])
+    await expect(page.getByTestId("user-message")).toHaveCount(1)
+
+    writeMetrics("renderer-outage", {
+      offlineAt,
+      offlineDurationMs: onlineAt - offlineAt,
+      recoveryChainsArmed: chains.length,
+      runs: runStarts.length,
+      backendRestarted: runStarts[0]?.pid !== runStart.pid,
+      runCompleted: true,
+      // Measured from the outage start: a value inside `offlineDurationMs`
+      // shows the run finished while the renderer was dark.
+      runEndedMsAfterOffline,
+    })
+  } finally {
+    stopLogging()
+    await harness.close()
+  }
+})
+
 test("a killed backend is restarted and the turn resumes exactly once", async () => {
   const harness = await launch("crash")
   const { page, toyLog } = harness

@@ -52,6 +52,14 @@ WorkBuddy **不重连那条已经断掉的流**。它做的是：
   后端冻结（进程活着但不产出）要等看门狗 60s 静默 + 5s 轮询，**约 64s** 才建链，解冻后
   0.5s 收敛——这一档用户在这 64s 里只看到 `Working…` 停住，没有提示。
 
+**真断网不会触发恢复**，这一点由 `renderer-outage` 场景单独验证（断 30s，跨过前 5 次
+退避）：后端进程 PID 不变、只导入过一次、只有 1 个 run，run 在断网窗口内（29.4s / 30.1s）
+跑完，恢复链一条都没 arm。也就是说断网期间用户的任务一直在后端执行，回来只是重新接上流。
+
+注意这个场景覆盖的是**重试进行中**的断网，不是重试预算耗尽之后。SDK 的 12 次退避累计
+约 23 分钟（1/2/4/8/16/32/64/128/256/300/300/300 秒），30s 只走到第 6 次。预算真正耗尽时
+`stream.error` 才会出现，渲染层随即以 `network` 原因 arm——那一步没有验收测试，见 §12。
+
 **这套口径没有覆盖的故障**：渲染进程崩溃、主进程崩溃、合盖休眠后唤醒、后端僵死但
 进程仍在（比 `frozen` 更隐蔽）。这些在本地模式下同样会发生，但目前没有验收测试，
 所以不应把上面任何一个数字外推到它们身上。
@@ -465,7 +473,8 @@ UI                         Coordinator               Backend
 
 **端到端（复用已建好的三种故障脚本）**
 
-1. CDP `Network.emulateNetworkConditions{offline}`：验证 toast、队列 hold；
+1. CDP `Network.emulateNetworkConditions{offline}`：验证 toast、队列 hold；断 30s
+   （跨过前 5 次退避，仍在重试中）验证后端 PID 不变、run 在断网窗口内跑完、恢复链不 arm；
 2. `NtSuspendProcess` 冻结后端 20s：解冻后 `phase` 从 `waiting` 回到 `inflight`，不补发；
 3. kill 后端：新进程起来后应补发一次，历史里只有一条提问、一条连续回答。
 
@@ -536,6 +545,13 @@ node D:\agent\open-swe\artifacts\network-recovery-p95\aggregate.cjs
   单次失败只记日志。
 - **队列 hold 的时长**：默认 10 分钟兜底，超过就释放并显示错误，避免无限等待。
 - **cloud 会话**：不在本方案内，仍走服务端自己的恢复。
+- **断网超过 SDK 重试预算**：`renderer-outage` 只覆盖了重试进行中的 30s。若断网持续到
+  预算耗尽（累计约 23 分钟），`stream.error` 出现后渲染层以 `network` 原因 arm，而本机
+  后端一直活着——探针会立即成功并派发续跑。此时若原 run 已经跑完（渲染层只是没收到完成），
+  就会**重复执行**一次任务。`resumeNetworkRun` 里的 `threadActivity()` 只能拦住「仍在执行」
+  的情形（`taken-over`），拦不住「已执行完」。这条没有验收测试；修法是 arm 之前先查
+  `GET /threads/<id>/state`，`next` 为空就走 `resync` 而不是 `arm`（与 `classifyStall`
+  已有的判断一致）。
 
 ## 13. 分阶段
 
