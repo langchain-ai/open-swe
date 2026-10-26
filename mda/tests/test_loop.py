@@ -17,6 +17,7 @@ from rt.middleware import BackendRunMiddleware
 from rt.tools import STATE_KEY
 from runtime_api.catalog import (
     CLIENT_CALL_PENDING,
+    Catalog,
     LoopRules,
     ModelSpec,
     ReplyRules,
@@ -49,13 +50,18 @@ type Calls = list[tuple[str, dict[str, JsonValue]]]
 
 
 def _backend(
-    monkeypatch: pytest.MonkeyPatch, answers: Mapping[str, BaseModel | BackendCallError]
+    monkeypatch: pytest.MonkeyPatch,
+    answers: Mapping[str, BaseModel | BackendCallError],
+    rules: LoopRules | None = None,
 ) -> tuple[OpenSweBackend, Calls]:
-    """A backend answering each named call with ``answers``, or failing it, and the calls it was asked."""
+    """A run's backend answering each named call with ``answers``, or failing it, and the
+    calls it was asked; the run's catalog has ``rules`` for its loop."""
     monkeypatch.setenv("OPEN_SWE_BACKEND_URL", "https://backend.invalid")
     monkeypatch.setattr("rt.loop.run_id", lambda: "run-1")
     monkeypatch.setattr("rt.middleware.run_id", lambda: "run-1")
-    backend = Run(RunContext.model_validate({"__run_token": "token"})).backend
+    catalog = Catalog() if rules is None else Catalog(loop=rules, models=_MODELS)
+    context = {"__run_token": "token", "__catalog": catalog.model_dump(mode="json")}
+    backend = Run(RunContext.model_validate(context)).backend
     calls: Calls = []
 
     async def post(
@@ -85,13 +91,6 @@ async def test_each_model_call_is_assembled_here_from_the_rules_and_named_calls(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     context = '<dynamic-context kind="task" id="task-1">Fix login</dynamic-context>'
-    backend, calls = _backend(
-        monkeypatch,
-        {
-            "task_context": TaskContext(instructions="You coordinate the task.", message=context),
-            "refresh_github_proxy": Done(),
-        },
-    )
     rules = LoopRules(
         deployment_prompt="This is a preview deployment.",
         hidden_tools=["grep"],
@@ -101,7 +100,15 @@ async def test_each_model_call_is_assembled_here_from_the_rules_and_named_calls(
         task_coordination=True,
         refresh_github_proxy=True,
     )
-    loop = RunLoop(backend, rules, _MODELS)
+    backend, calls = _backend(
+        monkeypatch,
+        {
+            "task_context": TaskContext(instructions="You coordinate the task.", message=context),
+            "refresh_github_proxy": Done(),
+        },
+        rules,
+    )
+    loop = RunLoop(backend)
     state = _state(
         HumanMessage(content="Fix the login", id="human-1"),
         rendered_system_prompt="You are Open SWE.",
@@ -137,11 +144,13 @@ async def test_a_requested_model_is_asked_for_once_and_the_classifier_routes_the
 ) -> None:
     requested = ModelSpec(model_id="openai:gpt-6.1-sol", kwargs={"reasoning_effort": "high"})
     backend, calls = _backend(
-        monkeypatch, {"model_choice": requested, "route_model": Route(route="default")}
+        monkeypatch,
+        {"model_choice": requested, "route_model": Route(route="default")},
+        LoopRules(routing=RoutingRules(mode="fast")),
     )
     events: list[object] = []
     monkeypatch.setattr("rt.loop.get_stream_writer", lambda: events.append)
-    loop = RunLoop(backend, LoopRules(routing=RoutingRules(mode="fast")), _MODELS)
+    loop = RunLoop(backend)
     asked = _state(
         HumanMessage(content="Use GPT", id="human-1"),
         requested_model=requested.model_id,
@@ -183,10 +192,10 @@ async def test_a_requested_model_is_asked_for_once_and_the_classifier_routes_the
 async def test_a_run_ends_before_its_next_call_where_a_rule_says_so(
     monkeypatch: pytest.MonkeyPatch, state: dict[str, object]
 ) -> None:
-    backend, calls = _backend(monkeypatch, {})
     rules = LoopRules(stop_when=["scout_nothing_to_plan"], client_tools=True)
+    backend, calls = _backend(monkeypatch, {}, rules)
 
-    planned = await RunLoop(backend, rules, _MODELS).before_model(state)
+    planned = await RunLoop(backend).before_model(state)
 
     assert planned.jump_to == "end"
     assert calls == []
@@ -195,8 +204,8 @@ async def test_a_run_ends_before_its_next_call_where_a_rule_says_so(
 async def test_an_answer_that_owes_a_slack_reply_is_asked_again_then_posted_for_the_model(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    backend, calls = _backend(monkeypatch, {"reply_on_behalf": Done()})
-    loop = RunLoop(backend, LoopRules(reply=_REPLY), _MODELS)
+    backend, calls = _backend(monkeypatch, {"reply_on_behalf": Done()}, LoopRules(reply=_REPLY))
+    loop = RunLoop(backend)
     asked = HumanMessage(content="Fix it", id="human-1")
     answer = AIMessage(content="Fixed the login.", id="ai-1")
 
@@ -231,8 +240,8 @@ async def test_a_reply_this_turn_satisfies_the_run_even_after_a_nudge(
 ) -> None:
     import json
 
-    backend, _calls = _backend(monkeypatch, {})
-    loop = RunLoop(backend, LoopRules(reply=_REPLY), _MODELS)
+    backend, _calls = _backend(monkeypatch, {}, LoopRules(reply=_REPLY))
+    loop = RunLoop(backend)
     args = {"response_type": "final"} if replied == "slack_reply" else {}
     state = _state(
         HumanMessage(content="Fix it", id="human-1"),
@@ -262,16 +271,16 @@ async def test_the_end_of_a_run_is_reported_and_its_graph_work_done_by_name(
             "step_limit_reached": BackendCallError("step_limit_reached failed: Slack is down"),
             "settle_review_check": Done(),
         },
+        LoopRules(at_end=["settle_review_check"]),
     )
     monkeypatch.setattr(
         "rt.middleware.build_model",
         lambda spec, use_gateway: FakeListChatModel(responses=["Model call limits exceeded"]),
     )
     backend.run.invocation_id = "turn"
-    rules = LoopRules(at_end=["settle_review_check"])
     graph = create_agent(
         model=FakeListChatModel(responses=["unused"]),
-        middleware=[BackendRunMiddleware(backend, loop=RunLoop(backend, rules, _MODELS))],
+        middleware=[BackendRunMiddleware(backend)],
     )
 
     await graph.ainvoke({"messages": [("user", "Review it")]})

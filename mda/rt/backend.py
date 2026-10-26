@@ -229,64 +229,33 @@ def _call_failure(response: httpx2.Response) -> CallFailure | None:
 
 
 Graph = Literal["agent", "reviewer", "review-scout"]
-# Runs whose grants a process keeps from building their graph until they start.
-_GRANTED_KEPT: Final = 256
-
-
-class Granted(BaseModel):
-    """What the backend gave one run alone, kept out of the graph that runs it: the token
-    it signed again, its grant of each operation, and who the run acts for."""
-
-    run_token: str | None = None
-    grants: dict[str, str] = {}
-    trace_metadata: dict[str, JsonValue] = {}
-
-    @classmethod
-    def split(cls, catalog: Catalog) -> tuple[Catalog, Granted]:
-        """``catalog`` as the graph is built from it, the same for every run alike, and what it granted the run."""
-        granted = cls(
-            run_token=catalog.run_token,
-            grants={op.name: op.grant for op in catalog.operations if op.grant is not None},
-            trace_metadata=catalog.trace_metadata,
-        )
-        graph = catalog.model_copy(
-            update={
-                "run_token": None,
-                "trace_metadata": {},
-                "operations": [op.model_copy(update={"grant": None}) for op in catalog.operations],
-            }
-        )
-        return graph, granted
+# Catalogs a process fetched building a run's graph, kept until the run itself asks.
+_FETCHED_KEPT: Final = 32
 
 
 class Run:
-    """One run of a graph, as the backend knows it: what it calls with, and what it has told it.
+    """One run of a graph, as the backend knows it: what it calls with, what it was
+    planned with, and what it has told the backend.
 
-    A graph is built once for many runs (MDA keeps it per thread), so nothing it holds
+    MDA builds a graph once for every run of every thread, so nothing the graph holds
     may be a run's: its tools and middleware find the run in progress per call
-    (``current_run``). What the factory learned building the graph for a run, the run
-    finds by the token it started with.
+    (``current_run``) and read what they need from it.
     """
 
-    # What each run whose graph this process built was granted, by the token or grant it
-    # started with.
-    _granted: ClassVar[OrderedDict[str, Granted]] = OrderedDict()
+    # Catalogs fetched while building a run's graph, by the token or grant it started
+    # with, so the run need not fetch its own again.
+    _fetched: ClassVar[OrderedDict[str, Catalog]] = OrderedDict()
 
     def __init__(self, context: RunContext) -> None:
         self._started_with = context.run_token or context.worker_grant
-        self.granted = (
-            self._granted.get(self._started_with, Granted())
-            if self._started_with is not None
-            else Granted()
-        )
-        self._token = (
-            self.granted.run_token or context.run_token if context.run_token is not None else None
-        )
+        self._carried = context.catalog
+        self._token = context.run_token
         self._worker_grant = context.worker_grant if context.run_token is None else None
         # The run's invocation, which its usage counts its replies by; a worker learns
         # its own when it adopts a run token.
         self.invocation_id = context.invocation_id
-        # The worker's own catalog, once it adopted a run token: what it may offer the model.
+        self._planned: Catalog | None = None
+        # The worker's own catalog, once it adopted a run token.
         self.adopted: Catalog | None = None
         self.backend = OpenSweBackend(self)
         self.reports = Reports(self.backend)
@@ -304,29 +273,49 @@ class Run:
         """A launched worker that has not yet traded its grant for a run token of its own."""
         return self._token is None and self._worker_grant is not None
 
-    async def plan(self, carried: Catalog | None) -> Catalog:
-        """The catalog the backend planned for this run, as the graph is built from it.
+    async def plan(self) -> Catalog:
+        """What the backend planned for the run as it started it.
 
-        A run started without it asks for it, and every later call carries the token the
-        backend signed with it. What it granted this run alone stays with the run.
+        A run started without it asks for it, and every later call carries the token
+        the backend signed with it.
         """
-        planned = (
-            carried
-            if carried is not None
-            else await self.backend.catalog(None)
-            # Runs without a context (state reads, assistant reads) never call a model or a tool.
-            if self.has_run
-            else Catalog()
+        if self._planned is not None or self._carried is not None:
+            return self.planned
+        fetched = (
+            self._fetched.pop(self._started_with, None) if self._started_with is not None else None
         )
-        graph, self.granted = Granted.split(planned)
-        if self.granted.run_token is not None and self._token is not None:
-            self._token = self.granted.run_token
-        if self._started_with is not None:
-            self._granted[self._started_with] = self.granted
-            self._granted.move_to_end(self._started_with)
-            while len(self._granted) > _GRANTED_KEPT:
-                self._granted.popitem(last=False)
-        return graph
+        if fetched is not None:
+            planned = fetched
+        elif self.has_run:
+            planned = await self.backend.catalog(None)
+            if self._started_with is not None:
+                self._fetched[self._started_with] = planned
+                while len(self._fetched) > _FETCHED_KEPT:
+                    self._fetched.popitem(last=False)
+        else:
+            # Runs without a context (state reads, assistant reads) never call a model or a tool.
+            planned = Catalog()
+        self._planned_with(planned)
+        return planned
+
+    def _planned_with(self, planned: Catalog) -> None:
+        if planned.run_token is not None and self._token is not None:
+            self._token = planned.run_token
+        self._planned = planned
+
+    @property
+    def planned(self) -> Catalog:
+        """The catalog the run started with: its coordinator's, for a launched worker."""
+        if self._planned is None and self._carried is not None:
+            self._planned_with(Catalog.model_validate(self._carried))
+        if self._planned is None:
+            raise BackendCallError("The run's catalog is read only once the run starts")
+        return self._planned
+
+    @property
+    def catalog(self) -> Catalog:
+        """What the run may do: a launched worker's own catalog once it adopted its run."""
+        return self.adopted if self.adopted is not None else self.planned
 
     async def adopt(self, thread_id: str, run_id: str | None, instructions: str) -> None:
         """Become this worker thread's run: every later call, tools included, acts as it."""
@@ -343,9 +332,7 @@ class Run:
 
     def grant(self, name: str) -> str | None:
         """The grant to call operation ``name`` with: an adopted worker's own, not its coordinator's."""
-        if self.adopted is None:
-            return self.granted.grants.get(name)
-        own = next((op for op in self.adopted.operations if op.name == name), None)
+        own = next((op for op in self.catalog.operations if op.name == name), None)
         return None if own is None else own.grant
 
 

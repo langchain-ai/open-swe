@@ -30,6 +30,7 @@ from langgraph.config import get_stream_writer
 from pydantic import JsonValue, TypeAdapter
 from runtime_api.catalog import (
     CLIENT_CALL_PENDING,
+    Catalog,
     CliResultRules,
     LoopRules,
     ModelSpec,
@@ -60,7 +61,14 @@ from runtime_api.loop import (
 )
 from runtime_api.operations import RunRequest
 
-from rt.backend import OpenSweBackend, RunLocal, git_trace, human_messages, run_call
+from rt.backend import (
+    BackendCallError,
+    OpenSweBackend,
+    RunLocal,
+    git_trace,
+    human_messages,
+    run_call,
+)
 from rt.tools import STATE_KEY, run_id
 
 logger = logging.getLogger(__name__)
@@ -188,27 +196,30 @@ class _Turn:
 class RunLoop:
     """What happens around each of the run's model calls, as its ``LoopRules`` say."""
 
-    def __init__(self, backend: OpenSweBackend, rules: LoopRules, models: RunModels) -> None:
+    def __init__(self, backend: OpenSweBackend) -> None:
         self._backend = backend
-        self._rules = rules
-        self._run_models = models
         # Models each run calls by id, such as one a person asked for, as the backend sets them.
         self._chosen: RunLocal[dict[tuple[str, str | None], ModelSpec]] = RunLocal(dict)
+
+    @staticmethod
+    def runs(catalog: Catalog) -> bool:
+        """Whether a run planned with ``catalog`` runs its loop here, not in the backend's phases."""
+        return catalog.loop is not None and catalog.models is not None
 
     @property
     def rules(self) -> LoopRules:
         """The run's rules; a launched worker's own once it adopted its run, not its coordinator's."""
-        adopted = self._backend.adopted
-        return adopted.loop if adopted is not None and adopted.loop is not None else self._rules
+        rules = self._backend.run.catalog.loop
+        if rules is None:
+            raise BackendCallError("The run's catalog names no loop rules")
+        return rules
 
     @property
     def _models(self) -> RunModels:
-        adopted = self._backend.adopted
-        return (
-            adopted.models
-            if adopted is not None and adopted.models is not None
-            else self._run_models
-        )
+        models = self._backend.run.catalog.models
+        if models is None:
+            raise BackendCallError("The run's catalog names no models")
+        return models
 
     @property
     def looks_at_answers(self) -> bool:

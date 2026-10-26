@@ -171,12 +171,10 @@ class _Omitted:
 _OMITTED = _Omitted()
 
 _ResultT = TypeVar("_ResultT")
-_KeyT = TypeVar("_KeyT")
 
 if TYPE_CHECKING:
     from deepagents import SubAgent
     from langchain.agents.middleware import AgentMiddleware
-    from langgraph.store.base import BaseStore
     from langgraph_sdk.runtime import ServerRuntime
     from langsmith.sandbox import Sandbox
     from langsmith.sandbox import SandboxClient as LangSmithSandboxClient
@@ -793,38 +791,7 @@ async def compile_managed_agent_async(
     )
     factory_entry = callable(entry)
     factory_inspection = factory_entry and not is_run
-    thread_graph = (
-        _ThreadGraph.of(async_subagent, config, factory_runtime.store) if factory_entry else None
-    )
-    # A read of a thread that ran is built as its runs were, from their inputs.
-    read_digest = (
-        await thread_graph.last_digest() if thread_graph is not None and not is_run else None
-    )
-    definition: DeepAgentDefinition | None = None
-    if thread_graph is not None and read_digest is not None:
-        built = thread_graph.built(read_digest)
-        if built is not None:
-            return _for_call(
-                built,
-                config,
-                run_context=run_context,
-                is_run=is_run,
-                report_telemetry=report_telemetry,
-            )
-        inputs = await thread_graph.inputs(read_digest)
-        try:
-            definition = (
-                await resolve_agent_definition(
-                    entry, replace(factory_runtime, _openswe_graph_inputs=inputs)
-                )
-                if inputs is not None
-                else None
-            )
-        except (RuntimeError, TypeError, ValueError):
-            logger.warning("agent factory refused a thread's saved graph inputs; read without them")
-    if definition is None:
-        read_digest = None
-        definition = await resolve_agent_definition(entry, factory_runtime)
+    definition = await resolve_agent_definition(entry, factory_runtime)
     if GENERAL_PURPOSE in (async_subagent_graphs or {}) or async_subagent == GENERAL_PURPOSE:
         definition = with_async_general_purpose(definition)
     if async_subagent is not None:
@@ -851,8 +818,7 @@ async def compile_managed_agent_async(
         report_telemetry=report_telemetry,
         skip_factory_inspection_tools=factory_inspection,
         factory_entry=factory_entry,
-        thread_graph=thread_graph if is_run or read_digest is not None else None,
-        read_digest=read_digest,
+        shared_graph=async_subagent or "lead",
     )
 
 
@@ -877,14 +843,13 @@ async def _compile_resolved_managed_agent_async(
     report_telemetry: bool = True,
     skip_factory_inspection_tools: bool = False,
     factory_entry: bool = False,
-    thread_graph: _ThreadGraph | None = None,
-    read_digest: str | None = None,
+    shared_graph: str | None = None,
 ) -> CompiledAgent:
     """Select native context schema and memory access for a resolved definition.
 
-    With a ``thread_graph`` and the ``_openswe_graph_inputs`` the factory declared, the
-    thread's graph is built once per inputs and kept, and a run saves its inputs for
-    the thread's reads.
+    A definition that declares ``_openswe_graph_inputs`` is compiled once per process
+    for those inputs and shared by every run and read of ``shared_graph`` (the lead's
+    graph, or an async subagent's), whichever thread or caller it serves.
     """
     started_monotonic_ms = time.monotonic() * 1000
 
@@ -956,28 +921,20 @@ async def _compile_resolved_managed_agent_async(
             selected_by_dynamic_resolver=memory_selected_by_dynamic_resolver,
         )
     inputs = definition.config.get("_openswe_graph_inputs")
-    # A read keeps its graph under the inputs it was given, however the factory
-    # declares them again.
-    digest = (
-        read_digest
-        if read_digest is not None
-        else _graph_inputs_digest(inputs)
-        if isinstance(inputs, Mapping)
+    key = (
+        _SharedGraphs.key(shared_graph, inputs)
+        if shared_graph is not None and isinstance(inputs, Mapping)
         else None
     )
     policy = (allow_agent, user_access.user_id, user_access.denied_reason) if is_run else None
-    reused = (
-        thread_graph.built(digest, policy)
-        if thread_graph is not None and digest is not None
-        else None
-    )
-    if reused is not None:
-        built = reused
-    else:
+    built = _SharedGraphs.built(key, policy) if key is not None else None
+    if built is None:
         agent, configuration = await asyncio.to_thread(
             _compile_managed_agent,
             definition,
-            config,
+            # A shared graph closes over no run's config: what a call needs of its
+            # run, such as the thread its box belongs to, it reads from the run.
+            None if key is not None else config,
             **options,
             allow_agent=allow_agent,
             user_access=user_access,
@@ -992,16 +949,9 @@ async def _compile_resolved_managed_agent_async(
                 if definition.config.get("replicate_traces") is False
                 else ManagedCompiledAgent
             )
-        built = _BuiltGraph(
-            digest=digest,
-            policy=policy,
-            agent=agent,
-            configuration=configuration,
-        )
-        if thread_graph is not None and digest is not None:
-            thread_graph.keep(built)
-    if is_run and thread_graph is not None and digest is not None and isinstance(inputs, Mapping):
-        await thread_graph.save(digest, inputs)
+        built = _BuiltGraph(policy=policy, agent=agent, configuration=configuration)
+        if key is not None:
+            _SharedGraphs.keep(key, built)
     return _for_call(
         built,
         config,
@@ -1019,11 +969,11 @@ def _for_call(
     run_context: object,
     is_run: bool,
     report_telemetry: bool,
-    started_monotonic_ms: float | None = None,
+    started_monotonic_ms: float,
 ) -> CompiledAgent:
     """``built`` as this call runs it: its telemetry and this run's config defaults.
 
-    Applied per call, never to the graph a thread keeps, which other runs share.
+    Applied per call, never to a shared graph.
     """
     from managed_deepagents._run_input import (  # noqa: PLC0415
         execution_context,
@@ -1044,11 +994,7 @@ def _for_call(
                 replace(built.configuration, channel=_detect_run_channel(config)),
                 run_id=_platform_run_id(config),
                 thread_id=_thread_id_of(config),
-                started_monotonic_ms=(
-                    time.monotonic() * 1000
-                    if started_monotonic_ms is None
-                    else started_monotonic_ms
-                ),
+                started_monotonic_ms=started_monotonic_ms,
             ),
         )
     defaults = graph_default_config(config)
@@ -1065,106 +1011,51 @@ def _for_call(
 class _BuiltGraph:
     """A compiled graph and what its runs report, before any one call's config."""
 
-    digest: str | None
     # Who a run's graph was built for (its memory access); None for a read's.
     policy: tuple[bool, str | None, str | None] | None
     agent: CompiledAgent
     configuration: RunConfiguration
 
 
-def _graph_inputs_digest(inputs: Mapping[str, object]) -> str:
-    canonical = json.dumps(inputs, sort_keys=True, separators=(",", ":"), ensure_ascii=False)
-    return hashlib.sha256(canonical.encode()).hexdigest()
+#: Graphs a process keeps compiled, one per graph and declared inputs.
+_SHARED_GRAPHS_KEPT = 32
 
 
-#: Threads whose graph a process keeps built.
-_THREAD_GRAPHS_KEPT = 128
-#: Store namespaces: each declared ``_openswe_graph_inputs`` by digest, and the digest of each
-#: thread's last run, per graph.
-_GRAPH_INPUTS_NAMESPACE = ("openswe", "graph_inputs")
-_THREAD_GRAPHS_NAMESPACE = ("openswe", "thread_graphs")
+class _SharedGraphs:
+    """Compiled graphs shared by every run and read, by graph and declared inputs.
 
-
-class _ThreadGraph:
-    """One thread's graph, built from the ``_openswe_graph_inputs`` its factory declared.
-
-    A run saves its inputs in the store under the thread, so a read on any replica
-    builds the graph the thread's runs use. Each process keeps the compiled graph of
-    its most recent threads and rebuilds it only when the inputs change, or for a
-    run, when the caller's memory access does.
+    Only a definition that declares ``_openswe_graph_inputs`` is kept: it promises
+    that nothing it builds belongs to one run, thread or caller.
     """
 
     _built: ClassVar[OrderedDict[tuple[str, str], _BuiltGraph]] = OrderedDict()
-    # The digest this process last saved for each thread.
-    _saved: ClassVar[OrderedDict[tuple[str, str], str]] = OrderedDict()
 
-    def __init__(self, graph: str, thread_id: str, store: BaseStore) -> None:
-        self._key = (graph, thread_id)
-        self._store = store
+    @staticmethod
+    def key(graph: str, inputs: Mapping[str, object]) -> tuple[str, str]:
+        canonical = json.dumps(inputs, sort_keys=True, separators=(",", ":"), ensure_ascii=False)
+        return graph, hashlib.sha256(canonical.encode()).hexdigest()
 
     @classmethod
-    def of(
-        cls, async_subagent: str | None, config: ManagedRunConfig | None, store: object
-    ) -> _ThreadGraph | None:
-        from langgraph.store.base import BaseStore  # noqa: PLC0415 - runtime dependency
-
-        thread_id = _thread_id_of(config)
-        if thread_id is None or not isinstance(store, BaseStore):
-            return None
-        return cls(async_subagent or "lead", thread_id, store)
-
     def built(
-        self, digest: str, policy: tuple[bool, str | None, str | None] | None = None
+        cls, key: tuple[str, str], policy: tuple[bool, str | None, str | None] | None
     ) -> _BuiltGraph | None:
-        """The graph kept for ``digest``: any for a read; for a run, one built for a run like it."""
-        built = self._built.get(self._key)
-        if built is None or built.digest != digest:
+        """The graph kept for ``key``: any for a read; for a run, one built for a run like it."""
+        built = cls._built.get(key)
+        if built is None or (policy is not None and built.policy != policy):
             return None
-        if policy is not None and built.policy != policy:
-            return None
-        self._built.move_to_end(self._key)
+        cls._built.move_to_end(key)
         return built
 
-    def keep(self, built: _BuiltGraph) -> None:
-        kept = self._built.get(self._key)
-        # A read's build never displaces the graph a run built from the same inputs.
-        if built.policy is None and kept is not None and kept.digest == built.digest:
+    @classmethod
+    def keep(cls, key: tuple[str, str], built: _BuiltGraph) -> None:
+        kept = cls._built.get(key)
+        # A read's build never displaces the graph a run built.
+        if built.policy is None and kept is not None:
             return
-        _remember(self._built, self._key, built)
-
-    async def last_digest(self) -> str | None:
-        """The digest of the inputs of the thread's last run, if it declared any."""
-        graph, thread_id = self._key
-        pointer = await self._store.aget((*_THREAD_GRAPHS_NAMESPACE, graph), thread_id)
-        digest = pointer.value.get("digest") if pointer is not None else None
-        return digest if isinstance(digest, str) else None
-
-    async def inputs(self, digest: str) -> Mapping[str, object] | None:
-        item = await self._store.aget(_GRAPH_INPUTS_NAMESPACE, digest)
-        inputs = item.value.get("inputs") if item is not None else None
-        return inputs if isinstance(inputs, Mapping) else None
-
-    async def save(self, digest: str, inputs: Mapping[str, object]) -> None:
-        """Keep ``inputs`` as the thread's, for its reads."""
-        if self._saved.get(self._key) == digest:
-            return
-        if await self._store.aget(_GRAPH_INPUTS_NAMESPACE, digest) is None:
-            await self._store.aput(
-                _GRAPH_INPUTS_NAMESPACE, digest, {"inputs": dict(inputs)}, index=False
-            )
-        graph, thread_id = self._key
-        await self._store.aput(
-            (*_THREAD_GRAPHS_NAMESPACE, graph), thread_id, {"digest": digest}, index=False
-        )
-        _remember(self._saved, self._key, digest)
-
-
-def _remember(kept: OrderedDict[_KeyT, _ResultT], key: _KeyT, value: _ResultT) -> None:
-    """Keep ``value`` as the most recent of at most ``_THREAD_GRAPHS_KEPT``."""
-    kept[key] = value
-    kept.move_to_end(key)
-    while len(kept) > _THREAD_GRAPHS_KEPT:
-        kept.popitem(last=False)
+        cls._built[key] = built
+        cls._built.move_to_end(key)
+        while len(cls._built) > _SHARED_GRAPHS_KEPT:
+            cls._built.popitem(last=False)
 
 
 def _select_run_connectors(
@@ -2014,6 +1905,17 @@ class _LazySandboxSource:
         self.proxy_config_sync = proxy_config_sync
 
 
+def _ambient_runtime() -> object:
+    """The LangGraph runtime of the run in progress, if any."""
+    from langgraph.config import get_config  # noqa: PLC0415
+
+    try:
+        configurable = get_config().get("configurable") or {}
+    except RuntimeError:
+        return None
+    return configurable.get("__pregel_runtime")
+
+
 class _LazyManagedSandboxBackend(SandboxBackendProtocol):
     """Lazy sandbox backend with frozen per-instance ``configurable``.
 
@@ -2024,15 +1926,44 @@ class _LazyManagedSandboxBackend(SandboxBackendProtocol):
     """
 
     def __init__(
-        self, source: _LazySandboxSource, bound_configurable: Mapping[str, object] | None
+        self,
+        source: _LazySandboxSource,
+        bound_configurable: Mapping[str, object] | None,
+        runtime: object = None,
     ) -> None:
         self._source = source
         self._bound_configurable = bound_configurable
+        # The bound run's runtime, which picks its box (``_openswe_select``).
+        self._runtime = runtime
+        self._selected: SandboxDefinition | None = None
         self._resolved_backend: SandboxBackendProtocol | None = None
+        # A graph shared by every run closes over no run's config: unbound, this backend
+        # finds the run in progress per call and keeps no box of its own.
+        self._shared = bound_configurable is None and source.run_config is None
 
     def bind_runtime(self, runtime: object) -> _LazyManagedSandboxBackend:
         """Capture this run's configuration without resolving the sandbox."""
-        return _LazyManagedSandboxBackend(self._source, resolve_runtime_configurable(runtime))
+        return _LazyManagedSandboxBackend(
+            self._source, resolve_runtime_configurable(runtime), runtime
+        )
+
+    def _sandbox(self) -> SandboxDefinition:
+        """The box of the run this backend acts for, as ``_openswe_select`` picks it."""
+        from managed_deepagents.sandbox import selected_for  # noqa: PLC0415
+
+        if self._selected is not None:
+            return self._selected
+        runtime = self._runtime if self._runtime is not None else _ambient_runtime()
+        selected = selected_for(self._source.sandbox, runtime)
+        if selected is None:
+            raise RuntimeError("This run has no sandbox")
+        if not self._shared:
+            self._selected = selected
+        return selected
+
+    def _keep(self, backend: SandboxBackendProtocol) -> None:
+        if not self._shared:
+            self._resolved_backend = backend
 
     @property
     def id(self) -> str:
@@ -2046,7 +1977,7 @@ class _LazyManagedSandboxBackend(SandboxBackendProtocol):
             return str(resolved)
         try:
             scope = _sandbox_scope_key(
-                self._source.sandbox, self._config(), self._source.selection_fingerprint
+                self._sandbox(), self._config(), self._source.selection_fingerprint
             )
             return f"pending:{scope}"
         except Exception:  # noqa: BLE001 — match TS pending:sandbox fallback
@@ -2058,7 +1989,7 @@ class _LazyManagedSandboxBackend(SandboxBackendProtocol):
             return self._resolved_backend
         try:
             key = _sandbox_scope_key(
-                self._source.sandbox, self._config(), self._source.selection_fingerprint
+                self._sandbox(), self._config(), self._source.selection_fingerprint
             )
         except Exception:  # noqa: BLE001 — no thread, so no sandbox, as in ``id``
             return None
@@ -2198,17 +2129,18 @@ class _LazyManagedSandboxBackend(SandboxBackendProtocol):
         """Replace this run's box with a fresh one under its name, from ``sandbox``'s options."""
         source = self._source
         await self._abackend()
+        current = self._sandbox()
         backend, replacement = await asyncio.to_thread(
             _replace_managed_sandbox,
-            source.sandbox,
-            sandbox if sandbox is not None else source.sandbox,
+            current,
+            sandbox if sandbox is not None else current,
             self._config(),
             source.connectors,
             source.identity,
             source.selection_fingerprint,
         )
         source.proxy_config_sync.invalidate(replacement.new_name)
-        self._resolved_backend = backend
+        self._keep(backend)
         return replacement
 
     def _config(self) -> ManagedRunConfig | None:
@@ -2219,12 +2151,13 @@ class _LazyManagedSandboxBackend(SandboxBackendProtocol):
     async def _sync_sandbox_proxy_config(self) -> None:
         from managed_deepagents.sandbox import manages_proxy  # noqa: PLC0415
 
-        if not manages_proxy(self._source.sandbox.options):
+        sandbox = self._sandbox()
+        if not manages_proxy(sandbox.options):
             return
         config = self._config()
-        key = _sandbox_scope_key(self._source.sandbox, config, self._source.selection_fingerprint)
+        key = _sandbox_scope_key(sandbox, config, self._source.selection_fingerprint)
         await self._source.proxy_config_sync.sync(
-            self._source.sandbox,
+            sandbox,
             _peek_managed_host_name(key),
             config,
         )
@@ -2234,13 +2167,13 @@ class _LazyManagedSandboxBackend(SandboxBackendProtocol):
             return self._resolved_backend
         source = self._source
         backend = _resolve_managed_sandbox(
-            source.sandbox,
+            self._sandbox(),
             self._config(),
             connectors=source.connectors,
             identity=source.identity,
             selection_fingerprint=source.selection_fingerprint,
         )
-        self._resolved_backend = backend
+        self._keep(backend)
         return backend
 
     async def _abackend(self) -> SandboxBackendProtocol:
@@ -2249,13 +2182,13 @@ class _LazyManagedSandboxBackend(SandboxBackendProtocol):
         source = self._source
         backend = await asyncio.to_thread(
             _resolve_managed_sandbox,
-            source.sandbox,
+            self._sandbox(),
             self._config(),
             source.connectors,
             source.identity,
             source.selection_fingerprint,
         )
-        self._resolved_backend = backend
+        self._keep(backend)
         return backend
 
     def _recover(self, backend: SandboxBackendProtocol, error: Exception) -> None:
@@ -2266,12 +2199,13 @@ class _LazyManagedSandboxBackend(SandboxBackendProtocol):
         if _parent_sandbox_scope(config, source.selection_fingerprint) is not None:
             # The lead recovers its own sandbox; helpers must not recreate it.
             return
+        sandbox = self._sandbox()
         previous_name = _peek_managed_host_name(
-            _sandbox_scope_key(source.sandbox, config, source.selection_fingerprint)
+            _sandbox_scope_key(sandbox, config, source.selection_fingerprint)
         )
         try:
             recovered = _recover_managed_sandbox(
-                source.sandbox,
+                sandbox,
                 config,
                 backend,
                 source.connectors,
@@ -2283,7 +2217,7 @@ class _LazyManagedSandboxBackend(SandboxBackendProtocol):
         if recovered is not backend:
             source.proxy_config_sync.invalidate(previous_name)
         if self._resolved_backend is backend:
-            self._resolved_backend = recovered
+            self._keep(recovered)
 
     def _call(
         self,

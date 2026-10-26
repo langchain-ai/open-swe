@@ -156,13 +156,10 @@ def define_deep_agent(
     ``_openswe_graph_inputs`` is Open SWE's, not MDA's API (see Open SWE's
     ``vendor/mda-changes``). From a factory entry, it is a JSON object naming
     everything the factory built this definition from. The factory then promises
-    that the same inputs build the same agent for every run, with nothing that
-    belongs to one run (a token, a request id) in the tools or middleware it
-    returns: those read it from the run's context per call. MDA keeps a thread's
-    inputs from its last run, builds the thread's graph once per inputs and reuses
-    it for the thread's runs, and reads the thread through the same graph by calling
-    the factory again with them (``runtime._openswe_graph_inputs``) instead of with
-    a run.
+    that the same inputs build the same agent for every run, thread and caller,
+    with nothing that belongs to one of them in the tools, middleware or sandbox it
+    returns: those read what they need from the run per call. MDA compiles the
+    definition once per process for those inputs and shares the graph.
     """
     if not isinstance(name, str) or not name.strip():
         raise TypeError(
