@@ -103,21 +103,28 @@ def _started(thread_id: str, starting_ms: int) -> Callable[[Headers], Awaitable[
 _POST_READS: Final = frozenset({"/history", "/state/checkpoint"})
 
 
-async def adopt_channel_run(thread_id: str, channel: str) -> None:
+async def adopt_channel_run(
+    thread_id: str, channel: str, *, metadata: Mapping[str, JsonValue] | None = None
+) -> None:
     """Index an MDA channel's thread for the run the channel is about to start on it.
 
     Call it before the thread's metadata is written. The channel creates the thread
     on MDA as its conversation's own when it starts the run, so the backend indexes
     it and keeps its own copy, but never creates it there, as it does a new thread
     of its own; it marks it the channel's, so it stays read-only here. Mark it busy
-    with :func:`channel_run_starting` once the run is ready.
+    with :func:`channel_run_starting` once the run is ready. ``metadata`` is what a
+    new thread starts with until its metadata is written, such as its visibility.
     """
     thread = await index.get(thread_id)
     if thread is None:
         thread = await index.create(
             thread_id,
             runtime="mda",
-            metadata={RUNTIME_METADATA_KEY: MDA_RUNTIME, CHANNEL_METADATA_KEY: channel},
+            metadata={
+                **(metadata or {}),
+                RUNTIME_METADATA_KEY: MDA_RUNTIME,
+                CHANNEL_METADATA_KEY: channel,
+            },
             if_exists="do_nothing",
         )
         await RUNTIMES.local.create(thread_id, thread.metadata)

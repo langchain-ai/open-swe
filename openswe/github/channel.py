@@ -160,14 +160,22 @@ async def github_channel_event(
     event_type, _, action = key.partition(".")
     if payload.get("action") != action:
         raise HTTPException(status_code=422, detail="The payload's action is not the event's")
+    fields = {"github_event": key, "github_delivery": delivery_id, "agent_thread_id": thread_id}
     reason = await trigger_rejection(payload, event_type)
     if reason is not None:
-        logger.info(
-            "MDA's GitHub channel event starts no run",
-            extra={"github_event": key, "github_delivery": delivery_id},
-        )
-        return None
+        return _no_run(reason, **fields)
     if thread.get("interrupted"):
         # Nothing starts while the thread waits; no reaction or metadata either.
         return {"input": _ACTS_WHILE_INTERRUPTED}
-    return await _prepare_run(payload, delivery_id, thread_id, event_type)
+    answer = await _prepare_run(payload, delivery_id, thread_id, event_type)
+    if answer is None:
+        return _no_run("no run prepared", **fields)
+    return answer
+
+
+def _no_run(reason: str, **fields: str) -> None:
+    """Answer the channel that the event starts nothing, with one log line saying why."""
+    logger.info(
+        "MDA's GitHub channel endpoint answers no run",
+        extra={"endpoint": "github", "no_run_reason": reason, **fields},
+    )

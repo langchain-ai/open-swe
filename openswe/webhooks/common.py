@@ -34,7 +34,7 @@ from openswe.dashboard.profiles import (  # noqa: F401
     has_access_token_record,
 )
 from openswe.dashboard.workspace_settings import get_workspace_settings
-from openswe.dispatch import dispatch_agent_run
+from openswe.dispatch import channel_of, dispatch_agent_run
 from openswe.github.app import (
     get_github_app_installation_token,  # noqa: F401
     get_github_app_installation_token_with_expiry,
@@ -642,9 +642,11 @@ async def upsert_agent_thread_metadata(
         metadata["title_seed"] = metadata["title"]
 
     # A helper may have pre-created a bare stub this request; it still needs the
-    # creation stamps. Legacy threads carry created_at_ms and are left alone.
+    # creation stamps. Legacy threads carry created_at_ms and are left alone. A
+    # channel's adopted stub is private only until this first write says who sees it.
     if existing is None or (
-        "visibility" not in existing_meta and existing_meta.get("created_at_ms") is None
+        existing_meta.get("created_at_ms") is None
+        and ("visibility" not in existing_meta or channel_of(existing_meta) is not None)
     ):
         metadata["visibility"] = visibility
         metadata["owner_type"] = owner_type

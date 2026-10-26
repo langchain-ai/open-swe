@@ -127,6 +127,38 @@ def test_upsert_stamps_visibility_and_owner_only_on_creation(
     assert metadata["owner_login"] == "Alice"
 
 
+@pytest.mark.parametrize(
+    ("stub", "visibility"),
+    [
+        # A channel's adopted stub is private only until its first write.
+        ({"channel": "slack", "visibility": "private", "source": "slack"}, "public"),
+        # Any other thread that already chose its visibility keeps it.
+        ({"visibility": "private"}, "private"),
+    ],
+)
+def test_upsert_stamps_an_adopted_channel_stub_once(
+    monkeypatch: pytest.MonkeyPatch, stub: dict, visibility: str
+) -> None:
+    threads = _FakeThreadsClient(thread={"metadata": dict(stub)})
+    monkeypatch.setattr(webhook_common, "get_client", lambda url: _FakeClient(threads))
+    monkeypatch.setattr(webhook_common, "mirror_thread_metadata", AsyncMock())
+
+    for login, requested in (("alice", "public"), ("bob", "private")):
+        assert asyncio.run(
+            webhook_common.upsert_agent_thread_metadata(
+                "thread-id",
+                source="slack",
+                visibility=requested,
+                owner_login=login,
+                title="Thread",
+            )
+        )
+
+    metadata = cast(dict, threads.thread)["metadata"]
+    assert metadata["visibility"] == visibility
+    assert metadata.get("owner_login") == ("alice" if visibility == "public" else None)
+
+
 @pytest.mark.asyncio
 @pytest.mark.parametrize("linked_slack", [True, False])
 async def test_upsert_counts_linked_and_unregistered_slack_participants(
@@ -514,6 +546,18 @@ async def test_slack_files_wait_for_the_box_mda_opens_for_the_run(
     run = captured["run_create"]["kwargs"]
     assert run["config"]["configurable"].get("environment") == environment
     assert "/workspace/.open-swe/slack-files/bundle.zip" in str(run["input"]["messages"])
+
+
+async def test_a_channel_run_does_not_wait_on_the_sandbox_for_slack_files(slack_file_mention):
+    request, threads, captured = slack_file_mention
+
+    prepared = await slack_webhooks.prepare_slack_channel_run(request, None)
+
+    # MDA's channel starts the run; nothing holds up its answer for a sandbox.
+    assert prepared is not None
+    assert "run_create" not in captured
+    assert "/workspace/.open-swe/slack-files/" not in str(prepared.input)
+    assert threads.metadata["owner_login"] == "mason-gh"
 
 
 @pytest.mark.parametrize("failure", ["account", "public-persistence", "private-persistence"])
