@@ -90,8 +90,19 @@ it.each([
     const button = screen.getByRole("button", {
       name: "Request review in Slack",
     })
-    expect(button.hasAttribute("disabled")).toBe(false)
+    expect(button.hasAttribute("disabled")).toBe(true)
+    fireEvent.click(button)
+    expect(request).not.toHaveBeenCalled()
+    fireEvent.click(
+      screen.getByRole("button", { name: "Why a review can't be requested" })
+    )
+    expect(
+      await screen.findByText(
+        "No default Slack review channel is configured. Choose a review channel manually to enable this button."
+      )
+    ).toBeTruthy()
     fireEvent.click(screen.getByRole("button", { name: "Choose channel" }))
+    expect(button.hasAttribute("disabled")).toBe(false)
     fireEvent.click(button)
     const requesting = await screen.findByRole("button", {
       name: "Requesting…",
@@ -160,7 +171,7 @@ it.each([
       screen
         .getByRole("button", { name: "Request review in Slack" })
         .hasAttribute("disabled")
-    ).toBe(false)
+    ).toBe(true)
     await act(async () =>
       result.resolve({
         available: false,
@@ -193,7 +204,7 @@ it.each([
 )
 
 it.each(["loading", "error", "blocked", "approved"])(
-  "allows requesting a review when availability is %s",
+  "requires a known default or selected channel when availability is %s",
   async (state) => {
     const current = {
       ...pr,
@@ -225,13 +236,19 @@ it.each(["loading", "error", "blocked", "approved"])(
         </TooltipProvider>
       </QueryClientProvider>
     )
-    await waitFor(() => expect(availability).toHaveBeenCalled())
     const button = screen.getByRole("button", {
       name: "Request review in Slack",
     })
-    expect(button.hasAttribute("disabled")).toBe(false)
+    if (state === "error")
+      await screen.findByRole("button", { name: "Retry review status" })
+    const needsChannel = state === "loading" || state === "error"
+    await waitFor(() =>
+      expect(button.hasAttribute("disabled")).toBe(needsChannel)
+    )
     fireEvent.click(button)
-    await waitFor(() => expect(request).toHaveBeenCalledWith(current, ""))
+    await waitFor(() =>
+      expect(request.mock.calls).toEqual(needsChannel ? [] : [[current, ""]])
+    )
   }
 )
 

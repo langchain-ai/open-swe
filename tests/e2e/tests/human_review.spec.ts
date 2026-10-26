@@ -602,7 +602,9 @@ test.describe("Human review in Slack", () => {
 
   test("approved pull requests still offer Slack review requests", async ({
     page,
+    request,
   }) => {
+    await setReviewChannel(request);
     await loginAs(page, ALICE);
     await seedOpenPullRequest(page, {
       repo: `${REPO.owner}/${REPO.repo}`,
