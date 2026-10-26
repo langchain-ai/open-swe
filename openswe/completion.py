@@ -427,6 +427,8 @@ async def _settle_transcript_turn(thread_id: str, run_id: str | None, status: ob
     """
     if status == "success":
         outcome: TurnOutcome = "completed"
+    elif status == "interrupted":
+        outcome = "interrupted"
     elif status in _TERMINAL_FAILURE_STATUSES:
         outcome = "failed"
     else:

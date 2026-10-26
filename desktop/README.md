@@ -3,8 +3,9 @@
 > [!IMPORTANT]
 > This desktop client is experimental. The web UI is the recommended way to use Open SWE.
 
-The Electron package ships the compiled Open SWE web UI. Users configure only the URL of a
-compatible Open SWE backend; they do not need a separately hosted dashboard.
+The Electron app downloads a standalone UI release selected by the connected backend. It keeps the
+last complete UI on disk, including lazy routes, for offline use. No dashboard is embedded in the
+installer. First launch requires connectivity to download the UI; failure shows a retry screen.
 
 Desktop users can choose **This Mac** in the new-task composer to run an agent over a selected local project. The thread is an ordinary cloud thread on the connected backend — same transcript, models, settings, MCPs and skills — whose sandbox is the project on this Mac instead of a hosted box. The app serves it through a sandbox bridge: it long-polls the backend for the agent's `execute`, `upload_files` and `download_files` requests, runs them in the checkout, and posts the results back. This is the same bridge `oswe run` uses, from the shared `bridge-client` package.
 
@@ -19,14 +20,31 @@ The **Terminal** and file browser open in the same checkout, on this Mac.
 
 ## How it connects
 
-The bundled UI runs at an internal `open-swe://app` origin. Electron proxies its
-`/dashboard/api/*` requests to the selected backend, so the browser never receives a LangSmith API
-key and never calls the raw LangGraph API directly. GitHub login creates the same signed dashboard
-session used by the web UI.
+The UI runs at `open-swe://app`, with native IPC for local projects, threads, worktrees, terminals
+and files. `/desktop-ui.json` on the backend selects a GitHub Release archive by backend commit,
+SHA-256 and bridge protocol version. Downloads carry no session credentials, follow redirects only
+to GitHub release hosts, and are verified before activation. Each backend has its own cache. Cached
+UI opens immediately; updates download in the background and take effect on the next reload.
+Interrupted or corrupt downloads leave the previous UI intact. Running agents requires the backend.
+
+**Release Desktop UI** publishes `ui.json.gz` and `descriptor.json` as immutable
+`desktop-ui-<commit>` prereleases on main/preview pushes. Backend images select that exact commit
+through their stamped build identity. To run a local UI instead, build `ui/` (`pnpm --filter open-swe-dashboard run build`) and launch
+the app with `OPEN_SWE_DESKTOP_UI_ARCHIVE=<repo>/ui/.output/desktop/ui.json.gz`; it installs that
+archive on every load instead of contacting the backend's descriptor.
+
+Electron proxies `/dashboard/api/*` requests to the selected backend, so the browser never receives
+a LangSmith API key and never calls the raw LangGraph API directly. GitHub login creates the same
+signed dashboard session used by the web UI.
 
 Packaged builds ask for the organization's backend URL on first launch and store it in the app's
 local user data. They have no maintainer-hosted default. Use **Open SWE → Backend URL…** to switch
 deployments; switching clears the previous deployment's local session data.
+
+On macOS, Universal Links open agent and review pages in the app only when the URL's origin
+matches the configured backend. Links for other deployments open in the default browser instead.
+Associated domains are fixed in the signed app, so macOS may still launch Open SWE before it
+hands a mismatched link back to the browser.
 
 The shared backend's GitHub App must allow `<backend-url>/dashboard/api/auth/callback` as a
 callback URL. Set `ALLOWED_GITHUB_ORGS` or `ALLOWED_GITHUB_USERS` on that backend to control which
@@ -99,7 +117,7 @@ pnpm --dir desktop run pack # unpacked application for the current platform
 pnpm --dir desktop run dist # installer for the current platform
 ```
 
-Both commands build `ui/` and package its static output with Electron. Build outputs are written
+Neither command builds or embeds the dashboard. Build outputs are written
 to `desktop/dist/`.
 
 ## macOS releases
@@ -113,10 +131,8 @@ pull request, merge it to `main`, test the resulting code as needed, then run **
 manually. The workflow publishes the exact package version and fails if that stable release is
 already complete. A partial stable release remains manually retryable.
 
-Both paths compile the current `ui/` bundle, sign and notarize the Electron app, verify the resulting
-app and DMG, create the tag, and publish the DMG, macOS zip, and app zip. Desktop-prefixed tags keep
-this release stream separate from web and backend releases; the workflow packages the web UI but
-does not deploy or otherwise change the hosted web app.
+Both paths sign and notarize the Electron shell, verify the app and DMG, create the tag, and publish
+the installers. UI releases are separate from desktop shell releases.
 
 The workflow requires these GitHub Actions secrets:
 
