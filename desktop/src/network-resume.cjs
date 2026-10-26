@@ -10,7 +10,18 @@
  */
 
 const DEFAULT_PROBE_INTERVAL_MS = 2_000;
-const DEFAULT_PROBE_TIMEOUT_MS = 1_000;
+/**
+ * The coordinator's probe includes restarting a dead backend, which the dev
+ * server takes seconds to boot (`uv run langgraph dev` measured at ~2.2s on
+ * Windows). A 1s budget cut that restart short, reported "unreachable", and
+ * then waited a further interval before probing again — the restart it had
+ * just started kept running in the background. The budget must outlast the
+ * boot; a genuinely dead backend still fails fast on its own (a refused
+ * connection returns immediately).
+ */
+const DEFAULT_PROBE_TIMEOUT_MS = 10_000;
+/** Cadence after a fast (refused / not-yet-listening) probe failure. */
+const FAST_RETRY_INTERVAL_MS = 250;
 const DEFAULT_WAITING_TIMEOUT_MS = 10 * 60 * 1_000;
 const DEFAULT_REJECTED_RETRY_MS = 60_000;
 /**
@@ -171,6 +182,8 @@ function createNetworkResumeCoordinator(options) {
   let failures = 0;
   let timer = null;
   let running = false;
+  let lastProbeFailed = false;
+  let lastProbeElapsedMs = 0;
 
   function log(message, extra) {
     logger.info(message, extra);
@@ -232,7 +245,21 @@ function createNetworkResumeCoordinator(options) {
       return;
     }
     if (timer !== null || running) return;
-    timer = schedule(tick, probeIntervalMs);
+    timer = schedule(tick, nextTickDelayMs());
+  }
+
+  /**
+   * A failed probe under a held chain is usually a backend still booting: the
+   * next probe decides "down" and should not wait out the full interval when
+   * the failure took only milliseconds (a refused connection). A slow failure
+   * (the probe timed out) keeps the normal cadence so a struggling backend is
+   * not hammered.
+   */
+  function nextTickDelayMs() {
+    if (hasWaiting() && lastProbeFailed && lastProbeElapsedMs < probeIntervalMs / 2) {
+      return FAST_RETRY_INTERVAL_MS;
+    }
+    return probeIntervalMs;
   }
 
   async function tick() {
@@ -269,9 +296,14 @@ function createNetworkResumeCoordinator(options) {
   async function sampleNetwork() {
     const startedAt = now();
     let reachable = false;
+    let timedOut = false;
     try {
       reachable = (await withTimeout(Promise.resolve(probe()), probeTimeoutMs)) === true;
-    } catch {
+    } catch (error) {
+      // The first probe after a loss starts the local backend, which takes
+      // seconds; a probe budget shorter than that would report "down" while
+      // the restart it just triggered is still on its way.
+      timedOut = /timed out/i.test(String(error));
       reachable = false;
     }
     failures = reachable ? 0 : failures + 1;
@@ -282,11 +314,14 @@ function createNetworkResumeCoordinator(options) {
           ? false
           : network.reachable;
     network.checkedAt = now();
+    lastProbeFailed = !reachable;
+    lastProbeElapsedMs = network.checkedAt - startedAt;
     log("network resume probe", {
       reachable,
       checkedAt: network.checkedAt,
-      elapsedMs: network.checkedAt - startedAt,
+      elapsedMs: lastProbeElapsedMs,
       failures,
+      timedOut,
     });
     emit({ kind: "network" });
   }

@@ -147,6 +147,46 @@ test("concurrent starts share one backend launch", async () => {
   assert.equal(second, first);
 });
 
+test("the startup health check uses a short per-attempt budget", async () => {
+  const { EventEmitter } = require("node:events");
+  const os = require("node:os");
+  const budgets = [];
+  const originalTimeout = AbortSignal.timeout;
+  // Capture the budget the supervisor asks for instead of waiting it out.
+  AbortSignal.timeout = (milliseconds) => {
+    budgets.push(milliseconds);
+    return originalTimeout.call(AbortSignal, 5);
+  };
+  const supervisor = new BackendSupervisor({
+    repoRoot: path.resolve("/work/open-swe"),
+    projectsFile: path.join(os.tmpdir(), "projects.json"),
+    worktreesDir: path.join(os.tmpdir(), "open-swe-test-worktrees"),
+    reservePort: async () => 49152,
+    spawn: () =>
+      Object.assign(new EventEmitter(), {
+        stdout: null,
+        stderr: null,
+        exitCode: null,
+        signalCode: null,
+        kill() {},
+      }),
+    // The child is not listening on the first attempt, so the caller must not
+    // be held for a full second while it boots.
+    fetch: async () => new Response(null, { status: 200 }),
+  });
+
+  try {
+    await supervisor.start();
+  } finally {
+    AbortSignal.timeout = originalTimeout;
+  }
+  assert.ok(budgets.length > 0);
+  assert.ok(
+    budgets[0] <= 500,
+    `startup health check waited ${budgets[0]}ms before giving up on a booting child`
+  );
+});
+
 test("boot interrupts runs a previous backend left marked as running", async () => {
   const { EventEmitter } = require("node:events");
   const os = require("node:os");

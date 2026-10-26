@@ -14,6 +14,7 @@ function harness(options = {}) {
   let nextTimer = 1;
   let clock = 1_000_000;
   const changes = [];
+  const delays = [];
   const state = { reachable: options.reachable ?? false };
   const resumeCalls = [];
   const coordinator = createNetworkResumeCoordinator({
@@ -26,10 +27,11 @@ function harness(options = {}) {
         return { status: "dispatched", runId: `run-${input.generation + 1}` };
       }),
     logger: { info() {} },
-    now: () => clock,
-    schedule: (callback) => {
+    now: options.now ?? (() => clock),
+    schedule: (callback, milliseconds) => {
       const id = nextTimer++;
       timers.set(id, callback);
+      delays.push(milliseconds);
       return id;
     },
     cancel: (id) => timers.delete(id),
@@ -44,6 +46,7 @@ function harness(options = {}) {
     resumeCalls,
     changes,
     timers,
+    delays,
     advance(milliseconds) {
       clock += milliseconds;
     },
@@ -303,6 +306,58 @@ test("the inflight timeout leaves other threads' chains alone", async () => {
   // Dispatching, not inflight: the inflight deadline is measured from the
   // renderer reporting the stream back, so another thread's chain is untouched.
   assert.equal(h.chain("thread-2")?.phase, "dispatching");
+});
+
+test("a fast failed probe retries sooner instead of waiting out the interval", async () => {
+  const h = harness({ reachable: false });
+  h.coordinator.arm({ threadId: "thread-1", reason: "backend-down" });
+  await h.tick();
+
+  // The probe returned immediately, so the next one is scheduled fast.
+  assert.equal(h.delays.at(-1), 250);
+
+  h.state.reachable = true;
+  h.delays.length = 0;
+  await h.tick();
+  assert.equal(h.resumeCalls.length, 1);
+  // The chain is inflight now, so the monitor only runs for the release
+  // timeout: no probe gets scheduled and nothing is accelerated.
+  assert.ok(!h.delays.includes(250));
+});
+
+test("a slow failed probe keeps the normal cadence", async () => {
+  // Only the tick after a *fast* failure is accelerated: a probe that spent
+  // its whole budget means a struggling backend is not hammered.
+  const clock = { value: 1_000_000 };
+  const h = harness({
+    probe: async () => {
+      clock.value += 10_000;
+      return false;
+    },
+    now: () => clock.value,
+  });
+  h.coordinator.arm({ threadId: "thread-1", reason: "backend-down" });
+  await h.tick();
+  assert.equal(h.delays.at(-1), 2_000);
+});
+
+test("the probe budget outlasts a backend boot", async () => {
+  // The probe restarts a dead backend, and the dev server takes seconds to
+  // boot; a shorter budget reports "down" while its own restart is in flight.
+  const bootMs = 3_000;
+  const clock = { value: 1_000_000 };
+  const h = harness({
+    probe: async () => {
+      clock.value += bootMs;
+      return true;
+    },
+    now: () => clock.value,
+  });
+  h.coordinator.arm({ threadId: "thread-1", reason: "backend-down" });
+  await h.tick();
+
+  assert.equal(h.resumeCalls.length, 1, "the restarting backend counts as reachable");
+  assert.equal(h.chain().phase, "dispatching");
 });
 
 test("releases a held turn once the wait window is spent", async () => {

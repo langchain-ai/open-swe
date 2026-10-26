@@ -16,6 +16,11 @@ const JOBS_PER_WORKER = "10";
 // helper calls on Windows — every request then fails with a 500.
 const ALLOW_BLOCKING = "--allow-blocking";
 const START_TIMEOUT_MS = 60_000;
+// The startup health check runs against a port nobody listens on yet, so its
+// per-attempt timeout and poll interval are what a dead backend costs the
+// recovery coordinator's first probe. 250ms leaves a real boot 240 tries.
+const START_PROBE_TIMEOUT_MS = 250;
+const START_POLL_INTERVAL_MS = 150;
 const STOP_TIMEOUT_MS = 5_000;
 const THREAD_STATUS = { busy: "running", error: "error" };
 const PROVIDER_KEYS = {
@@ -282,9 +287,12 @@ class BackendSupervisor {
     while (Date.now() < deadline) {
       if (startupError) break;
       try {
+        // A short per-attempt budget: while the child is booting nobody listens
+        // on the port yet, so each attempt fails fast and the loop retries.
+        // The overall wait is still bounded by `deadline`.
         const response = await this.fetch(`http://${HOST}:${this.port}/`, {
           headers: { authorization: `Bearer ${this.token}` },
-          signal: AbortSignal.timeout(1_000),
+          signal: AbortSignal.timeout(START_PROBE_TIMEOUT_MS),
         });
         if (response.ok) {
           this.failure = null;
@@ -292,7 +300,7 @@ class BackendSupervisor {
           return this.publicConfig();
         }
       } catch {}
-      await Promise.race([delay(150), exited]);
+      await Promise.race([delay(START_POLL_INTERVAL_MS), exited]);
     }
     await this.close();
     const detail = this.logs.trim();
