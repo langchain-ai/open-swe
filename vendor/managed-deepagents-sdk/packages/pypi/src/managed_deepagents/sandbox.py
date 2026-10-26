@@ -96,6 +96,7 @@ class SandboxDefinition:
         "_openswe_thread_id",
         "_openswe_create_fields",
         "_openswe_no_manage_proxy",
+        "_openswe_select",
     )
 
     def __repr__(self) -> str:  # pragma: no cover - debug helper
@@ -193,6 +194,20 @@ def owning_thread(options: Mapping[str, object]) -> str | None:
     """The thread whose box a definition uses, when not the run's own."""
     thread_id = options.get("_openswe_thread_id")
     return thread_id if isinstance(thread_id, str) else None
+
+
+def selected_for(sandbox: SandboxDefinition, runtime: object) -> SandboxDefinition | None:
+    """The box ``runtime``'s run uses: what ``_openswe_select`` picks for it, else ``sandbox``.
+
+    None when the run has no box.
+    """
+    select = sandbox.options.get("_openswe_select")
+    if not callable(select):
+        return sandbox
+    selected = select(runtime)
+    if selected is not None and not isinstance(selected, SandboxDefinition):
+        raise TypeError("_openswe_select must return define_sandbox(...) or None")
+    return selected
 
 
 def is_per_thread(options: Mapping[str, object]) -> bool:
