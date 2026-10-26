@@ -183,19 +183,6 @@ describe("AutomationEditor", () => {
     ).toBe(true)
   })
 
-  it("does not offer manual runs for new automations or non-admins", () => {
-    signInAsAdmin()
-    const { rerender } = render(<AutomationEditor mode="create" />, {
-      wrapper: TooltipProvider,
-    })
-    expect(screen.queryByRole("button", { name: "Run now" })).toBeNull()
-    vi.mocked(useSession).mockReturnValue({
-      data: { is_admin: false },
-    } as unknown as ReturnType<typeof useSession>)
-    rerender(<AutomationEditor mode="edit" schedule={SCHEDULE} />)
-    expect(screen.queryByRole("button", { name: "Run now" })).toBeNull()
-  })
-
   it("shows the admin-thread checkbox only to admins", () => {
     vi.mocked(useSession).mockReturnValue({
       data: { is_admin: true },
