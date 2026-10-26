@@ -27,11 +27,13 @@ class _Backend:
         inherited_from_main: bool = False,
         workflows_changed_by_merge: bool = True,
         inspectable: bool = True,
+        pending_workflows: bool = False,
     ) -> None:
         self.workflow_files = workflow_files
         self.inherited_from_main = inherited_from_main
         self.workflows_changed_by_merge = workflows_changed_by_merge
         self.inspectable = inspectable
+        self.pending_workflows = pending_workflows
         self.commands: list[str] = []
         self.head = "a" * 40
 
@@ -39,6 +41,8 @@ class _Backend:
         self.commands.append(command)
         if not self.inspectable:
             return _Response("fatal: not a git repository", 128)
+        if "status --porcelain" in command:
+            return _Response(" M .github/workflows/x.yml" if self.pending_workflows else "")
         if "rev-parse --show-toplevel" in command:
             return _Response("/repo\n")
         if "rev-parse --verify refs/remotes/origin/feature" in command:
@@ -247,15 +251,13 @@ async def test_workflow_change_for_push_ignores_non_workflow_push() -> None:
 async def test_workflow_change_for_push_rejects_non_current_refspec() -> None:
     backend = _Backend()
 
-    assert (
+    with pytest.raises(guard.WorkflowPushInspectionError):
         await guard._workflow_change_for_push(
             backend,
             guard.ParsedGitPush(
                 repo_dir="/repo", remote="origin", local_ref="evil", remote_ref="feature"
             ),
         )
-        is None
-    )
 
 
 @pytest.mark.parametrize("tool_name", ["execute", "background_execute"])
@@ -488,3 +490,94 @@ async def test_chained_push_runs_only_without_workflow_changes(
     if refused:
         assert result.status == "error"
         assert json.loads(str(result.content))["error_type"] == "WorkflowPushMustStandAlone"
+
+
+@pytest.mark.parametrize(
+    ("chained", "connection", "inspectable", "approved", "lease", "error"),
+    [
+        (True, "missing", True, False, "", "WorkflowPushMustStandAlone"),
+        (True, "registered", True, False, "", "WorkflowPushMustStandAlone"),
+        (True, "reconnect", True, False, "", "WorkflowPushMustStandAlone"),
+        (False, "reconnect", True, False, "", "WorkflowPushApprovalRequired"),
+        (False, "registered", True, True, "", None),
+        (False, "reconnect", True, True, "", None),
+        (False, "missing", True, False, "", "WorkflowPushInspectionError"),
+        (False, "registered", False, False, "", "WorkflowPushInspectionError"),
+        (False, "registered", False, False, "--force-with-lease ", "WorkflowPushInspectionError"),
+    ],
+)
+async def test_check_shell_inspects_workflow_pushes_in_the_threads_sandbox(
+    monkeypatch: pytest.MonkeyPatch,
+    chained: bool,
+    connection: str,
+    inspectable: bool,
+    approved: bool,
+    lease: str,
+    error: str | None,
+) -> None:
+    import time
+    from unittest.mock import AsyncMock
+
+    from openswe.agent_api.graph import RemoteGraph
+    from openswe.agent_api.run_parts import RunParts
+    from openswe.agent_api.tokens import RemoteRun
+    from openswe.sandboxes import connect, state
+    from openswe.sandboxes.tool_runtime import ToolSurface
+
+    backend = _Backend(inspectable=inspectable, pending_workflows=chained)
+    if connection == "registered":
+        state.set_sandbox_backend("thread-1", cast(SandboxBackendProtocol, backend))
+
+    async def sandbox_id(thread_id: str) -> str:
+        assert thread_id == "thread-1"
+        if connection == "missing":
+            raise RuntimeError("Sandbox metadata unavailable")
+        return backend.id
+
+    async def connect_box(
+        sandbox_id: str, *, thread_id: str | None = None
+    ) -> SandboxBackendProtocol:
+        assert sandbox_id == backend.id
+        assert thread_id == "thread-1"
+        return cast(SandboxBackendProtocol, backend)
+
+    monkeypatch.setattr(state, "get_sandbox_id_from_metadata", sandbox_id)
+    monkeypatch.setattr(connect, "connect_sandbox", connect_box)
+    monkeypatch.setattr(guard, "workflow_push_approved", AsyncMock(return_value=approved))
+    monkeypatch.setattr(
+        guard, "ensure_workflow_push_pending", AsyncMock(return_value=({"status": "pending"}, True))
+    )
+    monkeypatch.setattr(guard, "_post_slack_approval_if_needed", AsyncMock())
+
+    class Parts(RunParts):
+        shell_guards = (guard.WorkflowPushGuardMiddleware(),)
+
+    async def never_plan(config: object, surface: ToolSurface) -> None:
+        raise AssertionError("Shell checks must not plan a run")
+
+    run = RemoteRun(
+        thread_id="thread-1",
+        assistant_id="agent",
+        configurable={},
+        expires_at=int(time.time()) + 3600,
+    ).granting()
+    command = f"git -C /repo push {lease}origin feature"
+    if chained:
+        command = (
+            "git -C /repo add .github/workflows/x.yml && git -C /repo commit -m m && " + command
+        )
+    verdict = await RemoteGraph("agent", never_plan, Parts()).api(
+        run, "check_shell", {"run_id": "run-1", "tool": "execute", "command": command}
+    )
+
+    assert isinstance(verdict, dict)
+    assert verdict["allowed"] is (error is None)
+    if error is None:
+        assert verdict["command"] == f"git -C /repo push origin {backend.head}:refs/heads/feature"
+    else:
+        assert json.loads(str(verdict["refusal"]))["error_type"] == error
+    if connection != "missing":
+        assert backend.commands
+        assert all(
+            " push " not in command and " commit " not in command for command in backend.commands
+        )
