@@ -43,6 +43,7 @@ from openswe.github.queue import (
     ValidationRuns,
     WorkflowRun,
 )
+from openswe.utils.dashboard_links import dashboard_api_base_url
 from openswe.utils.http_pool import pooled_transport
 from openswe.utils.url_safety import request_with_safe_redirects
 
@@ -222,11 +223,21 @@ async def github_request(
     raise last_exc or httpx2.HTTPError("Max retries exceeded")
 
 
+def github_reauth_message(login: str | None = None) -> str:
+    person = f" for {login}" if login else ""
+    url = f"{dashboard_api_base_url()}/dashboard/api/auth/login"
+    return (
+        f"GitHub token unavailable{person}. Reconnect GitHub by signing in to Open SWE: {url}. "
+        "Then retry the action. This is your Open SWE GitHub authorization, not the sandbox "
+        "gh login or the workspace GitHub App installation."
+    )
+
+
 class GitHubSignInRequired(Exception):
     """The person has no usable GitHub authorization and must sign in again."""
 
     def __init__(self, login: str) -> None:
-        super().__init__(f"GitHub sign-in required for {login}")
+        super().__init__(github_reauth_message(login))
         self.login = login
 
 
