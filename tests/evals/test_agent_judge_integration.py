@@ -224,6 +224,42 @@ async def test_unreachable_base_commit_is_an_error_not_a_zero(
     assert result["failure_stage"] == "checkout"
 
 
+async def test_a_proxied_fetch_is_retried_without_the_proxy(
+    probe_repo, monkeypatch, tmp_path
+) -> None:
+    """A host proxy that the pinned mirror refuses must not fail the task.
+
+    The clone URL is part of the task identity, so the judge cannot swap it;
+    retrying the one network command without the host's proxy is what keeps
+    the judge on the same repository the agent cloned.
+    """
+    from evals.agent import judge as judge_module
+
+    real_run = judge_module._run
+    attempts: list[list[str]] = []
+
+    async def flaky(command, cwd, timeout):
+        attempts.append(command)
+        if command[:2] == ["git", "fetch"] and not any("-c" in part for part in command):
+            return {"returncode": 128, "output": "schannel: failed to receive handshake"}
+        return await real_run(command, cwd, timeout)
+
+    monkeypatch.setattr(judge_module, "_run", flaky)
+    workdir = tmp_path / "checkout"
+
+    error = await judge_module._prepare_checkout(
+        "probe/repo", probe_repo.base_commit, workdir, 300, clone_url=probe_repo.clone_url
+    )
+
+    assert error is None
+    # The retry keeps `git` first and passes the overrides as `git -c` options,
+    # so it is recognized by the subcommand rather than by position.
+    fetch_attempts = [command for command in attempts if "fetch" in command]
+    assert len(fetch_attempts) == 2
+    assert "https.proxy=" in fetch_attempts[1]
+    assert (workdir / "calc.py").exists()
+
+
 async def test_editable_install_does_not_leak_into_later_tasks(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

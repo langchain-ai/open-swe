@@ -28,6 +28,9 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 DEFAULT_TEST_TIMEOUT_SECONDS = 1800
+# `git -c` overrides the global config for one invocation, so a fetch can reach
+# a mirror that the host's configured proxy cannot.
+_NO_PROXY = ("-c", "http.proxy=", "-c", "https.proxy=")
 _FENCE_RE = re.compile(r"```(?:diff|patch)?\s*\n(.*?)```", re.DOTALL)
 _TEST_LINE_RE = re.compile(r"^(PASSED|FAILED|ERROR|SKIPPED|XFAIL|XPASS)\s+(\S+)", re.MULTILINE)
 _SUMMARY_TAIL_CHARS = 4000
@@ -268,16 +271,26 @@ async def _prepare_checkout(
     repo: str, base_commit: str, workdir: Path, timeout: int, *, clone_url: str | None = None
 ) -> str | None:
     workdir.mkdir(parents=True, exist_ok=True)
+    url = clone_url or f"https://github.com/{repo}.git"
     commands = (
         ["git", "init", "-q"],
-        ["git", "remote", "add", "origin", clone_url or f"https://github.com/{repo}.git"],
+        ["git", "remote", "add", "origin", url],
         ["git", "fetch", "-q", "--depth", "1", "origin", base_commit],
         ["git", "checkout", "-q", "FETCH_HEAD"],
     )
     for command in commands:
         result = await _run(command, workdir, timeout)
         if result["returncode"] != 0:
-            return f"{' '.join(command[:2])} failed: {result['output']}"
+            # A clone URL pinned to a mirror and a developer's global git proxy
+            # are both part of the host, not of the task: this host proxies
+            # github.com and the mirror refuses a proxied connection, so the
+            # judge would fail every task at checkout while the agent, which can
+            # edit its own command, clones fine. Retrying the network step
+            # without the proxy keeps the judge and the agent on the same task.
+            if command[:2] == ["git", "fetch"]:
+                result = await _run([*command[:1], *_NO_PROXY, *command[1:]], workdir, timeout)
+            if result["returncode"] != 0:
+                return f"{' '.join(command[:2])} failed: {result['output']}"
     return None
 
 
