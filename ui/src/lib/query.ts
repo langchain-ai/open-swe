@@ -1,6 +1,7 @@
 import { MutationCache, QueryCache, QueryClient } from "@tanstack/react-query"
 
 import { reportError } from "@/lib/errorReporting"
+import { recordClientError } from "@/lib/clientErrors"
 import type { InvalidationTopic } from "@/lib/invalidations/topics"
 
 type DashboardMutationMeta = {
@@ -33,6 +34,9 @@ export const expiresInBrowser = {
 export function makeQueryClient() {
   return new QueryClient({
     queryCache: new QueryCache({
+      onError: (error) => {
+        recordClientError({ title: "Query failed", error })
+      },
       onSuccess: (_data, query) => {
         // Queries that surface a retained refresh failure clear it here, so
         // automatic interval/focus fetches recover it, not only manual ones.

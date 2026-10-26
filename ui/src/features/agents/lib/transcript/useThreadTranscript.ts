@@ -9,6 +9,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { useQueryClient } from "@tanstack/react-query"
+import { recordClientError } from "@/lib/clientErrors"
 
 import {
   LIVE_CONNECTION,
@@ -249,6 +250,10 @@ export function useThreadTranscript(
         if (!disposed) subscribe()
       } catch (loadError) {
         if (disposed) return
+        recordClientError({
+          title: "Could not load transcript",
+          error: loadError,
+        })
         setError(loadError)
         threadHydrationFailed(threadId)
         hydration.reject(loadError)
@@ -302,7 +307,13 @@ export function useThreadTranscript(
       } catch (pageError) {
         // The live stream is untouched by a failed page: surface it the way a
         // load failure surfaces and let the reader try the top again.
-        if (!controller.signal.aborted) setError(pageError)
+        if (!controller.signal.aborted) {
+          recordClientError({
+            title: "Could not load older messages",
+            error: pageError,
+          })
+          setError(pageError)
+        }
       } finally {
         if (olderRequest.current === controller) olderRequest.current = null
         if (!controller.signal.aborted) setIsLoadingOlder(false)

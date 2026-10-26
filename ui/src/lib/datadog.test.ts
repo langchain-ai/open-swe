@@ -31,7 +31,7 @@ describe("initializeDatadogRum", () => {
       "fetch",
       vi.fn(async () => new Response(null, { status: 503 }))
     )
-    const warn = vi.spyOn(console, "warn").mockImplementation(() => {})
+    const warn = vi.spyOn(console, "error").mockImplementation(() => {})
     const { load } = rumLoader()
     await initializeDatadogRum(
       {
@@ -78,7 +78,7 @@ describe("initializeDatadogRum", () => {
       service: "dashboard",
       env: "staging",
       version: "1.2.3",
-      sessionSampleRate: 25,
+      sessionSampleRate: 100,
       sessionReplaySampleRate: 50,
       trackUserInteractions: true,
       trackResources: true,

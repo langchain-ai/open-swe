@@ -14,7 +14,10 @@ vi.mock("sonner", () => ({
 }))
 
 const addError = vi.fn()
-vi.mock("@/lib/datadog", () => ({ getDatadogRum: () => ({ addError }) }))
+vi.mock("@/lib/datadog", () => ({
+  getDatadogRum: () => ({ addError }),
+  subscribeToDatadogInitialization: () => () => {},
+}))
 
 type Sent = { url: string; headers: Record<string, string>; body: unknown }
 let sent: Array<Sent>
@@ -170,6 +173,22 @@ it("keeps the request ID when the server was never reached", async () => {
     expect.anything(),
     expect.objectContaining({ error_id: requestId, status: 0 })
   )
+})
+
+it("reports query failures without adding a toast", async () => {
+  stubFetch(async () => Response.json({ detail: "bad" }, { status: 500 }))
+  const client = makeQueryClient()
+  await client
+    .fetchQuery({
+      queryKey: ["failed-query"],
+      queryFn: () => api.saveMyInstructions("x"),
+      retry: false,
+    })
+    .catch(() => undefined)
+  expect(toastError).not.toHaveBeenCalled()
+  expect(addError).toHaveBeenCalledTimes(1)
+  await vi.waitFor(() => expect(reports()).toHaveLength(1))
+  client.clear()
 })
 
 it("still logs a silent mutation it does not toast", async () => {

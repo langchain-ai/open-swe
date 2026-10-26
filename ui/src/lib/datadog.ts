@@ -32,11 +32,6 @@ function envString(env: PublicEnv, name: string): string | undefined {
   return typeof value === "string" && value.trim() ? value.trim() : undefined
 }
 
-function sampleRate(env: PublicEnv, name: string, fallback: number): number {
-  const value = Number(envString(env, name))
-  return Number.isFinite(value) && value >= 0 && value <= 100 ? value : fallback
-}
-
 function replaySampleRate(env: PublicEnv): number {
   const configured = env.VITE_DATADOG_SESSION_REPLAY_SAMPLE_RATE
   if (typeof configured !== "string") return 100
@@ -189,13 +184,16 @@ export async function initializeDatadogRum(
     }
     environment = config.environment
   } catch (error) {
-    console.warn(
+    console.error(
       "Datadog initialization skipped: telemetry configuration unavailable",
       error
     )
     return
   }
-  const rum = await loadRum().catch(() => undefined)
+  const rum = await loadRum().catch((error: unknown) => {
+    console.error("Could not load Datadog RUM", error)
+    return undefined
+  })
   if (!rum) return
 
   const site = envString(env, "VITE_DATADOG_SITE") ?? "us5.datadoghq.com"
@@ -212,7 +210,7 @@ export async function initializeDatadogRum(
     service: envString(env, "VITE_DATADOG_SERVICE") ?? "open-swe-dashboard",
     env: environment,
     ...(version ? { version } : {}),
-    sessionSampleRate: sampleRate(env, "VITE_DATADOG_SESSION_SAMPLE_RATE", 100),
+    sessionSampleRate: 100,
     sessionReplaySampleRate: replaySampleRate(env),
     trackUserInteractions: true,
     trackResources: true,
