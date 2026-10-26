@@ -3,10 +3,9 @@
 > [!IMPORTANT]
 > This desktop client is experimental. The web UI is the recommended way to use Open SWE.
 
-The Electron app loads the current web UI from the configured Open SWE backend when online.
-It keeps the last complete server UI on disk for offline use, including lazy-loaded routes and
-assets. The bundled UI is only a last resort when no complete cached version exists. Users configure
-only their backend URL; UI updates arrive without reinstalling the desktop app.
+The Electron app downloads a standalone UI release selected by the connected backend. It keeps the
+last complete UI on disk, including lazy routes, for offline use. No dashboard is embedded in the
+installer. First launch requires connectivity to download the UI; failure shows a retry screen.
 
 Desktop users can choose **This Mac** in the new-task composer to run an agent over a selected local project. The thread is an ordinary cloud thread on the connected backend — same transcript, models, settings, MCPs and skills — whose sandbox is the project on this Mac instead of a hosted box. The app serves it through a sandbox bridge: it long-polls the backend for the agent's `execute`, `upload_files` and `download_files` requests, runs them in the checkout, and posts the results back. This is the same bridge `oswe run` uses, from the shared `bridge-client` package.
 
@@ -21,14 +20,16 @@ The **Terminal** and file browser open in the same checkout, on this Mac.
 
 ## How it connects
 
-The UI runs at the internal `open-swe://app` origin, whether loaded from the server or the
-bundled fallback. Electron fetches the backend's client-only shell and assets without sending
-session credentials or following redirects, while keeping native IPC available for local projects,
-threads, worktrees, terminals and files. Each backend has its own persistent, hash-verified UI cache.
-The app opens the cached version immediately and downloads updates in the background. Only a complete
-snapshot is promoted, and it takes effect on the next navigation or reload; interrupted downloads
-leave the previous version intact. Without a cache, the app tries to download a complete snapshot
-before using the bundled fallback. Running agents still requires the backend.
+The UI runs at `open-swe://app`, with native IPC for local projects, threads, worktrees, terminals
+and files. `/desktop-ui.json` on the backend selects a GitHub Release archive by backend commit,
+SHA-256 and bridge protocol version. Downloads carry no session credentials, follow redirects only
+to GitHub release hosts, and are verified before activation. Each backend has its own cache. Cached
+UI opens immediately; updates download in the background and take effect on the next reload.
+Interrupted or corrupt downloads leave the previous UI intact. Running agents requires the backend.
+
+**Release Desktop UI** publishes `ui.json.gz` and `descriptor.json` as immutable
+`desktop-ui-<commit>` prereleases on main/preview pushes. Backend images select that exact commit
+through their stamped build identity. Local builds use `ui/.output/desktop/descriptor.json`.
 
 Electron proxies `/dashboard/api/*` requests to the selected backend, so the browser never receives
 a LangSmith API key and never calls the raw LangGraph API directly. GitHub login creates the same
@@ -109,7 +110,7 @@ pnpm --dir desktop run pack # unpacked application for the current platform
 pnpm --dir desktop run dist # installer for the current platform
 ```
 
-Both commands build `ui/` and package its static output with Electron. Build outputs are written
+Neither command builds or embeds the dashboard. Build outputs are written
 to `desktop/dist/`.
 
 ## macOS releases
@@ -123,10 +124,8 @@ pull request, merge it to `main`, test the resulting code as needed, then run **
 manually. The workflow publishes the exact package version and fails if that stable release is
 already complete. A partial stable release remains manually retryable.
 
-Both paths compile the current `ui/` bundle, sign and notarize the Electron app, verify the resulting
-app and DMG, create the tag, and publish the DMG, macOS zip, and app zip. Desktop-prefixed tags keep
-this release stream separate from web and backend releases; the workflow packages the web UI but
-does not deploy or otherwise change the hosted web app.
+Both paths sign and notarize the Electron shell, verify the app and DMG, create the tag, and publish
+the installers. UI releases are separate from desktop shell releases.
 
 The workflow requires these GitHub Actions secrets:
 

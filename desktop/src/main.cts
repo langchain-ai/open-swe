@@ -2,7 +2,6 @@ const { randomBytes } = require("node:crypto");
 const fs = require("node:fs");
 const { createHash } = require("node:crypto");
 const path = require("node:path");
-const { pathToFileURL } = require("node:url");
 const {
   app,
   autoUpdater: nativeAutoUpdater,
@@ -12,7 +11,6 @@ const {
   Menu,
   dialog,
   nativeTheme,
-  net,
   protocol,
   powerMonitor,
   session,
@@ -85,7 +83,6 @@ const {
   localCallbackUrl,
   resolveBackendUrl,
   resolveAppRuntime,
-  staticFilePath,
   validateBackendUrl,
 } = require("./config.cjs");
 const {
@@ -1066,12 +1063,6 @@ function iconPath() {
     : path.resolve(__dirname, "../resources/icon.png");
 }
 
-function bundledUiPath() {
-  return app.isPackaged
-    ? path.join(process.resourcesPath, "ui")
-    : path.resolve(__dirname, "../../ui/.output/public");
-}
-
 function errorPage(error) {
   const message = String(error?.message || error);
   const html = `<!doctype html>
@@ -1219,32 +1210,10 @@ async function serveDesktopUi(request: Request) {
     desktopUi = new DesktopUi(
       backendUrl,
       fetch,
-      serveBundledUi,
       path.join(app.getPath("userData"), "ui-cache"),
     );
   }
   return desktopUi.serve(request);
-}
-
-async function serveBundledUi(request: Request) {
-  const url = new URL(request.url);
-  const root = bundledUiPath();
-  let filePath = staticFilePath(root, request.url);
-  if (
-    !filePath ||
-    !fs.existsSync(filePath) ||
-    !fs.statSync(filePath).isFile()
-  ) {
-    if (path.extname(url.pathname))
-      return new Response("Not found", { status: 404 });
-    filePath = path.join(root, "_shell.html");
-  }
-  if (!fs.existsSync(filePath)) {
-    return new Response("Bundled UI is missing. Run pnpm run build:ui.", {
-      status: 500,
-    });
-  }
-  return net.fetch(pathToFileURL(filePath).toString());
 }
 
 const appNavigations = new WeakMap<Electron.BrowserWindow, { url: string }>();

@@ -11,7 +11,7 @@ const page = () =>
     headers: { accept: "text/html" },
   });
 const asset = () => new Request("open-swe://app/assets/lazy.js");
-const bundled = async () => new Response("bundled");
+const { gzipSync } = require("node:zlib");
 
 async function fixture(t) {
   const root = await mkdtemp(path.join(tmpdir(), "desktop-ui-"));
@@ -19,27 +19,34 @@ async function fixture(t) {
   return root;
 }
 
-function server(version, failedAsset) {
+function server(version, failure) {
   const bodies = {
     "/_shell.html": `shell ${version}`,
     "/assets/lazy.js": `lazy ${version}`,
   };
+  const archive = gzipSync(
+    JSON.stringify({
+      files: Object.entries(bodies).map(([assetPath, body]) => ({
+        path: assetPath,
+        sha256: createHash("sha256").update(body).digest("hex"),
+        body: Buffer.from(body).toString("base64"),
+      })),
+    }),
+  );
   return async (url, init) => {
     assert.equal(init.credentials, "omit");
-    assert.equal(init.redirect, "error");
+    assert.equal(init.redirect, "manual");
     assert.equal(init.headers, undefined);
-    const pathname = new URL(url).pathname;
-    if (pathname === "/desktop-ui-manifest.json")
+    if (url.endsWith("/desktop-ui.json"))
       return Response.json({
-        files: Object.entries(bodies).map(([assetPath, body]) => ({
-          path: assetPath,
-          sha256: createHash("sha256").update(body).digest("hex"),
-        })),
+        bridge_version: 1,
+        url: `https://github.com/langchain-ai/open-swe/releases/download/desktop-ui-${"a".repeat(40)}/ui.json.gz`,
+        sha256: createHash("sha256").update(archive).digest("hex"),
       });
-    if (pathname === failedAsset) throw new Error("interrupted download");
-    return new Response(bodies[pathname], {
-      headers: { "set-cookie": "untrusted=value", "content-encoding": "gzip" },
-    });
+    if (failure === "interrupted") throw new Error("interrupted download");
+    return new Response(
+      failure === "corrupt" ? Buffer.from("corrupt") : archive,
+    );
   };
 }
 
@@ -49,82 +56,46 @@ const offline = async () => {
 
 test("persists a complete server UI across restarts, including unopened lazy routes", async (t) => {
   const root = await fixture(t);
-  const ui = new DesktopUi(
-    "https://backend.example",
-    server("v1"),
-    bundled,
-    root,
-  );
+  const ui = new DesktopUi("https://backend.example", server("v1"), root);
   const response = await ui.serve(page());
   assert.equal(await response.text(), "shell v1");
   assert.equal(response.headers.get("set-cookie"), null);
   assert.equal(response.headers.get("content-encoding"), null);
-  const restarted = new DesktopUi(
-    "https://backend.example",
-    offline,
-    bundled,
-    root,
-  );
+  const restarted = new DesktopUi("https://backend.example", offline, root);
   assert.equal(await (await restarted.serve(page())).text(), "shell v1");
   assert.equal(await (await restarted.serve(asset())).text(), "lazy v1");
-  assert.equal(
-    await (
-      await new DesktopUi(
-        "https://other.example",
-        offline,
-        bundled,
-        root,
-      ).serve(page())
-    ).text(),
-    "bundled",
+  await assert.rejects(
+    new DesktopUi("https://other.example", offline, root).serve(page()),
+    /Connect to the internet/,
   );
 });
 
 test("interrupted or corrupt updates never replace the last complete version", async (t) => {
   const root = await fixture(t);
-  await new DesktopUi(
-    "https://backend.example",
-    server("v1"),
-    bundled,
-    root,
-  ).serve(page());
+  await new DesktopUi("https://backend.example", server("v1"), root).serve(
+    page(),
+  );
   for (const fetchUi of [
-    server("v2", "/assets/lazy.js"),
-    async (url, init) => {
-      const response = await server("v3")(url, init);
-      return url.endsWith("lazy.js") ? new Response("wrong hash") : response;
-    },
+    server("v2", "interrupted"),
+    server("v3", "corrupt"),
   ]) {
-    const ui = new DesktopUi("https://backend.example", fetchUi, bundled, root);
+    const ui = new DesktopUi("https://backend.example", fetchUi, root);
     assert.equal(await (await ui.serve(page())).text(), "shell v1");
     await assert.rejects(
       ui.refresh(),
-      /interrupted download|changed during download/,
+      /interrupted download|checksum mismatch/,
     );
-    const restarted = new DesktopUi(
-      "https://backend.example",
-      offline,
-      bundled,
-      root,
-    );
+    const restarted = new DesktopUi("https://backend.example", offline, root);
     assert.equal(await (await restarted.serve(page())).text(), "shell v1");
   }
 });
 
 test("promotes complete updates on next navigation without changing active page assets", async (t) => {
   const root = await fixture(t);
-  await new DesktopUi(
-    "https://backend.example",
-    server("v1"),
-    bundled,
-    root,
-  ).serve(page());
-  const ui = new DesktopUi(
-    "https://backend.example",
-    server("v2"),
-    bundled,
-    root,
+  await new DesktopUi("https://backend.example", server("v1"), root).serve(
+    page(),
   );
+  const ui = new DesktopUi("https://backend.example", server("v2"), root);
   assert.equal(await (await ui.serve(page())).text(), "shell v1");
   await ui.refresh();
   assert.equal(await (await ui.serve(asset())).text(), "lazy v1");
@@ -133,16 +104,25 @@ test("promotes complete updates on next navigation without changing active page 
   assert.equal(await (await ui.serve(asset())).text(), "lazy v2");
 });
 
-test("rejects manifest paths that could fetch APIs or escape the cache", async (t) => {
+test("rejects untrusted archive URLs and incompatible bridges", async (t) => {
   const root = await fixture(t);
-  const ui = new DesktopUi(
-    "https://backend.example",
-    async () =>
-      Response.json({
-        files: [{ path: "/dashboard/api/session", sha256: "a".repeat(64) }],
-      }),
-    bundled,
-    root,
-  );
-  assert.equal(await (await ui.serve(page())).text(), "bundled");
+  for (const descriptor of [
+    {
+      bridge_version: 2,
+      url: "https://github.com/example",
+      sha256: "a".repeat(64),
+    },
+    {
+      bridge_version: 1,
+      url: "https://evil.example/ui.json.gz",
+      sha256: "a".repeat(64),
+    },
+  ]) {
+    const ui = new DesktopUi(
+      "https://backend.example",
+      async () => Response.json(descriptor),
+      root,
+    );
+    await assert.rejects(ui.serve(page()), /Connect to the internet/);
+  }
 });
