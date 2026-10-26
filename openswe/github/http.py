@@ -228,8 +228,7 @@ def github_reauth_message(login: str | None = None) -> str:
     url = f"{dashboard_api_base_url()}/dashboard/api/auth/login"
     return (
         f"GitHub token unavailable{person}. Reconnect GitHub by signing in to Open SWE: {url}. "
-        "Then retry the action. This is your Open SWE GitHub authorization, not the sandbox "
-        "gh login or the workspace GitHub App installation."
+        "Then retry the action."
     )
 
 
