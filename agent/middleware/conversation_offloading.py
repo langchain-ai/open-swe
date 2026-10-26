@@ -25,7 +25,7 @@ from langchain.agents.middleware.types import (
     hook_config,
 )
 from langchain_core.exceptions import ContextOverflowError
-from langchain_core.messages import AIMessage, AnyMessage, ToolMessage
+from langchain_core.messages import AIMessage, AnyMessage, HumanMessage, ToolMessage
 from langchain_core.messages.utils import count_tokens_approximately, trim_messages
 from langgraph.config import get_stream_writer
 from langgraph.runtime import Runtime
@@ -41,29 +41,59 @@ OffloadTrigger = Literal["manual", "automatic", "overflow"]
 
 
 class _CodingSummarizationMiddleware(LangChainSummarizationMiddleware):
-    """Summarization that keeps the trailing tool exchange when trimming.
+    """Summarization that keeps the task statement and the trailing exchange.
 
     The upstream helper trims the slice to `trim_tokens_to_summarize` tokens
-    with `start_on="human"`. A coding trajectory has one human turn at the
-    start and then nothing but ai/tool messages, so the trailing window it
-    keeps contains no human at all and `trim_messages` returns an empty list.
-    `_acreate_summary` then reports "Previous conversation was too long to
-    summarize." instead of a summary, and every compaction silently discards
-    the entire history.
+    with `start_on="human"` and `strategy="last"`. A coding trajectory has one
+    human turn at the start and then nothing but ai/tool messages, so that trim
+    keeps the tail of the slice and drops the request that opened it. A slice
+    that ends in a long tool result can trim down to a few recent messages,
+    leaving the summarizer no goal to report: the summary then says the intent
+    is unknown, and the agent spends its remaining turns rediscovering what it
+    was asked to do.
 
-    Starting the kept window on an ai/tool message is what this trajectory
-    needs: the first retained message must only not be an orphaned tool result,
-    because a tool message without its call is not a valid conversation.
+    Two changes fix that. The kept window may start on an ai message, since a
+    coding tail contains no human at all and `start_on="human"` returned an
+    empty list; and the request that opened the slice is summarized alongside
+    the tail, because it is the one thing the rest of the trajectory cannot
+    reconstruct.
     """
+
+    def _intent_prefix(self, messages: list[AnyMessage]) -> list[AnyMessage]:
+        """The leading human turns that state what the run is for."""
+        prefix: list[AnyMessage] = []
+        for message in messages:
+            if not isinstance(message, HumanMessage):
+                break
+            prefix.append(message)
+        return prefix
 
     def _trim_messages_for_summary(self, messages: list[AnyMessage]) -> list[AnyMessage]:
         if self.trim_tokens_to_summarize is None:
             return messages
+        prefix = self._intent_prefix(messages)
+        # The task statement is worth more to a summary than the last few tool
+        # results, but it is also not allowed to crowd out the recent window:
+        # it gets at most half the budget, and the tail gets the rest.
+        prefix_budget = max(1, self.trim_tokens_to_summarize // 2)
+        prefix = cast(
+            "list[AnyMessage]",
+            trim_messages(
+                prefix,
+                max_tokens=prefix_budget,
+                token_counter=self.token_counter,
+                strategy="last",
+                start_on="human",
+                end_on="human",
+                allow_partial=True,
+            ),
+        )
+        budget = max(1, self.trim_tokens_to_summarize - self.token_counter(prefix))
         trimmed = cast(
             "list[AnyMessage]",
             trim_messages(
                 messages,
-                max_tokens=self.trim_tokens_to_summarize,
+                max_tokens=budget,
                 token_counter=self.token_counter,
                 start_on=("human", "ai"),
                 strategy="last",
@@ -71,6 +101,8 @@ class _CodingSummarizationMiddleware(LangChainSummarizationMiddleware):
                 include_system=True,
             ),
         )
+        if trimmed and prefix and trimmed[0] is not prefix[0]:
+            trimmed = [*prefix, *trimmed]
         if trimmed or not messages:
             return trimmed
         # `allow_partial` can still leave only a tool message when the tail is a
@@ -78,7 +110,7 @@ class _CodingSummarizationMiddleware(LangChainSummarizationMiddleware):
         trailing: list[AnyMessage] = [
             message for message in messages if not isinstance(message, ToolMessage)
         ]
-        return trailing[-1:] if trailing else messages[-1:]
+        return [*prefix, trailing[-1]] if trailing else [*prefix, messages[-1]]
 
 
 @dataclass(frozen=True)

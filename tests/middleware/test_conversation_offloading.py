@@ -336,3 +336,43 @@ async def test_summary_keeps_a_tool_only_tail(tmp_path):
     assert trimmed
     assert not isinstance(trimmed[0], ToolMessage)
     assert await middleware._lc_helper._acreate_summary(messages) == "KEPT SUMMARY"
+
+
+def test_summary_keeps_the_request_that_opened_the_run(tmp_path):
+    """A trajectory long enough to trim keeps the task statement, not just the tail.
+
+    Trimming to a token budget keeps the most recent messages, and a real
+    trajectory's recent messages are tool output. Dropping the request leaves
+    the summarizer with no goal to report, so the summary says the intent is
+    unknown and the agent spends its turns rediscovering the task.
+    """
+    model = FakeListChatModel(responses=["KEPT SUMMARY"])
+    middleware = ConversationOffloadingMiddleware(
+        model, FilesystemBackend(root_dir=str(tmp_path), virtual_mode=True)
+    )
+    task = "Add a public `strip_tags` helper to `markupsafe`."
+    messages = [HumanMessage(content=task)]
+    for index in range(200):
+        messages.append(
+            AIMessage(
+                content=f"step {index}",
+                tool_calls=[
+                    {
+                        "name": "execute",
+                        "id": f"call-{index}",
+                        "args": {"command": "x" * 200},
+                    }
+                ],
+            )
+        )
+        messages.append(ToolMessage(content=f"output {index}", tool_call_id=f"call-{index}"))
+
+    trimmed = middleware._lc_helper._trim_messages_for_summary(messages)
+
+    assert any(task in str(message.content) for message in trimmed)
+    # The request is not allowed to crowd out the recent window it explains.
+    assert sum(1 for message in trimmed if isinstance(message, ToolMessage)) > 1
+    assert (
+        middleware._lc_helper.token_counter(trimmed)
+        <= middleware._lc_helper.trim_tokens_to_summarize
+    )
