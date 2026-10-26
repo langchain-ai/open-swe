@@ -159,6 +159,14 @@ class BrowserMiddleware(AgentMiddleware):
         if scope == "thread":
             self._instructions += f" {_LOCALHOST_NOTE}"
 
+    def browser_name(self, runtime: ManagedToolRuntime | Runtime) -> str:
+        """The LangSmith browser this run's browser tools use, whether or not it exists yet.
+
+        Raises:
+            RuntimeError: the run has no thread, or user scope has no signed-in user.
+        """
+        return _browser_name(_browser_key(runtime.server_info, _thread_id(runtime), self.scope))
+
     async def _call(
         self, runtime: ManagedToolRuntime, fn: Callable[[_Session], Awaitable[T]]
     ) -> T | str:

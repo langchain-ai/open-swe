@@ -28,8 +28,7 @@ class ReportedBrowserMiddleware(BrowserMiddleware):
     """MDA's browser per thread: the backend hears its name once per process, its use once per run."""
 
     def __init__(self, backend: OpenSweBackend) -> None:
-        # As the backend creates it when a person opens the browser first.
-        super().__init__(hidpi=True)
+        super().__init__()
         self._backend = backend
         # (browser name, whether it is opened) already reported, or being reported.
         self._reported: set[tuple[str, bool]] = set()
