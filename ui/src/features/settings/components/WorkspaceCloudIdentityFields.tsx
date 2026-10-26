@@ -27,7 +27,7 @@ export function cloudType(rule: Record<string, JsonValue>): Cloud | undefined {
 
 const FIELDS: Record<
   Cloud,
-  { key: string; label: string; placeholder: string }[]
+  { key: string; label: string; placeholder: string; list?: true }[]
 > = {
   aws: [
     {
@@ -48,6 +48,13 @@ const FIELDS: Record<
       label: "Service Account Email (Optional)",
       placeholder: "sandbox@project.iam.gserviceaccount.com",
     },
+    {
+      key: "scopes",
+      label: "OAuth Scopes (Optional, Comma-Separated)",
+      placeholder:
+        "https://www.googleapis.com/auth/cloud-platform, https://www.googleapis.com/auth/userinfo.email",
+      list: true,
+    },
   ],
   azure: [
     { key: "tenant_id", label: "Azure Tenant ID", placeholder: "Tenant UUID" },
@@ -60,6 +67,7 @@ const FIELDS: Record<
       key: "resources",
       label: "Azure Resources (Comma-Separated)",
       placeholder: "https://storage.azure.com",
+      list: true,
     },
   ],
 }
@@ -106,7 +114,7 @@ export function WorkspaceCloudIdentityFields({
         only the permissions this workspace needs; cloud trust must pin the
         tag-scoped LangSmith subject.
       </p>
-      {FIELDS[cloud].map(({ key, label, placeholder }) => (
+      {FIELDS[cloud].map(({ key, label, placeholder, list }) => (
         <Input
           key={key}
           label={label}
@@ -122,7 +130,7 @@ export function WorkspaceCloudIdentityFields({
           onChange={(value) =>
             change(
               key,
-              key === "resources"
+              list
                 ? value
                     .split(",")
                     .map((item) => item.trim())
