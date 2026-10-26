@@ -8,7 +8,11 @@ from pathlib import Path
 import pytest
 
 from agent.sandboxes.environment import probe_execution_environment
-from agent.sandboxes.local_execution import AsyncLocalShellBackend, _outside_sandbox
+from agent.sandboxes.local_execution import (
+    AsyncLocalShellBackend,
+    _network_escape,
+    _outside_sandbox,
+)
 
 
 def _backend(root: Path, *, limit: int = 100_000) -> AsyncLocalShellBackend:
@@ -111,6 +115,34 @@ def test_a_url_is_not_read_as_an_absolute_path(tmp_path: Path) -> None:
     assert _outside_sandbox('git clone "https://example.com/repo.git" x', [project]) is None
     # A real UNC path is still outside a local project.
     assert _outside_sandbox(r"type \\server\share\file", [project]) is not None
+
+
+def test_an_evaluation_run_may_clone_once_and_nothing_more() -> None:
+    clone = "git clone https://ghfast.top/https://github.com/pallets/markupsafe.git eval-x"
+    assert _network_escape(clone) is None
+    assert _network_escape(rf'cd /d "D:\work" && {clone}') is None
+    # Looking up the issue, or pulling the upstream fix, is how a model
+    # answers the benchmark from outside the checkout.
+    for blocked in (
+        "git fetch origin main",
+        "git pull",
+        "git remote -v",
+        "curl -s https://api.github.com/repos/pallets/markupsafe/issues/533",
+        f"{clone} && git fetch origin main",
+        f"{clone}; curl https://api.github.com/x",
+        "wget https://example.com/x",
+    ):
+        assert _network_escape(blocked) is not None, blocked
+    # Ordinary work stays allowed.
+    for allowed in ("python -m pytest tests -q", "pip install -e .", "git -C eval-x status"):
+        assert _network_escape(allowed) is None, allowed
+
+
+async def test_an_offline_sandbox_refuses_a_network_command(tmp_path: Path) -> None:
+    backend = AsyncLocalShellBackend(root_dir=tmp_path, offline=True)
+    response = await backend.aexecute("curl -s https://api.github.com/repos/x", timeout=10)
+    assert response.exit_code == 126
+    assert "reaches the network" in response.output
 
 
 async def test_command_naming_an_allowed_root_runs(tmp_path: Path) -> None:

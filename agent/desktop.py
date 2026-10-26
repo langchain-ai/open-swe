@@ -103,6 +103,9 @@ def create_desktop_backend(cfg: RunConfig) -> AsyncLocalShellBackend:
         virtual_mode=False,
         extra_roots=toolchain,
         env=env,
+        # An eval task is built from a public issue whose fix is one `git fetch`
+        # away, so an evaluation run works from the checkout alone.
+        offline=cfg.agent_eval is not None,
     )
 
 

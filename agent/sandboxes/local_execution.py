@@ -28,6 +28,51 @@ _SCHEME = re.compile(r"[A-Za-z][A-Za-z0-9+.-]*://\S*")
 _ABSOLUTE_PATH = re.compile(r"""(?<![A-Za-z0-9_])([A-Za-z]:[\\/][^"'|<>;&]*|[\\/]{2}[^"'|<>;&]+)""")
 
 
+# Commands that reach the network, and the upstream hosts an evaluation must
+# not consult: the issue an eval task is built from has a public resolution,
+# and a model that finds it is answering a different question than the one the
+# benchmark asks. Cloning the task repository itself is how every task starts,
+# so that one form stays allowed.
+_NETWORK_COMMAND = re.compile(
+    r"""(?<![A-Za-z0-9_])(curl|wget|Invoke-WebRequest|Invoke-RestMethod|iwr|irm)(?![A-Za-z0-9_])""",
+    re.IGNORECASE,
+)
+_GIT_REMOTE = re.compile(
+    r"""\bgit\b[^|;&\n]*?\b(clone|fetch|pull|remote|ls-remote)\b""", re.IGNORECASE
+)
+_UPSTREAM_HOST = re.compile(r"""\b(api\.github\.com|github\.com|raw\.githubusercontent\.com)\b""")
+_ANY_URL = re.compile(r"""[A-Za-z][A-Za-z0-9+.-]*://[^\s"'|<>;&]+""")
+_CLONE_TARGET = re.compile(r"""\bgit\b[^|;&\n]*?\bclone\b""", re.IGNORECASE)
+
+
+_STATEMENT = re.compile(r"&&|\|\||[;|\n]")
+
+
+def _network_escape(command: str) -> str | None:
+    """The part of a command that would reach the network, if any.
+
+    Only the checkout step is permitted: the task prompt tells the model to
+    clone its repository, and `git fetch`/`git pull` after that would bring in
+    the upstream fix the task asks it to write. A statement is judged on its
+    own, so a clone followed by a lookup does not smuggle the lookup through.
+    """
+    for statement in _STATEMENT.split(command):
+        if not statement.strip():
+            continue
+        if _CLONE_TARGET.search(statement) and not _NETWORK_COMMAND.search(statement):
+            continue
+        remote = _GIT_REMOTE.search(statement)
+        if remote is not None:
+            return remote.group(0).strip()
+        network = _NETWORK_COMMAND.search(statement)
+        if network is not None:
+            return network.group(0)
+        for url in _ANY_URL.findall(statement):
+            if _UPSTREAM_HOST.search(url):
+                return url
+    return None
+
+
 def _resolve(path: str | Path) -> str:
     """A comparable form of a path that may not exist yet.
 
@@ -106,6 +151,7 @@ class AsyncLocalShellBackend(LocalShellBackend):
         env: dict[str, str] | None = None,
         inherit_env: bool = False,
         extra_roots: Sequence[str] = (),
+        offline: bool = False,
     ) -> None:
         super().__init__(
             root_dir,
@@ -116,6 +162,7 @@ class AsyncLocalShellBackend(LocalShellBackend):
             inherit_env=inherit_env,
         )
         self._extra_roots = [Path(root) for root in extra_roots]
+        self._offline = offline
 
     def execute(self, command: str, *, timeout: int | None = None) -> ExecuteResponse:
         raise NotImplementedError("Use aexecute")
@@ -123,6 +170,15 @@ class AsyncLocalShellBackend(LocalShellBackend):
     async def aexecute(self, command: str, *, timeout: int | None = None) -> ExecuteResponse:
         if not command.strip():
             raise ValueError("command must be nonempty")
+        if self._offline:
+            escape = _network_escape(command)
+            if escape is not None:
+                logger.warning("Blocked a command that reaches the network")
+                return ExecuteResponse(
+                    output=render_prompt("tools/local-command-offline.md", command=escape),
+                    exit_code=126,
+                    truncated=False,
+                )
         outside = _outside_sandbox(command, [self.cwd, *self._extra_roots])
         if outside is not None:
             logger.warning("Blocked a command naming a path outside the sandbox")

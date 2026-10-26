@@ -9,6 +9,8 @@ Issue:
 $problem_statement
 
 Make the code changes needed to fix the issue, and validate them with the
-repository's own tests where practical. Do NOT open a pull request, push a
-branch, or otherwise write to GitHub. Leave the changes in $checkout_dir;
-the runtime collects the patch without another model call.
+repository's own tests where practical. This run is offline apart from that one
+clone: do not fetch, pull, or look up the issue, its pull request, or the
+upstream repository. Do NOT open a pull request, push a branch, or otherwise
+write to GitHub. Leave the changes in $checkout_dir; the runtime collects the
+patch without another model call.

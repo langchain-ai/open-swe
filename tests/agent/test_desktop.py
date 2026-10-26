@@ -17,6 +17,7 @@ from agent.desktop import (
     resolve_desktop_project,
     validate_path,
 )
+from agent.evaluation import AgentEvaluationConfig
 from agent.run_config import RunConfig
 from agent.sandboxes.read_only_backend import ReadOnlyBackend
 
@@ -72,6 +73,24 @@ def test_desktop_backend_puts_the_project_interpreter_on_path(
     assert "/usr/bin" in path_entries
     # The interpreter directory is also one the shell may name absolutely.
     assert scripts in backend._extra_roots
+
+
+def test_an_evaluation_run_gets_an_offline_shell(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    project = tmp_path / "project"
+    project.mkdir()
+    allowlist = tmp_path / "projects.json"
+    allowlist.write_text(json.dumps([{"cwd": str(project)}]))
+    monkeypatch.setenv("OPEN_SWE_LOCAL_PROJECTS_FILE", str(allowlist))
+    monkeypatch.setenv("OPEN_SWE_LOCAL_WORKTREES_DIR", str(tmp_path / "worktrees"))
+    evaluation = AgentEvaluationConfig(base_commit="a" * 40, checkout_dir="eval-0123456789abcdef")
+
+    assert create_desktop_backend(RunConfig(local_project_path=str(project)))._offline is False
+    backend = create_desktop_backend(
+        RunConfig(local_project_path=str(project), agent_eval=evaluation)
+    )
+    assert backend._offline is True
 
 
 def test_desktop_backend_allows_an_allowlisted_project_checkout(

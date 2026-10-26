@@ -1,0 +1,1 @@
+The command was not run because `$command` reaches the network. This run may clone its task repository once, and after that it works only with the code it has: no downloads, no GitHub issue or pull request lookups, and no `git fetch` or `git pull` from the upstream repository.
