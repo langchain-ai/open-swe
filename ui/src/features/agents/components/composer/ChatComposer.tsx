@@ -42,6 +42,7 @@ import type {
 import type { ComposerSlashCommand, ComposerTrigger } from "./composerTrigger"
 import type { RunTarget } from "./RunTargetSelector"
 import { DropdownMenuItem } from "@/components/MenuItem"
+import { useUnsentDraft } from "@/lib/buildReload"
 import type {
   DesktopProject,
   DesktopProjectRef,
@@ -343,6 +344,9 @@ export const ChatComposer = memo(function ChatComposer({
   const [modelPickerOpen, setModelPickerOpen] = useState(false)
   const [extrasMenuOpen, setExtrasMenuOpen] = useState(false)
   const [composerError, setComposerError] = useState<string | null>(null)
+  useUnsentDraft(
+    value.trim() !== "" || pendingImages.length > 0 || pendingReplies.length > 0
+  )
   const composerShortcuts = useMemo(
     () => [
       {
