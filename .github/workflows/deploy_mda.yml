@@ -89,6 +89,7 @@ jobs:
         run: make mda-cli
       - name: Deploy
         id: deploy
+        shell: bash
         if: steps.changed.outputs.deploy == 'true'
         env:
           ENVIRONMENT: ${{ matrix.environment }}
