@@ -53,6 +53,12 @@ export function visiblePendingMessages(
       id: message.id,
       author: "user",
       ...(senderName ? { structuredSenderName: senderName } : {}),
+      // The server labels a thread's first message, which this one cannot yet
+      // name; holding the label's space keeps the bubble from dropping once the
+      // confirmed message replaces it.
+      ...(!senderName && messages.length === 0
+        ? { senderLabelPending: true }
+        : {}),
       timestamp: new Date(message.createdAt).toISOString(),
       timestampIsFallback: true,
       deliveryStatus: message.status,

@@ -185,9 +185,16 @@ function StandardUserMessage({ message }: { message: Message }) {
       >
         {!isSystem &&
           (message.structuredSenderName ||
+            message.senderLabelPending ||
             isSlack ||
             message.structuredSenderIsBot) && (
-            <div className="mb-space-1 flex items-center gap-space-1 px-space-1 text-xxs font-medium text-secondary">
+            <div
+              aria-hidden={message.senderLabelPending || undefined}
+              className={cn(
+                "mb-space-1 flex items-center gap-space-1 px-space-1 text-xxs font-medium text-secondary",
+                message.senderLabelPending && "invisible"
+              )}
+            >
               {isSlack && (
                 <SlackLogoIcon
                   size={12}
@@ -205,8 +212,10 @@ function StandardUserMessage({ message }: { message: Message }) {
                   data-testid="user-message-bot-icon"
                 />
               )}
-              {message.structuredSenderName && (
+              {message.structuredSenderName ? (
                 <span>{message.structuredSenderName}</span>
+              ) : (
+                message.senderLabelPending && <span>&nbsp;</span>
               )}
               {message.structuredSenderNote && (
                 <span className="font-normal text-tertiary">
