@@ -36,6 +36,7 @@ class DesktopUi {
     private readonly fetchUi: UiFetch,
     cacheRoot: string,
     private readonly serveFile: (filename: string) => Promise<Response>,
+    private readonly localArchive: string | null = null,
   ) {
     this.directory = path.join(cacheRoot, digest(backendUrl));
   }
@@ -48,7 +49,9 @@ class DesktopUi {
     if (navigation) {
       this.snapshot = await this.readSnapshot();
       const update = this.refresh();
-      if (!this.snapshot) {
+      if (this.localArchive) {
+        this.snapshot = await update;
+      } else if (!this.snapshot) {
         try {
           this.snapshot = await update;
         } catch (error) {
@@ -116,6 +119,10 @@ class DesktopUi {
   }
 
   private async download(): Promise<UiSnapshot> {
+    if (this.localArchive) {
+      const archive = new Uint8Array(await readFile(this.localArchive));
+      return this.install(archive, digest(archive));
+    }
     const response = await this.fetchHosted("/desktop-ui.json");
     const descriptor: unknown = await response.json();
     if (
@@ -137,8 +144,19 @@ class DesktopUi {
     if (current?.version === descriptor.sha256) return current;
     const archiveResponse = await this.fetchPublic(descriptor.url);
     const archive = new Uint8Array(await archiveResponse.arrayBuffer());
-    if (archive.length > 100_000_000 || digest(archive) !== descriptor.sha256)
+    if (digest(archive) !== descriptor.sha256)
       throw new Error("Desktop UI archive checksum mismatch");
+    return this.install(archive, descriptor.sha256);
+  }
+
+  private async install(
+    archive: Uint8Array,
+    version: string,
+  ): Promise<UiSnapshot> {
+    if (archive.length > 100_000_000)
+      throw new Error("Desktop UI archive is too large");
+    const current = await this.readSnapshot();
+    if (current?.version === version) return current;
     const value: unknown = JSON.parse(
       gunzipSync(archive, { maxOutputLength: 300_000_000 }).toString("utf8"),
     );
@@ -168,7 +186,7 @@ class DesktopUi {
     )
       throw new Error("Missing shell or duplicate desktop UI assets");
     const snapshot: UiSnapshot = {
-      version: descriptor.sha256,
+      version,
       files: files.map((file) => file.path),
     };
     await mkdir(this.directory, { recursive: true });

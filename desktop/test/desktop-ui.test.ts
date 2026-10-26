@@ -1,34 +1,30 @@
-const test = require("node:test");
-const assert = require("node:assert/strict");
-const { mkdtemp, readFile, rm } = require("node:fs/promises");
-const { tmpdir } = require("node:os");
-const path = require("node:path");
-const { createHash } = require("node:crypto");
-const { DesktopUi } = require("../build/desktop-ui.cjs");
+import assert from "node:assert/strict";
+import { createHash } from "node:crypto";
+import { mkdtemp, readdir, readFile, rm, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import path from "node:path";
+import test from "node:test";
+import { gzipSync } from "node:zlib";
+import { DesktopUi } from "../build/desktop-ui.cjs";
+
+type Failure = "interrupted" | "corrupt";
+type Fetch = (url: string, init: RequestInit) => Promise<Response>;
 
 const page = () =>
   new Request("open-swe://app/agents/local-thread", {
     headers: { accept: "text/html" },
   });
 const asset = () => new Request("open-swe://app/assets/lazy.js");
-const serveFile = async (filename) => new Response(await readFile(filename));
-const { gzipSync } = require("node:zlib");
+const serveFile = async (filename: string) => new Response(await readFile(filename));
 
-async function fixture(t) {
+async function fixture(t: test.TestContext) {
   const root = await mkdtemp(path.join(tmpdir(), "desktop-ui-"));
   t.after(() => rm(root, { recursive: true, force: true }));
   return root;
 }
 
-function server(
-  version,
-  failure,
-  bodies = {
-    "/_shell.html": `shell ${version}`,
-    "/assets/lazy.js": `lazy ${version}`,
-  },
-) {
-  const archive = gzipSync(
+function archiveOf(bodies: Record<string, string>) {
+  return gzipSync(
     JSON.stringify({
       files: Object.entries(bodies).map(([assetPath, body]) => ({
         path: assetPath,
@@ -36,6 +32,17 @@ function server(
       })),
     }),
   );
+}
+
+function server(
+  version: string,
+  failure?: Failure,
+  bodies: Record<string, string> = {
+    "/_shell.html": `shell ${version}`,
+    "/assets/lazy.js": `lazy ${version}`,
+  },
+): Fetch {
+  const archive = archiveOf(bodies);
   return async (url, init) => {
     assert.equal(init.credentials, "omit");
     assert.equal(init.redirect, "manual");
@@ -176,5 +183,21 @@ test("rejects archive traversal before extracting a checksum-valid download", as
     serveFile,
   );
   await assert.rejects(ui.serve(page()), /Connect to the internet/);
-  assert.deepEqual(await require("node:fs/promises").readdir(root), []);
+  assert.deepEqual(await readdir(root), []);
+});
+
+test("installs a local archive on every load instead of contacting the backend", async (t) => {
+  const root = await fixture(t);
+  const archive = path.join(root, "ui.json.gz");
+  const ui = new DesktopUi(
+    "https://backend.example",
+    offline,
+    path.join(root, "cache"),
+    serveFile,
+    archive,
+  );
+  await writeFile(archive, archiveOf({ "/_shell.html": "local v1" }));
+  assert.equal(await (await ui.serve(page())).text(), "local v1");
+  await writeFile(archive, archiveOf({ "/_shell.html": "local v2" }));
+  assert.equal(await (await ui.serve(page())).text(), "local v2");
 });

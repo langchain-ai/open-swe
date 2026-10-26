@@ -9,7 +9,7 @@
     "build:ui": "pnpm --filter open-swe-dashboard run build",
     "dev": "pnpm run build && electron . --dev",
     "start": "pnpm run build && electron .",
-    "test:run": "node --test test/*.test.cjs",
+    "test:run": "node --test test/*.test.cjs test/*.test.ts",
     "test": "pnpm run build && pnpm run test:run",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "check": "pnpm run typecheck && pnpm run test",

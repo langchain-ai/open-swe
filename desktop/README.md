@@ -29,7 +29,9 @@ Interrupted or corrupt downloads leave the previous UI intact. Running agents re
 
 **Release Desktop UI** publishes `ui.json.gz` and `descriptor.json` as immutable
 `desktop-ui-<commit>` prereleases on main/preview pushes. Backend images select that exact commit
-through their stamped build identity. Local builds use `ui/.output/desktop/descriptor.json`.
+through their stamped build identity. To run a local UI instead, build `ui/` (`pnpm --filter open-swe-dashboard run build`) and launch
+the app with `OPEN_SWE_DESKTOP_UI_ARCHIVE=<repo>/ui/.output/desktop/ui.json.gz`; it installs that
+archive on every load instead of contacting the backend's descriptor.
 
 Electron proxies `/dashboard/api/*` requests to the selected backend, so the browser never receives
 a LangSmith API key and never calls the raw LangGraph API directly. GitHub login creates the same

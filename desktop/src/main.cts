@@ -1214,6 +1214,7 @@ async function serveDesktopUi(request: Request) {
       fetch,
       path.join(app.getPath("userData"), "ui-cache"),
       (filename: string) => net.fetch(pathToFileURL(filename).toString()),
+      process.env.OPEN_SWE_DESKTOP_UI_ARCHIVE ?? null,
     );
   }
   return desktopUi.serve(request);
