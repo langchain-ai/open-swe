@@ -1229,9 +1229,6 @@ class _ToolCallingModel(GenericFakeChatModel):
         return self
 
 
-COORDINATOR_CATALOG = Catalog(skill_sources=["/skills/coordinator/"])
-
-
 async def _launch_worker(
     monkeypatch: pytest.MonkeyPatch, client: MagicMock, *, also: Sequence[ToolCall] = ()
 ) -> tuple[list[ToolMessage], list[tuple[str, dict[str, object]]]]:
@@ -1280,9 +1277,7 @@ async def _launch_worker(
     model = _ToolCallingModel(
         messages=iter([AIMessage("", tool_calls=[launch, *also]), AIMessage("Launched.")])
     )
-    graph = create_agent(
-        model, middleware=[AsyncWorkerLaunchMiddleware(backend, COORDINATOR_CATALOG), launches]
-    )
+    graph = create_agent(model, middleware=[AsyncWorkerLaunchMiddleware(backend), launches])
     values = await graph.ainvoke(
         {"messages": [("user", "fix login in the background")]},
         {
@@ -1320,12 +1315,8 @@ async def test_a_launched_worker_carries_a_grant_never_its_coordinators_run_toke
 
     assert client.runs.create.await_args is not None
     launch = client.runs.create.await_args.kwargs
-    # The coordinator's catalog, which the worker's graph is built from until it adopts its own.
-    assert launch["context"] == {
-        "graph": "agent",
-        "__worker_grant": "worker-grant",
-        "__catalog": COORDINATOR_CATALOG.model_dump(mode="json"),
-    }
+    # The worker reads its coordinator's catalog with the grant, never from its context.
+    assert launch["context"] == {"graph": "agent", "__worker_grant": "worker-grant"}
     assert launch["input"] == {
         "messages": [{"role": "user", "content": "Your assignment: Fix login"}]
     }

@@ -1,8 +1,9 @@
 """The Managed Deep Agents deployment that hosts every Open SWE graph.
 
 ``mda`` serves them as one graph; a run's context names the graph it
-plays. Dispatch stamps a signed run token and the run's catalog, worked out once as
-the run starts, into that context, and the deployment calls back with the token for the graph's tools
+plays. Dispatch works out the run's catalog once as the run starts, keeps it
+(``openswe.agent_api.catalogs``), and stamps a run token that names it into that
+context; the deployment calls back with the token for the catalog, the graph's tools
 and run hooks.
 """
 
@@ -15,6 +16,7 @@ from urllib.parse import urlsplit
 from pydantic import JsonValue, TypeAdapter
 from runtime_api.catalog import Catalog
 
+from openswe.agent_api import catalogs
 from openswe.agent_api.tokens import RemoteRun, runtime_tokens_configured, sign_runtime_token
 from openswe.config import ENV
 from openswe.run_config import RunConfig
@@ -39,16 +41,16 @@ _json_object = TypeAdapter(dict[str, JsonValue])
 _hosted_graph = TypeAdapter(HostedGraph)
 
 
-# The run context the MDA deployment builds its graph from. The token's and the
-# catalog's keys are dunders so they stay out of the trace metadata the Agent Server
-# mirrors context into. The catalog is JSON: the gRPC runtime serializes only the
-# context's top level.
+# The run context the MDA deployment builds its graph from. The token's key is a
+# dunder so it stays out of the trace metadata the Agent Server mirrors context into.
+# The Agent Server also copies the context into the run's config and its thread's,
+# returned on every read of either, so the catalog stays out of it.
 RemoteRunContext = TypedDict(
     "RemoteRunContext",
     {
         "graph": HostedGraph,
         "__run_token": str,
-        "__catalog": NotRequired[dict[str, JsonValue]],
+        "__catalog": None,
         "invocation_id": NotRequired[str],
     },
 )
@@ -97,16 +99,19 @@ class StartedRun:
 
     graph: HostedGraph
     token: str
-    # None when working it out failed here: the run then asks for its catalog itself.
+    # Granted to the run; None when working it out failed here, and the run then asks
+    # for its catalog itself.
     catalog: Catalog | None
     invocation_id: str | None = None
 
     def context(self) -> RemoteRunContext:
-        context: RemoteRunContext = {"graph": self.graph, "__run_token": self.token}
-        if self.catalog is not None:
-            context["__catalog"] = _json_object.validate_python(
-                self.catalog.model_dump(mode="json")
-            )
+        context: RemoteRunContext = {
+            "graph": self.graph,
+            "__run_token": self.token,
+            # Runs that carried their catalog here left it in their thread's config, which
+            # the Agent Server merges into every later run's; this replaces it there.
+            "__catalog": None,
+        }
         if self.invocation_id:
             context["invocation_id"] = self.invocation_id
         return context
@@ -119,7 +124,8 @@ async def start_remote_run(
     thread_id: str,
     assistant_id: str,
 ) -> StartedRun:
-    """Work out the run's catalog and settings, once, and sign its token, before MDA starts it.
+    """Work out the run's catalog and settings, once, keep the catalog, and sign a token
+    that names it, before MDA starts the run.
 
     The configurable and metadata ride inside the signed token; the deployment calls
     back with the token rather than reading it.
@@ -139,15 +145,16 @@ async def start_remote_run(
     catalog: Catalog | None = None
     try:
         started = await hosted_graphs()[graph].start_run(run)
+        digest = await catalogs.keep(started.catalog)
     except Exception:
         # The run still starts, and fails on its own catalog call if this keeps failing.
         logger.exception(
             "Starting an MDA run failed", extra={"thread_id": thread_id, "graph": graph}
         )
     else:
-        catalog = started.catalog
-        # Signed, so every later call reads the settings the run started with.
-        run = run.model_copy(update={"settings": started.settings})
+        # Signed, so every later call reads the settings and catalog the run started with.
+        run = run.model_copy(update={"settings": started.settings, "catalog_digest": digest})
+        catalog = run.grant_operations(started.catalog)
     return StartedRun(
         graph=graph,
         token=sign_runtime_token(run),

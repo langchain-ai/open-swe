@@ -4,9 +4,9 @@ Open SWE dispatch names the graph a run plays (``agent``, ``reviewer`` or
 ``review-scout``) in its context. The model loop, its checkpoints and every tool call
 run here. The Open SWE backend holds every credential and plans the run: this factory
 takes the graph's operations, subagents and models from the catalog the backend
-worked out as it started the run, in the run's context, and makes a tool of each
-operation (``rt.tools``). This runtime's own middleware runs the loop around each
-model call as the catalog's rules say (``rt.loop``), asking the backend only for
+worked out as it started the run, which the run token in its context names, and
+makes a tool of each operation (``rt.tools``). This runtime's own middleware runs
+the loop around each model call as the catalog's rules say (``rt.loop``), asking the backend only for
 what needs its data or credentials. The file and shell tools are this runtime's own, in the
 thread's box or against its files on the backend (``rt.file_tools``). The run token in
 the context authenticates every call.
@@ -34,7 +34,7 @@ from managed_deepagents import (
     ManagedServerRuntime,
     define_deep_agent,
 )
-from pydantic import BaseModel, ConfigDict, Field, JsonValue
+from pydantic import BaseModel, ConfigDict, Field
 from rt.backend import OpenSweBackend
 from rt.browser import ReportedBrowserMiddleware
 from rt.factory_timing import FactoryTiming
@@ -108,14 +108,10 @@ class OpenSweRunContext(BaseModel):
     # A launched task worker's first run: traded for its own run token before anything else.
     worker_grant: str | None = Field(default=None, alias="__worker_grant")
     invocation_id: str | None = None
-    # JSON, not Catalog: the gRPC runtime serializes only the context's top level.
-    catalog: dict[str, JsonValue] | None = Field(default=None, alias="__catalog")
 
 
-async def _catalog(context: OpenSweRunContext, backend: OpenSweBackend) -> Catalog:
-    """What the backend planned for the run; a run started without it asks for it."""
-    if context.catalog is not None:
-        return Catalog.model_validate(context.catalog)
+async def _catalog(backend: OpenSweBackend) -> Catalog:
+    """What the backend worked out for the run as it started it, which its token names."""
     # Runs without a context (state reads, assistant reads) never call a model or a tool.
     return await backend.catalog(None) if backend.has_run else Catalog()
 
@@ -171,7 +167,7 @@ async def agent(runtime: ManagedServerRuntime) -> DeepAgentDefinition:
     backend = OpenSweBackend(
         context.run_token, worker_grant=context.worker_grant, invocation_id=context.invocation_id
     )
-    catalog = await _catalog(context, backend)
+    catalog = await _catalog(backend)
     timing.lap("catalog")
     models = catalog.models
     model = (
@@ -335,5 +331,5 @@ async def agent(runtime: ManagedServerRuntime) -> DeepAgentDefinition:
         ),
         # `mda build` reads `worker`'s literal name to build its graph.
         subagents=[*sync_subagents, worker],
-        middleware=[*agent_middleware, AsyncWorkerLaunchMiddleware(backend, catalog)],
+        middleware=[*agent_middleware, AsyncWorkerLaunchMiddleware(backend)],
     )

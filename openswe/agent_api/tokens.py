@@ -15,6 +15,7 @@ from typing import Final, Self
 
 import jwt
 from pydantic import BaseModel, ConfigDict, JsonValue, TypeAdapter, ValidationError
+from runtime_api.catalog import Catalog
 
 from openswe.config import ENV
 
@@ -74,6 +75,9 @@ class RemoteRun(BaseModel):
     # What the run's operation grants are signed under; None on a run started before
     # operations were granted, whose tools its plan bounds instead.
     grant_id: str | None = None
+    # The digest of the catalog the backend worked out as it started the run
+    # (``openswe.agent_api.catalogs``); None when it could not, so the run asks for one.
+    catalog_digest: str | None = None
     # When the run's token expires, in epoch seconds; a token signed again for the run
     # keeps it, so holding one never extends it.
     expires_at: int | None = None
@@ -86,6 +90,17 @@ class RemoteRun(BaseModel):
         """The grant of ``operation`` to this run, which its calls of it must carry."""
         keys = _signing_keys()
         return None if self.grant_id is None or not keys else _grant(keys[0], self, operation)
+
+    def grant_operations(self, catalog: Catalog) -> Catalog:
+        """``catalog`` with each of its operations granted to this run."""
+        return catalog.model_copy(
+            update={
+                "operations": [
+                    operation.model_copy(update={"grant": self.grant(operation.name)})
+                    for operation in catalog.operations
+                ]
+            }
+        )
 
     def granted(self, operation: str, grant: str | None) -> bool:
         """Whether this run may call ``operation``: its catalog granted it, under any live key."""
@@ -128,6 +143,7 @@ def _sign(audience: str, run: RemoteRun, extra: dict[str, JsonValue], now: int |
         "md": run.metadata,
         **({"set": settings} if (settings := run.settings.model_dump(exclude_none=True)) else {}),
         **({"gid": run.grant_id} if run.grant_id else {}),
+        **({"cat": run.catalog_digest} if run.catalog_digest else {}),
         **extra,
     }
     return jwt.encode(claims, keys[0], algorithm=_ALGORITHM)
@@ -164,6 +180,7 @@ def _run(claims: Mapping[str, object]) -> RemoteRun:
             "metadata": claims.get("md", {}),
             "settings": claims.get("set", {}),
             "grant_id": claims.get("gid"),
+            "catalog_digest": claims.get("cat"),
             "expires_at": claims.get("exp"),
         }
     )
