@@ -319,6 +319,7 @@ describe("WorkspacesSection", () => {
       repos: ["acme/web"],
       slack_channel_ids: ["C0000000002"],
       kitchen_channel_ids: [],
+      firehose_channel_id: null,
     })
   })
 })
