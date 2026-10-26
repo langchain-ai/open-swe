@@ -691,7 +691,7 @@ async def run_operation(
         return OperationResult(
             content=f"{request.name} is not one of this run's operations", status="error"
         )
-    unexpected = set(request.arguments) - set(_properties(tool))
+    unexpected = _unexpected_arguments(tool, request.arguments)
     if unexpected:
         return OperationResult(
             content=f"Unexpected arguments for {request.name}: {', '.join(sorted(unexpected))}",
@@ -1131,9 +1131,13 @@ def _json_or_text(value: object) -> JsonValue:
         return str(value)
 
 
-def _properties(tool: BaseTool) -> Mapping[str, object]:
-    properties = tool_parameters(tool).get("properties")
-    return properties if isinstance(properties, Mapping) else {}
+def _unexpected_arguments(tool: BaseTool, arguments: Mapping[str, JsonValue]) -> set[str]:
+    schema = tool_parameters(tool)
+    additional = schema.get("additionalProperties")
+    if additional is True or isinstance(additional, Mapping):
+        return set()
+    properties = schema.get("properties")
+    return set(arguments) - (set(properties) if isinstance(properties, Mapping) else set())
 
 
 def _operation_result(outcome: ToolMessage | Command, request_id: str) -> OperationResult:
