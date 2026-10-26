@@ -27,6 +27,21 @@ function validAsset(pathname: string): boolean {
   );
 }
 
+// fetch rejects with a TypeError, or a Timeout/Abort DOMException, when the
+// host is unreachable; every other failure is the backend or release answering
+// with something this app cannot use.
+function firstLoadFailure(error: unknown): string {
+  const unreachable =
+    error instanceof TypeError ||
+    (error instanceof Error &&
+      ["TimeoutError", "AbortError"].includes(error.name));
+  return unreachable
+    ? "Connect to the internet to download the Open SWE UI, then use View → Reload. " +
+        "Check Open SWE → Backend URL… if the server is unavailable."
+    : `Could not load the Open SWE UI: ${error instanceof Error ? error.message : String(error)}. ` +
+        "The backend may not have published its desktop UI yet, or it needs a newer Open SWE desktop app.";
+}
+
 class DesktopUi {
   private snapshot: UiSnapshot | null = null;
   private update: Promise<UiSnapshot> | null = null;
@@ -56,11 +71,7 @@ class DesktopUi {
         try {
           this.snapshot = await update;
         } catch (error) {
-          throw new Error(
-            "Connect to the internet to download the Open SWE UI, then use View → Reload. " +
-              "Check Open SWE → Backend URL… if the server is unavailable.",
-            { cause: error },
-          );
+          throw new Error(firstLoadFailure(error), { cause: error });
         }
       } else {
         void update.catch((error: unknown) =>

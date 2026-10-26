@@ -69,7 +69,7 @@ function server(
 }
 
 const offline = async () => {
-  throw new Error("offline");
+  throw new TypeError("fetch failed");
 };
 
 test("persists a complete server UI across restarts, including unopened lazy routes", async (t) => {
@@ -175,7 +175,7 @@ test("rejects untrusted archive URLs and incompatible bridges", async (t) => {
       root,
       serveFile,
     );
-    await assert.rejects(ui.serve(page()), /Connect to the internet/);
+    await assert.rejects(ui.serve(page()), /Could not load the Open SWE UI/);
   }
 });
 
@@ -190,7 +190,7 @@ test("rejects archive traversal before extracting a checksum-valid download", as
     root,
     serveFile,
   );
-  await assert.rejects(ui.serve(page()), /Connect to the internet/);
+  await assert.rejects(ui.serve(page()), /Could not load the Open SWE UI/);
   assert.deepEqual(await readdir(root), []);
 });
 
