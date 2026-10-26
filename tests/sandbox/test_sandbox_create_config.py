@@ -10,14 +10,36 @@ from openswe.workspaces.store import Workspace
 async def test_inherited_sandbox_tracks_default_without_changing_workspace_identity(
     monkeypatch,
 ) -> None:
-    child = Workspace(slug="child", inherit_default_sandbox=True, prompt="Child instructions")
+    child_params = {
+        "proxy_config": {"rules": [{"name": "child-api", "match_hosts": ["child.example.com"]}]},
+        "tag_value_ids": ["00000000-0000-0000-0000-000000000001"],
+    }
+    child = Workspace(
+        slug="child",
+        inherit_default_sandbox=True,
+        prompt="Child instructions",
+        create_params=child_params,
+    )
     default = Workspace(
         slug="default",
         update_script="git pull",
         snapshot_status="ready",
         snapshot_id="snap-1",
         mem_bytes=1234,
-        create_params={"preserve_memory_on_stop": False},
+        create_params={
+            "preserve_memory_on_stop": False,
+            "proxy_config": {
+                "rules": [
+                    {
+                        "name": "aws",
+                        "type": "aws",
+                        "aws": {"role_arn": "arn:aws:iam::123456789012:role/DefaultOnly"},
+                    }
+                ]
+            },
+            "env_vars": {"DEFAULT_SETTING": "default"},
+            "mount_config": {"mounts": []},
+        },
     )
 
     async def load(slug: str | None) -> Workspace:
@@ -27,8 +49,8 @@ async def test_inherited_sandbox_tracks_default_without_changing_workspace_ident
     config = await SandboxCreateConfig.resolve("child")
     assert config.snapshot_id == "snap-1"
     assert config.resources == {"mem_bytes": 1234}
-    assert config.create_params == {"preserve_memory_on_stop": True}
-    assert default.create_params == {"preserve_memory_on_stop": False}
+    assert config.create_params == {**child_params, "preserve_memory_on_stop": True}
+    assert default.create_params["preserve_memory_on_stop"] is False
     assert child.prompt == "Child instructions"
     default.snapshot_id = "snap-2"
     assert (await SandboxCreateConfig.resolve("child")).snapshot_id == "snap-2"
@@ -64,7 +86,22 @@ async def test_mda_owns_new_threads_and_its_own_boxes(
         slug="default",
         snapshot_status="ready",
         snapshot_id="snap-1",
-        create_params={"proxy_config": {"rules": []}, "preserve_memory_on_stop": False},
+        create_params={
+            "proxy_config": {
+                "rules": [
+                    {
+                        "name": "aws",
+                        "type": "aws",
+                        "aws": {
+                            "role_arn": "arn:aws:iam::123456789012:role/ReadOnly",
+                            "subject_scope": "tag:00000000-0000-0000-0000-000000000001",
+                        },
+                    }
+                ]
+            },
+            "preserve_memory_on_stop": False,
+            "tag_value_ids": ["00000000-0000-0000-0000-000000000001"],
+        },
     )
 
     async def load(slug: str | None) -> Workspace:
@@ -85,8 +122,10 @@ async def test_mda_owns_new_threads_and_its_own_boxes(
     assert sandbox is not None
     assert sandbox.thread_id == (None if owner == "own" else owner)
     assert sandbox.create.snapshot_id == "snap-1"
-    # The backend sets the proxy when it connects; MDA leaves it alone.
-    assert sandbox.create.extra_fields == {"preserve_memory_on_stop": True}
+    assert sandbox.create.extra_fields == {
+        **workspace.create_params,
+        "preserve_memory_on_stop": True,
+    }
 
 
 @pytest.mark.asyncio

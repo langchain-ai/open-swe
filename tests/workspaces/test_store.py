@@ -2,7 +2,7 @@ from typing import Any
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
-from pydantic import ValidationError
+from pydantic import JsonValue, ValidationError
 from sqlalchemy import select
 
 from openswe.database import postgres
@@ -52,6 +52,95 @@ def test_create_params_enforce_serialized_size_limit() -> None:
             name="env",
             create_params={"metadata": "x" * env_store.CREATE_PARAMS_MAX_CHARS},
         )
+
+
+_TAG = "00000000-0000-0000-0000-000000000001"
+_AWS_RULE: dict[str, JsonValue] = {
+    "name": "aws",
+    "type": "aws",
+    "enabled": True,
+    "aws": {"role_arn": "arn:aws:iam::123456789012:role/ReadOnly", "subject_scope": f"tag:{_TAG}"},
+}
+
+
+@pytest.mark.parametrize(
+    "params",
+    [
+        {"proxy_config": {"rules": [_AWS_RULE]}},
+        {"tag_value_ids": ["not-a-uuid"]},
+        {"tag_value_ids": [_TAG], "proxy_config": {"rules": [_AWS_RULE, _AWS_RULE]}},
+        {"tag_value_ids": [_TAG], "proxy_config": {"rules": [{**_AWS_RULE, "enabled": False}]}},
+        {"tag_value_ids": [_TAG], "proxy_config": {"rules": [{**_AWS_RULE, "name": "github"}]}},
+        {
+            "proxy_config": {
+                "rules": [
+                    {
+                        "name": "azure",
+                        "type": "azure",
+                        "azure": {"tenant_id": "domain.example", "client_id": _TAG},
+                    }
+                ]
+            }
+        },
+    ],
+)
+def test_cloud_authority_rejects_invalid_or_unassigned_scopes(params: dict[str, JsonValue]) -> None:
+    with pytest.raises(ValueError):
+        WorkspaceUpdate(create_params=params)
+    with pytest.raises(ValueError):
+        Workspace(slug="stored", create_params=params).sandbox_create_params()
+
+
+def test_cloud_authority_round_trips_without_changing_federated_rules() -> None:
+    params: dict[str, JsonValue] = {
+        "tag_value_ids": [_TAG],
+        "proxy_config": {
+            "rules": [
+                _AWS_RULE,
+                {
+                    "name": "gcp",
+                    "type": "gcp",
+                    "gcp": {
+                        "workload_identity_provider": "//iam.googleapis.com/projects/123/locations/global/workloadIdentityPools/pool/providers/provider"
+                    },
+                },
+                {
+                    "name": "azure",
+                    "type": "azure",
+                    "azure": {
+                        "tenant_id": _TAG,
+                        "client_id": _TAG,
+                        "resources": ["https://storage.azure.com"],
+                    },
+                },
+            ]
+        },
+    }
+    assert WorkspaceCreate(name="cloud", create_params=params).create_params == params
+    assert Workspace(slug="cloud", create_params=params).sandbox_create_params() == params
+
+
+def test_static_cloud_rules_keep_their_existing_json_contract() -> None:
+    params: dict[str, JsonValue] = {
+        "proxy_config": {
+            "enabled": False,
+            "rules": [
+                {
+                    "name": "existing-gcp",
+                    "type": "gcp",
+                    "enabled": False,
+                    "gcp": {
+                        "service_account_json": {
+                            "type": "workspace_secret",
+                            "value": "{GCP_SERVICE_ACCOUNT_JSON}",
+                        }
+                    },
+                }
+            ],
+        },
+    }
+    assert WorkspaceUpdate(create_params=params).create_params == params
+    assert Workspace(slug="stored", create_params=params).sandbox_create_params() == params
 
 
 # --- CRUD (PostgreSQL) ---

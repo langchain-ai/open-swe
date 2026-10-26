@@ -61,6 +61,7 @@ from openswe.github.repo_names import normalize_repo_full_name
 from openswe.github.repositories import Repository
 from openswe.ui_invalidations import Topic
 from openswe.utils.time import now_iso, parse_iso
+from openswe.workspaces.cloud_identity import validate_cloud_identity
 from openswe.workspaces.rows import (
     WorkspaceRepositoryRow,
     WorkspaceRow,
@@ -405,6 +406,7 @@ def _validate_create_params(value: dict[str, JsonValue] | None) -> dict[str, Jso
         raise ValueError(f"create_params must be at most {CREATE_PARAMS_MAX_CHARS} JSON characters")
     if _has_sensitive_create_param(params):
         raise ValueError("create_params must not contain secrets or authentication credentials")
+    validate_cloud_identity(params)
     return params
 
 
@@ -698,11 +700,7 @@ class Workspace(BaseModel):
         secrets) can tighten after a record was stored, and shipping a stale
         record's params to the platform would bypass the newer rule.
         """
-        try:
-            return _validate_create_params(self.create_params)
-        except ValueError:
-            logger.warning("Ignoring invalid sandbox create params", extra={"workspace": self.slug})
-            return {}
+        return _validate_create_params(self.create_params)
 
     def option(self, *, include_log: bool = False) -> dict[str, Any]:
         """Name/slug/refresh-state for the workspace picker and the settings page.

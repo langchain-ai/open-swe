@@ -10,6 +10,12 @@ import { Tooltip } from "@langchain/macaw-components/Tooltip"
 import { SettingsSection } from "@/components/AppShell"
 import { api, type JsonValue, type WorkspaceRecord } from "@/lib/api"
 
+import {
+  CLOUDS,
+  cloudType,
+  WorkspaceCloudIdentityFields,
+} from "./WorkspaceCloudIdentityFields"
+
 function FieldHelp({
   label,
   description,
@@ -69,7 +75,11 @@ export function WorkspaceProxySection({
   )
   const [draft, setDraft] = useState(original)
   const [view, setView] = useState<"form" | "json">("form")
-  const dirty = draft !== original
+  const originalTags = Array.isArray(record.create_params?.tag_value_ids)
+    ? record.create_params.tag_value_ids.join(", ")
+    : ""
+  const [tags, setTags] = useState(originalTags)
+  const dirty = draft !== original || tags !== originalTags
   let config: Record<string, JsonValue> | null = null
   let parseError: string | null = null
   try {
@@ -102,7 +112,14 @@ export function WorkspaceProxySection({
         throw new Error("Proxy rules must be a JSON array.")
       }
       return api.updateWorkspace(record.slug, {
-        create_params: { ...record.create_params, proxy_config: parsed },
+        create_params: {
+          ...record.create_params,
+          proxy_config: parsed,
+          tag_value_ids: tags
+            .split(",")
+            .map((tag) => tag.trim())
+            .filter(Boolean),
+        },
       })
     },
     onSuccess: onSaved,
@@ -111,7 +128,7 @@ export function WorkspaceProxySection({
   return (
     <SettingsSection
       title="Sandbox Proxy"
-      description="Configure host-matched headers and sandbox environment variables for new LangSmith sandboxes. Existing sandboxes are unchanged."
+      description="Configure cloud workload identity, host-matched headers, and environment variables for new LangSmith sandboxes. Existing sandboxes are unchanged; recreate explicitly to apply changes."
     >
       <div className="space-y-space-3 px-space-4 py-space-3 text-primary">
         <div
@@ -190,6 +207,21 @@ export function WorkspaceProxySection({
                     </p>
                   )
                 const rule = ruleValue
+                const cloud = cloudType(rule)
+                if (cloud)
+                  return (
+                    <WorkspaceCloudIdentityFields
+                      key={index}
+                      cloud={cloud}
+                      rule={rule}
+                      onChange={(next) => changeRule(index, next)}
+                      onRemove={() =>
+                        changeRules(
+                          rules.filter((_, position) => position !== index)
+                        )
+                      }
+                    />
+                  )
                 const headers = Array.isArray(rule.headers) ? rule.headers : []
                 const env =
                   rule.env_vars &&
@@ -461,9 +493,54 @@ export function WorkspaceProxySection({
               >
                 Add rule
               </Button>
+              <div className="flex flex-wrap gap-space-2">
+                {CLOUDS.map((cloud) => (
+                  <Button
+                    key={cloud}
+                    size="xs"
+                    color="secondary"
+                    variant="outlined"
+                    disabled={rules.some(
+                      (rule) =>
+                        rule &&
+                        typeof rule === "object" &&
+                        !Array.isArray(rule) &&
+                        rule.type === cloud
+                    )}
+                    onClick={() =>
+                      changeRules([
+                        ...rules,
+                        {
+                          name: cloud,
+                          type: cloud,
+                          enabled: true,
+                          [cloud]: { subject_scope: "workspace" },
+                        },
+                      ])
+                    }
+                  >
+                    {`Add ${cloud === "azure" ? "Azure" : cloud.toUpperCase()} identity`}
+                  </Button>
+                ))}
+              </div>
             </fieldset>
           )}
         </div>
+        <Input
+          label="Governed Tag Value IDs"
+          size="sm"
+          placeholder="Comma-separated LangSmith tag value UUIDs"
+          hintText="Assign existing governed tags from the LangSmith workspace used by this deployment. These are not Open SWE workspace IDs. LangSmith checks ownership and assignment permissions at sandbox creation."
+          value={tags}
+          onChange={setTags}
+          disabled={!canEdit || save.isPending}
+        />
+        <p className="text-xs text-secondary">
+          Cloud trust and least-privilege permissions must be configured in AWS,
+          GCP, or Azure first. Identity settings and tags belong to this
+          workspace even when its image is inherited. Never enter cloud keys or
+          secrets.
+        </p>
         <p id="workspace-proxy-help" className="text-xs text-secondary">
           Use rules with name, match_hosts, headers (name, type, value), and
           env_vars. Headers match hosts; environment variables are sandbox-wide.
@@ -510,7 +587,10 @@ export function WorkspaceProxySection({
                 color="secondary"
                 variant="plain"
                 disabled={save.isPending}
-                onClick={() => setDraft(original)}
+                onClick={() => {
+                  setDraft(original)
+                  setTags(originalTags)
+                }}
               >
                 Cancel
               </Button>

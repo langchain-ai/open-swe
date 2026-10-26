@@ -83,9 +83,9 @@ class SandboxCreateConfig:
         source: SandboxSource = "workspace",
     ) -> SandboxCreateConfig:
         workspace = None if source == "base" else await load_workspace(workspace_slug)
+        create_params = workspace.sandbox_create_params() if workspace is not None else {}
         if workspace is not None and workspace.inherit_default_sandbox:
             workspace = await load_workspace(None)
-        create_params = workspace.sandbox_create_params() if workspace is not None else {}
         create_params = {**create_params, "preserve_memory_on_stop": True}
         if workspace is None:
             return cls(snapshot_id=None, create_params=create_params)
@@ -101,10 +101,9 @@ class SandboxCreateConfig:
         return get_sandbox_proxy_config(self.create_params)
 
     def langsmith_options(self) -> LangSmithCreateOptions:
-        """What the box is created with when MDA creates it, its proxy config left to us."""
-        create_params = {k: v for k, v in self.create_params.items() if k != "proxy_config"}
+        """Include immutable federation authority at create; we refresh managed credentials later."""
         return LangSmithCreateOptions.resolve(
-            snapshot_id=self.snapshot_id, create_params=create_params, **self.resources
+            snapshot_id=self.snapshot_id, create_params=self.create_params, **self.resources
         )
 
     async def boot(self) -> SandboxBackendProtocol:
