@@ -167,16 +167,19 @@ async def test_snoozed_pick_does_not_expire_before_its_new_deadline() -> None:
         assert pick.decision == "picked"
 
 
-async def test_losing_auto_assignment_does_not_wake_another_picker() -> None:
+@pytest.mark.parametrize("author", ["ada", "open-swe[bot]"])
+async def test_losing_auto_assignment_does_not_wake_another_picker(author: str) -> None:
     from openswe.human_review.picking import Pick
     from openswe.human_review.standard import RequestResult, _auto_assign
 
-    pr = PullRequest(owner="lc", repo="repo", number=7, author="ada")
+    pr = PullRequest(owner="lc", repo="repo", number=7, author=author)
     request = HumanReviewRequest(pull_request_id=pr.id, head_sha="abc", kind="standard")
     request.pull_request = pr
     with (
         patch.object(HumanReviewRequest, "get", AsyncMock(return_value=request)),
-        patch.object(User, "for_login", AsyncMock(return_value=User())),
+        patch.object(
+            User, "for_login", AsyncMock(return_value=User() if author == "ada" else None)
+        ),
         patch(
             "openswe.human_review.standard.choose_reviewer",
             AsyncMock(return_value=Pick("grace", "owner")),
@@ -901,7 +904,9 @@ async def test_review_request_snapshots_merge_mode_and_preserves_it_on_reuse(
 @pytest.mark.parametrize("trigger", ["event", "deadline"])
 @pytest.mark.parametrize("pending", [False, True])
 @pytest.mark.parametrize("auto_merge", [False, True])
+@pytest.mark.parametrize("author", ["ada", "open-swe[bot]"])
 async def test_only_auto_merge_requests_merge_when_approved(
+    author: str,
     trigger: str,
     auto_merge: bool,
     pending: bool,
@@ -912,7 +917,7 @@ async def test_only_auto_merge_requests_merge_when_approved(
     from openswe.human_review.merging import MergeResult
     from openswe.human_review.picking import Coverage
 
-    pr = PullRequest(owner="lc", repo="repo", number=7, author="ada")
+    pr = PullRequest(owner="lc", repo="repo", number=7, author=author)
     request = HumanReviewRequest(
         pull_request_id=pr.id, head_sha="abc", kind="standard", auto_merge=auto_merge
     )
@@ -937,9 +942,11 @@ async def test_only_auto_merge_requests_merge_when_approved(
         patch.object(
             Readiness,
             "assess",
-            AsyncMock(return_value=Readiness(snapshot=_snapshot(), blockers=[])),
+            AsyncMock(return_value=Readiness(snapshot=_snapshot(author=author), blockers=[])),
         ),
-        patch.object(User, "for_login", AsyncMock(return_value=User())),
+        patch.object(
+            User, "for_login", AsyncMock(return_value=User() if author == "ada" else None)
+        ),
         patch.object(
             standard, "latest_review_states", AsyncMock(return_value={"grace": "APPROVED"})
         ),
