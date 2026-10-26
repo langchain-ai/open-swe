@@ -218,7 +218,27 @@ function PooledStream({ entry }: { entry: StreamPoolEntry }) {
     const reason = classifyStreamError(failure, navigator.onLine !== false)
     if (!reason) return
     armedError.current = failure
-    void networkResume.arm({ threadId, reason }).catch(() => {})
+    const stall = networkResume.stall
+    if (typeof stall !== "function") {
+      void networkResume.arm({ threadId, reason }).catch(() => {})
+      return
+    }
+    // Giving up is not proof that the run was lost. The SDK spends its budget
+    // over ~23 minutes, so a backend that came back, or a run that finished
+    // while the stream was dead, both surface here as a transport failure.
+    // Arming a chain for a finished run executes the task a second time, so ask
+    // the backend first. `arm` means it took the turn. Anything else means the
+    // run is intact and only this stream is dead — including `none`, which the
+    // quiet-stream path uses to mean "keep waiting": here the SDK has already
+    // given up, so waiting is no longer an option and the stream must reconnect.
+    void stall({ threadId })
+      .then((result) => {
+        if (result.action !== "arm") pool().refreshStream(entry.id)
+      })
+      .catch(() => {
+        // No decision is worse than the old guess, so keep the old behaviour.
+        void networkResume.arm({ threadId, reason }).catch(() => {})
+      })
   }, [entry.id, entry.transport, networkResume, pool, stream.error])
 
   // A loading local stream whose backend process exited hands the turn to the

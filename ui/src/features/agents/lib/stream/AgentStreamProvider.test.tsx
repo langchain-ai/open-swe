@@ -23,6 +23,7 @@ interface StreamOptions {
 interface StreamHandle {
   threadId: string | null
   isLoading: boolean
+  error: unknown
   getThread: () => { onError: (listener: (error: Error) => void) => () => void }
 }
 
@@ -32,6 +33,7 @@ const mocks = vi.hoisted(() => ({
   onEvent: (_event: unknown) => {},
   progressEvent: (_event: unknown) => {},
   loading: false,
+  error: null as unknown,
 }))
 
 vi.mock("@langchain/react", () => ({
@@ -51,6 +53,9 @@ vi.mock("@langchain/react", () => ({
       // A getter so a test can make the stream look busy without a re-render.
       get isLoading() {
         return mocks.loading
+      },
+      get error() {
+        return mocks.error
       },
       getThread: () => ({
         onError: (listener: (error: Error) => void) => {
@@ -95,10 +100,28 @@ function installStallBridge(stall: (input: { threadId: string }) => Promise<Desk
   }
 }
 
+function installFailureBridge(
+  stall: (input: { threadId: string }) => Promise<DesktopNetworkResumeStall>
+) {
+  const arm = vi.fn(async () => null)
+  const bridge = { networkResume: { arm, stall } }
+  Object.defineProperty(window, "openSweDesktop", {
+    value: bridge,
+    configurable: true,
+  })
+  return {
+    arm,
+    restore: () => {
+      Reflect.deleteProperty(window, "openSweDesktop")
+    },
+  }
+}
+
 beforeEach(() => {
   mocks.streams.length = 0
   mocks.threadErrors.length = 0
   mocks.loading = false
+  mocks.error = null
   Reflect.deleteProperty(window, "openSweDesktop")
   useStreamPool.setState({
     entries: [],
@@ -390,6 +413,134 @@ describe("AgentStreamProvider", () => {
       }
 
       expect(stall).not.toHaveBeenCalled()
+    })
+  })
+
+  describe("a local stream that gave up retrying", () => {
+    /**
+     * Fail the mounted stream, then force a render so the effect sees the new
+     * `stream.error`. The provider only re-renders on its own state changes, so
+     * the offloading flag is used as the trigger.
+     */
+    const failStream = () =>
+      act(() => {
+        mocks.error = new Error("stream closed")
+        mocks.onEvent({
+          method: "custom",
+          params: {
+            namespace: [],
+            data: {
+              payload: { type: "conversation_offloading", status: "started" },
+            },
+          },
+        })
+      })
+
+    const mount = () =>
+      render(
+        wrapper(
+          <AgentStreamProvider threadId="one" transport="local">
+            <Probe />
+          </AgentStreamProvider>
+        )
+      )
+
+    it("reconnects instead of continuing when the run already finished", async () => {
+      // A remount re-runs the effect with the same mocked error still set; a
+      // real stream clears its error when it reconnects, so the second answer
+      // here only has to stop the loop.
+      let calls = 0
+      const stall = vi.fn(async () => {
+        calls += 1
+        return calls === 1
+          ? ({ action: "resync" } as const)
+          : ({ action: "arm" } as const)
+      })
+      const bridge = installFailureBridge(stall)
+      try {
+        mount()
+        const entry = useStreamPool.getState().entries[0]
+        if (!entry) throw new Error("stream was not mounted")
+
+        await act(async () => failStream())
+
+        expect(stall).toHaveBeenCalledWith({ threadId: "one" })
+        expect(bridge.arm).not.toHaveBeenCalled()
+        const refreshed = useStreamPool
+          .getState()
+          .entries.find((candidate) => candidate.id === entry.id)
+        expect(refreshed?.reconnectEpoch).toBe(1)
+      } finally {
+        bridge.restore()
+      }
+    })
+
+    it("does not arm a second chain when the backend already armed one", async () => {
+      const stall = vi.fn(async () => ({ action: "arm" }) as const)
+      const bridge = installFailureBridge(stall)
+      try {
+        mount()
+        const entry = useStreamPool.getState().entries[0]
+        if (!entry) throw new Error("stream was not mounted")
+
+        await act(async () => failStream())
+
+        expect(stall).toHaveBeenCalledWith({ threadId: "one" })
+        expect(bridge.arm).not.toHaveBeenCalled()
+        const unchanged = useStreamPool
+          .getState()
+          .entries.find((candidate) => candidate.id === entry.id)
+        expect(unchanged?.reconnectEpoch).toBe(0)
+      } finally {
+        bridge.restore()
+      }
+    })
+
+    it("reconnects when the run is still executing, since the SDK gave up", async () => {
+      // The first answer asks for a reconnect; the remount's answer stops the
+      // loop, which is what a live stream would do by clearing its error.
+      let calls = 0
+      const stall = vi.fn(async () => {
+        calls += 1
+        return calls === 1
+          ? ({ action: "none" } as const)
+          : ({ action: "arm" } as const)
+      })
+      const bridge = installFailureBridge(stall)
+      try {
+        mount()
+        const entry = useStreamPool.getState().entries[0]
+        if (!entry) throw new Error("stream was not mounted")
+
+        await act(async () => failStream())
+
+        expect(bridge.arm).not.toHaveBeenCalled()
+        const refreshed = useStreamPool
+          .getState()
+          .entries.find((candidate) => candidate.id === entry.id)
+        expect(refreshed?.reconnectEpoch).toBe(1)
+      } finally {
+        bridge.restore()
+      }
+    })
+
+    it("falls back to arming when the backend cannot answer", async () => {
+      const stall = vi.fn(async () => {
+        throw new Error("ipc failed")
+      })
+      const bridge = installFailureBridge(stall)
+      try {
+        mount()
+
+        await act(async () => failStream())
+
+        expect(bridge.arm).toHaveBeenCalledWith({
+          threadId: "one",
+          reason: "network",
+        })
+      } finally {
+        bridge.restore()
+      }
     })
   })
 
