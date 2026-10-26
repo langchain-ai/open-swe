@@ -92,10 +92,9 @@ def managed_middleware_overrides(
         "schedules": RuntimeSchedules(runtime),
     }
     if backend_factory is not None and runtime is not None:
-        backend_runtime: object = (
-            {"configurable": configurable} if configurable is not None else runtime
-        )
-        overrides["backend"] = backend_factory(backend_runtime)
+        # The runtime itself, as tools bind it: the backend resolves the same configurable
+        # from it, and a per-run box (``_openswe_select``) reads the run's context.
+        overrides["backend"] = backend_factory(runtime)
     server_info = build_managed_server_info(runtime, configurable)
     if server_info is not None:
         overrides["server_info"] = server_info

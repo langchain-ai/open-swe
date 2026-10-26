@@ -6,7 +6,8 @@
 - `_SharedGraphs` and `_BuiltGraph`;
 - `_for_call`;
 - `_compile_managed_agent` returns the graph and its telemetry configuration instead of wrapping it;
-- `_LazyManagedSandboxBackend` resolves the run's box per call.
+- `_LazyManagedSandboxBackend` resolves the run's box per call;
+- `_managed_middleware.py`: a hook's backend is bound to its runtime, as a tool's is, not to a bare `configurable`, so `_openswe_select` sees the run's context.
 
 ## What
 
