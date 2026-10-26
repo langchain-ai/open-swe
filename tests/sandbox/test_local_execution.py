@@ -8,7 +8,7 @@ from pathlib import Path
 import pytest
 
 from agent.sandboxes.environment import probe_execution_environment
-from agent.sandboxes.local_execution import AsyncLocalShellBackend
+from agent.sandboxes.local_execution import AsyncLocalShellBackend, _outside_sandbox
 
 
 def _backend(root: Path, *, limit: int = 100_000) -> AsyncLocalShellBackend:
@@ -93,6 +93,14 @@ async def test_command_naming_a_path_outside_the_sandbox_is_not_run(tmp_path: Pa
     assert response.exit_code == 126
     assert str(marker) in response.output
     assert "secret contents" not in response.output
+
+
+def test_a_path_that_does_not_exist_yet_is_judged_by_its_parent(tmp_path: Path) -> None:
+    project = tmp_path / "project"
+    project.mkdir()
+
+    assert _outside_sandbox(f'cd "{project}" && git clone url eval-1', [project]) is None
+    assert _outside_sandbox(f'cd "{tmp_path}" && ls', [project]) is not None
 
 
 async def test_command_naming_an_allowed_root_runs(tmp_path: Path) -> None:

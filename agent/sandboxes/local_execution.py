@@ -26,6 +26,16 @@ if TYPE_CHECKING:
 _ABSOLUTE_PATH = re.compile(r"""(?<![A-Za-z0-9_])([A-Za-z]:[\\/][^"'|<>;&]*|[\\/]{2}[^"'|<>;&]+)""")
 
 
+def _resolve(path: str | Path) -> str:
+    """A comparable form of a path that may not exist yet.
+
+    `realpath` resolves symlinks only for the leading part that exists and keeps
+    the rest lexically, so a not-yet-created target such as the checkout a
+    command is about to clone still compares against its parent.
+    """
+    return os.path.normcase(os.path.realpath(os.path.abspath(path)))
+
+
 def _outside_sandbox(command: str, roots: Sequence[Path]) -> str | None:
     """The first absolute path in the command that is outside every root.
 
@@ -36,17 +46,14 @@ def _outside_sandbox(command: str, roots: Sequence[Path]) -> str | None:
     reading their own expected patches. Containment is therefore a guardrail
     against drift, not a security boundary.
     """
-    normalized_roots = [os.path.normcase(os.path.realpath(root)) for root in roots]
+    normalized_roots = [_resolve(root) for root in roots]
     for match in _ABSOLUTE_PATH.finditer(command):
         candidate = match.group(1).rstrip()
         if not candidate:
             continue
-        try:
-            resolved = os.path.normcase(os.path.realpath(candidate))
-        except OSError, ValueError:
-            continue
+        normalized = _resolve(candidate)
         if not any(
-            resolved == root or resolved.startswith(root + os.sep) for root in normalized_roots
+            normalized == root or normalized.startswith(root + os.sep) for root in normalized_roots
         ):
             return candidate
     return None
