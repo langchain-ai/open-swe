@@ -14,6 +14,7 @@ from agent.desktop import (
     create_desktop_backend,
     desktop_artifact_routes,
     resolve_desktop_project,
+    validate_path,
 )
 from agent.run_config import RunConfig
 from agent.sandboxes.read_only_backend import ReadOnlyBackend
@@ -168,3 +169,46 @@ def test_desktop_backend_still_routes_scratch_prefixes(
 
     read = composite.read("/conversation_history/history.md")
     assert read.file_data == {"content": "earlier turns", "encoding": "utf-8"}
+
+
+def test_desktop_backend_resolves_a_virtual_path_under_the_project(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    project = tmp_path / "project"
+    (project / "src").mkdir(parents=True)
+    (project / "src" / "app.py").write_text("value = 1\n")
+    allowlist = tmp_path / "projects.json"
+    allowlist.write_text(json.dumps([{"cwd": str(project)}]))
+    monkeypatch.setenv("OPEN_SWE_LOCAL_PROJECTS_FILE", str(allowlist))
+    monkeypatch.setenv("OPEN_SWE_LOCAL_WORKTREES_DIR", str(tmp_path / "worktrees"))
+    cfg = RunConfig(local_project_path=str(project))
+
+    composite = DesktopCompositeBackend(
+        default=create_desktop_backend(cfg),
+        routes={},
+        project_dir=resolve_desktop_project(cfg),
+    )
+
+    # The file tools normalize arguments to virtual paths; "/src/app.py" means
+    # the project's src, not the drive root's.
+    assert composite.read("/src/app.py").file_data == {
+        "content": "value = 1\n",
+        "encoding": "utf-8",
+    }
+    assert composite.read(str(project / "src" / "app.py")).file_data == {
+        "content": "value = 1\n",
+        "encoding": "utf-8",
+    }
+
+
+@pytest.mark.parametrize(
+    ("path", "expected"),
+    [
+        (r"D:\projects\app\src\main.py", r"D:\projects\app\src\main.py"),
+        ("C:/projects/app/src/main.py", "C:/projects/app/src/main.py"),
+        ("/src/main.py", "/src/main.py"),
+        ("src/main.py", "/src/main.py"),
+    ],
+)
+def test_validate_path_keeps_a_windows_path_verbatim(path: str, expected: str) -> None:
+    assert validate_path(path) == expected

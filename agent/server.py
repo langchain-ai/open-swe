@@ -69,6 +69,7 @@ from agent.desktop import (
     DesktopCompositeBackend,
     create_desktop_backend,
     desktop_artifact_routes,
+    install_real_path_file_tools,
     is_desktop_run,
     resolve_desktop_project,
 )
@@ -1370,6 +1371,9 @@ async def get_agent(config: RunnableConfig) -> Pregel:
             routes=skill_routes,
             project_dir=resolve_desktop_project(cfg),
         )
+        # The file tools validate arguments before the backend resolves them,
+        # so the desktop backend's real paths have to be accepted up there too.
+        install_real_path_file_tools()
     else:
         agent_backend = CompositeBackend(default=backend, routes=skill_routes)
     main_model = _make_model_or_defer(model_id, use_gateway=use_gateway, **model_kwargs)

@@ -15,7 +15,13 @@ def _backend(root: Path, *, limit: int = 100_000) -> AsyncLocalShellBackend:
     env = dict(os.environ)
     env["PATH"] = str(Path(sys.executable).parent) + os.pathsep + env.get("PATH", "")
     env["PYTHONUTF8"] = "1"
-    return AsyncLocalShellBackend(root_dir=root, env=env, max_output_bytes=limit)
+    # These commands name the test interpreter by absolute path.
+    return AsyncLocalShellBackend(
+        root_dir=root,
+        env=env,
+        max_output_bytes=limit,
+        extra_roots=[os.path.dirname(sys.executable)],
+    )
 
 
 async def _wait_for_file(path: Path) -> None:
@@ -74,6 +80,34 @@ async def test_cancellation_terminates_descendant_before_it_can_write(tmp_path: 
         await task
     await asyncio.sleep(1.7)
     assert not (tmp_path / "escaped").exists()
+
+
+async def test_command_naming_a_path_outside_the_sandbox_is_not_run(tmp_path: Path) -> None:
+    project = tmp_path / "project"
+    project.mkdir()
+    marker = tmp_path / "marker.txt"
+    marker.write_text("secret contents", encoding="utf-8")
+
+    response = await _backend(project).aexecute(f'type "{marker}"', timeout=10)
+
+    assert response.exit_code == 126
+    assert str(marker) in response.output
+    assert "secret contents" not in response.output
+
+
+async def test_command_naming_an_allowed_root_runs(tmp_path: Path) -> None:
+    project = tmp_path / "project"
+    project.mkdir()
+    (project / "marker.txt").write_text("inside", encoding="utf-8")
+
+    response = await _backend(project).aexecute('type "marker.txt"', timeout=10)
+    assert response.exit_code == 0
+    assert "inside" in response.output
+    # The test interpreter's own directory is an allowed root, so another
+    # command may name a sibling of the project through it.
+    interpreter_dir = Path(sys.executable).parent
+    response = await _backend(project).aexecute(f'cd /d "{interpreter_dir}" && echo ok', timeout=10)
+    assert response.exit_code == 0
 
 
 async def test_successful_command_can_start_an_explicit_background_process(tmp_path: Path) -> None:

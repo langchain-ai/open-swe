@@ -2,7 +2,9 @@ import asyncio
 import json
 import os
 import re
+import sys
 import tempfile
+from collections.abc import Sequence
 from pathlib import Path
 
 from deepagents.backends.composite import CompositeBackend
@@ -16,6 +18,8 @@ from deepagents.backends.protocol import (
     ReadResult,
     WriteResult,
 )
+from deepagents.backends.utils import validate_path as _virtual_validate_path
+from deepagents.middleware import filesystem as _filesystem_middleware
 
 from agent.config import ENV
 from agent.run_config import RunConfig
@@ -91,8 +95,62 @@ def create_desktop_backend(cfg: RunConfig) -> AsyncLocalShellBackend:
     return AsyncLocalShellBackend(
         root_dir=resolve_desktop_project(cfg),
         virtual_mode=False,
+        extra_roots=_toolchain_roots(),
         env={key: value for key in SHELL_ENV_KEYS if (value := os.environ.get(key))},
     )
+
+
+def _toolchain_roots() -> list[str]:
+    """Absolute locations a desktop command may name besides the project.
+
+    A build needs its interpreter and its shell by absolute path. Those live
+    outside the project, so they are named explicitly rather than by widening
+    the project root.
+    """
+    roots = [
+        os.path.dirname(sys.executable),
+        os.path.dirname(os.path.realpath(sys.executable)),
+        os.environ.get("SystemRoot", ""),
+        os.environ.get("LOCALAPPDATA", ""),
+    ]
+    return [root for root in roots if root and os.path.isdir(root)]
+
+
+_WINDOWS_ABSOLUTE = re.compile(r"^[A-Za-z]:[\\/]")
+
+
+def validate_path(path: str, *, allowed_prefixes: Sequence[str] | None = None) -> str:
+    """`deepagents`' virtual-path validation that also accepts Windows paths.
+
+    A real absolute path is left exactly as the caller wrote it: backslashes are
+    meaningful to `os.path` and a leading `/` would turn `D:\\proj` into a
+    virtual root path.
+    """
+    if _WINDOWS_ABSOLUTE.match(path):
+        return path
+    return _virtual_validate_path(path, allowed_prefixes=allowed_prefixes)
+
+
+def install_real_path_file_tools() -> None:
+    """Let the file tools accept the real Windows paths a desktop run works in.
+
+    Deep Agents validates every file-tool argument with `validate_path`, which
+    normalizes to a virtual POSIX path and rejects `D:\\...` outright. That
+    rejection happens in the middleware, before the backend sees the argument,
+    so a desktop backend that speaks real paths never gets the chance to
+    resolve them. The shell already runs on real paths, which left the model
+    reading through one path scheme and running commands in another.
+
+    Windows absolute paths therefore pass through untouched as the backend's own
+    real paths. Everything else keeps the virtual normalization, and
+    `DesktopCompositeBackend` resolves those virtual paths under the project, so
+    both forms name the same file.
+    """
+    # The tools call the module-level name, so replacing it is what reaches them.
+    # The checker rejects any write to a re-exported library attribute, even one
+    # whose signature matches; there is no other seam, since the tool closures
+    # bind the global rather than a method on the middleware.
+    _filesystem_middleware.validate_path = validate_path  # ty: ignore[invalid-assignment]
 
 
 class DesktopCompositeBackend(CompositeBackend):
@@ -121,6 +179,17 @@ class DesktopCompositeBackend(CompositeBackend):
         normalized = os.path.normcase(os.path.abspath(path))
         return normalized == self._project_dir or normalized.startswith(self._project_dir + os.sep)
 
+    def _project_path(self, virtual: str) -> str:
+        """Resolve a virtual path under the project instead of the drive root.
+
+        The file tools normalize every argument to a virtual path before the
+        backend sees it, and a non-virtual backend resolves a leading "/"
+        against the current drive. `/eval-abc/src` would then mean
+        `D:\\eval-abc\\src` rather than the project's `eval-abc`. A virtual path
+        is relative to the project, which is also where the shell starts.
+        """
+        return os.path.join(self._project_dir, virtual.lstrip("/"))
+
     def _route(self, path: str) -> tuple[BackendProtocol, str, str | None]:
         if self._in_project(path):
             return self.default, path, None
@@ -130,6 +199,8 @@ class DesktopCompositeBackend(CompositeBackend):
                 return backend, "/", prefix
             if path.startswith(f"{bare}/"):
                 return backend, path[len(bare) :], prefix
+        if path.startswith(("/", "\\")) and not _WINDOWS_ABSOLUTE.match(path):
+            return self.default, self._project_path(path), None
         return self.default, path, None
 
     # Every file operation routes through _route and hands the backend the
