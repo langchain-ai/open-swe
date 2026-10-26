@@ -25,6 +25,7 @@ from deepagents.backends.sandbox import BaseSandbox
 from langgraph_sdk import get_client
 
 from openswe.github.token_scope import token_repositories_from_metadata
+from openswe.threads.store import THREADS
 
 logger = logging.getLogger(__name__)
 
@@ -388,9 +389,10 @@ async def get_sandbox_metadata(thread_id: str) -> dict[str, Any]:
     """
     # A failed lookup must not read as "unbound": the caller would create a
     # replacement and bind it over the thread's real sandbox.
-    thread = await get_client().threads.get(thread_id)
-    metadata = thread.get("metadata", {}) if isinstance(thread, dict) else {}
-    return metadata if isinstance(metadata, dict) else {}
+    thread = await THREADS.get(thread_id)
+    if thread is None:
+        raise LookupError(f"Thread {thread_id} is not indexed")
+    return dict(thread.metadata)
 
 
 _TOKEN_SCOPES: OrderedDict[str, list[str] | None] = OrderedDict()
