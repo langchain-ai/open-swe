@@ -92,28 +92,53 @@ def create_desktop_backend(cfg: RunConfig) -> AsyncLocalShellBackend:
     # a model can hand a path it read back to `execute`. Virtual paths only
     # rewrite file tools; the shell still starts in the real project, which
     # left the model comparing two different views of one working tree.
+    project = resolve_desktop_project(cfg)
+    toolchain = _toolchain_roots(project)
+    env = {key: value for key in SHELL_ENV_KEYS if (value := os.environ.get(key))}
+    # A project venv is what the project's own commands run with, so put it
+    # ahead of whatever interpreter the app happens to have on PATH.
+    env["PATH"] = os.pathsep.join([*toolchain, env.get("PATH", "")])
     return AsyncLocalShellBackend(
-        root_dir=resolve_desktop_project(cfg),
+        root_dir=project,
         virtual_mode=False,
-        extra_roots=_toolchain_roots(),
-        env={key: value for key in SHELL_ENV_KEYS if (value := os.environ.get(key))},
+        extra_roots=toolchain,
+        env=env,
     )
 
 
-def _toolchain_roots() -> list[str]:
+def _toolchain_roots(project: str) -> list[str]:
     """Absolute locations a desktop command may name besides the project.
 
     A build needs its interpreter and its shell by absolute path. Those live
     outside the project, so they are named explicitly rather than by widening
     the project root.
     """
+    local_app_data = os.environ.get("LOCALAPPDATA", "")
     roots = [
+        _project_python_dir(project),
         os.path.dirname(sys.executable),
         os.path.dirname(os.path.realpath(sys.executable)),
         os.environ.get("SystemRoot", ""),
-        os.environ.get("LOCALAPPDATA", ""),
+        # Tools a user installed themselves, such as `uv`.
+        os.path.join(local_app_data, "Programs"),
+        os.path.join(local_app_data, "Microsoft", "WindowsApps"),
+        os.path.join(os.environ.get("USERPROFILE", ""), ".local", "bin"),
     ]
-    return [root for root in roots if root and os.path.isdir(root)]
+    unique: dict[str, str] = {}
+    for root in roots:
+        if root and os.path.isdir(root):
+            unique.setdefault(os.path.normcase(os.path.realpath(root)), root)
+    return list(unique.values())
+
+
+def _project_python_dir(project: str) -> str:
+    """The project's own interpreter directory, for a venv checked into it.
+
+    Without this a project command cannot name `python` at all, and the model
+    spends its budget hunting for one instead of working.
+    """
+    candidates = [Path(project) / ".venv" / "Scripts", Path(project) / ".venv" / "bin"]
+    return str(next((candidate for candidate in candidates if candidate.is_dir()), ""))
 
 
 _WINDOWS_ABSOLUTE = re.compile(r"^[A-Za-z]:[\\/]")

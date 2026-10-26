@@ -37,6 +37,50 @@ _NON_APPLYING_PATCH = (
 )
 
 
+_LEAK_TEST_PATCH = (
+    "diff --git a/test_probe.py b/test_probe.py\n"
+    "new file mode 100644\n"
+    "--- /dev/null\n"
+    "+++ b/test_probe.py\n"
+    "@@ -0,0 +1,2 @@\n"
+    "+def test_probe():\n"
+    "+    assert True\n"
+)
+
+
+def _package_repo() -> SimpleNamespace:
+    """A throwaway package whose install would stay importable after grading."""
+    root = Path(tempfile.mkdtemp(prefix="probe-package-"))
+    repo = root / "package"
+    repo.mkdir()
+    (repo / "pyproject.toml").write_text(
+        '[build-system]\nrequires = ["setuptools"]\nbuild-backend = "setuptools.build_meta"\n\n'
+        '[project]\nname = "probe-wheel-pkg"\nversion = "0.1"\n',
+        newline="\n",
+    )
+    (repo / "probe_leak_module.py").write_text("VALUE = 1\n", newline="\n")
+    _git("init", "-q", cwd=repo)
+    _git("add", ".", cwd=repo)
+    _git(
+        "-c",
+        "user.email=probe@example.com",
+        "-c",
+        "user.name=probe",
+        "commit",
+        "-q",
+        "-m",
+        "base",
+        cwd=repo,
+    )
+    origin = root / "origin.git"
+    _git("clone", "-q", "--bare", str(repo), str(origin), cwd=root)
+    return SimpleNamespace(
+        base_commit=_git("rev-parse", "HEAD", cwd=repo).strip(),
+        clone_url=origin.as_uri(),
+        root=root,
+    )
+
+
 def _git(*args: str, cwd: Path) -> str:
     result = subprocess.run(["git", *args], cwd=cwd, capture_output=True, text=True, check=True)
     return result.stdout
@@ -178,3 +222,38 @@ async def test_unreachable_base_commit_is_an_error_not_a_zero(
     assert result["resolved"] is False
     assert "git fetch" in result["error"]
     assert result["failure_stage"] == "checkout"
+
+
+async def test_editable_install_does_not_leak_into_later_tasks(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    package = _package_repo()
+    monkeypatch.setenv("AGENT_EVAL_PYTHON", sys.executable)
+    with tempfile.TemporaryDirectory() as tmp:
+        result = await _evaluate_instance(
+            patch="",
+            inputs={
+                "instance_id": "probe__package-1",
+                "repo": "probe/package",
+                "base_commit": package.base_commit,
+                "clone_url": package.clone_url,
+            },
+            outputs={
+                "fail_to_pass": ["test_probe.py::test_probe"],
+                "pass_to_pass": [],
+                "test_patch": _LEAK_TEST_PATCH,
+                "install_commands": ["python -m pip install -e ."],
+            },
+            workdir=Path(tmp) / "checkout",
+            timeout=600,
+        )
+
+    assert result["failure_stage"] == "none", result
+    assert result["resolved"] is True, result
+    leaked = subprocess.run(
+        [sys.executable, "-c", "import probe_leak_module"],
+        cwd=tempfile.gettempdir(),
+        capture_output=True,
+        text=True,
+    )
+    assert leaked.returncode != 0, "the graded package stayed installed"

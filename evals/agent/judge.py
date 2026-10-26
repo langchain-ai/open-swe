@@ -8,6 +8,7 @@ import signal
 import sys
 import tempfile
 import time
+import tomllib
 from collections.abc import Mapping
 from pathlib import Path
 from statistics import median
@@ -219,6 +220,52 @@ def _install_env() -> dict[str, str]:
     return env
 
 
+_EDITABLE_INSTALL = re.compile(r"-e\s+|--editable[\s=]")
+_PRUNE_ENV = "AGENT_EVAL_PRUNE_EDITABLE_INSTALLS"
+
+
+async def _install_repo(package: str, workdir: Path, timeout: int) -> tuple[int, str, bool]:
+    """Install the checkout a judge grades.
+
+    An editable install leaves the package importable from the shared judge
+    interpreter after the checkout is gone, so the next task would import it
+    instead of its own. A test patch failing to apply for the wrong reason is
+    invisible in the score, so the editable install is taken back once graded.
+    """
+    env = _install_env()
+    env[_PRUNE_ENV] = "1"
+    env["PIP_UNINSTALL_NO_INPUT"] = "1"
+    installed = await _run_shell(package, workdir, timeout, env=env)
+    return installed["returncode"], installed["output"], bool(_EDITABLE_INSTALL.search(package))
+
+
+def _project_name(workdir: Path) -> str | None:
+    """The distribution name a checkout declares, in `pip uninstall` form."""
+    pyproject = workdir / "pyproject.toml"
+    try:
+        metadata = tomllib.loads(pyproject.read_text(encoding="utf-8"))
+    except (OSError, UnicodeDecodeError, tomllib.TOMLDecodeError) as exc:
+        logger.warning("Could not read project metadata", extra={"error": str(exc)})
+        return None
+    name = metadata.get("project", {}).get("name") if isinstance(metadata, dict) else None
+    return name if isinstance(name, str) else None
+
+
+async def _prune_editable_install(workdir: Path, timeout: int) -> None:
+    # An exec'd `python` is resolved by the OS, which reads the judge's own
+    # environment and not the PATH the install ran with; name the interpreter.
+    name = _project_name(workdir)
+    if name is None:
+        logger.warning("Could not name the package to uninstall")
+        return
+    pruned = await _run([python_command(), "-m", "pip", "uninstall", "-y", name], workdir, timeout)
+    if pruned["returncode"] != 0:
+        logger.warning(
+            "Could not uninstall the graded package",
+            extra={"package": name, "output": pruned["output"][-_SUMMARY_TAIL_CHARS:]},
+        )
+
+
 async def _prepare_checkout(
     repo: str, base_commit: str, workdir: Path, timeout: int, *, clone_url: str | None = None
 ) -> str | None:
@@ -292,6 +339,7 @@ async def _evaluate_instance(
     phase = FailureStage.INVALID_INSTANCE
     phase_seconds: dict[str, float] = {}
     result["phase_seconds"] = phase_seconds
+    editable: list[str] = []
     try:
         grading = GradingSpec.model_validate(outputs)
         if grading.test_command != "pytest":
@@ -312,15 +360,12 @@ async def _evaluate_instance(
         phase = FailureStage.INSTALL
         started = time.monotonic()
         for command in grading.install_commands:
-            installed = await _run_shell(command, workdir, timeout, env=_install_env())
-            if installed["returncode"] != 0:
+            returncode, output, is_editable = await _install_repo(command, workdir, timeout)
+            if returncode != 0:
                 phase_seconds[phase] = round(time.monotonic() - started, 3)
-                return _failure(
-                    result,
-                    phase,
-                    f"install command failed ({command}): {installed['output']}",
-                    timed_out=installed.get("timed_out", False),
-                )
+                return _failure(result, phase, f"install command failed ({command}): {output}")
+            if is_editable:
+                editable.append(command)
         phase_seconds[phase] = round(time.monotonic() - started, 3)
 
         for phase, content in (
@@ -401,6 +446,9 @@ async def _evaluate_instance(
             extra={"instance_id": result["instance_id"], "failure_stage": phase},
         )
         return _failure(result, phase, f"{type(exc).__name__}: {exc}")
+    finally:
+        if editable:
+            await _prune_editable_install(workdir, timeout)
 
 
 async def evaluate_target(

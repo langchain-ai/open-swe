@@ -1,4 +1,5 @@
 import json
+import os
 import tempfile
 from collections.abc import Iterator
 from contextlib import contextmanager
@@ -45,11 +46,32 @@ def test_desktop_backend_allows_a_thread_worktree_without_provider_secrets(
 
     assert resolve_desktop_project(RunConfig(local_project_path=str(project))) == str(project)
     backend = create_desktop_backend(RunConfig(local_project_path=str(project)))
-    assert backend._env.get("PATH") == "/bin"
+    assert backend._env.get("PATH", "").endswith(os.pathsep + "/bin")
     assert "OPENAI_API_KEY" not in backend._env
     # Real paths, so a path the shell prints is a path the file tools accept.
     assert backend.read(str(marker)).file_data == {"content": "marker", "encoding": "utf-8"}
     assert backend.read("marker.txt").file_data == {"content": "marker", "encoding": "utf-8"}
+
+
+def test_desktop_backend_puts_the_project_interpreter_on_path(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    worktrees = tmp_path / "worktrees"
+    project = worktrees / "project-abc12345"
+    scripts = project / ".venv" / "Scripts"
+    scripts.mkdir(parents=True)
+    for name in ("python.exe", "pytest.exe"):
+        (scripts / name).write_bytes(b"")
+    monkeypatch.setenv("OPEN_SWE_LOCAL_WORKTREES_DIR", str(worktrees))
+    monkeypatch.setenv("PATH", "/usr/bin")
+
+    backend = create_desktop_backend(RunConfig(local_project_path=str(project)))
+
+    path_entries = backend._env["PATH"].split(os.pathsep)
+    assert Path(path_entries[0]) == scripts
+    assert "/usr/bin" in path_entries
+    # The interpreter directory is also one the shell may name absolutely.
+    assert scripts in backend._extra_roots
 
 
 def test_desktop_backend_allows_an_allowlisted_project_checkout(
