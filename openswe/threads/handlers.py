@@ -19,10 +19,12 @@ from openswe.github.pull_request_status import get_pull_request_statuses
 from openswe.github.thread_token import invalidate_cached_github_token
 from openswe.message_queue import QueuedMessage, QueuedPreview
 from openswe.review.session import ReviewSession, ReviewSessionMetadata
+from openswe.sandboxes.browsers import ThreadBrowser
 from openswe.slack.client import parse_github_pr_url
 from openswe.threads.access import _authorized_thread, _readable_thread_metadata
 from openswe.threads.blobs import copy_thread_blobs, referenced_blob_digests
 from openswe.threads.creation import TITLE_LOCKED_KEY, create_thread
+from openswe.threads.index import STOPPED_AT_KEY
 from openswe.threads.listing import (
     attach_task_workers,
     list_unresolved_dashboard_threads,
@@ -56,6 +58,7 @@ from openswe.transcript.engine import delete_transcript
 from openswe.transcript.mirror import mirror_thread_metadata
 from openswe.transcript.subagents import attach_subagents
 from openswe.transcript.turns import settle_run_turn
+from openswe.ui_invalidations.topics import Topic
 from openswe.utils.json_types import JsonObject, as_json_object, as_thread_dict, thread_metadata
 from openswe.utils.thread_ops import (
     langgraph_client,
@@ -107,18 +110,26 @@ async def mark_review_session_viewed(review: ReviewSession) -> None:
     )
 
 
-async def get_dashboard_terminal_sandbox(
-    thread_id: str, login: str, *, email: str | None = None
-) -> tuple[str, str | None]:
+async def get_promptable_thread_metadata(thread_id: str, login: str) -> Mapping[str, object]:
+    """The metadata of a thread ``login`` may prompt, for opening its live capabilities.
+
+    A shell or a browser is a live capability into the owner's sandbox, so admins
+    who may view a private thread still cannot open one.
+    """
     client = langgraph_client()
     try:
         thread = await client.threads.get(thread_id)
     except Exception as exc:  # noqa: BLE001
         raise HTTPException(404, "thread not found") from exc
     metadata = thread_metadata(thread)
-    # A shell is a live capability into the owner's sandbox, so admins who may
-    # view a private thread still cannot open one.
     _assert_thread_promptable(metadata, login)
+    return metadata
+
+
+async def get_dashboard_terminal_sandbox(
+    thread_id: str, login: str, *, email: str | None = None
+) -> tuple[str, str | None]:
+    metadata = await get_promptable_thread_metadata(thread_id, login)
     sandbox_id = metadata.get("sandbox_id")
     if (
         not isinstance(sandbox_id, str)
@@ -235,6 +246,12 @@ async def _cancel_active_thread_runs(
     return cancelled, kept
 
 
+def _stopped_metadata() -> dict[str, Any]:
+    """What a stop records: its run reads as interrupted, and a run still starting sees it."""
+    now = _now_ms()
+    return {"latest_run_status": "interrupted", STOPPED_AT_KEY: now, "updated_at_ms": now}
+
+
 async def interrupt_transcript_turns(thread_id: str, run_ids: Sequence[str]) -> None:
     """Close the transcript turn of each cancelled run.
 
@@ -293,10 +310,7 @@ async def cancel_dashboard_thread(
         await on_interrupted()
     await interrupt_transcript_turns(thread_id, cancelled_run_ids)
 
-    metadata_update: dict[str, Any] = {
-        "latest_run_status": "interrupted",
-        "updated_at_ms": _now_ms(),
-    }
+    metadata_update: dict[str, Any] = _stopped_metadata()
     await client.threads.update(thread_id=thread_id, metadata=metadata_update)
     # A follow-up left queued picks the leftovers up with its first model call.
     try:
@@ -333,7 +347,7 @@ async def cancel_machine_thread(thread_id: str, principal: Principal) -> JsonObj
     await interrupt_transcript_turns(thread_id, cancelled_run_ids)
     await client.threads.update(
         thread_id=thread_id,
-        metadata={"latest_run_status": "interrupted", "updated_at_ms": _now_ms()},
+        metadata=_stopped_metadata(),
     )
     return await machine_thread(thread_id, principal)
 
@@ -362,7 +376,7 @@ async def admin_cancel_dashboard_thread(
 
     await client.threads.update(
         thread_id=thread_id,
-        metadata={"latest_run_status": "interrupted", "updated_at_ms": _now_ms()},
+        metadata=_stopped_metadata(),
     )
     updated_thread = await client.threads.get(thread_id)
     return await _thread_summary(updated_thread)
@@ -461,12 +475,26 @@ async def share_thread_with_workspace(
     for status in ("pending", "running"):
         if await client.runs.list(thread_id, status=status, limit=1):
             raise HTTPException(409, "stop the run before sharing this thread")
-    metadata_update = {
+    metadata_update: dict[str, object] = {
         "visibility": "public",
         "admin_thread": False,
         "unlisted": False,
         "updated_at_ms": _now_ms(),
     }
+    # The thread's browser keeps whatever the owner signed into: like the
+    # owner's GitHub token below, it must not pass to the workspace. Whether
+    # it was opened is best effort, so it is deleted whenever it has a name.
+    browser = ThreadBrowser.of(metadata)
+    if browser is not None:
+        try:
+            metadata_update.update(await browser.forget())
+        except Exception as exc:
+            logger.warning(
+                "Could not delete the thread's browser before sharing",
+                extra={"thread_id": thread_id},
+                exc_info=True,
+            )
+            raise HTTPException(502, "failed to clear the thread's browser") from exc
     try:
         await client.threads.update(thread_id=thread_id, metadata=metadata_update)
     except Exception as exc:
@@ -474,6 +502,8 @@ async def share_thread_with_workspace(
         raise HTTPException(502, "failed to share thread") from exc
     await invalidate_cached_github_token(thread_id)
     await mirror_thread_metadata(thread_id, metadata_update)
+    if browser is not None:
+        await Topic.THREAD_BROWSERS.invalidate(key=thread_id)
     return await _thread_summary(
         {**as_thread_dict(thread), "metadata": {**metadata, **metadata_update}}
     )

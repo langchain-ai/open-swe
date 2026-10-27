@@ -22,10 +22,25 @@ from openswe.slack import webhook as slack_webhooks
 from openswe.slack.request import SlackRequest
 from openswe.webhooks import common as webhook_common
 from openswe.workspaces.store import WORKSPACES, WorkspaceCreate
+from tests.conftest import FakeUserRecords
 from tests.slack.test_slack_context import _setup_slack_mention_fakes
 
 # Workspaces are rows.
 _needs_workspace_rows = pytest.mark.usefixtures("registry_db")
+
+
+async def test_personal_workspace_repo_applies_without_a_fallback_candidate(
+    user_records: FakeUserRecords,
+) -> None:
+    user_records.seed(
+        "profile",
+        "alice",
+        {"default_repo": "acme/global", "workspace_default_repos": {"oss": "acme/personal"}},
+    )
+    assert await slack_webhooks.workspace_scoped_default_repo(None, "oss", "alice") == Repo(
+        owner="acme", name="personal"
+    )
+    assert await slack_webhooks.workspace_scoped_default_repo(None, "other", "alice") is None
 
 
 @_needs_workspace_rows
@@ -106,7 +121,9 @@ async def test_the_vision_fallback_reads_the_resolved_workspaces_model(
 async def test_a_bound_channel_outranks_a_named_repository(
     monkeypatch: pytest.MonkeyPatch,
     inherited_workspace: str | None,
+    user_records: FakeUserRecords,
 ) -> None:
+    user_records.seed("profile", "mason-gh", {"workspace_default_repos": {"oss": "acme/personal"}})
     captured: dict[str, Any] = {}
     _setup_slack_mention_fakes(monkeypatch, captured)
 

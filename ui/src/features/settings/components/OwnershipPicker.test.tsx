@@ -12,7 +12,8 @@ vi.mock("@/lib/session", () => ({
   useSession: () => ({ data: null }),
 }))
 
-vi.mock("@/lib/slack-channels", () => ({
+vi.mock("@/lib/slack-channels", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@/lib/slack-channels")>()),
   useSlackChannelDirectory: vi.fn(),
 }))
 
@@ -91,7 +92,7 @@ describe("OwnershipPicker", () => {
       num_members: 10,
     }))
     const directory = {
-      data: { channels, partial: false },
+      data: { channels, refreshing: false },
       isLoading: false,
       isError: false,
       error: null,

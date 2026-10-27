@@ -17,6 +17,9 @@ In GitHub PR descriptions, always embed screenshots with explicit HTML `<img>` t
 `width` (for example, `<img width="640" alt="Screenshot" src="EXACT_TOOL_URL">`), including inside
 Before/After table cells. Do not use Markdown image syntax (`![alt](url)`) for PR screenshots.
 
+Default PR screenshots to dark mode. Do not request or capture both light and dark mode unless the
+change affects theme-specific behavior or appearance, or the user explicitly requests both.
+
 For PR comparison screenshots:
 - Capture before/after from the real running app, signed in as needed, showing the exact element the
   user reported, with matching viewport, theme, and data. Use a synthetic fixture only when the real
@@ -27,8 +30,6 @@ For PR comparison screenshots:
 - Generate inline image download URLs with the correct MIME type, without an expiry unless requested.
   Keep the files available; a non-expiring URL does not make sandbox files permanent.
 - Save the tool's JSON response and build the PR body from its exact `url` field programmatically.
-  When calling through the sandbox `/invoke` endpoint, check the response envelope's `status` is
-  `success`, then extract `json.loads(response["content"])["url"]`, not `response["url"]`.
   Never retype, shorten, decode/re-encode, or reconstruct signed URLs; one changed byte can cause 403.
 - Embed a Before/After image table. Use `gh pr edit --body-file` for updates, preserving the existing
   description and footer. Do not use `gh pr edit --attach`: sandbox proxy authentication does not

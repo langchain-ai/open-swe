@@ -30,6 +30,7 @@ export function ReviewPage({ pr }: { pr: PullRequestRef }) {
   const detail = useQuery(reviewQueries.detail(pr))
   const chatThreadId = useReviewChat(pr).data?.thread_id
   const open = useReviewPage((state) => state.open)
+  const leave = useReviewPage((state) => state.leave)
   const navigatorOpen = useReviewPage((state) => state.navigatorOpen)
   const navigatorOverlay = useReviewPage((state) => state.navigatorOverlay)
   const setNavigatorOverlay = useReviewPage(
@@ -46,16 +47,25 @@ export function ReviewPage({ pr }: { pr: PullRequestRef }) {
   const headSha = detail.data?.head_sha ?? null
 
   useLayoutEffect(() => open(pr, headSha), [open, pr, headSha])
+  useLayoutEffect(() => leave, [leave])
 
-  // A new head means a new diff; the page stays mounted so nothing else resets.
-  const seenSha = useRef(headSha)
+  // A new head or base means a new diff, and nothing else reloads it; the
+  // page stays mounted so nothing else resets.
+  const baseRef = detail.data?.pr.base_ref ?? null
+  const diffRevision =
+    headSha && baseRef !== null ? `${baseRef}:${headSha}` : null
+  const seenRevision = useRef(diffRevision)
   useEffect(() => {
-    if (headSha && seenSha.current && headSha !== seenSha.current)
+    if (
+      diffRevision &&
+      seenRevision.current &&
+      diffRevision !== seenRevision.current
+    )
       void queryClient.invalidateQueries({
         queryKey: reviewQueries.diff(pr).queryKey,
       })
-    if (headSha) seenSha.current = headSha
-  }, [headSha, queryClient, pr])
+    if (diffRevision) seenRevision.current = diffRevision
+  }, [diffRevision, queryClient, pr])
 
   const title = pageTitle(
     detail.data?.pr.title ??

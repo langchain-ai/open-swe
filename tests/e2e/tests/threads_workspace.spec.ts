@@ -479,7 +479,7 @@ test.describe("threads workspace", () => {
     await profileStarted.promise;
     await expect(
       page.getByRole("heading", { name: "What should we build?" }),
-    ).toHaveCount(0);
+    ).toBeVisible();
 
     await page.evaluate(() => {
       const seen = { value: false };

@@ -21,6 +21,8 @@ import { Tooltip } from "@langchain/macaw-components/Tooltip"
 import { FileIcon } from "@phosphor-icons/react/dist/ssr/File"
 import { FilesIcon } from "@phosphor-icons/react/dist/ssr/Files"
 import { GitDiffIcon } from "@phosphor-icons/react/dist/ssr/GitDiff"
+import { GlobeIcon } from "@phosphor-icons/react/dist/ssr/Globe"
+import { PulseIcon } from "@phosphor-icons/react/dist/ssr/Pulse"
 import { RobotIcon } from "@phosphor-icons/react/dist/ssr/Robot"
 import { TerminalWindowIcon } from "@phosphor-icons/react/dist/ssr/TerminalWindow"
 import type {
@@ -56,16 +58,16 @@ interface RightPanelTabsProps {
   onAddTerminal: () => void
   onAddDiff: () => void
   onAddFiles: () => void
+  /** Offered only where a thread can have a browser window. */
+  onAddBrowser?: () => void
+  /** Offered only where a thread can run commands and monitors in the background. */
+  onAddBackgroundWork?: () => void
   terminalAvailable: boolean
   diffAvailable: boolean
+  browserAvailable?: boolean
+  backgroundWorkAvailable?: boolean
   children: ReactNode
 }
-
-const SURFACE_DISABLED_REASONS = {
-  terminal: "Terminals are only available from a running workspace.",
-  diff: "Changes are only available for threads with a repository.",
-  files: "Files are only available from a running workspace.",
-} as const
 
 /**
  * Overlays that must win over the launcher's letter shortcuts. One that
@@ -84,12 +86,96 @@ function hasLayerAbove(launcher: HTMLElement | null): boolean {
   ).some((layer) => !launcher || !layer.contains(launcher))
 }
 
-/** One-line unavailability hints for the empty-state cards. */
-const SURFACE_UNAVAILABLE_HINTS = {
-  terminal: "Available once the workspace is running.",
-  diff: "Available for Git repositories.",
-  files: "Available once the workspace is running.",
-} as const
+type SurfaceLauncherProps = Pick<
+  RightPanelTabsProps,
+  | "onAddTerminal"
+  | "onAddDiff"
+  | "onAddFiles"
+  | "onAddBrowser"
+  | "onAddBackgroundWork"
+  | "terminalAvailable"
+  | "diffAvailable"
+  | "browserAvailable"
+  | "backgroundWorkAvailable"
+>
+
+/** A surface the panel can open, as the add menu and the empty state offer it. */
+interface SurfaceLauncher {
+  label: string
+  description: string
+  icon: typeof TerminalWindowIcon
+  shortcut?: string
+  available: boolean
+  /** Why it is unavailable, as the add menu's tooltip says it. */
+  disabledReason: string
+  /** The same, in one line for an empty-state card. */
+  unavailableHint: string
+  onClick: () => void
+}
+
+function surfaceLaunchers(props: SurfaceLauncherProps): Array<SurfaceLauncher> {
+  return [
+    {
+      label: "Terminal",
+      description: "Start a shell in this workspace.",
+      icon: TerminalWindowIcon,
+      available: props.terminalAvailable,
+      disabledReason: "Terminals are only available from a running workspace.",
+      unavailableHint: "Available once the workspace is running.",
+      onClick: props.onAddTerminal,
+    },
+    {
+      label: "Changes",
+      description: "Review changes in this thread.",
+      icon: GitDiffIcon,
+      available: props.diffAvailable,
+      disabledReason:
+        "Changes are only available for threads with a repository.",
+      unavailableHint: "Available for Git repositories.",
+      onClick: props.onAddDiff,
+    },
+    {
+      label: "Files",
+      description: "Browse files in this workspace.",
+      icon: FilesIcon,
+      shortcut: "F",
+      available: props.terminalAvailable,
+      disabledReason: "Files are only available from a running workspace.",
+      unavailableHint: "Available once the workspace is running.",
+      onClick: props.onAddFiles,
+    },
+    ...(props.onAddBrowser
+      ? [
+          {
+            label: "Browser",
+            description:
+              "Browse alongside the agent, or take its browser over.",
+            icon: GlobeIcon,
+            shortcut: "B",
+            available: props.browserAvailable ?? false,
+            disabledReason:
+              "The browser is available once this thread's agent has started.",
+            unavailableHint: "Available once the thread starts.",
+            onClick: props.onAddBrowser,
+          },
+        ]
+      : []),
+    ...(props.onAddBackgroundWork
+      ? [
+          {
+            label: "Background work",
+            description: "Commands and monitors running for this thread.",
+            icon: PulseIcon,
+            available: props.backgroundWorkAvailable ?? false,
+            disabledReason:
+              "Nothing is running in the background for this thread.",
+            unavailableHint: "Available while a command or monitor runs.",
+            onClick: props.onAddBackgroundWork,
+          },
+        ]
+      : []),
+  ]
+}
 
 type SurfaceShortcutEvent = Pick<
   KeyboardEvent,
@@ -97,7 +183,7 @@ type SurfaceShortcutEvent = Pick<
 >
 
 export function surfaceShortcutActionForKey<
-  const TAction extends { available: boolean; shortcut: string },
+  const TAction extends { available: boolean; shortcut?: string },
 >(
   actions: ReadonlyArray<TAction>,
   event: SurfaceShortcutEvent
@@ -108,7 +194,7 @@ export function surfaceShortcutActionForKey<
     actions.find(
       (action) =>
         action.available &&
-        action.shortcut.toLowerCase() === event.key.toLowerCase()
+        action.shortcut?.toLowerCase() === event.key.toLowerCase()
     ) ?? null
   )
 }
@@ -116,7 +202,7 @@ export function surfaceShortcutActionForKey<
 function SurfaceMenuItem(props: {
   available: boolean
   disabledReason?: string
-  shortcut: string
+  shortcut?: string
   onSelect: () => void
   children: ReactNode
 }) {
@@ -134,7 +220,7 @@ function SurfaceMenuItem(props: {
         size="sm"
       >
         {props.children}
-        <Kbd className="ml-auto">{props.shortcut}</Kbd>
+        {props.shortcut && <Kbd className="ml-auto">{props.shortcut}</Kbd>}
       </DropdownMenuItem>
     </Tooltip>
   )
@@ -147,47 +233,13 @@ function SurfaceMenuItem(props: {
  * focused. The highlight only appears on hover or arrow use. Unavailable
  * surfaces stay visible with a one-line reason.
  */
-function RightPanelEmptyState(props: {
-  onAddTerminal: () => void
-  onAddDiff: () => void
-  onAddFiles: () => void
-  terminalAvailable: boolean
-  diffAvailable: boolean
+function RightPanelEmptyState({
+  actions,
+}: {
+  actions: ReadonlyArray<SurfaceLauncher>
 }) {
   // -1 means no highlight: it only appears on hover or arrow use.
   const [highlight, setHighlight] = useState(-1)
-
-  const actions = [
-    {
-      label: "Terminal",
-      description: "Start a shell in this workspace.",
-      icon: TerminalWindowIcon,
-      shortcut: "T",
-      available: props.terminalAvailable,
-      disabledReason: SURFACE_UNAVAILABLE_HINTS.terminal,
-      onClick: props.onAddTerminal,
-    },
-    {
-      label: "Changes",
-      description: "Review changes in this thread.",
-      icon: GitDiffIcon,
-      shortcut: "D",
-      available: props.diffAvailable,
-      disabledReason: SURFACE_UNAVAILABLE_HINTS.diff,
-      onClick: props.onAddDiff,
-    },
-    {
-      label: "Files",
-      description: "Browse files in this workspace.",
-      icon: FilesIcon,
-      shortcut: "F",
-      available: props.terminalAvailable,
-      disabledReason: SURFACE_UNAVAILABLE_HINTS.files,
-      onClick: props.onAddFiles,
-    },
-  ] as const
-
-  type SurfaceAction = (typeof actions)[number]
 
   const availableActions = actions.filter((action) => action.available)
   const highlightIndex =
@@ -272,10 +324,10 @@ function RightPanelEmptyState(props: {
     node?.focus()
   }, [])
 
-  const isHighlighted = (action: SurfaceAction) =>
+  const isHighlighted = (action: SurfaceLauncher) =>
     highlightIndex !== -1 && availableActions[highlightIndex] === action
 
-  const actionIcon = (action: SurfaceAction, iconClassName = "size-4") => {
+  const actionIcon = (action: SurfaceLauncher, iconClassName = "size-4") => {
     const Icon = action.icon
     return <Icon className={cn("shrink-0", iconClassName)} weight="regular" />
   }
@@ -329,7 +381,11 @@ function RightPanelEmptyState(props: {
                   isHighlighted(action) && highlightedCardClass
                 )}
               >
-                <Kbd className="absolute top-3 right-3">{action.shortcut}</Kbd>
+                {action.shortcut && (
+                  <Kbd className="absolute top-3 right-3">
+                    {action.shortcut}
+                  </Kbd>
+                )}
                 <span className="flex items-center gap-space-2 pe-space-6">
                   {actionIcon(action)}
                   <span className="text-sm font-medium">{action.label}</span>
@@ -346,13 +402,17 @@ function RightPanelEmptyState(props: {
                   cardShellClass
                 )}
               >
-                <Kbd className="absolute top-3 right-3">{action.shortcut}</Kbd>
+                {action.shortcut && (
+                  <Kbd className="absolute top-3 right-3">
+                    {action.shortcut}
+                  </Kbd>
+                )}
                 <span className="flex items-center gap-space-2 pe-space-6">
                   {actionIcon(action)}
                   <span className="text-sm font-medium">{action.label}</span>
                 </span>
                 <span className="mt-space-1 text-xs leading-relaxed text-secondary">
-                  {action.disabledReason}
+                  {action.unavailableHint}
                 </span>
               </div>
             )
@@ -382,6 +442,8 @@ export function surfaceTitle(
       return "Agents"
     case "preview":
       return "Browser"
+    case "background":
+      return "Background work"
   }
 }
 
@@ -392,6 +454,7 @@ const SURFACE_ICONS = {
   file: FileIcon,
   terminal: TerminalWindowIcon,
   agents: RobotIcon,
+  background: PulseIcon,
 } as const satisfies Record<RightPanelSurface["kind"], unknown>
 
 function SurfaceIcon({ surface }: { surface: RightPanelSurface }) {
@@ -403,32 +466,7 @@ export function RightPanelTabs(props: RightPanelTabsProps) {
   const tabListRef = useRef<HTMLDivElement>(null)
   const [addSurfaceMenuOpen, setAddSurfaceMenuOpen] = useState(false)
 
-  const addSurfaceActions = [
-    {
-      label: "Terminal",
-      icon: TerminalWindowIcon,
-      shortcut: "T",
-      available: props.terminalAvailable,
-      disabledReason: SURFACE_DISABLED_REASONS.terminal,
-      onClick: props.onAddTerminal,
-    },
-    {
-      label: "Changes",
-      icon: GitDiffIcon,
-      shortcut: "D",
-      available: props.diffAvailable,
-      disabledReason: SURFACE_DISABLED_REASONS.diff,
-      onClick: props.onAddDiff,
-    },
-    {
-      label: "Files",
-      icon: FilesIcon,
-      shortcut: "F",
-      available: props.terminalAvailable,
-      disabledReason: SURFACE_DISABLED_REASONS.files,
-      onClick: props.onAddFiles,
-    },
-  ] as const
+  const addSurfaceActions = surfaceLaunchers(props)
 
   const handleAddSurfaceMenuKeyDown = (
     event: ReactKeyboardEvent<HTMLDivElement>
@@ -638,13 +676,7 @@ export function RightPanelTabs(props: RightPanelTabsProps) {
         data-right-panel-surface-content
       >
         {props.activeSurfaceId === null ? (
-          <RightPanelEmptyState
-            onAddTerminal={props.onAddTerminal}
-            onAddDiff={props.onAddDiff}
-            onAddFiles={props.onAddFiles}
-            terminalAvailable={props.terminalAvailable}
-            diffAvailable={props.diffAvailable}
-          />
+          <RightPanelEmptyState actions={addSurfaceActions} />
         ) : (
           props.children
         )}

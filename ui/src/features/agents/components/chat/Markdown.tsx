@@ -19,6 +19,7 @@ import "streamdown/styles.css"
 import { PreviewablePullRequestLink } from "@/features/agents/components/PullRequestPreview"
 import { CodeBlock } from "./CodeBlock"
 import { MermaidDiagram } from "./MermaidDiagram"
+import { TableScroll } from "./TableScroll"
 import {
   orderedListGutterStyle,
   remarkGithubAlerts,
@@ -110,6 +111,27 @@ function fencedCode(node: HastElement | undefined) {
   }
 }
 
+function GithubAttachment({ href }: { href: string }) {
+  const [failed, setFailed] = useState(false)
+  if (failed)
+    return (
+      <a href={href} target="_blank" rel="noreferrer">
+        {href}
+      </a>
+    )
+  return (
+    <video
+      src={href}
+      controls
+      playsInline
+      preload="metadata"
+      aria-label="GitHub attachment video"
+      className="max-h-[70vh] max-w-full rounded-lg border border-subtle"
+      onError={() => setFailed(true)}
+    />
+  )
+}
+
 const COMPONENTS: Components = {
   h1: passthrough("h1"),
   h2: passthrough("h2"),
@@ -117,7 +139,30 @@ const COMPONENTS: Components = {
   h4: passthrough("h4"),
   h5: passthrough("h5"),
   h6: passthrough("h6"),
-  p: passthrough("p"),
+  p: ({ node, children, ...props }: ExtraProps & ComponentProps<"p">) => {
+    const content = node?.children.filter(
+      (child) => child.type !== "text" || child.value.trim()
+    )
+    const link = content?.length === 1 ? content[0] : undefined
+    const href = link?.type === "element" ? link.properties.href : undefined
+    if (
+      link?.type === "element" &&
+      link.tagName === "a" &&
+      typeof href === "string" &&
+      /^https:\/\/github\.com\/user-attachments\/assets\/[\da-f-]+$/i.test(
+        href
+      ) &&
+      link.children.length === 1 &&
+      link.children[0]?.type === "text" &&
+      link.children[0].value === href
+    )
+      return (
+        <p {...props}>
+          <GithubAttachment key={href} href={href} />
+        </p>
+      )
+    return <p {...props}>{children}</p>
+  },
   ul: passthrough("ul"),
   li: passthrough("li"),
   hr: passthrough("hr"),
@@ -179,9 +224,9 @@ const COMPONENTS: Components = {
     children,
     ...props
   }: ExtraProps & ComponentProps<"table">) => (
-    <div className="chat-markdown-table">
+    <TableScroll className="chat-markdown-table">
       <table {...props}>{children}</table>
-    </div>
+    </TableScroll>
   ),
   inlineCode: ({
     node: _node,

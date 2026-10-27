@@ -27,6 +27,7 @@ import { terminalTabTitle } from "@/features/agents/lib/terminalTabTitle"
 import { workspaceTargetKey } from "@/features/agents/lib/workspaceFiles"
 import { useRegisterAppCommands } from "@/lib/appCommands"
 import { cn } from "@/lib/utils"
+import type { PassageReply } from "@/features/agents/utils/passageReply"
 
 export interface AgentRightPanelProps {
   threadRef: PanelThreadRef
@@ -37,10 +38,18 @@ export interface AgentRightPanelProps {
   diffAvailable: boolean
   /** Rendered for the Changes surface; `fullScreen` drives layout-only extras. */
   renderDiff: (state: { fullScreen: boolean }) => ReactNode
+  /** Rendered for the Browser surface, which only cloud threads offer. */
+  renderBrowser?: () => ReactNode
+  browserAvailable?: boolean
+  /** Rendered for the Background work surface, which only cloud threads offer. */
+  renderBackgroundWork?: () => ReactNode
+  backgroundWorkAvailable?: boolean
   collapsed: boolean
   onCollapsedChange: (next: boolean) => void
   onTerminalOpenFile?: (path: string) => void
   onTerminalAddToChat?: (text: string) => void
+  /** Offers Reply on text selected in an open file. */
+  onReply?: (reply: PassageReply) => void
 }
 
 function useIsNarrowLayout(): boolean {
@@ -136,6 +145,14 @@ export function AgentRightPanel(props: AgentRightPanelProps) {
 
   const handleAddFiles = useCallback(() => {
     openSurface(threadRef, "files")
+  }, [openSurface, threadRef])
+
+  const handleAddBrowser = useCallback(() => {
+    openSurface(threadRef, "preview")
+  }, [openSurface, threadRef])
+
+  const handleAddBackgroundWork = useCallback(() => {
+    openSurface(threadRef, "background")
   }, [openSurface, threadRef])
 
   const handleActivate = useCallback(
@@ -289,6 +306,12 @@ export function AgentRightPanel(props: AgentRightPanelProps) {
       {activeSurface?.kind === "diff"
         ? props.renderDiff({ fullScreen: maximized })
         : null}
+      {activeSurface?.kind === "preview" && props.renderBrowser
+        ? props.renderBrowser()
+        : null}
+      {activeSurface?.kind === "background" && props.renderBackgroundWork
+        ? props.renderBackgroundWork()
+        : null}
       {activeSurface?.kind === "files" || activeSurface?.kind === "file" ? (
         <FilesPanel
           key={workspaceTargetKey(terminalTarget)}
@@ -300,6 +323,7 @@ export function AgentRightPanel(props: AgentRightPanelProps) {
             activeSurface.kind === "file" ? activeSurface.revealRequestId : 0
           }
           onOpenFile={(path) => openFileSurface(threadRef, path)}
+          onReply={props.onReply}
         />
       ) : null}
       {/* Terminals stay mounted while hidden so their scrollback survives tab
@@ -355,6 +379,18 @@ export function AgentRightPanel(props: AgentRightPanelProps) {
       onAddTerminal={handleAddTerminal}
       onAddDiff={handleAddDiff}
       onAddFiles={handleAddFiles}
+      {...(props.renderBrowser
+        ? {
+            onAddBrowser: handleAddBrowser,
+            browserAvailable: props.browserAvailable ?? false,
+          }
+        : {})}
+      {...(props.renderBackgroundWork
+        ? {
+            onAddBackgroundWork: handleAddBackgroundWork,
+            backgroundWorkAvailable: props.backgroundWorkAvailable ?? false,
+          }
+        : {})}
       terminalAvailable={terminalAvailable}
       diffAvailable={diffAvailable}
       layoutControls={layoutControls}

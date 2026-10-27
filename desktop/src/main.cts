@@ -27,6 +27,7 @@ const {
   normalizeConsoleMessage,
 } = require("./diagnostics.cjs");
 const { LocalBridges } = require("./local-bridges.cjs");
+const { DesktopUi } = require("./desktop-ui.cjs");
 const { LocalThreadStore } = require("./local-thread-store.cjs");
 const {
   addWorktree,
@@ -65,6 +66,7 @@ const {
   readWorkspacePath,
 } = require("./workspace-files.cjs");
 const { isDesktopCommandId } = require("./commands.cjs");
+const { DesktopLinks } = require("./desktop-links.cjs");
 const {
   APP_ORIGIN,
   APP_URL,
@@ -75,7 +77,6 @@ const {
   connectExchangeUrl,
   connectLoginUrl,
   desktopLoginUrl,
-  desktopDeepLinkUrl,
   isAppLoginUrl,
   isAppUrl,
   isConnectProvider,
@@ -84,7 +85,6 @@ const {
   localCallbackUrl,
   resolveBackendUrl,
   resolveAppRuntime,
-  staticFilePath,
   validateBackendUrl,
 } = require("./config.cjs");
 const {
@@ -124,6 +124,7 @@ protocol.registerSchemesAsPrivileged([
 ]);
 
 let backendUrl = null;
+let desktopUi: InstanceType<typeof DesktopUi> | null = null;
 let mainWindow = null;
 
 // Installed builds have no terminal; "Save Diagnostics Report…" exports these.
@@ -609,6 +610,16 @@ function configureDesktopIpc() {
     requireTrustedDesktopIpc(event);
     if (typeof value === "string") clipboard.writeText(value);
   });
+  ipcMain.handle("desktop:copy-page-link", (event) => {
+    requireTrustedDesktopIpc(event);
+    if (!backendUrl) throw new Error("Open SWE is not connected to a backend");
+    const source = new URL(event.sender.getURL());
+    const target = new URL(backendUrl);
+    target.pathname = source.pathname;
+    target.search = source.search;
+    target.hash = source.hash;
+    clipboard.writeText(target.toString());
+  });
   ipcMain.handle("desktop:version", (event) => {
     requireTrustedDesktopIpc(event);
     return app.getVersion();
@@ -1064,12 +1075,6 @@ function iconPath() {
     : path.resolve(__dirname, "../resources/icon.png");
 }
 
-function bundledUiPath() {
-  return app.isPackaged
-    ? path.join(process.resourcesPath, "ui")
-    : path.resolve(__dirname, "../../ui/.output/public");
-}
-
 function errorPage(error) {
   const message = String(error?.message || error);
   const html = `<!doctype html>
@@ -1204,7 +1209,7 @@ async function clearBackendCookies(url) {
   }
 }
 
-async function serveBundledUi(request) {
+async function serveDesktopUi(request: Request) {
   if (!backendUrl)
     return new Response("Backend is not configured", { status: 503 });
   const url = new URL(request.url);
@@ -1213,32 +1218,51 @@ async function serveBundledUi(request) {
   if (!["GET", "HEAD"].includes(request.method)) {
     return new Response("Method not allowed", { status: 405 });
   }
-
-  const root = bundledUiPath();
-  let filePath = staticFilePath(root, request.url);
-  if (
-    !filePath ||
-    !fs.existsSync(filePath) ||
-    !fs.statSync(filePath).isFile()
-  ) {
-    if (path.extname(url.pathname))
-      return new Response("Not found", { status: 404 });
-    filePath = path.join(root, "_shell.html");
+  if (desktopUi?.backendUrl !== backendUrl) {
+    desktopUi = new DesktopUi(
+      backendUrl,
+      fetch,
+      path.join(app.getPath("userData"), "ui-cache"),
+      (filename: string) => net.fetch(pathToFileURL(filename).toString()),
+      process.env.OPEN_SWE_DESKTOP_UI_ARCHIVE ?? null,
+      () =>
+        void dialog.showMessageBox({
+          type: "warning",
+          message: "Open SWE needs an update",
+          detail:
+            "Your backend has a newer UI than this version of Open SWE can run. You are still on the previous UI; update the desktop app to get the new one.",
+        }),
+    );
   }
-  if (!fs.existsSync(filePath)) {
-    return new Response("Bundled UI is missing. Run pnpm run build:ui.", {
-      status: 500,
-    });
-  }
-  return net.fetch(pathToFileURL(filePath).toString());
+  return desktopUi.serve(request);
 }
 
-async function loadApp(window) {
+const appNavigations = new WeakMap<Electron.BrowserWindow, { url: string }>();
+const failedAppUrls = new WeakMap<Electron.BrowserWindow, string>();
+
+async function loadApp(window: Electron.BrowserWindow, url = APP_URL) {
   if (!backendUrl) return;
+  failedAppUrls.delete(window);
+  const navigation = { url };
+  appNavigations.set(window, navigation);
   try {
-    await window.loadURL(APP_URL);
+    await window.loadURL(url);
   } catch (error) {
-    if (!window.isDestroyed()) await window.loadURL(errorPage(error));
+    console.warn("Desktop navigation failed", error);
+    if (
+      window.isDestroyed() ||
+      appNavigations.get(window) !== navigation ||
+      (error instanceof Error &&
+        "code" in error &&
+        error.code === "ERR_ABORTED")
+    )
+      return;
+    failedAppUrls.set(window, url);
+    await window
+      .loadURL(errorPage(error))
+      .catch((pageError) =>
+        console.warn("Could not show desktop navigation error", pageError),
+      );
   }
 }
 
@@ -1330,7 +1354,11 @@ function createMenu() {
             if (!mainWindow || mainWindow.isDestroyed()) return;
             if (isAppUrl(mainWindow.webContents.getURL()))
               mainWindow.webContents.reload();
-            else void loadApp(mainWindow);
+            else
+              void loadApp(
+                mainWindow,
+                failedAppUrls.get(mainWindow) ?? APP_URL,
+              );
           },
         },
         // Installed builds too: the renderer is sandboxed with no Node access.
@@ -1537,7 +1565,7 @@ function handleNavigation(window, event, url) {
   }
 }
 
-function createWindow() {
+function createWindow(initialUrl = APP_URL) {
   if (!backendUrl) return createSetupWindow();
   const window = new BrowserWindow({
     title: appRuntime.name,
@@ -1598,7 +1626,7 @@ function createWindow() {
     rendererConsole.push(normalizeConsoleMessage(details)),
   );
   mainWindow = window;
-  void loadApp(window);
+  void loadApp(window, initialUrl);
   return window;
 }
 
@@ -1694,8 +1722,6 @@ function createSetupWindow() {
       }
       if (mainWindow && !mainWindow.isDestroyed()) await loadApp(mainWindow);
       else createWindow();
-      if (pendingDeepLink && openDesktopLink(pendingDeepLink))
-        pendingDeepLink = null;
       window.close();
     } catch (error) {
       dialog.showErrorBox(
@@ -1727,32 +1753,31 @@ function configurePermissions() {
   );
 }
 
-let pendingDeepLink = null;
+const desktopLinks = new DesktopLinks({
+  backendUrl: () => backendUrl,
+  openApp: openDesktopLink,
+  openExternal: (url: string) => shell.openExternal(url),
+});
 
-function openDesktopLink(url) {
-  const target = backendUrl && desktopDeepLinkUrl(url, backendUrl);
-  if (!target) return false;
+function openDesktopLink(target: string) {
   const existingWindow =
     mainWindow && !mainWindow.isDestroyed() ? mainWindow : null;
-  const window = existingWindow || createWindow();
+  const window = existingWindow || createWindow(target);
   if (window.isMinimized()) window.restore();
   window.show();
   window.focus();
-  if (existingWindow) void window.loadURL(target);
-  else
-    window.webContents.once(
-      "did-finish-load",
-      () => void window.loadURL(target),
-    );
+  if (existingWindow) void loadApp(window, target);
   return true;
 }
 
+app.on("will-continue-activity", (event, type) => {
+  if (type === "NSUserActivityTypeBrowsingWeb") event.preventDefault();
+});
+
 app.on("continue-activity", (event, type, _userInfo, details) => {
   if (type !== "NSUserActivityTypeBrowsingWeb" || !details.webpageURL) return;
-  if (!backendUrl) pendingDeepLink = details.webpageURL;
-  else if (!desktopDeepLinkUrl(details.webpageURL, backendUrl)) return;
   event.preventDefault();
-  if (backendUrl) openDesktopLink(details.webpageURL);
+  desktopLinks.receive(details.webpageURL);
 });
 
 const hasSingleInstanceLock = app.requestSingleInstanceLock();
@@ -1810,13 +1835,11 @@ if (!hasSingleInstanceLock) {
           ? console.warn(message)
           : console.warn(message, error),
     });
-    protocol.handle("open-swe", serveBundledUi);
+    protocol.handle("open-swe", serveDesktopUi);
     configurePermissions();
     configureDesktopIpc();
     createMenu();
-    createWindow();
-    if (pendingDeepLink && openDesktopLink(pendingDeepLink))
-      pendingDeepLink = null;
+    if (!desktopLinks.ready()) createWindow();
     configureAutoUpdater();
     configureTerminalIpc({
       ipcMain,

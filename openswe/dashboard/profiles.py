@@ -16,7 +16,7 @@ from datetime import UTC, datetime, timedelta
 from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 
 from openswe.audit_logs.middleware import audit_endpoint
 from openswe.dashboard.oauth import (
@@ -44,6 +44,9 @@ RETIRED_PROFILE_KEYS = frozenset(
         "default_subagent_model",
         "subagent_reasoning_effort",
         "model_routing_enabled",
+        "experimental_mcp_ptc",
+        "experimental_assistant_ui",
+        "recent_thread_context_enabled",
     }
 )
 
@@ -78,25 +81,17 @@ GITHUB_OAUTH_TOKENS = UserRecords("github_oauth_token")
 
 class ProfileUpdate(BaseModel):
     default_repo: str | None = None
+    workspace_default_repos: dict[str, str] = Field(default_factory=dict)
     base_branch: str | None = None
     branch_prefix: str | None = None
     auto_fix_ci: bool = True
     auto_human_review_enabled: bool = True
-    recent_thread_context_enabled: bool = False
     concierge_mode: bool | None = None
     pr_review_links: bool | None = None
     pr_failure_reactions: bool | None = None
-    prefer_tools_in_sandbox: bool | None = None
-    experimental_task_coordination: bool | None = None
     draft_prs: bool | None = None
     review_draft_prs: bool | None = None
-    experimental_assistant_ui: bool | None = Field(
-        default=None, json_schema_extra={"agent_feature_flag": True}
-    )
     experimental_background_callbacks: bool | None = Field(
-        default=None, json_schema_extra={"agent_feature_flag": True}
-    )
-    experimental_mcp_ptc: bool | None = Field(
         default=None, json_schema_extra={"agent_feature_flag": True}
     )
     experimental_monitor: bool | None = Field(
@@ -105,10 +100,26 @@ class ProfileUpdate(BaseModel):
     experimental_act_as_approval: bool | None = None
     slack_onboarding_dismissed: bool = False
 
+    @field_validator("workspace_default_repos")
+    @classmethod
+    def validate_workspace_default_repos(cls, value: dict[str, str]) -> dict[str, str]:
+        for workspace, repo in value.items():
+            parts = repo.split("/")
+            if (
+                not workspace.strip()
+                or len(parts) != 2
+                or any(not part or any(char.isspace() for char in part) for part in parts)
+            ):
+                raise ValueError(
+                    "Workspace defaults must map workspace slugs to owner/name repositories"
+                )
+        return value
+
 
 def normalize_profile_for_response(profile: dict[str, Any]) -> dict[str, Any]:
     value = dict(profile)
     value.setdefault("auto_human_review_enabled", True)
+    value.setdefault("workspace_default_repos", {})
     for field in RETIRED_PROFILE_KEYS:
         value.pop(field, None)
     return value
@@ -135,6 +146,11 @@ async def upsert_profile(login: str, email: str, update: ProfileUpdate) -> dict[
         "login": login,
         "email": email or existing.get("email", ""),
         "default_repo": update.default_repo,
+        "workspace_default_repos": (
+            update.workspace_default_repos
+            if "workspace_default_repos" in update.model_fields_set
+            else existing.get("workspace_default_repos", {})
+        ),
         "base_branch": update.base_branch,
         "branch_prefix": update.branch_prefix,
         "auto_fix_ci": update.auto_fix_ci,
@@ -143,25 +159,10 @@ async def upsert_profile(login: str, email: str, update: ProfileUpdate) -> dict[
             if "auto_human_review_enabled" in update.model_fields_set
             else existing.get("auto_human_review_enabled", True)
         ),
-        "recent_thread_context_enabled": (
-            update.recent_thread_context_enabled
-            if "recent_thread_context_enabled" in update.model_fields_set
-            else existing.get("recent_thread_context_enabled", False)
-        ),
         "draft_prs": (
             update.draft_prs if update.draft_prs is not None else existing.get("draft_prs", True)
         ),
         "review_draft_prs": update.review_draft_prs,
-        "experimental_assistant_ui": (
-            update.experimental_assistant_ui
-            if update.experimental_assistant_ui is not None
-            else existing.get("experimental_assistant_ui")
-        ),
-        "experimental_mcp_ptc": (
-            update.experimental_mcp_ptc
-            if update.experimental_mcp_ptc is not None
-            else existing.get("experimental_mcp_ptc", False)
-        ),
         "experimental_background_callbacks": (
             update.experimental_background_callbacks
             if update.experimental_background_callbacks is not None
@@ -410,8 +411,6 @@ async def put_my_profile(
             concierge_mode=update.concierge_mode,
             pr_review_links=update.pr_review_links,
             pr_failure_reactions=update.pr_failure_reactions,
-            prefer_tools_in_sandbox=update.prefer_tools_in_sandbox,
-            experimental_task_coordination=update.experimental_task_coordination,
             experimental_act_as_approval=update.experimental_act_as_approval,
             # Switching approval either way starts over from asking every time.
             act_as_always_allowed=(
@@ -423,8 +422,6 @@ async def put_my_profile(
         update.concierge_mode
         or update.pr_review_links
         or update.pr_failure_reactions
-        or update.prefer_tools_in_sandbox
-        or update.experimental_task_coordination
         or update.experimental_act_as_approval
     ):
         raise HTTPException(status_code=409, detail="No Open SWE user record for this login yet")

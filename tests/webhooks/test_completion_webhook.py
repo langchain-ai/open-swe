@@ -206,12 +206,25 @@ async def test_later_failed_run_posts_even_if_prior_run_replied(
     reply = AsyncMock(return_value=True)
     monkeypatch.setattr(completion, "post_slack_thread_reply", reply)
 
+    error_url = "https://smith.example/o/tenant/projects/p/project/r/failed-span"
+    trace = AsyncMock(return_value=error_url)
+    monkeypatch.setattr(completion, "get_langsmith_error_url", trace)
+
     result = await completion.handle_run_completion(
-        {"thread_id": "t1", "run_id": "run-2", "status": "timeout"}
+        {
+            "thread_id": "t1",
+            "run_id": "run-2",
+            "status": "timeout",
+            "error": {"error": "TimeoutError", "message": "model timed out"},
+            "metadata": {"invocation_id": "invocation-2"},
+        }
     )
 
     assert result["status"] == "ok"
+    trace.assert_awaited_once_with("t1", "invocation-2", "model timed out")
     reply.assert_awaited_once()
+    assert reply.await_args is not None
+    assert f"<{error_url}|LangSmith>" in reply.await_args.args[2]
     assert client.threads.updates == [
         {
             "failure_reply_posted_run_id": "run-2",

@@ -17,6 +17,7 @@ import { ChatCircleIcon } from "@phosphor-icons/react/dist/ssr/ChatCircle"
 import { ClockIcon } from "@phosphor-icons/react/dist/ssr/Clock"
 import { GitPullRequestIcon } from "@phosphor-icons/react/dist/ssr/GitPullRequest"
 import { XCircleIcon } from "@phosphor-icons/react/dist/ssr/XCircle"
+import { Link } from "@tanstack/react-router"
 import { useState } from "react"
 
 import { DropdownMenuItem } from "@/components/MenuItem"
@@ -387,15 +388,20 @@ function PullRequestLink({
   const state = pullRequestState(pullRequest, health)
   const tone = pullRequestTone(pullRequest, health)
   const scopes = onFix ? fixScopes(pullRequest, health) : []
+  const [owner, repo] = pullRequest.repoFullName.split("/")
 
   return (
     <div className="@container flex min-w-0 items-center gap-space-1 rounded-xl border border-default bg-surface-level-1 p-space-1 text-xs text-secondary shadow-sm">
       <HoverCard openDelay={250} closeDelay={100}>
         <HoverCardTrigger asChild>
-          <a
-            href={pullRequest.url}
-            target="_blank"
-            rel="noreferrer"
+          <Link
+            to="/agents/reviews/$owner/$repo/$number"
+            params={{
+              owner: owner!,
+              repo: repo!,
+              number: String(pullRequest.number),
+            }}
+            data-thread-pull-request={pullRequest.url}
             aria-label={`Open ${repoName(pullRequest.repoFullName)} pull request #${pullRequest.number}`}
             data-testid={`pr-summary-${pullRequest.repoFullName}-${pullRequest.number}`}
             data-pr-tone={tone}
@@ -429,7 +435,7 @@ function PullRequestLink({
                 {state}
               </span>
             </span>
-          </a>
+          </Link>
         </HoverCardTrigger>
         <HoverCardContent
           side="top"
@@ -457,22 +463,21 @@ function PullRequestLink({
 }
 
 const FIX_LABELS: Record<ThreadFixScope, string> = {
-  conflicts: "Fix conflicts",
-  checks: "Fix checks",
+  repair: "Fix",
   comments: "Address comments",
 }
 
-/** One item per problem, so a fix never quietly takes on the others. */
+/** Conflicts and checks share one fix; comments stay separate. */
 function fixScopes(
   pullRequest: AgentPullRequest,
   health: AgentPullRequestHealth | undefined
 ): Array<ThreadFixScope> {
   if (!health || !hasActionableIssues(pullRequest, health)) return []
   return [
-    ...(health.mergeConflictState === "conflicting"
-      ? (["conflicts"] as const)
+    ...(health.mergeConflictState === "conflicting" ||
+    health.failingChecks.length > 0
+      ? (["repair"] as const)
       : []),
-    ...(health.failingChecks.length > 0 ? (["checks"] as const) : []),
     ...((health.unresolvedReviewThreadCount ?? 0) > 0
       ? (["comments"] as const)
       : []),

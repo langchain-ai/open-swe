@@ -106,7 +106,6 @@ import {
 } from "@/lib/appCommands"
 import { useShortcutLabel } from "@/lib/hotkeys"
 import { cn } from "@/lib/utils"
-import { useChatRoutes } from "@/lib/chatRoutes"
 import { usePendingVariables } from "@/lib/optimistic"
 
 interface AgentsSidebarProps {
@@ -187,7 +186,6 @@ export function AgentsSidebar({
   const repoName = useRepoName()
   const navigate = useNavigate()
   const newThreadShortcut = useShortcutLabel("mod+n")
-  const chat = useChatRoutes()
   const profile = useProfile()
   const concierge = useQuery({
     queryKey: ["concierge", user?.login],
@@ -208,9 +206,9 @@ export function AgentsSidebar({
         agentThreadKeys.detail(threadId)
       )?.reviewPage
       if (review) void navigate(reviewPageRoute(review))
-      else void navigate({ to: chat.thread, params: { threadId } })
+      else void navigate({ to: "/agents/$threadId", params: { threadId } })
     },
-    [navigate, chat.thread, queryClient]
+    [navigate, queryClient]
   )
   const {
     prefs,
@@ -259,6 +257,7 @@ export function AgentsSidebar({
     includeAutomations,
     includeResolved: prefs.filters.includeResolved,
     owned: prefs.filters.ownedOnly,
+    includeClaudeCode: prefs.filters.includeClaudeCode,
     sort: prefs.sortChats,
     enabled: true,
   })
@@ -266,6 +265,7 @@ export function AgentsSidebar({
     includeAutomations,
     includeResolved: prefs.filters.includeResolved,
     owned: prefs.filters.ownedOnly,
+    includeClaudeCode: prefs.filters.includeClaudeCode,
     enabled: repoMode,
   })
   const workspaceOptionsQuery = useWorkspaceOptions(workspaceOrganize)
@@ -549,6 +549,14 @@ export function AgentsSidebar({
           Show automations
         </MenuCheckItem>
         <MenuCheckItem
+          checked={prefs.filters.includeClaudeCode}
+          onCheckedChange={(checked) =>
+            setFilters({ ...prefs.filters, includeClaudeCode: checked })
+          }
+        >
+          Show Claude Code
+        </MenuCheckItem>
+        <MenuCheckItem
           checked={prefs.filters.ownedOnly}
           onCheckedChange={(checked) =>
             setFilters({ ...prefs.filters, ownedOnly: checked })
@@ -584,13 +592,14 @@ export function AgentsSidebar({
       includeResolved={prefs.filters.includeResolved}
       includeAutomations={includeAutomations}
       owned={prefs.filters.ownedOnly}
+      includeClaudeCode={prefs.filters.includeClaudeCode}
       sort={prefs.sortChats}
       activeThreadId={activeThreadId}
       openThread={openThread}
       hydrate={hydrateRepoThreads}
       onToggleCollapsed={() => toggleRepoCollapsed(group.key)}
       onExpand={() => expandRepo(group.key)}
-      composeTo={group.localRepoPath ? "/agents" : chat.home}
+      composeTo="/agents"
       onCompose={layout.closeOnMobile}
       onTogglePin={() => toggleRepoPin(group.key)}
       onLoadMore={
@@ -660,7 +669,7 @@ export function AgentsSidebar({
 
       <div className="flex flex-col gap-0.5 px-space-2 pb-space-1">
         <Link
-          to={chat.home}
+          to="/agents"
           onClick={layout.closeOnMobile}
           className={cn(
             NAV_ROW_CLASS,
@@ -680,7 +689,7 @@ export function AgentsSidebar({
           <a
             href={
               concierge.data?.thread_id
-                ? `${chat.home}/${concierge.data.thread_id}`
+                ? `/agents/${concierge.data.thread_id}`
                 : concierge.data?.channel_id
                   ? `slack://channel?id=${concierge.data.channel_id}`
                   : undefined
@@ -855,7 +864,7 @@ export function AgentsSidebar({
                     icon={PlusIcon}
                     onClick={() => {
                       layout.closeOnMobile()
-                      void navigate({ to: chat.home })
+                      void navigate({ to: "/agents" })
                     }}
                   />
                 }
@@ -978,6 +987,7 @@ function RepoGroup({
   includeResolved,
   includeAutomations,
   owned,
+  includeClaudeCode,
   sort,
   activeThreadId,
   openThread,
@@ -1000,13 +1010,14 @@ function RepoGroup({
   includeResolved: boolean
   includeAutomations: boolean
   owned: boolean
+  includeClaudeCode: boolean
   sort: ChatSort
   activeThreadId?: string
   openThread: (threadId: string) => void
   hydrate: (threads: Array<AgentThread>) => Array<SidebarThreadItem>
   onToggleCollapsed: () => void
   onExpand: () => void
-  composeTo: "/agents" | "/assistant"
+  composeTo: "/agents"
   onCompose: () => void
   onTogglePin: () => void
   onLoadMore?: () => void
@@ -1023,6 +1034,7 @@ function RepoGroup({
     includeResolved,
     includeAutomations,
     owned,
+    includeClaudeCode,
     sort,
     enabled: !collapsed,
   })

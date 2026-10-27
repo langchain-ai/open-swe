@@ -217,42 +217,48 @@ def seed_sandbox_repo() -> None:
     _git("clone", str(BARE_REMOTE), str(work / "repo"))
 
 
+_FILE_STATUSES = {"A": "added", "D": "removed", "M": "modified"}
+
+
 def _diff_files(owner: str, repo: str, base: str, head: str) -> list[dict[str, Any]]:
-    """Compute changed files for a PR from the pushed branch in the bare remote."""
+    """Compute changed files for a PR from the pushed branch in the bare remote.
+
+    The three ``git diff`` runs list the files in the same order, so they zip together.
+    """
     remote = _REMOTES.get((owner, repo))
     if remote is None:
         return []
+    diff = ["--git-dir", str(remote), "diff", "--no-renames", base, head]
     try:
-        out = _git("--git-dir", str(remote), "diff", "--numstat", base, head)
+        numstat = _git(*diff, "--numstat").splitlines()
+        if not numstat:
+            return []
+        statuses = _git(*diff, "--name-status").splitlines()
+        patches = _git(*diff).split("\ndiff --git ")
     except subprocess.CalledProcessError:
         return []
     files = []
-    for line in out.splitlines():
-        parts = line.split("\t")
-        if len(parts) == 3:
-            adds, dels, name = parts
-            files.append(
-                {
-                    "filename": name,
-                    "additions": int(adds) if adds.isdigit() else 0,
-                    "deletions": int(dels) if dels.isdigit() else 0,
-                    "patch": _file_patch(remote, base, head, name),
-                }
-            )
+    for counts, status, patch in zip(numstat, statuses, patches, strict=True):
+        adds, dels, name = counts.split("\t", 2)
+        files.append(
+            {
+                "filename": name,
+                "status": _FILE_STATUSES.get(status.split("\t", 1)[0], "modified"),
+                "additions": int(adds) if adds.isdigit() else 0,
+                "deletions": int(dels) if dels.isdigit() else 0,
+                "patch": _hunks(patch),
+            }
+        )
     return files
 
 
-def _file_patch(remote: Path, base: str, head: str, filename: str) -> str | None:
+def _hunks(file_diff: str) -> str | None:
     """One file's unified diff, hunks only, as GitHub's ``patch`` field carries it.
 
     ``None`` for a blob git produced no textual hunks for (a binary file), which
     is how the real API reports one — and what callers key "no readable diff" on.
     """
-    try:
-        out = _git("--git-dir", str(remote), "diff", base, head, "--", filename)
-    except subprocess.CalledProcessError:
-        return None
-    lines = out.splitlines()
+    lines = file_diff.splitlines()
     start = next((index for index, line in enumerate(lines) if line.startswith("@@")), None)
     return "\n".join(lines[start:]) if start is not None else None
 
@@ -663,6 +669,9 @@ def repo_private() -> bool:
 # The E2E sandbox is the local provider, so there is no real snapshot service —
 # this store stands in for it and is what the specs assert on.
 SNAPSHOTS: list[dict[str, Any]] = []
+# Each time the backend planned a run: the thread, and the call it planned it for
+# (``start`` when it started the run).
+PLANS: list[dict[str, str]] = []
 DELETED_SNAPSHOTS: list[str] = []
 _snapshot_seq = [0]
 
@@ -1012,6 +1021,7 @@ def reset() -> None:
     REPO_MERGE_METHODS.clear()
     SNAPSHOTS.clear()
     DELETED_SNAPSHOTS.clear()
+    PLANS.clear()
     COLLABORATOR_PERMISSIONS.clear()
     REPO_PRIVATE[0] = False
     _pr_seq[0] = 0

@@ -18,22 +18,24 @@ import { GitPullRequestIcon } from "@phosphor-icons/react/dist/ssr/GitPullReques
 import { GithubLogoIcon } from "@phosphor-icons/react/dist/ssr/GithubLogo"
 import { KeyboardIcon } from "@phosphor-icons/react/dist/ssr/Keyboard"
 import { LinkIcon } from "@phosphor-icons/react/dist/ssr/Link"
+import { TreeStructureIcon } from "@phosphor-icons/react/dist/ssr/TreeStructure"
 import { TreeViewIcon } from "@phosphor-icons/react/dist/ssr/TreeView"
 import { useQuery } from "@tanstack/react-query"
 import { Link } from "@tanstack/react-router"
 
 import { DropdownMenuItem } from "@/components/MenuItem"
 import type { ReviewDetail } from "@/lib/api"
-import { cn, formatRelativeTime } from "@/lib/utils"
+import { cn } from "@/lib/utils"
 import { useAppCommandControls } from "@/lib/appCommands"
 import { StatusPill } from "@/features/reviews/components/StatusPill"
-import { SubmitReviewPopover } from "@/features/reviews/components/SubmitReviewPopover"
-import { copyText } from "@/features/reviews/lib/copyText"
+import { ReviewButton } from "@/features/reviews/components/ReviewButton"
+import { copyPageLink, copyText } from "@/features/reviews/lib/copyText"
 import { githubUrls } from "@/features/reviews/lib/githubUrls"
 import { statusLabels } from "@/features/reviews/lib/status"
 import { ProfileLink } from "./notes/Byline"
 import { reviewQueries, type PullRequestRef } from "./queries"
 import { isLive } from "./pullRequestStanding"
+import { RelativeTimestamp } from "./RelativeTimestamp"
 import { NextStepAction, StandingDot, usePullRequestStanding } from "./Standing"
 import { useReviewPage } from "./store"
 
@@ -79,6 +81,7 @@ export function Header({
   const reviewOpen = useReviewPage((state) => state.reviewOpen)
   const reviewVerdict = useReviewPage((state) => state.reviewVerdict)
   const setReviewOpen = useReviewPage((state) => state.setReviewOpen)
+  const openReview = useReviewPage((state) => state.openReview)
   const toggleNavigator = useReviewPage((state) => state.toggleNavigator)
   const setRailTab = useReviewPage((state) => state.setRailTab)
   const jumpTo = useReviewPage((state) => state.jumpTo)
@@ -246,8 +249,7 @@ export function Header({
                   rel="noreferrer"
                   className="hidden shrink-0 hover:text-primary hover:underline xl:inline"
                 >
-                  · opened{" "}
-                  {formatRelativeTime(new Date(detail.pr.created_at).getTime())}
+                  · opened <RelativeTimestamp value={detail.pr.created_at} />
                 </a>
               )}
             </p>
@@ -314,13 +316,14 @@ export function Header({
           </Button>
         )}
         {detail && isLive(detail) && (
-          <SubmitReviewPopover
+          <ReviewButton
             owner={pr.owner}
             repo={pr.repo}
             number={pr.number}
             open={reviewOpen}
             onOpenChange={setReviewOpen}
             defaultVerdict={reviewVerdict}
+            onOpenReview={openReview}
           />
         )}
         <DropdownMenu>
@@ -336,6 +339,14 @@ export function Header({
             />
           </DropdownMenuTrigger>
           <DropdownMenuContent align="end" className="w-56">
+            {detail?.trace_url && (
+              <DropdownMenuItem asChild>
+                <a href={detail.trace_url} target="_blank" rel="noreferrer">
+                  <TreeStructureIcon aria-hidden size={16} weight="regular" />
+                  Open reviewer trace
+                </a>
+              </DropdownMenuItem>
+            )}
             <DropdownMenuItem
               onSelect={() =>
                 window.open(githubUrl, "_blank", "noopener,noreferrer")
@@ -344,9 +355,7 @@ export function Header({
               <GithubLogoIcon aria-hidden size={16} weight="regular" />
               Open on GitHub
             </DropdownMenuItem>
-            <DropdownMenuItem
-              onSelect={() => copyText(window.location.href, "Copied the link")}
-            >
+            <DropdownMenuItem onSelect={copyPageLink}>
               <LinkIcon aria-hidden size={16} weight="regular" />
               Copy link to this page
             </DropdownMenuItem>

@@ -1,4 +1,5 @@
 import type { TaskEventMetadata } from "./structuredInputMessages"
+import type { PassageReply } from "@/features/agents/utils/passageReply"
 
 export type Author = "user" | "agent" | "system" | "tool"
 
@@ -27,6 +28,7 @@ export type AgentSource =
   | "slack"
   | "linear"
   | "schedule"
+  | "claude_code"
 
 export type AgentThreadCategory =
   | "interactive"
@@ -104,6 +106,7 @@ export type OutputIframeDisplay =
 export interface ToolExecutionChunk {
   kind: "tool-execution"
   toolCallId: string
+  toolName?: string
   /** Stable arrival time for the tool call, shown on hover. */
   timestamp?: string
   title: string
@@ -141,6 +144,8 @@ export interface ToolExecutionChunk {
 export interface TextChunk {
   kind: "text"
   text: string
+  /** When the agent message that wrote it started; bounds the work around it. */
+  timestamp?: string
 }
 
 export interface ReasoningChunk {
@@ -220,9 +225,13 @@ export interface Message {
   structuredSenderId?: string
   structuredSenderKind?: "person" | "system"
   structuredSenderName?: string
+  /** GitHub login of a dashboard sender, so a pending message can borrow their label. */
+  structuredSenderLogin?: string
   structuredSenderNote?: string
   structuredSenderIsBot?: boolean
   structuredSurface?: string
+  /** Passages the sender selected and replied to, carried in the message's envelope. */
+  replies?: Array<PassageReply>
   taskEvent?: TaskEventMetadata
   /** Id of the user message that opened this agent run and keys its diff artifact. */
   turnKey?: string
@@ -324,6 +333,8 @@ export interface AgentSchedule {
   lastTriggeredAt?: string | null
   lastError?: string | null
   lastErrorAt?: string | null
+  createdBy?: string | null
+  updatedBy?: string | null
   createdAt?: string | null
   updatedAt?: string | null
 }
@@ -362,20 +373,15 @@ export interface AgentThreadMonitor {
   raw_lines: number
 }
 
-/** What a thread's monitors used of the allowance its last human message opened. */
-export interface AgentMonitorBudget {
-  events: number
-  max_events: number
-  starts: number
-  max_starts: number
-  window_ends_at: number
-}
-
 /** The sandbox commands and monitors running for a thread. */
 export interface AgentBackgroundWork {
   commands: Array<AgentBackgroundCommand>
   monitors: Array<AgentThreadMonitor>
-  monitor_budget: AgentMonitorBudget | null
+}
+
+/** The last lines a background command or monitor wrote. */
+export interface AgentBackgroundOutput {
+  output: string
 }
 
 export interface AgentQueuedMessage {
@@ -391,6 +397,7 @@ export interface PendingThreadMessage extends Omit<
   "images" | "pending" | "mine"
 > {
   images?: Array<ImageChunk>
+  replies?: Array<PassageReply>
   status: "sending" | "failed"
   /** Sent to queue behind the live run, so it renders as a queued row. */
   queued?: boolean
@@ -481,8 +488,8 @@ export interface AgentPullRequestStatusResponse {
   pullRequests: Array<AgentPullRequestHealth>
 }
 
-/** One kind of PR problem a thread-view fix prompt covers, and nothing else. */
-export type ThreadFixScope = "conflicts" | "checks" | "comments"
+/** What a thread-view fix prompt covers: conflicts and checks together, or comments. */
+export type ThreadFixScope = "repair" | "comments"
 
 export interface AgentPullRequestContextResponse {
   context: {
@@ -604,6 +611,12 @@ export interface AgentThread {
   sandboxBridgeClient?: "cli" | "desktop" | null
   /** Whether that machine is serving the thread's checkout right now; null in lists. */
   sandboxBridgeOnline?: boolean | null
+  /**
+   * The thread's LangSmith browser: "opened" once the agent or a person has
+   * opened it, "available" while it can be opened, null before the agent's
+   * first run names it.
+   */
+  browser?: "opened" | "available" | null
   messages: Array<Message>
   pendingMessages?: Array<PendingThreadMessage>
   pr?: AgentPullRequestSummary

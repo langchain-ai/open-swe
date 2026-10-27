@@ -42,6 +42,7 @@ SERVERS_PATH = "/v1/managed-tools/servers"
 CONSENT_SESSIONS_PATH = "/v1/agent-auth/oauth-authorization-sessions"
 CONNECTION_NAME = "lmt"
 _MISSING_CREDENTIALS_META = "com.langchain.langsmith/missingCredentials"
+_LANGSMITH_APP_SLUG_PREFIX = "langsmith-"
 _TIMEOUT_SECONDS = 30
 _MAX_PAGES = 5
 # LangSmith holds each status request open this long while consent is pending.
@@ -67,6 +68,8 @@ class MissingCredential(BaseModel):
     """A service in the gateway this person has not connected yet."""
 
     slug: str
+    """Which service, for connect links and cards: LMT's credential slug, made per service
+    where several share it (see ``_service_slug``)."""
     display_name: str
     kind: CredentialKind
 
@@ -91,8 +94,12 @@ class GatewayCredentialsRequired(ManagedToolsError):
 class ConnectedService(BaseModel):
     """A service in the gateway this person has connected."""
 
+    id: str
+    """LMT's server ID or built-in key, which disconnecting names."""
     name: str
     tool_count: int
+    disconnectable: bool = False
+    """This person has a stored credential for it; public services have none to remove."""
 
 
 class Gateway(BaseModel):
@@ -187,12 +194,9 @@ def _credentials(entries: object) -> tuple[list[MissingCredential], dict[str, Co
         if not isinstance(entry, dict) or not isinstance(entry.get("slug"), str):
             continue
         kind: CredentialKind = "secret" if entry.get("kind") == "secret" else "oauth"
-        slug = entry["slug"]
-        missing.append(
-            MissingCredential(
-                slug=slug, display_name=str(entry.get("display_name") or slug), kind=kind
-            )
-        )
+        display_name = str(entry.get("display_name") or entry["slug"])
+        slug = _service_slug(entry["slug"], display_name)
+        missing.append(MissingCredential(slug=slug, display_name=display_name, kind=kind))
         url = entry.get("verification_url")
         if kind == "oauth" and isinstance(url, str) and url.startswith("https://"):
             auth_id = entry.get("auth_id")
@@ -200,6 +204,19 @@ def _credentials(entries: object) -> tuple[list[MissingCredential], dict[str, Co
                 url=url, auth_id=auth_id if isinstance(auth_id, str) else None
             )
     return missing, links
+
+
+def _service_slug(slug: str, display_name: str) -> str:
+    """One key per service, even where services share an LMT connection.
+
+    LMT keeps one connection per LangSmith OAuth app (slug prefix ``langsmith-``, e.g.
+    ``langsmith-google``) for every built-in on it, but lists each built-in apart with its
+    own consent link asking only that built-in's scopes. Keyed by slug alone, all but one
+    link would be dropped and every button would grant the same built-in.
+    """
+    if slug.startswith(_LANGSMITH_APP_SLUG_PREFIX):
+        return f"{slug}:{_match_key(display_name)}"
+    return slug
 
 
 def _credentials_required(body: object) -> GatewayCredentialsRequired:
@@ -275,10 +292,12 @@ async def _gateway_detail(login: str, gateway: str) -> dict[str, object]:
 
 @dataclass(frozen=True)
 class _Server:
-    """What LMT's server list says about one server: its name and credential slugs."""
+    """What LMT's server list says about one server: its name, credential slugs, and
+    whether the caller has stored a credential for it."""
 
     name: str
     slugs: frozenset[str]
+    has_credential: bool = False
 
 
 def _server(item: dict[str, object]) -> _Server:
@@ -291,11 +310,20 @@ def _server(item: dict[str, object]) -> _Server:
         slug := connection.get("agent_auth_connection_slug"), str
     ):
         slugs.add(slug)
-    return _Server(name=str(item["name"]), slugs=frozenset(slugs))
+    return _Server(
+        name=str(item["name"]),
+        slugs=frozenset(slugs),
+        has_credential=item.get("has_credential") is True,
+    )
 
 
 async def _servers(login: str) -> dict[str, _Server]:
-    """Servers by id and key. OAuth built-ins are not listed; callers fall back."""
+    """Servers by id and key: every server a tool kit can hold.
+
+    LMT lists only the built-ins it supports (public and API-key ones) and admits only
+    those into tool kits, so OAuth built-ins are neither listed nor in a kit. Callers
+    fall back to a name from the kit when this read fails.
+    """
     headers = await _headers(login)
     servers: dict[str, _Server] = {}
     async with _client() as client:
@@ -385,7 +413,14 @@ def _connected_services(
             count = sum(tool in listing.tool_names for tool in source.tool_names)
             if not count:
                 continue
-        connected.append(ConnectedService(name=name, tool_count=count))
+        connected.append(
+            ConnectedService(
+                id=source.id,
+                name=name,
+                tool_count=count,
+                disconnectable=server.has_credential if server else False,
+            )
+        )
     return connected
 
 
@@ -506,6 +541,36 @@ async def connect_link(login: str, gateway: str, slug: str) -> ConsentLink | Non
     if any(item.slug == slug for item in listing.missing):
         raise ManagedToolsError("LangSmith did not return a consent link; retry")
     return None
+
+
+async def disconnect_service(login: str, gateway: str, service: str) -> None:
+    """Delete ``login``'s own LangSmith credential for one service in the gateway.
+
+    LangSmith keeps the server and everyone else's credentials; the person can connect again.
+    """
+    if service not in {source.id for source in _sources(await _gateway_detail(login, gateway))}:
+        raise ManagedToolsError("This tool kit has no such service")
+    headers = await _headers(login)
+    async with _client() as client:
+        response = await client.delete(
+            f"{langsmith_issuer()}{SERVERS_PATH}/{quote(service, safe='')}/credential",
+            headers=headers,
+        )
+    if response.status_code == 404:
+        raise ManagedToolsError("This service no longer exists in LangSmith")
+    if response.status_code == 409:
+        raise ManagedToolsError("This service has no connection to remove")
+    if not response.is_success:
+        raise _failure(response)
+    try:
+        await refresh_tools(login, gateway)
+    except Exception:
+        # A gateway that now misses a service may refuse to list; its stale list expires.
+        logger.warning(
+            "Managed tools refresh after disconnect failed",
+            extra={"gateway": gateway},
+            exc_info=True,
+        )
 
 
 async def refresh_tools(login: str, gateway: str) -> None:

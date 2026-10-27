@@ -43,7 +43,12 @@ async def notify_step_limit_reached(
 
     if _LIMIT_MARKER not in content:
         return None
+    await notify_step_limit()
+    return None
 
+
+async def notify_step_limit() -> None:
+    """Tell the run's Slack thread the run stopped at its step limit, as the run."""
     cfg = RunConfig.from_runtime()
     active = await get_active_slack_thread(
         get_client(url=LANGGRAPH_URL),
@@ -52,7 +57,7 @@ async def notify_step_limit_reached(
     )
     if not active:
         logger.info("No Slack thread config — cannot send step-limit notification")
-        return None
+        return
 
     channel_id = active.get("channel_id")
     thread_ts = active.get("thread_ts")
@@ -64,7 +69,7 @@ async def notify_step_limit_reached(
         or not thread_ts
     ):
         logger.info("No Slack thread config — cannot send step-limit notification")
-        return None
+        return
 
     message = warning(
         "Open SWE reached its maximum step limit and had to stop. "
@@ -82,5 +87,3 @@ async def notify_step_limit_reached(
         logger.info("Sent step-limit notification to Slack thread %s", thread_ts)
     except Exception:
         logger.exception("Failed to send step-limit notification")
-
-    return None

@@ -97,6 +97,21 @@ export interface WorkspaceApiKey {
   status: "active" | "expired" | "revoked"
 }
 
+/** A token that lets one person's Claude Code hooks mirror their sessions. */
+export interface ClaudeCodeSyncToken {
+  id: string
+  name: string
+  token_suffix: string
+  created_at: string
+  last_used_at: string | null
+}
+
+/** A freshly minted token: the only time its secret and hooks settings are shown. */
+export interface MintedClaudeCodeSyncToken extends ClaudeCodeSyncToken {
+  secret: string
+  settings: Record<string, unknown>
+}
+
 const API_BASE = dashboardApiBase()
 
 const GITHUB_IMAGE_HOST_RE =
@@ -218,6 +233,8 @@ async function loadPrDetails(
 export interface SessionUser {
   controlling_org?: string | null
   login: string
+  /** How the server labels this user's messages; empty until they have a name. */
+  display_name?: string
   email: string | null
   avatar_url: string | null
   user_id?: string | null
@@ -297,22 +314,18 @@ export interface OptionsPayload {
 }
 
 export interface Profile {
-  experimental_task_coordination?: boolean
-  experimental_assistant_ui?: boolean | null
   experimental_background_callbacks?: boolean | null
   login?: string
   email?: string
   default_repo?: string | null
+  workspace_default_repos?: Record<string, string>
   base_branch?: string | null
   branch_prefix?: string | null
   auto_fix_ci?: boolean
   auto_human_review_enabled?: boolean
-  recent_thread_context_enabled?: boolean
   concierge_mode?: boolean
   pr_review_links?: boolean
   pr_failure_reactions?: boolean
-  prefer_tools_in_sandbox?: boolean
-  experimental_mcp_ptc?: boolean
   experimental_monitor?: boolean | null
   experimental_act_as_approval?: boolean
   act_as_always_allowed?: boolean
@@ -323,20 +336,16 @@ export interface Profile {
 }
 
 export interface ProfileUpdate {
-  experimental_task_coordination?: boolean
-  experimental_assistant_ui?: boolean | null
   experimental_background_callbacks?: boolean | null
   default_repo?: string | null
+  workspace_default_repos?: Record<string, string>
   base_branch?: string | null
   branch_prefix?: string | null
   auto_fix_ci?: boolean
   auto_human_review_enabled?: boolean
-  recent_thread_context_enabled?: boolean
   concierge_mode?: boolean
   pr_review_links?: boolean
   pr_failure_reactions?: boolean
-  prefer_tools_in_sandbox?: boolean
-  experimental_mcp_ptc?: boolean
   experimental_monitor?: boolean | null
   experimental_act_as_approval?: boolean
   draft_prs?: boolean
@@ -468,8 +477,12 @@ export interface ManagedToolsMissingCredential {
 }
 
 export interface ManagedToolsConnectedService {
+  /** LangSmith's server ID or built-in key. */
+  id: string
   name: string
   tool_count: number
+  /** The caller has a stored credential for it; public services have none. */
+  disconnectable: boolean
 }
 
 export interface ManagedToolsGatewayStatus {
@@ -837,10 +850,10 @@ export interface SlackChannelOption {
   num_members: number | null
 }
 
-/** The channel directory; partial when Slack rate limited the walk over public channels. */
+/** The stored channel directory; refreshing while a walk over Slack is due or running. */
 export interface SlackChannelDirectory {
   channels: Array<SlackChannelOption>
-  partial: boolean
+  refreshing: boolean
 }
 
 export interface WorkspaceOptionList {
@@ -1094,15 +1107,11 @@ export type PullRequestThreadIntent =
   | { intent: "message"; title: string; message: string }
   | {
       intent: "fix"
-      scope: PullRequestFixScope
       context: OpenPullRequest | null
     }
   | { intent: "address-comments" }
   | { intent: "address-comment"; comment_url: string; instructions: string }
   | { intent: "comments"; comments: Array<AgentBatchComment> }
-
-/** One kind of PR problem a fix run handles; comments go through address-comments. */
-export type PullRequestFixScope = "conflicts" | "checks"
 
 export type AgentBatchComment =
   | ({ kind: "line" } & Omit<ReviewCommentCreate, "start_side">)
@@ -1206,6 +1215,7 @@ export interface ReviewDetail extends Omit<
   "thread_id" | "status"
 > {
   thread_id: string | null
+  trace_url?: string | null
   status: ReviewSummary["status"] | "none"
   assessment?: PublishedReviewAssessment | null
   pr: ReviewPrDetails
@@ -1578,6 +1588,17 @@ export const api = {
     request<void>(`/agent-instructions/${encodeURIComponent(full_name)}`, {
       method: "DELETE",
     }),
+  listClaudeCodeSyncTokens: () =>
+    request<ClaudeCodeSyncToken[]>("/claude-code/tokens"),
+  createClaudeCodeSyncToken: (name: string) =>
+    request<MintedClaudeCodeSyncToken>("/claude-code/tokens", {
+      method: "POST",
+      body: JSON.stringify({ name }),
+    }),
+  revokeClaudeCodeSyncToken: (id: string) =>
+    request<void>(`/claude-code/tokens/${encodeURIComponent(id)}`, {
+      method: "DELETE",
+    }),
   listWorkspaceApiKeys: (slug: string) =>
     request<WorkspaceApiKey[]>(
       `/admin/api-keys?workspace=${encodeURIComponent(slug)}`
@@ -1655,10 +1676,11 @@ export const api = {
       `/slack/users/${encodeURIComponent(userId)}/name`
     ),
   listSlackBots: () => request<SlackBotOption[]>("/slack/bots"),
-  listSlackChannels: (refresh = false) =>
-    request<SlackChannelDirectory>(
-      `/slack/channels${refresh ? "?refresh=true" : ""}`
-    ),
+  listSlackChannels: () => request<SlackChannelDirectory>("/slack/channels"),
+  refreshSlackChannels: () =>
+    request<SlackChannelDirectory>("/slack/channels/refresh", {
+      method: "POST",
+    }),
   listAllowedSlackBots: () => request<AllowedSlackBot[]>("/slack/allowed-bots"),
   listAllowedSlackBotDirectory: () =>
     request<AllowedSlackBotEntry[]>("/slack/allowed-bots/directory"),
@@ -1765,6 +1787,11 @@ export const api = {
       }`,
       { method: "POST" }
     ),
+  disconnectManagedTool: (gatewayId: string, serviceId: string) =>
+    request<void>(
+      `/my-managed-tools/${encodeURIComponent(gatewayId)}/services/${encodeURIComponent(serviceId)}`,
+      { method: "DELETE" }
+    ),
   listAutoReviewRepos: () =>
     request<{ repos: Array<string> }>("/enabled-review-repos"),
   setAutoReviewRepo: (full_name: string, runAutomatically: boolean) =>
@@ -1830,12 +1857,8 @@ export const api = {
     ),
   pullRequestStatus: (repo: string, number: number) =>
     loadPrDetails(repo, number),
-  fixPullRequest: (pr: OpenPullRequest, scope: PullRequestFixScope) =>
-    pullRequestThread(pr.repo, pr.number, {
-      intent: "fix",
-      scope,
-      context: pr,
-    }),
+  fixPullRequest: (pr: OpenPullRequest) =>
+    pullRequestThread(pr.repo, pr.number, { intent: "fix", context: pr }),
   addressPullRequestComments: (pr: OpenPullRequest) =>
     pullRequestThread(pr.repo, pr.number, { intent: "address-comments" }),
   sendCommentsToAgent: (
