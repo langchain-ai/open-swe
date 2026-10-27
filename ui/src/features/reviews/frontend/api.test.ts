@@ -18,13 +18,13 @@ it("only loads evidence through the authenticated report media API", () => {
   expect(() =>
     evidenceMediaUrl("/dashboard/api/reviews/a/b/1/frontend-reviews/../secrets")
   ).toThrow(/authenticated/)
-  expect(() => evidenceMediaUrl(path.replace("before.png", "%2e%2e"))).toThrow(
-    /authenticated/
-  )
   expect(() =>
-    evidenceMediaUrl(path.replace("before.png", "%2e%2e%2fsecrets"))
+    evidenceMediaUrl(path.replaceAll("before.png", "%2e%2e"))
   ).toThrow(/authenticated/)
   expect(() =>
-    evidenceMediaUrl(path.replace("before.png", "%5csecrets"))
+    evidenceMediaUrl(path.replaceAll("before.png", "%2e%2e%2fsecrets"))
+  ).toThrow(/authenticated/)
+  expect(() =>
+    evidenceMediaUrl(path.replaceAll("before.png", "%5csecrets"))
   ).toThrow(/authenticated/)
 })
