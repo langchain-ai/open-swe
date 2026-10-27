@@ -79,7 +79,7 @@ def github_channel(
     multitask_strategy: MultitaskStrategy = "enqueue",
     on_finish: EventFinished[GitHubEvent, GitHubChannelThread] | None = None,
     on_received: EventReceived[GitHubEvent, GitHubChannelThread] | None = None,
-    resolve_user: ResolveUser | None = None,
+    resolve_user: ResolveUser | EventEndpoint | None = None,
 ) -> HttpChannel:
     """Options for ``channels.github(...)``: App scope and event handlers that start runs.
 

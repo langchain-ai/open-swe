@@ -38,7 +38,7 @@ if TYPE_CHECKING:
     from managed_deepagents._channels.http.types import JsonValue
     from managed_deepagents._channels.manifest import ChannelManifest
     from managed_deepagents._channels.messaging_registry import PausedNotice
-    from managed_deepagents._channels.resolve_user import ResolveUser
+    from managed_deepagents._channels.resolve_user import ChannelResolveUser
     from managed_deepagents._channels.types import (
         ChannelMessage,
         ChannelReply,
@@ -86,7 +86,7 @@ class HttpChannel(Channel):
         #: provides, such as ``mda/github-token``, so deploy knows them.
         self.agent_connections: list[str] = []
         #: The channel's own ``resolve_user``, which overrides the identity's.
-        self.resolve_user: ResolveUser | None = None
+        self.resolve_user: ChannelResolveUser | None = None
 
     def _build_messaging(self, _env: Mapping[str, str]) -> _HttpReplyTransport | None:
         if self.post is None:

@@ -4,14 +4,24 @@ from __future__ import annotations
 
 import asyncio
 import inspect
-from collections.abc import Awaitable, Callable
-from typing import TYPE_CHECKING, Literal, TypeAlias, cast
+import json
+from collections.abc import Awaitable, Callable, Mapping
+from typing import TYPE_CHECKING, Annotated, Literal, NotRequired, TypeAlias, cast
 
+from pydantic import AfterValidator, BaseModel, ConfigDict, Field, TypeAdapter, ValidationError
 from typing_extensions import TypedDict
 
 from managed_deepagents._agent_auth import WORKSPACE_SETTING
 from managed_deepagents._agent_auth_http import ConnectionsNotConfiguredError
-from managed_deepagents._channels.runtime import create_runtime_channel
+from managed_deepagents._channels.actor import EndpointActor, endpoint_actor
+from managed_deepagents._channels.http.endpoint import (
+    EndpointClient,
+    EndpointLimits,
+    EventEndpoint,
+    is_event_endpoint,
+)
+from managed_deepagents._channels.runtime import create_runtime_channel, validate_message
+from managed_deepagents._channels.scalars import Nonblank  # noqa: TC001 - pydantic reads it
 from managed_deepagents._connections import (
     TRUSTED_BACKEND_PROVIDER,
     resolve_external_principal_id,
@@ -79,6 +89,56 @@ ResolveUser: TypeAlias = Callable[
 """Map a channel's verified sender to one of your users."""
 
 
+class ResolveUserEndpointRequest(TypedDict):
+    """What a ``resolve_user`` endpoint is POSTed: the ``ResolveUserRequest``, with
+    the actor in camelCase, as TypeScript's, and absent when unverified."""
+
+    actor: NotRequired[EndpointActor]
+    channel: ResolveUserChannel
+
+
+_ENDPOINT_TIMEOUT_SECONDS = 5.0
+"""How long a ``resolve_user`` endpoint may take, both attempts and the pause
+between. The delivery waits on it before MDA acknowledges it, and Trigger Server
+gives up on a delivery after 10 seconds."""
+_ENDPOINT_RETRY_DELAYS_SECONDS = (0.5,)
+"""The pause before the one more attempt after a network error, HTTP 429 or a 5xx."""
+
+
+class ResolveUserEndpoint:
+    """A ``resolve_user`` that is an endpoint: a URL, or an ``httpx.Request`` that
+    also carries headers, such as a credential the service checks.
+
+    Before a delivery starts a run, MDA POSTs a ``ResolveUserEndpointRequest`` as
+    JSON to the URL, with the request's headers, signed when the deployment has
+    ``MDA_SERVICE_SECRET``, with the webhook ID ``msg_<deliveryId>_resolve_user``.
+    The service answers with a ``ResolveUserResult``, checked as a function's;
+    ``null`` or HTTP 204 keeps the channel's own principal. A network error, HTTP
+    429 or a 5xx is tried again once. Any other answer, a redirect, or no answer
+    within 5 seconds fails the delivery, as a function that raises does. A retry
+    and a redelivery keep the webhook ID, so the service answers each request
+    and never dedupes on it.
+    """
+
+    def __init__(self, endpoint: EventEndpoint, label: str) -> None:
+        self._client = EndpointClient(endpoint, label, "resolve_user endpoint")
+
+    async def ask(self, request: ResolveUserRequest, delivery_id: str) -> JsonValue | None:
+        """The service's answer about one delivery's sender, not yet checked."""
+        sent: ResolveUserEndpointRequest = {"channel": request["channel"]}
+        if request["actor"] is not None:
+            sent["actor"] = endpoint_actor(request["actor"])
+        return await self._client.ask(
+            f"msg_{delivery_id}_resolve_user",
+            json.dumps(sent).encode(),
+            EndpointLimits(_ENDPOINT_TIMEOUT_SECONDS, _ENDPOINT_RETRY_DELAYS_SECONDS, total=True),
+        )
+
+
+ChannelResolveUser: TypeAlias = ResolveUser | ResolveUserEndpoint
+"""A declared ``resolve_user``: a function, or the service an endpoint names."""
+
+
 class ChannelPrincipal(TypedDict):
     type: Literal["principal"]
     id: str
@@ -87,51 +147,109 @@ class ChannelPrincipal(TypedDict):
 ChannelUser: TypeAlias = ChannelPrincipal | ResolvedReply | ResolvedIgnore
 """What a delivery does after ``resolve_user``."""
 
+_RESULT_SHAPE = (
+    'resolve_user must return {"type": "user", "id"}, {"type": "identity", "provider", '
+    '"issuer", "subject"}, {"type": "reply", "message"}, {"type": "ignore"} or None'
+)
 
-def checked_resolve_user(owner: str, resolve_user: ResolveUser | None) -> ResolveUser | None:
-    """A channel's own ``resolve_user``; one that isn't callable raises."""
+
+def _channel_message(value: object) -> object:
+    if not isinstance(value, Mapping):
+        raise ValueError("must be a ChannelMessage")
+    validate_message(cast("Mapping[str, object]", value))
+    return value
+
+
+class _Result(BaseModel):
+    model_config = ConfigDict(extra="forbid", strict=True)
+
+
+class _UserResult(_Result):
+    type: Literal["user"]
+    id: Nonblank
+
+
+class _IdentityResult(_Result):
+    type: Literal["identity"]
+    provider: Nonblank
+    issuer: Nonblank
+    subject: Nonblank
+
+
+class _ReplyResult(_Result):
+    type: Literal["reply"]
+    message: Annotated[object, AfterValidator(_channel_message)]
+
+
+class _IgnoreResult(_Result):
+    type: Literal["ignore"]
+
+
+_RESULT = TypeAdapter(
+    Annotated[
+        _UserResult | _IdentityResult | _ReplyResult | _IgnoreResult, Field(discriminator="type")
+    ]
+)
+"""A result ``resolve_user`` returns, or an endpoint answers, other than ``None``."""
+
+
+def checked_resolve_user(
+    owner: str, resolve_user: ResolveUser | EventEndpoint | None
+) -> ChannelResolveUser | None:
+    """A declared ``resolve_user``, with an endpoint's URL and the deployment's
+    secret checked; one that is neither callable nor an endpoint raises."""
+    if is_event_endpoint(resolve_user):
+        return ResolveUserEndpoint(resolve_user, f"{owner}(...) resolve_user")
     if resolve_user is not None and not callable(resolve_user):
-        raise TypeError(f"{owner}(...) resolve_user must be callable")
+        raise TypeError(f"{owner}(...) resolve_user must be callable or an endpoint URL")
     return resolve_user
 
 
 async def resolve_channel_user(
-    resolve_user: ResolveUser | None,
+    resolve_user: ChannelResolveUser | None,
     actor: ChannelActor | None,
     channel_name: str,
+    delivery_id: str,
     resolve_principal: Callable[[ResolvePrincipalIdentity], str] | None = None,
 ) -> ChannelUser | None:
-    """Ask ``resolve_user`` about the actor; ``None`` keeps the channel's principal."""
+    """Ask ``resolve_user`` about the actor of delivery ``delivery_id``; ``None``
+    keeps the channel's principal."""
     if resolve_user is None:
         return None
     request: ResolveUserRequest = {"actor": actor, "channel": {"name": channel_name}}
-    # A synchronous hook may block, so it runs off the event loop.
-    result = (
-        resolve_user(request)
-        if inspect.iscoroutinefunction(resolve_user)
-        else await asyncio.to_thread(resolve_user, request)
-    )
-    if inspect.isawaitable(result):
-        result = await result
+    result: object
+    if isinstance(resolve_user, ResolveUserEndpoint):
+        result = await resolve_user.ask(request, delivery_id)
+    else:
+        # A synchronous hook may block, so it runs off the event loop.
+        result = (
+            resolve_user(request)
+            if inspect.iscoroutinefunction(resolve_user)
+            else await asyncio.to_thread(resolve_user, request)
+        )
+        if inspect.isawaitable(result):
+            result = await result
     if result is None:
         return None
+    # An endpoint's answer is any JSON, and a function's is checked the same way.
+    try:
+        checked = _RESULT.validate_python(result)
+    except ValidationError:
+        raise TypeError(_RESULT_SHAPE) from None
     identity: ResolvePrincipalIdentity
-    match result.get("type"):
-        case "user":
-            identity = _app_user_identity(cast("ResolvedAppUser", result)["id"])
-        case "identity":
-            chosen = cast("ResolvedIdentity", result)
+    match checked:
+        case _UserResult():
+            identity = _app_user_identity(checked.id)
+        case _IdentityResult():
             identity = {
-                "provider": chosen["provider"],
-                "issuer": chosen["issuer"],
-                "subject": chosen["subject"],
+                "provider": checked.provider,
+                "issuer": checked.issuer,
+                "subject": checked.subject,
             }
-        case "reply":
-            return cast("ResolvedReply", result)
-        case "ignore":
+        case _ReplyResult():
+            return {"type": "reply", "message": cast("ChannelMessage", checked.message)}
+        case _IgnoreResult():
             return {"type": "ignore"}
-        case _:
-            raise TypeError("resolve_user must return user, identity, reply, ignore or None")
     principal_id = await asyncio.to_thread(
         resolve_principal or resolve_external_principal_id, identity
     )
@@ -180,8 +298,11 @@ def _app_user_identity(user_id: str) -> ResolvePrincipalIdentity:
 
 
 __all__ = [
+    "ChannelResolveUser",
     "ChannelUser",
     "ResolveUser",
+    "ResolveUserEndpoint",
+    "ResolveUserEndpointRequest",
     "ResolveUserRequest",
     "ResolveUserResult",
     "ResolvedAppUser",

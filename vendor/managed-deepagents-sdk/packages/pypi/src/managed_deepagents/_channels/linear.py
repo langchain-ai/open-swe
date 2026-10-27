@@ -111,7 +111,7 @@ def linear_channel(
     sessions: bool = True,
     ignore_bots: bool = True,
     on_finish: EventFinished[LinearEvent, LinearChannelThread] | None = None,
-    resolve_user: ResolveUser | None = None,
+    resolve_user: ResolveUser | EventEndpoint | None = None,
 ) -> HttpChannel:
     """Options for ``channels.linear(...)``: the app's scope, event handlers and sessions.
 

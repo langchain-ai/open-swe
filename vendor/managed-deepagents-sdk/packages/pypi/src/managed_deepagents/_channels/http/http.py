@@ -157,14 +157,16 @@ async def handle_http_request(ctx: ChannelEventsContext, channel: HttpChannel) -
             result.get("response"),
         )
     message = _copied_message(result["message"])
+    delivery_id = str(uuid.uuid4())
     try:
-        user = await resolve_channel_user(ctx.get("resolve_user"), result.get("actor"), ctx["name"])
+        user = await resolve_channel_user(
+            ctx.get("resolve_user"), result.get("actor"), ctx["name"], delivery_id
+        )
     except Exception as error:  # noqa: BLE001 - the app's hook may raise anything
         logger.error("channel resolve_user failed (%s)", logger.safe_error_label(error))
         return _error(500, "channel user resolution failed")
     principal_id = user["id"] if user is not None and user["type"] == "principal" else None
     user_id = principal_id or message["user_id"]
-    delivery_id = str(uuid.uuid4())
     content = message.get("content")
     thread_id = message["thread_id"].lower()
     source_thread_key = _source_thread_key(ctx["name"], thread_id)

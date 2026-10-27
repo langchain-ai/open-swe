@@ -101,7 +101,7 @@ if TYPE_CHECKING:
         HttpOnFinish,
         HttpSkipReason,
     )
-    from managed_deepagents._channels.resolve_user import ResolveUser
+    from managed_deepagents._channels.resolve_user import ChannelResolveUser
     from managed_deepagents._channels.run_input import NormalizedRunInput
     from managed_deepagents._channels.trigger.ingress import (
         ObservedIngressRun,
@@ -510,7 +510,7 @@ async def handle_trigger_channel_event_request(  # noqa: C901, PLR0911, PLR0912,
     on_finish: HttpOnFinish | None = None,
     identity_context_key: IdentityContextKey | None = None,
     identity_context_issuer: str | None = None,
-    resolve_user: ResolveUser | None = None,
+    resolve_user: ChannelResolveUser | None = None,
     resolve_principal: Callable[[ResolvePrincipalIdentity], str] | None = None,
 ) -> object:
     """Validate a Trigger message and enqueue its Agent Server run."""
@@ -609,7 +609,9 @@ async def handle_trigger_channel_event_request(  # noqa: C901, PLR0911, PLR0912,
         return _json_response({"error": "channel runtime is not configured"}, status_code=500)
 
     try:
-        user = await resolve_channel_user(resolve_user, actor, channel_name, resolve_principal)
+        user = await resolve_channel_user(
+            resolve_user, actor, channel_name, event["delivery_id"], resolve_principal
+        )
     except Exception as error:  # noqa: BLE001 - the app's hook may raise anything
         logger.error("channel resolve_user failed (%s)", logger.safe_error_label(error))
         return _json_response({"error": "channel user resolution failed"}, status_code=500)

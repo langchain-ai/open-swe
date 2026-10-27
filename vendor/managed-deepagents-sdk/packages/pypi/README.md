@@ -1279,6 +1279,38 @@ Your app links accounts: a `reply` can point to a page where the person signs
 in and connects their Slack or GitHub account. The reply can be public, so its
 link must not carry anything that proves who the sender is.
 
+When your users table lives in another service, `resolve_user` can be that
+service's endpoint instead of a function: a URL, or an `httpx.Request` that
+also carries headers, as an `on_event` endpoint can be (see
+[Asking your service what to start](#asking-your-service-what-to-start)).
+
+```python
+identity = define_identity(
+    auth="backend",
+    resolve_user=httpx.Request(
+        "POST",
+        f"{BACKEND_URL}/mda/resolve-user",
+        headers={"x-api-key": os.environ["BACKEND_KEY"]},
+    ),
+)
+```
+
+MDA POSTs the request a function gets as JSON, signed with
+`MDA_SERVICE_SECRET` as an `on_event` endpoint's request is, with the
+`webhook-id` `msg_<deliveryId>_resolve_user`. `ResolveUserEndpointRequest`
+types the body: `{"actor"?, "channel": {"name"}}`, with the actor's fields in
+camelCase (`teamId`), as the TypeScript runtime sends them. The service answers
+with what a function returns, checked the same way; `null` or HTTP 204 keeps the
+channel's own principal. The delivery waits on the answer, so the service gets
+5 seconds in all, and one more attempt after a network error, HTTP 429 or a
+5xx. Any other failure starts nothing, as a function that raises does. A bad
+URL or secret raises when the identity or channel is declared.
+
+Answer every `_resolve_user` request, even one whose `webhook-id` you have
+seen. The attempt after a 5xx and a redelivery from Trigger Server both keep
+the same ID. A receiver that dedupes on the ID and answers 204 to a repeat runs
+that delivery as the channel's own principal instead of your user.
+
 ## HTTP channels
 
 Use `channels.http(provider=..., verify=..., parse=..., post=...)` for a
@@ -1441,8 +1473,10 @@ changed or replayed, set `MDA_SERVICE_SECRET` in the project's `.env`;
 request as [Standard Webhooks](https://www.standardwebhooks.com/) does:
 `webhook-id`, `webhook-timestamp` and `webhook-signature`, an HMAC-SHA256 of the
 id, the timestamp and the exact body. The id is `msg_<deliveryId>` for the call
-that starts the run, and `msg_<deliveryId>_interrupted` for a GitHub call that
-asks whether to tell the conversation its thread waits on a decision. The secret is `whsec_` and padded base64
+that starts the run, `msg_<deliveryId>_interrupted` for a GitHub call that
+asks whether to tell the conversation its thread waits on a decision, and
+`msg_<deliveryId>_resolve_user` for a `resolve_user` call
+(see [Mapping channel senders to your users](#mapping-channel-senders-to-your-users)). The secret is `whsec_` and padded base64
 of 24 to 64 random bytes (`echo "whsec_$(openssl rand -base64 32)"`; an
 `openssl rand -hex 32` value is valid too); several, separated by commas, each
 sign the request, for rotation. A malformed secret raises when the channel is declared.
