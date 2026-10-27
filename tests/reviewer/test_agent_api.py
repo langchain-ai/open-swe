@@ -123,9 +123,9 @@ async def test_the_named_calls_around_a_model_call_never_plan_the_run(
         raise AssertionError("A call around a model call never plans the run")
 
     classify = AsyncMock(return_value="fast")
-    refresh = AsyncMock(return_value=False)
+    refresh = AsyncMock(return_value=None)
     monkeypatch.setattr("openswe.middleware.model_selection._select_jev_route", classify)
-    monkeypatch.setattr(graph_module, "maybe_refresh_proxy_token", refresh)
+    monkeypatch.setattr(graph_module, "refresh_thread_github_proxy", refresh)
     monkeypatch.setattr(TaskCoordinationMiddleware, "for_thread", AsyncMock(return_value=None))
     graph = RemoteGraph("agent", never_planned, agent.AgentParts())
     run = RUN.model_copy(update={"assistant_id": "agent"})
@@ -149,8 +149,8 @@ async def test_the_named_calls_around_a_model_call_never_plan_the_run(
     )
     # A thread in no task gets no task context.
     assert context == {"instructions": "", "message": None}
-    assert refreshed == {}
-    refresh.assert_awaited_once_with(run.thread_id)
+    assert refreshed == {"expires_at": None}
+    refresh.assert_awaited_once_with(run.thread_id, workspace_slug=None)
 
 
 async def test_a_runs_tool_and_shell_calls_never_plan_it_and_read_its_settings(
