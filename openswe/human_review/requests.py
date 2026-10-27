@@ -21,7 +21,7 @@ from datetime import datetime
 from typing import Literal, Self, TypedDict
 from uuid import UUID, uuid7
 
-from sqlalchemy import BigInteger, ForeignKey, Text, desc, func, or_, select
+from sqlalchemy import BigInteger, DateTime, ForeignKey, Text, cast, desc, func, or_, select
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import Mapped, mapped_column, relationship, selectinload
@@ -345,6 +345,27 @@ class HumanReviewRequest(Base):
                 .order_by(cls.created_at, cls.id)
             )
             return list(rows)
+
+    @classmethod
+    async def design_review_history(cls) -> dict[str, datetime]:
+        """Last supplementary design assignment per person, for least-recently-picked rotation."""
+        login = cls.run_config["design_review"]["github_login"].astext
+        assigned_at = cast(
+            cls.run_config["design_review"]["assigned_at"].astext, DateTime(timezone=True)
+        )
+        async with postgres.session() as session:
+            rows = await session.execute(
+                select(login, func.max(assigned_at))
+                .join(cls.pull_request)
+                .join(PullRequest.repository)
+                .where(
+                    Repository.key == "langchain-ai/langchainplus",
+                    login.is_not(None),
+                    login != "",
+                )
+                .group_by(login)
+            )
+            return {name.lower(): at for name, at in rows.tuples() if name and at is not None}
 
     @classmethod
     async def open_review_counts(

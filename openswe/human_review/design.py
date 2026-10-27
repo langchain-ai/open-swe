@@ -1,0 +1,270 @@
+"""Supplementary Product Design review, independent of engineering reviewer signup."""
+
+import asyncio
+import logging
+from dataclasses import dataclass
+from datetime import UTC, datetime, timedelta
+from pathlib import PurePosixPath
+
+from pydantic import BaseModel
+
+from openswe.dashboard.profiles import PROFILES
+from openswe.expedited_review.eligibility import ChangedFile
+from openswe.expedited_review.readiness import latest_review_states
+from openswe.github.org_membership import team_members
+from openswe.github.pull_request_status import PullRequestClient
+from openswe.github.pull_requests import PullRequestPayload
+from openswe.human_review.lifecycle import ReviewCard
+from openswe.human_review.picking import Coverage, ReviewerAvailability
+from openswe.human_review.requests import HumanReviewRequest, slack_mention
+from openswe.jobs import queue
+from openswe.prompts import prompt
+from openswe.slack.client import post_slack_thread_reply_with_ts
+from openswe.slack.dm import send_dm
+from openswe.users import User
+from openswe.utils.preview import skip_on_preview
+
+logger = logging.getLogger(__name__)
+_KEY = "design_review"
+_RETRY = timedelta(hours=1)
+
+
+class DesignState(BaseModel):
+    assessment_requested: bool = False
+    reason: str = ""
+    github_login: str = ""
+    assigned_at: datetime | None = None
+    github_requested: bool = False
+    github_notified: bool = False
+    slack_notified: bool = False
+    dm_notified: bool = False
+
+
+def potential_ui(path: str) -> bool:
+    """Production frontend paths warrant judgment, not automatic design assignment."""
+    file = PurePosixPath(path.lower())
+    return (
+        path.startswith("smith-frontend/")
+        and file.suffix in {".tsx", ".jsx", ".ts", ".js", ".css", ".scss", ".sass", ".less"}
+        and not {"tests", "test", "__tests__", "e2e", "playwright", "cypress", "__mocks__"}
+        & set(file.parts)
+        and not any(part in file.name for part in (".test.", ".spec.", ".stories.", ".d.ts"))
+    )
+
+
+@dataclass
+class DesignReview:
+    request: HumanReviewRequest
+
+    @property
+    def enabled(self) -> bool:
+        pr = self.request.pull_request
+        return (pr.owner.lower(), pr.repo.lower()) == (
+            "langchain-ai",
+            "langchainplus",
+        ) and self.request.kind in ("standard", "posted")
+
+    @property
+    def state(self) -> DesignState:
+        return DesignState.model_validate(self.request.run_config.get(_KEY) or {})
+
+    async def _schedule(self, after: timedelta = timedelta(0)) -> None:
+        await queue.schedule(
+            "human_review",
+            {"request_id": str(self.request.id), "step": "design_review"},
+            due_at=datetime.now(UTC) + after,
+            metadata={
+                "kind": "human_review",
+                "request_id": str(self.request.id),
+                "step": "design_review",
+            },
+        )
+
+    async def start(self, pull: PullRequestClient, reason: str = "") -> None:
+        """Queue immediate semantic assessment, or an agent's reasoned design-review request."""
+        if not self.enabled or self.request.state != "open":
+            return
+        if not reason and self.state.assessment_requested:
+            return
+        files = await ChangedFile.of_pull(pull)
+        if files is None or not any(potential_ui(file.filename) for file in files):
+            return
+        async with HumanReviewRequest.locked(self.request.id) as (_, row):
+            if row is None or row.state != "open":
+                return
+            state = DesignReview(row).state
+            if reason and not state.reason:
+                state.reason = reason.strip()
+                row.run_config = {**row.run_config, _KEY: state.model_dump(mode="json")}
+        await self._schedule()
+
+    async def run(self) -> str:
+        """Assess once, then rotate a designer as soon as someone eligible is working."""
+        if not self.enabled or skip_on_preview("design_review"):
+            return "disabled"
+        pr = self.request.pull_request
+        async with PullRequestClient.as_app(pr.owner, pr.repo, pr.number) as pull:
+            details = PullRequestPayload.model_validate(await pull.pull())
+            if details.merged or details.state != "open":
+                return "not_ready"
+            if details.draft:
+                await self._schedule(_RETRY)
+                return "not_ready"
+            if not self.state.reason:
+                return await self._assess()
+            try:
+                return await self._assign(pull)
+            except Exception:
+                logger.exception(
+                    "Could not deliver a design review request",
+                    extra={"request_id": str(self.request.id)},
+                )
+                await self._schedule(_RETRY)
+                return "retrying"
+
+    async def _assess(self) -> str:
+        async with HumanReviewRequest.locked(self.request.id) as (_, row):
+            if row is None or row.state != "open":
+                return "closed"
+            state = DesignReview(row).state
+            if state.assessment_requested:
+                return "assessed"
+            state.assessment_requested = True
+            row.run_config = {**row.run_config, _KEY: state.model_dump(mode="json")}
+        pr = self.request.pull_request
+        try:
+            if await ReviewCard(self.request).notify_agent(
+                prompt("runs/design-review", pr_url=pr.url),
+                title=f"Assess design review for {pr.repo}#{pr.number}",
+                unlisted=True,
+            ):
+                return "assessment_requested"
+        except Exception:
+            logger.exception(
+                "Could not request design review assessment",
+                extra={"request_id": str(self.request.id)},
+            )
+        async with HumanReviewRequest.locked(self.request.id) as (_, row):
+            if row is not None:
+                state = DesignReview(row).state
+                state.assessment_requested = False
+                row.run_config = {**row.run_config, _KEY: state.model_dump(mode="json")}
+        await self._schedule(_RETRY)
+        return "retrying"
+
+    async def _choose(self, pull: PullRequestClient) -> tuple[User | None, timedelta]:
+        members = await team_members("langchain-ai", "product-design")
+        users = await asyncio.gather(*(User.for_login("github", login) for login in members or []))
+        reviews = await latest_review_states(pull, self.request.pull_request.author)
+        if reviews is None:
+            return None, _RETRY
+        already_reviewed = {login.lower() for login in reviews}
+        eligible: list[tuple[User, ReviewerAvailability]] = []
+        for user in users:
+            if (
+                user is None
+                or not user.slack_user_id
+                or self.request.is_author(user.id, user.github_login)
+                or self.request.participant(user.id) is not None
+                or user.github_login.lower() in already_reviewed
+                or not await PROFILES.allows_auto_human_review(user.github_login)
+            ):
+                continue
+            hours = await ReviewerAvailability.for_user(user)
+            if hours.out_of_office is not False or not await pull.repo.can_write(user.github_login):
+                continue
+            eligible.append((user, hours))
+        if not eligible:
+            return None, _RETRY
+        history = await HumanReviewRequest.design_review_history()
+        now = datetime.now(UTC)
+        eligible.sort(
+            key=lambda person: (
+                person[1].next_start(now),
+                history.get(person[0].github_login.lower(), datetime.min.replace(tzinfo=UTC)),
+                person[0].github_login.lower(),
+            )
+        )
+        user, hours = eligible[0]
+        return user, hours.next_start(now) - now
+
+    async def _assign(self, pull: PullRequestClient) -> str:
+        if not self.state.github_login:
+            user, delay = await self._choose(pull)
+            if user is None or delay > timedelta(0):
+                await self._schedule(delay)
+                return "waiting"
+            async with HumanReviewRequest.locked(self.request.id) as (_, row):
+                if row is None or row.state != "open":
+                    return "closed"
+                state = DesignReview(row).state
+                if not state.github_login:
+                    state.github_login = user.github_login
+                    state.assigned_at = datetime.now(UTC)
+                    row.run_config = {**row.run_config, _KEY: state.model_dump(mode="json")}
+        async with HumanReviewRequest.locked(self.request.id) as (_, row):
+            if row is None or row.state != "open":
+                return "closed"
+            state = DesignReview(row).state
+            user = await User.for_login("github", state.github_login)
+            pr = row.pull_request
+            note = (
+                f"Design review — {slack_mention(user, state.github_login)}: {state.reason}\n"
+                f"<{pr.url}|{pr.repo}#{pr.number}> · Supplementary UX review; engineering review remains separate."
+            )
+            failed = False
+            try:
+                if not state.github_requested:
+                    await pull.request_reviewers([state.github_login])
+                    state.github_requested = True
+                if not state.github_notified:
+                    await pull.comment(
+                        f"### Design review\n\n@{state.github_login} — {state.reason}\n\n"
+                        "Supplementary Product Design review; this does not replace engineering or CODEOWNERS review."
+                    )
+                    state.github_notified = True
+                if not state.slack_notified:
+                    state.slack_notified = bool(
+                        await post_slack_thread_reply_with_ts(
+                            row.slack_channel_id,
+                            row.slack_thread_ts or row.slack_message_ts,
+                            note,
+                            unfurl_links=False,
+                            unfurl_media=False,
+                        )
+                    )
+                if not state.dm_notified and user is not None and user.slack_user_id:
+                    state.dm_notified = await send_dm(
+                        user.slack_user_id, note, origin=row.dm_origin
+                    )
+            except Exception:
+                logger.exception(
+                    "Could not deliver design review notifications",
+                    extra={"request_id": str(row.id)},
+                )
+                failed = True
+            row.run_config = {**row.run_config, _KEY: state.model_dump(mode="json")}
+        if failed or not state.dm_notified or not state.slack_notified:
+            await self._schedule(_RETRY)
+            return "retrying"
+        return "requested"
+
+    async def engineering_states(self, states: dict[str, str]) -> dict[str, str]:
+        """A supplementary approval is not an engineering approval unless they also own or signed up."""
+        designer = self.state.github_login.lower()
+        if not designer or not any(
+            login.lower() == designer and state == "APPROVED" for login, state in states.items()
+        ):
+            return states
+        if any(
+            p.github_login.lower() == designer for p in self.request.reviewers + self.request.picks
+        ):
+            return states
+        coverage = await Coverage.load(self.request)
+        if coverage is not None and coverage.of(designer):
+            return states
+        return {
+            login: state
+            for login, state in states.items()
+            if login.lower() != designer or state != "APPROVED"
+        }

@@ -46,6 +46,7 @@ from openswe.github.pull_request_status import PullRequestClient
 from openswe.github.pull_requests import PullRequest, PullRequestPayload
 from openswe.github.repo_files import RepoFileUnreadableError, RepoSettings
 from openswe.human_review.card import accept_button, decline_button, mention, snooze_button
+from openswe.human_review.design import DesignReview
 from openswe.human_review.lifecycle import ReviewCard, ReviewPicks
 from openswe.human_review.merging import merge_pull_request
 from openswe.human_review.people import Outcome, Participant, resolve_writer
@@ -375,6 +376,7 @@ async def request_review(
     channel: str = "",
     inline_summary: str | None = None,
     auto_merge: bool | None = None,
+    design_review_reason: str = "",
 ) -> RequestResult:
     """Post a standard review card for ``pr_ref``, or return the one already open.
 
@@ -389,6 +391,7 @@ async def request_review(
                 channel=channel,
                 inline_summary=inline_summary,
                 auto_merge=auto_merge,
+                design_review_reason=design_review_reason,
             )
     except GitHubAppUnavailable:
         return _failure("Open SWE cannot reach this repository's GitHub App installation.")
@@ -402,6 +405,7 @@ async def _request_review(
     channel: str,
     inline_summary: str | None,
     auto_merge: bool | None = None,
+    design_review_reason: str = "",
 ) -> RequestResult:
     # An open card stays correctable whatever has happened to the pull request since.
     active = await HumanReviewRequest.active_for(pr_ref.owner, pr_ref.repo, pr_ref.number)
@@ -409,6 +413,13 @@ async def _request_review(
         result = await _existing(active, auto_merge)
         if not result.success:
             return result
+        if design_review_reason:
+            blockers = await review_blockers(pull)
+            if blockers is None or blockers:
+                return _failure(
+                    "The pull request must be open and not a draft for a Design review."
+                )
+            await DesignReview(active).start(pull, design_review_reason)
         if active.kind == "standard" and inline_summary is not None and origin.asked(active):
             return await _resummarize(active, summary_line(inline_summary))
         return result
@@ -485,6 +496,7 @@ async def _request_review(
     request = await request.save()
     if not in_thread and origin.slack_channel_id and origin.slack_thread_ts:
         await _point_to_card(request, origin, target)
+    await DesignReview(request).start(pull, design_review_reason)
     return RequestResult(
         success=True,
         auto_merge=request.auto_merge,
@@ -662,6 +674,7 @@ async def _github_approvers(request: HumanReviewRequest) -> list[str]:
             extra={"request_id": str(request.id)},
         )
         return []
+    states = await DesignReview(request).engineering_states(states)
     return [login for login, state in states.items() if state == "APPROVED"]
 
 
@@ -1015,6 +1028,7 @@ async def _settle(request: HumanReviewRequest, pull: PullRequestClient) -> bool:
     states = await latest_review_states(pull, snapshot.author)
     if states is None:
         return False
+    states = await DesignReview(request).engineering_states(states)
     await ReviewPicks(request).complete(
         {
             login.lower()
@@ -1505,6 +1519,8 @@ async def run_deadline(request_id: str, step: str) -> dict[str, str]:
         request = None
     if request is None or request.state != "open":
         return {"status": "closed"}
+    if step == "design_review":
+        return {"status": await DesignReview(request).run()}
     if step.startswith("snooze:"):
         user_id = UUID(step.removeprefix("snooze:"))
         participant = request.participant(user_id)

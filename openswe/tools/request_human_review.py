@@ -67,7 +67,11 @@ async def _repository_refusal(pr_ref: GitHubPrRef, cfg: RunConfig) -> str | None
 @expose_mcp()
 @audit_tool()
 async def request_human_review(
-    pr_url: str, inline_summary: str, channel: str = "", auto_merge: bool | None = None
+    pr_url: str,
+    inline_summary: str,
+    channel: str = "",
+    auto_merge: bool | None = None,
+    design_review_reason: str = "",
 ) -> dict[str, Any]:
     """Implement the `request_human_review` tool."""
     pr_ref = parse_github_pr_url(pr_url)
@@ -81,7 +85,9 @@ async def request_human_review(
     if refusal := await _repository_refusal(pr_ref, cfg):
         return _failure(refusal)
     if caller := cfg.mcp_caller:
-        return await _request_for_mcp_caller(pr_ref, caller, inline_summary, channel, auto_merge)
+        return await _request_for_mcp_caller(
+            pr_ref, caller, inline_summary, channel, auto_merge, design_review_reason
+        )
     login = cfg.github_login or ""
     thread_id = cfg.thread_id or ""
     own_channel, own_thread = await run_slack_location(cfg, thread_id)
@@ -93,7 +99,12 @@ async def request_human_review(
         slack_thread_ts=own_thread,
     )
     result = await request_review(
-        pr_ref, origin, channel=channel, inline_summary=inline_summary, auto_merge=auto_merge
+        pr_ref,
+        origin,
+        channel=channel,
+        inline_summary=inline_summary,
+        auto_merge=auto_merge,
+        design_review_reason=design_review_reason,
     )
     if not result.success:
         return _failure(result.error)
@@ -124,6 +135,7 @@ async def _request_for_mcp_caller(
     inline_summary: str,
     channel: str,
     auto_merge: bool | None = None,
+    design_review_reason: str = "",
 ) -> dict[str, Any]:
     """Request review as a person calling over MCP, who has no thread to point at the card."""
     requester = await User.for_login("github", login)
@@ -135,6 +147,7 @@ async def _request_for_mcp_caller(
         channel=channel,
         inline_summary=inline_summary,
         auto_merge=auto_merge,
+        design_review_reason=design_review_reason,
     )
     if not result.success:
         return _failure(result.error)

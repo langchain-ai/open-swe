@@ -905,7 +905,9 @@ async def test_review_request_snapshots_merge_mode_and_preserves_it_on_reuse(
 @pytest.mark.parametrize("pending", [False, True])
 @pytest.mark.parametrize("auto_merge", [False, True])
 @pytest.mark.parametrize("author", ["ada", "open-swe[bot]"])
+@pytest.mark.parametrize("design_only", [False, True])
 async def test_only_auto_merge_requests_merge_when_approved(
+    design_only: bool,
     author: str,
     trigger: str,
     auto_merge: bool,
@@ -923,6 +925,8 @@ async def test_only_auto_merge_requests_merge_when_approved(
     )
     request.pull_request = pr
     request.created_at = datetime.now(UTC) - timedelta(hours=3)
+    if design_only:
+        request.run_config = {"design_review": {"github_login": "grace"}}
     if pending:
         user = User(
             identities=[UserIdentity(provider="github", external_id="linus", login="linus")]
@@ -964,8 +968,11 @@ async def test_only_auto_merge_requests_merge_when_approved(
             await standard.run_deadline(str(request.id), "auto_merge")
         else:
             await standard.settle_pull_request("lc", "repo", 7)
-    assert merge.await_count == int(auto_merge)
-    if not auto_merge:
+    assert merge.await_count == int(auto_merge and not design_only)
+    if design_only:
+        assert request.state == "open"
+        assert request.detail == "an approval on GitHub"
+    elif not auto_merge:
         assert request.state == "open"
         assert request.detail == (
             "approval from @linus" if pending else "approved — awaiting manual merge"
