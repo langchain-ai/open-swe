@@ -10,16 +10,31 @@ what to replace it with; MDA replaces it, the backend reconnects, and the call
 answers as it does in-process.
 """
 
+import asyncio
 import json
 import logging
+import os
+import random
+import re
 from collections.abc import Awaitable, Callable
+from time import monotonic
 from typing import Final
 
+import httpx
+import httpx2
 from langchain.agents.middleware import AgentMiddleware
 from langchain.agents.middleware.types import ToolCallRequest
 from langchain_core.messages import ToolMessage
 from langgraph.runtime import Runtime
 from langgraph.types import Command
+from langsmith.sandbox import (
+    QuotaExceededError,
+    SandboxAuthenticationError,
+    SandboxConnectionError,
+)
+from langsmith.sandbox import (
+    ValidationError as SandboxValidationError,
+)
 from managed_deepagents import define_sandbox
 from managed_deepagents.sandbox import SandboxDefinition, open_sandbox, replace_sandbox
 from pydantic import JsonValue, TypeAdapter, ValidationError
@@ -77,16 +92,59 @@ BOX: Final = define_sandbox(
 )
 
 
-async def opened_sandbox(runtime: Runtime) -> str | None:
-    """Adopt or create the thread's box now; its name, or None when MDA could not open it.
+class SandboxOpenError(RuntimeError):
+    """A sandbox open failed with a reason safe to send to the backend."""
 
-    The backend reports a box MDA could not open as unreachable when it prepares.
-    """
-    try:
-        return await open_sandbox(getattr(runtime, "backend", None))
-    except Exception:
-        logger.warning("Could not open the thread's sandbox", exc_info=True)
-        return None
+
+def _open_retryable(exc: BaseException) -> bool:
+    if isinstance(exc, (SandboxAuthenticationError, SandboxValidationError, QuotaExceededError)):
+        return False
+    response = getattr(exc, "response", None)
+    status = getattr(response, "status_code", None) or getattr(exc, "status_code", None)
+    if isinstance(status, int):
+        return status == 429 or 500 <= status < 600
+    if isinstance(exc, (SandboxConnectionError, httpx.TransportError, httpx2.TransportError)):
+        return True
+    return exc.__cause__ is not None and _open_retryable(exc.__cause__)
+
+
+def _open_reason(exc: Exception) -> str:
+    text = str(exc)
+    for key, value in os.environ.items():
+        if len(value) >= 8 and any(
+            part in key.upper() for part in ("KEY", "TOKEN", "SECRET", "PASSWORD")
+        ):
+            text = text.replace(value, "[redacted]")
+    text = re.sub(r"https?://[^\s\"'<>]+", "[url redacted]", text)
+    text = re.sub(r"(?i)bearer\s+[^\s,;]+", "[redacted]", text)
+    text = re.sub(
+        r"(?i)(?:(?:password|secret|api[_-]?key|(?:access[_-]?)?token|authorization)"
+        r"[\"']?\s*[:=]\s*[\"']?[^\s,;\"']+|(?:sk-|gh[pousr]_|github_pat_|xox[baprs]-|lsv2_pt_)[\w-]+)",
+        "[redacted]",
+        text,
+    )
+    return f"{type(exc).__name__}: {' '.join(text.split())}"[:500]
+
+
+async def opened_sandbox(runtime: Runtime) -> str | None:
+    """Open the thread's box, retrying transient failures within a one-minute budget."""
+    deadline = monotonic() + 60
+    attempt = 0
+    while True:
+        try:
+            return await open_sandbox(getattr(runtime, "backend", None))
+        except Exception as exc:
+            remaining = deadline - monotonic()
+            reason = _open_reason(exc)
+            if not _open_retryable(exc) or remaining <= 0:
+                logger.warning("Could not open the thread's sandbox", extra={"reason": reason})
+                raise SandboxOpenError(reason) from None
+            delay = min(0.5 * 2 ** min(attempt, 5), 8) * random.uniform(0.8, 1.2)
+            attempt += 1
+            logger.warning("Retrying sandbox open", extra={"attempt": attempt, "reason": reason})
+            await asyncio.sleep(min(delay, remaining))
+            if monotonic() >= deadline:
+                raise SandboxOpenError(reason) from None
 
 
 class ReplaceSandboxMiddleware(AgentMiddleware):

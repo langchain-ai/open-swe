@@ -37,6 +37,7 @@ class RunCall(RunRequest):
 
 
 class Prepare(RunCall):
+    sandbox_error: str | None = None
     # The thread's box, which the runtime opened before preparing; None when it could not.
     sandbox_id: str | None = None
 

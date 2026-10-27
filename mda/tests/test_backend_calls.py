@@ -1604,3 +1604,71 @@ async def test_backend_calls_carry_the_running_spans_trace_without_its_metadata(
         assert root.endswith(str(turn.id)) and span, hook
         assert "langsmith-project=turns" in headers["baggage"], hook
         assert "metadata" not in headers["baggage"], hook
+
+
+@pytest.mark.parametrize("status", [429, 503])
+async def test_sandbox_open_recovers_from_a_transient_http_failure(
+    monkeypatch: pytest.MonkeyPatch, status: int
+) -> None:
+    from langgraph.runtime import Runtime
+    from langsmith.sandbox import SandboxAPIError
+    from rt import managed_sandbox
+
+    error = SandboxAPIError("sandbox service unavailable")
+    error.__cause__ = httpx.HTTPStatusError(
+        "service unavailable",
+        request=httpx.Request("GET", "https://sandbox.invalid"),
+        response=httpx.Response(status),
+    )
+    opening = AsyncMock(side_effect=[error, "sb-recovered"])
+    monkeypatch.setattr(managed_sandbox, "open_sandbox", opening)
+    monkeypatch.setattr(managed_sandbox.asyncio, "sleep", AsyncMock())
+
+    assert await managed_sandbox.opened_sandbox(Runtime()) == "sb-recovered"
+
+
+@pytest.mark.parametrize("failure", ["permanent", "exhausted"])
+async def test_failed_sandbox_open_sends_a_sanitized_reason_to_prepare(
+    monkeypatch: pytest.MonkeyPatch, failure: str
+) -> None:
+    from langsmith.sandbox import SandboxAuthenticationError, SandboxConnectionError
+    from rt import managed_sandbox
+
+    monkeypatch.setenv("OPEN_SWE_BACKEND_URL", "https://backend.invalid")
+    monkeypatch.setenv("LANGSMITH_API_KEY", "synthetic-sensitive-key")
+    monkeypatch.setattr("rt.middleware.run_id", lambda: "run-1")
+    error_type = SandboxAuthenticationError if failure == "permanent" else SandboxConnectionError
+    opening = AsyncMock(
+        side_effect=error_type(
+            "could not open: synthetic-sensitive-key https://user:pass@host/?token=private "
+            "Authorization: Bearer hidden-token"
+        )
+    )
+    monkeypatch.setattr(managed_sandbox, "open_sandbox", opening)
+    clock = MagicMock(side_effect=[0, 0, 61])
+    monkeypatch.setattr(managed_sandbox, "monotonic", clock)
+    sleeping = AsyncMock()
+    monkeypatch.setattr(managed_sandbox.asyncio, "sleep", sleeping)
+    backend = _run_backend(invocation_id="invocation-1", catalog=Catalog(sandbox=_IN_BOX))
+    requests: list[Prepare] = []
+
+    async def phase(name: str, body: dict[str, JsonValue]) -> BaseModel:
+        if name == "prepare":
+            requests.append(Prepare.model_validate(body))
+        return PhaseResult()
+
+    _answering(monkeypatch, backend, phase)
+    graph = create_agent(
+        model=FakeListChatModel(responses=["done"]),
+        middleware=[BackendRunMiddleware(backend, managed_sandbox.opened_sandbox)],
+    )
+    await graph.ainvoke({"messages": [("user", "hello")]})
+
+    [request] = requests
+    assert request.sandbox_id is None
+    assert request.sandbox_error is not None
+    assert request.sandbox_error.startswith(f"{error_type.__name__}: could not open:")
+    for secret in ("synthetic-sensitive-key", "user:pass", "private", "hidden-token"):
+        assert secret not in request.sandbox_error
+    if failure == "permanent":
+        sleeping.assert_not_awaited()

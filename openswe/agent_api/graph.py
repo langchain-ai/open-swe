@@ -204,6 +204,7 @@ from openswe.sandboxes.lifecycle import (
     refresh_thread_github_proxy,
 )
 from openswe.sandboxes.managed import ManagedSandbox
+from openswe.sandboxes.state import SandboxUnreachableError
 from openswe.sandboxes.tool_runtime import (
     EXCLUDED_TOOLS,
     ModelChoice,
@@ -591,6 +592,13 @@ class RunSession:
     async def prepare(self, request: Prepare) -> PhaseResult:
         # MDA opened the box before preparing; preparation connects to it as to any other.
         await self.bind_sandbox(request.sandbox_id)
+        if request.sandbox_error and request.sandbox_id is None:
+            cfg = RunConfig.from_config(self.config)
+            if cfg.thread_id is not None and await self.sandbox() is not None:
+                await post_sandbox_unreachable_notification(
+                    self.config, reason=request.sandbox_error
+                )
+                raise SandboxUnreachableError(cfg.thread_id, None, request.sandbox_error)
         cfg = RunConfig.from_config(self.config)
         if self.surface.inbox is not None and cfg.thread_id is not None:
             # The events this run was started to carry are its input: it holds them now.

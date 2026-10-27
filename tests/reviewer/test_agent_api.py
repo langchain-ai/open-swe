@@ -1110,3 +1110,37 @@ async def test_a_launched_run_that_ended_before_its_worker_was_registered_is_set
             "error": "boom",
         }
     )
+
+
+async def test_sandbox_open_failure_reaches_the_error_and_user_notification(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from unittest.mock import AsyncMock
+
+    from runtime_api.loop import Prepare
+
+    from openswe.agent_api.graph import RunSession
+    from openswe.middleware import sandbox_circuit_breaker
+    from openswe.sandboxes.state import SandboxUnreachableError
+    from openswe.sandboxes.tool_runtime import ToolSurface
+
+    session = RunSession(
+        ToolSurface(), {"configurable": {"thread_id": "thread-1"}}, None, started_here=True
+    )
+    monkeypatch.setattr(session, "sandbox", AsyncMock(return_value=object()))
+    monkeypatch.setattr(session, "bind_sandbox", AsyncMock())
+    monkeypatch.setattr(
+        sandbox_circuit_breaker, "get_slack_target", AsyncMock(return_value=("channel", "ts"))
+    )
+    posted: list[str] = []
+
+    async def reply(channel: str, ts: str, message: str, *, agent_thread_id: str) -> None:
+        posted.append(message)
+
+    monkeypatch.setattr(sandbox_circuit_breaker, "post_slack_thread_reply", reply)
+    reason = "SandboxConnectionError: sandbox service unavailable"
+    with pytest.raises(SandboxUnreachableError, match=reason):
+        await session.prepare(Prepare(run_id="run-1", sandbox_error=reason))
+
+    assert len(posted) == 1
+    assert reason in posted[0]

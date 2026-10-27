@@ -27,14 +27,13 @@ def sandbox_unreachable_message(
     sandbox_id: str | None = None,
     sandbox_name: str | None = None,
     replacement_attempted: bool = False,
+    reason: str | None = None,
 ) -> str:
-    """User-facing text for a sandbox that stopped answering.
-
-    Deliberately does not claim the sandbox is gone for good — all we observed is
-    that it stopped responding, and it may come back. ``replacement_attempted``
-    is for callers allowed to replace an unreachable sandbox (the read-only
-    reviewer), where "Open SWE will not start a replacement" would be untrue.
-    """
+    """User-facing text for a sandbox that could not open or stopped answering."""
+    if reason:
+        return warning(
+            f"This thread's sandbox could not be opened: {reason}. Retrigger this thread to try again."
+        )
     identifiers = [
         part
         for part in (
@@ -111,6 +110,7 @@ async def post_sandbox_unreachable_notification(
     sandbox_id: str | None = None,
     sandbox_name: str | None = None,
     replacement_attempted: bool = False,
+    reason: str | None = None,
 ) -> None:
     cfg = RunConfig.from_config(config)
 
@@ -118,6 +118,7 @@ async def post_sandbox_unreachable_notification(
         sandbox_id=sandbox_id,
         sandbox_name=sandbox_name,
         replacement_attempted=replacement_attempted,
+        reason=reason,
     )
 
     slack_target = await get_slack_target(cfg)
