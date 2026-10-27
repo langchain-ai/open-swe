@@ -21,6 +21,7 @@ class _Ref(BaseModel):
 
 
 class PullRequestHead(BaseModel):
+    commits: int | None = None
     title: str = ""
     state: str = "open"
     draft: bool = False

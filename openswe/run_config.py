@@ -127,6 +127,8 @@ class RunConfig(BaseModel):
     pr_title: str | None = None
     head_sha: str | None = None
     base_sha: str | None = None
+    base_ref: str | None = None
+    pr_commit_count: int | None = None
     last_reviewed_sha: str | None = None
     re_review: bool | None = None
     diff_text: str | None = None

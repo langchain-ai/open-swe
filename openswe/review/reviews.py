@@ -1140,9 +1140,11 @@ async def proxy_pr_image(owner: str, repo: str, pr_number: int, url: str) -> Res
 
 class _ScoutRef(BaseModel):
     sha: str = ""
+    ref: str = ""
 
 
 class _ScoutPull(BaseModel):
+    commits: int | None = None
     title: str = ""
     html_url: str = ""
     state: Literal["open", "closed"] = "open"
@@ -1175,6 +1177,8 @@ async def _scout_target(
         pr_number=pr_number,
         pr_title=pull.title,
         base_sha=pull.base.sha,
+        base_ref=pull.base.ref,
+        commit_count=pull.commits,
         head_sha=pull.head.sha,
         workspace_slug=await WORKSPACES.owner_of_repo(f"{owner}/{repo}"),
     )

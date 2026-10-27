@@ -78,7 +78,8 @@ class ReviewGuideMiddleware(OpenSWEMiddleware[ReviewGuideState]):
         if await checkout.pin(
             full_name=pr.repo_full_name,
             pr_number=pr.number,
-            base_sha=head.base.sha,
+            base_ref=head.base.ref,
+            commit_count=head.commits,
             head_sha=head.head.sha,
         ):
             try:
@@ -199,6 +200,8 @@ class ReviewGuideMiddleware(OpenSWEMiddleware[ReviewGuideState]):
             pr_number=pr.number,
             pr_title=head.title,
             base_sha=head.base.sha,
+            base_ref=head.base.ref,
+            commit_count=head.commits,
             head_sha=head.head.sha,
             workspace_slug=session.workspace_slug,
         )

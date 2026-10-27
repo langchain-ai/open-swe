@@ -72,6 +72,7 @@ from openswe.review.findings import (
 )
 from openswe.review.publish import fetch_pr_review_threads
 from openswe.review.reconcile import reconcile_findings_with_review_threads
+from openswe.review_guide.github import fetch_head
 from openswe.review_scout.launch import ReviewScoutTarget
 from openswe.run_config import RunConfig
 from openswe.runtime import (
@@ -753,12 +754,17 @@ async def prepare_reviewer_run(
         if reviewer_event == "finding_reply" or reviewer_eval or not isinstance(pr_number, int):
             return None
         pr_title, _ = await pr_overview_task
+        pull = await fetch_head(repo_owner, repo_name, pr_number, token=github_token)
+        if pull is None:
+            return None
         target = ReviewScoutTarget(
             owner=repo_owner,
             repo=repo_name,
             pr_number=pr_number,
             pr_title=pr_title,
             base_sha=base_sha,
+            base_ref=pull.base.ref,
+            commit_count=pull.commits,
             head_sha=head_sha,
             workspace_slug=cfg.workspace_slug,
         )

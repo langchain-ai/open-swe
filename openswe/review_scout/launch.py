@@ -113,6 +113,8 @@ class ReviewScoutTarget(BaseModel):
     pr_number: int
     pr_title: str
     base_sha: str
+    base_ref: str
+    commit_count: int | None = None
     head_sha: str
     workspace_slug: str | None
 
@@ -211,6 +213,8 @@ class ReviewScoutTarget(BaseModel):
             "pr_number": self.pr_number,
             "pr_title": self.pr_title,
             "base_sha": self.base_sha,
+            "base_ref": self.base_ref,
+            "pr_commit_count": self.commit_count,
             "head_sha": self.head_sha,
             "workspace": self.workspace_slug,
         }

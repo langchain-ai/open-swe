@@ -126,12 +126,20 @@ class PrepareReviewScoutRunMiddleware(BasePrepareRunMiddleware):
             "repo": cfg.repo.model_dump() if cfg.repo else None,
             "pr_number": cfg.pr_number,
             "base_sha": cfg.base_sha,
+            "base_ref": cfg.base_ref,
+            "pr_commit_count": cfg.pr_commit_count,
             "head_sha": cfg.head_sha,
         }
 
     async def _prepare(self, state: PrepareRunState, runtime: Runtime) -> dict[str, Any]:  # noqa: ARG002
         cfg = RunConfig.from_config(self._config)
-        if cfg.repo is None or cfg.pr_number is None or not cfg.base_sha or not cfg.head_sha:
+        if (
+            cfg.repo is None
+            or cfg.pr_number is None
+            or not cfg.base_sha
+            or not cfg.base_ref
+            or not cfg.head_sha
+        ):
             raise RuntimeError("review scout run is missing its pull request")
         backend = await _ensure_scout_sandbox(self._thread_id, cfg)
         checkout = await PinnedCheckout.locate(backend, cfg.repo.name)
@@ -150,7 +158,8 @@ class PrepareReviewScoutRunMiddleware(BasePrepareRunMiddleware):
         await checkout.pin(
             full_name=cfg.repo.full_name,
             pr_number=cfg.pr_number,
-            base_sha=cfg.base_sha,
+            base_ref=cfg.base_ref,
+            commit_count=cfg.pr_commit_count,
             head_sha=cfg.head_sha,
         )
         try:

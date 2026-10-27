@@ -12,8 +12,15 @@ from deepagents.backends.protocol import ExecuteResponse, SandboxBackendProtocol
 from openswe.database import postgres
 from openswe.github.pull_requests import PullRequest
 from openswe.review_guide.walk import Reader, Walk
+from openswe.review_scout import graph as scout
 from openswe.sandbox_scripts.walkthrough import parse_index
-from openswe.walkthrough.checkout import BASE_REF, HEAD_REF, MERGE_BASE_REF, PinnedCheckout
+from openswe.walkthrough.checkout import (
+    BASE_REF,
+    HEAD_REF,
+    MERGE_BASE_REF,
+    CheckoutError,
+    PinnedCheckout,
+)
 from openswe.walkthrough.diff import Carry, DiffIndex
 from openswe.walkthrough.lines import LinePoint, LineSet
 from openswe.walkthrough.plan import (
@@ -452,3 +459,67 @@ async def test_a_plan_stored_line_by_line_reads_as_ranges_and_gets_its_index() -
 
     assert stored is not None and stored.diff_index == index
     assert stored.plan.complete(index)
+
+
+@pytest.mark.parametrize("base_commits", [0, 1001])
+async def test_pin_uses_current_base_and_plans_only_pr_changes(
+    repo: Path, checkout: PinnedCheckout, base_commits: int
+) -> None:
+    stale_base = _git(repo, "rev-parse", "HEAD").strip()
+    base = stale_base
+    if base_commits:
+        base = _commit(repo, {"base_work.py": "unrelated base work\n"}, "base work")
+    tree = _git(repo, "rev-parse", "HEAD^{tree}").strip()
+    for _ in range(max(0, base_commits - 1)):
+        base = _git(repo, "commit-tree", tree, "-p", base, "-m", "base work").strip()
+    _git(repo, "update-ref", "refs/heads/main", base)
+    _git(repo, "reset", "--hard", base)
+    _git(repo, "remote", "add", "origin", str(repo))
+    _git(repo, "checkout", "-qb", "feature")
+    head = _commit(repo, {"feature.py": "feature\n"}, "PR change")
+    if base_commits:
+        await _pin(checkout, stale_base, head)
+
+    assert await checkout.pin(
+        full_name="acme/repo", pr_number=1, base_ref="main", head_sha=head, commit_count=1
+    )
+    assert await checkout.merge_base() == base
+    assert await checkout.pinned() == (base, head)
+    index = await checkout.index()
+    plan = Plan.start(head, index)
+    chunk = _place(plan, index, "Feature", FileHunks(path="feature.py", hunks=["+1"]))
+    assert chunk.lines == _added("feature.py", (1, 1))
+    assert not plan.unplanned(index)
+    assert not await checkout.pin(
+        full_name="acme/repo", pr_number=1, base_ref="main", head_sha=head, commit_count=1
+    )
+
+
+async def test_pin_refuses_an_implausible_commit_range_before_publishing_refs(
+    repo: Path, checkout: PinnedCheckout, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _git(repo, "remote", "add", "origin", str(repo))
+    head = _git(repo, "rev-parse", "HEAD").strip()
+    tree = _git(repo, "rev-parse", "HEAD^{tree}").strip()
+    for _ in range(102):
+        head = _git(repo, "commit-tree", tree, "-p", head, "-m", "unrelated work").strip()
+
+    monkeypatch.setattr(scout, "_ensure_scout_sandbox", AsyncMock(return_value=checkout.backend))
+    monkeypatch.setattr(PinnedCheckout, "locate", AsyncMock(return_value=checkout))
+    monkeypatch.setattr(scout, "prepare_review_repo", AsyncMock(return_value=True))
+    middleware = scout.PrepareReviewScoutRunMiddleware(
+        thread_id="scout",
+        config={
+            "configurable": {
+                "repo": {"owner": "acme", "name": "repo"},
+                "pr_number": 1,
+                "base_sha": _git(repo, "rev-parse", "main").strip(),
+                "base_ref": "main",
+                "head_sha": head,
+                "pr_commit_count": 1,
+            }
+        },
+    )
+    with pytest.raises(CheckoutError, match="Refusing walkthrough planning:.*102.*reports 1"):
+        await middleware._prepare({"messages": []}, AsyncMock())
+    assert await checkout.pinned() is None

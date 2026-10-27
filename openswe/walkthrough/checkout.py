@@ -67,15 +67,20 @@ class PinnedCheckout:
             return None
         return lines[0], lines[1]
 
-    async def pin(self, *, full_name: str, pr_number: int, base_sha: str, head_sha: str) -> bool:
-        """Fetch and pin the PR's base and head, cloning the repository if it is missing.
-
-        Returns whether anything changed; a checkout already pinned there is left alone.
-        """
-        if await self.pinned() == (base_sha, head_sha):
-            return False
+    async def pin(
+        self,
+        *,
+        full_name: str,
+        pr_number: int,
+        base_ref: str,
+        head_sha: str,
+        commit_count: int | None,
+    ) -> bool:
+        """Fetch the current base tip and validate the comparison before pinning its refs."""
         work_dir, _, name = self.repo_dir.rpartition("/")
-        base, head = shlex.quote(base_sha), shlex.quote(head_sha)
+        head = shlex.quote(head_sha)
+        branch = shlex.quote(f"refs/heads/{base_ref}")
+        remote = shlex.quote(f"refs/remotes/origin/{base_ref}")
         pull_ref = shlex.quote(f"refs/pull/{pr_number}/head")
         await self.backend.aexecute(
             f"mkdir -p {shlex.quote(work_dir)}", timeout=GIT_TIMEOUT_SECONDS
@@ -84,19 +89,27 @@ class PinnedCheckout:
             f"[ -d {shlex.quote(name)}/.git ] || gh repo clone {shlex.quote(full_name)} "
             f"{shlex.quote(name)} -- --quiet {BLOBLESS_CLONE_ARGS}\n"
             f"cd {shlex.quote(name)}\n"
-            # The scout's repo prep has usually fetched both already; each fetch is a GitHub round trip.
-            f"for sha in {base} {head}; do\n"
-            '  git cat-file -e "$sha^{commit}" 2>/dev/null'
-            ' || git fetch --quiet origin "$sha" 2>/dev/null || true\n'
-            "done\n"
+            f"git fetch --quiet origin +{branch}:{remote}\n"
             f"git cat-file -e {head}^{{commit}} 2>/dev/null"
-            f" || git fetch --quiet origin {pull_ref} 2>/dev/null || true\n"
-            f"git cat-file -e {base}^{{commit}}\n"
-            f"git cat-file -e {head}^{{commit}}\n"
-            f"git update-ref {MERGE_BASE_REF} $(git merge-base {base} {head})\n"
-            f"git update-ref {BASE_REF} {base}\n"
-            f"git update-ref {HEAD_REF} {head}",
+            f" || git fetch --quiet origin {head} 2>/dev/null"
+            f" || git fetch --quiet origin {pull_ref}\n"
+            f"git cat-file -e {head}^{{commit}}",
             cwd=work_dir,
+        )
+        base = (await self._run(f"git rev-parse {remote}")).strip()
+        merge_base = (await self._run(f"git merge-base {base} {head}")).strip()
+        count = int((await self._run(f"git rev-list --count {merge_base}..{head}")).strip())
+        if commit_count is not None and count > max(commit_count * 10, commit_count + 100):
+            raise CheckoutError(
+                f"Refusing walkthrough planning: comparison contains {count} commits, "
+                f"but the pull request reports {commit_count}; check the base branch and head."
+            )
+        if await self.pinned() == (base, head_sha):
+            return False
+        await self._run(
+            f"git update-ref {MERGE_BASE_REF} {merge_base}\n"
+            f"git update-ref {BASE_REF} {base}\n"
+            f"git update-ref {HEAD_REF} {head}"
         )
         return True
 

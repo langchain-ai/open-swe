@@ -29,6 +29,7 @@ async def test_scout_records_security_identity_before_starting_or_reusing_a_run(
         pr_number=7,
         pr_title="Change",
         base_sha="base",
+        base_ref="main",
         head_sha="head",
         workspace_slug="workspace",
     )
