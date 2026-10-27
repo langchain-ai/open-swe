@@ -535,6 +535,7 @@ async def test_a_channel_threads_metadata_is_copied_only_here(
     status, _ = await harness.request(
         "PATCH", f"/threads/{THREAD}", {"metadata": {"title": "Renamed"}}
     )
+    await store.THREADS.copies.settled(THREAD)
 
     assert status == 200
     assert harness.runtimes.local.threads[THREAD]["metadata"]["title"] == "Renamed"
