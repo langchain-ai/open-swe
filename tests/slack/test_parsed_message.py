@@ -8,9 +8,6 @@ from openswe.slack.parsed_message import ParsedSlackMessage, SlackAction
     [
         ("<@U0BOT> /btw why?", SlackAction.BY_THE_WAY, "why?", ""),
         ("details <@U0BOT> /BTW why?\nmore", SlackAction.BY_THE_WAY, "why?\nmore", "details"),
-        ("/breakout fix it", SlackAction.BREAKOUT, "fix it", ""),
-        ("@openswe /breakout:web explain", SlackAction.BREAKOUT_WEB, "explain", ""),
-        ("<@U0BOT> /model:perf /breakout fix it", SlackAction.BREAKOUT, "fix it", ""),
         ("details <@U0BOT> please /btw why?", None, "details <@U0BOT> please /btw why?", ""),
         ("details /btw why? <@U0BOT>", None, "details /btw why? <@U0BOT>", ""),
         ("<@OTHER> /btw why?", None, "<@OTHER> /btw why?", ""),

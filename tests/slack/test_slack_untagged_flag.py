@@ -172,6 +172,32 @@ async def test_only_slack_mentions_trigger_normal_channels(
     assert bool(background_tasks.tasks) == (expected_status == "accepted")
 
 
+@pytest.mark.parametrize(
+    "text",
+    [
+        "<@BOT> /breakout in <#C2|team-oss-kitchen>, run streaming benchmarks",
+        "<@BOT> run streaming benchmarks; break this out into <#C2|team-oss-kitchen>",
+        "<@BOT> /breakout",
+        "<@BOT> /breakout:web explain this",
+    ],
+)
+async def test_breakouts_reach_the_agent_with_the_complete_request(text: str) -> None:
+    background_tasks = _FakeBackgroundTasks()
+
+    response = await slack_routes.slack_webhook(
+        cast(Request, _FakeRequest(_message_payload(text, "Ev-breakout"))),
+        cast(BackgroundTasks, background_tasks),
+    )
+
+    assert response["status"] == "accepted"
+    task, args = background_tasks.tasks[0]
+    assert task is slack_service.process_slack_mention
+    request = cast(SlackRequest, args[0])
+    assert request.text == text
+    assert request.channel_id == "C1"
+    assert request.thread_id == "t1"
+
+
 async def test_a_watched_channel_message_checks_automations(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

@@ -270,7 +270,9 @@ async def test_move_tool_uses_current_or_explicit_channel_without_moving_twice(
     monkeypatch.setattr("openswe.run_config.get_config", lambda: config)
     monkeypatch.setattr(move_thread, "langgraph_client", lambda: client)
     monkeypatch.setattr(
-        SlackChannel, "load", AsyncMock(return_value=SimpleNamespace(public=target != "C1"))
+        SlackChannel,
+        "load",
+        AsyncMock(return_value=SimpleNamespace(public=target != "C1", payload={"num_members": 10})),
     )
     root = AsyncMock(return_value="2.0")
     monkeypatch.setattr(slack_move, "post_slack_top_level_message_with_ts", root)
@@ -286,3 +288,38 @@ async def test_move_tool_uses_current_or_explicit_channel_without_moving_twice(
     repeated = await move_thread.slack_move_thread("Breakout", "C4")
     assert repeated["channel_id"] == target
     root.assert_awaited_once()
+
+
+@pytest.mark.parametrize("count", [98, None])
+async def test_move_tool_requires_audience_choice_unless_destination_is_explicit(
+    monkeypatch: pytest.MonkeyPatch, count: int | None
+) -> None:
+    client = cast(LangGraphClient, _LangGraph({"channel_id": "C1", "thread_ts": "1.0"}))
+    config = {
+        "configurable": {
+            "thread_id": "thread-1",
+            "workspace": "engineering",
+            "slack_thread": {"channel_id": "C1", "thread_ts": "1.0"},
+        }
+    }
+    monkeypatch.setattr(move_thread, "get_config", lambda: config)
+    monkeypatch.setattr("openswe.run_config.get_config", lambda: config)
+    monkeypatch.setattr(move_thread, "langgraph_client", lambda: client)
+    monkeypatch.setattr(
+        SlackChannel,
+        "load",
+        AsyncMock(return_value=SimpleNamespace(public=True, payload={"num_members": count})),
+    )
+    move = AsyncMock(return_value={"success": True})
+    monkeypatch.setattr(move_thread, "move_slack_thread", move)
+
+    result = await move_thread.slack_move_thread("Breakout")
+
+    assert result["success"] is False
+    assert "destination" in result["error"]
+    move.assert_not_awaited()
+
+    result = await move_thread.slack_move_thread("Breakout", "C1")
+
+    assert result["success"] is True
+    move.assert_awaited_once()
