@@ -187,7 +187,10 @@ For a session event the backend indexes the thread and answers with the run's in
 The endpoint answers only calls MDA signed with `MDA_SERVICE_SECRET`.
 
 Threads of Linear sessions belong to the channel, and MDA scopes threads by owner.
-The backend reads them as LangSmith Studio does (its LangSmith key with `x-auth-scheme: langsmith`), which MDA allows for reads only, so the dashboard shows them read-only: the backend starts no runs on them and writes nothing there.
+The backend reads them as LangSmith Studio does (its LangSmith key with `x-auth-scheme: langsmith`).
+It starts, answers and stops runs on them through MDA's trusted-backend ingress: `x-mda-ingress-secret` (the deployment's `MDA_INGRESS_SECRET`, which deploy sets to the `MDA_SERVICE_SECRET` value the two share) with the reserved headers naming the conversation that owns the thread, read from its `owner` on MDA.
+A follow-up from the dashboard lands on the same thread, which stays the conversation's.
+Copies and crons of these threads are refused.
 Each run carries the backend's run-complete webhook, so `/webhooks/run-complete` completes it as it does the backend's own runs.
 The channel reports failures in the session itself.
 
@@ -211,7 +214,7 @@ Without them, the deploy of a deployment with no App fails before uploading anyt
 The channel's `on_event` names the backend's endpoint, `POST /github/channel/events`, which it asks what each event starts: MDA posts `{event: {key, deliveryId, payload}, thread}`.
 The backend applies the same gates as its own intake, reacts to the comment, builds the prompt, writes and indexes the thread, and answers with the input, the run context with a run token signed for the channel's thread, the run metadata and the run-complete webhook, or `null` to start nothing.
 While the thread waits on an interrupt it only answers whether Open SWE would act, so the channel points the issue to the decision.
-Its threads are the channel's, as Linear sessions' are: read-only on the backend, and completed through `/webhooks/run-complete`, which also posts Open SWE's failure reply on the issue, as before.
+Its threads are the channel's, as Linear sessions' are: the dashboard continues them through MDA's trusted-backend ingress, and they're completed through `/webhooks/run-complete`, which also posts Open SWE's failure reply on the issue, as before.
 
 ## Observability
 
