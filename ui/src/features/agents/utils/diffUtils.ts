@@ -174,6 +174,12 @@ export const DIFF_UNSAFE_CSS = `
 [data-gutter-buffer="annotation"][data-selected-line] {
   --diffs-line-bg: var(--diffs-surface, var(--bg-surface-level-1)) !important;
 }
+
+/* Page styles don't reach the shadow root; see SelectionReply. */
+::highlight(selection-reply) {
+  background-color: Highlight;
+  color: HighlightText;
+}
 `
 
 export const DIFF_FIXED_LINE_HEIGHT_CSS = `

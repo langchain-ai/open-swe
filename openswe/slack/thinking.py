@@ -103,7 +103,7 @@ def _tool_step(name: str, tool_input: Any) -> tuple[str, str]:
         "ls": ("Inspecting repository files", "Repository directory"),
         "open_pull_request": ("Opening pull request", "GitHub operation"),
         "link_pull_request": ("Linking pull request", "GitHub operation"),
-        "save_plan": ("Publishing implementation plan", "Plan artifact"),
+        "publish_artifact": ("Publishing HTML artifact", "HTML artifact"),
         "analyzePlan": ("Checking implementation security", "Security analysis"),
     }
     return labels.get(name, (f"Using {name.replace('_', ' ')}", "Tool call"))

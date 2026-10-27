@@ -14,7 +14,7 @@ import pytest
 from fastapi import HTTPException
 from sqlalchemy import text
 
-from openswe import model_failures
+from openswe import completion, model_failures
 from openswe.database import postgres
 from openswe.model_failures import ProviderWait
 from openswe.transcript.attachments import PendingAttachment
@@ -562,7 +562,8 @@ async def test_a_settled_turn_is_not_reopened_by_a_later_settlement(registry_db:
             ),
         ],
     )
-    assert await settle_run_turn(thread_id, "run-1", outcome="interrupted") == turn
+    await completion._settle_transcript_turn(thread_id, "run-1", "interrupted")
+    assert await _turn_state(thread_id, turn) == "interrupted"
     await append(
         thread_id,
         [

@@ -17,7 +17,7 @@ import asyncio
 import logging
 import random
 from collections.abc import Awaitable, Callable, Iterator
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Final
 
 import httpx
@@ -27,9 +27,9 @@ from langchain.agents.middleware.types import ModelRequest, ModelResponse
 from langchain_core.exceptions import ModelError
 from runtime_api.catalog import ModelSpec
 from runtime_api.endpoint import call
-from runtime_api.model_calls import MODEL_RECOVERY, ModelFailureCode, ModelRecovery
+from runtime_api.loop import MODEL_RECOVERY, ModelFailureCode, ModelRecovery
 
-from rt.backend import BackendCallError, OpenSweBackend
+from rt.backend import BackendCallError, OpenSweBackend, RunLocal
 from rt.model_calls import http_status, provider_failure_code
 from rt.tools import run_id
 
@@ -94,19 +94,30 @@ class Backoff:
             delay = min(delay * 2, self.max_seconds)
 
 
+@dataclass
+class _Outage:
+    """How many of a run's model calls wait on their provider right now."""
+
+    waiting: int = 0
+    told: asyncio.Lock = field(default_factory=asyncio.Lock)
+
+
 class ProviderRecovery:
     """Holds a run's model calls through their provider's outages, on the model they chose.
 
-    One per run, shared by the agent's calls and its subagents', so the backend
-    hears that the run is waiting when its first call starts to and that it
-    stopped when its last call got through.
+    Shared by the agent's calls and its subagents', so the backend hears that a
+    run is waiting when its first call starts to and that it stopped when its last
+    call got through; what each run waits on is its own.
     """
 
     def __init__(self, backend: OpenSweBackend, backoff: Backoff | None = None) -> None:
         self._backend = backend
         self._backoff = backoff or Backoff()
-        self._waiting = 0
-        self._announced = asyncio.Lock()
+        self._outages = RunLocal(_Outage)
+
+    @property
+    def backend(self) -> OpenSweBackend:
+        return self._backend
 
     async def call(
         self,
@@ -147,7 +158,7 @@ class ProviderRecovery:
             # A stopped run's turn ends with it, wait and all; nothing to tell.
             if waiting:
                 waiting = False
-                self._waiting -= 1
+                self._outages.get(self._backend.run).waiting -= 1
             raise
         finally:
             if waiting:
@@ -156,9 +167,10 @@ class ProviderRecovery:
     async def _started(
         self, code: ModelFailureCode, model: ModelSpec | None, *, via_gateway: bool
     ) -> None:
-        async with self._announced:
-            self._waiting += 1
-            if self._waiting == 1:
+        outage = self._outages.get(self._backend.run)
+        async with outage.told:
+            outage.waiting += 1
+            if outage.waiting == 1:
                 await self._tell(
                     ModelRecovery(
                         run_id=run_id(),
@@ -170,9 +182,10 @@ class ProviderRecovery:
                 )
 
     async def _stopped(self, model: ModelSpec | None, *, via_gateway: bool) -> None:
-        async with self._announced:
-            self._waiting -= 1
-            if self._waiting == 0:
+        outage = self._outages.get(self._backend.run)
+        async with outage.told:
+            outage.waiting -= 1
+            if outage.waiting == 0:
                 await self._tell(
                     ModelRecovery(
                         run_id=run_id(),
@@ -192,23 +205,23 @@ class ProviderRecovery:
 
 
 class ProviderRecoveryMiddleware(AgentMiddleware):
-    """Wait out a provider outage around a subagent's calls of its one model."""
+    """Wait out a provider outage around a subagent's calls of the model its run gives it."""
 
     trace_policy = TracePolicy(process_inputs=omit_payload)
 
-    def __init__(
-        self, recovery: ProviderRecovery, model: ModelSpec | None, *, via_gateway: bool
-    ) -> None:
+    def __init__(self, recovery: ProviderRecovery) -> None:
         super().__init__()
         self._recovery = recovery
-        self._model = model
-        self._via_gateway = via_gateway
 
     async def awrap_model_call(
         self,
         request: ModelRequest,
         handler: Callable[[ModelRequest], Awaitable[ModelResponse]],
     ) -> ModelResponse:
+        models = self._recovery.backend.run.catalog.models
         return await self._recovery.call(
-            request, handler, self._model, via_gateway=self._via_gateway
+            request,
+            handler,
+            models.subagent_model if models is not None else None,
+            via_gateway=models is not None and models.use_gateway,
         )

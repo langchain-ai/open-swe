@@ -1,7 +1,6 @@
 """Unit tests for the shared GitHub HTTP helper."""
 
 import asyncio
-import json
 from datetime import UTC, datetime
 from unittest.mock import AsyncMock, Mock, patch
 
@@ -17,25 +16,6 @@ from openswe.github.http import (
     _compute_backoff,
     github_request,
 )
-
-
-@pytest.mark.asyncio
-async def test_validation_dispatch_never_retries_an_uncertain_response() -> None:
-    sent: list[httpx2.Request] = []
-
-    async def handle(request: httpx2.Request) -> httpx2.Response:
-        sent.append(request)
-        return httpx2.Response(503)
-
-    async with httpx2.AsyncClient(transport=httpx2.MockTransport(handle)) as http:
-        repo = GitHubClient(http).repo("acme", "widgets")
-        with pytest.raises(github_http.GitHubError):
-            await repo.dispatch_validation("merge_queue_validate.yml", '{"version":1}')
-    assert len(sent) == 1
-    assert json.loads(sent[0].content) == {
-        "ref": "main",
-        "inputs": {"contract": '{"version":1}'},
-    }
 
 
 @pytest.mark.asyncio

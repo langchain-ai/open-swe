@@ -2,21 +2,19 @@
 
 The plan says what to read and in what order; the walk says what this reader
 did with it. A line counts as reviewed only when the reader clicked "Looks
-good" on a chunk showing it. That is remembered per person by content, so it
-stays reviewed across rebases and across channels. Having a chunk on screen,
-or skipping it, never counts.
+good" on a chunk showing it. That is remembered per person and carried to
+each new head with the plan, so it stays reviewed across pushes and across
+channels. Having a chunk on screen, or skipping it, never counts.
 """
 
-from collections import Counter
-from collections.abc import Iterable
 from dataclasses import dataclass
 from typing import Self
 
 from pydantic import BaseModel
 
-from openswe.walkthrough.diff import ChangedLine, FileChange, line_key
-from openswe.walkthrough.plan import Hunks, LineRef, Plan, PlanChunk
-from openswe.walkthrough.render import fenced
+from openswe.walkthrough.diff import Carry
+from openswe.walkthrough.lines import LineSet
+from openswe.walkthrough.plan import Hunks, Plan, PlanChunk
 
 OTHER = "other"
 CUSTOM = "custom"
@@ -28,7 +26,7 @@ class OnScreen(BaseModel):
     chunk_id: str
     title: str
     # Exactly the lines the message offers to approve.
-    lines: list[LineRef]
+    lines: LineSet
     other_files: list[str] = []
     message_ts: str = ""
     message_text: str = ""
@@ -37,17 +35,19 @@ class OnScreen(BaseModel):
 
 class Approval(BaseModel):
     title: str
-    lines: list[LineRef]
+    lines: LineSet
     other: bool = False
 
 
 class Skip(BaseModel):
     reason: str
-    lines: list[LineRef]
+    lines: LineSet
 
 
 class Walk(BaseModel):
     head_sha: str
+    # Deleted lines are numbered at this merge base; empty for walks saved before it was kept.
+    merge_base_sha: str = ""
     on_screen: OnScreen | None = None
     approvals: list[Approval] = []
     skips: list[Skip] = []
@@ -59,28 +59,20 @@ class Walk(BaseModel):
     # The run that last put something on screen: one per turn, then the reader.
     shown_by_run: str = ""
 
-    def moved_to(self, head_sha: str, changes: list[FileChange]) -> tuple[Self, OnScreen | None]:
-        """This walk on a new head, following every line by content.
+    def moved_to(
+        self, head_sha: str, merge_base_sha: str, carry: Carry
+    ) -> tuple[Self, OnScreen | None]:
+        """This walk on a new head, keeping every line git kept.
 
         What is on screen stays only if all of its lines are still there.
         Returns the new walk and what was on screen if it had to go.
         """
         current = self.on_screen
-        followed = LineRef.follow(
-            [
-                *(ref for a in self.approvals for ref in a.lines),
-                *(ref for skip in self.skips for ref in skip.lines),
-                *(current.lines if current else []),
-            ],
-            changes,
-        )
-
-        def take(refs: list[LineRef]) -> list[LineRef]:
-            return [followed[ref] for ref in refs if ref in followed]
-
+        take = carry.lines
         moved = self.model_copy(
             update={
                 "head_sha": head_sha,
+                "merge_base_sha": merge_base_sha,
                 "on_screen": None,
                 "approvals": [
                     a.model_copy(update={"lines": lines})
@@ -120,15 +112,19 @@ class Walk(BaseModel):
         current, self.on_screen = self.on_screen, None
         return current
 
-    def skip(self, reason: str, lines: list[LineRef], *, other: bool = False) -> None:
+    def skip(self, reason: str, lines: LineSet, *, other: bool = False) -> None:
         if lines:
             self.skips.append(Skip(reason=reason.strip(), lines=lines))
         if other:
             self.other_skipped = True
 
     @property
-    def skipped(self) -> set[LineRef]:
-        return {ref for s in self.skips for ref in s.lines}
+    def skipped(self) -> LineSet:
+        return LineSet.union(s.lines for s in self.skips)
+
+    @property
+    def approved(self) -> LineSet:
+        return LineSet.union(a.lines for a in self.approvals)
 
     def coverage(self) -> str:
         """A one-line account of what the reader saw, for the closing message and the approval."""
@@ -179,17 +175,18 @@ class Reader:
 
     walk: Walk
     plan: Plan
-    unseen: set[LineRef]
+    unseen: LineSet
+    skipped: LineSet
 
     @classmethod
-    def of(cls, walk: Walk, plan: Plan, seen: Counter[str], extra: Iterable[LineRef] = ()) -> Self:
-        """``extra`` adds lines the plan does not hold yet, so they are judged too."""
-        refs = [ref for chunk in plan.chunks for ref in chunk.lines] + plan.other + [*extra]
-        return cls(walk, plan, _unseen(refs, seen, walk))
+    def of(cls, walk: Walk, plan: Plan, seen: LineSet, extra: LineSet | None = None) -> Self:
+        """``seen`` is what the person approved at the walk's head; ``extra`` adds lines the
+        plan does not hold yet, so they are judged too."""
+        lines = plan.planned() | (extra or LineSet())
+        return cls(walk, plan, lines - seen - walk.approved, walk.skipped)
 
-    def remaining(self, lines: Iterable[LineRef]) -> list[LineRef]:
-        skipped = self.walk.skipped
-        return [ref for ref in lines if ref in self.unseen and ref not in skipped]
+    def remaining(self, lines: LineSet) -> LineSet:
+        return (lines & self.unseen) - self.skipped
 
     def chunk(self, number: int) -> PlanChunk | None:
         return self.plan.chunks[number - 1] if 1 <= number <= len(self.plan.chunks) else None
@@ -203,7 +200,7 @@ class Reader:
             None,
         )
 
-    def custom(self, title: str, explanation: str, lines: list[LineRef], code: str) -> OnScreen:
+    def custom(self, title: str, explanation: str, lines: LineSet, code: str) -> OnScreen:
         """A chunk cut for this reader alone, outside the plan."""
         return OnScreen(
             chunk_id=CUSTOM,
@@ -244,7 +241,7 @@ class Reader:
         lines = self.remaining(self.plan.other)
         files = self.other_files_left
         stat = _other_stat(lines, files)
-        text = f"*Other · {len(lines)} lines*\n{self.plan.other_summary}\n\n{fenced(stat)}"
+        text = f"*Other · {len(lines)} lines*\n{self.plan.other_summary}\n\n{_fenced(stat)}"
         seen_files = [
             fingerprint
             for path, fingerprint in zip(
@@ -260,7 +257,7 @@ class Reader:
             message_text=text.strip(),
         )
 
-    def unfinished(self, unplanned: list[LineRef], *, other: bool = True) -> list[str]:
+    def unfinished(self, unplanned: LineSet, *, other: bool = True) -> list[str]:
         """What still stands between the reader and the end of the walkthrough, or Other."""
         reasons: list[str] = []
         left = [c for c in self.plan.chunks if self.remaining(c.lines)]
@@ -274,7 +271,7 @@ class Reader:
             reasons.append("Other has not been approved or skipped")
         return reasons
 
-    def status(self, unplanned: list[ChangedLine], hunks: Hunks) -> WalkStatus:
+    def status(self, unplanned: LineSet, hunks: Hunks) -> WalkStatus:
         current = self.walk.on_screen
         upcoming = self.next_chunk()
         chunks: list[ReaderChunk] = []
@@ -288,9 +285,7 @@ class Reader:
                 else "done"
             )
             chunks.append(
-                ReaderChunk(
-                    number=number, title=chunk.title, state=state, lines=LineRef.spans(left)
-                )
+                ReaderChunk(number=number, title=chunk.title, state=state, lines=left.spans())
             )
         other_state = (
             "on screen"
@@ -301,8 +296,7 @@ class Reader:
             if self.other_pending
             else "done"
         )
-        left = set(self.remaining(LineRef.of(line) for line in unplanned))
-        open_lines = [line for line in unplanned if LineRef.of(line) in left]
+        open_lines = self.remaining(unplanned)
         spans = hunks.spans(open_lines)
         return WalkStatus(
             on_screen=current.title if current else None,
@@ -327,39 +321,14 @@ class Reader:
         return f"{left} of {len(self.plan.chunks)} chunks left." if left else ""
 
 
-def _unseen(refs: list[LineRef], seen: Counter[str], walk: Walk) -> set[LineRef]:
-    """The lines not yet approved, each approval consuming one line with the same content.
-
-    This walk's own approvals settle first, so of two identical lines the one the
-    reader approved is the one that counts as seen.
-    """
-    remaining = Counter(seen)
-    approved = {ref for a in walk.approvals for ref in a.lines}
-    settled: set[LineRef] = set()
-    for ref in refs:
-        key = line_key(ref.path, ref.sign, ref.text)
-        if ref in approved and remaining[key] > 0:
-            remaining[key] -= 1
-            settled.add(ref)
-    out: set[LineRef] = set()
-    for ref in refs:
-        if ref in settled:
-            continue
-        key = line_key(ref.path, ref.sign, ref.text)
-        if remaining[key] > 0:
-            remaining[key] -= 1
-        else:
-            out.add(ref)
-    return out
+def _fenced(body: str) -> str:
+    return f"```\n{body.rstrip()}\n```" if body.strip() else "_(nothing to show)_"
 
 
-def _other_stat(lines: list[LineRef], files: list[str]) -> str:
-    by_path: dict[str, list[LineRef]] = {}
-    for ref in lines:
-        by_path.setdefault(ref.path, []).append(ref)
+def _other_stat(lines: LineSet, files: list[str]) -> str:
     rows = [
-        f"{path}  +{sum(r.sign == '+' for r in refs)} -{sum(r.sign == '-' for r in refs)}"
-        for path, refs in by_path.items()
+        f"{path}  +{len(lines.side(path, '+'))} -{len(lines.side(path, '-'))}"
+        for path in lines.paths
     ]
     rows += [f"{path}  (no text changes)" for path in files]
     return "\n".join(rows)

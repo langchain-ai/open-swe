@@ -17,16 +17,16 @@ from pydantic import ValidationError
 from typing_extensions import TypeIs
 
 from managed_deepagents._channel_icon import validate_channel_icon_path
+from managed_deepagents._channels.actor import endpoint_actor
 from managed_deepagents._channels.http import HttpChannel, channel_thread_id, http_channel
 from managed_deepagents._channels.http.endpoint import is_endpoint_handler
 from managed_deepagents._channels.http.provider import (
     EventFinished,
     EventHandlerOutcome,
     channel_name,
-    defined_fields,
+    check_event_keys,
     event_snapshot,
     finish_events,
-    handled_event_keys,
     read_deployment_secret,
     reset_deployment_secrets,
     resolve_endpoints,
@@ -39,7 +39,11 @@ from managed_deepagents._channels.http.studio import (
     studio_url,
 )
 from managed_deepagents._channels.http.types import ChannelName
-from managed_deepagents._channels.linear_connections import linear_app_connection_slug
+from managed_deepagents._channels.linear_app_setup import linear_app_setup
+from managed_deepagents._channels.linear_connections import (
+    LINEAR_TOKEN_SLUG,
+    linear_app_connection_slug,
+)
 from managed_deepagents._channels.linear_graphql import (
     LinearAppUser,
     OutgoingActivity,
@@ -66,6 +70,7 @@ from managed_deepagents._channels.linear_types import (
     LinearAppOptions,
     LinearChannelThread,
     LinearCommentCreateEvent,
+    LinearEndpointFields,
     LinearEvent,
     LinearEventCallback,
     LinearHandlers,
@@ -91,6 +96,7 @@ if TYPE_CHECKING:
         JsonValue,
     )
     from managed_deepagents._channels.run_input import ChannelRunResult
+    from managed_deepagents._channels.types import ChannelReply
 
 
 def linear_channel(
@@ -98,6 +104,7 @@ def linear_channel(
     on_event: LinearHandlers | None = None,
     app: LinearAppOptions | None = None,
     multitask_strategy: MultitaskStrategy = "enqueue",
+    reply: ChannelReply = "auto",
     sessions: bool = True,
     ignore_bots: bool = True,
     on_finish: EventFinished[LinearEvent, LinearChannelThread] | None = None,
@@ -119,6 +126,10 @@ def linear_channel(
             run and starts after it, ``interrupt`` cancels the run, keeping its
             progress, and starts at once, ``rollback`` cancels it and discards
             its progress, and ``reject`` starts nothing.
+        reply: Whether the channel posts the run's final answer, as a comment
+            or the session's response: ``"auto"`` (the default) or ``"none"``,
+            to leave replying to the agent. Session acknowledgements, Stop and
+            error notices still post.
         sessions: Answer Linear agent sessions, which open when someone
             mentions the app or delegates an issue to it. Without a handler, a
             new session runs with Linear's prompt for it (``promptContext``), and
@@ -153,14 +164,16 @@ def linear_channel(
         "Linear",
         # By key; the channel calls each only with its own key's events.
         cast("Mapping[str, LinearEventCallback | EventEndpoint]", on_event or {}),
+        _endpoint_fields,
     )
-    if set(handlers) - SUPPORTED_EVENT_KEYS:
-        raise ValueError("unsupported Linear event key")
-    filters = _Filters(teams=_teams(app), ignore_bots=ignore_bots, sessions=sessions)
-    events = handled_event_keys(handlers) + (sorted(SESSION_EVENT_KEYS) if sessions else [])
-    provider_config: dict[str, JsonValue] = {"events": sorted(set(events))}
-    if app is not None:
-        provider_config["app"] = _app_config(app)
+    check_event_keys("Linear", handlers, SUPPORTED_EVENT_KEYS)
+    app_setup = linear_app_setup(handlers, app, sessions=sessions)
+    teams = (
+        frozenset(team.strip().lower() for team in app["teams"])
+        if app is not None and "teams" in app
+        else None
+    )
+    filters = _Filters(teams=teams, ignore_bots=ignore_bots, sessions=sessions)
 
     def name() -> str:
         return channel_name(channel)
@@ -186,11 +199,18 @@ def linear_channel(
             _notify_finished,
             on_finish,
             _event,
-            lambda thread_id: LinearChannelThread(id=thread_id, channel=ChannelName(name=name())),
+            lambda delivery: LinearChannelThread(
+                id=delivery["thread_id"], channel=ChannelName(name=name())
+            ),
         ),
-        provider_config=provider_config,
+        # mda deploy sets up the Linear app from this.
+        provider_config=cast("dict[str, JsonValue]", app_setup),
         multitask_strategy=multitask_strategy,
+        reply=reply,
     )
+    channel.paused_notice = _notify_paused
+    # Deploy provides the app's token at this name.
+    channel.agent_connections = [LINEAR_TOKEN_SLUG]
     if app is not None and "icon" in app:
         # Served at /channels/{name}/icon; deploy points the app's icon at it.
         channel.icon = validate_channel_icon_path(app["icon"], "Linear app.icon")
@@ -204,63 +224,6 @@ class _Filters:
         self.teams = teams
         self.ignore_bots = ignore_bots
         self.sessions = sessions
-
-
-_APP_OPTION_KEYS = ("name", "description", "icon", "teams")
-_FORBIDDEN_IN_NAME = re.compile(r"linear|https?://", re.IGNORECASE)
-_APP_NAME_MIN_CHARS = 2
-_APP_NAME_MAX_CHARS = 80
-_APP_DESCRIPTION_MAX_CHARS = 1000
-
-
-def _check_app_display(app: LinearAppOptions) -> None:
-    """Check how the app looks against Linear's rules, before deploy sends it."""
-    name = app.get("name")
-    if name is not None and (
-        not _APP_NAME_MIN_CHARS <= len(name.strip()) <= _APP_NAME_MAX_CHARS
-        or _FORBIDDEN_IN_NAME.search(name)
-    ):
-        raise ValueError('Linear app.name must be 2-80 characters, without "Linear" or a URL')
-    description = app.get("description")
-    if description is not None and not (0 < len(description.strip()) <= _APP_DESCRIPTION_MAX_CHARS):
-        raise ValueError("Linear app.description must be 1-1000 characters")
-    icon = app.get("icon")
-    if icon is not None:
-        validate_channel_icon_path(icon, "Linear app.icon")
-
-
-def _app_config(app: LinearAppOptions) -> dict[str, JsonValue]:
-    """The app options deploy reads, in the manifest's spelling."""
-    name = app.get("name")
-    description = app.get("description")
-    return defined_fields(
-        {
-            "name": name.strip() if name is not None else None,
-            "description": description.strip() if description is not None else None,
-            "icon": validate_channel_icon_path(app["icon"], "Linear app.icon")
-            if "icon" in app
-            else None,
-            "teams": list(app["teams"]) if "teams" in app else None,
-        }
-    )
-
-
-def _teams(app: LinearAppOptions | None) -> frozenset[str] | None:
-    """The team keys the channel is limited to, after checking the app options."""
-    # A misspelled option would silently widen what starts runs.
-    unknown = sorted(set(app or {}) - set(_APP_OPTION_KEYS))
-    if unknown:
-        raise ValueError(
-            f"unknown Linear app option {', '.join(unknown)}; use {', '.join(_APP_OPTION_KEYS)}"
-        )
-    if app is not None:
-        _check_app_display(app)
-    if app is None or "teams" not in app:
-        return None
-    teams = frozenset(team.strip().lower() for team in app["teams"])
-    if not teams or "" in teams:
-        raise ValueError("Linear app.teams must list team keys; omit it to allow every team")
-    return teams
 
 
 async def _linear_webhook_secret() -> str | None:
@@ -567,6 +530,13 @@ def _team(team: LinearTeamPayload | None) -> LinearTeam | None:
     return None if team is None else LinearTeam(id=team["id"], key=team["key"])
 
 
+def _endpoint_fields(event: LinearEvent) -> LinearEndpointFields:
+    """The fields of a Linear event its endpoints are sent beside key, delivery ID
+    and payload: the one place they're listed, as TypeScript's
+    ``LINEAR_ENDPOINT_EVENT_FIELDS``."""
+    return {"actor": endpoint_actor(event.actor)} if event.actor is not None else {}
+
+
 def _actor(actor: LinearActorPayload | None) -> LinearActor | None:
     if actor is None:
         return None
@@ -741,8 +711,9 @@ async def _acknowledge_session(target: JsonValue, delivery: HttpDelivery) -> Non
 async def _notify_finished(target: JsonValue, delivery: HttpFinishedDelivery) -> None:
     """What the conversation hears once a delivery is done.
 
-    Besides the run's own answer and ``_report_error``: where to make a pending
-    decision, or, after Stop, the final word Linear waits for.
+    Besides the run's own answer, its own paused notice and ``_report_error``:
+    that a message found the thread waiting on a decision, or, after Stop, the
+    final word Linear waits for.
     """
     if delivery["type"] == "skipped" and delivery["reason"] == "cancel":
         await _confirm_stopped(target)
@@ -755,6 +726,11 @@ async def _notify_finished(target: JsonValue, delivery: HttpFinishedDelivery) ->
     pending = pending_decision(delivery)
     if pending is not None:
         await _notify_interrupted(target, delivery, pending)
+
+
+async def _notify_paused(target: JsonValue, delivery: HttpDelivery) -> None:
+    """A run stopped on interrupts, as it ended."""
+    await _notify_interrupted(target, delivery, "interrupted")
 
 
 def _is_stop(event: LinearEvent | None) -> bool:

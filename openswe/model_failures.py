@@ -20,9 +20,9 @@ from pydantic import BaseModel, ValidationError
 
 from openswe.run_config import RunConfig
 from openswe.run_source import notify_run_source
+from openswe.threads import index
 from openswe.transcript.events import JsonObject
 from openswe.transcript.turns import note_on_run_turn
-from openswe.utils.thread_ops import langgraph_client
 from openswe.utils.user_messages import warning
 
 logger = logging.getLogger(__name__)
@@ -87,9 +87,7 @@ class ModelError(BaseModel):
     async def record(self, thread_id: str) -> None:
         """Leave this on the thread for the run-completion reply."""
         try:
-            await langgraph_client().threads.update(
-                thread_id=thread_id, metadata={LAST_MODEL_ERROR_KEY: self.model_dump()}
-            )
+            await index.update(thread_id, {LAST_MODEL_ERROR_KEY: self.model_dump()})
         except Exception:  # noqa: BLE001
             logger.exception("Failed to record model error", extra={"thread_id": thread_id})
 

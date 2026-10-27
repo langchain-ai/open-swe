@@ -16,7 +16,6 @@ from openswe.dashboard.workspace_settings import delete_workspace_settings, get_
 from openswe.slack.channels import SlackChannel
 from openswe.workspaces.refresh import (
     ensure_refresh_cron,
-    is_refresh_in_flight,
     start_refresh_run,
 )
 from openswe.workspaces.store import (
@@ -160,7 +159,7 @@ async def api_update_workspace(
         and body.repos is not None
         and {repo.lower() for repo in body.repos} != {repo.lower() for repo in previous.repos}
     )
-    if repos_changed and is_refresh_in_flight(previous):
+    if repos_changed and previous.refresh_in_flight():
         raise HTTPException(409, "a refresh of this workspace is already running")
     if body.kitchen_channel_ids is not None:
         already = set(previous.kitchen_channel_ids) if previous is not None else set()
@@ -253,7 +252,7 @@ async def api_refresh_workspace(
     await bind_workspace(request, record)
     if not record.setup_script:
         raise HTTPException(400, "workspace has no setup script to run")
-    if is_refresh_in_flight(record):
+    if record.refresh_in_flight():
         raise HTTPException(409, "a refresh of this workspace is already running")
     run_id = await start_refresh_run(normalized)
     if run_id is None:

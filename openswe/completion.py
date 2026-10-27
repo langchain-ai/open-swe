@@ -35,12 +35,13 @@ from openswe.slack.code_channels import is_code_channel_session, set_session_sta
 from openswe.slack.thinking import sync_slack_background_status
 from openswe.source_context import SourceContext
 from openswe.tasks.messages import TASK_MESSAGE_KIND, TaskMessage
+from openswe.threads import index
 from openswe.threads.status import refresh_thread_status
 from openswe.transcript.turns import TurnOutcome, settle_run_turn
 from openswe.ui_invalidations import Topic
 from openswe.utils.errors import code_for_error_type
 from openswe.utils.json_types import thread_metadata
-from openswe.utils.langsmith import get_langsmith_trace_url
+from openswe.utils.langsmith import get_langsmith_error_url
 from openswe.utils.thread_ops import langgraph_client
 from openswe.utils.user_messages import warning
 from openswe.webhooks.event_matches import EVENT_MATCH_KIND
@@ -147,15 +148,15 @@ class _FailureReason:
     async def of_run(cls, thread_id: str, run_id: str | None, error: Any) -> Self:
         """``of`` against the thread's metadata, or the class name alone when it can't be read."""
         try:
-            metadata = thread_metadata(await langgraph_client().threads.get(thread_id))
+            thread = await index.get(thread_id)
         except Exception:  # noqa: BLE001
             logger.warning(
                 "Could not read the thread to classify its failed run",
                 exc_info=True,
                 extra={"run_completion": {"thread_id": thread_id, "run_id": run_id}},
             )
-            metadata = {}
-        return cls.of(error, metadata, run_id)
+            thread = None
+        return cls.of(error, thread.metadata if thread is not None else {}, run_id)
 
     def _parts(self, status: str) -> tuple[str, str]:
         code = self.code or ""
@@ -249,6 +250,9 @@ async def _post_failure_reply(
     metadata: dict[str, Any],
     status: str,
     reason: _FailureReason = _UNKNOWN_REASON,
+    *,
+    invocation_id: str | None = None,
+    terminal_error: str | None = None,
 ) -> bool:
     """Post a failure reply to the run's originating channel. Best-effort."""
     source = metadata.get("source")
@@ -257,7 +261,7 @@ async def _post_failure_reply(
     if source == "slack" or ctx.slack_thread is not None:
         location = ctx.slack_location
         if location is not None:
-            trace_url = await get_langsmith_trace_url(thread_id)
+            trace_url = await get_langsmith_error_url(thread_id, invocation_id, terminal_error)
             slack_text = reason.text(status, trace_url)
             return await post_slack_thread_reply(
                 location[0],
@@ -469,7 +473,7 @@ async def _handle_successful_run(
 
 
 async def _settle_transcript_turn(
-    thread_id: str, run_id: str | None, status: object, failure: _FailureReason | None
+    thread_id: str, run_id: str | None, status: object, failure: _FailureReason | None = None
 ) -> None:
     """Close the transcript turn of a run that ended without the middleware saying so.
 
@@ -478,6 +482,8 @@ async def _settle_transcript_turn(
     """
     if status == "success":
         outcome: TurnOutcome = "completed"
+    elif status == "interrupted":
+        outcome = "interrupted"
     elif status in _TERMINAL_FAILURE_STATUSES:
         outcome = "failed"
     else:
@@ -676,7 +682,15 @@ async def handle_run_completion(payload: dict[str, Any]) -> dict[str, str]:
         return {"status": "ignored", "reason": "repeated failures"}
 
     reason = _FailureReason.of(error, metadata, run_id)
-    posted = await _post_failure_reply(thread_id, metadata, status, reason)
+    error_message = error.get("message") if isinstance(error, dict) else error
+    posted = await _post_failure_reply(
+        thread_id,
+        metadata,
+        status,
+        reason,
+        invocation_id=_invocation_id(payload),
+        terminal_error=error_message if isinstance(error_message, str) else None,
+    )
     if not posted:
         return {"status": "ignored", "reason": "no reply posted"}
 

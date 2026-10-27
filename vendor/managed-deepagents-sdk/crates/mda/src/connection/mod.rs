@@ -18,16 +18,15 @@ use crate::cli_output::{continue_sequence, show_sequence, SequenceItem};
 use crate::command::CommandCompletion;
 use crate::compile;
 use crate::deploy::helpers::{
-    deployment_managed_deep_agent_marker, find_deployment_by_name, resolve_langsmith_api_bases,
-    resolve_platform_api_url, REMOVED_WORKSPACE_ID_ENVS, WORKSPACE_ID_ENV,
+    deployment_managed_deep_agent_marker, find_deployment_by_name, WORKSPACE_ID_ENV,
 };
+use crate::deploy::langsmith_context::{LangSmithContext, LangSmithEndpoints, WORKSPACE_FLAG_HINT};
 use crate::deploy::{env_file, resolve_api_key};
 use crate::error::{categorized, category_of, is_cancellation, ErrorCategory};
 use crate::install::Installation;
 use crate::interrupt::Interrupt;
 use crate::langsmith::{
-    self, resolve_preferred_env, ApiError, ConnectionOwnerPolicy, ConnectionSummary,
-    CreateOAuthConnection,
+    self, ApiError, ConnectionOwnerPolicy, ConnectionSummary, CreateOAuthConnection,
 };
 use crate::project;
 use crate::secret_input::{
@@ -47,6 +46,7 @@ pub struct CreateOptions {
     pub slug: String,
     pub value: ValueSource,
     pub authorize: bool,
+    pub deployment_id: Option<String>,
     pub oauth: Option<OAuthCreateOptions>,
     pub mcp: Option<String>,
 }
@@ -638,7 +638,8 @@ pub fn create(opts: CreateOptions) -> Result<CommandCompletion> {
         )?
     };
     let session = Session::open(&opts.target, &env_vars)?;
-    let agent_owner_id = require_managed_deployment_id(&session, &opts.target)?;
+    let agent_owner_id =
+        require_managed_deployment_id(&session, &opts.target, opts.deployment_id.as_deref())?;
     session
         .client
         .create_workspace_connection(
@@ -656,8 +657,16 @@ pub fn create(opts: CreateOptions) -> Result<CommandCompletion> {
 ///
 /// Agent-owned secrets are readable with the deployment's `deployments:read`
 /// key, so create refuses to store one until that MDA deployment exists.
-fn require_managed_deployment_id(session: &Session, target: &ConnectionTarget) -> Result<String> {
-    let project = project::load(&target.path)?;
+fn require_managed_deployment_id(
+    session: &Session,
+    target: &ConnectionTarget,
+    deployment_id: Option<&str>,
+) -> Result<String> {
+    if let Some(id) = deployment_id {
+        return explicit_managed_deployment_id(id, |id| session.client.get_deployment(id));
+    }
+    let project = project::load(&target.path)
+        .context("Pass --deployment-id to target a deployed agent without a local project.")?;
     let name = agent_config::agent_assistant_id(&project)?;
     let deployments = session
         .client
@@ -712,6 +721,17 @@ fn managed_deployment_id(
     Ok(id)
 }
 
+fn explicit_managed_deployment_id(
+    id: &str,
+    get_deployment: impl FnOnce(&str) -> Result<Value>,
+) -> Result<String> {
+    let deployment = get_deployment(id).context("failed to read the target deployment")?;
+    if deployment_managed_deep_agent_marker(&deployment) == Some(false) {
+        return Err(not_managed_deep_agent(id));
+    }
+    Ok(id.to_string())
+}
+
 fn not_managed_deep_agent(name: &str) -> anyhow::Error {
     categorized(
         ErrorCategory::UserInput,
@@ -728,11 +748,14 @@ fn create_mcp_oauth(
     url: &str,
 ) -> Result<CommandCompletion> {
     let env_vars = env_file::parse_env_file(&opts.target.path.join(".env"));
-    reject_mcp_address_langsmith_cannot_reach(url, &resolved_host_url(&opts.target, &env_vars))?;
+    let endpoints = LangSmithEndpoints::resolve(&env_vars, opts.target.host_url.as_deref());
+    reject_mcp_address_langsmith_cannot_reach(url, &endpoints.host_url)?;
     let session = Session::open(&opts.target, &env_vars)?;
     let deployment_id = opts
         .authorize
-        .then(|| require_managed_deployment_id(&session, &opts.target))
+        .then(|| {
+            require_managed_deployment_id(&session, &opts.target, opts.deployment_id.as_deref())
+        })
         .transpose()?;
     let created = create_discovered_mcp_connection(&session.client, &opts.slug, url)?;
     let authorization = start_agent_oauth_authorization(
@@ -833,7 +856,9 @@ fn create_oauth(opts: CreateOptions, owner: ConnectionOwnerPolicy) -> Result<Com
     let env_vars = env_file::parse_env_file(&opts.target.path.join(".env"));
     let session = Session::open(&opts.target, &env_vars)?;
     let deployment_id = (opts.authorize || grant_type == OAuthGrantType::ClientCredentials)
-        .then(|| require_managed_deployment_id(&session, &opts.target))
+        .then(|| {
+            require_managed_deployment_id(&session, &opts.target, opts.deployment_id.as_deref())
+        })
         .transpose()?;
     let redirect_uri = (grant_type == OAuthGrantType::AuthorizationCode)
         .then(|| session.client.oauth_redirect_uri())
@@ -1282,7 +1307,18 @@ fn resolve_create_owner_policy(
     opts: &CreateOptions,
     is_oauth: bool,
 ) -> Result<ConnectionOwnerPolicy> {
-    let manifest = manifest_owner_policy_for_slug(&opts.target, &opts.slug)?;
+    resolve_create_owner_policy_with(opts, is_oauth, connector_requirements_for_loaded_project)
+}
+
+fn resolve_create_owner_policy_with(
+    opts: &CreateOptions,
+    is_oauth: bool,
+    load_requirements: impl FnOnce(
+        &project::Project,
+        &ConnectionTarget,
+    ) -> Result<compile::ConnectorRequirements>,
+) -> Result<ConnectionOwnerPolicy> {
+    let manifest = manifest_owner_policy_for_slug(opts, load_requirements)?;
     let grant_type = opts
         .oauth
         .as_ref()
@@ -1336,15 +1372,29 @@ fn connector_requirements_for_loaded_project(
 }
 
 fn manifest_owner_policy_for_slug(
-    target: &ConnectionTarget,
-    slug: &str,
+    opts: &CreateOptions,
+    load_requirements: impl FnOnce(
+        &project::Project,
+        &ConnectionTarget,
+    ) -> Result<compile::ConnectorRequirements>,
 ) -> Result<Option<ConnectionOwnerPolicy>> {
-    let project = match project::load(&target.path) {
-        Ok(project) => project,
-        Err(err) if category_of(&err) == ErrorCategory::Project => return Ok(None),
+    let explicit_target = opts.target.workspace_id.is_some() || opts.deployment_id.is_some();
+    let requirements = (|| {
+        let project = match project::load(&opts.target.path) {
+            Ok(project) => project,
+            Err(err) if category_of(&err) == ErrorCategory::Project => return Ok(None),
+            Err(err) => return Err(err),
+        };
+        load_requirements(&project, &opts.target).map(Some)
+    })();
+    let requirements = match requirements {
+        Ok(Some(requirements)) => requirements,
+        Ok(None) => return Ok(None),
+        // Explicit remote targets may proceed without a usable local project.
+        Err(_) if explicit_target => return Ok(None),
         Err(err) => return Err(err),
     };
-    let requirements = connector_requirements_for_loaded_project(&project, target)?;
+    let slug = &opts.slug;
     match compile::connection_owner_policy_for_slug(&requirements, slug) {
         Some(owner) => Ok(Some(owner)),
         None if agent_and_user_manifest_overlap(&requirements, slug) => Err(categorized(
@@ -1412,19 +1462,25 @@ impl Session {
 
     fn open(target: &ConnectionTarget, env_vars: &BTreeMap<String, String>) -> Result<Self> {
         let env_path = target.path.join(".env");
-        let host_url = resolved_host_url(target, env_vars);
-        let host_url = host_url.as_str();
-
-        let platform_api_url = resolve_platform_api_url(host_url, env_vars);
-        let credential = resolve_api_key(env_vars, &env_path, &platform_api_url)?;
-        let workspace_id = require_workspace_id(target, env_vars)?;
-        let client = langsmith::Client::with_credential_and_platform(
-            host_url,
-            Some(platform_api_url.as_str()),
-            credential,
-            Some(workspace_id),
+        let ctx = LangSmithContext::resolve(
+            env_vars,
+            target.host_url.as_deref(),
+            target.workspace_id.as_deref(),
+            WORKSPACE_FLAG_HINT,
+            |platform_api_url| resolve_api_key(env_vars, &env_path, platform_api_url),
         )?;
-        Ok(Self { client })
+        if ctx.workspace_id.is_none() {
+            return Err(categorized(
+                ErrorCategory::UserInput,
+                format!(
+                    "A workspace ID is required for connection commands. Set {WORKSPACE_ID_ENV} \
+                     in the environment or project .env, or pass --workspace-id."
+                ),
+            ));
+        }
+        Ok(Self {
+            client: ctx.client()?,
+        })
     }
 
     fn find(&self, slug: &str) -> Result<ConnectionSummary> {
@@ -1443,29 +1499,6 @@ impl Session {
             )),
         }
     }
-}
-
-fn require_workspace_id(
-    target: &ConnectionTarget,
-    env_vars: &BTreeMap<String, String>,
-) -> Result<String> {
-    resolve_preferred_env(
-        WORKSPACE_ID_ENV,
-        REMOVED_WORKSPACE_ID_ENVS,
-        target.workspace_id.as_deref(),
-        env_vars,
-        |key| std::env::var(key).ok(),
-        " or pass --workspace-id instead",
-    )?
-    .ok_or_else(|| {
-        categorized(
-            ErrorCategory::UserInput,
-            format!(
-                "A workspace ID is required for connection commands. Set {WORKSPACE_ID_ENV} \
-                 in the environment or project .env, or pass --workspace-id."
-            ),
-        )
-    })
 }
 
 fn confirm_delete(found: &ConnectionSummary, yes: bool) -> Result<bool> {
@@ -1605,18 +1638,6 @@ fn normalize_mcp_server_url(raw: &str) -> Result<String> {
         ));
     }
     Ok(parsed.to_string())
-}
-
-/// The LangSmith host this invocation talks to, before any per-API mapping.
-fn resolved_host_url(target: &ConnectionTarget, env_vars: &BTreeMap<String, String>) -> String {
-    let (default_host, _) = resolve_langsmith_api_bases(env_vars);
-    target
-        .host_url
-        .as_deref()
-        .map(str::trim)
-        .filter(|value| !value.is_empty())
-        .map(str::to_string)
-        .unwrap_or(default_host)
 }
 
 /// Refuse an MCP address that LangSmith has no route to.
@@ -1831,6 +1852,141 @@ mod tests {
     use std::cell::{Cell, RefCell};
 
     use super::*;
+
+    #[test]
+    fn explicit_targets_preserve_manifest_ownership_and_conflicts() {
+        let dir = tempfile::tempdir().unwrap();
+        crate::test_support::write_file(dir.path(), "agent.py", "agent = None");
+        for deployment_target in [false, true] {
+            for (requirements, authorize, is_oauth, expected) in [
+                (
+                    serde_json::json!({"agentConnections": ["service"]}),
+                    true,
+                    true,
+                    Some(ConnectionOwnerPolicy::Agent),
+                ),
+                (
+                    serde_json::json!({"userConnections": ["service"]}),
+                    false,
+                    true,
+                    Some(ConnectionOwnerPolicy::User),
+                ),
+                (
+                    serde_json::json!({"agentConnections": ["service"]}),
+                    false,
+                    true,
+                    None,
+                ),
+                (
+                    serde_json::json!({"userConnections": ["service"]}),
+                    false,
+                    false,
+                    None,
+                ),
+                (
+                    serde_json::json!({"agentConnections": ["service"], "userConnections": ["service"]}),
+                    true,
+                    true,
+                    None,
+                ),
+            ] {
+                let opts = CreateOptions {
+                    target: ConnectionTarget {
+                        path: dir.path().to_path_buf(),
+                        workspace_id: (!deployment_target).then(|| "workspace".into()),
+                        host_url: None,
+                    },
+                    slug: "service".into(),
+                    value: ValueSource::Unspecified,
+                    authorize,
+                    deployment_id: deployment_target.then(|| "deployment".into()),
+                    oauth: None,
+                    mcp: None,
+                };
+                let called = Cell::new(false);
+                let result = resolve_create_owner_policy_with(&opts, is_oauth, |_, _| {
+                    called.set(true);
+                    Ok([(String::from("connector"), requirements)].into())
+                });
+                assert!(called.get());
+                match expected {
+                    Some(owner) => assert_eq!(result.unwrap(), owner),
+                    None => assert_eq!(category_of(&result.unwrap_err()), ErrorCategory::UserInput),
+                }
+                assert_eq!(
+                    resolve_create_owner_policy_with(&opts, true, |_, _| bail!("invalid project"))
+                        .unwrap(),
+                    ConnectionOwnerPolicy::User
+                );
+                let mut implicit = opts;
+                implicit.target.workspace_id = None;
+                implicit.deployment_id = None;
+                assert!(
+                    resolve_create_owner_policy_with(&implicit, true, |_, _| bail!(
+                        "invalid project"
+                    ))
+                    .is_err()
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn explicit_workspace_creation_ignores_invalid_local_agent() {
+        let dir = tempfile::tempdir().unwrap();
+        crate::test_support::write_file(dir.path(), "agent.py", "invalid agent");
+        crate::test_support::write_file(dir.path(), "memory.py", "memory = None");
+        let mut opts = CreateOptions {
+            target: ConnectionTarget {
+                path: dir.path().to_path_buf(),
+                workspace_id: Some("workspace".into()),
+                host_url: None,
+            },
+            slug: "doordash".into(),
+            value: ValueSource::Unspecified,
+            authorize: true,
+            deployment_id: None,
+            oauth: Some(OAuthCreateOptions {
+                client_id: Some("client".into()),
+                ..Default::default()
+            }),
+            mcp: None,
+        };
+        assert_eq!(
+            resolve_create_owner_policy(&opts, true).unwrap(),
+            ConnectionOwnerPolicy::User
+        );
+        assert!(!dir.path().join(".mda").exists());
+
+        opts.target.workspace_id = None;
+        opts.deployment_id = Some("deployment".into());
+        assert_eq!(
+            resolve_create_owner_policy(&opts, true).unwrap(),
+            ConnectionOwnerPolicy::User
+        );
+        let error = create(opts).unwrap_err().to_string();
+        assert!(error.contains("OAuth create requires --oauth"), "{error}");
+        assert!(!dir.path().join(".mda").exists());
+    }
+
+    #[test]
+    fn explicit_deployment_is_read_and_validated_without_a_project() {
+        assert_eq!(
+            explicit_managed_deployment_id("dep-mda", |id| {
+                assert_eq!(id, "dep-mda");
+                Ok(serde_json::json!({"is_managed_deep_agent": true}))
+            })
+            .unwrap(),
+            "dep-mda"
+        );
+        let error = explicit_managed_deployment_id("dep-graph", |_| {
+            Ok(serde_json::json!({"is_managed_deep_agent": false}))
+        })
+        .unwrap_err()
+        .to_string();
+        assert!(error.contains("is not a Managed Deep Agent"), "{error}");
+        assert!(explicit_managed_deployment_id("missing", |_| bail!("not found")).is_err());
+    }
 
     #[test]
     fn managed_deployment_id_returns_exact_mda_deployment() {
@@ -2565,6 +2721,7 @@ mod tests {
             slug: "foobar".into(),
             value: ValueSource::Unspecified,
             authorize: false,
+            deployment_id: None,
             oauth: Some(OAuthCreateOptions {
                 service: Some("github".into()),
                 ..Default::default()
@@ -2914,6 +3071,7 @@ mod tests {
             slug: "openai".into(),
             value: ValueSource::Unspecified,
             authorize: true,
+            deployment_id: None,
             oauth: None,
             mcp: None,
         })
@@ -2935,6 +3093,7 @@ mod tests {
                 slug: "gh".into(),
                 value: ValueSource::FromEnv("GH_SECRET".into()),
                 authorize: false,
+                deployment_id: None,
                 oauth: Some(OAuthCreateOptions {
                     service: Some("github".into()),
                     ..Default::default()

@@ -15,8 +15,8 @@ from langgraph_sdk.schema import ThreadSelectField
 from pydantic import BaseModel, ConfigDict, Field, JsonValue, TypeAdapter, ValidationError
 from sqlalchemy import RowMapping, text
 
+from openswe.agent_api.client import MDA_RUNTIME, RUNTIME_METADATA_KEY
 from openswe.database.postgres import transaction
-from openswe.remote_runtime.client import MDA_RUNTIME, RUNTIME_METADATA_KEY
 from openswe.thread_ids import mda_successor_thread_id
 
 Runtime = Literal["local", "mda"]
@@ -27,6 +27,8 @@ SelectField = Literal[
 ]
 
 THREAD_STATUSES: Final[frozenset[str]] = frozenset(get_args(ThreadStatus))
+# When someone last stopped the thread, in epoch milliseconds.
+STOPPED_AT_KEY: Final = "stopped_at_ms"
 # What the index keeps of an Agent Server thread; its values are its whole conversation.
 INDEXED_FIELDS: Final[list[ThreadSelectField]] = [
     "thread_id",
@@ -133,6 +135,11 @@ class IndexedThread(BaseModel):
             created_at=created_at,
             updated_at=updated_at,
         )
+
+    def stopped_since(self, moment_ms: int) -> bool:
+        """Whether someone stopped the thread at or after ``moment_ms``."""
+        stopped = self.metadata.get(STOPPED_AT_KEY)
+        return isinstance(stopped, int) and stopped >= moment_ms
 
     def as_langgraph(self, select: Sequence[SelectField] | None = None) -> dict[str, JsonValue]:
         """The thread as the Agent Server serves it; its state stays with the runtime."""

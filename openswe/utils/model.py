@@ -3,14 +3,14 @@ from typing import Any, Literal, TypedDict, Unpack, cast
 from langchain.chat_models import init_chat_model
 
 from openswe.config import ENV
-from openswe.dashboard.options import DEFAULT_MODEL_ID, model_profile_with_context_override
+from openswe.dashboard.options import DEFAULT_MODEL_ID, model_context_window
 from openswe.utils.gateway import gateway_env_default, gateway_overrides
 
 OPENAI_RESPONSES_WS_BASE_URL = "wss://api.openai.com/v1"
 BASETEN_BASE_URL = "https://inference.baseten.co/v1"
 
 # Anthropic SDK default is 2; a 529 burst can outlive that. Bump to give the
-# primary provider a fair chance before the fallback middleware kicks in.
+# provider a fair chance before the run fails.
 DEFAULT_MAX_RETRIES = 6
 
 # Per-request deadline. Without one a stalled provider connection can park a run
@@ -139,11 +139,24 @@ def make_model(model_id: str, *, use_gateway: bool | None = None, **kwargs: Unpa
             model_kwargs["base_url"] = BASETEN_BASE_URL
             model_kwargs["api_key"] = api_key
 
-    profile_override = model_profile_with_context_override(model_id)
-    if profile_override is not None:
-        model_kwargs["profile"] = profile_override
+    codex_profile = _codex_profile(model_id)
+    if codex_profile is not None:
+        model_kwargs["profile"] = codex_profile
 
     return init_chat_model(model=init_model_id, **cast(dict[str, Any], model_kwargs))
+
+
+def _codex_profile(model_id: str) -> dict[str, object] | None:
+    """OpenAI's models.dev profile with the smaller window Codex serves them at."""
+    context_window = model_context_window(model_id)
+    if not model_id.startswith("openai:") or context_window is None:
+        return None
+    # The bundled profile has no public accessor; init_chat_model imports this module next anyway.
+    from langchain_openai.chat_models.base import _get_default_model_profile  # noqa: PLC2701
+
+    profile: dict[str, object] = dict(_get_default_model_profile(model_id.partition(":")[2]))
+    profile["max_input_tokens"] = context_window
+    return profile
 
 
 def model_request_defaults(model_id: str) -> ModelKwargs:

@@ -141,7 +141,7 @@ def _check_suite(
 
 
 async def _owed() -> list[EventMatch]:
-    return await EventMatch.owed(_THREAD, [])
+    return await EventMatch.owed(_THREAD)
 
 
 @pytest.mark.parametrize("stale", [False, True])
@@ -244,7 +244,7 @@ async def test_a_one_shot_matches_once_and_ends(
     assert delivered == [(_THREAD, "enqueue")]
 
 
-async def test_matches_are_owed_oldest_first_until_their_messages_are_in_state(
+async def test_matches_are_owed_oldest_first_until_a_run_receives_them(
     workspace: dict[str, UUID], delivered: list[tuple[str, MultitaskStrategy]]
 ) -> None:
     await _subscribe(workspace, event_types=["check_suite"])
@@ -255,8 +255,8 @@ async def test_matches_are_owed_oldest_first_until_their_messages_are_in_state(
 
     owed = await _owed()
     assert [match.delivery_id for match in owed] == ["d-1", "d-2", "d-3"]
-    first_two = EventMatch.messages(owed[:2])
-    assert [match.delivery_id for match in await EventMatch.owed(_THREAD, first_two)] == ["d-3"]
+    await EventMatch.received(_THREAD, [match.id for match in owed[:2]])
+    assert [match.delivery_id for match in await EventMatch.owed(_THREAD)] == ["d-3"]
     (after,) = await EventSubscription.for_thread(_THREAD)
     assert (after.trigger_count, after.last_triggered_at) == (3, before.last_triggered_at)
 

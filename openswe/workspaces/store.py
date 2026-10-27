@@ -38,6 +38,7 @@ import re
 import shlex
 from collections import defaultdict
 from collections.abc import Callable, Sequence
+from datetime import UTC, datetime
 from typing import Any, Literal, NamedTuple, Self, TypedDict
 from uuid import UUID
 
@@ -59,7 +60,7 @@ from openswe.database import postgres
 from openswe.github.repo_names import normalize_repo_full_name
 from openswe.github.repositories import Repository
 from openswe.ui_invalidations import Topic
-from openswe.utils.time import now_iso
+from openswe.utils.time import now_iso, parse_iso
 from openswe.workspaces.rows import (
     WorkspaceRepositoryRow,
     WorkspaceRow,
@@ -150,6 +151,9 @@ MAX_REPOS = 50
 CREATE_PARAMS_MAX_CHARS = 20_000
 SCRIPT_MAX_CHARS = 20_000
 REFRESH_LOG_MAX_CHARS = 40_000
+# A refresh that has been "refreshing" for longer than this lost its worker
+# (redeploy, crash) and must not block the next attempt forever.
+STALE_REFRESH_SECONDS = 3 * 60 * 60
 SNAPSHOT_NAME_MAX_CHARS = 128
 LOG_EXCERPT_LINES = 10
 SNAPSHOT_TAG = "latest"
@@ -650,6 +654,21 @@ class Workspace(BaseModel):
             return None
         return self.snapshot_id or None
 
+    def refresh_in_flight(self, run_id: str | None = None) -> bool:
+        """Whether a refresh other than ``run_id``'s is still plausibly running.
+
+        The marker a run left behind is not someone else's: its job was cut
+        short (a redeploy lapsed its lease) and is being retried.
+        """
+        if self.refresh_status != "refreshing":
+            return False
+        if run_id is not None and self.refresh_run_id == run_id:
+            return False
+        started_at = parse_iso(self.refresh_started_at)
+        if started_at is None:
+            return False
+        return (datetime.now(UTC) - started_at).total_seconds() < STALE_REFRESH_SECONDS
+
     @property
     def instructions(self) -> str | None:
         return self.prompt.strip() or None
@@ -709,6 +728,41 @@ class Workspace(BaseModel):
         if include_log:
             option["refresh_log_excerpt"] = log_excerpt(self.refresh_log)
         return option
+
+
+class RefreshAttempt:
+    """One claim on a workspace's refresh, from :meth:`WorkspaceStore.mark_refreshing`.
+
+    Its writes land only while the record still carries this claim. A job whose
+    worker stalled past its lease is retried while the original may still be
+    running; once the retry takes the refresh over, the original can no longer
+    step or settle over it.
+    """
+
+    def __init__(self, slug: str, started_at: str) -> None:
+        self.slug = slug
+        self.started_at = started_at
+
+    def holds(self, record: Workspace) -> bool:
+        return parse_iso(record.refresh_started_at) == parse_iso(self.started_at)
+
+    async def start_step(self, label: str, *, log_path: str | None = None) -> None:
+        await WORKSPACES.start_refresh_step(self.slug, label, log_path=log_path, attempt=self)
+
+    async def finish_step(
+        self, label: str, status: StepStatus, *, exit_code: int | None = None
+    ) -> None:
+        await WORKSPACES.finish_refresh_step(
+            self.slug, label, status, exit_code=exit_code, attempt=self
+        )
+
+    async def publish_builder(self, sandbox_id: str) -> None:
+        await WORKSPACES.mark_refresh_builder(self.slug, sandbox_id, attempt=self)
+
+    async def settle(
+        self, status: RefreshStatus, *, log: str | None = None, error: str | None = None
+    ) -> None:
+        await WORKSPACES.mark_refresh_settled(self.slug, status, log=log, error=error, attempt=self)
 
 
 class WorkspaceStore:
@@ -1055,12 +1109,17 @@ class WorkspaceStore:
         return await self.put(slug, record, definition_only=True)
 
     async def update_state(
-        self, slug: str, change: Callable[[Workspace], None]
+        self,
+        slug: str,
+        change: Callable[[Workspace], None],
+        *,
+        attempt: RefreshAttempt | None = None,
     ) -> Workspace | None:
         """Change a workspace's snapshot and refresh state under a row lock.
 
         Only the state columns are written, so a refresh that runs for minutes
-        never writes back a definition it read before an admin edited it.
+        never writes back a definition it read before an admin edited it. With
+        ``attempt``, nothing is written once another claim has superseded it.
         """
         async with postgres.session() as session:
             row = await session.scalar(
@@ -1072,6 +1131,12 @@ class WorkspaceStore:
             record = to_workspace(
                 row, await _bound_repos(session, row.id), channels.channels, channels.kitchen
             )
+            if attempt is not None and not attempt.holds(record):
+                logger.warning(
+                    "Superseded refresh attempt skipped a write",
+                    extra={"workspace": slug, "attempt_started_at": attempt.started_at},
+                )
+                return None
             change(record)
             record.updated_at = now_iso()
             apply_state(row, record)
@@ -1189,21 +1254,44 @@ class WorkspaceStore:
 
         return await self.update_state(slug, change)
 
-    async def mark_refreshing(self, slug: str, kind: RefreshKind = "full") -> Workspace | None:
+    async def mark_refreshing(
+        self, slug: str, kind: RefreshKind = "full", *, run_id: str | None = None
+    ) -> RefreshAttempt | None:
+        """Claim the workspace's refresh for ``run_id``; ``None`` if another holds it.
+
+        Checked under the row lock, so two jobs queued for one workspace start
+        one builder between them. The claimant's id is always written, ``None``
+        for a cron tick, so an id written when a job was queued never matches a
+        refresh someone else started.
+        """
+        claimed: RefreshAttempt | None = None
+
         def change(record: Workspace) -> None:
+            nonlocal claimed
+            if record.refresh_in_flight(run_id):
+                return
+            started_at = now_iso()
+            claimed = RefreshAttempt(slug, started_at)
+            record.refresh_run_id = run_id
             record.refresh_status = "refreshing"
             record.refresh_kind = kind
-            record.refresh_started_at = now_iso()
+            record.refresh_started_at = started_at
             record.refresh_finished_at = None
             record.refresh_log = None
             record.refresh_error = None
             record.refresh_steps = []
             record.refresh_sandbox_id = None
 
-        return await self.update_state(slug, change)
+        await self.update_state(slug, change)
+        return claimed
 
     async def start_refresh_step(
-        self, slug: str, label: str, *, log_path: str | None = None
+        self,
+        slug: str,
+        label: str,
+        *,
+        log_path: str | None = None,
+        attempt: RefreshAttempt | None = None,
     ) -> Workspace | None:
         """Open a step, replacing any earlier one with the same label."""
 
@@ -1213,10 +1301,16 @@ class WorkspaceStore:
                 RefreshStep(label=label, started_at=now_iso(), log_path=log_path),
             ]
 
-        return await self.update_state(slug, change)
+        return await self.update_state(slug, change, attempt=attempt)
 
     async def finish_refresh_step(
-        self, slug: str, label: str, status: StepStatus, *, exit_code: int | None = None
+        self,
+        slug: str,
+        label: str,
+        status: StepStatus,
+        *,
+        exit_code: int | None = None,
+        attempt: RefreshAttempt | None = None,
     ) -> Workspace | None:
         def change(record: Workspace) -> None:
             record.refresh_steps = [
@@ -1228,15 +1322,17 @@ class WorkspaceStore:
                 for step in record.refresh_steps
             ]
 
-        return await self.update_state(slug, change)
+        return await self.update_state(slug, change, attempt=attempt)
 
-    async def mark_refresh_builder(self, slug: str, sandbox_id: str | None) -> Workspace | None:
+    async def mark_refresh_builder(
+        self, slug: str, sandbox_id: str | None, *, attempt: RefreshAttempt | None = None
+    ) -> Workspace | None:
         """Publish (or clear) the builder a poll may read the live trace from."""
 
         def change(record: Workspace) -> None:
             record.refresh_sandbox_id = sandbox_id
 
-        return await self.update_state(slug, change)
+        return await self.update_state(slug, change, attempt=attempt)
 
     async def mark_refresh_settled(
         self,
@@ -1245,6 +1341,7 @@ class WorkspaceStore:
         *,
         log: str | None = None,
         error: str | None = None,
+        attempt: RefreshAttempt | None = None,
     ) -> Workspace | None:
         """Record how the last rebuild went, without touching snapshot state.
 
@@ -1268,13 +1365,18 @@ class WorkspaceStore:
                 for step in record.refresh_steps
             ]
 
-        return await self.update_state(slug, change)
+        return await self.update_state(slug, change, attempt=attempt)
 
     async def set_refresh_run_id(self, slug: str, run_id: str) -> Workspace | None:
-        """Record the run a refresh is running in, so a poll can tell it from a later one."""
+        """Record the run a refresh is running in, so a poll can tell it from a later one.
+
+        Never while another run's refresh is in flight: that run would no longer
+        recognise its own marker if its job is retried.
+        """
 
         def change(record: Workspace) -> None:
-            record.refresh_run_id = run_id
+            if not record.refresh_in_flight(run_id):
+                record.refresh_run_id = run_id
 
         return await self.update_state(slug, change)
 

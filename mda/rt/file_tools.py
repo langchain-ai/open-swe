@@ -2,7 +2,8 @@
 
 They run in the thread's box, which MDA owns, or against the thread's files on the
 backend (``rt.remote_files``): where the box is not MDA's, such as a thread bridged
-to a person's machine, and on the paths the backend serves, such as skills.
+to a person's machine, and on the paths the backend serves. Reads of the run's
+skills are answered from the skills this runtime keeps (``rt.skills``).
 
 Around every call: a command that may push or open a pull request is first put to
 the backend's guards, which inspect the push and may need a person's approval, so
@@ -23,7 +24,6 @@ from collections.abc import Awaitable, Callable, Iterable, Mapping
 from functools import partial
 from typing import Final
 
-from deepagents.backends.protocol import BackendProtocol
 from langchain.agents.middleware import AgentMiddleware
 from langchain.agents.middleware.types import ModelRequest, ModelResponse
 from langchain.tools import ToolRuntime
@@ -38,9 +38,9 @@ from runtime_api.catalog import FilesSpec
 from runtime_api.endpoint import call
 from runtime_api.operations import CHECK_SHELL, ShellCheck
 
-from rt.backend import OpenSweBackend
+from rt.backend import OpenSweBackend, RunLocal
 from rt.middleware import reported
-from rt.remote_files import FILE_TOOLS
+from rt.remote_files import FILE_TOOLS, RemoteFiles, remote_file_tools
 from rt.subdir_agents import SubdirAgentsReadMiddleware
 from rt.tool_errors import ToolErrorMiddleware
 from rt.tools import run_id
@@ -76,37 +76,56 @@ Handler = Callable[[ToolCallRequest], Awaitable[ToolMessage | Command]]
 
 
 class FileToolsMiddleware(AgentMiddleware):
-    """Run the file and shell tools where the thread's files are, with their checks."""
+    """Run the file and shell tools where the thread's files are, with their checks.
+
+    Where they are, and which checks apply, is the run's: the graph is shared by every
+    run, so each call reads them from the run in progress.
+    """
 
     def __init__(
         self,
         backend: OpenSweBackend,
-        spec: FilesSpec,
         execute_timeout: int,
         *,
-        remote: Mapping[str, BaseTool],
-        remote_files: BackendProtocol,
-        in_box: bool,
+        remote_files: RemoteFiles,
+        skills: Mapping[str, BaseTool] | None = None,
     ) -> None:
         self._backend = backend
-        self._remote = dict(remote)
-        self._in_box = in_box
+        self._remote_files = remote_files
+        # Each run's view of the backend's files as deepagents' own tools, with large
+        # results under the run's artifacts root, which a bridged thread has its own of.
+        self._remote_by_run = RunLocal(
+            lambda: remote_file_tools(
+                self._remote_files, self._backend.run.catalog.files.artifacts_root
+            )
+        )
+        # The run's skills, which this runtime keeps itself (``rt.skills``).
+        self._skills = dict(skills or {})
         # The box's own tools, as the model is offered them; code mode runs them from here.
         self._box: dict[str, BaseTool] = {}
-        self._backend_paths = tuple(spec.backend_paths)
-        self._guards_shell = "shell_commands" in spec.guards
         self._execute_timeout = execute_timeout
         self._tool_errors = ToolErrorMiddleware(backend)
-        self._image_reads = ValidateImageReadsMiddleware() if "image_reads" in spec.checks else None
-        self._agents_md = (
-            SubdirAgentsReadMiddleware(None if in_box else remote_files)
-            if "agents_md" in spec.checks
-            else None
-        )
+        self._image_reads = ValidateImageReadsMiddleware()
+        self._agents_md_in_box = SubdirAgentsReadMiddleware(None)
+        self._agents_md_remote = SubdirAgentsReadMiddleware(remote_files)
+
+    @property
+    def _in_box(self) -> bool:
+        """Whether the run's files are in MDA's box, rather than only on the backend."""
+        return self._backend.run.planned.sandbox is not None
+
+    @property
+    def _spec(self) -> FilesSpec:
+        return self._backend.run.catalog.files
+
+    @property
+    def _remote(self) -> dict[str, BaseTool]:
+        return self._remote_by_run.get(self._backend.run)
 
     def code_tools(self, names: Iterable[str]) -> list[StructuredTool]:
         """The file and shell tools among ``names``, for code mode, each call checked."""
-        return [self._code_tool(self._remote[name]) for name in sorted({*names} & {*self._remote})]
+        templates = remote_file_tools(self._remote_files, "/")
+        return [self._code_tool(templates[name]) for name in sorted({*names} & {*templates})]
 
     def _code_tool(self, template: BaseTool) -> StructuredTool:
         name = template.name
@@ -130,12 +149,11 @@ class FileToolsMiddleware(AgentMiddleware):
         request: ModelRequest,
         handler: Callable[[ModelRequest], Awaitable[ModelResponse]],
     ) -> ModelResponse:
-        if self._in_box:
-            self._box.update(
-                (tool.name, tool)
-                for tool in request.tools
-                if isinstance(tool, BaseTool) and tool.name in FILE_TOOLS
-            )
+        self._box.update(
+            (tool.name, tool)
+            for tool in request.tools
+            if isinstance(tool, BaseTool) and tool.name in FILE_TOOLS
+        )
         return await handler(request)
 
     async def awrap_tool_call(
@@ -144,8 +162,11 @@ class FileToolsMiddleware(AgentMiddleware):
         call_ = request.tool_call
         if call_["name"] not in FILE_TOOLS:
             return await handler(request)
-        if self._in_box and self._on_backend(call_["name"], call_["args"]):
-            run: Handler = self._run_remote
+        spec = self._spec
+        if _under(self._backend.run.catalog.skill_sources, call_["name"], call_["args"]):
+            run: Handler = self._run_skill
+        elif not self._in_box or _under(spec.backend_paths, call_["name"], call_["args"]):
+            run = self._run_remote
         else:
             run = partial(_retried, handler=partial(self._within_deadline, handler=handler))
         # The transcript records a call the guards refuse, with their reason, as any other.
@@ -163,18 +184,12 @@ class FileToolsMiddleware(AgentMiddleware):
             return screened
         return await handler(screened)
 
-    def _on_backend(self, name: str, arguments: Mapping[str, object]) -> bool:
-        path = _absolute(arguments.get(_PATH_ARGUMENTS.get(name, "")))
-        return path is not None and any(
-            path == prefix.rstrip("/") or path.startswith(prefix) for prefix in self._backend_paths
-        )
-
     async def _screened(self, request: ToolCallRequest) -> ToolCallRequest | ToolMessage:
         """``request`` as the guards let it run, an approved push as they fixed it, or their refusal."""
         command = request.tool_call["args"].get("command")
         if (
             request.tool_call["name"] != "execute"
-            or not self._guards_shell
+            or "shell_commands" not in self._spec.guards
             or not isinstance(command, str)
             or not _guarded(command)
         ):
@@ -198,6 +213,18 @@ class FileToolsMiddleware(AgentMiddleware):
         """The call against the backend's files, as the box's own tool would run it."""
         return await _invoked(self._remote[request.tool_call["name"]], request)
 
+    async def _run_skill(self, request: ToolCallRequest) -> ToolMessage | Command:
+        """The call against the run's skills, as the box's own tool would run it."""
+        tool = self._skills.get(request.tool_call["name"])
+        if tool is None:
+            return ToolMessage(
+                content="Skills are read-only here",
+                tool_call_id=request.tool_call.get("id") or "",
+                name=request.tool_call["name"],
+                status="error",
+            )
+        return await _invoked(tool, request)
+
     async def _run_own(self, request: ToolCallRequest) -> ToolMessage | Command:
         """A code mode call, run by the tool the model's own call of it runs."""
         tools = self._box if self._in_box else self._remote
@@ -205,8 +232,14 @@ class FileToolsMiddleware(AgentMiddleware):
 
     async def _checked(self, request: ToolCallRequest, handler: Handler) -> ToolMessage | Command:
         """``handler`` in the graph's own order: image reads, then tool errors, then AGENTS.md."""
+        checks = self._spec.checks
+        agents_md = self._agents_md_in_box if self._in_box else self._agents_md_remote
         checked = handler
-        for check in (self._agents_md, self._tool_errors, self._image_reads):
+        for check in (
+            agents_md if "agents_md" in checks else None,
+            self._tool_errors,
+            self._image_reads if "image_reads" in checks else None,
+        ):
             if check is not None:
                 checked = partial(check.awrap_tool_call, handler=checked)
         return await checked(request)
@@ -245,6 +278,14 @@ async def _invoked(tool: BaseTool, request: ToolCallRequest) -> ToolMessage | Co
     if isinstance(result, ToolMessage | Command):
         return result
     return ToolMessage(content=str(result), tool_call_id=call_id, name=tool.name)
+
+
+def _under(prefixes: Iterable[str], name: str, arguments: Mapping[str, object]) -> bool:
+    """Whether the path ``name``'s call acts on is under one of ``prefixes``."""
+    path = _absolute(arguments.get(_PATH_ARGUMENTS.get(name, "")))
+    return path is not None and any(
+        path == prefix.rstrip("/") or path.startswith(prefix) for prefix in prefixes
+    )
 
 
 def _guarded(command: str) -> bool:

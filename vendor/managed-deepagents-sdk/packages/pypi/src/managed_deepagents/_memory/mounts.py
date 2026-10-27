@@ -2,8 +2,10 @@
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Literal, TypeVar
+import posixpath
+from typing import TYPE_CHECKING, Any, Literal, TypeVar, cast
 
+from deepagents.backends.composite import CompositeBackend
 from deepagents.backends.protocol import (
     BackendProtocol,
     EditResult,
@@ -26,7 +28,7 @@ from managed_deepagents._memory.paths import (
 
 if TYPE_CHECKING:
     from deepagents import FilesystemPermission
-    from deepagents.backends import CompositeBackend, StateBackend
+    from deepagents.backends import StateBackend
 
 _ResultT = TypeVar("_ResultT")
 
@@ -74,7 +76,7 @@ def managed_context_routes(
     selected_skills_backend: BackendProtocol | None = None,
 ) -> dict[str, BackendProtocol]:
     routes: dict[str, BackendProtocol] = {
-        "/instructions.md": MountedPathBackend.file(
+        "/instructions.md/": MountedPathBackend.file(
             context_backend, "instructions.md", "/instructions.md"
         ),
         "/skills/": selected_skills_backend
@@ -250,16 +252,28 @@ class MountedPathBackend(BackendProtocol):
             read_only=True,
         )
 
+    @property
+    def visible_file(self) -> str | None:
+        return self._visible_file
+
     def ls(self, path: str = "/") -> LsResult:
-        return self._remap_path_collections(self._backend.ls(self._repo_path(path)))
+        if error := self._missing_under_file(path):
+            return LsResult(error=error)
+        return self._remap_path_collections(self._backend.ls(self._ls_path(path)))
 
     async def als(self, path: str = "/") -> LsResult:
-        return self._remap_path_collections(await self._backend.als(self._repo_path(path)))
+        if error := self._missing_under_file(path):
+            return LsResult(error=error)
+        return self._remap_path_collections(await self._backend.als(self._ls_path(path)))
 
     def read(self, file_path: str, offset: int = 0, limit: int = 2000) -> ReadResult:
+        if error := self._missing_under_file(file_path):
+            return ReadResult(error=error)
         return self._backend.read(self._repo_path(file_path), offset=offset, limit=limit)
 
     async def aread(self, file_path: str, offset: int = 0, limit: int = 2000) -> ReadResult:
+        if error := self._missing_under_file(file_path):
+            return ReadResult(error=error)
         return await self._backend.aread(self._repo_path(file_path), offset=offset, limit=limit)
 
     def grep(
@@ -270,6 +284,8 @@ class MountedPathBackend(BackendProtocol):
         *,
         max_count: int | None = None,
     ) -> GrepResult:
+        if error := self._missing_under_file(path):
+            return GrepResult(error=error)
         repo_path = self._repo_path(path) if path is not None else path
         repo_glob = self._repo_glob(glob) if glob else glob
         # Forward the cap only when set, so wrapped backends without the
@@ -289,6 +305,8 @@ class MountedPathBackend(BackendProtocol):
         *,
         max_count: int | None = None,
     ) -> GrepResult:
+        if error := self._missing_under_file(path):
+            return GrepResult(error=error)
         repo_path = self._repo_path(path) if path is not None else path
         repo_glob = self._repo_glob(glob) if glob else glob
         result = (
@@ -299,24 +317,32 @@ class MountedPathBackend(BackendProtocol):
         return self._remap_path_collections(result)
 
     def glob(self, pattern: str, path: str | None = None) -> GlobResult:
+        if error := self._missing_under_file(path):
+            return GlobResult(error=error)
+        assert_safe_mounted_path(pattern)
         return self._remap_path_collections(
-            self._backend.glob(self._repo_glob(pattern), self._repo_path(path or "/"))
+            self._backend.glob(pattern, self._repo_path(path or "/"))
         )
 
     async def aglob(self, pattern: str, path: str | None = None) -> GlobResult:
+        if error := self._missing_under_file(path):
+            return GlobResult(error=error)
+        assert_safe_mounted_path(pattern)
         return self._remap_path_collections(
-            await self._backend.aglob(self._repo_glob(pattern), self._repo_path(path or "/"))
+            await self._backend.aglob(pattern, self._repo_path(path or "/"))
         )
 
     def write(self, file_path: str, content: str) -> WriteResult:
-        self._assert_writable()
+        if error := self._missing_under_file(file_path) or self._read_only_error():
+            return WriteResult(error=error)
         return self._with_visible_path(
             self._backend.write(self._repo_path(file_path), content),
             file_path,
         )
 
     async def awrite(self, file_path: str, content: str) -> WriteResult:
-        self._assert_writable()
+        if error := self._missing_under_file(file_path) or self._read_only_error():
+            return WriteResult(error=error)
         return self._with_visible_path(
             await self._backend.awrite(self._repo_path(file_path), content),
             file_path,
@@ -329,7 +355,8 @@ class MountedPathBackend(BackendProtocol):
         new_string: str,
         replace_all: bool = False,
     ) -> EditResult:
-        self._assert_writable()
+        if error := self._missing_under_file(file_path) or self._read_only_error():
+            return EditResult(error=error)
         return self._with_visible_path(
             self._backend.edit(
                 self._repo_path(file_path),
@@ -347,7 +374,8 @@ class MountedPathBackend(BackendProtocol):
         new_string: str,
         replace_all: bool = False,
     ) -> EditResult:
-        self._assert_writable()
+        if error := self._missing_under_file(file_path) or self._read_only_error():
+            return EditResult(error=error)
         return self._with_visible_path(
             await self._backend.aedit(
                 self._repo_path(file_path),
@@ -359,7 +387,8 @@ class MountedPathBackend(BackendProtocol):
         )
 
     def upload_files(self, files: list[tuple[str, bytes]]) -> list[FileUploadResponse]:
-        self._assert_writable()
+        if self._read_only:
+            return self._read_only_uploads(files)
         responses = self._backend.upload_files(
             [(self._repo_path(path), content) for path, content in files]
         )
@@ -369,7 +398,8 @@ class MountedPathBackend(BackendProtocol):
         ]
 
     async def aupload_files(self, files: list[tuple[str, bytes]]) -> list[FileUploadResponse]:
-        self._assert_writable()
+        if self._read_only:
+            return self._read_only_uploads(files)
         responses = await self._backend.aupload_files(
             [(self._repo_path(path), content) for path, content in files]
         )
@@ -379,17 +409,23 @@ class MountedPathBackend(BackendProtocol):
         ]
 
     def download_files(self, paths: list[str]) -> list[FileDownloadResponse]:
-        responses = self._backend.download_files([self._repo_path(path) for path in paths])
-        return [
-            self._with_visible_path(response, paths[index])
-            for index, response in enumerate(responses)
-        ]
+        found = [path for path in paths if self._missing_under_file(path) is None]
+        responses = self._backend.download_files([self._repo_path(path) for path in found])
+        return self._download_responses(paths, found, responses)
 
     async def adownload_files(self, paths: list[str]) -> list[FileDownloadResponse]:
-        responses = await self._backend.adownload_files([self._repo_path(path) for path in paths])
+        found = [path for path in paths if self._missing_under_file(path) is None]
+        responses = await self._backend.adownload_files([self._repo_path(path) for path in found])
+        return self._download_responses(paths, found, responses)
+
+    def _download_responses(
+        self, paths: list[str], found: list[str], responses: list[FileDownloadResponse]
+    ) -> list[FileDownloadResponse]:
         return [
-            self._with_visible_path(response, paths[index])
-            for index, response in enumerate(responses)
+            self._with_visible_path(responses[found.index(path)], path)
+            if path in found
+            else FileDownloadResponse(path=path, content=None, error="file_not_found")
+            for path in paths
         ]
 
     def _repo_path(self, path: str) -> str:
@@ -401,6 +437,20 @@ class MountedPathBackend(BackendProtocol):
             return ensure_absolute(suffix)
         joined = f"{self._repo_prefix}/{suffix}" if suffix else self._repo_prefix
         return ensure_absolute(joined)
+
+    def _ls_path(self, path: str) -> str:
+        """A file mount lists its parent and keeps only its own file."""
+        if self._repo_file is not None:
+            return posixpath.dirname(ensure_absolute(self._repo_file))
+        return self._repo_path(path)
+
+    def _missing_under_file(self, path: str | None) -> str | None:
+        """The tool error for a path under a file mount, which has no children."""
+        suffix = trim_slashes(path or "")
+        if not suffix or self._visible_file is None:
+            return None
+        file = self._visible_file
+        return f"'{file}/{suffix}' does not exist: {file} is a file, not a directory"
 
     def _repo_glob(self, pattern: str) -> str:
         assert_safe_mounted_path(pattern)
@@ -434,6 +484,13 @@ class MountedPathBackend(BackendProtocol):
         for key in ("entries", "files", "matches"):
             values = result_value(result, key)
             if isinstance(values, list):
+                if self._repo_file is not None:
+                    repo_file = ensure_absolute(self._repo_file)
+                    values[:] = [
+                        item
+                        for item in values
+                        if ensure_absolute(str(result_value(item, "path"))) == repo_file
+                    ]
                 for item in values:
                     set_result_path(item, self._from_repo_path)
         return result
@@ -442,12 +499,80 @@ class MountedPathBackend(BackendProtocol):
         set_result_path(result, lambda _: self._visible_path(backend_path))
         return result
 
-    def _assert_writable(self) -> None:
-        """Deploy-owned mounts (instructions, skills) reject writes."""
+    def _read_only_error(self) -> str | None:
+        """The tool error for a write to a deploy-owned mount (instructions, skills)."""
         if not self._read_only:
-            return
+            return None
         label = self._visible_file if self._visible_file is not None else self._visible_prefix
-        raise ValueError(f"Context Hub mount {label} is read-only")
+        return f"Context Hub mount {label} is read-only"
+
+    def _read_only_uploads(self, files: list[tuple[str, bytes]]) -> list[FileUploadResponse]:
+        return [
+            FileUploadResponse(path=self._visible_path(path), error="permission_denied")
+            for path, _ in files
+        ]
+
+
+class ManagedCompositeBackend(CompositeBackend):
+    """Lists file mounts as files.
+
+    deepagents treats every route as a directory: ``ls("/")`` marks it
+    ``is_dir``, and paths in routed results keep its trailing ``/``.
+    """
+
+    def __init__(
+        self, default: BackendProtocol, routes: dict[str, BackendProtocol], **kwargs: Any
+    ) -> None:
+        super().__init__(default, routes, **kwargs)
+        self._file_mounts = {
+            backend.visible_file
+            for backend in routes.values()
+            if isinstance(backend, MountedPathBackend) and backend.visible_file is not None
+        }
+
+    def ls(self, path: str) -> LsResult:
+        return self._as_file_mounts(super().ls(path))
+
+    async def als(self, path: str) -> LsResult:
+        return self._as_file_mounts(await super().als(path))
+
+    def glob(self, pattern: str, path: str | None = None) -> GlobResult:
+        return self._as_file_mounts(super().glob(pattern, path))
+
+    async def aglob(self, pattern: str, path: str | None = None) -> GlobResult:
+        return self._as_file_mounts(await super().aglob(pattern, path))
+
+    def grep(
+        self,
+        pattern: str,
+        path: str | None = None,
+        glob: str | None = None,
+        *,
+        max_count: int | None = None,
+    ) -> GrepResult:
+        return self._as_file_mounts(super().grep(pattern, path, glob, max_count=max_count))
+
+    async def agrep(
+        self,
+        pattern: str,
+        path: str | None = None,
+        glob: str | None = None,
+        *,
+        max_count: int | None = None,
+    ) -> GrepResult:
+        return self._as_file_mounts(await super().agrep(pattern, path, glob, max_count=max_count))
+
+    def _as_file_mounts(self, result: _ResultT) -> _ResultT:
+        for key in ("entries", "matches"):
+            values = result_value(result, key)
+            for item in values if isinstance(values, list) else []:
+                entry = cast("dict[str, object]", item)
+                path = strip_trailing_slash(str(entry["path"]))
+                if path in self._file_mounts:
+                    entry["path"] = path
+                    if "is_dir" in entry:
+                        entry["is_dir"] = False
+        return result
 
 
 def managed_context_permissions(

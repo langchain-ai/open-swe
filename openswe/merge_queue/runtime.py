@@ -5,6 +5,7 @@ import logging
 from collections.abc import Callable, Mapping
 from contextlib import AbstractAsyncContextManager, AsyncExitStack
 from datetime import UTC, datetime, timedelta
+from typing import TYPE_CHECKING
 from uuid import UUID, uuid7
 
 from pydantic import BaseModel, ConfigDict
@@ -12,9 +13,13 @@ from pydantic import BaseModel, ConfigDict
 from openswe.github.http import RepoClient
 from openswe.jobs.queue import Job
 from openswe.merge_queue.admission import QueuePolicy
+from openswe.merge_queue.dispatch import DispatchGateway
 from openswe.merge_queue.scheduler import BatchScheduler
 from openswe.merge_queue.store import LeaseLost, MergeQueue
 from openswe.merge_queue.validation import CandidateValidation
+
+if TYPE_CHECKING:
+    from openswe.merge_queue.native import NativeQueueRuntime
 
 JOB_KIND = "merge_queue_reconcile"
 logger = logging.getLogger(__name__)
@@ -31,6 +36,7 @@ class QueueRuntime:
         self,
         policies: Mapping[UUID, QueuePolicy],
         open_repo: Callable[[MergeQueue], AbstractAsyncContextManager[RepoClient]],
+        dispatcher: DispatchGateway,
         *,
         retention_days: int = 90,
     ):
@@ -38,13 +44,14 @@ class QueueRuntime:
             raise ValueError("Retention must be between 7 and 365 days")
         self.policies, self.open_repo = dict(policies), open_repo
         self.retention_days = retention_days
+        self.dispatcher = dispatcher
 
     async def reconcile(self, payload: QueueJob) -> None:
         policy = self.policies.get(payload.queue_id)
         if policy is None:
             return
         queue = await MergeQueue.load(payload.queue_id, payload.workspace_id)
-        if queue is None:
+        if queue is None or queue.mode != "custom":
             return
         lease = await queue.claim(uuid7(), timedelta(seconds=60))
         if lease is None:
@@ -62,7 +69,9 @@ class QueueRuntime:
                         await scheduler.reconcile(lease, seconds=180)
                         await queue.renew(lease, timedelta(seconds=60))
                         async with asyncio.timeout(45):
-                            await CandidateValidation(queue, repo, policy).reconcile(lease)
+                            await CandidateValidation(
+                                queue, repo, policy, self.dispatcher
+                            ).reconcile(lease)
                 except asyncio.CancelledError:
                     cancelled = True
                     raise
@@ -88,7 +97,7 @@ class QueueRuntime:
 
 
 # Only trusted server composition supplies policy and authentication, never job payloads.
-RUNTIME: QueueRuntime | None = None
+RUNTIME: QueueRuntime | NativeQueueRuntime | None = None
 
 
 async def reconcile_queue(job: Job) -> None:

@@ -4,12 +4,7 @@ from typing import Any
 
 from fastapi import APIRouter, HTTPException
 
-from openswe.dashboard.options import (
-    FABLE_MODEL_IDS,
-    SUPPORTED_MODELS,
-    gate_fable_model,
-    models_with_profile_context_windows,
-)
+from openswe.dashboard.options import available_requested_models, gate_fable_model
 from openswe.dashboard.workspace_settings import get_workspace_settings
 from openswe.workspaces.store import DEFAULT_WORKSPACE_SLUG, slugify
 
@@ -41,13 +36,8 @@ async def options(workspace: str = DEFAULT_WORKSPACE_SLUG) -> dict[str, Any]:
     subagent_model, subagent_effort = gate_fable_model(
         subagent_model, subagent_effort, fable_enabled=fable_enabled
     )
-    models = (
-        SUPPORTED_MODELS
-        if fable_enabled
-        else [m for m in SUPPORTED_MODELS if m["id"] not in FABLE_MODEL_IDS]
-    )
     return {
-        "models": models_with_profile_context_windows(models),
+        "models": list(available_requested_models(fable_enabled=fable_enabled).values()),
         "default_agent_model": agent_model,
         "default_agent_reasoning_effort": agent_effort,
         "default_agent_subagent_model": subagent_model,

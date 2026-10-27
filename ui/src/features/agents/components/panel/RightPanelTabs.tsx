@@ -22,6 +22,7 @@ import { FileIcon } from "@phosphor-icons/react/dist/ssr/File"
 import { FilesIcon } from "@phosphor-icons/react/dist/ssr/Files"
 import { GitDiffIcon } from "@phosphor-icons/react/dist/ssr/GitDiff"
 import { GlobeIcon } from "@phosphor-icons/react/dist/ssr/Globe"
+import { PulseIcon } from "@phosphor-icons/react/dist/ssr/Pulse"
 import { RobotIcon } from "@phosphor-icons/react/dist/ssr/Robot"
 import { TerminalWindowIcon } from "@phosphor-icons/react/dist/ssr/TerminalWindow"
 import type {
@@ -59,9 +60,12 @@ interface RightPanelTabsProps {
   onAddFiles: () => void
   /** Offered only where a thread can have a browser window. */
   onAddBrowser?: () => void
+  /** Offered only where a thread can run commands and monitors in the background. */
+  onAddBackgroundWork?: () => void
   terminalAvailable: boolean
   diffAvailable: boolean
   browserAvailable?: boolean
+  backgroundWorkAvailable?: boolean
   children: ReactNode
 }
 
@@ -88,9 +92,11 @@ type SurfaceLauncherProps = Pick<
   | "onAddDiff"
   | "onAddFiles"
   | "onAddBrowser"
+  | "onAddBackgroundWork"
   | "terminalAvailable"
   | "diffAvailable"
   | "browserAvailable"
+  | "backgroundWorkAvailable"
 >
 
 /** A surface the panel can open, as the add menu and the empty state offer it. */
@@ -151,6 +157,20 @@ function surfaceLaunchers(props: SurfaceLauncherProps): Array<SurfaceLauncher> {
               "The browser is available once this thread's agent has started.",
             unavailableHint: "Available once the thread starts.",
             onClick: props.onAddBrowser,
+          },
+        ]
+      : []),
+    ...(props.onAddBackgroundWork
+      ? [
+          {
+            label: "Background work",
+            description: "Commands and monitors running for this thread.",
+            icon: PulseIcon,
+            available: props.backgroundWorkAvailable ?? false,
+            disabledReason:
+              "Nothing is running in the background for this thread.",
+            unavailableHint: "Available while a command or monitor runs.",
+            onClick: props.onAddBackgroundWork,
           },
         ]
       : []),
@@ -422,6 +442,8 @@ export function surfaceTitle(
       return "Agents"
     case "preview":
       return "Browser"
+    case "background":
+      return "Background work"
   }
 }
 
@@ -432,6 +454,7 @@ const SURFACE_ICONS = {
   file: FileIcon,
   terminal: TerminalWindowIcon,
   agents: RobotIcon,
+  background: PulseIcon,
 } as const satisfies Record<RightPanelSurface["kind"], unknown>
 
 function SurfaceIcon({ surface }: { surface: RightPanelSurface }) {

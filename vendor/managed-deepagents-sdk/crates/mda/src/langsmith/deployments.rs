@@ -291,7 +291,7 @@ impl Client {
             &http,
             Method::PUT,
             &format!("{}{path}", self.host_backend_url),
-            &self.api_key()?,
+            self.api_key(),
             self.tenant_id.as_deref(),
             &[],
             Some(&artifacts),
@@ -319,7 +319,7 @@ impl Client {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::langsmith::{ApiError, Credential, REQUEST_TIMEOUT};
+    use crate::langsmith::ApiError;
     use reqwest::StatusCode;
     use std::io::{Read, Write};
     use std::net::{TcpListener, TcpStream};
@@ -328,14 +328,8 @@ mod tests {
 
     fn client_for_host(host_backend_url: String) -> Client {
         Client {
-            http: crate::http::client_builder()
-                .timeout(REQUEST_TIMEOUT)
-                .build()
-                .unwrap(),
-            credential: Credential::ApiKey("key".into()),
-            tenant_id: Some("tenant".into()),
             host_backend_url,
-            platform_api_url: None,
+            ..Client::for_test("http://unused.invalid")
         }
     }
 

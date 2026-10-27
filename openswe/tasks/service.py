@@ -12,6 +12,7 @@ from langgraph_sdk.schema import RunStatus
 from pydantic import JsonValue, TypeAdapter
 from sqlalchemy import text, update
 
+from openswe.agent_api.client import MDA_GRAPH_METADATA_KEY, MDA_WORKER_GRAPH_ID
 from openswe.dashboard.oauth import enforce_github_login_gate
 from openswe.dashboard.options import available_requested_models, normalize_model_choice
 from openswe.dashboard.profiles import get_profile
@@ -20,7 +21,6 @@ from openswe.database import postgres
 from openswe.dispatch import COMPLETION_WEBHOOK_URL
 from openswe.github.token_scope import GITHUB_TOKEN_REPOSITORIES_KEY
 from openswe.prompts import prompt
-from openswe.remote_runtime.client import MDA_GRAPH_METADATA_KEY, MDA_WORKER_GRAPH_ID
 from openswe.sandboxes.tool_access import SANDBOX_PROXY_CONFIG_METADATA_KEY
 from openswe.source_context import SourceContext
 from openswe.tasks import presentation, store

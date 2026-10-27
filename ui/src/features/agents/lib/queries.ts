@@ -14,6 +14,7 @@ import { localThreadKeys } from "./desktopLocal"
 import type { InfiniteData, QueryClient, QueryKey } from "@tanstack/react-query"
 import type {
   ScheduleUpdateRequest,
+  ThreadBrowser,
   ThreadMoveDestination,
   ThreadsPage,
   ThreadsPageParams,
@@ -29,12 +30,13 @@ import type {
   WorkflowApprovalStatus,
   WorkflowPushApprovalsResponse,
 } from "./types"
+import { CLAUDE_CODE_SOURCE } from "./sidebarFilter"
+import type { PassageReply } from "@/features/agents/utils/passageReply"
 import { useSidebarPrefsHydrated } from "./sidebarPrefs"
 import type { ChatSort } from "./sidebarPrefs"
 import type { Skill, SkillInput } from "@/lib/api"
 import { invalidationTopic } from "@/lib/invalidations/topics"
 import { api } from "@/lib/api"
-import { chatRoutes } from "@/lib/chatRoutes"
 import { optimisticUpdate } from "@/lib/optimistic"
 import { reportError } from "@/lib/errorReporting"
 
@@ -45,6 +47,7 @@ export const agentThreadKeys = {
     includeResolved: boolean
     includeAutomations: boolean
     owned: boolean
+    includeClaudeCode: boolean
   }) => ["agent-threads", "lists", "repos", params] as const,
   sidebarActive: (threadId: string) =>
     ["agent-threads", "lists", "sidebar-active", threadId] as const,
@@ -55,6 +58,8 @@ export const agentThreadKeys = {
     ["agent-threads", threadId, "queued-messages"] as const,
   backgroundWork: (threadId: string) =>
     ["agent-threads", threadId, "background-work"] as const,
+  backgroundOutput: (threadId: string, taskId: string) =>
+    ["agent-threads", threadId, "background-work", taskId, "output"] as const,
   branchDiff: (threadId: string) =>
     ["agent-threads", threadId, "branch-diff"] as const,
   workingTreeDiff: (threadId: string) =>
@@ -629,14 +634,23 @@ export function useSeedAgentThreadDetails(
 
 export const SIDEBAR_PAGE_SIZE = 10
 
+/** The sources the sidebar asks the server to leave out. */
+function excludedSources(
+  includeClaudeCode: boolean
+): Pick<ThreadsPageParams, "excludeSources"> {
+  return includeClaudeCode ? {} : { excludeSources: [CLAUDE_CODE_SOURCE] }
+}
+
 function sidebarPageParams({
   includeAutomations,
   includeResolved,
   owned,
+  includeClaudeCode,
 }: {
   includeAutomations: boolean
   includeResolved: boolean
   owned: boolean
+  includeClaudeCode: boolean
 }): Omit<ThreadsPageParams, "offset"> {
   return {
     limit: SIDEBAR_PAGE_SIZE,
@@ -644,6 +658,7 @@ function sidebarPageParams({
     ...(includeResolved ? {} : { resolved: false }),
     scope: includeAutomations ? "all" : "interactive",
     ...(owned ? { owned } : {}),
+    ...excludedSources(includeClaudeCode),
   }
 }
 
@@ -662,18 +677,24 @@ export function useSidebarRepos({
   includeAutomations = false,
   includeResolved = false,
   owned = false,
+  includeClaudeCode = true,
   enabled = true,
 }: {
   includeAutomations?: boolean
   includeResolved?: boolean
   owned?: boolean
+  includeClaudeCode?: boolean
   enabled?: boolean
 }) {
   const params = { includeAutomations, includeResolved, owned }
   const hydrated = useSidebarPrefsHydrated()
   return useQuery({
-    queryKey: agentThreadKeys.repos(params),
-    queryFn: () => agentsApi.listThreadRepos(params),
+    queryKey: agentThreadKeys.repos({ ...params, includeClaudeCode }),
+    queryFn: () =>
+      agentsApi.listThreadRepos({
+        ...params,
+        ...excludedSources(includeClaudeCode),
+      }),
     enabled: enabled && hydrated,
     placeholderData: (previous) => previous,
     refetchOnMount: "always",
@@ -710,6 +731,9 @@ export function useSidebarActiveThread({
   })
   // An open worker is already listed under its coordinator; listing it again on its own duplicates it.
   if (loaded && loaded.id !== activeThreadId) return loaded
+  if (detail && loaded?.taskWorkers) {
+    return { ...detail, taskWorkers: loaded.taskWorkers }
+  }
   return detail ?? loaded ?? query.data
 }
 
@@ -740,16 +764,23 @@ export function sidebarRecentsParams({
   includeAutomations = false,
   includeResolved = false,
   owned = false,
+  includeClaudeCode = true,
   sort = "created",
 }: {
   repoMode: boolean
   includeAutomations?: boolean
   includeResolved?: boolean
   owned?: boolean
+  includeClaudeCode?: boolean
   sort?: ChatSort
 }): Omit<ThreadsPageParams, "offset"> {
   return {
-    ...sidebarPageParams({ includeAutomations, includeResolved, owned }),
+    ...sidebarPageParams({
+      includeAutomations,
+      includeResolved,
+      owned,
+      includeClaudeCode,
+    }),
     ...(repoMode ? { ownerless: true } : {}),
     sortBy: sort === "created" ? "created_at" : "updated_at",
   }
@@ -760,6 +791,7 @@ export function useSidebarRecents({
   includeAutomations = false,
   includeResolved = false,
   owned = false,
+  includeClaudeCode = true,
   sort = "created",
   enabled = true,
 }: {
@@ -767,6 +799,7 @@ export function useSidebarRecents({
   includeAutomations?: boolean
   includeResolved?: boolean
   owned?: boolean
+  includeClaudeCode?: boolean
   sort?: ChatSort
   enabled?: boolean
 }) {
@@ -776,6 +809,7 @@ export function useSidebarRecents({
       includeAutomations,
       includeResolved,
       owned,
+      includeClaudeCode,
       sort,
     }),
     enabled
@@ -787,6 +821,7 @@ export function useSidebarRepoThreads({
   includeAutomations = false,
   includeResolved = false,
   owned = false,
+  includeClaudeCode = true,
   sort = "created",
   enabled = true,
 }: {
@@ -794,12 +829,18 @@ export function useSidebarRepoThreads({
   includeAutomations?: boolean
   includeResolved?: boolean
   owned?: boolean
+  includeClaudeCode?: boolean
   sort?: ChatSort
   enabled?: boolean
 }) {
   return useSidebarThreadPages(
     {
-      ...sidebarPageParams({ includeAutomations, includeResolved, owned }),
+      ...sidebarPageParams({
+        includeAutomations,
+        includeResolved,
+        owned,
+        includeClaudeCode,
+      }),
       ...(repoFullName ? { repo: repoFullName } : {}),
       sortBy: sort === "created" ? "created_at" : "updated_at",
     },
@@ -880,25 +921,50 @@ export function useAgentThreadQueuedMessages(threadId: string) {
   })
 }
 
-// Each read mints a new act link and reloads the framed page, so a link is kept
-// until shortly before it expires rather than refetched on every focus.
+// Each read mints a new act link, and a new link reloads the framed page. The
+// thread's runs invalidate the browser as they start and first browse, so a
+// read keeps the link it has for the same window until shortly before it
+// expires, and that is also when a stale link is refetched.
 const BROWSER_LINK_REFRESH_MARGIN_MS = 5 * 60_000
+
+function linkExpiresIn(browser: ThreadBrowser) {
+  return Date.parse(browser.expires_at) - Date.now()
+}
+
+function keepActLink(
+  current: ThreadBrowser | undefined,
+  fetched: ThreadBrowser
+): ThreadBrowser {
+  if (
+    !current ||
+    new URL(current.act_url).origin !== new URL(fetched.act_url).origin ||
+    linkExpiresIn(current) <= BROWSER_LINK_REFRESH_MARGIN_MS
+  )
+    return fetched
+  return {
+    ...fetched,
+    act_url: current.act_url,
+    expires_at: current.expires_at,
+  }
+}
 
 export function useAgentThreadBrowser(threadId: string, enabled: boolean) {
   return useQuery({
     queryKey: agentThreadKeys.browser(threadId),
-    queryFn: () => agentsApi.getThreadBrowser(threadId),
+    queryFn: async ({ client, queryKey }) =>
+      keepActLink(
+        client.getQueryData<ThreadBrowser>(queryKey),
+        await agentsApi.getThreadBrowser(threadId)
+      ),
     enabled: enabled && Boolean(threadId),
     retry: false,
-    staleTime: (query) => {
-      const expiresAt = query.state.data?.expires_at
-      return expiresAt
+    staleTime: (query) =>
+      query.state.data
         ? Math.max(
-            Date.parse(expiresAt) - Date.now() - BROWSER_LINK_REFRESH_MARGIN_MS,
+            linkExpiresIn(query.state.data) - BROWSER_LINK_REFRESH_MARGIN_MS,
             0
           )
-        : 0
-    },
+        : 0,
     meta: { invalidatedBy: [invalidationTopic("thread-browsers", threadId)] },
   })
 }
@@ -923,6 +989,21 @@ export function useAgentThreadBackgroundWork(threadId: string) {
     meta: {
       invalidatedBy: [invalidationTopic("thread-background-work", threadId)],
     },
+  })
+}
+
+/** Output is not pushed, so it is polled while someone reads it. */
+export function useAgentThreadBackgroundOutput(
+  threadId: string,
+  taskId: string,
+  enabled: boolean
+) {
+  return useQuery({
+    queryKey: agentThreadKeys.backgroundOutput(threadId, taskId),
+    queryFn: () => agentsApi.getThreadBackgroundOutput(threadId, taskId),
+    enabled,
+    refetchInterval: 5_000,
+    retry: false,
   })
 }
 
@@ -971,21 +1052,30 @@ export function useAgentThreadWorkingTreeDiff(
 
 export function useWorkflowApprovals(
   threadId: string,
-  options: { pollWhileActive?: boolean } = {}
+  { pollWhileActive = false }: { pollWhileActive?: boolean } = {}
 ) {
-  return useQuery({
+  const query = useQuery({
     queryKey: agentThreadKeys.workflowApprovals(threadId),
     queryFn: () => agentsApi.listWorkflowApprovals(threadId),
     enabled: Boolean(threadId),
-    refetchInterval: (query) =>
-      options.pollWhileActive ||
-      query.state.data?.approvals.some(
+    refetchInterval: (current) =>
+      pollWhileActive ||
+      current.state.data?.approvals.some(
         (approval) => approval.status === "pending"
       )
         ? 3000
         : false,
     retry: false,
   })
+  const previous = useRef({ threadId, pollWhileActive })
+  const refetch = query.refetch
+  useEffect(() => {
+    const was = previous.current
+    previous.current = { threadId, pollWhileActive }
+    if (was.threadId === threadId && was.pollWhileActive && !pollWhileActive)
+      void refetch()
+  }, [threadId, pollWhileActive, refetch])
+  return query
 }
 
 export function useWorkflowApprovalDecision(threadId: string) {
@@ -1192,6 +1282,8 @@ export function optimisticThread(
 export interface SendAgentMessageVariables {
   content: string
   images?: Array<ImageChunk>
+  /** Passages the person replied to, each with its context and their comment. */
+  replies?: Array<PassageReply>
   model_id?: string | null
   effort?: string | null
   model_selection_changed?: boolean
@@ -1254,9 +1346,8 @@ export function useDeleteAgentThread() {
             })
           )
       const path = window.location.pathname
-      const chat = chatRoutes(path)
-      if (path === `${chat.home}/${threadId}`) {
-        navigate({ to: chat.home })
+      if (path === `/agents/${threadId}`) {
+        navigate({ to: "/agents" })
       }
     },
   })

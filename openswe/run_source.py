@@ -19,7 +19,7 @@ from openswe.slack.client import (
 logger = logging.getLogger(__name__)
 
 
-async def get_slack_target(cfg: RunConfig) -> tuple[str, str] | None:
+async def _slack_target(cfg: RunConfig) -> tuple[str, str] | None:
     active = await get_active_slack_thread(
         get_client(url=LANGGRAPH_URL),
         cfg.thread_id,
@@ -60,7 +60,7 @@ async def notify_run_source(config: Mapping[str, object], message: str, *, what:
     """Post ``message`` where the run was started; ``what`` names it in the logs."""
     cfg = RunConfig.from_config(config)
 
-    slack_target = await get_slack_target(cfg)
+    slack_target = await _slack_target(cfg)
     if slack_target is not None:
         channel_id, thread_ts = slack_target
         if cfg.thread_id:

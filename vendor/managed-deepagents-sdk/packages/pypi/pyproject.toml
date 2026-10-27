@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "managed-deepagents"
-version = "0.9.3"
+version = "0.9.5"
 description = "Managed Deep Agents — the define_deep_agent authoring interface plus the CLI that compiles and deploys a code-first Deep Agent repository to a managed LangGraph runtime."
 readme = "README.md"
 requires-python = ">=3.11"
@@ -24,7 +24,7 @@ dependencies = [
     "pydantic>=2.7.4,<2.15",
     "httpx>=0.28.1,<1",
     "typing-extensions>=4.12.2,<5",
-    "deepagents>=0.7.27,<1",
+    "deepagents>=0.7.30,<1",
     "langchain>=1.4.6,<2",
     "langchain-core>=1.6.2,<2",
     "langgraph>=1.2.15,<2",
@@ -149,6 +149,7 @@ typing = [
     "mcp>=2.2.0,<3",
     # Injected into deployments that use the browser; matches browser.STAGEHAND_VERSION.
     "stagehand==4.3.0",
+    "stagehand-middleware==0.1.0",
 ]
 
 # Dead-code pass. ``ruff`` (F841/F401) catches unused variables and imports and
