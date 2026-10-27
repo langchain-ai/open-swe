@@ -5,7 +5,8 @@ loop reads, which rides in ``open_swe_state`` and goes back with every call. Aro
 each model call ``RunLoop`` (``rt.loop``) does what the catalog's rules say, and the
 transcript and usage hear of each reply. A run whose catalog names no rules hands
 each phase to the backend instead. The turn's git evidence (``rt.git_evidence``)
-starts once the run is prepared and ends up in the turn's trace.
+starts once the run is prepared and is reconciled into the turn's trace after
+the run ends.
 
 Before each model call the run also takes its thread's inbox: what was sent to
 the thread while the run worked, such as a person's follow-up or a task report.
@@ -87,6 +88,7 @@ from runtime_api.workers import LAUNCH_WORKER, WORKER_LAUNCHED, Launch, Launched
 from rt.backend import (
     BackendCallError,
     OpenSweBackend,
+    Run,
     RunLocal,
     human_messages,
     namespace,
@@ -290,6 +292,14 @@ class DescribedToolsMiddleware(AgentMiddleware):
         return await handler(request.override(tool_call={**tool_call, "args": args}))
 
 
+_TRACES: Final = RunLocal(TurnTrace)
+
+
+def turn_trace(run: Run) -> TurnTrace:
+    """The trace of the turn ``run`` is playing."""
+    return _TRACES.get(run)
+
+
 class BackendRunMiddleware(AgentMiddleware[RunState]):
     """Prepare the run on the backend, read its inbox, and run its loop around each model call."""
 
@@ -304,7 +314,6 @@ class BackendRunMiddleware(AgentMiddleware[RunState]):
         self._run_loop = RunLoop(backend)
         # Each run's own model, built from its catalog.
         self._models = RunLocal(self._build_model)
-        self._traces = RunLocal(TurnTrace)
         # Opens the thread's box before preparing, so the backend binds the thread to it.
         self._open_sandbox = open_sandbox
 
@@ -369,7 +378,7 @@ class BackendRunMiddleware(AgentMiddleware[RunState]):
     async def _before_agent(self, state: RunState, runtime: Runtime) -> dict[str, object] | None:
         # Every call the run makes reads its catalog; the graph holds none of it.
         await self._backend.run.plan()
-        trace = self._traces.get(self._backend.run)
+        trace = turn_trace(self._backend.run)
         trace.start(self._trace_metadata())
         if self._backend.awaiting_adoption:
             # A worker never acts on its grant: it has no identity until it adopts one.
@@ -554,7 +563,7 @@ class BackendRunMiddleware(AgentMiddleware[RunState]):
         run = self._backend.run
         try:
             if self._loop is not None:
-                # Reported, not waited on: the run ends as soon as its trace is reconciled.
+                # Reported, not waited on.
                 self._loop.after_agent(state)
                 return None
             return _apply(await self._phase(AFTER_AGENT, run_call(RunCall, run_id(), state)))
@@ -562,8 +571,7 @@ class BackendRunMiddleware(AgentMiddleware[RunState]):
             logger.warning("The backend's end-of-run hooks failed", exc_info=True)
             return None
         finally:
-            metadata = {**self._trace_metadata(), **await turn_git(run).metadata()}
-            await self._traces.get(run).reconcile(metadata)
+            turn_trace(run).end(self._trace_metadata(), turn_git(run).metadata)
 
 
 class ReportRepliesMiddleware(AgentMiddleware):

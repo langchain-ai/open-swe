@@ -1,15 +1,14 @@
 """Run the scripts in ``rt/sandbox_scripts`` in the thread's box.
 
-Each is kept in the box under a name carrying its hash, and written only when that
-version is missing, so the common case is one command, and a box always runs the
-version this runtime ships. A script gets its request as base64 JSON and answers
-with one JSON line; ``{"error": ...}`` is its refusal.
+Each call is one command that pipes the script this runtime ships into the box's
+``python3``, so a box always runs that version and nothing is kept in it. A box's
+first command is slow, so a second one to install the script would cost that
+twice. A script gets its request as base64 JSON and answers with one JSON line;
+``{"error": ...}`` is its refusal.
 """
 
 import base64
-import hashlib
 import json
-import secrets
 import shlex
 from functools import cached_property
 from pathlib import Path
@@ -31,42 +30,25 @@ def _encoded(value: str) -> str:
 
 
 class BoxScript:
-    """``rt/sandbox_scripts/<name>``, kept in the box under ``root``."""
+    """``rt/sandbox_scripts/<name>``, run in the thread's box."""
 
-    def __init__(self, name: str, root: str) -> None:
+    def __init__(self, name: str) -> None:
         self.name = name
-        self.root = root
 
     @cached_property
-    def text(self) -> str:
-        return _SCRIPTS.joinpath(self.name).read_text(encoding="utf-8")
-
-    @cached_property
-    def path(self) -> str:
-        digest = hashlib.sha256(self.text.encode()).hexdigest()[:16]
-        return f"{self.root}/{self.name.removesuffix('.py')}-{digest}.py"
+    def _source(self) -> str:
+        return shlex.quote(_encoded(_SCRIPTS.joinpath(self.name).read_text(encoding="utf-8")))
 
     async def run(
         self, box: SandboxBackendProtocol, request: dict[str, JsonValue], *, timeout: int = 30
     ) -> dict[str, JsonValue]:
-        script = shlex.quote(self.path)
-        # Fresh each call, so nothing the box prints can pass for it.
-        missing = f"open-swe-script-missing-{secrets.token_hex(16)}"
-        run = (
+        response = await box.aexecute(
             "command -v python3 >/dev/null || "
             '{ echo \'{"error": "this needs python3 in the sandbox"}\'; exit 0; }; '
-            f"python3 {script} {shlex.quote(_encoded(json.dumps(request)))}"
+            f"printf %s {self._source} | base64 -d | "
+            f"python3 - {shlex.quote(_encoded(json.dumps(request)))}",
+            timeout=timeout,
         )
-        response = await box.aexecute(
-            f"[ -f {script} ] || {{ echo {missing}; exit 0; }}; {run}", timeout=timeout
-        )
-        if response.output.strip() == missing:
-            response = await box.aexecute(
-                f"mkdir -p {shlex.quote(self.root)} && "
-                f"printf %s {shlex.quote(_encoded(self.text))} | base64 -d > {script}.$$ && "
-                f"mv {script}.$$ {script}; {run}",
-                timeout=timeout,
-            )
         lines = response.output.strip().splitlines()
         try:
             answer = _answer.validate_json(lines[-1]) if lines else None

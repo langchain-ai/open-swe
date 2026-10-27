@@ -7,10 +7,10 @@ may change a checkout first waits for the starting fingerprint, so that never se
 the tool's own change. Pull requests the run's operations open or find name the
 branch a repository's work went to.
 
-The turn's end reconciles the targets in the order the work happened: the first is
-the trace's ``ls_git_repo`` and ``ls_git_branch``, a pull request's head branch
-preferred for its repository. A turn whose tools changed nothing waits for no
-fingerprint.
+Once the run has ended, the targets are reconciled in the order the work happened
+(``TurnTrace.end``): the first is the trace's ``ls_git_repo`` and ``ls_git_branch``,
+a pull request's head branch preferred for its repository. Nothing waits for a
+fingerprint but a tool that may change a checkout, and only for the first.
 """
 
 import asyncio
@@ -30,6 +30,7 @@ logger = logging.getLogger(__name__)
 
 # The file and shell tools that may change a checkout.
 OBSERVED_TOOLS: Final = frozenset({"execute", "write_file", "edit_file", "delete"})
+_SCRIPT: Final = BoxScript("git_trace.py")
 
 
 class GitTarget(BaseModel):
@@ -67,7 +68,6 @@ class TurnGit:
     own (``turn_git``)."""
 
     def __init__(self) -> None:
-        self._script: BoxScript | None = None
         self._box: SandboxBackendProtocol | None = None
         self._root = ""
         self._baseline: asyncio.Task[GitSnapshot | None] | None = None
@@ -85,7 +85,6 @@ class TurnGit:
             self._baseline = None
             return
         self._box, self._root = files, root
-        self._script = BoxScript("git_trace.py", f"{root}/.open-swe/scripts")
         self._baseline = asyncio.ensure_future(self._fingerprint())
 
     async def changing(self) -> None:
@@ -148,12 +147,10 @@ class TurnGit:
             self._observed.append(_Observed(at, tuple(after.changes_since(before))))
 
     async def _fingerprint(self) -> GitSnapshot | None:
-        if self._box is None or self._script is None:
+        if self._box is None:
             return None
         try:
-            return GitSnapshot.model_validate(
-                await self._script.run(self._box, {"root": self._root})
-            )
+            return GitSnapshot.model_validate(await _SCRIPT.run(self._box, {"root": self._root}))
         except Exception:
             logger.warning("Could not fingerprint the turn's checkouts", exc_info=True)
             return None
