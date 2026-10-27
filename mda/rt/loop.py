@@ -85,6 +85,9 @@ _GITHUB_PROXY_DUE: Final = "github_proxy_refresh_at"
 _GITHUB_PROXY_WINDOW: Final = timedelta(minutes=10)
 # A thread whose box has no GitHub proxy is asked again after this long.
 _GITHUB_PROXY_RECHECK: Final = timedelta(minutes=30)
+# A refresh that failed is tried again after this long, so a failure that keeps happening
+# does not hold up every model call.
+_GITHUB_PROXY_RETRY: Final = timedelta(minutes=1)
 _json_dicts = TypeAdapter(list[dict[str, JsonValue]])
 
 
@@ -288,7 +291,7 @@ class RunLoop:
         """Put a new GitHub token on the box once the one there is about to expire.
 
         The call is awaited, so the model's first command never runs on an expired
-        token. A failure leaves the run going and the next model call asks again.
+        token. A failure leaves the run going and the call is made again a minute later.
         """
         if not self.rules.refresh_github_proxy:
             return {}
@@ -300,7 +303,7 @@ class RunLoop:
             refreshed = await call(self._backend, REFRESH_GITHUB_PROXY, RunRequest(run_id=run_id()))
         except Exception:
             logger.warning("Could not refresh the box's GitHub token", exc_info=True)
-            return {}
+            return {_GITHUB_PROXY_DUE: (now + _GITHUB_PROXY_RETRY).isoformat()}
         due = (
             refreshed.expires_at - _GITHUB_PROXY_WINDOW
             if refreshed.expires_at is not None

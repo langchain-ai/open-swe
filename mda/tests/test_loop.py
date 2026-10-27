@@ -90,6 +90,26 @@ def _state(*messages: BaseMessage, **held: JsonValue) -> dict[str, object]:
     return {"messages": list(messages), STATE_KEY: held}
 
 
+async def test_a_failed_github_token_refresh_waits_before_the_next_try(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    backend, calls = _backend(
+        monkeypatch,
+        {"refresh_github_proxy": BackendCallError("refresh_github_proxy failed: timed out")},
+        LoopRules(refresh_github_proxy=True),
+    )
+    loop = RunLoop(backend)
+
+    first = await loop.before_model(_state(HumanMessage(content="Fix the login", id="human-1")))
+    held = {"github_proxy_refresh_at": first.update["github_proxy_refresh_at"]}
+    second = await loop.before_model(
+        _state(HumanMessage(content="Fix the login", id="human-1"), **held)
+    )
+
+    assert first.call is not None and second.call is not None
+    assert [name for name, _ in calls] == ["refresh_github_proxy"]
+
+
 async def test_each_model_call_is_assembled_here_from_the_rules_and_named_calls(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
