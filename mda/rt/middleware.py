@@ -91,6 +91,7 @@ from rt.backend import (
     subagent_of,
 )
 from rt.loop import RunLoop
+from rt.managed_sandbox import OpenedSandbox
 from rt.models import build_model
 from rt.tools import STATE_KEY, cited, run_id, tool_report
 from rt.tracing import TurnTrace
@@ -289,7 +290,7 @@ class BackendRunMiddleware(AgentMiddleware[RunState]):
     def __init__(
         self,
         backend: OpenSweBackend,
-        open_sandbox: Callable[[Runtime], Awaitable[str | None]] | None = None,
+        open_sandbox: Callable[[Runtime], Awaitable[OpenedSandbox]] | None = None,
     ) -> None:
         self._backend = backend
         self._run_loop = RunLoop(backend)
@@ -349,13 +350,20 @@ class BackendRunMiddleware(AgentMiddleware[RunState]):
         if state.get("open_swe_prepared_for") == invocation:
             trace.record_evidence(state.get(STATE_KEY, {}))
             return None
-        sandbox_id = (
+        opened = (
             await self._open_sandbox(runtime)
             if self._open_sandbox is not None and self._backend.run.planned.sandbox is not None
-            else None
+            else OpenedSandbox()
         )
         prepared = await self._phase(
-            PREPARE, run_call(Prepare, run_id(), state, sandbox_id=sandbox_id)
+            PREPARE,
+            run_call(
+                Prepare,
+                run_id(),
+                state,
+                sandbox_id=opened.sandbox_id,
+                sandbox_error=opened.error,
+            ),
         )
         return {**_apply(prepared), "open_swe_prepared_for": invocation}
 

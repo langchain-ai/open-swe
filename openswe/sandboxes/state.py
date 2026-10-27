@@ -39,11 +39,16 @@ class SandboxUnreachableError(RuntimeError):
     carried on believing it was still there.
     """
 
-    def __init__(self, thread_id: str, sandbox_id: str | None, cause: str) -> None:
+    def __init__(
+        self, thread_id: str, sandbox_id: str | None, cause: str, *, reason: str | None = None
+    ) -> None:
         self.thread_id = thread_id
         self.sandbox_id = sandbox_id
+        # What the sandbox service answered, safe to show the person.
+        self.reason = reason
+        detail = f"{cause} ({reason})" if reason else cause
         super().__init__(
-            f"Sandbox {sandbox_id or '<unknown>'} for thread {thread_id} is unreachable: {cause}"
+            f"Sandbox {sandbox_id or '<unknown>'} for thread {thread_id} is unreachable: {detail}"
         )
 
 
