@@ -1,0 +1,21 @@
+openswe/github/pull_request_status.py
+  s_45ce6cb3804470::t_ce51f224948df3 573
+openswe/tools/publish_review.py
+  s_45ce6cb3804470::t_efeb60ae2e6eb3 736
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "031f7954ff3ef8d33b66cd4c70e4096310b51da3",
+  "prompts": {},
+  "sessions": {
+    "s_45ce6cb3804470": {
+      "agent_id": {
+        "tool": "cursor",
+        "id": "c6f5b80a-c2c7-4691-a461-8b0450f235e1",
+        "model": "auto-smart"
+      },
+      "human_author": "Joaquin Borggio <joaquin@langchain.dev>"
+    }
+  }
+}

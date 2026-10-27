@@ -1,0 +1,19 @@
+openswe/resources/prompts/tools/request_rollout_check.md
+  s_8c15db54e0c42b::t_f3d163c92c9687 3
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "dbaa90dbe1be3e2bd2f0ce1565790fe5825ab849",
+  "prompts": {},
+  "sessions": {
+    "s_8c15db54e0c42b": {
+      "agent_id": {
+        "tool": "cursor",
+        "id": "b496840a-1bef-4d5a-8172-c0a066b24285",
+        "model": "grok-4.7"
+      },
+      "human_author": "Joaquin Borggio <joaquin@langchain.dev>"
+    }
+  }
+}

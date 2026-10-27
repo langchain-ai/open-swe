@@ -1,0 +1,49 @@
+mda/pyproject.toml
+  s_b35d826fa62e9d::t_f376a966a68d9e 22-24
+mda/rt/browser.py
+  s_b35d826fa62e9d::t_ffd01ceaf2018c 18,20,38-40,47-60
+mda/uv.lock
+  s_b35d826fa62e9d::t_848a4d503bc06d 248-273,1616,1621,1838,1850,1864,1876,2045-2120
+openswe/agent_api/graph.py
+  s_b35d826fa62e9d::t_eb61c90721c7a5 120,135,162,1153-1157,1161
+openswe/browser_handoff.py
+  s_b35d826fa62e9d::t_55c38650d96552 1-49
+openswe/resources/prompts/system/sandbox-file-downloads.md
+  s_b35d826fa62e9d::t_7aa93fccc88f21 16-26
+packages/runtime-api/src/runtime_api/loop.py
+  s_b35d826fa62e9d::t_c2c5cb3b6cebeb 106-112,134-135
+vendor/managed-deepagents-sdk/crates/mda/src/compile/manifest.rs
+  s_b35d826fa62e9d::t_37d7d9686c4582 173
+vendor/managed-deepagents-sdk/crates/mda/src/compile/tests.rs
+  s_b35d826fa62e9d::t_25c4c40a20e8d8 4462
+vendor/managed-deepagents-sdk/crates/mda/src/dependencies.rs
+  s_b35d826fa62e9d::t_f473a347e71925 180-193,764-775
+vendor/managed-deepagents-sdk/packages/pypi/pyproject.toml
+  s_b35d826fa62e9d::t_2889c049d35c7a 153-155
+vendor/managed-deepagents-sdk/packages/pypi/src/managed_deepagents/_browser_recording.py
+  s_b35d826fa62e9d::t_12287b59d9bfa7 1-550
+vendor/managed-deepagents-sdk/packages/pypi/src/managed_deepagents/_channels/assistant_text.py
+  s_b35d826fa62e9d::t_d7602f586bff48 77-79,96,177
+vendor/managed-deepagents-sdk/packages/pypi/src/managed_deepagents/browser.py
+  s_b35d826fa62e9d::t_d661e76a4be7fc 9-12,29,32,35,41,43,45,47-48,63-64,76,100-129,134-193,205-206,222-228,233-234,254-256,259,274,277-283,297-299,338-345,365-438,511-645,697-712,799-804,811-812,824-827,845-874,935
+vendor/managed-deepagents-sdk/packages/pypi/uv.lock
+  s_b35d826fa62e9d::t_76b5fc857c560a 2,8-9,86-146,175-176,914,1361-1362,1367,1398,1403,1646-1735
+vendor/mda-upstream-prs
+  s_b35d826fa62e9d::t_22fcf215abd324 3-4
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "0fca69728ddfa41bb6f7dfb7f9fc895435d93c67",
+  "prompts": {},
+  "sessions": {
+    "s_b35d826fa62e9d": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "2b6b8806-93bb-4d14-bffd-fb396f8e89c7",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "Sydney Runkle <sydneymarierunkle@gmail.com>"
+    }
+  }
+}
