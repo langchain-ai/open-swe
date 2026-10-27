@@ -99,6 +99,7 @@ if TYPE_CHECKING:
     )
     from managed_deepagents._channels.resolve_user import (
         ResolveUser,
+        ResolveUserEndpointRequest,
         ResolveUserRequest,
         ResolveUserResult,
     )
@@ -326,6 +327,7 @@ _EXPORTS: dict[str, str] = {
     "PromptResponse": "managed_deepagents.run_context",
     "RemoteMcpServerConfig": "managed_deepagents._connectors.mcp",
     "ResolveUser": "managed_deepagents._channels.resolve_user",
+    "ResolveUserEndpointRequest": "managed_deepagents._channels.resolve_user",
     "ResolveUserRequest": "managed_deepagents._channels.resolve_user",
     "ResolveUserResult": "managed_deepagents._channels.resolve_user",
     "RuntimeChannel": "managed_deepagents._channels.runtime",
@@ -530,6 +532,7 @@ __all__ = [
     "PromptResponse",
     "RemoteMcpServerConfig",
     "ResolveUser",
+    "ResolveUserEndpointRequest",
     "ResolveUserRequest",
     "ResolveUserResult",
     "RuntimeChannel",

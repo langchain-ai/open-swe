@@ -24,7 +24,7 @@ if TYPE_CHECKING:
     from managed_deepagents._channels.http.provider import EventFinished
     from managed_deepagents._channels.http.types import HttpFinishedDelivery
     from managed_deepagents._channels.manifest import ChannelManifest, JsonObject
-    from managed_deepagents._channels.resolve_user import ResolveUser
+    from managed_deepagents._channels.resolve_user import ChannelResolveUser, ResolveUser
     from managed_deepagents._channels.run_input import ChannelRunResult
     from managed_deepagents._channels.slack.events import (
         DecidedSlackEvents,
@@ -99,7 +99,7 @@ class TriggerSlackChannel(Channel):
         multitask_strategy: MultitaskStrategy = "enqueue",
         reply: ChannelReply = "auto",
         on_finish: EventFinished[SlackEvent, SlackChannelThread] | None = None,
-        resolve_user: ResolveUser | None = None,
+        resolve_user: ChannelResolveUser | None = None,
     ) -> None:
         self.app = app
         self.resolve_user = resolve_user
@@ -430,7 +430,7 @@ def slack_channel(
     multitask_strategy: MultitaskStrategy = "enqueue",
     reply: ChannelReply = "auto",
     on_finish: EventFinished[SlackEvent, SlackChannelThread] | None = None,
-    resolve_user: ResolveUser | None = None,
+    resolve_user: ResolveUser | EventEndpoint | None = None,
 ) -> TriggerSlackChannel:
     """Declare a Trigger Server-backed Slack channel.
 
@@ -495,8 +495,8 @@ def slack_channel(
             agent, through ``runtime.channel.post`` or its own tools. The
             status, reactions and ``on_finish`` stay as they are. ``"none"``
             needs an ``mda`` CLI that deploys it.
-        resolve_user: Map the Slack user to one of your users; overrides the
-            identity's ``resolve_user``.
+        resolve_user: Map the Slack user to one of your users, with a function
+            or an endpoint MDA asks; overrides the identity's ``resolve_user``.
         on_finish: Called once when a message or interaction is done, with the
             ``SlackEvent`` (a ``SlackMessageEvent`` or ``SlackInteractionEvent``), its
             ``SlackChannelThread``, and how it finished: ``run`` (its run

@@ -55,7 +55,7 @@ if TYPE_CHECKING:
     from starlette.routing import BaseRoute as StarletteRoute
 
     from managed_deepagents._channel import Channel, ChannelEventsContext
-    from managed_deepagents._channels.resolve_user import ResolveUser
+    from managed_deepagents._channels.resolve_user import ChannelResolveUser
 
 else:
     #: Starlette ``Route`` / ``Mount`` instances — ``object`` at runtime so
@@ -199,7 +199,7 @@ def _channel_events_route(
     channel: object,
     name: str,
     mounted: list[MountedRoute],
-    resolve_user: ResolveUser | None,
+    resolve_user: ChannelResolveUser | None,
 ) -> StarletteRoute:
     """Public Events route for a direct or Trigger-backed channel."""
     routing = import_module("starlette.routing")

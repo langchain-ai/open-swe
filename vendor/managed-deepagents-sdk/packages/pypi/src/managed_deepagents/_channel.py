@@ -25,7 +25,7 @@ __all__ = [
 
 if TYPE_CHECKING:
     from managed_deepagents._channels.manifest import ChannelManifest
-    from managed_deepagents._channels.resolve_user import ResolveUser
+    from managed_deepagents._channels.resolve_user import ChannelResolveUser
     from managed_deepagents._channels.runtime import ChannelMessagingAdapter
 else:
     ChannelManifest = Mapping[str, object]
@@ -77,7 +77,7 @@ class ChannelEventsContext(TypedDict, total=False):
     raw_body: str | bytes
     channel: Channel
     #: The channel's ``resolve_user``, or else the identity's.
-    resolve_user: ResolveUser
+    resolve_user: ChannelResolveUser
 
 
 def is_channel(value: object) -> bool:
