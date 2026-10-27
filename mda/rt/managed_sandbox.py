@@ -28,6 +28,7 @@ from langchain_core.messages import ToolMessage
 from langgraph.runtime import Runtime
 from langgraph.types import Command
 from langsmith.sandbox import (
+    ResourceCreationError,
     ResourceTimeoutError,
     SandboxAPIError,
     SandboxClientError,
@@ -54,6 +55,8 @@ EXECUTE_TIMEOUT_SECONDS: Final = 300
 OPEN_BACKOFF_SECONDS: Final = (1.0, 2.0, 4.0, 8.0, 16.0, 30.0)
 OPEN_MAX_ELAPSED_SECONDS: Final = 90.0
 _CAUSE_LIMIT: Final = 300
+# Creation failures the service, not the box's options, caused; an image or config one is not.
+_UNSCHEDULED: Final = frozenset({"Unschedulable", "ServiceUnavailable"})
 _SECRET = re.compile(
     r"(?i)\b((?:token|api[_-]?key|secret|password|authorization)\s*[:=]\s*(?:bearer\s+)?|bearer\s+)"
     r"[^\s,;&\"']+"
@@ -120,8 +123,10 @@ def _transient(exc: BaseException) -> bool:
         | ConnectionError,
     ):
         return True
-    if type(exc) is SandboxClientError:
-        # The SDK raises its base error for statuses it does not map, such as a 503.
+    if isinstance(exc, ResourceCreationError) and exc.error_type in _UNSCHEDULED:
+        return True
+    if isinstance(exc, SandboxClientError):
+        # The SDK maps some 5xx answers to errors of its own, or to none, such as a 503.
         status = getattr(getattr(exc.__cause__, "response", None), "status_code", None)
         return isinstance(status, int) and status >= 500
     return False

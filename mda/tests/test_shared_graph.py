@@ -18,7 +18,11 @@ from langchain_core.tools import BaseTool
 from langgraph.graph.state import CompiledStateGraph
 from langgraph.store.memory import InMemoryStore
 from langgraph_sdk.runtime import _ExecutionRuntime, _ReadRuntime
-from langsmith.sandbox import SandboxAuthenticationError, SandboxClientError
+from langsmith.sandbox import (
+    ResourceCreationError,
+    SandboxAuthenticationError,
+    SandboxClientError,
+)
 from managed_deepagents import browser as mda_browser
 from managed_deepagents import runtime as mda_runtime
 from managed_deepagents.runtime import ManagedRunConfig, compile_managed_agent_async
@@ -244,14 +248,16 @@ async def test_each_run_on_the_shared_graph_works_in_its_own_threads_box(
 async def test_a_run_retries_a_box_the_sandbox_service_failed_to_open_and_reports_why_it_gave_up(
     monkeypatch: pytest.MonkeyPatch, backend_calls: BackendCalls, prepared: Prepared
 ) -> None:
-    """A 503 while opening the box is retried until it opens; a refusal that will not
+    """A 503 while opening or creating the box is retried until it opens; a refusal that will not
     change is not, and the backend hears its cause without the secret in it."""
     request = httpx2.Request("POST", "https://sandbox.invalid/boxes")
     response = httpx2.Response(503, request=request)
     unavailable = SandboxClientError("Service Unavailable")
     unavailable.__cause__ = httpx2.HTTPStatusError("503", request=request, response=response)
+    unscheduled = ResourceCreationError("No capacity", error_type="Unschedulable")
+    unscheduled.__cause__ = httpx2.HTTPStatusError("503", request=request, response=response)
     failures: dict[object, list[Exception]] = {
-        "thread-1": [unavailable],
+        "thread-1": [unavailable, unscheduled],
         "thread-2": [SandboxAuthenticationError("Invalid api_key=lsv2-secret")],
     }
     attempts: list[object] = []
@@ -277,7 +283,7 @@ async def test_a_run_retries_a_box_the_sandbox_service_failed_to_open_and_report
         catalog = _catalog("web_search", token, snapshot="a")
         await _run(store, thread_id, _context("agent", token, catalog))
 
-    assert attempts == ["thread-1", "thread-1", "thread-2"]
+    assert attempts == ["thread-1", "thread-1", "thread-1", "thread-2"]
     assert prepared == [
         ("box-thread-1", None),
         (None, "SandboxAuthenticationError: Invalid api_key=[redacted]"),
