@@ -13,7 +13,7 @@ from typing_extensions import TypedDict
 
 from managed_deepagents._agent_auth import WORKSPACE_SETTING
 from managed_deepagents._agent_auth_http import ConnectionsNotConfiguredError
-from managed_deepagents._channels.actor import EndpointActor, endpoint_actor
+from managed_deepagents._channels.actor import EndpointActor, actor_identity, endpoint_actor
 from managed_deepagents._channels.http.endpoint import (
     EndpointClient,
     EndpointLimits,
@@ -256,6 +256,35 @@ async def resolve_channel_user(
     return {"type": "principal", "id": principal_id}
 
 
+# Whether the fallback without Agent Auth was logged already.
+_logged_sender_fallback = False
+
+
+async def sender_principal_id(
+    actor: ChannelActor | None,
+    resolve_principal: Callable[[ResolvePrincipalIdentity], str] | None = None,
+) -> str | None:
+    """The principal a webhook channel's sender runs as when no ``resolve_user``
+    maps them, from ``actor_identity``; ``None`` runs the delivery as the channel.
+
+    Unlike a mapped user's, it owns no user connections: whoever completes a
+    connection's sign-in from a public thread would attach their account to it.
+    Without Agent Auth (``mda dev`` without a LangSmith key) the channel's own
+    user ID stays.
+    """
+    global _logged_sender_fallback  # noqa: PLW0603 - log the fallback once per process
+    identity = actor_identity(actor) if actor is not None else None
+    if identity is None:
+        return None
+    try:
+        return await asyncio.to_thread(resolve_principal or resolve_external_principal_id, identity)
+    except ConnectionsNotConfiguredError as error:
+        if not _logged_sender_fallback:
+            _logged_sender_fallback = True
+            logger.warning("channel senders keep the channel's user ID: %s", error)
+        return None
+
+
 # Deliveries already replied to; a provider may redeliver one.
 _replied_deliveries: dict[str, None] = {}
 _REPLIED_DELIVERIES_KEPT = 1000
@@ -312,4 +341,5 @@ __all__ = [
     "checked_resolve_user",
     "post_reply",
     "resolve_channel_user",
+    "sender_principal_id",
 ]
