@@ -116,7 +116,7 @@ export function ReviewPage({
           navigatorShown={roomForNavigator ? navigatorOpen : navigatorOverlay}
           showFileControls={!frontendActive}
         />
-        <div className="shrink-0 border-b border-default px-space-4 py-space-2">
+        <div className="flex shrink-0 flex-wrap items-center justify-between gap-space-2 border-b border-default px-space-4 py-space-2">
           <GroupedTabs
             size="sm"
             value={frontendActive ? "frontend" : "code"}
@@ -126,6 +126,16 @@ export function ReviewPage({
               { value: "frontend", display: "Frontend reviewer" },
             ]}
           />
+          {frontendActive && (
+            <Button
+              size="xs"
+              color="secondary"
+              variant="plain"
+              as={<Link to="/agents/qa" />}
+            >
+              Back to QA agent
+            </Button>
+          )}
         </div>
         {detail.isError ? (
           <PullRequestUnavailable pr={pr} message={detail.error.message} />

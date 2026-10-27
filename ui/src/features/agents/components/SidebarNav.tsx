@@ -8,6 +8,7 @@ import {
   DropdownMenuTrigger,
 } from "@langchain/macaw-components/DropdownMenu"
 import { GitPullRequestIcon } from "@phosphor-icons/react/dist/ssr/GitPullRequest"
+import { EyeIcon } from "@phosphor-icons/react/dist/ssr/Eye"
 import { LightningIcon } from "@phosphor-icons/react/dist/ssr/Lightning"
 import { PencilSimpleIcon } from "@phosphor-icons/react/dist/ssr/PencilSimple"
 import { RobotIcon } from "@phosphor-icons/react/dist/ssr/Robot"
@@ -30,6 +31,7 @@ const NAV = [
   { to: "/agents/automations", label: "Automations", icon: LightningIcon },
   { to: "/agents/bots", label: "Bots", icon: RobotIcon },
   { to: "/agents/reviews", label: "Pull Requests", icon: GitPullRequestIcon },
+  { to: "/agents/qa", label: "QA agent", icon: EyeIcon },
   { to: "/incidents", label: "Incidents", icon: SirenIcon },
 ] as const
 
@@ -46,7 +48,7 @@ export function SidebarNav({
 }) {
   const { prefs, toggleNavItemHidden } = useSidebarPrefs()
   const activeSection = useRouterState({
-    select: (state) => sectionOf(state.location.pathname),
+    select: (state) => sectionOf(state.location.href),
   })
   const linkTarget = useHrefLinkOptions()
   const hidden = NAV.filter((item) => prefs.hiddenNavItems.includes(item.to))

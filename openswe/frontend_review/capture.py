@@ -10,11 +10,13 @@ from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from typing import Literal
 from urllib.parse import urlsplit
+from uuid import uuid7
 
 import httpx2
 from pydantic import JsonValue, TypeAdapter
 from websockets.asyncio.client import ClientConnection, connect
 
+from openswe.sandboxes.browsers import LangSmithBrowser
 from openswe.sandboxes.providers.langsmith_api import SandboxAPI
 
 from .models import FrontendReviewRun
@@ -31,6 +33,12 @@ _PREVIEW_DOMAINS = ("smith.langchain.com", "vercel.app", "netlify.app", "pages.d
 
 class CaptureBlockedError(RuntimeError):
     """A preview needs authentication or is outside the capture boundary."""
+
+
+def _origin(url: str) -> tuple[str, str | None, int | None]:
+    parsed = urlsplit(url)
+    default_port = 443 if parsed.scheme in ("https", "wss") else 80
+    return parsed.scheme, parsed.hostname, parsed.port or default_port
 
 
 def validate_preview_url(url: str) -> None:
@@ -50,8 +58,8 @@ def validate_preview_url(url: str) -> None:
         )
 
 
-class _NetworkBoundary:
-    """Only public HTTP resources; no local browser services or private network targets."""
+class _PublicResourceFilter:
+    """Best-effort request filtering, never a browser network security boundary."""
 
     def __init__(self) -> None:
         self._public_hosts: dict[str, bool] = {}
@@ -83,7 +91,7 @@ class _CDP:
     def __init__(self, connection: ClientConnection) -> None:
         self._connection = connection
         self._next_id = 0
-        self._network = _NetworkBoundary()
+        self._network = _PublicResourceFilter()
         self._document_status: dict[tuple[str, str], int] = {}
 
     async def _send(self, method: str, params: dict[str, JsonValue], session: str | None) -> int:
@@ -227,7 +235,7 @@ class _CDP:
             if ready is not True:
                 raise RuntimeError("Preview did not reach a stable rendered state")
             location = await self.evaluate("location.href", session)
-            if not isinstance(location, str) or urlsplit(location).netloc != urlsplit(url).netloc:
+            if not isinstance(location, str) or _origin(location) != _origin(url):
                 raise CaptureBlockedError("Preview redirected away from its approved origin")
             auth = await self.evaluate(
                 "Boolean(document.querySelector('input[type=password]')) || "
@@ -259,25 +267,14 @@ class _CDP:
 
 @asynccontextmanager
 async def _browser(name: str) -> AsyncIterator[_CDP]:
+    _require_browser_network_isolation()
+    browser = LangSmithBrowser(name)
     api = SandboxAPI.from_env()
-    created = False
     try:
-        await api.request(
-            "POST",
-            "/browsers",
-            json={"name": name, "idle_ttl_seconds": 180, "hidpi": False},
-            timeout=180,
-        )
-        created = True
-        window = await api.request(
-            "POST",
-            f"/browsers/{name}/attachments",
-            json={"name": "frontend-review", "controller": "agent"},
-            timeout=180,
-        )
-        payload = _object.validate_python(window.json())
-        cdp = payload.get("api_cdp_url")
-        if not isinstance(cdp, str) or urlsplit(cdp).netloc != urlsplit(api.api_root).netloc:
+        window = await browser.open_window("frontend-review", hidpi=False, idle_ttl_seconds=180)
+        cdp = window.api_cdp_url
+        api_origin = _origin(api.api_root)
+        if not cdp or _origin(cdp) != api_origin:
             raise RuntimeError("Browser returned an untrusted connection origin")
         async with httpx2.AsyncClient(headers=api.headers(), timeout=30) as client:
             version = await client.get(f"{cdp.rstrip('/')}/json/version")
@@ -286,7 +283,7 @@ async def _browser(name: str) -> AsyncIterator[_CDP]:
         if (
             not isinstance(websocket, str)
             or urlsplit(websocket).scheme != "wss"
-            or urlsplit(websocket).netloc != urlsplit(api.api_root).netloc
+            or _origin(websocket)[1:] != api_origin[1:]
         ):
             raise RuntimeError("Browser returned an untrusted websocket origin")
         async with connect(
@@ -294,11 +291,19 @@ async def _browser(name: str) -> AsyncIterator[_CDP]:
         ) as socket:
             yield _CDP(socket)
     finally:
-        if created:
-            try:
-                await api.request("DELETE", f"/boxes/{name}", timeout=30)
-            except Exception:
-                logger.warning("Could not delete disposable frontend review browser", exc_info=True)
+        try:
+            await browser.delete()
+        except Exception:
+            logger.warning("Could not delete disposable frontend review browser", exc_info=True)
+
+
+def _require_browser_network_isolation() -> None:
+    # The provider's external egress proxy does not fence Chrome's own loopback services.
+    # CDP interception also misses workers, popups and WebSockets, and cannot pin browser DNS.
+    raise CaptureBlockedError(
+        "Live preview capture is disabled until the browser service enforces network isolation "
+        "for all browser traffic, including loopback services, workers, popups, and WebSockets"
+    )
 
 
 async def capture_run(run: FrontendReviewRun) -> None:
@@ -308,14 +313,10 @@ async def capture_run(run: FrontendReviewRun) -> None:
     report: FrontendReport | None = None
     assets: list[EvidenceAsset] = []
     try:
-        if run.auth_mode != "none":
-            raise CaptureBlockedError(
-                "Dummy authentication blocks capture before opening a browser"
-            )
         validate_preview_url(run.base_url)
         validate_preview_url(run.head_url)
         scenarios: list[FrontendScenario] = []
-        async with asyncio.timeout(600), _browser(f"frontend-review-{run.id.hex}") as browser:
+        async with asyncio.timeout(600), _browser(f"frontend-review-{uuid7().hex}") as browser:
             for index, path in enumerate(run.paths):
                 before = await browser.screenshot(f"{run.base_url}{path}")
                 after = await browser.screenshot(f"{run.head_url}{path}")

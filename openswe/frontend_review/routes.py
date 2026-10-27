@@ -1,4 +1,3 @@
-import logging
 from uuid import UUID
 
 from fastapi import APIRouter, HTTPException, Response
@@ -12,14 +11,12 @@ from openswe.users import User
 from .schemas import FrontendReviewList, FrontendReviewView, StartFrontendReview
 from .service import (
     create_review,
-    finish_review,
     get_review,
     list_reviews,
     media_for_review,
     review_view,
 )
 
-logger = logging.getLogger(__name__)
 router = APIRouter(tags=["frontend-review"])
 _PREFIX = "/reviews/{owner}/{repo}/{pr_number}/frontend-reviews"
 
@@ -56,29 +53,8 @@ async def api_start_frontend_review(
     login = await _authorize(owner, repo, pr_number, session)
     person = await User.for_login("github", login)
     run = await create_review(
-        owner, repo, pr_number, body, created_by=person.id if person else None
+        owner, repo, pr_number, body, created_by=person.id if person else None, queue_login=login
     )
-    if run.auth_mode != "dummy":
-        from .capture import capture_run
-
-        try:
-            await capture_run(run)
-        except Exception:
-            logger.exception("Frontend capture failed", extra={"frontend_review_id": str(run.id)})
-            await finish_review(
-                run.id,
-                owner=owner,
-                repo=repo,
-                pr_number=pr_number,
-                status="failed",
-                error="The capture failed. Check the server logs for details.",
-            )
-        run = await get_review(owner, repo, pr_number, run.id) or run
-        if run.status == "complete":
-            from .launch import launch_assessment
-
-            await launch_assessment(run, login)
-            run = await get_review(owner, repo, pr_number, run.id) or run
     return review_view(run)
 
 

@@ -26,7 +26,14 @@ from openswe.run_config import RunConfig
 from .capture import capture_run, validate_preview_url
 from .models import FrontendReviewRun
 from .schemas import FrontendReport, ReviewAnnotation, StartFrontendReview
-from .service import assess_review, create_review, get_review, media_for_review
+from .service import (
+    FrontendReviewAccessDenied,
+    assess_review,
+    create_review,
+    get_review,
+    media_for_review,
+    set_assessment_state,
+)
 
 API: Handlers[RemoteRun] = Handlers()
 
@@ -95,6 +102,8 @@ async def capture(run: RemoteRun, request: CaptureFrontendReview) -> CapturedFro
         if latest is None:
             raise RuntimeError("Captured frontend review could not be read")
         review = latest
+        if review.status == "complete" and cfg.head_sha == review.head_sha:
+            review = await set_assessment_state(review, "running", thread_id=run.thread_id)
     return await _view(review)
 
 
@@ -147,6 +156,9 @@ async def inspect(run: RemoteRun, request: ReadFrontendReview) -> CapturedFronte
     )
     if review is None or review.head_sha != cfg.head_sha:
         raise RefusedCallError("Frontend evidence does not belong to this PR revision")
+    report = FrontendReport.model_validate(review.report) if review.report else None
+    if report is None or report.assessment_thread_id != run.thread_id:
+        raise RefusedCallError("This thread does not own the frontend assessment")
     return await _view(review)
 
 
@@ -164,21 +176,25 @@ async def submit(run: RemoteRun, request: SubmitFrontendReview) -> SubmittedFron
     ):
         raise RefusedCallError("Frontend assessment requires a run bound to the exact PR head")
     body = request.request
-    review = await assess_review(
-        cfg.repo.owner,
-        cfg.repo.name,
-        cfg.pr_number,
-        body.review_id,
-        expected_head_sha=cfg.head_sha,
-        summary=body.summary,
-        annotations_by_scenario={
-            scenario: [
-                ReviewAnnotation.model_validate(annotation.model_dump())
-                for annotation in annotations
-            ]
-            for scenario, annotations in body.annotations_by_scenario.items()
-        },
-    )
+    try:
+        review = await assess_review(
+            cfg.repo.owner,
+            cfg.repo.name,
+            cfg.pr_number,
+            body.review_id,
+            expected_head_sha=cfg.head_sha,
+            assessment_thread_id=run.thread_id,
+            summary=body.summary,
+            annotations_by_scenario={
+                scenario: [
+                    ReviewAnnotation.model_validate(annotation.model_dump())
+                    for annotation in annotations
+                ]
+                for scenario, annotations in body.annotations_by_scenario.items()
+            },
+        )
+    except FrontendReviewAccessDenied as exc:
+        raise RefusedCallError(str(exc)) from exc
     return SubmittedFrontendReview(
         review_id=review.id,
         report_url=f"/agents/reviews/{cfg.repo.owner}/{cfg.repo.name}/{cfg.pr_number}?view=frontend&run={review.id}",

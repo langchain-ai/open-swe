@@ -5,7 +5,11 @@ import { useState } from "react"
 import { parsePullRequestReference } from "@/features/reviews/search"
 
 /** Jumps to the review of a pasted GitHub pull request link. */
-export function OpenPullRequestInput() {
+export function OpenPullRequestInput({
+  frontend = false,
+}: {
+  frontend?: boolean
+}) {
   const navigate = useNavigate()
   const [value, setValue] = useState("")
   const [invalid, setInvalid] = useState(false)
@@ -21,12 +25,13 @@ export function OpenPullRequestInput() {
     void navigate({
       to: "/agents/reviews/$owner/$repo/$number",
       params: { owner: pr.owner, repo: pr.repo, number: String(pr.number) },
+      search: frontend ? { view: "frontend" } : {},
     })
   }
 
   return (
     <form
-      className="w-72"
+      className="w-full sm:w-72"
       onSubmit={(event) => {
         event.preventDefault()
         open(value)
@@ -34,7 +39,11 @@ export function OpenPullRequestInput() {
     >
       <Input
         size="sm"
-        aria-label="Open a pull request review"
+        aria-label={
+          frontend
+            ? "Open frontend QA for a pull request"
+            : "Open a pull request review"
+        }
         isError={invalid}
         placeholder="Paste a GitHub PR link"
         value={value}

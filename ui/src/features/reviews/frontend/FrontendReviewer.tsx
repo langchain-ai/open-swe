@@ -3,7 +3,12 @@ import { Button } from "@langchain/macaw-components/Button"
 import { Card } from "@langchain/macaw-components/Card"
 import { GroupedTabs } from "@langchain/macaw-components/GroupedTabs"
 import { Input } from "@langchain/macaw-components/Input"
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
+import {
+  useIsMutating,
+  useMutation,
+  useQuery,
+  useQueryClient,
+} from "@tanstack/react-query"
 import { useState } from "react"
 import { Link } from "@tanstack/react-router"
 
@@ -45,10 +50,17 @@ export function FrontendReviewer({
     ...sharedReviewOptions(pr),
   })
   const [setupOpen, setSetupOpen] = useState(false)
+  const mutationKey = [...key, "start"]
+  const starting = useIsMutating({ mutationKey, exact: true }) > 0
+  const captureInProgress =
+    list.data?.runs.some(
+      (run) => run.status === "pending" || run.status === "running"
+    ) ?? false
   const start = useMutation({
+    mutationKey,
     mutationFn: (input: FrontendReviewInput) =>
       frontendReviewApi.start(pr, input),
-    onSuccess: (run) => {
+    onSuccess: async (run) => {
       client.setQueryData([...key, run.id], run)
       client.setQueryData<{ runs: FrontendReviewRun[] }>(key, (current) => ({
         runs: [
@@ -56,8 +68,7 @@ export function FrontendReviewer({
           ...(current?.runs ?? []).filter((item) => item.id !== run.id),
         ],
       }))
-      onRunChange(run.id)
-      setSetupOpen(false)
+      await client.invalidateQueries({ queryKey: key })
     },
     meta: { errorTitle: "Could not start frontend review" },
   })
@@ -92,7 +103,11 @@ export function FrontendReviewer({
             >
               Refresh
             </Button>
-            <Button size="sm" onClick={() => setSetupOpen(!setupOpen)}>
+            <Button
+              size="sm"
+              disabled={list.isPending || starting || captureInProgress}
+              onClick={() => setSetupOpen(!setupOpen)}
+            >
               {setupOpen ? "Close setup" : "New frontend review"}
             </Button>
           </div>
@@ -100,9 +115,16 @@ export function FrontendReviewer({
         {(setupOpen || empty) && (
           <ReviewSetup
             pr={pr}
-            pending={start.isPending}
+            pending={list.isPending || starting || captureInProgress}
             error={start.error?.message}
-            onStart={(input) => start.mutate(input)}
+            onStart={(input) =>
+              start.mutate(input, {
+                onSuccess: (created) => {
+                  onRunChange(created.id)
+                  setSetupOpen(false)
+                },
+              })
+            }
           />
         )}
         {list.isError ? (
@@ -212,6 +234,14 @@ function ReviewSetup({
             Use the same routes, viewport, and data on both versions. Use a base
             preview built from the PR base commit.
           </p>
+          <p
+            role="status"
+            className="mt-space-2 text-xs text-warning-secondary"
+          >
+            Live capture is currently blocked until the browser provider
+            enforces network isolation. Dummy login is available to verify the
+            review flow.
+          </p>
         </div>
         <div className="grid gap-space-3 md:grid-cols-2">
           <label className="flex flex-col gap-space-2 text-xs font-medium">
@@ -266,7 +296,7 @@ function ReviewSetup({
           <p className="text-xs text-secondary">
             {auth === "dummy"
               ? "Records an authentication blocker without attempting a login or contacting the preview."
-              : "Captures unauthenticated pages. A login screen is reported as blocked."}
+              : "Records the browser isolation blocker without contacting the preview. Public page capture requires enforced browser network isolation."}
           </p>
         </div>
         {error && (
@@ -277,10 +307,10 @@ function ReviewSetup({
         <div>
           <Button type="submit" size="sm" disabled={pending}>
             {pending
-              ? "Capturing frontend review…"
+              ? "Starting frontend review…"
               : auth === "dummy"
                 ? "Create dummy-auth review"
-                : "Capture previews"}
+                : "Check public preview capture"}
           </Button>
         </div>
       </form>
@@ -335,7 +365,9 @@ export function FrontendReportView({
           </Badge>
           <h3 className="text-sm font-medium">
             {run.status === "running" || run.status === "pending"
-              ? "Capturing paired preview evidence…"
+              ? run.status === "pending"
+                ? "Frontend review queued…"
+                : "Capturing paired preview evidence…"
               : report
                 ? "Review evidence"
                 : "No visual evidence captured"}
@@ -410,11 +442,15 @@ export function FrontendReportView({
       </Card>
       {run.status === "blocked" && (
         <Card className="p-space-4">
-          <h3 className="text-sm font-medium">Authentication required</h3>
+          <h3 className="text-sm font-medium">
+            {run.auth_mode === "dummy"
+              ? "Authentication required"
+              : "Capture blocked"}
+          </h3>
           <p className="mt-space-2 text-sm text-secondary">
             {run.auth_mode === "dummy"
               ? "Dummy login is intentionally unable to sign in. No preview was contacted and no page was reviewed. A private LangSmith preview needs a disposable QA identity before authenticated capture can run."
-              : "The preview requires authentication. Login-page screenshots do not count as coverage."}
+              : "The preview could not be captured. Blocked captures do not count as visually reviewed coverage."}
           </p>
         </Card>
       )}

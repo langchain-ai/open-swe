@@ -9,6 +9,7 @@ import json
 import logging
 import uuid
 from collections.abc import Mapping
+from contextlib import nullcontext
 from datetime import UTC, datetime, timedelta
 from enum import Enum
 from typing import Final, Self
@@ -17,6 +18,7 @@ from zoneinfo import ZoneInfo
 from croniter import croniter
 from pydantic import BaseModel, JsonValue
 from sqlalchemy import RowMapping, text
+from sqlalchemy.ext.asyncio import AsyncConnection
 
 from openswe.database.postgres import transaction
 
@@ -161,11 +163,13 @@ async def schedule(
     metadata: Mapping[str, JsonValue] | None = None,
     by: uuid.UUID | None = None,
     replace: bool = True,
+    connection: AsyncConnection | None = None,
 ) -> Job:
     """Queue a job; one with ``key`` replaces the job queued under that key before.
 
     With ``replace=False``, an existing keyed job keeps its payload, schedule and claim.
     ``by`` is the person whose action queued it, ``None`` for the system's own work.
+    ``connection`` joins an existing transaction so its state and job commit together.
     """
     if cron is not None and not croniter.is_valid(cron):
         raise ValueError(f"Invalid cron schedule: {cron}")
@@ -192,7 +196,7 @@ async def schedule(
         if replace
         else "key = EXCLUDED.key"
     )
-    async with transaction() as conn:
+    async with nullcontext(connection) if connection is not None else transaction() as conn:
         row = (
             (
                 await conn.execute(

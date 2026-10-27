@@ -9,7 +9,7 @@ from uuid import UUID
 
 from PIL import Image, UnidentifiedImageError
 from pydantic import JsonValue, TypeAdapter
-from sqlalchemy import Select, func, select, update
+from sqlalchemy import Select, func, select, text, update
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import undefer
 
@@ -40,6 +40,10 @@ MAX_RUN_BYTES = 32 * 1024 * 1024
 
 class FrontendReviewConflict(ValueError):
     """A capture tried to overwrite an already finished run."""
+
+
+class FrontendReviewAccessDenied(PermissionError):
+    """An assessment was requested by a thread that does not own its evidence."""
 
 
 @dataclass(frozen=True)
@@ -78,6 +82,7 @@ async def create_review(
     created_by: UUID | None = None,
     expected_base_sha: str | None = None,
     expected_head_sha: str | None = None,
+    queue_login: str | None = None,
 ) -> FrontendReviewRun:
     async with GitHubClient.as_app(owner, repo) as github:
         payload = await github.repo(owner, repo).pull_request(pr_number).pull()
@@ -105,7 +110,13 @@ async def create_review(
         head_url=request.head_url,
         paths=request.paths,
         auth_mode=request.auth_mode,
-        status="blocked" if request.auth_mode == "dummy" else "running",
+        status=(
+            "blocked"
+            if request.auth_mode == "dummy"
+            else "pending"
+            if queue_login is not None
+            else "running"
+        ),
         error=(
             "Dummy authentication cannot access the preview. No login or capture was attempted."
             if request.auth_mode == "dummy"
@@ -118,6 +129,10 @@ async def create_review(
     async with postgres.session() as session:
         session.add(run)
         await session.flush()
+        if queue_login is not None and run.auth_mode != "dummy":
+            from .jobs import enqueue_capture
+
+            await enqueue_capture(session, run, queue_login)
         await Topic.PULL_REQUESTS.invalidate(session, key=PullRequestKey.of(owner, repo, pr_number))
     return run
 
@@ -142,6 +157,10 @@ async def _expire_stale(session: AsyncSession, owner: str, repo: str, pr_number:
             FrontendReviewRun.id.in_(stale_ids),
             FrontendReviewRun.status.in_(["pending", "running"]),
             FrontendReviewRun.created_at < datetime.now(UTC) - timedelta(minutes=15),
+            text(
+                "NOT EXISTS (SELECT 1 FROM job WHERE job.key = "
+                "'frontend_capture:' || CAST(frontend_review_run.id AS text))"
+            ),
         )
         .values(
             status="failed",
@@ -311,6 +330,7 @@ async def assess_review(
     run_id: UUID,
     *,
     expected_head_sha: str,
+    assessment_thread_id: str,
     summary: str,
     annotations_by_scenario: dict[str, list[ReviewAnnotation]],
     created_by: UUID | None = None,
@@ -330,6 +350,8 @@ async def assess_review(
         if not expected_head_sha or run.head_sha != expected_head_sha:
             raise FrontendReviewConflict("The assessment does not match the captured head commit")
         report = FrontendReport.model_validate(run.report)
+        if not assessment_thread_id or report.assessment_thread_id != assessment_thread_id:
+            raise FrontendReviewAccessDenied("This thread does not own the frontend assessment")
         if report.ai_review_status == "complete":
             raise FrontendReviewConflict("A published frontend assessment cannot be overwritten")
         scenarios = {scenario.id: scenario for scenario in report.scenarios}
@@ -377,6 +399,12 @@ async def set_assessment_state(
         if current.status != "complete" or current.report is None:
             raise FrontendReviewConflict("Only completed captures can start an AI assessment")
         report = FrontendReport.model_validate(current.report)
+        if (
+            thread_id is not None
+            and report.assessment_thread_id is not None
+            and report.assessment_thread_id != thread_id
+        ):
+            raise FrontendReviewConflict("The frontend assessment is assigned to another thread")
         if report.ai_review_status == "complete":
             return current
         report.ai_review_status = state

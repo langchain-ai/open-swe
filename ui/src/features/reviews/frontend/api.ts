@@ -123,12 +123,19 @@ export const frontendReviewApi = {
 }
 
 export function evidenceMediaUrl(url: string): string {
+  const unsafeSegment = url.split("/").some((segment) => {
+    try {
+      const decoded = decodeURIComponent(segment)
+      return decoded === "." || decoded === ".." || /[\\/?#]/.test(decoded)
+    } catch {
+      return true
+    }
+  })
   if (
-    !/^\/dashboard\/api\/reviews\/[^/]+\/[^/]+\/\d+\/frontend-reviews\//.test(
+    !/^\/dashboard\/api\/reviews\/[^/]+\/[^/]+\/\d+\/frontend-reviews\/[^/]+\/media\/[^/]+$/.test(
       url
     ) ||
-    url.includes("..") ||
-    url.includes("\\")
+    unsafeSegment
   )
     throw new Error(
       "Evidence must be served by the authenticated frontend review API."

@@ -9,11 +9,21 @@ import httpx
 import pytest
 from fastapi import FastAPI, HTTPException
 from PIL import Image
+from runtime_api.frontend_review import (
+    CaptureFrontendReview,
+    FrontendAssessmentArguments,
+    FrontendReviewArguments,
+    ReadFrontendReview,
+    ReadFrontendReviewArguments,
+    SubmitFrontendReview,
+)
 from sqlalchemy import update
 
+from openswe.agent_api.server import RefusedCallError
+from openswe.agent_api.tokens import RemoteRun
 from openswe.dashboard.oauth import require_session
 from openswe.database import postgres
-from openswe.frontend_review import launch, routes, service
+from openswe.frontend_review import agent_api, launch, routes, service
 from openswe.frontend_review.models import FrontendReviewRun
 from openswe.frontend_review.schemas import (
     DifferenceMetrics,
@@ -124,6 +134,7 @@ async def test_evidence_is_pr_scoped_and_finished_runs_cannot_be_overwritten(
             8,
             run.id,
             expected_head_sha=run.head_sha,
+            assessment_thread_id="review-thread",
             summary="Incorrect PR",
             annotations_by_scenario={},
         )
@@ -134,6 +145,7 @@ async def test_evidence_is_pr_scoped_and_finished_runs_cannot_be_overwritten(
             7,
             run.id,
             expected_head_sha="c" * 40,
+            assessment_thread_id="review-thread",
             summary="Outdated review",
             annotations_by_scenario={},
         )
@@ -144,6 +156,7 @@ async def test_evidence_is_pr_scoped_and_finished_runs_cannot_be_overwritten(
             7,
             run.id,
             expected_head_sha=run.head_sha,
+            assessment_thread_id="review-thread",
             summary="Invented evidence",
             annotations_by_scenario={"missing": []},
         )
@@ -154,6 +167,7 @@ async def test_evidence_is_pr_scoped_and_finished_runs_cannot_be_overwritten(
             7,
             run.id,
             expected_head_sha=run.head_sha,
+            assessment_thread_id="review-thread",
             summary="Out of bounds",
             annotations_by_scenario={
                 "page-1": [
@@ -169,6 +183,7 @@ async def test_evidence_is_pr_scoped_and_finished_runs_cannot_be_overwritten(
         7,
         run.id,
         expected_head_sha=run.head_sha,
+        assessment_thread_id="review-thread",
         summary="The label clips in the updated screenshot.",
         annotations_by_scenario={
             "page-1": [
@@ -198,6 +213,7 @@ async def test_evidence_is_pr_scoped_and_finished_runs_cannot_be_overwritten(
             7,
             run.id,
             expected_head_sha=run.head_sha,
+            assessment_thread_id="review-thread",
             summary="Overwrite",
             annotations_by_scenario={},
         )
@@ -219,6 +235,121 @@ async def test_dummy_auth_is_terminal_and_stale_agent_revisions_never_create_run
     run = await service.create_review("acme", "repo", 7, body)
     assert run.status == "blocked" and run.report is None
     assert run.error and "No login or capture was attempted" in run.error
+
+
+@pytest.mark.usefixtures("registry_db")
+async def test_only_the_assigned_thread_can_read_or_publish_an_assessment(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(GitHubClient, "as_app", _github)
+    review = await service.create_review(
+        "acme",
+        "repo",
+        7,
+        StartFrontendReview(
+            base_url="https://base.vercel.app", head_url="https://head.vercel.app", auth_mode="none"
+        ),
+    )
+    captured = await service.finish_review(
+        review.id,
+        owner="acme",
+        repo="repo",
+        pr_number=7,
+        status="complete",
+        report=_report(),
+        assets=_assets(),
+    )
+    read = ReadFrontendReview(request=ReadFrontendReviewArguments(review_id=review.id))
+    submit = SubmitFrontendReview(
+        request=FrontendAssessmentArguments(review_id=review.id, summary="Owned assessment")
+    )
+    config = {
+        "repo": {"owner": "acme", "name": "repo"},
+        "pr_number": 7,
+        "head_sha": review.head_sha,
+    }
+    owner = RemoteRun(
+        thread_id="dashboard-assessment", assistant_id="reviewer", configurable=config
+    )
+    with pytest.raises(RefusedCallError, match="does not own"):
+        await agent_api.inspect(owner, read)
+    with pytest.raises(RefusedCallError, match="does not own"):
+        await agent_api.submit(owner, submit)
+    await service.set_assessment_state(captured, "running", thread_id=owner.thread_id)
+    for dedicated_id in (None, str(review.id)):
+        intruder = RemoteRun(
+            thread_id="other-pr-run",
+            assistant_id="reviewer",
+            configurable={**config, "frontend_review_id": dedicated_id},
+        )
+        with pytest.raises(RefusedCallError, match="does not own"):
+            await agent_api.inspect(intruder, read)
+        with pytest.raises(RefusedCallError, match="does not own"):
+            await agent_api.submit(intruder, submit)
+    with pytest.raises(FrontendReviewConflict, match="assigned to another thread"):
+        await service.set_assessment_state(captured, "running", thread_id="other-pr-run")
+    evidence = await agent_api.inspect(owner, read)
+    assert len(evidence.screenshots) == 2
+    result = await agent_api.submit(owner, submit)
+    assert result.ai_review_status == "complete"
+    restored = await service.get_review("acme", "repo", 7, review.id)
+    assert restored is not None and restored.report is not None
+    assert restored.report["summary"] == "Owned assessment"
+    assert restored.report["assessment_thread_id"] == owner.thread_id
+
+
+@pytest.mark.usefixtures("registry_db")
+@pytest.mark.parametrize("head_sha", ["b" * 40, None])
+async def test_agent_capture_assigns_its_evidence_before_assessment(
+    monkeypatch: pytest.MonkeyPatch, head_sha: str | None
+) -> None:
+    monkeypatch.setattr(GitHubClient, "as_app", _github)
+
+    async def capture(review: FrontendReviewRun) -> None:
+        await service.finish_review(
+            review.id,
+            owner=review.owner,
+            repo=review.repo,
+            pr_number=review.pr_number,
+            status="complete",
+            report=_report(),
+            assets=_assets(),
+        )
+
+    monkeypatch.setattr(agent_api, "capture_run", capture)
+    token = RemoteRun(
+        thread_id="capturing-agent",
+        assistant_id="agent",
+        configurable={
+            "repo": {"owner": "acme", "name": "repo"},
+            "pr_number": 7,
+            "head_sha": head_sha,
+        },
+    )
+    evidence = await agent_api.capture(
+        token,
+        CaptureFrontendReview(
+            request=FrontendReviewArguments(
+                base_url="https://base.vercel.app",
+                head_url="https://head.vercel.app",
+                auth_mode="none",
+            )
+        ),
+    )
+    assert len(evidence.screenshots) == 2
+    if head_sha is None:
+        assert evidence.ai_review_status == "not_run"
+        return
+    assert evidence.ai_review_status == "running"
+    result = await agent_api.submit(
+        token,
+        SubmitFrontendReview(
+            request=FrontendAssessmentArguments(
+                review_id=evidence.review_id, summary="Assessment of the agent's own capture"
+            )
+        ),
+    )
+    assert result.ai_review_status == "complete"
 
 
 @pytest.mark.usefixtures("registry_db")

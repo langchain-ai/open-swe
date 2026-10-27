@@ -4,9 +4,10 @@ import json
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from io import BytesIO
-from unittest.mock import AsyncMock
+from unittest.mock import AsyncMock, Mock
 from uuid import uuid7
 
+import httpx2
 import pytest
 from PIL import Image
 from pydantic import JsonValue, TypeAdapter
@@ -59,7 +60,7 @@ def test_exact_mask_uses_threshold_and_preserves_unchanged_pixels() -> None:
     assert region.model_dump() == {"x": 30, "y": 30, "width": 4, "height": 4, "pixels": 4}
 
 
-async def test_dummy_capture_finishes_blocked_without_browser_or_network(
+async def test_anonymous_capture_finishes_blocked_before_provider_access_or_browser_network(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     run = FrontendReviewRun(
@@ -70,30 +71,34 @@ async def test_dummy_capture_finishes_blocked_without_browser_or_network(
         base_url="https://base.vercel.app",
         head_url="https://head.vercel.app",
         paths=["/"],
-        auth_mode="dummy",
+        auth_mode="none",
     )
     run.pull_request = PullRequest(owner="acme", repo="widgets", number=7)
     finish = AsyncMock()
     monkeypatch.setattr(capture, "finish_review", finish)
-    browser = AsyncMock(side_effect=AssertionError("must not open a browser"))
-    monkeypatch.setattr(capture, "_browser", browser)
+    provider = Mock(side_effect=AssertionError("must not access browser service credentials"))
+    monkeypatch.setattr(capture.SandboxAPI, "from_env", provider)
 
     await capture.capture_run(run)
 
-    assert not browser.called
+    assert not provider.called
     assert finish.call_args.kwargs["status"] == "blocked"
+    assert "browser service enforces network isolation" in finish.call_args.kwargs["error"]
     assert finish.call_args.kwargs["assets"] == []
 
 
 @pytest.mark.parametrize(
-    "http_status,late_status,expected_status",
+    "http_status,late_status,expected_status,base_origin,rendered_base",
     [
-        (200, None, "complete"),
-        (401, None, "blocked"),
-        (403, None, "blocked"),
-        (503, None, "failed"),
-        (None, None, "failed"),
-        (200, 503, "failed"),
+        (200, None, "complete", "https://base.vercel.app", "https://base.vercel.app/"),
+        (401, None, "blocked", "https://base.vercel.app", "https://base.vercel.app/"),
+        (403, None, "blocked", "https://base.vercel.app", "https://base.vercel.app/"),
+        (503, None, "failed", "https://base.vercel.app", "https://base.vercel.app/"),
+        (None, None, "failed", "https://base.vercel.app", "https://base.vercel.app/"),
+        (200, 503, "failed", "https://base.vercel.app", "https://base.vercel.app/"),
+        (200, None, "complete", "https://base.vercel.app:443", "https://base.vercel.app/"),
+        (200, None, "complete", "https://Base.vercel.app", "https://base.vercel.app/"),
+        (200, None, "blocked", "https://base.vercel.app", "http://base.vercel.app/"),
     ],
 )
 async def test_capture_uses_main_document_http_status_instead_of_rendered_error_pages(
@@ -101,6 +106,8 @@ async def test_capture_uses_main_document_http_status_instead_of_rendered_error_
     http_status: int | None,
     late_status: int | None,
     expected_status: str,
+    base_origin: str,
+    rendered_base: str,
 ) -> None:
     if http_status is None:
         timeout = asyncio.timeout
@@ -126,6 +133,8 @@ async def test_capture_uses_main_document_http_status_instead_of_rendered_error_
                 result = {"sessionId": "page-session"}
             elif method == "Page.navigate":
                 location = str(params["url"])
+                if location == f"{base_origin}/":
+                    location = rendered_base
                 result = {"frameId": "main-frame"}
                 for session, frame, kind, status in (
                     ("page-session", "main-frame", "Document", http_status),
@@ -184,7 +193,7 @@ async def test_capture_uses_main_document_http_status_instead_of_rendered_error_
         pull_request_id=uuid7(),
         base_sha="a" * 40,
         head_sha="b" * 40,
-        base_url="https://base.vercel.app",
+        base_url=base_origin,
         head_url="https://head.vercel.app",
         paths=["/"],
         auth_mode="none",
@@ -211,6 +220,57 @@ async def test_capture_uses_main_document_http_status_instead_of_rendered_error_
         assert screenshots == []
         assert finish.call_args.kwargs["report"] is None
         assert finish.call_args.kwargs["assets"] == []
+
+
+@pytest.mark.parametrize("lost_create_response", [True, False])
+async def test_disposable_browser_cleanup_handles_ambiguous_creation_and_existing_browser(
+    monkeypatch: pytest.MonkeyPatch,
+    lost_create_response: bool,
+) -> None:
+    resources = set() if lost_create_response else {"disposable"}
+
+    async def request(
+        self: capture.SandboxAPI,
+        method: str,
+        path: str,
+        *,
+        json: dict[str, object] | None = None,
+        timeout: float,
+    ) -> httpx2.Response:
+        status = 200
+        body: dict[str, object] = {}
+        if method == "POST" and path == "/browsers":
+            if lost_create_response:
+                resources.add("disposable")
+                raise TimeoutError("Browser created but response was lost")
+            status = 409
+        elif method == "GET":
+            body = {"id": "browser-id", "name": "disposable", "status": "running"}
+        elif method == "POST":
+            body = {"id": "window-id", "api_cdp_url": "https://untrusted.example.test/cdp"}
+        elif method == "DELETE":
+            resources.remove("disposable")
+        response = httpx2.Response(
+            status,
+            json=body,
+            request=httpx2.Request(method, f"https://browser.example.test{path}"),
+        )
+        response.raise_for_status()
+        return response
+
+    monkeypatch.setattr(capture, "_require_browser_network_isolation", lambda: None)
+    monkeypatch.setattr(
+        capture.SandboxAPI,
+        "from_env",
+        lambda: capture.SandboxAPI("https://browser.example.test", None),
+    )
+    monkeypatch.setattr(capture.SandboxAPI, "request", request)
+    failure = TimeoutError if lost_create_response else RuntimeError
+    with pytest.raises(failure):
+        async with capture._browser("disposable"):
+            pytest.fail("Untrusted synthetic browser must not connect")
+
+    assert resources == set()
 
 
 @pytest.mark.parametrize(

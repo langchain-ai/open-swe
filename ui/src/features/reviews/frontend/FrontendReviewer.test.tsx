@@ -1,9 +1,17 @@
 /** @vitest-environment jsdom */
-import { cleanup, render, screen } from "@testing-library/react"
-import { afterEach, expect, it } from "vitest"
+import {
+  act,
+  cleanup,
+  fireEvent,
+  render,
+  screen,
+  waitFor,
+} from "@testing-library/react"
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
+import { afterEach, expect, it, vi } from "vitest"
 
-import { FrontendReportView } from "./FrontendReviewer"
-import type { FrontendReviewRun } from "./api"
+import { FrontendReportView, FrontendReviewer } from "./FrontendReviewer"
+import { frontendReviewApi, type FrontendReviewRun } from "./api"
 
 const run: FrontendReviewRun = {
   id: "00000000-0000-0000-0000-000000000001",
@@ -26,7 +34,10 @@ const run: FrontendReviewRun = {
   },
 }
 
-afterEach(cleanup)
+afterEach(() => {
+  cleanup()
+  vi.restoreAllMocks()
+})
 
 it("does not present dummy authentication as captured coverage or AI review", () => {
   render(<FrontendReportView run={run} />)
@@ -94,4 +105,108 @@ it("warns when a saved report covers a different PR commit and retains the repor
   rerender(<FrontendReportView run={completed} currentHeadSha={run.head_sha} />)
   expect(screen.queryByText("New PR changes have not been reviewed")).toBeNull()
   expect(screen.getByText("Review evidence")).toBeTruthy()
+})
+
+it("keeps an in-flight start disabled after remount and never navigates from its unmounted form", async () => {
+  const client = new QueryClient({
+    defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
+  })
+  vi.spyOn(frontendReviewApi, "list")
+    .mockResolvedValueOnce({ runs: [] })
+    .mockResolvedValue({ runs: [run] })
+  vi.spyOn(frontendReviewApi, "get").mockResolvedValue(run)
+  let resolveStart!: (value: FrontendReviewRun) => void
+  const start = vi.spyOn(frontendReviewApi, "start").mockImplementation(
+    () =>
+      new Promise<FrontendReviewRun>((resolve) => {
+        resolveStart = resolve
+      })
+  )
+  const originalNavigation = vi.fn()
+  const remountedNavigation = vi.fn()
+  const pr = { owner: "acme", repo: "repo", number: 7 }
+  const original = render(
+    <QueryClientProvider client={client}>
+      <FrontendReviewer pr={pr} onRunChange={originalNavigation} />
+    </QueryClientProvider>
+  )
+  await screen.findByRole("button", { name: "Create dummy-auth review" })
+  fireEvent.change(screen.getByRole("textbox", { name: "Base preview URL" }), {
+    target: { value: "https://base.vercel.app" },
+  })
+  fireEvent.change(screen.getByRole("textbox", { name: "PR preview URL" }), {
+    target: { value: "https://head.vercel.app" },
+  })
+  fireEvent.click(
+    screen.getByRole("button", { name: "Create dummy-auth review" })
+  )
+  await waitFor(() => expect(start).toHaveBeenCalledTimes(1))
+  original.unmount()
+  render(
+    <QueryClientProvider client={client}>
+      <FrontendReviewer pr={pr} onRunChange={remountedNavigation} />
+    </QueryClientProvider>
+  )
+  const pendingButton = await screen.findByRole("button", {
+    name: "Starting frontend review…",
+  })
+  expect((pendingButton as HTMLButtonElement).disabled).toBe(true)
+  fireEvent.click(pendingButton)
+  expect(start).toHaveBeenCalledTimes(1)
+  await act(async () => {
+    resolveStart(run)
+  })
+  await screen.findByText("Authentication required")
+  expect(originalNavigation).not.toHaveBeenCalled()
+  expect(remountedNavigation).not.toHaveBeenCalled()
+  expect(client.getQueryData(["frontend-review", "acme", "repo", 7])).toEqual({
+    runs: [run],
+  })
+  client.clear()
+})
+
+it("refreshes terminal progress when the worker finishes before the enqueue response arrives", async () => {
+  const client = new QueryClient({
+    defaultOptions: { queries: { retry: false } },
+  })
+  const finished: FrontendReviewRun = {
+    ...run,
+    auth_mode: "none",
+    report: null,
+    error: "Browser provider network isolation is required",
+  }
+  vi.spyOn(frontendReviewApi, "list")
+    .mockResolvedValueOnce({ runs: [] })
+    .mockResolvedValue({ runs: [finished] })
+  vi.spyOn(frontendReviewApi, "get").mockResolvedValue(finished)
+  vi.spyOn(frontendReviewApi, "start").mockResolvedValue({
+    ...finished,
+    status: "pending",
+    error: null,
+  })
+  render(
+    <QueryClientProvider client={client}>
+      <FrontendReviewer
+        pr={{ owner: "acme", repo: "repo", number: 7 }}
+        onRunChange={vi.fn()}
+      />
+    </QueryClientProvider>
+  )
+  await screen.findByRole("button", { name: "Create dummy-auth review" })
+  fireEvent.change(screen.getByRole("textbox", { name: "Base preview URL" }), {
+    target: { value: "https://base.vercel.app" },
+  })
+  fireEvent.change(screen.getByRole("textbox", { name: "PR preview URL" }), {
+    target: { value: "https://head.vercel.app" },
+  })
+  fireEvent.click(screen.getByText("Public preview"))
+  fireEvent.click(
+    screen.getByRole("button", { name: "Check public preview capture" })
+  )
+  await screen.findByText("Capture blocked")
+  expect(
+    screen.getByText("Browser provider network isolation is required")
+  ).toBeTruthy()
+  expect(screen.queryByText("Frontend review queued…")).toBeNull()
+  client.clear()
 })

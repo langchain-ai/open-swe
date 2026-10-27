@@ -1,6 +1,6 @@
 # Frontend reviewer
 
-Frontend review lives on a pull request's existing Open SWE review page. Select **Frontend reviewer** beside **Code review** to start a capture or inspect an earlier run. A shared link keeps the selected run:
+Open **QA agent** in the Open SWE sidebar to browse your PRs or review assignments as cards. Filter the loaded PRs, paste a GitHub PR link, or open a card to inspect its saved visual evidence. The overview lives at `/agents/qa`; each card links to the pull request's existing review page with **Frontend reviewer** selected beside **Code review**. A shared link keeps the selected run:
 
 ```text
 /agents/reviews/<owner>/<repo>/<number>?view=frontend&run=<run-id>
@@ -12,7 +12,9 @@ The feature uses the dashboard's existing deployment, GitHub session, and reposi
 
 Supply a base preview, the PR preview, and up to five matching routes. For LangChainPlus, the head URL defaults to `https://pr-<number>-fe.review.smith.langchain.com`. Build the base preview from the PR's exact base commit; a shared development deployment is not a reliable baseline.
 
-**Dummy login** is the default. It saves an authentication blocker without opening a browser or submitting credentials. **Public preview** explicitly opts into anonymous capture. Private LangSmith pages still require a disposable QA identity adapter; a login page is blocked rather than counted as coverage. No employee browser session is reused.
+**Dummy login** is the default. It saves an authentication blocker without opening a browser or submitting credentials. **Public preview** requests anonymous capture, which currently saves a network-isolation blocker before contacting the browser service. Private LangSmith pages still require a disposable QA identity adapter; a login page is blocked rather than counted as coverage. No employee browser session is reused.
+
+Live captures are disabled until the browser provider supplies a verifiable network boundary that covers all browser targets and protocols, including workers, popups, WebSockets, and browser-local services. A sandbox external-egress allowlist alone cannot fence Chrome's loopback services. CDP request interception and backend DNS checks are only supplemental filters: they do not pin the browser's connections or cover all traffic. Enabling live capture requires a provider-enforced policy that rejects private, link-local, metadata, and loopback destinations at connection time, with regressions against DNS rebinding and the non-page channels. There is no application flag that bypasses this blocker. Stored reports, pixel comparisons, and AI assessments remain available.
 
 Each run freezes the current PR base and head SHAs from GitHub and stores screenshots separately from other runs. A captured page is not proof that its deployment serves that commit: the report labels build verification as unverified until served-build attestation is implemented. Do not use the pixel percentage as a pass/fail verdict.
 
@@ -37,14 +39,14 @@ GET  /dashboard/api/reviews/<owner>/<repo>/<number>/frontend-reviews/<run-id>/me
 
 All reads and writes require repository access. The POST also inherits the dashboard's same-origin mutation checks. Original images and report data remain behind these endpoints; real evidence is not copied into the public UI bundle. Run records and bounded media are stored in PostgreSQL, using the same migration and deployment path as the application. This initial storage path suits a limited pilot; larger recordings should move to private object storage before expanding coverage.
 
-On-demand capture is bounded and awaited, so it does not depend on a process-local background queue. A capture failure is saved as a failed run. AI assessment uses Open SWE's existing durable MDA dispatch. Interrupted captures and assessments become failed after fifteen minutes when the report is next read. A frontend run does not replace the code review or create an approving GitHub review.
+The dashboard POST atomically saves a queued run and its job on Open SWE's shared PostgreSQL queue, then returns before the capture starts. The existing job worker claims one job per run across replicas, renews its lease while processing, and recovers abandoned jobs after a restart. Each phase invalidates the PR topic so the dashboard shows queued, running, and terminal progress. Leaving the page cannot trigger a late navigation, and an active start or capture stays visible when the page is reopened. A capture failure is saved as a failed run. AI assessment uses Open SWE's existing durable MDA dispatch. Interrupted captures without a queued job, and interrupted assessments, become failed after fifteen minutes when the report is next read. A frontend run does not replace the code review or create an approving GitHub review.
 
 Ordinary agent/reviewer runs also have typed `review_frontend`, `read_frontend_review`, and `submit_frontend_review` tools. Their run token supplies the repository, PR, and revision; the model cannot select an unrelated repository or head. The dedicated dashboard assessment is further bound to one saved report.
 
 ## Rollout
 
 1. Apply the feature's database migration with the normal Open SWE deployment process, and deploy the backend, MDA runtime, and UI together.
-2. Confirm the configured LangSmith browser service can create an isolated browser. Verify one anonymous paired capture and one dummy-auth blocker.
+2. Integrate and verify the browser provider's complete network-isolation contract before replacing the capture blocker. Confirm private-network, metadata, loopback, worker, popup, WebSocket, and DNS-rebinding attempts cannot reach their destinations. Then verify one anonymous paired capture and one dummy-auth blocker.
 3. Connect the existing QA harness's disposable identity and seeded workspace before enabling private LangSmith navigation.
 4. Add full served-SHA verification and deterministic route readiness, interaction journeys, flags, and data. Keep incomplete coverage visible.
 5. Pilot a few stable surfaces before adding automatic PR/deployment triggers or a required check.
