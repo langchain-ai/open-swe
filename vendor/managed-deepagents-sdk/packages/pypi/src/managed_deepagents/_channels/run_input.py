@@ -62,6 +62,34 @@ class NormalizedRunInput(TypedDict):
     webhook: NotRequired[str]
 
 
+class RunStartOptions(TypedDict):
+    """A handler's run input as ``start_ingress_run`` takes it."""
+
+    messages: list[dict[str, JsonValue]]
+    state: NotRequired[dict[str, JsonValue]]
+    metadata: NotRequired[dict[str, JsonValue]]
+    webhook: NotRequired[str]
+
+
+def run_start_options(
+    run_input: NormalizedRunInput, metadata: Mapping[str, JsonValue] | None = None
+) -> RunStartOptions:
+    """A handler's run input as ``start_ingress_run`` takes it.
+
+    MDA's own ``metadata`` goes over the handler's, so a handler can't replace
+    it. Empty state and metadata are left out.
+    """
+    options: RunStartOptions = {"messages": run_input["messages"]}
+    if run_input["state"]:
+        options["state"] = run_input["state"]
+    merged = {**run_input.get("metadata", {}), **(metadata or {})}
+    if merged:
+        options["metadata"] = merged
+    if "webhook" in run_input:
+        options["webhook"] = run_input["webhook"]
+    return options
+
+
 _MESSAGE_ROLES = frozenset({"human", "ai", "system", "tool"})
 
 
@@ -145,8 +173,9 @@ def _run_webhook(webhook: object) -> str:
 def _run_context(context: object) -> dict[str, JsonValue]:
     if not isinstance(context, Mapping) or not is_json_value(dict(context)):
         raise TypeError("run context must be a JSON object")
-    if "channel" in context:
-        raise TypeError("context.channel is reserved for managed ingress")
+    for key in ("channel", "mda_channel"):
+        if key in context:
+            raise TypeError(f"context.{key} is reserved for managed ingress")
     return cast("dict[str, JsonValue]", dict(context))
 
 

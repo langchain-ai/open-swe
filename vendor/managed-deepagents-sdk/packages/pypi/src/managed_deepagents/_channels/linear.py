@@ -17,12 +17,14 @@ from pydantic import ValidationError
 from typing_extensions import TypeIs
 
 from managed_deepagents._channel_icon import validate_channel_icon_path
+from managed_deepagents._channels.actor import endpoint_actor
 from managed_deepagents._channels.http import HttpChannel, channel_thread_id, http_channel
 from managed_deepagents._channels.http.endpoint import is_endpoint_handler
 from managed_deepagents._channels.http.provider import (
     EventFinished,
     EventHandlerOutcome,
     channel_name,
+    check_event_keys,
     defined_fields,
     event_snapshot,
     finish_events,
@@ -66,6 +68,7 @@ from managed_deepagents._channels.linear_types import (
     LinearAppOptions,
     LinearChannelThread,
     LinearCommentCreateEvent,
+    LinearEndpointFields,
     LinearEvent,
     LinearEventCallback,
     LinearHandlers,
@@ -91,6 +94,7 @@ if TYPE_CHECKING:
         JsonValue,
     )
     from managed_deepagents._channels.run_input import ChannelRunResult
+    from managed_deepagents._channels.types import ChannelReply
 
 
 def linear_channel(
@@ -98,6 +102,7 @@ def linear_channel(
     on_event: LinearHandlers | None = None,
     app: LinearAppOptions | None = None,
     multitask_strategy: MultitaskStrategy = "enqueue",
+    reply: ChannelReply = "auto",
     sessions: bool = True,
     ignore_bots: bool = True,
     on_finish: EventFinished[LinearEvent, LinearChannelThread] | None = None,
@@ -119,6 +124,10 @@ def linear_channel(
             run and starts after it, ``interrupt`` cancels the run, keeping its
             progress, and starts at once, ``rollback`` cancels it and discards
             its progress, and ``reject`` starts nothing.
+        reply: Whether the channel posts the run's final answer, as a comment
+            or the session's response: ``"auto"`` (the default) or ``"none"``,
+            to leave replying to the agent. Session acknowledgements, Stop and
+            error notices still post.
         sessions: Answer Linear agent sessions, which open when someone
             mentions the app or delegates an issue to it. Without a handler, a
             new session runs with Linear's prompt for it (``promptContext``), and
@@ -153,9 +162,9 @@ def linear_channel(
         "Linear",
         # By key; the channel calls each only with its own key's events.
         cast("Mapping[str, LinearEventCallback | EventEndpoint]", on_event or {}),
+        _endpoint_fields,
     )
-    if set(handlers) - SUPPORTED_EVENT_KEYS:
-        raise ValueError("unsupported Linear event key")
+    check_event_keys("Linear", handlers, SUPPORTED_EVENT_KEYS)
     filters = _Filters(teams=_teams(app), ignore_bots=ignore_bots, sessions=sessions)
     events = handled_event_keys(handlers) + (sorted(SESSION_EVENT_KEYS) if sessions else [])
     provider_config: dict[str, JsonValue] = {"events": sorted(set(events))}
@@ -186,11 +195,15 @@ def linear_channel(
             _notify_finished,
             on_finish,
             _event,
-            lambda thread_id: LinearChannelThread(id=thread_id, channel=ChannelName(name=name())),
+            lambda delivery: LinearChannelThread(
+                id=delivery["thread_id"], channel=ChannelName(name=name())
+            ),
         ),
         provider_config=provider_config,
         multitask_strategy=multitask_strategy,
+        reply=reply,
     )
+    channel.paused_notice = _notify_paused
     if app is not None and "icon" in app:
         # Served at /channels/{name}/icon; deploy points the app's icon at it.
         channel.icon = validate_channel_icon_path(app["icon"], "Linear app.icon")
@@ -567,6 +580,13 @@ def _team(team: LinearTeamPayload | None) -> LinearTeam | None:
     return None if team is None else LinearTeam(id=team["id"], key=team["key"])
 
 
+def _endpoint_fields(event: LinearEvent) -> LinearEndpointFields:
+    """The fields of a Linear event its endpoints are sent beside key, delivery ID
+    and payload: the one place they're listed, as TypeScript's
+    ``LINEAR_ENDPOINT_EVENT_FIELDS``."""
+    return {"actor": endpoint_actor(event.actor)} if event.actor is not None else {}
+
+
 def _actor(actor: LinearActorPayload | None) -> LinearActor | None:
     if actor is None:
         return None
@@ -741,8 +761,9 @@ async def _acknowledge_session(target: JsonValue, delivery: HttpDelivery) -> Non
 async def _notify_finished(target: JsonValue, delivery: HttpFinishedDelivery) -> None:
     """What the conversation hears once a delivery is done.
 
-    Besides the run's own answer and ``_report_error``: where to make a pending
-    decision, or, after Stop, the final word Linear waits for.
+    Besides the run's own answer, its own paused notice and ``_report_error``:
+    that a message found the thread waiting on a decision, or, after Stop, the
+    final word Linear waits for.
     """
     if delivery["type"] == "skipped" and delivery["reason"] == "cancel":
         await _confirm_stopped(target)
@@ -755,6 +776,11 @@ async def _notify_finished(target: JsonValue, delivery: HttpFinishedDelivery) ->
     pending = pending_decision(delivery)
     if pending is not None:
         await _notify_interrupted(target, delivery, pending)
+
+
+async def _notify_paused(target: JsonValue, delivery: HttpDelivery) -> None:
+    """A run stopped on interrupts, as it ended."""
+    await _notify_interrupted(target, delivery, "interrupted")
 
 
 def _is_stop(event: LinearEvent | None) -> bool:

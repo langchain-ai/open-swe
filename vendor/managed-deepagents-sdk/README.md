@@ -290,7 +290,6 @@ DeepAgents' `LangSmithSandbox`. For TypeScript, export a named `sandbox` from
 import { defineSandbox } from "managed-deepagents";
 
 export const sandbox = defineSandbox({
-  scope: "thread",
   idleTtlSeconds: 600,
 });
 ```
@@ -301,17 +300,16 @@ For Python, define `sandbox` in `sandbox/__init__.py`:
 from managed_deepagents import define_sandbox
 
 sandbox = define_sandbox(
-    scope="thread",
     idle_ttl_seconds=600,
 )
 ```
 
 If `sandbox/setup.sh` exists, MDA embeds it and runs it once when the sandbox is
-first provisioned. `scope: "thread"` creates one sandbox per thread and reuses
-it across runs on that thread; `scope: "agent"` creates one process-level
-sandbox shared by all threads handled by the agent. MDA owns sandbox naming,
-reuse, and lifecycle. LangSmith's default sandbox template is used unless you
-pass a `templateName`/`template_name` or `snapshotId`/`snapshot_id`.
+first provisioned. MDA creates one sandbox per thread and reuses it across runs
+on that thread. MDA owns sandbox naming, reuse, and lifecycle, so `scope` is not
+an option (it was removed in 0.10.0, and `mda` fails the build when it is set). LangSmith's default sandbox template is
+used unless you pass a `snapshotName`/`snapshot_name` or
+`snapshotId`/`snapshot_id`.
 
 Authored tools and middleware can use `runtime.backend` for sandbox file operations:
 
@@ -344,8 +342,9 @@ In TypeScript, MCP servers run on `@langchain/mcp-adapters` 2.x; see
 [packages/npm/README.md#mcp-servers](packages/npm/README.md#mcp-servers) for the
 0.8 migration notes.
 
-The old `connectors/mcp.ts` and `connectors/mcp.py` file API remains available
-with a warning during `0.7.x`. It will be removed in `0.8.0`.
+The old `connectors/mcp.ts` / `connectors/mcp.py` file layout and
+`connectors.mcp(...)` were removed in 0.10.0. `mda` fails the build when a module
+under `connectors/` still exports `connector` or has a default export.
 
 TypeScript:
 

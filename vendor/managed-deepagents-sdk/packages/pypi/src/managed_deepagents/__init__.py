@@ -15,6 +15,7 @@ primitive is not part of the public surface.
 
 from __future__ import annotations
 
+from managed_deepagents._channels.actor import ChannelActor, GitHubActor
 from managed_deepagents._channels.github_types import (
     GitHubAppOptions,
     GitHubChannelThread,
@@ -95,12 +96,36 @@ from managed_deepagents._channels.run_input import (
     ChannelRunOptions,
     ChannelRunResult,
 )
+from managed_deepagents._channels.runtime import RuntimeChannel
+from managed_deepagents._channels.slack.events import (
+    SlackActor,
+    SlackChannelThread,
+    SlackEndpointRequest,
+    SlackEvent,
+    SlackEventCallback,
+    SlackEventKey,
+    SlackFile,
+    SlackHandlers,
+    SlackInteractionCallback,
+    SlackInteractionEvent,
+    SlackMessageEvent,
+    SlackMessageKey,
+)
+from managed_deepagents._channels.slack.status import (
+    SlackStatusChoice,
+    SlackStatusChooser,
+    SlackStatusContext,
+    SlackStatusStep,
+    SlackStatusStepStatus,
+    SlackStatusValue,
+)
 from managed_deepagents._channels.types import (
     ChannelContentMessage,
     ChannelEvent,
     ChannelInfo,
     ChannelMessage,
     ChannelNativeMessage,
+    ChannelReply,
     JsonValue,
     MessageContent,
     OutboundMessage,
@@ -113,6 +138,7 @@ from managed_deepagents._connections import (
     InvalidAgentAuthEndpointError,
     connections,
 )
+from managed_deepagents._managed_thread import ManagedThread, ThreadOrigin, ThreadParticipant
 from managed_deepagents._managed_tools import (
     ManagedDeepAgentRuntime,
     ManagedRuntime,
@@ -149,7 +175,6 @@ from managed_deepagents.identity import ManagedServerInfo, define_identity
 from managed_deepagents.namespaces import (
     auth,
     channels,
-    connectors,
     define_mcp,
     define_sandbox,
 )
@@ -177,6 +202,7 @@ __all__ = [
     "AgentEntry",
     "AgentFactory",
     "BrowserDefinition",
+    "ChannelActor",
     "ChannelContentMessage",
     "ChannelContext",
     "ChannelEvent",
@@ -184,6 +210,7 @@ __all__ = [
     "ChannelMessage",
     "ChannelName",
     "ChannelNativeMessage",
+    "ChannelReply",
     "ChannelRunInput",
     "ChannelRunOptions",
     "ChannelRunResult",
@@ -198,6 +225,7 @@ __all__ = [
     "EventEndpoint",
     "EventFinished",
     "GeneratedSkill",
+    "GitHubActor",
     "GitHubAppOptions",
     "GitHubChannelThread",
     "GitHubCheckRunPayload",
@@ -264,6 +292,7 @@ __all__ = [
     "ManagedRuntime",
     "ManagedServerInfo",
     "ManagedServerRuntime",
+    "ManagedThread",
     "ManagedToolRuntime",
     "McpSelection",
     "McpServersConfig",
@@ -276,6 +305,7 @@ __all__ = [
     "PostedChannelMessage",
     "PromptResponse",
     "RemoteMcpServerConfig",
+    "RuntimeChannel",
     "RuntimeSchedules",
     "SandboxDefinition",
     "SandboxReplacement",
@@ -285,15 +315,34 @@ __all__ = [
     "SchedulePatch",
     "ScheduleRecord",
     "SkillSelection",
+    "SlackActor",
+    "SlackChannelThread",
+    "SlackEndpointRequest",
+    "SlackEvent",
+    "SlackEventCallback",
+    "SlackEventKey",
+    "SlackFile",
+    "SlackHandlers",
+    "SlackInteractionCallback",
+    "SlackInteractionEvent",
+    "SlackMessageEvent",
+    "SlackMessageKey",
     "SlackPromptResponse",
+    "SlackStatusChoice",
+    "SlackStatusChooser",
+    "SlackStatusContext",
+    "SlackStatusStep",
+    "SlackStatusStepStatus",
+    "SlackStatusValue",
     "SseMcpServerConfig",
     "SupportedEventKey",
+    "ThreadOrigin",
+    "ThreadParticipant",
     "auth",
     "basic",
     "bearer",
     "channels",
     "connections",
-    "connectors",
     "define_browser",
     "define_deep_agent",
     "define_identity",

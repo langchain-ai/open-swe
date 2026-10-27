@@ -48,7 +48,6 @@ from langgraph_sdk.auth.types import (
 )
 
 from managed_deepagents._identity_runtime import (
-    CHANNEL_THREAD_METADATA,
     _field,
     _runtime_user_id,
     build_runtime_identity,
@@ -57,8 +56,16 @@ from managed_deepagents._log import logger
 from managed_deepagents._schedule_auth import (
     ScheduleHandoffUser,
     authorize_schedule,
+    is_execution_record,
     schedule_access,
     schedule_handoff_user,
+)
+from managed_deepagents._thread_record import (
+    THREAD_PARTICIPANTS_METADATA,
+    THREAD_RECORD_METADATA,
+    names_thread_record_key,
+    parse_thread_record,
+    strip_thread_record_keys,
 )
 
 #: Value shapes the ``auth.on.threads`` / ``auth.on.crons`` handlers receive.
@@ -229,28 +236,28 @@ def _is_resume_only(value: object) -> bool:
 def _changes_more_than_the_resume(
     value: Mapping[str, object], kwargs: Mapping[str, object]
 ) -> bool:
-    """Whether a run would report the thread elsewhere or unmark it.
+    """Whether a run would report the thread elsewhere or change its record.
 
     The run's metadata merges over the thread's, so it may not name the
-    channel-thread marker.
+    thread record.
     """
-    if kwargs.get("webhook") is not None or _claims_channel_thread(value.get("metadata")):
+    if kwargs.get("webhook") is not None or _names_thread_record(value.get("metadata")):
         return True
     config = kwargs.get("config")
     if config is None:
         return False
-    return not isinstance(config, Mapping) or _claims_channel_thread(config.get("metadata"))
+    return not isinstance(config, Mapping) or _names_thread_record(config.get("metadata"))
 
 
-def _claims_channel_thread(metadata: object) -> bool:
-    """Whether run metadata names the channel-thread marker at all."""
+def _names_thread_record(metadata: object) -> bool:
+    """Whether run metadata names a thread record key at all."""
     if metadata is None:
         return False
-    return not isinstance(metadata, Mapping) or CHANNEL_THREAD_METADATA in metadata
+    return not isinstance(metadata, Mapping) or names_thread_record_key(metadata)
 
 
 def _studio_may_run(value: object) -> bool:
-    """Whether a Studio run only resumes interrupts, so it may run on channel threads."""
+    """Whether a Studio run only resumes interrupts, so it may run on any thread."""
     if _is_resume_only(value):
         return True
     # Owner-scoped instead, so Studio sees "not found"; say why, by shape only.
@@ -282,33 +289,78 @@ def _run_shape(value: object) -> dict[str, object]:
 def _stamp_thread_metadata(payload: JsonObject, user: object, key: str, action: str) -> None:
     """Stamp the caller's owner key on a thread payload's metadata.
 
-    Only managed ingress marks a thread as a channel's; no client can. Searches
-    keep finding threads made before the marker existed.
+    Only managed ingress writes a thread record; no client can.
     """
     metadata = payload.get("metadata")
     if not isinstance(metadata, dict):
         metadata = {}
         payload["metadata"] = metadata
-    stamped = cast("JsonObject", metadata)
-    stamped["owner"] = key
-    stamped.pop(CHANNEL_THREAD_METADATA, None)
-    if action != "search" and _channel_conversation_owner_key(user) is not None:
-        stamped[CHANNEL_THREAD_METADATA] = "true"
-    # A run's config metadata merges into what the run sees as well, so a run
-    # can't claim the marker there either.
-    _drop_channel_thread_marker(payload.get("config"))
+    metadata["owner"] = key
+    if action != "search":
+        _guard_thread_record(payload, user, action)
 
 
-def _drop_channel_thread_marker(holder: object) -> None:
-    """Remove the channel-thread marker from a payload's ``metadata``.
+def _guard_thread_record(payload: JsonObject, user: object, action: str) -> None:
+    """Keep a thread record only where managed ingress writes its own conversation's.
+
+    The Agent Server protects no metadata keys, and runs trust the record they
+    read, so every other ``ls_mda_*`` key is stripped, not rejected. A run's
+    metadata merges over its thread's, so a run never carries a record of its
+    own, except a new-thread cron's fire: the Agent Server builds
+    the new thread's metadata from that run's, and the cron's auth already
+    checked its record against its execution.
+    """
+    metadata = payload.get("metadata")
+    if isinstance(metadata, dict) and _keeps_thread_record(metadata, user, action):
+        record = {key: metadata[key] for key in _RECORD_KEYS}
+        strip_thread_record_keys(metadata)
+        metadata.update(record)
+    else:
+        strip_thread_record_keys(metadata)
+    for holder in (payload.get("config"), _field(payload.get("kwargs"), "config")):
+        strip_thread_record_keys(_field(holder, "metadata"))
+
+
+_RECORD_KEYS = (THREAD_RECORD_METADATA, THREAD_PARTICIPANTS_METADATA)
+
+
+def _keeps_thread_record(metadata: object, user: object, action: str) -> bool:
+    if action in {"create", "update"}:
+        return _is_own_thread_record(metadata, user)
+    return (
+        action == "create_run"
+        and _field(user, "mda_scheduled_run") is True
+        and is_execution_record(metadata, user)
+    )
+
+
+def _is_own_thread_record(metadata: object, user: object) -> bool:
+    """Whether a channel conversation's caller writes a valid record of that conversation.
+
+    Its origin must be the caller's source thread, and its sender the caller
+    (or no one).
+    """
+    if _channel_conversation_owner_key(user) is None:
+        return False
+    record = parse_thread_record(metadata, exact=True)
+    if record is None or record.origin is None:
+        return False
+    channel = record.origin.channel
+    sender = record.origin.sender
+    return (
+        channel.provider == _field(user, "mda_source_provider")
+        and channel.source_thread_key == _field(user, "mda_source_thread_id")
+        and (sender is None or sender == _field(user, "mda_user_id"))
+    )
+
+
+def _strip_metadata_record(holder: object) -> None:
+    """Remove thread record keys from a payload's ``metadata``.
 
     A run's metadata is its assistant's, thread's, config's and own metadata
-    merged, and only managed ingress may mark a channel's thread.
+    merged, and only managed ingress may write a thread's record.
     """
-    if isinstance(holder, dict):
-        metadata = holder.get("metadata")
-        if isinstance(metadata, dict):
-            metadata.pop(CHANNEL_THREAD_METADATA, None)
+    strip_thread_record_keys(_field(holder, "metadata"))
 
 
 def build_managed_auth(identity: IdentityDefinitionLike) -> Auth:
@@ -341,27 +393,60 @@ def build_managed_auth(identity: IdentityDefinitionLike) -> Auth:
 
 async def _scope_threads(ctx: AuthContext, value: ThreadsValue) -> FilterType | None:
     # Let Studio inspect every deployment thread so channel-triggered runs
-    # and their interrupts are visible there, and answer those interrupts on
-    # channel threads, which channels link to. Keep other mutations
-    # owner-scoped: Studio identity is reachable by any holder of a workspace
-    # LangSmith API key, so exempting all actions would let that key alter
-    # caller threads or speak in a channel's conversation.
+    # and their interrupts are visible there, and answer interrupts on any
+    # thread, which channels link to. Keep other mutations owner-scoped:
+    # Studio identity is reachable by any holder of a workspace LangSmith API
+    # key, so exempting all actions would let that key alter caller threads or
+    # speak in a channel's conversation.
     user = ctx.user
     if ctx.action == "search" and schedule_access(user) is not None:
         return None
     if is_local_dev_unscoped_user(user):
+        _guard_unscoped_thread_record(value, user, ctx.action)
         return None
     studio = is_studio_user(user)
     if studio and ctx.action in {"read", "search"}:
         return None
+    if is_studio_user(user) and ctx.action == "update" and _is_single_thread_interrupt(value):
+        # Studio may stop a run on any thread, as it may resume one there, so a
+        # runaway channel run can be cancelled from the deployment UI. Only
+        # ``interrupt`` on one thread: ``rollback`` deletes checkpoints, and a
+        # bulk cancel by status would stop every run in the deployment.
+        logger.info(
+            "Studio run cancel (user=%s, thread_id=%s)",
+            logger.log_identifier(str(_field(user, "identity") or "")),
+            logger.log_identifier(str(value.get("thread_id"))),
+        )
+        _guard_unscoped_thread_record(value, user, ctx.action)
+        return None
     if studio and ctx.action == "create_run" and _studio_may_run(value):
-        return {CHANNEL_THREAD_METADATA: "true"}
+        _guard_unscoped_thread_record(value, user, ctx.action)
+        return None
     key = _thread_owner_key(user)
     if isinstance(value, dict):
         # Stamp ownership on every threads payload, including the actions
         # whose upstream TypedDict does not declare ``metadata``.
         _stamp_thread_metadata(cast("JsonObject", value), user, key, ctx.action)
     return {"owner": key}
+
+
+def _is_single_thread_interrupt(value: object) -> bool:
+    """True for a run-cancel ``update`` that interrupts runs on one thread.
+
+    Run cancellation is the only thread update that carries ``action``; metadata
+    patches and state updates never set it.
+    """
+    return (
+        isinstance(value, Mapping)
+        and value.get("action") == "interrupt"
+        and value.get("thread_id") is not None
+    )
+
+
+def _guard_unscoped_thread_record(value: object, user: object, action: str) -> None:
+    """Apply the thread record rule to a caller exempt from owner scoping."""
+    if action != "search" and isinstance(value, dict):
+        _guard_thread_record(value, user, action)
 
 
 async def _scope_store(ctx: AuthContext, value: dict[str, Any]) -> None:
@@ -390,10 +475,10 @@ async def _scope_any(ctx: AuthContext, value: dict[str, Any]) -> None:
     store keep their own scoping.
     """
     # An assistant's metadata merges into its runs' too, so no caller, Studio
-    # included, may mark an assistant as a channel's.
+    # included, may give an assistant a thread record.
     if ctx.resource == "assistants" and isinstance(value, dict):
-        _drop_channel_thread_marker(value)
-        _drop_channel_thread_marker(value.get("config"))
+        _strip_metadata_record(value)
+        _strip_metadata_record(value.get("config"))
     if _is_unscoped_principal(ctx.user):
         return
     try:

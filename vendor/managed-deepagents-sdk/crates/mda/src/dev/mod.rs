@@ -53,18 +53,18 @@ use crate::compile::{self, CompileSummary, IdentitySummary, MemoryDecision};
 use crate::dependencies;
 use crate::deploy::bake::bake_recipe;
 use crate::deploy::helpers::{
-    resolve_langsmith_api_bases, resolve_platform_api_url, sandbox_api_endpoint,
-    LANGSMITH_ENDPOINT_ENV, MDA_ASSISTANT_ID_ENV, MDA_DEPLOYMENT_NAME_ENV, MDA_PUBLIC_API_URL_ENV,
-    MDA_SANDBOX_API_ENDPOINT_ENV, MDA_SANDBOX_RECIPE_SNAPSHOT_ENV, RESERVED_ENV_VARS,
-    WORKSPACE_ID_ENV,
+    sandbox_api_endpoint, LANGSMITH_ENDPOINT_ENV, MDA_ASSISTANT_ID_ENV, MDA_DEPLOYMENT_NAME_ENV,
+    MDA_PUBLIC_API_URL_ENV, MDA_SANDBOX_API_ENDPOINT_ENV, MDA_SANDBOX_RECIPE_SNAPSHOT_ENV,
+    RESERVED_ENV_VARS, WORKSPACE_ID_ENV,
 };
+use crate::deploy::langsmith_context::{LangSmithContext, LangSmithEndpoints};
 use crate::deploy::{self, resolve_https_public_api_url, PublicApiUrl};
 use crate::error::{
     categorize_unclassified, categorized, stderr_failed, with_category, ErrorCategory,
 };
 use crate::install::Installation;
 use crate::interrupt::Interrupt;
-use crate::langsmith::{Credential, API_KEY_ENV};
+use crate::langsmith::{lookup_env_file, lookup_env_or_process, ApiKey, API_KEY_ENV};
 use crate::project::{Language, Project};
 use crate::telemetry::stage::Stage;
 use crate::telemetry::{self, otel_logger};
@@ -222,7 +222,7 @@ fn prepare_dev(
     // Local files only: what fails here is the project's `.env` or `.mda`.
     let as_project = |err| categorize_unclassified(ErrorCategory::Project, err);
     ensure_dev_handoff_secret(out_dir).map_err(as_project)?;
-    let injected_ingress = ensure_dev_ingress_secret(project, out_dir).map_err(as_project)?;
+    let injected_ingress = ensure_dev_ingress_secret(out_dir).map_err(as_project)?;
     let injected_public_api = ensure_dev_public_api_url(out_dir, opts).map_err(as_project)?;
     ensure_dev_assistant_id(project, out_dir).map_err(as_project)?;
 
@@ -1049,7 +1049,7 @@ fn apply_watch_action(
                 DevLoginPrompt::Suppressed,
             )?;
             ensure_dev_handoff_secret(out_dir)?;
-            ensure_dev_ingress_secret(&project, out_dir)?;
+            ensure_dev_ingress_secret(out_dir)?;
             ensure_dev_public_api_url(out_dir, opts)?;
             ensure_dev_assistant_id(&project, out_dir)?;
             match project.language {
@@ -1104,7 +1104,7 @@ fn report_project_features(
     summary: &CompileSummary,
     provision_schedules: bool,
 ) -> Result<()> {
-    let connector_labels = connector_summary_labels(project, &summary.connectors)?;
+    let connector_labels = connector_summary_labels(&summary.connectors);
     let needs_public_url = compile::project_needs_events_public_url(project)?;
     let public_url = read_dev_public_api_url(project);
     for line in feature_summary_lines(
@@ -1198,25 +1198,19 @@ fn format_identity_lines(identity: Option<&IdentitySummary>) -> Vec<String> {
     vec![lines.join("\n")]
 }
 
-/// Label each connector by instance stem, annotating when the factory differs
-/// (e.g. `notion.ts` exporting `defineMcp()` → `notion (mcp)`).
-fn connector_summary_labels(project: &Project, connectors: &[PathBuf]) -> Result<Vec<String>> {
-    let mut labels = Vec::with_capacity(connectors.len());
-    for path in connectors {
-        let stem = path
-            .file_stem()
-            .and_then(|stem| stem.to_str())
-            .unwrap_or("connector");
-        let label = match compile::read_connector_factory(project, path)? {
-            Some(factory) if !factory.eq_ignore_ascii_case(stem) => {
-                format!("{stem} ({factory})")
-            }
-            _ => stem.to_string(),
-        };
-        labels.push(label);
-    }
+/// Label each connector by its file stem (`tools/mcp.ts` → `mcp`).
+fn connector_summary_labels(connectors: &[PathBuf]) -> Vec<String> {
+    let mut labels: Vec<String> = connectors
+        .iter()
+        .map(|path| {
+            path.file_stem()
+                .and_then(|stem| stem.to_str())
+                .unwrap_or("connector")
+                .to_string()
+        })
+        .collect();
     labels.sort_unstable();
-    Ok(labels)
+    labels
 }
 
 fn format_connectors_line(labels: &[String]) -> Option<String> {
@@ -1543,12 +1537,7 @@ fn stage_dev_env_file(
     let staged = crate::deploy::env_file::parse_env_file(&dst);
     let source_selects_tracing_project = [LANGSMITH_PROJECT_ENV, LANGCHAIN_PROJECT_ENV]
         .into_iter()
-        .any(|key| {
-            incoming
-                .get(key)
-                .map(|value| value.trim())
-                .is_some_and(|value| !value.is_empty())
-        });
+        .any(|key| lookup_env_file(key, &incoming).is_some());
     let preserve_generated_tracing_project = !source_selects_tracing_project
         && staged
             .get(LANGSMITH_PROJECT_ENV)
@@ -1679,10 +1668,17 @@ fn ensure_dev_langsmith_env(
 /// `.mda/dev/.env` or inherited from the `mda` process environment.
 fn dev_langsmith_api_key_available(out_dir: &Path) -> bool {
     let staged = crate::deploy::env_file::parse_env_file(&out_dir.join(".env"));
-    staged
-        .get(API_KEY_ENV)
-        .is_some_and(|value| !value.trim().is_empty())
+    lookup_env_file(API_KEY_ENV, &staged).is_some()
         || std::env::var(API_KEY_ENV).is_ok_and(|value| !value.trim().is_empty())
+}
+
+/// `LANGSMITH_API_KEY` from the staged `.env`, then the process env.
+///
+/// The staged key wins (unlike [`crate::langsmith::lookup_env`]): it is the one
+/// `ensure_project_langsmith_api_key` resolved for this run.
+fn staged_api_key(staged: &std::collections::BTreeMap<String, String>) -> Option<String> {
+    lookup_env_file(API_KEY_ENV, staged)
+        .or_else(|| lookup_env_or_process(API_KEY_ENV, &Default::default()))
 }
 
 /// How a reloading `mda dev` picks up a key added to `.env`, ending the
@@ -1765,56 +1761,32 @@ fn ensure_dev_workspace_connections(
     out_dir: &Path,
     connector_requirements: &compile::ConnectorRequirements,
 ) -> Result<()> {
-    use crate::deploy::helpers::{REMOVED_WORKSPACE_ID_ENVS, WORKSPACE_ID_ENV};
-    use crate::langsmith::resolve_preferred_env;
-
     if compile::referenced_connection_slugs(connector_requirements).is_empty() {
         return Ok(());
     }
 
     let env = crate::deploy::env_file::parse_env_file(&out_dir.join(".env"));
-    let api_key = env
-        .get(API_KEY_ENV)
-        .map(|value| value.trim())
-        .filter(|value| !value.is_empty())
-        .map(str::to_string)
-        .or_else(|| {
-            std::env::var(API_KEY_ENV)
-                .ok()
-                .map(|value| value.trim().to_string())
-                .filter(|value| !value.is_empty())
-        });
-    let Some(api_key) = api_key else {
-        return Err(categorized(
-            ErrorCategory::Authentication,
-            format!(
-                "This project declares connector connections, so `mda dev` needs {API_KEY_ENV} to \
-                 verify they exist in the workspace. Add the key to .env (or export it), then run \
-                 `mda dev` again."
-            ),
-        ));
-    };
-
-    let (host_url, _) = resolve_langsmith_api_bases(&env);
-    let platform = resolve_platform_api_url(&host_url, &env);
-    let workspace_id = resolve_preferred_env(
-        WORKSPACE_ID_ENV,
-        REMOVED_WORKSPACE_ID_ENVS,
-        None,
+    let ctx = LangSmithContext::resolve(
         &env,
-        |key| std::env::var(key).ok(),
+        None,
+        None,
         ". Set LANGSMITH_WORKSPACE_ID in .env (or export it)",
+        |_| {
+            let Some(api_key) = staged_api_key(&env) else {
+                bail!(
+                    "This project declares connector connections, so `mda dev` needs \
+                     {API_KEY_ENV} to verify they exist in the workspace. Add the key to .env \
+                     (or export it), then run `mda dev` again."
+                );
+            };
+            Ok(ApiKey::new(api_key))
+        },
     )?;
-    let client = crate::langsmith::Client::with_credential_and_platform(
-        &host_url,
-        Some(platform.as_str()),
-        Credential::ApiKey(api_key),
-        workspace_id.clone(),
-    )?;
+    let client = ctx.client()?;
 
     deploy::ensure_workspace_connections(
         &client,
-        workspace_id.as_deref(),
+        ctx.workspace_id.as_deref(),
         connector_requirements,
         &[],
     )
@@ -1837,26 +1809,15 @@ fn ensure_dev_developer_principal(out_dir: &Path, needed: bool) -> Result<()> {
 
     let staged = out_dir.join(".env");
     let env = crate::deploy::env_file::parse_env_file(&staged);
-    let api_key = env
-        .get(API_KEY_ENV)
-        .map(|value| value.trim())
-        .filter(|value| !value.is_empty())
-        .context(
-            "user-owned connections, managed tools, and user memory require LANGSMITH_API_KEY under `mda dev`",
-        )?;
-    let (host_url, _) = resolve_langsmith_api_bases(&env);
-    let platform = resolve_platform_api_url(&host_url, &env);
-    let workspace_id = env
-        .get(WORKSPACE_ID_ENV)
-        .map(|value| value.trim())
-        .filter(|value| !value.is_empty())
-        .map(str::to_string);
-    let client = crate::langsmith::Client::with_credential_and_platform(
-        &host_url,
-        Some(platform.as_str()),
-        Credential::ApiKey(api_key.to_string()),
-        workspace_id,
+    let api_key = lookup_env_file(API_KEY_ENV, &env).context(
+        "user-owned connections, managed tools, and user memory require LANGSMITH_API_KEY under `mda dev`",
     )?;
+    let client = LangSmithEndpoints::resolve(&env, None)
+        .with_auth(
+            ApiKey::new(api_key),
+            lookup_env_file(WORKSPACE_ID_ENV, &env),
+        )
+        .client()?;
     let developer = client.resolve_developer_principal()?;
     crate::deploy::env_file::set_env_key(&staged, WORKSPACE_ID_ENV, &developer.workspace_id)?;
     crate::deploy::env_file::set_env_key(
@@ -1932,15 +1893,13 @@ fn dev_local_environment_project(
         .get(API_KEY_ENV)
         .and_then(|value| non_empty(value))
         .or_else(|| non_empty(&std::env::var(API_KEY_ENV).ok()?))?;
-    let (host_url, _) = resolve_langsmith_api_bases(env);
-    let platform = resolve_platform_api_url(&host_url, env);
-    let client = crate::langsmith::Client::with_credential_and_platform(
-        &host_url,
-        Some(platform.as_str()),
-        Credential::ApiKey(api_key),
-        env.get(WORKSPACE_ID_ENV).and_then(|value| non_empty(value)),
-    )
-    .ok()?;
+    let client = crate::deploy::langsmith_context::LangSmithEndpoints::resolve(env, None)
+        .with_auth(
+            crate::langsmith::ApiKey::new(api_key),
+            env.get(WORKSPACE_ID_ENV).and_then(|value| non_empty(value)),
+        )
+        .client()
+        .ok()?;
     if !client.agent_platform_ready() {
         return None;
     }
@@ -1961,7 +1920,7 @@ fn apply_staged_langsmith_env(server: &mut Command, out_dir: &Path) {
         if process_set && key != &MDA_AGENT_AUTH_PRINCIPAL_ID_ENV {
             continue;
         }
-        if let Some(value) = staged.get(*key).map(|v| v.trim()).filter(|v| !v.is_empty()) {
+        if let Some(value) = lookup_env_file(key, &staged) {
             server.env(*key, value);
         }
     }
@@ -1976,11 +1935,7 @@ fn apply_staged_public_api_url(server: &mut Command, out_dir: &Path) {
         return;
     }
     let staged = crate::deploy::env_file::parse_env_file(&out_dir.join(".env"));
-    if let Some(value) = staged
-        .get(MDA_PUBLIC_API_URL_ENV)
-        .map(|v| v.trim())
-        .filter(|v| !v.is_empty())
-    {
+    if let Some(value) = lookup_env_file(MDA_PUBLIC_API_URL_ENV, &staged) {
         server.env(MDA_PUBLIC_API_URL_ENV, value);
     }
 }
@@ -2056,10 +2011,7 @@ fn format_dev_http_origin(host: &str, port: u16) -> String {
 fn ensure_dev_public_api_url(out_dir: &Path, opts: &DevOptions) -> Result<bool> {
     let staged = out_dir.join(".env");
     let env = crate::deploy::env_file::parse_env_file(&staged);
-    let present = env
-        .get(MDA_PUBLIC_API_URL_ENV)
-        .map(|value| value.trim())
-        .is_some_and(|value| !value.is_empty())
+    let present = lookup_env_file(MDA_PUBLIC_API_URL_ENV, &env).is_some()
         || std::env::var(MDA_PUBLIC_API_URL_ENV)
             .ok()
             .is_some_and(|value| !value.trim().is_empty());
@@ -2099,10 +2051,9 @@ fn ensure_dev_sandbox_recipe(
     }
 
     let mut env = crate::deploy::env_file::parse_env_file(&staged);
-    let (host_url, _) = resolve_langsmith_api_bases(&env);
-    let platform = resolve_platform_api_url(&host_url, &env);
-    let sandbox_endpoint =
-        sandbox_api_endpoint(&platform).context("resolved LangSmith platform API URL is empty")?;
+    let endpoints = LangSmithEndpoints::resolve(&env, None);
+    let sandbox_endpoint = sandbox_api_endpoint(&endpoints.platform_api_url)
+        .context("resolved LangSmith platform API URL is empty")?;
     crate::deploy::env_file::set_env_key(&staged, MDA_SANDBOX_API_ENDPOINT_ENV, &sandbox_endpoint)?;
 
     let Some(spec) = spec else {
@@ -2110,17 +2061,7 @@ fn ensure_dev_sandbox_recipe(
         return Ok(());
     };
 
-    let mut api_key = env
-        .get(API_KEY_ENV)
-        .map(|v| v.trim())
-        .filter(|v| !v.is_empty())
-        .map(str::to_string)
-        .or_else(|| {
-            std::env::var(API_KEY_ENV)
-                .ok()
-                .map(|v| v.trim().to_string())
-                .filter(|v| !v.is_empty())
-        });
+    let mut api_key = staged_api_key(&env);
     if api_key.is_none() {
         // Recipe bake needs a key; offer the same login path as deploy before failing.
         deploy::ensure_project_langsmith_api_key(
@@ -2129,17 +2070,7 @@ fn ensure_dev_sandbox_recipe(
             dev_langsmith_login_is_interactive(true, prompt),
         )?;
         env = crate::deploy::env_file::parse_env_file(&staged);
-        api_key = env
-            .get(API_KEY_ENV)
-            .map(|v| v.trim())
-            .filter(|v| !v.is_empty())
-            .map(str::to_string)
-            .or_else(|| {
-                std::env::var(API_KEY_ENV)
-                    .ok()
-                    .map(|v| v.trim().to_string())
-                    .filter(|v| !v.is_empty())
-            });
+        api_key = staged_api_key(&env);
     }
     let Some(api_key) = api_key else {
         return Err(categorized(
@@ -2152,17 +2083,12 @@ fn ensure_dev_sandbox_recipe(
     };
 
     let deployment = dev_deployment_name(&api_key, project, assistant_id);
-    let workspace_id = env
-        .get("LANGSMITH_WORKSPACE_ID")
-        .map(|v| v.trim())
-        .filter(|v| !v.is_empty())
-        .map(str::to_string);
-    let client = crate::langsmith::Client::with_credential_and_platform(
-        &host_url,
-        Some(platform.as_str()),
-        Credential::ApiKey(api_key),
-        workspace_id,
-    )?;
+    let client = endpoints
+        .with_auth(
+            ApiKey::new(api_key),
+            lookup_env_file(WORKSPACE_ID_ENV, &env),
+        )
+        .client()?;
 
     let bake_env: std::collections::BTreeMap<String, String> = env
         .iter()
@@ -2269,10 +2195,7 @@ fn random_local_dev_secret() -> String {
 fn ensure_dev_handoff_secret(out_dir: &Path) -> Result<()> {
     let staged = out_dir.join(".env");
     let env = crate::deploy::env_file::parse_env_file(&staged);
-    let present = env
-        .get(crate::deploy::MDA_HANDOFF_SECRET_ENV)
-        .map(|value| value.trim())
-        .is_some_and(|value| !value.is_empty());
+    let present = lookup_env_file(crate::deploy::MDA_HANDOFF_SECRET_ENV, &env).is_some();
     if present {
         return Ok(());
     }
@@ -2289,7 +2212,7 @@ fn ensure_dev_handoff_secret(out_dir: &Path) -> Result<()> {
 /// When it is absent, inject the legacy ingress secret so backend auth and
 /// credential-free local projects remain compatible.
 /// Returns `true` when a fresh local secret was injected into the staged `.env`.
-fn ensure_dev_ingress_secret(_project: &crate::project::Project, out_dir: &Path) -> Result<bool> {
+fn ensure_dev_ingress_secret(out_dir: &Path) -> Result<bool> {
     let process_ingress_secret = std::env::var(compile::INGRESS_SECRET_ENV).ok();
     let process_api_key = std::env::var(crate::langsmith::API_KEY_ENV).ok();
     ensure_dev_ingress_secret_with_process_env(
@@ -4065,14 +3988,8 @@ mod tests {
         let out_dir = root.path().join(".mda").join("build");
         fs::create_dir_all(&out_dir).unwrap();
         fs::write(out_dir.join(".env"), "LANGSMITH_API_KEY=server-key\n").unwrap();
-        let project = crate::project::Project {
-            root: root.path().to_path_buf(),
-            language: Language::TypeScript,
-            agent_file: PathBuf::from("agent.ts"),
-            files: Vec::new(),
-        };
 
-        assert!(!ensure_dev_ingress_secret(&project, &out_dir).unwrap());
+        assert!(!ensure_dev_ingress_secret(&out_dir).unwrap());
 
         let env = crate::deploy::env_file::parse_env_file(&out_dir.join(".env"));
         assert!(!env.contains_key(compile::INGRESS_SECRET_ENV));
@@ -4140,9 +4057,7 @@ mod tests {
         ]);
         let summary = CompileSummary {
             out_dir: PathBuf::from("/tmp/demo/.mda/build"),
-            entry_file: PathBuf::from("_mda_entry.ts"),
             copied: vec![PathBuf::from("agent.ts")],
-            langgraph_graph: "./_mda_entry.ts:agent".into(),
             assistant_id: "demo".into(),
             connectors: vec![
                 PathBuf::from("connectors/gmail.ts"),
@@ -4277,6 +4192,14 @@ mod tests {
     }
 
     #[test]
+    fn connector_label_is_the_file_stem() {
+        assert_eq!(
+            connector_summary_labels(&[PathBuf::from("tools/mcp.ts")]),
+            vec!["mcp".to_string()]
+        );
+    }
+
+    #[test]
     fn public_url_https_is_shown_when_set() {
         assert_eq!(
             format_public_url_line(
@@ -4285,97 +4208,6 @@ mod tests {
             ),
             Some("Public URL     https://tunnel.example".into())
         );
-    }
-
-    #[test]
-    fn connector_label_annotates_mismatched_factory() {
-        let root = tempfile::tempdir().unwrap();
-        fs::write(
-            root.path().join("notion.ts"),
-            "import { defineMcp } from \"managed-deepagents\";\n\
-             export const connector = defineMcp({ servers: {} });\n",
-        )
-        .unwrap();
-        // read_connector_factory expects path relative to project.root
-        let project = Project {
-            root: root.path().to_path_buf(),
-            language: Language::TypeScript,
-            agent_file: PathBuf::from("agent.ts"),
-            files: vec![PathBuf::from("notion.ts")],
-        };
-        // Place file under connectors/ as real projects do.
-        fs::create_dir_all(root.path().join("connectors")).unwrap();
-        fs::rename(
-            root.path().join("notion.ts"),
-            root.path().join("connectors/notion.ts"),
-        )
-        .unwrap();
-        let labels =
-            connector_summary_labels(&project, &[PathBuf::from("connectors/notion.ts")]).unwrap();
-        assert_eq!(labels, vec!["notion (mcp)".to_string()]);
-    }
-
-    #[test]
-    fn connector_label_annotates_mismatched_python_factory() {
-        let root = tempfile::tempdir().unwrap();
-        fs::create_dir_all(root.path().join("connectors")).unwrap();
-        fs::write(
-            root.path().join("connectors/notion.py"),
-            "from managed_deepagents import define_mcp\n\
-             connector = define_mcp(servers={\"docs\": {\"transport\": \"http\", \"url\": \"https://docs.example.com/mcp\"}})\n",
-        )
-        .unwrap();
-        let project = Project {
-            root: root.path().to_path_buf(),
-            language: Language::Python,
-            agent_file: PathBuf::from("agent.py"),
-            files: vec![PathBuf::from("connectors/notion.py")],
-        };
-        let labels =
-            connector_summary_labels(&project, &[PathBuf::from("connectors/notion.py")]).unwrap();
-        assert_eq!(labels, vec!["notion (mcp)".to_string()]);
-    }
-
-    #[test]
-    fn connector_label_omits_matching_mcp_factory() {
-        let root = tempfile::tempdir().unwrap();
-        fs::create_dir_all(root.path().join("connectors")).unwrap();
-        fs::write(
-            root.path().join("connectors/mcp.ts"),
-            "import { defineMcp } from \"managed-deepagents\";\n\
-             export const connector = defineMcp({ servers: {} });\n",
-        )
-        .unwrap();
-        let project = Project {
-            root: root.path().to_path_buf(),
-            language: Language::TypeScript,
-            agent_file: PathBuf::from("agent.ts"),
-            files: vec![PathBuf::from("connectors/mcp.ts")],
-        };
-        let labels =
-            connector_summary_labels(&project, &[PathBuf::from("connectors/mcp.ts")]).unwrap();
-        assert_eq!(labels, vec!["mcp".to_string()]);
-    }
-
-    #[test]
-    fn connector_label_still_resolves_deprecated_connectors_mcp() {
-        let root = tempfile::tempdir().unwrap();
-        fs::create_dir_all(root.path().join("connectors")).unwrap();
-        fs::write(
-            root.path().join("connectors/notion.ts"),
-            "import { connectors } from \"managed-deepagents\";\n\
-             export const connector = connectors.mcp({ servers: {} });\n",
-        )
-        .unwrap();
-        let project = Project {
-            root: root.path().to_path_buf(),
-            language: Language::TypeScript,
-            agent_file: PathBuf::from("agent.ts"),
-            files: vec![PathBuf::from("connectors/notion.ts")],
-        };
-        let labels =
-            connector_summary_labels(&project, &[PathBuf::from("connectors/notion.ts")]).unwrap();
-        assert_eq!(labels, vec!["notion (mcp)".to_string()]);
     }
 
     #[test]

@@ -45,13 +45,17 @@ pub(crate) mod test_support;
 mod tests;
 
 pub(crate) use discovery::{find_sandbox_entry, read_setup_script};
+pub use identity::IdentitySummary;
 pub(crate) use identity::{
     identity_requires_ingress_secret, read_identity_summary, INGRESS_SECRET_ENV,
 };
-pub use identity::{IdentityAuthMode, IdentityScopeAxes, IdentitySummary};
+#[cfg(test)]
+pub(crate) use identity::{IdentityAuthMode, IdentityScopeAxes};
 pub(crate) use local_packages::{find_local_packages, is_vendored_path, vendored_manifests};
+pub use memory::MemoryDecision;
 pub(crate) use memory::{declare_memory_snippet, resolve_memory};
-pub use memory::{MemoryDecision, MemoryLayers, MemorySummary};
+#[cfg(test)]
+pub(crate) use memory::{MemoryLayers, MemorySummary};
 pub(crate) use model::read_agent_model;
 pub(crate) use requirements::{
     agent_connections_from_connector_requirements, connection_owner_policy_for_slug,
@@ -75,7 +79,7 @@ use entry::{
     generate_langgraph_json, generate_managed_http_module, EntryInputs, LanggraphManifestInputs,
     RuntimeContext,
 };
-pub(crate) use exports::{project_needs_events_public_url, read_connector_factory};
+pub(crate) use exports::project_needs_events_public_url;
 use exports::{scan_exported_channels, scan_exported_connectors};
 use local_packages::vendor_local_packages;
 use manifest::{
@@ -84,7 +88,7 @@ use manifest::{
     strip_package_json_dev_dependencies, RuntimePathMode, LOCK_INPUT_MARKER,
 };
 use runtime::vendor_runtime;
-use sandbox_recipe::write_sandbox_recipe_manifest;
+use sandbox_recipe::{reject_removed_sandbox_scope, write_sandbox_recipe_manifest};
 use schedules::{read_schedule_crons, ScheduleReadContext};
 
 /// The LangGraph Node.js runtime version targeted by compiled TypeScript apps.
@@ -443,15 +447,11 @@ const RUNTIME_PACKAGE: &str = crate::dependencies::USER_RUNTIME_PACKAGE;
 #[derive(Debug)]
 pub struct CompileSummary {
     pub out_dir: PathBuf,
-    /// Generated managed entry module, relative to `out_dir`.
-    pub entry_file: PathBuf,
     /// User files carried into the build verbatim, relative to the root.
     pub copied: Vec<PathBuf>,
-    /// LangGraph graph export path (e.g. `./_mda_entry.ts:agent`).
-    pub langgraph_graph: String,
     /// LangGraph `graphs` key / assistant id from the authored name.
     pub assistant_id: String,
-    /// Connector modules discovered under `connectors/`, relative to the root.
+    /// Connector modules (the `tools/mcp.{ts,py}` declaration), relative to the root.
     /// Their HTTP routes are enumerated at runtime, not here.
     pub connectors: Vec<PathBuf>,
     /// Channel modules discovered under `channels/`, relative to the root.
@@ -615,15 +615,6 @@ pub fn compile_for_deploy(
 /// Eval artifacts keep the authored definition intact but point `langgraph.json`
 /// at an eval-specific entry that suppresses nested sandbox provisioning and
 /// allows the runner to apply an explicit model override.
-pub fn compile_for_eval(
-    project: &Project,
-    out_dir: &Path,
-    runtime_source: &Path,
-) -> Result<CompileSummary> {
-    let api_version = resolved_langgraph_api_version()?;
-    compile_for_eval_with_api_version(project, out_dir, runtime_source, &api_version, None)
-}
-
 pub(crate) fn compile_for_eval_with_api_version(
     project: &Project,
     out_dir: &Path,
@@ -770,8 +761,7 @@ fn compile_inner(
     // ingress heuristic share one parse per connector file. This release's
     // public authoring surface is MCP-only (`defineMcp` / `define_mcp`); product
     // toolserver / marketplace factories are not exported.
-    let connector_scan = scan_exported_connectors(project)?;
-    let connector_entries = connector_scan.entries;
+    let connector_entries = scan_exported_connectors(project)?;
     let connectors_import = if connector_entries.is_empty() {
         None
     } else {
@@ -809,18 +799,6 @@ fn compile_inner(
         context,
         agent.is_factory,
     )?);
-    if connector_entries
-        .iter()
-        .any(|entry| entry.starts_with("connectors"))
-    {
-        warnings.push(
-            "MCP declarations under `connectors/` are deprecated. Move the declaration to `tools/mcp.ts` or `tools/mcp.py` and export `mcp`. Support for the old connector file API will be removed in 0.8.0."
-                .to_string(),
-        );
-    }
-    if let Some(warning) = sandbox_recipe::legacy_thread_scope_warning(project)? {
-        warnings.push(warning);
-    }
     if agent.unreadable_subagents > 0 {
         warnings.push(format!(
             "{} subagent entr{} in {} could not be read without running it. An async \
@@ -836,6 +814,7 @@ fn compile_inner(
             project.agent_file.display()
         ));
     }
+    reject_removed_sandbox_scope(project)?;
 
     let channel_scan = scan_exported_channels(project)?;
     let channel_entries = channel_scan.entries;
@@ -891,14 +870,11 @@ fn compile_inner(
         }
     };
 
-    // Ingress channels (`channels.slack(...)`, `channels.github(...)`) and connectors with
-    // Events ingress cannot fall back to a deployment service principal: require a root
-    // identity declaration.
-    if identity_import.is_none()
-        && (connector_scan.requires_identity || channel_scan.requires_identity)
-    {
+    // Ingress channels (`channels.slack(...)`, `channels.github(...)`) cannot fall back
+    // to a deployment service principal: require a root identity declaration.
+    if identity_import.is_none() && channel_scan.requires_identity {
         anyhow::bail!(
-            "channels/ or connectors/ with an ingress trigger (e.g. Slack or GitHub channels) \
+            "channels/ with an ingress trigger (e.g. Slack or GitHub channels) \
              require a root identity.{{ts,py}} declaration; ingress triggers cannot \
              fall back to a deployment service principal"
         );
@@ -1152,9 +1128,7 @@ fn compile_inner(
 
     Ok(CompileSummary {
         out_dir: out_dir.to_path_buf(),
-        entry_file,
         copied,
-        langgraph_graph: graph,
         assistant_id,
         connectors: connector_entries,
         channels: channel_entries,
