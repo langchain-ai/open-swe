@@ -27,6 +27,7 @@ from runtime_api.catalog import (
 )
 from runtime_api.endpoint import Delivery
 from runtime_api.loop import Done, GitHubProxyRefreshed, PhaseResult, Route, TaskContext
+from runtime_api.reports import REPORTS, Reports, ReportsTaken
 
 _MAIN = ModelSpec(model_id="anthropic:claude-opus-5-5", kwargs={})
 _FALLBACK = ModelSpec(model_id="openai:gpt-6.1-sol", kwargs={})
@@ -76,11 +77,24 @@ def _backend(
         headers: Mapping[str, str] | None = None,
     ) -> JsonValue:
         name = path.rsplit("/", 1)[-1]
+        if name == REPORTS.name:
+            return (await _taking(body)).model_dump(mode="json")
         calls.append((name, body))
         answer = answers[name]
         if isinstance(answer, BackendCallError):
             raise answer
         return answer.model_dump(mode="json")
+
+    async def _taking(body: dict[str, JsonValue]) -> ReportsTaken:
+        """Each item of a batch, answered as the call it stands for."""
+        replies: list[dict[str, JsonValue]] = []
+        for item in Reports.model_validate(body).items:
+            calls.append((item.endpoint, item.request.model_dump(mode="json")))
+            answer = answers[item.endpoint]
+            if isinstance(answer, BackendCallError):
+                return ReportsTaken(replies=replies, refused=str(answer))
+            replies.append(answer.model_dump(mode="json"))
+        return ReportsTaken(replies=replies)
 
     monkeypatch.setattr(backend, "post", post)
     return backend, calls
@@ -139,7 +153,7 @@ async def test_each_model_call_is_assembled_here_from_the_rules_and_named_calls(
     )
 
     planned = await loop.before_model(state)
-    await backend.reports.settled()
+    await backend.outbox.drain()
 
     assert planned.call is not None
     assert planned.call.system_prompt == (
@@ -309,6 +323,7 @@ async def test_the_end_of_a_run_is_reported_and_its_graph_work_done_by_name(
         "rt.middleware.build_model",
         lambda spec, use_gateway: FakeListChatModel(responses=["Model call limits exceeded"]),
     )
+    monkeypatch.setattr("rt.outbox._RETRY_SECONDS", (0.0,))
     backend.run.invocation_id = "turn"
     graph = create_agent(
         model=FakeListChatModel(responses=["unused"]),
@@ -316,15 +331,18 @@ async def test_the_end_of_a_run_is_reported_and_its_graph_work_done_by_name(
     )
 
     await graph.ainvoke({"messages": [("user", "Review it")]})
-    await backend.reports.settled()
+    await backend.outbox.drain()
 
-    # Only preparation is a phase call: the loop and the end of the run are named calls,
-    # and the graph's own work goes out whether or not the run's end is recorded.
-    assert calls[0][0] == "prepare"
-    assert sorted(name for name, _ in calls[1:]) == [
-        "run_ended",
-        "settle_review_check",
+    # Only preparation is a phase call: the loop and the end of the run are named calls.
+    # The graph's own work goes out before the run's end, in the order asked for, and
+    # work the backend keeps failing is tried again, then let go of for the rest.
+    assert [name for name, _ in calls] == [
+        "prepare",
         "step_limit_reached",
+        "step_limit_reached",
+        "step_limit_reached",
+        "settle_review_check",
+        "run_ended",
     ]
 
 
@@ -369,7 +387,7 @@ async def test_reports_carry_what_they_report_never_the_conversation(
         {"messages": [HumanMessage(content="hello", id="human-1")]},
         {"configurable": {"thread_id": "thread-1"}},
     )
-    await backend.reports.settled()
+    await backend.outbox.drain()
 
     # The run's usage counts its own replies by the invocation stamped on them here.
     assert [
