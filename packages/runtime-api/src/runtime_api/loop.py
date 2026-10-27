@@ -54,7 +54,8 @@ class PhaseResult(BaseModel):
 class ModelCall(BaseModel):
     """What the graph's own middleware says the next model call sends."""
 
-    system_prompt: str
+    system_prompt: str | None
+    task_instructions: str = ""
     # Tools the graph's own middleware takes off this call's list.
     hidden_tools: list[str] = []
     model: ModelSpec | None = None

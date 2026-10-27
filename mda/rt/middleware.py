@@ -32,6 +32,7 @@ from collections.abc import (
 )
 from contextlib import contextmanager
 from contextvars import ContextVar
+from functools import partial
 from typing import Annotated, Final, NotRequired
 
 import httpx
@@ -91,6 +92,7 @@ from rt.backend import (
     subagent_of,
 )
 from rt.loop import RunLoop
+from rt.model_budget import model_fallback
 from rt.models import build_model
 from rt.tools import STATE_KEY, cited, run_id, tool_report
 from rt.tracing import TurnTrace
@@ -128,32 +130,12 @@ def _merge(
     return {**held, **(right or {})}
 
 
-_TOOL_PAIRING_ERRORS: Final = (
-    "no tool output found for function call",
-    "no tool call found for function call output",
-    "unexpected `tool_use_id`",
-    "unexpected tool_use_id",
-    "without `tool_result`",
-    "must be followed by tool messages",
-    "must be a response to a preceeding message with 'tool_calls'",
-    "must be a response to a preceding message with 'tool_calls'",
-)
-
-
 def _has_image(request: ModelRequest) -> bool:
     return any(
         block.get("type") == "image"
         for message in request.messages
         for block in message.content_blocks
     )
-
-
-def _tool_pairing_error(exc: Exception) -> bool:
-    """A 400 over unpaired tool history, which the fallback would get as well."""
-    if getattr(exc, "status_code", None) != 400:
-        return False
-    message = str(exc).lower()
-    return any(marker in message for marker in _TOOL_PAIRING_ERRORS)
 
 
 class RunState(AgentState):
@@ -420,25 +402,26 @@ class BackendRunMiddleware(AgentMiddleware[RunState]):
             return await handler(request)
         planned = ModelCall.model_validate(raw)
         existing = request.system_message.text if request.system_message is not None else ""
-        prompt = f"{planned.system_prompt}\n\n{existing}" if existing else planned.system_prompt
+        system_prompt = planned.system_prompt
+        if system_prompt is None:
+            if self._loop is None:
+                raise BackendCallError("A referenced system prompt requires the runtime loop")
+            held = request.state.get(STATE_KEY, {})
+            system_prompt = self._loop.system_prompt(held, planned.task_instructions)
+        prompt = f"{system_prompt}\n\n{existing}" if existing else system_prompt
         request = request.override(system_message=SystemMessage(content=prompt))
         model = (
             planned.vision if planned.vision is not None and _has_image(request) else planned.model
         )
         if model is not None:
             request = request.override(model=build_model(model, use_gateway=planned.use_gateway))
-        try:
+        fallback = (
+            partial(build_model, planned.fallback, use_gateway=planned.use_gateway)
+            if planned.fallback is not None
+            else None
+        )
+        with model_fallback(fallback):
             return await handler(request)
-        except Exception as exc:
-            if planned.fallback is None or _tool_pairing_error(exc):
-                raise
-            # As the in-process graph does: another provider before failing the run.
-            logger.warning("Model call failed; retrying on the fallback model", exc_info=True)
-            return await handler(
-                request.override(
-                    model=build_model(planned.fallback, use_gateway=planned.use_gateway)
-                )
-            )
 
     @hook_config(can_jump_to=["model", "end"])
     async def aafter_model(self, state: RunState, runtime: Runtime) -> dict[str, object] | None:  # noqa: ARG002

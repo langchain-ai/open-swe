@@ -1,5 +1,6 @@
 from collections.abc import Mapping
 from datetime import UTC, datetime
+from typing import cast
 
 import pytest
 from langchain.agents import create_agent
@@ -142,7 +143,10 @@ async def test_each_model_call_is_assembled_here_from_the_rules_and_named_calls(
     await backend.reports.settled()
 
     assert planned.call is not None
-    assert planned.call.system_prompt == (
+    assert planned.call.system_prompt is None
+    assert loop.system_prompt(
+        cast(dict[str, object], state[STATE_KEY]), planned.call.task_instructions
+    ) == (
         "This is a preview deployment.\n\nYou are Open SWE.\n\n"
         "Walk the reviewer through it.\n\nYou coordinate the task."
     )
