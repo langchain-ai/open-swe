@@ -51,20 +51,27 @@ export function FindingNote({
   const open = expandedFinding === finding.id
   const settled = finding.status !== "open"
   const color = findingGroupColor[finding.group]
+  const label = [
+    findingGroupLabel[finding.group],
+    finding.title,
+    settled && finding.status,
+    thread &&
+      thread.comments.length > 1 &&
+      plural(thread.comments.length - 1, "reply", "replies"),
+  ]
+    .filter(Boolean)
+    .join(", ")
   return (
     <NoteFrame>
       <div
-        className={cn(
-          "rounded-r-lg border-y border-r border-default bg-brand-muted text-xs",
-          settled && "opacity-60"
-        )}
+        className="rounded-r-lg border-y border-r border-default bg-brand-muted text-xs"
         style={{ borderLeft: `3px solid ${color}` }}
       >
         <Button
           color="secondary"
           variant="plain"
           size="sm"
-          aria-label={finding.title}
+          aria-label={label}
           type="button"
           aria-expanded={open}
           onClick={() => setExpandedFinding(open ? null : finding.id)}

@@ -1,8 +1,8 @@
 {
-  "source_commit": "5366090e4a9457462f3b8c9afdbf464b93f49a6a",
+  "source_commit": "28d67ec9a33faba2d658126d660f16a1a1c49412",
   "product_screenshots": "Local production build with disposable API fixtures; no authenticated backend or Monaco editor QA.",
   "component_screenshots": "Local fixtures rendering actual dashboard components.",
-  "contrast": "Sampled enabled visible text >= 4.5:1; sampled field borders >= 3:1 in light and dark themes. Disabled controls, SVGs and gradient avatar initials excluded.",
+  "contrast": "Sampled enabled visible text including finding status >=4.5:1; sampled field borders >=3:1 in light and dark themes. Product field values and placeholders >=4.5:1. Disabled controls, SVGs and gradient avatar initials excluded.",
   "files": [
     "automation-light-desktop.png",
     "automation-dark-mobile.png",

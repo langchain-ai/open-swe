@@ -216,6 +216,7 @@ function StepList({
           (sum, entry) => sum + entry.deletions,
           0
         )
+        const progress = stepProgress(entries, viewed)
         return (
           <li
             key={step.index}
@@ -228,7 +229,7 @@ function StepList({
               color="secondary"
               variant="plain"
               size="sm"
-              aria-label={step.title}
+              aria-label={`Step ${step.index}: ${step.title}, ${progress}, ${plural(additions, "addition")}, ${plural(deletions, "deletion")}`}
               type="button"
               aria-current={active ? "step" : undefined}
               onClick={() => jumpTo({ kind: "entry", id: entries[0]!.id })}
@@ -249,7 +250,7 @@ function StepList({
               >
                 <InlineCode text={step.title} />
                 <span className="flex flex-wrap gap-x-space-2 text-xxs text-secondary tabular-nums">
-                  {stepProgress(entries, viewed)}
+                  {progress}
                   <span className="font-mono">
                     {additions > 0 && (
                       <span className="text-success-secondary">
