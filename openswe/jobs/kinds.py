@@ -20,7 +20,7 @@ from openswe.announcements.delivery import ANNOUNCEMENT_TASK, deliver_announceme
 from openswe.baby_sit import WATCH_JOB_KIND, evaluate_watch
 from openswe.background_tasks import CRON_KIND as BACKGROUND_TASKS
 from openswe.background_tasks import monitor_background_tasks
-from openswe.human_review.standard import SCHEDULER_TASK as HUMAN_REVIEW_DEADLINE
+from openswe.human_review.deadlines import SCHEDULER_TASK as HUMAN_REVIEW_DEADLINE
 from openswe.human_review.standard import run_deadline
 from openswe.jobs import queue
 from openswe.jobs.cron_import import import_agent_server_crons

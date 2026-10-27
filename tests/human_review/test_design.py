@@ -11,7 +11,7 @@ from openswe.expedited_review.eligibility import ChangedFile
 from openswe.github.pull_request_status import PullRequestClient
 from openswe.github.pull_requests import PullRequest
 from openswe.github.repo_files import RepoSettings
-from openswe.human_review import design, standard
+from openswe.human_review import deadlines, design, standard
 from openswe.human_review.design import DesignReview
 from openswe.human_review.lifecycle import ReviewCard
 from openswe.human_review.picking import Area, Coverage, ReviewerAvailability
@@ -57,6 +57,15 @@ def review(monkeypatch: pytest.MonkeyPatch) -> HumanReviewRequest:
         ),
     )
     monkeypatch.setattr(HumanReviewRequest, "locked", locked)
+
+    @asynccontextmanager
+    async def rotation(
+        self: HumanReviewRequest,
+    ) -> AsyncIterator[tuple[HumanReviewRequest, dict[str, datetime]]]:
+        async with lock:
+            yield request, {}
+
+    monkeypatch.setattr(HumanReviewRequest, "design_rotation", rotation)
     return request
 
 
@@ -81,15 +90,17 @@ async def test_only_production_ui_changes_schedule_semantic_assessment(
     review.participants.append(participant)
     with (
         patch.object(ChangedFile, "of_pull", AsyncMock(return_value=[ChangedFile(filename=path)])),
-        patch.object(design.queue, "schedule", AsyncMock()) as schedule,
+        patch.object(deadlines.queue, "schedule", AsyncMock()) as schedule,
     ):
         await DesignReview(review).start(MagicMock())
     assert bool(schedule.await_count) is assess
     assert review.participants == [participant]
 
 
+@pytest.mark.parametrize("cancelled", [False, True])
 async def test_failed_assessment_dispatch_retries_then_runs_once(
     review: HumanReviewRequest,
+    cancelled: bool,
 ) -> None:
     review.thread_id = "engineering-thread"
     review.requested_by = _user("requester")
@@ -97,11 +108,20 @@ async def test_failed_assessment_dispatch_retries_then_runs_once(
         patch.object(
             design,
             "start_dashboard_thread",
-            AsyncMock(side_effect=[RuntimeError("unavailable"), "assessment-thread"]),
+            AsyncMock(
+                side_effect=[
+                    asyncio.CancelledError() if cancelled else RuntimeError("unavailable"),
+                    "assessment-thread",
+                ]
+            ),
         ) as notify,
-        patch.object(design.queue, "schedule", AsyncMock()),
+        patch.object(deadlines.queue, "schedule", AsyncMock()),
     ):
-        assert await DesignReview(review)._assess() == "retrying"
+        if cancelled:
+            with pytest.raises(asyncio.CancelledError):
+                await DesignReview(review)._assess()
+        else:
+            assert await DesignReview(review)._assess() == "retrying"
         assert not DesignReview(review).state.assessment_requested
         assert await DesignReview(review)._assess() == "assessment_requested"
         assert await DesignReview(review)._assess() == "assessed"
@@ -109,6 +129,26 @@ async def test_failed_assessment_dispatch_retries_then_runs_once(
     assert review.thread_id == "engineering-thread"
     assert notify.await_args is not None
     assert notify.await_args.kwargs["unlisted"] is True
+
+
+async def test_stranded_assessment_claim_retries_after_expiring(review: HumanReviewRequest) -> None:
+    review.requested_by = _user("requester")
+    now = datetime(2026, 9, 28, 12, tzinfo=UTC)
+    review.run_config = {"design_review": {"assessment_started_at": now.isoformat()}}
+    with (
+        patch.object(design, "datetime") as clock,
+        patch.object(
+            design, "start_dashboard_thread", AsyncMock(return_value="assessment")
+        ) as dispatch,
+        patch.object(DesignReview, "_schedule", AsyncMock()) as retry,
+    ):
+        clock.now.return_value = now + timedelta(minutes=30)
+        assert await DesignReview(review)._assess() == "assessing"
+        dispatch.assert_not_awaited()
+        retry.assert_awaited_once_with(timedelta(minutes=30))
+        clock.now.return_value = now + timedelta(hours=2)
+        assert await DesignReview(review)._assess() == "assessment_requested"
+    assert DesignReview(review).state.assessment_requested
 
 
 async def test_design_delivery_is_idempotent_and_retries_only_missing_notifications(
@@ -121,14 +161,16 @@ async def test_design_delivery_is_idempotent_and_retries_only_missing_notificati
     pull.comment = AsyncMock()
     with (
         patch.object(
-            DesignReview, "_choose", AsyncMock(return_value=(user, timedelta(0)))
+            DesignReview,
+            "_candidates",
+            AsyncMock(return_value=[(user, ReviewerAvailability(None))]),
         ) as choose,
         patch.object(User, "for_login", AsyncMock(return_value=user)),
         patch.object(
             design, "post_slack_thread_reply_with_ts", AsyncMock(side_effect=["", "1.1"])
         ) as thread_reply,
         patch.object(design, "send_dm", AsyncMock(side_effect=[False, True])) as dm,
-        patch.object(design.queue, "schedule", AsyncMock()),
+        patch.object(deadlines.queue, "schedule", AsyncMock()),
     ):
         assert await DesignReview(review)._assign(pull) == "retrying"
         assert await DesignReview(review)._assign(pull) == "requested"
@@ -143,21 +185,50 @@ async def test_design_delivery_is_idempotent_and_retries_only_missing_notificati
     assert review.participants == []
 
 
-async def test_rotation_uses_least_recent_available_team_member(review: HumanReviewRequest) -> None:
+@pytest.mark.parametrize("hour", [3, 12])
+async def test_concurrent_rotation_reserves_different_available_team_members(
+    registry_db: None,
+    hour: int,
+) -> None:
     people = {
         name: _user(name) for name in ("author", "recent", "older", "ooo", "optedout", "unknown")
     }
-    now = datetime.now(UTC)
+    now = datetime(2026, 9, 28, 12, tzinfo=UTC)
+    requests = []
+    for number, login in enumerate(("recent", "older", "", ""), start=1):
+        pr = await PullRequest(owner="example", repo="app", number=number, author="author").save()
+        request = await HumanReviewRequest(
+            pull_request_id=pr.id,
+            head_sha="abc",
+            kind="standard",
+            slack_channel_id="C1",
+            slack_message_ts="1.0",
+            run_config={
+                "design_review": {
+                    "reason": "New navigation",
+                    "github_login": login,
+                    "assigned_at": (
+                        now - (timedelta(hours=1) if login == "recent" else timedelta(days=1))
+                    ).isoformat()
+                    if login
+                    else None,
+                }
+            },
+        ).save()
+        if not login:
+            requests.append(request)
     pull = MagicMock(spec=PullRequestClient)
     pull.repo = MagicMock()
     pull.repo.can_write = AsyncMock(return_value=True)
+    pull.request_reviewers = AsyncMock()
+    pull.comment = AsyncMock()
 
     async def user_for_login(_: str, login: str) -> User:
         return people[login]
 
     async def availability(user: User) -> ReviewerAvailability:
         return ReviewerAvailability(
-            None, {"ooo": True, "unknown": None}.get(user.github_login, False)
+            ZoneInfo("UTC"), {"ooo": True, "unknown": None}.get(user.github_login, False)
         )
 
     async def opted_in(login: str) -> bool:
@@ -170,25 +241,46 @@ async def test_rotation_uses_least_recent_available_team_member(review: HumanRev
         patch.object(design.PROFILES, "allows_auto_human_review", opted_in),
         patch.object(ReviewerAvailability, "for_user", availability),
         patch.object(
-            HumanReviewRequest,
-            "design_review_history",
-            AsyncMock(return_value={"recent": now, "older": now - timedelta(days=1)}),
+            design.RepoSettings,
+            "cached",
+            AsyncMock(
+                return_value=RepoSettings.model_validate(
+                    {"designReview": {"team": "example/design", "paths": ["src/*"]}}
+                )
+            ),
         ),
+        patch.object(design, "post_slack_thread_reply_with_ts", AsyncMock(return_value="1.1")),
+        patch.object(design, "send_dm", AsyncMock(return_value=True)),
+        patch.object(deadlines.queue, "schedule", AsyncMock()) as schedule,
+        patch.object(design, "datetime") as clock,
     ):
-        chosen, delay = await DesignReview(review)._choose(pull)
-        assert chosen is people["older"]
-        assert delay == timedelta(0)
-        with patch.object(
-            ReviewerAvailability,
-            "for_user",
-            AsyncMock(return_value=ReviewerAvailability(ZoneInfo("UTC"))),
-        ):
-            with patch.object(design, "datetime") as clock:
-                clock.now.return_value = datetime(2026, 9, 28, 3, tzinfo=UTC)
-                clock.min = datetime.min
-                chosen, delay = await DesignReview(review)._choose(pull)
-        assert chosen is not None
-        assert delay == timedelta(hours=6)
+        clock.now.return_value = now.replace(hour=hour)
+        clock.min = datetime.min
+        results = await asyncio.wait_for(
+            asyncio.gather(*(DesignReview(request)._assign(pull) for request in requests)),
+            timeout=10,
+        )
+    stored = [await HumanReviewRequest.get(request.id) for request in requests]
+    assert all(request is not None for request in stored)
+    if hour == 12:
+        assert results == ["requested", "requested"]
+        assert {
+            DesignReview(request).state.github_login for request in stored if request is not None
+        } == {"older", "recent"}
+    else:
+        assert results == ["waiting", "waiting"]
+        assert all(
+            not DesignReview(request).state.github_login
+            for request in stored
+            if request is not None
+        )
+        assert schedule.await_count == len(requests)
+        assert all(
+            timedelta(hours=5, minutes=59)
+            < call.kwargs["due_at"] - datetime.now(UTC)
+            < timedelta(hours=6, minutes=1)
+            for call in schedule.await_args_list
+        )
 
 
 @pytest.mark.parametrize("draft", [True, False])
@@ -200,7 +292,7 @@ async def test_design_job_never_pings_draft_or_closed_pr(
     with (
         patch.object(PullRequestClient, "as_app") as app,
         patch.object(design, "skip_on_preview", return_value=False),
-        patch.object(design.queue, "schedule", AsyncMock()),
+        patch.object(deadlines.queue, "schedule", AsyncMock()),
         patch.object(DesignReview, "_assign", AsyncMock()) as assign,
         patch.object(DesignReview, "_assess", AsyncMock()) as assess,
     ):
@@ -233,9 +325,11 @@ async def test_design_approval_only_counts_for_engineering_when_they_also_have_t
 
 
 @pytest.mark.parametrize("kind", ["posted", "standard"])
+@pytest.mark.parametrize("schedule_fails", [False, True])
 async def test_design_request_reuses_posted_review_without_replacing_engineering(
     review: HumanReviewRequest,
     kind: str,
+    schedule_fails: bool,
 ) -> None:
     review.kind = kind
     review.tldr = "Original engineering summary"
@@ -250,7 +344,11 @@ async def test_design_request_reuses_posted_review_without_replacing_engineering
             "of_pull",
             AsyncMock(return_value=[ChangedFile(filename="smith-frontend/src/Comparison.tsx")]),
         ),
-        patch.object(design.queue, "schedule", AsyncMock()),
+        patch.object(
+            deadlines.queue,
+            "schedule",
+            AsyncMock(side_effect=RuntimeError("queue unavailable") if schedule_fails else None),
+        ),
         patch.object(ReviewCard, "post_standard", AsyncMock()) as post,
     ):
         result = await standard._request_review(
@@ -294,7 +392,7 @@ async def test_unconfigured_repository_does_not_start_design_review(
     with (
         patch.object(design.RepoSettings, "cached", AsyncMock(return_value=RepoSettings())),
         patch.object(ChangedFile, "of_pull", AsyncMock()) as files,
-        patch.object(design.queue, "schedule", AsyncMock()) as schedule,
+        patch.object(deadlines.queue, "schedule", AsyncMock()) as schedule,
     ):
         await DesignReview(review).start(MagicMock())
     files.assert_not_awaited()

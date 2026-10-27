@@ -880,6 +880,11 @@ async def test_review_request_snapshots_merge_mode_and_preserves_it_on_reuse(
         patch.object(standard, "_schedule", AsyncMock(return_value=True)) as schedule,
         patch.object(standard, "_permalink", AsyncMock(return_value="")),
         patch.object(ReviewCard, "post_standard", AsyncMock(return_value="1.0")),
+        patch.object(
+            standard.DesignReview,
+            "settings",
+            AsyncMock(side_effect=RuntimeError("design settings unavailable")),
+        ),
     ):
         result = await standard._request_review(
             ref, MagicMock(), Origin(), channel="", inline_summary="Fix", auto_merge=override

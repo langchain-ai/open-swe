@@ -58,10 +58,7 @@ async def watch_post(channel_id: str, message_ts: str, slack_user_id: str, text:
         for row in rows:
             row.run_config = {**row.run_config, "posted_pr_urls": urls}
     for request in requests:
-        pr = request.pull_request
-        if await DesignReview(request).settings() is not None:
-            async with PullRequestClient.as_app(pr.owner, pr.repo, pr.number) as pull:
-                await DesignReview(request).start(pull)
+        await DesignReview(request).start()
         await settle(request)
 
 

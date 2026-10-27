@@ -46,6 +46,7 @@ from openswe.github.pull_request_status import PullRequestClient
 from openswe.github.pull_requests import PullRequest, PullRequestPayload
 from openswe.github.repo_files import RepoFileUnreadableError, RepoSettings
 from openswe.human_review.card import accept_button, decline_button, mention, snooze_button
+from openswe.human_review.deadlines import schedule as _schedule
 from openswe.human_review.design import DesignReview
 from openswe.human_review.lifecycle import ReviewCard, ReviewPicks
 from openswe.human_review.merging import merge_pull_request
@@ -60,7 +61,6 @@ from openswe.human_review.picking import (
     choose_reviewer,
 )
 from openswe.human_review.requests import HumanReviewParticipant, HumanReviewRequest, RequestKind
-from openswe.jobs import queue
 from openswe.prompts import prompt
 from openswe.run_config import RunConfig
 from openswe.slack.blocks import actions, block_payload, escape, section
@@ -83,7 +83,6 @@ from openswe.workspaces.routing import resolve_workspace
 
 logger = logging.getLogger(__name__)
 
-SCHEDULER_TASK = "human_review"
 AUTO_MERGE_AFTER_HOURS = 2
 SUMMARY_MAX_CHARS = 280
 _HTML_COMMENT = re.compile(r"<!--.*?-->", re.DOTALL)
@@ -279,24 +278,6 @@ def review_reminder_at(start: datetime, timezone: ZoneInfo) -> datetime:
             return (cursor + remaining).astimezone(UTC)
         remaining -= available
         cursor = datetime.combine(cursor.date() + timedelta(days=1), time(9), timezone)
-
-
-async def _schedule(request: HumanReviewRequest, step: str, after: timedelta) -> bool:
-    try:
-        await queue.schedule(
-            SCHEDULER_TASK,
-            {"request_id": str(request.id), "step": step},
-            due_at=datetime.now(UTC) + after,
-            metadata={"kind": SCHEDULER_TASK, "request_id": str(request.id), "step": step},
-        )
-    except Exception:
-        logger.warning(
-            "Could not schedule a human review deadline",
-            extra={"request_id": str(request.id), "step": step},
-            exc_info=True,
-        )
-        return False
-    return True
 
 
 async def _existing(active: HumanReviewRequest, auto_merge: bool | None = None) -> RequestResult:

@@ -346,26 +346,42 @@ class HumanReviewRequest(Base):
             )
             return list(rows)
 
-    @classmethod
-    async def design_review_history(cls, repository: str) -> dict[str, datetime]:
-        """Last supplementary design assignment per person, for least-recently-picked rotation."""
+    @asynccontextmanager
+    async def design_rotation(self) -> AsyncIterator[tuple[Self | None, dict[str, datetime]]]:
+        """Read rotation history and reserve a designer atomically across this repository's PRs."""
+        cls = type(self)
+        pr = self.pull_request
+        repository = f"{pr.owner}/{pr.repo}".lower()
         login = cls.run_config["design_review"]["github_login"].astext
         assigned_at = cast(
             cls.run_config["design_review"]["assigned_at"].astext, DateTime(timezone=True)
         )
         async with postgres.session() as session:
+            await session.execute(
+                select(
+                    func.pg_advisory_xact_lock(
+                        func.hashtextextended(f"design-review:{repository}", 0)
+                    )
+                )
+            )
+            row = await session.scalar(
+                cls._loaded(select(cls))
+                .where(cls.id == self.id)
+                .with_for_update(of=cls)
+                .execution_options(populate_existing=True)
+            )
             rows = await session.execute(
                 select(login, func.max(assigned_at))
                 .join(cls.pull_request)
                 .join(PullRequest.repository)
                 .where(
-                    Repository.key == repository.lower(),
+                    Repository.key == repository,
                     login.is_not(None),
                     login != "",
                 )
                 .group_by(login)
             )
-            return {name.lower(): at for name, at in rows.tuples() if name and at is not None}
+            yield row, {name.lower(): at for name, at in rows if name and at is not None}
 
     @classmethod
     async def open_review_counts(

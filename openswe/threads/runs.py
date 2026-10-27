@@ -476,11 +476,10 @@ async def start_dashboard_thread(
         title=title,
         visibility=visibility,
         workspace=await _resolve_requested_workspace(None, primary, login=login),
+        extra_metadata={"unlisted": True} if unlisted else None,
     )
     thread_id = str(thread["thread_id"])
     client = langgraph_client()
-    if unlisted:
-        await client.threads.update(thread_id=thread_id, metadata={"unlisted": True})
     await dispatch_agent_run(
         thread_id,
         prompt,
