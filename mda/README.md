@@ -207,9 +207,18 @@ Its threads are the channel's, as Linear sessions' are: the dashboard continues 
 
 ## Slack
 
-The deployment's Slack channel (`channels/slack.py`) takes the Slack conversations it can start; every other conversation stays on the backend's own Slack intake. Open SWE's Slack app keeps its URLs at the backend's `/webhooks/slack`. When the first message of a new conversation is one MDA's channel can start, the backend first gates it as it gates its own Slack runs (a person without a usable GitHub account gets the prompt to connect one, and nothing is handed over), then binds the Slack thread to the thread MDA's channel keys it by (`uuid5` of Trigger Server's `slack:v1:{app}:{team}:{channel}:{root_ts}`), indexes it as the channel's (private until the run's metadata lands), remembers the request it gated, and forwards Slack's request to LangSmith Trigger Server unchanged: same bytes, same Slack signature, without Slack's retry headers. Later messages in that Slack thread, and Slack's Stop, go the same way. Trigger Server verifies the request as if Slack had sent it and hands the message to the channel, which asks the backend's `/slack/channel/events` what it starts; the backend builds the run from the request it remembered, as for its own Slack runs. The agent replies with Open SWE's Slack tools (`reply="none"`), and the channel shows the run's status and Stop.
+The deployment's Slack channel (`channels/slack.py`) takes the Slack conversations it can start; every other conversation stays on the backend's own Slack intake.
+Open SWE's Slack app keeps its URLs at the backend's `/webhooks/slack`.
+When the first message of a new conversation is one MDA's channel can start, the backend first gates it as it gates its own Slack runs (a person without a usable GitHub account gets the prompt to connect one, and nothing is handed over), then binds the Slack thread to the thread MDA's channel keys it by (`uuid5` of Trigger Server's `slack:v1:{app}:{team}:{channel}:{root_ts}`), indexes it as the channel's (private until the run's metadata lands), remembers the request it gated, and forwards Slack's request to LangSmith Trigger Server unchanged: same bytes, same Slack signature, without Slack's retry headers.
+Later messages in that Slack thread, and Slack's Stop, go the same way.
+Trigger Server verifies the request as if Slack had sent it and hands the message to the channel, which asks the backend's `/slack/channel/events` what it starts; the backend builds the run from the request it remembered, as for its own Slack runs.
+The agent replies with Open SWE's Slack tools (`reply="none"`), and the channel shows the run's status and Stop.
 
-A handed-over message never ends in silence. When Trigger Server refuses the forward, the forward gives up, the channel hasn't asked about the message after 90 s (a sweep job every minute), or building its run fails, the backend takes the remembered request back and replies in the Slack thread with an error id, as for its own runs, and logs the failure at error level. Taking it back is atomic, so the person gets either the run or the error. Each forward logs one outcome line (`forward_outcome`: `delivered`, `refused` or `gave_up`, with `status` and `attempts`); each null answer from `/slack/channel/events` or `/github/channel/events` logs its `no_run_reason`. A GitHub issue mention MDA's channel never takes gets a 😕 on its comment.
+A handed-over message never ends in silence.
+When Trigger Server refuses the forward, the forward gives up, the channel hasn't asked about the message after 90 s (a sweep job every minute), or building its run fails, the backend takes the remembered request back and replies in the Slack thread with an error id, as for its own runs, and logs the failure at error level.
+Taking it back is atomic, so the person gets either the run or the error.
+Each forward logs one outcome line (`forward_outcome`: `delivered`, `refused` or `gave_up`, with `status` and `attempts`); each null answer from `/slack/channel/events` or `/github/channel/events` logs its `no_run_reason`.
+A GitHub issue mention MDA's channel never takes gets a 😕 on its comment.
 
 Which conversations go where (`mda_can_start` in `openswe/slack/mda_forwarding.py`):
 
@@ -225,9 +234,12 @@ Which conversations go where (`mda_can_start` in `openswe/slack/mda_forwarding.p
 |---|---|
 | `OPEN_SWE_SLACK_TRIGGER_EVENTS_URL` | Trigger Server's Slack events URL. On US LangSmith it is `https://api.smith.langchain.com/v1/triggers/webhooks/d809e66e-0000-4000-8000-000000000003` for every environment: Trigger Server routes each request by its Slack app. Unset: nothing goes to MDA |
 
-`mda deploy` registers each environment's own Slack app with Trigger Server from `MDA_SLACK_BOT_TOKEN_<ENV>` and `MDA_SLACK_SIGNING_SECRET_<ENV>` (repository secrets; an app can be registered to one deployment only). Trigger Server keeps an app once registered, so later deploys need neither. Preview deploys run labeled PRs' code and never get them: register the preview's app once from a trusted checkout, with `mda/.env` as above plus the preview app's `MDA_SLACK_BOT_TOKEN` and `MDA_SLACK_SIGNING_SECRET`, by running the hand deploy for `open-swe-mda-preview`.
+`mda deploy` registers each environment's own Slack app with Trigger Server from `MDA_SLACK_BOT_TOKEN_<ENV>` and `MDA_SLACK_SIGNING_SECRET_<ENV>` (repository secrets; an app can be registered to one deployment only).
+Trigger Server keeps an app once registered, so later deploys need neither.
+Preview deploys run labeled PRs' code and never get them: register the preview's app once from a trusted checkout, with `mda/.env` as above plus the preview app's `MDA_SLACK_BOT_TOKEN` and `MDA_SLACK_SIGNING_SECRET`, by running the hand deploy for `open-swe-mda-preview`.
 
-To turn it on in an environment, deploy first, so `mda deploy` registers that environment's Slack app (without a terminal it prints no Slack URLs), then set `OPEN_SWE_SLACK_TRIGGER_EVENTS_URL` among the backend deployment's environment variables in LangSmith; saving rolls out a new revision. To turn it off, remove it.
+To turn it on in an environment, deploy first, so `mda deploy` registers that environment's Slack app (without a terminal it prints no Slack URLs), then set `OPEN_SWE_SLACK_TRIGGER_EVENTS_URL` among the backend deployment's environment variables in LangSmith; saving rolls out a new revision.
+To turn it off, remove it.
 
 ## Observability
 
