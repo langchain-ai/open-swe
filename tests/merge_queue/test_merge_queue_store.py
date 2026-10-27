@@ -1418,6 +1418,8 @@ async def test_native_selection_survives_restart_and_recovers_ac_before_def(queu
         native_snapshot((1, 2, 3, 4, 5, 6)), 600, lease, policy=policy, trust="trusted-policy"
     )
     assert duplicate is not None and not duplicate.dispatch and duplicate.request == initial
+    assert duplicate.batch.deadline == work.batch.deadline
+    assert duplicate.attempt.deadline == work.attempt.deadline
     await queue.finish_native_validation(
         duplicate, {"error": "B breaks smoke"}, lease, succeeded=False
     )
@@ -1432,6 +1434,7 @@ async def test_native_selection_survives_restart_and_recovers_ac_before_def(queu
     )
     assert recovered is not None and recovered.dispatch
     assert recovered.batch.id == initial.batch_id
+    assert recovered.batch.deadline == work.batch.deadline
     assert recovered.request.candidate_sha == list(native_snapshot((1, 3)).candidates)[-1]
     assert recovered.request.attempt_id != initial.attempt_id
     await queue.bind_validation_run(recovered.attempt.id, 42, lease)
@@ -1449,7 +1452,7 @@ async def test_native_selection_survives_restart_and_recovers_ac_before_def(queu
     assert await queue.authorize_native_result(recovered, native_snapshot((1, 3, 4, 5, 6)), lease)
     await queue.record_native_landing(recovered, lease)
     next_work = await queue.prepare_native_validation(
-        native_snapshot((4, 5, 6), main=recovered.request.candidate_sha),
+        native_snapshot((4, 5, 6), main=recovered.request.candidate_sha, age=700),
         600,
         lease,
         policy=policy,
@@ -1467,9 +1470,9 @@ async def test_native_selection_survives_restart_and_recovers_ac_before_def(queu
 
 
 @pytest.mark.parametrize(
-    ("cap", "age", "selected"), [(1, 0, True), (3, 0, False), (3, 90, True), (3, 700, False)]
+    ("cap", "age", "selected"), [(1, 0, True), (3, 0, False), (3, 90, True), (3, 700, True)]
 )
-async def test_native_partial_batches_obey_collection_and_github_deadline(
+async def test_native_partial_batches_obey_collection_without_expiring_backlog(
     queue, cap, age, selected
 ):
     policy, lease, _ = await enable_native_validation(queue, cap=cap)
@@ -1549,9 +1552,18 @@ async def test_native_success_cannot_authorize_stale_or_paused_work(queue, fault
 
 
 @pytest.mark.parametrize(
-    "fault", ["replay", "revoked", "issuer", "capacity", "timeout", "allgreen"]
+    "fault",
+    [
+        "replay",
+        "rerun_after_success",
+        "report_rejected",
+        "issuer",
+        "capacity",
+        "timeout",
+        "allgreen",
+    ],
 )
-async def test_native_runtime_rechecks_evidence_after_lost_success_response(
+async def test_native_runtime_recovers_publication_without_revoking_verified_success(
     queue: MergeQueue, monkeypatch: pytest.MonkeyPatch, fault: str
 ) -> None:
     import hmac
@@ -1602,7 +1614,7 @@ async def test_native_runtime_rechecks_evidence_after_lost_success_response(
         ]
     )
     sent: list[httpx2.Request] = []
-    lose_response = True
+    report_status = 502
 
     def deliver(request: httpx2.Request) -> httpx2.Response:
         sent.append(request)
@@ -1617,8 +1629,8 @@ async def test_native_runtime_rechecks_evidence_after_lost_success_response(
             assert body["dispatch_body"].encode() == next(
                 item.content for item in reversed(sent) if item.url.path.endswith("/dispatch")
             )
-            if body["state"] == "success" and lose_response:
-                return httpx2.Response(502)
+            if body["state"] == "success":
+                return httpx2.Response(report_status)
         return httpx2.Response(204)
 
     monkeypatch.setattr(dispatch, "pooled_transport", lambda: httpx2.MockTransport(deliver))
@@ -1651,7 +1663,6 @@ async def test_native_runtime_rechecks_evidence_after_lost_success_response(
             await reconcile()
         assert sent == []
         return
-    revoke = fault == "revoked"
     await reconcile()
     request = ValidationRequest.model_validate(json.loads(sent[0].content)["contract"])
     run = ValidationRun(
@@ -1704,25 +1715,22 @@ async def test_native_runtime_rechecks_evidence_after_lost_success_response(
     with pytest.raises(httpx2.HTTPStatusError):
         await reconcile()
     assert (await queue.history(request.batch_id)).attempts[0].state == "succeeded"
-    lose_response = False
-    if revoke:
+    report_status = 409 if fault == "report_rejected" else 204
+    if fault in {"rerun_after_success", "report_rejected"}:
         repo.validation_run.return_value = run.model_copy(update={"run_attempt": 2})
-    await reconcile()
-    assert (await queue.history(request.batch_id)).attempts[0].state == (
-        "failed" if revoke else "succeeded"
-    )
+    if fault == "report_rejected":
+        with pytest.raises(httpx2.HTTPStatusError):
+            await reconcile()
+    else:
+        await reconcile()
+    history = await queue.history(request.batch_id)
+    assert history.attempts[0].state == "succeeded"
+    assert all(evidence.key != "validation-revoked" for evidence in history.evidence)
     assert len([r for r in sent if r.url.path.endswith("/dispatch")]) == 1
     successes = [
         r
         for r in sent
         if r.url.path.endswith("/check-reports") and json.loads(r.content)["state"] == "success"
     ]
-    assert len(successes) == (1 if revoke else 2)
-    if revoke:
-        repo.native_queue.return_value = native_snapshot((1, 3, 4, 5, 6))
-        await reconcile()
-        recovered = ValidationRequest.model_validate(json.loads(sent[-2].content)["contract"])
-        assert recovered.batch_id == request.batch_id
-        assert recovered.candidate_sha == list(native_snapshot((1, 3)).candidates)[-1]
-    else:
-        assert successes[0].content == successes[1].content
+    assert len(successes) == 2
+    assert successes[0].content == successes[1].content

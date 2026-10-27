@@ -321,9 +321,8 @@ class MergeQueue(Record):
                 selection = NativeSelection(entries=selected)
                 if selection.candidate(snapshot) is None:
                     return None
-                deadline = min(
-                    oldest + timedelta(seconds=timeout_seconds - 30),
-                    now + timedelta(seconds=policy.deadline_seconds),
+                deadline = now + timedelta(
+                    seconds=min(timeout_seconds - 30, policy.deadline_seconds)
                 )
                 if deadline <= now:
                     return None
@@ -402,7 +401,7 @@ class MergeQueue(Record):
         async with self._locked(lease) as (session, _, now):
             attempt = await self._attempt(session, work.attempt.id)
             batch = await self._batch(session, attempt.batch_id)
-            if batch.state != "active" or attempt.state not in {"running", "succeeded"}:
+            if batch.state != "active" or attempt.state != "running":
                 return
             if min(attempt.deadline, batch.deadline) <= now:
                 attempt.state, attempt.finished_at = "timed_out", now
@@ -424,12 +423,7 @@ class MergeQueue(Record):
                     )
                 ):
                     raise ValueError("Validation evidence does not match its saved request and run")
-            key = (
-                "validation-revoked"
-                if attempt.state == "succeeded" and not succeeded
-                else "validation-result"
-            )
-            await self._save_evidence(session, attempt, key, evidence)
+            await self._save_evidence(session, attempt, "validation-result", evidence)
             attempt.state, attempt.finished_at = "succeeded" if succeeded else "failed", now
 
     async def native_validation_work(self, lease: Lease) -> NativeWork | None:

@@ -117,20 +117,25 @@ class NativeQueueRuntime:
                 return
             await dispatcher.report(work.request, work.attempt.deadline, "in_progress")
             return
-        evidence = ValidationEvidence(repo)
-        try:
-            run_id = await evidence.find_run(work.request, work.attempt.created_at, work.run_id)
-            if run_id is None:
-                return
-            if work.attempt.state == "running":
+        run_id = work.run_id
+        if work.attempt.state == "running":
+            evidence = ValidationEvidence(repo)
+            try:
+                run_id = await evidence.find_run(work.request, work.attempt.created_at, run_id)
+                if run_id is None:
+                    return
                 await queue.bind_validation_run(work.attempt.id, run_id, lease)
-            result = await evidence.result(work.request, run_id)
-            if result is None:
+                result = await evidence.result(work.request, run_id)
+                if result is None:
+                    return
+            except InvalidValidation as exc:
+                await queue.finish_native_validation(
+                    work, {"error": str(exc)}, lease, succeeded=False
+                )
                 return
-        except InvalidValidation as exc:
-            await queue.finish_native_validation(work, {"error": str(exc)}, lease, succeeded=False)
-            return
-        await queue.finish_native_validation(work, result, lease, succeeded=True)
+            await queue.finish_native_validation(work, result, lease, succeeded=True)
+        # Saved results are final; the gateway verifies evidence before any new success write.
+        assert run_id is not None
         snapshot = await repo.native_queue(queue.target_branch)
         if snapshot.repository_id != self.repository_id:
             raise ValueError("Native queue repository identity changed")
