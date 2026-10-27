@@ -556,6 +556,11 @@ export type TaskMembership =
   | { role: "coordinator"; taskId: string }
   | { role: "worker"; taskId: string; coordinatorThreadId: string | null }
 
+export interface AgentLastReply {
+  text: string | null
+  awaitingChoice: boolean
+}
+
 export interface AgentThread {
   taskMembership?: TaskMembership
   taskWorkers?: Array<AgentThread>
@@ -596,6 +601,8 @@ export interface AgentThread {
   resolved?: boolean
   resolvedAt?: number | null
   attentionReason?: string | null
+  /** What the latest run last told the person; null text means it chose not to reply. */
+  lastReply?: AgentLastReply | null
   createdAt: number
   updatedAt: number
   traceUrl?: string | null

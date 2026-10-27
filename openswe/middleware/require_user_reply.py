@@ -26,6 +26,7 @@ from openswe.input_messages import (
 from openswe.middleware.message_content import content_to_text
 from openswe.middleware.trace import OpenSWEMiddleware
 from openswe.prompts import prompt
+from openswe.threads.last_reply import LastReply
 
 logger = logging.getLogger(__name__)
 
@@ -210,6 +211,12 @@ class RequireUserReplyMiddleware(OpenSWEMiddleware):
             self._tool_name, self._no_reply_tool_name, visible_dynamic_context_hashes(state)
         )
         return [HumanMessage(content=text, id=str(uuid.uuid7())) for text in built]
+
+    async def aafter_agent(self, state: AgentState, runtime: Runtime) -> dict[str, Any] | None:  # noqa: ARG002
+        # The reply tools record a Slack answer, which closing narration must not replace.
+        if text := _last_answer(state.get("messages") or []):
+            await LastReply.record(text, fallback=True)
+        return None
 
     @hook_config(can_jump_to=["model"])
     async def aafter_model(self, state: AgentState, runtime: Runtime) -> dict[str, Any] | None:  # noqa: ARG002

@@ -278,6 +278,9 @@ SLACK_REPLY_GROUPED_ORDER_MARKER = "E2E_SLACK_REPLY_GROUPED_ORDER"
 SLACK_REPLY_SEGMENTS_MARKER = "E2E_SLACK_REPLY_SEGMENTS"
 EVAL_DESCRIPTION_MARKER = "E2E_EVAL_DESCRIPTION"
 BACKGROUND_WORK_MARKER = "E2E_BACKGROUND_WORK"
+NOTIFY_CHOICE_MARKER = "E2E_NOTIFY_CHOICE"
+NOTIFY_SILENT_MARKER = "E2E_NOTIFY_SILENT"
+NOTIFY_WEB_MARKER = "E2E_NOTIFY_WEB"
 # Long enough to outlast the spec, short enough not to linger on the host.
 BACKGROUND_WORK_COMMAND = "echo 'building assets'; sleep 110"
 BACKGROUND_WORK_MONITOR_COMMAND = (
@@ -1437,6 +1440,37 @@ SCRIPT_LIBRARY: dict[str, tuple[StepSpec, ...]] = {
         ),
     ),
     "hello": (_tool_step("Saying hi.", "slack_reply", {"message": "Hi!"}, "call-hello"),),
+    # Run-completion notifications: a final reply that asks the person to choose,
+    "notify_choice": (
+        _tool_step(
+            "Asking which way to go.",
+            "slack_reply",
+            {
+                "message": "Should I ship the **greeting** change now? See [the plan](https://example.com/plan).",
+                "options": ["Ship it", "Hold off"],
+            },
+            "call-notify-choice",
+        ),
+        StepSpec(content="Asked which way to go."),
+    ),
+    # a turn that decides nobody needs an answer,
+    "notify_silent": (
+        _tool_step(
+            "Nothing here is for me.",
+            "slack_no_reply_needed",
+            {
+                "reason": "The message was a drive-by aside.",
+                "confirmation": "The user cannot see anything I do not send to Slack.",
+            },
+            "call-notify-silent",
+        ),
+        StepSpec(content=""),
+    ),
+    # and a web turn whose answer is the assistant's own final message.
+    "notify_web": (
+        _tool_step("Looking it up.", "execute", {"command": "echo ok"}, "call-notify-web"),
+        StepSpec(content="The greeting lives in `greet.py`, see [the file](https://example.com)."),
+    ),
     # Woken because nobody signed up within 30 minutes.
     "human_review_assign": (
         _dynamic_step(_human_review_assign_step),
@@ -1711,6 +1745,15 @@ SCRIPT_RULES: tuple[ScriptRule, ...] = (
         lambda ctx: _UNCLAIMED_MARKER in ctx.last_text or _DECLINED_MARKER in ctx.pending_text,
     ),
     ScriptRule("hello", lambda ctx: "E2E_HELLO" in ctx.last_text),
+    ScriptRule(
+        "notify_choice", lambda ctx: ctx.human_count <= 1 and NOTIFY_CHOICE_MARKER in ctx.first_text
+    ),
+    ScriptRule(
+        "notify_silent", lambda ctx: ctx.human_count <= 1 and NOTIFY_SILENT_MARKER in ctx.first_text
+    ),
+    ScriptRule(
+        "notify_web", lambda ctx: ctx.human_count <= 1 and NOTIFY_WEB_MARKER in ctx.first_text
+    ),
     ScriptRule("human_review_dismiss", lambda ctx: HUMAN_REVIEW_DISMISS_MARKER in ctx.last_text),
     ScriptRule(
         "human_review_resummarize",

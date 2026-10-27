@@ -5,35 +5,35 @@ import { showRunNotification } from "@/lib/notifications"
 
 const TERMINAL_STATUSES = new Set(["finished", "error", "interrupted"])
 
-/** Notifies on completion outside the visible thread, except Slack threads and workers. */
+/** Says what each run did once it ends outside the visible thread, except Slack threads and workers. */
 export function useRunCompletionNotifier(
   threads: Array<AgentThread> | undefined,
   activeThreadId: string | undefined,
   openThread: (threadId: string) => void
 ) {
-  const prevStatusRef = useRef<Map<string, string>>(new Map())
+  const prevThreadsRef = useRef<Map<string, AgentThread>>(new Map())
 
   useEffect(() => {
     if (!threads) return
     const isViewingThread =
       !!activeThreadId && document.visibilityState === "visible"
-    const prev = prevStatusRef.current
+    const prev = prevThreadsRef.current
     for (const thread of threads) {
-      const prevStatus = prev.get(thread.id)
-      if (prevStatus === undefined) {
-        prev.set(thread.id, thread.status)
-        continue
+      const previous = prev.get(thread.id)
+      // Keep the snapshot from when the run started, so a PR it opened mid-run still reads as new.
+      if (previous?.status !== "running" || thread.status !== "running") {
+        prev.set(thread.id, thread)
       }
+      if (previous === undefined) continue
       if (
         thread.source !== "slack" &&
         thread.taskMembership?.role !== "worker" &&
-        prevStatus === "running" &&
+        previous.status === "running" &&
         TERMINAL_STATUSES.has(thread.status) &&
         !(isViewingThread && thread.id === activeThreadId)
       ) {
-        showRunNotification(thread, openThread)
+        showRunNotification(previous, thread, openThread)
       }
-      prev.set(thread.id, thread.status)
     }
   }, [threads, activeThreadId, openThread])
 }

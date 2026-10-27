@@ -3,6 +3,8 @@ from typing import Any
 
 from langgraph.config import get_config
 
+from openswe.threads.last_reply import LastReply
+
 logger = logging.getLogger(__name__)
 
 REQUIRED_CONFIRMATION = "The user cannot see anything I do not send to Slack."
@@ -38,4 +40,5 @@ async def slack_no_reply_needed(reason: str, confirmation: str) -> dict[str, Any
             "no_reply_reason": stated,
         },
     )
+    await LastReply.record(None)
     return {"success": True}
