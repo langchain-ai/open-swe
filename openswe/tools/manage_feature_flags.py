@@ -19,7 +19,7 @@ from openswe.workspaces.store import WORKSPACES, slugify
 
 FEATURE_FLAGS = feature_flag_names(WorkspaceSettingsUpdate)
 _READ = Policy(trusted="admin_surface", actor="admin")
-_WRITE = Policy(trusted="admin_surface", actor="admin", sole=ack("scope", "workspace"))
+_WRITE = Policy(trusted="admin_surface", actor="admin", shared=ack("scope", "workspace"))
 
 
 @audit_tool(skip_read=True)

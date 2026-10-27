@@ -16,7 +16,7 @@ from openswe.tools.mcp_exposure import expose_mcp
 
 @expose_mcp()
 @audit_tool()
-@access(Policy(trusted="private", actor="owner", sole=unchanged))
+@access(Policy(trusted="private", actor="owner", shared=unchanged))
 async def upload_session(
     type: SessionType = "claude",
     repo: str | None = None,
