@@ -66,9 +66,6 @@ from openswe.github.thread_token import (
     cache_github_token_for_thread,
     invalidate_cached_github_token,
 )
-from openswe.github.token import (
-    is_bot_token_only_mode,
-)
 from openswe.github.token_scope import GITHUB_TOKEN_REPOSITORIES_KEY, event_token_repositories
 from openswe.input_messages import PersonIdentity
 from openswe.linear.comments import get_recent_comments  # noqa: F401
@@ -265,7 +262,6 @@ __all__ = [
     "get_workspace_settings",
     "get_valid_access_token",
     "has_access_token_record",
-    "is_bot_token_only_mode",
     "is_code_channel",
     "json",
     "list_reviewer_findings",

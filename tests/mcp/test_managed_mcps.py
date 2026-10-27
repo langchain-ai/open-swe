@@ -106,6 +106,41 @@ async def test_gateway_status_reads_missing_services_under_either_policy(monkeyp
     assert [item.slug for item in required.missing_for(["Linear"])] == ["linear", "notion"]
 
 
+async def test_built_ins_sharing_a_langsmith_app_each_keep_their_own_consent_link(monkeypatch):
+    def google(name: str) -> dict[str, str]:
+        return {
+            "kind": "oauth",
+            "slug": "langsmith-google",
+            "display_name": f"Google {name}",
+            "verification_url": f"https://smith.langchain.com/connect/{name.lower()}",
+            "auth_id": f"{name.lower()}-auth",
+        }
+
+    listing = [[google("Calendar"), google("Drive")]]
+
+    async def with_session(login, gateway, use):
+        return ListToolsResult.model_validate(
+            {"tools": [], "_meta": {"com.langchain.langsmith/missingCredentials": listing[0]}}
+        )
+
+    monkeypatch.setattr(managed, "_with_session", with_session)
+    monkeypatch.setattr(
+        managed, "_gateway_detail", AsyncMock(return_value={"id": GATEWAY_ID, "name": "Eng"})
+    )
+
+    status = await managed.gateway_status("alice", GATEWAY_ID)
+    [calendar] = status.missing_for(["calendar"])
+    assert (await managed.connect_link("alice", GATEWAY_ID, calendar.slug)).auth_id == (
+        "calendar-auth"
+    )
+
+    # Once Drive is the only one left, the card's Calendar key must read as connected.
+    listing[0] = [google("Drive")]
+    status = await managed.gateway_status("alice", GATEWAY_ID)
+    assert status.missing_for([calendar.slug]) == []
+    assert await managed.connect_link("alice", GATEWAY_ID, calendar.slug) is None
+
+
 async def test_gateway_status_names_the_services_already_connected(monkeypatch):
     notion_id = "01a0f8da-0000-7000-8000-000000000001"
     linear_id = "01a0f8da-0000-7000-8000-000000000002"
