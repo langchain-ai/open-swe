@@ -17,6 +17,7 @@ from __future__ import annotations
 import warnings
 from collections.abc import Callable
 
+from deepagents.backends.protocol import SandboxBackendProtocol
 from pydantic import BaseModel, ConfigDict, field_validator
 from typing_extensions import Unpack
 
@@ -123,6 +124,7 @@ def define_sandbox(
     _openswe_create_fields: dict[str, object] | None = None,
     _openswe_no_manage_proxy: bool = False,
     _openswe_select: Callable[[object], SandboxDefinition | None] | None = None,
+    _openswe_without_box: SandboxBackendProtocol | None = None,
     idle_ttl_seconds: int | None = None,
     api_key: str | None = None,
     default_timeout: int | None = None,
@@ -157,6 +159,7 @@ def define_sandbox(
                 "_openswe_create_fields": _openswe_create_fields,
                 "_openswe_no_manage_proxy": _openswe_no_manage_proxy or None,
                 "_openswe_select": _openswe_select,
+                "_openswe_without_box": _openswe_without_box,
             }.items()
             if value is not None
         }

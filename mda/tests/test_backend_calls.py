@@ -4,6 +4,7 @@ from collections.abc import Awaitable, Callable, Mapping, Sequence
 from contextlib import closing
 from copy import deepcopy
 from datetime import UTC, datetime, timedelta
+from pathlib import Path
 from typing import Final, Literal, Self, cast
 from unittest.mock import AsyncMock, MagicMock
 from uuid import UUID
@@ -14,6 +15,7 @@ import httpx2
 import openai
 import pytest
 from deepagents import create_deep_agent
+from deepagents.backends.local_shell import LocalShellBackend
 from langchain.agents import create_agent
 from langchain.agents.middleware import AgentMiddleware
 from langchain.tools import ToolRuntime
@@ -58,6 +60,7 @@ from rt.backend import (
     RunContext,
 )
 from rt.file_tools import FileToolsMiddleware
+from rt.managed_sandbox import box
 from rt.middleware import BackendRunMiddleware, RunState, RuntimeToolsMiddleware
 from rt.model_calls import model_call_guards
 from rt.tools import operation_tool
@@ -1154,6 +1157,41 @@ async def test_a_read_file_the_backend_serves_gets_the_read_checks(
     assert isinstance(message, ToolMessage)
     assert message.status == "error"
     assert "not a valid image" in message.content
+
+
+async def test_a_run_without_an_mda_box_offloads_a_large_result_to_its_own_files(
+    tmp_path: Path,
+) -> None:
+    files = LocalShellBackend(root_dir=tmp_path, virtual_mode=True)
+
+    @tool
+    def dump() -> str:
+        """Print a lot."""
+        return "x" * 100_000
+
+    agent = await compile_managed_agent_async(
+        define_deep_agent(
+            name="test-agent",
+            model=_ToolCallingModel(
+                messages=iter(
+                    [
+                        AIMessage(content="", tool_calls=[ToolCall(name="dump", args={}, id="c1")]),
+                        AIMessage(content="done"),
+                    ]
+                )
+            ),
+            tools=[dump],
+            sandbox=box(files),
+            _openswe_graph_inputs={},
+        ),
+        None,
+        report_telemetry=False,
+    )
+
+    result = await agent.ainvoke({"messages": [("user", "dump")]})
+
+    assert result["messages"][-1].content == "done"
+    assert (tmp_path / "large_tool_results" / "c1").read_text() == "x" * 100_000
 
 
 async def test_each_run_lists_only_the_skills_it_may_see_and_reads_them_here(

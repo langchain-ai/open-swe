@@ -10,6 +10,8 @@ from collections.abc import Mapping
 from dataclasses import dataclass
 from typing import ClassVar, Literal, TypedDict
 
+from deepagents.backends.protocol import SandboxBackendProtocol
+
 from managed_deepagents._connections import ConnectionReference, is_connection_reference
 
 
@@ -97,6 +99,7 @@ class SandboxDefinition:
         "_openswe_create_fields",
         "_openswe_no_manage_proxy",
         "_openswe_select",
+        "_openswe_without_box",
     )
 
     def __repr__(self) -> str:  # pragma: no cover - debug helper
@@ -208,6 +211,12 @@ def selected_for(sandbox: SandboxDefinition, runtime: object) -> SandboxDefiniti
     if selected is not None and not isinstance(selected, SandboxDefinition):
         raise TypeError("_openswe_select must return define_sandbox(...) or None")
     return selected
+
+
+def without_box(sandbox: SandboxDefinition) -> SandboxBackendProtocol | None:
+    """Where a run ``_openswe_select`` picks no box for acts instead, if anywhere."""
+    backend = sandbox.options.get("_openswe_without_box")
+    return backend if isinstance(backend, SandboxBackendProtocol) else None
 
 
 def is_per_thread(options: Mapping[str, object]) -> bool:
